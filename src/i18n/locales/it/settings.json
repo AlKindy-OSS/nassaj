@@ -109,7 +109,6 @@
       "viewOptions": "Opzioni visualizzazione",
       "inputSettings": "Impostazioni input"
     },
-    "darkMode": "Modalità scura",
     "autoExpandTools": "Espandi strumenti automaticamente",
     "showRawParameters": "Mostra parametri grezzi",
     "showThinking": "Mostra ragionamento",
@@ -459,7 +458,8 @@
       "description": "Scegli chiaro, scuro oppure segui automaticamente l’impostazione di sistema",
       "light": "Chiaro",
       "dark": "Scuro",
-      "system": "Sistema"
+      "system": "Sistema",
+      "cycleLabel": "Tema: {{current}}. Passa a {{next}}"
     },
     "themePresets": {
       "title": "Tema",

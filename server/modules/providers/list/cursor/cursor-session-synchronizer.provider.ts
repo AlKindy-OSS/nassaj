@@ -65,6 +65,7 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
         createdAt: timestamps.createdAt,
         updatedAt: timestamps.updatedAt,
         jsonlPath: filePath,
+        origin: 'watcher',
       });
       processed += 1;
     }
@@ -94,6 +95,7 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
       createdAt: timestamps.createdAt,
       updatedAt: timestamps.updatedAt,
       jsonlPath: filePath,
+      origin: 'watcher',
     });
   }
 

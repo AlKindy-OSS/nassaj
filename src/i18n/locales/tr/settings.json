@@ -109,7 +109,6 @@
       "viewOptions": "Görünüm Seçenekleri",
       "inputSettings": "Girdi Ayarları"
     },
-    "darkMode": "Koyu Mod",
     "autoExpandTools": "Araçları otomatik genişlet",
     "showRawParameters": "Ham parametreleri göster",
     "showThinking": "Düşünmeyi göster",
@@ -459,7 +458,8 @@
       "description": "Açık, koyu ya da sistem ayarını otomatik izlemeyi seç",
       "light": "Açık",
       "dark": "Koyu",
-      "system": "Sistem"
+      "system": "Sistem",
+      "cycleLabel": "Tema: {{current}}. {{next}} temasına geç"
     },
     "themePresets": {
       "title": "Tema",

@@ -1,6 +1,6 @@
 /**
- * B-1616 (ADR-206 containment slice): the per-launch Codex multi-agent config, the
- * operator cap knob, the engine lookup and the tail gate.
+ * B-1616 / ADR-206 S1: the per-launch Codex multi-agent config (helpers switch B, depth,
+ * operator count override), the engine lookup and the tail gate.
  *
  * Runner: node scripts/run-isolated-node-tests.mjs server <this file>
  */
@@ -19,12 +19,33 @@ import {
   resolveCodexMultiAgentEngine,
 } from '../codex-multi-agent.js';
 
+const ON_ROW = { 'features.multi_agent': true, 'agents.max_depth': 10 };
+const OFF_ROW = {
+  'features.multi_agent': false,
+  'agents.max_concurrent_threads_per_session': 1,
+  'features.multi_agent_v2.max_concurrent_threads_per_session': 1,
+  'agents.max_depth': 10,
+};
+
 // Owner decision 2026-10-13: no sub-agent count cap from Nassaj; Codex decides.
-test('by default no thread-cap key is set: Codex\'s own default or the user config decides', () => {
+// ADR-206 §2.2/S9: B = 1 sends no count key, depth 10 (T-1601, v1 only), v1 on (default-on after S8).
+test('B = 1 (helpers on, the default): no thread-cap key, depth 10, v1 on (S9)', () => {
   assert.equal(resolveCodexAgentCap({}), null);
-  assert.deepEqual({ ...codexMultiAgentConfig(resolveCodexAgentCap({})) }, { 'features.multi_agent': false });
-  assert.deepEqual(codexConfigArgv(codexMultiAgentConfig(null)), ['--config', 'features.multi_agent=false']);
+  assert.deepEqual({ ...codexMultiAgentConfig(resolveCodexAgentCap({})) }, ON_ROW);
+  assert.deepEqual({ ...codexMultiAgentConfig(null, true) }, ON_ROW);
+  assert.deepEqual(codexConfigArgv(codexMultiAgentConfig(null)),
+    ['--config', 'features.multi_agent=true', '--config', 'agents.max_depth=10']);
   assert.ok(Object.isFrozen(codexMultiAgentConfig(null)));
+  assert.equal(Object.hasOwn(codexMultiAgentConfig(null), 'agents.job_max_runtime_seconds'), false, 'D1: unset');
+});
+
+test('B = 0 (helpers off): root-only v2 slot, v1 minimum, v1 off, depth 10; for that launch only', () => {
+  assert.deepEqual({ ...codexMultiAgentConfig(null, false) }, OFF_ROW);
+  // An operator override never widens a B = 0 launch.
+  assert.deepEqual({ ...codexMultiAgentConfig(40, false) }, OFF_ROW);
+  assert.equal(Object.hasOwn(codexMultiAgentConfig(null, false), 'agents.job_max_runtime_seconds'), false);
+  // The next launch is decided afresh: a B = 0 config leaves no state behind.
+  assert.deepEqual({ ...codexMultiAgentConfig(null, true) }, ON_ROW);
 });
 
 test('NASSAJ_CODEX_AGENT_CAP is an optional override: any positive integer, else no override', () => {
@@ -35,16 +56,16 @@ test('NASSAJ_CODEX_AGENT_CAP is an optional override: any positive integer, else
   }
 });
 
-test('an override pins both thread keys (v2 wins over agents.*); an invalid direct cap pins nothing', () => {
-  assert.deepEqual({ ...codexMultiAgentConfig(1) }, { 'features.multi_agent': false,
+test('an override pins both thread keys on B = 1 (v2 wins over agents.*); an invalid cap pins nothing', () => {
+  assert.deepEqual({ ...codexMultiAgentConfig(1) }, { ...ON_ROW,
     'agents.max_concurrent_threads_per_session': 1, 'features.multi_agent_v2.max_concurrent_threads_per_session': 2 });
   assert.equal(codexMultiAgentConfig(40)['features.multi_agent_v2.max_concurrent_threads_per_session'], 41);
   for (const bad of [0, -1, 2.5, Number.NaN, Number.MAX_SAFE_INTEGER]) {
-    assert.deepEqual({ ...codexMultiAgentConfig(bad) }, { 'features.multi_agent': false }, String(bad));
+    assert.deepEqual({ ...codexMultiAgentConfig(bad) }, ON_ROW, String(bad));
   }
 });
 
-test('the single-agent config leaves only the root slot on v2 and argv renders TOML scalars', () => {
+test('the single-agent config (strict-config paths) leaves only the root slot on v2', () => {
   assert.deepEqual(codexConfigArgv(CODEX_SINGLE_AGENT_CONFIG), [
     '--config', 'features.multi_agent=false',
     '--config', 'agents.max_concurrent_threads_per_session=1',
@@ -53,8 +74,10 @@ test('the single-agent config leaves only the root slot on v2 and argv renders T
 });
 
 test('the tail gate: always on v2 and unknown, on v1 only when the v1 flag is on, never on none', () => {
-  const off = codexMultiAgentConfig(null);
-  const on = { ...off, 'features.multi_agent': true };
+  // ADR-206 S9: B = 1 has the v1 flag on; B = 0 (and the operator switch) keeps it off.
+  const off = codexMultiAgentConfig(null, false);
+  const on = codexMultiAgentConfig(null, true);
+  assert.equal(on['features.multi_agent'], true);
   assert.equal(codexRunMayDelegate('v2', off), true);
   assert.equal(codexRunMayDelegate('unknown', off), true);
   assert.equal(codexRunMayDelegate('v1', off), false);

@@ -78,8 +78,10 @@ import {
   AGY_SPAWN_KEY_PATTERN,
 } from '@/modules/providers/list/antigravity/agy-session-ids.js';
 import { createSessionHandoverGate } from '@/modules/websocket/services/session-handover.js';
-import { describeSteerTurnForViewer, handleSessionSteer } from '@/modules/session-steer/index.js';
+import { describeSteerTurnForViewer, handleSessionSteerWithImages } from '@/modules/session-steer/index.js';
 
+// eslint-disable-next-line boundaries/no-unknown -- steer images reuse the normal prompt's chat-image store.
+import { buildChatImageNote, saveChatImages } from '../../../services/chat-image-store.js';
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 // Top-level shared/ (compiled into dist-server/shared/) — the single source of
 // truth for globally disabled providers (T-864). Relative on purpose: the `@/`
@@ -160,6 +162,20 @@ const BTW_MAX_ID_BYTES = 128;
 // excerpts while bounding the App Server/SDK prompt and diagnostic path.
 const BTW_MAX_QUESTION_BYTES = 32 * 1024;
 const btwInFlightByUser = new Map<string, number>();
+
+/**
+ * Stores a steer's images through the same chat-image store and path note a
+ * normal prompt uses; null (refuse the steer) when any image is rejected.
+ */
+async function storeSteerImages(images: unknown[]): Promise<string | null> {
+  // saveChatImages vets every element itself (data URL, size, type, count).
+  const { paths, failures } = await saveChatImages(images as Parameters<typeof saveChatImages>[0]);
+  if (failures.length > 0) {
+    console.warn('[session-steer] rejected image attachments', { failures });
+    return null;
+  }
+  return buildChatImageNote(paths) || null;
+}
 
 function btwUserKey(userId: string | number | null): string {
   return userId === null || userId === undefined ? '__anon__' : String(userId);
@@ -2978,7 +2994,7 @@ export function handleChatConnection(
       // events reach the starter and mirrors through the run's own writer.
       if (messageType === 'session-steer') {
         const senderUserId = toNumericUserId(presenceUserId);
-        sendRawToThisSocket(handleSessionSteer(data, {
+        sendRawToThisSocket(await handleSessionSteerWithImages(data, {
           senderUserId,
           isWritable: (sessionId, userId) => Boolean(sessionId) && isSessionWritableByUser(sessionId, userId),
           getSessionProvider: (sessionId) => {
@@ -2986,7 +3002,7 @@ export function handleChatConnection(
             return typeof provider === 'string' ? provider : null;
           },
           getDisplayName: (userId) => databaseModule.userDb.getUserById(userId)?.username ?? null,
-        }));
+        }, storeSteerImages));
         return;
       }
 

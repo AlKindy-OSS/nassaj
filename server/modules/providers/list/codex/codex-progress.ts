@@ -63,6 +63,8 @@ export function codexCollabSubagent(itemId: unknown, phase: 'started' | 'complet
 
 /** Subagent record for a history `spawn_agent` call or its settling result. */
 export function codexSpawnSubagent(callId: unknown, label: unknown, state: SubagentState): ProgressSubagent | null {
+  // Codex rollout spawn_agent exposes task_name; the transcript does not
+  // provide the spawned thread's model, reasoning effort, or tool call list.
   return buildProgressSubagent({ id: callId, parentId: null, label, state });
 }
 

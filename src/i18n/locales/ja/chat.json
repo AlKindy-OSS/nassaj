@@ -57,9 +57,9 @@
     "close": "閉じる",
     "alerts": {
       "pressure": "推奨圧縮しきい値に達しました",
-      "close": "25万トークンに達しました。新しい会話での継続を検討してください。",
+      "close": "{{value}} トークンに達しました。新しい会話での継続を検討してください。",
       "hour": "開始から1時間以上です。継続用の要約保存を検討してください。",
-      "compact": "15万トークンに達しました。/compact を検討してください。"
+      "compact": "{{value}} トークンに達しました。/compact を検討してください。"
     },
     "unavailable": "現在のコンテキスト使用量は不明"
   },
@@ -513,6 +513,10 @@
   },
   "agentActivity": {
     "title": "エージェントの活動",
+    "name": "エージェント名",
+    "model": "モデル",
+    "effort": "推論レベル",
+    "inherited": "継承",
     "summary": "{{total}}件中{{running}}件が実行中",
     "running": "実行中",
     "done": "完了",
@@ -523,6 +527,7 @@
     "detailsPlaceholder": "ツール履歴は近日公開予定です。",
     "noTools": "ツール呼び出しはまだ記録されていません。",
     "toolSuccess": "完了",
+    "toolFailed": "失敗",
     "toolRunning": "実行中"
   },
   "projectSelection": {

@@ -94,8 +94,11 @@ const codexStarts: Array<Record<string, any>> = [];
 let runStreamedFailure: Error | null = null;
 let runStreamedEvents: (() => AsyncGenerator<unknown, void, unknown>) | null = null;
 
+let lastRunSignal: AbortSignal | undefined;
+
 class FakeThread {
-  async runStreamed(): Promise<{ events: AsyncGenerator<unknown, void, unknown> }> {
+  async runStreamed(_input?: unknown, turnOptions?: { signal?: AbortSignal }): Promise<{ events: AsyncGenerator<unknown, void, unknown> }> {
+    lastRunSignal = turnOptions?.signal;
     if (runStreamedFailure) {
       const error = runStreamedFailure;
       runStreamedFailure = null;
@@ -130,12 +133,57 @@ mock.module('@openai/codex-sdk', { namedExports: { Codex: FakeCodex } });
 // Now safe to import the modules under test (they pick up the tmp DB + HOME + mock).
 const { initializeDatabase, closeConnection, participantsDb, sessionsDb, userDb } = await import('@/modules/database/index.js');
 const codexModule = await import('@/openai-codex.js');
+// ADR-206 S1: a busy CI host must not flip the per-turn helpers switch in this suite.
+const { codexHelpersRuntime } = await import('@/modules/providers/list/codex/codex-helpers-switch.js');
+codexHelpersRuntime.cpu = () => ({ percent: 10, source: 'window' });
+// ADR-206 S3/S4: no real /proc scan, signal or oom write from the launch path in this suite.
+const { codexTurnProcessRuntime } = await import('@/modules/providers/list/codex/codex-memory-breaker.js');
+type BreakerTurnSpy = { tag: string; launchMs: number; helpers: boolean; abort(reason: string): void; unregistered?: boolean };
+type CleanupSpyResult = { outcome: 'absent' | 'present' | 'hidden' | 'uncertain'; stopped: Array<{ pid: number; comm: string }> };
+const processCalls = {
+  cleanup: [] as Array<{ tag: string; launchMs: number }>,
+  protect: [] as string[],
+  registered: [] as BreakerTurnSpy[],
+};
+let cleanupResult: CleanupSpyResult = { outcome: 'absent', stopped: [] };
+let breachValue: { memoryPercent: number; treeKb: number; totalKb: number } | null = null;
+codexTurnProcessRuntime.cleanup = async (input) => { processCalls.cleanup.push(input); return cleanupResult; };
+codexTurnProcessRuntime.protectExecChild = (tag) => { processCalls.protect.push(tag); return true; };
+codexTurnProcessRuntime.breaker = {
+  register: (turn) => {
+    const spy = turn as unknown as BreakerTurnSpy;
+    processCalls.registered.push(spy);
+    return { unregister: () => { spy.unregistered = true; }, breach: () => breachValue };
+  },
+};
+// ADR-206 S2: the helpers lease runtime is spied; the real memory check is S2's own suite.
+const { codexHelpersLeaseRuntime } = await import('@/modules/providers/list/codex/codex-helpers-lease.js');
+type LeaseEndSpy = { started: boolean; succeeded: boolean; cleanup: { outcome: string } | null; notBeforeMs: number | null };
+const leaseCalls = {
+  reserve: [] as Array<{ tag: string; userId: number | null }>,
+  first: [] as Array<{ tag: string; notBeforeMs: number }>,
+  finish: [] as Array<{ tag: string; end: LeaseEndSpy; cleanupsSoFar: number }>,
+};
+let reserveResult: boolean | 'throw' = true;
+codexHelpersLeaseRuntime.leases = {
+  reserve: async (ctx) => {
+    leaseCalls.reserve.push(ctx);
+    if (reserveResult === 'throw') throw new Error('SQLITE_BUSY');
+    return reserveResult;
+  },
+  firstStreamEvent: (tag, notBeforeMs) => { leaseCalls.first.push({ tag, notBeforeMs }); },
+  finish: (tag, end) => {
+    leaseCalls.finish.push({ tag, end: end as LeaseEndSpy, cleanupsSoFar: processCalls.cleanup.length });
+    return 'released';
+  },
+};
 const {
   queryCodex, mapPermissionModeToCodexOptions, resolveCodexNetworkAccess, resolveCodexReasoningEffort,
-  transformCodexEvent,
+  transformCodexEvent, abortCodexSession,
 } =
   codexModule as unknown as {
     queryCodex: (command: string, options: unknown, ws: unknown) => Promise<void>;
+    abortCodexSession: (sessionId: string) => boolean;
     transformCodexEvent: (event: unknown, turnNonce: string) => { uuid?: string };
     mapPermissionModeToCodexOptions: (
       mode: string | undefined,
@@ -523,11 +571,11 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     await spawnAndCapture({});
     const config = codexStarts.at(-1)?.config;
     assert.deepEqual(config?.mcp_servers, {});
-    assert.equal(config?.['features.multi_agent'], false);
+    assert.equal(config?.['features.multi_agent'], true, 'ADR-206 S9: v1 on for a B = 1 turn');
   });
 
   // B-1616, owner decision 2026-10-13: Nassaj applies no sub-agent count cap. Every launch
-  // path keeps features.multi_agent=false and sends NO thread-cap key unless an operator
+  // path has features.multi_agent=true for B = 1 (ADR-206 S9) and sends NO thread-cap key unless an operator
   // sets NASSAJ_CODEX_AGENT_CAP, in which case both keys are pinned (the v2 key binds on v2).
   const CAP_KEYS = ['agents.max_concurrent_threads_per_session', 'features.multi_agent_v2.max_concurrent_threads_per_session'];
   it('B-1616: the default launch carries no thread-cap key on any launch path', async () => {
@@ -538,7 +586,8 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     for (const options of paths) {
       await spawnAndCapture(options);
       const config = codexStarts.at(-1)?.config ?? {};
-      assert.equal(config['features.multi_agent'], false, JSON.stringify(options));
+      assert.equal(config['features.multi_agent'], true, JSON.stringify(options));
+      assert.equal(config['agents.max_depth'], 10, `ADR-206 S1 depth ${JSON.stringify(options)}`);
       for (const key of CAP_KEYS) assert.equal(Object.hasOwn(config, key), false, `${key} ${JSON.stringify(options)}`);
     }
     await withEnv({ CODEX_ALLOW_FULL_ACCESS: 'true' }, async () => {
@@ -863,3 +912,305 @@ describe('queryCodex new-chat session bind (T-1910 S2)', () => {
     assert.equal(frames.some((frame) => frame.kind === 'session_created'), false);
   });
 });
+
+// ===========================================================================
+// ADR-206 S3 (breaker abort) and S4 (abort-path cleanup) on the live launch path.
+// The process runtime is spied above: nothing real is scanned, signalled or written.
+// ===========================================================================
+describe('queryCodex turn processes (ADR-206 S3/S4)', () => {
+  const THREAD = '22222222-3333-7444-8555-666666666666';
+  const DECISION = '0f1e2d3c-4b5a-4968-8776-655443322110';
+  const TAG = `pe-${DECISION}`;
+  const abortError = () => Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+  const reply = { type: 'item.completed', item: { type: 'agent_message', id: 'item_1', text: 'done' } };
+  const failed = { type: 'turn.failed', error: { message: 'model overloaded' } };
+
+  const handle = async (trace: string[], consume: () => void = () => { trace.push('consume'); }) => {
+    let bound = false;
+    return {
+      decisionId: DECISION,
+      launchIdentity: (await import('./shared/codex-executable.js')).acquireCodexLaunchIdentity(),
+      consume,
+      markStarted: () => { trace.push('started'); },
+      bindSession: () => { bound = true; },
+      isSessionBound: () => bound,
+      settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+      notStarted: () => { trace.push('not-started'); },
+    };
+  };
+
+  const runTurn = async (events: () => AsyncGenerator<unknown, void, unknown>) => {
+    const trace: string[] = [];
+    const ws = makeWs(null);
+    const before = { ...processCalls, cleanup: processCalls.cleanup.length, registered: processCalls.registered.length };
+    runStreamedEvents = events;
+    try {
+      await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: await handle(trace) }, ws);
+    } finally { runStreamedEvents = null; }
+    const frames = ws.sent.map((item) => (typeof item === 'string' ? JSON.parse(item) : item)) as Array<Record<string, unknown>>;
+    return {
+      trace,
+      frames,
+      cleanups: processCalls.cleanup.slice(before.cleanup),
+      registered: processCalls.registered.slice(before.registered),
+    };
+  };
+
+  it('success: cleanup never runs, the turn is registered with the breaker and the exec child protected', async () => {
+    const { trace, cleanups, registered } = await runTurn(async function* ok() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      yield reply;
+      yield { type: 'turn.completed', usage: null };
+    });
+    assert.deepEqual(cleanups, []);
+    assert.equal(trace.at(-1), 'settle:succeeded');
+    assert.equal(registered.length, 1);
+    assert.equal(registered[0].tag, TAG);
+    assert.equal(typeof registered[0].helpers, 'boolean');
+    assert.equal(registered[0].unregistered, true);
+    assert.ok(processCalls.protect.includes(TAG), 'oom_score_adj on the codex exec at the first event');
+  });
+
+  it('an error after a completed reply never cleans up (background work survives)', async () => {
+    const { trace, cleanups } = await runTurn(async function* late() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      yield reply;
+      yield failed;
+    });
+    assert.deepEqual(cleanups, []);
+    assert.equal(trace.at(-1), 'settle:failed');
+  });
+
+  it('a provider error that merely says "aborted" after a reply is not a stop: no cleanup (C1)', async () => {
+    for (const error of [
+      () => new Error('upstream stream aborted by provider'),
+      () => Object.assign(new Error('request failed'), { name: 'AbortError' }),
+    ]) {
+      const { trace, cleanups } = await runTurn(async function* providerAbortText() {
+        yield { type: 'thread.started', thread_id: THREAD };
+        yield reply;
+        throw error();
+      });
+      assert.deepEqual(cleanups, [], 'a background server the user asked for must survive');
+      assert.equal(trace.at(-1), 'settle:failed');
+    }
+  });
+
+  it('a turn.failed before the first completed reply cleans up once, with the turn tag and launch time', async () => {
+    const startedAt = Date.now();
+    const { trace, cleanups } = await runTurn(async function* early() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      yield failed;
+    });
+    assert.equal(cleanups.length, 1);
+    assert.equal(cleanups[0].tag, TAG);
+    // The launch mark is in the /proc start-time clock (btime + uptime), within drift of the wall clock.
+    assert.ok(Math.abs(cleanups[0].launchMs - startedAt) < 5_000);
+    assert.equal(trace.at(-1), 'settle:failed');
+  });
+
+  it('a thrown non-zero exit before any reply cleans up; hidden survivors settle reconciled_unknown', async () => {
+    cleanupResult = { outcome: 'hidden', stopped: [] };
+    try {
+      const { trace, cleanups } = await runTurn(async function* exits() {
+        yield { type: 'thread.started', thread_id: THREAD };
+        throw new Error('Codex Exec exited with code 1: boom');
+      });
+      assert.equal(cleanups.length, 1);
+      assert.equal(trace.at(-1), 'settle:reconciled_unknown');
+    } finally { cleanupResult = { outcome: 'absent', stopped: [] }; }
+  });
+
+  it('user stop: cleanup runs, the turn settles cancelled and the user sees the stopped processes', async () => {
+    cleanupResult = { outcome: 'absent', stopped: [{ pid: 4321, comm: 'sleep' }] };
+    try {
+      const { trace, cleanups, frames } = await runTurn(async function* stopped() {
+        yield { type: 'thread.started', thread_id: THREAD };
+        yield reply;
+        assert.equal(abortCodexSession(THREAD), true);
+        throw abortError();
+      });
+      assert.equal(cleanups.length, 1, 'user stop cleans up even after a completed reply');
+      assert.equal(trace.at(-1), 'settle:cancelled');
+      const notice = frames.find(frame => frame.code === 'codex_processes_stopped');
+      assert.match(String(notice?.content), /sleep \(4321\)/u);
+    } finally { cleanupResult = { outcome: 'absent', stopped: [] }; }
+  });
+
+  it('user stop with an uncertain cleanup settles reconciled_unknown (T-1910 fence path)', async () => {
+    cleanupResult = { outcome: 'uncertain', stopped: [] };
+    try {
+      const { trace } = await runTurn(async function* stopped() {
+        yield { type: 'thread.started', thread_id: THREAD };
+        abortCodexSession(THREAD);
+        throw abortError();
+      });
+      assert.equal(trace.at(-1), 'settle:reconciled_unknown');
+    } finally { cleanupResult = { outcome: 'absent', stopped: [] }; }
+  });
+
+  it('breaker abort: through the turn abortController, settles cancelled and names the processes', async () => {
+    cleanupResult = { outcome: 'absent', stopped: [{ pid: 777, comm: 'node' }] };
+    breachValue = { memoryPercent: 94.2, treeKb: 2_000_000, totalKb: 8_000_000 };
+    try {
+      const { trace, cleanups, frames, registered } = await runTurn(async function* breached() {
+        yield { type: 'thread.started', thread_id: THREAD };
+        processCalls.registered.at(-1)!.abort('codex_resource_breach');
+        assert.equal(lastRunSignal?.aborted, true, 'the SDK signal is the turn abortController');
+        throw abortError();
+      });
+      assert.equal(registered.length, 1);
+      assert.equal(cleanups.length, 1);
+      assert.equal(trace.at(-1), 'settle:cancelled');
+      const notice = frames.find(frame => frame.code === 'codex_resource_breach');
+      assert.equal(notice?.kind, 'error', 'the breaker stays an error');
+      assert.match(String(notice?.content), /قاطع الذاكرة/u);
+      assert.match(String(notice?.content), /94%/u);
+      assert.match(String(notice?.content), /node \(777\)/u);
+    } finally {
+      cleanupResult = { outcome: 'absent', stopped: [] };
+      breachValue = null;
+    }
+  });
+
+  it('pe-<decisionId> is used by exactly one launch: a consumed decision cannot start a second', async () => {
+    const trace: string[] = [];
+    let consumed = false;
+    const once = await handle(trace, () => {
+      if (consumed) throw Object.assign(new Error('PERMIT_REPLAYED'), { code: 'PERMIT_REPLAYED' });
+      consumed = true;
+      trace.push('consume');
+    });
+    const tagged = () => codexStarts.filter(start => start.env?.CCUI_PROCESS_TAG === TAG).length;
+    const before = tagged();
+    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: once }, makeWs(null));
+    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: once }, makeWs(null));
+    assert.equal(tagged() - before, 1);
+    assert.deepEqual(trace.filter(entry => entry === 'consume'), ['consume']);
+  });
+
+  it('launches without a decision get distinct codex-<uuid> tags', async () => {
+    const first = codexStarts.length;
+    await spawnAndCapture({});
+    await spawnAndCapture({});
+    const tags = codexStarts.slice(first).map(start => String(start.env?.CCUI_PROCESS_TAG));
+    assert.equal(new Set(tags).size, 2);
+    for (const tag of tags) assert.match(tag, /^codex-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  });
+});
+
+// ===========================================================================
+// ADR-206 S2: the helpers lease on the live launch path (memory check → lease → proof).
+// ===========================================================================
+describe('queryCodex helpers lease (ADR-206 S2)', () => {
+  const THREAD = '33333333-4444-7555-8666-777777777777';
+  const DECISION = '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9';
+  const TAG = `pe-${DECISION}`;
+  const reply = { type: 'item.completed', item: { type: 'agent_message', id: 'item_1', text: 'done' } };
+  const abortError = () => Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+
+  const handle = async (trace: string[], overrides: Record<string, unknown> = {}) => {
+    let bound = false;
+    return {
+      decisionId: DECISION,
+      launchIdentity: (await import('./shared/codex-executable.js')).acquireCodexLaunchIdentity(),
+      consume: () => { trace.push('consume'); },
+      markStarted: () => { trace.push('started'); },
+      bindSession: () => { bound = true; },
+      isSessionBound: () => bound,
+      settle: (outcome: string) => { trace.push(`settle:${outcome}:finish=${leaseCalls.finish.length}`); },
+      notStarted: () => { trace.push('not-started'); },
+      ...overrides,
+    };
+  };
+
+  const runTurn = async (
+    events: (() => AsyncGenerator<unknown, void, unknown>) | null,
+    overrides: Record<string, unknown> = {},
+  ) => {
+    const trace: string[] = [];
+    const before = { reserve: leaseCalls.reserve.length, first: leaseCalls.first.length, finish: leaseCalls.finish.length };
+    const cleanupsBefore = processCalls.cleanup.length;
+    runStreamedEvents = events;
+    try {
+      await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: await handle(trace, overrides) },
+        makeWs(null));
+    } finally { runStreamedEvents = null; }
+    return {
+      trace,
+      reserve: leaseCalls.reserve.slice(before.reserve),
+      first: leaseCalls.first.slice(before.first),
+      finish: leaseCalls.finish.slice(before.finish),
+      cleanups: processCalls.cleanup.slice(cleanupsBefore),
+    };
+  };
+
+  it('normal end: one reserve with the turn tag, baseline at the first event, process_exit proof', async () => {
+    const { trace, reserve, first, finish, cleanups } = await runTurn(async function* ok() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      yield reply;
+      yield { type: 'turn.completed', usage: null };
+    });
+    assert.deepEqual(reserve, [{ tag: TAG, userId: null }]);
+    assert.equal(first.length, 1);
+    assert.equal(first[0].tag, TAG);
+    assert.equal(finish.length, 1);
+    assert.deepEqual([finish[0].tag, finish[0].end.started, finish[0].end.succeeded, finish[0].end.cleanup], [TAG, true, true, null]);
+    assert.deepEqual(cleanups, []);
+    assert.equal(trace.at(-1), 'settle:succeeded:finish=' + leaseCalls.finish.length, 'lease released before settle');
+  });
+
+  it('user stop: the lease is released after cleanup, with the cleanup result as proof', async () => {
+    cleanupResult = { outcome: 'absent', stopped: [] };
+    const { finish, cleanups } = await runTurn(async function* stopped() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      abortCodexSession(THREAD);
+      throw abortError();
+    });
+    assert.equal(cleanups.length, 1);
+    assert.equal(finish.length, 1);
+    assert.equal(finish[0].end.succeeded, false);
+    assert.equal(finish[0].end.started, true);
+    assert.deepEqual(finish[0].end.cleanup, { outcome: 'absent', stopped: [] });
+    assert.equal(finish[0].cleanupsSoFar, processCalls.cleanup.length, 'finish runs after cleanup');
+    assert.equal(typeof finish[0].end.notBeforeMs, 'number');
+  });
+
+  it('error after a completed reply: no cleanup, the lease waits for the tag scan', async () => {
+    const { finish, cleanups } = await runTurn(async function* late() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      yield reply;
+      yield { type: 'turn.failed', error: { message: 'model overloaded' } };
+    });
+    assert.deepEqual(cleanups, []);
+    assert.deepEqual([finish.length, finish[0].end.succeeded, finish[0].end.cleanup], [1, false, null]);
+  });
+
+  it('a throw before runStreamed still finishes the lease (no effect, tag scan proof)', async () => {
+    const { finish, first, trace } = await runTurn(null, {
+      markStarted: () => { throw Object.assign(new Error('START_FENCE'), { code: 'START_FENCE' }); },
+    });
+    assert.deepEqual(first, []);
+    assert.equal(finish.length, 1);
+    assert.deepEqual([finish[0].end.succeeded, finish[0].end.cleanup, finish[0].end.notBeforeMs], [false, null, null]);
+    assert.equal(finish[0].end.started, false, 'never started: released at once, not held for 120 s');
+    assert.ok(trace.includes('consume'));
+  });
+
+  it('B = 0 from the memory check: helpers off for this turn, the turn still runs', async () => {
+    for (const result of [false, 'throw'] as const) {
+      reserveResult = result;
+      try {
+        const { trace, reserve } = await runTurn(async function* ok() {
+          yield { type: 'thread.started', thread_id: THREAD };
+          yield reply;
+        });
+        assert.equal(reserve.length, 1);
+        assert.match(String(trace.at(-1)), /^settle:succeeded/u, 'never a refusal');
+        const config = (codexStarts.at(-1)?.config ?? {}) as Record<string, unknown>;
+        assert.equal(config['features.multi_agent_v2.max_concurrent_threads_per_session'], 1, `${result}: root only`);
+      } finally { reserveResult = true; }
+    }
+  });
+});
+

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   loadThemePresetState,
@@ -15,7 +15,7 @@ import {
 import { onApplyServerPreference } from '../preferences/preferencesSync';
 // resolveIsDark is the single source of truth — also used by theme-presets.ts
 // at boot time (applyStoredThemePreset) to prevent light/dark flash.
-import { resolveIsDark, THEME_MODES } from '../lib/theme-mode';
+import { nextThemeMode, resolveIsDark, THEME_MODES } from '../lib/theme-mode';
 
 // Re-export so existing consumers of ThemeContext.jsx keep working.
 export { THEME_MODES };
@@ -56,7 +56,7 @@ export const ThemeProvider = ({ children }) => {
   // themeMode: 'light' | 'dark' | 'system'
   // Back-compat: existing 'light'/'dark' values in localStorage are preserved as-is.
   // A missing key (new user / first load after upgrade) defaults to 'system'.
-  const [themeMode, setThemeMode] = useState(() => {
+  const [themeMode, setThemeModeState] = useState(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
     // No saved value → default to system (new users and post-upgrade first load).
@@ -64,6 +64,11 @@ export const ThemeProvider = ({ children }) => {
     // preferencesSync layer treats the key as unset (seeding behaviour intact).
     return 'system';
   });
+
+  // Set once the user deliberately picks a mode (settings control or quick
+  // toggle), so an explicit 'system' is persisted — and therefore synced to the
+  // account — even when the key was never written before.
+  const explicitChoiceRef = useRef(false);
 
   // Derived boolean — what the DOM actually shows right now.
   const [isDarkMode, setIsDarkMode] = useState(() => resolveIsDark(themeMode));
@@ -80,11 +85,15 @@ export const ThemeProvider = ({ children }) => {
     setIsDarkMode(resolved);
     saveThemePresetState(presetState);
     // Persist themeMode — but only write 'system' when the user has explicitly
-    // chosen it (i.e. the key already exists in localStorage). A new user
-    // whose key is null stays null until they make a deliberate selection,
-    // so preferencesSync treats the account as having no preference yet
-    // (seeding behaviour stays correct).
-    if (themeMode !== 'system' || localStorage.getItem('theme') !== null) {
+    // chosen it (this session, or earlier so the key already exists). A new
+    // user whose key is null stays null until they make a deliberate
+    // selection, so preferencesSync treats the account as having no
+    // preference yet (seeding behaviour stays correct).
+    if (
+      themeMode !== 'system'
+      || explicitChoiceRef.current
+      || localStorage.getItem('theme') !== null
+    ) {
       localStorage.setItem('theme', themeMode);
     }
   }, [themeMode, presetState]);
@@ -103,10 +112,21 @@ export const ThemeProvider = ({ children }) => {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [themeMode, presetState]);
 
-  // Legacy helper — still exported so existing callers keep working.
-  // Toggles between light and dark (drops 'system' if currently set).
-  const toggleDarkMode = () => {
-    setThemeMode(prev => (prev === 'dark' ? 'light' : 'dark'));
+  /**
+   * User-facing setter: marks the choice explicit so 'system' persists. Picking
+   * the mode already shown (e.g. 'system' for a new user) changes no state and
+   * so runs no effect — write it here so that deliberate choice still syncs.
+   */
+  const setThemeMode = (mode) => {
+    explicitChoiceRef.current = true;
+    if (THEME_MODES.includes(mode)) localStorage.setItem('theme', mode);
+    setThemeModeState(mode);
+  };
+
+  /** Quick toggle: cycles light → dark → system → light (keeps 'system' reachable). */
+  const cycleThemeMode = () => {
+    explicitChoiceRef.current = true;
+    setThemeModeState(nextThemeMode);
   };
 
   // Interface font (see src/lib/ui-font.ts). Same ownership model as the theme
@@ -148,13 +168,13 @@ export const ThemeProvider = ({ children }) => {
     const offTheme = onApplyServerPreference('theme', (raw) => {
       // raw may be 'light', 'dark', 'system', or (legacy) null/other
       if (raw === 'light' || raw === 'dark' || raw === 'system') {
-        setThemeMode(raw);
+        setThemeModeState(raw);
       } else if (raw === null) {
         // Server cleared the preference → fall back to system
-        setThemeMode('system');
+        setThemeModeState('system');
       } else {
         // Unexpected / unrecognised value → fall back to system default
-        setThemeMode('system');
+        setThemeModeState('system');
       }
     });
     const offPreset = onApplyServerPreference('nassaj-theme-preset', () => {
@@ -182,7 +202,9 @@ export const ThemeProvider = ({ children }) => {
     isDarkMode,
     themeMode,
     setThemeMode,
-    toggleDarkMode,
+    cycleThemeMode,
+    // Legacy name kept for existing callers; it now cycles all three modes.
+    toggleDarkMode: cycleThemeMode,
     themePreset: presetState.preset,
     customThemeColors: presetState.custom,
     setThemePreset,

@@ -14,10 +14,13 @@ import {
   appConfigDb, closeConnection, getConnection, initializeDatabase, messageCoordinationDb,
   reverseSessionSteerIngress, uiPreferencesDb,
 } from '@/modules/database/index.js';
+// eslint-disable-next-line boundaries/no-unknown -- the test pins the note the normal prompt path builds.
+import { buildChatImageNote } from '@/services/chat-image-store.js';
 
 import { createSteerRun, type SteerRun } from './steer-run.js';
 import { registerMidTurnInjection, __resetMidTurnInjectionForTests } from './steer-registry.js';
-import { __recordSteerRateForTests, __resetSteerRateLimitForTests, __steerRateKeysForTests, handleSessionSteer } from './steer-service.js';
+import { __recordSteerRateForTests, __resetSteerRateLimitForTests, __steerRateKeysForTests, handleSessionSteer,
+  handleSessionSteerWithImages } from './steer-service.js';
 import { getSteerConsent, getSteerPolicy, setSteerConsent, setSteerPolicy } from './steer-policy.js';
 
 const TURN = '51111111-2222-4333-8444-555555555555';
@@ -231,4 +234,28 @@ test('arming split: no taint hook → others steer_unavailable, the starter stil
   assert.equal(code(handleSessionSteer(req(2), ctx(1))), 'ok:202', 'self-steer needs no taint hook');
   armed = false;
   assert.equal(code(handleSessionSteer(req(3), ctx(1))), 'steer_unavailable:409', 'no injection path');
+});
+
+test('steer images reach the injected payload through the normal image note; a rejected image refuses it', async () => {
+  const stored: unknown[][] = [];
+  const store = async (images: unknown[]) => { stored.push(images); return buildChatImageNote(['/store/b1/image_1.png']); };
+  const image = { name: 'shot.png', data: 'data:image/png;base64,AAAA', mimeType: 'image/png' };
+  const result = await handleSessionSteerWithImages(req(9, { images: [image] }), ctx(2), store);
+  assert.equal(code(result), 'ok:202');
+  assert.deepEqual(stored, [[image]], 'the uploaded image objects go to the store as-is');
+  const item = await run.take();
+  assert.match(item!.wrapped, /\[Images provided at the following paths:\]\n1\. \/store\/b1\/image_1\.png\n<\/nassaj-steer>$/u);
+  assert.equal(item!.text, 'please also check 9', 'the member-facing text stays the typed text');
+  const [row] = messageCoordinationDb.listSteerBySession(SID);
+  assert.equal(row.payloadSha256, createHash('sha256').update(item!.wrapped).digest('hex'), 'delivery proof covers the images');
+
+  assert.equal(code(await handleSessionSteerWithImages(req(10, { images: [image] }), ctx(2), async () => null)),
+    'image_rejected:400', 'never degraded to a text-only steer');
+  let touched = false;
+  const spy = async () => { touched = true; return 'x'; };
+  assert.equal(code(await handleSessionSteerWithImages(req(11, { images: [image] }), ctx(3), spy)), 'not_writable:403');
+  assert.equal(code(await handleSessionSteerWithImages(req(12, { images: 'nope' }), ctx(2), spy)), 'invalid_request:400');
+  assert.equal(touched, false, 'nothing is stored for a non-writer or a malformed request');
+  assert.equal(code(await handleSessionSteerWithImages(req(13), ctx(2), spy)), 'ok:202', 'no images: plain path');
+  assert.equal(touched, false);
 });

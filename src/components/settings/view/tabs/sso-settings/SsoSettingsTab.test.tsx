@@ -322,3 +322,68 @@ describe('test sign-in return', () => {
     expect(window.location.search).toBe('?settings=sso');
   });
 });
+
+describe('owner SSO sign-in switch (ADR-194 A1)', () => {
+  const ownerSwitch = () => screen.getByRole('switch', { name: s('ownerSignIn.label') }) as HTMLButtonElement;
+
+  it('is disabled with a hint when the caller has no link', async () => {
+    serve(activeStatus({ ownerSignIn: { linked: false, enabled: false } }));
+    await renderTab();
+    expect(ownerSwitch().disabled).toBe(true);
+    expect(screen.getByText(s('ownerSignIn.notLinked'))).toBeTruthy();
+  });
+
+  it('is hidden on a server without the field and without an active configuration', async () => {
+    serve(activeStatus());
+    await renderTab();
+    expect(screen.queryByRole('switch', { name: s('ownerSignIn.label') })).toBeNull();
+    cleanup();
+    serve(statusFixture({ ownerSignIn: { linked: false, enabled: false } }));
+    await renderTab();
+    expect(screen.queryByRole('switch', { name: s('ownerSignIn.label') })).toBeNull();
+  });
+
+  it('enabling opens the step-up dialog and sends the evidence', async () => {
+    serve(activeStatus({ ownerSignIn: { linked: true, enabled: false } }), {
+      'PUT /owner-sign-in': () => {
+        current = { ...current, ownerSignIn: { linked: true, enabled: true } };
+        return { status: 200, body: { ownerSignIn: { linked: true, enabled: true } } };
+      },
+    });
+    await renderTab();
+    expect(ownerSwitch().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(ownerSwitch());
+    expect(await screen.findByText(s('stepUp.title'))).toBeTruthy();
+    expect(screen.getByText(s('ownerSignIn.stepUpIntro'))).toBeTruthy();
+    expect(callsTo('PUT', '/owner-sign-in')).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText(s('stepUp.passwordLabel')), { target: { value: 'pw' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: s('stepUp.confirm') })); });
+    await waitFor(() => expect(callsTo('PUT', '/owner-sign-in')).toHaveLength(1));
+    expect(callsTo('PUT', '/owner-sign-in')[0].body).toEqual({ enabled: true, stepUp: { method: 'password', password: 'pw' } });
+    await waitFor(() => expect(ownerSwitch().getAttribute('aria-checked')).toBe('true'));
+  });
+
+  it('disabling needs no step-up', async () => {
+    serve(activeStatus({ ownerSignIn: { linked: true, enabled: true } }), {
+      'PUT /owner-sign-in': () => {
+        current = { ...current, ownerSignIn: { linked: true, enabled: false } };
+        return { status: 200, body: { ownerSignIn: { linked: true, enabled: false } } };
+      },
+    });
+    await renderTab();
+    await act(async () => { fireEvent.click(ownerSwitch()); });
+    await waitFor(() => expect(callsTo('PUT', '/owner-sign-in')).toHaveLength(1));
+    expect(callsTo('PUT', '/owner-sign-in')[0].body).toEqual({ enabled: false });
+    expect(screen.queryByText(s('stepUp.title'))).toBeNull();
+    await waitFor(() => expect(ownerSwitch().getAttribute('aria-checked')).toBe('false'));
+  });
+
+  it('shows a refusal in plain language under the switch', async () => {
+    serve(activeStatus({ ownerSignIn: { linked: true, enabled: true } }), {
+      'PUT /owner-sign-in': () => ({ status: 409, body: { code: 'owner_sso_not_linked' } }),
+    });
+    await renderTab();
+    await act(async () => { fireEvent.click(ownerSwitch()); });
+    expect(await screen.findByText(s('diag.owner_sso_not_linked'))).toBeTruthy();
+  });
+});

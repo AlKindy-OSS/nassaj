@@ -35,6 +35,8 @@ const DIRECT_CODES: ReadonlySet<string> = new Set([
   // Step-up
   'step_up_required', 'step_up_failed', 'step_up_invalid_request', 'step_up_rate_limited',
   'password_change_required', 'no_eligible_passkey', 'passkey_failed',
+  // Owner SSO sign-in opt-in (ADR-194 A1)
+  'owner_sso_not_linked', 'oidc_duplicate_links', 'owner_sso_invalid',
 ]);
 
 /** Codes that share a sentence with another code. */

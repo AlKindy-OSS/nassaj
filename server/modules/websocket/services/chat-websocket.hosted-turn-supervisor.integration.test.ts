@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
@@ -10,6 +11,7 @@ let ingressClaim: () => { action: string } = () => ({ action: 'dispatch' });
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: { getProjectPath: () => ({ project_id: 'test-project' }), isProjectVisibleToUser: () => true },
     sessionsDb: { getSessionById: () => null },
     sessionWorkspaceModesDb: { markOverlay: () => undefined },

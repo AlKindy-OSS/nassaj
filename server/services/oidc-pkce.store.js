@@ -78,11 +78,14 @@ function testBinding({ ownerUserId, configHash, draftVersion, ...rest }) {
 function purposeBinding({ purpose = 'login', ...binding }) {
   if (!PURPOSES.has(purpose)) return null;
   if (purpose === 'test') return testBinding(binding);
-  const { userId, requestedAtMs, audience, configVersion, ...rest } = binding;
+  const { userId, requestedAtMs, audience, configVersion, ownerStepUp, ...rest } = binding;
   if (!isVersion(configVersion) || Object.values(rest).some((value) => value !== undefined)) return null;
+  // ADR-194 A1: `ownerStepUp` marks the one automatic owner passkey step-up of a
+  // login (the loop guard); only `true` on a login entry is accepted.
+  if (ownerStepUp !== undefined && (purpose !== 'login' || ownerStepUp !== true)) return null;
   if (purpose === 'login') {
     return userId === undefined && requestedAtMs === undefined && audience === undefined
-      ? { purpose, configVersion } : null;
+      ? { purpose, configVersion, ...(ownerStepUp ? { ownerStepUp: true } : {}) } : null;
   }
   if (!Number.isInteger(userId) || userId <= 0 || !Number.isFinite(requestedAtMs)) {
     return null;

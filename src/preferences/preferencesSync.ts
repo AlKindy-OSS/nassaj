@@ -73,7 +73,7 @@ export interface SyncedPreference {
  * GitHub-stars / upstream-version caches, auth-token) is intentionally absent.
  */
 const SYNCED_STORAGE_KEYS: string[] = [
-  'theme', // ThemeContext.jsx (light/dark)
+  'theme', // ThemeContext.jsx (light/dark/system)
   'nassaj-theme-preset', // lib/theme-presets.ts (preset + custom colors, JSON)
   'nassaj-ui-font', // lib/ui-font.ts (interface font id, plain string)
   'userLanguage', // i18n/config.js

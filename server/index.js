@@ -196,7 +196,7 @@ import userRoutes from './routes/user.js';
 import githubRoutes from './routes/github.js';
 import systemRoutes, {
     executeActionRowAs, findSourceUpdateActivation, reconcileStrandedActivationJobs, reconcileSupersededQueuedSourceUpdates,
-    isServerActionRestartInFlight, readSourceHead,
+    isServerActionRestartInFlight, readSourceHead, setUpdateRouteHooks,
 } from './routes/system.js';
 import { createUpdateJobAbandoner, isSafeRestartProcessRunning } from './services/update-job-abandon.js';
 import { abandonFields, createAbandonUpdateJobHandler, toActiveUpdateJobPayload } from './routes/update-job-abandon.js';
@@ -245,6 +245,7 @@ import {
     cliTurnSupervisor, CLI_TURN_SUPERVISOR_OWNER_ID,
 } from './modules/turn-supervisor/cli-turn-supervisor.service.js';
 import { createTurnSupervisorLifecycle } from './modules/turn-supervisor/lifecycle.js';
+import { scheduleCodexLeaseBootReclaim } from './modules/providers/list/codex/codex-helpers-lease.js';
 import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, isSourceUpdateLeaseOwnerAlive, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced, DEVICE_COOKIE } from './modules/database/index.js';
 import { onSessionOutcomeChange } from './modules/websocket/services/session-outcome.service.js';
 import { broadcastSessionOutcome } from './modules/websocket/services/presence.service.js';
@@ -252,11 +253,15 @@ import { revokeProjectLiveAccess } from './modules/websocket/services/project-me
 import { onMemberRemoved } from './modules/projects/services/project-visibility-management.service.js';
 import { isProjectVisible, coerceUserId } from './modules/projects/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
-import { createSourceUpdater, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
+import { createPrestageCandidateBuilder, createSourceUpdater, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, runFile, sourceUpdateErrorPayload } from './services/source-updater.js';
+import { createPrestageSlot } from './services/update-prestage-slot.js';
+import { createUpdatePrestager, readFreeBytes, readMemAvailableBytes } from './services/update-prestager.js';
+import { readStoredPrestageSettings } from './services/update-prestage-settings.js';
+import { systemResourceSampler } from '@/services/system-resource-sampler.service.js';
 import { createSourceUpdateWorker, durableReceiptFile } from './services/source-update-worker.js';
 import { createUpdateDeferralScheduler } from './services/update-deferral-scheduler.js';
 import {
-    deriveUpdateJobFailure, deriveUpdateJobDeferral, deriveUpdateJobScheduledDueSoon,
+    deriveUpdateJobFailure, deriveUpdateJobDeferral, deriveUpdateJobPrestage, deriveUpdateJobScheduledDueSoon,
 } from './services/update-job-snapshot.js';
 import { mountNodeOverlay } from './services/node-overlay-static.js';
 import { mountPublicContent } from './services/public-content-static.js';
@@ -272,6 +277,7 @@ import { resolveDegraded } from './services/health-degraded.js';
 import { readRuntimeIdentity } from './services/runtime-identity.js';
 import { assertLegacyTransitionAllowed, requireStartupAdmission, confirmStartupServing } from './bootstrap-startup-context.js';
 import { createUpdateMaintenanceGate } from './services/update-maintenance-gate.js';
+import { pruneSourceUpdateCandidates } from './services/source-update-candidate-retention.js';
 import { acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases, summarizeOpenTerminals, withLocalUpdateWriterLease } from './services/update-writer-lease.js';
 import { createClientPublicationStaticMiddleware, createClientManifestHandler } from './services/client-publication-static.js';
 import { createSharePageRouter, publicAssetCors } from './services/share-page.js';
@@ -479,6 +485,9 @@ const queueSourceUpdateRestart = async ({ expectedServerBuildId, reason, transac
         if (raced && boundToThisJob(raced)) return true;
         return refuse('restart_row_raced_identity_mismatch', raced?.id ?? null);
 };
+// T-2024 S3 (ADR-207): set below once its dependencies exist; the job path
+// reads it at job time to abort a running prestage before it builds.
+let updatePrestager = null;
 const updateNassajSource = releaseSourceInvalid ? null : createSourceUpdater({
     appRoot: APP_ROOT,
     activeSessionCount: countGovernedActiveSessions,
@@ -490,6 +499,12 @@ const updateNassajSource = releaseSourceInvalid ? null : createSourceUpdater({
     },
     // B-1264: read at job time; SERVER_RUNTIME_IDENTITY is set later during startup.
     loadedRuntimeCommit: () => SERVER_RUNTIME_IDENTITY.runtimeCommit,
+    // ADR-207 §3.4: the job wins; a running prestage is aborted and discarded first.
+    yieldPrestage: async () => (updatePrestager ? updatePrestager.abortForJob() : true),
+    // T-2024 S4 (ADR-207 §3.5): a ready slot for exactly this release is adopted
+    // instead of rebuilt; the identity key includes this process's build id.
+    prestageAdoption: () => updatePrestager?.adoptionPort() ?? null,
+    builderBuildId: () => SERVER_BUILD_ID_LOADED_AT_STARTUP,
 });
 // git-checkout-v2 discovers a release from git tags via the node's own git
 // credentials (so a private source works), not the credential-free GitHub API
@@ -541,6 +556,9 @@ const sourceUpdateWorker = releaseSourceInvalid || process.env.NASSAJ_UPDATE_MOD
     // B-1585: a stranded job re-claimed after an out-of-band install of its
     // own target settles as superseded instead of rebuilding and restarting.
     loadedRuntimeCommit: () => SERVER_RUNTIME_IDENTITY.runtimeCommit,
+    // T-2024 S0 (ADR-207): wake the auto-activator once the job is queued
+    // rather than at its next 30 s poll; its gates and single-flight still rule.
+    afterRestartQueued: ({ autoActivate }) => { if (autoActivate) updateAutoActivator?.wake(); },
     // ADR-156 ت-3: the gate owns the downtime window, so the receipt reads the
     // measurement from it rather than guessing at one.
     readGateMetrics: () => {
@@ -2124,6 +2142,62 @@ const updatePreflight = createUpdatePreflight({
     isSourceUpdateJobLive,
 });
 
+/**
+ * T-2024 S3 (ADR-207): background prestaging of the latest release on
+ * release-mode git-checkout-v2 nodes. Decision 4 (owner 2026-10-15): prestage
+ * immediately by default; the owner's node setting (T-2030) turns it off or
+ * adds a delay and is read every cycle; NASSAJ_UPDATE_PRESTAGE=0 is the kill
+ * switch and wins. Never fails startup.
+ */
+function createNodeUpdatePrestager() {
+    if (releaseSourceInvalid || !updateReleaseDiscovery || updateHostCapability.jobStrategy !== 'git-checkout-v2') return null;
+    const controlRoot = createUpdateMaintenanceGate({ projectPath: APP_ROOT }).paths.controlRoot;
+    const slot = createPrestageSlot({ appRoot: APP_ROOT, controlRoot });
+    // Its own preflight: active sessions never block a prestage (owner decision 1).
+    const preflight = createUpdatePreflight({
+        appRoot: APP_ROOT, activeSessionCount: () => 0, isSourceUpdateJobLive,
+        listQueuedSafeRestarts: () => pendingServerActionsDb.listActionable().filter((row) => row.actionType === 'safe-restart'),
+    });
+    return createUpdatePrestager({
+        appRoot: APP_ROOT, slot,
+        buildPrestage: createPrestageCandidateBuilder({ appRoot: APP_ROOT, controlRoot,
+            loadedRuntimeCommit: () => SERVER_RUNTIME_IDENTITY.runtimeCommit }),
+        discoverRelease: updateReleaseDiscovery,
+        readRuntime: () => ({
+            updateMode: process.env.NASSAJ_UPDATE_MODE, isPlatform: IS_PLATFORM,
+            hostReady: updateHostCapability.ready, jobStrategy: updateHostCapability.jobStrategy,
+            runtimeVersion: SERVER_RUNTIME_IDENTITY.runtimeVersion, runtimeCommit: SERVER_RUNTIME_IDENTITY.runtimeCommit,
+            builderBuildId: SERVER_BUILD_ID_LOADED_AT_STARTUP,
+        }),
+        hasActiveJob: () => sourceUpdateJobsDb.listRuntimeReferences().length > 0,
+        listJobReferences: () => sourceUpdateJobsDb.listCandidateRetentionReferences(),
+        lookupJob: (jobId) => {
+            const job = sourceUpdateJobsDb.getById(jobId);
+            return job ? { state: job.state, transactionId: job.transaction_id ?? null } : null;
+        },
+        readJournal: () => createUpdateMaintenanceGate({ projectPath: APP_ROOT }).readRecoveryEvidence(),
+        runPreflight: preflight,
+        sampleResources: () => systemResourceSampler.sample(),
+        readMemAvailable: () => readMemAvailableBytes(),
+        readFreeDisk: () => readFreeBytes(controlRoot),
+        runGit: (args) => runFile('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: APP_ROOT }),
+        readSettings: () => readStoredPrestageSettings(),
+    });
+}
+try {
+    updatePrestager = createNodeUpdatePrestager();
+} catch (error) {
+    console.warn('[update-prestager] disabled:', error?.code || error?.message || 'unknown');
+}
+// ADR-207 S5: the owner's release view reads the prestage status; the
+// re-confirm route wakes the auto-activator (T-2024 S0 follow-up).
+setUpdateRouteHooks({
+    prestageStatus: updatePrestager ? () => updatePrestager.status() : null,
+    // T-2030: an owner settings change is applied now, not at the next poll.
+    wakePrestager: updatePrestager ? () => updatePrestager.wake() : null,
+    wakeAutoActivator: updateAutoActivator ? () => updateAutoActivator.wake() : null,
+});
+
 // Its own limiter, not the POST instance: sharing one bucket would let a burst
 // of read-only diagnoses consume the allowance the owner needs to actually
 // start an update (ADR-156 م-3). It spawns `git ls-remote` and touches the
@@ -2230,6 +2304,9 @@ app.get('/api/system/update/jobs/:jobId', authenticateToken, requireRole('owner'
         // T-1912: only while scheduled messages are what holds the restart
         // (waiting_scheduled); count and earliest due time, never content or owners.
         scheduledDueSoon: deriveUpdateJobScheduledDueSoon(job, autoActivation),
+        // ADR-207 S5: `prestaged` (adopted a prestaged candidate, «محضَّر مسبقاً»)
+        // and `prestageRejectedReason` (adoption tried, fell back to a build).
+        ...deriveUpdateJobPrestage(job, sourceUpdateJobsDb),
         // B-1605: the dialog polls this snapshot; it carries the same flag as /jobs/active.
         ...abandonFields(updateJobAbandoner.evaluate(job)),
     });
@@ -4398,6 +4475,9 @@ async function startServer() {
         startSsoAttestationSweep();
         // B-1608 T2: sweep aged transcript park files (parked_left) off the startup path.
         startParkedTranscriptSweep();
+        // ADR-206 S2 §3.3: one reclaimer pass for codex-sdk helper leases a previous
+        // instance left, once they can be stale. Off the startup path; never throws.
+        scheduleCodexLeaseBootReclaim();
         // T-1872: seal the machine Codex release once before admitting launches.
         prewarmCodexLaunchIdentity();
         // T-1872 part 2: judge that release off the event loop; a failure never aborts boot.
@@ -4422,7 +4502,24 @@ async function startServer() {
                 console.error('[source-update] queued job reconciliation failed:', error?.message || 'unknown error');
             }
         }
+        // B-1626 (ADR-207 slice R): after a verified activation (this boot settled
+        // it above) and on every boot, retire old update candidates. Off the
+        // startup path, under the writer lease; it never throws and never fails an update.
+        if (!forwardStartup && !OID_PAIR_BOOTSTRAP && !globalThis[SOURCE_UPDATE_OWNERSHIP]) {
+            const sweepCandidates = () => pruneSourceUpdateCandidates({
+                createGate: () => createUpdateMaintenanceGate({ projectPath: APP_ROOT }),
+                listJobReferences: () => sourceUpdateJobsDb.listCandidateRetentionReferences(),
+                // T-2024 S3: a waiting or running safe-command row's candidate stays.
+                listActionReferences: () => pendingServerActionsDb.listOpenSourceUpdateTransactions(),
+            });
+            void sweepCandidates();
+            // T-2024 S3: the boot sweep often skips (writer lease busy, activation
+            // still settling); retry once a few minutes later. Never keeps the process alive.
+            const retentionBootRetryMs = 5 * 60_000;
+            setTimeout(() => { void sweepCandidates(); }, retentionBootRetryMs).unref();
+        }
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP) sourceUpdateWorker?.start();
+        if (!forwardStartup && !OID_PAIR_BOOTSTRAP && !globalThis[SOURCE_UPDATE_OWNERSHIP]) updatePrestager?.start();
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP && !localActivationMode) updateAutoActivator?.start();
         // ADR-156 §3.3: reconcile parked deferrals (expire those that timed out
         // while down, reset the idle debounce for the rest) then run the loop.
@@ -4525,7 +4622,11 @@ async function startServer() {
             cancelPendingApprovals: cancelAllPendingApprovals,
             // B-1390: no new scheduled turn may start once a drain begins; the
             // queue resumes from durable state in the successor process.
-            onDrainStart: () => scheduledMessagesService.pause(),
+            onDrainStart: () => {
+                scheduledMessagesService.pause();
+                // ADR-207 §3.3: abort a running prestage (its launcher group dies) and discard it.
+                void updatePrestager?.stop({ drain: true });
+            },
             // Close SQLite as the very last act before the process dies. The
             // drain calls this injected `exit` on EVERY termination path (clean
             // finish, drain timeout, and the second-signal escape hatch), so

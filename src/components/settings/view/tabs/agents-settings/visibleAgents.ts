@@ -1,4 +1,7 @@
-import { filterDisabledProviders } from '../../../../../../shared/disabledProviders';
+import {
+  filterDisabledProviders,
+  isProviderGloballyDisabled,
+} from '../../../../../../shared/disabledProviders';
 import type { AgentProvider } from '../../../types/types';
 
 /**
@@ -67,4 +70,28 @@ export function visibleSettingsAgents(): AgentProvider[] {
   return SETTINGS_AGENT_ORDER.filter(
     (provider) => active.has(provider) || COMING_SOON_SETTINGS_PROVIDERS.includes(provider),
   );
+}
+
+/** الوكيل الذي يُفتح عليه التبويب حين لا رابط عميق ولا افتراضي صالح. */
+export const FALLBACK_SETTINGS_AGENT: AgentProvider = 'claude';
+
+/**
+ * هل يصلح المعرّف المخزَّن وكيلاً افتراضياً الآن؟ يجب أن يكون بلاطةً ظاهرة في
+ * الشريط وغير معطَّل عالمياً — فمزوّدات «قريباً» لا تصلح رغم ظهورها.
+ */
+export function isUsableDefaultSettingsAgent(agent: string): agent is AgentProvider {
+  if (!agent) return false;
+  return (visibleSettingsAgents() as string[]).includes(agent) && !isProviderGloballyDisabled(agent);
+}
+
+/**
+ * أول وكيل يُعرض: الرابط العميق (`?settingsAgent=`) يغلب دائماً، ثم الافتراضي
+ * الذي اختاره المستخدم إن بقي صالحاً، ثم السلوك السابق (`claude`).
+ */
+export function resolveInitialSettingsAgent(
+  deepLinkAgent: AgentProvider | undefined,
+  storedDefault: string,
+): AgentProvider {
+  if (deepLinkAgent) return deepLinkAgent;
+  return isUsableDefaultSettingsAgent(storedDefault) ? storedDefault : FALLBACK_SETTINGS_AGENT;
 }

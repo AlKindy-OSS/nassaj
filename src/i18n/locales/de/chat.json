@@ -57,9 +57,9 @@
     "close": "Schließen",
     "alerts": {
       "pressure": "Vorgeschlagene Komprimierungsschwelle erreicht",
-      "close": "250.000 Tokens erreicht — erwäge eine neue Unterhaltung.",
+      "close": "{{value}} Tokens erreicht — erwäge eine neue Unterhaltung.",
       "hour": "Die Sitzung ist über eine Stunde alt — erwäge eine Zusammenfassung zum Fortsetzen.",
-      "compact": "150.000 Tokens erreicht — erwäge /compact."
+      "compact": "{{value}} Tokens erreicht — erwäge /compact."
     },
     "unavailable": "Aktuelle Kontextnutzung nicht verfügbar"
   },
@@ -513,6 +513,10 @@
   },
   "agentActivity": {
     "title": "Agenten-Aktivität",
+    "name": "Agentenname",
+    "model": "Modell",
+    "effort": "Aufwand",
+    "inherited": "geerbt",
     "summary": "{{running}}/{{total}} laufen",
     "running": "Läuft",
     "done": "Erledigt",
@@ -523,6 +527,7 @@
     "detailsPlaceholder": "Werkzeugverlauf kommt bald.",
     "noTools": "Noch keine Werkzeugaufrufe aufgezeichnet.",
     "toolSuccess": "Erledigt",
+    "toolFailed": "Fehlgeschlagen",
     "toolRunning": "Läuft"
   },
   "projectSelection": {

@@ -88,6 +88,16 @@ export interface RunAgent {
    * translated); '' when absent — the card supplies its own generic label.
    */
   type: string;
+  /** Provider-neutral display name, when exposed by the harness. */
+  agentName?: string;
+  /** Model actually used by this child, or the parent model when inherited. */
+  model?: string;
+  /** True only when `model` is the parent session model inherited by this child. */
+  modelInherited?: boolean;
+  /** Provider effort/reasoning setting, when exposed. */
+  effort?: string;
+  /** Provider-neutral child tool history, including in-progress calls. */
+  tools?: Array<{ name: string; status?: string }>;
   /** `description` from the container toolInput, else the neutral `subagent.label`; '' when neither. */
   description: string;
   /**
@@ -384,8 +394,13 @@ function considerTurnSubagents(state: ScanState, msg: ChatMessage): void {
     if (!sub || !registerAgent(state, sub.id, complete, 0)) continue;
     state.agentsRev.push({
       id: sub.id,
-      type: '',
+      type: sub.agentName ?? '',
       description: typeof sub.label === 'string' ? sub.label : '',
+      agentName: sub.agentName,
+      model: sub.model,
+      modelInherited: sub.modelInherited,
+      effort: sub.effort,
+      tools: sub.tools,
       status: complete ? 'done' : 'running',
       callCount: 0,
       startedAt: tsMs(msg.timestamp),
@@ -415,7 +430,12 @@ function buildAgentRow(msg: ChatMessage, id: string, label: string, complete: bo
   const lastChild = childTools && childTools.length > 0 ? childTools[childTools.length - 1] : undefined;
   return {
     id,
-    type: meta.type,
+    type: msg.subagent?.agentName ?? meta.type,
+    agentName: msg.subagent?.agentName,
+    model: msg.subagent?.model,
+    modelInherited: msg.subagent?.modelInherited,
+    effort: msg.subagent?.effort,
+    tools: msg.subagent?.tools,
     description: meta.description || label,
     status: complete ? 'done' : 'running',
     currentTool: complete ? undefined : lastChild?.toolName || undefined,

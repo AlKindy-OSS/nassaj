@@ -266,8 +266,15 @@ export type AuditAction =
   // on the active row, making SSO unavailable. Metadata { fault } only.
   | 'sso_runtime_fault_recorded'
   // ADR-194 I6: an IdP identity linked to an owner was refused for login or
-  // self-link (the owner signs in locally only). Metadata { purpose } only.
+  // self-link. Metadata { purpose } and, for login (A1), { reason }.
   | 'oidc_owner_sign_in_refused'
+  // ADR-194 A1: an opted-in owner signed in through SSO with a fresh passkey.
+  // Metadata { provider, identityId, signInId, amr, authAgeSec } only; never
+  // the subject or a token.
+  | 'oidc_owner_sign_in'
+  // ADR-194 A1: an owner turned their own SSO sign-in opt-in on or off.
+  // Metadata { identityId, enabled } only.
+  | 'sso_owner_sign_in_changed'
   // ADR-194 D3/ADR-193: the owner confirmed the installation origin on a node
   // without the connector origin store. Metadata { replaced } only.
   | 'installation_origin_confirmed'

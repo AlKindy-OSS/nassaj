@@ -16,7 +16,7 @@
  */
 
 import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Partial mock: OutboxCard (B-1076) reaches the auth barrel, whose UI imports use `Trans`.
 vi.mock('react-i18next', async (importOriginal) => ({
@@ -121,6 +121,7 @@ import {
 } from '../../../stores/sessionProcessStateStore';
 
 import { useChatComposerState } from './useChatComposerState';
+import { __resetUiPreferencesStoreForTests, useUiPreferences } from '../../../hooks/useUiPreferences';
 import { readServerErrorCode, readServerErrorDetail } from './useChatRealtimeHandlers';
 
 
@@ -1389,5 +1390,50 @@ describe('T-1936 — الفقاعة قبل الحفظ الدائم', () => {
 
     expect(props.pendingViewSessionRef.current).not.toBeNull();
     expect(props.pendingViewSessionRef.current?.sessionId).toBeNull();
+  });
+});
+
+describe('وضع التفويض الافتراضي من الإعدادات', () => {
+  const setDefaultLevel = (value: string) => {
+    __resetUiPreferencesStoreForTests();
+    localStorage.setItem('uiPreferences', JSON.stringify({ defaultCoordinationLevel: value }));
+  };
+
+  afterEach(() => {
+    localStorage.removeItem('uiPreferences');
+    __resetUiPreferencesStoreForTests();
+  });
+
+  it('محادثة جديدة بلا معرّف تبدأ بالوضع الافتراضي المختار', () => {
+    setDefaultLevel('direct');
+    const { result } = harness({ sessionId: null });
+    expect(result.current.coordinationLevel).toBe('direct');
+  });
+
+  it('محادثة بلا اختيار مثبَّت تأخذ الوضع الافتراضي المختار', async () => {
+    setDefaultLevel('delegate_review');
+    const { result } = harness({ sessionId: SESSION_ID });
+    await waitFor(() => expect(result.current.coordinationLevel).toBe('delegate_review'));
+  });
+
+  it('الاختيار المثبَّت للمحادثة يغلب الافتراضي', async () => {
+    setDefaultLevel('delegate_review');
+    localStorage.setItem(`coordination_level_${SESSION_ID}`, 'direct');
+    const { result } = harness({ sessionId: SESSION_ID });
+    await waitFor(() => expect(result.current.coordinationLevel).toBe('direct'));
+  });
+
+  it('قيمة افتراضي تالفة تسقط على delegate', async () => {
+    setDefaultLevel('delegate_review_plus');
+    const { result } = harness({ sessionId: SESSION_ID });
+    await waitFor(() => expect(result.current.coordinationLevel).toBe('delegate'));
+  });
+
+  it('المسودّة بلا معرّف تتبع تغيير الافتراضي حيّاً', async () => {
+    setDefaultLevel('delegate');
+    const { result } = harness({ sessionId: null });
+    const prefs = renderHook(() => useUiPreferences());
+    act(() => { prefs.result.current.setPreference('defaultCoordinationLevel', 'direct'); });
+    await waitFor(() => expect(result.current.coordinationLevel).toBe('direct'));
   });
 });

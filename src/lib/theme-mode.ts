@@ -33,3 +33,18 @@ export function resolveIsDark(mode: string | null | undefined): boolean {
     ? window.matchMedia('(prefers-color-scheme: dark)').matches
     : false;
 }
+
+/** Quick-toggle order: light → dark → system → light. */
+const CYCLE_NEXT: Record<ThemeMode, ThemeMode> = {
+  light: 'dark',
+  dark: 'system',
+  system: 'light',
+};
+
+/**
+ * The mode a quick toggle moves to from `mode`. Unknown values start the cycle
+ * at 'light', matching resolveIsDark's treatment of them as 'system'.
+ */
+export function nextThemeMode(mode: string | null | undefined): ThemeMode {
+  return CYCLE_NEXT[mode as ThemeMode] ?? 'light';
+}

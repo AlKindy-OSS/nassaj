@@ -9,6 +9,7 @@ import { resolveSessionWorkspace } from '@/modules/session-workspaces/index.js';
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 import { dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
@@ -28,6 +29,7 @@ const sharedMarks: Array<{ sessionId: string; projectPath: string; provider: str
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (projectPath: string) => resumedRow?.project_path === projectPath
         || registeredPaths.has(projectPath)

@@ -8,6 +8,7 @@ const BINARY_EXTENSIONS = [
   'mp3', 'mp4', 'wav', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'm4a', 'ogg',
   // Documents
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+  'docm', 'dotx', 'xlsm', 'xltx', 'pptm', 'ppsx', 'potx',
   // Fonts
   'ttf', 'otf', 'woff', 'woff2', 'eot',
   // Database

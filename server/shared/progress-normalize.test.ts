@@ -81,6 +81,29 @@ test('subagent records require an id and a known state; parentId defaults to nul
   assert.equal(Array.from(record?.label ?? '').length, SUBAGENT_LABEL_MAX_CHARS);
 });
 
+test('subagent metadata is bounded, unknown fields stay absent, and inherited is explicit', () => {
+  const record = buildProgressSubagent({
+    id: 'agent', state: 'running', label: 'Search', agentName: 'explorer',
+    model: 'parent-model', modelInherited: true, effort: 'high',
+    tools: [{ name: 'Read', status: 'completed' }, { name: 'Write', status: 'running' }],
+  });
+  assert.deepEqual(record, {
+    id: 'agent', parentId: null, label: 'Search', state: 'running', agentName: 'explorer',
+    model: 'parent-model', modelInherited: true, effort: 'high',
+    tools: [{ name: 'Read', status: 'completed' }, { name: 'Write', status: 'running' }],
+  });
+  assert.deepEqual(buildProgressSubagent({ id: 'unknown', state: 'running', label: 'Task' }), {
+    id: 'unknown', parentId: null, label: 'Task', state: 'running',
+  });
+  assert.deepEqual(boundProgressSubagent({
+    id: 'untrusted', state: 'running', label: 'Task', model: 'child', modelInherited: false,
+    tools: [{ name: 'Read', status: 'completed' }, { name: 42 }, { name: 'Write', status: 'invalid\u202e' }],
+  }), {
+    id: 'untrusted', parentId: null, label: 'Task', state: 'running', model: 'child',
+    tools: [{ name: 'Read', status: 'completed' }, { name: 'Write', status: 'invalid' }],
+  });
+});
+
 test('bound* rebuilds untrusted values with contract keys only', () => {
   const plan = boundProgressPlan({
     source: 'tool', extra: 'leak', items: [{ id: '99', label: 'a', status: 'done', secret: 's' }],

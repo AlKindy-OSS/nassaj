@@ -38,7 +38,7 @@ import { isRetryableRefusal, removeSessionTranscript } from '../shared/session-t
 import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
-import { DOCUMENT_SHARING_INSTRUCTIONS, stripRuntimeInstructionsPrefix } from '../../../../shared/documentSharingInstructions.js';
+import { runtimeInstructionsPrefix, stripRuntimeInstructionsPrefix } from '../../../../shared/documentSharingInstructions.js';
 
 import { HISTORY_LIMITS, HistoryReadLease, HistoryBudgetError, historyAdmission } from './history-budget.service.js';
 import { HistoryHttpSink } from './history-response.service.js';
@@ -216,6 +216,29 @@ export function stampMessageAuthorsStrict(sessionId: string, messages: Normalize
   if (authorRows.length > 0) applyMessageAuthorAttribution(messages, authorRows);
 }
 
+let runtimePrefixChargeCache: number | undefined;
+
+/**
+ * Length charged per row for the outbound runtime prefix the transcript may carry:
+ * the FULL prefix (sharing + public-page + quick-reply blocks), not the sharing block
+ * alone (T-2027). Built with a full place so the public-page block takes its longest
+ * form; paths are budgeted at 256 chars each (real hosts are far shorter) and the
+ * origin at 64, keeping the per-row charge close to the bytes actually retained.
+ * Built on first use, never at module load (the memory-c0 harness evaluates this
+ * module with its imports stripped).
+ */
+function runtimePrefixChargeChars(): number {
+  runtimePrefixChargeCache ??= runtimeInstructionsPrefix(
+    {
+      publisherPath: `/${'p'.repeat(255)}`,
+      contentRoot: `/${'r'.repeat(255)}`,
+      origin: `https://${'o'.repeat(56)}`,
+    },
+    { quickReplies: true },
+  ).length;
+  return runtimePrefixChargeCache;
+}
+
 /** Re-attaches immutable turn policy without modifying provider transcripts. */
 export function applyMessageCoordination(
   messages: NormalizedMessage[],
@@ -224,7 +247,7 @@ export function applyMessageCoordination(
 ): void {
   const prepared = new Map<MessageCoordinationRow, string[]>();
   if (lease) for (const row of rows) {
-    const bytes = 4 * row.canonicalContent.length + 2 * DOCUMENT_SHARING_INSTRUCTIONS.length;
+    const bytes = 4 * row.canonicalContent.length + 2 * runtimePrefixChargeChars();
     lease.charge('retainedBytes', 4096 + bytes);
     lease.charge('copyBytes', 2048 + bytes, lease.limits.jobBytes);
     prepared.set(row, coordinationTranscriptVariants(row));

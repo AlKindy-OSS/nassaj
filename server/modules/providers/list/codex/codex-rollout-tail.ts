@@ -429,7 +429,9 @@ export function codexTailRow(signal: CodexTailSignal, sessionId: string | null, 
       id: signal.callId,
       kind: 'tool_use',
       toolName: 'Task',
-      toolInput: { subagent_type: 'Codex', description: signal.label },
+      // Codex does not expose the child role on this parent event; label is a
+      // task description, so leave subagent_type absent for honest UI fallback.
+      toolInput: { description: signal.label },
       subagent: codexSpawnSubagent(signal.callId, signal.label, 'started'),
     });
   }

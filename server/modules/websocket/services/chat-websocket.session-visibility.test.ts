@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import { test, describe, mock } from 'node:test';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 // --- Fixtures & module mocks (registered before importing the service) -------
 
@@ -50,6 +51,7 @@ const mirrorCalls: string[] = [];
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     sessionsDb: {
       getSessionById: (sessionId: string) =>
         SESSION_PROJECT[sessionId]

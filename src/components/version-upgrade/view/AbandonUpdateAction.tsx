@@ -1,13 +1,17 @@
 /**
- * Owner-only "stop stuck update". Shown under the update progress only when the
- * server says `abandonable === true`. The click opens the shared confirm dialog
- * (plain words, no restart); confirming POSTs `/abandon`, then the parent
- * refreshes the job and a self-clearing status line confirms the result. When the
- * job is not abandonable the server's reason is shown as a muted hint instead.
+ * Owner-only "cancel update". The server's `abandonable` flag means "safe to
+ * cancel now" (no live worker, gate open, runtime still the old one) — it is NOT
+ * a stalled-job signal, and the snapshot carries none — so the wording is neutral
+ * and the button is secondary. Rendered as flex items of the caller's action row:
+ * the button sits at the row's end, messages wrap onto their own full-width line.
+ * The click opens the shared confirm dialog (plain words, no restart); confirming
+ * POSTs `/abandon`, then the parent refreshes the job and a self-clearing status
+ * line confirms the result. When the job is not abandonable the server's reason
+ * is shown as a muted hint instead.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CheckCircle2, OctagonX } from 'lucide-react';
+import { AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 
 import { authenticatedFetch } from '../../../utils/api';
 import { useOptionalAuth } from '../../auth/context/AuthContext';
@@ -28,7 +32,7 @@ const SUCCESS_AUTO_CLEAR_MS = 6 * 1000;
 const HINT_REASONS: ReadonlyArray<AbandonBlockedReason> = [
   'in_flight_restart', 'gate_closed', 'head_moved_unverified',
 ];
-const NOTICE = 'flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 '
+const NOTICE = 'flex basis-full items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 '
   + 'dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200';
 
 /** i18n key (under `versionUpdate.abandon.errors`) for a refusal. */
@@ -83,7 +87,7 @@ export function AbandonUpdateAction({ job, jobId, onAbandoned }: AbandonUpdateAc
   if (role !== 'owner' || !jobId) return null;
 
   const status = done && (
-    <p role="status" className="flex items-center gap-2 text-xs font-medium text-foreground">
+    <p role="status" className="flex basis-full items-center gap-2 text-xs font-medium text-foreground">
       <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
       <span>{t(`${BASE}.done`)}</span>
     </p>
@@ -100,24 +104,22 @@ export function AbandonUpdateAction({ job, jobId, onAbandoned }: AbandonUpdateAc
     const hint = reason && HINT_REASONS.includes(reason) ? reason : null;
     if (!hint && !status && !error) return null;
     return (
-      <div className="space-y-2">
+      <>
         {status}
         {error}
-        {hint && <p className="text-xs text-muted-foreground">{t(`${BASE}.blocked.${hint}`)}</p>}
-      </div>
+        {hint && <p className="basis-full text-xs text-muted-foreground">{t(`${BASE}.blocked.${hint}`)}</p>}
+      </>
     );
   }
 
   return (
-    <div className="space-y-2">
-      {status}
-      {error}
+    <>
       <button
         type="button"
         onClick={() => { setErrorKey(null); setConfirming(true); }}
-        className="flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+        className="ms-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
-        <OctagonX aria-hidden="true" className="h-3.5 w-3.5" />
+        <XCircle aria-hidden="true" className="h-3.5 w-3.5" />
         <span>{t(`${BASE}.button`)}</span>
       </button>
       {confirming && (
@@ -133,6 +135,8 @@ export function AbandonUpdateAction({ job, jobId, onAbandoned }: AbandonUpdateAc
           <p>{t(`${BASE}.confirmMessage`)}</p>
         </SettingsConfirmDialog>
       )}
-    </div>
+      {status}
+      {error}
+    </>
   );
 }

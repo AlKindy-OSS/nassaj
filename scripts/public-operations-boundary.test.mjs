@@ -419,6 +419,7 @@ test('the gate scans only paths the public export ships', () => {
     'src/app.tsx', 'server/index.js', 'shared/util.ts', 'scripts/build.mjs',
     'scripts/operator-gate/export-allow.mjs', 'scripts/operator-gate/export-allow-paths.mjs',
     'docs/team-wiki/guide.md', 'README.md', 'package.json', 'index.html', 'share.html',
+    'src/components/code-editor/utils/office/testing/officeFixtures.ts',
   ]) assert.equal(isPublicExportPath(shipped), true, shipped);
   // Never-exported operator paths are excluded, so a marker there cannot fail here.
   for (const excluded of [
@@ -429,6 +430,10 @@ test('the gate scans only paths the public export ships', () => {
     'scripts/release-preflight.mjs', 'scripts/lib/release-baseline-cache.mjs',
     'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
     'server/modules/database/deletion-writer-inventory.test.ts',
+    'src/components/code-editor/utils/office/__fixtures__/ar/arabic-rtl.docx',
+    'src/components/code-editor/utils/office/__fixtures__/ar/generate.py',
+    'src/components/code-editor/utils/office/testing/fixtures/arabic-rtl.docx',
+    'src/components/code-editor/utils/office/testing/fixtures/arabic-rtl.xlsx',
   ]) assert.equal(isPublicExportPath(excluded), false, excluded);
 });
 

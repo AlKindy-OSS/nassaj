@@ -6,7 +6,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DOCUMENT_SHARING_INSTRUCTIONS, runtimeInstructionsPrefix } from '../../shared/documentSharingInstructions.js';
+import {
+  DOCUMENT_SHARING_INSTRUCTIONS, QUICK_REPLY_GUIDANCE, QUICK_REPLY_TAG, runtimeInstructionsPrefix,
+} from '../../shared/documentSharingInstructions.js';
 
 import {
   normalizeParts,
@@ -90,6 +92,22 @@ test('the runtime instruction prefix and literal sharing guidance are removed', 
   const pasted = `x ${DOCUMENT_SHARING_INSTRUCTIONS} y ${DOCUMENT_SHARING_INSTRUCTIONS}`;
   assert.equal(stripGovernanceText(pasted, c), 'x  y ');
   assert.equal(c.system, 3);
+});
+
+test('T-2027: a quick-reply block mid-text is stripped with its body, like its sibling tags', () => {
+  const c = counts();
+  const block = `<${QUICK_REPLY_TAG}>\n${QUICK_REPLY_GUIDANCE}\n</${QUICK_REPLY_TAG}>`;
+  const parts = stripHarnessTags(`before ${block} after`, c);
+  assert.equal(flat(parts), 'before [system] after');
+  assert.equal(c.system, 1);
+  assert.ok(!flat(sanitizeShareText(`a\n\n${block}\n\nb`, {}, counts())).includes(QUICK_REPLY_GUIDANCE));
+});
+
+test('T-2027: the full prefix with the quick-reply block strips to the user text', () => {
+  const c = counts();
+  const prefixed = `${runtimeInstructionsPrefix({ publisherPath: null, contentRoot: null, origin: null })}\n\nhello`;
+  assert.ok(prefixed.includes(`<${QUICK_REPLY_TAG}>`));
+  assert.equal(stripGovernanceText(prefixed, c), 'hello');
 });
 
 test('image fences become one marker; an unclosed image fence fails closed to the end', () => {

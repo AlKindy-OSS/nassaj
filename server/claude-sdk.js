@@ -64,7 +64,7 @@ import { isModelActivity, settleTurnTiming } from './modules/providers/services/
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { createNormalizedMessage, stampCoordinatorId, stampHumanUserId } from './shared/utils.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
-import { saveChatImages } from './services/chat-image-store.js';
+import { buildChatImageNote, saveChatImages } from './services/chat-image-store.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { reconcileClaudeSkillsForEnv } from './services/isolation/claude-skills-link.js';
@@ -2663,8 +2663,7 @@ async function handleImages(command, images, cwd) {
     // pre-B-430 temp-file cleanup at least used to sweep.
     let modifiedCommand = command;
     if (storedPaths.length > 0) {
-      const imageNote = `\n\n[Images provided at the following paths:]\n${storedPaths.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
-      modifiedCommand = (command || '') + imageNote;
+      modifiedCommand = (command || '') + buildChatImageNote(storedPaths);
     }
 
     // Images processed

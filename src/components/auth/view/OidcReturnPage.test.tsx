@@ -28,7 +28,7 @@ vi.mock('../context/AuthContext', () => ({
 const startOidcLogin = vi.fn();
 vi.mock('../oidc', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../oidc')>()),
-  startOidcLogin: () => startOidcLogin(),
+  startOidcLogin: (...args: unknown[]) => startOidcLogin(...args),
 }));
 
 // The real layout reads theme/RTL/branding contexts that are out of scope here.
@@ -151,6 +151,61 @@ describe('OidcReturnPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: enAuth.sso.return.backToLogin }));
     await screen.findByText('app-home');
+  });
+});
+
+describe('ADR-194 A1 owner refusals', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it.each([
+    ['owner_sso_key_required', enAuth.sso.errors.ownerKeyRequired],
+    ['owner_sso_reauth_required', enAuth.sso.errors.ownerReauthRequired],
+  ])('offers a passkey re-authentication for %s', async (error, message) => {
+    renderAt(`/auth/oidc/return?error=${error}`);
+    expect((await screen.findByRole('alert')).textContent).toContain(message);
+    expect(screen.queryByRole('button', { name: new RegExp(enAuth.sso.return.retry) })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: enAuth.sso.return.reauthWithPasskey }));
+    expect(startOidcLogin).toHaveBeenCalledWith(true);
+  });
+
+  it.each([
+    ['owner_must_sign_in_locally', enAuth.sso.errors.ownerLocalOnly],
+    ['password_change_required', enAuth.sso.errors.passwordChangeRequired],
+    ['sso_unavailable', enAuth.sso.errors.ssoUnavailable],
+  ])('names %s with password sign-in and no SSO retry', async (error, message) => {
+    renderAt(`/auth/oidc/return?error=${error}`);
+    expect((await screen.findByRole('alert')).textContent).toContain(message);
+    expect(screen.queryByRole('button', { name: new RegExp(enAuth.sso.return.retry) })).toBeNull();
+    expect(screen.queryByRole('button', { name: enAuth.sso.return.reauthWithPasskey })).toBeNull();
+    expect(screen.getByRole('button', { name: enAuth.sso.return.backToLogin })).toBeTruthy();
+  });
+
+  it.each([
+    ['oidc_config_changed', enAuth.sso.errors.configChanged],
+    ['oidc_login_not_initiated', enAuth.sso.errors.loginNotInitiated],
+  ])('names %s and offers a plain SSO retry', async (error, message) => {
+    renderAt(`/auth/oidc/return?error=${error}`);
+    expect((await screen.findByRole('alert')).textContent).toContain(message);
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(enAuth.sso.return.retry) }));
+    expect(startOidcLogin).toHaveBeenCalledWith();
+  });
+
+  it('owner_must_sign_in_locally clears the re-authentication hint; other refusals keep it', async () => {
+    window.localStorage.setItem('nassaj.sso.reauthHint', '1');
+    renderAt('/auth/oidc/return?error=owner_sso_reauth_required');
+    await screen.findByRole('alert');
+    expect(window.localStorage.getItem('nassaj.sso.reauthHint')).toBe('1');
+    cleanup();
+    renderAt('/auth/oidc/return?error=owner_must_sign_in_locally');
+    await screen.findByRole('alert');
+    expect(window.localStorage.getItem('nassaj.sso.reauthHint')).toBeNull();
+  });
+
+  it('ships the owner strings in Arabic', () => {
+    expect(arAuth.sso.return.reauthWithPasskey).toContain('مفتاح المرور');
+    expect(arAuth.sso.errors.ownerKeyRequired).toMatch(/\S/);
+    expect(arAuth.sso.errors.ownerReauthRequired).toMatch(/\S/);
+    expect(arAuth.sso.errors.ownerLocalOnly).toMatch(/\S/);
   });
 });
 

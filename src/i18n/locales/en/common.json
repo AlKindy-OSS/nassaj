@@ -312,10 +312,19 @@
     "updateCompleted": "Update completed successfully!",
     "restartServer": "Please restart the server to apply changes.",
     "updateFailed": "Update failed",
-    "strategy": "Update strategy: {{strategy}}",
-    "strategyUnknown": "governed automatic update",
     "reusedAttempt": "Resumed the existing update attempt; no duplicate update was started.",
     "reason": "Reason: {{reason}}",
+    "prestage": {
+      "ready": "Prepared in advance — the update will be faster",
+      "building": "Preparing in the background…",
+      "quarantine": "Will be prepared after {{time}}",
+      "lowMemory": "Not prepared: not enough memory",
+      "lowDisk": "Not prepared: not enough disk space",
+      "stopped": "Background preparation is off",
+      "notYet": "Not prepared yet",
+      "jobPrestaged": "Prepared in advance",
+      "jobRebuilt": "Prepared again"
+    },
     "jobStatus": {
       "preparing": "Preparing and verifying the governed release. It is not installed yet.",
       "staged": "Version {{version}} is staged. It has not been activated yet.",
@@ -807,29 +816,29 @@
       "recoveryUnavailable": "Move any hand-placed file out of the Nassaj tree and retry the update."
     },
     "abandon": {
-      "button": "Stop stuck update",
-      "confirmTitle": "Stop the stuck update?",
-      "confirmMessage": "This stops the stuck update attempt without restarting the server. Afterwards you can start a new update. Do you want to continue?",
-      "confirm": "Yes, stop the update",
-      "cancel": "Cancel",
-      "done": "The stuck update attempt was stopped. You can now start a new update.",
+      "button": "Cancel update",
+      "confirmTitle": "Cancel the update?",
+      "confirmMessage": "This cancels the update without restarting the server. Afterwards you can start a new update. Do you want to continue?",
+      "confirm": "Yes, cancel the update",
+      "cancel": "Keep the update",
+      "done": "The update was cancelled. You can now start a new update.",
       "blocked": {
-        "in_flight_restart": "This update cannot be stopped right now because a restart is in progress. Wait for it to finish.",
-        "gate_closed": "This update cannot be stopped right now because the update gate is closed.",
-        "head_moved_unverified": "This update cannot be stopped right now because the code state changed and the server could not verify it."
+        "in_flight_restart": "This update cannot be cancelled right now because a restart is in progress. Wait for it to finish.",
+        "gate_closed": "This update cannot be cancelled right now because the update gate is closed.",
+        "head_moved_unverified": "This update cannot be cancelled right now because the code state changed and the server could not verify it."
       },
       "errors": {
         "jobNotFound": "This update no longer exists. Close this window and open it again.",
-        "forbidden": "Only the owner can stop a stuck update.",
+        "forbidden": "Only the owner can cancel the update.",
         "rateLimited": "Too many attempts. Wait a minute, then try again.",
         "network": "Could not reach the server. Check the connection, then try again.",
-        "unknown": "Stopping the update failed. Nothing was changed by this attempt.",
+        "unknown": "Cancelling the update failed. Nothing was changed by this attempt.",
         "notAbandonable": {
-          "unknown": "This update cannot be stopped right now.",
-          "in_flight_restart": "The update cannot be stopped because a restart is in progress. Wait for it to finish.",
-          "gate_closed": "The update cannot be stopped because the update gate is closed.",
-          "head_moved_unverified": "The update cannot be stopped because the code state changed and the server could not verify it.",
-          "terminal": "This update has already finished, so there is nothing to stop."
+          "unknown": "This update cannot be cancelled right now.",
+          "in_flight_restart": "The update cannot be cancelled because a restart is in progress. Wait for it to finish.",
+          "gate_closed": "The update cannot be cancelled because the update gate is closed.",
+          "head_moved_unverified": "The update cannot be cancelled because the code state changed and the server could not verify it.",
+          "terminal": "This update has already finished, so there is nothing to cancel."
         }
       }
     }

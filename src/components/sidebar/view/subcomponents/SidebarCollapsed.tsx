@@ -24,6 +24,8 @@ type SidebarCollapsedProps = {
   updateAvailable: boolean;
   /** B-1055: the update is staged/promoted and only its activation is owed. */
   updatePrepared?: boolean;
+  /** ADR-207: the offered release is already prepared in the background. */
+  prestageReady?: boolean;
   /** T-928: true when build:client ran after the server process started. */
   restartRequired?: boolean;
   /** T-1036: declared server actions waiting; summed with the raw queue below. */
@@ -50,6 +52,7 @@ export default function SidebarCollapsed({
   terminalsActive,
   updateAvailable,
   updatePrepared = false,
+  prestageReady = false,
   restartRequired = false,
   pendingActionsCount = 0,
   onShowVersionModal,
@@ -78,7 +81,9 @@ export default function SidebarCollapsed({
   // B-1055: the collapsed rail must say WHICH of the two update states this is.
   const updateLabel = updatePrepared
     ? t('version.updatePrepared')
-    : t('common:versionUpdate.ariaLabels.updateAvailable');
+    : prestageReady
+      ? `${t('common:versionUpdate.ariaLabels.updateAvailable')} — ${t('version.prestageReady')}`
+      : t('common:versionUpdate.ariaLabels.updateAvailable');
 
   return (
     <div className="flex h-full w-12 flex-col items-center gap-1 bg-background/80 py-3 backdrop-blur-sm">
@@ -178,7 +183,10 @@ export default function SidebarCollapsed({
           title={updateLabel}
         >
           <ArrowUpCircle className="h-4 w-4 text-blue-500 dark:text-blue-400" aria-hidden />
-          <span className="absolute end-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+          <span
+            className={`absolute end-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full ${prestageReady ? 'bg-green-500' : 'bg-blue-500'}`}
+            data-prestage-ready={prestageReady || undefined}
+          />
         </button>
       )}
 

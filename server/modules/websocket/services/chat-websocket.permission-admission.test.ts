@@ -4,6 +4,7 @@ import test, { mock } from 'node:test';
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 const PROJECT_PATH = process.cwd();
 const PRINCIPAL = Object.freeze({
@@ -16,6 +17,7 @@ const PRINCIPAL = Object.freeze({
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (candidate: string) => candidate === PROJECT_PATH
         ? { project_id: 'permission-admission-project' }

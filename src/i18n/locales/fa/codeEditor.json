@@ -40,5 +40,30 @@
     "message": "پروندهٔ «{{fileName}}» دودویی است و در ویرایشگر متن نمایش داده نمی‌شود.",
     "download": "بارگیری",
     "downloadError": "بارگیری پرونده ممکن نشد."
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "قالب قدیمی Office",
+    "legacyMessage": "فایل «{{fileName}}» در قالب قدیمی Office (‎.doc، ‎.xls یا ‎.ppt) است و پیش‌نمایش ندارد. برای مشاهده آن را دانلود کنید.",
+    "rowsShown": "{{shown}} از {{total}} ردیف نمایش داده شده است.",
+    "showMoreRows": "نمایش ردیف‌های بیشتر",
+    "noSlides": "این ارائه اسلایدی ندارد.",
+    "textNotice": "فقط متن: چیدمان، تصاویر و قالب‌بندی نمایش داده نمی‌شوند.",
+    "emptyDocument": "این سند متنی ندارد.",
+    "textTruncated": "فقط ابتدای سند نمایش داده می‌شود.",
+    "secretNotPreviewed": "فایل «{{fileName}}» یک فایل محرمانه است، بنابراین پیش‌نمایش آن نمایش داده نمی‌شود."
   }
 }

@@ -9,7 +9,7 @@ import { releaseGitEnvironment, resolveGovernedSshCommand } from '../../server/s
 import {
     FETCH_ENVIRONMENT_DEVIATIONS, PREFLIGHT_CODES, SOURCE_ROLLBACK_COMMAND, UNTRACKED_SCOPE_NARROWED_IN,
     defaultListPm2Processes, parseGitlinkPaths, parsePorcelainStatus, releaseFetchEnvironment,
-    runUpdatePreflightChecks, shapeBlocker, untrackedFilesRejectedBy,
+    remoteTagCommit, runUpdatePreflightChecks, shapeBlocker, untrackedFilesRejectedBy,
 } from './update-preflight-checks.mjs';
 
 const SOURCE = 'https://github.com/AlKindy-OSS/nassaj';
@@ -671,4 +671,108 @@ test('a dist that references no generation clears the check, and an absent dist 
 
     const absent = await baseline(); // readFile: () => null → no built dist
     assert.equal(byCode(absent, 'client_generation_archive').ok, true);
+});
+
+/**
+ * B-1625 fixture: origin/main stale at the base commit, two release commits the
+ * governed updater installed (HEAD = annotated v1.47.0.10), and a newer target
+ * v1.47.0.11 that is not in the local object store.
+ */
+function installedByUpdater(t, { localTag = false } = {}) {
+    const root = realRepository(t);
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    for (const step of ['release-a', 'release-b']) {
+        fs.writeFileSync(path.join(root, `${step}.txt`), `${step}\n`);
+        git('add', `${step}.txt`);
+        git('commit', '-qm', step);
+    }
+    const installed = git('rev-parse', 'HEAD');
+    if (localTag) git('tag', '-a', 'v1.47.0.10', '-m', 'release', installed);
+    return { root, git, installed };
+}
+
+const advertised = (installed, { withInstalled = true } = {}) => async (args) => (args[0] === 'ls-remote'
+    ? { ok: true, code: 0, timedOut: false, stdout: lsRemote('1.47.0.11', OTHER) + (withInstalled ? lsRemote('1.47.0.10', installed) : '') }
+    : { ok: false, code: 128, stdout: '', timedOut: false });
+
+test('B-1625: HEAD at the installed release tag with a stale origin/main is clear', async (t) => {
+    const { root, installed } = installedByUpdater(t);
+    const result = await againstRealRepo(root, { networkGit: advertised(installed), installedVersion: '1.47.0.10' });
+    assert.equal(result.target.local, false);
+    const check = byCode(result, 'non_fast_forward');
+    assert.equal(check.severity, 'ok', check.reason_en);
+    assert.match(check.reason_en, /release v1\.47\.0\.10/);
+});
+
+test('B-1625: the local tag is consulted only when the source tag list is unavailable', async (t) => {
+    const { root, installed } = installedByUpdater(t, { localTag: true });
+    const unavailable = async () => ({ ok: false, code: 128, stdout: '', timedOut: false });
+    const offline = await againstRealRepo(root, { networkGit: unavailable, installedVersion: '1.47.0.10' });
+    assert.equal(offline.target, null);
+    assert.equal(byCode(offline, 'non_fast_forward').severity, 'ok');
+    // A source that answers but omits the tag is authoritative: the local tag is ignored.
+    const omitted = await againstRealRepo(root, {
+        networkGit: advertised(installed, { withInstalled: false }), installedVersion: '1.47.0.10',
+    });
+    assert.equal(byCode(omitted, 'non_fast_forward').severity, 'blocker');
+});
+
+test('B-1625: a forged local v<installed> tag cannot clear when the source names another commit', async (t) => {
+    const { root, git } = installedByUpdater(t);
+    fs.writeFileSync(path.join(root, 'custom.txt'), 'operator change\n');
+    git('add', 'custom.txt');
+    git('commit', '-qm', 'local customization');
+    git('tag', '-a', 'v1.47.0.10', '-m', 'forged', 'HEAD');
+    const nonLocal = 'd'.repeat(40);
+    const result = await againstRealRepo(root, { networkGit: advertised(nonLocal), installedVersion: '1.47.0.10' });
+    const check = byCode(result, 'non_fast_forward');
+    assert.equal(check.severity, 'blocker');
+    assert.match(check.reason_en, /^3 local commit\(s\) not in origin\/main break/);
+});
+
+test('B-1625: a genuine local commit beyond the installed release still blocks', async (t) => {
+    const { root, git, installed } = installedByUpdater(t);
+    fs.writeFileSync(path.join(root, 'custom.txt'), 'operator change\n');
+    git('add', 'custom.txt');
+    git('commit', '-qm', 'local customization');
+    const result = await againstRealRepo(root, { networkGit: advertised(installed), installedVersion: '1.47.0.10' });
+    const check = byCode(result, 'non_fast_forward');
+    assert.equal(check.severity, 'blocker');
+    assert.match(check.reason_en, /^1 local commit\(s\) not in origin\/main or release v1\.47\.0\.10/);
+    assert.match(check.action_en, /configuration overlay/);
+});
+
+test('B-1625: with the installed tag unknown, the old tracking-ref count still decides', async (t) => {
+    // Documented fallback: no remote line, no local tag -> release commits cannot
+    // be told apart from local ones, so the pre-B-1625 block stands (never a
+    // silent clear); the updater's post-fetch check stays the binding gate.
+    const { root, installed } = installedByUpdater(t);
+    const result = await againstRealRepo(root, {
+        networkGit: advertised(installed, { withInstalled: false }), installedVersion: '1.47.0.10',
+    });
+    const check = byCode(result, 'non_fast_forward');
+    assert.equal(check.severity, 'blocker');
+    assert.match(check.reason_en, /^2 local commit\(s\) not in origin\/main break/);
+    // An unreadable installed version takes the same path.
+    const unknown = await againstRealRepo(root, { networkGit: advertised(installed), installedVersion: null, readFile: () => null });
+    assert.equal(byCode(unknown, 'non_fast_forward').severity, 'blocker');
+});
+
+test('B-1625: a target present locally keeps the merge-base path unchanged', async (t) => {
+    const { root, installed } = installedByUpdater(t);
+    const local = async (args) => (args[0] === 'ls-remote'
+        ? { ok: true, code: 0, timedOut: false, stdout: lsRemote('1.47.0.10', installed) }
+        : { ok: false, code: 128, stdout: '', timedOut: false });
+    const result = await againstRealRepo(root, { networkGit: local, installedVersion: '1.47.0.9' });
+    assert.equal(result.target.local, true);
+    assert.match(byCode(result, 'non_fast_forward').reason_en, /clean fast-forward/);
+});
+
+test('remoteTagCommit prefers the peeled line and ignores other tags', () => {
+    const peeled = 'c'.repeat(40);
+    assert.equal(remoteTagCommit(`${OTHER}\trefs/tags/v1.0.0.1\n${peeled}\trefs/tags/v1.0.0.1^{}\n`, 'v1.0.0.1'), peeled);
+    assert.equal(remoteTagCommit(`${OTHER}\trefs/tags/v1.0.0.1\n`, 'v1.0.0.1'), OTHER);
+    assert.equal(remoteTagCommit(`${OTHER}\trefs/tags/v1.0.0.10^{}\n`, 'v1.0.0.1'), null);
+    assert.equal(remoteTagCommit(null, 'v1.0.0.1'), null);
 });

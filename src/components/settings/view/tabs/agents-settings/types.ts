@@ -1,4 +1,5 @@
 import type { ActiveBodyProvider } from '../../../../../types/app';
+import type { CoordinationLevel } from '../../../../../../shared/coordinationDirectives';
 import type {
   AgentProvider,
   AuthStatus,
@@ -75,6 +76,10 @@ export type AgentSelectorSectionProps = {
   localModelsLabel?: string;
   /** Called when the local-models card is clicked. */
   onSelectLocalModels?: () => void;
+  /** The user's usable default agent (already validated); marked on its tile. */
+  defaultAgent?: AgentProvider | null;
+  /** Visible text of the default marker (from i18n). */
+  defaultLabel?: string;
 };
 
 export type AgentCategoryContentSectionProps = {
@@ -90,4 +95,16 @@ export type AgentCategoryContentSectionProps = {
   projects: SettingsProject[];
   /** T-1866: see AgentsSettingsTabProps. */
   onOpenSystemTab?: () => void;
+};
+
+export type AgentDefaultsSectionProps = {
+  /** The agent whose view is open; `null` when «النماذج المحلية» is selected. */
+  selectedAgent: AgentProvider | null;
+  /** Whether `selectedAgent` may be stored as the default (visible, not disabled). */
+  canMakeDefault: boolean;
+  /** Whether `selectedAgent` is already the stored, usable default. */
+  isDefault: boolean;
+  onMakeDefault: () => void;
+  coordinationLevel: CoordinationLevel;
+  onCoordinationLevelChange: (level: CoordinationLevel) => void;
 };

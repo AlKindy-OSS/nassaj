@@ -26,12 +26,30 @@ function place() {
   };
 }
 
+/**
+ * T-2027 / ADR-209: operator opt-out of the quick-reply guidance block. ON by default;
+ * only the strict values '0' or 'off' (trimmed, case-insensitive) turn it off, the same
+ * idiom as `NASSAJ_UPDATE_PRESTAGE` (update-prestager.js). Read per call, never cached.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function quickReplyGuidanceEnabled(env = process.env) {
+  const value = String(env.NASSAJ_QUICK_REPLY_GUIDANCE ?? '').trim().toLowerCase();
+  return !(value === '0' || value === 'off');
+}
+
+/** مفاتيح التركيب الخاصّة بهذا الجهاز، منفصلةً عن الموضع. */
+function options() {
+  return { quickReplies: quickReplyGuidanceEnabled() };
+}
+
 /** التعليمات لقناةٍ أصيلة (system/developer)، بمسار ناشر هذا الجهاز. */
 export function getRuntimeInstructions(level) {
-  return composeRuntimeInstructions(level, place());
+  return composeRuntimeInstructions(level, place(), options());
 }
 
 /** التفافُ مطالبةٍ صادرة لمزوّدٍ لا يملك إلا مُدخَل نصّ، بمسار ناشر هذا الجهاز. */
 export function withRuntimeInstructions(command, level) {
-  return composeWithRuntimeInstructions(command, level, place());
+  return composeWithRuntimeInstructions(command, level, place(), options());
 }

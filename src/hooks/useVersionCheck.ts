@@ -8,6 +8,11 @@ import {
   publishServerCapabilities,
   resolveServerCapabilitiesUnavailable,
 } from '../stores/serverCapabilitiesStore';
+import {
+  isPrestageReadyFor,
+  normalizePrestage,
+  type PrestageStatus,
+} from '../components/version-upgrade/prestageStatus';
 
 export { compareVersions, parseVersion };
 
@@ -164,6 +169,8 @@ export const useVersionCheck = () => {
   const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
+  // ADR-207: owner-only background prestage; null for everyone else.
+  const [prestage, setPrestage] = useState<PrestageStatus | null>(null);
   const [installMode, setInstallMode] = useState<InstallMode>('git');
   const [updateMode, setUpdateMode] = useState<'release' | 'local-main' | null>(null);
   const [localUpdateAvailable, setLocalUpdateAvailable] = useState(false);
@@ -317,6 +324,7 @@ export const useVersionCheck = () => {
     const clearRelease = () => {
       setLatestVersion(null);
       setReleaseInfo(null);
+      setPrestage(null);
     };
     const recordResult = (status: VersionCheckStatus, httpStatus: number | null) => {
       if (!currentRequest()) return;
@@ -371,6 +379,7 @@ export const useVersionCheck = () => {
           htmlUrl: '',
           publishedAt: data.publishedAt || '',
         });
+        setPrestage(normalizePrestage(data.prestage));
         recordResult('ok', response.status);
       } else {
         clearRelease();
@@ -421,6 +430,10 @@ export const useVersionCheck = () => {
     /** Raw signals for a caller that can also read the action queue. */
     preparedSignals,
     latestVersion,
+    /** ADR-207: background prestage (owner only); null when absent. */
+    prestage,
+    /** The offered release is already prepared in the background. */
+    prestageReady: isPrestageReadyFor(prestage, latestVersion),
     /** The version this node SERVES (runtime, falling back to source). */
     currentVersion: runningVersion ?? UNKNOWN_VERSION,
     /** The working tree's version; differs from `currentVersion` while staged or unreconciled. */

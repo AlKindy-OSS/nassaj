@@ -7,6 +7,7 @@ import type { Database } from 'better-sqlite3';
 
 import { migrateUserHarnessFilesMode } from '@/modules/database/harness-files-mode.migration.js';
 import { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
+import { isForeignTempRootPath } from '@/modules/database/temp-root-guard.js';
 import { createUsageStatisticsV3Fresh } from '@/modules/database/usage-statistics-v3.migration.js';
 import {
   API_KEY_DIGEST_PATTERN,
@@ -1218,23 +1219,39 @@ const rebuildSessionsTableWithProjectSchema = (db: Database): void => {
   assertRebuildPreservedIntegrity(db, 'rebuild-sessions', violationsBeforeRebuild);
 };
 
+/** The file behind `db`; undefined for an in-memory handle, so the guard uses getDatabasePath(). */
+const databaseFileOf = (db: Database): string | undefined => {
+  const name = (db as { name?: string }).name;
+  return name && name !== ':memory:' ? name : undefined;
+};
+
+/**
+ * Creates a project row for every session path that has none. B-1620: a path
+ * under a temp root foreign to this database gets no project at boot either
+ * (a frozen temp session must not resurrect a deleted project).
+ */
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
   }
 
-  db.exec(`
+  const rows = db.prepare(`
+    SELECT DISTINCT s.project_path AS project_path
+    FROM sessions s
+    WHERE s.project_path IS NOT NULL AND trim(s.project_path) <> ''
+      AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.project_path = s.project_path)
+  `).all() as Array<{ project_path: string }>;
+  const databaseFile = databaseFileOf(db);
+  const insert = db.prepare(`
     INSERT INTO projects (project_id, project_path, custom_project_name, isStarred, isArchived)
-    SELECT
-      ${SQLITE_UUID_SQL},
-      project_path,
-      NULL,
-      0,
-      0
-    FROM sessions
-    WHERE project_path IS NOT NULL AND trim(project_path) <> ''
+    VALUES (${SQLITE_UUID_SQL}, ?, NULL, 0, 0)
     ON CONFLICT(project_path) DO NOTHING
   `);
+  db.transaction(() => {
+    for (const { project_path: projectPath } of rows) {
+      if (!isForeignTempRootPath(projectPath, databaseFile)) insert.run(projectPath);
+    }
+  })();
 };
 
 /**

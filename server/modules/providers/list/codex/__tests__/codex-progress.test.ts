@@ -16,7 +16,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { transformCodexEvent } from '../../../../../openai-codex.js';
-import { createCodexLiveProgressPhases, stampCodexProgressPhase } from '../codex-progress.js';
+import { codexSpawnSubagent, createCodexLiveProgressPhases, stampCodexProgressPhase } from '../codex-progress.js';
 import { CodexSessionsProvider } from '../codex-sessions.provider.js';
 
 type Row = Record<string, any>;
@@ -41,6 +41,15 @@ function runLive(events: Row[]) {
 
 const collabEvents = (): Row[] => copy(real.stream).filter((event: Row) => event.item?.type === 'collab_tool_call');
 const planArgs = () => JSON.parse(real.updatePlan.payload.arguments) as { plan: Array<{ step: string; status: string }> };
+
+test('spawn_agent task_name remains a fallback description, not a role name', () => {
+  const spawn = real.rollout.find((entry: Row) => entry.type === 'response_item'
+    && entry.payload?.type === 'function_call' && entry.payload.name === 'spawn_agent');
+  const args = JSON.parse(spawn.payload.arguments) as { task_name: string };
+  const normalized = codexSpawnSubagent(spawn.payload.call_id, args.task_name, 'started');
+  assert.equal(normalized?.label, 'agent_1');
+  assert.equal(normalized?.agentName, undefined);
+});
 
 /** Real update_plan steps in the SDK TodoListItem shape (the SDK carries only `completed`). */
 function todoEvent(type: string, doneCount: number): Row {
@@ -93,4 +102,3 @@ test('live todo_list: start, update and completion carry the newest plan with fu
   assert.equal(rows[0].plan.items[0].label, planArgs().plan[0].step);
   assert.equal(rows[0].plan.source, 'tool');
 });
-

@@ -1226,3 +1226,20 @@ test('B-1158 multiple identical executing rows reject without choosing or changi
     assert.deepEqual(getConnection().prepare('SELECT * FROM pending_server_actions ORDER BY id').all(), before);
   });
 });
+
+test('T-2024 S3 listOpenSourceUpdateTransactions: pending and executing rows only, distinct, no nulls', async () => {
+  await withDb(() => {
+    const pending = makeAction({ sessionId: 'tx-open-1', sourceUpdateTransactionId: 'update-open-pending' });
+    const executing = makeAction({ sessionId: 'tx-open-2', sourceUpdateTransactionId: 'update-open-executing' });
+    const settled = makeAction({ sessionId: 'tx-open-3', sourceUpdateTransactionId: 'update-open-settled' });
+    const failed = makeAction({ sessionId: 'tx-open-4', sourceUpdateTransactionId: 'update-open-failed' });
+    const unbound = makeAction({ sessionId: 'tx-open-5' });
+    for (const action of [pending, executing, settled, failed, unbound]) pendingServerActionsDb.insert(action);
+    pendingServerActionsDb.claimForExecution(executing.id);
+    pendingServerActionsDb.claimForExecution(settled.id);
+    pendingServerActionsDb.markSucceeded(settled.id);
+    pendingServerActionsDb.markFailed(failed.id, 'x');
+    assert.deepEqual(pendingServerActionsDb.listOpenSourceUpdateTransactions().sort(),
+      ['update-open-executing', 'update-open-pending']);
+  });
+});

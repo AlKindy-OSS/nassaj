@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { clearPendingConnectorStepUp } from '../connectorStepUpMarker';
 import { useAuth } from '../context/AuthContext';
 import {
+  clearSsoReauthHint,
   OIDC_CODE_PARAM,
   OIDC_ERROR_PARAM,
   reasonFromReturnError,
@@ -37,6 +38,13 @@ const REASON_MESSAGE_KEYS: Readonly<Record<OidcFailureReason, string>> = {
   provider_unavailable: 'sso.errors.providerUnavailable',
   session_failed: 'sso.errors.sessionFailed',
   network: 'sso.errors.network',
+  config_changed: 'sso.errors.configChanged',
+  login_not_initiated: 'sso.errors.loginNotInitiated',
+  sso_unavailable: 'sso.errors.ssoUnavailable',
+  password_change_required: 'sso.errors.passwordChangeRequired',
+  owner_local_only: 'sso.errors.ownerLocalOnly',
+  owner_key_required: 'sso.errors.ownerKeyRequired',
+  owner_reauth_required: 'sso.errors.ownerReauthRequired',
 };
 
 // Retrying SSO cannot fix these; only an administrator, the member's own
@@ -47,6 +55,16 @@ const NON_RETRYABLE_REASONS: ReadonlySet<OidcFailureReason> = new Set([
   'account_exists',
   'account_unavailable',
   'disabled',
+  'sso_unavailable',
+  'password_change_required',
+  'owner_local_only',
+]);
+
+// ADR-194 A1: an owner whose IdP sign-in was not a fresh passkey retries
+// with a forced re-authentication (`?reauth=1`).
+const OWNER_REAUTH_REASONS: ReadonlySet<OidcFailureReason> = new Set([
+  'owner_key_required',
+  'owner_reauth_required',
 ]);
 
 function readReturnPhase(params: URLSearchParams): ReturnPhase {
@@ -98,6 +116,8 @@ function OidcLoginReturn() {
     // a later plain IdP error must not be read as a step-up refusal.
     clearPendingConnectorStepUp();
     if (phase.status !== 'verifying') {
+      // An owner that is not opted in must not keep forcing re-authentication.
+      if (phase.reason === 'owner_local_only') clearSsoReauthHint();
       return;
     }
     void loginWithOidcCode(phase.code).then((result) => {
@@ -131,7 +151,8 @@ function OidcLoginReturn() {
     );
   }
 
-  const canRetry = !NON_RETRYABLE_REASONS.has(phase.reason);
+  const ownerReauth = OWNER_REAUTH_REASONS.has(phase.reason);
+  const canRetry = !ownerReauth && !NON_RETRYABLE_REASONS.has(phase.reason);
 
   return (
     <AuthScreenLayout
@@ -144,10 +165,20 @@ function OidcLoginReturn() {
       </div>
 
       <div className="space-y-3">
+        {ownerReauth && (
+          <button
+            type="button"
+            onClick={() => startOidcLogin(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 font-medium text-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground"
+          >
+            <KeyRound className="h-4 w-4" aria-hidden />
+            {t('sso.return.reauthWithPasskey')}
+          </button>
+        )}
         {canRetry && (
           <button
             type="button"
-            onClick={startOidcLogin}
+            onClick={() => startOidcLogin()}
             className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 font-medium text-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground"
           >
             <ShieldCheck className="h-4 w-4" aria-hidden />

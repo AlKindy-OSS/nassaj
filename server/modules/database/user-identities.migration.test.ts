@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import {
   migrateUserIdentities,
   rollbackUserIdentitiesAttestation,
+  rollbackUserIdentitiesOwnerSsoOptIn,
   rollbackUserIdentitiesUserIdIndex,
   rollbackUserIdentitiesUserIssuerIndex,
 } from './user-identities.migration.js';
@@ -42,7 +43,7 @@ test('T-1939: a legacy table gains a nullable INTEGER last_attested_at, rows pre
       { user_id: 1, subject: 'sub-1', last_attested_at: null },
     ]);
     migrateUserIdentities(db);
-    assert.equal((db.prepare('PRAGMA table_info(user_identities)').all()).length, 6, 'idempotent');
+    assert.equal((db.prepare('PRAGMA table_info(user_identities)').all()).length, 7, 'idempotent');
   } finally { db.close(); }
 });
 
@@ -175,5 +176,44 @@ test('T-1939 slice 5: the explicit unique-index rollback drops only that index a
     rollbackUserIdentitiesUserIssuerIndex(db);
     migrateUserIdentities(db);
     assert.ok(userIssuerIndex(db));
+  } finally { db.close(); }
+});
+
+const optInColumn = (db: Database.Database) => (db.prepare('PRAGMA table_info(user_identities)').all() as ColumnInfo[])
+  .find((entry) => entry.name === 'owner_sso_opt_in_at');
+
+test('ADR-194 A1: owner_sso_opt_in_at is added once, re-running is a no-op, existing rows read NULL', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(LEGACY_SCHEMA);
+    migrateUserIdentities(db);
+    assert.deepEqual(
+      { ...optInColumn(db) },
+      { cid: 6, name: 'owner_sso_opt_in_at', type: 'INTEGER', notnull: 0, dflt_value: null, pk: 0 },
+    );
+    assert.deepEqual(db.prepare('SELECT user_id, owner_sso_opt_in_at FROM user_identities').all(), [
+      { user_id: 1, owner_sso_opt_in_at: null },
+    ]);
+    db.prepare('UPDATE user_identities SET owner_sso_opt_in_at = ?').run(1_700_000_000_000);
+    migrateUserIdentities(db);
+    const columns = db.prepare('PRAGMA table_info(user_identities)').all() as ColumnInfo[];
+    assert.equal(columns.filter((entry) => entry.name === 'owner_sso_opt_in_at').length, 1, 'added once');
+    assert.equal((db.prepare('SELECT owner_sso_opt_in_at AS v FROM user_identities').get() as { v: number }).v,
+      1_700_000_000_000, 're-running keeps the value');
+  } finally { db.close(); }
+});
+
+test('ADR-194 A1: the explicit rollback drops only the opt-in column and keeps the links', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(LEGACY_SCHEMA);
+    migrateUserIdentities(db);
+    rollbackUserIdentitiesOwnerSsoOptIn(db);
+    assert.equal(optInColumn(db), undefined);
+    assert.equal(column(db)?.type, 'INTEGER', 'the attestation column stays');
+    assert.deepEqual(db.prepare('SELECT user_id, subject FROM user_identities').all(), [{ user_id: 1, subject: 'sub-1' }]);
+    rollbackUserIdentitiesOwnerSsoOptIn(db);
+    migrateUserIdentities(db);
+    assert.equal(optInColumn(db)?.type, 'INTEGER', 'rollback then migrate round-trips');
   } finally { db.close(); }
 });

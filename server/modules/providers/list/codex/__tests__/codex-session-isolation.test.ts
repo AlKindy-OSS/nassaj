@@ -108,8 +108,8 @@ describe('Codex session synchronizer — per-user home indexing (B-152)', () => 
     setCodexPolicy('isolated');
 
     const isolatedHome = userConfigDir(USER_ISOLATED, '.codex');
-    const isolatedFile = writeCodexSession(isolatedHome, 'iso-sess-A', '/tmp/proj-iso-a');
-    writeCodexSession(operatorCodexHome(), 'op-sess-A', '/tmp/proj-op-a');
+    const isolatedFile = writeCodexSession(isolatedHome, 'iso-sess-A', '/workspace/proj-iso-a');
+    writeCodexSession(operatorCodexHome(), 'op-sess-A', '/workspace/proj-op-a');
 
     const processed = await new CodexSessionSynchronizer().synchronize();
     assert.ok(processed >= 2, 'both the isolated and operator sessions must be processed');
@@ -136,8 +136,8 @@ describe('Codex session synchronizer — per-user home indexing (B-152)', () => 
 
     // A session sitting in a user's isolated tree must be invisible to the scan
     // while codex is shared: shared mode reads only the operator ~/.codex.
-    writeCodexSession(userConfigDir(USER_SHARED, '.codex'), 'iso-sess-B', '/tmp/proj-iso-b');
-    writeCodexSession(operatorCodexHome(), 'op-sess-B', '/tmp/proj-op-b');
+    writeCodexSession(userConfigDir(USER_SHARED, '.codex'), 'iso-sess-B', '/workspace/proj-iso-b');
+    writeCodexSession(operatorCodexHome(), 'op-sess-B', '/workspace/proj-op-b');
 
     await new CodexSessionSynchronizer().synchronize();
 
@@ -163,7 +163,7 @@ describe('Codex session synchronizer — per-user home indexing (B-152)', () => 
       `${JSON.stringify({ id: 'iso-sess-C', thread_name: 'Isolated Thread C' })}\n`,
       'utf8',
     );
-    const isolatedFile = writeCodexSession(isolatedHome, 'iso-sess-C', '/tmp/proj-iso-c');
+    const isolatedFile = writeCodexSession(isolatedHome, 'iso-sess-C', '/workspace/proj-iso-c');
 
     const indexedId = await new CodexSessionSynchronizer().synchronizeFile(isolatedFile);
     assert.equal(indexedId, 'iso-sess-C');

@@ -12,6 +12,7 @@ import type {
   SsoActionResult,
   SsoDiscoveryResult,
   SsoDraftForm,
+  SsoOwnerSignIn,
   SsoStatus,
   SsoTestResult,
   StepUpEvidence,
@@ -89,4 +90,7 @@ export const ssoApi = {
   disable: (body: { keepLinkedSessions?: boolean; stepUp?: StepUpEvidence }) => post('/disable', body),
   importEnv: () => post<{ warnings?: Array<{ code: string; legacyRedirectUri?: string; redirectUri?: string }> }>('/import-env'),
   confirmOrigin: (origin: string, stepUp: StepUpEvidence) => put<{ origin: string }>('/installation-origin', { origin, stepUp }),
+  /** ADR-194 A1: the caller's own owner SSO sign-in; step-up travels only when turning it on. */
+  setOwnerSignIn: (enabled: boolean, stepUp?: StepUpEvidence) =>
+    put<{ ownerSignIn: SsoOwnerSignIn }>('/owner-sign-in', { enabled, ...(stepUp ? { stepUp } : {}) }),
 };

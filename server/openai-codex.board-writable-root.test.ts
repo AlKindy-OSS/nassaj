@@ -108,6 +108,11 @@ mock.module('@openai/codex-sdk', { namedExports: { Codex: FakeCodex } });
 // Now safe to import the modules under test (they pick up the tmp DB + HOME + mock).
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 const codexModule = await import('@/openai-codex.js');
+// ADR-206 S1: a busy CI host must not flip the per-turn helpers switch in this suite.
+const { codexHelpersRuntime } = await import('@/modules/providers/list/codex/codex-helpers-switch.js');
+codexHelpersRuntime.cpu = () => ({ percent: 10, source: 'window' });
+// ADR-206 S2/S9: memory pinned too, so the helpers switch (and v1) do not follow this host.
+codexHelpersRuntime.memoryOk = () => true;
 const { queryCodex, resolveCodexDocsWritableRoots } = codexModule as unknown as {
   queryCodex: (command: string, options: unknown, ws: unknown) => Promise<void>;
   resolveCodexDocsWritableRoots: (workingDirectory: string | undefined | null) => string[];
@@ -214,7 +219,7 @@ describe('queryCodex — writable root reaches the SDK config (B-405)', () => {
     // byte cap or displace the separate ADR-134 delegation block.
     const config = await spawnAndCaptureConfig(symlinkedCwd);
     assert.equal('project_doc_max_bytes' in config, false, 'project AGENTS.md must use Codex defaults');
-    assert.equal(config['features.multi_agent'], false, 'native delegation denial must survive');
+    assert.equal(config['features.multi_agent'], true, 'ADR-206 S9: v1 on for a B = 1 turn');
   });
 });
 

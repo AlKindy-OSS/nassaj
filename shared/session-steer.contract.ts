@@ -47,6 +47,12 @@ export interface SessionSteerRequest {
   /** Sender-generated idempotency id, /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/. */
   clientMsgId: string;
   text: string;
+  /**
+   * Optional images, in the shape `/upload-images` returns (the same objects a
+   * normal prompt carries). The server stores them and appends the same path
+   * note a normal prompt gets, inside the steer wrapper.
+   */
+  images?: unknown[];
 }
 
 export type SteerRejectCode =
@@ -64,6 +70,7 @@ export type SteerRejectCode =
   | 'steer_queue_full'
   | 'text_empty'
   | 'text_too_long'
+  | 'image_rejected'
   | 'duplicate'
   | 'turn_aborted'
   | 'internal_error';

@@ -239,6 +239,9 @@ export const participantsDb = {
             sessionId,
             provider: context.provider,
             projectPath: context.projectPath,
+            // Provenance comes from a synchronizer, so it obeys the B-1620 watcher
+            // rule; a real spawn is a launch writer and always records.
+            origin: context.attribution === 'provenance' ? 'watcher' : 'launch',
           });
           write(getConnection());
           return;

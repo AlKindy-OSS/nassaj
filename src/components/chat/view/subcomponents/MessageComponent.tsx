@@ -17,6 +17,7 @@ import type {
 } from '../../types/types';
 import { resolveServerErrorMessage } from '../../utils/serverErrorMessage';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
+import { parseChoices } from '../../utils/parseChoices';
 import { resolveTextDirection } from '../../../../utils/textDirection';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Tooltip } from '../../../../shared/view/ui';
@@ -29,6 +30,7 @@ import { useTurnCostMap } from '../../context/TurnCostContext';
 import { Markdown } from './Markdown';
 import ChatMessageImage from './ChatMessageImage';
 import MessageCopyControl from './MessageCopyControl';
+import QuickReplies from './QuickReplies';
 import MessageModelBadge from './MessageModelBadge';
 import CoordinationLevelBadge from './CoordinationLevelBadge';
 import { shouldHideToolCallMessage } from './hideToolCalls';
@@ -74,6 +76,9 @@ type MessageComponentProps = {
    * يُستخدَم في بناء URL /api/assistant-images لصور المساعد المضمَّنة.
    */
   sessionId?: string | null;
+  /** T-2027: this is the one message whose quick replies are interactive. */
+  quickReplyEligible?: boolean;
+  onQuickReply?: (option: string) => void;
 };
 
 type InteractiveOption = {
@@ -84,7 +89,7 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onStartNewSession, onForkFromMessage, isForkingMessage, autoExpandTools, showRawParameters, showThinking, showToolCalls, selectedProject, owner, participantsById, provider, onRequestDeferredHistory, onResumeStreamRecovery, sessionId = null }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onStartNewSession, onForkFromMessage, isForkingMessage, autoExpandTools, showRawParameters, showThinking, showToolCalls, selectedProject, owner, participantsById, provider, onRequestDeferredHistory, onResumeStreamRecovery, sessionId = null, quickReplyEligible = false, onQuickReply }: MessageComponentProps) => {
   const { t, i18n } = useTranslation('chat');
   // خريطة الأدوار (turns) من TurnCostContext — بلا جلب إضافي (البيانات يجلبها
   // ChatInterface مرّة واحدة وتُشارَك عبر السياق).
@@ -287,6 +292,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     !message.isInteractivePrompt &&
     !message.isTaskNotification &&
     Boolean(formattedMessageContent.trim());
+  // T-2027: a trailing ```choices fence (primary text only) — cut before Markdown.
+  const parsedChoices = useMemo(
+    () => (isPrimaryAssistantText ? parseChoices(formattedMessageContent) : null),
+    [isPrimaryAssistantText, formattedMessageContent],
+  );
   const showForkAction = isPrimaryAssistantText && onForkFromMessage !== undefined;
   const forkDisabledReason = !getProviderCapabilities(provider).messageFork?.supported
     ? t('messageFork.errors.unsupported_provider')
@@ -1035,8 +1045,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                         className="prose prose-sm prose-gray max-w-none dark:prose-invert"
                         streaming={message.isStreaming === true}
                       >
-                        {content}
+                        {parsedChoices ? parsedChoices.body : content}
                       </Markdown>
+                      {parsedChoices && !message.isStreaming && (
+                        <QuickReplies choices={parsedChoices.choices} onSelect={quickReplyEligible ? onQuickReply : undefined} />
+                      )}
                     </ChatActionsContext.Provider>
                   ) : (
                     <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">

@@ -22,11 +22,14 @@ import { useChatSessionState } from '../hooks/useChatSessionState';
 import { resolveRunStartedAt } from '../hooks/runStartedAt';
 import { useChatRealtimeHandlers, type StreamBuffer } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
+import { useQuickReplyInsert } from '../hooks/useQuickReplyInsert';
+import { buildQuickReplyGate } from '../utils/quickReplyEligibility';
 import { hasOutboxDeliveryEvidence, verifyOutboxReceipt } from '../utils/messageOutbox';
 import { authenticatedFetch } from '../../../utils/api';
 import { useBtwSideChannel } from '../hooks/useBtwSideChannel';
 import { useSessionSteer } from '../../session-steer/useSessionSteer';
 import { isDuplicateSteerInjectionMatch } from '../../session-steer/steerDuplicateDetection';
+import { useSteerQueuedInsertion } from '../../session-steer/useSteerQueuedInsertion';
 import SteerStarterNotice from '../../session-steer/SteerStarterNotice';
 import SteerComposerNote from '../../session-steer/SteerComposerNote';
 import { useAuth } from '../../auth/context/AuthContext';
@@ -640,9 +643,9 @@ function ChatInterface({
   const latestSteerEventForStarter = steerEvents.length > 0 ? steerEvents[steerEvents.length - 1] : null;
   const [steerSendFeedback, setSteerSendFeedback] = useState<{ code: string; text: string } | null>(null);
   const handleSteerSend = useCallback(
-    (text: string) => {
+    (text: string, images?: unknown[]) => {
       setSteerSendFeedback(null);
-      void sendSteer(text).then((outcome) => {
+      void sendSteer(text, images).then((outcome) => {
         if (!outcome.ok) {
           setSteerSendFeedback({ code: outcome.code, text });
         }
@@ -791,43 +794,17 @@ function ChatInterface({
     outboxHistory: sessionStore.getSessionSlot(currentSessionId || selectedSession?.id || '')?.serverMessages,
   });
 
-  // T-1903 (ADR-190): يظهر توجيهٌ حيّ فوراً كفقاعة SteerBubble قبل أن يعيد
-  // الخادم History الرسمي (بحقل injected:true). لا نُحدِّث حالة التسليم لاحقاً
-  // (steer-delivered/steer-rejected) على هذا الصفّ المتفائل عمداً — الجولة
-  // التالية للتاريخ هي مصدر الحقيقة النهائي؛ دَينٌ مؤجَّل توثيقاً لا سهواً.
-  const insertedSteerClientMsgIdsRef = useRef<Set<string>>(new Set());
   // T-1904 e2e (bug 2) — يسجّل كلّ توجيهٍ أُدرِج محلياً (نصّه وجلسته ووقته)
-  // ليطابقه isDuplicateSteerInjection أدناه ضد الإطار الحيّ العام (الصفّ
-  // الحقيقي الذي يحفظه الخادم في المحادثة ويصل لكل مشاركي الجلسة — البادئ
-  // والمُوجِّه نفسه سواء)، فلا يُضاف صفّاً أزرق مكرَّراً بجانب SteerBubble.
+  // ليطابقه isDuplicateSteerInjection أدناه ضد الإطار الحيّ العام، فلا يُضاف
+  // صفّاً أزرق مكرَّراً بجانب SteerBubble. الإدراج نفسه (مرّةً واحدة لكل توجيه
+  // طوال عمر الصفحة، لا لكل تركيب) في useSteerQueuedInsertion.
   const steerInjectionsRef = useRef<Map<string, { text: string; sessionId: string; at: number }>>(new Map());
-  useEffect(() => {
-    const sid = currentSessionId ?? selectedSession?.id ?? undefined;
-    for (const event of steerEvents) {
-      if (event.type !== 'steer-queued' || !event.text) continue;
-      if (insertedSteerClientMsgIdsRef.current.has(event.clientMsgId)) continue;
-      insertedSteerClientMsgIdsRef.current.add(event.clientMsgId);
-      steerInjectionsRef.current.set(event.clientMsgId, {
-        text: event.text,
-        sessionId: sid ?? '',
-        at: Date.now(),
-      });
-      addMessage({
-        type: 'user',
-        content: event.text,
-        userId: event.sender.userId,
-        injected: true,
-        deliveryStatus: 'queued',
-        steerClientMsgId: event.clientMsgId,
-        // T-1904 e2e: اسمٌ مباشر لا يعتمد على تحميل قائمة المشاركين — سبب
-        // ظهور "؟" بدل الاسم/الصورة الرمزية حين وصلت الفقاعة قبل أن يتحمّل
-        // الطاقم (roster) على الطرف الآخر.
-        steerSenderDisplayName: event.sender.displayName,
-        timestamp: Date.now(),
-        sessionId: sid,
-      });
-    }
-  }, [steerEvents, addMessage, currentSessionId, selectedSession?.id]);
+  useSteerQueuedInsertion({
+    events: steerEvents,
+    sessionId: currentSessionId ?? selectedSession?.id ?? undefined,
+    addMessage,
+    trackedInjections: steerInjectionsRef.current,
+  });
 
   // T-1904 e2e (bug 2) — مطابقة أولى بمعرّف العميل (steerClientMsgId أو
   // clientMsgId، إذ لا يُعرف بعد اسم الحقل الذي يحمله الإطار الحيّ)، وبديلٌ
@@ -852,6 +829,17 @@ function ChatInterface({
       if (el) el.setSelectionRange(el.value.length, el.value.length);
     });
   }, [setInput, textareaRef]);
+
+  // T-2027 (ADR-209): زرّ ردّ سريع يملأ صندوق الكتابة ويُركّز عليه — لا إرسال.
+  const handleQuickReply = useQuickReplyInsert(setInput, textareaRef, currentSessionId ?? selectedSession?.id ?? null);
+  const quickReplyGate = useMemo(() => buildQuickReplyGate({
+    isRunActiveForViewer,
+    isLoading,
+    pendingPermissionCount: pendingPermissionRequests.length,
+    isConnected,
+    executingCommand,
+    isImageCropping,
+  }), [isRunActiveForViewer, isLoading, pendingPermissionRequests.length, isConnected, executingCommand, isImageCropping]);
 
   // T-1903 (ADR-190): «إرسال كرسالة عادية» — زرّ إجراء واحد على رفض 409
   // turn_not_active. يعيد نصّ التوجيه المرفوض إلى صندوق الإدخال العادي بدل
@@ -1412,6 +1400,8 @@ function ChatInterface({
           isResyncing={isRefreshing || (Boolean(historyError) && isLoadingSessionMessages)}
           retryUntil={historyError?.retryAt ?? null}
           onScrollToBottom={handleScrollToBottomWithResync}
+          quickReplyGate={quickReplyGate}
+          onQuickReply={handleQuickReply}
         />
 
         {isKnownStarter && latestSteerEventForStarter && latestSteerEventForStarter.deliveryStatus !== 'rejected' && (

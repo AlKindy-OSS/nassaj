@@ -167,6 +167,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
         createdAt: parsed.createdAt,
         updatedAt: parsed.updatedAt,
         jsonlPath: parsed.transcriptPath,
+        origin: 'watcher',
       });
       processed += 1;
     }
@@ -244,6 +245,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
       jsonlPath: parsed.transcriptPath,
+      origin: 'watcher',
     });
   }
 

@@ -15,6 +15,7 @@ import type {
 } from '../../../../types/app';
 import type { ProviderAuthStatusMap } from '../../../provider-auth/types';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
+import { findQuickReplyEligibleIndex, type QuickReplyGate } from '../../utils/quickReplyEligibility';
 
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
@@ -130,6 +131,9 @@ interface ChatMessagesPaneProps {
    */
   retryUntil?: number | null;
   onScrollToBottom?: () => void;
+  /** T-2027: composer-side gate + fill callback for quick replies (ADR-209). */
+  quickReplyGate?: Omit<QuickReplyGate, 'isStreaming' | 'isLoadingHistory'>;
+  onQuickReply?: (option: string) => void;
 }
 
 export default function ChatMessagesPane({
@@ -207,6 +211,8 @@ export default function ChatMessagesPane({
   isResyncing = false,
   retryUntil = null,
   onScrollToBottom,
+  quickReplyGate,
+  onQuickReply,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
 
@@ -293,6 +299,11 @@ export default function ChatMessagesPane({
     }
     return null;
   }, [chatMessages]);
+
+  // T-2027: computed once; only this message's quick replies are interactive.
+  const quickReplyIndex = useMemo(() => (quickReplyGate && onQuickReply
+    ? findQuickReplyEligibleIndex(visibleMessages, { ...quickReplyGate, isStreaming, isLoadingHistory: isLoadingSessionMessages })
+    : -1), [visibleMessages, quickReplyGate, onQuickReply, isStreaming, isLoadingSessionMessages]);
 
   return (
     <div
@@ -466,6 +477,8 @@ export default function ChatMessagesPane({
                   onRequestDeferredHistory={onRequestDeferredHistory}
                   onResumeStreamRecovery={onResumeStreamRecovery}
                   sessionId={currentSessionId ?? selectedSession?.id ?? null}
+                  quickReplyEligible={index === quickReplyIndex}
+                  onQuickReply={onQuickReply}
                 />
               </Fragment>
             );

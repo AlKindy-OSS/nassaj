@@ -8,7 +8,8 @@ export {
 export type { StarterVerdict } from './steer-taint.js';
 export { getMidTurnInjection, registerMidTurnInjection, supportsMidTurnInjection } from './steer-registry.js';
 export { getSteerConsent, getSteerPolicy, isSteeringAllowedFor, setSteerConsent, setSteerPolicy } from './steer-policy.js';
-export { handleSessionSteer } from './steer-service.js';
+export { handleSessionSteer, handleSessionSteerWithImages } from './steer-service.js';
+export type { SteerImageStore } from './steer-service.js';
 export {
   confirmWithRetry, createTranscriptScanner, lineProvesSteer, steerTranscriptOpener,
 } from './steer-delivery.js';

@@ -38,6 +38,8 @@ import { DeferralWaitingPanel } from "./DeferralWaitingPanel";
 import { ScheduledWaitPanel } from "./ScheduledWaitPanel";
 import { CloseTerminalsAction } from "./CloseTerminalsAction";
 import { AbandonUpdateAction } from "./AbandonUpdateAction";
+import { PrestageNoticeLine } from "./PrestageNoticeLine";
+import type { PrestageStatus } from "../prestageStatus";
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -76,6 +78,15 @@ function autoActivationMessage(job: UpdateJobSnapshot, t: Translate): string {
     return t('versionUpdate.autoActivate.pending');
 }
 
+/**
+ * An automatic-activation state that says more than the stage description does.
+ * `waiting_row` and `waiting_scheduled` (no due-soon panel) both render the
+ * generic pending text, which the stage description already carries.
+ */
+function hasSpecificWait(status: UpdateJobSnapshot['autoActivation']): boolean {
+    return status != null && status.state !== 'waiting_row' && status.state !== 'waiting_scheduled';
+}
+
 interface VersionUpgradeModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -97,6 +108,8 @@ interface VersionUpgradeModalProps {
      * where the owner must act.
      */
     updatePrepared?: boolean;
+    /** ADR-207: owner-only background prestage of the offered release; absent for others. */
+    prestage?: PrestageStatus | null;
 }
 
 interface LocalUpdateStatus {
@@ -114,7 +127,6 @@ interface LocalUpdateStatus {
 interface UpdateCapability {
     loading: boolean;
     ready: boolean;
-    strategy?: string;
     reason?: string;
     /** Present only alongside reason === 'insufficient_disk' (T-1553, م1). */
     blockedStorage?: BlockedStorageFigures | null;
@@ -333,6 +345,17 @@ function PhaseStepper({ job, jobId, onScheduledOverridden }: PhaseStepperProps) 
                                 >
                                     {t(`versionUpdate.phases.${phaseKey}.name`)}
                                 </span>
+                                {/* ADR-207: the click adopted a background-prepared build. */}
+                                {phase === 'staging' && job.prestaged && (
+                                    <span className="ms-2 inline-flex items-center rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium leading-none text-green-800 dark:bg-green-900/30 dark:text-green-200">
+                                        {t('versionUpdate.prestage.jobPrestaged')}
+                                    </span>
+                                )}
+                                {phase === 'staging' && !job.prestaged && job.prestageRejectedReason && (
+                                    <span className="ms-2 text-[11px] text-muted-foreground">
+                                        {t('versionUpdate.prestage.jobRebuilt')}
+                                    </span>
+                                )}
                                 {isCurrent && (
                                     <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
                                         {t(`versionUpdate.phases.${phaseKey}.description`)}
@@ -361,12 +384,16 @@ function PhaseStepper({ job, jobId, onScheduledOverridden }: PhaseStepperProps) 
             ) : job.state === 'restart_queued' && (job.autoActivate
                 && job.autoActivation?.state !== 'expired' && job.autoActivation?.state !== 'refused' ? (
                 <>
-                    <div
-                        role="status"
-                        className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-200"
-                    >
-                        {autoActivationMessage(job, t)}
-                    </div>
+                    {/* The plain "will activate automatically" case is already the
+                        stage description above; only a specific wait adds news. */}
+                    {hasSpecificWait(job.autoActivation) && (
+                        <div
+                            role="status"
+                            className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-200"
+                        >
+                            {autoActivationMessage(job, t)}
+                        </div>
+                    )}
                     {/* B-1448 slice 2: owner-only "close N terminals and update". */}
                     {job.autoActivation?.state === 'waiting_terminals' && (
                         <CloseTerminalsAction jobId={jobId} openTerminals={job.autoActivation.openTerminals} />
@@ -477,6 +504,7 @@ export function VersionUpgradeModal({
     latestVersion,
     updatePrepared = false,
     installMode,
+    prestage = null,
 }: VersionUpgradeModalProps) {
     const { t } = useTranslation('common');
     const upgradeCommand = installMode === 'npm' ? t('versionUpdate.npmUpgradeCommand') : null;
@@ -659,7 +687,6 @@ export function VersionUpgradeModal({
                 setCapability({
                     loading: false,
                     ready,
-                    strategy: typeof systemUpdate.updaterStrategy === 'string' ? systemUpdate.updaterStrategy : undefined,
                     reason,
                 });
                 // /health is unauthenticated and never carries byte counts; fetch
@@ -1022,6 +1049,7 @@ export function VersionUpgradeModal({
                         </div>
                     )}
                     <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/20"><span className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('versionUpdate.latestVersion')}</span><span dir="ltr" className="font-mono text-sm text-blue-900 tabular-nums dark:text-blue-100">{latestVersion}</span></div>
+                    {installMode === 'git' && !job && <PrestageNoticeLine prestage={prestage} latestVersion={latestVersion} />}
                 </div>
 
                 {/* Changelog — hidden when consent panel is open to avoid visual noise */}
@@ -1036,12 +1064,10 @@ export function VersionUpgradeModal({
                     </div>
                 )}
 
-                {/* Updater strategy / capability note */}
-                {installMode === 'git' && !capability.loading && (
-                    <div className={`rounded-md border px-3 py-2 text-xs ${capability.ready ? 'border-border bg-muted text-muted-foreground' : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'}`}>
-                        {capability.ready
-                            ? t('versionUpdate.strategy', { strategy: capability.strategy || t('versionUpdate.strategyUnknown') })
-                            : blockedReasonText(t, capability.reason, capability.blockedStorage, t('versionUpdate.errors.capabilityBlocked'))}
+                {/* Capability blocker — shown only when the updater cannot run */}
+                {installMode === 'git' && !capability.loading && !capability.ready && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                        {blockedReasonText(t, capability.reason, capability.blockedStorage, t('versionUpdate.errors.capabilityBlocked'))}
                     </div>
                 )}
 
@@ -1097,31 +1123,40 @@ export function VersionUpgradeModal({
                                             : prev);
                                     }}
                                 />
+                                {/* Subtle status line attached to the card, not a loose footnote */}
+                                {reused && (
+                                    <p className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">
+                                        {t('versionUpdate.reusedAttempt')}
+                                    </p>
+                                )}
                             </div>
-                        )}
-
-                        {/* Owner-only: stop a stuck attempt without a restart */}
-                        {job && (
-                            <AbandonUpdateAction
-                                job={job}
-                                jobId={jobIdFromUrl(job.statusUrl)}
-                                onAbandoned={(payload) => {
-                                    const snapshot = normalizeUpdateJob(payload, job.statusUrl);
-                                    if (isTerminalUpdateState(snapshot.state)) {
-                                        stopPolling();
-                                        clearStoredUpdateAttempt();
-                                    }
-                                    setJob(snapshot);
-                                    setUpdateError('');
-                                }}
-                            />
                         )}
 
                         {/* Error details for failed states */}
                         {job && isFailed && <ErrorPanel job={job} />}
 
-                        {/* Live console of the updater's commands (T-1768) */}
-                        {job?.statusUrl && <UpdateTerminalLog statusUrl={job.statusUrl} live={jobActive} />}
+                        {/* One secondary-actions row: terminal output (T-1768) + owner-only cancel */}
+                        {job?.statusUrl && (
+                            <UpdateTerminalLog
+                                statusUrl={job.statusUrl}
+                                live={jobActive}
+                                actions={(
+                                    <AbandonUpdateAction
+                                        job={job}
+                                        jobId={jobIdFromUrl(job.statusUrl)}
+                                        onAbandoned={(payload) => {
+                                            const snapshot = normalizeUpdateJob(payload, job.statusUrl);
+                                            if (isTerminalUpdateState(snapshot.state)) {
+                                                stopPolling();
+                                                clearStoredUpdateAttempt();
+                                            }
+                                            setJob(snapshot);
+                                            setUpdateError('');
+                                        }}
+                                    />
+                                )}
+                            />
+                        )}
 
                         {/* Terminal summary */}
                         {job && termKey && (
@@ -1151,7 +1186,6 @@ export function VersionUpgradeModal({
                             </div>
                         )}
 
-                        {reused && <p className="text-xs text-muted-foreground">{t('versionUpdate.reusedAttempt')}</p>}
                         {updateError && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">{updateError}</div>}
                     </div>
                 )}

@@ -454,3 +454,119 @@ test('B-1448 slice 2 T2: activateNow during a running tick re-runs the tick afte
     for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve));
     assert.equal(executed.length, 2, 'the first tick attempted, then the re-run attempted again');
 });
+
+// ---------------------------------------------------------------------------
+// T-2024 S0 (ADR-207) — wake on restart_queued instead of waiting for the poll.
+// ---------------------------------------------------------------------------
+
+const turns = async (count = 4) => { for (let i = 0; i < count; i++) await new Promise((resolve) => setImmediate(resolve)); };
+
+function wakeHarness({ sessions = 0, reply = { status: 200, body: { status: 'deferred', reasonCode: 'live_sessions' } },
+    prepareJob } = {}) {
+    const state = { jobs: [], sessions, reply, ticks: 0, inFlight: 0, maxInFlight: 0, executed: [] };
+    const activator = createUpdateAutoActivator({
+        jobs: { listAutoActivatable: () => { state.ticks += 1; return state.jobs; }, listReceipts: () => receipts },
+        listQueuedRestarts: () => [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }],
+        countSessions: () => state.sessions,
+        executeAsOwner: async (input) => {
+            state.inFlight += 1;
+            state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
+            state.executed.push(input);
+            await turns(1);
+            state.inFlight -= 1;
+            return state.reply;
+        },
+        getUser: () => ({ id: 1, role: 'owner' }),
+        now: () => QUEUED_AT + 1_000,
+        prepareJob,
+        intervalMs: 24 * 60 * 60 * 1000, // the poll never fires during a test
+    });
+    return { activator, state };
+}
+
+test('T-2024 S0: a wake before start() is refused and activates nothing', async () => {
+    const { activator, state } = wakeHarness();
+    state.jobs = [job()];
+    assert.equal(activator.wake(), false);
+    await turns();
+    assert.equal(state.ticks, 0);
+    assert.equal(state.executed.length, 0);
+});
+
+test('T-2024 S0: a wake on restart_queued runs one activator check at once, not at the next poll', async () => {
+    const { activator, state } = wakeHarness();
+    activator.start();
+    await turns();
+    assert.equal(state.ticks, 1, 'the start tick saw no queued job');
+    state.jobs = [job()];
+    assert.equal(activator.wake(), true);
+    await turns();
+    assert.equal(state.ticks, 2);
+    assert.equal(state.executed.length, 1);
+    activator.stop();
+});
+
+test('T-2024 S0: repeated wakes coalesce into a single check', async () => {
+    const { activator, state } = wakeHarness();
+    activator.start();
+    await turns();
+    state.jobs = [job()];
+    for (let i = 0; i < 5; i++) activator.wake();
+    await turns(8);
+    assert.equal(state.ticks, 2);
+    assert.equal(state.executed.length, 1);
+    activator.stop();
+});
+
+test('T-2024 S0: wakes during a running check never start a second concurrent run', async () => {
+    let release = () => {};
+    let block = false;
+    const { activator, state } = wakeHarness({
+        prepareJob: async () => { if (block) await new Promise((resolve) => { release = () => resolve(undefined); }); },
+    });
+    activator.start();
+    await turns();
+    state.jobs = [job()];
+    block = true;
+    activator.wake();
+    await turns(); // the woken check is now held inside considerJob
+    assert.equal(state.ticks, 2);
+    block = false;
+    for (let i = 0; i < 3; i++) activator.wake(); // lands while it runs
+    await turns();
+    assert.equal(state.ticks, 2, 'no second run while the first is busy');
+    release();
+    await turns(8);
+    assert.equal(state.ticks, 3, 'exactly one coalesced re-run afterwards');
+    assert.equal(state.maxInFlight, 1);
+    activator.stop();
+});
+
+test('T-2024 S0: a wake on a busy node activates nothing, as the poll would not', async () => {
+    const { activator, state } = wakeHarness({ sessions: 2 });
+    activator.start();
+    await turns();
+    state.jobs = [job()];
+    activator.wake();
+    await turns();
+    assert.equal(state.executed.length, 0);
+    assert.equal(activator.statusFor('job-1').state, 'waiting_sessions');
+    activator.stop();
+});
+
+test('T-2024 S0: a wake keeps the lock-contention backoff (unlike activateNow)', async () => {
+    const { activator, state } = wakeHarness({
+        reply: { status: 200, body: { status: 'deferred', reasonCode: 'update_lock_contended' } },
+    });
+    activator.start();
+    await turns();
+    state.jobs = [job()];
+    activator.wake();
+    await turns();
+    assert.equal(state.executed.length, 1);
+    activator.wake();
+    await turns();
+    assert.equal(state.ticks, 3);
+    assert.equal(state.executed.length, 1, 'still inside the backoff window');
+    activator.stop();
+});

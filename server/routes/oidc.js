@@ -10,6 +10,7 @@
  *
  * Browser-facing (front channel):
  *   GET    /login            → 302 to the IdP authorization endpoint
+ *                               (?reauth=1 adds prompt=login&max_age=0; ADR-194 A1)
  *   GET    /callback         → 302 to /auth/oidc/return?oidc_code=<code>
  *                               (login refusals: ?error=<oidc_* code>; an unknown or
  *                               expired state: ?error=invalid_state / transaction_expired)
@@ -74,9 +75,12 @@
  *   - Version fence (D9): the privileged writes run in one immediate
  *     transaction with the version check; the one-time code or step-up grant
  *     is dropped when the version moved after it was minted.
- *   - The owner signs in locally only (I6): an owner identity is refused in
- *     the login and self-link branches, and back-channel logout never
- *     revokes an owner.
+ *   - Owners (I6, amended by A1): an owner identity is refused in the
+ *     self-link and step-up branches, and back-channel logout never revokes
+ *     an owner. In the login branch an owner is admitted only after opting in
+ *     on their own link and proving a fresh passkey sign-in
+ *     (services/oidc-owner-sign-in.js); the owner role is never derived from
+ *     the IdP, so role mapping and attestation are skipped.
  *   - id_token and logout_token signatures and registered OIDC claims are
  *     verified before any identity lookup or revocation side effect.
  *   - Roles (ADR-194 D4/D5): the verified id_token claim at the active config's
@@ -158,6 +162,7 @@ import {
 import { stepUpAuthTimeFailure } from '../services/oidc-step-up.js';
 import { oidcStepUpGrantStore } from '../services/oidc-step-up-grant.store.js';
 import { idTokenAuthTimeMs } from '../services/oidc-verifier.service.js';
+import { decideOwnerSignIn, ownerLoginHint } from '../services/oidc-owner-sign-in.js';
 
 /**
  * B-1327 (qa M1): an SSO attestation that demotes a user (e.g. admin → user)
@@ -281,7 +286,7 @@ function revokeApiKeysForSsoWithdrawal(userId, trigger) {
  * existing tokens and live work; the local account itself is left enabled and
  * unchanged, so re-granting the role in the IdP restores access. Callers run
  * it inside the version fence (ADR-194 D9), and never for an owner (owners
- * are refused before any mapping, I6).
+ * take the A1 branch before any mapping).
  */
 function denyLoginWithoutRole(req, user, reason) {
   auditLogDb.record('oidc_access_denied_no_role', {
@@ -392,7 +397,10 @@ router.get('/login', oidcLoginLimiter, async (req, res) => {
     return redirectLoginRefusal(res, 'oidc_login_not_initiated');
   }
   try {
-    const authorizationUrl = await beginAuthorization(res, client, { purpose: 'login' });
+    // ADR-194 A1: `reauth=1` (and no other value) forces a fresh IdP sign-in,
+    // so an owner meets one passkey prompt instead of a stale-session refusal.
+    const extraParams = req.query.reauth === '1' ? { prompt: 'login', max_age: '0' } : {};
+    const authorizationUrl = await beginAuthorization(res, client, { purpose: 'login' }, extraParams);
     if (!authorizationUrl) {
       return res.status(503).json({ error: 'Identity provider temporarily unavailable' });
     }
@@ -410,8 +418,10 @@ router.get('/login', oidcLoginLimiter, async (req, res) => {
  * and /exchange issues the device session (ADR-163 amendment 1, A-1).
  * ADR-194 D9: after the code is stored the active version is read again; if
  * an apply landed meanwhile the code is dropped and the login refused.
+ * `auditBeforeLogin` (owner sign-in, A1) runs once the code is final; when it
+ * returns false the code is dropped and the login refused.
  */
-function handOffSession(req, res, user, transaction, configVersion) {
+function handOffSession(req, res, user, transaction, configVersion, auditBeforeLogin = null) {
   const walletMode = multiAccountSwitchingEnabled();
   const grant = walletMode ? { configVersion } : { token: generateToken(user) };
   const oneTimeCode = randomToken();
@@ -422,6 +432,10 @@ function handOffSession(req, res, user, transaction, configVersion) {
   if (!activeVersionStillIs(configVersion)) {
     oidcCodeStore.discard(oneTimeCode);
     return redirectLoginRefusal(res, 'oidc_config_changed');
+  }
+  if (auditBeforeLogin && !auditBeforeLogin()) {
+    oidcCodeStore.discard(oneTimeCode);
+    return redirectLoginRefusal(res, 'temporarily_unavailable');
   }
 
   // Wallet mode records the login at /exchange, after the device is issued.
@@ -452,8 +466,9 @@ function redirectLoginRefusal(res, errorCode) {
 }
 
 /**
- * ADR-194 I6: an IdP identity bound to an owner never signs in or links; the
- * owner signs in locally only. Audited (purpose only); nothing else is written.
+ * ADR-194 I6: an IdP identity bound to an owner never links (a login is
+ * decided by the A1 owner branch). Audited (purpose only); nothing else is
+ * written.
  */
 function refuseOwnerIdentity(req, res, userId, purpose) {
   auditLogDb.record('oidc_owner_sign_in_refused', {
@@ -463,10 +478,11 @@ function refuseOwnerIdentity(req, res, userId, purpose) {
 }
 
 /**
- * Alerts every active owner about a member SSO event (push when enabled) and
+ * Alerts every active owner about an SSO event (push when enabled) and
  * audits it with ids only. Best effort: never blocks the sign-in.
+ * `dedupeSuffix` keeps repeated events of one kind as separate alerts.
  */
-function alertOwners(req, kind, subjectUserId) {
+function alertOwners(req, kind, subjectUserId, dedupeSuffix) {
   let ownerIds = [];
   try {
     ownerIds = userDb.listActiveOwnerIds();
@@ -474,7 +490,7 @@ function alertOwners(req, kind, subjectUserId) {
     logOidcFailure('owner_alert_lookup_failed');
   }
   for (const ownerId of ownerIds) {
-    void notifyOwnerOfSsoEvent(ownerId, kind, subjectUserId);
+    void notifyOwnerOfSsoEvent(ownerId, kind, subjectUserId, dedupeSuffix);
   }
   auditLogDb.record('oidc_owner_alerted', {
     userId: subjectUserId,
@@ -586,8 +602,9 @@ function applyLoginDecision(req, { linkedUser, identity, decision }) {
 }
 
 /**
- * Existing-link checks before any write: duplicates, active account, owner
- * (I6). Returns the linked user, or null after answering the request.
+ * Existing-link checks before any write: duplicates and an active account.
+ * Returns the linked user (an owner goes on to the A1 owner branch), or null
+ * after answering the request.
  */
 function linkedLoginPrecheck(req, res, { identity, issuer }) {
   // T-1939 slice 5: a legacy account holding two links for this issuer
@@ -609,11 +626,114 @@ function linkedLoginPrecheck(req, res, { identity, issuer }) {
     res.status(401).json({ error: 'Linked account is unavailable' });
     return null;
   }
-  if (linkedUser.role === 'owner') {
-    refuseOwnerIdentity(req, res, linkedUser.id, 'login');
-    return null;
-  }
   return linkedUser;
+}
+
+/**
+ * ADR-194 A1: a refused owner sign-in, audited with its reason only (and
+ * `stepUp: 'exhausted'` when the automatic step-up already ran).
+ */
+function refuseOwnerSignIn(req, res, userId, decision, afterStepUp) {
+  const metadata = { provider: 'oidc', purpose: 'login', reason: decision.reason };
+  auditLogDb.record('oidc_owner_sign_in_refused', {
+    userId, metadata: afterStepUp ? { ...metadata, stepUp: 'exhausted' } : metadata, ...auditContext(req),
+  });
+  return redirectLoginRefusal(res, decision.code);
+}
+
+/**
+ * Strict owner sign-in audit (A1): an owner session is never handed out
+ * unaudited. Returns false when the row could not be written.
+ */
+function recordOwnerSignIn(req, userId, details) {
+  try {
+    auditLogDb.recordStrict('oidc_owner_sign_in', {
+      userId, metadata: { provider: 'oidc', ...details }, ...auditContext(req),
+    });
+    return true;
+  } catch {
+    logOidcFailure('owner_sign_in_audit_failed');
+    return false;
+  }
+}
+
+const htmlEscape = (value) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+const OWNER_STEP_UP_DELAY_SECONDS = 2;
+
+/**
+ * Short bilingual page shown before the automatic owner passkey step-up,
+ * then a meta refresh to the IdP. The URL is built here from the pinned
+ * authorization endpoint; nothing from the request is echoed.
+ */
+function sendOwnerPasskeyInterstitial(res, authorizationUrl) {
+  const target = htmlEscape(authorizationUrl);
+  setNoStore(res);
+  return res.status(200).type('html').send(`<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="${OWNER_STEP_UP_DELAY_SECONDS};url=${target}">
+<title>نسّاج · Nassaj</title></head>
+<body><main>
+<p lang="ar" dir="rtl">يتطلب نسّاج مفتاح المرور للمالك — سجّل بمفتاحك</p>
+<p lang="en" dir="ltr">Nassaj requires your passkey — sign in with your key</p>
+<p><a href="${target}">متابعة · Continue</a></p>
+</main></body></html>`);
+}
+
+/**
+ * ADR-194 A1 (owner decision 2026-10-15): the IdP session has no WebAuthn
+ * factor or a stale auth_time, so instead of an error the owner is sent back
+ * once with prompt=login&max_age=0 (and login_hint when known). The new
+ * entry carries `ownerStepUp`, so a second failure refuses (loop guard).
+ */
+async function startOwnerPasskeyStepUp(req, res, { client, claims, userId, decision }) {
+  auditLogDb.record('oidc_owner_sign_in_refused', {
+    userId,
+    metadata: { provider: 'oidc', purpose: 'login', reason: decision.reason, stepUp: 'started' },
+    ...auditContext(req),
+  });
+  const hint = ownerLoginHint(claims);
+  let authorizationUrl;
+  try {
+    authorizationUrl = await beginAuthorization(res, client, { purpose: 'login', ownerStepUp: true }, {
+      prompt: 'login', max_age: '0', ...(hint ? { login_hint: hint } : {}),
+    });
+  } catch {
+    logOidcFailure('owner_step_up_unavailable');
+    return redirectLoginRefusal(res, 'temporarily_unavailable');
+  }
+  if (!authorizationUrl) return redirectLoginRefusal(res, 'temporarily_unavailable');
+  return sendOwnerPasskeyInterstitial(res, authorizationUrl);
+}
+
+/**
+ * `login` branch for an owner (ADR-194 A1): forced password change, the
+ * owner's own opt-in, the WebAuthn factor and auth_time freshness, in that
+ * order. A missing key or stale auth_time triggers one automatic step-up;
+ * after it, the refusal stands. On success the session is handed out
+ * directly: no role mapping, no role sync and no attestation stamp (the
+ * owner role never comes from the IdP). Every successful sign-in is audited
+ * strictly and alerts every owner under its own dedupe key.
+ */
+async function completeOwnerLogin(req, res, { entry, claims, transaction, identity, linkedUser, client }) {
+  const account = userDb.getRawById(linkedUser.id);
+  if (!account) return res.status(401).json({ error: 'Linked account is unavailable' });
+  const decision = decideOwnerSignIn({ account, identity, claims, nowMs: Date.now() });
+  if (!decision.ok && decision.stepUp && entry.ownerStepUp !== true) {
+    return startOwnerPasskeyStepUp(req, res, { client, claims, userId: linkedUser.id, decision });
+  }
+  if (!decision.ok) return refuseOwnerSignIn(req, res, linkedUser.id, decision, entry.ownerStepUp === true);
+
+  const signInId = crypto.randomUUID();
+  let audited = false;
+  const answer = handOffSession(req, res, linkedUser, transaction, entry.configVersion, () => {
+    audited = recordOwnerSignIn(req, linkedUser.id, {
+      identityId: identity.id, signInId, amr: decision.amr, authAgeSec: decision.authAgeSec,
+    });
+    return audited;
+  });
+  if (audited) alertOwners(req, 'owner_sso_sign_in', linkedUser.id, signInId);
+  return answer;
 }
 
 /**
@@ -627,6 +747,7 @@ function completeLogin(req, res, context) {
   if (!identity) return signInUnknownSubject(req, res, context);
   const linkedUser = linkedLoginPrecheck(req, res, { identity, issuer: client.issuer });
   if (!linkedUser) return undefined;
+  if (linkedUser.role === 'owner') return completeOwnerLogin(req, res, { ...context, identity, linkedUser });
   const decision = evaluateSsoClaims(claims, client.mapping);
   if (decision.reason === MAPPING_UNAVAILABLE_REASON) {
     // The config went away mid-flight: refuse, but never treat it as a withdrawal.
@@ -812,7 +933,7 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
   }
   if (entry.purpose === 'test') return finishTestSignIn(res, entry, claims, selection.draftRow);
   try {
-    return branchOnPurpose(req, res, { entry, claims, transaction, client: selection.client });
+    return await branchOnPurpose(req, res, { entry, claims, transaction, client: selection.client });
   } catch {
     logOidcFailure('callback_rejected');
     if (res.headersSent) return undefined;

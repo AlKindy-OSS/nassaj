@@ -194,6 +194,10 @@ export interface UpdateJobSnapshot {
   abandonable?: boolean;
   /** Why it cannot be stopped now; null when it can, or when the server sent none. */
   abandonBlockedReason?: AbandonBlockedReason | null;
+  /** ADR-207: the job adopted a background-prepared build at click. */
+  prestaged?: boolean;
+  /** ADR-207: a prepared build existed but was not adopted; the job built afresh. */
+  prestageRejectedReason?: string | null;
 }
 
 export type AbandonBlockedReason = 'in_flight_restart' | 'gate_closed' | 'head_moved_unverified' | 'terminal';
@@ -526,6 +530,9 @@ export function normalizeUpdateJob(payload: unknown, fallbackStatusUrl?: string)
       : typeof source.abandonBlockedReason === 'string'
         && ABANDON_BLOCKED_REASONS.includes(source.abandonBlockedReason)
         ? source.abandonBlockedReason as AbandonBlockedReason : undefined,
+    prestaged: source.prestaged === true,
+    prestageRejectedReason: typeof source.prestageRejectedReason === 'string'
+      && /^[a-z_]{1,64}$/.test(source.prestageRejectedReason) ? source.prestageRejectedReason : null,
   };
 }
 

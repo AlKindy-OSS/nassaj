@@ -42,6 +42,7 @@ const realRoleMapper = await import(url('../services/external-role-mapper.js'));
 const realJit = await import(url('../services/oidc-jit-provision.js'));
 const realSelfLink = await import(url('../services/oidc-self-link.js'));
 const realTestSignIn = await import(url('../services/sso-test-signin.service.js'));
+const realRoleMapping = await import(url('../services/sso-role-mapping.ts'));
 const { createOidcCodeStore } = await import(url('../services/oidc-code.store.js'));
 const { createOidcStepUpGrantStore } = await import(url('../services/oidc-step-up-grant.store.js'));
 const codes = createOidcCodeStore();
@@ -49,6 +50,9 @@ const grants = createOidcStepUpGrantStore();
 
 mock.module(url('../services/external-role-mapper.js'), {
   namedExports: { ...realRoleMapper, syncExternalRole: spy('syncExternalRole', realRoleMapper.syncExternalRole) },
+});
+mock.module(url('../services/sso-role-mapping.ts'), {
+  namedExports: { ...realRoleMapping, evaluateSsoClaims: spy('evaluateSsoClaims', realRoleMapping.evaluateSsoClaims) },
 });
 mock.module(url('../services/oidc-jit-provision.js'), {
   namedExports: { ...realJit, provisionSsoUser: spy('provisionSsoUser', realJit.provisionSsoUser) },
@@ -324,6 +328,7 @@ test('a login entry signs in through the pinned endpoints and never reaches comp
   assert.equal(count('completeTestSignIn'), 0);
   assert.equal(count('recordTestFailure'), 0);
   assert.equal(count('generateToken'), 1);
+  assert.equal(count('evaluateSsoClaims'), 1, 'a member login is mapped (the spy is live)');
   assert.equal(repoSpies[0]?.mock.callCount(), 1, 'attestation stamped');
   const token = op.requests.find((request) => request.url.endsWith('/token'));
   assert.equal(token?.url, `${FIXTURE_ISSUER}/token`, 'the pinned token endpoint');
@@ -423,4 +428,130 @@ test('back channel: an owner subject is a 200 no-op', async () => {
   const before = stamp(owner.id);
   assert.equal((await logout('sub-owner')).status, 200);
   assert.equal(stamp(owner.id), before);
+});
+
+// ---------------------------------------------------------------------------
+// ADR-194 A1: an opted-in owner with a fresh passkey (real database)
+// ---------------------------------------------------------------------------
+
+const OWNER_PASSKEY = Object.freeze({ sub: 'sub-owner', roles: ['member'], org: 'org-1', amr: ['user', 'mfa'] });
+
+function linkOwner({ optedIn }: { optedIn: boolean }) {
+  const id = userIdentitiesDb.link(owner.id, FIXTURE_ISSUER, 'sub-owner');
+  if (optedIn) userIdentitiesDb.setOwnerSsoOptIn(id, owner.id, Date.now());
+  for (const repoSpy of repoSpies) repoSpy.mock.resetCalls();
+  calls.clear();
+  return id;
+}
+
+const auditRows = (action: string) => (db.prepare('SELECT user_id AS userId, metadata FROM audit_log WHERE action = ?')
+  .all(action) as Array<{ userId: number; metadata: string }>).map((row) => ({ ...row, metadata: JSON.parse(row.metadata) }));
+
+test('A1: an opted-in owner signs in with a passkey; role untouched; no mapping, sync or attestation', async () => {
+  activeRow();
+  db.exec("DELETE FROM audit_log WHERE action IN ('oidc_owner_sign_in', 'oidc_login')");
+  const identityId = linkOwner({ optedIn: true });
+  db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(owner.id);
+  const res = await complete(await startLogin(), OWNER_PASSKEY);
+  assert.match(res.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
+  assert.equal(count('generateToken'), 1);
+  for (const name of ['syncExternalRole', 'evaluateSsoClaims', 'provisionSsoUser', 'linkIdentityWithAttestation']) {
+    assert.equal(count(name), 0, name);
+  }
+  assert.equal(repoSpies[0]?.mock.callCount(), 0, 'no attestation stamp (markAttested)');
+  assert.equal(repoSpies[2]?.mock.callCount(), 0, 'no role write');
+  assert.equal(userDb.getUserById(owner.id)?.role, 'owner');
+  const [signIn] = auditRows('oidc_owner_sign_in');
+  assert.equal(signIn?.userId, owner.id);
+  assert.equal(signIn?.metadata.identityId, identityId);
+  assert.deepEqual(signIn?.metadata.amr, ['user', 'mfa']);
+  assert.equal(typeof signIn?.metadata.signInId, 'string');
+  assert.ok(!JSON.stringify(signIn).includes('sub-owner'), 'no subject in the audit');
+  assert.equal(auditRows('oidc_login').length, 1);
+});
+
+test('A1: password + security key (pwd, user, mfa) is accepted', async () => {
+  activeRow();
+  linkOwner({ optedIn: true });
+  const res = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd', 'user', 'mfa'] });
+  assert.match(res.headers.get('location') ?? '', /oidc_code=/);
+});
+
+/** The interstitial's IdP URL and the new transaction cookie of the automatic step-up. */
+async function ownerStepUpFrom(res: Response): Promise<Started> {
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  const target = (/url=([^"]+)"/.exec(html)?.[1] ?? '').replaceAll('&#38;', '&');
+  return { authorizationUrl: target, cookie: (res.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '' };
+}
+
+test('A1: a password-only IdP session steps up once to the passkey, then signs in', async () => {
+  activeRow();
+  linkOwner({ optedIn: true });
+  const first = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd'], preferred_username: 'owner@idp' });
+  const stepUp = await ownerStepUpFrom(first);
+  const idp = new URL(stepUp.authorizationUrl);
+  assert.equal(idp.origin + idp.pathname, `${FIXTURE_ISSUER}/authorize`, 'the pinned endpoint');
+  assert.equal(idp.searchParams.get('prompt'), 'login');
+  assert.equal(idp.searchParams.get('max_age'), '0');
+  assert.equal(idp.searchParams.get('login_hint'), 'owner@idp');
+  assertNoPrivilegedWrite('before the step-up');
+  const second = await complete(stepUp, OWNER_PASSKEY);
+  assert.match(second.headers.get('location') ?? '', /oidc_code=/);
+  assert.equal(count('generateToken'), 1);
+});
+
+test('A1: a password-only IdP session is refused owner_sso_key_required after the one step-up', async () => {
+  activeRow();
+  linkOwner({ optedIn: true });
+  const stepUp = await ownerStepUpFrom(await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd'] }));
+  const second = await complete(stepUp, { ...OWNER_PASSKEY, amr: ['pwd', 'otp', 'mfa'] });
+  assert.equal(second.headers.get('location'), '/auth/oidc/return?error=owner_sso_key_required');
+  assertNoPrivilegedWrite('step-up exhausted');
+});
+
+test('A1: an opted-in owner flagged must_change_password is refused password_change_required', async () => {
+  activeRow();
+  linkOwner({ optedIn: true });
+  db.prepare('UPDATE users SET must_change_password = 1 WHERE id = ?').run(owner.id);
+  try {
+    const res = await complete(await startLogin(), OWNER_PASSKEY);
+    assert.equal(res.headers.get('location'), '/auth/oidc/return?error=password_change_required');
+    assertNoPrivilegedWrite('owner must change password');
+  } finally {
+    db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(owner.id);
+  }
+});
+
+test('A1: owner links with no opt-in are refused even with a passkey token', async () => {
+  activeRow();
+  linkOwner({ optedIn: false });
+  const res = await complete(await startLogin(), OWNER_PASSKEY);
+  assert.equal(res.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
+  assertNoPrivilegedWrite('owner not opted in');
+});
+
+test('A1: reauth=1 reaches the IdP with prompt=login and max_age=0', async () => {
+  activeRow();
+  const res = await fetch(`${baseUrl}/api/auth/oidc/login?reauth=1`, { redirect: 'manual' });
+  const location = new URL(res.headers.get('location') ?? '');
+  assert.equal(location.searchParams.get('prompt'), 'login');
+  assert.equal(location.searchParams.get('max_age'), '0');
+});
+
+test('A1 unchanged: an opted-in owner is still local-only for self-link, step-up and back channel', async () => {
+  activeRow();
+  linkOwner({ optedIn: true });
+  const asOwner = { 'content-type': 'application/json', 'x-test-user-id': String(owner.id), 'x-test-role': 'owner' };
+  const selfLink = await fetch(`${baseUrl}/api/auth/oidc/link/self/start`, {
+    method: 'POST', headers: asOwner, body: JSON.stringify({ currentPassword: 'x' }),
+  });
+  assert.equal(selfLink.status, 403);
+  assert.equal((await selfLink.json()).code, 'owner_must_sign_in_locally');
+  const stepUp = await fetch(`${baseUrl}/api/auth/oidc/step-up/start`, { method: 'POST', headers: asOwner });
+  assert.equal(stepUp.status, 409);
+  assert.equal((await stepUp.json()).code, 'sso_step_up_not_applicable');
+  const before = stamp(owner.id);
+  assert.equal((await logout('sub-owner')).status, 200);
+  assert.equal(stamp(owner.id), before, 'the IdP never revokes an owner');
 });

@@ -64,6 +64,7 @@ describe('OpenCode live tool parts — real capture (B-1560)', () => {
     const subagents = tools(live()).filter((c) => c.subagent).map((c) => c.subagent);
     assert.deepEqual(subagents, [{
       id: 'call_1eb88656fe0840c4937553d3', parentId: null, label: 'Read a.txt content', state: 'completed',
+      agentName: 'general', model: 'big-pickle',
     }]);
   });
 });
@@ -101,7 +102,9 @@ describe('openCodeToolPart edge cases', () => {
     const [card] = provider.normalizeMessage(toolLine('task', {
       status: 'error', input: { subagent_type: 'general' }, error: 'boom',
     }, 'call_err'), null);
-    assert.deepEqual(card.subagent, { id: 'call_err', parentId: null, label: 'general', state: 'failed' });
+    assert.deepEqual(card.subagent, {
+      id: 'call_err', parentId: null, label: 'general', state: 'failed', agentName: 'general',
+    });
     assert.deepEqual(card.toolResult, { content: 'boom', isError: true });
   });
 

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  DOCUMENT_SHARING_INSTRUCTIONS, getRuntimeInstructions, stripRuntimeInstructionsPrefix,
-  withRuntimeInstructions,
+  DOCUMENT_SHARING_INSTRUCTIONS, QUICK_REPLY_GUIDANCE, QUICK_REPLY_TAG, getRuntimeInstructions,
+  runtimeInstructionsPrefix, stripRuntimeInstructionsPrefix, withRuntimeInstructions,
 } from './documentSharingInstructions.js';
 import { buildPublicPageInstructions } from './publicPageGuidance.js';
 
@@ -41,7 +41,11 @@ test('all five CLI launchers import the shared outbound wrapper', () => {
 test('native instruction channels carry guidance without rewriting the user command', () => {
   const channels = [
     ['../server/claude-sdk.js', /append: getRuntimeInstructions\(coordinationLevel\)/],
-    ['../server/openai-codex.js', /developer_instructions: getRuntimeInstructions\(options\?\.coordinationLevel\)/],
+    // ADR-206: the Codex slot goes through the B = 0/1 helper, which still calls the facade.
+    [
+      '../server/openai-codex.js',
+      /developer_instructions: codexTurnDeveloperInstructions\(\s*options\?\.coordinationLevel, helpersDecision, getRuntimeInstructions,/,
+    ],
     ['../server/modules/providers/shared/vendor/vendor-runtime.js', /getRuntimeInstructions\(options\?\.coordinationLevel\)/],
   ] as const;
   for (const [file, channel] of channels) assert.match(readFileSync(new URL(file, import.meta.url), 'utf8'), channel);
@@ -140,4 +144,90 @@ test('no launcher carries its own copy of the publish command', () => {
     const source = readFileSync(new URL(`../server/${file}.js`, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /public-page-publish\.mjs publish/, `${file}: نسخة ثانية من النصّ`);
   }
+});
+
+/* ---------------------------------------------------------------------------
+ * T-2027 / ADR-209 — quick-reply guidance block.
+ * ------------------------------------------------------------------------- */
+
+const QUICK_BLOCK = `<${QUICK_REPLY_TAG}>\n${QUICK_REPLY_GUIDANCE}\n</${QUICK_REPLY_TAG}>`;
+const count = (text: string, needle: string): number => text.split(needle).length - 1;
+const OPEN_TAG = `<${QUICK_REPLY_TAG}>`;
+
+test('quick-reply constant shape: one line, no fence-opening line, bounded, names choices', () => {
+  assert.equal(QUICK_REPLY_TAG, 'nassaj_quick_replies');
+  assert.ok(!QUICK_REPLY_GUIDANCE.includes('\n'), 'single line');
+  for (const line of QUICK_BLOCK.split('\n')) assert.ok(!line.trimStart().startsWith('```'), line);
+  assert.ok(QUICK_REPLY_GUIDANCE.length <= 420, String(QUICK_REPLY_GUIDANCE.length));
+  assert.match(QUICK_REPLY_GUIDANCE, /```choices/);
+  assert.doesNotMatch(QUICK_REPLY_GUIDANCE, /claude|codex|agy|antigravity|cursor|opencode|kimi|qwen|hermes|sakana|openai|anthropic/i);
+});
+
+test('flag ON (default): the block comes last, after the public-page block, exactly once', () => {
+  for (const prefix of [runtimeInstructionsPrefix(PLACE), runtimeInstructionsPrefix(PLACE, { quickReplies: true })]) {
+    assert.ok(prefix.endsWith(`</nassaj_public_pages>\n\n${QUICK_BLOCK}`));
+    assert.equal(count(prefix, OPEN_TAG), 1);
+  }
+  for (const level of ['direct', 'delegate', 'delegate_review', undefined]) {
+    assert.equal(count(getRuntimeInstructions(level, PLACE), OPEN_TAG), 1, String(level));
+    assert.equal(count(withRuntimeInstructions('hi', level, PLACE), OPEN_TAG), 1, String(level));
+  }
+});
+
+test('flag OFF: no block anywhere, and the rest of the prefix is byte-identical', () => {
+  const off = { quickReplies: false };
+  assert.equal(runtimeInstructionsPrefix(PLACE, off), runtimeInstructionsPrefix(PLACE).slice(0, -(QUICK_BLOCK.length + 2)));
+  assert.equal(count(getRuntimeInstructions('delegate', PLACE, off), QUICK_REPLY_TAG), 0);
+  assert.equal(count(withRuntimeInstructions('hi', 'delegate', PLACE, off), QUICK_REPLY_TAG), 0);
+});
+
+test('strip (b): the full prefix with an empty command strips to empty', () => {
+  assert.equal(stripRuntimeInstructionsPrefix(withRuntimeInstructions('', 'direct', PLACE)), '');
+  assert.equal(stripRuntimeInstructionsPrefix(runtimeInstructionsPrefix(PLACE)), '');
+});
+
+test('strip (c): the full prefix followed by <coordination> leaves exactly that body', () => {
+  const body = '<coordination>\nx\n</coordination>\n\nسؤال';
+  assert.equal(stripRuntimeInstructionsPrefix(`${runtimeInstructionsPrefix(PLACE)}\n\n${body}`), body);
+  const wrapped = withRuntimeInstructions('سؤال', 'delegate', PLACE);
+  assert.ok(stripRuntimeInstructionsPrefix(wrapped).endsWith('سؤال'));
+  assert.equal(count(stripRuntimeInstructionsPrefix(wrapped), QUICK_REPLY_TAG), 0);
+});
+
+test('strip (a): a legacy sharing-only prefix keeps user text that begins with the quick block', () => {
+  const legacy = `<nassaj_document_sharing>\n${DOCUMENT_SHARING_INSTRUCTIONS}\n</nassaj_document_sharing>`;
+  const user = `${QUICK_BLOCK}\n\nmy own text`;
+  assert.equal(stripRuntimeInstructionsPrefix(`${legacy}\n\n${user}`), user);
+  assert.equal(stripRuntimeInstructionsPrefix(`${legacy}\n\n${QUICK_BLOCK}`), QUICK_BLOCK);
+});
+
+test('strip after a flag flip: ON-era blocks still strip once the flag is OFF, and vice versa', () => {
+  const body = 'نص المستخدم';
+  const onEra = withRuntimeInstructions(body, 'direct', PLACE, { quickReplies: true });
+  const offEra = withRuntimeInstructions(body, 'direct', PLACE, { quickReplies: false });
+  assert.equal(stripRuntimeInstructionsPrefix(onEra), body);
+  assert.equal(stripRuntimeInstructionsPrefix(offEra), body);
+});
+
+test('strip never removes a near-miss of the quick block (exact match only)', () => {
+  const head = runtimeInstructionsPrefix(PLACE, { quickReplies: false });
+  for (const near of [
+    `${QUICK_BLOCK}tail`, // glued, no blank-line separator
+    `${QUICK_BLOCK.slice(0, -1)}X\n\nx`, // altered close tag
+    `<${QUICK_REPLY_TAG}>\nuser variant\n</${QUICK_REPLY_TAG}>\n\nx`,
+  ]) assert.equal(stripRuntimeInstructionsPrefix(`${head}\n\n${near}`), near);
+});
+
+/**
+ * Item 6 (anti-double-wrap): anchored on the frozen sharing block, so a text wrapped
+ * under the other flag value or another publisher path is never wrapped twice.
+ */
+test('anti-double-wrap survives a flag flip and a publisher-path change', () => {
+  const onEra = withRuntimeInstructions('x', 'delegate', PLACE, { quickReplies: true });
+  const offEra = withRuntimeInstructions('x', 'delegate', PLACE, { quickReplies: false });
+  assert.equal(withRuntimeInstructions(onEra, 'delegate', PLACE, { quickReplies: false }), onEra);
+  assert.equal(withRuntimeInstructions(offEra, 'delegate', PLACE, { quickReplies: true }), offEra);
+  const moved = { ...PLACE, publisherPath: '/elsewhere/public-page-publish.mjs' };
+  assert.equal(withRuntimeInstructions(onEra, 'delegate', moved), onEra);
+  assert.equal(count(withRuntimeInstructions(onEra, 'delegate', moved), DOCUMENT_SHARING_INSTRUCTIONS), 1);
 });

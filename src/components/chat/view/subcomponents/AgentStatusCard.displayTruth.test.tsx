@@ -86,6 +86,44 @@ function callsBadgeText(container: HTMLElement): string | null {
 }
 
 describe('عدّاد الاستدعاءات', () => {
+  it('يعرض اسم الوكيل والنموذج والجهد والأدوات الحية في تفاصيل الصف', () => {
+    const { container } = renderCard({
+      agents: [agent({
+        agentName: 'backend-dev',
+        model: 'gpt-6-luna',
+        modelInherited: true,
+        effort: 'high',
+        tools: [{ name: 'Read', status: 'done' }, { name: 'Bash', status: 'running' }],
+      })],
+    });
+
+    assert.equal((container.textContent ?? '').includes('backend-dev'), true);
+    assert.equal((container.textContent ?? '').includes('gpt-6-luna'), true);
+    assert.equal((container.textContent ?? '').includes('high'), true);
+    const row = screen.getByLabelText('backend-dev — Running');
+    assert.equal(row.getAttribute('aria-expanded'), 'false');
+    fireEvent.click(row);
+    assert.equal(row.getAttribute('aria-expanded'), 'true');
+    assert.equal((container.textContent ?? '').includes('Read'), true);
+    assert.equal((container.textContent ?? '').includes('Bash'), true);
+  });
+
+  it('يعرض شرطة للحقول المجهولة ولا يخترع اسماً أو نموذجاً أو جهداً', () => {
+    renderCard({ agents: [agent({ type: '', description: '' })] });
+
+    assert.equal(screen.getByLabelText('agentActivity.name').textContent?.trim(), '—');
+    assert.equal(screen.getByLabelText('agentActivity.model').textContent?.trim(), '—');
+    assert.equal(screen.getByLabelText('agentActivity.effort').textContent?.trim(), '—');
+  });
+
+  it('يستخدم الوصف كاسم فقط عند غياب اسم الدور', () => {
+    const { container } = renderCard({
+      agents: [agent({ agentName: undefined, type: '', description: 'Inspect the logs' })],
+    });
+
+    assert.equal((container.textContent ?? '').includes('Inspect the logs'), true);
+  });
+
   it('وكيل حيّ بعد تحديث الصفحة (callCount = 0) ⇒ لا شارة عدّاد ولا «0»', () => {
     const { container } = renderCard({ agents: [agent({ callCount: 0 })] });
 
@@ -364,8 +402,8 @@ describe('عنوان الورشة الخلفية', () => {
 
     const text = container.textContent ?? '';
     assert.equal(/0\/3 running/.test(text), false, `الملخّص ما يزال يقول running: ${text}`);
-    assert.equal(text.includes('1/3'), true, text);
-    assert.equal(text.includes('1/3 done'), false, 'العدّ المنتهي يظهر في الشارة وحدها لا بنصّ مكرَّر');
+    assert.equal(text.includes('1 done'), true, text);
+    assert.equal(/\d\/\d/.test(text.replace(/#\d+/g, '').replace(/[0-9a-f]{8}/g, '')), false, 'صيغة x/N يجب ألّا تظهر');
   });
 
   it('الحزمة الحقيقية: مفتاح unknown لا يترجم إلى «running»', async () => {
@@ -550,5 +588,62 @@ describe('إخفاء الوكلاء المكتملين', () => {
 
     assert.equal(screen.queryByLabelText('Hide completed agents'), null);
     assert.equal(screen.queryByLabelText('Show completed agents'), null);
+  });
+});
+
+// ── مؤشّر الوكلاء الموحّد (بدل شارتين بصيغة x/N) ─────────────────────────────
+describe('مؤشّر الوكلاء الموحّد', () => {
+  function renderCounts(statuses: string[]) {
+    return render(
+      <AgentStatusCard
+        agents={statuses.map((status, i) =>
+          agent({ id: `c${i}`, type: `t${i}`, status: status as never }),
+        )}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={() => {}}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+      />,
+    );
+  }
+
+  it('منتهٍ + جارٍ ⇒ شارة واحدة «2 done · 1 running» بلا صيغة x/N', () => {
+    const { container } = renderCounts(['done', 'done', 'running']);
+    const chip = screen.getByTestId('agent-counts-chip').textContent ?? '';
+    assert.equal(chip, '2 done · 1 running');
+    assert.equal(/\d\/\d/.test(container.textContent ?? ''), false);
+    assert.equal(screen.queryByLabelText('Show completed agents') !== null, true);
+  });
+
+  it('منتهٍ فقط (لا جارٍ) ⇒ «2 done» وحدها', () => {
+    renderCounts(['done', 'done']);
+    assert.equal(screen.getByTestId('agent-counts-chip').textContent, '2 done');
+  });
+
+  it('جارٍ فقط ⇒ نصّ «1 running» بلا زرّ تبديل', () => {
+    const { container } = renderCounts(['running']);
+    assert.equal((container.textContent ?? '').includes('1 running'), true);
+    assert.equal(screen.queryByTestId('agent-counts-chip'), null);
+  });
+});
+
+describe('تصريف نصوص المؤشّر العربية', () => {
+  it('الصيغ المفردة والمثنى والجمع تُحلّ من chat.json', async () => {
+    const i18next = (await import('i18next')).default;
+    const ar = (await import('../../../../i18n/locales/ar/chat.json')).default;
+    const inst = i18next.createInstance();
+    await inst.init({ lng: 'ar', resources: { ar: { chat: ar } }, ns: ['chat'], defaultNS: 'chat' });
+    const f = (k: string, count: number) =>
+      inst.t(`agentActivity.${k}`, { count, n: String(count) });
+    assert.equal(f('agentsCompleted', 1), 'منتهٍ');
+    assert.equal(f('agentsCompleted', 2), 'منتهيان');
+    assert.equal(f('agentsCompleted', 3), '3 منتهون');
+    assert.equal(f('agentsCompleted', 11), '11 منتهياً');
+    assert.equal(f('agentsRunning', 1), 'يعمل');
+    assert.equal(f('agentsRunning', 2), 'يعملان');
+    assert.equal(f('agentsRunning', 5), '5 يعملون');
+    assert.equal(f('agentsRunning', 11), '11 يعمل');
   });
 });

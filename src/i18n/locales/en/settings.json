@@ -108,6 +108,31 @@
     "notYet": "None",
     "error": "The global update setting could not be loaded."
   },
+  "prestageSettings": {
+    "title": "Nassaj updates",
+    "description": "How this server gets ready for new Nassaj releases.",
+    "loading": "Loading…",
+    "enabledLabel": "Prepare updates in advance",
+    "enabledHelp": "Prepares the new release in the background so updating is faster",
+    "hoursLabel": "Wait before preparing (hours)",
+    "hoursHint": "0 = immediately",
+    "hoursError": "Enter a whole number from {{min}} to {{max}}.",
+    "lockedByEnv": "Turned off by server settings",
+    "overriddenByEnv": "Set by server settings",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Setting saved.",
+    "loadFailed": "Could not load the update preparation setting.",
+    "retry": "Retry",
+    "errors": {
+      "settingsInvalid": "The server rejected an incomplete setting. Reload the page and save again.",
+      "enabledInvalid": "Invalid prepare-in-advance value. Reload the page and save again.",
+      "hoursInvalid": "The wait must be a whole number from {{min}} to {{max}} hours.",
+      "rateLimited": "Too many save attempts. Wait a minute and try again.",
+      "forbidden": "Only the owner can change this setting.",
+      "saveFailed": "Could not save the setting. Your changes are kept; you can save again."
+    }
+  },
   "permissionFences": {
     "title": "Permission fences",
     "description": "When a run ends and its effect is unknown, Nassaj pauses launches as a precaution until the owner reviews it.",
@@ -298,7 +323,6 @@
       "viewOptions": "View Options",
       "inputSettings": "Input Settings"
     },
-    "darkMode": "Dark Mode",
     "autoExpandTools": "Auto-expand tools",
     "showRawParameters": "Show raw parameters",
     "showThinking": "Show thinking",
@@ -879,7 +903,8 @@
       "description": "Choose light, dark, or follow your system setting automatically",
       "light": "Light",
       "dark": "Dark",
-      "system": "System"
+      "system": "System",
+      "cycleLabel": "Theme: {{current}}. Switch to {{next}}"
     },
     "themePresets": {
       "title": "Theme",
@@ -1211,6 +1236,19 @@
     "deleteAria": "Delete key {{name}}"
   },
   "agents": {
+    "defaults": {
+      "agent": {
+        "label": "Default agent",
+        "description": "The Agents tab opens on this agent unless a link names another one.",
+        "makeDefault": "Make default",
+        "current": "Default",
+        "indicator": "Default"
+      },
+      "coordinationLevel": {
+        "label": "Default delegation mode",
+        "description": "Applies to new conversations and to any conversation without its own choice; a choice made inside a conversation still wins."
+      }
+    },
     "authStatus": {
       "checking": "Checking...",
       "connected": "Connected",
@@ -2822,6 +2860,13 @@
       "usePasskey": "Use passkey",
       "openProfile": "Open Profile"
     },
+    "ownerSignIn": {
+      "title": "Your sign-in",
+      "label": "Allow me to sign in with SSO using a passkey",
+      "description": "Your identity provider sign-in must include your passkey; if you signed in there with a password only, Nassaj asks for your key once. Your password and passkey here always keep working.",
+      "notLinked": "Your account is not linked to the identity provider in use, so this cannot be turned on.",
+      "stepUpIntro": "Confirm it's you with your password or passkey here to allow SSO sign-in for your owner account."
+    },
     "technical": {
       "title": "Technical details",
       "ignoredEnv": "These old server variables are no longer used:",
@@ -2899,6 +2944,9 @@
       "password_change_required": "Change your password first, then come back.",
       "no_eligible_passkey": "You have no passkey that can confirm this. Use your password.",
       "passkey_failed": "The passkey could not confirm it's you. Try again or use your password.",
+      "owner_sso_not_linked": "Your account is not linked to the identity provider in use.",
+      "oidc_duplicate_links": "Your account has more than one link to this identity provider. Remove the extra links first.",
+      "owner_sso_invalid": "This request is not valid. Reload the page and try again.",
       "field": {
         "generic": "One of the values is not valid. Check the fields and try again.",
         "issuer": "Enter the identity provider address exactly, starting with https://.",

@@ -129,7 +129,19 @@ export function createClaudeProgressFold(mode: 'history' | 'live', sessionId: st
   });
 
   const fold = (raw: AnyRecord, rows: NormalizedMessage[]): NormalizedMessage[] => {
-    subagents.observe(raw, rows);
+    const subagentUpdates = subagents.observe(raw, rows);
+    if (mode === 'live') {
+      const base = typeof raw.uuid === 'string' && raw.uuid ? raw.uuid : generateMessageId('claude');
+      const rowSessionId = raw.session_id ?? raw.sessionId ?? sessionId;
+      subagentUpdates.forEach((subagent, index) => rows.push(createNormalizedMessage({
+        id: `${base}_agent_tools_${subagent.id}_${index}`,
+        sessionId: rowSessionId,
+        provider: 'claude',
+        timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : undefined,
+        kind: 'status',
+        subagent,
+      })));
+    }
     return taskPlan.observe(raw, rows);
   };
 

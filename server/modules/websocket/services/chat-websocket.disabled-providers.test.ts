@@ -31,6 +31,7 @@ import type { WebSocketWriter } from '@/modules/websocket/services/websocket-wri
 import { DISABLED_PROVIDERS } from '../../../../shared/disabledProviders.js';
 import { PROVIDER_REMOVED_CODE, RETIRED_PROVIDER_IDS } from '../../../../shared/retiredProviders.js';
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
@@ -40,6 +41,7 @@ import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand 
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: () => ({ project_id: 'test-project' }),
       isProjectVisibleToUser: () => true,

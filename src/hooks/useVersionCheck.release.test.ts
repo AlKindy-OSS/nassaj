@@ -509,3 +509,35 @@ it('local main shows an update at the same version and never discovers a remote 
   expect(hook.result.current.releaseInfo).toBeNull();
   hook.unmount();
 });
+
+describe('ADR-207 prestage on the release endpoint', () => {
+  const release = (extra: Record<string, unknown>) => response(200, {
+    success: true, version: '99.0.0.0', tagName: 'v99.0.0.0', ...extra,
+  });
+
+  it('exposes a ready prestage for the offered release', async () => {
+    authenticatedFetch.mockResolvedValue(release({
+      prestage: { state: 'ready', version: '99.0.0.0', quarantineUntil: null, notPrestagedReason: null, readySince: null },
+    }));
+    const hook = renderHook(() => useVersionCheck());
+    await waitFor(() => expect(hook.result.current.prestageReady).toBe(true));
+    expect(hook.result.current.prestage?.state).toBe('ready');
+  });
+
+  it('is null and not ready when the server omits it (non-owner)', async () => {
+    authenticatedFetch.mockResolvedValue(release({}));
+    const hook = renderHook(() => useVersionCheck());
+    await waitFor(() => expect(hook.result.current.latestVersion).toBe('99.0.0.0'));
+    expect(hook.result.current.prestage).toBeNull();
+    expect(hook.result.current.prestageReady).toBe(false);
+  });
+
+  it('a ready build for another version does not mark the badge', async () => {
+    authenticatedFetch.mockResolvedValue(release({
+      prestage: { state: 'ready', version: '98.0.0.0', quarantineUntil: null, notPrestagedReason: null, readySince: null },
+    }));
+    const hook = renderHook(() => useVersionCheck());
+    await waitFor(() => expect(hook.result.current.prestage?.version).toBe('98.0.0.0'));
+    expect(hook.result.current.prestageReady).toBe(false);
+  });
+});

@@ -44,11 +44,13 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
   const [focusCompanyId, setFocusCompanyId] = useState<string | undefined>(
     deepLink?.tab === 'vendors' ? deepLink.companyId : undefined,
   );
+  // ‏`agent` غائب بلا رابط عميق: يحلّه `AgentsSettingsTab` إلى الوكيل
+  // الافتراضي الذي اختاره المستخدم (أو `claude`)، فلا يُثبَّت هنا مسبقاً.
   const [agentDestination, setAgentDestination] = useState<{
-    agent: AgentProvider;
+    agent?: AgentProvider;
     category: AgentCategory;
   }>({
-    agent: deepLink?.tab === 'agents' && deepLink.agent ? deepLink.agent : 'claude',
+    agent: deepLink?.tab === 'agents' && deepLink.agent ? deepLink.agent : undefined,
     category: deepLink?.tab === 'agents' && deepLink.category ? deepLink.category : 'account',
   });
   // Whether the «النماذج المحلية» grid card is active inside the Agents tab.
@@ -89,7 +91,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
       setLocalModelsActiveInAgents(Boolean(deepLink.localModels));
       if (!deepLink.localModels) {
         setAgentDestination({
-          agent: deepLink.agent ?? 'claude',
+          agent: deepLink.agent,
           category: deepLink.category ?? 'account',
         });
       }

@@ -42,6 +42,8 @@ async function fixture(t, automatic = false) {
     };
     const operations = {
         readBuildProfile: () => null, // Injected mechanics fixture; production CLI has no profile bypass.
+        // Host load is not a fixture input: an unrelated busy host must not fail or hang mechanics tests.
+        resourcesBusy: () => false,
         run(executable, args, options) {
             assert.equal(executable, 'npm');
             if (args[0] === 'ci') {
@@ -289,14 +291,15 @@ test('main advances during build: retire stale output and prepare only latest ma
     assert.equal(builds, 2);
 });
 
-test('a build interrupted with an orphan child cannot be retried merely because its parent died', async t => {
+test('a build interrupted with an orphan child cannot be retried merely because its parent died', { timeout: 60_000 }, async t => {
     const v = await fixture(t);
     const { spawn } = await import('node:child_process');
     const { once } = await import('node:events');
     const moduleUrl = new URL('./oid-update-candidate.mjs', import.meta.url).href;
     const program = `import { buildOidTripleCandidate } from ${JSON.stringify(moduleUrl)};
 import { spawn } from 'node:child_process';
-await buildOidTripleCandidate(JSON.parse(process.argv[1]), { readBuildProfile: () => null, materialize: async () => {
+await buildOidTripleCandidate(JSON.parse(process.argv[1]), { readBuildProfile: () => null, resourcesBusy: () => false,
+    materialize: async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
     process.stdout.write(String(child.pid)+'\\n'); await new Promise(()=>{});
 } });`;
@@ -308,11 +311,24 @@ await buildOidTripleCandidate(JSON.parse(process.argv[1]), { readBuildProfile: (
         if (descendant) try { process.kill(descendant, 'SIGTERM'); } catch {}
         if (builder.exitCode === null && builder.signalCode === null) builder.kill('SIGTERM');
     });
-    const [bytes] = await once(builder.stdout, 'data'); descendant = Number(bytes.toString().trim());
+    let stderr = ''; builder.stderr.on('data', chunk => { stderr += chunk; });
+    // A builder that exits before reporting its child would otherwise leave this wait pending forever.
+    const exitedEarly = once(builder, 'close').then(([code, signal]) => {
+        throw new Error(`builder exited before spawning its child (${code ?? signal}): ${stderr.trim()}`);
+    });
+    const [bytes] = await Promise.race([once(builder.stdout, 'data'), exitedEarly]);
+    exitedEarly.catch(() => {}); descendant = Number(bytes.toString().trim());
     assert.ok(descendant > 1); process.kill(descendant, 0);
     const closed = once(builder, 'close'); builder.kill('SIGTERM'); await closed;
     process.kill(descendant, 0);
     await assert.rejects(buildOidTripleCandidate(v, { readBuildProfile: () => null, materialize: () => assert.fail('must not start a second heavy build') }), /build_recovery_required/);
+});
+
+test('a busy host refuses the heavy build before claiming it', async t => {
+    const v = await fixture(t);
+    await assert.rejects(buildOidTripleCandidate(v, { ...v.operations, resourcesBusy: () => true,
+        materialize: () => assert.fail('a busy host must not start a heavy build') }), /local_update_resources_busy/);
+    assert.equal(fs.existsSync(path.join(v.root, '.git/nassaj-local-update-build-attempt-v1.json')), false);
 });
 
 test('main changed before the heavy build does not leave an interrupted build claim', async t => {

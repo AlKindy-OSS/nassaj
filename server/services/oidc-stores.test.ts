@@ -150,3 +150,19 @@ test('ADR-194 D9: an unredeemed code can be discarded and a grant revoked', () =
     false);
   assert.equal(grants.revoke(42 as never), false);
 });
+
+test('ADR-194 A1: a login entry may carry ownerStepUp: true (the loop guard), nothing else may', () => {
+  const store = createOidcPkceStore();
+  const browser = transaction('S');
+  const secrets = { nonce: 'n', codeVerifier: 'v', browserTransaction: browser, ...V };
+  assert.equal(store.store('step', { ...secrets, ownerStepUp: true } as never), true);
+  assert.deepEqual(store.consume('step', browser), {
+    nonce: 'n', codeVerifier: 'v', purpose: 'login', configVersion: 3, ownerStepUp: true,
+  });
+  for (const binding of [
+    { ownerStepUp: false }, { ownerStepUp: '1' },
+    { purpose: 'link', userId: 12, requestedAtMs: 1, ownerStepUp: true },
+  ]) {
+    assert.equal(store.store('bad', { ...secrets, ...binding } as never), false, JSON.stringify(binding));
+  }
+});

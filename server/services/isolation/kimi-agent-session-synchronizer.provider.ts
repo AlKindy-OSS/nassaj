@@ -243,6 +243,7 @@ export class KimiAgentSessionSynchronizer implements IProviderSessionSynchronize
       createdAt: timestamps.createdAt,
       updatedAt: timestamps.updatedAt,
       jsonlPath: filePath,
+      origin: 'watcher',
     });
   }
 

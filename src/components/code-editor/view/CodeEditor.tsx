@@ -10,6 +10,7 @@ import { useEditorKeyboardShortcuts } from '../hooks/useEditorKeyboardShortcuts'
 import type { CodeEditorFile } from '../types/types';
 import { createMinimapExtension, createScrollToFirstChunkExtension, getLanguageExtensions } from '../utils/editorExtensions';
 import { getEditorStyles } from '../utils/editorStyles';
+import { getOfficeFormat, isLegacyOfficeFile } from '../utils/officeDocument';
 import { createEditorToolbarPanelExtension } from '../utils/editorToolbarPanel';
 import CodeEditorFooter from './subcomponents/CodeEditorFooter';
 import CodeEditorHeader from './subcomponents/CodeEditorHeader';
@@ -18,6 +19,7 @@ import CodeEditorCloseConfirm from './subcomponents/CodeEditorCloseConfirm';
 import CodeEditorSurface from './subcomponents/CodeEditorSurface';
 import CodeEditorBinaryFile from './subcomponents/CodeEditorBinaryFile';
 import CodeEditorMediaPreview from './subcomponents/CodeEditorMediaPreview';
+import CodeEditorOfficePreview from './subcomponents/office/CodeEditorOfficePreview';
 
 type CodeEditorProps = {
   file: CodeEditorFile;
@@ -249,9 +251,40 @@ export default function CodeEditor({
     );
   }
 
+  // Office documents (Word, spreadsheets, presentations, OpenDocument) get a
+  // read-only preview. Keyed by path so a file switch never shows the
+  // previous file's content.
+  const officeFormat = getOfficeFormat(file.name);
+  if (officeFormat && !secretDeclined) {
+    return (
+      <CodeEditorOfficePreview
+        key={`${fileProjectId ?? ''}:${file.path}`}
+        file={file}
+        format={officeFormat}
+        projectId={fileProjectId}
+        isSidebar={isSidebar}
+        isFullscreen={isFullscreen}
+        isDarkMode={isDarkMode}
+        onClose={onClose}
+        onToggleFullscreen={() => setIsFullscreen((previous) => !previous)}
+      />
+    );
+  }
+
   // Binary file display; also used when the user declined to open a secrets
   // file (B-1593), so no empty buffer can be typed into and saved over it.
+  // Legacy Office files (doc/xls/ppt) explain that they are download-only.
   if (isBinary || secretDeclined) {
+    const isLegacyOffice = !secretDeclined && isLegacyOfficeFile(file.name);
+    let binaryScreenTitle = t('binaryFile.title', 'Binary File');
+    let binaryScreenMessage = t('binaryFile.message', 'The file "{{fileName}}" cannot be displayed in the text editor because it is a binary file.', { fileName: file.name });
+    if (secretDeclined) {
+      binaryScreenTitle = t('common:secretFile.title', 'Secrets file');
+      binaryScreenMessage = t('common:secretFile.declined', 'Not opened: this is a secrets file and opening it was not confirmed.');
+    } else if (isLegacyOffice) {
+      binaryScreenTitle = t('officePreview.legacyTitle');
+      binaryScreenMessage = t('officePreview.legacyMessage', { fileName: file.name });
+    }
     return (
       <CodeEditorBinaryFile
         file={file}
@@ -260,12 +293,8 @@ export default function CodeEditor({
         isFullscreen={isFullscreen}
         onClose={onClose}
         onToggleFullscreen={() => setIsFullscreen((previous) => !previous)}
-        title={secretDeclined
-          ? t('common:secretFile.title', 'Secrets file')
-          : t('binaryFile.title', 'Binary File')}
-        message={secretDeclined
-          ? t('common:secretFile.declined', 'Not opened: this is a secrets file and opening it was not confirmed.')
-          : t('binaryFile.message', 'The file "{{fileName}}" cannot be displayed in the text editor because it is a binary file.', { fileName: file.name })}
+        title={binaryScreenTitle}
+        message={binaryScreenMessage}
       />
     );
   }

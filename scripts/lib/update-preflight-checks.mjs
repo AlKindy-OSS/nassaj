@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { compareNassajReleaseVersions, isNassajReleaseVersion } from '../../shared/release-version-policy.js';
+import { compareNassajReleaseVersions, isNassajReleaseVersion, releaseTagForVersion } from '../../shared/release-version-policy.js';
 import { selectLatestAnnotatedReleaseTag } from '../../server/services/git-tag-release-discovery.js';
 import { normalizeGitHubRepositoryIdentity, resolveReleaseSource } from '../../server/services/release-source-config.js';
 import { releaseGitEnvironment, resolveGovernedSshCommand } from '../../server/services/source-updater.js';
@@ -446,7 +446,44 @@ function checkAnnotatedTag({ lsRemoteStdout, source, selectTag }) {
     };
 }
 
-async function checkNonFastForward({ git, target, targetIsLocal, remote, branch }) {
+const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/**
+ * The commit `refs/tags/<tag>` names in `git ls-remote --tags` output: the
+ * peeled `^{}` line for an annotated tag, else the direct line. Null when absent.
+ */
+export function remoteTagCommit(lsRemoteStdout, tag) {
+    if (typeof lsRemoteStdout !== 'string') return null;
+    let direct = null;
+    for (const line of lsRemoteStdout.split('\n')) {
+        const [oid, ref] = line.trim().split('\t');
+        if (!OBJECT_ID.test(oid || '')) continue;
+        if (ref === `refs/tags/${tag}^{}`) return oid;
+        if (ref === `refs/tags/${tag}`) direct = oid;
+    }
+    return direct;
+}
+
+/**
+ * B-1625: the local commit of the release this node runs (`v<installed>`). The
+ * governed updater fetches into private refs and never advances the tracking
+ * ref, so the release commits it installed are not local customization. When the
+ * pinned source's tag list was read, it is the SOLE authority: a tag it omits,
+ * or a commit not in the local object store, yields null, so a local
+ * `git tag v<installed>` on a customized commit cannot clear the check. The local
+ * tag is consulted only when that list is unavailable. Null on unknown version.
+ */
+async function installedReleaseCommit({ git, installedVersion, lsRemoteStdout }) {
+    if (!isNassajReleaseVersion(installedVersion)) return null;
+    const tag = releaseTagForVersion(installedVersion);
+    const candidate = typeof lsRemoteStdout === 'string' ? remoteTagCommit(lsRemoteStdout, tag) : `refs/tags/${tag}`;
+    if (!candidate) return null;
+    const resolved = await git(['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`]);
+    const oid = resolved.stdout.trim();
+    return resolved.ok && OBJECT_ID.test(oid) ? oid : null;
+}
+
+async function checkNonFastForward({ git, target, targetIsLocal, remote, branch, installedVersion, lsRemoteStdout }) {
     if (target && targetIsLocal) {
         const ancestor = await git(['merge-base', '--is-ancestor', 'HEAD', target.commit]);
         if (ancestor.ok) {
@@ -456,26 +493,39 @@ async function checkNonFastForward({ git, target, targetIsLocal, remote, branch 
             { ar: `توجد commits محلية على ${branch} تمنع التقدّم السريع إلى v${target.version}.`, en: `Local commits on ${branch} block a fast-forward to v${target.version}.` },
             { ar: 'انقل التخصيص إلى overlay الإعدادات؛ لا إصلاح آلي ولا reset --hard على تاريخ العقدة.', en: 'Move the customization into the configuration overlay; there is no automatic fix and no reset --hard on node history.' });
     }
+    const installedCommit = await installedReleaseCommit({ git, installedVersion, lsRemoteStdout });
+    return checkAheadOfKnownHistory({ git, remote, branch, installedVersion, installedCommit });
+}
+
+/**
+ * Count commits on HEAD that neither the tracking ref nor the installed release
+ * contains. Only those are local customization; an undeterminable count never
+ * clears (warning), and the updater's post-fetch check stays the binding gate.
+ */
+async function checkAheadOfKnownHistory({ git, remote, branch, installedVersion, installedCommit }) {
     const trackingRef = `refs/remotes/${remote}/${branch}`;
     const tracking = await git(['rev-parse', '--verify', '--quiet', trackingRef]);
-    if (!tracking.ok) {
+    if (!tracking.ok && !installedCommit) {
         return warning('non_fast_forward',
             { ar: `لا مرجع تتبّع ${remote}/${branch} محلياً ولا هدف محلول، فلم يُحسم التقدّم السريع.`, en: `Neither a local ${remote}/${branch} tracking ref nor a resolved target exists, so fast-forward could not be decided.` },
             { ar: 'شغّل الفحص بعد أول سحب ناجح لمرجع التتبّع.', en: 'Re-run after the tracking ref has been fetched once.' });
     }
-    const ahead = await git(['rev-list', '--count', `${trackingRef}..HEAD`]);
+    const known = [tracking.ok ? trackingRef : null, installedCommit].filter(Boolean);
+    const ahead = await git(['rev-list', '--count', 'HEAD', '--not', ...known]);
     const count = Number(ahead.stdout.trim());
+    const base = installedCommit ? `${remote}/${branch} or release v${installedVersion}` : `${remote}/${branch}`;
+    const baseAr = installedCommit ? `${remote}/${branch} أو الإصدار v${installedVersion}` : `${remote}/${branch}`;
     if (ahead.ok && Number.isSafeInteger(count) && count > 0) {
         return blocker('non_fast_forward',
-            { ar: `${count} commit محلي يسبق ${remote}/${branch} ويقطع مسار التقدّم السريع.`, en: `${count} local commit(s) ahead of ${remote}/${branch} break the fast-forward path.` },
+            { ar: `${count} commit محلي ليس في ${baseAr} ويقطع مسار التقدّم السريع.`, en: `${count} local commit(s) not in ${base} break the fast-forward path.` },
             { ar: 'انقل التخصيص إلى overlay الإعدادات؛ لا إصلاح آلي.', en: 'Move the customization into the configuration overlay; there is no automatic fix.' });
     }
-    if (!ahead.ok) {
+    if (!ahead.ok || !Number.isSafeInteger(count)) {
         return warning('non_fast_forward',
             { ar: 'تعذّر عدّ الـcommits المحلية أمام مرجع التتبّع.', en: 'Counting local commits ahead of the tracking ref failed.' },
             { ar: 'تحقّق من سلامة شجرة git ثم أعد الفحص.', en: 'Verify the git tree, then re-run.' });
     }
-    return clear('non_fast_forward', { ar: `لا commits محلية أمام ${remote}/${branch}.`, en: `No local commits ahead of ${remote}/${branch}.` });
+    return clear('non_fast_forward', { ar: `لا commits محلية خارج ${baseAr}.`, en: `No local commits outside ${base}.` });
 }
 
 /**
@@ -1094,7 +1144,9 @@ export async function runUpdatePreflightChecks({
         ? (await localGit(['rev-parse', '--verify', '--quiet', `${target.commit}^{commit}`])).ok
         : false;
 
-    const nonFastForward = await checkNonFastForward({ git: localGit, target, targetIsLocal, remote, branch });
+    const nonFastForward = await checkNonFastForward({
+        git: localGit, target, targetIsLocal, remote, branch, installedVersion: installed, lsRemoteStdout: stdout,
+    });
     // Attach `details.divergence` (M9) only when the release is local and the jump
     // is actually blocked: this changes the text, never the code or severity.
     let divergence = null;

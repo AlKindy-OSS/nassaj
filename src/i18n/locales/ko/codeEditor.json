@@ -40,5 +40,30 @@
     "message": "파일 \"{{fileName}}\"은(는) 바이너리 파일이므로 텍스트 편집기에서 표시할 수 없습니다.",
     "download": "다운로드",
     "downloadError": "파일을 다운로드할 수 없습니다."
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "이전 Office 형식",
+    "legacyMessage": "\"{{fileName}}\"은(는) 미리 볼 수 없는 이전 Office 형식(.doc, .xls, .ppt)입니다. 다운로드하여 확인하세요.",
+    "rowsShown": "전체 {{total}}행 중 {{shown}}행을 표시합니다.",
+    "showMoreRows": "행 더 보기",
+    "noSlides": "이 프레젠테이션에는 슬라이드가 없습니다.",
+    "textNotice": "텍스트만 표시: 레이아웃, 이미지, 서식은 표시되지 않습니다.",
+    "emptyDocument": "이 문서에는 텍스트가 없습니다.",
+    "textTruncated": "문서의 앞부분만 표시됩니다.",
+    "secretNotPreviewed": "\"{{fileName}}\"은(는) 비밀 파일이므로 미리 보기를 표시하지 않습니다."
   }
 }

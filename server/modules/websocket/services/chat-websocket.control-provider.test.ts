@@ -18,10 +18,12 @@ import test, { mock } from 'node:test';
 import type { LLMProvider } from '@/shared/types.js';
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+import { chatImageStoreDatabaseLinkStubs } from '../../../../tests/helpers/chat-image-store-link-stubs.js';
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
+    ...chatImageStoreDatabaseLinkStubs(),
     projectsDb: { getProjectPath: () => null, isProjectVisibleToUser: () => true },
     sessionsDb: { getSessionById: () => null },
     sessionOutcomesDb: { getOutcomeForBroadcast: () => null },

@@ -7,7 +7,9 @@
  * scanner here is linear in the input: fixed tag names, bounded lookaheads and
  * no backtracking regex over unbounded runs.
  */
-import { DOCUMENT_SHARING_INSTRUCTIONS, stripRuntimeInstructionsPrefix } from '../../shared/documentSharingInstructions.js';
+import {
+  DOCUMENT_SHARING_INSTRUCTIONS, QUICK_REPLY_TAG, stripRuntimeInstructionsPrefix,
+} from '../../shared/documentSharingInstructions.js';
 import { PUBLIC_PAGE_TAG } from '../../shared/publicPageGuidance.js';
 
 import { redactForShare } from './secret-patterns.js';
@@ -24,7 +26,7 @@ const STRIPPED_TAGS = new Set([
   'system-reminder', 'command-name', 'command-message', 'command-args', 'command-contents',
   'local-command-stdout', 'local-command-stderr', 'local-command-caveat', 'user-prompt-submit-hook',
   'bash-input', 'bash-stdout', 'bash-stderr', 'task-notification', 'subagent_notification',
-  'nassaj_document_sharing', PUBLIC_PAGE_TAG, 'coordination', 'environment_context',
+  'nassaj_document_sharing', PUBLIC_PAGE_TAG, QUICK_REPLY_TAG, 'coordination', 'environment_context',
   'recommended_plugins', 'instructions', 'user_instructions', 'permissions', 'plugins_instructions',
   'multi_agent_role', 'multi_agent_mode', 'turn_aborted', 'system_message', 'additional_metadata',
 ]);

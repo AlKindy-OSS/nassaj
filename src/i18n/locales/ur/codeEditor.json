@@ -40,5 +40,30 @@
     "message": "فائل \"{{fileName}}\" بائنری ہے، اس لیے متن کے ایڈیٹر میں نہیں دکھائی جا سکتی۔",
     "download": "ڈاؤن لوڈ",
     "downloadError": "فائل ڈاؤن لوڈ نہیں ہو سکی۔"
+  },
+  "officePreview": {
+    "readOnly": "Read-only preview",
+    "loading": "Preparing preview…",
+    "unavailableTitle": "Preview unavailable",
+    "tooLarge": "The file \"{{fileName}}\" is too large to preview (maximum {{limit}} MB). You can download it instead.",
+    "failed": "Couldn't preview \"{{fileName}}\". The file may be damaged or in an unsupported format. You can download it instead.",
+    "documentFrameTitle": "Preview of {{fileName}}",
+    "sheetTabs": "Sheets",
+    "untitledSheet": "Sheet {{number}}",
+    "emptySheet": "This sheet is empty.",
+    "truncated": "Only the first {{rows}} rows and {{columns}} columns are shown.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No text on this slide.",
+    "slidesNotice": "Text only: layout, images and formatting are not shown.",
+    "slidesTruncated": "Only the first {{count}} slides are shown.",
+    "legacyTitle": "پرانا Office فارمیٹ",
+    "legacyMessage": "فائل «{{fileName}}» پرانے Office فارمیٹ (‎.doc، ‎.xls یا ‎.ppt) میں ہے جس کا پیش منظر ممکن نہیں۔ دیکھنے کے لیے اسے ڈاؤن لوڈ کریں۔",
+    "rowsShown": "{{total}} میں سے {{shown}} قطاریں دکھائی جا رہی ہیں۔",
+    "showMoreRows": "مزید قطاریں دکھائیں",
+    "noSlides": "اس پریزنٹیشن میں کوئی سلائیڈ نہیں۔",
+    "textNotice": "صرف متن: لے آؤٹ، تصاویر اور فارمیٹنگ نہیں دکھائی جاتیں۔",
+    "emptyDocument": "اس دستاویز میں کوئی متن نہیں۔",
+    "textTruncated": "دستاویز کا صرف ابتدائی حصہ دکھایا گیا ہے۔",
+    "secretNotPreviewed": "فائل «{{fileName}}» رازوں کی فائل ہے، اس لیے اس کا پیش منظر نہیں دکھایا جاتا۔"
   }
 }

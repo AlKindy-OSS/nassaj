@@ -109,7 +109,6 @@
       "viewOptions": "Anzeigeoptionen",
       "inputSettings": "Eingabeeinstellungen"
     },
-    "darkMode": "Darkmode",
     "autoExpandTools": "Werkzeuge automatisch erweitern",
     "showRawParameters": "Rohe Parameter anzeigen",
     "showThinking": "Denken anzeigen",
@@ -459,7 +458,8 @@
       "description": "Wähle hell, dunkel oder automatisch die Systemeinstellung",
       "light": "Hell",
       "dark": "Dunkel",
-      "system": "System"
+      "system": "System",
+      "cycleLabel": "Design: {{current}}. Wechseln zu {{next}}"
     },
     "themePresets": {
       "title": "Design",

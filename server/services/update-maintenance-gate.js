@@ -425,7 +425,18 @@ function resolvePaths(projectPath, commandRunner = spawnSync) {
     };
 }
 
-function flockAsync(lockPath, mode, { signal, waitMs = 30_000 } = {}) {
+/**
+ * Take a kernel `flock` on `lockPath` through a `flock(1)` child holding the
+ * fd. The kernel drops it when this process exits, so there is no stale-lock
+ * stealing. Rejects with `update_lock_contended` after `waitMs`, or
+ * `update_lock_aborted` on `signal`. Shared with the prestage slot (ADR-207
+ * §3.3, M3).
+ * @param {string} lockPath
+ * @param {'exclusive'|'shared'} mode
+ * @param {{signal?: AbortSignal, waitMs?: number}} [options]
+ * @returns {Promise<{release: () => void}>}
+ */
+export function flockAsync(lockPath, mode, { signal, waitMs = 30_000 } = {}) {
     const restricted = requireStartupAdmission();
     if (!restricted) fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
     const fd = restricted ? fs.openSync(lockPath, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW)

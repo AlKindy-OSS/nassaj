@@ -57,9 +57,9 @@
     "close": "닫기",
     "alerts": {
       "pressure": "제안 압축 기준에 도달함",
-      "close": "25만 토큰에 도달했습니다. 새 대화에서 이어가는 것을 고려하세요.",
+      "close": "{{value}} 토큰에 도달했습니다. 새 대화에서 이어가는 것을 고려하세요.",
       "hour": "세션 시작 후 한 시간이 지났습니다. 이어갈 요약 저장을 고려하세요.",
-      "compact": "15만 토큰에 도달했습니다. /compact 실행을 고려하세요."
+      "compact": "{{value}} 토큰에 도달했습니다. /compact 실행을 고려하세요."
     },
     "unavailable": "현재 컨텍스트 사용량을 알 수 없음"
   },
@@ -513,6 +513,10 @@
   },
   "agentActivity": {
     "title": "에이전트 활동",
+    "name": "에이전트 이름",
+    "model": "모델",
+    "effort": "추론 수준",
+    "inherited": "상속됨",
     "summary": "{{total}} 중 {{running}}개 실행 중",
     "running": "실행 중",
     "done": "완료",
@@ -523,6 +527,7 @@
     "detailsPlaceholder": "도구 히스토리가 곧 제공됩니다.",
     "noTools": "아직 기록된 도구 호출이 없습니다.",
     "toolSuccess": "완료",
+    "toolFailed": "실패",
     "toolRunning": "실행 중"
   },
   "projectSelection": {

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   isUniqueConflict,
+  oidcAlertDedupeKey,
   SELF_LINK_CLOCK_SKEW_MS,
   SELF_LINK_MAX_AUTH_AGE_MS,
   selfLinkAuthTimeFailure,
@@ -28,4 +29,11 @@ test('T-1939 slice 5: only SQLite constraint errors count as link conflicts', ()
   assert.equal(isUniqueConflict({ code: 'SQLITE_BUSY' }), false);
   assert.equal(isUniqueConflict(new Error('x')), false);
   assert.equal(isUniqueConflict(null), false);
+});
+
+test('ADR-194 A1: a dedupe suffix makes each owner SSO alert its own; none keeps the merged key', () => {
+  assert.equal(oidcAlertDedupeKey('member_linked', 12), 'oidc:member_linked:12');
+  assert.equal(oidcAlertDedupeKey('owner_sso_sign_in', 1, 'abc'), 'oidc:owner_sso_sign_in:1:abc');
+  assert.equal(oidcAlertDedupeKey('owner_sso_sign_in', 1, ''), 'oidc:owner_sso_sign_in:1');
+  assert.notEqual(oidcAlertDedupeKey('owner_sso_sign_in', 1, 'a'), oidcAlertDedupeKey('owner_sso_sign_in', 1, 'b'));
 });

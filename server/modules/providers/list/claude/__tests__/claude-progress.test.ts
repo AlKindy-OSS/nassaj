@@ -62,8 +62,14 @@ test('live: an Agent launch is started then running; its child row carries the p
   const agentId = 'toolu_01WcE3ua1KLZd5XE3Etd6sPo';
   const lifecycle = rows.filter((m) => m.subagent).map((m) => [m.kind, m.subagent]);
   assert.deepEqual(lifecycle, [
-    ['tool_use', { id: agentId, parentId: null, label: 'Reply OK', state: 'started' }],
-    ['tool_result', { id: agentId, parentId: null, label: 'Reply OK', state: 'running' }],
+    ['tool_use', {
+      id: agentId, parentId: null, label: 'Reply OK', state: 'started',
+      agentName: 'general-purpose', model: 'claude-haiku-4-5-20251001', modelInherited: true,
+    }],
+    ['tool_result', {
+      id: agentId, parentId: null, label: 'Reply OK', state: 'running',
+      agentName: 'general-purpose', model: 'claude-haiku-4-5-20251001',
+    }],
   ]);
   const child = rows.find((m) => m.kind === 'text' && m.content === 'OK');
   assert.equal(child?.parentToolUseId, agentId);
@@ -71,6 +77,33 @@ test('live: an Agent launch is started then running; its child row carries the p
   assert.equal(child?.subagent, undefined, 'subagent prose is not a lifecycle row');
   const todoResult = rows.find((m) => m.kind === 'tool_result' && m.toolId === 'toolu_01NQReCbsFjRsqPEtViRc7uM');
   assert.equal(todoResult?.subagent, undefined, 'non-delegation results stay untouched');
+});
+
+test('live: parent_tool_use_id streams child tool snapshots while the Agent is running', async () => {
+  const [sdk, transcript] = await Promise.all([
+    fixture('claude-progress-sdk-stream.real.json'),
+    fixture('claude-subagent-task-plan.real.json'),
+  ]);
+  const provider = new ClaudeSessionsProvider();
+  const fold = createClaudeProgressFold('live', SID);
+  const launch = sdk.events.find((event: Record<string, any>) => event.message?.content?.some((part: any) => part.name === 'Agent'));
+  const launchRows = provider.normalizeMessage(launch, SID);
+  fold.observe(launch, launchRows);
+  const parentId = launch.message.content.find((part: any) => part.name === 'Agent').id;
+  const childTool = transcript.subagent.find((entry: Record<string, any>) => entry.message?.content?.some((part: any) => part.type === 'tool_use'));
+  const rawChild = { ...childTool, parent_tool_use_id: parentId };
+  const childRows = provider.normalizeMessage(rawChild, SID);
+  fold.observe(rawChild, childRows);
+  assert.deepEqual(childRows.filter((row) => row.kind === 'status').map((row) => row.subagent?.tools), [[{ name: 'ToolSearch', status: 'running' }]]);
+
+  const toolId = childTool.message.content.find((part: any) => part.type === 'tool_use').id;
+  const rawResult = transcript.subagent.find((entry: Record<string, any>) =>
+    entry.message?.content?.some((part: any) => part.type === 'tool_result' && part.tool_use_id === toolId));
+  const resultEvent = { ...rawResult, parent_tool_use_id: parentId };
+  const resultRows = provider.normalizeMessage(resultEvent, SID);
+  fold.observe(resultEvent, resultRows);
+  assert.ok(resultRows.some((row) => row.kind === 'status'
+    && row.subagent?.tools?.some((tool) => tool.name === 'ToolSearch' && tool.status === 'completed')));
 });
 
 test('history: recorded transcript rows yield completed and failed lifecycles; light projection round-trips', async () => {

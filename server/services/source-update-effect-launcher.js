@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Inert durable-effect launcher. The governed command cannot start before gate release. */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -34,6 +35,17 @@ function killDescendants() {
     }
 }
 
+/**
+ * ADR-207 §3.7: a prestage build runs at niceness 19 and oom_score_adj 1000 so
+ * the kernel kills it before the live server. Applied to the CHILD right after
+ * exec, before it can fork npm (both are inherited at fork); the launcher
+ * itself keeps its own values, it must survive to kill its group. Best effort.
+ */
+function lowerChildPriority(pid) {
+    try { os.setPriority(pid, 19); } catch { /* not permitted: keep going */ }
+    try { fs.writeFileSync(`/proc/${pid}/oom_score_adj`, '1000'); } catch { /* not Linux or not permitted */ }
+}
+
 async function main() {
     let config;
     try { config = JSON.parse(process.argv[2]); } catch { process.exit(125); }
@@ -53,6 +65,7 @@ async function main() {
         try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     } catch { process.exit(125); }
     const child = spawn(config.command, config.args, { cwd: config.cwd, env: process.env, shell: false, stdio: 'inherit' });
+    if (config.lowPriority === true && child.pid) lowerChildPriority(child.pid);
     let parentTimer = setInterval(() => {
         if (parentAlive(config)) return;
         killDescendants();

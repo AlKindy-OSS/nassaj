@@ -65,6 +65,19 @@ const DENY_EXACT = new Set([
     'scripts/prepare-release-version.test.mjs',
 ]);
 
+// Directory trees that must not ship even though they sit under an allowed prefix.
+//   - the Office-preview Arabic fixtures are ZIP containers (docx/xlsx/pptx/odt/ods)
+//     the export leak gate cannot decode, so it refuses them rather than ship
+//     unscanned compressed content; their only reader is the private
+//     tests/e2e/office-preview-egress.browser.mjs (tests/ is not exported), and
+//     generate.py beside them only regenerates them;
+//   - the Office testing/fixtures/ docx/xlsx are the same undecodable ZIP class; the
+//     two shipped vitest cases that read them skip when the file is absent.
+const DENY_PREFIXES = [
+    'src/components/code-editor/utils/office/__fixtures__/ar/',
+    'src/components/code-editor/utils/office/testing/fixtures/',
+];
+
 // The operator-gate helpers carry the exact forbidden tokens they hunt for and
 // are private CI only — EXCEPT the two neutral, leak-clean modules the shipped
 // boundary test imports (the allow-list values and this path allow-list itself).
@@ -107,6 +120,7 @@ const APP_PREFIXES = ['src/', 'server/', 'shared/', 'public/', 'docker/', 'plugi
  */
 export function isPublicExportPath(relative) {
     if (DENY_EXACT.has(relative)) return false;
+    if (DENY_PREFIXES.some(prefix => relative.startsWith(prefix))) return false;
 
     if (APP_PREFIXES.some(prefix => relative.startsWith(prefix))) return true;
 
