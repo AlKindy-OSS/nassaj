@@ -48,6 +48,8 @@ type WebSocketAuthDependencies = {
     [key: string]: unknown;
   } | null;
   deviceSessionsEnabled?: () => boolean;
+  /** Whether a device secret names a live session (ADR-194 A3 ambiguity rule). */
+  deviceSessionLive?: (secret: string) => boolean;
   jwtSecret: string;
   recordRejection: (record: AuthRejectionRecord) => void;
   clientIp: (req: IncomingMessage | null | undefined) => string | null;
@@ -158,6 +160,11 @@ export function verifyWebSocketClient(
     .match(/(?:^|;\s*)__Host-nassaj_device=([^;]+)/);
   const deviceCookieActive = Boolean(cookieMatch)
     && (dependencies.deviceSessionsEnabled?.() ?? Boolean(dependencies.authenticateDeviceWebSocket));
+  // ADR-194 A3: a stale (revoked or undecodable) device cookie beside a bearer
+  // is ignored and the bearer decides; only a live session is ambiguous.
+  if (deviceCookieActive && token && cookieMatch && !liveDeviceCookie(cookieMatch[1], dependencies)) {
+    return authenticateBearer(request, token, dependencies);
+  }
   if (deviceCookieActive && token) {
     dependencies.recordRejection({
       reason: 'ambiguous_authentication',
@@ -190,6 +197,27 @@ export function verifyWebSocketClient(
     return true;
   }
 
+  return authenticateBearer(request, token, dependencies);
+}
+
+/** Whether the raw device cookie value names a live device session. */
+function liveDeviceCookie(raw: string, dependencies: WebSocketAuthDependencies): boolean {
+  let secret = '';
+  try {
+    secret = decodeURIComponent(raw);
+  } catch {
+    return false;
+  }
+  if (dependencies.deviceSessionLive) return dependencies.deviceSessionLive(secret);
+  return (dependencies.authenticateDeviceWebSocket?.(secret) ?? null) !== null;
+}
+
+/** The bearer (JWT or query token) half of the upgrade verifier, with its rejection audit. */
+function authenticateBearer(
+  request: AuthenticatedWebSocketRequest,
+  token: string | null,
+  dependencies: WebSocketAuthDependencies,
+): boolean {
   const user = dependencies.authenticateWebSocket(token);
   if (!user) {
     console.log('[WARN] WebSocket authentication failed');

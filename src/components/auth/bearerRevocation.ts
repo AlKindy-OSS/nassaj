@@ -18,6 +18,9 @@
 
 import { api } from '../../utils/api';
 
+import { reconcileRevokedIdentity } from './accountIdentityBarrier';
+import { AUTH_TOKEN_STORAGE_KEY } from './constants';
+
 export type BearerRevocationOutcome = 'signed_out' | 'reconnect' | 'stay_disconnected';
 
 export const BEARER_REVOCATION_RECONNECT_COOLDOWN_MS = 60_000;
@@ -51,4 +54,19 @@ export async function resolveBearerRevocation({
   if (at - lastReconnectAt < BEARER_REVOCATION_RECONNECT_COOLDOWN_MS) return 'stay_disconnected';
   lastReconnectAt = at;
   return 'reconnect';
+}
+
+/**
+ * Routes a revocation signal from a secondary channel (shell, terminal, search
+ * stream). A device-cookie tab reconciles its wallet; a bearer tab has none, so
+ * it only re-proves its token: a dead one lands on login through the 401 path
+ * (`auth:unauthorized`), a live one stays signed in. The reconnect cooldown is
+ * left to the main socket.
+ */
+export function handleIdentityRevocation(): void {
+  if (localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
+    void api.auth.userForIdentityReconciliation().catch(() => {});
+    return;
+  }
+  reconcileRevokedIdentity();
 }

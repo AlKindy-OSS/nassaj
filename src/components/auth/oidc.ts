@@ -40,9 +40,7 @@ export type OidcFailureReason =
   | 'login_not_initiated'
   | 'sso_unavailable'
   | 'password_change_required'
-  | 'owner_local_only'
-  | 'owner_key_required'
-  | 'owner_reauth_required';
+  | 'owner_local_only';
 
 /**
  * What a redeemed code grants: a legacy JWT, or — with MULTI_ACCOUNT_SWITCHING
@@ -83,8 +81,6 @@ const RETURN_ERROR_REASONS: Readonly<Record<string, OidcFailureReason>> = {
   // ADR-194 A1: owner sign-in refusals.
   password_change_required: 'password_change_required',
   owner_must_sign_in_locally: 'owner_local_only',
-  owner_sso_key_required: 'owner_key_required',
-  owner_sso_reauth_required: 'owner_reauth_required',
 };
 
 /** Classifies an `error` query value on the return page. Unknown → provider_unavailable. */
@@ -215,11 +211,9 @@ export function resetOidcAvailabilityCache(): void {
 }
 
 /**
- * ADR-194 A1 re-authentication hint. Set after an SSO sign-in that yields an
- * owner session, so the next SSO start asks the IdP for a fresh sign-in
- * (`?reauth=1`) and the owner meets one passkey prompt instead of a stale-
- * session refusal. It holds no user id and no token: on a shared device it
- * only makes a member re-authenticate.
+ * Legacy re-authentication hint (ADR-194 A1, withdrawn 2026-10-18). No longer
+ * set or honoured; a stored one is cleared on the next SSO start. It holds no
+ * user id and no token.
  */
 export const SSO_REAUTH_HINT_KEY = 'nassaj.sso.reauthHint';
 export const OIDC_REAUTH_LOGIN_PATH = `${OIDC_LOGIN_PATH}?reauth=1`;

@@ -10,7 +10,7 @@
  *
  * Browser-facing (front channel):
  *   GET    /login            → 302 to the IdP authorization endpoint
- *                               (?reauth=1 adds prompt=login&max_age=0; ADR-194 A1)
+ *                               (?reauth=1 adds prompt=login&max_age=0)
  *   GET    /callback         → 302 to /auth/oidc/return?oidc_code=<code>
  *                               (login refusals: ?error=<oidc_* code>; an unknown or
  *                               expired state: ?error=invalid_state / transaction_expired)
@@ -31,12 +31,11 @@
  *   anyone in by subject, and a 'login' transaction never links.
  *
  * Device-session purposes (authenticated; ADR-H20, ADR-194 A2):
- *   POST   /owner-step-up/start  → { authorizationUrl }  (owner-tier SSO session;
- *                                   prompt=login, max_age=0, login_hint)
  *   POST   /recheck/start        → { authorizationUrl }  (prompt=none, login_hint)
- *   GET    /session              → { sso, recheckDue?, ownerTier?, privilegedUntil? }
- *   Both return to /callback and then /auth/oidc/return?owner_step_up=… or
- *   ?oidc_recheck=ok|kept|signed_out; neither ever signs anyone in.
+ *   GET    /session              → { sso, recheckDue?, ownerTier? }
+ *   The re-check returns to /callback and then
+ *   /auth/oidc/return?oidc_recheck=ok|kept|signed_out; it never signs anyone in.
+ *   (The owner passkey step-up, ADR-H20 N2, was withdrawn 2026-10-18.)
  *
  * Member step-up (authenticated SSO-linked member; T-1939 slice 6B):
  *   POST   /step-up/start         → { authorizationUrl }  (counts against the
@@ -85,10 +84,10 @@
  *     transaction with the version check; the one-time code or step-up grant
  *     is dropped when the version moved after it was minted.
  *   - Owners (I6, amended by A1 and A2): an owner identity is refused in the
- *     self-link and member step-up branches. In the login branch an owner is
- *     admitted with no click from a passkey-only IdP session within the 30-day
- *     entry cap (services/oidc-owner-sign-in.js); privileged actions then need
- *     the owner step-up (owner-step-up/start, ~60 min, this browser only). The
+ *     self-link and member step-up branches. In the login branch a linked owner
+ *     is admitted directly with full access (services/oidc-owner-sign-in.js;
+ *     the A1 factor/recency rule, its automatic step-up and the ADR-H20 N2
+ *     owner step-up were withdrawn 2026-10-18). The
  *     owner role is never derived from the IdP, so role mapping and
  *     attestation are skipped.
  *   - Linked sessions (ADR-H20): every SSO sign-in binds its device session to
@@ -145,7 +144,9 @@ import {
 } from '../modules/database/index.js';
 import { clientIp } from '../utils/client-ip.js';
 import { isTrustedOrigin, multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
-import { clearPasswordChangeCookie, issueDeviceSession } from '../modules/account-wallet/issue-device-session.js';
+import {
+  clearDeviceCookie, clearPasswordChangeCookie, issueDeviceSession,
+} from '../modules/account-wallet/issue-device-session.js';
 import { userSsoAttestationFresh } from '../services/sso-attestation.js';
 import { oidcPkceStore } from '../services/oidc-pkce.store.js';
 import { oidcCodeStore } from '../services/oidc-code.store.js';
@@ -182,22 +183,14 @@ import {
 import { stepUpAuthTimeFailure } from '../services/oidc-step-up.js';
 import { oidcStepUpGrantStore } from '../services/oidc-step-up-grant.store.js';
 import { idTokenAuthTimeMs } from '../services/oidc-verifier.service.js';
-import {
-  amrSatisfiesRule,
-  decideOwnerSignIn,
-  requireFreshOwnerTouch,
-  OWNER_SSO_FACTOR_RULE,
-  ownerLoginHint,
-} from '../services/oidc-owner-sign-in.js';
+import { decideOwnerSignIn } from '../services/oidc-owner-sign-in.js';
 import { mintTokenSid } from '../modules/account-wallet/token-session.js';
 import {
   addSsoIdpSid,
   bindSsoDeviceSession,
   endSsoDeviceSession,
-  grantOwnerPrivilege,
   idpSidOf,
   markSsoRechecked,
-  OWNER_PRIVILEGE_TTL_MS,
   ssoDeviceSessionOf,
   ssoRecheckDue,
 } from '../services/sso-device-session.service.js';
@@ -336,7 +329,7 @@ function revokeApiKeysForSsoWithdrawal(userId, trigger) {
  * existing tokens and live work; the local account itself is left enabled and
  * unchanged, so re-granting the role in the IdP restores access. Callers run
  * it inside the version fence (ADR-194 D9), and never for an owner (owners
- * take the A1 branch before any mapping).
+ * take the owner branch before any mapping).
  */
 function denyLoginWithoutRole(req, user, reason) {
   auditLogDb.record('oidc_access_denied_no_role', {
@@ -447,8 +440,7 @@ router.get('/login', oidcLoginLimiter, async (req, res) => {
     return redirectLoginRefusal(res, 'oidc_login_not_initiated');
   }
   try {
-    // ADR-194 A1: `reauth=1` (and no other value) forces a fresh IdP sign-in,
-    // so an owner meets one passkey prompt instead of a stale-session refusal.
+    // `reauth=1` (and no other value) forces a fresh IdP sign-in on request.
     const extraParams = req.query.reauth === '1' ? { prompt: 'login', max_age: '0' } : {};
     // ADR-H20 N3: an owner node's static login_hint (never a "last user" cookie).
     const { ownerLoginHint } = readSsoLinkedSettings();
@@ -473,10 +465,15 @@ router.get('/login', oidcLoginLimiter, async (req, res) => {
  * and /exchange issues the device session (ADR-163 amendment 1, A-1).
  * ADR-194 D9: after the code is stored the active version is read again; if
  * an apply landed meanwhile the code is dropped and the login refused.
- * `auditBeforeLogin` (owner sign-in, A1) runs once the code is final; when it
+ * `auditBeforeLogin` (owner sign-in) runs once the code is final; when it
  * returns false the code is dropped and the login refused.
  */
 function handOffSession(req, res, user, transaction, configVersion, auditBeforeLogin = null, binding = null) {
+  // Defensive (ADR-194 A3): every caller runs only while SSO login is available,
+  // and any SSO state except off disables the wallet, so walletMode is false
+  // here in practice. The branch stays so a future change to either predicate
+  // fails into the existing, reviewed wallet hand-off instead of a new path;
+  // oidc.wallet-exchange.e2e.test.ts pins that no device session is minted.
   const walletMode = multiAccountSwitchingEnabled();
   // ADR-H20 N5: the device session id is minted here so the IdP sid can be
   // bound to it before the code is handed out (wallet mode: not bound, D7).
@@ -507,14 +504,14 @@ function handOffSession(req, res, user, transaction, configVersion, auditBeforeL
 }
 
 /**
- * ADR-H20 N5/N8/N2: binds the new device session to the IdP session (sid), the
+ * ADR-H20 N5/N8: binds the new device session to the IdP session (sid), the
  * idle and re-check clocks, the login hint and (owner) the no-click tier. A
  * session the linked sign-out could not reach is never handed out: a failed
  * bind refuses the sign-in.
  */
-function bindHandedOffSession(refreshSid, user, { issuer, claims, ownerTier = false, privilegedUntil = null }) {
+function bindHandedOffSession(refreshSid, user, { issuer, claims, ownerTier = false }) {
   try {
-    bindSsoDeviceSession({ refreshSid, userId: user.id, issuer, claims, ownerTier, privilegedUntil });
+    bindSsoDeviceSession({ refreshSid, userId: user.id, issuer, claims, ownerTier });
     return true;
   } catch {
     logOidcFailure('device_session_bind_failed');
@@ -545,7 +542,7 @@ function redirectLoginRefusal(res, errorCode) {
 
 /**
  * ADR-194 I6: an IdP identity bound to an owner never links (a login is
- * decided by the A1 owner branch). Audited (purpose only); nothing else is
+ * decided by the owner branch). Audited (purpose only); nothing else is
  * written.
  */
 function refuseOwnerIdentity(req, res, userId, purpose) {
@@ -707,14 +704,10 @@ function linkedLoginPrecheck(req, res, { identity, issuer }) {
   return linkedUser;
 }
 
-/**
- * ADR-194 A1: a refused owner sign-in, audited with its reason only (and
- * `stepUp: 'exhausted'` when the automatic step-up already ran).
- */
-function refuseOwnerSignIn(req, res, userId, decision, afterStepUp) {
-  const metadata = { provider: 'oidc', purpose: 'login', reason: decision.reason };
+/** A refused owner sign-in (a pending password change), audited with its reason only. */
+function refuseOwnerSignIn(req, res, userId, decision) {
   auditLogDb.record('oidc_owner_sign_in_refused', {
-    userId, metadata: afterStepUp ? { ...metadata, stepUp: 'exhausted' } : metadata, ...auditContext(req),
+    userId, metadata: { provider: 'oidc', purpose: 'login', reason: decision.reason }, ...auditContext(req),
   });
   return redirectLoginRefusal(res, decision.code);
 }
@@ -735,62 +728,10 @@ function recordOwnerSignIn(req, userId, details) {
   }
 }
 
-const htmlEscape = (value) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
-const OWNER_STEP_UP_DELAY_SECONDS = 2;
-
 /**
- * Short bilingual page shown before the automatic owner passkey step-up,
- * then a meta refresh to the IdP. The URL is built here from the pinned
- * authorization endpoint; nothing from the request is echoed.
- */
-function sendOwnerPasskeyInterstitial(res, authorizationUrl) {
-  const target = htmlEscape(authorizationUrl);
-  setNoStore(res);
-  return res.status(200).type('html').send(`<!doctype html>
-<html lang="ar" dir="rtl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="${OWNER_STEP_UP_DELAY_SECONDS};url=${target}">
-<title>نسّاج · Nassaj</title></head>
-<body><main>
-<p lang="ar" dir="rtl">يتطلب نسّاج مفتاح المرور للمالك — سجّل بمفتاحك</p>
-<p lang="en" dir="ltr">Nassaj requires your passkey — sign in with your key</p>
-<p><a href="${target}">متابعة · Continue</a></p>
-</main></body></html>`);
-}
-
-/**
- * ADR-194 A1 (owner decision 2026-10-15): the IdP session has no WebAuthn
- * factor or a stale auth_time, so instead of an error the owner is sent back
- * once with prompt=login&max_age=0 (and login_hint when known). The new
- * entry carries `ownerStepUp`, so a second failure refuses (loop guard).
- */
-async function startOwnerPasskeyStepUp(req, res, { client, claims, userId, decision }) {
-  auditLogDb.record('oidc_owner_sign_in_refused', {
-    userId,
-    metadata: { provider: 'oidc', purpose: 'login', reason: decision.reason, stepUp: 'started' },
-    ...auditContext(req),
-  });
-  const hint = ownerLoginHint(claims);
-  let authorizationUrl;
-  try {
-    authorizationUrl = await beginAuthorization(res, client, {
-      purpose: 'login', ownerStepUp: true, requestedAtMs: Date.now(),
-    }, {
-      prompt: 'login', max_age: '0', ...(hint ? { login_hint: hint } : {}),
-    });
-  } catch {
-    logOidcFailure('owner_step_up_unavailable');
-    return redirectLoginRefusal(res, 'temporarily_unavailable');
-  }
-  if (!authorizationUrl) return redirectLoginRefusal(res, 'temporarily_unavailable');
-  return sendOwnerPasskeyInterstitial(res, authorizationUrl);
-}
-
-/**
- * `login` branch for an owner (ADR-194 A1): forced password change, the
- * WebAuthn factor and auth_time freshness, in that order (always on, no
- * per-owner opt-in). A missing key or stale auth_time triggers one automatic step-up;
- * after it, the refusal stands. On success the session is handed out
+ * `login` branch for an owner: only a pending forced password change refuses
+ * (the A1 factor and recency rule and its automatic passkey step-up were
+ * withdrawn 2026-10-18). On success the session is handed out
  * directly: no role mapping, no role sync and no attestation stamp (the
  * owner role never comes from the IdP). Every successful sign-in is audited
  * strictly and alerts every owner under its own dedupe key.
@@ -798,26 +739,16 @@ async function startOwnerPasskeyStepUp(req, res, { client, claims, userId, decis
 async function completeOwnerLogin(req, res, { entry, claims, transaction, identity, linkedUser, client }) {
   const account = userDb.getRawById(linkedUser.id);
   if (!account) return res.status(401).json({ error: 'Linked account is unavailable' });
-  const nowMs = Date.now();
-  const admitted = decideOwnerSignIn({ account, claims, nowMs, requestedAtMs: entry.requestedAtMs });
-  const decision = multiAccountSwitchingEnabled() ? requireFreshOwnerTouch(admitted) : admitted;
-  if (!decision.ok && decision.stepUp && entry.ownerStepUp !== true) {
-    return startOwnerPasskeyStepUp(req, res, { client, claims, userId: linkedUser.id, decision });
-  }
-  if (!decision.ok) return refuseOwnerSignIn(req, res, linkedUser.id, decision, entry.ownerStepUp === true);
+  const decision = decideOwnerSignIn({ account, claims, nowMs: Date.now() });
+  if (!decision.ok) return refuseOwnerSignIn(req, res, linkedUser.id, decision);
 
   const signInId = crypto.randomUUID();
   let audited = false;
-  // ADR-H20 A2: no-click owner entry; the privileged tier only when this
-  // sign-in itself was a fresh passkey touch.
-  const binding = {
-    issuer: client.issuer, claims, ownerTier: true,
-    privilegedUntil: decision.privileged ? nowMs + OWNER_PRIVILEGE_TTL_MS : null,
-  };
+  // ADR-H20 A2: no-click owner entry with full access (N2 step-up withdrawn).
+  const binding = { issuer: client.issuer, claims, ownerTier: true };
   const answer = handOffSession(req, res, linkedUser, transaction, entry.configVersion, () => {
     audited = recordOwnerSignIn(req, linkedUser.id, {
       identityId: identity.id, signInId, amr: decision.amr, authAgeSec: decision.authAgeSec,
-      authStale: decision.authStale, privileged: decision.privileged,
     });
     return audited;
   }, binding);
@@ -897,7 +828,6 @@ function answerAbandoned(req, res, entry) {
     return redirectStepUpRefusal(res, cancelled ? 'provider_denied' : 'temporarily_unavailable');
   }
   if (entry.purpose === 'recheck') return answerRecheckError(req, res, entry, cancelled ? req.query.error : 'code_missing');
-  if (entry.purpose === 'owner_step_up') return refuseOwnerStepUp(req, res, entry, cancelled ? 'provider_denied' : 'code_missing');
   return res.status(400).json({ error: 'Missing authorization code' });
 }
 
@@ -945,7 +875,6 @@ function refuseCallback(req, res, entry, code) {
     return redirectStepUpRefusal(res, code);
   }
   if (entry.purpose === 'recheck') return keepAfterRecheck(res, entry, code, { stamp: false });
-  if (entry.purpose === 'owner_step_up') return refuseOwnerStepUp(req, res, entry, code);
   return redirectLoginRefusal(res, code);
 }
 
@@ -968,7 +897,6 @@ function answerExchangeFailure(req, res, entry, error) {
     return redirectStepUpRefusal(res, 'temporarily_unavailable');
   }
   if (entry.purpose === 'recheck') return keepAfterRecheck(res, entry, 'provider_exchange_failed', { stamp: false });
-  if (entry.purpose === 'owner_step_up') return refuseOwnerStepUp(req, res, entry, 'temporarily_unavailable');
   return res.status(502).json({ error: 'Identity provider unavailable' });
 }
 
@@ -993,13 +921,11 @@ function branchOnPurpose(req, res, context) {
       return redirectStepUpRefusal(res, 'temporarily_unavailable');
     }
     if (entry.purpose === 'recheck') return keepAfterRecheck(res, entry, 'subject_missing', { stamp: false });
-    if (entry.purpose === 'owner_step_up') return refuseOwnerStepUp(req, res, entry, 'temporarily_unavailable');
-    return res.status(401).json({ error: 'id_token missing subject' });
+      return res.status(401).json({ error: 'id_token missing subject' });
   }
   const withSubject = { ...context, subject };
   if (entry.purpose === 'link') return completeSelfLink(req, res, withSubject);
   if (entry.purpose === 'step_up') return completeStepUp(req, res, withSubject);
-  if (entry.purpose === 'owner_step_up') return completeOwnerStepUp(req, res, withSubject);
   if (entry.purpose === 'recheck') return completeRecheck(req, res, withSubject);
   if (entry.purpose === 'login') return completeLogin(req, res, withSubject);
   return res.status(400).json({ error: 'Invalid or expired state' });
@@ -1038,7 +964,6 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
     if (res.headersSent) return undefined;
     if (entry.purpose === 'step_up') return redirectStepUpRefusal(res, 'temporarily_unavailable');
     if (entry.purpose === 'recheck') return redirectRecheckResult(res, 'kept');
-    if (entry.purpose === 'owner_step_up') return redirectOwnerStepUp(res, 'temporarily_unavailable');
     return redirectLoginRefusal(res, 'server_error');
   }
 });
@@ -1080,6 +1005,7 @@ router.post('/exchange', oidcExchangeLimiter, (req, res) => {
   if (!ssoLoginAvailable()) {
     return res.status(501).json({ error: 'OIDC is not enabled' });
   }
+  // Defensive (ADR-194 A3): unreachable while ssoLoginAvailable() holds, see handOffSession.
   const walletMode = multiAccountSwitchingEnabled();
   if (walletMode && !isTrustedOrigin(req)) {
     return res.status(403).json({ error: 'Request rejected', code: 'origin_rejected' });
@@ -1097,6 +1023,8 @@ router.post('/exchange', oidcExchangeLimiter, (req, res) => {
   }
   // W1: a leftover forced-change cookie must not outrank the new Bearer.
   clearPasswordChangeCookie(res);
+  // ADR-194 A3: a stale device cookie must not sit beside the new bearer.
+  clearDeviceCookie(res);
   return res.json({ token: redeemed.token, userId: redeemed.userId });
 });
 
@@ -1403,7 +1331,6 @@ function redirectUnusableState(res, stalePurpose) {
   if (stalePurpose === 'step_up') return redirectStepUpRefusal(res, 'oidc_reauth_required');
   if (stalePurpose === 'test') return redirectTestError(res, 'transaction_expired');
   if (stalePurpose === 'recheck') return redirectRecheckResult(res, 'kept');
-  if (stalePurpose === 'owner_step_up') return redirectOwnerStepUp(res, 'transaction_expired');
   return redirectLoginRefusal(res, stalePurpose ? 'transaction_expired' : 'invalid_state');
 }
 
@@ -1585,12 +1512,9 @@ function completeStepUp(req, res, { entry, claims, subject, transaction, client 
 
 
 // ---------------------------------------------------------------------------
-// Device-session purposes (ADR-H20 S6): owner step-up, silent re-check, status
+// Device-session purposes (ADR-H20 S6): silent re-check, status
 // ---------------------------------------------------------------------------
 
-const OWNER_STEP_UP_NOT_APPLICABLE = Object.freeze({
-  error: 'Passkey confirmation is not used for this session', code: 'owner_step_up_not_applicable',
-});
 const RECHECK_NOT_APPLICABLE = Object.freeze({
   error: 'This session did not start through SSO', code: 'recheck_not_applicable',
 });
@@ -1604,13 +1528,6 @@ const RECHECK_SIGNED_OUT_ERRORS = new Set(['login_required']);
 function redirectRecheckResult(res, outcome) {
   setStepUpRedirectHeaders(res);
   return res.redirect(`${RETURN_PATH}?oidc_recheck=${encodeURIComponent(outcome)}`);
-}
-
-function redirectOwnerStepUp(res, outcome) {
-  setStepUpRedirectHeaders(res);
-  return outcome === 'ok'
-    ? res.redirect(`${RETURN_PATH}?owner_step_up=ok`)
-    : res.redirect(`${RETURN_PATH}?owner_step_up_error=${encodeURIComponent(outcome)}`);
 }
 
 /** The binding of this request's own device session, or a coded refusal. */
@@ -1679,55 +1596,6 @@ function completeRecheck(req, res, { entry, claims, subject, client }) {
   return redirectRecheckResult(res, 'ok');
 }
 
-function refuseOwnerStepUp(req, res, entry, reason) {
-  auditLogDb.record('oidc_owner_step_up_failed', {
-    userId: entry.userId ?? null, metadata: { provider: 'oidc', reason }, ...auditContext(req),
-  });
-  return redirectOwnerStepUp(res, OWNER_STEP_UP_CODES.has(reason) ? reason : 'temporarily_unavailable');
-}
-
-const OWNER_STEP_UP_CODES = new Set([
-  'owner_sso_key_required', 'owner_sso_reauth_required', 'oidc_step_up_identity_mismatch',
-  'session_ended', 'provider_denied', 'oidc_config_changed', 'sso_unavailable', 'transaction_expired',
-]);
-
-/** Why an owner step-up callback cannot grant, or null (D9-4: checked here, whatever the request sent). */
-function ownerStepUpRefusal({ entry, claims, subject, issuer, nowMs }) {
-  const authFailure = stepUpAuthTimeFailure({
-    authTimeMs: idTokenAuthTimeMs(claims), requestedAtMs: entry.requestedAtMs, nowMs,
-  });
-  if (authFailure) return 'owner_sso_reauth_required';
-  if (!amrSatisfiesRule(claims.amr, OWNER_SSO_FACTOR_RULE)) return 'owner_sso_key_required';
-  const identity = userIdentitiesDb.findByIssuerAndSubject(issuer, subject);
-  if (!identity || identity.user_id !== entry.userId) return 'oidc_step_up_identity_mismatch';
-  const owner = userDb.getUserById(entry.userId);
-  if (!owner || owner.role !== 'owner' || userDb.getRawById(entry.userId)?.must_change_password === 1) {
-    return 'session_ended';
-  }
-  const row = ssoDeviceSessionOf(entry.refreshSid);
-  if (!row || row.user_id !== entry.userId || row.owner_tier !== 1) return 'session_ended';
-  return null;
-}
-
-/**
- * `owner_step_up` callback: never signs anyone in. A fresh (≤120 s) passkey-only
- * IdP sign-in by the SAME owner grants the privileged tier to the device
- * session that started it, and to no other browser.
- */
-function completeOwnerStepUp(req, res, { entry, claims, subject, client }) {
-  const nowMs = Date.now();
-  const refusal = ownerStepUpRefusal({ entry, claims, subject, issuer: client.issuer, nowMs });
-  if (refusal) return refuseOwnerStepUp(req, res, entry, refusal);
-  const until = grantOwnerPrivilege(entry.refreshSid, nowMs);
-  if (!until) return refuseOwnerStepUp(req, res, entry, 'session_ended');
-  const sid = idpSidOf(claims);
-  if (sid) addSsoIdpSid(entry.refreshSid, sid);
-  auditLogDb.record('oidc_owner_step_up_verified', {
-    userId: entry.userId, metadata: { provider: 'oidc', privilegedUntil: until }, ...auditContext(req),
-  });
-  return redirectOwnerStepUp(res, 'ok');
-}
-
 /** Starts an IdP sign-in bound to the caller's own device session. */
 async function beginDeviceSessionAuthorization(res, client, binding, params) {
   try {
@@ -1737,30 +1605,6 @@ async function beginDeviceSessionAuthorization(res, client, binding, params) {
     return { url: null };
   }
 }
-
-// N2: the owner's passkey step-up for privileged actions (prompt=login,
-// max_age=0, login_hint). Counted on the shared per-user step-up quota.
-router.post('/owner-step-up/start', requireSsoLoginAvailable, authenticateToken, async (req, res) => {
-  setNoStore(res);
-  const client = activeSsoClient();
-  if (!client) return res.status(503).json(STEP_UP_UNAVAILABLE);
-  if (req.user?.role !== 'owner') return res.status(403).json(OWNER_STEP_UP_NOT_APPLICABLE);
-  const { row, refusal } = currentDeviceSession(req);
-  if (refusal) return res.status(refusal.status).json(refusal.body);
-  if (!row || row.owner_tier !== 1) return res.status(409).json(OWNER_STEP_UP_NOT_APPLICABLE);
-  const verdict = consumeStepUpAttempt(req.user.id);
-  if (!verdict.allowed) {
-    res.set('Retry-After', String(verdict.retryAfterSeconds));
-    return res.status(429).json({ error: 'Too many verification attempts, please try again later', code: 'step_up_rate_limited' });
-  }
-  const hint = row.login_hint ?? readSsoLinkedSettings().ownerLoginHint;
-  const { url } = await beginDeviceSessionAuthorization(res, client, {
-    purpose: 'owner_step_up', userId: req.user.id, requestedAtMs: Date.now(), refreshSid: row.refresh_sid,
-  }, { prompt: 'login', max_age: '0', ...(hint ? { login_hint: hint } : {}) });
-  if (!url) return res.status(503).json(STEP_UP_UNAVAILABLE);
-  auditLogDb.record('oidc_owner_step_up_started', { userId: req.user.id, metadata: { provider: 'oidc' }, ...auditContext(req) });
-  return res.json({ authorizationUrl: url });
-});
 
 // D9-1: the silent prompt=none re-check of this browser's SSO session, with the
 // session's own user as login_hint (V10a).
@@ -1780,7 +1624,7 @@ router.post('/recheck/start', oidcLoginLimiter, requireSsoLoginAvailable, authen
 });
 
 // The SPA's view of its own device session: whether it is an SSO session, the
-// re-check due flag, and the owner tier with its grant expiry. No identifiers.
+// re-check due flag and the owner tier. No identifiers.
 router.get('/session', authenticateToken, (req, res) => {
   setNoStore(res);
   const { row, refusal } = currentDeviceSession(req);
@@ -1791,7 +1635,6 @@ router.get('/session', authenticateToken, (req, res) => {
     sso: true,
     recheckDue: ssoLoginAvailable() && ssoRecheckDue(row, recheckIntervalHours),
     ownerTier: row.owner_tier === 1,
-    privilegedUntil: row.owner_tier === 1 && Number.isFinite(row.privileged_until) ? row.privileged_until : null,
   });
 });
 

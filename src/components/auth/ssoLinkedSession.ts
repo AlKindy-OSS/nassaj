@@ -9,7 +9,6 @@
  *   end_session URL the server returned, so every linked app signs out.
  * - D9-1 re-check: when the server says it is due, one silent prompt=none
  *   round trip at page load (guarded so a failing IdP cannot loop).
- * - N2 owner step-up: the passkey round trip for privileged actions.
  *
  * Only timestamps and flags are stored; never a user id or token.
  */
@@ -161,32 +160,10 @@ export async function runSsoRecheckIfDue(
   }
 }
 
-/** N2: starts the owner's passkey step-up. Resolves false when it could not start. */
-export async function startOwnerStepUp(assign: (url: string) => void = (url) => window.location.assign(url)): Promise<boolean> {
-  try {
-    const url = await authorizationUrlFrom(await api.auth.oidc.startOwnerStepUp());
-    if (!url) return false;
-    assign(url);
-    return true;
-  } catch {
-    return false;
-  }
-}
+export type SsoSessionReturn = { kind: 'recheck'; outcome: 'ok' | 'kept' | 'signed_out' };
 
-export type SsoSessionReturn =
-  | { kind: 'owner_step_up'; ok: true }
-  | { kind: 'owner_step_up'; ok: false; code: string }
-  | { kind: 'recheck'; outcome: 'ok' | 'kept' | 'signed_out' };
-
-const CODE = /^[a-z0-9_]{1,64}$/;
-
-/** Classifies an owner step-up or re-check return (`/auth/oidc/return?...`), else null. */
+/** Classifies a re-check return (`/auth/oidc/return?...`), else null. */
 export function readSsoSessionReturn(params: URLSearchParams): SsoSessionReturn | null {
-  if (params.get('owner_step_up') === 'ok') return { kind: 'owner_step_up', ok: true };
-  const stepUpError = params.get('owner_step_up_error');
-  if (stepUpError !== null) {
-    return { kind: 'owner_step_up', ok: false, code: CODE.test(stepUpError) ? stepUpError : 'temporarily_unavailable' };
-  }
   const recheck = params.get('oidc_recheck');
   if (recheck === 'ok' || recheck === 'kept' || recheck === 'signed_out') return { kind: 'recheck', outcome: recheck };
   return null;

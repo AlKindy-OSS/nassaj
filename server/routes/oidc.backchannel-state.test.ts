@@ -86,7 +86,7 @@ beforeEach(() => {
   // ADR-H20 N5: the member's browser session is bound to the IdP sid at sign-in.
   ssoDeviceSessionsDb.bind({
     refreshSid: REFRESH_SID, userId: member.id, issuer: ISSUER, idpSid: IDP_SID, loginHint: null,
-    ownerTier: false, privilegedUntil: null, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
+    ownerTier: false, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
   });
   for (const key of ENV_KEYS) delete process.env[key];
   resetSsoConfigCacheForTests();

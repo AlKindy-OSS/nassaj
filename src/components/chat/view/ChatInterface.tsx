@@ -1343,6 +1343,7 @@ function ChatInterface({
           <SessionHeaderControls
             sessionId={selectedSession?.id ?? currentSessionId ?? null}
             internalChatEnabled={internalSessionChatCapability.enabled}
+            projectId={selectedProject?.projectId ?? null}
           >
           <SessionParticipantsBar
             key={selectedSession?.id ?? currentSessionId}

@@ -386,13 +386,18 @@ test('drift: a moved endpoint persists runtime_fault and SSO becomes unavailable
   assert.ok(audit, 'audited');
 });
 
-test('A1: an owner identity without a passkey only gets the step-up and nothing is written', async () => {
+test('A1 withdrawn: an owner identity with no amr signs in directly; no role write or attestation', async () => {
   activeRow();
   userIdentitiesDb.link(owner.id, FIXTURE_ISSUER, 'sub-owner');
+  db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(owner.id);
   for (const repoSpy of repoSpies) repoSpy.mock.resetCalls();
   const res = await complete(await startLogin(), { sub: 'sub-owner', roles: ['admin'], org: 'org-1' });
-  assert.equal(res.status, 200, 'the passkey interstitial, not a session');
-  assertNoPrivilegedWrite('owner without a passkey');
+  assert.equal(res.status, 302, 'a session, not the passkey interstitial');
+  assert.match(res.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
+  for (const name of ['syncExternalRole', 'provisionSsoUser', 'linkIdentityWithAttestation']) {
+    assert.equal(count(name), 0, name);
+  }
+  assert.equal(userDb.getUserById(owner.id)?.role, 'owner');
 });
 
 // ---------------------------------------------------------------------------
@@ -410,7 +415,7 @@ async function logout(sub: string) {
 function bindMemberSession(refreshSid = 'M'.repeat(22)) {
   ssoDeviceSessionsDb.bind({
     refreshSid, userId: member.id, issuer: FIXTURE_ISSUER, idpSid: 'V1_mock-sid', loginHint: null,
-    ownerTier: false, privilegedUntil: null, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
+    ownerTier: false, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
   });
   return refreshSid;
 }
@@ -443,7 +448,7 @@ test('back channel: an owner subject is a 200 no-op', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// ADR-194 A1: an owner with a fresh passkey (real database)
+// Owner SSO sign-in (real database; the A1 factor/recency rule was withdrawn 2026-10-18)
 // ---------------------------------------------------------------------------
 
 const OWNER_PASSKEY = Object.freeze({ sub: 'sub-owner', roles: ['member'], org: 'org-1', amr: ['user', 'mfa'] });
@@ -481,45 +486,19 @@ test('A1: an owner signs in with a passkey; role untouched; no mapping, sync or 
   assert.equal(auditRows('oidc_login').length, 1);
 });
 
-test('A2 passkey_only: password + security key (pwd, user, mfa) gets the passkey step-up', async () => {
+test('A1 withdrawn: an owner with amr=[pwd] signs in directly with no interstitial', async () => {
   activeRow();
   linkOwner();
-  const res = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd', 'user', 'mfa'] });
-  assert.equal(res.status, 200, 'the passkey interstitial');
-  assertNoPrivilegedWrite('pwd beside the key');
-});
-
-/** The interstitial's IdP URL and the new transaction cookie of the automatic step-up. */
-async function ownerStepUpFrom(res: Response): Promise<Started> {
-  assert.equal(res.status, 200);
-  const html = await res.text();
-  const target = (/url=([^"]+)"/.exec(html)?.[1] ?? '').replaceAll('&#38;', '&');
-  return { authorizationUrl: target, cookie: (res.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '' };
-}
-
-test('A1: a password-only IdP session steps up once to the passkey, then signs in', async () => {
-  activeRow();
-  linkOwner();
-  const first = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd'], preferred_username: 'owner@idp' });
-  const stepUp = await ownerStepUpFrom(first);
-  const idp = new URL(stepUp.authorizationUrl);
-  assert.equal(idp.origin + idp.pathname, `${FIXTURE_ISSUER}/authorize`, 'the pinned endpoint');
-  assert.equal(idp.searchParams.get('prompt'), 'login');
-  assert.equal(idp.searchParams.get('max_age'), '0');
-  assert.equal(idp.searchParams.get('login_hint'), 'owner@idp');
-  assertNoPrivilegedWrite('before the step-up');
-  const second = await complete(stepUp, OWNER_PASSKEY);
-  assert.match(second.headers.get('location') ?? '', /oidc_code=/);
-  assert.equal(count('generateToken'), 1);
-});
-
-test('A1: a password-only IdP session is refused owner_sso_key_required after the one step-up', async () => {
-  activeRow();
-  linkOwner();
-  const stepUp = await ownerStepUpFrom(await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd'] }));
-  const second = await complete(stepUp, { ...OWNER_PASSKEY, amr: ['pwd', 'otp', 'mfa'] });
-  assert.equal(second.headers.get('location'), '/auth/oidc/return?error=owner_sso_key_required');
-  assertNoPrivilegedWrite('step-up exhausted');
+  db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(owner.id);
+  for (const amr of [['pwd'], ['pwd', 'user', 'mfa'], ['pwd', 'otp', 'mfa']]) {
+    const stale = Math.floor(Date.now() / 1000) - 40 * 86_400;
+    const res = await complete(await startLogin(), { ...OWNER_PASSKEY, amr, auth_time: stale });
+    assert.equal(res.status, 302, JSON.stringify(amr));
+    assert.match(res.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/, JSON.stringify(amr));
+    const body = await res.text();
+    assert.ok(!body.includes('Nassaj requires your passkey'), 'no interstitial');
+    assert.equal(userDb.getUserById(owner.id)?.role, 'owner');
+  }
 });
 
 test('A1: an owner flagged must_change_password is refused password_change_required', async () => {
@@ -546,7 +525,7 @@ test('A1 always on: a fresh owner link (no opt-in recorded) signs in with a pass
   assert.match(res.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
 });
 
-test('A1: reauth=1 reaches the IdP with prompt=login and max_age=0', async () => {
+test('reauth=1 reaches the IdP with prompt=login and max_age=0', async () => {
   activeRow();
   const res = await fetch(`${baseUrl}/api/auth/oidc/login?reauth=1`, { redirect: 'manual' });
   const location = new URL(res.headers.get('location') ?? '');

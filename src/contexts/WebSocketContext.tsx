@@ -3,7 +3,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../components/auth/context/AuthContext';
 import { resolveBearerRevocation } from '../components/auth/bearerRevocation';
 import { IS_PLATFORM } from '../constants/config';
-import { dispatchOwnerStepUp, OWNER_STEP_UP_REQUIRED_CODE } from '../utils/api';
 import {
   beginSessionProcessConnectionEpoch,
   invalidateSessionProcessAuthority,
@@ -584,8 +583,6 @@ const useWebSocketProviderState = (): WebSocketContextType => {
               typeof data.projectId === 'string' && data.projectId.length > 0 ? data.projectId : null,
             );
           }
-          // ADR-H20 N2: a turn refused until the owner's passkey step-up.
-          if (data?.code === OWNER_STEP_UP_REQUIRED_CODE) dispatchOwnerStepUp();
           setLatestMessage(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);

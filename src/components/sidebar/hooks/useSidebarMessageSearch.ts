@@ -4,9 +4,9 @@ import { api } from '../../../utils/api';
 import type { LLMProvider } from '../../../types/app';
 import {
   getIdentityBarrierSnapshot,
-  reconcileRevokedIdentity,
   subscribeIdentityBarrier,
 } from '../../auth/accountIdentityBarrier';
+import { handleIdentityRevocation } from '../../auth/bearerRevocation';
 
 /**
  * Sidebar message search (B-332).
@@ -156,7 +156,7 @@ export function useSidebarMessageSearch(query: string, enabled: boolean): Messag
       source.addEventListener('error', finish);
       source.addEventListener('identity_revoked', () => {
         closeStream();
-        reconcileRevokedIdentity();
+        handleIdentityRevocation();
       });
     }, DEBOUNCE_MS);
 

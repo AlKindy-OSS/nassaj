@@ -37,8 +37,6 @@ import { SsoSettingsError } from '../services/sso-settings-error.js';
 import { ssoConfigView, ssoSettingsStatus } from '../services/sso-settings-status.js';
 import { readTestResult } from '../services/sso-test-signin.service.js';
 import { StepUpError, verifyStepUpEvidence } from '../services/step-up.service.js';
-import { OWNER_SSO_ENTRY_MAX_AUTH_AGE_MS } from '../services/oidc-owner-sign-in.js';
-import { ssoDeviceSessionOf } from '../services/sso-device-session.service.js';
 import {
   INVALID_SSO_LINKED_SETTINGS_CODE,
   mergeSsoLinkedSettings,
@@ -50,7 +48,6 @@ import { clientIp } from '../utils/client-ip.js';
 import { beginTestAuthorization } from './oidc.js';
 
 const router = express.Router();
-const DAY_MS = 24 * 60 * 60_000;
 const CONFIG_HASH = /^[a-f0-9]{64}$/;
 const MAX_CONFIRMATION_LENGTH = 64;
 
@@ -208,26 +205,15 @@ router.post('/import-env', writeLimiter, currentIdentity, handle('import', (req,
 // ADR-H20 S6: the node's linked sign-in/sign-out settings (auto sign-in, owner
 // login_hint, post-logout URI, re-check interval, the owner kill switch).
 router.get('/linked-sessions', readLimiter, handle('linked_read', (req, res) => {
-  res.json({ settings: readSsoLinkedSettings(), ownerEntryCapDays: OWNER_SSO_ENTRY_MAX_AUTH_AGE_MS / DAY_MS });
+  res.json({ settings: readSsoLinkedSettings() });
 }));
-
-/**
- * Step-up for a linked-sessions change: an owner-tier SSO session already
- * passed this browser's passkey step-up (authenticateToken refuses it
- * otherwise); any other owner session confirms locally (password or passkey).
- */
-async function verifyLinkedSettingsStepUp(req) {
-  const row = ssoDeviceSessionOf(req.tokenSession?.refreshSid);
-  if (row?.owner_tier === 1 && Number.isFinite(row.privileged_until) && row.privileged_until > Date.now()) return;
-  await verifySsoStepUp(req);
-}
 
 router.put('/linked-sessions', writeLimiter, currentIdentity, handle('linked_write', async (req, res) => {
   // Validated before the step-up, so a malformed request never spends a step-up attempt.
   if (!mergeSsoLinkedSettings(req.body?.settings, readSsoLinkedSettings())) {
     return res.status(400).json({ error: 'Invalid settings', code: INVALID_SSO_LINKED_SETTINGS_CODE });
   }
-  await verifyLinkedSettingsStepUp(req);
+  await verifySsoStepUp(req);
   const result = updateSsoLinkedSettings(req.body?.settings, {
     userId: req.user.id, ipAddress: clientIp(req), userAgent: req.headers['user-agent'] ?? null,
   });

@@ -120,10 +120,11 @@ export default function AgentSelectorSection({
           panel tree below it, not one labelled region. A pressed toggle button
           states the same thing honestly — and keeps each tile a plain button
           for anything (assistive tech, tests) querying by role and name. */}
-      {/* تسعة وكلاء ظاهرون حالياً + بطاقة «النماذج المحلية» في الأخير.
-          الأعمدة الخمسة في العرض المتوسط تقسمهم 5+5 عند عشرة، وعند اتساع
-          المساحة تظهر المجموعة في صف واحد. */}
-      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 xl:grid-cols-9">
+      {/* أعمدة متساوية تملأ العرض كله (auto-fit): عدد البطاقات الظاهرة اليوم
+          أقل من أي عدد أعمدة ثابت، فكانت الشبكة الثابتة (9 أعمدة) تكدّسها في
+          جانب وتقتطع الأسماء. الحدّ الأدنى 5.5rem يتّسع لأطول اسم (Antigravity)
+          بخط 13px، وما لا يتّسع في سطر يلتفّ إلى سطر تالٍ على الجوال. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1.5">
         {agents.map((agent) => {
           const isActive = !localModelsSelected && selectedAgent === agent;
           // `agents` is always `visibleSettingsAgents()`, which never carries
@@ -232,10 +233,11 @@ export default function AgentSelectorSection({
             <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center" aria-hidden="true">
               <Server className="h-7 w-7" />
             </span>
-            {/* اسم عربي — لا يحتاج dir=ltr لأنه نص عربي خالص لا علامة لاتينية. */}
+            {/* اسم عربي — لا يحتاج dir=ltr لأنه نص عربي خالص لا علامة لاتينية.
+                كلمتان: يلتفّ إلى سطرين في أضيق الشاشات بدل أن يُقتطع. */}
             <span
               className={cn(
-                'w-full truncate text-center text-[13px] leading-tight',
+                'line-clamp-2 w-full text-center text-[13px] leading-tight',
                 localModelsSelected ? 'font-semibold' : 'font-medium',
               )}
             >

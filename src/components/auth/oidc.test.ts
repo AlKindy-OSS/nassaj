@@ -193,11 +193,9 @@ describe('detectOidcAvailability', () => {
   });
 });
 
-describe('ADR-194 A1 return codes', () => {
+describe('owner and SSO return codes', () => {
   it.each([
     ['owner_must_sign_in_locally', 'owner_local_only'],
-    ['owner_sso_key_required', 'owner_key_required'],
-    ['owner_sso_reauth_required', 'owner_reauth_required'],
     ['password_change_required', 'password_change_required'],
     ['oidc_config_changed', 'config_changed'],
     ['oidc_login_not_initiated', 'login_not_initiated'],

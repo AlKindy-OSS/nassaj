@@ -21,6 +21,7 @@ import {
   XIcon,
   MicIcon,
   Loader2Icon,
+  SquareSlash,
   Terminal,
 } from 'lucide-react';
 
@@ -2114,12 +2115,14 @@ export default function ChatComposer({
               tooltip={{ content: t('input.showAllCommands') }}
               onClick={onToggleCommandMenu}
               aria-label={t('input.showAllCommands')}
+              aria-expanded={isCommandMenuOpen && !shellMode.active}
+              data-command-menu-toggle=""
             >
               <span
                 aria-hidden="true"
                 className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
               >
-                <Terminal size={16} strokeWidth={2.2} />
+                <SquareSlash size={16} strokeWidth={2.2} />
               </span>
             </PromptInputButton>
 

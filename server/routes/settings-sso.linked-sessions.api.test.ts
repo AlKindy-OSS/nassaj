@@ -1,10 +1,10 @@
 /**
  * ADR-H20 S6: the node's linked-sessions settings API (auto sign-in, owner
  * login_hint, post-logout URI, re-check interval, the owner kill switch).
- * Owner-only; every change needs step-up (this browser's live passkey grant
- * for an owner-tier SSO session, otherwise local password or passkey) and is
- * audited strictly; a kill-switch change ends every owner privileged grant.
- * The owner entry cap is a code constant and cannot be set here.
+ * Owner-only; every change needs the sso_config step-up (local password or
+ * passkey), for an owner-tier SSO session too (the N2 owner grant that used to
+ * stand in for it was withdrawn 2026-10-18), and is audited strictly.
+ * There is no owner entry cap (ADR-194 A1 withdrawn 2026-10-18) and none can be set.
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -24,25 +24,24 @@ beforeEach(() => {
 const audits = () => (db.prepare("SELECT metadata FROM audit_log WHERE action = 'sso_linked_settings_changed' ORDER BY id")
   .all() as Array<{ metadata: string }>).map((row) => JSON.parse(row.metadata));
 
-function ownerTierSession(privilegedUntil: number | null) {
+function ownerTierSession() {
   const refreshSid = crypto.randomBytes(16).toString('base64url');
   ssoDeviceSessionsDb.bind({
     refreshSid, userId: owner.id, issuer: 'https://idp.example', idpSid: 'V1_s', loginHint: null, ownerTier: true,
-    privilegedUntil, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
+    nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
   });
   return refreshSid;
 }
 
-test('GET: safe defaults and the fixed 30-day entry cap; admin and member get 403', async () => {
+test('GET: safe defaults (no owner entry cap any more); admin and member get 403', async () => {
   const res = await api('GET', '/linked-sessions');
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('cache-control'), 'no-store');
   assert.deepEqual(res.body, {
     settings: {
-      autoSignIn: false, ownerLoginHint: null, postLogoutRedirectUri: null, recheckIntervalHours: 12,
+      autoSignIn: true, ownerLoginHint: null, postLogoutRedirectUri: null, recheckIntervalHours: 12,
       idpSignOutAffectsOwner: true,
     },
-    ownerEntryCapDays: 30,
   });
   for (const userId of [admin.id, member.id]) {
     assert.equal((await api('GET', '/linked-sessions', undefined, { userId })).status, 403);
@@ -51,38 +50,36 @@ test('GET: safe defaults and the fixed 30-day entry cap; admin and member get 40
 });
 
 test('PUT needs step-up: none → 403, a wrong password → 401, the local password → saved and audited', async () => {
-  const body = { settings: { autoSignIn: true, ownerLoginHint: 'ibrahim@example.org' } };
+  const body = { settings: { autoSignIn: false, ownerLoginHint: 'ibrahim@example.org' } };
   const missing = await api('PUT', '/linked-sessions', body);
   assert.equal(missing.status, 403);
   assert.equal(missing.body.code, 'step_up_required');
   const wrong = await api('PUT', '/linked-sessions', { ...body, stepUp: { method: 'password', password: 'nope' } });
   assert.equal(wrong.status, 401);
-  assert.equal((await api('GET', '/linked-sessions')).body.settings.autoSignIn, false, 'nothing written');
+  assert.equal((await api('GET', '/linked-sessions')).body.settings.autoSignIn, true, 'nothing written');
   const saved = await api('PUT', '/linked-sessions', { ...body, stepUp: STEP_UP });
   assert.equal(saved.status, 200);
-  assert.equal(saved.body.settings.autoSignIn, true);
+  assert.equal(saved.body.settings.autoSignIn, false, 'an explicit off is stored and respected');
   assert.equal(saved.body.settings.ownerLoginHint, 'ibrahim@example.org');
   assert.deepEqual(audits(), [{ changed: ['autoSignIn', 'ownerLoginHint'] }]);
 });
 
-test('an owner-tier SSO session with a live passkey grant needs no local step-up; without a grant it does', async () => {
-  const granted = ownerTierSession(Date.now() + 3_600_000);
-  const ok = await api('PUT', '/linked-sessions', { settings: { recheckIntervalHours: 24 } },
-    { headers: { 'x-test-refresh-sid': granted } });
-  assert.equal(ok.status, 200);
-  const stale = ownerTierSession(Date.now() - 1);
+test('an owner-tier SSO session still confirms an sso_config change with the local step-up', async () => {
+  const sid = ownerTierSession();
   const refused = await api('PUT', '/linked-sessions', { settings: { recheckIntervalHours: 6 } },
-    { headers: { 'x-test-refresh-sid': stale } });
+    { headers: { 'x-test-refresh-sid': sid } });
   assert.equal(refused.status, 403);
+  assert.equal(refused.body.code, 'step_up_required');
+  const ok = await api('PUT', '/linked-sessions', { settings: { recheckIntervalHours: 24 }, stepUp: STEP_UP },
+    { headers: { 'x-test-refresh-sid': sid } });
+  assert.equal(ok.status, 200);
 });
 
-test('the kill switch: a change needs step-up, is audited and ends every outstanding privileged grant', async () => {
-  const grant = ownerTierSession(Date.now() + 3_600_000);
+test('the kill switch: a change needs step-up and is audited', async () => {
   const res = await api('PUT', '/linked-sessions', { settings: { idpSignOutAffectsOwner: false }, stepUp: STEP_UP });
   assert.equal(res.status, 200);
   assert.equal(res.body.settings.idpSignOutAffectsOwner, false);
-  assert.equal(ssoDeviceSessionsDb.get(grant)?.privileged_until, null);
-  assert.deepEqual(audits(), [{ changed: ['idpSignOutAffectsOwner'], idpSignOutAffectsOwner: false, endedGrants: 1 }]);
+  assert.deepEqual(audits(), [{ changed: ['idpSignOutAffectsOwner'], idpSignOutAffectsOwner: false }]);
 });
 
 test('invalid values and unknown fields (the entry cap included) refuse the whole update', async () => {

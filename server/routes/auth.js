@@ -25,6 +25,7 @@ import {
   mutationIdentityBinding,
 } from '../modules/account-wallet/request-csrf.js';
 import {
+  clearDeviceCookie,
   clearPasswordChangeCookie,
   csrfFor as signWalletCsrf,
   deviceCookieOptions,
@@ -597,6 +598,8 @@ router.post('/login', authLimiter, async (req, res) => {
 
     const token = generateToken(user);
     res.clearCookie(PASSWORD_CHANGE_COOKIE, SESSION_COOKIE_OPTIONS);
+    // ADR-194 A3: a stale device cookie must not sit beside the new bearer.
+    clearDeviceCookie(res);
     recordConnectorOwnerAuthentication(res, user.id, 'password');
     userDb.updateLastLogin(user.id);
     auditLogDb.record('login_success', { userId: user.id, ipAddress: ip, userAgent });

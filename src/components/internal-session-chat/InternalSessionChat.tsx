@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AtSign, LockKeyhole, MessageCircle, Send, Users, X } from 'lucide-react';
+import { AtSign, LockKeyhole, MessageCircle, Send, UserCog, Users, X } from 'lucide-react';
 
 import { useOptionalAuth } from '../auth/context/AuthContext';
 import { cn } from '../../lib/utils';
 
+import InternalRoomMembers from './InternalRoomMembers';
 import {
-  createInternalRoom, getInternalMessages, getInternalRoom, markInternalRead, sendInternalMessage,
+  createInternalRoom, getInternalMessages, getInternalRoom, markInternalRead, revalidateInternalRoom, sendInternalMessage,
   type InternalMember, type InternalMessage, type InternalRoom,
 } from './internalSessionChatApi';
 import { clearInternalSessionChatState, setInternalMentionCount } from './internalSessionChatStore';
 import { useInternalSessionChatRealtime, type InternalChatFrame } from './useInternalSessionChatRealtime';
 
-type Props = { sessionId: string | null | undefined; enabled: boolean };
+type Props = {
+  sessionId: string | null | undefined;
+  enabled: boolean;
+  /** The session's project; its member list feeds the room's add-member picker. */
+  projectId?: string | null;
+};
 type Mode = 'provider' | 'internal';
 
 const ACCENT_BUTTON = 'border-[color:var(--session-internal-accent)]/40 bg-[color:var(--session-internal-accent)]/15';
@@ -179,7 +185,7 @@ function useInternalRoom(sessionId: string | null | undefined, enabled: boolean)
  * Isolated human-only room UI. It never receives or invokes the provider composer
  * callbacks, and renders NOTHING while the server capability is off (ADR-187 §4).
  */
-export default function InternalSessionChat({ sessionId, enabled }: Props) {
+export default function InternalSessionChat({ sessionId, enabled, projectId }: Props) {
   const { t } = useTranslation('chat');
   const auth = useOptionalAuth();
   const [open, setOpen] = useState(false);
@@ -187,12 +193,15 @@ export default function InternalSessionChat({ sessionId, enabled }: Props) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showMembers, setShowMembers] = useState(false);
+  const [createFailed, setCreateFailed] = useState(false);
   const dialogLabel = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const { room, setRoom, messages, setMessages, scope, live } = useInternalRoom(sessionId, enabled);
 
   useEffect(() => {
     setOpen(false); setMode('provider'); setDraft(''); setError(null); setSending(false);
+    setShowMembers(false); setCreateFailed(false);
   }, [sessionId]);
   useEffect(() => { if (!room) setOpen(false); }, [room]);
 
@@ -206,8 +215,25 @@ export default function InternalSessionChat({ sessionId, enabled }: Props) {
     if (room || !current) return;
     const next = await createInternalRoom(current.id, current.signal).catch(() => null);
     if (!live(current)) return;
-    if (!next) { setError(t('internalChat.createFailed')); return; }
+    if (!next) { setError(t('internalChat.createFailed')); setCreateFailed(true); return; }
     setRoom(next); setInternalMentionCount(current.id, next.unreadMentionCount);
+  };
+  // A moved session's room needs its creator to re-activate it; the server alone
+  // decides who that is, so a refusal is just shown. Others are re-added after.
+  const selfId = Number(auth?.user?.id);
+  const reactivate = async () => {
+    const current = scope();
+    if (!current || !Number.isSafeInteger(selfId)) return;
+    setError(null);
+    const next = await revalidateInternalRoom(current.id, [{ userId: selfId, role: 'owner' }], current.signal).catch(() => null);
+    if (!live(current)) return;
+    if (!next) { setError(t('internalChat.reactivateFailed')); return; }
+    setCreateFailed(false); setShowMembers(true);
+    setRoom(next); setInternalMentionCount(current.id, next.unreadMentionCount);
+  };
+  const onRoomChange = (next: InternalRoom | null) => {
+    setRoom(next);
+    if (next && sessionId) setInternalMentionCount(sessionId, next.unreadMentionCount);
   };
   const loadMessages = async () => {
     const current = scope();
@@ -267,17 +293,42 @@ export default function InternalSessionChat({ sessionId, enabled }: Props) {
                   <LockKeyhole className="size-3" aria-hidden />{t('internalChat.privacyNote')}
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className={cn(FOCUS_RING, 'rounded p-2 hover:bg-muted')} aria-label={t('internalChat.close')}>
-                <X className="size-4" aria-hidden />
-              </button>
+              <div className="flex items-center gap-1">
+                {room && (
+                  <button
+                    type="button"
+                    aria-pressed={showMembers}
+                    onClick={() => setShowMembers((value) => !value)}
+                    className={cn(FOCUS_RING, 'inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium hover:bg-muted', showMembers && 'bg-muted')}
+                  >
+                    <UserCog className="size-3.5" aria-hidden />{t('internalChat.members.toggle', { count: room.members.length })}
+                  </button>
+                )}
+                <button type="button" onClick={() => setOpen(false)} className={cn(FOCUS_RING, 'rounded p-2 hover:bg-muted')} aria-label={t('internalChat.close')}>
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
             </header>
             {!room && (
               <>
                 {errorAlert}
-                <div className="m-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">{t('internalChat.unavailable')}</div>
+                <div className="m-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  <p>{t('internalChat.unavailable')}</p>
+                  {createFailed && (
+                    <>
+                      <p className="mt-2">{t('internalChat.reactivateHint')}</p>
+                      <button type="button" onClick={() => void reactivate()} className={cn(FOCUS_RING, ACCENT_BUTTON, 'mt-3 inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm font-medium text-foreground')}>
+                        {t('internalChat.reactivate')}
+                      </button>
+                    </>
+                  )}
+                </div>
               </>
             )}
-            {room && (
+            {room && showMembers && (
+              <InternalRoomMembers sessionId={sessionId} projectId={projectId} room={room} onRoomChange={onRoomChange} />
+            )}
+            {room && !showMembers && (
               <>
                 <div className="flex-1 overflow-y-auto p-4" aria-live="polite"><MessageList messages={messages} /></div>
                 {errorAlert}

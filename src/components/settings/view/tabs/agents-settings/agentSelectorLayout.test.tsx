@@ -36,9 +36,9 @@ describe('مُنتقي الوكلاء', () => {
     );
 
     const grid = container.querySelector('.grid');
-    expect(grid?.className).toContain('grid-cols-3');
-    expect(grid?.className).toContain('sm:grid-cols-5');
-    expect(grid?.className).toContain('xl:grid-cols-9');
+    // أعمدة متساوية تتمدّد لتملأ العرض بدل عدد أعمدة ثابت يكدّس البطاقات في جانب.
+    expect(grid?.className).toContain('grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))]');
+    expect(grid?.className).not.toMatch(/(^|\s)(sm:|xl:)?grid-cols-\d/);
 
     // بلا localModelsLabel/onSelectLocalModels لا تظهر البطاقة الإضافية.
     const buttons = screen.getAllByRole('button');

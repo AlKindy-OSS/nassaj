@@ -46,7 +46,9 @@ import { createRateLimiter } from '../middleware/rate-limit.js';
 import { auditLogDb, userDb, webauthnCredentialsDb } from '../modules/database/index.js';
 import { clientIp } from '../utils/client-ip.js';
 import { isTrustedOrigin, multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
-import { clearPasswordChangeCookie, issueDeviceSession } from '../modules/account-wallet/issue-device-session.js';
+import {
+  clearDeviceCookie, clearPasswordChangeCookie, issueDeviceSession,
+} from '../modules/account-wallet/issue-device-session.js';
 import { recordConnectorOwnerAuthentication } from '../modules/connectors/connector-owner-auth-session.js';
 import {
   WebAuthnError,
@@ -322,6 +324,7 @@ function answerPasskeyLogin(res, user, issued) {
   if (!issued) {
     // W1: a leftover forced-change cookie must not outrank the new Bearer.
     clearPasswordChangeCookie(res);
+    clearDeviceCookie(res);
     return res.json({ success: true, user: publicUser, token: generateToken(user) });
   }
   return res.set('Cache-Control', 'no-store').json({

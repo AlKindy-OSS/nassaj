@@ -100,6 +100,40 @@ describe('AuthProvider sign-out (T-2035)', () => {
   });
 });
 
+describe('AuthProvider sign-out in wallet mode (ADR-194 A3)', () => {
+  it('a bearer tab ends its bearer session even when wallet mode is on, never the wallet', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('/api/auth/status')) return json({ needsSetup: false, deviceAccountSessionsEnabled: true });
+      if (url.endsWith('/api/auth/user')) {
+        return json({ user: { id: 7, username: 'member', role: 'user', status: 'active' }, isMultiUser: true });
+      }
+      if (url.includes('/api/user/onboarding-status')) return json({ hasCompletedOnboarding: true });
+      if (url.endsWith('/api/auth/logout')) return json({ success: true, scope: 'device' });
+      return json({}, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await renderProvider();
+    expect(auth!.deviceAccountSessionsEnabled).toBe(true);
+    expect(screen.getByTestId('token').textContent).toBe('null');
+    // A bearer written after mount (another tab's sign-in) outranks the cookie.
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-bearer');
+    const walletReads = () => fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/auth/accounts')).length;
+    const readsBefore = walletReads();
+
+    await act(async () => { auth!.logout(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const call = logoutCall(fetchMock as unknown as ReturnType<typeof installFetch>);
+    expect(call).toBeTruthy();
+    expect(new Headers(call![1]?.headers).get('Authorization')).toBe('Bearer token-bearer');
+    expect(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+    expect(auth!.user).toBeNull();
+    expect(walletReads()).toBe(readsBefore);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/auth/logout'))).toHaveLength(1);
+  });
+});
+
 describe('AuthProvider SSO sign-out (ADR-H20 N1/N4)', () => {
   it('an SSO sign-out goes on to the IdP end_session URL and marks the explicit sign-out', async () => {
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'token-synthetic');

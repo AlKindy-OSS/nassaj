@@ -2,7 +2,8 @@ import type { TFunction } from 'i18next';
 import { UserPlus } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import { getIdentityBarrierSnapshot, reconcileRevokedIdentity, subscribeIdentityBarrier } from '../auth/accountIdentityBarrier';
+import { getIdentityBarrierSnapshot, subscribeIdentityBarrier } from '../auth/accountIdentityBarrier';
+import { handleIdentityRevocation } from '../auth/bearerRevocation';
 import { staticAssetUrl } from '../../lib/static-asset-url';
 import { cn } from '../../lib/utils';
 import { Button, Input } from '../../shared/view/ui';
@@ -250,13 +251,13 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
       if (!valid(fence)) return;
       if (response.status === 409) {
         const body = await response.json().catch(() => null); if (!valid(fence)) return;
-        if (conflictCode(body) === 'identity_changed') { reconcileRevokedIdentity(); return; }
+        if (conflictCode(body) === 'identity_changed') { handleIdentityRevocation(); return; }
         if (conflictCode(body) !== 'project_access_changed' || getIdentityBarrierSnapshot().phase !== 'stable') throw new Error('load_conflict');
         response = await api.getProjectMembers(projectId, { signal: fence.controller.signal });
         if (!valid(fence)) return;
         if (response.status === 409) {
           const retryBody = await response.json().catch(() => null); if (!valid(fence)) return;
-          if (conflictCode(retryBody) === 'identity_changed') { reconcileRevokedIdentity(); return; }
+          if (conflictCode(retryBody) === 'identity_changed') { handleIdentityRevocation(); return; }
         }
       }
       if (response.status === 404) { onOpenChangeRef.current(false); return; }
@@ -289,7 +290,7 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
       if (response.status === 409) {
         const body = await response.json().catch(() => null); if (!valid(fence)) return;
         const code = conflictCode(body);
-        if (code === 'identity_changed') { setMembers([]); setViewer(null); reconcileRevokedIdentity(); return; }
+        if (code === 'identity_changed') { setMembers([]); setViewer(null); handleIdentityRevocation(); return; }
         const creatorProtected = code === 'cannot_remove_creator' || code === 'cannot_change_creator_role';
         setActionError(t(creatorProtected ? 'participants.memberDialog.creatorProtected' : 'participants.memberDialog.changeUnconfirmed', {
           defaultValue: creatorProtected ? 'The project creator cannot be changed or removed.' : 'The result of the change could not be confirmed. Check the refreshed list before making another change.',

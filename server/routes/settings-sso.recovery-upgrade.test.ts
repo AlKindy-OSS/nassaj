@@ -186,9 +186,9 @@ test('test plan 8: an env-configured node upgrades paused → import → test �
   const outOfScope = await ssoLogin({ sub: 'sub-outsider', ...NESTED('admin', 'org-9') });
   assert.ok(outOfScope.refusal, 'a grant outside the allowed scopes grants nothing');
   const { back: ownerTry } = await ssoCallback({ sub: 'sub-owner', ...NESTED('admin', 'org-1') });
-  assert.equal(ownerTry.status, 200, 'an owner without a passkey gets the step-up page, not a code');
-  assert.match(ownerTry.text, /Nassaj requires your passkey/);
-  assert.equal(ownerTry.headers.get('location'), null);
+  assert.equal(ownerTry.status, 302, 'an owner without a passkey signs in directly (A1 withdrawn)');
+  assert.doesNotMatch(ownerTry.text, /Nassaj requires your passkey/);
+  assert.match(ownerTry.headers.get('location') ?? '', /oidc_code=/);
   assert.equal((await login(owner.username, OWNER_PASSWORD)).status, 200, 'owner password after apply');
 });
 

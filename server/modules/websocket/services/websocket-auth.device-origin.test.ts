@@ -77,6 +77,38 @@ test('disabled wallet ignores a stale device cookie and preserves bearer websock
   assert.equal((request.req as { user?: { authenticationKind?: string } }).user?.authenticationKind, 'session');
 });
 
+/** Wallet on, a device cookie plus a bearer query token; `live` says whether the cookie's session lives. */
+function bearerBesideCookie(live: boolean, rejections: string[]) {
+  const request = {
+    req: {
+      url: '/ws?token=bearer-token',
+      headers: { cookie: '__Host-nassaj_device=revoked-secret', host: 'nassaj.example.test' },
+    },
+  };
+  const deps: any = dependencies(rejections);
+  deps.deviceSessionsEnabled = () => true;
+  deps.deviceSessionLive = (secret: string) => secret === 'revoked-secret' && live;
+  deps.authenticateWebSocket = (token: string) => token === 'bearer-token'
+    ? { id: 7, username: 'owner', authenticationKind: 'session' }
+    : null;
+  return { request, deps };
+}
+
+test('ADR-194 A3: a revoked device cookie beside a bearer is ignored; the bearer authenticates', () => {
+  const rejections: string[] = [];
+  const { request, deps } = bearerBesideCookie(false, rejections);
+  assert.equal(verifyWebSocketClient(request as never, deps), true);
+  assert.equal((request.req as { user?: { authenticationKind?: string } }).user?.authenticationKind, 'session');
+  assert.deepEqual(rejections, []);
+});
+
+test('ADR-194 A3: a LIVE device session beside a bearer is still ambiguous', () => {
+  const rejections: string[] = [];
+  const { request, deps } = bearerBesideCookie(true, rejections);
+  assert.equal(verifyWebSocketClient(request as never, deps), false);
+  assert.deepEqual(rejections, ['ambiguous_authentication']);
+});
+
 test('T-1939: a verified bearer refused for a stale SSO attestation is audited as such', async () => {
   const { default: jwt } = await import('jsonwebtoken');
   const secret = 'synthetic-ws-classifier-secret';

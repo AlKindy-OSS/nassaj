@@ -10,6 +10,12 @@
  *
  * Boot re-assertion: an enabled active row together with a disabled record is
  * an inconsistent restore; the record is removed (enabled is stricter).
+ *
+ * Wallet exclusion (ADR-194 A3): multi-account switching is off while
+ * SSO is configured or enforced. Every transition into that state — enable,
+ * an apply that leaves the row enabled, and boot when SSO is not 'off' —
+ * revokes all live device sessions in the same transaction, so a wallet
+ * cookie cannot silently revive if SSO is turned off later.
  */
 import { getConnection } from '../modules/database/connection.js';
 import { recordStrictAuditOnConnection } from '../modules/database/repositories/audit-log.js';
@@ -22,11 +28,13 @@ import {
   writeDisabledRecordOn,
 } from '../modules/database/repositories/sso-oidc-config.js';
 import { revokeUserIdentity } from '../modules/account-wallet/user-identity-revocation.js';
+import { connectionRevocationRegistry } from '../modules/account-wallet/connection-revocation-registry.js';
+import { revokeAllLiveDeviceSessionsOn } from '../modules/database/repositories/device-account-sessions.js';
 import { SSO_ATTESTATION_EXPIRED_REVOCATION } from '../modules/account-wallet/user-realtime-revocation.js';
 import { invalidateRefreshCache } from '../middleware/auth.js';
 import { apiKeySsoUnavailableGateRegistered } from '../modules/database/repositories/api-key-sso-gate.js';
 
-import { ssoForceOff, ssoState } from './sso-config.service.js';
+import { invalidateSsoWalletBlockCache, ssoForceOff, ssoState } from './sso-config.service.js';
 import { sweepTestEvidence } from './sso-test-signin.service.js';
 
 function log(level, code, fields = {}) {
@@ -43,6 +51,28 @@ export function revokeLiveAccessForUsers(userIds) {
       log('warn', 'sso_disable_live_revocation_failed');
     }
   }
+}
+
+/**
+ * Wallet exclusion, transaction half: revokes every live device session on
+ * `db`. Must run inside the transaction that makes SSO configured/enforced.
+ * @returns {string[]} revoked device session ids, for revokeLiveDeviceConnections()
+ */
+export function revokeWalletSessionsOn(db, nowMs) {
+  return revokeAllLiveDeviceSessionsOn(db, nowMs);
+}
+
+/** Wallet exclusion, post-commit half: drops the wallet cache and cuts live device connections. */
+export function revokeLiveDeviceConnections(deviceSessionIds) {
+  invalidateSsoWalletBlockCache();
+  for (const deviceSessionId of deviceSessionIds) {
+    try {
+      connectionRevocationRegistry.revokeDevice(deviceSessionId);
+    } catch {
+      log('warn', 'sso_wallet_live_revocation_failed');
+    }
+  }
+  if (deviceSessionIds.length > 0) log('info', 'sso_wallet_sessions_revoked', { count: deviceSessionIds.length });
 }
 
 /** The shared disable transaction body; must run inside an immediate transaction. */
@@ -94,6 +124,7 @@ export function disableSso({
       reason: 'owner', auditAction: 'sso_disabled', actorUserId, revoke, fromState, nowMs,
     });
   }).immediate();
+  invalidateSsoWalletBlockCache();
   if (result === null) return { alreadyDisabled: true, linkedRevoked: 0, fromState: 'off', keptSessions: false };
   afterCommit(result.revokedIds);
   return {
@@ -111,6 +142,7 @@ function applyForceOff(db, nowMs, afterCommit) {
       reason: 'force_off', auditAction: 'sso_force_off_applied', actorUserId: null, revoke: true, fromState, nowMs,
     });
   }).immediate();
+  invalidateSsoWalletBlockCache();
   if (result === null) return { action: 'none' };
   afterCommit(result.revokedIds);
   log('warn', 'sso_force_off_applied', { linkedRevoked: result.revokedIds.length });
@@ -127,6 +159,17 @@ function reassertEnabled(db) {
   }).immediate();
   if (cleared) log('warn', 'sso_disabled_record_cleared');
   return { action: cleared ? 'disabled_record_cleared' : 'none' };
+}
+
+/**
+ * Boot half of the wallet exclusion: when SSO is not 'off' (including a read
+ * failure), device sessions minted while it was off are revoked. Idempotent.
+ */
+function revokeWalletSessionsAtBoot(db, nowMs) {
+  invalidateSsoWalletBlockCache();
+  if (ssoState() === 'off') return;
+  const revoked = db.transaction(() => revokeWalletSessionsOn(db, nowMs)).immediate();
+  revokeLiveDeviceConnections(revoked);
 }
 
 /** One warning naming (never valuing) OIDC_* variables an active row makes irrelevant. */
@@ -146,6 +189,7 @@ export function applySsoBootPolicy({ nowMs = Date.now(), afterCommit = revokeLiv
   try {
     const db = getConnection();
     const outcome = ssoForceOff() ? applyForceOff(db, nowMs, afterCommit) : reassertEnabled(db);
+    revokeWalletSessionsAtBoot(db, nowMs);
     warnIgnoredLegacyEnv(db);
     sweepTestEvidence(nowMs);
     log('info', 'sso_boot_state', { state: ssoState() });

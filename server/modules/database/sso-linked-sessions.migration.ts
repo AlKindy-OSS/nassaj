@@ -6,12 +6,13 @@ import type { Database } from 'better-sqlite3';
  * `sso_device_sessions` holds one row per Nassaj device session (the JWT
  * `refreshSid`) that started through SSO. It carries the 24 h idle clock
  * (N8), the silent re-check clock (D9-1), the login hint of the session's own
- * user (V10a), whether it is the owner's no-click tier, and that browser's
- * privileged step-up grant (N2). A password session has no row.
+ * user (V10a) and whether it is the owner's no-click tier. `privileged_until`
+ * held the owner step-up grant (N2), withdrawn 2026-10-18; the column stays
+ * (always NULL). A password session has no row.
  *
  * `sso_device_session_idp_sids` maps the IdP session ids (`sid` claim) seen by
  * that device session to it, so a back-channel logout ends exactly that
- * browser's session (N5). Sign-in, step-up and re-check may each add a sid.
+ * browser's session (N5). Sign-in and re-check may each add a sid.
  *
  * `oidc_logout_jtis` records a logout token's `jti` only after it was answered
  * 200 (ADR-H20 D5, V4), so a retry after our own 503 is processed and a replay

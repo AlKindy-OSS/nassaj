@@ -14,7 +14,8 @@ import {
 import { useTerminalTheme } from '../../shell/hooks/useTerminalTheme';
 import { enableXtermArabic, ensureXtermFocusStyles } from '../../shell/utils/terminalStyles';
 import { copyTextToClipboard } from '../../../utils/clipboard';
-import { isIdentityRevocationClose, reconcileRevokedIdentity } from '../../auth/accountIdentityBarrier';
+import { isIdentityRevocationClose } from '../../auth/accountIdentityBarrier';
+import { handleIdentityRevocation } from '../../auth/bearerRevocation';
 import { getTerminalWebSocketUrl, parseTerminalMessage, sendTerminalMessage } from '../utils/socket';
 import {
   MAX_RECONNECT_ATTEMPTS,
@@ -368,7 +369,7 @@ export function useTerminalConnection({
           clearReconnectTimer();
           reconnectAttemptsRef.current = 0;
           setState('idle');
-          reconcileRevokedIdentity();
+          handleIdentityRevocation();
           return;
         }
 

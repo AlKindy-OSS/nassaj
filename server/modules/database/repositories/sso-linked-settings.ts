@@ -3,12 +3,12 @@
  *
  * Stored in app_config under the reserved `sso.linked.` namespace, which only
  * this repository writes (the generic app_config writer refuses `sso.`). A
- * missing or corrupt value reads as its safe default: auto sign-in off, no
+ * missing or corrupt value reads as its default: auto sign-in on, no
  * login hint, no post-logout URI, a 12 h re-check, and the owner kill switch
  * on ("IdP sign-out affects the owner").
  *
- * The owner entry cap is NOT a setting: it is OWNER_SSO_ENTRY_MAX_AUTH_AGE_MS,
- * a code constant (ADR-H20 D9 item 3).
+ * There is no owner entry cap (the ADR-194 A1 recency rule was withdrawn
+ * 2026-10-18), and none can be set here.
  */
 import { getConnection } from '@/modules/database/connection.js';
 
@@ -35,7 +35,9 @@ export type SsoLinkedSettings = {
 };
 
 export const SSO_LINKED_DEFAULTS: Readonly<SsoLinkedSettings> = Object.freeze({
-  autoSignIn: false,
+  // Owner decision 2026-10-18: with SSO active, opening any node signs in
+  // directly. A stored '0' still turns it off; ?local=1 stays the escape hatch.
+  autoSignIn: true,
   ownerLoginHint: null,
   postLogoutRedirectUri: null,
   recheckIntervalHours: RECHECK_DEFAULT_HOURS,

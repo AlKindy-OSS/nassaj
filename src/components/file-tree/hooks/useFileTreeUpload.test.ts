@@ -14,7 +14,9 @@ vi.mock('../../../utils/api', () => ({
 }));
 vi.mock('../../auth/accountIdentityBarrier', () => ({
   identityRequestSignal: mocks.identitySignal,
-  reconcileRevokedIdentity: mocks.reconcile,
+}));
+vi.mock('../../auth/bearerRevocation', () => ({
+  handleIdentityRevocation: mocks.reconcile,
 }));
 
 import { uploadFormDataWithProgress } from './useFileTreeUpload';

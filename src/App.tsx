@@ -9,7 +9,6 @@ import JoinPage from './components/auth/view/JoinPage';
 import SharedDocumentPage from './components/document-sharing/SharedDocumentPage';
 import ShareLoginPage from './components/document-sharing/ShareLoginPage';
 import OidcReturnPage from './components/auth/view/OidcReturnPage';
-import OwnerStepUpPrompt from './components/auth/view/OwnerStepUpPrompt';
 import { OIDC_RETURN_PATH } from './components/auth/oidc';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { BrandingProvider } from './contexts/BrandingContext';
@@ -76,8 +75,6 @@ export function AuthenticatedApp() {
               hop now that this IS the catch-all. */}
           <Route path="/*" element={<AppContent />} />
         </Routes>
-        {/* ADR-H20 N2: the owner's passkey step-up for privileged actions. */}
-        <OwnerStepUpPrompt />
       </ProtectedRoute>
     </WebSocketProvider>
   );

@@ -51,6 +51,16 @@ export function clearPasswordChangeCookie(res) {
   res.clearCookie(PASSWORD_CHANGE_COOKIE, DEVICE_COOKIE_ATTRIBUTES);
 }
 
+/**
+ * Drops the device cookie when a bearer JWT is issued (ADR-194 A3). A device
+ * session revoked while SSO was on leaves its cookie in the browser; if the
+ * wallet comes back later, that stale cookie beside the new bearer must not
+ * turn every request into 400 ambiguous_authentication.
+ */
+export function clearDeviceCookie(res) {
+  res.clearCookie(deviceCookieName(), DEVICE_COOKIE_ATTRIBUTES);
+}
+
 /** Cookie attributes for a device secret that expires at `expiresAt` (ms epoch). */
 export function deviceCookieOptions(expiresAt, now = Date.now()) {
   return { ...DEVICE_COOKIE_ATTRIBUTES, maxAge: Math.max(0, expiresAt - now) };

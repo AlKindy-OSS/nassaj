@@ -17,6 +17,7 @@ import { render, cleanup, act } from '@testing-library/react';
 import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 
+import { getIdentityBarrierSnapshot } from '../../auth/accountIdentityBarrier';
 import type { ShellErrorInfo } from '../types/types';
 
 import { useShellConnection } from './useShellConnection';
@@ -357,10 +358,41 @@ describe('useShellConnection — عمر اللافتة', () => {
   // phase (both 'changing' and 'committed'), so one revocation cycle fired the
   // shell's listener twice. `identityDisconnectedRef` in useShellConnection.ts
   // now dedupes that to a single disconnect+clear per revocation.
+  // A bearer (JWT) tab has no device wallet: a 4401 only re-proves the token
+  // (a dead one reaches login through auth:unauthorized). It must never enter
+  // the wallet identity barrier, whose /accounts read answers 404 there and
+  // ended on the locked "could not secure account switch" screen.
+  it('إغلاق مصادقة في تبويب bearer: لا يدخل حاجز الهوية ولا يعيد الاتصال', () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { result, socket } = mount();
+      const socketsBefore = FakeWebSocket.instances.length;
+
+      act(() => {
+        socket.onclose?.({ code: 4401 });
+      });
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      expect(FakeWebSocket.instances.length).toBe(socketsBefore);
+      expect(getIdentityBarrierSnapshot().phase).toBe('stable');
+      expect(result.clears).toBe(0);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(String((fetchSpy.mock.calls[0] as unknown[])[0])).toContain('/api/auth/user');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('إغلاق مصادقة بعد إطار الخطأ: مسح واحد فقط (تفعيل حاجز الهوية) ولا إعادة اتصال', () => {
     vi.useFakeTimers();
     try {
       const { result, socket } = mount();
+      // Device-cookie tab: the wallet path owns the revocation.
+      window.localStorage.removeItem('auth-token');
       const socketsBefore = FakeWebSocket.instances.length;
 
       act(() => {

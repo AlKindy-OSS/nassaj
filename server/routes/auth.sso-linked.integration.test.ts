@@ -1,7 +1,7 @@
 /**
  * ADR-H20 S6 with the real auth router, middleware and SQLite (ADR-194
- * amendment A2): the 24 h sliding idle of SSO device sessions (N8), the owner
- * tier gate on privileged REST actions (N2), the sid binding across a refresh
+ * amendment A2): the 24 h sliding idle of SSO device sessions (N8), full
+ * owner access with no passkey step-up (N2 withdrawn 2026-10-18), the sid binding across a refresh
  * (N5) and the end_session URL on sign-out (N4). The OIDC router is a double;
  * the mock OpenID Provider serves discovery for the end_session endpoint.
  */
@@ -41,8 +41,6 @@ let passwordHash: string;
 let sequence = 0;
 let ipSequence = 0;
 let authenticateWebSocket: (token: string | null) => { tokenSid?: string } | null;
-let mintToken: (user: unknown, options: { sid: string }) => string;
-let ownerStepUpRequired: (principal: { role?: string; refreshSid?: string | null }) => boolean;
 let constants: { TOKEN_TTL_MS: number; REFRESH_GRACE_MAX_HOURS: number; MAX_SESSION_TOKEN_LIFETIME_MS: number };
 let setNetwork: (overrides: unknown) => void;
 let resetSso: () => void;
@@ -59,8 +57,6 @@ before(async () => {
   const middleware = await import('../middleware/auth.js');
   const deviceSessions = await import('../services/sso-device-session.service.js');
   authenticateWebSocket = middleware.authenticateWebSocket as typeof authenticateWebSocket;
-  ownerStepUpRequired = deviceSessions.ownerStepUpRequired;
-  mintToken = middleware.generateToken as typeof mintToken;
   constants = {
     TOKEN_TTL_MS: middleware.TOKEN_TTL_MS,
     REFRESH_GRACE_MAX_HOURS: middleware.REFRESH_GRACE_MAX_HOURS,
@@ -79,6 +75,7 @@ before(async () => {
   app.post('/api/system/pending/1/execute', middleware.authenticateToken, ok);
   app.get('/api/terminals', middleware.authenticateToken, ok);
   app.post('/api/projects/p1/files', middleware.authenticateToken, ok);
+  app.post('/api/commands/execute', middleware.authenticateToken, ok);
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -127,12 +124,12 @@ const sidOf = (token: string) => (jwt.decode(token) as { sid: string }).sid;
 
 /** Turns a password session into an SSO device session (what the OIDC callback binds). */
 function bindSso(token: string, userId: number, {
-  ownerTier = false, lastSeenAgoMs = 0, privilegedUntil = null as number | null, idpSid = `V1_${crypto.randomUUID()}`,
+  ownerTier = false, lastSeenAgoMs = 0, idpSid = `V1_${crypto.randomUUID()}`,
 } = {}) {
   const refreshSid = sidOf(token);
   const nowMs = Date.now();
   ssoDeviceSessionsDb.bind({
-    refreshSid, userId, issuer: 'https://idp.example', idpSid, loginHint: null, ownerTier, privilegedUntil,
+    refreshSid, userId, issuer: 'https://idp.example', idpSid, loginHint: null, ownerTier,
     nowMs, pruneAfter: nowMs + 30 * 24 * HOUR_MS,
   });
   if (lastSeenAgoMs) {
@@ -199,81 +196,40 @@ test('pruning can never revive an idle token: a row outlives every token of its 
 });
 
 // ---------------------------------------------------------------------------
-// N2: the owner tier gate on REST
+// N2 withdrawn (owner decision 2026-10-18): no owner step-up gate on REST
 // ---------------------------------------------------------------------------
 
-test('N2: an owner no-click SSO session reads freely; privileged writes and the terminal need the step-up', async () => {
+test('N2 withdrawn: an owner no-click SSO session with no grant reaches every privileged action', async () => {
   const owner = account('owner');
   const token = await passwordLogin(owner);
-  bindSso(token, owner.id, { ownerTier: true });
-  assert.equal((await call('GET', '/api/probe', token)).status, 200);
-  assert.equal((await call('GET', '/api/settings/sample', token)).status, 200, 'reading settings is open');
-  assert.equal((await call('POST', '/api/projects/p1/files', token, {})).status, 200, 'not a privileged action');
+  const { refreshSid } = bindSso(token, owner.id, { ownerTier: true });
+  assert.equal(ssoDeviceSessionsDb.get(refreshSid)?.privileged_until, null, 'no grant at all');
   for (const [method, route] of [
-    ['PUT', '/api/settings/sample'], ['POST', '/api/system/pending/1/execute'], ['GET', '/api/terminals'],
+    ['GET', '/api/probe'], ['GET', '/api/settings/sample'], ['PUT', '/api/settings/sample'],
+    ['POST', '/api/system/pending/1/execute'], ['GET', '/api/terminals'], ['POST', '/api/commands/execute'],
+    ['POST', '/api/projects/p1/files'],
   ] as const) {
     const res = await call(method, route, token, method === 'GET' ? undefined : {});
-    assert.equal(res.status, 403, `${method} ${route}`);
-    assert.equal((await res.json()).code, 'owner_step_up_required');
+    assert.equal(res.status, 200, `${method} ${route}`);
   }
-  const ws = authenticateWebSocket(token);
-  assert.ok(ws, 'the socket itself opens');
-  assert.equal(ownerStepUpRequired({ role: 'owner', refreshSid: ws.tokenSid }), true, 'its agent turns and shell are gated');
+  for (const [method, body] of [['PATCH', { name: 'x' }], ['DELETE', undefined]] as const) {
+    const res = await call(method, '/api/auth/webauthn/credentials/1', token, body);
+    const answer = await res.json().catch(() => ({})) as { code?: string };
+    assert.notEqual(answer.code, 'owner_step_up_required', `${method} credentials`);
+  }
+  assert.ok(authenticateWebSocket(token), 'the socket opens');
 });
 
-test('N2: a grant on browser A opens A only; a password owner session is never gated', async () => {
-  const owner = account('owner');
-  const browserA = await passwordLogin(owner);
-  const browserB = await passwordLogin(owner);
-  bindSso(browserA, owner.id, { ownerTier: true, privilegedUntil: Date.now() + HOUR_MS });
-  bindSso(browserB, owner.id, { ownerTier: true });
-  assert.equal((await call('PUT', '/api/settings/sample', browserA, {})).status, 200);
-  assert.equal((await call('PUT', '/api/settings/sample', browserB, {})).status, 403, 'never crosses devices');
-  const passwordSession = await passwordLogin(owner);
-  assert.equal((await call('PUT', '/api/settings/sample', passwordSession, {})).status, 200);
-});
-
-test('N2: an expired grant (past ~60 min) gates again', async () => {
-  const owner = account('owner');
-  const token = await passwordLogin(owner);
-  bindSso(token, owner.id, { ownerTier: true, privilegedUntil: Date.now() - 1 });
-  assert.equal((await call('PUT', '/api/settings/sample', token, {})).status, 403);
-});
-
-test('H2: a member SSO session promoted to owner is refused privileged actions until a fresh owner sign-in', async () => {
+test('a member SSO session promoted to owner: the role change still invalidates the old token', async () => {
   const admin = account('owner');
   const adminToken = await passwordLogin(admin);
   const user = account();
   const token = await passwordLogin(user);
   bindSso(token, user.id);
-  assert.equal((await call('PUT', '/api/settings/sample', token, {})).status, 200, 'a member is never step-up gated');
+  assert.equal((await call('PUT', '/api/settings/sample', token, {})).status, 200);
   const promoted = await call('PATCH', `/api/auth/users/${user.id}/role`, adminToken, { role: 'owner' });
   assert.equal(promoted.status, 200);
   assert.equal((await call('GET', '/api/probe', token)).status, 401, 'the role change invalidates the old token');
-  // Defence in depth: a token of the SAME device session minted after the
-  // promotion (the binding, owner_tier 0, stays) still cannot act as owner.
-  const renewed = mintToken(userDb.getUserById(user.id), { sid: sidOf(token) });
-  const res = await call('PUT', '/api/settings/sample', renewed, {});
-  assert.equal(res.status, 403, 'the member-tier binding cannot carry owner privilege');
-  assert.equal((await res.json()).code, 'owner_step_up_required');
-  assert.equal((await call('GET', '/api/probe', renewed)).status, 200, 'reads stay open');
-});
-
-test('M2: renaming or deleting a passkey needs the step-up; registration and the step-up itself stay open', async () => {
-  const owner = account('owner');
-  const token = await passwordLogin(owner);
-  bindSso(token, owner.id, { ownerTier: true });
-  for (const [method, body] of [['PATCH', { name: 'x' }], ['DELETE', undefined]] as const) {
-    const res = await call(method, '/api/auth/webauthn/credentials/1', token, body);
-    assert.equal(res.status, 403, `${method} credentials`);
-    assert.equal((await res.json()).code, 'owner_step_up_required');
-  }
-  assert.equal((await call('GET', '/api/auth/webauthn/credentials', token)).status, 200, 'listing stays open');
-  for (const route of ['/api/auth/webauthn/register/options', '/api/auth/webauthn/step-up/options']) {
-    const res = await call('POST', route, token, {});
-    const body = await res.json().catch(() => ({})) as { code?: string };
-    assert.notEqual(body.code, 'owner_step_up_required', route);
-  }
 });
 
 // ---------------------------------------------------------------------------
@@ -307,15 +263,17 @@ test('N4: an SSO sign-out returns the end_session URL (client_id, allow-listed r
   assert.equal(plain.endSessionUrl, undefined, 'a password session stays local (ADR-H20 D7)');
 });
 
-test('N1: /status exposes ssoAutoSignIn only when SSO is active and the node setting is on', async () => {
+test('N1: /status exposes ssoAutoSignIn when SSO is active unless the node turned it off', async () => {
   const status = async () => (await fetch(`${origin}/api/auth/status`)).json();
-  assert.equal((await status()).ssoAutoSignIn, false);
-  const owner = account('owner');
-  updateSettings({ autoSignIn: true }, { userId: owner.id });
   assert.equal((await status()).ssoAutoSignIn, false, 'SSO is not active');
   const op = createMockOpenIdProvider();
   setNetwork(op.network);
   writeSsoRow(getConnection());
   resetSso();
+  assert.equal((await status()).ssoAutoSignIn, true, 'on by default once SSO is active');
+  const owner = account('owner');
+  updateSettings({ autoSignIn: false }, { userId: owner.id });
+  assert.equal((await status()).ssoAutoSignIn, false, 'an explicitly stored off is respected');
+  updateSettings({ autoSignIn: true }, { userId: owner.id });
   assert.equal((await status()).ssoAutoSignIn, true);
 });

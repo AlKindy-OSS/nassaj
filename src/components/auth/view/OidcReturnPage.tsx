@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -14,7 +14,7 @@ import {
 } from '../oidc';
 import type { OidcFailureReason } from '../oidc';
 import { readStepUpReturn } from '../../settings/view/tabs/connectorStepUpClient';
-import { readSsoSessionReturn, type SsoSessionReturn } from '../ssoLinkedSession';
+import { readSsoSessionReturn } from '../ssoLinkedSession';
 
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthScreenLayout from './AuthScreenLayout';
@@ -44,8 +44,6 @@ const REASON_MESSAGE_KEYS: Readonly<Record<OidcFailureReason, string>> = {
   sso_unavailable: 'sso.errors.ssoUnavailable',
   password_change_required: 'sso.errors.passwordChangeRequired',
   owner_local_only: 'sso.errors.ownerLocalOnly',
-  owner_key_required: 'sso.errors.ownerKeyRequired',
-  owner_reauth_required: 'sso.errors.ownerReauthRequired',
 };
 
 // Retrying SSO cannot fix these; only an administrator, the member's own
@@ -59,13 +57,6 @@ const NON_RETRYABLE_REASONS: ReadonlySet<OidcFailureReason> = new Set([
   'sso_unavailable',
   'password_change_required',
   'owner_local_only',
-]);
-
-// ADR-194 A1: an owner whose IdP sign-in was not a fresh passkey retries
-// with a forced re-authentication (`?reauth=1`).
-const OWNER_REAUTH_REASONS: ReadonlySet<OidcFailureReason> = new Set([
-  'owner_key_required',
-  'owner_reauth_required',
 ]);
 
 function readReturnPhase(params: URLSearchParams): ReturnPhase {
@@ -97,51 +88,33 @@ export default function OidcReturnPage() {
   const [stepUp] = useState(() => readStepUpReturn(searchParams));
   const [sessionReturn] = useState(() => readSsoSessionReturn(searchParams));
   const scrubUrl = useCallback(() => setSearchParams({}, { replace: true }), [setSearchParams]);
-  if (sessionReturn) return <SsoSessionReturnView result={sessionReturn} scrubUrl={scrubUrl} />;
+  if (sessionReturn) return <SsoSessionReturnView scrubUrl={scrubUrl} />;
   return stepUp ? <OidcStepUpReturn result={stepUp} scrubUrl={scrubUrl} /> : <OidcLoginReturn />;
 }
 
 /**
- * ADR-H20: the return of an owner passkey step-up or a silent re-check. Neither
- * signs anyone in. A confirmed step-up or a kept/renewed session goes back to
- * the app; a re-check that ended the session goes back too, where the revoked
- * session lands on the sign-in page. Only a failed step-up stays here.
+ * ADR-H20: the return of a silent re-check. It never signs anyone in. A
+ * kept/renewed session goes back to the app; a re-check that ended the
+ * session goes back too, where the revoked session lands on the sign-in page.
  */
-function SsoSessionReturnView({ result, scrubUrl }: { result: SsoSessionReturn; scrubUrl: () => void }) {
+function SsoSessionReturnView({ scrubUrl }: { scrubUrl: () => void }) {
   const { t } = useTranslation('auth');
   const navigate = useNavigate();
   const started = useRef(false);
-  const failed = result.kind === 'owner_step_up' && !result.ok;
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     scrubUrl();
-    if (!failed) navigate('/', { replace: true });
-  }, [failed, navigate, scrubUrl]);
+    navigate('/', { replace: true });
+  }, [navigate, scrubUrl]);
 
-  if (!failed) {
-    return (
-      <AuthScreenLayout title={t('sso.return.title')} description="" footerText="">
-        <p role="status" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          {t('sso.return.verifying')}
-        </p>
-      </AuthScreenLayout>
-    );
-  }
   return (
-    <AuthScreenLayout title={t('sso.ownerStepUp.title')} description="" footerText="">
-      <div role="alert">
-        <AuthErrorAlert errorMessage={t('sso.ownerStepUp.returnFailed')} />
-      </div>
-      <button
-        type="button"
-        onClick={() => navigate('/', { replace: true })}
-        className="w-full rounded-md bg-blue-600 px-4 py-2 font-medium text-white transition-colors duration-200 hover:bg-blue-700"
-      >
-        {t('sso.ownerStepUp.back')}
-      </button>
+    <AuthScreenLayout title={t('sso.return.title')} description="" footerText="">
+      <p role="status" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        {t('sso.return.verifying')}
+      </p>
     </AuthScreenLayout>
   );
 }
@@ -199,8 +172,7 @@ function OidcLoginReturn() {
     );
   }
 
-  const ownerReauth = OWNER_REAUTH_REASONS.has(phase.reason);
-  const canRetry = !ownerReauth && !NON_RETRYABLE_REASONS.has(phase.reason);
+  const canRetry = !NON_RETRYABLE_REASONS.has(phase.reason);
 
   return (
     <AuthScreenLayout
@@ -213,16 +185,6 @@ function OidcLoginReturn() {
       </div>
 
       <div className="space-y-3">
-        {ownerReauth && (
-          <button
-            type="button"
-            onClick={() => startOidcLogin(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 font-medium text-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground"
-          >
-            <KeyRound className="h-4 w-4" aria-hidden />
-            {t('sso.return.reauthWithPasskey')}
-          </button>
-        )}
         {canRetry && (
           <button
             type="button"

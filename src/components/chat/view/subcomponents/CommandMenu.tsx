@@ -6,9 +6,10 @@ import {
   Folder,
   MessageSquare,
   Sparkles,
+  SquareSlash,
   Star,
-  Terminal,
   User,
+  X,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -55,6 +56,8 @@ type CommandMenuRow = {
 const menuBaseStyle: CSSProperties = {
   maxHeight: '360px',
   overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
   borderRadius: '8px',
   boxShadow: '0 24px 60px rgba(2, 6, 23, 0.38), 0 0 0 1px rgba(148, 163, 184, 0.12)',
   zIndex: 1000,
@@ -75,7 +78,7 @@ const namespaceLabels: Record<string, string> = {
 
 const namespaceIcons: Record<string, LucideIcon> = {
   frequent: Star,
-  builtin: Terminal,
+  builtin: SquareSlash,
   skill: Sparkles,
   opencode: Zap,
   project: Folder,
@@ -94,6 +97,8 @@ const namespaceAccentClasses: Record<string, string> = {
 };
 
 const MENU_EDGE_GAP = 16;
+/** The composer's toggle button carries this attribute so its own tap is not an "outside" tap. */
+const COMMAND_MENU_TOGGLE_ATTR = 'data-command-menu-toggle';
 const MENU_MAX_HEIGHT = 360;
 
 const getCommandKey = (command: CommandMenuCommand) =>
@@ -178,6 +183,7 @@ export default function CommandMenu({
 }: CommandMenuProps) {
   const { t } = useTranslation('chat');
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const selectedItemRef = useRef<HTMLDivElement | null>(null);
 
   // Detect RTL from prop override, then nearest [dir] ancestor, then document.
@@ -196,23 +202,35 @@ export default function CommandMenu({
     if (!isOpen) {
       return;
     }
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!menuRef.current || !(event.target instanceof Node)) {
+    // pointerdown covers mouse, touch and pen, so a tap outside closes the menu on mobile too.
+    const handlePointerOutside = (event: PointerEvent) => {
+      if (!menuRef.current || !(event.target instanceof Element)) {
         return;
       }
-      if (!menuRef.current.contains(event.target)) {
+      if (menuRef.current.contains(event.target) || event.target.closest(`[${COMMAND_MENU_TOGGLE_ATTR}]`)) {
+        return;
+      }
+      onClose();
+    };
+    // The composer textarea already handles Escape (and prevents default); this covers focus elsewhere.
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
         onClose();
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('pointerdown', handlePointerOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (!selectedItemRef.current || !menuRef.current) {
+    if (!selectedItemRef.current || !listRef.current) {
       return;
     }
-    const menuRect = menuRef.current.getBoundingClientRect();
+    const menuRect = listRef.current.getBoundingClientRect();
     const itemRect = selectedItemRef.current.getBoundingClientRect();
     if (itemRect.bottom > menuRect.bottom || itemRect.top < menuRect.top) {
       selectedItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -300,97 +318,120 @@ export default function CommandMenu({
   return (
     <div
       ref={menuRef}
-      role="listbox"
-      aria-label={t('commandMenu.ariaLabel')}
       dir={isRTL ? 'rtl' : 'ltr'}
       className="command-menu border border-border/90 bg-card/95 text-foreground"
-      style={{ ...menuBaseStyle, ...menuPosition, opacity: 1, transform: 'translateY(0)' }}
+      style={{ ...menuBaseStyle, ...menuPosition, overflowY: 'hidden', opacity: 1, transform: 'translateY(0)' }}
     >
-      {orderedNamespaces.map((namespace) => (
-        <div key={namespace} className="command-group">
-          {orderedNamespaces.length > 1 && (
-            <div className="flex h-7 items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <span>{t(`commandMenu.groups.${namespace}`, { defaultValue: namespaceLabels[namespace] || namespace })}</span>
-              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border bg-muted px-1 text-[9px] leading-none text-muted-foreground">
-                {(groupedCommands[namespace] || []).length}
-              </span>
-            </div>
-          )}
-
-          {(groupedCommands[namespace] || []).map(({ command, commandIndex, renderKey }) => {
-            const isSelected = commandIndex === selectedIndex;
-            const isDisabled = isCommandDisabled(command);
-            const NamespaceIcon = getNamespaceIcon(namespace);
-            const accentClass = getNamespaceAccentClass(namespace);
-            return (
-              <div
-                key={renderKey}
-                ref={isSelected ? selectedItemRef : null}
-                role="option"
-                aria-selected={isSelected}
-                aria-disabled={isDisabled || undefined}
-                className={`command-item group relative flex min-h-11 items-center gap-2 rounded-md border px-2 py-1 transition-all ${
-                  isDisabled
-                    ? 'cursor-not-allowed border-transparent bg-transparent opacity-50'
-                    : isSelected
-                    ? 'border-sky-200 bg-sky-50 shadow-sm dark:border-cyan-400/30 dark:bg-cyan-400/10'
-                    : 'cursor-pointer border-transparent bg-transparent hover:border-border hover:bg-accent/90'
-                }`}
-                onMouseEnter={isDisabled
-                  ? undefined
-                  : () => onSelect && commandIndex >= 0 && onSelect(command, commandIndex, true)}
-                onClick={isDisabled
-                  ? undefined
-                  : () => onSelect && commandIndex >= 0 && onSelect(command, commandIndex, false)}
-                onMouseDown={(event) => event.preventDefault()}
-              >
-                {isSelected && !isDisabled && (
-                  <span className="absolute bottom-1.5 start-1 top-1.5 w-0.5 rounded-full bg-sky-500 dark:bg-cyan-300" />
-                )}
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border ${accentClass}`}>
-                  <NamespaceIcon aria-hidden="true" size={13} strokeWidth={2.2} />
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/70 pb-1 ps-2 pe-0.5">
+        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+          {t('commandMenu.title', { defaultValue: 'Commands' })}
+        </span>
+        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border bg-muted px-1 text-[9px] leading-none text-muted-foreground">
+          {commands.length}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          onMouseDown={(event) => event.preventDefault()}
+          aria-label={t('commandMenu.close', { defaultValue: 'Close commands' })}
+          title={t('commandMenu.close', { defaultValue: 'Close commands' })}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X aria-hidden="true" size={16} strokeWidth={2.2} />
+        </button>
+      </div>
+      <div
+        ref={listRef}
+        role="listbox"
+        aria-label={t('commandMenu.ariaLabel')}
+        className="min-h-0 flex-1 overflow-y-auto pt-1"
+      >
+        {orderedNamespaces.map((namespace) => (
+          <div key={namespace} className="command-group">
+            {orderedNamespaces.length > 1 && (
+              <div className="flex h-7 items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <span>{t(`commandMenu.groups.${namespace}`, { defaultValue: namespaceLabels[namespace] || namespace })}</span>
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border bg-muted px-1 text-[9px] leading-none text-muted-foreground">
+                  {(groupedCommands[namespace] || []).length}
                 </span>
-                <div className="min-w-0 flex-1 pe-1">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    {command.view?.title ? (
-                      <span className="min-w-0 truncate text-[13px] font-semibold leading-4 text-foreground">
-                        {command.view.title}{' '}<span aria-hidden="true">(</span><bdi dir="ltr" className="text-left font-mono" title={command.name}>{command.view.canonicalName}</bdi><span aria-hidden="true">)</span>
-                      </span>
-                    ) : (
-                      <bdi
-                        dir="ltr"
-                        className="shrink-0 text-left font-mono text-[13px] font-semibold leading-4 text-foreground"
-                        title={command.name}
-                      >
-                        {command.name}
-                      </bdi>
-                    )}
-                    {command.metadata?.type && (
-                      <span className="command-metadata-badge inline-flex h-4 shrink-0 items-center rounded border border-border bg-card px-1 text-[9px] font-medium leading-none text-muted-foreground">
-                        {command.metadata.type}
-                      </span>
-                    )}
-                  </div>
-                  {(command.view?.description || command.description) && (
-                    <div
-                      className="truncate whitespace-nowrap text-[11px] leading-4 text-muted-foreground"
-                      title={command.view?.description || command.description}
-                    >
-                      {command.view?.description || command.description}
-                    </div>
-                  )}
-                  {command.type === 'skill' && command.metadata?.disableModelInvocation === true && <p className="text-xs text-foreground">{t('skillObservations.manualOnly')}</p>}
-                </div>
-                {isSelected && !isDisabled && (
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-sky-200 bg-card text-sky-600 dark:border-cyan-400/30 dark:text-cyan-200">
-                    <CornerDownLeft aria-hidden="true" size={11} strokeWidth={2.2} />
-                  </span>
-                )}
               </div>
-            );
-          })}
-        </div>
-      ))}
+            )}
+
+            {(groupedCommands[namespace] || []).map(({ command, commandIndex, renderKey }) => {
+              const isSelected = commandIndex === selectedIndex;
+              const isDisabled = isCommandDisabled(command);
+              const NamespaceIcon = getNamespaceIcon(namespace);
+              const accentClass = getNamespaceAccentClass(namespace);
+              return (
+                <div
+                  key={renderKey}
+                  ref={isSelected ? selectedItemRef : null}
+                  role="option"
+                  aria-selected={isSelected}
+                  aria-disabled={isDisabled || undefined}
+                  className={`command-item group relative flex min-h-11 items-center gap-2 rounded-md border px-2 py-1 transition-all ${
+                    isDisabled
+                      ? 'cursor-not-allowed border-transparent bg-transparent opacity-50'
+                      : isSelected
+                      ? 'border-sky-200 bg-sky-50 shadow-sm dark:border-cyan-400/30 dark:bg-cyan-400/10'
+                      : 'cursor-pointer border-transparent bg-transparent hover:border-border hover:bg-accent/90'
+                  }`}
+                  onMouseEnter={isDisabled
+                    ? undefined
+                    : () => onSelect && commandIndex >= 0 && onSelect(command, commandIndex, true)}
+                  onClick={isDisabled
+                    ? undefined
+                    : () => onSelect && commandIndex >= 0 && onSelect(command, commandIndex, false)}
+                  onMouseDown={(event) => event.preventDefault()}
+                >
+                  {isSelected && !isDisabled && (
+                    <span className="absolute bottom-1.5 start-1 top-1.5 w-0.5 rounded-full bg-sky-500 dark:bg-cyan-300" />
+                  )}
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border ${accentClass}`}>
+                    <NamespaceIcon aria-hidden="true" size={13} strokeWidth={2.2} />
+                  </span>
+                  <div className="min-w-0 flex-1 pe-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {command.view?.title ? (
+                        <span className="min-w-0 truncate text-[13px] font-semibold leading-4 text-foreground">
+                          {command.view.title}{' '}<span aria-hidden="true">(</span><bdi dir="ltr" className="text-left font-mono" title={command.name}>{command.view.canonicalName}</bdi><span aria-hidden="true">)</span>
+                        </span>
+                      ) : (
+                        <bdi
+                          dir="ltr"
+                          className="shrink-0 text-left font-mono text-[13px] font-semibold leading-4 text-foreground"
+                          title={command.name}
+                        >
+                          {command.name}
+                        </bdi>
+                      )}
+                      {command.metadata?.type && (
+                        <span className="command-metadata-badge inline-flex h-4 shrink-0 items-center rounded border border-border bg-card px-1 text-[9px] font-medium leading-none text-muted-foreground">
+                          {command.metadata.type}
+                        </span>
+                      )}
+                    </div>
+                    {(command.view?.description || command.description) && (
+                      <div
+                        className="truncate whitespace-nowrap text-[11px] leading-4 text-muted-foreground"
+                        title={command.view?.description || command.description}
+                      >
+                        {command.view?.description || command.description}
+                      </div>
+                    )}
+                    {command.type === 'skill' && command.metadata?.disableModelInvocation === true && <p className="text-xs text-foreground">{t('skillObservations.manualOnly')}</p>}
+                  </div>
+                  {isSelected && !isDisabled && (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-sky-200 bg-card text-sky-600 dark:border-cyan-400/30 dark:text-cyan-200">
+                      <CornerDownLeft aria-hidden="true" size={11} strokeWidth={2.2} />
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

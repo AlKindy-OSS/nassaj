@@ -147,9 +147,9 @@ const replaceEmptyLegacyInternalChatSchema = (db: Database): boolean => {
 };
 
 /**
- * ADR-187 schema, created ONLY while NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=1 so a
- * rollback to a binary that does not classify these tables keeps working until
- * the flag is first enabled. Additive (CREATE ... IF NOT EXISTS), idempotent, no
+ * ADR-187 schema, created at every boot unless the kill switch
+ * NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=0|false is set (ON by default since
+ * 2026-10-18). Additive (CREATE ... IF NOT EXISTS), idempotent on existing databases, no
  * backfill; FKs reference sessions and users, so it runs after both. A populated
  * legacy-shaped schema is left untouched and blocks the feature for this process.
  */

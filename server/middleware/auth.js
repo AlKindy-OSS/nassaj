@@ -25,8 +25,7 @@ import {
   tokenSidOf,
 } from '../modules/account-wallet/token-session.js';
 import { configureLoginThrottle } from '../services/login-throttle.service.js';
-import { ownerStepUpRequired, touchSsoDeviceSession } from '../services/sso-device-session.service.js';
-import { isOwnerPrivilegedRequest, OWNER_STEP_UP_REQUIRED_CODE } from '../services/owner-privileged-actions.js';
+import { touchSsoDeviceSession } from '../services/sso-device-session.service.js';
 
 const { userDb, appConfigDb, auditLogDb } = databaseModule;
 const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
@@ -432,26 +431,6 @@ const validateApiKey = (req, res, next) => {
 /** 401 code for an SSO device session that was idle for 24 h (ADR-H20 N8). */
 const SSO_SESSION_EXPIRED_CODE = 'sso_session_expired';
 
-/**
- * ADR-H20 N2: refuses (403 owner_step_up_required) a privileged action from an
- * owner-tier SSO session without a live step-up grant for THIS browser. True
- * when the request was answered.
- */
-function refuseOwnerPrivilegedWithoutStepUp(req, res) {
-  if (req.user?.role !== 'owner' || !isOwnerPrivilegedRequest(req)) return false;
-  if (!ownerStepUpRequired({ role: req.user.role, refreshSid: req.tokenSession?.refreshSid })) return false;
-  auditLogDb.record('owner_step_up_required', {
-    userId: req.user.id,
-    metadata: { method: req.method },
-    ipAddress: clientIp(req),
-    userAgent: req.headers['user-agent'] ?? null,
-  });
-  res.status(403).set('Cache-Control', 'no-store').json({
-    error: 'Confirm with your passkey to continue', code: OWNER_STEP_UP_REQUIRED_CODE,
-  });
-  return true;
-}
-
 // JWT authentication middleware
 const authenticateToken = async (req, res, next) => {
   // Platform mode: use single database user
@@ -490,7 +469,15 @@ const authenticateToken = async (req, res, next) => {
     return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
   }
   if (deviceSecret && (authHeader || queryToken)) {
-    return res.status(400).json({ error: 'Ambiguous authentication', code: 'ambiguous_authentication' });
+    // ADR-194 A3: only a LIVE device session beside a bearer is ambiguous. A
+    // cookie whose session was revoked (e.g. when SSO was enabled) is dropped
+    // and the bearer decides, so a returning wallet never locks a bearer tab
+    // out with 400 (no redirect, no sign-out).
+    if (liveDeviceSession(deviceSecret)) {
+      return res.status(400).json({ error: 'Ambiguous authentication', code: 'ambiguous_authentication' });
+    }
+    res.clearCookie(DEVICE_COOKIE, STALE_DEVICE_COOKIE_ATTRIBUTES);
+    deviceSecret = null;
   }
   if (deviceSecret) {
     const resolved = deviceAccountSessionsDb.resolve(deviceSecret);
@@ -682,9 +669,6 @@ const authenticateToken = async (req, res, next) => {
         });
       }
     }
-    // ADR-H20 N2: an owner's no-click SSO session needs this browser's passkey
-    // step-up grant before a privileged action; reads stay open.
-    if (refuseOwnerPrivilegedWithoutStepUp(req, res)) return;
     // ADR-H20 N8: use renews the 24 h idle clock (throttled, best effort).
     touchSsoDeviceSession(req.tokenSession.refreshSid);
     installIdentityFence(req, res);
@@ -986,6 +970,15 @@ const authenticateWebSocket = (token) => {
   }
 };
 
+/** Attributes the device cookie was set with; clearing must match them. */
+const STALE_DEVICE_COOKIE_ATTRIBUTES = Object.freeze({ secure: true, httpOnly: true, sameSite: 'lax', path: '/' });
+
+/** Whether a device secret names a live session with an active slot (ADR-194 A3 ambiguity rule). */
+function liveDeviceSession(secret) {
+  const resolved = deviceAccountSessionsDb.resolve(secret);
+  return Boolean(resolved?.wallet.activeSlotId);
+}
+
 // Device-session websocket authentication. Cookie parsing and ambiguity checks
 // stay in the upgrade verifier; this function only resolves a server principal.
 const authenticateDeviceWebSocket = (secret) => {
@@ -1018,6 +1011,7 @@ export {
   generatePasswordChangeToken,
   authenticateWebSocket,
   authenticateDeviceWebSocket,
+  liveDeviceSession,
   invalidateRefreshCache,
   invalidateRefreshCacheForSession,
   refreshSidOf,

@@ -42,7 +42,9 @@ import { decryptSsoClientSecret, encryptSsoClientSecret } from '../modules/datab
 
 import { computeSsoConfigHash, ssoConfigInvalidReason } from './sso-config-record.js';
 import { ssoForceOff, ssoPolicyEnforced } from './sso-config.service.js';
-import { revokeLiveAccessForUsers } from './sso-lifecycle.service.js';
+import {
+  revokeLiveAccessForUsers, revokeLiveDeviceConnections, revokeWalletSessionsOn,
+} from './sso-lifecycle.service.js';
 import { SsoSettingsError } from './sso-settings-error.js';
 
 /** The typed phrases (one per UI language) that keep orphaned members signed in. */
@@ -146,16 +148,18 @@ function applyTransaction(db, request, nowMs) {
   const fields = buildActiveFields(draft, impact);
   const written = writeActive(db, { draft, active, fields, request, nowMs });
   const effects = applySideEffects(db, impact, request, nowMs);
+  // ADR-194 A3: an enabled SSO row excludes the wallet; end it now.
+  const revokedDevices = written.enabled === 1 ? revokeWalletSessionsOn(db, nowMs) : [];
   const summary = {
     version: written.version, enabled: written.enabled === 1, mappingChanged: impact.mappingChanged,
     reattestRequired: effects.reattestRequired, issuerChanged: impact.issuerChanged,
     orphaned: impact.orphanIds.length, revoked: effects.revoked, keysRevoked: effects.keysRevoked,
-    jitForcedOff: impact.jitForcedOff,
+    jitForcedOff: impact.jitForcedOff, walletSessionsRevoked: revokedDevices.length,
   };
   auditLogRepository.recordStrictAuditOnConnection(db, 'sso_config_applied', {
     userId: request.actorUserId, metadata: summary,
   });
-  return { summary, revokedIds: effects.revokedIds };
+  return { summary, revokedIds: effects.revokedIds, revokedDevices };
 }
 
 /**
@@ -166,7 +170,9 @@ function applyTransaction(db, request, nowMs) {
  */
 export function applySsoDraft({ nowMs = Date.now(), afterCommit = revokeLiveAccessForUsers, ...request }) {
   const db = getConnection();
-  const { summary, revokedIds } = db.transaction(() => applyTransaction(db, request, nowMs)).immediate();
+  const { summary, revokedIds, revokedDevices } = db.transaction(() => applyTransaction(db, request, nowMs))
+    .immediate();
+  revokeLiveDeviceConnections(revokedDevices);
   afterCommit(revokedIds);
   return summary;
 }
@@ -179,7 +185,7 @@ export function applySsoDraft({ nowMs = Date.now(), afterCommit = revokeLiveAcce
  */
 export function enableSso({ actorUserId, nowMs = Date.now() }) {
   const db = getConnection();
-  return db.transaction(() => {
+  const { result, revokedDevices } = db.transaction(() => {
     if (ssoForceOff()) throw new SsoSettingsError('sso_force_off', 409);
     const active = readSlotOn(db, 'active');
     if (!active) throw new SsoSettingsError('sso_active_config_missing', 409);
@@ -188,9 +194,13 @@ export function enableSso({ actorUserId, nowMs = Date.now() }) {
     if (reason !== null) throw new SsoSettingsError('sso_config_invalid', 409, { reason });
     const disabledRecordCleared = disabledRecordPresentOn(db) && deleteDisabledRecordOn(db);
     if (active.enabled !== 1) setActiveEnabledOn(db, 1, actorUserId, nowMs);
+    // ADR-194 A3: enabled SSO excludes the wallet; end it in this transaction.
+    const revoked = revokeWalletSessionsOn(db, nowMs);
     auditLogRepository.recordStrictAuditOnConnection(db, 'sso_enabled', {
-      userId: actorUserId, metadata: { disabledRecordCleared },
+      userId: actorUserId, metadata: { disabledRecordCleared, walletSessionsRevoked: revoked.length },
     });
-    return { enabled: true, disabledRecordCleared };
+    return { result: { enabled: true, disabledRecordCleared }, revokedDevices: revoked };
   }).immediate();
+  revokeLiveDeviceConnections(revokedDevices);
+  return result;
 }
