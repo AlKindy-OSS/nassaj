@@ -4,12 +4,41 @@
 
 ---
 
+## الإصدار 2.3.0.3 — حد أوضح للحوكمة ومنشأ إصدار قابل للتحقق
+
+مرشح بتاريخ 2026-09-24 لاحق للإصدار المنشور `2.3.0.2`. ما زال بانتظار مراجعة
+QA المستقلة النهائية، ولم يُنشر أو يُفعّل على خادم.
+
+ما الذي يتغير عند نشره:
+
+- تفصل معمارية المنتج ومسارات الكتابة بين مستودع المنتج والحوكمة الحية.
+- تقرأ اللوحة من كتالوج نظام ثابت وتفشل مغلقة عند غيابه أو فساده، بلا fallback.
+- تبقى تعليمات مشروع Codex مفعلة من دون جذور كتابة خارج مساحة العمل.
+- يصبح التصدير العام قابلاً للتحقق والاستئناف مع تثبيت النسب والبصمات.
+- تستخدم أسرار النماذج المحلية دوالاً مخصصة لا تصل إلى بيانات اعتماد الموصلات.
+
+مقارن ADR-169 غير نشط، ولا ينشر المرشح كتالوج الحوكمة أو لقطتها ولا يفعّل
+خادماً.
+
+[ملاحظات الإصدار الكاملة / Full release notes](../releases/2.3.0.3.md)
+
+### English
+
+Candidate dated 2026-09-24 following published `2.3.0.2`. It remains pending
+final independent QA and has not been published or activated on a server.
+
+Once published, it separates product files from live governance writes, reads
+the board through a fail-closed immutable catalog, keeps Codex project
+instructions enabled without external writable roots, hardens resumable public
+export provenance, and narrows local-model access to its own secret namespace.
+The ADR-169 comparator remains inactive, and the candidate does not publish a
+governance catalog/snapshot or activate a server.
+
 ## الإصدار 2.3.0.2 — إصدار قابل للاستئناف، ومحادثة ونماذج محلية أكثر ثباتاً
 
-مرشح بناء بتاريخ 2026-09-22 لاحق للإصدار المنشور `2.3.0.1`. لا يعني هذا الإعلان
-أن الإصدار وُسم أو نُشر أو فُعِّل على عقدة.
+إصدار منشور بتاريخ 2026-09-24 لاحق للإصدار `2.3.0.1`.
 
-ما الذي ستلاحظه عند نشره وتحديث العقدة:
+ما الذي تغير في الإصدار:
 
 - تحديث المحادثة والانتقال إلى آخرها صار أكثر اتساقاً.
 - تستعاد ردود OpenCode الحية التي انقطعت، ويظهر خطأ المزوّد المحدد بدلاً من
@@ -24,11 +53,9 @@
 
 ### English
 
-Build candidate dated 2026-09-22, following the published 2.3.0.1. This update
-does not claim that the release has been tagged, published, or activated on a
-node.
+Published release dated 2026-09-24, following `2.3.0.1`.
 
-What you will notice once it is published and a node is updated:
+What changed in the release:
 
 - Chat refresh and moving to the newest message are more consistent.
 - Dropped OpenCode live replies are recovered, and provider-specific errors are

@@ -192,6 +192,14 @@ function assertMemberScope(scope) {
   assertScope(scope);
 }
 
+/** Local-model credentials belong to an authenticated member, never shared scope. */
+function assertLocalModelScope(scope) {
+  if (scope === SYSTEM_SECRET_SCOPE) {
+    throw new TypeError('provider-secrets-store: local-model secrets are member-scoped.');
+  }
+  assertScope(scope);
+}
+
 function secretsDir(scope) {
   if (scope === SYSTEM_SECRET_SCOPE) {
     return path.join(os.homedir(), '.nassaj-provider-secrets');
@@ -393,6 +401,52 @@ export function deleteNamespacedSecret(scope, namespace, id) {
     writeKeysFile(scope, keys);
   }
   return { namespace, id, removed };
+}
+
+/**
+ * Member-scoped capability for local-model credentials. The namespace is fixed
+ * here so a local-model caller cannot select the connector credential domain.
+ *
+ * @param {string|number} userId
+ * @param {string} serverId
+ * @param {string} secret
+ * @returns {{ namespace: string, id: string, stored: boolean }}
+ */
+export function setLocalModelSecret(userId, serverId, secret) {
+  assertLocalModelScope(userId);
+  return setNamespacedSecret(userId, 'local-model', serverId, secret);
+}
+
+/**
+ * Reads one member's local-model credential without exposing another namespace.
+ * @param {string|number} userId
+ * @param {string} serverId
+ * @returns {string|null}
+ */
+export function getLocalModelSecret(userId, serverId) {
+  assertLocalModelScope(userId);
+  return getNamespacedSecret(userId, 'local-model', serverId);
+}
+
+/**
+ * Reports whether one member has a usable local-model credential.
+ * @param {string|number} userId
+ * @param {string} serverId
+ * @returns {boolean}
+ */
+export function hasLocalModelSecret(userId, serverId) {
+  return getLocalModelSecret(userId, serverId) !== null;
+}
+
+/**
+ * Deletes one member's local-model credential without accepting a namespace.
+ * @param {string|number} userId
+ * @param {string} serverId
+ * @returns {{ namespace: string, id: string, removed: boolean }}
+ */
+export function deleteLocalModelSecret(userId, serverId) {
+  assertLocalModelScope(userId);
+  return deleteNamespacedSecret(userId, 'local-model', serverId);
 }
 
 /**

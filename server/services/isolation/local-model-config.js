@@ -1,7 +1,7 @@
 import { appConfigDb, localModelServersDb } from '../../modules/database/index.js';
 
 import { resolveCredentialPrincipal } from './credential-principal.js';
-import { getNamespacedSecret } from './provider-secrets-store.js';
+import { getLocalModelSecret } from './provider-secrets-store.js';
 
 export const LOCAL_MODEL_PROVIDER_PREFIX = 'nassaj_local_';
 /** Default-off consent gate; no request may enable it implicitly. */
@@ -42,7 +42,7 @@ export function localModelProviderBlocks(callerId) {
  */
 function localKeyOption(server, callerId) {
   if (Number(server.ownerId) !== Number(callerId)) return {};
-  const apiKey = getNamespacedSecret(server.ownerId, 'local-model', server.id);
+  const apiKey = getLocalModelSecret(server.ownerId, server.id);
   return apiKey ? { apiKey } : {};
 }
 /** Sharing remains blocked by B-1243 until the T-1807 permission work is accepted. */

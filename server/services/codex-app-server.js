@@ -307,7 +307,7 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
   }
 
   const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
-  const child = spawnImpl(launch.codexPathOverride, ['app-server', '-c', 'project_doc_max_bytes=0'], {
+  const child = spawnImpl(launch.codexPathOverride, ['app-server'], {
     cwd,
     env: launch.env,
     stdio: ['pipe', 'pipe', 'pipe'],

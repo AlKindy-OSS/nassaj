@@ -21,8 +21,8 @@
  */
 
 import { execFile } from 'child_process';
-import { promises as fs } from 'fs';
-import path from 'path';
+
+import { tryResolveGovernanceContent } from './governance-content-resolver.js';
 
 /**
  * Resolve the repo this layer may read ground truth from — THE CALLING
@@ -129,16 +129,13 @@ export function readRecentCommits(repoRoot) {
 }
 
 /**
- * Reads open (in_progress/todo) tasks from project-state.json, preferring those
- * matching a delegation keyword when any match. Async, fail-safe.
- * @param {string} projectStatePath
+ * Filters a parsed governance state without accepting any filesystem path.
+ * @param {unknown} state
  * @param {string[]} keywords
- * @returns {Promise<Array<{id:string,status:string,title:string}>>}
+ * @returns {Array<{id:string,status:string,title:string}>}
  */
-export async function readOpenTasks(projectStatePath, keywords = []) {
+export function filterOpenTasks(state, keywords = []) {
   try {
-    const raw = await fs.readFile(projectStatePath, 'utf8');
-    const state = JSON.parse(raw);
     const tasks = Array.isArray(state?.tasks) ? state.tasks : [];
     const open = tasks
       .filter((t) => t && typeof t === 'object' && RELEVANT_STATUSES.has(t.status))
@@ -163,6 +160,27 @@ export async function readOpenTasks(projectStatePath, keywords = []) {
   }
 }
 
+/** Read open tasks through the logical governance boundary (never a product path). */
+export async function readGovernanceOpenTasks({
+  projectId,
+  actorId,
+  keywords = [],
+  resolver = tryResolveGovernanceContent,
+} = {}) {
+  try {
+    const resolved = resolver({
+      projectId,
+      actorId,
+      kind: 'project-state',
+    });
+    if (!resolved.available) return [];
+    const state = resolved.value ?? JSON.parse(resolved.content);
+    return filterOpenTasks(state, keywords);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Builds the full neutral-fact injection string for a coordinator delegation.
  * Returns null when there is nothing useful to inject or on ANY failure — the
@@ -174,6 +192,9 @@ export async function readOpenTasks(projectStatePath, keywords = []) {
  *   the ONLY accepted source: a session's own root is ground truth about itself,
  *   and nothing stands in for it (see `resolveSessionRepoRoot`).
  * @param {string} [args.projectStatePath]
+ * @param {string} [args.projectId] logical governance project id
+ * @param {string|number} [args.actorId] authenticated actor id
+ * @param {Function} [args.governanceResolver] injected resolver (test seam)
  * @returns {Promise<string|null>} null when the session's project root is unknown
  *   — never an env override and never the shared server process's own
  *   `process.cwd()`, either of which leaks another project's commits/tasks into
@@ -182,20 +203,20 @@ export async function readOpenTasks(projectStatePath, keywords = []) {
 export async function buildGroundTruthContext({
   delegationPrompt,
   repoRoot,
-  projectStatePath,
+  projectId,
+  actorId,
+  governanceResolver,
 } = {}) {
   try {
     const root = resolveSessionRepoRoot(repoRoot);
     if (!root) return null;
-    const statePath =
-      typeof projectStatePath === 'string' && projectStatePath.trim()
-        ? projectStatePath.trim()
-        : path.join(root, 'docs', 'project-state.json');
     const keywords = extractKeywords(delegationPrompt);
 
     const [commits, tasks] = await Promise.all([
       readRecentCommits(root),
-      readOpenTasks(statePath, keywords),
+      readGovernanceOpenTasks({
+        projectId, actorId, keywords, resolver: governanceResolver,
+      }),
     ]);
 
     // Nothing on disk to report ⇒ inject nothing (keeps token cost at zero when

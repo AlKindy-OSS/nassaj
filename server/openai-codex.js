@@ -14,14 +14,12 @@
  */
 
 import fs from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { Codex } from '@openai/codex-sdk';
 
 import { getRuntimeInstructions } from './services/runtime-instructions.js';
-
 import { codexLaunchOptions } from './shared/codex-executable.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { assertHistorySourceAccessible, sessionsService } from './modules/providers/services/sessions.service.js';
@@ -378,47 +376,16 @@ function resolveCodexNetworkAccess(_options = {}, env = process.env) {
 }
 
 /**
- * Board/docs writable root for the workspace-write sandbox.
- *
- * nassaj's MANDATORY board gate writes through `docs/project-state.json`, and the
- * project's decision/plan/architecture artifacts sit beside it — but every one of
- * those paths is a SYMLINK into the shared nassaj-core product tree
- * (`nassaj-core/products/<product>/docs`). Codex's sandbox resolves the REALPATH
- * before checking writability, so under workspace-write (writable roots = cwd +
- * /tmp) the lock file lands outside every root and `board.mjs add` dies with
- * `EROFS: read-only file system` on `.project-state.lock`. Measured 2026-08-03:
- * the coordinator AND all three delegates (architect/backend_dev/devops) stopped
- * at that gate before touching a single file — the board rule made the work
- * unstartable rather than merely unrecorded.
- *
- * Granting the resolved docs directory (and nothing above it) is the minimum that
- * lets a Codex run OBEY the board rule instead of stalling on it. Derived from the
- * session's own working directory rather than hardcoded, so other products under
- * the same symlink convention (SampleOne, SampleTwo) get the same narrow grant. Returns
- * [] when docs/ is absent or already inside cwd (the ordinary repo layout), so no
- * project without the symlink convention widens its sandbox by accident.
+ * ADR-174 write boundary: product sessions never receive an external docs/core
+ * writable root. Governance writes belong to the typed core CLI, outside this
+ * product process; an escaped docs symlink therefore grants nothing.
  *
  * @param {string} workingDirectory - the session's resolved cwd
  * @returns {string[]} zero or one absolute path to add to sandbox writable roots
  */
 function resolveCodexDocsWritableRoots(workingDirectory) {
-  if (!workingDirectory) {
-    return [];
-  }
-  try {
-    const realCwd = realpathSync(workingDirectory);
-    const realDocs = realpathSync(path.join(workingDirectory, 'docs'));
-    // Already inside the workspace → cwd covers it, grant nothing.
-    if (realDocs === realCwd || realDocs.startsWith(realCwd + path.sep)) {
-      return [];
-    }
-    return [realDocs];
-  } catch {
-    // No docs/, broken symlink, or unreadable path: stay at the default roots.
-    // The board gate will still fail loudly, which is strictly better than
-    // widening the sandbox on a path we could not resolve.
-    return [];
-  }
+  void workingDirectory;
+  return [];
 }
 
 // SDK-accepted ModelReasoningEffort values (codex-sdk/dist/index.d.ts). The
@@ -653,7 +620,7 @@ async function queryCodexOwned(invocation) {
   // omitted entirely when absent/invalid so Codex falls back to its config.toml
   // default ("medium") rather than ever receiving a raw unvalidated client string.
   const modelReasoningEffort = resolveCodexReasoningEffort(reasoningEffort);
-  // B-405: resolved once per launch — see resolveCodexDocsWritableRoots.
+  // ADR-174: remains empty even when docs is an external symlink.
   const docsWritableRoots =
     sandboxMode === 'workspace-write' ? resolveCodexDocsWritableRoots(workingDirectory) : [];
 
@@ -788,17 +755,6 @@ async function queryCodexOwned(invocation) {
         ...resolveProviderEnv(ws?.userId ?? null, 'codex', process.env),
         [PROCESS_TAG_ENV_VAR]: processRunTag,
       }),
-      // Governance-bypass block (ADR-057 §5, 2026-07-12 remediation): Codex merges a
-      // local AGENTS.md found in the working directory — and any ancestor up to the
-      // project/repo root — INTO the model-visible prompt alongside the neutral
-      // $CODEX_HOME/AGENTS.md governance, and a more-deeply-nested AGENTS.md takes
-      // precedence on conflict, so a project could override nassaj governance.
-      // project_doc_max_bytes=0 sets the byte budget for project-level AGENTS.md docs
-      // to zero, dropping them entirely while the global governance survives
-      // (empirically verified on codex-cli 0.144.1 via `codex debug prompt-input`).
-      // Passed as a per-spawn `--config` CLI arg (not written to config.toml), so a
-      // danger-full-access turn cannot strip it from the parent-controlled spawn.
-      //
       // ADR-134 v1 supersedes the earlier depth-1 delegation allowance: external
       // delegation is denied, so every launch pins depth to zero.
       //
@@ -808,14 +764,8 @@ async function queryCodexOwned(invocation) {
       // أمني سابق يستوجب إذن مالك مستقلاً بعينه (لم يُمنح)، فبقي 1 غير مشروط،
       // ودرجةُ إنفاذ كودكس أُعلنت **نصّية** في الواصف — لا وعدَ بحدٍّ لا يُفرض.
       //
-      // Board gate (B-405): under workspace-write, add the resolved docs realpath to
-      // the sandbox writable roots so the MANDATORY `board.mjs` write can actually
-      // land — docs/project-state.json symlinks into nassaj-core and the sandbox
-      // checks realpaths, so without this every run dies at the board gate with
-      // EROFS before doing any work. Empty array under danger-full-access (no
-      // sandbox to widen) and for repos whose docs/ is not a symlink.
+      // ADR-174: no product-derived path may widen the sandbox into governance.
       config: {
-        project_doc_max_bytes: 0,
         // ADR-134 v1 denies MCP and external delegation as surfaces, not merely
         // as UI choices. These parent-controlled overrides replace any entries
         // in the user's config before the CLI starts.

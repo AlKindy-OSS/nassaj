@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 
 import { appConfigDb, auditLogDb, getConnection, localModelServersDb, type LocalModel, type LocalModelServer } from '@/modules/database/index.js';
-import { getNamespacedSecret, setNamespacedSecret, deleteNamespacedSecret, hasNamespacedSecret } from '@/services/isolation/provider-secrets-store.js';
+import {
+  deleteLocalModelSecret,
+  getLocalModelSecret,
+  hasLocalModelSecret,
+  setLocalModelSecret,
+} from '@/services/isolation/provider-secrets-store.js';
 import { AppError } from '@/shared/utils.js';
 import { safeFetchLocalModelJson, safeProbeLocalModelAuth, validateLocalModelUrl } from '@/modules/connectors/index.js';
 
@@ -66,7 +71,12 @@ const defaultDependencies = {
   fetchJson: safeFetchLocalModelJson,
   probeAuth: safeProbeLocalModelAuth,
   transaction: <T>(work: () => T): T => getConnection().transaction(work)(),
-  secrets: { get: getNamespacedSecret, set: setNamespacedSecret, remove: deleteNamespacedSecret, has: hasNamespacedSecret },
+  secrets: {
+    get: getLocalModelSecret,
+    set: setLocalModelSecret,
+    remove: deleteLocalModelSecret,
+    has: hasLocalModelSecret,
+  },
 };
 
 class LocalModelsService {
@@ -83,7 +93,7 @@ class LocalModelsService {
     if (!server) throw failure('LOCAL_MODEL_SERVER_NOT_FOUND', 404);
     return server;
   };
-  private dto = (server: LocalModelServer, callerId: number) => ({ ...server, owned: server.ownerId === callerId, hasApiKey: this.deps.secrets.has(server.ownerId, 'local-model', server.id) });
+  private dto = (server: LocalModelServer, callerId: number) => ({ ...server, owned: server.ownerId === callerId, hasApiKey: this.deps.secrets.has(server.ownerId, server.id) });
   private audit = (callerId: number, id: string, operation: string) => this.deps.audit.recordStrict('local_model_server_changed', { userId: callerId, metadata: { serverId: id, operation } });
   private rate = new Map<number, { until: number; count: number }>();
   private throttle = (callerId: number) => {
@@ -138,7 +148,7 @@ class LocalModelsService {
   catalog = async (callerId: number, id: string, persist: boolean) => {
     this.requireEnabled(); this.throttle(callerId);
     const server = this.own(callerId, id);
-    const apiKey = this.deps.secrets.get(server.ownerId, 'local-model', server.id);
+    const apiKey = this.deps.secrets.get(server.ownerId, server.id);
     await this.probeAuth(server, apiKey);
     let models: LocalModel[];
     try {
@@ -185,18 +195,18 @@ class LocalModelsService {
     if (!existing && this.deps.repository.count(callerId) >= 20) throw failure('LOCAL_MODELS_SERVER_LIMIT', 409);
     const { apiKey, removeApiKey, ...fields } = this.validateServer(input, existing);
     const serverId = existing?.id ?? crypto.randomUUID();
-    const previousKey = this.deps.secrets.get(callerId, 'local-model', serverId);
+    const previousKey = this.deps.secrets.get(callerId, serverId);
     try {
-      if (apiKey) this.deps.secrets.set(callerId, 'local-model', serverId, apiKey);
-      else if (removeApiKey) this.deps.secrets.remove(callerId, 'local-model', serverId);
+      if (apiKey) this.deps.secrets.set(callerId, serverId, apiKey);
+      else if (removeApiKey) this.deps.secrets.remove(callerId, serverId);
       this.deps.transaction(() => {
         this.audit(callerId, serverId, existing ? 'update' : 'create');
         this.deps.repository.save({ ...fields, id: serverId, ownerId: callerId, providerId: localProviderId(serverId) });
       });
     } catch (error) {
       if (apiKey || removeApiKey) {
-        if (previousKey) this.deps.secrets.set(callerId, 'local-model', serverId, previousKey);
-        else this.deps.secrets.remove(callerId, 'local-model', serverId);
+        if (previousKey) this.deps.secrets.set(callerId, serverId, previousKey);
+        else this.deps.secrets.remove(callerId, serverId);
       }
       throw error;
     }
@@ -205,15 +215,15 @@ class LocalModelsService {
   /** Revokes future runs, leaving already-running sessions alone. */
   remove(callerId: number, id: string) {
     this.own(callerId, id); this.throttle(callerId);
-    const previousKey = this.deps.secrets.get(callerId, 'local-model', id);
-    this.deps.secrets.remove(callerId, 'local-model', id);
+    const previousKey = this.deps.secrets.get(callerId, id);
+    this.deps.secrets.remove(callerId, id);
     try {
       this.deps.transaction(() => {
         this.audit(callerId, id, 'delete');
         this.deps.repository.remove(id, callerId);
       });
     } catch (error) {
-      if (previousKey) this.deps.secrets.set(callerId, 'local-model', id, previousKey);
+      if (previousKey) this.deps.secrets.set(callerId, id, previousKey);
       throw error;
     }
     return { removed: true };

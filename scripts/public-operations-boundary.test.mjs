@@ -423,6 +423,8 @@ test('the gate scans only paths the public export ships', () => {
   // Never-exported operator paths are excluded, so a marker there cannot fail here.
   for (const excluded of [
     'scripts/operator-gate/leak-rules.mjs', 'scripts/release.mjs',
+    'scripts/lib/public-release-provenance.mjs',
+    'scripts/lib/release-baseline-comparator.mjs',
     'scripts/release-orchestrator-phases.test.mjs', 'docs/plans/roadmap.md',
     'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
     'server/modules/database/deletion-writer-inventory.test.ts',

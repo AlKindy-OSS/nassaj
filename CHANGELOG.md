@@ -2,13 +2,65 @@
 
 All notable changes to Nassaj will be documented in this file.
 
+## [2.3.0.3] — Product/governance boundary and release provenance (2026-09-24)
+
+مرشح لاحق للإصدار المنشور `2.3.0.2`. يبقى بانتظار مراجعة QA المستقلة النهائية؛
+ولا يدل هذا السجل على وسم أو نشر أو تفعيل خادم. / Candidate following the
+published `2.3.0.2`. It remains pending final independent QA; this entry does
+not claim a tag, publication or server activation.
+
+### أُضيف / Added
+
+- قراءة حوكمة فاشلة الإغلاق من الكتالوج الثابت
+  `/etc/nassaj/governance-content.json` وبمفاتيح منطقية ظاهرة للفاعل. غياب
+  الكتالوج أو فساده أو عدم تطابق اللقطة يعيد `available: false` بلا fallback. /
+  Fail-closed governance reads from the immutable system catalog with
+  actor-visible logical keys; missing, malformed or mismatched input returns
+  `available: false` with no fallback.
+- بيان منشأ خارجي غير دائري للتصدير العام، مع تثبيت المرشح والأب العام ومحاولات
+  نشر قابلة للاستئناف. / An external non-circular public-export provenance
+  manifest that binds the candidate, public parent and resumable attempts.
+
+### تغيّر / Changed
+
+- أصبحت معمارية المنتج ملفات عادية متتبعة، وبقيت اللوحة والخطط والحالة في
+  الحوكمة الخارجية. يرفض `scripts/board.mjs` داخل المنتج القراءة والكتابة ويوجه
+  العمليات إلى CLI النمطي الخارجي. / Product architecture is now tracked as
+  regular files while board, plan and status truth remains external; product
+  `scripts/board.mjs` refuses reads and writes and directs operations to the
+  typed external CLI.
+- بقيت تعليمات مشروع Codex مفعلة، مع إزالة منح الكتابة إلى جذور خارج مساحة عمل
+  المنتج. / Codex project instructions remain enabled while external writable
+  roots are removed from product sessions.
+- `NASSAJ_COORDINATOR=1` مخصص لحقن حقائق المنسق فقط، ولا يفعّل قراءة اللوحة أو
+  fallback. / `NASSAJ_COORDINATOR=1` controls coordinator ground-truth
+  injection only; it does not enable board reads or a fallback.
+
+### أُصلح / Fixed
+
+- حُصر وصول النماذج المحلية إلى الأسرار في دوال مخصصة تثبت نطاق
+  `local-model` ولا تمنح وصولاً إلى بيانات اعتماد الموصلات. / Local-model secret
+  access now uses dedicated wrappers that pin the `local-model` namespace and
+  cannot select connector credentials.
+- شُدد استئناف نشر المصدر العام والتحقق من النسب والبصمات من دون force push أو
+  إعادة نشر الإصدار الخاص. / Public-source publication resume and
+  ancestry/digest verification are hardened without force-push or private
+  republishing.
+
+### لم يُفعّل / Not activated
+
+- مقارن ADR-169 تاريخي وغير معتمد لإصدار `2.3.0.2`، ويبقى غير نشط في
+  `2.3.0.3`. ولا ينشر المرشح كتالوج الحوكمة أو لقطتها، ولا يشغل CLI الخاص بـcore،
+  ولا يفعّل خادماً. / The historical ADR-169 comparator was not adopted for
+  `2.3.0.2` and remains inactive in `2.3.0.3`. The candidate does not publish a
+  governance catalog or snapshot, execute the core CLI or activate a server.
+
 ## [2.3.0.2] — Resumable release, chat, local-model, and SSO documentation updates (2026-09-22)
 
-مرشح بناء لاحق للإصدار المنشور `2.3.0.1`؛ يرفع مقطع البناء وحده تحت
-`architecture.feature.fix.build`. لا يدل هذا السجل على وسم أو نشر أو تفعيل عقدة.
-/ Build candidate following the published `2.3.0.1`, advancing the build segment
-only under `architecture.feature.fix.build`. This entry does not claim a tag,
-publication, or node activation.
+إصدار منشور لاحق للإصدار `2.3.0.1`؛ يرفع مقطع البناء وحده تحت
+`architecture.feature.fix.build`. لا يدل هذا السجل على تفعيل عقدة. / Published
+release following `2.3.0.1`, advancing the build segment only under
+`architecture.feature.fix.build`. This entry does not claim node activation.
 
 ### أُضيف / Added
 

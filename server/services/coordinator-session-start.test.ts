@@ -25,6 +25,7 @@ import {
   renderSessionStartContext,
   buildSessionStartContext,
 } from './coordinator-session-start.js';
+import { createGovernanceTestFixture } from './governance-content-test-fixture.js';
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -49,6 +50,18 @@ function writeState(dir: string, tasks: unknown): string {
   const p = path.join(docs, 'project-state.json');
   fs.writeFileSync(p, JSON.stringify({ tasks }, null, 2));
   return p;
+}
+
+function governanceArgs(root: string) {
+  const publication = createGovernanceTestFixture([{
+    projectId: 'test-project', filename: 'project-state.json',
+    content: fs.readFileSync(path.join(root, 'docs', 'project-state.json'), 'utf8'), actorIds: [7],
+  }]);
+  return {
+    projectId: 'test-project',
+    actorId: 7,
+    governanceResolver: publication.resolver,
+  };
 }
 
 const SAMPLE_TASKS = [
@@ -114,7 +127,7 @@ test('renderSessionStartContext: empty inputs ⇒ still returns a frame (never t
 test('buildSessionStartContext: compact ⇒ commits + in_progress tasks present', async () => {
   const repo = makeTempRepo(['feat: session start layer', 'fix: earlier work']);
   writeState(repo, SAMPLE_TASKS);
-  const ctx = await buildSessionStartContext({ source: 'compact', repoRoot: repo });
+  const ctx = await buildSessionStartContext({ source: 'compact', repoRoot: repo, ...governanceArgs(repo) });
   assert.ok(ctx);
   const c = ctx as string;
   assert.ok(c.includes('session start layer'));
@@ -126,7 +139,7 @@ test('buildSessionStartContext: compact ⇒ commits + in_progress tasks present'
 test('buildSessionStartContext: resume ⇒ injects (context-loss moment)', async () => {
   const repo = makeTempRepo(['feat: something']);
   writeState(repo, SAMPLE_TASKS);
-  const ctx = await buildSessionStartContext({ source: 'resume', repoRoot: repo });
+  const ctx = await buildSessionStartContext({ source: 'resume', repoRoot: repo, ...governanceArgs(repo) });
   assert.ok(ctx);
 });
 
@@ -264,7 +277,9 @@ test('buildSessionStartContext: session root from another project ⇒ block carr
   try {
     process.chdir(serverCwdRepo);
     delete process.env.NASSAJ_COORDINATOR_REPO_ROOT;
-    const ctx = await buildSessionStartContext({ source: 'compact', repoRoot: otherProjectRepo });
+    const ctx = await buildSessionStartContext({
+      source: 'compact', repoRoot: otherProjectRepo, ...governanceArgs(otherProjectRepo),
+    });
     assert.ok(ctx);
     const c = ctx as string;
     assert.ok(c.includes('SampleTwo-only commit'));

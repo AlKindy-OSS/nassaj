@@ -2,17 +2,16 @@
  * PROJECT BOARD API ROUTES
  * ========================
  *
- * Read-only projection of a project's on-disk state files for the
+ * Read-only projection of product architecture plus optional governance state.
  * "Project Board" UI (spec: ~/.claude/wiki/project-board.md):
  *
- *   docs/project-state.json   — structured phases/tasks/issues/decisions
+ *   governance:project-state  — structured phases/tasks/issues/decisions
  *   docs/ARCHITECTURE.md      — technical architecture (Mermaid diagrams)
  *   docs/ARCHITECTURE_AR.md   — simplified owner-facing architecture
  *
- * The files are the source of truth (no LLM involved). Each project gets a
- * chokidar watcher (created lazily on first GET) so edits are pushed to all
- * connected clients over the main WebSocket as `project-board-updated`
- * messages; the frontend then re-fetches.
+ * Product architecture is local and versioned. Governance state is selected by
+ * logical projectId/kind through the server-only resolver and never through a
+ * product path or symlink. Architecture changes retain the existing watcher.
  *
  * Resilience contract: an invalid project-state.json NEVER breaks the board.
  * The route keeps the last successfully parsed state in memory and returns it
@@ -20,7 +19,6 @@
  */
 
 import path from 'path';
-import { promises as fsPromises } from 'fs';
 
 import express from 'express';
 import chokidar from 'chokidar';
@@ -30,10 +28,13 @@ import {
     coerceUserId,
 } from '../modules/projects/services/project-visibility-guard.service.js';
 import { AppError } from '../shared/utils.js';
+import {
+    readProductVersionedContent,
+    tryResolveGovernanceContent,
+} from '../services/governance-content-resolver.js';
 
 const router = express.Router();
 
-const STATE_FILE = 'docs/project-state.json';
 const ARCHITECTURE_FILE = 'docs/ARCHITECTURE.md';
 const ARCHITECTURE_AR_FILE = 'docs/ARCHITECTURE_AR.md';
 
@@ -94,16 +95,15 @@ function getBoardEntry(projectId, projectPath) {
 }
 
 /**
- * Lazily start a chokidar watcher for the three board files of a project.
- * chokidar tracks not-yet-existing paths through their parent directory, so
- * creating docs/project-state.json later still fires an `add` event.
+ * Lazily start a chokidar watcher for the two product-versioned architecture files.
+ * chokidar tracks not-yet-existing architecture paths through their parent.
  */
 function ensureWatcher(entry, projectId, wss) {
     if (entry.watcher || boards.size > MAX_WATCHED_PROJECTS) {
         return;
     }
 
-    const targets = [STATE_FILE, ARCHITECTURE_FILE, ARCHITECTURE_AR_FILE]
+    const targets = [ARCHITECTURE_FILE, ARCHITECTURE_AR_FILE]
         .map((relative) => path.join(entry.projectPath, relative));
 
     const watcher = chokidar.watch(targets, {
@@ -132,9 +132,9 @@ function ensureWatcher(entry, projectId, wss) {
     entry.watcher = watcher;
 }
 
-async function readFileOrNull(filePath) {
+async function readProductFileOrNull(projectPath, relativePath) {
     try {
-        return await fsPromises.readFile(filePath, 'utf8');
+        return readProductVersionedContent(projectPath, relativePath).content;
     } catch {
         return null;
     }
@@ -146,7 +146,7 @@ async function readFileOrNull(filePath) {
  * Response shape (all fields always present):
  * {
  *   projectId,
- *   available,        // docs/project-state.json exists (even if invalid)
+ *   available,        // governance project-state exists (even if invalid)
  *   state,            // parsed JSON, or last good copy on parse error, or null
  *   stateError,       // true when the file exists but is invalid JSON
  *   architecture: { technical, simplified }  // raw markdown or null
@@ -155,7 +155,7 @@ async function readFileOrNull(filePath) {
 router.get('/:projectId', async (req, res) => {
     try {
         const { projectId } = req.params;
-        // B-PRIV guard: the board is project CONTENT — docs/project-state.json
+        // B-PRIV guard: the board is project CONTENT — governance project-state
         // carries the full task/issue/decision history and the two ARCHITECTURE
         // files are read verbatim off disk — so it must not be readable for any
         // projectId that happens to be guessed or enumerated. assertProjectVisible
@@ -168,34 +168,44 @@ router.get('/:projectId', async (req, res) => {
         const entry = getBoardEntry(projectId, projectPath);
         ensureWatcher(entry, projectId, req.app.locals.wss);
 
-        const [stateRaw, technical, simplified] = await Promise.all([
-            readFileOrNull(path.join(projectPath, STATE_FILE)),
-            readFileOrNull(path.join(projectPath, ARCHITECTURE_FILE)),
-            readFileOrNull(path.join(projectPath, ARCHITECTURE_AR_FILE)),
+        const actorId = coerceUserId(req.user?.id ?? null);
+        const governanceResolver = req.app.locals.governanceContentResolver
+            ?? tryResolveGovernanceContent;
+        const stateRead = governanceResolver({
+            projectId,
+            actorId,
+            kind: 'project-state',
+        });
+        const [technical, simplified] = await Promise.all([
+            readProductFileOrNull(projectPath, ARCHITECTURE_FILE),
+            readProductFileOrNull(projectPath, ARCHITECTURE_AR_FILE),
         ]);
 
         let state = null;
-        let stateError = false;
+        let stateError = stateRead.reason === 'invalid_json';
 
-        if (stateRaw !== null) {
+        if (stateRead.available) {
             try {
-                state = JSON.parse(stateRaw);
+                state = stateRead.value ?? JSON.parse(stateRead.content);
                 entry.lastGoodState = state;
             } catch {
                 // Invalid JSON: serve the last good copy and flag the problem.
                 state = entry.lastGoodState;
                 stateError = true;
             }
-        } else {
+        } else if (!stateError) {
             entry.lastGoodState = null;
         }
 
         res.json({
             projectId,
-            available: stateRaw !== null,
+            available: stateRead.available || stateError,
             state,
             stateError,
             architecture: { technical, simplified },
+            governance: stateRead.available
+                ? { available: true, provenance: stateRead.provenance }
+                : { available: false, reason: stateRead.reason ?? 'unavailable' },
         });
     } catch (error) {
         // The visibility guard signals refusal as an AppError(404); surface its

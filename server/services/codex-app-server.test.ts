@@ -94,6 +94,7 @@ test('Codex /btw answer byte ceiling accepts the boundary and stops before an ov
 test('Codex /btw uses an ephemeral read-only native thread fork and streams only its turn', async () => {
   const requests: Record<string, any>[] = [];
   const chunks: string[] = [];
+  let spawnArgs: string[] = [];
   let completed = '';
   const child = createRpcChild((request) => {
     requests.push(request);
@@ -128,8 +129,9 @@ test('Codex /btw uses an ephemeral read-only native thread fork and streams only
       onComplete: (answer: string) => { completed = answer; },
     },
     {
-      spawnImpl: (command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+      spawnImpl: (command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
         assertPackagedSpawn(command, options);
+        spawnArgs = args;
         return child;
       },
       authorizeImpl: () => ({ project_path: '/authorized/project', provider: 'codex' }),
@@ -141,6 +143,7 @@ test('Codex /btw uses an ephemeral read-only native thread fork and streams only
   assert.deepEqual(requests.map((request) => request.method), [
     'initialize', 'initialized', 'thread/fork', 'turn/start',
   ]);
+  assert.deepEqual(spawnArgs, ['app-server'], 'the side query must leave project instructions enabled');
   const fork = requests.find((request) => request.method === 'thread/fork')?.params;
   assert.equal(fork.threadId, 'source-thread');
   assert.equal(fork.ephemeral, true);

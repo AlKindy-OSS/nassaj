@@ -25,6 +25,18 @@ const ALLOWED_OWNERS = new Set([
   'server/services/isolation/provider-secrets-store.js',
 ]);
 
+const LOCAL_MODEL_SECRET_CAPABILITIES = new Set([
+  'deleteLocalModelSecret',
+  'getLocalModelSecret',
+  'hasLocalModelSecret',
+  'setLocalModelSecret',
+]);
+
+const LOCAL_MODEL_SECRET_CONSUMERS = new Set([
+  'server/modules/providers/services/local-models.service.ts',
+  'server/services/isolation/local-model-config.js',
+]);
+
 const usesSensitiveSymbol = (path: string): boolean => {
   const source = ts.createSourceFile(
     path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true,
@@ -51,6 +63,20 @@ const callArities = (path: string, functionName: string): number[] => {
   };
   visit(source);
   return arities;
+};
+
+const importsLocalModelSecretCapability = (path: string): boolean => {
+  const source = ts.createSourceFile(
+    path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true,
+    path.endsWith('.ts') ? ts.ScriptKind.TS : ts.ScriptKind.JS,
+  );
+  return source.statements.some(statement => ts.isImportDeclaration(statement)
+    && ts.isStringLiteral(statement.moduleSpecifier)
+    && statement.moduleSpecifier.text.endsWith('provider-secrets-store.js')
+    && statement.importClause?.namedBindings
+    && ts.isNamedImports(statement.importClause.namedBindings)
+    && statement.importClause.namedBindings.elements.some(element =>
+      LOCAL_MODEL_SECRET_CAPABILITIES.has((element.propertyName ?? element.name).text)));
 };
 
 test('module ownership rejects new credential readers and launch-path bypasses', () => {
@@ -83,4 +109,19 @@ test('module ownership rejects new credential readers and launch-path bypasses',
   assert.match(production, /reference\.provenance === 'm2'/u);
   const mcpLaunch = readFileSync(join(root, 'modules/providers/shared/mcp/mcp.provider.ts'), 'utf8');
   assert.match(mcpLaunch, /Connector MCP material is restricted to member user scope/u);
+});
+
+test('local-model secret capability has exact consumers without widening connector owners', () => {
+  const root = join(process.cwd(), 'server');
+  const consumers = globSync('**/*.{ts,js}', { cwd: root, exclude: ['**/*.test.*'] })
+    .map(path => join(root, path))
+    .filter(importsLocalModelSecretCapability)
+    .map(path => relative(process.cwd(), path));
+  assert.deepEqual(new Set(consumers), LOCAL_MODEL_SECRET_CONSUMERS);
+
+  for (const consumer of LOCAL_MODEL_SECRET_CONSUMERS) {
+    const source = readFileSync(join(process.cwd(), consumer), 'utf8');
+    assert.doesNotMatch(source, /(?:get|set|has|delete)NamespacedSecret/u);
+    assert.doesNotMatch(source, /['"]connector['"]/u);
+  }
 });

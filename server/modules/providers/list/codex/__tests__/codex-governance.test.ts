@@ -21,8 +21,8 @@
  *  - guard: a SYMLINK in place of the copy is rejected and replaced by a real copy.
  *  - launch WITHOUT governance ⇒ structural `governance_missing` + the Arabic
  *    message, and NO Codex spawn (constructor never called).
- *  - launch WITH governance ⇒ clears the gate, spawns, and carries the
- *    project_doc_max_bytes=0 governance-bypass block.
+ *  - launch WITH governance ⇒ clears the gate, spawns, and leaves project-level
+ *    AGENTS.md ingestion enabled alongside global governance.
  *
  * Runner:
  *   npx tsx --experimental-test-module-mocks --tsconfig server/tsconfig.json --test <this file>
@@ -399,7 +399,7 @@ describe('queryCodex spawn path — fail-closed governance enforcement', () => {
     setNeutralSource(true);
   });
 
-  it('clears the gate WITH governance: spawns once and carries project_doc_max_bytes=0', async () => {
+  it('clears the gate WITH governance and leaves project instructions enabled', async () => {
     setCodexIsolated();
     setNeutralSource(true);
     const userId = 9105;
@@ -418,13 +418,11 @@ describe('queryCodex spawn path — fail-closed governance enforcement', () => {
       false,
       'a governed launch must NOT be blocked',
     );
-    // Governance-bypass block (bug #2): every spawn must disable project-level
-    // AGENTS.md ingestion so a local AGENTS.md cannot override nassaj governance.
     const opts = codexConstructions[codexConstructions.length - 1];
     assert.equal(
-      opts?.config?.project_doc_max_bytes,
-      0,
-      'the spawn must pass project_doc_max_bytes=0 to block local AGENTS.md governance bypass',
+      'project_doc_max_bytes' in (opts?.config ?? {}),
+      false,
+      'the spawn must leave project AGENTS.md ingestion at the Codex default',
     );
   });
 });

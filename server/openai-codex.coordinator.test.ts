@@ -6,7 +6,7 @@
  * @openai/codex-sdk is mocked at the module boundary (no real codex binary, no network, NO
  * ChatGPT quota — R2 live verification is separate). queryCodex is driven end-to-end and the
  * ACTUAL launch surface is asserted:
- *   - LAYER (all 3 modes): config disables native multi-agent + project_doc_max_bytes=0, the
+ *   - LAYER (all 3 modes): config disables native multi-agent while leaving project docs enabled, the
  *               ROOT turn input is prepended with the delegate-only contract, and a delegate
  *               TOML is materialized into $CODEX_HOME/agents for EVERY present agent card
  *               (dynamic roster; here the seeded architect + qa-critic).
@@ -240,7 +240,8 @@ describe('queryCodex — always-on coordinator layer across all modes (T-886 red
       const construct = codexConstructions[codexConstructions.length - 1];
       assert.equal(construct.config?.['features.multi_agent'], false,
         'ADR-134: native multi-agent must be disabled on every launch');
-      assert.equal(construct.config?.project_doc_max_bytes, 0, 'governance byte-cap preserved');
+      assert.equal('project_doc_max_bytes' in (construct.config ?? {}), false,
+        'project AGENTS.md must use Codex defaults');
 
       // T-1283: the root turn input is now the USER'S COMMAND VERBATIM. The
       // delegate-only contract moved out of the prompt and into the governance file
