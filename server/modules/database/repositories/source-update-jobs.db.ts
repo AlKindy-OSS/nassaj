@@ -510,6 +510,32 @@ export const sourceUpdateJobsDb = {
     })();
   },
 
+  /**
+   * B-1585: settle the job of a worker whose lease lapsed while nobody claimed
+   * it. Only the exact lease holder (job, worker, fence epoch) may call this; a
+   * newer epoch or another worker makes it a no-op (`not_owner`). A pre-seal job
+   * becomes `failed` with a rollback receipt carrying `code`; a sealed job is
+   * left for recovery. Either way the control lease is released. Idempotent.
+   */
+  abandonLapsedLease(jobId: string, workerId: string, fence: number, code: string, message: string) {
+    const db = getConnection();
+    return db.transaction(() => {
+      const owned = db.prepare(`SELECT j.state FROM source_update_control c JOIN source_update_jobs j ON j.id = c.active_job_id
+        WHERE c.singleton = 1 AND c.active_job_id = ? AND c.worker_id = ? AND c.fence_epoch = ?
+          AND j.worker_fence = ?`).get(jobId, workerId, fence, fence) as { state: SourceUpdateState } | undefined;
+      if (!owned) return { outcome: 'not_owner' as const, receipt: null };
+      let receipt: { sequence: number; factsSha256: string; factsJson: string } | null = null;
+      if (REARMABLE_STATES.includes(owned.state)) {
+        receipt = this.appendReceipt(jobId, fence, owned.state, 'rollback', { code, intervention: null });
+        db.prepare(`UPDATE source_update_jobs SET state = 'failed', error_code = ?, error_message = ?,
+            progress_seq = progress_seq + 1, updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND worker_fence = ? AND state = ?`).run(code, message, jobId, fence, owned.state);
+      }
+      this.release(jobId, workerId, fence);
+      return { outcome: receipt ? 'failed' as const : 'released' as const, state: owned.state, receipt };
+    })();
+  },
+
   release(jobId: string, workerId: string, fence: number): boolean {
     return getConnection().prepare(`UPDATE source_update_control SET
       active_job_id = CASE WHEN EXISTS (

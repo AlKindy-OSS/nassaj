@@ -348,3 +348,40 @@ test('kill-9 predecessor orphan is durably killed before a new fence epoch is is
     }
   });
 });
+
+// B-1585: a worker whose lease lapsed while nobody claimed it settles its own job.
+test('abandonLapsedLease fails only the exact lapsed holder, audits it, releases, and is idempotent', async () => {
+  await withDb((ownerId) => {
+    const job = sourceUpdateJobsDb.createOrReuse(request(ownerId)).job!;
+    const workerA = { workerId: 'worker-a', pid: 10, startTicks: '100', bootId: 'boot', pgid: 10 };
+    const a = sourceUpdateJobsDb.claim(workerA, 1_000, 100)!;
+    assert.equal(sourceUpdateJobsDb.transition(job.id, a.worker_fence!, ['accepted'], 'staging'), true);
+    assert.equal(sourceUpdateJobsDb.assertFence(job.id, 'worker-a', a.worker_fence!, 1_200), false, 'lease lapsed');
+
+    assert.equal(sourceUpdateJobsDb.abandonLapsedLease(job.id, 'worker-b', a.worker_fence!, 'code_x', 'msg').outcome, 'not_owner');
+    const settled = sourceUpdateJobsDb.abandonLapsedLease(job.id, 'worker-a', a.worker_fence!, 'source_update_worker_lease_lost', 'msg');
+    assert.equal(settled.outcome, 'failed');
+    const row = sourceUpdateJobsDb.getById(job.id)!;
+    assert.equal(row.state, 'failed');
+    assert.equal(row.error_code, 'source_update_worker_lease_lost');
+    const receipts = sourceUpdateJobsDb.listReceipts(job.id) as { phase: string; kind: string; facts_json: string }[];
+    assert.deepEqual(receipts.map((r) => [r.phase, r.kind, JSON.parse(r.facts_json).code]),
+      [['staging', 'rollback', 'source_update_worker_lease_lost']]);
+    const control = getConnection().prepare('SELECT * FROM source_update_control WHERE singleton = 1').get() as Record<string, unknown>;
+    assert.equal(control.active_job_id, null);
+    assert.equal(control.worker_id, null);
+    assert.equal(sourceUpdateJobsDb.abandonLapsedLease(job.id, 'worker-a', a.worker_fence!, 'source_update_worker_lease_lost', 'msg').outcome, 'not_owner');
+    assert.equal(sourceUpdateJobsDb.listReceipts(job.id).length, 1);
+  });
+});
+
+test('abandonLapsedLease never touches a job a newer epoch owns', async () => {
+  await withDb((ownerId) => {
+    const job = sourceUpdateJobsDb.createOrReuse(request(ownerId)).job!;
+    const a = sourceUpdateJobsDb.claim({ workerId: 'worker-a', pid: 10, startTicks: '1', bootId: 'boot', pgid: 10 }, 1_000, 100)!;
+    const b = sourceUpdateJobsDb.claim({ workerId: 'worker-b', pid: 11, startTicks: '2', bootId: 'boot', pgid: 11 }, 1_101, 100, () => false)!;
+    assert.equal(sourceUpdateJobsDb.abandonLapsedLease(job.id, 'worker-a', a.worker_fence!, 'code_x', 'msg').outcome, 'not_owner');
+    assert.equal(sourceUpdateJobsDb.getById(job.id)!.state, 'accepted');
+    assert.equal(sourceUpdateJobsDb.assertFence(job.id, 'worker-b', b.worker_fence!, 1_150), true);
+  });
+});

@@ -1,6 +1,8 @@
 import type { CodeEditorFile } from '../../types/types';
 import DocumentShareButton from '../../../document-sharing/DocumentShareButton';
 import { useTranslation } from 'react-i18next';
+import { Download } from 'lucide-react';
+import { useBinaryFileDownload } from '../../hooks/useBinaryFileDownload';
 
 type CodeEditorBinaryFileProps = {
   file: CodeEditorFile;
@@ -24,6 +26,7 @@ export default function CodeEditorBinaryFile({
   message,
 }: CodeEditorBinaryFileProps) {
   const { t } = useTranslation('codeEditor');
+  const { isDownloading, hasError, download } = useBinaryFileDownload(projectId, file.path, file.name);
   const binaryContent = (
     <div className="flex h-full w-full flex-col items-center justify-center bg-background p-8 text-muted-foreground">
       <div className="flex max-w-md flex-col items-center gap-4 text-center">
@@ -36,7 +39,22 @@ export default function CodeEditorBinaryFile({
           <h3 className="mb-2 text-lg font-medium text-foreground">{title}</h3>
           <p className="text-sm text-muted-foreground">{message}</p>
         </div>
-        <DocumentShareButton projectId={projectId} filePath={file.path} />
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={download}
+            disabled={isDownloading || !projectId}
+            aria-busy={isDownloading}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm text-foreground transition-colors hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" aria-hidden="true" />
+            {t('binaryFile.download')}
+          </button>
+          <DocumentShareButton projectId={projectId} filePath={file.path} />
+        </div>
+        {hasError && (
+          <p role="alert" className="text-sm text-destructive">{t('binaryFile.downloadError')}</p>
+        )}
         <button
           onClick={onClose}
           className="mt-4 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground transition-colors hover:bg-primary/90"

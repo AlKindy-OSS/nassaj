@@ -1,3 +1,16 @@
+## 2.3.1.3 — 2026-10-11
+
+إصلاح عامل التحديث (B-1585): يجدّد العامل عقده حول الخطوات الطويلة فلا تعلق مهمة في التجهيز، ويُسوّي
+المهمة التي فقد عقدها برمز محدد، ويرفض التحديث إلى إصدار محمَّل أو أقدم؛ وبوابة إصدار تختبر الترقية من
+الإصدار السابق (B-1584)؛ وزرّ تنزيل للملفات الثنائية في محرر الشيفرة. العُقد على 2.3.1.2 تتحدّث بالزرّ؛
+العُقد على 2.3.1.0 أو 2.3.1.1 لا تستطيع التحديث الذاتي (B-1583) وتحتاج تثبيتاً رسمياً لمرة واحدة.
+
+Update worker fix (B-1585): the worker renews its lease around long steps so a job no longer sticks in
+staging, settles a job whose lease it lost with a bounded code, and refuses an update to a release that is
+already loaded or older; a release gate now tests the upgrade from the previous release (B-1584); a
+binary-safe Download button in the code editor. Nodes on 2.3.1.2 update by button; nodes on 2.3.1.0 or
+2.3.1.1 cannot self-update (B-1583) and need a one-time official install.
+
 ## 2.3.1.2 — 2026-10-11
 
 إصلاح مسار التحديث (B-1583): منذ 2.3.1.0 كان كل تحديث بالزرّ يفشل عند إعادة التشغيل الآمنة بالرمز

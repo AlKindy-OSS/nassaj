@@ -43,7 +43,9 @@ import {
 import { createHostContainment } from '@/modules/execution-permissions/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
-import { exchangeGenerations, validateCandidate, verifyRuntimeIdentities } from '../scripts/lib/source-update-activation.mjs';
+import {
+    exchangeGenerations, readBootstrapActivationAction, validateCandidate, verifyRuntimeIdentities,
+} from '../scripts/lib/source-update-activation.mjs';
 import { tryCommonGitDir } from '../scripts/git-control-root.mjs';
 import { createUpdateRuntimeOrchestrator } from '../scripts/lib/update-runtime-orchestrator.mjs';
 import { bootstrapLegacy144HostCapability } from '../scripts/lib/update-runtime-capability.mjs';
@@ -525,6 +527,9 @@ if (updateRuntimeOrchestrator) {
 const sourceUpdateWorker = releaseSourceInvalid || process.env.NASSAJ_UPDATE_MODE === 'local-main' ? null : createSourceUpdateWorker({
     resolveRelease: updateReleaseDiscovery,
     jobLog: updateJobLog,
+    // B-1585: a stranded job re-claimed after an out-of-band install of its
+    // own target settles as superseded instead of rebuilding and restarting.
+    loadedRuntimeCommit: () => SERVER_RUNTIME_IDENTITY.runtimeCommit,
     // ADR-156 ت-3: the gate owns the downtime window, so the receipt reads the
     // measurement from it rather than guessing at one.
     readGateMetrics: () => {
@@ -3990,17 +3995,7 @@ async function completeBootstrappedSourceUpdate() {
     assertLegacyTransitionAllowed();
     const gate = createUpdateMaintenanceGate({ projectPath: APP_ROOT });
     const candidateRoot = path.join(gate.paths.controlRoot, 'candidates', ownership.transactionId);
-    const actionFile = path.join(candidateRoot, 'activation-action.json');
-    const metadata = fs.lstatSync(actionFile);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
-        throw new Error('source_update_activation_action_unsafe');
-    }
-    const action = JSON.parse(fs.readFileSync(actionFile, 'utf8'));
-    if (action?.schema !== 'nassaj-source-update-activation/v1'
-        || action.transactionId !== ownership.transactionId
-        || action.manifestPath !== path.join(candidateRoot, 'candidate-manifest.json')) {
-        throw new Error('source_update_activation_action_invalid');
-    }
+    const action = readBootstrapActivationAction(candidateRoot, ownership.transactionId);
     const validation = validateCandidate({
         projectRoot: APP_ROOT, candidateRoot, transactionId: action.transactionId,
         releaseCommit: action.targetCommit, version: action.version,

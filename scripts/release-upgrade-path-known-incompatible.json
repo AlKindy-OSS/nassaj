@@ -1,0 +1,22 @@
+{
+  "schema": "nassaj-upgrade-path-known-incompatible/v1",
+  "note": "Baselines whose OWN update code cannot complete a button update to any later release. An entry never passes the gate by itself: the release run must also pass --acknowledge-upgrade-incompatible <baseline> (owner acknowledgement), and only the exact baseline commit, leg and error code below are excused. Nodes on these baselines need the documented manual path.",
+  "entries": [
+    {
+      "baseline": "v2.3.1.0",
+      "baselineCommit": "5ec102a1820762673112d2cebd132aba44d7fb2d",
+      "leg": "previous-reader-before-restart",
+      "code": "source_update_action_invalid",
+      "bug": "B-1583",
+      "reason": "The 2.3.1.0 writer adds previousRuntimeOid; its own command-board reader requires exactly eight keys, so the old process refuses the safe-restart action."
+    },
+    {
+      "baseline": "v2.3.1.1",
+      "baselineCommit": "dfcb54195d632f4dacafc833009a1fd67c2dd72d",
+      "leg": "previous-reader-before-restart",
+      "code": "source_update_action_invalid",
+      "bug": "B-1583",
+      "reason": "Same defect as 2.3.1.0; fixed in 2.3.1.2."
+    }
+  ]
+}

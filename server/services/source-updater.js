@@ -25,6 +25,9 @@ import { reserveFullUpdateWaiter, failReleaseUpdateWaiter } from '../../scripts/
 import { UPDATE_RUNTIME_CAPABILITY } from '../../scripts/lib/update-runtime-bundle.mjs';
 
 import { createUpdateMaintenanceGate } from './update-maintenance-gate.js';
+import {
+    SUPERSEDING_TARGET_CODES, TARGET_ALREADY_LOADED, TARGET_NOT_NEWER, isTargetAlreadyLoaded, readLoadedRuntimeCommit,
+} from './source-update-target-guard.js';
 import { normalizeGitHubRepositoryIdentity, resolveReleaseSource } from './release-source-config.js';
 
 const SAFE_REMOTE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -538,6 +541,47 @@ async function assertNoOverlayMountConflict({ git, appRoot, releaseCommit, versi
     }
 }
 
+/**
+ * B-1585: remove a candidate this call alone created, after its worker was
+ * fenced. The transaction id carries a per-call nonce and was never handed to
+ * the job (no seal, no queued action), so no other owner can reference it. The
+ * fenced git runner refuses by design, hence the plain runner, scoped to the
+ * one worktree path and the private refs.
+ */
+async function discardPrivateCandidate({ commandRunner, appRoot, gitEnv, stagePath, planPath }) {
+    const git = (args) => Promise.resolve(commandRunner('git', ['-c', 'core.hooksPath=/dev/null', ...args],
+        { cwd: appRoot, env: gitEnv })).catch(() => undefined);
+    if (stagePath) await git(['worktree', 'remove', '--force', stagePath]);
+    try {
+        if (stagePath) fs.rmSync(path.dirname(stagePath), { recursive: true, force: true });
+        if (planPath) fs.rmSync(planPath, { force: true });
+    } catch { /* best effort: the next update reports leftover storage */ }
+}
+
+/**
+ * B-1585 (qa improvement-4): the waiter's requestId is per JOB
+ * (`release-update:<jobId>`) and reserveFullUpdateWaiter replays the same
+ * record — same revision — for a re-claimed attempt, so the waiter alone cannot
+ * tell this attempt from a newer owner's. It is failed only after the worker
+ * proves, atomically under this attempt's exact lease, that the job is now
+ * terminal (`failed`): a terminal job is never claimed again, so no newer
+ * owner can be waiting on it. failReleaseUpdateWaiter adds its own CAS
+ * (revision, phase waiting, no effect). Anything else leaves the waiter alone.
+ */
+async function failAbandonedWaiter({ appRoot, waiter, settleLostLease }) {
+    if (typeof settleLostLease !== 'function') return;
+    try {
+        if ((await settleLostLease()) === 'failed') await failReleaseUpdateWaiter(appRoot, waiter);
+    } catch { /* the waiter keeps its durable state; recovery owns it */ }
+}
+
+async function dropPrivateRefs({ commandRunner, appRoot, gitEnv, refs }) {
+    for (const ref of refs) {
+        await Promise.resolve(commandRunner('git', ['-c', 'core.hooksPath=/dev/null', 'update-ref', '-d', ref],
+            { cwd: appRoot, env: gitEnv })).catch(() => undefined);
+    }
+}
+
 export function createSourceUpdater({
     appRoot,
     activeSessionCount,
@@ -574,6 +618,9 @@ export function createSourceUpdater({
         const ssh = resolveGovernedSshCommand({ env, appRoot });
         const gitEnv = { ...releaseGitEnvironment(env), GIT_SSH_COMMAND: ssh.command };
         const assertFence = typeof jobIdentity.assertFence === 'function' ? jobIdentity.assertFence : () => true;
+        // B-1585: renew the worker lease around long synchronous steps (they
+        // block the heartbeat timer); falls back to a plain fence check.
+        const renewLease = typeof jobIdentity.renewLease === 'function' ? jobIdentity.renewLease : assertFence;
         // T-1768: each command and its output go to the job's live log.
         const onOutput = typeof jobIdentity.onOutput === 'function' ? jobIdentity.onOutput : undefined;
         const guardedRun = async (command, args, options = {}) => {
@@ -650,6 +697,7 @@ export function createSourceUpdater({
         let restartQueued = false;
         let activationEverQueued = false;
         let queuedBuildId = null;
+        let sealHandedOff = false;
         try {
             requireNoActiveSessions();
 
@@ -686,6 +734,19 @@ export function createSourceUpdater({
             if (remoteAfterFetch !== runtimeRemote) throw new SourceUpdateError('remote_changed', 'The update remote changed during the update.');
 
             const releaseCommit = await requireGit(['rev-parse', '--verify', `${tagRef}^{commit}`], 'tag_mismatch', 'resolve the release tag');
+            // B-1585: never stage the commit the running server already runs
+            // (an out-of-band install): it would only queue a redundant restart.
+            if (isTargetAlreadyLoaded(releaseCommit, loadedRuntimeCommit)) {
+                throw new SourceUpdateError(TARGET_ALREADY_LOADED, SUPERSEDING_TARGET_CODES[TARGET_ALREADY_LOADED], 409);
+            }
+            // B-1585 (qa mid-1): nor a target the running runtime already
+            // contains (e.g. the node was installed to a newer release while a
+            // job for an older one was stranded). An unknown loaded commit
+            // makes git exit non-zero, which is never read as "contained".
+            const loadedCommit = readLoadedRuntimeCommit(loadedRuntimeCommit);
+            if (loadedCommit && (await git(['merge-base', '--is-ancestor', releaseCommit, loadedCommit])).code === 0) {
+                throw new SourceUpdateError(TARGET_NOT_NEWER, SUPERSEDING_TARGET_CODES[TARGET_NOT_NEWER], 409);
+            }
             const onReleaseBranch = await git(['merge-base', '--is-ancestor', releaseCommit, branchRef]);
             if (onReleaseBranch.code !== 0) throw new SourceUpdateError('tag_mismatch', 'The release tag is not part of the configured release branch.');
             const fastForward = await git(['merge-base', '--is-ancestor', originalHead, releaseCommit]);
@@ -742,6 +803,7 @@ export function createSourceUpdater({
             // (H1). `git status` never shows ignored files, nor a file where the
             // release needs a directory; they used to surface only after the
             // gate closed, as a CAS failure mid-activation.
+            renewLease();
             try {
                 sourcePlanner({ projectRoot: appRoot, originalHead, targetCommit: releaseCommit });
             } catch (error) {
@@ -749,6 +811,7 @@ export function createSourceUpdater({
                 throw new SourceUpdateError('source_plan_conflict',
                     `The source tree cannot take this release without overwriting local files (${detail}). Move that path aside, then retry.`, 409);
             }
+            renewLease();
 
             assertFence();
             publicationWaiter = await reserveFullUpdateWaiter(appRoot, { requestId: `release-update:${jobIdentity.jobId || nonce}`,
@@ -812,6 +875,7 @@ export function createSourceUpdater({
                 if (stageHead.code !== 0 || stageHead.stdout.trim() !== releaseCommit) {
                     throw new SourceUpdateError('candidate_identity_mismatch', 'The staged candidate does not match the requested release.');
                 }
+                renewLease();
                 const manifestRaw = fs.readFileSync(plan.outputs.manifest);
                 const manifest = JSON.parse(manifestRaw);
                 if (manifest?.schemaVersion !== 1 || manifest.txId !== transactionId
@@ -828,9 +892,14 @@ export function createSourceUpdater({
                     || manifest.artifacts?.nodeModules?.commit !== releaseCommit) {
                     throw new SourceUpdateError('candidate_manifest_invalid', 'The staged candidate manifest is invalid.');
                 }
+                renewLease();
                 if (fs.existsSync(path.join(plan.outputs.client, 'CLIENT_ASSET_MANIFEST.json'))) {
-                    if (fs.existsSync(path.join(appRoot, 'dist/CLIENT_ASSET_MANIFEST.json'))) prepareClientPublicationAssets(appRoot, path.join(appRoot, 'dist'), {}, verifyAssetClosure, { reserveBytes: DEFAULT_MIN_FREE_BYTES });
+                    if (fs.existsSync(path.join(appRoot, 'dist/CLIENT_ASSET_MANIFEST.json'))) {
+                        prepareClientPublicationAssets(appRoot, path.join(appRoot, 'dist'), {}, verifyAssetClosure, { reserveBytes: DEFAULT_MIN_FREE_BYTES });
+                        renewLease();
+                    }
                     prepareClientPublicationAssets(appRoot, plan.outputs.client, { sourceOid: releaseCommit, buildId: manifest.clientBuildId }, verifyAssetClosure, { reserveBytes: DEFAULT_MIN_FREE_BYTES });
+                    renewLease();
                 }
                 const manifestSha256 = crypto.createHash('sha256').update(manifestRaw).digest('hex');
                 if (typeof queueRestartAction !== 'function') {
@@ -848,14 +917,15 @@ export function createSourceUpdater({
                     manifestPath: plan.outputs.manifest, manifestSha256,
                     expectedServerBuildId: manifest.serverBuildId, previousRuntimeOid,
                 });
-                assertFence();
+                renewLease();
                 const actionFd = fs.openSync(actionFile, 'wx', 0o600);
                 try { fs.writeFileSync(actionFd, `${JSON.stringify(action)}\n`); fs.fsyncSync(actionFd); } finally { fs.closeSync(actionFd); }
                 const activationIdentitySha256 = crypto.createHash('sha256')
                     .update(JSON.stringify(action)).digest('hex');
                 const candidateFd = fs.openSync(candidateRoot, 'r');
                 try { fs.fsyncSync(candidateFd); } finally { fs.closeSync(candidateFd); }
-                assertFence();
+                renewLease();
+                sealHandedOff = true;
                 if (typeof jobIdentity.beforeQueue === 'function') {
                     jobIdentity.beforeQueue({
                         transaction_id: transactionId,
@@ -906,6 +976,8 @@ export function createSourceUpdater({
                     await git(['worktree', 'remove', '--force', stagePath]).catch(() => undefined);
                     fs.rmSync(path.dirname(stagePath), { recursive: true, force: true });
                     if (planPath) fs.rmSync(planPath, { force: true });
+                } else if (jobIdentity.signal?.aborted && !candidatePersisted && !restartQueued && !sealHandedOff) {
+                    await discardPrivateCandidate({ commandRunner, appRoot, gitEnv, stagePath, planPath });
                 }
                 throw error;
             }
@@ -913,6 +985,9 @@ export function createSourceUpdater({
             if (publicationWaiter && !candidatePersisted && !activationEverQueued && !restartQueued && !jobIdentity.signal?.aborted
                 && !['resource_ceiling', 'insufficient_disk', 'update_lock_contended'].includes(error.code)) {
                 await failReleaseUpdateWaiter(appRoot, publicationWaiter);
+            } else if (publicationWaiter && jobIdentity.signal?.aborted && !sealHandedOff && !candidatePersisted
+                && !activationEverQueued && !restartQueued) {
+                await failAbandonedWaiter({ appRoot, waiter: publicationWaiter, settleLostLease: jobIdentity.settleLostLease });
             }
             throw error;
         } finally {
@@ -922,6 +997,9 @@ export function createSourceUpdater({
                     await git(['update-ref', '-d', tagRef]).catch(() => undefined);
                     await git(['update-ref', '-d', branchRef]).catch(() => undefined);
                 } catch { /* a newer fence owns cleanup */ }
+            } else if (fetchedTemporaryRefs) {
+                // B-1585: the refs carry this call's nonce; nobody else uses them.
+                await dropPrivateRefs({ commandRunner, appRoot, gitEnv, refs: [tagRef, branchRef] });
             }
             writerLease?.release();
             updateRunning = false;
