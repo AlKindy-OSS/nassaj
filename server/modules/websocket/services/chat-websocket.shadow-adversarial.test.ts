@@ -67,7 +67,6 @@ function dependencies(input: {
       input.codex(writer),
     queryClaudeSDK: unused,
     spawnCursor: unused,
-    spawnGemini: unused,
     spawnAntigravity: unused,
     spawnOpenCode: unused,
     spawnHermes: unused,

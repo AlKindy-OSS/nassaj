@@ -79,7 +79,7 @@ const AUTH_STATUS = {
 
 const agentContextById = Object.fromEntries(
   ([
-    'claude', 'codex', 'cursor', 'gemini', 'antigravity', 'opencode',
+    'claude', 'codex', 'cursor', 'antigravity', 'opencode',
     'qwen', 'kimi', 'deepseek', 'glm', 'hermes', 'sakana',
   ] as AgentProvider[]).map((agent) => [agent, { authStatus: AUTH_STATUS, onLogin: () => {} }]),
 ) as Record<AgentProvider, AgentContext>;
@@ -106,8 +106,6 @@ describe('مزوّدات «قريباً» تعرض لوح coming-soon لا فر�
             onCursorPermissionsChange={() => {}}
             codexPermissionMode="default"
             onCodexPermissionModeChange={() => {}}
-            geminiPermissionMode="default"
-            onGeminiPermissionModeChange={() => {}}
             projects={[]}
           />
         </ThemeProvider>,
@@ -150,8 +148,6 @@ describe('لا فئةَ تفتح على فراغ (B-414)', () => {
         onCursorPermissionsChange={() => {}}
         codexPermissionMode="default"
         onCodexPermissionModeChange={() => {}}
-        geminiPermissionMode="default"
-        onGeminiPermissionModeChange={() => {}}
         projects={[]}
       />
       </ThemeProvider>,

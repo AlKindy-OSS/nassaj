@@ -399,7 +399,7 @@ test('الكاش معزول لكل مستخدم ولكل مزوّد', async () =
 test('مزوّد بلا مصدر (deepseek/claude/مجهول) ⇒ null بلا أي نداء شبكي', async () => {
   providerQuotaService.__resetCache();
   const { impl, state } = countingFetch(GLM_LIVE_BODY);
-  for (const provider of ['deepseek', 'claude', 'gemini', 'cursor', 'nope']) {
+  for (const provider of ['deepseek', 'claude', 'cursor', 'nope']) {
     assert.equal(
       await providerQuotaService.getWindows(provider, 'u1', { fetchImpl: impl, credential: 'k' }),
       null,

@@ -10,7 +10,7 @@
  *   • providers with a dedicated knob (claude → CLAUDE_CONFIG_DIR, codex →
  *     CODEX_HOME, kimi agent → KIMI_CODE_HOME, vendor keys) point straight at
  *     the owner's provider dir / key;
- *   • providers steered by HOME or XDG (gemini, agy, hermes, cursor, opencode)
+ *   • providers steered by HOME or XDG (agy, hermes, cursor, opencode)
  *     get a GRANT HOME (grant-home.js): the grantee's own tree with just the
  *     granted provider dirs linked to the owner's. Never the owner's root — the
  *     root holds every other credential the owner has.
@@ -49,7 +49,6 @@ import * as database from '../../modules/database/index.js';
  */
 export const GRANTABLE_PROVIDERS = Object.freeze([
   'claude',
-  'gemini',
   'codex',
   'agy',
   'cursor',
@@ -68,10 +67,9 @@ export const GRANTABLE_PROVIDERS = Object.freeze([
  */
 
 /**
- * gemini and agy are ONE credential on disk (`~/.gemini/antigravity-cli`, one
- * binary under two names), so they are one grant: rows are stored under the
- * unit key and both providers resolve through it. Every other provider is its
- * own unit.
+ * agy's credential lives in `~/.gemini/antigravity-cli`, so its grant rows are
+ * stored under the unit key 'gemini' (the settings client addresses that unit
+ * directly). Every other provider is its own unit.
  * @param {string} provider
  * @returns {string}
  */
@@ -81,6 +79,16 @@ export function credentialUnit(provider) {
 
 /** The distinct units a member can grant (GRANTABLE_PROVIDERS collapsed). */
 export const GRANTABLE_UNITS = Object.freeze([...new Set(GRANTABLE_PROVIDERS.map(credentialUnit))]);
+
+/**
+ * True for a grantable provider or its storage unit. The settings client and
+ * the grant rows address agy by its unit key, so both spellings are accepted.
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isGrantableKey(key) {
+  return GRANTABLE_PROVIDERS.includes(key) || GRANTABLE_UNITS.includes(key);
+}
 
 function isAnonymous(userId) {
   return userId === null || userId === undefined || userId === '';
@@ -96,7 +104,7 @@ export function resolveCredentialPrincipal(userId, provider) {
     return { principalId: userId ?? null, grantedBy: null };
   }
   const own = { principalId: userId, grantedBy: null };
-  if (!GRANTABLE_PROVIDERS.includes(provider)) {
+  if (!isGrantableKey(provider)) {
     return own;
   }
   const credentialGrantsDb = database.credentialGrantsDb;

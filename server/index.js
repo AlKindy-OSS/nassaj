@@ -121,8 +121,11 @@ import {
 // would leave that path inert (chat behavior unchanged).
 import { spawnKimiAgent } from './kimi-agent-cli.js';
 import {
+    getProviderRunsOwnedByUser,
     getProviderRunsOwnedByWriter,
+    getProviderRunWriter,
     isProviderRunOwnershipCurrent,
+    isProviderRunRegistrationCurrent,
 } from './services/session-process-monitor.js';
 import {
     spawnDeepSeek,
@@ -174,6 +177,7 @@ import {
     writeStandaloneTerminalInput,
     resizeStandaloneTerminal,
     detachStandaloneTerminalSocket,
+    terminateStandaloneTerminalsForUser,
 } from './services/standalone-terminals/standalone-terminal-registry.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import harnessUpdateRoutes from './modules/providers/harness-update/harness-update.routes.js';
@@ -956,7 +960,11 @@ const wss = createWebSocketServer(server, {
         abortGlmSession,
         abortQwenSession,
         getProviderRunsOwnedByWriter,
+        getProviderRunWriter,
         isProviderRunOwnershipCurrent,
+        // B-1327: user-level revocation (disable/delete/role downgrade).
+        getProviderRunsOwnedByUser,
+        isProviderRunRegistrationCurrent,
         resolveToolApproval,
         isClaudeSDKSessionActive,
         isCursorSessionActive,
@@ -999,6 +1007,8 @@ const wss = createWebSocketServer(server, {
         writeInput: writeStandaloneTerminalInput,
         resizeTerminal: resizeStandaloneTerminal,
         detachSocket: detachStandaloneTerminalSocket,
+        // B-1327: disable/delete/admin downgrade ends the user's terminals.
+        terminateForUser: terminateStandaloneTerminalsForUser,
     },
 });
 
@@ -1433,6 +1443,8 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
 // project and is notified over their open sockets.
 // Owner decision 2026-09-23 (م1): also stop in-flight turns the removed member
 // launched in the project (abortSessionTurn = the abort-session dispatch).
+// T-1854 (qa H2): chat runs are already aborted by their run fence; this stays
+// as secondary coverage for runs that never crossed one (POST /api/agent SSE).
 onMemberRemoved((event) => revokeProjectLiveAccess(event, {
     abortTurn: (sessionId, userId) => abortSessionTurn(chatDependencies, sessionId, null, userId),
 }));
@@ -3501,62 +3513,6 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
                 breakdown: { input: 0, output: 0 },
                 unsupported: true,
                 message: 'Token usage tracking not available for Cursor sessions'
-            });
-        }
-
-        if (provider === 'gemini') {
-            const session = sessionsDb.getSessionById(safeSessionId);
-            const sessionFilePath = session?.jsonl_path;
-            if (!sessionFilePath) {
-                return res.json({
-                    used: 0,
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    breakdown: { input: 0, output: 0 },
-                    unsupported: true,
-                    message: 'Token usage tracking not available for this Gemini session'
-                });
-            }
-
-            let fileContent;
-            try {
-                fileContent = await fsPromises.readFile(sessionFilePath, 'utf8');
-            } catch (error) {
-                if (error.code === 'ENOENT') {
-                    return res.status(404).json({ error: 'Session file not found', path: sessionFilePath });
-                }
-                throw error;
-            }
-
-            const lines = fileContent.trim().split('\n');
-            let inputTokens = 0;
-            let outputTokens = 0;
-            let totalTokens = 0;
-
-            for (let i = lines.length - 1; i >= 0; i--) {
-                try {
-                    const entry = JSON.parse(lines[i]);
-                    if (!entry.tokens || typeof entry.tokens !== 'object') {
-                        continue;
-                    }
-
-                    inputTokens = Number(entry.tokens.input || 0);
-                    outputTokens = Number(entry.tokens.output || 0);
-                    totalTokens = Number(entry.tokens.total || inputTokens + outputTokens || 0);
-                    break;
-                } catch {
-                    continue;
-                }
-            }
-
-            return res.json({
-                used: totalTokens,
-                inputTokens,
-                outputTokens,
-                breakdown: {
-                    input: inputTokens,
-                    output: outputTokens
-                }
             });
         }
 

@@ -3,7 +3,7 @@
  *
  * B-VR-2A. The isolation seam (resolve-provider-env.js) only sets per-user
  * CONFIG_DIR/HOME paths so each first-party CLI reads credentials from its own
- * isolated tree. That is enough for claude/gemini/codex/agy, but the hosted
+ * isolated tree. That is enough for claude/codex/agy, but the hosted
  * vendor providers (kimi/deepseek/glm) are third-party HTTP APIs that read no
  * nassaj config tree — their key must be handed to the child process as an
  * explicit env value. This store holds those keys, encrypted at rest, isolated

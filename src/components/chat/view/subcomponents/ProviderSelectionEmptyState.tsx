@@ -131,8 +131,6 @@ type ProviderSelectionEmptyStateProps = {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
-  geminiModel: string;
-  setGeminiModel: (model: string) => void;
   antigravityModel: string;
   setAntigravityModel: (model: string) => void;
   opencodeModel: string;
@@ -253,8 +251,6 @@ export default function ProviderSelectionEmptyState({
   setCursorModel,
   codexModel,
   setCodexModel,
-  geminiModel,
-  setGeminiModel,
   antigravityModel,
   setAntigravityModel,
   opencodeModel,
@@ -468,7 +464,6 @@ export default function ProviderSelectionEmptyState({
       claude: claudeModel,
       cursor: cursorModel,
       codex: codexModel,
-      gemini: geminiModel,
       antigravity: antigravityModel,
       opencode: opencodeModel,
       hermes: hermesModel,
@@ -484,7 +479,6 @@ export default function ProviderSelectionEmptyState({
       claudeModel,
       cursorModel,
       codexModel,
-      geminiModel,
       antigravityModel,
       opencodeModel,
       hermesModel,
@@ -517,9 +511,6 @@ export default function ProviderSelectionEmptyState({
       } else if (providerId === "codex") {
         setCodexModel(modelValue);
         localStorage.setItem("codex-model", modelValue);
-      } else if (providerId === "gemini") {
-        setGeminiModel(modelValue);
-        localStorage.setItem("gemini-model", modelValue);
       } else if (providerId === "antigravity") {
         setAntigravityModel(modelValue);
         localStorage.setItem("antigravity-model", modelValue);
@@ -550,7 +541,6 @@ export default function ProviderSelectionEmptyState({
       setClaudeModel,
       setCursorModel,
       setCodexModel,
-      setGeminiModel,
       setAntigravityModel,
       setOpenCodeModel,
       setHermesModel,
@@ -1136,9 +1126,6 @@ export default function ProviderSelectionEmptyState({
                 }),
                 codex: t("providerSelection.readyPrompt.codex", {
                   model: codexModel,
-                }),
-                gemini: t("providerSelection.readyPrompt.gemini", {
-                  model: geminiModel,
                 }),
                 antigravity: t("providerSelection.readyPrompt.antigravity", {
                   model: antigravityModel,

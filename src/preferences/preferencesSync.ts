@@ -89,13 +89,11 @@ const SYNCED_STORAGE_KEYS: string[] = [
   'claude-settings',
   'cursor-tools-settings',
   'codex-settings',
-  'gemini-settings',
   // provider selection + per-provider models (useChatProviderState.ts)
   'selected-provider',
   'claude-model',
   'cursor-model',
   'codex-model',
-  'gemini-model',
   'opencode-model',
   'antigravity-model',
 ];

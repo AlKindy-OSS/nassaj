@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { Fragment, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
+import { ArrowDownIcon, RefreshCw } from 'lucide-react';
 
 import { useSessionParticipants } from '../../../participants';
 import type { SessionParticipant } from '../../../participants/types';
@@ -18,9 +19,7 @@ import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import DateSeparator from './DateSeparator';
-import RunningActivityGapCard from './RunningActivityGapCard';
 import SessionIdleWarning from './SessionIdleWarning';
-import { getRunningActivityGap } from './runningActivityGap';
 
 // Parse a ChatMessage timestamp (string | number | Date) into a valid Date, or null.
 function toValidDate(timestamp: string | number | Date | undefined): Date | null {
@@ -55,8 +54,6 @@ interface ChatMessagesPaneProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
-  geminiModel: string;
-  setGeminiModel: (model: string) => void;
   antigravityModel: string;
   setAntigravityModel: (model: string) => void;
   opencodeModel: string;
@@ -120,6 +117,19 @@ interface ChatMessagesPaneProps {
   idleThresholdMs?: number | null;
   /** يُستدعى عند النقر على «محادثة جديدة» في تنبيه الخمول. */
   onNewSession?: () => void;
+  /** B-1044: زرّ scroll-to-bottom — true حين المستخدم تمرَّر للأعلى ويوجد رسائل. */
+  isUserScrolledUp?: boolean;
+  hasMessages?: boolean;
+  /** T-1821: يُظهر الزرّ حتى حين المستخدم في الأسفل (جلسة عالقة / historyError / انقطاع تعافى). */
+  showResync?: boolean;
+  /** T-1821: دوّامة أثناء إعادة المزامنة (refresh أو retry تاريخ). */
+  isResyncing?: boolean;
+  /**
+   * T-1821: طابع Unix بالميلي ثانية لوقت انتهاء تأجيل المحاولة (retryAt من historyError).
+   * حين `retryUntil > Date.now()` يُعطَّل الزرّ ويُعرض تلميح «يرجى الانتظار».
+   */
+  retryUntil?: number | null;
+  onScrollToBottom?: () => void;
 }
 
 export default function ChatMessagesPane({
@@ -144,8 +154,6 @@ export default function ChatMessagesPane({
   setCursorModel,
   codexModel,
   setCodexModel,
-  geminiModel,
-  setGeminiModel,
   antigravityModel,
   setAntigravityModel,
   opencodeModel,
@@ -199,8 +207,26 @@ export default function ChatMessagesPane({
   contextTokens = null,
   idleThresholdMs = null,
   onNewSession,
+  isUserScrolledUp = false,
+  hasMessages = false,
+  showResync = false,
+  isResyncing = false,
+  retryUntil = null,
+  onScrollToBottom,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
+
+  // T-1821 fix-6: isRetryWaiting is computed from Date.now() at render time, so
+  // the button stays disabled after retryAt expires unless we force a re-render.
+  // Schedule one re-render at the exact expiry time so the button re-enables promptly.
+  const [, setRetryTick] = useState(0);
+  useEffect(() => {
+    if (retryUntil == null) return;
+    const delay = retryUntil - Date.now();
+    if (delay <= 0) return; // already past — no timer needed
+    const id = window.setTimeout(() => setRetryTick((n) => n + 1), delay + 50);
+    return () => window.clearTimeout(id);
+  }, [retryUntil]);
 
   // Roster of humans seen in this session, used to resolve a message's
   // `userId` author stamp to a username/avatar/colour so mirrors render the
@@ -274,11 +300,6 @@ export default function ChatMessagesPane({
     return null;
   }, [chatMessages]);
 
-  const activityGap = useMemo(
-    () => getRunningActivityGap(chatMessages, isStreaming, showToolCalls === true),
-    [chatMessages, isStreaming, showToolCalls],
-  );
-
   return (
     <div
       ref={scrollContainerRef}
@@ -317,8 +338,6 @@ export default function ChatMessagesPane({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
           antigravityModel={antigravityModel}
           setAntigravityModel={setAntigravityModel}
           opencodeModel={opencodeModel}
@@ -473,10 +492,6 @@ export default function ChatMessagesPane({
             );
           })}
 
-          {activityGap.visible && activityGap.lastActivityAt !== null && (
-            <RunningActivityGapCard lastActivityAt={activityGap.lastActivityAt} />
-          )}
-
           {/* تنبيه الخمول — يظهر بعد مدة كاش الهارنس على آخر رسالة خارج البثّ.
               يُعرض داخل منطقة التمرير لأنه يتبع آخر رسالة بصرياً، لا بعدها. */}
           {onNewSession && idleThresholdMs !== null && (
@@ -491,6 +506,43 @@ export default function ChatMessagesPane({
 
         </>
       )}
+
+      {/* B-1044: زرّ scroll-to-bottom sticky داخل منطقة التمرير نفسها (لا فوق
+            المُؤلِّف/شريط الحالة كالسابق بإزاحة سالبة هشّة). يبقى مثبَّتاً عند
+            أسفل ما هو مرئي من منطقة التمرير، فوق المُؤلِّف تماماً وبلا تغطية،
+            بصرف النظر عن ارتفاع AgentStatusCard.
+            T-1821: زرّ موحَّد — ينزل ويُعيد المزامنة. يظهر حين:
+              (أ) المستخدم تمرَّر للأعلى ويوجد رسائل، أو
+              (ب) showResync=true (historyError / جلسة عالقة / انقطاع تعافى)
+                  بصرف النظر عن وجود رسائل (fix-1: لا بديل مرئي عند الخطأ الابتدائي).
+            أثناء المزامنة أو انتظار retryAt تظهر دوّامة وتُعطَّل النقرة. */}
+      {onScrollToBottom && ((isUserScrolledUp && hasMessages) || showResync) && (() => {
+        const isRetryWaiting = retryUntil != null && retryUntil > Date.now();
+        const isDisabled = isResyncing || isRetryWaiting;
+        const label = isResyncing
+          ? t('refreshChat.refreshing', { defaultValue: 'Refreshing…' })
+          : isRetryWaiting
+            ? t('session.historyError.wait', { defaultValue: 'Please wait before trying again' })
+            : showResync
+              ? t('input.scrollToBottomAndSync', { defaultValue: 'Go to latest & refresh' })
+              : t('input.scrollToBottom', { defaultValue: 'Scroll to bottom' });
+        return (
+          <div className="sticky bottom-2 end-0 start-0 z-10 flex justify-center">
+            <button
+              type="button"
+              onClick={onScrollToBottom}
+              disabled={isDisabled}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              title={label}
+              aria-label={label}
+            >
+              {isDisabled
+                ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                : <ArrowDownIcon className="h-4 w-4" aria-hidden="true" />}
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

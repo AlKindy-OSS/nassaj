@@ -769,8 +769,7 @@
         "irukhaimi": "الرخيمي",
         "cursor": "Cursor",
         "codex": "Codex",
-        "gemini": "Gemini",
-        "custom": "مخصصة"
+          "custom": "مخصصة"
       },
       "custom": {
         "title": "ألوان مخصصة",
@@ -1099,9 +1098,6 @@
       "codex": {
         "description": "مساعد OpenAI Codex الذكي"
       },
-      "gemini": {
-        "description": "مساعد Google Gemini الذكي"
-      },
       "antigravity": {
         "description": "Google AI Pro عبر أداة agy CLI"
       },
@@ -1407,8 +1403,7 @@
       "claude": "خوادم Model Context Protocol توفّر لـ Claude أدوات ومصادر بيانات إضافية",
       "cursor": "خوادم Model Context Protocol توفّر لـ Cursor أدوات ومصادر بيانات إضافية",
       "codex": "خوادم Model Context Protocol توفّر لـ Codex أدوات ومصادر بيانات إضافية",
-      "opencode": "خوادم Model Context Protocol توفّر لـ OpenCode أدوات ومصادر بيانات إضافية",
-      "gemini": "خوادم Model Context Protocol توفّر لـ Gemini أدوات ومصادر بيانات إضافية"
+      "opencode": "خوادم Model Context Protocol توفّر لـ OpenCode أدوات ومصادر بيانات إضافية"
     },
     "addButton": "إضافة خادم MCP",
     "empty": "لا توجد خوادم MCP معدّة",
@@ -1800,7 +1795,6 @@
       "kimi": "تسجيل الدخول إلى وكيل Kimi Code CLI",
       "hermes": "وكيل Hermes",
       "antigravity": "إعداد وكيل Antigravity (agy)",
-      "gemini": "إعداد وكيل Gemini CLI",
       "qwen": "ربط Qwen",
       "generic": "إعداد وكيل {{provider}} CLI"
     },
@@ -1861,26 +1855,11 @@
       "error": "تعذّر حفظ الاعتماد. راجع نوع الخطة والمنطقة والمفتاح ثم حاول مجدداً.",
       "successTitle": "تم ربط Qwen",
       "successDescription": "سيُستخدم الاعتماد المشفّر في رسالة Qwen التالية."
-    },
-    "gemini": {
-      "title": "إعداد وصول Gemini عبر API",
-      "description": "يحتاج وكيل Gemini CLI مفتاح API ليعمل. اضبطه من طرفيتك أولاً.",
-      "step1": "احصل على مفتاح API",
-      "step2": "شغّل أمر الإعداد",
-      "step2Hint": "افتح طرفيتك وشغّل:",
-      "done": "تمّ"
     }
   },
   "actionRequired": "إجراء مطلوب",
   "error": "خطأ",
   "stop": "إيقاف",
-  "gemini": {
-    "modesShort": {
-      "default": "يسأل",
-      "autoEdit": "تعديل تلقائي",
-      "yolo": "YOLO"
-    }
-  },
   "tmpfsCap": {
     "title": "سقف الذاكرة المشتركة (‏/tmp)",
     "description": "‏/tmp على هذا الجهاز في الذاكرة. مِقدارٌ بلا سقف يترك بناءً واحداً يحجز غيغابايتات لساعات.",
@@ -2238,7 +2217,6 @@
       "placeholder": "أضف عضواً…",
       "noMembers": "لا أعضاء آخرين بعد",
       "noMatch": "لا عضو بهذا الاسم",
-      "pairedNote": "‏Gemini وAntigravity تسجيل دخول واحد؛ مشاركة أحدهما مشاركة للآخر.",
       "declined": "على اعتماده",
       "remove": "إلغاء المشاركة مع {{member}}"
     },

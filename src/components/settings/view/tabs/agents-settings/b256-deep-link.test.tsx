@@ -66,8 +66,6 @@ const baseProps: AgentsSettingsTabProps = {
   onCursorPermissionsChange: vi.fn(),
   codexPermissionMode: 'default',
   onCodexPermissionModeChange: vi.fn(),
-  geminiPermissionMode: 'default',
-  onGeminiPermissionModeChange: vi.fn(),
   projects: [],
 };
 

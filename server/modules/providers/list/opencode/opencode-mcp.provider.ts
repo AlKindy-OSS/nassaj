@@ -128,7 +128,7 @@ const parseOpenCodeConfig = (content: string): Record<string, unknown> =>
   readObjectRecord(JSON.parse(stripTrailingCommas(stripJsonComments(content))) as unknown) ?? {};
 
 /**
- * T-1230 — atomic + 0600, matching the claude/gemini writers.
+ * T-1230 — atomic + 0600, matching the claude/codex writers.
  *
  * Two reasons, both now live. A plain `writeFile` truncates before it writes, so
  * a crash or a concurrent read mid-write leaves a torn or empty `opencode.json`

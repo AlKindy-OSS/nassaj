@@ -18,7 +18,6 @@ test('resolveHarnessId normalises ids and documented aliases', () => {
   assert.equal(resolveHarnessId('agy'), 'antigravity');
   assert.equal(resolveHarnessId('cursor-agent'), 'cursor');
   assert.equal(resolveHarnessId(' Cursor '), 'cursor');
-  assert.equal(resolveHarnessId('gemini'), null); // removed provider
   assert.equal(resolveHarnessId('nope'), null);
   assert.equal(resolveHarnessId(42 as unknown), null);
 });

@@ -166,7 +166,6 @@ function dependencies(input: {
       input.codex(writer),
     queryClaudeSDK: unused,
     spawnCursor: async (_command: string, options: unknown) => input.cursor?.(options),
-    spawnGemini: unused,
     spawnAntigravity: unused,
     spawnOpenCode: unused,
     spawnHermes: unused,

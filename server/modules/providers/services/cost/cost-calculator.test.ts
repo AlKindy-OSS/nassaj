@@ -75,7 +75,7 @@ test('بند بسعر غير معلن يُحصى توكنزه بدل أن يُب
 
 test('صفر جوجل للكتابة واقع تسعير لا نقص بيانات', () => {
   const cost = calculateSessionCost(
-    usageOf('gemini-2.5-pro', { input: 1_000_000, cacheWrite5m: 500_000 }, 'gemini'),
+    usageOf('gemini-2.5-pro', { input: 1_000_000, cacheWrite5m: 500_000 }, 'antigravity'),
   );
 
   assert.equal(cost.totalUsd, 1.25);

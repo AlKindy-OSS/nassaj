@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:389a595cf42a53803f24768650ec89f48675cecd776f2be6a5bc8136f15695a2",
+  "reviewedSiteDigest": "sha256:41a94fabd00092645baa1dccf4fb815d06ca008403b40b56a1e7d96147e797c4",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -466,16 +466,6 @@
       "test": "chat websocket and execution adapter tests"
     },
     {
-      "prefix": "runtime#gemini.cli",
-      "classification": "provider_effect_enclosed",
-      "owner": "Gemini CLI adapter",
-      "purpose": "spawn",
-      "actorSource": "enclosed WS/REST caller",
-      "gate": "caller ADR-134 LaunchPermit",
-      "adapter": "spawnGemini",
-      "test": "chat websocket and execution adapter tests"
-    },
-    {
       "prefix": "runtime#opencode.cli",
       "classification": "provider_effect_enclosed",
       "owner": "OpenCode CLI adapter",
@@ -674,16 +664,6 @@
       "gate": "project ownership and transport policy",
       "adapter": "project service",
       "test": "project clone and transport security tests"
-    },
-    {
-      "prefix": "server/modules/providers/list/gemini/gemini-auth.provider.ts#",
-      "classification": "credential_management_effect",
-      "owner": "Gemini authentication verifier",
-      "purpose": "credential_setup",
-      "actorSource": "authenticated provider credential route",
-      "gate": "provider credential ownership",
-      "adapter": "Gemini auth provider",
-      "test": "Gemini provider authentication tests"
     },
     {
       "prefix": "server/modules/providers/services/claude-usage.service.ts#",

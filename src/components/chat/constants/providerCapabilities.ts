@@ -136,7 +136,7 @@ export interface ProviderUiCapabilities {
    * - antigravity: true — agy يقبل --model فعلاً (مقيس على 1.1.9)، ويحذفه عند
    *   الاستئناف العادي فقط كي لا يتسرّب اختيار محادثة أخرى؛ أما التبديل الصريح
    *   من هذا المبدّل فيُقرأ عبر getChangedActiveModel (agy-cli.js:513-540).
-   * - cursor/gemini/sakana: false — لا آلية active-model موثَّقة أو المزوّد يدير النموذج بنفسه.
+   * - cursor/sakana: false — لا آلية active-model موثَّقة أو المزوّد يدير النموذج بنفسه.
    * - الباقون: true — نقطة النهاية تكتب المفتاح وresolveResumeModel يقرأه.
    */
   modelSwitch: { supported: boolean };
@@ -261,22 +261,6 @@ export const PROVIDER_UI_CAPABILITIES: Record<LLMProvider, ProviderUiCapabilitie
     sideChannel: { supported: false },
     agentMode: { supported: false },
     coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.qwen },
-    modelSwitch: { supported: true },
-  },
-  gemini: {
-    id: 'gemini',
-    displayName: 'Gemini',
-    effort: { supported: false },
-    tokenCounter: { supported: false },
-    command: { supportsImages: false },
-    permissions: { modes: DEFAULT_PERMISSION_MODES },
-    quota: { isClaudeAccount: false, surface: 'cycle' },
-    posture: { supported: false },
-    sideChannel: { supported: false },
-    agentMode: { supported: false },
-    coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.gemini },
-    // T-1028: مدعوم — changeActiveModel مُنفَّذ خادمياً ويستدعي
-    // writeProviderSessionActiveModelChange (gemini-models.provider.ts:37-41).
     modelSwitch: { supported: true },
   },
   antigravity: {

@@ -137,7 +137,7 @@ test('provider service connector adapter fails closed outside Claude and Codex',
     providerRegistry.resolveProvider('codex').mcp,
   );
   assert.throws(
-    () => providerMcpService.connectorTargetAdapter('gemini' as 'claude'),
+    () => providerMcpService.connectorTargetAdapter('cursor' as 'claude'),
     (error: unknown) => (error as { code?: string }).code === 'CONNECTOR_MCP_TARGET_UNSUPPORTED',
   );
 });

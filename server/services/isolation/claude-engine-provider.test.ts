@@ -111,8 +111,8 @@ test('apply: a requested id that is not an eligible engine is REFUSED, never tre
   assert.deepEqual(applyClaudeEngineProviderEnv(env, '1', 'claude'), {
     status: 'unavailable', provider: 'claude', reason: 'not_an_engine',
   });
-  assert.deepEqual(applyClaudeEngineProviderEnv(env, '1', 'gemini'), {
-    status: 'unavailable', provider: 'gemini', reason: 'not_an_engine',
+  assert.deepEqual(applyClaudeEngineProviderEnv(env, '1', 'cursor'), {
+    status: 'unavailable', provider: 'cursor', reason: 'not_an_engine',
   });
   // B-424: deepseek WAS the not_eligible example here, but it was made an
   // eligible engine once the owner stored a key and verified the wire. It is now

@@ -29,7 +29,7 @@ const CHILD_EXPORTS = new Set([
 const SDK_MODULE = '@anthropic-ai/claude-agent-sdk';
 const HTTP_MODULES = new Set(['axios', 'undici', 'got', 'node:http', 'node:https', 'http', 'https']);
 const HTTP_EXPORTS = new Set(['fetch', 'request', 'get']);
-const PROVIDER_LAUNCHER_MODULE = /(?:^|\/)(?:claude-sdk|openai-codex|agy-cli|cursor-cli|gemini-cli|opencode-cli|qwen-cli|hermes-cli|kimi-agent-cli|vendor-runtime|task-runner|resume-turn-runner)(?:\.[cm]?[jt]s)?$/u;
+const PROVIDER_LAUNCHER_MODULE = /(?:^|\/)(?:claude-sdk|openai-codex|agy-cli|cursor-cli|opencode-cli|qwen-cli|hermes-cli|kimi-agent-cli|vendor-runtime|task-runner|resume-turn-runner)(?:\.[cm]?[jt]s)?$/u;
 
 const walk = directory => fs.readdirSync(directory, { withFileTypes: true })
   .flatMap(entry => {

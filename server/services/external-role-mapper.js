@@ -145,11 +145,17 @@ export function hasZitadelRolesClaim(claims, projectId) {
  * distinct `reason` so a demotion driven by a missing claim is diagnosable.
  * @param {{ user: { id: number, role: string }, externalRoles: unknown,
  *           provider: string, claimPresent?: boolean }} input
+ * `onRoleApplied` (optional) runs only when the compare-and-set actually changed
+ * the stored role, so the caller can revoke live work on a downgrade (B-1327).
  * @param {{ userDb: { setRoleIfUnchanged: Function, getUserById: Function },
- *           auditLogDb: { record: Function } }} deps
+ *           auditLogDb: { record: Function },
+ *           onRoleApplied?: (change: { userId: number, from: string, to: string }) => void }} deps
  * @returns {object | undefined} the fresh active user row, or undefined if it vanished
  */
-export function syncExternalRole({ user, externalRoles, provider, claimPresent }, { userDb, auditLogDb }) {
+export function syncExternalRole(
+  { user, externalRoles, provider, claimPresent },
+  { userDb, auditLogDb, onRoleApplied },
+) {
   const { role, changed } = reconcileLocalRole(user.role, externalRoles);
   if (!changed) {
     return user;
@@ -164,6 +170,7 @@ export function syncExternalRole({ user, externalRoles, provider, claimPresent }
       userId: user.id,
       metadata,
     });
+    onRoleApplied?.({ userId: user.id, from: user.role, to: role });
   }
   // Re-read: generateToken must see the stored role (and the bumped
   // authorization_generation), including when a concurrent change won the CAS.

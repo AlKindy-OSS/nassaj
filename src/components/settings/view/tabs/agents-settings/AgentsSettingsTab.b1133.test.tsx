@@ -114,7 +114,7 @@ const NOT_AUTHED: ProviderAuthStatus = {
 };
 
 const PROVIDERS = [
-  'claude', 'cursor', 'codex', 'gemini', 'antigravity',
+  'claude', 'cursor', 'codex', 'antigravity',
   'opencode', 'qwen', 'kimi', 'deepseek', 'glm', 'hermes', 'sakana',
 ] as const;
 
@@ -133,8 +133,6 @@ function makeProps(overrides: Partial<AgentsSettingsTabProps> = {}): AgentsSetti
     onCursorPermissionsChange: vi.fn(),
     codexPermissionMode: 'default',
     onCodexPermissionModeChange: vi.fn(),
-    geminiPermissionMode: 'default',
-    onGeminiPermissionModeChange: vi.fn(),
     projects: [],
     ...overrides,
   };

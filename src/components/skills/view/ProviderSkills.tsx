@@ -88,7 +88,6 @@ const PROVIDER_NAMES: Record<SkillsProvider, string> = {
   claude: 'Claude',
   codex: 'Codex',
   cursor: 'Cursor',
-  gemini: 'Gemini',
   opencode: 'OpenCode',
   qwen: 'Qwen Code',
   antigravity: 'Antigravity',
@@ -104,7 +103,6 @@ const WRITE_SUPPORTED_PROVIDERS: ReadonlySet<SkillsProvider> = new Set([
   'claude',
   'codex',
   'cursor',
-  'gemini',
   'qwen',
 ]);
 
@@ -113,7 +111,6 @@ const PROVIDER_SKILL_PATHS: Partial<Record<SkillsProvider, string>> = {
   claude: '~/.claude/skills/<skill-name>/SKILL.md',
   codex: '~/.agents/skills/<skill-name>/SKILL.md',
   cursor: '~/.cursor/skills/<skill-name>/SKILL.md',
-  gemini: '~/.gemini/skills/<skill-name>/SKILL.md',
 };
 
 const SCOPE_ORDER: SkillsScope[] = ['user', 'plugin', 'repo', 'project', 'admin', 'system'];

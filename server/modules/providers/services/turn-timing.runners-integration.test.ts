@@ -68,7 +68,6 @@ test('shared runner timing keeps no-answer unknown and settles a terminal turn o
 const RUNNERS = [
   { provider: 'agy', file: '../../../agy-cli.js', outputGate: /const durableTiming = finalTranscriptMessage/ },
   { provider: 'cursor', file: '../../../cursor-cli.js', outputGate: /assistantMessageId: lastAssistantMessageId/ },
-  { provider: 'gemini', file: '../../../gemini-cli.js', outputGate: /code === 0 && sawAssistantOutput/ },
   { provider: 'hermes', file: '../../../hermes-cli.js', outputGate: /succeeded && sawAssistantOutput/ },
   { provider: 'kimi', file: '../../../kimi-agent-cli.js', outputGate: /code === 0 && sawAssistantOutput/ },
   { provider: 'opencode', file: '../../../opencode-cli.js', outputGate: /assistantMessageId: lastAssistantMessageId/ },

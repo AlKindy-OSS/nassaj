@@ -43,7 +43,6 @@ export const CLI_PROVIDERS: LLMProvider[] = filterDisabledProviders([
   'claude',
   'cursor',
   'codex',
-  'gemini',
   'antigravity',
   'opencode',
   'hermes',
@@ -57,7 +56,6 @@ export const PROVIDER_AUTH_STATUS_ENDPOINTS: Record<LLMProvider, string> = {
   claude: '/api/providers/claude/auth/status',
   cursor: '/api/providers/cursor/auth/status',
   codex: '/api/providers/codex/auth/status',
-  gemini: '/api/providers/gemini/auth/status',
   antigravity: '/api/providers/antigravity/auth/status',
   opencode: '/api/providers/opencode/auth/status',
   kimi: '/api/providers/kimi/auth/status',
@@ -86,7 +84,6 @@ export const createInitialProviderAuthStatusMap = (loading = true): ProviderAuth
   claude: initialStatus(loading),
   cursor: initialStatus(loading),
   codex: initialStatus(loading),
-  gemini: initialStatus(loading),
   antigravity: initialStatus(loading),
   opencode: initialStatus(loading),
   // Hosted vendors (kimi/deepseek/glm) and Hermes are real probed providers

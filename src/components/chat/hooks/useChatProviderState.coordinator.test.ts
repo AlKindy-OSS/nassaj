@@ -25,10 +25,6 @@ describe('getPermissionModesForProvider — no coordinator mode', () => {
     expect(getPermissionModesForProvider('claude')).not.toContain('coordinator');
   });
 
-  it('coordinator is absent from gemini', () => {
-    expect(getPermissionModesForProvider('gemini')).not.toContain('coordinator');
-  });
-
   it('coordinator is absent from cursor', () => {
     expect(getPermissionModesForProvider('cursor')).not.toContain('coordinator');
   });

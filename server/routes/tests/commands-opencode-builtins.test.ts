@@ -98,7 +98,7 @@ test('codex: exposes only implemented web commands and native compact', () => {
 
 test('other non-Claude harnesses receive portable commands only', () => {
   assert.deepEqual(
-    builtInsForProvider('gemini').map((command) => command.name),
+    builtInsForProvider('cursor').map((command) => command.name),
     UNIVERSAL,
   );
 });

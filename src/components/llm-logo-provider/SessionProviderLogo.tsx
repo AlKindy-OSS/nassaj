@@ -1,3 +1,4 @@
+import { isRetiredProvider } from '../../../shared/retiredProviders';
 import type { LLMProvider } from '../../types/app';
 import { VENDOR_PROVIDERS, type VendorProvider } from '../provider-auth/vendorProviders';
 import BrandImageLogo, { hasBrandImage } from './BrandImageLogo';
@@ -5,7 +6,6 @@ import ClaudeLogo from './ClaudeLogo';
 import CodexLogo from './CodexLogo';
 import CursorLogo from './CursorLogo';
 import DeepSeekLogo from './DeepSeekLogo';
-import GeminiLogo from './GeminiLogo';
 import OpenCodeLogo from './OpenCodeLogo';
 import QwenLogo from './QwenLogo';
 import VendorLogo from './VendorLogo';
@@ -45,20 +45,25 @@ const makeInitialLogo = (fill: string, initials: string) =>
 // sakana is the last placeholder, and is not shown in settings.
 const SakanaLogo = makeInitialLogo('#14B8A6', 'S');
 
+// A historical row may name a provider whose runtime was deleted (T-1853). It
+// must not fall through to Claude's mark and misattribute the run; a neutral
+// grey tile marks it as retired instead.
+const RetiredProviderLogo = makeInitialLogo('#6B7280', '?');
+
 export default function SessionProviderLogo({
   provider = 'claude',
   className = 'w-5 h-5',
 }: SessionProviderLogoProps) {
+  if (isRetiredProvider(provider)) {
+    return <RetiredProviderLogo className={className} />;
+  }
+
   if (provider === 'cursor') {
     return <CursorLogo className={className} />;
   }
 
   if (provider === 'codex') {
     return <CodexLogo className={className} />;
-  }
-
-  if (provider === 'gemini') {
-    return <GeminiLogo className={className} />;
   }
 
   if (provider === 'opencode') {

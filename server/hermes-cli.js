@@ -234,6 +234,10 @@ async function spawnHermes(command, options = {}, ws) {
     return;
   }
 
+  // T-1854 (qa H1b): last await is above; from here to spawn + registration
+  // everything is synchronous, so a revoked run fence never spawns.
+  if (ws?.runFenceRevoked) return;
+
   return new Promise((resolve, reject) => {
     const { sessionId, projectPath, cwd, model, sessionSummary } = options;
     const workingDir = cwd || projectPath || process.cwd();
@@ -433,6 +437,12 @@ async function spawnHermes(command, options = {}, ws) {
       // receives below — the member's isolated tree, not the operator's.
       readHermesRuntimeConfig(hermesEnv.HOME),
     ]).then(([resolvedModel, hermesConfig]) => {
+      // T-1854 (qa H1b): the model/config reads above are real I/O, so a
+      // revocation can land here; from this point to spawn nothing awaits.
+      if (ws?.runFenceRevoked) {
+        resolve();
+        return;
+      }
       // Security: the prompt is a standalone argv entry, never string-concatenated.
       // `hermes -z` runs headless (loads OAuth, bypasses permissions); there is no
       // resume/conversation flag, so prior context is not replayed in this phase.

@@ -1,4 +1,4 @@
-import fsSync, { promises as fs } from 'node:fs';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -17,7 +17,7 @@ import {
 } from '@/modules/database/index.js';
 
 type AnyRecord = Record<string, any>;
-type SearchableProvider = 'claude' | 'codex' | 'gemini';
+type SearchableProvider = 'claude' | 'codex';
 
 type SearchSnippetHighlight = {
   start: number;
@@ -97,7 +97,7 @@ type ProjectBucket = {
   sessions: SearchableSessionRow[];
 };
 
-const SUPPORTED_PROVIDERS = new Set<SearchableProvider>(['claude', 'codex', 'gemini']);
+const SUPPORTED_PROVIDERS = new Set<SearchableProvider>(['claude', 'codex']);
 const MAX_MATCHES_PER_SESSION = 2;
 const RIPGREP_FILE_CHUNK_SIZE = 40;
 const RIPGREP_CHUNK_CONCURRENCY = 6;
@@ -467,21 +467,6 @@ function extractCodexText(content: unknown): string {
       return '';
     })
     .filter(Boolean)
-    .join(' ');
-}
-
-function extractGeminiText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  return content
-    .filter((part: AnyRecord) => typeof part?.text === 'string')
-    .map((part: AnyRecord) => String(part.text))
     .join(' ');
 }
 
@@ -1164,81 +1149,6 @@ async function parseCodexSessionMatches(
   };
 }
 
-async function parseGeminiSessionMatches(
-  session: SearchableSessionRow,
-  runtime: SearchRuntime,
-): Promise<SessionConversationResult | null> {
-  let data: string;
-  try {
-    data = await fs.readFile(session.jsonl_path, 'utf8');
-  } catch {
-    return null;
-  }
-
-  let parsed: AnyRecord;
-  try {
-    parsed = JSON.parse(data) as AnyRecord;
-  } catch {
-    return null;
-  }
-
-  const sourceMessages = Array.isArray(parsed.messages) ? parsed.messages as AnyRecord[] : [];
-  if (sourceMessages.length === 0) {
-    return null;
-  }
-
-  const matches: SessionConversationMatch[] = [];
-  let firstUserText: string | null = null;
-
-  for (const msg of sourceMessages) {
-    if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
-      break;
-    }
-
-    const role = msg.type === 'user'
-      ? 'user'
-      : (msg.type === 'gemini' || msg.type === 'assistant')
-        ? 'assistant'
-        : null;
-    if (!role) {
-      continue;
-    }
-
-    const text = extractGeminiText(msg.content);
-    if (!text) {
-      continue;
-    }
-
-    if (role === 'user' && !firstUserText) {
-      firstUserText = text;
-    }
-
-    if (!runtime.matchesQuery(text)) {
-      continue;
-    }
-
-    const { snippet, highlights } = runtime.buildSnippet(text);
-    addSessionMatch(runtime, matches, {
-      role,
-      snippet,
-      highlights,
-      timestamp: msg.timestamp ? String(msg.timestamp) : null,
-      provider: 'gemini',
-    });
-  }
-
-  if (matches.length === 0) {
-    return null;
-  }
-
-  return {
-    sessionId: session.session_id,
-    provider: 'gemini',
-    sessionSummary: toSummaryText(session.custom_name, firstUserText, 'Gemini Session'),
-    matches,
-  };
-}
-
 async function parseSessionMatches(
   session: SearchableSessionRow,
   runtime: SearchRuntime,
@@ -1246,10 +1156,7 @@ async function parseSessionMatches(
   if (session.provider === 'claude') {
     return parseClaudeSessionMatches(session, runtime);
   }
-  if (session.provider === 'codex') {
-    return parseCodexSessionMatches(session, runtime);
-  }
-  return parseGeminiSessionMatches(session, runtime);
+  return parseCodexSessionMatches(session, runtime);
 }
 
 export async function searchConversations(

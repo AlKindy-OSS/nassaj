@@ -1170,7 +1170,7 @@ if [ -z "$MANAGED_OPERATION_ID" ] && command -v pm2 >/dev/null 2>&1; then
       # Conservative zero-live proof: recovery has no trustworthy server PID,
       # so ANY provider CLI owned by this uid blocks rather than guessing.
       if node -e '
-        const fs=require("fs"); const names=/(^|\/)(claude|codex|agy|opencode|hermes|kimi|deepseek|glm|qwen|gemini|antigravity|cursor)(\s|$)/i;
+        const fs=require("fs"); const names=/(^|\/)(claude|codex|agy|opencode|hermes|kimi|deepseek|glm|qwen|antigravity|cursor)(\s|$)/i;
         for(const d of fs.readdirSync("/proc")){if(!/^\d+$/.test(d)||Number(d)===process.pid)continue;try{const s=fs.statSync(`/proc/${d}`);if(s.uid!==process.getuid())continue;const c=fs.readFileSync(`/proc/${d}/cmdline`).toString().replace(/\0/g," ");if(names.test(c))process.exit(1)}catch{}}
       '; then :; else
         emit WARN "rollback recovery deferred: provider process exists and no safe ancestry proof is available."

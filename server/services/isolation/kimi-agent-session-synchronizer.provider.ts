@@ -42,7 +42,7 @@ import { resolveKimiHomes } from './kimi-agent-home.js';
  *
  * FIELD-CONFIRMED AT G-KIMI-LIVE (§4.5): kimi is NOT installed on this node, so
  * (a) the MAIN agent folder's exact name and (b) the wire.jsonl meta field
- * spellings (cwd / title) are taken from KG-1 research + the codex/gemini
+ * spellings (cwd / title) are taken from KG-1 research + the codex
  * precedent. Both are read DEFENSIVELY here and are single-point corrections when
  * the live tree is captured — the row-key (`<id>`) and the fold semantics do not
  * change. MAIN_AGENT_ID is additionally overridable via the KIMI_MAIN_AGENT_ID

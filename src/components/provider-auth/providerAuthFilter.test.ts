@@ -72,10 +72,10 @@ describe('provider visibility (installed field)', () => {
   });
 
   it('(باگ مُصلَح) installed===false + error مملوء + checkFailed===false → يُخفى (error وحده لا يمنع الإخفاء)', () => {
-    // Backend fills error="Gemini CLI is not installed" on a successful 200 response.
+    // Backend fills error="Cursor CLI is not installed" on a successful 200 response.
     // The old code used error==null as fail-open guard → provider was always shown.
     // The fix: only checkFailed (HTTP/network failure) triggers fail-open.
-    const status = makeStatus({ installed: false, error: 'Gemini CLI is not installed', checkFailed: false });
+    const status = makeStatus({ installed: false, error: 'Cursor CLI is not installed', checkFailed: false });
     expect(isProviderVisible(status)).toBe(false);
   });
 
@@ -134,7 +134,7 @@ describe('provider reset logic (sanitize stored provider)', () => {
 describe('initial provider map (fail-open defaults)', () => {
   it('(و) createInitialProviderAuthStatusMap sets installed=true and checkFailed=false by default', () => {
     const map = createInitialProviderAuthStatusMap(true);
-    const providers = ['claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
     for (const p of providers) {
       expect(map[p].installed).toBe(true);
       expect(map[p].loading).toBe(true);
@@ -144,7 +144,7 @@ describe('initial provider map (fail-open defaults)', () => {
 
   it('(و) no provider is hidden during initial loading (fail-open)', () => {
     const map = createInitialProviderAuthStatusMap(true);
-    const providers = ['claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
     for (const p of providers) {
       expect(isProviderVisible(map[p])).toBe(true);
     }
@@ -152,7 +152,7 @@ describe('initial provider map (fail-open defaults)', () => {
 
   it('(و) no provider is disabled during initial loading (fail-open)', () => {
     const map = createInitialProviderAuthStatusMap(true);
-    const providers = ['claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
     for (const p of providers) {
       expect(isProviderDisabled(map[p])).toBe(false);
     }
@@ -177,14 +177,14 @@ describe('toProviderAuthStatus payload parsing (installed field)', () => {
 
   it('استجابة ناجحة (200) بـerror مملوء → checkFailed=false (الحالة محسومة، ليست فشل طلب)', () => {
     // Simulate what toProviderAuthStatus produces for a 200 with error payload
-    // (e.g. gemini: installed=false, error="Gemini CLI is not installed")
+    // (e.g. cursor: installed=false, error="Cursor CLI is not installed")
     // checkFailed must be false — this is a confirmed state, not a request failure.
     const simulatedStatus = {
       authenticated: false,
       installed: false,
       email: null,
       method: null,
-      error: 'Gemini CLI is not installed',
+      error: 'Cursor CLI is not installed',
       loading: false,
       checkFailed: false, // ← key: 200 response always sets this to false
     };
@@ -198,7 +198,7 @@ describe('toProviderAuthStatus payload parsing (installed field)', () => {
  * resolveFallbackProvider — the composer's auto-reset target.
  *
  * The order under test is the REAL capability-descriptor key order the chat
- * surface passes (claude, codex, opencode, gemini, …, deepseek, glm, sakana),
+ * surface passes (claude, codex, opencode, …, deepseek, glm, sakana),
  * so these assertions fail if a future reordering re-exposes a disabled id.
  */
 describe('resolveFallbackProvider — auto-reset never lands on a dead end', () => {
@@ -225,9 +225,7 @@ describe('resolveFallbackProvider — auto-reset never lands on a dead end', () 
     // refused by the dispatch seam, i.e. a chat that can never send.
     //
     // T-1211: the set is DERIVED from the source of truth rather than written
-    // out here. The hand-written list said gemini/deepseek/glm and went stale
-    // the moment gemini was re-enabled, failing a test whose actual guarantee
-    // ("never land on a disabled provider") still held perfectly.
+    // out here, so a policy change cannot leave a stale hand-written list.
     for (const disabled of DISABLED_PROVIDERS as readonly LLMProvider[]) {
       expect(
         resolveFallbackProvider(REAL_ORDER, statusWithInstalled(disabled)),
@@ -237,7 +235,7 @@ describe('resolveFallbackProvider — auto-reset never lands on a dead end', () 
   });
 
   it('lands on each selectable provider when it alone is installed', () => {
-    // T-1760 disabled Gemini again; derive eligible cases from the current policy.
+    // Derive eligible cases from the current policy.
     for (const provider of REAL_ORDER.filter((candidate) =>
       !(DISABLED_PROVIDERS as readonly LLMProvider[]).includes(candidate))) {
       expect(resolveFallbackProvider(REAL_ORDER, statusWithInstalled(provider))).toBe(provider);

@@ -357,9 +357,9 @@ test('اختيار المالك يعلو على المكتشَف ولا يُنق
 test('المشتقّ يصل موسوماً derived — لا يُقدَّم كأنه حقيقة', async () => {
   await withIsolatedDatabase(async () => {
     const entries = await subscriptionConfigService.list(2, {
-      probeAuth: probeFor({ gemini: 'credentials_file' }),
+      probeAuth: probeFor({ antigravity: 'credentials_file' }),
       discoverAnchor: discoveryFor({
-        gemini: {
+        antigravity: {
           anchorDay: 17,
           source: 'derived',
           evidence: 'oldest-recorded-usage',

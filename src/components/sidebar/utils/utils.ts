@@ -167,7 +167,6 @@ export const createSessionViewModel = (
   return {
     isCursorSession: session.__provider === 'cursor',
     isCodexSession: session.__provider === 'codex',
-    isGeminiSession: session.__provider === 'gemini',
     isOpenCodeSession: session.__provider === 'opencode',
     // `Boolean(...)` like the star above, not `=== true`: the flag is absent on
     // legacy rows, and SQLite hands booleans back as 0/1 — a 1 that read as

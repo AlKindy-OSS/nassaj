@@ -373,13 +373,13 @@ test('provider model cache is persisted across service instances', async () => {
       cachePath,
       resolveProvider: () => ({
         models: {
-          getSupportedModels: async () => createModels('gemini-cached'),
-          getCurrentActiveModel: async () => createCurrentActiveModel('gemini-active'),
-          changeActiveModel: async (input) => createSessionActiveModelChange('gemini', input),
+          getSupportedModels: async () => createModels('hermes-cached'),
+          getCurrentActiveModel: async () => createCurrentActiveModel('hermes-active'),
+          changeActiveModel: async (input) => createSessionActiveModelChange('hermes', input),
         },
       }),
     });
-    await writer.getProviderModels('gemini');
+    await writer.getProviderModels('hermes');
 
     const reader = createProviderModelsService({
       cachePath,
@@ -388,13 +388,13 @@ test('provider model cache is persisted across service instances', async () => {
           getSupportedModels: async () => {
             throw new Error('loader should not be called for persisted cache hits');
           },
-          getCurrentActiveModel: async () => createCurrentActiveModel('gemini-active'),
-          changeActiveModel: async (input) => createSessionActiveModelChange('gemini', input),
+          getCurrentActiveModel: async () => createCurrentActiveModel('hermes-active'),
+          changeActiveModel: async (input) => createSessionActiveModelChange('hermes', input),
         },
       }),
     });
-    const models = await reader.getProviderModels('gemini');
-    assert.equal(models.models.DEFAULT, 'gemini-cached');
+    const models = await reader.getProviderModels('hermes');
+    assert.equal(models.models.DEFAULT, 'hermes-cached');
     assert.equal(models.cache.source, 'disk');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
@@ -727,7 +727,7 @@ test('getProviderModels with no userId uses the shared bare-provider cache key (
 const memorylessAdapter = (provider: LLMProvider) => ({
   models: {
     getSupportedModels: async () => createModels(`${provider}-models`),
-    // A memoryless provider (gemini/codex/hermes/vendors) has no per-session
+    // A memoryless provider (codex/hermes/vendors) has no per-session
     // model of its own, so getCurrentActiveModel only ever returns the catalog
     // default — NOT the model a given session was created with.
     getCurrentActiveModel: async () => createCurrentActiveModel(`${provider}-default`),
@@ -747,17 +747,17 @@ test('seedSessionModel pins a new session so resume returns the creation model, 
       resolveProvider: memorylessAdapter,
     });
 
-    // Session created on 'gemini-2.5-pro'; seed pins it in the change store.
-    await service.seedSessionModel('gemini', 'sess-seed-1', 'gemini-2.5-pro');
+    // Session created on 'hermes-4-405b'; seed pins it in the change store.
+    await service.seedSessionModel('hermes', 'sess-seed-1', 'hermes-4-405b');
 
-    const changed = await service.getChangedActiveModel('gemini', 'sess-seed-1');
+    const changed = await service.getChangedActiveModel('hermes', 'sess-seed-1');
     assert.equal(changed.changed, true, 'the seed is recorded as a pinned change');
-    assert.equal(changed.model, 'gemini-2.5-pro');
+    assert.equal(changed.model, 'hermes-4-405b');
 
     // On resume the frontend re-sends its (possibly changed) GLOBAL model; the
     // seeded creation model must win over both the global and the catalog default.
-    const resumed = await service.resolveResumeModel('gemini', 'sess-seed-1', 'leaked-global');
-    assert.equal(resumed, 'gemini-2.5-pro');
+    const resumed = await service.resolveResumeModel('hermes', 'sess-seed-1', 'leaked-global');
+    assert.equal(resumed, 'hermes-4-405b');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

@@ -752,8 +752,7 @@
         "irukhaimi": "Al-Rukhaimi",
         "cursor": "Cursor",
         "codex": "Codex",
-        "gemini": "Gemini",
-        "custom": "Custom"
+          "custom": "Custom"
       },
       "custom": {
         "title": "Custom colors",
@@ -1079,9 +1078,6 @@
       "codex": {
         "description": "OpenAI Codex AI assistant"
       },
-      "gemini": {
-        "description": "Google Gemini AI assistant"
-      },
       "antigravity": {
         "description": "Google AI Pro via the agy CLI"
       },
@@ -1387,8 +1383,7 @@
       "claude": "Model Context Protocol servers provide additional tools and data sources to Claude",
       "cursor": "Model Context Protocol servers provide additional tools and data sources to Cursor",
       "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
-      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode",
-      "gemini": "Model Context Protocol servers provide additional tools and data sources to Gemini"
+      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode"
     },
     "addButton": "Add MCP Server",
     "empty": "No MCP servers configured",
@@ -1780,7 +1775,6 @@
       "kimi": "Kimi Code CLI Login",
       "hermes": "Hermes Agent",
       "antigravity": "Antigravity (agy) Configuration",
-      "gemini": "Gemini CLI Configuration",
       "qwen": "Connect Qwen",
       "generic": "{{provider}} CLI Configuration"
     },
@@ -1841,26 +1835,11 @@
       "error": "The credential could not be saved. Check the plan, region, and key, then try again.",
       "successTitle": "Qwen is connected",
       "successDescription": "The encrypted credential will be used on the next Qwen message."
-    },
-    "gemini": {
-      "title": "Setup Gemini API Access",
-      "description": "The Gemini CLI requires an API key to function. Configure it in your terminal first.",
-      "step1": "Get your API key",
-      "step2": "Run configuration",
-      "step2Hint": "Open your terminal and run:",
-      "done": "Done"
     }
   },
   "actionRequired": "Action required",
   "error": "Error",
   "stop": "Stop",
-  "gemini": {
-    "modesShort": {
-      "default": "Ask",
-      "autoEdit": "Auto-edit",
-      "yolo": "YOLO"
-    }
-  },
   "tmpfsCap": {
     "title": "Shared memory cap (/tmp)",
     "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
@@ -2218,7 +2197,6 @@
       "placeholder": "Add a member…",
       "noMembers": "No other members yet",
       "noMatch": "No matching member",
-      "pairedNote": "Gemini and Antigravity are one login; sharing either shares both.",
       "declined": "on their own",
       "remove": "Stop sharing with {{member}}"
     },

@@ -208,8 +208,6 @@ function ChatInterface({
     setClaudeModel,
     codexModel,
     setCodexModel,
-    geminiModel,
-    setGeminiModel,
     antigravityModel,
     setAntigravityModel,
     opencodeModel,
@@ -258,7 +256,7 @@ function ChatInterface({
     // so a user on one of those could be silently bounced to an unauthenticated
     // 'claude' the moment its auth status resolved to installed===false.
     // resolveFallbackProvider drops the globally disabled ids from that order
-    // (gemini/deepseek/glm): they are absent from the picker and refused at the
+    // (deepseek/glm): they are absent from the picker and refused at the
     // dispatch seam, so landing on one is a dead end, not a fallback.
     const fallback = resolveFallbackProvider(
       Object.keys(PROVIDER_UI_CAPABILITIES) as LLMProvider[],
@@ -284,7 +282,6 @@ function ChatInterface({
     const dp = displayProvider;
     if (dp === 'cursor') return cursorModel;
     if (dp === 'codex') return codexModel;
-    if (dp === 'gemini') return geminiModel;
     if (dp === 'antigravity') return antigravityModel;
     if (dp === 'opencode') return opencodeModel;
     if (dp === 'hermes') return hermesModel;
@@ -293,7 +290,7 @@ function ChatInterface({
     if (dp === 'glm') return glmModel;
     if (dp === 'qwen') return qwenModel;
     return claudeModel;
-  }, [displayProvider, claudeModel, cursorModel, codexModel, geminiModel,
+  }, [displayProvider, claudeModel, cursorModel, codexModel,
       antigravityModel, opencodeModel, hermesModel, kimiModel, deepseekModel, glmModel, qwenModel]);
 
   const {
@@ -663,7 +660,6 @@ function ChatInterface({
     cursorModel,
     claudeModel,
     codexModel,
-    geminiModel,
     antigravityModel,
     opencodeModel,
     hermesModel,
@@ -1158,8 +1154,6 @@ function ChatInterface({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
           antigravityModel={antigravityModel}
           setAntigravityModel={setAntigravityModel}
           opencodeModel={opencodeModel}
@@ -1213,6 +1207,12 @@ function ChatInterface({
           contextTokens={idleContextTokens}
           idleThresholdMs={idleThresholdMs}
           onNewSession={onNewSession}
+          isUserScrolledUp={isUserScrolledUp}
+          hasMessages={chatMessages.length > 0}
+          showResync={showResync}
+          isResyncing={isRefreshing || (Boolean(historyError) && isLoadingSessionMessages)}
+          retryUntil={historyError?.retryAt ?? null}
+          onScrollToBottom={handleScrollToBottomWithResync}
         />
 
         <ChatComposer
@@ -1245,12 +1245,6 @@ function ChatInterface({
           onToggleCommandMenu={handleToggleCommandMenu}
           hasInput={Boolean(input.trim())}
           onClearInput={handleClearInput}
-          isUserScrolledUp={isUserScrolledUp}
-          hasMessages={chatMessages.length > 0}
-          showResync={showResync}
-          isResyncing={isRefreshing || (Boolean(historyError) && isLoadingSessionMessages)}
-          retryUntil={historyError?.retryAt ?? null}
-          onScrollToBottom={handleScrollToBottomWithResync}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
           attachedImages={attachedImages}

@@ -27,7 +27,6 @@ import { getProviderCapabilities, PROVIDER_UI_CAPABILITIES } from './providerCap
 // subscription-config.service.ts) — ما عدا claude الذي له سطحه الخاص.
 const SERVER_SUBSCRIPTION_PROVIDERS_MINUS_CLAUDE = [
   'codex',
-  'gemini',
   'cursor',
   'antigravity',
   'opencode',
@@ -52,7 +51,6 @@ describe('quota.surface', () => {
       codex: 'provider-windows',
       opencode: 'cycle',
       qwen: 'cycle',
-      gemini: 'cycle',
       antigravity: 'cycle',
       cursor: 'cycle',
       hermes: 'cycle',

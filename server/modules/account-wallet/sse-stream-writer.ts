@@ -1,3 +1,5 @@
+import { stampWriterEpoch } from '@/shared/user-revocation-epoch.js';
+
 import { DeviceBoundSseStream, type DeviceSseResponse } from './device-bound-sse-stream.js';
 
 /** Production SSE transport with device-generation fencing on every emission. */
@@ -13,6 +15,8 @@ export class SSEStreamWriter {
     private readonly accessFence: (() => 'identity_changed' | 'project_access_changed' | null) | null = null,
   ) {
     this.stream = new DeviceBoundSseStream(res, authenticatedUser);
+    // B-1327: runs of this stream stay revocable before they register.
+    stampWriterEpoch(this);
   }
 
   /** Ends a stale device stream and emits the normative revocation event. */

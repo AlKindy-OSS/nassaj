@@ -38,7 +38,7 @@
  * user+pid namespace, while the child still boots normally (whole FS read-only).
  *
  * Scope: caging is opt-in behind NASSAJ_PROVIDER_CAGE=true and applies to the
- * local-CLI providers (claude/gemini/agy/opencode/cursor/hermes/qwen). Two exemption
+ * local-CLI providers (claude/agy/opencode/cursor/hermes/qwen). Two exemption
  * classes never get wrapped — see CAGE_EXEMPT_PROVIDERS.
  *
  * Per-mode caging (SL-6 / ADR-062, 2026-07-22): kimi and glm live in
@@ -52,7 +52,7 @@
  * hazard). See cageEnabled + CAGEABLE_AGENT_PROVIDERS. An omitted/`'chat'` mode is
  * byte-identical to the pre-SL-6 behaviour (kimi/glm/deepseek exempt).
  *
- * @typedef {'claude'|'gemini'|'codex'|'agy'|'cursor'|'opencode'|'hermes'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
+ * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'hermes'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
  * @typedef {'chat'|'agent'|''|undefined|null} ProviderMode
  */
 

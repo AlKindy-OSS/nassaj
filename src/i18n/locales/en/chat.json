@@ -187,7 +187,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -326,24 +325,6 @@
       "default": "sandbox: workspace-write · approvals: untrusted · network: OFF",
       "acceptEdits": "sandbox: workspace-write · approvals: never · network: OFF",
       "bypassPermissions": "sandbox: workspace-write · approvals: never · network: OFF — same as Accept Edits. Full disk/network access only if the operator enabled it for this deployment (off by default)."
-    }
-  },
-  "gemini": {
-    "permissionMode": "Gemini Permission Mode",
-    "description": "Control how Gemini CLI handles operation approvals.",
-    "modes": {
-      "default": {
-        "title": "Standard (Ask for Approval)",
-        "description": "Gemini will prompt for approval before executing commands, writing files, and fetching web resources."
-      },
-      "autoEdit": {
-        "title": "Auto Edit (Skip File Approvals)",
-        "description": "Gemini will automatically approve file edits and web fetches, but will still prompt for shell commands."
-      },
-      "yolo": {
-        "title": "YOLO (Bypass All Permissions)",
-        "description": "Gemini will execute all operations without asking for approval. Exercise caution."
-      }
     }
   },
   "input": {
@@ -559,7 +540,6 @@
       "claude": "Ready to use Claude with {{model}}. Start typing your message below.",
       "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
-      "gemini": "Ready to use Gemini with {{model}}. Start typing your message below.",
       "antigravity": "Ready to use Antigravity (agy) with {{model}}. Start typing your message below.",
       "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
       "default": "Select a provider above to begin",
@@ -952,14 +932,6 @@
     "subagentModelCalls": "Subagent model calls: {{count}}",
     "responseTurnDurationLabel": "Response time",
     "totalWorkDuration": "Total work time (durations may overlap): {{duration}}"
-  },
-  "activityGap": {
-    "status": "Agent is working — last activity {{time}} ago",
-    "ariaLabel": "Agent is still working, last activity {{time}} ago"
-  },
-  "activityGap": {
-    "status": "Agent is working — last activity {{time}} ago",
-    "ariaLabel": "Agent is still working, last activity {{time}} ago"
   },
   "closeConversation": {
     "close": "Close conversation",

@@ -5,7 +5,7 @@ import type { LLMProvider } from '../../types/app';
 /**
  * Hosted vendor providers (ADR-036): Kimi (Moonshot), DeepSeek, GLM (Zhipu/Z.ai).
  *
- * Unlike the CLI providers (claude/cursor/codex/gemini/antigravity/opencode),
+ * Unlike the CLI providers (claude/cursor/codex/antigravity/opencode),
  * these are authenticated purely by an API key stored in the encrypted per-user
  * secrets store. They have no CLI `login` flow — the UI collects/clears the key
  * via `/api/providers/:provider/api-key` and reflects connection state through

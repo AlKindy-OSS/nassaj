@@ -276,38 +276,38 @@ test('a member write never reaches ANOTHER member\'s file on disk', async () => 
   assert.equal(victimConfig.mcpServers?.['not-yours'], undefined, 'no cross-member write');
 });
 
-test('Gemini pseudo MCP remains blocked even when its sharing policy is isolated', async () => {
-  setProviderSharingConfig({ claude: 'isolated', gemini: 'isolated', opencode: 'shared' });
+test('the deleted Gemini provider is refused (400) and never writes ~/.gemini/settings.json', async () => {
+  setProviderSharingConfig({ claude: 'isolated', opencode: 'shared' });
   const response = await call('POST', '/api/providers/gemini/mcp/servers', memberUser, {
     name: 'gem-own',
     transport: 'stdio',
     command: 'example-mcp',
     scope: 'user',
   });
-  assert.equal(response.status, 403);
+  assert.equal(response.status, 400);
   assert.equal(
     (response.json.error as { code?: string } | undefined)?.code,
-    'GEMINI_GENERIC_MCP_DISABLED',
+    'UNSUPPORTED_PROVIDER',
   );
   const listResponse = await call(
     'GET', '/api/providers/gemini/mcp/servers?scope=user', memberUser,
   );
-  assert.equal(listResponse.status, 403);
+  assert.equal(listResponse.status, 400);
   assert.equal(
     (listResponse.json.error as { code?: string } | undefined)?.code,
-    'GEMINI_GENERIC_MCP_DISABLED',
+    'UNSUPPORTED_PROVIDER',
   );
   const inventoryResponse = await call(
     'GET', '/api/providers/gemini/mcp/servers/inventory', adminUser,
   );
-  assert.equal(inventoryResponse.status, 403);
+  assert.equal(inventoryResponse.status, 400);
   assert.equal(
     (inventoryResponse.json.error as { code?: string } | undefined)?.code,
-    'GEMINI_GENERIC_MCP_DISABLED',
+    'UNSUPPORTED_PROVIDER',
   );
 
   const settings = path.join(sandboxHome, '.nassaj-users', String(memberUser.id), '.gemini', 'settings.json');
-  assert.equal(fs.existsSync(settings), false, 'the blocked generic API must not create pseudo Gemini config');
+  assert.equal(fs.existsSync(settings), false, 'the refused API must not create legacy Gemini config');
   assert.equal(
     fs.existsSync(path.join(sandboxHome, '.gemini', 'settings.json')),
     false,

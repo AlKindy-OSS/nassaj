@@ -6,7 +6,7 @@
  * liveness probe are all fed from ONE place: `registerSessionProcess` in
  * session-process-monitor.js. Until this module, the only caller in the whole
  * server was `server/claude-sdk.js` — so the badge was a Claude-only feature and
- * a Codex/Gemini/Cursor/OpenCode/… run that was demonstrably mid-turn (STOP
+ * a Codex/Cursor/OpenCode/… run that was demonstrably mid-turn (STOP
  * button on screen, tokens streaming) showed no badge at all, and its header
  * read "Unknown liveness" because no pid ever reached the liveness registry.
  *
@@ -53,7 +53,7 @@ import { beginHarnessLaunch } from '../modules/providers/harness-update/spawn-ad
  * of a run whose id only arrives with the first stream event.
  *
  * @param {Object} details
- * @param {string} details.provider - Provider name ('codex', 'gemini', …).
+ * @param {string} details.provider - Provider name ('codex', 'cursor', …).
  * @param {Object|null} details.writer - WebSocketWriter for the run (the `ws`
  *   the provider already streams through). Supplies the JWT-sourced userId.
  * @param {string|null} [details.sessionId] - Best-known session id at spawn time.

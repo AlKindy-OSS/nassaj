@@ -10,7 +10,6 @@
  *   - claude:      `server/modules/providers/list/claude/claude-models.provider.ts`
  *   - cursor:      `server/modules/providers/list/cursor/cursor-models.provider.ts`
  *   - codex:       `server/modules/providers/list/codex/codex-models.provider.ts`
- *   - gemini:      `server/modules/providers/list/gemini/gemini-models.provider.ts`
  *   - antigravity: `server/modules/providers/list/antigravity/antigravity-models.provider.ts`
  *   - opencode:    `server/modules/providers/list/opencode/opencode-models.provider.ts`
  * (NOT `public/modelConstants.js`, which is static documentation and is never
@@ -647,21 +646,6 @@ export const CODEX_FALLBACK_MODELS: ProviderModelsDefinition = {
   DEFAULT: 'gpt-5.4',
 };
 
-export const GEMINI_FALLBACK_MODELS: ProviderModelsDefinition = {
-  OPTIONS: [
-    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
-    { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
-    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-    { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
-    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-    { value: 'gemini-2.0-pro-exp', label: 'Gemini 2.0 Pro Experimental' },
-    { value: 'gemini-2.0-flash-thinking-exp', label: 'Gemini 2.0 Flash Thinking' },
-  ],
-  DEFAULT: 'gemini-3.1-pro-preview',
-};
-
 export const ANTIGRAVITY_FALLBACK_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
     // Snapshot of `agy models` (agy 1.1.9, 2026-08-01) — keep in sync with
@@ -796,7 +780,6 @@ export const PROVIDER_FALLBACK_MODELS: Record<LLMProvider, ProviderModelsDefinit
   claude: CLAUDE_FALLBACK_MODELS,
   cursor: CURSOR_FALLBACK_MODELS,
   codex: CODEX_FALLBACK_MODELS,
-  gemini: GEMINI_FALLBACK_MODELS,
   antigravity: ANTIGRAVITY_FALLBACK_MODELS,
   opencode: OPENCODE_FALLBACK_MODELS,
   qwen: QWEN_FALLBACK_MODELS,
@@ -816,7 +799,6 @@ export const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   claude: CLAUDE_FALLBACK_MODELS.DEFAULT,
   cursor: CURSOR_FALLBACK_MODELS.DEFAULT,
   codex: CODEX_FALLBACK_MODELS.DEFAULT,
-  gemini: GEMINI_FALLBACK_MODELS.DEFAULT,
   antigravity: ANTIGRAVITY_FALLBACK_MODELS.DEFAULT,
   opencode: OPENCODE_FALLBACK_MODELS.DEFAULT,
   qwen: QWEN_FALLBACK_MODELS.DEFAULT,

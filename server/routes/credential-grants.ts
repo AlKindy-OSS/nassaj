@@ -19,7 +19,7 @@ import express, { type Request, type Response } from 'express';
 import { createRateLimiter } from '@/middleware/rate-limit.js';
 import { auditLogDb, credentialGrantsDb, getConnection, userDb } from '@/modules/database/index.js';
 import {
-  GRANTABLE_PROVIDERS,
+  isGrantableKey,
   GRANTABLE_UNITS,
   credentialUnit,
   resolveCredentialPrincipal,
@@ -51,7 +51,7 @@ const readCallerId = (req: Request): number => {
 
 const parseProvider = (value: unknown): string => {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (!GRANTABLE_PROVIDERS.includes(normalized)) {
+  if (!isGrantableKey(normalized)) {
     throw new AppError('This provider cannot be delegated.', {
       code: 'CREDENTIAL_GRANT_PROVIDER_UNKNOWN',
       statusCode: 400,

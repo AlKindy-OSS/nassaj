@@ -16,7 +16,6 @@ export const BILLING_LINKS: Record<AgentProvider, string> = {
   claude:      'https://claude.ai/settings/billing',
   cursor:      'https://cursor.com/settings/billing',
   codex:       'https://chatgpt.com/settings',
-  gemini:      'https://gemini.google.com/app/subscriptions',
   antigravity: 'https://one.google.com/about/google-ai-plans/',
   opencode:    'https://opencode.ai/zen',
   kimi:        'https://www.kimi.com/membership',

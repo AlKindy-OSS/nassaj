@@ -21,7 +21,6 @@ const HARNESS_DISPLAY_NAME: Readonly<Record<string, string>> = Object.freeze({
   codex: 'Codex',
   opencode: 'OpenCode',
   cursor: 'Cursor',
-  gemini: 'Gemini CLI',
   antigravity: 'Antigravity',
   kimi: 'Kimi CLI',
   hermes: 'Hermes',

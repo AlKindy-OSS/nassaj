@@ -116,7 +116,6 @@ describe('synced key registry', () => {
       'claude-settings',
       'cursor-tools-settings',
       'codex-settings',
-      'gemini-settings',
       'selected-provider',
       'claude-model',
       'antigravity-model',

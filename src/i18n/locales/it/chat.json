@@ -102,7 +102,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -223,24 +222,6 @@
       "default": "sandbox: workspace-write · approvazioni: untrusted · rete: OFF",
       "acceptEdits": "sandbox: workspace-write · approvazioni: never · rete: OFF",
       "bypassPermissions": "sandbox: workspace-write · approvazioni: never · rete: OFF — identico ad \"Accetta modifiche\". L’accesso completo a disco e rete è possibile solo se l’operatore lo ha abilitato per questa installazione (disattivato per impostazione predefinita)."
-    }
-  },
-  "gemini": {
-    "permissionMode": "Modalità permessi Gemini",
-    "description": "Controlla come Gemini CLI gestisce le approvazioni delle operazioni.",
-    "modes": {
-      "default": {
-        "title": "Standard (chiedi approvazione)",
-        "description": "Gemini chiederà l'approvazione prima di eseguire comandi, scrivere file e recuperare risorse web."
-      },
-      "autoEdit": {
-        "title": "Modifica automatica (salta approvazioni file)",
-        "description": "Gemini approverà automaticamente modifiche ai file e recupero web, ma chiederà conferma per i comandi shell."
-      },
-      "yolo": {
-        "title": "YOLO (ignora tutti i permessi)",
-        "description": "Gemini eseguirà tutte le operazioni senza chiedere approvazione. Usa con cautela."
-      }
     }
   },
   "input": {
@@ -419,7 +400,6 @@
       "claude": "Pronto a usare Claude con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "cursor": "Pronto a usare Cursor con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "codex": "Pronto a usare Codex con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
-      "gemini": "Pronto a usare Gemini con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "antigravity": "Pronto per Antigravity (agy) con {{model}}. Inizia a scrivere il tuo messaggio qui sotto.",
       "opencode": "Pronto a usare OpenCode con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "default": "Seleziona un provider sopra per iniziare",
@@ -664,14 +644,6 @@
     "subagentModelCalls": "Chiamate del modello dei subagenti: {{count}}",
     "responseTurnDurationLabel": "Tempo di risposta",
     "totalWorkDuration": "Tempo di lavoro totale (le durate possono sovrapporsi): {{duration}}"
-  },
-  "activityGap": {
-    "status": "L'agente sta lavorando — ultima attività {{time}} fa",
-    "ariaLabel": "L'agente sta ancora lavorando, ultima attività {{time}} fa"
-  },
-  "activityGap": {
-    "status": "L'agente sta lavorando — ultima attività {{time}} fa",
-    "ariaLabel": "L'agente sta ancora lavorando, ultima attività {{time}} fa"
   },
   "closeConversation": {
     "close": "Chiudi conversazione",

@@ -13,11 +13,11 @@ import { readFileSync } from 'node:fs';
 import { getRuntimeInstructions, withRuntimeInstructions } from './runtime-instructions.js';
 import { resolvePublicPagePublisher } from './public-page-agent-guidance.js';
 
-/** المُشعِلات العشرة، بمسارها من جذر المستودع. */
+/** المُشعِلات التسعة، بمسارها من جذر المستودع. */
 const LAUNCHERS = [
   'server/claude-sdk.js', 'server/openai-codex.js', 'server/agy-cli.js', 'server/hermes-cli.js',
   'server/opencode-cli.js', 'server/qwen-cli.js', 'server/kimi-agent-cli.js', 'server/cursor-cli.js',
-  'server/gemini-cli.js', 'server/modules/providers/shared/vendor/vendor-runtime.js',
+  'server/modules/providers/shared/vendor/vendor-runtime.js',
 ];
 
 test('every launcher imports the resolving facade, and none the pure module directly', () => {

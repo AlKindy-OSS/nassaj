@@ -34,7 +34,7 @@
 |---|---|
 | Claude Code | ‏Agent SDK رسمي |
 | Codex | ‏Codex SDK |
-| Gemini CLI · Cursor CLI · OpenCode · Hermes · Kimi · GLM · DeepSeek · Antigravity | ‏CLI محكوم لكلٍّ منها |
+| Cursor CLI · OpenCode · Hermes · Kimi · GLM · DeepSeek · Antigravity | ‏CLI محكوم لكلٍّ منها |
 
 كل مزوّد اختياري: يظهر في المنتقي إن كان **مثبَّتاً ومصادَقاً** على الجهاز، ويختفي وإلا. لا يشحن نسّاج مفاتيح ولا يطلبها لنفسه.
 
@@ -158,7 +158,7 @@ credentials, and puts their sessions, your projects and live terminals in one pl
 Arabic and RTL are first-class throughout, not a translation layer.
 
 **Providers** (each optional, each listed only when installed and authenticated):
-Claude Code, Codex, Gemini CLI, Cursor CLI, OpenCode, Hermes, Kimi, GLM, DeepSeek,
+Claude Code, Codex, Cursor CLI, OpenCode, Hermes, Kimi, GLM, DeepSeek,
 Antigravity. nassaj ships no keys and asks for none of its own.
 
 **Production release install** requires Node 24 on Linux x64 with glibc 2.39 or newer, plus `curl`, `jq`, and `tar`. It needs no checkout, npm, or GitHub token: use the Arabic command block above to resolve `latest` from the public `AlKindy-OSS/nassaj` release channel, verify the standalone installer asset against GitHub's API digest, and pass that exact release receipt and resolved commit to the installer.

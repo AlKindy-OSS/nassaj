@@ -51,7 +51,7 @@ getConnection().prepare("INSERT OR IGNORE INTO users (id, username, password_has
 
 _resetProviderSharingCache();
 setProviderSharingConfig({
-  claude: 'isolated', gemini: 'shared', codex: 'shared', agy: 'shared', cursor: 'shared', opencode: 'shared',
+  claude: 'isolated', codex: 'shared', agy: 'shared', cursor: 'shared', opencode: 'shared',
 });
 
 after(async () => {

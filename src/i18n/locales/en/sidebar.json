@@ -223,7 +223,8 @@
         "other": ""
       }
     },
-    "hardwareToggleCollapsed": "Toggle hardware usage widget"
+    "hardwareToggleCollapsed": "Toggle hardware usage widget",
+    "hardwareToggleFooter": "Hardware usage"
   },
   "branding": {
     "openSource": "Open Source"

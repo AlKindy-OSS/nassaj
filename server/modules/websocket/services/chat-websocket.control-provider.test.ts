@@ -59,13 +59,13 @@ test('an unpersisted session (null lookup) falls back to the client provider', (
   const seen: string[] = [];
   const provider = resolveSessionControlProvider(
     ' sess-new ',
-    'gemini',
+    'hermes',
     (id) => {
       seen.push(id);
       return null;
     },
   );
-  assert.equal(provider, 'gemini');
+  assert.equal(provider, 'hermes');
   assert.deepEqual(seen, ['sess-new'], 'the trimmed id is used for the lookup');
 });
 

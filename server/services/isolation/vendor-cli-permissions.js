@@ -28,8 +28,7 @@
  *
  * VENDOR FLAG TABLES (grounded in the real CLIs, NOT invented):
  *   Kimi (@moonshot-ai/kimi-code, KG-1 §1.1):  --plan  <  --auto  <  -y/--yolo
- *     (three explicit permission flags, tiered like gemini-cli's
- *      plan < --approval-mode auto_edit < --yolo). `--auto` = auto-approve edits
+ *     (three explicit permission flags, tiered plan < auto < yolo). `--auto` = auto-approve edits
  *      within the workspace (the safe autonomous tier, == Codex workspace-write);
  *      `--yolo` = full unrestricted access (== Codex danger-full-access).
  *   OpenCode (sst/opencode 1.17.18, `opencode run --help`, verified live):
@@ -39,8 +38,7 @@
  *      so `acceptEdits` stays on the safe default just like `default`).
  *
  * ASSUMPTION FLAGGED FOR LIVE VERIFICATION (§4.5 G-KIMI-LIVE): Kimi is not installed
- * on this node, so the plan/auto/yolo ORDERING is taken from the KG-1 research gate
- * and the gemini precedent. If a live `kimi --help` ever shows `--auto` to be the
+ * on this node, so the plan/auto/yolo ORDERING is taken from the KG-1 research gate. If a live `kimi --help` ever shows `--auto` to be the
  * dangerous full tier (with no separate mid tier), the Kimi `--auto` cases below must
  * move behind the operator flag. OpenCode's table is verified against the live binary.
  *
@@ -66,7 +64,7 @@ const MODE_ACCEPT_EDITS = 'acceptEdits';
 const MODE_BYPASS = 'bypass';
 
 /**
- * Alias table folding both nassaj-native modes and the gemini/vendor vocabularies
+ * Alias table folding both nassaj-native modes and the vendor vocabularies
  * onto the four canonical modes. Anything unknown/empty resolves to the SAFE default
  * (never the bypass tier) — an unrecognized client string can never widen the ceiling.
  */

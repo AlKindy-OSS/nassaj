@@ -1,7 +1,7 @@
 /**
  * permissionModes.test.tsx — منتقي وضع الأذونات، مقروءاً كما يراه المستخدم.
  *
- * **لماذا وُجد.** الجولة الأولى من T-1172 شحنت أوضاع Codex/Gemini في مصفوفة
+ * **لماذا وُجد.** الجولة الأولى من T-1172 شحنت أوضاع Codex في مصفوفة
  * وضعت الأسماء في رؤوس الأعمدة وتركت الخلايا صامتة، فخرجت على الشاشة اثني عشر
  * مربّعاً فارغاً — والاسم كان في `aria-label` وحده، أي أن قارئ الشاشة كان يعرف
  * ما لا تعرفه العين. لم يسقط اختبارٌ واحد وقتها، لأن كل ما كان مُختبَراً هو أن
@@ -60,21 +60,6 @@ describe('no option is known by its position', () => {
     expect(options[0].getAttribute('aria-checked')).toBe('true');
     // وصف الوضع المحدَّد مكتوبٌ في الصفحة، لا في `title` يحتاج فأرة.
     expect(screen.getByText(lookup('permissions.codex.modes.default.description')!)).toBeTruthy();
-  });
-
-  it("Gemini's three modes do the same, and only the barrier-lifting one is dyed", () => {
-    render(
-      <PermissionsContent agent="gemini" permissionMode="yolo" onPermissionModeChange={() => {}} />,
-    );
-
-    const options = screen.getAllByRole('radio');
-    expect(options.map((option) => option.textContent)).toEqual(['Ask', 'Auto-edit', 'YOLO']);
-    expect(options[2].getAttribute('aria-checked')).toBe('true');
-    // الخيار الوحيد المستحقّ لـ`bg-destructive` — ولو صُبغ غيرُه لضاعت الإشارة.
-    expect(options[2].className).toContain('bg-destructive');
-    expect(options[0].className).not.toContain('bg-destructive');
-    expect(options[1].className).not.toContain('bg-destructive');
-    expect(screen.getAllByText(lookup('gemini.modes.yolo.description')!).length).toBeGreaterThan(0);
   });
 
   it('the Claude panel keeps its two switches and its pattern list', () => {

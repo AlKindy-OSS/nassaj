@@ -309,7 +309,7 @@ test('P1-2: a removed member stops receiving the next live message', () => {
   );
   assert.equal(outcome.mirrorsRemoved, 1);
   assert.equal(outcome.socketsNotified, 1);
-  assert.equal(outcome.socketsClosed, 0, 'viewer transport is not mistaken for the project writer');
+  assert.deepEqual(removedTab.closes, [], 'T-1854: the chat socket is never closed (no 4404)');
   assert.equal(refreshed, 1);
   assert.equal(JSON.parse(removedTab.received[1]).type, 'project_membership_revoked');
 
@@ -326,7 +326,7 @@ test('P1-2: a removed member stops receiving the next live message', () => {
   assert.equal(adminOutcome.mirrorsRemoved, 0, 'still-authorized user keeps the stream');
 });
 
-test('membership revocation fences the actual project writer before transport close', () => {
+test('T-1854 (design test 9): the listener sends the notice only — no fence, no 4404 close', () => {
   const order: string[] = [];
   const socket = {
     readyState: 1, userId: stranger.id,
@@ -334,22 +334,13 @@ test('membership revocation fences the actual project writer before transport cl
     close: (code?: number, reason?: string) => order.push(`close:${code}:${reason}`),
     once() {},
   };
-  const writer = new WebSocketWriter(socket as any, stranger.id);
-  writer.setSessionId(SESSION_ID);
-  writer.bindRevocableRun(SESSION_ID, 'opencode');
-  (socket as any).abortProjectMembershipRuns = (sessionIds: Iterable<string>) => {
-    order.push('fence');
-    return writer.revokeProjectSessions(sessionIds, socket as any);
-  };
-
   const outcome = revokeProjectLiveAccess(
     { projectId, projectPath, userId: stranger.id, stillHasAccess: false },
     { clients: [socket as any], refreshPresence: () => {}, terminateShells: () => 0 },
   );
-  assert.deepEqual(order, ['fence', 'notice', 'close:4404:project_access_revoked']);
-  assert.equal(outcome.socketsClosed, 1);
-  writer.send({ kind: 'complete', sessionId: SESSION_ID });
-  assert.equal(order.length, 3, 'late output remains fenced even if close later surfaces as 1006');
+  assert.deepEqual(order, ['notice'], 'the socket carries other projects: it stays open');
+  assert.equal(outcome.socketsNotified, 1);
+  assert.equal('socketsClosed' in outcome, false);
 });
 
 test('WS gates that take a project follow enforcement', () => {
@@ -582,7 +573,7 @@ test('#5: a session participant who is not a member cannot write/resume under en
   assert.equal(isSessionWritableByUser(SESSION_ID, launcher.id), true, 'flag off: participant arm kept');
 });
 
-test('#6: revocation detaches the removed user\'s turn writer and ends their /shell PTYs', () => {
+test('#6: revocation ends the removed user\'s /shell PTYs; the socket writer is not detached', () => {
   const own = fakeSocket(stranger.id);
   const writer = new WebSocketWriter(own as any, stranger.id);
   writer.setSessionId(SESSION_ID);
@@ -608,14 +599,15 @@ test('#6: revocation detaches the removed user\'s turn writer and ends their /sh
     { clients: [], refreshPresence: () => {} },
   );
   assert.equal(outcome.shellsEnded, 2);
-  assert.ok(outcome.writersDetached >= 1);
   assert.deepEqual(calls.sort(), ['close:root:4404', 'close:sub:4404', 'kill:root', 'kill:sub',
     'release:root', 'release:sub']);
 
+  // T-1854: authority is per run (chat-websocket.run-fence tests). The shared
+  // connection writer keeps no per-session detach, so a later re-add streams.
   writer.send({ type: 'probe', sessionId: SESSION_ID });
-  assert.equal(own.received.length, 2, 'revoked project stream no longer reaches the user');
+  assert.equal(own.received.length, 3, 'no connection-level detach survives the removal');
   writer.send({ type: 'probe', sessionId: otherProjectSession });
-  assert.equal(own.received.length, 3, 'other projects keep streaming');
+  assert.equal(own.received.length, 4, 'other projects keep streaming');
 
   assert.equal(terminateShellSessionsForUserInProject(member.id, projectPath), 1, 'cleanup member entry');
   assert.equal(terminateShellSessionsForUserInProject(stranger.id, `${projectPath}-sibling`), 1);
@@ -785,13 +777,15 @@ test('re-adding a removed member does not revive their old writer identity', asy
   revokeProjectLiveAccess({ projectId, projectPath, userId: returning.id, stillHasAccess: false },
     { clients: [socket as any], refreshPresence: () => {} });
   writer.send({ type: 'probe', sessionId: SESSION_ID });
-  assert.equal(socket.received.length, 1, 'only the revocation notice is delivered');
+  // T-1854: the notice, then the probe — a connection writer that carries no
+  // fenced run is not detached; in-flight runs are fenced per run instead.
+  assert.equal(socket.received.length, 2, 'no connection-level detach');
 
   assert.equal((await call('POST', `/api/projects/${projectId}/members`, member, { userId: returning.id })).status, 200);
   assert.equal(userDb.getRawById(returning.id)?.authorization_generation ?? 0, before,
     'project membership does not invalidate unrelated credentials');
   writer.send({ type: 'probe', sessionId: SESSION_ID });
-  assert.equal(socket.received.length, 1, 'old writer stays detached after re-add');
+  assert.equal(socket.received.length, 3, 'T-1854: after re-add the same connection streams (the gap)');
   assert.deepEqual(socket.closes, [], 'an inert viewer socket is not closed as a writer');
   assert.deepEqual(terminalCalls.sort(), ['close', 'kill', 'release']);
   assert.equal(terminateShellSessionsForUserInProject(returning.id, projectPath), 0,

@@ -50,6 +50,8 @@ import {
     markRunStarted,
 } from '../modules/websocket/services/session-outcome.service.js';
 import { createNormalizedMessage } from '../shared/utils.js';
+import { abortIfWriterRevoked } from '../shared/user-revocation-epoch.js';
+import { unwrapWriter } from '../shared/writer-target.js';
 
 import { runLocalUpdateBackground } from './update-writer-lease.js';
 // ADR-053 (T-53-B1): the workflow-liveness registry is independent of this
@@ -270,6 +272,7 @@ function registerSessionProcess(sessionId, { provider, writer, pid = null, runTa
         if (pid) existing.pid = pid;
         if (runTag) existing.runTag = runTag;
         if (projectPath) existing.projectPath = projectPath;
+        abortIfWriterRevoked({ sessionId, provider: existing.provider, token: existing, writer });
         return;
     }
 
@@ -277,6 +280,9 @@ function registerSessionProcess(sessionId, { provider, writer, pid = null, runTa
     runs.set(sessionId, run);
     broadcastState(sessionId, run, 'running');
     startPolling();
+    // B-1327 (qa M2): a run launched before its user was revoked but registered
+    // only now (session id captured late) is aborted like any revoked run.
+    abortIfWriterRevoked({ sessionId, provider, token: run, writer });
 }
 
 /**
@@ -313,6 +319,10 @@ function hasActiveRunForProviders(providerIds) {
  * Returns opaque registrations owned by one writer transport. The registration
  * object itself is the run token: unregister + re-register creates a different
  * object, so a delayed socket-close callback cannot target the replacement.
+ * The comparison is deliberately literal: the caller is a per-run fence that
+ * registered itself, and unwrapping would let one run's fence claim a newer run
+ * of the same session on the same socket. User-level revocation uses
+ * getProviderRunsOwnedByUser instead (B-1327).
  */
 function getProviderRunsOwnedByWriter(writer, rawWs) {
     const owned = [];
@@ -322,6 +332,43 @@ function getProviderRunsOwnedByWriter(writer, rawWs) {
         }
     }
     return owned;
+}
+
+/**
+ * B-1327: every current registration launched by `userId`, whatever socket or
+ * writer wrapper it was registered through (providers register a per-run
+ * Proxy, never the raw socket writer). The launcher identity is read from the
+ * innermost writer, whose `userId` is stamped from the JWT at socket creation,
+ * so a wrapper cannot re-attribute a run. Runs whose socket already closed are
+ * included on purpose: user-level revocation must reach detached runs too.
+ * Returns the same opaque token shape as getProviderRunsOwnedByWriter, plus
+ * the registered (wrapped) writer so a terminal frame keeps its run metadata.
+ */
+function getProviderRunsOwnedByUser(userId) {
+    if (userId === null || userId === undefined || String(userId) === '') return [];
+    const target = String(userId);
+    const owned = [];
+    for (const [sessionId, run] of runs) {
+        const launcherId = unwrapWriter(run?.writer)?.userId;
+        if (launcherId !== null && launcherId !== undefined && String(launcherId) === target) {
+            owned.push({ sessionId, provider: run.provider, token: run, writer: run.writer });
+        }
+    }
+    return owned;
+}
+
+/** True while the opaque token is still the session's live registration. */
+function isProviderRunRegistrationCurrent(ownedRun) {
+    return Boolean(ownedRun?.sessionId && ownedRun.token)
+        && runs.get(ownedRun.sessionId) === ownedRun.token;
+}
+
+/**
+ * T-1854: the writer that currently holds a session's registration, or null.
+ * Re-registering a session hands it to the newest writer (`existing.writer`).
+ */
+function getProviderRunWriter(sessionId) {
+    return runs.get(sessionId)?.writer ?? null;
 }
 
 /** Revalidates an opaque run token immediately before an abort side effect. */
@@ -337,5 +384,8 @@ export {
     unregisterSessionProcess,
     hasActiveRunForProviders,
     getProviderRunsOwnedByWriter,
+    getProviderRunsOwnedByUser,
+    getProviderRunWriter,
     isProviderRunOwnershipCurrent,
+    isProviderRunRegistrationCurrent,
 };

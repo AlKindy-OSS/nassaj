@@ -24,7 +24,7 @@ import kimiMark from '../../assets/provider-logos/kimi.png';
  *
  * They are IDENTIFICATION, not endorsement: each names the provider whose CLI
  * this row actually launches — the same nominative use already made of the
- * Cursor, Codex, Gemini and OpenCode marks. No mark is recoloured, cropped or
+ * Cursor, Codex and OpenCode marks. No mark is recoloured, cropped or
  * composed into another; nassaj's own identity stays its own.
  *
  * Bundled through the asset pipeline (hashed, self-hosted) rather than hot-linked:

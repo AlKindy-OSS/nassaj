@@ -110,7 +110,6 @@ export type SidebarProps = ProjectToolbarProps & {
 export type SessionViewModel = {
   isCursorSession: boolean;
   isCodexSession: boolean;
-  isGeminiSession: boolean;
   isOpenCodeSession: boolean;
   // Derived once here so every surface reads closure the same way: only an
   // explicit `true` closes a row (a missing field on a legacy payload is open).

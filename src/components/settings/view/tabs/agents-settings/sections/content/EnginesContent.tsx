@@ -62,7 +62,7 @@ export default function EnginesContent({ agent }: { agent: AgentProvider }) {
    * الفوضى؟»).
    *
    * والغيابُ لم يكن عشوائياً: `actionableEngineCells` تُرجع فارغاً لمن لا محرّك
-   * بديلَ له (‏codex، gemini، cursor، antigravity، hermes)، فكان التبويب يُخفى
+   * بديلَ له (‏codex، cursor، antigravity، hermes)، فكان التبويب يُخفى
    * كي لا يفتح على بياض. لكن «لا تبويب» تُقرأ نقصاً في المنتج لا حقيقةً عن
    * الوكيل — والقاعدة الصحيحة مطبَّقةٌ في هذا المشروع منذ ADR-093 §2 على تبويب
    * «التعليمات»: **لكل جسمٍ جوابٌ عن هذا السؤال، حتى الذي جوابه «لا قناة»**.

@@ -66,14 +66,12 @@ const parseProvider = (value: unknown): LLMProvider | undefined => {
     normalized === 'claude'
     || normalized === 'codex'
     || normalized === 'cursor'
-    || normalized === 'gemini'
     || normalized === 'antigravity'
     || normalized === 'opencode'
     || normalized === 'hermes'
     || normalized === 'kimi'
     || normalized === 'deepseek'
     || normalized === 'glm'
-    || normalized === 'sakana'
   ) {
     return normalized;
   }
@@ -133,7 +131,7 @@ const optionsFor = (req: Request) => {
   };
 };
 
-const CREATABLE_SKILL_PROVIDERS = new Set<LLMProvider>(['claude', 'codex', 'cursor', 'gemini']);
+const CREATABLE_SKILL_PROVIDERS = new Set<LLMProvider>(['claude', 'codex', 'cursor']);
 
 const assertCreateSupported = (material: ReferenceMaterialKind, provider?: LLMProvider): void => {
   if (material === 'instructions' || material === 'agents') {

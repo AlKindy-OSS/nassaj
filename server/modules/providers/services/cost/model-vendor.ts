@@ -84,7 +84,6 @@ const MODEL_PREFIX_VENDORS: ReadonlyArray<readonly [string, VendorKey]> = Object
 const HARNESS_VENDORS: Readonly<Record<string, VendorKey>> = Object.freeze({
   claude: 'anthropic',
   codex: 'openai',
-  gemini: 'google',
   antigravity: 'google',
   agy: 'google',
   glm: 'glm',

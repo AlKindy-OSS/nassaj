@@ -14,7 +14,7 @@ const HEX40 = /^[a-f0-9]{40}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
 const CAPABILITY_SCHEMA = 'nassaj-update-capability/v1';
 const RUNTIME_SCHEMA = 'nassaj-release-runtime/v1';
-const PERMISSION_CAPABILITY_DIGEST = 'sha256:cf3e5bfe81e622fc0905b72a604a55b19e521e8752610c158becfcb7e1f05430';
+const PERMISSION_CAPABILITY_DIGEST = 'sha256:e4f42ebffc340adb7beb51a389206fc8cac11a20df81839bdd3914dfa50bf230';
 const PERMISSION_RELEASE_FIELDS = Object.freeze([
     'permissionProfile', 'permissionContractVersion', 'permissionProfileDigest',
     'permissionCapabilityDigest', 'permissionProtocolGeneration', 'minimumPermissionBuild',

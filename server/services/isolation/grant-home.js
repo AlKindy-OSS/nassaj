@@ -2,14 +2,14 @@
  * grant-home — a HOME for a grantee's spawn of a HOME/XDG-steered provider
  * (T-1675 / ADR-152, closing qa-critic finding 1).
  *
- * gemini, agy, hermes and cursor find their credential relative to $HOME, and
+ * agy, hermes and cursor find their credential relative to $HOME, and
  * opencode relative to $XDG_DATA_HOME. Handing such a spawn the OWNER's root
  * would expose every credential the owner holds — `.claude/`, `.codex/`,
  * `.qwen/`, the lot — through a grant for one provider. So a grantee never
  * runs on the owner's root. They run here:
  *
  *   ~/.nassaj-users/<grantee>/.grants/<owner>/
- *     .gemini                -> ~/.nassaj-users/<owner>/.gemini    (only if gemini/agy is granted)
+ *     .gemini                -> ~/.nassaj-users/<owner>/.gemini    (only if agy is granted)
  *     .hermes                -> ~/.nassaj-users/<owner>/.hermes    (only if hermes is granted)
  *     .cursor                -> ~/.nassaj-users/<owner>/.cursor    (only if cursor is granted)
  *     .local/                   (real dir)
@@ -25,10 +25,9 @@
  * Only symlinks are ever created or removed here; a real file or directory
  * found in the way is left alone and logged.
  *
- * gemini and agy are ONE credential (`~/.gemini/antigravity-cli`, one binary
- * under two names — see resolve-provider-env.js `case 'gemini'`): granting
- * either links `.gemini`, so granting one hands over the other. The settings
- * page says so.
+ * agy's grant is stored under the credential unit named after its `~/.gemini`
+ * home (see credential-principal.js); listDelegatedProvidersFromOwner hands the
+ * provider key `agy` here, which links `.gemini`.
  */
 
 import fs from 'fs';
@@ -40,7 +39,6 @@ const DIR_MODE = 0o700;
 
 /** Where each HOME/XDG-steered provider keeps its credential, relative to root. */
 const OWNER_LINKED_PATHS = Object.freeze({
-  gemini: ['.gemini'],
   agy: ['.gemini'],
   hermes: ['.hermes'],
   cursor: ['.cursor'],

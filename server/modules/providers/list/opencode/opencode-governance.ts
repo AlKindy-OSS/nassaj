@@ -5,7 +5,7 @@
  * PRINCIPLE (inherited from the 2026-07-12 Codex remediation, ADR-057 §5):
  * a governed vendor CLI must NEVER run outside nassaj governance. opencode ingests its
  * global rules from `$XDG_CONFIG_HOME/opencode/AGENTS.md` and — unlike kimi's "reference
- * not privileged" posture — obeys it at the codex/gemini level (the enforced tier). So
+ * not privileged" posture — obeys it at the codex level (the enforced tier). So
  * before a carrier turn is spawned, the launcher (server/opencode-cli.js, carrier mode
  * only) calls this gate to verify the user's effective opencode `AGENTS.md` is AUTHENTIC
  * neutral governance — a real, non-empty file (never a symlink) whose sha256 EQUALS the

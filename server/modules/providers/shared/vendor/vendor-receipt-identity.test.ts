@@ -49,7 +49,7 @@ for (const provider of ['qwen', 'hermes', 'kimi', 'deepseek', 'glm'] as LLMProvi
 }
 
 test('B-1078: displayClientMsgId is stripped for vendor and non-vendor providers alike', () => {
-  for (const provider of ['kimi', 'gemini'] as const) {
+  for (const provider of ['kimi', 'cursor'] as const) {
     const result = { messages: [{ id: 'm1', sessionId: 's', timestamp: 'now', provider, kind: 'text' as const, role: 'user' as const,
       content: 'hi', displayClientMsgId: 'injected-display' }], total: 1, hasMore: false, offset: 0, limit: null };
     for (const requester of [7, null]) {

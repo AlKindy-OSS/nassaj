@@ -718,7 +718,7 @@ describe('B-894 sticky history eligibility', () => {
     expect(getOutboxSnapshot().map(entry => entry.id)).toEqual(['text', 'file', 'image', 'legacy']);
   });
 
-  it.each(['codex', 'gemini', 'cursor', 'opencode', 'antigravity'])('%s does not let a v1 identity row dispose a copy', (provider) => {
+  it.each(['codex', 'cursor', 'opencode', 'antigravity'])('%s does not let a v1 identity row dispose a copy', (provider) => {
     record('native', { intent: { provider } });
     reconcileOutboxDeliveryEvidence(SESSION, [{ id: 'native', sessionId: SESSION, kind: 'text', role: 'user' }]);
     expect(getOutboxSnapshot()).toHaveLength(1);

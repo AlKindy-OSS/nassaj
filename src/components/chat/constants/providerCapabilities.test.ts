@@ -84,8 +84,8 @@ describe('getProviderDisplayName — إصلاح وسم هرمز (T-224 م0)', ()
     expect(getProviderDisplayName('codex')).toBe('Codex');
   });
 
-  it('المزوّدات المعروفة لا تتأثّر: gemini → «Gemini»', () => {
-    expect(getProviderDisplayName('gemini')).toBe('Gemini');
+  it('المزوّدات المعروفة لا تتأثّر: cursor → «Cursor»', () => {
+    expect(getProviderDisplayName('cursor')).toBe('Cursor');
   });
 
   it('المزوّدات المعروفة لا تتأثّر: opencode → «OpenCode»', () => {

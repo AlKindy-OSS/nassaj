@@ -58,8 +58,6 @@ function renderTab() {
         onCursorPermissionsChange={() => {}}
         codexPermissionMode="default"
         onCodexPermissionModeChange={() => {}}
-        geminiPermissionMode="default"
-        onGeminiPermissionModeChange={() => {}}
         projects={[]}
       />
     </ThemeProvider>,

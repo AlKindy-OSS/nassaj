@@ -4,6 +4,7 @@ import {
   isOutcomeSignalKind,
 } from '@/modules/websocket/services/session-outcome.service.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
+import { abortIfWriterRevoked, stampWriterEpoch } from '@/shared/user-revocation-epoch.js';
 
 /**
  * Read-only session mirrors (realtime fan-out).
@@ -177,26 +178,6 @@ export function removeSessionMirrorsForUser(
   return removed;
 }
 
-/**
- * ADR-172 (qa #6): stop streaming the listed sessions to a user's OWN sockets
- * (the primary writer of a turn they launched). The revocation coordinator
- * separately aborts runs actually launched by that user. Returns the number of
- * writers detached.
- */
-export function detachWritersForUser(userId: string | number, sessionIds: Iterable<string>): number {
-  const target = String(userId);
-  const sessions = [...sessionIds];
-  let detached = 0;
-  for (const writer of liveWriters) {
-    if (writer.userId === null || writer.userId === undefined || String(writer.userId) !== target) {
-      continue;
-    }
-    for (const sessionId of sessions) writer.detachedSessionIds.add(sessionId);
-    detached += 1;
-  }
-  return detached;
-}
-
 export function __mirroredSessionCountForTests(): number {
   return sessionMirrors.size;
 }
@@ -259,61 +240,68 @@ export function countLiveMirrors(sessionId: string): number {
   return live;
 }
 
+/** A supervised run as seen by user-level revocation (B-1327). */
+export type UserRevocableRun = {
+  sessionId: string;
+  provider: string;
+  token: object;
+  writer: WebSocketWriter;
+};
+
+/**
+ * B-1327: writers that currently hold at least one supervised run. Supervised
+ * runs have no process-monitor registration, so without this index a run whose
+ * socket already closed would be invisible to user-level revocation. Entries
+ * leave the set when their last run is released.
+ */
+const writersWithRevocableRuns = new Set<WebSocketWriter>();
+
+/** Every supervised run currently bound by a writer stamped with `userId`. */
+export function listRevocableRunsForUser(userId: string | number): UserRevocableRun[] {
+  const target = String(userId);
+  const owned: UserRevocableRun[] = [];
+  for (const writer of writersWithRevocableRuns) {
+    if (writer.userId === null || writer.userId === undefined || String(writer.userId) !== target) continue;
+    owned.push(...writer.listBoundRevocableRuns());
+  }
+  return owned;
+}
+
 /**
  * Thin transport adapter that gives WebSocket connections the same interface as
  * SSE writers used by API routes (`send`, `setSessionId`, `getSessionId`).
+ *
+ * T-1854: project-membership authority is NOT held here. One socket carries
+ * many runs across many projects, so revocation is per run (the run fence in
+ * chat-websocket.service); this writer keeps only the identity-revocation
+ * fence (4401), which is genuinely per device.
  */
-/** Live writers, for ADR-172 revocation (dropped when their socket closes). */
-const liveWriters = new Set<WebSocketWriter>();
-
 export class WebSocketWriter {
   ws: RealtimeClientConnection;
   sessionId: string | null;
   userId: string | number | null;
   isWebSocketWriter: boolean;
-  private outputRevoked: boolean;
   private readonly revocableRuns: Map<string, { provider: string; token: object }>;
-  /** Sessions whose stream must no longer reach this writer's own socket. */
-  detachedSessionIds: Set<string>;
+  /** >0 while a run fence mutes this writer's primary socket (I7). */
+  private primarySuppression: number;
 
   constructor(ws: RealtimeClientConnection, userId: string | number | null = null) {
     this.ws = ws;
     this.sessionId = null;
     this.userId = userId;
     this.isWebSocketWriter = true;
-    this.outputRevoked = false;
     this.revocableRuns = new Map();
-    this.detachedSessionIds = new Set();
-    // Only writers bound to a real socket (one that emits 'close') are tracked,
-    // so inert server-owned writers (scheduled dispatch) never accumulate here.
-    const emitter = ws as unknown as { once?: (event: string, cb: () => void) => void };
-    if (typeof emitter?.once === 'function') {
-      try {
-        emitter.once('close', () => liveWriters.delete(this));
-        liveWriters.add(this);
-      } catch {
-        /* registration must never break writer construction */
-      }
-    }
+    this.primarySuppression = 0;
+    stampWriterEpoch(this);
   }
 
   send(data: unknown): void {
-    // A revoked device identity owns neither the primary stream nor its mirrors,
-    // and may not commit a terminal outcome after the wallet switched slots.
-    if (this.outputRevoked) {
-      return;
-    }
     const serialized = JSON.stringify(data);
     const targetSessionId =
       data && typeof data === 'object' && typeof (data as { sessionId?: unknown }).sessionId === 'string'
         ? (data as { sessionId: string }).sessionId
         : this.sessionId;
-    const detached = targetSessionId !== null && this.detachedSessionIds.has(targetSessionId);
-    // Project-membership revocation is a content fence, not merely a transport
-    // detach: no primary send, mirror fan-out, or terminal outcome persistence
-    // may cross it while the close handshake is pending (or ends as 1006).
-    if (detached) return;
-    if (this.ws.readyState === WS_OPEN_STATE) {
+    if (this.primarySuppression === 0 && this.ws.readyState === WS_OPEN_STATE) {
       try {
         this.ws.send(serialized);
       } catch {
@@ -353,39 +341,37 @@ export class WebSocketWriter {
   }
 
   /**
-   * Permanently fences output from the run owned by `expectedRawWs`. Returning
-   * false means the writer has already moved to a newer transport, so a delayed
-   * close event must not revoke it.
+   * T-1854 (I7, qa M6): runs `emit` with the primary socket muted — mirrors and
+   * outcome recording still happen. Used by a run fence whose primary socket now
+   * belongs to a user who lost the project. The socket itself is never swapped,
+   * so `isPrimarySocketAlive` (B-SEC-DUP-RUN) keeps reporting the real state.
+   * Scoped and synchronous: other runs on this writer are unaffected.
    */
-  revokeRunOutput(expectedRawWs: RealtimeClientConnection): boolean {
-    if (this.ws !== expectedRawWs || this.outputRevoked) {
-      return false;
+  sendWithPrimarySuppressed(emit: () => void): void {
+    this.primarySuppression += 1;
+    try {
+      emit();
+    } finally {
+      this.primarySuppression -= 1;
     }
-    this.outputRevoked = true;
-    return true;
   }
 
-  /** Provider terminal handlers use this to skip late transcript persistence. */
-  isRunOutputRevoked(sessionId: string | null = this.sessionId): boolean {
-    return this.outputRevoked || (sessionId !== null && this.detachedSessionIds.has(sessionId));
-  }
-
-  /** Fences only the listed project sessions while preserving unrelated runs. */
-  revokeProjectSessions(sessionIds: Iterable<string>, expectedRawWs: RealtimeClientConnection): number {
-    if (this.ws !== expectedRawWs) return 0;
-    const revoked = new Set(sessionIds);
-    for (const sessionId of revoked) this.detachedSessionIds.add(sessionId);
-    let owned = 0;
-    for (const sessionId of this.revocableRuns.keys()) {
-      if (revoked.has(sessionId)) owned += 1;
-    }
-    return owned;
+  /**
+   * Provider terminal handlers use this to skip late transcript persistence.
+   * The socket writer itself is never fenced (B-1327: administrative
+   * revocation aborts runs instead); the run-fence override answers per run.
+   */
+  isRunOutputRevoked(_sessionId: string | null = this.sessionId): boolean {
+    return false;
   }
 
   /** Binds a supervised run that has no child-process monitor registration. */
   bindRevocableRun(sessionId: string, provider: string): object {
     const token = {};
     this.revocableRuns.set(sessionId, { provider, token });
+    writersWithRevocableRuns.add(this);
+    // B-1327 (qa M2): bound after its user was revoked → aborted right away.
+    abortIfWriterRevoked({ sessionId, provider, token, writer: this });
     return token;
   }
 
@@ -393,7 +379,18 @@ export class WebSocketWriter {
   releaseRevocableRun(sessionId: string, token: object): void {
     if (this.revocableRuns.get(sessionId)?.token === token) {
       this.revocableRuns.delete(sessionId);
+      if (this.revocableRuns.size === 0) writersWithRevocableRuns.delete(this);
     }
+  }
+
+  /** Every supervised run bound by this writer, regardless of its socket. */
+  listBoundRevocableRuns(): UserRevocableRun[] {
+    return [...this.revocableRuns.entries()].map(([sessionId, run]) => ({ sessionId, ...run, writer: this }));
+  }
+
+  /** True while `token` is still the bound generation for `sessionId`. */
+  isRevocableRunBound(sessionId: string, token: unknown): boolean {
+    return this.revocableRuns.get(sessionId)?.token === token;
   }
 
   /** Returns writer-owned supervised runs for this exact raw transport. */

@@ -2,20 +2,15 @@
  * resolveProviderEnv(userId, provider) — central credential-isolation seam.
  *
  * Per ADR-014, this is the SOLE source of truth for isolating provider
- * credentials per user. Every provider spawn (claude/gemini/codex/agy) builds
+ * credentials per user. Every provider spawn (claude/codex/agy/…) builds
  * its child-process environment through this function and no other path.
  *
  * Isolation model (Phase-MU):
  *   - claude:  CLAUDE_CONFIG_DIR=~/.nassaj-users/<userId>/.claude   (B-ISO-CLAUDE)
- *   - gemini:  HOME=~/.nassaj-users/<userId> — same knob as agy, and for the
- *              same reason: the CLI reads no dedicated env var. This used to set
- *              GEMINI_CLI_HOME, which NOTHING reads (B-548, measured — see the
- *              `case 'gemini'` body); the variable reached the spawn and was
- *              ignored, so every member's gemini turn ran on the OPERATOR's
- *              ~/.gemini credentials.
  *   - codex:   CODEX_HOME=~/.nassaj-users/<userId>/.codex           (B-ISO-CODEX, wired)
  *   - agy:     HOME=~/.nassaj-users/<userId> so its brain store under
- *              ~/.gemini/antigravity-cli resolves into the isolated tree
+ *              ~/.gemini/antigravity-cli resolves into the isolated tree (HOME is
+ *              the only knob it reads, B-548 — measured)
  *   - opencode: XDG_DATA_HOME/XDG_CONFIG_HOME/XDG_CACHE_HOME/XDG_STATE_HOME all
  *              point into ~/.nassaj-users/<userId>/ so auth.json, opencode.db and
  *              config isolate at once while HOME stays operator (shared skills).
@@ -62,7 +57,7 @@
  * policy (see services/provider-sharing.js). resolveProviderEnv consults
  * isProviderIsolated(provider) on every call: when a provider is marked
  * 'shared' the base (operator) environment is returned unchanged even for
- * claude/gemini/codex; when marked 'isolated' the per-user override is applied.
+ * claude/codex; when marked 'isolated' the per-user override is applied.
  * The default policy is now 'isolated' for every provider that HAS an isolation
  * case (ADR-105, superseding the ADR-016 default): nassaj is open source, so a
  * fresh install belongs to somebody else's team, and defaulting to shared there
@@ -76,7 +71,7 @@
  * is applied and the base environment is returned unchanged — preserving the
  * single-user behavior the app had before multi-user.
  *
- * @typedef {'claude'|'gemini'|'codex'|'agy'|'cursor'|'opencode'|'hermes'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
+ * @typedef {'claude'|'codex'|'agy'|'cursor'|'opencode'|'hermes'|'kimi'|'deepseek'|'glm'|'qwen'} ProviderName
  *
  * Spawn mode for a provider (SL-5/ADR-062). 'chat' is the historical toolless
  * HTTP path (the default — identical to the pre-SL-5 behavior for EVERY
@@ -203,18 +198,6 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       // today; the other harnesses' disable knobs are unverified and stay OFF —
       // the server scheduler is their single controlled update path.
       env.DISABLE_AUTOUPDATER = '1';
-      return env;
-    }
-    case 'gemini': {
-      // T-1749/ADR-159 D1: gemini is removed as a DISPATCHABLE provider (registry
-      // + WS branch), so no chat turn reaches here with provider='gemini' any
-      // more. This case is KEPT because 'gemini' is also agy's on-disk credential
-      // UNIT (~/.gemini/antigravity-cli — credential-principal.js maps agy→gemini,
-      // grant-home.js links `.gemini`): the grant/isolation machinery resolves the
-      // unit through this HOME override. agy's own `case 'agy'` is identical, and
-      // both point HOME at the isolated per-user tree. HOME is the only knob that
-      // moves this CLI's tree (B-548, measured).
-      env.HOME = homeRoot();
       return env;
     }
     case 'codex': {
@@ -387,7 +370,7 @@ function applyHarnessUpdaterPolicy(provider, env) {
  * this fix EVERY child provider process inherited nassaj's own secrets —
  * JWT_SECRET above all, plus DATABASE_PATH and NASSAJ_PROVIDER_SECRETS_KEY.
  * `sanitizeVendorAgentEnv` (SL-3) only ever ran on the kimi/glm carrier paths,
- * so claude / codex / gemini / agy / opencode / hermes / cursor inherited them
+ * so claude / codex / agy / opencode / hermes / cursor inherited them
  * raw (e.g. openai-codex.js:535 passes this result straight into `new Codex({
  * env })`). One prompt-injected `env | grep JWT_SECRET` in any agent turn was a
  * full account-takeover primitive.

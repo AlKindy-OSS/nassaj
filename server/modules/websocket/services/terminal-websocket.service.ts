@@ -109,6 +109,8 @@ type TerminalWebSocketDependencies = {
   ) => void;
   /** Releases the binding on disconnect. NEVER kills the PTY (by design). */
   detachSocket: (userId: string | number, terminalId: string, ws: WebSocket) => void;
+  /** B-1327: removes every terminal of a revoked user (kills its PTYs). */
+  terminateForUser?: (userId: number) => number;
 };
 
 type TerminalIncomingMessage = {

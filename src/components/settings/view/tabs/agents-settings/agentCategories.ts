@@ -33,12 +33,12 @@ import { COMING_SOON_SETTINGS_PROVIDERS } from './visibleAgents';
  * هذه القائمة عن الشرطيات هناك — فلا يحرس المصفوفةَ بل ما يراه القارئ.
  */
 export const PERMISSIONS_PANEL_AGENTS: readonly AgentProvider[] = Object.freeze([
-  'claude', 'cursor', 'codex', 'gemini', 'antigravity',
+  'claude', 'cursor', 'codex', 'antigravity',
 ] as AgentProvider[]);
 
 /** الوكلاء الذين لهم تبويب مهارات مخصّص. */
 export const SKILLS_CAPABLE_PROVIDERS: readonly AgentProvider[] = Object.freeze([
-  'claude', 'codex', 'cursor', 'gemini', 'opencode',
+  'claude', 'codex', 'cursor', 'opencode',
 ] as AgentProvider[]);
 
 /** Providers whose generic MCP surface is currently exposed to members. */

@@ -32,7 +32,7 @@ const { STUB_DEF_H, ALL_PROVIDERS_H } = vi.hoisted(() => {
     DEFAULT: 'claude-opus',
   };
   const ALL_PROVIDERS_H = [
-    'claude', 'cursor', 'codex', 'gemini', 'antigravity',
+    'claude', 'cursor', 'codex', 'antigravity',
     'opencode', 'hermes', 'kimi', 'deepseek', 'glm', 'qwen', 'sakana',
   ];
   return { STUB_DEF_H, ALL_PROVIDERS_H };

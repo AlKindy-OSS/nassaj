@@ -83,7 +83,7 @@
  * the same value also leaves the machine.
  *
  * These names are secrets of the HOST APPLICATION. No provider CLI (claude,
- * codex, gemini, agy, cursor, opencode, hermes, kimi, deepseek, glm) reads any
+ * codex, agy, cursor, opencode, hermes, kimi, deepseek, glm) reads any
  * of them — they are stripped for EVERY provider, in every mode, at the single
  * `resolveProviderEnv` choke point. Everything a CLI actually needs (PATH, HOME,
  * USER, LOGNAME, SHELL, LANG, TERM, TMPDIR, XDG_*, NODE_*, npm_*, and the

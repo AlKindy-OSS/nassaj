@@ -45,7 +45,7 @@ test('ADR-062: the allowlist stays EXACT — no `kimi login`-prefixed smuggling'
 
 test('ADR-062: only kimi resolves to agent mode; every other provider stays chat', () => {
   assert.equal(readIsolationMode('kimi'), 'agent');
-  for (const provider of ['claude', 'codex', 'gemini', 'cursor', 'agy', 'opencode', 'hermes'] as const) {
+  for (const provider of ['claude', 'codex', 'cursor', 'agy', 'opencode', 'hermes'] as const) {
     assert.equal(readIsolationMode(provider), 'chat', `${provider} must stay in chat mode`);
   }
 });

@@ -2,6 +2,11 @@ import * as databaseModule from '@/modules/database/index.js';
 import type { AccountWalletSnapshot, DevicePrincipal } from '@/modules/database/index.js';
 
 import { connectionRevocationRegistry } from './connection-revocation-registry.js';
+import { revokeUserIdentity } from './user-identity-revocation.js';
+import type {
+  UserRealtimeRevocation,
+  UserRealtimeRevocationResult,
+} from './user-realtime-revocation.js';
 
 type LocalCredential = Readonly<{
   id: number;
@@ -152,5 +157,17 @@ export class AccountWalletService {
     for (const deviceSessionId of deviceSessionIds) {
       connectionRevocationRegistry.revokeDevice(deviceSessionId);
     }
+  }
+
+  /**
+   * B-1327: applies an administrative identity change (disable, delete, role
+   * change) to everything live for `userId`; see revokeUserIdentity.
+   */
+  revokeUser(
+    userId: number,
+    deviceSessionIds: readonly string[],
+    revocation: UserRealtimeRevocation,
+  ): UserRealtimeRevocationResult {
+    return revokeUserIdentity(userId, revocation, deviceSessionIds);
   }
 }

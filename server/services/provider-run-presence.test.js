@@ -45,7 +45,7 @@ function reset() {
 test('registers immediately when the session id is known at spawn', () => {
   reset();
   beginProviderRun({
-    provider: 'gemini',
+    provider: 'cursor',
     writer,
     sessionId: 'sess-1',
     projectPath: '/w',
@@ -55,7 +55,7 @@ test('registers immediately when the session id is known at spawn', () => {
   assert.equal(registrations.length, 1);
   assert.partialDeepStrictEqual(registrations[0], {
     sessionId: 'sess-1',
-    provider: 'gemini',
+    provider: 'cursor',
     pid: 4242,
     projectPath: '/w',
   });

@@ -1,3 +1,8 @@
+## 2.3.0.7 — 2026-09-25
+
+حذف مزوّد Gemini CLI، وحدود عضوية المشاريع، وإيقاف دورات الوكلاء عند تعديل المستخدمين.
+Gemini CLI removal, project membership boundaries per run, agent turn control on user changes.
+
 ## 2.3.0.6 — 2026-09-25
 
 استعادة محرّك نموذج Codex المجمَّد، حوكمة مشاريع وأجهزة محافظ، وقياس تكاليف متقدم.
@@ -11,6 +16,48 @@ Improve provider status localization, optional hardware usage, images and menus.
 # التحديثات
 
 هنا تجد ملخصاً عملياً لأحدث إصدارات نسّاج: ما الجديد، وما الذي ستلاحظه عند الاستخدام. أما التفاصيل التقنية الكاملة فتوجد في سجل التغييرات داخل المشروع.
+
+---
+
+## الإصدار 2.3.0.7 — حذف مزوّد Gemini وحدود العضوية وإيقاف الدورات
+
+مرشح بتاريخ 2026-09-25 لاحق للإصدار المنشور `2.3.0.6`.
+
+ما الذي يتغير عند نشره:
+
+- حذف مزوّد Gemini CLI بالكامل: الخادم والعميل والموثّقات والحزم. نماذج Google تبقى
+  متاحة عبر Antigravity و OpenCode و Cursor. الطلبات القديمة التي تسمّي "gemini"
+  ترفع استثناء؛ طلبات HTTP ترد بـ 400 بدلاً من 403.
+- إصلاح تبويب المراجع: لا يظهر خطأ 503 عند عدم تسجيل مزوّد مدرج.
+- حدود العضوية لكل دورة: عند إضافة أو حذف عضو من مشروع، تتوقف دوراتهم الجارية فوراً
+  وتُغلق اتصالاتهم.
+- إيقاف الدورات على تغيير المستخدم: تعطيل أو حذف أو خفض مستخدم يوقف جميع دوراتهم
+  الجارية ويُغلق اتصالات الدردشة والـ shell والـ terminal. الأعضاء يرون إشعار محايد.
+- تحسينات الواجهة: خيار عرض استهلاك العتاد على الهاتف، إزالة شارة الوكيل المكرّرة، نقل
+  زرّ الانتقال للأسفل عن شريط الحالة.
+
+قيد معروف: ما زال Qwen يوقف دوره عند انقطاع الشبكة (مُتابَع).
+
+### English
+
+Candidate dated 2026-09-25, following published `2.3.0.6`.
+
+What changes when published:
+
+- Gemini CLI provider removed completely: server, client, docs and packages gone.
+  Google model names remain available via Antigravity, OpenCode and Cursor. Old
+  requests naming "gemini" get a typed refusal; HTTP requests return 400 instead
+  of 403.
+- References tab fixed: no 503 when a listed provider is unavailable.
+- Project membership per run: adding or removing a member stops their running
+  turns immediately and closes their connections.
+- User changes stop turns: disabling, deleting or downgrading a user stops all
+  their running agent turns and closes chat, shell and terminal connections.
+  Other members see a neutral stop notice.
+- UI improvements: hardware-usage toggle on mobile, removed redundant agent
+  pill, jump-to-bottom button moved away from status bar.
+
+Known limitation: Qwen still stops its turn on network loss (tracked).
 
 ---
 

@@ -19,6 +19,7 @@ const mintedRoles: string[] = [];
 let verifiedClaims: Record<string, unknown> = { sub: 'subject-synthetic' };
 let verifyFailure: Error | null = null;
 const storedUser = { id: 12, username: 'linked', role: 'user', password_changed_at: 1 };
+const identityRevocations: Array<{ userId: number; revocation: unknown }> = [];
 
 const pkceStore = {
   store: (_state: string, value: Record<string, unknown>) => {
@@ -52,6 +53,14 @@ mock.module(url('../middleware/auth.js'), {
     },
     invalidateRefreshCache: (userId: number) => refreshInvalidations.push(userId),
     requireRole: () => passThrough,
+  },
+});
+mock.module(url('../modules/account-wallet/user-identity-revocation.js'), {
+  namedExports: {
+    revokeUserIdentity: (userId: number, revocation: unknown) => {
+      identityRevocations.push({ userId, revocation });
+      return { abortedRuns: 0, closedSockets: 0, endedInteractiveSessions: 0 };
+    },
   },
 });
 mock.module(url('../middleware/rate-limit.js'), { namedExports: { createRateLimiter: () => passThrough } });
@@ -273,4 +282,23 @@ test('fail-closed: a missing/invalid OIDC_ROLE_PROJECT_ID disables OIDC (routes 
   } finally {
     process.env.OIDC_ROLE_PROJECT_ID = saved;
   }
+});
+
+test('B-1327 (qa M1): an SSO downgrade revokes live work; a promotion does not', async () => {
+  identityRevocations.length = 0;
+  resetLoginState('user', { [ROLES_CLAIM]: { admin: { '1': 'org.example' } } });
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(identityRevocations, [], 'promotion user -> admin changes nothing live');
+
+  resetLoginState('admin', {});
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(identityRevocations, [{
+    userId: 12,
+    revocation: { abortReason: 'role_changed', endInteractiveSessions: true },
+  }]);
+
+  identityRevocations.length = 0;
+  resetLoginState('owner', {});
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(identityRevocations, [], 'an owner is never demoted, so nothing is revoked');
 });

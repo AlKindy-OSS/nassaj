@@ -102,7 +102,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -223,24 +222,6 @@
       "default": "沙箱：workspace-write · 审批：untrusted · 网络：关闭",
       "acceptEdits": "沙箱：workspace-write · 审批：never · 网络：关闭",
       "bypassPermissions": "沙箱：workspace-write · 审批：never · 网络：关闭 —— 与「编辑模式」相同。只有在运维方为本次部署开启后，才会有完整的磁盘/网络访问权限（默认关闭）。"
-    }
-  },
-  "gemini": {
-    "permissionMode": "Gemini 权限模式",
-    "description": "控制 Gemini CLI 如何处理操作审批。",
-    "modes": {
-      "default": {
-        "title": "标准（请求审批）",
-        "description": "Gemini 在执行命令、写入文件和获取网络资源前将提示审批。"
-      },
-      "autoEdit": {
-        "title": "自动编辑（跳过文件审批）",
-        "description": "Gemini 将自动批准文件编辑和网络获取，但仍会提示 Shell 命令审批。"
-      },
-      "yolo": {
-        "title": "YOLO（绕过所有权限）",
-        "description": "Gemini 将不请求审批直接执行所有操作。请谨慎使用。"
-      }
     }
   },
   "input": {
@@ -419,7 +400,6 @@
       "claude": "准备好使用带有 {{model}} 的 Claude。请在下方开始输入您的消息。",
       "cursor": "准备好使用带有 {{model}} 的 Cursor。请在下方开始输入您的消息。",
       "codex": "准备好使用带有 {{model}} 的 Codex。请在下方开始输入您的消息。",
-      "gemini": "准备好使用带有 {{model}} 的 Gemini。请在下方开始输入您的消息。",
       "antigravity": "已准备好通过 {{model}} 使用 Antigravity（agy）。请在下方输入消息。",
       "opencode": "准备好使用带有 {{model}} 的 OpenCode。请在下方开始输入您的消息。",
       "default": "请在上方选择一个提供者以开始",
@@ -662,14 +642,6 @@
     "subagentModelCalls": "子代理模型调用：{{count}}",
     "responseTurnDurationLabel": "响应时间",
     "totalWorkDuration": "总工作时间（时长可能重叠）：{{duration}}"
-  },
-  "activityGap": {
-    "status": "智能体正在工作 — 最近一次活动在 {{time}} 前",
-    "ariaLabel": "智能体仍在工作，最近一次活动在 {{time}} 前"
-  },
-  "activityGap": {
-    "status": "智能体正在工作 — 最近一次活动在 {{time}} 前",
-    "ariaLabel": "智能体仍在工作，最近一次活动在 {{time}} 前"
   },
   "closeConversation": {
     "close": "关闭对话",

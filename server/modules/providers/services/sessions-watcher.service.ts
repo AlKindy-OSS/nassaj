@@ -42,8 +42,6 @@ const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> =
     provider: 'codex',
     rootPath: path.join(os.homedir(), '.codex', 'sessions'),
   },
-  // gemini watch targets removed (D1, T-1749): the provider is gone, so nothing
-  // may re-index ~/.gemini artifacts as new sessions.
   {
     // Operator baseline only. OC-07: at watcher init this single opencode entry
     // is expanded (see resolveEffectiveWatchTargets) into one watch per isolated

@@ -262,10 +262,6 @@ export function cageOperatorSecretMasks({
  * other provider's credential is always masked.
  *
  * Deliberately absent:
- *  - gemini: no operator-level gemini-cli credential file exists on any fleet
- *    node (verified on disk 2026-07-15 — ~/.gemini holds only antigravity-cli/,
- *    config/, projects/, sessions/, tmp/); the antigravity OAuth token is agy's
- *    and is listed under agy.
  *  - cursor: not installed on any fleet node; no credential path to verify.
  *    Revisit when a node has it (T-897 spike note).
  *  - glm: no glm credential FILE of its own — the glm key is written as a JSON
@@ -320,8 +316,6 @@ function launchingProviderWriteStores(launching, isolated) {
       return isolated
         ? [path.join('.claude', 'projects')]
         : ['.claude', '.claude.json'];
-    case 'gemini':
-      return isolated ? [path.join('.gemini', 'projects')] : ['.gemini'];
     case 'agy':
       return isolated
         ? [path.join('.gemini', 'antigravity-cli', 'brain')]

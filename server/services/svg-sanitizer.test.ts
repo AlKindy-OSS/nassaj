@@ -118,8 +118,11 @@ test('real light-mode logo (nassaj-logo-on-light.svg) survives with its paths in
 
 // Web icon set export: colour is in fill="" attributes, and style="" carries only
 // non-colour layout properties which must simply be dropped.
-test('real icon (gemini-ai-icon.svg): attribute colours kept, non-colour style dropped', () => {
-  const out = sanitizeSvg(readAsset('public/icons/gemini-ai-icon.svg'));
+test('web icon export: attribute colours kept, non-colour style dropped', () => {
+  const out = sanitizeSvg(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+    + '<path d="M0 0h24v24H0z" fill="#3186FF" style="line-height:normal;white-space:normal"/></svg>',
+  );
   assert.ok(out);
   assert.match(out!, /fill="#3186FF"/i, 'existing fill attributes must be preserved verbatim');
   assert.doesNotMatch(out!, /line-height/i, 'non-colour CSS must not be migrated anywhere');

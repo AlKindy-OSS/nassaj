@@ -502,17 +502,7 @@ const assertCredentialWriteAllowed = (req: Request, provider: string): void => {
  *
  * Reads are untouched — listing is already workspace-authorized.
  */
-const assertGenericMcpProviderEnabled = (provider: string): void => {
-  if (provider === 'gemini') {
-    throw new AppError(
-      'Gemini MCP management is disabled because the installed runtime is agy.',
-      { code: 'GEMINI_GENERIC_MCP_DISABLED', statusCode: 403 },
-    );
-  }
-};
-
 const assertMcpWriteAllowed = (req: Request, scope: McpScope, provider: string): void => {
-  assertGenericMcpProviderEnabled(provider);
   if (!providerMcpService.providerSupportsMcp(provider)) {
     throw new AppError('This provider MCP surface is not enabled.', {
       code: 'MCP_WRITE_FORBIDDEN',
@@ -858,7 +848,6 @@ const parseProvider = (value: unknown): LLMProvider => {
     normalized === 'claude'
     || normalized === 'codex'
     || normalized === 'cursor'
-    || normalized === 'gemini'
     || normalized === 'antigravity'
     || normalized === 'opencode'
     || normalized === 'hermes'
@@ -1163,7 +1152,7 @@ router.get(
 //   - facet  (claude/codex/opencode): the key is merged into that provider's OWN
 //            credential file inside the caller's resolved (isolated) tree;
 //   - vendor (kimi/deepseek/glm): the legacy encrypted per-user secrets store;
-//   - none   (hermes/cursor/antigravity/gemini): 400 TERMINAL_ONLY.
+//   - none   (hermes/cursor/antigravity): 400 TERMINAL_ONLY.
 // The whole router sits behind authenticateToken, so userId is the caller's and
 // keys are isolated per user. These routes NEVER return or log the key value —
 // only `{ provider, configured }`. Once a key is set, GET /:provider/auth/status
@@ -1767,7 +1756,7 @@ router.get(
 //   • per-session-memory providers (claude transcript, opencode.db, cursor store,
 //     the agy/antigravity brain) → resume reads THEIR OWN store again, so the
 //     session returns to the model it is genuinely running on.
-//   • memoryless providers (codex / gemini / hermes / hosted vendors) have no
+//   • memoryless providers (codex / hermes / hosted vendors) have no
 //     per-session store: getCurrentActiveModel degrades to the CURRENT CATALOG
 //     DEFAULT. seedSessionModel (B-167) had written the CREATION model into this
 //     SAME key, and the first explicit re-pick already OVERWROTE that seed — so
@@ -2032,9 +2021,6 @@ router.get(
   '/:provider/mcp/servers',
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
-    // The retired Gemini MCP provider used to refuse listing itself; since its
-    // registry entry was removed (035fe5fb1) the route keeps that 403 contract.
-    assertGenericMcpProviderEnabled(provider);
     const scope = parseMcpScope(req.query.scope);
     const userId = readAuthenticatedUserId(req);
 
@@ -2103,7 +2089,6 @@ router.get(
   '/:provider/mcp/servers/inventory',
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
-    assertGenericMcpProviderEnabled(provider);
     const role = readAuthenticatedUserRole(req);
     if (role !== 'owner' && role !== 'admin') {
       throw new AppError('Listing every member\'s MCP servers requires an admin or owner.', {

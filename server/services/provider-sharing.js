@@ -1,7 +1,7 @@
 /**
  * provider-sharing — admin-configurable per-provider isolation policy.
  *
- * Each provider (claude/gemini/codex/agy/cursor) can be either:
+ * Each provider (claude/codex/agy/cursor/…) can be either:
  *   - 'isolated': credentials are isolated per user (resolveProviderEnv applies
  *                 the per-user CONFIG_DIR / HOME override for that provider), or
  *   - 'shared':   all users share the operator's credentials (env unchanged).
@@ -15,7 +15,7 @@
  * lazy load / restart; this install runs a single server process.)
  *
  * The defaults below MUST mirror the pre-feature behavior so an install with no
- * stored config behaves exactly as before: claude/gemini/codex isolated, agy and
+ * stored config behaves exactly as before: claude/codex isolated, agy and
  * cursor shared (ADR-016).
  */
 
@@ -27,7 +27,6 @@ const CONFIG_KEY = 'provider_sharing';
 /** Providers the policy recognizes. Any other key is rejected on write. */
 export const KNOWN_PROVIDERS = Object.freeze([
   'claude',
-  'gemini',
   'codex',
   'agy',
   'cursor',
@@ -67,7 +66,6 @@ export const SHARING_MODES = Object.freeze(['shared', 'isolated']);
  */
 const DEFAULT_CONFIG = Object.freeze({
   claude: 'isolated',
-  gemini: 'isolated',
   codex: 'isolated',
   agy: 'isolated',
   // cursor-agent derives every path from $HOME (login + chat state in ~/.cursor,

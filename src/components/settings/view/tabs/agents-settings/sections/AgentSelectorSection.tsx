@@ -30,7 +30,6 @@ export const AGENT_NAMES: Record<AgentProvider, string> = {
   claude: 'Claude',
   cursor: 'Cursor',
   codex: 'Codex',
-  gemini: 'Gemini',
   antigravity: 'Antigravity',
   opencode: 'OpenCode',
   qwen: 'Qwen Code',

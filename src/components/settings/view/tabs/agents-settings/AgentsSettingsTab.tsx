@@ -23,8 +23,6 @@ export default function AgentsSettingsTab({
   onCursorPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
-  geminiPermissionMode,
-  onGeminiPermissionModeChange,
   projects,
   initialAgent,
   initialCategory,
@@ -136,10 +134,6 @@ export default function AgentsSettingsTab({
       authStatus: providerAuthStatus.codex,
       onLogin: () => onProviderLogin('codex'),
     },
-    gemini: {
-      authStatus: providerAuthStatus.gemini,
-      onLogin: () => onProviderLogin('gemini'),
-    },
     // `onLogin` is wired but `AccountContent` for antigravity does not surface
     // a login button — agy uses Google OAuth from its CLI and the panel only
     // shows status plus instructions to run `agy -p hello`.
@@ -184,7 +178,6 @@ export default function AgentsSettingsTab({
     providerAuthStatus.claude,
     providerAuthStatus.codex,
     providerAuthStatus.cursor,
-    providerAuthStatus.gemini,
     providerAuthStatus.antigravity,
     providerAuthStatus.opencode,
     providerAuthStatus.qwen,
@@ -260,8 +253,6 @@ export default function AgentsSettingsTab({
             onCursorPermissionsChange={onCursorPermissionsChange}
             codexPermissionMode={codexPermissionMode}
             onCodexPermissionModeChange={onCodexPermissionModeChange}
-            geminiPermissionMode={geminiPermissionMode}
-            onGeminiPermissionModeChange={onGeminiPermissionModeChange}
             projects={projects}
           />
         </div>

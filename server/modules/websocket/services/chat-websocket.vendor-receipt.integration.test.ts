@@ -40,7 +40,7 @@ function harness(options: { enabled: boolean; supported: boolean }) {
   };
   const spawn = async (command: string, options: Record<string, unknown>) => { calls.legacy += 1; calls.input = { prompt: command, ...options }; };
   const dependencies = {
-    queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn, spawnGemini: spawn,
+    queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
     spawnAntigravity: spawn, spawnHermes: spawn, spawnQwen: spawn, spawnOpenCode: spawn,
     spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn,
     getSessionProvider: () => null,

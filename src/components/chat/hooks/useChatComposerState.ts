@@ -174,7 +174,6 @@ interface UseChatComposerStateArgs {
   cursorModel: string;
   claudeModel: string;
   codexModel: string;
-  geminiModel: string;
   antigravityModel: string;
   opencodeModel: string;
   hermesModel: string;
@@ -375,7 +374,6 @@ export function useChatComposerState({
   cursorModel,
   claudeModel,
   codexModel,
-  geminiModel,
   antigravityModel,
   opencodeModel,
   hermesModel,
@@ -666,9 +664,7 @@ export function useChatComposerState({
               ? cursorModel
               : displayProvider === 'codex'
                 ? codexModel
-                : displayProvider === 'gemini'
-                  ? geminiModel
-                  : displayProvider === 'antigravity'
+                : displayProvider === 'antigravity'
                     ? antigravityModel
                     : displayProvider === 'opencode'
                       ? opencodeModel
@@ -749,8 +745,7 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
-      geminiModel,
-      hermesModel,
+          hermesModel,
       opencodeModel,
       kimiModel,
       deepseekModel,
@@ -1003,9 +998,7 @@ export function useChatComposerState({
           ? 'cursor-tools-settings'
           : targetProvider === 'codex'
             ? 'codex-settings'
-            : targetProvider === 'gemini'
-              ? 'gemini-settings'
-              : targetProvider === 'antigravity'
+            : targetProvider === 'antigravity'
                 ? 'antigravity-settings'
                 : 'claude-settings';
       const savedSettings = safeLocalStorage.getItem(settingsKey);
@@ -1028,8 +1021,7 @@ export function useChatComposerState({
   const composerModelFor = useCallback((target: string): string => (
     target === 'cursor' ? cursorModel
       : target === 'codex' ? codexModel
-        : target === 'gemini' ? geminiModel
-          : target === 'antigravity' ? antigravityModel
+        : target === 'antigravity' ? antigravityModel
             : target === 'opencode' ? opencodeModel
               : target === 'hermes' ? hermesModel
                 : target === 'kimi' ? kimiModel
@@ -1039,7 +1031,7 @@ export function useChatComposerState({
                       : claudeModel
   ), [
     antigravityModel, claudeModel, codexModel, cursorModel, deepseekModel,
-    geminiModel, glmModel, hermesModel, kimiModel, opencodeModel, qwenModel,
+    glmModel, hermesModel, kimiModel, opencodeModel, qwenModel,
   ]);
 
   // Single source of truth for building and sending a provider chat command.
@@ -1200,16 +1192,6 @@ export function useChatComposerState({
           sessionId: targetSessionId,
           options: codexOptions,
         });
-      } else if (effectiveProvider === 'gemini') {
-        result = dispatch({
-          type: 'gemini-command',
-          command: messageContent,
-          sessionId: targetSessionId,
-          options: {
-            cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-            resume, model: geminiModel, sessionSummary, permissionMode, toolsSettings,
-          },
-        });
       } else if (effectiveProvider === 'antigravity') {
         result = dispatch({
           type: 'antigravity-command',
@@ -1345,7 +1327,7 @@ export function useChatComposerState({
       return result == null ? true : result.ok;
     },
     [
-      antigravityModel, claudeModel, codexModel, cursorModel, geminiModel, opencodeModel,
+      antigravityModel, claudeModel, codexModel, cursorModel, opencodeModel,
       hermesModel, kimiModel, deepseekModel, glmModel, qwenModel, engineProvider, composerMode, coordinationLevel,
       getToolsSettings, permissionMode, provider, selectedProject, selectedSession, sendMessage,
       composerModelFor,

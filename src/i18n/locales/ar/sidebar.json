@@ -235,7 +235,8 @@
         "other": ""
       }
     },
-    "hardwareToggleCollapsed": "تشغيل/إيقاف عرض استهلاك العتاد"
+    "hardwareToggleCollapsed": "تشغيل/إيقاف عرض استهلاك العتاد",
+    "hardwareToggleFooter": "استهلاك العتاد"
   },
   "branding": {
     "openSource": "مفتوح المصدر"

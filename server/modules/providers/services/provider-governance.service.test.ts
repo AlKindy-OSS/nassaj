@@ -399,7 +399,7 @@ describe('provider-governance — antigravity/agy (GEMINI.md, present-not-enforc
 describe('provider-governance — engines with no mechanism are always ungoverned', () => {
   // `kimi` was here until ADR-093 §2.3-1: it HAS a fail-closed channel (traced to
   // the live agent launch path), so it now lives in its own suite below.
-  for (const provider of ['hermes', 'cursor', 'gemini', 'deepseek', 'glm', 'sakana'] as const) {
+  for (const provider of ['hermes', 'cursor', 'deepseek', 'glm', 'sakana'] as const) {
     it(`${provider} ⇒ ungoverned/none (no 404 — an unknown engine still answers honestly)`, () => {
       assert.deepEqual(legacy(providerGovernanceService.getGovernance(provider, 9001)), {
         status: 'ungoverned',
@@ -518,7 +518,7 @@ describe('ADR-093 — channels carry the path, the link target and the verificat
   it('every provider answers with at least one channel (never an empty list)', () => {
     for (const provider of [
       'codex', 'claude', 'opencode', 'kimi', 'antigravity',
-      'hermes', 'cursor', 'gemini', 'deepseek', 'glm', 'sakana',
+      'hermes', 'cursor', 'deepseek', 'glm', 'sakana',
     ] as const) {
       const desc = providerGovernanceService.getGovernance(provider, 9101);
       assert.ok(desc.sources.length >= 1, `${provider} must report a channel`);
@@ -735,7 +735,7 @@ describe('ADR-093 §4.1 — which engines have a link action at all', () => {
   });
 
   it('mechanism-less engines have none (a button that lies is worse than no button)', () => {
-    for (const provider of ['hermes', 'cursor', 'gemini', 'deepseek', 'glm', 'sakana'] as const) {
+    for (const provider of ['hermes', 'cursor', 'deepseek', 'glm', 'sakana'] as const) {
       const plan = resolveGovernanceLinkPlan(provider, 7101);
       assert.equal(plan.linkable, false, provider);
       assert.equal(plan.refusal, 'no_mechanism', provider);

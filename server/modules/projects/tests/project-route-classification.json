@@ -15,10 +15,6 @@
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (404)"
  },
- "DELETE /api/gemini/sessions/:sessionId": {
-  "class": "project",
-  "creatorDenied": "deletes a Gemini transcript that the probe session (claude) does not have → 404 for everyone [inferred from handler code, not individually probed]"
- },
  "DELETE /api/projects/:projectId": {
   "class": "project"
  },

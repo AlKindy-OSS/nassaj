@@ -27,7 +27,7 @@ test('actual dispatch persists private native proof, strips public live/replay f
         runWriter.send({ kind: 'session_created', sessionId, provider: 'codex' } as never);
         runWriter.send(attachCodexCompletionProof({ kind: 'complete', sessionId, provider: 'codex', clientMsgId: options.clientMsgId }, proof) as never);
       },
-      queryClaudeSDK: async () => {}, spawnCursor: async () => {}, spawnGemini: async () => {}, spawnAntigravity: async () => {},
+      queryClaudeSDK: async () => {}, spawnCursor: async () => {}, spawnAntigravity: async () => {},
       spawnHermes: async () => {}, spawnKimi: async () => {}, spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
       getSessionProvider: () => 'codex', getActiveClaudeSDKSessions: () => [],
     } as never;

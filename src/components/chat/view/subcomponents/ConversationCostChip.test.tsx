@@ -453,7 +453,6 @@ describe('نافذة التفصيل', () => {
   it.each([
     'claude',
     'cursor',
-    'gemini',
     'antigravity',
     'opencode',
     'kimi',

@@ -101,7 +101,6 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
   claude: { name: 'Claude' },
   cursor: { name: 'Cursor' },
   codex: { name: 'Codex' },
-  gemini: { name: 'Gemini', description: 'Google Gemini AI assistant' },
   antigravity: { name: 'Antigravity (agy)', description: 'Google AI Pro via the agy CLI' },
   opencode: { name: 'OpenCode', description: 'OpenCode CLI assistant' },
   qwen: { name: 'Qwen Code', description: 'Personal Alibaba Cloud Coding Plan' },

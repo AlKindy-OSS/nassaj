@@ -454,6 +454,13 @@ async function spawnOpenCode(command, options = {}, ws) {
       prepareOpenCodeAttachments(images, files, workingDir),
     ]).then(([resolvedModel, attachments]) => {
       attachmentsTempDir = attachments.tempDir;
+      // T-1854 (qa H1b): last await is the Promise.all; spawn follows synchronously.
+      if (ws?.runFenceRevoked) {
+        runPresence.end();
+        void cleanupOpenCodeTempDir(attachmentsTempDir);
+        resolve();
+        return;
+      }
       // Resume case: the session id is known before the process runs, and
       // registerSession short-circuits when it re-sees the same id, so record
       // participation here so a resumed opencode conversation stays "native".

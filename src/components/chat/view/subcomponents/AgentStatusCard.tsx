@@ -52,7 +52,6 @@ const PROVIDER_LABEL_KEYS: Record<string, string> = {
   claude: 'messageTypes.claude',
   codex: 'messageTypes.codex',
   cursor: 'messageTypes.cursor',
-  gemini: 'messageTypes.gemini',
   opencode: 'messageTypes.opencode',
   kimi: 'messageTypes.kimi',
   deepseek: 'messageTypes.deepseek',

@@ -396,6 +396,7 @@ async function spawnCursor(command, options = {}, ws) {
           runSawWorkspaceTrustPrompt &&
           code !== 0 &&
           !hasRetriedWithTrust &&
+          !ws?.runFenceRevoked &&
           !args.includes('--trust')
         ) {
           hasRetriedWithTrust = true;
@@ -454,6 +455,11 @@ async function spawnCursor(command, options = {}, ws) {
       cursorProcess.stdin.end();
     };
 
+    // T-1854 (qa H1b): the only await is above; spawn follows synchronously.
+    if (ws?.runFenceRevoked) {
+      settleOnce(() => resolve());
+      return;
+    }
     runCursorProcess(baseArgs, 'initial');
   });
 }

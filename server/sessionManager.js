@@ -7,10 +7,9 @@ class SessionManager {
     // Store sessions in memory with conversation history
     this.sessions = new Map();
     this.maxSessions = 100;
-    // LEGACY PATH, kept deliberately after the gemini removal (T-1749/ADR-159 D1):
-    // this store is shared by agy and kimi today and already holds their files.
-    // Renaming the directory would orphan existing session state — a data move,
-    // which D1 explicitly forbids — so the name stays while the provider is gone.
+    // LEGACY PATH, kept deliberately: this store is shared by agy and kimi and
+    // already holds their files. Renaming the directory would orphan existing
+    // session state (a data move), so the historical name stays.
     this.sessionsDir = path.join(os.homedir(), '.gemini', 'sessions');
     this.ready = this.init();
   }

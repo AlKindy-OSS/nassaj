@@ -8,7 +8,10 @@
  */
 
 import { getConnection } from '@/modules/database/connection.js';
-import { retireProjectSubjectAccess } from '@/modules/database/repositories/project-access.js';
+import {
+  retireProjectSubjectAccess,
+  revalidateUserProjectAccess,
+} from '@/modules/database/repositories/project-access.js';
 
 export type UserRole = 'owner' | 'admin' | 'user';
 export type UserStatus = 'active' | 'disabled';
@@ -245,12 +248,16 @@ export const userDb = {
       }
     });
     apply(userId, status);
+    // T-1854: status changes rotate no project token; re-check live runs now.
+    revalidateUserProjectAccess(userId);
   },
 
   /** Updates a user's role (owner/admin/user). Used by owner-only management. */
   setRole(userId: number, role: UserRole): void {
     const db = getConnection();
     db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, userId);
+    // T-1854: an admin demotion can remove see-all access without a token rotation.
+    revalidateUserProjectAccess(userId);
   },
 
   /**
@@ -266,6 +273,7 @@ export const userDb = {
     const result = db
       .prepare("UPDATE users SET role = ? WHERE id = ? AND role = ? AND role <> 'owner'")
       .run(nextRole, userId, expectedRole);
+    if (result.changes === 1) revalidateUserProjectAccess(userId);
     return result.changes === 1;
   },
 
@@ -501,6 +509,9 @@ export const userDb = {
     if (outcome.deleted) {
       for (const projectId of outcome.projectIds) retireProjectSubjectAccess(projectId, userId);
     }
+    // T-1854 (qa M1): an admin reaches projects without a membership row, so
+    // the per-project retire above can miss runs; re-check every run of the user.
+    revalidateUserProjectAccess(userId);
     return outcome.deleted;
   },
 

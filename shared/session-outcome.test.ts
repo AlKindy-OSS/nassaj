@@ -28,7 +28,7 @@ describe('deriveOutcomeSignal — نموذج الحالات الخمس (B-544)',
   it('٢ — اكتمالٌ نظيف ⇒ done، ومهما اختلفت حمولة المزوّد', () => {
     // claude: بلا exitCode ولا success. codex: بلا exitCode أصلاً.
     assert.deepEqual(deriveOutcomeSignal({ kind: 'complete' }), { action: 'outcome', outcome: 'done' });
-    // kimi/hermes/opencode/agy/gemini: exitCode صفر.
+    // kimi/hermes/opencode/agy: exitCode صفر.
     assert.deepEqual(
       deriveOutcomeSignal({ kind: 'complete', exitCode: 0 }),
       { action: 'outcome', outcome: 'done' },
@@ -52,7 +52,7 @@ describe('deriveOutcomeSignal — نموذج الحالات الخمس (B-544)',
 
   it('٤ — كل صور الفشل ⇒ error، باختلاف لهجات المزوّدات', () => {
     assert.deepEqual(deriveOutcomeSignal({ kind: 'error' }), { action: 'outcome', outcome: 'error' });
-    // gemini/kimi/hermes/opencode/agy
+    // kimi/hermes/opencode/agy
     assert.deepEqual(
       deriveOutcomeSignal({ kind: 'complete', exitCode: 1 }),
       { action: 'outcome', outcome: 'error' },

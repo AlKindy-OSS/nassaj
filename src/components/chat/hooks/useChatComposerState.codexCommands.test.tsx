@@ -136,7 +136,7 @@ function renderComposer(provider = 'codex', overrides: Record<string, unknown> =
     engineProvider: null,
     permissionMode: 'default',
     cyclePermissionMode: () => {},
-    cursorModel: 'cursor', claudeModel: 'claude', codexModel: 'gpt-5', geminiModel: 'gemini',
+    cursorModel: 'cursor', claudeModel: 'claude', codexModel: 'gpt-5',
     antigravityModel: 'ag', opencodeModel: 'oc', hermesModel: 'hermes', kimiModel: 'kimi',
     deepseekModel: 'deepseek', glmModel: 'glm',
     isLoading: false,
@@ -590,7 +590,7 @@ it('B-894 refuses a full outbox before dispatch and preserves the composer', asy
 
 
 describe('B-894 original payload eligibility', () => {
-  it.each(['qwen', 'hermes', 'kimi', 'deepseek', 'glm', 'claude', 'codex', 'gemini', 'cursor', 'opencode', 'antigravity'])(
+  it.each(['qwen', 'hermes', 'kimi', 'deepseek', 'glm', 'claude', 'codex', 'cursor', 'opencode', 'antigravity'])(
     '%s sends a completeness manifest only on eligible text receipt paths', async (provider) => {
       const view = renderComposer(provider);
       act(() => view.result.current.setInput('Same text'));
@@ -823,7 +823,7 @@ describe('B-894 complete attachment retry guard', () => {
 });
 
 
-it.each(['qwen', 'hermes', 'kimi', 'deepseek', 'glm', 'cursor', 'gemini', 'antigravity'])(
+it.each(['qwen', 'hermes', 'kimi', 'deepseek', 'glm', 'cursor', 'antigravity'])(
   'B-894 refuses restored images when the %s wire path cannot carry them', async (provider) => {
     const file = new File(['image'], 'image.png', { type: 'image/png' });
     const deleteMany = vi.fn(async () => {});

@@ -37,8 +37,9 @@ const GRANT_PROVIDERS: GrantProvider[] = filterDisabledProviders([
 
 /**
  * Agents-settings agent id → grant unit. `antigravity` is keyed `agy` in the
- * policy, and gemini/agy are ONE credential on disk, so both pages edit the
- * `gemini` grant (mirrors `credentialUnit` on the server). Agents with no
+ * policy, and agy's grant is stored under the key `gemini` — only the name of
+ * its `~/.gemini` credential home, not a provider (mirrors `credentialUnit` on
+ * the server). Agents with no
  * credential to delegate (sakana) map to `null`, so the Account tab renders
  * no sharing section for them.
  */

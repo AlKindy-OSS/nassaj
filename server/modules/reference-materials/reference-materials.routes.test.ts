@@ -144,6 +144,14 @@ test('member read succeeds and reports read-only capability', async () => {
   assert.equal(item.canEdit, false);
 });
 
+test('B-1323 regression: skills listing does not fail with 503 on retired providers', async () => {
+  const response = await call('GET', '/api/references/skills?pageSize=100', memberUser);
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  const entries = (response.json.data as { entries: Array<{ provider: string | null }> }).entries;
+  assert.equal(entries.some((entry) => entry.provider === 'gemini'), false);
+  assert.equal(entries.some((entry) => entry.provider === 'sakana'), false);
+});
+
 test('member write is rejected', async () => {
   const id = await firstMemoryId(memberUser);
   const response = await call('PUT', `/api/references/memory/${id}`, memberUser, {

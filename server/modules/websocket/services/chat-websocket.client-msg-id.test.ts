@@ -64,7 +64,6 @@ function makeDependencies() {
       queryClaudeSDK: spawn('claude'),
       spawnCursor: spawn('cursor'),
       queryCodex: spawn('codex'),
-      spawnGemini: spawn('gemini'),
       spawnAntigravity: spawn('antigravity'),
       spawnHermes: spawn('hermes'),
       spawnKimi: spawn('kimi'),

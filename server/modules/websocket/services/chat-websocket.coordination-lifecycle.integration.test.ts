@@ -46,7 +46,7 @@ test('not-started retry dispatches once more, terminal retry replays verdict, mi
           runWriter.send({ kind: 'complete', success: true, exitCode: 0, content: 'done' } as never);
         }
       },
-      spawnCursor: async () => {}, queryCodex: async () => {}, spawnGemini: async () => {},
+      spawnCursor: async () => {}, queryCodex: async () => {},
       spawnAntigravity: async () => {}, spawnHermes: async () => {}, spawnKimi: async () => {},
       spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
       getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],

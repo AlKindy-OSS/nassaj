@@ -16,9 +16,7 @@ describe('MCP provider capability registry', () => {
     expect(MCP_SUPPORTED_SCOPES.opencode).toEqual([]);
   });
 
-  it('hides Gemini generic MCP without changing Cursor manual MCP', () => {
-    expect(MCP_SUPPORTED_SCOPES.gemini).toEqual([]);
-    expect(MCP_SUPPORTED_TRANSPORTS.gemini).toEqual([]);
+  it('keeps Cursor manual MCP for both scopes', () => {
     expect(MCP_SUPPORTED_SCOPES.cursor).toEqual(['user', 'project']);
     expect(MCP_SUPPORTED_TRANSPORTS.cursor).toEqual(['stdio', 'http']);
   });

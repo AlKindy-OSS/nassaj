@@ -181,7 +181,10 @@ function scheduleClaudeBufferDrop(key) {
  */
 function bufferThenSend(ws, sessionKey, payload) {
   try {
-    const seq = sessionKey ? claudeSessionRegistry.record(sessionKey, payload) : null;
+    // T-1854 (qa M2): nothing a revoked run fence drops may enter the replay ring.
+    const seq = sessionKey && ws?.runFenceRevoked !== true
+      ? claudeSessionRegistry.record(sessionKey, payload)
+      : null;
     if (seq !== null && seq !== undefined) {
       payload.sequence = seq;
     }

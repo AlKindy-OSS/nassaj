@@ -11,7 +11,7 @@ import SettingsGroup from '../../../../SettingsGroup';
 import SettingsRow from '../../../../SettingsRow';
 import SettingsSection from '../../../../SettingsSection';
 import SettingsToggle from '../../../../SettingsToggle';
-import type { CodexPermissionMode, GeminiPermissionMode } from '../../../../../types/types';
+import type { CodexPermissionMode } from '../../../../../types/types';
 
 /**
  * لوحة الأذونات — لغة سطوح الإعدادات v3
@@ -32,12 +32,11 @@ import type { CodexPermissionMode, GeminiPermissionMode } from '../../../../../t
  * - **`h3.text-lg`** كان أكبر من رأس القسم الذي يعلوه — الابن أكبر من أبيه.
  *   صارت الرؤوس `SettingsSection` على سلّم §3.
  *
- * **لماذا `SegmentedControl` لأوضاع Codex/Gemini بعد `TierMatrix`:** المصفوفة
+ * **لماذا `SegmentedControl` لأوضاع Codex بعد `TierMatrix`:** المصفوفة
  * وضعت أسماء الأوضاع في رؤوس أعمدة وتركت الخلايا صامتة، فخرجت على الشاشة اثني
  * عشر مربّعاً فارغاً — تشخيصٌ مقيسٌ على لقطة لا مستنتَج (v2 §0-2). المنتقي
  * المجزّأ يحمل نصّه داخله، فلا خيارَ يُعرَف بموضعه. **التصعيد الأمني لا يضيع**:
- * ترتيب الخيارات هو ترتيبه (Codex: الموثوقة ← مساحة العمل ← تجاوز؛ Gemini: يسأل
- * ← تعديل تلقائي ← YOLO)، والخيار الذي يرفع الحاجز وحده يُصبغ `bg-destructive`،
+ * ترتيب الخيارات هو ترتيبه (Codex: الموثوقة ← مساحة العمل ← تجاوز)، والخيار الذي يرفع الحاجز وحده يُصبغ `bg-destructive`،
  * ووصفُ الوضع المحدَّد مكتوبٌ تحته دائماً لا مدفوناً في `title`.
  */
 
@@ -603,79 +602,13 @@ function CodexPermissions({ permissionMode, onPermissionModeChange }: Omit<Codex
   );
 }
 
-type GeminiPermissionsProps = {
-  agent: 'gemini';
-  permissionMode: GeminiPermissionMode;
-  onPermissionModeChange: (value: GeminiPermissionMode) => void;
-};
-
-function GeminiPermissions({ permissionMode, onPermissionModeChange }: Omit<GeminiPermissionsProps, 'agent'>) {
-  const { t } = useTranslation(['settings', 'chat']);
-
-  // قيمة الوضع `auto_edit` ومفتاحه `autoEdit` — تباينٌ قائم في العقد، يُنقل كما هو.
-  const options: readonly SegmentedOption<GeminiPermissionMode>[] = [
-    { value: 'default', label: t('gemini.modesShort.default') },
-    { value: 'auto_edit', label: t('gemini.modesShort.autoEdit') },
-    { value: 'yolo', label: t('gemini.modesShort.yolo'), danger: true },
-  ];
-
-  const selected = options.find((option) => option.value === permissionMode) ?? options[0];
-  const titleByMode: Record<GeminiPermissionMode, string> = {
-    default: t('gemini.modes.default.title'),
-    auto_edit: t('gemini.modes.autoEdit.title'),
-    yolo: t('gemini.modes.yolo.title'),
-  };
-  const descriptionByMode: Record<GeminiPermissionMode, string> = {
-    default: t('gemini.modes.default.description'),
-    auto_edit: t('gemini.modes.autoEdit.description'),
-    yolo: t('gemini.modes.yolo.description'),
-  };
-
-  return (
-    <div className="space-y-8">
-      <SettingsSection
-        icon={SlidersHorizontal}
-        tone="info"
-        title={t('gemini.permissionMode')}
-        description={t('gemini.description')}
-        boxed
-      >
-        <SettingsGroup>
-          <SettingsRow stacked label={t('permissions.modeRowLabel')}>
-            <div className="space-y-2.5">
-              <SegmentedControl
-                options={options}
-                value={permissionMode}
-                onChange={onPermissionModeChange}
-                label={t('gemini.permissionMode')}
-              />
-              <SelectedModeNote
-                description={descriptionByMode[selected.value]}
-                danger={Boolean(selected.danger)}
-              />
-            </div>
-          </SettingsRow>
-        </SettingsGroup>
-
-        <SettingsCollapsible summary={t('permissions.modesExplainer')}>
-          {options.map((option) => (
-            <p key={option.value}>
-              <strong>{titleByMode[option.value]}:</strong> {descriptionByMode[option.value]}
-            </p>
-          ))}
-        </SettingsCollapsible>
-      </SettingsSection>
-    </div>
-  );
-}
-
 type AntigravityPermissionsProps = {
   agent: 'antigravity';
 };
 
 /*
  * agy (Antigravity CLI) does not expose configurable allow/deny tool lists or a
- * selectable permission mode the way Claude/Cursor/Codex/Gemini do. The server
+ * selectable permission mode the way Claude/Cursor/Codex do. The server
  * always spawns agy with `--dangerously-skip-permissions` and the agent's
  * autonomy is governed inside agy's own CLI settings, not from this UI. We
  * surface that reality here so the Permissions tab is never blank and matches
@@ -732,7 +665,6 @@ type PermissionsContentProps =
   | ClaudePermissionsProps
   | CursorPermissionsProps
   | CodexPermissionsProps
-  | GeminiPermissionsProps
   | AntigravityPermissionsProps;
 
 export default function PermissionsContent(props: PermissionsContentProps) {
@@ -742,10 +674,6 @@ export default function PermissionsContent(props: PermissionsContentProps) {
 
   if (props.agent === 'cursor') {
     return <CursorPermissions {...props} />;
-  }
-
-  if (props.agent === 'gemini') {
-    return <GeminiPermissions {...props} />;
   }
 
   if (props.agent === 'antigravity') {

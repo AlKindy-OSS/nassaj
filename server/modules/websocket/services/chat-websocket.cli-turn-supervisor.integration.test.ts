@@ -32,7 +32,7 @@ function harness(supported: boolean, enabled = supported) {
     setSessionId() {},
   };
   const dependencies = {
-    queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn, spawnGemini: spawn,
+    queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
     spawnAntigravity: spawn, spawnHermes: spawn, spawnOpenCode: spawn,
     spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn, spawnQwen: spawn,
     getSessionProvider: () => null,

@@ -118,7 +118,7 @@ mock.module('@/modules/providers/services/mcp.service.js', {
         return cleanupReturnsEmpty
           ? []
           : cleanupUnverified
-          ? [{ provider: 'gemini', removed: false, verified: false, state: 'unverified' }]
+          ? [{ provider: 'cursor', removed: false, verified: false, state: 'unverified' }]
           : cleanupFailsHere
           ? [{ provider: 'codex', removed: false, verified: false, state: 'failed', error: cleanupError }]
             : [
@@ -454,7 +454,7 @@ test('a newly provisioned member receives every enabled connector', async () => 
     assert.equal(upsertCalls.length, 2, 'the two proven per-user engines only');
     assert.ok(upsertCalls.every((c) => c.userId === 7));
     assert.ok(
-      !upsertCalls.some((c) => ['gemini', 'opencode', 'cursor'].includes(c.provider)),
+      !upsertCalls.some((c) => ['opencode', 'cursor'].includes(c.provider)),
       'unproven runtime targets are not advertised or written',
     );
     assert.equal(results.length, 2);
@@ -855,7 +855,7 @@ test('a personal connector reaches only its owner', async () => {
     assert.ok(written.length > 0, 'the owner does get it');
     assert.ok(written.every((c) => c.userId === 2), 'and only the owner');
     assert.ok(
-      !results.some((r) => ['gemini', 'opencode', 'cursor'].includes(r.provider)),
+      !results.some((r) => ['opencode', 'cursor'].includes(r.provider)),
       'unproven destinations are omitted rather than claimed',
     );
   } finally {

@@ -31,7 +31,7 @@
 #
 #   لماذا فحص العمليات الأبناء هنا (لا فحص workflow في safe-restart وحده)؟
 #   لأن الـdrain يُبقي العملية القديمة حيّة حتى countActiveSessions==0، وهذا
-#   يقابل عمليات المزوّد الابنة (claude/agy/codex/gemini/cursor/hermes/opencode)
+#   يقابل عمليات المزوّد الابنة (claude/agy/codex/cursor/hermes/opencode)
 #   تحت PID العملية. safe-restart يفحص journals الـworkflows فقط، فأضفنا هنا
 #   بوّابة العمليات الأبناء كي لا نُطلق restart أثناء جلسة تفاعلية حيّة (وهو ما
 #   يعيد إنتاج عطل 502 بالضبط).
@@ -130,7 +130,7 @@ PROC_NAME="${PROC_NAME:-${NASSAJ_PROCESS_NAME:-nassaj-dev}}"
 THRESHOLD_MB="${MEM_GUARD_THRESHOLD_MB:-850}"
 FORCE_MB="${MEM_GUARD_FORCE_MB:-}"
 FORCE_RESTART="${MEM_GUARD_FORCE_RESTART:-0}"
-PROVIDERS_RE="${MEM_GUARD_PROVIDERS_RE:-claude|agy|codex|gemini|cursor|hermes|opencode}"
+PROVIDERS_RE="${MEM_GUARD_PROVIDERS_RE:-claude|agy|codex|cursor|hermes|opencode}"
 LOG_FILE="${MEM_GUARD_LOG:-$PM2_HOME/logs/nassaj-memory-guard.log}"
 STATE_FILE="${MEM_GUARD_STATE:-$PM2_HOME/logs/nassaj-memory-guard.state}"
 FAIL_FILE="${MEM_GUARD_FAIL_STATE:-$STATE_FILE.fail}"

@@ -329,7 +329,7 @@ describe('flag ON — caged launch shape', () => {
       isProviderIsolated: () => true,
     };
     const out = resolveCagedLaunch(
-      { userId: 99, provider: 'gemini', cmd: 'gemini', args: [], cwd: '/proj' },
+      { userId: 99, provider: 'agy', cmd: 'agy', args: [], cwd: '/proj' },
       deps,
     );
     assertContainsSeq(out.args, ['--tmpfs', USERS_ROOT]);
@@ -549,15 +549,6 @@ describe('cageMountPlan (T-898)', () => {
     for (const f of [CRED.claudeCred, CRED.claudeJson, CRED.codexAuth, CRED.agyToken, CRED.opencodeAuth]) {
       assert.ok(plan.maskFiles.includes(f), `${f} must be masked inside the hermes cage`);
     }
-  });
-
-  it('ISOLATED gemini: no gemini credential exists at operator level — all six creds masked', () => {
-    const { deps } = allExist();
-    const plan = cageMountPlan({ provider: 'gemini', userId: 7 }, deps);
-    for (const f of ALL_CREDS) {
-      assert.ok(plan.maskFiles.includes(f), `${f} must be masked inside the gemini cage`);
-    }
-    assert.ok(plan.writePaths.includes(path.join(HOME, '.gemini', 'projects')));
   });
 
   it('existsSync-filters everything: nothing to mask/bind on a bare host', () => {

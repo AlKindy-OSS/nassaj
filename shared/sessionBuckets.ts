@@ -38,7 +38,6 @@ export const SESSION_BUCKET_PROVIDERS = [
   'claude',
   'cursor',
   'codex',
-  'gemini',
   'antigravity',
   'opencode',
   'qwen',

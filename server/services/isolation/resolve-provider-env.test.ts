@@ -204,7 +204,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
     _resetProviderSharingCache();
     setProviderSharingConfig({
       claude: 'isolated',
-      gemini: 'isolated',
       codex: 'isolated',
       agy: 'isolated',
       cursor: 'isolated',
@@ -226,7 +225,7 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   // Every provider EXCEPT kimi must be totally mode-agnostic: the env produced
   // by the legacy 3-arg call, by mode='chat', and by mode='agent' are identical.
   const MODE_AGNOSTIC = [
-    'claude', 'gemini', 'codex', 'agy', 'opencode', 'deepseek', 'glm', 'qwen',
+    'claude', 'codex', 'agy', 'opencode', 'deepseek', 'glm', 'qwen',
   ] as const;
   for (const provider of MODE_AGNOSTIC) {
     it(`${provider}: legacy 3-arg === mode 'chat' === mode 'agent' (mode is a no-op)`, () => {
@@ -246,17 +245,12 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
     });
   }
 
-  it('first-party CLI overrides are unchanged (claude/gemini/codex/agy)', () => {
+  it('first-party CLI overrides are unchanged (claude/codex/agy)', () => {
     isolateAll();
     const uid = 501;
     assert.equal(
       resolveProviderEnv(uid, 'claude', { ...BASE }).CLAUDE_CONFIG_DIR,
       userDir(uid, '.claude'),
-    );
-    // B-548: gemini isolates through HOME (like agy), NOT GEMINI_CLI_HOME.
-    assert.equal(
-      resolveProviderEnv(uid, 'gemini', { ...BASE }).HOME,
-      userDir(uid),
     );
     assert.equal(
       resolveProviderEnv(uid, 'codex', { ...BASE }).CODEX_HOME,
