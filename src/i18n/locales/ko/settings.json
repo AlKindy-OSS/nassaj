@@ -412,7 +412,14 @@
       "done": "완료",
       "copy": "복사",
       "copied": "복사됨",
-      "successHint": "이 일회용 링크를 공유하세요. 한 번만 표시됩니다."
+      "successHint": "이 일회용 링크를 공유하세요. 한 번만 표시됩니다.",
+      "durationLabel": "유효 기간",
+      "durations": {
+        "day1": "1일",
+        "day3": "3일",
+        "day7": "7일",
+        "day30": "30일"
+      }
     }
   },
   "notifications": {

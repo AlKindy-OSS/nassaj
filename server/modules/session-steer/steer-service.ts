@@ -24,7 +24,7 @@ const TURN_ID = /^[0-9a-f-]{36}$/u;
 
 const STATUS: Record<SteerRejectCode, number> = {
   invalid_request: 400, text_empty: 400, not_writable: 403, steer_disabled: 403, steer_not_consented: 403,
-  steer_unsupported: 409, turn_not_active: 409, steer_self: 409, plan_mode: 409, steer_unavailable: 409,
+  steer_unsupported: 409, turn_not_active: 409, starter_unknown: 409, plan_mode: 409, steer_unavailable: 409,
   duplicate: 409, turn_aborted: 409, text_too_long: 413, steer_rate_limited: 429, steer_turn_limit: 429,
   steer_queue_full: 429, internal_error: 500,
 };
@@ -116,8 +116,15 @@ function audit(req: Request, sender: number, starter: number | null, mode: strin
 
 /**
  * Admits one steer request. Order: shape → write access → provider capability
- * → live run → sender≠starter → plan mode → hooks armed → policy+consent →
- * turn authority → rate/turn/queue limits → text bounds. Never throws.
+ * → live run → known starter → plan mode → policy+consent (per sender) →
+ * arming → turn authority → rate/turn/queue limits → text bounds. Never throws.
+ *
+ * The starter may steer his own turn: consent (which is about OTHERS) is
+ * skipped for him, the admin policy still applies, his note never taints, and
+ * he needs only an armed injection path. Another member needs policy AND the
+ * starter's current consent (else steer_disabled / steer_not_consented) AND the
+ * taint hook registered at run start (else steer_unavailable — e.g. consent
+ * granted after the run began, or the no-hook retry path).
  */
 export function handleSessionSteer(data: unknown, ctx: SteerContext): SessionSteerResult {
   const req = readRequest(data);
@@ -140,11 +147,12 @@ export function handleSessionSteer(data: unknown, ctx: SteerContext): SessionSte
       audit(req, senderId, starter, mode, text, code);
       return reply(req, code);
     };
-    if (starter === null || starter === senderId) return refuse('steer_self');
+    if (starter === null) return refuse('starter_unknown');
     if (mode === 'plan') return refuse('plan_mode');
-    if (!run.hooksArmed()) return refuse('steer_unavailable');
-    const allowed = isSteeringAllowedFor(starter);
+    const allowed = isSteeringAllowedFor(starter, senderId);
     if (!allowed.allowed) return refuse(allowed.code);
+    const selfSteer = senderId === starter;
+    if (!(selfSteer ? run.injectionArmed() : run.taintHookArmed())) return refuse('steer_unavailable');
     if (run.turnId !== req.turnId) return refuse('turn_not_active');
     const now = (ctx.now ?? Date.now)();
     const rateKey = `${senderId}:${req.sessionId}`;
@@ -154,7 +162,7 @@ export function handleSessionSteer(data: unknown, ctx: SteerContext): SessionSte
     const clean = sanitizeSteerText(req.text);
     if (!clean.ok) return refuse(clean.code);
     const senderName = ctx.getDisplayName(senderId) ?? 'member';
-    const wrapped = buildSteerWrapper(senderName, clean.text);
+    const wrapped = buildSteerWrapper(senderName, clean.text, selfSteer ? 'owner' : 'member');
     if (!wrapped) return refuse('text_too_long', clean.text);
     const payloadSha256 = adapter.payloadHash(wrapped);
     if (!payloadSha256) return refuse('text_too_long', clean.text);

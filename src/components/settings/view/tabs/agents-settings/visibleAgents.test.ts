@@ -4,14 +4,8 @@ import { visibleSettingsAgents } from './visibleAgents';
 describe('visibleSettingsAgents (T-1760 order)', () => {
   it('orders tiles by each company’s first generative-AI release', () => {
     expect(visibleSettingsAgents()).toEqual([
-      'antigravity', 'codex', 'cursor', 'claude', 'kimi', 'deepseek', 'opencode',
+      'antigravity', 'codex', 'claude', 'opencode',
     ]);
-  });
-
-  it('keeps the coming-soon deepseek tile in its dated slot, not appended last', () => {
-    const agents = visibleSettingsAgents();
-    expect(agents.indexOf('deepseek')).toBe(agents.indexOf('kimi') + 1);
-    expect(agents.at(-1)).toBe('opencode');
   });
 
   it('hides globally disabled providers that are not coming-soon', () => {
@@ -21,5 +15,7 @@ describe('visibleSettingsAgents (T-1760 order)', () => {
     expect(agents).not.toContain('hermes');
     // qwen: disabled 2026-09-28 (owner decision), key to move to the OpenCode carrier.
     expect(agents).not.toContain('qwen');
+    // cursor, kimi, deepseek: hidden 2026-09-29 (owner decision).
+    for (const hidden of ['cursor', 'kimi', 'deepseek']) expect(agents).not.toContain(hidden);
   });
 });

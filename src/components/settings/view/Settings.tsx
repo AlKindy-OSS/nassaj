@@ -346,10 +346,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
               {/* فهرسُ الاعتمادات ومنزلُ الشركة التي لا بلاطةَ لوكيلها
                   (T-1206) — لا سطحَ كتابةٍ ثانٍ: انظر رأس `VendorsSettingsTab`. */}
               {activeTab === 'vendors' && (
-                <VendorsSettingsTab
-                  focusCompanyId={vendorFocusCompanyId}
-                  onQwenConnect={() => openLoginForProvider('qwen')}
-                />
+                <VendorsSettingsTab focusCompanyId={vendorFocusCompanyId} />
               )}
 
               {activeTab === 'api' && <CredentialsSettingsTab />}

@@ -412,7 +412,14 @@
       "done": "完成",
       "copy": "复制",
       "copied": "已复制",
-      "successHint": "请共享此一次性链接，它只显示一次。"
+      "successHint": "请共享此一次性链接，它只显示一次。",
+      "durationLabel": "有效期",
+      "durations": {
+        "day1": "1 天",
+        "day3": "3 天",
+        "day7": "7 天",
+        "day30": "30 天"
+      }
     }
   },
   "notifications": {

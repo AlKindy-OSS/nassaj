@@ -200,9 +200,9 @@ test('mapCliOptionsToSDK falls back to the static list when no validModelValues 
   assert.equal(stat.model, 'sonnet[1m]', 'static-list model still accepted on the degraded path');
   assert.equal(stat.warnings.length, 0);
 
-  // claude-opus-4-8 is in the static list.
-  const opus = mapAndCaptureWarn({ model: 'claude-opus-4-8' });
-  assert.equal(opus.model, 'claude-opus-4-8');
+  // claude-opus-5-5 is in the static list.
+  const opus = mapAndCaptureWarn({ model: 'claude-opus-5-5' });
+  assert.equal(opus.model, 'claude-opus-5-5');
   assert.equal(opus.warnings.length, 0);
 });
 

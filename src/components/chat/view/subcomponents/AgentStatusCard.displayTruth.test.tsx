@@ -47,6 +47,7 @@ import AgentStatusCard from './AgentStatusCard';
 afterEach(() => {
   translationLanguage.value = 'en';
   cleanup();
+  localStorage.clear();
 });
 
 function agent(overrides: Partial<RunAgent>): RunAgent {
@@ -456,5 +457,97 @@ describe('تبديل الطيّ بالنقر على صف الرأس (T-1744)', (
       false,
       'chevron يجب أن يُطوي البطاقة مرة واحدة فقط',
     );
+  });
+});
+
+// ── إخفاء الوكلاء المكتملين (افتراضي: مخفيّون) ───────────────────────────────
+describe('إخفاء الوكلاء المكتملين', () => {
+  function renderMixedCard() {
+    return render(
+      <AgentStatusCard
+        agents={[
+          agent({ id: 'a1', type: 'running-agent', status: 'running' }),
+          agent({ id: 'a2', type: 'done-agent', status: 'done' }),
+          agent({ id: 'a3', type: 'stale-agent', status: 'stale' as never }),
+        ]}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={() => {}}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+      />,
+    );
+  }
+
+  it('افتراضياً: الوكيل المكتمل مخفي، والجاري وبلا الإشارة ظاهران', () => {
+    const { container } = renderMixedCard();
+    const text = container.textContent ?? '';
+
+    assert.equal(text.includes('running-agent'), true, 'الوكيل الجاري يجب أن يظهر');
+    assert.equal(text.includes('stale-agent'), true, 'وكيل بلا إشارة يجب ألّا يُخفى');
+    assert.equal(text.includes('done-agent'), false, 'الوكيل المكتمل يجب أن يُخفى افتراضياً');
+  });
+
+  it('زرّ «إظهار المكتمل» يُظهر الصفّ المخفي ويتحوّل نصّه', () => {
+    const { container } = renderMixedCard();
+
+    const showBtn = screen.getByLabelText('Show completed agents');
+    fireEvent.click(showBtn);
+
+    assert.equal((container.textContent ?? '').includes('done-agent'), true);
+    assert.equal(screen.queryByLabelText('Hide completed agents') !== null, true);
+  });
+
+  it('التفضيل يُستعاد من localStorage عند إعادة التركيب', () => {
+    const { unmount } = renderMixedCard();
+    const showBtn = screen.getByLabelText('Show completed agents');
+    fireEvent.click(showBtn);
+    unmount();
+
+    const { container } = renderMixedCard();
+    assert.equal(
+      (container.textContent ?? '').includes('done-agent'),
+      true,
+      'التفضيل المحفوظ (إظهار) يجب أن يُستعاد',
+    );
+  });
+
+  it('كل الوكلاء مكتملون ومخفيّون ⇒ ملخّص سطر واحد بدل قائمة فارغة', () => {
+    const { container } = render(
+      <AgentStatusCard
+        agents={[
+          agent({ id: 'a1', type: 'agent-one', status: 'done' }),
+          agent({ id: 'a2', type: 'agent-two', status: 'done' }),
+        ]}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={() => {}}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+      />,
+    );
+
+    const text = container.textContent ?? '';
+    assert.equal(text.includes('2 completed'), true, `الملخّص لم يظهر: ${text}`);
+    assert.equal(text.includes('agent-one'), false);
+  });
+
+  it('لا يوجد وكيل مكتمل ⇒ زرّ التبديل لا يُعرض إطلاقاً', () => {
+    render(
+      <AgentStatusCard
+        agents={[agent({ id: 'a1', type: 'running-only', status: 'running' })]}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={() => {}}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+      />,
+    );
+
+    assert.equal(screen.queryByLabelText('Hide completed agents'), null);
+    assert.equal(screen.queryByLabelText('Show completed agents'), null);
   });
 });

@@ -144,7 +144,7 @@ test('runningSessions reaches every permitted recipient and is privacy-filtered'
   await flush();
   assert.deepEqual(
     recipient7.last?.runningSessions.find((e) => e.sessionId === 's-shared'),
-    { sessionId: 's-shared', state: 'frozen' },
+    { sessionId: 's-shared', state: 'frozen', projectId: null },
     'a frozen child is reported as frozen, not dropped',
   );
 
@@ -203,7 +203,7 @@ test('presenceRunState ignores unknown runs and invalid states', async () => {
   await flush();
 
   assert.deepEqual(recipient.last?.runningSessions, [
-    { sessionId: 's-only', state: 'running' },
+    { sessionId: 's-only', state: 'running', projectId: null },
   ]);
 
   presence.presenceRunStopped({ userId: 1, sessionId: 's-only' });

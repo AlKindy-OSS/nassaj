@@ -134,6 +134,9 @@ export interface Project extends Partial<SessionBuckets<ProjectSession>> {
   // Server-relative URL of the project's custom logo (cache-busted), or null
   // when it has none (T-1403). Shared state, like the display name.
   logoUrl?: string | null;
+  // Normalized (https:// prefixed) external link for the project (T-1950),
+  // or null when it has none. Shared state, like the display name/logo.
+  linkUrl?: string | null;
   // True when the requesting user participates in >=1 session of this project
   // (B-MU-UX-PROJ-FILTER). Informational only — the server never filters the
   // project list; the frontend "My Projects / All" toggle uses this flag.

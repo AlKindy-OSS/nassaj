@@ -133,6 +133,20 @@ export const NASSAJ_HOST_SECRET_EXACT_DENY = Object.freeze([
   // one, which is the failure mode B-222 already taught this repo.
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
+  // T-1906: the personal Qwen Coding Plan key. The qwen-plan opencode launcher
+  // sets it on its own child AFTER sanitizing; no other run may inherit it.
+  'NASSAJ_QWEN_PLAN_API_KEY',
+]);
+
+/**
+ * Host-secret PREFIXES (case-insensitive), T-1906: Alibaba credential
+ * namespaces. The qwen launchers set their own BAILIAN_* variable after
+ * resolveProviderEnv; an inherited one must reach no run at all.
+ * @type {ReadonlyArray<string>}
+ */
+export const NASSAJ_HOST_SECRET_PREFIX_DENY = Object.freeze([
+  'BAILIAN_',
+  'DASHSCOPE_',
 ]);
 
 /**
@@ -160,6 +174,7 @@ export function isDeniedHostSecretEnvKey(name) {
   if (typeof name !== 'string' || name.length === 0) return false;
   const upper = name.toUpperCase();
   if (NASSAJ_HOST_SECRET_EXACT_DENY.some((d) => d === upper)) return true;
+  if (NASSAJ_HOST_SECRET_PREFIX_DENY.some((p) => upper.startsWith(p))) return true;
   if (NASSAJ_HOST_SECRET_SUFFIX_DENY.some((s) => upper.endsWith(s))) return true;
   return false;
 }
@@ -213,6 +228,7 @@ export const VENDOR_AGENT_ENV_PREFIX_DENY = Object.freeze([
   'CURSOR_',
   'GH_',
   'GITHUB_',
+  ...NASSAJ_HOST_SECRET_PREFIX_DENY,
 ]);
 
 /**

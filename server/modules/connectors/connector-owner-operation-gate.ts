@@ -16,8 +16,14 @@ export type ConnectorOwnerOperation =
   | 'oauth_revoke';
 
 const AUTHORIZED = Symbol('authorized-connector-owner-operation');
-const COOKIE_NAME = 'nassaj_connector_recent_auth';
-const CSRF_COOKIE_NAME = 'nassaj_connector_csrf';
+/** Plain-HTTP (loopback development) name; never accepted under an https origin. */
+const LEGACY_COOKIE_NAME = 'nassaj_connector_recent_auth';
+/** HTTPS name: the __Host- prefix forbids Domain, forces Secure and Path=/. */
+const HOST_COOKIE_NAME = '__Host-nassaj_connector_recent_auth';
+/** Plain-HTTP (loopback development) CSRF cookie name. */
+const LEGACY_CSRF_COOKIE_NAME = 'nassaj_connector_csrf';
+/** HTTPS CSRF cookie name: __Secure- keeps a non-Secure sibling from planting a duplicate. */
+const SECURE_CSRF_COOKIE_NAME = '__Secure-nassaj_connector_csrf';
 const OPERATION_TTL_MS = 30_000;
 
 type OperationRepository = Readonly<{
@@ -50,17 +56,65 @@ export type AuthorizedOwnerOperation = Readonly<{
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
-const cookieValue = (req: express.Request, cookieName: string): string | null => {
+/**
+ * Reads one 64-hex cookie. A name that appears more than once is ambiguous
+ * (e.g. a sibling-subdomain cookie shadowing ours), so it resolves to null.
+ */
+const cookieValue = (req: express.Request, cookieName: string | null): string | null => {
   const raw = req.headers.cookie;
-  if (typeof raw !== 'string') return null;
+  if (typeof raw !== 'string' || cookieName === null) return null;
+  let found: string | null = null;
+  let seen = 0;
   for (const pair of raw.split(';')) {
     const [name, ...rest] = pair.trim().split('=');
-    if (name === cookieName) {
-      const value = rest.join('=');
-      return /^[a-f0-9]{64}$/u.test(value) ? value : null;
-    }
+    if (name !== cookieName) continue;
+    seen += 1;
+    found = rest.join('=');
   }
-  return null;
+  return seen === 1 && found !== null && /^[a-f0-9]{64}$/u.test(found) ? found : null;
+};
+
+/**
+ * Recent-auth cookie name for the installation origin: `__Host-` under https,
+ * the legacy name only for plain-http loopback development, null when no
+ * origin is configured (nothing can be read or set).
+ */
+export const connectorRecentAuthCookieNameFor = (origin: string | null): string | null => {
+  if (!origin) return null;
+  try {
+    return new URL(origin).protocol === 'https:' ? HOST_COOKIE_NAME : LEGACY_COOKIE_NAME;
+  } catch {
+    return null;
+  }
+};
+
+/** CSRF double-submit cookie name for the origin, with the same scheme rule as the recent-auth cookie. */
+export const connectorCsrfCookieNameFor = (origin: string | null): string | null => {
+  const recentName = connectorRecentAuthCookieNameFor(origin);
+  if (recentName === null) return null;
+  return recentName === HOST_COOKIE_NAME ? SECURE_CSRF_COOKIE_NAME : LEGACY_CSRF_COOKIE_NAME;
+};
+
+/** Live origin source for a gate: a fixed string (tests) or a per-request resolver. */
+export type ConnectorOriginSource = string | (() => string | null);
+
+const resolveOriginSource = (source: ConnectorOriginSource): string | null => {
+  if (typeof source === 'string') return source || null;
+  try { return source() ?? null; } catch { return null; }
+};
+
+/**
+ * Origin source for a composed connector runtime: its live resolver when the
+ * production composition wired one (read per request, so PUT /origin applies
+ * without a restart), else the fixed origin a test runtime carries.
+ */
+export const runtimeOriginSource = (runtime: Readonly<{
+  canonicalOrigin: string; resolveOrigin?: () => string | null;
+}>): ConnectorOriginSource => runtime.resolveOrigin ?? runtime.canonicalOrigin;
+
+const originUnconfigured = (res: express.Response): void => {
+  res.status(503).json({ error: 'Connector origin is not configured.',
+    code: 'CONNECTOR_RECENT_AUTH_ORIGIN_UNCONFIGURED' });
 };
 
 const hashesMatch = (rawToken: string, expectedHash: string): boolean => {
@@ -96,10 +150,11 @@ const recentSession = (
   repository: Pick<OperationRepository, 'readOwnerAuthSession'>,
   installationId: string,
   nowMs: number,
+  origin: string | null,
   resolvedUserId?: number | null,
 ) => {
   const userId = resolvedUserId === undefined ? ownerIdentity(req) : resolvedUserId;
-  const token = cookieValue(req, COOKIE_NAME);
+  const token = cookieValue(req, connectorRecentAuthCookieNameFor(origin));
   if (userId === null || !token) return null;
   const session = repository.readOwnerAuthSession({
     sessionTokenHash: sha256(token), installationId, userId, nowMs,
@@ -116,10 +171,11 @@ export const validatedConnectorCsrfToken = (
   repository: Pick<OperationRepository, 'readOwnerAuthSession'>,
   installationId: string,
   userId: number,
+  origin: string | null,
   nowMs = Date.now(),
 ): string | null => {
-  const recent = recentSession(req, repository, installationId, nowMs, userId);
-  const csrfToken = cookieValue(req, CSRF_COOKIE_NAME);
+  const recent = recentSession(req, repository, installationId, nowMs, origin, userId);
+  const csrfToken = cookieValue(req, connectorCsrfCookieNameFor(origin));
   return recent && csrfToken && hashesMatch(csrfToken, recent.session.csrfTokenHash)
     ? csrfToken
     : null;
@@ -129,13 +185,19 @@ export const validatedConnectorCsrfToken = (
 export const createConnectorOwnerReadGate = (deps: Readonly<{
   repository: Pick<OperationRepository, 'readOwnerAuthSession'>;
   installationId: string;
+  canonicalOrigin: ConnectorOriginSource;
   now?: () => number;
 }>): express.RequestHandler => (req, res, next) => {
   if (ownerIdentity(req) === null) {
     res.status(403).json({ error: 'Owner permission required.', code: 'CONNECTOR_OWNER_REQUIRED' });
     return;
   }
-  if (!recentSession(req, deps.repository, deps.installationId, deps.now?.() ?? Date.now())) {
+  const origin = resolveOriginSource(deps.canonicalOrigin);
+  if (origin === null) {
+    originUnconfigured(res);
+    return;
+  }
+  if (!recentSession(req, deps.repository, deps.installationId, deps.now?.() ?? Date.now(), origin)) {
     res.status(403).json({ error: 'Recent authentication required.', code: 'CONNECTOR_RECENT_AUTH_REQUIRED' });
     return;
   }
@@ -146,7 +208,7 @@ export const createConnectorOwnerReadGate = (deps: Readonly<{
 export const createConnectorOwnerOperationGate = (deps: Readonly<{
   repository: OperationRepository;
   installationId: string;
-  canonicalOrigin: string;
+  canonicalOrigin: ConnectorOriginSource;
   operation: ConnectorOwnerOperation;
   ownerOnly?: boolean;
   now?: () => number;
@@ -156,12 +218,17 @@ export const createConnectorOwnerOperationGate = (deps: Readonly<{
     res.status(403).json({ error: 'Owner permission required.', code: 'CONNECTOR_OWNER_REQUIRED' });
     return;
   }
-  if (req.get('origin') !== deps.canonicalOrigin) {
+  const origin = resolveOriginSource(deps.canonicalOrigin);
+  if (origin === null) {
+    originUnconfigured(res);
+    return;
+  }
+  if (req.get('origin') !== origin) {
     res.status(403).json({ error: 'Request origin was rejected.', code: 'CONNECTOR_ORIGIN_REJECTED' });
     return;
   }
   const nowMs = deps.now?.() ?? Date.now();
-  const recent = recentSession(req, deps.repository, deps.installationId, nowMs, userId);
+  const recent = recentSession(req, deps.repository, deps.installationId, nowMs, origin, userId);
   if (!recent) {
     res.status(403).json({ error: 'Recent authentication required.', code: 'CONNECTOR_RECENT_AUTH_REQUIRED' });
     return;
@@ -215,7 +282,10 @@ export const consumeAuthorizedOwnerOperation = (
   if (!consumed) throw new Error('connector_owner_operation_invalid');
 };
 
-export const connectorRecentAuthCookieName = COOKIE_NAME;
-export const connectorCsrfCookieName = CSRF_COOKIE_NAME;
-export const connectorRecentAuthCookieValue = (req: express.Request): string | null =>
-  cookieValue(req, COOKIE_NAME);
+export const connectorLegacyRecentAuthCookieName = LEGACY_COOKIE_NAME;
+export const connectorHostRecentAuthCookieName = HOST_COOKIE_NAME;
+export const connectorLegacyCsrfCookieName = LEGACY_CSRF_COOKIE_NAME;
+export const connectorSecureCsrfCookieName = SECURE_CSRF_COOKIE_NAME;
+/** The caller's recent-auth token under the cookie name `origin` dictates. */
+export const connectorRecentAuthCookieValue = (req: express.Request, origin: string | null): string | null =>
+  cookieValue(req, connectorRecentAuthCookieNameFor(origin));

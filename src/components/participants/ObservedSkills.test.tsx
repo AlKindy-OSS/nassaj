@@ -86,6 +86,8 @@ describe('observed skills disclosure', () => {
   });
   it('hides observed-skills label and section when agent has zero observed skills', () => {
     const i18n = setup();
+    // Completed rows are hidden by default (77da1e911); show them for this row.
+    localStorage.setItem('nassaj:agentStatusCard:hideCompleted', '0');
     const data = projection([]);
     const agents = attachObservedSkills([{ id: 'call-1', type: 'backend-dev', description: 'call-1', status: 'done' as const, callCount: 0, startedAt: 0 }], data);
     render(<I18nextProvider i18n={i18n}><ThemeProvider><AgentStatusCard agents={agents} status={{ text: 'Done' }} isLoading={false} provider="claude" /></ThemeProvider></I18nextProvider>);

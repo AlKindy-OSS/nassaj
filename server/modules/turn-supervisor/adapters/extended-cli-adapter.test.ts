@@ -30,8 +30,9 @@ describe('extended CLI mechanical adapters', () => {
       let cleaned = false;
       const adapter = createExtendedCliAdapter(provider, {
         executableProbe: async () => true,
-        versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider],
+        versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider] ?? '1.18.40',
         qwenCapabilityProbe: async () => true,
+        opencodeCapabilityProbe: async () => true,
         hermesToolDefinitionProbe: async () => 0,
         resolveEnv: () => ({ PROVIDER_SECRET: 'server-only' }),
         createRoleHome: async () => ROLE,
@@ -98,6 +99,41 @@ describe('extended CLI mechanical adapters', () => {
     assert.equal(await hermes.probe({ provider: 'hermes', userId: 1 }), false);
   });
 
+  it('accepts any reporting opencode release but refuses a silent or missing binary', async () => {
+    const make = (versionProbe: () => Promise<string>, executableProbe = async () => true, capable = true) =>
+      createExtendedCliAdapter('opencode', {
+        binary: '/fake/opencode', executableProbe, versionProbe, opencodeCapabilityProbe: async () => capable,
+        createRoleHome: async () => ROLE, cleanupRoleHome: async () => {},
+        spawnCapture: async () => ({ code: 0, stdout: 'answer', stderr: '' }),
+      });
+    for (const version of ['1.18.32', '1.18.40', '2.0.0']) {
+      assert.equal(await make(async () => version).probe({ provider: 'opencode', userId: 1 }), true, version);
+    }
+    assert.equal(await make(async () => '').probe({ provider: 'opencode', userId: 1 }), false);
+    const missing = make(async () => '1.18.40', async () => false);
+    assert.equal(await missing.probe({ provider: 'opencode', userId: 1 }), false);
+    const incapable = make(async () => '1.18.40', async () => true, false);
+    assert.equal(await incapable.probe({ provider: 'opencode', userId: 1 }), false, 'capability probe fails closed');
+    await assert.rejects(incapable.invoke({
+      provider: 'opencode', userId: 1, model: 'x', prompt: 'x', persist: false, writer: { capture() {} },
+    }), /not pinned and probed/u);
+  });
+
+  it('opencode capability: the resolved supervisor agent must have every tool off and deny *', () => {
+    const { opencodeAgentIsToolless, OPENCODE_RUN_FLAGS, opencodeSpec } = extendedCliAdapterInternals;
+    const deny = { permission: '*', action: 'deny', pattern: '*' };
+    const doc = (tools: Record<string, boolean>, permission = [{ permission: '*', action: 'allow' }, deny]) =>
+      `log line\n${JSON.stringify({ name: 'supervisor', tools, permission })}\n`;
+    assert.equal(opencodeAgentIsToolless(doc({ bash: false, read: false, task: false })), true);
+    assert.equal(opencodeAgentIsToolless(doc({ bash: false, read: true })), false, 'one tool left on');
+    assert.equal(opencodeAgentIsToolless(doc({})), false, 'schema ignored: no tools resolved');
+    assert.equal(opencodeAgentIsToolless(doc({ bash: false }, [{ permission: '*', action: 'allow' }])), false);
+    assert.throws(() => opencodeAgentIsToolless('{not json}'));
+    assert.equal(opencodeAgentIsToolless('no json at all'), false);
+    const args = opencodeSpec({ binary: 'o', cwd: '/', env: {}, model: 'm', prompt: 'p', system: 's' }).args;
+    for (const flag of OPENCODE_RUN_FLAGS) assert.ok(args.includes(flag), `cell uses ${flag}`);
+  });
+
   it('Qwen refuses capability when the installed help surface lacks any mechanical denial option', async () => {
     const adapter = createExtendedCliAdapter('qwen', {
       executableProbe: async () => true, versionProbe: async () => '0.21.12',
@@ -123,5 +159,24 @@ describe('extended CLI mechanical adapters', () => {
     await assert.rejects(adapter.invoke({ ...base, effects: [{}] }), /deny effects/u);
     await assert.rejects(adapter.invoke({ ...base, signal: controller.signal }), /aborted before launch/u);
     await assert.rejects(adapter.invoke(base), /no final assistant/u);
+  });
+
+  it('T-1906: the opencode cell refuses qwen-plan/* before any role home or spawn', async () => {
+    let spawned = false;
+    let roleCreated = false;
+    const adapter = createExtendedCliAdapter('opencode', {
+      executableProbe: async () => true, versionProbe: async () => '1.18.40',
+      opencodeCapabilityProbe: async () => true,
+      resolveEnv: () => ({}),
+      createRoleHome: async () => { roleCreated = true; return ROLE; }, cleanupRoleHome: async () => {},
+      spawnCapture: async () => { spawned = true; return { code: 0, stdout: output.opencode, stderr: '' }; },
+    });
+    assert.equal(await adapter.probe({ provider: 'opencode', userId: 1 }), true);
+    await assert.rejects(adapter.invoke({
+      provider: 'opencode', userId: 1, model: 'qwen-plan/qwen3-coder-plus', prompt: 'x', persist: false,
+      writer: { capture() {} },
+    }), (error: { code?: string }) => error.code === 'credential_unavailable');
+    assert.equal(spawned, false);
+    assert.equal(roleCreated, false);
   });
 });

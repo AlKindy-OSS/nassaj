@@ -21,6 +21,7 @@ import { createConnectorAuthDb } from '../database/repositories/connector-auth.d
 /* eslint-enable boundaries/dependencies */
 
 import { createConnectorOwnerAuthSessionAdapter,
+  connectorOwnerSessionOrigin,
   recordConnectorOwnerAuthentication } from './connector-owner-auth-session.js';
 import { CONNECTOR_GLOBAL_PACK_DOMAIN, connectorGlobalPackDigest,
   connectorGlobalPackSignedBytes } from './connector-global-certification-pack.js';
@@ -115,7 +116,7 @@ test('environment proposal bootstraps first-owner auth without becoming runtime 
     const cookies = new Map<string, string>();
     assert.equal(recordConnectorOwnerAuthentication({ cookie: (name: string, value: string) => {
       cookies.set(name, value); return undefined as never;
-    }, clearCookie: () => undefined as never } as unknown as express.Response, 7, 'password'), true);
+    }, clearCookie: () => undefined as never } as unknown as express.Response, 7, 'password'), 'ok');
     const app = express(); app.use(express.json()); app.use((req, _res, next) => {
       (req as express.Request & { user: { id: number } }).user = { id: 7 }; next();
     });
@@ -125,17 +126,28 @@ test('environment proposal bootstraps first-owner auth without becoming runtime 
       server.once('listening', resolve); server.once('error', reject);
     });
     try {
-      const recent = cookies.get('nassaj_connector_recent_auth');
-      const csrf = cookies.get('nassaj_connector_csrf');
+      const recent = cookies.get('__Host-nassaj_connector_recent_auth');
+      const csrf = cookies.get('__Secure-nassaj_connector_csrf');
       const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/setup/origin`, {
         method: 'PUT', headers: { 'content-type': 'application/json', origin: 'https://proposal.example',
           'if-match': '"0"', 'idempotency-key': 'origin-bootstrap-1', 'x-csrf-token': csrf!,
-          cookie: `nassaj_connector_recent_auth=${recent}` },
+          cookie: `__Host-nassaj_connector_recent_auth=${recent}` },
         body: JSON.stringify({ canonicalOrigin: 'https://proposal.example', expectedOriginRevision: 0 }),
       });
       assert.equal(response.status, 200);
       process.env.NASSAJ_PUBLIC_ORIGIN = 'https://conflict.example';
       assert.equal(resolveConnectorRuntimeInstallationOrigin()?.canonicalOrigin, 'https://proposal.example');
+      assert.equal(connectorOwnerSessionOrigin(), 'https://proposal.example',
+        'once persisted, the stored origin (not the environment) names the recent-auth cookies');
+      assert.equal(executeConnectorPolicyV2LifecycleWrite(() => {
+        f.database.prepare('UPDATE connector_m5_installation_origin SET canonical_origin = ?')
+          .run('HTTPS://proposal.example');
+      }), true);
+      assert.throws(() => resolveConnectorRuntimeInstallationOrigin(), /connector_installation_origin_invalid/u);
+      assert.equal(connectorOwnerSessionOrigin(), null,
+        'an unreadable (tampered) persisted origin fails closed, never NASSAJ_PUBLIC_ORIGIN');
+      assert.equal(recordConnectorOwnerAuthentication({ cookie: () => undefined as never,
+        clearCookie: () => undefined as never } as unknown as express.Response, 7, 'password'), 'unavailable');
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }
@@ -326,13 +338,15 @@ test('ready substrate serves schema two and fenced origin write advances policy 
     authMethod: 'password', authTimeMs: NOW - 1_000, expiresAtMs: NOW + 60_000,
   }), /connector_runtime_fence_required/u, 'raw owner-session writers remain fenced');
   createConnectorOwnerAuthSessionAdapter({ repository, installationId: f.installationId,
-    canonicalOrigin: 'https://nassaj.example', now: () => NOW - 1_000,
+    resolveOrigin: () => 'https://nassaj.example', now: () => NOW - 1_000,
     randomToken: () => token, randomCsrfToken: () => csrf,
     sessionId: () => '11111111-1111-4111-8111-111111111111',
     executeWrite: executeConnectorPolicyV2LifecycleWrite }).record(
     { cookie: () => undefined, clearCookie: () => undefined } as unknown as express.Response,
     7, 'password',
   );
+  const priorPublicOrigin = process.env.NASSAJ_PUBLIC_ORIGIN;
+  delete process.env.NASSAJ_PUBLIC_ORIGIN;
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => {
     (req as express.Request & { user: { id: number } }).user = { id: 7 }; next();
@@ -352,14 +366,33 @@ test('ready substrate serves schema two and fenced origin write advances policy 
     assert.equal(catalogBody.origin.configured, false);
     assert.equal(catalogBody.services.find(item => item.authMethod === 'api_key')?.state,
       'coming_soon_uncertified');
+    // Before an origin is stored, the bootstrap proposal names the recent-auth
+    // cookie; it is read live, so setting it after boot takes effect at once.
+    const initialCookieName = await (async () => {
+      const unnamed = await fetch(`${base}/origin`, { method: 'PUT', headers: {
+        'content-type': 'application/json', origin: 'https://nassaj.example',
+        'x-csrf-token': csrf, cookie: `__Host-nassaj_connector_recent_auth=${token}`,
+      }, body: JSON.stringify({ canonicalOrigin: 'https://nassaj.example', expectedOriginRevision: 0 }) });
+      assert.equal(unnamed.status, 403, 'no stored or proposed origin: no cookie can be trusted');
+      assert.deepEqual(await unnamed.json(), { code: 'CONNECTOR_RECENT_AUTH_OR_CSRF_REQUIRED' });
+      process.env.NASSAJ_PUBLIC_ORIGIN = 'https://nassaj.example';
+      return '__Host-nassaj_connector_recent_auth';
+    })();
+    const wrongOrigin = await fetch(`${base}/origin`, { method: 'PUT', headers: {
+      'content-type': 'application/json', origin: 'https://attacker.example',
+      'x-csrf-token': csrf, cookie: `${initialCookieName}=${token}`,
+    }, body: JSON.stringify({ canonicalOrigin: 'https://nassaj.example', expectedOriginRevision: 0 }) });
+    assert.equal(wrongOrigin.status, 403);
+    assert.deepEqual(await wrongOrigin.json(), { code: 'CONNECTOR_ORIGIN_REJECTED' },
+      'an origin mismatch is never reported as a missing step-up');
     const initial = await fetch(`${base}/origin`, { method: 'PUT', headers: {
       'content-type': 'application/json', origin: 'https://nassaj.example',
-      'x-csrf-token': csrf, cookie: `nassaj_connector_recent_auth=${token}`,
+      'x-csrf-token': csrf, cookie: `__Host-nassaj_connector_recent_auth=${token}`,
     }, body: JSON.stringify({ canonicalOrigin: 'https://nassaj.example', expectedOriginRevision: 0 }) });
     assert.equal(initial.status, 200);
     const change = await fetch(`${base}/origin`, { method: 'PUT', headers: {
       'content-type': 'application/json', origin: 'https://nassaj.example',
-      'x-csrf-token': csrf, cookie: `nassaj_connector_recent_auth=${token}`,
+      'x-csrf-token': csrf, cookie: `__Host-nassaj_connector_recent_auth=${token}`,
     }, body: JSON.stringify({ canonicalOrigin: 'https://new.example', expectedOriginRevision: 1 }) });
     assert.equal(change.status, 200);
     const policy = JSON.parse((f.database.prepare(`SELECT state_json AS stateJson FROM connector_policy_v2_state`)
@@ -369,6 +402,8 @@ test('ready substrate serves schema two and fenced origin write advances policy 
     assert.deepEqual(policy, { ...policy, originRevision: 2, writerEpoch: 2 });
     assert.equal(control.writerEpoch, 2); assert.equal(control.floor, 1);
   } finally {
+    if (priorPublicOrigin === undefined) delete process.env.NASSAJ_PUBLIC_ORIGIN;
+    else process.env.NASSAJ_PUBLIC_ORIGIN = priorPublicOrigin;
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     initializeConnectorPolicyV2SubstrateOnly(f.database, '/proc/nassaj-connector-runtime-authority.json', () => NOW);
     f.database.close(); rmSync(directory, { recursive: true, force: true });

@@ -1587,7 +1587,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     } else if (provider === 'glm') {
       // GL-8 (ADR-062): GLM runs through the OpenCode CARRIER (provider-prefixed
       // `glm/<model>`, carrier=true so opencode-cli.js takes its governed carrier
-      // path: GL-5 governance gate + GL-3 baseURL allowlist + GL-6 digest pin +
+      // path: GL-5 governance gate + GL-3 baseURL allowlist + GL-6 loopback server +
       // env sanitize). The carrier flag is already asserted ON by the pre-flight
       // guard above, so reaching here means the surface is enabled.
       console.log('🧩 Starting GLM session via OpenCode carrier');

@@ -258,6 +258,7 @@ describe('useActiveWorkflows — stop when document.hidden', () => {
       return Promise.resolve(okResponse(makeEnvelope([{
         sessionId: 's1',
         wfId: 'wf_x',
+        projectId: null,
         status: 'running',
         dormant: false,
         agents: [],

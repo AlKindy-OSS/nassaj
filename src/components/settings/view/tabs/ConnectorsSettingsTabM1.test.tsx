@@ -2,7 +2,16 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import enSettings from '../../../../i18n/locales/en/settings.json';
 import type { ConnectorCatalogEntry } from '../../../../stores/connectorsStore';
+
+function lookup(tree: unknown, key: string): string | undefined {
+  const value = key.split('.').reduce<unknown>(
+    (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
+    tree,
+  );
+  return typeof value === 'string' ? value : undefined;
+}
 
 const translations: Record<string, string> = {
   'connectorsSettings.title': 'Connectors',
@@ -21,7 +30,9 @@ vi.mock('./connectorNavigation', () => ({ navigateToConnectorAuthorization }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) => String(translations[key] ?? options?.defaultValue ?? key),
+    t: (key: string, options?: Record<string, unknown>) => String(
+      translations[key] ?? options?.defaultValue ?? lookup(enSettings, key) ?? key,
+    ),
     i18n: { language: 'en' },
   }),
 }));
@@ -52,6 +63,10 @@ let malformedGrantPayload = false;
 let readinessSchemaVersion: number = 1;
 let ownerSetupFailureCode: string | null = null;
 let ownerSetupMutationErrorCode: string | null = null;
+// T-1939 6C: the step-up endpoint's answer and the SSO self-link status.
+let stepUpAnswer: { status: number; code?: string } = { status: 204 };
+let rejectNextWriteWithCode: string | null = null;
+let ssoLinked: boolean | null = false;
 
 const ownerSetupFixture = (resumableStep: 'origin' | 'trust' | 'provider_pack' | 'activation' | 'complete' = 'origin') => ({
   schemaVersion: 1,
@@ -141,6 +156,9 @@ const catalog: ConnectorCatalogEntry[] = [
 ];
 
 vi.mock('../../../../utils/api', () => ({
+  api: { auth: { oidc: { selfLinkStatus: vi.fn(async () => (ssoLinked === null
+    ? { ok: false, status: 501, json: async () => ({}) }
+    : { ok: true, status: 200, json: async () => ({ linked: ssoLinked }) }) as Response) } } },
   authenticatedFetch: vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     calls.push({
@@ -148,6 +166,20 @@ vi.mock('../../../../utils/api', () => ({
       ...(init?.body ? { body: JSON.parse(String(init.body)) as Record<string, unknown> } : {}),
       headers: init?.headers,
     });
+    if (url === '/api/connectors/owner-session/step-up') {
+      if (stepUpAnswer.status === 204) {
+        recentAuthRequired = false;
+        readinessCsrf = 'b'.repeat(64);
+        return { ok: true, status: 204, json: async () => ({}) } as Response;
+      }
+      return { ok: false, status: stepUpAnswer.status, headers: new Headers(),
+        json: async () => ({ code: stepUpAnswer.code }) } as Response;
+    }
+    if (method !== 'GET' && rejectNextWriteWithCode) {
+      const code = rejectNextWriteWithCode;
+      rejectNextWriteWithCode = null;
+      return { ok: false, status: 503, json: async () => ({ code }) } as Response;
+    }
     if (method !== 'GET' && rejectNextWriteAsStale) {
       rejectNextWriteAsStale = false;
       return {
@@ -254,6 +286,13 @@ vi.mock('../../../../utils/api', () => ({
 import { resetConnectorsStore } from '../../../../stores/connectorsStore';
 import ConnectorsSettingsTabM1 from './ConnectorsSettingsTabM1';
 
+const STEP_UP_CTA = "Confirm it's you";
+/** Neither the sign-out CTA nor the step-up CTA is offered. */
+function expectNoReauthAction() {
+  expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+  expect(screen.queryByRole('button', { name: STEP_UP_CTA })).toBeNull();
+}
+
 beforeEach(() => {
   role = 'owner';
   readinessAvailable = true;
@@ -274,6 +313,10 @@ beforeEach(() => {
   readinessSchemaVersion = 1;
   ownerSetupFailureCode = null;
   ownerSetupMutationErrorCode = null;
+  stepUpAnswer = { status: 204 };
+  rejectNextWriteWithCode = null;
+  ssoLinked = false;
+  window.sessionStorage.clear();
   ownerSetupPayload = ownerSetupFixture();
   persistedDrafts = [];
   profiles = [
@@ -303,8 +346,9 @@ describe('portable connectors M1 surface', () => {
     };
     render(<ConnectorsSettingsTabM1 />);
 
-    const button = await screen.findByRole('button', { name: 'Sign in again' });
-    expect(screen.getAllByRole('button', { name: 'Sign in again' })).toHaveLength(1);
+    const button = await screen.findByRole('button', { name: STEP_UP_CTA });
+    expect(screen.getAllByRole('button', { name: STEP_UP_CTA })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Connect with key' })).toBeNull();
     expect((screen.getByRole('button', { name: /Remove account: Work — Google Workspace/u }) as HTMLButtonElement).disabled).toBe(true);
@@ -316,16 +360,21 @@ describe('portable connectors M1 surface', () => {
     const writesBefore = calls.filter(call => call.method !== 'GET').length;
     fireEvent.click(save);
     expect(calls.filter(call => call.method !== 'GET')).toHaveLength(writesBefore);
+    // Installation view: the wizard's prompt is the only step-up button.
+    expect(button.isConnected).toBe(false);
+    const installationButtons = screen.getAllByRole('button', { name: STEP_UP_CTA });
+    expect(installationButtons).toHaveLength(1);
 
-    fireEvent.click(button);
-    expect(logout).toHaveBeenCalledOnce();
+    fireEvent.click(installationButtons[0]);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(logout).not.toHaveBeenCalled();
   });
 
   it('treats a null CSRF token as stale even when the server boolean is false', async () => {
     readinessCsrf = null;
     recentAuthRequired = false;
     render(<ConnectorsSettingsTabM1 />);
-    expect(await screen.findByRole('button', { name: 'Sign in again' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: STEP_UP_CTA })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Connect with key' })).toBeNull();
   });
 
@@ -337,7 +386,7 @@ describe('portable connectors M1 surface', () => {
     fireEvent.change(within(github).getByLabelText('Personal token'), { target: { value: 'secret' } });
     rejectNextWriteAsStale = true;
     fireEvent.click(within(github).getByRole('button', { name: 'Connect' }));
-    expect(await screen.findByRole('button', { name: 'Sign in again' })).toBeTruthy();
+    expect(await screen.findByRole('dialog')).toBeTruthy();
     const writesAfterRejection = calls.filter(call => call.method !== 'GET').length;
     expect(within(github).queryByRole('button', { name: 'Connect' })).toBeNull();
     expect(calls.filter(call => call.method !== 'GET')).toHaveLength(writesAfterRejection);
@@ -351,7 +400,7 @@ describe('portable connectors M1 surface', () => {
     fireEvent.change(within(google).getByLabelText('Account name'), { target: { value: 'Work' } });
     rejectNextWriteAsStale = true;
     fireEvent.click(within(google).getByRole('button', { name: 'Continue to sign in' }));
-    await screen.findByRole('button', { name: 'Sign in again' });
+    await screen.findByRole('dialog');
     const writes = calls.filter(call => call.method !== 'GET').length;
     expect(within(google).queryByRole('button', { name: 'Add account' })).toBeNull();
     expect(within(google).queryByRole('button', { name: /Grant .* access/u })).toBeNull();
@@ -416,7 +465,8 @@ describe('portable connectors M1 surface', () => {
     const remove = await screen.findByRole('button', { name: /Remove account: Work — Google Workspace/u });
     rejectNextWriteAsStale = true;
     fireEvent.click(remove);
-    await screen.findByRole('button', { name: 'Sign in again' });
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     const writesAfterRevoke = calls.filter(call => call.method !== 'GET').length;
     fireEvent.click(remove);
     expect(calls.filter(call => call.method !== 'GET')).toHaveLength(writesAfterRevoke);
@@ -474,7 +524,7 @@ describe('portable connectors M1 surface', () => {
     // The client surfaces the server code so it can be diagnosed without a misleading sign-in CTA.
     await screen.findByText(/NOT_FOUND/u);
     expect(screen.queryByRole('tab', { name: 'Installation setup' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expectNoReauthAction();
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(document.body.textContent).not.toMatch(/not ready on this installation/u);
   });
@@ -597,9 +647,28 @@ describe('portable connectors M1 surface', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
 
-    expect((await screen.findByRole('alert')).textContent)
-      .toContain('CONNECTOR_RECENT_AUTH_OR_CSRF_REQUIRED');
+    // A recent-auth refusal opens the step-up; it is not a setup failure.
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(await screen.findByLabelText('Your current password')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Setup could not continue');
     expect(screen.queryByLabelText('Client secret')).toBeNull();
+  });
+
+  it('locks the tab writes when the wizard asks for a step-up, even if it is cancelled', async () => {
+    ownerSetupMutationErrorCode = 'CONNECTOR_SETUP_RECENT_AUTH_OR_CSRF_REQUIRED';
+    render(<ConnectorsSettingsTabM1 />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Installation setup' }));
+    fireEvent.change(await screen.findByLabelText('Canonical HTTPS origin'), {
+      target: { value: 'https://oss.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getAllByRole('button', { name: STEP_UP_CTA })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('tab', { name: 'My accounts' }));
+    expect(await screen.findByRole('button', { name: STEP_UP_CTA })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Connect with key' })).toBeNull();
   });
 
   it('does not restore legacy BYO credential fields in the owner setup plane', async () => {
@@ -956,7 +1025,7 @@ describe('portable connectors M1 surface', () => {
     render(<ConnectorsSettingsTabM1 />);
 
     expect(await screen.findByText(/Connectors are not enabled on this installation/u)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expectNoReauthAction();
     // Owner sees the installation tab (not a redundant inline button)
     expect(screen.queryByRole('button', { name: 'Go to operator setup' })).toBeNull();
     expect(screen.getByRole('tab', { name: /installation setup/iu })).toBeTruthy();
@@ -969,7 +1038,7 @@ describe('portable connectors M1 surface', () => {
     render(<ConnectorsSettingsTabM1 />);
 
     expect(await screen.findByText(/not available.*contact your platform operator/iu)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expectNoReauthAction();
     expect(screen.queryByRole('button', { name: 'Go to operator setup' })).toBeNull();
   });
 
@@ -979,7 +1048,7 @@ describe('portable connectors M1 surface', () => {
     render(<ConnectorsSettingsTabM1 />);
 
     expect(await screen.findByText(/Connector authentication isn't configured on the server yet/u)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expectNoReauthAction();
     expect(screen.queryByRole('button', { name: 'Go to operator setup' })).toBeNull();
     expect(screen.getByRole('tab', { name: /installation setup/iu })).toBeTruthy();
   });
@@ -990,7 +1059,7 @@ describe('portable connectors M1 surface', () => {
     render(<ConnectorsSettingsTabM1 />);
 
     expect(await screen.findByText(/canonical origin/iu)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expectNoReauthAction();
   });
 
   it('shows the session-expired message for AUTH_REQUIRED and preserves the re-login CTA', async () => {
@@ -1011,6 +1080,153 @@ describe('portable connectors M1 surface', () => {
     render(<ConnectorsSettingsTabM1 />);
 
     expect(await screen.findByText(/CONNECTOR_MAINTENANCE_MODE/u)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    expectNoReauthAction();
+  });
+});
+
+describe('connector step-up wiring (T-1939 6C)', () => {
+  const stepUpCalls = () => calls.filter(call => call.url === '/api/connectors/owner-session/step-up');
+
+  async function openDialog() {
+    readinessCsrf = null;
+    recentAuthRequired = true;
+    render(<ConnectorsSettingsTabM1 />);
+    fireEvent.click(await screen.findByRole('button', { name: STEP_UP_CTA }));
+    return screen.findByRole('dialog');
+  }
+
+  it('confirms with the password, refetches readiness and re-enables writes', async () => {
+    const dialog = await openDialog();
+    fireEvent.change(await within(dialog).findByLabelText('Your current password'), { target: { value: 'pw' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(stepUpCalls()[0]?.body).toEqual({ stepUp: { method: 'password', password: 'pw' } });
+    expect((await screen.findAllByText(/Identity confirmed/u)).length).toBeGreaterThan(0);
+    expect(await screen.findAllByRole('button', { name: 'Connect with key' })).not.toHaveLength(0);
+    expectNoReauthAction();
+    expect(calls.filter(call => call.url === '/api/connectors/auth-readiness').length).toBeGreaterThan(1);
+  });
+
+  it('keeps the session on a wrong password and says so', async () => {
+    stepUpAnswer = { status: 401, code: 'step_up_failed' };
+    const dialog = await openDialog();
+    fireEvent.change(await within(dialog).findByLabelText('Your current password'), { target: { value: 'bad' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toMatch(/didn't match/u);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it('explains an origin rejection instead of asking for the password again', async () => {
+    stepUpAnswer = { status: 403, code: 'CONNECTOR_ORIGIN_REJECTED' };
+    const dialog = await openDialog();
+    fireEvent.change(await within(dialog).findByLabelText('Your current password'), { target: { value: 'pw' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toMatch(/public address/u);
+    expect(within(dialog).queryByLabelText('Your current password')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+
+  it('offers only SSO to an SSO-linked member', async () => {
+    role = 'member';
+    ssoLinked = true;
+    const dialog = await openDialog();
+    expect(await within(dialog).findByRole('button', { name: 'Confirm with SSO' })).toBeTruthy();
+    expect(within(dialog).queryByLabelText('Your current password')).toBeNull();
+  });
+
+  it('switches to SSO when the server says the account must use SSO', async () => {
+    ssoLinked = null;
+    stepUpAnswer = { status: 403, code: 'sso_step_up_required' };
+    const dialog = await openDialog();
+    fireEvent.change(await within(dialog).findByLabelText('Your current password'), { target: { value: 'pw' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    expect(await within(dialog).findByRole('button', { name: 'Confirm with SSO' })).toBeTruthy();
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/signs in through SSO/u);
+  });
+
+  it('offers a linked owner the password: the owner always stays local', async () => {
+    ssoLinked = true;
+    const dialog = await openDialog();
+    expect(await within(dialog).findByLabelText('Your current password')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Confirm with SSO' })).toBeNull();
+    expect(calls.some(call => call.url === '/api/auth/oidc/step-up/start')).toBe(false);
+  });
+
+  it('refreshes a stale CSRF token instead of asking for the password again', async () => {
+    render(<ConnectorsSettingsTabM1 />);
+    const github = (await screen.findByRole('heading', { name: 'GitHub' })).closest('article')!;
+    fireEvent.click(within(github).getByRole('button', { name: 'Connect with key' }));
+    fireEvent.change(within(github).getByLabelText('Account name'), { target: { value: 'Personal' } });
+    fireEvent.change(within(github).getByLabelText('Personal token'), { target: { value: 'secret' } });
+    readinessCsrf = 'c'.repeat(64);
+    rejectNextWriteWithCode = 'CONNECTOR_CSRF_REJECTED';
+    fireEvent.click(within(github).getByRole('button', { name: 'Connect' }));
+    expect((await within(github).findByText(/security token was refreshed/u))).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: STEP_UP_CTA })).toBeNull();
+  });
+
+  it('asks for the step-up when the CSRF refusal is a real recent-auth gap', async () => {
+    render(<ConnectorsSettingsTabM1 />);
+    const github = (await screen.findByRole('heading', { name: 'GitHub' })).closest('article')!;
+    fireEvent.click(within(github).getByRole('button', { name: 'Connect with key' }));
+    fireEvent.change(within(github).getByLabelText('Account name'), { target: { value: 'Personal' } });
+    fireEvent.change(within(github).getByLabelText('Personal token'), { target: { value: 'secret' } });
+    recentAuthRequired = true;
+    rejectNextWriteWithCode = 'CONNECTOR_CSRF_REJECTED';
+    fireEvent.click(within(github).getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+
+  it('shows a successful SSO return once and reopens installation setup', async () => {
+    window.sessionStorage.setItem('nassaj:connector-step-up-outcome',
+      JSON.stringify({ verified: true, view: 'installation', at: Date.now() }));
+    render(<ConnectorsSettingsTabM1 />);
+    expect((await screen.findAllByText(/Identity confirmed/u)).length).toBeGreaterThan(0);
+    expect(screen.getByRole('tab', { name: 'Installation setup' }).getAttribute('aria-selected')).toBe('true');
+    expect(window.sessionStorage.getItem('nassaj:connector-step-up-outcome')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('explains an unconfigured origin when a write is refused for it', async () => {
+    render(<ConnectorsSettingsTabM1 />);
+    const github = (await screen.findByRole('heading', { name: 'GitHub' })).closest('article')!;
+    fireEvent.click(within(github).getByRole('button', { name: 'Connect with key' }));
+    fireEvent.change(within(github).getByLabelText('Account name'), { target: { value: 'Personal' } });
+    fireEvent.change(within(github).getByLabelText('Personal token'), { target: { value: 'secret' } });
+    rejectNextWriteWithCode = 'CONNECTOR_RECENT_AUTH_ORIGIN_UNCONFIGURED';
+    fireEvent.click(within(github).getByRole('button', { name: 'Connect' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/public address has not been set/u);
+    expect(within(dialog).queryByLabelText('Your current password')).toBeNull();
+  });
+
+  it('opens the dialog with the refusal after a failed SSO return', async () => {
+    window.sessionStorage.setItem('nassaj:connector-step-up-outcome',
+      JSON.stringify({ verified: false, code: 'oidc_step_up_identity_mismatch', view: 'accounts', at: Date.now() }));
+    role = 'member';
+    ssoLinked = true;
+    render(<ConnectorsSettingsTabM1 />);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/different person/u);
+  });
+
+  it('ignores a stale or forged SSO outcome', async () => {
+    window.sessionStorage.setItem('nassaj:connector-step-up-outcome',
+      JSON.stringify({ verified: true, view: 'accounts', at: Date.now() - 5 * 60_000 }));
+    render(<ConnectorsSettingsTabM1 />);
+    await screen.findByRole('heading', { name: 'GitHub' });
+    expect(screen.queryByText(/Identity confirmed/u)).toBeNull();
+    cleanup();
+    window.sessionStorage.setItem('nassaj:connector-step-up-outcome',
+      JSON.stringify({ code: 'ok', view: 'accounts', at: Date.now() }));
+    render(<ConnectorsSettingsTabM1 />);
+    await screen.findByRole('heading', { name: 'GitHub' });
+    expect(screen.queryByText(/Identity confirmed/u)).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

@@ -36,6 +36,7 @@ test('createProject throws when path validation fails', async () => {
           ensureWorkspaceDirectory: async () => undefined,
           persistProjectPath: () => ({ outcome: 'created', project: projectRow }),
           getProjectByPath: () => projectRow,
+          isPathAdmitted: () => true,
         },
       ),
     (error: unknown) => {
@@ -58,6 +59,7 @@ test('createProject throws conflict when active project path already exists', as
           ensureWorkspaceDirectory: async () => undefined,
           persistProjectPath: () => ({ outcome: 'active_conflict', project: projectRow }),
           getProjectByPath: () => projectRow,
+          isPathAdmitted: () => true,
         },
       ),
     (error: unknown) => {
@@ -89,6 +91,7 @@ test('createProject falls back to directory name when custom name is not provide
         };
       },
       getProjectByPath: () => projectRow,
+      isPathAdmitted: () => true,
     },
   );
 
@@ -111,9 +114,42 @@ test('createProject returns archived reuse outcome when archived row is reused',
         },
       }),
       getProjectByPath: () => projectRow,
+      isPathAdmitted: () => true,
     },
   );
 
   assert.equal(result.outcome, 'reactivated_archived');
   assert.equal(result.project.isArchived, true);
+});
+
+test('B-1423: an inadmissible path is refused before any lookup or write', async () => {
+  const touched: string[] = [];
+  await assert.rejects(
+    async () =>
+      createProject(
+        { projectPath: '/workspace/my-project', createdBy: 7 },
+        {
+          validatePath: async () => ({ valid: true, resolvedPath: '/workspace/my-project' }),
+          ensureWorkspaceDirectory: async () => { touched.push('mkdir'); },
+          persistProjectPath: () => {
+            touched.push('persist');
+            return { outcome: 'active_conflict', project: projectRow };
+          },
+          getProjectByPath: () => { touched.push('lookup'); return projectRow; },
+          isPathAdmitted: (projectPath, userId) => {
+            assert.equal(projectPath, '/workspace/my-project');
+            assert.equal(userId, 7);
+            return false;
+          },
+        },
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, 'INVALID_PROJECT_PATH');
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.details, 'Path validation failed');
+      return true;
+    },
+  );
+  assert.deepEqual(touched, []);
 });

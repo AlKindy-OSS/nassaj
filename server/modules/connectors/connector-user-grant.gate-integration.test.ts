@@ -62,7 +62,7 @@ const put = async (app: express.Express, body: unknown) => {
       method: 'PUT',
       headers: {
         'content-type': 'application/json', origin: ORIGIN,
-        cookie: `nassaj_connector_recent_auth=${SESSION}`, 'x-csrf-token': CSRF,
+        cookie: `__Host-nassaj_connector_recent_auth=${SESSION}`, 'x-csrf-token': CSRF,
       },
       body: JSON.stringify(body),
     });

@@ -35,3 +35,55 @@ test('OIDC hand-off code is browser-bound, single-use, and hard-capped', () => {
   assert.deepEqual(store.consume('code-b', browserA), { token: 'jwt-b', userId: 8 });
   assert.equal(store.consume('code-b', browserA), null);
 });
+
+test('T-1939 slice 5: a PKCE entry carries its purpose; login is the default and binds no user', () => {
+  const store = createOidcPkceStore();
+  const browser = transaction('A');
+  const secrets = { nonce: 'n', codeVerifier: 'v', browserTransaction: browser };
+
+  assert.equal(store.store('login-state', secrets), true);
+  assert.deepEqual(store.consume('login-state', browser), { nonce: 'n', codeVerifier: 'v', purpose: 'login' });
+
+  assert.equal(store.store('link-state', { ...secrets, purpose: 'link', userId: 12, requestedAtMs: 1_700 }), true);
+  assert.deepEqual(store.consume('link-state', browser), {
+    nonce: 'n', codeVerifier: 'v', purpose: 'link', userId: 12, requestedAtMs: 1_700,
+  });
+});
+
+test('T-1939 slice 5: malformed purpose bindings are refused at store time', () => {
+  const store = createOidcPkceStore();
+  const secrets = { nonce: 'n', codeVerifier: 'v', browserTransaction: transaction('A') };
+  const invalid: Array<Record<string, unknown>> = [
+    { purpose: 'admin' },
+    { purpose: 'link' },
+    { purpose: 'link', userId: 0, requestedAtMs: 1 },
+    { purpose: 'link', userId: 1.5, requestedAtMs: 1 },
+    { purpose: 'link', userId: 3, requestedAtMs: Number.NaN },
+    { purpose: 'login', userId: 3 },
+    { userId: 3, requestedAtMs: 1 },
+  ];
+  for (const binding of invalid) {
+    assert.equal(store.store('s', { ...secrets, ...binding } as never), false, JSON.stringify(binding));
+  }
+  assert.equal(store.size, 0);
+});
+
+test('T-1939 6B: consumeWithOutcome names only the purpose of an expired or foreign state', async () => {
+  const store = createOidcPkceStore({ ttlMs: 1 });
+  const browser = transaction('A');
+  const stepUp = { purpose: 'step_up', userId: 7, requestedAtMs: 1, audience: 'connector_owner' } as const;
+  assert.equal(store.store('expired', { nonce: 'n', codeVerifier: 'v', browserTransaction: browser, ...stepUp }), true);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(store.consumeWithOutcome('expired', browser), { entry: null, stalePurpose: 'step_up' });
+  assert.deepEqual(store.consumeWithOutcome('expired', browser), { entry: null, stalePurpose: null },
+    'still single use: the second answer knows nothing');
+  assert.deepEqual(store.consumeWithOutcome('never-stored', browser), { entry: null, stalePurpose: null });
+
+  const live = createOidcPkceStore();
+  assert.equal(live.store('foreign', { nonce: 'n', codeVerifier: 'v', browserTransaction: browser }), true);
+  assert.deepEqual(live.consumeWithOutcome('foreign', transaction('B')), { entry: null, stalePurpose: 'login' });
+  assert.equal(live.store('ok', { nonce: 'n', codeVerifier: 'v', browserTransaction: browser, ...stepUp }), true);
+  assert.deepEqual(live.consumeWithOutcome('ok', browser), {
+    entry: { nonce: 'n', codeVerifier: 'v', ...stepUp }, stalePurpose: null,
+  });
+});

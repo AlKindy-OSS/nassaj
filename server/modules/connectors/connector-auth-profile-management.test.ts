@@ -201,7 +201,7 @@ const authority = (
   const req = {
     user: { id: 7, role: 'owner' },
     headers: {
-      cookie: `nassaj_connector_recent_auth=${'a'.repeat(64)}`,
+      cookie: `__Host-nassaj_connector_recent_auth=${'a'.repeat(64)}`,
       'x-csrf-token': CSRF_TOKEN,
     },
     get: (name: string) => name.toLowerCase() === 'origin' ? ORIGIN
@@ -438,7 +438,7 @@ test('write gate rejects missing or wrong CSRF before issuing an operation nonce
     let next = false;
     const req = {
       user: { id: 7, role: 'owner' },
-      headers: { cookie: `nassaj_connector_recent_auth=${'a'.repeat(64)}` },
+      headers: { cookie: `__Host-nassaj_connector_recent_auth=${'a'.repeat(64)}` },
       get: (name: string) => name.toLowerCase() === 'origin' ? ORIGIN
         : name.toLowerCase() === 'x-csrf-token' ? supplied : undefined,
     } as unknown as express.Request;

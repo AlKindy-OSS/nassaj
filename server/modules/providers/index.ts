@@ -20,7 +20,7 @@ export { setSessionLivenessProbes } from './services/session-activity.service.js
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';
-export { notifySessionMetadataChanged } from './services/sessions-watcher.service.js';
+export { notifyProjectMetadataChanged, notifySessionMetadataChanged } from './services/sessions-watcher.service.js';
 export { default as providerRoutes } from './provider.routes.js';
 
 // T-1090: branches a session (plus the `/btw` exchange) into a new one. Exported

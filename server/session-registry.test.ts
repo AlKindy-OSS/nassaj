@@ -348,3 +348,20 @@ test('B-N7 single source: with the flag OFF the registry is inert (legacy map is
     assert.equal(reg.isActive('k'), false, 'disabled registry is never the authority');
   });
 });
+
+test('B-1399 clearInactiveBuffer: a finished run\'s frames are cleared, seq keeps rising', () => {
+  withFlag(true, () => {
+    const reg = new SessionRegistry(FLAG);
+    const sid = 'session-b1399';
+    reg.open(sid);
+    reg.record(sid, { kind: 'error' });
+    assert.equal(reg.clearInactiveBuffer(sid), false, 'a live run is never touched');
+    reg.setActive(sid, false);
+    assert.equal(reg.clearInactiveBuffer(sid), true);
+    const seen: unknown[] = [];
+    reg.attach(sid, 0, (p) => seen.push(p));
+    assert.deepEqual(seen, [], 'nothing from the finished run is replayed');
+    assert.equal(reg.record(sid, { kind: 'complete' }), 2, 'the seq line continues');
+    assert.equal(reg.clearInactiveBuffer('unknown'), false);
+  });
+});

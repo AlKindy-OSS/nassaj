@@ -174,6 +174,17 @@ export const apiKeysDb = {
     return result.changes > 0;
   },
 
+  /**
+   * Permanently removes every API key of a user and returns how many were
+   * removed (T-1939: the IdP withdrew the member's grant or signed them out).
+   * Deleted, not disabled, so the member cannot re-enable a revoked key.
+   */
+  revokeAllForUser(userId: number): number {
+    return getConnection()
+      .prepare('DELETE FROM api_keys WHERE user_id = ?')
+      .run(userId).changes;
+  },
+
   /** Enables or disables an API key without deleting it. */
   toggleApiKey(
     userId: number,

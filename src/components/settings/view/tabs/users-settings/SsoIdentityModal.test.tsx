@@ -25,20 +25,20 @@ vi.mock('react-i18next', () => ({
 }));
 
 const apiMock = vi.hoisted(() => ({
-  link: vi.fn<(id: number, subject: string) => Promise<Response>>(),
   unlink: vi.fn<(id: number) => Promise<Response>>(),
+  unlinkSelf: vi.fn<(password: string) => Promise<Response>>(),
 }));
 vi.mock('../../../../../utils/api', () => ({
   api: {
     auth: {
       listUsers: async () => new Response(JSON.stringify({ users: tabState.users })),
       listInvites: async () => new Response(JSON.stringify({ invites: [] })),
-      oidc: { link: apiMock.link, unlink: apiMock.unlink },
+      oidc: { unlink: apiMock.unlink, unlinkSelf: apiMock.unlinkSelf },
     },
   },
 }));
 
-// Visibility test below drives these two directly.
+// Visibility test below drives these directly.
 const tabState = vi.hoisted(() => ({
   role: 'owner' as 'owner' | 'admin',
   ssoAvailable: true,
@@ -58,27 +58,35 @@ import UsersSettingsTab from './UsersSettingsTab';
 const sso = enSettings.users.sso;
 
 beforeEach(() => {
-  apiMock.link.mockReset();
   apiMock.unlink.mockReset();
+  apiMock.unlinkSelf.mockReset();
 });
 
 afterEach(() => {
   cleanup();
 });
 
-describe('useUsersAdmin SSO link calls', () => {
+describe('useUsersAdmin SSO unlink calls', () => {
+  it('exposes no link call (B-1410)', () => {
+    const { result } = renderHook(() => useUsersAdmin(false));
+    expect('linkSsoIdentity' in result.current).toBe(false);
+  });
+
   it.each([
     [200, { success: true }],
-    [400, { success: false, reason: 'invalid' }],
+    [401, { success: false, reason: 'wrong_password' }],
+    [403, { success: false, reason: 'forbidden' }],
     [404, { success: false, reason: 'not_found' }],
-    [409, { success: false, reason: 'conflict' }],
-    [500, { success: false, reason: 'not_configured' }],
-    [403, { success: false, reason: 'failed' }],
-  ] as const)('maps POST /link status %s', async (status, expected) => {
-    apiMock.link.mockResolvedValue(new Response('{}', { status }));
+    [429, { success: false, reason: 'rate_limited' }],
+    [500, { success: false, reason: 'failed' }],
+  ] as const)('maps DELETE /link status %s', async (status, expected) => {
+    apiMock.unlink.mockResolvedValue(new Response('{}', { status }));
+    apiMock.unlinkSelf.mockResolvedValue(new Response('{}', { status }));
     const { result } = renderHook(() => useUsersAdmin(false));
-    await expect(result.current.linkSsoIdentity(7, 'sub-1')).resolves.toEqual(expected);
-    expect(apiMock.link).toHaveBeenCalledWith(7, 'sub-1');
+    await expect(result.current.unlinkSsoIdentity(7)).resolves.toEqual(expected);
+    await expect(result.current.unlinkOwnSsoIdentity('pw')).resolves.toEqual(expected);
+    expect(apiMock.unlink).toHaveBeenCalledWith(7);
+    expect(apiMock.unlinkSelf).toHaveBeenCalledWith('pw');
   });
 
   it('reports a network failure on unlink', async () => {
@@ -89,41 +97,23 @@ describe('useUsersAdmin SSO link calls', () => {
 });
 
 describe('SsoIdentityModal', () => {
-  const setup = (onLink = vi.fn<(s: string) => Promise<SsoLinkResult>>(), onUnlink = vi.fn<() => Promise<SsoLinkResult>>()) => {
-    render(<SsoIdentityModal username="alice" onClose={vi.fn()} onLink={onLink} onUnlink={onUnlink} />);
-    return { onLink, onUnlink };
+  const setup = (isSelf = false, onUnlink = vi.fn<(pw?: string) => Promise<SsoLinkResult>>()) => {
+    render(<SsoIdentityModal username="alice" isSelf={isSelf} onClose={vi.fn()} onUnlink={onUnlink} />);
+    return { onUnlink };
   };
 
-  it('requires a subject before calling the server', async () => {
-    const { onLink } = setup();
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: sso.link }));
-    });
-    expect(onLink).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toContain(sso.errors.required);
+  it('shows the link control disabled, with the reason, and no subject field', () => {
+    setup();
+    const link = screen.getByRole('button', { name: sso.link }) as HTMLButtonElement;
+    expect(link.disabled).toBe(true);
+    const hintId = link.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(hintId)?.textContent).toBe(sso.linkDisabledHint);
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  it('links a trimmed subject and confirms success', async () => {
-    const { onLink } = setup(vi.fn(async () => ({ success: true }) as const));
-    fireEvent.change(screen.getByLabelText(sso.subjectLabel), { target: { value: '  2981234  ' } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: sso.link }));
-    });
-    expect(onLink).toHaveBeenCalledWith('2981234');
-    expect(screen.getByRole('status').textContent).toContain('alice can now sign in with SSO');
-  });
-
-  it('names a conflict (identity already linked elsewhere)', async () => {
-    setup(vi.fn(async () => ({ success: false, reason: 'conflict' }) as const));
-    fireEvent.change(screen.getByLabelText(sso.subjectLabel), { target: { value: 'taken' } });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: sso.link }));
-    });
-    expect(screen.getByRole('alert').textContent).toContain(sso.errors.conflict);
-  });
-
-  it('asks for confirmation before unlinking (it revokes every session)', async () => {
-    const { onUnlink } = setup(undefined, vi.fn(async () => ({ success: true }) as const));
+  it('asks for confirmation before unlinking a member (it revokes every session)', async () => {
+    const { onUnlink } = setup(false, vi.fn(async () => ({ success: true }) as const));
+    expect(screen.queryByLabelText(sso.passwordLabel)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
     expect(onUnlink).not.toHaveBeenCalled();
     expect(screen.getByText(/sign them out everywhere/)).toBeTruthy();
@@ -131,44 +121,76 @@ describe('SsoIdentityModal', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
     });
-    expect(onUnlink).toHaveBeenCalledTimes(1);
+    expect(onUnlink).toHaveBeenCalledWith(undefined);
     expect(screen.getByRole('status').textContent).toContain('SSO links removed');
+  });
+
+  it('requires the current password to unlink the owner account', async () => {
+    const { onUnlink } = setup(true, vi.fn(async () => ({ success: true }) as const));
+    fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
+    expect(onUnlink).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain(sso.errors.passwordRequired);
+
+    fireEvent.change(screen.getByLabelText(sso.passwordLabel), { target: { value: 'secret-pw' } });
+    fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
+    expect(screen.getByText(sso.unlinkSelfConfirm)).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
+    });
+    expect(onUnlink).toHaveBeenCalledWith('secret-pw');
+    expect(screen.getByRole('status').textContent).toContain(sso.unlinkedSelf);
+  });
+
+  it('names a wrong password', async () => {
+    setup(true, vi.fn(async () => ({ success: false, reason: 'wrong_password' }) as const));
+    fireEvent.change(screen.getByLabelText(sso.passwordLabel), { target: { value: 'nope' } });
+    fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: sso.unlink }));
+    });
+    expect(screen.getByRole('alert').textContent).toContain(sso.errors.wrongPassword);
   });
 });
 
 describe('UsersSettingsTab SSO action visibility', () => {
-  const owner: ManagedUser = { id: 5, username: 'boss', role: 'owner', status: 'active' };
+  const me: ManagedUser = { id: 1, username: 'me', role: 'owner', status: 'active' };
+  const coOwner: ManagedUser = { id: 5, username: 'boss', role: 'owner', status: 'active' };
   const member: ManagedUser = { id: 6, username: 'bob', role: 'user', status: 'active' };
 
-  const openMenuItems = async (username: string) => {
+  const ssoItemFor = async (username: string) => {
     fireEvent.click(await screen.findByRole('button', { name: `Actions for ${username}` }));
     return screen.queryByRole('menuitem', { name: new RegExp(sso.menu) });
   };
 
   beforeEach(() => {
-    tabState.users = [owner, member];
+    tabState.users = [me, coOwner, member];
   });
 
   it('is absent while OIDC is off', async () => {
     tabState.role = 'owner';
     tabState.ssoAvailable = false;
     render(<UsersSettingsTab />);
-    expect(await openMenuItems('bob')).toBeNull();
+    expect(await ssoItemFor('bob')).toBeNull();
   });
 
-  it('lets an admin manage a member', async () => {
+  it('lets the owner manage a member and their own account, not another owner', async () => {
+    tabState.role = 'owner';
+    tabState.ssoAvailable = true;
+    render(<UsersSettingsTab />);
+    expect(await ssoItemFor('bob')).toBeTruthy();
+    cleanup();
+    render(<UsersSettingsTab />);
+    expect(await ssoItemFor('me')).toBeTruthy();
+    cleanup();
+    render(<UsersSettingsTab />);
+    expect(await ssoItemFor('boss')).toBeNull();
+  });
+
+  it('gives an admin no SSO action', async () => {
     tabState.role = 'admin';
     tabState.ssoAvailable = true;
     render(<UsersSettingsTab />);
-    expect(await openMenuItems('bob')).toBeTruthy();
-  });
-
-  it('does not offer an admin the owner row', async () => {
-    tabState.role = 'admin';
-    tabState.ssoAvailable = true;
-    render(<UsersSettingsTab />);
-    await screen.findByRole('button', { name: 'Actions for bob' });
-    expect(screen.queryByRole('button', { name: 'Actions for boss' })).toBeNull();
+    expect(await ssoItemFor('bob')).toBeNull();
   });
 });
 

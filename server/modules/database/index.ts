@@ -210,7 +210,13 @@ export {
   SessionTombstonedError,
 } from '@/modules/database/repositories/session-tombstones.db.js';
 export { sessionOutcomesDb } from '@/modules/database/repositories/session-outcomes.db.js';
-export type { SessionOutcomeRow } from '@/modules/database/repositories/session-outcomes.db.js';
+export { indicatorLookupsDb } from '@/modules/database/repositories/indicator-lookups.db.js';
+export type { IndicatorSessionRow } from '@/modules/database/repositories/indicator-lookups.db.js';
+export type {
+  OutcomeBroadcast,
+  SessionOutcomeRow,
+  UnseenOutcomeRow,
+} from '@/modules/database/repositories/session-outcomes.db.js';
 export type { ClosedSessionRow } from '@/modules/database/repositories/closed-sessions.db.js';
 export { uiPreferencesDb } from '@/modules/database/repositories/ui-preferences.js';
 export type { UiPreferences } from '@/modules/database/repositories/ui-preferences.js';

@@ -665,5 +665,9 @@
     "error": "无法裁剪图片，请重试。",
     "cropArea": "裁剪区域",
     "cropHint": "使用方向键移动或调整裁剪区域"
+  },
+  "inlineCode": {
+    "openLink": "打开链接 — 右键点击以复制",
+    "copyHint": "复制"
   }
 }

@@ -48,15 +48,23 @@
  * provider module and auth/login wiring stay in place as dormant code, and
  * historical Qwen sessions stay listable and readable.
  *
+ * `cursor` and `kimi` are disabled, and `deepseek` loses its "coming soon"
+ * settings tile (owner decision 2026-09-29): all three are hidden from every
+ * surface and new runs are refused at the dispatch seam. Launchers, provider
+ * modules and auth wiring stay as dormant code; historical sessions stay
+ * listable and readable. Re-enabling is removing the id from this list.
+ *
  * NOTE: the provider registry itself is NOT filtered — `resolveProvider` must
  * keep returning disabled providers so historical sessions stay listable and
  * readable (sessions.service fetchHistory/normalizeMessage, synchronizers).
  * Enforcement happens at the spawn/dispatch seam only.
  */
 export const DISABLED_PROVIDERS = [
+  'cursor',
   'deepseek',
   'glm',
   'hermes',
+  'kimi',
   'qwen',
 ] as const;
 

@@ -46,7 +46,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { Stats } from 'node:fs';
 
-import { participantsDb, sessionsDb } from '@/modules/database/index.js';
+import { indicatorLookupsDb, participantsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import {
   DEFAULT_QUIET_MS,
   readJournalKeySets,
@@ -191,6 +191,12 @@ async function readJournalKeySetsCached(
 /** One active (running or orphaned) workflow owned by the caller. */
 export type ActiveWorkflow = {
   sessionId: string;
+  /**
+   * B-1431: DB id of the session's project (never a path), or null. Set ONLY
+   * when that project is visible to the caller: being a participant of a
+   * session does not make one a member of its project (ADR-172).
+   */
+  projectId: string | null;
   wfId: string;
   status: ActiveWorkflowStatus;
   /** Unique result keys observed so far (progress numerator). */
@@ -266,7 +272,7 @@ async function scanSessionWorkflows(
   projectPath: string | null,
   scopeResolver: ScopeLivenessResolver | null,
   terminalWorkflowIds: ReadonlySet<string>,
-): Promise<ActiveWorkflow[]> {
+): Promise<Array<Omit<ActiveWorkflow, 'projectId'>>> {
   let entries: string[];
   try {
     entries = await fsp.readdir(workflowsDir);
@@ -294,7 +300,7 @@ async function scanSessionWorkflows(
     }
   }
 
-  const active: ActiveWorkflow[] = [];
+  const active: Array<Omit<ActiveWorkflow, 'projectId'>> = [];
 
   for (const entry of entries) {
     if (!entry.startsWith('wf_')) {
@@ -439,6 +445,27 @@ async function scanSessionWorkflows(
   return active;
 }
 
+/**
+ * B-1431: returns a path -> projectId resolver that answers ONLY for projects
+ * visible to `userId` (one visibility query + one id query, lazily, on the first
+ * workflow found). Anything else — invisible, archived, unknown, null — is null.
+ */
+function buildVisibleProjectIdResolver(userId: number): (projectPath: string | null) => string | null {
+  let visible: Set<string> | null = null;
+  let idByPath: Map<string, string> | null = null;
+  return (projectPath) => {
+    if (!projectPath) {
+      return null;
+    }
+    visible ??= new Set(projectsDb.getVisibleProjectPaths(userId));
+    if (!visible.has(projectPath)) {
+      return null;
+    }
+    idByPath ??= indicatorLookupsDb.getActiveProjectIdsByPath();
+    return idByPath.get(projectPath) ?? null;
+  };
+}
+
 export const workflowStatusService = {
   /**
    * Returns the caller's running/orphaned workflows across the sessions they
@@ -492,6 +519,7 @@ export const workflowStatusService = {
       // Null when WORKFLOW_SUPERVISOR is off => scanner stays pid-only (no-op).
       const scopeResolver = await buildScopeLivenessResolver();
 
+      const resolveProjectId = buildVisibleProjectIdResolver(userId as number);
       const workflows: ActiveWorkflow[] = [];
       let scanned = 0;
       for (const sessionId of toScan) {
@@ -521,8 +549,9 @@ export const workflowStatusService = {
           scopeResolver,
           terminalWorkflowIds,
         );
+        const projectId = sessionWorkflows.length > 0 ? resolveProjectId(projectPath) : null;
         for (const wf of sessionWorkflows) {
-          workflows.push(wf);
+          workflows.push({ ...wf, projectId });
         }
       }
 

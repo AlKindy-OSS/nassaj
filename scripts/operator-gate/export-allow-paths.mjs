@@ -28,6 +28,8 @@ import { fileURLToPath } from 'node:url';
 //     and carry the private repo owner literally;
 //   - the orchestrator's own tests carry that owner and the operator's name/email
 //     as fixtures, so they leak exactly like their subjects and are private CI only;
+//   - the runner's release-gate test imports the excluded orchestrator phases, and
+//     its hang fixture has no other reader, so both stay private with their subject;
 //   - the export builder, its test and the content linker describe OUR layout;
 //   - prepare-release-version.test.mjs asserts on the excluded release.yml, so its
 //     subject is absent in the public tree;
@@ -54,6 +56,12 @@ const DENY_EXACT = new Set([
     'scripts/release-orchestrator-journal.test.mjs',
     'scripts/release-orchestrator-phases.test.mjs',
     'scripts/release-orchestrator-sandbox.test.mjs',
+    'scripts/release-preflight.mjs',
+    'scripts/release-preflight.test.mjs',
+    'scripts/lib/release-baseline-cache.mjs',
+    'scripts/release-baseline-cache.test.mjs',
+    'scripts/run-isolated-node-tests.release-gate.test.mjs',
+    'scripts/fixtures/runner-hang-probe.mjs',
     'scripts/prepare-release-version.test.mjs',
 ]);
 

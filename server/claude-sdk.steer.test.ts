@@ -11,6 +11,8 @@
  * Runner: node:test with --experimental-test-module-mocks (SDK mock registered
  * before the dynamic import of the module under test).
  */
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -149,7 +151,7 @@ test('armed run: hook registered, turn announced, injection yielded by the same 
   const hookEntry = lastOptions!.hooks.PreToolUse.at(-1);
   assert.equal(hookEntry.matcher, steer.STEER_TAINT_MATCHER);
   const state = turnState();
-  assert.deepEqual([state?.sessionId, state?.starterUserId, state?.steerable], [SID, 1, true]);
+  assert.deepEqual([state?.sessionId, state?.starterUserId, state?.steerable, state?.starterSteerable], [SID, 1, true, true]);
   const verdict = steer.handleSessionSteer({ sessionId: SID, turnId: state!.turnId, clientMsgId: 'm-1', text: 'use tabs' }, steerCtx(2));
   assert.deepEqual([verdict.ok, verdict.status], [true, 202]);
   assert.ok(sent.some(p => p.type === 'steer-queued' && p.sender.userId === 2 && p.text === 'use tabs'));
@@ -261,35 +263,81 @@ test('taint gate in bypassPermissions: only the starter can approve; others, tim
   await run;
 });
 
-test('no-hook retry path: the run cannot be steered (409 steer_unavailable)', async () => {
+test('no-hook retry path: others cannot steer (409 steer_unavailable); the starter still can', async () => {
   throwWhenHooks = true;
   const { run } = await startRun();
   assert.equal(lastOptions!.hooks, undefined);
   const state = turnState();
-  assert.equal(state?.steerable, false);
+  assert.deepEqual([state?.steerable, state?.starterSteerable], [false, true]);
   const verdict = steer.handleSessionSteer({ sessionId: SID, turnId: state!.turnId, clientMsgId: 'n-1', text: 'x' }, steerCtx(2));
   assert.deepEqual([verdict.code, verdict.status], ['steer_unavailable', 409]);
+  assert.equal(steer.handleSessionSteer({ sessionId: SID, turnId: state!.turnId, clientMsgId: 'n-2', text: 'x' }, steerCtx(1)).ok,
+    true);
   releaseStream();
   await run;
 });
 
-test('consent off at start: no taint hook, no announcement, steer_unavailable', async () => {
+test('consent off at start: NO taint hook, yet the starter self-steers and it is delivered', async () => {
   steer.setSteerConsent(1, { allowSteerOnMyRuns: false });
+  prepare([[result(0.1, 1)], [text('ok'), result(0.2, 1)]]);
+  const { run } = await startRun();
+  const matchers = (lastOptions!.hooks.PreToolUse ?? []).map((h: { matcher: string }) => h.matcher);
+  assert.ok(!matchers.includes(steer.STEER_TAINT_MATCHER), 'no .* callback hook without consent (B-503)');
+  const state = turnState();
+  assert.deepEqual([state?.starterUserId, state?.steerable, state?.starterSteerable], [1, false, true],
+    'the broadcast never offers others a steer the starter did not consent to');
+  const other = steer.handleSessionSteer({ sessionId: SID, turnId: state!.turnId, clientMsgId: 'c-1', text: 'x' }, steerCtx(2));
+  assert.deepEqual([other.code, other.status], ['steer_not_consented', 403]);
+  steer.setSteerConsent(1, { allowSteerOnMyRuns: true });
+  const late = steer.handleSessionSteer({ sessionId: SID, turnId: state!.turnId, clientMsgId: 'c-3', text: 'x' }, steerCtx(2));
+  assert.deepEqual([late.code, late.status], ['steer_unavailable', 409], 'consent after start: still no gate, refused');
+  const own = steer.handleSessionSteer({ sessionId: SID, turnId: state!.turnId, clientMsgId: 'c-2', text: 'use tabs' }, steerCtx(1));
+  assert.deepEqual([own.ok, own.status], [true, 202]);
+  gates[0]();
+  const next = await promptIterator!.next();
+  assert.equal(next.value.message.content, '<nassaj-steer from="bob" role="owner">\nuse tabs\n</nassaj-steer>');
+  const row = getConnection().prepare('SELECT claude_user_uuid AS uuid FROM message_coordination_ingress WHERE client_msg_id = ?').get('c-2') as { uuid: string };
+  assert.equal(next.value.uuid, row.uuid, 'delivered to the CLI by the same generator with our uuid');
+  gates[1]();
+  assert.equal(rawSent.some(p => p.kind === 'permission_request'), false, 'the starter was never asked');
+  releaseStream();
+  await run;
+});
+
+test('self-steer with consent on: no taint; a later steer by another member taints as before', async () => {
+  const { run } = await startRun();
+  const hook = lastOptions!.hooks.PreToolUse.at(-1).hooks[0];
+  const turnId = turnState()!.turnId;
+  assert.equal(turnState()!.starterSteerable, true);
+  assert.equal(steer.handleSessionSteer({ sessionId: SID, turnId, clientMsgId: 'x-1', text: 'a' }, steerCtx(1)).ok, true);
+  assert.deepEqual(await hook({ tool_name: 'Write', tool_input: {} }), {}, 'self-steer: gate stays inert');
+  assert.equal(steer.handleSessionSteer({ sessionId: SID, turnId, clientMsgId: 'x-2', text: 'b' }, steerCtx(2)).ok, true);
+  const gated = hook({ tool_name: 'Write', tool_input: {} });
+  await sleep(5);
+  assert.equal(rawSent.filter(p => p.kind === 'permission_request').length, 1, 'the starter is asked now');
+  assert.equal((await gated).hookSpecificOutput.permissionDecision, 'deny', 'unanswered → timeout deny');
+  releaseStream();
+  await run;
+});
+
+test('policy off: no arming at all; the starter himself cannot steer', async () => {
+  steer.setSteerPolicy({ mode: 'off' }, 1);
   const { run } = await startRun();
   const matchers = (lastOptions!.hooks.PreToolUse ?? []).map((h: { matcher: string }) => h.matcher);
   assert.ok(!matchers.includes(steer.STEER_TAINT_MATCHER));
   assert.equal(turnState(), undefined);
   const verdict = steer.handleSessionSteer({ sessionId: SID, turnId: '71111111-2222-4333-8444-555555555555',
-    clientMsgId: 'c-1', text: 'x' }, steerCtx(2));
+    clientMsgId: 'p-1', text: 'x' }, steerCtx(1));
   assert.equal(verdict.code, 'steer_unavailable');
   releaseStream();
   await run;
 });
 
-test('plan mode and the starter himself are refused', async () => {
+test('plan mode is refused and never armed', async () => {
   const { run } = await startRun({ permissionMode: 'default' });
   const turnId = turnState()!.turnId;
-  assert.equal(steer.handleSessionSteer({ sessionId: SID, turnId, clientMsgId: 's-1', text: 'x' }, steerCtx(1)).code, 'steer_self');
+  assert.equal(steer.handleSessionSteer({ sessionId: SID, turnId, clientMsgId: 's-1', text: 'x' }, steerCtx(1)).ok, true,
+    'the starter may steer his own non-plan turn');
   releaseStream();
   await run;
   const planned = await (async () => {

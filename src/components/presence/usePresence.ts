@@ -49,6 +49,12 @@ export type ActiveConversations = {
 export type RunningSession = {
   sessionId: string;
   state: 'running' | 'frozen';
+  /**
+   * DB project id (never a path), or null when the run's project is not
+   * visible to this recipient. An older server that omits the field also
+   * parses to null (B-1431 client stage) — see reconcilePresenceProcessStates.
+   */
+  projectId: string | null;
 };
 
 /** WS message name the backend broadcasts presence under. */
@@ -131,7 +137,10 @@ export function parseRunningSessions(raw: unknown): RunningSession[] {
     if (state !== 'running' && state !== 'frozen') {
       continue;
     }
-    parsed.push({ sessionId: entry.sessionId, state });
+    const projectId = typeof entry.projectId === 'string' && entry.projectId.length > 0
+      ? entry.projectId
+      : null;
+    parsed.push({ sessionId: entry.sessionId, state, projectId });
   }
   return parsed;
 }

@@ -51,6 +51,8 @@ export function canMarkOutcomeUnread(
 type StoredOutcome = {
   outcome: SessionOutcome;
   outcomeAt: string | null;
+  /** DB project id (B-1431), or null when unknown/not carried by this write path. */
+  projectId: string | null;
 };
 export type OutcomeState = 'visible' | 'seen' | 'absent';
 
@@ -108,6 +110,9 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+/** Raw subscription for callers outside React's useSyncExternalStore (B-1431 rollup). */
+export { subscribe as subscribeSessionCompletion };
+
 function commit(next: Map<string, StoredOutcome>): void {
   outcomeById = next;
   emitChange();
@@ -144,6 +149,7 @@ export function applyOutcomeSnapshot(
     sessionId: string;
     outcome: SessionOutcome;
     outcomeAt?: string | null;
+    projectId?: string | null;
   }>,
 ): void {
   const next = new Map<string, StoredOutcome>();
@@ -152,6 +158,7 @@ export function applyOutcomeSnapshot(
       next.set(row.sessionId, {
         outcome: row.outcome,
         outcomeAt: row.outcomeAt ?? null,
+        projectId: row.projectId ?? null,
       });
     }
   }
@@ -168,6 +175,7 @@ export function applyOutcomeDelta(
   outcome: SessionOutcome | null,
   outcomeAt: string | null = null,
   outcomeState: OutcomeState = outcome ? 'visible' : 'absent',
+  projectId: string | null = null,
 ): void {
   if (!sessionId) return;
   if (outcomeState === 'visible' && !outcome) return;
@@ -178,7 +186,8 @@ export function applyOutcomeDelta(
       && terminalOutcomeStateById.get(sessionId) === outcomeState)
     || (outcomeState === 'visible'
       && current?.outcome === outcome
-      && current.outcomeAt === outcomeAt)
+      && current.outcomeAt === outcomeAt
+      && current.projectId === projectId)
   ) return;
   deltaGeneration += 1;
   lastDeltaGenerationById.set(sessionId, deltaGeneration);
@@ -207,7 +216,7 @@ export function applyOutcomeDelta(
   if (outcomeState === 'visible') {
     if (!outcome) return; // guarded above; keeps the discriminant explicit to TypeScript
     terminalOutcomeStateById.delete(sessionId);
-    next.set(sessionId, { outcome, outcomeAt });
+    next.set(sessionId, { outcome, outcomeAt, projectId });
   } else {
     terminalOutcomeStateById.set(sessionId, outcomeState);
     next.delete(sessionId);
@@ -230,6 +239,7 @@ export async function refreshOutcomes(): Promise<boolean> {
       sessionId?: unknown;
       outcome?: unknown;
       outcomeAt?: unknown;
+      projectId?: unknown;
     }>) {
       if (
         typeof row?.sessionId !== 'string'
@@ -238,6 +248,7 @@ export async function refreshOutcomes(): Promise<boolean> {
       snapshot.set(row.sessionId, {
         outcome: row.outcome,
         outcomeAt: typeof row.outcomeAt === 'string' ? row.outcomeAt : null,
+        projectId: typeof row.projectId === 'string' && row.projectId.length > 0 ? row.projectId : null,
       });
     }
 
@@ -383,6 +394,9 @@ export async function markOutcomeUnread(sessionId: string): Promise<boolean> {
     next.set(sessionId, {
       outcome,
       outcomeAt,
+      // This endpoint's response carries no projectId; the session's project
+      // did not change under an unread toggle, so keep whatever we last knew.
+      projectId: current?.projectId ?? null,
     });
     commit(next);
     return true;
@@ -418,6 +432,27 @@ export function useSessionOutcome(sessionId?: string | null): SessionOutcome | n
   return useSyncExternalStore(subscribe, () =>
     sessionId ? outcomeById.get(sessionId)?.outcome ?? null : null,
   );
+}
+
+/** Non-reactive: حالة هذه الجلسة، أو `null` — لقارئ يجمع عدة متاجر خارج React. */
+export function getSessionOutcome(sessionId?: string | null): SessionOutcome | null {
+  return sessionId ? outcomeById.get(sessionId)?.outcome ?? null : null;
+}
+
+/**
+ * Non-reactive: session ids currently carrying a terminal outcome (question /
+ * error / done) attributed to `projectId` (B-1431). Used by the project
+ * busy-dot rollup to reach sessions it never loaded a row for.
+ */
+export function getOutcomeSessionIdsForProject(projectId: string | null): string[] {
+  if (!projectId) return [];
+  const ids: string[] = [];
+  for (const [sessionId, stored] of outcomeById) {
+    if (stored.projectId === projectId) {
+      ids.push(sessionId);
+    }
+  }
+  return ids;
 }
 
 /**

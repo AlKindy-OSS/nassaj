@@ -1,3 +1,7 @@
+// Must stay first: sets WORKSPACES_ROOT before @/shared/utils.js loads (B-1421).
+// eslint-disable-next-line import-x/order
+import { TEST_GIT_PROJECT } from './chat-websocket.test-git-project.js';
+
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,7 +25,7 @@ test('not-started retry dispatches once more, terminal retry replays verdict, mi
   await initializeDatabase();
   try {
     const userId = userDb.createUser('coord-lifecycle', 'hash', 'user').id;
-    projectsDb.createProjectPath(process.cwd(), 'coordination lifecycle', userId);
+    projectsDb.createProjectPath(TEST_GIT_PROJECT, 'coordination lifecycle', userId);
     const sent: Array<Record<string, unknown>> = [];
     const writer = { send: (payload: Record<string, unknown>) => sent.push(payload) } as unknown as WebSocketWriter;
     let launches = 0;

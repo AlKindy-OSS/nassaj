@@ -178,7 +178,7 @@ function schedulePendingWatcherFlush(retry = false): void {
 
 function queuePendingWatcherUpdate(
   eventType: WatcherEventType,
-  provider: LLMProvider,
+  provider: LLMProvider | null,
   updatedSessionId: string | null
 ): void {
   if (!pendingWatcherUpdate) {
@@ -189,7 +189,9 @@ function queuePendingWatcherUpdate(
     };
   }
 
-  pendingWatcherUpdate.providers.add(provider);
+  if (provider) {
+    pendingWatcherUpdate.providers.add(provider);
+  }
   pendingWatcherUpdate.changeTypes.add(eventType);
   if (updatedSessionId) {
     pendingWatcherUpdate.updatedSessionIds.add(updatedSessionId);
@@ -676,6 +678,19 @@ export function notifySessionMetadataChanged(
   sessionId: string | null,
 ): void {
   queuePendingWatcherUpdate('change', provider, sessionId);
+}
+
+/**
+ * Broadcasts a `projects_updated` refresh for a DB-only PROJECT metadata change
+ * (e.g. the project link, T-1950) that no transcript write will ever surface.
+ *
+ * Sibling of notifySessionMetadataChanged for changes not tied to a session or
+ * provider: it rides the same queue, so it inherits the per-user payloads and
+ * the shared visibility seam (currently unfiltered per ADR-089) instead of
+ * hand-rolling a frame.
+ */
+export function notifyProjectMetadataChanged(): void {
+  queuePendingWatcherUpdate('change', null, null);
 }
 
 /**

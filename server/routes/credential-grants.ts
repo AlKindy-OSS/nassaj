@@ -93,7 +93,9 @@ function buildOverview(callerId: number) {
   const names = usernameIndex();
   const nameOf = (id: number) => names.get(id) ?? `#${id}`;
 
-  const given = credentialGrantsDb.listByOwner(callerId).map((row) => ({
+  // T-1906: rows for a unit that is no longer grantable (qwen) are not shown
+  // and never used — the store keeps them only so a revoke can still find them.
+  const given = credentialGrantsDb.listByOwner(callerId).filter((row) => isGrantableKey(row.provider)).map((row) => ({
     provider: row.provider,
     userId: row.granteeUserId,
     username: nameOf(row.granteeUserId),
@@ -101,7 +103,7 @@ function buildOverview(callerId: number) {
     createdAt: row.createdAt,
   }));
 
-  const received = credentialGrantsDb.listByGrantee(callerId).map((row) => ({
+  const received = credentialGrantsDb.listByGrantee(callerId).filter((row) => isGrantableKey(row.provider)).map((row) => ({
     provider: row.provider,
     ownerUserId: row.ownerUserId,
     ownerUsername: nameOf(row.ownerUserId),

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 
-import { canAccessProject, closedSessionsDb, listAccessibleProjectPaths, participantsDb, projectMembersDb, projectsDb, sessionOutcomesDb, sessionsDb, starredSessionsDb } from '@/modules/database/index.js';
+import { canAccessProject, closedSessionsDb, indicatorLookupsDb, listAccessibleProjectPaths, participantsDb, projectMembersDb, projectsDb, sessionOutcomesDb, sessionsDb, starredSessionsDb } from '@/modules/database/index.js';
 import type { ClosedSessionRow } from '@/modules/database/index.js';
 import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
@@ -105,6 +105,8 @@ export type ProjectListItem = {
   isStarred: boolean;
   // Public URL of the project's custom logo, or null when it has none (T-1403).
   logoUrl: string | null;
+  // Optional external project link (T-1950), or null. Display-only.
+  linkUrl: string | null;
   // True when the requesting user owns or participates in >=1 session whose
   // project_path belongs to this project. Purely informational: the project
   // list is NOT filtered server-side (full sharing is preserved) — the frontend
@@ -565,6 +567,65 @@ export function getSessionDeepLinkContext(
   return { projectId: project.project_id, provider: row.provider, session };
 }
 
+/**
+ * B-1431 — batched {@link getSessionDeepLinkContext} for the sidebar's project
+ * indicators: resolves many session ids to `{projectId, provider, session}` in
+ * a fixed number of queries (no N+1).
+ *
+ * Visibility boundary: ONE `getVisibleProjectPaths(userId)` set per request.
+ * That set is membership-scoped under PROJECT_MEMBERSHIP_ENFORCE (the same
+ * predicate canAccessProject applies) and holds ACTIVE projects only, so a
+ * session under an archived project is dropped here — stricter than the single
+ * endpoint, whose isProjectVisibleToUser ignores the project archive flag.
+ * An unresolved caller sees nothing (same fail-closed rule as the single path).
+ *
+ * Archived sessions, unknown providers, missing and invisible ids are dropped
+ * silently and indistinguishably: the result lists found contexts only, in
+ * request order, so a caller cannot tell "does not exist" from "not yours".
+ */
+export function getSessionDeepLinkContexts(
+  sessionIds: readonly string[],
+  currentUserId: number | null,
+): SessionDeepLinkContext[] {
+  if (!Number.isInteger(currentUserId) || sessionIds.length === 0) {
+    return [];
+  }
+  const visiblePaths = new Set(projectsDb.getVisibleProjectPaths(currentUserId));
+  if (visiblePaths.size === 0) {
+    return [];
+  }
+
+  // Newest-first; keep the first row per id (getSessionById's pick).
+  const rowById = new Map<string, SessionRepositoryRow & { project_path: string }>();
+  for (const raw of indicatorLookupsDb.getSessionsByIds(sessionIds)) {
+    if (rowById.has(raw.session_id)) continue;
+    if (raw.isArchived || !raw.project_path || !visiblePaths.has(raw.project_path)) continue;
+    if (!isSessionBucketProvider(raw.provider)) continue;
+    rowById.set(raw.session_id, { ...raw, project_path: raw.project_path });
+  }
+  if (rowById.size === 0) {
+    return [];
+  }
+
+  const projectIdByPath = indicatorLookupsDb.getActiveProjectIdsByPath();
+  const rows = [...rowById.values()];
+  const buckets = bucketSessionRowsByProvider(rows, currentUserId);
+  const summaryById = new Map<string, SessionSummary>();
+  for (const bucket of Object.values(buckets) as SessionSummary[][]) {
+    for (const summary of bucket) summaryById.set(summary.id, summary);
+  }
+
+  const contexts: SessionDeepLinkContext[] = [];
+  for (const sessionId of sessionIds) {
+    const row = rowById.get(sessionId);
+    const projectId = row ? projectIdByPath.get(row.project_path) : undefined;
+    const session = summaryById.get(sessionId);
+    if (!row || !projectId || !session) continue;
+    contexts.push({ projectId, provider: row.provider, session });
+  }
+  return contexts;
+}
+
 // Broadcast progress to all connected WebSocket clients
 function broadcastProgress(progress: ProgressUpdate) {
   const message = JSON.stringify({
@@ -597,6 +658,7 @@ export async function getProjectsWithSessions(
     isStarred?: number;
     created_by?: number | null;
     logo_url?: string | null;
+    link_url?: string | null;
     dir_exists?: number | null;
     dir_checked_at?: string | null;
   }>;
@@ -674,6 +736,7 @@ export async function getProjectsWithSessions(
       fullPath: projectPath,
       isStarred: Boolean(row.isStarred),
       logoUrl: row.logo_url ?? null,
+      linkUrl: row.link_url ?? null,
       isMember: memberProjectPaths.has(projectPath),
       ownerId,
       isOwner,
@@ -720,6 +783,7 @@ export async function getArchivedProjectsWithSessions(
     isStarred?: number;
     created_by?: number | null;
     logo_url?: string | null;
+    link_url?: string | null;
     dir_exists?: number | null;
     dir_checked_at?: string | null;
   }>;
@@ -758,6 +822,7 @@ export async function getArchivedProjectsWithSessions(
       fullPath: row.project_path,
       isStarred: Boolean(row.isStarred),
       logoUrl: row.logo_url ?? null,
+      linkUrl: row.link_url ?? null,
       // Archived view does not drive the "My Projects" filter; default to false.
       isMember: false,
       ownerId,

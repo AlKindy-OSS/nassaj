@@ -73,6 +73,9 @@ let scriptedMessagesConsumed: Promise<void> = Promise.resolve();
 let releaseMessageStream: () => void = () => {};
 let messageStreamHeld: Promise<void> = Promise.resolve();
 let promptClosure: Promise<boolean> | null = null;
+// B-1399 review: an interrupt that has not answered yet, and a CLI exit after release.
+let interruptImpl: () => Promise<void> = async () => {};
+let streamExitError: Error | null = null;
 
 mock.module('@anthropic-ai/claude-agent-sdk', {
   namedExports: {
@@ -102,8 +105,9 @@ mock.module('@anthropic-ai/claude-agent-sdk', {
           // Stay open after the scripted messages so the close under test is the
           // one the loop decided on — not the unconditional release in `finally`.
           await messageStreamHeld;
+          if (streamExitError) throw streamExitError;
         },
-        interrupt: async () => {},
+        interrupt: () => interruptImpl(),
         supportedCommands: async () => [],
         supportedModels: async () => [],
       };
@@ -126,13 +130,22 @@ mock.module('./services/isolation/resolve-claude-run-profile.js', {
 const sdk = (await import('./claude-sdk.js')) as unknown as {
   queryClaudeSDK: (command: string, options: Record<string, unknown>, ws: unknown) => Promise<unknown>;
   abortClaudeSDKSession: (sessionId: string, rawWs?: unknown) => Promise<{ aborted: boolean }>;
+  announceUnresolvedWorkflows: (sessionId: string, ids: string[], send: (p: unknown) => void) => void;
+  settleAnnouncedWorkflows: (sessionId: string, ids: string[], reason: string) => void;
+};
+const liveness = (await import('./services/workflow-liveness.js')) as unknown as {
+  registerWorkflowPid: (sessionId: string, pid: number) => void;
+  forgetWorkflowPid: (sessionId: string) => void;
 };
 
 const SID = 'control-stream-session-0001';
 const PROMPT = 'delegate this please';
 
+// B-1401: payloads the run sent, to read the `complete` frame.
+let sentPayloads: Array<Record<string, unknown>> = [];
+
 function makeWs() {
-  return { send: () => {}, userId: null, ws: { readyState: 1 } };
+  return { send: (p: Record<string, unknown>) => { sentPayloads.push(p); }, userId: null, ws: { readyState: 1 } };
 }
 
 /** Resolves to true if the prompt stream has been closed within `ms`. */
@@ -155,6 +168,20 @@ async function promptClosedWithin(ms: number): Promise<boolean> {
 function preparePhases(phases: SdkMessage[][]) {
   laterPhases = phases;
   phaseGates = phases.map(() => new Promise<void>(resolve => { phaseReleases.push(resolve); }));
+}
+
+/** Re-arms the query mock's gates so a second run can start inside one test. */
+function resetQueryHarness() {
+  lastQueryArg = null;
+  promptIterator = null;
+  firstPrompt = null;
+  promptClosure = null;
+  laterPhases = [];
+  phaseGates = [];
+  queryStarted = new Promise<void>(resolve => { resolveQueryStarted = resolve; });
+  scriptedMessagesHeld = new Promise<void>(resolve => { releaseScriptedMessages = resolve; });
+  scriptedMessagesConsumed = new Promise<void>(resolve => { resolveScriptedMessagesConsumed = resolve; });
+  messageStreamHeld = new Promise<void>(resolve => { releaseMessageStream = resolve; });
 }
 
 const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
@@ -223,7 +250,7 @@ const capture = JSON.parse(fs.readFileSync(
 
 const ENV_KEYS = [
   'CLAUDE_CONFIG_DIR', 'CLAUDE_SDK_INPUT_CLOSE_GRACE_MS', 'CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS',
-  'CLAUDE_SDK_CONTINUATION_WAIT_MS',
+  'CLAUDE_SDK_CONTINUATION_WAIT_MS', 'CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS',
 ] as const;
 let savedEnv: Record<string, string | undefined> = {};
 let tmpConfigDir = '';
@@ -238,6 +265,9 @@ const closeReason = () => {
 
 beforeEach(() => {
   scriptedMessages = [];
+  interruptImpl = async () => {};
+  streamExitError = null;
+  sentPayloads = [];
   laterPhases = [];
   phaseGates = [];
   phaseReleases = [];
@@ -594,3 +624,271 @@ for (const scenario of ['bgBash', 'bgAgent']) {
     await run;
   });
 }
+
+// ── B-1400 / B-1401 ──────────────────────────────────────────────────────────
+
+const levelSignal = (taskIds: string[]): SdkMessage => ({
+  type: 'system', subtype: 'background_tasks_changed', session_id: SID,
+  tasks: taskIds.map(id => ({ task_id: id, task_type: 'local_agent', description: 'x' })),
+});
+const notificationText = (taskId: string, toolUseId = 'tu_1'): SdkMessage => ({
+  type: 'user', session_id: SID, parent_tool_use_id: null, origin: { kind: 'task-notification' },
+  message: { role: 'user', content: `<task-notification>\n<task-id>${taskId}</task-id>\n`
+    + `<tool-use-id>${toolUseId}</tool-use-id>\n<status>completed</status>\n</task-notification>` },
+});
+const workflowToolUse = (id: string): SdkMessage => ({
+  type: 'assistant', session_id: SID, parent_tool_use_id: null,
+  message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Workflow', input: { script: 'x' } }] },
+});
+const workflowStarted = (taskId: string, toolUseId: string): SdkMessage => ({
+  type: 'system', subtype: 'task_started', task_id: taskId, tool_use_id: toolUseId,
+  description: 'wf', task_type: 'local_workflow', session_id: SID,
+});
+const toolResult = (toolUseId: string, isError = false): SdkMessage => ({
+  type: 'user', session_id: SID, parent_tool_use_id: null,
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, is_error: isError,
+    content: [{ type: 'text', text: isError ? 'script error' : 'Workflow started: wf1' }] }] },
+});
+const completeFrame = () => sentPayloads.find(p => p.kind === 'complete');
+
+for (const [label, terminal] of [
+  ['the <task-notification> the model receives', [notificationText('t1')]],
+  ['a task_notification naming the same tool call under another id', [taskNotification('t1-other')]],
+  ['the background_tasks_changed level dropping it', [levelSignal([])]],
+] as Array<[string, SdkMessage[]]>) {
+  test(`B-1400: a task whose own end bookend is lost settles on ${label}`, async () => {
+    process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '100';
+    process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '600000';
+    process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '100';
+    scriptedMessages = [
+      assistantToolUse('Agent', { subagent_type: 'general-purpose', prompt: 'x', run_in_background: true }),
+      levelSignal(['t1']),
+      taskStarted('t1'),
+      launchedToolResult,
+      resultMsg,
+    ];
+    preparePhases([[...terminal, systemInit, assistantText('DONE'), resultMsg]]);
+    const { run } = await startRun();
+
+    assert.equal(await promptClosedWithin(300), false, 'held while the task is pending');
+    phaseReleases[0]();
+    assert.equal(await promptClosedWithin(600), true, 'pending reaches 0 and the channel closes');
+    assert.notEqual(closeReason(), 'background-idle-cap');
+    releaseMessageStream();
+    await run;
+    assert.ok(completeFrame(), 'complete is sent');
+  });
+}
+
+test('B-1400: an ambient task (watcher) never holds the channel', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '600000';
+  scriptedMessages = [
+    assistantText('done'),
+    { ...taskStarted('w1', true, 'local_bash'), ambient: true },
+    resultMsg,
+  ];
+  const { run } = await startRun();
+
+  assert.equal(await promptClosedWithin(500), true, 'nothing that counts is pending');
+  assert.equal(closeReason(), 'result-immediate');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1400: unrelated CLI messages do not extend the hold past the idle cap', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '100';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '400';
+  scriptedMessages = [
+    assistantToolUse('Agent', { subagent_type: 'general-purpose', prompt: 'x', run_in_background: true }),
+    taskStarted('t1'),
+    resultMsg,
+  ];
+  const chatter: SdkMessage[] = [
+    { type: 'rate_limit_event', session_id: SID },
+    { type: 'system', subtype: 'thinking_tokens', session_id: SID },
+    { ...taskNotification('ghost'), tool_use_id: 'tu_other' },
+  ];
+  preparePhases([chatter, chatter]);
+  const started = Date.now();
+  const { run } = await startRun();
+
+  await sleep(200);
+  phaseReleases[0]();
+  await sleep(150);
+  phaseReleases[1]();
+  assert.equal(await promptClosedWithin(1000), true, 'released at the cap');
+  assert.equal(closeReason(), 'background-idle-cap');
+  assert.ok(Date.now() - started < 700, 'the chatter did not re-arm a full cap');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1400: activity of the pending task itself does extend the hold', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '100';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '400';
+  scriptedMessages = [
+    assistantToolUse('Agent', { subagent_type: 'general-purpose', prompt: 'x', run_in_background: true }),
+    taskStarted('t1'),
+    resultMsg,
+  ];
+  preparePhases([[{ type: 'assistant', session_id: SID, parent_tool_use_id: 'tu_1',
+    message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } }]]);
+  const { run } = await startRun();
+
+  await sleep(300);
+  phaseReleases[0]();
+  assert.equal(await promptClosedWithin(250), false, 'the subagent speaking re-arms the cap');
+  assert.equal(await promptClosedWithin(800), true, 'and it still ends at the cap');
+  assert.equal(closeReason(), 'background-idle-cap');
+  releaseMessageStream();
+  await run;
+});
+
+test('B-1401: pendingWorkflows counts only workflows still running at complete', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '50';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '50';
+  scriptedMessages = [
+    workflowToolUse('wf_ok'), workflowStarted('w1', 'wf_ok'), toolResult('wf_ok'),
+    workflowToolUse('wf_running'), workflowStarted('w2', 'wf_running'), toolResult('wf_running'),
+    workflowToolUse('wf_broken'), toolResult('wf_broken', true),
+    taskNotification('w1'),
+    resultMsg,
+  ];
+  const { run } = await startRun();
+  releaseMessageStream();
+  await run;
+  assert.equal(completeFrame()?.pendingWorkflows, 1, 'only wf_running is still in flight');
+});
+
+test('B-1401: pendingWorkflows is 0 once every workflow has reported back', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '50';
+  scriptedMessages = [
+    workflowToolUse('wf_a'), workflowStarted('w1', 'wf_a'), toolResult('wf_a'),
+    resultMsg,
+    notificationText('w1', 'wf_a'),
+    systemInit, assistantText('done'), resultMsg,
+  ];
+  const { run } = await startRun();
+  releaseMessageStream();
+  await run;
+  assert.equal(completeFrame()?.pendingWorkflows, 0);
+});
+
+// ── T-1933 review round 2 ────────────────────────────────────────────────────
+
+/** Runs one held background agent `t1` (tool call tu_1), then `later`; true if still held. */
+async function heldAfter(later: SdkMessage[], extraFirst: SdkMessage[] = []): Promise<boolean> {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '100';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '600000';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '100';
+  scriptedMessages = [
+    assistantToolUse('Agent', { subagent_type: 'general-purpose', prompt: 'x', run_in_background: true }),
+    ...extraFirst,
+    resultMsg,
+  ];
+  preparePhases([later]);
+  const { run } = await startRun();
+  phaseReleases[0]();
+  const held = !(await promptClosedWithin(600));
+  releaseMessageStream();
+  await run;
+  return held;
+}
+
+test('B-1400: a <task-notification> typed as ordinary user text settles nothing', async () => {
+  const typed = { ...notificationText('t1'), origin: undefined };
+  assert.equal(await heldAfter([typed, resultMsg], [levelSignal(['t1']), taskStarted('t1')]), true);
+});
+
+test('B-1400: a peer delivery (task-notification subkind) settles nothing', async () => {
+  const peer = { ...notificationText('t1'), origin: { kind: 'task-notification', subkind: 'peer-send-message' } };
+  assert.equal(await heldAfter([peer, resultMsg], [levelSignal(['t1']), taskStarted('t1')]), true);
+});
+
+test('B-1400: a notification settles by its task id, not another task sharing its tool call', async () => {
+  const other = { ...taskStarted('t2'), tool_use_id: 'tu_1' };
+  assert.equal(await heldAfter([taskNotification('t2'), resultMsg], [taskStarted('t1'), other]), true,
+    't1 stays pending although the t2 notification names tu_1');
+});
+
+test('B-1400: a task still in the background_tasks_changed level is not settled', async () => {
+  assert.equal(await heldAfter([levelSignal(['t1']), resultMsg], [levelSignal(['t1']), taskStarted('t1')]), true);
+});
+
+test('B-1400: a foreground task absent from the level is not settled', async () => {
+  assert.equal(await heldAfter([levelSignal([]), resultMsg], [taskStarted('t1', false)]), true);
+});
+
+test('B-1401: complete names the unresolved Workflow calls in pendingWorkflowIds', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS = '50';
+  process.env.CLAUDE_SDK_BACKGROUND_HOLD_IDLE_MAX_MS = '50';
+  process.env.CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS = '600000';
+  scriptedMessages = [
+    workflowToolUse('wf_ok'), workflowStarted('w1', 'wf_ok'), toolResult('wf_ok'),
+    workflowToolUse('wf_running'), workflowStarted('w2', 'wf_running'), toolResult('wf_running'),
+    taskNotification('w1'),
+    resultMsg,
+  ];
+  const { run } = await startRun({ sessionId: SID });
+  releaseMessageStream();
+  await run;
+  assert.deepEqual(completeFrame()?.pendingWorkflowIds, ['wf_running']);
+  assert.equal(completeFrame()?.pendingWorkflows, 1);
+
+  // A later run of the same session receives the workflow's notification.
+  sentPayloads = [];
+  resetQueryHarness();
+  scriptedMessages = [notificationText('w2', 'wf_running'), systemInit, assistantText('ok'), resultMsg];
+  const second = await startRun({ sessionId: SID });
+  releaseMessageStream();
+  await second.run;
+  const settled = sentPayloads.filter(p => p.kind === 'workflow_settled');
+  assert.equal(settled.length, 1, 'announced exactly once');
+  assert.equal(settled[0].toolUseId, 'wf_running');
+  assert.equal(settled[0].sessionId, SID);
+  assert.equal(settled[0].provider, 'claude');
+  assert.equal(settled[0].reason, 'notified');
+  assert.deepEqual(completeFrame()?.pendingWorkflowIds, []);
+});
+
+test('B-1401: a workflow whose CLI process exited is settled after complete', async () => {
+  process.env.CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS = '20';
+  const sent: Array<Record<string, unknown>> = [];
+  const sid = 'wf-exit-session';
+  liveness.registerWorkflowPid(sid, 2 ** 22 + 12345); // above pid_max: never alive
+  sdk.announceUnresolvedWorkflows(sid, ['wf_x'], p => { sent.push(p as Record<string, unknown>); });
+  await sleep(120);
+  liveness.forgetWorkflowPid(sid);
+  assert.deepEqual(sent.map(p => [p.kind, p.toolUseId, p.reason]), [['workflow_settled', 'wf_x', 'process_exited']]);
+});
+
+test('B-1401: an unknown CLI pid settles nothing (liveness unproven)', async () => {
+  process.env.CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS = '20';
+  const sent: unknown[] = [];
+  const sid = 'wf-unknown-session';
+  sdk.announceUnresolvedWorkflows(sid, ['wf_y'], p => { sent.push(p); });
+  await sleep(120);
+  assert.equal(sent.length, 0);
+  sdk.settleAnnouncedWorkflows(sid, ['wf_y'], 'notified');
+  assert.equal(sent.length, 1, 'evidence still settles it');
+});
+
+test('B-1399: a CLI exit while the stop interrupt is in flight is a stop, not spawn_failed', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '600000';
+  let answerInterrupt: () => void = () => {};
+  interruptImpl = () => new Promise<void>(resolve => { answerInterrupt = resolve; });
+  scriptedMessages = [assistantText('working')];
+  const { run } = await startRun({ sessionId: SID });
+
+  const abort = sdk.abortClaudeSDKSession(SID);
+  await sleep(20);
+  streamExitError = new Error('Claude Code process exited with code 1');
+  releaseMessageStream();
+  await run;
+  answerInterrupt();
+  await abort;
+  assert.equal(sentPayloads.filter(p => p.kind === 'error').length, 0, 'no failure frame');
+});

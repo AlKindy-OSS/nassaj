@@ -9,48 +9,26 @@
 
 import { clientIp } from '../utils/client-ip.js';
 
+import { createKeyedLimiter } from './keyed-limiter.js';
+
 export function createRateLimiter({ windowMs, max, message, key, code } = {}) {
-  const windowSize = windowMs ?? 60_000;
-  const limit = max ?? 10;
   const errorMessage = message ?? 'Too many requests, please try again later';
-  const buckets = new Map();
+  const limiter = createKeyedLimiter({ windowMs, max });
 
   return function rateLimit(req, res, next) {
     // Unified IP source (T-182/ADR-040): the real client behind the tunnel, not
     // the loopback peer — so the brute-force counter keys on the actual caller.
-    const ip = typeof key === 'function'
+    const bucketKey = typeof key === 'function'
       ? String(key(req))
       : (clientIp(req) || 'unknown');
-    const now = Date.now();
-    const entry = buckets.get(ip);
-
-    if (!entry || now > entry.resetAt) {
-      buckets.set(ip, { count: 1, resetAt: now + windowSize });
-      pruneIfLarge(buckets, now);
+    const verdict = limiter.hit(bucketKey);
+    if (verdict.allowed) {
       return next();
     }
-
-    if (entry.count >= limit) {
-      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
-      res.setHeader('Retry-After', String(retryAfter));
-      return res.status(429).json({
-        error: errorMessage,
-        ...(typeof code === 'string' && code ? { code } : {}),
-      });
-    }
-
-    entry.count += 1;
-    next();
+    res.setHeader('Retry-After', String(verdict.retryAfterSeconds));
+    return res.status(429).json({
+      error: errorMessage,
+      ...(typeof code === 'string' && code ? { code } : {}),
+    });
   };
-}
-
-function pruneIfLarge(buckets, now) {
-  if (buckets.size < 1000) {
-    return;
-  }
-  for (const [key, value] of buckets) {
-    if (now > value.resetAt) {
-      buckets.delete(key);
-    }
-  }
 }

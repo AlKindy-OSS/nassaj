@@ -38,7 +38,8 @@ assert.equal(os.homedir(), sandboxHome);
 const { initializeDatabase, closeConnection, userDb, credentialGrantsDb } = await import('@/modules/database/index.js');
 const { setProviderSharingConfig, _resetProviderSharingCache, KNOWN_PROVIDERS } = await import('@/services/provider-sharing.js');
 const { resolveProviderEnv } = await import('@/services/isolation/resolve-provider-env.js');
-const { resolveCredentialPrincipal, GRANTABLE_PROVIDERS, GRANTABLE_UNITS } = await import('@/services/isolation/credential-principal.js');
+const { resolveCredentialPrincipal, listDelegatedOwners, GRANTABLE_PROVIDERS, GRANTABLE_UNITS } = await import('@/services/isolation/credential-principal.js');
+const { providerSecretsService } = await import('@/modules/providers/services/provider-secrets.service.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { setProviderKey, _resetProviderSecretsServerKeyCache } = await import('@/services/isolation/provider-secrets-store.js');
 const { default: grantsRouter } = await import('./credential-grants.js');
@@ -189,13 +190,34 @@ describe('resolveCredentialPrincipal + resolveProviderEnv', () => {
     assert.equal(resolveProviderEnv(grantee.id, 'kimi', { PATH: '/usr/bin' }).KIMI_API_KEY, undefined);
   });
 
-  it('every known provider is grantable (owner decision 2026-09-10 includes qwen); self-grant is refused', () => {
-    assert.deepEqual([...GRANTABLE_PROVIDERS].sort(), [...KNOWN_PROVIDERS].sort());
+  it('every known provider except qwen is grantable (T-1906); self-grant is refused', () => {
+    assert.deepEqual(
+      [...GRANTABLE_PROVIDERS].sort(),
+      [...KNOWN_PROVIDERS].filter((provider) => provider !== 'qwen').sort(),
+    );
+    assert.ok(!GRANTABLE_UNITS.includes('qwen'));
     assert.throws(() => credentialGrantsDb.grant(owner.id, owner.id, 'claude'), /distinct/);
+  });
+
+  it('a legacy qwen grant row is ignored: the grantee never gets the grantor key (T-1906)', () => {
+    _resetProviderSecretsServerKeyCache();
+    const ownerProfile = JSON.stringify({
+      version: 1, plan: 'coding_plan', region: 'international', key: ['sk', 'sp-owner-secret-0123456789'].join('-'),
+    });
+    setProviderKey(owner.id, 'qwen', ownerProfile);
+    // Written straight to the store, as a pre-T-1906 grant would have been.
     credentialGrantsDb.grant(owner.id, grantee.id, 'qwen');
-    const home = resolveProviderEnv(grantee.id, 'qwen', {}).HOME!;
-    assert.equal(home, userConfigDir(grantee.id, path.join('.grants', String(owner.id))));
-    credentialGrantsDb.revoke(owner.id, grantee.id, 'qwen');
+    try {
+      assert.deepEqual(resolveCredentialPrincipal(grantee.id, 'qwen'), { principalId: grantee.id, grantedBy: null });
+      assert.equal(providerSecretsService.getQwenProfile(grantee.id), null, 'grantee reads their own (empty) slot');
+      assert.equal(providerSecretsService.getQwenProfile(owner.id)?.key, ['sk', 'sp-owner-secret-0123456789'].join('-'));
+      const env = resolveProviderEnv(grantee.id, 'qwen', {});
+      assert.equal(env.HOME, userConfigDir(grantee.id), 'no grant home for qwen');
+      assert.ok(!JSON.stringify(env).includes(['sk', 'sp-owner-secret'].join('-')), 'owner key never reaches the env');
+      assert.ok(!listDelegatedOwners(grantee.id).includes(String(owner.id)));
+    } finally {
+      credentialGrantsDb.revoke(owner.id, grantee.id, 'qwen');
+    }
   });
 });
 
@@ -305,5 +327,20 @@ describe('routes /api/credential-grants — self-scoped wire contract', () => {
     assert.equal((await call('GET', '/', null)).status, 401);
     // A refused set leaves nothing behind.
     assert.deepEqual((await call('GET', '/', asOwner)).json.data.given, []);
+  });
+
+  it('qwen cannot be granted, and a legacy qwen row is hidden from both sides (T-1906)', async () => {
+    assert.equal((await call('PUT', '/qwen/grantees', asOwner, { userIds: [grantee.id] })).status, 400);
+    assert.equal((await call('PUT', '/qwen/use', asGrantee, { ownerUserId: owner.id })).status, 400);
+    credentialGrantsDb.grant(owner.id, grantee.id, 'qwen');
+    try {
+      const ownerView = (await call('GET', '/', asOwner)).json.data;
+      assert.ok(!ownerView.providers.includes('qwen'));
+      assert.ok(!ownerView.given.some((g: { provider: string }) => g.provider === 'qwen'));
+      const granteeView = (await call('GET', '/', asGrantee)).json.data;
+      assert.ok(!granteeView.received.some((g: { provider: string }) => g.provider === 'qwen'));
+    } finally {
+      credentialGrantsDb.revoke(owner.id, grantee.id, 'qwen');
+    }
   });
 });

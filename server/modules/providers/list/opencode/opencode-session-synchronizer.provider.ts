@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { participantsDb, sessionsDb } from '@/modules/database/index.js';
+import { redactQwenPlanSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import {
   normalizeProviderTimestamp,
@@ -173,9 +174,10 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     const fallbackTitle = 'Untitled OpenCode Session';
     const existingSession = sessionsDb.getSessionById(sessionId);
     const existingName = existingSession?.custom_name;
+    // T-1906: a title/first prompt read from opencode.db never carries a key.
     const nextName = existingName && existingName !== fallbackTitle
       ? existingName
-      : readOptionalString(row.title) ?? this.readFirstUserText(db, sessionId);
+      : redactQwenPlanSecrets(readOptionalString(row.title) ?? this.readFirstUserText(db, sessionId));
 
     // OpenCode stores every session in one shared sqlite database, so jsonl_path
     // must stay null to avoid deleting opencode.db when one app session is removed.

@@ -26,6 +26,7 @@ let dir = '';
 let run: SteerRun;
 let mode = 'bypassPermissions';
 let armed = true;
+let taintArmed = true;
 let now = 1_000_000;
 const writers = new Set([1, 2]);
 
@@ -52,11 +53,12 @@ beforeEach(async () => {
   for (const [id, name] of [[1, 'alice'], [2, 'bob'], [3, 'carol']] as const) {
     db.prepare("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, 'h', 'user')").run(id, name);
   }
-  mode = 'bypassPermissions'; armed = true; now = 1_000_000;
+  mode = 'bypassPermissions'; armed = true; taintArmed = true; now = 1_000_000;
   __resetSteerRateLimitForTests();
   __resetMidTurnInjectionForTests();
   run = createSteerRun({
-    sessionId: () => SID, turnId: TURN, starterUserId: 1, permissionMode: () => mode, hooksArmed: () => armed,
+    sessionId: () => SID, turnId: TURN, starterUserId: 1, permissionMode: () => mode,
+    injectionArmed: () => armed, taintHookArmed: () => taintArmed,
     broadcast: () => {}, persistStatus: (item, status) => { messageCoordinationDb.updateSteerStatus(item.clientMsgId, item.senderUserId, status); },
     confirmDelivery: async () => true,
   });
@@ -77,12 +79,11 @@ test('permission matrix: every refusal in the approved order, each fail-closed',
   assert.equal(code(handleSessionSteer(req(1), ctx(3))), 'not_writable:403');
   assert.equal(code(handleSessionSteer(req(1, { sessionId: 'codex-session' }), ctx(2))), 'steer_unsupported:409');
   assert.equal(code(handleSessionSteer(req(1, { sessionId: 'no-run' }), ctx(2))), 'turn_not_active:409');
-  assert.equal(code(handleSessionSteer(req(1), ctx(1))), 'steer_self:409', 'the starter cannot steer his own turn');
   mode = 'plan';
   assert.equal(code(handleSessionSteer(req(1), ctx(2))), 'plan_mode:409');
-  mode = 'default'; armed = false;
+  mode = 'default'; taintArmed = false;
   assert.equal(code(handleSessionSteer(req(1), ctx(2))), 'steer_unavailable:409', 'no-hook run');
-  armed = true;
+  taintArmed = true;
   setSteerPolicy({ mode: 'off' }, 1);
   assert.equal(code(handleSessionSteer(req(1), ctx(2))), 'steer_disabled:403');
   setSteerPolicy({ mode: 'per_user' }, 1);
@@ -182,4 +183,52 @@ test('migration: reverse refuses while steer rows exist, then drops the columns'
   reverseSessionSteerIngress(db);
   const columns = (db.prepare('PRAGMA table_info(message_coordination_ingress)').all() as Array<{ name: string }>).map(c => c.name);
   assert.ok(!columns.includes('delivery_kind') && !columns.includes('turn_id') && !columns.includes('delivery_status'));
+});
+
+test('self-steer: the starter steers his own turn without consent, untainted, marked as the owner', () => {
+  setSteerConsent(1, { allowSteerOnMyRuns: false });
+  assert.equal(code(handleSessionSteer(req(1), ctx(1))), 'ok:202', 'consent is about OTHERS');
+  assert.equal(run.isTainted(), false, 'no starter approvals after his own note');
+  assert.equal(messageCoordinationDb.listSteerBySession(SID)[0].userId, 1);
+  assert.equal(code(handleSessionSteer(req(2), ctx(2))), 'steer_not_consented:403', 'others still need consent');
+  assert.equal(run.isTainted(), false);
+});
+
+test('self-steer: the admin policy still applies; plan mode still refuses', () => {
+  setSteerPolicy({ mode: 'off' }, 1);
+  assert.equal(code(handleSessionSteer(req(1), ctx(1))), 'steer_disabled:403');
+  setSteerPolicy({ mode: 'per_user' }, 1);
+  mode = 'plan';
+  assert.equal(code(handleSessionSteer(req(1), ctx(1))), 'plan_mode:409');
+  assert.equal(run.everInjected(), false);
+});
+
+test('self-steer then another member: only the other member taints the turn', async () => {
+  assert.equal(code(handleSessionSteer(req(1), ctx(1))), 'ok:202');
+  assert.equal(run.isTainted(), false);
+  const own = await run.take();
+  assert.match(own!.wrapped, /^<nassaj-steer from="carol" role="owner">\n/u);
+  assert.equal(code(handleSessionSteer(req(2), ctx(2))), 'ok:202');
+  assert.equal(run.isTainted(), true, 'a later steer by another member still taints');
+  assert.match((await run.take())!.wrapped, /^<nassaj-steer from="bob" role="member">\n/u);
+});
+
+test('unknown starter stays fail-closed: starter_unknown for everyone', () => {
+  run = createSteerRun({
+    sessionId: () => SID, turnId: TURN, starterUserId: null, permissionMode: () => mode,
+    injectionArmed: () => armed, taintHookArmed: () => taintArmed,
+    broadcast: () => {}, persistStatus: () => {}, confirmDelivery: async () => true,
+  });
+  assert.equal(code(handleSessionSteer(req(1), ctx(1))), 'starter_unknown:409');
+  assert.equal(code(handleSessionSteer(req(1), ctx(2))), 'starter_unknown:409');
+});
+
+test('arming split: no taint hook → others steer_unavailable, the starter still steers; no injection → nobody', () => {
+  taintArmed = false;
+  assert.equal(code(handleSessionSteer(req(1), ctx(2))), 'steer_unavailable:409', 'consent on, hook absent');
+  setSteerConsent(1, { allowSteerOnMyRuns: false });
+  assert.equal(code(handleSessionSteer(req(1), ctx(2))), 'steer_not_consented:403', 'consent off reads as such');
+  assert.equal(code(handleSessionSteer(req(2), ctx(1))), 'ok:202', 'self-steer needs no taint hook');
+  armed = false;
+  assert.equal(code(handleSessionSteer(req(3), ctx(1))), 'steer_unavailable:409', 'no injection path');
 });

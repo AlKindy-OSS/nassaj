@@ -27,9 +27,9 @@ const KEY_BYTES = 32;
 export type AckKind = 'pinBreak' | 'dataLoss';
 export type AckAction = 'update' | 'restore-compatible' | 'rollback';
 
-/** pinBreak facts: `carrier` = opencode GLM carrier, `all` = pin armed for every mode. */
+/** pinBreak facts: the opt-in pin is armed, so every mode refuses a non-pinned binary. */
 export interface PinBreakFacts {
-  variant: 'carrier' | 'all';
+  variant: 'all';
   target: string;
   pin: string;
 }
@@ -124,12 +124,6 @@ export function factsDigest(facts: PinBreakFacts | DataLossFacts): string {
 
 /** Server-built pinBreak texts (spec §9). */
 export function pinBreakTexts(harnessName: string, f: PinBreakFacts): { en: string; ar: string } {
-  if (f.variant === 'carrier') {
-    return {
-      en: `Updating OpenCode to ${f.target} leaves the verified version ${f.pin}. GLM will stop working until the compatible version is restored. The verified pin does not change.`,
-      ar: `تحديث OpenCode إلى ${f.target} يُخرجه عن النسخة الموثَّقة ${f.pin}. سيتوقف GLM عن العمل حتى تُستعاد النسخة المتوافقة. لن يتغيّر التثبيت الموثَّق.`,
-    };
-  }
   return {
     en: `${harnessName} will be blocked in every mode until version ${f.pin} is restored.`,
     ar: `سيُحجب ${harnessName} في كل الأوضاع حتى تُستعاد النسخة ${f.pin}.`,

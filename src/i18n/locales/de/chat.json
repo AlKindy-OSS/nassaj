@@ -667,5 +667,9 @@
     "error": "Bild konnte nicht zugeschnitten werden. Bitte erneut versuchen.",
     "cropArea": "Zuschneidebereich",
     "cropHint": "Pfeiltasten verwenden, um den Zuschneidebereich zu verschieben oder anzupassen"
+  },
+  "inlineCode": {
+    "openLink": "Link öffnen — Rechtsklick zum Kopieren",
+    "copyHint": "Kopieren"
   }
 }

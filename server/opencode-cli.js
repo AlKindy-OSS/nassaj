@@ -9,6 +9,9 @@ import Database from 'better-sqlite3';
 
 import { withRuntimeInstructions as withCoordinationDirective } from './services/runtime-instructions.js';
 import { messageAuthorsDb, participantsDb, sessionsDb } from './modules/database/index.js';
+// Namespace import: a test that mocks the barrel without auditLogDb still links.
+import * as databaseModule from './modules/database/index.js';
+import { providerSecretsService } from './modules/providers/services/provider-secrets.service.js';
 import { sessionsService } from './modules/providers/services/sessions.service.js';
 import { createTurnTimer, settleTurnTiming } from './modules/providers/services/turn-timing.service.js';
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
@@ -22,7 +25,6 @@ import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
-import { verifyVendorBinaryDigest } from './services/isolation/vendor-binary-integrity.js';
 import { sanitizeVendorAgentEnv } from './services/isolation/sanitize-vendor-agent-env.js';
 import {
   assertOpenCodeBaseUrlAllowed,
@@ -39,6 +41,35 @@ import {
 import { watchLocalModelProgress } from './services/isolation/local-model-timeout.js';
 import { materializeOpenCodeConfig } from './services/isolation/opencode-config-material.js';
 import { ensureOpenCodeGovernance } from './modules/providers/list/opencode/opencode-governance.js';
+import {
+  authorizeQwenPlanLaunch,
+  createRedactingLineAssembler,
+  isQwenPlanModel,
+  redactQwenPlanSecrets,
+  withQwenPlanEnv,
+} from './services/isolation/opencode-qwen-plan.js';
+
+/** User-facing text per qwen-plan refusal code (codes are the contract). */
+const QWEN_PLAN_REFUSAL_TEXT = Object.freeze({
+  qwen_plan_disabled: 'تشغيل خطة Qwen Coding عبر OpenCode غير مفعّل على هذا الخادم.',
+  qwen_plan_not_interactive: 'خطة Qwen Coding تعمل فقط برسالة يرسلها صاحب المفتاح بنفسه من المحادثة.',
+  missing_key: 'لا يوجد مفتاح Qwen Coding Plan شخصي محفوظ لحسابك.',
+  incompatible_profile: 'المفتاح المحفوظ ليس مفتاح Coding Plan دولياً، فلا يعمل مع هذا المسار.',
+});
+
+/**
+ * One audit row per qwen-plan launch decision (T-1906). Never the key or prompt.
+ * @param {'qwen_execution_allowed'|'qwen_execution_rejected'} action
+ * @param {string|number|null|undefined} userId
+ * @param {Record<string, unknown>} metadata
+ */
+function auditQwenPlanTurn(action, userId, metadata) {
+  const id = Number(userId);
+  databaseModule.auditLogDb?.record(action, {
+    userId: Number.isInteger(id) && id > 0 ? id : undefined,
+    metadata: { engine: 'opencode', provider: 'qwen-plan', source: 'ws-interactive', ...metadata },
+  });
+}
 
 /** Fleet flag gating the GLM OpenCode carrier (GL-8 / OCC-15). Default OFF. */
 const OPENCODE_CARRIER_FLAG = 'NASSAJ_OPENCODE_CARRIER';
@@ -293,6 +324,9 @@ async function spawnOpenCode(command, options = {}, ws) {
     // layer can surface it instead of only the generic dispatch fallback. It is a
     // fixed non-secret string — never the provider's raw message.
     let lastProviderErrorCode = null;
+    // T-1906: the sender's Coding Plan key on a qwen-plan run (else null). Every
+    // byte of child output is redacted against it before ws.send/persist.
+    let qwenPlanKey = null;
 
     // B-395: feed the process monitor so this run gets the same "Running" badge,
     // project busy dot and active-conversations entry a Claude run gets. A new
@@ -321,7 +355,7 @@ async function spawnOpenCode(command, options = {}, ws) {
         provider: 'opencode',
         projectPath: workingDir,
       });
-      messageAuthorsDb.recordUserMessage(sid, ws.userId, command);
+      messageAuthorsDb.recordUserMessage(sid, ws.userId, redactQwenPlanSecrets(command, qwenPlanKey));
     };
 
     const notifyTerminalState = ({ code = null, error = null } = {}) => {
@@ -391,10 +425,12 @@ async function spawnOpenCode(command, options = {}, ws) {
       }
     };
 
-    const processOpenCodeOutputLine = (line) => {
-      if (!line || !line.trim() || ws?.isRunOutputRevoked?.()) {
+    const processOpenCodeOutputLine = (rawLine) => {
+      if (!rawLine || !rawLine.trim() || ws?.isRunOutputRevoked?.()) {
         return;
       }
+      // T-1906: redact on the ASSEMBLED line, before parse/send/persist.
+      const line = redactQwenPlanSecrets(rawLine, qwenPlanKey);
 
       let response;
       try {
@@ -493,7 +529,10 @@ async function spawnOpenCode(command, options = {}, ws) {
       // OC-07: build the child env through resolveProviderEnv so an isolated
       // user's XDG_* dirs point into their tree; shared mode returns the base
       // env unchanged (byte-for-byte the previous {...process.env}).
-      const carrierRun = isOpenCodeCarrierRun(options, process.env, resolvedModel);
+      // T-1906: a qwen-plan/* RESOLVED model is a carrier run (sanitized env,
+      // binary pin, loopback confinement) regardless of the GLM carrier flag.
+      const qwenPlanRun = isQwenPlanModel(resolvedModel);
+      const carrierRun = qwenPlanRun || isOpenCodeCarrierRun(options, process.env, resolvedModel);
       resolvedLocalRun = isLocalModel(resolvedModel);
       // B-1268: every local-model step below is inert unless the manager activated the
       // feature AND this very turn resolved to a local model, so a plain GLM carrier
@@ -513,6 +552,15 @@ async function spawnOpenCode(command, options = {}, ws) {
         try {
           // GL-5: fail-closed governance gate — refuses an ungoverned carrier turn.
           const callerId = ws?.userId ?? null;
+          if (qwenPlanRun) {
+            // T-1906: flag, SERVER-set interactive marker, and the SENDER's own
+            // compatible key (ws.userId — never a credential-grant principal).
+            qwenPlanKey = authorizeQwenPlanLaunch({
+              userId: callerId,
+              interactiveVerified: options.qwenInteractiveVerified,
+              getProfile: (id) => providerSecretsService.getQwenProfile(id),
+            }).key;
+          }
           // ADR-088: a session pinned to the local engine may not silently continue on
           // another engine when its server/model disappeared.
           if (pinnedLocalSession && !resolvedLocalRun) {
@@ -536,10 +584,9 @@ async function spawnOpenCode(command, options = {}, ws) {
           // The map is empty whenever the feature is off, so the allowlist collapses
           // back to api.z.ai alone.
           assertOpenCodeBaseUrlAllowed(resolveOpenCodeConfigPath(childEnv), childEnv, localServerOrigins(callerId));
-          // GL-6: MANDATORY sha256 pin of the opencode binary in carrier mode
-          // (independent of the NASSAJ_VENDOR_BINARY_PIN flag) — checks the FINAL
-          // resolved path (M-4), refusing spawn on any deviation from the pinned 1.18.32.
-          verifyVendorBinaryDigest('opencode', opencodeBinary, { enforced: true });
+          // No mandatory binary-digest pin here (owner decision 2026-09-29): the
+          // carrier runs whatever opencode release the update button installed.
+          // The opt-in NASSAJ_VENDOR_BINARY_PIN still applies at binary resolution.
           // GL-6: confine opencode's embedded local HTTP server to loopback so the
           // one-shot `run` never exposes a boot token/endpoint off-box.
           assertOpenCodeCarrierServerLocal(args);
@@ -547,7 +594,20 @@ async function spawnOpenCode(command, options = {}, ws) {
           // CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_*/CLAUDE_* / inherited *_BASE_URL so the
           // carrier child can never inherit the owner's Claude subscription/routing.
           childEnv = sanitizeVendorAgentEnv(childEnv);
+          if (qwenPlanRun) {
+            // Set AFTER sanitizing: the key and the inline provider block reach
+            // this child only. Everything else strips NASSAJ_QWEN_PLAN_API_KEY.
+            childEnv = withQwenPlanEnv(childEnv, qwenPlanKey);
+            auditQwenPlanTurn('qwen_execution_allowed', callerId, { model: resolvedModel });
+          }
         } catch (guardError) {
+          qwenPlanKey = null;
+          if (qwenPlanRun) {
+            auditQwenPlanTurn('qwen_execution_rejected', ws?.userId ?? null, {
+              model: resolvedModel,
+              code: guardError?.code || 'opencode_carrier_blocked',
+            });
+          }
           const finalSessionId = capturedSessionId || sessionId || processKey;
           console.error('[OpenCode] carrier launch BLOCKED by a governance/compliance guard', {
             code: guardError?.code || null,
@@ -559,7 +619,8 @@ async function spawnOpenCode(command, options = {}, ws) {
             code: guardError?.code || 'opencode_carrier_blocked',
             content: guardError?.code === 'ENGINE_PROVIDER_UNAVAILABLE'
               ? 'خادم النموذج المحلي غير متاح. راجع إعدادات الخادم وصلاحية الوصول.'
-              : 'تعذّر تشغيل النموذج بسبب إعدادات الحوكمة أو الاتصال.',
+              : (qwenPlanRun && QWEN_PLAN_REFUSAL_TEXT[guardError?.code])
+                || 'تعذّر تشغيل النموذج بسبب إعدادات الحوكمة أو الاتصال.',
             sessionId: finalSessionId,
             provider: 'opencode',
           }));
@@ -610,8 +671,11 @@ async function spawnOpenCode(command, options = {}, ws) {
         });
       });
 
-      opencodeProcess.stderr.on('data', (data) => {
-        const stderrText = data.toString();
+      // T-1906: stderr is line-assembled so a key split across two chunks is
+      // still redacted before it reaches ws.send (and so every mirror).
+      const stderrLines = createRedactingLineAssembler(qwenPlanKey);
+      const sendStderrLines = (lines) => {
+        const stderrText = lines.join('\n');
         if (!stderrText.trim()) {
           return;
         }
@@ -622,6 +686,9 @@ async function spawnOpenCode(command, options = {}, ws) {
           sessionId: capturedSessionId || sessionId || null,
           provider: 'opencode',
         }));
+      };
+      opencodeProcess.stderr.on('data', (data) => {
+        sendStderrLines(stderrLines.push(data.toString()));
       });
 
       opencodeProcess.on('close', async (code) => {
@@ -638,6 +705,7 @@ async function spawnOpenCode(command, options = {}, ws) {
           processOpenCodeOutputLine(stdoutLineBuffer.trim());
           stdoutLineBuffer = '';
         }
+        sendStderrLines(stderrLines.flush());
 
         const tokenBudget = readOpenCodeTokenUsage(finalSessionId, ws?.userId ?? null);
         if (tokenBudget) {

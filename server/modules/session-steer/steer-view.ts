@@ -27,7 +27,11 @@ const asUserId = (value: unknown): number | null => {
 /**
  * The `steer-turn-state` frame for ONE viewer of a live run. `steerable` is
  * true only when every admission precondition that does not depend on the
- * message itself holds for this viewer. Never throws; any doubt → false.
+ * message itself holds for this viewer — for the starter himself that is the
+ * admin policy and an armed injection path (consent governs OTHERS); for
+ * anyone else policy, the starter's consent AND the run's taint hook.
+ * `starterSteerable` says whether the starter may steer his own turn. Never
+ * throws; any doubt → false.
  */
 export function describeSteerTurnForViewer(input: SteerViewInput): SteerTurnState {
   const adapter = getMidTurnInjection(input.provider);
@@ -36,12 +40,21 @@ export function describeSteerTurnForViewer(input: SteerViewInput): SteerTurnStat
   const starterUserId = asUserId(run?.starterUserId ?? input.runStarterUserId);
   const viewer = asUserId(input.viewerUserId);
   let steerable = false;
+  let starterSteerable = false;
   try {
-    steerable = Boolean(run && !run.isClosed() && run.hooksArmed() && run.permissionMode() !== 'plan'
-      && viewer !== null && starterUserId !== null && viewer !== starterUserId
-      && input.isWritable(input.sessionId, viewer) && isSteeringAllowedFor(starterUserId).allowed);
+    const live = Boolean(run && !run.isClosed() && run.permissionMode() !== 'plan' && starterUserId !== null);
+    starterSteerable = live && Boolean(run?.injectionArmed())
+      && input.isWritable(input.sessionId, starterUserId as number)
+      && isSteeringAllowedFor(starterUserId, starterUserId).allowed;
+    if (viewer !== null && viewer === starterUserId) {
+      steerable = starterSteerable;
+    } else {
+      steerable = live && viewer !== null && Boolean(run?.taintHookArmed())
+        && input.isWritable(input.sessionId, viewer) && isSteeringAllowedFor(starterUserId, viewer).allowed;
+    }
   } catch {
     steerable = false;
+    starterSteerable = false;
   }
   return {
     type: 'steer-turn-state',
@@ -49,6 +62,7 @@ export function describeSteerTurnForViewer(input: SteerViewInput): SteerTurnStat
     turnId: run ? run.turnId : null,
     starterUserId,
     steerable,
+    starterSteerable,
     forViewerUserId: viewer,
     capability: { midTurnInjection: adapter !== null },
   };

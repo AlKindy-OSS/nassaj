@@ -1,8 +1,11 @@
 /**
  * session-steer.contract — WIRE CONTRACT for mid-turn steering (T-1903 / ADR-190).
  *
- * A session member who is NOT the starter of the running turn may inject a
- * short message into that turn. Both sides compile against these declarations.
+ * A session member may inject a short message into a running turn. Another
+ * member needs the admin policy AND the starter's consent, and his note taints
+ * the turn (gated tools need the starter's approval). The starter himself may
+ * steer his own turn under the admin policy alone; that never taints and never
+ * asks for any approval. Both sides compile against these declarations.
  *
  * REST (all behind authenticateToken):
  *   GET  /api/session-steer/policy   → SteerPolicy                (any authenticated user)
@@ -32,7 +35,7 @@ export interface SteerPolicy {
 }
 
 export interface SteerConsent {
-  /** Starter consent: may other members steer MY running turns. Default false. */
+  /** Starter consent: may other members steer MY running turns. Default false. Self-steer ignores it. */
   allowSteerOnMyRuns: boolean;
 }
 
@@ -51,7 +54,7 @@ export type SteerRejectCode =
   | 'not_writable'
   | 'steer_unsupported'
   | 'turn_not_active'
-  | 'steer_self'
+  | 'starter_unknown'
   | 'plan_mode'
   | 'steer_unavailable'
   | 'steer_disabled'
@@ -84,13 +87,21 @@ export interface SessionSteerResult {
  *
  * Two emissions:
  *  - BROADCAST at run start (starter + mirrors) for a steer-armed Claude run:
- *    `forViewerUserId: null`; `steerable` means "the run is armed" — a viewer
- *    must still be ≠ starterUserId to steer.
+ *    `forViewerUserId: null`; `steerable` means "a member OTHER than the
+ *    starter may steer" (taint hook armed at start + policy + starter consent,
+ *    read at announce time); `starterSteerable` means "the starter may steer
+ *    his own turn" (injection armed + policy, not plan mode). The starter
+ *    reads `starterSteerable`, everyone else `steerable`.
  *  - UNICAST to one socket whenever it sends `check-session-status` for a
  *    session with a live run of ANY provider (late joiners included):
  *    `forViewerUserId` = that viewer; `steerable` is computed for THAT viewer
- *    (policy, starter consent, provider capability, write access, viewer ≠
- *    starter, run armed and not in plan mode). Prefer this frame.
+ *    (policy, provider capability, write access, not in plan mode; for the
+ *    starter an armed injection path, for anyone else the starter's consent
+ *    and the run's taint hook).
+ *    Prefer this frame.
+ * Admission (`session-steer`) re-checks everything and is the authority.
+ * `starter_unknown` (409): the run's starter could not be established, so no
+ * one may steer it (fail-closed).
  *
  * `starterUserId` is the run's launcher (null only when unknown); a viewer whose
  * id differs from it is NOT the starter and must not be offered Stop/Esc-abort
@@ -102,6 +113,11 @@ export interface SteerTurnState {
   turnId: string | null;
   starterUserId: number | null;
   steerable: boolean;
+  /**
+   * The starter may steer his own turn (policy on, run armed, not plan mode).
+   * Always sent by this server; optional only so older frames still parse (absent → false).
+   */
+  starterSteerable?: boolean;
   forViewerUserId: number | null;
   /** Server-registered capability of the session's provider. */
   capability: { midTurnInjection: boolean };

@@ -412,7 +412,14 @@
       "done": "Fatto",
       "copy": "Copia",
       "copied": "Copiato",
-      "successHint": "Condividi questo link monouso. Viene mostrato una sola volta."
+      "successHint": "Condividi questo link monouso. Viene mostrato una sola volta.",
+      "durationLabel": "Validità",
+      "durations": {
+        "day1": "1 giorno",
+        "day3": "3 giorni",
+        "day7": "7 giorni",
+        "day30": "30 giorni"
+      }
     }
   },
   "notifications": {

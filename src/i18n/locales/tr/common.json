@@ -307,7 +307,8 @@
     "projectBusyHint": "Bu projedeki bir oturum şu anda işleniyor",
     "done": "Bitti",
     "doneHint": "Oturum bitti ve henüz açılmadı",
-    "projectDoneHint": "Bu projedeki bir oturum bitti ve henüz açılmadı"
+    "projectDoneHint": "Bu projedeki bir oturum bitti ve henüz açılmadı",
+    "projectOrphanHint": "Bu projedeki bir arka plan iş akışı tam bir sonuç üretmeden durdu"
   },
   "workflowStatus": {
     "running": "İş akışı çalışıyor",

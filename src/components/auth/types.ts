@@ -19,7 +19,9 @@ export type AuthUser = {
   [key: string]: unknown;
 };
 
-export type AuthActionResult = { success: true } | { success: false; error: string };
+// `code` carries the server's machine-readable refusal (e.g. T-1939
+// `sso_required`) so a view can show a specific, translated message.
+export type AuthActionResult = { success: true } | { success: false; error: string; code?: string };
 
 // SSO results carry a reason code, not server text: the return page owns the
 // translated message for each failure.
@@ -33,6 +35,7 @@ export type AuthSessionPayload = {
   passwordChangeRequired?: boolean;
   error?: string;
   message?: string;
+  code?: string;
 };
 
 export type AuthStatusPayload = {
@@ -55,6 +58,7 @@ export type OnboardingStatusPayload = {
 export type ApiErrorPayload = {
   error?: string;
   message?: string;
+  code?: string;
 };
 
 // Passkey summary as returned by /api/auth/webauthn (register/verify and
@@ -73,6 +77,9 @@ export type PasskeyCredentialSummary = {
   name: string | null;
   created_at: string;
   last_used_at: string | null;
+  // 1 when enrolled under the hardened ceremony (B-1407) — only these may
+  // confirm sensitive actions; 0 for passkeys added before it.
+  step_up_eligible?: number;
 };
 
 export type AuthContextValue = {

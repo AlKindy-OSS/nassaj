@@ -76,25 +76,6 @@ export type HarnessLatestProbe =
   | { kind: 'github-release'; url: string }
   | null;
 
-/**
- * Compatibility data for the indicator (T-1871 / ADR-159 Addendum 4).
- *   - `baseline`: the version installed when the baseline was recorded. It is
- *     NOT a test result; the UI says "baseline as of <date>", never "tested".
- *   - `alwaysEnforcedMode`: a mode that enforces the digest pin whatever
- *     NASSAJ_VENDOR_BINARY_PIN says (opencode in GLM carrier mode, GL-6).
- */
-export interface HarnessCompat {
-  baseline: { version: string; date: string } | null;
-  alwaysEnforcedMode: string | null;
-}
-
-/** Date the compat baselines below were measured (stage 1 of T-1871). */
-const BASELINE_DATE = '2026-09-27';
-
-function baselineOf(version: string): HarnessCompat {
-  return { baseline: { version, date: BASELINE_DATE }, alwaysEnforcedMode: null };
-}
-
 /** Fixed GitHub latest-release endpoint for opencode (repo moved sst → anomalyco). */
 export const OPENCODE_LATEST_RELEASE_URL =
   'https://api.github.com/repos/anomalyco/opencode/releases/latest';
@@ -111,7 +92,7 @@ export interface HarnessSnapshotSpec {
   resolveLayout: (binaryPath: string) => BinaryLayoutSpec;
 }
 
-/** "Restore compatible version" source (opencode only: the pinned release asset). */
+/** Known-release restore source (opencode only: the digest-verified release asset). */
 export interface HarnessRestoreCompatibleSpec {
   /** Version the action installs; always the digest pin, never changed here. */
   version: string;
@@ -193,8 +174,6 @@ export interface HarnessDescriptor {
     context?: { gitCheckoutDir?: string },
   ) => HarnessUpdateArgv | null;
   latestProbe: HarnessLatestProbe;
-  /** Compatibility data; absent = no data (→ `untested`). */
-  compat?: HarnessCompat;
   /**
    * The CLI's own updater only STAGES the new exe in `<bin dir>/.staging` and
    * swaps it in on the next run (kimi-code, native-staging.ts): the update
@@ -338,7 +317,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     // npm numbering equals the native version (measured). npm `latest` tracks the
     // `next` channel, so a newer latest is "published", not "the updater will move".
     latestProbe: { kind: 'npm', pkg: '@anthropic-ai/claude-code' },
-    compat: baselineOf('2.1.280'),
     snapshot: { layout: 'versioned-file', linkMode: 'hardlink', stores: [], resolveLayout: claudeLayout },
     restoreCompatible: null,
     notices: null,
@@ -363,7 +341,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     updateArgv: () => codexUpdateArgv(),
     // npm `latest` carries the plain native number (platform builds are suffixed).
     latestProbe: { kind: 'npm', pkg: '@openai/codex' },
-    compat: baselineOf('0.156.0'),
     snapshot: { layout: 'versioned-dir', linkMode: 'hardlink', stores: [CODEX_STORE], resolveLayout: codexLayout },
     restoreCompatible: null,
     notices: null,
@@ -386,7 +363,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     versionArgs: ['--version'],
     updateArgv: () => nativeUpdateArgv('antigravity', ['update']),
     latestProbe: null,
-    compat: baselineOf('1.2.12'),
     // agy data (~/.gemini/antigravity-cli) is out of scope, and its built-in
     // updater is not proven off until the stage 7 off-switch run.
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [], resolveLayout: singleFileLayout },
@@ -410,7 +386,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     versionArgs: ['--version'],
     updateArgv: () => nativeUpdateArgv('cursor', ['update']),
     latestProbe: null,
-    compat: baselineOf('2026.09.18-9a7762b'),
     snapshot: { layout: 'versioned-dir', linkMode: 'hardlink', stores: [], resolveLayout: cursorLayout },
     restoreCompatible: null,
     notices: null,
@@ -437,9 +412,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     versionArgs: ['--version'],
     updateArgv: () => nativeUpdateArgv('opencode', ['upgrade']),
     latestProbe: { kind: 'github-release', url: OPENCODE_LATEST_RELEASE_URL },
-    // GL-6: the GLM carrier verifies the pinned 1.18.32 digest with enforced:true, so
-    // any other version is refused in that mode even while the flag is off.
-    compat: { ...baselineOf('1.18.32'), alwaysEnforcedMode: 'glm-carrier' },
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [OPENCODE_STORE], resolveLayout: singleFileLayout },
     restoreCompatible: { version: PINNED_VENDOR_DIGESTS.opencode.version },
     notices: null,
@@ -470,7 +442,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
       env: { TMPDIR: NPM_UPDATE_TMPDIR },
     }),
     latestProbe: { kind: 'npm', pkg: '@qwen-code/qwen-code' },
-    compat: baselineOf('0.24.0'),
     // Legacy exact-version recovery (npm reinstall / git reset); no snapshot yet.
     manualOnly: false,
     snapshot: null,
@@ -504,7 +475,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     stagesNativeUpdate: true,
     // npm `latest` carries the same numbering as the native release.
     latestProbe: { kind: 'npm', pkg: '@moonshot-ai/kimi-code' },
-    compat: baselineOf('2.1.1'),
     // Button-only: the one installed copy moves only when the owner updates it.
     manualOnly: true,
     // One native file replaced in place, copied like agy/opencode.
@@ -546,7 +516,6 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
       env: { HERMES_HOME: resolveHermesHome(env) },
     }),
     latestProbe: null,
-    compat: baselineOf('0.21.4'),
     // Legacy exact-version recovery (npm reinstall / git reset); no snapshot yet.
     manualOnly: false,
     snapshot: null,

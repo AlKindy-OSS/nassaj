@@ -88,6 +88,8 @@
     "messageCount_one": "{{count}} message",
     "messageCount_other": "{{count}} messages",
     "allClosedHidden": "Closed conversations are hidden",
+    "surfacedHiddenHint_one": "+{{count}} more with activity",
+    "surfacedHiddenHint_other": "+{{count}} more with activity",
     "loadMoreSessions": "Load more sessions",
     "loadingSessions": "Loading sessions...",
     "unnamed": "Unnamed",
@@ -163,7 +165,14 @@
     "selectProject": "Select project",
     "selectSession": "Select conversation",
     "projectLogoTooLarge": "Image exceeds the 2MB size limit",
-    "projectLogoFailed": "Failed to save the project logo"
+    "projectLogoFailed": "Failed to save the project logo",
+    "addProjectLink": "Add link…",
+    "editProjectLink": "Edit link…",
+    "removeProjectLink": "Remove link",
+    "openProjectLink": "Open project link: {{name}} (opens in a new tab)",
+    "projectLinkPlaceholder": "https://example.com",
+    "projectLinkInvalid": "Enter a valid web address",
+    "projectLinkFailed": "Failed to save the project link"
   },
   "navigation": {
     "chat": "Chat",
@@ -335,6 +344,7 @@
     },
     "memberDialog": {
       "trigger": "Project members",
+      "addTrigger": "Add member",
       "title": "Manage project members",
       "searchLabel": "Add a member",
       "searchPlaceholder": "Search by username",

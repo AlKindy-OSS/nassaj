@@ -20,6 +20,8 @@ import { requireStartupAdmission } from '../../../bootstrap-startup-context.js';
  *  - `recordRejection` — the shared auth_rejected recorder (noise policy lives
  *                      in middleware/auth-rejection-audit).
  *  - `clientIp`      — the loopback-guarded client IP resolver (ADR-040).
+ *  - `ssoAttestationFresh` — T-1939 slice 3 freshness predicate, used only to
+ *                      label a rejection `sso_attestation_stale` in the audit.
  */
 type AuthRejectionRecord = {
   reason: string;
@@ -49,6 +51,7 @@ type WebSocketAuthDependencies = {
   jwtSecret: string;
   recordRejection: (record: AuthRejectionRecord) => void;
   clientIp: (req: IncomingMessage | null | undefined) => string | null;
+  ssoAttestationFresh?: (userId: number) => boolean;
   isTrustedOrigin?: (req: IncomingMessage) => boolean;
 };
 
@@ -63,7 +66,8 @@ type WebSocketAuthDependencies = {
  */
 function classifyWsRejection(
   token: string | null,
-  jwtSecret: string
+  jwtSecret: string,
+  ssoAttestationFresh?: (userId: number) => boolean,
 ): {
   reason: string;
   userId: number | null;
@@ -88,9 +92,15 @@ function classifyWsRejection(
     // trusts the algorithm declared in the token header. This classifier only
     // labels a rejection, but an unpinned verify here could label a forged token
     // 'user_missing' instead of 'bad_signature' and mislead the audit trail.
-    jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
-    // Signature/expiry valid but authenticateWebSocket still returned null →
-    // the user no longer exists / is disabled (matches REST user_missing).
+    const verified = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
+    // Signature/expiry valid but authenticateWebSocket still returned null. A
+    // linked member past the SSO attestation window is labelled as such (REST
+    // sso_attestation_stale); otherwise the user no longer exists / is disabled
+    // (matches REST user_missing).
+    const verifiedUserId = typeof verified === 'object' ? verified.userId : undefined;
+    if (Number.isSafeInteger(verifiedUserId) && ssoAttestationFresh?.(verifiedUserId) === false) {
+      return { reason: 'sso_attestation_stale', userId: unverifiedUserId };
+    }
     return { reason: 'user_missing', userId: unverifiedUserId };
   } catch (err) {
     const name = (err as { name?: string } | null)?.name;
@@ -186,7 +196,9 @@ export function verifyWebSocketClient(
     // Audit the rejection on the WS upgrade path with the same noise policy as
     // REST (no_token/expired aggregated; rare reasons recorded immediately).
     // IP from clientIp on the upgrade request (loopback guard on remoteAddress).
-    const { reason, userId } = classifyWsRejection(token, dependencies.jwtSecret);
+    const { reason, userId } = classifyWsRejection(
+      token, dependencies.jwtSecret, dependencies.ssoAttestationFresh,
+    );
     dependencies.recordRejection({
       reason,
       transport: 'ws',

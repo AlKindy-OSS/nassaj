@@ -65,10 +65,39 @@ const STORAGE_BLOCKERS = Object.freeze({
         message: 'The update storage pre-flight could not read the filesystem. Verify the source and TMPDIR paths, then retry.' },
 });
 
+/** Return the device with the largest shortfall (required - available), or null when all fit. */
+function worstShortfall(devices) {
+    let worst = null;
+    for (const device of devices) {
+        if (device.available >= device.required) continue;
+        if (!worst || device.required - device.available > worst.required - worst.available) worst = device;
+    }
+    return worst;
+}
+
+const MIB = 1024 * 1024;
+
+/**
+ * Owner-facing figures for an insufficient_disk blocker, or null for any other
+ * result. Never published on the unauthenticated /health; byte counts are still
+ * coarsened to whole MiB (available floored, required ceiled) to limit precision
+ * leakage about the host.
+ */
+export function publicStorageFigures(result) {
+    if (!result || result.ok !== false || result.code !== 'insufficient_disk') return null;
+    if (!Number.isSafeInteger(result.availableBytes) || !Number.isSafeInteger(result.requiredBytes)) return null;
+    return {
+        availableBytes: Math.floor(result.availableBytes / MIB) * MIB,
+        requiredBytes: Math.ceil(result.requiredBytes / MIB) * MIB,
+    };
+}
+
 /**
  * Evaluate the pre-flight storage state without throwing (ADR-141, T-1553).
  * Returns `{ ok: true }` or `{ ok: false, code, message, status }` so both the
- * update job and /health can surface the same actionable blocker.
+ * update job and /health can surface the same actionable blocker. For
+ * `insufficient_disk` the result also carries integer `availableBytes` and
+ * `requiredBytes` of the device with the largest shortfall.
  */
 export function evaluateUpdateStorage({ appRoot, env, statfs = fs.statfsSync, stat = fs.statSync }) {
     const blocked = (code) => ({ ok: false, code, ...STORAGE_BLOCKERS[code] });
@@ -98,7 +127,8 @@ export function evaluateUpdateStorage({ appRoot, env, statfs = fs.statfsSync, st
             const previous = devices.get(device) || { available, required: 0 };
             devices.set(device, { available: Math.min(previous.available, available), required: previous.required + required });
         }
-        if ([...devices.values()].some(device => device.available < device.required)) return blocked('insufficient_disk');
+        const worst = worstShortfall(devices.values());
+        if (worst) return { ...blocked('insufficient_disk'), availableBytes: worst.available, requiredBytes: worst.required };
     } catch {
         return blocked('storage_probe_failed');
     }

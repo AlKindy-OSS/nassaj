@@ -1,11 +1,10 @@
 /**
- * B-147 — acceptInvite must enforce the same username shape as createOidcUser.
+ * B-147 — acceptInvite must enforce the username shape (USERNAME_PATTERN).
  *
  * Before the fix acceptInvite validated only username LENGTH, so an invite could
  * mint an account whose name contained spaces, dots, slashes, or unicode — the
- * length gate alone let them through. createOidcUser (same module) already
- * applied USERNAME_PATTERN. These tests pin that acceptInvite now rejects the
- * same off-pattern names with the SAME message, and still accepts clean names.
+ * length gate alone let them through. These tests pin that acceptInvite now
+ * rejects off-pattern names and still accepts clean names.
  *
  * Framework: node:test + node:assert/strict via tsx, mirroring the sibling
  * auth-flow.integration.test.ts (a real, isolated SQLite database under a temp
@@ -23,7 +22,7 @@ import { initializeDatabase } from '@/modules/database/init-db.js';
 import { userDb } from '@/modules/database/repositories/users.js';
 
 import { hashPassword } from './password.service.js';
-import { createInvite, acceptInvite, createOidcUser, InviteError } from './invite.service.js';
+import { createInvite, acceptInvite, InviteError } from './invite.service.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -76,31 +75,6 @@ for (const username of OFF_PATTERN) {
     });
   });
 }
-
-test('B-147 message parity: acceptInvite uses the identical message as createOidcUser', async () => {
-  await withIsolatedDatabase(async () => {
-    const hash = await hashPassword('ownerpass123');
-    const owner = userDb.createUser('owner', hash, 'owner');
-    const { token } = await createInvite({ id: owner.id, role: 'owner' }, { role: 'user' });
-
-    let acceptMsg = '';
-    try {
-      await acceptInvite({ token, username: 'bad-name', password: 'password12' });
-    } catch (err) {
-      acceptMsg = (err as Error).message;
-    }
-
-    let oidcMsg = '';
-    try {
-      await createOidcUser({ id: owner.id, role: 'owner' }, { username: 'bad-name' });
-    } catch (err) {
-      oidcMsg = (err as Error).message;
-    }
-
-    assert.ok(acceptMsg.length > 0 && oidcMsg.length > 0);
-    assert.equal(acceptMsg, oidcMsg, 'both account-creation paths share one message');
-  });
-});
 
 test('B-147 behavior: acceptInvite accepts a pattern-valid username', async () => {
   await withIsolatedDatabase(async () => {

@@ -101,7 +101,7 @@ test('an overlay run is surfaced under the project its sidebar row lives in', as
 
   assert.deepEqual(
     recipient.last?.runningSessions,
-    [{ sessionId: 's-overlay', state: 'running' }],
+    [{ sessionId: 's-overlay', state: 'running', projectId: null }],
     'the session id must reach the client, or its row can never light up',
   );
   assert.equal(recipient.last?.activeConversations.total, 1);
@@ -148,7 +148,7 @@ test('an overlay run in a project the recipient cannot see stays hidden', async 
     'the count stays honest: it is explained as "elsewhere"',
   );
   assert.deepEqual(member.last?.runningSessions, [
-    { sessionId: 's-overlay-private', state: 'running' },
+    { sessionId: 's-overlay-private', state: 'running', projectId: null },
   ]);
 
   resetRuns();
@@ -167,7 +167,7 @@ test('a run with no session row yet keeps its reported path', async () => {
   await flush();
 
   assert.deepEqual(recipient.last?.runningSessions, [
-    { sessionId: 's-brand-new', state: 'running' },
+    { sessionId: 's-brand-new', state: 'running', projectId: null },
   ]);
   assert.deepEqual(recipient.last?.activeConversations.byProject, [
     { projectPath: REPO_PROJECT, count: 1 },

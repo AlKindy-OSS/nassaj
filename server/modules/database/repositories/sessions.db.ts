@@ -2,6 +2,7 @@ import { getConnection } from '@/modules/database/connection.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { rotateProjectStructureForPath } from '@/modules/database/repositories/project-access.js';
 import { notifyProjectTransfer } from '@/modules/database/repositories/session-project-transfer-events.js';
+import { isForeignTestRunPath } from '@/modules/database/test-run-root-guard.js';
 import { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';
 import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/index.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
@@ -87,6 +88,9 @@ const NATIVE_SESSION_PREDICATE_SQL = `(
   OR EXISTS (SELECT 1 FROM message_authors ma WHERE ma.session_id = sessions.session_id)
 )`;
 
+/** B-1420: warn once per leaked test path instead of on every rescan. */
+const warnedForeignTestRunPaths = new Set<string>();
+
 export const sessionsDb = {
   createSession(
     sessionId: string,
@@ -101,6 +105,15 @@ export const sessionsDb = {
     const createdAtValue = normalizeTimestamp(createdAt);
     const updatedAtValue = normalizeTimestamp(updatedAt);
     const normalizedProjectPath = normalizeProjectPathForProvider(provider, projectPath);
+    // B-1420: a test that leaked a transcript into a watched root must not
+    // register its throwaway case dir as a project in another (live) database.
+    if (isForeignTestRunPath(normalizedProjectPath)) {
+      if (!warnedForeignTestRunPaths.has(normalizedProjectPath)) {
+        warnedForeignTestRunPaths.add(normalizedProjectPath);
+        console.warn('Skipped session discovered under a foreign test run root', { provider });
+      }
+      return sessionId;
+    }
 
     // Wrap the project-upsert + session-upsert in a single transaction so a
     // concurrent UNIQUE violation or mid-flight crash never leaves the sessions

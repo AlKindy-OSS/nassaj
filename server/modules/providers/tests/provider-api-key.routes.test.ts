@@ -271,7 +271,7 @@ test('Qwen APIs expose personal credentials and the native runtime catalog', asy
   const key = 'sk-sp-personal-key-123';
   const set = await call('POST', '/api/providers/qwen/api-key', {
     user: '1',
-    body: { apiKey: key },
+    body: { apiKey: key, consent: true },
   });
   assert.equal(set.status, 200);
   assert.deepEqual(set.body.data, { provider: 'qwen', configured: true });
@@ -309,7 +309,7 @@ test('Qwen APIs expose personal credentials and the native runtime catalog', asy
 
   const oversized = await call('PUT', '/api/providers/qwen/api-key', {
     user: '1',
-    body: { apiKey: `sk-sp-${'x'.repeat(507)}` },
+    body: { apiKey: `sk-sp-${'x'.repeat(507)}`, consent: true },
   });
   assert.equal(oversized.status, 400);
   assert.equal(oversized.body.error?.code, 'INVALID_QWEN_CODING_PLAN_KEY');
@@ -319,7 +319,7 @@ test('Qwen Token Plan can be stored without returning the secret', async () => {
   const key = 'token-plan-private-key-123';
   const set = await call('POST', '/api/providers/qwen/api-key', {
     user: '1',
-    body: { apiKey: key, plan: 'token_plan', region: 'international' },
+    body: { apiKey: key, plan: 'token_plan', region: 'international', consent: true },
   });
   assert.equal(set.status, 200);
   assert.deepEqual(set.body.data, { provider: 'qwen', configured: true });
@@ -331,6 +331,18 @@ test('Qwen Token Plan can be stored without returning the secret', async () => {
   );
   assert.match(stored, /v1:/);
   assert.doesNotMatch(stored, /token-plan-private-key-123|token_plan|international/);
+});
+
+test('T-1906: a Qwen key without consent:true is refused with 400 CONSENT_REQUIRED', async () => {
+  const personalKey = ['sk', 'sp-personal-key-456'].join('-');
+  for (const body of [{ apiKey: personalKey }, { apiKey: personalKey, consent: 'true' }]) {
+    const set = await call('POST', '/api/providers/qwen/api-key', { user: '2', body });
+    assert.equal(set.status, 400);
+    assert.equal(set.body.error?.code, 'CONSENT_REQUIRED');
+    assert.doesNotMatch(JSON.stringify(set.body), /sk-sp-personal-key-456/);
+  }
+  const status = await call('GET', '/api/providers/qwen/api-key', { user: '2' });
+  assert.equal(status.body.data.configured, false);
 });
 
 test('an empty or missing key is rejected with 400', async () => {

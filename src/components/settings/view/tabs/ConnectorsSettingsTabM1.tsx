@@ -26,6 +26,12 @@ import SettingsSection from '../SettingsSection';
 import StatusBadge from '../StatusBadge';
 
 import ConnectorOwnerSetupWizard from './ConnectorOwnerSetupWizard';
+import ConnectorStepUpDialog from './ConnectorStepUpDialog';
+import {
+  consumeConnectorStepUpOutcome,
+  CONNECTOR_RECENT_AUTH_CODES,
+  ORIGIN_PROBLEM_CODES,
+} from './connectorStepUpClient';
 import { navigateToConnectorAuthorization } from './connectorNavigation';
 
 type Grant = {
@@ -164,6 +170,25 @@ type ReadinessResponse = {
   profiles?: Profile[];
 };
 type View = 'accounts' | 'installation';
+
+const CSRF_TOKEN_PATTERN = /^[a-f0-9]{64}$/u;
+
+/**
+ * After CONNECTOR_CSRF_REJECTED: the connector session may be fine and only
+ * this tab's token stale (another tab stepped up and rotated it). Returns the
+ * fresh token when readiness says no step-up is needed, otherwise null.
+ */
+async function readFreshCsrfToken(): Promise<string | null> {
+  try {
+    const response = await authenticatedFetch('/api/connectors/auth-readiness');
+    if (!response.ok) return null;
+    const readiness = await response.json() as ReadinessResponse;
+    return readiness.recentAuthRequired !== true && typeof readiness.csrfToken === 'string'
+      && CSRF_TOKEN_PATTERN.test(readiness.csrfToken) ? readiness.csrfToken : null;
+  } catch {
+    return null;
+  }
+}
 const GOOGLE_WORKSPACE_TITLE = 'Google Workspace';
 
 const serviceLogo = (entry: ConnectorCatalogEntry) => entry.logo
@@ -183,9 +208,7 @@ class ConnectorApiError extends Error {
   }
 }
 
-const AUTH_CODES = new Set([
-  'AUTH_REQUIRED', 'CONNECTOR_RECENT_AUTH_REQUIRED', 'CONNECTOR_CSRF_REJECTED',
-]);
+const AUTH_CODES = new Set(['AUTH_REQUIRED', ...CONNECTOR_RECENT_AUTH_CODES]);
 
 /**
  * Portable connector surface. It consumes only the public M1 registry DTOs and
@@ -217,6 +240,9 @@ export default function ConnectorsSettingsTabM1() {
   const [keyDrafts, setKeyDrafts] = useState<Record<string, KeyDraft>>({});
   const [oauthLabels, setOauthLabels] = useState<Record<string, string>>({});
   const [localDrafts, setLocalDrafts] = useState<Record<string, Connector>>({});
+  // T-1939 6C: inline step-up replaces "sign out and sign in again".
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const [stepUpErrorCode, setStepUpErrorCode] = useState<string | null>(null);
   const keyInputRef = useRef<HTMLInputElement | null>(null);
   const initialRefreshStarted = useRef(false);
   const writesAllowed = profilesKnown && csrfToken !== null && !recentAuthRequired;
@@ -250,10 +276,29 @@ export default function ConnectorsSettingsTabM1() {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const code: string = payload.code ?? 'UNKNOWN';
-      if (code === 'CONNECTOR_RECENT_AUTH_REQUIRED' || code === 'CONNECTOR_CSRF_REJECTED') {
+      const write = method !== 'GET' && method !== 'HEAD';
+      if (code === 'CONNECTOR_CSRF_REJECTED' && write) {
+        const fresh = await readFreshCsrfToken();
+        if (fresh) {
+          setCsrfToken(fresh);
+          setRecentAuthRequired(false);
+          throw new ConnectorApiError('CONNECTOR_CSRF_REFRESHED', 'connector_csrf_refreshed');
+        }
+      }
+      if (CONNECTOR_RECENT_AUTH_CODES.has(code)) {
         setCsrfToken(null);
         setRecentAuthRequired(true);
+        // A write the member just attempted: ask for the step-up right away.
+        if (method !== 'GET' && method !== 'HEAD') {
+          setStepUpErrorCode(null);
+          setStepUpOpen(true);
+        }
         throw new ConnectorApiError(code, 'connector_recent_auth_required');
+      }
+      // A write refused for the public origin: explain it (no password helps).
+      if (ORIGIN_PROBLEM_CODES.has(code) && method !== 'GET' && method !== 'HEAD') {
+        setStepUpErrorCode(code);
+        setStepUpOpen(true);
       }
       const reason = payload.error
         || copy('requestFailed', 'The request could not be completed.', 'تعذر إكمال الطلب.');
@@ -264,9 +309,12 @@ export default function ConnectorsSettingsTabM1() {
 
   const handleWriteError = (scope: string, reason: unknown) => {
     if (reason instanceof ConnectorApiError && AUTH_CODES.has(reason.code)) return;
+    const refreshed = reason instanceof ConnectorApiError && reason.code === 'CONNECTOR_CSRF_REFRESHED';
     setActionErrors(current => ({
       ...current,
-      [scope]: copy('actionFailed', 'This action could not be completed. Try again.', 'تعذر إكمال هذا الإجراء. حاول مرة أخرى.'),
+      [scope]: refreshed
+        ? copy('csrfRefreshed', 'Your security token was refreshed. Try again.', 'حُدِّث رمز الأمان. حاول مجدداً.')
+        : copy('actionFailed', 'This action could not be completed. Try again.', 'تعذر إكمال هذا الإجراء. حاول مرة أخرى.'),
     }));
   };
 
@@ -316,7 +364,7 @@ export default function ConnectorsSettingsTabM1() {
       const readiness = readinessResult.value as ReadinessResponse;
       const schemaVersion = readiness.schemaVersion === 1 || readiness.schemaVersion === 2
         ? readiness.schemaVersion : null;
-      const validCsrf = typeof readiness.csrfToken === 'string' && /^[a-f0-9]{64}$/u.test(readiness.csrfToken);
+      const validCsrf = typeof readiness.csrfToken === 'string' && CSRF_TOKEN_PATTERN.test(readiness.csrfToken);
       const validProfiles = Array.isArray(readiness.profiles);
       setProfiles(schemaVersion !== null && validProfiles ? readiness.profiles! : []);
       setCsrfToken(schemaVersion !== null && validCsrf ? readiness.csrfToken! : null);
@@ -352,8 +400,51 @@ export default function ConnectorsSettingsTabM1() {
   useEffect(() => {
     if (initialRefreshStarted.current) return;
     initialRefreshStarted.current = true;
+    // Back from a SSO step-up: reopen the view it started from and show
+    // its outcome once (the return page already redeemed the grant).
+    const outcome = consumeConnectorStepUpOutcome();
+    if (outcome) {
+      if (outcome.view === 'installation' && isOwner) setView('installation');
+      if (outcome.verified) {
+        setNotice(t('connectorsSettings.stepUp.verified'));
+      } else {
+        setStepUpErrorCode(outcome.code);
+        setStepUpOpen(true);
+      }
+    }
     void refresh();
-  }, [refresh]);
+  }, [isOwner, refresh, t]);
+
+  const openStepUp = useCallback(() => {
+    setStepUpErrorCode(null);
+    setStepUpOpen(true);
+  }, []);
+
+  // The wizard's refusal is the tab's too: hide the write controls before the
+  // dialog opens, so cancelling it leaves no stale write buttons behind. A
+  // stale CSRF token alone is refreshed instead of asking for a password.
+  const requestStepUpFromWizard = useCallback(async (code?: string) => {
+    if (code === 'CONNECTOR_CSRF_REJECTED') {
+      const fresh = await readFreshCsrfToken();
+      if (fresh) {
+        setCsrfToken(fresh);
+        setRecentAuthRequired(false);
+        setNotice(copy('csrfRefreshed', 'Your security token was refreshed. Try again.', 'حُدِّث رمز الأمان. حاول مجدداً.'));
+        return;
+      }
+    }
+    setCsrfToken(null);
+    setRecentAuthRequired(true);
+    openStepUp();
+  }, [copy, openStepUp]);
+
+  const handleStepUpVerified = useCallback(() => {
+    setStepUpOpen(false);
+    setStepUpErrorCode(null);
+    setNotice(t('connectorsSettings.stepUp.verified'));
+    // Readiness hands out the fresh CSRF token and clears recentAuthRequired.
+    void refresh();
+  }, [refresh, t]);
 
   const profileById = useMemo(
     () => new Map(profiles.map(profile => [profile.providerId, profile])),
@@ -817,16 +908,25 @@ export default function ConnectorsSettingsTabM1() {
         }
 
         if (recentAuthRequired) {
+          // The installation wizard shows its own step-up prompt: one button.
+          if (!authExpired && isOwner && view === 'installation') return null;
           return (
             <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm text-warning">
               <span>
                 {authExpired
                   ? copy('sessionExpired', 'Your session has ended. Sign in to continue.', 'انتهت جلستك. سجّل الدخول للمتابعة.')
-                  : copy('reauthRequired', 'Sign in again before linking or changing connector accounts.', 'مضى وقت على دخولك؛ سجّل الدخول مجدداً قبل ربط حسابات الموصلات أو تغييرها.')}
+                  : t('connectorsSettings.stepUp.ctaDescription')}
               </span>
-              <Button variant="outline" onClick={() => auth?.logout()}>
-                {copy('signInAgain', 'Sign in again', 'تسجيل الدخول مجددًا')}
-              </Button>
+              {authExpired ? (
+                <Button variant="outline" onClick={() => auth?.logout()}>
+                  {copy('signInAgain', 'Sign in again', 'تسجيل الدخول مجددًا')}
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={openStepUp}>
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                  {t('connectorsSettings.stepUp.cta')}
+                </Button>
+              )}
             </div>
           );
         }
@@ -883,9 +983,14 @@ export default function ConnectorsSettingsTabM1() {
       ) : isOwner ? (
         <div id="connector-view-panel" role="tabpanel" aria-labelledby="connector-view-installation">
           <ConnectorOwnerSetupWizard owner={isOwner} csrfToken={csrfToken}
+            recentAuthRequired={recentAuthRequired}
+            onRequestStepUp={code => void requestStepUpFromWizard(code)}
             language={i18n.language} onReadyChange={() => void refresh()} />
         </div>
       ) : null}
+      <ConnectorStepUpDialog open={stepUpOpen} owner={isOwner} returnView={view} initialErrorCode={stepUpErrorCode}
+        onClose={() => setStepUpOpen(false)} onVerified={handleStepUpVerified}
+        onVerifiedAfterClose={() => void refresh()} />
     </SettingsSection>
   );
 }

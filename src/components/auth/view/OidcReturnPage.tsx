@@ -3,6 +3,7 @@ import { Loader2, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
+import { clearPendingConnectorStepUp } from '../connectorStepUpMarker';
 import { useAuth } from '../context/AuthContext';
 import {
   OIDC_CODE_PARAM,
@@ -11,9 +12,11 @@ import {
   startOidcLogin,
 } from '../oidc';
 import type { OidcFailureReason } from '../oidc';
+import { readStepUpReturn } from '../../settings/view/tabs/connectorStepUpClient';
 
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthScreenLayout from './AuthScreenLayout';
+import OidcStepUpReturn from './OidcStepUpReturn';
 
 type ReturnPhase =
   | { status: 'verifying'; code: string }
@@ -26,6 +29,8 @@ const REASON_MESSAGE_KEYS: Readonly<Record<OidcFailureReason, string>> = {
   provider_denied: 'sso.errors.providerDenied',
   transaction_expired: 'sso.errors.transactionExpired',
   not_linked: 'sso.errors.notLinked',
+  not_authorized: 'sso.errors.notAuthorized',
+  account_exists: 'sso.errors.accountExists',
   account_unavailable: 'sso.errors.accountUnavailable',
   disabled: 'sso.errors.disabled',
   rate_limited: 'sso.errors.rateLimited',
@@ -34,9 +39,12 @@ const REASON_MESSAGE_KEYS: Readonly<Record<OidcFailureReason, string>> = {
   network: 'sso.errors.network',
 };
 
-// Retrying SSO cannot fix these; only an administrator (or the flag) can.
+// Retrying SSO cannot fix these; only an administrator, the member's own
+// password sign-in and self-link, or the flag can.
 const NON_RETRYABLE_REASONS: ReadonlySet<OidcFailureReason> = new Set([
   'not_linked',
+  'not_authorized',
+  'account_exists',
   'account_unavailable',
   'disabled',
 ]);
@@ -59,8 +67,20 @@ function readReturnPhase(params: URLSearchParams): ReturnPhase {
  * only fail, since the code is single-use (StrictMode re-runs effects).
  * Success enters the app; every failure is named, with the password sign-in
  * one click away.
+ *
+ * T-1939 6C: the same page receives a connector step-up return
+ * (`?oidc_step_up=` / `?oidc_step_up_error=`), which never signs anyone in and
+ * is handed to OidcStepUpReturn instead.
  */
 export default function OidcReturnPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Classified once: the URL is scrubbed right after.
+  const [stepUp] = useState(() => readStepUpReturn(searchParams));
+  const scrubUrl = useCallback(() => setSearchParams({}, { replace: true }), [setSearchParams]);
+  return stepUp ? <OidcStepUpReturn result={stepUp} scrubUrl={scrubUrl} /> : <OidcLoginReturn />;
+}
+
+function OidcLoginReturn() {
   const { t } = useTranslation('auth');
   const { loginWithOidcCode } = useAuth();
   const navigate = useNavigate();
@@ -74,6 +94,9 @@ export default function OidcReturnPage() {
     }
     hasStarted.current = true;
     setSearchParams({}, { replace: true });
+    // An ordinary sign-in return ends any connector step-up this tab began;
+    // a later plain IdP error must not be read as a step-up refusal.
+    clearPendingConnectorStepUp();
     if (phase.status !== 'verifying') {
       return;
     }

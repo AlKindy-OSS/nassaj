@@ -6,7 +6,9 @@ import test, { after, before, mock } from 'node:test';
 
 import express from 'express';
 
-import { closeConnection, deviceAccountSessionsDb, initializeDatabase, userDb } from '../modules/database/index.js';
+import {
+  closeConnection, deviceAccountSessionsDb, initializeDatabase, userDb, userIdentitiesDb,
+} from '../modules/database/index.js';
 import { bindDeviceHttpResponseLifetime, connectionRevocationRegistry, SSEStreamWriter } from '../modules/account-wallet/index.js';
 import { hashPassword } from '../services/password.service.js';
 
@@ -683,4 +685,62 @@ test('409 returns the winning tab active identity without replaying a stale swit
   assert.equal(conflict.wallet.activeSlotId, second.slotId);
   assert.equal(conflict.wallet.generation, 3);
   assert.equal(deviceAccountSessionsDb.resolve(f.device.secret)?.principal.slotId, second.slotId);
+});
+
+/** T-1939: toggles a live OIDC config (oidcEnabled() reads env per call). */
+async function withOidcEnabled(enabled: boolean, run: () => Promise<void>) {
+  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
+  process.env.OIDC_ENABLED = enabled ? 'true' : 'false';
+  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+  try { await run(); } finally {
+    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test('T-1939: with SSO live a linked member is refused on password login and wallet add', async () => {
+  const f = fixture();
+  const candidate = userDb.getUserByLoginIdentifier(f.email);
+  assert.ok(candidate);
+  userIdentitiesDb.link(candidate.id, 'https://issuer.example', `sub-${candidate.id}`);
+  const loginAs = (username: string) => fetch(`${origin}/api/auth/login`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password: 'correct horse battery staple' }),
+  });
+
+  await withOidcEnabled(true, async () => {
+    const refused = await loginAs(f.email);
+    assert.equal(refused.status, 403, 'never 401: the SPA must not read it as a lost session');
+    assert.equal((await refused.json()).code, 'sso_required');
+    assert.equal(refused.headers.get('set-cookie'), null, 'no session is issued');
+
+    const added = await f.mutate('/accounts/add', 'add', {
+      email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    });
+    assert.equal(added.status, 403);
+    assert.equal((await added.json()).code, 'sso_required');
+    assert.deepEqual(deviceAccountSessionsDb.snapshot(f.device.principal.deviceSessionId), f.device.wallet);
+
+    const wrong = await f.mutate('/accounts/add', 'add', { email: f.email, password: 'wrong', expectedGeneration: 1 });
+    assert.equal(wrong.status, 401, 'a wrong password keeps the generic failure (no linkage oracle)');
+    assert.equal((await wrong.json()).code, 'add_account_failed');
+
+    const owner = userDb.getUserById(f.device.principal.userId);
+    assert.equal(owner?.role, 'owner');
+    userIdentitiesDb.link(owner!.id, 'https://issuer.example', `sub-owner-${owner!.id}`);
+    const ownerLogin = await loginAs(owner!.username);
+    assert.equal(ownerLogin.status, 200, 'the owner stays local (break-glass) even when linked');
+  });
+
+  await withOidcEnabled(false, async () => {
+    // /login shares one IP limiter with the rest of this file, so the OIDC-off
+    // password path is asserted in auth.sso-only.test.ts; wallet add here.
+    const added = await f.mutate('/accounts/add', 'add', {
+      email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    });
+    assert.equal(added.status, 201, 'OIDC off: a linked account is added with its password as before');
+  });
 });

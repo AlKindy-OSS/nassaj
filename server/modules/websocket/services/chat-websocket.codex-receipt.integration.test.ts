@@ -1,3 +1,7 @@
+// Must stay first: sets WORKSPACES_ROOT before @/shared/utils.js loads (B-1421).
+// eslint-disable-next-line import-x/order
+import { TEST_GIT_PROJECT } from './chat-websocket.test-git-project.js';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -15,7 +19,7 @@ test('actual dispatch persists private native proof, strips public live/replay f
   const original = messageCoordinationDb.recordVerdict;
   try {
     const owner = userDb.createUser('native-proof-owner', 'hash', 'user').id;
-    projectsDb.createProjectPath(process.cwd(), 'native receipt', owner);
+    projectsDb.createProjectPath(TEST_GIT_PROJECT, 'native receipt', owner);
     const frames: any[] = [];
     const writer = { send: (frame: unknown) => frames.push(frame) } as unknown as WebSocketWriter;
     const proof = { version: 'codex_user_v1' as const, userMessageId: 'native-user', turnId: 'turn-native', payloadSha256: 'a'.repeat(64) };
@@ -106,14 +110,18 @@ test('actual dispatch persists private native proof, strips public live/replay f
     assert.equal(frames.at(-1)?.code, 'invalid_turn_content');
 
     let cursorResumes = 0;
-    sessionsDb.createSession('cursor-resume-control', 'cursor', process.cwd());
-    sessionWorkspaceModesDb.markShared('cursor-resume-control', process.cwd(), 'cursor');
+    sessionsDb.createSession('cursor-resume-control', 'cursor', TEST_GIT_PROJECT);
+    sessionWorkspaceModesDb.markShared('cursor-resume-control', TEST_GIT_PROJECT, 'cursor');
     await dispatch('cursor-resume', { command: '', sessionId: 'cursor-resume-control',
       options: { sessionId: 'cursor-resume-control', resume: true } } as never, writer, {
       ...dependencies, getSessionProvider: () => 'cursor',
       spawnCursor: async (command: string) => { cursorResumes++; assert.equal(command, ''); },
     } as never, owner);
-    assert.equal(cursorResumes, 1, 'the server-routed cursor resume control must preserve its empty command');
+    // cursor is globally disabled (owner decision 2026-09-29): the empty-command resume
+    // control now hits the disable wall and never reaches spawnCursor (B-1426).
+    assert.equal(cursorResumes, 0, 'a disabled cursor resume control must never launch');
+    assert.equal(frames.at(-1)?.notStarted, true);
+    assert.match(String(frames.at(-1)?.error), /disabled on this deployment/);
     assert.equal(launches, 4, 'blank, malformed, oversized or unsupported attachments must never reach Codex');
   } finally { messageCoordinationDb.recordVerdict = original; closeConnection(); }
 });

@@ -165,6 +165,7 @@ import {
 import { createRateLimiter } from './middleware/rate-limit.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
+import { warnOnOwnerOidcLinks } from './services/oidc-owner-link-check.js';
 import adminRoutes from './routes/admin.js';
 import credentialGrantsRoutes from './routes/credential-grants.js';
 import cursorRoutes from './routes/cursor.js';
@@ -197,6 +198,8 @@ import {
     startHarnessAutoUpdateScheduler,
     stopHarnessAutoUpdateScheduler,
 } from './modules/providers/harness-update/scheduler.js';
+import { startSsoAttestationSweep } from './services/sso-attestation-sweep.js';
+import { ssoAttestationFresh } from './services/sso-attestation.js';
 import { reconcileHarnessSnapshots } from './modules/providers/harness-update/boot-reconcile.js';
 import { logUnresolvedHarnessBinaries } from './shared/harness-binaries.js';
 import governancePreferencesRoutes from './modules/providers/governance-preferences.routes.js';
@@ -224,7 +227,7 @@ import { revokeProjectLiveAccess } from './modules/websocket/services/project-me
 import { onMemberRemoved } from './modules/projects/services/project-visibility-management.service.js';
 import { isProjectVisible, coerceUserId } from './modules/projects/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
-import { createSourceUpdater, evaluateUpdateStorage, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
+import { createSourceUpdater, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
 import { createSourceUpdateWorker, durableReceiptFile } from './services/source-update-worker.js';
 import { createUpdateDeferralScheduler } from './services/update-deferral-scheduler.js';
 import {
@@ -920,6 +923,7 @@ const wss = createWebSocketServer(server, {
         jwtSecret: JWT_SECRET,
         recordRejection: recordAuthRejection,
         clientIp,
+        ssoAttestationFresh,
         isTrustedOrigin: (request) => {
             const origin = request.headers.origin;
             const forwardedProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim();
@@ -1473,6 +1477,13 @@ app.use('/api', (req, res, next) => {
 app.use('/share', (_req, res, next) => {
     res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store',
         'X-Robots-Tag': 'noindex, nofollow, noarchive' });
+    next();
+});
+// The OIDC return page carries one-time values in its query (a login code or
+// a T-1939 6B step-up grant): never sent onward as a Referer. The SPA
+// fallback below already marks the page no-store.
+app.use('/auth/oidc/return', (_req, res, next) => {
+    res.set('Referrer-Policy', 'no-referrer');
     next();
 });
 
@@ -2075,6 +2086,29 @@ app.get('/api/system/update/preflight', authenticateToken, requireRole('owner'),
     } catch (error) {
         console.error('[update-preflight] diagnosis failed:', error?.message || 'unknown error');
         return res.status(500).json({ success: false, code: 'update_preflight_unavailable' });
+    }
+});
+
+// Owner-only storage figures for the insufficient_disk blocker. /health is
+// unauthenticated, so it publishes the blocker code but never the byte counts;
+// the update modal reads them here at the same authorization level as starting
+// an update. statfs only: no git, no network, no writes.
+const updateStorageLimiter = createRateLimiter({ windowMs: 60_000, max: 30, message: 'Too many storage requests, please slow down' });
+
+app.get('/api/system/update/storage', authenticateToken, requireRole('owner'), updateStorageLimiter, (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (IS_PLATFORM) {
+        return res.status(409).json({ success: false, code: 'platform_update_managed', error: 'Platform releases use the managed deployment workflow.' });
+    }
+    if (!updateHostCapability.ready) {
+        return res.status(503).json({ success: false, code: 'update_capability_unavailable', error: 'The verified v2 update capability is unavailable.' });
+    }
+    try {
+        const storage = evaluateUpdateStorage({ appRoot: APP_ROOT, env: process.env });
+        return res.json({ ok: storage.ok, code: storage.ok ? null : storage.code, blockedStorage: publicStorageFigures(storage) });
+    } catch (error) {
+        console.error('[update-storage] evaluation failed:', error?.message || 'unknown error');
+        return res.status(500).json({ success: false, code: 'update_storage_unavailable' });
     }
 });
 
@@ -4050,6 +4084,8 @@ async function startServer() {
             );
         }
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP) runConnectorCredentialRetentionAtStartup();
+        // B-1410: flag SSO links on owner accounts (planted before the fix). Never throws.
+        warnOnOwnerOidcLinks();
 
         // T-1871 §8: harness snapshot jobs interrupted by a crash are abandoned,
         // rolled back or resumed HERE — after the DB (durable fences) and before
@@ -4223,6 +4259,8 @@ async function startServer() {
         await backgroundLifecycle.prepare();
         privateSecurityReady = true;
         startHarnessAutoUpdateScheduler();
+        // T-1939 slice 3: close live access of members whose SSO attestation aged out.
+        startSsoAttestationSweep();
         // T-1872: seal the machine Codex release once before admitting launches.
         prewarmCodexLaunchIdentity();
         // T-1872 part 2: judge that release off the event loop; a failure never aborts boot.

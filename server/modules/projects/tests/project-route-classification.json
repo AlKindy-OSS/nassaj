@@ -178,6 +178,10 @@
  "GET /api/projects/session-context/:sessionId": {
   "class": "project"
  },
+ "POST /api/projects/session-contexts": {
+  "class": "global",
+  "reason": "B-1431 batch lookup: answers 200 with only the caller-visible contexts (empty otherwise), never 403/404; filtering proven in projects.routes.session-contexts.test.ts"
+ },
  "GET /api/providers/:provider/api-key": {
   "class": "global",
   "reason": "per-user provider key"
@@ -384,6 +388,10 @@
   "class": "global",
   "reason": "connector mutation, no project context; 503 = connector substrate not provisioned in tests"
  },
+ "POST /api/connectors/owner-session/step-up": {
+  "class": "global",
+  "reason": "caller's own recent-auth session, no project context; authenticateToken + rate limit + exact Origin + step-up evidence; 503 = session adapter not installed in tests"
+ },
  "POST /api/git/checkout": {
   "class": "project"
  },
@@ -567,6 +575,9 @@
  "PUT /api/connectors/grants/:serviceId/api-key": {
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PUT /api/projects/:projectId/link": {
+  "class": "project"
  },
  "PUT /api/projects/:projectId/rename": {
   "class": "project"

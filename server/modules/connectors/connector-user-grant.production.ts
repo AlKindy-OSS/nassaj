@@ -14,8 +14,14 @@ import { providerAuthSpecFor } from '../../../shared/connector-auth-registry.js'
 
 import { probeConnectorApiKeyCandidate } from './connector-api-key-probe.js';
 import { ConnectorPolicyOperation } from './connector-policy-v2.js';
-import { assertConnectorProviderEffectEnabled } from './connector-substrate-only.production.js';
-import { createConnectorCredentialRetentionService } from './connector-credential-retention.js';
+import {
+  assertConnectorProviderEffectEnabled,
+  executeConnectorPolicyV2SynchronousWrite,
+} from './connector-substrate-only.production.js';
+import {
+  connectorRetentionFailureCode,
+  createConnectorCredentialRetentionService,
+} from './connector-credential-retention.js';
 import {
   FileConnectorAuthKeyring,
   createConnectorAuthKeyringFile,
@@ -75,20 +81,50 @@ export const isM2PlacementMaterialReference = (
   reference: ConnectorGrantMaterialReference | null,
 ): boolean => reference?.kind === 'v2' && reference.provenance === 'm2';
 
-/** Official boot hook; cleanup does not wait for a connector distribution request. */
+type RetentionService = ReturnType<typeof createConnectorCredentialRetentionService>;
+
+/** Retention whose deletes run inside the connector runtime fence (guarded tables). */
+const fencedRetention = (repository: ReturnType<typeof createConnectorAuthDb>): RetentionService =>
+  createConnectorCredentialRetentionService(repository, {
+    executeWrite: effect => executeConnectorPolicyV2SynchronousWrite(effect),
+  });
+
+/** Maintenance never stops its caller: a failure is logged as a fixed code and retried next tick. */
+const runRetentionSafely = (retention: RetentionService, limit: number) => {
+  try { return retention.runOnce(limit); } catch (error) {
+    console.warn('connector retention skipped', { code: connectorRetentionFailureCode(error) });
+    return null;
+  }
+};
+
+let retentionTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Official boot hook; cleanup does not wait for a connector distribution
+ * request. It runs after initializeDatabase, so the deletes go through the
+ * composed runtime fence. It never throws: retention is maintenance, and a
+ * refused fence (e.g. connectors blocked) must not fail the server boot.
+ */
 export const runConnectorCredentialRetentionAtStartup = (): Readonly<{ removedCandidates: number }> => {
-  const database = getConnection();
-  migrateConnectorAuthSchema(database);
-  const retention = createConnectorCredentialRetentionService(createConnectorAuthDb(database));
   let removedCandidates = 0;
+  let retention: RetentionService;
+  try {
+    const database = getConnection();
+    migrateConnectorAuthSchema(database);
+    retention = fencedRetention(createConnectorAuthDb(database));
+  } catch (error) {
+    console.warn('connector retention unavailable', { code: connectorRetentionFailureCode(error) });
+    return Object.freeze({ removedCandidates });
+  }
   for (let batch = 0; batch < 10; batch += 1) {
-    const result = retention.runOnce(100);
+    const result = runRetentionSafely(retention, 100);
+    if (!result) break;
     removedCandidates += result.removedCandidates;
     if (result.removedCandidates < 100) break;
   }
   if (!retentionTimer) {
     retentionTimer = setInterval(() => {
-      void runLocalUpdateBackground('connector-retention', () => retention.runOnce(100))
+      void runLocalUpdateBackground('connector-retention', () => runRetentionSafely(retention, 100))
         .catch(() => { /* next bounded tick retries */ });
     }, 15 * 60 * 1_000);
     retentionTimer.unref();
@@ -96,14 +132,12 @@ export const runConnectorCredentialRetentionAtStartup = (): Readonly<{ removedCa
   return Object.freeze({ removedCandidates });
 };
 
-let retentionTimer: NodeJS.Timeout | null = null;
-
 const buildRuntime = (): Runtime => {
   if (runtime) return runtime;
   const database = getConnection();
   migrateConnectorAuthSchema(database);
   const repository = createConnectorAuthDb(database);
-  createConnectorCredentialRetentionService(repository).runOnce();
+  runRetentionSafely(fencedRetention(repository), 25);
   const installationId = repository.getOrCreateInstallation();
   const keyringPath = `${getDatabasePath()}.connector-auth-keyring.json`;
   const keyring = existsSync(keyringPath)

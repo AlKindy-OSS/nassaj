@@ -14,6 +14,7 @@ import FeedbackBanner from './FeedbackBanner';
 import type { Feedback } from './FeedbackBanner';
 import OutboxCleanupSection from './OutboxCleanupSection';
 import PasskeysSection from './PasskeysSection';
+import SsoSelfLinkSection from './SsoSelfLinkSection';
 import SteerConsentSection from './SteerConsentSection';
 
 // `border-input` لا `border-border`: حدّ التحكّم مطلوب بـWCAG 1.4.11 وليس طبقةً
@@ -31,7 +32,8 @@ type ProfileInnerTab = 'identity' | 'security' | 'collaboration';
  * be a filled pill group here and an underlined bar there, two shapes for one
  * idea) so the page opens compact instead of one long vertical stack:
  *  - Identity: avatar style (upload / gallery / colour) + change username.
- *  - Security: change password + passkeys (WebAuthn, C-PK-3).
+ *  - Security: change password + passkeys (WebAuthn, C-PK-3) + the member's
+ *    own SSO link (T-1939 slice 5; hidden when SSO is off).
  *
  * Both panels stay mounted (the inactive one is `hidden`) so in-progress form
  * input and the fetched passkeys list survive switching tabs.
@@ -332,6 +334,9 @@ export default function ProfileSettingsTab() {
 
         {/* Passkeys (C-PK-3) */}
         <PasskeysSection />
+
+        {/* Self-link to SSO (T-1939 slice 5). Renders nothing with SSO off. */}
+        <SsoSelfLinkSection />
       </div>
 
       {/* Collaboration: mid-turn steering consent (T-1903, ADR-190). */}

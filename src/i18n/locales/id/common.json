@@ -307,7 +307,8 @@
     "projectBusyHint": "Ada sesi di proyek ini yang sedang memproses",
     "done": "Selesai",
     "doneHint": "Sesi selesai dan belum dibuka",
-    "projectDoneHint": "Ada sesi di proyek ini yang selesai dan belum dibuka"
+    "projectDoneHint": "Ada sesi di proyek ini yang selesai dan belum dibuka",
+    "projectOrphanHint": "Alur kerja latar di proyek ini berhenti sebelum menghasilkan hasil lengkap"
   },
   "workflowStatus": {
     "running": "Alur kerja berjalan",

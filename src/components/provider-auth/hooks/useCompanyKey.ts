@@ -42,6 +42,14 @@ export type CompanySlotStatus = {
   configured: boolean;
   /** True when that harness is currently signed in by subscription. */
   subscription: boolean;
+  /**
+   * Set by the server when a stored profile is not usable through the
+   * simplified single-key flow (T-1906) — a Qwen key saved as `token_plan` or
+   * region `china` under the old two-field form. `configured` stays true (a
+   * secret IS stored), but the card must ask for a fresh Coding Plan key
+   * rather than claim the slot is ready.
+   */
+  status?: 'incompatible_profile';
 };
 
 type MutationResult =
@@ -110,7 +118,17 @@ export function useCompanyKey(companyId: string) {
   const saveKey = useCallback(
     async (
       apiKey: string,
-      options: { includeSubscription?: boolean; vendorIds?: string[] } = {},
+      options: {
+        includeSubscription?: boolean;
+        vendorIds?: string[];
+        /**
+         * Explicit consent flag for companies whose disclosure the operator must
+         * tick before saving (Alibaba Coding Plan, T-1906). Omitted, not sent
+         * `false`, when the caller has nothing to consent to — a company with no
+         * consent gate must never look like one that was declined.
+         */
+        consent?: boolean;
+      } = {},
     ): Promise<MutationResult> => {
       const trimmed = apiKey.trim();
       if (!trimmed) {
@@ -134,6 +152,7 @@ export function useCompanyKey(companyId: string) {
             apiKey: trimmed,
             includeSubscription: options.includeSubscription === true,
             ...(options.vendorIds ? { vendorIds: options.vendorIds } : {}),
+            ...(options.consent === true ? { consent: true } : {}),
           }),
         });
         if (!response.ok) {

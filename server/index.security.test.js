@@ -230,9 +230,19 @@ test('save-file endpoint — an ordinary in-tree save still works', async () => 
   }
 });
 
+/**
+ * Parent for a project root the real document guard accepts: disk-backed and with no
+ * hidden path component. The checkout itself qualifies only when its path has no dot
+ * component; the release gate (~/.nassaj-release-work) and agent worktrees
+ * (.claude/worktrees) do not, so they fall back to the disk-backed /var/tmp (B-1433).
+ */
+function shareableProjectParent() {
+  const checkout = process.cwd();
+  return checkout.split(path.sep).some((part) => part.startsWith('.')) ? '/var/tmp' : checkout;
+}
+
 test('save-file endpoint — a shareable document is replaced atomically', async () => {
-  // The real document guard requires a disk-backed, non-hidden project root.
-  const projectRoot = await realpath(await mkdtemp(path.join(process.cwd(), 'idx-doc-proj-')));
+  const projectRoot = await realpath(await mkdtemp(path.join(shareableProjectParent(), 'idx-doc-proj-')));
   let previousVersion;
   try {
     await mkdir(path.join(projectRoot, 'docs'));
@@ -293,6 +303,14 @@ test('system update routes expose only the v2 jobs contract and matching status 
   assert.match(INDEX_SOURCE, /updaterStrategy: updateOffered/);
   assert.match(INDEX_SOURCE, /updateReady: updateOffered/);
   assert.match(INDEX_SOURCE, /blockedReasonCode:/);
+  // Disk figures never ride the unauthenticated /health (review A).
+  const healthAt = INDEX_SOURCE.indexOf("app.get('/health'");
+  const healthHandler = INDEX_SOURCE.slice(healthAt, INDEX_SOURCE.indexOf('\n});', healthAt));
+  assert.ok(healthAt !== -1 && !healthHandler.includes('blockedStorage'), '/health must not publish blockedStorage');
+  assert.ok(!healthHandler.includes('publicStorageFigures'), '/health must not compute disk figures');
+  // They are served owner-only, through the MiB-coarsening helper.
+  assert.match(INDEX_SOURCE, /app\.get\('\/api\/system\/update\/storage', authenticateToken, requireRole\('owner'\), updateStorageLimiter,/);
+  assert.match(INDEX_SOURCE, /blockedStorage: publicStorageFigures\(storage\)/);
   assert.match(INDEX_SOURCE, /update_protocol_upgrade_required/);
 });
 

@@ -26,6 +26,7 @@ import {
   closeConnection,
   getConnection,
   initializeDatabase,
+  projectsDb,
   sessionsDb,
   userDb,
 } from '@/modules/database/index.js';
@@ -282,5 +283,32 @@ test('dormancy: a freshly silent unknown workflow is NOT dormant', async () => {
     assert.equal(result.workflows.length, 1);
     assert.equal(result.workflows[0].dormant, false);
     assert.equal(result.dormant, 0);
+  });
+});
+
+test('B-1431: projectId is set only when the session project is visible to the caller', async () => {
+  await withHarness(async ({ projectDir, createUser, addSessionWithWorkflow }) => {
+    const u = createUser('u1');
+    await addSessionWithWorkflow({ userId: u, sessionId: 's-pid', wfId: 'wf_pid1', lines: INCIDENT_JOURNAL_LINES });
+    registerWorkflowPid('s-pid', process.pid);
+    const expectedId = projectsDb.getProjectPath(projectDir)?.project_id;
+    assert.ok(expectedId, 'fixture project row exists');
+
+    const previous = process.env.PROJECT_MEMBERSHIP_ENFORCE;
+    try {
+      delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
+      const visible = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
+      assert.equal(visible.workflows[0]?.projectId, expectedId, 'visible project => its DB id');
+
+      // ADR-172: owning a SESSION is not project membership. With enforcement on
+      // and no creator/member link, the project is invisible => null.
+      process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
+      const hidden = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
+      assert.equal(hidden.workflows.length, 1, 'the workflow itself is still reported');
+      assert.equal(hidden.workflows[0]?.projectId, null, 'invisible project => projectId null');
+    } finally {
+      if (previous === undefined) delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
+      else process.env.PROJECT_MEMBERSHIP_ENFORCE = previous;
+    }
   });
 });

@@ -126,16 +126,16 @@ for (const provider of ['kimi', 'deepseek', 'glm'] as const) {
     assert.equal(ctx.calls.enabled, 1);
     assert.equal(ctx.calls.supports, 0);
     assert.equal(ctx.calls.execute, 0);
-    if (provider === 'kimi') {
-      assert.equal(ctx.calls.legacy, 1);
-    } else {
-      assert.equal(ctx.calls.legacy, 0);
-      assert.match(String(ctx.sent[0]?.error), /disabled on this deployment/);
-    }
+    // All three are globally disabled (kimi again since 2026-09-29): the legacy
+    // path is the disable wall, so nothing launches.
+    assert.equal(ctx.calls.legacy, 0);
+    assert.match(String(ctx.sent[0]?.error), /disabled on this deployment/);
     assert.notEqual(ctx.sent[0]?.code, 'hosted_turn_supervisor_unsupported');
   });
 }
 
+// kimi is disabled (2026-09-29) and this harness wires no native kimi launcher, so
+// the legacy path an inert supervisor preserves is the disable wall's refusal.
 test('hosted supervisor flag OFF in agent mode is inert and preserves legacy dispatch', async () => {
   const ctx = harness({ enabled: false, supported: false });
   await dispatchProviderCommand('kimi-command', {
@@ -147,7 +147,8 @@ test('hosted supervisor flag OFF in agent mode is inert and preserves legacy dis
 
   assert.equal(ctx.calls.execute, 0);
   assert.equal(ctx.calls.supports, 0);
-  assert.equal(ctx.calls.legacy, 1);
+  assert.equal(ctx.calls.legacy, 0);
+  assert.match(String(ctx.sent[0]?.error), /disabled on this deployment/);
   assert.notEqual(ctx.sent[0]?.code, 'hosted_turn_supervisor_unsupported');
 });
 

@@ -276,3 +276,41 @@ test('B-172: an ORPHAN child (parent absent) is folded silently and creates no r
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('T-1906: a Coding Plan key in a title or first prompt never reaches the session name', { concurrency: false }, async () => {
+  const KEY = ['sk', 'sp-title-secret-0123456789'].join('-');
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-title-redaction-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await createOpenCodeDatabase(tempRoot, workspacePath, [
+      { id: 'ses_titled', parentId: null, title: `use ${KEY} please`, timeCreated: 1_700_000_000_000, timeUpdated: 1_700_000_000_500 },
+      { id: 'ses_blank', parentId: null, title: '', timeCreated: 1_700_000_001_000, timeUpdated: 1_700_000_001_500 },
+    ]);
+    const db = new Database(path.join(tempRoot, '.local', 'share', 'opencode', 'opencode.db'));
+    try {
+      db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)')
+        .run('m1', 'ses_blank', 1, 1, JSON.stringify({ role: 'user' }));
+      db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)')
+        .run('p1', 'm1', 'ses_blank', 1, 1, JSON.stringify({ type: 'text', text: `my key is ${KEY}` }));
+    } finally {
+      db.close();
+    }
+
+    await withIsolatedDatabase(async () => {
+      await new OpenCodeSessionSynchronizer().synchronize();
+      const titled = sessionsDb.getSessionById('ses_titled');
+      const untitled = sessionsDb.getSessionById('ses_blank');
+      assert.ok(titled && untitled, 'both sessions indexed');
+      const names = JSON.stringify([titled, untitled]);
+      assert.ok(!names.includes(KEY), names);
+      assert.match(String(titled?.custom_name), /use \[REDACTED\] please/);
+      assert.match(String(untitled?.custom_name), /my key is \[REDACTED\]/);
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

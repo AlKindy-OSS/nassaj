@@ -15,8 +15,15 @@ import { claudeUsageService } from '@/modules/providers/services/claude-usage.se
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
-import { companyCredentialsService } from '@/modules/providers/services/company-credentials.service.js';
+import {
+  companyConsentVersion,
+  companyCredentialsService,
+} from '@/modules/providers/services/company-credentials.service.js';
 import { providerCredentialsService } from '@/modules/providers/services/provider-credentials.service.js';
+import {
+  QWEN_CONSENT_VERSION,
+  providerSecretsService,
+} from '@/modules/providers/services/provider-secrets.service.js';
 import { providerGovernanceLinkService } from '@/modules/providers/services/provider-governance-link.service.js';
 import {
   providerGovernanceService,
@@ -1232,6 +1239,12 @@ const readVendorIds = (value: unknown): string[] | undefined => {
   return ids;
 };
 
+/** Request facts for the service-level credential audit row — never the key. */
+const readAuditContext = (req: Request): { ipAddress: string | null; userAgent: string | null } => ({
+  ipAddress: req.ip ?? null,
+  userAgent: req.get('user-agent') ?? null,
+});
+
 const setCompanyKey = asyncHandler(async (req: Request, res: Response) => {
   const companyId = readPathParam(req.params.companyId, 'companyId');
   const userId = readAuthenticatedUserId(req);
@@ -1245,6 +1258,9 @@ const setCompanyKey = asyncHandler(async (req: Request, res: Response) => {
     includeSubscription,
     authenticatedPrincipal: (req as Request & { user?: unknown }).user,
     vendorIds: readVendorIds(body?.vendorIds),
+    // T-1906: only a literal `true` is consent (alibaba-cloud requires it).
+    consent: body?.consent === true,
+    auditContext: readAuditContext(req),
   });
   res.json(createApiSuccessResponse(result));
 });
@@ -1264,6 +1280,7 @@ router.delete(
       // single id. Absent still means "every slot", for the whole-company
       // removal the older client sent.
       vendorIds: readVendorIds(req.query.vendorIds ?? (req.body as Record<string, unknown> | undefined)?.vendorIds),
+      auditContext: readAuditContext(req),
     });
     res.json(createApiSuccessResponse(result));
   }),
@@ -1284,7 +1301,15 @@ router.get(
     const writable = status.slots.some(
       (slot) => !providerCredentialsService.requiresElevatedRole(slot.provider) || isElevatedCaller(req),
     );
-    res.json(createApiSuccessResponse({ ...status, writable }));
+    // T-1906: tell the client a consent checkbox is required, and (for the
+    // Qwen slot) whether the saved key can drive qwen-plan models.
+    const consentVersion = companyConsentVersion(companyId);
+    const qwenPlan = status.slots.some((slot) => slot.provider === 'qwen')
+      ? { qwenPlan: providerSecretsService.getQwenPlanStatus(userId) }
+      : {};
+    res.json(createApiSuccessResponse({
+      ...status, writable, consentRequired: consentVersion !== null, consentVersion, ...qwenPlan,
+    }));
   }),
 );
 
@@ -1305,24 +1330,14 @@ const setProviderApiKey = asyncHandler(async (req: Request, res: Response) => {
   const qwenOptions = provider === 'qwen'
     ? { plan: body?.plan, region: body?.region }
     : undefined;
+  // T-1906: the Qwen audit row is written by providerSecretsService itself.
   const result = await providerCredentialsService.setKey(
     userId, provider, apiKey, target, qwenOptions,
     (req as Request & { user?: unknown }).user,
+    // T-1906: only a literal `consent: true` records the personal-use version;
+    // providerSecretsService refuses a qwen write without it (400 CONSENT_REQUIRED).
+    { ...readAuditContext(req), consentVersion: body?.consent === true ? QWEN_CONSENT_VERSION : null },
   );
-  if (provider === 'qwen') {
-    auditLogDb.record('qwen_credential_set', {
-      userId: coerceUserId(userId) ?? undefined,
-      metadata: {
-        provider: 'qwen',
-        scope: 'personal',
-        configured: result.configured,
-        plan: body?.plan ?? 'coding_plan',
-        region: body?.region ?? 'international',
-      },
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent') ?? undefined,
-    });
-  }
   res.json(createApiSuccessResponse(result));
 });
 
@@ -1343,15 +1358,7 @@ router.delete(
     const userId = readAuthenticatedUserId(req);
 
     const target = readOptionalTarget(req.query.target);
-    const result = await providerCredentialsService.deleteKey(userId, provider, target);
-    if (provider === 'qwen') {
-      auditLogDb.record('qwen_credential_deleted', {
-        userId: coerceUserId(userId) ?? undefined,
-        metadata: { provider: 'qwen', scope: 'personal', configured: result.configured },
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent') ?? undefined,
-      });
-    }
+    const result = await providerCredentialsService.deleteKey(userId, provider, target, readAuditContext(req));
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -1368,7 +1375,8 @@ router.get(
     const userId = readAuthenticatedUserId(req);
     const target = readOptionalTarget(req.query.target);
     const result = await providerCredentialsService.getStatus(userId, provider, target);
-    res.json(createApiSuccessResponse({ ...result, ...evaluateCredentialWrite(req, provider) }));
+    const qwenPlan = provider === 'qwen' ? { qwenPlan: providerSecretsService.getQwenPlanStatus(userId) } : {};
+    res.json(createApiSuccessResponse({ ...result, ...evaluateCredentialWrite(req, provider), ...qwenPlan }));
   }),
 );
 

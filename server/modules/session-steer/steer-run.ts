@@ -12,6 +12,10 @@
 
 import type { SteerDeliveryStatus, SteerEvent, SteerRejectCode } from '../../../shared/session-steer.contract.js';
 
+// Both bounds are per RUN and SHARED by every sender, the starter's own
+// self-steers included: a busy starter can use up the turn's budget for
+// members and vice versa. Deliberate — the model-facing volume of injected
+// text per turn is what they bound. The per-sender rate (5/min) is separate.
 export const STEER_QUEUE_MAX = 3;
 export const STEER_PER_TURN_MAX = 10;
 
@@ -29,7 +33,10 @@ export type SteerRunDeps = {
   turnId: string;
   starterUserId: number | null;
   permissionMode: () => string | null;
-  hooksArmed: () => boolean;
+  /** The run can take an injection at all (controller armed, streaming input). Gates the starter. */
+  injectionArmed: () => boolean;
+  /** The `.*` taint hook reached the CLI (starter consented at start). Gates every OTHER member. */
+  taintHookArmed: () => boolean;
   /** Called after every accepted enqueue (the runner re-arms its input-close timer). */
   onQueued?: (item: SteerItem) => void;
   /** Broadcast to the starter and every mirror of the session. */
@@ -78,12 +85,13 @@ export function createSteerRun(deps: SteerRunDeps) {
   return {
     turnId: deps.turnId,
     starterUserId: deps.starterUserId,
-    /** True from the first accepted injection until the run ends. */
+    /** True from the first accepted injection by a NON-starter until the run ends (a self-steer never taints). */
     isTainted: () => tainted,
     everInjected: () => accepted > 0,
     isClosed: () => closedReason !== null,
     hasPendingWork: () => queue.length > 0 || inFlight.length > 0,
-    hooksArmed: () => deps.hooksArmed(),
+    injectionArmed: () => deps.injectionArmed(),
+    taintHookArmed: () => deps.taintHookArmed(),
     permissionMode: () => deps.permissionMode(),
     /** The accepted item that carries this native uuid (live echo attribution). */
     findByUuid: (uuid: unknown): SteerItem | null => (typeof uuid === 'string' ? byUuid.get(uuid) ?? null : null),
@@ -102,7 +110,7 @@ export function createSteerRun(deps: SteerRunDeps) {
       const refused = this.precheck();
       if (refused) return { ok: false, code: refused };
       accepted += 1;
-      tainted = true;
+      if (item.senderUserId !== deps.starterUserId) tainted = true;
       byUuid.set(item.uuid, item);
       deps.broadcast(event('steer-queued', item, 'queued', { text: item.text }));
       if (waiter) {

@@ -49,7 +49,9 @@ const SPAWN_SITES: Readonly<Record<string, ReadonlyArray<{ file: string; needle:
   ],
   codex: [
     { file: 'openai-codex.js', needle: "refuseSpawnIfHarnessUpdating('codex'" },
-    { file: 'services/codex-app-server.js', needle: "beginHarnessLaunch('codex')" },
+    { file: 'modules/providers/list/codex/codex-reserved-spawn.js', needle: "beginHarnessLaunch('codex')" },
+    { file: 'services/codex-app-server.js', needle: 'spawnReservedCodex(' },
+    { file: 'modules/providers/list/codex/codex-models-refresh.ts', needle: 'spawnReservedCodex(' },
     { file: 'modules/providers/list/codex/codex-credentials.writer.ts', needle: "assertHarnessNotUpdating('codex')" },
     { file: 'modules/turn-supervisor/adapters/codex-cli-adapter.ts', needle: "isSpawnBlockedForRunProvider('codex')" },
   ],

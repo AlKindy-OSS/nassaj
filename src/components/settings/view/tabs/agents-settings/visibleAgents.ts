@@ -55,11 +55,12 @@ export const SETTINGS_AGENT_ORDER: readonly AgentProvider[] = Object.freeze([
  * They keep their place in `SETTINGS_AGENT_ORDER` like any other tile. `glm`
  * stays hidden entirely (folded into OpenCode carrier, ADR-062).
  *
- * T-1760: added 2026-09-12.
+ * T-1760: added 2026-09-12. Emptied 2026-09-29 — the owner hid `deepseek`
+ * entirely; the mechanism stays for future planned bodies.
  */
-export const COMING_SOON_SETTINGS_PROVIDERS: readonly AgentProvider[] = Object.freeze([
-  'deepseek',
-] as AgentProvider[]);
+export const COMING_SOON_SETTINGS_PROVIDERS: readonly AgentProvider[] = Object.freeze(
+  [] as AgentProvider[],
+);
 
 /** الشريط كما يُصيَّر فعلاً: الترتيب أعلاه بعد إسقاط المعطَّل عالمياً، مع إبقاء
  *  مزوّدات «قريباً» في مواضعها من الترتيب رغم تعطيلها. */

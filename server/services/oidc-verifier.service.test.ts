@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import {
   OIDC_LIMITS,
   createOidcVerifier,
+  idTokenAuthTimeMs,
   parseExactHttpsIssuer,
 } from './oidc-verifier.service.js';
 
@@ -288,4 +289,22 @@ test('the OIDC route logs only stable codes, never raw tokens or provider diagno
   assert.match(source, /process\.stderr\.write.*JSON\.stringify/);
   assert.doesNotMatch(source, /process\.stderr\.write.*logoutToken/);
   assert.doesNotMatch(source, /metadata:\s*\{\s*sub:/);
+});
+
+test('T-1939 slice 5: auth_time is exposed when valid and rejected when malformed or future', async () => {
+  const verifier = verifierWith([rsa]);
+  const now = Math.floor(Date.now() / 1000);
+  const claims = await verifier.verifyIdToken(sign(rsa, { auth_time: now - 30 }), 'nonce-synthetic');
+  assert.equal(idTokenAuthTimeMs(claims), (now - 30) * 1000);
+  const withoutAuthTime = await verifier.verifyIdToken(sign(rsa), 'nonce-synthetic');
+  assert.equal(idTokenAuthTimeMs(withoutAuthTime), null, 'absent auth_time is reported, not invented');
+  for (const authTime of ['1700000000', now + 600, 0, -5, 1.5, null]) {
+    await assert.rejects(
+      verifier.verifyIdToken(sign(rsa, { auth_time: authTime }), 'nonce-synthetic'),
+      /invalid_auth_time/,
+      String(authTime),
+    );
+  }
+  assert.equal(idTokenAuthTimeMs({}), null);
+  assert.equal(idTokenAuthTimeMs(null as never), null);
 });

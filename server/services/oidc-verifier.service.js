@@ -257,10 +257,33 @@ function validateClaims(claims, { issuer, clientId, expectedNonce, logout }) {
     if (typeof claims.jti !== 'string' || claims.jti.length === 0 || claims.jti.length > 128) {
       fail('logout_jti_required');
     }
-  } else if (typeof expectedNonce !== 'string' || claims.nonce !== expectedNonce) {
-    fail('invalid_nonce');
+  } else {
+    if (typeof expectedNonce !== 'string' || claims.nonce !== expectedNonce) {
+      fail('invalid_nonce');
+    }
+    // auth_time is optional in an id_token, but when present it must be a real
+    // past instant: the self-link flow (T-1939 slice 5) trusts it as proof of a
+    // fresh IdP sign-in.
+    if (
+      'auth_time' in claims
+      && (!Number.isInteger(claims.auth_time) || claims.auth_time <= 0 || claims.auth_time > nowSeconds + 60)
+    ) {
+      fail('invalid_auth_time');
+    }
   }
   return claims;
+}
+
+/**
+ * The verified id_token's auth_time (when the user last actively signed in at
+ * the IdP) in epoch ms, or null when the IdP did not send it. Only meaningful
+ * on claims returned by verifyIdToken, which already validated its shape.
+ * @param {Record<string, unknown>} claims
+ * @returns {number | null}
+ */
+export function idTokenAuthTimeMs(claims) {
+  const authTime = claims?.auth_time;
+  return Number.isInteger(authTime) && authTime > 0 ? authTime * 1000 : null;
 }
 
 /** Creates an isolated verifier so tests and multiple configured RPs do not share cache state. */

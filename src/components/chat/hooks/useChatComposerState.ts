@@ -214,12 +214,22 @@ interface UseChatComposerStateArgs {
   sendByCtrlEnter?: boolean;
   onSessionActive?: (sessionId?: string | null) => void;
   onSessionProcessing?: (sessionId?: string | null) => void;
+  /**
+   * T-1933 (B-1401، إصلاح السباق الأخير): يُستدعى مع كل بدء جولةٍ محليّ على
+   * جلسة قائمة مسبقاً (إرسال عادي، إعادة محاولة outbox، ضغط سياق) كي يُحذف
+   * فوراً من `pendingWorkflowIdsRef` داخل `useChatRealtimeHandlers` — قبل أن
+   * يصل أيّ `workflow_settled` متأخّر لورشة الجولة **السابقة** فيُسوّي مؤشّر
+   * الجولة الجديدة خطأً. اختياري كي تبقى الاستدعاءات القديمة/الاختبارات صالحة.
+   */
+  forgetPendingWorkflows?: (sessionId: string | null | undefined) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   pendingViewSessionRef: { current: PendingViewSession | null };
   scrollToBottom: () => void;
-  addMessage: (msg: ChatMessage) => void;
+  // T-1936 item 2: تُرجع المفتاح الذي أُضيفت الفقاعة تحته (null = معلّقة) حتى
+  // يُسحب السحب لاحقاً بنفس المفتاح المضبوط لا بجلسة قد تبدّلت أثناء الحفظ.
+  addMessage: (msg: ChatMessage) => string | null | void;
   setIsLoading: (loading: boolean) => void;
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
@@ -404,6 +414,7 @@ export function useChatComposerState({
   steerAvailable = false,
   onSessionActive,
   onSessionProcessing,
+  forgetPendingWorkflows,
   onInputFocusChange,
   onFileOpen,
   onShowSettings,
@@ -1380,6 +1391,7 @@ export function useChatComposerState({
         // T-1862: fresh progress scope — see field doc in types.ts.
         isCompactionBoundary: true,
       });
+      if (sessionId) forgetPendingWorkflows?.(sessionId);
       setIsLoading(true);
       setCanAbortSession(true);
       setClaudeStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
@@ -1403,8 +1415,8 @@ export function useChatComposerState({
       }
     },
     [
-      addMessage, currentSessionId, dispatchProviderCommand, isLoading, onSessionActive, onSessionProcessing,
-      selectedProject, selectedSession?.id, setCanAbortSession, setClaudeStatus, setIsLoading, t,
+      addMessage, currentSessionId, dispatchProviderCommand, forgetPendingWorkflows, isLoading, onSessionActive,
+      onSessionProcessing, selectedProject, selectedSession?.id, setCanAbortSession, setClaudeStatus, setIsLoading, t,
     ],
   );
   useEffect(() => {
@@ -1806,6 +1818,32 @@ export function useChatComposerState({
           return;
         }
       }
+      const userMessage: ChatMessage = {
+        id: clientMsgId,
+        type: 'user',
+        content: currentInput,
+        coordinationLevel,
+        images: uploadedImages as any,
+        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+        timestamp: new Date(),
+        userId: authUserId,
+      };
+
+      // T-1936: الفقاعة تظهر قبل الحفظ الدائم لا بعده — كلفةُ الانتظار كانت
+      // قفلاً وقراءتين إضافيتين في IndexedDB يراهما المستخدم كتأخّرٍ في
+      // ظهور رسالته. القيد نفسه (item 1): لا شيء غيرها يُبثّ أو يُرسَل قبل
+      // نجاح الحفظ — `dispatchProviderCommand` وكل حالة «قيد المعالجة» تبقى
+      // بعد `savedOutbox` كما كانت.
+      //
+      // المفتاح الذي أُضيفت الفقاعة تحته يُثبَّت هنا (item 2): `addMessage`
+      // يقرأ الجلسة النشطة **وقت الاستدعاء**، وقد تتبدّل أثناء `await`
+      // التالي (تبديل محادثة)، فسحبُها لاحقاً يستهدف هذا المفتاح المضبوط لا
+      // قراءةً جديدة لـ`effectiveSessionId` قد تخصّ محادثةً أخرى.
+      const bubbleKey = addMessage(userMessage);
+      const withdrawKey = typeof bubbleKey === 'string' ? bubbleKey : null;
+      setIsUserScrolledUp(false);
+      setTimeout(() => scrollToBottom(), 100);
+
       const savedOutbox = await recordOutboxEntryDurably({
         id: clientMsgId,
         projectId: String(selectedProject.projectId),
@@ -1827,24 +1865,20 @@ export function useChatComposerState({
       });
 
       if (!savedOutbox) {
+        // الحفظ فشل: تُسحب الفقاعة من نفس المفتاح الذي أُضيفت تحته، ويبقى
+        // الإدخال والمرفقات كما كانا (لم يُمسحا بعد) — المستخدم يستطيع إعادة
+        // المحاولة من حيث توقّف.
         submitSealRef.current = false;
         setIsSubmitSealed(false);
+        withdrawOptimisticUserMessage?.(withdrawKey, clientMsgId);
         setSendError(t('outbox.storageFull'));
         return;
       }
 
-      const userMessage: ChatMessage = {
-        id: clientMsgId,
-        type: 'user',
-        content: currentInput,
-        coordinationLevel,
-        images: uploadedImages as any,
-        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
-        timestamp: new Date(),
-        userId: authUserId,
-      };
-
-      addMessage(userMessage);
+      // T-1933 (B-1401): جولة جديدة تبدأ الآن محلياً — احذف فوراً أيّ ورشة
+      // معلّقة موروثة من الجولة السابقة على هذه الجلسة قبل أن يُسوّيها
+      // `workflow_settled` متأخّر فيُنزل مؤشّر الجولة الجديدة خطأً.
+      if (effectiveSessionId) forgetPendingWorkflows?.(effectiveSessionId);
       setIsLoading(true); // Processing banner starts
       setCanAbortSession(true);
       setClaudeStatus({
@@ -1852,9 +1886,6 @@ export function useChatComposerState({
         tokens: 0,
         can_interrupt: true,
       });
-
-      setIsUserScrolledUp(false);
-      setTimeout(() => scrollToBottom(), 100);
 
       if (!effectiveSessionId && !selectedSession?.id) {
         // This tracks that a request is in flight before the provider has
@@ -1902,7 +1933,9 @@ export function useChatComposerState({
         // وتُسحب الفقاعة المتفائلة التي أُضيفت قبل الإرسال: إبقاؤها يعرض رسالةً
         // «مُرسَلة» لم تُرسَل، فينتظر المستخدم رداً لن يأتي ثم يعيد الإرسال
         // (نفس آفة B-518، من بابٍ آخر). النصّ والصور صارا في البطاقة.
-        withdrawOptimisticUserMessage?.(effectiveSessionId ?? null, clientMsgId);
+        // السحب يستهدف `withdrawKey` المضبوط وقت الإضافة (item 2) لا قراءةً
+        // جديدة لـ`effectiveSessionId` قد تخصّ محادثةً بُدِّلت أثناء الإرسال.
+        withdrawOptimisticUserMessage?.(withdrawKey, clientMsgId);
         setInput('');
         inputValueRef.current = '';
         setAttachedImages([]);
@@ -1952,6 +1985,7 @@ export function useChatComposerState({
       dispatchProviderCommand,
       displayProvider,
       executeCommand,
+      forgetPendingWorkflows,
       isLoading,
       onBtwQuery,
       onSteerSend,
@@ -2212,6 +2246,7 @@ export function useChatComposerState({
           timestamp: new Date(),
           userId: authUserId,
         });
+        if (targetSessionId) forgetPendingWorkflows?.(targetSessionId);
         setIsLoading(true);
         setCanAbortSession(true);
         setClaudeStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
@@ -2222,9 +2257,9 @@ export function useChatComposerState({
       }
     },
     [
-      addMessage, authUserId, currentSessionId, dispatchProviderCommand, resetOutboxJudgement,
-      scrollToBottom, selectedProject, selectedSession, setCanAbortSession, setClaudeStatus,
-      setIsLoading, setIsUserScrolledUp, t, provider,
+      addMessage, authUserId, currentSessionId, dispatchProviderCommand, forgetPendingWorkflows,
+      resetOutboxJudgement, scrollToBottom, selectedProject, selectedSession, setCanAbortSession,
+      setClaudeStatus, setIsLoading, setIsUserScrolledUp, t, provider,
     ],
   );
 

@@ -12,12 +12,19 @@ import {
  * an ENGINE (ADR-073). The two axes are independent — `glm` has no body card yet
  * its key gates the "Claude engine on GLM" path, so a body-only fan-out left it
  * permanently reported as unkeyed and the engine group permanently locked.
+ *
+ * `qwen` joins this list even though it is not a `VendorProvider` (it has no
+ * body card and drives no Claude engine): its personal Coding Plan key still
+ * gates a real picker group — the `qwen-plan/*` models under the OpenCode
+ * carrier (owner decision 2026-09-28). It is queried the same way, by the same
+ * `/api/providers/:provider/api-key` status endpoint the Qwen body already
+ * answers.
  */
-const QUERYABLE_VENDOR_PROVIDERS: readonly VendorProvider[] = Array.from(
-  new Set<VendorProvider>([...ENABLED_VENDOR_PROVIDERS, ...ENGINE_VENDOR_PROVIDERS]),
+const QUERYABLE_VENDOR_PROVIDERS: readonly (VendorProvider | 'qwen')[] = Array.from(
+  new Set<VendorProvider | 'qwen'>([...ENABLED_VENDOR_PROVIDERS, ...ENGINE_VENDOR_PROVIDERS, 'qwen']),
 );
 
-export type VendorKeyStatusMap = Record<VendorProvider, boolean>;
+export type VendorKeyStatusMap = Record<VendorProvider | 'qwen', boolean>;
 
 type ApiKeyStatusResponse = {
   success?: boolean;
@@ -28,6 +35,7 @@ const createInitialMap = (): VendorKeyStatusMap => ({
   kimi: false,
   deepseek: false,
   glm: false,
+  qwen: false,
 });
 
 /**

@@ -13,8 +13,14 @@ function lookup(obj: unknown, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+// Real ar-locale interpolation (T-1553, م2) needs the actual ar/common.json
+// text, not the English mock's fallback — switchable per test, reset in
+// afterEach so it never leaks into an unrelated test.
+let activeLocale: 'en' | 'ar' = 'en';
+
 const tMock = (key: string, options?: Record<string, unknown>) => {
-  const template = lookup(enCommon, key) ?? (typeof options?.defaultValue === 'string' ? options.defaultValue : key);
+  const source = activeLocale === 'ar' ? arCommon : enCommon;
+  const template = lookup(source, key) ?? (typeof options?.defaultValue === 'string' ? options.defaultValue : key);
   return template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(options?.[name] ?? `{{${name}}}`));
 };
 
@@ -37,15 +43,19 @@ const PREFLIGHT_URL = '/api/system/update/preflight';
 const CLEAR_PREFLIGHT = () => response(200, { ok: true, blocker: null, checks: [] });
 
 /** Route authenticatedFetch by URL so the pre-flight call never consumes a job mock. */
+const STORAGE_URL = '/api/system/update/storage';
+
 function routeFetch(routes: {
   active?: () => Response;
   preflight?: () => Response;
   post?: () => Response;
   status?: () => Response;
+  storage?: () => Response;
 }) {
   authenticatedFetch.mockImplementation(async (url: string, options?: RequestInit) => {
     if (url === '/api/system/update/jobs/active') return routes.active?.() ?? response(200, { job: null });
     if (url === PREFLIGHT_URL) return (routes.preflight ?? CLEAR_PREFLIGHT)();
+    if (url === STORAGE_URL) return routes.storage?.() ?? response(200, { ok: false, code: 'insufficient_disk', blockedStorage: null });
     if (options?.method === 'POST') return routes.post?.() ?? response(500, {});
     return routes.status?.() ?? response(500, {});
   });
@@ -81,6 +91,7 @@ describe('VersionUpgradeModal async updater', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    activeLocale = 'en';
   });
 
   it('discovers an active job in a fresh browser without creating or confirming anything', async () => {
@@ -151,6 +162,60 @@ describe('VersionUpgradeModal async updater', () => {
     expect(postCalls()).toHaveLength(1);
   });
 
+  it('hides the consent card once a discovered job turns active mid-flow (owner defect 2026-09)', async () => {
+    let finishDiscovery!: (value: Response) => void;
+    authenticatedFetch.mockImplementation(async (url: string) => {
+      if (url === '/api/system/update/jobs/active') return new Promise<Response>(resolve => { finishDiscovery = resolve; });
+      if (url === PREFLIGHT_URL) return CLEAR_PREFLIGHT();
+      return response(200, { state: 'restart_queued_auto', targetVersion: '2.2.0.1', autoActivate: true });
+    });
+    renderModal();
+    await screen.findByText(/Readiness check passed/);
+    fireEvent.click(screen.getByRole('button', { name: 'Update Now' }));
+    await screen.findByRole('button', { name: /Agree to update/ });
+
+    // The discovery fetch (in flight since mount) resolves late with a job
+    // that is already mid-restart — a job the owner never started from this
+    // click. The consent card must not linger over the running progress.
+    finishDiscovery(response(200, { job: { jobId: 'auto-1', state: 'restart_queued', autoActivate: true,
+      targetVersion: '2.2.0.1', statusUrl: '/api/system/update/jobs/auto-1' } }));
+
+    await screen.findByText('Update Progress:');
+    expect(screen.queryByRole('button', { name: /Agree to update/ })).toBeNull();
+  });
+
+  it('never reopens the consent card once the active job it hid behind finishes (M-b(1))', async () => {
+    let statusCalls = 0;
+    let finishDiscovery!: (value: Response) => void;
+    authenticatedFetch.mockImplementation(async (url: string) => {
+      if (url === '/api/system/update/jobs/active') return new Promise<Response>(resolve => { finishDiscovery = resolve; });
+      if (url === PREFLIGHT_URL) return CLEAR_PREFLIGHT();
+      if (url === '/api/system/update/jobs/auto-1') {
+        statusCalls += 1;
+        // First poll still running; second poll reports the restart finished.
+        return statusCalls === 1
+          ? response(200, { state: 'restart_queued', autoActivate: true, targetVersion: '2.2.0.1' })
+          : response(200, { state: 'activated', targetVersion: '2.2.0.1' });
+      }
+      return response(200, { state: 'restart_queued_auto', targetVersion: '2.2.0.1', autoActivate: true });
+    });
+    renderModal();
+    await screen.findByText(/Readiness check passed/);
+    fireEvent.click(screen.getByRole('button', { name: 'Update Now' }));
+    await screen.findByRole('button', { name: /Agree to update/ });
+
+    finishDiscovery(response(200, { job: { jobId: 'auto-1', state: 'restart_queued', autoActivate: true,
+      targetVersion: '2.2.0.1', statusUrl: '/api/system/update/jobs/auto-1' } }));
+
+    await screen.findByText('Update Progress:');
+    expect(screen.queryByRole('button', { name: /Agree to update/ })).toBeNull();
+
+    // The job settles into 'activated' (jobActive turns false again); the
+    // consent card this active job hid earlier must stay hidden, not reappear.
+    await waitFor(() => expect(statusCalls).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Agree to update/ })).toBeNull());
+  }, 10_000);
+
   it('does not begin polling when a POST completes after unmount', async () => {
     let finish!: (value: Response) => void;
     authenticatedFetch.mockImplementation(async (url: string, options?: RequestInit) => {
@@ -169,6 +234,26 @@ describe('VersionUpgradeModal async updater', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(authenticatedFetch.mock.calls.some(([url]) => url === '/api/system/update/jobs/late-post')).toBe(false);
+  });
+
+  it('a 429 POST rejection clears the stored attempt (M-b(2))', async () => {
+    routeFetch({ post: () => response(429, { code: 'rate_limited' }) });
+    renderModal();
+    await screen.findByText(/Readiness check passed/);
+    fireEvent.click(screen.getByRole('button', { name: 'Update Now' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Agree to update/ }));
+    await waitFor(() => expect(postCalls()).toHaveLength(1));
+    await waitFor(() => expect(localStorage.getItem(UPDATE_ATTEMPT_STORAGE_KEY)).toBeNull());
+  });
+
+  it('a general blocker POST rejection clears the stored attempt (M-b(2))', async () => {
+    routeFetch({ post: () => response(409, { code: 'dirty_worktree', error: 'boom' }) });
+    renderModal();
+    await screen.findByText(/Readiness check passed/);
+    fireEvent.click(screen.getByRole('button', { name: 'Update Now' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Agree to update/ }));
+    await waitFor(() => expect(postCalls()).toHaveLength(1));
+    await waitFor(() => expect(localStorage.getItem(UPDATE_ATTEMPT_STORAGE_KEY)).toBeNull());
   });
 
   it('creates a UUID idempotency key and never calls the legacy endpoint', async () => {
@@ -318,6 +403,70 @@ describe('VersionUpgradeModal async updater', () => {
     renderModal();
     expect(await screen.findByText(/complete its governed release-layout setup/)).not.toBeNull();
     expect((screen.getByRole('button', { name: 'Update Now' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('fetches owner-only storage figures when /health blocks on insufficient_disk, and renders them', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'insufficient_disk' },
+    })));
+    routeFetch({
+      storage: () => response(200, {
+        ok: false, code: 'insufficient_disk',
+        blockedStorage: { availableBytes: 500 * 1024 * 1024, requiredBytes: 2 * 1024 * 1024 * 1024 },
+      }),
+    });
+    renderModal();
+    expect(await screen.findByText(/available 500 MB of 2 GB required/)).not.toBeNull();
+    expect((screen.getByRole('button', { name: 'Update Now' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('falls back to the plain insufficient_disk text when the storage fetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'insufficient_disk' },
+    })));
+    routeFetch({ storage: () => response(500, { success: false, code: 'update_storage_unavailable' }) });
+    renderModal();
+    expect(await screen.findByText(/Free space on the server, then retry\./)).not.toBeNull();
+    expect(screen.queryByText(/short \(available/)).toBeNull();
+  });
+
+  it('ignores a malformed storage payload and falls back to the plain text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'insufficient_disk' },
+    })));
+    routeFetch({
+      storage: () => response(200, { ok: false, code: 'insufficient_disk',
+        blockedStorage: { availableBytes: -1, requiredBytes: 'nope' } }),
+    });
+    renderModal();
+    expect(await screen.findByText(/Free space on the server, then retry\./)).not.toBeNull();
+  });
+
+  it('does not call the storage endpoint for a blocked reason other than insufficient_disk', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'release_layout_required' },
+    })));
+    routeFetch({});
+    renderModal();
+    await screen.findByText(/complete its governed release-layout setup/);
+    expect(authenticatedFetch.mock.calls.some(([url]) => url === STORAGE_URL)).toBe(false);
+  });
+
+  it('renders the real ar/common.json insufficient_disk_detail string with interpolated figures', async () => {
+    activeLocale = 'ar';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updateReady: false, blockedReasonCode: 'insufficient_disk' },
+    })));
+    routeFetch({
+      storage: () => response(200, {
+        ok: false, code: 'insufficient_disk',
+        blockedStorage: { availableBytes: 500 * 1024 * 1024, requiredBytes: 2 * 1024 * 1024 * 1024 },
+      }),
+    });
+    renderModal();
+    expect(await screen.findByText(
+      'لا توجد مساحة كافية على القرص لتجهيز التحديث: ينقص 1.6 GB (المتاح 500 MB من 2 GB مطلوبة). حرّر مساحة ثم أعد المحاولة.',
+    )).not.toBeNull();
   });
 
   it('consents to preparation and automatic activation when active sessions defer the update', async () => {
@@ -691,8 +840,14 @@ describe('i18n coverage — all mapped error codes have ar+en keys', () => {
 
   const BLOCKED_REASON_CODES = [
     'protocol_unavailable', 'capability_unavailable', 'release_layout_required',
-    'release_layout_configuration_absent', 'release_layout_retired',
+    'release_layout_configuration_absent', 'release_layout_retired', 'release_layout_not_ready',
     'unsupported_deployment', 'update_job_active', 'update_source_state_degraded',
+    'unsupported_install_mode', 'verified_update_runtime_absent', 'release_source_lock_mismatch',
+    // T-1553 (م1): storage pre-flight blockers reaching /health's blockedReasonCode.
+    'release_source_lock_invalid', 'invalid_release_source', 'invalid_update_source',
+    'detached_head', 'wrong_branch', 'remote_unavailable', 'ambiguous_remote', 'unsafe_remote',
+    'platform_update_unsupported', 'tmpfs_candidate_root', 'tmpfs_build_tmpdir',
+    'tmpfs_database_root', 'insufficient_disk', 'insufficient_disk_detail', 'storage_probe_failed',
   ];
 
   for (const code of BLOCKED_REASON_CODES) {

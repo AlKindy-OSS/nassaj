@@ -229,7 +229,13 @@ export type MessageKind =
    * has been reconciled as complete. Idempotent; absence of this event never
    * changes correctness because the REST `task_reconcile` row is authoritative.
    */
-  | 'workflow_reconciled';
+  | 'workflow_reconciled'
+  /**
+   * Live signal (B-1401): a Workflow call a `complete` listed in
+   * `pendingWorkflowIds` has ended. Carries `toolUseId` and `reason`
+   * ('notified' | 'failed' | 'process_exited'); sent once per call.
+   */
+  | 'workflow_settled';
 
 /**
  * Provider-neutral message envelope used in REST responses and realtime channels.
@@ -799,6 +805,9 @@ export type ProjectRepositoryRow = {
   // Public, server-relative URL of the project's custom logo, or null when it
   // has none (T-1403). Never a filesystem path.
   logo_url?: string | null;
+  // Optional external project link (T-1950): normalized http(s) URL or null.
+  // Display-only; the server never fetches it.
+  link_url?: string | null;
   /** Last confirmed directory probe. NULL means not checked or inconclusive. */
   dir_exists?: number | null;
   /** ISO/SQLite timestamp of the last conclusive directory probe. */

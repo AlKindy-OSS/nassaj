@@ -36,7 +36,7 @@ const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, sp
 const KEY = 'sk-company-secret-DO-NOT-LEAK';
 
 /** Every setKey the service dispatched, in order. */
-let setCalls: Array<{ provider: string; target?: string; apiKey: string }> = [];
+let setCalls: Array<{ provider: string; target?: string; apiKey: string; auditContext?: { consentVersion?: string | null } }> = [];
 /** Providers the stub dispatcher should refuse with a throw. */
 let failingProviders = new Set<string>();
 /** Providers the stub policy marks as shared (elevated role required). */
@@ -53,11 +53,14 @@ mock.module(url('./provider-credentials.service.js'), {
         provider: string,
         apiKey: string,
         target?: string,
+        _qwenOptions?: unknown,
+        _principal?: unknown,
+        auditContext?: { consentVersion?: string | null },
       ) => {
         if (failingProviders.has(provider)) {
           throw new Error(`writer refused ${provider}`);
         }
-        setCalls.push({ provider, target, apiKey });
+        setCalls.push({ provider, target, apiKey, auditContext });
         return { provider, configured: true };
       },
       deleteKey: async (_userId: unknown, provider: string) => ({ provider, configured: false }),
@@ -274,4 +277,30 @@ test('removal is per slot too — one place, not the whole company', async () =>
   });
 
   assert.deepEqual(result.slots.map((slot) => slot.vendorId), ['zai-opencode']);
+});
+
+test('T-1906: alibaba-cloud without explicit consent is a 400 and writes nothing', async () => {
+  for (const consent of [undefined, false]) {
+    await assert.rejects(
+      companyCredentialsService.setKey(1, 'alibaba-cloud', 'sk-sp-0123456789abcdef', { isElevated: false, consent }),
+      (error: { statusCode?: number; code?: string }) => error.statusCode === 400 && error.code === 'CONSENT_REQUIRED',
+    );
+  }
+  assert.deepEqual(setCalls, []);
+});
+
+test('T-1906: alibaba-cloud with consent passes the consent version to the audited write', async () => {
+  const result = await companyCredentialsService.setKey(1, 'alibaba-cloud', 'sk-sp-0123456789abcdef', {
+    isElevated: false, consent: true, auditContext: { ipAddress: '127.0.0.1' },
+  });
+  assert.equal(result.configured, true);
+  assert.equal(setCalls.length, 1);
+  assert.equal(setCalls[0].provider, 'qwen');
+  assert.equal(setCalls[0].auditContext?.consentVersion, 'qwen-plan-personal-use/2026-09-28');
+});
+
+test('T-1906: companies without a personal-use rule need no consent', async () => {
+  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
+  assert.equal(result.configured, true);
+  assert.ok(setCalls.every((call) => call.auditContext?.consentVersion === null));
 });

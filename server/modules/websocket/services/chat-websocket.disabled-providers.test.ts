@@ -5,16 +5,17 @@
  * `dispatchProviderCommand` (defence in depth behind the UI filtering, single
  * source of truth: shared/disabledProviders.ts):
  *
- *   - a new run for a disabled provider (deepseek/glm/hermes/qwen — kimi
- *     re-enabled per ADR-062; glm folded into the OpenCode carrier 2026-07-26;
- *     hermes and qwen disabled by owner decision 2026-09-28) is refused with a normalized error `complete`
+ *   - a new run for a disabled provider (deepseek/glm/hermes/qwen/cursor/kimi —
+ *     glm folded into the OpenCode carrier 2026-07-26; hermes and qwen disabled
+ *     by owner decision 2026-09-28; cursor and kimi disabled again by owner
+ *     decision 2026-09-29) is refused with a normalized error `complete`
  *     message and NO spawn call;
  *   - the guard runs on the RESOLVED provider, so resuming a historical
  *     session persisted under a disabled provider is refused too — even when
  *     the client sends it under an enabled message type;
  *   - a resumed session persisted under an ENABLED provider still dispatches,
  *     even when the (stale) client message type names a disabled provider;
- *   - enabled providers (claude/codex/cursor/…) dispatch exactly as before.
+ *   - enabled providers (claude/codex/antigravity) dispatch exactly as before.
  *
  * The database repository is module-mocked, keeping this a pure unit test.
  * Runner: Node built-in test runner with --experimental-test-module-mocks.
@@ -174,7 +175,7 @@ test('a resumed Qwen session is refused and never falls through to Claude (disab
 test('resume of a session persisted under a disabled provider is refused', async () => {
   // Historical deepseek session resumed under the (enabled) claude message type:
   // the DB provider wins, so the guard must still fire. (deepseek is still in
-  // DISABLED_PROVIDERS; kimi was re-enabled per ADR-062.)
+  // DISABLED_PROVIDERS.)
   const { writer, sent } = makeWriter();
   const { dependencies, calls } = makeDependencies({ 's-deepseek-1': 'deepseek' });
 
@@ -210,6 +211,28 @@ test('resume of a historical hermes session is refused (disabled 2026-09-28)', a
   assert.match(data.error ?? '', /disabled/i);
 });
 
+test('resume of a historical cursor or kimi session is refused (disabled 2026-09-29)', async () => {
+  // Their transcripts stay readable over REST; a new turn must not spawn a CLI,
+  // even when the client sends it under an enabled message type.
+  for (const provider of ['cursor', 'kimi']) {
+    const { writer, sent } = makeWriter();
+    const sessionId = `s-${provider}-1`;
+    const { dependencies, calls } = makeDependencies({ [sessionId]: provider });
+
+    await dispatchProviderCommand(
+      'claude-command',
+      { command: 'hi', options: { sessionId } },
+      writer,
+      dependencies
+    );
+
+    assert.deepEqual(calls, [], `${provider}: no handler is spawned`);
+    const data = readError(sent);
+    assert.equal(data.provider, provider);
+    assert.match(data.error ?? '', /disabled/i);
+  }
+});
+
 test('resumed session persisted under an enabled provider dispatches despite a stale disabled type', async () => {
   // Stale client selection sends glm-command, but the session belongs to claude
   // in the DB — re-routing lands on an enabled provider and proceeds.
@@ -231,7 +254,6 @@ test('resumed session persisted under an enabled provider dispatches despite a s
 test('enabled providers dispatch exactly as before', async () => {
   const expected: [string, string][] = [
     ['claude-command', 'claude'],
-    ['cursor-command', 'cursor'],
     ['codex-command', 'codex'],
     ['antigravity-command', 'antigravity'],
   ];

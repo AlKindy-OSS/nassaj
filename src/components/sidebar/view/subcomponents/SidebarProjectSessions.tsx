@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 
 import { AnimatedRow } from './AnimatedRow';
@@ -13,6 +13,10 @@ import type { ProjectToolbarProps, SessionWithProvider } from '../../types/types
 import type { BulkSelectionKind } from '../../hooks/useSidebarController';
 import { announceContextMenuOpen, useDismissableContextMenu } from '../../hooks/useDismissableContextMenu';
 import { useSidebarSessionExtras } from '../../context/SidebarSessionExtrasContext';
+import {
+  computeSurfacedSessionsForProject,
+  useSurfacedSessionsRenderTick,
+} from '../../../../stores/surfacedSessionsStore';
 
 import SidebarSessionItem from './SidebarSessionItem';
 
@@ -149,6 +153,21 @@ export default function SidebarProjectSessions({
   const newSessionCtxMenuRef = useRef<HTMLDivElement>(null);
   const { hideClosedSessions } = useSidebarSessionExtras();
 
+  // B-1431/T-1949: `sessions` already unions in this project's surfaced rows
+  // (Sidebar.tsx aliases `getProjectSessions` to the merged selector), so the
+  // cap's own hidden count is re-derived here purely to render the "+N" hint —
+  // it is never used to decide which rows are visible.
+  useSurfacedSessionsRenderTick();
+  const loadedSessionIds = useMemo(
+    () => new Set(sessions.filter((session) => !session.__surfaced).map((session) => session.id)),
+    [sessions],
+  );
+  const { hiddenCount: surfacedHiddenCount } = computeSurfacedSessionsForProject(
+    project.projectId,
+    loadedSessionIds,
+    selectedSession?.id ?? null,
+  );
+
   // Close the context menu when the project collapses so no stale listeners remain.
   useEffect(() => {
     if (!isExpanded) {
@@ -230,16 +249,36 @@ export default function SidebarProjectSessions({
             variant="ghost"
             size="sm"
             dir={contentDirection}
-            className={cn('sidebar-new-session', PROJECT_SESSION_ACTION_CLASS, 'h-8 min-h-8 w-auto shrink-0 whitespace-nowrap px-1')}
+            className={cn(
+              'sidebar-new-session',
+              PROJECT_SESSION_ACTION_CLASS,
+              // No background at rest, hover, or press — only the text/icon
+              // color darkens (owner decision, B-693). Overrides the ghost
+              // variant's hover:bg-accent and this class's own active:bg,
+              // both of which sit earlier in the merged class string.
+              'h-8 min-h-8 w-auto shrink-0 whitespace-nowrap px-1 hover:bg-transparent active:bg-transparent',
+            )}
             onClick={() => onNewSession(project)}
             onContextMenu={handleNewSessionContextMenu}
           >
             <Plus aria-hidden="true" />
             {t('sessions.newSession')}
           </Button>
+          {/* Owner decision: Project Board sits right next to the avatar stack
+              (then the add-member circle after it), not lumped in with the
+              other tool icons — this button is pulled out of the tools loop
+              below so it renders immediately beside `participantsSummary`. */}
+          {onOpenProjectTool && (
+            <button type="button" data-project-tool="board"
+              aria-pressed={activeProjectTool === 'board'}
+              className="sidebar-project-tool" title={t('common:tabs.board')} aria-label={t('common:tabs.board')}
+              onClick={() => onOpenProjectTool(project, 'board')}>
+              <KanbanSquare aria-hidden="true" className="size-3.5" />
+            </button>
+          )}
           <div dir={contentDirection} className="min-w-0 flex-1 overflow-hidden">{participantsSummary}</div>
           {onOpenProjectTool && <div className="flex shrink-0 items-center">
-            {([['board', KanbanSquare], ['git', GitBranch], ['files', Folder]] as const).map(([tool, Icon]) => (
+            {([['git', GitBranch], ['files', Folder]] as const).map(([tool, Icon]) => (
               <button key={tool} type="button" data-project-tool={tool}
                 aria-pressed={activeProjectTool === tool}
                 className="sidebar-project-tool" title={t(`common:tabs.${tool}`)} aria-label={t(`common:tabs.${tool}`)}
@@ -335,6 +374,15 @@ export default function SidebarProjectSessions({
                   </div>
                 </AnimatedRow>
               ))}
+
+              {surfacedHiddenCount > 0 && (
+                <p
+                  role="status"
+                  className="px-2 py-1 text-center text-xs text-muted-foreground"
+                >
+                  {t('sessions.surfacedHiddenHint', { count: surfacedHiddenCount })}
+                </p>
+              )}
 
               {hasMoreSessions && (
                 <Button

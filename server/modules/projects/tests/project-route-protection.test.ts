@@ -183,8 +183,15 @@ before(async () => {
   });
   await mountRouters(app);
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    const status = err instanceof AppError ? err.statusCode : 500;
-    res.status(status).json({ success: false });
+    // Same envelope as server/index.js so refusal bodies can be compared (B-1423).
+    if (err instanceof AppError) {
+      res.status(err.statusCode).json({
+        success: false,
+        error: { code: err.code, message: err.message, details: err.details },
+      });
+      return;
+    }
+    res.status(500).json({ success: false });
   });
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -420,4 +427,42 @@ test('qa ن2: session search with a valid term — members see the project, othe
   assert.ok(sees(await searchAs(member)), 'member finds the session');
   assert.ok(!sees(await searchAs(stranger)), 'stranger sees nothing from the project');
   assert.ok(!sees(await searchAs(launcher)), 'launcher without membership sees nothing');
+});
+
+test('B-1423: create-project never discloses a registered path to a non-member', async () => {
+  // Validation and admission both read the env root per call, so a case-local
+  // temp root reaches the membership gate without touching the real home.
+  const savedRoot = process.env.WORKSPACES_ROOT;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'b1423-'));
+  process.env.WORKSPACES_ROOT = sandbox;
+  const registered = path.join(sandbox, 'registered');
+  fs.mkdirSync(registered);
+  projectsDb.createProjectPath(registered, 'B1423', creator.id);
+  const create = async (user: TestUser, target: string) => {
+    currentUser = user;
+    const response = await fetch(`${baseUrl}/api/projects/create-project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: target }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { status: response.status, body: await response.text() };
+  };
+  try {
+    const existing = await create(stranger, registered);
+    const unseen = await create(stranger, path.join(registered, 'not-yet-created'));
+    assert.notEqual(existing.status, 409, 'no "already exists" answer to a non-member');
+    assert.equal(existing.status, 400);
+    assert.deepEqual(existing, unseen, 'existing and non-existing paths answer identically');
+    assert.doesNotMatch(existing.body, /exist|B1423|registered/i);
+    assert.equal(fs.existsSync(path.join(registered, 'not-yet-created')), false, 'no write before auth');
+
+    assert.equal((await create(creator, registered)).status, 409, 'the creator still gets the conflict');
+    const fresh = await create(stranger, path.join(sandbox, 'fresh'));
+    assert.equal(fresh.status, 200, 'an unregistered path stays creatable');
+  } finally {
+    if (savedRoot === undefined) delete process.env.WORKSPACES_ROOT;
+    else process.env.WORKSPACES_ROOT = savedRoot;
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  }
 });

@@ -52,6 +52,9 @@ describe('reason classification', () => {
     expect(reasonFromReturnError('invalid_state')).toBe('invalid_state');
     expect(reasonFromReturnError('transaction_expired')).toBe('transaction_expired');
     expect(reasonFromReturnError('oidc_not_linked')).toBe('not_linked');
+    expect(reasonFromReturnError('oidc_not_authorized')).toBe('not_authorized');
+    expect(reasonFromReturnError('oidc_account_exists')).toBe('account_exists');
+    expect(reasonFromReturnError('rate_limited')).toBe('rate_limited');
     expect(reasonFromReturnError('toString')).toBe('provider_unavailable');
     expect(reasonFromReturnError('<script>')).toBe('provider_unavailable');
   });

@@ -36,6 +36,12 @@ import {
   writeSidebarSearchScope,
   writeSidebarSection,
 } from '../utils/utils';
+import { SESSION_BUCKET_KEYS } from '../../../../shared/sessionBuckets';
+import {
+  computeSurfacedSessionsForProject,
+  useSurfacedSessionsDriver,
+  useSurfacedSessionsRenderTick,
+} from '../../../stores/surfacedSessionsStore';
 
 import { useSidebarMessageSearch } from './useSidebarMessageSearch';
 
@@ -107,6 +113,12 @@ export function useSidebarController({
 }: UseSidebarControllerArgs) {
   const paletteOps = usePaletteOps();
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+
+  // B-1431/T-1949: fetches session-context for indicator ids outside an
+  // expanded project's loaded page, and forces a re-render whenever an
+  // indicator/surfaced-store change could add, drop, or re-rank a row.
+  useSurfacedSessionsDriver(projects, expandedProjects, SESSION_BUCKET_KEYS);
+  useSurfacedSessionsRenderTick();
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [editingName, setEditingName] = useState('');
@@ -771,9 +783,36 @@ export function useSidebarController({
    * is the filter overruling the user. Searching therefore reveals closed rows
    * again — the filter governs the resting list.
    */
+  /**
+   * `getProjectSessions` (loaded page only) unioned with this project's
+   * surfaced rows (B-1431/T-1949) — sessions an indicator store attributes to
+   * this project but whose row was never loaded. Dedup is structural: surfaced
+   * candidates already exclude every loaded id, so the union never doubles a
+   * row, and the loaded copy is always what would have won anyway.
+   *
+   * Sorted with the SAME comparator `getAllSessions` uses so a surfaced row
+   * takes its natural chronological position instead of being appended at the
+   * end. Kept OUT of `getProjectSessions` itself: that one still answers "how
+   * many sessions does this project have" for the delete dialog and the
+   * load-more offset, which must never count a row that was never paged in.
+   */
+  const getProjectSessionsWithSurfaced = useCallback(
+    (project: Project): SessionWithProvider[] => {
+      const loaded = getProjectSessions(project);
+      const loadedIds = new Set(loaded.map((session) => session.id));
+      const { sessions: surfaced } = computeSurfacedSessionsForProject(
+        project.projectId,
+        loadedIds,
+        selectedSession?.id ?? null,
+      );
+      return surfaced.length === 0 ? loaded : [...loaded, ...surfaced].sort(compareSidebarSessions);
+    },
+    [getProjectSessions, selectedSession?.id],
+  );
+
   const getSearchVisibleSessions = useCallback(
     (project: Project): SessionWithProvider[] => {
-      const searchVisible = selectSearchVisibleSessions(project, getProjectSessions(project), {
+      const searchVisible = selectSearchVisibleSessions(project, getProjectSessionsWithSurfaced(project), {
         normalizedSearch: normalizeForSearch(debouncedSearchQuery.trim()),
         scope: searchScope,
         matchBySessionId: messageSearch.matchBySessionId,
@@ -787,7 +826,7 @@ export function useSidebarController({
     [
       selectedSession?.id,
       debouncedSearchQuery,
-      getProjectSessions,
+      getProjectSessionsWithSurfaced,
       hideClosedSessions,
       messageSearch.matchBySessionId,
       searchScope,

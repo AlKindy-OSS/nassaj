@@ -32,23 +32,20 @@ export type CreatedInvite = {
 
 type MutationResult = { success: true } | { success: false; error: string };
 
-export type SsoLinkFailure = 'invalid' | 'conflict' | 'not_found' | 'not_configured' | 'failed' | 'network';
+export type SsoLinkFailure = 'wrong_password' | 'rate_limited' | 'forbidden' | 'not_found' | 'failed' | 'network';
 export type SsoLinkResult = { success: true } | { success: false; reason: SsoLinkFailure };
 
-// Mirrors MAX_SUBJECT_LENGTH in server/routes/oidc.js.
-export const SSO_SUBJECT_MAX_LENGTH = 255;
-
-/** Classifies a failed /api/auth/oidc/link call (server text is English-only). */
-function ssoLinkFailure(status: number): SsoLinkFailure {
+/** Classifies a failed /api/auth/oidc/link DELETE (server text is English-only). */
+function ssoUnlinkFailure(status: number): SsoLinkFailure {
   switch (status) {
-    case 400:
-      return 'invalid';
+    case 401:
+      return 'wrong_password';
+    case 403:
+      return 'forbidden';
     case 404:
       return 'not_found';
-    case 409:
-      return 'conflict';
-    case 500:
-      return 'not_configured';
+    case 429:
+      return 'rate_limited';
     default:
       return 'failed';
   }
@@ -143,9 +140,12 @@ export function useUsersAdmin(enabled: boolean) {
   );
 
   const createInvite = useCallback(
-    async (role: ManagedUserRole): Promise<{ success: true; invite: CreatedInvite } | { success: false; error: string }> => {
+    async (
+      role: ManagedUserRole,
+      ttlHours?: number,
+    ): Promise<{ success: true; invite: CreatedInvite } | { success: false; error: string }> => {
       try {
-        const res = await api.auth.createInvite({ role });
+        const res = await api.auth.createInvite({ role, ttlHours });
         if (!res.ok) {
           return { success: false, error: await readError(res, 'Failed to create invite') };
         }
@@ -215,24 +215,22 @@ export function useUsersAdmin(enabled: boolean) {
     [refresh],
   );
 
-  // SSO identity links (B-728). No list endpoint exists, so the tab cannot
-  // show who is linked; these only write.
-  const linkSsoIdentity = useCallback(
-    async (id: number, subject: string): Promise<SsoLinkResult> => {
-      try {
-        const res = await api.auth.oidc.link(id, subject);
-        return res.ok ? { success: true } : { success: false, reason: ssoLinkFailure(res.status) };
-      } catch {
-        return { success: false, reason: 'network' };
-      }
-    },
-    [],
-  );
-
+  // SSO identity links (B-728, B-1410). No list endpoint exists, so the tab
+  // cannot show who is linked. Only removal is offered: linking an account is
+  // done by its member themself, never by an administrator.
   const unlinkSsoIdentity = useCallback(async (id: number): Promise<SsoLinkResult> => {
     try {
       const res = await api.auth.oidc.unlink(id);
-      return res.ok ? { success: true } : { success: false, reason: 'failed' };
+      return res.ok ? { success: true } : { success: false, reason: ssoUnlinkFailure(res.status) };
+    } catch {
+      return { success: false, reason: 'network' };
+    }
+  }, []);
+
+  const unlinkOwnSsoIdentity = useCallback(async (currentPassword: string): Promise<SsoLinkResult> => {
+    try {
+      const res = await api.auth.oidc.unlinkSelf(currentPassword);
+      return res.ok ? { success: true } : { success: false, reason: ssoUnlinkFailure(res.status) };
     } catch {
       return { success: false, reason: 'network' };
     }
@@ -250,7 +248,7 @@ export function useUsersAdmin(enabled: boolean) {
     revokeInvite,
     resetPassword,
     deleteUser,
-    linkSsoIdentity,
     unlinkSsoIdentity,
+    unlinkOwnSsoIdentity,
   };
 }

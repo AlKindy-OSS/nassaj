@@ -14,8 +14,19 @@ type InviteUserModalProps = {
   onClose: () => void;
   onCreate: (
     role: ManagedUserRole,
+    ttlHours: number,
   ) => Promise<{ success: true; invite: CreatedInvite } | { success: false; error: string }>;
 };
+
+// Mirrors the valid range enforced by createInvite in
+// server/services/invite.service.js (default 72h, 0 < ttlHours <= 720).
+const TTL_OPTIONS: ReadonlyArray<{ hours: number; labelKey: string }> = [
+  { hours: 24, labelKey: 'users.invite.durations.day1' },
+  { hours: 72, labelKey: 'users.invite.durations.day3' },
+  { hours: 168, labelKey: 'users.invite.durations.day7' },
+  { hours: 720, labelKey: 'users.invite.durations.day30' },
+];
+const DEFAULT_TTL_HOURS = 72;
 
 // Builds the absolute, openable invite link on the project domain (respecting
 // any router basename), per the project rule to hand over real URLs.
@@ -24,32 +35,52 @@ function buildInviteUrl(token: string): string {
   return `${window.location.origin}${basename}/join?token=${encodeURIComponent(token)}`;
 }
 
+// Server sends SQLite UTC timestamps as "YYYY-MM-DD HH:MM:SS" — neither a
+// bare `new Date()` nor `Date.parse` reliably treat that as UTC across
+// engines, so the separator swap + explicit `Z` is required before parsing.
+function parseUtcTimestamp(value: string): Date | null {
+  const isoLike = value.includes('T') ? value : value.replace(' ', 'T');
+  const date = new Date(isoLike.endsWith('Z') ? isoLike : `${isoLike}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatExpiry(value: string, locale: string): string {
+  const date = parseUtcTimestamp(value);
+  if (!date) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
 /**
  * Invite creation modal (C-UI-3). Owner/admin pick an optional role, submit,
  * and receive a one-time invite link with a copy button. The plaintext token is
  * shown once and never persisted in clear text server-side.
  */
 export default function InviteUserModal({ canInviteAdmin, onClose, onCreate }: InviteUserModalProps) {
-  const { t } = useTranslation('settings');
+  const { t, i18n } = useTranslation('settings');
   const titleId = useId();
 
   const [role, setRole] = useState<ManagedUserRole>('user');
+  const [ttlHours, setTtlHours] = useState<number>(DEFAULT_TTL_HOURS);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [inviteUrl, setInviteUrl] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [copied, setCopied] = useState(false);
 
   const handleSubmit = useCallback(async () => {
     setError('');
     setIsSubmitting(true);
-    const result = await onCreate(role);
+    const result = await onCreate(role, ttlHours);
     setIsSubmitting(false);
     if (!result.success) {
       setError(result.error);
       return;
     }
     setInviteUrl(buildInviteUrl(result.invite.token));
-  }, [onCreate, role]);
+    setExpiresAt(result.invite.expiresAt);
+  }, [onCreate, role, ttlHours]);
 
   const handleCopy = useCallback(async () => {
     const ok = await copyTextToClipboard(inviteUrl);
@@ -104,6 +135,25 @@ export default function InviteUserModal({ canInviteAdmin, onClose, onCreate }: I
             </p>
           </div>
 
+          <div>
+            <label htmlFor="invite-ttl" className="mb-1 block text-sm font-medium text-foreground">
+              {t('users.invite.durationLabel')}
+            </label>
+            <select
+              id="invite-ttl"
+              value={ttlHours}
+              onChange={(event) => setTtlHours(Number(event.target.value))}
+              disabled={isSubmitting}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {TTL_OPTIONS.map((option) => (
+                <option key={option.hours} value={option.hours}>
+                  {t(option.labelKey)}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {error && (
             <Alert variant="destructive">
               <AlertTriangle />
@@ -125,6 +175,11 @@ export default function InviteUserModal({ canInviteAdmin, onClose, onCreate }: I
           <p className="text-[13px] leading-relaxed text-muted-foreground">
             {t('users.invite.successHint')}
           </p>
+          {expiresAt && (
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              {t('users.expiresAt', { date: formatExpiry(expiresAt, i18n.language) })}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             {/* design-ok: `text-left` فيزيائي عمداً — الحقل جزيرة `dir="ltr"`
                 تحمل رابطاً لاتينياً، و`text-start` فيها كان سيتبع اتجاه الجزيرة

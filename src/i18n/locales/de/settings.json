@@ -412,7 +412,14 @@
       "done": "Fertig",
       "copy": "Kopieren",
       "copied": "Kopiert",
-      "successHint": "Teile diesen Einmallink. Er wird nur einmal angezeigt."
+      "successHint": "Teile diesen Einmallink. Er wird nur einmal angezeigt.",
+      "durationLabel": "Gültig für",
+      "durations": {
+        "day1": "1 Tag",
+        "day3": "3 Tage",
+        "day7": "7 Tage",
+        "day30": "30 Tage"
+      }
     }
   },
   "notifications": {

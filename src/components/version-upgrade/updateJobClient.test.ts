@@ -5,10 +5,13 @@ import {
   RELEASE_LAYOUT_V2_PHASES,
   UPDATE_ATTEMPT_STORAGE_KEY,
   UPDATE_PROGRESS_STATES,
+  blockedReasonI18nArgs,
   clearStoredUpdateAttempt,
+  formatBytesDirectional,
   inferStrategy,
   isTerminalUpdateState,
   normalizeUpdateJob,
+  parseBlockedStorage,
   phaseListForStrategy,
   pollingDelay,
   readStoredUpdateAttempt,
@@ -356,5 +359,122 @@ describe('normalizeUpdateJob scheduled-message hold (T-1912)', () => {
     expect(snapshot.autoActivation?.state).toBe('waiting_sessions');
     expect(snapshot.autoActivation?.scheduledDueSoon).toBeNull();
     expect(snapshot.autoActivation?.scheduledOverride).toBe(false);
+  });
+});
+
+describe('parseBlockedStorage', () => {
+  it('accepts finite non-negative integer byte counts', () => {
+    expect(parseBlockedStorage({ availableBytes: 1024, requiredBytes: 2048 }))
+      .toEqual({ availableBytes: 1024, requiredBytes: 2048 });
+  });
+
+  it('accepts zero as a valid byte count', () => {
+    expect(parseBlockedStorage({ availableBytes: 0, requiredBytes: 0 }))
+      .toEqual({ availableBytes: 0, requiredBytes: 0 });
+  });
+
+  it('rejects null/undefined/non-object input', () => {
+    expect(parseBlockedStorage(null)).toBeNull();
+    expect(parseBlockedStorage(undefined)).toBeNull();
+    expect(parseBlockedStorage('nope')).toBeNull();
+    expect(parseBlockedStorage(42)).toBeNull();
+  });
+
+  it('rejects negative byte counts', () => {
+    expect(parseBlockedStorage({ availableBytes: -1, requiredBytes: 2048 })).toBeNull();
+  });
+
+  it('rejects non-integer byte counts', () => {
+    expect(parseBlockedStorage({ availableBytes: 1.5, requiredBytes: 2048 })).toBeNull();
+  });
+
+  it('rejects non-finite byte counts (Infinity/NaN)', () => {
+    expect(parseBlockedStorage({ availableBytes: Infinity, requiredBytes: 2048 })).toBeNull();
+    expect(parseBlockedStorage({ availableBytes: NaN, requiredBytes: 2048 })).toBeNull();
+  });
+
+  it('rejects string-typed byte counts', () => {
+    expect(parseBlockedStorage({ availableBytes: '1024', requiredBytes: 2048 })).toBeNull();
+  });
+
+  it('rejects a payload missing one of the two fields', () => {
+    expect(parseBlockedStorage({ availableBytes: 1024 })).toBeNull();
+  });
+});
+
+describe('blockedReasonI18nArgs', () => {
+  it('returns the plain key for a non-storage reason', () => {
+    expect(blockedReasonI18nArgs('release_layout_required', null))
+      .toEqual({ key: 'versionUpdate.blockedReasons.release_layout_required' });
+  });
+
+  it('falls back to "failed" for an undefined reason', () => {
+    expect(blockedReasonI18nArgs(undefined, null))
+      .toEqual({ key: 'versionUpdate.blockedReasons.failed' });
+  });
+
+  it('returns the plain insufficient_disk key when no figures are available', () => {
+    expect(blockedReasonI18nArgs('insufficient_disk', null))
+      .toEqual({ key: 'versionUpdate.blockedReasons.insufficient_disk' });
+  });
+
+  it('returns the detail key with human-readable figures and the shortfall when figures are present', () => {
+    const result = blockedReasonI18nArgs('insufficient_disk', { availableBytes: 500 * 1024 * 1024, requiredBytes: 2 * 1024 * 1024 * 1024 });
+    expect(result.key).toBe('versionUpdate.blockedReasons.insufficient_disk_detail');
+    expect(result.params).toEqual({ available: '500 MB', required: '2 GB', shortfall: '1.6 GB' });
+  });
+
+  it('never renders an identical available/required pair as a zero shortfall gap', () => {
+    // 4 GiB available against a 4.05 GiB requirement: naive one-decimal rounding
+    // of each figure independently would print "4 GB available, 4 GB required".
+    const result = blockedReasonI18nArgs('insufficient_disk', {
+      availableBytes: 4 * 1024 * 1024 * 1024,
+      requiredBytes: Math.round(4.05 * 1024 * 1024 * 1024),
+    });
+    expect(result.params?.available).toBe('4 GB');
+    expect(result.params?.required).toBe('4.1 GB');
+    expect(result.params?.shortfall).toBe('51.2 MB');
+  });
+
+  it('ignores figures for a reason other than insufficient_disk', () => {
+    const result = blockedReasonI18nArgs('storage_probe_failed', { availableBytes: 1024, requiredBytes: 2048 });
+    expect(result).toEqual({ key: 'versionUpdate.blockedReasons.storage_probe_failed' });
+  });
+});
+
+describe('formatBytesDirectional', () => {
+  it('formats zero and sub-byte input as "0 B"', () => {
+    expect(formatBytesDirectional(0, 'down')).toBe('0 B');
+    expect(formatBytesDirectional(-5, 'up')).toBe('0 B');
+    expect(formatBytesDirectional(Number.NaN, 'down')).toBe('0 B');
+  });
+
+  it('formats plain bytes and kilobytes', () => {
+    expect(formatBytesDirectional(512, 'down')).toBe('512 B');
+    expect(formatBytesDirectional(2048, 'down')).toBe('2 KB');
+  });
+
+  it('formats megabytes, gigabytes, and terabytes with binary (1024) units', () => {
+    expect(formatBytesDirectional(500 * 1024 * 1024, 'down')).toBe('500 MB');
+    expect(formatBytesDirectional(2 * 1024 * 1024 * 1024, 'up')).toBe('2 GB');
+    expect(formatBytesDirectional(3 * 1024 * 1024 * 1024 * 1024, 'down')).toBe('3 TB');
+  });
+
+  it('rounds down for "down" so availability is never overstated', () => {
+    // 1.999 GiB should read as 1.9 GB available, not round up to "2 GB".
+    const bytes = Math.round(1.999 * 1024 * 1024 * 1024);
+    expect(formatBytesDirectional(bytes, 'down')).toBe('1.9 GB');
+  });
+
+  it('rounds up for "up" so a requirement or shortfall is never understated', () => {
+    // 1.901 GiB should read as 1.91 GB → 2 decimal? no, one decimal ceil → 2.0 → "2 GB"
+    const bytes = Math.round(1.901 * 1024 * 1024 * 1024);
+    expect(formatBytesDirectional(bytes, 'up')).toBe('2 GB');
+  });
+
+  it('near-equal figures still diverge under opposite rounding directions', () => {
+    const bytes = Math.round(4.04 * 1024 * 1024 * 1024);
+    expect(formatBytesDirectional(bytes, 'down')).toBe('4 GB');
+    expect(formatBytesDirectional(bytes, 'up')).toBe('4.1 GB');
   });
 });

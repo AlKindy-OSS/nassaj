@@ -77,7 +77,7 @@ const authority = (
   const req = {
     user: { id: 7, role: 'owner' },
     headers: {
-      cookie: `nassaj_connector_recent_auth=${SESSION_TOKEN}`,
+      cookie: `__Host-nassaj_connector_recent_auth=${SESSION_TOKEN}`,
       'x-csrf-token': CSRF_TOKEN,
     },
     get: (name: string) => name.toLowerCase() === 'origin' ? ORIGIN

@@ -83,11 +83,17 @@ function writeStub(file: string): void {
   fs.writeFileSync(file, STUB, { flag: 'wx', mode: 0o755 });
 }
 
-/** Writes `#!/bin/sh exit 0` (mode 0755) at the measured path of `id` under a sandbox `home`. */
+/**
+ * Writes `#!/bin/sh exit 0` (mode 0755) at the measured path of `id` under a sandbox
+ * `home`, and clears that harness's server override env (e.g. `KIMI_PATH` set by the
+ * isolated runner, B-1420) so the resolver actually lands on the stub.
+ */
 export function installFakeHarnessBinary(home: string, id: HarnessBinaryId): string {
   assertTestSandbox(home);
-  const file = HARNESS_BINARY_SPECS[id].measured(home);
+  const spec = HARNESS_BINARY_SPECS[id];
+  const file = spec.measured(home);
   writeStub(file);
+  delete process.env[spec.overrideEnv];
   return file;
 }
 

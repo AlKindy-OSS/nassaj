@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -114,6 +114,31 @@ function hasRunTag(node: unknown): boolean {
  * ببصمتها — `rm -rf /tmp/x` قبل وصول بقيّته أمرٌ آخر تماماً.
  */
 const StreamingContext = React.createContext(false);
+
+/**
+ * إشارة «هذا `code` واقعٌ داخل `<pre>`» — الفارق البنيوي الوحيد الموثوق بين
+ * كتلة سياج (```` ``` ````/مسنَّدة بأربع مسافات، تصير دوماً `<pre><code>` في
+ * hast) وشارة سطرية حقيقية (backtick واحد، `<code>` مباشرة داخل الفقرة).
+ *
+ * لماذا لا `node.position` (المقياس السابق: امتداد سطرين فأكثر = كتلة):
+ * ينهار في حالتين حقيقيتين كلتاهما `<pre><code>` رغم سطرٍ واحد ظاهرياً —
+ * كتلة مسنَّدة بأربع مسافات من سطر واحد («    echo hi»)، وسياج لم يُغلَق بعد
+ * أثناء البثّ (```` ```bash ```` وحدها، جسمها لم يصل). البنية (`pre` أم لا)
+ * صحيحة في الحالتين لأن remark يبنيها كذلك بصرف النظر عن اكتمال المحتوى.
+ *
+ * `react-markdown` لا يُمرّر معلومة الأب مباشرة إلى مكوّن `code`، فنزرعها
+ * سياقاً من مكوّن `pre` نفسه — وهو ما توفّره الشجرة دوماً حول كتلة سياج
+ * وأبداً حول شارة سطرية.
+ */
+const InsidePreContext = React.createContext(false);
+
+/** يمرّر أثناء نزوله عبر `<pre>` الإشارة التي يقرؤها `code` تحته. */
+const PreBlock = ({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) => (
+  <InsidePreContext.Provider value={true}>
+    <pre {...props}>{children}</pre>
+  </InsidePreContext.Provider>
+);
+PreBlock.displayName = 'MarkdownPreBlock';
 
 const RAW_EXEC_URL = '/api/system/command-board-raw';
 
@@ -267,6 +292,186 @@ const InlineImageError = ({ message }: { message: string }) => (
   </div>
 );
 
+// ─── Inline code pill click behavior ───────────────────────────────────────
+
+/** مدة ظهور تلميح «تمّ النسخ» فوق شارة الكود السطري. */
+const INLINE_COPY_FEEDBACK_MS = 1200;
+
+/**
+ * مهلة تأجيل فتح الرابط بعد النقرة الأولى — تمنح نقرة ثانية (نقر مزدوج) فرصة
+ * الوصول قبل أن يُفتَح التبويب. القيمة قريبة من مهلة المتصفّح النمطية لحسم
+ * النقر المزدوج (~300-500ms) ودون أن تُحسّ كتأخّر عند نقرة مفردة حقيقية.
+ */
+const INLINE_OPEN_DEFER_MS = 250;
+
+/**
+ * هل النصّ بأكمله رابط http(s) واحد بلا فراغات؟ `javascript:` وغيره من المخطّطات
+ * مرفوضة عمداً — لا فتح إلا لما يُصنَّف رابطاً آمناً فعلاً.
+ */
+function singleHttpUrl(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return trimmed;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * هل التحديد النصّي الحالي (إن وُجد) يتقاطع مع هذا العنصر تحديداً؟ فحصٌ محصور
+ * بالعنصر لا بالصفحة كلّها: تحديدُ نصٍّ في مكان آخر من الرسالة لا يعطّل نقرةً
+ * لاحقة على شارة بعيدة عنه — المطلوب هو رصد سحبٍ ينتهي داخل هذه الشارة بعينها.
+ */
+function selectionIntersectsElement(el: HTMLElement | null): boolean {
+  if (!el || typeof window === 'undefined') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  if (typeof selection.containsNode === 'function') {
+    return selection.containsNode(el, true);
+  }
+  return false;
+}
+
+/**
+ * شارة الكود السطري (backtick واحد) — `code` مضمَّن لا كتلة.
+ *
+ * النقر بالزر الأيسر: فتح رابط http(s) وحيد في تبويب جديد (بعد تأجيل قصير
+ * يُلغى لو تبعته نقرة ثانية)، أو نسخ أيّ نصّ آخر فوراً.
+ * النقر بالزر الأيمن: نسخ دائماً (حتى على رابط) بدل القائمة الافتراضية.
+ * لا يعترض سحب التحديد المنتهي داخل الشارة نفسها.
+ */
+const InlineCode = ({ className, children, ...props }: CodeBlockProps) => {
+  const { t } = useTranslation('chat');
+  const [copied, setCopied] = useState(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elRef = useRef<HTMLElement | null>(null);
+  const hintId = useId();
+
+  const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
+  const url = singleHttpUrl(raw);
+
+  useEffect(() => () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+  }, []);
+
+  const cancelPendingOpen = useCallback(() => {
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  }, []);
+
+  const flashCopied = useCallback(() => {
+    setCopied(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setCopied(false), INLINE_COPY_FEEDBACK_MS);
+  }, []);
+
+  const doCopy = useCallback(() => {
+    void copyTextToClipboard(raw).then((success) => {
+      if (success) flashCopied();
+    });
+  }, [raw, flashCopied]);
+
+  const openUrlNow = useCallback(() => {
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, [url]);
+
+  /** نقرة مفردة مؤكَّدة (لا ثانية تبعتها خلال المهلة) — الفعل الأساسي هنا. */
+  const primaryAction = useCallback(() => {
+    if (url) {
+      openUrlNow();
+    } else {
+      doCopy();
+    }
+  }, [url, openUrlNow, doCopy]);
+
+  const handleClick = useCallback((event: React.MouseEvent) => {
+    if (selectionIntersectsElement(elRef.current)) return;
+    // `detail > 1` تعني نقرة ثانية أو أكثر من سلسلة نقر مزدوج/متعدّد — تُلغي
+    // أيّ فتحٍ مؤجَّل من النقرة الأولى ولا تُطلق فعلاً جديداً بنفسها؛ فتح رابط
+    // بنقرتين متتاليتين سلوكٌ غير مقصود (تحديد نصّ بنقر مزدوج مثلاً).
+    if (event.detail > 1) {
+      cancelPendingOpen();
+      return;
+    }
+    if (url) {
+      cancelPendingOpen();
+      openTimerRef.current = setTimeout(() => {
+        openTimerRef.current = null;
+        openUrlNow();
+      }, INLINE_OPEN_DEFER_MS);
+    } else {
+      doCopy();
+    }
+  }, [url, openUrlNow, doCopy, cancelPendingOpen]);
+
+  const handleDoubleClick = useCallback(() => {
+    cancelPendingOpen();
+  }, [cancelPendingOpen]);
+
+  const handleContextMenu = useCallback((event: React.MouseEvent) => {
+    if (selectionIntersectsElement(elRef.current)) return;
+    event.preventDefault();
+    cancelPendingOpen();
+    doCopy();
+  }, [doCopy, cancelPendingOpen]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+    event.preventDefault();
+    primaryAction();
+  }, [primaryAction]);
+
+  const hint = copied
+    ? t('codeBlock.copied')
+    : url
+      ? t('inlineCode.openLink', { defaultValue: 'Open link — right-click to copy' })
+      : t('inlineCode.copyHint', { defaultValue: 'Copy' });
+
+  return (
+    <span className="relative inline">
+      <code
+        ref={elRef}
+        dir="ltr"
+        role="button"
+        tabIndex={0}
+        title={hint}
+        aria-describedby={hintId}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
+        onKeyDown={handleKeyDown}
+        className={`cursor-pointer whitespace-pre-wrap break-words rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${className || ''}`}
+        {...props}
+      >
+        {children}
+      </code>
+      {/*
+        وصفٌ دائم لقارئ الشاشة لا يُبدِل الاسم المحسوب من النصّ الظاهر: كان
+        `aria-label` يستبدل محتوى الشارة نفسه («life-trip») بتلميح النقر
+        («Copy»)، فيسمع مستخدم قارئ الشاشة الفعل بلا معرفة أيّ نصّ سيُنسَخ.
+      */}
+      <span id={hintId} className="sr-only">{hint}</span>
+      {copied && (
+        <span
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute -top-6 start-0 z-20 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background shadow"
+        >
+          {t('codeBlock.copied')}
+        </span>
+      )}
+    </span>
+  );
+};
+
 const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
   const { t: tChat } = useTranslation('chat');
   const { t: tSidebar } = useTranslation('sidebar');
@@ -290,6 +495,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   // cache على مستوى الوحدة: استدعاء شبكة واحد لكل الكتل بـTTL 30 ثانية.
   const { canUseRaw } = useRawExecConfig(!!user);
   const isStreaming = useContext(StreamingContext);
+  const insidePre = useContext(InsidePreContext);
   const [rawExecTarget, setRawExecTarget] = useState<RawCommand | null>(null);
   const [isInserting, setIsInserting] = useState(false);
   /**
@@ -307,15 +513,22 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   const [insertError, setInsertError] = useState<InsertErrorState | null>(null);
 
   const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
-  const looksMultiline = /[\r\n]/.test(raw);
-  const inlineDetected = inline || (node && node.type === 'inlineCode');
-  const shouldInline = inlineDetected || !looksMultiline;
+  /*
+   * `node.type === 'inlineCode'` هو ميراث لواجهة mdast القديمة: react-markdown
+   * v10 يمرّر شجرة hast بعد التحويل، وفيها `node.type` دوماً `'element'` (كودٌ
+   * سطري أو كتلة سياج على حدّ سواء) — فالشرط ميت عملياً ومُبقًى للتوافق فقط.
+   *
+   * الحاسم فعلاً `insidePre` (تعريفه أعلى الملف): أيّ `code` نازلٍ عبر `<pre>`
+   * هو كتلة سياج أو كتلة مسنَّدة بصرف النظر عن عدد أسطرها أو اكتمال جسمها،
+   * وأيّ `code` خارج `<pre>` هو شارة سطرية بصرف النظر عن عدد أسطرها هي الأخرى
+   * (شارة سطرية مُتعدِّدة الأسطر تبقى شارة). لا حاجة لحساب امتداد الأسطر إطلاقاً.
+   */
+  const inlineDetected = inline || (node && node.type === 'inlineCode') || !insidePre;
+  const shouldInline = inlineDetected;
 
-  // T-1737 — فرع سياج `image`. يجب أن يُفحَص هنا، قبل shouldInline:
-  // جسم فارغ يجعل looksMultiline=false ← shouldInline=true ← يُعرَض
-  // كـ<code> سطري لو أجّلنا الفحص. السياف `image` مقصود دائماً كتلةً.
-  // `!inlineDetected` يضمن ألا نعترض الكود السطري المكتوب صراحةً بـ
-  // backtick واحد.
+  // T-1737 — فرع سياج `image`. `!inlineDetected` يعني «داخل `<pre>` فعلاً»
+  // (كتلة سياج حقيقية)، بصرف النظر عن اكتمال جسمها أثناء البثّ — البنية
+  // ثابتة من remark سواء وصل الجسم أم لا.
   const isImageFence = !inlineDetected && /language-image/.test(className ?? '');
 
   // ── كشف وسم النيّة (```bash nassaj-run) ──────────────────────────────
@@ -446,28 +659,24 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
     }
   }, [execActionType, isInFlight, effectiveStatus, runAction, startPolling]);
 
-  // الكود السطري لا زرّ له — يُعرَض بعد استدعاء كل الـhooks (قاعدة React)
+  // الشارة السطرية تُعرَض بعد استدعاء كل الـhooks (قاعدة React)
   //
-  // `dir="ltr"` مقصود ولازم: الشيفرة LTR دوماً، والسِمة نفسها تُفعِّل
-  // `unicode-bidi: isolate` من ورقة أنماط المتصفح — فيصبح المعرّف اللاتيني
-  // جزيرة معزولة داخل الفقرة العربية بدل أن يجرّ المحايدات حوله (الأقواس
-  // والنقاط والأرقام) إلى مواضع خاطئة. العزل هنا لا يعتمد على اتجاه الجذر.
+  // `dir="ltr"` (داخل `InlineCode`) مقصود ولازم: الشيفرة LTR دوماً، والسِمة
+  // نفسها تُفعِّل `unicode-bidi: isolate` من ورقة أنماط المتصفح — فيصبح
+  // المعرّف اللاتيني جزيرة معزولة داخل الفقرة العربية بدل أن يجرّ المحايدات
+  // حوله (الأقواس والنقاط والأرقام) إلى مواضع خاطئة. العزل هنا لا يعتمد على
+  // اتجاه الجذر.
   // T-1737 — عرض سياج `image` (قبل shouldInline لمعالجة الجسم الفارغ).
   // لا نعرض أثناء البثّ: المسار قد لم يكتمل بعد (ت-2 من التقرير).
   if (isImageFence && !isStreaming) {
     return <AssistantImageBlock raw={raw} />;
   }
 
+  // `shouldInline === inlineDetected` منذ الكشف صار بنيوياً (`insidePre`) لا
+  // إحصائياً: أيّ `code` وصل إلى هنا خارج `<pre>` هو شارة سطرية حقيقية دوماً،
+  // فلا فرع بديل «كتلة سياج قصيرة بلا سلوك نقر» يبقى ممكناً بعد `isImageFence`.
   if (shouldInline) {
-    return (
-      <code
-        dir="ltr"
-        className={`whitespace-pre-wrap break-words rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground ${className || ''}`}
-        {...props}
-      >
-        {children}
-      </code>
-    );
+    return <InlineCode className={className} {...props}>{children}</InlineCode>;
   }
 
   // ─── عرض اللغة في العنوان ────────────────────────────────────────────────
@@ -898,6 +1107,7 @@ function ProjectFileLink({ href, children }: { href?: string; children?: React.R
 
 const markdownComponents = {
   code: CodeBlock,
+  pre: PreBlock,
   h1: blockComponent('h1', 'mb-3 mt-4 text-2xl font-bold'),
   h2: blockComponent('h2', 'mb-2 mt-3 text-xl font-bold'),
   h3: blockComponent('h3', 'mb-2 mt-3 text-lg font-semibold'),

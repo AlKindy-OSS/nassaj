@@ -95,7 +95,7 @@ const request = async (input: Readonly<{
   const headers: Record<string, string> = {};
   if (input.origin) headers.origin = input.origin;
   const cookie = input.cookie === undefined
-    ? `nassaj_connector_recent_auth=${RECENT}; nassaj_connector_csrf=${CSRF}`
+    ? `__Host-nassaj_connector_recent_auth=${RECENT}; __Secure-nassaj_connector_csrf=${CSRF}`
     : input.cookie;
   if (cookie) headers.cookie = cookie;
   const response = await fetch(
@@ -180,9 +180,9 @@ test('flags and certifications fail closed, including Canva and uncertified API 
 test('missing, corrupt, logged-out, and rotated recent-auth cookies never mint or reveal CSRF', async () => {
   const cases = [
     await request({ cookie: null }),
-    await request({ cookie: `nassaj_connector_recent_auth=${RECENT}; nassaj_connector_csrf=${'b'.repeat(64)}` }),
+    await request({ cookie: `__Host-nassaj_connector_recent_auth=${RECENT}; __Secure-nassaj_connector_csrf=${'b'.repeat(64)}` }),
     await request({ sessionActive: false }),
-    await request({ cookie: `nassaj_connector_recent_auth=${'d'.repeat(64)}; nassaj_connector_csrf=${CSRF}` }),
+    await request({ cookie: `__Host-nassaj_connector_recent_auth=${'d'.repeat(64)}; __Secure-nassaj_connector_csrf=${CSRF}` }),
   ];
   for (const result of cases) {
     assert.equal(result.response.status, 200);
@@ -243,7 +243,7 @@ test('a login-established CSRF pair returned by readiness passes the unchanged w
   servers.push(server);
   await new Promise<void>(resolve => server.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const cookie = `nassaj_connector_recent_auth=${RECENT}; nassaj_connector_csrf=${CSRF}`;
+  const cookie = `__Host-nassaj_connector_recent_auth=${RECENT}; __Secure-nassaj_connector_csrf=${CSRF}`;
   const readiness = await fetch(`${baseUrl}/api/connectors/auth-readiness`, { headers: { cookie } });
   const readinessBody = await readiness.json() as { csrfToken: string | null };
   assert.equal(readinessBody.csrfToken, CSRF);

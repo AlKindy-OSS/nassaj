@@ -135,9 +135,10 @@ function stubServer() {
 }
 
 /**
- * سطح اعتماد واحد لكل شركة: حقل مفتاح تقليدي، أو إجراء اتصال مُدار (Qwen).
- * Alibaba موجودة في registry لكن اعتماد Qwen يمرّ بحوار الاتصال الحالي، لذلك
- * قياس inputs وحدها كان يعدّ ست شركات من أصل سبع رغم وجود السطح السابع فعلاً.
+ * سطح اعتماد واحد لكل شركة: حقل مفتاح تقليدي دائماً منذ T-1906 — نافذة اتصال
+ * Qwen المُدارة أُزيلت (قرار المالك 2026-09-28)، فصارت Alibaba بطاقةً عاديةً
+ * مثل أخواتها بلا فرعٍ خاص. `[data-company-credential-action]` تبقى في مِقبض
+ * القياس توافقاً خلفياً فقط — لا عنصر في الشجرة الحالية يحمله.
  */
 const companyFields = (root: ParentNode = document) =>
   Array.from(
@@ -263,5 +264,91 @@ describe('‏`vendorIds` صريحٌ في كل حفظ — العطل النشط (
     const write = writes.find((entry) => entry.url.includes('/company/anthropic/key'))!;
     expect(write.body.vendorIds).toEqual(['anthropic-opencode']);
     expect(write.body.includeSubscription).toBe(false);
+  });
+});
+
+/**
+ * Alibaba Cloud (T-1906, owner decision 2026-09-28): the standalone Qwen
+ * login window is gone. Its personal Coding Plan key is now a plain
+ * `CompanyCredentialCard` field like every other company, gated by an
+ * additional consent checkbox the other companies do not carry.
+ */
+describe('Alibaba Cloud — CompanyCredentialCard, not a managed connect dialog (T-1906)', () => {
+  it('renders a normal password field, no connect-terminal markup', async () => {
+    stubServer();
+    render(<VendorsSettingsTab />);
+    const field = () => document.getElementById('company-api-key-alibaba-cloud') as HTMLInputElement;
+    await waitFor(() => expect(field()).not.toBeNull());
+
+    expect(field().getAttribute('type')).toBe('password');
+    expect(document.querySelector('[data-company-credential-action="alibaba-cloud"]')).toBeNull();
+  });
+
+  it('blocks save until the consent checkbox is ticked, then sends consent:true', async () => {
+    stubServer();
+    render(<VendorsSettingsTab />);
+    const field = () => document.getElementById('company-api-key-alibaba-cloud') as HTMLInputElement;
+    await waitFor(() => expect(field()).not.toBeNull());
+
+    fireEvent.change(field(), { target: { value: 'sk-alibaba-1' } });
+    const saveButton = screen.getByLabelText('Save Alibaba Cloud key') as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+
+    const consentCheckbox = document.getElementById(
+      'alibaba-cloud-key-consent',
+    ) as HTMLInputElement;
+    expect(consentCheckbox).not.toBeNull();
+    fireEvent.click(consentCheckbox);
+    expect(saveButton.disabled).toBe(false);
+
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(writes.length).toBeGreaterThan(0));
+    const write = writes.find((entry) => entry.url.includes('/company/alibaba-cloud/key'))!;
+    expect(write, 'no save request reached Alibaba Cloud').toBeTruthy();
+    expect(write.body.consent).toBe(true);
+    expect(write.body.vendorIds).toEqual(['alibaba-qwen-coding-plan']);
+  });
+
+  it('never sends consent for a company with no consent gate', async () => {
+    stubServer();
+    render(<VendorsSettingsTab />);
+    const field = () => document.getElementById('company-api-key-deepseek') as HTMLInputElement;
+    await waitFor(() => expect(field()).not.toBeNull());
+
+    fireEvent.change(field(), { target: { value: 'sk-deepseek-1' } });
+    fireEvent.click(screen.getByLabelText('Save DeepSeek key'));
+
+    await waitFor(() => expect(writes.length).toBeGreaterThan(0));
+    const write = writes.find((entry) => entry.url.includes('/company/deepseek/key'))!;
+    expect(write.body.consent).toBeUndefined();
+  });
+
+  it('shows a re-enter prompt for a stored key the simplified flow cannot use', async () => {
+    writes = [];
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method && init.method !== 'GET') {
+        writes.push({ url, method: init.method, body: init.body ? JSON.parse(String(init.body)) : {} });
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: { slots: [] } }) });
+      }
+      const companyId = /\/company\/([^/]+)\/key/.exec(url)?.[1] ?? '';
+      const slots = companyId === 'alibaba-cloud'
+        ? [{
+          vendorId: 'alibaba-qwen-coding-plan',
+          provider: 'qwen',
+          configured: true,
+          subscription: false,
+          status: 'incompatible_profile',
+        }]
+        : (SLOTS[companyId] ?? []);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ success: true, data: { companyId, writable: true, slots } }),
+      });
+    });
+    render(<VendorsSettingsTab />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/re-enter a Coding Plan key/i)).toBeTruthy());
   });
 });

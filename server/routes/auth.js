@@ -8,6 +8,10 @@ import multer from 'multer';
 
 import { AccountWalletService } from '../modules/account-wallet/index.js';
 import {
+  SsoReauthRequiredError,
+  SsoRequiredError,
+} from '../modules/account-wallet/account-wallet.service.js';
+import {
   ACCOUNT_DELETED_REVOCATION,
   revocationForRoleChange,
   revocationForStatusChange,
@@ -29,6 +33,19 @@ import {
   recordConnectorOwnerAuthentication,
 } from '../modules/connectors/connector-owner-auth-session.js';
 import { oidcEnabled } from '../services/oidc-config.js';
+import { isUsernameAvailable } from '../services/username-policy.js';
+import {
+  localAccountCreationClosed,
+  refuseLocalCredential,
+  requiresSsoLogin,
+  SSO_REQUIRED_FOR_NEW_ACCOUNTS_CODE,
+} from '../services/sso-only-policy.js';
+import {
+  refuseStaleAttestation,
+  SSO_REAUTH_REQUIRED_CODE,
+  ssoAttestationFresh,
+  userSsoAttestationFresh,
+} from '../services/sso-attestation.js';
 
 import webauthnRouter from './webauthn.js';
 import oidcRouter from './oidc.js';
@@ -223,6 +240,8 @@ const accountWalletService = new AccountWalletService({
   },
   verifyPassword,
   decoyPasswordHash: DECOY_PASSWORD_HASH,
+  requiresSso: (userId) => requiresSsoLogin(userDb.getUserById(userId)),
+  attestationFresh: (userId) => ssoAttestationFresh(userId),
 });
 
 const addCandidateKey = (req) => {
@@ -271,7 +290,16 @@ router.post('/accounts/switch', walletAuth, walletCsrf('switch'), (req, res) => 
     const wallet = accountWalletService.switch(req.devicePrincipal, slotId, expectedGeneration);
     const account = wallet.accounts.find((item) => item.slotId === slotId);
     res.set('Cache-Control', 'no-store').json({ generation: wallet.generation, activeSlotId: wallet.activeSlotId, account });
-  } catch (error) { walletError(res, error, req.devicePrincipal); }
+  } catch (error) {
+    // 403, not 401: the device's CURRENT identity is still valid; only the
+    // target slot must re-attest at the IdP before it can become active.
+    if (error instanceof SsoReauthRequiredError) {
+      return res.status(403).set('Cache-Control', 'no-store').json({
+        error: 'This account must sign in again through SSO', code: SSO_REAUTH_REQUIRED_CODE,
+      });
+    }
+    return walletError(res, error, req.devicePrincipal);
+  }
 });
 router.post('/accounts/add', walletAuth, ...addAccountLimiters, walletCsrf('add'), async (req, res) => {
   const { email, password, expectedGeneration } = req.body ?? {};
@@ -286,7 +314,17 @@ router.post('/accounts/add', walletAuth, ...addAccountLimiters, walletCsrf('add'
     );
     if (!wallet) return res.status(401).json({ error: 'Account could not be added', code: 'add_account_failed' });
     return res.status(201).set('Cache-Control', 'no-store').json(wallet);
-  } catch (error) { return walletError(res, error, req.devicePrincipal); }
+  } catch (error) {
+    if (error instanceof SsoRequiredError) {
+      return refuseLocalCredential(res, {
+        userId: error.userId,
+        entry: 'wallet_add',
+        ipAddress: clientIp(req),
+        userAgent: req.headers['user-agent'] ?? null,
+      });
+    }
+    return walletError(res, error, req.devicePrincipal);
+  }
 });
 router.delete('/accounts/:slotId', walletAuth, walletCsrf('remove'), (req, res) => {
   const expectedGeneration = req.body?.expectedGeneration;
@@ -379,6 +417,14 @@ router.post('/login', authLimiter, async (req, res) => {
         userAgent,
       });
       return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    // T-1939: checked only after a correct password, so the answer never
+    // reveals whether an account exists or is SSO-linked.
+    if (requiresSsoLogin(user)) {
+      return refuseLocalCredential(res, {
+        userId: user.id, entry: 'password_login', ipAddress: ip, userAgent,
+      });
     }
 
     if (user.must_change_password === 1) {
@@ -495,6 +541,11 @@ const graceRefresh = (req, res, next) => {
         || result.decoded.auth_gen !== user.authorization_generation) {
       return res.status(401).json({ error: 'Token invalidated' });
     }
+    // T-1939 slice 3: a linked member past the SSO attestation window is never
+    // renewed; they re-attest at the IdP instead.
+    if (!userSsoAttestationFresh(user)) {
+      return refuseStaleAttestation(res);
+    }
     if (user.must_change_password === 1) {
       return res.status(403).json({
         error: 'Password change required',
@@ -606,6 +657,16 @@ router.post('/logout-all', walletAuth, walletCsrf('logout_all'), (req,res) => {
 
 // Accept an invite → creates a `user` account (public, rate-limited).
 router.post('/invite/accept', authLimiter, async (req, res) => {
+  // T-1939: with SSO live, team accounts come from the IdP; an invite may not
+  // mint a local-password account. Refused before the token is touched.
+  if (localAccountCreationClosed()) {
+    return refuseLocalCredential(res, {
+      entry: 'invite_accept',
+      code: SSO_REQUIRED_FOR_NEW_ACCOUNTS_CODE,
+      ipAddress: clientIp(req),
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+  }
   try {
     const { token, username, password } = req.body ?? {};
     const user = await acceptInvite({ token, username, password }, clientIp(req));
@@ -626,6 +687,13 @@ router.post('/invite/accept', authLimiter, async (req, res) => {
 
 // Create an invite (owner/admin only). Returns the plaintext token ONCE.
 router.post('/invites', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+  if (localAccountCreationClosed()) {
+    return refuseLocalCredential(res, {
+      userId: req.user.id,
+      entry: 'invite_create',
+      code: SSO_REQUIRED_FOR_NEW_ACCOUNTS_CODE,
+    });
+  }
   try {
     const { role, email, ttlHours } = req.body ?? {};
     const result = await createInvite(req.user, { role, email, ttlHours });
@@ -999,8 +1067,9 @@ router.patch('/me/username', authenticateToken, (req, res) => {
       return res.json({ success: true });
     }
 
-    const existing = userDb.getUserByUsername(username);
-    if (existing && existing.id !== req.user.id) {
+    // Case-insensitive over every account (any status) plus the reserved
+    // names; the caller's own row is excluded so a case-only rename works.
+    if (!isUsernameAvailable(username, { excludeUserId: req.user.id })) {
       return res.status(409).json({ error: 'Username already taken' });
     }
 

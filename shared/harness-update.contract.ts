@@ -35,8 +35,9 @@
  *   - `updatable`         a user-owned install with a working updater and probe
  *   - `managed-external`  installed but nassaj cannot update it in place
  *   - `no-cli`            no local CLI (hosted API: deepseek; glm rides opencode)
- *   - `unknown`           installed but the latest-version probe could not run
- *                         (network failure with no fresh cache) — never a crash
+ *   - `unknown`           the version cannot be read safely (mid-update or a
+ *                         failed recovery). A failed latest probe is NOT this:
+ *                         it stays `updatable` with reason `probe-failed`.
  */
 export type HarnessVersionState =
   | 'updatable'
@@ -70,14 +71,6 @@ export interface HarnessVersionStatus {
   /** The running job id, or null. */
   activeJobId: string | null;
   /**
-   * Compatibility of the INSTALLED version with Nassaj (T-1871 / ADR-159
-   * Addendum 4). Optional for backward compatibility: absent on rows that have
-   * no readable installed version (no-cli, recovery-blocked, mid-update).
-   */
-  compatibility?: HarnessCompatibility;
-  /** Compatibility of `latestVersion`; present only when a latest probe answered. */
-  targetCompatibility?: HarnessCompatibility;
-  /**
    * Installed version changed since Nassaj last saw it WITHOUT a Nassaj update
    * job recording the change (vendor auto-updater, manual shell update, …).
    * Optional for backward compatibility; absent when the ledger is unavailable.
@@ -87,7 +80,7 @@ export interface HarnessVersionStatus {
   manualOnly?: boolean;
   /** T-1871: facts the update dialog must state (agy today); absent = none. */
   notices?: HarnessUpdateNotices;
-  /** T-1871: "restore compatible version" is offered (opencode only). */
+  /** T-1871: restoring a known release is offered (opencode only). */
   restoreCompatible?: HarnessRestoreCompatibleOffer;
 }
 
@@ -99,7 +92,7 @@ export interface HarnessUpdateNotices {
   selfUpdating: boolean;
 }
 
-/** The compatible version the restore action installs. */
+/** The known release the restore action installs. */
 export interface HarnessRestoreCompatibleOffer {
   version: string;
   /**
@@ -107,38 +100,6 @@ export interface HarnessRestoreCompatibleOffer {
    * the UI must not present the path as verified before then.
    */
   verified: boolean;
-}
-
-/**
- * Compatibility verdict for one harness version:
- *   - `compatible`   equals the reviewed pinned version (the bytes are still
- *                    digest-checked at spawn when the pin is enforced)
- *   - `baseline`     equals the version installed when the baseline was
- *                    recorded — render as "baseline as of <asOf>", never "tested"
- *   - `untested`     no review data covers this version; Nassaj still runs it
- *   - `incompatible` Nassaj WILL refuse to run it (pin enforced), fully or in
- *                    the modes listed in `blockedModes`
- */
-export type HarnessCompatibilityState =
-  | 'compatible'
-  | 'baseline'
-  | 'untested'
-  | 'incompatible';
-
-export interface HarnessCompatibility {
-  state: HarnessCompatibilityState;
-  /**
-   * Machine reason: `pin-match`, `pin-armed-blocked`, `<mode>-blocked` (e.g.
-   * `glm-carrier-blocked`), `pin-mismatch-unreviewed`, `baseline-match`,
-   * `not-baselined`, `no-compat-data`, `version-unknown`.
-   */
-  reason: string;
-  /** The version the verdict was compared against (pin or baseline), or null. */
-  referenceVersion: string | null;
-  /** ISO date (YYYY-MM-DD) of the baseline, for `baseline`; null otherwise. */
-  asOf: string | null;
-  /** Modes Nassaj refuses to run this version in; empty unless `incompatible`. */
-  blockedModes: string[];
 }
 
 /** Out-of-band version change detected by the status read (T-1871 stage 2). */

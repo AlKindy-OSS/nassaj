@@ -74,7 +74,7 @@ import {
   clearHarnessRecoveryBlocked,
   markHarnessRecoveryBlocked,
 } from './spawn-admission.js';
-import { pinBreakFacts, verifyActionAcks } from './acks.js';
+import { pinBreakFacts, pinOf, verifyActionAcks } from './acks.js';
 import { clearNativeStaging, pendingNativeStage } from './native-staging.js';
 import { snapshotError } from './snapshot/errors.js';
 import type { VersionFacts } from './snapshot/manifest.js';
@@ -226,16 +226,18 @@ function judgeUpdate(from: VersionFacts, to: VersionFacts | null, result: RunRes
 }
 
 /**
- * Snapshot-backed update: the target's compatibility decides a `pinBreak`
- * acknowledgement (the pin table is never modified), then the fixed updater
- * argv runs inside the §8 state machine.
+ * Snapshot-backed update: a `pinBreak` acknowledgement is required only while
+ * the opt-in digest pin is armed for a pinned harness (the pin table is never
+ * modified), then the fixed updater argv runs inside the §8 state machine.
  */
 async function startSnapshotUpdate(
   descriptor: HarnessDescriptor,
   opts: { rt: SnapshotRuntime; userId: number | null; trigger: UpdateTrigger; acks: unknown },
 ): Promise<HarnessUpdateJob> {
   const { rt } = opts;
-  const target = await rt.latestVersion(descriptor).catch(() => null);
+  const target = rt.pinArmed() && pinOf(descriptor)
+    ? await rt.latestVersion(descriptor).catch(() => null)
+    : null;
   verifyActionAcks(rt, descriptor, {
     action: 'update', userId: opts.userId, pinBreak: pinBreakFacts(rt, descriptor, target), dataLoss: null, acks: opts.acks,
   });

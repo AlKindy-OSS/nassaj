@@ -25,13 +25,15 @@ import {
   FileConnectorAuthKeyring,
   createConnectorAuthKeyringFile,
 } from './connector-auth-vault.crypto.js';
-import { assertConnectorProviderEffectEnabled, executeConnectorPolicyV2SynchronousWrite,
+import { assertConnectorProviderEffectEnabled, connectorRuntimeLiveOrigin,
+  executeConnectorPolicyV2SynchronousWrite,
   resolveConnectorRuntimeInstallationOrigin } from './connector-substrate-only.production.js';
 import { ConnectorPolicyOperation } from './connector-policy-v2.js';
 import {
   authorizedOwnerOperation,
   consumeAuthorizedOwnerOperation,
   createConnectorOwnerOperationGate,
+  runtimeOriginSource,
   type ConnectorOwnerOperation,
 } from './connector-owner-operation-gate.js';
 import { isClaudeSubscriptionToken } from '../../../shared/claudeSubscriptionToken.js';
@@ -39,6 +41,8 @@ import { isClaudeSubscriptionToken } from '../../../shared/claudeSubscriptionTok
 type Runtime = Readonly<{
   installationId: string;
   canonicalOrigin: string;
+  /** Live origin (production); absent in test runtimes, which use canonicalOrigin. */
+  resolveOrigin?: () => string | null;
   repository: ReturnType<typeof createConnectorAuthDb>;
   grants: ReturnType<typeof createConnectorUserGrantService>;
   profiles: ReturnType<typeof createConnectorProfileManagementService>;
@@ -79,7 +83,7 @@ const buildRuntime = (): Runtime => {
     testApiKeyCandidate: async candidate => { await testApiKeyCandidate(candidate); },
   });
   productionRuntime = Object.freeze({
-    installationId, canonicalOrigin, repository, grants, profiles,
+    installationId, canonicalOrigin, resolveOrigin: connectorRuntimeLiveOrigin, repository, grants, profiles,
     getConnector: connectorsDb.get.bind(connectorsDb),
     assertProviderEffect: assertConnectorProviderEffectEnabled,
   });
@@ -164,7 +168,8 @@ export const createConnectorUserGrantRoutes = (
     }
     writeLimiter(req, res, () => createConnectorOwnerOperationGate({
       repository: runtime.repository, installationId: runtime.installationId,
-      canonicalOrigin: runtime.canonicalOrigin, operation, ownerOnly,
+      canonicalOrigin: runtimeOriginSource(runtime),
+      operation, ownerOnly,
     })(req, res, () => {
       void action(runtime, req, res, user.id).catch(error => fail(res, error));
     }));

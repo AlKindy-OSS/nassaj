@@ -2,7 +2,6 @@ import { Building2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '../../../../../shared/view/ui';
 import SettingsSection from '../../SettingsSection';
 import { vendorsByCompany } from '../../../../../../shared/vendors';
 
@@ -39,10 +38,8 @@ import VoiceTranscriptionSection from './VoiceTranscriptionSection';
  */
 export default function VendorsSettingsTab({
   focusCompanyId,
-  onQwenConnect,
 }: {
   focusCompanyId?: string;
-  onQwenConnect?: () => void;
 }) {
   const { t } = useTranslation('settings');
 
@@ -84,28 +81,7 @@ export default function VendorsSettingsTab({
         التعميم بعينه، والفراغُ يفصل ما يكفي بلا أن يستأذن أحداً.
       */}
       <div className="space-y-1">
-        {vendorsByCompany().map((company) => company.id === 'alibaba-cloud' ? (
-          <div key={company.id} data-company={company.id} className="grid grid-cols-1 items-center gap-2 py-2.5 sm:grid-cols-[7rem_1fr_auto]">
-            <span dir="ltr" className="text-start text-[15px] font-medium text-foreground">
-              {company.name}
-            </span>
-            <span className="text-[13px] text-muted-foreground">
-              {t('vendors.qwenManaged', {
-                defaultValue: 'Coding Plan or Token Plan · stored in the encrypted nassaj vault',
-              })}
-            </span>
-            <Button
-              id={`company-api-key-${company.id}`}
-              data-company-credential-action={company.id}
-              type="button"
-              size="sm"
-              onClick={onQwenConnect}
-              disabled={!onQwenConnect}
-            >
-              {t('vendors.connectQwen', { defaultValue: 'Connect Qwen' })}
-            </Button>
-          </div>
-        ) : (
+        {vendorsByCompany().map((company) => (
           <CompanyCredentialCard key={company.id} company={company} />
         ))}
       </div>

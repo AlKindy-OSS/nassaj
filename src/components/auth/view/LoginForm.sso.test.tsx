@@ -15,8 +15,9 @@ function lookup(key: string): string {
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => lookup(key) }),
 }));
+const authMock = vi.hoisted(() => ({ login: vi.fn() }));
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ login: vi.fn() }),
+  useAuth: () => ({ login: authMock.login }),
 }));
 vi.mock('../hooks/useWebAuthn', () => ({
   useWebAuthn: () => ({ isSupported: false, loginWithPasskey: vi.fn() }),
@@ -97,5 +98,46 @@ describe('LoginForm SSO entry', () => {
     });
 
     expect((ssoButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('LoginForm SSO-only refusal (T-1939)', () => {
+  it('explains that a linked account signs in through SSO and keeps the SSO button', async () => {
+    authMock.login.mockResolvedValueOnce({ success: false, error: 'This account signs in through SSO', code: 'sso_required' });
+    await renderForm(true);
+    fireEvent.change(screen.getByLabelText(enAuth.login.username), { target: { value: 'member' } });
+    fireEvent.change(screen.getByLabelText(enAuth.login.password), { target: { value: 'right' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: enAuth.login.submit }));
+    });
+    expect(screen.getByText(enAuth.login.errors.ssoRequired)).toBeTruthy();
+    expect(ssoButton()).toBeTruthy();
+  });
+
+  it('shows the server message for any other failure', async () => {
+    authMock.login.mockResolvedValueOnce({ success: false, error: 'Invalid username or password' });
+    await renderForm(true);
+    fireEvent.change(screen.getByLabelText(enAuth.login.username), { target: { value: 'member' } });
+    fireEvent.change(screen.getByLabelText(enAuth.login.password), { target: { value: 'wrong' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: enAuth.login.submit }));
+    });
+    expect(screen.getByText('Invalid username or password')).toBeTruthy();
+  });
+});
+
+describe('LoginForm SSO re-attestation notice (T-1939 slice 3)', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('shows the expiry notice once, then clears it', async () => {
+    sessionStorage.setItem('nassaj:sso-reauth-notice', '1');
+    await renderForm(true);
+    expect(screen.getByText(enAuth.login.errors.ssoReauthRequired)).toBeTruthy();
+    expect(sessionStorage.getItem('nassaj:sso-reauth-notice')).toBeNull();
+    cleanup();
+    await renderForm(true);
+    expect(screen.queryByText(enAuth.login.errors.ssoReauthRequired)).toBeNull();
   });
 });

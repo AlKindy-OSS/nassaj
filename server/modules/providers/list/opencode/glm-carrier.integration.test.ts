@@ -23,8 +23,9 @@
  *      when a different provider is caged.
  *   6. Governance fail-closed (GL-5, "رفض غير المحكوم"): ensureOpenCodeGovernance
  *      throws VendorGovernanceMissingError when no neutral source exists.
- *   7. Binary digest deviation (SL-7/GL-6, "رفض انحراف digest"): verifyVendorBinaryDigest
- *      with enforced:true throws on a binary whose sha256 does not match the pin.
+ *   7. Binary digest deviation (SL-7): verifyVendorBinaryDigest with enforced:true
+ *      throws on a sha256 mismatch. Only the opt-in NASSAJ_VENDOR_BINARY_PIN arms it;
+ *      the carrier no longer forces it (owner decision 2026-09-29).
  *   8. Localhost server confinement (GL-6, "حصر localhost"): assertOpenCodeCarrierServerLocal
  *      accepts the canonical run args and refuses `serve` and non-loopback binds.
  *   9. Carrier flag OFF identity (NASSAJ_OPENCODE_CARRIER): the flag is absent from
@@ -520,10 +521,10 @@ describe('GL-10 — governance fail-closed (GL-5)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Binary digest deviation (SL-7/GL-6, "رفض انحراف digest")
+// 7. Binary digest deviation (SL-7, opt-in pin only)
 // ---------------------------------------------------------------------------
 
-describe('GL-10 — binary digest deviation (SL-7/GL-6)', () => {
+describe('GL-10 — binary digest deviation (SL-7, opt-in pin)', () => {
   let tempDir: string;
 
   beforeEach(() => {

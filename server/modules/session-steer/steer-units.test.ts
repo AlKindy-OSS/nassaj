@@ -49,7 +49,7 @@ function makeRun(overrides: Partial<Parameters<typeof createSteerRun>[0]> = {}) 
   const statuses: Array<[string, string]> = [];
   const run = createSteerRun({
     sessionId: () => 'sess-1', turnId: UUID, starterUserId: 1,
-    permissionMode: () => 'bypassPermissions', hooksArmed: () => true,
+    permissionMode: () => 'bypassPermissions', injectionArmed: () => true, taintHookArmed: () => true,
     broadcast: event => { events.push(event as unknown as Record<string, unknown>); },
     persistStatus: (item, status) => { statuses.push([item.clientMsgId, status]); },
     confirmDelivery: async () => true,
@@ -73,6 +73,26 @@ test('run queue: bounds (queue ≤3, 10 per turn), taint on first accept, take o
   assert.deepEqual(run.precheck(), 'steer_turn_limit');
   assert.equal(events.filter(e => e.type === 'steer-queued').length, 10);
   assert.equal(events[0].text, 't0');
+});
+
+test('run queue: a self-steer (sender = starter) never taints; another member still does', () => {
+  const { run } = makeRun();
+  assert.deepEqual(run.enqueue({ ...item(0), senderUserId: 1, senderName: 'alice' }), { ok: true });
+  assert.equal(run.isTainted(), false);
+  assert.equal(run.everInjected(), true);
+  assert.deepEqual(run.enqueue(item(1)), { ok: true });
+  assert.equal(run.isTainted(), true);
+  const { run: unknownStarter } = makeRun({ starterUserId: null });
+  unknownStarter.enqueue({ ...item(2), senderUserId: 1 });
+  assert.equal(unknownStarter.isTainted(), true, 'unknown starter: any steer taints (fail-closed)');
+});
+
+test('wrapper: a self-steer is tagged role="owner" and still unwraps for display', () => {
+  const own = buildSteerWrapper('alice', 'use tabs', 'owner')!;
+  assert.equal(own, '<nassaj-steer from="alice" role="owner">\nuse tabs\n</nassaj-steer>');
+  assert.equal(unwrapSteerForDisplay(own), 'use tabs');
+  assert.ok(buildSteerWrapper('bob', 'x')!.includes('role="member"'), 'default stays member');
+  assert.equal(unwrapSteerForDisplay('<nassaj-steer from="x" role="admin">\nx\n</nassaj-steer>'), null);
 });
 
 test('run queue: a parked take() is woken by enqueue and by close()', async () => {

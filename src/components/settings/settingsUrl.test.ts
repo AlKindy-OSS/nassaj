@@ -129,4 +129,19 @@ describe('settings URL destination', () => {
       expect(window.location.search).toBe('?settings=system');
     });
   });
+
+  // T-1906: qwen and hermes are globally disabled (shared/disabledProviders.ts)
+  // — a deep link naming either must fall back to the default agent, the same
+  // treatment as an unknown agent id, rather than pin a hidden surface with no
+  // category content to render.
+  it('T-1906: a deep link to a globally disabled agent falls back to no agent pinned', () => {
+    expect(readSettingsDestination('?settings=agents&settingsAgent=qwen&settingsCategory=account')).toEqual({
+      tab: 'agents',
+      category: 'account',
+    });
+    expect(readSettingsDestination('?settings=agents&settingsAgent=hermes&settingsCategory=account')).toEqual({
+      tab: 'agents',
+      category: 'account',
+    });
+  });
 });

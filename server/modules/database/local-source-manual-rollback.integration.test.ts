@@ -18,6 +18,7 @@ import { manualRollback, prepareRuntimeRebinding } from '../../../scripts/local-
 import { registerLocalRecoveryPacket, recoveryDatabaseSchemaSha256 } from '../../../scripts/local-source-recovery-operator.mjs';
 import { MANUAL_ROLLBACK_ACTIVE_STATES } from '../../../scripts/lib/source-update-manual-rollback-db.mjs';
 import { hashTree } from '../../../scripts/lib/source-update-tree-identity.mjs';
+import { installServerScriptsLib } from '../../../tests/helpers/server-artifact-scripts-lib.mjs';
 
 const project = process.cwd(), sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const oldBuild = 'd'.repeat(64), serverBuild = 'c'.repeat(64), clientBuild = 'b'.repeat(64);
@@ -39,8 +40,7 @@ function rootFixture(t: test.TestContext) {
   git('add', 'package.json', 'package-lock.json', '.gitignore');
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'fixture');
   for (const name of ['dist', 'dist-server', 'node_modules']) { fs.mkdirSync(path.join(root, name)); write(path.join(root, name, 'fixture'), 'old'); }
-  fs.mkdirSync(path.join(root, 'dist-server/scripts'));
-  fs.cpSync(path.join(project, 'dist-server/scripts/lib'), path.join(root, 'dist-server/scripts/lib'), { recursive: true });
+  installServerScriptsLib(project, root);
   write(path.join(root, 'dist-server/OID_CONTROL_MANIFEST.json'), '{}');
   for (const name of ['dist', 'dist-server']) write(path.join(root, name, 'BUILD_PROVENANCE.json'), JSON.stringify({ commit: 'e'.repeat(40), buildId: oldBuild }));
   return { root, git, oid: git('rev-parse', 'HEAD') };

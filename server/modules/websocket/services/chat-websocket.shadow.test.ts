@@ -1,5 +1,10 @@
+// Must stay first: sets WORKSPACES_ROOT before @/shared/utils.js loads (B-1421).
+// eslint-disable-next-line import-x/order
+import { TEST_GIT_PROJECT } from './chat-websocket.test-git-project.js';
+
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it, mock } from 'node:test';
 
@@ -17,6 +22,7 @@ import {
 
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
 
+
 mock.module('@/modules/database/index.js', {
   namedExports: {
     ...reviewEnvelopeDatabaseLinkStubs(),
@@ -25,7 +31,7 @@ mock.module('@/modules/database/index.js', {
       isProjectWritableByUser: () => true,
     },
     sessionsDb: { getSessionById: (sessionId: string) => ({
-      session_id: sessionId, provider: 'codex', project_path: process.cwd(),
+      session_id: sessionId, provider: 'codex', project_path: TEST_GIT_PROJECT,
     }) },
     participantsDb: { isParticipant: () => true },
     sessionWorkspaceModesDb: { readLegacyEligibility: () => ({ mode: 'legacy_shared' }) },
@@ -57,7 +63,7 @@ const dispatchProviderCommand = (
   messageType,
   {
     ...data,
-    options: { cwd: process.cwd(), projectPath: process.cwd(), ...(data.options ?? {}) },
+    options: { cwd: TEST_GIT_PROJECT, projectPath: TEST_GIT_PROJECT, ...(data.options ?? {}) },
   },
   writer as never,
   dependencySet as never,
@@ -134,7 +140,7 @@ function shadowHarness(overrides: {
 function dependencies(input: {
   shadow: UniversalConversationShadowHook;
   codex: (writer: { send(payload: unknown): void }) => Promise<unknown>;
-  cursor?: (options: unknown) => Promise<unknown>;
+  antigravity?: (options: unknown) => Promise<unknown>;
 }) {
   const unused = async () => undefined;
   return {
@@ -165,8 +171,8 @@ function dependencies(input: {
     queryCodex: async (_command: string, _options: unknown, writer: { send(payload: unknown): void }) =>
       input.codex(writer),
     queryClaudeSDK: unused,
-    spawnCursor: async (_command: string, options: unknown) => input.cursor?.(options),
-    spawnAntigravity: unused,
+    spawnCursor: unused,
+    spawnAntigravity: async (_command: string, options: unknown) => input.antigravity?.(options),
     spawnOpenCode: unused,
     spawnHermes: unused,
     spawnKimi: unused,
@@ -265,7 +271,7 @@ describe('chat Phase-0 shadow hook', () => {
     await dispatchProviderCommand(
       'codex-command',
       { command: 'hello', options: {
-        clientMsgId: 'permission-client-1', sessionId: 'session-1', cwd: process.cwd(),
+        clientMsgId: 'permission-client-1', sessionId: 'session-1', cwd: TEST_GIT_PROJECT,
       } },
       writer as never,
       dependencySet as never,
@@ -285,12 +291,12 @@ describe('chat Phase-0 shadow hook', () => {
     const dependencySet = dependencies({
       shadow,
       codex: async () => undefined,
-      cursor: async () => { trace.push('adapter'); },
+      antigravity: async () => { trace.push('adapter'); },
     }) as unknown as Record<string, any>;
     dependencySet.authorizeProviderExecution = () => ({
       kind: 'authorized',
       execution: {
-        decisionId: 'decision-cursor', leaseId: 'lease-cursor', mode: 'legacy',
+        decisionId: 'decision-antigravity', leaseId: 'lease-antigravity', mode: 'legacy',
         consume: () => { trace.push('consume'); return {}; },
         markStarted: () => { trace.push('started'); },
         settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
@@ -298,8 +304,8 @@ describe('chat Phase-0 shadow hook', () => {
       },
     });
     await dispatchProviderCommand(
-      'cursor-command',
-      { command: 'hello', options: { clientMsgId: 'cursor-1', cwd: process.cwd() } },
+      'antigravity-command',
+      { command: 'hello', options: { clientMsgId: 'antigravity-1', cwd: TEST_GIT_PROJECT } },
       writer as never,
       dependencySet as never,
       41,
@@ -330,7 +336,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('persists a terminal content summary for each real provider redispatch generation', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const databasePath = path.join(directory, 'auth.db');
     const lockPath = path.join(directory, 'universal-conversations.lock');
     const db = new Database(databasePath);
@@ -391,7 +397,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('settles a resolved provider call without a verdict as uncertain evidence', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const db = new Database(path.join(directory, 'auth.db'));
     const runtime = UniversalConversationShadowRuntime.boot(db, {
       env: { [UNIVERSAL_CONVERSATION_SHADOW_FLAG]: '1' },
@@ -444,7 +450,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('forwards an asynchronous post-finish payload and records its anomaly once', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const db = new Database(path.join(directory, 'auth.db'));
     const runtime = UniversalConversationShadowRuntime.boot(db, {
       env: { [UNIVERSAL_CONVERSATION_SHADOW_FLAG]: '1' },
@@ -495,7 +501,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('forwards multi-megabyte identity claims unchanged while persisting only bounded evidence', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const db = new Database(path.join(directory, 'auth.db'));
     const runtime = UniversalConversationShadowRuntime.boot(db, {
       env: { [UNIVERSAL_CONVERSATION_SHADOW_FLAG]: '1' },
@@ -549,7 +555,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('preserves exact serialized bytes and getter counts when shadow inspection is enabled', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const db = new Database(path.join(directory, 'auth.db'));
     const runtime = UniversalConversationShadowRuntime.boot(db, {
       env: { [UNIVERSAL_CONVERSATION_SHADOW_FLAG]: '1' },
@@ -621,7 +627,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('forwards exact wire bytes and marks evidence unknown after a payload descriptor trap fails', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const db = new Database(path.join(directory, 'auth.db'));
     const runtime = UniversalConversationShadowRuntime.boot(db, {
       env: { [UNIVERSAL_CONVERSATION_SHADOW_FLAG]: '1' },
@@ -717,7 +723,7 @@ describe('chat Phase-0 shadow hook', () => {
   });
 
   it('forwards toJSON-transformed wire payloads but never verifies their shadow evidence', async () => {
-    const directory = await mkdtemp('/tmp/nassaj-shadow-ws-');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'nassaj-shadow-ws-'));
     const db = new Database(path.join(directory, 'auth.db'));
     const runtime = UniversalConversationShadowRuntime.boot(db, {
       env: { [UNIVERSAL_CONVERSATION_SHADOW_FLAG]: '1' },

@@ -351,14 +351,3 @@ test('the compat module imports no project module beyond codex-executable', () =
   const imports = [...source.matchAll(/from '([^']+)'/gu)].map(match => match[1]);
   assert.deepEqual(imports.filter(name => !name.startsWith('node:')), ['./codex-executable.js']);
 });
-
-test('harness compatibility reports a refused installed release as runtime-incompatible', async () => {
-  const { computeHarnessCompatibility } = await import('../modules/providers/harness-update/compatibility.ts');
-  const base = { version: '0.156.0', descriptor: { pinKey: null, compat: { baseline: { version: '0.156.0', date: 'd' } } },
-    pins: {}, pinArmed: false, carrierAlwaysEnforced: false };
-  assert.equal(computeHarnessCompatibility(base).reason, 'baseline-match');
-  const refused = computeHarnessCompatibility({ ...base, runtimeIncompatible: true });
-  assert.deepEqual(refused, { state: 'incompatible', reason: 'runtime-incompatible', referenceVersion: null,
-    asOf: null, blockedModes: ['all'] });
-  assert.equal(computeHarnessCompatibility({ ...base, version: null, runtimeIncompatible: true }).reason, 'version-unknown');
-});

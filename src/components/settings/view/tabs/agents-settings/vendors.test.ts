@@ -290,12 +290,10 @@ describe('لا مفتاح لا يُدخَل — المنزل الواحد (T-121
     }
   });
 
-  it('DeepSeek بلاطتها في الشريط (قريباً T-1760) وحقلها قابل للإدخال من تبويب المورّدين', () => {
-    // T-1760 (2026-09-12): deepseek صارت بلاطةً «قريباً» في شريط الوكلاء؛
-    // المزوّد معطَّل عالمياً (بلا spawn)، لكنّ البلاطة ظاهرة وتعرض لوح «قريباً».
-    // الثابت هنا: حقل المفتاح لا يزال في تبويب المورّدين (T-1219) وهو المنزل
-    // الوحيد لكل المفاتيح — استقلالُ وصول المفتاح عن البلاطة لا يزال صحيحاً.
-    expect(agentsForCompany('deepseek', visibleSettingsAgents())).toEqual(['deepseek']);
+  it('DeepSeek بلا بلاطة في الشريط وحقلها باقٍ في الكتالوج', () => {
+    // 2026-09-29: أُخفيت بلاطة deepseek كلياً بقرار المالك. الثابت هنا: حقل
+    // المفتاح باقٍ في الكتالوج (T-1219) — استقلالُ وصول المفتاح عن البلاطة.
+    expect(agentsForCompany('deepseek', visibleSettingsAgents())).toEqual([]);
     expect(
       vendorsByCompany().some((company) => company.id === 'deepseek'),
       'DeepSeek خرجت من الكتالوج فخرج حقلُها من الشاشة',
@@ -345,18 +343,16 @@ describe('التصفية بالمحور: الحساب للشركة الأصيل�
     }
   });
 
-  it('يبقي مفتاح Moonshot في حساب Kimi وحده — ويقرؤه Claude من تبويب المحرّكات', () => {
+  it('لا يمدّ مفتاح Moonshot إلى حساب Claude — ويقرؤه Claude من تبويب المحرّكات', () => {
     // قبل T-1206 كان الجواب `['claude','kimi']`: مستهلكا المحرّك والأداة تحت
-    // Claude كانا يمدّان البطاقة إلى حسابه.
-    expect(agentsForCompany('moonshot', agents)).toEqual(['kimi']);
+    // Claude كانا يمدّان البطاقة إلى حسابه. بلاطة Kimi مخفية منذ 2026-09-29.
+    expect(agentsForCompany('moonshot', agents)).toEqual([]);
   });
 
-  it('DeepSeek تظهر تحت نفسها لا تحت Claude — المحور أداة لا جسم تحت Claude', () => {
-    // deepseek now has a coming-soon tile in the strip (T-1760), so it appears
-    // under its own company. It still does NOT appear under Claude's account tab
-    // (that is what this axis test guards): the consumer axis for deepseek on
-    // Claude is `tool`, not `body`, so its vendor card belongs to its OWN tile.
-    expect(agentsForCompany('deepseek', agents)).toEqual(['deepseek']);
+  it('DeepSeek لا تظهر تحت Claude — المحور أداة لا جسم تحت Claude', () => {
+    // The consumer axis for deepseek on Claude is `tool`, not `body`, so its
+    // vendor card never lands on Claude's account tab (its own tile is hidden).
+    expect(agentsForCompany('deepseek', agents)).toEqual([]);
   });
 
   it('يبقي مفتاح Anthropic ظاهراً تحت Claude وتحت OpenCode — موضعان أصيلان', () => {

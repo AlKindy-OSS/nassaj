@@ -110,7 +110,7 @@ test('profile list needs an owner session but no Origin and performs no nonce wr
     assert.equal(bootCalls, 1, 'composition runs before a request is accepted');
     app.use('/auth-profiles', routes);
     const response = await request(app, {
-      cookie: `nassaj_connector_recent_auth=${token}`,
+      cookie: `__Host-nassaj_connector_recent_auth=${token}`,
     });
     assert.equal(response.status, 200);
     const body = await response.json() as { profiles: unknown[] };

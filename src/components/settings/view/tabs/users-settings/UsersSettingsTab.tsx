@@ -66,8 +66,8 @@ export default function UsersSettingsTab() {
     revokeInvite,
     resetPassword,
     deleteUser,
-    linkSsoIdentity,
     unlinkSsoIdentity,
+    unlinkOwnSsoIdentity,
   } = useUsersAdmin(true);
   const isSsoAvailable = useOidcAvailability();
 
@@ -96,12 +96,14 @@ export default function UsersSettingsTab() {
     [currentUserId, isAdmin, isOwner],
   );
 
-  // SSO link visibility: owner may manage anyone's link (their own included);
-  // admin may not touch an owner's — linking an owner to a subject the admin
-  // controls would hand the admin an owner session.
+  // SSO visibility (B-1410), mirroring the server: only the owner may remove
+  // SSO links — from a strictly lower-ranked member, or from their own account
+  // (password re-checked). Nobody links an account for someone else, so an
+  // admin has no SSO action at all.
   const canManageSso = useCallback(
-    (target: ManagedUser) => isSsoAvailable && (isOwner || (isAdmin && target.role !== 'owner')),
-    [isAdmin, isOwner, isSsoAvailable],
+    (target: ManagedUser) =>
+      isSsoAvailable && isOwner && (target.id === currentUserId || target.role !== 'owner'),
+    [currentUserId, isOwner, isSsoAvailable],
   );
 
   const pendingInvites = useMemo(
@@ -483,9 +485,13 @@ export default function UsersSettingsTab() {
       {ssoTarget && (
         <SsoIdentityModal
           username={ssoTarget.username}
+          isSelf={ssoTarget.id === currentUserId}
           onClose={() => setSsoTarget(null)}
-          onLink={(subject) => linkSsoIdentity(ssoTarget.id, subject)}
-          onUnlink={() => unlinkSsoIdentity(ssoTarget.id)}
+          onUnlink={(currentPassword) =>
+            ssoTarget.id === currentUserId
+              ? unlinkOwnSsoIdentity(currentPassword ?? '')
+              : unlinkSsoIdentity(ssoTarget.id)
+          }
         />
       )}
     </div>

@@ -8,6 +8,8 @@
  *    callers are expected to stay silent;
  *  - duplicate authenticator on registration → `duplicate` (client
  *    InvalidStateError or server 409);
+ *  - a refused step-up proof on registration (B-1407) → `stepUp` with the
+ *    server's machine-readable `code` (step_up_failed, step_up_rate_limited…);
  *  - everything else → `failed` / `network` with an optional server message.
  *
  * The session side of a passkey login (token persistence, identity hydration,
@@ -31,7 +33,20 @@ import { useAuth } from '../context/AuthContext';
 import type { ApiErrorPayload, PasskeyCredentialSummary } from '../types';
 import { parseJsonSafely } from '../utils';
 
-export type WebAuthnFailureKind = 'cancelled' | 'duplicate' | 'failed' | 'network';
+export type WebAuthnFailureKind = 'cancelled' | 'duplicate' | 'failed' | 'network' | 'stepUp';
+
+/**
+ * How the user proves it is them before enrolling a passkey: the current
+ * password, or an assertion from one of their step-up-eligible passkeys.
+ */
+export type PasskeyStepUpInput = { method: 'password'; password: string } | { method: 'passkey' };
+
+export type StepUpEvidence =
+  | { method: 'password'; password: string }
+  | { method: 'passkey'; response: unknown };
+
+/** Step-up audiences the server accepts (services/step-up.service.js). */
+export type StepUpAudience = 'passkey_registration' | 'connector_owner';
 
 export type WebAuthnLoginResult =
   | { success: true }
@@ -39,7 +54,79 @@ export type WebAuthnLoginResult =
 
 export type WebAuthnRegisterResult =
   | { success: true; credential: PasskeyCredentialSummary }
-  | { success: false; kind: WebAuthnFailureKind; error?: string };
+  | { success: false; kind: WebAuthnFailureKind; error?: string; code?: string; retryAfterSeconds?: number };
+
+export type EvidenceResult =
+  | { ok: true; evidence: StepUpEvidence }
+  | { ok: false; failure: Extract<WebAuthnRegisterResult, { success: false }> };
+
+/** Server codes (routes/webauthn.js, services/step-up.service.js) for a refused step-up. */
+export const STEP_UP_CODES: ReadonlySet<string> = new Set([
+  'step_up_required',
+  'step_up_failed',
+  'step_up_invalid_request',
+  'step_up_rate_limited',
+  'sso_step_up_required',
+  'password_change_required',
+  'no_eligible_passkey',
+]);
+
+/** Parses a failed response into a register failure, keeping the server code. */
+async function toFailure(
+  response: Response,
+): Promise<Extract<WebAuthnRegisterResult, { success: false }>> {
+  const payload = await parseJsonSafely<ApiErrorPayload>(response);
+  const code = payload?.code;
+  // A 429 carries its wait time; the caller shows it and holds the buttons.
+  const retryAfterSeconds = Number(response.headers?.get?.('Retry-After'));
+  return {
+    success: false,
+    kind: code && STEP_UP_CODES.has(code) ? 'stepUp' : 'failed',
+    error: payload?.error ?? payload?.message,
+    code,
+    ...(Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? { retryAfterSeconds: Math.ceil(retryAfterSeconds) } : {}),
+  };
+}
+
+/**
+ * Turns the chosen step-up input into evidence for `audience`. For a passkey
+ * this runs the step-up ceremony (only the user's eligible passkeys, UV
+ * required); the challenge is bound to that audience server-side.
+ */
+export async function collectStepUpEvidence(
+  input: PasskeyStepUpInput,
+  audience: StepUpAudience,
+): Promise<EvidenceResult> {
+  if (input.method === 'password') {
+    return { ok: true, evidence: input };
+  }
+  let optionsJSON: PublicKeyCredentialRequestOptionsJSON;
+  try {
+    const optionsResponse = await api.auth.webauthn.stepUpOptions(audience);
+    if (!optionsResponse.ok) {
+      return { ok: false, failure: await toFailure(optionsResponse) };
+    }
+    const parsed = await parseJsonSafely<PublicKeyCredentialRequestOptionsJSON>(optionsResponse);
+    if (!parsed) {
+      return { ok: false, failure: { success: false, kind: 'failed' } };
+    }
+    optionsJSON = parsed;
+  } catch (caughtError) {
+    console.error('Passkey step-up options error:', caughtError);
+    return { ok: false, failure: { success: false, kind: 'network' } };
+  }
+  try {
+    const response = await startAuthentication({ optionsJSON });
+    return { ok: true, evidence: { method: 'passkey', response } };
+  } catch (caughtError) {
+    if (isUserCancellation(caughtError)) {
+      return { ok: false, failure: { success: false, kind: 'cancelled' } };
+    }
+    console.error('Passkey step-up ceremony error:', caughtError);
+    return { ok: false, failure: { success: false, kind: 'failed' } };
+  }
+}
 
 /** True when the user dismissed/aborted the ceremony — callers stay silent. */
 function isUserCancellation(error: unknown): boolean {
@@ -107,17 +194,21 @@ export function useWebAuthn() {
   }, [completePasskeyLogin]);
 
   /**
-   * Registers a new passkey for the signed-in user. `name` is an optional
-   * user-facing label stored alongside the credential.
+   * Registers a new passkey for the signed-in user after a step-up proof
+   * (B-1407). `name` is an optional user-facing label stored alongside the
+   * credential.
    */
   const registerPasskey = useCallback(
-    async (name?: string): Promise<WebAuthnRegisterResult> => {
+    async (name: string | undefined, stepUp: PasskeyStepUpInput): Promise<WebAuthnRegisterResult> => {
+      const collected = await collectStepUpEvidence(stepUp, 'passkey_registration');
+      if (!collected.ok) {
+        return collected.failure;
+      }
       let optionsJSON: PublicKeyCredentialCreationOptionsJSON;
       try {
-        const optionsResponse = await api.auth.webauthn.registerOptions();
+        const optionsResponse = await api.auth.webauthn.registerOptions(collected.evidence);
         if (!optionsResponse.ok) {
-          const payload = await parseJsonSafely<ApiErrorPayload>(optionsResponse);
-          return { success: false, kind: 'failed', error: payload?.error ?? payload?.message };
+          return toFailure(optionsResponse);
         }
         const parsed = await parseJsonSafely<PublicKeyCredentialCreationOptionsJSON>(
           optionsResponse,

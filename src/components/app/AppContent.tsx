@@ -16,6 +16,7 @@ import type { SidebarSection, SidebarTerminalsProps } from '../sidebar/types/typ
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { PaletteOpsProvider, usePaletteOpsRegister } from '../../contexts/PaletteOpsContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
+import { useVersionCheck } from '../../hooks/useVersionCheck';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import {
@@ -25,12 +26,15 @@ import {
 import { setTitleOutcome } from '../../utils/pageTitleNotification';
 import { loadConnectors } from '../../stores/connectorsStore';
 import { useActiveWorkflows } from '../../stores/useActiveWorkflows';
+import { forgetSurfacedNegativeCache } from '../../stores/surfacedSessionsStore';
 import { useAuth } from '../auth';
 import { useScheduledMessagesSummary } from '../scheduled-messages/hooks/useScheduledMessagesSummary';
 import { isScheduledMessagesCenterEnabled } from '../scheduled-messages/scheduledMessagesFeature';
 import ScheduledMessagesCenterRoute from '../scheduled-messages/view/ScheduledMessagesCenterRoute';
 
 import BuildUpdateBanner from './BuildUpdateBanner';
+import { useUpdateCompletionNotice } from '../version-upgrade/useUpdateCompletionNotice';
+import { UpdateCompletionBanner } from '../version-upgrade/view/UpdateCompletionBanner';
 import { useSessionOutcomeAcknowledgement } from './hooks/useSessionOutcomeAcknowledgement';
 import { getShellVisualViewportGeometry } from './visualViewportGeometry';
 import {
@@ -57,6 +61,13 @@ function AppContentInner() {
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { user } = useAuth();
+  // Success signal for an update that finished while its dialog was closed
+  // (owner defect, a fleet node, 2026-09) — lives at the app shell, not the
+  // Sidebar, because on mobile the Sidebar is an off-screen transformed
+  // drawer and would show the notice unseen (qa-critic round 1, M2).
+  const { currentVersion: updateCurrentVersion } = useVersionCheck();
+  const { notice: updateCompletionNotice, dismiss: dismissUpdateCompletionNotice } =
+    useUpdateCompletionNotice(updateCurrentVersion);
   const scheduledCenterEnabled = isScheduledMessagesCenterEnabled(user?.role);
   const scheduledSummary = useScheduledMessagesSummary(scheduledCenterEnabled);
   const isScheduledRoute = location.pathname === '/scheduled' && scheduledCenterEnabled;
@@ -342,6 +353,16 @@ function AppContentInner() {
      * الانتهاء لا يرى شيئاً أبداً. صار الحكم يُكتب مرّةً عند مختنق الإرسال
      * الخادميّ ويُبثّ لكل من يرى المحادثة — مهما كان مَن شغّلها.
      */
+    // B-1431/T-1949: a brand-new session id cannot be a stale "not found"
+    // negative from an earlier surfaced-sessions batch — the negative would
+    // otherwise sit until its TTL and hide a just-created running conversation.
+    if (msg.kind === 'session_created') {
+      const newSessionId = typeof msg.newSessionId === 'string' && msg.newSessionId
+        ? msg.newSessionId
+        : typeof msg.sessionId === 'string' ? msg.sessionId : null;
+      if (newSessionId) forgetSurfacedNegativeCache(newSessionId);
+    }
+
     if (msg.type === 'session_outcome' && typeof msg.sessionId === 'string') {
       const outcomeState = msg.outcomeState;
       if (outcomeState !== 'visible' && outcomeState !== 'seen' && outcomeState !== 'absent') {
@@ -352,6 +373,7 @@ function AppContentInner() {
         (msg.outcome ?? null) as Parameters<typeof applyOutcomeDelta>[1],
         typeof msg.outcomeAt === 'string' ? msg.outcomeAt : null,
         outcomeState,
+        typeof msg.projectId === 'string' && msg.projectId.length > 0 ? msg.projectId : null,
       );
     }
 
@@ -558,6 +580,14 @@ function AppContentInner() {
       }}
     >
       <BuildUpdateBanner />
+      {updateCompletionNotice && (
+        <div className="fixed inset-x-4 top-4 z-[60] mx-auto max-w-md sm:inset-x-auto sm:end-4 sm:start-auto">
+          <UpdateCompletionBanner
+            targetVersion={updateCompletionNotice.targetVersion}
+            onDismiss={dismissUpdateCompletionNotice}
+          />
+        </div>
+      )}
       {!isMobile ? (
         <div className="sidebar-host-panel h-full flex-shrink-0">
           <Sidebar

@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import Database from 'better-sqlite3';
 
 import { readResponseModel } from '@/modules/providers/shared/response-model.js';
+import { redactQwenPlanSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import {
@@ -456,7 +457,14 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
 
-    for (const row of rows) {
+    for (const storedRow of rows) {
+      // T-1906: a Coding Plan key a model echoed into opencode.db is redacted
+      // on read, before any field is parsed or returned.
+      const row: OpenCodeHistoryRow = {
+        ...storedRow,
+        message_data: redactQwenPlanSecrets(storedRow.message_data),
+        part_data: redactQwenPlanSecrets(storedRow.part_data),
+      };
       const timestamp = normalizeProviderTimestamp(row.part_time_created ?? row.message_time_created);
       const baseId = `${row.message_id}_${row.part_id ?? normalized.length}`;
       const messageInfo = readJsonRecord(row.message_data);

@@ -235,7 +235,14 @@ function makeOutboxEntry(input: RecordOutboxInput): OutboxEntry {
  * It deliberately fails closed when the browser cannot provide origin-wide
  * locking: a local copy is safer than a message which cannot be recovered.
  */
-async function recordV2OutboxEntry(input: RecordOutboxInput, activate: boolean): Promise<OutboxEntry | null> {
+/** Sentinel: the account has never activated v2 and this call may not
+ * activate it (T-1936 item 4 — the activation read now lives inside the
+ * same readwrite transaction as the record, so this is the only way for
+ * that in-transaction read to signal "fall back to the legacy writer"
+ * without a second, separate transaction). */
+const V2_NOT_ACTIVE = Symbol('v2_not_active');
+
+async function recordV2OutboxEntry(input: RecordOutboxInput, mayActivate: boolean): Promise<OutboxEntry | null | typeof V2_NOT_ACTIVE> {
   const account = activeUserKey;
   const epoch = activeUserEpoch;
   if (!account || !supportsSafeV2Storage()) return null;
@@ -247,7 +254,14 @@ async function recordV2OutboxEntry(input: RecordOutboxInput, activate: boolean):
   let evictedInTx: V2Entry[] = [];
   // B-1042: رصد امتلاء السعة داخل المعاملة لرفع الراية خارجها.
   let v2CapacityExceeded = false;
+  // T-1936 item 4: قراءة راية التفعيل داخل نفس معاملة القيد لا في معاملة
+  // منفصلة سابقة عليها، ولا تُكتب إلا إن كانت غائبة (لا تُستبدَل أبداً).
+  let notActive = false;
+  let wasActive = false;
   const saved = await withV2Transaction<boolean>('readwrite', async (stores) => {
+    const activationMarker = await requestValue(stores[V2_META].get(activationKey(account)));
+    wasActive = Boolean(activationMarker);
+    if (!wasActive && !mayActivate) { notActive = true; throw new Error('not_active'); }
     const all = await requestValue(stores[V2_ENTRIES].getAll()) as V2Entry[];
     if (activeUserKey !== account || activeUserEpoch !== epoch) throw new Error('stale_account');
     const owned = all.filter(item => item.account === account);
@@ -269,9 +283,10 @@ async function recordV2OutboxEntry(input: RecordOutboxInput, activate: boolean):
     });
     stores[V2_ENTRIES].put(candidate);
     images.forEach((image, index) => stores[V2_IMAGES].put(image, v2ImageKey(candidate, index)));
-    if (activate) stores[V2_META].put({ activatedAt: Date.now() }, activationKey(account));
+    if (!wasActive) stores[V2_META].put({ activatedAt: Date.now() }, activationKey(account));
     return true;
   });
+  if (notActive) return V2_NOT_ACTIVE;
   if (!saved || activeUserKey !== account || activeUserEpoch !== epoch) {
     // B-1042: رفع الراية فقط إن كانت السعة هي السبب وما زلنا على نفس الحساب.
     if (v2CapacityExceeded && activeUserKey === account && activeUserEpoch === epoch) {
@@ -297,11 +312,6 @@ async function recordV2OutboxEntry(input: RecordOutboxInput, activate: boolean):
   notify();
   notifyV2Change();
   return entry;
-}
-
-async function readV2Activation(account: string): Promise<boolean> {
-  const marker = await withV2Transaction<unknown>('readonly', stores => requestValue(stores[V2_META].get(activationKey(account))));
-  return Boolean(marker);
 }
 
 async function legacyFingerprint(entry: OutboxEntry, images: readonly File[]): Promise<string | null> {
@@ -388,8 +398,10 @@ async function recordLegacyOutboxEntryDurably(input: RecordOutboxInput): Promise
 
 /**
  * Admission routing for the B→A compatibility floor.  Every call reads the
- * account marker while holding the origin lock.  B writes legacy only while
- * no marker exists; after A commits activation it transparently adopts v2.
+ * account marker while holding the origin lock, from inside the same
+ * readwrite transaction as the record itself (T-1936 item 4) — no separate
+ * readonly transaction precedes it. B writes legacy only while no marker
+ * exists; after A commits activation it transparently adopts v2.
  */
 export async function recordOutboxEntryDurably(input: RecordOutboxInput): Promise<OutboxEntry | null> {
   const account = activeUserKey;
@@ -398,11 +410,8 @@ export async function recordOutboxEntryDurably(input: RecordOutboxInput): Promis
   const locks = (navigator as Navigator & { locks: LockManager }).locks;
   return locks.request('nassaj-outbox-v2', { mode: 'exclusive' }, async () => {
     if (activeUserKey !== account || activeUserEpoch !== epoch) return null;
-    const active = await readV2Activation(account);
-    if (activeUserKey !== account || activeUserEpoch !== epoch) return null;
-    const saved = active || MAY_ACTIVATE_OUTBOX_V2
-      ? await recordV2OutboxEntry(input, !active && MAY_ACTIVATE_OUTBOX_V2)
-      : await recordLegacyOutboxEntryDurably(input);
+    const v2Result = await recordV2OutboxEntry(input, MAY_ACTIVATE_OUTBOX_V2);
+    const saved = v2Result === V2_NOT_ACTIVE ? await recordLegacyOutboxEntryDurably(input) : v2Result;
     return activeUserKey === account && activeUserEpoch === epoch ? saved : null;
   }).catch(() => null);
 }

@@ -4,7 +4,12 @@
  *
  * Lists the signed-in user's WebAuthn credentials (name, created/last-used
  * dates, synced vs device-bound badge) and offers add (with an optional
- * label), inline rename, and delete-with-confirmation. The WebAuthn
+ * label), inline rename, and delete-with-confirmation. Adding a passkey first
+ * asks for the current password — or a confirmation with an existing
+ * step-up-eligible passkey — because a session token alone may no longer
+ * enroll one (B-1407). Passkeys added before that check carry a
+ * "re-register" badge: they still sign in but cannot confirm sensitive
+ * actions. The WebAuthn
  * registration ceremony itself lives in useWebAuthn; this component only
  * orchestrates the CRUD calls and UI state. A dismissed authenticator prompt
  * is treated as a silent cancel, mirroring the login form.
@@ -17,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Input } from '../../../../../shared/view/ui';
 import { useWebAuthn } from '../../../../auth/hooks/useWebAuthn';
+import type { PasskeyStepUpInput, WebAuthnRegisterResult } from '../../../../auth/hooks/useWebAuthn';
 import type { PasskeyCredentialSummary } from '../../../../auth/types';
 import { parseJsonSafely, resolveApiErrorMessage } from '../../../../auth/utils';
 import { api } from '../../../../../utils/api';
@@ -47,6 +53,34 @@ function formatDate(value: string, locale: string): string {
   return date.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/** Enrolled under the hardened ceremony — may confirm sensitive actions. */
+function isStepUpEligible(credential: PasskeyCredentialSummary): boolean {
+  return credential.step_up_eligible === 1;
+}
+
+const STEP_UP_ERROR_KEYS: Record<string, string> = {
+  step_up_failed: 'profile.passkeys.errors.stepUpFailed',
+  step_up_required: 'profile.passkeys.errors.stepUpFailed',
+  step_up_invalid_request: 'profile.passkeys.errors.stepUpFailed',
+  step_up_rate_limited: 'profile.passkeys.errors.stepUpRateLimited',
+  sso_step_up_required: 'profile.passkeys.errors.ssoStepUp',
+  password_change_required: 'profile.passkeys.errors.passwordChange',
+  no_eligible_passkey: 'profile.passkeys.errors.noEligiblePasskey',
+};
+
+/** Translation key for a failed registration, or null for a silent cancel. */
+function registerErrorKey(
+  result: Extract<WebAuthnRegisterResult, { success: false }>,
+): string | null {
+  if (result.kind === 'cancelled') return null;
+  if (result.kind === 'duplicate') return 'profile.passkeys.errors.duplicate';
+  if (result.kind === 'network') return 'profile.passkeys.errors.network';
+  if (result.kind === 'stepUp' && result.code) {
+    return STEP_UP_ERROR_KEYS[result.code] ?? 'profile.passkeys.errors.stepUpFailed';
+  }
+  return 'profile.passkeys.errors.registerFailed';
+}
+
 /** A passkey synced through a platform account (iCloud/Google) vs device-bound. */
 function isSyncedPasskey(credential: PasskeyCredentialSummary): boolean {
   return Boolean(credential.backed_up) || credential.device_type === 'multiDevice';
@@ -63,7 +97,9 @@ export default function PasskeysSection() {
   // Add-passkey form state.
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
+  const hasEligiblePasskey = credentials.some(isStepUpEligible);
 
   // Inline rename state (one credential at a time).
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -95,38 +131,47 @@ export default function PasskeysSection() {
     void loadCredentials();
   }, [loadCredentials]);
 
-  const handleAddSubmit = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
+  const closeAddForm = useCallback(() => {
+    setShowAddForm(false);
+    setNewName('');
+    setCurrentPassword('');
+  }, []);
+
+  const register = useCallback(
+    async (stepUp: PasskeyStepUpInput) => {
       setFeedback(null);
       setIsRegistering(true);
-      const result = await registerPasskey(newName);
+      const result = await registerPasskey(newName, stepUp);
       setIsRegistering(false);
+      // The password is single-use evidence: never keep it after an attempt.
+      setCurrentPassword('');
 
       if (!result.success) {
-        // The user dismissed the authenticator prompt — not an error.
-        if (result.kind === 'cancelled') {
-          return;
-        }
-        if (result.kind === 'duplicate') {
-          setFeedback({ kind: 'error', message: t('profile.passkeys.errors.duplicate') });
-        } else if (result.kind === 'network') {
-          setFeedback({ kind: 'error', message: t('profile.passkeys.errors.network') });
-        } else {
-          setFeedback({
-            kind: 'error',
-            message: result.error ?? t('profile.passkeys.errors.registerFailed'),
-          });
+        const key = registerErrorKey(result);
+        if (key) {
+          // A step-up refusal has a precise message; otherwise prefer the server's.
+          const message = result.kind === 'failed' && result.error ? result.error : t(key);
+          setFeedback({ kind: 'error', message });
         }
         return;
       }
 
       setCredentials((previous) => [...previous, result.credential]);
       setFeedback({ kind: 'success', message: t('profile.passkeys.success.added') });
-      setShowAddForm(false);
-      setNewName('');
+      closeAddForm();
     },
-    [newName, registerPasskey, t],
+    [closeAddForm, newName, registerPasskey, t],
+  );
+
+  const handleAddSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!currentPassword) {
+        return;
+      }
+      void register({ method: 'password', password: currentPassword });
+    },
+    [currentPassword, register],
   );
 
   const startRename = useCallback((credential: PasskeyCredentialSummary) => {
@@ -252,8 +297,28 @@ export default function PasskeysSection() {
                 maxLength={64}
               />
             </div>
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={isRegistering}>
+            <div>
+              <p className="mb-2 text-[13px] leading-relaxed text-muted-foreground">
+                {t('profile.passkeys.stepUp.intro')}
+              </p>
+              <label
+                htmlFor="passkey-step-up-password"
+                className="mb-1 block text-sm font-medium text-foreground"
+              >
+                {t('profile.passkeys.stepUp.passwordLabel')}
+              </label>
+              <Input
+                id="passkey-step-up-password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                disabled={isRegistering}
+                required
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" size="sm" disabled={isRegistering || !currentPassword}>
                 {isRegistering && <Loader2 className="h-4 w-4 animate-spin" />}
                 {isRegistering ? t('profile.passkeys.creating') : t('profile.passkeys.create')}
               </Button>
@@ -261,14 +326,23 @@ export default function PasskeysSection() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  setShowAddForm(false);
-                  setNewName('');
-                }}
+                onClick={closeAddForm}
                 disabled={isRegistering}
               >
                 {t('profile.passkeys.cancel')}
               </Button>
+              {hasEligiblePasskey && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void register({ method: 'passkey' })}
+                  disabled={isRegistering}
+                >
+                  <Fingerprint className="h-4 w-4" aria-hidden />
+                  {t('profile.passkeys.stepUp.usePasskey')}
+                </Button>
+              )}
             </div>
           </form>
         )}
@@ -357,7 +431,17 @@ export default function PasskeysSection() {
                             ? t('profile.passkeys.badges.synced')
                             : t('profile.passkeys.badges.device')}
                         </StatusBadge>
+                        {!isStepUpEligible(credential) && (
+                          <StatusBadge tone="warning">
+                            {t('profile.passkeys.badges.reRegister')}
+                          </StatusBadge>
+                        )}
                       </div>
+                    )}
+                    {!isStepUpEligible(credential) && renamingId !== credential.id && (
+                      <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+                        {t('profile.passkeys.reRegisterHint')}
+                      </p>
                     )}
                     <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
                       {t('profile.passkeys.createdAt', {

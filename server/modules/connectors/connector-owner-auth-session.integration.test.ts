@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import Database from 'better-sqlite3';
@@ -9,11 +10,14 @@ import { migrateConnectorAuthSchema } from '../database/connector-auth.migration
 // eslint-disable-next-line boundaries/dependencies -- integration test exercises real revocation queries.
 import { createConnectorAuthDb } from '../database/repositories/connector-auth.db.js';
 
+import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import { createConnectorOwnerAuthSessionAdapter } from './connector-owner-auth-session.js';
 import {
-  connectorRecentAuthCookieName,
+  connectorHostRecentAuthCookieName as connectorRecentAuthCookieName,
   createConnectorOwnerReadGate,
 } from './connector-owner-operation-gate.js';
+
+const ORIGIN = 'https://nassaj.example';
 
 const OLD_TOKEN = '1'.repeat(64);
 const NEW_TOKEN = '2'.repeat(64);
@@ -31,7 +35,7 @@ test('a stolen old cookie fails after new login and the current cookie fails aft
   const adapter = createConnectorOwnerAuthSessionAdapter({
     repository,
     installationId,
-    canonicalOrigin: 'https://nassaj.example',
+    resolveOrigin: () => ORIGIN,
     now: () => now,
     randomToken: () => token,
     randomCsrfToken: () => '3'.repeat(64),
@@ -46,7 +50,7 @@ test('a stolen old cookie fails after new login and the current cookie fails aft
     } as unknown as express.Request;
     const res = { status: () => res, json: () => res } as unknown as express.Response;
     let next = false;
-    createConnectorOwnerReadGate({ repository, installationId, now: () => now })(
+    createConnectorOwnerReadGate({ repository, installationId, canonicalOrigin: ORIGIN, now: () => now })(
       req, res, () => { next = true; },
     );
     return next;
@@ -68,6 +72,21 @@ test('a stolen old cookie fails after new login and the current cookie fails aft
     } as express.Request;
     assert.equal(adapter.revoke(logoutReq, cookieResponse, 7), true);
     assert.equal(accepted(NEW_TOKEN), false, 'logout revokes before clearing the browser cookie');
+
+    // An OIDC step-up session lives exactly RECENT_AUTH_MAX_AGE_MS (10 minutes).
+    now += 1;
+    token = '4'.repeat(64);
+    adapter.record(cookieResponse, 7, 'oidc');
+    const stored = database.prepare(
+      'SELECT auth_method, expires_at_ms - auth_time_ms AS window FROM connector_owner_auth_sessions WHERE session_token_hash = ?',
+    ).get(createHash('sha256').update(token).digest('hex')) as { auth_method: string; window: number };
+    assert.deepEqual(stored, { auth_method: 'oidc', window: 10 * 60 * 1_000 });
+    assert.equal(RECENT_AUTH_MAX_AGE_MS, 10 * 60 * 1_000);
+    assert.equal(accepted(token), true);
+    now += RECENT_AUTH_MAX_AGE_MS - 1;
+    assert.equal(accepted(token), true, 'still inside the ten-minute window');
+    now += 1;
+    assert.equal(accepted(token), false, 'expired at exactly ten minutes');
   } finally {
     database.close();
   }

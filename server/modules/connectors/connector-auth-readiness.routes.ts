@@ -11,7 +11,8 @@ import type { ManagedConnectorProfile } from './connector-auth-profile-managemen
 import { connectorAuthServiceCapability } from './connector-auth-public-capabilities.js';
 import { connectorAuthProfileRuntime } from './connector-auth-profile.routes.js';
 import { CONNECTOR_OAUTH_CALLBACK_PATH } from './connector-auth-security.js';
-import { resolveConnectorRuntimeInstallationOrigin } from './connector-substrate-only.production.js';
+import { connectorRuntimeLiveOrigin } from './connector-substrate-only.production.js';
+import { connectorOwnerSessionOrigin } from './connector-owner-auth-session.js';
 import { validatedConnectorCsrfToken } from './connector-owner-operation-gate.js';
 
 type ProfileReader = Readonly<{
@@ -23,6 +24,13 @@ type ProfileReader = Readonly<{
 
 type ReadinessRuntime = Readonly<{
   canonicalOrigin: string;
+  /**
+   * Origin the recent-auth cookies were issued under (the step-up source: the
+   * persisted origin, else the pre-origin environment proposal). The CSRF token
+   * is validated against it so the first-time origin wizard receives its token
+   * before any origin is persisted. Defaults to canonicalOrigin.
+   */
+  sessionOrigin?: string | null;
   installationId: string | null;
   repository: ProfileReader | null;
 }>;
@@ -81,13 +89,15 @@ const readinessDto = (
   });
 };
 
+// The origin is read per request (T-1939 6B): a PUT /origin change applies to
+// readiness, CSRF validation and the callback URL without a restart.
 const productionRuntime = (): ReadinessRuntime => {
   const runtime = connectorAuthProfileRuntime();
-  const origin = resolveConnectorRuntimeInstallationOrigin();
-  return runtime ?? {
-    canonicalOrigin: origin?.canonicalOrigin ?? '',
-    installationId: null,
-    repository: null,
+  return {
+    canonicalOrigin: connectorRuntimeLiveOrigin() ?? '',
+    sessionOrigin: connectorOwnerSessionOrigin(),
+    installationId: runtime?.installationId ?? null,
+    repository: runtime?.repository ?? null,
   };
 };
 
@@ -128,6 +138,7 @@ export const createConnectorAuthReadinessRoutes = (
           runtime.repository,
           runtime.installationId,
           caller.userId,
+          runtime.sessionOrigin !== undefined ? runtime.sessionOrigin : (runtime.canonicalOrigin || null),
           dependencies.now?.() ?? Date.now(),
         )
         : null;

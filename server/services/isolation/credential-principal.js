@@ -17,8 +17,9 @@
  *
  * Rules, all decided HERE and nowhere else:
  *   • no delegation for an anonymous caller (null/undefined/'') — returned as is;
- *   • qwen joined the grantable set on the owner's instruction (2026-09-10);
- *     its Coding Plan key and ~/.qwen state follow the grant like any other;
+ *   • qwen is NOT grantable (T-1906, 2026-09-28; reverses 2026-09-10): the
+ *     Alibaba Coding Plan key is personal and may not be shared (vendor terms).
+ *     Grant rows stored for it before the change are ignored on every read;
  *   • only a grant whose owner is an ACTIVE account counts — read live on every
  *     call, no cache, so disabling or deleting the owner ends it on the very
  *     next spawn (an indexed query per lookup; a HOME-steered spawn makes two:
@@ -57,7 +58,6 @@ export const GRANTABLE_PROVIDERS = Object.freeze([
   'kimi',
   'deepseek',
   'glm',
-  'qwen',
 ]);
 
 /**
@@ -156,7 +156,8 @@ export function listDelegatedOwners(granteeId) {
     const seen = new Set();
     const owners = new Set();
     for (const row of credentialGrantsDb.listUsableByGrantee(granteeId)) {
-      if (seen.has(row.provider)) continue;
+      // A row for a no-longer-grantable unit (qwen before T-1906) is dead.
+      if (seen.has(row.provider) || !isGrantableKey(row.provider)) continue;
       seen.add(row.provider);
       owners.add(String(row.ownerUserId));
     }

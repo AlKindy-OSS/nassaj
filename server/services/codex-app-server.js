@@ -14,15 +14,9 @@ import { authorizeRuntimeUserProviderEffect } from '../modules/execution-permiss
 import {
   acquireCodexLaunchIdentity,
   assertCodexIdentityUnchanged,
-  codexIdentityFromExecution,
-  codexLaunchOptions,
-  CODEX_MACHINE_CLI_MISSING_MESSAGE,
-  isCodexMachineCliMissing,
 } from '../shared/codex-executable.js';
-import { assertCodexRuntimeCompatible, peekCodexRuntimeVerdict } from '../shared/codex-runtime-compat.js';
-import {
-  beginHarnessLaunch,
-} from '../modules/providers/harness-update/spawn-admission.js';
+import { codexLaunchIdentityFor, spawnReservedCodex } from '../modules/providers/list/codex/codex-reserved-spawn.js';
+import { peekCodexRuntimeVerdict } from '../shared/codex-runtime-compat.js';
 
 import { resolveProviderEnv } from './isolation/resolve-provider-env.js';
 
@@ -34,42 +28,6 @@ const activeCompactions = new Map();
 const MAX_ACTIVE_RPCS = 8;
 const MAX_ACTIVE_RPCS_PER_USER = 3;
 const activeRpcs = new Map();
-
-/**
- * T-1872: the machine Codex identity for one launch — the admission's own
- * object when a permit exists (never re-acquired), otherwise acquired here once.
- * An unresolvable or incompatible runtime releases the unconsumed permit before rethrowing.
- */
-async function codexLaunchIdentityFor(permissionExecution) {
-  try {
-    const identity = permissionExecution
-      ? codexIdentityFromExecution(permissionExecution) : acquireCodexLaunchIdentity();
-    // T-1872 part 2: refuse a machine release outside Nassaj's contract (cached verdict).
-    return await assertCodexRuntimeCompatible(identity);
-  } catch (error) {
-    permissionExecution?.notStarted?.();
-    if (isCodexMachineCliMissing(error)) {
-      throw Object.assign(new Error(CODEX_MACHINE_CLI_MISSING_MESSAGE), { code: error.code });
-    }
-    throw error;
-  }
-}
-
-/** Spawn `codex app-server` from the exact measured executable after a final re-stat. */
-function spawnReservedCodex(spawnImpl, identity, env, args, options) {
-  const release = beginHarnessLaunch('codex');
-  try {
-    assertCodexIdentityUnchanged(identity);
-    const launch = codexLaunchOptions(env, identity);
-    const child = spawnImpl(launch.codexPathOverride, args, { ...options, env: launch.env });
-    child.once?.('exit', release);
-    child.once?.('error', release);
-    return child;
-  } catch (error) {
-    release();
-    throw error;
-  }
-}
 
 /**
  * Release trees whose native fork was exercised end-to-end by a real fork test

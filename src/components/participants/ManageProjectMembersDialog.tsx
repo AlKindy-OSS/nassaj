@@ -62,8 +62,8 @@ function parseCandidates(value: unknown, projectId: string): Candidate[] | null 
 
 function MemberAvatar({ userId, displayName, avatar }: Pick<Member, 'userId' | 'displayName' | 'avatar'>) {
   const name = displayName ?? String(userId);
-  return avatar ? <img src={staticAssetUrl(avatar)} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" /> : (
-    <span aria-hidden className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-medium text-white', avatarColorForUser(userId))}>{initialForName(name)}</span>
+  return avatar ? <img src={staticAssetUrl(avatar)} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" /> : (
+    <span aria-hidden className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-medium text-white', avatarColorForUser(userId))}>{initialForName(name)}</span>
   );
 }
 
@@ -82,7 +82,7 @@ function MemberRow({ member, viewer, currentUserId, busy, t, onRole, onRemove }:
   const canRemove = !member.isCreator && (member.role === 'owner' ? viewer.canManageOwnerRole : viewer.canManageMembers);
   const canChangeRole = !member.isCreator && viewer.canManageOwnerRole;
   const isSelf = currentUserId === member.userId;
-  return <li className="flex min-h-11 flex-wrap items-center gap-2 py-1.5 sm:flex-nowrap">
+  return <li className="flex min-h-9 flex-wrap items-center gap-2 py-1 sm:flex-nowrap">
     <MemberAvatar userId={member.userId} displayName={member.displayName} avatar={member.avatar} />
     {/* qa MEDIUM (c): truncate على <bdi> block لا <p> — بدونها القصّ العربي
         RTL يقصّ الاسم اللاتيني من بدايته (يمين السطر) لا نهايته. */}
@@ -216,6 +216,16 @@ function SearchAreaHeightReserve({ pulse = false, message }: { pulse?: boolean; 
 
 function MembersManager({ projectId, t, currentUserId }: { projectId: string; t: TFunction; currentUserId: number | null }) {
   const { onOpenChange } = useDialog();
+  // qa (B-1430): `onOpenChange` is the Dialog's own context value, which the
+  // upstream `<Dialog>` re-derives whenever the *parent's* `onOpenChange`
+  // prop gets a new identity (e.g. an inline arrow recreated by a sidebar
+  // re-render unrelated to this dialog). Keeping only a ref to it — read
+  // inside `load`/effects instead of listed as a dependency — means those
+  // effects re-run solely on their own intended triggers (mount, identity
+  // barrier, membership revocation), never on a parent re-render blinking
+  // the member list back to "loading" with the data already in hand.
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
   const [members, setMembers] = useState<Member[]>([]);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading');
@@ -249,23 +259,23 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
           if (conflictCode(retryBody) === 'identity_changed') { reconcileRevokedIdentity(); return; }
         }
       }
-      if (response.status === 404) { onOpenChange(false); return; }
+      if (response.status === 404) { onOpenChangeRef.current(false); return; }
       if (!response.ok) throw new Error('load_failed');
       const body = await response.json(); if (!valid(fence)) return;
       const parsed = parseMembersPayload(body, projectId); if (!parsed) throw new Error('invalid_members');
       setMembers(parsed.members); setViewer(parsed.viewer); setStatus('ready'); setGeneration(value => value + 1);
     } catch (error) { if (valid(fence) && (error as Error).name !== 'AbortError') setStatus('error'); }
-  }, [begin, onOpenChange, projectId, valid]);
+  }, [begin, projectId, valid]);
 
   useEffect(() => { void load(); return () => { requestGeneration.current += 1; activeController.current?.abort(); }; }, [load]);
   useEffect(() => subscribeIdentityBarrier(() => {
     requestGeneration.current += 1; activeController.current?.abort(); setMembers([]); setViewer(null);
-    if (getIdentityBarrierSnapshot().phase !== 'stable') onOpenChange(false);
-  }), [onOpenChange]);
+    if (getIdentityBarrierSnapshot().phase !== 'stable') onOpenChangeRef.current(false);
+  }), []);
   useEffect(() => {
-    const revoked = (event: Event) => { const detail = (event as CustomEvent<{ projectId?: string }>).detail; if (detail?.projectId === projectId) onOpenChange(false); };
+    const revoked = (event: Event) => { const detail = (event as CustomEvent<{ projectId?: string }>).detail; if (detail?.projectId === projectId) onOpenChangeRef.current(false); };
     window.addEventListener('project:membership-revoked', revoked); return () => window.removeEventListener('project:membership-revoked', revoked);
-  }, [onOpenChange, projectId]);
+  }, [projectId]);
 
   const mutate = useCallback(async (kind: 'add' | 'remove', userId: number, role: MemberRole = 'member') => {
     if (!viewer || (role === 'owner' && !viewer.canManageOwnerRole)) return;
@@ -294,8 +304,8 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
   }, [begin, load, projectId, t, valid, viewer]);
 
   const existingIds = useMemo(() => new Set(members.map(member => member.userId)), [members]);
-  return <DialogContent aria-labelledby={titleId} className="flex h-[min(90dvh,38rem)] w-[calc(100vw-1rem)] max-w-xl flex-col overflow-hidden p-4 text-start sm:p-6">
-    <div className="flex flex-wrap items-center gap-2"><DialogTitle id={titleId} className="not-sr-only text-xl font-semibold text-foreground">{t('participants.memberDialog.title', { defaultValue: 'Manage project members' })}</DialogTitle>{viewer?.adminAccess && <span className="rounded-full bg-warning/15 px-2 py-1 text-xs font-medium text-warning">{t('participants.memberDialog.adminAccess', { defaultValue: 'Admin access' })}</span>}</div>
+  return <DialogContent aria-labelledby={titleId} className="flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-md flex-col overflow-hidden p-4 text-start sm:p-5">
+    <div className="flex flex-wrap items-center gap-2"><DialogTitle id={titleId} className="not-sr-only text-base font-semibold text-foreground">{t('participants.memberDialog.title', { defaultValue: 'Manage project members' })}</DialogTitle>{viewer?.adminAccess && <span className="rounded-full bg-warning/15 px-2 py-1 text-xs font-medium text-warning">{t('participants.memberDialog.adminAccess', { defaultValue: 'Admin access' })}</span>}</div>
     {/* qa MEDIUM (b): overflow-hidden — لا يُمرَّر الغلاف كلّه؛ التمرير الوحيد
         الآن على قائمة الأعضاء نفسها (min-h-0 flex-1 overflow-y-auto) فتملأ
         الفراغ المتبقّي فعلاً بلا الفجوة الفارغة ~100px التي تركها ارتفاعٌ ثابت. */}
@@ -307,7 +317,7 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
         ? <AddMemberSearch projectId={projectId} viewer={viewer} existingIds={existingIds} mutationBusy={busyUserId !== null} generation={generation} t={t} onAdd={(userId, role) => void mutate('add', userId, role)} />
         : <SearchAreaHeightReserve pulse />}
       {actionError && <p role="alert" className="text-sm text-danger">{actionError}</p>}
-      <h3 className="text-sm font-semibold text-foreground">{t('participants.memberDialog.existing', { defaultValue: 'Current members' })}</h3>
+      <h3 className="text-xs font-medium text-muted-foreground">{t('participants.memberDialog.existing', { defaultValue: 'Current members' })}</h3>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {status === 'loading' && <p role="status" className="py-2 text-sm text-foreground">{t('participants.memberDialog.loading', { defaultValue: 'Loading…' })}</p>}
         {status === 'error' && <div className="space-y-2 py-2"><p role="alert" className="text-sm text-danger">{t('participants.memberDialog.loadError', { defaultValue: 'Could not load members' })}</p><Button type="button" variant="outline" size="sm" onClick={() => void load()}>{t('participants.memberDialog.retry', { defaultValue: 'Retry' })}</Button></div>}
@@ -316,14 +326,49 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
       </div>
       <div aria-live="polite" className="sr-only">{busyUserId !== null ? t('participants.memberDialog.saving', { defaultValue: 'Saving membership change' }) : actionError}</div>
     </div>
-    <Button type="button" variant="outline" size="lg" className="mt-3 w-full shrink-0" onClick={() => onOpenChange(false)}>{t('participants.memberDialog.close', { defaultValue: 'Close' })}</Button>
+    <div className="mt-3 flex shrink-0 justify-end">
+      <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>{t('participants.memberDialog.close', { defaultValue: 'Close' })}</Button>
+    </div>
   </DialogContent>;
 }
 
-export type ManageProjectMembersButtonProps = { projectId: string; t: TFunction; currentUserId?: number | null; className?: string };
+type TriggerVariant = 'default' | 'circle';
 
-export default function ManageProjectMembersButton({ projectId, t, currentUserId = null, className }: ManageProjectMembersButtonProps) {
+// `circle`: the trigger sits in the avatar stack row (sidebar project toolbar)
+// and reads as "one more face" — same diameter, corner radius and overlap
+// convention (`-ms-2`, applied by the stack's own `[&>*+*]:-ms-2`) as
+// `ParticipantAvatarStack`'s xs avatars and its "+N" overflow chip, whose
+// `bg-muted`/`rounded-full` styling this deliberately mirrors.
+const TRIGGER_VARIANT_CLASS: Record<TriggerVariant, string> = {
+  default: 'h-11 w-11 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground',
+  circle: 'aspect-square h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-accent hover:text-foreground align-middle',
+};
+
+export type ManageProjectMembersButtonProps = {
+  projectId: string;
+  t: TFunction;
+  currentUserId?: number | null;
+  className?: string;
+  /** `circle`: matches a member avatar (see `TRIGGER_VARIANT_CLASS`). */
+  variant?: TriggerVariant;
+};
+
+export default function ManageProjectMembersButton({ projectId, t, currentUserId = null, className, variant = 'default' }: ManageProjectMembersButtonProps) {
   const [open, setOpen] = useState(false); const trigger = useRef<HTMLButtonElement>(null);
-  const label = t('participants.memberDialog.trigger', { defaultValue: 'Project members' }) as string;
-  return <Dialog open={open} onOpenChange={value => { setOpen(value); if (!value) requestAnimationFrame(() => trigger.current?.focus()); }}><DialogTrigger ref={trigger} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', className)} title={label} aria-label={label}><UserPlus className="h-4 w-4" aria-hidden /></DialogTrigger>{open && <MembersManager key={projectId} projectId={projectId} t={t} currentUserId={currentUserId} />}</Dialog>;
+  const label = variant === 'circle'
+    ? t('participants.memberDialog.addTrigger', { defaultValue: 'Add member' }) as string
+    : t('participants.memberDialog.trigger', { defaultValue: 'Project members' }) as string;
+  // qa (B-1430): this used to be an inline arrow, recreated with a new
+  // identity on every render of this button — including ones caused by
+  // unrelated sidebar re-renders (the 60s clock tick, session updates) that
+  // don't touch `open`. `<Dialog>` re-derives its own memoized context value
+  // from this prop's identity, which cascaded into `MembersManager`'s reload
+  // effect and blinked the member list back to "loading" already-loaded
+  // data. `setOpen`/`trigger` are stable across renders, so this callback's
+  // identity is now stable too.
+  const handleOpenChange = useCallback((value: boolean) => {
+    setOpen(value);
+    if (!value) requestAnimationFrame(() => trigger.current?.focus());
+  }, []);
+  return <Dialog open={open} onOpenChange={handleOpenChange}><DialogTrigger ref={trigger} className={cn('flex shrink-0 select-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', TRIGGER_VARIANT_CLASS[variant], className)} title={label} aria-label={label}><UserPlus className={variant === 'circle' ? 'h-3 w-3' : 'h-4 w-4'} aria-hidden /></DialogTrigger>{open && <MembersManager key={projectId} projectId={projectId} t={t} currentUserId={currentUserId} />}</Dialog>;
 }

@@ -5,6 +5,9 @@ import { shareLoginPath } from '../../document-sharing/share-navigation';
 import { api, setCookieSessionKind } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
 import { exchangeOidcCode, fetchOidcIdentity } from '../oidc';
+import {
+  consumeSsoReauthNotice, isSsoRedirectInFlight, requestSsoReauth, SSO_REAUTH_EVENT,
+} from '../ssoReauth';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -35,6 +38,7 @@ import {
   subscribeIdentityBarrier,
 } from '../accountIdentityBarrier';
 import { purgeAccountIdentityState } from '../accountIdentityIsolation';
+import { clearConnectorStepUpState } from '../connectorStepUpMarker';
 import {
   AccountWalletError,
   finishWalletIdentityTransition,
@@ -216,6 +220,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setUser(null);
     setToken(null);
     clearStoredToken();
+    // T-1939 6C: a step-up begun (or its unread outcome) before sign-out must
+    // not reach the next member signing in on this tab.
+    clearConnectorStepUpState();
     // T-1295 (فيتو الخصوصية): الخروج يمسح صندوق الصادر ومعه صور الرسائل غير
     // المُرسَلة. الخروج كان يزيل التوكن وحده، و`localStorage`/IndexedDB مقيَّدان
     // بالأصل (origin) لا بالحساب — فصندوقٌ متروك يعني كلامَ عضوٍ ظاهراً لعضو
@@ -416,6 +423,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // meantime, adopt it and stay signed in instead of evicting.
       const rejectedToken = (event as CustomEvent<{ token?: string }>).detail?.token ?? null;
       if (!evictIfTokenStale(rejectedToken)) return;
+      // An SSO re-attestation navigation is already under way: do not cancel it.
+      if (isSsoRedirectInFlight()) return;
       // Genuinely evicted. Defense-in-depth: never hard-redirect to /login if we
       // are already on it — a second `location.href` assignment would only force
       // a redundant full-page reload (and could re-arm a reload loop if a
@@ -428,6 +437,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => {
       window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    };
+  }, [evictIfTokenStale]);
+
+  // T-1939 slice 3: the member's SSO attestation aged out. Drop the refused
+  // credential (compare-and-clear, as above) and restart SSO; the loop guard in
+  // requestSsoReauth leaves them on /login with a notice if the IdP bounces back.
+  useEffect(() => {
+    if (IS_PLATFORM) return;
+
+    const handleSsoReauth = (event: Event) => {
+      const rejectedToken = (event as CustomEvent<{ token?: string | null }>).detail?.token ?? null;
+      if (rejectedToken && !evictIfTokenStale(rejectedToken)) return;
+      // Only the loop guard falls back to /login; a redirect started by an
+      // earlier event of the same 401 burst must not be cancelled by a second
+      // navigation (qa T-1939 slice 3).
+      if (requestSsoReauth() !== 'cooling') return;
+      if (window.location.pathname !== '/login') {
+        window.location.href = shareLoginPath(window.location.pathname);
+      }
+    };
+
+    window.addEventListener(SSO_REAUTH_EVENT, handleSsoReauth);
+    return () => {
+      window.removeEventListener(SSO_REAUTH_EVENT, handleSsoReauth);
     };
   }, [evictIfTokenStale]);
 
@@ -657,7 +690,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!response.ok || !payload?.user || (!payload.token && !payload.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.loginFailed);
           setError(message);
-          return { success: false, error: message };
+          return { success: false, error: message, code: payload?.code };
         }
 
         // Prevent the token-change-driven useEffect from re-running checkAuthStatus
@@ -735,6 +768,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       skipNextAuthCheck.current = true;
       setSession(identity.user, exchange.token);
+      // A completed SSO sign-in answers any pending re-attestation notice.
+      consumeSsoReauthNotice();
       setIsMultiUser(identity.isMultiUser);
       setNeedsSetup(false);
       await checkOnboardingStatus();
@@ -782,7 +817,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!response.ok || !payload?.token || !payload.user) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.inviteFailed);
           setError(message);
-          return { success: false, error: message };
+          return { success: false, error: message, code: payload?.code };
         }
 
         skipNextAuthCheck.current = true;

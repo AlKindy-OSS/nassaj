@@ -108,7 +108,7 @@ function makeWorkflow(
   updatedAt: string | null = '2026-07-04T10:00:00.000Z',
 ): ActiveWorkflow {
   return {
-    sessionId, wfId, status, agentsDone, agentsTotal, updatedAt,
+    sessionId, wfId, projectId: null, status, agentsDone, agentsTotal, updatedAt,
     agents: [], agentsTruncated: false, dormant: false,
   };
 }
@@ -233,6 +233,23 @@ describe('setActiveWorkflows — new reference on change', () => {
     // Different status in env2 ⇒ new snapshot sig ⇒ emitChange ⇒ new reference.
     expect(result.current).not.toBe(ref1);
     expect(result.current[0].status).toBe('orphan');
+  });
+
+  it('projectId-only change produces a new reference (T-1949)', () => {
+    const env1 = makeEnvelope([{ ...makeWorkflow('s1', 'wf_abc', 'running', 3, 5), projectId: 'p1' }]);
+    const env2 = makeEnvelope([{ ...makeWorkflow('s1', 'wf_abc', 'running', 3, 5), projectId: 'p2' }]);
+
+    const { result } = renderHook(() => useSessionWorkflows('s1'));
+
+    act(() => { setActiveWorkflows(env1); });
+    const ref1 = result.current;
+    expect(ref1[0].projectId).toBe('p1');
+
+    // Every field but projectId is identical to env1 — must still be a new
+    // reference, or the project rollup that reads w.projectId goes stale.
+    act(() => { setActiveWorkflows(env2); });
+    expect(result.current).not.toBe(ref1);
+    expect(result.current[0].projectId).toBe('p2');
   });
 
   it('changed progress counters produce a new reference', () => {

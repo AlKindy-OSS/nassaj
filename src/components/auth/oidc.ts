@@ -27,6 +27,8 @@ export type OidcFailureReason =
   | 'provider_denied'
   | 'transaction_expired'
   | 'not_linked'
+  | 'not_authorized'
+  | 'account_exists'
   | 'account_unavailable'
   | 'disabled'
   | 'rate_limited'
@@ -52,6 +54,9 @@ const RETURN_ERROR_REASONS: Readonly<Record<string, OidcFailureReason>> = {
   invalid_state: 'invalid_state',
   transaction_expired: 'transaction_expired',
   oidc_not_linked: 'not_linked',
+  oidc_not_authorized: 'not_authorized',
+  oidc_account_exists: 'account_exists',
+  rate_limited: 'rate_limited',
   account_unavailable: 'account_unavailable',
   temporarily_unavailable: 'provider_unavailable',
   server_error: 'provider_unavailable',

@@ -8,6 +8,9 @@ import express from 'express';
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const records: Array<{ userId: number; method: string }> = [];
+const audits: Array<{ action: string; metadata?: unknown }> = [];
+const linkedUserIds = new Set<number>();
+let assertedUser = { id: 7, username: 'owner', role: 'owner' };
 
 class MockWebAuthnError extends Error {}
 
@@ -19,8 +22,9 @@ mock.module(url('../middleware/rate-limit.js'), {
 });
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
-    auditLogDb: { record: () => undefined },
+    auditLogDb: { record: (action: string, data: { metadata?: unknown }) => audits.push({ action, ...data }) },
     userDb: { updateLastLogin: () => undefined },
+    userIdentitiesDb: { hasAnyLink: (userId: number) => linkedUserIds.has(userId) },
     webauthnCredentialsDb: {},
   },
 });
@@ -33,9 +37,17 @@ mock.module(url('../services/webauthn.service.js'), {
     createAuthenticationOptions: async () => ({}),
     createRegistrationOptions: async () => ({}),
     verifyAuthentication: async () => ({
-      user: { id: 7, username: 'owner', role: 'owner' }, credentialId: 'credential-1',
+      user: assertedUser, credentialId: 'credential-1', userVerified: true, stepUpEligible: true,
     }),
+    createStepUpOptions: async () => ({}),
     verifyRegistration: async () => ({}),
+  },
+});
+mock.module(url('../services/step-up.service.js'), {
+  namedExports: {
+    STEP_UP_AUDIENCES: ['passkey_registration', 'connector_owner'],
+    StepUpError: class extends Error {},
+    verifyStepUpEvidence: async () => ({ authMethod: 'password', authTimeMs: 0 }),
   },
 });
 mock.module(url('../modules/connectors/connector-owner-auth-session.js'), {
@@ -67,4 +79,68 @@ test('successful WebAuthn verification records verifier-time recent authenticati
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+});
+
+async function verifyPasskey() {
+  const app = express();
+  app.use(express.json());
+  app.use('/webauthn', router);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/webauthn/login/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ response: { id: 'credential-1' } }),
+    });
+    return { status: response.status, body: await response.json() };
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}
+
+async function withOidc(enabled: boolean, run: () => Promise<void>) {
+  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
+  process.env.OIDC_ENABLED = enabled ? 'true' : 'false';
+  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+  try { await run(); } finally {
+    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test('T-1939: with SSO live a linked member passkey is refused with sso_required, no session', async () => {
+  records.length = 0;
+  audits.length = 0;
+  assertedUser = { id: 21, username: 'member', role: 'user' };
+  linkedUserIds.add(21);
+  await withOidc(true, async () => {
+    const { status, body } = await verifyPasskey();
+    assert.equal(status, 403);
+    assert.equal(body.code, 'sso_required');
+    assert.equal(body.token, undefined);
+    assert.deepEqual(records, [], 'no recent-authentication record');
+    assert.ok(!audits.some((entry) => entry.action === 'login_success'));
+    assert.deepEqual(audits.find((entry) => entry.action === 'sso_required_denied')?.metadata,
+      { entry: 'passkey_login' });
+  });
+});
+
+test('T-1939: a linked owner and any user with OIDC off keep passkey login', async () => {
+  linkedUserIds.add(7);
+  linkedUserIds.add(21);
+  await withOidc(true, async () => {
+    assertedUser = { id: 7, username: 'owner', role: 'owner' };
+    assert.equal((await verifyPasskey()).status, 200);
+  });
+  await withOidc(false, async () => {
+    assertedUser = { id: 21, username: 'member', role: 'user' };
+    const { status, body } = await verifyPasskey();
+    assert.equal(status, 200);
+    assert.equal(body.token, 'passkey-jwt');
+  });
 });

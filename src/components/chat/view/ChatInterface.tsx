@@ -672,6 +672,15 @@ function ChatInterface({
     onError: handleMessageForkError,
   });
 
+  // T-1933 (B-1401): `useChatRealtimeHandlers` (يُستدعى أدناه بعد
+  // `useChatComposerState`، فمعرّفه غير متاح بعدُ نحوياً هنا) يملك
+  // `forgetPendingWorkflows` الحقيقية. جسرٌ بمرجع كي يستدعيها مسار الإرسال
+  // (الأبكر في هذا المكوّن) بمعرّفٍ مستقرّ لا يتغيّر مع كل تصيير.
+  const forgetPendingWorkflowsRef = useRef<(sessionId: string | null | undefined) => void>(() => {});
+  const forgetPendingWorkflows = useCallback((sessionId: string | null | undefined) => {
+    forgetPendingWorkflowsRef.current(sessionId);
+  }, []);
+
   const {
     input,
     setInput,
@@ -768,6 +777,7 @@ function ChatInterface({
     sendByCtrlEnter,
     onSessionActive,
     onSessionProcessing,
+    forgetPendingWorkflows,
     onInputFocusChange,
     onFileOpen,
     onShowSettings,
@@ -1016,7 +1026,10 @@ function ChatInterface({
     setInput((current) => (current.trim() ? current : text));
   }, [setInput]);
 
-  const { requestStreamGapRecovery: resumeStreamRecovery } = useChatRealtimeHandlers({
+  const {
+    requestStreamGapRecovery: resumeStreamRecovery,
+    forgetPendingWorkflows: forgetPendingWorkflowsImpl,
+  } = useChatRealtimeHandlers({
     latestMessage,
     reconnectEpoch,
     controlFrames,
@@ -1046,6 +1059,10 @@ function ChatInterface({
     sessionStore,
     isDuplicateSteerInjection,
   });
+
+  useEffect(() => {
+    forgetPendingWorkflowsRef.current = forgetPendingWorkflowsImpl;
+  }, [forgetPendingWorkflowsImpl]);
 
   // T-1904 e2e (BLOCKER) — Esc يوقف الدور فقط حين يُعرَف صراحةً أن المستخدم
   // الحالي هو البادئ (`isKnownStarter`، فشلٌ مغلَق — انظر تعليقه أعلاه). لا
@@ -1409,7 +1426,9 @@ function ChatInterface({
           </div>
         )}
 
-        {canSteer && steerStarterName && <SteerComposerNote starterName={steerStarterName} />}
+        {canSteer && steerStarterName && (
+          <SteerComposerNote starterName={steerStarterName} isStarter={isKnownStarter} />
+        )}
 
         <ChatComposer
           pendingPermissionRequests={pendingPermissionRequests}

@@ -50,6 +50,14 @@ const listeners = new Set<() => void>();
  */
 const presenceOwned = new Set<string>();
 
+/**
+ * Session id -> DB project id (B-1431), filled only by
+ * `reconcilePresenceProcessStates` — the direct mirror stream (`setSessionProcessState`)
+ * has no project context to offer. Cleared whenever the session goes idle (either
+ * path) and on identity reset, so it never outlives the `states` entry it describes.
+ */
+const projectIdBySession = new Map<string, string | null>();
+
 function emitChange(): void {
   for (const listener of listeners) {
     listener();
@@ -95,6 +103,8 @@ export function setSessionProcessState(
   }
   if (state === 'idle') {
     changed = states.delete(sessionId) || changed;
+    // A presence-known projectId must not survive the run it described.
+    projectIdBySession.delete(sessionId);
   } else {
     if (states.get(sessionId) !== state) {
       states.set(sessionId, state as SessionProcessState);
@@ -123,12 +133,18 @@ export function invalidateSessionProcessAuthority(epoch: number): void {
 /** Clears all process states when the authenticated WebSocket identity changes. */
 export function resetSessionProcessStates(): void {
   connectionEpoch = ++epochSequence;
-  if (states.size === 0 && presenceOwned.size === 0 && authorityEpochs.size === 0) {
+  if (
+    states.size === 0
+    && presenceOwned.size === 0
+    && authorityEpochs.size === 0
+    && projectIdBySession.size === 0
+  ) {
     return;
   }
   states.clear();
   presenceOwned.clear();
   authorityEpochs.clear();
+  projectIdBySession.clear();
   emitChange();
 }
 
@@ -147,12 +163,12 @@ if (typeof window !== 'undefined') {
  * @param entries - Session ids with their server-observed process state.
  */
 export function reconcilePresenceProcessStates(
-  entries: ReadonlyArray<{ sessionId: string; state: SessionProcessState }>,
+  entries: ReadonlyArray<{ sessionId: string; state: SessionProcessState; projectId?: string | null }>,
 ): void {
   let changed = false;
   const seen = new Set<string>();
 
-  for (const { sessionId, state } of entries) {
+  for (const { sessionId, state, projectId = null } of entries) {
     if (!sessionId || state === 'idle') {
       continue;
     }
@@ -166,6 +182,12 @@ export function reconcilePresenceProcessStates(
       states.set(sessionId, state);
       changed = true;
     }
+    if (projectIdBySession.get(sessionId) !== projectId) {
+      projectIdBySession.set(sessionId, projectId);
+      // A projectId-only change (the session's live state stays the same) must
+      // still notify — the project rollup depends on it.
+      changed = true;
+    }
   }
 
   for (const sessionId of [...presenceOwned]) {
@@ -174,6 +196,7 @@ export function reconcilePresenceProcessStates(
     }
     presenceOwned.delete(sessionId);
     authorityEpochs.delete(sessionId);
+    projectIdBySession.delete(sessionId);
     if (states.delete(sessionId)) {
       changed = true;
     }
@@ -182,6 +205,22 @@ export function reconcilePresenceProcessStates(
   if (changed) {
     emitChange();
   }
+}
+
+/**
+ * Non-reactive: session ids currently attributed to `projectId` (running or
+ * frozen) per the presence feed. Used by the project busy-dot rollup to reach
+ * sessions it never loaded a row for (B-1431).
+ */
+export function getProcessStateSessionIdsForProject(projectId: string | null): string[] {
+  if (!projectId) return [];
+  const ids: string[] = [];
+  for (const sessionId of states.keys()) {
+    if (projectIdBySession.get(sessionId) === projectId) {
+      ids.push(sessionId);
+    }
+  }
+  return ids;
 }
 
 /**

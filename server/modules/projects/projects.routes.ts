@@ -17,8 +17,15 @@ import { createProject, updateProjectDisplayName } from '@/modules/projects/serv
 import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
 import { parseCanonicalGitHubUrl } from '@/modules/projects/services/git-transport-security.service.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
-import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions, getSessionDeepLinkContext } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
+import {
+  getArchivedProjectsWithSessions,
+  getProjectSessionsPage,
+  getProjectsWithSessions,
+  getSessionDeepLinkContext,
+  getSessionDeepLinkContexts,
+} from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
 import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projects/services/project-delete.service.js';
+import { updateProjectLink } from '@/modules/projects/services/project-link.service.js';
 import { applyLegacyStarredProjectIds, setProjectStar, toggleProjectStar } from '@/modules/projects/services/project-star.service.js';
 import { notifySessionMetadataChanged, participantsService, sessionSynchronizerService } from '@/modules/providers/index.js';
 import { assertProjectVisible } from '@/modules/projects/services/project-visibility-guard.service.js';
@@ -32,6 +39,8 @@ import {
   searchMemberCandidates,
 } from '@/modules/projects/services/project-visibility-management.service.js';
 import type { MembershipAuditContext } from '@/modules/projects/services/project-visibility-management.service.js';
+
+import { SESSION_CONTEXT_ID_PATTERN } from '../../../shared/sessionContextIds.js';
 
 const router = express.Router();
 
@@ -333,6 +342,61 @@ router.get(
   }),
 );
 
+/** B-1431: most session ids one batched context request may name. */
+export const MAX_SESSION_CONTEXT_IDS = 50;
+
+/**
+ * Validates `{sessionIds: string[]}`: an array of 1..MAX_SESSION_CONTEXT_IDS
+ * well-formed ids after de-duplication. Any other shape is a 400 — the request
+ * is rejected whole rather than silently trimmed.
+ */
+export function parseSessionContextIds(body: unknown): string[] {
+  const raw = (body as { sessionIds?: unknown } | null | undefined)?.sessionIds;
+  const invalid = (message: string): AppError =>
+    new AppError(message, { code: 'INVALID_SESSION_IDS', statusCode: 400 });
+  if (!Array.isArray(raw)) {
+    throw invalid('sessionIds must be an array of strings.');
+  }
+  const unique = new Set<string>();
+  for (const value of raw) {
+    if (typeof value !== 'string' || !SESSION_CONTEXT_ID_PATTERN.test(value)) {
+      throw invalid('sessionIds contains an invalid session id.');
+    }
+    unique.add(value);
+  }
+  if (unique.size === 0 || unique.size > MAX_SESSION_CONTEXT_IDS) {
+    throw invalid(`sessionIds must name 1 to ${MAX_SESSION_CONTEXT_IDS} sessions.`);
+  }
+  return [...unique];
+}
+
+/** B-1431: 60 batched context lookups per minute per authenticated user. */
+const sessionContextsLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 60,
+  code: 'RATE_LIMITED',
+  key: (req: express.Request) => `user:${readAuthenticatedUserId(req) ?? 'anonymous'}`,
+});
+
+/**
+ * POST /api/projects/session-contexts — B-1431. Batched form of
+ * `/session-context/:sessionId` for the sidebar's project indicators. Returns
+ * `{contexts}` holding ONLY the sessions the caller may see; missing, archived
+ * and invisible ids are dropped with no distinguishing signal.
+ */
+router.post(
+  '/session-contexts',
+  sessionContextsLimiter,
+  asyncHandler(async (req, res) => {
+    const userId = readAuthenticatedUserId(req);
+    if (userId === null) {
+      throw new AppError('Authentication required', { code: 'UNAUTHENTICATED', statusCode: 401 });
+    }
+    const sessionIds = parseSessionContextIds(req.body);
+    res.json({ contexts: getSessionDeepLinkContexts(sessionIds, userId) });
+  }),
+);
+
 router.get(
   '/:projectId/sessions',
   asyncHandler(async (req, res) => {
@@ -555,6 +619,30 @@ router.post(
       ? setProjectStar(projectId, body.starred)
       : toggleProjectStar(projectId);
     res.json({ success: true, isStarred });
+  }),
+);
+
+/**
+ * PROJECT LINK (T-1950) — set or clear the project's external URL.
+ * Body: { linkUrl: string | null }.
+ * Responds { success: true, data: { projectId, linkUrl: <normalized | null> } }.
+ * Shared state like rename/star/logo, so it takes the WRITE mandate (404 when
+ * refused). The server never fetches the stored URL (see project-link.service).
+ */
+router.put(
+  '/:projectId/link',
+  asyncHandler(async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
+    assertProjectWritable(req, projectId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!('linkUrl' in body)) {
+      throw new AppError('Field "linkUrl" is required (string or null).', {
+        code: 'INVALID_PROJECT_LINK',
+        statusCode: 400,
+      });
+    }
+    const linkUrl = updateProjectLink(projectId, body.linkUrl);
+    res.json(createApiSuccessResponse({ projectId, linkUrl }));
   }),
 );
 

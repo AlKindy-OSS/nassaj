@@ -18,7 +18,42 @@ type AccountWalletDependencies = Readonly<{
   findLocalCredential: (normalizedIdentifier: string) => LocalCredential | null;
   verifyPassword: (passwordHash: string, plaintext: string) => Promise<boolean>;
   decoyPasswordHash: string;
+  /** T-1939: true when the account must sign in through SSO (default: never). */
+  requiresSso?: (userId: number) => boolean;
+  /** T-1939 slice 3: false when a linked account's SSO attestation aged out. */
+  attestationFresh?: (userId: number) => boolean;
 }>;
+
+/**
+ * T-1939: a correct local credential for an account that signs in through SSO
+ * only. Raised after the full password verification, so it reveals nothing to
+ * a caller that does not already hold the password.
+ */
+export class SsoRequiredError extends Error {
+  readonly code = 'sso_required';
+  readonly userId: number;
+
+  constructor(userId: number) {
+    super('sso_required');
+    this.name = 'SsoRequiredError';
+    this.userId = userId;
+  }
+}
+
+/**
+ * T-1939 slice 3: the target account's SSO attestation aged out, so it may not
+ * become the active identity until its member signs in at the IdP again.
+ */
+export class SsoReauthRequiredError extends Error {
+  readonly code = 'sso_reauth_required';
+  readonly userId: number;
+
+  constructor(userId: number) {
+    super('sso_reauth_required');
+    this.name = 'SsoReauthRequiredError';
+    this.userId = userId;
+  }
+}
 
 /** Domain boundary for every mutation of a device-bound account wallet. */
 export class AccountWalletService {
@@ -31,8 +66,17 @@ export class AccountWalletService {
     return wallet;
   }
 
-  /** Switches the active slot and immediately revokes the older generation. */
+  /**
+   * Switches the active slot and immediately revokes the older generation.
+   * Throws SsoReauthRequiredError when the target's SSO attestation is stale.
+   */
   switch(principal: DevicePrincipal, slotId: string, expectedGeneration: number): AccountWalletSnapshot {
+    const targetUserId = databaseModule.deviceAccountSessionsDb.userIdForSlot?.(
+      principal.deviceSessionId, slotId,
+    );
+    if (typeof targetUserId === 'number' && this.dependencies.attestationFresh?.(targetUserId) === false) {
+      throw new SsoReauthRequiredError(targetUserId);
+    }
     const wallet = databaseModule.deviceAccountSessionsDb.switch(principal, slotId, expectedGeneration);
     connectionRevocationRegistry.revokeOlderGenerations(principal.deviceSessionId, wallet.generation);
     return wallet;
@@ -41,6 +85,7 @@ export class AccountWalletService {
   /**
    * Re-authenticates and adds a local account without issuing a JWT or changing
    * the active slot. Unknown and invalid credentials take the same verify path.
+   * Throws SsoRequiredError for a verified SSO-only account (T-1939).
    */
   async addLocal(
     principal: DevicePrincipal,
@@ -55,6 +100,7 @@ export class AccountWalletService {
       password,
     );
     if (!credential || !verified) return null;
+    if (this.dependencies.requiresSso?.(credential.id)) throw new SsoRequiredError(credential.id);
     let wallet: AccountWalletSnapshot;
     try {
       wallet = databaseModule.deviceAccountSessionsDb.add(
