@@ -43,6 +43,7 @@ test('constructor-only fallback may consume once; cross-generator fallback after
   const stream = prompt.make();
   const first = await stream.next();
   assert.match(first.value!.uuid!, /^[0-9a-f-]{36}$/);
+  assert.equal(prompt.promptUuid(), first.value!.uuid, 'B-1694: the runner learns the stamped uuid');
   assert.equal(bindings.length, 1);
   assert.equal(prompt.wasConsumed(), true);
   await assert.rejects(prompt.make().next(), /ALREADY_DISPATCHED/);
@@ -54,8 +55,10 @@ test('binding conflict blocks yield; missing completeness capability and ephemer
   const input = { capability: capability(), command: 'hello', content: 'hello', userId: 1, sessionId: sid, release: Promise.resolve() };
   await assert.rejects(createClaudeReceiptPrompt(input, () => false).make().next(), /BINDING_CONFLICT/);
   for (const patch of [{ capability: undefined }, { persistSession: false }, { userId: 2 }, { content: [{ type: 'image' }] }]) {
-    const stream = createClaudeReceiptPrompt({ ...input, ...patch }, () => { throw Error('must not bind'); }).make();
+    const prompt = createClaudeReceiptPrompt({ ...input, ...patch }, () => { throw Error('must not bind'); });
+    const stream = prompt.make();
     assert.equal((await stream.next()).value!.uuid, undefined); await stream.next();
+    assert.equal(prompt.promptUuid(), null);
   }
 });
 

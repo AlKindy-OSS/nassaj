@@ -4,7 +4,7 @@
  * Ports the proven producer wrapper (`spikes/b103-t819/bin/task-inner.sh`) to a
  * self-contained Node entrypoint so it ships in dist-server and is invoked by an
  * ABSOLUTE `node` path (no PATH dependence). It:
- *   1. runs `claude -p '<prompt>' --output-format json [--model M]`, streaming
+ *   1. runs `claude -p '<prompt>' --output-format json --permission-mode P [--model M]`, streaming
  *      stdout into `<task-dir>/result.json.partial` (stderr → stderr.log),
  *   2. bounds the run with an internal SIGTERM timer (keeping THIS wrapper alive
  *      so it still seals a DONE for an interrupted run — the PARTIAL mechanism),
@@ -29,7 +29,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { assertClaudeSpawnEnvAllowed } from '../../services/isolation/claude-spawn-env-guard.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: pure relay spawn constants (no imports); the unit has no database.
+import { relayCliArgsForRelayMode } from '../peer-relay/peer-spawn-constants.js';
 
+import {
+  FALLBACK_PERMISSION_MODE,
+  isClaudePermissionMode,
+  type ClaudePermissionMode,
+} from './permission-mode.js';
 import { seal } from './result-capture-writer.js';
 
 /** Exit code sealed when the routing guard refuses the unit env (claude never ran). */
@@ -42,6 +49,9 @@ type Args = {
   model: string | null;
   outputFormat: string;
   claudeTimeoutSec: number | null;
+  permissionMode: ClaudePermissionMode;
+  /** ADR-219 ح-1: the launcher decided this node is in relay mode. */
+  relayRefuse: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -52,6 +62,8 @@ function parseArgs(argv: string[]): Args {
     model: null,
     outputFormat: 'json',
     claudeTimeoutSec: null,
+    permissionMode: FALLBACK_PERMISSION_MODE,
+    relayRefuse: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
@@ -60,7 +72,13 @@ function parseArgs(argv: string[]): Args {
     else if (t === '--prompt') a.prompt = argv[++i] ?? '';
     else if (t === '--model') a.model = argv[++i] ?? null;
     else if (t === '--output-format') a.outputFormat = argv[++i] ?? 'json';
+    else if (t === '--relay-refuse') a.relayRefuse = true;
     else if (t === '--claude-timeout-sec') a.claudeTimeoutSec = Number.parseInt(argv[++i] ?? '', 10);
+    else if (t === '--permission-mode') {
+      const mode = argv[++i];
+      if (!isClaudePermissionMode(mode)) throw new Error('--permission-mode is not a known mode');
+      a.permissionMode = mode;
+    }
     else throw new Error(`unknown arg: ${t}`);
   }
   if (!a.taskDir) throw new Error('--task-dir required');
@@ -109,8 +127,14 @@ async function main(): Promise<void> {
   const out = fs.createWriteStream(partialPath, { flags: 'w', mode: 0o600 });
   const errOut = fs.createWriteStream(stderrPath, { flags: 'w', mode: 0o600 });
 
-  const childArgs = ['-p', a.prompt, '--output-format', a.outputFormat];
+  // T-2071: always explicit — the CLI's own default differs between versions.
+  const childArgs = ['-p', a.prompt, '--output-format', a.outputFormat, '--permission-mode', a.permissionMode];
   if (a.model) childArgs.push('--model', a.model);
+  // ADR-219 ح-1: hookless relay-mode spawn — refuse inbound peers, no session tools (variadic last).
+  if (a.relayRefuse) {
+    const relay = relayCliArgsForRelayMode();
+    childArgs.push(...relay.settingsArgs, '--disallowed-tools', ...relay.disallowedTools);
+  }
 
   const child = spawn(a.claudeBin, childArgs, {
     cwd: process.cwd(), // the project cwd (systemd --working-directory)

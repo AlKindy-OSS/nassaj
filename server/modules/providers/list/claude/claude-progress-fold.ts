@@ -11,36 +11,14 @@ import { createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 
 import { claudeParentToolUseId, claudeToolUseProgress, createClaudeSubagentTracker } from './claude-progress.js';
 import { createClaudeTaskPlan, type ClaudeTaskPlan } from './claude-task-plan.js';
+import { claudeTaskEnds, claudeUserMessageText } from './claude-task-events.js';
 
 type AnyRecord = Record<string, any>;
-
-// B-1400: the CLI's own `<task-notification>` text names the task and its tool call.
-const NOTIFICATION_BLOCK_RE = /<task-notification>([\s\S]*?)(?:<\/task-notification>|$)/g;
-const NOTIFICATION_TASK_ID_RE = /<task-id>([^<\s]+)<\/task-id>/;
-const NOTIFICATION_TOOL_USE_ID_RE = /<tool-use-id>([^<\s]+)<\/tool-use-id>/;
-const NOTIFICATION_STATUS_RE = /<status>([^<\s]+)<\/status>/;
-const NOTIFICATION_BODY_RE = /<summary>|<result>/;
-
-/**
- * Addendum A §9: the only notification statuses that settle a delegation.
- * Study §3.2 (P0): `killed`/`stopped` are a measured stop, never a failure.
- */
-const SETTLED_STATES: Readonly<Record<string, SubagentState>> = Object.freeze({
-  completed: 'completed', failed: 'failed', killed: 'stopped', stopped: 'stopped',
-});
 
 /** The CLI's main-thread cut marker after an owner interrupt (the CLI emits two wordings). */
 const INTERRUPT_MARKER_PREFIX = '[Request interrupted by user';
 
-export type ClaudeNotifiedTask = { taskId: string | null; toolUseId: string | null; status: string | null };
-
-/** Text of a user message, or '' — only used to find `<task-notification>` blocks. */
-function userMessageText(message: AnyRecord): string {
-  const content = message?.message?.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.map((block: AnyRecord) => (typeof block?.text === 'string' ? block.text : '')).join('');
-}
+export { claudeNotifiedTasks, type ClaudeNotifiedTask } from './claude-task-events.js';
 
 /**
  * True for the CLI's own main-thread `[Request interrupted by user…]` row: the
@@ -48,30 +26,7 @@ function userMessageText(message: AnyRecord): string {
  */
 export function isClaudeInterruptMarker(raw: AnyRecord): boolean {
   if (raw?.type !== 'user' || raw.isSidechain === true || claudeParentToolUseId(raw)) return false;
-  return userMessageText(raw).trimStart().startsWith(INTERRUPT_MARKER_PREFIX);
-}
-
-/**
- * `{ taskId, toolUseId, status }` per `<task-notification>` block of a user
- * message the CLI itself delivered as a background-task notification. Such a
- * message carries `origin.kind === 'task-notification'` with no `subkind` (a
- * subkind marks scheduled/peer/relay deliveries, whose text another sender
- * authored), so text a human or a peer typed can never settle a task. `status`
- * is read from the block header only, before `<summary>`/`<result>`, so text
- * quoted in a report cannot settle anything.
- */
-export function claudeNotifiedTasks(message: AnyRecord): ClaudeNotifiedTask[] {
-  const origin = message?.type === 'user' ? message.origin : null;
-  if (origin?.kind !== 'task-notification' || origin.subkind) return [];
-  return Array.from(userMessageText(message).matchAll(NOTIFICATION_BLOCK_RE), ([, block]) => {
-    const body = block.search(NOTIFICATION_BODY_RE);
-    const header = body === -1 ? block : block.slice(0, body);
-    return {
-      taskId: block.match(NOTIFICATION_TASK_ID_RE)?.[1] ?? null,
-      toolUseId: block.match(NOTIFICATION_TOOL_USE_ID_RE)?.[1] ?? null,
-      status: header.match(NOTIFICATION_STATUS_RE)?.[1] ?? null,
-    };
-  });
+  return claudeUserMessageText(raw).trimStart().startsWith(INTERRUPT_MARKER_PREFIX);
 }
 
 /**
@@ -80,15 +35,7 @@ export function claudeNotifiedTasks(message: AnyRecord): ClaudeNotifiedTask[] {
  * settle nothing, so the agent stays `running`.
  */
 export function claudeSettlements(raw: AnyRecord): Array<{ toolUseId: string; state: SubagentState }> {
-  const found = raw?.type === 'system' && raw.subtype === 'task_notification'
-    ? [{ toolUseId: raw.tool_use_id, status: raw.status }]
-    : claudeNotifiedTasks(raw);
-  const settled: Array<{ toolUseId: string; state: SubagentState }> = [];
-  for (const { toolUseId, status } of found) {
-    const state = typeof status === 'string' ? SETTLED_STATES[status] : undefined;
-    if (typeof toolUseId === 'string' && toolUseId && state) settled.push({ toolUseId, state });
-  }
-  return settled;
+  return claudeTaskEnds(raw).flatMap(({ toolUseId, state }) => (toolUseId ? [{ toolUseId, state }] : []));
 }
 
 /** A human prompt opens a new turn; machine-routed, subagent and injected rows do not. */
@@ -145,12 +92,14 @@ export function createClaudeProgressFold(mode: 'history' | 'live', sessionId: st
     lastTaskRow = null;
     taskPlan.endTurn();
   };
-  const settlementRows = (raw: AnyRecord): NormalizedMessage[] => claudeSettlements(raw).flatMap(({ toolUseId, state }) => {
-    const subagent = subagents.settle(toolUseId, state);
+  // ADR-218: the task id names the agent across SendMessage resumes, whose
+  // notification carries the SendMessage call's tool_use_id instead.
+  const settlementRows = (raw: AnyRecord): NormalizedMessage[] => claudeTaskEnds(raw).flatMap(({ taskId, toolUseId, state }) => {
+    const subagent = subagents.settle(toolUseId, state, taskId);
     if (!subagent) return [];
     const base = typeof raw.uuid === 'string' && raw.uuid ? raw.uuid : generateMessageId('claude');
     const rowSessionId = raw.session_id ?? raw.sessionId ?? sessionId;
-    return [createNormalizedMessage({ id: `${base}_settle_${toolUseId}`, sessionId: rowSessionId, provider: 'claude',
+    return [createNormalizedMessage({ id: `${base}_settle_${subagent.id}`, sessionId: rowSessionId, provider: 'claude',
       timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : undefined, kind: 'status', subagent })];
   });
 

@@ -119,7 +119,9 @@ mock.module(url('./services/isolation/resolve-provider-env.js'), {
   // XDG_CONFIG_HOME points at a missing dir: the GL-3 file check sees no file.
   namedExports: {
     resolveProviderEnv: (...args: unknown[]) => {
-      envOptions.push(args[4]);
+      // B-1707 also asks for the sender's Claude env (permission parity); only the
+      // OpenCode child env is under test here.
+      if (args[1] === 'opencode') envOptions.push(args[4]);
       return { PATH: '/usr/bin', XDG_CONFIG_HOME: '/nonexistent-s8', ...inheritedEnv };
     },
   },

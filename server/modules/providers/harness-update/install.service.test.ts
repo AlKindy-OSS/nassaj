@@ -20,6 +20,7 @@ import {
   _setInstallTestDeps,
   buildInstallEnv,
   INSTALL_PATH_ENV,
+  _resetInstallSlot,
   removeOrphanInstallDirs,
   startHarnessInstall,
   type InstallDeps,
@@ -74,6 +75,7 @@ function setDeps(over: Partial<InstallDeps>, realVerify = false): void {
 
 afterEach(() => {
   _setInstallTestDeps(null);
+  _resetInstallSlot();
   _resetHarnessLeases();
   _resetHarnessJobs();
   fs.rmSync(staging, { recursive: true, force: true });
@@ -92,12 +94,55 @@ test('display-command parity: every script source URL is the command the UI show
   assert.ok(Object.isFrozen(HARNESS_INSTALL_SOURCES) && Object.isFrozen(HARNESS_INSTALL_INFO));
 });
 
-test('C5: env drops CODEX_*/XDG_*/OPENCODE_* and pins HOME, TMPDIR and PATH', () => {
+test('C5/ADR-215 §3.5: allow-list env drops vendor keys and pins HOME, TMPDIR and PATH', () => {
   const env = buildInstallEnv({
     CODEX_HOME: '/x', CODEX_INSTALL_DIR: '/y', XDG_DATA_HOME: '/z', OPENCODE_CONFIG: '/w',
-    HOME: '/other', PATH: '/evil', TMPDIR: '/tmp', LANG: 'C.UTF-8',
+    HOME: '/other', PATH: '/evil', TMPDIR: '/tmp', LANG: 'C.UTF-8', KEEP: '1', LC_ALL: '',
   }, '/home/op');
   assert.deepEqual(env, { HOME: '/home/op', PATH: INSTALL_PATH_ENV, TMPDIR: '/var/tmp', LANG: 'C.UTF-8' });
+});
+
+test('ش8 iron rule: the built installer env carries no provider, config or runtime-injection key', () => {
+  const base: NodeJS.ProcessEnv = {
+    ANTHROPIC_BASE_URL: 'https://proxy.example', ANTHROPIC_API_KEY: 'k', CLAUDE_CONFIG_DIR: '/home/example/.claude',
+    GEMINI_API_KEY: 'g', GOOGLE_API_KEY: 'g', AGY_PATH: '/x', NODE_OPTIONS: '--require /evil.js',
+    npm_config_prefix: '/evil', LD_PRELOAD: '/evil.so', BASH_ENV: '/evil.sh', ENV: '/evil.sh',
+    USER: 'nassaj', LOGNAME: 'nassaj', LC_ALL: 'C.UTF-8',
+    HTTPS_PROXY: 'http://p:1', https_proxy: 'http://p:1', NO_PROXY: 'localhost', SHELL: '/bin/bash',
+    ALL_PROXY: 'socks5://p:2', SSL_CERT_FILE: '/etc/ssl/ca.pem', CURL_CA_BUNDLE: '/etc/ssl/ca.pem',
+  };
+  const env = buildInstallEnv(base, '/home/op');
+  for (const key of ['ANTHROPIC_BASE_URL', 'CLAUDE_CONFIG_DIR', 'GEMINI_API_KEY', 'NODE_OPTIONS',
+    'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY', 'AGY_PATH', 'npm_config_prefix', 'LD_PRELOAD', 'BASH_ENV', 'ENV']) {
+    assert.equal(key in env, false, `${key} must not reach an installer`);
+  }
+  assert.deepEqual(Object.keys(env).sort(), ['ALL_PROXY', 'CURL_CA_BUNDLE', 'HOME', 'HTTPS_PROXY', 'LC_ALL',
+    'LOGNAME', 'NO_PROXY', 'PATH', 'SHELL', 'SSL_CERT_FILE', 'TMPDIR', 'USER', 'https_proxy'].sort());
+});
+
+test('ش7: SHELL passes only as a plain absolute path', () => {
+  for (const bad of ['bash', '/bin/bash -c x', '/bin/$(id)', '/bin/ba;sh', '']) {
+    assert.equal('SHELL' in buildInstallEnv({ SHELL: bad }, '/h'), false, bad);
+  }
+  assert.equal(buildInstallEnv({ SHELL: '/usr/bin/zsh' }, '/h').SHELL, '/usr/bin/zsh');
+});
+
+test('ش7 codex parity: a real script run sees SHELL (profile choice) and no CODEX_*/XDG_* key', async () => {
+  const outFile = path.join('/var/tmp', `install-test-env-${process.pid}`);
+  const script = `#!/bin/sh\nprintf '%s|%s|%s|%s' "$SHELL" "\${CODEX_HOME:-}" "\${XDG_CONFIG_HOME:-}" "$HOME" > ${outFile}\n`;
+  setDeps({
+    fetchImpl: scriptFetch(script),
+    runCommand: runHarnessUpdateCommand,
+    cleanEnv: () => ({ SHELL: '/bin/bash', CODEX_HOME: '/x', XDG_CONFIG_HOME: '/y' }),
+  });
+  try {
+    const job = startHarnessInstall('codex', { userId: 1 });
+    await job.done;
+    assert.equal(getHarnessUpdateJob(job.jobId)?.status, 'succeeded');
+    assert.equal(fs.readFileSync(outFile, 'utf8'), `/bin/bash|||${SANDBOX_HOME}`);
+  } finally {
+    fs.rmSync(outFile, { force: true });
+  }
 });
 
 test('codex: script downloaded privately, run as sh <file>, verified, dir removed', async () => {
@@ -128,7 +173,7 @@ test('codex: script downloaded privately, run as sh <file>, verified, dir remove
   assert.equal(s.cmd, '/bin/sh');
   assert.equal(s.fileMode, 0o600);
   assert.equal(s.dirMode, 0o700);
-  assert.deepEqual(s.env, { KEEP: '1', HOME: SANDBOX_HOME, TMPDIR: '/var/tmp', PATH: INSTALL_PATH_ENV });
+  assert.deepEqual(s.env, { HOME: SANDBOX_HOME, TMPDIR: '/var/tmp', PATH: INSTALL_PATH_ENV }, 'allow-list env (ADR-215)');
   assert.deepEqual(fs.readdirSync(staging), [], 'staging dir removed');
   assert.deepEqual(audits.map((a) => a.action), ['harness_install_started', 'harness_install_succeeded']);
   assert.match(String(audits[1].metadata.sha256), /^[0-9a-f]{64}$/u);
@@ -256,7 +301,7 @@ test('C3/C8: refusals happen before any job, download or lease', () => {
   setDeps({ isPlatform: () => true });
   assert.throws(() => startHarnessInstall('codex', { userId: 1 }), { code: 'PLATFORM_MODE_UNSUPPORTED', statusCode: 403 });
   setDeps({});
-  assert.throws(() => startHarnessInstall('claude', { userId: 1 }), { code: 'HARNESS_NOT_INSTALLABLE' });
+  assert.throws(() => startHarnessInstall('cursor', { userId: 1 }), { code: 'HARNESS_NOT_INSTALLABLE' });
   acquireHarnessLease('codex', 'other-job');
   assert.throws(() => startHarnessInstall('codex', { userId: 1 }),
     (e: { code?: string; details?: { activeJobId?: string } }) =>

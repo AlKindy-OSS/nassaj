@@ -16,8 +16,8 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
 import { buildPartialProjectFileTreeResponse } from './utils/file-tree-partial.js';
-import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
-import { createWebSocketServer } from '@/modules/websocket/index.js';
+import { claudeUsageService, closeSessionsWatcher, configureSessionAgents, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, readSessionWorkflowAgents, sendSessionAgentsSnapshot, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
+import { broadcastToSessionMirrors, countLiveMirrors, createWebSocketServer } from '@/modules/websocket/index.js';
 import {
     abortSessionTurn, dispatchProviderCommand, isModelActivityFrame, isSessionWritableByUser,
 } from '@/modules/websocket/services/chat-websocket.service.js';
@@ -26,6 +26,8 @@ import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.s
 import {
     createScheduledMessagesRouter, createScheduledMessagesService, createScheduledTurnDispatcher,
 } from '@/modules/scheduled-messages/index.js';
+import { createPeerRelayRuntime } from '@/modules/peer-relay/index.js';
+import { sessionCostService } from '@/modules/providers/services/cost/session-cost.service.js';
 import {
     closeUniversalConversationShadowRuntime,
     createUniversalConversationShadowCoreResolver,
@@ -69,7 +71,7 @@ import { isTrustedOrigin, multiAccountSwitchingEnabled, trustedOriginPolicy } fr
 import { corsAllowedOrigins } from './config/cors-origins.js';
 import { serverPort } from './config/server-port.js';
 import { sanitizeAttachmentName, resolveCollisionFreeDest } from './utils/attachment-helpers.js';
-import { openReadableProjectFile, isResolvedPathInsideRootReal } from './utils/path-guard.js';
+import { openReadableProjectFile, isResolvedPathInsideRootReal, pathHasGitDirSegment } from './utils/path-guard.js';
 import {
     SECRET_FILE_AUDIT_ACTION,
     buildSecretFileAuditEntry,
@@ -87,6 +89,14 @@ import { createDocumentSharesStore } from './modules/database/document-shares.js
 import { createDocumentShareVerifier } from './services/document-share-auth.js';
 import { createSessionShareRuntime } from './services/session-share-runtime.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
+import {
+    OVERLAY_FILE_WRITE_AUDIT_ACTION,
+    buildOverlayFileWriteAuditEntry,
+    rebaseRequestedPath,
+    resolveSessionFileRoot,
+} from './services/session-file-root.js';
+import { findSessionOverlayWorkspace } from './modules/session-workspaces/index.js';
+import { isDirectLocalRequest } from './utils/direct-local-request.js';
 import { createAssistantImagesRouter, deriveAllowedRoots, defaultScratchpadBases, defaultTmpBases, deriveOverlayWorkspace } from './routes/assistant-images.js';
 import {
     queryClaudeSDK,
@@ -97,6 +107,9 @@ import {
     getActiveClaudeSDKSessions,
     getDrainBlockingClaudeSessions,
     ghostDetachEnabled,
+    releaseScheduledWakeupHoldsForDrain,
+    getScheduledWakeupHoldPids,
+    releaseNativeHoldsOnRelayTransition,
     resolveToolApproval,
     getPendingApprovalsForSession,
     cancelAllPendingApprovals,
@@ -225,7 +238,7 @@ import { startSsoAttestationSweep } from './services/sso-attestation-sweep.js';
 import { ssoAttestationFresh } from './services/sso-attestation.js';
 import { reconcileHarnessSnapshots } from './modules/providers/harness-update/boot-reconcile.js';
 import { startVendorKeyMigrationSweep } from './modules/providers/services/vendor-key-migration.runtime.js';
-import { logUnresolvedHarnessBinaries } from './shared/harness-binaries.js';
+import { logUnresolvedHarnessBinaries, resolveHarnessBinary } from './shared/harness-binaries.js';
 import governancePreferencesRoutes from './modules/providers/governance-preferences.routes.js';
 import { harnessFilesRoutes } from './modules/harness-files/index.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
@@ -248,9 +261,11 @@ import { revokeProjectLiveAccess } from './modules/websocket/services/project-me
 import { onMemberRemoved } from './modules/projects/services/project-visibility-management.service.js';
 import { isProjectVisible, coerceUserId } from './modules/projects/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
-import { createPrestageCandidateBuilder, createSourceUpdater, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, runFile, sourceUpdateErrorPayload } from './services/source-updater.js';
+import { createPrestageCandidateBuilder, createSourceUpdater, defaultGitCheckoutProbe, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, runFile, sourceUpdateErrorPayload } from './services/source-updater.js';
 import { createPrestageSlot } from './services/update-prestage-slot.js';
-import { createUpdatePrestager, readFreeBytes, readMemAvailableBytes } from './services/update-prestager.js';
+import { createUpdatePrestager, readFreeBytes, readMemAvailableBytes, releasePolicyRequiresVerification, verifySignedReleasePort } from './services/update-prestager.js';
+import { createServerQuiescenceReader, createSourceAttachRestartIssuer, createSourceAttachService } from './services/source-attach-operation.js';
+import { attachFetchDeadlineMs, createAttachGit } from '../scripts/lib/release-branch-attach.mjs';
 import { readStoredPrestageSettings } from './services/update-prestage-settings.js';
 import { systemResourceSampler } from '@/services/system-resource-sampler.service.js';
 import { createSourceUpdateWorker, durableReceiptFile } from './services/source-update-worker.js';
@@ -273,7 +288,7 @@ import { readRuntimeIdentity } from './services/runtime-identity.js';
 import { assertLegacyTransitionAllowed, requireStartupAdmission, confirmStartupServing } from './bootstrap-startup-context.js';
 import { createUpdateMaintenanceGate } from './services/update-maintenance-gate.js';
 import { pruneSourceUpdateCandidates } from './services/source-update-candidate-retention.js';
-import { acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases, summarizeOpenTerminals, withLocalUpdateWriterLease } from './services/update-writer-lease.js';
+import { acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases, runOutsideWriterContext, summarizeOpenTerminals, withLocalUpdateWriterLease } from './services/update-writer-lease.js';
 import { createClientPublicationStaticMiddleware, createClientManifestHandler } from './services/client-publication-static.js';
 import { createSharePageRouter, publicAssetCors } from './services/share-page.js';
 import { resolveHostUpdateMode, setLocalUpdateRuntimeIdentity, localUpdateActivationJobs, ensureLocalUpdateAction,
@@ -357,6 +372,9 @@ try {
             + `Set it to a credential-free GitHub repository URL, then run the governed safe restart: ${error.message}`);
 }
 const sourceVersionHealthMiddleware = createSourceVersionHealthMiddleware(path.join(APP_ROOT, 'package.json'));
+// ADR-216: the release-branch re-attach service; built below once the gate and
+// the restart queue exist. /health reads its two booleans.
+let sourceAttachService = null;
 const PREVIEW_LEDGER_NAME = 'nassaj-local-preview-ledger-v1.json';
 // Resolved lazily through the common Git dir: in a linked worktree `.git` is a file.
 let previewLedgerPath = null;
@@ -1025,6 +1043,7 @@ const wss = createWebSocketServer(server, {
         isQwenSessionActive,
         reconnectSessionWriter,
         isPrimarySocketAlive: isSessionPrimarySocketAlive,
+        sendSessionAgentsSnapshot,
         attachAntigravitySession,
         attachClaudeSDKSession,
         getPendingApprovalsForSession,
@@ -1084,6 +1103,37 @@ const scheduledMessagesService = createScheduledMessagesService({
         // a source update waits for a running scheduled turn instead of racing it.
         acquireWriterLease: (kind) => acquireApplicationWriterLease(kind, { waitMs: 100 }),
     }),
+});
+
+// ADR-219 S1 (T-2072): the cross-session relay. Peer rows are delivered by a resume
+// turn through the same provider dispatch as scheduled messages, under the target
+// owner's internal-service principal (`peer-message:<id>`); nothing runs until start().
+const peerRelayDispatcher = createPeerRelayRuntime({
+    isSessionRunLive: (sessionId) => isClaudeSDKSessionActive(sessionId),
+    resolveClaudeBinary: () => resolveHarnessBinary('claude'),
+    readUsage: (userId) => claudeUsageService.getUsage(userId),
+    ledgerCostUsd: async (sessionId, userId) => {
+        const cost = await sessionCostService.getSessionCost(sessionId, userId);
+        return cost.available ? cost.totalUsd : null;
+    },
+    canWriteSession: (sessionId, userId) => isSessionWritableByUser(sessionId, userId),
+    notifySession: (sessionId, serialized) => { broadcastToSessionMirrors(sessionId, serialized); },
+    activeMemberCount: () => userDb.getActiveUserCount(),
+    getUser: (userId) => userDb.getUserById(userId),
+    createWriter: (userId, sessionId) => {
+        const writer = new WebSocketWriter({ readyState: 1, send() {} }, userId);
+        writer.setSessionId(sessionId);
+        return writer;
+    },
+    dispatchProviderCommand: (messageType, data, writer, userId, principal) => dispatchProviderCommand(
+        messageType, data, writer, chatDependencies, userId, principal,
+    ),
+    acquireWriterLease: (kind) => acquireApplicationWriterLease(kind, { waitMs: 100 }),
+    runOutsideWriterContext,
+    // A hosted supervision cell would run the wrapper as ordinary text: refuse delivery there.
+    isUnsupportedPath: () => hostedTurnSupervisor.enabled({ provider: 'claude', mode: 'chat' }) === true,
+    // The wall-clock cap of a delivery turn stops it like the user's STOP.
+    abortSession: (sessionId) => abortClaudeSDKSession(sessionId),
 });
 
 // Make WebSocket server available to routes
@@ -1376,6 +1426,9 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
     // learn that this node is not serving normally. On 2026-09-11 the site was
     // 503 for an unmeasured period with nothing outside the box saying why.
     const maintenance = resolveDegraded(() => requestMaintenanceGate.readPublicStatus());
+    // ADR-216 §3.3: two booleans only (no oid, version or path) on this public route.
+    let sourceAttachFlags = { sourceAttachOffered: false, restartPending: false };
+    try { if (sourceAttachService) sourceAttachFlags = await sourceAttachService.healthFlags(); } catch { /* stays false */ }
     res.json({
         status: 'ok',
         startupPhase: startupAdmission?.phase ?? 'legacy',
@@ -1416,6 +1469,13 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         degraded: maintenance.degraded,
         degradedReason: maintenance.degradedReason,
         activeSessions,
+        // B-1699: CLI pids of claude runs held ONLY for a scheduled wake-up, so the
+        // safe-restart scan does not count a `/loop` as live work (the drain releases
+        // them). Direct local callers only, with this server's pid for the scan to match.
+        ...(isDirectLocalRequest(req) ? {
+            serverPid: process.pid,
+            claudeWakeupHoldPids: (() => { try { return getScheduledWakeupHoldPids(); } catch { return []; } })(),
+        } : {}),
         // T-1880: static booleans proving the Claude-home separation prerequisites are live.
         claudeHomeReady: CLAUDE_HOME_READY,
         restartRequired,
@@ -1473,6 +1533,8 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         blockedReasonMessage: !IS_PLATFORM && updateHostCapability.ready && !updateStorage.ok
             ? updateStorage.message : undefined,
         hasPendingActions,
+        sourceAttachOffered: sourceAttachFlags.sourceAttachOffered === true,
+        restartPending: sourceAttachFlags.restartPending === true,
     });
 });
 
@@ -1711,6 +1773,15 @@ app.use('/api/providers/antigravity', (req, res, next) => {
 // REST answer and the `session-status` frame can never disagree — the endpoint
 // mirrors an existing state and introduces no store of its own. Not injected =
 // fail-closed (`isProcessing:false`), never a throw.
+// ADR-218: the session agents registry delivers its snapshot to the session's
+// gated mirrors and asks the same Claude liveness probe whether a run is alive.
+configureSessionAgents({
+    deliver: broadcastToSessionMirrors,
+    countMirrors: countLiveMirrors,
+    isRunLive: isClaudeSDKSessionActive,
+    readWorkflowAgents: readSessionWorkflowAgents,
+});
+
 setSessionLivenessProbes({
     claude: isClaudeSDKSessionActive,
     cursor: isCursorSessionActive,
@@ -2186,13 +2257,62 @@ try {
 } catch (error) {
     console.warn('[update-prestager] disabled:', error?.code || error?.message || 'unknown');
 }
+// ADR-216 §3.3: the dedicated restart issuer of a re-attach (never the job-bound
+// queueSourceUpdateRestart), bound to the build id this process loaded.
+const queueSourceAttachRestart = createSourceAttachRestartIssuer({
+    actions: pendingServerActionsDb, buildAction: buildPendingAction,
+    currentBuildId: () => SERVER_BUILD_ID_LOADED_AT_STARTUP,
+    audit: (action, details) => auditLogDb.record(action, details),
+});
+/** ADR-216: the owner's re-attach of a detached checkout; null when this is not a git checkout. */
+function createNodeSourceAttachService() {
+    if (IS_PLATFORM || !fs.existsSync(path.join(APP_ROOT, '.git'))) return null;
+    const controlRoot = defaultSourceUpdateControlRoot(APP_ROOT);
+    const remote = process.env.NASSAJ_UPDATE_REMOTE || 'origin';
+    const branch = process.env.NASSAJ_UPDATE_BRANCH || 'main';
+    return createSourceAttachService({
+        appRoot: APP_ROOT, controlRoot, remote, branch,
+        configuredRemoteUrl: () => resolveReleaseSource(process.env, {
+            lockPath: path.join(APP_ROOT, 'config', 'release-source.lock.json'),
+        }).repositoryUrl,
+        git: createAttachGit({ appRoot: APP_ROOT, env: process.env }),
+        bootBlockedDetached: () => updateHostCapability.blockedReasonCode === 'detached_head',
+        probe: () => defaultGitCheckoutProbe({ appRoot: APP_ROOT, remote, branch }),
+        acquireLease: (options) => requestMaintenanceGate.acquireExclusiveSourceRefLease(options),
+        readQuiescence: createServerQuiescenceReader({
+            readGate: () => requestMaintenanceGate.readPublicStatus(),
+            hasUnfinishedJobs: () => sourceUpdateJobsDb.hasUnfinished(),
+            controlRoot,
+        }),
+        queueRestart: queueSourceAttachRestart,
+        verifySignedRelease: verifySignedReleasePort,
+        requireVerified: () => {
+            let stored = null;
+            try { stored = readStoredPrestageSettings(); } catch { stored = null; }
+            return releasePolicyRequiresVerification(process.env, stored);
+        },
+        deadlineMs: attachFetchDeadlineMs(process.env),
+        summarizeOpenTerminals: () => summarizeOpenTerminals(),
+        audit: (action, details) => auditLogDb.record(action, details),
+    });
+}
+try {
+    sourceAttachService = createNodeSourceAttachService();
+} catch (error) {
+    console.warn('[source-attach] disabled:', error?.code || error?.message || 'unknown');
+}
 // ADR-207 S5: the owner's release view reads the prestage status; the
 // re-confirm route wakes the auto-activator (T-2024 S0 follow-up).
 setUpdateRouteHooks({
     prestageStatus: updatePrestager ? () => updatePrestager.status() : null,
     // T-2030: an owner settings change is applied now, not at the next poll.
     wakePrestager: updatePrestager ? () => updatePrestager.wake() : null,
+    // T-2025: the banner shares this node's discovery cache, and a release it
+    // discovers wakes the prestager once instead of at the next 30 min poll.
+    releaseDiscovery: updateReleaseDiscovery,
+    noteReleaseDiscovered: updatePrestager ? (release) => updatePrestager.noteRelease(release) : null,
     wakeAutoActivator: updateAutoActivator ? () => updateAutoActivator.wake() : null,
+    sourceAttach: sourceAttachService,
 });
 
 // Its own limiter, not the POST instance: sharing one bucket would let a burst
@@ -2484,7 +2604,8 @@ app.post('/api/create-folder', authenticateToken,
         }
         const targetPath = validation.resolvedPath || resolvedInput;
         // B-1373: never create folders inside credential locations.
-        if (isSecretPath(targetPath)) {
+        // B-1691 (qa F5): nor inside a `.git` directory, lexically or for real.
+        if (isSecretPath(targetPath) || pathHasGitDirSegment(resolvedInput) || pathHasGitDirSegment(targetPath)) {
             return res.status(403).json({ error: 'Path is not allowed' });
         }
         const parentDir = path.dirname(targetPath);
@@ -2544,8 +2665,13 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
         // file (B-159). Open only the verified real path; SQLite content is
         // refused from the opened descriptor before anything is returned.
         // B-1593: a project secret file needs `confirmSecret=1` on the request.
-        const guard = await openReadableProjectFile(projectRoot, filePath, {
+        // B-1689: a chat session's overlay copy when the editor names its session.
+        const fileScope = resolveFileRootOrRespond(req, res, projectRoot, req.query.sessionId, 'read');
+        if (!fileScope) return;
+        const fileRoot = fileScope.root;
+        const guard = await openReadableProjectFile(fileRoot, rebaseRequestedPath(filePath, projectRoot, fileRoot), {
             confirmSecret: isSecretFileConfirmed(req.query.confirmSecret),
+            trustedOverlayRoot: fileScope.overlay,
         });
         if (!guard.valid) {
             if (guard.code === 'ENOENT') {
@@ -2558,7 +2684,7 @@ app.get('/api/projects/:projectId/file', authenticateToken, async (req, res) => 
         }
         if (guard.secretFile) {
             res.set('Cache-Control', 'no-store');
-            auditSecretFileAccess(req, projectId, projectRoot, guard.resolved, 'read');
+            auditSecretFileAccess(req, projectId, fileRoot, guard.resolved, 'read', fileScope);
         }
 
         // Defense in depth: this route returns JSON (never raw renderable bytes),
@@ -2615,8 +2741,12 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
         // the verified real path. A missing file/component surfaces as ENOENT.
         // SQLite content is refused from the opened descriptor (header sniff).
         // B-1593: a project secret file needs `confirmSecret=1` on the request.
-        const guard = await openReadableProjectFile(projectRoot, filePath, {
+        const fileScope = resolveFileRootOrRespond(req, res, projectRoot, req.query.sessionId, 'read');
+        if (!fileScope) return;
+        const fileRoot = fileScope.root;
+        const guard = await openReadableProjectFile(fileRoot, rebaseRequestedPath(filePath, projectRoot, fileRoot), {
             confirmSecret: isSecretFileConfirmed(req.query.confirmSecret),
+            trustedOverlayRoot: fileScope.overlay,
         });
         if (!guard.valid) {
             if (guard.code === 'ENOENT') {
@@ -2628,7 +2758,7 @@ app.get('/api/projects/:projectId/files/content', authenticateToken, async (req,
             return res.status(403).json({ error: 'Path must be under project root' });
         }
         if (guard.secretFile) {
-            auditSecretFileAccess(req, projectId, projectRoot, guard.resolved, 'download');
+            auditSecretFileAccess(req, projectId, fileRoot, guard.resolved, 'download', fileScope);
         }
 
         // Content type from the requested name's extension; nosniff, a
@@ -2700,7 +2830,12 @@ app.put('/api/projects/:projectId/file', authenticateToken,
         // inside the tree (a cloned repo can ship one) let this write land on an
         // arbitrary path on disk. B-159 closed that on the READ endpoints only;
         // this was the last write still on the old check.
-        const validation = validatePathInProject(projectRoot, filePath);
+        // B-1689: save into the same copy the editor read (session overlay or root).
+        const fileScope = resolveFileRootOrRespond(req, res, projectRoot, req.body.sessionId, 'write');
+        if (!fileScope) return;
+        const fileRoot = fileScope.root;
+        const validation = validatePathInProject(fileRoot, rebaseRequestedPath(filePath, projectRoot, fileRoot),
+            { trustedOverlayRoot: fileScope.overlay });
         if (!validation.valid) {
             return res.status(403).json({ error: validation.error });
         }
@@ -2712,17 +2847,23 @@ app.put('/api/projects/:projectId/file', authenticateToken,
         }
 
         // Write the new content (the guard-approved path, never a raw client one)
-        const relativeDocumentPath = path.relative(projectRoot, resolved);
-        if (isShareableDocument(relativeDocumentPath)) {
-            await saveSharedDocumentAtomically(projectRoot, relativeDocumentPath, content);
+        const relativeDocumentPath = path.relative(fileRoot, resolved);
+        // Shared documents live under the project root only; the share store
+        // refuses an overlay root (it sits under `.git`), so an overlay copy
+        // takes the guarded plain write.
+        if (!fileScope.overlay && isShareableDocument(relativeDocumentPath)) {
+            await saveSharedDocumentAtomically(fileRoot, relativeDocumentPath, content);
         } else {
             await fsPromises.writeFile(resolved, content, 'utf8');
         }
-        if (secretFile) auditSecretFileAccess(req, projectId, projectRoot, resolved, 'save');
+        if (secretFile) auditSecretFileAccess(req, projectId, fileRoot, resolved, 'save', fileScope);
+        // qa M-1: every write into a session overlay is audited (never its content).
+        if (fileScope.overlay) auditOverlayFileWrite(req, projectId, fileScope, resolved);
 
         res.json({
             success: true,
-            path: resolved,
+            // Root-relative (qa L-4): the absolute server path is not echoed back.
+            path: relativeDocumentPath,
             message: 'File saved successfully'
         });
     } catch (error) {
@@ -2871,9 +3012,12 @@ async function buildTempUploadMulter({ fileFilter, maxSizeBytes, maxCount }) {
  * Validate that a path is within the project root
  * @param {string} projectRoot - The project root path
  * @param {string} targetPath - The path to validate
+ * @param {{ trustedOverlayRoot?: boolean }} [scope] - B-1691 (qa F8): true only for a
+ *   session overlay root resolved server-side (resolveFileRootOrRespond); any other
+ *   root inside a `.git` directory is refused.
  * @returns {{ valid: boolean, resolved?: string, error?: string }}
  */
-function validatePathInProject(projectRoot, targetPath) {
+function validatePathInProject(projectRoot, targetPath, { trustedOverlayRoot = false } = {}) {
     const resolved = path.isAbsolute(targetPath)
         ? path.resolve(targetPath)
         : path.resolve(projectRoot, targetPath);
@@ -2889,16 +3033,51 @@ function validatePathInProject(projectRoot, targetPath) {
     // B-1593: only SERVICE secrets are refused here; the project's own dotenv/
     // SQLite files may again be created, renamed, deleted and uploaded. Saving
     // their content additionally needs an explicit confirmation (PUT /file).
-    if (!isResolvedPathInsideRootReal(projectRoot, resolved, { allowProjectSecretFiles: true })) {
+    // B-1691: never into a `.git` directory (hooks/config run as the service).
+    if (!isResolvedPathInsideRootReal(projectRoot, resolved, {
+        allowProjectSecretFiles: true, refuseGitDir: true, trustedOverlayRoot,
+    })) {
         return { valid: false, error: 'Path must be under project root' };
     }
     return { valid: true, resolved };
 }
 
-/** B-1593: audit line (no content) for a confirmed project secret-file access. */
-function auditSecretFileAccess(req, projectId, projectRoot, absolutePath, access) {
+/**
+ * B-1689: the root a project file request reads/saves through — the session's
+ * overlay when `sessionId` names a session of this project the requester may
+ * use (`mode`), otherwise the project root. Never derived from a client path.
+ * Returns the scope `{ root, overlay, sessionId, overlayId }`; answers an error
+ * response itself and returns null when the session is refused.
+ */
+function resolveFileRootOrRespond(req, res, projectRoot, sessionId, mode) {
+    const resolved = resolveSessionFileRoot({
+        projectRoot,
+        sessionId,
+        userId: coerceUserId(req.user?.id),
+        mode,
+        getSessionById: (id) => sessionsDb.getSessionById(id),
+        isSessionAccessible: isSessionAccessibleByUser,
+        findOverlay: findSessionOverlayWorkspace,
+    });
+    if (resolved.ok) return resolved;
+    res.status(resolved.status).json({ error: resolved.status === 400 ? 'Invalid session id' : 'Session not found' });
+    return null;
+}
+
+/**
+ * B-1593: audit line (no content) for a confirmed project secret-file access.
+ * B-1689 (qa M-2): `overlayScope` marks an access through a session overlay.
+ */
+function auditSecretFileAccess(req, projectId, projectRoot, absolutePath, access, overlayScope = null) {
     auditLogDb.record(SECRET_FILE_AUDIT_ACTION, buildSecretFileAuditEntry(req, {
-        userId: coerceUserId(req.user?.id), projectId, projectRoot, absolutePath, access,
+        userId: coerceUserId(req.user?.id), projectId, projectRoot, absolutePath, access, overlayScope,
+    }));
+}
+
+/** B-1689 (qa M-1): audit line (no content) for a save into a session overlay. */
+function auditOverlayFileWrite(req, projectId, scope, absolutePath) {
+    auditLogDb.record(OVERLAY_FILE_WRITE_AUDIT_ACTION, buildOverlayFileWriteAuditEntry(req, {
+        userId: coerceUserId(req.user?.id), projectId, scope, absolutePath,
     }));
 }
 
@@ -4288,6 +4467,10 @@ async function startServer() {
         });
         startupBackground = backgroundLifecycle;
         await backgroundLifecycle.prepare();
+        // ADR-219: boot repair of `delivering` rows runs first, then the claim loop.
+        peerRelayDispatcher.start();
+        // ADR-219 (qa م-5): a second member ends native holds so the next turn spawns in relay mode.
+        setInterval(() => { releaseNativeHoldsOnRelayTransition(); }, 60 * 1000).unref();
         privateSecurityReady = true;
         startHarnessAutoUpdateScheduler();
         // T-1939 slice 3: close live access of members whose SSO attestation aged out.
@@ -4432,6 +4615,7 @@ async function startServer() {
                 qwen: getActiveQwenSessions().length,
             }),
             finalCleanup: async () => {
+                peerRelayDispatcher.stop();
                 stopHarnessAutoUpdateScheduler();
                 await backgroundLifecycle.stop();
             },
@@ -4443,6 +4627,12 @@ async function startServer() {
             // queue resumes from durable state in the successor process.
             onDrainStart: () => {
                 scheduledMessagesService.pause();
+                // ADR-219: no relay claim or delivery during a drain; sends still queue.
+                peerRelayDispatcher.pause();
+                // B-1699: a `/loop` never ends on its own; a run held only for its
+                // next wake-up must not keep the drain waiting.
+                const wakeHolds = releaseScheduledWakeupHoldsForDrain();
+                if (wakeHolds > 0) console.log(`[DRAIN] released ${wakeHolds} scheduled-wakeup hold(s)`);
                 // ADR-207 §3.3: abort a running prestage (its launcher group dies) and discard it.
                 void updatePrestager?.stop({ drain: true });
             },

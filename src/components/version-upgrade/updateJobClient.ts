@@ -263,7 +263,7 @@ const AUTO_ACTIVATION_STATES = new Set([
 const TERMINAL_SNAPSHOT = /^[a-f0-9]{32}$/;
 
 /** Validate an open-terminal reading (B-1448); never trust the response body as-is. */
-function normalizeOpenTerminals(value: unknown): OpenTerminals | null {
+export function normalizeOpenTerminals(value: unknown): OpenTerminals | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
   const count = (field: string): number => {

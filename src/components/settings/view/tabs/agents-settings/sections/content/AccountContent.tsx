@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { HARNESS_INSTALL_INFO, isInstallableHarness } from '../../../../../../../../shared/harness-install.contract';
 import { useHarnessInstall } from '../../../../../../../hooks/useHarnessInstall';
+import { isolateLtrRuns } from '../../../../../../../utils/isolateLtrRuns';
 import { Button } from '../../../../../../../shared/view/ui';
 import { useOptionalAuth } from '../../../../../../auth/context/AuthContext';
 import SettingsCard from '../../../../SettingsCard';
@@ -591,7 +592,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink, o
           <div role="status" className="space-y-2">
           <p className="flex items-start gap-2 text-sm font-medium text-warning">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            {installInfo.label}
+            {t(`harnessInstall.info.${installable}.label`, { defaultValue: installInfo.label })}
           </p>
           {/* صفّ واحد: الأمر ثم النسخ ثم «تثبيت» في نهايته المنطقية؛ يلتفّ الزرّ تحته
               في الشاشة الضيّقة (basis-48) بدل أن يضغط الأمر أو يفيض. */}
@@ -609,10 +610,17 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink, o
             )}
           </div>
           {installInfo.note && (
-            <p className="text-[13px] leading-relaxed text-muted-foreground">{installInfo.note}</p>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              {isolateLtrRuns(t(`harnessInstall.info.${installable}.note`, { defaultValue: installInfo.note }))}
+            </p>
           )}
           {isOwner && installable && (
-            <HarnessInstallProgress provider={installable} state={install.state} />
+            <HarnessInstallProgress
+              provider={installable}
+              state={install.state}
+              onConfirm={(acks) => void install.start(acks)}
+              onCancel={install.cancel}
+            />
           )}
           </div>
         </SettingsCard>

@@ -42,6 +42,8 @@ import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-id
 import { isTranscriptHandle, openSessionTranscript } from '../shared/session-transcript.js';
 import { isRetryableRefusal, removeSessionTranscript } from '../shared/session-transcript-removal.js';
 import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219: the peer history-marker leaf (relay repository only).
+import { projectPeerDeliveryMarkers } from '../../peer-relay/peer-history.js';
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
 import { runtimeInstructionsPrefix, stripRuntimeInstructionsPrefix } from '../../../../shared/documentSharingInstructions.js';
@@ -79,6 +81,11 @@ type ArchivedSessionListItem = {
  * content (participants, agents, active-model pinning) share this one gate
  * instead of re-deriving it.
  */
+/** ADR-219: maps transcript proof rows to server `peerDeliveryId` markers and strips the internal ref. */
+function projectPeerHistory(result: FetchHistoryResult, sessionId: string): FetchHistoryResult {
+  return { ...result, messages: projectPeerDeliveryMarkers(result.messages, sessionId) };
+}
+
 export function assertSessionAccessible(
   sessionId: string,
   requesterUserId: number | null,
@@ -766,7 +773,7 @@ export const sessionsService = {
     options.historyLease?.check();
     options.historyLease?.reserveDto(result);
     const ownedResult = provider === 'claude'
-      ? projectClaudeHistoryReceipts(result, sessionId, requesterUserId, undefined, options.historyLease)
+      ? projectPeerHistory(projectClaudeHistoryReceipts(result, sessionId, requesterUserId, undefined, options.historyLease), sessionId)
       : provider === 'codex' ? result
         : projectVendorHistoryReceipts(result, provider, sessionId, requesterUserId);
     let payload = payloadMode === 'light' ? projectLightHistory(ownedResult) : ownedResult;

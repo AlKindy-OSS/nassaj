@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let role: string = 'owner';
 const installState = { current: { status: 'idle', percent: 0, log: [] as string[] } as Record<string, unknown> };
 const start = vi.fn();
+const cancel = vi.fn();
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -17,7 +18,7 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('../../../../../../auth/context/AuthContext', () => ({ useOptionalAuth: () => ({ user: { role } }) }));
 vi.mock('../../../../../../../hooks/useHarnessInstall', () => ({
-  useHarnessInstall: () => ({ state: installState.current, start }),
+  useHarnessInstall: () => ({ state: installState.current, start, cancel }),
 }));
 vi.mock('../../../../../../quick-settings-panel/hooks/useProviderCycles', () => ({ useProviderCycles: () => ({ status: 'idle' }) }));
 vi.mock('./LinkModeSection', () => ({ default: () => null }));
@@ -28,12 +29,12 @@ import AccountContent from './AccountContent';
 
 const missing = { installed: false, authenticated: false, loading: false } as unknown as AuthStatus;
 
-function mount(authStatus: AuthStatus = missing, agent: 'codex' | 'opencode' = 'codex') {
+function mount(authStatus: AuthStatus = missing, agent: 'codex' | 'opencode' | 'antigravity' | 'claude' = 'codex') {
   return render(<AccountContent agent={agent} authStatus={authStatus} onLogin={() => {}} onRefreshAuthStatus={() => {}} />);
 }
 
 describe('AccountContent install button', () => {
-  beforeEach(() => { role = 'owner'; installState.current = { status: 'idle', percent: 0, log: [] }; start.mockReset(); });
+  beforeEach(() => { role = 'owner'; installState.current = { status: 'idle', percent: 0, log: [] }; start.mockReset(); cancel.mockReset(); });
   afterEach(cleanup);
 
   it('shows the shared install command and an Install button to the owner', () => {
@@ -76,6 +77,56 @@ describe('AccountContent install button', () => {
     // Feedback sits below the row, outside it.
     expect(button.parentElement!.contains(progress)).toBe(false);
     expect(screen.getByText('line one')).toBeTruthy();
+  });
+
+  it('shows the agy command and the same inline Install button to the owner (ADR-215)', () => {
+    mount(missing, 'antigravity');
+    const command = screen.getByText('curl -fsSL https://antigravity.google/cli/install.sh | bash');
+    const button = screen.getByTestId('harness-install-antigravity');
+    expect(button.parentElement).toBe(command.parentElement);
+    fireEvent.click(button);
+    expect(start).toHaveBeenCalledTimes(1);
+    cleanup();
+    role = 'member';
+    mount(missing, 'antigravity');
+    expect(screen.queryByTestId('harness-install-antigravity')).toBeNull();
+  });
+
+  it('shows the claude command with the inline Install button, and the server-built confirm dialog (ADR-215 B)', () => {
+    mount(missing, 'claude');
+    expect(screen.getByText('curl -fsSL https://claude.ai/install.sh | bash')).toBeTruthy();
+    expect(screen.getByTestId('harness-install-claude')).toBeTruthy();
+    cleanup();
+    installState.current = { status: 'confirming', percent: 0, log: [], required: [
+      { kind: 'systemCopy', token: 'tok', expiresAt: Date.now() + 60_000, textEn: 'sys en', textAr: 'نص الخادم', facts: {} },
+    ] };
+    mount(missing, 'claude');
+    expect(screen.getByText('نص الخادم')).toBeTruthy();
+    const confirm = screen.getByRole('button', { name: 'تأكيد' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(confirm);
+    expect(start).toHaveBeenCalledWith([{ kind: 'systemCopy', token: 'tok' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'إلغاء' }));
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('keeps the confirm dialog up and disabled while the confirmed POST is in flight (qa M3)', () => {
+    installState.current = { status: 'starting', percent: 0, log: [], required: [
+      { kind: 'npmRemoval', token: 'tok', expiresAt: Date.now() + 60_000, textEn: 'npm en', textAr: 'سيُزال من ~/.npm-global/lib.', facts: {} },
+    ] };
+    mount(missing, 'claude');
+    // The path is isolated LTR so the bidi algorithm cannot reorder `~/.` inside Arabic.
+    const path = screen.getByText('~/.npm-global/lib');
+    expect(path.tagName).toBe('BDI');
+    expect(path.getAttribute('dir')).toBe('ltr');
+    const confirm = screen.getByRole('button', { name: 'تأكيد' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    expect(start).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'إلغاء' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('shows the server Arabic failure message and a retry button', () => {

@@ -12,7 +12,7 @@ const ORIGINAL_DB = process.env.DATABASE_PATH;
 process.env.DATABASE_PATH = path.join(sandbox, 'db.sqlite');
 
 const {
-  saveChatImages, resolveChatImagePath, getChatImageRoot, setSharpImporterForTesting,
+  saveChatImages, resolveChatImagePath, getChatImageRoot, setSharpImporterForTesting, chatImageRefsFromPaths,
 } = await import('./chat-image-store.js');
 
 const PNG_BASE64 =
@@ -34,6 +34,18 @@ describe('chat-image-store', () => {
     assert.equal(paths.length, 1);
     assert.equal(paths[0], path.join(getChatImageRoot(), bucket!, 'image_0.png'));
     assert.ok((await fs.stat(paths[0])).isFile());
+  });
+
+  it('B-1697: turns stored paths into {bucket,name} refs and drops anything outside the store', async () => {
+    const { bucket, paths } = await saveChatImages([{ data: `data:image/png;base64,${PNG_BASE64}` }]);
+    assert.deepEqual(chatImageRefsFromPaths(paths), [{ bucket, name: 'image_0.png' }]);
+    assert.deepEqual(chatImageRefsFromPaths([
+      path.join('/elsewhere', bucket!, 'image_0.png'),
+      path.join(getChatImageRoot(), 'not-a-bucket', 'image_0.png'),
+      path.join(getChatImageRoot(), bucket!, 'passwd'),
+      42,
+    ] as never), []);
+    assert.deepEqual(chatImageRefsFromPaths(null as never), []);
   });
 
   it('falls back to .png for an unknown mime subtype instead of trusting it', async () => {

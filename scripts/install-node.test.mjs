@@ -465,11 +465,12 @@ test('a full install runs every step in order and never derives the source silen
         now: () => '2026-09-11T00:00:00.000Z',
         confirm: async (request) => { confirmed.push(request); return true; },
         output: { write: () => {} },
+        releaseCheckout: async () => ({ shape: 'attached', repaired: false }),
     });
 
     assert.deepEqual(confirmed.map((entry) => entry.identity), ['github.com/your-org/nassaj-dev']);
     assert.deepEqual(result.steps.map((entry) => entry.step), [
-        'derive-release-source', 'host-keys', 'ssh-probe', 'remote', 'release-fetch',
+        'derive-release-source', 'host-keys', 'ssh-probe', 'remote', 'release-fetch', 'release-checkout',
         'node-env', 'release-source-lock', 'ecosystem', 'first-build-seed', 'client-archive',
         'install-root', 'update-preflight',
     ]);
@@ -505,6 +506,7 @@ test('a blocked port 22 stops the install until the operator authorizes the ssh 
     const options = {
         appRoot, deployRoot: '/opt/nassaj', homeDir, node: 'trav', env: {}, spawn,
         fetch: fakeFetch({ ssh_keys: META_KEYS }), confirm: async () => true, output: { write: () => {} },
+        releaseCheckout: async () => ({ shape: 'attached', repaired: false }),
     };
     await assert.rejects(installNode(options), (error) => {
         assert.equal(error.code, 'ssh_config_required');

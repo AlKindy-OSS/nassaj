@@ -213,6 +213,7 @@
     "title": "Subagent",
     "titleWithType": "Subagent / {{type}}",
     "titleWithTask": "{{prefix}}: {{description}}",
+    "forkType": "Fork",
     "backgroundLaunched": "Agent launched in the background"
   },
   "coordinator": {
@@ -232,6 +233,18 @@
   "skillLoad": {
     "label": "Skill loaded: {{name}}",
     "expand": "Show skill content"
+  },
+  "chatNotice": {
+    "scheduledWakeup": "Scheduled wake-up",
+    "wakeupClosed": {
+      "expired": "Scheduled wake-up did not fire in time; the session stopped waiting.",
+      "cap": "Stopped waiting for the scheduled wake-up: it was beyond the hold limit.",
+      "total_cap": "Scheduled wake-ups stopped: the loop reached its total time or turn limit.",
+      "drain": "Scheduled wake-ups stopped: the server is restarting.",
+      "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
+      "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
+      "disabled": "Scheduled wake-ups are turned off on this server."
+    }
   },
   "systemMessage": {
     "label": "System message",
@@ -787,7 +800,11 @@
     "stoppedTooltip": "The harness reported that the agent stopped before finishing.",
     "stoppedByOwnerTooltip": "The run was stopped while this agent was working.",
     "unknownProcessExitTooltip": "Its process ended without reporting how this agent finished.",
-    "unknownTimeoutTooltip": "No signal from this agent for over 6 hours."
+    "unknownTimeoutTooltip": "No signal from this agent for over 6 hours.",
+    "backgroundAgents": "Background agents running",
+    "backgroundAgentsEnded": "Background agents finished",
+    "estimated": "Estimated state",
+    "estimatedTooltip": "Rebuilt by the server from the session record, not from a live event."
   },
   "projectSelection": {
     "startChatWithProvider": "Select a project to start chatting with {{provider}}"
@@ -862,6 +879,8 @@
     "session_busy": "Your message was not sent: this conversation has a run in progress. Wait for it to finish or stop it, then send again",
     "attachment_rejected": "Your message was not sent: an attachment is not a file uploaded to this project. Attach the file again from your device, then send",
     "opencode_project_config_refused": "Could not start: this project has an OpenCode config file (opencode.json or a .opencode folder) that sets provider or MCP endpoints, which is not allowed in this mode. Remove its provider and mcp sections or delete the file, then send again",
+    "permission_auto_rejected": "The engine blocked this action automatically: this run cannot ask for permission, so no one was asked and you did not refuse anything",
+    "opencode_cli_args_rejected": "Nothing ran: the installed OpenCode refused the arguments it was started with. Update OpenCode, then send again",
     "authentication_required": "Provider authentication is missing or expired. Check its connection in Settings",
     "model_not_supported": "The selected model is not supported by this provider",
     "codex_cache_incompatible": "The Codex model cache is incompatible with the installed runtime",
@@ -1473,5 +1492,50 @@
   },
   "agyMessage": {
     "to": "Message to {{name}}"
+  },
+  "peerRelay": {
+    "inbound": {
+      "heading": "Message from another session",
+      "ariaLabel": "Message from another session: {{name}}"
+    },
+    "outbound": {
+      "heading": "Message sent to",
+      "ariaLabel": "Message sent to {{name}}: {{state}}"
+    },
+    "openSession": "Open session {{name}}",
+    "unknownSession": "another session",
+    "startedBy": "Started by a session message",
+    "state": {
+      "queued": "Queued",
+      "deferred": "Deferred",
+      "delivering": "Delivering",
+      "delivered": "Delivered",
+      "refused": "Refused",
+      "failed": "Failed"
+    },
+    "cause": {
+      "unwritable": "This session cannot write to the target session.",
+      "cross_user": "The target session belongs to another member.",
+      "mode_mismatch": "The two sessions run in different permission modes.",
+      "unverified_cli": "The target session's Claude version is not verified for relayed messages.",
+      "no_transcript": "The target session has no conversation record yet.",
+      "invalid_attributes": "The message could not be addressed correctly.",
+      "deferred_quota": "Waiting for usage quota to free up.",
+      "update_maintenance_active": "Waiting for server maintenance to finish.",
+      "not_started": "The delivery turn did not start; it will be retried.",
+      "no_delivery_proof": "Delivery could not be confirmed.",
+      "turn_threw": "The delivery turn stopped with an error.",
+      "target_owner_unresolved": "The target session has no single owner.",
+      "target_owner_inactive": "The target session's owner is not active.",
+      "session_unavailable": "The target session is unavailable.",
+      "unsupported_dispatch_path": "This server cannot deliver relayed messages in its current mode.",
+      "budget_stop": "Delivered; the reply stopped at its cost limit.",
+      "repaired_requeue": "Requeued after a server restart.",
+      "unknown": "Reason code: {{code}}"
+    }
+  },
+  "syntheticMessage": {
+    "label": "Message from a non-user source",
+    "expand": "Show the delivered text"
   }
 }

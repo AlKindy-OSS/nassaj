@@ -17,6 +17,8 @@ import {
 // eslint-disable-next-line boundaries/no-unknown -- the test pins the note the normal prompt path builds.
 import { buildChatImageNote } from '@/services/chat-image-store.js';
 
+import type { SteerEvent } from '../../../shared/session-steer.contract.js';
+
 import { createSteerRun, type SteerRun } from './steer-run.js';
 import { registerMidTurnInjection, __resetMidTurnInjectionForTests } from './steer-registry.js';
 import { __recordSteerRateForTests, __resetSteerRateLimitForTests, __steerRateKeysForTests, handleSessionSteer,
@@ -31,6 +33,7 @@ let mode = 'bypassPermissions';
 let armed = true;
 let taintArmed = true;
 let now = 1_000_000;
+let events: SteerEvent[] = [];
 const writers = new Set([1, 2]);
 
 function ctx(senderUserId: number | null) {
@@ -56,13 +59,13 @@ beforeEach(async () => {
   for (const [id, name] of [[1, 'alice'], [2, 'bob'], [3, 'carol']] as const) {
     db.prepare("INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, 'h', 'user')").run(id, name);
   }
-  mode = 'bypassPermissions'; armed = true; taintArmed = true; now = 1_000_000;
+  mode = 'bypassPermissions'; armed = true; taintArmed = true; now = 1_000_000; events = [];
   __resetSteerRateLimitForTests();
   __resetMidTurnInjectionForTests();
   run = createSteerRun({
     sessionId: () => SID, turnId: TURN, starterUserId: 1, permissionMode: () => mode,
     injectionArmed: () => armed, taintHookArmed: () => taintArmed,
-    broadcast: () => {}, persistStatus: (item, status) => { messageCoordinationDb.updateSteerStatus(item.clientMsgId, item.senderUserId, status); },
+    broadcast: (event) => { events.push(event); }, persistStatus: (item, status) => { messageCoordinationDb.updateSteerStatus(item.clientMsgId, item.senderUserId, status); },
     confirmDelivery: async () => true,
   });
   registerMidTurnInjection('claude', { findRun: s => (s === SID ? run : null), payloadHash: w => createHash('sha256').update(w).digest('hex') });
@@ -238,24 +241,37 @@ test('arming split: no taint hook → others steer_unavailable, the starter stil
 
 test('steer images reach the injected payload through the normal image note; a rejected image refuses it', async () => {
   const stored: unknown[][] = [];
-  const store = async (images: unknown[]) => { stored.push(images); return buildChatImageNote(['/store/b1/image_1.png']); };
+  const bucket = 'ab'.repeat(16);
+  const store = async (images: unknown[]) => {
+    stored.push(images);
+    return { note: buildChatImageNote([`/store/${bucket}/image_1.png`]), images: [{ bucket, name: 'image_1.png' }] };
+  };
   const image = { name: 'shot.png', data: 'data:image/png;base64,AAAA', mimeType: 'image/png' };
   const result = await handleSessionSteerWithImages(req(9, { images: [image] }), ctx(2), store);
   assert.equal(code(result), 'ok:202');
   assert.deepEqual(stored, [[image]], 'the uploaded image objects go to the store as-is');
   const item = await run.take();
-  assert.match(item!.wrapped, /\[Images provided at the following paths:\]\n1\. \/store\/b1\/image_1\.png\n<\/nassaj-steer>$/u);
+  assert.match(item!.wrapped, /\[Images provided at the following paths:\]\n1\. \/store\/(ab){16}\/image_1\.png\n<\/nassaj-steer>$/u);
   assert.equal(item!.text, 'please also check 9', 'the member-facing text stays the typed text');
   const [row] = messageCoordinationDb.listSteerBySession(SID);
   assert.equal(row.payloadSha256, createHash('sha256').update(item!.wrapped).digest('hex'), 'delivery proof covers the images');
+  // B-1697: the bubble's refs travel on the row, the queued item and the event — never the path.
+  assert.deepEqual(row.images, [{ bucket, name: 'image_1.png' }]);
+  assert.deepEqual(item!.images, [{ bucket, name: 'image_1.png' }]);
+  const queued = events.find(e => e.type === 'steer-queued' && e.clientMsgId === 'steer-9');
+  assert.deepEqual(queued?.images, [{ bucket, name: 'image_1.png' }]);
+  assert.doesNotMatch(JSON.stringify([row, queued]), /\/store\//u, 'no absolute path reaches a member');
 
   assert.equal(code(await handleSessionSteerWithImages(req(10, { images: [image] }), ctx(2), async () => null)),
     'image_rejected:400', 'never degraded to a text-only steer');
   let touched = false;
-  const spy = async () => { touched = true; return 'x'; };
+  const spy = async () => { touched = true; return { note: 'x', images: [] }; };
   assert.equal(code(await handleSessionSteerWithImages(req(11, { images: [image] }), ctx(3), spy)), 'not_writable:403');
   assert.equal(code(await handleSessionSteerWithImages(req(12, { images: 'nope' }), ctx(2), spy)), 'invalid_request:400');
   assert.equal(touched, false, 'nothing is stored for a non-writer or a malformed request');
   assert.equal(code(await handleSessionSteerWithImages(req(13), ctx(2), spy)), 'ok:202', 'no images: plain path');
   assert.equal(touched, false);
+  const plain = messageCoordinationDb.listSteerBySession(SID).find(r => r.clientMsgId === 'steer-13');
+  assert.equal(plain?.images, undefined, 'a text-only steer carries no images field');
+  assert.equal(events.find(e => e.clientMsgId === 'steer-13')?.images, undefined);
 });

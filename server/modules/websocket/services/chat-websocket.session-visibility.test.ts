@@ -314,3 +314,38 @@ describe('B-144 get-active-sessions membership filter + provider coverage', () =
     assert.deepEqual(msg.sessions.glm, ['sess-public'], 'only the public glm id survives the filter');
   });
 });
+
+describe('ADR-218 session-agents snapshot rides the B-137 gate', () => {
+  const snapshotDeps = () => {
+    const requested: string[] = [];
+    return {
+      requested,
+      overrides: {
+        sendSessionAgentsSnapshot: async (sessionId: string, send: (frame: unknown) => void) => {
+          requested.push(sessionId);
+          send({ type: 'session-agents', sessionId, supported: true, agents: [] });
+        },
+      },
+    };
+  };
+
+  test('an outsider asking for a PRIVATE-project session gets no snapshot', async () => {
+    const { requested, overrides } = snapshotDeps();
+    const { ws } = connect(OUTSIDER_USER_ID, overrides);
+    ws.emit('message', JSON.stringify({ type: 'check-session-status', provider: 'claude', sessionId: 'sess-private' }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requested, []);
+    assert.equal(findSent(ws, 'session-agents'), undefined);
+  });
+
+  test('a member gets the snapshot on its own socket only', async () => {
+    const { requested, overrides } = snapshotDeps();
+    const { ws } = connect(OWNER_USER_ID, overrides);
+    const other = connect(OUTSIDER_USER_ID, overrides).ws;
+    ws.emit('message', JSON.stringify({ type: 'check-session-status', provider: 'claude', sessionId: 'sess-private' }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requested, ['sess-private']);
+    assert.equal(findSent(ws, 'session-agents')?.sessionId, 'sess-private');
+    assert.equal(findSent(other, 'session-agents'), undefined, 'another socket never receives it');
+  });
+});

@@ -1298,9 +1298,13 @@ export function useChatComposerState({
         // images and files (the same payload shape as Claude). The server
         // materializes base64 images to temp files and resolves file paths, then
         // passes each as --file. Empty arrays are a no-op on the server side.
+        // B-1707: OpenCode runs under Claude's permission mode (owner ruling
+        // 2026-10-28), so it carries `permissionMode` and `toolsSettings` exactly
+        // as the Claude branch does; getToolsSettings reads 'claude-settings' for
+        // it, so skipPermissions is the same switch.
         const opencodeOptions: Record<string, unknown> = {
           cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-          resume, model: opencodeModel, sessionSummary,
+          resume, toolsSettings, permissionMode, model: opencodeModel, sessionSummary,
           images: uploadedImages,
         };
         if (uploadedFiles.length > 0) {

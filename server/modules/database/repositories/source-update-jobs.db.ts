@@ -108,6 +108,12 @@ export const sourceUpdateJobsDb = {
       `SELECT * FROM source_update_jobs WHERE owner_id = ? AND state IN (${ACTIVE_SQL}) ORDER BY created_at, rowid LIMIT 1`,
     ).get(ownerId, ...SOURCE_UPDATE_ACTIVE_STATES) as JobRow | undefined);
   },
+  /** ADR-216 L7: whether any job of any owner is unfinished (an attach must wait). */
+  hasUnfinished(): boolean {
+    return Boolean(getConnection().prepare(
+      `SELECT 1 FROM source_update_jobs WHERE state IN (${ACTIVE_SQL}) LIMIT 1`,
+    ).get(...SOURCE_UPDATE_ACTIVE_STATES));
+  },
   /** Adopt an operator-verified local candidate without running the ordinary release worker. */
   registerPreparedRecoveryCandidate(input: PreparedRecoveryRegistration) {
     return registerPreparedRecoveryCandidate(getConnection(), input, SOURCE_UPDATE_ACTIVE_STATES);

@@ -51,7 +51,7 @@ export const useEditorSidebar = ({
     (
       filePath: string,
       diffInfo: CodeEditorDiffInfo | null = null,
-      options: { openMarkdownPreview?: boolean } = {},
+      options: { openMarkdownPreview?: boolean; sessionId?: string | null } = {},
     ) => {
       const normalizedPath = filePath.replace(/\\/g, '/');
       const fileName = normalizedPath.split('/').pop() || filePath;
@@ -62,6 +62,7 @@ export const useEditorSidebar = ({
         // DB projectId is forwarded to the editor so it can read/save files
         // via `/api/projects/:projectId/file` endpoints.
         projectId: selectedProject?.projectId,
+        sessionId: options.sessionId ?? null,
         diffInfo,
         openMarkdownPreview: Boolean(options.openMarkdownPreview),
       };

@@ -10,6 +10,7 @@ import { acquireLease, captureRequest, commitRequest } from '../../../scripts/se
 import {
   bindSessionWorkspace,
   createSessionWorkspace,
+  findSessionOverlayWorkspace,
   logicalProjectPathForWorkspace,
   probeSessionWorkspaceAlias,
   reapSessionWorkspaces,
@@ -594,6 +595,32 @@ test('descriptor-anchored capture cannot be redirected by an adversarial parent 
     assert.equal(captured.body.includes(Buffer.from('outside secret')), false);
   } finally {
     fs.rmSync(outside, { recursive: true, force: true });
+    cleanup(repo);
+  }
+});
+
+test('B-1689: findSessionOverlayWorkspace returns the bound overlay for any authorized reader', () => {
+  const repo = fixture();
+  const plain = fs.mkdtempSync(path.join('/var/tmp', 'nassaj-session-overlay-plain-'));
+  try {
+    const created = createSessionWorkspace({ projectPath: repo, launchKey: 'launch-f', principalId: 'alice' });
+    bindSessionWorkspace({ projectPath: repo, launchKey: 'launch-f', sessionId: 'sess-f', principalId: 'alice' });
+
+    // No principal match: the caller authorizes the requester against the session.
+    const found = findSessionOverlayWorkspace({ projectPath: repo, sessionId: 'sess-f' });
+    assert.equal(found.cwd, fs.realpathSync(created.cwd));
+    assert.equal(found.overlayId, created.overlayId);
+    assert.equal(findSessionOverlayWorkspace({ projectPath: repo, sessionId: 'unbound' }), null);
+    assert.equal(findSessionOverlayWorkspace({ projectPath: plain, sessionId: 'sess-f' }), null,
+      'a non-repository project has no overlays');
+
+    // A manifest that no longer matches fails closed instead of reading the root.
+    const manifestPath = path.join(path.dirname(created.cwd), 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, sessionId: 'someone-else' }));
+    assert.throws(() => findSessionOverlayWorkspace({ projectPath: repo, sessionId: 'sess-f' }), /mismatch/);
+  } finally {
+    fs.rmSync(plain, { recursive: true, force: true });
     cleanup(repo);
   }
 });

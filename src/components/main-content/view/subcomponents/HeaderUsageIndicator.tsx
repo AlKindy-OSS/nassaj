@@ -29,6 +29,7 @@ import {
 import { useProviderCycles } from '../../../quick-settings-panel/hooks/useProviderCycles';
 import { useCycleCountdown } from '../../../quick-settings-panel/hooks/useCycleCountdown';
 import { isolateBidi } from '../../../quick-settings-panel/subscriptionHelpers';
+import { useAnthropicApiSpend } from '../../../quick-settings-panel/hooks/useAnthropicApiSpend';
 import {
   quotaCountdownParts,
   selectActiveQuotaBlock,
@@ -41,49 +42,8 @@ import {
   shouldSuppressOnProviderWindowsLoading,
 } from '../../../quick-settings-panel/providerQuotaHelpers';
 
-// ---------------------------------------------------------------------------
-// QuotaErrorBadge — خالصة بلا hooks، تعرض حالة تعذّر القراءة.
-// مفصولة عن المكوّن الأب لتبقى ≤50 سطراً وعمقاً ≤3 (قاعدة التنظيف).
-// ---------------------------------------------------------------------------
-interface QuotaErrorBadgeProps {
-  /** نصّ قصير لـ aria-label والسطر الأول من التلميح. */
-  errorLabel: string;
-  /** وصف سبب التعذّر للتلميح (اسم المزوّد مُضمَّن). */
-  errorTooltipText: string;
-  /** معلومة التجديد الثانوية — تُعرض في نهاية التلميح كسياق لا كشارة أساسية. */
-  cycleSecondaryText: string | null;
-}
-
-/**
- * شارة مكتومة تُشير إلى تعذّر قراءة حصّة المزوّد — لا تُظهر رقم الدورة
- * كشارة أساسية. الدورة (إن كانت) تظهر فقط في نهاية التلميح.
- */
-function QuotaErrorBadge({ errorLabel, errorTooltipText, cycleSecondaryText }: QuotaErrorBadgeProps) {
-  const tooltip = (
-    <div className="space-y-0.5">
-      <div className="font-medium">{errorLabel}</div>
-      <div className="opacity-75">{errorTooltipText}</div>
-      {cycleSecondaryText && (
-        <div className="opacity-50 mt-0.5">{cycleSecondaryText}</div>
-      )}
-    </div>
-  );
-  return (
-    <div
-      className="flex flex-shrink-0 select-none items-center"
-      aria-label={errorLabel}
-      data-testid="provider-quota-error-badge"
-    >
-      <Tooltip content={tooltip} position="bottom" tapToToggle multiline>
-        <span className="flex items-baseline text-xs" aria-hidden="true">
-          <span className="font-semibold text-muted-foreground opacity-60" aria-hidden="true">
-            ⚠
-          </span>
-        </span>
-      </Tooltip>
-    </div>
-  );
-}
+import ApiSpendBadge from './ApiSpendBadge';
+import QuotaErrorBadge from './QuotaErrorBadge';
 
 // ---------------------------------------------------------------------------
 // Window definitions — order determines display order.
@@ -195,6 +155,9 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
   // بـ`claudeWindowsAllowed` (يتضمّن `quota.isClaudeAccount`) كما كان: جلسة
   // Codex تُظهر رصيد Codex فقط.
   const usageState = useClaudeUsage(isWide && claudeWindowsAllowed, user?.id);
+  // ADR-214: إنفاق Anthropic API للمستخدم نفسه — على محور حصّة Anthropic وحده،
+  // وبنفس البوابة: لا طلب على جلسة يُفوتَر استهلاكها على مورّد آخر.
+  const apiSpendState = useAnthropicApiSpend(isWide && claudeWindowsAllowed, user?.id);
   const cyclesState = useProviderCycles(isWide && cycleFallbackResolved);
   const cycle = useCycleCountdown(
     cyclesState.status === 'success' ? cyclesState.rows : null,
@@ -476,24 +439,28 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
     );
   }
 
-  // Silent during loading / error — keep the header clean.
-  if (usageState.status !== 'success') return null;
+  // شارة إنفاق API تظهر مستقلّةً عن حصّة الاشتراك: نجاحاً أو تعذّراً. وidle/
+  // loading/none صامتة (none = لا مفتاح Admin مُعدّ).
+  const showApiSpend = apiSpendState.status === 'success' || apiSpendState.status === 'error';
 
-  const { data } = usageState;
-  const claudeExtraDisplay = resolveClaudeExtraUsageDisplay(data.extraUsage);
+  // نوافذ الاشتراك صامتة أثناء التحميل/الخطأ (‏data=null)؛ شارة إنفاق API مستقلّة عنها.
+  const data = usageState.status === 'success' ? usageState.data : null;
+  const claudeExtraDisplay = resolveClaudeExtraUsageDisplay(data?.extraUsage);
   const extraBadgeText = formatClaudeExtraBadgeText(claudeExtraDisplay, i18n.language);
   const extraDetail = formatClaudeExtraDetailAmounts(claudeExtraDisplay, i18n.language);
 
   // Build the list of windows that actually have data.
-  const items = WINDOWS.flatMap(({ letter, key }) => {
-    const win = data[key];
-    if (win === null) return [];
-    const clamped = clampUtilization(win.utilization);
-    return [{ letter, clamped, resetsAt: win.resetsAt }];
-  });
+  const items = data
+    ? WINDOWS.flatMap(({ letter, key }) => {
+        const win = data[key];
+        if (win === null) return [];
+        const clamped = clampUtilization(win.utilization);
+        return [{ letter, clamped, resetsAt: win.resetsAt }];
+      })
+    : [];
 
-  // Nothing to show — all windows are null.
-  if (items.length === 0 && claudeExtraDisplay.kind === 'hidden') return null;
+  // Nothing to show — all windows are null, no extra credits, no API spend.
+  if (items.length === 0 && claudeExtraDisplay.kind === 'hidden' && !showApiSpend) return null;
 
   return (
     <div
@@ -576,6 +543,7 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
           </span>
         </Tooltip>
       )}
+      {showApiSpend && <ApiSpendBadge state={apiSpendState} />}
     </div>
   );
 }

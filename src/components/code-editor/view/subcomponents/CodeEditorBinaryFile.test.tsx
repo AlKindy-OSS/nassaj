@@ -49,7 +49,7 @@ describe('CodeEditorBinaryFile download', () => {
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'binaryFile.download' }));
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:x'));
-    expect(readFileBlob).toHaveBeenCalledWith('proj-1', '/p/report.docx', { confirmSecret: false });
+    expect(readFileBlob).toHaveBeenCalledWith('proj-1', '/p/report.docx', { confirmSecret: false, sessionId: null });
   });
 
   it('shows an error when the response is not ok', async () => {

@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 
 import {
-  AUDIT_REDACTED, LEGACY_AUDIT_REDACTION_RULES, isHighEntropySecret, redactForShare, scanJwts, segmentsToText,
+  AUDIT_REDACTED, LEGACY_AUDIT_REDACTION_RULES, isHighEntropySecret, redactForDisplay, redactForShare, scanJwts,
+  segmentsToText,
 } from './secret-patterns.js';
 
 const S = '[redacted:secret]';
@@ -61,6 +62,14 @@ test('well-known token formats', () => {
   assert.equal(red(`key ${'AKIA'}IOSFODNN7EXAMPLE end`), `key ${S} end`);
   assert.equal(red(`jwt ${JWT}`), `jwt ${S}`);
   unchanged('the task-sk-list and desk-sk-12 and AKIA-short and ghp_short');
+});
+
+test('Anthropic Admin keys are redacted for share and display (ADR-214)', () => {
+  const ADMIN = 'sk-' + 'ant-admin01-AbCdEfGhIjKlMnOpQrStUvWx_yz-0123';
+  assert.equal(red(`admin ${ADMIN} end`), `admin ${S} end`);
+  const shown = redactForDisplay(`x-api-key: ${ADMIN}`);
+  assert.ok(!shown.includes('AbCdEfGhIjKlMnOp'), shown);
+  assert.ok(!redactForDisplay(`${ADMIN}`).includes('admin01-AbCd'));
 });
 
 test('Bearer and URL userinfo', () => {

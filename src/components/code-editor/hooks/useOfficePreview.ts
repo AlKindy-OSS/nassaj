@@ -17,15 +17,22 @@ type UseOfficePreviewArgs = {
   projectId?: string;
   filePath: string;
   format: OfficeFormat;
+  /** B-1689: chat session whose overlay copy to preview, when opened from chat. */
+  sessionId?: string | null;
 };
 
 class SecretFileError extends Error {}
 
 /** Fetches the raw bytes, stopping the download once it passes the size cap. */
-async function fetchOfficeBytes(projectId: string, filePath: string, signal: AbortSignal): Promise<Uint8Array> {
+async function fetchOfficeBytes(
+  projectId: string,
+  filePath: string,
+  sessionId: string | null,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
   // No confirmSecret here: a secrets file stays closed (fail closed) and the
   // user is told why instead of seeing a generic failure.
-  const response: Response = await api.readFileBlob(projectId, filePath, { signal });
+  const response: Response = await api.readFileBlob(projectId, filePath, { signal, sessionId });
   if (response.status === 428) throw new SecretFileError();
   if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
   return readResponseBounded(response, OFFICE_PREVIEW_MAX_BYTES);
@@ -37,7 +44,7 @@ async function fetchOfficeBytes(projectId: string, filePath: string, signal: Abo
  * the file aborts both the download and the parse. Theme changes do not
  * re-run this: the caller derives themed output from the result.
  */
-export function useOfficePreview({ projectId, filePath, format }: UseOfficePreviewArgs): OfficePreviewState {
+export function useOfficePreview({ projectId, filePath, format, sessionId = null }: UseOfficePreviewArgs): OfficePreviewState {
   const [state, setState] = useState<OfficePreviewState>({ status: 'loading' });
 
   useEffect(() => {
@@ -50,7 +57,7 @@ export function useOfficePreview({ projectId, filePath, format }: UseOfficePrevi
 
     const load = async () => {
       try {
-        const bytes = await fetchOfficeBytes(projectId, filePath, controller.signal);
+        const bytes = await fetchOfficeBytes(projectId, filePath, sessionId, controller.signal);
         const { parseOfficeFile } = await import('../utils/office/parseOfficeFile');
         const result = await parseOfficeFile(format, bytes, controller.signal);
         if (!controller.signal.aborted) setState({ status: 'ready', result });
@@ -72,7 +79,7 @@ export function useOfficePreview({ projectId, filePath, format }: UseOfficePrevi
 
     void load();
     return () => controller.abort();
-  }, [projectId, filePath, format]);
+  }, [projectId, filePath, format, sessionId]);
 
   return state;
 }

@@ -77,7 +77,7 @@ test('a healthy node reports every code clear, in blocker priority order', async
     assert.equal(result.ok, true);
     assert.equal(result.blocker, null);
     assert.deepEqual(result.checks.map((check) => check.code), [...PREFLIGHT_CODES]);
-    assert.equal(result.checks.length, 17); // +migration_backup_directory_insecure (B-1146), +client_generation_archive (B-1293)
+    assert.equal(result.checks.length, 18); // +migration_backup_directory_insecure (B-1146), +client_generation_archive (B-1293), +detached_head (ADR-216)
     for (const check of result.checks) {
         assert.equal(check.ok, true, `${check.code} should be clear`);
         assert.ok(check.reason_ar && check.reason_en, `${check.code} needs both languages`);

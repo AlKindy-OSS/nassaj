@@ -43,6 +43,11 @@ import {
 } from './modules/providers/list/opencode/opencode-home.js';
 import { collectOpenCodeTurnSecrets } from './modules/providers/list/opencode/opencode-redaction-secrets.js';
 import {
+  createOpenCodeStderrReader,
+  resolveOpenCodePermissionLaunch,
+  withOpenCodePermissionEnv,
+} from './modules/providers/list/opencode/opencode-run-permissions.js';
+import {
   assertLocalModelAvailable,
   authorizedLocalModelServers,
   isLocalModel,
@@ -623,6 +628,31 @@ async function spawnOpenCode(command, options = {}, ws) {
         resolve();
         return;
       }
+      // B-1707 (owner ruling 2026-10-28): the mode Claude would run under for this
+      // same request, through Claude's own resolver; refused exactly where Claude
+      // refuses (parity enforce without full_delegation).
+      let permissionLaunch;
+      try {
+        permissionLaunch = resolveOpenCodePermissionLaunch(options, {
+          userId: ws?.userId ?? null,
+          cwd: workingDir,
+        });
+      } catch (permissionError) {
+        console.error('[OpenCode] launch refused by the permission resolver', {
+          error: permissionError instanceof Error ? permissionError.message : String(permissionError),
+        });
+        ws.send(createNormalizedMessage({
+          kind: 'error',
+          code: 'permission_denied',
+          content: 'The requested permission profile is unavailable.',
+          sessionId: capturedSessionId || sessionId || null,
+          provider: 'opencode',
+        }));
+        runPresence.end();
+        void cleanupOpenCodeTempDir(attachmentsTempDir);
+        reject(permissionError instanceof Error ? permissionError : new Error(String(permissionError)));
+        return;
+      }
       // Resume case: the session id is known before the process runs, and
       // registerSession short-circuits when it re-sees the same id, so record
       // participation here so a resumed opencode conversation stays "native".
@@ -641,6 +671,8 @@ async function spawnOpenCode(command, options = {}, ws) {
       if (launchModel) {
         args.push('--model', launchModel);
       }
+      // B-1707: Claude bypass → skip flag, plan → `--agent plan`, else none.
+      args.push(...permissionLaunch.args);
       // OC-22: attach images (materialized) and files via -f/--file, one per path.
       for (const attachmentPath of attachments.filePaths) {
         args.push('--file', attachmentPath);
@@ -803,6 +835,10 @@ async function spawnOpenCode(command, options = {}, ws) {
         }
       }
 
+      // B-1707: OPENCODE_PERMISSION is nassaj's own (plan = edit/bash deny) or absent;
+      // set last, after every sanitize step, so an inherited one never reaches opencode.
+      childEnv = withOpenCodePermissionEnv(childEnv, permissionLaunch.permission);
+
       // T-897: cage the opencode spawn behind NASSAJ_PROVIDER_CAGE (default OFF
       // ⇒ launch returned unchanged; byte-identical to the previous spawn).
       const opencodeLaunch = resolveCagedLaunch({
@@ -847,8 +883,28 @@ async function spawnOpenCode(command, options = {}, ws) {
       // T-1906: stderr is line-assembled so a key split across two chunks is
       // still redacted before it reaches ws.send (and so every mirror).
       const stderrLines = createRedactingLineAssembler(ingestSecrets);
+      // B-1707: one honest error per auto-rejected permission per turn, and one for a
+      // usage dump (refused argv), instead of unclassified stderr cards.
+      const stderrReader = createOpenCodeStderrReader();
       const sendStderrLines = (lines) => {
-        const stderrText = lines.join('\n');
+        const plainLines = [];
+        for (const line of lines) {
+          const verdict = stderrReader.read(line);
+          if (verdict.kind === 'plain') {
+            plainLines.push(line);
+            continue;
+          }
+          if (verdict.kind === 'drop') continue;
+          // The closing frame of a failed run carries the same code (P3).
+          lastProviderErrorCode = verdict.error.code;
+          ws.send(createNormalizedMessage({
+            kind: 'error',
+            ...verdict.error,
+            sessionId: capturedSessionId || sessionId || null,
+            provider: 'opencode',
+          }));
+        }
+        const stderrText = plainLines.join('\n');
         if (!stderrText.trim()) {
           return;
         }

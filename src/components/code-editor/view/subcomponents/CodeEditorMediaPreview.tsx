@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import DocumentShareButton from '../../../document-sharing/DocumentShareButton';
 
-import { authenticatedFetch } from '../../../../utils/api';
+import { authenticatedFetch, fileContentUrl } from '../../../../utils/api';
 import type { CodeEditorFile } from '../../types/types';
 import { getPreviewMimeType, type PreviewKind } from '../../utils/previewableFile';
 
@@ -52,7 +52,8 @@ export default function CodeEditorMediaPreview({
   // this so a blob from a previously-opened file can never show under the new
   // file (the editor reuses this component instance across files).
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const sourceKey = `${projectId ?? ''}:${file.path}:${kind}`;
+  const fileSessionId = file.sessionId ?? null;
+  const sourceKey = `${projectId ?? ''}:${fileSessionId ?? ''}:${file.path}:${kind}`;
 
   useEffect(() => {
     if (!projectId) {
@@ -75,7 +76,8 @@ export default function CodeEditorMediaPreview({
         // The content endpoint requires the auth header, so we fetch the bytes
         // ourselves and hand the media element a blob URL instead of a bare src.
         // Fetching a blob (rather than streaming) also lets <video>/<audio> seek.
-        const contentUrl = `/api/projects/${projectId}/files/content?path=${encodeURIComponent(file.path)}`;
+        // B-1689: the chat session's overlay copy when opened from that chat.
+        const contentUrl = fileContentUrl(projectId, file.path, fileSessionId);
         const response = await authenticatedFetch(contentUrl, { signal: controller.signal });
 
         if (!response.ok) {
@@ -137,7 +139,7 @@ export default function CodeEditorMediaPreview({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [file.path, file.name, projectId, kind, sourceKey, labels.error]);
+  }, [file.path, file.name, fileSessionId, projectId, kind, sourceKey, labels.error]);
 
   // Only expose the blob once it matches the file currently being shown, so a
   // stale URL from the previous file is never rendered during a switch.

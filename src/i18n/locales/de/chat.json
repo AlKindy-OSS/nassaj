@@ -115,6 +115,7 @@
     "title": "Subagent",
     "titleWithType": "Subagent / {{type}}",
     "titleWithTask": "{{prefix}}: {{description}}",
+    "forkType": "Fork",
     "backgroundLaunched": "Agent im Hintergrund gestartet"
   },
   "coordinator": {
@@ -130,6 +131,17 @@
   "coordinatorPrompt": {
     "label": "Koordinator → Unteragent",
     "ariaLabel": "Koordinator-Prompt an Unteragent"
+  },
+  "chatNotice": {
+    "wakeupClosed": {
+      "expired": "Scheduled wake-up did not fire in time; the session stopped waiting.",
+      "cap": "Stopped waiting for the scheduled wake-up: it was beyond the hold limit.",
+      "total_cap": "Scheduled wake-ups stopped: the loop reached its total time or turn limit.",
+      "drain": "Scheduled wake-ups stopped: the server is restarting.",
+      "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
+      "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
+      "disabled": "Scheduled wake-ups are turned off on this server."
+    }
   },
   "systemMessage": {
     "label": "Systemnachricht",

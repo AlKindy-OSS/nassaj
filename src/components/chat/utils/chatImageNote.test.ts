@@ -7,7 +7,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractChatImagesFromPrompt, stripChatImageNote } from './chatImageNote';
+import { chatImagesFromRefs, extractChatImagesFromPrompt, stripChatImageNote } from './chatImageNote';
+import { userMessageImages } from './userMessageImages';
 
 /**
  * The synthetic note below preserves the shape written by the server
@@ -86,5 +87,35 @@ describe('stripChatImageNote', () => {
   it('does not strip a bucket path a user merely typed', () => {
     const pasted = `انظر chat-images/${BUCKET}/image_0.png`;
     assert.equal(stripChatImageNote(pasted), pasted);
+  });
+});
+
+describe('chatImagesFromRefs (B-1697 steer images)', () => {
+  it('builds the authenticated chat-images URL from a store ref', () => {
+    assert.deepEqual(chatImagesFromRefs([{ bucket: BUCKET, name: 'image_0.png' }]), [
+      { name: 'image_0.png', data: `/api/chat-images/${BUCKET}/image_0.png` },
+    ]);
+  });
+
+  it('drops malformed refs, absolute paths and non-arrays instead of building a URL', () => {
+    assert.deepEqual(chatImagesFromRefs([
+      { bucket: '../etc', name: 'image_0.png' },
+      { bucket: BUCKET, name: '../../passwd' },
+      { bucket: BUCKET, name: 'image_0.exe' },
+      `/srv/chat-images/${BUCKET}/image_0.png`,
+      null,
+    ]), []);
+    assert.deepEqual(chatImagesFromRefs(undefined), []);
+    assert.deepEqual(chatImagesFromRefs('x'), []);
+  });
+
+  it('a reloaded steer row (clean text + refs) yields its images through userMessageImages', () => {
+    const images = userMessageImages('look at this', [{ bucket: BUCKET, name: 'image_1.jpg' }]);
+    assert.deepEqual(images, [{ name: 'image_1.jpg', data: `/api/chat-images/${BUCKET}/image_1.jpg` }]);
+  });
+
+  it('does not duplicate an image already derived from the note', () => {
+    const images = userMessageImages(`x${noteFor('image_0.png')}`, [{ bucket: BUCKET, name: 'image_0.png' }]);
+    assert.equal(images.length, 1);
   });
 });

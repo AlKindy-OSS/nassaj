@@ -115,6 +115,7 @@
     "title": "하위 에이전트",
     "titleWithType": "하위 에이전트 / {{type}}",
     "titleWithTask": "{{prefix}}: {{description}}",
+    "forkType": "포크",
     "backgroundLaunched": "에이전트가 백그라운드에서 시작됨"
   },
   "coordinator": {
@@ -130,6 +131,17 @@
   "coordinatorPrompt": {
     "label": "조율자 → 서브에이전트",
     "ariaLabel": "서브에이전트에 대한 조율자 프롬프트"
+  },
+  "chatNotice": {
+    "wakeupClosed": {
+      "expired": "Scheduled wake-up did not fire in time; the session stopped waiting.",
+      "cap": "Stopped waiting for the scheduled wake-up: it was beyond the hold limit.",
+      "total_cap": "Scheduled wake-ups stopped: the loop reached its total time or turn limit.",
+      "drain": "Scheduled wake-ups stopped: the server is restarting.",
+      "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
+      "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
+      "disabled": "Scheduled wake-ups are turned off on this server."
+    }
   },
   "systemMessage": {
     "label": "시스템 메시지",

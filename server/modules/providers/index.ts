@@ -114,3 +114,11 @@ export {
 export { descriptorNamed } from './shared/pinned-fd.js';
 // B-1608 T2: boot sweep of transcript park files a failed removal left behind.
 export { startParkedTranscriptSweep } from './shared/transcript-park-sweeper.js';
+
+// ADR-218: session agents registry — composition-root seams (delivery, liveness,
+// workflow reads) and the check-session-status snapshot.
+export {
+  configureSessionAgents,
+  sendSessionAgentsSnapshot,
+} from './services/session-agents/session-agents.service.js';
+export { readSessionWorkflowAgents } from './services/session-agents/workflow-agents.adapter.js';

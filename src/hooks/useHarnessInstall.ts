@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { InstallableHarnessId } from '../../shared/harness-install.contract';
-import type { HarnessUpdateJob, HarnessUpdateJobPhase } from '../../shared/harness-update.contract';
+import type {
+  HarnessRequiredAck,
+  HarnessSuppliedAck,
+  HarnessUpdateJob,
+  HarnessUpdateJobPhase,
+} from '../../shared/harness-update.contract';
 import { getIdentityBarrierSnapshot, subscribeIdentityBarrier } from '../components/auth/accountIdentityBarrier';
 import { authenticatedFetch } from '../utils/api';
 
 import { HARNESS_INSTALLED_EVENT, pollHarnessJob } from './harnessJobPoller';
 
-/** `busy-other`: the harness lease is held by a non-install job (update, rollback…). */
-export type HarnessInstallStatus = 'idle' | 'starting' | 'running' | 'succeeded' | 'failed' | 'busy-other';
+/**
+ * `busy-other`: the harness lease is held by a non-install job (update, rollback…).
+ * `confirming`: the server needs the owner's acknowledgement first (ADR-215 stage B).
+ */
+export type HarnessInstallStatus = 'idle' | 'starting' | 'running' | 'succeeded' | 'failed' | 'busy-other' | 'confirming';
 
 /** View state of one owner-started CLI install (T-2062). */
 export interface HarnessInstallState {
@@ -21,13 +29,15 @@ export interface HarnessInstallState {
   errorCode?: string;
   errorMessage?: string;
   errorMessageAr?: string;
+  /** Server-built acknowledgements of a 409 CONFIRMATION_REQUIRED. */
+  required?: HarnessRequiredAck[];
 }
 
 const identityKey = () => { const snapshot = getIdentityBarrierSnapshot(); return `${snapshot.version}:${snapshot.phase}`; };
 
 const IDLE: HarnessInstallState = { status: 'idle', percent: 0, log: [] };
 
-type Refusal = { code?: unknown; message?: unknown; activeJobId?: unknown };
+type Refusal = { code?: unknown; message?: unknown; activeJobId?: unknown; required?: unknown };
 
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value.length > 0 ? value : undefined);
 
@@ -52,6 +62,8 @@ export function useHarnessInstall(provider: InstallableHarnessId | null, onInsta
   const epoch = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notified = useRef<string | null>(null);
+  /** Epoch of the POST still awaiting its response; blocks a duplicate submit (double-click). */
+  const inFlight = useRef<number | null>(null);
   const onInstalledRef = useRef(onInstalled);
   onInstalledRef.current = onInstalled;
 
@@ -79,32 +91,42 @@ export function useHarnessInstall(provider: InstallableHarnessId | null, onInsta
     });
   }, [clearTimer, provider]);
 
-  const start = useCallback(async () => {
-    if (!provider) return;
+  const start = useCallback(async (acks?: HarnessSuppliedAck[]) => {
+    if (!provider || inFlight.current !== null) return;
     clearTimer();
     const request = ++epoch.current;
-    setState({ ...IDLE, status: 'starting' });
+    inFlight.current = request;
+    // A confirmed resend keeps the acks so the dialog stays up, disabled, until the server answers.
+    setState(previous => (acks ? { ...IDLE, status: 'starting', required: previous.required } : { ...IDLE, status: 'starting' }));
     try {
-      const response = await authenticatedFetch(`/api/providers/${encodeURIComponent(provider)}/install`, { method: 'POST', body: '{}' });
+      const response = await authenticatedFetch(`/api/providers/${encodeURIComponent(provider)}/install`, { method: 'POST', body: JSON.stringify(acks ? { acks } : {}) });
       if (epoch.current !== request) return;
       const body = await response.json().catch(() => ({})) as Refusal & { jobId?: unknown };
       if (epoch.current !== request) return;
       const jobId = text(body.jobId);
       if (response.ok && jobId) { follow(jobId); return; }
+      if (response.status === 409 && body.code === 'CONFIRMATION_REQUIRED' && Array.isArray(body.required)) {
+        setState({ ...IDLE, status: 'confirming', required: body.required as HarnessRequiredAck[] });
+        return;
+      }
       const activeJobId = text(body.activeJobId);
       if (response.status === 409 && body.code === 'HARNESS_UPDATE_IN_PROGRESS' && activeJobId) { follow(activeJobId); return; }
       setState({ ...IDLE, status: 'failed', errorCode: text(body.code) ?? `http_${response.status}`, errorMessage: text(body.message) });
     } catch (error) {
       if (epoch.current === request && (error as Error).name !== 'AbortError') setState({ ...IDLE, status: 'failed', errorCode: 'network' });
+    } finally {
+      if (inFlight.current === request) inFlight.current = null;
     }
   }, [clearTimer, follow, provider]);
 
   useEffect(() => () => { epoch.current += 1; clearTimer(); }, [clearTimer]);
   useEffect(() => {
-    const reset = () => { epoch.current += 1; clearTimer(); setState(IDLE); };
+    const reset = () => { epoch.current += 1; inFlight.current = null; clearTimer(); setState(IDLE); };
     reset();
     return subscribeIdentityBarrier(reset);
   }, [clearTimer, provider]);
 
-  return { state, start };
+  const cancel = useCallback(() => { epoch.current += 1; inFlight.current = null; clearTimer(); setState(IDLE); }, [clearTimer]);
+
+  return { state, start, cancel };
 }

@@ -65,6 +65,7 @@ import { createGitTagReleaseDiscovery } from '../services/git-tag-release-discov
 import { resolveUpdateHostCapability } from '../services/source-updater.js';
 import { toOwnerPrestageStatus } from '../services/update-prestage-status.js';
 import { createPrestageSettingsRouter } from './update-prestage-settings.js';
+import { createSourceAttachRouter } from './update-source-attach.js';
 import {
     buildPendingAction,
     toPublic,
@@ -183,6 +184,12 @@ router.use('/update/prestage', createPrestageSettingsRouter({
     onChange: () => updateRouteHooks.wakePrestager?.(),
 }));
 
+// ADR-216: the owner's release-branch re-attach (background operation + polling).
+router.use('/update/source-attach', createSourceAttachRouter({
+    service: () => updateRouteHooks.sourceAttach ?? null,
+    limiter: localUpdateLimiter,
+}));
+
 router.get('/update/local', requireRole('owner'), localUpdateLimiter, (_req, res) => {
     res.set('Cache-Control', 'no-store');
     try { return res.json(getLocalUpdateStatus()); }
@@ -285,8 +292,14 @@ router.post('/update/jobs/:jobId/confirm', requireRole('owner'), localUpdateLimi
 /**
  * Server-owned services the router reads but does not create (they live in
  * server/index.js). Both are optional: a missing hook means "not on this node".
+ * `releaseDiscovery` is the node's own discovery, shared so the banner and
+ * the prestager read one cache (T-2025); `noteReleaseDiscovered` hands each
+ * discovered release to the prestager, which wakes once per new release.
+ * `sourceAttach` is the ADR-216 re-attach service (null on a node that is not a git checkout).
  * @type {{ prestageStatus?: (() => Record<string, unknown> | null) | null, wakeAutoActivator?: (() => unknown) | null,
- *   wakePrestager?: (() => unknown) | null }}
+ *   sourceAttach?: object | null,
+ *   wakePrestager?: (() => unknown) | null, noteReleaseDiscovered?: ((release: object) => unknown) | null,
+ *   releaseDiscovery?: (() => Promise<{release: Record<string, unknown>}>) | null }}
  */
 let updateRouteHooks = {};
 
@@ -305,6 +318,13 @@ function ownerPrestageStatus() {
     try { return toOwnerPrestageStatus(updateRouteHooks.prestageStatus()); } catch { return null; }
 }
 
+/** T-2025: tell the prestager about a discovered release; never fails or delays the response. */
+function notePrestageRelease(release) {
+    try {
+        Promise.resolve(updateRouteHooks.noteReleaseDiscovered?.(release)).catch(() => { /* the poll still picks it up */ });
+    } catch { /* the poll still picks it up */ }
+}
+
 let releaseDiscovery = null;
 let inspectActionServerCandidate = inspectServerActivationCandidate;
 
@@ -318,6 +338,7 @@ function inspectButtonBoundServerCandidate(buildId, requestId = null) {
 
 let hostCapabilitySnapshot = null;
 function getReleaseDiscovery() {
+    if (!releaseDiscovery && typeof updateRouteHooks.releaseDiscovery === 'function') return updateRouteHooks.releaseDiscovery;
     // The banner mirrors the host's actual update strategy (ADR-141, T-1569): a
     // git-checkout-v2 host discovers from git tags via its own credentials (so a
     // private release source resolves), while an artifact host keeps the
@@ -1529,6 +1550,7 @@ router.get('/release/latest', statsLimiter, async (req, res) => {
     res.setHeader('Vary', 'Authorization');
     try {
         const result = await getReleaseDiscovery()();
+        notePrestageRelease(result.release);
         const { htmlUrl: _repositoryUrl, ...release } = result.release;
         // ADR-207 S5: owners also see the background prestage (badge + modal
         // label); every other role gets exactly the contract it had before.

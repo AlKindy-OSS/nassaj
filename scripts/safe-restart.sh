@@ -761,8 +761,17 @@ fi
 # _scan_session_json: مُغلَّف حول ماسح /proc كي يُعاد استدعاؤه بعد قتل الجلسات
 # (force-restart) لإعادة الكشف fail-closed. يقرأ SERVER_PID من البيئة ويطبع نفس
 # الـ JSON. لا أثر جانبي (قراءة فقط).
+# B-1699: claude runs held ONLY for a scheduled wake-up (`/loop`) are not live work —
+# the drain releases them at its start. The server publishes their CLI pids on /health
+# to direct local callers only, with its own pid; the scan honours the list only when
+# that pid is the server it walks. Unreachable /health ⇒ empty ⇒ counted (fail-closed).
+_read_wakeup_holds() {
+  command -v curl >/dev/null 2>&1 || return 0
+  curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null || true
+}
+
 _scan_session_json() {
-  SERVER_PID="${SERVER_PID}" node - <<'NODE'
+  SERVER_PID="${SERVER_PID}" WAKEUP_HOLD_HEALTH="$(_read_wakeup_holds)" node - <<'NODE'
 const fs = require('fs');
 function out(o){ process.stdout.write(JSON.stringify(o)); }
 try {
@@ -939,12 +948,32 @@ try {
     return null;
   }
 
+  // B-1699: pids the server holds only for a scheduled wake-up (see _read_wakeup_holds).
+  const holdPids = new Set();
+  try {
+    const health = JSON.parse(process.env.WAKEUP_HOLD_HEALTH || '{}');
+    if (health && health.serverPid === serverPid && Array.isArray(health.claudeWakeupHoldPids)) {
+      for (const p of health.claudeWakeupHoldPids) if (Number.isInteger(p) && p > 0) holdPids.add(p);
+    }
+  } catch (_) { /* no list ⇒ nothing exempt */ }
+  // A caged run's provider process sits under the held pid (bwrap), so an ancestor counts too.
+  function heldForWakeup(pid){
+    for (let p = pid, hops = 0; p && p !== serverPid && hops < 16; p = readPPid(p), hops++) {
+      if (holdPids.has(p)) return true;
+    }
+    return false;
+  }
   const sessions = [];
+  const wakeupHoldSessions = [];
   for (const pid of descendants) {
     const argv = readCmdline(pid);
     const prov = detect(argv);
     if (!prov) continue;
     const cmd = (argv || []).join(' ').replace(/\s+/g, ' ');
+    if (holdPids.size > 0 && heldForWakeup(pid)) {
+      wakeupHoldSessions.push({ pid, provider: prov, sessionId: detectSessionId(argv) });
+      continue;
+    }
     sessions.push({
       pid,
       provider: prov,
@@ -954,7 +983,7 @@ try {
     });
   }
   sessions.sort((a, b) => a.pid - b.pid);
-  out({ sessionCount: sessions.length, serverPid, sessions });
+  out({ sessionCount: sessions.length, serverPid, sessions, wakeupHoldSessions });
 } catch (e) {
   // B-195 (fail-closed): علامة صريحة تميّز «خطأ كشف داخلي» (مثل فشل قراءة /proc
   // بعد استنباط PID صالح) عن «صفر جلسات حقيقي». المستهلك في bash يُعامل

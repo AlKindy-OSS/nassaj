@@ -5,6 +5,8 @@
  *   POST   /api/sessions/star                     → star/unstar a session for the caller
  *   GET    /api/sessions/:sessionId/participants  → human participants of a session
  *   GET    /api/sessions/:sessionId/agents        → model + subagents of a session
+ *   GET    /api/sessions/:sessionId/agents/live   → live agents registry snapshot (ADR-218)
+ *   GET    /api/sessions/:sessionId/peer-messages → relayed peer messages of the session (ADR-219)
  *   POST   /api/sessions/:sessionId/close         → mark a conversation finished
  *   DELETE /api/sessions/:sessionId/close         → reopen it
  *
@@ -18,9 +20,14 @@ import { closedSessionsDb, projectsDb, sessionOutcomesDb, sessionsDb, starredSes
 import { participantsService } from '@/modules/providers/services/participants.service.js';
 import { notifySessionMetadataChanged } from '@/modules/providers/services/sessions-watcher.service.js';
 import { assertSessionAccessible } from '@/modules/providers/services/sessions.service.js';
-import { notifyOutcomeChanged } from '@/modules/websocket/index.js';
+import { getSessionAgentsSnapshot } from '@/modules/providers/services/session-agents/session-agents.service.js';
+import { listPeerMessageViews } from '@/modules/peer-relay/index.js';
+import { isSessionVisibleToUser, notifyOutcomeChanged } from '@/modules/websocket/index.js';
 import { parseSessionIdParam } from '@/shared/session-id.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
+
+// eslint-disable-next-line boundaries/no-unknown -- shared HTTP rate limiter, as in connectors.
+import { createRateLimiter } from '../../middleware/rate-limit.js';
 
 const router = express.Router();
 
@@ -163,6 +170,59 @@ router.get(
     // (B-410) and neither axis is derivable from the agent rows themselves.
     const view = await participantsService.listSessionAgents(sessionId);
     res.json(createApiSuccessResponse(view));
+  })
+);
+
+// ADR-218: the server's own list of a session's agents (Claude subagents and
+// Workflow agents), the same snapshot the `session-agents` WS frame carries.
+// Gate: the B-137 predicate the mirror registration uses, so REST and WS agree;
+// refusal is a 404 that does not disclose the session. Rate-limited per caller
+// (each read may rebuild the session from its transcript once): every bucket is
+// keyed by the authenticated user, so one member exhausting their own quota never
+// locks the view for other members. The global ceiling only caps the process.
+const liveAgentsCaller = (req: Request): string =>
+  String((req as Request & { user?: AuthenticatedUser }).user?.id ?? 'anonymous');
+const liveAgentsGlobalLimit = createRateLimiter({
+  windowMs: 60_000, max: 6_000, key: () => 'session-agents', code: 'RATE_LIMITED',
+});
+const liveAgentsUserLimit = createRateLimiter({
+  windowMs: 60_000, max: 300, key: (req: Request) => `session-agents:u:${liveAgentsCaller(req)}`,
+  code: 'RATE_LIMITED',
+});
+const liveAgentsUserSessionLimit = createRateLimiter({
+  windowMs: 60_000, max: 60,
+  key: (req: Request) => `session-agents:u:${liveAgentsCaller(req)}:s:${String(req.params.sessionId)}`,
+  code: 'RATE_LIMITED',
+});
+
+router.get(
+  '/:sessionId/agents/live',
+  liveAgentsGlobalLimit,
+  liveAgentsUserLimit,
+  liveAgentsUserSessionLimit,
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionIdParam(req.params.sessionId);
+    if (!isSessionVisibleToUser(sessionId, readAuthenticatedUserId(req))) {
+      throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+    }
+    res.json(createApiSuccessResponse(await getSessionAgentsSnapshot(sessionId)));
+  })
+);
+
+const peerMessagesUserLimit = createRateLimiter({
+  windowMs: 60_000, max: 120, key: (req: Request) => `peer-messages:u:${liveAgentsCaller(req)}`, code: 'RATE_LIMITED',
+});
+
+// ADR-219 S1: the peer bubbles of a session after a reload. Gated exactly like the
+// session messages route (assertSessionAccessible 'read', ADR-089); rows come from
+// the relay table, never from transcript text.
+router.get(
+  '/:sessionId/peer-messages',
+  peerMessagesUserLimit,
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionIdParam(req.params.sessionId);
+    assertSessionAccessible(sessionId, readAuthenticatedUserId(req), 'read');
+    res.json(createApiSuccessResponse({ messages: listPeerMessageViews(sessionId) }));
   })
 );
 

@@ -40,6 +40,8 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { hardenGitArgs } from '../../shared/git-safety.js';
+
 const MARKER_FILE = 'coordinator-markers.json';
 const MAX_MARKERS = 200;
 const MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
@@ -222,7 +224,7 @@ export function readCommitLog(repoRoot) {
       }
       execFile(
         'git',
-        ['-C', repoRoot, 'log', '--format=%h', '-n', String(GIT_LOG_N)],
+        hardenGitArgs(['-C', repoRoot, 'log', '--format=%h', '-n', String(GIT_LOG_N)]),
         { timeout: GIT_TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 },
         (err, stdout) => {
           if (err || typeof stdout !== 'string') {

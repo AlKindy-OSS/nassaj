@@ -397,6 +397,14 @@ export type NormalizedMessage = {
   isSidechain?: boolean;
   isSynthetic?: boolean;
   /**
+   * ADR-219 S1: the peer message id whose delivery turn produced this row, set
+   * ONLY by the server (the delivery writer, or the history projection from the
+   * transcript proof row matched to a delivered relay row). Never client input.
+   */
+  peerDeliveryId?: string;
+  /** Internal: a proof row's ref, mapped to `peerDeliveryId` and stripped before egress. */
+  peerProofRef?: string;
+  /**
    * ADR-199: provider-neutral plan snapshot (todo list) for the run. Built only
    * through `server/shared/progress-normalize.ts`; item ids are snapshot
    * indexes, so the latest plan inside the current turn wins. `items` is capped

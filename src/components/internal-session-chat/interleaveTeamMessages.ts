@@ -2,12 +2,14 @@ import type { InternalMessage } from './internalSessionChatApi';
 
 type Timed = { timestamp?: string | number | Date };
 
-export type TeamMessagePlacement = {
+export type TimelinePlacement<T> = {
   /** `before[i]` renders just before chat message `i`. */
-  before: InternalMessage[][];
+  before: T[][];
   /** Newer than every visible chat message: rendered after the list. */
-  trailing: InternalMessage[];
+  trailing: T[];
 };
+
+export type TeamMessagePlacement = TimelinePlacement<InternalMessage>;
 
 const timeOf = (value: string | number | Date | undefined): number | null => {
   if (value == null) return null;
@@ -16,15 +18,15 @@ const timeOf = (value: string | number | Date | undefined): number | null => {
 };
 
 /**
- * Places team messages (already in room sequence order) between the visible
- * chat messages by time. When older chat history is still unloaded, team
- * messages older than the first visible message are held back so they appear
- * with that history, not stacked above it.
+ * Places side-timeline items (team messages, ADR-219 peer messages), already in
+ * time order, between the visible chat messages by `createdAt`. When older chat
+ * history is still unloaded, items older than the first visible message are
+ * held back so they appear with that history, not stacked above it.
  */
-export function placeTeamMessages(
-  chat: Timed[], team: InternalMessage[], olderHistoryHidden: boolean,
-): TeamMessagePlacement {
-  const before: InternalMessage[][] = chat.map(() => []);
+export function placeTeamMessages<T extends { createdAt?: string | number }>(
+  chat: Timed[], team: T[], olderHistoryHidden: boolean,
+): TimelinePlacement<T> {
+  const before: T[][] = chat.map(() => []);
   let next = 0;
   if (olderHistoryHidden) {
     const first = chat.map((message) => timeOf(message.timestamp)).find((ms) => ms !== null) ?? null;

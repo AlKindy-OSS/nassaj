@@ -29,6 +29,7 @@ import { supportsAtomicExchange } from './atomic-exchange-capability.mjs';
 import { classifyDivergence, diffDependencyVersions } from './local-divergence.mjs';
 import { parseNodeOverlay } from './node-overlay.mjs';
 import pm2InstallLayout from './pm2-install-layout.cjs';
+import { inspectReleaseCheckout } from './release-branch-attach.mjs';
 import { gitlinkChangePaths, parseTreeEntries } from './source-update-gitlinks.mjs';
 import {
     conflictingPaths, describePaths, nulFields, parsePorcelainStatus,
@@ -65,6 +66,7 @@ const HOST_KEY_FAILURE = /host key verification failed|remote host identificatio
  */
 export const PREFLIGHT_CODES = Object.freeze([
     'source_state_unreconciled',
+    'detached_head',
     'active_sessions',
     'remote_mismatch',
     'release_source_lock',
@@ -298,6 +300,43 @@ function checkSourceState({ unreadable, journal }) {
             { ar: 'انتظر اكتماله ثم أعد الفحص.', en: 'Wait for it to finish, then re-run.' });
     }
     return clear(code, { ar: 'بوابة الصيانة مفتوحة وحالة المصدر متصالحة.', en: 'The maintenance gate is open and the source state is reconciled.' });
+}
+
+/** The single remedy for each detached-HEAD refusal (ADR-216 §3.5). */
+const DETACHED_REMEDIES = Object.freeze({
+    dirty_worktree: {
+        ar: 'تراجع عن التعديلات المتتبَّعة أو التزمها ثم استعمل «إصلاح ربط فرع الإصدار».',
+        en: 'Commit or revert the tracked changes, then use “Repair release-branch link”.',
+    },
+    local_branch_diverged: {
+        ar: 'الفرع المحلي يشير إلى commit لا يتبع هذا الإصدار؛ يُحسم بقرار بشري ولا يُكتب فوقه.',
+        en: 'The local branch points at a commit this release does not descend from; settle it by a human decision, it is never overwritten.',
+    },
+});
+const REINSTALL_REMEDY = {
+    ar: 'هذه الشجرة ليست على commit إصدار منشور؛ أعد التثبيت بأوامر «Clean node (re)install» في docs/RELEASING.md.',
+    en: 'This tree is not at a published release commit; reinstall with the “Clean node (re)install” commands in docs/RELEASING.md.',
+};
+
+/**
+ * ADR-216 §3.5: a detached HEAD stops the updater before anything else (the
+ * capability probe returns `detached_head`). Network-free: the precise refusal
+ * comes from the same inspection the in-app repair runs.
+ */
+async function checkDetachedHead({ git, appRoot, remote, branch }) {
+    const code = 'detached_head';
+    const symbolic = await git(['symbolic-ref', '--quiet', 'HEAD']);
+    if (symbolic.ok) return clear(code, { ar: 'الرأس مربوط بفرع.', en: 'HEAD is attached to a branch.' });
+    const inspection = await inspectReleaseCheckout({ appRoot, remote, branch, git });
+    if (inspection.eligible) {
+        return blocker(code,
+            { ar: `الرأس منفصل عند ${inspection.tag}، والمحدّث لا يعمل حتى يُربط بفرع ${branch}.`, en: `HEAD is detached at ${inspection.tag}; the updater stays off until it is attached to ${branch}.` },
+            { ar: 'استعمل «إصلاح ربط فرع الإصدار» في التطبيق (المالك)، ثم أكّد إعادة التشغيل الآمنة.', en: 'Use “Repair release-branch link” in the app (owner), then confirm the safe restart.', command: 'npm run doctor -- --attach-release-branch' });
+    }
+    const reason = /^[a-z_]{1,64}$/.test(inspection.reason || '') ? inspection.reason : 'release_checkout_invalid';
+    return blocker(code,
+        { ar: `الرأس منفصل والإصلاح داخل التطبيق مرفوض (${reason}).`, en: `HEAD is detached and the in-app repair is refused (${reason}).` },
+        DETACHED_REMEDIES[reason] || REINSTALL_REMEDY);
 }
 
 function checkActiveSessions(count) {
@@ -1127,6 +1166,7 @@ export async function runUpdatePreflightChecks({
 
     const checks = new Map();
     checks.set('source_state_unreconciled', checkSourceState(await readSourceState({ git: localGit, readFile })));
+    checks.set('detached_head', await checkDetachedHead({ git: localGit, appRoot, remote, branch }));
     checks.set('active_sessions', checkActiveSessions(sessions));
     checks.set('remote_mismatch', await checkRemote({ git: localGit, remote, source }));
     checks.set('release_source_lock', checkReleaseSourceLock({ readLockFile: lockReader, source }));

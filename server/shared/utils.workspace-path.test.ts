@@ -91,3 +91,15 @@ test('path outside the root without links is still rejected', async () => {
   const result = await validateWorkspacePath(path.join(outsideDir, 'x'));
   assert.equal(result.valid, false);
 });
+
+test('B-1691 (qa F8): a workspace path inside .git is refused, lexically or through a link', async () => {
+  fs.mkdirSync(ws('repo', '.git'), { recursive: true });
+  fs.symlinkSync(ws('repo', '.git'), ws('gitlink'));
+  for (const target of [ws('repo', '.git'), ws('repo', '.git', 'x'), ws('repo', '.GIT'), ws('gitlink'), ws('gitlink', 'y')]) {
+    const result = await validateWorkspacePath(target);
+    assert.equal(result.valid, false, target);
+    assert.match(String(!result.valid && result.error), /\.git directory/, target);
+  }
+  assert.equal((await validateWorkspacePath(ws('repo', '.github'))).valid, true);
+  assert.equal((await validateWorkspacePath(ws('repo'))).valid, true);
+});

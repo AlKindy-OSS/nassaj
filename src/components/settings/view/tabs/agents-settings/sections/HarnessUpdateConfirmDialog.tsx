@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { HarnessRequiredAck, HarnessSuppliedAck } from '../../../../../../../shared/harness-update.contract';
 import type { HarnessPendingConfirmation } from '../../../../../../hooks/useHarnessVersion';
 import { Button, Dialog, DialogContent, DialogTitle } from '../../../../../../shared/view/ui';
+import { isolateLtrRuns } from '../../../../../../utils/isolateLtrRuns';
 
 /**
  * The 409 CONFIRMATION_REQUIRED dialog (T-1871 stage 4, spec §9). Every
@@ -40,7 +41,7 @@ export default function HarnessUpdateConfirmDialog({
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onCancel(); }}>
-      <DialogContent layerClassName="z-[10000]" className="max-w-md p-4" aria-labelledby="harness-confirm-title">
+      <DialogContent layerClassName="z-[10000]" className="w-[calc(100%-2rem)] max-w-md p-4" aria-labelledby="harness-confirm-title">
         <DialogTitle id="harness-confirm-title" className="not-sr-only text-[15px] font-medium text-foreground">
           {t('harnessVersion.confirm.title', { defaultValue: 'تأكيد إجراء حسّاس' })}
         </DialogTitle>
@@ -55,7 +56,7 @@ export default function HarnessUpdateConfirmDialog({
                 disabled={submitting || expired}
                 aria-describedby={`harness-ack-${ack.kind}`}
               />
-              <span id={`harness-ack-${ack.kind}`}>{textOf(ack)}</span>
+              <span id={`harness-ack-${ack.kind}`} className="min-w-0 [overflow-wrap:anywhere]">{isolateLtrRuns(textOf(ack))}</span>
             </label>
           ))}
           {expired && (

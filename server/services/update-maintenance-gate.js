@@ -763,6 +763,28 @@ export const UPDATE_GATE_DEFERRABLE_REASON_CODES = Object.freeze([
 export const UPDATE_ACTIVITY_LOCK_WAIT_MS = 1_000;
 
 /**
+ * ADR-216: the brand of a lease issued by acquireExclusiveSourceRefLease. A
+ * registry symbol, so scripts/lib/release-branch-attach.mjs can verify it
+ * without importing this module.
+ */
+export const SOURCE_REF_LEASE = Symbol.for('nassaj.exclusiveSourceRefLease');
+
+/**
+ * t3: an artifact/release-layout node has no git common dir, so there is no
+ * source ref to attach; the lease refuses it before taking any lock.
+ * @param {{commonGitDir: string|null}} paths
+ */
+export function requireSourceRefGitDir(paths) {
+    if (!paths?.commonGitDir) throw new Error('unsupported_install_mode');
+    return paths.commonGitDir;
+}
+
+/** OPEN, gate open, not degraded: the only journal a source-ref lease accepts. */
+function sourceRefJournalQuiet(journal) {
+    return journal.state === 'OPEN' && !journal.gateClosed && !(typeof journal.degraded === 'string' && journal.degraded);
+}
+
+/**
  * The activity wait: `activityWaitMs` (default UPDATE_ACTIVITY_LOCK_WAIT_MS),
  * never longer than an explicit `waitMs`, so a short test wait stays short.
  * @param {number | undefined} waitMs the caller's overall lock wait
@@ -850,6 +872,54 @@ export function createUpdateMaintenanceGate({
                 },
             };
         } catch (error) {
+            admission.release();
+            throw error;
+        }
+    };
+
+    /**
+     * ADR-216 §3.2: the exclusive source-ref lease. Admission EXCLUSIVE, then
+     * activity EXCLUSIVE — beginUpdate's order — so no staging job, prestage,
+     * activation, recovery or other attach can hold either lock in any process
+     * while it is held. Both waits are short (default 1 s). The journal is never
+     * written; the lease only proves it is OPEN, not closed and not degraded.
+     * @param {{kind?: string, waitMs?: number, signal?: AbortSignal}} [options]
+     * @returns {Promise<{kind: string, journalSequence: number, commonGitDir: string, held: boolean, release: () => void}>}
+     */
+    const acquireExclusiveSourceRefLease = async ({ kind = 'source-attach', waitMs = UPDATE_ACTIVITY_LOCK_WAIT_MS, signal } = {}) => {
+        if (typeof kind !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(kind)) throw new Error('update_writer_kind_invalid');
+        requireSourceRefGitDir(paths);
+        const wait = Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : UPDATE_ACTIVITY_LOCK_WAIT_MS;
+        const contended = (error, code) => new Error(error?.message === 'update_lock_contended' ? code : (error?.message || code));
+        let admission;
+        try { admission = await flockAsync(paths.admissionLock, 'exclusive', { signal, waitMs: wait }); }
+        catch (error) { throw contended(error, 'update_maintenance_active'); }
+        let activity = null;
+        try {
+            const journal = readJournal(paths.journal);
+            if (!sourceRefJournalQuiet(journal)) throw new Error('update_maintenance_active');
+            // t3: an oid-pair maintenance owns the tree even while the journal reads OPEN.
+            try { validateOidPairMaintenance(paths.root, journal); } catch { throw new Error('update_maintenance_active'); }
+            try { activity = await flockAsync(paths.activityLock, 'exclusive', { signal, waitMs: wait }); }
+            catch (error) { throw contended(error, 'source_attach_writers_active'); }
+            const afterActivity = readJournal(paths.journal);
+            if (afterActivity.sequence !== journal.sequence || !sourceRefJournalQuiet(afterActivity)) {
+                throw new Error('update_maintenance_active');
+            }
+            let released = false;
+            return Object.freeze({
+                kind, journalSequence: afterActivity.sequence, commonGitDir: paths.commonGitDir,
+                [SOURCE_REF_LEASE]: true,
+                get held() { return !released; },
+                release() {
+                    if (released) return;
+                    released = true;
+                    activity.release();
+                    admission.release();
+                },
+            });
+        } catch (error) {
+            activity?.release();
             admission.release();
             throw error;
         }
@@ -1314,7 +1384,7 @@ export function createUpdateMaintenanceGate({
     };
 
     return Object.freeze({
-        acquireWriterLease, beginUpdate, claimBootstrapOwnership, recoverOrDeclareManual,
+        acquireWriterLease, acquireExclusiveSourceRefLease, beginUpdate, claimBootstrapOwnership, recoverOrDeclareManual,
         /** Detect a durable pre-drain OID intent even while the previous OPEN identity remains. */
         hasPendingOidAdmissionIntent() {
             const current = readJournal(paths.journal), intent = current.oidAdmissionIntent;
@@ -1341,6 +1411,7 @@ export function createUpdateMaintenanceGate({
 }
 
 export const acquireWriterLease = (options) => createUpdateMaintenanceGate(options).acquireWriterLease(options);
+export const acquireExclusiveSourceRefLease = (options) => createUpdateMaintenanceGate(options).acquireExclusiveSourceRefLease(options);
 export const beginUpdate = (identity, options) => createUpdateMaintenanceGate(options).beginUpdate(identity, options);
 export const claimBootstrapOwnership = (options) => createUpdateMaintenanceGate(options).claimBootstrapOwnership(options);
 export const recoverOrDeclareManual = (options) => createUpdateMaintenanceGate(options).recoverOrDeclareManual(options);

@@ -16,6 +16,13 @@
 .dark { --session-steer-accent: #F0B858; --session-steer-surface: #2A2416; --session-steer-rule: #F0B858; }
 /* Tailwind 3.4 لا يطبّق شفافية /10 على متغيّر HEX، فنستعمل أسطحاً صلبة جاهزة. */
 
+/* ADR-219 S1 (T-2072): رسالة من جلسة أخرى — فيروزيٌّ ثابت لا يتبع --primary ولا
+   --project-accent، فلا تُشبه فقاعة المستخدم ولا التوجيه (كهرمان) ولا محادثة الفريق.
+   مقاسة: النص 6.09:1 على الأبيض و5.39:1 على السطح؛ الداكن 10.87:1 و8.31:1.
+   ‏--session-peer-problem للرفض/الفشل: 5.82:1 على السطح الفاتح و7.53:1 على الداكن. */
+:root { --session-peer-accent: #0F6E68; --session-peer-surface: #E6F4F2; --session-peer-rule: #0F6E68; --session-peer-problem: #B42318; }
+.dark { --session-peer-accent: #5ED1C6; --session-peer-surface: #10292A; --session-peer-rule: #5ED1C6; --session-peer-problem: #FF9B8F; }
+
 /* ── Ultracode effort mode: terminal glow ring ──────────────────────────────
    ⚠ ميزانية 8px — لا تتجاوزها. المجموع (spread + blur) لكل ظلٍّ هنا يجب أن
    يبقى ≤ 8px، وإلا عاد التوهّج مقصوصاً بحافةٍ أفقية صلبة.
@@ -1223,6 +1230,20 @@
 .nassaj-md samp {
   direction: ltr;
   unicode-bidi: isolate;
+  text-align: start;
+}
+
+/* B-1674 — prose fences only (no language / text / plaintext / markdown / md,
+   rendered by src/syntax/ProseFenceBlock.tsx). Each source line is its own
+   block and takes its base direction from its first strong character, so a
+   line such as "استخدم npm install ثم شغّل" reads in logical order instead of
+   being laid out on the box's LTR base. Code fences (any language, diff) are
+   NOT targeted: they stay one LTR isolate with indentation and `//`/`#`/`+` on
+   the left, and no other <pre> in the app is touched. The line spans carry no
+   `dir`, so the `[dir="ltr"]` isolate never reaches them. */
+.nassaj-md pre[data-prose-fence] .nassaj-prose-line {
+  display: block;
+  unicode-bidi: plaintext;
   text-align: start;
 }
 

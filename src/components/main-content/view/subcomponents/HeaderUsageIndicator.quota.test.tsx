@@ -4,6 +4,9 @@
  * المُثبَت:
  *  • ‏glm بمصدر رسمي ⇒ ثلاث شارات نسبة (نَفِدت 100% أولاً لأنها الأقرب تصفيراً)،
  *    **بلا أي مبلغ** (‏ADR-081 قائم: العقد لا يحمل مالاً أصلاً).
+ *  • ‏ADR-214 يعدّل ADR-081 لشارة واحدة فقط: إنفاق Anthropic API (‏`api-spend-badge`)
+ *    على محور حصّة Anthropic. الحارس أدناه يسمح بها صراحةً ويُبقي المنع على
+ *    كل ما سواها — ولا تُشغَّل إطلاقاً على مزوّد غير Anthropic.
  *  • ‏codex بمصدر متعذّر (توكن بائت — وهي الحالة الحيّة المقيسة) ⇒ **يسقط إلى
  *    دورة التجديد** لا إلى الصمت.
  *  • مزوّد بلا مصدر ولا مرساة (kimi) ⇒ صمت.
@@ -68,6 +71,29 @@ vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
           refetch: () => {},
         }
       : { status: 'idle', refetch: () => {} };
+  },
+}));
+
+// ADR-214: إنفاق API — مُفعَّل دائماً بحمولة مبلغ حقيقي كي يختبر الحارسُ أن المبلغ
+// لا يظهر إلا داخل شارته، ولا يُطلب أصلاً على مزوّد غير Anthropic.
+const apiSpendEnabledCalls: boolean[] = [];
+vi.mock('../../../quick-settings-panel/hooks/useAnthropicApiSpend', () => ({
+  useAnthropicApiSpend: (enabled: boolean) => {
+    apiSpendEnabledCalls.push(enabled);
+    return enabled
+      ? {
+          status: 'success',
+          data: {
+            spendCents: 4217,
+            currency: 'USD',
+            periodStart: '2026-07-01T00:00:00.000Z',
+            periodEnd: '2026-07-30T00:00:00.000Z',
+            observedAt: '2026-07-30T00:00:00.000Z',
+            hasData: true,
+            excludesPriorityTier: true,
+          },
+        }
+      : { status: 'idle' };
   },
 }));
 
@@ -204,6 +230,7 @@ beforeEach(() => {
   quotaEnabledFor.length = 0;
   cycleEnabledCalls.length = 0;
   claudeUsageEnabledCalls.length = 0;
+  apiSpendEnabledCalls.length = 0;
   _lastCyclesSuccess = null;
   codexQuotaResult = {
     status: 'none',
@@ -234,7 +261,9 @@ function renderHeader(sessionProvider?: string | null, tabsMode: 'full' | 'hidde
   );
   return {
     text: container.textContent ?? '',
-    badges: container.querySelectorAll('span[aria-label]').length,
+    // شارات النوافذ/الأرصدة فقط؛ شارة إنفاق API (‏ADR-214) يفحصها حارسها المخصّص.
+    badges: container.querySelectorAll('span[aria-label]:not([data-testid="api-spend-badge"])')
+      .length,
     container,
   };
 }
@@ -255,6 +284,34 @@ describe('HeaderUsageIndicator — نوافذ حصّة المزوّد', () => {
     assert.equal(text.includes('resets-3h'), false);
     assert.equal(text.includes('$'), false);
     assert.equal(/\d+\.\d\d/.test(text), false);
+    assert.equal(apiSpendEnabledCalls.includes(true), false, 'لا إنفاق Anthropic على glm');
+  });
+
+  // ── حارس ADR-081 بتعديل ADR-214 ────────────────────────────────────────────
+  it('المبلغ الوحيد المسموح على الهيدر هو شارة إنفاق API — ولا مبلغ خارجها', () => {
+    setSelectedProvider('claude');
+    const { container } = renderHeader('claude');
+    const spendBadges = container.querySelectorAll('[data-testid="api-spend-badge"]');
+    assert.equal(spendBadges.length, 1);
+    assert.equal((spendBadges[0].textContent ?? '').includes('$42.17'), true);
+
+    const clone = container.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('[data-testid="api-spend-badge"]').forEach((el) => el.remove());
+    const outside = clone.textContent ?? '';
+    assert.equal(outside.includes('$'), false, 'لا عملة خارج شارة إنفاق API');
+    assert.equal(/\d+\.\d\d/.test(outside), false, 'لا مبلغ عشري خارج شارة إنفاق API');
+  });
+
+  it('لا شارة إنفاق API ولا طلب لها على أي مزوّد غير Anthropic', () => {
+    for (const provider of ['glm', 'codex', 'kimi']) {
+      cleanup();
+      apiSpendEnabledCalls.length = 0;
+      setSelectedProvider(provider);
+      const { container, text } = renderHeader(null);
+      assert.equal(container.querySelectorAll('[data-testid="api-spend-badge"]').length, 0, provider);
+      assert.equal(text.includes('$'), false, provider);
+      assert.equal(apiSpendEnabledCalls.includes(true), false, provider);
+    }
   });
 
   it('codex بمصدر متعذّر يسقط إلى دورة التجديد لا إلى الصمت', () => {

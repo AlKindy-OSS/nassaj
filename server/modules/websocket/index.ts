@@ -28,3 +28,7 @@ export {
   openSessionStopped,
   sendOpenSessionsCount,
 } from './services/open-sessions.service.js';
+// ADR-218: session-level frames (the `session-agents` snapshot) reach every live,
+// visibility-gated mirror of a session; wired into the providers module at the
+// composition root so that module never imports the websocket graph.
+export { broadcastToSessionMirrors, countLiveMirrors } from './services/websocket-writer.service.js';

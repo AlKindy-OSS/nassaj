@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:5292f72fbc4b138ff87ba81165ab76960c9e6c28fa1937cc49ffafb7c1e18061",
+  "reviewedSiteDigest": "sha256:18ade2e6609529d77567b72bc28c413fc3c8b6909ba83026b37134a1c7081928",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -454,6 +454,15 @@
       "gate": "fixed git argv (worktree remove --force under candidates/update-pre-*, for-each-ref and update-ref -d under refs/nassaj-prestage/) with core.hooksPath=/dev/null and shell false, cwd the live source tree; transaction ids validated against the update-pre- pattern; every delete holds the exclusive prestage flock and passes assertDeleteAuthority after the build group is killed and verified gone; 60000 ms timeout, stdout capped at 1 MiB, stderr ignored",
       "adapter": "defaultRunGit",
       "test": "update-prestage-slot.test.js"
+    },
+    "server/modules/peer-relay/peer-cli-version.ts#child_process.execFile#1": {
+      "classification": "read_only_process_query",
+      "owner": "cross-session peer relay CLI version check (T-2072, ADR-219 S1)",
+      "purpose": "claude_cli_version_query",
+      "actorSource": "peer dispatcher before a resume turn; executable is resolveHarnessBinary('claude') (server-env absolute override or the measured install path); no caller-controlled executable or arguments",
+      "gate": "execFile without a shell; fixed --version argv; env is cleanSpawnEnv() (PATH/HOME/locale passthrough only, no server secrets); 5000 ms timeout; output matched against a line-anchored X.Y.Z only and never executed; failures fail closed to null and are not cached; 10 min cache; no host mutation",
+      "adapter": "defaultExec",
+      "test": "peer-policy.test.ts and permission inventory classification gate"
     }
   },
   "rules": [

@@ -32,6 +32,8 @@ import {
   isSpawnBlockedForRunProvider,
 } from '../providers/harness-update/spawn-admission.js';
 /* eslint-enable boundaries/dependencies */
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: the relay spawn policy leaf (member count only), applied at every Claude spawn.
+import { relayCliPolicy } from '../peer-relay/peer-spawn-policy.js';
 
 import type { ResumeTurnParams, ResumeTurnResult } from './handoff-injector.js';
 import { INJECTOR_SIGKILL_GRACE_MS } from './config.js';
@@ -92,6 +94,8 @@ function spawnResumeTurn(params: ResumeTurnParams, claudeBinary: string): Promis
       });
       return;
     }
+    // ADR-219 ح-1: a hookless relay-mode spawn refuses inbound peers and loses the session tools.
+    const relay = relayCliPolicy();
     const args: string[] = [
       '-r',
       params.conversationId,
@@ -100,9 +104,14 @@ function spawnResumeTurn(params: ResumeTurnParams, claudeBinary: string): Promis
       '--append-system-prompt',
       params.systemFraming,
       ...(params.model ? ['--model', params.model] : []),
+      // T-2071: explicit — the CLI's own default differs between versions.
+      '--permission-mode',
+      params.permissionMode,
+      ...relay.settingsArgs,
       // Variadic — MUST be the last flag before the positional `-p <prompt>`.
       '--disallowed-tools',
       ...params.disallowedTools,
+      ...relay.disallowedTools,
       '-p',
       params.prompt,
     ];

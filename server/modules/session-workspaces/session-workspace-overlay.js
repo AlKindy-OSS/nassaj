@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+import { hardenGitArgs } from '../../../shared/git-safety.js';
+
 const OVERLAY_SCHEMA = 1;
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 const DEFAULT_REAP_AGE_MS = 24 * 60 * 60_000;
@@ -10,7 +12,7 @@ const DEFAULT_REAP_BATCH = 20;
 const CANONICAL_OVERLAY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function runGit(cwd, args, { allowFailure = false, encoding = 'utf8' } = {}) {
-  const result = spawnSync('git', ['-C', cwd, ...args], {
+  const result = spawnSync('git', hardenGitArgs(['-C', cwd, ...args]), {
     encoding,
     env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
   });
@@ -327,6 +329,27 @@ export function probeSessionWorkspaceAlias({ projectPath, sessionId }) {
   } catch {
     return 'present_invalid';
   }
+}
+
+/**
+ * B-1689: the active overlay of `sessionId` for project-scoped file access, or
+ * null when the session never got one (non-repository project, legacy shared
+ * session). The manifest is read through the same strict, no-follow checks as
+ * every other overlay consumer, but WITHOUT the owner-principal match: callers
+ * authorize the requester against the session first (ADR-089 project-level
+ * read/write), so a teammate who may read the session sees the same files.
+ * A malformed or dangling alias throws (fail closed), never falls back.
+ * @param {{projectPath: string, sessionId: string}} input
+ * @returns {Readonly<{cwd: string, overlayId: string}>|null}
+ */
+export function findSessionOverlayWorkspace({ projectPath, sessionId }) {
+  const resolved = tryResolveOverlayRepository(projectPath);
+  if (resolved.kind !== 'exact_repository') return null;
+  const manifest = readStrictSessionManifest(
+    stateRoot(resolved.repository), sessionId, resolved.repository, null, false,
+  );
+  if (!manifest) return null;
+  return Object.freeze({ cwd: fs.realpathSync(manifest.cwd), overlayId: manifest.overlayId });
 }
 
 function publicBinding(manifest, isolation = 'overlay') {

@@ -91,8 +91,8 @@ export default function CodeEditorOfficePreview({
   onToggleFullscreen,
 }: CodeEditorOfficePreviewProps) {
   const { t } = useTranslation('codeEditor');
-  const state = useOfficePreview({ projectId, filePath: file.path, format });
-  const { isDownloading, hasError, download } = useBinaryFileDownload(projectId, file.path, file.name);
+  const state = useOfficePreview({ projectId, filePath: file.path, format, sessionId: file.sessionId });
+  const { isDownloading, hasError, download } = useBinaryFileDownload(projectId, file.path, file.name, file.sessionId);
 
   if (state.status === 'tooLarge' || state.status === 'error' || state.status === 'secret') {
     const limit = Math.round(OFFICE_PREVIEW_MAX_BYTES / (1024 * 1024));

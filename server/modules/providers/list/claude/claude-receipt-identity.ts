@@ -31,29 +31,42 @@ export function claudeTextPayloadHash(content: unknown): string | null {
   return hash.digest('hex');
 }
 
+/**
+ * ADR-219: how the turn's first message is marked. A human prompt (and every
+ * mid-turn steer) is stamped `origin: {kind: 'human'}`; a peer relay delivery is
+ * an `isSynthetic` message with no origin (the CLI frames it as non-user input).
+ */
+function firstMessageMarks(synthetic: boolean | undefined): Record<string, unknown> {
+  return synthetic ? { isSynthetic: true } : { origin: { kind: 'human' } };
+}
+
 /** All fallback generators share this invocation's single-use latch, set before the SDK yield. */
 export function createClaudeReceiptPrompt(input: {
   capability: unknown; command: string; content: unknown; userId: unknown;
   sessionId: string | null; persistSession?: boolean; release: Promise<unknown>;
   steer?: { take(): Promise<{ uuid: string; wrapped: string } | null> } | null;
+  /** ADR-219: a peer relay delivery (sent as an isSynthetic message, never receipt-bound). */
+  synthetic?: boolean;
 }, bind = messageCoordinationDb.bindClaudeIdentity) {
   const receipt = readVendorReceiptInvocation(input.capability, input.command, input.userId);
   const payloadSha256 = claudeTextPayloadHash(input.content);
   const content = payloadSha256 && Array.isArray(input.content)
     ? input.content.map(block => ({ type: 'text', text: block.text })) : input.content;
   let consumed = false;
+  let promptUuid: string | null = null;
   const make = async function* () {
     if (consumed) throw new Error('CLAUDE_PROMPT_ALREADY_DISPATCHED');
     consumed = true;
     let uuid: string | undefined;
-    if (receipt && payloadSha256 && input.persistSession !== false) {
+    if (receipt && payloadSha256 && input.persistSession !== false && !input.synthetic) {
       uuid = randomUUID();
       if (!bind({ clientMsgId: receipt.clientMsgId as string, userId: receipt.userId as number,
         provider: 'claude', sessionId: input.sessionId, uuid, payloadSha256 })) {
         throw new Error('CLAUDE_RECEIPT_BINDING_CONFLICT');
       }
+      promptUuid = uuid;
     }
-    yield { type: 'user', session_id: '', parent_tool_use_id: null,
+    yield { type: 'user', session_id: '', parent_tool_use_id: null, ...firstMessageMarks(input.synthetic),
       ...(uuid ? { uuid } : {}), message: { role: 'user', content } };
     if (!input.steer) {
       await input.release;
@@ -62,11 +75,13 @@ export function createClaudeReceiptPrompt(input: {
     // T-1903: the same single generator carries mid-turn injections. The queue
     // is owned by the run; closing it (input release or abort) ends the stream.
     for (let item = await input.steer.take(); item; item = await input.steer.take()) {
-      yield { type: 'user', session_id: '', parent_tool_use_id: null, uuid: item.uuid,
+      yield { type: 'user', session_id: '', parent_tool_use_id: null, uuid: item.uuid, origin: { kind: 'human' },
         message: { role: 'user', content: item.wrapped } };
     }
   };
-  return { make, wasConsumed: () => consumed };
+  // B-1694: the client uuid of this turn's message (null when none was stamped),
+  // which the CLI echoes in a result's user_message_uuid(s) once it consumed it.
+  return { make, wasConsumed: () => consumed, promptUuid: () => promptUuid };
 }
 
 /** Raw model activity only: synthetic auth failures and replay cannot prove acceptance. */
@@ -196,7 +211,11 @@ export function markSteerCandidate(message: NormalizedMessage, uuid: string): vo
   steerCandidates.set(message, uuid);
 }
 
-type SteerRow = { clientMsgId: string; userId: number; uuid: string; payloadSha256: string; text: string };
+type SteerRow = {
+  clientMsgId: string; userId: number; uuid: string; payloadSha256: string; text: string;
+  /** B-1697: store refs of the steer's images; the path note itself stays in the transcript only. */
+  images?: ReadonlyArray<{ bucket: string; name: string }>;
+};
 
 /**
  * Stamps VERIFIED injections: uuid AND payload hash must match one ingress row.
@@ -218,6 +237,7 @@ export function applyClaudeSteerInjections(messages: NormalizedMessage[], rows: 
     message.content = row.text;
     message.deliveryStatus = 'delivered';
     message.steerClientMsgId = row.clientMsgId;
+    if (row.images?.length) message.images = row.images.map(({ bucket, name }) => ({ bucket, name }));
     return true;
   });
 }

@@ -23,7 +23,7 @@ import { HARNESS_INSTALLED_EVENT, pollHarnessJob } from './harnessJobPoller';
 const identityKey = () => { const snapshot = getIdentityBarrierSnapshot(); return `${snapshot.version}:${snapshot.phase}`; };
 
 /** The action a pending 409 CONFIRMATION_REQUIRED belongs to, so `confirmPending` knows which route to resend. */
-export type HarnessConfirmAction = 'update' | 'restore-compatible' | 'rollback';
+export type HarnessConfirmAction = 'update' | 'restore-compatible' | 'rollback' | 'install';
 
 /** Rollback needs its `jobId`/`scope` echoed back unchanged when the acks are resent (spec §9). */
 export interface HarnessRollbackContext { jobId: string; scope: 'binary' | 'binary+data' }

@@ -22,7 +22,14 @@ import type { SessionTranscriptHandle } from '../../shared/session-transcript-re
 
 import { claudeHistorySource, type ClaudeHistorySource } from './claude-history-source.js';
 import { detectClaudeSkillLoad } from './claude-skill-load.js';
+import {
+  isScheduledWakeupRow,
+  SCHEDULED_WAKEUP_NOTICE_CODE,
+  SCHEDULED_WAKEUP_NOTICE_TEXT,
+} from './claude-scheduled-wakeup.js';
 import { createClaudeRawIdentityCollector, markSteerCandidate, readQueuedSteerPrompt } from './claude-receipt-identity.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219: the pure proof-row reader leaf (no service graph in history parsing).
+import { readPeerProofRef } from '../../../peer-relay/peer-wire.js';
 
 const PROVIDER = 'claude';
 
@@ -476,6 +483,9 @@ function isClaudeSubagentRow(raw: AnyRecord): boolean {
 function stampProvenance(raw: AnyRecord, messages: NormalizedMessage[]): NormalizedMessage[] {
   const sidechain = isClaudeSubagentRow(raw);
   const synthetic = raw.isSynthetic === true;
+  // ADR-219: the delivery proof row's ref (internal; the history projection maps and strips it).
+  const peerProofRef = readPeerProofRef(raw);
+  if (peerProofRef) for (const message of messages) message.peerProofRef = peerProofRef;
   if (!sidechain && !synthetic) return messages;
   // ADR-199: a row emitted inside a delegation names its parent on both paths.
   const parentToolUseId = claudeParentToolUseId(raw);
@@ -549,6 +559,20 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         content: skillLoad.body,
         isSkillLoad: true,
         skillName: skillLoad.name,
+      })];
+    }
+
+    if (isScheduledWakeupRow(raw)) {
+      // B-1699: the prompt of a scheduled wake-up turn is not the human's message;
+      // it reads as the same neutral line the live run sends (same id).
+      return [createNormalizedMessage({
+        id: baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'notice',
+        noticeCode: SCHEDULED_WAKEUP_NOTICE_CODE,
+        content: SCHEDULED_WAKEUP_NOTICE_TEXT,
       })];
     }
 

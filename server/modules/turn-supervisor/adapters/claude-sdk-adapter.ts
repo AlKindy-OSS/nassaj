@@ -2,6 +2,8 @@ import { query, type Options, type SDKMessage, type SDKResultMessage } from '@an
 
 // eslint-disable-next-line boundaries/dependencies -- admission is a synchronous leaf; importing the providers barrel here creates the provider-auth graph during adapter boot.
 import { isSpawnBlockedForRunProvider } from '../../providers/harness-update/spawn-admission.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: the relay spawn policy leaf (member count only), applied at every Claude spawn.
+import { relaySdkSpawnOptions } from '../../peer-relay/peer-spawn-policy.js';
 import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from '../../../services/isolation/anthropic-base-url-guard.js';
 import { assertLinkModeRunAllowed } from '../../../services/isolation/link-mode-run-gate.js';
 import { resolveHarnessBinary } from '../../../shared/harness-binaries.js';
@@ -124,6 +126,8 @@ export function createClaudeSdkTurnAdapter(
           tools: [],
           allowedTools: [],
           disallowedTools: ['Agent', 'Task'],
+          // ADR-219 ح-1: refuse inbound cross-session messages on a relay-mode node (the role is toolless).
+          ...relaySdkSpawnOptions(),
           agents: {},
           mcpServers: {},
           plugins: [],

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { access, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { GIT_CLONE_ARGS } from '../../../../shared/git-safety.js';
 
 import { githubTokensDb } from '@/modules/database/index.js';
 import { createProject } from '@/modules/projects/services/project-management.service.js';
@@ -109,7 +110,8 @@ const defaultDependencies: CloneProjectDependencies = {
   },
   createAskpass: createGitAskpassLease,
   spawnGitClone: (cloneUrl: string, clonePath: string, env: NodeJS.ProcessEnv): GitCloneProcess =>
-    spawn('git', ['clone', '--progress', '--', cloneUrl, clonePath], {
+    // B-1691 (qa F10): no hooks, fsmonitor or file:// transport during the clone.
+    spawn('git', [...GIT_CLONE_ARGS, 'clone', '--progress', '--', cloneUrl, clonePath], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
     }) as unknown as GitCloneProcess,

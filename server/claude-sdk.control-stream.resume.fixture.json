@@ -1,0 +1,442 @@
+{
+ "cli": "2.1.306",
+ "captured": "2026-10-27",
+ "board": "T-2070",
+ "note": "Redacted raw stream of `claude -p --output-format stream-json --verbose` (model haiku, cwd /var/tmp): a background Agent finishes, then SendMessage resumes it. ids/paths/texts replaced; order and shapes kept.",
+ "scenarios": {
+  "resumeAgent": [
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.306",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_redacted_1",
+       "name": "Agent",
+       "input": {
+        "description": "<redacted>",
+        "prompt": "<redacted>",
+        "subagent_type": "general-purpose",
+        "run_in_background": true
+       }
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "tasks": [
+     {
+      "task_id": "task_redacted_1",
+      "task_type": "local_agent"
+     }
+    ],
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "task_redacted_1",
+    "tool_use_id": "toolu_redacted_1",
+    "is_backgrounded": true,
+    "task_type": "local_agent",
+    "subagent_type": "general-purpose",
+    "session_id": "<session>"
+   },
+   {
+    "type": "user",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_redacted_1",
+       "content": "<redacted>"
+      }
+     ]
+    },
+    "tool_use_result": {
+     "status": "async_launched",
+     "isAsync": true,
+     "agentId": "task_redacted_1"
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_redacted_2",
+       "name": "ToolSearch",
+       "input": {
+        "query": "select:SendMessage",
+        "max_results": 1
+       }
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "user",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_redacted_2",
+       "content": "<redacted>"
+      }
+     ]
+    },
+    "tool_use_result": {
+     "matches": [
+      "SendMessage"
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": "toolu_redacted_1",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_redacted_3",
+       "name": "Bash",
+       "input": {
+        "command": "<redacted>",
+        "description": "<redacted>"
+       }
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_progress",
+    "task_id": "task_redacted_1",
+    "tool_use_id": "toolu_redacted_1",
+    "subagent_type": "general-purpose",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "bash_redacted_1",
+    "tool_use_id": "toolu_redacted_3",
+    "is_backgrounded": false,
+    "task_type": "local_bash",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "bash_redacted_1",
+    "tool_use_id": "toolu_redacted_3",
+    "status": "completed",
+    "summary": "<redacted>",
+    "output_file": "<redacted>",
+    "session_id": "<session>"
+   },
+   {
+    "type": "user",
+    "parent_tool_use_id": "toolu_redacted_1",
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_redacted_3",
+       "content": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": "toolu_redacted_1",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_updated",
+    "task_id": "task_redacted_1",
+    "patch": {
+     "status": "completed",
+     "end_time": 0
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "task_redacted_1",
+    "tool_use_id": "toolu_redacted_1",
+    "status": "completed",
+    "summary": "<redacted>",
+    "output_file": "<redacted>",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "tasks": [],
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.306",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_redacted_4",
+       "name": "SendMessage",
+       "input": {
+        "to": "task_redacted_1",
+        "message": "<redacted>",
+        "summary": "<redacted>",
+        "type": "message",
+        "recipient": "task_redacted_1",
+        "recipient_kind": "agent",
+        "content": "reply x again"
+       }
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "tasks": [
+     {
+      "task_id": "task_redacted_1",
+      "task_type": "local_agent"
+     }
+    ],
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "task_redacted_1",
+    "tool_use_id": "toolu_redacted_4",
+    "is_backgrounded": true,
+    "task_type": "local_agent",
+    "subagent_type": "general-purpose",
+    "session_id": "<session>"
+   },
+   {
+    "type": "user",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_redacted_4",
+       "content": "<redacted>"
+      }
+     ]
+    },
+    "tool_use_result": {
+     "resumedAgentId": "task_redacted_1",
+     "revivedAgentId": "task_redacted_1",
+     "success": true
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": "toolu_redacted_1",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_updated",
+    "task_id": "task_redacted_1",
+    "patch": {
+     "status": "completed",
+     "end_time": 0
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "task_redacted_1",
+    "tool_use_id": "toolu_redacted_4",
+    "status": "completed",
+    "summary": "<redacted>",
+    "output_file": "<redacted>",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "tasks": [],
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 3,
+    "queued_turn_count": 0,
+    "result": "<redacted>",
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "origin": {
+     "kind": "task-notification",
+     "producer": "session-task",
+     "runId": "<redacted>"
+    },
+    "num_turns": 2,
+    "queued_turn_count": 0,
+    "result": "<redacted>",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.306",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "origin": {
+     "kind": "task-notification",
+     "producer": "session-task",
+     "runId": "<redacted>"
+    },
+    "num_turns": 1,
+    "queued_turn_count": 0,
+    "result": "<redacted>",
+    "session_id": "<session>"
+   }
+  ]
+ }
+}

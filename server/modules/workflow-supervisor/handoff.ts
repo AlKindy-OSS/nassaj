@@ -45,9 +45,16 @@ import crypto from 'node:crypto';
 
 // eslint-disable-next-line boundaries/dependencies -- ADR-201 A1.5: the pinned-open primitive (pure fs), without loading the providers barrel in the supervisor process.
 import { canonicalFileSync, openPinnedSync, PinnedOpenError } from '../providers/shared/pinned-fd.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 م-2: the pure wrapper-tag escape leaf (node:crypto only), shared by every stdin writer.
+import { escapePeerWrapperTags } from '../peer-relay/peer-wire.js';
 
 import { writeFileAtomic } from './result-capture-writer.js';
 import { handoffsDir } from './config.js';
+import {
+  capTranscriptPermissionMode,
+  lastTranscriptPermissionMode,
+  type ClaudePermissionMode,
+} from './permission-mode.js';
 import type { Classification } from './result-capture.js';
 
 /** Small chunks so a torn-write test can tear at a byte-precise offset. */
@@ -82,10 +89,28 @@ export function ledgerPath(stateRoot: NodeJS.ProcessEnv | string, conversationId
   return path.join(dir, `${conversationId}.done`);
 }
 
+/**
+ * ADR-219 م-8: the ledger is shared by two delivery kinds. `handoff` entries
+ * (Tier-B background results) predate the field, so an entry with no `kind`
+ * is a handoff keyed by its taskId; `peer` entries are keyed by peerMessageId.
+ */
+export type DeliveryKind = 'handoff' | 'peer';
+
+type LedgerEntry = {
+  kind?: DeliveryKind; deliveryId?: string; taskId?: string; handoffId?: string; ref?: string; outcome?: string;
+};
+
 type Ledger = {
-  entries?: Array<{ taskId?: string; handoffId?: string; outcome?: string }>;
+  entries?: LedgerEntry[];
   _unparsable?: true;
 };
+
+/** Stable key of an entry: (kind, deliveryId), legacy entries read as (handoff, taskId). */
+function entryKey(entry: LedgerEntry): string | null {
+  const kind = entry.kind ?? 'handoff';
+  const id = entry.deliveryId ?? (kind === 'handoff' ? entry.taskId : undefined);
+  return typeof id === 'string' && id ? `${kind}\0${id}` : null;
+}
 
 /** Read the per-conversation batch ledger. Missing → null; corrupt → {_unparsable}. */
 export function readLedger(
@@ -108,11 +133,17 @@ export function readLedger(
 }
 
 export function ledgerHasTask(ledger: Ledger | null, taskId: string): boolean {
+  return ledgerHasDelivery(ledger, 'handoff', taskId);
+}
+
+/** True when the ledger already committed the (kind, deliveryId) delivery. */
+export function ledgerHasDelivery(ledger: Ledger | null, kind: DeliveryKind, deliveryId: string): boolean {
+  const key = `${kind}\0${deliveryId}`;
   return !!(
     ledger &&
     !ledger._unparsable &&
     Array.isArray(ledger.entries) &&
-    ledger.entries.some((e) => e && e.taskId === taskId)
+    ledger.entries.some((e) => e && entryKey(e) === key)
   );
 }
 
@@ -142,6 +173,45 @@ function readTranscriptSync(jsonlPath: string): string | null {
     return fs.readFileSync(pinned.fd, 'utf8');
   } finally {
     fs.closeSync(pinned.fd);
+  }
+}
+
+/** T-2071 (qa M4): only this much of a transcript's tail is read for its mode. */
+export const PERMISSION_MODE_TAIL_BYTES = 256 * 1024;
+
+/** The last `maxBytes` of a transcript from a pinned descriptor; null when absent. */
+function readTranscriptTailSync(jsonlPath: string, maxBytes: number): string | null {
+  let pinned;
+  try {
+    pinned = pinnedTranscriptSync(jsonlPath);
+  } catch (error) {
+    if (error instanceof PinnedOpenError && error.reason === 'missing') return null;
+    throw error;
+  }
+  try {
+    const size = fs.fstatSync(pinned.fd).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(pinned.fd, buffer, 0, length, size - length);
+    // The first line may be cut mid-row; the parser skips what does not parse.
+    return buffer.toString('utf8');
+  } finally {
+    fs.closeSync(pinned.fd);
+  }
+}
+
+/**
+ * T-2071: the conversation's permission mode for a resumed turn, read from a
+ * bounded tail of the transcript through the same pinned reader as delivery.
+ * GUARD (qa M4): capped by capTranscriptPermissionMode — a transcript row alone
+ * can never raise the turn above `default`. Absent or unreadable → the fallback.
+ */
+export function readSessionPermissionMode(jsonlPath: string): ClaudePermissionMode {
+  try {
+    return capTranscriptPermissionMode(
+      lastTranscriptPermissionMode(readTranscriptTailSync(jsonlPath, PERMISSION_MODE_TAIL_BYTES)));
+  } catch {
+    return lastTranscriptPermissionMode(null);
   }
 }
 
@@ -294,6 +364,8 @@ export function sanitizeUntrusted(raw: string): string {
     })
     .join('');
   s = s.replace(/<\/background_task_result/gi, '<\\/background_task_result');
+  // ADR-219 م-2: a result can never carry a peer wrapper the CLI or model would trust.
+  s = escapePeerWrapperTags(s);
   if (Buffer.byteLength(s, 'utf8') > RESULT_EXCERPT_MAX) {
     // Byte-precise, code-point-safe clamp; the marker is counted within the budget
     // so the whole excerpt stays ≤ RESULT_EXCERPT_MAX bytes (B-157).
@@ -414,6 +486,20 @@ export function writeLedgerEntries(
   conversationId: string,
   newEntries: Array<{ taskId: string; handoffId: string; outcome: string }>,
 ): void {
+  writeDeliveryLedgerEntries(env, conversationId, newEntries.map((e) => ({
+    kind: 'handoff', deliveryId: e.taskId, ...e,
+  })));
+}
+
+/**
+ * ADR-219 م-8: merge entries of either kind in ONE atomic tmp→rename, keyed by
+ * (kind, deliveryId) so a handoff and a peer delivery can never collide.
+ */
+export function writeDeliveryLedgerEntries(
+  env: NodeJS.ProcessEnv,
+  conversationId: string,
+  newEntries: Array<LedgerEntry & { kind: DeliveryKind; deliveryId: string; outcome: string }>,
+): void {
   const dir = handoffsDir(env);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.chmodSync(dir, 0o700);
@@ -422,7 +508,8 @@ export function writeLedgerEntries(
     prev && !prev._unparsable && Array.isArray(prev.entries) ? prev.entries.slice() : [];
   const now = new Date().toISOString();
   for (const entry of newEntries) {
-    if (!entries.some((e) => e.taskId === entry.taskId)) {
+    const key = entryKey(entry);
+    if (key && !entries.some((e) => entryKey(e) === key)) {
       entries.push({ ...entry, committedAt: now } as never);
     }
   }
@@ -498,6 +585,64 @@ export function scanJsonlForInjectedRef(
     }
   }
   return res;
+}
+
+/** ADR-219 م-7: the transcript's current byte size (the proof scan's start), null when absent. */
+export function transcriptByteSize(jsonlPath: string): number | null {
+  let pinned;
+  try {
+    pinned = pinnedTranscriptSync(jsonlPath);
+  } catch {
+    return null;
+  }
+  try {
+    return Number(pinned.stat.size);
+  } finally {
+    fs.closeSync(pinned.fd);
+  }
+}
+
+/** Upper bound of bytes a proof scan reads after its offset (a turn is USD-capped). */
+const PROOF_SCAN_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * ADR-219 م-7/م-8: the proof scan over ONLY what was appended since `fromOffset`
+ * (the size at claim), so a large history is never re-read. A line cut by the
+ * offset is skipped; a torn last line never parses. Missing file → false.
+ */
+export function scanJsonlForProofFrom(jsonlPath: string, fromOffset: number, isProof: (row: unknown) => boolean): boolean {
+  let pinned;
+  try {
+    pinned = pinnedTranscriptSync(jsonlPath);
+  } catch {
+    return false;
+  }
+  try {
+    const size = Number(pinned.stat.size);
+    const start = Math.max(0, Math.min(fromOffset, size));
+    const length = Math.min(size - start, PROOF_SCAN_MAX_BYTES);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(pinned.fd, buffer, 0, length, start);
+    const lines = buffer.toString('utf8').split('\n');
+    if (start > 0 && !atLineStart(pinned.fd, start)) lines.shift();
+    return lines.some((line) => line !== '' && parsesAsProof(line, isProof));
+  } finally {
+    fs.closeSync(pinned.fd);
+  }
+}
+
+function atLineStart(fd: number, offset: number): boolean {
+  const previous = Buffer.alloc(1);
+  fs.readSync(fd, previous, 0, 1, offset - 1);
+  return previous[0] === 0x0a;
+}
+
+function parsesAsProof(line: string, isProof: (row: unknown) => boolean): boolean {
+  try {
+    return isProof(JSON.parse(line));
+  } catch {
+    return false;
+  }
 }
 
 export type FinalizeInput = {

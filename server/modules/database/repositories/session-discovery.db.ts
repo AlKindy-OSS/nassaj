@@ -18,6 +18,7 @@ import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/ind
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 // eslint-disable-next-line boundaries/no-unknown -- shared guard (B-1373), same seam as project-management
 import { isForbiddenProjectRoot } from '@/shared/secret-path-guard.js';
+import { pathHasGitDirSegment } from '../../../../shared/git-safety.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
 /**
@@ -160,7 +161,10 @@ function admissibleProjectPath(input: DiscoveredSession): string | null {
     }
     return null;
   }
-  if (isForbiddenProjectRoot(normalized) && !projectsDb.getProjectPath(normalized)) {
+  // B-1691 (qa F8): a session cwd inside `.git` (not an overlay, which maps to
+  // its logical project above) never registers a project.
+  const refusedRoot = isForbiddenProjectRoot(normalized) || pathHasGitDirSegment(normalized);
+  if (refusedRoot && !projectsDb.getProjectPath(normalized)) {
     if (!warnedForbiddenProjectRoots.has(normalized)) {
       warnedForbiddenProjectRoots.add(normalized);
       console.warn('Skipped session discovered under a protected root', { provider: input.provider });

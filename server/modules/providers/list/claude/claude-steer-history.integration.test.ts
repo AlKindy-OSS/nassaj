@@ -9,8 +9,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 import { closeConnection, getConnection, initializeDatabase, messageCoordinationDb, participantsDb, sessionsDb } from '@/modules/database/index.js';
 import { buildSteerWrapper } from '@/modules/session-steer/index.js';
 import type { NormalizedMessage } from '@/shared/types.js';
@@ -96,4 +97,47 @@ test('stamp unit: uuid+hash must both match; tampered candidate dropped; look-al
   assert.deepEqual([out[1].injected, out[1].userId, out[1].content, out[1].steerClientMsgId, out[1].deliveryStatus],
     [true, 2, 'please also check 1', 'steer-1', 'delivered']);
   assert.deepEqual([out[0].injected, out[0].userId, out[0].content], [undefined, undefined, wrapped]);
+});
+
+test('B-1697: a reloaded steer with images carries store refs, never the path note or an absolute path', async () => {
+  const dir = await mkdtemp('/var/tmp/steer-hist-img-');
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(dir, 'auth.db');
+  await initializeDatabase();
+  resetHistorySnapshotCacheForTests();
+  try {
+    const db = getConnection();
+    db.prepare("INSERT INTO users (id, username, password_hash, role) VALUES (1, 'alice', 'h', 'user'), (2, 'bob', 'h', 'user'), (3, 'carol', 'h', 'user')").run();
+    const bucket = 'cd'.repeat(16);
+    const absolute = `/srv/data/chat-images/${bucket}/image_0.png`;
+    const wrapped = buildSteerWrapper('bob', `see this\n\n[Images provided at the following paths:]\n1. ${absolute}`)!;
+    assert.equal(messageCoordinationDb.insertSteer({ clientMsgId: 'img-1', userId: 2, provider: 'claude', sessionId: SID,
+      turnId: TURN, text: 'see this', uuid: U1, payloadSha256: claudeTextPayloadHash(wrapped)!,
+      images: [{ bucket, name: 'image_0.png' }, { bucket: '../etc', name: 'passwd' }] }), true);
+    const lines = [
+      { type: 'user', uuid: 'a1111111-2222-4333-8444-555555555555', sessionId: SID, message: { role: 'user', content: 'start' } },
+      { type: 'user', uuid: U1, sessionId: SID, message: { role: 'user', content: wrapped } },
+    ];
+    const file = path.join(claudeProjectsSandbox('steer-hist-img-'), `${SID}.jsonl`);
+    await writeFile(file, `${lines.map(l => JSON.stringify(l)).join('\n')}\n`);
+    sessionsDb.createSession(SID, 'claude', dir, undefined, undefined, undefined, file);
+    participantsDb.recordSpawn(SID, 1);
+
+    const history = await sessionsService.fetchHistory(SID, 1, {});
+    const steerRow = history.messages.find(m => m.injected);
+    assert.ok(steerRow, 'the injection is stamped');
+    assert.equal(steerRow.content, 'see this');
+    assert.deepEqual(steerRow.images, [{ bucket, name: 'image_0.png' }], 'only well-formed refs survive');
+    assert.doesNotMatch(JSON.stringify(steerRow), /\/srv\/data|Images provided/u, 'no absolute path or note to the client');
+    // Refs reach only readers of the session: under project-membership enforcement
+    // a user who is neither participant nor author of an unregistered session is refused.
+    process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
+    resetHistorySnapshotCacheForTests();
+    await assert.rejects(sessionsService.fetchHistory(SID, 3, {}), /SESSION_NOT_FOUND|not found/iu);
+  } finally {
+    delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
+    resetHistorySnapshotCacheForTests();
+    closeConnection();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

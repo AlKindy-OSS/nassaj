@@ -32,8 +32,15 @@ import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 
 // eslint-disable-next-line boundaries/dependencies -- systemd admission must stay a synchronous leaf and avoid the providers barrel's service graph.
 import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
+// eslint-disable-next-line boundaries/dependencies -- ADR-219 ح-1: the relay spawn policy leaf (member count only), applied at every Claude spawn.
+import { relayModeNow } from '../peer-relay/peer-spawn-policy.js';
 
 import { scopeUnitName } from './config.js';
+import {
+  FALLBACK_PERMISSION_MODE,
+  isClaudePermissionMode,
+  type ClaudePermissionMode,
+} from './permission-mode.js';
 import type { UnitState } from './result-capture.js';
 
 const execFileAsync = promisify(execFile);
@@ -433,6 +440,8 @@ export async function launchScope(params: {
   /** Task artifact dir (result.json[.partial] + DONE land here — §أ-2/§أ-4). */
   resultDir: string;
   model?: string | null;
+  /** T-2071: the requesting session's permission mode; always passed to the unit's claude. */
+  permissionMode?: ClaudePermissionMode;
   memoryMax?: string;
   timeoutSeconds?: number;
   /** Absolute node binary for the in-unit wrapper (defaults to this process's). */
@@ -510,10 +519,15 @@ export async function launchScope(params: {
     'json',
     '--claude-timeout-sec',
     String(timeoutS),
+    // T-2071: explicit, since the CLI's own default differs between versions.
+    '--permission-mode',
+    isClaudePermissionMode(params.permissionMode) ? params.permissionMode : FALLBACK_PERMISSION_MODE,
   );
   if (params.model) {
     args.push('--model', params.model);
   }
+  // ADR-219 ح-1: decided here (the unit has no database); the runner adds the CLI policy.
+  if (relayModeNow() === 'relay') args.push('--relay-refuse');
   // Prompt LAST and as a single argv element (parameterized — no shell, no
   // injection possible regardless of prompt content).
   args.push('--prompt', params.scriptOrPrompt);

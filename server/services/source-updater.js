@@ -38,6 +38,10 @@ import { normalizeGitHubRepositoryIdentity, resolveReleaseSource } from './relea
 
 const SAFE_REMOTE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_BRANCH = /^(?![-.])(?!.*(?:\.\.|\/\.|\.\/|\/\/))[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+/** The update remote/branch shapes every governed git path accepts (shared with ADR-216 attach). */
+export const SAFE_UPDATE_REMOTE = SAFE_REMOTE;
+export const SAFE_UPDATE_BRANCH = SAFE_BRANCH;
+const COMMIT_OID = /^[0-9a-f]{40}$/;
 const OUTPUT_LIMIT = 128 * 1024;
 // Linux tmpfs superblock magic. A candidate root or build TMPDIR on tmpfs turns
 // `npm ci` + build into resident RAM that the kernel never reclaims until an
@@ -774,16 +778,64 @@ function createRunState({ transactionId = null, refPrefix = null, leaseKind = 's
  * The configured release remote of the live checkout (HEAD-independent): one
  * credential-free GitHub URL equal to the configured release source.
  */
-async function verifyReleaseRemote(ctx) {
-    const { requireGit, remote } = ctx;
-    const remoteUrls = (await requireGit(['remote', 'get-url', '--all', remote], 'remote_unavailable', 'verify the configured remote')).split('\n').filter(Boolean);
-    if (remoteUrls.length !== 1) throw new SourceUpdateError('ambiguous_remote', 'The update remote must have exactly one URL.');
-    const runtimeRemote = normalizeGitHubRemote(remoteUrls[0]);
-    if (!runtimeRemote) throw new SourceUpdateError('unsafe_remote', 'The update remote must be a credential-free GitHub HTTPS or SSH URL.');
-    if (normalizeGitHubRemote(ctx.configuredRemoteUrl) !== runtimeRemote) {
-        throw new SourceUpdateError('remote_mismatch', 'The runtime Git remote does not match the configured release source.');
+const RELEASE_REMOTE_MESSAGES = Object.freeze({
+    remote_unavailable: 'The governed update could not verify the configured remote.',
+    ambiguous_remote: 'The update remote must have exactly one URL.',
+    unsafe_remote: 'The update remote must be a credential-free GitHub HTTPS or SSH URL.',
+    remote_mismatch: 'The runtime Git remote does not match the configured release source.',
+});
+
+/**
+ * The release-remote trust rule (ADR-141; shared with the ADR-216 attach path so
+ * the two cannot drift): exactly one credential-free GitHub URL, equal to the
+ * configured release source. `git` is any governed runner returning `{ code, stdout }`.
+ * @returns {Promise<{ok: true, identity: string} | {ok: false, code: string}>}
+ */
+export async function checkReleaseRemote(git, { remote, configuredRemoteUrl }) {
+    const result = await git(['remote', 'get-url', '--all', remote]);
+    if (result.code !== 0) return { ok: false, code: 'remote_unavailable' };
+    const remoteUrls = String(result.stdout).trim().split('\n').filter(Boolean);
+    if (remoteUrls.length !== 1) return { ok: false, code: 'ambiguous_remote' };
+    const identity = normalizeGitHubRemote(remoteUrls[0]);
+    if (!identity) return { ok: false, code: 'unsafe_remote' };
+    if (normalizeGitHubRemote(configuredRemoteUrl) !== identity) return { ok: false, code: 'remote_mismatch' };
+    return { ok: true, identity };
+}
+
+/**
+ * The tag-on-branch predicate of a release (ADR-216 §3.1 steps 4–6), shared by
+ * the updater (`resolveReleaseIdentity`) and the attach proof. Ancestry exit 1
+ * is "not on the branch"; any other non-zero exit is never read as success.
+ * The updater keeps its historical rule (`requireAnnotated: false`); discovery
+ * already offers annotated tags only, and the attach proof requires them.
+ * @param {(args: string[]) => Promise<{code: number, stdout: string}>} git
+ * @param {{tagRef: string, branchRef: string, expectedCommit?: string|null, requireAnnotated?: boolean,
+ *   resolvedCommit?: string|null}} refs
+ * @returns {Promise<{ok: true, commit: string} | {ok: false, code: string}>}
+ */
+export async function proveTagOnBranch(git, {
+    tagRef, branchRef, expectedCommit = null, requireAnnotated = true, resolvedCommit = null,
+}) {
+    if (requireAnnotated) {
+        const type = await git(['cat-file', '-t', tagRef]);
+        if (type.code !== 0 || String(type.stdout).trim() !== 'tag') return { ok: false, code: 'tag_not_annotated' };
     }
-    return runtimeRemote;
+    // The updater has already resolved the tag (and refused a loaded target) by
+    // the time it asks; it passes that commit instead of resolving twice.
+    const resolved = resolvedCommit ? null : await git(['rev-parse', '--verify', '--quiet', `${tagRef}^{commit}`]);
+    const commit = resolvedCommit || (resolved.code === 0 ? String(resolved.stdout).trim() : '');
+    if (!COMMIT_OID.test(commit)) return { ok: false, code: 'tag_unresolved' };
+    if (expectedCommit && commit !== expectedCommit) return { ok: false, code: 'head_not_release_tag' };
+    const ancestry = await git(['merge-base', '--is-ancestor', commit, branchRef]);
+    if (ancestry.code === 1) return { ok: false, code: 'tag_not_on_release_branch' };
+    if (ancestry.code !== 0) return { ok: false, code: 'ancestry_unproven' };
+    return { ok: true, commit };
+}
+
+async function verifyReleaseRemote(ctx) {
+    const outcome = await checkReleaseRemote(ctx.git, { remote: ctx.remote, configuredRemoteUrl: ctx.configuredRemoteUrl });
+    if (!outcome.ok) throw new SourceUpdateError(outcome.code, RELEASE_REMOTE_MESSAGES[outcome.code]);
+    return outcome.identity;
 }
 
 /** CLICK-TIME: branch, HEAD and remote of the live source tree, before anything is fetched. */
@@ -839,8 +891,10 @@ async function resolveReleaseIdentity(ctx, { runtimeRemote }) {
     if (loadedCommit && (await git(['merge-base', '--is-ancestor', releaseCommit, loadedCommit])).code === 0) {
         throw new SourceUpdateError(TARGET_NOT_NEWER, SUPERSEDING_TARGET_CODES[TARGET_NOT_NEWER], 409);
     }
-    const onReleaseBranch = await git(['merge-base', '--is-ancestor', releaseCommit, run.branchRef]);
-    if (onReleaseBranch.code !== 0) throw new SourceUpdateError('tag_mismatch', 'The release tag is not part of the configured release branch.');
+    const onReleaseBranch = await proveTagOnBranch(git, {
+        tagRef: run.tagRef, branchRef: run.branchRef, resolvedCommit: releaseCommit, requireAnnotated: false,
+    });
+    if (!onReleaseBranch.ok) throw new SourceUpdateError('tag_mismatch', 'The release tag is not part of the configured release branch.');
     const packageText = await requireGit(['show', `${releaseCommit}:package.json`], 'release_manifest_unavailable', 'read the release manifest');
     let releaseManifest;
     try { releaseManifest = JSON.parse(packageText); } catch { throw new SourceUpdateError('release_manifest_invalid', 'The release package manifest is invalid.'); }

@@ -12,7 +12,17 @@
  * Job always wins (§3.4): `abortForJob()` aborts a running prestage, waits for
  * its discard and for the mutex, and only then lets the job take the mutex.
  *
- * Every refusal is a reason code in `status()` (S5 shows it to the owner).
+ * Every refusal is a reason code in `status()` (S5 shows it to the owner);
+ * each change of state or reason code is also logged (T-2025), so a node that
+ * did not prestage can be diagnosed from its logs.
+ *
+ * T-2025: `noteRelease()` lets another discovery (the banner's
+ * /release/latest) wake one cycle per newly seen release instead of waiting
+ * for the next poll; the cycle keeps every gate and the settle window. The
+ * prestager's own probe (every 5.5–6 min, just past the 5 min discovery TTL)
+ * feeds the same path from the node's shared discovery cache, so a node
+ * prestages soon after a release even when nobody opens the update screen:
+ * discovery within ~6 min, then the 5 min settle window, then the build.
  * The mechanism (slot.json, flock, verified kill, discard) is the slot module's.
  */
 import crypto from 'node:crypto';
@@ -22,7 +32,8 @@ import { compareNassajReleaseVersions, releaseTagForVersion } from '../../shared
 import { tryAcquireBuildMutex } from './source-update-build-mutex.js';
 import { journalRefusal } from './source-update-candidate-retention.js';
 import {
-    PRESTAGE_BUILD_MUTEX_KIND, adoptedJobId, isStalePrivateRef, newPrestageTransactionId, prestageRefPrefix, quarantineRemainingMs,
+    PRESTAGE_BUILD_MUTEX_KIND, adoptedJobId, isStalePrivateRef, isValidSlot, newPrestageTransactionId, prestagePaths,
+    prestageRefPrefix, quarantineRemainingMs,
 } from './update-prestage-slot.js';
 
 const MIB = 1024 * 1024;
@@ -41,6 +52,8 @@ export const PRESTAGE_POLICIES = Object.freeze(['quarantine', 'owner-node', 'ver
 
 export const PRESTAGE_DEFAULTS = Object.freeze({
     pollMs: 30 * MINUTE, minPollMs: 5 * MINUTE, firstPollMs: 5 * MINUTE, jitter: 0.2,
+    // T-2025: just past the 5 min discovery TTL, jittered upward only, so each probe reads a fresh listing.
+    probeMs: 5.5 * MINUTE, probeJitter: 0.1, maxWokenReleases: 32,
     settleMs: 5 * MINUTE, buildTimeoutMs: 20 * MINUTE, watchdogMs: 5_000,
     minMemBytes: 3072 * MIB, minFreeBytes: Math.round(2 * GIB * 1.2 + 4 * GIB),
     watchdogMinFreeBytes: 2 * GIB, watchdogMinMemBytes: 1024 * MIB,
@@ -152,6 +165,43 @@ export async function verifySignedReleaseStub() {
 }
 
 /**
+ * The ADR-174 signed-release port the attach proof calls (ADR-216 §3.1 step 8).
+ * Same hook as the prestager's `verified` policy; never verified while the
+ * signing work is not built.
+ */
+export const verifySignedReleasePort = verifySignedReleaseStub;
+
+/**
+ * ADR-216 §3.1 step 8: whether this node's release policy is `verified`, from
+ * the same configuration the prestager reads (env over the owner's setting).
+ * @param {object} [env]
+ * @param {{prestageEnabled?: boolean, prestageQuarantineHours?: number} | null} [stored]
+ */
+export function releasePolicyRequiresVerification(env = process.env, stored = null) {
+    const silent = { warn() {}, error() {}, info() {} };
+    return resolvePrestageConfig(env, { logger: silent, stored }).policy === 'verified';
+}
+
+/**
+ * ADR-216 §3.1 L7: the prestage slot state, read without the slot lock and
+ * without writing anything. `null` when there is no slot; `'corrupt'` when
+ * slot.json is unreadable or not a record this module wrote (callers fail
+ * closed on it); otherwise the slot's `state` (`building`, `ready`,
+ * `discarding`, `adopted:<jobId>`).
+ * @param {string} controlRoot `<git common dir>/nassaj-source-update`
+ * @returns {string|null}
+ */
+export function readPrestageSlotState(controlRoot) {
+    let raw;
+    try { raw = fs.readFileSync(prestagePaths(controlRoot).slot, 'utf8'); } catch (error) {
+        return error?.code === 'ENOENT' ? null : 'corrupt';
+    }
+    let slot;
+    try { slot = JSON.parse(raw); } catch { return 'corrupt'; }
+    return isValidSlot(slot) ? slot.state : 'corrupt';
+}
+
+/**
  * @param {object} deps
  * @param {string} deps.appRoot
  * @param {ReturnType<import('./update-prestage-slot.js').createPrestageSlot>} deps.slot
@@ -184,12 +234,18 @@ export function createUpdatePrestager(deps) {
     const state = {
         status: { enabled: false, policy: null, state: 'idle', version: null, readyAt: null, reasonCode: 'not_started',
             quarantineUntil: null, updatedAt: null },
-        pending: null, build: null, cycle: null, timer: null, stopped: true, failures: new Map(),
-        lastSettings: undefined,
+        pending: null, build: null, cycle: null, timer: null, probeTimer: null, probeEnded: false, waking: new Set(), stopped: true, failures: new Map(),
+        lastSettings: undefined, woken: new Set(),
     };
 
+    /** Update the status; a change of state or reason code is logged (T-2025), a repeat is not. */
     function setStatus(fields) {
-        state.status = { ...state.status, ...fields, updatedAt: new Date(now()).toISOString() };
+        const previous = state.status;
+        state.status = { ...previous, ...fields, updatedAt: new Date(now()).toISOString() };
+        if (previous.state !== state.status.state || previous.reasonCode !== state.status.reasonCode) {
+            log('status_changed', { state: state.status.state, reasonCode: state.status.reasonCode,
+                version: state.status.version, previousState: previous.state, previousReasonCode: previous.reasonCode });
+        }
         return state.status;
     }
 
@@ -340,10 +396,7 @@ export function createUpdatePrestager(deps) {
     /** The latest release when it is strictly newer than the loaded runtime; null otherwise. */
     async function latestTarget() {
         const { release } = await discoverRelease();
-        const runtime = readRuntime();
-        if (release.commit && release.commit === runtime.runtimeCommit) return null;
-        if (runtime.runtimeVersion && compareNassajReleaseVersions(release.version, runtime.runtimeVersion) <= 0) return null;
-        return { version: release.version, tag: release.tagName || releaseTagForVersion(release.version), releaseCommit: release.commit };
+        return newerTarget(release, readRuntime());
     }
 
     function sameTarget(current, target) {
@@ -353,7 +406,7 @@ export function createUpdatePrestager(deps) {
 
     /** §3.2: a newly seen target waits `settleMs` so a burst of releases costs one build. */
     function settled(target, config) {
-        const key = `${target.tag}@${target.releaseCommit}`;
+        const key = targetKey(target);
         if (state.pending?.key !== key) {
             state.pending = { key, since: now() };
             schedule(config.settleMs);
@@ -514,9 +567,11 @@ export function createUpdatePrestager(deps) {
         if (safe(hasActiveJob, false)) return abortBuild('job_claimed');
         let target;
         try { target = await latestTarget(); } catch { return null; }
-        if (target && target.releaseCommit !== build.target.releaseCommit) {
+        if (target && targetKey(target) !== targetKey(build.target)) {
             await abortBuild('superseded');
-            state.pending = null; // the newer target settles afresh
+            // The newer target settles afresh from now, with its own timer (T-2025 qa 1b).
+            state.pending = { key: targetKey(target), since: now() };
+            schedule(config.settleMs);
             // S7 finding: the owner sees the newest release settling at once,
             // not the aborted version until the next poll.
             return setStatus({ state: 'settling', reasonCode: 'settling', version: target.version, readyAt: null,
@@ -594,6 +649,49 @@ export function createUpdatePrestager(deps) {
         };
     }
 
+    /**
+     * T-2025: a release seen by another discovery path wakes one cycle now,
+     * once per release (`tag@commit`), instead of waiting up to a poll
+     * interval. Nothing is woken when the release is not newer than the
+     * runtime, the prestager is stopped, off or without settings, or a job is
+     * active. The release's wake is used up only once the woken cycle has
+     * taken the release on (settling, or building it); a cycle that could not
+     * (mutex taken, discovery failed) leaves it for the next call. The woken
+     * cycle keeps every gate (policy and quarantine, journal, backoff,
+     * resources) and the settle window. Returns the wake promise, or null.
+     * @param {object} release
+     * @param {{config: object, unavailable: boolean}} [current] the configuration already read (probe)
+     */
+    function noteRelease(release, current = null) {
+        if (state.stopped || typeof release?.version !== 'string') return null;
+        const target = safe(() => newerTarget(release, readRuntime()), null);
+        if (!target) return null;
+        const key = targetKey(target);
+        if (state.woken.has(key) || state.waking.has(key)) return null;
+        if (tracking(key)) {
+            rememberWoken(key); // the prestager already took it on: its own timers carry it
+            return null;
+        }
+        const { config, unavailable } = current ?? currentConfig();
+        if (unavailable || offReason(config) || safe(hasActiveJob, true)) return null;
+        state.waking.add(key);
+        log('wake_on_discovery', { version: target.version });
+        return wake().finally(() => {
+            state.waking.delete(key);
+            if (tracking(key)) rememberWoken(key);
+        });
+    }
+
+    /** Whether the prestager is settling, gating or building exactly this release key. */
+    function tracking(key) {
+        return state.pending?.key === key || (Boolean(state.build) && targetKey(state.build.target) === key);
+    }
+
+    function rememberWoken(key) {
+        state.woken.add(key);
+        if (state.woken.size > settings.maxWokenReleases) state.woken.delete(state.woken.values().next().value);
+    }
+
     function schedule(delayMs) {
         if (state.stopped) return;
         const delay = Math.max(1_000, Math.round(delayMs));
@@ -609,10 +707,46 @@ export function createUpdatePrestager(deps) {
         schedule(Math.max(settings.minPollMs, pollMs * (1 + settings.jitter * (2 * random() - 1))));
     }
 
+    /**
+     * T-2025: the lightweight discovery probe. It reads the shared discovery
+     * (cached: at most one ls-remote per TTL) and hands the release to
+     * noteRelease(); it never builds, recovers or takes the mutex itself.
+     * Off (setting or mode) skips the discovery; the kill switch, fixed for
+     * the process, ends the probe; stop() clears it.
+     * @returns {Promise<unknown>} the wake noteRelease() started, or null
+     */
+    async function probe() {
+        if (state.stopped) return null;
+        const { config, unavailable } = currentConfig();
+        if (config.killed) { state.probeEnded = true; clearProbe(); return null; }
+        if (unavailable || offReason(config)) return null;
+        let release;
+        try { ({ release } = await discoverRelease()); } catch { return null; }
+        return state.stopped ? null : noteRelease(release, { config, unavailable });
+    }
+
+    function scheduleProbe() {
+        if (state.stopped || state.probeEnded) return;
+        const delay = Math.max(1_000, Math.round(settings.probeMs * (1 + settings.probeJitter * random())));
+        const handle = timers.setTimeout(() => {
+            state.probeTimer = null;
+            void probe().catch(() => null).finally(() => { if (!state.probeTimer) scheduleProbe(); });
+        }, delay);
+        handle?.unref?.();
+        state.probeTimer = handle;
+    }
+
+    function clearProbe() {
+        if (state.probeTimer) timers.clearTimeout(state.probeTimer);
+        state.probeTimer = null;
+    }
+
     function start() {
         if (!state.stopped) return;
         state.stopped = false;
+        state.probeEnded = false;
         schedule(settings.firstPollMs);
+        scheduleProbe();
     }
 
     /**
@@ -631,15 +765,28 @@ export function createUpdatePrestager(deps) {
         state.stopped = true;
         if (state.timer) timers.clearTimeout(state.timer.handle);
         state.timer = null;
+        clearProbe();
         if (drain) await abortBuild('drain');
     }
 
     return {
-        start, stop, runCycle, wake, abortForJob, discardForJob, adoptionPort,
+        start, stop, runCycle, wake, noteRelease, probe, abortForJob, discardForJob, adoptionPort,
         status: () => ({ ...state.status }),
         /** Test seam: the running build's transaction, or null. */
         buildInFlight: () => state.build?.transactionId ?? null,
     };
+}
+
+/** The identity of a prestage target: a re-tag on a new commit, or a new tag on the same commit, is a new key. */
+function targetKey(target) {
+    return `${target.tag}@${target.releaseCommit}`;
+}
+
+/** The release as a prestage target when it is strictly newer than the loaded runtime; null otherwise. */
+function newerTarget(release, runtime) {
+    if (release.commit && release.commit === runtime.runtimeCommit) return null;
+    if (runtime.runtimeVersion && compareNassajReleaseVersions(release.version, runtime.runtimeVersion) <= 0) return null;
+    return { version: release.version, tag: release.tagName || releaseTagForVersion(release.version), releaseCommit: release.commit };
 }
 
 /**

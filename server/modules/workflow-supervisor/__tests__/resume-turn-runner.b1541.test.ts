@@ -38,6 +38,7 @@ test('engine-pinned resume turn refuses a key in <projectPath>/.claude/settings.
       prompt: 'p',
       systemFraming: 's',
       model: null,
+      permissionMode: 'default',
       disallowedTools: [],
       env: {
         PATH: '/usr/bin',

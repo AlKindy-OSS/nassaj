@@ -4,6 +4,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { hardenGitArgs } from '../shared/git-safety.js';
 import { listOidControlTransactions, OID_TERMINAL_STATES, assertNoNonterminalOidTransaction } from './oid-control-journal.mjs';
 import { reconcileTerminalOidControl } from './oid-terminal-control-reconcile.mjs';
 import { advanceClientServingLineageRecord } from './lib/client-publication-lineage.mjs';
@@ -353,7 +354,7 @@ const DOMAINS = new Set(['client', 'server']);
 
 /** Run the fixed-argument Git queries shared by preview event readers. */
 export function git(root, args, options = {}) {
-    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', ...options });
+    const result = spawnSync('git', hardenGitArgs(args), { cwd: root, encoding: 'utf8', ...options });
     if (result.status !== 0) {
         throw new Error(`git ${args[0]} failed: ${String(result.stderr || result.stdout || '').trim()}`);
     }
@@ -462,7 +463,7 @@ export function listPreviewEvents(root) {
 function gitTransaction(root, commands) {
     const result = spawnSync('flock', [
         '-x', previewEventMutationLock(root),
-        'git', 'update-ref', '--stdin',
+        'git', ...hardenGitArgs(['update-ref', '--stdin']),
     ], {
         cwd: root, encoding: 'utf8', input: `start\n${commands.join('\n')}\nprepare\ncommit\n`,
     });
@@ -480,7 +481,7 @@ export function enqueuePreviewEvent(root, input) {
     const domains = normalizeDomains(input.domains);
     const { group, refs } = previewEventRefs(sequence, domains);
     const existing = refs.map((ref) => {
-        const result = spawnSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd: root, encoding: 'utf8' });
+        const result = spawnSync('git', hardenGitArgs(['rev-parse', '--verify', '--quiet', ref]), { cwd: root, encoding: 'utf8' });
         if (result.status === 1) return { ref, oid: null };
         if (result.status !== 0) throw new Error(`Cannot inspect preview event ref ${ref}.`);
         return { ref, oid: result.stdout.trim() };

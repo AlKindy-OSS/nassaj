@@ -37,6 +37,7 @@ import { UpdateConsentPanel } from "./UpdateConsentPanel";
 import { DeferralWaitingPanel } from "./DeferralWaitingPanel";
 import { ScheduledWaitPanel } from "./ScheduledWaitPanel";
 import { CloseTerminalsAction } from "./CloseTerminalsAction";
+import { SourceAttachAction } from "./SourceAttachAction";
 import { AbandonUpdateAction } from "./AbandonUpdateAction";
 import { PrestageNoticeLine } from "./PrestageNoticeLine";
 import type { PrestageStatus } from "../prestageStatus";
@@ -130,6 +131,9 @@ interface UpdateCapability {
     reason?: string;
     /** Present only alongside reason === 'insufficient_disk' (T-1553, م1). */
     blockedStorage?: BlockedStorageFigures | null;
+    /** /health `sourceAttachOffered` / `restartPending` (ADR-216 §3.4). */
+    sourceAttachOffered?: boolean;
+    restartPending?: boolean;
 }
 
 /** Render a blocked-reason code, interpolating disk figures when available. */
@@ -688,6 +692,8 @@ export function VersionUpgradeModal({
                     loading: false,
                     ready,
                     reason,
+                    sourceAttachOffered: systemUpdate.sourceAttachOffered === true,
+                    restartPending: systemUpdate.restartPending === true,
                 });
                 // /health is unauthenticated and never carries byte counts; fetch
                 // them at owner-only authorization only when they would actually
@@ -1048,7 +1054,9 @@ export function VersionUpgradeModal({
                             <span dir="ltr" className="font-mono text-xs text-muted-foreground tabular-nums">{sourceVersion}</span>
                         </div>
                     )}
-                    <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/20"><span className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('versionUpdate.latestVersion')}</span><span dir="ltr" className="font-mono text-sm text-blue-900 tabular-nums dark:text-blue-100">{latestVersion}</span></div>
+                    <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/20"><span className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('versionUpdate.latestVersion')}</span>{latestVersion
+                        ? <span dir="ltr" className="font-mono text-sm text-blue-900 tabular-nums dark:text-blue-100">{latestVersion}</span>
+                        : <span className="text-sm text-blue-900 dark:text-blue-100">{t('versionUpdate.latestVersionUnavailable')}</span>}</div>
                     {installMode === 'git' && !job && <PrestageNoticeLine prestage={prestage} latestVersion={latestVersion} />}
                 </div>
 
@@ -1069,6 +1077,14 @@ export function VersionUpgradeModal({
                     <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                         {blockedReasonText(t, capability.reason, capability.blockedStorage, t('versionUpdate.errors.capabilityBlocked'))}
                     </div>
+                )}
+
+                {/* ADR-216 §3.4: owner-only repair of a detached release checkout */}
+                {installMode === 'git' && !capability.loading && !job && (
+                    <SourceAttachAction
+                        offered={capability.sourceAttachOffered === true}
+                        restartPending={capability.restartPending === true}
+                    />
                 )}
 
                 {/* Pre-flight notice — hide when consent or deferral panel is active */}

@@ -49,6 +49,7 @@ export {
 } from '@/modules/database/repositories/engine-restamp-intent.db.js';
 export type { EngineRestampIntent } from '@/modules/database/repositories/engine-restamp-intent.db.js';
 export { auditLogDb } from '@/modules/database/repositories/audit-log.js';
+export type { AuditAction } from '@/modules/database/repositories/audit-log.js';
 export {
     createSessionSharesStore,
     migrateSessionShares,
@@ -254,6 +255,8 @@ export type { SsoLinkedSettings } from '@/modules/database/repositories/sso-link
 export type { SsoDeviceSessionRow } from '@/modules/database/repositories/sso-device-sessions.db.js';
 export { shellOneShotRunsDb, SHELL_ONESHOT_RUN_RETENTION_MS } from '@/modules/database/repositories/shell-oneshot-runs.db.js';
 export type { ShellOneShotRunRow, ShellOneShotRunState } from '@/modules/database/repositories/shell-oneshot-runs.db.js';
+export { peerMessagesDb } from '@/modules/database/repositories/peer-messages.db.js';
+export type { NewPeerMessage, OwnedSessionRow, PeerMessageRow, PeerMessageState } from '@/modules/database/repositories/peer-messages.db.js';
 export type { RevokedTokenSidRow } from '@/modules/database/repositories/revoked-token-sids.db.js';
 export {
   deviceAccountSessionsDb, DEVICE_ABSOLUTE_TTL_MS, DEVICE_COOKIE, DEVICE_IDLE_TTL_MS, MAX_ACCOUNT_SLOTS,

@@ -42,6 +42,8 @@ import test, { after, beforeEach, mock } from 'node:test';
 
 import express from 'express';
 
+import { GIT_READ_ONLY_ARGS, GIT_SAFE_CONFIG_ARGS, gitHardeningArgs } from '../../shared/git-safety.js';
+
 // ── real directories: the guards call fs.realpath, so the tree must exist ─────
 const WORKSPACE = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'git-guards-')));
 const PROJECT_DIR = path.join(WORKSPACE, 'repo', 'project');
@@ -107,7 +109,23 @@ function defaultGitScript(args: string[]): ScriptedResult {
   return { stdout: '' };
 }
 
-function fakeSpawn(cmd: string, args: string[], options: { env?: NodeJS.ProcessEnv }) {
+/** B-1691 (qa F2/F12): every git child carries the shared prefix its verb calls for. */
+let unhardenedGitSpawns = 0;
+
+function stripGitHardening(rawArgs: string[]): string[] | null {
+  for (const prefix of [GIT_READ_ONLY_ARGS, GIT_SAFE_CONFIG_ARGS]) {
+    if (!prefix.every((value, index) => rawArgs[index] === value)) continue;
+    const args = rawArgs.slice(prefix.length);
+    return gitHardeningArgs(args) === prefix ? args : null;
+  }
+  return null;
+}
+
+function fakeSpawn(cmd: string, rawArgs: string[], options: { env?: NodeJS.ProcessEnv }) {
+  // Strip the hardening prefix so the scripts below key on the git verb.
+  const stripped = cmd === 'git' ? stripGitHardening(rawArgs) : rawArgs;
+  if (stripped === null) unhardenedGitSpawns += 1;
+  const args = stripped ?? rawArgs;
   spawnCalls.push({ cmd, args: [...args], options: options ?? {} });
 
   const child = new EventEmitter() as EventEmitter & {
@@ -232,6 +250,7 @@ beforeEach(() => {
 });
 
 after(async () => {
+  assert.equal(unhardenedGitSpawns, 0, 'B-1691: every git spawn carries the hardening config');
   await new Promise<void>((resolve) => server.close(() => resolve()));
   fs.rmSync(WORKSPACE, { recursive: true, force: true });
 });

@@ -19,6 +19,9 @@ import { findQuickReplyEligibleIndex, type QuickReplyGate } from '../../utils/qu
 import TeamMessageBubble from '../../../internal-session-chat/TeamMessageBubble';
 import { placeTeamMessages } from '../../../internal-session-chat/interleaveTeamMessages';
 import type { InternalMessage } from '../../../internal-session-chat/internalSessionChatApi';
+import PeerMessageCard from '../../../peer-relay/PeerMessageCard';
+import { isPeerTurnStart } from '../../../peer-relay/peerDisplay';
+import { usePeerTimeline } from '../../../peer-relay/usePeerTimeline';
 
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
@@ -26,6 +29,7 @@ import DateSeparator from './DateSeparator';
 import SessionIdleWarning from './SessionIdleWarning';
 
 const EMPTY_INTERNAL_MESSAGES: InternalMessage[] = [];
+
 
 // Parse a ChatMessage timestamp (string | number | Date) into a valid Date, or null.
 function toValidDate(timestamp: string | number | Date | undefined): Date | null {
@@ -96,6 +100,8 @@ interface ChatMessagesPaneProps {
   visibleMessages: ChatMessage[];
   /** ADR-187 team messages, shown inline by time; they never reach the model. */
   internalMessages?: InternalMessage[];
+  /** ADR-219 S1: opens another session from a cross-session message card. */
+  onOpenPeerSession?: (sessionId: string) => void;
   loadEarlierMessages: () => void;
   /** يجلب الصفحة الأقدم من الخادم (نظير التمرير-إلى-الأعلى بضغطة، B-431). */
   loadMoreMessages: () => void;
@@ -195,6 +201,7 @@ export default function ChatMessagesPane({
   visibleMessageCount,
   visibleMessages,
   internalMessages = EMPTY_INTERNAL_MESSAGES,
+  onOpenPeerSession,
   loadEarlierMessages,
   loadMoreMessages,
   loadAllMessages,
@@ -234,6 +241,25 @@ export default function ChatMessagesPane({
     () => placeTeamMessages(visibleMessages, internalMessages, olderHistoryHidden),
     [visibleMessages, internalMessages, olderHistoryHidden],
   );
+  // ADR-219 S1: cross-session messages, placed by time like team messages.
+  const peerSessionId = currentSessionId ?? selectedSession?.id ?? null;
+  const peerTimeline = usePeerTimeline(peerSessionId, selectedProject);
+  const peerPlacement = useMemo(
+    () => placeTeamMessages(visibleMessages, peerTimeline.items, olderHistoryHidden),
+    [visibleMessages, peerTimeline.items, olderHistoryHidden],
+  );
+  const renderPeer = (peer: (typeof peerTimeline.items)[number]) => {
+    const otherId = peer.toSessionId === peerSessionId ? peer.fromSessionId : peer.toSessionId;
+    return (
+      <PeerMessageCard
+        key={`peer-${peer.id}`}
+        message={peer}
+        currentSessionId={peerSessionId ?? ''}
+        targetName={peerTimeline.nameOf(peer.toSessionId) ?? (peer.toName || undefined)}
+        onOpenSession={onOpenPeerSession && peerTimeline.isReadable(otherId) ? onOpenPeerSession : undefined}
+      />
+    );
+  };
 
   // T-1821 fix-6: isRetryWaiting is computed from Date.now() at render time, so
   // the button stays disabled after retryAt expires unless we force a re-render.
@@ -484,7 +510,14 @@ export default function ChatMessagesPane({
                   {teamPlacement.before[index]?.map((teamMessage) => (
                     <TeamMessageBubble key={`team-${teamMessage.id}`} message={teamMessage} />
                   ))}
+                  {peerPlacement.before[index]?.map(renderPeer)}
                   {showSeparator && messageDate && <DateSeparator date={messageDate} />}
+                  {isPeerTurnStart(message, prevMessage, peerTimeline.inboundIds) && (
+                    <p className="flex items-center gap-1.5 px-3 text-[11px] font-medium text-[color:var(--session-peer-accent)] sm:px-0" data-peer-started>
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--session-peer-accent)]" aria-hidden="true" />
+                      {t('peerRelay.startedBy')}
+                    </p>
+                  )}
                   <MessageComponent
                     message={message}
                     prevMessage={prevMessage}
@@ -515,6 +548,7 @@ export default function ChatMessagesPane({
             {teamPlacement.trailing.map((teamMessage) => (
               <TeamMessageBubble key={`team-${teamMessage.id}`} message={teamMessage} />
             ))}
+            {peerPlacement.trailing.map(renderPeer)}
 
             {/* تنبيه الخمول — يظهر بعد مدة كاش الهارنس على آخر رسالة خارج البثّ.
                 يُعرض داخل منطقة التمرير لأنه يتبع آخر رسالة بصرياً، لا بعدها. */}

@@ -116,11 +116,11 @@ test('shell-quote runtime import is a direct production lock-bound dependency', 
     const manifest = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
     const lock = JSON.parse(fs.readFileSync(new URL('../package-lock.json', import.meta.url)));
     const installed = lock.packages['node_modules/shell-quote'];
-    assert.equal(manifest.dependencies['shell-quote'], '^1.9.0');
+    assert.equal(manifest.dependencies['shell-quote'], '^1.11.0');
     assert.equal(lock.packages[''].dependencies['shell-quote'], manifest.dependencies['shell-quote']);
-    assert.equal(installed.version, '1.10.0');
+    assert.equal(installed.version, '1.12.0');
     assert.equal(installed.integrity,
-        'sha512-w1aiOKwKuRgtwAReIIj89puqg+I7GvX4IbLrvmhXbzQsj1+Zwi4VO3+fa6ZF91TWSjIxoEkKnMeHcLEODK5ZXA==');
+        'sha512-PcByqNyT/38F2kDNi006HAMRJaULuBzq/FOsw3qdZvX/GA9W/jamDaRskgHjubHiftXK5sIFxLNkvrXUwcof6Q==');
     assert.equal(installed.dev, undefined);
 });
 

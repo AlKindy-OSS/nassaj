@@ -32,6 +32,15 @@ import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivi
 import {
   createClaudeProgressFold, claudeNotifiedTasks, claudeSettlements,
 } from './modules/providers/list/claude/claude-progress-fold.js';
+import { CLAUDE_TERMINAL_TASK_STATUSES } from './modules/providers/list/claude/claude-task-events.js';
+import { resolveSettingsDefaultMode } from './services/isolation/claude-settings-default-mode.js';
+import { resolveClaudeRequestedPermissionMode } from './services/isolation/claude-permission-mode.js';
+import { createScheduledWakeupTracker, SCHEDULED_WAKEUP_NOTICE_CODE, SCHEDULED_WAKEUP_NOTICE_TEXT }
+  from './modules/providers/list/claude/claude-scheduled-wakeup.js';
+import { createWakeupHoldBudget, peakUsagePercent, planWakeupHold, readWakeupHoldConfig,
+  WAKEUP_HOLD_CLOSE_REASONS, WAKEUP_HOLD_CLOSED_NOTICE_CODE, WAKEUP_HOLD_QUOTA_LIMIT_PERCENT }
+  from './modules/providers/list/claude/claude-wakeup-hold-policy.js';
+import { claudeUsageService } from './modules/providers/services/claude-usage.service.js';
 import { createSeededLiveFold } from './modules/providers/list/claude/claude-progress-seed.js';
 import { createClaudeLaunchTranscriptRecorder } from './modules/providers/list/claude/claude-launch-transcript.js';
 import { readAgentMeta } from './modules/providers/list/claude/agent-transcript.reader.js';
@@ -130,10 +139,18 @@ import {
   unregisterSessionProcess
 } from './services/session-process-monitor.js';
 import { SessionRegistry } from './session-registry.js';
-import { probeWorkflowLiveness } from './services/workflow-liveness.js';
+import { probeWorkflowLiveness, resolveWorkflowPid } from './services/workflow-liveness.js';
 // ADR-042 (B-80c) ghost-detach: read-only listener-detection seam. Imported one
 // way only (writer service NEVER imports claude-sdk — verified, no circularity).
-import { countLiveMirrors } from './modules/websocket/services/websocket-writer.service.js';
+import { addSessionMirror, countLiveMirrors } from './modules/websocket/services/websocket-writer.service.js';
+import { claudeRunExited, hasSessionAgent, observeClaudeRunEvent } from './modules/providers/services/session-agents/session-agents.service.js';
+// ADR-219 S1 (T-2072): the cross-session relay — spawn-time mode, in-process hook, delivery turns.
+import {
+  buildPeerRelayHookMatcher, createPeerHookDependencies, createPeerRunState, escapePeerWrapperTags,
+  observePeerRunMessage, readActiveMemberCount, readPeerDeliveryTurn, recordSessionMode, relayModeNow, relaySdkSettings,
+  settlePeerRunMode,
+  relaySdkSpawnOptions,
+} from './modules/peer-relay/index.js';
 
 // ADR-041 (B-80): per-session read-only replay registry for claude, isolated in
 // its OWN SessionRegistry instance gated behind SESSION_REGISTRY_claude. When the
@@ -229,6 +246,9 @@ function bufferThenSend(ws, sessionKey, payload) {
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
 
+// B-1696: a task id taken from task_started names a file (`agent-<id>.jsonl`).
+const SIDECAR_AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/u;
+
 function createClaudeAgentSidecarPoller(dependencies = {}) {
   const agents = new Map();
   const pending = new Map();
@@ -274,6 +294,15 @@ function createClaudeAgentSidecarPoller(dependencies = {}) {
     observe(raw, sessionId) {
       if (sessionId) latestSessionId = sessionId;
       for (const { toolUseId } of claudeSettlements(raw)) settled.add(toolUseId);
+      // B-1696: a FOREGROUND agent returns its agentId only in the final tool result,
+      // when it has already settled, so it was never tailed. Its task_started carries
+      // the same id up front (the CLI's local_agent task id is the agent file's id).
+      if (raw?.type === 'system' && raw.subtype === 'task_started' && raw.task_type === 'local_agent'
+        && typeof raw.task_id === 'string' && SIDECAR_AGENT_ID.test(raw.task_id)
+        && typeof raw.tool_use_id === 'string' && raw.tool_use_id
+        && !agents.has(raw.task_id) && pending.size < 100) {
+        pending.set(raw.task_id, raw.tool_use_id);
+      }
       const blocks = Array.isArray(raw?.message?.content) ? raw.message.content : [];
       for (const block of blocks) {
         const result = block?.toolUseResult ?? block?.tool_use_result
@@ -325,7 +354,8 @@ function createClaudeAgentSidecarPoller(dependencies = {}) {
       if (!artifactDir) return [];
 
       for (const [agentId, toolId] of pending) {
-        if (agents.has(agentId)) continue;
+        // B-1696: task_started and the tool result can both name an agent already tailed.
+        if (agents.has(agentId)) { pending.delete(agentId); continue; }
         let meta;
         let file;
         try {
@@ -590,12 +620,184 @@ const sdkBackgroundHoldIdleMaxMs = () =>
 const sdkContinuationWaitMs = () =>
   parseInt(process.env.CLAUDE_SDK_CONTINUATION_WAIT_MS, 10) || 120000;
 
+// B-1699: a scheduled wake-up (ScheduleWakeup, `/loop`, session-only CronCreate)
+// fires inside the CLI process, so the channel is held for it. The bounds (margin,
+// total cap, pulses, listener grace, kill switch) live in claude-wakeup-hold-policy.
+//
+// Runs held ONLY for a wake-up (no task, steer or turn wait of their own):
+// release function → sessionId. They do not block a restart: the safe-restart scan
+// exempts their CLI pids (published on a direct local /health only), a drain releases
+// them (the wake-up dies with the CLI process either way), and a new user message to
+// the session releases the hold and starts a fresh run.
+const wakeOnlyHolds = new Map();
+let scheduledWakeupHoldsDraining = false;
+
+/**
+ * Called at the start of a drain: closes the input of every run held only for a
+ * scheduled wake-up, so its CLI exits and the drain is not blocked by a `/loop`.
+ * @returns {number} how many held runs were released
+ */
+function releaseScheduledWakeupHoldsForDrain() {
+  scheduledWakeupHoldsDraining = true;
+  const releasers = [...wakeOnlyHolds.keys()];
+  for (const release of releasers) {
+    try { release('drain-scheduled-wakeup'); } catch { /* one run must never stop the drain */ }
+  }
+  return releasers.length;
+}
+
+/** Test seam: the drain flag is process-wide and otherwise stays set. */
+function resetScheduledWakeupDrainForTests() {
+  scheduledWakeupHoldsDraining = false;
+}
+
+/**
+ * CLI pids (as resolved by the session process monitor) of runs held only for a
+ * wake-up. A pid not resolved yet is left out, so the restart scan still counts it.
+ * @returns {number[]}
+ */
+function getScheduledWakeupHoldPids() {
+  const pids = new Set();
+  for (const sessionId of wakeOnlyHolds.values()) {
+    const pid = sessionId ? resolveWorkflowPid(sessionId) : null;
+    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+  }
+  return [...pids].sort((a, b) => a - b);
+}
+
+/**
+ * B-1699 (M2): a new user message to a session whose run is held only for a
+ * wake-up releases that hold and waits (bounded) for the run to end, so the
+ * message starts a fresh run instead of being refused as session_busy.
+ * @returns {Promise<boolean>} true when such a hold was released
+ */
+async function yieldWakeOnlyHold(sessionId, waitMs = 20000) {
+  const entry = [...wakeOnlyHolds].find(([, sid]) => sid === sessionId);
+  if (!entry) return false;
+  entry[0]('superseded-by-user-turn');
+  const until = Date.now() + waitMs;
+  while (isSessionRunLive(sessionId) && Date.now() < until) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return true;
+}
+
+/** Whether the session still has a viewer: its primary socket or a live mirror. */
+function sessionHasLiveListener(sessionId) {
+  const session = sessionId ? activeSessions.get(sessionId) : null;
+  if (session?.writer?.isPrimarySocketAlive?.() === true) return true;
+  return sessionId ? countLiveMirrors(sessionId) > 0 : false;
+}
+
+/**
+ * Polls whether the session still has a viewer; calls `onGone` once none has been
+ * seen for `graceMs`. `start`/`stop` are idempotent.
+ */
+function createListenerWatch(sessionId, graceMs, pollMs, onGone) {
+  let timer = null;
+  let quietSince = null;
+  return {
+    start() {
+      if (timer) return;
+      timer = setInterval(() => {
+        if (sessionHasLiveListener(sessionId())) { quietSince = null; return; }
+        quietSince ??= Date.now();
+        if (Date.now() - quietSince >= graceMs) onGone();
+      }, pollMs);
+      timer.unref?.();
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      quietSince = null;
+    },
+  };
+}
+
+/**
+ * Per-run wake-up hold: budget, plan, drain/new-turn registration, listener watch,
+ * quota check and the close notice. `release(reason)` closes the run's input.
+ * @param {{ release: (reason: string) => void, sessionId: () => string|null,
+ *   ownerUserId: number|null, notify: (payload: object) => void }} deps
+ */
+function createWakeHoldController(deps) {
+  const config = readWakeupHoldConfig();
+  const budget = createWakeupHoldBudget(config);
+  const release = (reason) => deps.release(reason);
+  const watch = createListenerWatch(deps.sessionId, config.listenerGraceMs, config.listenerPollMs,
+    () => release('scheduled-wakeup-listeners-gone'));
+  const checkQuota = () => {
+    void claudeUsageService.getUsage(deps.ownerUserId).then((usage) => {
+      const peak = peakUsagePercent(usage);
+      if (peak !== null && peak >= WAKEUP_HOLD_QUOTA_LIMIT_PERCENT && wakeOnlyHolds.has(release)) {
+        release('scheduled-wakeup-quota');
+      }
+    }, () => { /* unknown usage: the caps still bound the hold */ });
+  };
+  return {
+    observe(wakeState) {
+      if (wakeState.scheduled) budget.onScheduled();
+      if (wakeState.firedCommandUuid) budget.onFired();
+    },
+    /** The wake-up plan for this moment (see planWakeupHold). */
+    plan(wakeState, holdAnchorAt) {
+      return planWakeupHold(wakeState, budget, config, holdAnchorAt + sdkBackgroundHoldIdleMaxMs(), Date.now());
+    },
+    /** Marks the run held only for a wake-up (or not); a renewal checks the quota. */
+    setWakeOnly(on, renewal = false) {
+      if (!on) { wakeOnlyHolds.delete(release); watch.stop(); return; }
+      wakeOnlyHolds.set(release, deps.sessionId());
+      watch.start();
+      if (renewal) checkQuota();
+    },
+    draining: () => scheduledWakeupHoldsDraining,
+    /** Called when the input closes: unregisters and announces a wake-up close. */
+    closed(reason) {
+      wakeOnlyHolds.delete(release);
+      watch.stop();
+      const code = WAKEUP_HOLD_CLOSE_REASONS[reason];
+      if (!code) return;
+      deps.notify(createNormalizedMessage({ kind: 'notice', noticeCode: WAKEUP_HOLD_CLOSED_NOTICE_CODE,
+        noticeReason: code, content: `Scheduled wake-up hold ended (${code})`,
+        sessionId: deps.sessionId(), provider: 'claude' }));
+    },
+  };
+}
+
+// ADR-219 (qa م-5): a run spawned NATIVE keeps no refuse setting. When the node gains a
+// second member, every native run that is only being held open (background tasks, a
+// wake-up) is released, so its next turn spawns in relay mode with refuse and the hook.
+const nativeRelayHoldReleasers = new Set();
+// ADR-219 (qa م-2): sessions whose live run is a relayed peer turn (the busy text names it).
+const peerDeliverySessions = new Set();
+
+/**
+ * Releases the input holds of native-mode runs once the node is in relay mode.
+ * Called at every spawn and periodically from the composition root. Never throws.
+ * @returns {number} how many held runs were released
+ */
+function releaseNativeHoldsOnRelayTransition() {
+  if (nativeRelayHoldReleasers.size === 0) return 0;
+  let mode;
+  try { mode = relayModeNow(readActiveMemberCount()); } catch { return 0; }
+  if (mode !== 'relay') return 0;
+  const releasers = [...nativeRelayHoldReleasers];
+  for (const release of releasers) {
+    try { release(); } catch { /* one run must never stop the others */ }
+  }
+  try {
+    console.log(JSON.stringify({ level: 'info', msg: 'peer relay: native holds released on relay transition',
+      component: 'peer-relay', released: releasers.length }));
+  } catch { /* logging must never break a spawn */ }
+  return releasers.length;
+}
+
 // B-1120: `task_updated` statuses that end a task (`task_notification` ends it at any
-// status), and the top-level message types that mean the main loop is working again.
+// status) come from the shared CLAUDE_TERMINAL_TASK_STATUSES (ADR-218). Below: the
+// top-level message types that mean the main loop is working again.
 // A top-level system/init counts too: measured on CLI 2.1.269, a notification cycle
 // starts with init and NO user message, and without partial messages the model may
 // then think for longer than the grace before anything else arrives.
-const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'killed']);
 const MAIN_LOOP_ACTIVITY_TYPES = new Set(['assistant', 'user', 'stream_event']);
 const startsMainLoopActivity = (message) => !message?.parent_tool_use_id && (
   MAIN_LOOP_ACTIVITY_TYPES.has(message?.type)
@@ -689,7 +891,9 @@ async function emitDelegationExit(foldReady, cause, sessionId, send) {
  * `<task-notification>` text the CLI delivers (origin task-notification), and its
  * absence from the `background_tasks_changed` level (the SDK's documented guard
  * against a missed bookend; foreground tasks are not in that list, so only tasks
- * known to be backgrounded settle that way). Ambient/skip_transcript tasks (watchers,
+ * known to be backgrounded settle that way). A SendMessage result with a structured
+ * `resumedAgentId` opens a backgrounded task under that id (ADR-218), since the
+ * resume may carry no task_started. Ambient/skip_transcript tasks (watchers,
  * housekeeping) are not activity and are never counted.
  * `quiet` is true from a `result` until the MAIN loop (not a subagent) speaks again.
  * `continuationExpected`: a known task ended while quiet, so its notification cycle is
@@ -708,7 +912,7 @@ function createBackgroundTaskTracker() {
   let continuationExpected = false;
   let holdAnchorAt = Date.now();
   const endsTask = (message) => message.subtype === 'task_notification'
-    || (message.subtype === 'task_updated' && TERMINAL_TASK_STATUSES.has(message.patch?.status));
+    || (message.subtype === 'task_updated' && CLAUDE_TERMINAL_TASK_STATUSES.has(message.patch?.status));
   const settle = (taskId, endedToolUseIds) => {
     const task = pendingTasks.get(taskId);
     if (!task) return;
@@ -762,6 +966,24 @@ function createBackgroundTaskTracker() {
     if (task) task.backgrounded = true;
     return true;
   };
+  // ADR-218 (qa condition 3): a SendMessage that resumed a finished agent answers
+  // with a structured `resumedAgentId`; the resumed agent then runs in the
+  // background under that id. The CLI may emit no task_started for it, so the
+  // result itself opens the pending task; its task_notification (same id) or its
+  // absence from background_tasks_changed settles it like any other.
+  const observeResumedAgent = (message) => {
+    if (message?.type !== 'user' || message.parent_tool_use_id) return false;
+    const blocks = Array.isArray(message.message?.content)
+      ? message.message.content.filter(block => block?.type === 'tool_result') : [];
+    const structured = message.tool_use_result ?? message.toolUseResult;
+    const agentId = blocks.length === 1 && typeof structured?.resumedAgentId === 'string'
+      ? structured.resumedAgentId.trim() : '';
+    if (!agentId || pendingTasks.has(agentId)) return false;
+    const toolUseId = typeof blocks[0].tool_use_id === 'string' ? blocks[0].tool_use_id : null;
+    pendingTasks.set(agentId, { toolUseId, backgrounded: true });
+    holdAnchorAt = Date.now();
+    return true;
+  };
   const isPendingTaskActivity = (message) => typeof message?.parent_tool_use_id === 'string'
     && [...pendingTasks.values()].some(t => t.toolUseId === message.parent_tool_use_id);
   return {
@@ -769,6 +991,7 @@ function createBackgroundTaskTracker() {
       let backgrounded = false;
       const endedToolUseIds = [];
       if (message?.type === 'system') backgrounded = observeSystem(message, endedToolUseIds);
+      if (observeResumedAgent(message)) backgrounded = true;
       // B-1400: parsing is shared with the history path (claude-progress-fold.ts).
       for (const { taskId, toolUseId } of claudeNotifiedTasks(message)) {
         settleEnded(taskId, toolUseId, endedToolUseIds);
@@ -786,6 +1009,52 @@ function createBackgroundTaskTracker() {
         endedToolUseIds: [...new Set(endedToolUseIds)] };
     },
   };
+}
+
+/**
+ * B-1694: whether a top-level `result` answers THIS turn's own message, read from
+ * the CLI's structured fields only (never message text). On a resume, a
+ * `<task-notification>` queued by the previous process can produce a result
+ * before the turn's message has even been consumed (session 6c419d5b, 2026-10-27:
+ * input closed `result-immediate` 2s in while the turn ran for minutes). Such a
+ * result names other messages, comes from a task notification, or reports the
+ * turn's send still queued. A result carrying none of these (older CLIs, or a
+ * prompt without a client uuid) answers the turn, as before.
+ * @param {object} result - raw SDK `result` message
+ * @param {string|null} promptUuid - client uuid stamped on the turn's message
+ * @returns {boolean}
+ */
+function resultAnswersTurn(result, promptUuid) {
+  const uuids = [
+    ...(Array.isArray(result?.user_message_uuids) ? result.user_message_uuids : []),
+    result?.user_message_uuid,
+  ].filter(uuid => typeof uuid === 'string' && uuid);
+  if (promptUuid && uuids.includes(promptUuid)) return true;
+  if (result?.origin?.kind === 'task-notification') return false;
+  if (promptUuid && uuids.length > 0) return false;
+  return !(Number.isInteger(result?.queued_turn_count) && result.queued_turn_count > 0);
+}
+
+/**
+ * B-1694 (qa condition 1): one diagnostic line for a top-level `result` weighed
+ * against the turn — structured counts only, never message content or ids.
+ * @param {object} result - raw SDK `result` message
+ * @param {string|null} promptUuid - client uuid stamped on the turn's message
+ * @param {boolean} answers - the resultAnswersTurn verdict
+ * @param {number} resultIndex - 1-based index of this top-level result in the run
+ * @param {string} session - session label for the line
+ * @returns {string}
+ */
+function describeTurnResult(result, promptUuid, answers, resultIndex, session) {
+  const uuids = [
+    ...(Array.isArray(result?.user_message_uuids) ? result.user_message_uuids : []),
+    result?.user_message_uuid,
+  ].filter(uuid => typeof uuid === 'string' && uuid);
+  const queued = Number.isInteger(result?.queued_turn_count) ? result.queued_turn_count : 'none';
+  return `[CONTROL-STREAM-TURN-RESULT] session=${session} `
+    + `origin=${typeof result?.origin?.kind === 'string' ? result.origin.kind : 'none'} `
+    + `matched=${Boolean(promptUuid && uuids.includes(promptUuid))} answers=${answers} `
+    + `uuid_count=${uuids.length} queued_turn_count=${queued} result_index=${resultIndex}`;
 }
 
 // B-SEC-APPROVAL-WEDGE: hard ceiling for the INTERACTIVE tools below, which used
@@ -1380,13 +1649,32 @@ function resolveEffortLevel(value) {
  *   keeps the function usable standalone, e.g. in unit tests).
  * @returns {Object} SDK-compatible options
  */
+/** Marks SDK options whose `default` permission mode was not an explicit choice. */
+const IMPLICIT_PERMISSION_MODE = Symbol('implicitPermissionMode');
+
+/**
+ * T-2071 (qa M5): for an implicit `default`, the permission mode becomes the
+ * settings' `permissions.defaultMode` the spawn loads (as the CLI itself did before
+ * nassaj passed the mode always). Explicit choices and the parity path are untouched.
+ * @param {object} sdkOptions - options from mapCliOptionsToSDK, final env applied
+ * @param {{ managedSettingsDir?: string }} [ctx] - test seam
+ * @returns {object} the same options
+ */
+function applySettingsPermissionMode(sdkOptions, ctx = {}) {
+  if (!sdkOptions?.[IMPLICIT_PERMISSION_MODE]) return sdkOptions;
+  const settingsMode = resolveSettingsDefaultMode(sdkOptions.env || process.env, sdkOptions.cwd, ctx);
+  if (settingsMode) sdkOptions.permissionMode = settingsMode;
+  return sdkOptions;
+}
+
 function mapCliOptionsToSDK(options = {}, validModelValues) {
   const { sessionId, cwd, toolsSettings } = options;
-  const parityEnforced = options.permissionExecution?.mode === 'enforce';
-  if (parityEnforced && options.permissionExecution?.effectivePolicy?.profileId !== 'full_delegation') {
-    throw new Error('PERMISSION_EFFECTIVE_POLICY_REQUIRED');
-  }
-  const permissionMode = parityEnforced ? 'bypassPermissions' : options.permissionMode;
+  // B-1707: the shared resolver other harnesses reuse (owner ruling 2026-10-28).
+  const {
+    parityEnforced,
+    requested: permissionMode,
+    mode: requestedMode,
+  } = resolveClaudeRequestedPermissionMode(options);
 
   const sdkOptions = {};
 
@@ -1436,10 +1724,10 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
     sdkOptions.cwd = cwd;
   }
 
-  // Map permission mode
-  if (permissionMode && permissionMode !== 'default') {
-    sdkOptions.permissionMode = permissionMode;
-  }
+  // T-2071: always explicit, 'default' included. Left out, the CLI picks its own
+  // default, which differs between versions (`auto` on 2.1.285, `default` on 2.1.302).
+  // skipPermissions (outside plan) and parity already lifted this to bypassPermissions.
+  sdkOptions.permissionMode = requestedMode;
 
   // Map tool settings
   const settings = toolsSettings || {
@@ -1448,13 +1736,7 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
     skipPermissions: false
   };
 
-  // Handle tool permissions
-  if (settings.skipPermissions && permissionMode !== 'plan') {
-    // When skipping permissions, use bypassPermissions mode
-    sdkOptions.permissionMode = 'bypassPermissions';
-  }
   if (parityEnforced) {
-    sdkOptions.permissionMode = 'bypassPermissions';
     sdkOptions.allowDangerouslySkipPermissions = true;
   }
 
@@ -1493,6 +1775,14 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
   }
 
   sdkOptions.allowedTools = allowedTools;
+
+  // T-2071 (qa M5): `default` from the composer is its own default, not a choice;
+  // the run then follows the settings' permissions.defaultMode (applied once the
+  // final spawn env is known, see applySettingsPermissionMode). A symbol key, so
+  // the SDK never sees it.
+  if (!parityEnforced && sdkOptions.permissionMode === 'default') {
+    sdkOptions[IMPLICIT_PERMISSION_MODE] = true;
+  }
 
   // Use the tools preset to make all default built-in tools available (including AskUserQuestion).
   // This was introduced in SDK 0.1.57. Omitting this preserves existing behavior (all tools available),
@@ -1598,6 +1888,33 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
  * @returns {Promise<Array<{name:string,description?:string,aliases?:string[],argumentHint?:string}>|null>}
  *   Normalized command list, or `null` on any failure/timeout/old SDK.
  */
+/** ADR-219 D1: `settings` for a spawn that is not a chat run (probe, side query). */
+function peerRelaySpawnSettings() {
+  return relaySdkSpawnOptions(relayModeNow(readActiveMemberCount()));
+}
+
+/**
+ * ADR-219: per-run relay options. Relay mode adds `crossSessionInbound: refuse`;
+ * a peer delivery turn adds the per-turn USD cap and disallows the scheduling
+ * tools for the life of the query (ح-1, ح-2 a).
+ */
+function applyPeerRelayOptions(sdkOptions, peerRun, peerDelivery) {
+  const settings = relaySdkSettings(peerRun.relayMode);
+  if (settings) sdkOptions.settings = { ...settings };
+  if (!peerDelivery) return;
+  sdkOptions.maxBudgetUsd = peerDelivery.maxBudgetUsd;
+  sdkOptions.disallowedTools = [...new Set([...(sdkOptions.disallowedTools || []), ...peerDelivery.disallowedTools])];
+}
+
+/**
+ * ADR-219: with no hook to route them, a relay-mode run loses the session tools
+ * (a delivery turn already disallows the scheduling tools).
+ */
+function denyPeerToolsWithoutHook(sdkOptions) {
+  const tools = ['SendMessage', 'ListAgents', 'ListPeers'];
+  sdkOptions.disallowedTools = [...new Set([...(sdkOptions.disallowedTools || []), ...tools])];
+}
+
 async function probeClaudeBuiltInCommands(context = {}) {
   assertHarnessNotUpdating('claude');
   const { userId = null, cwd = null } = context;
@@ -1657,6 +1974,7 @@ async function probeClaudeBuiltInCommands(context = {}) {
       pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
       // No tools/prompt/model work happens; keep options minimal & deterministic.
       systemPrompt: { type: 'preset', preset: 'claude_code' },
+      ...peerRelaySpawnSettings(),
     };
     if (cwd) {
       sdkOptions.cwd = cwd;
@@ -1882,7 +2200,8 @@ function frameBtwPrompt(question) {
     + 'only Read/Grep/Glob/NotebookRead inside this project are available. Answer in '
     + 'words, then stop.]'
     + '\n\n'
-    + question
+    // ADR-219 (qa م-8): the side question is human text, so it can never carry a peer wrapper.
+    + escapePeerWrapperTags(String(question ?? ''))
   );
 }
 
@@ -2173,6 +2492,7 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
         type: 'preset', preset: 'claude_code', append: BTW_SIDE_QUERY_DIRECTIVE, snapshot: false,
       },
       settingSources: ['project', 'user', 'local'],
+      ...peerRelaySpawnSettings(),
       cwd: projectRoot,
       // SDK 0.3.162+: native builds no longer register Grep/Glob by default (search
       // moves into Bash, which the cage denies). Name the base tool set explicitly so
@@ -3141,6 +3461,9 @@ function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, injectionArm
 async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}) {
   const { suppressResumeMissError = false } = internalOptions;
   const { sessionId, sessionSummary } = options;
+  releaseNativeHoldsOnRelayTransition();
+  // ADR-219 S1: a peer relay delivery turn (server-only Symbol key; never JSON-reachable).
+  const peerDelivery = readPeerDeliveryTurn(options);
   // T-1295 — هويةُ الجولة كما ولّدها العميل، تُصدى بها كلُّ حمولة **حكم** على
   // هذه الجولة (`session_created`, `complete`, `error`). بها وحدها يربط العميل
   // الحكمَ بإدخال صندوق الصادر الصحيح؛ وبدونها كان يربطه بـ«أحدث معلَّق لهذه
@@ -3197,6 +3520,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   let tempImagePaths = [];
   let tempDir = null;
   let participantRecorded = false;
+  // ADR-219: set right before query(); recorded with the participant row.
+  let spawnPermissionMode = null;
   // Exact prompt text handed to the SDK (and therefore written verbatim into
   // the transcript). Updated to the image-annotated form after handleImages so
   // the authorship hash recorded below matches the transcript line.
@@ -3213,6 +3538,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // fired while the other was still streaming), and both interleaved writes into
   // the same replay RingBuffer. A listener-less ghost is deliberately NOT treated
   // as live, so a stale entry can never lock a conversation out of sending.
+  // B-1699 (M2): a run held only for a scheduled wake-up yields to a new message
+  // (its hold is released and the run ends) instead of refusing it as session_busy.
+  if (sessionId && !/^\/steer(?:\s|$)/iu.test(String(command ?? '').trimStart())) {
+    await yieldWakeOnlyHold(sessionId);
+  }
   if (sessionId && isSessionRunLive(sessionId)) {
     console.warn(`[SEC-DUP-RUN] refused a concurrent run on session ${sessionId}`);
     // B-515 — هذا الموضع وحده **يبقى** إرسالاً مباشراً بلا تخزين، عن قصد: لا
@@ -3238,12 +3568,17 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       permissionExecution?.notStarted();
       return { ok: false };
     }
+    const relayedTurn = peerDeliverySessions.has(sessionId);
     ws.send(createNormalizedMessage({
       kind: 'error',
       code: 'session_busy',
-      content:
-        'This conversation already has a run in progress. '
-        + 'Wait for it to finish (or stop it) before sending another message.',
+      // ADR-219 (qa م-2): a relayed peer turn is named; Stop ends it like any run.
+      ...(relayedTurn ? { peerRelayTurn: true } : {}),
+      content: relayedTurn
+        ? 'This conversation is answering a message relayed from another of your sessions. '
+          + 'Stop it to take over now, or wait for it to finish.'
+        : 'This conversation already has a run in progress. '
+          + 'Wait for it to finish (or stop it) before sending another message.',
       sessionId,
       provider: 'claude',
       ...clientMsgIdField,
@@ -3290,6 +3625,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       return;
     }
     participantRecorded = true;
+    // ADR-219: the EFFECTIVE mode this spawn handed the CLI, the relay's only mode source.
+    recordSessionMode(sid, ws.userId, spawnPermissionMode);
     participantsDb.recordSpawn(sid, ws.userId, {
       provider: 'claude',
       projectPath: options.cwd || options.projectPath || process.cwd(),
@@ -3302,7 +3639,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // Sender attribution (B-MU-UX-FIX-MSG-AUTHOR): remember WHO authored this
     // prompt so history loads can stamp userId onto the transcript's user
     // message (the transcript itself carries no identity). Never throws.
-    messageAuthorsDb.recordUserMessage(sid, ws.userId, promptTextForAuthorship);
+    // ADR-219: a relayed peer message is not authored by this member.
+    if (!peerDelivery) messageAuthorsDb.recordUserMessage(sid, ws.userId, promptTextForAuthorship);
   };
 
   const emitNotification = (event) => {
@@ -3360,7 +3698,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // had to infer it from timestamps in the CLI's own debug file. One line, once, with
   // the reason: `result-immediate` (no continuation predicted), `grace-expired` (the
   // prediction was wrong and the run kept going), `background-idle-cap` (B-1120:
-  // background tasks never reported back within the idle ceiling), `abort`, or
+  // background tasks never reported back within the idle ceiling),
+  // `scheduled-wakeup-expired` / `scheduled-wakeup-cap` (B-1699: a held wake-up passed
+  // its time plus the margin, or lay beyond the idle cap), `abort`, or
   // `run-ended` (the finally).
   let inputReleasedAt = null;
   // T-1903: the run-owned steer controller (null unless the admin policy allowed
@@ -3370,8 +3710,32 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   let steerRun = null;
   let steerInjectionArmed = false;
   let steerTaintHookArmed = false;
+  // B-1694: set once the steerable turn was announced; re-announces it as no
+  // longer steerable when input closes while the run is still working.
+  let announceSteerClosed = null;
+  // B-1694 (qa condition 2): when the first result that does NOT answer the turn
+  // arrived. The turn-result wait counts from here, so CLI chatter that keeps the
+  // loop quiet cannot re-arm a full wait forever (as holdAnchorAt does for B-1400).
+  let turnResultWaitAnchorAt = null;
+  // B-1699: this run's wake-up hold (bounds, drain / new-turn registration, close
+  // notice). `notifyWakeHold` is bound to the run's sink once that exists (below).
+  let notifyWakeHold = () => {};
+  const wakeHold = createWakeHoldController({
+    release: (reason) => releaseInput(reason),
+    sessionId: () => capturedSessionId || sessionId || null,
+    ownerUserId: Number.isInteger(ws?.userId) ? ws.userId : null,
+    notify: (payload) => notifyWakeHold(payload),
+  });
+  // ADR-219 (qa م-5): this run's relay mode, set at spawn; a native hold is releasable.
+  let runRelayMode = null;
+  const releaseNativeHold = () => releaseInput('relay-mode-transition');
   const releaseInput = (reason) => {
+    const firstRelease = inputReleasedAt === null;
+    nativeRelayHoldReleasers.delete(releaseNativeHold);
+    turnResultWaitAnchorAt = null;
+    const steerWasOpen = Boolean(steerRun && !steerRun.isClosed());
     steerRun?.close(reason === 'abort' ? 'turn_aborted' : 'input_closed');
+    if (steerWasOpen && reason !== 'abort' && reason !== 'run-ended') announceSteerClosed?.();
     if (inputReleasedAt === null) {
       inputReleasedAt = Date.now();
       try {
@@ -3382,6 +3746,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       } catch { /* logging must never break the run */ }
     }
     releaseInputStream();
+    // B-1699: after the close, so a failing notice can never keep the input open.
+    if (firstRelease) {
+      try { wakeHold.closed(reason); } catch { /* the notice is best-effort */ }
+    }
   };
   const disarmInputClose = () => {
     if (inputCloseTimer) {
@@ -3410,24 +3778,69 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // continuation is possible, else the grace); pending tasks → hold the channel,
   // bounded by the idle ceiling, so their notification finds it still open; a task
   // just ended → wait for its notification cycle (longer than the grace).
-  const reconsiderInputClose = (taskState, continuationPossible) => {
-    disarmInputClose();
-    if (inputReleasedAt !== null || !taskState.quiet) return;
-    // T-1903: an injection still queued or not yet answered by a `result` keeps
-    // the channel open (idle-capped like background tasks).
+  // B-1694: `turnAnswered` — a result for the turn's own message was seen; until
+  // then a result (e.g. for a stale queued notification) never closes at once.
+  // The close plan WITHOUT wake-ups. `holds`: the run has a reason of its own to
+  // keep the channel open (T-1903 steer, B-1400 pending task, B-1120 continuation,
+  // B-1694 unanswered turn); otherwise the B-117 grace or an immediate close.
+  const baseClosePlan = (taskState, continuationPossible, turnAnswered) => {
     if (steerRun?.hasPendingWork()) {
-      armInputClose(sdkBackgroundHoldIdleMaxMs(), 'steer-hold-cap');
-    } else if (taskState.pending > 0) {
+      return { holds: true, delayMs: sdkBackgroundHoldIdleMaxMs(), reason: 'steer-hold-cap' };
+    }
+    if (taskState.pending > 0) {
       // B-1400: idle counted from the last result or pending-task activity, not from
       // this message — unrelated CLI chatter no longer re-arms a full hour.
       const idleLeftMs = taskState.holdAnchorAt + sdkBackgroundHoldIdleMaxMs() - Date.now();
-      armInputClose(Math.max(0, idleLeftMs), 'background-idle-cap');
-    } else if (taskState.continuationExpected) {
-      armInputClose(sdkContinuationWaitMs(), 'continuation-wait-expired');
-    } else if (continuationPossible) {
-      armInputClose();
+      return { holds: true, delayMs: Math.max(0, idleLeftMs), reason: 'background-idle-cap' };
+    }
+    if (taskState.continuationExpected) {
+      return { holds: true, delayMs: sdkContinuationWaitMs(), reason: 'continuation-wait-expired' };
+    }
+    if (!turnAnswered) {
+      // Accepted (qa B-1694): a task-notification result with queued_turn_count > 0
+      // and no stamped uuid (non-receipt path) cannot be told apart from a stale one,
+      // so it waits up to this cap before the input closes — never longer.
+      const anchorAt = turnResultWaitAnchorAt ?? Date.now();
+      return { holds: true, delayMs: Math.max(0, anchorAt + sdkContinuationWaitMs() - Date.now()),
+        reason: 'turn-result-wait-expired' };
+    }
+    if (continuationPossible) return { holds: false, delayMs: sdkInputCloseGraceMs(), reason: 'grace-expired' };
+    return { holds: false, delayMs: null, reason: 'result-immediate' };
+  };
+  const applyClosePlan = (plan) => (plan.delayMs === null
+    ? releaseInput(plan.reason) : armInputClose(plan.delayMs, plan.reason));
+  // B-1120: the close decision, re-taken after EVERY CLI message — not only on a
+  // `result`, since a message landing after the last result used to disarm the
+  // timer for good. Nothing is armed while the main loop is working.
+  // B-1699: a pending wake-up holds the channel too, but never shortens a longer
+  // hold of the run's own (M1: the longer delay wins). Only a run held for nothing
+  // but a wake-up is registered as such: a drain or a new user message releases it,
+  // the restart scan exempts it, and the listener/quota guards watch it.
+  // `renewal`: this message is a top-level result, so the hold is being renewed.
+  const reconsiderInputClose = (taskState, continuationPossible, turnAnswered, wakeState = null,
+    renewal = false) => {
+    disarmInputClose();
+    wakeHold.setWakeOnly(false);
+    nativeRelayHoldReleasers.delete(releaseNativeHold);
+    if (inputReleasedAt !== null || !taskState.quiet) return;
+    const base = baseClosePlan(taskState, continuationPossible, turnAnswered);
+    const wake = wakeState ? wakeHold.plan(wakeState, taskState.holdAnchorAt) : null;
+    // ADR-219 (qa م-5): a native run held for background tasks or a wake-up is releasable.
+    if (runRelayMode === 'native' && (taskState.pending > 0 || (wake && !('release' in wake)))) {
+      nativeRelayHoldReleasers.add(releaseNativeHold);
+    }
+    if (!wake) {
+      applyClosePlan(base);
+    } else if ('release' in wake || wakeHold.draining()) {
+      // Ended (or draining): the wake-up adds nothing; a hold of the run's own still
+      // applies at its own delay, never extended by the wake-up (qa round 2 H1).
+      if (base.holds) applyClosePlan(base);
+      else releaseInput('release' in wake ? wake.release : 'drain-scheduled-wakeup');
+    } else if (base.holds) {
+      applyClosePlan(wake.delayMs > base.delayMs ? wake : base);
     } else {
-      releaseInput('result-immediate');
+      wakeHold.setWakeOnly(true, renewal);
+      armInputClose(wake.delayMs, wake.reason);
     }
   };
 
@@ -3502,6 +3915,20 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       ...options,
       model: requestedModelForRun,
     }, validModelValues);
+    // ADR-219 D1: the relay mode is fixed for this run at spawn (refuse in relay mode).
+    const peerRun = createPeerRunState({
+      activeMemberCount: readActiveMemberCount(), userId: ws?.userId ?? null, sessionId: sessionId || null,
+      permissionMode: sdkOptions.permissionMode, delivery: peerDelivery,
+    });
+    applyPeerRelayOptions(sdkOptions, peerRun, peerDelivery);
+    runRelayMode = peerRun.relayMode;
+    // ADR-219 (qa م-3): a delivery turn never runs without the relay (refuse + hook).
+    if (peerDelivery && peerRun.relayMode !== 'relay') {
+      ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 1, success: false, notStarted: true,
+        code: 'peer_delivery_unavailable', error: 'A relayed message needs relay mode on this node.',
+        sessionId: sessionId || null, provider: 'claude', ...clientMsgIdField }));
+      return { ok: false }; // the finally settles the unconsumed permission as not started
+    }
 
     // T-1665: a substitution must never be silent to the USER — a console.warn
     // is invisible from the chat. Surface it as a status line so the person who
@@ -3718,6 +4145,16 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       cwd: sdkOptions.cwd ?? null,
     });
     sdkOptions.env = runProfile.env;
+    applySettingsPermissionMode(sdkOptions);
+    // ADR-219 (qa م-A): the sender category and the hook follow the FINAL mode the SDK gets.
+    settlePeerRunMode(peerRun, sdkOptions.permissionMode);
+    // ADR-219 (qa ح-A): a delivery whose final mode left the row's category never starts.
+    if (peerDelivery && peerRun.modeCategory !== peerDelivery.fromMode) {
+      ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 1, success: false, notStarted: true,
+        code: 'mode_mismatch_at_delivery', error: 'The relayed message no longer matches this session\'s permission mode.',
+        sessionId: sessionId || null, provider: 'claude', ...clientMsgIdField }));
+      return { ok: false }; // the finally settles the unconsumed permission as not started
+    }
     effectiveEngineProvider = runProfile.effectiveEngine ?? null;
     injectedHosts = runProfile.engineHosts;
 
@@ -3838,7 +4275,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // by magic keywords in the prompt text. Append them here so ultracode takes
     // real effect (no-op for every other effort value). Applied after the image
     // annotation so the keywords ride along on the exact text the CLI receives.
-    const finalCommand = maybeApplyUltracodeKeywords(fileResult.modifiedCommand, options.effort);
+    // ADR-219 م-2: human text can never carry a peer wrapper (a delivery's wrapper is ours).
+    const finalCommand = peerDelivery
+      ? fileResult.modifiedCommand
+      : escapePeerWrapperTags(maybeApplyUltracodeKeywords(fileResult.modifiedCommand, options.effort));
     tempImagePaths = imageResult.tempImagePaths;
     tempDir = imageResult.tempDir;
     // The transcript stores the prompt exactly as handed to the SDK, so
@@ -3996,6 +4436,16 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       } : {}),
     };
 
+    // ADR-219 م-6: the relay hook, in-process, on every relay-mode spawn. The mode is fixed
+    // for the run, so a native run (where the hook is a no-op) registers none: B-503 — an
+    // SDK-callback hook on a closed control stream cancels its tools at entry.
+    if (peerRun.relayMode === 'relay') {
+      sdkOptions.hooks.PreToolUse = [
+        ...(Array.isArray(sdkOptions.hooks.PreToolUse) ? sdkOptions.hooks.PreToolUse : []),
+        buildPeerRelayHookMatcher(peerRun, createPeerHookDependencies(hasSessionAgent)),
+      ];
+    }
+
     const armedSteer = armSteerRun({
       ws, sdkOptions, sessionIdRef: () => capturedSessionId || sessionId || null,
       sendAndBuffer: (payload) => bufferThenSend(ws, capturedSessionId || sessionId || null, payload),
@@ -4004,7 +4454,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // M2: a steer landing while a close is ARMED (the run went quiet) must
       // not be cut off by that timer — swap it for the steer hold.
       onQueued: () => {
-        if (inputReleasedAt === null && inputCloseTimer) armInputClose(sdkBackgroundHoldIdleMaxMs(), 'steer-hold-cap');
+        if (inputReleasedAt === null && inputCloseTimer) {
+          wakeHold.setWakeOnly(false); // B-1699: a queued steer is a reason of the run's own
+          armInputClose(sdkBackgroundHoldIdleMaxMs(), 'steer-hold-cap');
+        }
       },
       waitForApproval: waitForToolApproval,
       settleApproval: settleToolApproval,
@@ -4267,12 +4720,20 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         othersAllowed = isSteeringAllowedFor(steerRun.starterUserId).allowed;
         starterAllowed = isSteeringAllowedFor(steerRun.starterUserId, steerRun.starterUserId).allowed;
       } catch { /* fail-closed: not steerable */ }
-      bufferThenSend(ws, sid, {
+      const frame = {
         type: 'steer-turn-state', sessionId: sid, turnId: steerRun.turnId,
         starterUserId: steerRun.starterUserId, steerable: steerRun.taintHookArmed() && othersAllowed,
         starterSteerable: steerRun.injectionArmed() && steerRun.permissionMode() !== 'plan' && starterAllowed,
         forViewerUserId: null, capability: { midTurnInjection: true },
-      });
+      };
+      bufferThenSend(ws, sid, frame);
+      announceSteerClosed = () => {
+        try {
+          // bufferThenSend stamped the replay `sequence` on `frame`; a fresh frame gets its own.
+          const { sequence: _staleSequence, ...base } = frame;
+          bufferThenSend(ws, sid, { ...base, steerable: false, starterSteerable: false });
+        } catch { /* the close itself must never fail on a broadcast */ }
+      };
     };
 
     // B-117: the streaming-input prompt. Yields this turn's single user message —
@@ -4283,6 +4744,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       capability: options.vendorReceiptInvocation, command, content: finalCommand,
       userId: ws?.userId, sessionId: sessionId || null,
       persistSession: sdkOptions.persistSession, release: inputStreamRelease, steer: steerRun,
+      synthetic: Boolean(peerDelivery),
     });
     const makePromptStream = receiptPrompt.make;
     // B-SEC-ENV-LEAK: the restore MUST be in a finally welded to the query block.
@@ -4310,6 +4772,12 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       permissionExecution.markStarted();
       permissionStarted = true;
     }
+    // ADR-219: the final mode (after parity, settings defaultMode and the UI choice).
+    spawnPermissionMode = sdkOptions.permissionMode || 'default';
+    if (peerDelivery) {
+      peerDelivery.consumed = true;
+      if (sessionId) peerDeliverySessions.add(sessionId);
+    }
     try {
       try {
         queryInstance = query({
@@ -4317,11 +4785,14 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
           options: sdkOptions
         });
       } catch (hookError) {
-        if (receiptPrompt.wasConsumed() || reviewedDelegationReady) throw hookError;
+        // ADR-219 (qa م-3): a delivery turn without its relay hook must not run at all.
+        if (receiptPrompt.wasConsumed() || reviewedDelegationReady || peerDelivery) throw hookError;
         // Older/newer SDK versions may not accept hook shapes yet.
         // Keep notification behavior operational via runtime events even if hook registration fails.
         console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
         delete sdkOptions.hooks;
+        // ADR-219: no relay hook → the relay tools are removed rather than left unrouted.
+        if (peerRun.relayMode === 'relay') denyPeerToolsWithoutHook(sdkOptions);
         // T-1903: no hooks → no taint gate → no steering by OTHER members on this
         // run (fail-closed). The starter's own steer needs no gate and stays armed.
         steerTaintHookArmed = false;
@@ -4388,8 +4859,15 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     let wsDiagMessageCount = 0;
     // B-117: set once this run shows work that can resume after a `result`.
     let continuationPossible = false;
+    // B-1694: a top-level result answering this turn's own message was seen.
+    let turnAnswered = false;
+    // B-1694: count of top-level results seen in this run (for the diagnostic line).
+    let topLevelResultCount = 0;
     // B-1120: this run's pending CLI tasks and whether the main loop is quiet.
     const backgroundTasks = createBackgroundTaskTracker();
+    // B-1699: wake-ups this CLI process owes (no task_* event announces them).
+    const scheduledWakeups = createScheduledWakeupTracker(readWakeupHoldConfig().marginMs);
+    notifyWakeHold = sendAndBuffer;
     // ADR-199: this run's progress fold (task list, delegations); dies with the run.
     // A resumed run is seeded from the full transcript before its first event;
     // T-1988: the seed is size-capped and time-budgeted, past which the run
@@ -4477,6 +4955,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         }
 
         capturedSessionId = message.session_id;
+        if (peerDelivery) peerDeliverySessions.add(capturedSessionId);
         // ADR-041 / B-N-RESUME clean buffer (mirrors agy-cli.js): the SDK reports
         // its real session_id only now. A resumed run for a sessionId that carries
         // a prior, already-terminated registry entry must NOT inherit the previous
@@ -4494,6 +4973,13 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
           claudeSessionRegistry.drop(capturedSessionId);
         }
         addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort());
+        // ADR-218: the socket that started a NEW session mirrors it, so
+        // session-level frames (session-agents) reach it too. ADDITIVE, never the
+        // view-replacing setter: the user may already be viewing another session
+        // on this socket (switched before the id arrived), and stealing that
+        // mirror would cut its live stream (B-1666 #5). The next
+        // check-session-status narrows the socket to the session on screen.
+        if (!sessionId && ws?.ws) addSessionMirror(capturedSessionId, ws.ws);
         attachSteerRun(capturedSessionId);
         recordParticipant(capturedSessionId);
         // ADR-088: record the engine this spawn ACTUALLY engaged (the resolved
@@ -4568,6 +5054,17 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       settleAnnouncedWorkflows(capturedSessionId || sessionId, taskState.endedToolUseIds, 'notified',
         sendAndBuffer);
       if (taskState.backgrounded || taskState.continuationExpected) continuationPossible = true;
+      const wakeState = scheduledWakeups.observe(message, uuid => uuid === receiptPrompt.promptUuid()
+        || Boolean(steerRun?.findByUuid(uuid)));
+      wakeHold.observe(wakeState);
+      if (wakeState.scheduled) continuationPossible = true;
+      if (wakeState.firedCommandUuid) {
+        // B-1699: the wake-up turn has no `user` message; one neutral line marks it,
+        // with the id the transcript gives its (meta) prompt row.
+        sendAndBuffer(createNormalizedMessage({ kind: 'notice', id: wakeState.firedCommandUuid,
+          noticeCode: SCHEDULED_WAKEUP_NOTICE_CODE, content: SCHEDULED_WAKEUP_NOTICE_TEXT,
+          sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      }
       // T-1903: an injected message can start another invocation after a
       // `result`, and a `result` settles every injection yielded before it.
       if (steerRun?.everInjected()) continuationPossible = true;
@@ -4591,6 +5088,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       const progressFold = await progressFoldReady;
       normalized.push(...progressFold.observe(transformedMessage, normalized));
       agentSidecars.observe(message, sid);
+      // ADR-218: the session agents registry, fed from the same raw event.
+      observeClaudeRunEvent(sid, message, runToken);
+      // ADR-219: CLI version, agent origin hops, the session's cost total, delivery results.
+      observePeerRunMessage(peerRun, peerDelivery, sid, message);
       for (const msg of normalized) {
         // A thinking/tool/text delta is model activity.  User echoes and tool
         // results are not: the latter can arrive long after model work began.
@@ -4627,7 +5128,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         if (steerEcho && msg.kind === 'text' && msg.role === 'user') {
           // T-1903: the CLI echoed an injection — it is the SENDER's, never the starter's.
           Object.assign(msg, { injected: true, userId: steerEcho.senderUserId, content: steerEcho.text,
-            steerClientMsgId: steerEcho.clientMsgId, deliveryStatus: 'delivered' });
+            steerClientMsgId: steerEcho.clientMsgId, deliveryStatus: 'delivered',
+            ...(steerEcho.images?.length ? { images: steerEcho.images } : {}) });
         } else {
           stampHumanUserId(msg, ws?.userId);
         }
@@ -4691,6 +5193,13 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
             + `pending=${taskState.pending}`
           );
         }
+        if (wakeState.nextWakeAt !== null || wakeState.openEnded) {
+          console.log(
+            `[CONTROL-STREAM-HOLD] session=${capturedSessionId || sessionId || 'NEW'} `
+            + `scheduled-wakeup-in-ms=${wakeState.nextWakeAt === null ? 'open'
+              : Math.max(0, wakeState.nextWakeAt - Date.now())}`
+          );
+        }
       }
       if (message.type === 'system' && message.subtype === 'compact_boundary' && !message.parent_tool_use_id) {
         contextModelId = null;
@@ -4723,7 +5232,21 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
           sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
       }
 
-      reconsiderInputClose(taskState, continuationPossible);
+      if (message.type === 'result' && !message.parent_tool_use_id) topLevelResultCount += 1;
+      if (message.type === 'result' && !message.parent_tool_use_id && !turnAnswered) {
+        const promptUuid = receiptPrompt.promptUuid();
+        turnAnswered = resultAnswersTurn(message, promptUuid);
+        if (turnAnswered) turnResultWaitAnchorAt = null;
+        else turnResultWaitAnchorAt ??= Date.now();
+        // Logged for the run's first top-level result whatever the verdict, and for
+        // each later one weighed while the turn is still unanswered.
+        try {
+          console.log(describeTurnResult(message, promptUuid, turnAnswered, topLevelResultCount,
+            capturedSessionId || sessionId || 'NEW'));
+        } catch { /* logging must never break the run */ }
+      }
+      reconsiderInputClose(taskState, continuationPossible, turnAnswered, wakeState,
+        message.type === 'result' && !message.parent_tool_use_id);
 
       // Fork: stale `resume` surfaces as an error result whose text names the
       // missing conversation. Throw a tagged error so the shared catch path
@@ -4809,6 +5332,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     if (capturedSessionId) {
       // B-SEC-DUP-RUN: only tear down OUR OWN entry (see removeSession).
       removeSession(capturedSessionId, runToken);
+      // ADR-218: agents this run drove are no longer known to be running.
+      claudeRunExited(capturedSessionId, runToken);
     }
 
     // Clean up temporary image files
@@ -4891,6 +5416,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     if (capturedSessionId) {
       // B-SEC-DUP-RUN: only tear down OUR OWN entry (see removeSession).
       removeSession(capturedSessionId, runToken);
+      // ADR-218: agents this run drove are no longer known to be running.
+      claudeRunExited(capturedSessionId, runToken);
     }
     // ADR-041: terminal (error) state — flip the registry's active flag to
     // inactive and schedule the deferred buffer drop (post-close replay window),
@@ -5012,6 +5539,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     });
     return { ok: false };
   } finally {
+    if (peerDelivery) for (const sid of [sessionId, capturedSessionId]) if (sid) peerDeliverySessions.delete(sid);
     await agentSidecars.close().catch(() => undefined);
     if (permissionExecution && permissionConsumed) {
       try {
@@ -5519,6 +6047,7 @@ export {
   // T-881: read-only /btw side query (resume + forkSession, never registered).
   spawnClaudeSideQuery,
   mapCliOptionsToSDK,
+  applySettingsPermissionMode,
   buildValidClaudeModelValues,
   // Lazy model-discovery (B-MODEL-DISCOVERY): pure detector for the
   // model_not_found/404 signal. Exported for unit testing only.
@@ -5528,6 +6057,13 @@ export {
   // ADR-042 (B-80c) ghost-detach.
   getDrainBlockingClaudeSessions,
   ghostDetachEnabled,
+  // B-1699: a drain releases runs held only for a scheduled wake-up; the restart
+  // scan exempts their CLI pids; the test seam resets the process-wide drain flag.
+  releaseScheduledWakeupHoldsForDrain,
+  getScheduledWakeupHoldPids,
+  resetScheduledWakeupDrainForTests,
+  // ADR-219 (qa م-5): native holds end when the node gains a second member.
+  releaseNativeHoldsOnRelayTransition,
   // Test seam for the ghost sweep (ADR-042 test plan). addSession/removeSession
   // are the real production paths — using them keeps the unit tests faithful.
   sweepGhostSessions,
@@ -5538,5 +6074,6 @@ export {
   announceUnresolvedWorkflows,
   settleAnnouncedWorkflows,
   // Pure helpers — exported for unit testing only (no side effects, no I/O).
-  handleFiles
+  handleFiles,
+  resultAnswersTurn
 };

@@ -25,8 +25,50 @@
  * History messages (GET session messages) gain, on a user text row that is a
  * VERIFIED injection (ingress uuid + payload hash match, never text parsing):
  *   injected: true, userId: <sender>, deliveryStatus: 'delivered',
- *   steerClientMsgId: <sender's clientMsgId>, content: the sender's text (wrapper stripped).
+ *   steerClientMsgId: <sender's clientMsgId>, content: the sender's text (wrapper stripped),
+ *   images: SteerImageRef[] when the steer carried images (B-1697).
  */
+
+/**
+ * B-1697: one image a steer carried, as a reference into the chat-image store.
+ * Never an absolute path: the client builds `/api/chat-images/<bucket>/<name>`
+ * from it, the same authenticated route a normal prompt's image uses.
+ */
+export interface SteerImageRef {
+  /** 32 lowercase hex chars. */
+  bucket: string;
+  /** `image_<n>.<ext>`. */
+  name: string;
+}
+
+const STEER_IMAGE_BUCKET = /^[0-9a-f]{32}$/u;
+const STEER_IMAGE_NAME = /^image_\d{1,4}\.(?:png|jpe?g|gif|webp|svg)$/u;
+/** The store's hard per-message ceiling (chat-image-store HARD_MAX_IMAGES). */
+export const STEER_IMAGES_MAX = 50;
+
+/**
+ * Strict reader for steer image refs from any untrusted carrier (wire frame,
+ * stored JSON): keeps only well-formed `{bucket,name}` pairs, drops everything
+ * else, never throws. Both server and client use it, so neither ever builds a
+ * URL from a malformed ref.
+ */
+export function readSteerImageRefs(value: unknown): SteerImageRef[] {
+  if (!Array.isArray(value)) return [];
+  const refs: SteerImageRef[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value.slice(0, STEER_IMAGES_MAX)) {
+    const ref = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : null;
+    const bucket = ref?.bucket;
+    const name = ref?.name;
+    if (typeof bucket !== 'string' || typeof name !== 'string'
+      || !STEER_IMAGE_BUCKET.test(bucket) || !STEER_IMAGE_NAME.test(name)) continue;
+    const key = `${bucket}/${name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ bucket, name });
+  }
+  return refs;
+}
 
 export type SteerPolicyMode = 'off' | 'per_user';
 
@@ -140,6 +182,8 @@ export interface SteerEvent {
   deliveryStatus: SteerDeliveryStatus;
   /** Present on steer-queued so the starter sees what was injected. */
   text?: string;
+  /** B-1697: present on steer-queued when the steer carried images. */
+  images?: SteerImageRef[];
   reason?: SteerRejectCode;
 }
 
@@ -150,4 +194,4 @@ export interface SteerEvent {
  * starter's socket at run start — after a reconnect it cannot be answered and
  * ends in a (safe) deny.
  */
-export const STEER_TAINT_FREE_TOOLS: readonly string[] = Object.freeze(['Read', 'Grep', 'Glob', 'TodoWrite', 'TaskOutput']);
+export const STEER_TAINT_FREE_TOOLS: readonly string[] = Object.freeze(['Read', 'Grep', 'Glob', 'TodoWrite']);

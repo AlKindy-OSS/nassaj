@@ -220,6 +220,54 @@ const baseline = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS peer_messages (\n  id TEXT PRIMARY KEY NOT NULL,\n  ref_token TEXT NOT NULL UNIQUE,\n  chain_id TEXT NOT NULL,\n  from_user_id INTEGER NOT NULL,\n  from_session_id TEXT NOT NULL,\n  from_agent_id TEXT,\n  from_mode TEXT NOT NULL,\n  stamped_mode TEXT,\n  to_user_id INTEGER,\n  to_session_id TEXT NOT NULL,\n  project_id TEXT,\n  body TEXT NOT NULL,\n  body_sha256 TEXT NOT NULL,\n  body_bytes INTEGER NOT NULL CHECK (body_bytes >= 0),\n  summary TEXT,\n  hop INTEGER NOT NULL CHECK (hop >= 1),\n  parent_id TEXT,\n  notify_when_idle INTEGER NOT NULL DEFAULT 0,\n  state TEXT NOT NULL CHECK (state IN ('queued', 'delivering', 'delivered', 'refused', 'deferred_quota', 'failed')),\n  cause TEXT,\n  delivery_path TEXT,\n  approval_text_hash TEXT,\n  approval_target_mode TEXT,\n  approved_by INTEGER,\n  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),\n  next_attempt_at INTEGER,\n  proof_scan_offset INTEGER,\n  cost_usd_charged REAL,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  delivered_at INTEGER\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_messages_to_user_state ON peer_messages(to_user_id, state)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_messages_to_session ON peer_messages(to_session_id, state, created_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_messages_from_session ON peer_messages(from_session_id, created_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_messages_from_user ON peer_messages(from_user_id, created_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS peer_session_cost_totals (\n  session_id TEXT PRIMARY KEY NOT NULL,\n  total_cost_usd REAL NOT NULL CHECK (total_cost_usd >= 0),\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS peer_agent_origin_hops (\n  session_id TEXT NOT NULL,\n  agent_id TEXT NOT NULL,\n  origin_hop INTEGER NOT NULL CHECK (origin_hop >= 0),\n  created_at INTEGER NOT NULL,\n  PRIMARY KEY (session_id, agent_id)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS session_permission_modes (\n  session_id TEXT NOT NULL,\n  owner_user_id INTEGER NOT NULL,\n  permission_mode TEXT NOT NULL,\n  updated_at INTEGER NOT NULL,\n  PRIMARY KEY (session_id, owner_user_id)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "run",
     "sql": "UPDATE connector_runtime_anchor SET\n    maximum_fencing_token = ?, maximum_writer_epoch = ?, clock_high_water_ms = ?, authority_mac = ?\n    WHERE singleton = 1 AND authority_mac = ?",
     "shadow": null

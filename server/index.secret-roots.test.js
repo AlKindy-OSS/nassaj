@@ -18,8 +18,9 @@ import { fileURLToPath } from 'node:url';
 import test, { after, before } from 'node:test';
 
 import { isForbiddenProjectRoot, isSecretPath } from './shared/secret-path-guard.js';
-import { openReadableProjectFile } from './utils/path-guard.js';
+import { openReadableProjectFile, pathHasGitDirSegment } from './utils/path-guard.js';
 import { isSecretFileConfirmed, sendSecretFileConfirmationRequired } from './utils/secret-file-access.js';
+import { rebaseRequestedPath } from './services/session-file-root.js';
 
 const INDEX_SOURCE = fs.readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js'),
@@ -197,6 +198,11 @@ function buildReadHandler(projectRoot) {
     isSecretFileConfirmed,
     sendSecretFileConfirmationRequired,
     auditSecretFileAccess: () => {},
+    // B-1689: no sessionId here, so the file root is the project root.
+    resolveFileRootOrRespond: (_req, _res, root) => ({
+      root, overlay: false, sessionId: null, overlayId: null,
+    }),
+    rebaseRequestedPath,
     console: quiet,
   });
 }
@@ -255,6 +261,7 @@ test('create-folder refuses to create inside a hidden home entry', async () => {
     path,
     validateWorkspacePath: acceptUnderHome,
     isSecretPath,
+    pathHasGitDirSegment,
     fs,
   });
   const target = path.join(fakeHome, '.ssh', 'planted');
@@ -268,4 +275,37 @@ test('create-folder refuses to create inside a hidden home entry', async () => {
   await handler({ body: { path: allowed } }, ok.res);
   assert.equal(ok.sent[0].status, 200);
   assert.equal(fs.existsSync(allowed), true);
+});
+
+test('B-1691 (qa F5): create-folder refuses a .git segment, lexically or through a symlink', async () => {
+  const handler = buildHandler("app.post('/api/create-folder'", {
+    console: quiet,
+    expandWorkspacePath: (p) => p,
+    path,
+    // Mirrors validateWorkspacePath: resolvedPath is the real path.
+    validateWorkspacePath: async (target) => {
+      let probe = target;
+      const tail = [];
+      while (!fs.existsSync(probe)) { tail.unshift(path.basename(probe)); probe = path.dirname(probe); }
+      return { valid: true, resolvedPath: path.join(fs.realpathSync(probe), ...tail) };
+    },
+    isSecretPath,
+    pathHasGitDirSegment,
+    fs,
+  });
+  const repo = path.join(fakeHome, 'Project', 'repo');
+  fs.mkdirSync(path.join(repo, '.git', 'hooks'), { recursive: true });
+  fs.symlinkSync(path.join(repo, '.git'), path.join(repo, 'gitlink'));
+  for (const target of [
+    path.join(repo, '.git', 'hooks', 'evil'), path.join(repo, '.GIT'), path.join(repo, 'gitlink', 'evil'),
+  ]) {
+    const refused = makeResponseDouble();
+    await handler({ body: { path: target } }, refused.res);
+    assert.equal(refused.sent[0].status, 403, target);
+  }
+  assert.equal(fs.existsSync(path.join(repo, '.git', 'hooks', 'evil')), false);
+  assert.equal(fs.existsSync(path.join(repo, '.git', 'evil')), false);
+  const ok = makeResponseDouble();
+  await handler({ body: { path: path.join(repo, '.github') } }, ok.res);
+  assert.equal(ok.sent[0].status, 200);
 });

@@ -153,3 +153,24 @@ test('B-1423: an inadmissible path is refused before any lookup or write', async
   );
   assert.deepEqual(touched, []);
 });
+
+test('B-1691 (qa F8): createProject refuses a resolved root inside .git whatever validatePath says', async () => {
+  const touched: string[] = [];
+  for (const resolvedPath of ['/workspace/P/.git', '/workspace/P/.git/nassaj-session-overlays/instances/x/workspace']) {
+    await assert.rejects(
+      async () => createProject(
+        { projectPath: resolvedPath, createdBy: 7 },
+        {
+          validatePath: async () => ({ valid: true, resolvedPath }),
+          ensureWorkspaceDirectory: async () => { touched.push('mkdir'); },
+          persistProjectPath: () => { touched.push('persist'); return { outcome: 'created', project: projectRow }; },
+          getProjectByPath: () => { touched.push('lookup'); return null; },
+          isPathAdmitted: () => { touched.push('admit'); return true; },
+        },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 400
+        && error.code === 'PROJECT_ROOT_FORBIDDEN',
+    );
+  }
+  assert.deepEqual(touched, []);
+});

@@ -46,4 +46,25 @@ describe('SteerBubble', () => {
     expect(container.innerHTML).toContain('var(--session-steer-rule)');
     expect(container.querySelector('bdi')).toBeNull();
   });
+
+  it('B-1697: renders the steer images as thumbnails below the text', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    const { container } = render(
+      <SteerBubble senderName="Sara" content="see this" images={[
+        { name: 'image_0.png', data: png },
+        { name: 'image_1.png', data: `${png}A` },
+      ]} />,
+    );
+    const grid = container.querySelector('[data-steer-images="true"]');
+    expect(grid).not.toBeNull();
+    const imgs = grid!.querySelectorAll('img');
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0].getAttribute('src')).toBe(png);
+    expect(imgs[0].getAttribute('alt')).toBe('image_0.png');
+  });
+
+  it('B-1697: renders no image grid for a text-only steer', () => {
+    const { container } = render(<SteerBubble senderName="Sara" content="text only" images={[]} />);
+    expect(container.querySelector('[data-steer-images]')).toBeNull();
+  });
 });

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  formatApiSpend,
   formatClaudeExtraBadgeText,
   formatClaudeExtraDetailAmounts,
   formatCreditBalance,
@@ -171,5 +172,16 @@ describe('formatClaudeExtraDetailAmounts', () => {
       ),
       { used: '$30.00', limit: '$80.00' },
     );
+  });
+});
+
+describe('formatApiSpend (ADR-214)', () => {
+  it('formats cents as currency when data exists', () => {
+    assert.equal(formatApiSpend({ spendCents: 4217, currency: 'USD', hasData: true }, 'en'), '$42.17');
+  });
+
+  it('a confirmed zero is $0.00, but no data is null — never a fabricated zero', () => {
+    assert.equal(formatApiSpend({ spendCents: 0, currency: 'USD', hasData: true }, 'en'), '$0.00');
+    assert.equal(formatApiSpend({ spendCents: 0, currency: 'USD', hasData: false }, 'en'), null);
   });
 });

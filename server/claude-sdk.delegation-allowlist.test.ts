@@ -24,7 +24,11 @@ import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mapCliOptionsToSDK, buildValidClaudeModelValues } from './claude-sdk.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { mapCliOptionsToSDK, applySettingsPermissionMode, buildValidClaudeModelValues } from './claude-sdk.js';
 
 const validModels = buildValidClaudeModelValues?.() ?? [];
 
@@ -47,6 +51,15 @@ test('an explicit permission mode still keeps delegation allow-listed', () => {
     assert.ok(allowed.includes('Task'), `Task missing under permissionMode=${permissionMode}`);
     assert.ok(allowed.includes('Agent'), `Agent missing under permissionMode=${permissionMode}`);
   }
+});
+
+test('T-2071: the permission mode is always passed, default included', () => {
+  const modeFor = (options: Record<string, unknown>) =>
+    (mapCliOptionsToSDK(options as never, validModels as never) as { permissionMode?: string }).permissionMode;
+  assert.equal(modeFor({}), 'default', 'an absent mode is sent as default, never left to the CLI');
+  assert.equal(modeFor({ permissionMode: 'default' }), 'default');
+  assert.equal(modeFor({ permissionMode: 'acceptEdits' }), 'acceptEdits');
+  assert.equal(modeFor({ permissionMode: 'plan' }), 'plan');
 });
 
 test('caller-supplied allowedTools are preserved, and no entry is duplicated', () => {
@@ -90,4 +103,97 @@ test('enforce projects full delegation while mechanically denying agent delegati
   assert.throws(() => mapCliOptionsToSDK({
     permissionExecution: { mode: 'enforce', effectivePolicy: null },
   } as never, validModels as never), /PERMISSION_EFFECTIVE_POLICY_REQUIRED/u);
+});
+
+test('T-2071 M5: an implicit default follows the settings permissions.defaultMode; explicit choices stay', () => {
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 't2071-m5-'));
+  try {
+    const configDir = path.join(dir, 'config');
+    const managedDir = path.join(dir, 'managed');
+    fs.mkdirSync(configDir);
+    fs.mkdirSync(managedDir);
+    fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'acceptEdits' } }));
+    const env = { HOME: dir, CLAUDE_CONFIG_DIR: configDir };
+    const run = (options: Record<string, unknown>) => {
+      const sdk = mapCliOptionsToSDK({ cwd: dir, ...options } as never, validModels as never) as Record<string, unknown>;
+      sdk.env = env;
+      return (applySettingsPermissionMode(sdk, { managedSettingsDir: managedDir }) as { permissionMode?: string })
+        .permissionMode;
+    };
+    assert.equal(run({}), 'acceptEdits', 'no mode from the UI: the settings decide');
+    assert.equal(run({ permissionMode: 'default' }), 'acceptEdits', 'the composer default is not a choice');
+    assert.equal(run({ permissionMode: 'plan' }), 'plan', 'an explicit choice stays');
+    assert.equal(run({ permissionMode: 'bypassPermissions' }), 'bypassPermissions');
+
+    fs.writeFileSync(path.join(managedDir, 'managed-settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
+    assert.equal(run({}), 'plan', 'managed policy wins over user settings');
+    fs.writeFileSync(path.join(managedDir, 'managed-settings.json'), '{ broken');
+    assert.equal(run({}), 'acceptEdits', 'a malformed file is skipped');
+    fs.rmSync(path.join(configDir, 'settings.json'));
+    fs.rmSync(path.join(managedDir, 'managed-settings.json'));
+    assert.equal(run({}), 'default', 'no settings mode: explicit default');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T-2071 M5: the parity path is never changed by settings', () => {
+  const sdk = mapCliOptionsToSDK({ permissionExecution: { mode: 'enforce',
+    effectivePolicy: { profileId: 'full_delegation' } } } as never, validModels as never) as Record<string, unknown>;
+  sdk.env = { HOME: '/nonexistent', CLAUDE_CONFIG_DIR: '/nonexistent' };
+  assert.equal((applySettingsPermissionMode(sdk) as { permissionMode?: string }).permissionMode, 'bypassPermissions');
+});
+
+test('T-2071 I1: project and local-project settings never choose the mode of a run', () => {
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 't2071-i1-'));
+  try {
+    const configDir = path.join(dir, 'config');
+    const managedDir = path.join(dir, 'managed');
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.mkdirSync(configDir);
+    fs.mkdirSync(managedDir);
+    const env = { HOME: dir, CLAUDE_CONFIG_DIR: configDir };
+    const run = () => {
+      const sdk = mapCliOptionsToSDK({ cwd: dir } as never, validModels as never) as Record<string, unknown>;
+      sdk.env = env;
+      return (applySettingsPermissionMode(sdk, { managedSettingsDir: managedDir }) as { permissionMode?: string })
+        .permissionMode;
+    };
+    const write = (file: string, mode: string) =>
+      fs.writeFileSync(file, JSON.stringify({ permissions: { defaultMode: mode } }));
+    write(path.join(dir, '.claude', 'settings.json'), 'acceptEdits');
+    assert.equal(run(), 'default', 'project settings are ignored');
+    write(path.join(dir, '.claude', 'settings.local.json'), 'dontAsk');
+    assert.equal(run(), 'default', 'local project settings are ignored');
+    write(path.join(configDir, 'settings.json'), 'plan');
+    assert.equal(run(), 'plan', 'the user\'s own settings count');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T-2071 I1: bypassPermissions is never derived from settings', () => {
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 't2071-i1b-'));
+  try {
+    const configDir = path.join(dir, 'config');
+    const managedDir = path.join(dir, 'managed');
+    fs.mkdirSync(configDir);
+    fs.mkdirSync(managedDir);
+    const env = { HOME: dir, CLAUDE_CONFIG_DIR: configDir };
+    const run = () => {
+      const sdk = mapCliOptionsToSDK({ cwd: dir } as never, validModels as never) as Record<string, unknown>;
+      sdk.env = env;
+      const out = applySettingsPermissionMode(sdk, { managedSettingsDir: managedDir }) as Record<string, unknown>;
+      return { mode: out.permissionMode, allow: out.allowDangerouslySkipPermissions };
+    };
+    const write = (file: string, mode: string) =>
+      fs.writeFileSync(file, JSON.stringify({ permissions: { defaultMode: mode } }));
+    write(path.join(configDir, 'settings.json'), 'bypassPermissions');
+    assert.deepEqual(run(), { mode: 'default', allow: undefined }, 'user bypass is ignored');
+    write(path.join(managedDir, 'managed-settings.json'), 'bypassPermissions');
+    write(path.join(configDir, 'settings.json'), 'acceptEdits');
+    assert.deepEqual(run(), { mode: 'acceptEdits', allow: undefined }, 'managed bypass is skipped, next source wins');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -45,6 +45,54 @@ describe('useHarnessInstall', () => {
     window.removeEventListener(HARNESS_INSTALLED_EVENT, listener);
   });
 
+  it('turns 409 CONFIRMATION_REQUIRED into confirming, resends the acks, and cancel returns to idle (ADR-215)', async () => {
+    const required = [{ kind: 'systemCopy', token: 't1', expiresAt: Date.now() + 60_000, textEn: 'e', textAr: 'ع', facts: {} }];
+    const bodies: string[] = [];
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        bodies.push(String(init.body));
+        return bodies.length === 1
+          ? response({ code: 'CONFIRMATION_REQUIRED', message: 'confirm', required }, 409)
+          : response({ jobId: 'job-1', provider: 'claude', status: 'running' }, 202);
+      }
+      return response(job({ provider: 'claude' }));
+    });
+    const { result } = renderHook(() => useHarnessInstall('claude'));
+    await act(async () => result.current.start());
+    expect(result.current.state.status).toBe('confirming');
+    expect(result.current.state.required).toEqual(required);
+    act(() => result.current.cancel());
+    expect(result.current.state.status).toBe('idle');
+    await act(async () => result.current.start());
+    await act(async () => result.current.start([{ kind: 'systemCopy', token: 't1' }]));
+    expect(JSON.parse(bodies[0])).toEqual({});
+    expect(JSON.parse(bodies[2])).toEqual({ acks: [{ kind: 'systemCopy', token: 't1' }] });
+    await waitFor(() => expect(result.current.state.status).toBe('running'));
+  });
+
+  it('sends one POST when Confirm is double-clicked and keeps the acks while starting (qa M3)', async () => {
+    const required = [{ kind: 'npmRemoval', token: 't1', expiresAt: Date.now() + 60_000, textEn: 'e', textAr: 'ع', facts: {} }];
+    let release: (value: Response) => void = () => {};
+    let posts = 0;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return response(job({ provider: 'claude' }));
+      posts += 1;
+      if (posts === 1) return response({ code: 'CONFIRMATION_REQUIRED', message: 'confirm', required }, 409);
+      return new Promise<Response>((resolve) => { release = resolve; });
+    });
+    const { result } = renderHook(() => useHarnessInstall('claude'));
+    await act(async () => result.current.start());
+    const acks = [{ kind: 'npmRemoval' as const, token: 't1' }];
+    let first: Promise<void> = Promise.resolve();
+    act(() => { first = result.current.start(acks); void result.current.start(acks); });
+    expect(posts).toBe(2);
+    expect(result.current.state.status).toBe('starting');
+    expect(result.current.state.required).toEqual(required);
+    await act(async () => { release({ ok: true, status: 202, json: async () => ({ jobId: 'job-1' }) } as Response); await first; });
+    await waitFor(() => expect(result.current.state.status).toBe('running'));
+    expect(posts).toBe(2);
+  });
+
   it('resumes polling the active job on 409 HARNESS_UPDATE_IN_PROGRESS', async () => {
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return response({ code: 'HARNESS_UPDATE_IN_PROGRESS', message: 'busy', activeJobId: 'job-active' }, 409);

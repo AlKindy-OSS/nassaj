@@ -29,6 +29,8 @@ export function useBinaryFileDownload(
   projectId: string | undefined,
   filePath: string,
   fileName: string,
+  /** B-1689: chat session whose overlay copy to download, when opened from chat. */
+  sessionId: string | null = null,
 ): DownloadState {
   const [isDownloading, setIsDownloading] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -40,7 +42,7 @@ export function useBinaryFileDownload(
     try {
       // B-1593: a secrets file (e.g. a project SQLite database) asks first.
       const response = await requestWithSecretConfirmation(
-        (confirmSecret) => api.readFileBlob(projectId, filePath, { confirmSecret }),
+        (confirmSecret) => api.readFileBlob(projectId, filePath, { confirmSecret, sessionId }),
         { fileName },
       );
       if (response === SECRET_FILE_DECLINED) return;
@@ -52,7 +54,7 @@ export function useBinaryFileDownload(
     } finally {
       setIsDownloading(false);
     }
-  }, [projectId, filePath, fileName, isDownloading]);
+  }, [projectId, filePath, fileName, sessionId, isDownloading]);
 
   return { isDownloading, hasError, download };
 }

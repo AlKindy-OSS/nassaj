@@ -7,7 +7,7 @@
  */
 
 /** Harnesses the server can install for the owner. */
-export type InstallableHarnessId = 'codex' | 'opencode';
+export type InstallableHarnessId = 'codex' | 'opencode' | 'antigravity' | 'claude';
 
 /** Display copy of one installable harness. */
 export interface HarnessInstallInfo {
@@ -31,6 +31,23 @@ export const HARNESS_INSTALL_INFO: Readonly<Record<InstallableHarnessId, Harness
     command: 'curl -fsSL https://opencode.ai/install | bash',
     note: 'Official installer → ~/.opencode/bin/opencode. An npm -g copy is not detected.',
   }),
+  // ADR-215 stage A. Measured 2026-10-20: the vendor's `agy install` appends a
+  // PATH line to an existing ~/.bashrc and ~/.profile (official footprint).
+  antigravity: Object.freeze({
+    label: 'Antigravity CLI (agy) is not installed',
+    command: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    note: 'Official installer → ~/.local/bin/agy; it downloads from a Cloud Run manifest host and '
+      + 'storage.googleapis.com, and adds a PATH line to ~/.bashrc and ~/.profile.',
+  }),
+  // ADR-215 stage B. Nassaj takes the same release path as this command
+  // (latest → manifest → binary → `claude install <v>`) and also checks the
+  // vendor's GPG signature on the manifest.
+  claude: Object.freeze({
+    label: 'Claude Code CLI is not installed',
+    command: 'curl -fsSL https://claude.ai/install.sh | bash',
+    note: 'Official native installer → ~/.local/bin/claude → ~/.local/share/claude/versions/<v>; '
+      + 'Nassaj verifies the vendor-signed manifest first.',
+  }),
 });
 
 /** True when `id` is a harness the install endpoint accepts. */
@@ -53,11 +70,17 @@ export type HarnessInstallRefusalCode =
   | 'HARNESS_ALREADY_INSTALLED'
   | 'HARNESS_INSTALL_INVALID'
   | 'HARNESS_OVERRIDE_SET'
-  | 'HARNESS_UPDATE_IN_PROGRESS';
+  | 'HARNESS_UPDATE_IN_PROGRESS'
+  /** ADR-215 §3.6: one install at a time across all harnesses. */
+  | 'HARNESS_INSTALL_SLOT_BUSY';
 
 /** Failure codes an install job can end with (`job.error.code`). */
 export type HarnessInstallJobErrorCode =
   | 'install_failed'
   | 'install_timeout'
   | 'verify_failed'
-  | 'script_rejected';
+  | 'script_rejected'
+  /** ADR-215 ش4: free space in HOME is below the descriptor's minimum. */
+  | 'insufficient_space'
+  /** ADR-215 ش3: gpgv is missing, so the claude manifest cannot be verified. */
+  | 'verifier_unavailable';
