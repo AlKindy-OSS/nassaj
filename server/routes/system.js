@@ -151,6 +151,9 @@ import {
 } from '../../scripts/lib/source-update-database-snapshot.mjs';
 import { resolveDatabaseFilePath } from '../modules/database/database-path.js';
 import { appendGateStderr, gateReasonFromStderr } from '../shared/action-gate-reason.js';
+import {
+    isBootstrapHandoffPending, readOpenMaintenanceGate, readQueuedActionEvidence, settleSourceUpdateJobRows,
+} from '../services/update-job-abandon.js';
 
 const router = express.Router();
 
@@ -880,15 +883,75 @@ function supersededQueuedReason(action, { runtimeCommit, head }) {
     return null;
 }
 
-/** Settle the open command-board rows of one superseded job; never restarts anything. */
-function settleSupersededJobRows(jobId, code, actions) {
-    let settled = 0;
-    for (const row of actions.listOpenForSourceUpdateJob(jobId)) {
-        settled += row.status === 'executing'
-            ? actions.failExecutingAttempt(row.id, row.executionAttemptNonce, code)
-            : actions.supersedeQueued(row.id, code);
+const QUEUED_SETTLE_MESSAGES = Object.freeze({
+    source_update_source_moved: 'The source moved past the commit this update was prepared from.',
+    source_update_target_already_loaded: 'The running server already runs this release.',
+    source_update_action_missing: 'The queued update lost its activation action; nothing was activated. Start the update again.',
+});
+
+/**
+ * B-1603: the outcome for a queued job whose bound action is missing or
+ * unusable, decided only from what the job's own records prove about its
+ * originalHead (a hash-bound action file or a receipt). HEAD and runtime moved
+ * past it: superseded. HEAD still at it with the gate OPEN: failed, so the node
+ * can retry. Anything else is left alone.
+ */
+function unusableQueuedActionOutcome(job, { root, head, runtimeCommit, gateOpen, jobs }) {
+    let receipts = [];
+    try { receipts = jobs.listReceipts?.(job.id) || []; } catch { receipts = []; }
+    const evidence = readQueuedActionEvidence(job, root, receipts);
+    if (!evidence || !SOURCE_UPDATE_SHA40.test(head || '')) return null;
+    const runtime = SOURCE_UPDATE_SHA40.test(runtimeCommit || '') ? runtimeCommit : null;
+    if (runtime && runtime === job.release_commit) return { next: 'superseded', code: 'source_update_target_already_loaded' };
+    if (head !== evidence.originalHead && runtime
+        && runtime !== evidence.originalHead && runtime !== evidence.previousRuntimeOid) {
+        return { next: 'superseded', code: 'source_update_source_moved' };
     }
-    return settled;
+    if (head === evidence.originalHead && gateOpen(job)) return { next: 'failed', code: 'source_update_action_missing' };
+    return null;
+}
+
+/** Settle one queued job whose action is unusable: receipt, terminal state, rows and audit in one transaction. */
+function settleUnusableQueuedJob(job, outcome, { jobs, actions, audit, transact }) {
+    const identity = { jobId: job.id, transactionId: job.transaction_id, activationIdentitySha256: job.activation_identity_sha256 };
+    return transact(() => {
+        jobs.appendActivationReceipt(identity, 'restart_queued', 'recovery',
+            { code: outcome.code, failedPhase: 'restart_queued', intervention: 'automatic' });
+        if (!jobs.settleRestartQueued(identity, outcome.next, outcome.code, QUEUED_SETTLE_MESSAGES[outcome.code])) {
+            throw Object.assign(new Error('source_update_job_not_queued'), { notQueued: true });
+        }
+        const rows = settleSourceUpdateJobRows(job.id, outcome.code, actions);
+        audit.record(outcome.next === 'failed' ? 'source_update_action_missing_at_boot' : 'source_update_superseded_at_boot',
+            { metadata: { sourceUpdateJobId: job.id, code: outcome.code, rows } });
+        return { jobId: job.id, settled: true, state: outcome.next, code: outcome.code, rows };
+    });
+}
+
+/** One queued job at boot: the B-1583 path when its action is bound, else the B-1603 path. */
+function reconcileQueuedJob(job, context) {
+    const { root, head, runtimeCommit, jobs, actions, audit } = context;
+    let action = null;
+    try { action = readBoundQueuedAction(job, root); } catch { action = null; }
+    if (!action) {
+        const outcome = unusableQueuedActionOutcome(job, context);
+        if (!outcome) return { jobId: job.id, settled: false };
+        try { return settleUnusableQueuedJob(job, outcome, context); } catch (error) {
+            if (error?.notQueued) return { jobId: job.id, settled: false, code: outcome.code };
+            return { jobId: job.id, settled: false, error: String(error?.message || error).slice(0, 200) };
+        }
+    }
+    const code = supersededQueuedReason(action, { runtimeCommit, head });
+    if (!code) return { jobId: job.id, settled: false };
+    const identity = { jobId: job.id, transactionId: job.transaction_id, activationIdentitySha256: job.activation_identity_sha256 };
+    try {
+        jobs.appendActivationReceipt(identity, 'restart_queued', 'recovery', { code, intervention: 'automatic' });
+        if (!jobs.transitionActivation(identity, ['restart_queued'], 'superseded')) return { jobId: job.id, settled: false, code };
+        const rows = settleSourceUpdateJobRows(job.id, code, actions);
+        audit.record('source_update_superseded_at_boot', { metadata: { sourceUpdateJobId: job.id, code, rows } });
+        return { jobId: job.id, settled: true, code, rows };
+    } catch (error) {
+        return { jobId: job.id, settled: false, error: String(error?.message || error).slice(0, 200) };
+    }
 }
 
 /**
@@ -899,33 +962,32 @@ function settleSupersededJobRows(jobId, code, actions) {
  * rows are settled, and the outcome is audited. Idempotent; never restarts;
  * runs after completeBootstrappedSourceUpdate, so an in-flight activation is
  * already past `restart_queued` and is not touched.
+ *
+ * B-1603: a job whose action is missing or unusable is decided by the job's
+ * own records instead (unusableQueuedActionOutcome). Never restarts and never
+ * rolls back.
  */
 export function reconcileSupersededQueuedSourceUpdates({
     jobs = sourceUpdateJobsDb, actions = pendingServerActionsDb, audit = auditLogDb,
     runtimeCommit = null, readHead = () => readSourceHead(APP_ROOT),
-    controlRoot = null,
+    controlRoot = null, readGate = null,
+    transact = (fn) => getConnection().transaction(fn)(),
 } = {}) {
     const queued = jobs.listRestartQueuedGitCheckout();
     if (!queued.length) return [];
     let head = null;
     try { head = readHead(); } catch { head = null; }
-    const root = controlRoot || createUpdateMaintenanceGate({ projectPath: APP_ROOT }).paths.controlRoot;
-    return queued.map((job) => {
-        let action = null;
-        try { action = readBoundQueuedAction(job, root); } catch { action = null; }
-        const code = action ? supersededQueuedReason(action, { runtimeCommit, head }) : null;
-        if (!code) return { jobId: job.id, settled: false };
-        const identity = { jobId: job.id, transactionId: job.transaction_id, activationIdentitySha256: job.activation_identity_sha256 };
-        try {
-            jobs.appendActivationReceipt(identity, 'restart_queued', 'recovery', { code, intervention: 'automatic' });
-            if (!jobs.transitionActivation(identity, ['restart_queued'], 'superseded')) return { jobId: job.id, settled: false, code };
-            const rows = settleSupersededJobRows(job.id, code, actions);
-            audit.record('source_update_superseded_at_boot', { metadata: { sourceUpdateJobId: job.id, code, rows } });
-            return { jobId: job.id, settled: true, code, rows };
-        } catch (error) {
-            return { jobId: job.id, settled: false, error: String(error?.message || error).slice(0, 200) };
-        }
-    });
+    let gate = null;
+    const appGate = () => (gate ||= createUpdateMaintenanceGate({ projectPath: APP_ROOT }));
+    const root = controlRoot || appGate().paths.controlRoot;
+    // An OPEN journal with no pending handoff; a leftover descriptor of the
+    // finished transaction is inert (see isBootstrapHandoffPending).
+    const gateOpen = (job) => {
+        const open = readOpenMaintenanceGate(readGate || (() => appGate().readRecoveryEvidence()));
+        return Boolean(open) && !isBootstrapHandoffPending(root, open, job.transaction_id);
+    };
+    const context = { root, head, runtimeCommit, gateOpen, jobs, actions, audit, transact };
+    return queued.map((job) => reconcileQueuedJob(job, context));
 }
 
 /**
@@ -1162,6 +1224,11 @@ function broadcastPendingActionsUpdated(req) {
 // The per-IP rate limit + the DB CAS claim are the durable protection; this just
 // blunts overlapping owner clicks.
 let restartInFlight = false;
+
+/** B-1605: whether this process launched a restart that has not ended (read only). */
+export function isServerActionRestartInFlight() {
+    return restartInFlight;
+}
 
 // Longest we keep `restartInFlight` set after launching a detached --exec that
 // is EXPECTED to end this process. If the process is still alive after this, the

@@ -1312,3 +1312,73 @@ describe('unified local update dialog', () => {
   });
 
 });
+
+describe('VersionUpgradeModal stop-stuck-update button across polling', () => {
+  const STATUS_URL = '/api/system/update/jobs/stuck-1';
+  const activeJob = (extra: Record<string, unknown> = {}) => ({
+    job: { jobId: 'stuck-1', state: 'restart_queued', targetVersion: '2.2.0.1', statusUrl: STATUS_URL,
+      abandonable: true, abandonBlockedReason: null, ...extra },
+  });
+  const statusCalls = () => authenticatedFetch.mock.calls.filter(([url]) => url === STATUS_URL).length;
+  const STOP = { name: 'Stop stuck update' };
+
+  beforeEach(() => {
+    localStorage.clear();
+    authRole = 'owner';
+    authenticatedFetch.mockReset();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updaterStrategy: 'atomic-release', updateReady: true },
+    })));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    authRole = 'owner';
+  });
+
+  it('discovery then polls that omit the flag keep the button visible', async () => {
+    routeFetch({
+      active: () => response(200, activeJob()),
+      // The job endpoint predates the abandon fields: it never states them.
+      status: () => response(200, { state: 'restart_queued', targetVersion: '2.2.0.1', statusUrl: STATUS_URL }),
+    });
+    renderModal();
+    await screen.findByRole('button', STOP);
+    await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(2), { timeout: 6000 });
+    expect(screen.getByRole('button', STOP)).not.toBeNull();
+  });
+
+  it('an attempt restored from localStorage shows the button once discovery states the flag', async () => {
+    localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+      idempotencyKey: 'k', jobId: 'stuck-1', statusUrl: STATUS_URL, targetVersion: '2.2.0.1', createdAt: Date.now(),
+    }));
+    routeFetch({
+      active: () => response(200, activeJob()),
+      status: () => response(200, { state: 'restart_queued', targetVersion: '2.2.0.1', statusUrl: STATUS_URL }),
+    });
+    renderModal();
+    await screen.findByRole('button', STOP);
+    await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(1));
+    expect(screen.getByRole('button', STOP)).not.toBeNull();
+  });
+
+  it('a poll that states abandonable:false removes the button', async () => {
+    routeFetch({
+      active: () => response(200, activeJob()),
+      status: () => response(200, { state: 'restart_queued', targetVersion: '2.2.0.1', statusUrl: STATUS_URL,
+        abandonable: false, abandonBlockedReason: 'in_flight_restart' }),
+    });
+    renderModal();
+    await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(screen.queryByRole('button', STOP)).toBeNull());
+  });
+
+  it('shows no button to a non-owner', async () => {
+    authRole = 'user';
+    routeFetch({ active: () => response(200, activeJob()), status: () => response(200, { state: 'restart_queued', statusUrl: STATUS_URL }) });
+    renderModal();
+    await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(1));
+    expect(screen.queryByRole('button', STOP)).toBeNull();
+  });
+});

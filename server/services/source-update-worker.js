@@ -10,6 +10,7 @@ import { SUPERSEDING_TARGET_CODES, TARGET_ALREADY_LOADED, isTargetAlreadyLoaded 
 const LEASE_MS = 30_000;
 const POLL_MS = 1_000;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SHA40 = /^[a-f0-9]{40}$/;
 // B-1585: states before the candidate is sealed; only these may be settled by
 // the worker itself (a sealed candidate belongs to the activation path).
 const PRE_SEAL_STATES = ['accepted', 'resolving', 'resolved', 'downloading', 'archive_verified', 'extracting', 'staging'];
@@ -346,6 +347,9 @@ export function createSourceUpdateWorker({
                 expectedServerBuildId: result.expectedServerBuildId,
                 expectedClientBuildId: result.expectedClientBuildId,
                 activationIdentitySha256: result.activationIdentitySha256,
+                // B-1603: the commit the candidate was prepared from, when known.
+                ...(SHA40.test(result.originalHead || '') ? { originalHead: result.originalHead } : {}),
+                ...(SHA40.test(result.previousRuntimeOid || '') ? { previousRuntimeOid: result.previousRuntimeOid } : {}),
             };
             receipt('candidate_sealed', 'done', facts);
             receipt('restart_queued', 'intent', facts);

@@ -196,7 +196,10 @@ import userRoutes from './routes/user.js';
 import githubRoutes from './routes/github.js';
 import systemRoutes, {
     executeActionRowAs, findSourceUpdateActivation, reconcileStrandedActivationJobs, reconcileSupersededQueuedSourceUpdates,
+    isServerActionRestartInFlight, readSourceHead,
 } from './routes/system.js';
+import { createUpdateJobAbandoner, isSafeRestartProcessRunning } from './services/update-job-abandon.js';
+import { abandonFields, createAbandonUpdateJobHandler, toActiveUpdateJobPayload } from './routes/update-job-abandon.js';
 import { createUpdateAutoActivator, resolveScheduledUpdateWindowMs } from './services/update-auto-activator.js';
 import { createUpdateJobLog } from './services/update-job-log.js';
 import terminalsRoutes from './routes/terminals.js';
@@ -242,7 +245,7 @@ import {
     cliTurnSupervisor, CLI_TURN_SUPERVISOR_OWNER_ID,
 } from './modules/turn-supervisor/cli-turn-supervisor.service.js';
 import { createTurnSupervisorLifecycle } from './modules/turn-supervisor/lifecycle.js';
-import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced, DEVICE_COOKIE } from './modules/database/index.js';
+import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, isSourceUpdateLeaseOwnerAlive, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced, DEVICE_COOKIE } from './modules/database/index.js';
 import { onSessionOutcomeChange } from './modules/websocket/services/session-outcome.service.js';
 import { broadcastSessionOutcome } from './modules/websocket/services/presence.service.js';
 import { revokeProjectLiveAccess } from './modules/websocket/services/project-membership-revocation.service.js';
@@ -2163,6 +2166,24 @@ app.get('/api/system/update/storage', authenticateToken, requireRole('owner'), u
     }
 });
 
+// B-1605: the owner's exit from a stuck job. Fail closed — allowed only when no
+// restart or worker is live for it, the maintenance gate is OPEN and the
+// running runtime is provably the pre-update one (services/update-job-abandon.js).
+const updateJobAbandoner = createUpdateJobAbandoner({
+    jobs: sourceUpdateJobsDb, actions: pendingServerActionsDb, audit: auditLogDb,
+    transact: (fn) => getConnection().transaction(fn)(),
+    readGate: () => requestMaintenanceGate.readRecoveryEvidence(),
+    controlRoot: () => requestMaintenanceGate.paths.controlRoot,
+    isRestartInFlight: isServerActionRestartInFlight,
+    isSafeRestartRunning: () => isSafeRestartProcessRunning(),
+    isLeaseOwnerAlive: isSourceUpdateLeaseOwnerAlive,
+    readHead: () => readSourceHead(APP_ROOT),
+    runtimeCommit: () => SERVER_RUNTIME_IDENTITY.runtimeCommit,
+});
+const sourceUpdateAbandonLimiter = createRateLimiter({ windowMs: 60_000, max: 10, message: 'Too many abandon requests, please slow down' });
+app.post('/api/system/update/jobs/:jobId/abandon', authenticateToken, requireRole('owner'), sourceUpdateAbandonLimiter,
+    createAbandonUpdateJobHandler({ abandoner: updateJobAbandoner }));
+
 // Discovery is owner-scoped and read-only, just like the individual job snapshot.
 app.get('/api/system/update/jobs/active', authenticateToken, requireRole('owner'), (req, res) => {
     const ownerId = req.user?.id;
@@ -2171,10 +2192,7 @@ app.get('/api/system/update/jobs/active', authenticateToken, requireRole('owner'
     }
     const job = sourceUpdateJobsDb.getActiveForOwner(ownerId);
     res.set('Cache-Control', 'no-store');
-    return res.json({ job: job ? {
-        jobId: job.id, state: job.state, targetVersion: job.expected_version,
-        statusUrl: `/api/system/update/jobs/${encodeURIComponent(job.id)}`,
-    } : null });
+    return res.json({ job: job ? toActiveUpdateJobPayload(job, updateJobAbandoner.evaluate(job)) : null });
 });
 
 app.get('/api/system/update/jobs/:jobId', authenticateToken, requireRole('owner'), (req, res) => {
@@ -2209,6 +2227,8 @@ app.get('/api/system/update/jobs/:jobId', authenticateToken, requireRole('owner'
         // T-1912: only while scheduled messages are what holds the restart
         // (waiting_scheduled); count and earliest due time, never content or owners.
         scheduledDueSoon: deriveUpdateJobScheduledDueSoon(job, autoActivation),
+        // B-1605: the dialog polls this snapshot; it carries the same flag as /jobs/active.
+        ...abandonFields(updateJobAbandoner.evaluate(job)),
     });
 });
 
