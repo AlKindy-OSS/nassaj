@@ -274,10 +274,10 @@ test('capability endpoint reports the writer method per provider', async () => {
 });
 
 test('Qwen keeps its personal key slot while its body surfaces are refused (T-1953)', async () => {
-  const key = 'sk-sp-personal-key-123';
+  const key = 'tp-personal-key-123456';
   const set = await call('POST', '/api/providers/qwen/api-key', {
     user: '1',
-    body: { apiKey: key, consent: true },
+    body: { apiKey: key },
   });
   assert.equal(set.status, 200);
   assert.deepEqual(set.body.data, { provider: 'qwen', configured: true });
@@ -294,17 +294,17 @@ test('Qwen keeps its personal key slot while its body surfaces are refused (T-19
 
   const oversized = await call('PUT', '/api/providers/qwen/api-key', {
     user: '1',
-    body: { apiKey: `sk-sp-${'x'.repeat(507)}`, consent: true },
+    body: { apiKey: `tp-${'x'.repeat(510)}` },
   });
   assert.equal(oversized.status, 400);
-  assert.equal(oversized.body.error?.code, 'INVALID_QWEN_CODING_PLAN_KEY');
+  assert.equal(oversized.body.error?.code, 'INVALID_QWEN_TOKEN_PLAN_KEY');
 });
 
 test('Qwen Token Plan can be stored without returning the secret', async () => {
   const key = 'token-plan-private-key-123';
   const set = await call('POST', '/api/providers/qwen/api-key', {
     user: '1',
-    body: { apiKey: key, plan: 'token_plan', region: 'international', consent: true },
+    body: { apiKey: key },
   });
   assert.equal(set.status, 200);
   assert.deepEqual(set.body.data, { provider: 'qwen', configured: true });
@@ -318,16 +318,15 @@ test('Qwen Token Plan can be stored without returning the secret', async () => {
   assert.doesNotMatch(stored, /token-plan-private-key-123|token_plan|international/);
 });
 
-test('T-1906: a Qwen key without consent:true is refused with 400 CONSENT_REQUIRED', async () => {
-  const personalKey = ['sk', 'sp-personal-key-456'].join('-');
-  for (const body of [{ apiKey: personalKey }, { apiKey: personalKey, consent: 'true' }]) {
-    const set = await call('POST', '/api/providers/qwen/api-key', { user: '2', body });
-    assert.equal(set.status, 400);
-    assert.equal(set.body.error?.code, 'CONSENT_REQUIRED');
-    assert.doesNotMatch(JSON.stringify(set.body), /sk-sp-personal-key-456/);
-  }
+test('ADR-200 S7: a Qwen key needs no consent, no sk-sp- prefix, and ignores plan/region', async () => {
+  const key = ['tp', 'member-two-key-456789'].join('-');
+  const body = { apiKey: key, plan: 'coding_plan', region: 'china', consent: false };
+  const set = await call('POST', '/api/providers/qwen/api-key', { user: '2', body });
+  assert.equal(set.status, 200);
+  assert.doesNotMatch(JSON.stringify(set.body), new RegExp(key));
   const status = await call('GET', '/api/providers/qwen/api-key', { user: '2' });
-  assert.equal(status.body.data.configured, false);
+  assert.equal(status.body.data.configured, true);
+  assert.equal(status.body.data.qwenPlan?.status, 'ok', 'saved as Token Plan / international');
 });
 
 test('an empty or missing key is rejected with 400', async () => {

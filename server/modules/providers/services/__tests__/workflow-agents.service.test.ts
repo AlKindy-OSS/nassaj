@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { openArtifactDirAt, SessionArtifactDir } from '../../shared/session-transcript-reader.js';
 import {
   __resetWorkflowAgentScan,
   deriveAgentLabel,
@@ -76,16 +77,33 @@ describe('deriveAgentLabel', () => {
   });
 });
 
+/**
+ * Reads `workflowDir` the way the status service does (ADR-201 A1): through
+ * its parent (`subagents/workflows`) pinned as an artifact directory.
+ */
+async function readAt(workflowDir: string, options: { now?: number } = {}) {
+  const parent = await openArtifactDirAt(await fsp.realpath(path.dirname(workflowDir)));
+  assert.ok(parent instanceof SessionArtifactDir);
+  try {
+    return await readWorkflowAgents(parent, path.basename(workflowDir), options);
+  } finally {
+    await parent.close();
+  }
+}
+
 describe('readWorkflowAgents', () => {
+  let root: string;
   let dir: string;
 
   beforeEach(async () => {
-    dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wf-agents-'));
+    root = await fsp.mkdtemp(path.join(os.tmpdir(), 'wf-agents-'));
+    dir = path.join(root, 'wf_test');
+    await fsp.mkdir(dir);
     __resetWorkflowAgentScan();
   });
 
   afterEach(async () => {
-    await fsp.rm(dir, { recursive: true, force: true });
+    await fsp.rm(root, { recursive: true, force: true });
   });
 
   it('mirrors the interrupted-run shape: 3 started, 2 resulted → one row still running', async () => {
@@ -98,7 +116,7 @@ describe('readWorkflowAgents', () => {
     await fsp.writeFile(path.join(dir, 'agent-a2.jsonl'), [promptRow('inventory infra'), toolRow('Read')].join('\n') + '\n', 'utf8');
     await fsp.writeFile(path.join(dir, 'agent-a3.jsonl'), [promptRow('plan separation'), toolRow('Grep'), toolRow('Bash')].join('\n') + '\n', 'utf8');
 
-    const { agents, truncated, lastActivityMs } = await readWorkflowAgents(dir);
+    const { agents, truncated, lastActivityMs } = await readAt(dir);
 
     assert.equal(truncated, false);
     assert.deepEqual(agents.map((a) => a.status), ['done', 'done', 'running']);
@@ -113,7 +131,7 @@ describe('readWorkflowAgents', () => {
     await fsp.writeFile(path.join(dir, 'journal.jsonl'), [started('a1'), result('a1')].join('\n') + '\n', 'utf8');
     await fsp.writeFile(path.join(dir, 'agent-a1.jsonl'), [promptRow('done work'), toolRow('Bash')].join('\n') + '\n', 'utf8');
 
-    const { agents } = await readWorkflowAgents(dir);
+    const { agents } = await readAt(dir);
     assert.equal(agents[0]?.status, 'done');
     assert.equal(agents[0]?.currentTool, null);
     assert.equal(agents[0]?.callCount, 1, 'the call count is still real for a finished agent');
@@ -125,18 +143,18 @@ describe('readWorkflowAgents', () => {
     await fsp.writeFile(journal, `${started('a1')}\n`, 'utf8');
     await fsp.writeFile(agentFile, [promptRow('long run'), toolRow('Bash')].join('\n') + '\n', 'utf8');
 
-    const first = await readWorkflowAgents(dir);
+    const first = await readAt(dir);
     assert.equal(first.agents[0]?.callCount, 1);
 
     await fsp.appendFile(agentFile, `${toolRow('Read')}\n`, 'utf8');
-    const second = await readWorkflowAgents(dir);
+    const second = await readAt(dir);
     assert.equal(second.agents[0]?.callCount, 2, 'appended calls must accumulate, not restart');
     assert.equal(second.agents[0]?.currentTool, 'Read');
   });
 
   it('reports a row for an agent whose transcript is missing, without throwing', async () => {
     await fsp.writeFile(path.join(dir, 'journal.jsonl'), `${started('ghost')}\n`, 'utf8');
-    const { agents } = await readWorkflowAgents(dir);
+    const { agents } = await readAt(dir);
     assert.equal(agents.length, 1);
     assert.equal(agents[0]?.callCount, 0);
     assert.equal(agents[0]?.updatedAt, null);
@@ -156,7 +174,7 @@ describe('readWorkflowAgents', () => {
     await fsp.writeFile(path.join(dir, 'agent-dead.jsonl'), [promptRow('killed mid-flight'), toolRow('Bash')].join('\n') + '\n', 'utf8');
 
     // Read as if 18 hours had passed since those files were written.
-    const { agents } = await readWorkflowAgents(dir, { now: Date.now() + 18 * 60 * 60 * 1000 });
+    const { agents } = await readAt(dir, { now: Date.now() + 18 * 60 * 60 * 1000 });
 
     const deadRow = agents.find((a) => a.agentId === 'dead');
     assert.equal(deadRow?.status, 'stale');
@@ -171,19 +189,19 @@ describe('readWorkflowAgents', () => {
 
     // 14 minutes of silence is under the threshold: one long tool call must not
     // be mislabelled as a death (the false-stop this window exists to avoid).
-    const { agents } = await readWorkflowAgents(dir, { now: Date.now() + 14 * 60 * 1000 });
+    const { agents } = await readAt(dir, { now: Date.now() + 14 * 60 * 1000 });
     assert.equal(agents[0]?.status, 'running');
     assert.equal(agents[0]?.currentTool, 'Bash');
   });
 
   it('treats an unfinished agent with NO transcript as stale, not running', async () => {
     await fsp.writeFile(path.join(dir, 'journal.jsonl'), `${started('ghost')}\n`, 'utf8');
-    const { agents } = await readWorkflowAgents(dir);
+    const { agents } = await readAt(dir);
     assert.equal(agents[0]?.status, 'stale', 'a missing file is not a heartbeat');
   });
 
   it('degrades to an empty list for a directory with no journal', async () => {
-    const { agents, lastActivityMs } = await readWorkflowAgents(path.join(dir, 'absent'));
+    const { agents, lastActivityMs } = await readAt(path.join(dir, 'absent'));
     assert.deepEqual(agents, []);
     assert.equal(lastActivityMs, 0);
   });

@@ -1,5 +1,7 @@
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  lstat, mkdir, mkdtemp, readFile, rename, rm, stat, unlink, writeFile,
+} from 'node:fs/promises';
 
 import type { IProviderSkills } from '@/shared/interfaces.js';
 import type {
@@ -86,6 +88,61 @@ const normalizeSkillDirectoryName = (value: string): string => (
     .replace(/^-+|-+$/g, '')
 );
 
+/** Stable 409 for any write aimed at a read-only (shared) skill (T-2003). */
+const readOnlySkillError = (skillName: string): AppError => new AppError(
+  `Skill "${skillName}" belongs to a shared library and cannot be changed here.`,
+  { code: 'PROVIDER_SKILL_READ_ONLY', statusCode: 409 },
+);
+
+/** True when a listed skill is the one a delete-by-name request targets. */
+const skillMatchesName = (skill: ProviderSkill, directoryName: string): boolean => (
+  skill.name === directoryName || path.basename(path.dirname(skill.sourcePath)) === directoryName
+);
+
+/**
+ * Precedence rank when the same skill name appears in several sources (lower
+ * wins): repo/project > user (private) > nassaj-shared > admin > system. Plugin
+ * skills are namespaced (`/plugin:name`) and never collide, so they are exempt.
+ */
+const skillPrecedenceRank = (skill: ProviderSkill): number => {
+  if (skill.origin === 'nassaj-shared') return 2;
+  switch (skill.scope) {
+    case 'repo':
+    case 'project':
+      return 0;
+    case 'user':
+      return 1;
+    case 'admin':
+      return 3;
+    default:
+      return 4;
+  }
+};
+
+/**
+ * Collapses same-named skills to the one the CLI actually resolves (T-2003).
+ *
+ * The key is `definition.name` (SKILL.md frontmatter `name`, falling back to the
+ * folder name), compared CASE-SENSITIVELY: `Foo` and `foo` are distinct skills.
+ *
+ * Shadowed rows are DROPPED rather than kept with a `shadowedBy` tag: the current
+ * UI renders every row as an invocable command with its own delete button and
+ * knows no such tag, so a kept shadowed row would show a duplicate slash command
+ * that never runs and a delete aimed at a file the CLI ignores. Ties keep source
+ * order (the first source listed wins), matching the pre-existing scan order.
+ */
+export const dedupeSkillsByPrecedence = (skills: ProviderSkill[]): ProviderSkill[] => {
+  const winners = new Map<string, ProviderSkill>();
+  for (const skill of skills) {
+    if (skill.scope === 'plugin') continue;
+    const current = winners.get(skill.name);
+    if (!current || skillPrecedenceRank(skill) < skillPrecedenceRank(current)) {
+      winners.set(skill.name, skill);
+    }
+  }
+  return skills.filter((skill) => skill.scope === 'plugin' || winners.get(skill.name) === skill);
+};
+
 type PendingSkillInstall = {
   skillDirectoryPath: string;
   skillPath: string;
@@ -159,33 +216,43 @@ export abstract class SkillsProvider implements IProviderSkills {
     this.provider = provider;
   }
 
+  /**
+   * Lists the skills the provider would actually resolve: every source is scanned,
+   * then same-named skills are collapsed to the highest-precedence one
+   * (see `dedupeSkillsByPrecedence`).
+   */
   async listSkills(options?: ProviderSkillListOptions): Promise<ProviderSkill[]> {
+    return dedupeSkillsByPrecedence(await this.collectSourceSkills(options));
+  }
+
+  /**
+   * Scans sources without de-duplication. `onlyReadOnly` limits the scan to
+   * read-only sources (the delete path's 404 check must not walk the server cwd).
+   */
+  private async collectSourceSkills(
+    options?: ProviderSkillListOptions,
+    onlyReadOnly = false,
+  ): Promise<ProviderSkill[]> {
     const workspacePath = resolveWorkspacePath(options?.workspacePath);
     const sources = await this.getSkillSources(workspacePath, options?.userId ?? null);
     const skills: ProviderSkill[] = [];
 
     for (const source of sources) {
-      const skillFiles = await findProviderSkillMarkdownFiles(source.rootDir, {
-        recursive: source.recursive,
-      });
+      if (onlyReadOnly && !source.readOnly) continue;
+      const skillFiles = source.listSkillFiles
+        ? await source.listSkillFiles()
+        : await findProviderSkillMarkdownFiles(source.rootDir, { recursive: source.recursive });
       for (const skillPath of skillFiles) {
         try {
           const definition = await readProviderSkillMarkdownDefinition(skillPath);
-          const command = source.commandForSkill
-            ? source.commandForSkill(definition.name)
-            : `${source.commandPrefix ?? '/'}${definition.name}`;
-
-          skills.push({
-            provider: this.provider,
-            name: definition.name,
-            description: definition.description,
-            ...(definition.disableModelInvocation !== undefined ? { disableModelInvocation: definition.disableModelInvocation } : {}),
-            command,
-            scope: source.scope,
-            sourcePath: skillPath,
-            pluginName: source.pluginName,
-            pluginId: source.pluginId,
-          });
+          const record = this.toSkillRecord(source, definition, skillPath);
+          // Operator-shared library: deletable through the API only when this app
+          // installed the folder (B-175/2 marker); a hand-authored one is read-only.
+          if (source.origin === 'operator-shared'
+              && !(await isAppManagedSkillDirectory(path.dirname(skillPath)))) {
+            record.readOnly = true;
+          }
+          skills.push(record);
         } catch {
           // A malformed or unreadable skill markdown file should not hide other valid skills.
         }
@@ -195,8 +262,32 @@ export abstract class SkillsProvider implements IProviderSkills {
     return skills;
   }
 
+  /** Builds the normalized record for one skill markdown file of one source. */
+  private toSkillRecord(
+    source: ProviderSkillSource,
+    definition: { name: string; description: string; disableModelInvocation?: boolean },
+    skillPath: string,
+  ): ProviderSkill {
+    const command = source.commandForSkill
+      ? source.commandForSkill(definition.name)
+      : `${source.commandPrefix ?? '/'}${definition.name}`;
+    return {
+      provider: this.provider,
+      name: definition.name,
+      description: definition.description,
+      ...(definition.disableModelInvocation !== undefined ? { disableModelInvocation: definition.disableModelInvocation } : {}),
+      command,
+      scope: source.scope,
+      sourcePath: skillPath,
+      pluginName: source.pluginName,
+      pluginId: source.pluginId,
+      ...(source.readOnly ? { readOnly: true } : {}),
+      ...(source.origin ? { origin: source.origin } : {}),
+    };
+  }
+
   async addSkills(input: ProviderSkillCreateInput): Promise<ProviderSkill[]> {
-    const globalSkillSource = await this.requireGlobalSkillSource(input.userId ?? null);
+    const globalSkillSource = await this.requireGlobalSkillSource(input.userId ?? null, input.requiredRootDir);
 
     if (!Array.isArray(input.entries) || input.entries.length === 0) {
       throw new AppError('At least one skill entry is required.', {
@@ -236,6 +327,8 @@ export abstract class SkillsProvider implements IProviderSkills {
         });
       }
 
+      // ADR-203: a private store validates the name and every path component.
+      globalSkillSource.assertWriteTarget?.(resolvedDirectoryName);
       const skillDirectoryPath = path.join(globalSkillSource.rootDir, resolvedDirectoryName);
       const resolvedSkillDirectoryPath = path.resolve(skillDirectoryPath);
       if (!resolvedSkillDirectoryPath.startsWith(`${resolvedRootDir}${path.sep}`)) {
@@ -403,7 +496,10 @@ export abstract class SkillsProvider implements IProviderSkills {
     directoryName: string,
     options?: ProviderSkillRemoveOptions,
   ): Promise<ProviderSkill> {
-    const globalSkillSource = await this.requireGlobalSkillSource(options?.userId ?? null);
+    const globalSkillSource = await this.requireGlobalSkillSource(
+      options?.userId ?? null,
+      options?.requiredRootDir,
+    );
 
     const resolvedDirectoryName = normalizeSkillDirectoryName(
       typeof directoryName === 'string' ? directoryName : '',
@@ -414,6 +510,11 @@ export abstract class SkillsProvider implements IProviderSkills {
         statusCode: 400,
       });
     }
+    // T-2003: a read-only root is never mutated through the API, for any role.
+    if (globalSkillSource.readOnly) {
+      throw readOnlySkillError(resolvedDirectoryName);
+    }
+    globalSkillSource.assertWriteTarget?.(resolvedDirectoryName);
 
     const skillDirectoryPath = path.join(globalSkillSource.rootDir, resolvedDirectoryName);
     const resolvedRootDir = path.resolve(globalSkillSource.rootDir);
@@ -426,8 +527,21 @@ export abstract class SkillsProvider implements IProviderSkills {
       });
     }
 
-    const directoryStats = await stat(skillDirectoryPath).catch(() => null);
-    if (!directoryStats || !directoryStats.isDirectory()) {
+    // lstat, not stat: a symlinked skill folder points at content this root does
+    // not own. Only its LINK may be removed, and only when the target carries the
+    // app marker; the target itself is never touched (unlink, below).
+    const directoryStats = await lstat(skillDirectoryPath).catch(() => null);
+    const isLink = Boolean(directoryStats?.isSymbolicLink());
+    if (isLink && !(await isAppManagedSkillDirectory(skillDirectoryPath))) {
+      throw readOnlySkillError(resolvedDirectoryName);
+    }
+    if (!isLink && (!directoryStats || !directoryStats.isDirectory())) {
+      // Absent from the writable root: a name that only exists in a read-only
+      // source reports "read-only" rather than "not found".
+      const listed = await this.collectSourceSkills({ userId: options?.userId ?? null }, true);
+      if (listed.some((skill) => skill.readOnly && skillMatchesName(skill, resolvedDirectoryName))) {
+        throw readOnlySkillError(resolvedDirectoryName);
+      }
       throw new AppError(`Skill "${resolvedDirectoryName}" is not installed for ${this.provider}.`, {
         code: 'PROVIDER_SKILL_NOT_FOUND',
         statusCode: 404,
@@ -437,6 +551,10 @@ export abstract class SkillsProvider implements IProviderSkills {
     // B-175/2: only directories this app installed may be deleted through the API.
     // Checked AFTER the 404 so an absent skill still reports "not installed".
     if (!(await isAppManagedSkillDirectory(skillDirectoryPath))) {
+      // Operator-shared library (T-2003): an unmarked skill is read-only there.
+      if (globalSkillSource.origin === 'operator-shared') {
+        throw readOnlySkillError(resolvedDirectoryName);
+      }
       throw new AppError(
         `Skill "${resolvedDirectoryName}" was not installed through this app, so it will not be `
         + `deleted. Remove ${skillDirectoryPath} manually if that is intended.`,
@@ -459,7 +577,11 @@ export abstract class SkillsProvider implements IProviderSkills {
       ? globalSkillSource.commandForSkill(definition.name)
       : `${globalSkillSource.commandPrefix ?? '/'}${definition.name}`;
 
-    await rm(skillDirectoryPath, { recursive: true, force: true });
+    if (isLink) {
+      await unlink(skillDirectoryPath);
+    } else {
+      await rm(skillDirectoryPath, { recursive: true, force: true });
+    }
 
     return {
       provider: this.provider,
@@ -500,14 +622,26 @@ export abstract class SkillsProvider implements IProviderSkills {
     return null;
   }
 
+  /**
+   * Resolves the writable root. With `requiredRootDir` (a member's private store,
+   * ADR-203) any other resolved root aborts with 409 before anything is written:
+   * the permission was granted for that destination only.
+   */
   private async requireGlobalSkillSource(
     userId: string | number | null,
+    requiredRootDir?: string,
   ): Promise<ProviderSkillSource> {
     const globalSkillSource = await this.getGlobalSkillSource(userId);
     if (!globalSkillSource) {
       throw new AppError(`${this.provider} does not support managed global skills.`, {
         code: 'PROVIDER_SKILLS_WRITE_UNSUPPORTED',
         statusCode: 400,
+      });
+    }
+    if (requiredRootDir !== undefined
+        && path.resolve(globalSkillSource.rootDir) !== path.resolve(requiredRootDir)) {
+      throw new AppError('The files mode changed while this request was running. Reload and retry.', {
+        code: 'HARNESS_FILES_MODE_CHANGED', statusCode: 409,
       });
     }
     return globalSkillSource;

@@ -5,6 +5,7 @@ import path from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import type { Database } from 'better-sqlite3';
 
+import { migrateUserHarnessFilesMode } from '@/modules/database/harness-files-mode.migration.js';
 import { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
 import { createUsageStatisticsV3Fresh } from '@/modules/database/usage-statistics-v3.migration.js';
 import {
@@ -3082,6 +3083,10 @@ export const runMigrations = (db: Database) => {
     // User-to-user credential grants (T-1675) — after users exists so the
     // owner/grantee FKs resolve. Idempotent; no backfill (empty = all isolated).
     migrateProviderCredentialGrants(db);
+
+    // Per-user shared/private skills choice (ADR-203, T-2003) — after users
+    // exists so the CASCADE FK resolves. Idempotent; no backfill (no row = shared).
+    migrateUserHarnessFilesMode(db);
 
     // FK CASCADE on session_agents tables — must run after sessions exist so
     // the REFERENCES sessions(session_id) constraint is satisfiable. (B-38.)

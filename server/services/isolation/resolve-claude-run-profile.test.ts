@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test, { beforeEach, mock } from 'node:test';
 
 type State = {
@@ -11,6 +14,8 @@ type State = {
   pinWriteError: Error | null;
   storedPins: Array<{ sessionId: string; engine: string; source: string }>;
   appliedEngine: string | null | undefined;
+  gateCalls: Array<{ userId: unknown; provider: string; options: unknown }>;
+  gateError: Error | null;
 };
 
 const state: State = {
@@ -23,6 +28,8 @@ const state: State = {
   pinWriteError: null,
   storedPins: [],
   appliedEngine: undefined,
+  gateCalls: [],
+  gateError: null,
 };
 
 mock.module('@/modules/database/index.js', {
@@ -81,6 +88,17 @@ mock.module('@/services/isolation/apply-claude-engine-provider-env.js', {
   },
 });
 
+// ADR-200 S10 (B-1575): the run gate is armed by default; its read-only leaf is
+// replaced so the real flag check in link-mode-run-gate.js stays under test.
+mock.module('@/modules/providers/services/harness-link-mode.scope.js', {
+  namedExports: {
+    assertLinkModeRunAllowed: (userId: unknown, provider: string, options: unknown) => {
+      state.gateCalls.push({ userId, provider, options });
+      if (state.gateError) throw state.gateError;
+    },
+  },
+});
+
 const profileModule = await import('./resolve-claude-run-profile.js');
 
 beforeEach(() => {
@@ -93,7 +111,10 @@ beforeEach(() => {
   state.pinWriteError = null;
   state.storedPins = [];
   state.appliedEngine = undefined;
+  state.gateCalls = [];
+  state.gateError = null;
   delete process.env.NASSAJ_ENGINE_PIN_ENFORCE;
+  delete process.env.NASSAJ_UNIFIED_VENDOR_KEYS;
 });
 
 test('stored pin wins a mismatched client engine for an authoritative resume', async () => {
@@ -258,4 +279,107 @@ test('final host guard rejects a disallowed base URL before returning a profile'
     }),
     /disallowed host/,
   );
+});
+
+/** A user tree whose settings.json holds an API key for official turns (dummy). */
+function userTreeWithKey(): { root: string; configDir: string } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-profile-s2-'));
+  const configDir = path.join(root, '.claude');
+  fs.mkdirSync(path.join(configDir, 'projects'), { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'settings.json'),
+    JSON.stringify({ env: { ANTHROPIC_API_KEY: 'sk' + '-ant-api03-DUMMY-RUN-PROFILE' } }));
+  fs.writeFileSync(path.join(configDir, '.claude.json'), JSON.stringify({ primaryApiKey: 'sk' + '-ant-api03-DUMMY-2' }));
+  fs.mkdirSync(path.join(root, 'project'));
+  return { root, configDir };
+}
+
+test('ADR-200 S2: a pinned profile runs on the derived credential-free config dir', async () => {
+  const { root, configDir } = userTreeWithKey();
+  try {
+    const profile = await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      clientEngine: 'glm',
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    });
+    const derived = path.join(root, '.claude-engine-pin');
+    assert.equal(profile.env.CLAUDE_CONFIG_DIR, derived);
+    const settings = JSON.parse(fs.readFileSync(path.join(derived, 'settings.json'), 'utf8'));
+    assert.equal(settings.env?.ANTHROPIC_API_KEY, undefined);
+    const config = JSON.parse(fs.readFileSync(path.join(derived, '.claude.json'), 'utf8'));
+    assert.equal(config.primaryApiKey, undefined);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ADR-200 S2: an unpinned profile keeps the user config dir untouched', async () => {
+  const { root, configDir } = userTreeWithKey();
+  try {
+    const profile = await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    });
+    assert.equal(profile.env.CLAUDE_CONFIG_DIR, configDir);
+    assert.equal(fs.existsSync(path.join(root, '.claude-engine-pin')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ADR-200 S10: with the flag unset an official run passes the link-mode gate', async () => {
+  const { root, configDir } = userTreeWithKey();
+  try {
+    await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    });
+    assert.deepEqual(state.gateCalls.map(call => [call.userId, call.provider]), [[7, 'claude']]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ADR-200 S10: a gate refusal stops the official run before a profile is returned', async () => {
+  const { root, configDir } = userTreeWithKey();
+  state.gateError = Object.assign(new Error('key missing'), { code: 'LINK_MODE_KEY_MISSING' });
+  try {
+    await assert.rejects(profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    }), (error: Error & { code?: string }) => error.code === 'LINK_MODE_KEY_MISSING');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ADR-200 S10: an engine-pinned run and the kill switch both skip the gate', async () => {
+  const { root, configDir } = userTreeWithKey();
+  try {
+    await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      clientEngine: 'glm',
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    });
+    process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
+    state.gateError = new Error('must not be reached');
+    await profileModule.resolveClaudeRunProfileOrThrow({
+      userId: 7,
+      baseEnv: { CLAUDE_CONFIG_DIR: configDir, HOME: root },
+      envAlreadyIsolated: true,
+      cwd: path.join(root, 'project'),
+    });
+    assert.equal(state.gateCalls.length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

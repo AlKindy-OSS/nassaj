@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { isResolvedPathInsideRootReal } from './utils/path-guard.js';
+import { classifySecretPath } from './shared/secret-path-guard.js';
+import { isSecretFileConfirmed, sendSecretFileConfirmationRequired } from './utils/secret-file-access.js';
 import { buildPendingAction } from './services/server-actions.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
 
@@ -142,6 +144,7 @@ function buildSaveFileHandler(projectRoot) {
   const factory = new Function(
     'path', 'fsPromises', 'projectsDb', 'coerceUserId', 'isResolvedPathInsideRootReal', 'console',
     'isShareableDocument', 'saveSharedDocumentAtomically',
+    'classifySecretPath', 'isSecretFileConfirmed', 'sendSecretFileConfirmationRequired', 'auditSecretFileAccess',
     `function validatePathInProject(${validateSrc.params}) ${validateSrc.body}
      return ${handlerSrc};`,
   );
@@ -158,6 +161,10 @@ function buildSaveFileHandler(projectRoot) {
     { error: () => {}, log: () => {}, warn: () => {} },
     isShareableDocument,
     saveSharedDocumentAtomically,
+    classifySecretPath,
+    isSecretFileConfirmed,
+    sendSecretFileConfirmationRequired,
+    () => {},
   );
 }
 

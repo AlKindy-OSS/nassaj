@@ -42,12 +42,19 @@ export function readJsonObjectOrEmpty(filePath: string): Record<string, unknown>
 /**
  * Atomically writes a JSON object with restrictive permissions:
  * dir 0700 (created if absent), file 0600, tmp + rename (never in-place).
+ * `trailingNewline: false` matches CLIs that write none (Codex auth.json), so a
+ * merge-write can round-trip their file byte for byte (ADR-200 S3).
  */
-export function writeJsonObjectAtomic(filePath: string, value: Record<string, unknown>): void {
+export function writeJsonObjectAtomic(
+  filePath: string,
+  value: Record<string, unknown>,
+  options: { trailingNewline?: boolean } = {},
+): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   const tmpPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
-  fs.writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, { mode: FILE_MODE });
+  const newline = options.trailingNewline === false ? '' : '\n';
+  fs.writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}${newline}`, { mode: FILE_MODE });
   fs.renameSync(tmpPath, filePath);
   try {
     fs.chmodSync(filePath, FILE_MODE);

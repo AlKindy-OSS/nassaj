@@ -53,7 +53,7 @@ export type TierBDeps = {
   env?: NodeJS.ProcessEnv;
   probeUnitState: UnitStateProbe;
   /** C2 ownership gate → AUTHORITATIVE jsonl/project path from the DB. */
-  verifyDeliveryTarget: (conversationId: string, userId: number) => DeliveryTarget;
+  verifyDeliveryTarget: (conversationId: string, userId: number) => DeliveryTarget | Promise<DeliveryTarget>;
   /** The `claude -p --resume` runner (defaults to the real spawn). */
   runResumeTurn?: (params: ResumeTurnParams) => Promise<ResumeTurnResult>;
   /** Test seam forwarded to the central fail-closed resume profile resolver. */
@@ -156,7 +156,7 @@ export async function deliverTierBOnce(deps: TierBDeps): Promise<TierBPassResult
   for (const [conversationId, items] of byConv) {
     result.conversations++;
     const userId = items[0]!.task.userId;
-    const target = deps.verifyDeliveryTarget(conversationId, userId);
+    const target = await deps.verifyDeliveryTarget(conversationId, userId);
     if (!target.ok) {
       result.denied++;
       deps.onAudit?.({ event: 'tierb-delivery-denied', conversationId, userId, reason: target.reason });

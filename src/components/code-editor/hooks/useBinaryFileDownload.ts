@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 
 import { api } from '../../../utils/api';
+import { SECRET_FILE_DECLINED, requestWithSecretConfirmation } from '../../../utils/secretFileConfirmation';
 
 type DownloadState = {
   isDownloading: boolean;
@@ -37,7 +38,12 @@ export function useBinaryFileDownload(
     setIsDownloading(true);
     setHasError(false);
     try {
-      const response = await api.readFileBlob(projectId, filePath);
+      // B-1593: a secrets file (e.g. a project SQLite database) asks first.
+      const response = await requestWithSecretConfirmation(
+        (confirmSecret) => api.readFileBlob(projectId, filePath, { confirmSecret }),
+        { fileName },
+      );
+      if (response === SECRET_FILE_DECLINED) return;
       if (!response.ok) throw new Error(`Download failed (${response.status})`);
       saveBlob(await response.blob(), fileName);
     } catch (error) {

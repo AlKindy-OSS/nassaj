@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { isSourceUpdateActionShape } from './source-update-action-schema.mjs';
+import { assertSourceUpdateAction, isSourceUpdateActionShape } from './source-update-action-schema.mjs';
 import { gitlinkPaths, parseTreeEntries, sameEntry } from './source-update-gitlinks.mjs';
 import { hashTree } from './source-update-tree-identity.mjs';
 import { classifyGenerationExchange } from './update-generation-reconciliation.mjs';
@@ -52,9 +52,10 @@ function provenance(directory) {
  * The replacement process's read of `activation-action.json` at boot
  * (completeBootstrappedSourceUpdate in server/index.js), exported so the
  * upgrade-path gate (B-1584) runs the candidate's own boot-time check on the
- * action the previous release wrote: owner-only regular file, schema,
- * transaction and canonical manifest path. Strict shape checks stay with the
- * command-board and recovery readers.
+ * action the previous release wrote: owner-only regular file, the shared
+ * open-world schema (required keys strict, unknown keys ignored, a newer major
+ * refused as `source_update_action_schema_unsupported`), transaction and
+ * canonical manifest path.
  * @param {string} candidateRoot `<control root>/candidates/<transactionId>`
  * @param {string} transactionId the transaction the bootstrap ownership names
  * @returns {object} the parsed action
@@ -66,8 +67,8 @@ export function readBootstrapActivationAction(candidateRoot, transactionId) {
         throw new Error('source_update_activation_action_unsafe');
     }
     const action = JSON.parse(readFileSync(actionFile, 'utf8'));
-    if (action?.schema !== 'nassaj-source-update-activation/v1'
-        || action.transactionId !== transactionId
+    assertSourceUpdateAction(action, 'source_update_activation_action_invalid');
+    if (action.transactionId !== transactionId
         || action.manifestPath !== path.join(candidateRoot, 'candidate-manifest.json')) {
         throw new Error('source_update_activation_action_invalid');
     }

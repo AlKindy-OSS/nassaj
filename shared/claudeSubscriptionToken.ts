@@ -7,7 +7,14 @@
 /** Prefix Anthropic gives a `claude setup-token` subscription OAuth token. */
 export const SUBSCRIPTION_TOKEN_PREFIX = 'sk-ant-oat01-';
 
-/** True when `value` is a Claude subscription token (prefix test on the trimmed form). */
+/**
+ * ADR-200 S1 (L2): every OAuth-token generation, not only `oat01`. A refusal
+ * keyed to one version would wave `sk-ant-oat02-…` through to a non-Claude
+ * writer the day Anthropic bumps the number.
+ */
+export const SUBSCRIPTION_TOKEN_PATTERN = /^sk-ant-oat\d+-/;
+
+/** True when `value` is a Claude subscription token (pattern test on the trimmed form). */
 export function isClaudeSubscriptionToken(value: unknown): boolean {
-  return typeof value === 'string' && value.trim().startsWith(SUBSCRIPTION_TOKEN_PREFIX);
+  return typeof value === 'string' && SUBSCRIPTION_TOKEN_PATTERN.test(value.trim());
 }

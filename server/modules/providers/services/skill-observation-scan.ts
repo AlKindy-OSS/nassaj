@@ -1,20 +1,33 @@
-import { constants } from 'node:fs';
-import { open, realpath } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { SkillCoverageReason, SkillObservation } from '../../../../shared/skillObservations.js';
 
 import { classifySkillCall, nativeSkillEvents, record, safeNativeId, skillHash } from './skill-observation-parser.js';
 
+/** A pinned, bound descriptor of one source; `release` closes it (and any pinned parent dir). */
+export type OpenedSkillSource = { handle: FileHandle; release: () => Promise<void> };
+/**
+ * Opens a source through the pinned transcript reader (ADR-201 M1): never by
+ * its stored or derived path string. Throws when the open is refused.
+ */
+export type SkillSourceOpener = () => Promise<OpenedSkillSource>;
+
 export type SkillSource = {
-  path: string; identity: string; actorKind: SkillObservation['actorKind']; actorToolCallId: string | null;
+  /** Realpath of the pinned file (identity/diagnostics only; never opened by name). */
+  path: string; open: SkillSourceOpener; identity: string; actorKind: SkillObservation['actorKind']; actorToolCallId: string | null;
   expectedParent?: string; offset: number; tail: Buffer; discarding: boolean; fingerprint: string;
   size: number; mtime: number; complete: boolean; valid: boolean; metaSeen: boolean;
   ambiguous: boolean; calls: Map<string, { id: string; shell: boolean }>; spawns: Map<string, string | null>;
 };
+/** The session's recorded transcript as first admitted: every later open must match it. */
+export type RootTranscriptBinding = {
+  sessionId: string; provider: 'claude' | 'codex'; recorded: string; root: string; realpath: string;
+};
 export type SkillScanState = {
   provider: 'claude' | 'codex'; sessionId: string; principal: number; owner: number;
-  sourceRoot: string; skillRoots: string[]; sources: Map<string, SkillSource>;
+  /** Realpath of the owner's provider root holding the transcript. */
+  sourceRoot: string; rootTranscript: RootTranscriptBinding; skillRoots: string[]; sources: Map<string, SkillSource>;
   observations: Map<string, SkillObservation>; reasons: Set<SkillCoverageReason>;
   generation: number; updatedAt: number; discoveryComplete: boolean;
   definitions: Map<string, { key: string; name: string }>;
@@ -31,9 +44,9 @@ export function canScan(budget: ScanBudget): boolean {
     && budget.operations < 504 && budget.entries < 256;
 }
 /** Fresh bounded source cursor; no raw result bodies are retained. */
-export function newSkillSource(file: string, identity: string, actorKind: SkillObservation['actorKind'],
-  actorToolCallId: string | null = null): SkillSource {
-  return { path: file, identity, actorKind, actorToolCallId, offset: 0, tail: Buffer.alloc(0),
+export function newSkillSource(file: string, open: SkillSourceOpener, identity: string,
+  actorKind: SkillObservation['actorKind'], actorToolCallId: string | null = null): SkillSource {
+  return { path: file, open, identity, actorKind, actorToolCallId, offset: 0, tail: Buffer.alloc(0),
     discarding: false, fingerprint: '', size: 0, mtime: 0, complete: false,
     valid: false, metaSeen: false, ambiguous: false, calls: new Map(), spawns: new Map() };
 }
@@ -169,10 +182,10 @@ function consumeChunk(state: SkillScanState, source: SkillSource, chunk: Buffer)
 export async function scanSkillSource(state: SkillScanState, source: SkillSource, budget: ScanBudget): Promise<void> {
   if (!canScan(budget)) return;
   budget.operations += 3;
-  const real = await realpath(source.path);
-  if (!canScan(budget) || !real.startsWith(`${state.sourceRoot}${path.sep}`)) return;
-  const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const opened = await source.open();
+  const { handle } = opened;
   try {
+    if (!canScan(budget)) return;
     const stats = await handle.stat();
     if (!canScan(budget) || !stats.isFile()) return;
     if (state.provider === 'claude' && stats.size === 0) source.valid = true;
@@ -180,7 +193,7 @@ export async function scanSkillSource(state: SkillScanState, source: SkillSource
     if (source.fingerprint && (source.fingerprint !== fingerprint || stats.size < source.offset
       || stats.size === source.size && stats.mtimeMs !== source.mtime)) {
       removeSourceObservations(state, source);
-      const replacement = newSkillSource(source.path, source.identity, source.actorKind, source.actorToolCallId);
+      const replacement = newSkillSource(source.path, source.open, source.identity, source.actorKind, source.actorToolCallId);
       replacement.expectedParent = source.expectedParent;
       Object.assign(source, replacement); state.generation++; state.reasons.add('source_changed');
     }
@@ -197,5 +210,5 @@ export async function scanSkillSource(state: SkillScanState, source: SkillSource
     }
     source.complete = source.offset === stats.size && !source.tail.length && !source.discarding;
     if (!source.complete) state.reasons.add('scan_budget');
-  } finally { await handle.close(); }
+  } finally { await opened.release(); }
 }

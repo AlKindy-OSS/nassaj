@@ -12,6 +12,7 @@
 import path from 'node:path';
 import { promises as fsPromises } from 'node:fs';
 
+import { isSecretFileKind } from '@/shared/secret-path-guard.js';
 import { AppError, FORBIDDEN_WORKSPACE_PATHS, normalizeProjectPath } from '@/shared/utils.js';
 
 /** Maximum entries one project file-tree response may contain. */
@@ -177,6 +178,9 @@ export async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showH
     const items = await Promise.all(entries.map(async (entry) => {
         const itemPath = path.join(dirPath, entry.name);
         const item = { name: entry.name, path: itemPath, type: entry.isDirectory() ? 'directory' : 'file' };
+        // B-1593: listed as usual, but marked so the client can show that opening
+        // it asks for confirmation (dotenv/SQLite by name; no realpath per entry).
+        if (item.type === 'file' && isSecretFileKind(entry.name)) item.secretFile = true;
         await describeItem(item);
 
         const descend = entry.isDirectory()

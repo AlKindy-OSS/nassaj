@@ -22,7 +22,13 @@ export type ProviderSkill = {
   disableModelInvocation?: boolean;
   projectDisplayName?: string;
   projectPath?: string;
+  /** The server refuses delete/replace (`PROVIDER_SKILL_READ_ONLY`); hide those actions. */
+  readOnly?: boolean;
+  /** Provenance of a shared skill; `operator-shared` deletions affect every member. */
+  origin?: ProviderSkillOrigin;
 };
+
+export type ProviderSkillOrigin = 'nassaj-shared' | 'operator-shared';
 
 export type ProviderSkillCreateEntryPayload = {
   content: string;

@@ -56,8 +56,7 @@
  * a terminal verdict is never un-learned.
  */
 
-import fs from 'node:fs';
-import fsp from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 
 /**
  * Statuses that mean "this background run is over". `stopped` is intentionally
@@ -138,34 +137,68 @@ export function extractTerminalWorkflowIds(chunk: string): Set<string> {
   return found;
 }
 
+/** A pinned transcript (ADR-201 A1): read through its descriptor, keyed by its realpath. */
+export type TerminalScanTranscript = { fd: FileHandle; realpath: string };
+
+/** Reads `[start, end)` of the pinned transcript as UTF-8; null on a read failure. */
+async function readWindow(fd: FileHandle, start: number, end: number): Promise<string | null> {
+  try {
+    const buffer = Buffer.allocUnsafe(end - start);
+    const { bytesRead } = await fd.read(buffer, 0, end - start, start);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** Folds one read window into `state`, advancing only past complete lines. */
+function foldWindow(state: ScanState, chunk: string, start: number, end: number, size: number): void {
+  // Advance only to the last COMPLETE line: a notification split across the chunk
+  // boundary must be re-read whole on the next pass, not half-matched now.
+  const lastNewline = chunk.lastIndexOf('\n');
+  if (lastNewline === -1) {
+    // No line boundary in this window. If we are at EOF the line is still being
+    // written; otherwise the line is longer than the scan window — advance past it
+    // so the cursor cannot stall forever on one pathological line.
+    if (end < size) state.offset = end;
+    return;
+  }
+  for (const id of extractTerminalWorkflowIds(chunk.slice(0, lastNewline))) {
+    state.terminal.add(id);
+  }
+  state.offset = start + Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8');
+}
+
 /**
  * Returns every workflow id this session's transcript has declared terminal.
  *
- * Fail-safe in one direction only: on ANY anomaly (missing file, unreadable
- * bytes, stat failure) it returns whatever was already known — never a partial
- * or empty set that would resurrect a finished workflow as "running", and never
- * a throw into the caller's scan loop.
+ * Reads only the pinned descriptor the caller opened through the session
+ * transcript reader (ADR-201 A1); the cursor is keyed by its realpath.
+ * Fail-safe in one direction only: on ANY anomaly (unreadable bytes, stat
+ * failure) it returns whatever was already known — never a partial or empty set
+ * that would resurrect a finished workflow as "running", and never a throw into
+ * the caller's scan loop.
  *
- * @param jsonlPath Absolute path to the session transcript, or null.
+ * @param transcript The pinned session transcript, or null.
  */
 export async function readTerminalWorkflowIds(
-  jsonlPath: string | null,
+  transcript: TerminalScanTranscript | null,
 ): Promise<ReadonlySet<string>> {
-  if (!jsonlPath) {
+  if (!transcript) {
     return new Set<string>();
   }
 
-  let state = scanStates.get(jsonlPath);
+  let state = scanStates.get(transcript.realpath);
   if (!state) {
     state = { offset: 0, size: 0, terminal: new Set<string>() };
-    scanStates.set(jsonlPath, state);
+    scanStates.set(transcript.realpath, state);
   }
 
   let size: number;
   try {
-    size = (await fsp.stat(jsonlPath)).size;
+    size = (await transcript.fd.stat()).size;
   } catch {
-    return state.terminal; // Gone/unreadable: keep what we learned.
+    return state.terminal; // Unreadable: keep what we learned.
   }
 
   // Truncated or replaced (rotation): the old cursor is meaningless. Re-scan from
@@ -181,59 +214,12 @@ export async function readTerminalWorkflowIds(
 
   const start = state.offset;
   const end = Math.min(size, start + MAX_BYTES_PER_SCAN);
-
-  let chunk: string;
-  let handle: fsp.FileHandle | null = null;
-  try {
-    handle = await fsp.open(jsonlPath, 'r');
-    const buffer = Buffer.allocUnsafe(end - start);
-    const { bytesRead } = await handle.read(buffer, 0, end - start, start);
-    chunk = buffer.subarray(0, bytesRead).toString('utf8');
-  } catch {
-    return state.terminal;
-  } finally {
-    if (handle) {
-      await handle.close().catch(() => {});
-    }
-  }
-
-  // Advance only to the last COMPLETE line: a notification split across the chunk
-  // boundary must be re-read whole on the next pass, not half-matched now.
-  const lastNewline = chunk.lastIndexOf('\n');
-  if (lastNewline === -1) {
-    // No line boundary in this window. If we are at EOF the line is still being
-    // written; otherwise the line is longer than the scan window — advance past it
-    // so the cursor cannot stall forever on one pathological line.
-    if (end < size) {
-      state.offset = end;
-    }
-    return state.terminal;
-  }
-
-  for (const id of extractTerminalWorkflowIds(chunk.slice(0, lastNewline))) {
-    state.terminal.add(id);
-  }
-  state.offset = start + Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8');
-
+  const chunk = await readWindow(transcript.fd, start, end);
+  if (chunk !== null) foldWindow(state, chunk, start, end, size);
   return state.terminal;
 }
 
 /** Diagnostics/tests: how many transcripts currently hold a scan cursor. */
 export function trackedTerminalScanCount(): number {
   return scanStates.size;
-}
-
-/**
- * Synchronous existence probe used by the scanner's fast path in tests; kept out
- * of the hot path deliberately (the async reader above is the only caller-facing
- * API). Exported so a test can assert the module never touches the FS when the
- * path is null.
- */
-export function transcriptExists(jsonlPath: string | null): boolean {
-  if (!jsonlPath) return false;
-  try {
-    return fs.existsSync(jsonlPath);
-  } catch {
-    return false;
-  }
 }

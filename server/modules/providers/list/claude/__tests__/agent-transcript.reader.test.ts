@@ -42,14 +42,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { openArtifactDirAt, SessionArtifactDir } from '@/modules/providers/shared/session-transcript-reader.js';
 import {
-  agentMetaPath,
-  agentTranscriptPath,
   classifyLastRecord,
   hasTornTail,
   listSessionAgentIds,
@@ -113,9 +112,14 @@ const INTERRUPTED_FOR_TOOL_USE = JSON.stringify({
   },
 });
 
+/**
+ * Writes `files` into a fresh `subagents` dir and hands the reader that dir
+ * pinned (ADR-201 A1), exactly as the status service does after pinning it
+ * from the session transcript.
+ */
 async function withSubagentsDir(
   files: Record<string, string>,
-  run: (subagentsDir: string) => Promise<void>,
+  run: (subagents: SessionArtifactDir) => Promise<void>,
 ): Promise<void> {
   const root = await mkdtemp(path.join(tmpdir(), 'agent-reader-'));
   const subagentsDir = path.join(root, 'session', 'subagents');
@@ -124,7 +128,13 @@ async function withSubagentsDir(
     for (const [name, body] of Object.entries(files)) {
       await writeFile(path.join(subagentsDir, name), body, 'utf8');
     }
-    await run(subagentsDir);
+    const pinned = await openArtifactDirAt(await realpath(subagentsDir));
+    assert.ok(pinned instanceof SessionArtifactDir);
+    try {
+      await run(pinned);
+    } finally {
+      await pinned.close();
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -148,7 +158,7 @@ test('incident transcript: interrupted, and its lost report is recovered verbati
     },
     async (dir) => {
       const outcome = await readAgentOutcome(
-        agentTranscriptPath(dir, 'ab0bf67f9ea3d0c25'),
+        dir,
         'ab0bf67f9ea3d0c25',
       );
 
@@ -167,7 +177,7 @@ test('incident transcript: interrupted, and its lost report is recovered verbati
       assert.equal(outcome.interruptionText, '[Request interrupted by user]');
 
       // The launch-time join key the server has ignored until now.
-      const meta = await readAgentMeta(agentMetaPath(dir, 'ab0bf67f9ea3d0c25'));
+      const meta = await readAgentMeta(dir, 'ab0bf67f9ea3d0c25');
       assert.equal(meta.toolUseId, 'toolu_01SVHAGH5nqsRk11r8zwa4yT');
       assert.equal(meta.agentType, 'frontend-dev');
       assert.equal(meta.description, 'إصلاح تشوّه bidi في عرض رسائل RTL');
@@ -211,7 +221,7 @@ test('constraint 2: an interruption marker mid-transcript does NOT mean interrup
     },
     async (dir) => {
       const outcome = await readAgentOutcome(
-        agentTranscriptPath(dir, 'a7a5d0d829cd93943'),
+        dir,
         'a7a5d0d829cd93943',
       );
       assert.equal(outcome.outcome, 'completed');
@@ -228,14 +238,14 @@ test('constraint 3: ambiguous tails are `unknown` with a reason — never comple
     },
     async (dir) => {
       const toolResultTail = await readAgentOutcome(
-        agentTranscriptPath(dir, 'a4b86edd162eeebf7'),
+        dir,
         'a4b86edd162eeebf7',
       );
       assert.equal(toolResultTail.outcome, 'unknown');
       assert.equal(toolResultTail.unknownReason, 'no-terminal-marker');
 
       const thinkingTail = await readAgentOutcome(
-        agentTranscriptPath(dir, 'a34e6920efa23792f'),
+        dir,
         'a34e6920efa23792f',
       );
       assert.equal(thinkingTail.outcome, 'unknown');
@@ -273,7 +283,7 @@ test('a normal completion is reported completed with its report text', async () 
     },
     async (dir) => {
       const outcome = await readAgentOutcome(
-        agentTranscriptPath(dir, 'af485a27dc52b445a'),
+        dir,
         'af485a27dc52b445a',
       );
       assert.equal(outcome.outcome, 'completed');
@@ -281,7 +291,7 @@ test('a normal completion is reported completed with its report text', async () 
       assert.equal(outcome.startedAt, '2026-07-10T17:51:51.576Z');
       assert.equal(outcome.finalText, '*Please answer in the same language as the question.*');
 
-      const meta = await readAgentMeta(agentMetaPath(dir, 'af485a27dc52b445a'));
+      const meta = await readAgentMeta(dir, 'af485a27dc52b445a');
       assert.equal(meta.parentAgentId, 'a5a05086d3cb0b770');
       assert.equal(meta.spawnDepth, 2);
       assert.equal(meta.model, null); // absent in this real sidecar shape
@@ -300,7 +310,7 @@ test('listSessionAgentIds returns flat agent ids only and never descends into wo
     async (dir) => {
       // A workflow subtree next door: its subagents must stay invisible here
       // (T-825 keeps the two readers on disjoint trees).
-      const wfDir = path.join(dir, 'workflows', 'wf_synthetic_5e55ac63-ce7');
+      const wfDir = path.join(dir.realpath, 'workflows', 'wf_synthetic_5e55ac63-ce7');
       await mkdir(wfDir, { recursive: true });
       await writeFile(path.join(wfDir, 'agent-deadbeef.jsonl'), jsonl(COMPLETED_LAST), 'utf8');
 
@@ -326,7 +336,7 @@ test('the tail window still classifies correctly when it cannot reach the report
     async (dir) => {
       // A window big enough for the last record but not for the assistant report.
       const outcome = await readAgentOutcome(
-        agentTranscriptPath(dir, 'ab0bf67f9ea3d0c25'),
+        dir,
         'ab0bf67f9ea3d0c25',
         { tailBytes: INCIDENT_LAST.length + 8 },
       );
@@ -345,7 +355,7 @@ test('a window too small for any complete record declines the verdict', async ()
     },
     async (dir) => {
       const outcome = await readAgentOutcome(
-        agentTranscriptPath(dir, 'ab0bf67f9ea3d0c25'),
+        dir,
         'ab0bf67f9ea3d0c25',
         { tailBytes: 32 },
       );
@@ -392,7 +402,7 @@ test('an assistant record holding BOTH text and a tool_use is in-flight, not com
   await withSubagentsDir(
     { 'agent-mixedtail.jsonl': jsonl(INCIDENT_FIRST, MIXED_TEXT_AND_TOOL_USE) },
     async (dir) => {
-      const outcome = await readAgentOutcome(agentTranscriptPath(dir, 'mixedtail'), 'mixedtail');
+      const outcome = await readAgentOutcome(dir, 'mixedtail');
       assert.equal(outcome.outcome, 'unknown', 'the tool never returned ⇒ the turn never closed');
       assert.equal(outcome.unknownReason, 'in-flight-turn');
       assert.notEqual(outcome.outcome, 'completed');
@@ -420,7 +430,7 @@ test('a transcript cut mid-record is `torn-tail`, never the verdict of the recor
       'agent-intact.jsonl': jsonl(INCIDENT_FIRST, INCIDENT_FINAL_ASSISTANT),
     },
     async (dir) => {
-      const torn = await readAgentOutcome(agentTranscriptPath(dir, 'torn'), 'torn');
+      const torn = await readAgentOutcome(dir, 'torn');
       assert.equal(torn.outcome, 'unknown');
       assert.equal(torn.unknownReason, 'torn-tail');
       assert.notEqual(torn.outcome, 'completed');
@@ -430,7 +440,7 @@ test('a transcript cut mid-record is `torn-tail`, never the verdict of the recor
         'Two files from another session appeared — staging mine by name only.',
       );
 
-      const intact = await readAgentOutcome(agentTranscriptPath(dir, 'intact'), 'intact');
+      const intact = await readAgentOutcome(dir, 'intact');
       assert.equal(intact.outcome, 'completed', 'the control must NOT be dragged into unknown');
       assert.equal(intact.unknownReason, null);
     },
@@ -460,20 +470,20 @@ test('missing / empty / malformed inputs degrade to unknown and never throw', as
       'agent-badmeta.meta.json': '{ this is not json',
     },
     async (dir) => {
-      const missing = await readAgentOutcome(agentTranscriptPath(dir, 'nope'), 'nope');
+      const missing = await readAgentOutcome(dir, 'nope');
       assert.equal(missing.outcome, 'unknown');
       assert.equal(missing.unknownReason, 'unreadable');
 
-      const empty = await readAgentOutcome(agentTranscriptPath(dir, 'empty'), 'empty');
+      const empty = await readAgentOutcome(dir, 'empty');
       assert.equal(empty.outcome, 'unknown');
       assert.equal(empty.unknownReason, 'unreadable');
 
-      const garbage = await readAgentOutcome(agentTranscriptPath(dir, 'garbage'), 'garbage');
+      const garbage = await readAgentOutcome(dir, 'garbage');
       assert.equal(garbage.outcome, 'unknown');
       assert.equal(garbage.unknownReason, 'window-truncated');
       assert.equal(garbage.finalText, null);
 
-      assert.deepEqual(await readAgentMeta(agentMetaPath(dir, 'badmeta')), {
+      assert.deepEqual(await readAgentMeta(dir, 'badmeta'), {
         agentType: null,
         description: null,
         toolUseId: null,
@@ -481,13 +491,28 @@ test('missing / empty / malformed inputs degrade to unknown and never throw', as
         model: null,
         parentAgentId: null,
       });
-      assert.equal((await readAgentMeta(agentMetaPath(dir, 'absent'))).toolUseId, null);
+      assert.equal((await readAgentMeta(dir, 'absent')).toolUseId, null);
     },
   );
 
-  assert.deepEqual(await listSessionAgentIds('/definitely/not/a/path'), []);
   assert.deepEqual(classifyLastRecord(null), {
     outcome: 'unknown',
     unknownReason: 'window-truncated',
+  });
+});
+
+test('ADR-201 A1: a symlinked or hardlinked agent file is unreadable, never followed', async () => {
+  await withSubagentsDir({ 'outside.jsonl': jsonl(COMPLETED_FIRST, COMPLETED_LAST) }, async (dir) => {
+    const outside = path.join(dir.realpath, 'outside.jsonl');
+    await symlink(outside, path.join(dir.realpath, 'agent-linked.jsonl'));
+    await link(outside, path.join(dir.realpath, 'agent-hard.jsonl'));
+    await symlink(path.join(dir.realpath, '..', '..', 'meta.json'), path.join(dir.realpath, 'agent-linked.meta.json'));
+    await writeFile(path.join(dir.realpath, '..', '..', 'meta.json'), COMPLETED_META, 'utf8');
+    for (const agentId of ['linked', 'hard']) {
+      const outcome = await readAgentOutcome(dir, agentId);
+      assert.equal(outcome.unknownReason, 'unreadable', agentId);
+      assert.equal(outcome.finalText, null, agentId);
+    }
+    assert.equal((await readAgentMeta(dir, 'linked')).toolUseId, null);
   });
 });

@@ -40,7 +40,7 @@ mock.module('./sessionManager.js', {
 named('./modules/database/index.js', {
   sessionsDb: {
     getSessionById: () => null,
-    createSession: (id: string) => { events.push(`create:${id}`); },
+    recordDiscoveredSession: ({ sessionId }: { sessionId: string }) => { events.push(`create:${sessionId}`); },
     adoptRuntimeSessionId: (from: string, to: string) => { events.push(`adopt:${from}->${to}`); return true; },
   },
   participantsDb: { recordSpawn() {} },

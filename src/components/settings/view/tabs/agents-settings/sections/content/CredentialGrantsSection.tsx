@@ -3,9 +3,11 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../../../../../../auth';
+import { Tooltip } from '../../../../../../../shared/view/ui';
 import SettingsCard from '../../../../SettingsCard';
 import SettingsGroup from '../../../../SettingsGroup';
 import SettingsSection from '../../../../SettingsSection';
+import StatusBadge from '../../../../StatusBadge';
 import {
   agentToGrantProvider,
   useCredentialGrants,
@@ -13,6 +15,19 @@ import {
   type GrantProvider,
 } from '../../../../../hooks/useCredentialGrants';
 import type { AgentProvider } from '../../../../../types/types';
+
+/** What the grantor's mode means for the grantee, in words: a key mode is billed by usage. */
+function GrantorModeBadge({ mode }: { mode: 'subscription' | 'api_key' | null | undefined }) {
+  const { t } = useTranslation('settings');
+  if (!mode) return null;
+  return (
+    <Tooltip content={t('credentialGrants.grantorMode.tooltip')} position="bottom" multiline tapToToggle keyboard>
+      <StatusBadge tone={mode === 'api_key' ? 'warning' : 'neutral'}>
+        {t(`credentialGrants.grantorMode.${mode}`)}
+      </StatusBadge>
+    </Tooltip>
+  );
+}
 
 type CredentialGrantsSectionProps = {
   agent: AgentProvider;
@@ -149,6 +164,7 @@ export default function CredentialGrantsSection({ agent }: CredentialGrantsSecti
                     />
                     <Share2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span>{t('credentialGrants.received.grantOption', { owner: grant.ownerUsername })}</span>
+                    <GrantorModeBadge mode={grant.grantorLinkMode} />
                   </label>
                 </li>
               ))}

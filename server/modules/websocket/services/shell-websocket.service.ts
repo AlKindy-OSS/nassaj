@@ -17,6 +17,7 @@ import {
   resolveWorkspaceProjectAdmission,
 } from '@/modules/database/repositories/project-access.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { installManagedClaudeTerminalEnv } from '@/services/isolation/managed-claude-terminal-env.js';
 import {
@@ -534,6 +535,34 @@ export function materializeProviderLoginCommand(
   if (head === 'codex') return codexShellCommand(codexIdentity, rest);
   const harness = PTY_LOGIN_COMMAND_HARNESS.get(head);
   return harness ? [ptyHarnessCli(harness), ...rest].join(' ') : command;
+}
+
+const LINK_MODE_REFUSAL_CODES = new Set(['LINK_MODE_KEY_MISSING', 'LINK_MODE_RECORD_UNREADABLE']);
+
+/**
+ * B-1548: runs the link-mode gate for a Codex model terminal on the caller's
+ * OWN tree (`honorGrants: false`, as for Claude terminals). On refusal sends a
+ * credential-free error frame and returns false; the caller must not spawn.
+ * An unexpected gate failure also refuses (fail closed) with a generic frame.
+ */
+async function admitCodexTerminalLinkMode(
+  ws: WebSocket,
+  userId: string | number | null | undefined
+): Promise<boolean> {
+  try {
+    await assertLinkModeRunAllowed(userId, 'codex', { honorGrants: false });
+    return true;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    const known = typeof code === 'string' && LINK_MODE_REFUSAL_CODES.has(code);
+    console.error('[ERROR] Codex terminal refused by the link-mode gate:', known ? code : 'gate_failure');
+    ws.send(JSON.stringify({
+      type: 'error',
+      code: known ? code : 'link_mode_check_failed',
+      message: known ? (error as Error).message : 'The link mode for this harness could not be checked.',
+    }));
+    return false;
+  }
 }
 
 /**
@@ -1129,6 +1158,12 @@ export function handleShellConnection(
             }));
             return;
           }
+        }
+        // B-1548 (ADR-200 S4): a Codex model terminal (`codex` / `codex resume`)
+        // runs on the member's own tree, so it passes the same link-mode run gate
+        // as every other Codex spawn. Plain shells and `codex login` stay ungated.
+        if (provider === 'codex' && !isPlainShell && !(await admitCodexTerminalLinkMode(ws, userId))) {
+          return;
         }
         const shellCommand = buildShellCommand(data, dependencies, codexIdentity);
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';

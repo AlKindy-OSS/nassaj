@@ -349,6 +349,32 @@ function assertParsedConfigAllowed(config, env, expectedOrigins, collectOptions 
   }
 }
 
+/**
+ * ADR-200 S8: validates the inline OPENCODE_CONFIG_CONTENT a spawn-vendor turn sets
+ * AFTER sanitizing, with the same expansion and per-block binding rules. The allowlist
+ * gains ONLY this turn's vendor block → its constant origin; every other block (the
+ * carrier `glm` included) keeps its own binding, and an unknown block fails closed.
+ * No inline config → no-op.
+ *
+ * @param {NodeJS.ProcessEnv} env the final child env
+ * @param {Record<string, string>} turnVendorBaseUrls providerId → constant endpoint
+ * @throws {OpenCodeBaseUrlError} code OPENCODE_BASEURL_NOT_ALLOWED on any violation
+ */
+export function assertOpenCodeInlineConfigAllowed(env, turnVendorBaseUrls = {}) {
+  const raw = env?.OPENCODE_CONFIG_CONTENT;
+  if (raw === undefined) return;
+  let config;
+  try {
+    config = JSON.parse(String(raw));
+  } catch {
+    throw new OpenCodeBaseUrlError(
+      'Refusing to spawn the opencode carrier: the inline config is not valid JSON.',
+      { reason: 'invalid_json', label: 'OPENCODE_CONFIG_CONTENT' },
+    );
+  }
+  assertParsedConfigAllowed(config, env, expectedOriginByProvider(turnVendorBaseUrls), { includeMcp: true });
+}
+
 /** Config filenames opencode merges from a project directory and from each `.opencode` dir. */
 const OPENCODE_PROJECT_CONFIG_NAMES = Object.freeze(['opencode.json', 'opencode.jsonc']);
 

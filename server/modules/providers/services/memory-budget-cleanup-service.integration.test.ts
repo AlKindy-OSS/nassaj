@@ -9,8 +9,8 @@ import ts from 'typescript';
 
 import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
-import { resolveClaudeHistoryTranscriptPath } from '../list/claude/claude-transcript-path.js';
-import { resolveCodexHistoryTranscriptPath } from '../list/codex/codex-transcript-path.js';
+import { openPinned } from '../shared/pinned-fd.js';
+import { isTranscriptHandle } from '../shared/session-transcript-reader.js';
 import { HistoryAdmission, HistoryReadLease, HistoryBudgetError, HISTORY_LIMITS } from './history-budget.service.js';
 const sourcePath = path.join(import.meta.dirname, 'sessions.service.ts');
 async function actualService(bindings: Record<string, unknown>) {
@@ -25,7 +25,7 @@ async function actualService(bindings: Record<string, unknown>) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
   }).outputText;
   const context = vm.createContext({ HistoryReadLease, HistoryBudgetError, HISTORY_LIMITS,
-    resolveClaudeHistoryTranscriptPath, resolveCodexHistoryTranscriptPath,
+    isTranscriptHandle,
     AbortController, AbortSignal, setTimeout, clearTimeout, ...bindings });
   vm.runInContext(code, context); return context.service;
 }
@@ -41,6 +41,11 @@ for (const scenario of ['read-413', 'consumer-413', 'consumer-undefined', 'consu
       await fs.writeFile(file, '{"fixture":1}\n');
       const service = await actualService({ historyAdmission: admission,
         assertHistorySourceAccessible(session: string, user: number) { assert.equal(session, 'fixture'); assert.equal(user, 7); return { provider: 'codex', jsonl_path: file }; },
+        // ADR-201: the real reader's pinned open of the (already authorised) fixture.
+        async openSessionTranscript(session: string) {
+          const pinned = await openPinned(await fs.realpath(file), 'file');
+          return { fd: pinned.handle, realpath: pinned.realpath, stat: pinned.stat, sessionId: session, provider: 'codex' };
+        },
         console: { error(...args: unknown[]) { diagnostics.push(args); if (scenario === 'logger-throws') throw new Error('logging failed'); } },
       });
       service.fetchHistory = async (_session: string, _user: number, options: { historyLease: HistoryReadLease }) => {

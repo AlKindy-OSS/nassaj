@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises';
+import { lstat, open, readdir, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -17,6 +17,17 @@ import {
   resolveCodexLinkedRollouts,
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
+import type { PinnedHandle } from '@/modules/providers/shared/pinned-fd.js';
+import {
+  claudeFileBinder,
+  codexThreadBinder,
+  isQuietChildRefusal,
+  isTranscriptHandle,
+  openBoundFile,
+  openRecordedTranscript,
+  TranscriptRefusedError,
+  type FileBinder,
+} from '@/modules/providers/shared/session-transcript-reader.js';
 
 import { calculateSessionCost, type SessionCost } from './cost-calculator.js';
 import { emptyTotals, type ModelUsage, type SessionUsage } from './usage-extractors.js';
@@ -82,48 +93,46 @@ const positive = (value: unknown): number => {
 
 const eventId = (...parts: Array<string | number>): string =>
   createHash('sha256').update(parts.join('|')).digest('hex');
-const durableSessionId = (value: string): boolean => /^[a-f0-9-]{20,}$/i.test(value);
+/** The conversation root, bound to the session (ADR-201 A-P2c). */
+type BoundRoot = { realpath: string; root: string };
 
-async function assertRootSessionIdentity(context: IngestContext): Promise<void> {
-  if (!durableSessionId(context.sessionId)) return;
-  if (context.provider === 'codex') {
-    const observed = context.manifest?.root.sessionId ?? context.manifest?.root.threadId;
-    if (!observed) throw new Error(`Cannot prove transcript session identity for ${context.sessionId}`);
-    if (observed !== context.sessionId) {
-      throw new Error(`Transcript session identity ${observed} does not match ${context.sessionId}`);
-    }
-    return;
+/**
+ * Binds the root transcript to the session through the session transcript
+ * reader: the recorded path, confined to the one tree holding it, pinned, and
+ * bound by name and header (Claude `sessionId`; Codex `session_meta`). A
+ * refusal throws TranscriptRefusedError: nothing is attributed to the session.
+ */
+async function bindIngestRoot(context: IngestContext): Promise<BoundRoot> {
+  const opened = await openRecordedTranscript({
+    session_id: context.sessionId, provider: context.provider, jsonl_path: context.transcriptPath,
+  }, 'cost');
+  if (!isTranscriptHandle(opened)) throw new TranscriptRefusedError(opened.reason);
+  await opened.fd.close().catch(() => undefined);
+  if (!opened.root) throw new TranscriptRefusedError('outside_tree');
+  return { realpath: opened.realpath, root: opened.root };
+}
+
+/** A source to ingest and the binder its own descriptor must pass. */
+type BoundSource = { path: string; binder: FileBinder };
+
+/**
+ * The sources of a bound conversation: the Claude root and its subagent files
+ * (each bound to the session id by its header), or the Codex manifest files
+ * (each bound to its own thread id). A manifest built for another root throws.
+ */
+function boundSources(context: IngestContext, root: BoundRoot, claudeFiles: string[] | null): BoundSource[] {
+  if (context.provider === 'claude') {
+    return (claudeFiles ?? [root.realpath]).map((source) => ({
+      path: source, binder: claudeFileBinder(context.sessionId, source === root.realpath),
+    }));
   }
-  const handle = await open(context.transcriptPath, 'r');
-  try {
-    const chunk = Buffer.allocUnsafe(MAX_READ_BYTES);
-    let offset = 0;
-    let tail = '';
-    for (;;) {
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, offset);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-      const text = tail + chunk.subarray(0, bytesRead).toString('utf8');
-      const lines = text.split('\n');
-      tail = lines.pop() ?? '';
-      if (Buffer.byteLength(tail) > MAX_JSONL_RECORD_BYTES) throw new Error('Identity record exceeds JSONL limit');
-      for (const line of lines) {
-        let value: unknown;
-        try { value = JSON.parse(line); } catch { continue; }
-        if (!record(value)) continue;
-        const observed = typeof value.sessionId === 'string' ? value.sessionId
-          : typeof value.session_id === 'string' ? value.session_id : null;
-        if (!observed) continue;
-        if (!durableSessionId(observed) || observed !== context.sessionId) {
-          throw new Error(`Transcript session identity ${observed} does not match ${context.sessionId}`);
-        }
-        return;
-      }
-    }
-    throw new Error(`Cannot prove transcript session identity for ${context.sessionId}`);
-  } finally {
-    await handle.close();
+  const files = context.manifest?.files ?? [{ rolloutPath: root.realpath, threadId: context.sessionId }];
+  if (files[0]?.rolloutPath !== root.realpath || files[0]?.threadId !== context.sessionId) {
+    throw new TranscriptRefusedError('id_mismatch');
   }
+  return files.map((file, index) => ({
+    path: file.rolloutPath, binder: codexThreadBinder(file.threadId ?? '', index === 0),
+  }));
 }
 
 function decodeFingerprint(value: string | null): string[] {
@@ -154,20 +163,25 @@ async function extendFingerprint(
   return JSON.stringify(hashes);
 }
 
-async function sourceIdentity(provider: string, sourcePath: string): Promise<SourceIdentity> {
-  const canonical = await realpath(sourcePath);
-  const handle = await open(canonical, 'r');
-  try {
-    const fileStat = await handle.stat();
-    return {
-      sourceKey: `${provider}:${canonical}`,
-      sourcePath: canonical,
-      deviceId: String(fileStat.dev),
-      inode: String(fileStat.ino),
-    };
-  } finally {
-    await handle.close();
-  }
+/**
+ * Pinned single-link source, last component never followed, confined to the
+ * conversation's tree and bound by its binder (ADR-201 A-P2c); the caller
+ * closes it. A refusal throws TranscriptRefusedError.
+ */
+async function openSource(root: BoundRoot, source: BoundSource): Promise<PinnedHandle> {
+  const opened = await openBoundFile(root.root, source.path, source.binder);
+  if ('reason' in opened) throw new TranscriptRefusedError(opened.reason);
+  return opened;
+}
+
+/** Source key and identity of a pinned source. */
+function sourceIdentity(provider: string, source: PinnedHandle): SourceIdentity {
+  return {
+    sourceKey: `${provider}:${source.realpath}`,
+    sourcePath: source.realpath,
+    deviceId: String(source.stat.dev),
+    inode: String(source.stat.ino),
+  };
 }
 
 function ensureCheckpoint(identity: SourceIdentity, provider: string, parserVersion: number): UsageSourceCheckpoint {
@@ -385,15 +399,22 @@ function parseDurationEvents(
 
 async function ingestSource(
   context: IngestContext,
-  sourcePath: string,
+  bound: { root: BoundRoot; source: BoundSource },
   attribution: { kind: UsageAttributionKind; id: string; subagent: boolean },
   modelHint?: string | null,
 ): Promise<{ complete: boolean; sourceKey: string; generation: number; eventsWritten: number; committedBytes: number }> {
   context.signal?.throwIfAborted();
-  const identity = await sourceIdentity(context.provider, sourcePath);
+  const source = await openSource(bound.root, bound.source);
+  const handle = source.handle;
+  const identity = sourceIdentity(context.provider, source);
   const parserVersion = context.parserVersion ?? PARSER_VERSION;
-  let checkpoint = ensureCheckpoint(identity, context.provider, parserVersion);
-  const handle = await open(identity.sourcePath, 'r');
+  let checkpoint: UsageSourceCheckpoint;
+  try {
+    checkpoint = ensureCheckpoint(identity, context.provider, parserVersion);
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
   try {
     let before = await handle.stat();
     if (String(before.dev) !== identity.deviceId || String(before.ino) !== identity.inode) {
@@ -604,15 +625,14 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
   if (usageIngestWriterMode() === 'off') {
     return { skipped: true, caughtUp: true, ingestComplete: false, eventsWritten: 0, madeProgress: false };
   }
-  await assertRootSessionIdentity(context);
+  const root = await bindIngestRoot(context);
   const claude = context.provider === 'claude'
-    ? await claudeSources(context.transcriptPath, context.signal)
+    ? await claudeSources(root.realpath, context.signal)
     : null;
-  const sources = context.provider === 'codex'
-    ? context.manifest?.files.map((file) => file.rolloutPath) ?? [context.transcriptPath]
-    : claude!.sources;
+  const bound = boundSources(context, root, claude?.sources ?? null);
+  const sources = bound.map((source) => source.path);
   const pinnedSources = await Promise.all(sources.map(async (source) => {
-    const value = await stat(source);
+    const value = await lstat(source);
     return { source, size: value.size, mtimeMs: value.mtimeMs, inode: value.ino };
   }));
   let complete = context.provider === 'codex'
@@ -620,7 +640,7 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
     : claude!.stable;
   if (context.provider === 'codex' && context.manifest) {
     for (const pinned of context.manifest.files) {
-      const current = await stat(pinned.rolloutPath).catch(() => null);
+      const current = await lstat(pinned.rolloutPath).catch(() => null);
       if (!current || current.size !== pinned.size || current.mtimeMs !== pinned.mtimeMs) complete = false;
     }
   }
@@ -628,15 +648,27 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
   let caughtUp = true;
   let eventsWritten = 0;
   let madeProgress = false;
-  const rootKey = `${context.provider}:${await realpath(context.transcriptPath)}`;
-  for (const source of sources) {
-    const isRoot = path.resolve(source) === path.resolve(context.transcriptPath);
+  const rootKey = `${context.provider}:${root.realpath}`;
+  for (const source of bound) {
+    const isRoot = source.path === root.realpath;
     const agentId = context.provider === 'codex'
-      ? context.manifest?.linked.find((child) => child.rolloutPath === source)?.spawn.agentPath ?? ''
-      : isRoot ? '' : path.basename(source, '.jsonl');
-    const result = await ingestSource(context, source, {
-      kind: isRoot ? 'coordinator' : 'agent', id: agentId, subagent: !isRoot,
-    }, context.manifest?.files.find((file) => file.rolloutPath === source)?.model);
+      ? context.manifest?.linked.find((child) => child.rolloutPath === source.path)?.spawn.agentPath ?? ''
+      : isRoot ? '' : path.basename(source.path, '.jsonl');
+    let result: Awaited<ReturnType<typeof ingestSource>>;
+    try {
+      result = await ingestSource(context, { root, source }, {
+        kind: isRoot ? 'coordinator' : 'agent', id: agentId, subagent: !isRoot,
+      }, context.manifest?.files.find((file) => file.rolloutPath === source.path)?.model);
+    } catch (error) {
+      // A child that is not bound to this conversation is never attributed to
+      // it; the snapshot says so instead of failing the whole conversation.
+      if (isRoot || !(error instanceof TranscriptRefusedError)) throw error;
+      if (!isQuietChildRefusal(error.reason)) {
+        complete = false;
+        caughtUp = false;
+      }
+      continue;
+    }
     generation = Math.max(generation, result.generation);
     caughtUp = caughtUp && result.complete;
     eventsWritten += result.eventsWritten;
@@ -654,17 +686,17 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
     }
   }
   for (const pinned of pinnedSources) {
-    const current = await stat(pinned.source).catch(() => null);
+    const current = await lstat(pinned.source).catch(() => null);
     if (!current || current.size !== pinned.size || current.mtimeMs !== pinned.mtimeMs
       || current.ino !== pinned.inode) complete = false;
   }
   if (context.provider === 'claude') {
-    const finalTree = await claudeSources(context.transcriptPath, context.signal);
+    const finalTree = await claudeSources(root.realpath, context.signal);
     complete = complete && finalTree.stable
       && finalTree.sources.map((source) => path.resolve(source)).sort().join('\0')
         === sources.map((source) => path.resolve(source)).sort().join('\0');
   } else if (context.manifest) {
-    const refreshed = await resolveCodexLinkedRollouts(context.transcriptPath, context.signal);
+    const refreshed = await resolveCodexLinkedRollouts(root.realpath, context.signal);
     complete = complete && refreshed.complete
       && refreshed.files.map((file) => path.resolve(file.rolloutPath)).sort().join('\0')
         === sources.map((source) => path.resolve(source)).sort().join('\0');
@@ -678,7 +710,7 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
   if (context.provider === 'codex' && complete && context.manifest) {
     await buildCodexStatisticsV3({
       sessionId: context.sessionId,
-      transcriptPath: context.transcriptPath,
+      transcriptPath: root.realpath,
       scopeFingerprint: 'all',
       attributionFingerprint: 'none',
       ownerUserId: context.ownerUserId,

@@ -6,8 +6,13 @@
  *   - a plain API key → `env.ANTHROPIC_API_KEY`;
  *   - a `claude setup-token` OAuth token (prefix `sk-ant-oat01-`, B-1075) →
  *     `env.CLAUDE_CODE_OAUTH_TOKEN`.
- * The two are mutually exclusive: writing one removes the other, so the CLI
- * never sees a stale credential of the opposite kind. CLAUDE_CONFIG_DIR is
+ * ADR-200 C2 (S2, out of flag): key operations never touch the subscription.
+ * Writing an API key leaves `CLAUDE_CODE_OAUTH_TOKEN` in place, and deleting
+ * the key removes `ANTHROPIC_API_KEY` only, so OAuth → set key → delete key
+ * round-trips the file byte for byte. Saving a setup-token is the user's
+ * explicit subscription act and still drops a stored API key, which would
+ * otherwise outrank it (D1: a key never silently overrides a subscription).
+ * `.credentials.json` is never read or written here. CLAUDE_CONFIG_DIR is
  * resolved through the central isolation seam (resolveProviderEnv), so an
  * isolated user's credential lands in ~/.nassaj-users/<userId>/.claude/
  * settings.json and never the operator's.
@@ -32,7 +37,7 @@ import {
   readJsonObjectOrEmpty,
   writeJsonObjectAtomic,
 } from '@/modules/providers/shared/credentials/atomic-json-file.js';
-import { SUBSCRIPTION_TOKEN_PREFIX } from '@/modules/providers/shared/credentials/subscription-token-guard.js';
+import { isClaudeSubscriptionToken } from '@/modules/providers/shared/credentials/subscription-token-guard.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import type {
   IProviderCredentialWriter,
@@ -47,8 +52,6 @@ const MANAGED_API_KEY = 'ANTHROPIC_API_KEY';
 const MANAGED_OAUTH_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
 /** The exact set of env keys this writer is permitted to add or remove. */
 const MANAGED_ENV_KEYS = [MANAGED_API_KEY, MANAGED_OAUTH_KEY] as const;
-/** Prefix that marks a value as a `claude setup-token` OAuth token, not an API key. */
-const OAUTH_SETUP_TOKEN_PREFIX = SUBSCRIPTION_TOKEN_PREFIX;
 
 /**
  * IRON-RULE tripwire: refuses any write whose changed env keys include a
@@ -71,9 +74,12 @@ export function assertOnlyManagedEnvKeyChanged(changedKeys: readonly string[]): 
   }
 }
 
-/** The managed env key a value belongs under: OAuth token by prefix, else API key. */
+/**
+ * The managed env key a value belongs under: a subscription token by the shared
+ * pattern (every `sk-ant-oatNN-` generation, ADR-200 L2), else the API key.
+ */
 function managedKeyFor(value: string): typeof MANAGED_API_KEY | typeof MANAGED_OAUTH_KEY {
-  return value.startsWith(OAUTH_SETUP_TOKEN_PREFIX) ? MANAGED_OAUTH_KEY : MANAGED_API_KEY;
+  return isClaudeSubscriptionToken(value) ? MANAGED_OAUTH_KEY : MANAGED_API_KEY;
 }
 
 /** Env keys that differ (added, removed or modified) between two env records. */
@@ -149,9 +155,9 @@ export class ClaudeCredentialsWriter implements IProviderCredentialWriter {
 
   /**
    * Stores a Claude credential. A plain API key is written under
-   * `ANTHROPIC_API_KEY`; a `claude setup-token` OAuth token (prefix
-   * `sk-ant-oat01-`) under `CLAUDE_CODE_OAUTH_TOKEN`. Writing one removes the
-   * other so the two never coexist. The secret value is never logged.
+   * `ANTHROPIC_API_KEY` and leaves `CLAUDE_CODE_OAUTH_TOKEN` untouched (C2); a
+   * `claude setup-token` OAuth token under `CLAUDE_CODE_OAUTH_TOKEN`, dropping a
+   * stored API key that would outrank it. The secret value is never logged.
    */
   async setApiKey(
     userId: string | number | null | undefined,
@@ -167,17 +173,20 @@ export class ClaudeCredentialsWriter implements IProviderCredentialWriter {
       });
     }
     const targetKey = managedKeyFor(value);
-    const otherKey = targetKey === MANAGED_OAUTH_KEY ? MANAGED_API_KEY : MANAGED_OAUTH_KEY;
     const filePath = this.settingsFilePath(userId);
     const settings = readJsonObjectOrEmpty(filePath);
     const previousEnv = readObjectRecord(settings.env) ?? {};
     const nextEnv = { ...previousEnv, [targetKey]: value };
-    delete nextEnv[otherKey]; // The two managed credentials are mutually exclusive.
+    // C2: an API-key write never removes the subscription token.
+    if (targetKey === MANAGED_OAUTH_KEY) delete nextEnv[MANAGED_API_KEY];
     this.writeSettingsEnv(filePath, settings, previousEnv, nextEnv);
     return { provider: 'claude', configured: true };
   }
 
-  /** Removes both managed credential keys (API key and OAuth token); other settings survive. */
+  /**
+   * Removes `ANTHROPIC_API_KEY` only (C2): the subscription token and every
+   * other setting survive, and an untouched file is not rewritten.
+   */
   async deleteApiKey(
     userId: string | number | null | undefined,
     target?: string,
@@ -187,11 +196,46 @@ export class ClaudeCredentialsWriter implements IProviderCredentialWriter {
     const settings = readJsonObjectOrEmpty(filePath);
     const previousEnv = readObjectRecord(settings.env) ?? {};
     const nextEnv = { ...previousEnv };
-    for (const key of MANAGED_ENV_KEYS) delete nextEnv[key];
+    delete nextEnv[MANAGED_API_KEY];
     if (diffEnvKeys(previousEnv, nextEnv).length > 0) {
       this.writeSettingsEnv(filePath, settings, previousEnv, nextEnv);
     }
-    return { provider: 'claude', configured: false };
+    // A surviving subscription token still configures Claude; report the truth.
+    const configured = readOptionalString(nextEnv[MANAGED_OAUTH_KEY]) !== undefined;
+    return { provider: 'claude', configured };
+  }
+
+  /**
+   * ADR-200 S4: removes `CLAUDE_CODE_OAUTH_TOKEN` only, on an explicit
+   * link-mode act. `.credentials.json` and the API key are never touched.
+   */
+  async deleteSubscriptionToken(
+    userId: string | number | null | undefined,
+  ): Promise<ProviderCredentialStatus> {
+    const filePath = this.settingsFilePath(userId);
+    const settings = readJsonObjectOrEmpty(filePath);
+    const previousEnv = readObjectRecord(settings.env) ?? {};
+    const nextEnv = { ...previousEnv };
+    delete nextEnv[MANAGED_OAUTH_KEY];
+    if (diffEnvKeys(previousEnv, nextEnv).length > 0) {
+      this.writeSettingsEnv(filePath, settings, previousEnv, nextEnv);
+    }
+    const configured = readOptionalString(nextEnv[MANAGED_API_KEY]) !== undefined;
+    return { provider: 'claude', configured };
+  }
+
+  /**
+   * ADR-200 S6: the stored `ANTHROPIC_API_KEY`, or null, for the fan-out
+   * ownership check and re-read verify. `CLAUDE_CODE_OAUTH_TOKEN` and
+   * `.credentials.json` are never read here.
+   */
+  async readApiKey(
+    userId: string | number | null | undefined,
+    target?: string,
+  ): Promise<string | null> {
+    this.rejectTarget(target);
+    const env = readObjectRecord(readJsonObjectOrEmpty(this.settingsFilePath(userId)).env) ?? {};
+    return readOptionalString(env[MANAGED_API_KEY]) ?? null;
   }
 
   /** Configured when either managed credential key (API key or OAuth token) is present. */

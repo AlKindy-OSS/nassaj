@@ -28,9 +28,9 @@ import { engineProviderLabel } from '../shared/engineProviders.js';
 import { claudeDelegationProfile, prepareClaudeReviewedDelegation } from './services/claude-delegation-admission.js';
 import { evaluatePublicPageWrite } from './services/public-page-agent-guidance.js';
 import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
-import { resolveClaudeTranscriptPath } from './modules/providers/list/claude/claude-transcript-path.js';
 import { createClaudeProgressFold, claudeNotifiedTasks } from './modules/providers/list/claude/claude-progress-fold.js';
 import { createSeededLiveFold } from './modules/providers/list/claude/claude-progress-seed.js';
+import { createClaudeLaunchTranscriptRecorder } from './modules/providers/list/claude/claude-launch-transcript.js';
 import {
   confirmWithRetry,
   createSteerRun,
@@ -41,6 +41,7 @@ import {
   registerMidTurnInjection,
   STEER_TAINT_MATCHER,
   steerHookTimeoutSeconds,
+  steerTranscriptOpener,
 } from './modules/session-steer/index.js';
 import { claudeCacheSnapshot, claudeCacheTtlMinutes, claudeContextSnapshot, readClaudeContextSnapshot } from './modules/providers/list/claude/claude-token-usage.js';
 import { messageCoordinationDb, providerRunFailuresDb, auditLogDb, messageAuthorsDb, participantsDb, sessionsDb  } from './modules/database/index.js';
@@ -66,6 +67,7 @@ import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { saveChatImages } from './services/chat-image-store.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { reconcileClaudeSkillsForEnv } from './services/isolation/claude-skills-link.js';
 import {
   assertHarnessNotUpdating,
   beginHarnessLaunch,
@@ -81,6 +83,7 @@ import {
   pickEngineModel,
 } from './services/isolation/engine-pin.js';
 import { resolveClaudeRunProfileOrThrow } from './services/isolation/resolve-claude-run-profile.js';
+import { isLinkModeRunRefusal } from './modules/providers/services/harness-link-mode.service.js';
 import { runAuthorizedProviderCatalog } from './modules/execution-permissions/runtime-catalog.js';
 import { readRuntimeProcessIdentity } from './modules/execution-permissions/adapter.js';
 import { findDirectChildByProcessTag, permissionProcessTag } from './modules/execution-permissions/process-tag-identity.js';
@@ -1919,6 +1922,7 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
   } catch {
     env = { ...process.env };
   }
+  reconcileClaudeSkillsForEnv(env);
 
   let queryInstance = null;
   let timeoutHandle = null;
@@ -2883,10 +2887,9 @@ function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, injectionArm
   } catch {
     return null;
   }
-  const scanner = createTranscriptScanner(() => resolveClaudeTranscriptPath({
-    session_id: sessionIdRef() || '', project_path: sdkOptions.cwd || null,
-    jsonl_path: sessionsDb.getSessionById(sessionIdRef() || '')?.jsonl_path ?? null,
-  }, starterUserId));
+  // ADR-201 A1: the delivery proof reads the run's recorded transcript through
+  // the pinned reader, authorised as the starter (no project-derived fallback).
+  const scanner = createTranscriptScanner(steerTranscriptOpener(() => sessionIdRef() || '', starterUserId));
   const run = createSteerRun({
     sessionId: sessionIdRef, turnId: crypto.randomUUID(), starterUserId,
     permissionMode: () => sdkOptions.permissionMode || 'default',
@@ -3060,6 +3063,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // Record the authenticated human who spawned this run as a session
   // participant. Once per spawn (idempotent at the DB layer too) and only when
   // the WS is authenticated — anonymous/single-user runs carry no userId.
+  // Set once the spawn env is final (config dir + cwd); see recordClaudeLaunchTranscript.
+  let launchTranscriptContext = null;
+  // M3: records the launch path only once the CLI has written the file (retried per event).
+  const recordLaunchTranscript = createClaudeLaunchTranscriptRecorder();
   const recordParticipant = (sid) => {
     if (participantRecorded || !sid || !ws?.userId) {
       return;
@@ -3069,6 +3076,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       provider: 'claude',
       projectPath: options.cwd || options.projectPath || process.cwd(),
     });
+    // ADR-201 A2 (case g): a just-launched session gets the transcript path its
+    // spawn writes to, so pinned readers of the recorded path work before the
+    // synchronizer indexes it. After recordSpawn: the fill is admitted only from
+    // a spawn participant's credential tree. Never throws.
+    recordLaunchTranscript(sid, launchTranscriptContext);
     // Sender attribution (B-MU-UX-FIX-MSG-AUTHOR): remember WHO authored this
     // prompt so history loads can stamp userId onto the transcript's user
     // message (the transcript itself carries no identity). Never throws.
@@ -3304,6 +3316,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // while conversations/instructions stay shared via symlinks. Falls back to the
     // base env unchanged when no userId is present (single-user / platform mode).
     sdkOptions.env = resolveProviderEnv(ws?.userId ?? null, 'claude', sdkOptions.env);
+    // ADR-203: point <CLAUDE_CONFIG_DIR>/skills at the shared or private skills the
+    // resolver chose (deferred while another session of that tree is live). Never throws.
+    reconcileClaudeSkillsForEnv(sdkOptions.env);
 
     // Iron-rule re-check on the FINAL env actually handed to the subprocess.
     // resolveProviderEnv spreads the base env (ANTHROPIC_BASE_URL included) and
@@ -3314,6 +3329,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // spawn env. Validate that file under the same allowlist so a competitor base
     // URL placed there cannot bypass the OS-env guard above.
     assertSettingsEnvAllowed(sdkOptions.env.CLAUDE_CONFIG_DIR, sdkOptions.env);
+    // ADR-201: the spawn context the launch transcript path is derived from.
+    launchTranscriptContext = {
+      cwd: sdkOptions.cwd ?? options.cwd ?? null, configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR ?? null,
+    };
 
     // T-1910 S2: the admitted run's child identity is evidence for its decision. Recorded once;
     // a refused record is only logged (a failed write already blocked the generation inside the
@@ -4155,8 +4174,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // T-1988: the seed is size-capped and time-budgeted, past which the run
     // continues with a fresh fold, so it never holds live events longer.
     const progressFoldReady = sdkOptions.resume
-      ? createSeededLiveFold(sessionId || null, sdkOptions.resume,
-        { userId: ws?.userId ?? null, projectPath: sdkOptions.cwd || null })
+      ? createSeededLiveFold(sessionId || null, sdkOptions.resume)
       : Promise.resolve(createClaudeProgressFold('live', sessionId || null));
     // B-1401: tool_use ids of this run's Workflow calls not yet resolved. The tool
     // returns at once and the workflow runs as a background task, so an id leaves
@@ -4293,6 +4311,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       } else {
         // session_id already captured
       }
+      // M3 (ADR-201): retry the launch-path record until the CLI has written the
+      // file; only after the spawn participant exists (the fill is gated on it).
+      if (participantRecorded) recordLaunchTranscript(capturedSessionId, launchTranscriptContext);
 
       // Detect Workflow tool invocations so the complete event can signal
       // that background work continues after the assistant turn ends.
@@ -4675,7 +4696,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // CLI-installed probe, and its message must reach the user intact: the
     // frontend renders `reason` as the detail beside the localized headline, so
     // the user reads "no GLM API key stored" instead of a generic failure.
-    const engineRefused = error?.code === 'ENGINE_PROVIDER_UNAVAILABLE';
+    // B-1546: an api_key link mode with no key is refused the same way — before
+    // any spawn, with a credential-free message the user must read intact
+    // (B-1547: an unreadable link-mode record likewise).
+    const engineRefused = error?.code === 'ENGINE_PROVIDER_UNAVAILABLE' || isLinkModeRunRefusal(error?.code);
 
     // B-411: when an ENGINE was actually engaged, ask whether the vendor refused
     // us for quota before falling through to the generic mapper. Without this

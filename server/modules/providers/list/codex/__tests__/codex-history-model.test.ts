@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, it, mock } from 'node:test';
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+import { codexSessionsSandbox, withPinnedTranscript } from '@/shared/__tests__/provider-root-sandbox.js';
 
 const sandbox = codexSessionsSandbox('codex-history-model-');
 const transcript = path.join(sandbox, 'synthetic.jsonl');
@@ -27,9 +27,15 @@ const answer = (id: string, phase = 'commentary', turnId?: string, model?: strin
   },
 });
 
+/** Provider history over the pinned synthetic transcript (ADR-201: the service supplies it). */
+function modelHistory(options: { limit?: number; cursor?: string }) {
+  return withPinnedTranscript(transcript, 'synthetic-model-session', 'codex',
+    (pinned) => new CodexSessionsProvider().fetchHistory('synthetic-model-session', { ...options, transcript: pinned }));
+}
+
 async function history(rows: unknown[], limit?: number) {
   fs.writeFileSync(transcript, rows.map((row) => JSON.stringify(row)).join('\n'));
-  return new CodexSessionsProvider().fetchHistory('synthetic-model-session', { limit });
+  return modelHistory({ limit });
 }
 
 it('preserves per-turn models on commentary and final answers across model changes', async () => {
@@ -92,9 +98,7 @@ it('retains the model from before a pagination boundary without borrowing the ne
     context('gpt-5.6-sol', 'b'), answer('b-progress'), answer('b-final', 'final_answer', 'b'),
   ], 1);
   assert.equal(result.messages[0]?.model, 'gpt-5.6-sol');
-  const previous = await new CodexSessionsProvider().fetchHistory('synthetic-model-session', {
-    limit: 2, cursor: result.nextCursor,
-  });
+  const previous = await modelHistory({ limit: 2, cursor: result.nextCursor });
   assert.deepEqual(previous.messages.map((row) => row.model), ['gpt-6-astra', 'gpt-5.6-sol']);
 });
 
@@ -104,9 +108,9 @@ it('only fully flushed durable completed final responses expose a continuation i
     answer('msg_final', 'final_answer', 'a'), event('task_complete', 'a'),
     context('gpt-5.6-sol', 'b'), answer('msg_live', 'final_answer', 'b')];
   fs.writeFileSync(transcript, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
-  const result = await new CodexSessionsProvider().fetchHistory('synthetic-model-session', {});
+  const result = await modelHistory({});
   assert.deepEqual(result.messages.map(row => row.transcriptMessageId), [undefined, 'msg_final', undefined]);
   fs.appendFileSync(transcript, '{');
-  const incomplete = await new CodexSessionsProvider().fetchHistory('synthetic-model-session', {});
+  const incomplete = await modelHistory({});
   assert.ok(incomplete.messages.every(row => row.transcriptMessageId === undefined));
 });

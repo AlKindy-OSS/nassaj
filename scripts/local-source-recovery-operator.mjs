@@ -8,6 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { readPreparedLocalRecoveryCandidate } from './local-source-recovery-candidate.mjs';
 import { hashTree } from './lib/source-update-tree-identity.mjs';
+import { buildSourceUpdateAction } from './lib/source-update-action-schema.mjs';
 import { readBootstrapPrivateFile, readBootstrapPinnedFile, validateBootstrapApprovalChain, verifyBootstrapJournalBinding,
     verifyBootstrapTicket } from './lib/local-source-bootstrap-ticket.mjs';
 
@@ -242,9 +243,10 @@ export function deriveLocalRecoveryRegistration(context, { existingOnly = false 
         || receipt.manifestSha256 !== packet.manifestSha256) fail('candidate_binding');
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     if (head !== binding.previousSourceOid || head !== receipt.localSource.oid) fail('source_head_changed');
-    const action = { schema: 'nassaj-source-update-activation/v1', transactionId: receipt.transactionId,
+    // T-2004: the shared builder; without previousRuntimeOid its bytes equal the former literal.
+    const action = buildSourceUpdateAction({ transactionId: receipt.transactionId,
         originalHead: head, targetCommit: receipt.localSource.oid, version: receipt.version, manifestPath: receipt.manifestPath,
-        manifestSha256: receipt.manifestSha256, expectedServerBuildId: receipt.expectedServerBuildId };
+        manifestSha256: receipt.manifestSha256, expectedServerBuildId: receipt.expectedServerBuildId });
     const registration = { jobId: binding.jobId, actionId: binding.actionId, transactionId: binding.transactionId, ownerId: binding.ownerId,
         version: receipt.version, sourceOid: receipt.localSource.oid, sourceTreeSha256: receipt.localSource.inventorySha256,
         manifestPath: receipt.manifestPath, manifestSha256: receipt.manifestSha256, activationIdentitySha256: sha(JSON.stringify(action)),

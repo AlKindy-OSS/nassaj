@@ -7,7 +7,7 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
-import { closeConnection, closedSessionsDb, initializeDatabase, participantsDb, projectsDb, sessionsDb, userDb } from '@/modules/database/index.js';
+import { closeConnection, closedSessionsDb, getConnection, initializeDatabase, participantsDb, projectsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 import { providerRoutes } from '@/modules/providers/index.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -37,6 +37,9 @@ function seed(): void {
   const otherPath = fs.mkdtempSync(path.join(workspaceRoot, 'other-'));
   ownProjectId = projectsDb.createProjectPath(ownPath, 'Own', owner.id).project?.project_id ?? '';
   otherProjectId = projectsDb.createProjectPath(otherPath, 'Other', stranger.id).project?.project_id ?? '';
+  // ADR-201 A2: discovery never moves an existing row to another project, so a
+  // fresh fixture starts from no row rather than re-pointing the previous one.
+  getConnection().prepare("DELETE FROM sessions WHERE session_id IN ('bulk-owned-session', 'bulk-other-session')").run();
   sessionsDb.createSession('bulk-owned-session', 'claude', ownPath);
   sessionsDb.createSession('bulk-other-session', 'claude', otherPath);
   participantsDb.recordSpawn('bulk-owned-session', owner.id);

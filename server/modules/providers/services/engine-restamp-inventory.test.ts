@@ -24,6 +24,9 @@ const APP_CONFIG_WRITERS = new Set([
   'server/modules/database/repositories/engine-restamp-intent.db.ts',
   // T-1946: the API key SSO window (key 'api_keys.sso_attestation_window_days').
   'server/modules/database/repositories/api-key-sso-window.ts',
+  // ADR-203 (T-2003 C1): the 'harness_files.allow_member_private' switch only,
+  // a fixed parameterized key; never the reserved engine_restamp namespace.
+  'server/modules/database/repositories/harness-files-mode.db.ts',
   // ADR-194 (T-1962): 'sso.disabled' and 'installation.origin' only; never the
   // reserved engine_restamp namespace (the next test still enforces that).
   'server/modules/database/repositories/sso-oidc-config.ts',

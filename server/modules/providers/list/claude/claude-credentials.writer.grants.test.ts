@@ -120,13 +120,16 @@ describe('B-1251 — a credential write never follows a grant', () => {
     assert.equal(await writer.isConfigured(grantee.id), true);
   });
 
-  it('B deleteApiKey removes B credential and never the grantor one', async () => {
+  it('B deleteApiKey acts on B tree only and never on the grantor one', async () => {
     const before = fs.readFileSync(settingsOf(grantor.id));
 
     await writer.deleteApiKey(grantee.id);
 
     const granteeSettings = JSON.parse(fs.readFileSync(settingsOf(grantee.id), 'utf8'));
-    assert.equal(granteeSettings.env?.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+    // ADR-200 C2: a key delete removes ANTHROPIC_API_KEY only; B's own
+    // subscription token stays in B's own tree.
+    assert.equal(granteeSettings.env?.ANTHROPIC_API_KEY, undefined);
+    assert.equal(granteeSettings.env?.CLAUDE_CODE_OAUTH_TOKEN, TOKEN_B);
     assert.ok(
       fs.readFileSync(settingsOf(grantor.id)).equals(before),
       'A settings.json untouched by B delete',

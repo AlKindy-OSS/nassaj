@@ -19,7 +19,11 @@ const sandbox = path.join(os.homedir(), '.nassaj-users');
 fs.mkdirSync(sandbox, { recursive: true });
 let jsonlPath = '';
 mock.module('@/modules/database/index.js', { namedExports: {
-  sessionsDb: { getSessionById: () => ({ jsonl_path: jsonlPath }) },
+  sessionsDb: {
+    getSessionById: () => ({ jsonl_path: jsonlPath }),
+    // ADR-201: the history reader resolves the row through the bounded lookup.
+    getHistorySource: (sessionId: string) => ({ session_id: sessionId, provider: 'antigravity', jsonl_path: jsonlPath }),
+  },
   providerRunFailuresDb: { getFailure: () => null },
 } });
 const progress = await import('../agy-progress.js');

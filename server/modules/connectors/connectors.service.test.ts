@@ -1713,3 +1713,23 @@ test('failed extra-env redistribution leaves a disabled non-green retry state', 
     restore();
   }
 });
+
+test('B-1547: an unreadable keys store refuses a connector key save and delete without rewriting it', async () => {
+  const restore = sandbox();
+  connectorRow = stdioConnector();
+  try {
+    const keysFile = path.join(os.homedir(), '.nassaj-provider-secrets', 'keys.json');
+    fs.mkdirSync(path.dirname(keysFile), { recursive: true });
+    fs.writeFileSync(keysFile, '{not json');
+    const isStoreRefusal = (error: unknown) => error instanceof AppError
+      && error.code === 'PROVIDER_SECRETS_STORE_UNREADABLE'
+      && error.statusCode === 409
+      && error.message === 'The credential store needs operator repair.';
+    await assert.rejects(() => connectorsService.setKey('canva', 'sk-live-B1547'), isStoreRefusal);
+    assert.equal(fs.readFileSync(keysFile, 'utf8'), '{not json', 'the store bytes are left for the operator');
+    await assert.rejects(() => connectorsService.remove('canva'), isStoreRefusal);
+    assert.equal(fs.readFileSync(keysFile, 'utf8'), '{not json');
+  } finally {
+    restore();
+  }
+});

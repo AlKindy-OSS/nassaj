@@ -14,10 +14,12 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, mock } from 'node:test';
 
+// B-1544 / B-1551: must stay the first app-side import. Without it, an unset
+// DATABASE_PATH made initializeDatabase() write the worktree's database/auth.db.
+import { removeSandbox, sandboxRoot } from '@/modules/providers/tests/helpers/hermetic-sandbox.js';
 import type { UniversalConversationShadowHook } from '@/modules/conversations/index.js';
 import type { WebSocketWriter as WebSocketWriterType } from '@/modules/websocket/services/websocket-writer.service.js';
 
@@ -115,7 +117,7 @@ async function dispatch(
 
 before(async () => {
   closeConnection();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't1854-dispatch-'));
+  const root = fs.mkdtempSync(path.join(sandboxRoot, 't1854-dispatch-'));
   process.env.WORKSPACES_ROOT = root;
   await initializeDatabase();
   creator = userDb.createUser('rfd_creator', 'hash', 'user') as User;
@@ -137,6 +139,7 @@ after(() => {
   delete process.env.NASSAJ_OPENCODE_CARRIER;
   delete process.env.WORKSPACES_ROOT;
   closeConnection();
+  removeSandbox();
 });
 
 type Branch = {

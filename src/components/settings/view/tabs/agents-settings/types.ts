@@ -58,6 +58,8 @@ export type AgentCategoryTabsSectionProps = {
   selectedCategory: AgentCategory;
   onSelectCategory: (category: AgentCategory) => void;
   selectedAgent: AgentProvider;
+  /** A newer version of the selected harness exists — dot on the update tab. */
+  updateAvailable?: boolean;
 };
 
 export type AgentSelectorSectionProps = {
@@ -65,6 +67,8 @@ export type AgentSelectorSectionProps = {
   selectedAgent: AgentProvider;
   onSelectAgent: (agent: AgentProvider) => void;
   agentContextById: AgentContextByProvider;
+  /** Wire ids of harnesses with a newer version available (dot on their tile). */
+  updateAvailableIds?: ReadonlySet<string>;
   /** Whether the «النماذج المحلية» card at the end of the grid is active. */
   localModelsSelected?: boolean;
   /** Label for the local-models card (from i18n). When omitted the card is not rendered. */

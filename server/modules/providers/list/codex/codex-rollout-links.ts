@@ -1,6 +1,8 @@
-import { open, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+
+import { openFileNoFollow, PinnedOpenError, type PinnedHandle } from '../../shared/pinned-fd.js';
 
 export type CodexSpawn = {
   callId: string | null;
@@ -33,6 +35,8 @@ export type CodexRolloutMetadata = {
 
 export type CodexRolloutFile = {
   rolloutPath: string;
+  /** Thread id of this rollout's own first `session_meta` (its name carries it). */
+  threadId: string | null;
   model: string | null;
   size: number;
   mtimeMs: number;
@@ -221,7 +225,9 @@ async function childPathForThread(
       const relativeDirectory = path.relative(realSessionsRoot, realDirectory);
       const insideSessionsRoot = relativeDirectory === '' ||
         (!relativeDirectory.startsWith('..') && !path.isAbsolute(relativeDirectory));
-      if (insideSessionsRoot && path.dirname(realCandidate) === realDirectory) return realCandidate;
+      // The real directory plus the listed name: the pinned open below refuses
+      // the name when it is itself a symlink (ADR-201 A1), so it is never resolved here.
+      if (insideSessionsRoot && path.dirname(realCandidate) === realDirectory) return path.join(realDirectory, name);
     }
   } catch {
     signal?.throwIfAborted();
@@ -230,11 +236,44 @@ async function childPathForThread(
   return null;
 }
 
-/** Reads only Codex-native actor/link fields from one rollout. */
+/** A refused rollout open; `reason` carries no path or content. */
+export class CodexRolloutRefusedError extends Error {
+  constructor(readonly reason: string) {
+    super(`Codex rollout refused: ${reason}`);
+    this.name = 'CodexRolloutRefusedError';
+  }
+}
+
+/** Pinned single-link open, last component never followed; a refusal throws CodexRolloutRefusedError. */
+async function openRollout(rolloutPath: string): Promise<PinnedHandle> {
+  try {
+    return await openFileNoFollow(rolloutPath);
+  } catch (error) {
+    throw new CodexRolloutRefusedError(error instanceof PinnedOpenError ? error.reason : 'io_error');
+  }
+}
+
+/**
+ * Reads only Codex-native actor/link fields from one rollout (ADR-201 A1.5):
+ * the rollout is read from a pinned single-link descriptor whose last path
+ * component is never followed. Identity is bound by the caller (the manifest
+ * checks the child name, `session_meta` and its sessions root). Throws
+ * CodexRolloutRefusedError on a refused open.
+ */
 export async function readCodexRolloutMetadata(
   rolloutPath: string,
   signal?: AbortSignal,
 ): Promise<CodexRolloutMetadata> {
+  const opened = await openRollout(rolloutPath);
+  try {
+    return await readRolloutMetadataFrom(opened.handle, signal);
+  } finally {
+    await opened.handle.close().catch(() => undefined);
+  }
+}
+
+/** Metadata pass over an already pinned rollout descriptor (left open). */
+async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal): Promise<CodexRolloutMetadata> {
   return withCodexRolloutRead(signal, async () => {
   let model: string | null = null;
   const models: string[] = [];
@@ -262,7 +301,6 @@ export async function readCodexRolloutMetadata(
   }> = [];
   const seenThreads = new Set<string>();
 
-  const handle = await open(rolloutPath, 'r');
   const before = await handle.stat();
   const stream = handle.createReadStream({ encoding: 'utf8', signal, autoClose: false });
   const lines = createInterface({ input: stream, crlfDelay: Infinity });
@@ -403,7 +441,6 @@ export async function readCodexRolloutMetadata(
     snapshotStable = Boolean(after && after.size === before.size && after.mtimeMs === before.mtimeMs);
     lines.close();
     stream.destroy();
-    await handle.close().catch(() => undefined);
   }
 
   const spawns: CodexSpawn[] = started.map((spawn) => ({
@@ -443,7 +480,15 @@ async function buildCodexRolloutManifest(
   signal?: AbortSignal,
   afterMetadata?: () => Promise<void> | void,
 ): Promise<CodexRolloutManifest> {
+  // ADR-201 A1.5: every rollout of the manifest is read from a pinned
+  // descriptor; children are also confined to the root's sessions root below.
   const root = await readCodexRolloutMetadata(rootRolloutPath, signal);
+  // ADR-201 A-P2c: the root's name is bound to its own thread id exactly as a
+  // child's is (childPathForThread finds `…-<threadId>.jsonl`): a rollout whose
+  // session_meta names another thread is refused, never read as that thread.
+  if (root.threadId && !path.basename(rootRolloutPath).endsWith(`-${root.threadId}.jsonl`)) {
+    throw new CodexRolloutRefusedError('name_mismatch');
+  }
   const linked: CodexLinkedRollout[] = [];
   const spawns: CodexSpawn[] = [];
   const visitedPaths = new Set([rootRolloutPath]);
@@ -472,7 +517,7 @@ async function buildCodexRolloutManifest(
   );
   if (!rootIdentityValid) {
     signal?.throwIfAborted();
-    const rootStat = await stat(rootRolloutPath);
+    const rootStat = await lstat(rootRolloutPath);
     const hasUnfollowableLinks = root.spawns.length > 0;
     root.spawns = [];
     const rootStable = root.snapshotStable &&
@@ -484,6 +529,7 @@ async function buildCodexRolloutManifest(
       root, linked, spawns, spawnCount: 0,
       files: [{
         rolloutPath: rootRolloutPath,
+        threadId: root.threadId,
         model: root.model,
         size: root.snapshotSize,
         mtimeMs: root.snapshotMtimeMs,
@@ -573,13 +619,14 @@ async function buildCodexRolloutManifest(
   signal?.throwIfAborted();
   const files = [...metadataByPath].map(([rolloutPath, metadata]) => ({
     rolloutPath,
+    threadId: metadata.threadId,
     model: metadata.model,
     size: metadata.snapshotSize,
     mtimeMs: metadata.snapshotMtimeMs,
   }));
   const changedAfterMetadata = await Promise.all(files.map(async (file) => {
     signal?.throwIfAborted();
-    const current = await stat(file.rolloutPath).catch(() => null);
+    const current = await lstat(file.rolloutPath).catch(() => null);
     return !current || current.size !== file.size || current.mtimeMs !== file.mtimeMs;
   }));
   if (changedAfterMetadata.some(Boolean)) {
@@ -605,7 +652,9 @@ export async function resolveCodexLinkedRollouts(
   /** Deterministic race seam for unit tests; production callers omit it. */
   afterMetadata?: () => Promise<void> | void,
 ): Promise<CodexRolloutManifest> {
-  const canonicalPath = await realpath(rootRolloutPath);
+  // The directory is canonicalised, the file name never is: a symlinked
+  // rollout is refused by the pinned open instead of being resolved here.
+  const canonicalPath = path.join(await realpath(path.dirname(rootRolloutPath)), path.basename(rootRolloutPath));
   signal?.throwIfAborted();
   if (afterMetadata) return buildCodexRolloutManifest(canonicalPath, signal, afterMetadata);
   let flight = manifestFlights.get(canonicalPath);

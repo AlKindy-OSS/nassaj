@@ -39,6 +39,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+import { canonicalFileSync, openPinnedSync, PinnedOpenError } from '../modules/providers/shared/pinned-fd.js';
+
 /** The pattern the Anthropic API enforces on server-tool ids. */
 const SERVER_TOOL_ID_PATTERN = /^srvtoolu_[a-zA-Z0-9_]+$/;
 
@@ -222,27 +224,129 @@ export function repairRecord(record, seen, mode = REPAIR_MODE.SERVER_TOOL) {
 }
 
 /**
+ * Reads the whole transcript through a pinned single-link descriptor (no
+ * symlink, no hardlink, kernel-confirmed path). Returns `{ raw, stat }` or
+ * `{ reason }` ('absent' for a missing file).
+ */
+function readPinned(real) {
+  let pinned;
+  try {
+    pinned = openPinnedSync(real);
+  } catch (error) {
+    const reason = error instanceof PinnedOpenError ? error.reason : 'io_error';
+    return { reason: reason === 'missing' ? 'absent' : `refused:${reason}` };
+  }
+  try {
+    return { raw: fs.readFileSync(pinned.fd, 'utf8'), stat: pinned.stat };
+  } catch (error) {
+    return { reason: `unreadable:${error?.code || 'error'}` };
+  } finally {
+    fs.closeSync(pinned.fd);
+  }
+}
+
+/**
+ * Writes `content` beside `target` as an exclusive, non-following temp file
+ * and renames it over `target`. Nothing is ever opened through `target`'s
+ * name, so a symlink or hardlink planted there is replaced, never written
+ * through. With `expected` (the read's fstat), the rename happens only while
+ * `target` is still that same regular file. Throws on failure (tmp removed).
+ */
+function replaceAtomically(target, content, expected = null) {
+  const tmp = `${target}.nassaj-repair.tmp`;
+  try { fs.unlinkSync(tmp); } catch { /* none left over */ }
+  const created = openPinnedSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+  try {
+    try {
+      fs.writeFileSync(created.fd, content, 'utf8');
+      fs.fsyncSync(created.fd);
+    } finally {
+      fs.closeSync(created.fd);
+    }
+    if (expected) {
+      const now = fs.lstatSync(target, { bigint: true });
+      if (!now.isFile() || now.dev !== expected.dev || now.ino !== expected.ino) {
+        throw Object.assign(new Error('transcript changed during repair'), { code: 'ECHANGED' });
+      }
+    }
+    fs.renameSync(tmp, target);
+  } catch (error) {
+    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+    throw error;
+  }
+}
+
+/** First top-level `sessionId` of the parsed records, or null. */
+function headerSessionId(lines) {
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const record = JSON.parse(line);
+      if (record && typeof record.sessionId === 'string') return record.sessionId;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Repairs every line in place; returns `{ blocks, repairedLines, seen }` or
+ * `{ reason }` when a line cannot be parsed or re-serialised.
+ */
+function repairLines(lines, mode) {
+  const repairedLines = [];
+  const seen = [];
+  let blocks = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].trim()) continue;
+    let record;
+    try {
+      record = JSON.parse(lines[i]);
+    } catch {
+      // A torn tail is expected while a run is still appending; a torn line in
+      // the middle is corruption we must not compound. Either way: abandon the
+      // whole repair rather than rewrite a file we cannot fully read.
+      return { reason: 'unparsable' };
+    }
+    const n = repairRecord(record, seen, mode);
+    if (!n) continue;
+    blocks += n;
+    repairedLines.push(i + 1);
+    try {
+      lines[i] = JSON.stringify(record);
+    } catch {
+      return { reason: 'unserializable' };
+    }
+  }
+  return { blocks, repairedLines, seen };
+}
+
+/**
  * Scans and, when needed, rewrites a transcript file.
  *
- * Atomic: writes a sibling `.tmp` then renames over the original. The shared
- * `~/.claude/projects` tree is reached through per-user SYMLINKED directories
- * (provision-user-dirs), never hardlinks, so a rename in the real directory is
- * seen by every mirror.
+ * ADR-201 A1: the file is read from a pinned single-link descriptor (never a
+ * symlink or hardlink) and rewritten only by an exclusive temp file renamed
+ * over it while it is still the file that was read. With `expectedSessionId`
+ * its first id-bearing record must carry that id, or nothing is written.
+ * The shared `~/.claude/projects` tree is reached through per-user SYMLINKED
+ * directories (provision-user-dirs), so the directory part is realpath-resolved
+ * and the rename lands in the real directory, seen by every mirror.
  *
  * @param {string} jsonlPath
+ * @param {'server-tool'|'cross-engine'} [mode]
+ * @param {{ expectedSessionId?: string }} [expect]
  * @returns {{repaired: number, blocks: number, lines: number[], reason?: string}}
  */
-export function repairTranscriptFile(jsonlPath, mode = REPAIR_MODE.SERVER_TOOL) {
+export function repairTranscriptFile(jsonlPath, mode = REPAIR_MODE.SERVER_TOOL, expect = {}) {
   const untouched = (reason) => ({ repaired: 0, blocks: 0, lines: [], seen: [], reason });
   const crossEngine = mode === REPAIR_MODE.CROSS_ENGINE;
 
-  let raw;
-  try {
-    raw = fs.readFileSync(jsonlPath, 'utf8');
-  } catch (error) {
-    // Missing file is the normal case for a brand-new or foreign session.
-    return untouched(error?.code === 'ENOENT' ? 'absent' : `unreadable:${error?.code || 'error'}`);
-  }
+  const real = canonicalFileSync(jsonlPath);
+  if (!real) return untouched('absent');
+  const read = readPinned(real);
+  if (read.reason) return untouched(read.reason);
+  const { raw } = read;
 
   // Fast path: no candidate block type anywhere ⇒ nothing to do, no parsing.
   // NOT taken when crossing engines: the marker names one block shape out of
@@ -255,39 +359,20 @@ export function repairTranscriptFile(jsonlPath, mode = REPAIR_MODE.SERVER_TOOL) 
   // and re-add it on write so the file's shape is preserved byte-for-byte.
   const hadTrailingNewline = lines.length > 0 && lines[lines.length - 1] === '';
   if (hadTrailingNewline) lines.pop();
-
-  const repairedLines = [];
-  const seen = [];
-  let blocks = 0;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    let record;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      // A torn tail is expected while a run is still appending; a torn line in
-      // the middle is corruption we must not compound. Either way: abandon the
-      // whole repair rather than rewrite a file we cannot fully read.
-      return untouched('unparsable');
-    }
-    const n = repairRecord(record, seen, mode);
-    if (!n) continue;
-    blocks += n;
-    repairedLines.push(i + 1);
-    try {
-      lines[i] = JSON.stringify(record);
-    } catch {
-      return untouched('unserializable');
-    }
+  if (expect.expectedSessionId && headerSessionId(lines) !== expect.expectedSessionId) {
+    return untouched('id_mismatch');
   }
 
-  if (!repairedLines.length) return untouched('clean');
-
+  const result = repairLines(lines, mode);
+  if (result.reason) return untouched(result.reason);
+  if (!result.repairedLines.length) return untouched('clean');
   const output = lines.join('\n') + (hadTrailingNewline ? '\n' : '');
-  const tmp = `${jsonlPath}.nassaj-repair.tmp`;
+  return writeRepair(real, raw, output, read.stat, crossEngine, result);
+}
 
+/** Backup (cross-engine only) then the atomic rewrite; reports like repairTranscriptFile. */
+function writeRepair(real, raw, output, stat, crossEngine, { blocks, repairedLines, seen }) {
+  const untouched = (reason) => ({ repaired: 0, blocks: 0, lines: [], seen: [], reason });
   // Crossing to Anthropic rewrites tool and thinking blocks into text — the
   // conversation stays readable but the structure is gone, and switching the
   // engine back does NOT restore it. The default mode touches one block shape
@@ -295,25 +380,37 @@ export function repairTranscriptFile(jsonlPath, mode = REPAIR_MODE.SERVER_TOOL) 
   // copy first and REFUSES to write when the copy fails (qa-critic مهم 10).
   if (crossEngine) {
     try {
-      fs.writeFileSync(`${jsonlPath}.nassaj-precross.bak`, raw, { encoding: 'utf8', mode: 0o600 });
+      replaceAtomically(`${real}.nassaj-precross.bak`, raw);
     } catch (error) {
-      return untouched(`backup-failed:${error?.code || 'error'}`);
+      return untouched(`backup-failed:${error?.code || error?.reason || 'error'}`);
     }
   }
-
   try {
-    fs.writeFileSync(tmp, output, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tmp, jsonlPath);
+    replaceAtomically(real, output, stat);
   } catch (error) {
-    try {
-      fs.unlinkSync(tmp);
-    } catch {
-      /* best effort */
-    }
-    return untouched(`unwritable:${error?.code || 'error'}`);
+    return untouched(`unwritable:${error?.code || error?.reason || 'error'}`);
   }
-
   return { repaired: repairedLines.length, blocks, lines: repairedLines, seen };
+}
+
+/**
+ * The transcript a resume replays, derived from the spawn's own context (its
+ * config dir, cwd and session id — server context, not file content) and
+ * confined to that config dir's `projects` tree (ADR-201 A1.3). Null when the
+ * directory resolves outside it.
+ */
+function confinedResumeTranscript({ sessionId, cwd, configDir }) {
+  const jsonlPath = resolveTranscriptPath({ sessionId, cwd, configDir });
+  if (!jsonlPath) return null;
+  const real = canonicalFileSync(jsonlPath);
+  let root;
+  try {
+    root = fs.realpathSync(path.join(configDir || path.join(os.homedir(), '.claude'), 'projects'));
+  } catch {
+    return null;
+  }
+  const rel = real ? path.relative(root, real) : '..';
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? real : null;
 }
 
 /**
@@ -334,9 +431,9 @@ export function repairTranscriptFile(jsonlPath, mode = REPAIR_MODE.SERVER_TOOL) 
  */
 export function repairResumeTranscript({ sessionId, cwd, configDir, mode = REPAIR_MODE.SERVER_TOOL }) {
   try {
-    const jsonlPath = resolveTranscriptPath({ sessionId, cwd, configDir });
+    const jsonlPath = confinedResumeTranscript({ sessionId, cwd, configDir });
     if (!jsonlPath) return { repaired: 0, blocks: 0, lines: [], seen: [], reason: 'unresolved' };
-    const result = repairTranscriptFile(jsonlPath, mode);
+    const result = repairTranscriptFile(jsonlPath, mode, { expectedSessionId: sessionId });
     if (result.repaired) {
       console.warn(
         `[B-421] repaired ${result.blocks} malformed block(s) in ` +

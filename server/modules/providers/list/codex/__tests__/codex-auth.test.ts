@@ -90,3 +90,50 @@ test('getStatus reports installed=true + authenticated=true when an API key is c
   assert.equal(status.authenticated, true);
   assert.equal(status.method, 'api_key');
 });
+
+/**
+ * ADR-200 S3 — the Codex precedence rule, as measured against codex-cli
+ * 0.160.0 with `codex login status` (throwaway CODEX_HOME, dummy values):
+ * a recorded auth_mode decides alone; without one a non-null key wins.
+ */
+test('S3: resolveCodexEffectiveAuth encodes the measured Codex precedence', async () => {
+  const { resolveCodexEffectiveAuth } = await import('@/modules/providers/list/codex/codex-auth.provider.js');
+  const tokens = { id_token: 'h.p.s', access_token: 'DUMMY' };
+  const cases: Array<[Record<string, unknown>, string]> = [
+    [{ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-d', tokens }, 'api_key'],
+    [{ auth_mode: 'chatgpt', OPENAI_API_KEY: 'sk-d', tokens }, 'subscription'],
+    [{ auth_mode: 'apikey', OPENAI_API_KEY: null, tokens }, 'none'],
+    [{ OPENAI_API_KEY: 'sk-d', tokens }, 'api_key'],
+    [{ OPENAI_API_KEY: null, tokens }, 'subscription'],
+    [{ tokens }, 'subscription'],
+    [{ OPENAI_API_KEY: '', tokens }, 'none'],
+    [{ auth_mode: 'chatgpt', OPENAI_API_KEY: 'sk-d' }, 'none'],
+    [{ OPENAI_API_KEY: 'sk-d' }, 'api_key'],
+    [{}, 'none'],
+  ];
+  for (const [auth, expected] of cases) {
+    assert.equal(resolveCodexEffectiveAuth(auth), expected, JSON.stringify(auth));
+  }
+});
+
+test('S3: getStatus reports the credential that runs, not just the first one found', async () => {
+  const codexDir = path.join(HOME_DIR, '.codex');
+  await mkdir(codexDir, { recursive: true });
+  const tokens = { id_token: 'h.p.s', access_token: 'DUMMY' };
+  const write = (auth: object) => writeFile(path.join(codexDir, 'auth.json'), JSON.stringify(auth), 'utf8');
+
+  await write({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-d', tokens });
+  let status = await new CodexProviderAuth(() => true).getStatus();
+  assert.equal(status.method, 'api_key');
+  assert.equal(status.authMode, 'both');
+
+  await write({ auth_mode: 'chatgpt', OPENAI_API_KEY: 'sk-d', tokens });
+  status = await new CodexProviderAuth(() => true).getStatus();
+  assert.equal(status.method, 'credentials_file');
+  assert.equal(status.authMode, 'both');
+
+  await write({ auth_mode: 'apikey', OPENAI_API_KEY: null, tokens });
+  status = await new CodexProviderAuth(() => true).getStatus();
+  assert.equal(status.authenticated, false);
+  assert.equal(status.authMode, 'subscription_oauth');
+});

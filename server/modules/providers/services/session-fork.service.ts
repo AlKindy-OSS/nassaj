@@ -11,6 +11,7 @@ import {
   TranscriptForkError,
   type ForkExtraMessage,
 } from '@/modules/providers/list/claude/claude-transcript-fork.js';
+import { isLinkModeRunRefusal } from '@/modules/providers/services/harness-link-mode.service.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import { notifySessionMetadataChanged } from '@/modules/providers/services/sessions-watcher.service.js';
 
@@ -98,7 +99,10 @@ export type SessionForkErrorCode =
   | 'registration_failed'
   | 'registration_evidence_expired'
   | 'busy'
-  | 'fork_failed';
+  | 'fork_failed'
+  /** B-1546/B-1547: the link-mode run gate refused the Codex fork before any submit. */
+  | 'LINK_MODE_KEY_MISSING'
+  | 'LINK_MODE_RECORD_UNREADABLE';
 
 export class SessionForkError extends Error {
   readonly code: SessionForkErrorCode;
@@ -555,6 +559,16 @@ async function forkCodexMessage(params: ForkSessionAtMessageParams): Promise<For
   return result;
 }
 
+/**
+ * B-1546/B-1547: a link-mode run refusal keeps its own code and credential-free
+ * message instead of collapsing into `runtime_not_ready`; anything else → null.
+ */
+function linkModeForkRefusal(error: unknown): SessionForkError | null {
+  const code = (error as { code?: unknown })?.code;
+  if (!isLinkModeRunRefusal(code) || !(error instanceof Error)) return null;
+  return new SessionForkError(code, error.message);
+}
+
 async function createCodexFork(params: ForkSessionAtMessageParams, attempt: CodexForkAttempt) {
   const row = await authorizeCodexFork(params);
   // ADR-B913 extends the existing legacy App Server transport; no parallel transport service.
@@ -593,7 +607,7 @@ async function createCodexFork(params: ForkSessionAtMessageParams, attempt: Code
     if (attempt.target) throw error;
     if (submitted) throw new SessionForkError('outcome_unknown', 'The fork may have been created. Check your sessions before creating another.');
     if (error instanceof SessionForkError) throw error;
-    throw new SessionForkError('runtime_not_ready', 'The Codex fork could not be submitted.');
+    throw linkModeForkRefusal(error) ?? new SessionForkError('runtime_not_ready', 'The Codex fork could not be submitted.');
   } finally { await source.close(); }
 }
 

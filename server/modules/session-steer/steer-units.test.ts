@@ -4,12 +4,15 @@
  * transcript delivery proof.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+// eslint-disable-next-line boundaries/dependencies -- test pins its fixture with the reader's primitive.
+import { openPinned } from '../providers/shared/pinned-fd.js';
 
 import { createSteerRun, type SteerItem } from './steer-run.js';
 import {
@@ -17,7 +20,13 @@ import {
   type StarterVerdict,
 } from './steer-taint.js';
 import { buildSteerWrapper, sanitizeSteerText, STEER_MAX_CHARS, unwrapSteerForDisplay } from './steer-text.js';
-import { confirmWithRetry, createTranscriptScanner, lineProvesSteer, transcriptHasSteer } from './steer-delivery.js';
+import { confirmWithRetry, createTranscriptScanner, lineProvesSteer } from './steer-delivery.js';
+
+/** Opener the scanner calls per scan: a fresh pinned descriptor of `file` (ADR-201 A1). */
+const pinnedOpener = (file: string) => async () => {
+  const { handle, realpath, stat } = await openPinned(realpathSync(file), 'file');
+  return { fd: handle, realpath, stat, sessionId: 's', provider: 'claude' };
+};
 
 const UUID = '31111111-2222-4333-8444-555555555555';
 
@@ -210,21 +219,17 @@ test('hook timeout always exceeds the approval wait (a CLI timeout can never fai
 test('delivery proof: queued_command.source_uuid or a user line with our uuid; nothing else', async () => {
   const dir = await mkdtemp(path.join(process.env.NASSAJ_TEST_TMP || tmpdir(), 'steer-tx-'));
   try {
-    const file = path.join(dir, 's.jsonl');
     const queued = JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command', prompt: 'w', source_uuid: UUID } });
     const decoy = JSON.stringify({ type: 'assistant', uuid: UUID });
     assert.equal(lineProvesSteer(queued, UUID), true);
     assert.equal(lineProvesSteer(decoy, UUID), false);
     assert.equal(lineProvesSteer(JSON.stringify({ type: 'user', uuid: UUID }), UUID), true);
-    await writeFile(file, `${decoy}\n`);
-    assert.equal(await transcriptHasSteer(file, UUID), false);
-    await writeFile(file, `${decoy}\n${queued}\n`);
-    assert.equal(await transcriptHasSteer(file, UUID), true);
-    assert.equal(await transcriptHasSteer(path.join(dir, 'missing.jsonl'), UUID), false);
-    assert.equal(await transcriptHasSteer(null, UUID), false);
+    const missing = createTranscriptScanner(async () => null);
+    await missing.mark(UUID);
+    assert.equal(await missing.has(UUID), false, 'no admissible transcript answers false');
     const scanned = path.join(dir, 'scan.jsonl');
     await writeFile(scanned, `${decoy}\n`);
-    const scanner = createTranscriptScanner(async () => scanned);
+    const scanner = createTranscriptScanner(pinnedOpener(scanned));
     await scanner.mark(UUID);
     assert.equal(await scanner.has(UUID), false);
     await appendFile(scanned, queued.slice(0, 20));

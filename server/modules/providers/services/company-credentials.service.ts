@@ -37,6 +37,13 @@
  * exists to avoid. Every slot returns why it ended up as it did, and one slot's
  * error never cancels the others.
  *
+ * ADR-200 S6 (in-flag `NASSAJ_UNIFIED_VENDOR_KEYS`, a signed-in member): Save
+ * and Delete go through the unified fan-out (`vendor-key-fanout.service`): one
+ * AES record per vendor, projections owned by fingerprint, tombstones for a
+ * removal that fails. With the flag off this file keeps the T-1201 behaviour,
+ * except that a company delete also removes the member's `vendor:*` record
+ * (§3 legacy delete path) so the two models cannot diverge.
+ *
  * Never returns, logs, or echoes a key value — same contract as the per-slot
  * routes it delegates to.
  */
@@ -44,16 +51,27 @@
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCredentialsService } from '@/modules/providers/services/provider-credentials.service.js';
 import {
-  QWEN_CONSENT_VERSION,
   providerSecretsService,
   type QwenCredentialAuditContext,
 } from '@/modules/providers/services/provider-secrets.service.js';
-import { QWEN_PLAN_REFUSAL } from '@/services/isolation/opencode-qwen-plan.js';
+import { isLinkModeHarness } from '@/modules/providers/services/harness-link-mode.service.js';
+import {
+  deriveCompanyProjections,
+  projectionReadDeps,
+  type CompanyProjection,
+} from '@/modules/providers/services/company-credentials.projections.js';
+import { QWEN_PLAN_REFUSAL, qwenPlanProfileVerdict } from '@/services/isolation/opencode-qwen-plan.js';
+import {
+  deleteCanonicalVendorKey,
+  isUnifiedVendorKeysEnabled,
+} from '@/services/isolation/provider-secrets-store.js';
 // Relative, like every other shared/ import on the server side (claude-sdk.js,
 // engine-pin.js): the `@/*` alias maps to server/ only.
 import { AppError } from '@/shared/utils.js';
 
-import { COMPANY_NAME, VENDORS, type Vendor } from '../../../../shared/vendors.js';
+import { CANONICAL_VENDOR_IDS, COMPANY_NAME, VENDORS, type Vendor } from '../../../../shared/vendors.js';
+
+import type { FanoutSlot } from './vendor-key-fanout.service.js';
 
 
 /** What happened to one slot of the company during a fan-out. */
@@ -64,8 +82,31 @@ export type CompanySlotOutcome =
   | 'skipped_subscription'
   /** Skipped: writing this slot touches the operator's shared credentials. */
   | 'forbidden'
+  /**
+   * ADR-200 S4 (in-flag): the link-mode choke point refused the key because the
+   * harness is in subscription mode (or no mode is chosen yet). Nothing written.
+   */
+  | 'kept_on_subscription'
+  /** ADR-200 S4 (in-flag): no link mode chosen and nothing to derive one from. Nothing written. */
+  | 'mode_unset'
   /** The write was attempted and the harness's own writer refused it. */
-  | 'failed';
+  | 'failed'
+  // ADR-200 S6 (in-flag) Save outcomes:
+  /** The key is in the AES record, or projected into this harness and re-read. */
+  | 'linked'
+  /** OpenCode: the target holds a login, which nassaj never overwrites. */
+  | 'login_present'
+  /** The harness uses a shared tree; a member's key is never written there (D6). */
+  | 'shared_scope_refused'
+  /** A value nassaj does not own sits there; untouched without explicit confirm. */
+  | 'foreign_credential'
+  // ADR-200 S6 (in-flag) Delete outcomes:
+  /** nassaj's own projection (or the AES record) was removed. */
+  | 'removed'
+  /** Nothing was there to remove. */
+  | 'absent'
+  /** A key the migration adopted; removed only with explicit confirm. */
+  | 'adopted_credential';
 
 export type CompanySlotResult = {
   vendorId: string;
@@ -74,7 +115,40 @@ export type CompanySlotResult = {
   outcome: CompanySlotOutcome;
   /** Present only for 'failed' — the writer's message, never the key. */
   error?: string;
+  /** ADR-200 S4: the refusal code behind 'kept_on_subscription' or a link-mode 'failed'. */
+  code?: string;
 };
+
+/** Link-mode refusals that are a decision, not a broken write. */
+const LINK_MODE_OUTCOMES: Record<string, CompanySlotOutcome> = {
+  LINK_MODE_SUBSCRIPTION: 'kept_on_subscription',
+  // UNSET means no key and no subscription exist (H1), so nothing was "kept".
+  LINK_MODE_UNSET: 'mode_unset',
+};
+
+/** Maps a dispatcher refusal to a slot outcome, keeping the code but never a key. */
+function failedSlot(base: Omit<CompanySlotResult, 'outcome'>, error: unknown, fallback: string): CompanySlotResult {
+  const code = error instanceof AppError ? error.code : undefined;
+  const decided = code ? LINK_MODE_OUTCOMES[code] : undefined;
+  if (decided) return { ...base, outcome: decided, code };
+  const surfaced = code?.startsWith('LINK_MODE_') || code === 'FOREIGN_CREDENTIAL_PRESENT';
+  return {
+    ...base,
+    outcome: 'failed',
+    error: error instanceof Error ? error.message : fallback,
+    ...(surfaced ? { code } : {}),
+  };
+}
+
+/**
+ * Whether the live-login skip applies. In-flag, Claude and Codex are decided by
+ * the stored link mode at the choke point instead (ADR-200 S4): a key-mode
+ * harness with a login is written, and `includeSubscription` cannot force a
+ * subscription-mode one.
+ */
+function usesLiveSubscriptionSkip(provider: string): boolean {
+  return !(isUnifiedVendorKeysEnabled() && isLinkModeHarness(provider));
+}
 
 export type CompanyKeyResult = {
   companyId: string;
@@ -91,13 +165,14 @@ export type CompanySlotStatus = {
   /** True when this slot is currently held by a subscription login. */
   subscription: boolean;
   /**
-   * T-1906: present only on a configured qwen slot whose saved profile cannot
-   * drive qwen-plan models (token_plan or china region).
+   * ADR-200 S7: present only on a configured qwen slot holding a legacy
+   * profile (a Coding Plan record, or a non-international Token Plan record).
+   * It is shown with a working Delete; it is never deleted silently.
    */
-  status?: typeof QWEN_PLAN_REFUSAL.INCOMPATIBLE_PROFILE;
+  status?: typeof QWEN_PLAN_REFUSAL.LEGACY_PROFILE;
 };
 
-/** T-1906: the qwen slot's incompatibility marker, or nothing. Never the key. */
+/** ADR-200 S7: the qwen slot's legacy marker, or nothing. Never the key. */
 function qwenSlotStatus(
   userId: string | number | null | undefined,
   provider: string,
@@ -106,8 +181,8 @@ function qwenSlotStatus(
   if (provider !== 'qwen' || !configured) return {};
   try {
     const profile = providerSecretsService.getQwenProfile(userId);
-    return profile && (profile.plan !== 'coding_plan' || profile.region !== 'international')
-      ? { status: QWEN_PLAN_REFUSAL.INCOMPATIBLE_PROFILE }
+    return qwenPlanProfileVerdict(profile) === QWEN_PLAN_REFUSAL.LEGACY_PROFILE
+      ? { status: QWEN_PLAN_REFUSAL.LEGACY_PROFILE }
       : {};
   } catch {
     return {};
@@ -118,7 +193,109 @@ export type CompanyKeyStatus = {
   companyId: string;
   name: string;
   slots: CompanySlotStatus[];
+  /**
+   * ADR-200 S5 (in-flag), D9: the company's existing keys disagree, so the
+   * migration wrote nothing for it. `sources` say where each key sits and which
+   * of them match (`group`); never a value. The user chooses one.
+   */
+  migrationConflict?: { sources: Array<{ harness: string; target: string | null; group: number | null }> };
+  /**
+   * ADR-200 S9 (in-flag only; absent with the flag off): the caller's state per
+   * harness projection, from their own ledger and link mode. Never a key or a
+   * fingerprint.
+   */
+  projections?: CompanyProjection[];
 };
+
+/** ADR-200 S5, D9: the company's unresolved migration conflict, if any. Read-only. */
+async function migrationConflictFor(
+  userId: string | number | null | undefined,
+  companyId: string,
+): Promise<Pick<CompanyKeyStatus, 'migrationConflict'>> {
+  if (!isUnifiedVendorKeysEnabled()) return {};
+  try {
+    // Loaded at call time, in-flag only (the routes import the runtime statically anyway).
+    const { vendorKeyMigrationService } = await import('./vendor-key-migration.runtime.js');
+    const inventory = vendorKeyMigrationService.inventory(userId);
+    const vendor = inventory.vendors.find((entry) => entry.vendorId === companyId && entry.outcome === 'conflict');
+    if (!vendor) return {};
+    const sources = vendor.sources.map(({ harness, target, group }) => ({ harness, target, group }));
+    return { migrationConflict: { sources } };
+  } catch {
+    return {};
+  }
+}
+
+/** ADR-200 S6: the unified fan-out applies in-flag, to a signed-in member only. */
+function usesUnifiedFanout(userId: string | number | null | undefined): userId is string | number {
+  return isUnifiedVendorKeysEnabled() && userId !== null && userId !== undefined && userId !== '';
+}
+
+function toFanoutSlot(vendor: Vendor): FanoutSlot {
+  const slot = vendor.slot!;
+  return { vendorId: vendor.id, provider: slot.provider, ...(slot.target ? { target: slot.target } : {}) };
+}
+
+/** G2 (B-1570): an in-flag delete takes every slot of the vendor or none; a strict subset is a 409. */
+function assertVendorWideDelete(selected: readonly Vendor[], all: readonly Vendor[]): void {
+  if (selected.length === all.length) return;
+  throw new AppError('Deleting this key removes it from every harness; select all of its slots.', {
+    code: 'VENDOR_DELETE_IS_VENDOR_WIDE',
+    statusCode: 409,
+  });
+}
+
+/**
+ * Loaded at call time, in-flag only, so the flag-off delete path never runs it.
+ * (The routes already import the migration runtime statically, so this is not
+ * an import-graph guarantee.)
+ */
+async function loadFanout() {
+  return (await import('./vendor-key-fanout.runtime.js')).vendorKeyFanoutService;
+}
+
+/** ADR-200 S6 Save through the fan-out; `includeSubscription` is moot, the link mode decides. */
+async function fanoutSave(
+  userId: string | number,
+  companyId: string,
+  key: string,
+  vendors: Vendor[],
+  options: {
+    isElevated: boolean;
+    replaceForeignKey?: boolean;
+    authenticatedPrincipal?: unknown;
+    auditContext?: QwenCredentialAuditContext;
+  },
+): Promise<CompanyKeyResult> {
+  const results = await (await loadFanout()).save(userId, companyId, key, {
+    isElevated: options.isElevated,
+    replaceForeignKey: options.replaceForeignKey === true,
+    authenticatedPrincipal: options.authenticatedPrincipal,
+    auditContext: options.auditContext,
+    slots: vendors.map(toFanoutSlot),
+  });
+  return { companyId, configured: results.some((entry) => entry.outcome === 'linked'), slots: results };
+}
+
+/**
+ * §3 legacy delete path (flag off): the member's `vendor:*` record goes with the
+ * company's slots. A failure is reported as a slot, never silently dropped.
+ */
+function deleteLegacyCanonical(
+  userId: string | number | null | undefined,
+  companyId: string,
+): CompanySlotResult[] {
+  if (!CANONICAL_VENDOR_IDS.includes(companyId) || userId === null || userId === undefined || userId === '') return [];
+  try {
+    deleteCanonicalVendorKey(userId, companyId);
+    return [];
+  } catch {
+    return [{
+      vendorId: companyId, provider: 'vendor', outcome: 'failed',
+      error: 'The unified vendor record could not be removed.',
+    }];
+  }
+}
 
 /** The writable slots of a company, in catalog order. Throws 404 when unknown. */
 function companyVendors(companyId: string): Vendor[] {
@@ -195,21 +372,6 @@ async function isHeldBySubscription(
   }
 }
 
-/**
- * T-1906: companies whose key is a PERSONAL subscription the vendor forbids
- * sharing or automating (Alibaba Coding Plan: personal key, interactive use
- * only). Saving it requires the member's explicit acknowledgement, and the
- * acknowledged text version is recorded in the credential audit row.
- */
-const CONSENT_REQUIRED_COMPANIES: Readonly<Record<string, string>> = Object.freeze({
-  'alibaba-cloud': QWEN_CONSENT_VERSION,
-});
-
-/** The consent text version a company requires, or null when none is needed. */
-export function companyConsentVersion(companyId: string): string | null {
-  return CONSENT_REQUIRED_COMPANIES[companyId] ?? null;
-}
-
 export const companyCredentialsService = {
   /** The companies that own at least one writable slot. */
   companies(): { id: string; name: string }[] {
@@ -239,23 +401,15 @@ export const companyCredentialsService = {
     options: {
       isElevated: boolean;
       includeSubscription?: boolean;
+      /** ADR-200 S4 / G1 M-5: explicit confirmation to replace a key nassaj did not write. */
+      replaceForeignKey?: boolean;
       authenticatedPrincipal?: unknown;
       /** Slots the caller ticked. Absent = every slot (pre-checkbox clients). */
       vendorIds?: readonly string[];
-      /** The member's explicit acknowledgement (required for some companies). */
-      consent?: boolean;
       auditContext?: QwenCredentialAuditContext;
     } = { isElevated: false },
   ): Promise<CompanyKeyResult> {
     const vendors = selectVendors(companyVendors(companyId), options.vendorIds);
-    const consentVersion = companyConsentVersion(companyId);
-    if (consentVersion !== null && options.consent !== true) {
-      throw new AppError('This key is personal: confirm the personal-use terms before saving it.', {
-        code: 'CONSENT_REQUIRED',
-        statusCode: 400,
-        details: { consentVersion },
-      });
-    }
     if (typeof apiKey !== 'string' || apiKey.trim() === '') {
       throw new AppError('API key is required and must not be empty.', {
         code: 'INVALID_API_KEY',
@@ -263,6 +417,7 @@ export const companyCredentialsService = {
       });
     }
     const key = apiKey.trim();
+    if (usesUnifiedFanout(userId)) return fanoutSave(userId, companyId, key, vendors, options);
 
     const slots: CompanySlotResult[] = [];
     for (const vendor of vendors) {
@@ -279,6 +434,7 @@ export const companyCredentialsService = {
 
       if (
         !options.includeSubscription
+        && usesLiveSubscriptionSkip(slot.provider)
         && await isHeldBySubscription(slot.provider, userId)
       ) {
         slots.push({ ...base, outcome: 'skipped_subscription' });
@@ -287,16 +443,12 @@ export const companyCredentialsService = {
 
       try {
         await providerCredentialsService.setKey(
-          userId, slot.provider, key, slot.target, undefined, options.authenticatedPrincipal,
-          { ...options.auditContext, consentVersion },
+          userId, slot.provider, key, slot.target, options.authenticatedPrincipal, options.auditContext,
+          { origin: 'company_route', replaceForeignKey: options.replaceForeignKey === true },
         );
         slots.push({ ...base, outcome: 'written' });
       } catch (error) {
-        slots.push({
-          ...base,
-          outcome: 'failed',
-          error: error instanceof Error ? error.message : 'Write failed',
-        });
+        slots.push(failedSlot(base, error, 'Write failed'));
       }
     }
 
@@ -311,6 +463,12 @@ export const companyCredentialsService = {
    * Removes the company's key from every slot it was fanned out to. A slot that
    * holds nothing is not an error — delete is idempotent per slot, so this is
    * safe to call after a partial write.
+   *
+   * In-flag (ADR-200 §6) the delete is vendor-wide: the AES record and every
+   * owned projection go. A `vendorIds` that names only some of the company's
+   * slots is refused with 409 `VENDOR_DELETE_IS_VENDOR_WIDE` (G2), so a
+   * per-slot remove can never wipe the other harnesses' key silently.
+   * `removeForeignKey` is the explicit confirm for adopted and foreign values.
    */
   async deleteKey(
     userId: string | number | null | undefined,
@@ -318,10 +476,19 @@ export const companyCredentialsService = {
     options: {
       isElevated: boolean;
       vendorIds?: readonly string[];
+      /** ADR-200 S6: explicit confirm to also remove adopted and foreign projections. */
+      removeForeignKey?: boolean;
       auditContext?: QwenCredentialAuditContext;
     } = { isElevated: false },
   ): Promise<CompanyKeyResult> {
     const vendors = selectVendors(companyVendors(companyId), options.vendorIds);
+    if (usesUnifiedFanout(userId)) {
+      assertVendorWideDelete(vendors, companyVendors(companyId));
+      const results = await (await loadFanout()).remove(userId, companyId, {
+        ...options, removeForeignKey: options.removeForeignKey === true, slots: companyVendors(companyId).map(toFanoutSlot),
+      });
+      return { companyId, configured: false, slots: results };
+    }
     const slots: CompanySlotResult[] = [];
 
     for (const vendor of vendors) {
@@ -345,7 +512,7 @@ export const companyCredentialsService = {
       }
     }
 
-    return { companyId, configured: false, slots };
+    return { companyId, configured: false, slots: [...slots, ...deleteLegacyCanonical(userId, companyId)] };
   },
 
   /** Per-slot existence + subscription state, for the single-field UI. */
@@ -380,6 +547,10 @@ export const companyCredentialsService = {
       companyId,
       name: COMPANY_NAME[companyId] ?? companyId,
       slots,
+      ...await migrationConflictFor(userId, companyId),
+      ...(isUnifiedVendorKeysEnabled()
+        ? { projections: deriveCompanyProjections(projectionReadDeps, userId, companyId, slots) }
+        : {}),
     };
   },
 };

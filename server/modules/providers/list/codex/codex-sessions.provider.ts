@@ -8,12 +8,15 @@ import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMess
 import { AppError, createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
 
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
+import {
+  historyTranscript, pinnedReadStream, releaseHistoryTranscript,
+  type HistoryTranscript, type SessionTranscriptHandle,
+} from '../../shared/session-transcript-reader.js';
 
 import { isCodexBootstrapContext, isCodexGoalContext } from './codex-receipt-proof.js';
 import { createCodexFinalResponseTracker } from './codex-fork-cutoff.js';
 import { extractCodexBranchCommand } from './codex-branch-context.js';
 import { extractCodexTokenBudget } from './codex-token-budget.js';
-import { resolveCodexHistoryTranscriptPath } from './codex-transcript-path.js';
 import {
   codexCollabSubagent,
   codexSpawnSubagent,
@@ -483,14 +486,19 @@ function visibleCodexUserText(payload: AnyRecord, lease?: HistoryReadLease): str
 async function getCodexSessionMessages(
   sessionId: string,
   lease?: HistoryReadLease,
+  transcript?: SessionTranscriptHandle | null,
 ): Promise<CodexHistoryResult> {
   const stringify = (value: unknown) => lease ? lease.stringify(value) : JSON.stringify(value);
+  let pinned: HistoryTranscript | null = null;
   try {
-    // B-1564: only a contained rollout is read; no raw stored-path fallback.
-    const sessionFilePath = lease?.mainFile
-      ?? await resolveCodexHistoryTranscriptPath(sessionsDb.getSessionById(sessionId)?.jsonl_path);
-
-    if (!sessionFilePath) {
+    // ADR-201 A1: only the lease or a pinned, contained, id-bound rollout is read.
+    const sessionFilePath = lease?.mainFile;
+    const acquired = lease ? null : await historyTranscript(sessionId, 'codex', transcript);
+    pinned = acquired;
+    const openRollout = sessionFilePath && lease
+      ? () => lease.stream(sessionFilePath)
+      : acquired ? () => pinnedReadStream(acquired.transcript.fd) : null;
+    if (!openRollout) {
       console.warn(`Codex session file not found for session ${sessionId}`);
       return { messages: [], total: 0, hasMore: false };
     }
@@ -506,7 +514,7 @@ async function getCodexSessionMessages(
     const completedExecCalls = new Set<string>();
     const subagentsByCallId = new Map<string, CodexSubagentRecord>();
     const subagentsByPath = new Map<string, CodexSubagentRecord>();
-    const fileStream = lease ? lease.stream(sessionFilePath) : fsSync.createReadStream(sessionFilePath);
+    const fileStream = openRollout();
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity,
@@ -1001,6 +1009,8 @@ async function getCodexSessionMessages(
     lease?.check();
     console.error(`Error reading Codex session messages for ${sessionId}:`, error);
     return { messages: [], total: 0, hasMore: false };
+  } finally {
+    await releaseHistoryTranscript(pinned);
   }
 }
 
@@ -1378,7 +1388,7 @@ export class CodexSessionsProvider implements IProviderSessions {
     try {
       // Load full history first so `total` reflects frontend-normalized messages,
       // not raw JSONL records.
-      result = await getCodexSessionMessages(sessionId, options.historyLease);
+      result = await getCodexSessionMessages(sessionId, options.historyLease, options.transcript);
     } catch (error) {
       options.historyLease?.check();
       const message = error instanceof Error ? error.message : String(error);

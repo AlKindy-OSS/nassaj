@@ -12,6 +12,7 @@ import { writeCodexMachineRelease } from './__tests__/harness-world.js';
 import { makeFixtureRoot, removeFixture, writeFixtureFile } from './snapshot/__tests__/fixtures.js';
 import {
   AUTOUPDATER_DISABLE_NONE,
+  deriveHarnessNotices,
   getHarnessDescriptor,
   HARNESS_IDS,
   HARNESS_UPDATE_DESCRIPTORS,
@@ -83,7 +84,8 @@ test('kimi is the official native install: single-file snapshot, `kimi update --
     { layout: kimi.snapshot?.layout, linkMode: kimi.snapshot?.linkMode },
     { layout: 'single-file', linkMode: 'copy' },
   );
-  assert.deepEqual(kimi.notices, { dataNotBackedUp: true, selfUpdating: true });
+  // Verified + wired KIMI_CODE_NO_AUTO_UPDATE: only the no-store notice remains.
+  assert.deepEqual(deriveHarnessNotices(kimi), { dataNotBackedUp: true, selfUpdating: false });
   const bin = installFakeHarnessBinary(SANDBOX_HOME, 'kimi');
   assert.equal(bin, path.join(SANDBOX_HOME, '.kimi-code', 'bin', 'kimi'));
   assert.deepEqual(kimi.updateArgv(), { cmd: bin, args: ['update', '--yes'] });
@@ -168,5 +170,35 @@ test('AUTOUPDATER_DISABLE_NONE lists only harnesses with no verified knob', () =
 test('every descriptor is keyed by its own id', () => {
   for (const id of HARNESS_IDS) {
     assert.equal(HARNESS_UPDATE_DESCRIPTORS[id].id, id);
+  }
+});
+
+/** The dialog facts every harness must carry; a new harness must be listed here. */
+const EXPECTED_NOTICES: Record<string, { dataNotBackedUp: boolean; selfUpdating: boolean } | null> = {
+  claude: { dataNotBackedUp: true, selfUpdating: false },
+  codex: { dataNotBackedUp: false, selfUpdating: true },
+  antigravity: { dataNotBackedUp: true, selfUpdating: true },
+  cursor: { dataNotBackedUp: true, selfUpdating: true },
+  opencode: null,
+  qwen: { dataNotBackedUp: true, selfUpdating: true },
+  kimi: { dataNotBackedUp: true, selfUpdating: false },
+  glm: null,
+  deepseek: null,
+};
+
+test('notices are derived from each descriptor\'s facts, for every harness (parity guard)', () => {
+  assert.deepEqual([...HARNESS_IDS].sort(), Object.keys(EXPECTED_NOTICES).sort(),
+    'every harness lists its expected notices');
+  for (const d of Object.values(HARNESS_UPDATE_DESCRIPTORS)) {
+    const notices = deriveHarnessNotices(d);
+    assert.deepEqual(notices, EXPECTED_NOTICES[d.id], d.id);
+    assert.equal('notices' in d, false, `${d.id}: notices are never hand-set`);
+    if (!d.updatable) {
+      assert.equal(notices, null, `${d.id}: no update, no warning`);
+      continue;
+    }
+    const noStore = (d.snapshot?.stores.length ?? 0) === 0;
+    assert.equal(notices?.dataNotBackedUp ?? false, noStore, `${d.id}: dataNotBackedUp`);
+    assert.equal(notices?.selfUpdating ?? false, !d.autoUpdaterDisableVerified, `${d.id}: selfUpdating`);
   }
 });

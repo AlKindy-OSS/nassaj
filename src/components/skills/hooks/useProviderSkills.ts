@@ -36,6 +36,25 @@ const SKILL_SCOPE_ORDER: Record<SkillsScope, number> = {
 
 const toResponseJson = async <T>(response: Response): Promise<T> => response.json() as Promise<T>;
 
+/** A failed skills write; `code` is the server's stable code for the view to translate. */
+export class ProviderSkillsError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'ProviderSkillsError';
+    this.code = code;
+  }
+}
+
+const getApiErrorCode = (payload: unknown, status: number): string => {
+  const code = (payload as { error?: { code?: unknown } } | null)?.error?.code;
+  if (typeof code === 'string' && code) return code;
+  if (status === 403) return 'FORBIDDEN';
+  if (status === 404) return 'NOT_FOUND';
+  return 'UNKNOWN';
+};
+
 const getApiErrorMessage = (payload: unknown, fallback: string): string => {
   if (!payload || typeof payload !== 'object') {
     return fallback;
@@ -118,6 +137,8 @@ const normalizeSkill = (
     projectPath: shouldAttachProject
       ? project?.path ?? skill.projectPath
       : skill.projectPath,
+    readOnly: skill.readOnly === true,
+    origin: skill.origin === 'nassaj-shared' || skill.origin === 'operator-shared' ? skill.origin : undefined,
   };
 };
 
@@ -190,9 +211,12 @@ const saveProviderSkills = async (
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  const data = await toResponseJson<ApiResponse<ProviderSkillsResponse>>(response);
-  if (!response.ok || !data.success) {
-    throw new Error(getApiErrorMessage(data, 'Failed to save skills'));
+  const data = await toResponseJson<ApiResponse<ProviderSkillsResponse>>(response).catch(() => null);
+  if (!response.ok || !data || !data.success) {
+    throw new ProviderSkillsError(
+      getApiErrorCode(data, response.status),
+      getApiErrorMessage(data, 'Failed to save skills'),
+    );
   }
 
   return (data.data.skills || []).map((skill) => normalizeSkill(provider, skill));
@@ -207,29 +231,18 @@ const deleteProviderSkill = async (
     { method: 'DELETE' },
   );
 
-  if (response.status === 403) {
-    throw Object.assign(
-      new Error('You do not have permission to delete skills.'),
-      { code: 'FORBIDDEN' },
+  const data = await toResponseJson<ApiResponse<unknown>>(response).catch(() => null);
+  if (!response.ok || !data || !data.success) {
+    throw new ProviderSkillsError(
+      getApiErrorCode(data, response.status),
+      getApiErrorMessage(data, 'Failed to delete skill'),
     );
-  }
-
-  if (response.status === 404) {
-    throw Object.assign(
-      new Error('Skill not found — it may have already been removed.'),
-      { code: 'NOT_FOUND' },
-    );
-  }
-
-  const data = await toResponseJson<ApiResponse<unknown>>(response);
-  if (!response.ok || !data.success) {
-    throw new Error(getApiErrorMessage(data, 'Failed to delete skill'));
   }
 };
 
-const getCacheKey = (provider: SkillsProvider, projects: ProjectTarget[]): string => {
+const getCacheKey = (provider: SkillsProvider, projects: ProjectTarget[], filesMode: string): string => {
   const projectKey = projects.map((project) => project.path).sort().join('|');
-  return `${provider}:${projectKey}`;
+  return `${provider}:${filesMode}:${projectKey}`;
 };
 
 const clearProviderSkillCache = (provider: SkillsProvider): void => {
@@ -243,9 +256,11 @@ const clearProviderSkillCache = (provider: SkillsProvider): void => {
 type UseProviderSkillsArgs = {
   selectedProvider: SkillsProvider;
   currentProjects: SkillsProject[];
+  /** Effective harness-files mode (ADR-203); a change lists a different store. */
+  filesMode?: string;
 };
 
-export function useProviderSkills({ selectedProvider, currentProjects }: UseProviderSkillsArgs) {
+export function useProviderSkills({ selectedProvider, currentProjects, filesMode = 'shared' }: UseProviderSkillsArgs) {
   const [skills, setSkills] = useState<ProviderSkill[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingProjectScopes, setIsLoadingProjectScopes] = useState(false);
@@ -254,7 +269,10 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
   const activeLoadIdRef = useRef(0);
 
   const projectTargets = useMemo(() => createProjectTargets(currentProjects), [currentProjects]);
-  const cacheKey = useMemo(() => getCacheKey(selectedProvider, projectTargets), [projectTargets, selectedProvider]);
+  const cacheKey = useMemo(
+    () => getCacheKey(selectedProvider, projectTargets, filesMode),
+    [filesMode, projectTargets, selectedProvider],
+  );
 
   const refreshSkills = useCallback(async (options: { force?: boolean } = {}) => {
     const loadId = activeLoadIdRef.current + 1;

@@ -18,6 +18,7 @@ import {
 import { codexLaunchIdentityFor, spawnReservedCodex } from '../modules/providers/list/codex/codex-reserved-spawn.js';
 import { peekCodexRuntimeVerdict } from '../shared/codex-runtime-compat.js';
 
+import { assertLinkModeRunAllowed } from './isolation/link-mode-run-gate.js';
 import { resolveProviderEnv } from './isolation/resolve-provider-env.js';
 
 const START_TIMEOUT_MS = 20_000;
@@ -143,6 +144,8 @@ async function executeCodexAppServerRpc(sessionId, userId, method, params = {}, 
   const envResolver = options.envResolver || resolveProviderEnv;
   const accessMode = options.accessMode === 'write' ? 'write' : 'read';
   const session = validateCodexSession(sessionId, userId, accessMode, authorizeImpl);
+  // B-1546: refused before any permit or spawn (api_key link mode, no key).
+  await assertLinkModeRunAllowed(userId, 'codex');
   const permissionExecution = options.permissionExecution !== undefined
     ? options.permissionExecution
     : authorizeImpl !== assertSessionAccessible
@@ -342,6 +345,13 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
     onError('session_not_found', error instanceof Error ? error.message : String(error));
     return;
   }
+  try {
+    // B-1546: refused before any spawn (api_key link mode, no key).
+    await assertLinkModeRunAllowed(userId, 'codex');
+  } catch (error) {
+    onError('sdk_error', error instanceof Error ? error.message : String(error));
+    return;
+  }
   let governance;
   try {
     governance = governanceImpl(userId);
@@ -524,6 +534,8 @@ export async function startCodexCompaction(sessionId, userId, options = {}) {
   const authorizeImpl = options.authorizeImpl || assertSessionAccessible;
   const envResolver = options.envResolver || resolveProviderEnv;
   const session = validateCodexSession(sessionId, userId, 'write', authorizeImpl);
+  // B-1546: refused before any permit or spawn (api_key link mode, no key).
+  await assertLinkModeRunAllowed(userId, 'codex');
   const key = sessionId;
   if (activeCompactions.has(key)) {
     const result = await activeCompactions.get(key).promise;

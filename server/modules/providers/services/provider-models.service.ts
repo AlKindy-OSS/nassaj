@@ -3,8 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { authorizedLocalModelServers, hasRunnableLocalServers, isLocalModel } from '@/services/isolation/local-model-config.js';
+import { isOpencodeSpawnVendorsEnabled } from '@/services/isolation/opencode-spawn-vendor.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
-import { withQwenPlanModels } from '@/modules/providers/list/opencode/opencode-models.provider.js';
+import { withQwenPlanModels, withSpawnVendorModels } from '@/modules/providers/list/opencode/opencode-models.provider.js';
 import { providerSecretsService } from '@/modules/providers/services/provider-secrets.service.js';
 // Runtime-only leaf import avoids eagerly composing the database gateway through the barrel.
 // eslint-disable-next-line boundaries/dependencies
@@ -96,6 +97,22 @@ function readQwenProfileSafely(userId: string | number | null | undefined) {
   } catch {
     return null;
   }
+}
+
+/**
+ * ADR-200 S8: which spawn-vendor keys the caller holds in their OWN slot. An
+ * unreadable store means "none", never a failed catalog.
+ */
+function readOwnSpawnVendorKeys(userId: string | number | null | undefined) {
+  if (!isOpencodeSpawnVendorsEnabled()) return {};
+  const has = (slot: 'kimi' | 'deepseek'): boolean => {
+    try {
+      return providerSecretsService.getOwnVendorKey(userId, slot) !== null;
+    } catch {
+      return false;
+    }
+  };
+  return { moonshot: has('kimi'), deepseek: has('deepseek') };
 }
 
 type ProviderModelsServiceDependencies = {
@@ -645,7 +662,9 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
       if (args[0] !== 'opencode') return cached;
       // T-1906: the caller's own key decides the qwen-plan overlay, per request.
       const qwenModels = withQwenPlanModels(cached.models, readQwenProfileSafely(args[2]));
-      const result = qwenModels === cached.models ? cached : { ...cached, models: qwenModels };
+      // ADR-200 S8: in-flag Moonshot / DeepSeek overlay, from the caller's own keys.
+      const vendorModels = withSpawnVendorModels(qwenModels, readOwnSpawnVendorKeys(args[2]));
+      const result = vendorModels === cached.models ? cached : { ...cached, models: vendorModels };
       if (!hasRunnableLocalServers(args[2])) return result;
       const options = result.models.OPTIONS.filter(option => !isLocalModel(option.value));
       const localOptions = authorizedLocalModelServers(args[2]).flatMap(server => server.models.map(model => ({

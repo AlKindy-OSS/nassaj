@@ -98,7 +98,10 @@ test('every failed precondition refuses and leaves the ledger unchanged', async 
       getConnection().prepare("UPDATE sessions SET provider = 'claude' WHERE session_id = ?").run(TO);
     }, /target session/],
     ['target in another project', () => {
-      sessionsDb.createSession(TO, 'antigravity', '/var/tmp/handover-other', undefined, undefined, undefined, JSONL);
+      // ADR-201 A2: discovery never moves a row between projects; arrange it directly.
+      const db = getConnection();
+      db.prepare("INSERT INTO projects (project_id, project_path) VALUES ('handover-other', '/var/tmp/handover-other')").run();
+      db.prepare("UPDATE sessions SET project_path = '/var/tmp/handover-other' WHERE session_id = ?").run(TO);
     }, /target session/],
     ['no target row', () => ({ toSessionId: '11111111-2222-4333-8444-555555555555' }), /target session/],
     ['evidence refused', () => ({ verifyTarget: () => { throw new Error('brain predates launch'); } }),

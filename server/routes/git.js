@@ -23,7 +23,9 @@ import { spawnCursor } from '../cursor-cli.js';
 import { buildGitAuthorEnv, getUserGithubToken } from '../utils/gitIdentity.js';
 import { coerceUserId } from '../modules/projects/services/project-visibility-guard.service.js';
 import { isResolvedPathInsideRootReal } from '../utils/path-guard.js';
+import { readCommitDiffWithoutSecrets } from '../utils/commit-diff-redaction.js';
 import {
+  containsServiceSecretValue,
   containsSqliteContent,
   isForbiddenProjectRoot,
   isSqliteFileName,
@@ -799,9 +801,13 @@ async function resolveRepositoryReadableFilePath(projectPath, filePath) {
   return resolved;
 }
 
-/** Throws when any client-bound text embeds an SQLite file (renamed database copy). */
+/**
+ * Throws when any client-bound text embeds an SQLite file (renamed database
+ * copy) or the value of a secret the running service holds (a renamed copy of
+ * its .env, B-1593 review).
+ */
 function assertNoSqliteContent(...texts) {
-  if (texts.some((text) => containsSqliteContent(text))) {
+  if (texts.some((text) => containsSqliteContent(text) || containsServiceSecretValue(text))) {
     throw new Error('Invalid file path: protected content');
   }
 }
@@ -1749,10 +1755,15 @@ router.get('/commit-diff', async (req, res) => {
     // Get diff for the commit (--end-of-options: the ref can never be re-parsed
     // as an option, e.g. `--output=<file>` — B-GIT-SEC-4). `^{commit}` peels to
     // a commit, so a raw blob/tree id can never print file content directly.
-    const { stdout } = await spawnAsync(
-      'git', ['show', '--end-of-options', `${commit}^{commit}`],
-      { cwd: projectPath }
-    );
+    // B-1592: secret files (dotenv/SQLite and anything secret on disk) are
+    // excluded from the patch and listed as hidden, so history never shows a
+    // `.env` that was committed and later deleted.
+    const repositoryRootPath = await getRepositoryRootPath(projectPath);
+    const stdout = await readCommitDiffWithoutSecrets({
+      runGit: (args) => spawnAsync('git', args, { cwd: projectPath }),
+      repositoryRootPath,
+      commitRef: `${commit}^{commit}`,
+    });
     assertNoSqliteContent(stdout);
 
     const isTruncated = stdout.length > COMMIT_DIFF_CHARACTER_LIMIT;

@@ -307,6 +307,20 @@ export class ClaudeProviderAuth implements IProviderAuth {
       return { authenticated: true, email: 'API Key Auth', method: 'api_key' };
     }
 
+    // ADR-200 S4 / G1 M-1, MEASURED on the wire (claude-auth.precedence.header-
+    // echo test): an API key or auth token from settings.env beats an OAuth token
+    // in the spawn env — every key source outranks every OAuth source.
+    const configDir = this.resolveConfigDir(env);
+
+    const settingsEnv = await this.loadSettingsEnv(configDir);
+    if (readOptionalString(settingsEnv.ANTHROPIC_API_KEY)) {
+      return { authenticated: true, email: 'API Key Auth', method: 'api_key' };
+    }
+
+    if (readOptionalString(settingsEnv.ANTHROPIC_AUTH_TOKEN)) {
+      return { authenticated: true, email: 'Configured via settings.json', method: 'api_key' };
+    }
+
     // `claude setup-token` mints a long-lived OAuth token (sk-ant-oat01...) and
     // instructs the user to export it as CLAUDE_CODE_OAUTH_TOKEN — the CLI honors
     // that variable, so the status check must too (T-115). B-1260: this token is
@@ -318,17 +332,6 @@ export class ClaudeProviderAuth implements IProviderAuth {
       return {
         authenticated: true, email: 'OAuth Token', method: 'oauth_token', incompleteLink: true,
       };
-    }
-
-    const configDir = this.resolveConfigDir(env);
-
-    const settingsEnv = await this.loadSettingsEnv(configDir);
-    if (readOptionalString(settingsEnv.ANTHROPIC_API_KEY)) {
-      return { authenticated: true, email: 'API Key Auth', method: 'api_key' };
-    }
-
-    if (readOptionalString(settingsEnv.ANTHROPIC_AUTH_TOKEN)) {
-      return { authenticated: true, email: 'Configured via settings.json', method: 'api_key' };
     }
 
     if (readOptionalString(settingsEnv.CLAUDE_CODE_OAUTH_TOKEN)) {

@@ -1,5 +1,5 @@
 import { AlertTriangle, ChevronDown, RefreshCw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { AgentProvider } from '../../../../types/types';
@@ -70,6 +70,16 @@ function storeAccessUnprovableText(t: Translate, details: HarnessUncheckedDetail
     processes: formatUncheckedProcesses(t, details),
     defaultValue: 'تعذّر التأكد من أن الأداة لا تستخدم ملفات بياناتها: لم يُسمح بفحص: {{processes}}. أغلقها أو أعد المحاولة لاحقاً.',
   });
+}
+
+/** The one warning-line presentation of this tab: amber text with a leading triangle, no box. */
+function HarnessWarningLine({ testId, children }: { testId: string; children: ReactNode }) {
+  return (
+    <p data-testid={testId} className="flex flex-wrap items-start gap-1.5 text-[13px] leading-relaxed text-warning">
+      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  );
 }
 
 export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemTab }: {
@@ -170,24 +180,26 @@ export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemT
         {busy.has(state.status) && <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={state.progressPercent ?? 0} aria-label={t('harnessVersion.progress', { defaultValue: 'تقدّم التحديث' })} className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${state.progressPercent ?? 0}%` }} /></div>}
 
         {state.drift?.detected && (
-          <p data-testid="harness-drift" className="flex flex-wrap items-start gap-1.5 text-[13px] leading-relaxed text-warning">
-            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            <span>
-              {t('harnessVersion.drift.from', { defaultValue: 'تغيّر الإصدار من' })}{' '}
-              <bdi dir="ltr" className="font-mono">{state.drift.from}</bdi>{' '}
-              {t('harnessVersion.drift.to', { defaultValue: 'إلى' })}{' '}
-              <bdi dir="ltr" className="font-mono">{state.drift.to}</bdi>{' '}
-              {t('harnessVersion.drift.outside', { defaultValue: 'خارج نسّاج' })}
-              {state.drift.at && <>{' · '}{t('harnessVersion.drift.date', { defaultValue: `في ${state.drift.at.slice(0, 10)}`, date: state.drift.at.slice(0, 10) })}</>}
-            </span>
-          </p>
+          <HarnessWarningLine testId="harness-drift">
+            {t('harnessVersion.drift.from', { defaultValue: 'تغيّر الإصدار من' })}{' '}
+            <bdi dir="ltr" className="font-mono">{state.drift.from}</bdi>{' '}
+            {t('harnessVersion.drift.to', { defaultValue: 'إلى' })}{' '}
+            <bdi dir="ltr" className="font-mono">{state.drift.to}</bdi>{' '}
+            {t('harnessVersion.drift.outside', { defaultValue: 'خارج نسّاج' })}
+            {state.drift.at && <>{' · '}{t('harnessVersion.drift.date', { defaultValue: `في ${state.drift.at.slice(0, 10)}`, date: state.drift.at.slice(0, 10) })}</>}
+          </HarnessWarningLine>
         )}
 
-        {isOwner && !carrierOnly && state.notices && (state.notices.dataNotBackedUp || state.notices.selfUpdating) && (
-          <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3 text-[13px] leading-relaxed text-foreground">
-            {state.notices.dataNotBackedUp && <p>{t('harnessVersion.notices.dataNotBackedUp', { defaultValue: 'لا تُنسخ بيانات هذه الأداة احتياطياً قبل التحديث.' })}</p>}
-            {state.notices.selfUpdating && <p>{t('harnessVersion.notices.selfUpdating', { defaultValue: 'قد تُحدِّث الأداة نفسها خارج نسّاج.' })}</p>}
-          </div>
+        {/* Same warning-line pattern as drift above (no separate boxed callout). */}
+        {isOwner && !carrierOnly && state.notices?.dataNotBackedUp && (
+          <HarnessWarningLine testId="harness-notice-dataNotBackedUp">
+            {t('harnessVersion.notices.dataNotBackedUp', { defaultValue: 'لا تُنسخ بيانات هذه الأداة احتياطياً قبل التحديث.' })}
+          </HarnessWarningLine>
+        )}
+        {isOwner && !carrierOnly && state.notices?.selfUpdating && (
+          <HarnessWarningLine testId="harness-notice-selfUpdating">
+            {t('harnessVersion.notices.selfUpdating', { defaultValue: 'قد تُحدِّث الأداة نفسها خارج نسّاج.' })}
+          </HarnessWarningLine>
         )}
 
         <div className="flex flex-wrap gap-2">

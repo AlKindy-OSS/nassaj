@@ -105,4 +105,48 @@ describe('CLI Turn Supervisor capability gate', () => {
       provider: 'codex', mode: 'chat', coordinationLevel: 'delegate', model: 'root',
     }), true);
   });
+
+  describe('B-1550: spawn-only opencode models route to spawnOpenCode', () => {
+    const cell = { NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT: '1' };
+    const turn = (model?: string) => ({
+      provider: 'opencode', mode: 'chat', coordinationLevel: 'direct' as const, model,
+    });
+    const VENDOR_MODELS = ['deepseek/deepseek-v4-pro', 'moonshot/kimi-k2.6'];
+
+    it('flag on: deepseek/, moonshot/ and qwen-plan/ are neither supported nor a cell turn', () => {
+      const runtime = new CliTurnSupervisorRuntime({ ...cell, NASSAJ_OPENCODE_SPAWN_VENDORS: '1' }, inertAdapter());
+      for (const model of [...VENDOR_MODELS, 'qwen-plan/qwen3-coder-plus']) {
+        assert.equal(runtime.supports(turn(model)), false, model);
+        assert.equal(runtime.enabledCell({ provider: 'opencode', mode: 'chat', model }), false, model);
+      }
+      for (const model of [undefined, 'opencode/default', 'glm/glm-5']) {
+        assert.equal(runtime.supports(turn(model)), true, String(model));
+        assert.equal(runtime.enabledCell({ provider: 'opencode', mode: 'chat', model }), true);
+      }
+    });
+
+    it('flag off: vendor models keep the cell; qwen-plan/ still routes away', () => {
+      const runtime = new CliTurnSupervisorRuntime(cell, inertAdapter());
+      for (const model of VENDOR_MODELS) {
+        assert.equal(runtime.supports(turn(model)), true, model);
+        assert.equal(runtime.enabledCell({ provider: 'opencode', mode: 'chat', model }), true);
+      }
+      assert.equal(runtime.supports(turn('qwen-plan/qwen3-coder-plus')), false);
+    });
+
+    it('a spawn-only reviewer model makes delegate_review unsupported', () => {
+      const runtime = new CliTurnSupervisorRuntime({
+        ...cell, NASSAJ_OPENCODE_SPAWN_VENDORS: '1',
+        NASSAJ_TURN_SUPERVISOR_OPENCODE_REVIEW_MODEL: 'deepseek/deepseek-v4-flash',
+      }, inertAdapter());
+      assert.equal(runtime.supports({ ...turn('glm/glm-5'), coordinationLevel: 'delegate_review' }), false);
+    });
+
+    it('other providers are unaffected by the model rule', () => {
+      const runtime = new CliTurnSupervisorRuntime({
+        NASSAJ_TURN_SUPERVISOR_CODEX_CHAT: '1', NASSAJ_OPENCODE_SPAWN_VENDORS: '1',
+      }, inertAdapter());
+      assert.equal(runtime.enabledCell({ provider: 'codex', mode: 'chat', model: 'deepseek/x' }), true);
+    });
+  });
 });

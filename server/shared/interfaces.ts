@@ -186,6 +186,25 @@ export interface IProviderCredentialWriter {
   ): Promise<ProviderCredentialStatus>;
 
   /**
+   * ADR-200 S4, optional: removes a stored subscription token (Claude's
+   * settings.json setup-token) and nothing else. Only an explicit link-mode
+   * act calls it; key operations never do (C2).
+   */
+  deleteSubscriptionToken?(
+    userId: string | number | null | undefined,
+  ): Promise<ProviderCredentialStatus>;
+
+  /**
+   * ADR-200 S6, optional: the API key stored at the target, or null. Server
+   * internal only (fan-out ownership check and re-read verify); never returned
+   * over the wire. Never reads an OAuth or login field.
+   */
+  readApiKey?(
+    userId: string | number | null | undefined,
+    target?: string,
+  ): Promise<string | null>;
+
+  /**
    * Reports whether a usable key is stored for the user/target without ever
    * returning the secret. A corrupt/unreadable file reads as `false`.
    */

@@ -1,6 +1,6 @@
 /**
- * opencode-cli.engine-carrier-survival.test.ts — tripwire: GLM and the Qwen
- * Coding Plan still ride the OpenCode carrier after `glm` and `qwen` are deleted
+ * opencode-cli.engine-carrier-survival.test.ts — tripwire: GLM and the Alibaba
+ * Token Plan (ADR-200 S7) still ride the OpenCode carrier after `glm` and `qwen` are deleted
  * as agent bodies.
  *
  *   - the two carrier catalogs are non-empty and are served as `glm/*` and
@@ -34,7 +34,7 @@ import {
 
 import { isOpenCodeCarrierRun } from './opencode-cli.js';
 
-describe('OpenCode carrier: GLM and the Qwen Coding Plan still ride it', () => {
+describe('OpenCode carrier: GLM and the Alibaba Token Plan still ride it', () => {
   const ARMED = { NASSAJ_OPENCODE_CARRIER: '1' } as NodeJS.ProcessEnv;
   const glmModelIds = Object.keys(GLM_CARRIER_MODELS);
 
@@ -74,7 +74,7 @@ describe('OpenCode carrier: GLM and the Qwen Coding Plan still ride it', () => {
 
     const live = { OPTIONS: [{ value: 'opencode/big-pickle', label: 'Big Pickle' }], DEFAULT: 'opencode/big-pickle' };
     const armed = { NASSAJ_OPENCODE_QWEN_PLAN: '1' } as NodeJS.ProcessEnv;
-    const profile = { plan: 'coding_plan', region: 'international', key: 'sk-sp-member' };
+    const profile = { plan: 'token_plan', region: 'international', key: 'tp-member-key-0123' };
 
     const offered = withQwenPlanModels(live, profile, armed);
     assert.deepEqual(
@@ -96,8 +96,8 @@ describe('OpenCode carrier: GLM and the Qwen Coding Plan still ride it', () => {
     assert.equal(isQwenPlanModel('opencode/qwen3-coder-plus'), false);
     assert.equal(isQwenPlanModel('glm/glm-5.2'), false);
 
-    const child = withQwenPlanEnv({ PATH: '/usr/bin' }, 'sk-sp-member');
-    assert.equal(child[QWEN_PLAN_KEY_ENV], 'sk-sp-member');
+    const child = withQwenPlanEnv({ PATH: '/usr/bin' }, 'tp-member-key-0123');
+    assert.equal(child[QWEN_PLAN_KEY_ENV], 'tp-member-key-0123');
     assert.equal(QWEN_PLAN_KEY_ENV, 'NASSAJ_QWEN_PLAN_API_KEY');
   });
 });

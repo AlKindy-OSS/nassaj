@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
-import { initializeDatabase, participantsDb, sessionsDb, userDb } from '@/modules/database/index.js';
+import { getConnection, initializeDatabase, participantsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 
 import { getAgyBrainDir } from '../list/antigravity/agy-brain-dir.js';
 import { AntigravitySessionsProvider } from '../list/antigravity/antigravity-sessions.provider.js';
@@ -205,6 +205,8 @@ test('member trees: a transcript under a numbered member tree reads; a non-membe
   for (const [dir, readable] of [[stray, false], [member, true]] as const) {
     fs.rmSync(path.join(SANDBOX_HOME, '.nassaj-users'), { recursive: true, force: true });
     const file = place('valid', path.join(dir, `${sessionId}.jsonl`), fixture);
+    // ADR-201 A2: discovery never re-points a row into another tree; start fresh.
+    getConnection().prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
     sessionsDb.createSession(sessionId, 'claude', '/home/operator/Project/General', undefined, undefined, undefined, file);
     participantsDb.recordSpawn(sessionId, ownerId);
     resetHistorySnapshotCacheForTests();

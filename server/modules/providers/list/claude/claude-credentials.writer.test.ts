@@ -23,7 +23,7 @@ const { ClaudeCredentialsWriter, assertOnlyManagedEnvKeyChanged } =
 
 const settingsPath = path.join(sandbox, 'settings.json');
 const writer = new ClaudeCredentialsWriter();
-const KEY = 'sk-ant-secret-DO-NOT-LEAK';
+const KEY = 'sk' + '-ant-secret-DO-NOT-LEAK';
 
 function readSettings(): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -123,7 +123,7 @@ test('IRON RULE: assertOnlyManagedEnvKeyChanged blocks *_BASE_URL and foreign ke
   );
 });
 
-const OAUTH_TOKEN = 'sk-ant-oat01-DO-NOT-LEAK';
+const OAUTH_TOKEN = 'sk' + '-ant-oat01-DO-NOT-LEAK';
 
 test('setApiKey routes a setup-token to CLAUDE_CODE_OAUTH_TOKEN, not ANTHROPIC_API_KEY', async () => {
   const result = await writer.setApiKey(null, OAUTH_TOKEN);
@@ -134,32 +134,59 @@ test('setApiKey routes a setup-token to CLAUDE_CODE_OAUTH_TOKEN, not ANTHROPIC_A
   assert.equal(await writer.isConfigured(null), true);
 });
 
-test('setApiKey keeps the two managed credentials mutually exclusive', async () => {
+test('C2: an API-key write keeps the OAuth token; a setup-token write drops the key', async () => {
   await writer.setApiKey(null, KEY);
   let env = readSettings().env as Record<string, string>;
   assert.equal(env.ANTHROPIC_API_KEY, KEY);
-  // Switching to a setup-token removes the stale API key.
+  // Saving a setup-token is the explicit subscription act: the key would outrank it.
   await writer.setApiKey(null, OAUTH_TOKEN);
   env = readSettings().env as Record<string, string>;
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN);
   assert.equal('ANTHROPIC_API_KEY' in env, false, 'stale API key removed');
-  // Switching back removes the stale OAuth token.
+  // ADR-200 C2: writing a key never removes the subscription token.
   await writer.setApiKey(null, KEY);
   env = readSettings().env as Record<string, string>;
   assert.equal(env.ANTHROPIC_API_KEY, KEY);
-  assert.equal('CLAUDE_CODE_OAUTH_TOKEN' in env, false, 'stale OAuth token removed');
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN, 'OAuth token preserved');
 });
 
-test('deleteApiKey removes both managed credential keys, leaving others intact', async () => {
+test('C2: deleteApiKey removes ANTHROPIC_API_KEY only, never the OAuth token', async () => {
   fs.writeFileSync(settingsPath, JSON.stringify({
-    env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN, SOME_OTHER: 'keep-me' },
+    env: { ANTHROPIC_API_KEY: KEY, CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN, SOME_OTHER: 'keep-me' },
   }));
   const result = await writer.deleteApiKey(null);
-  assert.deepEqual(result, { provider: 'claude', configured: false });
+  assert.deepEqual(result, { provider: 'claude', configured: true }, 'the token still configures Claude');
   const env = readSettings().env as Record<string, string>;
-  assert.equal('CLAUDE_CODE_OAUTH_TOKEN' in env, false, 'OAuth token removed');
+  assert.equal('ANTHROPIC_API_KEY' in env, false, 'API key removed');
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN, 'OAuth token preserved');
   assert.equal(env.SOME_OTHER, 'keep-me', 'other env preserved');
-  assert.equal(await writer.isConfigured(null), false);
+  assert.equal(await writer.isConfigured(null), true);
+});
+
+test('C2: deleteApiKey on a token-only file does not rewrite it', async () => {
+  const raw = JSON.stringify({ env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN } });
+  fs.writeFileSync(settingsPath, raw);
+  const result = await writer.deleteApiKey(null);
+  assert.deepEqual(result, { provider: 'claude', configured: true });
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), raw);
+});
+
+test('C2: OAuth file -> set key -> delete key is byte-identical (settings and .credentials.json)', async () => {
+  const credentialsPath = path.join(sandbox, '.credentials.json');
+  const oauthLogin = JSON.stringify({ claudeAiOauth: { accessToken: 'sk' + '-ant-oat01-FIXTURE', expiresAt: 1 } });
+  fs.writeFileSync(credentialsPath, oauthLogin);
+  const settingsBytes = `${JSON.stringify({
+    permissions: { allow: ['Read'] },
+    env: { DISABLE_TELEMETRY: '1', CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN },
+    model: 'opus',
+  }, null, 2)}\n`;
+  fs.writeFileSync(settingsPath, settingsBytes);
+  await writer.setApiKey(null, KEY);
+  assert.equal((readSettings().env as Record<string, string>).CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN);
+  await writer.deleteApiKey(null);
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), settingsBytes, 'settings.json byte-identical');
+  assert.equal(fs.readFileSync(credentialsPath, 'utf8'), oauthLogin, '.credentials.json untouched');
+  fs.rmSync(credentialsPath, { force: true });
 });
 
 test('isConfigured is true for a CLAUDE_CODE_OAUTH_TOKEN alone', async () => {
@@ -176,4 +203,30 @@ test('IRON RULE: the tripwire allows CLAUDE_CODE_OAUTH_TOKEN but still refuses b
     () => assertOnlyManagedEnvKeyChanged(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL']),
     /IRON RULE/,
   );
+});
+
+test('ADR-200 L2: every setup-token generation is stored as the OAuth token', async () => {
+  await writer.setApiKey(null, 'sk' + '-ant-oat02-NEXT-GEN-DO-NOT-LEAK');
+  const env = readSettings().env as Record<string, string>;
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk' + '-ant-oat02-NEXT-GEN-DO-NOT-LEAK');
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+});
+
+test('ADR-200 S4: deleteSubscriptionToken removes only CLAUDE_CODE_OAUTH_TOKEN', async () => {
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    theme: 'dark',
+    env: { ANTHROPIC_API_KEY: KEY, CLAUDE_CODE_OAUTH_TOKEN: 'sk' + '-ant-oat01-x', OTHER: 'keep' },
+  }));
+  const credentialsPath = path.join(sandbox, '.credentials.json');
+  fs.writeFileSync(credentialsPath, '{"claudeAiOauth":{"accessToken":"at"}}');
+  const result = await writer.deleteSubscriptionToken(null);
+  assert.deepEqual(result, { provider: 'claude', configured: true });
+  const settings = readSettings();
+  assert.equal(settings.theme, 'dark');
+  assert.deepEqual(settings.env, { ANTHROPIC_API_KEY: KEY, OTHER: 'keep' });
+  assert.equal(fs.readFileSync(credentialsPath, 'utf8'), '{"claudeAiOauth":{"accessToken":"at"}}');
+  fs.rmSync(credentialsPath);
+  const untouched = fs.readFileSync(settingsPath, 'utf8');
+  await writer.deleteSubscriptionToken(null);
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), untouched, 'nothing to remove leaves the file as is');
 });

@@ -30,6 +30,8 @@ import {
   userDb,
 } from '@/modules/database/index.js';
 import { workflowStatusService } from '@/modules/providers/services/workflow-status.service.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { claudeHeaderLine, claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 // JS module (allowJs) + test fixtures outside the modules tree — same blessed
 // cross-cutting seam as participants.service.ts → transcript-parser.js.
 // eslint-disable-next-line boundaries/no-unknown
@@ -64,6 +66,7 @@ async function spawnDeadPid(): Promise<number> {
 async function withHarness(
   run: (h: {
     projectDir: string;
+    transcriptDir: string;
     createUser: (name: string) => number;
     addSessionWithWorkflow: (args: {
       userId: number;
@@ -79,6 +82,8 @@ async function withHarness(
   const databasePath = path.join(tempRoot, 'db.sqlite');
   const projectDir = path.join(tempRoot, 'project-encoded');
   await mkdir(projectDir, { recursive: true });
+  // ADR-201 A1: transcripts are read only inside a provider tree, bound to their id.
+  const transcriptDir = claudeProjectsSandbox('wf-status-');
 
   closeConnection();
   process.env.DATABASE_PATH = databasePath;
@@ -98,8 +103,8 @@ async function withHarness(
     const { userId, sessionId, wfId, lines, mtimeMs = QUIET_MTIME_MS } = args;
     // transcript path: <projectDir>/<sessionId>.jsonl  =>  service derives
     // <projectDir>/<sessionId>/subagents/workflows/<wfId>/journal.jsonl
-    const jsonlPath = path.join(projectDir, `${sessionId}.jsonl`);
-    await writeFile(jsonlPath, '', 'utf8');
+    const jsonlPath = path.join(transcriptDir, `${sessionId}.jsonl`);
+    await writeFile(jsonlPath, `${claudeHeaderLine(sessionId)}\n`, 'utf8');
 
     // createSession upserts the projects row (project_path FK) + the sessions
     // row (which session_participants FKs to) transactionally, so the participant
@@ -109,7 +114,7 @@ async function withHarness(
       .prepare('INSERT INTO session_participants (session_id, user_id, role) VALUES (?, ?, ?)')
       .run(sessionId, userId, 'owner');
 
-    const wfDir = path.join(projectDir, sessionId, 'subagents', 'workflows', wfId);
+    const wfDir = path.join(transcriptDir, sessionId, 'subagents', 'workflows', wfId);
     await mkdir(wfDir, { recursive: true });
     if (lines !== null) {
       const journalPath = path.join(wfDir, 'journal.jsonl');
@@ -121,7 +126,7 @@ async function withHarness(
   };
 
   try {
-    await run({ projectDir, createUser, addSessionWithWorkflow });
+    await run({ projectDir, transcriptDir, createUser, addSessionWithWorkflow });
   } finally {
     for (const sid of registeredSessionIds) forgetWorkflowPid(sid);
     closeConnection();
@@ -131,6 +136,7 @@ async function withHarness(
       process.env.DATABASE_PATH = previousDatabasePath;
     }
     await rm(tempRoot, { recursive: true, force: true });
+    await rm(transcriptDir, { recursive: true, force: true });
   }
 }
 
@@ -226,13 +232,13 @@ test('ownership: a caller never sees another user\'s workflow', async () => {
 });
 
 test('a session with no workflows dir is scanned but contributes nothing (no false orphan)', async () => {
-  await withHarness(async ({ projectDir, createUser, addSessionWithWorkflow }) => {
+  await withHarness(async ({ transcriptDir, createUser, addSessionWithWorkflow }) => {
     const u = createUser('u1');
     await addSessionWithWorkflow({ userId: u, sessionId: 's-empty', wfId: 'wf_synthetic_placeholder', lines: COMPLETED_JOURNAL_LINES });
     forgetWorkflowPid('s-empty');
 
     // Remove the workflows dir to model "session exists, no workflows".
-    await rm(path.join(projectDir, 's-empty', 'subagents', 'workflows'), { recursive: true, force: true });
+    await rm(path.join(transcriptDir, 's-empty', 'subagents', 'workflows'), { recursive: true, force: true });
 
     const result = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
     assert.equal(result.eligible, 1);
@@ -285,7 +291,7 @@ test('dormancy: a freshly silent unknown workflow is NOT dormant', async () => {
   });
 });
 
-test('B-1431: projectId is set only when the session project is visible to the caller', async () => {
+test('B-1431 + M2: a workflow is reported only while its session is readable; projectId when visible', async () => {
   await withHarness(async ({ projectDir, createUser, addSessionWithWorkflow }) => {
     const u = createUser('u1');
     await addSessionWithWorkflow({ userId: u, sessionId: 's-pid', wfId: 'wf_pid1', lines: INCIDENT_JOURNAL_LINES });
@@ -299,12 +305,20 @@ test('B-1431: projectId is set only when the session project is visible to the c
       const visible = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
       assert.equal(visible.workflows[0]?.projectId, expectedId, 'visible project => its DB id');
 
-      // ADR-172: owning a SESSION is not project membership. With enforcement on
-      // and no creator/member link, the project is invisible => null.
+      // ADR-172 + ADR-201 M2: owning a SESSION is not project membership. With
+      // enforcement on and no creator/member link the participant has lost read
+      // access to the session itself (isSessionAccessibleByUser), so its workflow
+      // is no longer opened or reported at all — not merely shown without an id.
       process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
       const hidden = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
-      assert.equal(hidden.workflows.length, 1, 'the workflow itself is still reported');
-      assert.equal(hidden.workflows[0]?.projectId, null, 'invisible project => projectId null');
+      assert.equal(hidden.workflows.length, 0, 'no project access => the workflow is not reported');
+
+      // B-1431 intent kept: a participant who still has project access sees the
+      // workflow, with its project's DB id.
+      getConnection().prepare('UPDATE projects SET created_by = ? WHERE project_id = ?').run(u, expectedId);
+      const member = await workflowStatusService.getActiveWorkflows(u, { now: NOW_MS, quietMs: QUIET_MS });
+      assert.equal(member.workflows.length, 1, 'project access => reported');
+      assert.equal(member.workflows[0]?.projectId, expectedId, 'and carries the project id');
     } finally {
       if (previous === undefined) delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
       else process.env.PROJECT_MEMBERSHIP_ENFORCE = previous;

@@ -221,7 +221,8 @@ export class KimiAgentSessionSynchronizer implements IProviderSessionSynchronize
     // Fold a subagent thread under its parent conversation: never its own row.
     if (parsed.agentId !== primary) {
       const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.bumpSessionUpdatedAt(parsed.sessionId, timestamps.updatedAt);
+      // ADR-201 A2: only a subagent file in the parent row's own tree bumps it.
+      sessionsDb.bumpSessionUpdatedAtFromChild(parsed.sessionId, timestamps.updatedAt, filePath);
       return null;
     }
 
@@ -234,15 +235,15 @@ export class KimiAgentSessionSynchronizer implements IProviderSessionSynchronize
     }
 
     const timestamps = await readFileTimestamps(filePath);
-    return sessionsDb.createSession(
-      parsed.sessionId,
-      this.provider,
-      meta.projectPath,
-      meta.sessionName,
-      timestamps.createdAt,
-      timestamps.updatedAt,
-      filePath,
-    );
+    return sessionsDb.recordDiscoveredSession({
+      sessionId: parsed.sessionId,
+      provider: this.provider,
+      projectPath: meta.projectPath,
+      customName: meta.sessionName,
+      createdAt: timestamps.createdAt,
+      updatedAt: timestamps.updatedAt,
+      jsonlPath: filePath,
+    });
   }
 
   /**

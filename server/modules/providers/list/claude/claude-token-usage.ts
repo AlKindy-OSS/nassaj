@@ -1,13 +1,5 @@
-import fs from 'node:fs';
-import { open, realpath } from 'node:fs/promises';
-import path from 'node:path';
 import { cacheObservationMetadata, type CacheSnapshot, nativeContextId, nativeTokenCount } from '../codex/codex-token-budget.js';
-
-import {
-  claudeProjectRoots,
-  resolveClaudeTranscriptPath,
-  type ClaudeTranscriptRow,
-} from './claude-transcript-path.js';
+import { isTranscriptHandle, openRecordedTranscript } from '../../shared/session-transcript-reader.js';
 
 type RecordValue = Record<string, unknown>;
 
@@ -24,7 +16,12 @@ export type ClaudeTokenUsage = {
   };
 };
 
-type ClaudeSessionSource = ClaudeTranscriptRow & { provider?: unknown };
+type ClaudeSessionSource = {
+  session_id: string;
+  provider?: unknown;
+  project_path?: string | null;
+  jsonl_path?: string | null;
+};
 
 const isRecord = (value: unknown): value is RecordValue =>
   typeof value === 'object' && value !== null;
@@ -32,49 +29,28 @@ const isRecord = (value: unknown): value is RecordValue =>
 const tokenCount = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 
-const isInsideRoot = (candidate: string, root: string): boolean => {
-  const relative = path.relative(root, candidate);
-  return relative !== ''
-    && relative !== '..'
-    && !relative.startsWith(`..${path.sep}`)
-    && !path.isAbsolute(relative);
-};
-
 /**
- * Reads the transcript selected by the shared resolver from the same descriptor
- * that is containment-checked. O_NOFOLLOW plus /proc/self/fd closes the
- * validate-path/read-path race without losing overlay and legacy fallbacks.
+ * Reads the session's transcript text (ADR-201 A1): the row's recorded path,
+ * tree-confined, pinned and bound to the session id by name and header; read
+ * only from the pinned descriptor. Authorization-free core: the token-usage
+ * route has already checked that the caller sees the project and that this
+ * session belongs to it (`session.project_path === projectPath`).
  */
 export async function readClaudeTranscriptForSession(
   session: ClaudeSessionSource | null,
   projectPath: string,
-  userId: string | number | null,
 ): Promise<string | null> {
   if (session?.provider !== 'claude' || session.project_path !== projectPath) return null;
-
-  const indexedPath = await resolveClaudeTranscriptPath(session, userId);
-  if (!indexedPath) return null;
-
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  const opened = await openRecordedTranscript(
+    { session_id: session.session_id, provider: 'claude', jsonl_path: session.jsonl_path ?? null }, 'token-usage',
+  );
+  if (!isTranscriptHandle(opened)) return null;
   try {
-    const roots = (
-      await Promise.all(claudeProjectRoots(userId).map(async (root) => {
-        try { return await realpath(root); } catch { return null; }
-      }))
-    ).filter((root): root is string => root !== null);
-    handle = await open(
-      indexedPath,
-      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
-    );
-    if (!(await handle.stat()).isFile()) return null;
-
-    const descriptorPath = await realpath(`/proc/self/fd/${handle.fd}`);
-    if (!roots.some((root) => isInsideRoot(descriptorPath, root))) return null;
-    return await handle.readFile('utf8');
+    return await opened.fd.readFile({ encoding: 'utf8' });
   } catch {
     return null;
   } finally {
-    await handle?.close();
+    await opened.fd.close().catch(() => undefined);
   }
 }
 

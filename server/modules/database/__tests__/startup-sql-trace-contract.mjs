@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 // ADR-194 (T-1962): the four additive SSO DDL statements (one per exec) and the
 // two TTL sweeps of expired test evidence at boot are reviewed effects too.
 // ADR-196 (T-1970): the four additive session_shares DDL statements (one per exec).
+// ADR-203 (T-2003): the one additive user_harness_files_mode CREATE TABLE.
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -113,6 +114,12 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE INDEX IF NOT EXISTS idx_sso_apply_proofs_binding\n  ON sso_apply_proofs (owner_user_id, config_hash, draft_version, kind)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS user_harness_files_mode (\n  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n  mode TEXT NOT NULL CHECK (mode IN ('shared','private')),\n  updated_at INTEGER NOT NULL\n)",
     "shadow": null
   },
   {

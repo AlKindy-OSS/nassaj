@@ -127,3 +127,31 @@ describe('CredentialGrantsSection', () => {
     assert.ok(screen.getByText('credentialGrants.given.title'));
   });
 });
+
+describe('the grantor mode beside the grantor (ADR-200 S9, brief §6)', () => {
+  const withMode = (mode: 'subscription' | 'api_key' | null | undefined) => {
+    const [grant] = overview.received;
+    if (mode === undefined) delete grant.grantorLinkMode;
+    else grant.grantorLinkMode = mode;
+  };
+  afterEach(() => withMode(undefined));
+
+  it('warns that an API-key grantor bills by usage', () => {
+    withMode('api_key');
+    render(<CredentialGrantsSection agent="claude" />);
+    assert.ok(screen.getByText('credentialGrants.grantorMode.api_key'));
+    assert.equal(screen.queryByText('credentialGrants.grantorMode.subscription'), null);
+  });
+
+  it('shows «اشتراك» for a subscription grantor', () => {
+    withMode('subscription');
+    render(<CredentialGrantsSection agent="claude" />);
+    assert.ok(screen.getByText('credentialGrants.grantorMode.subscription'));
+  });
+
+  it.each([null, undefined] as const)('shows no badge when the mode is %s', (mode) => {
+    withMode(mode);
+    render(<CredentialGrantsSection agent="claude" />);
+    assert.equal(screen.queryByText(/credentialGrants\.grantorMode\./), null);
+  });
+});

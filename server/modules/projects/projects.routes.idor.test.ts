@@ -32,7 +32,7 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
-import { closeConnection, initializeDatabase, projectsDb, sessionsDb, userDb } from '@/modules/database/index.js';
+import { closeConnection, getConnection, initializeDatabase, projectsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 import { AppError } from '@/shared/utils.js';
 
 import projectsRouter from './projects.routes.js';
@@ -65,6 +65,8 @@ function seedPublicProject(): void {
 
   // A real session row for the project path, carrying the transcript that
   // force-delete unlinks.
+  // ADR-201 A2: discovery never re-points an existing row, so start from no row.
+  getConnection().prepare('DELETE FROM sessions WHERE session_id = ?').run(SESSION_ID);
   sessionsDb.createSession(SESSION_ID, 'claude', projectPath, 'Owner session', undefined, undefined, transcriptPath);
 
   // Production default — and the state of every project on the live install.

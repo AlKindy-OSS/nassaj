@@ -12,6 +12,8 @@ import AgentCategoryContentSection from './sections/AgentCategoryContentSection'
 import AgentCategoryTabsSection from './sections/AgentCategoryTabsSection';
 import AgentSelectorSection from './sections/AgentSelectorSection';
 import { visibleCategoriesFor } from './agentCategories';
+import { normalizeHarnessProvider } from '../../../../../hooks/harnessVersionMapping';
+import { useHarnessUpdateAvailability } from '../../../../../hooks/useHarnessUpdateAvailability';
 import { visibleSettingsAgents } from './visibleAgents';
 
 export default function AgentsSettingsTab({
@@ -120,6 +122,8 @@ export default function AgentsSettingsTab({
   // القائمة ومبرّرات ترتيبها انتقلت إلى `visibleAgents.ts` (T-1205): الحارس
   // الآلي الذي يمنع «شركة يتيمة» بعد حذف تبويب المورّدين يسأل نفس المصدر.
   const visibleAgents = useMemo<AgentProvider[]>(() => visibleSettingsAgents(), []);
+  // Re-read when leaving the update tab so a finished update clears its dot.
+  const updateAvailableIds = useHarnessUpdateAvailability(selectedCategory === 'update');
 
   // T-1953: keyed by ActiveBodyProvider — cursor/hermes/qwen/kimi are retired
   // bodies, gone from `visibleAgents` (visibleSettingsAgents) permanently, so
@@ -196,6 +200,7 @@ export default function AgentsSettingsTab({
             selectedAgent={selectedAgent}
             onSelectAgent={selectAgent}
             agentContextById={agentContextById}
+            updateAvailableIds={updateAvailableIds}
             localModelsSelected={localModelsSelected}
             localModelsLabel={t('mainTabs.localModels')}
             onSelectLocalModels={selectLocalModels}
@@ -217,6 +222,7 @@ export default function AgentsSettingsTab({
             selectedCategory={selectedCategory}
             onSelectCategory={selectCategory}
             selectedAgent={selectedAgent}
+            updateAvailable={updateAvailableIds.has(normalizeHarnessProvider(selectedAgent))}
           />
 
           {/* T-1219 — لا `onOpenCredentials` بعد اليوم: لوحُ المحرّكات كان يقفز

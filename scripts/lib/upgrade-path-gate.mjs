@@ -22,14 +22,25 @@
 //   previous-reader-of-candidate-action (advisory) the previous tree reads the
 //                                     candidate writer's action: forward compat
 //                                     for a manual downgrade, never blocking
+//   candidate-leaves                  (ADR-204 S0) the candidate, installed and
+//                                     RUNNING under a sandbox pm2, updates to the
+//                                     synthetic next release through the real
+//                                     button path: HTTP, owner role, idle
+//                                     detection, deferral, worker, activation,
+//                                     pm2 restart, N+1 boot, `activated`
+//                                     (upgrade-path-candidate-leaves.mjs)
 //
 // The sandbox: a bare "release remote" whose objects are borrowed read-only
 // from the source repository (alternates), node clones on branch main whose
 // `origin` is a credential-free GitHub SSH URL and whose core.sshCommand is a
 // local transport shim (the updater composes a node's own sshCommand, so the
 // previous release's code runs unmodified), private HOME/TMPDIR/database per
-// leg, and no process manager, port, network or live path. Nothing outside the
-// sandbox is written; the source repository is only read.
+// leg, and no network or live path. Only the candidate-leaves leg runs a process
+// manager and binds a port: a private pm2 daemon (own PM2_HOME, unique app name)
+// on a free loopback port that is never 3001 or 3004, with every health, origin
+// and port variable the server and safe-restart.sh read set to that port (their
+// defaults point at the live 3004). Nothing outside the sandbox is written; the
+// source repository is only read.
 
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -38,6 +49,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { LEAVES_LEG, runCandidateLeavesLeg } from './upgrade-path-candidate-leaves.mjs';
 import { NEUTRAL_GIT_ENV, git } from './upgrade-path-gate-git.mjs';
 import { ensurePrivateDirectory, verifyTreeRoot } from './upgrade-path-trees.mjs';
 
@@ -55,6 +67,8 @@ const PROBE_TIMEOUT_MS = 5 * 60 * 1000;
 // A neutral, non-existent release source: the transport shim serves it locally.
 export const GATE_REMOTE = Object.freeze({ host: 'github.com', path: 'nassaj-upgrade-gate/nassaj.git' });
 const GATE_REMOTE_URL = `git@${GATE_REMOTE.host}:${GATE_REMOTE.path}`;
+/** The NASSAJ_RELEASE_SOURCE a sandbox node is configured with (served by the shim). */
+const GATE_RELEASE_SOURCE = `https://${GATE_REMOTE.host}/${GATE_REMOTE.path.replace(/\.git$/, '')}`;
 
 /** The legs, in execution order. `blocking: false` is reported, never fails the gate. */
 export const LEGS = Object.freeze([
@@ -66,10 +80,15 @@ export const LEGS = Object.freeze([
     { id: 'candidate-reader-next-update', blocking: true },
     { id: 'candidate-bootstrap-next-update', blocking: true },
     { id: 'previous-reader-of-candidate-action', blocking: false },
+    { id: LEAVES_LEG, blocking: true },
 ]);
 
-/** Legs a known-incompatible entry may name: a blocking reader, never a writer. */
-const EXCUSABLE_LEGS = new Set(LEGS.filter((leg) => leg.blocking && !leg.id.endsWith('-writer')).map((leg) => leg.id));
+/**
+ * Legs a known-incompatible entry may name: a blocking reader, never a writer,
+ * and never candidate-leaves (the candidate must leave itself; ADR-204 S0).
+ */
+const EXCUSABLE_LEGS = new Set(LEGS.filter((leg) => leg.blocking && !leg.id.endsWith('-writer')
+    && leg.id !== LEAVES_LEG).map((leg) => leg.id));
 
 /** Bump the last numeric segment of a four-part version (2.3.1.3 -> 2.3.1.4). */
 export function nextVersion(version) {
@@ -174,12 +193,17 @@ function seedLiveGenerations(node, { commit, version }) {
     }
 }
 
-/** Clone one sandbox node on branch main at `commit`, with the gate remote and shim. */
-export function cloneNode({ sandbox, bare, name, commit }) {
+/**
+ * Clone one sandbox node on branch main at `commit`, with the gate remote and
+ * shim; `seed: false` leaves the live generations to the caller (a real build).
+ */
+export function cloneNode({ sandbox, bare, name, commit, seed = true }) {
     const node = path.join(sandbox, name);
     git(sandbox, ['clone', '-q', '--shared', '--no-checkout', bare, node]);
     git(node, ['checkout', '-q', '-B', 'main', commit]);
-    seedLiveGenerations(node, { commit, version: JSON.parse(readFileSync(path.join(node, 'package.json'), 'utf8')).version });
+    if (seed) {
+        seedLiveGenerations(node, { commit, version: JSON.parse(readFileSync(path.join(node, 'package.json'), 'utf8')).version });
+    }
     const shim = path.join(sandbox, 'ssh-shim.sh');
     if (!existsSync(shim)) writeFileSync(shim, sshShimScript(bare), { mode: 0o700 });
     git(node, ['remote', 'set-url', 'origin', GATE_REMOTE_URL]);
@@ -198,7 +222,7 @@ export function probeEnvironment({ sandbox, tree, database }) {
         CLAUDE_CONFIG_DIR: path.join(home, '.claude'), NASSAJ_HARNESS_DATA_HOME: path.join(sandbox, 'harness'),
         DATABASE_PATH: database, JWT_SECRET: randomBytes(32).toString('hex'),
         TSX_TSCONFIG_PATH: path.join(tree, 'server', 'tsconfig.json'),
-        NASSAJ_RELEASE_SOURCE: `https://${GATE_REMOTE.host}/${GATE_REMOTE.path.replace(/\.git$/, '')}`,
+        NASSAJ_RELEASE_SOURCE: GATE_RELEASE_SOURCE,
         ...NEUTRAL_GIT_ENV,
     };
     return env;
@@ -259,24 +283,40 @@ function forwardLegs(ctx) {
     });
 }
 
+/** Commit and publish the synthetic next release (candidate + version bump) on the gate remote. */
+function publishNextRelease(ctx) {
+    const version = nextVersion(ctx.candidateVersion);
+    const commit = commitNextRelease({ bare: ctx.bare, candidateCommit: ctx.candidateCommit, version });
+    publish(ctx.bare, { branchCommit: commit, tag: `v${version}`, tagCommit: commit });
+    return { version, commit };
+}
+
+/** The candidate-leaves leg against the published next release (ADR-204 S0). */
+function candidateLeavesLeg(ctx, next) {
+    const run = ctx.candidateLeaves || runCandidateLeavesLeg;
+    return run({ sandbox: ctx.sandbox, bare: ctx.bare, cloneNode, candidateRoot: ctx.candidateRoot,
+        candidateCommit: ctx.candidateCommit, candidateVersion: ctx.candidateVersion, next,
+        releaseSource: GATE_RELEASE_SOURCE, leavesLimits: ctx.leavesLimits });
+}
+
 /**
  * Next-update direction: the candidate, once installed, stages a synthetic next
  * release and must read its own action; the previous tree's reading is reported
- * for forward compatibility only.
+ * for forward compatibility only. Then the candidate, installed and running,
+ * must actually leave itself for that release through the button path.
  */
-function nextUpdateLegs(ctx) {
-    const version = nextVersion(ctx.candidateVersion);
-    const nextCommit = commitNextRelease({ bare: ctx.bare, candidateCommit: ctx.candidateCommit, version });
-    publish(ctx.bare, { branchCommit: nextCommit, tag: `v${version}`, tagCommit: nextCommit });
-    return updateLegs(ctx, {
+async function nextUpdateLegs(ctx) {
+    const next = publishNextRelease(ctx);
+    const legs = updateLegs(ctx, {
         name: 'node-candidate', fromCommit: ctx.candidateCommit, writerTree: ctx.candidateRoot, writerLeg: 'candidate-writer',
-        target: { version, commit: nextCommit },
+        target: next,
         readers: [
             { leg: 'candidate-reader-next-update', tree: ctx.candidateRoot, role: 'read' },
             { leg: 'candidate-bootstrap-next-update', tree: ctx.candidateRoot, role: 'bootstrap' },
             { leg: 'previous-reader-of-candidate-action', tree: ctx.previousRoot, role: 'read' },
         ],
     });
+    return { ...legs, [LEAVES_LEG]: await candidateLeavesLeg(ctx, next) };
 }
 
 /**
@@ -285,24 +325,55 @@ function nextUpdateLegs(ctx) {
  * re-hashed archive tree), the candidate's version and the ancestry.
  */
 function resolveInputs(options) {
-    const { sourceRepo, previousTag, previousRoot, candidateRoot } = options;
+    const { sourceRepo, previousTag, previousRoot } = options;
     const previousCommit = git(sourceRepo, ['rev-parse', '--verify', `${previousTag}^{commit}`]);
-    const candidateCommit = options.candidateCommit;
-    if (!SHA40.test(previousCommit) || !SHA40.test(candidateCommit || '')) {
+    if (!SHA40.test(previousCommit)) throw new Error(`upgrade-path gate: ${previousTag} is not a commit`);
+    assertInstalledTree('previous', previousRoot, sourceRepo, previousCommit);
+    const candidate = resolveCandidate(options);
+    git(sourceRepo, ['merge-base', '--is-ancestor', previousCommit, candidate.candidateCommit]);
+    return { previousCommit, ...candidate };
+}
+
+/** Require an installed tree that is proven to be `commit`. */
+function assertInstalledTree(label, root, sourceRepo, commit) {
+    if (!existsSync(path.join(root, 'node_modules', 'tsx'))) {
+        throw new Error(`upgrade-path gate: the ${label} tree ${root} is not installed (npm ci --include=dev)`);
+    }
+    verifyTreeRoot({ root, sourceRepo, commit });
+}
+
+/** The candidate commit, its installed tree and its version. */
+function resolveCandidate(options) {
+    const { sourceRepo, candidateRoot, candidateCommit } = options;
+    if (!SHA40.test(candidateCommit || '')) {
         throw new Error('upgrade-path gate: the candidate commit must be a full 40-hex commit id');
     }
-    for (const [label, root, commit] of [['previous', previousRoot, previousCommit], ['candidate', candidateRoot, candidateCommit]]) {
-        if (!existsSync(path.join(root, 'node_modules', 'tsx'))) {
-            throw new Error(`upgrade-path gate: the ${label} tree ${root} is not installed (npm ci --include=dev)`);
-        }
-        verifyTreeRoot({ root, sourceRepo, commit });
-    }
+    assertInstalledTree('candidate', candidateRoot, sourceRepo, candidateCommit);
     const candidateVersion = options.candidateVersion || versionAt(sourceRepo, candidateCommit);
     if (versionAt(sourceRepo, candidateCommit) !== candidateVersion) {
         throw new Error(`upgrade-path gate: ${candidateCommit} is not version ${candidateVersion}`);
     }
-    git(sourceRepo, ['merge-base', '--is-ancestor', previousCommit, candidateCommit]);
-    return { previousCommit, candidateCommit, candidateVersion };
+    return { candidateCommit, candidateVersion };
+}
+
+/** Create the sandbox and its release remote, run `body(ctx)`, and settle the sandbox. */
+async function inSandbox(options, inputs, legIds, body) {
+    ensurePrivateDirectory(options.workParent);
+    const sandbox = createSandbox(options.workParent);
+    let legs = null;
+    try {
+        const ctx = { ...options, ...inputs, sandbox };
+        ctx.bare = prepareReleaseRemote({ sandbox, sourceRepo: options.sourceRepo, ...inputs });
+        ctx.probe = ({ tree, database, label, spec }) => runProbe({ sandbox, tree, database, spec, label,
+            spawn: options.spawn });
+        legs = await body(ctx);
+    } catch (error) {
+        error.message = `${error.message} (sandbox kept: ${sandbox})`;
+        throw error;
+    }
+    const kept = Boolean(options.keep || legIds.some((id) => !legs[id]?.ok));
+    if (!kept) rmSync(sandbox, { recursive: true, force: true });
+    return { sandbox, kept, legs };
 }
 
 /**
@@ -312,24 +383,25 @@ function resolveInputs(options) {
  * @returns {{sandbox:string, kept:boolean, previousTag:string, previousCommit:string,
  *   candidateCommit:string, candidateVersion:string, legs:Record<string, object>}}
  */
-export function runUpgradePathLegs(options) {
+export async function runUpgradePathLegs(options) {
     const inputs = resolveInputs(options);
-    ensurePrivateDirectory(options.workParent);
-    const sandbox = createSandbox(options.workParent);
-    let legs = null;
-    try {
-        const ctx = { ...options, ...inputs, sandbox };
-        ctx.bare = prepareReleaseRemote({ sandbox, sourceRepo: options.sourceRepo, ...inputs });
-        ctx.probe = ({ tree, database, label, spec }) => runProbe({ sandbox, tree, database, spec, label,
-            spawn: options.spawn });
-        legs = { ...forwardLegs(ctx), ...nextUpdateLegs(ctx) };
-    } catch (error) {
-        error.message = `${error.message} (sandbox kept: ${sandbox})`;
-        throw error;
-    }
-    const kept = Boolean(options.keep || LEGS.some((leg) => !legs[leg.id]?.ok));
-    if (!kept) rmSync(sandbox, { recursive: true, force: true });
-    return { sandbox, kept, previousTag: options.previousTag, ...inputs, legs };
+    const run = await inSandbox(options, inputs, LEGS.map((leg) => leg.id),
+        async (ctx) => ({ ...forwardLegs(ctx), ...await nextUpdateLegs(ctx) }));
+    return { ...run, previousTag: options.previousTag, ...inputs };
+}
+
+/**
+ * Run ONLY the candidate-leaves leg (no previous release involved): whether an
+ * installed candidate can leave itself through the button path. Used to prove a
+ * single tree, e.g. that v2.3.1.0 and v2.3.1.1 cannot (B-1583).
+ * @returns {Promise<object>} a report whose `only` names the one leg
+ */
+export async function runCandidateLeavesOnly(options) {
+    const inputs = resolveCandidate(options);
+    const run = await inSandbox(options, inputs, [LEAVES_LEG], async (ctx) => ({
+        [LEAVES_LEG]: await candidateLeavesLeg(ctx, publishNextRelease(ctx)),
+    }));
+    return { ...run, only: [LEAVES_LEG], previousTag: null, previousCommit: null, ...inputs };
 }
 
 /** Load and validate the recorded known-incompatible baselines. */
@@ -356,18 +428,21 @@ export function loadKnownIncompatible(file = KNOWN_INCOMPATIBLE_FILE) {
  *   excused:object[], unacknowledged:object[], advisories:object[], staleEntries:object[]}}
  */
 export function decideUpgradePath(report, { knownIncompatible = [], acknowledged = [] } = {}) {
-    const matches = (leg, result) => knownIncompatible.find((entry) => entry.baseline === report.previousTag
-        && entry.baselineCommit === report.previousCommit && entry.leg === leg && entry.code === result.code);
+    const matches = (leg, result) => EXCUSABLE_LEGS.has(leg) && knownIncompatible.find((entry) => report.previousTag
+        && entry.baseline === report.previousTag && entry.baselineCommit === report.previousCommit
+        && entry.leg === leg && entry.code === result.code);
     const failures = [];
     const excused = [];
     const unacknowledged = [];
     const advisories = [];
-    for (const { id, blocking } of LEGS) {
+    for (const { id, blocking } of reportLegs(report)) {
         const result = report.legs[id];
         if (result?.ok) continue;
         const finding = { leg: id, code: result?.code ?? 'missing', detail: result?.detail ?? null };
         if (!blocking) { advisories.push(finding); continue; }
-        if (result?.skipped) continue;
+        // A skipped reader is covered by its failed writer; candidate-leaves is never
+        // skippable, so a "skipped" result for it is a failure (ADR-204 S0).
+        if (result?.skipped && id !== LEAVES_LEG) continue;
         const entry = matches(id, result || {});
         if (!entry) failures.push(finding);
         else if (acknowledged.includes(report.previousTag)) excused.push({ ...finding, bug: entry.bug });
@@ -380,17 +455,35 @@ export function decideUpgradePath(report, { knownIncompatible = [], acknowledged
     return { verdict, failures, excused, unacknowledged, advisories, staleEntries };
 }
 
+/** The legs a report covers: all of them, or only those of a single-leg run. */
+function reportLegs(report) {
+    return report.only ? LEGS.filter((leg) => report.only.includes(leg.id)) : LEGS;
+}
+
+/** The facts printed after one leg's state. */
+function legFacts(result) {
+    const seconds = (ms) => (Number.isFinite(ms) ? `${Math.round(ms / 1000)}s` : '?');
+    return [result.actionKeys ? `keys=${result.actionKeys.length}` : null,
+        Number.isSafeInteger(result.registeredEffects) ? `effects=${result.registeredEffects}` : null,
+        result.candidateBuilds ? `builder=${result.builder}` : null,
+        result.timings ? `${result.from}->${result.to} update=${seconds(result.timings.updateMs)} `
+            + `total=${seconds(result.timings.totalMs)}` : null].filter(Boolean).join(' ');
+}
+
 /** Human-readable report lines for the release log. */
 export function formatUpgradePathReport(report, decision) {
-    const lines = [`upgrade-path gate: ${report.previousTag} (${report.previousCommit.slice(0, 12)}) -> `
-        + `${report.candidateVersion} (${report.candidateCommit.slice(0, 12)})`];
-    for (const { id, blocking } of LEGS) {
+    const target = `${report.candidateVersion} (${report.candidateCommit.slice(0, 12)})`;
+    const lines = [report.only ? `upgrade-path gate (${report.only.join(', ')} only): ${target}`
+        : `upgrade-path gate: ${report.previousTag} (${report.previousCommit.slice(0, 12)}) -> ${target}`];
+    for (const { id, blocking } of reportLegs(report)) {
         const result = report.legs[id] || {};
         const state = result.ok ? 'ok' : result.skipped ? 'skipped' : `FAIL ${result.code}`;
-        const facts = [result.actionKeys ? `keys=${result.actionKeys.length}` : null,
-            Number.isSafeInteger(result.registeredEffects) ? `effects=${result.registeredEffects}` : null,
-            result.candidateBuilds ? `builder=${result.builder}` : null].filter(Boolean).join(' ');
+        const facts = legFacts(result);
         lines.push(`  ${blocking ? '' : '(advisory) '}${id}: ${state}${facts ? ` ${facts}` : ''}`);
+        if (id === LEAVES_LEG && !result.ok && result.detail) lines.push(`    detail: ${result.detail}`);
+        if (id === LEAVES_LEG && result.timeline?.length) {
+            lines.push(`    timeline: ${result.timeline.map((step) => `${step.at}s ${step.state}`).join(' > ')}`);
+        }
     }
     for (const item of decision.excused) {
         lines.push(`  KNOWN-INCOMPATIBLE (owner acknowledged): ${item.leg} ${item.code} — ${item.bug}`);

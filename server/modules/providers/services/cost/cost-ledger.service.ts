@@ -28,7 +28,6 @@
  * لا قاعدة قراءة جديدة في هذا الملف.
  */
 
-import { createReadStream } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -46,6 +45,14 @@ import {
 } from '@/modules/providers/list/claude/claude-projects-roots.js';
 import { resolveOpenCodeDataHomes } from '@/modules/providers/list/opencode/opencode-home.js';
 import { resolveCodexHomes } from '@/modules/providers/list/codex/codex-home.js';
+import {
+  claudeFileBinder,
+  codexThreadBinder,
+  isQuietChildRefusal,
+  openBoundFile,
+  type FileBinder,
+  type TranscriptRefusal,
+} from '@/modules/providers/shared/session-transcript-reader.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
 import { runLocalUpdateBackground } from '../../../../services/update-writer-lease.js';
@@ -415,32 +422,69 @@ async function signatureOf(files: string[]): Promise<FileSignature> {
   return { mtimeMs: Math.round(mtimeMs), size };
 }
 
-/** يقرأ ملف JSONL سطراً سطراً (بعض السجلّات تتجاوز 100MB فلا readFile). */
-async function forEachJsonlEntry(filePath: string, visit: (entry: unknown) => void): Promise<void> {
-  try {
-    await stat(filePath);
-  } catch {
-    // اختفى بين المشي والقراءة (كنس جارٍ) — لا يُسقط بقيّة المحادثة.
-    return;
-  }
+/**
+ * A file the scan found under a provider root and the binder its pinned
+ * descriptor must pass before any of its usage is attributed (ADR-201 A-P2c).
+ */
+type LedgerSource = { path: string; binder: FileBinder };
 
-  const stream = createReadStream(filePath, { encoding: 'utf8' });
-  const lines = createInterface({ input: stream, crlfDelay: Infinity });
-  try {
-    for await (const line of lines) {
-      if (!line || line.charCodeAt(0) !== 123 /* '{' */) {
-        continue;
-      }
-      try {
-        visit(JSON.parse(line));
-      } catch {
-        // سطر مقطوع (كتابة جارية) — يُتخطّى ولا يُسقط الملف كلّه.
-      }
+/** Outcome of reading bound sources: how many were read, and why others were refused. */
+type BoundRead = { read: number; refused: Array<{ path: string; reason: TranscriptRefusal }> };
+
+/**
+ * يقرأ ملفات JSONL سطراً سطراً (بعض السجلّات تتجاوز 100MB فلا readFile)، كلٌّ
+ * من واصف مثبَّت لا يتبع رابطاً رمزياً، محصور تحت جذر المزوّد `root` ومربوط
+ * بمعرّفه من رأسه (ADR-201 A-P2c). ملف اختفى بين المشي والقراءة (كنس جارٍ)
+ * يُتخطّى بصمت؛ والمرفوض لا يُقرأ ويُعاد سببه.
+ */
+async function forEachBoundEntry(
+  root: string, sources: readonly LedgerSource[], visit: (entry: unknown) => void,
+  options: { requireFirst?: boolean } = {},
+): Promise<BoundRead> {
+  const outcome: BoundRead = { read: 0, refused: [] };
+  for (const [index, source] of sources.entries()) {
+    const opened = await openBoundFile(root, source.path, source.binder);
+    if ('reason' in opened) {
+      const required = index === 0 && options.requireFirst === true;
+      const quiet = required ? opened.reason === 'missing' : isQuietChildRefusal(opened.reason);
+      if (!quiet) outcome.refused.push({ path: source.path, reason: opened.reason });
+      // A required first source (the parent transcript) that cannot be bound
+      // drops the rest: nothing is attributed to a session it does not prove.
+      if (required) return outcome;
+      continue;
     }
-  } finally {
-    lines.close();
-    stream.destroy();
+    const stream = opened.handle.createReadStream({ encoding: 'utf8', start: 0, autoClose: false });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        if (!line || line.charCodeAt(0) !== 123 /* '{' */) {
+          continue;
+        }
+        try {
+          visit(JSON.parse(line));
+        } catch {
+          // سطر مقطوع (كتابة جارية) — يُتخطّى ولا يُسقط الملف كلّه.
+        }
+      }
+      outcome.read += 1;
+    } finally {
+      lines.close();
+      stream.destroy();
+      await opened.handle.close().catch(() => undefined);
+    }
   }
+  return outcome;
+}
+
+/** Report lines for refused sources: harness, path and reason only, never content. */
+const refusalErrors = (harness: string, read: BoundRead): string[] =>
+  read.refused.map(({ path: file, reason }) => `${harness}:${file}: refused (${reason})`);
+
+/** Codex thread id carried by a rollout name (`rollout-…-<uuid>.jsonl`), or null. */
+const ROLLOUT_THREAD_ID = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+function rolloutThreadId(rolloutPath: string): string | null {
+  const name = path.basename(rolloutPath);
+  return name.startsWith('rollout-') ? ROLLOUT_THREAD_ID.exec(name)?.[1] ?? null : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +495,12 @@ type TranscriptScan = {
   rows: LedgerRowInput[];
   undatedEntries: number;
   attributed: boolean;
+  /** Sources refused by binding (ADR-201 A-P2c) — reported, never attributed. */
+  errors?: string[];
 };
+
+const UNATTRIBUTED_SCAN = (undatedEntries: number, errors: string[]): TranscriptScan =>
+  ({ rows: [], undatedEntries, attributed: false, errors });
 
 /**
  * سجلّ كلود واحد: ملف الأمّ + كل ملفات الوكلاء الفرعيين تحت مجلّده.
@@ -465,46 +514,51 @@ type TranscriptScan = {
  * تُحتسب في اليومين. الأسطر المكرَّرة تُكتب في نفس الملّي ثانية عملياً،
  * فالاحتمال نظري — والبديل (نافذة لكل يوم) يحمل نفس الحدّ حرفياً.
  */
-async function scanClaudeTranscript(files: string[], sessionIdHint?: string): Promise<TranscriptScan> {
+async function scanClaudeTranscript(
+  root: string, sessionId: string, files: string[], parent: string | null,
+): Promise<TranscriptScan> {
   const byDay = new Map<string, ClaudeUsageAccumulator>();
   let projectPath = '';
   let undatedEntries = 0;
 
-  for (const file of files) {
-    // ملف اختفى بين المشي والقراءة (كنس جارٍ) لا يُسقط بقيّة المحادثة.
-    await forEachJsonlEntry(file, (entry) => {
-      if (!isRecord(entry)) {
-        return;
-      }
-      if (!projectPath && typeof entry.cwd === 'string' && entry.cwd.trim()) {
-        projectPath = entry.cwd.trim();
-      }
-      if (entry.type !== 'assistant') {
-        return;
-      }
+  // ADR-201 A-P2c: the parent must be `<sessionId>.jsonl` and carry that id;
+  // every subagent file must carry it too. A refused parent drops the whole
+  // conversation: nothing is attributed to a session its file is not bound to.
+  const sources = files.map((file) => ({ path: file, binder: claudeFileBinder(sessionId, file === parent) }));
+  const visited = await forEachBoundEntry(root, sources, (entry) => {
+    if (!isRecord(entry)) {
+      return;
+    }
+    if (!projectPath && typeof entry.cwd === 'string' && entry.cwd.trim()) {
+      projectPath = entry.cwd.trim();
+    }
+    if (entry.type !== 'assistant') {
+      return;
+    }
 
-      const timestamp = parseTimestampMs(entry.timestamp);
-      if (!Number.isFinite(timestamp)) {
-        // بلا طابع لا يوجد يوم يُنسب إليه. حشرُه في «اليوم» يفبرك تاريخاً،
-        // فيُستبعَد ويُعلَن عدده في التقرير.
-        undatedEntries += 1;
-        return;
-      }
+    const timestamp = parseTimestampMs(entry.timestamp);
+    if (!Number.isFinite(timestamp)) {
+      // بلا طابع لا يوجد يوم يُنسب إليه. حشرُه في «اليوم» يفبرك تاريخاً،
+      // فيُستبعَد ويُعلَن عدده في التقرير.
+      undatedEntries += 1;
+      return;
+    }
 
-      const day = localDay(timestamp);
-      let accumulator = byDay.get(day);
-      if (!accumulator) {
-        accumulator = new ClaudeUsageAccumulator();
-        byDay.set(day, accumulator);
-      }
-      accumulator.addEntry(entry);
-    });
-  }
+    const day = localDay(timestamp);
+    let accumulator = byDay.get(day);
+    if (!accumulator) {
+      accumulator = new ClaudeUsageAccumulator();
+      byDay.set(day, accumulator);
+    }
+    accumulator.addEntry(entry);
+  }, { requireFirst: parent !== null });
+  const errors = refusalErrors('claude', visited);
 
-  // احتياط النسبة: صفّ الجلسة في قاعدة نسّاج حين لا `cwd` في السجلّ نفسه.
-  if (!projectPath && sessionIdHint) {
+  // احتياط النسبة: صفّ الجلسة في قاعدة نسّاج حين لا `cwd` في السجلّ نفسه —
+  // ولا يُستشار إلا إذا قُرئ ملفٌّ مربوط بمعرّفها فعلاً.
+  if (!projectPath && visited.read > 0) {
     try {
-      projectPath = sessionsDb.getSessionById(sessionIdHint)?.project_path ?? '';
+      projectPath = sessionsDb.getSessionById(sessionId)?.project_path ?? '';
     } catch {
       // لا صفّ — يبقى غير منسوب.
     }
@@ -512,7 +566,7 @@ async function scanClaudeTranscript(files: string[], sessionIdHint?: string): Pr
 
   const ref = projectPath ? resolveProjectRef(projectPath) : null;
   if (!ref) {
-    return { rows: [], undatedEntries, attributed: false };
+    return UNATTRIBUTED_SCAN(undatedEntries, errors);
   }
 
   const rows: LedgerRowInput[] = [];
@@ -520,7 +574,7 @@ async function scanClaudeTranscript(files: string[], sessionIdHint?: string): Pr
     rows.push(...costToRows(ref, day, 'claude', calculateSessionCost(accumulator.result('claude'))));
   }
 
-  return { rows, undatedEntries, attributed: true };
+  return { rows, undatedEntries, attributed: true, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -534,12 +588,17 @@ async function scanClaudeTranscript(files: string[], sessionIdHint?: string): Pr
  * يُستدعى المُستخرِج مرّة لكل يوم: ملفات الـrollout صغيرة، وإعادة تنفيذ منطق
  * الطرح هنا كانت ستنسخ أدقّ قاعدة في المُستخرِج.
  */
-async function scanCodexRollout(rolloutPath: string): Promise<TranscriptScan> {
+async function scanCodexRollout(root: string, rolloutPath: string): Promise<TranscriptScan> {
   const days = new Set<string>();
   let projectPath = '';
   let undatedEntries = 0;
 
-  await forEachJsonlEntry(rolloutPath, (entry) => {
+  // ADR-201 A-P2c: the rollout's name carries its thread id and its first
+  // `session_meta` must carry the same one before any usage is attributed.
+  const threadId = rolloutThreadId(rolloutPath);
+  if (!threadId) return UNATTRIBUTED_SCAN(0, [`codex:${rolloutPath}: refused (name_mismatch)`]);
+  const source = { path: rolloutPath, binder: codexThreadBinder(threadId, false) };
+  const visited = await forEachBoundEntry(root, [source], (entry) => {
     if (!isRecord(entry)) {
       return;
     }
@@ -560,16 +619,16 @@ async function scanCodexRollout(rolloutPath: string): Promise<TranscriptScan> {
       return;
     }
     days.add(localDay(timestamp));
-  });
+  }, { requireFirst: true });
 
-  const ref = projectPath ? resolveProjectRef(projectPath) : null;
+  const ref = visited.read > 0 && projectPath ? resolveProjectRef(projectPath) : null;
   if (!ref) {
-    return { rows: [], undatedEntries, attributed: false };
+    return UNATTRIBUTED_SCAN(undatedEntries, refusalErrors('codex', visited));
   }
 
   const rows: LedgerRowInput[] = [];
   for (const day of days) {
-    const usage = await extractCodexSessionUsage(rolloutPath, dayBounds(day));
+    const usage = await extractCodexSessionUsage({ rolloutPath, threadId, root }, dayBounds(day));
     rows.push(...costToRows(ref, day, 'codex', calculateSessionCost(usage)));
   }
 
@@ -679,6 +738,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
   ): void => {
     const stats = (report.perHarness[harness] ??= emptyHarnessStat());
     report.undatedEntries += scan.undatedEntries;
+    report.errors.push(...(scan.errors ?? []));
 
     if (!scan.attributed) {
       // بلا مشروع لا مكان للصفّ. **ولا تُكتب علامة مائية** كي يُعاد النظر
@@ -760,7 +820,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
                 stats.skipped += 1;
                 continue;
               }
-              const scan = await scanClaudeTranscript(orphanFiles, entry.name);
+              const scan = await scanClaudeTranscript(root.real, entry.name, orphanFiles, null);
               report.scanned += 1;
               stats.scanned += 1;
               persist('claude', orphanIdentity.key, 'claude', signature, scan, orphanIdentity.legacy);
@@ -790,7 +850,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
               continue;
             }
 
-            const scan = await scanClaudeTranscript(files, sessionId);
+            const scan = await scanClaudeTranscript(root.real, sessionId, files, transcriptPath);
             report.scanned += 1;
             stats.scanned += 1;
             persist('claude', identity.key, 'claude', signature, scan, identity.legacy);
@@ -809,7 +869,12 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
     const homes = options.codexHomes ? await dedupeByRealPath(options.codexHomes) : await dedupeByRealPath(resolveCodexHomes());
 
     for (const home of homes) {
-      const rollouts = await collectJsonlFiles(path.join(home, 'sessions'));
+      // Containment root: the realpath of this home's sessions tree. Rollouts
+      // keep their literal paths, which are their watermark keys.
+      const sessionsDirectory = path.join(home, 'sessions');
+      const sessionsRoot = await realpath(sessionsDirectory).catch(() => null);
+      if (!sessionsRoot) continue;
+      const rollouts = await collectJsonlFiles(sessionsDirectory);
       for (const rolloutPath of rollouts) {
         try {
           const signature = await signatureOf([rolloutPath]);
@@ -820,7 +885,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
             continue;
           }
 
-          const scan = await scanCodexRollout(rolloutPath);
+          const scan = await scanCodexRollout(sessionsRoot, rolloutPath);
           report.scanned += 1;
           stats.scanned += 1;
           persist('codex', rolloutPath, 'codex', signature, scan);

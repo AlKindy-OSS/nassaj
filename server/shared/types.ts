@@ -467,6 +467,12 @@ export type NormalizedMessage = {
 export type FetchHistoryOptions = {
   /** Explicit owner for bounded native history reads; never shared across requests. */
   historyLease?: import('../modules/providers/services/history-budget.service.js').HistoryReadLease;
+  /**
+   * ADR-201 A1: transcript pinned by `openSessionTranscript` for an unleased
+   * read; owned (closed) by the caller. `null` = refused, read nothing;
+   * absent = direct caller, the provider pins the row's recorded path itself.
+   */
+  transcript?: import('../modules/providers/shared/session-transcript-reader.js').SessionTranscriptHandle | null;
   projectPath?: string;
   limit?: number | null;
   offset?: number;
@@ -584,6 +590,11 @@ export type ProviderSkillCreateInput = {
   userId?: string | number | null;
   /** Refuse an existing target and publish each new directory atomically. */
   createOnly?: boolean;
+  /**
+   * Server-injected (ADR-203): when set, the write proceeds only if the resolved
+   * writable root is exactly this directory; otherwise 409 and nothing written.
+   */
+  requiredRootDir?: string;
 };
 
 /**
@@ -594,6 +605,8 @@ export type ProviderSkillCreateInput = {
  */
 export type ProviderSkillRemoveOptions = {
   userId?: string | number | null;
+  /** Same server-injected destination pin as ProviderSkillCreateInput.requiredRootDir. */
+  requiredRootDir?: string;
 };
 
 /**
@@ -616,7 +629,26 @@ export type ProviderSkill = {
   pluginId?: string;
   /** Native metadata preserved for consumers; does not grant or enforce invocation permission. */
   disableModelInvocation?: boolean;
+  /**
+   * True when the API will refuse to delete this skill (T-2003): nassaj-shared
+   * Codex skills, and operator-shared skills this app did not install. The UI
+   * should hide delete for it; the server answers `PROVIDER_SKILL_READ_ONLY`.
+   */
+  readOnly?: boolean;
+  /** Where a read-only skill comes from; absent for ordinary provider-native skills. */
+  origin?: ProviderSkillOrigin;
 };
+
+/**
+ * Provenance of a shared, read-only skill (T-2003).
+ *
+ * `nassaj-shared`   — nassaj's portable skills materialized into a Codex home
+ *                     (ADR-202), owned per `<CODEX_HOME>/skills/.nassaj-sync-state.json`.
+ * `operator-shared` — the operator-global library every member reads (Claude
+ *                     `~/.claude/skills`, a Qwen skills root linked to the operator's).
+ *                     A display tag: per-skill `readOnly` decides deletability.
+ */
+export type ProviderSkillOrigin = 'nassaj-shared' | 'operator-shared';
 
 /**
  * Internal source descriptor consumed by shared provider skill discovery logic.
@@ -635,6 +667,20 @@ export type ProviderSkillSource = {
   commandForSkill?: (skillName: string) => string;
   pluginName?: string;
   pluginId?: string;
+  /** Every skill from this source is listed read-only and refused by delete (T-2003). */
+  readOnly?: boolean;
+  origin?: ProviderSkillOrigin;
+  /**
+   * Optional custom enumerator replacing the default `rootDir` scan. Used when only
+   * an explicit allow-list of child folders belongs to the source (nassaj-shared).
+   */
+  listSkillFiles?: () => Promise<string[]>;
+  /**
+   * Write guard for the managed write surface (ADR-203 condition 4): called with
+   * the normalized folder name before any add/remove touches the disk; throws to
+   * refuse. Set on per-user private stores.
+   */
+  assertWriteTarget?: (directoryName: string) => void;
 };
 
 // ---------------------------

@@ -9,7 +9,8 @@ import { getClaudeBuiltInCommands } from "../claude-sdk.js";
 import { resolveProviderEnv } from "../services/isolation/resolve-provider-env.js";
 import { parseFrontMatter } from "../shared/frontmatter.js";
 import { findAppRoot, getModuleDir } from "../utils/runtime-paths.js";
-import { projectsDb } from "../modules/database/index.js";
+import { projectsDb, sessionsDb } from "../modules/database/index.js";
+import { isSessionAccessibleByUser } from "../modules/providers/services/session-access.js";
 import {
   callCodexAppServer,
   startCodexCompaction,
@@ -146,8 +147,23 @@ const readModelProvider = (value) => {
 const hasConcreteSessionId = (value) =>
   typeof value === "string" && value.trim().length > 0;
 
-const resolveCommandModel = async (provider, catalog, sessionId) => {
-  if (!hasConcreteSessionId(sessionId)) {
+/**
+ * True when `userId` may read session `sessionId` (the session-route predicate).
+ * The session id comes from the client-supplied context, so the transcript
+ * behind it is consulted only for a requester who may read it (ADR-201 A1);
+ * any failure answers false.
+ */
+const sessionReadableBy = (sessionId, userId) => {
+  try {
+    const row = sessionsDb.getSessionById(sessionId);
+    return Boolean(row) && isSessionAccessibleByUser(sessionId, row.project_path, userId, "read");
+  } catch {
+    return false;
+  }
+};
+
+const resolveCommandModel = async (provider, catalog, sessionId, userId) => {
+  if (!hasConcreteSessionId(sessionId) || !sessionReadableBy(sessionId, userId)) {
     return catalog.DEFAULT;
   }
 
@@ -172,6 +188,7 @@ export const executeModelsCommand = async (args, context) => {
     currentProvider,
     catalog,
     context?.sessionId,
+    context?.userId ?? null,
   );
   const availableModels = catalog.OPTIONS.map((option) => option.value);
   const availableOptions = catalog.OPTIONS.map((option) => ({
@@ -956,7 +973,7 @@ ${customCommandsHelp}
         provider, {}, context?.userId ?? null, context?.authenticatedPrincipal,
       )
     ).models;
-    const model = await resolveCommandModel(provider, catalog, context?.sessionId);
+    const model = await resolveCommandModel(provider, catalog, context?.sessionId, context?.userId ?? null);
 
     const reportedUsed =
       Number(
@@ -1063,7 +1080,7 @@ ${customCommandsHelp}
         statusProvider, {}, context?.userId ?? null, context?.authenticatedPrincipal,
       )
     ).models;
-    const model = await resolveCommandModel(statusProvider, statusCatalog, context?.sessionId);
+    const model = await resolveCommandModel(statusProvider, statusCatalog, context?.sessionId, context?.userId ?? null);
     const memoryUsage = process.memoryUsage();
 
     return {

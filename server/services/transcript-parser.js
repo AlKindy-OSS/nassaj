@@ -33,6 +33,13 @@ import readline from 'readline';
 
 import { sessionAgentsDb } from '../modules/database/index.js';
 import { resolveCodexLinkedRollouts } from '../modules/providers/list/codex/codex-rollout-links.js';
+import {
+  isTranscriptHandle,
+  openRecordedTranscript,
+  openSessionArtifactDir,
+  pinnedReadStream,
+  SessionArtifactDir,
+} from '../modules/providers/shared/session-transcript-reader.js';
 
 import { fingerprintResponseProvider } from './provider-fingerprint.js';
 
@@ -115,68 +122,76 @@ function reparsedTooRecently(sessionId, now = Date.now()) {
 }
 
 /**
- * Reads the first real assistant `model` value from a subagent JSONL sidecar file.
- * Returns null on any error or if no model is found.
- * @param {string} subagentFilePath
+ * Reads the first real assistant `model` value from a subagent JSONL sidecar,
+ * opened through the session's pinned `subagents` directory (ADR-201 A1).
+ * Returns null on any error, a refused open, or when no model is found.
+ * @param {SessionArtifactDir} subagentsDir
+ * @param {string} agentId
  * @returns {Promise<string|null>}
  */
-async function readSubagentModel(subagentFilePath) {
+async function readSubagentModel(subagentsDir, agentId) {
+  const child = await subagentsDir.openFile(`agent-${agentId}.jsonl`);
+  if (!child || !('handle' in child)) return null;
+  const fileStream = pinnedReadStream(child.handle);
+  const lineReader = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
   try {
-    const fileStream = fs.createReadStream(subagentFilePath);
-    const lineReader = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
     for await (const rawLine of lineReader) {
-      const trimmed = rawLine.trim();
-      if (!trimmed) continue;
-      let entry;
-      try { entry = JSON.parse(trimmed); } catch { continue; }
-      if (!entry || typeof entry !== 'object') continue;
-      const msg = entry.message;
-      if (!msg || typeof msg !== 'object') continue;
-      if (
-        msg.role === 'assistant' &&
-        typeof msg.model === 'string' &&
-        msg.model.length > 0 &&
-        msg.model !== SYNTHETIC_MODEL
-      ) {
-        lineReader.close();
-        fileStream.destroy();
-        return msg.model;
-      }
+      const model = assistantModelOf(rawLine);
+      if (model) return model;
     }
+    return null;
   } catch {
-    // unreadable / missing file
+    return null;
+  } finally {
+    lineReader.close();
+    fileStream.destroy();
+    await subagentsDir.closeFile(child);
   }
-  return null;
+}
+
+/** The real assistant model of one JSONL line, or null. */
+function assistantModelOf(rawLine) {
+  const trimmed = rawLine.trim();
+  if (!trimmed) return null;
+  let entry;
+  try { entry = JSON.parse(trimmed); } catch { return null; }
+  const msg = entry && typeof entry === 'object' ? entry.message : null;
+  if (!msg || typeof msg !== 'object') return null;
+  const real = msg.role === 'assistant' && typeof msg.model === 'string'
+    && msg.model.length > 0 && msg.model !== SYNTHETIC_MODEL;
+  return real ? msg.model : null;
 }
 
 /**
- * Given a transcriptPath, resolves the sibling `subagents/` directory.
- * Returns null if the transcript lives at the top level (no session UUID dir).
- * @param {string} transcriptPath
- * @returns {string|null}
+ * Per-subagent models from the sidecars under the pinned transcript's
+ * `subagents` directory (never a path derived by name).
+ * @param {import('../modules/providers/shared/session-transcript-reader.js').SessionTranscriptHandle} transcript
+ * @param {Map<string, string>} subagentToAgentId
+ * @returns {Promise<Map<string, string|null>>}
  */
-function resolveSubagentsDir(transcriptPath) {
-  // Layout: <projectDir>/<sessionId>.jsonl
-  // Subagent files live at: <projectDir>/<sessionId>/subagents/agent-<agentId>.jsonl
-  const basename = path.basename(transcriptPath, '.jsonl');
-  const projectDir = path.dirname(transcriptPath);
-  const candidate = path.join(projectDir, basename, 'subagents');
+async function readSubagentModels(transcript, subagentToAgentId) {
+  const subagentModels = new Map();
+  if (subagentToAgentId.size === 0) return subagentModels;
+  const dir = await openSessionArtifactDir(transcript, 'subagents');
+  if (!(dir instanceof SessionArtifactDir)) return subagentModels;
   try {
-    const stat = fs.statSync(candidate);
-    if (stat.isDirectory()) return candidate;
-  } catch {
-    // no subagents dir for this session — normal for sessions with no agents
+    for (const [subagentType, agentId] of subagentToAgentId) {
+      subagentModels.set(subagentType, await readSubagentModel(dir, agentId));
+    }
+  } finally {
+    await dir.close();
   }
-  return null;
+  return subagentModels;
 }
 
 /**
  * Streams a Claude/Codex-style JSONL transcript and tallies model + subagents.
  * Also resolves per-subagent model strings from sidecar JSONL files when available.
- * @param {string} transcriptPath
+ * Reads only the pinned descriptor it is given (ADR-201 A1); the caller owns it.
+ * @param {import('../modules/providers/shared/session-transcript-reader.js').SessionTranscriptHandle} transcript
  * @returns {Promise<Array<{agent_name: string, agent_kind: 'model'|'subagent', invocation_count: number, agent_model: string|null}>>}
  */
-export async function parseClaudeStyleTranscript(transcriptPath) {
+export async function parseClaudeStyleTranscript(transcript) {
   /**
    * EVERY model that answered in this transcript → the number of CONVERSATIONAL
    * TURNS it opened, in first-seen order (Map preserves insertion order).
@@ -240,7 +255,7 @@ export async function parseClaudeStyleTranscript(transcriptPath) {
    */
   const subagentToAgentId = new Map();
 
-  const fileStream = fs.createReadStream(transcriptPath);
+  const fileStream = pinnedReadStream(transcript.fd);
   const lineReader = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
   for await (const rawLine of lineReader) {
@@ -351,19 +366,7 @@ export async function parseClaudeStyleTranscript(transcriptPath) {
   }
 
   // Resolve per-subagent models from sidecar JSONL files (best-effort).
-  const subagentsDir = resolveSubagentsDir(transcriptPath);
-  /** @type {Map<string, string|null>} subagent_type → model */
-  const subagentModels = new Map();
-
-  if (subagentsDir) {
-    await Promise.all(
-      [...subagentToAgentId.entries()].map(async ([subagentType, agentId]) => {
-        const subagentFile = path.join(subagentsDir, `agent-${agentId}.jsonl`);
-        const resolvedModel = await readSubagentModel(subagentFile);
-        subagentModels.set(subagentType, resolvedModel);
-      })
-    );
-  }
+  const subagentModels = await readSubagentModels(transcript, subagentToAgentId);
 
   const agents = [];
   // One row per model that actually answered, in first-seen order, carrying its
@@ -438,7 +441,7 @@ async function codexRosterCacheKey(transcriptPath) {
   for (const rolloutPath of paths) {
     let signature = rolloutPath;
     try {
-      const info = fs.statSync(rolloutPath);
+      const info = fs.lstatSync(rolloutPath);
       signature += `:${Math.floor(info.mtimeMs)}:${info.size}`;
     } catch {
       signature += ':missing';
@@ -467,19 +470,10 @@ const AGY_SUBAGENT_RE = /"name"\s*:\s*"invoke_subagent"/g;
  * `invoke_subagent` منذ وصل طاقم نسّاج إلى agy (B-392) — فصار للتفويض أثرٌ
  * يُعدّ. الفشل آمن: إن غاب السطر يعود الاسم إلى `agy` كما كان.
  *
- * @param {string|null|undefined} transcriptPath مسار نصّ الجلسة
+ * @param {string} text نصّ الجلسة كما قُرئ من واصفه المثبَّت ('' حين لا نصّ مقبول)
  * @returns {Array<{agent_name: string, agent_kind: 'model'|'subagent', invocation_count: number, agent_model: string|null, agent_provider: string|null}>}
  */
-function parseAgySession(transcriptPath) {
-  let text = '';
-  if (transcriptPath) {
-    try {
-      text = fs.readFileSync(transcriptPath, 'utf8');
-    } catch {
-      text = '';
-    }
-  }
-
+function parseAgySession(text) {
   let model = null;
   for (const m of text.matchAll(AGY_MODEL_RE)) {
     model = m[1].trim() || model; // الأخير هو المفعول: المستخدم قد يبدّل مراراً
@@ -512,11 +506,110 @@ function parseAgySession(transcriptPath) {
 }
 
 /**
+ * Runs `read` on the session's pinned transcript and closes it; null when the
+ * recorded path is refused or absent. ADR-201 A1, authorization-free core: the
+ * only caller (participants.service → GET /:sessionId/agents) runs after the
+ * route's own 'read' gate (assertSessionAccessible); the transcript is still
+ * tree-confined, id-bound by name/header and read from a pinned descriptor.
+ * @template T
+ * @param {string} sessionId
+ * @param {string} provider
+ * @param {string|null|undefined} transcriptPath  the row's recorded jsonl_path
+ * @param {(transcript: import('../modules/providers/shared/session-transcript-reader.js').SessionTranscriptHandle) => Promise<T>} read
+ * @returns {Promise<T|null>}
+ */
+async function withRosterTranscript(sessionId, provider, transcriptPath, read) {
+  if (!transcriptPath) return null;
+  const opened = await openRecordedTranscript(
+    { session_id: sessionId, provider, jsonl_path: transcriptPath }, 'agents');
+  if (!isTranscriptHandle(opened)) return null;
+  try {
+    return await read(opened);
+  } finally {
+    await opened.fd.close().catch(() => undefined);
+  }
+}
+
+/** mtime cache key of a pinned transcript. */
+const pinnedCacheKey = (transcript) => cacheKeyFor(Math.floor(Number(transcript.stat.mtimeMs)));
+
+/** Stores a fresh roster and stamps the throttle window. */
+function storeRoster(sessionId, agents, key) {
+  sessionAgentsDb.replaceForSession(sessionId, agents, key);
+  // Stamped AFTER the parse, not before: a slow parse must not shorten the next
+  // window, and a parse that threw must not start one at all.
+  if (lastParseAt.size >= LAST_PARSE_MAX_ENTRIES) lastParseAt.clear();
+  lastParseAt.set(sessionId, Date.now());
+  return agents;
+}
+
+/** antigravity: one 'model' row from the transcript text, keyed on its mtime (0 without one). */
+async function agyAgents(sessionId, transcriptPath) {
+  const cachedMeta = sessionAgentsDb.getMeta(sessionId);
+  const fresh = await withRosterTranscript(sessionId, 'antigravity', transcriptPath, async (transcript) => {
+    const key = pinnedCacheKey(transcript);
+    if (cachedMeta !== null && cachedMeta === key) return { key, cached: true };
+    return { key, text: await transcript.fd.readFile({ encoding: 'utf8' }) };
+  });
+  const key = fresh?.key ?? cacheKeyFor(0);
+  if (fresh?.cached || (cachedMeta !== null && cachedMeta === key)) return sessionAgentsDb.listBySession(sessionId);
+  const agents = parseAgySession(fresh?.text ?? '');
+  sessionAgentsDb.replaceForSession(sessionId, agents, key);
+  return agents;
+}
+
+/** codex: roster of the bound root rollout and its explicitly linked children. */
+async function codexAgents(sessionId, transcriptPath) {
+  const rootPath = await withRosterTranscript(sessionId, 'codex', transcriptPath, async (t) => t.realpath);
+  if (!rootPath) return sessionAgentsDb.listBySession(sessionId);
+  let key;
+  try {
+    key = await codexRosterCacheKey(rootPath);
+  } catch {
+    return sessionAgentsDb.listBySession(sessionId);
+  }
+  const cachedMeta = sessionAgentsDb.getMeta(sessionId);
+  if (cachedMeta !== null && (cachedMeta === key || reparsedTooRecently(sessionId))) {
+    return sessionAgentsDb.listBySession(sessionId);
+  }
+  try {
+    return storeRoster(sessionId, await parseCodexRolloutTranscript(rootPath), key);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Failed to parse Codex rollout for agents', { sessionId, error: message });
+    return sessionAgentsDb.listBySession(sessionId);
+  }
+}
+
+/**
+ * claude: parse on an mtime change, but not more often than the B-418 floor
+ * (a streaming session changes on every append; serve the previous roster).
+ */
+async function claudeAgents(sessionId, transcriptPath) {
+  const cachedMeta = sessionAgentsDb.getMeta(sessionId);
+  let parsed;
+  try {
+    parsed = await withRosterTranscript(sessionId, 'claude', transcriptPath, async (transcript) => {
+      const key = pinnedCacheKey(transcript);
+      if (cachedMeta !== null && (cachedMeta === key || reparsedTooRecently(sessionId))) return null;
+      return { key, agents: await parseClaudeStyleTranscript(transcript) };
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Failed to parse transcript for agents', { sessionId, error: message });
+    return sessionAgentsDb.listBySession(sessionId);
+  }
+  // Missing/refused transcript or a cache hit: serve whatever was cached.
+  return parsed ? storeRoster(sessionId, parsed.agents, parsed.key) : sessionAgentsDb.listBySession(sessionId);
+}
+
+/**
  * Returns the agents (model + subagents) for a session, using the mtime-keyed
- * cache and re-parsing only when the transcript has changed.
+ * cache and re-parsing only when the transcript has changed. The transcript is
+ * the row's recorded path, opened only through the pinned reader (ADR-201 A1).
  *
  * @param {string} sessionId
- * @param {string|null|undefined} transcriptPath  Absolute path to the .jsonl transcript.
+ * @param {string|null|undefined} transcriptPath  The row's recorded jsonl_path.
  * @param {{ provider?: string }} [options]
  * @returns {Promise<Array<{agent_name: string, agent_kind: 'model'|'subagent', invocation_count: number}>>}
  */
@@ -524,104 +617,17 @@ export async function getSessionAgents(sessionId, transcriptPath, options = {}) 
   if (!sessionId) {
     return [];
   }
-
   const provider = (options.provider || '').toLowerCase();
-
-  // antigravity has no on-disk model/subagent structure; record 'agy' once and
-  // key the cache on the transcript mtime when available, else on 0.
-  if (provider === 'antigravity') {
-    let mtime = 0;
-    if (transcriptPath) {
-      try {
-        mtime = Math.floor(fs.statSync(transcriptPath).mtimeMs);
-      } catch {
-        mtime = 0;
-      }
-    }
-    const key = cacheKeyFor(mtime);
-    const cachedMeta = sessionAgentsDb.getMeta(sessionId);
-    if (cachedMeta !== null && cachedMeta === key) {
-      return sessionAgentsDb.listBySession(sessionId);
-    }
-    const agents = parseAgySession(transcriptPath);
-    sessionAgentsDb.replaceForSession(sessionId, agents, key);
-    return agents;
-  }
-
+  if (provider === 'antigravity') return agyAgents(sessionId, transcriptPath);
   // Other harnesses do not share Claude's transcript contract. Until a
   // harness-specific parser exists, an empty roster is more truthful than
   // interpreting unrelated JSON as Claude tool_use blocks.
   if (provider && provider !== 'claude' && provider !== 'codex') {
     return [];
   }
-
   if (!transcriptPath) {
     // Without a transcript file we can still serve a previously parsed cache.
     return sessionAgentsDb.listBySession(sessionId);
   }
-
-  if (provider === 'codex') {
-    let key;
-    try {
-      key = await codexRosterCacheKey(transcriptPath);
-    } catch {
-      return sessionAgentsDb.listBySession(sessionId);
-    }
-    const cachedMeta = sessionAgentsDb.getMeta(sessionId);
-    if (cachedMeta !== null && cachedMeta === key) {
-      return sessionAgentsDb.listBySession(sessionId);
-    }
-    if (cachedMeta !== null && reparsedTooRecently(sessionId)) {
-      return sessionAgentsDb.listBySession(sessionId);
-    }
-    try {
-      const agents = await parseCodexRolloutTranscript(transcriptPath);
-      sessionAgentsDb.replaceForSession(sessionId, agents, key);
-      if (lastParseAt.size >= LAST_PARSE_MAX_ENTRIES) lastParseAt.clear();
-      lastParseAt.set(sessionId, Date.now());
-      return agents;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error('Failed to parse Codex rollout for agents', { sessionId, error: message });
-      return sessionAgentsDb.listBySession(sessionId);
-    }
-  }
-
-  let mtime;
-  try {
-    mtime = Math.floor(fs.statSync(transcriptPath).mtimeMs);
-  } catch {
-    // Missing/unreadable transcript: fall back to whatever was cached before.
-    return sessionAgentsDb.listBySession(sessionId);
-  }
-
-  const key = cacheKeyFor(mtime);
-  const cachedMeta = sessionAgentsDb.getMeta(sessionId);
-  if (cachedMeta !== null && cachedMeta === key) {
-    return sessionAgentsDb.listBySession(sessionId);
-  }
-
-  // The transcript DID change — but on a streaming session it changes on every
-  // append, and re-reading it whole per append is the cost B-418 names. Serve
-  // the previous roster until the floor elapses. Guarded on `cachedMeta`: with
-  // nothing cached there is nothing to serve, so a first parse always runs.
-  if (cachedMeta !== null && reparsedTooRecently(sessionId)) {
-    return sessionAgentsDb.listBySession(sessionId);
-  }
-
-  let agents;
-  try {
-    agents = await parseClaudeStyleTranscript(transcriptPath);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('Failed to parse transcript for agents', { sessionId, error: message });
-    return sessionAgentsDb.listBySession(sessionId);
-  }
-
-  sessionAgentsDb.replaceForSession(sessionId, agents, key);
-  // Stamped AFTER the parse, not before: a slow parse must not shorten the next
-  // window, and a parse that threw (returned above) must not start one at all.
-  if (lastParseAt.size >= LAST_PARSE_MAX_ENTRIES) lastParseAt.clear();
-  lastParseAt.set(sessionId, Date.now());
-  return agents;
+  return provider === 'codex' ? codexAgents(sessionId, transcriptPath) : claudeAgents(sessionId, transcriptPath);
 }

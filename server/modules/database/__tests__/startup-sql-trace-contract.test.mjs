@@ -64,6 +64,60 @@ const baseline = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS session_shares (\n    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, project_id TEXT NOT NULL,\n    owner_user_id INTEGER NOT NULL, token_hash TEXT NOT NULL, created_by INTEGER NOT NULL,\n    created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, revoke_reason TEXT,\n    snapshot BLOB, snapshot_sha256 TEXT NOT NULL, up_to_message_id TEXT NOT NULL,\n    message_count INTEGER NOT NULL, redaction_counts TEXT NOT NULL,\n    view_count INTEGER NOT NULL DEFAULT 0, last_viewed_at TEXT,\n    sweep_miss_count INTEGER NOT NULL DEFAULT 0,\n    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE\n  )",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS session_shares_session ON session_shares(session_id)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS session_shares_creator ON session_shares(created_by)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS session_shares_liveness ON session_shares(revoked_at, expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_oidc_config (\n  slot TEXT PRIMARY KEY CHECK (slot IN ('active','draft')),\n  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),\n  issuer TEXT NOT NULL,\n  client_id TEXT NOT NULL,\n  client_auth TEXT NOT NULL\n    CHECK (client_auth IN ('none','client_secret_basic','client_secret_post')),\n  client_secret_enc TEXT,\n  secret_version INTEGER NOT NULL DEFAULT 0,\n  extra_scopes TEXT NOT NULL DEFAULT '',\n  redirect_uri TEXT,\n  role_claim_path TEXT NOT NULL,\n  role_rules_json TEXT NOT NULL,\n  tenant_mode TEXT NOT NULL CHECK (tenant_mode IN ('none','claim','role_grant_scope')),\n  tenant_claim_path TEXT,\n  tenant_values_json TEXT NOT NULL DEFAULT '[]',\n  jit_enabled INTEGER NOT NULL DEFAULT 0 CHECK (jit_enabled IN (0,1)),\n  attestation_max_age_hours INTEGER NOT NULL DEFAULT 12\n    CHECK (attestation_max_age_hours BETWEEN 1 AND 24),\n  allow_private_network INTEGER NOT NULL DEFAULT 0 CHECK (allow_private_network IN (0,1)),\n  issuer_port INTEGER CHECK (issuer_port IS NULL OR issuer_port BETWEEN 1 AND 65535),\n  pinned_endpoints_json TEXT,\n  discovery_flags_json TEXT,\n  runtime_fault TEXT,\n  config_hash TEXT NOT NULL,\n  draft_version INTEGER NOT NULL DEFAULT 0,\n  version INTEGER NOT NULL DEFAULT 0,\n  updated_at INTEGER,\n  updated_by INTEGER\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_test_results (\n  id TEXT PRIMARY KEY CHECK (length(id) = 43),\n  owner_user_id INTEGER NOT NULL,\n  config_hash TEXT NOT NULL,\n  result_json TEXT NOT NULL,\n  created_at INTEGER NOT NULL,\n  consumed_at INTEGER\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_apply_proofs (\n  id INTEGER PRIMARY KEY,\n  owner_user_id INTEGER NOT NULL,\n  config_hash TEXT NOT NULL,\n  draft_version INTEGER NOT NULL,\n  kind TEXT NOT NULL CHECK (kind IN ('discovery','sign_in')),\n  passed INTEGER NOT NULL CHECK (passed IN (0,1)),\n  shape_flags TEXT,\n  created_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_sso_apply_proofs_binding\n  ON sso_apply_proofs (owner_user_id, config_hash, draft_version, kind)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS user_harness_files_mode (\n  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n  mode TEXT NOT NULL CHECK (mode IN ('shared','private')),\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "run",
     "sql": "UPDATE connector_runtime_anchor SET\n    maximum_fencing_token = ?, maximum_writer_epoch = ?, clock_high_water_ms = ?, authority_mac = ?\n    WHERE singleton = 1 AND authority_mac = ?",
     "shadow": null
@@ -78,6 +132,18 @@ const baseline = [
     "phase": "security_startup_authorized",
     "method": "run",
     "sql": "INSERT INTO connector_runtime_writer_lease (\n    singleton, owner_token, acquisition_nonce, lease_generation, fencing_token,\n    writer_epoch, expires_at_ms, authority_mac\n  ) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(singleton) DO UPDATE SET\n    owner_token = excluded.owner_token, acquisition_nonce = excluded.acquisition_nonce,\n    lease_generation = excluded.lease_generation, fencing_token = excluded.fencing_token,\n    writer_epoch = excluded.writer_epoch, expires_at_ms = excluded.expires_at_ms,\n    authority_mac = excluded.authority_mac",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "run",
+    "sql": "DELETE FROM sso_test_results WHERE created_at <= ?",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "run",
+    "sql": "DELETE FROM sso_apply_proofs WHERE created_at <= ?",
     "shadow": null
   },
   {
@@ -111,7 +177,7 @@ test('reviewed startup effects and explicit connection-local/read PRAGMAs pass',
   rows.unshift({phase:'claimed',method:'pragma',sql:'foreign_keys = ON',shadow:null},
     {phase:'claimed',method:'pragma',sql:'journal_mode',shadow:null},
     {phase:'claimed',method:'all',sql:'SELECT name FROM sqlite_schema',shadow:null});
-  assert.equal(assertStartupSqlTrace(rows).length,7);
+  assert.equal(assertStartupSqlTrace(rows).length,9);
 });
 for(const [name,modify] of [
   ['extra statement appended to the reviewed multi-statement exec',rows=>{

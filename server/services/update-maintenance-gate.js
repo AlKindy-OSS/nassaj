@@ -11,6 +11,7 @@ import { inspectSealedRelease, readReceipt } from '../../scripts/nassaj-release-
 import { requireReleaseLayout } from '../../scripts/lib/update-release-layout-adapter.mjs';
 import { readReleaseActivationAction, validateReleaseActivationAction } from '../../scripts/lib/update-release-layout-activation.mjs';
 import { hashTree } from '../../scripts/lib/source-update-tree-identity.mjs';
+import { assertSourceUpdateAction } from '../../scripts/lib/source-update-action-schema.mjs';
 import { readDatabaseSnapshot, captureDatabaseSnapshot } from '../../scripts/lib/source-update-database-snapshot.mjs';
 import { isNassajReleaseVersion } from '../../shared/release-version-policy.js';
 import { validateOidPairMaintenance, recoverOidPairAdmission, inspectOidBootstrapAdmission as inspectPairBootstrap } from '../../scripts/oid-control-capsule.mjs';
@@ -333,8 +334,9 @@ async function rollbackStaleSourceUpdate(paths, journal) {
     const metadata = fs.lstatSync(actionFile);
     if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) throw new Error('update_recovery_action_unsafe');
     const action = JSON.parse(fs.readFileSync(actionFile, 'utf8'));
-    if (action?.schema !== 'nassaj-source-update-activation/v1'
-        || action.transactionId !== journal.transactionId
+    // T-2004: shared open-world schema; a newer major is refused by name.
+    assertSourceUpdateAction(action, 'update_recovery_action_mismatch');
+    if (action.transactionId !== journal.transactionId
         || action.originalHead !== journal.identity?.originalHead
         || action.targetCommit !== journal.identity?.targetCommit
         || action.version !== journal.identity?.expectedVersion) throw new Error('update_recovery_action_mismatch');

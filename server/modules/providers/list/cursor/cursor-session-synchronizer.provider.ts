@@ -57,15 +57,15 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
       }
 
       const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.createSession(
-        parsed.sessionId,
-        this.provider,
-        parsed.projectPath,
-        parsed.sessionName,
-        timestamps.createdAt,
-        timestamps.updatedAt,
-        filePath
-      );
+      sessionsDb.recordDiscoveredSession({
+        sessionId: parsed.sessionId,
+        provider: this.provider,
+        projectPath: parsed.projectPath,
+        customName: parsed.sessionName,
+        createdAt: timestamps.createdAt,
+        updatedAt: timestamps.updatedAt,
+        jsonlPath: filePath,
+      });
       processed += 1;
     }
 
@@ -86,15 +86,15 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
     }
 
     const timestamps = await readFileTimestamps(filePath);
-    return sessionsDb.createSession(
-      parsed.sessionId,
-      this.provider,
-      parsed.projectPath,
-      parsed.sessionName,
-      timestamps.createdAt,
-      timestamps.updatedAt,
-      filePath
-    );
+    return sessionsDb.recordDiscoveredSession({
+      sessionId: parsed.sessionId,
+      provider: this.provider,
+      projectPath: parsed.projectPath,
+      customName: parsed.sessionName,
+      createdAt: timestamps.createdAt,
+      updatedAt: timestamps.updatedAt,
+      jsonlPath: filePath,
+    });
   }
 
   /**

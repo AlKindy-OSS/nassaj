@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 import { closeConnection, getConnection, initializeDatabase } from '@/modules/database/index.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { codexRolloutPath, codexSessionMetaLine, codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 import {
   captureCodexTurnBaseline,
@@ -118,11 +120,11 @@ describe('newestCompletedTurnFromJsonl', () => {
         } }),
       ].join('\n');
       await appendFile(filePath, `${appended}\n`);
-      assert.equal(await readCodexJsonlAppend(baseline), `${appended}\n`);
+      assert.equal(await readAppend(baseline, filePath), `${appended}\n`);
 
       await rename(filePath, `${filePath}.replaced`);
       await writeFile(filePath, `${appended}\n`);
-      assert.equal(await readCodexJsonlAppend(baseline), null,
+      assert.equal(await readAppend(baseline, filePath), null,
         'replacement inode must fail closed even when path and content look valid');
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -142,12 +144,22 @@ describe('newestCompletedTurnFromJsonl', () => {
       };
 
       await truncate(filePath, 0);
-      assert.equal(await readCodexJsonlAppend(baseline), null);
+      assert.equal(await readAppend(baseline, filePath), null);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 });
+
+/** The appended window read through a descriptor on `file` (the resolver hands a pinned one). */
+async function readAppend(baseline: Parameters<typeof readCodexJsonlAppend>[0], file: string): Promise<string | null> {
+  const handle = await open(file, 'r');
+  try {
+    return await readCodexJsonlAppend(baseline, handle);
+  } finally {
+    await handle.close();
+  }
+}
 
 describe('resolveCompletedCodexTurn', () => {
   /**
@@ -161,9 +173,10 @@ describe('resolveCompletedCodexTurn', () => {
     const previous = process.env.DATABASE_PATH;
     // Tests must not allocate in /tmp: it is tmpfs on Nassaj hosts.
     const directory = await mkdtemp('/var/tmp/codex-turn-resolve-');
-    const rolloutPath = path.join(directory, 'rollout.jsonl');
-    const databasePath = path.join(directory, 'db.sqlite');
     const sessionId = 'session-fixture-codex-turn';
+    // ADR-201 A1: a rollout in the Codex sessions tree, named and headed for its id.
+    const rolloutPath = codexRolloutPath(codexSessionsSandbox('turn-'), sessionId);
+    const databasePath = path.join(directory, 'db.sqlite');
     closeConnection();
     process.env.DATABASE_PATH = databasePath;
     await writeFile(databasePath, '');
@@ -171,6 +184,7 @@ describe('resolveCompletedCodexTurn', () => {
     try {
       // A previous turn that already completed: it must never win.
       await writeFile(rolloutPath, [
+        codexSessionMetaLine(sessionId),
         JSON.stringify({ type: 'response_item', payload: {
           type: 'message', id: 'msg_fixture_previous', role: 'assistant', phase: 'final_answer',
           internal_chat_message_metadata_passthrough: { turn_id: 'turn-before-this-run' },

@@ -121,6 +121,13 @@ export type AuditAction =
   // touched — never file content.
   | 'governance_exemption_granted'
   | 'governance_exemption_revoked'
+  // ADR-203 (T-2003): shared vs private skills. Both are written STRICTLY in
+  // the same transaction as the change they describe. `member_policy_changed`
+  // is the owner/admin workspace switch, metadata { from, to, role,
+  // affectedMembers }; `mode_changed` is one user's own choice, metadata
+  // { from, to, effective, role }. Never a path or file content.
+  | 'harness_files_member_policy_changed'
+  | 'harness_files_mode_changed'
   // ADR-088 engine-pin decisions (B-258): a deliberate widening of this table
   // beyond auth events — routing a user's payload to a provider they did not
   // choose IS security-relevant. Metadata carries session id, stored/client
@@ -150,8 +157,31 @@ export type AuditAction =
   // the gesture token, API key, prompt, response or environment.
   | 'qwen_execution_allowed'
   | 'qwen_execution_rejected'
+  // ADR-200 S8: a Moonshot / DeepSeek turn carried by OpenCode was launched or
+  // refused. Metadata { engine, vendor, model, code? }; never the key or prompt.
+  | 'spawn_vendor_execution_allowed'
+  | 'spawn_vendor_execution_rejected'
   | 'qwen_credential_set'
   | 'qwen_credential_deleted'
+  // ADR-200 S4: a member switched a harness between subscription and API key.
+  // Metadata carries the harness, from/to modes, the outcome and the grantee
+  // count the grantor confirmed; never a key or token.
+  | 'link_mode_switched'
+  // ADR-200 S5: vendor-key migration. Adoption = a key found in a harness file
+  // or the AES store taken into the unified record; purge = a migration backup
+  // deleted 30 days after verification (D8). Metadata carries vendor, harness,
+  // target and key version only — never a key or a fingerprint.
+  | 'vendor_key_adopted'
+  | 'vendor_key_backup_purged'
+  | 'vendor_key_backup_restored'
+  | 'vendor_key_conflict_resolved'
+  // ADR-200 S6: a vendor key saved (fan-out) or deleted. Metadata carries the
+  // vendor and the per-slot outcome (provider, target, outcome) only.
+  | 'vendor_key_saved'
+  | 'vendor_key_deleted'
+  // ADR-200 S4 / G1 M-4: a member removed their stored `claude setup-token`
+  // (settings.json only). Metadata: provider and target; never the token.
+  | 'claude_setup_token_deleted'
   // Cross-home Codex continuation: records parent/child lineage and bounded
   // context counts only; conversation content is never written to the audit log.
   | 'codex_session_branch'
@@ -289,7 +319,10 @@ export type AuditAction =
   | 'harness_recovery_acknowledged'
   | 'harness_reconcile_resolved'
   // T-1910 S4: a session writer acknowledged-and-lifted a session-scoped permission fence.
-  | 'permission_fence_acknowledged';
+  | 'permission_fence_acknowledged'
+  // B-1593: a project secret file (.env*, SQLite) was read, downloaded or saved
+  // after explicit confirmation. Metadata: projectId, relative path, access.
+  | 'project_secret_file_accessed';
 
 /**
  * Hard cap on the stored User-Agent string (T-182). UA headers can be long and

@@ -15,7 +15,8 @@ import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { after, mock, test } from 'node:test';
 
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { codexSessionMetaLine, codexSessionsSandbox, withPinnedTranscript } from '@/shared/__tests__/provider-root-sandbox.js';
 
 let historyPath = '';
 mock.module('@/modules/database/index.js', { namedExports: {
@@ -55,8 +56,15 @@ function freshRoot(): { home: string; sessionsRoot: string; file: string } {
 }
 
 const lineOf = (entry: unknown) => `${JSON.stringify(entry)}\n`;
-const rollout = () => (real.rollout as Row[]).map(lineOf);
-const spawnIndex = () => (real.rollout as Row[]).findIndex((row) => row.payload.name === 'spawn_agent');
+/**
+ * Every Codex rollout opens with `session_meta` (the capture above was trimmed
+ * after it); the tail binds the file to the thread by that header (ADR-201
+ * A1.4), so the real-derived header is put back in front.
+ */
+const META = `${codexSessionMetaLine(THREAD)}\n`;
+const rollout = () => [META, ...(real.rollout as Row[]).map(lineOf)];
+/** Index of the spawn_agent line in {@link rollout} (after the header). */
+const spawnIndex = () => (real.rollout as Row[]).findIndex((row) => row.payload.name === 'spawn_agent') + 1;
 
 async function until(check: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -114,7 +122,8 @@ test('a labelled spawn appears live while the file grows, settles from the paren
   assert.equal(fdsOn(liveFile), 0, 'fd closed on complete');
 
   historyPath = liveFile;
-  const history = (await new CodexSessionsProvider().fetchHistory('tail-parity')).messages as Row[];
+  const history = (await withPinnedTranscript(historyPath, 'tail-parity', 'codex',
+    (pinned) => new CodexSessionsProvider().fetchHistory('tail-parity', { transcript: pinned }))).messages as Row[];
   const [task] = history.filter((row) => row.subagent);
   assert.equal(task.id, rows[0].id, 'live and history share the spawn id, so dedup keeps one');
   assert.equal(task.subagent.id, rows[0].subagent.id);
@@ -128,7 +137,7 @@ test('resume starts at the size when opened: earlier spawns are not re-emitted, 
   fs.writeFileSync(file, rollout().join(''));
   const { handle, signals } = tail(sessionsRoot, { resumed: true, storedPath: file });
   await until(() => handle.phase === 'tailing');
-  const next = JSON.parse(JSON.stringify(real.rollout[spawnIndex()]));
+  const next = JSON.parse(JSON.stringify(real.rollout[spawnIndex() - 1]));
   next.payload.call_id = 'call_resume_next';
   fs.appendFileSync(file, lineOf(next));
   await until(() => signals.length === 1);
@@ -146,10 +155,10 @@ test('once a labelled spawn exists the anonymous collab card is hidden; a shown 
   });
   const collab = (uuid: string, progressPhase: string, progressOpened: boolean) =>
     ({ itemType: 'collab_tool_call', uuid, progressPhase, progressOpened });
-  fs.writeFileSync(liveFile, '');
+  fs.writeFileSync(liveFile, META);
   run.onThreadStarted(THREAD, false, null);
   assert.equal(run.hidesCollab(collab('shown', 'started', false)), false, 'no spawn yet: anonymous card shows');
-  fs.appendFileSync(liveFile, rollout().slice(0, spawnIndex() + 1).join(''));
+  fs.appendFileSync(liveFile, rollout().slice(1, spawnIndex() + 1).join(''));
   await until(() => rows.length === 1);
   assert.equal(run.hidesCollab(collab('later', 'started', false)), true);
   assert.equal(run.hidesCollab(collab('later', 'completed', true)), true, 'a hidden card stays hidden to the end');
@@ -304,10 +313,10 @@ test('only the parent rollout is opened: a child rollout beside it never gets an
   const childThread = real.rollout.find((row: Row) => row.payload?.item?.agent_thread_id).payload.item.agent_thread_id;
   const child = path.join(path.dirname(file), `rollout-2026-10-09T10-17-42-${childThread}.jsonl`);
   fs.writeFileSync(child, rollout().join(''));
-  fs.writeFileSync(file, '');
+  fs.writeFileSync(file, META);
   const { handle, signals } = tail(sessionsRoot);
   await until(() => handle.phase === 'tailing');
-  fs.appendFileSync(file, rollout().join(''));
+  fs.appendFileSync(file, rollout().slice(1).join(''));
   await until(() => signals.length === 2);
   assert.equal(fdsOn(child), 0);
   assert.equal(fdsOn(file), 1);

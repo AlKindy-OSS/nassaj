@@ -214,6 +214,20 @@ export class OpenCodeCredentialsWriter implements IProviderCredentialWriter {
     return { provider: 'opencode', configured: false };
   }
 
+  /**
+   * ADR-200 S6: the target's API key, or null, for the fan-out ownership check
+   * and re-read verify. A login record (`type` other than `api`) reads as null:
+   * it is never a key, and the write and delete paths refuse to touch it.
+   */
+  async readApiKey(
+    userId: string | number | null | undefined,
+    target?: string,
+  ): Promise<string | null> {
+    const resolvedTarget = this.resolveTarget(target);
+    const record = readObjectRecord(readJsonObjectOrEmpty(this.authFilePath(userId))[resolvedTarget]);
+    return record?.type === 'api' ? readOptionalString(record.key) ?? null : null;
+  }
+
   async isConfigured(
     userId: string | number | null | undefined,
     target?: string,

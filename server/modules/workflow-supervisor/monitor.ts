@@ -54,7 +54,7 @@ export type MonitorDeps = {
   /** Real: systemctl show; test: a stub. */
   probeUnitState: UnitStateProbe;
   /** C2 ownership gate; returns the AUTHORITATIVE jsonl path from the DB. */
-  verifyDeliveryTarget: (conversationId: string, userId: number) => DeliveryTarget;
+  verifyDeliveryTarget: (conversationId: string, userId: number) => DeliveryTarget | Promise<DeliveryTarget>;
   /** Override the DONE-absent grace (defaults to config). */
   graceMs?: number;
   now?: () => number;
@@ -193,7 +193,7 @@ export async function deliverIfTerminal(
 
   // C2 — verify the delivery target BEFORE any write; get the DB-authoritative
   // jsonl path (never a path built from the web-supplied conversationId).
-  const target = deps.verifyDeliveryTarget(task.conversationId, task.userId);
+  const target = await deps.verifyDeliveryTarget(task.conversationId, task.userId);
   if (!target.ok) {
     auditLine(taskDir, {
       event: 'delivery-denied',

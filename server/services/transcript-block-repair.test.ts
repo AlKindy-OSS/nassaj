@@ -276,13 +276,67 @@ test('B-421: repairs through the path a resume actually resolves', () => {
     const projectDir = path.join(dir, 'projects', encodeProjectDir(cwd));
     fs.mkdirSync(projectDir, { recursive: true });
     const file = path.join(projectDir, `${sessionId}.jsonl`);
-    fs.copyFileSync(FIXTURE, file);
+    fs.writeFileSync(file, rekeyedFixture(sessionId));
 
     const result = repairResumeTranscript({ sessionId, cwd, configDir: dir });
 
     assert.equal(result.blocks, 2);
     assert.ok(!fs.readFileSync(file, 'utf8').includes(POISON_ID));
   });
+});
+
+/** The real poisoned transcript with every `sessionId` re-keyed to `sessionId`. */
+function rekeyedFixture(sessionId: string): string {
+  return fs.readFileSync(FIXTURE, 'utf8').split('\n').map((line) => {
+    if (!line.trim()) return line;
+    const record = JSON.parse(line);
+    return JSON.stringify(typeof record.sessionId === 'string' ? { ...record, sessionId } : record);
+  }).join('\n');
+}
+
+type Planted = 'genuine' | 'forged' | 'symlink' | 'hardlink' | 'outsideRoot';
+
+/**
+ * ADR-201 A-P2b negative cases through the spawn seam: the resume path is
+ * derived from server context, yet only a confined, id-bound, single-link
+ * regular file is rewritten — and the planted target never changes.
+ */
+function plantResume(dir: string, planted: Planted) {
+  const sessionId = '00000001-0000-4000-8000-0000000000aa';
+  const cwd = '/home/example/Project/nassaj-dev';
+  const projectDir = path.join(dir, 'projects', encodeProjectDir(cwd));
+  const elsewhere = path.join(dir, 'elsewhere');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const file = path.join(projectDir, `${sessionId}.jsonl`);
+  const target = path.join(elsewhere, 'victim.jsonl');
+  fs.writeFileSync(target, rekeyedFixture(planted === 'forged' ? '00000001-0000-4000-8000-0000000000bb' : sessionId));
+  if (planted === 'symlink') fs.symlinkSync(target, file);
+  else if (planted === 'hardlink') fs.linkSync(target, file);
+  else if (planted === 'outsideRoot') fs.symlinkSync(elsewhere, path.join(dir, 'projects', encodeProjectDir('/linked')));
+  else fs.renameSync(target, file);
+  const resumeCwd = planted === 'outsideRoot' ? '/linked' : cwd;
+  const victim = planted === 'outsideRoot' ? path.join(elsewhere, `${sessionId}.jsonl`)
+    : planted === 'forged' ? file : target;
+  if (planted === 'outsideRoot') fs.renameSync(target, victim);
+  return { sessionId, cwd: resumeCwd, file, victim };
+}
+
+test('ADR-201: the resume repair rewrites only a confined, id-bound, single-link transcript', () => {
+  for (const planted of ['genuine', 'forged', 'symlink', 'hardlink', 'outsideRoot'] as Planted[]) {
+    withTmp((dir) => {
+      const { sessionId, cwd, file, victim } = plantResume(dir, planted);
+      const before = planted === 'genuine' ? null : fs.readFileSync(victim, 'utf8');
+      const result = repairResumeTranscript({ sessionId, cwd, configDir: dir });
+      if (planted === 'genuine') {
+        assert.equal(result.blocks, 2, planted);
+        assert.ok(!fs.readFileSync(file, 'utf8').includes(POISON_ID));
+        return;
+      }
+      assert.equal(result.repaired, 0, `${planted}: ${result.reason}`);
+      assert.equal(fs.readFileSync(victim, 'utf8'), before, `${planted}: the planted target is untouched`);
+    });
+  }
 });
 
 test('B-421: the spawn seam fails open on unusable input', () => {

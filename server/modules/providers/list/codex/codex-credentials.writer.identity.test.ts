@@ -13,6 +13,7 @@ import { after, mock, test } from 'node:test';
 import { acquireCodexLaunchIdentity } from '@/shared/codex-executable.js';
 import { createCodexMachineFixture, pointCurrent, writeCodexRelease } from '@/shared/tests/codex-release-fixture.js';
 
+import { emulateCodexCliLogin } from '../../tests/codex-cli-login.fixture.js';
 import { principal } from '../../tests/codex-credential-principal.fixture.js';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cred-identity-'));
@@ -47,10 +48,14 @@ function permit(launchIdentity: unknown, launchIdentityError: Error | null = nul
 
 function recordingSpawn() {
   const commands: string[] = [];
-  const spawnFn = (command: string) => {
+  const spawnFn = (command: string, _args: string[], opts: unknown) => {
     commands.push(command);
-    const child = Object.assign(new EventEmitter(), { stdin: { write: () => true, end: () => {} } });
-    setImmediate(() => child.emit('close', 0, null));
+    let input = '';
+    const child = Object.assign(new EventEmitter(), {
+      stdin: { write: (chunk: string) => { input += chunk; return true; }, end: () => {} },
+    });
+    // ADR-200 S3: the writer re-reads auth.json, so leave what the CLI writes.
+    setImmediate(() => { emulateCodexCliLogin(opts, input); child.emit('close', 0, null); });
     return child;
   };
   return { spawnFn, commands };

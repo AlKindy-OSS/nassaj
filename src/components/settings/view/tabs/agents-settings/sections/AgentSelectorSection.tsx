@@ -1,10 +1,12 @@
 import { Server } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '../../../../../../lib/utils';
 import SessionProviderLogo from '../../../../../llm-logo-provider/SessionProviderLogo';
 import type { ActiveBodyProvider } from '../../../../../../types/app';
 import type { AgentProvider } from '../../../../types/types';
 import { COMING_SOON_SETTINGS_PROVIDERS } from '../visibleAgents';
+import { normalizeHarnessProvider } from '../../../../../../hooks/harnessVersionMapping';
 import type { AgentSelectorSectionProps } from '../types';
 
 /**
@@ -95,10 +97,13 @@ export default function AgentSelectorSection({
   selectedAgent,
   onSelectAgent,
   agentContextById,
+  updateAvailableIds,
   localModelsSelected,
   localModelsLabel,
   onSelectLocalModels,
 }: AgentSelectorSectionProps) {
+  const { t } = useTranslation('settings');
+  const updateLabel = t('harnessVersion.updateIndicator', { defaultValue: 'Update available' });
   return (
     <div className="flex-shrink-0">
       {/* Deliberately NOT role="tablist"/"tab": that contract requires each tab
@@ -119,6 +124,7 @@ export default function AgentSelectorSection({
           // connection state to report; the dot would always show "not connected"
           // which is misleading for a provider that is not yet wired up at all.
           const isComingSoon = COMING_SOON_SETTINGS_PROVIDERS.includes(agent);
+          const hasUpdate = Boolean(updateAvailableIds?.has(normalizeHarnessProvider(agent)));
 
           return (
             <button
@@ -130,8 +136,8 @@ export default function AgentSelectorSection({
               // Left to content, it would concatenate whatever the logo SVG
               // contributes with the visible label, and the announced name
               // would drift with the artwork.
-              aria-label={AGENT_NAMES[agent]}
-              title={AGENT_NAMES[agent]}
+              aria-label={hasUpdate ? `${AGENT_NAMES[agent]} — ${updateLabel}` : AGENT_NAMES[agent]}
+              title={hasUpdate ? `${AGENT_NAMES[agent]} — ${updateLabel}` : AGENT_NAMES[agent]}
               className={cn(
                 'relative flex min-w-0 touch-manipulation flex-col items-center justify-center gap-1.5',
                 // بلا حدّ: الحدّ حول أيقونةٍ وكلمة لا يجمّع شيئاً — والصفّ نفسه
@@ -156,6 +162,13 @@ export default function AgentSelectorSection({
                     isConnected ? 'bg-foreground' : 'border border-muted-foreground',
                   )}
                   aria-hidden="true"
+                />
+              )}
+              {hasUpdate && (
+                <span
+                  className="absolute top-1.5 start-1.5 h-2 w-2 rounded-full bg-primary"
+                  aria-hidden="true"
+                  data-testid="update-indicator"
                 />
               )}
               <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center" aria-hidden="true">

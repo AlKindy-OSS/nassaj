@@ -1,11 +1,13 @@
 /** ADR-145: request-owned history bounds. No ambient API patches or provider SDK state. */
-import fs, { type BigIntStats, type Dir } from 'node:fs';
+import type { BigIntStats, Dir } from 'node:fs';
 import fsp, { type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { types as utilTypes } from 'node:util';
 import type Database from 'better-sqlite3';
+
+import { openPinned, PinnedOpenError } from '../shared/pinned-fd.js';
 
 const MiB = 1024 * 1024;
 // B-1025 (2026-09-10, owner decision): the interim envelope (4MiB / 10000
@@ -276,6 +278,25 @@ export class HistoryReadLease {
     if (await fsp.realpath(this.root) !== this.root) this.fail('HISTORY_SOURCE_UNAVAILABLE');
     await this.open(mainFile); this.nativeFile = mainFile;
   }
+  /**
+   * ADR-201: establish scope from a transcript already pinned by
+   * `openSessionTranscript`. The lease owns (and closes) the descriptor from the
+   * first instruction, whether or not admission then succeeds.
+   */
+  async adopt(transcript: { fd: FileHandle; realpath: string; stat: BigIntStats }): Promise<void> {
+    this.handles.add(transcript.fd);
+    return this.operation(() => this.adoptSource(transcript));
+  }
+  private async adoptSource(transcript: { fd: FileHandle; realpath: string; stat: BigIntStats }): Promise<void> {
+    this.check();
+    const mainFile = transcript.realpath;
+    if (!path.isAbsolute(mainFile) || mainFile.length > 4096 || this.root) this.fail('HISTORY_SOURCE_UNAVAILABLE');
+    this.root = path.dirname(mainFile);
+    if (await fsp.realpath(this.root) !== this.root) this.fail('HISTORY_SOURCE_UNAVAILABLE');
+    this.charge('files', 1); this.charge('sourceBytes', Number(transcript.stat.size));
+    this.sources.set(mainFile, { file: mainFile, fd: transcript.fd, stat: transcript.stat, consumed: false });
+    this.nativeFile = mainFile;
+  }
   private async scoped(file: string): Promise<string> {
     this.check();
     const resolved = path.resolve(file);
@@ -291,24 +312,22 @@ export class HistoryReadLease {
       const previous = this.sources.get(resolved); if (previous) return previous;
       if (this.opening.has(resolved)) this.fail('HISTORY_BUSY');
       this.opening.add(resolved);
-      const expected = await fsp.lstat(resolved, { bigint: true });
-      if (!expected.isFile()) this.fail('HISTORY_SOURCE_UNAVAILABLE');
-      this.check();
-      const fd = await fsp.open(resolved, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
-      this.handles.add(fd);
-      try {
-        this.check();
-        const stat = await fd.stat({ bigint: true }); this.check();
-        if (!stat.isFile() || stat.dev !== expected.dev || stat.ino !== expected.ino
-          || await fsp.realpath(`/proc/self/fd/${fd.fd}`) !== resolved) this.fail('HISTORY_SOURCE_UNAVAILABLE');
-        this.charge('files', 1); this.charge('sourceBytes', Number(stat.size));
-        const source = { file: resolved, fd, stat, consumed: false };
-        this.sources.set(resolved, source); return source;
-      } catch (error) { await this.closeHandle(fd); throw error; }
+      const { handle: fd, stat } = await openPinned(resolved, 'file', this.pinning());
+      this.charge('files', 1); this.charge('sourceBytes', Number(stat.size));
+      const source = { file: resolved, fd, stat, consumed: false };
+      this.sources.set(resolved, source); return source;
     } catch (error) {
       if (error instanceof HistoryBudgetError) throw error;
       return this.fail('HISTORY_SOURCE_UNAVAILABLE');
     } finally { this.opening.delete(path.resolve(file)); }
+  }
+  /** Pinned-open hooks: budget checks between steps, descriptor owned from the first instant. */
+  private pinning() {
+    return {
+      checkpoint: () => this.check(),
+      track: (fd: FileHandle) => { this.handles.add(fd); },
+      release: (fd: FileHandle) => this.closeHandle(fd),
+    };
   }
   /** Incremental enumeration never materializes an unbounded directory listing. */
   async directory(directory: string): Promise<string[]> { return this.operation(() => this.readDirectory(directory)); }
@@ -316,16 +335,8 @@ export class HistoryReadLease {
     this.check();
     try {
       const resolved = await this.scoped(directory);
-      const expected = await fsp.lstat(resolved, { bigint: true });
-      if (!expected.isDirectory()) this.fail('HISTORY_SOURCE_UNAVAILABLE');
-      this.check();
-      const fd = await fsp.open(resolved, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
-      this.handles.add(fd);
+      const { handle: fd } = await openPinned(resolved, 'directory', this.pinning());
       try {
-        this.check();
-        const stat = await fd.stat({ bigint: true }); this.check();
-        if (!stat.isDirectory() || stat.ino !== expected.ino || stat.dev !== expected.dev
-          || await fsp.realpath(`/proc/self/fd/${fd.fd}`) !== resolved) this.fail('HISTORY_SOURCE_UNAVAILABLE');
         this.check();
         const dir = await fsp.opendir(`/proc/self/fd/${fd.fd}`); this.handles.add(dir);
         try {
@@ -339,6 +350,7 @@ export class HistoryReadLease {
       } finally { await this.closeHandle(fd); }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      if (error instanceof PinnedOpenError && error.reason === 'missing') return [];
       if (error instanceof HistoryBudgetError) throw error;
       return this.fail('HISTORY_SOURCE_UNAVAILABLE');
     }

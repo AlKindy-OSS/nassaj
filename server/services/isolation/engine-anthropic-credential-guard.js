@@ -41,13 +41,13 @@ const SPAWN_ENV_FORBIDDEN = Object.freeze([
 
 /** In a settings `env` block ANTHROPIC_AUTH_TOKEN would override the engine key
  * we set, so a settings file may not carry it either. */
-const SETTINGS_ENV_FORBIDDEN = Object.freeze([...SPAWN_ENV_FORBIDDEN, 'ANTHROPIC_AUTH_TOKEN']);
+export const SETTINGS_ENV_FORBIDDEN = Object.freeze([...SPAWN_ENV_FORBIDDEN, 'ANTHROPIC_AUTH_TOKEN']);
 
 /** Top-level settings keys that make the CLI produce a credential. */
-const SETTINGS_TOP_LEVEL_FORBIDDEN = Object.freeze(['apiKeyHelper']);
+export const SETTINGS_TOP_LEVEL_FORBIDDEN = Object.freeze(['apiKeyHelper']);
 
 /** Top-level global-config (.claude.json) keys holding a stored API key. */
-const GLOBAL_CONFIG_FORBIDDEN = Object.freeze(['primaryApiKey']);
+export const GLOBAL_CONFIG_FORBIDDEN = Object.freeze(['primaryApiKey']);
 
 /** Managed (policy) settings locations the CLI always loads, per platform. */
 const MANAGED_SETTINGS_DIR = Object.freeze({
@@ -116,7 +116,7 @@ function parseObject(raw) {
  * @param {{retryOnce?: boolean}} [opts]
  * @returns {Record<string, unknown>|null}
  */
-function readJsonObject(file, label, opts = {}) {
+export function readJsonObject(file, label, opts = {}) {
   let read = readRaw(file, label);
   if (read === null) return null;
   let parsed = parseObject(read.raw);

@@ -48,7 +48,9 @@ import { assertLegacyTransitionAllowed } from '../bootstrap-startup-context.js';
 import { readOidPairServingReceipt, reconcileOidPairServingReceipt, validateOidPairTerminal } from '../../scripts/oid-control-capsule.mjs';
 import { computeOidTripleTargetDigest } from '../../scripts/lib/oid-triple-target.mjs';
 import { tryCommonGitDir } from '../../scripts/git-control-root.mjs';
-import { isSourceUpdateActionShape } from '../../scripts/lib/source-update-action-schema.mjs';
+import {
+    checkSourceUpdateAction, isSourceUpdateActionShape, SOURCE_UPDATE_ACTION_SCHEMA_UNSUPPORTED,
+} from '../../scripts/lib/source-update-action-schema.mjs';
 import { hasCurrentUpdateConsent } from '../services/update-auto-activator.js';
 import { summarizeOpenTerminals, withLocalUpdateWriterLease } from '../services/update-writer-lease.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
@@ -345,8 +347,9 @@ const UPDATE_CAPABILITY_FILE = typeof process.env.NASSAJ_UPDATE_CAPABILITY_FILE 
 
 /**
  * Read the mode-0600 activation action of one candidate. Returns null when it
- * belongs to another server build; throws a bounded code when it is unsafe or
- * not exactly the shape the updater writes (shared schema, B-1583).
+ * belongs to another server build; throws a bounded code when it is unsafe, of
+ * a newer major (`source_update_action_schema_unsupported`) or missing a
+ * well-formed required key. Unknown keys are ignored (shared schema, T-2004).
  */
 export function readCanonicalSourceUpdateAction(file, candidateRoot, expectedServerBuildId) {
     const canonicalFile = path.join(candidateRoot, 'activation-action.json');
@@ -364,8 +367,11 @@ export function readCanonicalSourceUpdateAction(file, candidateRoot, expectedSer
     }
     const action = JSON.parse(fs.readFileSync(canonicalFile, 'utf8'));
     const expectedManifest = path.join(candidateRoot, 'candidate-manifest.json');
+    const checked = checkSourceUpdateAction(action);
+    // A newer major is refused loudly before any field is trusted, even the build id.
+    if (checked.code === SOURCE_UPDATE_ACTION_SCHEMA_UNSUPPORTED) throw new Error(checked.code);
     if (action?.expectedServerBuildId !== expectedServerBuildId) return null;
-    if (!isSourceUpdateActionShape(action)
+    if (!checked.ok
         || action.transactionId !== path.basename(candidateRoot)
         || path.resolve(action.manifestPath) !== expectedManifest) {
         throw new Error('source_update_action_invalid');

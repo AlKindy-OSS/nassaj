@@ -88,6 +88,10 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/modules/providers/services/__tests__/antigravity-active-model.test.ts': AGY_MODELS,
   'server/modules/providers/tests/agy-gemini-unit.regression.test.ts': 'agy regression guard for this deletion',
   'server/modules/providers/tests/mcp.test.ts': 'legacy ~/.gemini/settings.json cleaner contract',
+  'server/modules/providers/tests/skills.private-store.test.ts':
+    'asserts the retired gemini body is refused by the private skills routes',
+  'server/modules/providers/tests/vendor-key.routes.test.ts':
+    'asserts a retired gemini harness id is refused by the vendor-key routes',
   'server/modules/reference-materials/reference-materials.routes.test.ts': 'asserts no gemini entry; agy GEMINI.md channel',
   'server/modules/reference-materials/reference-materials.service.ts': AGY_GOVERNANCE,
   'server/routes/credential-grants.test.ts': CREDENTIAL_UNIT,

@@ -1048,5 +1048,11 @@
   },
   "githubStar": {
     "star": "Star"
+  },
+  "secretFile": {
+    "title": "Secrets file",
+    "confirm": "This is a secrets file. Do you want to open it?\n{{fileName}}",
+    "declined": "Not opened: this is a secrets file and opening it was not confirmed.",
+    "badge": "Secrets file: opening it asks for confirmation"
   }
 }

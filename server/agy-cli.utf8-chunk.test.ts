@@ -115,7 +115,9 @@ before(async () => {
     namedExports: {
       sessionsDb: {
         getSessionById: (id: string) => dbRows.get(id) ?? null,
-        createSession: (id: string, provider: string, cwd: string) => {
+        recordDiscoveredSession: (
+          { sessionId: id, provider, projectPath: cwd }: { sessionId: string; provider: string; projectPath: string },
+        ) => {
           dbRows.set(id, { session_id: id, provider, cwd, jsonl_path: null });
         },
       },

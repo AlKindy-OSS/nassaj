@@ -15,6 +15,11 @@ import {
   isQwenPlanModel,
   qwenPlanProfileVerdict,
 } from '@/services/isolation/opencode-qwen-plan.js';
+import {
+  OPENCODE_SPAWN_VENDORS,
+  isOpencodeSpawnVendorsEnabled,
+  spawnVendorOfModel,
+} from '@/services/isolation/opencode-spawn-vendor.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderChangeActiveModelInput,
@@ -156,9 +161,10 @@ export const withGlmCarrierModels = (
 };
 
 /**
- * T-1906: the static qwen-plan catalog as opencode `qwen-plan/<id>` options.
- * Offered ONLY to a caller whose own saved Qwen profile is compatible
- * (coding_plan + international) while NASSAJ_OPENCODE_QWEN_PLAN is armed; for
+ * T-1906 / ADR-200 S7: the static Token Plan catalog as opencode
+ * `qwen-plan/<id>` options. Offered ONLY to a caller whose own saved Qwen
+ * profile is usable (token_plan + international) while the
+ * NASSAJ_OPENCODE_QWEN_PLAN kill switch is armed; for
  * everyone else any `qwen-plan/*` entry is removed. Applied after the catalog
  * cache (provider-models.service) so saving or deleting the key is immediate.
  */
@@ -178,6 +184,38 @@ export const withQwenPlanModels = (
     : base;
   if (options.length === definition.OPTIONS.length && !offered) return definition;
   const unique = disambiguateModelLabels(options);
+  return {
+    ...definition,
+    OPTIONS: unique,
+    DEFAULT: unique.some((option) => option.value === definition.DEFAULT) ? definition.DEFAULT : unique[0]?.value ?? '',
+  };
+};
+
+/**
+ * ADR-200 S8: the `moonshot/<id>` and `deepseek/<id>` spawn-vendor options,
+ * behind NASSAJ_OPENCODE_SPAWN_VENDORS (B-1575). Flag off → the definition is
+ * returned unchanged. Flag on → every
+ * entry naming these vendors in any case or alias (opencode's built-in
+ * `moonshotai/*`, `moonshotai-cn/*`, B-1551 M2) is replaced by the static catalog
+ * of the OFFERED vendors whose key the CALLER holds in their own slot
+ * (`ownKeys`); the rest are hidden.
+ */
+export const withSpawnVendorModels = (
+  definition: ProviderModelsDefinition,
+  ownKeys: Readonly<Partial<Record<string, boolean>>>,
+  env: NodeJS.ProcessEnv = process.env,
+): ProviderModelsDefinition => {
+  if (!isOpencodeSpawnVendorsEnabled(env)) return definition;
+  const base = definition.OPTIONS.filter((option) => !spawnVendorOfModel(option.value));
+  const offered = Object.values(OPENCODE_SPAWN_VENDORS)
+    .filter((vendor) => vendor.offered && ownKeys[vendor.id] === true)
+    .flatMap((vendor) => vendor.models.map((model) => ({
+      value: `${vendor.prefix}${model.value}`,
+      label: model.label,
+      description: `${vendor.providerId} - ${vendor.prefix}${model.value}`,
+    })));
+  if (offered.length === 0 && base.length === definition.OPTIONS.length) return definition;
+  const unique = disambiguateModelLabels([...base, ...offered]);
   return {
     ...definition,
     OPTIONS: unique,

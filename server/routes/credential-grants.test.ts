@@ -372,4 +372,76 @@ describe('routes /api/credential-grants — self-scoped wire contract', () => {
       credentialGrantsDb.revoke(owner.id, grantee.id, 'qwen');
     }
   });
+
+  it('ADR-200 S4 in-flag: grantor mode and grantee count appear only with the flag on', async () => {
+    const { harnessLinkModeService } = await import('@/modules/providers/index.js');
+    fs.mkdirSync(claudeDirOf(owner.id), { recursive: true });
+    fs.writeFileSync(path.join(claudeDirOf(owner.id), '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at', refreshToken: 'rt' } }));
+    credentialGrantsDb.grant(owner.id, grantee.id, 'claude');
+    const previous = process.env.NASSAJ_UNIFIED_VENDOR_KEYS;
+    try {
+      process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
+      assert.equal((await call('GET', '/', asOwner)).json.data.linkModes, undefined);
+      process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
+      const ownerView = (await call('GET', '/', asOwner)).json.data;
+      assert.deepEqual(ownerView.linkModes.claude, { mode: 'subscription', granteeCount: 1 });
+      const granteeView = (await call('GET', '/', asGrantee)).json.data;
+      const row = granteeView.received.find((g: { provider: string }) => g.provider === 'claude');
+      assert.equal(row.ownerLinkMode, 'subscription');
+      // H6: the switch notice counts the grantor's accepted grantees.
+      await assert.rejects(
+        harnessLinkModeService.switchMode(owner.id, 'claude', { mode: 'api_key' }),
+        (err: { code?: string; details?: { granteeCount?: number } }) =>
+          err.code === 'LINK_MODE_CONFIRM_REQUIRED' && err.details?.granteeCount === 1,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.NASSAJ_UNIFIED_VENDOR_KEYS;
+      else process.env.NASSAJ_UNIFIED_VENDOR_KEYS = previous;
+      credentialGrantsDb.revoke(owner.id, grantee.id, 'claude');
+    }
+  });
+
+  it('ADR-200 S9: each received grant carries only its grantor\'s mode as grantorLinkMode', async () => {
+    const { setLinkModeRecord } = await import('@/services/isolation/provider-secrets-store.js');
+    fs.mkdirSync(claudeDirOf(owner.id), { recursive: true });
+    fs.writeFileSync(path.join(claudeDirOf(owner.id), '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at', refreshToken: 'rt' } }));
+    credentialGrantsDb.grant(owner.id, grantee.id, 'claude');
+    credentialGrantsDb.grant(owner.id, grantee.id, 'codex');
+    credentialGrantsDb.grant(owner.id, grantee.id, 'gemini');
+    const previous = process.env.NASSAJ_UNIFIED_VENDOR_KEYS;
+    const rowOf = (data: { received: Array<Record<string, unknown>> }, provider: string) =>
+      data.received.find((g) => g.provider === provider);
+    try {
+      process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
+      const off = (await call('GET', '/', asGrantee)).json.data;
+      for (const provider of ['claude', 'codex', 'gemini']) assert.equal(rowOf(off, provider)?.grantorLinkMode, null);
+
+      process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
+      const on = (await call('GET', '/', asGrantee)).json.data;
+      assert.equal(rowOf(on, 'claude')?.grantorLinkMode, 'subscription');
+      assert.equal(rowOf(on, 'codex')?.grantorLinkMode, null, 'no codex credential and no record: mode not chosen');
+      assert.equal(rowOf(on, 'gemini')?.grantorLinkMode, null, 'not a link-mode unit');
+      // Only the mode leaves: the row keys are the pre-S9 set plus grantorLinkMode (and S4 ownerLinkMode).
+      assert.deepEqual(Object.keys(rowOf(on, 'claude') ?? {}).sort(), [
+        'createdAt', 'declined', 'grantorLinkMode', 'inUse', 'ownerLinkMode', 'ownerUserId', 'ownerUsername', 'provider',
+      ]);
+
+      // An unreadable grantor record reads as null, never a derived mode (B-1547).
+      setLinkModeRecord(owner.id, 'claude', { mode: 'not-a-mode' });
+      assert.equal(rowOf((await call('GET', '/', asGrantee)).json.data, 'claude')?.grantorLinkMode, null);
+
+      // Member isolation: a member with no grant sees no row of the owner's at all.
+      const thirdView = (await call('GET', '/', { id: third.id, role: 'user' })).json.data;
+      assert.equal(thirdView.received.some((g: { ownerUserId: number }) => g.ownerUserId === owner.id), false);
+      // The owner's own view (given) carries no grantor field.
+      const ownerView = (await call('GET', '/', asOwner)).json.data;
+      assert.equal(ownerView.given.some((g: Record<string, unknown>) => 'grantorLinkMode' in g), false);
+    } finally {
+      if (previous === undefined) delete process.env.NASSAJ_UNIFIED_VENDOR_KEYS;
+      else process.env.NASSAJ_UNIFIED_VENDOR_KEYS = previous;
+      for (const provider of ['claude', 'codex', 'gemini']) credentialGrantsDb.revoke(owner.id, grantee.id, provider);
+    }
+  });
 });

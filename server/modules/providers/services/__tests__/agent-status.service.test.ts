@@ -28,6 +28,8 @@
  * are trimmed, as marked in place there.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox before any provider root is computed.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -45,6 +47,10 @@ import {
   agentStatusService,
   isValidAgentId,
 } from '@/modules/providers/services/agent-status.service.js';
+import {
+  claudeHeaderLine,
+  claudeTranscriptPath,
+} from '@/modules/providers/services/cost/__tests__/bound-transcripts.js';
 
 const NOW_MS = Date.parse('2026-07-26T15:00:00.000Z');
 const QUIET_MS = 5_000;
@@ -86,14 +92,18 @@ type Harness = {
 };
 
 /**
- * Isolated migrated DB whose session rows point INTO a temp project tree, so the
- * service's real derivation (`<projectDir>/<sessionId>/subagents/agent-*.jsonl`)
- * resolves to transcripts we actually write. Nothing is stubbed.
+ * Isolated migrated DB whose session rows point INTO the sandbox operator Claude
+ * tree (ADR-201: the pinned reader confines transcripts to a provider root and
+ * binds them by name and `sessionId` header), so the service's real derivation
+ * (`<projectDir>/<sessionId>/subagents/agent-*.jsonl`) resolves to transcripts
+ * we actually write. Nothing is stubbed.
  */
 async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-status-'));
-  const projectDir = path.join(tempRoot, 'project-encoded');
+  const projectPath = path.join(tempRoot, 'project');
+  const projectDir = path.dirname(claudeTranscriptPath('x', null, `-agent-status-${path.basename(tempRoot)}`));
+  await mkdir(projectPath, { recursive: true });
   await mkdir(projectDir, { recursive: true });
 
   closeConnection();
@@ -109,11 +119,11 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
   }): Promise<void> => {
     const { userId, sessionId, agents } = args;
     const jsonlPath = path.join(projectDir, `${sessionId}.jsonl`);
-    await writeFile(jsonlPath, '', 'utf8');
+    await writeFile(jsonlPath, claudeHeaderLine(sessionId), 'utf8');
     sessionsDb.createSession(
       sessionId,
       'claude',
-      projectDir,
+      projectPath,
       undefined,
       undefined,
       undefined,
@@ -146,6 +156,7 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
       process.env.DATABASE_PATH = previousDatabasePath;
     }
     await rm(tempRoot, { recursive: true, force: true });
+    await rm(projectDir, { recursive: true, force: true });
   }
 }
 
@@ -156,6 +167,27 @@ const orphans = (userId: unknown) =>
   });
 
 const EMPTY = { agents: [], eligible: 0, scanned: 0, agentsScanned: 0, capped: false };
+
+test('M2 (ADR-201, ADR-172): participation alone is not enough under enforcement; project access is', async () => {
+  await withHarness(async ({ createUser, addSession }) => {
+    const alice = createUser('alice');
+    await addSession({
+      userId: alice,
+      sessionId: 's-revoked',
+      agents: [{ agentId: 'ab0bf67f9ea3d0c25', lines: [FIRST, FINAL_REPORT, CUT] }],
+    });
+    const previous = process.env.PROJECT_MEMBERSHIP_ENFORCE;
+    try {
+      process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
+      assert.equal((await orphans(alice)).agents.length, 0, 'a participant who lost project access sees nothing');
+      getConnection().prepare('UPDATE projects SET created_by = ?').run(alice);
+      assert.equal((await orphans(alice)).agents.length, 1, 'with project access the participant sees the agent');
+    } finally {
+      if (previous === undefined) delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
+      else process.env.PROJECT_MEMBERSHIP_ENFORCE = previous;
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // (أ) The ownership gate — fail-closed on identity

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { open, readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 
 import {
   participantsDb,
@@ -15,16 +15,16 @@ import {
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
 
+import { openPinned } from '../../shared/pinned-fd.js';
+
 import { emptyTotals, WorkDurationAccumulator, type SessionUsage } from './usage-extractors.js';
 
 /** ADR-169 framing: reads are 1 MiB; an individual JSONL record is at most 4 MiB. */
 export const V3_STREAM_CHUNK_BYTES = 1024 * 1024;
 export const V3_MAX_RECORD_BYTES = 4 * 1024 * 1024;
-const MAX_RECORD_BYTES = V3_MAX_RECORD_BYTES;
 const MAX_FACTS_PER_SOURCE = 100_000;
 const MAX_FACTS_PER_RUN = 500_000;
 const MAX_SOURCES = 256;
-const MAX_RUN_BYTES = 256 * 1024 * 1024;
 const MAX_PENDING_FACT_BYTES = 64 * 1024 * 1024;
 const LEASE_MS = 60_000;
 const OPERATION_MS = 45_000;
@@ -43,7 +43,6 @@ type UsageStatisticsFailureCode =
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const nonNegative = (value: unknown): number | null => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
 const digest = (domain: string, value: string | Buffer): string => createHash('sha256').update(`usage-v3:${domain}\0`).update(value).digest('hex');
-const sourceKeyFor = (canonicalPath: string): string => `codex:${digest('source', canonicalPath)}`;
 
 export type WriterAttemptProcessIdentity = {
   hostBootId: string;
@@ -289,7 +288,8 @@ export async function preflightWriterAttemptSource(
   if (await realpath(sourcePath) !== sourcePath || sha256(sourcePath) !== sourceIdentityHash) {
     throw new Error('usage-v3 canonical locator drift');
   }
-  const handle = await open(sourcePath, 'r');
+  // L1 (ADR-201): pinned no-follow open of the canonical path, single link only.
+  const { handle } = await openPinned(sourcePath, 'file', { singleLink: true });
   const content = createHash('sha256');
   const chunk = Buffer.allocUnsafe(V3_STREAM_CHUNK_BYTES);
   let tail = Buffer.alloc(0);
@@ -382,7 +382,7 @@ const RETAIN_NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 async function metadataMatchesDescriptor(context: WriterAttemptContext, descriptor: V3SourceDescriptor): Promise<boolean> {
   const sourcePath = context.sources.get(descriptor.sourceIdentityHash);
   if (!sourcePath || await realpath(sourcePath) !== sourcePath) return false;
-  const handle = await open(sourcePath, 'r');
+  const { handle } = await openPinned(sourcePath, 'file', { singleLink: true });
   try {
     const value = await handle.stat({ bigint: true });
     return value.dev === BigInt(descriptor.device) && value.ino === BigInt(descriptor.inode)
@@ -624,7 +624,6 @@ class V3WriterError extends Error {
 }
 
 type ParsedFact = Omit<UsageStatisticsV3Fact, 'eventKey' | 'evidence'> & { byteStart: number; byteEnd: number };
-type SourceScan = { contentSha256: string; sizeBytes: number; terminalVectorSha256: string; facts: ParsedFact[] };
 
 export type BuildCodexStatisticsV3Input = {
   sessionId: string; transcriptPath: string; scopeFingerprint: string; attributionFingerprint: string;
@@ -719,69 +718,10 @@ function parseFact(line: Buffer, byteStart: number, byteEnd: number, model: stri
     requestCount: 1, isSubagent: false, byteStart, byteEnd }, model: nextModel, vector };
 }
 
-async function scanSource(sourcePath: string, modelHint: string | null, isSubagent: boolean,
-  duration: WorkDurationAccumulator, durationSource: string, signal?: AbortSignal): Promise<SourceScan> {
-  const handle = await open(sourcePath, 'r');
-  const hash = createHash('sha256').update('usage-v3:content\0');
-  // Content passes are intentionally framed at 1 MiB.  `tail` carries only
-  // the bounded current record, so a 4 MiB record never grows memory without
-  // a hard cap.
-  const chunk = Buffer.allocUnsafe(V3_STREAM_CHUNK_BYTES);
-  const facts: ParsedFact[] = [];
-  let tail = Buffer.alloc(0); let offset = 0; let pendingFactBytes = 0;
-  let model = modelHint ?? ''; let vector = { input: 0, cached: 0, output: 0 };
-  try {
-    const before = await handle.stat();
-    for (;;) {
-      signal?.throwIfAborted();
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, offset);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-      const data = Buffer.concat([tail, chunk.subarray(0, bytesRead)]);
-      let start = 0;
-      for (;;) {
-        const newline = data.indexOf(10, start);
-        if (newline < 0) break;
-        const line = data.subarray(start, newline);
-        if (line.length > MAX_RECORD_BYTES) throw new V3WriterError('source_invalid', 'quarantined');
-        const byteStart = offset - data.length + start;
-        let entry: unknown;
-        try { entry = JSON.parse(line.toString('utf8')); } catch { throw new V3WriterError('source_invalid', 'quarantined'); }
-        duration.addEntry(entry, durationSource);
-        const parsed = parseFact(line, byteStart, byteStart + line.length + 1, model, vector);
-        model = parsed.model; vector = parsed.vector;
-        if (parsed.fact) {
-          parsed.fact.isSubagent = isSubagent;
-          pendingFactBytes += Buffer.byteLength(JSON.stringify(parsed.fact));
-          if (pendingFactBytes > MAX_PENDING_FACT_BYTES) throw new V3WriterError('source_invalid', 'quarantined');
-          facts.push(parsed.fact);
-        }
-        if (facts.length > MAX_FACTS_PER_SOURCE) throw new V3WriterError('source_invalid', 'quarantined');
-        start = newline + 1;
-      }
-      tail = Buffer.from(data.subarray(start));
-      if (tail.length > MAX_RECORD_BYTES) throw new V3WriterError('source_invalid', 'quarantined');
-      hash.update(chunk.subarray(0, bytesRead));
-    }
-    if (tail.length !== 0) throw new V3WriterError('source_invalid', 'incomplete');
-    const after = await handle.stat();
-    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino) throw new V3WriterError('source_changed', 'incomplete');
-    return { contentSha256: hash.digest('hex'), sizeBytes: before.size, terminalVectorSha256: digest('vector', JSON.stringify(vector)), facts };
-  } finally { await handle.close(); }
-}
-
 function metricsFingerprintFor(sessionId: string): string {
   return digest('response-turn-metrics', JSON.stringify(responseTurnMetricsDb.listSessionWindows(sessionId).map((metric) => [
     metric.assistantMessageId, metric.startedAt, metric.completedAt, metric.durationMs,
   ])));
-}
-
-function manifestFingerprint(manifest: CodexRolloutManifest, sourceKeys: Map<string, string>, content: Map<string, string>): string {
-  const allowlist = manifest.files.map((file) => [sourceKeys.get(file.rolloutPath), content.get(file.rolloutPath)]);
-  const links = manifest.linked.map((link) => [link.parentThreadId, link.spawn.callId, link.spawn.agentThreadId, sourceKeys.get(link.rolloutPath)]);
-  const canonical = JSON.stringify({ allowlist, links });
-  if (Buffer.byteLength(canonical, 'utf8') > 4 * 1024) throw new V3WriterError('manifest_incomplete', 'incomplete');
-  return digest('manifest', canonical);
 }
 
 type LifecycleWaiter = {
@@ -895,81 +835,4 @@ export async function buildCodexStatisticsV3(input: BuildCodexStatisticsV3Input)
       return runFencedWriterLifecycle(input, manifest);
     }, input.retryPolicy);
   } finally { release(); }
-  /* Legacy ledger writes below remain temporarily retained only for the reader
-   * migration; the fenced lifecycle above is the sole writer path. */
-  /*
-  const canonicalRoot = await realpath(input.transcriptPath);
-  const sourceKeys = new Map<string, string>();
-  for (const file of manifest.files) sourceKeys.set(file.rolloutPath, sourceKeyFor(await realpath(file.rolloutPath)));
-  const duration = new WorkDurationAccumulator();
-  const scans = new Map<string, SourceScan>();
-  const content = new Map<string, string>();
-  let scannedFacts = 0;
-  let scannedBytes = 0;
-  for (const file of manifest.files) {
-    const sourcePath = await realpath(file.rolloutPath);
-    const scan = await scanSource(sourcePath, file.model, sourcePath !== canonicalRoot, duration, sourceKeys.get(file.rolloutPath)!, input.signal);
-    scans.set(file.rolloutPath, scan);
-    content.set(file.rolloutPath, scan.contentSha256);
-    scannedFacts += scan.facts.length;
-    scannedBytes += scan.sizeBytes + scan.facts.reduce((sum, fact) => sum + Buffer.byteLength(JSON.stringify(fact)), 0);
-    if (scannedFacts > MAX_FACTS_PER_RUN || scannedBytes > MAX_RUN_BYTES) throw new V3WriterError('source_invalid', 'quarantined');
-  }
-  const fingerprint = manifestFingerprint(manifest, sourceKeys, content);
-  const generation = Number.parseInt(fingerprint.slice(0, 12), 16);
-  const leaseOwner = randomUUID(); const runId = randomUUID();
-  if (!usageStatisticsV3Db.claimRun({ runId, sessionId: input.sessionId, rootSessionId: rootId, provider: 'codex', status: 'building',
-    manifestFingerprint: fingerprint, scopeFingerprint: input.scopeFingerprint, attributionFingerprint: input.attributionFingerprint,
-    metricsFingerprint: input.metricsFingerprint ?? metricsFingerprintFor(input.sessionId), pricingVersion: input.pricingVersion, generation, leaseOwner,
-    leaseExpiresAtMs: Date.now() + LEASE_MS, evidence: { manifestFingerprint: fingerprint, workDurationRequired: true } })) return 'failed';
-  try {
-    let runFacts = 0; let runBytes = 0;
-    for (const link of manifest.linked) {
-      if (!link.spawn.callId || !link.spawn.agentThreadId || !link.parentThreadId) throw new V3WriterError('lineage_incomplete', 'incomplete');
-      const sourceKey = sourceKeys.get(link.rolloutPath);
-      if (!sourceKey || !usageStatisticsV3Db.appendLineage(runId, leaseOwner, generation, { rootSessionId: rootId,
-        parentThreadId: link.parentThreadId, spawnCallId: link.spawn.callId, agentThreadId: link.spawn.agentThreadId,
-        childGeneration: generation, sourceKey })) throw new V3WriterError('lineage_incomplete', 'failed');
-    }
-    for (const file of manifest.files) {
-      input.signal?.throwIfAborted();
-      const scan = scans.get(file.rolloutPath)!;
-      runFacts += scan.facts.length;
-      runBytes += scan.sizeBytes + scan.facts.reduce((sum, fact) => sum + Buffer.byteLength(JSON.stringify(fact)), 0);
-      if (runFacts > MAX_FACTS_PER_RUN || runBytes > MAX_RUN_BYTES) throw new V3WriterError('source_invalid', 'quarantined');
-      const sourceKey = sourceKeys.get(file.rolloutPath)!;
-      if (!usageStatisticsV3Db.recordSourceSnapshot(runId, leaseOwner, generation, { sourceKey, sourceGeneration: generation,
-        contentSha256: scan.contentSha256, sizeBytes: scan.sizeBytes, factCount: scan.facts.length,
-        terminalVectorSha256: scan.terminalVectorSha256, manifestFingerprint: fingerprint })) throw new V3WriterError('snapshot_rejected', 'failed');
-      for (const fact of scan.facts) if (!usageStatisticsV3Db.appendFact(runId, leaseOwner, generation, {
-        eventKey: `${sourceKey}+${generation}+${fact.byteStart}`, occurredAt: fact.occurredAt, model: fact.model,
-        inputTokens: fact.inputTokens, cachedInputTokens: fact.cachedInputTokens, outputTokens: fact.outputTokens,
-        requestCount: fact.requestCount, isSubagent: fact.isSubagent,
-        evidence: { sourceKey, generation, byteStart: fact.byteStart, byteEnd: fact.byteEnd, manifestFingerprint: fingerprint },
-      })) throw new V3WriterError('fact_rejected', 'failed');
-    }
-    const refreshed = await resolveCodexLinkedRollouts(input.transcriptPath, input.signal);
-    const refreshedKeys = new Map<string, string>();
-    const refreshedContent = new Map<string, string>();
-    for (const file of refreshed.files) {
-      refreshedKeys.set(file.rolloutPath, sourceKeyFor(await realpath(file.rolloutPath)));
-      const scan = await scanSource(await realpath(file.rolloutPath), file.model, false, new WorkDurationAccumulator(),
-        refreshedKeys.get(file.rolloutPath)!, input.signal);
-      refreshedContent.set(file.rolloutPath, scan.contentSha256);
-    }
-    if (!refreshed.complete || manifestFingerprint(refreshed, refreshedKeys, refreshedContent) !== fingerprint) {
-      throw new V3WriterError('source_changed', 'incomplete');
-    }
-    const workDurationMs = duration.result();
-    if (workDurationMs === null || !usageStatisticsV3Db.setRunWorkDuration(runId, leaseOwner, generation, workDurationMs)) {
-      throw new V3WriterError('writer_failed', 'incomplete');
-    }
-    if (!usageStatisticsV3Db.finalizeReady(runId, leaseOwner, generation)) throw new V3WriterError('finalize_validation_failed', 'failed');
-    return 'ready';
-  } catch (error) {
-    const failure = error instanceof V3WriterError ? error : new V3WriterError('writer_failed');
-    usageStatisticsV3Db.markRunTerminal(runId, leaseOwner, generation, failure.status, failure.code);
-    return failure.status === 'incomplete' ? 'incomplete' : 'failed';
-  }
-  */
 }

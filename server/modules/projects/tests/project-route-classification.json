@@ -190,6 +190,10 @@
   "class": "global",
   "reason": "per-user provider key capability"
  },
+ "GET /api/providers/:provider/link-mode": {
+  "class": "global",
+  "reason": "per-user harness link mode (ADR-200 S4)"
+ },
  "GET /api/providers/:provider/auth/status": {
   "class": "global",
   "reason": "per-user provider auth status"
@@ -514,6 +518,10 @@
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (404)"
  },
+ "POST /api/providers/company/:companyId/key/conflict": {
+  "class": "global",
+  "reason": "per-user vendor-key migration on the caller's own tree (ADR-200 S6); no project context"
+ },
  "POST /api/providers/local/servers": {
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (403)"
@@ -536,6 +544,10 @@
  "POST /api/providers/sessions/bulk": {
   "class": "project",
   "allow400": "body needs ids[] + action; valid payload: 200 with per-item SESSION_NOT_FOUND for a non-member (see 'bulk, scheduled PATCH and workflow launch')"
+ },
+ "POST /api/providers/vendor-keys/backups/:harness/restore": {
+  "class": "global",
+  "reason": "per-user vendor-key migration on the caller's own tree (ADR-200 S6); no project context"
  },
  "POST /api/references/:material": {
   "class": "global",
@@ -589,6 +601,10 @@
  "PUT /api/providers/company/:companyId/key": {
   "class": "global",
   "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PUT /api/providers/:provider/link-mode": {
+  "class": "global",
+  "reason": "no project context; per-user harness link mode switch (ADR-200 S4)"
  },
  "PUT /api/providers/costs/subscriptions/:provider": {
   "class": "global",

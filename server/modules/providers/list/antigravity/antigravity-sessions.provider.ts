@@ -1,7 +1,7 @@
-import fsSync from 'node:fs';
 import readline from 'node:readline';
+import type { Readable } from 'node:stream';
 
-import { providerRunFailuresDb, sessionsDb  } from '@/modules/database/index.js';
+import { providerRunFailuresDb } from '@/modules/database/index.js';
 import type { ProviderRunFailureRow } from '@/modules/database/index.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type {
@@ -11,6 +11,9 @@ import type {
 } from '@/shared/types.js';
 import { createNormalizedMessage, readObjectRecord } from '@/shared/utils.js';
 import { readResponseModel } from '@/modules/providers/shared/response-model.js';
+import {
+  historyTranscript, pinnedReadStream, releaseHistoryTranscript,
+} from '@/modules/providers/shared/session-transcript-reader.js';
 
 import {
   agyBrainOfTranscript,
@@ -22,7 +25,6 @@ import {
   type AgyProgressStep,
 } from './agy-progress.js';
 import { agyTranscriptMessageId } from './agy-transcript-identity.js';
-import { resolveAgyHistoryTranscriptPath } from './agy-transcript-path.js';
 
 const PROVIDER = 'antigravity' as const;
 
@@ -217,14 +219,14 @@ function mapAgyLineToNormalized(
  * row from masking the rest of the conversation.
  */
 async function readAgyTranscript(
-  filePath: string,
+  openStream: () => Readable,
   sessionId: string,
   steps: AgyProgressStep[] = [],
 ): Promise<NormalizedMessage[]> {
   const messages: NormalizedMessage[] = [];
 
   try {
-    const fileStream = fsSync.createReadStream(filePath);
+    const fileStream = openStream();
     const lineReader = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity,
@@ -338,10 +340,10 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     // user opens wondering why it is empty.
     const failure = providerRunFailuresDb.getFailure(sessionId);
 
-    const sessionRow = sessionsDb.getSessionById(sessionId);
-    // B-1564: only a contained brain transcript is read; no raw stored path.
-    const transcriptPath = await resolveAgyHistoryTranscriptPath(sessionRow?.jsonl_path);
-    if (!transcriptPath) {
+    // ADR-201 A1: only a pinned, contained brain transcript whose brain dir is
+    // this session id is read; no stored path is opened by name.
+    const pinned = await historyTranscript(sessionId, 'antigravity', options.transcript);
+    if (!pinned) {
       const only = failure ? [buildFailureMessage(sessionId, failure)] : [];
       return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null };
     }
@@ -349,13 +351,16 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     let normalized: NormalizedMessage[];
     try {
       const steps: AgyProgressStep[] = [];
-      normalized = await readAgyTranscript(transcriptPath, sessionId, steps);
-      normalized = [...normalized, ...await readLastTurnProgress(transcriptPath, sessionId, steps)];
+      const { transcript } = pinned;
+      normalized = await readAgyTranscript(() => pinnedReadStream(transcript.fd), sessionId, steps);
+      normalized = [...normalized, ...await readLastTurnProgress(transcript.realpath, sessionId, steps)];
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[AntigravityProvider] Failed to load session ${sessionId}:`, message);
       const only = failure ? [buildFailureMessage(sessionId, failure)] : [];
       return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null };
+    } finally {
+      await releaseHistoryTranscript(pinned);
     }
 
     // Appended, never interleaved: the marker describes the LAST run, so it

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import test, { after } from 'node:test';
+import test, { after, mock } from 'node:test';
 
 import { acquireCodexLaunchIdentity } from '../shared/codex-executable.js';
 import { acceptFixtureRuntimeCompat, createCodexMachineFixture, pointCurrent, writeCodexRelease } from '../shared/tests/codex-release-fixture.js';
@@ -24,14 +24,22 @@ function assertPackagedSpawn(command: string, options: { env: NodeJS.ProcessEnv 
   for (const directory of identity.pathDirs) assert.ok(options.env.PATH?.startsWith(directory));
 }
 
-test('App Server binary is the machine release measured by permission capability admission', () => {
-  const identity = acquireCodexLaunchIdentity();
-  const fingerprint = resolveInstalledCodexBuildFingerprint(identity);
-  assert.equal(fingerprint.cliFingerprint, `codex-cli@${identity.version}`);
-  assert.ok(!identity.executablePath.includes('node_modules'));
+// B-1575: the link-mode run gate is armed by default and its real leaf loads
+// through a dynamic import, which under the tsx loader spans macrotasks and
+// breaks this file's tick-exact protocol tests. It is replaced by a recorder
+// that settles like the flag-off gate; the gate itself is covered elsewhere.
+const gateCalls: Array<{ userId: unknown; provider: string }> = [];
+let gateError: Error | null = null;
+mock.module('./isolation/link-mode-run-gate.js', {
+  namedExports: {
+    assertLinkModeRunAllowed: async (userId: unknown, provider: string) => {
+      gateCalls.push({ userId, provider });
+      if (gateError) throw gateError;
+    },
+  },
 });
 
-import {
+const {
   assertCodexMessageForkRuntimeReady,
   assertCodexMessageForkRuntimeUnchanged,
   CODEX_SIDE_QUERY_MAX_ANSWER_BYTES,
@@ -40,7 +48,15 @@ import {
   isCodexRpcActive,
   spawnCodexSideQuery,
   startCodexCompaction,
-} from './codex-app-server.js';
+} = await import('./codex-app-server.js');
+
+test('App Server binary is the machine release measured by permission capability admission', () => {
+  const identity = acquireCodexLaunchIdentity();
+  const fingerprint = resolveInstalledCodexBuildFingerprint(identity);
+  assert.equal(fingerprint.cliFingerprint, `codex-cli@${identity.version}`);
+  assert.ok(!identity.executablePath.includes('node_modules'));
+});
+
 
 test('Codex /btw answer byte ceiling accepts the boundary and stops before an overflowing delta', async () => {
   const run = async (deltas: string[]) => {
@@ -606,6 +622,28 @@ test('authorization happens before spawning App Server', async () => {
     /not found/,
   );
   assert.equal(spawned, false);
+});
+
+test('B-1575: compaction passes the link-mode run gate, and a refusal stops it before spawning', async () => {
+  gateCalls.length = 0;
+  gateError = Object.assign(new Error('key missing'), { code: 'LINK_MODE_KEY_MISSING' });
+  let spawned = false;
+  try {
+    await assert.rejects(
+      startCodexCompaction('gated-thread', 7, {
+        authorizeImpl: () => ({ provider: 'codex', projectPath: process.cwd() }),
+        spawnImpl: () => {
+          spawned = true;
+          throw new Error('must not spawn');
+        },
+      }),
+      (error: Error & { code?: string }) => error.code === 'LINK_MODE_KEY_MISSING',
+    );
+  } finally {
+    gateError = null;
+  }
+  assert.equal(spawned, false);
+  assert.deepEqual(gateCalls, [{ userId: 7, provider: 'codex' }]);
 });
 
 test('the same thread is single-flight across different authorized users', async () => {

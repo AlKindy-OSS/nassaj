@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
+// eslint-disable-next-line boundaries/no-unknown -- shared test fixture helper (same seam as sandbox-home)
+import { claudeHeaderLine } from '@/shared/__tests__/provider-root-sandbox.js';
+
 import { latestClaudeTokenUsage, readClaudeTranscriptForSession } from './claude-token-usage.js';
+
+/** A transcript the reader binds to session `session` (real-derived header, ADR-201 A1.4). */
+const AUTHORIZED = `${claudeHeaderLine('session')}\n`;
 
 describe('readClaudeTranscriptForSession', () => {
   const withClaudeTree = async (run: (root: string) => Promise<void>): Promise<void> => {
@@ -27,10 +33,10 @@ describe('readClaudeTranscriptForSession', () => {
   it('accepts a regular transcript with matching provider and project', async () => {
     await withClaudeTree(async (root) => {
       const transcript = path.join(root, '.claude', 'projects', 'work', 'session.jsonl');
-      await writeFile(transcript, '{}\n');
+      await writeFile(transcript, AUTHORIZED);
       assert.equal(await readClaudeTranscriptForSession({
         session_id: 'session', provider: 'claude', project_path: '/workspace/app', jsonl_path: transcript,
-      }, '/workspace/app', null), '{}\n');
+      }, '/workspace/app'), AUTHORIZED);
     });
   });
 
@@ -38,8 +44,8 @@ describe('readClaudeTranscriptForSession', () => {
     const base = {
       session_id: 'session', project_path: '/workspace/app', jsonl_path: '/var/tmp/session.jsonl',
     };
-    assert.equal(await readClaudeTranscriptForSession({ ...base, provider: 'codex' }, '/workspace/app', null), null);
-    assert.equal(await readClaudeTranscriptForSession({ ...base, provider: 'claude' }, '/workspace/other', null), null);
+    assert.equal(await readClaudeTranscriptForSession({ ...base, provider: 'codex' }, '/workspace/app'), null);
+    assert.equal(await readClaudeTranscriptForSession({ ...base, provider: 'claude' }, '/workspace/other'), null);
   });
 
   it('never follows a transcript path swapped to a symlink outside the root', async () => {
@@ -47,23 +53,24 @@ describe('readClaudeTranscriptForSession', () => {
       const transcript = path.join(root, '.claude', 'projects', 'work', 'session.jsonl');
       const staged = path.join(root, '.claude', 'projects', 'work', 'staged-link');
       const outside = path.join(root, 'outside.jsonl');
-      await writeFile(outside, 'outside-secret\n');
+      const outsideSecret = `${claudeHeaderLine('session')}\n{"secret":"outside"}\n`;
+      await writeFile(outside, outsideSecret);
 
       const reads: Array<Promise<string | null>> = [];
       for (let attempt = 0; attempt < 32; attempt += 1) {
         await rm(transcript, { force: true });
-        await writeFile(transcript, 'authorized\n');
+        await writeFile(transcript, AUTHORIZED);
         await rm(staged, { force: true });
         await symlink(outside, staged);
         reads.push(readClaudeTranscriptForSession({
           session_id: 'session', provider: 'claude', project_path: '/workspace/app', jsonl_path: transcript,
-        }, '/workspace/app', null));
+        }, '/workspace/app'));
         await rename(staged, transcript);
       }
 
       const results = await Promise.all(reads);
-      assert.equal(results.includes('outside-secret\n'), false);
-      assert.equal(results.every((value) => value === null || value === 'authorized\n'), true);
+      assert.equal(results.includes(outsideSecret), false);
+      assert.equal(results.every((value) => value === null || value === AUTHORIZED), true);
     });
   });
 });

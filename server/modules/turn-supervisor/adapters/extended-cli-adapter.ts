@@ -1,12 +1,13 @@
 import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
-import { providerSecretsService } from '@/modules/providers/index.js';
+import { collectOpenCodeTurnSecrets, providerSecretsService } from '@/modules/providers/index.js';
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { sanitizeVendorAgentEnv } from '@/services/isolation/sanitize-vendor-agent-env.js';
-import { isQwenPlanModel } from '@/services/isolation/opencode-qwen-plan.js';
+import { isQwenPlanModel, redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
+import { spawnVendorRunOf } from '@/services/isolation/opencode-spawn-vendor.js';
 import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { resolveOpenCodeBinaryPath } from '@/shared/utils.js';
 
@@ -41,6 +42,10 @@ export const EXTENDED_CLI_CAPABILITIES: TurnAdapterCapabilities = Object.freeze(
 
 type AdapterOptions = Readonly<{
   binary?: string;
+  /** Feature-flag source for the spawn-only model rule (defaults to process.env). */
+  env?: NodeJS.ProcessEnv;
+  /** Literal secrets of a turn, for stderr redaction (defaults to the M-6 collector). */
+  turnSecrets?: (userId: string | number) => readonly string[];
   cwd?: string;
   resolveEnv?: (userId: string | number) => NodeJS.ProcessEnv;
   executableProbe?: (binary: string) => Promise<boolean>;
@@ -142,6 +147,21 @@ async function defaultOpencodeCapabilityProbe(input: { binary: string; env: Node
   finally { await cleanupEphemeralRoleHome(role); }
 }
 
+/**
+ * ADR-200 S7/S8, B-1550: models only spawnOpenCode may run — `qwen-plan/*`, and
+ * `moonshot/*` / `deepseek/*` while NASSAJ_OPENCODE_SPAWN_VENDORS is on (B-1575). They must
+ * spend the SENDER's own vendor key under the carrier guards; this cell runs
+ * opencode under a grant-honoring env, so it must never launch them.
+ */
+export function isSpawnOnlyOpenCodeModel(model: unknown, env: NodeJS.ProcessEnv = process.env): boolean {
+  return isQwenPlanModel(model) || spawnVendorRunOf(model, env) !== null;
+}
+
+/** CLI stderr for an error message: every key of the turn redacted, then bounded. */
+function redactedStderr(stderr: string, secrets: readonly string[]): string {
+  return redactLiteralSecrets(stderr, secrets).slice(0, 500);
+}
+
 function hiddenSystem(request: { hiddenContext?: readonly string[]; system?: string }): string {
   return [ROLE_SYSTEM, ...(request.hiddenContext ?? []), request.system ?? ''].filter(Boolean).join('\n\n');
 }
@@ -226,6 +246,8 @@ function resolveExtendedCliBinary(provider: ExtendedCliProvider): string {
 /** Strict, capture-only Qwen/OpenCode registrations. There is no legacy passthrough path. */
 export function createExtendedCliAdapter(provider: ExtendedCliProvider, options: AdapterOptions = {}): TurnAdapterRegistration {
   const cwd = options.cwd ?? process.cwd();
+  const flagEnv = options.env ?? process.env;
+  const turnSecrets = options.turnSecrets ?? collectOpenCodeTurnSecrets;
   const resolveEnv = options.resolveEnv ?? ((userId: string | number) => defaultResolvedEnv(userId, provider));
   const executableProbe = options.executableProbe ?? executable;
   const versionProbe = options.versionProbe ?? defaultVersionProbe;
@@ -267,11 +289,11 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
       if (request.persist !== false) throw new TurnAdapterError('invalid_persistence', 'supervised CLI roles are ephemeral');
       if (request.effects?.length) throw new TurnAdapterError('effects_unsupported', 'supervised CLI roles deny effects');
       if (request.signal?.aborted) throw new TurnAdapterError('aborted', `${provider} role aborted before launch`);
-      // T-1906: a Coding Plan turn must run through spawnOpenCode (sender key,
-      // interactive marker, carrier guards). This cell spawns opencode directly
-      // and is not an interactive human turn, so qwen-plan/* is refused here.
-      if (isQwenPlanModel(request.model)) {
-        throw new TurnAdapterError('credential_unavailable', 'Qwen Coding Plan models run only in interactive chat turns');
+      // T-1906 / ADR-200 S7-S8 (B-1550): a Token Plan, Moonshot or DeepSeek turn
+      // runs only through spawnOpenCode (the sender's own key, carrier guards).
+      // The supervisor routes these models away; this refusal is defense in depth.
+      if (isSpawnOnlyOpenCodeModel(request.model, flagEnv)) {
+        throw new TurnAdapterError('credential_unavailable', 'This model runs only through the standard chat path');
       }
       if (isSpawnBlockedForRunProvider(provider)) {
         throw new TurnAdapterError('provider_unavailable', `The ${provider} runtime is being updated right now`);
@@ -285,7 +307,7 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
         const spec = provider === 'qwen' ? qwenSpec(common) : opencodeSpec(common);
         const result = await run({ ...spec, role, signal: request.signal });
         if (result.code !== 0) {
-          throw new TurnAdapterError('remote_error', `${provider} CLI exited ${result.code}: ${result.stderr.slice(0, 500)}`);
+          throw new TurnAdapterError('remote_error', `${provider} CLI exited ${result.code}: ${redactedStderr(result.stderr, turnSecrets(request.userId))}`);
         }
         const text = parseOutput(provider, result.stdout);
         if (!text) throw new TurnAdapterError('remote_error', `${provider} CLI returned no final assistant response`);

@@ -10,14 +10,29 @@
  *     الفرعي (origin=coordinator) ليست حدوداً.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox before any provider root is computed.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+import { claudeHeaderLine, claudeProjectsRoot, nextSessionId } from './__tests__/bound-transcripts.js';
 import { buildSessionTurns } from './session-turns.js';
 import { extractClaudeSessionUsage, type ModelUsage } from './usage-extractors.js';
+
+/**
+ * ADR-201 A-P2c: the extractor reads only a transcript bound to its session —
+ * a fresh project dir in the sandbox Claude root, `<id>.jsonl`, id header first.
+ */
+async function boundTranscript(prefix: string, body: string): Promise<{ dir: string; sessionId: string; transcriptPath: string }> {
+  await mkdir(claudeProjectsRoot(), { recursive: true });
+  const dir = await mkdtemp(path.join(claudeProjectsRoot(), prefix));
+  const sessionId = nextSessionId('7e7e0000');
+  const transcriptPath = path.join(dir, `${sessionId}.jsonl`);
+  await writeFile(transcriptPath, claudeHeaderLine(sessionId) + body);
+  return { dir, sessionId, transcriptPath };
+}
 
 const OPUS = 'claude-opus-4-6';
 
@@ -81,11 +96,9 @@ const EXPECTED = { requests: 3, output: 120, input: 15, cacheRead: 1500 };
 // «آخر ردّ فقط» لو تسلّل: مخرجات 40 وطلب واحد — القيَم التي يجب أن يرفضها الحارس.
 
 test('التراكمي لا آخر ردّ: extractClaudeSessionUsage يجمع كل الأدوار', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'turns-regress-'));
+  const { dir, ...transcript } = await boundTranscript('turns-regress-', TRANSCRIPT);
   try {
-    const file = path.join(dir, 'session.jsonl');
-    await writeFile(file, TRANSCRIPT);
-    const usage = await extractClaudeSessionUsage(file, undefined, undefined, undefined, { captureRequests: true });
+    const usage = await extractClaudeSessionUsage(transcript, undefined, undefined, undefined, { captureRequests: true });
 
     const opus = usage.perModel.find((model: ModelUsage) => model.model === OPUS);
     assert.ok(opus, 'يجب أن يظهر نموذج opus');
@@ -108,11 +121,9 @@ test('التراكمي لا آخر ردّ: extractClaudeSessionUsage يجمع ك
 });
 
 test('مجموع توكنات turns = إجماليات perModel (بلا صفوف مقياس ⇒ مسار احتياطي)', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'turns-sum-'));
+  const { dir, ...transcript } = await boundTranscript('turns-sum-', TRANSCRIPT);
   try {
-    const file = path.join(dir, 'session.jsonl');
-    await writeFile(file, TRANSCRIPT);
-    const usage = await extractClaudeSessionUsage(file, undefined, undefined, undefined, { captureRequests: true });
+    const usage = await extractClaudeSessionUsage(transcript, undefined, undefined, undefined, { captureRequests: true });
     const turns = buildSessionTurns(usage.requests ?? [], [], usage.userBoundariesMs ?? []);
 
     // دوران، مفتاح كلٍّ آخر رسالة مساعد فيه.
@@ -145,11 +156,9 @@ const DEGENERATE_TRANSCRIPT = [
 ].join('\n') + '\n';
 
 test('السطر ناقص المعرّف محتسَبٌ في turns كما في perModel — الثابت غير مشروط', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'turns-degenerate-'));
+  const { dir, ...transcript } = await boundTranscript('turns-degenerate-', DEGENERATE_TRANSCRIPT);
   try {
-    const file = path.join(dir, 'session.jsonl');
-    await writeFile(file, DEGENERATE_TRANSCRIPT);
-    const usage = await extractClaudeSessionUsage(file, undefined, undefined, undefined, { captureRequests: true });
+    const usage = await extractClaudeSessionUsage(transcript, undefined, undefined, undefined, { captureRequests: true });
 
     const opus = usage.perModel.find((model: ModelUsage) => model.model === OPUS)!;
     assert.equal(opus.totals.output, 20 + 33); // كلا الطلبين محسوب في perModel

@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import { after, describe, it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+import { codexRolloutPath, codexSessionsSandbox, withCodexSessionMeta } from '@/shared/__tests__/provider-root-sandbox.js';
 
 const sandbox = codexSessionsSandbox('nassaj-codex-history-');
 process.env.DATABASE_PATH = path.join(sandbox, 'db.sqlite');
@@ -64,7 +64,7 @@ function spawnAgent(callId: string, taskName: string) {
 describe('Codex history pagination', () => {
   it('preserves image prompt whitespace for exact authenticated ingress attribution', async () => {
     const sessionId = 'image-authorship-whitespace';
-    const filePath = path.join(sandbox, `${sessionId}.jsonl`);
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const prompt = '  Who sent this message? \n\n';
     const image = 'data:image/png;base64,iVBORw0KGgo=';
     const payload = (withImage: boolean) => ({
@@ -80,7 +80,7 @@ describe('Codex history pagination', () => {
     });
     fs.writeFileSync(filePath, `${[payload(true), assistant('reply'), payload(false)]
       .map((event) => JSON.stringify(event)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     const users = history.messages.filter((message) => message.role === 'user');
     assert.deepEqual(users.map((message) => message.content), [prompt, prompt]);
@@ -115,7 +115,7 @@ describe('Codex history pagination', () => {
 
   it('retains native text-only user records without requiring the legacy user_message echo', async () => {
     const sessionId = 'native-text-only-session';
-    const filePath = path.join(sandbox, 'native-text-only.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const nativeUser = (text: string) => ({
       type: 'response_item',
       payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
@@ -134,7 +134,7 @@ describe('Codex history pagination', () => {
       nativeUser('<environment_context>quoted by the user</environment_context>'),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     assert.deepEqual(history.messages.filter((row) => row.role === 'user').map((row) => row.content),
       ['first prompt', 'same request', 'same request', 'legacy echo', 'repeated later', 'repeated later',
@@ -143,7 +143,7 @@ describe('Codex history pagination', () => {
 
   it('hides an attested resumed environment singleton while preserving literal malformed and complete mixed user content', async () => {
     const sessionId = 'resumed-environment-context-session';
-    const filePath = path.join(sandbox, `${sessionId}.jsonl`);
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const environment = '<environment_context>workspace</environment_context>';
     const image = 'data:image/png;base64,YQ==';
     const rows = [
@@ -172,7 +172,7 @@ describe('Codex history pagination', () => {
       ),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     const users = history.messages.filter((row) => row.role === 'user');
@@ -189,20 +189,20 @@ describe('Codex history pagination', () => {
 
   it('preserves literal image tags and whitespace in text without an input_image attachment', async () => {
     const sessionId = 'literal-image-tags-session';
-    const filePath = path.join(sandbox, 'literal-image-tags.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const text = '  Explain this markup:\n<image>\nexample\n</image>\n  ';
     fs.writeFileSync(filePath, `${JSON.stringify({
       type: 'response_item',
       payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
     })}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     assert.equal(history.messages[0]?.content, text);
   });
 
   it('preserves the SDK assistant item id as the durable history identity', async () => {
     const sessionId = 'durable-assistant-id-session';
-    const filePath = path.join(sandbox, 'durable-assistant-id-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     fs.writeFileSync(filePath, `${JSON.stringify({
       timestamp: '2026-08-17T10:00:00.000Z',
       type: 'response_item',
@@ -214,7 +214,7 @@ describe('Codex history pagination', () => {
         content: [{ type: 'output_text', text: 'durable' }],
       },
     })}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     assert.equal(history.messages[0]?.id, 'msg_fixture_sdk_attested_1');
@@ -223,7 +223,7 @@ describe('Codex history pagination', () => {
 
   it('hydrates embedded input_image data URLs without duplicating Codex user echoes', async () => {
     const sessionId = 'embedded-image-session';
-    const filePath = path.join(sandbox, 'embedded-image-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const image = 'data:image/png;base64,iVBORw0KGgo=';
     const timestamp = '2026-08-17T10:00:00.000Z';
     const rows = [
@@ -245,7 +245,7 @@ describe('Codex history pagination', () => {
       assistant('تم'),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     const userRows = history.messages.filter((message) => message.role === 'user');
@@ -257,7 +257,7 @@ describe('Codex history pagination', () => {
 
   it('uses the response_item text fallback and rejects active SVG image data', async () => {
     const sessionId = 'embedded-image-fallback-session';
-    const filePath = path.join(sandbox, 'embedded-image-fallback-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const safeImage = 'data:image/jpeg;base64,/9j/4AAQ';
     const activeSvg = `data:image/svg+xml;base64,${Buffer.from('<svg onload="alert(1)"/>').toString('base64')}`;
     const rows = [
@@ -278,7 +278,7 @@ describe('Codex history pagination', () => {
       },
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
 
@@ -294,7 +294,7 @@ describe('Codex history pagination', () => {
 
   it('keeps an image-only user turn even when Codex emits no visible user_message echo', async () => {
     const sessionId = 'embedded-image-only-session';
-    const filePath = path.join(sandbox, 'embedded-image-only-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const image = 'data:image/webp;base64,UklGRg==';
     const row = {
       timestamp: '2026-08-17T10:02:00.000Z',
@@ -310,7 +310,7 @@ describe('Codex history pagination', () => {
       },
     };
     fs.writeFileSync(filePath, `${JSON.stringify(row)}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
 
@@ -363,7 +363,7 @@ describe('Codex history pagination', () => {
 
   it('caps accumulated history image data and evicts oldest images while retaining newest', async () => {
     const sessionId = 'embedded-image-request-cap-session';
-    const filePath = path.join(sandbox, 'embedded-image-request-cap-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const prefix = 'data:image/png;base64,';
     const image = prefix + 'A'.repeat((7 * 1024 * 1024) - prefix.length);
     const file = fs.openSync(filePath, 'w');
@@ -392,7 +392,7 @@ describe('Codex history pagination', () => {
     } finally {
       fs.closeSync(file);
     }
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
     const userRows = history.messages.filter((message) => message.role === 'user');
@@ -411,7 +411,7 @@ describe('Codex history pagination', () => {
 
   it('does not deduplicate a same-text event when another JSONL record intervenes', async () => {
     const sessionId = 'embedded-image-non-adjacent-session';
-    const filePath = path.join(sandbox, 'embedded-image-non-adjacent-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const timestamp = '2026-08-17T10:20:00.000Z';
     const rows = [
       {
@@ -430,7 +430,7 @@ describe('Codex history pagination', () => {
       { timestamp, type: 'event_msg', payload: { type: 'user_message', message: 'same text' } },
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
 
@@ -439,7 +439,7 @@ describe('Codex history pagination', () => {
 
   it('returns latest context occupancy and keeps cumulative coordinator usage separate', async () => {
     const sessionId = 'token-usage-session';
-    const filePath = path.join(sandbox, 'token-usage-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const rows = [
       {
         timestamp: '2026-09-13T10:00:00.000Z',
@@ -462,7 +462,7 @@ describe('Codex history pagination', () => {
       assistant('latest answer'),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
 
@@ -495,7 +495,7 @@ describe('Codex history pagination', () => {
 
   it('keeps the newest growing context then invalidates it on compaction', async () => {
     const sessionId = 'token-growth-compaction-session';
-    const filePath = path.join(sandbox, `${sessionId}.jsonl`);
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const token = (timestamp: string, total: number) => ({
       timestamp, type: 'event_msg', payload: { type: 'token_count', info: {
         model_context_window: 400000,
@@ -508,7 +508,7 @@ describe('Codex history pagination', () => {
       token('2026-09-13T10:00:02.000Z', 2400),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
     const provider = new CodexSessionsProvider();
     assert.equal((await provider.fetchHistory(sessionId)).tokenUsage?.contextSnapshot?.usedTokens, 2400);
 
@@ -520,7 +520,7 @@ describe('Codex history pagination', () => {
 
   it('does not revive invalidated usage from a delayed pre-boundary token row', async () => {
     const sessionId = 'token-late-history-session';
-    const filePath = path.join(sandbox, `${sessionId}.jsonl`);
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const rows = [
       { timestamp: '2026-09-13T10:00:00.000Z', type: 'turn_context', payload: { model: 'model-a' } },
       { timestamp: '2026-09-13T10:00:01.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
@@ -533,13 +533,13 @@ describe('Codex history pagination', () => {
       } } },
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
     assert.equal((await new CodexSessionsProvider().fetchHistory(sessionId)).tokenUsage, null);
   });
 
   it('restores Codex subagent requests as Task rows on reloaded history', async () => {
     const sessionId = 'codex-subagent-history-session';
-    const filePath = path.join(sandbox, 'codex-subagent-history-rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const rows = [
       {
         timestamp: '2026-08-18T10:00:00.000Z',
@@ -578,7 +578,7 @@ describe('Codex history pagination', () => {
       assistant('تمت المراجعة'),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const changesBeforeRead = getConnection().prepare('SELECT total_changes() AS count').get() as { count: number };
     const history = await new CodexSessionsProvider().fetchHistory(sessionId);
@@ -598,7 +598,7 @@ describe('Codex history pagination', () => {
 
   it('pages by stable cursors and starts each page at its human prompt', async () => {
     const sessionId = 'pagination-session';
-    const filePath = path.join(sandbox, 'rollout.jsonl');
+    const filePath = codexRolloutPath(sandbox, sessionId);
     const rows = [
       user('first prompt'),
       ...Array.from({ length: 25 }, (_, index) => assistant(`first ${index}`)),
@@ -606,7 +606,7 @@ describe('Codex history pagination', () => {
       ...Array.from({ length: 25 }, (_, index) => assistant(`second ${index}`)),
     ];
     fs.writeFileSync(filePath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
 
     const provider = new CodexSessionsProvider();
     const latest = await provider.fetchHistory(sessionId, { limit: 20 });
@@ -631,9 +631,9 @@ describe('Codex history pagination', () => {
 
   it('rejects a correctly signed version-one cursor after bootstrap filtering changes pagination', async () => {
     const sessionId = 'stale-v1-cursor-session';
-    const filePath = path.join(sandbox, `${sessionId}.jsonl`);
+    const filePath = codexRolloutPath(sandbox, sessionId);
     fs.writeFileSync(filePath, `${JSON.stringify(user('prompt'))}\n`);
-    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, filePath);
+    sessionsDb.createSession(sessionId, 'codex', '/workspace/demo', undefined, undefined, undefined, withCodexSessionMeta(filePath, sessionId));
     const body = Buffer.from(JSON.stringify({
       v: 1,
       sessionId,

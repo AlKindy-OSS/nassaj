@@ -19,7 +19,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { parseClaudeStyleTranscript } from './transcript-parser.js';
+import { withPinnedTranscript } from '../shared/__tests__/provider-root-sandbox.js';
+
+import { parseClaudeStyleTranscript as parsePinned } from './transcript-parser.js';
+
+/** ADR-201 A1: the parser reads only a pinned descriptor; pin the fixture as the history service would. */
+const parseClaudeStyleTranscript = (file) =>
+  withPinnedTranscript(file, 'fixture-session', 'claude', (transcript) => parsePinned(transcript));
 
 function assistantEntry({ model, id, requestId }) {
   return JSON.stringify({

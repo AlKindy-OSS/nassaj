@@ -44,7 +44,7 @@ const { providerSecretsService } =
   await import('@/modules/providers/services/provider-secrets.service.js');
 const { initializeDatabase, closeConnection, userDb } =
   await import('@/modules/database/index.js');
-const { hasProviderKey } = await import('@/services/isolation/provider-secrets-store.js');
+const { getProviderKey, hasProviderKey } = await import('@/services/isolation/provider-secrets-store.js');
 
 await initializeDatabase();
 const member = userDb.createUser('member-a', 'hash', 'user');
@@ -168,5 +168,49 @@ describe('vendor secrets store', () => {
     const result = providerSecretsService.setKey(member.id, 'kimi', ORDINARY_KEY);
     assert.equal(result.configured, true);
     assert.equal(hasProviderKey(member.id, 'kimi'), true);
+  });
+});
+
+/**
+ * ADR-200 S1 (L2): the refusal is keyed to the token SHAPE, not to `oat01`. A
+ * later generation must be refused by every non-Claude writer just the same.
+ */
+describe('a later token generation (sk-ant-oat02-) is refused everywhere', () => {
+  const NEXT_GENERATION = SUBSCRIPTION_TOKEN.replace('oat01', 'oat02');
+
+  beforeEach(() => {
+    fs.rmSync(path.join(sandbox, 'xdg', 'opencode'), { recursive: true, force: true });
+  });
+
+  it('is recognised, while look-alikes are not', () => {
+    assert.equal(isClaudeSubscriptionToken(NEXT_GENERATION), true);
+    assert.equal(isClaudeSubscriptionToken('sk-ant-oat-ZZ'), false);
+    assert.equal(isClaudeSubscriptionToken('sk-ant-oatx-ZZ'), false);
+    assert.equal(isClaudeSubscriptionToken(`x${NEXT_GENERATION}`), false);
+  });
+
+  it('opencode refuses it for every target and writes nothing', async () => {
+    for (const target of ['anthropic', 'openai', 'openrouter', 'glm']) {
+      await assertRefused(() => openCodeWriter.setApiKey(null, NEXT_GENERATION, target));
+    }
+    assert.equal(fs.existsSync(openCodeAuthPath), false);
+  });
+
+  it('codex refuses it before spawning the login CLI', async () => {
+    let spawned = 0;
+    const writer = new CodexCredentialsWriter((() => {
+      spawned += 1;
+      throw new Error('the CLI must not be reached');
+    }) as never);
+    await assertRefused(() => writer.setApiKey(null, NEXT_GENERATION));
+    assert.equal(spawned, 0);
+  });
+
+  it('the hosted vendor store refuses it for every vendor slot, leaving each slot as it was', async () => {
+    for (const vendor of ['kimi', 'deepseek', 'glm', 'qwen']) {
+      const before = getProviderKey(member.id, vendor);
+      await assertRefused(() => providerSecretsService.setKey(member.id, vendor, NEXT_GENERATION));
+      assert.equal(getProviderKey(member.id, vendor), before);
+    }
   });
 });

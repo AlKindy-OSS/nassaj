@@ -1,5 +1,19 @@
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { harnessLinkModeService } from '@/modules/providers/services/harness-link-mode.runtime.js';
+import {
+  isLinkModeHarness,
+  type SwitchLinkModeInput,
+} from '@/modules/providers/services/harness-link-mode.service.js';
 import type { LLMProvider, ProviderAuthStatus } from '@/shared/types.js';
+import { AppError } from '@/shared/utils.js';
+
+/** Antigravity is subscription-only and OpenCode key-only: neither has a link mode. */
+function assertLinkModeHarness(providerName: string): 'claude' | 'codex' {
+  if (isLinkModeHarness(providerName)) return providerName;
+  throw new AppError(`Provider "${providerName}" has no link-mode choice.`, {
+    code: 'LINK_MODE_UNSUPPORTED', statusCode: 400,
+  });
+}
 
 export const providerAuthService = {
   /**
@@ -14,6 +28,20 @@ export const providerAuthService = {
   ): Promise<ProviderAuthStatus> {
     const provider = providerRegistry.resolveProvider(providerName);
     return provider.auth.getStatus(userId);
+  },
+
+  /**
+   * ADR-200 S4 / M4: the caller's chosen link mode beside the effective one
+   * (what the CLI runs on under its own precedence), with drift warnings.
+   * Flag off → `{ provider, enabled: false }`.
+   */
+  async getLinkModeStatus(providerName: string, userId?: string | number | null) {
+    return harnessLinkModeService.getStatus(userId ?? null, assertLinkModeHarness(providerName));
+  },
+
+  /** ADR-200 S4: the caller's explicit switch between subscription and API key. */
+  async switchLinkMode(providerName: string, userId: string | number | null, input: SwitchLinkModeInput) {
+    return harnessLinkModeService.switchMode(userId, assertLinkModeHarness(providerName), input);
   },
 
   /**

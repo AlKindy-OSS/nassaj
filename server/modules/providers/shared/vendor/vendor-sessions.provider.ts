@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
@@ -12,6 +10,8 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { createNormalizedMessage, readObjectRecord } from '@/shared/utils.js';
 
 import { createVendorResponseModelReader, readResponseModel } from '../response-model.js';
+import { openPinned } from '../pinned-fd.js';
+import { withRecordedTranscript, type SessionTranscriptHandle } from '../session-transcript-reader.js';
 
 import { resolveVendorTranscriptForRead } from './vendor-transcript.js';
 import { readVendorReceipt, setVendorHistoryReceipts } from './vendor-receipt-identity.js';
@@ -56,6 +56,16 @@ export type VendorSessionsOptions = {
 
 const readString = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
+
+/** Text of the already-contained realpath `filePath`, read through a pinned descriptor. */
+async function readPinnedText(filePath: string): Promise<string> {
+  const { handle } = await openPinned(filePath, 'file', { singleLink: true });
+  try {
+    return await handle.readFile({ encoding: 'utf8' });
+  } finally {
+    await handle.close();
+  }
+}
 
 export class VendorSessionsProvider implements IProviderSessions {
   protected readonly provider: LLMProvider;
@@ -316,6 +326,29 @@ export class VendorSessionsProvider implements IProviderSessions {
   }
 
   /**
+   * Transcript text of one session (ADR-201 A1): the pinned transcript the
+   * history service supplied, nothing when it refused one (`null`), or — for
+   * direct callers — a pinned open of the row's recorded path. Only a row with
+   * NO recorded path falls back to the contained legacy-hash lookup of
+   * `resolveVendorTranscriptForRead`, and that file is read pinned as well.
+   */
+  private async readTranscript(
+    sessionId: string,
+    projectPath: string,
+    storedJsonlPath: string | null,
+    supplied: SessionTranscriptHandle | null | undefined,
+  ): Promise<string | null> {
+    if (supplied === null) return null;
+    if (supplied) return supplied.fd.readFile({ encoding: 'utf8' });
+    if (storedJsonlPath) {
+      return withRecordedTranscript(sessionId, this.provider, 'history',
+        (transcript) => transcript.fd.readFile({ encoding: 'utf8' }));
+    }
+    const filePath = await resolveVendorTranscriptForRead(this.provider, sessionId, projectPath, null);
+    return filePath ? readPinnedText(filePath) : null;
+  }
+
+  /**
    * Reads the nassaj-owned JSONL transcript for one session and re-normalizes it
    * into a paginated history result. Missing transcripts (a brand-new session, or
    * one that produced no recorded events) return an empty result, never throw.
@@ -339,16 +372,10 @@ export class VendorSessionsProvider implements IProviderSessions {
 
     let lines: string[];
     try {
-      const filePath = await resolveVendorTranscriptForRead(
-        this.provider,
-        sessionId,
-        projectPath,
-        storedJsonlPath,
-      );
-      if (!filePath) {
+      const content = await this.readTranscript(sessionId, projectPath, storedJsonlPath, options.transcript);
+      if (content === null) {
         return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
       }
-      const content = await readFile(filePath, 'utf8');
       lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     } catch {
       return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };

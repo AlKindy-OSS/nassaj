@@ -144,6 +144,42 @@ const NATIVE_ENGINE: Partial<Record<LLMProvider, { key: string; vars: Record<str
   kimi: { key: 'native', vars: { engine: 'Moonshot' } },
 };
 
+/**
+ * Vendor spellings OpenCode accepts as aliases of a canonical id (S8): the guarded
+ * spawn path maps them all to one vendor, so the picker lists the canonical one only.
+ */
+const NON_CANONICAL_UPSTREAMS: ReadonlySet<string> = new Set(['moonshotai', 'moonshotai-cn', 'moonshot-cn']);
+
+/** The key-status slot that links each unified OpenCode upstream (ADR-200 S8). */
+const UPSTREAM_KEY_STATUS: Readonly<Record<string, string>> = {
+  moonshot: 'kimi',
+  deepseek: 'deepseek',
+  glm: 'glm',
+};
+
+export type RowsOptions = {
+  /**
+   * ADR-200 S9, unified key mode: list only cells that are supported AND linked
+   * for the caller. A vendor without a key is absent from the picker, not
+   * greyed; the engines page is the one place that says it needs a key.
+   */
+  hideUnlinked?: boolean;
+};
+
+/** Whether an OpenCode option belongs in the list: canonical id, and linked when asked. */
+function opencodeOptionListed(
+  option: ProviderModelOption,
+  keyStatuses: Partial<Record<string, boolean>>,
+  hideUnlinked: boolean,
+): boolean {
+  const { upstream } = splitOpenCodeId(option.value);
+  const lower = upstream.toLowerCase();
+  const aliasOfCanonical = NON_CANONICAL_UPSTREAMS.has(lower) || (lower in UPSTREAM_KEY_STATUS && upstream !== lower);
+  if (aliasOfCanonical) return false;
+  const keyed = UPSTREAM_KEY_STATUS[upstream];
+  return !(hideUnlinked && keyed && !keyStatuses[keyed]);
+}
+
 const splitOpenCodeId = (id: string): { upstream: string; slug: string } => {
   const at = id.indexOf('/');
   return at < 0 ? { upstream: '', slug: id } : { upstream: id.slice(0, at), slug: id.slice(at + 1) };
@@ -197,6 +233,7 @@ export function rowsForBody(
   catalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>,
   keyStatuses: Partial<Record<string, boolean>>,
   authModes?: Partial<Record<string, 'api_key' | 'subscription_oauth' | 'both' | null>>,
+  options: RowsOptions = {},
 ): PickerRow[] {
   /**
    * `qwen-plan/*` options are dropped client-side when no Alibaba Coding Plan
@@ -205,9 +242,12 @@ export function rowsForBody(
    * gate — the same pattern as the `glm` needsKey row below for the Claude body.
    */
   const ownUnfiltered: ProviderModelOption[] = catalog[body]?.OPTIONS ?? [];
-  const own = body === 'opencode' && !keyStatuses.qwen
+  const qwenFiltered = body === 'opencode' && !keyStatuses.qwen
     ? ownUnfiltered.filter((option) => splitOpenCodeId(option.value).upstream !== 'qwen-plan')
     : ownUnfiltered;
+  const own = body === 'opencode'
+    ? qwenFiltered.filter((option) => opencodeOptionListed(option, keyStatuses, options.hideUnlinked === true))
+    : qwenFiltered;
   const bodyAuthMode = authModes?.[body];
   const rows: PickerRow[] = own.map((option) => ({
     key: `${body}:${option.value}`,
@@ -229,6 +269,7 @@ export function rowsForBody(
     const host = engineProviderHost(engine) ?? name;
 
     if (!keyStatuses[engine]) {
+      if (options.hideUnlinked) continue;
       rows.push({
         key: `claude:engine:${engine}:locked`,
         model: '',

@@ -767,14 +767,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sessionId, projectName, starred }),
     }),
-  readFile: (projectId, filePath) =>
-    authenticatedFetch(`/api/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`),
-  readFileBlob: (projectId, filePath) =>
-    authenticatedFetch(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`),
-  saveFile: (projectId, filePath, content) =>
+  // B-1593: `confirmSecret` is the explicit per-request confirmation a project
+  // secrets file (.env*, SQLite) needs; without it the server answers 428.
+  readFile: (projectId, filePath, { confirmSecret = false } = {}) =>
+    authenticatedFetch(`/api/projects/${projectId}/file?filePath=${encodeURIComponent(filePath)}`
+      + (confirmSecret ? '&confirmSecret=1' : '')),
+  readFileBlob: (projectId, filePath, { confirmSecret = false } = {}) =>
+    authenticatedFetch(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`
+      + (confirmSecret ? '&confirmSecret=1' : '')),
+  saveFile: (projectId, filePath, content, { confirmSecret = false } = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/file`, {
       method: 'PUT',
-      body: JSON.stringify({ filePath, content }),
+      body: JSON.stringify(confirmSecret ? { filePath, content, confirmSecret: true } : { filePath, content }),
     }),
   getFiles: (projectId, options = {}) =>
     authenticatedFetch(`/api/projects/${projectId}/files`, options),

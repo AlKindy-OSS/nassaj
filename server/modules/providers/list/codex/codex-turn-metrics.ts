@@ -1,6 +1,6 @@
-import { open } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { withRecordedTranscript } from '../../shared/session-transcript-reader.js';
 
 type RecordValue = Record<string, unknown>;
 
@@ -10,6 +10,7 @@ export type DurableCodexCompletedTurn = {
 };
 
 export type CodexTurnBaseline = {
+  /** Realpath of the pinned rollout the baseline was taken on (ADR-201 A1). */
   filePath: string;
   device: number;
   inode: number;
@@ -80,51 +81,53 @@ export function newestCompletedTurnFromJsonl(
 const MAX_APPEND_BYTES = 4 * 1024 * 1024;
 const RETRIES = 6;
 
-export async function readCodexJsonlAppend(baseline: CodexTurnBaseline): Promise<string | null> {
-  const filePath = baseline.filePath;
-  const handle = await open(filePath, 'r');
-  try {
-    const file = await handle.stat();
-    if (
-      file.dev !== baseline.device
-      || file.ino !== baseline.inode
-      || file.size < baseline.byteOffset
-      || file.size - baseline.byteOffset > MAX_APPEND_BYTES
-    ) return null;
-    const bytes = file.size - baseline.byteOffset;
-    if (bytes === 0) return '';
-    const buffer = Buffer.allocUnsafe(bytes);
-    let read = 0;
-    while (read < bytes) {
-      const chunk = await handle.read(buffer, read, bytes - read, baseline.byteOffset + read);
-      if (chunk.bytesRead === 0) return null;
-      read += chunk.bytesRead;
-    }
-    return buffer.toString('utf8', 0, read);
-  } finally {
-    await handle.close();
+/**
+ * Bytes appended to the pinned rollout `handle` since `baseline`, or null when
+ * the descriptor is not the baseline's file (dev/ino), it shrank, or the append
+ * exceeds the cap. Positional reads only.
+ */
+export async function readCodexJsonlAppend(baseline: CodexTurnBaseline, handle: FileHandle): Promise<string | null> {
+  const file = await handle.stat();
+  if (
+    file.dev !== baseline.device
+    || file.ino !== baseline.inode
+    || file.size < baseline.byteOffset
+    || file.size - baseline.byteOffset > MAX_APPEND_BYTES
+  ) return null;
+  const bytes = file.size - baseline.byteOffset;
+  if (bytes === 0) return '';
+  const buffer = Buffer.allocUnsafe(bytes);
+  let read = 0;
+  while (read < bytes) {
+    const chunk = await handle.read(buffer, read, bytes - read, baseline.byteOffset + read);
+    if (chunk.bytesRead === 0) return null;
+    read += chunk.bytesRead;
   }
+  return buffer.toString('utf8', 0, read);
 }
 
 /**
  * Captures the durable state before a run starts.  This baseline IS the join:
  * every byte read afterwards was appended by this run, on the same inode, so a
  * completion that predates the run can never be seen at all.
+ *
+ * ADR-201 A1, authorization-free core: this runs inside the run the requester
+ * already launched, so there is no second requester; the rollout is still tree-
+ * confined, id-bound by name and `session_meta`, and read from a pinned fd.
  */
 export async function captureCodexTurnBaseline(sessionId: string): Promise<CodexTurnBaseline | null> {
-  const filePath = sessionsDb.getSessionById(sessionId)?.jsonl_path ?? null;
-  if (!filePath) return null;
-  try {
-    const handle = await open(filePath, 'r');
-    try {
-      const file = await handle.stat();
-      return { filePath, device: file.dev, inode: file.ino, byteOffset: file.size };
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return null;
-  }
+  return withRecordedTranscript(sessionId, 'codex', 'turn-metrics', async (transcript) => {
+    const file = await transcript.fd.stat();
+    return { filePath: transcript.realpath, device: file.dev, inode: file.ino, byteOffset: file.size };
+  }).catch(() => null);
+}
+
+/** One attempt: the appended window of the session's pinned rollout, or null when it is not the baseline's file. */
+async function readBaselineAppend(sessionId: string, baseline: CodexTurnBaseline): Promise<string | null> {
+  return withRecordedTranscript(sessionId, 'codex', 'turn-metrics', async (transcript) =>
+    // A changed path means the indexed session was replaced/re-synchronized
+    // during this run. Do not join timing across two physical transcripts.
+    (transcript.realpath === baseline.filePath ? readCodexJsonlAppend(baseline, transcript.fd) : null));
 }
 
 /**
@@ -136,15 +139,9 @@ export async function resolveCompletedCodexTurn(
   baseline: CodexTurnBaseline | null,
 ): Promise<DurableCodexCompletedTurn | null> {
   if (!baseline) return null;
-  const filePath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
-  if (!filePath) return null;
-  // A changed path means the indexed session was replaced/re-synchronized
-  // during this run. Do not join timing across two physical transcripts.
-  if (baseline.filePath !== filePath) return null;
-
   for (let attempt = 0; attempt < RETRIES; attempt += 1) {
     try {
-      const text = await readCodexJsonlAppend(baseline);
+      const text = await readBaselineAppend(sessionId, baseline);
       if (text === null) return null;
       const found = newestCompletedTurnFromJsonl(text);
       if (found) return found;

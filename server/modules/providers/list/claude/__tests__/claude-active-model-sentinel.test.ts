@@ -17,9 +17,6 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
 
 import { __readClaudeSessionModelFromJsonlForTests as readModel } from '@/modules/providers/list/claude/claude-models.provider.js';
@@ -63,18 +60,12 @@ const userRow = JSON.stringify({
   message: { role: 'user', content: 'مرحباً' },
 });
 
+/** Hands the transcript TEXT to the reader (the provider reads it from the pinned fd, ADR-201 A1). */
 const withTranscript = async (
   lines: string[],
-  run: (jsonlPath: string) => Promise<void>,
+  run: (content: string) => Promise<void>,
 ): Promise<void> => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'claude-active-model-'));
-  const jsonlPath = path.join(dir, `${SESSION_ID}.jsonl`);
-  await writeFile(jsonlPath, `${lines.join('\n')}\n`, 'utf8');
-  try {
-    await run(jsonlPath);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  await run(`${lines.join('\n')}\n`);
 };
 
 test('B-313: صفّ <synthetic> الأخير لا يُبلَّغ نموذجاً — يُرجَع آخر نموذج حقيقي قبله', async () => {
