@@ -11,6 +11,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../utils/api';
 import type { LLMProvider } from '../types/app';
+import type { SubagentInferredCause, SubagentState } from '../../shared/subagent-states';
 
 // ─── NormalizedMessage (mirrors server/adapters/types.js) ────────────────────
 
@@ -22,6 +23,8 @@ export type MessageKind =
   | 'stream_delta'
   | 'stream_end'
   | 'error'
+  /** B-1624: neutral transcript line; never a failure, never spinner state. */
+  | 'notice'
   | 'complete'
   | 'status'
   | 'permission_request'
@@ -119,7 +122,10 @@ export interface NormalizedMessage {
     id: string;
     parentId: string | null;
     label: string;
-    state: 'started' | 'running' | 'completed' | 'failed';
+    /** Shared vocabulary with the server (shared/subagent-states.ts). */
+    state: SubagentState;
+    /** Present only when Nassaj inferred `stopped`/`unknown`. */
+    inferredCause?: SubagentInferredCause;
     agentName?: string;
     model?: string;
     modelInherited?: boolean;

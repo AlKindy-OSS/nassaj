@@ -303,6 +303,10 @@ export default defineConfig(({ command, mode }) => {
       include: ['src/**/*.test.{ts,tsx}'],
       // Keep node:test files out of vitest (they run under tsx --test).
       exclude: nodeTestFiles(),
+      // T-2011: the service exports NODE_ENV=production, and vitest only defaults
+      // NODE_ENV when it is unset, so React loads its production build where act()
+      // throws. Pin it for every worker regardless of the inherited environment.
+      env: { NODE_ENV: 'test' },
     }
   }
 })

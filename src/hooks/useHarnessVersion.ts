@@ -8,7 +8,6 @@ import type {
   HarnessSuppliedAck,
   HarnessUpdateAccepted,
   HarnessUpdateConflict,
-  HarnessUpdateJob,
   HarnessVersionStatus as WireStatus,
 } from '../../shared/harness-update.contract';
 import { getIdentityBarrierSnapshot, subscribeIdentityBarrier } from '../components/auth/accountIdentityBarrier';
@@ -16,11 +15,11 @@ import type { AgentProvider } from '../components/settings/types/types';
 import { authenticatedFetch } from '../utils/api';
 
 import {
-  isTerminalJob, mapUpdateJob, mapVersionStatus, normalizeHarnessProvider, parseUncheckedDetails,
+  mapUpdateJob, mapVersionStatus, normalizeHarnessProvider, parseUncheckedDetails,
   type HarnessUncheckedDetails, type HarnessVersionState,
 } from './harnessVersionMapping';
+import { HARNESS_INSTALLED_EVENT, pollHarnessJob } from './harnessJobPoller';
 
-const JOB_POLL_MS = 1000;
 const identityKey = () => { const snapshot = getIdentityBarrierSnapshot(); return `${snapshot.version}:${snapshot.phase}`; };
 
 /** The action a pending 409 CONFIRMATION_REQUIRED belongs to, so `confirmPending` knows which route to resend. */
@@ -73,20 +72,12 @@ export function useHarnessVersion(agent: AgentProvider, isOwner: boolean) {
   const followJob = useCallback((jobId: string) => {
     if (!isOwner) return;
     clearTimer(); const request = ++epoch.current; const identity = identityKey();
-    const poll = async () => {
-      try {
-        const response = await authenticatedFetch(`/api/providers/update-jobs/${encodeURIComponent(jobId)}`);
-        if (!valid(request, identity)) return;
-        if (!response.ok) { setState({ status: 'unknown' }); return; }
-        const job = await response.json() as HarnessUpdateJob;
-        if (!valid(request, identity)) return;
-        setState(mapUpdateJob(job));
-        if (!isTerminalJob(job.status)) timer.current = setTimeout(() => void poll(), JOB_POLL_MS);
-      } catch (error) {
-        if (valid(request, identity) && (error as Error).name !== 'AbortError') timer.current = setTimeout(() => void poll(), JOB_POLL_MS);
-      }
-    };
-    void poll();
+    pollHarnessJob(jobId, {
+      isValid: () => valid(request, identity),
+      onJob: (job) => setState(mapUpdateJob(job)),
+      onHttpError: () => setState({ status: 'unknown' }),
+      setTimer: (next) => { timer.current = next; },
+    });
   }, [clearTimer, isOwner, valid]);
 
   /** POST one harness action; classifies the response into the shapes every caller below needs. Never throws — network/abort errors surface as `error`. */
@@ -210,6 +201,14 @@ export function useHarnessVersion(agent: AgentProvider, isOwner: boolean) {
     setSnapshots(null);
     void fetchStatus();
   }, [clearTimer, fetchStatus, isOwner]);
+
+  useEffect(() => {
+    const onInstalled = (event: Event) => {
+      if ((event as CustomEvent<{ provider?: string }>).detail?.provider === provider) void fetchStatus();
+    };
+    window.addEventListener(HARNESS_INSTALLED_EVENT, onInstalled);
+    return () => window.removeEventListener(HARNESS_INSTALLED_EVENT, onInstalled);
+  }, [fetchStatus, provider]);
 
   useEffect(() => {
     void fetchStatus();

@@ -265,6 +265,16 @@ test('frames: unmasked kinds pass untouched, permission input stays raw for the 
   assert.equal(prepareDisplayFrames({ kind: 'text', content: SK }, null), null, 'no session, no masking');
 });
 
+test('B-1624: a notice frame is masked for viewers like the error frame it replaced', () => {
+  for (const kind of ['error', 'notice']) {
+    const frame = { kind, sessionId: 's', provider: 'codex', content: `stopped: echo ${SK}` };
+    const frames = prepareDisplayFrames(frame, 's');
+    assert.ok(frames, kind);
+    assert.ok(!JSON.stringify(frames.viewer).includes(SK), kind);
+    assert.ok(JSON.stringify(frames.viewer).includes('[masked:'), kind);
+  }
+});
+
 test('kill switches: env 0 wins, the admin setting turns it off, default is on', () => {
   assert.equal(isDisplayMaskingEnabled(), true);
   quietSources({ env: () => '0' });

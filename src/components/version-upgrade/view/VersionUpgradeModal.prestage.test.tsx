@@ -8,6 +8,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import arCommon from '../../../i18n/locales/ar/common.json';
 import { UPDATE_ATTEMPT_STORAGE_KEY } from '../updateJobClient';
 import type { PrestageStatus } from '../prestageStatus';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 function lookup(obj: unknown, key: string): string | undefined {
   const value = key.split('.').reduce<unknown>(
@@ -71,6 +73,28 @@ describe('prestage line before the click', () => {
     await waitFor(() => expect((updateButton() as HTMLButtonElement).disabled).toBe(false));
   });
 
+  it.each([
+    ['ready', P({ state: 'ready', version: LATEST })],
+    ['not prepared', P({ state: 'waiting', notPrestagedReason: 'other' })],
+  ])('%s: the update button keeps the same solid primary fill', async (_label, prestage) => {
+    renderModal(prestage);
+    await waitFor(() => expect((updateButton() as HTMLButtonElement).disabled).toBe(false));
+    const button = updateButton();
+    expect(button.classList.contains('bg-blue-600')).toBe(true);
+    expect(button.classList.contains('text-white')).toBe(true);
+    // Opted out of the touch-screen hover reset that strips the fill after a tap.
+    expect(button.hasAttribute('data-keep-fill')).toBe(true);
+  });
+
+  it('the touch hover reset spares solid actions marked data-keep-fill', () => {
+    const indexCss = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8');
+    const touch = indexCss.slice(indexCss.indexOf('Only disable hover states for interactive elements'));
+    const selectors = touch.slice(touch.indexOf('*/') + 2, touch.indexOf('{')).trim();
+    expect(selectors).toContain('button:not([data-keep-fill]):hover');
+    expect(selectors).toContain('[role="button"]:not([data-keep-fill]):hover');
+    expect(selectors).not.toMatch(/(^|,)\s*button:hover/);
+  });
+
   it('building', () => {
     renderModal(P({ state: 'building', version: LATEST }));
     expect(screen.getByText('يُحضَّر في الخلفية…')).not.toBeNull();
@@ -87,7 +111,22 @@ describe('prestage line before the click', () => {
     ['low_disk', 'لم يُحضَّر: المساحة غير كافية'],
     ['policy_off', 'التحضير المسبق متوقف'],
     ['kill_switch', 'التحضير المسبق متوقف'],
-    ['backoff', 'لم يُحضَّر بعد'],
+    ['resource_busy', 'لم يُحضَّر: الخادم مشغول حالياً'],
+    ['settling', 'سيُحضَّر بعد قليل'],
+    ['job_active', 'لم يُحضَّر: عملية تحديث أخرى جارية'],
+    ['slot_busy', 'لم يُحضَّر: عملية تحديث أخرى جارية'],
+    ['maintenance', 'لم يُحضَّر: الخادم في وضع صيانة'],
+    ['backoff', 'تعذّر التحضير؛ ستُعاد المحاولة لاحقاً'],
+    ['interrupted', 'تعذّر التحضير؛ ستُعاد المحاولة لاحقاً'],
+    ['failed', 'تعذّر التحضير — التحديث يعمل لكنه أبطأ'],
+    ['blocked', 'لم يُحضَّر: فحص الجاهزية يمنعه حالياً'],
+    ['rejected', 'لم يُحضَّر: فحص الجاهزية يمنعه حالياً'],
+    ['discovery_failed', 'لم يُحضَّر: تعذّر الوصول لمصدر الإصدارات'],
+    ['unsupported_mode', 'التحضير المسبق غير متاح على هذا الخادم'],
+    ['not_owner_node', 'التحضير المسبق غير متاح على هذا الخادم'],
+    ['release_unverified', 'التحضير المسبق غير متاح على هذا الخادم'],
+    ['other', 'لم يُحضَّر بعد'],
+    ['some_future_code', 'لم يُحضَّر بعد'],
   ])('reason %s reads as plain words, never the code', async (reason, text) => {
     renderModal(P({ state: 'waiting', notPrestagedReason: reason }));
     expect(screen.getByText(text)).not.toBeNull();

@@ -473,7 +473,7 @@
     {
       "id": "server/claude-sdk.js#claude_sdk.query#1",
       "file": "server/claude-sdk.js",
-      "line": 1652,
+      "line": 1678,
       "primitive": "claude_sdk.query",
       "expression": "query",
       "classification": "provider_effect_enclosed",
@@ -487,7 +487,7 @@
     {
       "id": "server/claude-sdk.js#claude_sdk.query#2",
       "file": "server/claude-sdk.js",
-      "line": 2312,
+      "line": 2338,
       "primitive": "claude_sdk.query",
       "expression": "query",
       "classification": "provider_effect_enclosed",
@@ -501,7 +501,7 @@
     {
       "id": "server/claude-sdk.js#claude_sdk.query#3",
       "file": "server/claude-sdk.js",
-      "line": 4286,
+      "line": 4315,
       "primitive": "claude_sdk.query",
       "expression": "query",
       "classification": "provider_effect_enclosed",
@@ -515,7 +515,7 @@
     {
       "id": "server/claude-sdk.js#claude_sdk.query#4",
       "file": "server/claude-sdk.js",
-      "line": 4301,
+      "line": 4330,
       "primitive": "claude_sdk.query",
       "expression": "query",
       "classification": "provider_effect_enclosed",
@@ -1019,7 +1019,7 @@
     {
       "id": "server/modules/providers/harness-update/run-command.ts#child_process.spawn#1",
       "file": "server/modules/providers/harness-update/run-command.ts",
-      "line": 102,
+      "line": 162,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",

@@ -63,13 +63,47 @@ export interface AssetInstallOptions {
   spec?: ReleaseAssetSpec;
   fetchImpl?: typeof fetch;
   stagingParent?: string;
+  /** Overall download deadline (default DOWNLOAD_DEADLINE_MS); abort → ASSET_DOWNLOAD_TIMEOUT. */
+  signal?: AbortSignal;
+}
+
+/** Per-hop response deadline of `fetchAllowed` (T-2062 qa I-1). */
+export const FETCH_HOP_TIMEOUT_MS = 60_000;
+/** Default overall deadline of one asset download when the caller gives none. */
+export const DOWNLOAD_DEADLINE_MS = 10 * 60 * 1000;
+
+/**
+ * Resolves/rejects with `p`, or rejects ASSET_DOWNLOAD_TIMEOUT as soon as
+ * `signal` aborts — even when `p` itself never settles (an injected fetch, a
+ * stalled body read). A late rejection of `p` is swallowed.
+ */
+export function withAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) {
+    p.catch(() => {});
+    return Promise.reject(snapshotError('ASSET_DOWNLOAD_TIMEOUT'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(snapshotError('ASSET_DOWNLOAD_TIMEOUT'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then((value) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(value);
+    }, (error: unknown) => {
+      signal.removeEventListener('abort', onAbort);
+      reject(signal.aborted ? snapshotError('ASSET_DOWNLOAD_TIMEOUT') : error);
+    });
+  });
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const BLOCK = 512;
 const INSTALLED_MODE = 0o755;
 
-function assertAllowedUrl(raw: string, spec: ReleaseAssetSpec): void {
+/** The redirect-policy fields `fetchAllowed` reads (shared with T-2062 script installs). */
+export type AllowedFetchSpec = Pick<ReleaseAssetSpec, 'url' | 'allowedHosts' | 'maxRedirects'>;
+
+function assertAllowedUrl(raw: string, spec: AllowedFetchSpec): void {
   let url: URL;
   try {
     url = new URL(raw);
@@ -82,11 +116,17 @@ function assertAllowedUrl(raw: string, spec: ReleaseAssetSpec): void {
 }
 
 /** Follows at most `maxRedirects` redirects, every hop on the allowlist; returns the 200. */
-export async function fetchAllowed(spec: ReleaseAssetSpec, fetchImpl: typeof fetch): Promise<Response> {
+export async function fetchAllowed(
+  spec: AllowedFetchSpec,
+  fetchImpl: typeof fetch,
+  signal?: AbortSignal,
+  hopTimeoutMs: number = FETCH_HOP_TIMEOUT_MS,
+): Promise<Response> {
   let url = spec.url;
   for (let hop = 0; ; hop += 1) {
     assertAllowedUrl(url, spec);
-    const res = await fetchImpl(url, { redirect: 'manual' });
+    const hopSignal = AbortSignal.any([AbortSignal.timeout(hopTimeoutMs), ...(signal ? [signal] : [])]);
+    const res = await withAbort(fetchImpl(url, { redirect: 'manual', signal: hopSignal }), hopSignal);
     if (!REDIRECT_STATUSES.has(res.status)) {
       if (res.status !== 200) throw snapshotError('ASSET_HTTP_STATUS');
       return res;
@@ -100,7 +140,12 @@ export async function fetchAllowed(spec: ReleaseAssetSpec, fetchImpl: typeof fet
 }
 
 /** Streams the body to `file` (0600) enforcing Content-Length, size, cap and tarball sha. */
-export async function downloadVerified(res: Response, file: string, spec: ReleaseAssetSpec): Promise<void> {
+export async function downloadVerified(
+  res: Response,
+  file: string,
+  spec: ReleaseAssetSpec,
+  signal?: AbortSignal,
+): Promise<void> {
   const declared = Number(res.headers.get('content-length'));
   if (!Number.isSafeInteger(declared) || declared > spec.capBytes) throw snapshotError('ASSET_TOO_LARGE');
   if (declared !== spec.size) throw snapshotError('ASSET_SIZE_MISMATCH');
@@ -110,7 +155,11 @@ export async function downloadVerified(res: Response, file: string, spec: Releas
   let received = 0;
   try {
     const reader = res.body.getReader();
-    for (let r = await reader.read(); !r.done; r = await reader.read()) {
+    const read = () => withAbort(reader.read(), signal).catch(async (error: unknown) => {
+      await reader.cancel().catch(() => {});
+      throw error;
+    });
+    for (let r = await read(); !r.done; r = await read()) {
       received += r.value.length;
       if (received > spec.size || received > spec.capBytes) {
         await reader.cancel();
@@ -294,10 +343,11 @@ export async function installCompatAsset(opts: AssetInstallOptions): Promise<voi
   assertJobId(opts.jobId);
   const spec = opts.spec ?? OPENCODE_COMPAT_ASSET;
   const staging = makeStagingDir(opts.stagingParent ?? '/var/tmp', opts.jobId);
+  const signal = opts.signal ?? AbortSignal.timeout(DOWNLOAD_DEADLINE_MS);
   try {
-    const res = await fetchAllowed(spec, opts.fetchImpl ?? fetch);
+    const res = await fetchAllowed(spec, opts.fetchImpl ?? fetch, signal);
     const tarball = path.join(staging, 'asset.tar.gz');
-    await downloadVerified(res, tarball, spec);
+    await downloadVerified(res, tarball, spec, signal);
     const bin = path.join(staging, spec.entryName);
     await extractSingleEntry(tarball, bin, spec);
     await verifyExtracted(bin, spec, opts.readVersion);

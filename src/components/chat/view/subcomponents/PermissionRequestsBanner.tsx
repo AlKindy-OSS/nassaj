@@ -2,7 +2,8 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShieldAlertIcon } from 'lucide-react';
 
-import type { PendingPermissionRequest } from '../../types/types';
+import type { PendingPermissionRequest, Question } from '../../types/types';
+import type { PendingQuestionState } from '../../utils/pendingQuestionState';
 import { buildClaudeToolPermissionEntry, formatToolInputForDisplay } from '../../utils/chatPermissions';
 import { getClaudeSettings } from '../../utils/chatStorage';
 import { getPermissionPanel, registerPermissionPanel } from '../../tools/configs/permissionPanelRegistry';
@@ -19,6 +20,8 @@ registerPermissionPanel('AskUserQuestion', AskUserQuestionPanel);
 
 interface PermissionRequestsBannerProps {
   pendingPermissionRequests: PendingPermissionRequest[];
+  /** Display state per requestId (see classifyPendingQuestions); absent = active. */
+  pendingQuestionStates?: Map<string, PendingQuestionState>;
   handlePermissionDecision: (
     requestIds: string | string[],
     decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
@@ -28,6 +31,7 @@ interface PermissionRequestsBannerProps {
 
 export default function PermissionRequestsBanner({
   pendingPermissionRequests,
+  pendingQuestionStates,
   handlePermissionDecision,
   handleGrantToolPermission,
 }: PermissionRequestsBannerProps) {
@@ -44,6 +48,10 @@ export default function PermissionRequestsBanner({
   return (
     <div className="mb-3 space-y-2">
       {filteredRequests.map((request) => {
+        const state = pendingQuestionStates?.get(request.requestId) ?? 'active';
+        if (state !== 'active') {
+          return <InactiveQuestionNotice key={request.requestId} request={request} state={state} />;
+        }
         const CustomPanel = getPermissionPanel(request.toolName);
         if (CustomPanel) {
           return (
@@ -144,5 +152,36 @@ export default function PermissionRequestsBanner({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Read-only stand-in for a question that can no longer be answered (settled in
+ * the transcript or replaced by a newer ask). Keeps the text reachable without
+ * offering any control that would answer a dead tool_use.
+ */
+function InactiveQuestionNotice({
+  request,
+  state,
+}: {
+  request: PendingPermissionRequest;
+  state: Exclude<PendingQuestionState, 'active'>;
+}) {
+  const { t } = useTranslation('chat');
+  const questions = ((request.input as { questions?: Question[] } | undefined)?.questions) ?? [];
+  return (
+    <details
+      className="rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+      data-question-state={state}
+    >
+      <summary className="cursor-pointer">{t(`askUser.${state}`)}</summary>
+      {questions.length > 0 && (
+        <ul className="mt-2 list-disc space-y-1 ps-4">
+          {questions.map((q, i) => (
+            <li key={i}>{q.question}</li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }

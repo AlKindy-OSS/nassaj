@@ -40,6 +40,11 @@ import ClaudeStatus from './ClaudeStatus';
 import { shortModelLabel } from './MessageModelBadge';
 import PercentMeter, { formatPercent } from './PercentMeter';
 import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
+import { OutcomeIcon } from './SubagentOutcome';
+import {
+  agentCountsLabel, countAgentOutcomes, isUnsuccessfulOutcome, OUTCOME_BADGE_CLASS, outcomeLabel, outcomeTooltip,
+  rowOutcome,
+} from './subagentOutcomeText';
 
 // ── ثوابت مشتركة مع ClaudeStatus ─────────────────────────────────────────────
 const ACTION_KEYS = [
@@ -68,8 +73,8 @@ const MIN_ELAPSED_SECONDS_FOR_ESTIMATE = 15;
 
 // ── تفضيل إخفاء الوكلاء المكتملين (محلي، مستمرّ) ─────────────────────────────
 // افتراضياً مخفيّون: بطاقة تتراكم فيها صفوف ✓ خضراء تفقد فائدتها كمؤشّر حيّ.
-// فقط `status === 'done'` (نجاح مؤكَّد) يُخفى؛ `stale` (بلا إشارة، لم يُؤكَّد
-// نجاحه ولا فشله) و`running` يبقيان ظاهرين دائماً بصرف النظر عن التفضيل.
+// فقط النجاح المؤكَّد (`done` بنتيجة `completed`) يُخفى؛ الفاشل والموقوف ومجهول
+// النهاية و`stale` و`running` تبقى ظاهرة دائماً بصرف النظر عن التفضيل (P0).
 const HIDE_COMPLETED_STORAGE_KEY = 'nassaj:agentStatusCard:hideCompleted';
 
 function readHideCompletedPref(): boolean {
@@ -135,13 +140,15 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const localeNum = (n: number) => n.toLocaleString(i18n.language);
   const skillCount = new Set(agent.observedSkills?.map(item => item.skillKey)).size;
   const skillAria = skillCount > 0 && agent.observedSkills ? t('skillObservations.count', { value: !agent.skillCoverage || ['unsupported', 'unavailable'].includes(agent.skillCoverage.state) ? '—' : formatObservedCount(skillCount, i18n.language) }) : '';
-  const running = agent.status === 'running';
+  const outcome = rowOutcome(agent);
+  const running = outcome === 'running';
+  const unsuccessful = isUnsuccessfulOutcome(outcome);
   // A stale row is NOT a done row and NOT a live one: it started, never produced a
   // result, and stopped writing. It gets its own mark (a hollow amber ring, no
   // pulse) because reusing the green tick would claim success and reusing the
   // pulsing dot would claim life — the 18-hour "running · now Bash" on a run that
   // died overnight was exactly the second mistake.
-  const stale = agent.status === 'stale';
+  const stale = outcome === 'stale';
   const pulse = running && !frozen;
   const contentId = useId();
   const typeLabel = agent.agentName || agent.type || '—';
@@ -170,7 +177,8 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
     });
   }
   const tools = [...toolRows.values()];
-  const rowPercent = agent.status === 'done' ? 100 : running ? (agent.progress?.percent ?? null) : null;
+  // P0: only a successful end is 100%; failed/stopped/unknown show no percent at all.
+  const rowPercent = outcome === 'completed' ? 100 : running ? (agent.progress?.percent ?? null) : null;
 
   // صدق العرض (B-208، بند 8 — فيتو): الأداة الجارية وعدّاد الاستدعاءات يأتيان
   // حصراً من `childTools`، وهذه تُبنى إمّا من البثّ الحيّ (صفوف تحمل
@@ -181,11 +189,10 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const callsKnown = Number.isFinite(agent.callCount) && agent.callCount > 0;
   const showCurrentTool = running && Boolean(agent.currentTool);
 
-  const statusLabel = running
-    ? t('agentActivity.running', { defaultValue: 'Running' })
-    : stale
-      ? t('agentActivity.stale', { defaultValue: 'No signal' })
-      : t('agentActivity.done', { defaultValue: 'Done' });
+  const statusLabel = outcomeLabel(t, outcome, agent.outcomeCause);
+  // P0: the inferred cause also reaches keyboard (aria-label) and touch (expanded
+  // panel) users, not only a hover `title`.
+  const causeText = unsuccessful ? outcomeTooltip(t, outcome, agent.outcomeCause) : '';
 
   return (
     <Collapsible className="group/agent">
@@ -200,38 +207,10 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
           type: typeLabel,
           status: statusLabel,
           defaultValue: '{{type}} — {{status}}',
-        }) + (skillAria ? ` · ${skillAria}` : '')}
+        }) + (causeText ? ` · ${causeText}` : '') + (skillAria ? ` · ${skillAria}` : '')}
       >
-        {/* نقطة الحالة */}
-        {running ? (
-          <span
-            className={cn(
-              'h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500',
-              pulse && 'animate-pulse',
-            )}
-            aria-hidden="true"
-          />
-        ) : stale ? (
-          <span
-            className="h-2 w-2 shrink-0 rounded-full border border-amber-500/80"
-            aria-hidden="true"
-          />
-        ) : (
-          <svg
-            className="h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M5 13l4 4L19 7"
-            />
-          </svg>
-        )}
+        {/* علامة الحالة: علامة الصحّ للنجاح وحده (P0) */}
+        <OutcomeIcon outcome={outcome} pulse={pulse} />
 
         {/* Name, model and effort stay scannable as compact chips. */}
         <span className="flex min-w-0 flex-wrap items-center gap-1">
@@ -313,13 +292,27 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
           </span>
         )}
 
+        {/* نهاية بلا نجاح — نصّ صريح لا لون وحده، مع سبب الاستنتاج في التلميح. */}
+        {unsuccessful && (
+          <span
+            data-testid="agent-outcome-badge"
+            className={cn(
+              'ms-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+              OUTCOME_BADGE_CLASS[outcome as 'failed' | 'stopped' | 'unknown'],
+            )}
+            title={causeText}
+          >
+            {statusLabel}
+          </span>
+        )}
+
         {/* عدّاد الاستدعاءات — مُخفى حين تكون القيمة غير مستعادة من القرص */}
         {callsKnown && (
           <span
             className={cn(
               'shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-[10px]',
               'font-medium tabular-nums text-muted-foreground',
-              !showCurrentTool && !stale && 'ms-auto',
+              !showCurrentTool && !stale && !unsuccessful && 'ms-auto',
             )}
             title={t('agentActivity.callsTooltip', {
               calls: localeNum(agent.callCount),
@@ -334,7 +327,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
         )}
 
         {/* فاصل يحفظ محاذاة chevron إلى الطرف حين يُخفى الحقلان معاً */}
-        {!showCurrentTool && !callsKnown && !stale && <span className="ms-auto" aria-hidden="true" />}
+        {!showCurrentTool && !callsKnown && !stale && !unsuccessful && <span className="ms-auto" aria-hidden="true" />}
 
         {/* chevron توسّع تاريخ الأدوات */}
         <svg
@@ -360,6 +353,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
       {/* تاريخ أدوات الوكيل */}
       <CollapsibleContent id={contentId}>
         <div className="ms-3 mt-0.5 border-s border-border ps-3">
+          {causeText && <p className="py-1 text-xs text-muted-foreground" data-testid="agent-outcome-cause">{causeText}</p>}
           {agent.progress && <DeclaredProgressNote progress={agent.progress} />}
           {skillCount > 0 && agent.observedSkills && <section className="space-y-0.5 py-1.5" aria-label={t('skillObservations.title')}>
             <p className="text-xs font-medium text-muted-foreground">{t('skillObservations.title')}</p>
@@ -651,12 +645,11 @@ function MergedCard({
     });
   }, []);
 
-  const completedCount = agents.reduce(
-    (n, a) => (a.status === 'done' ? n + 1 : n),
-    0,
-  );
+  // P0: «مكتمل» = نجح فقط؛ الفاشل والموقوف ومجهول النهاية لا تُعدّ ولا تُخفى معه.
+  const outcomeCounts = countAgentOutcomes(agents);
+  const completedCount = outcomeCounts.succeeded;
   const visibleAgents = hideCompleted
-    ? agents.filter((a) => a.status !== 'done')
+    ? agents.filter((a) => rowOutcome(a) !== 'completed')
     : agents;
   const allHiddenAsCompleted = hideCompleted && completedCount > 0 && visibleAgents.length === 0;
   // ADR-199 Decision 18: this provider reports a sub-agent only once it settled,
@@ -726,21 +719,8 @@ function MergedCard({
       })
     : t('runProgress.estimating', { defaultValue: '…' });
 
-  const runningCount = agents.reduce(
-    (n, a) => (a.status === 'running' ? n + 1 : n),
-    0,
-  );
-  // نصّ المؤشّر الموحّد: العدد يمرّ كـ count للتصريف العربي، و n للعرض المحلّي.
-  const runningLabel = t('agentActivity.agentsRunning', {
-    count: runningCount,
-    n: runningCount.toLocaleString(locale),
-    defaultValue: '{{n}} running',
-  });
-  const completedLabel = t('agentActivity.agentsCompleted', {
-    count: completedCount,
-    n: completedCount.toLocaleString(locale),
-    defaultValue: '{{n}} done',
-  });
+  // نصّ المؤشّر الموحّد مفصَّلاً بالنتيجة: «N نجحوا · K فشل · M يعمل».
+  const countsLabel = agentCountsLabel(t, locale, outcomeCounts);
 
   // ── عرض البطاقة الموحّدة ──────────────────────────────────────────────────
   return (
@@ -915,9 +895,12 @@ function MergedCard({
           {/* مؤشّر وكلاء واحد بصيغة «N منتهٍ · M يعمل» بدل شارتين بصيغة x/N
               متطابقة. حين لا يوجد منتهٍ يظهر «يعمل» وحده كنصّ، وإلا يحمله زر
               التبديل أدناه. */}
-          {runningCount > 0 && completedCount === 0 && (
-            <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/60">
-              {runningLabel}
+          {countsLabel && completedCount === 0 && (
+            <span
+              data-testid="agent-counts-text"
+              className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/60"
+            >
+              {countsLabel}
             </span>
           )}
 
@@ -959,9 +942,7 @@ function MergedCard({
               )}
             >
               <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span data-testid="agent-counts-chip">
-                {runningCount > 0 ? `${completedLabel} · ${runningLabel}` : completedLabel}
-              </span>
+              <span data-testid="agent-counts-chip">{countsLabel}</span>
             </button>
           )}
 

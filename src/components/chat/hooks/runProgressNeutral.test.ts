@@ -127,11 +127,11 @@ describe('ADR-199 neutral subagent lifecycle', () => {
 
   it('history: completed and failed both settle the sub-agent', () => {
     const progress = progressOf(HISTORY_ROWS);
-    assert.deepEqual(progress.agents.map((a) => [a.id, a.status]), [
-      [FIXTURE_IDS.AGENT_DONE, 'done'],
-      [FIXTURE_IDS.AGENT_DENIED, 'done'],
+    assert.deepEqual(progress.agents.map((a) => [a.id, a.status, a.outcome]), [
+      [FIXTURE_IDS.AGENT_DONE, 'done', 'completed'],
+      [FIXTURE_IDS.AGENT_DENIED, 'done', 'failed'],
     ]);
-    assert.equal(progress.agentsDone, 2);
+    assert.deepEqual([progress.agentsDone, progress.agentsUnsuccessful], [1, 1]);
     assert.equal(progress.activeSubagent, null);
   });
 

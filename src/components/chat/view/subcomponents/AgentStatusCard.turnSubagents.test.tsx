@@ -76,7 +76,7 @@ describe('turn sub-agents on the card', () => {
     assert.equal((rows.textContent ?? '').includes('Read a.txt content'), true);
     assert.equal((rows.textContent ?? '').includes('still going'), false);
     assert.equal(screen.queryByText(/running$/), null);
-    assert.equal(screen.getAllByRole('button', { name: /general — Done/ }).length, 1);
+    assert.equal(screen.getAllByRole('button', { name: /general — Succeeded/ }).length, 1);
   });
 
   it('a live provider keeps its running row and shows no finished label', () => {

@@ -100,7 +100,7 @@ function AppContentInner() {
   const { currentVersion: updateCurrentVersion } = useVersionCheck();
   const { notice: updateCompletionNotice, dismiss: dismissUpdateCompletionNotice } =
     useUpdateCompletionNotice(updateCurrentVersion);
-  // Once-per-browser highlights of the version now running, for every signed-in user.
+  // Once-per-user highlights of the version now running, for every signed-in user.
   const whatsNew = useWhatsNew(updateCurrentVersion, i18n.language ?? 'en');
   const scheduledCenterEnabled = isScheduledMessagesCenterEnabled(user?.role);
   const scheduledSummary = useScheduledMessagesSummary(scheduledCenterEnabled);

@@ -879,9 +879,13 @@
       opacity: 1 !important;
     }
     
-    /* Only disable hover states for interactive elements, not containers */
-    button:hover,
-    [role="button"]:hover,
+    /* Only disable hover states for interactive elements, not containers.
+       A tap leaves :hover stuck on touch screens, so `inherit` strips a solid
+       button down to the card's background and text (owner-reported: the
+       update dialog's primary action looked disabled). Solid actions opt out
+       with `data-keep-fill` and keep their own fill. */
+    button:not([data-keep-fill]):hover,
+    [role="button"]:not([data-keep-fill]):hover,
     .cursor-pointer:hover,
     a:hover,
     .hover\:bg-gray-50:hover,

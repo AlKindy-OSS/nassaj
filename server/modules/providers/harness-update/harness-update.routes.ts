@@ -6,6 +6,7 @@
  *   GET  /:id/version-status      (any authenticated user)
  *   GET  /version-status          (any authenticated user)
  *   POST /:id/update              (owner, rate-limited) {acks?}
+ *   POST /:id/install             (owner, rate-limited) — codex/opencode CLI install (T-2062)
  *   POST /:id/restore-compatible  (owner, rate-limited) {acks?}   — opencode only
  *   POST /:id/rollback            (owner, rate-limited) {jobId, scope, acks?}
  *   POST /:id/recovery            (owner, rate-limited) {action: retry|acknowledge}
@@ -31,6 +32,7 @@ import {
   getHarnessVersionStatus,
 } from './version-status.service.js';
 import { getHarnessUpdateJob, startHarnessUpdate } from './update.service.js';
+import { startHarnessInstall } from './install.service.js';
 import {
   listHarnessSnapshots,
   startManualRollback,
@@ -85,6 +87,9 @@ const HARNESS_ACTION_CODES: ReadonlySet<string> = new Set([
   'NOT_RESTORE_COMPATIBLE', 'SNAPSHOT_NOT_FOUND', 'NO_RECOVERY_PENDING', 'RECOVERY_UNVERIFIED',
   'INVALID_ROLLBACK_SCOPE', 'INVALID_RECOVERY_ACTION', 'PREFLIGHT_CHANGED', 'MANIFEST_INVALID',
   'HARNESS_NOT_UPDATABLE', 'UNKNOWN_HARNESS',
+  // T-2062 install refusals.
+  'HARNESS_NOT_INSTALLABLE', 'PLATFORM_MODE_UNSUPPORTED', 'HARNESS_ALREADY_INSTALLED',
+  'HARNESS_INSTALL_INVALID', 'HARNESS_OVERRIDE_SET',
 ]);
 
 /** Writes the harness action body for a known refusal; false when `err` is not one. */
@@ -162,6 +167,18 @@ router.post(
   actionHandler(async (req: Request, res: Response) => {
     const id = requireHarnessId(req);
     const job = await startHarnessUpdate(id, { userId: readUserId(req), trigger: 'manual', acks: bodyOf(req).acks });
+    res.status(202).json({ jobId: job.jobId, provider: job.provider, status: job.status });
+  }),
+);
+
+// POST install of a missing CLI (owner only; codex/opencode). 202 | 403 | 404 | 409 {code,…}.
+router.post(
+  '/:id/install',
+  requireRole('owner'),
+  ownerActionLimiter,
+  actionHandler(async (req: Request, res: Response) => {
+    const id = requireHarnessId(req);
+    const job = startHarnessInstall(id, { userId: readUserId(req) });
     res.status(202).json({ jobId: job.jobId, provider: job.provider, status: job.status });
   }),
 );

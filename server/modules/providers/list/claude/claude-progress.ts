@@ -18,6 +18,7 @@ import {
   type SubagentState,
 } from '../../../../shared/progress-normalize.js';
 import type { NormalizedMessage } from '../../../../shared/types.js';
+import { isTerminalSubagentState } from '../../../../../shared/subagent-states.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -91,7 +92,21 @@ export type ClaudeSubagentTracker = {
   settle(toolUseId: string, state: SubagentState): ProgressSubagent | null;
   /** Live SDK task_progress snapshot for a child without parent_tool_use_id rows. */
   progress(raw: AnyRecord): ProgressSubagent | null;
+  /**
+   * Latest record of every delegation seen and not yet ended (no terminal
+   * tool_result, no settlement): what a process exit leaves unsettled.
+   */
+  unsettled(): ProgressSubagent[];
 };
+
+/**
+ * Status of a child tool when its delegation ends in `state`: a tool still
+ * `running` takes the delegation's outcome word (so a stopped or unknown agent
+ * never shows its open tool as succeeded).
+ */
+function closedToolStatus(status: string, state: SubagentState): string {
+  return status === 'running' ? state : status;
+}
 
 /**
  * Creates a tracker for one run (live) or one history load. A tool_result row
@@ -104,6 +119,7 @@ export function createClaudeSubagentTracker(
   const started = new Map<string, ProgressSubagent>();
   const childTools = new Map<string, Map<string, { name: string; status: string }>>();
   const settled = new Set<string>();
+  const open = new Set<string>();
   return {
     observe(raw, messages) {
       const updates: ProgressSubagent[] = [];
@@ -113,15 +129,18 @@ export function createClaudeSubagentTracker(
             const oldestId = started.keys().next().value as string;
             started.delete(oldestId);
             childTools.delete(oldestId);
+            open.delete(oldestId);
           }
           started.set(message.toolId, message.subagent);
           settled.delete(message.toolId);
+          open.add(message.toolId);
           continue;
         }
         const origin = message.kind === 'tool_result' && message.toolId
           ? started.get(message.toolId) : undefined;
         if (origin && !message.subagent) {
-          settleDelegation(raw, message, origin, childTools);
+          const ended = settleDelegation(raw, message, origin, childTools);
+          if (ended && isTerminalSubagentState(ended.state)) open.delete(message.toolId as string);
           continue;
         }
         const parentValue: unknown = message.parentToolUseId
@@ -140,12 +159,17 @@ export function createClaudeSubagentTracker(
       const origin = started.get(toolUseId);
       if (!origin) return null;
       settled.add(toolUseId);
+      open.delete(toolUseId);
       const tools = childTools.get(toolUseId);
       return buildProgressSubagent({ ...origin, state,
         ...(tools ? { tools: [...tools].map(([id, tool]) => ({ id, ...tool,
-          status: tool.status === 'running'
-            ? (state === 'failed' ? 'failed' : 'completed')
-            : tool.status })) } : {}),
+          status: closedToolStatus(tool.status, state) })) } : {}),
+      });
+    },
+    unsettled() {
+      return [...open].flatMap((id) => {
+        const origin = started.get(id);
+        return origin && !settled.has(id) ? [origin] : [];
       });
     },
     progress(raw) {
@@ -210,13 +234,16 @@ function trackChildTool(
   return snapshotWithTools(started.get(parentId), tools);
 }
 
-/** Attaches final lifecycle metadata to a Claude delegation result row. */
+/**
+ * Attaches final lifecycle metadata to a Claude delegation result row.
+ * @returns the record attached, or null when none could be built.
+ */
 function settleDelegation(
   raw: AnyRecord,
   message: NormalizedMessage,
   origin: ProgressSubagent,
   childTools: Map<string, Map<string, { name: string; status: string }>>,
-): void {
+): ProgressSubagent | null {
   const result = raw.toolUseResult ?? raw.tool_use_result;
   const resultModel = result && typeof result === 'object'
     ? (result as AnyRecord).resolvedModel : undefined;
@@ -242,4 +269,5 @@ function settleDelegation(
     } : {}),
   });
   if (subagent) message.subagent = subagent;
+  return subagent;
 }

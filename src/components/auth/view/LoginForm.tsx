@@ -14,9 +14,12 @@ import { decideAutoSignIn } from '../ssoLinkedSession';
 import { consumeSsoReauthNotice, hasSsoReauthNotice } from '../ssoReauth';
 import {
   consumeSignedOutEverywhereNotice,
+  consumeSignOutIncompleteNotice,
   hasSignedOutEverywhereNotice,
+  hasSignOutIncompleteNotice,
   LOGIN_LOCKED_CODE,
   loginLockedMessage,
+  SIGN_OUT_INCOMPLETE_EVENT,
 } from '../loginLock';
 
 import AuthErrorAlert from './AuthErrorAlert';
@@ -92,9 +95,18 @@ export default function LoginForm() {
   );
   // T-2035: after a sign-out that ended every device's session, say so once.
   const [signedOutEverywhere] = useState(() => hasSignedOutEverywhereNotice());
+  // B-1652: the server may answer after this page mounted, so listen as well.
+  const [signOutIncomplete, setSignOutIncomplete] = useState(() => hasSignOutIncompleteNotice());
   useEffect(() => {
     consumeSsoReauthNotice();
     consumeSignedOutEverywhereNotice();
+    consumeSignOutIncompleteNotice();
+    const onIncomplete = () => {
+      consumeSignOutIncompleteNotice();
+      setSignOutIncomplete(true);
+    };
+    window.addEventListener(SIGN_OUT_INCOMPLETE_EVENT, onIncomplete);
+    return () => window.removeEventListener(SIGN_OUT_INCOMPLETE_EVENT, onIncomplete);
   }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false);
@@ -217,7 +229,14 @@ export default function LoginForm() {
           autoComplete="current-password"
         />
 
-        {signedOutEverywhere && !errorMessage && (
+        {signOutIncomplete && (
+          <p role="status" className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-foreground">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+            {t('signOutIncomplete')}
+          </p>
+        )}
+
+        {signedOutEverywhere && !errorMessage && !signOutIncomplete && (
           <p role="status" className="flex items-start gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-sm text-foreground">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
             {t('loggedOutEverywhere')}

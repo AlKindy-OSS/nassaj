@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { HARNESS_UPDATE_DESCRIPTORS, type HarnessDescriptor } from './descriptors.js';
+import { removeOrphanInstallDirs } from './install.service.js';
 import { isHarnessLockedElsewhere } from './harness-lock.js';
 import { pruneHarnessSnapshots } from './harness-retention.js';
 import { autoRollback, completeRestore, markRollbackFailed } from './restore-engine.js';
@@ -229,5 +230,7 @@ export async function reconcileHarnessSnapshots(perCall: Partial<SnapshotRuntime
   } catch {
     /* retention retries at the next preflight / daily tick */
   }
+  // T-2062 (qa C8): no install job survives a restart, so its staging dirs are orphans.
+  removeOrphanInstallDirs();
   return report;
 }

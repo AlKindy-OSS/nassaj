@@ -605,7 +605,8 @@ export class DisplayStreamMasker {
 
 /** Kinds whose payload can carry agent or user text; every other kind passes byte-for-byte. */
 const MASKED_KINDS: ReadonlySet<string> = new Set([
-  'text', 'stream_delta', 'thinking', 'tool_use', 'tool_result', 'error', 'permission_request',
+  'text', 'stream_delta', 'thinking', 'tool_use', 'tool_result', 'error', 'notice',
+  'permission_request',
   'interactive_prompt', 'task_notification',
 ]);
 /** Kinds that end every stream of the session. */

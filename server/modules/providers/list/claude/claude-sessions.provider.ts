@@ -949,6 +949,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       hasMore,
       offset: normalizedOffset,
       limit: normalizedLimit,
+      ...(progress.ownerStoppedIds.size > 0 ? { subagentOwnerStops: [...progress.ownerStoppedIds] } : {}),
     }, raw => this.normalizeMessage(raw, sessionId, options.historyLease));
   }
 }

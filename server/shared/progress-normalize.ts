@@ -8,6 +8,10 @@
  * malformed or oversized value never reaches a client.
  */
 
+import {
+  isSubagentState, validInferredCause, type SubagentInferredCause, type SubagentState,
+} from '../../shared/subagent-states.js';
+
 export type ProgressItemStatus = 'pending' | 'in_progress' | 'completed';
 export type ProgressPlanItem = { id: string; label: string; status: ProgressItemStatus };
 /**
@@ -16,13 +20,15 @@ export type ProgressPlanItem = { id: string; label: string; status: ProgressItem
  */
 export type ProgressPlanCounts = { done: number; total: number };
 export type ProgressPlan = { source: 'tool' | 'artifact'; items: ProgressPlanItem[]; counts?: ProgressPlanCounts };
-export type SubagentState = 'started' | 'running' | 'completed' | 'failed';
+export type { SubagentInferredCause, SubagentState } from '../../shared/subagent-states.js';
 export type ProgressSubagentTool = { id?: string; name: string; status?: string };
 export type ProgressSubagent = {
   id: string;
   parentId: string | null;
   label: string;
   state: SubagentState;
+  /** Set only when Nassaj inferred `stopped`/`unknown` (study §3.2); absent when measured. */
+  inferredCause?: SubagentInferredCause;
   agentName?: string;
   model?: string;
   modelInherited?: boolean;
@@ -38,7 +44,6 @@ const ID_MAX_CHARS = 200;
 export const PLAN_COUNT_MAX_ENTRIES = 10_000;
 
 const PLAN_SOURCES: ReadonlySet<string> = new Set(['tool', 'artifact']);
-const SUBAGENT_STATES: ReadonlySet<string> = new Set(['started', 'running', 'completed', 'failed']);
 
 /** Provider status words mapped onto the three neutral plan states. */
 const STATUS_VOCABULARY: Readonly<Record<string, ProgressItemStatus>> = Object.freeze({
@@ -146,11 +151,11 @@ function boundPlanCounts(value: unknown, itemCount: number): ProgressPlanCounts 
  *   is outside the neutral vocabulary.
  */
 export function buildProgressSubagent(fields: {
-  id: unknown; parentId?: unknown; label: unknown; state: unknown;
+  id: unknown; parentId?: unknown; label: unknown; state: unknown; inferredCause?: unknown;
   agentName?: unknown; model?: unknown; modelInherited?: unknown; effort?: unknown; tools?: unknown;
 }): ProgressSubagent | null {
   const id = typeof fields.id === 'string' ? fields.id.slice(0, ID_MAX_CHARS) : '';
-  if (!id || typeof fields.state !== 'string' || !SUBAGENT_STATES.has(fields.state)) return null;
+  if (!id || !isSubagentState(fields.state)) return null;
   const parentId = typeof fields.parentId === 'string' && fields.parentId
     ? fields.parentId.slice(0, ID_MAX_CHARS)
     : null;
@@ -158,11 +163,13 @@ export function buildProgressSubagent(fields: {
   const model = toPlainLabel(fields.model, SUBAGENT_LABEL_MAX_CHARS);
   const effort = toPlainLabel(fields.effort, 32);
   const tools = boundProgressSubagentTools(fields.tools);
+  const inferredCause = validInferredCause(fields.state, fields.inferredCause);
   return {
     id,
     parentId,
     label: toPlainLabel(fields.label, SUBAGENT_LABEL_MAX_CHARS),
-    state: fields.state as SubagentState,
+    state: fields.state,
+    ...(inferredCause ? { inferredCause } : {}),
     ...(agentName ? { agentName } : {}),
     ...(model ? { model } : {}),
     ...(fields.modelInherited === true && model ? { modelInherited: true } : {}),
@@ -217,7 +224,8 @@ export function boundProgressSubagent(value: unknown): ProgressSubagent | null {
   const record = value as Record<string, unknown>;
   return buildProgressSubagent({
     id: record.id, parentId: record.parentId, label: record.label, state: record.state,
-    agentName: record.agentName, model: record.model, modelInherited: record.modelInherited,
+    inferredCause: record.inferredCause, agentName: record.agentName, model: record.model,
+    modelInherited: record.modelInherited,
     effort: record.effort, tools: record.tools,
   });
 }

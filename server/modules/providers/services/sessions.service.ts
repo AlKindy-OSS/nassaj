@@ -25,8 +25,10 @@ import {
   type HistoryPayloadMode,
   type HistoryResponse,
 } from '@/modules/providers/services/session-history-light.service.js';
+import { applySubagentLiveness } from '@/shared/subagent-liveness.js';
 import type {
   FetchHistoryOptions,
+  FetchHistoryResult,
   LLMProvider,
   NormalizedMessage,
 } from '@/shared/types.js';
@@ -43,10 +45,12 @@ import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../lis
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
 import { runtimeInstructionsPrefix, stripRuntimeInstructionsPrefix } from '../../../../shared/documentSharingInstructions.js';
+import { SUBAGENT_SESSION_TIMEOUT_MS } from '../../../../shared/subagent-states.js';
 
 import { HISTORY_LIMITS, HistoryReadLease, HistoryBudgetError, historyAdmission } from './history-budget.service.js';
 import { HistoryHttpSink } from './history-response.service.js';
 import { canPermanentlyDeleteSession, isSessionAccessibleByUser, type SessionAccessMode } from './session-access.js';
+import { probeSessionLiveness } from './session-activity.service.js';
 
 export { canPermanentlyDeleteSession, isSessionAccessibleByUser, type SessionAccessMode };
 
@@ -383,6 +387,42 @@ export function applyResponseTurnMetrics(
   }
 }
 
+/**
+ * Agent-progress P0 (N3): settles delegations from the session's liveness at
+ * response time, on this request's copy of the (possibly cached) snapshot, and
+ * removes the server-internal owner-stop hint. Claude has no session timeout:
+ * its CLI exits at the background idle cap first (N6).
+ */
+function overlaySubagentLiveness(sessionId: string, provider: LLMProvider, result: FetchHistoryResult): void {
+  const ownerStoppedIds = result.subagentOwnerStops;
+  delete result.subagentOwnerStops;
+  const alive = probeSessionLiveness(sessionId, provider);
+  // The probes see only runs this server spawned: a session run from an external
+  // terminal reads "not alive" while its agent works. Without spawn evidence the
+  // process state is unobserved, so only the session timeout may settle (C2).
+  if (alive === false && !spawnedHere(sessionId)) {
+    applySubagentLiveness(result.messages, { alive: true, timeoutMs: SUBAGENT_SESSION_TIMEOUT_MS });
+    return;
+  }
+  applySubagentLiveness(result.messages, {
+    alive,
+    timeoutMs: provider === 'claude' ? null : SUBAGENT_SESSION_TIMEOUT_MS,
+    ownerStoppedIds,
+  });
+}
+
+function spawnedHere(sessionId: string): boolean {
+  try {
+    return participantsDb.hasAnySpawn(sessionId);
+  } catch (error) {
+    console.error('Failed to read session spawn evidence', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 function stampResponseTurnMetrics(sessionId: string, messages: NormalizedMessage[], lease?: HistoryReadLease): void {
   const assistantIds = messages
     .filter((message) => message.kind === 'text' && message.role === 'assistant')
@@ -712,6 +752,7 @@ export const sessionsService = {
       await transcript?.fd.close().catch(() => undefined);
     }
     const { result } = snapshot;
+    overlaySubagentLiveness(sessionId, provider, result);
     const displayMask = options.displayMask === true && isDisplayMaskingEnabled();
     const revision = displayMask ? displayHistoryRevision(snapshot.revision) : snapshot.revision;
     options.assertCurrent?.(true);

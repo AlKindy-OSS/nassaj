@@ -22,6 +22,61 @@ export interface RunCommandOptions {
   timeoutMs: number;
   /** Called with the pid (= process group id) right after the spawn succeeded. */
   onSpawn?: (pid: number) => void;
+  /**
+   * T-2062: receives each complete output line live (ANSI CSI/OSC and `\r`
+   * stripped, length-capped, at most MAX_LIVE_LINES per run). Never throws out.
+   */
+  onLine?: (line: string) => void;
+}
+
+/** Max characters of one live line, and max live lines per run. */
+const MAX_LIVE_LINE_LEN = 500;
+const MAX_LIVE_LINES = 2_000;
+const MAX_PENDING_CHARS = 8_192;
+const ANSI_OSC = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/gu;
+const ANSI_CSI = /\u001b\[[0-?]*[ -/]*[@-~]/gu;
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/gu;
+
+/**
+ * One display-safe output line: OSC then CSI sequences removed, only the text
+ * after the last `\r` kept (progress redraws), other control bytes dropped,
+ * trimmed and capped at MAX_LIVE_LINE_LEN.
+ */
+export function sanitizeOutputLine(raw: string): string {
+  const noAnsi = raw.replace(ANSI_OSC, '').replace(ANSI_CSI, '');
+  const lastCr = noAnsi.trimEnd().lastIndexOf('\r');
+  const visible = lastCr === -1 ? noAnsi : noAnsi.slice(lastCr + 1);
+  return visible.replace(CONTROL, '').trim().slice(0, MAX_LIVE_LINE_LEN);
+}
+
+/** Splits streamed chunks into lines for `onLine`, bounded in count and buffer size. */
+function makeLineSplitter(onLine: ((line: string) => void) | undefined) {
+  let delivered = 0;
+  const emit = (raw: string) => {
+    if (!onLine || delivered >= MAX_LIVE_LINES) return;
+    const line = sanitizeOutputLine(raw);
+    if (line === '') return;
+    delivered += 1;
+    try {
+      onLine(line);
+    } catch {
+      /* a sink failure never breaks the run */
+    }
+  };
+  return () => {
+    let pending = '';
+    return {
+      push(chunk: string) {
+        const parts = `${pending}${chunk}`.split('\n');
+        pending = (parts.pop() ?? '').slice(-MAX_PENDING_CHARS);
+        for (const part of parts) emit(part);
+      },
+      flush() {
+        if (pending !== '') emit(pending);
+        pending = '';
+      },
+    };
+  };
 }
 
 /**
@@ -69,9 +124,14 @@ export function runHarnessUpdateCommand(
         ? next
         : `${next.slice(0, contentLimit)}${marker}`;
     };
+    const newSplitter = makeLineSplitter(opts.onLine);
+    const outLines = newSplitter();
+    const errLines = newSplitter();
     const finish = (code: number | null, quiesced = true) => {
       if (settled) return;
       settled = true;
+      outLines.flush();
+      errLines.flush();
       clearTimeout(timer);
       resolve({ code, stdout, stderr, timedOut, quiesced });
     };
@@ -114,9 +174,11 @@ export function runHarnessUpdateCommand(
     if (groupId !== null && opts.onSpawn) recordSpawn(groupId, opts.onSpawn);
     child.stdout?.on('data', (b) => {
       stdout = appendBounded(stdout, b.toString());
+      outLines.push(b.toString());
     });
     child.stderr?.on('data', (b) => {
       stderr = appendBounded(stderr, b.toString());
+      errLines.push(b.toString());
     });
     child.on('error', (err) => {
       stderr = appendBounded(stderr, err instanceof Error ? err.message : String(err));

@@ -9,7 +9,7 @@ import type { ProgressPlan, SubagentState } from '@/shared/progress-normalize.js
 import type { NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 
-import { claudeToolUseProgress, createClaudeSubagentTracker } from './claude-progress.js';
+import { claudeParentToolUseId, claudeToolUseProgress, createClaudeSubagentTracker } from './claude-progress.js';
 import { createClaudeTaskPlan, type ClaudeTaskPlan } from './claude-task-plan.js';
 
 type AnyRecord = Record<string, any>;
@@ -21,10 +21,16 @@ const NOTIFICATION_TOOL_USE_ID_RE = /<tool-use-id>([^<\s]+)<\/tool-use-id>/;
 const NOTIFICATION_STATUS_RE = /<status>([^<\s]+)<\/status>/;
 const NOTIFICATION_BODY_RE = /<summary>|<result>/;
 
-/** Addendum A §9: the only notification statuses that settle a delegation. */
+/**
+ * Addendum A §9: the only notification statuses that settle a delegation.
+ * Study §3.2 (P0): `killed`/`stopped` are a measured stop, never a failure.
+ */
 const SETTLED_STATES: Readonly<Record<string, SubagentState>> = Object.freeze({
-  completed: 'completed', failed: 'failed', killed: 'failed', stopped: 'failed',
+  completed: 'completed', failed: 'failed', killed: 'stopped', stopped: 'stopped',
 });
+
+/** The CLI's main-thread cut marker after an owner interrupt (the CLI emits two wordings). */
+const INTERRUPT_MARKER_PREFIX = '[Request interrupted by user';
 
 export type ClaudeNotifiedTask = { taskId: string | null; toolUseId: string | null; status: string | null };
 
@@ -34,6 +40,15 @@ function userMessageText(message: AnyRecord): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content.map((block: AnyRecord) => (typeof block?.text === 'string' ? block.text : '')).join('');
+}
+
+/**
+ * True for the CLI's own main-thread `[Request interrupted by user…]` row: the
+ * owner stopped the run at that point (study §3.2 "history resolution").
+ */
+export function isClaudeInterruptMarker(raw: AnyRecord): boolean {
+  if (raw?.type !== 'user' || raw.isSidechain === true || claudeParentToolUseId(raw)) return false;
+  return userMessageText(raw).trimStart().startsWith(INTERRUPT_MARKER_PREFIX);
 }
 
 /**
@@ -95,6 +110,15 @@ export type ClaudeProgressFold = {
   seed(raw: AnyRecord, rows: NormalizedMessage[]): void;
   /** Closes the current turn: history attaches its snapshot; buffered updates drop. */
   endTurn(): void;
+  /**
+   * Live only, at the exit of the run's CLI process (study §3.2, N3): settles
+   * every delegation this run launched (seeded ones excluded) and that never
+   * ended, as `stopped (owner)` or `unknown (process-exit)`. Idempotent.
+   * @returns `status` rows carrying the inferred records.
+   */
+  processExit(cause: 'owner' | 'process-exit', rowSessionId?: string | null): NormalizedMessage[];
+  /** History: delegations still unsettled when an owner interrupt marker was written. */
+  readonly ownerStoppedIds: ReadonlySet<string>;
   readonly taskPlan: ClaudeTaskPlan;
 };
 
@@ -108,6 +132,8 @@ export function createClaudeProgressFold(mode: 'history' | 'live', sessionId: st
   const subagents = createClaudeSubagentTracker();
   const taskPlan = createClaudeTaskPlan();
   let lastTaskRow: NormalizedMessage | null = null;
+  const ownerStoppedIds = new Set<string>();
+  const runOwned = new Set<string>();
 
   const attach = (row: NormalizedMessage): void => {
     const plan = taskPlan.snapshot();
@@ -148,9 +174,25 @@ export function createClaudeProgressFold(mode: 'history' | 'live', sessionId: st
     return taskPlan.observe(raw, rows);
   };
 
+  const noteOwnership = (raw: AnyRecord, rows: NormalizedMessage[]): void => {
+    if (isClaudeInterruptMarker(raw)) subagents.unsettled().forEach(({ id }) => ownerStoppedIds.add(id));
+    for (const row of rows) if (row.kind === 'tool_use' && row.subagent && row.toolId) runOwned.add(row.toolId);
+  };
+  const processExit = (cause: 'owner' | 'process-exit', rowSessionId?: string | null): NormalizedMessage[] => {
+    const state: SubagentState = cause === 'owner' ? 'stopped' : 'unknown';
+    return subagents.unsettled().filter(({ id }) => runOwned.has(id)).flatMap(({ id }) => {
+      const subagent = subagents.settle(id, state);
+      if (!subagent) return [];
+      return [createNormalizedMessage({ id: `${generateMessageId('claude')}_exit_${id}`,
+        sessionId: rowSessionId ?? sessionId,
+        provider: 'claude', kind: 'status', subagent: { ...subagent, inferredCause: cause } })];
+    });
+  };
+
   return {
     observe(raw, rows) {
       if (mode === 'history' && opensTurn(rows)) endTurn();
+      noteOwnership(raw, rows);
       const touched = fold(raw, rows);
       if (mode === 'live') touched.forEach(attach);
       else if (touched.length > 0) lastTaskRow = touched[touched.length - 1];
@@ -162,6 +204,8 @@ export function createClaudeProgressFold(mode: 'history' | 'live', sessionId: st
       settlementRows(raw);
     },
     endTurn,
+    processExit,
+    ownerStoppedIds,
     taskPlan,
   };
 }

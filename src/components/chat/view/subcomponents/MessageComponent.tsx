@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Clock3, GitFork, ImageOff, Sparkles } from 'lucide-react';
+import { ChevronDown, Clock3, GitFork, ImageOff, Info, Sparkles } from 'lucide-react';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import ParticipantAvatar from '../../../participants/ParticipantAvatar';
@@ -254,7 +254,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   // vice-versa.
   // A compact skill-load line is not a reply: the assistant message after it
   // still opens its own group (provider logo / coordinator header).
-  const isGrouped = prevMessage && !prevMessage.isSkillLoad && prevMessage.type === message.type &&
+  const isGrouped = prevMessage && !prevMessage.isSkillLoad && !prevMessage.isNotice
+    && !message.isNotice && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user' &&
         prevMessage.userId === message.userId &&
@@ -278,6 +279,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   );
   const shouldShowUserCopyControl = message.type === 'user' && userCopyContent.trim().length > 0;
   const shouldShowAssistantCopyControl = message.type === 'assistant' &&
+    !message.isNotice &&
     assistantCopyContent.trim().length > 0 &&
     !isCommandOrFileEditToolResponse;
   // Only a persisted, completed assistant text row can anchor a transcript
@@ -293,6 +295,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     !message.isToolUse &&
     !message.isInteractivePrompt &&
     !message.isTaskNotification &&
+    !message.isNotice &&
     Boolean(formattedMessageContent.trim());
   // T-2027: a trailing ```choices fence (primary text only) — cut before Markdown.
   const parsedChoices = useMemo(
@@ -447,7 +450,14 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
           : 'px-3 sm:px-0'
       } ${isSteerContinuation ? '!mt-0' : ''}`}
     >
-      {message.isSkillLoad ? (
+      {message.isNotice ? (
+        /* B-1624: a neutral server notice (a Codex user stop): one muted line,
+         * no error colour, no copy control, never grouped with a reply. */
+        <p className="flex w-full items-start gap-2 py-0.5 text-xs text-muted-foreground" data-chat-notice>
+          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words" dir={contentDir}>{message.content}</span>
+        </p>
+      ) : message.isSkillLoad ? (
         /* Skill body injected by Claude after a Skill tool call: one compact,
          * expandable line instead of a bubble. Logical properties only. */
         <details className="group/skill w-full py-0.5" data-skill-load>

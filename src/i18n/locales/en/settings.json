@@ -1,4 +1,27 @@
 {
+  "harnessInstall": {
+    "install": "Install",
+    "installing": "Installing…",
+    "retry": "Retry",
+    "progress": "Install progress",
+    "succeeded": "Install completed.",
+    "log": "Install log",
+    "otherOperation": "Another operation is running on this CLI; try again when it finishes.",
+    "error": {
+      "generic": "Could not start the install.",
+      "network": "Could not reach the server.",
+      "install_failed": "The install failed.",
+      "install_timeout": "The install timed out.",
+      "verify_failed": "Installed, but the CLI could not be verified.",
+      "script_rejected": "The installer script did not match the trusted source and was rejected.",
+      "PLATFORM_MODE_UNSUPPORTED": "Installing from the UI is not available in this mode.",
+      "HARNESS_ALREADY_INSTALLED": "The CLI is already installed.",
+      "HARNESS_OVERRIDE_SET": "A custom CLI path is set; install it manually.",
+      "HARNESS_INSTALL_INVALID": "A broken install exists; fix it manually.",
+      "HARNESS_ACTION_RATE_LIMITED": "Too many attempts; wait a moment and retry.",
+      "HARNESS_UPDATE_IN_PROGRESS": "Another operation is running on this CLI."
+    }
+  },
   "harnessVersion": {
     "updateIndicator": "Update available",
     "title": "Provider tool version",
@@ -26,6 +49,9 @@
     "glmManagedNote": "GLM runs through OpenCode and updates with it.",
     "autoUpdateMovedNote": "Automatic update settings are in the System tab",
     "phase": {
+      "downloading": "Downloading",
+      "installing": "Installing",
+      "snapshotting": "Taking a snapshot",
       "queued": "Queued",
       "preflight": "Preflight check",
       "updating": "Updating",

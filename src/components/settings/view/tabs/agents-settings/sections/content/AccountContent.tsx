@@ -2,7 +2,10 @@ import { AlertTriangle, Calendar, Check, Clock, Copy, ExternalLink, Link2, LogIn
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { HARNESS_INSTALL_INFO, isInstallableHarness } from '../../../../../../../../shared/harness-install.contract';
+import { useHarnessInstall } from '../../../../../../../hooks/useHarnessInstall';
 import { Button } from '../../../../../../../shared/view/ui';
+import { useOptionalAuth } from '../../../../../../auth/context/AuthContext';
 import SettingsCard from '../../../../SettingsCard';
 import SettingsCollapsible from '../../../../SettingsCollapsible';
 import SettingsGroup from '../../../../SettingsGroup';
@@ -13,6 +16,7 @@ import { useProviderCycles } from '../../../../../../quick-settings-panel/hooks/
 import { findCycleRow, resolveCycleDisplay } from '../../../../../../quick-settings-panel/providerCycleHelpers';
 
 import { hasDualAuthPaths } from './authPaths';
+import HarnessInstallProgress, { HarnessInstallButton } from './HarnessInstallControl';
 import LinkModeSection from './LinkModeSection';
 import { BILLING_LINKS } from './billingLinks';
 import { formatExpiryMoment, resolveLinkExpiryDisplay } from './linkExpiryHelpers';
@@ -74,19 +78,6 @@ const AGENT_DISPLAY_NAMES: Record<AgentProvider, string> = {
   glm: 'GLM',
   hermes: 'Hermes',
   sakana: 'Sakana',
-};
-
-const INSTALL_INFO: Partial<Record<AgentProvider, { label: string; command: string; note?: string }>> = {
-  codex: {
-    label: 'Codex CLI is not installed',
-    command: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
-    note: 'Official standalone installer → ~/.local/bin/codex. An npm -g copy is not detected.',
-  },
-  opencode: {
-    label: 'OpenCode CLI is not installed',
-    command: 'curl -fsSL https://opencode.ai/install | bash',
-    note: 'Official installer → ~/.opencode/bin/opencode. An npm -g copy is not detected.',
-  },
 };
 
 /**
@@ -176,9 +167,8 @@ function CopyButton({ text }: { text: string }) {
  * vendors: it ships the native `@moonshot-ai/kimi-code` CLI (ADR-062), so it
  * gets BOTH the API-key panel and the device-code login row.
  */
-// `onRefreshAuthStatus` stays in the props type (callers unchanged) but is no
-// longer consumed here: the key write it used to refresh moved to the vendors
-// tab (ADR-085), and the login path refreshes through its own handler.
+// `onRefreshAuthStatus` re-probes the CLI after an owner-started install
+// (T-2062) so the missing-CLI banner disappears without a reload.
 /** تنسيق تاريخ ISO للعرض: يحذف السنة إن كانت السنة الحالية. */
 function formatDisplayDate(isoString: string, locale: string): string {
   const date = new Date(isoString);
@@ -190,8 +180,11 @@ function formatDisplayDate(isoString: string, locale: string): string {
   }).format(date);
 }
 
-export default function AccountContent({ agent, authStatus, onLogin, userLink }: AccountContentProps) {
+export default function AccountContent({ agent, authStatus, onLogin, userLink, onRefreshAuthStatus }: AccountContentProps) {
   const { t, i18n } = useTranslation('settings');
+  const isOwner = useOptionalAuth()?.user?.role === 'owner';
+  const installable = isInstallableHarness(agent) ? agent : null;
+  const install = useHarnessInstall(installable, onRefreshAuthStatus);
   const isAntigravity = agent === 'antigravity';
 
   const checking = authStatus.loading || Boolean(userLink?.loading);
@@ -249,7 +242,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
   // رابط صفحة الفوترة — موجود لجميع المزوّدين (BILLING_LINKS كامل).
   const billingHref = BILLING_LINKS[agent];
 
-  const installInfo = INSTALL_INFO[agent];
+  const installInfo = installable ? HARNESS_INSTALL_INFO[installable] : undefined;
   const showInstallBanner = authStatus.installed === false && Boolean(installInfo);
 
   /**
@@ -600,18 +593,26 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
             {installInfo.label}
           </p>
-          <div className="flex items-center gap-2">
+          {/* صفّ واحد: الأمر ثم النسخ ثم «تثبيت» في نهايته المنطقية؛ يلتفّ الزرّ تحته
+              في الشاشة الضيّقة (basis-48) بدل أن يضغط الأمر أو يفيض. */}
+          <div className="flex flex-wrap items-center gap-2">
             <code
               dir="ltr"
               style={{ unicodeBidi: 'isolate' }}
-              className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-[13px] text-foreground"
+              className="min-w-0 flex-1 basis-48 truncate rounded-md bg-muted px-3 py-2 font-mono text-[13px] text-foreground"
             >
               {installInfo.command}
             </code>
             <CopyButton text={installInfo.command} />
+            {isOwner && installable && (
+              <HarnessInstallButton provider={installable} state={install.state} onStart={() => void install.start()} />
+            )}
           </div>
           {installInfo.note && (
             <p className="text-[13px] leading-relaxed text-muted-foreground">{installInfo.note}</p>
+          )}
+          {isOwner && installable && (
+            <HarnessInstallProgress provider={installable} state={install.state} />
           )}
           </div>
         </SettingsCard>

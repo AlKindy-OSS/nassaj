@@ -836,6 +836,7 @@ const TEXT_KINDS = new Set(['stream_delta', 'text', 'thinking']);
 const STRUCTURED_TOOL_KINDS = new Set(['tool_use', 'tool_result']);
 const KNOWN_VISIBLE_UNSUPPORTED_KINDS = new Set([
   'status',
+  'notice',
   'permission_request',
   'permission_cancelled',
   'interactive_prompt',
@@ -1046,14 +1047,16 @@ export class ShadowContentIntegrityAccumulator {
       && kind !== 'complete'
       && kind !== 'error'
     ) {
-      if (
+      // B-1624: a live-only `notice` (e.g. Codex user stop) arrives after `complete`
+      // by design, as the `error` frame it replaced did; it is not late content.
+      if (kind !== 'notice' && (
         kind !== null
         || hasSemanticAccessor(inspected)
         || inspected.present.has('content')
         || inspected.present.has('text')
         || inspected.present.has('input')
         || inspected.present.has('result')
-      ) {
+      )) {
         this.lateContentAfterTerminal = true;
       }
       return this.contentObservation(kind ? 'content' : 'ignored', null);

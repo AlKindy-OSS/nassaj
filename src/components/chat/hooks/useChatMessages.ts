@@ -3,6 +3,7 @@
  * Converts NormalizedMessage[] from the session store into ChatMessage[] for the UI.
  */
 
+import { isTerminalSubagentState, preferSubagentRecord } from '../../../../shared/subagent-states';
 import type { NormalizedMessage } from '../../../stores/useSessionStore';
 import type { ChatMessage, ProgressPlan, ProgressSubagent, SubagentChildTool } from '../types/types';
 import { parseLatestDeclaredProgress, type DeclaredProgress } from './declaredProgress';
@@ -58,11 +59,28 @@ export function attachTurnDurations(messages: ChatMessage[]): ChatMessage[] {
 const LEGACY_CONTAINER_TOOLS: ReadonlySet<string> = new Set(['Task', 'Agent']);
 
 /**
- * Latest lifecycle of the subagent a container delegates to (ADR-199). A
- * terminal settlement `status` row wins, then the result row, then the call's
- * `started`. When the result row is outside the loaded window (only an inline
- * result survives), a resolved, non-background result settles a still-open
- * state, as before the neutral fields existed.
+ * The call's record, settled by a resolved, non-background result whose result
+ * row is outside the loaded window (only an inline result survives), as before
+ * the neutral fields existed.
+ */
+function resolvedCall(
+  call: ProgressSubagent | undefined, resolved: boolean, isError: boolean,
+): ProgressSubagent | undefined {
+  if (!call || !resolved || (call.state !== 'started' && call.state !== 'running')) return call;
+  return { ...call, state: isError ? 'failed' : 'completed' };
+}
+
+/** `record` carrying `winner`'s state and inferred cause (a measured winner drops the cause). */
+function withLifecycle(record: ProgressSubagent, winner: ProgressSubagent): ProgressSubagent {
+  const { inferredCause: _previousCause, ...rest } = record;
+  return { ...rest, state: winner.state, ...(winner.inferredCause ? { inferredCause: winner.inferredCause } : {}) };
+}
+
+/**
+ * Latest lifecycle of the subagent a container delegates to (ADR-199): the
+ * result row, else the call; a `status` row (live update or settlement) then
+ * merges in. Study §3.2 (P0): a terminal state is never reopened, and an
+ * inferred `unknown`/`stopped (owner)` never replaces a measured outcome.
  */
 function effectiveSubagent(
   call: ProgressSubagent | undefined,
@@ -71,29 +89,14 @@ function effectiveSubagent(
   isError: boolean,
   settlement?: ProgressSubagent,
 ): ProgressSubagent | undefined {
-  const latest = result ?? call;
-  if (settlement && latest) {
-    const { state, tools, ...fields } = settlement;
-    const settledState = settlementIsTerminal(settlement.state)
-      ? settlement.state
-      : settlementIsTerminal(latest.state) ? latest.state : state;
-    return {
-      ...latest,
-      ...fields,
-      state: settledState,
-      ...(tools ? { tools: mergeSubagentTools(latest.tools, tools) } : {}),
-    };
-  }
-  if (result) return result;
-  if (!call) return undefined;
-  if (resolved && (call.state === 'started' || call.state === 'running')) {
-    return { ...call, state: isError ? 'failed' : 'completed' };
-  }
-  return call;
-}
-
-function settlementIsTerminal(state: ProgressSubagent['state']): boolean {
-  return state === 'completed' || state === 'failed';
+  const latest = result ?? resolvedCall(call, resolved, isError);
+  if (!settlement || !latest) return latest;
+  const { state: _state, inferredCause: _cause, tools, ...fields } = settlement;
+  return withLifecycle({
+    ...latest,
+    ...fields,
+    ...(tools ? { tools: mergeSubagentTools(latest.tools, tools) } : {}),
+  }, preferSubagentRecord(latest, settlement));
 }
 
 /** Merge event deltas without losing earlier child tools or their later status. */
@@ -105,7 +108,7 @@ function mergeSubagentTools(
   for (const tool of [...(previous ?? []), ...(updates ?? [])]) {
     const key = tool.id || `legacy:${tool.name}`;
     const existing = merged.get(key);
-    const existingSettled = existing && ['done', 'success', 'completed', 'failed', 'error']
+    const existingSettled = existing && ['done', 'success', 'completed', 'failed', 'error', 'stopped', 'unknown']
       .includes(existing.status ?? '');
     merged.set(key, existing
       ? { ...existing, ...tool, ...(existingSettled && tool.status === 'running'
@@ -127,16 +130,13 @@ function collectSubagentSettlements(messages: NormalizedMessage[]): Map<string, 
     if (msg.kind !== 'status' || !msg.subagent?.id) continue;
     const previous = byId.get(msg.subagent.id);
     const next = msg.subagent;
-    byId.set(next.id, {
+    byId.set(next.id, withLifecycle({
       ...previous,
       ...next,
-      state: previous && settlementIsTerminal(previous.state) && !settlementIsTerminal(next.state)
-        ? previous.state
-        : next.state,
       ...(previous?.tools || next.tools
         ? { tools: mergeSubagentTools(previous?.tools, next.tools) }
         : {}),
-    });
+    }, preferSubagentRecord(previous, next)));
   }
   return byId;
 }
@@ -504,13 +504,18 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           : null;
 
         const settlement = msg.toolId ? settlements.get(msg.toolId) : undefined;
-        const settled = settlement?.state === 'completed' || settlement?.state === 'failed';
+        const settled = isTerminalSubagentState(settlement?.state);
         // A background launch ack is not completion (B-63/T-143); its later
         // settlement row is (ADR-199 P1c).
-        const isComplete = (Boolean(toolResult) && !isAsyncLaunchAck(toolResult?.toolUseResult)) || settled;
+        const resolvedByResult = Boolean(toolResult) && !isAsyncLaunchAck(toolResult?.toolUseResult);
+        // Only a real result resolves the call; a settlement merges in after, so an
+        // inferred end is never mistaken for a measured completion (P0).
         const subagent = effectiveSubagent(
-          msg.subagent, resultRow?.subagent, isComplete, Boolean(toolResult?.isError), settlement,
+          msg.subagent, resultRow?.subagent, resolvedByResult, Boolean(toolResult?.isError), settlement,
         );
+        // History carries the server's inferred end on the launch-ack row itself,
+        // with no separate settlement row (C1).
+        const isComplete = resolvedByResult || settled || isTerminalSubagentState(subagent?.state);
         const plan = rowPlan(msg, resultRow);
 
         converted.push({
@@ -573,6 +578,21 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           failedCommand: msg.command,
           ...sharedMetadata,
         });
+        break;
+
+      // B-1624: a neutral notice (e.g. a Codex user stop) — a muted line, not
+      // an error bubble.
+      case 'notice':
+        if (msg.content) {
+          converted.push({
+            id: msg.id,
+            type: 'assistant',
+            content: msg.content,
+            timestamp: msg.timestamp,
+            isNotice: true,
+            ...sharedMetadata,
+          });
+        }
         break;
 
       case 'interactive_prompt':

@@ -42,7 +42,15 @@ export default function SettledPlanStatus({ progress, provider, providerLabel }:
         defaultValue: 'Sub-agents: {{done}}/{{total}}',
       })
     : null;
-  const detail = [tasksText, agentsText].filter(Boolean).join(' · ');
+  const unsuccessful = progress.agentsUnsuccessful ?? 0;
+  const unsuccessfulText = unsuccessful > 0
+    ? t('runProgress.agentsUnsuccessfulTooltip', {
+        count: unsuccessful,
+        n: localeNum(unsuccessful),
+        defaultValue: '{{n}} ended without success',
+      })
+    : null;
+  const detail = [tasksText, agentsText, unsuccessfulText].filter(Boolean).join(' · ');
 
   return (
     <div className="mb-3 w-full" data-testid="settled-plan-status">

@@ -69,7 +69,7 @@ function renderAgent(rows: NormalizedMessage[]) {
       progress={runProgress}
     />,
   );
-  const button = screen.getByRole('button', { name: /general — (Running|Done)/ });
+  const button = screen.getByRole('button', { name: /general — (Running|Succeeded)/ });
   fireEvent.click(button);
 }
 

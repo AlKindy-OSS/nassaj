@@ -78,6 +78,12 @@ type UiPreferences = {
    * الاختيار المثبَّت لكل محادثة (`coordination_level_${sessionId}`) يبقى الغالب.
    */
   defaultCoordinationLevel: CoordinationLevel;
+  /**
+   * Last version whose "What's new" highlights this user dismissed (`''` = none).
+   * Lives here, not in a per-browser key, so the popup shows once per user
+   * across devices (src/components/version-upgrade/whatsNew/useWhatsNew.ts).
+   */
+  whatsNewLastSeenVersion: string;
 };
 
 type UiPreferenceKey = keyof UiPreferences;
@@ -95,6 +101,14 @@ const AGENT_ID_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 const parseAgentId = (value: unknown, fallback: string): string => {
   if (value === '') return '';
   return typeof value === 'string' && AGENT_ID_PATTERN.test(value) ? value : fallback;
+};
+
+/** A dotted release version (e.g. `2.3.1.11`) or `''`; anything else keeps the fallback. */
+const VERSION_PATTERN = /^[0-9][0-9A-Za-z.+-]{0,31}$/;
+
+const parseVersionString = (value: unknown, fallback: string): string => {
+  if (value === '') return '';
+  return typeof value === 'string' && VERSION_PATTERN.test(value) ? value : fallback;
 };
 
 /** قيمة تالفة أو مجهولة تسقط على الافتراضي (`delegate`) لا على `direct`. */
@@ -144,10 +158,11 @@ const DEFAULTS: UiPreferences = {
   codeHighlightScope: DEFAULT_CODE_HIGHLIGHT_SCOPE,
   defaultSettingsAgent: '',
   defaultCoordinationLevel: 'delegate',
+  whatsNewLastSeenVersion: '',
 };
 
 /**
- * Keys whose value is a string enum rather than a boolean. Kept as one list so
+ * Keys whose value is a string (enum or version) rather than a boolean. Kept as one list so
  * the legacy-migration path below cannot silently coerce a new enum key to
  * `false` — which is exactly what would happen under the old boolean-only reduce.
  */
@@ -157,6 +172,7 @@ const ENUM_KEYS = new Set<UiPreferenceKey>([
   'enterBehavior',
   'defaultSettingsAgent',
   'defaultCoordinationLevel',
+  'whatsNewLastSeenVersion',
 ]);
 
 const PREFERENCE_KEYS = Object.keys(DEFAULTS) as UiPreferenceKey[];
@@ -217,6 +233,9 @@ const parsePreferenceValue = <K extends UiPreferenceKey>(
   }
   if (key === 'defaultCoordinationLevel') {
     return parseCoordinationLevel(value, fallback as CoordinationLevel) as UiPreferences[K];
+  }
+  if (key === 'whatsNewLastSeenVersion') {
+    return parseVersionString(value, fallback as string) as UiPreferences[K];
   }
   return parseBoolean(value, fallback as boolean) as UiPreferences[K];
 };

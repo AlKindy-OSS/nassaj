@@ -7,10 +7,16 @@
  *   error with a wait time, never a session failure: nothing signs out.
  * - A successful sign-out with `scope: 'all'` ended every token the user
  *   held; the login page says so once (one-shot notice, like ssoReauth).
+ * - B-1652: a sign-out the server could not complete (5xx, 400
+ *   ambiguous_authentication, network failure) after the local session was
+ *   already cleared leaves a one-shot warning: the server session may survive.
  */
 
 export const LOGIN_LOCKED_CODE = 'login_temporarily_locked';
 export const SIGNED_OUT_EVERYWHERE_NOTICE_KEY = 'nassaj:signed-out-everywhere';
+export const SIGN_OUT_INCOMPLETE_NOTICE_KEY = 'nassaj:sign-out-incomplete';
+/** Fired on `window` when the incomplete notice is recorded after the login page mounted. */
+export const SIGN_OUT_INCOMPLETE_EVENT = 'nassaj:sign-out-incomplete';
 
 type NoticeStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type TranslateLock = (key: string, options: { minutes: number; ns?: string }) => string;
@@ -51,31 +57,75 @@ function sessionStore(storage?: NoticeStorage): NoticeStorage | null {
   }
 }
 
-/** Leaves the one-shot "signed out on all devices" notice for the login page. */
-export function recordSignedOutEverywhereNotice(storage?: NoticeStorage): void {
+function recordNotice(key: string, storage?: NoticeStorage): void {
   try {
-    sessionStore(storage)?.setItem(SIGNED_OUT_EVERYWHERE_NOTICE_KEY, '1');
+    sessionStore(storage)?.setItem(key, '1');
   } catch {
     // Without storage the notice is simply not shown.
   }
 }
 
-/** Whether the notice is pending (does not clear it). */
-export function hasSignedOutEverywhereNotice(storage?: NoticeStorage): boolean {
+function hasNotice(key: string, storage?: NoticeStorage): boolean {
   try {
-    return sessionStore(storage)?.getItem(SIGNED_OUT_EVERYWHERE_NOTICE_KEY) === '1';
+    return sessionStore(storage)?.getItem(key) === '1';
   } catch {
     return false;
   }
 }
 
-/** Reads and clears the notice. */
-export function consumeSignedOutEverywhereNotice(storage?: NoticeStorage): boolean {
-  const present = hasSignedOutEverywhereNotice(storage);
+function consumeNotice(key: string, storage?: NoticeStorage): boolean {
+  const present = hasNotice(key, storage);
   try {
-    if (present) sessionStore(storage)?.removeItem(SIGNED_OUT_EVERYWHERE_NOTICE_KEY);
+    if (present) sessionStore(storage)?.removeItem(key);
   } catch {
     // Nothing to clear when storage is unavailable.
   }
   return present;
+}
+
+/** Leaves the one-shot "signed out on all devices" notice for the login page. */
+export function recordSignedOutEverywhereNotice(storage?: NoticeStorage): void {
+  recordNotice(SIGNED_OUT_EVERYWHERE_NOTICE_KEY, storage);
+}
+
+/** Whether the notice is pending (does not clear it). */
+export function hasSignedOutEverywhereNotice(storage?: NoticeStorage): boolean {
+  return hasNotice(SIGNED_OUT_EVERYWHERE_NOTICE_KEY, storage);
+}
+
+/** Reads and clears the notice. */
+export function consumeSignedOutEverywhereNotice(storage?: NoticeStorage): boolean {
+  return consumeNotice(SIGNED_OUT_EVERYWHERE_NOTICE_KEY, storage);
+}
+
+/**
+ * B-1652: leaves the one-shot "sign-out did not reach the server" warning and
+ * tells an already-mounted login page, since the answer arrives after the
+ * local session was cleared.
+ */
+export function recordSignOutIncompleteNotice(storage?: NoticeStorage): void {
+  recordNotice(SIGN_OUT_INCOMPLETE_NOTICE_KEY, storage);
+  try {
+    window.dispatchEvent(new Event(SIGN_OUT_INCOMPLETE_EVENT));
+  } catch {
+    // No window (tests with injected storage): the stored notice still shows.
+  }
+}
+
+/** Whether the incomplete warning is pending (does not clear it). */
+export function hasSignOutIncompleteNotice(storage?: NoticeStorage): boolean {
+  return hasNotice(SIGN_OUT_INCOMPLETE_NOTICE_KEY, storage);
+}
+
+/** Reads and clears the incomplete warning. */
+export function consumeSignOutIncompleteNotice(storage?: NoticeStorage): boolean {
+  return consumeNotice(SIGN_OUT_INCOMPLETE_NOTICE_KEY, storage);
+}
+
+/**
+ * Whether a sign-out answer leaves the server session possibly alive: any
+ * non-2xx except 401, which means the session was already gone.
+ */
+export function isIncompleteSignOutStatus(status: number): boolean {
+  return (status < 200 || status >= 300) && status !== 401;
 }

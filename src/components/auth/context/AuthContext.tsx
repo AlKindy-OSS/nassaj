@@ -24,7 +24,13 @@ import type {
   OnboardingStatusPayload,
 } from '../types';
 import { parseJsonSafely, resolveApiErrorMessage } from '../utils';
-import { LOGIN_LOCKED_CODE, readLoginLock, recordSignedOutEverywhereNotice } from '../loginLock';
+import {
+  isIncompleteSignOutStatus,
+  LOGIN_LOCKED_CODE,
+  readLoginLock,
+  recordSignedOutEverywhereNotice,
+  recordSignOutIncompleteNotice,
+} from '../loginLock';
 import {
   hydratePreferencesFromServer,
   setPreferenceIdentityAuthenticated,
@@ -799,9 +805,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const wallet = await readAccountWallet(undefined, true);
       await mutateAccountWallet('/api/auth/logout-all', 'POST', 'logout_all',
         { expectedGeneration: wallet.generation }, { identityBypass: true });
-    } catch {
+    } catch (caught) {
       // An already-absent session, or a 204 without a body, both end here; the
       // reconciliation below reads the authoritative outcome either way.
+      // B-1652: a server failure (500 sign_out_incomplete) is said out loud.
+      if (caught instanceof AccountWalletError && isIncompleteSignOutStatus(caught.status)) {
+        recordSignOutIncompleteNotice();
+      }
     }
     clearStoredToken();
     retryIdentityReconciliation('signed_out');
@@ -1099,11 +1109,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       void request.then(async (response: Response) => {
         const payload = await parseJsonSafely<{ scope?: string; endSessionUrl?: string }>(response);
         if (response.ok && payload?.scope === 'all') recordSignedOutEverywhereNotice();
+        // B-1652: the local session is already gone; a refused or failed server
+        // sign-out may leave the server session alive, so the user is told.
+        if (isIncompleteSignOutStatus(response.status)) recordSignOutIncompleteNotice();
         // ADR-H20 N4: an SSO session goes on to the IdP end_session, which
         // signs this browser out of every linked app.
         if (response.ok) followEndSession(payload?.endSessionUrl);
       }).catch((caughtError: unknown) => {
         console.error('Logout endpoint error:', caughtError);
+        recordSignOutIncompleteNotice();
       });
       return;
     }

@@ -45,7 +45,11 @@ export type HarnessAuditAction =
   | 'harness_snapshot_pruned'
   | 'harness_snapshot_aside_pruned'
   | 'harness_recovery_acknowledged'
-  | 'harness_reconcile_resolved';
+  | 'harness_reconcile_resolved'
+  // T-2062 owner CLI install. Metadata: provider, sha256, exitCode, cause.
+  | 'harness_install_started'
+  | 'harness_install_succeeded'
+  | 'harness_install_failed';
 
 /** Output of one bounded child run. */
 export interface RunResult {
@@ -67,6 +71,8 @@ export interface InternalJob extends HarnessUpdateJob {
   retainLease: boolean;
   /** Promise that settles when the job leaves a running state (for tests). */
   done: Promise<void>;
+  /** T-2062: 'install' jobs are fresh CLI installs; absent = update. */
+  kind?: 'update' | 'install';
 }
 
 const jobs = new Map<string, InternalJob>();
@@ -99,6 +105,7 @@ export function toPublic(job: InternalJob): HarnessUpdateJob {
     fromVersion: job.fromVersion,
     toVersion: job.toVersion,
     error: job.error ? cloneJobError(job.error) : null,
+    ...(job.kind ? { kind: job.kind } : {}),
   };
 }
 
@@ -204,6 +211,9 @@ const FAILURE_MESSAGES_AR: Readonly<Record<string, string>> = Object.freeze({
   STORE_IN_USE: 'مخزن بيانات مفتوح لدى عملية أخرى، فأُلغي التحديث.',
   STORE_ACCESS_UNPROVABLE: 'تعذّر إثبات أن مخازن البيانات غير مستخدمة، فأُلغي التحديث.',
   SNAPSHOT_LAYOUT_MISMATCH: 'بنية التثبيت لا تطابق المتوقَّع، فرُفض التحديث.',
+  install_failed: 'فشل تثبيت أداة التشغيل.',
+  install_timeout: 'تجاوز التثبيت المهلة المحدّدة فأُوقف.',
+  script_rejected: 'رُفض ملف التثبيت المنزَّل فلم يُشغَّل.',
 });
 
 /**
@@ -226,6 +236,10 @@ export function failJob(
     finished: true,
     finishedAt: Date.now(),
   });
+  if (job.kind === 'install') {
+    audit('harness_install_failed', { provider: job.provider, exitCode, cause: code }, job.userId);
+    return;
+  }
   audit('harness_update_failed', {
     provider: job.provider,
     fromVersion: job.fromVersion,

@@ -310,6 +310,18 @@ describe('shadow content integrity accumulator', () => {
     assert.equal(replayedSummary.duplicateEventCount, 1);
   });
 
+  it('B-1624: a notice after complete is not late content, other kinds still are', () => {
+    const noticed = accumulator();
+    terminal(noticed);
+    noticed.observe({ kind: 'notice', provider: 'codex', content: 'Stopped 2 processes' });
+    assert.equal(noticed.consumeLateContentAfterTerminal(), false);
+
+    const late = accumulator();
+    terminal(late);
+    late.observe({ kind: 'text', content: 'after the end' });
+    assert.equal(late.consumeLateContentAfterTerminal(), true);
+  });
+
   it('fails content integrity closed on schema gaps, overflow, and reentrancy', () => {
     const schemaGap = accumulator();
     schemaGap.observe({ kind: 'future_visible_kind', content: 'visible but unsupported' });

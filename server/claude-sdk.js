@@ -651,6 +651,32 @@ function announceUnresolvedWorkflows(sessionId, toolUseIds, send) {
 }
 
 /**
+ * Whether the owner stopped this run (B-1399): STOP either kills the CLI
+ * (controller aborted, B-1136) or answers interrupt(). The one criterion for
+ * both a clean iterator end and a thrown one, so the exit cause matches.
+ */
+function isOwnerStop(abortController, queryInstance) {
+  return Boolean(abortController?.signal.aborted || queryInstance?.__nassajAborted
+    || queryInstance?.__nassajStopRequested);
+}
+
+/**
+ * Agent-progress P0 (study §3.2, N3): at the exit of a run's CLI process, sends
+ * the inferred `stopped (owner)` / `unknown (process-exit)` record of every
+ * delegation the run launched that never settled. Never throws: progress must
+ * not break the end of a run.
+ */
+async function emitDelegationExit(foldReady, cause, sessionId, send) {
+  if (!foldReady) return;
+  try {
+    const fold = await foldReady;
+    for (const row of fold.processExit(cause, sessionId)) send(row);
+  } catch (error) {
+    console.warn('[Claude] delegation exit settlement skipped:', error?.message || error);
+  }
+}
+
+/**
  * B-1120: per-run view of the CLI's tasks, fed with RAW SDK messages. Measured on
  * CLI 2.1.269: every task (foreground or background, agent or bash) emits
  * system/task_started{task_id,is_backgrounded}, then task_updated{patch.status} and
@@ -3418,6 +3444,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // B-1399: out here too — an interrupt() that answered leaves the controller
   // un-aborted, so the catch reads the abort mark on the query handle instead.
   let queryInstance = null;
+  // Agent-progress P0 (N3): this run's progress fold, reachable from the catch so
+  // the process-exit settlement runs on every end of the CLI process.
+  let exitProgressFold = null;
 
   try {
     // B-1399: a new turn on a session whose previous run already ended must not
@@ -4368,6 +4397,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     const progressFoldReady = sdkOptions.resume
       ? createSeededLiveFold(sessionId || null, sdkOptions.resume)
       : Promise.resolve(createClaudeProgressFold('live', sessionId || null));
+    exitProgressFold = progressFoldReady;
     agentSidecars.start(progressFoldReady, sendAndBuffer, ws, clientMsgIdField,
       responseToMessageIdField);
     // B-1401: tool_use ids of this run's Workflow calls not yet resolved. The tool
@@ -4768,7 +4798,12 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // An explicit abort removes its active entry while interrupting the same
     // iterator.  Do not turn that successful interruption into a `complete`
     // verdict (and, crucially, never attach a completed duration to it).
-    const turnAborted = Boolean(queryInstance?.__nassajAborted);
+    const turnAborted = isOwnerStop(runAbortController, queryInstance);
+    // Agent-progress P0: the query iterator ended, so the CLI process exited.
+    // Delegations this run launched and that never settled are stopped (owner
+    // STOP) or unknown (process exit); turn ends (`result`) settle nothing.
+    await emitDelegationExit(exitProgressFold, turnAborted ? 'owner' : 'process-exit',
+      capturedSessionId || sessionId || null, sendAndBuffer);
 
     // Clean up session on completion
     if (capturedSessionId) {
@@ -4831,8 +4866,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // B-1399: a STOP ends the run either by killing the CLI (controller aborted,
     // B-1136) or by an answered interrupt() after which the CLI may still exit
     // non-zero. Both are the user's own stop, never a failure.
-    const userAborted = Boolean(runAbortController?.signal.aborted || queryInstance?.__nassajAborted
-      || queryInstance?.__nassajStopRequested);
+    const userAborted = isOwnerStop(runAbortController, queryInstance);
     if (userAborted) {
       permissionOutcome = 'cancelled';
       console.log(`[Claude] run ended by user stop: ${error?.message || error}`);
@@ -4843,6 +4877,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // T-1910 S2: a CLI that ignored its bound session id may have acted on the prompt
     // before it closed; its outcome is unknown, never a plain failure or a stop.
     if (permissionSessionMismatch) permissionOutcome = 'reconciled_unknown';
+    await emitDelegationExit(exitProgressFold, userAborted ? 'owner' : 'process-exit',
+      capturedSessionId || sessionId || null,
+      (payload) => bufferThenSend(ws, capturedSessionId || sessionId || null, payload));
 
     // B-40a: cancel dangling tool approvals so approval promises resolve
     // immediately rather than leaking until TOOL_APPROVAL_TIMEOUT_MS.

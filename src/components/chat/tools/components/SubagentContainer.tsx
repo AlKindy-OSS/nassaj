@@ -5,6 +5,8 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../../../..
 import { resolveTextDirection } from '../../../../utils/textDirection';
 import { formatSubagentTitle } from '../subagentTitle';
 import { isAsyncLaunchAckResult } from '../../utils/asyncLaunchAck';
+import { OutcomeIcon } from '../../view/subcomponents/SubagentOutcome';
+import { outcomeLabel, outcomeTooltip } from '../../view/subcomponents/subagentOutcomeText';
 
 import { CollapsibleSection } from './CollapsibleSection';
 
@@ -61,6 +63,8 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
 
   const prompt = parsedInput?.prompt || '';
   const { childTools, currentToolIndex, isComplete } = subagentState;
+  const endState = subagent?.state;
+  const unsuccessfulEnd = endState === 'failed' || endState === 'stopped' || endState === 'unknown' ? endState : null;
   const currentTool = currentToolIndex >= 0 ? childTools[currentToolIndex] : null;
 
   const title = formatSubagentTitle(
@@ -106,8 +110,17 @@ export const SubagentContainer: React.FC<SubagentContainerProps> = ({
           </div>
         )}
 
-        {/* Completion status */}
-        {isComplete && (
+        {/* Completion status: the success line only for a successful end (P0). */}
+        {isComplete && unsuccessfulEnd && (
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="subagent-outcome">
+            <OutcomeIcon outcome={unsuccessfulEnd} pulse={false} />
+            <span>{outcomeLabel(t, unsuccessfulEnd, subagent?.inferredCause)}</span>
+            <span className="text-muted-foreground/70" data-testid="subagent-outcome-cause">
+              {outcomeTooltip(t, unsuccessfulEnd, subagent?.inferredCause)}
+            </span>
+          </div>
+        )}
+        {isComplete && !unsuccessfulEnd && (
           <div className="mt-1 flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
             <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />

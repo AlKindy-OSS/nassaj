@@ -1608,14 +1608,16 @@ async function runCodexTurnCleanup(reason, tag, launchMs) {
 }
 
 /**
- * User stop and breaker show the user which processes were stopped (§6). Both stay `error`
- * frames: a live `status` frame with text re-arms the chat spinner, and this notice arrives
- * after the abort route has already sent the turn's `complete`.
+ * User stop and breaker show the user which processes were stopped (§6). The notice arrives
+ * after the abort route has already sent the turn's `complete`, so it is never a `status`
+ * frame (its text re-arms the chat spinner). B-1624: a user stop is the user's own choice,
+ * so it is a neutral `notice` (no error colour or sound, no failed-send card); the breaker
+ * stays an `error`.
  */
 function reportCodexTurnCleanup(ws, reason, cleanup, breach, fields) {
   if (reason === 'error' || (reason === 'user_abort' && cleanup.stopped.length === 0)) return;
   sendMessage(ws, createNormalizedMessage({
-    kind: 'error',
+    kind: reason === 'breaker' ? 'error' : 'notice',
     code: reason === 'breaker' ? 'codex_resource_breach' : 'codex_processes_stopped',
     content: codexStoppedProcessesNotice(reason, cleanup, breach),
     provider: 'codex',

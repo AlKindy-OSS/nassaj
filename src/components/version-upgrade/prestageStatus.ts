@@ -46,14 +46,36 @@ export interface PrestageNotice {
   until?: string;
 }
 
-const STOPPED_REASONS = new Set(['policy_off', 'kill_switch']);
+/**
+ * Owner-facing reason codes (closed vocabulary of
+ * server/services/update-prestage-status.js) mapped to one plain line each.
+ * Anything unlisted, including `other`, reads as "not prepared yet".
+ */
+const REASON_KEYS: Readonly<Record<string, string>> = {
+  low_memory: 'lowMemory',
+  low_disk: 'lowDisk',
+  policy_off: 'stopped',
+  kill_switch: 'stopped',
+  resource_busy: 'busy',
+  settling: 'settling',
+  job_active: 'otherUpdate',
+  slot_busy: 'otherUpdate',
+  maintenance: 'maintenance',
+  backoff: 'willRetry',
+  interrupted: 'willRetry',
+  failed: 'gaveUp',
+  blocked: 'readinessBlocked',
+  rejected: 'readinessBlocked',
+  discovery_failed: 'sourceUnreachable',
+  unsupported_mode: 'unavailable',
+  not_owner_node: 'unavailable',
+  release_unverified: 'unavailable',
+};
 
 /** The plain reason line for a release that is not prepared; never a raw code. */
 function reasonKey(reason: string): string {
-  if (reason === 'low_memory') return 'versionUpdate.prestage.lowMemory';
-  if (reason === 'low_disk') return 'versionUpdate.prestage.lowDisk';
-  if (STOPPED_REASONS.has(reason)) return 'versionUpdate.prestage.stopped';
-  return 'versionUpdate.prestage.notYet';
+  const suffix = Object.prototype.hasOwnProperty.call(REASON_KEYS, reason) ? REASON_KEYS[reason] : 'notYet';
+  return `versionUpdate.prestage.${suffix}`;
 }
 
 /**

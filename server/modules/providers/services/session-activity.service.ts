@@ -155,3 +155,14 @@ export function readSessionActivity(
   // JSON.stringify drop the field and turn "idle" into "field absent".
   return { isProcessing: Boolean(probe(id)) };
 }
+
+/**
+ * Agent-progress P0 (N3): the same injected liveness predicate, for a caller
+ * that already authorized the read (the history egress). No visibility gate
+ * and no claude fallback: an unwired provider answers null ("unknown"), so the
+ * history overlay is skipped instead of declaring every agent dead.
+ */
+export function probeSessionLiveness(sessionId: string, provider: string): boolean | null {
+  const probe = livenessProbes[provider.trim().toLowerCase()];
+  return typeof probe === 'function' ? Boolean(probe(sessionId)) : null;
+}

@@ -163,7 +163,8 @@ describe('Claude background agents close live from status rows', () => {
   it('the settlement status rows close both agents without counting them twice', () => {
     const p = feed(CLAUDE_ROWS).progress();
     assert.deepEqual(p.agents.map((a) => a.status), ['done', 'done']);
-    assert.deepEqual([p.agentsDone, p.agentsTotal], [2, 2]);
+    assert.deepEqual([p.agentsDone + (p.agentsUnsuccessful ?? 0), p.agentsTotal], [2, 2]);
+    assert.deepEqual(p.agents.map((a) => a.outcome), ['completed', 'failed'], 'P0: failed is not counted as done');
     assert.equal(p.activeSubagent, null);
   });
 
