@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:8b543087e738cf74711de3ad4f5faeecb0c40dd06d2952410b5c4d2eedad5e37",
+  "reviewedSiteDigest": "sha256:614f04d0fcaa72d981c901a8630942359de22fc46b7a8441a04ee764cf979656",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -165,6 +165,16 @@
       "footprint": "local",
       "test": "managed-claude-launcher.test.ts"
     },
+    "runtime#codex.models-refresh": {
+      "classification": "provider_effect_enclosed",
+      "owner": "Codex per-user models cache refresh",
+      "purpose": "catalog",
+      "actorSource": "canonical authenticated caller principal of the enclosing catalog probe",
+      "gate": "runs only inside the caller's dedicated ADR-134 catalog permit scope (no scope refuses); executes that permit's launchIdentity; SIGKILL when the permit's probe settles (the caller waits out the 22 s hard timeout, so this only fires on early probe end; not counted as a failure)",
+      "adapter": "runCodexModelsRefreshProcess",
+      "footprint": "external",
+      "test": "codex-models-refresh.test.ts"
+    },
     "runtime#codex.login": {
       "classification": "provider_effect_denied",
       "owner": "Codex credential writer",
@@ -180,9 +190,18 @@
       "owner": "provider quota refresh",
       "purpose": "quota",
       "actorSource": "authenticated provider-route principal",
-      "gate": "one-shot ADR-134 quota permit on live refresh only",
-      "adapter": "ProviderQuotaDeps.runEffect",
+      "gate": "one ADR-134 local-footprint quota permit per live GET (T-1910); cache hits need none",
+      "adapter": "ProviderQuotaDeps.read -> runAuthorizedInProcessRead",
       "test": "provider-quota.service.test.ts"
+    },
+    "runtime#provider.quota.in-process-read": {
+      "classification": "provider_effect_enclosed",
+      "owner": "provider quota refresh (codex, glm, kimi)",
+      "purpose": "quota",
+      "actorSource": "authenticated provider-route principal",
+      "gate": "T-1910 local-footprint permit; server identity recorded as child in the start CAS under the in-process read capability; GET to allowlisted origin; capability only to gateway-minted handles, redirect refused, one deadline",
+      "adapter": "runAuthorizedInProcessRead",
+      "test": "in-process-read.test.ts"
     },
     "runtime#provider.balance": {
       "classification": "provider_effect_enclosed",

@@ -49,6 +49,9 @@ export type AuthUserPayload = {
   // servers — read as `false` (single user), which hides per-conversation
   // attribution rather than showing avatars nobody needs.
   isMultiUser?: boolean;
+  // True when the server answered through the single-purpose forced-rotation
+  // cookie: the client must re-enter password-change-only mode (B-1533).
+  passwordChangeSession?: boolean;
 };
 
 export type OnboardingStatusPayload = {

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 // triggers need `;` inside BEGIN/END, so it is admitted only by exact reviewed text.
 // ADR-194 (T-1962): the four additive SSO DDL statements (one per exec) and the
 // two TTL sweeps of expired test evidence at boot are reviewed effects too.
+// ADR-196 (T-1970): the four additive session_shares DDL statements (one per exec).
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -64,6 +65,30 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE INDEX IF NOT EXISTS document_shares_project ON document_shares(project_id)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS session_shares (\n    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, project_id TEXT NOT NULL,\n    owner_user_id INTEGER NOT NULL, token_hash TEXT NOT NULL, created_by INTEGER NOT NULL,\n    created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, revoke_reason TEXT,\n    snapshot BLOB, snapshot_sha256 TEXT NOT NULL, up_to_message_id TEXT NOT NULL,\n    message_count INTEGER NOT NULL, redaction_counts TEXT NOT NULL,\n    view_count INTEGER NOT NULL DEFAULT 0, last_viewed_at TEXT,\n    sweep_miss_count INTEGER NOT NULL DEFAULT 0,\n    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE\n  )",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS session_shares_session ON session_shares(session_id)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS session_shares_creator ON session_shares(created_by)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS session_shares_liveness ON session_shares(revoked_at, expires_at)",
     "shadow": null
   },
   {

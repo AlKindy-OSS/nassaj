@@ -34,7 +34,6 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test, { after, before } from 'node:test';
@@ -162,7 +161,7 @@ async function probe(method: string, routePath: string, user: TestUser = strange
 before(async () => {
   process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
   closeConnection();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'adr172-probe-'));
+  const root = fs.mkdtempSync('/var/tmp/adr172-probe-');
   process.env.WORKSPACES_ROOT = root;
   process.env.DATABASE_PATH = path.join(root, 'db.sqlite');
   await initializeDatabase();
@@ -433,7 +432,7 @@ test('B-1423: create-project never discloses a registered path to a non-member',
   // Validation and admission both read the env root per call, so a case-local
   // temp root reaches the membership gate without touching the real home.
   const savedRoot = process.env.WORKSPACES_ROOT;
-  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'b1423-'));
+  const sandbox = fs.mkdtempSync('/var/tmp/b1423-');
   process.env.WORKSPACES_ROOT = sandbox;
   const registered = path.join(sandbox, 'registered');
   fs.mkdirSync(registered);

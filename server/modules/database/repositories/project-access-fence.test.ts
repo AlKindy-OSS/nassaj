@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach } from 'node:test';
 
@@ -35,7 +34,9 @@ const createUser = (role: 'owner' | 'admin' | 'user' = 'user'): number => {
 };
 
 before(async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-fence-'));
+  // B-1373: os.tmpdir() may sit under a hidden entry of the passwd home, which
+  // is refused as a project root; use a fixed non-hidden on-disk root.
+  root = fs.mkdtempSync('/var/tmp/project-fence-');
   process.env.DATABASE_PATH = path.join(root, 'auth.db');
   process.env.WORKSPACES_ROOT = root;
   process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
@@ -133,7 +134,7 @@ test('projectless sessions require the requested consent class and canonical roo
   assert.ok(captureWorkspaceTopologyFence(location, participant, { sessionId, consent: 'control' }));
   assert.equal(captureWorkspaceTopologyFence(location, guessed, { sessionId, consent: 'read' }), null);
 
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'project-fence-outside-'));
+  const outside = fs.mkdtempSync('/var/tmp/project-fence-outside-');
   const dangling = path.join(root, 'dangling');
   const escape = path.join(root, 'escape');
   fs.symlinkSync(path.join(root, 'missing-target'), dangling);

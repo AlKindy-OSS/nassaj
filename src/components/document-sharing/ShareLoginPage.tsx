@@ -10,11 +10,12 @@ import { safeShareReturn } from './share-navigation';
 
 /** Existing sign-in UI, followed by a validated internal destination exactly once. */
 export default function ShareLoginPage() {
-  const { user, token, isLoading, mustChangePassword, needsSetup } = useAuth();
+  const { user, isLoading, mustChangePassword, needsSetup } = useAuth();
   const [params] = useSearchParams();
   if (isLoading) return <AuthLoadingScreen />;
   if (needsSetup) return <SetupForm />;
-  if (!user || !token) return <LoginForm />;
+  // A device (cookie) session has no bearer token; the user alone proves sign-in.
+  if (!user) return <LoginForm />;
   if (mustChangePassword) return <ForceChangePasswordForm />;
   return <Navigate replace to={safeShareReturn(params.get('returnTo')) ?? '/'} />;
 }

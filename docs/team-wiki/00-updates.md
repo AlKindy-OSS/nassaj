@@ -1,3 +1,22 @@
+## 2.3.1.0 — 2026-10-04
+
+جلسات مشتركة برابط عام لأي حامل توكن (T-1970)، تسجيل دخول موحد باسم مستخدم أو بريد (T-1973)، تبديل حسابات
+اختياري معطّل افتراضياً، جلسة جهاز جديدة بعد تغيير كلمة المرور المفروض، كاتالوج نماذج مخصص لكل عضو (B-1284)،
+قراءة حصص مزوّدات موضعياً بدون حظر دائم أو ترحيل (T-1910 S1)، ربط قرارات SDK بجلسة فريدة (T-1910 S2/B-1202)،
+إقرار كاتبي الجلسة برفع الأسوار بعد إثبات الاحتواء بدون ترحيل (T-1910 S4)، لوحة مشروع من كل مجلد (B-1524/ADR-195)،
+إعادة تنظيم الإعدادات مع التحديث المضمّن، إصلاح حرج: عمليات محرّك مثبّتة ترفض بيانات Anthropic (B-1541)،
+إصلاحات أمان أخرى (B-464، B-1373، B-1325، B-1503)، دفتر أوامر خام (B-1325)، ترقية أكثر أماناً (B-1146)،
+إصلاح حرج: كاسح المشاركة (B-1535)، إصلاحات دردشة (B-1489)، إزالة بطاقة Claude التقليدية.
+
+Session sharing via public link for anyone with the token (T-1970); unified sign-in by username or email (T-1973);
+optional account switching (off by default); fresh device session after forced password change; per-member model catalog
+(B-1284); in-process provider quota reads without permanent fencing on restart or schema changes (T-1910 S1);
+session-bound SDK turn decisions (T-1910 S2/B-1202); session-writer permission-fence acknowledgement after containment
+proof, no owner approval or schema required (T-1910 S4); per-project board from project folder (B-1524/ADR-195);
+reorganized settings with in-app update; critical security fix: engine-pinned spawns refuse Anthropic credentials (B-1541);
+other security fixes (B-464, B-1373, B-1325, B-1503); durable raw-command ledger (B-1325); safer update (B-1146);
+critical fix: share sweeper (B-1535); chat fixes (B-1489); removed deprecated Claude setup-token card.
+
 ## 2.3.0.13 — 2026-09-30
 
 طرفية مفتوحة كانت تُفشل تحديث النظام بخطأ عام، فصار التحديث يؤجَّل بدلاً من الفشل مع عرض عدد

@@ -26,7 +26,6 @@
 // T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
 import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
-import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import test, { mock, beforeEach, afterEach, after } from 'node:test';
@@ -69,14 +68,19 @@ mock.module('@anthropic-ai/claude-agent-sdk', {
 });
 
 const originalDatabasePath = process.env.DATABASE_PATH;
-const databaseRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coordinator-hook-db-'));
+// B-1373 refuses the passwd home and its hidden entries as project roots, and
+// TMPDIR or the checkout cwd may sit there (~/.cache/tmp, ~/.nassaj-release-*):
+// fixture roots live on a fixed non-hidden on-disk root instead.
+const databaseRoot = fs.mkdtempSync('/var/tmp/coordinator-hook-db-');
 process.env.DATABASE_PATH = path.join(databaseRoot, 'auth.db');
+const defaultCwd = path.join(databaseRoot, 'project');
+fs.mkdirSync(defaultCwd);
 const sdk = (await import('./claude-sdk.js')) as unknown as {
   queryClaudeSDK: (command: string, options: Record<string, unknown>, ws: unknown) => Promise<unknown>;
 };
 const database = await import('@/modules/database/index.js');
 await database.initializeDatabase();
-const governanceActor = database.userDb.createUser('governance_actor', 'hash', 'user') as { id: number };
+const boardActor = database.userDb.createUser('board_actor', 'hash', 'user') as { id: number };
 
 const SID = 'coordinator-gate-session-0001';
 
@@ -90,7 +94,7 @@ function makeWs(userId: number | null = null) {
 
 /** Runs one turn and returns the hooks map the SDK was handed. */
 async function hooksForThisRun(
-  options: Record<string, unknown> = { cwd: process.cwd() },
+  options: Record<string, unknown> = { cwd: defaultCwd },
   ws: unknown = makeWs(),
 ): Promise<HookMap> {
   scriptedMessages = [resultMsg];
@@ -106,7 +110,6 @@ async function hooksForThisRun(
 const ENV_KEYS = [
   'CLAUDE_CONFIG_DIR',
   'NASSAJ_COORDINATOR',
-  'NASSAJ_GOVERNANCE_CONTENT_CONFIG_JSON',
 ] as const;
 let savedEnv: Record<string, string | undefined> = {};
 let tmpConfigDir = '';
@@ -117,7 +120,7 @@ beforeEach(() => {
   activeHarness = null;
   savedEnv = {};
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
-  tmpConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'b503-cfg-'));
+  tmpConfigDir = fs.mkdtempSync('/var/tmp/b503-cfg-');
   process.env.CLAUDE_CONFIG_DIR = tmpConfigDir;
 });
 
@@ -127,7 +130,6 @@ afterEach(() => {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k] as string;
   }
-  try { fs.chmodSync(path.join(tmpConfigDir, 'governance'), 0o700); } catch { /* absent */ }
   try { fs.rmSync(tmpConfigDir, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
@@ -176,39 +178,44 @@ test('only the exact value "1" opens the gate — a truthy-looking flag must not
     'isCoordinatorInjectionEnabled accepts "1" only; the gate must inherit that exactly');
 });
 
-test('flag UP: same-UID governance remains unavailable through both real hooks', async () => {
+test('flag UP: both real hooks read open tasks from the project folder, overlay cwd included (B-1524)', async () => {
   process.env.NASSAJ_COORDINATOR = '1';
-  const governanceRoot = path.join(tmpConfigDir, 'governance');
-  fs.mkdirSync(governanceRoot, { mode: 0o700 });
-  const state = path.join(governanceRoot, 'state.json');
-  fs.writeFileSync(state, JSON.stringify({
-    tasks: [{ id: 'T-ADR174', status: 'in_progress', title: 'resolver integration marker' }],
-  }), { mode: 0o600 });
-  fs.chmodSync(state, 0o400);
-  fs.chmodSync(governanceRoot, 0o500);
-  process.env.NASSAJ_GOVERNANCE_CONTENT_CONFIG_JSON = JSON.stringify({
-    enabled: true,
-    root: governanceRoot,
-    trustedGovernanceUid: process.getuid(),
-    entries: [{
-      projectId: 'project-174',
-      kind: 'project-state',
-      relativePath: 'state.json',
-      visibility: 'actors',
-      actorIds: [governanceActor.id],
-      format: 'json',
-    }],
-  });
-
-  const hooks = await hooksForThisRun(
-    { cwd: process.cwd(), projectId: 'project-174' },
-    makeWs(governanceActor.id),
+  const projectRoot = path.join(tmpConfigDir, 'project root مشروع');
+  fs.mkdirSync(path.join(projectRoot, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, 'docs', 'project-state.json'), JSON.stringify({
+    tasks: [{ id: 'T-B1524', status: 'in_progress', title: 'board reader integration marker' }],
+  }));
+  const overlayCwd = path.join(
+    projectRoot, '.git', 'nassaj-session-overlays', 'instances', 'ov-1', 'workspace',
   );
+  fs.mkdirSync(overlayCwd, { recursive: true });
+  const projectId = database.projectsDb.createProjectPath(projectRoot, 'B1524', boardActor.id)
+    .project?.project_id as string;
+
+  const hooks = await hooksForThisRun({ cwd: overlayCwd, projectId }, makeWs(boardActor.id));
   const preToolUse = hooks.PreToolUse?.[0].hooks[0] as (input: unknown) => Promise<any>;
   const sessionStart = hooks.SessionStart?.[0].hooks[0] as (input: unknown) => Promise<any>;
-  const delegated = await preToolUse({ tool_name: 'Agent', tool_input: { prompt: 'resolver integration' } });
+  const delegated = await preToolUse({ tool_name: 'Agent', tool_input: { prompt: 'board reader integration' } });
   const resumed = await sessionStart({ source: 'resume' });
 
-  assert.doesNotMatch(delegated.hookSpecificOutput.additionalContext, /T-ADR174/);
-  assert.doesNotMatch(resumed.hookSpecificOutput.additionalContext, /T-ADR174/);
+  assert.match(delegated.hookSpecificOutput.additionalContext, /T-B1524/);
+  assert.match(resumed.hookSpecificOutput.additionalContext, /T-B1524/);
+});
+
+test('flag UP: a session whose cwd is outside its projectId root gets no tasks', async () => {
+  process.env.NASSAJ_COORDINATOR = '1';
+  const projectRoot = path.join(tmpConfigDir, 'other-project');
+  fs.mkdirSync(path.join(projectRoot, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, 'docs', 'project-state.json'), JSON.stringify({
+    tasks: [{ id: 'T-LEAK', status: 'in_progress', title: 'must not leak' }],
+  }));
+  const projectId = database.projectsDb.createProjectPath(projectRoot, 'Other', boardActor.id)
+    .project?.project_id as string;
+  const unrelatedCwd = path.join(tmpConfigDir, 'unrelated');
+  fs.mkdirSync(unrelatedCwd);
+
+  const hooks = await hooksForThisRun({ cwd: unrelatedCwd, projectId }, makeWs(boardActor.id));
+  const sessionStart = hooks.SessionStart?.[0].hooks[0] as (input: unknown) => Promise<any>;
+  const resumed = await sessionStart({ source: 'resume' });
+  assert.doesNotMatch(JSON.stringify(resumed), /T-LEAK/);
 });

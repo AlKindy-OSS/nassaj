@@ -563,7 +563,7 @@ export default function ClaudeStatus({
               إلا لمن نعرف يقيناً أنه البادئ (`isConfirmedStarter`، فشلٌ
               مغلَق)، وغير البادئ يملك زرّ التوجيه وحده حين steerable. لا نسخة
               ثانية من هذا القرار. */}
-          <RunStatusSteerHint show={showSteerHint} t={t} />
+          <RunStatusSteerHint show={showSteerHint} t={t} onSteerClick={onSteerClick} />
           <RunStatusActions
             canStop={isConfirmedStarter && isLoading && status?.can_interrupt !== false && Boolean(onAbort)}
             onAbort={onAbort}

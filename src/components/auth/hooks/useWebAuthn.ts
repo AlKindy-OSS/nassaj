@@ -50,7 +50,7 @@ export type StepUpAudience = 'passkey_registration' | 'connector_owner' | 'sso_c
 
 export type WebAuthnLoginResult =
   | { success: true }
-  | { success: false; kind: WebAuthnFailureKind; error?: string };
+  | { success: false; kind: WebAuthnFailureKind; error?: string; code?: string };
 
 export type WebAuthnRegisterResult =
   | { success: true; credential: PasskeyCredentialSummary }
@@ -188,7 +188,7 @@ export function useWebAuthn() {
 
     const result = await completePasskeyLogin(assertionResponse);
     if (!result.success) {
-      return { success: false, kind: 'failed', error: result.error };
+      return { success: false, kind: 'failed', error: result.error, code: result.code };
     }
     return { success: true };
   }, [completePasskeyLogin]);

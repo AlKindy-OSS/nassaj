@@ -23,15 +23,18 @@ function parseArgs(argv) {
   let version = null;
   let write = false;
   let requireCurrent = false;
+  let openCycle = false;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--version') version = argv[++index] ?? null;
     else if (token === '--write') write = true;
     else if (token === '--require-current') requireCurrent = true;
+    else if (token === '--open-cycle') openCycle = true;
     else throw new Error(`unknown argument: ${token}`);
   }
   if (write && requireCurrent) throw new Error('--write and --require-current are mutually exclusive');
-  return { version: validateReleaseVersion(version), write, requireCurrent };
+  if (openCycle && !write) throw new Error('--open-cycle requires --write');
+  return { version: validateReleaseVersion(version), write, requireCurrent, openCycle };
 }
 
 async function readJson(filePath) {
@@ -42,7 +45,11 @@ async function writeJson(filePath, value) {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-/** Require the human-facing wiki changelog to name the exact release. */
+/**
+ * Require the human-facing wiki changelog to name the exact release. Both heading
+ * shapes count: the current `## 2.3.0.13 — <date>` and the older
+ * `## الإصدار 1.44.0.0 — <note>` (B-1438).
+ */
 export async function assertReleaseWikiUpdated(root, version) {
   const exactVersion = validateReleaseVersion(version);
   const wikiPath = path.join(root, WIKI_UPDATES_PATH);
@@ -56,14 +63,19 @@ export async function assertReleaseWikiUpdated(root, version) {
     throw error;
   }
   const escaped = exactVersion.replaceAll('.', '\\.');
-  const heading = new RegExp(`^##\\s+الإصدار\\s+${escaped}(?:\\s|$)`, 'm');
+  const heading = new RegExp(`^##\\s+(?:الإصدار\\s+)?${escaped}(?:\\s|$)`, 'm');
   const visibleMarkdown = source.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1\s*$/gm, '');
   if (!heading.test(visibleMarkdown)) {
     throw new Error(`release wiki page must include an entry for ${exactVersion}: ${WIKI_UPDATES_PATH}`);
   }
 }
 
-export async function prepareReleaseVersion({ root, version, write = false, requireCurrent = false }) {
+/**
+ * Check (and with `write`, set) the package and lock versions. `openCycle` marks
+ * the post-release bump to the next development version: that version has not
+ * been released, so no wiki entry is required for it yet (B-1322).
+ */
+export async function prepareReleaseVersion({ root, version, write = false, requireCurrent = false, openCycle = false }) {
   const exactVersion = validateReleaseVersion(version);
   const packagePath = path.join(root, 'package.json');
   const lockPath = path.join(root, 'package-lock.json');
@@ -84,7 +96,7 @@ export async function prepareReleaseVersion({ root, version, write = false, requ
       throw new Error('requested release version does not match the reviewed package and lock identities');
     }
   }
-  if (write || requireCurrent) await assertReleaseWikiUpdated(root, exactVersion);
+  if ((write && !openCycle) || requireCurrent) await assertReleaseWikiUpdated(root, exactVersion);
   packageJson.version = exactVersion;
   lockJson.version = exactVersion;
   lockJson.packages[''].version = exactVersion;

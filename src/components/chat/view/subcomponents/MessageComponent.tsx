@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock3, GitFork, ImageOff } from 'lucide-react';
+import { ChevronDown, Clock3, GitFork, ImageOff, Sparkles } from 'lucide-react';
 
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import ParticipantAvatar from '../../../participants/ParticipantAvatar';
@@ -239,7 +239,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   // Consecutive user messages only group when they share an author AND origin
   // kind, so coordinator prompts never merge visually with human bubbles and
   // vice-versa.
-  const isGrouped = prevMessage && prevMessage.type === message.type &&
+  // A compact skill-load line is not a reply: the assistant message after it
+  // still opens its own group (provider logo / coordinator header).
+  const isGrouped = prevMessage && !prevMessage.isSkillLoad && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user' &&
         prevMessage.userId === message.userId &&
@@ -297,10 +299,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
       inlineExecEnabled: true,
       liveStatusOf,
       sessionId,
+      messageTimestamp: message.timestamp ?? null,
       shareProjectId: isPrimaryAssistantText && !message.isStreaming ? selectedProject?.projectId : undefined,
       onShareFileOpen: onFileOpen,
     }),
-    [catalog, runAction, user?.role, liveStatusOf, sessionId, isPrimaryAssistantText, message.isStreaming, selectedProject?.projectId, onFileOpen],
+    [catalog, runAction, user?.role, liveStatusOf, sessionId, isPrimaryAssistantText, message.isStreaming, message.timestamp, selectedProject?.projectId, onFileOpen],
   );
 
   useEffect(() => {
@@ -418,7 +421,28 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
           : 'px-3 sm:px-0'
       }`}
     >
-      {isCoordinatorPrompt ? (
+      {message.isSkillLoad ? (
+        /* Skill body injected by Claude after a Skill tool call: one compact,
+         * expandable line instead of a bubble. Logical properties only. */
+        <details className="group/skill w-full py-0.5" data-skill-load>
+          <summary
+            className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden"
+            title={t('skillLoad.expand', { defaultValue: 'Show skill content' })}
+          >
+            <Sparkles className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+            <span className="font-medium">
+              {t('skillLoad.label', { name: message.skillName ?? '', defaultValue: 'Skill loaded: {{name}}' })}
+            </span>
+            <ChevronDown className="h-3 w-3 flex-shrink-0 transition-transform group-open/skill:rotate-180" aria-hidden="true" />
+          </summary>
+          <pre
+            className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/50 p-2 text-xs text-muted-foreground"
+            dir={contentDir}
+          >
+            {message.content}
+          </pre>
+        </details>
+      ) : isCoordinatorPrompt ? (
         /* ── Coordinator → Sub-agent prompt ─────────────────────────────────
          * A user-role row carrying originKind:'coordinator': the main agent
          * (coordinator) directed a sub-agent via Task/Agent tool. Never a

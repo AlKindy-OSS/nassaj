@@ -16,15 +16,24 @@
  * sealing" (CRASHED) — the liveness contract the monitor classifies against.
  *
  * The isolated credential (CLAUDE_CONFIG_DIR) and everything else reach this
- * process via `systemd-run --setenv` (never inheritance) — this wrapper reads
- * `process.env` unchanged and passes it to the child.
+ * process via `systemd-run --setenv` (never inheritance). B-446: before the
+ * child is spawned that env is held to the same iron-rule guard the central
+ * Claude run profile applies (spawn env, settings.json env block, settings base
+ * URLs). A unit task is a fresh `claude -p` with no engine verdict, so only
+ * official Anthropic routing passes; a refusal seals the task as failed
+ * without ever starting `claude`.
  */
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { assertClaudeSpawnEnvAllowed } from '../../services/isolation/claude-spawn-env-guard.js';
+
 import { seal } from './result-capture-writer.js';
+
+/** Exit code sealed when the routing guard refuses the unit env (claude never ran). */
+const GUARD_REFUSED_EXIT = 126;
 
 type Args = {
   taskDir: string;
@@ -65,7 +74,22 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
-function main(): void {
+/**
+ * Seals a task whose env the routing guard refused: the reason code goes to
+ * stderr.log and DONE carries a non-zero exit, so the monitor sees a failed run.
+ */
+function sealGuardRefusal(taskDir: string, stderrPath: string, error: unknown): never {
+  const code = (error as { code?: string })?.code ?? 'ANTHROPIC_BASE_URL_NOT_ALLOWED';
+  try {
+    fs.appendFileSync(stderrPath, `[task-runner] spawn refused by the routing guard: ${code}\n`, { mode: 0o600 });
+    seal(taskDir, GUARD_REFUSED_EXIT, { signal: null });
+  } catch {
+    /* best-effort: the unit still exits so it is not left running */
+  }
+  process.exit(0);
+}
+
+async function main(): Promise<void> {
   const a = parseArgs(process.argv.slice(2));
   fs.mkdirSync(a.taskDir, { recursive: true, mode: 0o700 });
 
@@ -73,6 +97,14 @@ function main(): void {
   const stderrPath = `${a.taskDir}/stderr.log`;
   // Ensure `.partial` exists even if the child writes nothing.
   fs.writeFileSync(partialPath, '', { mode: 0o600 });
+
+  // B-446: the env the child receives is a copy checked by the iron-rule guard.
+  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  try {
+    await assertClaudeSpawnEnvAllowed(childEnv);
+  } catch (error) {
+    sealGuardRefusal(a.taskDir, stderrPath, error);
+  }
 
   const out = fs.createWriteStream(partialPath, { flags: 'w', mode: 0o600 });
   const errOut = fs.createWriteStream(stderrPath, { flags: 'w', mode: 0o600 });
@@ -82,7 +114,7 @@ function main(): void {
 
   const child = spawn(a.claudeBin, childArgs, {
     cwd: process.cwd(), // the project cwd (systemd --working-directory)
-    env: process.env, // includes the --setenv-injected CLAUDE_CONFIG_DIR
+    env: childEnv, // guard-checked copy; includes the --setenv-injected CLAUDE_CONFIG_DIR
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -153,4 +185,4 @@ function main(): void {
   }, 50);
 }
 
-main();
+void main();

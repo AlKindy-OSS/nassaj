@@ -105,6 +105,9 @@ app.use('/api/settings/sso', ssoRouter);
 const server: Server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
 export const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+// The listening port is the implicit trusted loopback origin for cookie mutations
+// such as the forced password change (ADR-163 amendment 1, D1).
+process.env.SERVER_PORT = String((server.address() as AddressInfo).port);
 after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });

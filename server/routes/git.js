@@ -23,6 +23,7 @@ import { spawnCursor } from '../cursor-cli.js';
 import { buildGitAuthorEnv, getUserGithubToken } from '../utils/gitIdentity.js';
 import { coerceUserId } from '../modules/projects/services/project-visibility-guard.service.js';
 import { isResolvedPathInsideRootReal } from '../utils/path-guard.js';
+import { isForbiddenProjectRoot } from '../shared/secret-path-guard.js';
 import {
   acquireLease,
   captureRequest,
@@ -471,6 +472,11 @@ function validateProjectPath(projectPath) {
   // Block obviously dangerous paths
   if (resolved === '/' || resolved === path.sep) {
     throw new Error('Invalid project path: root directory not allowed');
+  }
+  // B-1373: no git reads (show/diff/blame) over the service user's home or a
+  // root holding credentials, even for an already-registered project row.
+  if (isForbiddenProjectRoot(resolved)) {
+    throw new Error('Invalid project path: protected location');
   }
   return resolved;
 }

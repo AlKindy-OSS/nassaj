@@ -552,7 +552,13 @@ export function resolveCagedLaunch({ userId, provider, mode, cmd, args = [], cwd
  * is spawned with piped stdin/stdout, so the concrete ChildProcess satisfies
  * the interface's non-null stream types at runtime.
  *
- * @param {{ userId?: string|number|null, cwd?: string|null }} spec
+ * T-1910 S2: `processGroup` starts the wrapper in its own process group
+ * (detached; never unref'd, so the server still waits on its pipes) and
+ * `onSpawn` receives the spawned child once, synchronously, so the caller can
+ * record its exact kernel identity before the SDK reads its first byte.
+ *
+ * @param {{ userId?: string|number|null, cwd?: string|null, processGroup?: boolean,
+ *           onSpawn?: (child: import('node:child_process').ChildProcess) => void }} spec
  * @param {{ spawn?: typeof spawn, homedir?: () => string,
  *           existsSync?: (p: string) => boolean,
  *           lstatSync?: typeof fs.lstatSync, realpathSync?: (p: string) => string,
@@ -563,7 +569,7 @@ export function resolveCagedLaunch({ userId, provider, mode, cmd, args = [], cwd
  *            env?: Record<string, string|undefined>, signal?: AbortSignal }) =>
  *            import('@anthropic-ai/claude-agent-sdk').SpawnedProcess)|undefined}
  */
-export function buildCagedSdkSpawn({ userId, cwd }, deps = {}) {
+export function buildCagedSdkSpawn({ userId, cwd, processGroup = false, onSpawn }, deps = {}) {
   if (!cageEnabled('claude')) {
     return undefined;
   }
@@ -579,12 +585,17 @@ export function buildCagedSdkSpawn({ userId, cwd }, deps = {}) {
       },
       deps,
     );
-    return spawnFn(launch.cmd, launch.args, {
+    const child = spawnFn(launch.cmd, launch.args, {
       cwd: spec.cwd,
       env: spec.env,
       signal: spec.signal,
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
+      ...(processGroup ? { detached: true } : {}),
     });
+    if (onSpawn) {
+      try { onSpawn(child); } catch { /* identity evidence must never break the spawn */ }
+    }
+    return child;
   };
 }

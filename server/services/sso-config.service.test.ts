@@ -54,7 +54,7 @@ before(async () => {
   await initializeDatabase();
   stopReconcileScheduler();
   owner = userDb.createUser('sso_owner', 'hash-owner', 'owner');
-  member = userDb.createUser('sso_member', 'hash-member', 'user');
+  member = userDb.createUser('sso_member', 'hash-member', 'admin');
   memberApiKey = String(apiKeysDb.createApiKey(member.id, 'matrix-member').apiKey);
   ownerApiKey = String(apiKeysDb.createApiKey(owner.id, 'matrix-owner').apiKey);
 });

@@ -961,8 +961,13 @@ function purgeQuarantine(realRoot, relative, policy) {
 async function reapSessions(realRoot, { policy }) {
     const modulePath = path.join(realRoot, policy.sessionWorkspaces.module);
     if (!fs.existsSync(modulePath)) return { ran: false, note: 'overlay module not present' };
-    const { reapSessionWorkspaces } = await import(pathToFileURL(modulePath).href);
-    const reaped = reapSessionWorkspaces({ projectPath: realRoot });
+    const overlay = await import(pathToFileURL(modulePath).href);
+    // B-914: the bounded, fail-closed report says what was kept and why; an older
+    // module without it still answers with the reaped ids alone.
+    const report = typeof overlay.reapSessionWorkspacesReport === 'function'
+        ? overlay.reapSessionWorkspacesReport({ projectPath: realRoot })
+        : { reaped: overlay.reapSessionWorkspaces({ projectPath: realRoot }), skipped: [], stopped: null };
+    const { reaped, skipped, stopped } = report;
     const prune = spawnSync('git', ['-C', realRoot, 'worktree', 'prune'], {
         encoding: 'utf8',
         env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
@@ -971,6 +976,8 @@ async function reapSessions(realRoot, { policy }) {
         ran: true,
         reaped,
         reapedCount: reaped.length,
+        skipped,
+        stopped,
         worktreePrune: prune.status === 0 ? 'ok' : `exit ${prune.status}: ${(prune.stderr ?? '').trim()}`,
     };
 }

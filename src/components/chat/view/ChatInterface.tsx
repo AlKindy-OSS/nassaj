@@ -75,6 +75,7 @@ import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
 import { resolveEffectiveEngine } from './subcomponents/engineGuard';
 import WsConnectionBadge from './subcomponents/WsConnectionBadge';
+import { withSteerPrefix } from '../utils/steerCommand';
 import CommandResultModal from './subcomponents/CommandResultModal';
 import BtwOverlay from './subcomponents/BtwOverlay';
 import SessionHeaderControls from './subcomponents/SessionHeaderControls';
@@ -840,8 +841,16 @@ function ChatInterface({
   // T-1904 (ADR-190): زرّ التوجيه في شريط الحالة يضع «/steer » في صندوق
   // الكتابة ويُركِّز عليه — لا إرسال تلقائي.
   const handleSteerButtonClick = useCallback(() => {
-    setInput('/steer ');
-    textareaRef.current?.focus();
+    // غير مُدمِّر وغير مكرِّر: يُسبَق «/steer » للنصّ الموجود، ونقرة ثانية على
+    // إدخال يبدأ به أصلاً تكتفي بالتركيز.
+    setInput((current) => withSteerPrefix(current));
+    const textarea = textareaRef.current;
+    textarea?.focus();
+    // المؤشّر في النهاية بعد أن يُطبَّق الإدخال الجديد على الـtextarea.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) el.setSelectionRange(el.value.length, el.value.length);
+    });
   }, [setInput, textareaRef]);
 
   // T-1903 (ADR-190): «إرسال كرسالة عادية» — زرّ إجراء واحد على رفض 409

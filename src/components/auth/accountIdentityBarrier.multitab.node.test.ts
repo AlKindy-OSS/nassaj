@@ -174,3 +174,57 @@ for (const broadcast of [true, false]) {
     } finally { fixture.close(); }
   });
 }
+
+test('B-1531: a reconciled fence is cleared so the next reload boots stable', () => {
+  const version = `${Date.now().toString(36)}:prior-load`;
+  const fixture = tabs(false, 1, JSON.stringify({ phase: 'committed', version, reason: 'switch' }));
+  const barrier = fixture.barriers[0];
+  try {
+    assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'committed');
+    barrier.stabilizeIdentityBarrier(version);
+    assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+    assert.equal(fixture.stored.has('nassaj_identity_barrier_v1'), false);
+  } finally { fixture.close(); }
+  const reloaded = tabs(false, 1);
+  try {
+    assert.equal(reloaded.barriers[0].getIdentityBarrierSnapshot().phase, 'stable');
+  } finally { reloaded.close(); }
+});
+
+test('B-1531: a locked tab recovers only through a fresh persisted reconciliation', () => {
+  const fixture = tabs(false, 1);
+  const barrier = fixture.barriers[0];
+  try {
+    const version = barrier.beginIdentityTransition('switch');
+    barrier.commitIdentityTransition(version, 'switch');
+    barrier.lockIdentityBarrier(version, 'identity_cleanup_or_hydration_failed');
+    barrier.retryIdentityReconciliation();
+    const retry = barrier.getIdentityBarrierSnapshot();
+    assert.equal(retry.phase, 'committed');
+    assert.equal(retry.reason, 'identity_reconciliation_retry');
+    assert.notEqual(retry.version, version);
+    assert.throws(() => barrier.identityRequestSignal(), { name: 'AbortError' });
+    assert.equal(JSON.parse(fixture.stored.get('nassaj_identity_barrier_v1')!).version, retry.version);
+    barrier.stabilizeIdentityBarrier(retry.version);
+    barrier.retryIdentityReconciliation();
+    assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable', 'a stable tab never re-fences');
+  } finally { fixture.close(); }
+});
+
+test('B-1531: a same-identity generation bump excuses one 4401 per tab, across tabs', async () => {
+  const fixture = tabs(true, 2);
+  const [own, other] = fixture.barriers;
+  try {
+    assert.equal(own.consumeExpectedWalletRevocation(), false);
+    own.expectWalletGenerationBump();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(own.consumeExpectedWalletRevocation(), true);
+    assert.equal(own.consumeExpectedWalletRevocation(), false);
+    assert.equal(other.consumeExpectedWalletRevocation(), true);
+    assert.equal(other.consumeExpectedWalletRevocation(), false);
+    other.expectWalletGenerationBump();
+    const version = other.beginIdentityTransition('switch');
+    assert.equal(other.consumeExpectedWalletRevocation(), false, 'never while fenced');
+    other.cancelIdentityTransition(version);
+  } finally { fixture.close(); }
+});

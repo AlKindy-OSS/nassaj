@@ -2,6 +2,10 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  currentCatalogLaunchScope,
+  type CatalogLaunchScope,
+} from '@/modules/execution-permissions/catalog-launch-scope.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { resolveCodexMachineRuntime } from '@/shared/codex-executable.js';
@@ -21,8 +25,15 @@ import { codexLaunchIdentityFor, spawnReservedCodex } from './codex-reserved-spa
  */
 
 export const CODEX_MODELS_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-export const CODEX_MODELS_REFRESH_WAIT_MS = 10_000;
-export const CODEX_MODELS_REFRESH_HARD_TIMEOUT_MS = 30_000;
+/**
+ * B-1414: the refresh child lives inside the caller's catalog permit, which ends
+ * when the probe returns. So the caller waits for the WHOLE refresh — the wait
+ * is the hard timeout plus a short margin that lets the timeout's own SIGKILL
+ * and exit settle first — and a refresh is never cut off early by its permit.
+ * Both stay well under the 30 s permit lease.
+ */
+export const CODEX_MODELS_REFRESH_HARD_TIMEOUT_MS = 22_000;
+export const CODEX_MODELS_REFRESH_WAIT_MS = CODEX_MODELS_REFRESH_HARD_TIMEOUT_MS + 1_000;
 export const CODEX_MODELS_REFRESH_BACKOFF_MS = 10 * 60 * 1000;
 export const CODEX_MODELS_REFRESH_MAX_CONCURRENT = 2;
 const CODEX_MODELS_CACHE_FILE = 'models_cache.json';
@@ -116,37 +127,91 @@ type SpawnedChild = {
 };
 
 export type CodexRefreshProcessDeps = {
-  identityFor?: () => Promise<unknown>;
+  /**
+   * The catalog permit scope this refresh runs under. Defaults to the current
+   * async context's scope; `null` (or no scope) refuses the spawn.
+   */
+  scope?: CatalogLaunchScope | null;
+  identityFor?: (scope: CatalogLaunchScope) => Promise<unknown>;
   spawnReserved?: (
     identity: unknown, env: NodeJS.ProcessEnv, args: string[], options: Record<string, unknown>,
   ) => SpawnedChild;
   hardTimeoutMs?: number;
 };
 
+/** Raised when a refresh is asked to run outside a catalog permit. Never spawns. */
+export const CODEX_MODELS_REFRESH_PERMIT_REQUIRED = 'CODEX_MODELS_REFRESH_PERMIT_REQUIRED';
+
+/**
+ * The permit ended before the refresh could start, or the child was killed
+ * because it ended. Not a refresh failure: no failure backoff is recorded.
+ */
+export const CODEX_MODELS_REFRESH_PERMIT_ENDED = 'CODEX_MODELS_REFRESH_PERMIT_ENDED';
+
+const permitEndedError = (): Error => Object.assign(
+  new Error(CODEX_MODELS_REFRESH_PERMIT_ENDED),
+  { code: CODEX_MODELS_REFRESH_PERMIT_ENDED },
+);
+
+/** True for the permit-ended outcome (see {@link CODEX_MODELS_REFRESH_PERMIT_ENDED}). */
+export const isCodexRefreshPermitEnded = (error: unknown): boolean => (
+  (error as { code?: unknown } | null)?.code === CODEX_MODELS_REFRESH_PERMIT_ENDED
+);
+
+/**
+ * B-1414: the identity is the one the CALLER's catalog permit was fingerprinted
+ * against (`execution.launchIdentity`), never re-acquired on the side. Only the
+ * identity fields are handed over, so a failure here can never try to settle
+ * the caller's already-started permit.
+ */
+const identityFromScope = (scope: CatalogLaunchScope): Promise<unknown> => codexLaunchIdentityFor({
+  launchIdentity: scope.execution.launchIdentity,
+  launchIdentityError: scope.execution.launchIdentityError,
+});
+
 /**
  * Runs `codex debug models` under the target's already-resolved env through the
  * shared guarded launch path (no env recomputation). Output is discarded; only
  * the exit status matters. Resolves on exit 0, rejects otherwise.
+ *
+ * B-1414: it runs only inside the caller's ADR-134 catalog permit — the scope
+ * supplies the launch identity, and the child is SIGKILLed the moment that
+ * permit ends (the probe settled), so it can never outlive it. The hard timeout
+ * stays as a second, independent bound.
  */
 export const runCodexModelsRefreshProcess = async (
   target: CodexRefreshTarget,
   deps: CodexRefreshProcessDeps = {},
 ): Promise<void> => {
-  const identityFor = deps.identityFor ?? (() => codexLaunchIdentityFor(null));
+  const scope = deps.scope === undefined ? currentCatalogLaunchScope() : deps.scope;
+  if (!scope) throw new Error(CODEX_MODELS_REFRESH_PERMIT_REQUIRED);
+  const identityFor = deps.identityFor ?? identityFromScope;
   const spawnReserved = deps.spawnReserved
     ?? ((identity, env, args, options) => spawnReservedCodex(spawn, identity, env, args, options));
   const hardTimeoutMs = deps.hardTimeoutMs ?? CODEX_MODELS_REFRESH_HARD_TIMEOUT_MS;
-  const identity = await identityFor();
+  const identity = await identityFor(scope);
+  if (scope.signal.aborted) throw permitEndedError();
   await new Promise<void>((resolve, reject) => {
     const child = spawnReserved(identity, target.env, ['debug', 'models'], {
       cwd: target.codexHome,
       stdio: ['ignore', 'ignore', 'ignore'],
     });
-    const timer = setTimeout(() => child.kill('SIGKILL'), hardTimeoutMs);
-    child.once('error', (error: Error) => { clearTimeout(timer); reject(error); });
-    child.once('exit', (code: number | null, signal: string | null) => {
+    let killedByPermitEnd = false;
+    const killOnPermitEnd = () => {
+      killedByPermitEnd = true;
+      child.kill('SIGKILL');
+    };
+    const cleanup = () => {
       clearTimeout(timer);
+      scope.signal.removeEventListener('abort', killOnPermitEnd);
+    };
+    const timer = setTimeout(() => child.kill('SIGKILL'), hardTimeoutMs);
+    scope.signal.addEventListener('abort', killOnPermitEnd, { once: true });
+    child.once('error', (error: Error) => { cleanup(); reject(error); });
+    child.once('exit', (code: number | null, signal: string | null) => {
+      cleanup();
       if (code === 0) resolve();
+      else if (killedByPermitEnd) reject(permitEndedError());
       else reject(new Error(`codex debug models exited (code=${code ?? 'null'}, signal=${signal ?? 'none'})`));
     });
   });
@@ -175,8 +240,10 @@ const defaultInstalledVersion = (): string | null => {
 /**
  * Builds a refresher with single-flight and failure backoff per CODEX_HOME, a
  * global concurrency cap (over cap → no spawn, the current file is served), and
- * a bounded wait: callers wait at most `waitMs`, while a slower refresh keeps
- * running and still fires `onRefreshed` (catalog invalidation) on a verified success.
+ * a bounded wait of `waitMs`. B-1414: by default that wait outlasts the child's
+ * hard timeout, so the starting caller holds its catalog permit for the whole
+ * refresh; a verified success fires `onRefreshed` (catalog invalidation). A
+ * child killed because its permit ended is not a failure and records no backoff.
  */
 export const createCodexModelsRefresher = (deps: CodexModelsRefresherDeps = {}) => {
   const runRefresh = deps.runRefresh ?? ((target) => runCodexModelsRefreshProcess(target));
@@ -212,6 +279,11 @@ export const createCodexModelsRefresher = (deps: CodexModelsRefresherDeps = {}) 
         backoffUntil.delete(key);
         await deps.onRefreshed?.(userId);
       } catch (error) {
+        if (isCodexRefreshPermitEnded(error)) {
+          // Cut short by the permit, not by Codex: the next caller may retry at once.
+          log(`[codex-models] refresh stopped with its permit user=${String(userId)} reason=${reason}`);
+          return;
+        }
         backoffUntil.set(key, now() + backoffMs);
         const detail = error instanceof Error ? error.message : 'unknown error';
         log(`[codex-models] refresh failed user=${String(userId)} reason=${reason}: ${detail}`);

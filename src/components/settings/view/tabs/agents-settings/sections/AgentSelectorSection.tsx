@@ -19,6 +19,15 @@ import type { AgentSelectorSectionProps } from '../types';
  * is the ordinary icon-set correction, and it is why the row looked uneven
  * while every icon in it was technically identical.
  */
+/**
+ * Tile surface per state — ONE definition for every tile (agents and «النماذج
+ * المحلية»), so the selected highlight cannot differ between harnesses. The
+ * inset ring makes the selection visible even where `bg-muted` sits close to the
+ * page surface in a preset.
+ */
+const TILE_SELECTED = 'bg-muted text-foreground ring-1 ring-inset ring-border';
+const TILE_IDLE = 'text-muted-foreground hover:bg-accent hover:text-foreground';
+
 const FILLED_SQUARE_MARKS: readonly string[] = ['claude', 'kimi', 'hermes'];
 
 /**
@@ -131,9 +140,7 @@ export default function AgentSelectorSection({
                 'min-h-16 w-full rounded-md px-1.5 py-1.5 transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 // فرعان متنافيان بالكامل على `background-color` و`color`.
-                isActive
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                isActive ? TILE_SELECTED : TILE_IDLE,
               )}
             >
               {/* Status rides in the corner rather than in the name row: it is a
@@ -196,9 +203,7 @@ export default function AgentSelectorSection({
               'relative flex min-w-0 touch-manipulation flex-col items-center justify-center gap-1.5',
               'min-h-16 w-full rounded-md px-1.5 py-1.5 transition-colors duration-150',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              localModelsSelected
-                ? 'bg-muted text-foreground'
-                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+              localModelsSelected ? TILE_SELECTED : TILE_IDLE,
             )}
           >
             <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center" aria-hidden="true">

@@ -167,7 +167,14 @@ router.get('/onboarding-status', authenticateToken, async (req, res) => {
 //        http://localhost:3004/api/user/claude-connection
 router.get('/claude-connection', authenticateToken, async (req, res) => {
   try {
-    const status = await getClaudeConnectionStatus(req.user.id);
+    const status = await getClaudeConnectionStatus(req.user.id, {
+      // Lazy, like terminals.js: the providers barrel is heavy and only this
+      // live check needs it.
+      verifyOauthLink: async () => {
+        const { claudeUsageService } = await import('../modules/providers/index.js');
+        return (await claudeUsageService.verifyLink(req.user.id)) !== 'rejected';
+      },
+    });
     res.json(status);
   } catch (error) {
     console.error('Error checking Claude connection status:', error);

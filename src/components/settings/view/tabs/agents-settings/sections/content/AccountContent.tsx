@@ -1,9 +1,8 @@
 import { AlertTriangle, Calendar, Check, Clock, Copy, ExternalLink, Link2, LogIn, RefreshCw } from 'lucide-react';
-import { useCallback, useState } from 'react';
-import { Trans, useTranslation } from 'react-i18next';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import { Button, Input } from '../../../../../../../shared/view/ui';
-import SessionProviderLogo from '../../../../../../llm-logo-provider/SessionProviderLogo';
+import { Button } from '../../../../../../../shared/view/ui';
 import SettingsCard from '../../../../SettingsCard';
 import SettingsCollapsible from '../../../../SettingsCollapsible';
 import SettingsGroup from '../../../../SettingsGroup';
@@ -50,25 +49,6 @@ export type UserCredentialLink = {
   onLink: () => void;
   /** Re-checks the per-user credential link status. */
   onRecheck: () => void;
-  /**
-   * Optional second path (B-1075 / claude setup-token): saves the setup-token
-   * printed by `claude setup-token` via the provider API-key endpoint.
-   * When present — and the credential is not linked yet — the card renders a
-   * password input of its own (NOT inside the invite banner, which is
-   * role-conditioned) so whoever ran the command can paste the token without
-   * leaving the settings panel.
-   */
-  onSaveToken?: (token: string) => Promise<{ success: boolean; error?: string }>;
-  /**
-   * هل يستطيع **هذا المستخدم** كتابة هذا الاعتماد (‏B-362، `writable` من
-   * `/api/providers/:provider/api-key`).
-   *
-   * `undefined` = لم يُجب الخادم بعد، أو خادمٌ أقدم من الحقل. **الغائب ليس
-   * رفضاً**: عميلٌ أحدث من خادمه يجب أن ينحدر إلى سلوك الخادم القديم (اسمح ودع
-   * الـ403 يتكلّم)، لا أن يقفل الباب على الجميع — وهو نفس تمييز الخطّاف
-   * (`useProviderApiKey`) حرفاً بحرف.
-   */
-  canSaveToken?: boolean;
 };
 
 type AccountContentProps = {
@@ -80,35 +60,19 @@ type AccountContentProps = {
   onRefreshAuthStatus?: () => void;
 };
 
-/**
- * ما بقي من `AgentVisualConfig` بعد T-1172: **الاسم والوصف فقط**.
- *
- * كانت هنا خمس أصناف لون لكل وكيل × أحد عشر وكيلاً — إحدى عشرة عائلة خامّة
- * (blue/purple/gray/indigo/emerald/zinc/rose/sky/violet/teal) لبطاقةٍ واحدة
- * تتبدّل بتبدّل المنتقي. ثلاث علل: (أ) لا واحدة منها رمزٌ في `src/index.css`
- * فكلّها خارج النظام (STYLE_LOCK §2.1)؛ (ب) لونُ البطاقة كان يقول «أيّ وكيل
- * مفتوح» وهو ما يقوله المنتقي المضيء بجانبها أصلاً، فاللون يُنفَق على معلومة
- * مكرّرة بينما حالةُ الاتصال — المعلومة الوحيدة التي تتغيّر — تُترك لشارة؛
- * (ج) `bg-*-50` مع نصّ `text-*-900` لوحةٌ لم يقس تباينها أحد في أيٍّ من
- * البريستات الستة. ولا بطاقةَ أصلاً بعد v2: قائمةُ صفوفٍ بفواصل شعرية.
- */
-type AgentVisualConfig = {
-  name: string;
-  description?: string;
-};
-
-const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
-  claude: { name: 'Claude' },
-  cursor: { name: 'Cursor' },
-  codex: { name: 'Codex' },
-  antigravity: { name: 'Antigravity (agy)', description: 'Google AI Pro via the agy CLI' },
-  opencode: { name: 'OpenCode', description: 'OpenCode CLI assistant' },
-  qwen: { name: 'Qwen Code', description: 'Personal Alibaba Cloud Coding Plan' },
-  kimi: { name: 'Kimi', description: 'Moonshot Kimi — native CLI (device-code login) or API key' },
-  deepseek: { name: 'DeepSeek', description: 'DeepSeek via API key' },
-  glm: { name: 'GLM', description: 'Zhipu / Z.ai GLM via API key' },
-  hermes: { name: 'Hermes', description: 'Hermes assistant' },
-  sakana: { name: 'Sakana', description: 'Sakana assistant' },
+/** Display names used in login copy; the description lines were dropped with the per-agent header. */
+const AGENT_DISPLAY_NAMES: Record<AgentProvider, string> = {
+  claude: 'Claude',
+  cursor: 'Cursor',
+  codex: 'Codex',
+  antigravity: 'Antigravity (agy)',
+  opencode: 'OpenCode',
+  qwen: 'Qwen Code',
+  kimi: 'Kimi',
+  deepseek: 'DeepSeek',
+  glm: 'GLM',
+  hermes: 'Hermes',
+  sakana: 'Sakana',
 };
 
 const INSTALL_INFO: Partial<Record<AgentProvider, { label: string; command: string; note?: string }>> = {
@@ -154,24 +118,6 @@ const PURE_API_PROVIDERS: AgentProvider[] = ['deepseek', 'glm', 'sakana'];
  * subscription login.
  */
 const DUAL_AUTH_PROVIDERS: AgentProvider[] = ['kimi'];
-
-/**
- * أمرٌ لاتيني داخل جملةٍ عربية. `dir="ltr"` وحده يترك المقطع مدمجاً في سياق
- * الفقرة، فينزلق ما يليه من ترقيمٍ إلى الطرف الخطأ وينكسر المعرّف سطرين.
- * `unicode-bidi: isolate` يعزله و`whitespace-nowrap` يمنع كسر ما يُنسخ حرفياً —
- * نفس علاج `InlineCode` في `ProviderLoginModal`.
- */
-function InlineCommand({ children }: { children?: React.ReactNode }) {
-  return (
-    <code
-      dir="ltr"
-      style={{ unicodeBidi: 'isolate' }}
-      className="whitespace-nowrap rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground"
-    >
-      {children}
-    </code>
-  );
-}
 
 /** Inline copy button: icon toggles to checkmark for 1 second after click. */
 function CopyButton({ text }: { text: string }) {
@@ -245,36 +191,10 @@ function formatDisplayDate(isoString: string, locale: string): string {
 
 export default function AccountContent({ agent, authStatus, onLogin, userLink }: AccountContentProps) {
   const { t, i18n } = useTranslation('settings');
-  const config = agentConfig[agent];
   const isAntigravity = agent === 'antigravity';
 
   const checking = authStatus.loading || Boolean(userLink?.loading);
   const isConnected = authStatus.authenticated || Boolean(userLink?.connected);
-
-  // حالة نموذج لصق الرمز (B-1075) — تُديرها المكوّن محلياً؛ الرمز لا يُقرأ للخادم.
-  const [tokenDraft, setTokenDraft] = useState('');
-  const [tokenSaving, setTokenSaving] = useState(false);
-  const [tokenSaved, setTokenSaved] = useState(false);
-  const [tokenSaveError, setTokenSaveError] = useState<string | null>(null);
-
-  const handleSaveToken = useCallback(async () => {
-    if (!userLink?.onSaveToken) return;
-    const trimmed = tokenDraft.trim();
-    if (!trimmed) {
-      setTokenSaveError(t(`${userLink.i18nPrefix}.tokenInput.emptyError`));
-      return;
-    }
-    setTokenSaving(true);
-    setTokenSaveError(null);
-    const result = await userLink.onSaveToken(trimmed);
-    setTokenSaving(false);
-    if (result.success) {
-      setTokenSaved(true);
-      setTokenDraft('');
-    } else {
-      setTokenSaveError(result.error ?? t(`${userLink.i18nPrefix}.tokenInput.saveError`));
-    }
-  }, [userLink, tokenDraft, t]);
 
   // دورة الفوترة — تُجلَب مرّة واحدة عند الاتصال، بلا استقصاء.
   const cycles = useProviderCycles(isConnected && !checking);
@@ -295,47 +215,6 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
       && !userLink.incompleteLink,
   );
   /**
-   * **حقلُ لصق الرمز ليس ابناً للافتة الدعوة** (‏B-1075 ← هذا الإصلاح).
-   *
-   * كان الحقل مُصيَّراً داخل `showLinkBanner`، فورث منها شرطَ `!isOwner`. ونتيجةُ
-   * ذلك أنّ المالك — وهو على عقدةٍ فرديّةٍ المستخدمُ الوحيد — يفتح الطرفية،
-   * فيطبع له `claude setup-token` رمزاً **يُعرض مرّةً واحدة**، ثم لا يجد في
-   * الشاشة كلّها موضعاً يلصقه فيه. فالربط يقف عند خطوته الأخيرة.
-   *
-   * ووراثةُ الشرط سهوٌ لا حارس: `!isOwner` بقيّةُ زمنٍ كان الخادم فيه يربط
-   * اعتماد المُشغِّل رمزيّاً في شجرة كل حساب دوره `owner`، فلا يحتاج المالك
-   * تسجيلَ دخولٍ أصلاً. وذلك الرابط **أُزيل ويُقتلع فعليّاً** الآن
-   * (‏ADR-105 / B-486، ‏`unlinkForeignCredential` في `provision-user-dirs.js`)
-   * لأنّه كان قناةَ مشاركةٍ للاعتماد خارج سياسة العزل. فالمالك يصادق لنفسه
-   * كسائر الأعضاء، والشرط الذي كان يُعفيه صار يحجب عنه المسار وحسب.
-   *
-   * فالشرط هنا هو شرطُ الحقل نفسِه: مسارُ حفظٍ متاح، وحالةٌ لم تُربَط بعد.
-   * لا دورٌ ولا لافتة.
-   */
-  /**
-   * **ورمزٌ يُعرض مرّةً واحدة لا يُطلب ممّن لا يستطيع حفظه** (‏نمط B-362).
-   *
-   * تحت سياسة مشاركةٍ `shared` يصير اعتماد claude مُلزِماً بدورٍ أعلى
-   * (‏`requiresElevatedRole` في `provider-credentials.service.ts`)، فيُردّ العضو
-   * بـ403 **بعد** الحفظ. وثمن ذلك هنا ليس رسالة خطأ: العضو يكون قد شغّل
-   * `setup-token` ولصق الرمز، والرمز لا يُعرض ثانيةً — فالردّ يصل بعد أن أُتلفت
-   * النسخة الوحيدة. فيُسأل السؤال قبل الطرفية لا بعدها.
-   */
-  const tokenWriteRefused = Boolean(
-    userLink && userLink.onSaveToken && userLink.canSaveToken === false,
-  );
-  const showTokenPaste = Boolean(
-    userLink
-      && userLink.onSaveToken
-      && !userLink.loading
-      && !userLink.connected
-      && !tokenWriteRefused,
-  );
-  /** سطرٌ يقول لماذا لا حقل، بدل اختفاءٍ صامتٍ تحت إفادةٍ تطلب اللصق. */
-  const showTokenWriteRefusal = Boolean(
-    tokenWriteRefused && userLink && !userLink.loading && !userLink.connected,
-  );
-  /**
    * **كتلةُ ربط الاشتراك لا تُصيَّر فارغة** (‏T-1700). أبناؤها الثلاثة —
    * الوصف، وسطر الخطأ، ولافتة الربط — كلّهم مشروطون بـ«لم يُربَط بعد»، فحين
    * يكون العضو موصولاً تبقى الكتلة بلا ابنٍ واحد ويبقى حشوُها: شريطٌ ميّت بين
@@ -346,9 +225,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
     userLink
       && ((!userLink.loading && !userLink.connected)
         || userLink.error
-        || showLinkBanner
-        || showTokenPaste
-        || showTokenWriteRefusal),
+        || showLinkBanner),
   );
   // Re-auth affordance: the generic provider login for most agents; for
   // antigravity (no UI-driven login — agy runs Google OAuth in the link
@@ -367,21 +244,6 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
   // terminal for Coding Plan or Token Plan credentials.
   const showLoginRow =
     !isPureApiProvider && Boolean(onReauth) && !apiKeyHidesLoginRow && !showLinkBanner;
-
-  /**
-   * **اسمُ الزرّ الذي يفتح الطرفية — كما يقرؤه هذا المستخدم بعينه.**
-   *
-   * إرشادٌ يقول «اضغط الزرّ في هذه البطاقة» يفترض أنّ في البطاقة زرّاً واحداً،
-   * وفيها اثنان لا يجتمعان: العضو غير المربوط يرى «ربط حساب Claude» في اللافتة،
-   * والمالك يرى «تسجيل الدخول» في صفّ الدخول (اللافتة محجوبة عنه). فتسميةٌ
-   * ثابتة تكون خاطئةً لأحدهما حتماً. يُشتقّ الاسم من نفس الشرطين اللذين
-   * يقرّران أيّ الزرّين يُصيَّر.
-   */
-  const tokenLaunchLabel = showLinkBanner
-    ? t(`${userLink?.i18nPrefix ?? 'claudeConnection'}.linkButton`)
-    : authStatus.authenticated
-      ? t('agents.login.reAuthenticate')
-      : t('agents.login.title');
 
   // رابط صفحة الفوترة — موجود لجميع المزوّدين (BILLING_LINKS كامل).
   const billingHref = BILLING_LINKS[agent];
@@ -679,82 +541,6 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
             </SettingsCard>
           )}
 
-          {/*
-            **مسارُ لصق الرمز — صندوقٌ قائمٌ بذاته، لا ذيلٌ للافتة** (‏B-1075).
-
-            `claude setup-token` يطبع رمز OAuth في الطرفية **مرّةً واحدة** ثم
-            لا سبيل إلى رؤيته ثانيةً؛ فهذا الحقل هو الخطوة الثانية من خطوتين،
-            وهو الفرق بين طرفيةٍ عرضت رمزاً وبين اشتراكٍ مربوط.
-
-            وحين كان ابناً للافتة الدعوة ورث شرطَها `!isOwner`، فاختفى عمّن
-            يملك الحساب. أُخرج منها لأنّ شرطه غير شرطها: اللافتة تنادي مَن لم
-            يبدأ، والحقل يُكمل لمَن بدأ — ومَن بدأ قد يكون المالك.
-
-            ونبرة `info` لا `warning`: هذه خطوةُ إعداد تُقرأ وتُنفَّذ، وليست
-            خطراً يُحذَّر منه. والأصفر محجوزٌ للافتة فوقها.
-          */}
-          {showTokenWriteRefusal && (
-            <SettingsCard tone="info">
-              <p className="text-[13px] leading-relaxed text-muted-foreground">
-                {t(`${userLink.i18nPrefix}.tokenInput.notWritable`)}
-              </p>
-            </SettingsCard>
-          )}
-
-          {showTokenPaste && userLink.onSaveToken && (
-            <SettingsCard tone="info">
-              <div className="space-y-2">
-                <p className="text-[13px] leading-relaxed text-foreground">
-                  <Trans
-                    ns="settings"
-                    i18nKey={`${userLink.i18nPrefix}.tokenInput.stepHint`}
-                    values={{ button: tokenLaunchLabel }}
-                    components={{ cmd: <InlineCommand /> }}
-                  />
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    type="password"
-                    dir="ltr"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder={t(`${userLink.i18nPrefix}.tokenInput.placeholder`)}
-                    aria-label={t(`${userLink.i18nPrefix}.tokenInput.ariaLabel`)}
-                    value={tokenDraft}
-                    onChange={(e) => {
-                      setTokenDraft(e.target.value);
-                      setTokenSaveError(null);
-                      setTokenSaved(false);
-                    }}
-                    disabled={tokenSaving}
-                    className="min-w-0 flex-1"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={tokenSaving}
-                    onClick={() => { void handleSaveToken(); }}
-                  >
-                    {tokenSaving
-                      ? t(`${userLink.i18nPrefix}.tokenInput.saving`)
-                      : t(`${userLink.i18nPrefix}.tokenInput.save`)}
-                  </Button>
-                </div>
-                {tokenSaved && (
-                  <p role="status" className="flex items-center gap-1 text-[13px] text-success">
-                    <Check className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                    {t(`${userLink.i18nPrefix}.tokenInput.saved`)}
-                  </p>
-                )}
-                {tokenSaveError && (
-                  <p role="alert" className="text-[13px] text-danger">
-                    {tokenSaveError}
-                  </p>
-                )}
-              </div>
-            </SettingsCard>
-          )}
-
           {/* ADR-105 — the owner note ("your credential is linked automatically
               as the owner") is gone because the linking is gone. It described the
               symlink channel that put the operator's real credential into every
@@ -773,7 +559,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
           description={
             authStatus.authenticated
               ? t('agents.login.reAuthDescription')
-              : t('agents.login.description', { agent: config.name })
+              : t('agents.login.description', { agent: AGENT_DISPLAY_NAMES[agent] })
           }
         >
           {/* زرّ النظام بلا صبغة مورّد: `bg-blue-600 text-white` كانت تفرض
@@ -789,18 +575,6 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
         </SettingsRow>
       )}
 
-      {/* **مرّةً واحدة لا مرّتين.** كانت `agents.antigravity.modelNote` تفتتح بـ
-          «يستخدم Google AI Pro عبر agy CLI» — وهي حرفياً وصفُ الوكيل المطبوع في
-          رأس اللوح فوقها (`agents.account.antigravity.description`). فبقي منها
-          ما تنفرد به وحدها: **أين يُختار النموذج**. */}
-      {isAntigravity && (
-        <p className="py-2.5 text-[13px] leading-relaxed text-muted-foreground">
-          {t('agents.antigravity.modelPickerNote', {
-            defaultValue: 'اختر النموذج من منتقي النماذج؛ و«agy default» يترك الاختيار لـagy.',
-          })}
-        </p>
-      )}
-
       {/* sakana: coming soon, no key available yet (ADR-076). */}
       {agent === 'sakana' && (
         <p className="py-2.5 text-[13px] leading-relaxed text-muted-foreground">
@@ -810,43 +584,10 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
     </SettingsGroup>
   );
 
-  const agentDescription = t(`agents.account.${agent}.description`, {
-    defaultValue: config.description || `${config.name} CLI assistant`,
-  }).trim();
-
   return (
-    /**
-     * **رأسٌ واحد لقسمٍ واحد** (‏T-1700، شكوى المالك 2026-09-10: «فيها نوع من
-     * الفوضى»). تبويب الحساب ثلاثة أقسام متتابعة — الاتصال، ثم مشاركة الاعتماد،
-     * ثم حدود الاستخدام — وهذا أوّلها. فبنيته هي بنية `SettingsSection` حرفاً
-     * بحرف: غلافٌ `space-y-3`، ورأسٌ `flex items-center gap-2.5` بأيقونة
-     * `h-5 w-5` وعنوان `text-lg`، ووصفٌ `mt-1.5 text-[13px]`. المقاسات كانت
-     * `gap-3` و`h-6 w-6` و`mt-1` و`space-y-5` — فرقٌ يُرى بين رأسٍ ورأسٍ في
-     * شاشةٍ واحدة ولا يُفسَّر، وهو نصفُ «الفوضى» المرصودة.
-     *
-     * ولم يُستدعَ `SettingsSection` نفسُه لأن فتحته للأيقونة تقبل مكوّن lucide
-     * وحده، وأيقونةٌ عامّة تقول أقلّ ممّا يقوله شعارُ الوكيل الذي يخصّه القسم.
-     */
-    <div className="space-y-3">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <SessionProviderLogo provider={agent} className="h-5 w-5 flex-shrink-0" />
-          <h3 dir="ltr" className="min-w-0 text-lg font-semibold leading-snug text-foreground">
-            {config.name}
-          </h3>
-        </div>
-        {/* الوصف الفارغ لا يُصيَّر: `agents.account.claude.description` سلسلة
-            خالية، وفقرةٌ خالية بـ`mt-1.5` كانت تفتح فراغاً بلا سبب تحت الاسم. */}
-        {agentDescription && (
-          <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-            {agentDescription}
-          </p>
-        )}
-      </div>
-
-      {/* الكتل تحت الرأس بإيقاعٍ واحد: `space-y-4` بين كتلةٍ وكتلة، و`space-y-1`
-          بين صفوف المجموعة (‏`SettingsGroup`)، لا قيمةَ ثالثة. */}
-      <div className="space-y-4">
+    /* لا رأس للوكيل هنا: شريط الشعارات في أعلى الصفحة يسمّي المفتوح أصلاً،
+       فتكرار الشعار والاسم والوصف تحته كان حشواً (شكوى المالك 2026-10-04). */
+    <div className="space-y-4">
       {/* Install banner — shown when the CLI is not installed */}
       {/* صندوق نبرة `warning` (v3 §2.4): «الثنائية غائبة عن الخادم» ليس سطراً
           في تدفّق البطاقة — هو الشرط الذي يجعل كل ما تحته بلا أثر، ويحمل أمراً
@@ -881,46 +622,23 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
           الوكيل الذي يقبل الطريقين معاً (`credential: 'both'` في سجلّ
           المورّدين) يُعنوَن اشتراكُه باسمه هنا، ويُعنوَن مفتاحُه باسمه في
           `AgentVendorCredentials` تحته — فيُقرأ الاثنان خياراً من اثنين لا
-          أربع خطواتٍ متتابعة. والوكيل ذو الطريق الواحد (أنتيجرافيتي اشتراكاً،
-          وديبسيك مفتاحاً) لا يُعنوَن ولا يُطوى: عنوانُ «الطريق الأول» فوق طريقٍ
-          لا ثاني له وعدٌ لا يُوفى.
+          أربع خطواتٍ متتابعة. وغير المطويّ بلا عنوانٍ لأنّ شريط الوكلاء
+          أعلاه يكفي (2026-10-04).
 
           والمطويّ يبقى **ناطقاً بحالته**: الشارة في سطر الطيّ نفسه، فالطيُّ
           يخفي التحكّم لا المعلومة.
       */}
-      {dualPaths ? (
-        subscriptionFolded ? (
-          <SettingsCollapsible
-            summary={
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="text-[15px] font-medium text-foreground">{subscriptionTitle}</span>
-                {statusBadge}
-              </span>
-            }
-          >
-            {subscriptionRows}
-          </SettingsCollapsible>
-        ) : (
-          /**
-           * **لصيقةُ كتلة لا عنوانُ قسم** (‏T-1700). كان عنوان «الاعتماد
-           * باشتراك» يُصيَّر بـ`SettingsSection` — أي `text-lg` بأيقونة — فوقع
-           * في مستوى «مشاركة الاعتماد» و«حدود الاستخدام» تحته وفي مستوى اسم
-           * الوكيل فوقه: أربعةُ عناوين بمقاسٍ واحد في لوحٍ واحد، لا يقول شيءٌ
-           * منها أيّها يحتوي أيّاً. وهو داخل قسم الاتصال لا قسمٌ ثالث، فنزل إلى
-           * `text-[15px]` — مقاسُ لصيقة الصفّ نفسُه الذي يحمله سطرُ الطيّ
-           * المقابل أعلاه، ومقاسُ «اعتمادك» و«مُشارَك معك» في القسم التالي.
-           *
-           * ووصفُه سقط لأنه صار كاذباً: «والآخر مفتاح API **أدناه**» يشير إلى
-           * قسمٍ حُذف من هذه الشاشة (‏T-1139/‏B-350) وانتقل إلى تبويب
-           * المورّدين — إشارةٌ إلى لا شيء أسوأ من صمت.
-           */
-          <div className="space-y-2">
-            <p className="text-[15px] font-medium leading-relaxed text-foreground">
-              {subscriptionTitle}
-            </p>
-            {subscriptionRows}
-          </div>
-        )
+      {subscriptionFolded ? (
+        <SettingsCollapsible
+          summary={
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="text-[15px] font-medium text-foreground">{subscriptionTitle}</span>
+              {statusBadge}
+            </span>
+          }
+        >
+          {subscriptionRows}
+        </SettingsCollapsible>
       ) : (
         subscriptionRows
       )}
@@ -932,7 +650,6 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
           </p>
         </SettingsCard>
       )}
-      </div>
     </div>
   );
 }

@@ -5,7 +5,8 @@
     "permissions": "İzinler",
     "mcpServers": "MCP Sunucuları",
     "skills": "Beceriler",
-    "appearance": "Görünüm"
+    "appearance": "Görünüm",
+    "update": "Güncelleme"
   },
   "skills": {
     "title": "Beceriler",
@@ -721,32 +722,6 @@
       "authenticatedUser": "kimliği doğrulanmış kullanıcı",
       "billingPage": "Faturalandırma sayfası",
       "billingPageNewTab": "yeni sekmede açılır"
-    },
-    "account": {
-      "claude": {
-        "description": "Anthropic Claude AI asistanı"
-      },
-      "cursor": {
-        "description": "Cursor AI destekli kod editörü"
-      },
-      "codex": {
-        "description": "OpenAI Codex AI asistanı"
-      },
-      "antigravity": {
-        "description": "agy CLI üzerinden Google AI Pro"
-      },
-      "opencode": {
-        "description": "OpenCode CLI asistanı"
-      },
-      "kimi": {
-        "description": "API anahtarı üzerinden Moonshot Kimi"
-      },
-      "deepseek": {
-        "description": "API anahtarı üzerinden DeepSeek"
-      },
-      "glm": {
-        "description": "API anahtarı üzerinden Zhipu / Z.ai GLM"
-      }
     },
     "connectionStatus": "Bağlantı Durumu",
     "login": {

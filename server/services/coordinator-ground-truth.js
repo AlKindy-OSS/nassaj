@@ -21,8 +21,10 @@
  */
 
 import { execFile } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
-import { tryResolveGovernanceContent } from './governance-content-resolver.js';
+import { getExternalBinding, readProjectBoardState } from './project-board-reader.js';
 
 /**
  * Resolve the repo this layer may read ground truth from — THE CALLING
@@ -129,7 +131,7 @@ export function readRecentCommits(repoRoot) {
 }
 
 /**
- * Filters a parsed governance state without accepting any filesystem path.
+ * Filters a parsed board state without accepting any filesystem path.
  * @param {unknown} state
  * @param {string[]} keywords
  * @returns {Array<{id:string,status:string,title:string}>}
@@ -160,22 +162,78 @@ export function filterOpenTasks(state, keywords = []) {
   }
 }
 
-/** Read open tasks through the logical governance boundary (never a product path). */
-export async function readGovernanceOpenTasks({
-  projectId,
-  actorId,
-  keywords = [],
-  resolver = tryResolveGovernanceContent,
+const OVERLAY_WORKSPACE = /^(.+?)\/\.git\/nassaj-session-overlays\/instances\/[^/]+\/workspace(?:\/.*)?$/;
+
+/**
+ * Default project lookup: the project's registered root, only when `actorId`
+ * may enter it (the same rule the board route applies). Loaded lazily so this
+ * module stays import-safe without a database.
+ * @param {string} projectId
+ * @param {unknown} actorId
+ * @returns {Promise<string|null>}
+ */
+async function lookupVisibleProjectPath(projectId, actorId) {
+  const { projectsDb } = await import('../modules/database/index.js');
+  const userId = Number.isInteger(actorId) ? actorId : Number.parseInt(String(actorId ?? ''), 10);
+  if (!Number.isInteger(userId) || !projectsDb.isProjectVisibleToUser(projectId, userId)) return null;
+  return projectsDb.getProjectPathById(projectId);
+}
+
+function isSameOrWithin(candidate, root) {
+  try {
+    const realCandidate = fs.realpathSync(candidate);
+    const realRoot = fs.realpathSync(root);
+    return realCandidate === realRoot || realCandidate.startsWith(realRoot + path.sep);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The project root whose board belongs to this session.
+ *
+ * With a projectId: the registered root of that project (visible to the
+ * actor), and only if the session's own root lies inside it — which covers a
+ * session overlay at `<root>/.git/nassaj-session-overlays/instances/<id>/workspace`.
+ * Without one: the session root, with an overlay workspace mapped back to its
+ * project root by path shape (no git call, so the hook never blocks).
+ *
+ * @returns {Promise<string|null>} null ⇒ read no board
+ */
+export async function resolveBoardRoot({
+  repoRoot, projectId, actorId, projectPathLookup = lookupVisibleProjectPath,
 } = {}) {
   try {
-    const resolved = resolver({
-      projectId,
-      actorId,
-      kind: 'project-state',
+    const root = resolveSessionRepoRoot(repoRoot);
+    if (!root) return null;
+    if (typeof projectId === 'string' && projectId.trim()) {
+      const projectPath = await projectPathLookup(projectId.trim(), actorId);
+      if (typeof projectPath !== 'string' || !projectPath) return null;
+      return isSameOrWithin(root, projectPath) ? projectPath : null;
+    }
+    const overlay = OVERLAY_WORKSPACE.exec(root);
+    return overlay ? overlay[1] : root;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read open tasks from the session's own project board (B-1524): the
+ * project's docs/project-state.json, read through project-board-reader with
+ * the external binding declared for this projectId, if any. Never throws.
+ * @returns {Promise<Array<{id:string,status:string,title:string}>>}
+ */
+export async function readBoardOpenTasks({
+  repoRoot, projectId, actorId, keywords = [], projectPathLookup,
+} = {}) {
+  try {
+    const boardRoot = await resolveBoardRoot({ repoRoot, projectId, actorId, projectPathLookup });
+    if (!boardRoot) return [];
+    const read = readProjectBoardState(boardRoot, {
+      externalBinding: typeof projectId === 'string' ? getExternalBinding(projectId.trim()) : null,
     });
-    if (!resolved.available) return [];
-    const state = resolved.value ?? JSON.parse(resolved.content);
-    return filterOpenTasks(state, keywords);
+    return read.status === 'ok' ? filterOpenTasks(read.value, keywords) : [];
   } catch {
     return [];
   }
@@ -191,10 +249,9 @@ export async function readGovernanceOpenTasks({
  * @param {string} [args.repoRoot] the DELEGATING SESSION's own project root. It is
  *   the ONLY accepted source: a session's own root is ground truth about itself,
  *   and nothing stands in for it (see `resolveSessionRepoRoot`).
- * @param {string} [args.projectStatePath]
- * @param {string} [args.projectId] logical governance project id
+ * @param {string} [args.projectId] the session's project id (projects.project_id)
  * @param {string|number} [args.actorId] authenticated actor id
- * @param {Function} [args.governanceResolver] injected resolver (test seam)
+ * @param {Function} [args.projectPathLookup] injected project lookup (test seam)
  * @returns {Promise<string|null>} null when the session's project root is unknown
  *   — never an env override and never the shared server process's own
  *   `process.cwd()`, either of which leaks another project's commits/tasks into
@@ -205,7 +262,7 @@ export async function buildGroundTruthContext({
   repoRoot,
   projectId,
   actorId,
-  governanceResolver,
+  projectPathLookup,
 } = {}) {
   try {
     const root = resolveSessionRepoRoot(repoRoot);
@@ -214,8 +271,8 @@ export async function buildGroundTruthContext({
 
     const [commits, tasks] = await Promise.all([
       readRecentCommits(root),
-      readGovernanceOpenTasks({
-        projectId, actorId, keywords, resolver: governanceResolver,
+      readBoardOpenTasks({
+        repoRoot: root, projectId, actorId, keywords, projectPathLookup,
       }),
     ]);
 

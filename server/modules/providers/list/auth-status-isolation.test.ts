@@ -51,6 +51,19 @@ mock.module('cross-spawn', {
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 initializeDatabase();
 
+/*
+ * B-1346 — pin the sharing policy instead of inheriting whatever the database
+ * holds. The B-580 case once failed on the main tree and passed in a clean one:
+ * the sandbox DB used to be seeded from the checkout's legacy `database/auth.db`,
+ * whose stored policy says `agy: "shared"`, and under that policy
+ * resolveProviderEnv correctly returns the operator HOME. B-973 stopped test and
+ * temp databases from being seeded that way; the pin keeps this file independent
+ * of any stored policy regardless.
+ */
+const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
+_resetProviderSharingCache();
+setProviderSharingConfig({ cursor: 'isolated', agy: 'isolated' });
+
 const { CursorProviderAuth } = await import('./cursor/cursor-auth.provider.js');
 
 type LoginProbe = { checkCursorLogin(userId?: string | number | null): Promise<unknown> };
@@ -97,6 +110,16 @@ test('B-580: the agy token path is per member', () => {
   assert.match(first, /nassaj-users[/\\]1[/\\]/, 'member 1 resolves under their own root');
   assert.match(second, /nassaj-users[/\\]2[/\\]/, 'member 2 resolves under their own root');
   assert.match(first, /antigravity-oauth-token$/, 'the file itself must not move');
+});
+
+test('B-1346: an admin-shared agy policy is the ONE thing that collapses members onto the operator', () => {
+  try {
+    setProviderSharingConfig({ agy: 'shared' });
+    assert.equal(getAntigravityTokenPath(1), getAntigravityTokenPath(2), 'shared is a deliberate admin choice');
+  } finally {
+    setProviderSharingConfig({ agy: 'isolated' });
+  }
+  assert.notEqual(getAntigravityTokenPath(1), getAntigravityTokenPath(2), 'isolated again once the policy says so');
 });
 
 test('B-580: a null userId still means the operator, explicitly', () => {

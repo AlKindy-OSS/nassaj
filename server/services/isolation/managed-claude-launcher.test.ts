@@ -261,3 +261,104 @@ test('foreign session, unknown pin, and ambiguous pin all fail before child spaw
   }
   assert.equal(spawned, 0);
 });
+
+// ---------------------------------------------------------------------------
+// B-1541: an engine-pinned managed launch refuses an Anthropic credential in a
+// settings source at the shell cwd, and any command-line settings override.
+// ---------------------------------------------------------------------------
+
+const KIMI_ENV = { ANTHROPIC_BASE_URL: 'https://api.moonshot.ai/anthropic', ANTHROPIC_AUTH_TOKEN: 'vendor-fixture' };
+
+/** Runs `body` with process.cwd() at a fresh project dir and a private config dir. */
+async function inProject(body: (dirs: { project: string; configDir: string }) => Promise<void>): Promise<void> {
+  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'b1541-launcher-'));
+  const project = path.join(root, 'project');
+  const configDir = path.join(root, 'config');
+  fs.mkdirSync(project, { recursive: true });
+  fs.mkdirSync(configDir, { recursive: true });
+  const previous = process.cwd();
+  process.chdir(project);
+  try {
+    await body({ project, configDir });
+  } finally {
+    process.chdir(previous);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function pinnedDeps(configDir: string, spawnImpl: never, onProfile?: (input: Record<string, unknown>) => void) {
+  return {
+    permissionExecution: null,
+    authorizeSession: () => ({} as never),
+    resolveProfile: async (input: Record<string, unknown>) => {
+      onProfile?.(input);
+      return {
+        env: { PATH: '/usr/bin', CLAUDE_CONFIG_DIR: configDir, HOME: configDir, ...KIMI_ENV },
+        effectiveEngine: 'kimi',
+        engineHosts: new Set(['api.moonshot.ai']),
+        pin: {},
+      } as never;
+    },
+    spawnImpl,
+  };
+}
+
+function writeLocalKey(project: string): void {
+  fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.claude', 'settings.local.json'),
+    JSON.stringify({ env: { ANTHROPIC_API_KEY: 'sk-ant-api03-FIXTURE' } }));
+}
+
+test('B-1541 non-brokered: a key in <cwd>/.claude/settings.local.json refuses before spawn', async () => {
+  await inProject(async ({ project, configDir }) => {
+    writeLocalKey(project);
+    let spawned = false;
+    let profileCwd: unknown = null;
+    await assert.rejects(
+      launcher.runManagedClaudeLauncher(['-r', 'sess-1'], contractEnv(),
+        pinnedDeps(configDir, (() => { spawned = true; }) as never, (input) => { profileCwd = input.cwd; })),
+      (error: Error & { code?: string }) => error.code === 'ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED',
+    );
+    assert.equal(spawned, false);
+    assert.equal(fs.realpathSync(String(profileCwd)), fs.realpathSync(project), 'profile resolved at the shell cwd');
+  });
+});
+
+test('B-1541 non-brokered: --settings / --setting-sources refuse an engine-pinned launch', async () => {
+  await inProject(async ({ configDir }) => {
+    for (const argv of [
+      ['-r', 'sess-1', '--settings', '{"env":{"ANTHROPIC_API_KEY":"x"}}'],
+      ['-r', 'sess-1', '--settings=/var/tmp/s.json'],
+      ['-r', 'sess-1', '--setting-sources', 'user'],
+      ['-r', 'sess-1', '--setting-sources=local'],
+    ]) {
+      await assert.rejects(
+        launcher.runManagedClaudeLauncher(argv, contractEnv(),
+          pinnedDeps(configDir, (() => { throw new Error('must not spawn'); }) as never)),
+        (error: Error & { code?: string }) => error.code === 'ENGINE_ANTHROPIC_CREDENTIAL_EXPOSED',
+        argv.join(' '),
+      );
+    }
+    // A clean pinned launch still spawns.
+    const calls: Array<{ bin: string; argv: string[]; options: Record<string, unknown> }> = [];
+    assert.equal(await launcher.runManagedClaudeLauncher(['-r', 'sess-1'], contractEnv(),
+      pinnedDeps(configDir, fakeSpawn(calls))), 0);
+    assert.equal(calls.length, 1);
+  });
+});
+
+test('B-1541 non-brokered: the official path keeps --settings and a stored key', async () => {
+  await inProject(async ({ project }) => {
+    writeLocalKey(project);
+    const calls: Array<{ bin: string; argv: string[]; options: Record<string, unknown> }> = [];
+    await launcher.runManagedClaudeLauncher(['--settings', '{}'], contractEnv(), {
+      permissionExecution: null,
+      authorizeSession: () => ({} as never),
+      resolveProfile: async (input) => ({
+        env: { ...input.baseEnv, ANTHROPIC_API_KEY: 'k' }, effectiveEngine: null,
+      } as never),
+      spawnImpl: fakeSpawn(calls),
+    });
+    assert.equal(calls.length, 1);
+  });
+});

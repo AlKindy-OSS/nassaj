@@ -120,7 +120,7 @@ function refusal(apiKey: string): string {
 
 test('owner changes the window: audited once, applied to the next key check', async () => {
   currentUser = { id: ownerId, role: 'owner' };
-  const member = userDb.createUser('window-linked', 'hash', 'user');
+  const member = userDb.createUser('window-linked', 'hash', 'admin');
   const linkId = userIdentitiesDb.link(member.id, 'https://idp.example', 'sub-window');
   userIdentitiesDb.markAttested(linkId, member.id, Date.now() - 10 * DAY_MS);
   const key = apiKeysDb.createApiKey(member.id, 'window');

@@ -16,6 +16,7 @@ import { reconcileAgentMessages } from '@/modules/providers/list/claude/agent-re
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
 
 import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
+import { detectClaudeSkillLoad } from './claude-skill-load.js';
 import { createClaudeRawIdentityCollector, markSteerCandidate, readQueuedSteerPrompt } from './claude-receipt-identity.js';
 
 const PROVIDER = 'claude';
@@ -398,16 +399,52 @@ function normalizeWithSteer(provider: ClaudeSessionsProvider, raw: AnyRecord, se
   return messages;
 }
 
+/**
+ * T-1970 D1: true when a raw Claude row belongs to a subagent thread, not the
+ * main conversation: a sidechain transcript row, a row stamped with a subagent
+ * id, or an SDK event nested under a delegating Task/Agent tool_use. Main-thread
+ * JSONL rows carry none of these keys.
+ */
+function isClaudeSubagentRow(raw: AnyRecord): boolean {
+  return raw.isSidechain === true
+    || (typeof raw.agentId === 'string' && raw.agentId.length > 0)
+    || (typeof raw.parent_tool_use_id === 'string' && raw.parent_tool_use_id.length > 0)
+    || (typeof raw.parentToolUseId === 'string' && raw.parentToolUseId.length > 0);
+}
+
+/**
+ * Carries the neutral provenance markers of a raw row onto its normalized rows.
+ * Additive only: no renderer reads `isSidechain`/`isSynthetic`, so the chat UI
+ * is unchanged; consumers that must exclude non-conversation rows (public share
+ * snapshots) can now see them.
+ */
+function stampProvenance(raw: AnyRecord, messages: NormalizedMessage[]): NormalizedMessage[] {
+  const sidechain = isClaudeSubagentRow(raw);
+  const synthetic = raw.isSynthetic === true;
+  if (!sidechain && !synthetic) return messages;
+  for (const message of messages) {
+    if (sidechain) message.isSidechain = true;
+    if (synthetic) message.isSynthetic = true;
+  }
+  return messages;
+}
+
 export class ClaudeSessionsProvider implements IProviderSessions {
   /**
    * Normalizes one Claude JSONL entry or live SDK stream event into the shared
-   * message shape consumed by REST and WebSocket clients.
+   * message shape consumed by REST and WebSocket clients, tagging subagent and
+   * synthetic rows with neutral provenance markers.
    */
   normalizeMessage(rawMessage: unknown, sessionId: string | null, lease?: HistoryReadLease): NormalizedMessage[] {
     const raw = readObjectRecord(rawMessage);
     if (!raw) {
       return [];
     }
+    return stampProvenance(raw, this.normalizeRow(raw, sessionId, lease));
+  }
+
+  /** Maps one raw row to normalized messages; see normalizeMessage. */
+  private normalizeRow(raw: AnyRecord, sessionId: string | null, lease?: HistoryReadLease): NormalizedMessage[] {
 
     // THE DERIVED-ROW PASS-THROUGH. getSessionMessages injects rows that are
     // ALREADY in NormalizedMessage shape (workflow-reconcile's ADR-048
@@ -438,6 +475,22 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const messages: NormalizedMessage[] = [];
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');
+
+    const skillLoad = raw.message?.content ? detectClaudeSkillLoad(raw) : null;
+    if (skillLoad) {
+      // Not a human turn: an assistant-side row so user-turn scans skip it.
+      return [createNormalizedMessage({
+        id: baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'text',
+        role: 'assistant',
+        content: skillLoad.body,
+        isSkillLoad: true,
+        skillName: skillLoad.name,
+      })];
+    }
 
     if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
       /**

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../../shared/view/ui';
 import { useAuth } from '../../../../auth';
 import { MIN_PASSWORD_LENGTH } from '../../../../auth/constants';
+import MySharesPanel from '../../../../session-sharing/MySharesPanel';
 import SettingsSection from '../../SettingsSection';
 import SettingsSubNav from '../SettingsSubNav';
 
@@ -348,6 +349,8 @@ export default function ProfileSettingsTab() {
         className="space-y-8 pt-3"
       >
         <SteerConsentSection />
+        {/* Mounted only while visible: it fetches the share list on mount (T-1970). */}
+        {activeTab === 'collaboration' && <MySharesPanel />}
       </div>
 
       {/* Stuck local outbox cleanup (T-1382/B-1370) — this device/browser's

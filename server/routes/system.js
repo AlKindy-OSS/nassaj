@@ -100,6 +100,9 @@ import {
     listRawCommands,
     prepareRawExecution,
     deleteRawCommand,
+    deleteRawCommandsByText,
+    lookupRawExecution,
+    validateRawCommand,
     recordRawExecution,
     listRawHistory,
     deleteRawHistoryEntry,
@@ -2683,12 +2686,37 @@ router.post('/command-board-raw', rawExecInsertLimiter, requireRawExecTier, (req
             id: result.value.id,
             digest: result.value.digest,
             command: result.value.command,
+            ...(result.reused ? { reused: true, requestedBy: result.value.requestedBy } : {}),
         });
         broadcastPendingActionsUpdated(req);
         return res.status(201).json({ command: result.value });
     } catch (error) {
         console.error('[system] insert raw command failed:', error.message);
         return res.status(500).json({ status: 'error', code: 'internal', detail: 'Failed to insert command' });
+    }
+});
+
+// POST /api/system/command-board-raw/executions/lookup — latest recorded
+// execution of an exact command text (durable ledger keyed by digest). Lets the
+// chat fence show «executed at …» and retire its button after a refresh, and
+// reflects a run started from the board. Same 'raw' tier as the queue it mirrors;
+// returns only when/outcome/exit — never output, text or executor. Body: { command }.
+router.post('/command-board-raw/executions/lookup', requireRawExecTier, (req, res) => {
+    try {
+        const checked = validateRawCommand(req.body?.command);
+        if (!checked.ok) {
+            return res.status(400).json({ status: 'error', code: checked.error });
+        }
+        const found = lookupRawExecution(checked.value.command);
+        // when / exit only: who ran it is not the chat's business.
+        return res.json({
+            execution: found
+                ? { executedAt: found.executedAt, outcome: found.outcome, exitCode: found.exitCode }
+                : null,
+        });
+    } catch (error) {
+        console.error('[system] raw execution lookup failed:', error.message);
+        return res.status(500).json({ status: 'error', code: 'internal', detail: 'Lookup failed' });
     }
 });
 
@@ -2779,6 +2807,16 @@ router.post('/command-board-raw/:id/execute', rawExecRunLimiter, requireRawExecT
 
         // Claim: delete the row BEFORE spawning so it can't be run twice.
         deleteRawCommand(req.params.id);
+        // Legacy byte-identical twins (queued before insert de-duplicated) would
+        // keep offering a command that is already running.
+        const swept = deleteRawCommandsByText(prep.row.command);
+        if (swept.removed > 0) {
+            auditRawExec(req, 'sweep', {
+                executedId: prep.row.id,
+                ids: swept.rows.map((r) => r.id),
+                requestedBy: swept.rows.map((r) => r.requestedBy),
+            });
+        }
         broadcastPendingActionsUpdated(req);
 
         await runRawCommand(req, res, prep);

@@ -7,10 +7,11 @@ import test, { after, before, mock } from 'node:test';
 import express from 'express';
 
 import {
-  closeConnection, deviceAccountSessionsDb, initializeDatabase, userDb, userIdentitiesDb,
+  closeConnection, deviceAccountSessionsDb, getConnection, initializeDatabase, userDb, userIdentitiesDb,
 } from '../modules/database/index.js';
 import { bindDeviceHttpResponseLifetime, connectionRevocationRegistry, SSEStreamWriter } from '../modules/account-wallet/index.js';
 import { hashPassword } from '../services/password.service.js';
+import { useWalletOriginEnv } from '../utils/__tests__/wallet-origin-env.js';
 
 // Mock unrelated external authentication boundaries; exercise the real router,
 // local verifier, limiter, middleware and SQLite wallet transactions together.
@@ -27,7 +28,7 @@ let delayedReadStarted = Promise.withResolvers<void>();
 let releaseDelayedRead = Promise.withResolvers<void>();
 let documentWrites = 0;
 const previousFlag = process.env.MULTI_ACCOUNT_SWITCHING;
-const previousOrigin = process.env.APP_ORIGIN;
+let restoreOriginEnv = () => {};
 
 before(async () => {
   assert.ok(process.env.DATABASE_PATH, 'Use the isolated node test runner');
@@ -61,8 +62,7 @@ before(async () => {
   });
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
-  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  process.env.APP_ORIGIN = origin;
+  ({ origin, restore: restoreOriginEnv } = useWalletOriginEnv((server.address() as AddressInfo).port));
 });
 
 after(async () => {
@@ -70,8 +70,7 @@ after(async () => {
   closeConnection();
   if (previousFlag === undefined) delete process.env.MULTI_ACCOUNT_SWITCHING;
   else process.env.MULTI_ACCOUNT_SWITCHING = previousFlag;
-  if (previousOrigin === undefined) delete process.env.APP_ORIGIN;
-  else process.env.APP_ORIGIN = previousOrigin;
+  restoreOriginEnv();
 });
 
 function fixture() {
@@ -100,8 +99,9 @@ function fixture() {
     body: JSON.stringify(body),
     headers: { 'X-CSRF-Token': await mutationCsrf(method, `/api/auth${route}`) },
   });
-  const mutate = async (route: string, action: string, body: object, method = 'POST') => request(route, {
-    method, body: JSON.stringify(body), headers: { 'X-CSRF-Token': await csrf(action) },
+  const mutate = async (route: string, action: string, body: object, method = 'POST', ip?: string) => request(route, {
+    method, body: JSON.stringify(body),
+    headers: { 'X-CSRF-Token': await csrf(action), ...(ip ? { 'CF-Connecting-IP': ip } : {}) },
   });
   return { device, email, request, csrf, mutationCsrf, genericMutate, mutate };
 }
@@ -137,7 +137,7 @@ test('wallet login requires the exact application Origin while legacy JWT login 
 test('local add preserves identity, exposes no credentials and rejects stale generations', async () => {
   const f = fixture();
   const response = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   assert.equal(response.status, 201);
   assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -161,8 +161,8 @@ test('local add preserves identity, exposes no credentials and rejects stale gen
 
 test('unknown email and wrong password have identical failures and leave the wallet unchanged', async () => {
   const f = fixture();
-  const wrong = await f.mutate('/accounts/add', 'add', { email: f.email, password: 'wrong', expectedGeneration: 1 });
-  const absent = await f.mutate('/accounts/add', 'add', { email: 'absent@example.test', password: 'wrong', expectedGeneration: 1 });
+  const wrong = await f.mutate('/accounts/add', 'add', { identifier: f.email, password: 'wrong', expectedGeneration: 1 });
+  const absent = await f.mutate('/accounts/add', 'add', { identifier: 'absent@example.test', password: 'wrong', expectedGeneration: 1 });
   assert.equal(wrong.status, 401);
   assert.equal(absent.status, 401);
   assert.deepEqual(await wrong.json(), await absent.json());
@@ -173,7 +173,7 @@ test('compound limiter rejects the sixth device/IP/candidate attempt', async () 
   const f = fixture();
   for (let attempt = 0; attempt < 6; attempt++) {
     const response = await f.mutate('/accounts/add', 'add', {
-      email: attempt % 2 ? ` ${f.email.toUpperCase()} ` : f.email,
+      identifier: attempt % 2 ? ` ${f.email.toUpperCase()} ` : f.email,
       password: 'wrong', expectedGeneration: 1,
     });
     assert.equal(response.status, attempt === 5 ? 429 : 401);
@@ -186,7 +186,7 @@ test('device limiter is independent from candidate and compound buckets', async 
   const f = fixture();
   for (let attempt = 0; attempt < 9; attempt++) {
     const response = await f.mutate('/accounts/add', 'add', {
-      email: `distinct_${sequence}_${attempt}@example.test`,
+      identifier: `distinct_${sequence}_${attempt}@example.test`,
       password: 'wrong', expectedGeneration: 1,
     });
     assert.equal(response.status, attempt === 8 ? 429 : 401);
@@ -199,7 +199,7 @@ test('candidate limiter is independent across devices', async () => {
   for (let attempt = 0; attempt < 9; attempt++) {
     const f = fixture();
     const response = await f.mutate('/accounts/add', 'add', {
-      email: candidate, password: 'wrong', expectedGeneration: 1,
+      identifier: candidate, password: 'wrong', expectedGeneration: 1,
     });
     assert.equal(response.status, attempt === 8 ? 429 : 401);
     assert.equal((await response.json()).code, 'add_account_failed');
@@ -242,7 +242,7 @@ test('device-cookie mutations require method/path token and reject it after an a
   assert.equal(wrongPath.status, 403);
 
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   const wallet = await added.json();
   const staleToken = await f.mutationCsrf('PATCH', '/api/auth/me/avatar-choice');
@@ -264,7 +264,7 @@ test('an async response cannot disclose the old account after a wallet switch', 
   releaseDelayedRead = Promise.withResolvers<void>();
   const f = fixture();
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   const wallet = await added.json();
   const pending = fetch(`${origin}/api/auth-test/delayed-disclosure`, {
@@ -325,7 +325,7 @@ test('direct document-style cookie writes pass through the shared mutation guard
 test('switch closes old realtime identity; logout selects remaining account and device logout revokes cookie', async () => {
   const f = fixture();
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   const wallet = await added.json();
   const second = wallet.accounts.find((account: { isActive: boolean }) => !account.isActive);
@@ -350,7 +350,7 @@ test('switch closes old realtime identity; logout selects remaining account and 
 test('inactive removal is slot-bound and active removal cannot alter the wallet', async () => {
   const f = fixture();
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   const wallet = await added.json();
   const second = wallet.accounts.find((account: { isActive: boolean }) => !account.isActive);
@@ -376,7 +376,7 @@ test('SSE receives identity_revoked and ends when the wallet generation changes'
     assert.equal(stream.status, 200);
     const body = stream.text();
     const added = await f.mutate('/accounts/add', 'add', {
-      email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+      identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
     });
     assert.equal(added.status, 201);
     assert.equal(await body, 'data: {"type":"ready"}\n\nevent: identity_revoked\ndata: {}\n\n');
@@ -401,13 +401,13 @@ test('a device-bound HTTP stream is destroyed when its wallet generation changes
     authorizationGeneration: f.device.principal.authorizationGeneration,
   }, response), true);
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   assert.equal(added.status, 201);
   assert.equal(response.destroyed, true);
 });
 
-test('reset login is password-change-only, then safely joins the existing wallet', async () => {
+test('reset login is password-change-only, then replaces the presented device (B-1529)', async () => {
   const f = fixture();
   const target = userDb.getUserByUsername(f.email)!;
   const reset = await f.genericMutate(`/users/${target.id}/reset-password`, {});
@@ -477,15 +477,21 @@ test('reset login is password-change-only, then safely joins the existing wallet
   });
   assert.equal(changed.status, 200);
   const changedBody = await changed.json();
-  assert.equal(changedBody.wallet.accounts.length, 2);
-  assert.equal(
-    changedBody.wallet.accounts.find((account: { isActive: boolean }) => account.isActive)
-      .displayName,
-    f.email,
+  assert.deepEqual(
+    changedBody.wallet.accounts.map((account: { displayName: string }) => account.displayName),
+    [f.email],
+    'a new device with only the rotated account; nothing merges into the old wallet',
   );
   assert.equal(userDb.getRawById(target.id)?.must_change_password, 0);
 
-  const normal = await f.request('/me');
+  const previous = await f.request('/me');
+  assert.equal(previous.status, 401, 'the presented device is revoked');
+  const fresh = /__Host-nassaj_device=([^;]+)/u.exec(changed.headers.get('set-cookie') ?? '')?.[1];
+  assert.ok(fresh);
+  assert.notEqual(decodeURIComponent(fresh), f.device.secret);
+  const normal = await fetch(`${origin}/api/auth/me`, {
+    headers: { Cookie: `__Host-nassaj_device=${fresh}`, Origin: origin },
+  });
   assert.equal(normal.status, 200);
   assert.equal((await normal.json()).id, target.id);
   const replay = await fetch(`${origin}/api/auth/me/password`, {
@@ -582,17 +588,21 @@ test('foreign slots and mixed authentication are rejected without changing eithe
 });
 
 test('invalid credential inputs and generations fail before any wallet mutation', async () => {
-  for (const payload of [
-    {}, { email: null }, { email: '' }, { email: 'x'.repeat(321) },
-    { email: "x' OR 1=1 --" }, { password: '' }, { password: 'x'.repeat(1025) },
-    { expectedGeneration: -1 }, { expectedGeneration: 0 },
-    { expectedGeneration: Number.MAX_SAFE_INTEGER + 1 },
-  ]) {
+  // 400 only for a wrong type or size; an unusable identifier shape (empty,
+  // control characters) gets the decoy verification and the generic 401 (D2).
+  for (const [payload, status] of [
+    [{}, 401], [{ identifier: null }, 400], [{ identifier: 42 }, 400], [{ identifier: 'x'.repeat(321) }, 400],
+    [{ identifier: '' }, 401], [{ identifier: '   ' }, 401], [{ identifier: 'bad\u0000name' }, 401],
+    [{ identifier: "x' OR 1=1 --" }, 401], [{ password: '' }, 400], [{ password: 'x'.repeat(1025) }, 400],
+    [{ expectedGeneration: -1 }, 400], [{ expectedGeneration: 0 }, 400],
+    [{ expectedGeneration: Number.MAX_SAFE_INTEGER + 1 }, 400],
+  ] as const) {
     const f = fixture();
     const response = await f.mutate('/accounts/add', 'add', {
-      email: f.email, password: 'wrong', expectedGeneration: 1, ...payload,
-    });
-    assert.equal(response.status, Object.keys(payload).length ? 400 : 401);
+      identifier: f.email, password: 'wrong', expectedGeneration: 1, ...payload,
+    }, 'POST', '198.51.100.81');
+    assert.equal(response.status, status, JSON.stringify(payload));
+    if (status === 401) assert.deepEqual(await response.json(), { error: 'Account could not be added', code: 'add_account_failed' });
     assert.deepEqual(deviceAccountSessionsDb.snapshot(f.device.principal.deviceSessionId), f.device.wallet);
   }
 });
@@ -617,7 +627,7 @@ test('concurrent adds commit only one generation and reject the losing request e
   const token = await f.csrf('add');
   const options = {
     method: 'POST', headers: { 'X-CSRF-Token': token },
-    body: JSON.stringify({ email: f.email, password: 'correct horse battery staple', expectedGeneration: 1 }),
+    body: JSON.stringify({ identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1 }),
   };
   const responses = await Promise.all([f.request('/accounts/add', options), f.request('/accounts/add', options)]);
   assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
@@ -645,7 +655,7 @@ test('IP quota applies even while the attacker changes both device and candidate
     const response = await f.request('/accounts/add', {
       method: 'POST',
       headers: { 'X-CSRF-Token': await f.csrf('add'), 'CF-Connecting-IP': '198.51.100.73' },
-      body: JSON.stringify({ email: f.email, password: '', expectedGeneration: 1 }),
+      body: JSON.stringify({ identifier: f.email, password: '', expectedGeneration: 1 }),
     });
     assert.equal(response.status, attempt === 100 ? 429 : 400);
     if (attempt === 100) assert.equal((await response.json()).code, 'add_account_failed');
@@ -659,7 +669,7 @@ test('disabled and reset-required candidates produce the same generic credential
     if (status === 'disabled') userDb.setStatus(candidate.id, 'disabled');
     else userDb.resetPassword(candidate.id, passwordHash, Date.now() + 1000);
     const result = await f.mutate('/accounts/add', 'add', {
-      email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+      identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
     });
     assert.equal(result.status, 401);
     assert.deepEqual(await result.json(), { error: 'Account could not be added', code: 'add_account_failed' });
@@ -670,7 +680,7 @@ test('disabled and reset-required candidates produce the same generic credential
 test('409 returns the winning tab active identity without replaying a stale switch', async () => {
   const f = fixture();
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   const wallet = await added.json();
   const second = wallet.accounts.find((account: { isActive: boolean }) => !account.isActive);
@@ -715,13 +725,20 @@ test('T-1939: with SSO live a linked member is refused on password login and wal
     assert.equal(refused.headers.get('set-cookie'), null, 'no session is issued');
 
     const added = await f.mutate('/accounts/add', 'add', {
-      email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+      identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
     });
     assert.equal(added.status, 403);
     assert.equal((await added.json()).code, 'sso_required');
     assert.deepEqual(deviceAccountSessionsDb.snapshot(f.device.principal.deviceSessionId), f.device.wallet);
 
-    const wrong = await f.mutate('/accounts/add', 'add', { email: f.email, password: 'wrong', expectedGeneration: 1 });
+    acceptInviteEmail(candidate.id, `linked_${candidate.id}@invite.test`);
+    const byEmail = await f.mutate('/accounts/add', 'add', {
+      identifier: `Linked_${candidate.id}@Invite.TEST`, password: 'correct horse battery staple', expectedGeneration: 1,
+    });
+    assert.equal(byEmail.status, 403, 'T7: the invite email reaches the same SSO-only closure');
+    assert.equal((await byEmail.json()).code, 'sso_required');
+
+    const wrong = await f.mutate('/accounts/add', 'add', { identifier: f.email, password: 'wrong', expectedGeneration: 1 });
     assert.equal(wrong.status, 401, 'a wrong password keeps the generic failure (no linkage oracle)');
     assert.equal((await wrong.json()).code, 'add_account_failed');
 
@@ -734,7 +751,7 @@ test('T-1939: with SSO live a linked member is refused on password login and wal
 
   // ADR-194 D1: without any env the non-owner link alone keeps the policy on.
   const stillRefused = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   assert.equal(stillRefused.status, 403, 'a non-owner link enforces SSO with no row and no env');
   assert.equal((await stillRefused.json()).code, 'sso_required');
@@ -746,7 +763,76 @@ test('T-1939: with SSO live a linked member is refused on password login and wal
   const disabled = disableSso({ actorUserId: f.device.principal.userId, afterCommit: () => {} });
   assert.equal(disabled.linkedRevoked, 1, 'the linked member is revoked; the linked owner is not');
   const added = await f.mutate('/accounts/add', 'add', {
-    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
   });
   assert.equal(added.status, 201, 'SSO disabled: a linked account is added with its password as before');
+});
+
+/** Records an accepted invite carrying `email` for `userId` (invite-bound email login). */
+function acceptInviteEmail(userId: number, email: string): void {
+  getConnection().prepare(`INSERT INTO invites (token_hash, role, invited_by, email, status, expires_at, accepted_by)
+    VALUES (?, 'user', ?, ?, 'accepted', datetime('now', '+1 day'), ?)`).run(`hash-${email}`, userId, email, userId);
+}
+
+/** The identifier tests share one per-IP add quota of their own. */
+const IDENTIFIER_TEST_IP = '198.51.100.82';
+
+test('T6: add by username in another case or by invite email; failures stay generic', async () => {
+  const f = fixture();
+  userDb.createUser(`Wallet_Plain_${sequence}`, passwordHash, 'user');
+  const byName = await f.mutate('/accounts/add', 'add', {
+    identifier: ` wallet_plain_${sequence} `, password: 'correct horse battery staple', expectedGeneration: 1,
+  }, 'POST', IDENTIFIER_TEST_IP);
+  assert.equal(byName.status, 201, 'a username matches case-insensitively');
+  const invited = userDb.createUser(`wallet_invited_${sequence}`, passwordHash, 'user');
+  acceptInviteEmail(invited.id, `Invited_${sequence}@Example.test`);
+  const byEmail = await f.mutate('/accounts/add', 'add', {
+    identifier: `invited_${sequence}@example.TEST`, password: 'correct horse battery staple', expectedGeneration: 2,
+  }, 'POST', IDENTIFIER_TEST_IP);
+  assert.equal(byEmail.status, 201, 'an accepted invite email matches case-insensitively');
+  assert.equal(deviceAccountSessionsDb.snapshot(f.device.principal.deviceSessionId)!.accounts.length, 3);
+});
+
+test('T6b: identifier and the email alias must agree', async () => {
+  const f = fixture();
+  const conflict = await f.mutate('/accounts/add', 'add', {
+    identifier: f.email, email: 'other@example.test', password: 'correct horse battery staple', expectedGeneration: 1,
+  }, 'POST', IDENTIFIER_TEST_IP);
+  assert.equal(conflict.status, 400);
+  assert.equal((await conflict.json()).code, 'invalid_request');
+  const alias = await f.mutate('/accounts/add', 'add', {
+    email: f.email, password: 'correct horse battery staple', expectedGeneration: 1,
+  }, 'POST', IDENTIFIER_TEST_IP);
+  assert.equal(alias.status, 201, 'the email alias still works for one release');
+  const g = fixture();
+  const same = await g.mutate('/accounts/add', 'add', {
+    identifier: g.email, email: g.email, password: 'correct horse battery staple', expectedGeneration: 1,
+  }, 'POST', IDENTIFIER_TEST_IP);
+  assert.equal(same.status, 201, 'identical identifier and email are accepted');
+});
+
+test('T6c: legacy usernames differing only by case resolve to no account, without disclosure', async () => {
+  const db = getConnection();
+  db.exec('DROP INDEX IF EXISTS idx_users_username_lower');
+  try {
+    const n = sequence;
+    const upper = userDb.createUser(`DupName_${n}`, passwordHash, 'user');
+    const lower = userDb.createUser(`dupname_${n}`, passwordHash, 'user');
+    assert.equal(userDb.getUserByLoginIdentifier(`DUPNAME_${n}`), undefined);
+    const f = fixture();
+    const bodies = [];
+    for (const identifier of [`DupName_${n}`, `dupname_${n}`, `absent_dup_${n}`]) {
+      const response = await f.mutate('/accounts/add', 'add', {
+        identifier, password: 'correct horse battery staple', expectedGeneration: 1,
+      }, 'POST', IDENTIFIER_TEST_IP);
+      assert.equal(response.status, 401, identifier);
+      bodies.push(await response.json());
+    }
+    assert.deepEqual(bodies[0], bodies[2]);
+    assert.deepEqual(bodies[1], bodies[2]);
+    assert.deepEqual(deviceAccountSessionsDb.snapshot(f.device.principal.deviceSessionId), f.device.wallet);
+    db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(upper.id, lower.id);
+  } finally {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(lower(username))');
+  }
 });

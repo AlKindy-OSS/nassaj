@@ -96,6 +96,7 @@ const {
   recordRawExecution,
   RAW_QUEUE_CONFIG_KEY,
   RAW_HISTORY_CONFIG_KEY,
+  RAW_LEDGER_CONFIG_KEY,
   MAX_RAW_COMMAND_LEN,
   MAX_RAW_COMMAND_LINES,
   MAX_RAW_HISTORY,
@@ -164,6 +165,7 @@ function enableRaw(): void {
 function resetState(): void {
   appConfigDb.set(RAW_QUEUE_CONFIG_KEY, JSON.stringify([]));
   appConfigDb.set(RAW_HISTORY_CONFIG_KEY, JSON.stringify([]));
+  appConfigDb.set(RAW_LEDGER_CONFIG_KEY, JSON.stringify({}));
   appConfigDb.set(
     COMMAND_BOARD_CONFIG_KEY,
     JSON.stringify({
@@ -438,6 +440,12 @@ test('7: flag ON + tier raw → insert then execute runs bash -c verbatim, secre
   assert.equal(c.options.env.JWT_SECRET, undefined, 'JWT_SECRET must NOT leak');
   assert.equal(c.options.env.DATABASE_PATH, undefined, 'DATABASE_PATH must NOT leak');
   assert.equal(c.options.env.NASSAJ_FAKE_PROVIDER_KEY, undefined, 'provider keys must NOT leak');
+  // B-678: systemd-run --user needs the user-manager keys, derived from the uid.
+  const uid = process.getuid?.();
+  if (typeof uid === 'number') {
+    assert.equal(c.options.env.XDG_RUNTIME_DIR, `/run/user/${uid}`);
+    assert.equal(c.options.env.DBUS_SESSION_BUS_ADDRESS, `unix:path=/run/user/${uid}/bus`);
+  }
 
   // the row is consumed (claimed) — a second execute finds nothing.
   assert.equal(listRawCommands().length, 0);
@@ -1088,4 +1096,146 @@ test('29: DELETE history/:id removes one record and needs the raw tier', async (
   const again = await call('DELETE', '/api/system/command-board-raw/history/drop-me', { user: OWNER });
   assert.equal(again.status, 200, 'idempotent');
   assert.equal((await again.json()).removed, false);
+});
+
+// ── Executed-from-chat bookkeeping ────────────────────────────────────────────
+// Owner report: a command placed on the board was run from the chat fence; the
+// board item stayed and the chat gave no sign it had run. Cause: the chat insert
+// made a SECOND row (new id) and consumed that twin, and the only trace of the run
+// expired after an hour and was keyed by the consumed id.
+
+test('33: inserting a command already on the board reuses that row (no twin)', async () => {
+  resetState();
+  enableRaw();
+  const first = insertRawCommand({ command: 'echo twin', requestedBy: 'agent' });
+  assert.equal(first.ok, true);
+  const r = await call('POST', '/api/system/command-board-raw', {
+    user: OWNER, body: { command: 'echo twin' },
+  });
+  assert.equal(r.status, 201);
+  assert.equal((await r.json()).command.id, (first as any).value.id);
+  assert.equal(listRawCommands().length, 1);
+});
+
+test('34: executing consumes the board row and sweeps legacy byte-identical twins', async () => {
+  resetState();
+  enableRaw();
+  const keep = crypto.randomUUID();
+  const now = new Date().toISOString();
+  appConfigDb.set(RAW_QUEUE_CONFIG_KEY, JSON.stringify([
+    { id: 'a', command: 'echo done', requestedBy: 'agent', requestedAt: now },
+    { id: 'b', command: 'echo done', requestedBy: 'owner', requestedAt: now },
+    { id: keep, command: 'echo other', requestedBy: 'owner', requestedAt: now },
+  ]));
+  spawnCalls = [];
+  nextExitCode = 0;
+  const r = await call('POST', '/api/system/command-board-raw/b/execute', {
+    user: OWNER, body: { confirmationDigest: computeDigest('echo done') },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(listRawCommands().map((e: { id: string }) => e.id), [keep]);
+});
+
+test('35: the ledger survives history expiry and the lookup route serves it', async () => {
+  resetState();
+  enableRaw();
+  nextExitCode = 0;
+  const id = seedRow('echo ledger');
+  await call('POST', `/api/system/command-board-raw/${id}/execute`, {
+    user: OWNER, body: { confirmationDigest: computeDigest('echo ledger') },
+  });
+  // The hour-long history is gone; the durable ledger is not.
+  appConfigDb.set(RAW_HISTORY_CONFIG_KEY, JSON.stringify([]));
+  const r = await call('POST', '/api/system/command-board-raw/executions/lookup', {
+    user: OWNER, body: { command: 'echo ledger' },
+  });
+  assert.equal(r.status, 200);
+  const { execution } = await r.json();
+  assert.equal(execution.outcome, 'success');
+  assert.equal(execution.exitCode, 0);
+  assert.equal('executedBy' in execution, false);
+  assert.ok(Number.isFinite(Date.parse(execution.executedAt)));
+  // It stores no command text or output.
+  assert.equal(String(appConfigDb.get(RAW_LEDGER_CONFIG_KEY)).includes('echo ledger'), false);
+
+  const none = await call('POST', '/api/system/command-board-raw/executions/lookup', {
+    user: OWNER, body: { command: 'echo never-ran' },
+  });
+  assert.equal((await none.json()).execution, null);
+});
+
+test('36: a failed run is recorded with its exit code; lookup needs the raw tier', async () => {
+  resetState();
+  enableRaw();
+  nextExitCode = 3;
+  const id = seedRow('false');
+  await call('POST', `/api/system/command-board-raw/${id}/execute`, {
+    user: OWNER, body: { confirmationDigest: computeDigest('false') },
+  });
+  nextExitCode = 0;
+  const r = await call('POST', '/api/system/command-board-raw/executions/lookup', {
+    user: OWNER, body: { command: 'false' },
+  });
+  const { execution } = await r.json();
+  assert.equal(execution.outcome, 'failure');
+  assert.equal(execution.exitCode, 3);
+
+  const denied = await call('POST', '/api/system/command-board-raw/executions/lookup', {
+    user: ADMIN, body: { command: 'false' },
+  });
+  assert.equal(denied.status, 403);
+});
+
+test('37: trailing whitespace does not defeat reuse, sweep or the ledger', async () => {
+  resetState();
+  enableRaw();
+  const first = insertRawCommand({ command: 'echo trail\n', requestedBy: 'agent' });
+  assert.equal(first.ok, true);
+  const r = await call('POST', '/api/system/command-board-raw', {
+    user: OWNER, body: { command: 'echo trail' },
+  });
+  assert.equal((await r.json()).command.id, (first as any).value.id);
+  assert.equal(listRawCommands().length, 1);
+  const { deleteRawCommandsByText, lookupRawExecution } = await import('@/services/command-board-raw.js');
+  recordRawExecution({ id: 'x', command: 'echo trail\n', outcome: 'success', exitCode: 0 });
+  assert.equal(lookupRawExecution('echo trail')?.outcome, 'success');
+  const swept = deleteRawCommandsByText('echo trail  ');
+  assert.deepEqual(swept.rows, [{ id: (first as any).value.id, requestedBy: 'agent' }]);
+});
+
+test('38: the ledger key is keyed: no plain sha256 of the command is stored', async () => {
+  resetState();
+  recordRawExecution({ id: 'k', command: 'echo keyed', outcome: 'success', exitCode: 0 });
+  const stored = String(appConfigDb.get(RAW_LEDGER_CONFIG_KEY));
+  assert.equal(stored.includes(computeDigest('echo keyed')), false);
+  assert.equal(Object.keys(JSON.parse(stored)).length, 1);
+});
+
+test('39: sweep and reuse are audited with the real actors; lookup validates input', async () => {
+  resetState();
+  enableRaw();
+  appConfigDb.set(RAW_QUEUE_CONFIG_KEY, JSON.stringify([
+    { id: 'p', command: 'echo aud', requestedBy: 'agent', requestedAt: new Date().toISOString() },
+    { id: 'q', command: 'echo aud', requestedBy: 'other', requestedAt: new Date().toISOString() },
+  ]));
+  nextExitCode = 0;
+  await call('POST', '/api/system/command-board-raw/q/execute', {
+    user: OWNER, body: { confirmationDigest: computeDigest('echo aud') },
+  });
+  const rows = auditLogDb.recent(50).map((r: any) => String(r.metadata));
+  assert.ok(rows.some((m) => m.includes('"result":"sweep"') && m.includes('"p"') && m.includes('agent')));
+
+  insertRawCommand({ command: 'echo reuse', requestedBy: 'agent2' });
+  await call('POST', '/api/system/command-board-raw', { user: OWNER, body: { command: 'echo reuse' } });
+  const rows2 = auditLogDb.recent(50).map((r: any) => String(r.metadata));
+  assert.ok(rows2.some((m) => m.includes('"reused":true') && m.includes('agent2')));
+
+  const bad = await call('POST', '/api/system/command-board-raw/executions/lookup', {
+    user: OWNER, body: { command: 'x'.repeat(MAX_RAW_COMMAND_LEN + 1) },
+  });
+  assert.equal(bad.status, 400);
+  const bad2 = await call('POST', '/api/system/command-board-raw/executions/lookup', {
+    user: OWNER, body: {},
+  });
+  assert.equal(bad2.status, 400);
 });

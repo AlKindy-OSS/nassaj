@@ -190,11 +190,27 @@ export type ProjectBoardState = {
   visual_checks?: BoardVisualCheck[];
 };
 
+/**
+ * Why the server could or could not serve a board state. Absent on older
+ * servers (legacy): callers keep the pre-reason behaviour in that case.
+ */
+export type BoardStateReason =
+  | 'ok'
+  | 'missing'
+  | 'invalid_json'
+  | 'too_large'
+  | 'outside_project'
+  | 'external_source_unconfigured'
+  | 'unreadable';
+
 export type ProjectBoardResponse = {
   projectId: string;
   available: boolean;
   state: ProjectBoardState | null;
   stateError: boolean;
+  stateReason?: BoardStateReason;
+  /** Size cap in megabytes, sent alongside `too_large` when the server knows it. */
+  stateLimitMb?: number;
   architecture: {
     technical: string | null;
     simplified: string | null;

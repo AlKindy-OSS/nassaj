@@ -10,7 +10,10 @@
  *   - `--disallowed-tools Task Workflow` blocks the background-spawning tools;
  *     placed right before the positional `-p <prompt>` so the variadic stops at
  *     `-p` and never swallows the prompt.
- *   - the env is the caller's STRICT, workflow-stripped provider env.
+ *   - the env is the caller's STRICT, workflow-stripped run-profile env, and
+ *     B-446: it is re-checked here against the iron-rule guard (the same one
+ *     the central run profile applies) right before spawn, so a caller handing
+ *     a raw or tampered env is refused instead of reaching `claude`.
  * BOUNDED (§ج-4): a hard hold-cap timer SIGTERMs then SIGKILLs the child, so the
  *   injector never holds the per-conversation lock "minutes open".
  * OUTPUT: `--output-format json` → the single result object is parsed for token
@@ -19,6 +22,7 @@
 
 import { spawn } from 'node:child_process';
 
+import { assertClaudeSpawnEnvAllowed } from '@/services/isolation/claude-spawn-env-guard.js';
 import { resolveHarnessBinaryWithOverride } from '@/shared/harness-binaries.js';
 
 /* eslint-disable boundaries/dependencies -- this runner needs the synchronous admission leaf without loading the full providers barrel into workflow boot. */
@@ -42,7 +46,39 @@ const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
  * reasons about the SAME worst-case hold the runner actually enforces. */
 const KILL_GRACE_MS = INJECTOR_SIGKILL_GRACE_MS;
 
-export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTurnResult> {
+/**
+ * Runs one bounded `claude -p --resume` turn. The env is refused before spawn
+ * unless it passes the iron-rule guard for the profile's engine hosts (B-446).
+ */
+export async function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTurnResult> {
+  // The one claude the terminal runs, from the harness registry (T-1873); the
+  // supervisor's own WORKFLOW_SUPERVISOR_CLAUDE_BIN (server env, absolute) still
+  // wins, under the registry's override rules. Resolved at call time, before the
+  // async guard, so the binary decision reads the env of the calling moment.
+  let claudeBinary: string;
+  try {
+    claudeBinary = resolveHarnessBinaryWithOverride('claude', WORKFLOW_CLAUDE_BIN_ENV);
+  } catch (error) {
+    return refusedTurn(error instanceof Error ? error.message : String(error));
+  }
+  try {
+    await assertClaudeSpawnEnvAllowed(params.env, {
+      engineHosts: params.engineHosts ?? null,
+      cwd: params.projectPath,
+    });
+  } catch (error) {
+    const code = (error as { code?: string })?.code ?? 'ANTHROPIC_BASE_URL_NOT_ALLOWED';
+    return refusedTurn(`refused by the routing guard: ${code}`);
+  }
+  return spawnResumeTurn(params, claudeBinary);
+}
+
+/** A turn that never started a child. */
+function refusedTurn(error: string): ResumeTurnResult {
+  return { ok: false, exitCode: null, timedOut: false, resultObj: null, error };
+}
+
+function spawnResumeTurn(params: ResumeTurnParams, claudeBinary: string): Promise<ResumeTurnResult> {
   return new Promise((resolve) => {
     // T-1749/ADR-159: a headless `claude -p --resume` is a claude harness spawn;
     // refuse (retryably) rather than run against a binary being replaced.
@@ -83,10 +119,7 @@ export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTu
     // Track it explicitly for the child's whole life.
     const releaseLaunch = beginHarnessLaunch('claude');
     try {
-      // The one claude the terminal runs, from the harness registry (T-1873);
-      // the supervisor's own WORKFLOW_SUPERVISOR_CLAUDE_BIN (server env,
-      // absolute) still wins, under the registry's override rules.
-      child = spawn(resolveHarnessBinaryWithOverride('claude', WORKFLOW_CLAUDE_BIN_ENV), args, {
+      child = spawn(claudeBinary, args, {
         cwd: params.projectPath,
         env: params.env,
         stdio: ['ignore', 'pipe', 'pipe'],

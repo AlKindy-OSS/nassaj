@@ -486,7 +486,7 @@ async function retentionHealth(fetchHealth) {
  * client-recovery, and the live index/version describe the current generation.
  */
 function assertRecoveryAssetsPreserved(root, entry) {
-    const excluded = new Set(['index.html', 'version.json', 'BUILD_PROVENANCE.json', 'ATOMIC_GENERATION.json']);
+    const excluded = new Set(['index.html', 'share.html', 'version.json', 'BUILD_PROVENANCE.json', 'ATOMIC_GENERATION.json']);
     function walk(directory) {
         for (const name of readdirSync(directory)) {
             const file = path.join(directory, name); const st = lstatSync(file);

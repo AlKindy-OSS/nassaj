@@ -4,6 +4,10 @@ import { getConnection } from '@/modules/database/connection.js';
 
 export const DEVICE_COOKIE = '__Host-nassaj_device';
 export const MAX_ACCOUNT_SLOTS = 5;
+/** Idle window of a device session; renewed by sliding renewal (ADR-163 amendment 1, M6). */
+export const DEVICE_IDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Absolute cap from creation; past it the device needs a new primary login. */
+export const DEVICE_ABSOLUTE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type DevicePrincipal = Readonly<{
   deviceSessionId: string;
@@ -23,6 +27,15 @@ export type AccountWalletSnapshot = Readonly<{
     isActive: boolean;
     lastUsedAt: number;
   }>>;
+}>;
+
+export type IssuedDeviceSession = Readonly<{
+  secret: string;
+  expiresAt: number;
+  /** Device session revoked by this issuance, if the request presented one. */
+  revokedDeviceSessionId: string | null;
+  principal: DevicePrincipal;
+  wallet: AccountWalletSnapshot;
 }>;
 
 const hash = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
@@ -104,41 +117,112 @@ function inImmediateTransaction<T>(operation: () => T): T {
   }
 }
 
+/** Reads the issuance stamp of an account that may hold a device slot. */
+function eligibleUser(userId: number): { passwordStamp: number; authorizationGeneration: number } {
+  const user = getConnection().prepare(`
+    SELECT password_changed_at AS passwordStamp,
+           authorization_generation AS authorizationGeneration FROM users
+    WHERE id = ? AND is_active = 1 AND status = 'active' AND must_change_password = 0
+  `).get(userId) as { passwordStamp: number; authorizationGeneration: number } | undefined;
+  if (!user || !Number.isSafeInteger(user.passwordStamp)) {
+    throw new WalletConflictError('account_ineligible');
+  }
+  return user;
+}
+
+/** Revokes the device behind a presented secret and all of its slots. */
+function revokeDeviceBySecret(secret: string, now: number): string | null {
+  const db = getConnection();
+  const prior = db.prepare('SELECT id FROM device_sessions WHERE secret_hash = ?')
+    .get(hash(secret)) as { id: string } | undefined;
+  if (!prior) return null;
+  // Same order as logout(all): the active-slot trigger forbids revoking a slot
+  // that a live session still points at.
+  db.prepare('UPDATE device_sessions SET active_slot_id = NULL WHERE id = ?').run(prior.id);
+  db.prepare(`
+    UPDATE device_account_slots SET revoked_at = ?
+    WHERE device_session_id = ? AND revoked_at IS NULL
+  `).run(now, prior.id);
+  db.prepare(`
+    UPDATE device_sessions SET generation = generation + 1, revoked_at = COALESCE(revoked_at, ?)
+    WHERE id = ?
+  `).run(now, prior.id);
+  return prior.id;
+}
+
+function insertDevice(
+  sessionId: string,
+  slotId: string,
+  secret: string,
+  slot: { userId: number; passwordStamp: number; now: number; expiresAt: number },
+): void {
+  const db = getConnection();
+  db.prepare(`
+    INSERT INTO device_sessions(id, secret_hash, expires_at, generation, created_at)
+    VALUES(?, ?, ?, 1, ?)
+  `).run(sessionId, hash(secret), slot.expiresAt, slot.now);
+  db.prepare(`
+    INSERT INTO device_account_slots(
+      id, device_session_id, user_id, created_at, last_used_at, password_stamp
+    ) VALUES(?, ?, ?, ?, ?, ?)
+  `).run(slotId, sessionId, slot.userId, slot.now, slot.now, slot.passwordStamp);
+  db.prepare('UPDATE device_sessions SET active_slot_id = ? WHERE id = ?').run(slotId, sessionId);
+}
+
 /** Parameterized persistence boundary for device-bound account wallets. */
 export const deviceAccountSessionsDb = {
-  create(userId: number, ttlMs: number): { secret: string; principal: DevicePrincipal; wallet: AccountWalletSnapshot } {
-    const db = getConnection();
-    const user = db.prepare(`
-      SELECT password_changed_at AS passwordStamp,
-             authorization_generation AS authorizationGeneration FROM users
-      WHERE id = ? AND is_active = 1 AND status = 'active' AND must_change_password = 0
-    `).get(userId) as { passwordStamp: number; authorizationGeneration: number } | undefined;
-    if (!user || !Number.isSafeInteger(user.passwordStamp)) {
-      throw new WalletConflictError('account_ineligible');
-    }
+  create(userId: number, ttlMs: number): IssuedDeviceSession {
+    return deviceAccountSessionsDb.rotateDevice(null, userId, ttlMs);
+  },
+
+  /**
+   * Primary-login issuance (ADR-163 amendment 1, D3/C1). In one immediate
+   * transaction: revokes the device session behind `priorSecret` (valid or not)
+   * with every slot, then creates a new device with a fresh secret and one
+   * active slot. Nothing from the prior wallet is carried over.
+   */
+  rotateDevice(priorSecret: string | null, userId: number, ttlMs: number): IssuedDeviceSession {
     const secret = crypto.randomBytes(32).toString('base64url');
     const sessionId = id('device');
     const slotId = id('slot');
     const now = Date.now();
-    inImmediateTransaction(() => {
-      db.prepare(`
-        INSERT INTO device_sessions(id, secret_hash, expires_at, generation, created_at)
-        VALUES(?, ?, ?, 1, ?)
-      `).run(sessionId, hash(secret), now + ttlMs, now);
-      db.prepare(`
-        INSERT INTO device_account_slots(
-          id, device_session_id, user_id, created_at, last_used_at, password_stamp
-        ) VALUES(?, ?, ?, ?, ?, ?)
-      `).run(slotId, sessionId, userId, now, now, user.passwordStamp);
-      db.prepare('UPDATE device_sessions SET active_slot_id = ? WHERE id = ?')
-        .run(slotId, sessionId);
+    const expiresAt = now + Math.min(ttlMs, DEVICE_ABSOLUTE_TTL_MS);
+    const { authorizationGeneration, revokedDeviceSessionId } = inImmediateTransaction(() => {
+      const user = eligibleUser(userId);
+      const revoked = priorSecret ? revokeDeviceBySecret(priorSecret, now) : null;
+      insertDevice(sessionId, slotId, secret, { userId, passwordStamp: user.passwordStamp, now, expiresAt });
+      return { authorizationGeneration: user.authorizationGeneration, revokedDeviceSessionId: revoked };
     });
     return {
       secret,
-      principal: { deviceSessionId: sessionId, slotId, generation: 1, userId,
-        authorizationGeneration: user.authorizationGeneration },
+      expiresAt,
+      revokedDeviceSessionId,
+      principal: { deviceSessionId: sessionId, slotId, generation: 1, userId, authorizationGeneration },
       wallet: readSnapshot(sessionId)!,
     };
+  },
+
+  /**
+   * Sliding renewal (D3/M6), outside the resolve transaction and best effort.
+   * Extends a live session past half of the idle window to `now + idle`,
+   * capped at `created_at + absolute`. The UPDATE is conditional on the
+   * expiry read here and on the row not being revoked, so a concurrent
+   * revocation or renewal wins. Returns the new expiry or null.
+   */
+  slideExpiry(deviceSessionId: string, now = Date.now()): number | null {
+    const db = getConnection();
+    const row = db.prepare(`
+      SELECT expires_at AS expiresAt, created_at AS createdAt FROM device_sessions
+      WHERE id = ? AND revoked_at IS NULL AND expires_at > ?
+    `).get(deviceSessionId, now) as { expiresAt: number; createdAt: number } | undefined;
+    if (!row || row.expiresAt - now >= DEVICE_IDLE_TTL_MS / 2) return null;
+    const next = Math.min(now + DEVICE_IDLE_TTL_MS, row.createdAt + DEVICE_ABSOLUTE_TTL_MS);
+    if (next <= row.expiresAt) return null;
+    const changed = db.prepare(`
+      UPDATE device_sessions SET expires_at = ?
+      WHERE id = ? AND revoked_at IS NULL AND expires_at = ?
+    `).run(next, deviceSessionId, row.expiresAt);
+    return changed.changes === 1 ? next : null;
   },
 
   resolve(secret: string): { principal: DevicePrincipal; wallet: AccountWalletSnapshot } | null {

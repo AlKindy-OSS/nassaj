@@ -7,7 +7,6 @@
  */
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -29,7 +28,7 @@ const U2 = '91111111-2222-4333-8444-555555555552';
 const FOREIGN = '91111111-2222-4333-8444-555555555553';
 
 test('reload marks verified injections only, by ingress identity, never by text', async () => {
-  const dir = await mkdtemp(path.join(process.env.NASSAJ_TEST_TMP || tmpdir(), 'steer-hist-'));
+  const dir = await mkdtemp('/var/tmp/steer-hist-');
   closeConnection();
   process.env.DATABASE_PATH = path.join(dir, 'auth.db');
   await initializeDatabase();

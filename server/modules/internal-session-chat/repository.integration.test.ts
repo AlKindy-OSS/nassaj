@@ -1,7 +1,6 @@
 /** ADR-187 behavioural tests: authorization, storage atomicity and reconnect safety. */
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -28,7 +27,9 @@ const frameTypes = (frames: string[]) => frames.map(frame => JSON.parse(frame).t
 
 async function withDatabase(run: () => void | Promise<void>) {
   const previous = process.env.DATABASE_PATH;
-  const directory = await mkdtemp(path.join(tmpdir(), 'internal-session-chat-'));
+  // B-1373: os.tmpdir() may sit under a hidden entry of the passwd home, which
+  // is refused as a project root; use a fixed non-hidden on-disk root.
+  const directory = await mkdtemp('/var/tmp/internal-session-chat-');
   closeConnection();
   process.env.DATABASE_PATH = path.join(directory, 'auth.db');
   process.env.NASSAJ_INTERNAL_SESSION_CHAT_ENABLED = '1';

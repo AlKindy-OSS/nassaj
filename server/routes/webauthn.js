@@ -23,7 +23,13 @@
  *   POST   /login/verify           { response } → { success, user, token }
  *                                    (same contract as POST /api/auth/login; a
  *                                    connector recent-auth session is minted only
- *                                    for a step-up-eligible passkey with UV)
+ *                                    for a step-up-eligible passkey with UV).
+ *                                    MULTI_ACCOUNT_SWITCHING: a trusted Origin is
+ *                                    required and the answer is
+ *                                    { success, user, wallet, csrfToken } with a new
+ *                                    device cookie (ADR-163 amendment 1, D3); an
+ *                                    account that must change its password is
+ *                                    refused 403 password_change_required.
  *
  * Example:
  *   curl -X POST https://host/api/auth/webauthn/register/options \
@@ -33,11 +39,14 @@
 
 import express from 'express';
 
+import * as authMiddleware from '../middleware/auth.js';
 import { authenticateToken, generateToken } from '../middleware/auth.js';
 import { createKeyedLimiter } from '../middleware/keyed-limiter.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { auditLogDb, userDb, webauthnCredentialsDb } from '../modules/database/index.js';
 import { clientIp } from '../utils/client-ip.js';
+import { isTrustedOrigin, multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
+import { clearPasswordChangeCookie, issueDeviceSession } from '../modules/account-wallet/issue-device-session.js';
 import { recordConnectorOwnerAuthentication } from '../modules/connectors/connector-owner-auth-session.js';
 import {
   WebAuthnError,
@@ -261,9 +270,69 @@ router.post('/login/options', loginLimiter, async (req, res) => {
   }
 });
 
+/** Wallet-mode refusal before any assertion work: same contract as POST /login. */
+function refuseUntrustedOrigin(req, res) {
+  if (!multiAccountSwitchingEnabled() || isTrustedOrigin(req)) return false;
+  res.status(403).set('Cache-Control', 'no-store').json({
+    error: 'Request rejected', code: 'origin_rejected',
+  });
+  return true;
+}
+
+/**
+ * Wallet mode only: a device slot cannot hold an account under forced password
+ * rotation, and a passkey cannot perform that rotation, so the member is sent
+ * to the password sign-in, which owns the rotation flow.
+ */
+function refusePendingPasswordChange(req, res, user) {
+  if (!multiAccountSwitchingEnabled() || user.must_change_password !== 1) return false;
+  auditLogDb.record('login_failure', {
+    userId: user.id,
+    metadata: { method: 'passkey', reason: 'password_change_required' },
+    ipAddress: clientIp(req),
+    userAgent: req.headers['user-agent'] ?? null,
+  });
+  res.status(403).set('Cache-Control', 'no-store').json({
+    error: 'Sign in with your password to change it', code: 'password_change_required',
+  });
+  return true;
+}
+
+/**
+ * Wallet mode: issues the device session BEFORE the connector owner session,
+ * last-login and success audit. On failure it audits, answers 401 and returns
+ * null, so none of those side effects happen.
+ */
+function issuePasskeyDevice(req, res, user) {
+  const issued = issueDeviceSession(req, res, user, authMiddleware.JWT_SECRET);
+  if (issued.ok) return issued;
+  auditLogDb.record('login_failure', {
+    userId: user.id,
+    metadata: { method: 'passkey', reason: issued.code },
+    ipAddress: clientIp(req),
+    userAgent: req.headers['user-agent'] ?? null,
+  });
+  res.status(401).json({ error: 'Passkey sign-in failed' });
+  return null;
+}
+
+/** Answers a verified passkey login: the issued device session, or a legacy JWT. */
+function answerPasskeyLogin(res, user, issued) {
+  const publicUser = { id: user.id, username: user.username, role: user.role };
+  if (!issued) {
+    // W1: a leftover forced-change cookie must not outrank the new Bearer.
+    clearPasswordChangeCookie(res);
+    return res.json({ success: true, user: publicUser, token: generateToken(user) });
+  }
+  return res.set('Cache-Control', 'no-store').json({
+    success: true, user: publicUser, wallet: issued.wallet, csrfToken: issued.csrfToken,
+  });
+}
+
 // Verifies the assertion and issues a JWT with the same contract as /login.
 router.post('/login/verify', loginLimiter, async (req, res) => {
   try {
+    if (refuseUntrustedOrigin(req, res)) return;
     const { response } = req.body ?? {};
     if (!response || typeof response !== 'object') {
       return res.status(400).json({ error: 'An authentication response is required' });
@@ -280,8 +349,11 @@ router.post('/login/verify', loginLimiter, async (req, res) => {
         userAgent: req.headers['user-agent'] ?? null,
       });
     }
+    if (refusePendingPasswordChange(req, res, user)) return;
+    const walletMode = multiAccountSwitchingEnabled();
+    const issued = walletMode ? issuePasskeyDevice(req, res, user) : null;
+    if (walletMode && !issued) return;
 
-    const token = generateToken(user);
     // B-1407: only a passkey enrolled under the hardened ceremony, used with
     // user verification, may stand in for the owner's recent authentication.
     // A legacy passkey still signs in, without a connector owner session.
@@ -297,11 +369,7 @@ router.post('/login/verify', loginLimiter, async (req, res) => {
       userAgent: req.headers['user-agent'] ?? null,
     });
 
-    res.json({
-      success: true,
-      user: { id: user.id, username: user.username, role: user.role },
-      token,
-    });
+    return answerPasskeyLogin(res, user, issued);
   } catch (error) {
     if (error instanceof WebAuthnError) {
       auditLogDb.record('login_failure', {

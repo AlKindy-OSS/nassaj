@@ -12,6 +12,14 @@ const digest = (value: string | Buffer) => createHash('sha256').update(value).di
 const validId = (value: unknown): value is string => typeof value === 'string'
   && value.length > 0 && value.length <= 256 && !/\s|[\x00-\x1f\x7f]/.test(value);
 
+/**
+ * Display-only ids never name a durable rollout row: live SDK rows
+ * (`codex-<turnNonce>-item_N`, B-1489, and legacy raw `item_N`) and history
+ * line-hash rows (`codex-history-*`). Durable ids are `msg_<hex>` and similar.
+ */
+const isSyntheticCodexId = (id: string): boolean =>
+  id.startsWith('item_') || id.startsWith('codex-');
+
 export type CodexForkCutoff = {
   turnId: string;
   messageId: string;
@@ -22,7 +30,7 @@ export type CodexForkCutoff = {
 /** Resolve one exact durable final response and its completed native turn; never a text/time match. */
 export function parseCodexForkCutoff(text: string, sessionId: string, projectPath: string,
   messageId: string): CodexForkCutoff {
-  if (!validId(messageId) || messageId.startsWith('item_') || messageId.startsWith('codex-history-')) {
+  if (!validId(messageId) || isSyntheticCodexId(messageId)) {
     throw new Error('unsupported_cutoff');
   }
   const rows = text.split('\n');
@@ -158,7 +166,7 @@ export function createCodexFinalResponseTracker() {
         const candidate: Candidate = { id: p.id, turnId };
         if (validId(p.id)) byId.set(p.id, candidate);
         if (p.role === 'assistant' && p.phase === 'final_answer' && validId(p.id) && validId(turnId)
-          && !p.id.startsWith('item_') && !p.id.startsWith('codex-history-')
+          && !isSyntheticCodexId(p.id)
           && (!activeTurn || activeTurn === turnId)) pending = candidate;
       }
       if (entry.type === 'event_msg' && p?.type === 'turn_aborted') {

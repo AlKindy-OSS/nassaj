@@ -46,6 +46,10 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import type {
+  InProcessReadDescriptor,
+  InProcessReadResult,
+} from '@/modules/execution-permissions/index.js';
 import { resolveModelVendor, harnessVendor, type VendorKey } from '@/modules/providers/services/cost/model-vendor.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
@@ -78,8 +82,11 @@ export type ProviderQuotaDeps = {
   /** التوكن/المفتاح جاهزاً — يتجاوز قراءة القرص والمخزن. */
   credential?: string | null;
   now?: () => Date;
-  /** Encloses only a live credential/network refresh; cache hits need no lease. */
-  runEffect?: <T>(effect: () => Promise<T>) => Promise<T>;
+  /**
+   * T-1910: the admitted in-process read (runAuthorizedInProcessRead). Each live HTTP read
+   * is one GET descriptor and one lease; cache hits and local credential reads need none.
+   */
+  read?: (descriptor: InProcessReadDescriptor) => Promise<InProcessReadResult>;
 };
 
 const cache = new Map<string, CacheEntry>();
@@ -197,21 +204,52 @@ async function fetchJson(
   headers: Record<string, string>,
   deps: ProviderQuotaDeps,
 ): Promise<unknown | null> {
-  const doFetch = deps.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const response = await doFetch(url, { headers, signal: controller.signal });
-    if (!response.ok) {
-      // ‏401/403 = توكن بائت أو مفتاح بلا صلاحية مراقبة. لا يُصنَع منه رقم.
+  // GET only, by construction: the reader never sends a body and never refreshes a token.
+  const descriptor: InProcessReadDescriptor = { url, method: 'GET', headers, deadlineMs: FETCH_TIMEOUT_MS };
+  if (deps.read) {
+    // The admitted read never throws for network, deadline or status: those come back as a
+    // failed result. Anything it throws is a permission refusal (gate, scope or generation
+    // fence, untrusted handle) or a settlement failure, and must reach the route (B-1289,
+    // ADR-198) instead of being disguised as "no quota source".
+    const result = await deps.read(descriptor);
+    // ‏401/403 = توكن بائت أو مفتاح بلا صلاحية مراقبة. لا يُصنَع منه رقم.
+    if (result.kind !== 'response' || result.status < 200 || result.status >= 300 || !result.body) {
       return null;
     }
-    const text = await response.text();
-    if (!text) return null;
-    return JSON.parse(text) as unknown;
+    return parseJsonOrNull(result.body);
+  }
+  try {
+    return await fetchJsonDirect(descriptor, deps.fetchImpl ?? fetch);
   } catch {
     // شبكة، مهلة، أو JSON تالف — كلها «لا نعرف».
     return null;
+  }
+}
+
+/** A corrupt provider body is "unknown", never an error. */
+function parseJsonOrNull(text: string): unknown | null {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** Unit-test seam only: getWindows refuses to run live without `read` or `fetchImpl`. */
+async function fetchJsonDirect(
+  descriptor: InProcessReadDescriptor,
+  doFetch: typeof fetch,
+): Promise<unknown | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), descriptor.deadlineMs);
+  try {
+    const response = await doFetch(descriptor.url, {
+      method: descriptor.method, headers: { ...descriptor.headers }, signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    if (!text) return null;
+    return JSON.parse(text) as unknown;
   } finally {
     clearTimeout(timer);
   }
@@ -574,12 +612,12 @@ export const providerQuotaService = {
     const pending = inFlight.get(key);
     if (pending) return pending;
 
-    if (!deps.runEffect && !deps.fetchImpl) {
+    if (!deps.read && !deps.fetchImpl) {
       throw new Error('QUOTA_AUTHENTICATED_EFFECT_RUNNER_REQUIRED');
     }
 
     const liveRead = () => reader(userId, deps);
-    const promise = (deps.runEffect ? deps.runEffect(liveRead) : liveRead())
+    const promise = liveRead()
       .then((value) => {
         const stamped = value
           ? { ...value, observedAt: new Date(nowMs).toISOString() }

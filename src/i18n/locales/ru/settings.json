@@ -5,7 +5,8 @@
     "permissions": "Разрешения",
     "mcpServers": "MCP серверы",
     "skills": "Навыки",
-    "appearance": "Внешний вид"
+    "appearance": "Внешний вид",
+    "update": "Обновление"
   },
   "skills": {
     "title": "Навыки",
@@ -721,32 +722,6 @@
       "authenticatedUser": "аутентифицированный пользователь",
       "billingPage": "Страница оплаты",
       "billingPageNewTab": "открывается в новой вкладке"
-    },
-    "account": {
-      "claude": {
-        "description": "AI-ассистент Anthropic Claude"
-      },
-      "cursor": {
-        "description": "Редактор кода с AI Cursor"
-      },
-      "codex": {
-        "description": "AI-ассистент OpenAI Codex"
-      },
-      "antigravity": {
-        "description": "Google AI Pro через agy CLI"
-      },
-      "opencode": {
-        "description": "Ассистент OpenCode CLI"
-      },
-      "kimi": {
-        "description": "Moonshot Kimi через API ключ"
-      },
-      "deepseek": {
-        "description": "DeepSeek через API ключ"
-      },
-      "glm": {
-        "description": "Zhipu / Z.ai GLM через API ключ"
-      }
     },
     "connectionStatus": "Статус подключения",
     "login": {

@@ -12,7 +12,11 @@ export type StreamFrame = StreamSnapshot & {
   droppedBeforeSeq?: number;
   lastServerSequence?: number;
   evictionGap?: boolean;
+  /** Highest server sequence per recent run id: tells a restarted line from a late frame. */
+  runSequences?: Readonly<Record<string, number>>;
 };
+
+const MAX_TRACKED_RUNS = 16;
 
 type EvictedStreamHead = Pick<StreamFrame, 'seq' | 'lastServerSequence'>;
 
@@ -20,6 +24,18 @@ export type StreamFrameMap = ReadonlyMap<string, StreamFrame> & {
   /** آخر 64 جلسة مقلمة فقط؛ بيانات استرداد بلا نصوص. */
   evictedHeads?: ReadonlyMap<string, EvictedStreamHead>;
 };
+
+function trackRun(
+  tracked: Readonly<Record<string, number>>,
+  run: string,
+  sequence: number,
+): Record<string, number> {
+  const { [run]: previous, ...rest } = tracked;
+  const next = { ...rest, [run]: Math.max(previous ?? 0, sequence) };
+  const keys = Object.keys(next);
+  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_TRACKED_RUNS))) delete next[key];
+  return next;
+}
 
 /** الحدّ: إدخال واحد فقط لكل جلسة، مع تقليم الأقدم. */
 export const MAX_STREAM_FRAMES = 64;
@@ -69,15 +85,27 @@ export function applyStreamFrame(
   const evicted = previous.evictedHeads?.get(sessionId);
   const serverSequence = typeof frame.sequence === 'number' && Number.isFinite(frame.sequence)
     ? frame.sequence : undefined;
-  const lastServerSequence = prior?.lastServerSequence ?? evicted?.lastServerSequence;
+  const run = frame.responseToMessageId ?? frame.clientMsgId;
+  const priorRun = prior?.frame?.responseToMessageId ?? prior?.frame?.clientMsgId;
+  const changedRun = Boolean(run && priorRun && run !== priorRun);
+  const runSequences = prior?.runSequences ?? {};
+  // The server's per-session sequence line restarts at 1 when its registry
+  // entry is dropped (post-run retention elapsed, server restart). A frame of a
+  // run NOT SEEN BEFORE is therefore never a duplicate, however low its
+  // sequence. A frame of an already-seen run is judged against that run's own
+  // last sequence, so a late frame of an earlier run cannot finalize or split
+  // the run now streaming.
+  const knownRun = run && Object.prototype.hasOwnProperty.call(runSequences, run);
+  const lastServerSequence = knownRun
+    ? runSequences[run]
+    : changedRun && run !== priorRun
+      ? undefined
+      : prior?.lastServerSequence ?? evicted?.lastServerSequence;
   if (serverSequence != null && lastServerSequence != null
     && serverSequence <= lastServerSequence) return previous;
 
   // A redundant terminal marker must not create a second synthetic response.
   if (kind === 'stream_end' && prior?.ended) return previous;
-  const run = frame.responseToMessageId ?? frame.clientMsgId;
-  const priorRun = prior?.frame?.responseToMessageId ?? prior?.frame?.clientMsgId;
-  const changedRun = Boolean(run && priorRun && run !== priorRun);
   const sameFinal = isPersistableAssistantText && prior?.ended
     && prior.frame.kind === 'text' && frame.id && prior.frame.id === frame.id;
   const startsNext = prior && !sameFinal && (changedRun || (prior.ended
@@ -97,6 +125,9 @@ export function applyStreamFrame(
   next.set(sessionId, {
     ...(evicted || prior?.evictionGap ? { evictionGap: true } : {}),
     ...((evicted || prior?.incomplete) && !isPersistableAssistantText ? { incomplete: true } : {}),
+    ...(run && serverSequence != null
+      ? { runSequences: trackRun(runSequences, run, serverSequence) }
+      : prior?.runSequences ? { runSequences: prior.runSequences } : {}),
     seq, text, ended: kind === 'stream_end' || isPersistableAssistantText,
     frame: prior && !changedRun && !startsNext && !isPersistableAssistantText
       ? { ...frame,

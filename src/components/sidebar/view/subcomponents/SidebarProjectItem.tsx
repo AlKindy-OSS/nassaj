@@ -719,6 +719,11 @@ export default function SidebarProjectItem({
                           {project.displayName}
                         </div>
                       </Tooltip>
+                      <ProjectBusyDot
+                        projectId={project.projectId}
+                        loadedIds={loadedSessionIds}
+                        className="ms-1 flex-shrink-0"
+                      />
                       {parsedLink && (
                         <a
                           href={parsedLink.href}
@@ -736,11 +741,6 @@ export default function SidebarProjectItem({
                           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                         </a>
                       )}
-                      <ProjectBusyDot
-                        projectId={project.projectId}
-                        loadedIds={loadedSessionIds}
-                        className="ms-1 flex-shrink-0"
-                      />
                       {/* الرقم وحده: العبارة الكاملة في `title` وفي نصّ مخفيّ
                           لقارئ الشاشة، فلا يفقد أحدٌ المعنى ولا يدفع السطر ثمن
                           كلمةٍ تتكرّر في كل صفّ. */}

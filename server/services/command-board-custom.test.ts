@@ -82,6 +82,8 @@ const {
   resolveAction,
   MAX_CUSTOM_COMMANDS,
   CUSTOM_COMMANDS_CONFIG_KEY,
+  userManagerSpawnEnv,
+  cleanSpawnEnv,
 } = await import('@/services/command-board-custom.js');
 const {
   canRoleRunAction,
@@ -448,4 +450,17 @@ test('23: create/update/delete each write one command_board_custom_updated audit
     assert.ok(rec, `an audit row for op=${op} must exist`);
     assert.equal(rec!.user_id, OWNER.id, `op=${op} must record the acting userId`);
   }
+});
+
+// ── B-678: user-manager env for systemd-run --user ───────────────────────────
+test('B-678: userManagerSpawnEnv derives the bus from the uid; cleanSpawnEnv stays secret-free', () => {
+  assert.deepEqual(userManagerSpawnEnv(1000, '/run/user'), {
+    XDG_RUNTIME_DIR: '/run/user/1000',
+    DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+  });
+  assert.deepEqual(userManagerSpawnEnv(null), {}, 'no uid ⇒ nothing invented');
+  assert.deepEqual(userManagerSpawnEnv(Number.NaN), {});
+  const env = cleanSpawnEnv();
+  assert.equal(env.JWT_SECRET, undefined);
+  assert.equal(env.DATABASE_PATH, undefined);
 });

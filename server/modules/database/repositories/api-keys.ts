@@ -13,6 +13,7 @@ import {
 } from '@/modules/database/api-key-digest.js';
 import { getConnection } from '@/modules/database/connection.js';
 import {
+  API_KEY_ROLE_SQL,
   apiKeyCredentialState,
   apiKeySsoAttestationClause,
   type ApiKeyCredentialState,
@@ -125,6 +126,9 @@ export const apiKeysDb = {
    * once their newest SSO sign-in is older than the owner's window (see
    * api-key-sso-window.ts). The key itself is untouched, so the next SSO
    * sign-in makes it work again.
+   *
+   * B-464: the owner's CURRENT role must be owner/admin; a member's key (minted
+   * before the creation gate) or a demoted admin's key is refused as `invalid`.
    */
   resolveApiKey(apiKey: string, nowMs: number = Date.now()): ApiKeyResolution {
     const keyDigest = digestApiKey(apiKey);
@@ -140,7 +144,8 @@ export const apiKeysDb = {
          WHERE ak.key_digest = ?
            AND ak.is_active = 1
            AND u.is_active = 1
-           AND u.status = 'active'`
+           AND u.status = 'active'
+           AND ${API_KEY_ROLE_SQL}`
       )
       .get(...clause.params, keyDigest) as
       | (ValidatedApiKeyUser & { sso_attested: number })

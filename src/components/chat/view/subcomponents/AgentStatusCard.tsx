@@ -606,12 +606,7 @@ function MergedCard({
     (n, a) => (a.status === 'running' ? n + 1 : n),
     0,
   );
-  // The summary chip used to read "{{running}}/{{total}} running" unconditionally,
-  // so a workflow whose every agent had gone silent still rendered "0/3 running" —
-  // the word "running" surviving on a card whose own headline says the liveness is
-  // unproven. When nothing is running there is nothing to report as running: the
-  // chip switches to what IS known, the finished count.
-  const doneCount = agents.reduce((n, a) => (a.status === 'done' ? n + 1 : n), 0);
+  // "running" is shown only when something runs; never "0/3 running" on a silent card.
 
   // ── عرض البطاقة الموحّدة ──────────────────────────────────────────────────
   return (
@@ -651,13 +646,15 @@ function MergedCard({
 
           {/* اسم المزوّد + نص الحالة */}
           <div className="flex min-w-0 grow flex-col sm:flex-row sm:items-center sm:gap-2">
-            {/* اسم المزوّد مُترجَم — أو اسم بادئ الدور لغير البادئ (T-1904)،
-                قطعة مشتركة مع ClaudeStatus (RunStatusViewerActions.tsx). */}
-            <RunStatusIdentityLabel
-              isViewer={isViewer}
-              viewerStarterName={viewerStarterName}
-              providerLabel={providerLabel}
-            />
+            {/* اسم بادئ الدور لغير البادئ فقط (T-1904)؛ اسم المزوّد للبادئ يكرّر الشعار
+                فحُذف. قطعة مشتركة مع ClaudeStatus (RunStatusViewerActions.tsx). */}
+            {isViewer && viewerStarterName && (
+              <RunStatusIdentityLabel
+                isViewer={isViewer}
+                viewerStarterName={viewerStarterName}
+                providerLabel={providerLabel}
+              />
+            )}
             <div className="flex items-center gap-1.5">
               <span
                 className={cn(
@@ -762,21 +759,17 @@ function MergedCard({
             </div>
           )}
 
-          {/* ملخّص الوكلاء — ظاهر دائماً. الصيغة تتبع ما يجري فعلاً: «يعمل» حين
-              يعمل أحد، و«أنهى» حين لا يعمل أحد (لا «0/3 يعمل»). */}
-          <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/60">
-            {runningCount > 0
-              ? t('agentActivity.summary', {
-                  running: runningCount,
-                  total: agents.length,
-                  defaultValue: '{{running}}/{{total}} running',
-                })
-              : t('agentActivity.summaryIdle', {
-                  done: doneCount,
-                  total: agents.length,
-                  defaultValue: '{{done}}/{{total}} done',
-                })}
-          </span>
+          {/* ملخّص «يعمل» — فقط حين يعمل أحد. العدّ المنتهي يحمله شارة التبديل أدناه
+              (كان نصّ «أنهى» يكرّره بجانبها). */}
+          {runningCount > 0 && (
+            <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/60">
+              {t('agentActivity.summary', {
+                running: runningCount,
+                total: agents.length,
+                defaultValue: '{{running}}/{{total}} running',
+              })}
+            </span>
+          )}
 
           {/* تبديل إخفاء/إظهار المكتمل — مستقلّ لا يُطلق toggle البطاقة.
               يظهر فقط حين توجد صفوف مكتملة فعلاً؛ لا فائدة من زر بلا أثر.
@@ -807,7 +800,7 @@ function MergedCard({
                     })
               }
               className={cn(
-                'hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 sm:flex',
+                'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5',
                 'text-[10px] font-medium tabular-nums transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                 hideCompleted
@@ -816,7 +809,7 @@ function MergedCard({
               )}
             >
               <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>{localeNum(completedCount)}</span>
+              <span>{localeNum(completedCount)}/{localeNum(agents.length)}</span>
             </button>
           )}
 
@@ -865,7 +858,7 @@ function MergedCard({
               لا مسار يُظهر STOP لغير البادئ، بصرف النظر عن canInterrupt.
               آخر عنصر في الصفّ عمداً (ms-auto) — أقصى اليسار في RTL، بعيداً عن
               أزرار الطيّ/الإخفاء كي لا يُضغط بالخطأ (طلب المالك 2026-10-02). */}
-          <RunStatusSteerHint show={showSteerHint} t={t} />
+          <RunStatusSteerHint show={showSteerHint} t={t} onSteerClick={onSteerClick} />
           <div className="ms-auto flex shrink-0 items-center gap-1.5">
             <RunStatusActions
               canStop={canInterrupt}

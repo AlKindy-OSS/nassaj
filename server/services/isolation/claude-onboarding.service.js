@@ -197,8 +197,14 @@ export function resolveClaudeStatusDir(userId, isolated) {
  * a `.credentials.json` with no refresh token (or inference-only scopes). The
  * card then shows "incomplete link — re-link" instead of a false "connected".
  *
+ * A full OAuth link is only reported connected when `options.verifyOauthLink`
+ * (if given) does not refuse it: a well-formed file Anthropic rejects would
+ * otherwise read "connected" while every turn fails with "Not logged in".
+ *
  * @param {string|number} userId authenticated user id
- * @param {{ isolated?: boolean }} [options] test seam for the sharing policy
+ * @param {{ isolated?: boolean, verifyOauthLink?: () => Promise<boolean> }} [options]
+ *   test seam for the sharing policy; live check that resolves false only when
+ *   Anthropic refused the stored login
  * @returns {Promise<{ connected: boolean, incompleteLink: boolean, provider: 'claude' }>}
  */
 export async function getClaudeConnectionStatus(userId, options = {}) {
@@ -207,8 +213,12 @@ export async function getClaudeConnectionStatus(userId, options = {}) {
 
   const fullApiKey = await hasSettingsCredential(claudeDir);
   const oauthQuality = await oauthLinkQuality(claudeDir);
-  if (fullApiKey || oauthQuality === 'linked') {
+  if (fullApiKey) {
     return { connected: true, incompleteLink: false, provider: 'claude' };
+  }
+  if (oauthQuality === 'linked') {
+    const accepted = options.verifyOauthLink ? await options.verifyOauthLink() : true;
+    return { connected: accepted, incompleteLink: false, provider: 'claude' };
   }
 
   const setupTokenOnly = await hasSettingsSetupTokenOnly(claudeDir);

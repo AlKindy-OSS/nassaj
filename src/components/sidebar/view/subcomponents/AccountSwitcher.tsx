@@ -7,7 +7,9 @@ import { cn } from '../../../../lib/utils';
 import {
   beginIdentityTransition,
   cancelIdentityTransition,
+  expectWalletGenerationBump,
   lockIdentityBarrier,
+  reconcileRevokedIdentity,
 } from '../../../auth/accountIdentityBarrier';
 import { hasPendingAccountWork } from '../../../auth/accountIdentityIsolation';
 import {
@@ -57,7 +59,7 @@ export default function AccountSwitcher({ current, t, onShowSettings, onLegacyLo
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [addEmail, setAddEmail] = useState('');
+  const [addIdentifier, setAddIdentifier] = useState('');
   const [addPassword, setAddPassword] = useState('');
   const [pendingSwitch, setPendingSwitch] = useState<DeviceAccount | null>(null);
   const [removeTarget, setRemoveTarget] = useState<DeviceAccount | null>(null);
@@ -151,40 +153,59 @@ export default function AccountSwitcher({ current, t, onShowSettings, onLegacyLo
     void switchTo(account);
   };
 
+  // Add and remove-inactive keep the active account (B-1531): no identity
+  // transition, no purge. The generation bump still closes realtime sockets;
+  // that expected 4401 only redials. If the authoritative wallet shows a
+  // different active account anyway, take the full revocation path.
+  const applyWalletEdit = (next: AccountWallet, previousActiveSlotId: string | null) => {
+    setWallet(next);
+    if (next.activeSlotId !== previousActiveSlotId) reconcileRevokedIdentity();
+  };
+
+  const recoverWalletEdit = async (caught: unknown, previousActiveSlotId: string | null) => {
+    setError(walletError(caught));
+    if (!isConflict(caught) && !(caught instanceof AccountWalletError && caught.outcomeUnknown)) return;
+    try {
+      const errorWallet = caught instanceof AccountWalletError ? caught.wallet : undefined;
+      applyWalletEdit(isAccountWallet(errorWallet) ? errorWallet : await readAccountWallet(), previousActiveSlotId);
+    } catch {
+      reconcileRevokedIdentity();
+    }
+  };
+
   const addAccount = async (event: FormEvent) => {
     event.preventDefault();
-    if (!wallet || busy || !addEmail.trim() || !addPassword) return;
-    const transitionVersion = beginIdentityTransition('add');
+    if (!wallet || busy || !addIdentifier.trim() || !addPassword) return;
     setBusy('add'); setError(null);
+    expectWalletGenerationBump();
     try {
       const next = await mutateAccountWallet<AccountWallet>('/api/auth/accounts/add', 'POST', 'add', {
-        email: addEmail.trim(), password: addPassword, expectedGeneration: wallet.generation,
-      }, { identityBypass: true });
+        identifier: addIdentifier.trim(), password: addPassword, expectedGeneration: wallet.generation,
+      });
       if (!isAccountWallet(next)) {
         throw new AccountWalletError('wallet_mutation_outcome_unknown', 0, undefined, true);
       }
-      setWallet(next);
-      setAddOpen(false); setAddEmail(''); setAddPassword('');
+      setAddOpen(false); setAddIdentifier('');
       setAnnouncement(t('account.added'));
-      finishWalletIdentityTransition(transitionVersion, wallet.activeSlotId, next.activeSlotId, 'add');
-    } catch (caught) { await recover(caught, transitionVersion, wallet.activeSlotId); }
+      applyWalletEdit(next, wallet.activeSlotId);
+    } catch (caught) { await recoverWalletEdit(caught, wallet.activeSlotId); }
     finally { setAddPassword(''); setBusy(null); }
   };
 
   const remove = async () => {
     if (!wallet || !removeTarget || busy) return;
-    const transitionVersion = beginIdentityTransition('remove');
     setBusy(removeTarget.slotId); setError(null);
+    expectWalletGenerationBump();
     try {
       const next = await mutateAccountWallet<AccountWallet>(`/api/auth/accounts/${encodeURIComponent(removeTarget.slotId)}`, 'DELETE', 'remove', {
         expectedGeneration: wallet.generation,
-      }, { slotId: removeTarget.slotId, identityBypass: true });
+      }, { slotId: removeTarget.slotId });
       if (!isAccountWallet(next)) {
         throw new AccountWalletError('wallet_mutation_outcome_unknown', 0, undefined, true);
       }
-      setWallet(next); setRemoveTarget(null); setAnnouncement(t('account.removed'));
-      finishWalletIdentityTransition(transitionVersion, wallet.activeSlotId, next.activeSlotId, 'remove');
-    } catch (caught) { await recover(caught, transitionVersion, wallet.activeSlotId); }
+      setRemoveTarget(null); setAnnouncement(t('account.removed'));
+      applyWalletEdit(next, wallet.activeSlotId);
+    } catch (caught) { await recoverWalletEdit(caught, wallet.activeSlotId); }
     finally { setBusy(null); }
   };
 
@@ -237,14 +258,14 @@ export default function AccountSwitcher({ current, t, onShowSettings, onLegacyLo
             {busy === account.slotId ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-label={t('account.switching')} /> : account.slotId === wallet?.activeSlotId ? <Check className="h-4 w-4 shrink-0" aria-label={t('account.active')} /> : null}
           </button>)}</div>}
         <div className="my-1 h-px bg-border" />
-        <button data-account-control type="button" role="menuitem" disabled={!wallet || Boolean(busy) || accounts.length >= 5} onClick={() => { close(); setAddOpen(true); }} className="flex min-h-[var(--control-height-touch)] w-full items-center gap-3 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"><Plus className="h-4 w-4" aria-hidden />{t('account.add')}</button>
+        <button data-account-control type="button" role="menuitem" disabled={!wallet || Boolean(busy) || accounts.length >= 5} onClick={() => { close(); setError(null); setAddOpen(true); }} className="flex min-h-[var(--control-height-touch)] w-full items-center gap-3 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"><Plus className="h-4 w-4" aria-hidden />{t('account.add')}</button>
         <button data-account-control type="button" role="menuitem" disabled={!wallet || Boolean(busy)} onClick={() => { close(); setManageOpen(true); }} className="flex min-h-[var(--control-height-touch)] w-full items-center gap-3 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">{t('account.manage')}</button>
         <button data-account-control type="button" role="menuitem" onClick={() => { close(); onShowSettings(); }} className="flex min-h-[var(--control-height-touch)] w-full items-center gap-3 rounded-md px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"><Settings className="h-4 w-4" aria-hidden />{t('actions.settings')}</button>
         <button data-account-control type="button" role="menuitem" disabled={Boolean(busy)} onClick={() => wallet ? void signOut() : onLegacyLogout()} className="flex min-h-[var(--control-height-touch)] w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-danger hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"><LogOut className="h-4 w-4" aria-hidden />{t('actions.logout')}</button>
       </div>}
     </div>
 
-    <Dialog open={addOpen} onOpenChange={(next) => { setAddOpen(next); if (!next) { setAddEmail(''); setAddPassword(''); } }}><DialogContent className="w-[calc(100vw-2rem)] max-w-sm p-0"><DialogTitle className="sr-only">{t('account.add')}</DialogTitle><form className="space-y-4 p-5" onSubmit={(event) => void addAccount(event)}><div><h2 className="text-lg font-semibold">{t('account.add')}</h2><p className="text-sm text-muted-foreground">{t('account.addDescription')}</p></div>{error && <p role="alert" className="text-sm text-danger">{t(`account.errors.${error}`, { defaultValue: t('account.errors.add_account_failed') })}</p>}<label className="block space-y-1.5 text-sm font-medium"><span>{t('account.email')}</span><Input type="email" value={addEmail} onChange={(event) => setAddEmail(event.target.value)} autoComplete="username" inputMode="email" required autoFocus /></label><label className="block space-y-1.5 text-sm font-medium"><span>{t('account.password')}</span><Input type="password" value={addPassword} onChange={(event) => setAddPassword(event.target.value)} autoComplete="current-password" required /></label><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAddOpen(false)}>{t('account.cancel')}</Button><Button type="submit" disabled={busy === 'add' || !addEmail.trim() || !addPassword}>{busy === 'add' ? t('account.adding') : t('account.add')}</Button></div></form></DialogContent></Dialog>
+    <Dialog open={addOpen} onOpenChange={(next) => { setAddOpen(next); if (!next) { setAddIdentifier(''); setAddPassword(''); } }}><DialogContent className="w-[calc(100vw-2rem)] max-w-sm p-0"><DialogTitle className="sr-only">{t('account.add')}</DialogTitle><form className="space-y-4 p-5" onSubmit={(event) => void addAccount(event)}><div><h2 className="text-lg font-semibold">{t('account.add')}</h2><p className="text-sm text-muted-foreground">{t('account.addDescription')}</p></div>{error && <p role="alert" className="text-sm text-danger">{t(`account.errors.${error}`, { defaultValue: t('account.errors.add_account_failed') })}</p>}<label className="block space-y-1.5 text-sm font-medium"><span>{t('account.identifier')}</span><Input type="text" value={addIdentifier} onChange={(event) => setAddIdentifier(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} dir="ltr" required autoFocus /></label><label className="block space-y-1.5 text-sm font-medium"><span>{t('account.password')}</span><Input type="password" value={addPassword} onChange={(event) => setAddPassword(event.target.value)} autoComplete="current-password" required /></label><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAddOpen(false)}>{t('account.cancel')}</Button><Button type="submit" disabled={busy === 'add' || !addIdentifier.trim() || !addPassword}>{busy === 'add' ? t('account.adding') : t('account.add')}</Button></div></form></DialogContent></Dialog>
 
     <Dialog open={Boolean(pendingSwitch)} onOpenChange={(next) => { if (!next) setPendingSwitch(null); }}><DialogContent className="w-[calc(100vw-2rem)] max-w-sm p-0"><DialogTitle className="sr-only">{t('account.switchConfirmTitle')}</DialogTitle><div className="space-y-4 p-5"><div><h2 className="text-lg font-semibold">{t('account.switchConfirmTitle')}</h2><p className="text-sm text-muted-foreground">{t('account.switchConfirmDescription')}</p></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setPendingSwitch(null)}>{t('account.cancel')}</Button><Button onClick={() => { const target = pendingSwitch; setPendingSwitch(null); if (target) void switchTo(target); }}>{t('account.switchConfirm')}</Button></div></div></DialogContent></Dialog>
 

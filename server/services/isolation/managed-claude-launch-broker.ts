@@ -15,6 +15,7 @@ import util from 'node:util';
 import type { PermissionChildIdentity } from '@/modules/database/index.js';
 import { readRuntimeProcessIdentity, type PermissionExecutionHandle } from '@/modules/execution-permissions/index.js';
 
+import { assertNoSettingsOverrideArgv, isEngineRoutedEnv } from './engine-anthropic-credential-guard.js';
 import type { ManagedClaudeTerminalMode } from './managed-claude-terminal-env.js';
 
 export const MANAGED_CLAUDE_BROKER_SOCKET_ENV = 'NASSAJ_MANAGED_CLAUDE_BROKER_SOCKET';
@@ -114,8 +115,13 @@ async function authorize(record: Registration, pid: unknown, startTicks: unknown
   const profile = await resolveClaudeRunProfileOrThrow({
     userId: record.userId, authenticatedPrincipal: record.actor, sessionId: targetSessionId,
     baseEnv: record.baseEnv, envAlreadyIsolated: true, authoritativeStoredPin: targetSessionId !== null,
-    requireKnownResumePin: targetSessionId !== null, failOnAmbiguous: true,
+    requireKnownResumePin: targetSessionId !== null, failOnAmbiguous: true, cwd: record.cwd,
   });
+  // B-1541: `--settings` / `--setting-sources` would hand an engine-pinned child
+  // settings no file shows. The wrapper re-checks too (cwd may have moved).
+  if ((profile.engineHosts instanceof Set && profile.engineHosts.size > 0) || isEngineRoutedEnv(profile.env)) {
+    assertNoSettingsOverrideArgv(argv as string[]);
+  }
   const execution = authorizeRuntimeUserProviderEffect({
     authenticatedPrincipal: record.actor, provider: 'claude', engine: profile.effectiveEngine ?? 'anthropic',
     entrypoint: 'terminal.managed-claude', purpose: 'spawn', effectFootprint: 'local', sessionId: targetSessionId,

@@ -154,7 +154,7 @@ describe('مخزن البثّ لكل جلسة على حدة', () => {
     });
 
     assert.equal(lastSeq, 41, 'هذه القيمة هي التي يرسلها reconnect لمنع replay');
-    assert.deepEqual(recordSeq.mock.calls, [[VIEWED, 41]]);
+    assert.deepEqual(recordSeq.mock.calls, [[VIEWED, 41, null]]);
     assert.deepEqual(written, [{ sessionId: VIEWED, text: 'الجزء الحي' }]);
 
     // React may rerender the same cumulative snapshot while reconnecting. Its

@@ -2,6 +2,7 @@ import type { LLMProvider } from '@/shared/types.js';
 
 import { runPermissionExecutionAdapter } from './adapter.js';
 import { createAuthenticatedLaunchActor } from './actor.js';
+import { runInCatalogLaunchScope } from './catalog-launch-scope.js';
 import { authorizeRuntimeUserProviderEffect } from './runtime-user-effect.js';
 
 /** Runs one live provider catalog probe under its own actor, lease, and permit. */
@@ -31,5 +32,6 @@ export const runAuthorizedProviderCatalog = async <T>(
     projectId: 'system:provider-catalog',
     workspacePath: process.cwd(),
   });
-  return runPermissionExecutionAdapter(execution, probe);
+  // B-1414: children the probe starts see this permit (identity) and die with it.
+  return runPermissionExecutionAdapter(execution, () => runInCatalogLaunchScope(execution, probe));
 };

@@ -48,7 +48,16 @@ vi.mock('../../../../hooks/useRawExecConfig', () => ({
   useRawExecQueue: () => ({ commands: [], canUseRaw: false, loading: false, refresh: () => {} }),
   invalidateRawExecConfig: () => {},
   refreshRawExecConfig: () => {},
+  subscribeRawExecConfig: () => () => {},
 }));
+
+// سجلّ التنفيذ الدائم (الخادم): يُحقَن لكل اختبار؛ المنطق الخالص يبقى حقيقياً.
+type Rec = { executedAt: string; outcome: 'success' | 'failure' | 'unknown'; exitCode: number | null; executedBy: string | null } | null;
+const mockRecord = vi.fn((): Rec => null);
+vi.mock('../../../../hooks/useRawExecutionRecord', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, useRawExecutionRecord: () => ({ record: mockRecord(), refresh: () => {} }) };
+});
 
 /** تسمية الزرّ = `defaultValue` لمفتاح `codeBlock.executeRawTitle` (محاكاة t). */
 const RAW_BUTTON = 'Execute this command on the Nassaj server (opens review dialog)';
@@ -81,6 +90,7 @@ const fence = (info: string, body = 'echo hi') => '```' + info + '\n' + body + '
 afterEach(() => {
   cleanup();
   mockCanUseRaw.mockReturnValue(true);
+  mockRecord.mockReturnValue(null);
 });
 
 describe('زرّ التنفيذ الحر — الكتلة الموسومة وحدها', () => {
@@ -209,4 +219,51 @@ it.each(['executing', 'execution_unresolved'] as const)('preserves shared %s loc
   expect(screen.queryByRole('button', { name: /تنفيذ|الإعادة/ })).toBeNull();
   if (status === 'execution_unresolved') expect(screen.getByRole('status').textContent).toBe('pendingActions.outcomeUnverified');
   expect(runAction).not.toHaveBeenCalled();
+});
+
+describe('زرّ التنفيذ الحر — سجلّ التنفيذ الدائم', () => {
+  const ranAt = '2026-10-04T09:30:00.000Z';
+  const sentAt = '2026-10-04T09:00:00.000Z';
+  const withTs = (ts: string | null): ChatActionsContextValue => ({ ...CTX, messageTimestamp: ts });
+
+  it('بعد تنفيذ ناجح: يختفي الزرّ ويظهر وقت التنفيذ ورمز الخروج', () => {
+    mockRecord.mockReturnValue({ executedAt: ranAt, outcome: 'success', exitCode: 0, executedBy: 'owner' });
+    renderInAssistantMessage(fence('bash nassaj-run'), { ctx: withTs(sentAt) });
+    expect(queryRawButton()).toBeNull();
+    const status = screen.getByRole('status');
+    expect(status.textContent).toContain('Executed at');
+    expect(status.textContent).toContain(new Date(ranAt).toLocaleString());
+  });
+
+  it('بعد تنفيذ فاشل: يبقى الزرّ (إعادة محاولة) مع تاريخ التنفيذ ظاهراً', () => {
+    mockRecord.mockReturnValue({ executedAt: ranAt, outcome: 'failure', exitCode: 3, executedBy: 'owner' });
+    renderInAssistantMessage(fence('bash nassaj-run'), { ctx: withTs(sentAt) });
+    expect(queryRawButton()).not.toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('Executed at');
+  });
+
+  it('بلا سجلّ: الزرّ ظاهر ولا سطر حالة', () => {
+    renderInAssistantMessage(fence('bash nassaj-run'));
+    expect(queryRawButton()).not.toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('رسالة أحدث بالنصّ نفسه: الزرّ يبقى ولا يُنسب إليها التنفيذ القديم', () => {
+    mockRecord.mockReturnValue({ executedAt: ranAt, outcome: 'success', exitCode: 0, executedBy: null });
+    renderInAssistantMessage(fence('bash nassaj-run'), { ctx: withTs('2026-10-05T09:00:00.000Z') });
+    expect(queryRawButton()).not.toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('رسالة سبقت التنفيذ: يختفي الزرّ', () => {
+    mockRecord.mockReturnValue({ executedAt: ranAt, outcome: 'success', exitCode: 0, executedBy: null });
+    renderInAssistantMessage(fence('bash nassaj-run'), { ctx: withTs(sentAt) });
+    expect(queryRawButton()).toBeNull();
+  });
+
+  it('بلا وقت للرسالة: الزرّ ظاهر دائماً', () => {
+    mockRecord.mockReturnValue({ executedAt: ranAt, outcome: 'success', exitCode: 0, executedBy: null });
+    renderInAssistantMessage(fence('bash nassaj-run'), { ctx: withTs(null) });
+    expect(queryRawButton()).not.toBeNull();
+  });
 });

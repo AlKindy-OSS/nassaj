@@ -73,16 +73,56 @@ function contrast(a: string, b: string): number {
 const cssPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.css');
 const css = readFileSync(cssPath, 'utf8');
 
-/** Pulls a token out of the `:root` or `.dark` block of index.css. */
-function cssToken(name: string, dark: boolean): string {
-  // `.dark` is defined after `:root`; take the last match before/after
-  // accordingly by slicing the sheet at the `.dark {` boundary.
-  const cut = css.indexOf('.dark');
-  const scope = dark ? css.slice(cut) : css.slice(0, cut);
-  const m = scope.match(new RegExp(`${name}:\\s*([^;]+);`));
+/**
+ * Pulls a token out of the `:root` or `.dark` theme block inside `@layer base`.
+ * It reads the selector's own brace-delimited block (B-644): slicing the sheet
+ * at the first `.dark` broke as soon as a `.dark …` rule sat before `:root`,
+ * which index.css now has, so "light" read no tokens and "dark" read light ones.
+ */
+function cssToken(name: string, dark: boolean, sheet: string = css): string {
+  const base = sheet.indexOf('@layer base');
+  const selector = dark ? '  .dark {' : '  :root {';
+  const start = base < 0 ? -1 : sheet.indexOf(selector, base);
+  if (start < 0) throw new Error(`${selector.trim()} not found in index.css`);
+  const open = sheet.indexOf('{', start);
+  let depth = 1;
+  let end = open + 1;
+  while (end < sheet.length && depth > 0) {
+    if (sheet[end] === '{') depth += 1;
+    if (sheet[end] === '}') depth -= 1;
+    end += 1;
+  }
+  const scope = sheet.slice(open + 1, end - 1);
+  const m = scope.match(new RegExp(`(?:^|[\\s;])${name}:\\s*([^;]+);`));
   if (!m) throw new Error(`${name} not found in index.css (${dark ? '.dark' : ':root'})`);
   return m[1].trim();
 }
+
+describe('the index.css token reader (B-644)', () => {
+  it('reads each theme block even when a .dark rule comes before :root', () => {
+    const sheet = [
+      '.dark { --ring: 9 9% 99%; }',
+      '.dark .voice-mic-live svg { --ring: 8 8% 88%; }',
+      '@layer base {',
+      '  :root {',
+      '    --ring: 1 1% 11%;',
+      '    --nested-ring: 3 3% 33%;',
+      '  }',
+      '  .dark {',
+      '    --ring: 2 2% 22%;',
+      '  }',
+      '}',
+    ].join('\n');
+    expect(cssToken('--ring', false, sheet)).toBe('1 1% 11%');
+    expect(cssToken('--ring', true, sheet)).toBe('2 2% 22%');
+    expect(() => cssToken('--ring', true, sheet.replace('  .dark {', '  .other {'))).toThrow(/not found/);
+  });
+
+  it('the shipped sheet has that shape, and its light and dark backgrounds differ', () => {
+    expect(css.indexOf('.dark')).toBeLessThan(css.indexOf('@layer base'));
+    expect(cssToken('--background', false)).not.toBe(cssToken('--background', true));
+  });
+});
 
 /* ─────────────────────────────── the guard ───────────────────────── */
 

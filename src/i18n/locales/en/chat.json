@@ -150,6 +150,8 @@
     "copy": "Copy",
     "copied": "Copied",
     "copyCode": "Copy code",
+    "executedAt": "Executed at {{time}} — exit code {{code}}",
+    "executedAtNoExit": "Executed at {{time}}",
     "executeRaw": "Execute",
     "executeRawTitle": "Execute this command on the Nassaj server (opens review dialog)",
     "inserting": "Adding to queue…",
@@ -216,6 +218,10 @@
   "coordinatorPrompt": {
     "label": "Coordinator → Sub-agent",
     "ariaLabel": "Coordinator prompt to sub-agent"
+  },
+  "skillLoad": {
+    "label": "Skill loaded: {{name}}",
+    "expand": "Show skill content"
   },
   "systemMessage": {
     "label": "System message",
@@ -698,7 +704,6 @@
   "agentActivity": {
     "title": "Agent activity",
     "summary": "{{running}}/{{total}} running",
-    "summaryIdle": "{{done}}/{{total}} done",
     "approvalSummary": "{{approved}}/{{total}} approved · {{percent}}%",
     "running": "Running",
     "done": "Done",
@@ -798,6 +803,8 @@
     "spawn_failed": "Failed to start the process — check server logs for details",
     "session_create_failed": "Could not start a new session — please try again",
     "session_busy": "Your message was not sent: this conversation has a run in progress. Wait for it to finish or stop it, then send again",
+    "attachment_rejected": "Your message was not sent: an attachment is not a file uploaded to this project. Attach the file again from your device, then send",
+    "opencode_project_config_refused": "Could not start: this project has an OpenCode config file (opencode.json or a .opencode folder) that sets provider or MCP endpoints, which is not allowed in this mode. Remove its provider and mcp sections or delete the file, then send again",
     "authentication_required": "Provider authentication is missing or expired. Check its connection in Settings",
     "model_not_supported": "The selected model is not supported by this provider",
     "codex_cache_incompatible": "The Codex model cache is incompatible with the installed runtime",
@@ -828,6 +835,26 @@
     "showLess": "Collapse text",
     "startNewConversation": "Continue in a new conversation",
     "reviewAndUnlock": "Review and unlock",
+    "continueHere": {
+      "notice": "The last turn was interrupted, so its effects may be incomplete. Review what ran, then continue from here.",
+      "memberNotice": "The last turn in this conversation was interrupted and its effects may be incomplete. You cannot lift the lock; you can continue in a new conversation.",
+      "action": "Continue from here",
+      "confirmPrompt": "The interrupted turn's effects may be incomplete. Have you reviewed what ran and want to continue from here?",
+      "confirm": "Yes, continue",
+      "cancel": "Cancel",
+      "working": "Lifting the lock…",
+      "error": {
+        "not_contained": "A process from the previous turn is still running; wait a moment and try again.",
+        "leases_open": "A run is in progress in this conversation; try again once it finishes.",
+        "not_session_scope": "This lock cannot be lifted from the conversation; the owner lifts it in Settings.",
+        "not_provable": "The previous turn cannot be proven finished from here; the owner lifts this lock in Settings > System.",
+        "fence_changed": "The lock changed during the attempt; refresh the page and try again.",
+        "unverified_actor": "Your identity could not be verified in this mode; sign in and try again.",
+        "forbidden": "You do not have write access to this conversation.",
+        "rate_limited": "Too many attempts; wait a moment.",
+        "unknown": "Could not lift the lock right now. Try again."
+      }
+    },
     "reason": {
       "delivered": "Kept here until it appears in conversation history",
       "effect_scope_fenced_session": "The previous turn in this conversation ended with an unknown outcome (for example, interrupted by a server restart), so it was locked for safety.",
@@ -1197,7 +1224,112 @@
     }
   },
   "inlineCode": {
-    "openLink": "Open link — right-click to copy",
+    "copyLink": "Copy link",
     "copyHint": "Copy"
+  },
+  "sessionShare": {
+    "button": "Share conversation",
+    "dialogTitle": "Share this conversation with a read-only link",
+    "intro": "Anyone with the link can read a redacted copy of this conversation without signing in. They cannot write or see your files.",
+    "noBearer": "Sharing is not available in the current sign-in mode (device session). Sign in with your password or passkey and try again.",
+    "loading": "Preparing the preview…",
+    "retry": "Try again",
+    "close": "Close",
+    "cancel": "Cancel",
+    "previewTitle": "Preview of what the reader will see",
+    "previewMore": "Show more ({{n}} messages left)",
+    "messageCount": "{{n}} messages",
+    "roleUser": "Session owner",
+    "roleAssistant": "Assistant",
+    "summaryTitle": "Removed from the shared copy",
+    "summaryNone": "Nothing was removed.",
+    "summary": {
+      "secret": "{{n}} possible secrets",
+      "path": "{{n}} paths",
+      "image": "{{n}} images",
+      "network": "{{n}} network addresses",
+      "system": "{{n}} system instructions",
+      "tools": "{{n}} tool calls",
+      "thinking": "{{n}} thinking blocks",
+      "other": "{{n}} other items"
+    },
+    "summaryPrefix": "Removed: {{items}}",
+    "category": {
+      "secret": "Possible secret",
+      "path": "Path",
+      "image": "Image",
+      "network": "Network address",
+      "system": "System instructions"
+    },
+    "blockersTitle": "The link cannot be created",
+    "blockers": {
+      "FOREIGN_AUTHOR": "Someone other than the session owner wrote messages here; multi-author conversations are not published.",
+      "UNATTRIBUTED_MULTI_PARTICIPANT": "The author of some messages cannot be verified because the conversation has several participants.",
+      "UNATTRIBUTED_PARTICIPANTS_UNVERIFIED": "The author of some messages cannot be verified, so they cannot be proven to be the session owner."
+    },
+    "confirmUnattributed": "I confirm that {{n}} unattributed messages were written by the session owner and accept publishing them",
+    "expiryLabel": "Link validity",
+    "expiry": {
+      "24h": "24 hours",
+      "7d": "7 days",
+      "30d": "30 days",
+      "90d": "90 days"
+    },
+    "reviewed": "I reviewed the content and the removed items",
+    "reviewedNote": "Not every secret is detected; short unlabeled secrets may remain in the text. Review the preview carefully before publishing.",
+    "secretConfirm": "I acknowledge {{n}} possible secrets were removed and I accept responsibility for publishing the rest",
+    "create": "Create link",
+    "creating": "Creating…",
+    "created": {
+      "title": "Link created",
+      "once": "The link will not be shown again. Copy it now and keep it somewhere safe.",
+      "linkLabel": "Share link",
+      "copy": "Copy link",
+      "copied": "Copied",
+      "copyFailed": "Automatic copy failed; select the link and copy it manually."
+    },
+    "list": {
+      "title": "Current links for this conversation",
+      "empty": "No shared links.",
+      "loadFailed": "Could not load the links.",
+      "session": "Conversation",
+      "created": "Created",
+      "expires": "Expires",
+      "views": "Views",
+      "messages": "Messages",
+      "status": {
+        "active": "Active",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      },
+      "revoke": "Revoke link",
+      "revokeConfirm": "Confirm revoke",
+      "revokeCancel": "Keep",
+      "revoking": "Revoking…",
+      "createdBy": "Created by: {{name}}"
+    },
+    "panel": {
+      "title": "My shared links",
+      "description": "Read-only links you created for your conversations, or that were created for them. The link itself is never shown again after creation.",
+      "unavailable": "Sharing is not available in the current sign-in mode (device session)."
+    },
+    "errors": {
+      "generic": "Something went wrong. Try again.",
+      "network": "Could not reach the server.",
+      "authRequired": "Your session expired or you are not signed in. Sign in and try again.",
+      "unavailableMode": "Sharing is not available in the current sign-in mode.",
+      "accessDenied": "You are not allowed to share this conversation. Only its owner, the platform owner and admins can.",
+      "notFound": "The conversation was not found.",
+      "ownerUnresolved": "The owner of this conversation could not be determined, so it cannot be shared.",
+      "projectUnregistered": "The conversation project is unregistered or archived, so it cannot be shared.",
+      "authorsUnverifiable": "Message authors cannot be verified right now. Try again later.",
+      "snapshotChanged": "The conversation changed since the preview. The preview was refreshed; review it and confirm again.",
+      "blocked": "Publishing is no longer allowed for this conversation. The preview was refreshed.",
+      "tooLarge": "The conversation is too large to share. Try a shorter one.",
+      "rateLimited": "Too many requests. Wait a moment and try again.",
+      "limitReached": "You reached the maximum number of links. Revoke an old one first.",
+      "notConfigured": "Sharing is not enabled on this server.",
+      "shareGone": "The link does not exist or was already revoked."
+    }
   }
 }

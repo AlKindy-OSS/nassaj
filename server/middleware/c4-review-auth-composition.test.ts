@@ -17,6 +17,7 @@ import { mintMutationCsrfToken } from '../modules/account-wallet/index.js';
 import { AgentReviewError, applyAgentReviewSchema, closeConnection, getConnection } from '../modules/database/index.js';
 import { isAuthenticatedLaunchActorCurrent } from '../modules/execution-permissions/index.js';
 import type { ReviewAccessSeams } from '../modules/providers/services/agent-review-http-authority.js';
+import { useWalletOriginEnv } from '../utils/__tests__/wallet-origin-env.js';
 
 import { createC4ReviewHttpStack } from './c4-review-request-boundaries.js';
 
@@ -29,6 +30,8 @@ const sha = (value: string): string => createHash('sha256').update(value).digest
 const token = (extra: object = {}, secret = SECRET): string => jwt.sign({ userId: 1, auth_gen: 1, pwd_iat: 100,
   exp: Math.floor(Date.now() / 1000) + 3600, ...extra }, secret, { algorithm: 'HS256' });
 type Reply = { status: number; headers: Headers; body: any };
+/** The per-request device predicate the composition root wires to multiAccountSwitchingEnabled. */
+const deviceFlag = { enabled: true };
 type Fixture = { db: Database.Database; second: () => Database.Database; origin: string;
   call: (headers: Record<string, string>, method?: string, url?: string, body?: unknown) => Promise<Reply>;
   capture: { run?: () => void } };
@@ -49,7 +52,7 @@ async function fixture(t: TestContext, run: (value: Fixture) => Promise<void>): 
   const db = getConnection(); db.pragma('busy_timeout=0'); db.transaction(() => applyAgentReviewSchema(db)).immediate();
   db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,role TEXT,is_active INTEGER,status TEXT,
     authorization_generation INTEGER,password_changed_at INTEGER,must_change_password INTEGER,avatar_url TEXT);
-    INSERT INTO users VALUES (1,'synthetic','user',1,'active',1,100,0,NULL);
+    INSERT INTO users VALUES (1,'synthetic','admin',1,'active',1,100,0,NULL);
     CREATE TABLE api_keys(id INTEGER PRIMARY KEY,user_id INTEGER,key_digest TEXT,is_active INTEGER,last_used TEXT);
     CREATE TABLE user_identities(id INTEGER PRIMARY KEY,user_id INTEGER,issuer TEXT,subject TEXT,last_attested_at INTEGER);
     CREATE TABLE device_sessions(id TEXT PRIMARY KEY,secret_hash TEXT,active_slot_id TEXT,generation INTEGER,revoked_at INTEGER,expires_at INTEGER);
@@ -70,19 +73,19 @@ async function fixture(t: TestContext, run: (value: Fixture) => Promise<void>): 
     capture: () => { capture.run?.(); return null; }, current: () => true };
   // Real existing installation-key middleware; importing it is bootstrap, outside measured requests.
   const { validateApiKey } = await import('./auth.js');
-  const stack = createC4ReviewHttpStack({ db, jwtSecret: SECRET, deviceEnabled: true, accessSeams: seams });
+  const stack = createC4ReviewHttpStack({ db, jwtSecret: SECRET, deviceEnabled: () => deviceFlag.enabled, accessSeams: seams });
   const app = express(); app.use(stack.beforeGlobal); app.use(stack.globalParsers); app.use(validateApiKey);
   app.use(stack.authenticatedRoutes);
   app.use((_req, res) => res.status(404).json({ fallback: true }));
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const { origin, restore: restoreOriginEnv } = useWalletOriginEnv((server.address() as AddressInfo).port);
   try { await run({ db, origin, capture, second: () => new Database(filename, { timeout: 0 }), call: async (headers, method = 'GET', url = GET, body) => {
     const response = await fetch(origin + url, { method, headers: { 'Content-Type': 'application/json', ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, headers: response.headers, body: await response.json() };
   } }); }
   finally {
-    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); closeConnection(); t.mock.restoreAll();
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); closeConnection(); t.mock.restoreAll(); restoreOriginEnv();
     for (const [key, value] of Object.entries({ DATABASE_PATH: previous.db, JWT_SECRET: previous.secret, API_KEY: previous.api, APP_ORIGIN: previous.origin, TMPDIR: previous.tmp })) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
@@ -117,6 +120,14 @@ test('real CK lookup and device read-only eligibility preserve whole DB and key/
   assert.deepEqual(db.prepare('SELECT last_used_at FROM device_account_slots').get(), { last_used_at: 0 });
   db.prepare('UPDATE api_keys SET is_active=0').run();
   const before = changes(db); assert.equal((await call(keyHeader)).status, 401); assert.deepEqual(changes(db), before);
+}));
+
+test('device acceptance follows the per-request flag predicate (ADR-163 amendment 1, M4)', async t => fixture(t, async ({ call }) => {
+  assert.equal((await call(cookie)).status, 200);
+  deviceFlag.enabled = false;
+  try { assert.equal((await call(cookie)).status, 401, 'flag off at request time: the cookie is not an identity'); }
+  finally { deviceFlag.enabled = true; }
+  assert.equal((await call(cookie)).status, 200);
 }));
 
 test('installation key is separate from personal Bearer CK, with no fallback for mixed or query credentials', async t => fixture(t, async ({ db, call }) => {

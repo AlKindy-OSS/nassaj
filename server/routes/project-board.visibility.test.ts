@@ -12,6 +12,10 @@
  * test is what shows the guard is wired and reached, and that its 404 survives
  * the handler's own try/catch instead of collapsing into a 500.
  *
+ * B-1524: the board is read from the project's own folder (no governance
+ * catalog). This suite also covers `stateReason`, lastGoodState on invalid
+ * JSON, and the ADR-172 membership flag (404 for a non-member, 200 for admin).
+ *
  * Framework: node:test + node:assert/strict via tsx.
  */
 
@@ -61,7 +65,6 @@ mock.module('chokidar', {
 });
 
 const { default: projectBoardRouter } = await import('./project-board.js');
-const { createGovernanceTestFixture } = await import('../services/governance-content-test-fixture.js');
 
 type TestUser = { id: number; role: string };
 
@@ -72,6 +75,7 @@ let dbDir = '';
 let workspaceRoot = '';
 let ownerUser: TestUser;
 let strangerUser: TestUser;
+let adminUser: TestUser;
 let privateProjectId = '';
 let publicProjectId = '';
 let privateProjectPath = '';
@@ -108,12 +112,13 @@ async function getBoard(projectId: string, user: TestUser | null): Promise<{ sta
 before(async () => {
   closeConnection();
   dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-board-idor-db-'));
-  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-board-idor-ws-'));
+  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-board idor ws مشروع-'));
   process.env.DATABASE_PATH = path.join(dbDir, 'db.sqlite');
   await initializeDatabase();
 
   ownerUser = userDb.createUser('board_owner', 'hash', 'user') as TestUser;
   strangerUser = userDb.createUser('board_stranger', 'hash', 'user') as TestUser;
+  adminUser = userDb.createUser('board_admin', 'hash', 'admin') as TestUser;
 
   privateProjectPath = fs.mkdtempSync(path.join(workspaceRoot, 'private-'));
   seedBoardFiles(privateProjectPath, SECRET_MARKER);
@@ -134,18 +139,12 @@ before(async () => {
   );
   publicProjectId = publicCreated.project?.project_id as string;
 
-  const publication = createGovernanceTestFixture([
-    { projectId: privateProjectId, filename: 'private-state.json', content: JSON.stringify({ phases: [{ id: 'P0', name: SECRET_MARKER }] }) },
-    { projectId: publicProjectId, filename: 'public-state.json', content: JSON.stringify({ phases: [{ id: 'P0', name: 'PUBLIC-MARKER' }] }) },
-  ]);
-
   app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: TestUser | null }).user = currentUser;
     next();
   });
-  app.locals.governanceContentResolver = publication.resolver;
   app.use('/api/project-board', projectBoardRouter);
 
   server = app.listen(0);
@@ -203,18 +202,84 @@ test('a public project\'s board stays readable for the whole team', async () => 
   assert.equal(watchersFor(publicProjectPath), 1, 'the public board is watched for live updates');
 });
 
-test('an absent governance provider is explicit and never falls back to product docs', async () => {
-  const configured = app.locals.governanceContentResolver;
-  delete app.locals.governanceContentResolver;
+test('state and architecture come from the project folder with stateReason ok', async () => {
+  const { status, body } = await getBoard(publicProjectId, ownerUser);
+  assert.equal(status, 200);
+  const parsed = JSON.parse(body);
+  assert.equal(parsed.available, true);
+  assert.equal(parsed.stateError, false);
+  assert.equal(parsed.stateReason, 'ok');
+  assert.equal(parsed.stateLimitMb, 16, 'the state cap is sent in MiB');
+  assert.equal(parsed.state.phases[0].name, 'PUBLIC-MARKER');
+  assert.match(parsed.architecture.technical, /PUBLIC-MARKER/);
+  assert.equal('governance' in parsed, false, 'the governance field is gone');
+});
+
+test('invalid JSON serves the last good state with stateError and stateReason', async () => {
+  const stateFile = path.join(publicProjectPath, 'docs', 'project-state.json');
+  const good = fs.readFileSync(stateFile, 'utf8');
   try {
-    const { status, body } = await getBoard(privateProjectId, ownerUser);
-    assert.equal(status, 200);
-    const parsed = JSON.parse(body);
+    await getBoard(publicProjectId, ownerUser);
+    fs.writeFileSync(stateFile, '{broken', 'utf8');
+    const parsed = JSON.parse((await getBoard(publicProjectId, ownerUser)).body);
+    assert.equal(parsed.available, true);
+    assert.equal(parsed.stateError, true);
+    assert.equal(parsed.stateReason, 'invalid_json');
+    assert.equal(parsed.state.phases[0].name, 'PUBLIC-MARKER', 'last good copy is served');
+  } finally {
+    fs.writeFileSync(stateFile, good, 'utf8');
+  }
+});
+
+test('the governance stub reads as external_source_unconfigured, architecture still served', async () => {
+  const stateFile = path.join(publicProjectPath, 'docs', 'project-state.json');
+  const good = fs.readFileSync(stateFile, 'utf8');
+  try {
+    fs.writeFileSync(stateFile, JSON.stringify({
+      $schema: 'nassaj-governance-boundary/v1', available: false,
+    }), 'utf8');
+    const parsed = JSON.parse((await getBoard(publicProjectId, ownerUser)).body);
     assert.equal(parsed.available, false);
     assert.equal(parsed.state, null);
-    assert.equal(parsed.governance.reason, 'path_unavailable');
-    assert.match(parsed.architecture.technical, new RegExp(SECRET_MARKER));
+    assert.equal(parsed.stateReason, 'external_source_unconfigured');
+    assert.match(parsed.architecture.technical, /PUBLIC-MARKER/);
   } finally {
-    app.locals.governanceContentResolver = configured;
+    fs.writeFileSync(stateFile, good, 'utf8');
+  }
+});
+
+test('a state file symlinked outside the project is refused without leaking content', async () => {
+  const stateFile = path.join(publicProjectPath, 'docs', 'project-state.json');
+  const good = fs.readFileSync(stateFile, 'utf8');
+  const outside = path.join(workspaceRoot, 'home-like-settings.json');
+  fs.writeFileSync(outside, JSON.stringify({ secret: 'HOME-SECRET-MARKER' }), 'utf8');
+  try {
+    fs.rmSync(stateFile);
+    fs.symlinkSync(outside, stateFile);
+    const { body } = await getBoard(publicProjectId, ownerUser);
+    const parsed = JSON.parse(body);
+    assert.equal(parsed.stateReason, 'outside_project');
+    assert.equal(body.includes('HOME-SECRET-MARKER'), false);
+    assert.equal(body.includes(outside), false, 'no host path in the response');
+  } finally {
+    fs.rmSync(stateFile, { force: true });
+    fs.writeFileSync(stateFile, good, 'utf8');
+  }
+});
+
+test('PROJECT_MEMBERSHIP_ENFORCE on: non-member gets 404 with no read, admin and owner get 200', async () => {
+  const previous = process.env.PROJECT_MEMBERSHIP_ENFORCE;
+  process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
+  try {
+    const refused = await getBoard(privateProjectId, strangerUser);
+    assert.equal(refused.status, 404);
+    assert.equal(refused.body.includes(SECRET_MARKER), false);
+    const admin = await getBoard(privateProjectId, adminUser);
+    assert.equal(admin.status, 200);
+    assert.ok(admin.body.includes(SECRET_MARKER));
+    assert.equal((await getBoard(privateProjectId, ownerUser)).status, 200);
+  } finally {
+    if (previous === undefined) delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
+    else process.env.PROJECT_MEMBERSHIP_ENFORCE = previous;
   }
 });

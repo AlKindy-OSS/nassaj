@@ -32,7 +32,9 @@ test('rejects commentary, synthetic ids, missing completion, duplicate and misma
     [...entries(), row('event_msg', { type: 'turn_aborted', turn_id: 'turn-a' })],
     [...entries(), entries()[3]],
   ]) assert.throws(() => parse(rows), /unsupported_cutoff/);
-  for (const id of ['item_0', 'codex-history-x', '']) assert.throws(() => parse(entries(), id));
+  for (const id of ['item_0', 'codex-history-x', 'codex-5f0c1d2e-item_0', '']) {
+    assert.throws(() => parse(entries(), id));
+  }
   assert.throws(() => parseCodexForkCutoff(encode(entries()).trimEnd(), 'source', '/project', 'msg_a'));
   assert.throws(() => parseCodexForkCutoff(encode(entries()), 'foreign', '/project', 'msg_a'));
 });

@@ -14,6 +14,8 @@ export const DELETION_DEPENDENCIES: readonly DeletionDependency[] = Object.freez
   { table: 'conversations', column: 'project_id', disposition: 'logical_retirement' },
   { table: 'deletion_source_manifest_members', column: 'session_id', disposition: 'retained_ledger' },
   { table: 'deletion_source_manifests', column: 'project_id', disposition: 'retained_ledger' },
+  // B-1514: created by migrateDocumentShares (startup migration, not schema.js); FK ON DELETE CASCADE to projects.
+  { table: 'document_shares', column: 'project_id', disposition: 'cascade' },
   { table: 'message_authors', column: 'session_id', disposition: 'transactional_delete' },
   { table: 'message_coordination_ingress', column: 'session_id', disposition: 'transactional_delete' },
   { table: 'pending_server_actions', column: 'session_id', disposition: 'transactional_delete' },
@@ -53,6 +55,8 @@ export const DELETION_DEPENDENCIES: readonly DeletionDependency[] = Object.freez
   { table: 'session_outcome_reads', column: 'session_id', disposition: 'transactional_delete' },
   { table: 'session_participants', column: 'session_id', disposition: 'cascade' },
   { table: 'session_run_outcomes', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_shares', column: 'project_id', disposition: 'cascade' },
+  { table: 'session_shares', column: 'session_id', disposition: 'transactional_delete' },
   { table: 'session_tombstones', column: 'project_path', disposition: 'retained_ledger' },
   { table: 'session_tombstones', column: 'session_id', disposition: 'retained_ledger' },
   { table: 'session_workspace_modes', column: 'project_path', disposition: 'transactional_delete' },

@@ -17,7 +17,7 @@ import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { findDenylistedCommand, MAX_RAW_COMMAND_LEN, RAW_DENY_RULES } from './command-board-raw.js';
+import { findDenylistedCommand, MAX_RAW_COMMAND_LEN, RAW_DENY_RULES, validateRawCommand } from './command-board-raw.js';
 
 /** Shapes that can take THIS server (or the pm2 daemon) down. */
 const MUST_DENY = [
@@ -187,6 +187,10 @@ const REDOS_UNITS = [
   '!in', 'in-', 'init--', '<in', '=in', 'systemctl start ',
   // Round 4: value-taking systemctl options added to the flag grammar.
   'systemctl --when x ', 'systemctl -s x ',
+  // B-1325: short-flag clusters taking a value, variable verbs, D-Bus calls.
+  'systemctl -lh ', 'systemctl -lh x ', 'loginctl -qm x ', 'systemctl $', 'systemctl `',
+  'busctl call ', 'busctl call systemd1 ', 'gdbus call ', 'dbus-send systemd1 ',
+  'busctl call login1 ', 'dbus-send login1 ', 'qdbus login1 ', 'qdbus ', 'gdbus call login1 terminateuser ',
 ];
 const REDOS_TAILS = ['-', 'x', '='];
 const REDOS_SIZES = [1024, 4096] as const;
@@ -525,4 +529,81 @@ test('T-1816 — every fatal rule precedes every discretionary rule', () => {
   const lastFatal = Math.max(...FATAL_CODES.map((code) => order.lastIndexOf(code)));
   const firstDiscretionary = Math.min(...DISCRETIONARY_CODES.map((code) => order.indexOf(code)));
   assert.ok(lastFatal < firstDiscretionary, `order: ${order.join(', ')}`);
+});
+
+/** B-1325: the four audit probes, plus their close variants. */
+const B1325_MUST_DENY: ReadonlyArray<readonly [string, string]> = [
+  ['systemctl --user set-property cloudflared.service MemoryMax=1', 'systemctl_lifecycle'],
+  ['systemctl set-property nginx.service CPUQuota=1%', 'systemctl_lifecycle'],
+  ['systemctl --user kill cloudflared', 'systemctl_lifecycle'],
+  ['busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager StopUnit ss cloudflared.service replace', 'systemctl_lifecycle'],
+  ['busctl --user set-property org.freedesktop.systemd1 /org/freedesktop/systemd1/unit/x org.freedesktop.systemd1.Unit X b false', 'systemctl_lifecycle'],
+  ['gdbus call --session --dest org.freedesktop.systemd1 --object-path /org/freedesktop/systemd1 --method org.freedesktop.systemd1.Manager.KillUnit x all 9', 'systemctl_lifecycle'],
+  ['dbus-send --session --dest=org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager.StopUnit string:x string:replace', 'systemctl_lifecycle'],
+  ['busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager PowerOff b false', 'systemd_manager'],
+  ['busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager Exit', 'systemd_manager'],
+  ['systemctl --user $V cloudflared', 'systemctl_lifecycle'],
+  ['systemctl --user "$V" cloudflared', 'systemctl_lifecycle'],
+  ['systemctl --user ${VERB} cloudflared', 'systemctl_lifecycle'],
+  ['systemctl --user $(echo stop) cloudflared', 'systemctl_lifecycle'],
+  ['systemctl --user `echo stop` cloudflared', 'systemctl_lifecycle'],
+  ['/usr/bin/systemctl --user `echo stop` cloudflared', 'systemctl_lifecycle'],
+  ['systemctl -lH host restart', 'systemctl_lifecycle'],
+  ['systemctl -qH otherhost stop nginx', 'systemctl_lifecycle'],
+  ['systemctl -lM box restart x', 'systemctl_lifecycle'],
+  ['systemctl -lH host reboot', 'systemd_manager'],
+  ['loginctl -qH host terminate-user nassaj', 'session_kill'],
+];
+
+/** Read-only neighbours that must stay usable. */
+const B1325_MUST_ALLOW = [
+  'systemctl --user status cloudflared',
+  'systemctl --user show -p MemoryMax cloudflared',
+  'systemctl --user status "$UNIT"',
+  'systemctl -l status nginx',
+  'busctl --user tree org.freedesktop.systemd1',
+  'busctl --user introspect org.freedesktop.systemd1 /org/freedesktop/systemd1',
+  'busctl --user get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager Version',
+  'echo $V',
+];
+
+test('B-1325 — the audit probes are refused by validateRawCommand with the expected rule', () => {
+  for (const [cmd, code] of B1325_MUST_DENY) {
+    assert.equal(findDenylistedCommand(cmd), code, `should deny as ${code}: ${cmd}`);
+    const verdict = validateRawCommand(cmd);
+    assert.equal(verdict.ok, false, `validateRawCommand must refuse: ${cmd}`);
+  }
+});
+
+test('B-1325 — read-only systemd neighbours stay allowed', () => {
+  for (const cmd of B1325_MUST_ALLOW) {
+    assert.equal(findDenylistedCommand(cmd), null, `should allow: ${cmd}`);
+  }
+});
+
+/** B-1325 (round 2): logind's terminate/kill verbs over D-Bus. */
+const B1325_LOGIND_MUST_DENY = [
+  'busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager TerminateUser u 1000',
+  'busctl --system call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager KillUser uss 1000 all 9',
+  'busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager TerminateSession s 3',
+  'busctl -H host call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager KillSession ssi 3 all 9',
+  'gdbus call --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1 --method org.freedesktop.login1.Manager.TerminateUser 1000',
+  'dbus-send --system --print-reply --dest=org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager.KillSession string:3 string:all int32:9',
+  'qdbus --system org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager.TerminateSession 3',
+  'sudo /usr/bin/busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager TerminateUser u 1000',
+];
+
+test('B-1325 round 2 — logind terminate/kill over D-Bus is refused as session_kill', () => {
+  for (const cmd of B1325_LOGIND_MUST_DENY) {
+    assert.equal(findDenylistedCommand(cmd), 'session_kill', `should deny as session_kill: ${cmd}`);
+    assert.equal(validateRawCommand(cmd).ok, false, `validateRawCommand must refuse: ${cmd}`);
+  }
+  // Listing logind state stays allowed.
+  for (const cmd of [
+    'busctl tree org.freedesktop.login1',
+    'busctl introspect org.freedesktop.login1 /org/freedesktop/login1',
+    'loginctl list-sessions',
+  ]) {
+    assert.equal(findDenylistedCommand(cmd), null, `should allow: ${cmd}`);
+  }
 });

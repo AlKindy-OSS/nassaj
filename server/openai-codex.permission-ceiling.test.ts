@@ -36,7 +36,7 @@ import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/
 // codex-spawn-isolation.test.ts): the DB singleton resolves DATABASE_PATH on first
 // use, and the governance gate reads os.homedir()/.claude/AGENTS.md.
 // ---------------------------------------------------------------------------
-const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-codex-ceiling-'));
+const sandbox = fs.mkdtempSync('/var/tmp/nassaj-codex-ceiling-');
 const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_DB = process.env.DATABASE_PATH;
 const ORIGINAL_FULL_ACCESS = process.env.CODEX_ALLOW_FULL_ACCESS;
@@ -128,9 +128,13 @@ mock.module('@openai/codex-sdk', { namedExports: { Codex: FakeCodex } });
 // Now safe to import the modules under test (they pick up the tmp DB + HOME + mock).
 const { initializeDatabase, closeConnection, participantsDb, sessionsDb, userDb } = await import('@/modules/database/index.js');
 const codexModule = await import('@/openai-codex.js');
-const { queryCodex, mapPermissionModeToCodexOptions, resolveCodexNetworkAccess, resolveCodexReasoningEffort } =
+const {
+  queryCodex, mapPermissionModeToCodexOptions, resolveCodexNetworkAccess, resolveCodexReasoningEffort,
+  transformCodexEvent,
+} =
   codexModule as unknown as {
     queryCodex: (command: string, options: unknown, ws: unknown) => Promise<void>;
+    transformCodexEvent: (event: unknown, turnNonce: string) => { uuid?: string };
     mapPermissionModeToCodexOptions: (
       mode: string | undefined,
       env?: Record<string, string | undefined>,
@@ -699,6 +703,50 @@ describe('queryCodex post-turn context refresh', () => {
   });
 });
 
+describe('queryCodex live row ids — turn-scoped (B-1489)', () => {
+  /** One turn as the SDK streams it: per-turn counters restart at every turn. */
+  async function* turnEvents(): AsyncGenerator<unknown, void, unknown> {
+    const command = (id: string) => ({
+      type: 'command_execution', id, command: `echo ${id}`, aggregated_output: '', exit_code: 0,
+      status: 'completed',
+    });
+    yield { type: 'item.started', item: { ...command('item_1'), status: 'in_progress' } };
+    yield { type: 'item.completed', item: command('item_1') };
+    yield { type: 'item.completed', item: command('item_3') };
+    yield { type: 'item.completed', item: { type: 'agent_message', id: 'item_5', text: 'done' } };
+    yield { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } };
+  }
+
+  it('keeps one id across started/completed of an item and distinct ids across turns', () => {
+    const started = transformCodexEvent({ type: 'item.started', item: { type: 'agent_message', id: 'item_1' } }, 'n1');
+    const completed = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', id: 'item_1' } }, 'n1');
+    const nextTurn = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', id: 'item_1' } }, 'n2');
+    assert.equal(started.uuid, 'codex-n1-item_1');
+    assert.equal(completed.uuid, started.uuid);
+    assert.notEqual(nextTurn.uuid, started.uuid);
+    const ids = ['n1', 'n2', 'n3'].flatMap((nonce) => ['item_1', 'item_3', 'item_5'].map((id) =>
+      transformCodexEvent({ type: 'item.completed', item: { type: 'command_execution', id } }, nonce).uuid));
+    assert.equal(new Set(ids).size, 9);
+  });
+
+  it('three resumed turns emitting item_1/item_3/item_5 yield nine distinct live rows', async () => {
+    const ws = makeWs(permissionTestUser.id);
+    runStreamedEvents = turnEvents;
+    try {
+      for (let turn = 0; turn < 3; turn += 1) {
+        await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', sessionId: 'fake-thread-id' }, ws);
+      }
+    } finally {
+      runStreamedEvents = null;
+    }
+    const rows = (ws.sent.map((m) => typeof m === 'string' ? JSON.parse(m) : m) as any[])
+      .filter((m) => m?.kind === 'tool_use' || (m?.kind === 'text' && m?.role === 'assistant'));
+    assert.equal(rows.length, 9, JSON.stringify(rows.map((row) => row.id)));
+    assert.equal(new Set(rows.map((row) => row.id)).size, 9, 'a later turn must not reuse an earlier row id');
+    assert.ok(rows.every((row) => /^codex-[0-9a-f-]{36}-item_[135]$/.test(row.id)));
+  });
+});
+
 // ===========================================================================
 // Part 3 — /api/agent no longer forces bypassPermissions for Codex (structural).
 // Importing the Express handler would drag in auth/DB/GitHub; instead assert the
@@ -723,5 +771,52 @@ describe('/api/agent codex dispatch — no pinned bypass (T-884)', () => {
       codexBlock.includes("permissionMode: 'acceptEdits'"),
       '/api/agent codex path must pin the safe acceptEdits mode',
     );
+  });
+});
+
+// ===========================================================================
+// T-1910 S2 (B-1202): a new Codex chat binds its decision to the thread id at
+// thread.started, and the CLI carries the durable run tag pe-<decisionId>.
+// ===========================================================================
+describe('queryCodex new-chat session bind (T-1910 S2)', () => {
+  const THREAD = '11111111-2222-7333-8444-555555555555';
+  const handle = async (trace: string[], bind: (sid: string) => void) => {
+    let bound = false;
+    return {
+      decisionId: '7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d',
+      launchIdentity: (await import('./shared/codex-executable.js')).acquireCodexLaunchIdentity(),
+      consume: () => { trace.push('consume'); },
+      markStarted: () => { trace.push('started'); },
+      bindSession: (sid: string) => { trace.push(`bind:${sid}`); bind(sid); bound = true; },
+      isSessionBound: () => bound,
+      settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+      notStarted: () => { trace.push('not-started'); },
+    };
+  };
+
+  it('binds once at thread.started, after the start fence, and tags the CLI durably', async () => {
+    const trace: string[] = [];
+    runStreamedEvents = async function* started() { yield { type: 'thread.started', thread_id: THREAD }; };
+    try {
+      await spawnAndCapture({ permissionExecution: await handle(trace, () => {}) });
+    } finally { runStreamedEvents = null; }
+    assert.deepEqual(trace, ['consume', 'started', `bind:${THREAD}`, 'settle:succeeded']);
+    assert.equal(codexStarts.at(-1)?.env?.CCUI_PROCESS_TAG, 'pe-7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d');
+  });
+
+  it('a refused bind stops the turn in-process like any other mid-turn failure', async () => {
+    const trace: string[] = [];
+    const ws = makeWs(null);
+    runStreamedEvents = async function* started() {
+      yield { type: 'thread.started', thread_id: THREAD };
+      yield { type: 'item.completed', item: { type: 'agent_message', id: 'item_1', text: 'never seen' } };
+    };
+    try {
+      await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: await handle(trace,
+        () => { throw Object.assign(new Error('SESSION_FOREIGN'), { code: 'SESSION_FOREIGN' }); }) }, ws);
+    } finally { runStreamedEvents = null; }
+    assert.deepEqual(trace, ['consume', 'started', `bind:${THREAD}`, 'settle:failed']);
+    const frames = ws.sent.map((item) => (typeof item === 'string' ? JSON.parse(item) : item)) as Array<{ kind?: string }>;
+    assert.equal(frames.some((frame) => frame.kind === 'session_created'), false);
   });
 });

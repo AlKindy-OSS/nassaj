@@ -10,6 +10,7 @@
 import { getConnection } from '@/modules/database/connection.js';
 import { recordStrictAuditOnConnection } from '@/modules/database/repositories/audit-log.js';
 import { userIdentitiesDb } from '@/modules/database/repositories/user-identities.js';
+import { revokeSharesByUser } from '@/modules/database/session-shares.js';
 import {
   retireProjectSubjectAccess,
   revalidateUserProjectAccess,
@@ -217,10 +218,12 @@ export const userDb = {
   },
 
   /**
-   * Resolves a local login identifier without exposing whether it exists.
-   * Local accounts historically store a username while invite-bound email lives
-   * on the accepted invite; an ambiguous reused email intentionally resolves to
-   * no account instead of selecting one by row order.
+   * Resolves a local login identifier (username or invite email) without
+   * exposing whether it exists. Both match case-insensitively. Local accounts
+   * historically store a username while invite-bound email lives on the
+   * accepted invite. Ambiguity resolves to no account instead of selecting one
+   * by row order: a reused invite email, or legacy usernames that differ only
+   * by case (counted across every status) — ADR-163 amendment 1, D2.
    */
   getUserByLoginIdentifier(identifier: string): UserRow | undefined {
     const normalized = identifier.trim().toLowerCase();
@@ -230,7 +233,11 @@ export const userDb = {
       FROM users u
       WHERE u.is_active = 1 AND u.status = 'active'
         AND (
-          lower(u.username) = ?
+          u.id = (
+            SELECT CASE WHEN COUNT(*) = 1 THEN MIN(id) END
+            FROM users
+            WHERE lower(username) = ?
+          )
           OR u.id = (
             SELECT CASE WHEN COUNT(DISTINCT accepted_by) = 1 THEN MIN(accepted_by) END
             FROM invites
@@ -517,6 +524,7 @@ export const userDb = {
    *              user_ui_preferences, push_subscriptions, session_participants,
    *              message_authors, invites.invited_by
    *   SET NULL → invites.accepted_by, audit_log.user_id
+   *   REVOKE   → session_shares created by or owned by the user (ADR-196)
    *
    * T-1946: a non-empty API key purge is audited strictly in the same
    * transaction (`api_keys_revoked`, trigger `user_deleted`, ids and count).
@@ -574,6 +582,8 @@ export const userDb = {
       db.prepare('DELETE FROM user_notification_preferences WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM user_ui_preferences WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(id);
+      // ADR-196: shares this user created or whose session they own die with them.
+      revokeSharesByUser(db, id, 'user_deleted');
       db.prepare('DELETE FROM session_participants WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM message_authors WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM invites WHERE invited_by = ?').run(id);

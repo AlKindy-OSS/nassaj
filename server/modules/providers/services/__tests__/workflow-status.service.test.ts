@@ -18,7 +18,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -76,7 +75,7 @@ async function withHarness(
   }) => Promise<void>,
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'wf-status-'));
+  const tempRoot = await mkdtemp('/var/tmp/wf-status-');
   const databasePath = path.join(tempRoot, 'db.sqlite');
   const projectDir = path.join(tempRoot, 'project-encoded');
   await mkdir(projectDir, { recursive: true });

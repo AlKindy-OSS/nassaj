@@ -24,6 +24,8 @@ import test, { after, before, beforeEach, mock } from 'node:test';
 import express from 'express';
 
 import type { WebSocketWriter as WebSocketWriterType } from '@/modules/websocket/services/websocket-writer.service.js';
+// eslint-disable-next-line boundaries/no-unknown -- shared test env helper.
+import { useWalletOriginEnv } from '@/utils/__tests__/wallet-origin-env.js';
 
 mock.module(new URL('../../../routes/webauthn.js', import.meta.url).href, { defaultExport: express.Router() });
 mock.module(new URL('../../../routes/oidc.js', import.meta.url).href, { defaultExport: express.Router() });
@@ -227,8 +229,9 @@ let owner: User;
 let passwordHash = '';
 let generateToken: (user: unknown) => string;
 let unbindRevocation: () => void = () => undefined;
+let restoreOriginEnv = () => {};
 const previousEnv = {
-  flag: process.env.MULTI_ACCOUNT_SWITCHING, origin: process.env.APP_ORIGIN, root: process.env.WORKSPACES_ROOT,
+  flag: process.env.MULTI_ACCOUNT_SWITCHING, root: process.env.WORKSPACES_ROOT,
 };
 
 before(async () => {
@@ -250,8 +253,7 @@ before(async () => {
   app.use('/api/auth', router);
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
-  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  process.env.APP_ORIGIN = origin;
+  ({ origin, restore: restoreOriginEnv } = useWalletOriginEnv((server.address() as AddressInfo).port));
   // Same bindings createWebSocketServer installs in production.
   const unbindUser = bindUserRealtimeRevocation(
     (userId, revocation) => revokeUserRunsAndSockets(userId, revocation, chatDependencies as never, {
@@ -268,8 +270,9 @@ after(async () => {
   for (const release of gates.values()) release();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   closeConnection();
+  restoreOriginEnv();
   for (const [key, value] of [
-    ['MULTI_ACCOUNT_SWITCHING', previousEnv.flag], ['APP_ORIGIN', previousEnv.origin],
+    ['MULTI_ACCOUNT_SWITCHING', previousEnv.flag],
     ['WORKSPACES_ROOT', previousEnv.root],
   ] as const) {
     if (value === undefined) delete process.env[key];

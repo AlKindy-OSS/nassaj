@@ -1,3 +1,4 @@
+import { createIdentityCircuit } from '@/modules/providers/list/antigravity/antigravity-identity-circuit.js';
 import { ANTIGRAVITY_FALLBACK_MODELS } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 import { readAntigravityAccessToken } from '@/modules/providers/list/antigravity/antigravity-token-reader.js';
 import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/types.js';
@@ -14,10 +15,10 @@ import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/typ
  *
  * Resilience (qa-critic / architect hard constraints):
  *  - Short abort timeout so a hung request never stalls a chat/model lookup.
- *  - Process-level circuit breaker: after repeated failures we stop hitting the
- *    network for a cooldown window and serve the fallback immediately, so a
- *    consumer (non-Antigravity) account that always 401s does not add latency to
- *    every request.
+ *  - Per-identity circuit breaker (B-1284): after repeated failures for one
+ *    caller we stop hitting the network FOR THAT CALLER for a cooldown window
+ *    and serve the fallback immediately, so a consumer (non-Antigravity) account
+ *    that always 401s adds no latency — and never trips anyone else's catalog.
  *  - The OAuth token is read transiently to set the Authorization header and is
  *    never logged or retained.
  */
@@ -34,32 +35,8 @@ const CIRCUIT_FAILURE_THRESHOLD = 3;
 /** How long the breaker stays open (serving fallback) before a half-open retry. */
 const CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000;
 
-type CircuitState = {
-  consecutiveFailures: number;
-  openUntil: number;
-};
-
-// Module-scoped breaker. Holds only counters/timestamps — never a token.
-const circuit: CircuitState = {
-  consecutiveFailures: 0,
-  openUntil: 0,
-};
-
-function isCircuitOpen(now: number): boolean {
-  return circuit.openUntil > now;
-}
-
-function recordSuccess(): void {
-  circuit.consecutiveFailures = 0;
-  circuit.openUntil = 0;
-}
-
-function recordFailure(now: number): void {
-  circuit.consecutiveFailures += 1;
-  if (circuit.consecutiveFailures >= CIRCUIT_FAILURE_THRESHOLD) {
-    circuit.openUntil = now + CIRCUIT_COOLDOWN_MS;
-  }
-}
+// Per-identity breaker. Holds only counters/timestamps — never a token.
+const circuit = createIdentityCircuit(CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_COOLDOWN_MS);
 
 /**
  * Builds the degraded/fallback catalog returned when the live fetch is
@@ -74,8 +51,12 @@ function degradedFallbackCatalog(): ProviderModelsDefinition {
 
 /** Resets breaker state. Exported for unit tests only. */
 export function __resetAntigravityCatalogCircuit(): void {
-  circuit.consecutiveFailures = 0;
-  circuit.openUntil = 0;
+  circuit.reset();
+}
+
+/** Number of identities with a failing breaker. Exported for unit tests only. */
+export function __antigravityCatalogCircuitSize(): number {
+  return circuit.size();
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -220,20 +201,23 @@ async function fetchLiveCatalog(
  * instead of pinning the fallback for days. This never throws.
  */
 export async function getAntigravityModelCatalog(
-  userId: string | number | null = null,
+  // B-1284: positionally REQUIRED, no default. The silent `= null` default is
+  // what hid the leak — every member's catalog was fetched on the operator's
+  // token. `null` still means the operator, but the caller has to say so.
+  userId: string | number | null,
 ): Promise<ProviderModelsDefinition> {
   const now = Date.now();
 
-  if (isCircuitOpen(now)) {
+  if (circuit.isOpen(userId, now)) {
     return degradedFallbackCatalog();
   }
 
   const liveCatalog = await fetchLiveCatalog(userId);
   if (liveCatalog) {
-    recordSuccess();
+    circuit.recordSuccess(userId);
     return liveCatalog;
   }
 
-  recordFailure(Date.now());
+  circuit.recordFailure(userId, Date.now());
   return degradedFallbackCatalog();
 }

@@ -28,6 +28,7 @@ export default function AgentCategoryTabsSection({
       instructions: t('tabs.instructions', { defaultValue: 'Instructions' }),
       mcp: t('tabs.mcpServers'),
       skills: t('tabs.skills'),
+      update: t('tabs.update', { defaultValue: 'Update' }),
     };
 
     return categories.map((category) => ({

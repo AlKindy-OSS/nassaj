@@ -12,7 +12,12 @@ type RuntimeUserEffect = Readonly<{
   engine: string;
   entrypoint: string;
   purpose: LaunchPurpose;
-  /** Omitted = 'external' (safe). Only host-child spawns may declare 'local' (T-1593). */
+  /**
+   * Omitted = 'external' (safe). 'local' is declared only at reviewed sites: host-child
+   * spawns (T-1593), and the in-process read helper (T-1910, ADR-198), whose effect is one
+   * idempotent GET to an allowlisted origin with redirects refused, a bounded deadline, no
+   * writes and no credential refresh, started only under the in-process read capability.
+   */
   effectFootprint?: 'local' | 'external';
   sessionId?: string | null;
   projectId: string;

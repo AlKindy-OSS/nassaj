@@ -13,6 +13,7 @@
 
 import { api } from '../../utils/api';
 
+import { isAccountWallet, type AccountWallet } from './accountWalletClient';
 import type { AuthUser, AuthUserPayload } from './types';
 import { parseJsonSafely } from './utils';
 
@@ -36,7 +37,16 @@ export type OidcFailureReason =
   | 'session_failed'
   | 'network';
 
-export type OidcExchangeResult = { ok: true; token: string } | { ok: false; reason: OidcFailureReason };
+/**
+ * What a redeemed code grants: a legacy JWT, or — with MULTI_ACCOUNT_SWITCHING
+ * (ADR-163 amendment 1, A-1) — a device session already set as an HttpOnly
+ * cookie, described by the wallet the server answered with.
+ */
+export type OidcSessionGrant = { token: string; wallet?: undefined } | { token?: undefined; wallet: AccountWallet };
+
+export type OidcExchangeResult =
+  | ({ ok: true } & OidcSessionGrant)
+  | { ok: false; reason: OidcFailureReason };
 
 export type OidcIdentityResult =
   | { ok: true; user: AuthUser; isMultiUser: boolean }
@@ -90,7 +100,7 @@ export function reasonFromExchangeStatus(status: number): OidcFailureReason {
   }
 }
 
-/** Redeems the one-time code for a JWT. Never throws. */
+/** Redeems the one-time code for a JWT or a device session. Never throws. */
 export async function exchangeOidcCode(code: string): Promise<OidcExchangeResult> {
   let response: Response;
   try {
@@ -101,22 +111,31 @@ export async function exchangeOidcCode(code: string): Promise<OidcExchangeResult
   if (!response.ok) {
     return { ok: false, reason: reasonFromExchangeStatus(response.status) };
   }
-  const payload = await parseJsonSafely<{ token?: unknown }>(response);
-  if (typeof payload?.token !== 'string' || payload.token.length === 0) {
-    return { ok: false, reason: 'provider_unavailable' };
+  const payload = await parseJsonSafely<{ token?: unknown; wallet?: unknown }>(response);
+  if (typeof payload?.token === 'string' && payload.token.length > 0) {
+    return { ok: true, token: payload.token };
   }
-  return { ok: true, token: payload.token };
+  if (isAccountWallet(payload?.wallet)) {
+    return { ok: true, wallet: payload.wallet };
+  }
+  return { ok: false, reason: 'provider_unavailable' };
 }
 
 /**
  * Loads the full identity for a freshly minted token WITHOUT persisting it
  * first: a token that turns out to be unusable must never reach localStorage,
  * where other tabs would adopt it and then be signed out by its removal.
+ * Without a token (wallet mode) the request rides the new device cookie only.
  */
-export async function fetchOidcIdentity(token: string): Promise<OidcIdentityResult> {
+export async function fetchOidcIdentity(token?: string): Promise<OidcIdentityResult> {
   let response: Response;
   try {
-    response = await fetch('/api/auth/user', { headers: { Authorization: `Bearer ${token}` } });
+    response = await fetch(
+      '/api/auth/user',
+      token
+        ? { headers: { Authorization: `Bearer ${token}` } }
+        : { credentials: 'same-origin', cache: 'no-store' },
+    );
   } catch {
     return { ok: false, reason: 'network' };
   }

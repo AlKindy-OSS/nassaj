@@ -1,14 +1,38 @@
+import { realpathSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { sessionsDb, userDb } from '@/modules/database/index.js';
 import { getAntigravityProjectPath } from '@/modules/providers/list/antigravity/antigravity-project-registry.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import type { AnyRecord } from '@/shared/types.js';
 import { normalizeSessionName, readObjectRecord } from '@/shared/utils.js';
+import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
+import { isProviderIsolated } from '@/services/provider-sharing.js';
 
 const ANTIGRAVITY_PLACEHOLDER_PROJECT_PATH = '/__antigravity__';
+
+/** Where agy files its brain store under one HOME. */
+const BRAIN_RELATIVE_PATH = path.join('.gemini', 'antigravity-cli', 'brain');
+
+/**
+ * B-227 member-brain indexing, switched OFF for release 2.3.1.0 (owner option A).
+ * Sessions from member brains land in the ownerless `/__antigravity__` placeholder
+ * project, so any member could read them by id/search/archive/deep link/share.
+ * Re-enable (flip to true) only with the follow-up ownership fix: a provenance
+ * participant on each indexed row plus a placeholder-session access predicate.
+ */
+const INDEX_MEMBER_BRAINS = false;
+
+/** Canonical form for de-duplication: the real path when it exists, else the resolved one. */
+const canonicalDir = (dir: string): string => {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
+  }
+};
 
 type ParsedAgyMetadata = {
   sessionId: string;
@@ -23,7 +47,7 @@ type ParsedAgyMetadata = {
  *
  * agy stores one chat per UUID under `~/.gemini/antigravity-cli/brain/<UUID>/`
  * with the live transcript at `.system_generated/logs/transcript.jsonl`. This
- * synchronizer scans the brain root, derives session metadata from the first
+ * synchronizer scans the operator's brain root (member brains: see INDEX_MEMBER_BRAINS), derives session metadata from the first
  * transcript line, and upserts rows so the rest of the app can browse agy
  * conversations like any other provider.
  *
@@ -33,18 +57,94 @@ type ParsedAgyMetadata = {
  */
 export class AntigravitySessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'antigravity' as const;
-  private readonly brainDir = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain');
+
+  /** How long a brain-dir enumeration is reused for per-file (watcher) events. */
+  static readonly BRAIN_DIRS_CACHE_MS = 30_000;
+
+  /** Canonical path → brain dir, from the last enumeration, and when it was taken. */
+  private brainDirsCache: { at: number; dirs: Map<string, string> } | null = null;
+
+  constructor(
+    private readonly now: () => number = () => Date.now(),
+    private readonly indexMemberBrains: boolean = INDEX_MEMBER_BRAINS,
+  ) {}
 
   /**
-   * Scans agy brain UUIDs and upserts each session that has a transcript file.
+   * B-227: every brain directory whose sessions must be indexed — the operator's
+   * plus, when member indexing is on (INDEX_MEMBER_BRAINS) and agy is isolated, each ACTIVE member's own brain under the HOME the
+   * spawn gives them (`~/.nassaj-users/<id>`, the root resolveProviderEnv sets for
+   * a member's own agy tree; grants are not followed, so a grantor's brain is
+   * indexed once, as their own). This used to be the operator's brain only, so an
+   * isolated member's agy chats were written to their tree and never indexed.
+   *
+   * Read-only: the path is computed, never provisioned, so a disabled member or
+   * one who never ran agy gets no tree created by the indexer — a missing brain
+   * dir simply scans as zero. Each member is resolved in its own try, so one bad
+   * row never drops the others. De-duplicated on the real path, so shared mode
+   * collapses to one directory.
+   */
+  private enumerateBrainDirs(): Map<string, string> {
+    const dirs = new Map<string, string>();
+    const add = (dir: string) => {
+      const key = canonicalDir(dir);
+      if (!dirs.has(key)) dirs.set(key, dir);
+    };
+    add(path.join(os.homedir(), BRAIN_RELATIVE_PATH));
+    let members: Array<{ id: number; status?: string }> = [];
+    try {
+      members = this.indexMemberBrains && isProviderIsolated('agy') ? userDb.listUsers() : [];
+    } catch (error) {
+      console.error('Failed to enumerate members for agy brain indexing; operator brain only', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    for (const member of members) {
+      let userId: unknown = 'unknown';
+      try {
+        if (member.status !== 'active') continue;
+        userId = member.id;
+        add(path.join(userConfigDir(member.id, ''), BRAIN_RELATIVE_PATH));
+      } catch (error) {
+        console.error('Failed to resolve one member agy brain dir; skipping it', {
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    this.brainDirsCache = { at: this.now(), dirs };
+    return dirs;
+  }
+
+  /** The brain-dir enumeration, reused for up to BRAIN_DIRS_CACHE_MS (per-file events). */
+  private cachedBrainDirs(): Map<string, string> {
+    const cache = this.brainDirsCache;
+    if (cache && this.now() - cache.at < AntigravitySessionSynchronizer.BRAIN_DIRS_CACHE_MS) {
+      return cache.dirs;
+    }
+    return this.enumerateBrainDirs();
+  }
+
+  /**
+   * Scans agy brain UUIDs in every resolved brain directory and upserts each
+   * session that has a transcript file.
    *
    * The `since` filter compares against the transcript mtime so the watcher can
    * cheaply re-sync only conversations that changed after the previous scan.
    */
   async synchronize(since?: Date): Promise<number> {
+    let processed = 0;
+    // A full scan always re-enumerates, so a new member is picked up at once.
+    for (const brainDir of this.enumerateBrainDirs().values()) {
+      processed += await this.synchronizeBrainDir(brainDir, since);
+    }
+    return processed;
+  }
+
+  /** Indexes one brain directory; a missing directory (agy never run there) counts zero. */
+  private async synchronizeBrainDir(brainDir: string, since?: Date): Promise<number> {
     let uuids: string[];
     try {
-      uuids = await readdir(this.brainDir);
+      uuids = await readdir(brainDir);
     } catch {
       // The brain directory only appears after the first successful agy run.
       return 0;
@@ -52,7 +152,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
 
     let processed = 0;
     for (const uuid of uuids) {
-      const parsed = await this.parseBrainSession(uuid, since);
+      const parsed = await this.parseBrainSession(brainDir, uuid, since);
       if (!parsed) {
         continue;
       }
@@ -123,7 +223,14 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       return null;
     }
 
-    const parsed = await this.parseBrainSession(uuid, null);
+    // The transcript must live in one of the brain dirs this indexer owns; a
+    // path anywhere else is not an agy session we index.
+    const brainDir = this.brainDirOfTranscript(filePath);
+    if (!brainDir) {
+      return null;
+    }
+
+    const parsed = await this.parseBrainSession(brainDir, uuid, null);
     if (!parsed) {
       return null;
     }
@@ -152,13 +259,17 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
    * - `updated_at` is the transcript file mtime.
    * - When `since` is provided, sessions whose transcript mtime is older are skipped.
    */
-  private async parseBrainSession(uuid: string, since: Date | null | undefined): Promise<ParsedAgyMetadata | null> {
+  private async parseBrainSession(
+    brainDir: string,
+    uuid: string,
+    since: Date | null | undefined,
+  ): Promise<ParsedAgyMetadata | null> {
     if (!this.isValidUuid(uuid)) {
       return null;
     }
 
     const transcriptPath = path.join(
-      this.brainDir,
+      brainDir,
       uuid,
       '.system_generated',
       'logs',
@@ -296,6 +407,20 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     }
 
     return candidate;
+  }
+
+  /**
+   * The resolved brain dir that holds `<brainDir>/<uuid>/.system_generated/logs/transcript.jsonl`,
+   * or null when the transcript's brain dir is not one this indexer owns.
+   */
+  private brainDirOfTranscript(filePath: string): string | null {
+    const dirs = this.cachedBrainDirs();
+    const candidate = path.resolve(filePath, '..', '..', '..', '..');
+    for (const dir of dirs.values()) {
+      if (path.resolve(dir) === candidate) return dir;
+    }
+    // Only a path written through a symlink needs the one realpath lookup.
+    return dirs.get(canonicalDir(candidate)) ?? null;
   }
 
   /**

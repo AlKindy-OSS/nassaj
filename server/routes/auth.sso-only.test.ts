@@ -36,7 +36,7 @@ class MockInviteError extends Error {
 mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
-    userDb: { getUserByUsername: () => userRow, updateLastLogin: () => {} },
+    userDb: { getUserByLoginIdentifier: () => userRow, updateLastLogin: () => {} },
     auditLogDb: { record: (action: string, data: { metadata?: unknown }) => audits.push({ action, ...data }) },
     userIdentitiesDb: { hasAnyLink: (userId: number) => linkedUserIds.has(userId) },
     invitesDb: {},

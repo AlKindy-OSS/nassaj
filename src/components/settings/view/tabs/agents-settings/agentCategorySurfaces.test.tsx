@@ -164,12 +164,12 @@ describe('لا فئةَ تفتح على فراغ (B-414)', () => {
 });
 
 describe('T-1866: HarnessAutoUpdateSection moved off agent pages into النظام', () => {
-  it('the account category for a harness-backed agent no longer renders the auto-update policy widget', async () => {
+  it('the update category for a harness-backed agent no longer renders the auto-update policy widget', async () => {
     const { container, findByText } = render(
       <ThemeProvider>
         <AgentCategoryContentSection
           selectedAgent="claude"
-          selectedCategory="account"
+          selectedCategory="update"
           agentContextById={agentContextById}
           claudePermissions={{
             allowedTools: [], disallowedTools: [], skipPermissions: false, allowVendorDelegation: false,

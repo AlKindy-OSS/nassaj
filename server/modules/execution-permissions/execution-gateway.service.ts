@@ -8,6 +8,7 @@ import {
   digestPermissionWorkspace,
   markPermissionEffectStarted,
   attachPermissionEffectChild,
+  bindPermissionDecisionSession,
   PermissionStateConflictError,
   readPermissionRolloutState,
   recordPermissionDenial,
@@ -24,6 +25,7 @@ import {
   computePermissionReleaseCapabilityDigest,
   PERMISSION_CAPABILITY_ARTIFACT_DIGEST,
 } from './capability-registry.js';
+import { isInProcessReadCapability } from './in-process-read-capability.js';
 import { evaluateParity } from './parity.js';
 import { createLaunchPermitBroker, type LaunchPermitBinding } from './permit.js';
 import { resolveEffectivePolicy } from './policy.js';
@@ -52,7 +54,19 @@ export type PermissionExecutionHandle = Readonly<{
   launchIdentityError: Error | null;
   consume(): LaunchPermitBinding;
   markStarted(child?: PermissionChildIdentity): void;
+  /**
+   * T-1910: start a local-footprint effect carried by this server process itself. Requires
+   * the in-process read capability; records the owner identity as the child atomically.
+   */
+  markStartedInProcessRead(capability: unknown): void;
   attachChildIdentity(child: PermissionChildIdentity): void;
+  /**
+   * T-1910 S2: one-shot bind of a new-chat sdk_turn decision to its provider session. Until it
+   * commits, the decision fences user-wide on death, so callers refuse tools before it.
+   */
+  bindSession(sessionId: string): void;
+  /** True once the decision names a session: admitted with one, or after `bindSession` committed. */
+  isSessionBound(): boolean;
   settle(outcome: PermissionTerminalOutcome): void;
   notStarted(): void;
 }>;
@@ -102,6 +116,13 @@ type GatewayDependencies = Readonly<{
 }>;
 
 const broker = createLaunchPermitBroker();
+
+/** T-1910: every handle this module minted; the in-process capability goes to no other object. */
+const issuedExecutions = new WeakSet<object>();
+
+/** True only for an execution handle minted by a gateway in this module (not a look-alike). */
+export const isGatewayIssuedExecution = (value: unknown): value is PermissionExecutionHandle =>
+  typeof value === 'object' && value !== null && issuedExecutions.has(value);
 
 /** Creates the local ADR-134 gateway. It performs no provider effect itself. */
 export const createExecutionPermissionGateway = (dependencies: GatewayDependencies) => {
@@ -314,7 +335,20 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
       decisionRevision = 2;
       return consumedBinding;
     };
-    const markStarted = (child?: PermissionChildIdentity): void => {
+    const ownerAsChild: PermissionChildIdentity = Object.freeze({
+      pid: dependencies.processIdentity.ownerPid,
+      bootId: dependencies.processIdentity.ownerBootId,
+      startTicks: dependencies.processIdentity.ownerStartTicks,
+    });
+    // T-1910: a child equal to this server is an in-process effect; only the capability
+    // holder may claim it. Refused before any write, so a misuse never blocks the generation.
+    const assertNotSelf = (child: PermissionChildIdentity | undefined): void => {
+      if (child && child.pid === ownerAsChild.pid && child.bootId === ownerAsChild.bootId
+        && child.startTicks === ownerAsChild.startTicks) {
+        throw new PermissionStateConflictError('SELF_EFFECT_CAPABILITY_REQUIRED');
+      }
+    };
+    const recordStart = (child: PermissionChildIdentity | undefined, selfEffect: boolean): void => {
       if (!consumed || started || settled) {
         throw new PermissionStateConflictError('DECISION_NOT_STARTABLE');
       }
@@ -326,6 +360,7 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
           decisionRevision,
           dependencies.nowMs(),
           child,
+          { selfEffect },
         );
         started = true;
       } catch (error) {
@@ -338,6 +373,19 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
         });
         throw error;
       }
+    };
+    const markStarted = (child?: PermissionChildIdentity): void => {
+      assertNotSelf(child);
+      recordStart(child, false);
+    };
+    const markStartedInProcessRead = (capability: unknown): void => {
+      if (!isInProcessReadCapability(capability)) {
+        throw new PermissionStateConflictError('SELF_EFFECT_CAPABILITY_REQUIRED');
+      }
+      if (base.effectFootprint !== 'local') {
+        throw new PermissionStateConflictError('IN_PROCESS_READ_FOOTPRINT_REQUIRED');
+      }
+      recordStart(ownerAsChild, true);
     };
     const settle = (outcome: PermissionTerminalOutcome): void => {
       if (!consumed || settled) throw new PermissionStateConflictError('DECISION_NOT_SETTLEABLE');
@@ -365,6 +413,7 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
     };
     const attachChildIdentity = (child: PermissionChildIdentity): void => {
       if (!started || settled) throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
+      assertNotSelf(child);
       try {
         attachPermissionEffectChild(dependencies.database, decisionId, child, dependencies.nowMs());
       } catch (error) {
@@ -378,27 +427,38 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
         throw error;
       }
     };
+    let boundSessionId: string | null = context.sessionId ?? null;
+    const bindSession = (sessionId: string): void => {
+      if (settled) throw new PermissionStateConflictError('DECISION_NOT_BINDABLE');
+      if (boundSessionId !== null) throw new PermissionStateConflictError('SESSION_ALREADY_BOUND');
+      bindPermissionDecisionSession(dependencies.database, decisionId, sessionId, dependencies.nowMs());
+      // Set only after the CAS committed: the tool gate reads this flag.
+      boundSessionId = sessionId;
+    };
+    const isSessionBound = (): boolean => boundSessionId !== null;
     const notStarted = (): void => {
       if (consumed || settled) throw new PermissionStateConflictError('DECISION_NOT_SETTLEABLE');
       settlePermissionNotStarted(dependencies.database, decisionId, dependencies.nowMs());
       settled = true;
     };
-    return Object.freeze({
-      kind: 'authorized',
-      execution: Object.freeze({
-        decisionId,
-        leaseId,
-        mode: rollout.profile,
-        effectivePolicy: policy.kind === 'resolved' ? policy.policy : null,
-        launchIdentity,
-        launchIdentityError,
-        consume,
-        markStarted,
-        attachChildIdentity,
-        settle,
-        notStarted,
-      }),
+    const execution: PermissionExecutionHandle = Object.freeze({
+      decisionId,
+      leaseId,
+      mode: rollout.profile,
+      effectivePolicy: policy.kind === 'resolved' ? policy.policy : null,
+      launchIdentity,
+      launchIdentityError,
+      consume,
+      markStarted,
+      markStartedInProcessRead,
+      attachChildIdentity,
+      bindSession,
+      isSessionBound,
+      settle,
+      notStarted,
     });
+    issuedExecutions.add(execution);
+    return Object.freeze({ kind: 'authorized', execution });
   };
   return Object.freeze({ authorize });
 };

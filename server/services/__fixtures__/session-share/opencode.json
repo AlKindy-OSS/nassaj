@@ -1,0 +1,515 @@
+{
+ "sessionId": "ses_10000000-0001",
+ "messages": [
+  {
+   "id": "msg_10000000-0008",
+   "time_created": 1786405864234,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1786405864234
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "opencode",
+     "modelID": "deepseek-v4-flash-free"
+    },
+    "summary": {
+     "diffs": []
+    }
+   }
+  },
+  {
+   "id": "msg_10000000-0009",
+   "time_created": 1786405864442,
+   "data": {
+    "parentID": "msg_10000000-0008",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/operator/Project/nassaj-dev",
+     "root": "/home/operator/Project/nassaj-dev"
+    },
+    "modelID": "deepseek-v4-flash-free",
+    "providerID": "opencode",
+    "time": {
+     "created": 1786405864442,
+     "completed": 1786405869780
+    },
+    "finish": "stop"
+   }
+  },
+  {
+   "id": "msg_10000000-0010",
+   "time_created": 1786405921550,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1786405921550
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "opencode",
+     "modelID": "deepseek-v4-flash-free"
+    },
+    "summary": {
+     "diffs": []
+    }
+   }
+  },
+  {
+   "id": "msg_10000000-0011",
+   "time_created": 1786405921764,
+   "data": {
+    "parentID": "msg_10000000-0010",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/operator/Project/nassaj-dev",
+     "root": "/home/operator/Project/nassaj-dev"
+    },
+    "modelID": "deepseek-v4-flash-free",
+    "providerID": "opencode",
+    "time": {
+     "created": 1786405921764,
+     "completed": 1786405928758
+    },
+    "finish": "stop"
+   }
+  },
+  {
+   "id": "msg_10000000-0012",
+   "time_created": 1786405950933,
+   "data": {
+    "role": "user",
+    "time": {
+     "created": 1786405950933
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "opencode",
+     "modelID": "big-pickle"
+    },
+    "summary": {
+     "diffs": []
+    }
+   }
+  },
+  {
+   "id": "msg_10000000-0013",
+   "time_created": 1786405951149,
+   "data": {
+    "parentID": "msg_10000000-0012",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/operator/Project/nassaj-dev",
+     "root": "/home/operator/Project/nassaj-dev"
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1786405951149,
+     "completed": 1786405958641
+    },
+    "finish": "tool-calls"
+   }
+  },
+  {
+   "id": "msg_10000000-0014",
+   "time_created": 1786405958643,
+   "data": {
+    "parentID": "msg_10000000-0012",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/operator/Project/nassaj-dev",
+     "root": "/home/operator/Project/nassaj-dev"
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1786405958643,
+     "completed": 1786405964284
+    },
+    "finish": "tool-calls"
+   }
+  },
+  {
+   "id": "msg_10000000-0015",
+   "time_created": 1786405964287,
+   "data": {
+    "parentID": "msg_10000000-0012",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/operator/Project/nassaj-dev",
+     "root": "/home/operator/Project/nassaj-dev"
+    },
+    "modelID": "big-pickle",
+    "providerID": "opencode",
+    "time": {
+     "created": 1786405964287,
+     "completed": 1786405972400
+    },
+    "finish": "stop"
+   }
+  }
+ ],
+ "parts": [
+  {
+   "id": "prt_fee16432f0018VbzBFohqes8nI",
+   "message_id": "msg_10000000-0008",
+   "time_created": 1786405864433,
+   "data": {
+    "type": "text",
+    "text": "\"لو طلبت منك تصميم موقع ايش حتسوي؟\""
+   }
+  },
+  {
+   "id": "prt_fee164bbd001aX0j77lhLapb1l",
+   "message_id": "msg_10000000-0009",
+   "time_created": 1786405866430,
+   "data": {
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-start"
+   }
+  },
+  {
+   "id": "prt_fee164bbf001CIOdIgcaW5s1w0",
+   "message_id": "msg_10000000-0009",
+   "time_created": 1786405866432,
+   "data": {
+    "type": "reasoning",
+    "text": "The user is asking in Arabic: \"If I asked you to design a website, what would you do?\"\n\nThis is a conversational question about my approach to designing a website. I should answer in Arabic (per the A …[fixture-truncated]… ign tokens, RTL, etc.\n\nLet me answer concisely in Arabic describing my workflow.",
+    "time": {
+     "start": 1786405866432,
+     "end": 1786405867396
+    }
+   }
+  },
+  {
+   "id": "prt_fee164f860019gYvnxKxagBsaH",
+   "message_id": "msg_10000000-0009",
+   "time_created": 1786405867398,
+   "data": {
+    "type": "text",
+    "text": "حسب نوع الموقع، لكن المسار العام:\n\n1. **توضيح الهدف** — ما المشكلة؟ من الجمهور؟ ما مقياس النجاح؟ (هذا يقود @product-strategist و@ux-designer)\n2. **تجربة المستخدم قبل البصر** — رحلات المستخدم، تدفّق الشاشات، معمارية المعلومات: @ux-designer\n3. **التصميم البصري** — Design Brief + design tokens (ألوان، خطوط، مسافات): @ui-designer\n4. **التنفيذ** — واجهة متجاوبة RTL بأصناف منطقية، خطوط عربية أصيلة لا افتراضية، التزام هوية العلامة: @frontend-dev\n5. **التحقق** — لقطة شاشة حقيقية مقابل المطلوب قبل التسليم (لا قراءة كود تُغني عنها)، فحص إتاحة WCAG، واختبار كمستخدم فعلي\n6. **النجاح** — كل مرحلة تُقفل بتوافقك، لا أكمل التالي قبل اعتماد السابق\n\nأين نبدأ؟ أخبرني بالفكرة، وسأبدأ جلسة توضيح الهدف والنطاق.",
+    "time": {
+     "start": 1786405867398,
+     "end": 1786405869744
+    }
+   }
+  },
+  {
+   "id": "prt_fee1658c1001WmTc7j1Exrlkk3",
+   "message_id": "msg_10000000-0009",
+   "time_created": 1786405869761,
+   "data": {
+    "reason": "stop",
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-finish",
+    "tokens": {
+     "total": 24283,
+     "input": 22055,
+     "output": 436,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 1792
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "id": "prt_fee172310001WSjwgIXwV4dxkL",
+   "message_id": "msg_10000000-0010",
+   "time_created": 1786405921754,
+   "data": {
+    "type": "text",
+    "text": "\"لو طلبت منك تصميم موقع ايش حتسوي؟\""
+   }
+  },
+  {
+   "id": "prt_fee173380001d64YspNqUnrAeb",
+   "message_id": "msg_10000000-0011",
+   "time_created": 1786405925760,
+   "data": {
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-start"
+   }
+  },
+  {
+   "id": "prt_fee1733830017CK0IuJf0Yx0Ab",
+   "message_id": "msg_10000000-0011",
+   "time_created": 1786405925763,
+   "data": {
+    "type": "reasoning",
+    "text": "The user asked again the same question. Maybe they want a more detailed answer, or simpler. Let me give a concrete, straightforward answer. Perhaps they want it simpler or more practical. Let me keep  …[fixture-truncated]… swer, or they want a different style. Let me give a clearer, more direct answer.",
+    "time": {
+     "start": 1786405925763,
+     "end": 1786405926747
+    }
+   }
+  },
+  {
+   "id": "prt_fee17375d0018pzp2RFYu8ZK3R",
+   "message_id": "msg_10000000-0011",
+   "time_created": 1786405926749,
+   "data": {
+    "type": "text",
+    "text": "نفس الخطوات السابقة، لكن أنفّذها بهذا الترتيب العملي:\n\n1. **أسألك 3-4 أسئلة**: ما الغرض؟ لمن؟ ما الجوهر المميز؟ هل لديك محتوى/شعار/ألوان؟\n2. **أكتب مواصفة مختصرة** تعتمدها قبل أي كود.\n3. **أبني نسخة مقربة** بأسلوب حقيقي للعلامة — أعرّف نظام التصميم (ألوان، خط، مسافات) في البداية، لا أعشّق ألواناً في المنتصف.\n4. **أعرضها عليك مطبوعة** (لقطة شاشة) وأعدّل حتى ترضى.\n5. **أسلّم الكود نظيفاً** متجاوباً وRTL، وأنشر لك رابطاً حقيقياً لتعاينه.\n\nابدأ بسطر واحد يصف الفكرة، وسأكمل من هناك.",
+    "time": {
+     "start": 1786405926749,
+     "end": 1786405928721
+    }
+   }
+  },
+  {
+   "id": "prt_fee173f25001c2JKDeCkREIiZU",
+   "message_id": "msg_10000000-0011",
+   "time_created": 1786405928741,
+   "data": {
+    "reason": "stop",
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-finish",
+    "tokens": {
+     "total": 24605,
+     "input": 240,
+     "output": 301,
+     "reasoning": 0,
+     "cache": {
+      "write": 0,
+      "read": 24064
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "id": "prt_fee1795dc001NGR9YhutD1AZ9D",
+   "message_id": "msg_10000000-0012",
+   "time_created": 1786405951140,
+   "data": {
+    "type": "text",
+    "text": "\"ردود ديب سيك ما تظهر\""
+   }
+  },
+  {
+   "id": "prt_fee179d3c001QzT6apXf7f4HVJ",
+   "message_id": "msg_10000000-0013",
+   "time_created": 1786405952828,
+   "data": {
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-start"
+   }
+  },
+  {
+   "id": "prt_fee17a0a0001M4Arw7SGwA8uxH",
+   "message_id": "msg_10000000-0013",
+   "time_created": 1786405953696,
+   "data": {
+    "type": "reasoning",
+    "text": "The user says \"ردود ديب سيك ما تظهر\" - \"DeepSeek responses don't appear\". This seems to be about the opencode tool they're using. The model is opencode/big-pickle. They're saying DeepSeek responses do …[fixture-truncated]… h the web too for opencode DeepSeek issues. Let me do webfetch of opencode docs.",
+    "time": {
+     "start": 1786405953696,
+     "end": 1786405956460
+    }
+   }
+  },
+  {
+   "id": "prt_fee17ab6f0015oPfgaPoSSisxA",
+   "message_id": "msg_10000000-0013",
+   "time_created": 1786405956463,
+   "data": {
+    "type": "tool",
+    "tool": "webfetch",
+    "callID": "call_00_vcMekG0WLQni9TpcP3QN2754",
+    "state": {
+     "status": "completed",
+     "input": {
+      "url": "https://opencode.ai/docs/providers",
+      "format": "markdown"
+     },
+     "output": "[fixture: tool output truncated]",
+     "title": "https://opencode.ai/docs/providers (text/html)",
+     "time": {
+      "start": 1786405956662,
+      "end": 1786405957378
+     }
+    }
+   }
+  },
+  {
+   "id": "prt_fee17ac64001M9vWC8N6lrbkTW",
+   "message_id": "msg_10000000-0013",
+   "time_created": 1786405956708,
+   "data": {
+    "type": "tool",
+    "tool": "websearch",
+    "callID": "call_01_srJoM5RdnyYUFXJYpfDF6997",
+    "state": {
+     "status": "completed",
+     "input": {
+      "query": "opencode deepseek responses not showing blank"
+     },
+     "output": "[fixture: tool output truncated]",
+     "title": "Parallel Web Search: opencode deepseek responses not showing blank",
+     "time": {
+      "start": 1786405956841,
+      "end": 1786405958605
+     }
+    }
+   }
+  },
+  {
+   "id": "prt_fee17b3e0001EucdiN9X9QoHU6",
+   "message_id": "msg_10000000-0013",
+   "time_created": 1786405958624,
+   "data": {
+    "reason": "tool-calls",
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-finish",
+    "tokens": {
+     "total": 25048,
+     "input": 24573,
+     "output": 107,
+     "reasoning": 368,
+     "cache": {
+      "write": 0,
+      "read": 0
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "id": "prt_fee17b8e9001654XlpdknbfbAN",
+   "message_id": "msg_10000000-0014",
+   "time_created": 1786405959914,
+   "data": {
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-start"
+   }
+  },
+  {
+   "id": "prt_fee17bf0c001bWatBa4DyqIoXi",
+   "message_id": "msg_10000000-0014",
+   "time_created": 1786405961484,
+   "data": {
+    "type": "reasoning",
+    "text": "The user is asking about DeepSeek responses not appearing. I found relevant info. The most relevant issue is #40483: \"Bug: DeepSeek v4 Flash Free (New) returns blank response\" — thinking animation pla …[fixture-truncated]… the issue details to give concrete advice. Let me fetch the GitHub issue #40483.",
+    "time": {
+     "start": 1786405961484,
+     "end": 1786405962905
+    }
+   }
+  },
+  {
+   "id": "prt_fee17c49b001g5jWO669MxonKJ",
+   "message_id": "msg_10000000-0014",
+   "time_created": 1786405962907,
+   "data": {
+    "type": "tool",
+    "tool": "webfetch",
+    "callID": "call_00_8xK88Z0oAMc0g4JGKNjd7706",
+    "state": {
+     "status": "completed",
+     "input": {
+      "format": "markdown",
+      "url": "https://github.com/anomalyco/opencode/issues/40483"
+     },
+     "output": "[fixture: tool output truncated]",
+     "title": "https://github.com/anomalyco/opencode/issues/40483 (text/html; charset=utf-8)",
+     "time": {
+      "start": 1786405963102,
+      "end": 1786405964258
+     }
+    }
+   }
+  },
+  {
+   "id": "prt_fee17c9ef001buQblFYG8iqYhC",
+   "message_id": "msg_10000000-0014",
+   "time_created": 1786405964271,
+   "data": {
+    "reason": "tool-calls",
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-finish",
+    "tokens": {
+     "total": 47575,
+     "input": 22391,
+     "output": 76,
+     "reasoning": 148,
+     "cache": {
+      "write": 0,
+      "read": 24960
+     }
+    },
+    "cost": 0
+   }
+  },
+  {
+   "id": "prt_fee17ce7b001VsHNo8fhuJpe0z",
+   "message_id": "msg_10000000-0015",
+   "time_created": 1786405965435,
+   "data": {
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-start"
+   }
+  },
+  {
+   "id": "prt_fee17d0880019ssf9ei2Gg8bxs",
+   "message_id": "msg_10000000-0015",
+   "time_created": 1786405965960,
+   "data": {
+    "type": "reasoning",
+    "text": "The user says \"ردود ديب سيك ما تظهر\" (DeepSeek responses don't appear). This matches a known opencode bug: blank response after streaming. The relevant issue is #40483 (open) and #34345 (closed as dup …[fixture-truncated]… hich interface. Let me be concise but helpful.\n\nI'll respond in Arabic, concise.",
+    "time": {
+     "start": 1786405965960,
+     "end": 1786405968720
+    }
+   }
+  },
+  {
+   "id": "prt_fee17db52001xaiZ6vn9wV7ar0",
+   "message_id": "msg_10000000-0015",
+   "time_created": 1786405968722,
+   "data": {
+    "type": "text",
+    "text": "مشكلة معروفة في opencode، مو فيك. أهم شيء أعرفه من أي واجهة تواجهها (Terminal TUI أم Desktop؟) وأي موديل ديب سيك بالضبط.\n\nالأرجح عندك أحد سلوكين موثّقين:\n\n1. **الرد يُكتب أثناء البث ثم يختفي عند اكتماله** — باغ معروف (Issue #34345، تأثر به 1.16.0 حتى 1.17.11 مع كل الموديلات وحتى مع تعطيل الـ plugins بـ`--pure`).\n2. **فارغ نهائياً مع أصوات/حركة تفكير فقط** — يخص DeepSeek v4 Flash Free تحديداً (#40483، ما زال مفتوحاً).\n\nجرّب بالترتيب:\n\n- `opencode --version` وحدّث للإصدار الأحدث\n- شغّله بـ`--pure` لتأكيد عدم تورّط plugin\n- جرّب موديل DeepSeek آخر (مثل `deepseek-v4-pro`) للعزل\n- إن كنت في Desktop: أعد تشغيله كاملاً، وعلى macOS `Reload Webview`\n\nقل لي التفاصيل وسأضيّق لك الحل (وإن كان باغاً مفتوحاً، لا حلّ جذريّ له سوى الانتظار أو تبديل الموديل).",
+    "time": {
+     "start": 1786405968722,
+     "end": 1786405972373
+    }
+   }
+  },
+  {
+   "id": "prt_fee17e9a1001jsNdvpvYdnJN93",
+   "message_id": "msg_10000000-0015",
+   "time_created": 1786405972385,
+   "data": {
+    "reason": "stop",
+    "snapshot": "96bbd6edb53908dfcb734787c07de68c4cfd8399",
+    "type": "step-finish",
+    "tokens": {
+     "total": 50900,
+     "input": 2819,
+     "output": 315,
+     "reasoning": 278,
+     "cache": {
+      "write": 0,
+      "read": 47488
+     }
+    },
+    "cost": 0
+   }
+  }
+ ]
+}

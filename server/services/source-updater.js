@@ -93,6 +93,32 @@ export function publicStorageFigures(result) {
 }
 
 /**
+ * The default source-update control root (B-1334): `<git common dir>/nassaj-source-update`, the same root update-maintenance-gate.js
+ * uses for its locks and journal. In a linked worktree or overlay `<appRoot>/.git` is
+ * a file, so the old `<appRoot>/.git/nassaj-source-update` default named a path that
+ * cannot exist. Only the checkout itself counts: a directory nested inside another
+ * repository keeps the legacy path (which then reports as absent), as does a host
+ * without git.
+ * @param {string} appRoot checkout root
+ * @param {typeof spawnSync} [commandRunner]
+ * @returns {string} absolute control root
+ */
+export function defaultSourceUpdateControlRoot(appRoot, commandRunner = spawnSync) {
+    const legacy = path.join(appRoot, '.git', 'nassaj-source-update');
+    try {
+        const result = commandRunner('git', ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'], {
+            cwd: appRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        const [topLevel, commonDir] = result?.status === 0 && typeof result.stdout === 'string'
+            ? result.stdout.trim().split('\n') : [];
+        if (!topLevel || !commonDir || fs.realpathSync(topLevel) !== fs.realpathSync(appRoot)) return legacy;
+        return path.join(path.resolve(appRoot, commonDir), 'nassaj-source-update');
+    } catch {
+        return legacy;
+    }
+}
+
+/**
  * Evaluate the pre-flight storage state without throwing (ADR-141, T-1553).
  * Returns `{ ok: true }` or `{ ok: false, code, message, status }` so both the
  * update job and /health can surface the same actionable blocker. For
@@ -104,7 +130,7 @@ export function evaluateUpdateStorage({ appRoot, env, statfs = fs.statfsSync, st
     const minFreeBytes = positiveIntegerEnv(env.NASSAJ_UPDATE_MIN_FREE_BYTES, DEFAULT_MIN_FREE_BYTES);
     const controlRoot = env.NASSAJ_UPDATE_CONTROL_ROOT
         ? path.resolve(env.NASSAJ_UPDATE_CONTROL_ROOT)
-        : path.join(appRoot, '.git', 'nassaj-source-update');
+        : defaultSourceUpdateControlRoot(appRoot);
     const buildTmpdir = env.TMPDIR || env.TMP || env.TEMP || os.tmpdir();
     try {
         const databasePath = resolveDatabaseFilePath(env);
@@ -228,7 +254,7 @@ export function resolveUpdateHostCapability({
 } = {}) {
     if (!appRoot) throw new TypeError('appRoot is required');
     const artifactRoot = moduleUrl.includes('/dist-server/') ? path.join(appRoot, 'dist-server') : appRoot;
-    const controlRoot = path.resolve(env.NASSAJ_UPDATE_CONTROL_ROOT || path.join(appRoot, '.git', 'nassaj-source-update'));
+    const controlRoot = path.resolve(env.NASSAJ_UPDATE_CONTROL_ROOT || defaultSourceUpdateControlRoot(appRoot));
     const capabilityFile = path.resolve(env.NASSAJ_UPDATE_CAPABILITY_FILE || path.join(controlRoot, UPDATE_RUNTIME_CAPABILITY));
     const runtimeStrategy = detector({
         artifactRoot,
@@ -524,6 +550,7 @@ export function createSourceUpdater({
     stat = fs.statSync,
     exchangeProbe = supportsAtomicExchange,
     sourcePlanner = planSourceManifest,
+    loadedRuntimeCommit = () => null,
 } = {}) {
     if (!appRoot || typeof activeSessionCount !== 'function') throw new TypeError('Updater dependencies are required');
     let updateRunning = false;
@@ -809,11 +836,17 @@ export function createSourceUpdater({
                     throw new SourceUpdateError('restart_queue_unavailable', 'The governed restart queue is unavailable.', 503);
                 }
                 const actionFile = path.join(candidateRoot, 'activation-action.json');
+                // B-1264: the commit of the server process now loaded, which a
+                // rollback restores. It can be older than originalHead (the source
+                // was advanced without a rebuild), so recovery settles by it.
+                let previousRuntimeOid = null;
+                try { previousRuntimeOid = loadedRuntimeCommit(); } catch { previousRuntimeOid = null; }
                 const action = {
                     schema: 'nassaj-source-update-activation/v1', transactionId,
                     originalHead, targetCommit: releaseCommit, version: expectedVersion,
                     manifestPath: plan.outputs.manifest, manifestSha256,
                     expectedServerBuildId: manifest.serverBuildId,
+                    ...(/^[0-9a-f]{40}$/.test(previousRuntimeOid || '') ? { previousRuntimeOid } : {}),
                 };
                 assertFence();
                 const actionFd = fs.openSync(actionFile, 'wx', 0o600);

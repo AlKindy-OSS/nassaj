@@ -5,6 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import type { PluggableList } from 'unified';
 import { useTranslation } from 'react-i18next';
+import { Copy, ExternalLink } from 'lucide-react';
 // ملاحظة: ورقة `katex/dist/katex.min.css` محمَّلة على مستوى التطبيق في
 // `src/main.jsx`، فلا تُستورَد هنا ثانيةً.
 
@@ -23,6 +24,11 @@ import { roleSatisfies } from '../../../../hooks/useServerActionCatalog';
 import { useRestartWatch } from '../../../../hooks/useRestartWatch';
 import { useAuth } from '../../../auth';
 import { useRawExecConfig } from '../../../../hooks/useRawExecConfig';
+import {
+  isExecutionDone,
+  recordAppliesToMessage,
+  useRawExecutionRecord,
+} from '../../../../hooks/useRawExecutionRecord';
 import { authenticatedFetch } from '../../../../utils/api';
 import { ExecReviewDialog, type RawCommand } from '../../../command-board/ExecReviewDialog';
 import {
@@ -131,6 +137,9 @@ const StreamingContext = React.createContext(false);
  * وأبداً حول شارة سطرية.
  */
 const InsidePreContext = React.createContext(false);
+
+/** داخل رابط ماركداون: شارة الكود تُعرَض نصّاً فقط كي لا يتداخل <a> أو زرّ داخل <a>. */
+const InsideLinkContext = React.createContext(false);
 
 /** يمرّر أثناء نزوله عبر `<pre>` الإشارة التي يقرؤها `code` تحته. */
 const PreBlock = ({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) => (
@@ -292,32 +301,43 @@ const InlineImageError = ({ message }: { message: string }) => (
   </div>
 );
 
-// ─── Inline code pill click behavior ───────────────────────────────────────
+// ─── Inline code pill behavior ─────────────────────────────────────────────
 
 /** مدة ظهور تلميح «تمّ النسخ» فوق شارة الكود السطري. */
 const INLINE_COPY_FEEDBACK_MS = 1200;
 
-/**
- * مهلة تأجيل فتح الرابط بعد النقرة الأولى — تمنح نقرة ثانية (نقر مزدوج) فرصة
- * الوصول قبل أن يُفتَح التبويب. القيمة قريبة من مهلة المتصفّح النمطية لحسم
- * النقر المزدوج (~300-500ms) ودون أن تُحسّ كتأخّر عند نقرة مفردة حقيقية.
- */
-const INLINE_OPEN_DEFER_MS = 250;
+/** نطاقات المستوى الأعلى المقبولة لنطاق عارٍ (بلا مخطّط) — قائمة قصيرة عمداً. */
+const BARE_DOMAIN_TLDS = new Set([
+  'com', 'net', 'org', 'sa', 'io', 'dev', 'tech', 'app', 'ai', 'co', 'me',
+]);
+
+/** تسميات اسم مضيف صالحة (حرف/رقم في الطرفين) تليها منفذ ومسار اختياريان. */
+const BARE_DOMAIN_RE =
+  /^((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24}))(?::\d{1,5})?(?:\/\S*)?$/i;
 
 /**
- * هل النصّ بأكمله رابط http(s) واحد بلا فراغات؟ `javascript:` وغيره من المخطّطات
- * مرفوضة عمداً — لا فتح إلا لما يُصنَّف رابطاً آمناً فعلاً.
+ * الرابط الآمن الذي تمثّله شارة الكود، أو null. يُقبل فقط: رابط http(s) صريح بلا
+ * فراغات، أو نطاق عارٍ صارم (تسمية أخيرة من القائمة المسموحة) يُفتح بـhttps.
+ * أسماء الملفات (`config.json`، `Markdown.tsx`) لا تطابق أبداً، و`javascript:`
+ * و`data:` وغيرهما نصٌّ عادي.
  */
-function singleHttpUrl(text: string): string | null {
+function resolveLinkHref(text: string): string | null {
   const trimmed = text.trim();
   if (!trimmed || /\s/.test(trimmed)) return null;
+  let candidate = trimmed;
+  if (!/^https?:\/\//i.test(trimmed)) {
+    const bare = BARE_DOMAIN_RE.exec(trimmed);
+    if (!bare || !BARE_DOMAIN_TLDS.has(bare[2].toLowerCase())) return null;
+    // أسماء تطبيقات/ملفات شائعة (Safari.app) أو إصدارات (v1.2.app) ليست نطاقات.
+    if (/^[A-Z]/.test(trimmed) || /^v\d/i.test(trimmed)) return null;
+    candidate = `https://${trimmed}`;
+  }
   try {
-    const url = new URL(trimmed);
-    if (url.protocol === 'http:' || url.protocol === 'https:') return trimmed;
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
   } catch {
     return null;
   }
-  return null;
 }
 
 /**
@@ -335,105 +355,105 @@ function selectionIntersectsElement(el: HTMLElement | null): boolean {
   return false;
 }
 
-/**
- * شارة الكود السطري (backtick واحد) — `code` مضمَّن لا كتلة.
- *
- * النقر بالزر الأيسر: فتح رابط http(s) وحيد في تبويب جديد (بعد تأجيل قصير
- * يُلغى لو تبعته نقرة ثانية)، أو نسخ أيّ نصّ آخر فوراً.
- * النقر بالزر الأيمن: نسخ دائماً (حتى على رابط) بدل القائمة الافتراضية.
- * لا يعترض سحب التحديد المنتهي داخل الشارة نفسها.
- */
-const InlineCode = ({ className, children, ...props }: CodeBlockProps) => {
-  const { t } = useTranslation('chat');
-  const [copied, setCopied] = useState(false);
-  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const elRef = useRef<HTMLElement | null>(null);
-  const hintId = useId();
+const INLINE_CODE_CLASS =
+  'whitespace-pre-wrap break-words rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground transition-colors hover:bg-accent';
 
-  const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
-  const url = singleHttpUrl(raw);
+const FOCUS_RING_CLASS =
+  'rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/** نسخ نصّ إلى الحافظة مع علامة «تمّ النسخ» مؤقّتة. */
+function useCopyFeedback(text: string) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    if (timerRef.current) clearTimeout(timerRef.current);
   }, []);
 
-  const cancelPendingOpen = useCallback(() => {
-    if (openTimerRef.current) {
-      clearTimeout(openTimerRef.current);
-      openTimerRef.current = null;
-    }
-  }, []);
-
-  const flashCopied = useCallback(() => {
-    setCopied(true);
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    feedbackTimerRef.current = setTimeout(() => setCopied(false), INLINE_COPY_FEEDBACK_MS);
-  }, []);
-
-  const doCopy = useCallback(() => {
-    void copyTextToClipboard(raw).then((success) => {
-      if (success) flashCopied();
+  const copy = useCallback(() => {
+    void copyTextToClipboard(text).then((success) => {
+      if (!success) return;
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), INLINE_COPY_FEEDBACK_MS);
     });
-  }, [raw, flashCopied]);
+  }, [text]);
 
-  const openUrlNow = useCallback(() => {
-    if (!url) return;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }, [url]);
+  return { copied, copy };
+}
 
-  /** نقرة مفردة مؤكَّدة (لا ثانية تبعتها خلال المهلة) — الفعل الأساسي هنا. */
-  const primaryAction = useCallback(() => {
-    if (url) {
-      openUrlNow();
-    } else {
-      doCopy();
-    }
-  }, [url, openUrlNow, doCopy]);
+const CopiedBadge = ({ label }: { label: string }) => (
+  <span
+    role="status"
+    aria-live="polite"
+    className="pointer-events-none absolute -top-6 start-0 z-20 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background shadow"
+  >
+    {label}
+  </span>
+);
 
-  const handleClick = useCallback((event: React.MouseEvent) => {
-    if (selectionIntersectsElement(elRef.current)) return;
-    // `detail > 1` تعني نقرة ثانية أو أكثر من سلسلة نقر مزدوج/متعدّد — تُلغي
-    // أيّ فتحٍ مؤجَّل من النقرة الأولى ولا تُطلق فعلاً جديداً بنفسها؛ فتح رابط
-    // بنقرتين متتاليتين سلوكٌ غير مقصود (تحديد نصّ بنقر مزدوج مثلاً).
-    if (event.detail > 1) {
-      cancelPendingOpen();
-      return;
-    }
-    if (url) {
-      cancelPendingOpen();
-      openTimerRef.current = setTimeout(() => {
-        openTimerRef.current = null;
-        openUrlNow();
-      }, INLINE_OPEN_DEFER_MS);
-    } else {
-      doCopy();
-    }
-  }, [url, openUrlNow, doCopy, cancelPendingOpen]);
+/**
+ * شارة رابط: `<a>` حقيقي يفتح في تبويب جديد (يعمل معه Tab والنقر الأوسط)، وبجانبه
+ * زرّ نسخ يُحجَز مكانه دائماً فلا يتحرّك التخطيط: شفّاف افتراضياً، ويظهر عند
+ * تمرير المؤشّر على المجموعة أو تركيز الزرّ، وثابتاً خافتاً على أجهزة اللمس.
+ * المجموعة `dir="ltr"` كي تلتصق الأيقونات بنهاية النصّ اللاتيني داخل جملة عربية.
+ * النقر الأيمن والضغط المطوّل لا يُعترَضان.
+ */
+const LinkChip = (
+  { href, raw, className, children, ...props }: CodeBlockProps & { href: string; raw: string },
+) => {
+  const { t } = useTranslation('chat');
+  const { copied, copy } = useCopyFeedback(raw.trim());
 
-  const handleDoubleClick = useCallback(() => {
-    cancelPendingOpen();
-  }, [cancelPendingOpen]);
+  return (
+    <span dir="ltr" className="group/chip relative inline">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`no-underline ${FOCUS_RING_CLASS}`}
+      >
+        <code
+          className={`${INLINE_CODE_CLASS} cursor-pointer ${className || ''}`}
+          {...props}
+        >
+          {children}
+          <ExternalLink aria-hidden="true" className="ms-1 inline h-3 w-3 align-baseline opacity-60" />
+        </code>
+      </a>
+      <button
+        type="button"
+        onClick={copy}
+        aria-label={t('inlineCode.copyLink', { defaultValue: 'نسخ الرابط' })}
+        className="relative ms-1 inline-flex h-4 w-4 items-center justify-center align-middle text-muted-foreground opacity-0 transition-opacity before:absolute before:-inset-1 before:content-[''] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/chip:opacity-100 group-focus-within/chip:opacity-100 [@media(hover:none)]:opacity-100"
+      >
+        <Copy aria-hidden="true" className="h-3.5 w-3.5" />
+      </button>
+      {copied && <CopiedBadge label={t('codeBlock.copied')} />}
+    </span>
+  );
+};
 
-  const handleContextMenu = useCallback((event: React.MouseEvent) => {
-    if (selectionIntersectsElement(elRef.current)) return;
-    event.preventDefault();
-    cancelPendingOpen();
-    doCopy();
-  }, [doCopy, cancelPendingOpen]);
+/** شارة نصّ عادي: النقر الأيسر (أو Enter/Space) ينسخ النصّ. */
+const CopyChip = ({ raw, className, children, ...props }: CodeBlockProps & { raw: string }) => {
+  const { t } = useTranslation('chat');
+  const elRef = useRef<HTMLElement | null>(null);
+  const hintId = useId();
+  const { copied, copy } = useCopyFeedback(raw);
+
+  const handleClick = useCallback(() => {
+    if (!selectionIntersectsElement(elRef.current)) copy();
+  }, [copy]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
     event.preventDefault();
-    primaryAction();
-  }, [primaryAction]);
+    copy();
+  }, [copy]);
 
   const hint = copied
     ? t('codeBlock.copied')
-    : url
-      ? t('inlineCode.openLink', { defaultValue: 'Open link — right-click to copy' })
-      : t('inlineCode.copyHint', { defaultValue: 'Copy' });
+    : t('inlineCode.copyHint', { defaultValue: 'Copy' });
 
   return (
     <span className="relative inline">
@@ -445,10 +465,8 @@ const InlineCode = ({ className, children, ...props }: CodeBlockProps) => {
         title={hint}
         aria-describedby={hintId}
         onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-        onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
-        className={`cursor-pointer whitespace-pre-wrap break-words rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${className || ''}`}
+        className={`cursor-pointer ${INLINE_CODE_CLASS} ${FOCUS_RING_CLASS} ${className || ''}`}
         {...props}
       >
         {children}
@@ -459,17 +477,26 @@ const InlineCode = ({ className, children, ...props }: CodeBlockProps) => {
         («Copy»)، فيسمع مستخدم قارئ الشاشة الفعل بلا معرفة أيّ نصّ سيُنسَخ.
       */}
       <span id={hintId} className="sr-only">{hint}</span>
-      {copied && (
-        <span
-          role="status"
-          aria-live="polite"
-          className="pointer-events-none absolute -top-6 start-0 z-20 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background shadow"
-        >
-          {t('codeBlock.copied')}
-        </span>
-      )}
+      {copied && <CopiedBadge label={t('codeBlock.copied')} />}
     </span>
   );
+};
+
+/**
+ * شارة الكود السطري (backtick واحد): رابط (http(s) صريح أو نطاق عارٍ صارم) يصير
+ * `LinkChip`، وغيره `CopyChip`. لا اعتراض للنقر الأيمن في الحالتين.
+ */
+const InlineCode = (props: CodeBlockProps) => {
+  const { children, className } = props;
+  const insideLink = useContext(InsideLinkContext);
+  const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
+  const href = insideLink ? null : resolveLinkHref(raw);
+  if (insideLink) {
+    return <code dir="ltr" className={`${INLINE_CODE_CLASS} ${className || ''}`}>{children}</code>;
+  }
+  return href
+    ? <LinkChip {...props} href={href} raw={raw} />
+    : <CopyChip {...props} raw={raw} />;
 };
 
 const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
@@ -480,7 +507,9 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   // المُلوِّن: مكوِّن ثابت المرجع، ونطاق لغاته تفضيلُ مستخدم. اللغة خارج النطاق
   // تُعرَض نصّاً سليماً بنفس الإطار (تفصيل السقوط في src/syntax/prismRegistry).
   const { SyntaxHighlighter } = useCodeHighlighter();
-  const { catalog, runAction, userRole, inlineExecEnabled, liveStatusOf } = useChatActions();
+  const {
+    catalog, runAction, userRole, inlineExecEnabled, liveStatusOf, messageTimestamp,
+  } = useChatActions();
   const { isRestarting, isSuccess, startPolling } = useRestartWatch();
   const [copied, setCopied] = useState(false);
   const [execStatus, setExecStatus] = useState<ExecStatus>('idle');
@@ -620,6 +649,20 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   //   • !isStreaming      — لا نقرة على أمرٍ لم يكتمل بعد.
   const showRawExecButton =
     canUseRaw && inlineExecEnabled && isRunTagged && !isExecBlock && !isStreaming;
+
+  // Durable «already ran» record (server ledger keyed by command digest): survives
+  // a refresh and reflects a run started from the board. A clean run retires the
+  // button; a failed one stays retryable but is dated.
+  const { record: ledgerRecord, refresh: refreshExecRecord } = useRawExecutionRecord(
+    raw,
+    showRawExecButton,
+  );
+  // The ledger is keyed by text, so only a run AFTER this message was sent counts
+  // for this block; without a usable message time the button stays (fail-open to
+  // «not executed», never to «hidden»).
+  const recordScope = recordAppliesToMessage(ledgerRecord, messageTimestamp);
+  const execRecord = recordScope === 'older' ? null : ledgerRecord;
+  const execDone = recordScope === 'applies' && isExecutionDone(ledgerRecord);
 
   // الحالة المشتركة من الطابور (T-947 F4): يربط الزر بلوحة الأوامر — تنفيذ
   // الأمر نفسه من النافذة (أو تبويب آخر) يجعل صفّه 'executing' فينعكس هنا لحظيّاً.
@@ -839,7 +882,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
         )}
 
         {/* ── زرّ التنفيذ الحر (كتل shell للمالك فقط) ───────────────────── */}
-        {showRawExecButton && (
+        {showRawExecButton && !execDone && (
           <button
             type="button"
             onClick={() => { void handleRawExec(); }}
@@ -947,6 +990,27 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
           B-261: أحمر و role=alert للعطل وحده. الرفض المتعمَّد كهرماني وrole=status
           لأنه حارسٌ يعمل لا ميزةٌ معطوبة، ويحمل وقته وعدد محاولاته وزرّ إغلاق —
           فلا يُقرأ حالةً جاريةً للنظام بعد أن يُعالج المالك الأمر من مكان آخر. */}
+      {/* سجلّ التنفيذ الدائم: وقتٌ وكود خروج من الخادم لا حالة محلية. */}
+      {showRawExecButton && execRecord && (
+        <p
+          role="status"
+          className={`mt-1 text-xs ${
+            execRecord.outcome === 'success' ? 'text-emerald-400' : 'text-amber-300'
+          }`}
+        >
+          {tChat(
+            execRecord.exitCode === null
+              ? 'codeBlock.executedAtNoExit'
+              : 'codeBlock.executedAt',
+            {
+              time: new Date(execRecord.executedAt).toLocaleString(),
+              code: execRecord.exitCode,
+              defaultValue: `Executed at ${new Date(execRecord.executedAt).toLocaleString()}`,
+            },
+          )}
+        </p>
+      )}
+
       {showRawExecButton && insertError && (
         <div
           role={isMalfunction(insertError.code) ? 'alert' : 'status'}
@@ -1000,7 +1064,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
         <ExecReviewDialog
           target={rawExecTarget}
           onClose={() => setRawExecTarget(null)}
-          onComplete={() => {}}
+          onComplete={refreshExecRecord}
         />
       )}
     </div>
@@ -1095,14 +1159,17 @@ function ProjectFileLink({ href, children }: { href?: string; children?: React.R
   const { inlineExecEnabled, shareProjectId, onShareFileOpen } = useChatActions();
   const streaming = useContext(StreamingContext);
   const relativePath = shareableReference(href);
+  const inside = (node: React.ReactNode) => (
+    <InsideLinkContext.Provider value>{node}</InsideLinkContext.Provider>
+  );
   if (inlineExecEnabled && !streaming && shareProjectId && relativePath) {
     return <span className="not-prose inline-flex max-w-full flex-wrap items-center gap-2 align-middle">
       {onShareFileOpen ? <button type="button" className="min-h-11 break-all text-primary underline focus-visible:outline focus-visible:outline-ring"
-        onClick={() => onShareFileOpen(relativePath)}>{children}</button> : <span className="break-all"><bdi>{children}</bdi></span>}
+        onClick={() => onShareFileOpen(relativePath)}>{inside(children)}</button> : <span className="break-all"><bdi>{inside(children)}</bdi></span>}
       <DocumentShareButton key={`${shareProjectId}:${relativePath}`} projectId={shareProjectId} filePath={relativePath} showLabel />
     </span>;
   }
-  return <a href={href} className="text-blue-600 hover:underline dark:text-blue-400" target="_blank" rel="noopener noreferrer">{children}</a>;
+  return <a href={href} className="text-blue-600 hover:underline dark:text-blue-400" target="_blank" rel="noopener noreferrer">{inside(children)}</a>;
 }
 
 const markdownComponents = {

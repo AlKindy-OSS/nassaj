@@ -82,7 +82,10 @@ export type ResumeTurnParams = {
   systemFraming: string;
   model: string | null;
   disallowedTools: readonly string[];
+  /** The run-profile env (resolveClaudeRunProfileOrThrow), never raw process.env. */
   env: NodeJS.ProcessEnv;
+  /** Hosts the profile's engine verdict authorized; the runner re-checks env against them (B-446). */
+  engineHosts?: Set<string> | null;
   maxHoldMs: number;
 };
 
@@ -353,6 +356,7 @@ export async function injectForConversation(
   try {
     // (6) Build env (§هـ-1 strict + leaf-only env hygiene) & the coalesced prompt.
     let spawnEnv: NodeJS.ProcessEnv;
+    let engineHosts: Set<string> | null = null;
     try {
       const profile = await (deps.resolveProfile ?? resolveClaudeRunProfileOrThrow)({
         userId,
@@ -362,8 +366,10 @@ export async function injectForConversation(
         authoritativeStoredPin: true,
         requireKnownResumePin: true,
         failOnAmbiguous: true,
+        cwd: input.projectPath,
       });
       spawnEnv = profile.env;
+      engineHosts = profile.engineHosts ?? null;
     } catch (error) {
       audit({ event: 'tierb-denied-env', error: error instanceof Error ? error.message : String(error) });
       return { ...base, event: 'denied' };
@@ -403,6 +409,7 @@ export async function injectForConversation(
       model: injectorModel(env),
       disallowedTools: LEAF_ONLY_DISALLOWED_TOOLS,
       env: spawnEnv,
+      engineHosts,
       maxHoldMs: injectorMaxHoldMs(env),
     });
 

@@ -50,7 +50,7 @@ const PM2_OK = Object.freeze({ name: 'nassaj-dev', pmId: 0, script: '/fixture/di
 
 const baseline = (routes = {}, overrides = {}) => runUpdatePreflightChecks({
     appRoot: '/fixture',
-    env: { NASSAJ_RELEASE_SOURCE: SOURCE },
+    env: { NASSAJ_RELEASE_SOURCE: SOURCE, DATABASE_PATH: '/fixture/db/auth.db' },
     installedVersion: NARROWED,
     readFile: () => null,
     exists: () => true,
@@ -77,12 +77,41 @@ test('a healthy node reports every code clear, in blocker priority order', async
     assert.equal(result.ok, true);
     assert.equal(result.blocker, null);
     assert.deepEqual(result.checks.map((check) => check.code), [...PREFLIGHT_CODES]);
-    assert.equal(result.checks.length, 16); // 16 codes: +client_generation_archive (B-1293) atop the 15 post-ADR-156 T-1730
+    assert.equal(result.checks.length, 17); // +migration_backup_directory_insecure (B-1146), +client_generation_archive (B-1293)
     for (const check of result.checks) {
         assert.equal(check.ok, true, `${check.code} should be clear`);
         assert.ok(check.reason_ar && check.reason_en, `${check.code} needs both languages`);
     }
     assert.deepEqual(result.target, { version: '1.47.0.10', commit: COMMIT, local: true });
+});
+
+test('migration-backups with a mode other than 0700 blocks the update before activation (B-1146)', async () => {
+    const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || '/var/tmp', 'preflight-backups-'));
+    try {
+        const env = { NASSAJ_RELEASE_SOURCE: SOURCE, DATABASE_PATH: path.join(dir, 'auth.db') };
+        const absent = await baseline({}, { env });
+        assert.equal(byCode(absent, 'migration_backup_directory_insecure').ok, true, 'absent is created 0700 later');
+        const backups = path.join(dir, 'migration-backups');
+        fs.mkdirSync(backups, { mode: 0o700 });
+        fs.chmodSync(backups, 0o700);
+        assert.equal(byCode(await baseline({}, { env }), 'migration_backup_directory_insecure').ok, true);
+        fs.chmodSync(backups, 0o755);
+        const loose = await baseline({}, { env });
+        assert.equal(loose.ok, false);
+        assert.equal(loose.blocker.code, 'migration_backup_directory_insecure');
+        assert.match(loose.blocker.en, /mode 0755/);
+        assert.equal(loose.blocker.action.command, `chmod 700 ${fs.realpathSync(dir)}/migration-backups`);
+        assert.equal(byCode(loose, 'migration_backup_directory_insecure').autoFixable, false);
+        assert.equal((fs.statSync(backups).mode & 0o777), 0o755, 'the preflight never changes the mode');
+        fs.chmodSync(backups, 0o700);
+        const foreign = await baseline({}, { env, euid: fs.statSync(backups).uid + 1 });
+        assert.match(foreign.blocker.en, /owner uid/);
+        fs.rmSync(backups, { recursive: true });
+        fs.symlinkSync(dir, backups);
+        assert.match((await baseline({}, { env })).blocker.en, /symlink/);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('a non-git tree stops before any check rather than failing all ten', async () => {

@@ -113,6 +113,12 @@
     "warning": "Lifting a fence does not prove the old run ended safely. It may have had an effect outside this machine. Lift only if you verified this or accept the risk.",
     "filteredWarning": "Showing only the fence for this conversation. Before lifting, check its transcript and workspace (git status, any pushes) for the interrupted turn's effect.",
     "showAll": "Show all fences",
+    "recentTitle": "Recent acknowledgements from conversations",
+    "recentEmpty": "No recent acknowledgements",
+    "recentUnavailable": "The acknowledgement log is currently unreliable",
+    "recentRow": "{{when}} · session {{session}} · actor {{actor}} · decision owner {{owner}}",
+    "committed": "committed",
+    "notCommitted": "not committed",
     "none": "No active fences",
     "kindGeneration": "All launches paused (generation {{generation}})",
     "kindScoped": "Paused scope: {{scope}}",
@@ -167,7 +173,8 @@
     "instructions": "Instructions",
     "mcpServers": "MCP Servers",
     "skills": "Skills",
-    "appearance": "Appearance"
+    "appearance": "Appearance",
+    "update": "Update"
   },
   "skills": {
     "title": "Skills",
@@ -710,17 +717,6 @@
     "banner": "Your Claude subscription is not linked yet. You need to link it before using Claude in your sessions.",
     "bannerHint": "Click the button below to open the terminal and complete the login flow using",
     "linkButton": "Link Claude account",
-    "tokenInput": {
-      "stepHint": "Press “{{button}}” on this card to run <cmd>claude setup-token</cmd>, then paste the token it prints here — it is shown once only.",
-      "notWritable": "The Claude credential is shared on this server, so only an owner or admin can set it. Do not run claude setup-token: the token is shown once and will not be accepted here.",
-      "placeholder": "sk-ant-oat01-…",
-      "ariaLabel": "Setup token",
-      "save": "Save token",
-      "saving": "Saving…",
-      "saved": "Token saved",
-      "emptyError": "Token is required",
-      "saveError": "Failed to save token. Please try again."
-    },
     "incompleteLink": "Your Claude link is incomplete — it cannot read usage and may stop working. Re-link with a full sign-in to finish.",
     "relinkButton": "Re-link"
   },
@@ -1220,38 +1216,6 @@
       "cycleRenews": "Subscription renews {{date}}",
       "billingPage": "Billing page",
       "billingPageNewTab": "opens in new tab"
-    },
-    "account": {
-      "claude": {
-        "description": ""
-      },
-      "cursor": {
-        "description": "Cursor AI-powered code editor"
-      },
-      "codex": {
-        "description": "OpenAI Codex AI assistant"
-      },
-      "antigravity": {
-        "description": "Google AI Pro via the agy CLI"
-      },
-      "opencode": {
-        "description": "OpenCode CLI assistant"
-      },
-      "qwen": {
-        "description": "Alibaba ModelStudio via Coding Plan or Token Plan"
-      },
-      "kimi": {
-        "description": "Moonshot Kimi — native CLI (device-code login) or API key"
-      },
-      "deepseek": {
-        "description": "DeepSeek via API key"
-      },
-      "glm": {
-        "description": "Zhipu / Z.ai GLM via API key"
-      }
-    },
-    "antigravity": {
-      "modelPickerNote": "Pick the model in the model picker; \"agy default\" leaves the choice to agy."
     },
     "authPaths": {
       "subscription": {

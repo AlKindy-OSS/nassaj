@@ -140,6 +140,21 @@ export function cleanSpawnEnv() {
 }
 
 /**
+ * B-678: the two keys `systemctl --user` / `systemd-run --user` need to reach
+ * this uid's user manager. Not secrets: derived from the process uid exactly as
+ * workflow-supervisor/systemd.ts `userManagerEnv` does (mirrored here because
+ * that module carries the harness-launch import graph). Empty without getuid.
+ * @param {number|undefined} [uid]
+ * @param {string} [runUserRoot]
+ * @returns {{XDG_RUNTIME_DIR?: string, DBUS_SESSION_BUS_ADDRESS?: string}}
+ */
+export function userManagerSpawnEnv(uid = process.getuid?.(), runUserRoot = '/run/user') {
+  if (!Number.isInteger(uid)) return {};
+  const dir = path.join(runUserRoot, String(uid));
+  return { XDG_RUNTIME_DIR: dir, DBUS_SESSION_BUS_ADDRESS: `unix:path=${dir}/bus` };
+}
+
+/**
  * Reads the repo package.json scripts (commit-gated) at call time so the set of
  * runnable scripts is exactly what code review approved. fail-closed: any read/
  * parse error → empty set → every npm command is rejected.

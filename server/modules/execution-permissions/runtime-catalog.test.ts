@@ -60,3 +60,18 @@ test('catalog rejects a credential user that differs from the authenticated acto
     /CATALOG_ACTOR_USER_MISMATCH/,
   );
 });
+
+test('B-1414: the probe runs inside a catalog launch scope bound to its permit, ended when it settles', async () => {
+  const { currentCatalogLaunchScope } = await import('./catalog-launch-scope.js');
+  let seen: ReturnType<typeof currentCatalogLaunchScope> = null;
+  await runAuthorizedProviderCatalog('codex', '7', {
+    id: 7, role: 'user', authenticationKind: 'session', authorizationGeneration: 1,
+  }, async () => {
+    seen = currentCatalogLaunchScope();
+    assert.equal(seen?.signal.aborted, false, 'the permit holds while the probe runs');
+    return [];
+  });
+  assert.equal((seen as { execution: { decisionId: string } } | null)?.execution.decisionId, 'decision-catalog');
+  assert.equal((seen as { signal: AbortSignal } | null)?.signal.aborted, true, 'the scope ends with the probe');
+  assert.equal(currentCatalogLaunchScope(), null, 'no scope leaks outside the probe');
+});

@@ -46,7 +46,7 @@ import {
   createGitAskpassLease,
 } from '../modules/projects/services/git-transport-security.service.js';
 import {
-  isProjectPathVisibleToUser,
+  isProjectPathWritableByUser,
   isSessionVisibleToUser,
 } from '../modules/websocket/services/chat-websocket.service.js';
 import {
@@ -56,6 +56,7 @@ import {
 } from '../../shared/retiredProviders.js';
 
 import { ResponseCollector } from './agent-response-collector.js';
+import { isForbiddenProjectRoot } from '../shared/secret-path-guard.js';
 
 const router = express.Router();
 
@@ -1287,7 +1288,12 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     if (!workspaceValidation.valid) {
       return res.status(400).json({ error: workspaceValidation.error });
     }
-    if (!isProjectPathVisibleToUser(projectPath, req.user?.id ?? null)) {
+    // B-1373: never run an agent over (or register) the service user's home.
+    if (isForbiddenProjectRoot(workspaceValidation.resolvedPath || projectPath)) {
+      return res.status(400).json({ error: 'Project root is not allowed', code: 'PROJECT_ROOT_FORBIDDEN' });
+    }
+    // B-1411: shared launch gate (visibility with the flag off, write membership with it on).
+    if (!isProjectPathWritableByUser(projectPath, req.user?.id ?? null)) {
       return res.status(404).json({ error: 'Project not found' });
     }
     if (isProjectMembershipEnforced()) {
@@ -1434,6 +1440,10 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
 
     finalProjectPath = normalizeProjectPath(finalProjectPath);
     assertAgentAccessCurrent(req, workspaceFence, !githubUrl);
+    // B-1373: refuse to register a protected root (home / credential location).
+    if (isForbiddenProjectRoot(finalProjectPath)) {
+      return res.status(400).json({ error: 'Project root is not allowed', code: 'PROJECT_ROOT_FORBIDDEN' });
+    }
 
     // Register project path in DB (or reuse existing registration).
     // Attribute the creator so the private-project authorization layer (B-PRIV)

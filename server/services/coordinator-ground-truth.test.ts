@@ -28,8 +28,9 @@ import {
   renderGroundTruthContext,
   buildGroundTruthContext,
   resolveSessionRepoRoot,
+  resolveBoardRoot,
+  readBoardOpenTasks,
 } from './coordinator-ground-truth.js';
-import { createGovernanceTestFixture } from './governance-content-test-fixture.js';
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -56,15 +57,14 @@ function writeState(dir: string, tasks: unknown): string {
   return p;
 }
 
-function governanceArgs(root: string) {
-  const publication = createGovernanceTestFixture([{
-    projectId: 'test-project', filename: 'project-state.json',
-    content: fs.readFileSync(path.join(root, 'docs', 'project-state.json'), 'utf8'), actorIds: [7],
-  }]);
+/** Session args for a project whose registered root is `root` (visible to actor 7). */
+function boardArgs(root: string) {
   return {
     projectId: 'test-project',
     actorId: 7,
-    governanceResolver: publication.resolver,
+    projectPathLookup: async (projectId: string, actorId: unknown) => (
+      projectId === 'test-project' && actorId === 7 ? root : null
+    ),
   };
 }
 
@@ -169,7 +169,7 @@ test('buildGroundTruthContext: real repo + state ⇒ facts present', async () =>
   const ctx = await buildGroundTruthContext({
     delegationPrompt: 'work on terminals',
     repoRoot: repo,
-    ...governanceArgs(repo),
+    ...boardArgs(repo),
   });
   assert.ok(ctx);
   const c = ctx as string;
@@ -326,7 +326,7 @@ test('buildGroundTruthContext: session root from another project ⇒ block carri
     const ctx = await buildGroundTruthContext({
       delegationPrompt: 'x',
       repoRoot: otherProjectRepo, // the session's own, known, project root
-      ...governanceArgs(otherProjectRepo),
+      ...boardArgs(otherProjectRepo),
     });
     assert.ok(ctx);
     const c = ctx as string;
@@ -350,10 +350,86 @@ test('buildGroundTruthContext: nassaj-dev\'s own root behaviour is unchanged whe
   const repo = makeTempRepo(['feat: standalone terminals', 'fix: something']);
   writeState(repo, SAMPLE_TASKS);
   const ctx = await buildGroundTruthContext({
-    delegationPrompt: 'work on terminals', repoRoot: repo, ...governanceArgs(repo),
+    delegationPrompt: 'work on terminals', repoRoot: repo, ...boardArgs(repo),
   });
   assert.ok(ctx);
   const c = ctx as string;
   assert.ok(c.includes('standalone terminals'));
   assert.ok(c.includes('T-300'));
+});
+
+// --- B-1524: the board is read from the session's own project folder --------
+
+test('readBoardOpenTasks: overlay session cwd resolves to the project root via projectId', async () => {
+  const repo = makeVarTmpRepo(['feat: overlay base']);
+  writeState(repo, SAMPLE_TASKS);
+  const overlay = path.join(repo, '.git', 'nassaj-session-overlays', 'instances', 'abc', 'workspace');
+  fs.mkdirSync(overlay, { recursive: true });
+  try {
+    const tasks = await readBoardOpenTasks({ repoRoot: overlay, ...boardArgs(repo) });
+    assert.deepEqual(tasks.map((t) => t.id), ['T-937', 'T-300']);
+  } finally {
+    rmVarTmp(repo);
+  }
+});
+
+test('resolveBoardRoot: without projectId an overlay path maps to its project root by shape', async () => {
+  assert.equal(
+    await resolveBoardRoot({ repoRoot: '/srv/p/.git/nassaj-session-overlays/instances/x/workspace/sub' }),
+    '/srv/p',
+  );
+  assert.equal(await resolveBoardRoot({ repoRoot: '/srv/p' }), '/srv/p');
+  assert.equal(await resolveBoardRoot({ repoRoot: '' }), null);
+});
+
+test('readBoardOpenTasks: session root outside the registered project ⇒ no tasks', async () => {
+  const project = makeVarTmpRepo(['feat: project']);
+  writeState(project, SAMPLE_TASKS);
+  const elsewhere = makeVarTmpRepo(['feat: elsewhere']);
+  try {
+    assert.deepEqual(await readBoardOpenTasks({ repoRoot: elsewhere, ...boardArgs(project) }), []);
+  } finally {
+    rmVarTmp(project);
+    rmVarTmp(elsewhere);
+  }
+});
+
+test('readBoardOpenTasks: project not visible to the actor ⇒ no tasks', async () => {
+  const project = makeVarTmpRepo(['feat: project']);
+  writeState(project, SAMPLE_TASKS);
+  try {
+    const tasks = await readBoardOpenTasks({
+      repoRoot: project, ...boardArgs(project), actorId: 99,
+    });
+    assert.deepEqual(tasks, []);
+  } finally {
+    rmVarTmp(project);
+  }
+});
+
+test('readBoardOpenTasks: governance stub ⇒ no tasks; bound external file ⇒ its tasks', async () => {
+  const project = makeVarTmpRepo(['feat: bound']);
+  const external = fs.mkdtempSync(path.join(VAR_TMP_ROOT, 'cgt-b1524-ext-'));
+  const bound = path.join(external, 'project-state.json');
+  fs.writeFileSync(bound, JSON.stringify({ tasks: [{ id: 'EXT-9', status: 'in_progress', title: 'bound' }] }));
+  const previous = process.env.NASSAJ_BOARD_EXTERNAL_BINDINGS;
+  try {
+    fs.mkdirSync(path.join(project, 'docs'), { recursive: true });
+    const stateFile = path.join(project, 'docs', 'project-state.json');
+    fs.writeFileSync(stateFile, JSON.stringify({ $schema: 'nassaj-governance-boundary/v1' }));
+    assert.deepEqual(await readBoardOpenTasks({ repoRoot: project, ...boardArgs(project) }), []);
+
+    fs.rmSync(stateFile);
+    fs.symlinkSync(bound, stateFile);
+    assert.deepEqual(await readBoardOpenTasks({ repoRoot: project, ...boardArgs(project) }), [],
+      'without a binding the outside file is refused');
+    process.env.NASSAJ_BOARD_EXTERNAL_BINDINGS = `test-project=${bound}`;
+    const tasks = await readBoardOpenTasks({ repoRoot: project, ...boardArgs(project) });
+    assert.deepEqual(tasks.map((t) => t.id), ['EXT-9']);
+  } finally {
+    if (previous === undefined) delete process.env.NASSAJ_BOARD_EXTERNAL_BINDINGS;
+    else process.env.NASSAJ_BOARD_EXTERNAL_BINDINGS = previous;
+    rmVarTmp(project);
+    rmVarTmp(external);
+  }
 });

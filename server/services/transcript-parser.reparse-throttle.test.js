@@ -16,7 +16,6 @@
 
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, appendFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -39,7 +38,7 @@ async function appendTurn(file, model, id) {
 }
 
 test('B-418: الإلحاق المتكرّر لا يُعيد التحليل، والطاقم يبقى مخدوماً', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'tp-throttle-'));
+  const dir = await mkdtemp('/var/tmp/tp-throttle-');
   const transcript = path.join(dir, 'session.jsonl');
   const sessionId = `throttle-${process.pid}`;
 

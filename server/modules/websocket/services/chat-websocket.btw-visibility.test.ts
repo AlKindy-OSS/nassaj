@@ -898,3 +898,26 @@ describe('message-fork WS gate', () => {
     assert.equal(messageForkCalls.length, 0);
   });
 });
+
+describe('B-1411 chat spawn gate, membership flag off (ADR-089)', () => {
+  async function sendCommand(userId: number, cwd: string) {
+    let queried = 0;
+    const { ws } = connect(userId, { queryClaudeSDK: async () => { queried += 1; } });
+    ws.emit('message', JSON.stringify({ type: 'claude-command', command: 'hi', options: { cwd, clientMsgId: 'm-1' } }));
+    for (let i = 0; i < 20; i += 1) await waitForWriterLease();
+    const refusal = ws.sent.find((m) => m.error === 'Project not found');
+    return { refusal, queried };
+  }
+
+  test('a non-member team member may start a run in a PUBLIC project (visibility rule kept)', async () => {
+    const { refusal } = await sendCommand(OUTSIDER_USER_ID, PUBLIC_PATH);
+    assert.equal(refusal, undefined, 'flag off: the visibility rule decides, not write membership');
+  });
+
+  test('a PRIVATE project the caller cannot see is still refused before dispatch', async () => {
+    const { refusal, queried } = await sendCommand(OUTSIDER_USER_ID, PRIVATE_PATH);
+    assert.ok(refusal, 'the hidden project gets the 404-equivalent refusal');
+    assert.equal(refusal.notStarted, true);
+    assert.equal(queried, 0, 'the provider is never dispatched');
+  });
+});

@@ -37,7 +37,7 @@ export type AgentProvider = LLMProvider;
 // معطَّلان عالمياً وsakana مُسقَطة من الشريط — ولوحُها `ApiSetupContent` كان يُرجع
 // `null` لكل معرّفٍ يبلغه، فهي فئةٌ لا تُعرض ولوحٌ لا يُصيَّر. وبقاؤها في الاتحاد
 // كان يُبقي رابطاً عميقاً صالحاً نحو لوحٍ أبيض.
-export type AgentCategory = 'account' | 'permissions' | 'engines' | 'instructions' | 'mcp' | 'skills';
+export type AgentCategory = 'account' | 'permissions' | 'engines' | 'instructions' | 'mcp' | 'skills' | 'update';
 export type ProjectSortOrder = 'name' | 'date';
 export type SaveStatus = 'success' | 'error' | null;
 export type CodexPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';

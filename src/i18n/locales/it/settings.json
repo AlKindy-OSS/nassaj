@@ -5,7 +5,8 @@
     "permissions": "Permessi",
     "mcpServers": "Server MCP",
     "skills": "Competenze",
-    "appearance": "Aspetto"
+    "appearance": "Aspetto",
+    "update": "Aggiornamento"
   },
   "skills": {
     "title": "Competenze",
@@ -721,32 +722,6 @@
       "authenticatedUser": "utente autenticato",
       "billingPage": "Pagina di fatturazione",
       "billingPageNewTab": "si apre in una nuova scheda"
-    },
-    "account": {
-      "claude": {
-        "description": "Assistente AI Anthropic Claude"
-      },
-      "cursor": {
-        "description": "Editor di codice potenziato da AI Cursor"
-      },
-      "codex": {
-        "description": "Assistente AI OpenAI Codex"
-      },
-      "antigravity": {
-        "description": "Google AI Pro tramite la CLI agy"
-      },
-      "opencode": {
-        "description": "Assistente CLI OpenCode"
-      },
-      "kimi": {
-        "description": "Moonshot Kimi tramite chiave API"
-      },
-      "deepseek": {
-        "description": "DeepSeek tramite chiave API"
-      },
-      "glm": {
-        "description": "Zhipu / Z.ai GLM tramite chiave API"
-      }
     },
     "connectionStatus": "Stato connessione",
     "login": {

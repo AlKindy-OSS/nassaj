@@ -76,8 +76,12 @@ export const PROVIDER_MODELS_DEGRADED_CACHE_TTL_MS = 5 * 60 * 1000;
  *     snapshots of what were really fallbacks. Bumping retires them so the fixed
  *     short-TTL degraded behavior takes effect on first open instead of waiting
  *     out the old deadline.
+ * 7 — B-1284: antigravity and opencode catalogs were fetched with the OPERATOR's
+ *     credentials even though they were cached under each member's key. Bumping
+ *     retires those entries, so a member sees their own catalog on first open
+ *     instead of the operator's for up to a day.
  */
-export const PROVIDER_MODELS_CACHE_VERSION = 6;
+export const PROVIDER_MODELS_CACHE_VERSION = 7;
 
 // Qwen's catalog is selected from immutable in-process constants plus the
 // caller's already-decrypted plan profile. It starts no process and performs no

@@ -22,6 +22,7 @@ import { formatCostUsd } from '../../chat/view/subcomponents/conversationCostFor
 import { useProjectBoard } from '../hooks/useProjectBoard';
 import { useProjectStats } from '../hooks/useProjectStats';
 import type { ProjectCost } from '../projectStatsHelpers';
+import type { BoardStateReason } from '../types';
 
 import ArchitectureView from './ArchitectureView';
 import BoardOverview from './BoardOverview';
@@ -186,12 +187,43 @@ function BoardEmptyState({ projectName }: { projectName: string }) {
   );
 }
 
+type UnavailableReason = Exclude<BoardStateReason, 'ok' | 'missing'>;
+
+/** The reason's message; `too_large` drops the limit when the server sent none. */
+function useReasonMessage() {
+  const { t } = useTranslation('projectBoard');
+  return (reason: UnavailableReason, limitMb?: number): string =>
+    reason === 'too_large' && limitMb === undefined
+      ? t('unavailable.too_large_nolimit')
+      : t(`unavailable.${reason}`, { limit: limitMb });
+}
+
+/** Shown when the board cannot be read for a reason other than "no file yet". */
+function BoardUnavailable({ reason, limitMb }: { reason: UnavailableReason; limitMb?: number }) {
+  const { t } = useTranslation('projectBoard');
+  const message = useReasonMessage()(reason, limitMb);
+
+  return (
+    <div className="flex h-full items-center justify-center p-6" data-testid="board-unavailable">
+      <div role="status" className="max-w-md text-center">
+        <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-warning" aria-hidden="true" />
+        <h3 className="mb-2 text-sm font-semibold text-foreground">{t('unavailable.title')}</h3>
+        <p className="text-sm text-muted-foreground">{message}</p>
+        <code className="mt-3 inline-block rounded-md border border-border bg-muted px-2 py-1 font-mono text-xs text-foreground" dir="ltr">
+          docs/project-state.json
+        </code>
+      </div>
+    </div>
+  );
+}
+
 /**
  * "Project Board" tab — a zero-LLM live view of the project's own files
  * (docs/project-state.json + ARCHITECTURE*.md). See ~/.claude/wiki/project-board.md.
  */
 export default function ProjectBoardPanel({ selectedProject, onFileOpen }: ProjectBoardPanelProps) {
   const { t } = useTranslation('projectBoard');
+  const reasonMessage = useReasonMessage();
   const [section, setSection] = useState<BoardSection>('overview');
   // The bug-task → issue link now crosses a tab boundary: the click switches to
   // the issues tab and names the row, and IssuesView scrolls to it once mounted
@@ -218,7 +250,7 @@ export default function ProjectBoardPanel({ selectedProject, onFileOpen }: Proje
     [],
   );
 
-  const { board, isLoading, loadError } = useProjectBoard(selectedProject?.projectId);
+  const { board, isLoading, loadError, notFound } = useProjectBoard(selectedProject?.projectId);
   // Cost + statistics (ADR-078): one scan per project, independent of the board
   // file watcher. Both stay null on a server without the endpoints, and every
   // consumer below renders nothing in that case rather than an empty shell.
@@ -239,6 +271,14 @@ export default function ProjectBoardPanel({ selectedProject, onFileOpen }: Proje
     );
   }
 
+  if (notFound) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
+        {t('unavailable.notVisible')}
+      </div>
+    );
+  }
+
   if (loadError || !board) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -250,9 +290,24 @@ export default function ProjectBoardPanel({ selectedProject, onFileOpen }: Proje
   const hasArchitecture = Boolean(board.architecture.technical || board.architecture.simplified);
   const projectName = selectedProject?.displayName || board.projectId;
 
-  // Guidance empty state: the project has no docs/project-state.json (yet).
+  // "No file yet" (or a legacy server that sends no reason) gets the template
+  // guidance; any other reason with no state means the file exists but cannot
+  // be read, and offering a template there would invite overwriting it.
+  const stateReason = board.stateReason;
+  const unavailableReason: UnavailableReason | null =
+    !board.state && stateReason && stateReason !== 'ok' && stateReason !== 'missing'
+      ? stateReason
+      : null;
+  const staleReason: UnavailableReason | null =
+    board.state && stateReason && stateReason !== 'ok' && stateReason !== 'missing'
+      ? stateReason
+      : null;
   if (!board.available && !board.state && !hasArchitecture) {
-    return <BoardEmptyState projectName={projectName} />;
+    return unavailableReason ? (
+      <BoardUnavailable reason={unavailableReason} limitMb={board.stateLimitMb} />
+    ) : (
+      <BoardEmptyState projectName={projectName} />
+    );
   }
 
   // Schema 1.2 conditional tabs: a non-empty section is what shows its tab
@@ -389,7 +444,20 @@ export default function ProjectBoardPanel({ selectedProject, onFileOpen }: Proje
         </div>
       </div>
 
-      {board.stateError && (
+      {staleReason && (
+        <div
+          role="status"
+          data-testid="board-stale-notice"
+          className="flex flex-shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-warning"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>
+            {reasonMessage(staleReason, board.stateLimitMb)} {t('unavailable.staleSuffix')}
+          </span>
+        </div>
+      )}
+
+      {board.stateError && !stateReason && (
         <div className="flex flex-shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-warning">
           <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
           <span>{t('stateError')}</span>
@@ -403,6 +471,8 @@ export default function ProjectBoardPanel({ selectedProject, onFileOpen }: Proje
               state={board.state}
               onNavigate={(target: OverviewTarget) => setSection(target)}
             />
+          ) : unavailableReason ? (
+            <BoardUnavailable reason={unavailableReason} limitMb={board.stateLimitMb} />
           ) : (
             <BoardEmptyState projectName={projectName} />
           ))}

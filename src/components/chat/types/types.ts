@@ -136,6 +136,9 @@ export interface ChatMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /** A skill body Claude injected after a Skill tool call; rendered as a compact expandable line. */
+  isSkillLoad?: boolean;
+  skillName?: string;
   /**
    * T-1862: stamped on the locally-added "Context compaction started." row
    * (runPassthroughCompaction / the `compact` command-output case). Marks a

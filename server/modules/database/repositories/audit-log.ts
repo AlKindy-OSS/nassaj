@@ -287,7 +287,9 @@ export type AuditAction =
   | 'harness_snapshot_pruned'
   | 'harness_snapshot_aside_pruned'
   | 'harness_recovery_acknowledged'
-  | 'harness_reconcile_resolved';
+  | 'harness_reconcile_resolved'
+  // T-1910 S4: a session writer acknowledged-and-lifted a session-scoped permission fence.
+  | 'permission_fence_acknowledged';
 
 /**
  * Hard cap on the stored User-Agent string (T-182). UA headers can be long and

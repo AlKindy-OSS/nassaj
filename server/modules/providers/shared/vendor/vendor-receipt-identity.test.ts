@@ -116,7 +116,12 @@ test('ambiguous repeated receipt IDs fail closed even when split across pages', 
 test('actual authorized session service preserves participant privacy across cache read orders', async t => {
   const { closeConnection, initializeDatabase, participantsDb, sessionsDb, userDb } = await import('@/modules/database/index.js');
   const { sessionsService } = await import('../../services/sessions.service.js');
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'vendor-receipt-service-'));
+  // B-1373 (55e7c933f) refuses the service home (mocked and passwd) and its hidden
+  // entries as project roots; TMPDIR may sit inside the real home, so the mocked
+  // home lives on a fixed non-hidden root and the project is a subdirectory of it.
+  const dir = await fsp.mkdtemp('/var/tmp/vendor-receipt-service-');
+  const project = path.join(dir, 'project');
+  await fsp.mkdir(project);
   const previous = process.env.DATABASE_PATH;
   t.mock.method(os, 'homedir', () => dir);
   closeConnection();
@@ -125,10 +130,10 @@ test('actual authorized session service preserves participant privacy across cac
     await initializeDatabase();
     const owner = userDb.createUser('vendor-owner', 'fixture-hash', 'user').id;
     const participant = userDb.createUser('vendor-participant', 'fixture-hash', 'user').id;
-    sessionsDb.createSession('vendor-service', 'kimi', dir);
+    sessionsDb.createSession('vendor-service', 'kimi', project);
     participantsDb.recordSpawn('vendor-service', owner);
     participantsDb.recordSpawn('vendor-service', participant);
-    await appendVendorTranscriptTurnIdempotent('kimi', 'vendor-service', dir, 'user', 'text', 'native-id', { ...input(), userId: owner });
+    await appendVendorTranscriptTurnIdempotent('kimi', 'vendor-service', project, 'user', 'text', 'native-id', { ...input(), userId: owner });
     for (const order of [[owner, participant], [participant, owner]]) {
       resetHistorySnapshotCacheForTests();
       for (const userId of order) {

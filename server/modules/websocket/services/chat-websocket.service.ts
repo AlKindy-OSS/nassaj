@@ -32,6 +32,7 @@ import {
   canAccessProjectPath,
   isProjectMembershipEnforced,
   releaseFencedRun,
+  resolveWorkspaceProjectAdmission,
 } from '@/modules/database/repositories/project-access.js';
 import { createRunFence, type FencedWriter, type RunFence } from '@/modules/websocket/services/run-fence.js';
 import {
@@ -595,16 +596,12 @@ function readResumeSessionId(data: ChatIncomingMessage): string | null {
 }
 
 /**
- * B-PRIV spawn guard. A run is started against `options.cwd` (a project path).
- * If that path maps to a KNOWN private project the user is not a member of, the
- * run is refused so a non-member cannot start a session inside a private
- * project's directory (which would also leak its content through the stream).
- *
- * Unregistered paths (no projects row yet) are allowed — that is the creation
- * flow, which records the spawner as the project's participant/creator. Returns
- * true when the spawn may proceed.
+ * B-PRIV / B-1411 spawn guard. A run is started against `options.cwd` (a
+ * project path) and is a WRITE (it edits files and runs commands); see
+ * {@link isProjectPathWritableByUser} for the rule. Returns true when the spawn
+ * may proceed.
  */
-function isSpawnProjectVisible(
+function isSpawnProjectWritable(
   data: ChatIncomingMessage,
   userId: string | number | null
 ): boolean {
@@ -612,7 +609,40 @@ function isSpawnProjectVisible(
   const cwd = typeof options.cwd === 'string' && options.cwd.trim()
     ? options.cwd.trim()
     : process.cwd();
-  return isProjectPathVisibleToUser(cwd, userId);
+  return isProjectPathWritableByUser(cwd, userId);
+}
+
+/**
+ * B-1411 launch gate shared by chat spawn, the `/shell` PTY and REST agent runs
+ * (option (a), until the owner decides the reader-role ADR):
+ *   - PROJECT_MEMBERSHIP_ENFORCE off: EXACTLY the previous visibility rule
+ *     (ADR-089: every signed-in member may act in every project). Most live
+ *     projects have no creator or member rows, so a write requirement here
+ *     would lock owners and the team out.
+ *   - enforce on: the cwd is resolved (realpath, sub-directory, symlink, `..`)
+ *     to the nearest registered containing project, then that project's WRITE
+ *     predicate decides. An unregistered location keeps the creation-flow rule.
+ * This is a UI/API gate, NOT an OS boundary: every provider runs as one uid.
+ */
+export function isProjectPathWritableByUser(
+  projectPath: string,
+  userId: string | number | null
+): boolean {
+  if (!isProjectMembershipEnforced()) {
+    return isProjectPathVisibleToUser(projectPath, userId);
+  }
+  const numericUserId = toNumericUserId(userId);
+  try {
+    const admission = resolveWorkspaceProjectAdmission(
+      typeof projectPath === 'string' ? projectPath.trim() : '',
+      numericUserId
+    );
+    if (!admission.allowed) return false;
+    if (!admission.projectId) return true;
+    return databaseModule.projectsDb.isProjectWritableByUser(admission.projectId, numericUserId) === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -2812,7 +2842,7 @@ export function handleChatConnection(
         messageType in COMMAND_TYPE_TO_PROVIDER ||
         messageType === 'opencode-command' ||
         messageType === 'cursor-resume';
-      if (isSpawnMessage && !isSpawnProjectVisible(data, presenceUserId)) {
+      if (isSpawnMessage && !isSpawnProjectWritable(data, presenceUserId)) {
         writer.send(
           createNormalizedMessage({
             kind: 'complete',
@@ -2834,7 +2864,7 @@ export function handleChatConnection(
         let lease: { release(): void } | null = null;
         try {
           lease = await dependencies.acquireWriterLease?.('provider-turn') ?? null;
-          if (!isSpawnProjectVisible(data, presenceUserId)) {
+          if (!isSpawnProjectWritable(data, presenceUserId)) {
             writer.send(createNormalizedMessage({
               kind: 'complete', provider: COMMAND_TYPE_TO_PROVIDER[messageType],
               exitCode: 1, success: false, error: 'Project not found',
@@ -2872,7 +2902,7 @@ export function handleChatConnection(
         let lease: { release(): void } | null = null;
         try {
           lease = await dependencies.acquireWriterLease?.('provider-turn') ?? null;
-          if (!isSpawnProjectVisible(data, presenceUserId)) {
+          if (!isSpawnProjectWritable(data, presenceUserId)) {
             writer.send(createNormalizedMessage({
               kind: 'complete', provider: 'cursor', exitCode: 1, success: false,
               error: 'Project not found', notStarted: true, ...clientMsgIdEcho(data),

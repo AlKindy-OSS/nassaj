@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  __antigravityCatalogCircuitSize,
   __resetAntigravityCatalogCircuit,
   getAntigravityModelCatalog,
   parseCatalog,
@@ -90,7 +91,7 @@ test('getAntigravityModelCatalog: falls back when no token file exists', async (
     throw new Error('fetch must not be called without a token');
   });
   try {
-    const result = await getAntigravityModelCatalog();
+    const result = await getAntigravityModelCatalog(null);
     assert.deepEqual(result, { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true });
   } finally {
     restoreFetch();
@@ -111,7 +112,7 @@ test('getAntigravityModelCatalog: returns live catalog on a successful fetch', a
     }),
   );
   try {
-    const result = await getAntigravityModelCatalog();
+    const result = await getAntigravityModelCatalog(null);
     assert.ok(result.OPTIONS.some((o) => o.value === 'gemini-9-pro'));
     // A live fetch is authoritative — it must NOT be flagged degraded, so the
     // provider-models cache keeps it under the normal long TTL.
@@ -137,14 +138,40 @@ test('getAntigravityModelCatalog: falls back on HTTP error and opens the breaker
     // Threshold is 3 consecutive failures; the 4th call must be short-circuited
     // by the open breaker and not hit fetch again.
     for (let i = 0; i < 3; i += 1) {
-      const result = await getAntigravityModelCatalog();
+      const result = await getAntigravityModelCatalog(null);
       assert.deepEqual(result, { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true });
     }
     assert.equal(calls, 3);
 
-    const afterOpen = await getAntigravityModelCatalog();
+    const afterOpen = await getAntigravityModelCatalog(null);
     assert.deepEqual(afterOpen, { ...ANTIGRAVITY_FALLBACK_MODELS, degraded: true });
     assert.equal(calls, 3, 'breaker must be open: no further fetch calls');
+  } finally {
+    restoreFetch();
+    restoreHome();
+    __resetAntigravityCatalogCircuit();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+// ---------------- per-identity breaker (B-1284) ----------------
+
+test('B-1284: the catalog breaker tracks the failing identity and a success deletes it', async () => {
+  __resetAntigravityCatalogCircuit();
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-catalog-identity-'));
+  const restoreHome = patchHomeDir(tempRoot);
+  await writeTokenFile(tempRoot, 'operator-token');
+  let fail = true;
+  const restoreFetch = stubFetch(async () => (fail
+    ? new Response('unauthorized', { status: 401 })
+    : new Response(JSON.stringify({ models: [{ modelId: 'gemini-9-pro' }] }), { status: 200 })));
+  try {
+    await getAntigravityModelCatalog(null);
+    assert.equal(__antigravityCatalogCircuitSize(), 1, 'the failing identity is tracked');
+    fail = false;
+    const live = await getAntigravityModelCatalog(null);
+    assert.ok(live.OPTIONS.some((o) => o.value === 'gemini-9-pro'));
+    assert.equal(__antigravityCatalogCircuitSize(), 0, 'success deletes the entry, so the map never grows');
   } finally {
     restoreFetch();
     restoreHome();

@@ -21,8 +21,34 @@ function assertOffline(databasePath) {
   }
 }
 
-/** Disable all links in an explicitly selected, offline restored copy inside this project. */
+const hasTable = (db, name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+
+/**
+ * Disable document AND session share links (ADR-196) in one transaction.
+ * Session shares also lose their snapshot blob, as every revocation does.
+ * @returns {{ documentShares: number, sessionShares: number }}
+ */
+function disableAll(db, at) {
+  return db.transaction(() => ({
+    documentShares: hasTable(db, 'document_shares')
+      ? db.prepare('UPDATE document_shares SET revoked_at=COALESCE(revoked_at,?)').run(at).changes : 0,
+    sessionShares: hasTable(db, 'session_shares')
+      ? db.prepare(`UPDATE session_shares SET revoked_at=COALESCE(revoked_at,@at),
+          revoke_reason=COALESCE(revoke_reason,'restored'), snapshot=NULL`).run({ at }).changes : 0,
+  }))();
+}
+
+/**
+ * Disable all links in an explicitly selected, offline restored copy inside this project.
+ * @returns {number} rows disabled across document and session shares
+ */
 export function disableRestoredShares(databasePath) {
+  const counts = disableRestoredShareTables(databasePath);
+  return counts.documentShares + counts.sessionShares;
+}
+
+/** Same as disableRestoredShares, with a per-table count. */
+export function disableRestoredShareTables(databasePath) {
   if (typeof databasePath !== 'string' || !path.isAbsolute(databasePath)) throw new Error('absolute_restored_copy_required');
   const resolved = realpathSync(databasePath);
   if (resolved !== databasePath || !resolved.startsWith(`${ROOT}${path.sep}`)
@@ -33,12 +59,9 @@ export function disableRestoredShares(databasePath) {
   const db = new Database(resolved, { fileMustExist: true });
   try {
     if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('restored_database_invalid');
-    const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='document_shares'").get();
-    if (!exists) return 0;
-    const result = db.transaction(() => db.prepare('UPDATE document_shares SET revoked_at=COALESCE(revoked_at,?)')
-      .run(new Date().toISOString()))();
+    const counts = disableAll(db, new Date().toISOString());
     db.pragma('wal_checkpoint(TRUNCATE)');
-    return result.changes;
+    return counts;
   } finally { db.close(); }
 }
 
@@ -48,7 +71,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.stderr.write('Usage: node scripts/document-shares-restore.mjs --restored-copy <absolute-project-copy.sqlite> --confirm-disable-shares\n');
     process.exitCode = 2;
   } else {
-    try { process.stdout.write(JSON.stringify({ disabled: disableRestoredShares(args[1]) }) + '\n'); }
+    try {
+      const counts = disableRestoredShareTables(args[1]);
+      process.stdout.write(JSON.stringify({ disabled: counts.documentShares + counts.sessionShares, ...counts }) + '\n');
+    }
     catch { process.stderr.write('Restore preparation refused. Use a verified offline copy inside the project; never the active database.\n'); process.exitCode = 1; }
   }
 }

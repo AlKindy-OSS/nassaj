@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { getConnection, projectsDb, rotateProjectStructureForPath, sessionsDb } from '@/modules/database/index.js';
+import {
+  getConnection, projectsDb, revokeSharesByProject, rotateProjectStructureForPath, sessionsDb,
+} from '@/modules/database/index.js';
 import { purgeProjectLogoFiles } from '@/modules/projects/services/project-logo.service.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -79,6 +81,8 @@ function deleteProjectRowsAtomically(projectId: string, projectPath: string): vo
       }>
     ).map((sessionRow) => sessionRow.session_id);
 
+    // ADR-196: null every share blob before the project row cascades the shares away.
+    revokeSharesByProject(db, projectId, 'project_gone');
     sessionsDb.deleteSessionsByProjectPath(projectPath);
     projectsDb.deleteProjectById(projectId, { deferFenceRotation: true });
 
@@ -128,6 +132,7 @@ export async function deleteOrArchiveProject(projectId: string, force: boolean):
 
   if (!force) {
     projectsDb.updateProjectIsArchivedById(projectId, true);
+    revokeSharesByProject(getConnection(), projectId, 'project_archived');
     return;
   }
 

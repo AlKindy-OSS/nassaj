@@ -33,8 +33,9 @@ import express from 'express';
 const verifyCalls: Array<{ hash: unknown; password: unknown }> = [];
 let verifyResult = false;
 
-// The row getUserByUsername returns for the current test (null → unknown user).
+// The row getUserByLoginIdentifier returns for the current test (null → unknown user).
 let userRow: Record<string, unknown> | null = null;
+const lookups: string[] = [];
 const connectorAuthRecords: Array<{ userId: number; method: string }> = [];
 
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
@@ -53,7 +54,7 @@ class MockInviteError extends Error {
 // Register mocks BEFORE importing the router (node:test mocks are not hoisted).
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
-    userDb: { getUserByUsername: () => userRow, updateLastLogin: () => {} },
+    userDb: { getUserByLoginIdentifier: (id: string) => { lookups.push(id); return userRow; }, updateLastLogin: () => {} },
     // ADR-194 D1: the mocked store makes the SSO state read fail closed
     // (enforced); this account has no IdP link, so local login stays open.
     userIdentitiesDb: { hasAnyLink: () => false },
@@ -149,7 +150,7 @@ async function login(username: string, password: string): Promise<Response> {
 
 test('B-142 attack: unknown user still runs verifyPassword against the decoy hash', async () => {
   verifyCalls.length = 0;
-  userRow = null; // getUserByUsername → null → unknown-user branch
+  userRow = null; // getUserByLoginIdentifier → null → unknown-user branch
   verifyResult = false;
 
   const res = await login('ghost-user', 'attempted-password');
@@ -195,4 +196,32 @@ test('B-142 happy path preserved: valid credentials return a token (200)', async
   assert.equal(body.token, 'test-jwt');
   assert.equal(body.user?.username, 'real');
   assert.deepEqual(connectorAuthRecords, [{ userId: 7, method: 'password' }]);
+});
+
+test('D2: login resolves a username or email case-insensitively through one lookup', async () => {
+  lookups.length = 0;
+  userRow = null;
+  verifyResult = false;
+  await login('  Real.Person@Example.TEST ', 'attempted-password');
+  await login('REAL', 'attempted-password');
+  assert.deepEqual(lookups, ['real.person@example.test', 'real']);
+});
+
+test('D2/I-ENUM: an unusable identifier shape takes the decoy path and the same 401', async () => {
+  for (const identifier of ['bad\u0007name', '   ']) {
+    verifyCalls.length = 0;
+    lookups.length = 0;
+    const res = await login(identifier, 'attempted-password');
+    assert.equal(res.status, 401, JSON.stringify(identifier));
+    assert.deepEqual(await res.json(), { error: 'Invalid username or password' });
+    assert.deepEqual(lookups, [], 'no lookup for an unusable shape');
+    assert.deepEqual(verifyCalls, [{ hash: DECOY_PASSWORD_HASH, password: 'attempted-password' }]);
+  }
+});
+
+test('D2: an oversized identifier is a 400 without any verification', async () => {
+  verifyCalls.length = 0;
+  const res = await login('a'.repeat(321), 'attempted-password');
+  assert.equal(res.status, 400);
+  assert.equal(verifyCalls.length, 0);
 });

@@ -236,24 +236,149 @@ function extractNestedCodexCommands(source: string, lease?: HistoryReadLease): s
   return commands;
 }
 
+const JS_STRING_LITERAL = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/y;
+const EXEC_COMMAND_CALL = /tools\s*\.\s*exec_command\s*\(/y;
+const EXEC_CMD_KEY = /\s*(?:cmd|"cmd"|'cmd')\s*:\s*/y;
+const PROPERTY_END = /\s*[,}]/y;
+const IDENTIFIER_CHARACTER = /[\w$.]/;
+/** Upper bound on recovered commands per `exec` script (history is a shared read surface). */
+const MAX_EXEC_COMMANDS = 64;
+/** Characters scanned between cooperative history-lease deadline checks. */
+const LEASE_CHECK_INTERVAL = 65_536;
+
+/**
+ * If `index` starts a string literal or comment, the index just past it;
+ * `index` itself when it starts ordinary code; -1 when the token is unterminated.
+ */
+function skipNonCode(source: string, index: number): number {
+  const character = source[index];
+  if (character === '"' || character === "'" || character === '`') {
+    JS_STRING_LITERAL.lastIndex = index;
+    const match = JS_STRING_LITERAL.exec(source);
+    return match ? index + match[0].length : -1;
+  }
+  if (character === '/' && source[index + 1] === '/') {
+    const end = source.indexOf('\n', index + 2);
+    return end < 0 ? source.length : end + 1;
+  }
+  if (character === '/' && source[index + 1] === '*') {
+    const end = source.indexOf('*/', index + 2);
+    return end < 0 ? -1 : end + 2;
+  }
+  return index;
+}
+
+/**
+ * Index of the `)` closing a call whose arguments start at `start`, skipping
+ * strings and comments; -1 when it never closes (the caller stops scanning).
+ */
+function findCallEnd(source: string, start: number, lease?: HistoryReadLease): number {
+  let depth = 1;
+  let nextLeaseCheck = start;
+  for (let index = start; index < source.length; index += 1) {
+    if (index >= nextLeaseCheck) { lease?.check(); nextLeaseCheck = index + LEASE_CHECK_INTERVAL; }
+    const skipped = skipNonCode(source, index);
+    if (skipped < 0) return -1;
+    if (skipped !== index) { index = skipped - 1; continue; }
+    const character = source[index];
+    if ('({['.includes(character)) depth += 1;
+    else if (')}]'.includes(character)) {
+      depth -= 1;
+      if (depth === 0) return character === ')' ? index : -1;
+    }
+  }
+  return -1;
+}
+
+/** Decoded `cmd` value when a literal-only `cmd:` property starts at `start`. */
+function readCmdPropertyAt(source: string, start: number, lease?: HistoryReadLease): string | null {
+  EXEC_CMD_KEY.lastIndex = start;
+  const key = EXEC_CMD_KEY.exec(source);
+  if (!key) return null;
+  const valueStart = start + key[0].length;
+  if (!'"\'`'.includes(source[valueStart] ?? '')) return null;
+  const valueEnd = skipNonCode(source, valueStart);
+  if (valueEnd < 0) return null;
+  PROPERTY_END.lastIndex = valueEnd;
+  // A computed value (`"a" + b`, `cmds[i]`) is not a recoverable literal.
+  if (!PROPERTY_END.test(source)) return null;
+  return decodeJavaScriptStringLiteral(source.slice(valueStart, valueEnd), lease);
+}
+
+/** Top-level `cmd` of one exec_command argument object; nested objects are ignored. */
+function readTopLevelExecCmd(argument: string, lease?: HistoryReadLease): string | null {
+  let depth = 0;
+  for (let index = 0; index < argument.length; index += 1) {
+    const skipped = skipNonCode(argument, index);
+    if (skipped < 0) return null;
+    if (skipped !== index) { index = skipped - 1; continue; }
+    const character = argument[index];
+    if ('({['.includes(character)) depth += 1;
+    else if (')}]'.includes(character)) depth -= 1;
+    if (depth === 1 && (character === '{' || character === ',')) {
+      const command = readCmdPropertyAt(argument, index + 1, lease);
+      if (command !== null) return command;
+    }
+  }
+  return null;
+}
+
+/** End of an exec_command call head (`tools.exec_command(`) at `index`, or -1. */
+function matchExecCallAt(source: string, index: number): number {
+  if (source[index] !== 't' || IDENTIFIER_CHARACTER.test(source[index - 1] ?? '')) return -1;
+  EXEC_COMMAND_CALL.lastIndex = index;
+  const match = EXEC_COMMAND_CALL.exec(source);
+  return match ? index + match[0].length : -1;
+}
+
+/**
+ * Commands of every `tools.exec_command({cmd: ...})` call in an `exec` script.
+ * One linear pass: strings and comments are skipped (so a quoted or commented
+ * call is not a command), scanning resumes after each call's closing `)`, and
+ * the `cmd` key is read only inside that call's own argument object.
+ */
+function extractExecCommandCalls(source: string, lease?: HistoryReadLease): string[] {
+  const commands: string[] = [];
+  if (!source.includes('exec_command')) return commands;
+  let nextLeaseCheck = 0;
+  for (let index = 0; index < source.length && commands.length < MAX_EXEC_COMMANDS; index += 1) {
+    if (index >= nextLeaseCheck) { lease?.check(); nextLeaseCheck = index + LEASE_CHECK_INTERVAL; }
+    const skipped = skipNonCode(source, index);
+    if (skipped < 0) break;
+    if (skipped !== index) { index = skipped - 1; continue; }
+    const start = matchExecCallAt(source, index);
+    if (start < 0) continue;
+    const end = findCallEnd(source, start, lease);
+    if (end < 0) break;
+    const argument = source.slice(start, end).trim();
+    const command = argument.startsWith('{') ? readTopLevelExecCmd(argument, lease) : null;
+    if (command !== null) commands.push(command);
+    index = end;
+  }
+  return commands;
+}
+
 /**
  * Newer Codex rollouts persist the orchestration wrapper (`exec`) instead of
  * the nested tool name. Recover the useful UI-level operation so history does
- * not degrade into rows labelled only "exec / Parameters".
+ * not degrade into rows labelled only "exec / Parameters". Both the older
+ * `tools.shell_command({command})` and the current
+ * `tools.exec_command({cmd})` shapes are recognized (B-1489).
  */
 function translateCodexExecInput(input: unknown, lease?: HistoryReadLease): { toolName: string; toolInput: string } | null {
   const source = typeof input === 'string' ? input : String(input || '');
-  if (/\btools\.shell_command\s*\(/.test(source)) {
-    const commands = extractNestedCodexCommands(source, lease);
-    if (commands.length > 0) {
-      return {
-        toolName: 'Bash',
-        toolInput: lease ? lease.stringify({ command: commands.join('\n') }) : JSON.stringify({ command: commands.join('\n') }),
-      };
-    }
+  const commands = /\btools\.shell_command\s*\(/.test(source)
+    ? extractNestedCodexCommands(source, lease)
+    : [];
+  commands.push(...extractExecCommandCalls(source, lease));
+  if (commands.length === 0) {
+    return null;
   }
-
-  return null;
+  const toolInput = { command: commands.join('\n') };
+  return {
+    toolName: 'Bash',
+    toolInput: lease ? lease.stringify(toolInput) : JSON.stringify(toolInput),
+  };
 }
 
 function humanizeCodexToolName(toolName: string): string {

@@ -670,7 +670,7 @@
     "cropHint": "Pfeiltasten verwenden, um den Zuschneidebereich zu verschieben oder anzupassen"
   },
   "inlineCode": {
-    "openLink": "Link öffnen — Rechtsklick zum Kopieren",
+    "copyLink": "Link kopieren",
     "copyHint": "Kopieren"
   }
 }

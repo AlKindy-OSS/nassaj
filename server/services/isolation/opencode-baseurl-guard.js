@@ -109,6 +109,10 @@ export class OpenCodeBaseUrlError extends Error {
     this.reason = details.reason ?? 'disallowed_host';
     this.label = details.label ?? null;
     this.shown = details.shown ?? null;
+    /** @type {string|null} 'project' when a project-level config file caused it. */
+    this.scope = null;
+    /** @type {string|null} the offending config file (project scope only). */
+    this.file = null;
   }
 }
 
@@ -166,35 +170,58 @@ export function expandOpenCodeInterpolation(value, env = process.env) {
 }
 
 /**
- * Collects every effective baseURL declared in an opencode config object. opencode
- * carries provider base URLs at `provider.<id>.options.baseURL`; a defensive scan
- * also picks up a `provider.<id>.baseURL` shorthand if one ever appears. Returns the
- * provider id, a label + the RAW (pre-expansion) value for each.
+ * Collects every effective endpoint declared in an opencode config object. opencode
+ * resolves a provider's URL from `provider.<id>.api` first, then
+ * `provider.<id>.options.baseURL` (B-1367: `api` was the unseen bypass), and a model can
+ * carry its own `provider.<id>.models.<m>.provider.api`. A `provider.<id>.baseURL`
+ * shorthand is scanned defensively. With `includeMcp`, every remote MCP
+ * `mcp.<name>.url` is collected too under the pseudo-provider `mcp:<name>`, which no
+ * origin is ever bound to — so any remote MCP endpoint is refused.
  *
- * @param {unknown} config parsed opencode.json
- * @returns {Array<{ provider: string, label: string, raw: string }>}
+ * A present, non-blank value that is not a string is still returned (and refused
+ * downstream as un-vettable) rather than skipped.
+ *
+ * @param {unknown} config parsed opencode config
+ * @param {{ includeMcp?: boolean }} [options]
+ * @returns {Array<{ provider: string, label: string, raw: unknown }>}
  */
-export function collectOpenCodeBaseUrls(config) {
+export function collectOpenCodeBaseUrls(config, { includeMcp = false } = {}) {
   const out = [];
-  const providers = config && typeof config === 'object' ? config.provider : null;
-  if (!providers || typeof providers !== 'object') {
-    return out;
+  const root = isObject(config) ? config : {};
+  for (const [name, block] of Object.entries(isObject(root.provider) ? root.provider : {})) {
+    if (!isObject(block)) continue;
+    pushEndpoint(out, name, `provider.${name}.api`, block.api);
+    pushEndpoint(out, name, `provider.${name}.options.baseURL`, isObject(block.options) ? block.options.baseURL : undefined);
+    pushEndpoint(out, name, `provider.${name}.baseURL`, block.baseURL);
+    for (const [modelId, model] of Object.entries(isObject(block.models) ? block.models : {})) {
+      const modelProvider = isObject(model) && isObject(model.provider) ? model.provider : null;
+      pushEndpoint(out, name, `provider.${name}.models.${modelId}.provider.api`, modelProvider?.api);
+    }
   }
-  for (const [name, block] of Object.entries(providers)) {
-    if (!block || typeof block !== 'object') {
-      continue;
-    }
-    const optionsBase = block.options && typeof block.options === 'object'
-      ? block.options.baseURL
-      : undefined;
-    if (typeof optionsBase === 'string' && optionsBase.trim() !== '') {
-      out.push({ provider: name, label: `provider.${name}.options.baseURL`, raw: optionsBase });
-    }
-    if (typeof block.baseURL === 'string' && block.baseURL.trim() !== '') {
-      out.push({ provider: name, label: `provider.${name}.baseURL`, raw: block.baseURL });
+  if (includeMcp) {
+    for (const [name, server] of Object.entries(isObject(root.mcp) ? root.mcp : {})) {
+      pushEndpoint(out, `mcp:${name}`, `mcp.${name}.url`, isObject(server) ? server.url : undefined);
     }
   }
   return out;
+}
+
+/** @param {unknown} value @returns {value is Record<string, any>} plain non-array object */
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Records one endpoint unless it is absent or a blank string.
+ * @param {Array<{ provider: string, label: string, raw: unknown }>} out
+ * @param {string} provider
+ * @param {string} label
+ * @param {unknown} value
+ */
+function pushEndpoint(out, provider, label, value) {
+  if (value === undefined || value === null) return;
+  if (typeof value === 'string' && value.trim() === '') return;
+  out.push({ provider, label, raw: value });
 }
 
 /**
@@ -279,9 +306,22 @@ export function assertOpenCodeBaseUrlAllowed(configPath, env = process.env, loca
     );
   }
 
-  const expectedOrigins = expectedOriginByProvider(localServerBaseUrls);
+  assertParsedConfigAllowed(config, env, expectedOriginByProvider(localServerBaseUrls));
+}
 
-  for (const { provider, label, raw: rawUrl } of collectOpenCodeBaseUrls(config)) {
+/**
+ * Validates every baseURL declared in one parsed opencode config object against the
+ * per-block origin map. Shared by the per-user (GL-3) and project-level (B-1367) checks
+ * so both apply the exact same expansion + binding rules.
+ *
+ * @param {unknown} config parsed opencode config
+ * @param {NodeJS.ProcessEnv} env effective env used to expand interpolations
+ * @param {Map<string, string>} expectedOrigins providerId → the one approved origin
+ * @param {{ includeMcp?: boolean }} [collectOptions] forwarded to collectOpenCodeBaseUrls
+ * @throws {OpenCodeBaseUrlError} on the first violation
+ */
+function assertParsedConfigAllowed(config, env, expectedOrigins, collectOptions = {}) {
+  for (const { provider, label, raw: rawUrl } of collectOpenCodeBaseUrls(config, collectOptions)) {
     const { expanded, unresolved } = expandOpenCodeInterpolation(rawUrl, env);
     if (unresolved) {
       throw notAllowedError(
@@ -305,6 +345,186 @@ export function assertOpenCodeBaseUrlAllowed(configPath, env = process.env, loca
     // matching authorized row) has no approved origin at all and fails closed.
     if (origin !== expectedOrigins.get(provider)) {
       throw notAllowedError(label, host, `points at a host this provider block is not bound to (the carrier block may only use "${ALLOWED_CARRIER_HOST}")`, 'disallowed_host');
+    }
+  }
+}
+
+/** Config filenames opencode merges from a project directory and from each `.opencode` dir. */
+const OPENCODE_PROJECT_CONFIG_NAMES = Object.freeze(['opencode.json', 'opencode.jsonc']);
+
+/**
+ * Env vars through which opencode reads an EXTRA config source (a file path, a config
+ * dir, or inline JSON). The carrier launcher strips them before spawn (B-1367); the
+ * qwen-plan path re-adds its own OPENCODE_CONFIG_CONTENT afterwards on purpose.
+ */
+export const OPENCODE_CONFIG_SOURCE_ENV = Object.freeze([
+  'OPENCODE_CONFIG',
+  'OPENCODE_CONFIG_DIR',
+  'OPENCODE_CONFIG_CONTENT',
+]);
+
+/**
+ * Strips JSONC comments and trailing commas so a project `opencode.jsonc` can be
+ * parsed with JSON.parse. Both passes are string-aware: string literals are copied
+ * verbatim (a `//` or `,}` inside a URL is data, not syntax).
+ *
+ * @param {string} text raw JSONC
+ * @returns {string} strict JSON text
+ */
+export function stripJsonc(text) {
+  return dropTrailingCommas(dropJsoncComments(text));
+}
+
+/** @param {string} text @returns {string} text without comments outside strings */
+function dropJsoncComments(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      const end = endOfJsonString(text, i);
+      out += text.slice(i, end);
+      i = end;
+    } else if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i += 1;
+    } else if (ch === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      i = close === -1 ? text.length : close + 2;
+    } else {
+      out += ch;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** @param {string} text comment-free JSON @returns {string} text without trailing commas */
+function dropTrailingCommas(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      const end = endOfJsonString(text, i);
+      out += text.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (ch === ',' && /^\s*[}\]]/.test(text.slice(i + 1))) {
+      i += 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * @param {string} text
+ * @param {number} start index of the opening quote
+ * @returns {number} index just past the closing quote (or text end)
+ */
+function endOfJsonString(text, start) {
+  let i = start + 1;
+  while (i < text.length) {
+    if (text[i] === '\\') i += 2;
+    else if (text[i] === '"') return i + 1;
+    else i += 1;
+  }
+  return text.length;
+}
+
+/**
+ * Lists every project-level config file opencode would merge for a run in `cwd`:
+ * `opencode.json(c)` and `.opencode/opencode.json(c)` in cwd and EVERY ancestor up to
+ * the filesystem root (a superset of opencode's walk, which stops at the git worktree),
+ * plus `<home>/.opencode/opencode.json(c)`. Only existing paths are returned.
+ *
+ * @param {string} cwd the run's working directory
+ * @param {string} [home] HOME the child will see
+ * @returns {string[]} absolute paths of existing candidate files
+ */
+export function listOpenCodeProjectConfigFiles(cwd, home = os.homedir()) {
+  const dirs = [];
+  let current = path.resolve(cwd);
+  for (;;) {
+    dirs.push(current, path.join(current, '.opencode'));
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (typeof home === 'string' && home.trim() !== '') {
+    dirs.push(path.join(path.resolve(home), '.opencode'));
+  }
+  const files = [];
+  for (const dir of new Set(dirs)) {
+    for (const name of OPENCODE_PROJECT_CONFIG_NAMES) {
+      const candidate = path.join(dir, name);
+      if (fs.existsSync(candidate) || isDanglingLink(candidate)) files.push(candidate);
+    }
+  }
+  return files;
+}
+
+/** @param {string} candidate @returns {boolean} true for a symlink whose target is missing */
+function isDanglingLink(candidate) {
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The opencode switch that stops it loading ANY project-level config: the working
+ * tree's `opencode.json(c)`, its `.opencode/` dirs (config, plugins, agents) and project
+ * AGENTS.md (verified in the installed 1.18.x binary). The carrier launcher sets it
+ * after env sanitization (B-1367); governance still arrives through the per-user
+ * `$XDG_CONFIG_HOME/opencode/AGENTS.md`, which the switch does not affect.
+ */
+export const OPENCODE_DISABLE_PROJECT_CONFIG_ENV = 'OPENCODE_DISABLE_PROJECT_CONFIG';
+
+/** Error `scope` marking a refusal caused by a project-level config file. */
+export const OPENCODE_PROJECT_CONFIG_SCOPE = 'project';
+
+/**
+ * Defense-in-depth guard over the PROJECT-level opencode config (B-1367). The carrier
+ * launcher already sets OPENCODE_DISABLE_PROJECT_CONFIG so opencode ignores these files;
+ * this check still refuses a carrier turn when one of them declares an endpoint, so a
+ * future opencode that stops honoring the switch cannot silently reroute the `glm`
+ * block. Every candidate (`opencode.json(c)` and `.opencode/opencode.json(c)` up the
+ * tree, plus `~/.opencode/`) is read, symlinks followed, and held to the same per-block
+ * origin binding as the per-user file — including `provider.*.api`, per-model
+ * `provider.api` and any remote `mcp.*.url`. An unreadable or unparseable candidate is
+ * refused, never skipped. Every refusal carries `scope: 'project'` and `file`.
+ *
+ * @param {string} cwd the run's working directory
+ * @param {NodeJS.ProcessEnv} [env] effective child env (expansion + HOME)
+ * @param {Record<string, string>} [localServerBaseUrls] providerId → endpoint
+ * @throws {OpenCodeBaseUrlError} code OPENCODE_BASEURL_NOT_ALLOWED on any violation
+ */
+export function assertOpenCodeProjectConfigAllowed(cwd, env = process.env, localServerBaseUrls = {}) {
+  const expectedOrigins = expectedOriginByProvider(localServerBaseUrls);
+  for (const file of listOpenCodeProjectConfigFiles(cwd, env?.HOME || os.homedir())) {
+    try {
+      let config;
+      try {
+        config = JSON.parse(stripJsonc(fs.readFileSync(file, 'utf8')));
+      } catch (err) {
+        throw new OpenCodeBaseUrlError(
+          `Refusing to spawn the opencode carrier: project config ${file} cannot be read or parsed `
+            + `(${err?.code || 'invalid JSON'}), so its provider routing cannot be validated.`,
+          { reason: err?.code ? 'unverifiable' : 'invalid_json', label: file },
+        );
+      }
+      assertParsedConfigAllowed(config, env, expectedOrigins, { includeMcp: true });
+    } catch (err) {
+      if (err instanceof OpenCodeBaseUrlError) {
+        err.scope = OPENCODE_PROJECT_CONFIG_SCOPE;
+        err.file = file;
+      }
+      throw err;
     }
   }
 }

@@ -40,21 +40,27 @@ const resolveProviderEnvUrl = pathToFileURL(
 // is present, base env untouched for anonymous/system callers) with no DB and no
 // filesystem provisioning. os.homedir() is read at CALL time so the per-test
 // temp-home patch below applies.
+const resolveProviderEnvStandIn = (
+  userId: string | number | null,
+  provider: string,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv => {
+  const env = { ...baseEnv };
+  if (userId === null || userId === undefined || userId === '' || provider !== 'codex') {
+    delete env.CODEX_HOME;
+    return env;
+  }
+  env.CODEX_HOME = path.join(os.homedir(), '.nassaj-users', String(userId), '.codex');
+  return env;
+};
+
+// The mock replaces the whole module, so every export a transitively imported
+// provider binds must exist. c1a46a519 (B-1284) added `resolveCatalogEnv`, the
+// catalog readers' wrapper over the same seam; mirror it here.
 mock.module(resolveProviderEnvUrl, {
   namedExports: {
-    resolveProviderEnv: (
-      userId: string | number | null,
-      provider: string,
-      baseEnv: NodeJS.ProcessEnv = process.env,
-    ): NodeJS.ProcessEnv => {
-      const env = { ...baseEnv };
-      if (userId === null || userId === undefined || userId === '' || provider !== 'codex') {
-        delete env.CODEX_HOME;
-        return env;
-      }
-      env.CODEX_HOME = path.join(os.homedir(), '.nassaj-users', String(userId), '.codex');
-      return env;
-    },
+    resolveProviderEnv: resolveProviderEnvStandIn,
+    resolveCatalogEnv: resolveProviderEnvStandIn,
   },
 });
 

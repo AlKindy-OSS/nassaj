@@ -84,6 +84,9 @@ test('GET lists the fence for the owner and refuses an admin', async () => {
   assert.equal(listed.body.fences[0].generation, 1);
   assert.equal(listed.body.fences[0].reasonCode, 'RECONCILED_EFFECT_UNKNOWN');
   assert.equal(listed.body.fences[0].decision, null);
+  // T-1910 S4 (qa M4): session-writer acknowledgements are listed for the owner.
+  assert.deepEqual(listed.body.recentAcknowledgements, []);
+  assert.equal(listed.body.recentAcknowledgementsAvailable, true);
 });
 
 test('lift refuses an admin, a missing acknowledgement and a blank reason', async () => {

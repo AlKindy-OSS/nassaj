@@ -100,6 +100,35 @@ describe('AuthContext.loginWithOidcCode', () => {
     expect(apiMock.onboardingStatus).toHaveBeenCalled();
   });
 
+  it('adopts a wallet-mode exchange as a cookie session and drops any stored bearer', async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'jwt-previous-member');
+    const wallet = {
+      generation: 1,
+      activeSlotId: 'slot-a',
+      accounts: [{ slotId: 'slot-a', displayName: 'linked', isActive: true, lastUsedAt: 1 }],
+    };
+    apiMock.exchange.mockResolvedValue(json({ wallet, csrfToken: 'csrf-synthetic' }));
+    identityFetch.mockResolvedValue(
+      json({ user: { id: 12, username: 'linked', role: 'user' }, isMultiUser: true }),
+    );
+    await mountProvider();
+
+    let result: Awaited<ReturnType<AuthContextValue['loginWithOidcCode']>> | undefined;
+    await act(async () => {
+      result = await auth!.loginWithOidcCode('one-time');
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(identityFetch).toHaveBeenCalledWith('/api/auth/user', {
+      credentials: 'same-origin', cache: 'no-store',
+    });
+    expect(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+    expect(auth!.token).toBeNull();
+    expect(auth!.user?.username).toBe('linked');
+    expect(auth!.deviceAccountSessionsEnabled).toBe(true);
+    expect(auth!.isMultiUser).toBe(true);
+  });
+
   it('leaves storage untouched when the code is rejected', async () => {
     apiMock.exchange.mockResolvedValue(json({ error: 'Invalid or expired code' }, 401));
     await mountProvider();

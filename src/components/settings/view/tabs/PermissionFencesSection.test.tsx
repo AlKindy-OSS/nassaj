@@ -15,13 +15,14 @@ type Call = { url: string; method: string; body?: Record<string, unknown> };
 let calls: Call[] = [];
 let fences: PermissionFence[] = [];
 let loadStatus = 200;
+let extra: Record<string, unknown> = {};
 
 vi.mock('../../../../utils/api', () => ({
   authenticatedFetch: vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (method === 'GET') {
-      return { ok: loadStatus < 400, status: loadStatus, json: async () => ({ fences, scopedFences: [] }) };
+      return { ok: loadStatus < 400, status: loadStatus, json: async () => ({ fences, scopedFences: [], ...extra }) };
     }
     fences = [];
     return { ok: true, status: 200, json: async () => ({ operationId: 'op-1' }) };
@@ -53,12 +54,46 @@ describe('PermissionFencesSection', () => {
     calls = [];
     fences = [];
     loadStatus = 200;
+    extra = {};
   });
   afterEach(() => cleanup());
 
   it('says there is nothing to lift when no fence exists', async () => {
     render(<PermissionFencesSection />);
     expect(await screen.findByText('permissionFences.none')).toBeTruthy();
+  });
+
+  it('lists recent acknowledgements newest first with committed state', async () => {
+    const row = (operationId: string, committed: boolean, atMs: number) => ({
+      operationId, sessionId: `sess-${operationId}`, actorUserId: 7, actorDeviceSessionId: 'd',
+      decisionOwnerUserId: 3, decisionId: 'x', atMs, committed,
+    });
+    extra = {
+      recentAcknowledgementsAvailable: true,
+      recentAcknowledgements: [row('b', true, 2000), row('a', false, 1000)],
+    };
+    render(<PermissionFencesSection />);
+    const box = await screen.findByTestId('recent-acknowledgements');
+    const items = box.querySelectorAll('li');
+    expect(items.length).toBe(2);
+    expect(items[0].textContent).toContain('sess-b');
+    expect(items[0].textContent).toContain('"actor":7');
+    expect(items[0].textContent).toContain('"owner":3');
+    expect(items[0].textContent).toContain('permissionFences.committed');
+    expect(items[1].textContent).toContain('permissionFences.notCommitted');
+  });
+
+  it('shows the empty note when available with no rows', async () => {
+    extra = { recentAcknowledgementsAvailable: true, recentAcknowledgements: [] };
+    render(<PermissionFencesSection />);
+    expect(await screen.findByText('permissionFences.recentEmpty')).toBeTruthy();
+  });
+
+  it('says the log is unreliable when unavailable, without listing rows', async () => {
+    extra = { recentAcknowledgementsAvailable: false, recentAcknowledgements: [] };
+    render(<PermissionFencesSection />);
+    expect(await screen.findByText('permissionFences.recentUnavailable')).toBeTruthy();
+    expect(screen.queryByText('permissionFences.recentEmpty')).toBeNull();
   });
 
   it('lifts only after a reason and the acknowledgement, and never sends force', async () => {

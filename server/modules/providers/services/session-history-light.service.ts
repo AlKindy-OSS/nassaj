@@ -84,7 +84,8 @@ const SAFE_SCALAR_FIELDS = [
   'canInterrupt', 'requestId', 'reason', 'newSessionId', 'parentSessionId', 'status',
   'summary', 'sequence', 'rowid', 'isTaskNotification', 'taskStatus', 'model',
   'transcriptMessageId', 'commandName', 'commandMessage', 'commandArgs',
-  'isLocalCommand', 'isLocalCommandStdout', 'isCompactSummary', 'imagesOmitted',
+  'isLocalCommand', 'isLocalCommandStdout', 'isCompactSummary', 'isSkillLoad', 'skillName',
+  'imagesOmitted',
   'code', 'staleSessionId', 'command', 'exitCode', 'actualSessionId',
   'parentToolUseId', 'isFinal', 'forked',
 ] as const;

@@ -1,3 +1,31 @@
+## 2.3.1.0 — 2026-10-04
+
+جلسات مشتركة برابط عام لأي شخص يملك التوكن مع عرض فقط (T-1970)، وتسجيل دخول موحد باسم مستخدم أو
+بريد إلكتروني (T-1973)، وتبديل حسابات اختياري معطّل افتراضياً، وجلسة جهاز جديدة بعد تغيير كلمة المرور
+المفروض، وكاتالوج نماذج مخصص لكل عضو (B-1284)، وقراءة حصص مزوّدات موضعياً بدون حظر دائم على
+إعادة التشغيل (T-1910 S1، بلا ترحيل)، وربط جلسات قرارات SDK بجلسة فريدة (T-1910 S2 / B-1202)، وإقرار
+كاتبي الجلسة برفع أسوار الجلسات بعد إثبات الاحتواء بلا موافقة مالك (T-1910 S4، بلا ترحيل)، ولوحة
+مشروع من كل مجلد مع ربط خارجي اختياري (B-1524)، وإعادة تنظيم الإعدادات بفئات ودعم التحديث المضمّن،
+وإصلاحات أمان حرجة (B-1541: عمليات محرّك مثبّتة ترفض على بيانات اعتماد Anthropic؛ B-1373: رفض جذور المشاريع تحت مدخلات مخفية؛ B-464، B-1325، B-1503، B-1374، B-446)، 
+وتحقّق حيّ من حالة اتصال Claude قبل عرض "متصل"،
+ودفتر ثابت لأوامر خام (B-1325)، وترقية أكثر أماناً (B-1146)،
+وعطّل فهرسة دماغ agy للأعضاء في المزامج (B-227 معطّلة؛ قيد معروفة على الأدمغة المشتركة، إعادة تفعيل مع إصلاح الملكية لاحقاً)،
+وإصلاحات دردشة (B-1489، B-472)، وإصلاح حرج: كاسح المشاركة (B-1535)، وملف تعريف SSO الموثوق،
+وحذف auth.db القديم (B-973)، وتصنيف مشاركات المستندات (B-1514)، وفحص الاختبارات المنهارة (B-1436)، وترحيل fixtures الاختبار (B-1373 sweep).
+
+Session sharing via secure public links for anyone holding the token with read-only view (T-1970);
+unified sign-in by username or email (T-1973); optional account switching (off by default); fresh device
+session after forced password change; per-member model catalog (B-1284); in-process provider quota reads
+without permanent fencing on restart (T-1910 S1, schema-free); session-bound SDK turn decisions
+(T-1910 S2 / B-1202); session-writer acknowledgement of permission fences after proving containment,
+no owner approval required (T-1910 S4, schema-free); per-project board from its own folder with optional
+external binding (B-1524); reorganized settings with categorized agents and in-app update support;
+critical security fixes (B-1541: engine-pinned spawns refuse Anthropic credentials; B-1373: refuse project roots under hidden entries; B-464, B-1325, B-1503, B-1374, B-446);
+live Claude connection verification before showing "connected";
+durable raw-command ledger (B-1325); safer update (B-1146); agy session synchronizer no longer indexes
+member brains expansion in 2.3.1.0 (B-227 disabled; known limitation on shared brains, re-enabled with ownership fix later); chat fixes (B-1489, B-472); critical fix: share sweeper (B-1535); trusted SSO profile verification; legacy auth.db
+no longer seeds test databases (B-973); document-share classification (B-1514); correct crash-file judging (B-1436); test fixture migration (B-1373 sweep).
+
 ## 2.3.0.13 — 2026-09-30
 
 **تحذير قبل الترقية:** هذه القفزة (من 2.3.0.12 إلى 2.3.0.13) تُنفَّذ بمحدِّث 2.3.0.12 القديم، فعيب

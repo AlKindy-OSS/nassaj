@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { api } from '../utils/api';
@@ -74,6 +74,9 @@ export const useBranding = (): BrandingContextValue => {
 export function BrandingProvider({ children }: { children: ReactNode }) {
   const [branding, setBranding] = useState<Branding>({ title: null, logoUrl: null, logoDarkUrl: null, logoOnly: false, splashHideTitle: false, nodeIconDataUri: null, nodeIconPosition: 'end', nodeIconHref: null });
   const [isLoading, setIsLoading] = useState(true);
+  // روابط الأيقونة الساكنة من index.html تُلتقط مرة واحدة لاستعادتها عند إزالة المخصّصة.
+  const originalIconsRef = useRef<Element[] | null>(null);
+  const customFaviconRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -121,18 +124,26 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     // الافتراضي فوراً بلا إعادة تحميل. والكتابة عبر الكاتب المشترك لا مباشرةً:
     // انظر `setPageBrandName` — الكتابة الخام تمحو علامة `[Done]` الحيّة.
     setPageBrandName(branding.title);
-    if (branding.logoUrl) {
-      // Replace the static favicon links with the uploaded logo (all allowed
-      // upload formats — png/jpg/webp/svg — are valid favicon sources in
-      // current browsers). apple-touch-icon links are left alone: iOS needs
-      // fixed-size PNGs and falls back gracefully.
-      document.head.querySelectorAll('link[rel="icon"]').forEach((node) => node.remove());
+    // الأولوية: أيقونة الخادم > الشعار > أيقونات index.html الأصلية. apple-touch-icon
+    // تُترك كما هي: iOS يحتاج PNG بمقاسات ثابتة ويتراجع بسلاسة.
+    const faviconHref = branding.nodeIconDataUri ?? branding.logoUrl;
+    if (!originalIconsRef.current) {
+      originalIconsRef.current = Array.from(document.head.querySelectorAll('link[rel="icon"]'));
+    }
+    if (!faviconHref && !customFaviconRef.current) {
+      return;
+    }
+    document.head.querySelectorAll('link[rel="icon"]').forEach((node) => node.remove());
+    if (faviconHref) {
       const link = document.createElement('link');
       link.rel = 'icon';
-      link.href = branding.logoUrl;
+      link.href = faviconHref;
       document.head.appendChild(link);
+    } else {
+      originalIconsRef.current.forEach((node) => document.head.appendChild(node));
     }
-  }, [branding.title, branding.logoUrl, isLoading]);
+    customFaviconRef.current = Boolean(faviconHref);
+  }, [branding.title, branding.logoUrl, branding.nodeIconDataUri, isLoading]);
 
   return (
     <BrandingContext.Provider value={{ ...branding, isLoading, refresh }}>

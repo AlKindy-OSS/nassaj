@@ -32,8 +32,9 @@ import { GLM_CARRIER_MODELS } from '@/modules/providers/shared/vendor/vendor-con
 const PINNED = {
   // B-1283: bumped to 6 alongside the degraded-fallback flagging in the
   // cursor/opencode/hermes catalog adapters (the carrier fingerprint is
-  // unchanged, so this pin tracks the version-only bump).
-  cacheVersion: 6,
+  // unchanged, so this pin tracks the version-only bump). B-1284: bumped to 7
+  // when antigravity/opencode catalogs moved onto each member's credentials.
+  cacheVersion: 7,
   cacheTtlMs: 24 * 60 * 60 * 1000,
   // sha256 of the canonical JSON of GLM_CARRIER_MODELS at version 2 ({'glm-5.2'}).
   carrierFingerprint: crypto

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -42,7 +41,7 @@ for (const event of events) {
 
 async function withIsolatedDatabase(runTest) {
   const previousDatabasePath = process.env.DATABASE_PATH;
-  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'opencode-cli-db-'));
+  const tempDirectory = await mkdtemp('/var/tmp/opencode-cli-db-');
   const databasePath = path.join(tempDirectory, 'auth.db');
 
   closeConnection();
@@ -63,7 +62,7 @@ async function withIsolatedDatabase(runTest) {
 }
 
 test('spawnOpenCode records the spawning user so the web session is native (T-857 part أ)', { concurrency: false }, async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-cli-native-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-cli-native-');
   const previousOpenCodePath = process.env.OPENCODE_PATH;
   const pathExtKey = findEnvKey('PATHEXT');
   const previousPathExt = process.env[pathExtKey];
@@ -128,7 +127,7 @@ test('spawnOpenCode records the spawning user so the web session is native (T-85
 });
 
 test('spawnOpenCode emits session_created before normalized live messages for new sessions', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-cli-live-'));
+  const tempRoot = await mkdtemp('/var/tmp/opencode-cli-live-');
   // OC-06: the binary is now resolved via resolveOpenCodeBinaryPath(), which
   // prefers OPENCODE_PATH → ~/.opencode/bin/opencode → PATH. On a host where the
   // real CLI is installed the old PATH-injection would be bypassed, so pin the

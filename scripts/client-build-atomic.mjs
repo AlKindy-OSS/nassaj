@@ -41,7 +41,7 @@ export function clientBuildLockPath(root = ROOT) {
     return gitControlPath(root, 'nassaj-client-build.lock');
 }
 export const CLIENT_SOURCE_ENTRIES = [
-    'src', 'public', 'docs/team-wiki', 'index.html', 'package.json', 'package-lock.json',
+    'src', 'public', 'docs/team-wiki', 'index.html', 'share.html', 'package.json', 'package-lock.json',
     'vite.config.js', 'postcss.config.js', 'tailwind.config.js', 'tsconfig.json', 'tsconfig.preview.json', 'shared',
 ];
 export const CLIENT_ENV_FILES = ['.env', '.env.local', '.env.production', '.env.production.local'];

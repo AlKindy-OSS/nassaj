@@ -5,6 +5,7 @@ import { notifyProjectTransfer } from '@/modules/database/repositories/session-p
 import { isForeignTestRunPath } from '@/modules/database/test-run-root-guard.js';
 import { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';
 import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/index.js';
+import { isForbiddenProjectRoot } from '@/shared/secret-path-guard.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
 type SessionRow = {
@@ -90,6 +91,8 @@ const NATIVE_SESSION_PREDICATE_SQL = `(
 
 /** B-1420: warn once per leaked test path instead of on every rescan. */
 const warnedForeignTestRunPaths = new Set<string>();
+/** B-1373: warn once per refused protected root instead of on every rescan. */
+const warnedForbiddenProjectRoots = new Set<string>();
 
 export const sessionsDb = {
   createSession(
@@ -111,6 +114,17 @@ export const sessionsDb = {
       if (!warnedForeignTestRunPaths.has(normalizedProjectPath)) {
         warnedForeignTestRunPaths.add(normalizedProjectPath);
         console.warn('Skipped session discovered under a foreign test run root', { provider });
+      }
+      return sessionId;
+    }
+    // B-1373: a session whose cwd is the service user's home (or a secret
+    // location) must not auto-register that directory as a project — such a
+    // project would expose every credential under it. An already-registered row
+    // is left alone here; file access to it is refused by the path guard.
+    if (isForbiddenProjectRoot(normalizedProjectPath) && !projectsDb.getProjectPath(normalizedProjectPath)) {
+      if (!warnedForbiddenProjectRoots.has(normalizedProjectPath)) {
+        warnedForbiddenProjectRoots.add(normalizedProjectPath);
+        console.warn('Skipped session discovered under a protected root', { provider });
       }
       return sessionId;
     }

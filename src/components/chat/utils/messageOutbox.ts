@@ -178,6 +178,14 @@ function supportsSafeV2Storage(): boolean {
   return typeof indexedDB !== 'undefined' && typeof navigator !== 'undefined'
     && Boolean((navigator as Navigator & { locks?: LockManager }).locks?.request);
 }
+/**
+ * B-1531: an identity purge deletes these databases. A connection that ignores
+ * `versionchange` blocks that delete, so every connection yields to it.
+ */
+function releaseOnVersionChange(db: IDBDatabase): IDBDatabase {
+  db.onversionchange = () => db.close();
+  return db;
+}
 function openV2Database(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
     try {
@@ -188,7 +196,7 @@ function openV2Database(): Promise<IDBDatabase | null> {
         if (!db.objectStoreNames.contains(V2_IMAGES)) db.createObjectStore(V2_IMAGES);
         if (!db.objectStoreNames.contains(V2_META)) db.createObjectStore(V2_META);
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => resolve(releaseOnVersionChange(request.result));
       request.onerror = () => resolve(null);
     } catch { resolve(null); }
   });
@@ -448,7 +456,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
           db.createObjectStore(DB_STORE);
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => resolve(releaseOnVersionChange(request.result));
       request.onerror = () => resolve(null);
     } catch {
       resolve(null);
@@ -474,11 +482,13 @@ function createIndexedDbBlobStore(): OutboxBlobStore {
           settled = true;
           resolve(value);
         };
-        tx.onerror = () => finish(fallback);
-        tx.onabort = () => finish(fallback);
+        // Each operation owns its connection; a leaked one blocks deletion.
+        tx.onerror = () => { db.close(); finish(fallback); };
+        tx.onabort = () => { db.close(); finish(fallback); };
         run(store, finish);
-        tx.oncomplete = () => finish(fallback);
+        tx.oncomplete = () => { db.close(); finish(fallback); };
       } catch {
+        db.close();
         resolve(fallback);
       }
     });

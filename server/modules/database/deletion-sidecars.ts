@@ -15,6 +15,7 @@ const SESSION_SIDECARS = [
  ['scheduled_messages','DELETE FROM scheduled_messages WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],
  ['session_outcome_reads','DELETE FROM session_outcome_reads WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],
  ['session_run_outcomes','DELETE FROM session_run_outcomes WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],
+ ['session_shares','DELETE FROM session_shares WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],
  ['session_workspace_modes','DELETE FROM session_workspace_modes WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],
  ['turn_supervisor_hosted_context','DELETE FROM turn_supervisor_hosted_context WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],
  ['turn_supervisor_hosted_results','DELETE FROM turn_supervisor_hosted_results WHERE session_id IN (SELECT session_id FROM session_delete_batch_members WHERE operation_id=?)'],

@@ -1,4 +1,3 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 
 import express from 'express';
@@ -6,10 +5,10 @@ import express from 'express';
 import { DocumentShareError, inspectSharedDocument, readSharedDocument, sharedPageAssetScope } from '../services/document-share-files.js';
 import { buildSharedDocumentPreview, documentPreviewCsp, isPreviewableDocument } from '../services/document-share-preview.js';
 import { documentShareUrl, trustedDocumentShareOrigin } from '../services/document-share-url.js';
+import {
+  createShareId, createShareToken, hashShareToken, isShareId, verifyShareToken,
+} from '../services/share-capability.js';
 
-const ID = /^[a-f0-9]{32}$/;
-const TOKEN = /^[A-Za-z0-9_-]{43}$/;
-const digest = (value) => createHash('sha256').update(value).digest('hex');
 const admin = (user) => user && ['owner', 'admin'].includes(user.role);
 const unavailable = () => new DocumentShareError('SHARE_UNAVAILABLE');
 
@@ -112,10 +111,10 @@ function registerCreate(router, manage, writer, publicOrigin) {
     const expiresAt = expiry(req.body.expiresAt);
     const identity = await inspectSharedDocument(project.project_path, relativePath);
     checkWrite();
-    const id = randomBytes(16).toString('hex');
-    const token = audience === 'client' ? randomBytes(32).toString('base64url') : null;
+    const id = createShareId();
+    const token = audience === 'client' ? createShareToken() : null;
     const row = { id, project_id: project.project_id, relative_path: relativePath, audience,
-      token_hash: token ? digest(token) : null, root_dev: identity.root_dev, root_ino: identity.root_ino,
+      token_hash: token ? hashShareToken(token) : null, root_dev: identity.root_dev, root_ino: identity.root_ino,
       created_by: user.id, created_at: new Date().toISOString(), expires_at: expiresAt, revoked_at: null };
     if (!store.insert(row).changes) throw new DocumentShareError('SHARE_LIMIT_REACHED', 429);
     audit('document_share_created', user.id, id);
@@ -225,23 +224,45 @@ export function createDocumentSharesRouter({ getStore, verifyUser, isMember, can
   return router;
 }
 
+const MANAGEMENT_PATH = /^\/projects\/[^/]+\/document-shares(?:\/|$)/;
+const READ_PATH = /^\/document-shares(?:\/|$)/;
+
+/**
+ * `/api` mount. Management runs behind authenticateToken. Member reads keep
+ * their own Bearer verifier and, without a share token, first pass the
+ * device-cookie bridge (ADR-163 amendment 1, M4) so a wallet session can
+ * read a members-audience share. Share-token reads never consult a cookie.
+ * @param {import('express').RequestHandler} router createDocumentSharesRouter()
+ * @param {{ authenticateToken: import('express').RequestHandler,
+ *   deviceIdentity?: import('express').RequestHandler }} deps
+ */
+export function createDocumentSharesMount(router, { authenticateToken, deviceIdentity = (_req, _res, next) => next() }) {
+  return (req, res, next) => {
+    if (MANAGEMENT_PATH.test(req.path)) return authenticateToken(req, res, () => router(req, res, next));
+    if (!READ_PATH.test(req.path)) return next();
+    if (req.get('X-Share-Token')) return router(req, res, next);
+    return deviceIdentity(req, res, () => router(req, res, next));
+  };
+}
+
 function authorizeRead(req, store, verifyUser, isMember) {
   const secret = req.get('X-Share-Token');
   if (!secret && req.assertCurrentIdentity?.() === false) {
     throw new DocumentShareError('AUTH_REQUIRED', 401);
   }
   const user = secret ? null : (req.user ?? verifyUser(req.get('Authorization')));
-  // For member requests authenticate before looking up any identifier.
-  if (!secret && !user) throw new DocumentShareError('AUTH_REQUIRED', 401);
-  if (!ID.test(req.params.id)) throw unavailable();
+  // For member requests authenticate before looking up any identifier. A
+  // forced password rotation is refused for a device session exactly as the
+  // Bearer verifier refuses it.
+  if (!secret && (!user || user.must_change_password === 1)) throw new DocumentShareError('AUTH_REQUIRED', 401);
+  if (!isShareId(req.params.id)) throw unavailable();
   const row = store.get(req.params.id);
   if (!row || row.revoked_at || row.source_missing_at
     || (row.expires_at && (!Number.isFinite(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= Date.now()))) throw unavailable();
   const project = store.project(row.project_id);
   if (!project) throw unavailable();
   if (row.audience === 'client') {
-    if (!secret || !TOKEN.test(secret) || !/^[a-f0-9]{64}$/.test(row.token_hash ?? '')
-      || !timingSafeEqual(Buffer.from(digest(secret), 'hex'), Buffer.from(row.token_hash, 'hex'))) throw unavailable();
+    if (!verifyShareToken(secret, row.token_hash)) throw unavailable();
   } else if (secret) {
     throw unavailable();
   } else if (!user || (!admin(user) && !isMember(project.project_path, user.id))) {

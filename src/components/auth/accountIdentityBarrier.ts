@@ -153,10 +153,61 @@ export function lockIdentityBarrier(version: string, reason: string): void {
 
 /** Release the fence only after cleanup and authoritative identity hydration. */
 export function stabilizeIdentityBarrier(version: string): void {
-  // Stable means this tab completed cleanup and hydration. Never broadcast or
-  // persist it: another tab may still be reconciling or may be fail-closed.
+  // Stable means this tab completed cleanup and hydration. Never broadcast it:
+  // another tab may still be reconciling or may be fail-closed.
   if (snapshot.version !== version) return;
   applySnapshot({ phase: 'stable', version, reason: '' }, { publish: false, persist: false, force: true });
+  releasePersistedFence(version);
+}
+
+/**
+ * Drop the persisted fence once this exact transition has been reconciled, so
+ * a later reload starts normally instead of re-running a finished cleanup
+ * (B-1531/B-1532). Compare-and-clear: a newer transition stays persisted, and
+ * a removed key is ignored by other tabs (it never advances a version).
+ */
+function releasePersistedFence(version: string): void {
+  if (typeof localStorage === 'undefined') return;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw === null || raw.length > 4_096) return;
+  try {
+    // A corrupt record carries no version to compare, so it is never removed.
+    if (normalizeSnapshot(JSON.parse(raw))?.version === version) localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Unreadable: leave it in place.
+  }
+}
+
+/**
+ * Recovery from a locked tab: start a fresh local reconciliation (full cleanup
+ * and authoritative hydration). Never unlocks without that reconciliation.
+ */
+export function retryIdentityReconciliation(reason = 'identity_reconciliation_retry'): void {
+  if (snapshot.phase !== 'locked' && snapshot.phase !== 'committed') return;
+  applySnapshot(
+    { phase: 'committed', version: nextVersion(), reason },
+    { publish: false, persist: true, force: true },
+  );
+}
+
+// A wallet edit that keeps the active account (add, remove an inactive slot)
+// still bumps the device generation, and the server then closes this device's
+// realtime sockets with 4401. That close is expected and must only redial,
+// never start an identity transition. The window is short and single-use.
+const EXPECTED_REVOCATION_WINDOW_MS = 15_000;
+let expectedRevocationUntil = 0;
+
+/** Announce (to this and other tabs) a same-identity wallet generation bump. */
+export function expectWalletGenerationBump(): void {
+  expectedRevocationUntil = Date.now() + EXPECTED_REVOCATION_WINDOW_MS;
+  channel?.postMessage({ kind: 'wallet-generation-bump' });
+}
+
+/** True once per announced bump: a 4401 that only needs a reconnect. */
+export function consumeExpectedWalletRevocation(): boolean {
+  if (snapshot.phase !== 'stable' || Date.now() > expectedRevocationUntil) return false;
+  expectedRevocationUntil = 0;
+  return true;
 }
 
 /** A 4401 revocation is authoritative and must never enter reconnect backoff. */
@@ -207,7 +258,12 @@ export function receiveIdentityBarrierSnapshot(value: unknown): void {
   if (shouldAccept(next)) applySnapshot(next, { publish: false, persist: false });
 }
 
-channel?.addEventListener('message', (event: MessageEvent<IdentityBarrierSnapshot>) => {
+channel?.addEventListener('message', (event: MessageEvent<unknown>) => {
+  const data = event.data as { kind?: unknown } | null;
+  if (data && typeof data === 'object' && data.kind === 'wallet-generation-bump') {
+    expectedRevocationUntil = Date.now() + EXPECTED_REVOCATION_WINDOW_MS;
+    return;
+  }
   receiveIdentityBarrierSnapshot(event.data);
 });
 

@@ -8,7 +8,7 @@ import { WebSocket, type RawData } from 'ws';
 
 import { assertRealtimePrincipalCurrent } from '@/modules/account-wallet/index.js';
 import {
-  isProjectPathVisibleToUser,
+  isProjectPathWritableByUser,
   readRequestUserId,
 } from '@/modules/websocket/services/chat-websocket.service.js';
 import {
@@ -1018,11 +1018,11 @@ export function handleShellConnection(
           return;
         }
 
-        // B-36 / B-PRIV: same spawn guard as chat — refuse to open a PTY inside
-        // a KNOWN private project the authenticated user is not a member of
-        // (404-equivalent), before any reattach or spawn. Unregistered paths
-        // pass (creation/first-run flow), mirroring the chat behavior.
-        if (!isProjectPathVisibleToUser(projectPath, userId)) {
+        // B-36 / B-1411: same launch gate as chat (404-equivalent), before any
+        // reattach or spawn: visibility with the membership flag off, the
+        // containing project's write predicate with it on. A UI/API gate, not
+        // an OS boundary (one uid).
+        if (!isProjectPathWritableByUser(projectPath, userId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Project not found' }));
           ws.close(4404, 'Project not found');
           return;

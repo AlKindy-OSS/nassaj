@@ -92,5 +92,8 @@ export function visibleCategoriesFor(agent: AgentProvider): AgentCategory[] {
     categories.push('skills');
   }
 
+  // تحديث أداة الوكيل: تبويبٌ لكل وكيل في آخر الشريط دائماً — موضعٌ ثابت.
+  categories.push('update');
+
   return categories;
 }

@@ -24,6 +24,7 @@ let wallet = { generation: 1, activeSlotId: 'slot-a', accounts: [
 let loginResponse: () => Promise<Response> = async () => Response.json({}, { status: 401 });
 let passwordResponse: () => Promise<Response> = async () => Response.json({}, { status: 400 });
 let passwordOptions: unknown;
+let inviteResponse: () => Promise<Response> = async () => Response.json({}, { status: 400 });
 let walletEnabled = true;
 let readWallet: () => Promise<typeof wallet> = async () => wallet;
 let mutateWallet: () => Promise<{ generation: number; activeSlotId: string | null }> = async () => ({ generation: 2, activeSlotId: null });
@@ -40,6 +41,7 @@ mock.module('../../../utils/api', { namedExports: { SSO_REAUTH_EVENT: 'auth:sso-
     user: () => initialUser(),
     userForIdentityReconciliation: () => hydrate(),
     login: () => loginResponse(),
+    acceptInvite: () => inviteResponse(),
     changePassword: (_current: string, _next: string, options: unknown) => {
       passwordOptions = options;
       return passwordResponse();
@@ -86,6 +88,7 @@ afterEach(() => {
   loginResponse = async () => Response.json({}, { status: 401 });
   passwordResponse = async () => Response.json({}, { status: 400 });
   passwordOptions = undefined;
+  inviteResponse = async () => Response.json({}, { status: 400 });
   walletEnabled = true;
   readWallet = async () => wallet;
   mutateWallet = async () => ({ generation: 2, activeSlotId: null });
@@ -521,4 +524,156 @@ test('normal device password success without token or wallet reconciles instead 
   assert.equal(view.result.current.user?.username, 'A');
   assert.equal(view.result.current.error, null);
   assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+});
+
+const twoAccountWallet = (active: 'slot-a' | 'slot-b') => ({ generation: 3, activeSlotId: active, accounts: [
+  { slotId: 'slot-a', displayName: 'A', isActive: active === 'slot-a', lastUsedAt: null },
+  { slotId: 'slot-b', displayName: 'Account B', isActive: active === 'slot-b', lastUsedAt: null },
+] });
+
+test('B-1532: a fence resumed on reload restores the wallet UI and clears the persisted fence', async () => {
+  walletEnabled = false;
+  const first = await mount();
+  first.unmount();
+  const version = barrier.beginIdentityTransition('switch');
+  barrier.commitIdentityTransition(version, 'switch');
+  assert.notEqual(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+  // The reloaded tab never runs the status check while fenced.
+  const reloaded = renderHook(() => useAuth(), { wrapper: ({ children }) => createElement(AuthProvider, null, children) });
+  await act(async () => {});
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+  assert.equal(reloaded.result.current.user?.username, 'B');
+  assert.equal(reloaded.result.current.deviceAccountSessionsEnabled, true);
+  assert.equal(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+});
+
+test('B-1531: an unchanged active account keeps drafts even without a local receipt', async () => {
+  let purges = 0;
+  purge = async () => { purges++; };
+  hydrate = async () => Response.json({ user: { id: 1, username: 'A' } });
+  const view = await mount();
+  sessionStorage.clear();
+  localStorage.setItem('draft_input_private', 'unsent');
+  for (const reason of ['wallet_generation_changed', 'identity_revoked']) {
+    await act(async () => {
+      const version = barrier.beginIdentityTransition(reason);
+      barrier.commitIdentityTransition(version, reason);
+    });
+    assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable', reason);
+  }
+  assert.equal(purges, 0);
+  assert.equal(localStorage.getItem('draft_input_private'), 'unsent');
+  assert.equal(view.result.current.user?.username, 'A');
+  assert.equal(localStorage.getItem('nassaj_identity_barrier_v1'), null);
+});
+
+test('B-1531: a revocation that changed the active account still purges before hydrating', async () => {
+  let purges = 0;
+  purge = async () => { purges++; };
+  const view = await mount();
+  sessionStorage.clear();
+  await act(async () => { barrier.reconcileRevokedIdentity(); });
+  assert.equal(purges, 1);
+  assert.equal(view.result.current.user?.username, 'B');
+});
+
+test('B-1531: a locked tab offers retry and sign-out instead of a dead end', async () => {
+  purge = async () => { throw new Error('indexeddb_delete_blocked:nassaj-outbox'); };
+  await mount();
+  await act(async () => {
+    const version = barrier.beginIdentityTransition('switch');
+    barrier.commitIdentityTransition(version, 'switch');
+  });
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'locked');
+  const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Try again');
+  const signOut = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Sign out');
+  assert.ok(retry && signOut);
+  purge = async () => {};
+  await act(async () => { retry.click(); });
+  await act(async () => {});
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+});
+
+test('B-1531: sign-out from a lock revokes the device and lands on a clean login', async () => {
+  let purges = 0;
+  purge = async () => { purges++; if (purges === 1) throw new Error('cache_delete_failed'); };
+  let logoutAllCalls = 0;
+  mutateWallet = async () => {
+    logoutAllCalls++;
+    readWallet = async () => { throw { status: 401, code: 'device_session_required' }; };
+    return { generation: 2, activeSlotId: null };
+  };
+  const view = await mount();
+  await act(async () => {
+    const version = barrier.beginIdentityTransition('switch');
+    barrier.commitIdentityTransition(version, 'switch');
+  });
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'locked');
+  const signOut = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Sign out');
+  await act(async () => { signOut!.click(); });
+  await act(async () => {});
+  assert.equal(logoutAllCalls, 1);
+  assert.equal(purges, 2);
+  assert.equal(view.result.current.user, null);
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'stable');
+});
+
+test('B-1534: signing out of the active account names the account that is now active', async () => {
+  wallet = twoAccountWallet('slot-a');
+  hydrate = async () => Response.json({ user: { id: 2, username: 'b-user' } });
+  mutateWallet = async () => {
+    readWallet = async () => twoAccountWallet('slot-b');
+    return { generation: 4, activeSlotId: 'slot-b' };
+  };
+  const view = await mount();
+  await act(async () => { view.result.current.logout(); });
+  await act(async () => {});
+  assert.equal(view.result.current.user?.username, 'b-user');
+  const notice = [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent).join(' ');
+  assert.match(notice, /Signed out\. The active account is now Account B/);
+});
+
+test('B-1533: a reload during a forced rotation restores the password-change-only state', async () => {
+  initialUser = async () => Response.json({ user: { id: 2, username: 'B' }, passwordChangeSession: true });
+  const view = renderHook(() => useAuth(), { wrapper: ({ children }) => createElement(AuthProvider, null, children) });
+  await act(async () => {});
+  assert.equal(view.result.current.user?.username, 'B');
+  assert.equal(view.result.current.mustChangePassword, true);
+  assert.equal(view.result.current.isLoading, false);
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'limited');
+  await act(async () => { barrier.exitPasswordChangeOnlyMode(); });
+});
+
+test('B-1533: a wrong temporary password is a coded form error, never an identity lock', async () => {
+  initialUser = async () => Response.json({}, { status: 401 });
+  loginResponse = async () => Response.json({ passwordChangeRequired: true, user: { id: 2, username: 'B' } });
+  const view = renderHook(() => useAuth(), { wrapper: ({ children }) => createElement(AuthProvider, null, children) });
+  await act(async () => {});
+  await act(async () => { await view.result.current.login('B', 'temporary'); });
+  passwordResponse = async () => Response.json(
+    { error: 'Current password is incorrect', code: 'current_password_incorrect' }, { status: 401 });
+  let result: Awaited<ReturnType<typeof view.result.current.changePassword>> | undefined;
+  await act(async () => { result = await view.result.current.changePassword('wrong', 'permanent-password'); });
+  assert.equal(result?.success, false);
+  assert.equal(result && !result.success ? result.code : null, 'current_password_incorrect');
+  assert.equal(barrier.getIdentityBarrierSnapshot().phase, 'limited');
+  await act(async () => { barrier.exitPasswordChangeOnlyMode(); });
+});
+
+test('B-1534: an invite join in wallet mode adopts the device session, not a bearer JWT', async () => {
+  initialUser = async () => Response.json({}, { status: 401 });
+  const view = renderHook(() => useAuth(), { wrapper: ({ children }) => createElement(AuthProvider, null, children) });
+  await act(async () => {});
+  initialUser = async () => Response.json({ user: { id: 5, username: 'joiner' } });
+  inviteResponse = async () => Response.json({
+    success: true, user: { id: 5, username: 'joiner', role: 'user' },
+    wallet: { generation: 1, activeSlotId: 'slot-j' }, csrfToken: 'csrf',
+  });
+  let result: { success: boolean } | undefined;
+  await act(async () => { result = await view.result.current.acceptInvite('invite', 'joiner', 'password-1'); });
+  assert.equal(result?.success, true);
+  assert.equal(view.result.current.user?.username, 'joiner');
+  assert.equal(view.result.current.token, null);
+  assert.equal(localStorage.getItem('auth-token'), null);
+  assert.equal(view.result.current.deviceAccountSessionsEnabled, true);
 });
