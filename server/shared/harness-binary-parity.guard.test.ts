@@ -549,6 +549,11 @@ const SINK_ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   // launch (prepareDshLaunch: verified node + registry script as args[0]).
   'modules/providers/list/dsh/dsh-dump-config-check.js#launch.command':
     'node running the registry dsh script (args[0]) with --dump-config',
+  // agy ACP (T-2094): plan.launch is resolveCagedLaunch over
+  // resolveHarnessBinary('antigravity') in prepareAgyAcpLaunch; agy-cli.js
+  // passes that plan unchanged through admitAgyAcpTurn to the spawn.
+  'modules/providers/list/antigravity/agy-acp-runner.js#plan.launch.cmd':
+    'caged launch of the registry agy binary from prepareAgyAcpLaunch',
   // Generic git transport helper; its callers pass the literal 'git'.
   'routes/git.js#command': 'spawnAsync(git …) helper',
 });

@@ -137,6 +137,7 @@
       "pressure": "بلغت عتبة الضغط المقترحة"
     },
     "unavailable": "قراءة السياق الحالي غير متاحة",
+    "staleEstimate": "تقدير — حتى نهاية الدور السابق",
     "cache": {
       "title": "إعادة استخدام الكاش",
       "ratio": "نسبة إعادة الاستخدام: {{percent}}",
@@ -1342,6 +1343,13 @@
   "images": {
     "remove": "أزل الصورة",
     "closePreview": "أغلق المعاينة",
+    "previewFallback": "معاينة الصورة",
+    "toolbar": "أدوات تكبير الصورة",
+    "zoomIn": "كبّر الصورة",
+    "zoomOut": "صغّر الصورة",
+    "resetZoom": "أعد الصورة إلى ملاءمة الشاشة",
+    "openOriginal": "افتح الصورة الأصلية في تبويب جديد",
+    "download": "نزّل الصورة الأصلية",
     "omitted": "لم تُحمّل {{count}} من الصور المرفقة لحماية الذاكرة."
   },
   "questionAnswer": {
@@ -1827,5 +1835,30 @@
       "denyNoteHint": "يصل إلى المحادثة مقروناً باسمك.",
       "counter": "{{count}} / {{max}}"
     }
+  },
+  "turnCheckpoint": {
+    "filesChanged_zero": "لا تغييرات في الملفات",
+    "filesChanged_one": "تغيّر ملف واحد",
+    "filesChanged_two": "تغيّر ملفان",
+    "filesChanged_few": "تغيّرت {{count}} ملفات",
+    "filesChanged_many": "تغيّر {{count}} ملفًا",
+    "filesChanged_other": "تغيّر {{count}} ملف",
+    "withheld_zero": "({{count}} محجوب)",
+    "withheld_one": "({{count}} محجوب)",
+    "withheld_two": "({{count}} محجوب)",
+    "withheld_few": "({{count}} محجوب)",
+    "withheld_many": "({{count}} محجوب)",
+    "withheld_other": "({{count}} محجوب)",
+    "noChanges": "لا تغييرات في الملفات",
+    "running": "يجري تتبّع التغييرات…",
+    "openLabel": "{{summary}}. اعرض تغييرات هذا الدور",
+    "skip": {
+      "not_overlay": "تتبّع التغييرات غير متاح: مساحة عمل مشتركة",
+      "no_principal": "تتبّع التغييرات غير متاح: لا مستخدم مرتبط",
+      "not_owner": "تتبّع التغييرات متاح لمالك المحادثة فقط",
+      "low_disk": "تتبّع التغييرات متوقف: مساحة القرص منخفضة",
+      "timeout": "تتبّع التغييرات تجاوز المهلة"
+    },
+    "failed": "تعذّر تسجيل تغييرات هذا الدور"
   }
 }

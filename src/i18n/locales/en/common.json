@@ -1142,12 +1142,57 @@
       "fromCurrent": "This will create a new branch from the current branch ({{branch}})",
       "creating": "Creating…",
       "submit": "Create branch"
+    },
+    "turns": {
+      "tab": "Turn changes",
+      "turnN": "Turn {{n}}",
+      "withheldFile": "Withheld, not captured",
+      "phasePre": "Withheld before the turn",
+      "binary": "Binary file",
+      "empty": "No recorded turns yet",
+      "notFound": "Changes are not available for this conversation",
+      "loadOlder": "Load older turns",
+      "retry": "Retry",
+      "loadError": "Could not load turn changes",
+      "noFiles": "No file changes",
+      "filesTruncated": "Showing the first 500 files only",
+      "legendWithheld": "Withheld",
+      "status": {
+        "running": "Running",
+        "interrupted": "Interrupted"
+      },
+      "fileStatus": {
+        "A": "Added",
+        "M": "Modified",
+        "D": "Deleted"
+      },
+      "count": {
+        "added_one": "{{count}} added",
+        "added_other": "{{count}} added",
+        "modified_one": "{{count}} modified",
+        "modified_other": "{{count}} modified",
+        "deleted_one": "{{count}} deleted",
+        "deleted_other": "{{count}} deleted",
+        "withheld_one": "{{count}} withheld",
+        "withheld_other": "{{count}} withheld"
+      },
+      "reasons": {
+        "too_large": "Too large",
+        "secret_content": "Secret content",
+        "secret_container": "Secrets file",
+        "denied_path": "Denied path",
+        "budget": "Over budget",
+        "hardlink": "Hard link",
+        "special": "Special file",
+        "protected_content": "Protected content"
+      }
     }
   },
   "folderBrowser": {
     "title": "Select folder",
     "createFolder": "Create new folder",
     "newFolderName": "New folder name",
+    "create": "Create",
     "noSubfolders": "No subfolders found",
     "select": "Select",
     "path": "Path:",

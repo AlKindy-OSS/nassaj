@@ -54,6 +54,13 @@ import {
   type OutboxIntent,
   type OutboxHistoryEligibility,
 } from '../utils/messageOutbox';
+import {
+  commandIdForIntent,
+  rememberSentTurnKey,
+  resolveStopTarget,
+  submitControlCommand,
+} from '../utils/controlCommandOutbox';
+import type { ControlFrameMap } from '../../../contexts/WebSocketContext';
 import type {
   ChatFile,
   ChatMessage,
@@ -259,6 +266,12 @@ interface UseChatComposerStateArgs {
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
+  /**
+   * T-2093 (ADR-TURN-SCOPED-CONTROL): sender-only receipts of turn-scoped
+   * stop/approval commands (WebSocketContext `controlReceipts`). A final STOP
+   * receipt clears the spinner even when the broadcast `complete` was lost.
+   */
+  controlReceipts?: ControlFrameMap;
   /**
    * T-1295 — سحب فقاعة المستخدم المتفائلة حين يفشل النقل. `null` للمحادثة التي
    * لم تُولد بعد (الفقاعة حينها معلَّقة في حالة المكوّن لا في المخزن).
@@ -485,6 +498,7 @@ export function useChatComposerState({
   verifyMessageDelivered,
   outboxHistory,
   userPrompts = NO_PROMPTS,
+  controlReceipts,
 }: UseChatComposerStateArgs) {
   const { user } = useAuth();
   const { t, i18n } = useTranslation('chat');
@@ -1244,6 +1258,8 @@ export function useChatComposerState({
         if (wantsCoordinationLevel) {
           options.coordinationLevel = effectiveCoordinationLevel;
         }
+        // T-2093: until this turn's first run frame arrives, a STOP names it by this id.
+        if (clientMsgId) rememberSentTurnKey(targetSessionId || null, clientMsgId);
         return sendMessage({ ...payload, options });
       };
 
@@ -2939,6 +2955,24 @@ export function useChatComposerState({
     [],
   );
 
+  // T-2093: a final STOP receipt clears the spinner of the session in view,
+  // even when the broadcast `complete` was lost across a reconnect. A
+  // `stale_target` receipt leaves the newer turn's spinner alone.
+  const handledReceiptSeqRef = useRef(0);
+  const viewSessionId = currentSessionId || selectedSession?.id || '';
+  useEffect(() => {
+    const fresh = [...(controlReceipts?.values() ?? [])]
+      .filter((receipt) => receipt.seq > handledReceiptSeqRef.current && receipt.frame?.kind === 'abort');
+    if (fresh.length === 0) return;
+    handledReceiptSeqRef.current = Math.max(...fresh.map((receipt) => receipt.seq));
+    setIsAborting(false);
+    const clearsView = fresh.some(({ frame }) => (frame.status === 'stopped' || frame.status === 'not_running')
+      && (!frame.result?.sessionId || frame.result.sessionId === viewSessionId));
+    if (!clearsView) return;
+    setIsLoading(false);
+    setCanAbortSession(false);
+  }, [controlReceipts, viewSessionId, setIsLoading, setCanAbortSession]);
+
   const handleAbortSession = useCallback(() => {
     if (!canAbortSession || isAborting) {
       return;
@@ -2961,11 +2995,18 @@ export function useChatComposerState({
     // empty id. The server falls back to the newest active claude run on THIS
     // socket, so STOP works before the id is known. Previously this bailed with
     // a silent console.warn, which is exactly the dead-button symptom.
-    const result = sendMessage({
+    // T-2093: name the turn the user saw and send one commandId per targeted
+    // turn, so a double press or a reconnect resend stops it at most once and a
+    // late press can never stop a newer turn.
+    const targetTurnKey = resolveStopTarget(targetSessionId);
+    const commandId = commandIdForIntent(`stop:${targetSessionId ?? ''}:${targetTurnKey ?? ''}`);
+    const result = submitControlCommand({
       type: 'abort-session',
       sessionId: targetSessionId || '',
       provider,
-    });
+      commandId,
+      ...(targetTurnKey ? { targetTurnKey } : {}),
+    }, sendMessage);
 
     // Surface transport failure instead of failing silently. A `void` return
     // (legacy senders) is treated as success.
@@ -3009,14 +3050,16 @@ export function useChatComposerState({
       }
 
       validIds.forEach((requestId) => {
-        sendMessage({
+        // T-2093: one commandId per requestId — a resend is replayed, never re-applied.
+        submitControlCommand({
           type: 'claude-permission-response',
           requestId,
           allow: Boolean(decision?.allow),
           updatedInput: decision?.updatedInput,
           message: decision?.message,
           rememberEntry: decision?.rememberEntry,
-        });
+          commandId: commandIdForIntent(`approval:${requestId}`),
+        }, sendMessage);
       });
 
       setPendingPermissionRequests((previous) => {

@@ -42,6 +42,16 @@ export interface SubagentChildTool {
   plan?: ProgressPlan;
 }
 
+/** T-2095: the live per-turn checkpoint outcome a chip renders under a reply. */
+export interface TurnCheckpointEvent {
+  turnSeq: number | null;
+  /** `running` is client-side only; the server emits captured/failed/skipped. */
+  status: 'captured' | 'failed' | 'skipped' | 'running';
+  reason?: string;
+  counts: { added: number; modified: number; deleted: number };
+  withheldCount: number;
+}
+
 export interface ChatMessage {
   /** Untranslated server classification; rendered only through the safe formatter. */
   serverError?: { code?: unknown; error?: unknown };
@@ -202,6 +212,8 @@ export interface ChatMessage {
   provider?: LLMProvider;
   /** B-1624: a neutral server notice row (`kind: 'notice'`), rendered as a muted line. */
   isNotice?: boolean;
+  /** T-2095: a turn checkpoint chip row (`kind: 'turn_checkpoint'`). */
+  turnCheckpoint?: TurnCheckpointEvent;
   /** B-1699: a known notice the client renders translated (e.g. `scheduled_wakeup`). */
   noticeCode?: string;
   /** B-1699: why a scheduled wake-up hold closed (`scheduled_wakeup_closed`). */

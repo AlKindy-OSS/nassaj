@@ -37,6 +37,7 @@ import {
   SqliteCancellationStore,
 } from './cancel-cascade.js';
 import { HOSTED_RESULT_SCHEMA_SQL, HostedResultStore, type DurableHostedResult } from './hosted-result-store.js';
+import { isCancellableActiveTurn } from './turn-cancel-match.js';
 import { probeProcess } from './watchdog.js';
 
 export type HostedHarnessMode = 'chat' | 'agent';
@@ -91,6 +92,8 @@ export type HostedSupervisorExecuteInput = {
 type ActiveTurn = {
   readonly provider: SupervisedChatProvider;
   readonly userId: number;
+  /** T-2093: the clientMsgId that started this turn (its turnKey). */
+  readonly clientMsgId: string;
   readonly controller: AbortController;
   readonly runId: string;
   readonly rootId: string;
@@ -390,6 +393,7 @@ export class HostedTurnSupervisorRuntime {
     const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
     this.#active.set(sessionId, {
       provider: input.provider, userId: input.userId, controller,
+      clientMsgId: input.clientMsgId,
       runId: adopted.run.runId, rootId: adopted.turn.turnId, settled, resolveSettled,
     });
     const writerEpoch = this.#recoveryStore!.claimWriter(adopted.run.runId);
@@ -513,14 +517,11 @@ export class HostedTurnSupervisorRuntime {
     provider: SupervisedChatProvider;
     sessionId: string;
     userId: number | null;
+    /** T-2093: when set, cancels only the turn started by this clientMsgId. */
+    clientMsgId?: string;
   }): boolean {
-    const active = this.#active.get(input.sessionId);
-    if (
-      !active
-      || active.provider !== input.provider
-      || input.userId == null
-      || active.userId !== input.userId
-    ) return false;
+    if (!isCancellableActiveTurn(this.#active.get(input.sessionId), input)) return false;
+    const active = this.#active.get(input.sessionId)!;
     void this.#cascade?.cancel(active.rootId, 'user_cancelled').catch((error) => {
       console.error('Durable hosted cancellation failed', { error });
     });

@@ -10,7 +10,17 @@
  * lease also blocks NEW spawns of that harness (the update service's live-run
  * check + the spawn-admission helper both read `isHarnessLeased`). In-process
  * only — this install runs a single server process.
+ *
+ * T-2094 (qa condition 2): taking a lease also drains the harness's pooled
+ * long-lived ACP processes, synchronously and before this call returns — so
+ * every updater (update, rollback, install) has stopped idle agy processes
+ * before it snapshots or replaces the binary. Busy ones are retired and die
+ * at the end of their turn; their launch reservation keeps the live-session
+ * gate closed meanwhile. The pool module imports nothing of the server, so
+ * this adds no import cycle.
  */
+
+import { drainProvider } from '../shared/acp/acp-process-pool.js';
 
 export interface HarnessLease {
   provider: string;
@@ -35,6 +45,7 @@ export function acquireHarnessLease(
   }
   const lease: HarnessLease = { provider, jobId, acquiredAt: now() };
   leases.set(provider, lease);
+  drainProvider(provider);
   return { lease };
 }
 

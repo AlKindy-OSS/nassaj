@@ -32,11 +32,20 @@ describe('Codex context-window usage', () => {
     const live = { contextSnapshot: nativeSnapshot({ provider: 'claude', usedTokens: 160_000 }) };
     const { rerender } = render(<TokenUsageSummary provider="claude" sessionId="s1" modelId="m1" usage={live} />);
     expect(screen.getByRole('progressbar')).toBeTruthy();
-    const boundary = { used: null, total: null, contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: null, usedTokens: null, windowTokens: null, usageKind: 'unknown', source: 'claude.message.usage', observedAt: '2026-09-13T13:00:00Z', nativeCompactTokens: null, proposedCompactTokens: null, newSessionTokens: null }) };
+    const boundary = { used: null, total: null, contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: null, usedTokens: null, windowTokens: null, usageKind: 'unknown', source: 'claude.message.usage', observedAt: '2026-09-13T13:00:00Z', nativeCompactTokens: null, proposedCompactTokens: null, newSessionTokens: null, invalidatedBy: 'compact_boundary' }) };
     const invalidated = newestContextUsage(live, boundary);
     rerender(<TokenUsageSummary provider="claude" sessionId="s1" modelId="m1" usage={invalidated} />);
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.getByRole('button', { name: 'Context usage unavailable' }).querySelector('.animate-pulse')).toBeNull();
+  });
+  it('a later Codex snapshot without a native reading still replaces the reading (unchanged by B-1803)', () => {
+    const live = { contextSnapshot: nativeSnapshot({ usedTokens: 20_000 }) };
+    const unknown = { contextSnapshot: nativeSnapshot({ usageKind: 'unknown', usedTokens: null, windowTokens: null, source: 'codex.token_count', observedAt: '2026-09-13T12:00:01Z' }) };
+    const next = newestContextUsage(live, unknown);
+    expect(next).toBe(unknown);
+    render(<TokenUsageSummary provider="codex" sessionId="s1" modelId="m1" usage={next} />);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Context usage unavailable' }).textContent).toContain('?');
   });
   it('clears occupancy on model or session changes until a matching reading arrives', () => {
     const usage = { contextSnapshot: nativeSnapshot({ usedTokens: 20_000 }) };

@@ -16,6 +16,12 @@ import { ingestPeerMessageFrame } from '../components/peer-relay/peerMessageStor
 import { ingestPeerHoldFrame } from '../components/peer-relay/peerHoldStore';
 import { consumeOutboxIngressVerdict } from '../components/chat/utils/messageOutbox';
 import {
+  acknowledgeControlCommand,
+  recordTurnKeyFrame,
+  resendPendingControlCommands,
+  resetControlCommandState,
+} from '../components/chat/utils/controlCommandOutbox';
+import {
   consumeExpectedWalletRevocation,
   getIdentityBarrierSnapshot,
   isIdentityRevocationClose,
@@ -101,6 +107,13 @@ type WebSocketContextType = {
    * the single-value `latestMessage`.
    */
   sessionAgentsFrames: ControlFrameMap;
+  /**
+   * T-2093 (ADR-TURN-SCOPED-CONTROL) — `control-command-receipt` frames keyed by
+   * `commandId`: the sender-only reply to a turn-scoped stop or approval. Its own
+   * slice, never `latestMessage`, so a receipt cannot clobber the preceding
+   * `complete` of the stopped turn.
+   */
+  controlReceipts: ControlFrameMap;
   streamFrames: StreamFrameMap;
   /** Durable reconnect signal; unrelated incoming frames cannot overwrite it. */
   reconnectEpoch: number;
@@ -220,6 +233,8 @@ export const CONTROL_MESSAGE_TYPES: ReadonlySet<string> = new Set(['session-stat
 
 /** ADR-218 — the server's full agents snapshot for one session. */
 export const SESSION_AGENTS_MESSAGE_TYPE = 'session-agents';
+/** T-2093: sender-only reply to a turn-scoped stop/approval command. */
+export const CONTROL_COMMAND_RECEIPT_TYPE = 'control-command-receipt';
 
 /**
  * أنواع **أحداث** التحكّم، مفروزة بـ`data.kind` لا `data.type`.
@@ -359,6 +374,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   const [controlFrames, setControlFrames] = useState<ControlFrameMap>(EMPTY_CONTROL_FRAMES);
   const [controlEvents, setControlEvents] = useState<ControlEventLog>(EMPTY_CONTROL_EVENTS);
   const [sessionAgentsFrames, setSessionAgentsFrames] = useState<ControlFrameMap>(EMPTY_CONTROL_FRAMES);
+  const [controlReceipts, setControlReceipts] = useState<ControlFrameMap>(EMPTY_CONTROL_FRAMES);
   const [streamFrames, setStreamFrames] = useState<StreamFrameMap>(EMPTY_STREAM_FRAMES);
   // عدّاد رتيب لإطارات التحكّم عبر كل الاتصالات: المستهلك يعرف به ما لم يُعالج.
   // **واحد للشريحتين** عمداً: به وحده يبقى ترتيب حدثٍ بالنسبة لحالةٍ معلوماً.
@@ -401,6 +417,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     // on account/password identity changes, but preserve it across ordinary
     // network reconnects where this effect does not re-run.
     resetSessionProcessStates();
+    // T-2093: turn keys and pending stop/approval commands belong to one identity too.
+    resetControlCommandState();
     // (Re)establishing the connection for a real token change: clear the
     // unmounted flag so the cleanup of the PREVIOUS run (which set it true)
     // does not permanently block this fresh connection. A genuine React unmount
@@ -471,6 +489,9 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           // This is a reconnect — signal so components can catch up on missed messages
           setReconnectEpoch(epoch => epoch + 1);
           setLatestMessage({ type: 'websocket-reconnected', timestamp: Date.now() });
+          // T-2093: a stop/approval without a receipt is resent with the SAME
+          // commandId (the server replays its result instead of acting twice).
+          resendPendingControlCommands((payload) => websocket.send(JSON.stringify(payload)));
         }
         hasConnectedRef.current = true;
       };
@@ -479,6 +500,19 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         if (myEpoch !== connEpochRef.current) return; // ignore stale socket
         try {
           const data = JSON.parse(event.data);
+          // T-2093: the receipt of a turn-scoped stop/approval — its own slice
+          // (never `latestMessage`), and it settles the control outbox now.
+          if (data && data.type === CONTROL_COMMAND_RECEIPT_TYPE) {
+            const commandId = typeof data.commandId === 'string' ? data.commandId : '';
+            if (!commandId) return;
+            acknowledgeControlCommand(data);
+            controlSeqRef.current += 1;
+            const seq = controlSeqRef.current;
+            setControlReceipts((previous) => applyControlFrame(previous, commandId, data, seq));
+            return;
+          }
+          // T-2093: run frames carry `turnKey`; remember it per session for STOP.
+          recordTurnKeyFrame(data);
           // The open_sessions_count message is a background counter update.
           // It updates its own slice of state without touching latestMessage so
           // that hooks watching latestMessage (e.g. useSessionParticipants) do
@@ -713,6 +747,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     controlFrames,
     controlEvents,
     sessionAgentsFrames,
+    controlReceipts,
     streamFrames,
     reconnectEpoch,
     isConnected,
@@ -724,6 +759,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     controlFrames,
     controlEvents,
     sessionAgentsFrames,
+    controlReceipts,
     streamFrames,
     reconnectEpoch,
     isConnected,

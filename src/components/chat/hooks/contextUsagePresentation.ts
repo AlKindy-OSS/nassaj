@@ -30,7 +30,11 @@ export function contextUsagePresentation(usage: Record<string, unknown> | null, 
   // A transcript snapshot (observedAt absent) whose usageKind is last_request_input carries
   // the last request's input tokens — the best available context-size estimate for past sessions.
   const transcriptEstimate = identityValid && !valid && snapshot?.usageKind === 'last_request_input';
-  const used = current || transcriptEstimate ? finiteCount(snapshot?.usedTokens) : null;
+  // B-1803 / B-1356: a preserved (stale) reading may over-state, never under-state.
+  const stale = current && snapshot?.stale === true;
+  const nativeUsed = current || transcriptEstimate ? finiteCount(snapshot?.usedTokens) : null;
+  const liveInput = stale ? finiteCount(snapshot?.liveInputTokens) : null;
+  const used = nativeUsed !== null && liveInput !== null ? Math.max(nativeUsed, liveInput) : nativeUsed;
   const window = valid || transcriptEstimate ? positiveCount(snapshot?.windowTokens) : null;
   const native = valid ? positiveCount(snapshot?.nativeCompactTokens) : null;
   const suppliedProposed = valid ? positiveCount(snapshot?.proposedCompactTokens) : null;
@@ -43,6 +47,7 @@ export function contextUsagePresentation(usage: Record<string, unknown> | null, 
     cumulative: finiteCount(usage?.cumulativeUsed),
     newSession: claude ? claude.close : null,
     source: valid ? snapshot?.source as string : null,
+    stale,
   };
 }
 
@@ -55,6 +60,30 @@ function positiveCount(value: unknown): number | null {
   return count !== null && count > 0 ? count : null;
 }
 
+const hasObservedAt = (snapshot: Record<string, unknown>) =>
+  typeof snapshot.observedAt === 'string' && Number.isFinite(Date.parse(snapshot.observedAt));
+
+/**
+ * B-1803: whether an incoming live Claude snapshot must keep the previous native reading.
+ * Model-switch rule: only result-path snapshots (native readings, failed reads, invalidations)
+ * carry the picker alias, so only those are compared with the preserved reading's modelId.
+ * A live `last_request_input` carries the native id of the same model and is never a switch.
+ * Explicit invalidations (`invalidatedBy`, or the legacy null-model `unknown` reset) clear.
+ */
+function keepsNativeReading(previous: Record<string, unknown>, incoming: Record<string, unknown>) {
+  if (previous.provider !== 'claude' || previous.usageKind !== 'native_reported_context' || !hasObservedAt(previous)) return false;
+  if (incoming.usageKind === 'native_reported_context' || incoming.invalidatedBy) return false;
+  if (incoming.usageKind === 'last_request_input') return true;
+  return incoming.usageKind === 'unknown' && incoming.modelId != null && incoming.modelId === previous.modelId;
+}
+
+/** Previous native reading, marked stale, carrying the latest live last-request input. */
+function staleReading(previous: Record<string, unknown>, incoming: Record<string, unknown>) {
+  const liveInputTokens = incoming.usageKind === 'last_request_input'
+    ? finiteCount(incoming.usedTokens) : finiteCount(previous.liveInputTokens);
+  return { ...previous, stale: true, liveInputTokens };
+}
+
 /** Ignore reordered native events for the same identity; null explicitly clears a session. */
 function newestContextOnly(current: Record<string, unknown> | null, incoming: Record<string, unknown> | null, origin: 'event' | 'hydration' = 'event') {
   if (!current || !incoming) return incoming;
@@ -63,10 +92,11 @@ function newestContextOnly(current: Record<string, unknown> | null, incoming: Re
   if (!a || !b || a.sessionId !== b.sessionId || a.provider !== b.provider) return incoming;
   // A delayed history request is not evidence that a live measurement expired.
   if (origin === 'hydration' && (a.usageKind === 'native_reported_context' || a.usageKind === 'unknown')
-    && typeof a.observedAt === 'string' && Number.isFinite(Date.parse(a.observedAt))) return current;
+    && hasObservedAt(a)) return current;
   const previousTime = typeof a.observedAt === 'string' ? Date.parse(a.observedAt) : NaN;
   const incomingTime = typeof b.observedAt === 'string' ? Date.parse(b.observedAt) : NaN;
-  return Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime ? current : incoming;
+  if (Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime) return current;
+  return origin === 'event' && keepsNativeReading(a, b) ? { ...incoming, contextSnapshot: staleReading(a, b) } : incoming;
 }
 
 /** Validate one inclusive cache observation without merging counters or inventing time. */

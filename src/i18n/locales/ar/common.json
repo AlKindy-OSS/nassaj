@@ -1186,12 +1186,73 @@
       "fromCurrent": "سيُنشأ فرع جديد من الفرع الحالي ({{branch}})",
       "creating": "جارٍ الإنشاء…",
       "submit": "أنشئ الفرع"
+    },
+    "turns": {
+      "tab": "تغييرات الأدوار",
+      "turnN": "الدور {{n}}",
+      "withheldFile": "محجوب، لم يُلتقط",
+      "phasePre": "محجوب قبل الدور",
+      "binary": "ملف ثنائي",
+      "empty": "لا أدوار مسجّلة بعد",
+      "notFound": "التغييرات غير متاحة لهذه المحادثة",
+      "loadOlder": "أدوار أقدم",
+      "retry": "إعادة المحاولة",
+      "loadError": "تعذّر تحميل تغييرات الأدوار",
+      "noFiles": "لا تغييرات في الملفات",
+      "filesTruncated": "تُعرض أول 500 ملف فقط",
+      "legendWithheld": "محجوب",
+      "status": {
+        "running": "جارٍ",
+        "interrupted": "متوقف"
+      },
+      "fileStatus": {
+        "A": "مضاف",
+        "M": "معدّل",
+        "D": "محذوف"
+      },
+      "count": {
+        "added_zero": "لا ملفات مضافة",
+        "added_one": "ملف مضاف واحد",
+        "added_two": "ملفان مضافان",
+        "added_few": "{{count}} ملفات مضافة",
+        "added_many": "{{count}} ملفًا مضافًا",
+        "added_other": "{{count}} ملف مضاف",
+        "modified_zero": "لا ملفات معدّلة",
+        "modified_one": "ملف معدّل واحد",
+        "modified_two": "ملفان معدّلان",
+        "modified_few": "{{count}} ملفات معدّلة",
+        "modified_many": "{{count}} ملفًا معدّلًا",
+        "modified_other": "{{count}} ملف معدّل",
+        "deleted_zero": "لا ملفات محذوفة",
+        "deleted_one": "ملف محذوف واحد",
+        "deleted_two": "ملفان محذوفان",
+        "deleted_few": "{{count}} ملفات محذوفة",
+        "deleted_many": "{{count}} ملفًا محذوفًا",
+        "deleted_other": "{{count}} ملف محذوف",
+        "withheld_zero": "لا ملفات محجوبة",
+        "withheld_one": "ملف محجوب واحد",
+        "withheld_two": "ملفان محجوبان",
+        "withheld_few": "{{count}} ملفات محجوبة",
+        "withheld_many": "{{count}} ملفًا محجوبًا",
+        "withheld_other": "{{count}} ملف محجوب"
+      },
+      "reasons": {
+        "too_large": "ملف كبير جدًا",
+        "secret_content": "محتوى سرّي",
+        "secret_container": "ملف أسرار",
+        "denied_path": "مسار محظور",
+        "budget": "تجاوز الحد",
+        "hardlink": "رابط صلب",
+        "special": "ملف خاص",
+        "protected_content": "محتوى محمي"
+      }
     }
   },
   "folderBrowser": {
     "title": "اختر مجلداً",
     "createFolder": "أنشئ مجلداً جديداً",
     "newFolderName": "اسم المجلد الجديد",
+    "create": "إنشاء",
     "noSubfolders": "لا مجلدات فرعية",
     "select": "اختر",
     "path": "المسار:",

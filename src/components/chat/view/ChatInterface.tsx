@@ -134,7 +134,7 @@ function ChatInterface({
   onSelectedSessionClosedChange,
 }: ChatInterfaceProps) {
   const { t } = useTranslation('chat');
-  const { isConnected, wsStatus, controlFrames, controlEvents, streamFrames, reconnectEpoch } = useWebSocket();
+  const { isConnected, wsStatus, controlFrames, controlEvents, controlReceipts, streamFrames, reconnectEpoch } = useWebSocket();
   const internalSessionChatCapability = useInternalSessionChatCapability();
 
   // Manual refresh state — prevents double-clicks and shows a spinner.
@@ -876,6 +876,7 @@ function ChatInterface({
     verifyOutboxEntry,
   } = useChatComposerState({
     selectedProject,
+    controlReceipts,
     selectedSession,
     currentSessionId,
     provider,

@@ -20,6 +20,7 @@ import { formatUsageLimitText } from '../../utils/chatFormatting';
 import { parseChoices } from '../../utils/parseChoices';
 import { extractAgyTextToolCalls } from '../../utils/agyTextToolCall';
 import { resolveTextDirection } from '../../../../utils/textDirection';
+import { openTurnChanges } from '../../../../utils/turnChangesNavigation';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Tooltip } from '../../../../shared/view/ui';
 import { getProviderDisplayName, getProviderCapabilities } from '../../constants/providerCapabilities';
@@ -31,6 +32,7 @@ import { useTurnCostMap } from '../../context/TurnCostContext';
 import { Markdown } from './Markdown';
 import ChatNoticeLine from './ChatNoticeLine';
 import { isNoticeForUser } from './noticeText';
+import TurnChangesChip from './TurnChangesChip';
 import AgyTextToolCalls from './AgyTextToolCalls';
 import ChatMessageImage from './ChatMessageImage';
 import MessageCopyControl from './MessageCopyControl';
@@ -277,7 +279,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   // vice-versa.
   // A compact skill-load line is not a reply: the assistant message after it
   // still opens its own group (provider logo / coordinator header).
-  const isGrouped = prevMessage && !prevMessage.isSkillLoad && !prevMessage.isNotice
+  const isGrouped = prevMessage && !prevMessage.isSkillLoad && !prevMessage.isNotice && !prevMessage.turnCheckpoint
     && !message.isNotice && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user' &&
@@ -462,6 +464,19 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
 
   if (shouldHideToolCall) {
     return null;
+  }
+
+  // T-2095: what this turn changed: one chip line, never a bubble.
+  if (message.turnCheckpoint) {
+    const chipSessionId = message.sessionId || sessionId || null;
+    return (
+      <div ref={messageRef} data-message-timestamp={message.timestamp || undefined} className="chat-message px-3 sm:px-0">
+        <TurnChangesChip
+          checkpoint={message.turnCheckpoint}
+          onOpen={(turnSeq) => { if (chipSessionId) openTurnChanges({ sessionId: chipSessionId, turnSeq }); }}
+        />
+      </div>
+    );
   }
 
   // T-2113: an owner-only notice (an ending sign-in) is not rendered for anyone else.

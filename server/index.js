@@ -246,6 +246,7 @@ import { harnessFilesRoutes } from './modules/harness-files/index.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
 import { createSessionPermissionFenceRouter } from './modules/providers/session-permission-fence.routes.js';
 import { readSessionTokenUsage } from './modules/providers/services/session-token-usage.service.js';
+import { providerModelsService } from './modules/providers/services/provider-models.service.js';
 import workflowSupervisorLaunchRoutes from './modules/workflow-supervisor/launch.route.js';
 import { ensureBackgroundTasksWatcher } from './modules/workflow-supervisor/background-tasks-watcher.service.js';
 import {
@@ -255,12 +256,15 @@ import {
     cliTurnSupervisor, CLI_TURN_SUPERVISOR_OWNER_ID,
 } from './modules/turn-supervisor/cli-turn-supervisor.service.js';
 import { createTurnSupervisorLifecycle } from './modules/turn-supervisor/lifecycle.js';
+import { createTurnCheckpointMaintenance } from './modules/turn-checkpoints/index.js';
 import { scheduleCodexLeaseBootReclaim } from './modules/providers/list/codex/codex-helpers-lease.js';
 import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, isSourceUpdateLeaseOwnerAlive, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced, DEVICE_COOKIE } from './modules/database/index.js';
 import { onSessionOutcomeChange } from './modules/websocket/services/session-outcome.service.js';
 import { broadcastSessionOutcome } from './modules/websocket/services/presence.service.js';
 import { revokeProjectLiveAccess } from './modules/websocket/services/project-membership-revocation.service.js';
 import { onMemberRemoved } from './modules/projects/services/project-visibility-management.service.js';
+import { wireAgyAcpLifecycle } from './modules/providers/list/antigravity/agy-acp-lifecycle.js';
+import { shutdownAgyAcp } from './modules/providers/list/antigravity/agy-acp-runner.js';
 import { isProjectVisible, coerceUserId } from './modules/projects/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { createPrestageCandidateBuilder, createSourceUpdater, defaultGitCheckoutProbe, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, resolveUpdateHostCapability, runFile, sourceUpdateErrorPayload } from './services/source-updater.js';
@@ -1543,6 +1547,8 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
 onMemberRemoved((event) => revokeProjectLiveAccess(event, {
     abortTurn: (sessionId, userId) => abortSessionTurn(chatDependencies, sessionId, null, userId),
 }));
+// T-2094: pooled agy ACP processes die with the grant or membership they ran on.
+wireAgyAcpLifecycle({ onMemberRemoved });
 // ADR-172 (P1-3): platform mode authenticates everyone as the first user, so
 // per-user project visibility is meaningless there. Warn, never crash.
 const platformVisibilityWarning = describePlatformModeVisibilityRisk(IS_PLATFORM, isProjectMembershipEnforced());
@@ -3996,6 +4002,8 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             {
                 getSessionById: (id) => sessionsDb.getSessionById(id),
                 getProjectPathById: (id) => projectsDb.getProjectPathById(id),
+                // B-1803: same source as the client's active-model read and the live path.
+                resolveSessionModel: (provider, id) => providerModelsService.resolveResumeModel(provider, id, null, userId),
             },
         );
         res.status(status).json(body);
@@ -4476,6 +4484,10 @@ async function startServer() {
                 CLI_TURN_SUPERVISOR_OWNER_ID,
             ],
             supervisors: [hostedTurnSupervisor, cliTurnSupervisor],
+            // T-2095: interrupted turns, stale locks and orphan checkpoint stores.
+            checkpointMaintenance: createTurnCheckpointMaintenance({
+                listProjectPaths: () => projectsDb.getProjectPaths().map((row) => row.project_path),
+            }),
         });
         const credentialFileWatcher = createCredentialFileWatcher();
         const backgroundLifecycle = createServerBackgroundLifecycle({
@@ -4641,6 +4653,8 @@ async function startServer() {
                 dsh: countDshRuns(),
             }),
             finalCleanup: async () => {
+                // T-2094: no long-lived agy ACP process outlives the server.
+                shutdownAgyAcp();
                 peerRelayDispatcher.stop();
                 stopHarnessAutoUpdateScheduler();
                 await stopDshProcesses();

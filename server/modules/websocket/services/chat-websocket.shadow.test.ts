@@ -75,6 +75,19 @@ const dispatchProviderCommand = (
 
 type Payload = Record<string, unknown>;
 
+/**
+ * T-2095 appends a turn_checkpoint frame after each turn; these tests count
+ * shadow output only. This filter cannot use production's identity check
+ * (isTurnCheckpointFrame): these fake writers are the raw socket writer, and
+ * the frame reaches it as the T-2093 turnKey-stamped copy, a new object.
+ * Production applies the identity check in the shadow writer, before that copy
+ * is made; chat-websocket.shadow-adversarial.test.ts pins that a provider frame
+ * that only carries kind 'turn_checkpoint' is still observed there.
+ */
+function isTurnCheckpointFrame(payload: unknown): boolean {
+  return Boolean(payload) && (payload as Payload).kind === 'turn_checkpoint';
+}
+
 function fakeWriter(): { writer: Record<string, unknown>; sent: Payload[] } {
   const sent: Payload[] = [];
   const writer = {
@@ -82,6 +95,7 @@ function fakeWriter(): { writer: Record<string, unknown>; sent: Payload[] } {
     userId: 41,
     isWebSocketWriter: true,
     send(payload: unknown) {
+      if (isTurnCheckpointFrame(payload)) return;
       sent.push(payload as Payload);
     },
     setSessionId(sessionId: string) {
@@ -333,6 +347,8 @@ describe('chat Phase-0 shadow hook', () => {
     assert.equal(counts.dispatch, 2);
     assert.equal(counts.observe, 2);
     assert.equal(counts.finish, 2);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(counts.observe, 2, 'T-2095 turn_checkpoint frames are never shadow evidence');
   });
 
   it('persists a terminal content summary for each real provider redispatch generation', async () => {
@@ -480,10 +496,10 @@ describe('chat Phase-0 shadow hook', () => {
       (capturedWriter as { send(payload: unknown): void }).send(firstLate);
       (capturedWriter as { send(payload: unknown): void }).send(secondLate);
       assert.deepEqual(sent.at(-2), {
-        ...firstLate, clientMsgId: 'delayed-send', coordinationLevel: 'delegate',
+        ...firstLate, clientMsgId: 'delayed-send', coordinationLevel: 'delegate', turnKey: 'delayed-send',
       });
       assert.deepEqual(sent.at(-1), {
-        ...secondLate, clientMsgId: 'delayed-send', coordinationLevel: 'delegate',
+        ...secondLate, clientMsgId: 'delayed-send', coordinationLevel: 'delegate', turnKey: 'delayed-send',
       });
       const parity = db.prepare('SELECT divergence_codes_json FROM conversation_shadow_parity')
         .get() as { divergence_codes_json: string };
@@ -534,6 +550,7 @@ describe('chat Phase-0 shadow hook', () => {
         ...payload,
         coordinationLevel: 'delegate',
         sameClientMsgIdRetryable: false,
+        turnKey: 'bounded-ingress',
       });
       assert.deepEqual(
         db.prepare(
@@ -578,6 +595,7 @@ describe('chat Phase-0 shadow hook', () => {
         userId: 41,
         isWebSocketWriter: true,
         send(payload: unknown) {
+          if (isTurnCheckpointFrame(payload)) return;
           serialized.push(JSON.stringify(payload));
         },
         setSessionId(sessionId: string) {
@@ -662,6 +680,7 @@ describe('chat Phase-0 shadow hook', () => {
       sessionId: null as string | null,
       userId: 41,
       send(payload: unknown) {
+        if (isTurnCheckpointFrame(payload)) return;
         serialized.push(JSON.stringify(payload));
       },
       setSessionId(sessionId: string) {
@@ -705,6 +724,7 @@ describe('chat Phase-0 shadow hook', () => {
         ...target,
         coordinationLevel: 'delegate',
         sameClientMsgIdRetryable: false,
+        turnKey: 'proxy-descriptor',
       })]);
       assert.equal(observedContext?.preInspectionFailed, true);
       assert.equal(observedAttestation, null);
@@ -735,6 +755,7 @@ describe('chat Phase-0 shadow hook', () => {
       sessionId: null as string | null,
       userId: 41,
       send(payload: unknown) {
+        if (isTurnCheckpointFrame(payload)) return;
         serialized.push(JSON.stringify(payload));
       },
       setSessionId(sessionId: string) {
@@ -783,6 +804,7 @@ describe('chat Phase-0 shadow hook', () => {
       assert.equal(serialized[0], JSON.stringify({
         ...topLevelPayload,
         coordinationLevel: 'delegate',
+        turnKey: 'top-level-to-json',
       }));
       assert.match(serialized[1], /nested-danger-on-wire/);
       assert.deepEqual(

@@ -71,7 +71,7 @@ import {
   steerHookTimeoutSeconds,
   steerTranscriptOpener,
 } from './modules/session-steer/index.js';
-import { claudeCacheSnapshot, claudeCacheTtlMinutes, claudeContextSnapshot, readClaudeContextSnapshot } from './modules/providers/list/claude/claude-token-usage.js';
+import { claudeCacheSnapshot, claudeCacheTtlMinutes, claudeCompactBoundarySnapshot, claudeContextSnapshot, readClaudeContextSnapshot } from './modules/providers/list/claude/claude-token-usage.js';
 import { messageCoordinationDb, providerRunFailuresDb, auditLogDb, messageAuthorsDb, participantsDb, sessionsDb  } from './modules/database/index.js';
 import {
   classifyEngineFailure,
@@ -539,6 +539,22 @@ function getNewestSessionForSocket(rawWs) {
   }
   return newest;
 }
+
+/**
+ * T-2093: the live run on this connection that `turnKey` started, or null. Used
+ * by an empty-id stop from a turn-scoped client instead of "the newest run".
+ *
+ * @param {object|null} rawWs - Raw socket the stop arrived on.
+ * @param {string} turnKey - clientMsgId that started the wanted run.
+ * @returns {string|null} The matching session id.
+ */
+function getSessionForSocketByTurnKey(rawWs, turnKey) {
+  if (!rawWs || !turnKey) return null;
+  for (const id of sessionsByConnection.get(rawWs) ?? []) {
+    if (activeSessions.get(id)?.clientMsgId === turnKey) return id;
+  }
+  return null;
+}
 // Guards the race window between removeSession() and the next addSession() for
 // the same sessionId — a writer swap during this gap would mismatch the new ws.
 const recentlyEndedSessions = new Map(); // sessionId → expiry timestamp
@@ -801,12 +817,12 @@ function authorizeClaudeTurnStop(sessionId, requesterUserId) {
  * any launch in progress, or an active run of another user (whatever its phase).
  * Runs before any hold is yielded, so a member never ends another member's hold.
  */
-function claimClaudeRunLaunch(sessionId, senderUserId, runToken) {
+function claimClaudeRunLaunch(sessionId, senderUserId, runToken, clientMsgId = null) {
   if (!sessionId) return null;
   const entry = activeSessions.get(sessionId);
   const foreignRun = entry?.status === 'active' && isForeignRunSender(entry.writer?.userId ?? null, senderUserId);
   if (launchReservations.holder(sessionId) || foreignRun) return describeSessionOccupancy(sessionId, senderUserId);
-  launchReservations.reserve(sessionId, senderUserId ?? null, runToken);
+  launchReservations.reserve(sessionId, senderUserId ?? null, runToken, clientMsgId);
   return null;
 }
 
@@ -3078,15 +3094,21 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
  *   NEWER run created for the same sessionId (which left the newer run
  *   unstoppable: abort/`isActive` resolve by sessionId only). Defaults to null =
  *   the legacy unconditional behaviour, so existing callers/tests are unchanged.
+ * @param {(() => void)|null} releaseInput - B-117 streaming-input close handle.
+ * @param {(() => void)|null} forceStop - B-1136 CLI kill handle.
  * @param {object|null} activity - ADR-173: the run's stream activity (createRunActivity).
+ * @param {string|null} turnKey - T-2093: the clientMsgId that started the run.
  * @returns {boolean} false when ADR-173 refused to displace another active run.
  */
-function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null, runTag = null, projectPath = null, runToken = null, releaseInput = null, forceStop = null, activity = null) {
+function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null, runTag = null, projectPath = null, runToken = null, releaseInput = null, forceStop = null, activity = null, turnKey = null) {
   if (registrationConflict(sessionId, runToken, writer)) return false;
   // qa r2 #1: a cancelled launch never registers beside the run that replaced it.
   if (runToken !== null && typeof runToken === 'symbol' && launchReservations.isRevoked(runToken)) return false;
   activeSessions.set(sessionId, {
     instance: queryInstance,
+    // T-2093: the clientMsgId that started this run (its turnKey). A stop naming
+    // another turn is refused as stale; null (no client id) keeps legacy stops.
+    clientMsgId: typeof turnKey === 'string' && turnKey ? turnKey : null,
     startTime: Date.now(),
     status: 'active',
     tempImagePaths,
@@ -5107,7 +5129,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
 
     // Track the query instance for abort capability
     if (capturedSessionId) {
-      if (!addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort(), runActivity)) {
+      if (!addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort(), runActivity, options.clientMsgId)) {
         throw runRegistrationRefused(capturedSessionId, runAbortController);
       }
       attachSteerRun(capturedSessionId);
@@ -5280,7 +5302,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         ) {
           claudeSessionRegistry.drop(capturedSessionId);
         }
-        if (!addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort(), runActivity)) {
+        if (!addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort(), runActivity, options.clientMsgId)) {
           throw runRegistrationRefused(capturedSessionId, runAbortController);
         }
         // ADR-218: the socket that started a NEW session mirrors it, so
@@ -5526,9 +5548,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         contextModelId = null;
         lastCacheSnapshot = null;
         sendAndBuffer(createNormalizedMessage({ kind: 'status', text: 'token_budget',
-          tokenBudget: { used: null, total: null, cacheSnapshot: null, contextSnapshot: claudeContextSnapshot(null, {
-            sessionId: capturedSessionId || sessionId || null, modelId: null,
-          }) }, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+          tokenBudget: { used: null, total: null, cacheSnapshot: null,
+            contextSnapshot: claudeCompactBoundarySnapshot(capturedSessionId || sessionId || null) },
+          sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
       }
       if (message.type === 'assistant' && !message.parent_tool_use_id) {
         if (contextModelId !== (message.message?.model || null)) lastCacheSnapshot = null;
@@ -5943,7 +5965,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
   const { sessionId } = options;
   // ADR-173 rev.3 (always on): busy check and launch reservation in one tick, before
   // any await — every entry (chat socket, /api/agent, git) passes through here.
-  const occupancy = claimClaudeRunLaunch(sessionId, ws?.userId ?? null, runToken);
+  const occupancy = claimClaudeRunLaunch(sessionId, ws?.userId ?? null, runToken, typeof options.clientMsgId === 'string' ? options.clientMsgId : null);
   if (occupancy) {
     console.warn(`[ADR-173] refused a launch on session ${sessionId} (phase=${occupancy.phase})`);
     ws.send(isSteerChatCommand(command)
@@ -6025,6 +6047,46 @@ function interruptTimeoutMs() {
 }
 
 /**
+ * Synchronous target resolution for {@link abortClaudeSDKSession}.
+ *
+ * B-ABORT-CROSSKILL: the by-connection fallback is for the pre-id race ONLY, so
+ * it is unreachable once the client named a session. A named-but-unmatched id
+ * means that run already ended (a second STOP press, or a stale id) — and since
+ * one browser socket carries every session the tab opened, falling back there
+ * aborted an unrelated live run instead, one per press. A resumed run needs no
+ * fallback either: addSession registers it under the resume id as well as under
+ * the newly captured one, so the client's id still matches directly.
+ *
+ * @param {string} sessionId - Session id named by the stop (may be empty).
+ * @param {object|null} rawWs - Raw socket the stop arrived on.
+ * @param {string|null} expectedTurnKey - Turn the stop names (T-2093), optional.
+ * @returns {{ resolvedId: string, session: object|undefined, staleTarget: boolean }}
+ */
+function resolveClaudeAbortTarget(sessionId, rawWs, expectedTurnKey) {
+  const named = getSession(sessionId);
+  if (named) {
+    const staleTarget = Boolean(expectedTurnKey && named.clientMsgId && named.clientMsgId !== expectedTurnKey);
+    return { resolvedId: sessionId, session: named, staleTarget };
+  }
+  // A launch that has not registered yet carries its turn's key on its reservation:
+  // a late stop for an older turn must not cancel it (T-2093 review item 3).
+  const launch = sessionId ? launchReservations.holder(sessionId) : null;
+  if (launch && expectedTurnKey && launch.clientMsgId && launch.clientMsgId !== expectedTurnKey) {
+    return { resolvedId: sessionId, session: undefined, staleTarget: true };
+  }
+  if (sessionId || !rawWs) return { resolvedId: sessionId, session: undefined, staleTarget: false };
+  const fallbackId = expectedTurnKey
+    ? getSessionForSocketByTurnKey(rawWs, expectedTurnKey)
+    : getNewestSessionForSocket(rawWs);
+  if (!fallbackId) return { resolvedId: sessionId, session: undefined, staleTarget: false };
+  console.log(
+    `[WS-DIAG] sdk-abort fallback: requested=none resolved-by-connection=${fallbackId}`
+    + (expectedTurnKey ? ' (by turn key)' : '')
+  );
+  return { resolvedId: fallbackId, session: getSession(fallbackId), staleTarget: false };
+}
+
+/**
  * Aborts an active SDK session.
  *
  * Resolution order (B-ABORT-FALLBACK):
@@ -6037,32 +6099,26 @@ function interruptTimeoutMs() {
  *      intent on STOP, so the fallback is safe and connection-scoped.
  *
  * @param {string} sessionId - Session identifier supplied by the client.
+ * T-2093: `expectedTurnKey` (the clientMsgId of the turn the stop names) is
+ * compared with the run's recorded key BEFORE the first await, so a run started
+ * by another message is never interrupted (`staleTarget`). With an empty id, the
+ * fallback picks the run on this connection carrying that key, not the newest.
+ *
+ * @param {string} sessionId - Session identifier supplied by the client.
  * @param {object|null} [rawWs] - The raw WebSocket the abort arrived on, used
  *   only for the connection fallback above.
- * @returns {Promise<{ aborted: boolean, reason: string, sessionId: string|null }>}
+ * @param {string|null} [expectedTurnKey] - Turn the stop is meant for (optional).
+ * @returns {Promise<{ aborted: boolean, reason: string, sessionId: string|null, staleTarget?: boolean }>}
  *   Structured result; `aborted` is the boolean the WS layer maps to success.
  */
-async function abortClaudeSDKSession(sessionId, rawWs = null) {
-  let resolvedId = sessionId;
-  let session = getSession(resolvedId);
-
-  // B-ABORT-CROSSKILL: the by-connection fallback is for the pre-id race ONLY, so
-  // it is unreachable once the client named a session. A named-but-unmatched id
-  // means that run already ended (a second STOP press, or a stale id) — and since
-  // one browser socket carries every session the tab opened, falling back there
-  // aborted an unrelated live run instead, one per press. A resumed run needs no
-  // fallback either: addSession registers it under the resume id as well as under
-  // the newly captured one, so the client's id still matches directly.
-  if (!session && !sessionId && rawWs) {
-    const fallbackId = getNewestSessionForSocket(rawWs);
-    if (fallbackId) {
-      resolvedId = fallbackId;
-      session = getSession(resolvedId);
-      console.log(
-        `[WS-DIAG] sdk-abort fallback: requested=none resolved-by-connection=${resolvedId}`
-      );
-    }
+async function abortClaudeSDKSession(sessionId, rawWs = null, expectedTurnKey = null) {
+  const target = resolveClaudeAbortTarget(sessionId, rawWs, expectedTurnKey);
+  if (target.staleTarget) {
+    const reason = `session ${sessionId} is running another turn (stale stop)`;
+    console.log(`[WS-DIAG] sdk-abort no-op: ${reason}`);
+    return { aborted: false, reason: 'stale_target', sessionId: null, staleTarget: true };
   }
+  const { resolvedId, session } = target;
 
   // qa r2 #1: a launch that has not registered yet (the caller already authorized the stop).
   const launch = !session && sessionId ? launchReservations.cancel(sessionId) : null;

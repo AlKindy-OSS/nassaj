@@ -42,6 +42,11 @@ export type TokenUsageDeps = {
   getProjectPathById: (projectId: string) => string | null | Promise<string | null>;
   /** opencode.db files to search; defaults to {@link existingOpenCodeDatabasePaths}. */
   openCodeDatabasePaths?: () => string[];
+  /**
+   * B-1803: the model the client shows for a session (resolveResumeModel — the
+   * source of the active-model read). Omitted or empty → the native transcript id.
+   */
+  resolveSessionModel?: (provider: string, sessionId: string) => Promise<string | null | undefined>;
 };
 
 export type TokenUsageRequest = {
@@ -76,7 +81,7 @@ export async function readSessionTokenUsage(
     case 'cursor': return reply(200, CURSOR_UNSUPPORTED);
     case 'opencode': return readOpenCodeUsage(row, (deps.openCodeDatabasePaths ?? existingOpenCodeDatabasePaths)());
     case 'codex': return readCodexUsage(row);
-    case 'claude': return readClaudeUsage(row, projectPath);
+    case 'claude': return readClaudeUsage(row, projectPath, deps.resolveSessionModel);
     default: return TRANSCRIPT_UNAVAILABLE;
   }
 }
@@ -91,13 +96,30 @@ const CURSOR_UNSUPPORTED = {
   message: 'Token usage tracking not available for Cursor sessions',
 };
 
-async function readClaudeUsage(row: SessionRow, projectPath: string): Promise<TokenUsageReply> {
+/** The session's client-facing model, or null when none is stored or the lookup fails. */
+async function sessionModelOrNull(
+  resolve: TokenUsageDeps['resolveSessionModel'], provider: string, sessionId: string,
+): Promise<string | null> {
+  if (!resolve) return null;
+  try {
+    return (await resolve(provider, sessionId))?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function readClaudeUsage(
+  row: SessionRow, projectPath: string, resolveSessionModel: TokenUsageDeps['resolveSessionModel'],
+): Promise<TokenUsageReply> {
   const fileContent = await readClaudeTranscriptForSession(row, projectPath);
   if (fileContent === null) return TRANSCRIPT_UNAVAILABLE;
   const { inputTokens, outputTokens, modelName, breakdown, cacheSnapshot } = latestClaudeTokenUsage(fileContent, row.session_id);
   // A restored transcript exposes request input, not a fresh native context measurement;
-  // B-1356: the window comes from the model id, or stays null when it is not known.
-  const contextSnapshot = claudeTranscriptContextSnapshot(row.session_id, modelName, inputTokens);
+  // B-1356: the window comes from the native model id, or stays null when it is not known.
+  // B-1803: the identity is the model the client compares against (same source as the
+  // live path), so the ring does not discard the hydrated reading as another model's.
+  const identityModel = (await sessionModelOrNull(resolveSessionModel, row.provider, row.session_id)) ?? modelName;
+  const contextSnapshot = claudeTranscriptContextSnapshot(row.session_id, modelName, inputTokens, identityModel);
   return reply(200, {
     used: null,
     total: null,

@@ -528,9 +528,14 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
     maximumFractionDigits: 0,
   }).format(Math.round(percentValue));
 
+  // B-1803: during a turn the ring keeps the previous native reading as a labelled estimate.
+  const staleLabel = reading.stale ? t('contextRot.staleEstimate') : null;
+  const ratioText = `${formatTokenCount(usedTokens)}/${formatTokenCount(totalTokens)}`;
+
   // Multi-line content — same data used in both native tooltip and popover.
   const tooltipLines = [
     `${formatTokenCount(usedTokens)} / ${formatTokenCount(totalTokens)} · ${percentLabel}`,
+    staleLabel,
     ...alertLines,
     thresholdLine,
   ].filter(Boolean) as string[];
@@ -547,11 +552,11 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
         // نفس السطح المقلوب ونفس التأخير، ويعطي التحويم على الفأرة والضغطة
         // المطوّلة على اللمس مجّاناً — بدل تلميح خاصّ يشبه المشروع ولا يطابقه.
         tooltip={{
-          content: `${formatTokenCount(usedTokens)}/${formatTokenCount(totalTokens)}`,
+          content: staleLabel ? `${ratioText} · ${staleLabel}` : ratioText,
         }}
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={[...alertLines, t('contextRot.percentUsed', { percent: percentLabel })].join(' ')}
+        aria-label={[...alertLines, t('contextRot.percentUsed', { percent: percentLabel }), staleLabel].filter(Boolean).join(' ')}
         onClick={handleToggle}
       >
         <span

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:8f26415282c438944716fb7f3daa22316ae27f27770766ca4d0eb44f24609529",
+  "reviewedSiteDigest": "sha256:23c74d14c50efab6003302cc00517976264d7ffd57445254f04f4c6abe49c8f7",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -28,6 +28,15 @@
       "gate": "fixed /usr/bin/flock argv, verified retained lock descriptor inherited as fd 3, 1s helper deadline, shell false and PATH/LANG/LC_ALL-only environment; exact named inode is rechecked after acquisition and before every owner use",
       "adapter": "runFlock",
       "test": "engine-restamp-model-store.service.test.ts and permission inventory classification/mutation gates"
+    },
+    "server/modules/turn-checkpoints/checkpoint-git.js#child_process.spawn#1": {
+      "classification": "infrastructure_effect",
+      "owner": "turn checkpoints (T-2095)",
+      "purpose": "private_checkpoint_store_git",
+      "actorSource": "trusted turn wrapper and checkpoint read routes; store path derived only from the overlay manifest owner and overlay id, never from client input or model output",
+      "gate": "fixed git executable, hardenGitArgs plus core.hooksPath=/dev/null and core.fsmonitor=false, shell false, minimal environment (GIT_DIR=private store, GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null, fixed identity), deadline-bounded with SIGKILL, bounded output",
+      "adapter": "runStoreGit",
+      "test": "server/modules/turn-checkpoints/turn-checkpoints.capture.test.js and turn-checkpoints.acceptance.test.ts"
     },
     "server/services/preview-runtime-attestation.js#child_process.spawnSync#1": {
       "classification": "read_only_process_query",
@@ -526,6 +535,24 @@
       "gate": "prepareDshLaunch before spawn: own deepseek key (CREDENTIAL_NOT_LINKED), governance_missing, sha256-pinned Nassaj patch layer last naming the sha256-pinned Nassaj policy plugin (T-2089: every tool call decided over fd 3), exact allow-list env sanitized last, absolute node >= 24.9.0, shell false, detached group kill; admission: Claude permission parity (T-2089: every Claude mode; the per-turn parity engine decides each tool call over fd 3 with Claude hooks, rules and mode; UserPromptSubmit hooks run before spawn and a block spawns nothing; unsupported deny/ask, non-command hooks, unreadable enabled plugins and Claude sandbox refuse; the policy plugin handshake (T-2091 capability probes P1 public tools API, P2 guard gate, P4 channel) must pass before session/new; a call bypassing the guard ends the turn; an undecided result kills the group), session_busy, starter-only resume, harness-update lease; detached group SIGKILL after exit; caller ADR-134 LaunchPermit (runtime#ws.dsh)",
       "adapter": "spawnDsh",
       "test": "server/modules/providers/list/dsh/__tests__/dsh-acceptance.test.ts and dsh-launch.test.ts and server/services/permission-parity/__tests__/parity-acceptance.test.ts"
+    },
+    "server/modules/providers/list/antigravity/agy-acp-runner.js#child_process.spawn#1": {
+      "classification": "provider_effect_enclosed",
+      "owner": "Antigravity ACP runner capability probe, T-2094/ADR-232",
+      "purpose": "acp_capability_probe",
+      "actorSource": "enclosing WS caller (runtime#ws.antigravity via spawnAntigravity -> runAgyAcpTurn -> prepareAgyAcpLaunch); assertModelRunActor(writer.userId) refuses a missing member",
+      "gate": "only when NASSAJ_AGY_ACP is on; runs on the member own env (resolveProviderEnv(member, agy)) through resolveCagedLaunch (cage when enabled for agy); executable resolveHarnessBinary(antigravity), fixed argv: `acp --help` then the turn launch argv (acp --dangerously-skip-permissions --disable-telemetry --add-dir <cwd>, owner full-control decision) for an ACP initialize handshake only (no session/new, no prompt); shell false, stderr ignored, stdout capped at 64 KiB, 15 s SIGKILL deadline, probe child SIGKILLed after initialize; beginHarnessLaunch(antigravity) lease per child; verdict cached per binary identity; caller ADR-134 LaunchPermit (runtime#ws.antigravity)",
+      "adapter": "runProbeChild",
+      "test": "server/agy-cli.acp.acceptance.test.ts and server/agy-cli.acp.guards.test.ts"
+    },
+    "server/modules/providers/list/antigravity/agy-acp-runner.js#child_process.spawn#2": {
+      "classification": "provider_effect_enclosed",
+      "owner": "Antigravity ACP runner, T-2094/ADR-232",
+      "purpose": "spawn",
+      "actorSource": "enclosing WS caller (runtime#ws.antigravity via spawnAntigravity -> runAgyAcpTurn -> admitAgyAcpTurn); pool key and env from assertModelRunActor(writer.userId)",
+      "gate": "only when NASSAJ_AGY_ACP is on; prepareAgyAcpLaunch re-resolves per turn the member own env (resolveProviderEnv(member, agy)), resolveCagedLaunch (cage when enabled for agy), binary identity and credential principal into the pool fingerprint; executable resolveHarnessBinary(antigravity), fixed argv acp --dangerously-skip-permissions --disable-telemetry --add-dir <cwd> under the owner full-control decision; shell false; runFenceRevoked checked with no await before the synchronous admit; beginHarnessLaunch(antigravity) lease; one pooled process per member per brain UUID, capacity-capped; registered as a warm credential process (unit agy) so grant revocation kills it; SIGTERM then SIGKILL after 5 s; caller ADR-134 LaunchPermit (runtime#ws.antigravity)",
+      "adapter": "spawnAgyAcpChild",
+      "test": "server/agy-cli.acp.acceptance.test.ts and server/agy-cli.acp.guards.test.ts"
     },
     "server/services/permission-parity/claude-hook-runner.js#child_process.spawn#1": {
       "classification": "provider_effect_enclosed",

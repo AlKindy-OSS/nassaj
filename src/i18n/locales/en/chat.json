@@ -134,6 +134,7 @@
       "pressure": "Proposed compaction threshold reached"
     },
     "unavailable": "Context usage unavailable",
+    "staleEstimate": "Estimate — as of the end of the previous turn",
     "cache": {
       "title": "Cache reuse",
       "ratio": "Reuse: {{percent}}",
@@ -1279,6 +1280,13 @@
   "images": {
     "remove": "Remove image",
     "closePreview": "Close preview",
+    "previewFallback": "Image preview",
+    "toolbar": "Image zoom controls",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Fit image to screen",
+    "openOriginal": "Open original image in a new tab",
+    "download": "Download original image",
     "omitted": "{{count}} attached image(s) were not loaded to protect memory."
   },
   "questionAnswer": {
@@ -1756,5 +1764,22 @@
       "denyNoteHint": "Sent to the conversation with your name.",
       "counter": "{{count}} / {{max}}"
     }
+  },
+  "turnCheckpoint": {
+    "filesChanged_one": "{{count}} file changed",
+    "filesChanged_other": "{{count}} files changed",
+    "withheld_one": "({{count}} withheld)",
+    "withheld_other": "({{count}} withheld)",
+    "noChanges": "No file changes",
+    "running": "Tracking changes…",
+    "openLabel": "{{summary}}. Open this turn's changes",
+    "skip": {
+      "not_overlay": "Change tracking unavailable: shared workspace",
+      "no_principal": "Change tracking unavailable: no signed-in owner",
+      "not_owner": "Change tracking unavailable: owner only",
+      "low_disk": "Change tracking unavailable: low disk space",
+      "timeout": "Change tracking timed out"
+    },
+    "failed": "Could not record this turn's changes"
   }
 }

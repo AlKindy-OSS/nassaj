@@ -76,7 +76,7 @@ describe('native snapshot ordering', () => {
     expect(newestContextUsage(current, { unavailable: true }, 'hydration')).toEqual({ unavailable: true });
   });
   it('keeps a compaction invalidation newer than delayed pre-compaction events', () => {
-    const boundary = { contextSnapshot: nativeSnapshot({ modelId: null, usageKind: 'unknown', usedTokens: null, windowTokens: null, observedAt: '2026-09-13T13:00:00Z' }) };
+    const boundary = { contextSnapshot: nativeSnapshot({ modelId: null, usageKind: 'unknown', usedTokens: null, windowTokens: null, observedAt: '2026-09-13T13:00:00Z', invalidatedBy: 'compact_boundary' }) };
     expect(newestContextUsage(current, boundary)).toBe(boundary);
     expect(newestContextUsage(boundary, current)).toBe(boundary);
     expect(newestContextUsage(boundary, { contextSnapshot: nativeSnapshot({ observedAt: null }) }, 'hydration')).toBe(boundary);
@@ -91,5 +91,58 @@ describe('native snapshot ordering', () => {
     expect(newestContextUsage(current, null)).toBeNull();
     expect(newestContextUsage(null, newer)).toBe(newer);
     expect(newestContextUsage(current, { unavailable: true })).toEqual({ unavailable: true });
+  });
+});
+
+describe('Claude live turn keeps the last native reading (B-1803)', () => {
+  // Native readings (result path) carry the picker alias; live assistant events carry the native id.
+  const native = { contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: 'opus[1m]', windowTokens: 1_000_000 }), cacheTtlMinutes: 5 };
+  const liveCache = { version: 1, provider: 'claude', sessionId: 's1', modelId: 'claude-opus-5-5', scope: 'last_request', source: 'claude.message.usage', inputTokens: 130_000, cacheReadTokens: 100_000, transport: 'live' };
+  const assistant = (usedTokens: number | null, observedAt = '2026-09-13T12:00:01Z') => ({
+    used: null, total: null, cacheSnapshot: liveCache, cacheTtlMinutes: 60,
+    contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: 'claude-opus-5-5', usageKind: usedTokens === null ? 'unknown' : 'last_request_input',
+      usedTokens, windowTokens: null, source: 'claude.message.usage', observedAt, nativeCompactTokens: null, proposedCompactTokens: null }),
+  });
+  const view = (usage: Record<string, unknown> | null) => contextUsagePresentation(usage, 'claude', 's1', 'opus[1m]');
+
+  it('a live non-native Claude event does not erase a native reading', () => {
+    const merged = newestContextUsage(native, assistant(110_000));
+    expect(view(merged)).toMatchObject({ used: 120_000, window: 1_000_000, stale: true });
+    expect(merged?.cacheSnapshot).toBe(liveCache);
+    expect(merged?.cacheTtlMinutes).toBe(60);
+    expect(view(native)).toMatchObject({ used: 120_000, stale: false });
+  });
+  it('a stale estimate shows the larger of the preserved reading and the latest live input', () => {
+    const merged = newestContextUsage(newestContextUsage(native, assistant(110_000)), assistant(150_000, '2026-09-13T12:00:02Z'));
+    expect(view(merged)).toMatchObject({ used: 150_000, window: 1_000_000, stale: true });
+  });
+  it('failed result read keeps the last reading, marked stale', () => {
+    const failed = { used: null, total: null, contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: 'opus[1m]', usageKind: 'unknown',
+      usedTokens: null, windowTokens: null, source: 'claude.message.usage', observedAt: '2026-09-13T12:05:00Z' }) };
+    expect(view(newestContextUsage(native, failed))).toMatchObject({ used: 120_000, window: 1_000_000, stale: true });
+  });
+  it('compact invalidation still clears', () => {
+    const boundary = { contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: null, usageKind: 'unknown', usedTokens: null, windowTokens: null,
+      observedAt: '2026-09-13T12:05:00Z', invalidatedBy: 'compact_boundary' }) };
+    const merged = newestContextUsage(newestContextUsage(native, assistant(110_000)), boundary);
+    expect(merged).toBe(boundary);
+    expect(view(merged)).toMatchObject({ used: null, window: null, stale: false });
+  });
+  it('genuine model switch clears', () => {
+    const switched = { contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: 'sonnet', usageKind: 'unknown', usedTokens: null, windowTokens: null,
+      observedAt: '2026-09-13T12:05:00Z' }) };
+    expect(newestContextUsage(native, switched)).toBe(switched);
+    const nativeSwitch = { contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: 'sonnet', observedAt: '2026-09-13T12:05:00Z' }) };
+    expect(newestContextUsage(newestContextUsage(native, assistant(110_000)), nativeSwitch)).toBe(nativeSwitch);
+  });
+  it('a fresh native reading replaces the stale estimate', () => {
+    const fresh = { contextSnapshot: nativeSnapshot({ provider: 'claude', modelId: 'opus[1m]', windowTokens: 1_000_000, usedTokens: 140_000, observedAt: '2026-09-13T12:06:00Z' }) };
+    const merged = newestContextUsage(newestContextUsage(native, assistant(110_000)), fresh);
+    expect(view(merged)).toMatchObject({ used: 140_000, stale: false });
+  });
+  it('does not preserve Codex readings across live snapshots', () => {
+    const codexNative = { contextSnapshot: nativeSnapshot() };
+    const codexUnknown = { contextSnapshot: nativeSnapshot({ usageKind: 'unknown', usedTokens: null, windowTokens: null, observedAt: '2026-09-13T12:00:01Z' }) };
+    expect(newestContextUsage(codexNative, codexUnknown)).toBe(codexUnknown);
   });
 });

@@ -34,7 +34,9 @@ export type MessageKind =
   | 'session_created'
   | 'interactive_prompt'
   | 'task_notification'
-  | 'task_reconcile';
+  | 'task_reconcile'
+  /** T-2095: what one agent turn changed in its overlay (owner only). */
+  | 'turn_checkpoint';
 
 export interface NormalizedMessage {
   /** Structured provider error, preserved for safe classification at render time. */
@@ -246,6 +248,14 @@ export interface NormalizedMessage {
    * legacy row, treated as 'completed'.
    */
   taskStatus?: 'completed' | 'settled' | string;
+  /** T-2095 `turn_checkpoint`: the turn sequence in the overlay's checkpoint store. */
+  turnSeq?: number | null;
+  /** T-2095 `turn_checkpoint`: why a capture was skipped or failed. */
+  reason?: string;
+  /** T-2095 `turn_checkpoint`: captured file counts. */
+  counts?: { added: number; modified: number; deleted: number };
+  /** T-2095 `turn_checkpoint`: paths withheld instead of captured. */
+  withheldCount?: number;
 }
 
 // ─── Per-session slot ────────────────────────────────────────────────────────

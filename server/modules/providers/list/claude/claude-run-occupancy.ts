@@ -28,6 +28,8 @@ export interface LaunchReservation {
   userId: unknown;
   token: symbol;
   at: number;
+  /** T-2093: the clientMsgId of the launching turn; null for a launch without one. */
+  clientMsgId: string | null;
 }
 
 const DEFAULT_STUCK_AFTER_MS = 15 * 60 * 1000;
@@ -139,7 +141,7 @@ export function createLaunchReservations(deps: {
   };
   return {
     /** Takes the reservation; false when another launch holds it. */
-    reserve(sessionId: string, userId: unknown, token: symbol): boolean {
+    reserve(sessionId: string, userId: unknown, token: symbol, clientMsgId: string | null = null): boolean {
       if (held.has(sessionId)) return false;
       const timer = setTimeout(() => {
         if (held.get(sessionId)?.token !== token) return;
@@ -147,7 +149,7 @@ export function createLaunchReservations(deps: {
         cancel(sessionId);
       }, deps.maxMs());
       timer.unref?.();
-      held.set(sessionId, { userId, token, at: Date.now(), timer, abort: null });
+      held.set(sessionId, { userId, token, at: Date.now(), clientMsgId: clientMsgId || null, timer, abort: null });
       return true;
     },
     /** The launch's own abort (its SDK controller), used by `cancel`. */
@@ -171,7 +173,9 @@ export function createLaunchReservations(deps: {
     },
     holder(sessionId: string): LaunchReservation | null {
       const current = held.get(sessionId);
-      return current ? { userId: current.userId, token: current.token, at: current.at } : null;
+      return current
+        ? { userId: current.userId, token: current.token, at: current.at, clientMsgId: current.clientMsgId }
+        : null;
     },
   };
 }

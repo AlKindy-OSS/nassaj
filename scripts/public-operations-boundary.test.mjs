@@ -428,6 +428,8 @@ test('the gate scans only paths the public export ships', () => {
     'scripts/lib/release-frozen-build.mjs',
     'scripts/release-orchestrator-phases.test.mjs', 'docs/plans/roadmap.md',
     'scripts/release-preflight.mjs', 'scripts/lib/release-orchestrator-phases.mjs',
+    'scripts/lib/spawn-status.mjs', 'scripts/release-readiness.mjs', 'scripts/release-readiness.test.mjs',
+    'scripts/lib/release-readiness.mjs', 'scripts/lib/release-readiness-format.mjs',
     'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
     'server/modules/database/deletion-writer-inventory.test.ts',
     'src/components/code-editor/utils/office/__fixtures__/ar/arabic-rtl.docx',

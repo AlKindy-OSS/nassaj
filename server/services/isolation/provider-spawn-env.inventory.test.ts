@@ -25,6 +25,8 @@ const SITES: readonly Site[] = [
   { file: 'cursor-cli.js', modelRun: true },
   { file: 'opencode-cli.js', modelRun: true },
   { file: 'agy-cli.js', modelRun: true },
+  // T-2094: the pooled `agy acp` launch and its capability probe.
+  { file: 'modules/providers/list/antigravity/agy-acp-runner.js', modelRun: true },
   { file: 'modules/providers/shared/vendor/vendor-runtime.js', modelRun: true },
   { file: 'modules/turn-supervisor/adapters/claude-sdk-adapter.ts', modelRun: true },
   { file: 'modules/turn-supervisor/adapters/codex-cli-adapter.ts', modelRun: true },
