@@ -111,7 +111,11 @@
   "subagent": {
     "badge": "子智能体",
     "shortBadge": "子智能体",
-    "badgeLabel": "子智能体任务"
+    "badgeLabel": "子智能体任务",
+    "title": "子代理",
+    "titleWithType": "子代理 / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "已在后台启动代理"
   },
   "coordinator": {
     "label": "协调器",
@@ -148,7 +152,18 @@
     "readFile": "读取文件",
     "updateTodo": "更新待办列表",
     "readTodo": "读取待办列表",
-    "searchResults": "结果"
+    "searchResults": "结果",
+    "titles": {
+      "parameters": "参数",
+      "details": "详情",
+      "plan": "计划",
+      "taskDetails": "任务详情",
+      "subagentResult": "子代理结果",
+      "updatingTodoList": "正在更新待办列表",
+      "taskList": "任务列表",
+      "implementationPlan": "实施计划",
+      "foundFiles_other": "找到 {{count}} 个文件"
+    }
   },
   "search": {
     "found": "找到 {{count}} 个{{type}}",
@@ -674,5 +689,8 @@
   "inlineCode": {
     "copyLink": "复制链接",
     "copyHint": "复制"
+  },
+  "agyMessage": {
+    "to": "发给 {{name}} 的消息"
   }
 }

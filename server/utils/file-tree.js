@@ -40,6 +40,16 @@ const IGNORED_DIRS = new Set([
 
 const FORBIDDEN_DESCENT_PATHS = new Set(FORBIDDEN_WORKSPACE_PATHS.map((entry) => normalizeProjectPath(entry)));
 
+/** Whether a directory with this name is skipped (never listed nor descended). */
+export function isIgnoredDirectoryName(name) {
+    return IGNORED_DIRS.has(name);
+}
+
+/** Whether an absolute directory path is a system-critical one never descended into. */
+export function isForbiddenDescentPath(dirPath) {
+    return FORBIDDEN_DESCENT_PATHS.has(normalizeProjectPath(dirPath));
+}
+
 const DEFAULT_FS_CONCURRENCY = 64;
 const parsedFsConcurrency = Number.parseInt(process.env.FS_CONCURRENCY || '', 10);
 const FS_CONCURRENCY = Number.isFinite(parsedFsConcurrency) && parsedFsConcurrency > 0
@@ -112,7 +122,7 @@ async function readDirectoryEntries(dirPath, budget) {
     try {
         const dir = await fsPromises.opendir(dirPath);
         for await (const entry of dir) {
-            if (entry.isDirectory() && IGNORED_DIRS.has(entry.name)) continue;
+            if (entry.isDirectory() && isIgnoredDirectoryName(entry.name)) continue;
             consumeBudget(budget);
             entries.push(entry);
         }
@@ -143,6 +153,14 @@ async function describeItem(item) {
         item.permissions = '000';
         item.permissionsRwx = '---------';
     }
+}
+
+/** Tree order shared by every listing: directories first, then by name. */
+export function compareTreeItems(a, b) {
+    if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
 }
 
 /**
@@ -185,7 +203,7 @@ export async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showH
 
         const descend = entry.isDirectory()
             && currentDepth < maxDepth
-            && !FORBIDDEN_DESCENT_PATHS.has(normalizeProjectPath(itemPath));
+            && !isForbiddenDescentPath(itemPath);
         if (descend) {
             // The recursive call takes its own bounded permit; holding one for the
             // whole subtree could deadlock sibling directories.
@@ -194,16 +212,11 @@ export async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showH
         return item;
     }));
 
-    return items.sort((a, b) => {
-        if (a.type !== b.type) {
-            return a.type === 'directory' ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-    });
+    return items.sort(compareTreeItems);
 }
 
 /** Depth the project files route walks (unchanged from the pre-T-1896 route). */
-const PROJECT_FILE_TREE_DEPTH = 10;
+export const PROJECT_FILE_TREE_DEPTH = 10;
 
 /**
  * Builds the HTTP response for GET /api/projects/:projectId/files.

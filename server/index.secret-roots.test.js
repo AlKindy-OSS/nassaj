@@ -64,8 +64,10 @@ function makeResponseDouble() {
   const res = {
     statusCode: 200,
     headersSent: false,
+    headers: {},
     status(code) { res.statusCode = code; return res; },
     setHeader() { return res; },
+    set(name, value) { res.headers[name] = value; return res; },
     json(payload) {
       res.headersSent = true;
       sent.push({ status: res.statusCode, payload });
@@ -105,7 +107,7 @@ after(() => {
 // GET /api/projects/:projectId/files (tree)
 // ---------------------------------------------------------------------------
 
-function buildTreeHandler(projectRoot, treeCalls) {
+function buildTreeHandler(projectRoot, treeCalls, partialCalls = []) {
   return buildHandler("app.get('/api/projects/:projectId/files', authenticateToken", {
     isProjectVisible: () => true,
     coerceUserId: (id) => id,
@@ -115,6 +117,10 @@ function buildTreeHandler(projectRoot, treeCalls) {
     buildProjectFileTreeResponse: async (root) => {
       treeCalls.push(root);
       return { status: 200, body: { tree: [] } };
+    },
+    buildPartialProjectFileTreeResponse: async (root) => {
+      partialCalls.push(root);
+      return { status: 200, body: [], truncated: true };
     },
     console: quiet,
   });
@@ -143,6 +149,39 @@ test('GET /files still lists a legitimate ~/Project root', async () => {
   await buildTreeHandler(project, treeCalls)({ params: { projectId: 'p' }, user: { id: 1 } }, res);
   assert.equal(sent[0].status, 200);
   assert.deepEqual(treeCalls, [project]);
+});
+
+test('B-1669: ?partial=1 lists the lean tree with the truncation header', async () => {
+  const treeCalls = [];
+  const partialCalls = [];
+  const { res, sent } = makeResponseDouble();
+  await buildTreeHandler(project, treeCalls, partialCalls)(
+    { params: { projectId: 'p' }, query: { partial: '1' }, user: { id: 1 } }, res);
+  assert.equal(sent[0].status, 200);
+  assert.deepEqual(partialCalls, [project]);
+  assert.deepEqual(treeCalls, []);
+  assert.equal(res.headers['X-File-Tree-Truncated'], '1');
+});
+
+test('B-1669: only partial=1 selects the lean tree; other values keep the full tree', async () => {
+  for (const partial of ['true', '0', ['1', '1']]) {
+    const treeCalls = [];
+    const partialCalls = [];
+    const { res } = makeResponseDouble();
+    await buildTreeHandler(project, treeCalls, partialCalls)(
+      { params: { projectId: 'p' }, query: { partial }, user: { id: 1 } }, res);
+    assert.deepEqual(treeCalls, [project], JSON.stringify(partial));
+    assert.deepEqual(partialCalls, []);
+  }
+});
+
+test('B-1669: a forbidden root is refused in partial mode too', async () => {
+  const partialCalls = [];
+  const { res, sent } = makeResponseDouble();
+  await buildTreeHandler(fakeHome, [], partialCalls)(
+    { params: { projectId: 'p' }, query: { partial: '1' }, user: { id: 1 } }, res);
+  assert.equal(sent[0].status, 403);
+  assert.deepEqual(partialCalls, []);
 });
 
 // ---------------------------------------------------------------------------

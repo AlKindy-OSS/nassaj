@@ -58,7 +58,14 @@ mock.module(url('../services/isolation/provision-user-dirs.js'), {
   namedExports: { userConfigDir: () => '/tmp/none' },
 });
 mock.module(url('../modules/connectors/connector-owner-auth-session.js'), {
-  namedExports: { clearConnectorOwnerAuthentication: () => {}, recordConnectorOwnerAuthentication: () => {} },
+  namedExports: {
+    clearConnectorOwnerAuthentication: () => {},
+    recordConnectorOwnerAuthentication: () => {},
+    // ADR-H20 S6: auth.js -> sso-oidc-runtime.service -> database/connection pulls the
+    // connector substrate, which links these two names at import time.
+    configureConnectorOwnerAuthSessionProduction: () => undefined,
+    createRecentAuthOriginSource: () => () => null,
+  },
 });
 mock.module(url('./webauthn.js'), { defaultExport: emptyRouter });
 mock.module(url('./oidc.js'), { defaultExport: emptyRouter });
@@ -105,6 +112,7 @@ test('/status reports SSO off with the login button hidden', async () => {
     isAuthenticated: false,
     ssoState: 'off',
     ssoLoginAvailable: false,
+    ssoAutoSignIn: false,
     deviceAccountSessionsEnabled: false,
   });
 });
@@ -154,10 +162,13 @@ test('/status still reflects needsSetup and leaks no other SSO config', async ()
     isAuthenticated: false,
     ssoState: 'active',
     ssoLoginAvailable: true,
+    // ADR-H20 N1: the node's auto sign-in setting, off unless the owner enables it.
+    ssoAutoSignIn: false,
     deviceAccountSessionsEnabled: true,
   });
   assert.deepEqual(Object.keys(body).sort(), [
-    'deviceAccountSessionsEnabled', 'isAuthenticated', 'needsSetup', 'ssoLoginAvailable', 'ssoState',
+    'deviceAccountSessionsEnabled', 'isAuthenticated', 'needsSetup', 'ssoAutoSignIn', 'ssoLoginAvailable',
+    'ssoState',
   ]);
   ssoStateResult = 'off';
   delete process.env.MULTI_ACCOUNT_SWITCHING;

@@ -4,7 +4,13 @@ import { IS_PLATFORM } from '../../../constants/config';
 import { shareLoginPath } from '../../document-sharing/share-navigation';
 import { api, setCookieSessionKind } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
-import { exchangeOidcCode, fetchOidcIdentity, setSsoReauthHint } from '../oidc';
+import { clearSsoReauthHint, exchangeOidcCode, fetchOidcIdentity } from '../oidc';
+import {
+  followEndSession,
+  markExplicitSignOut,
+  resetAutoSignInGuard,
+  runSsoRecheckIfDue,
+} from '../ssoLinkedSession';
 import {
   consumeSsoReauthNotice, isSsoRedirectInFlight, requestSsoReauth, SSO_REAUTH_EVENT,
 } from '../ssoReauth';
@@ -426,6 +432,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await checkOnboardingStatus();
       if (!isCurrentAuthCheck(operation)) return;
       hydratePreferences();
+      // ADR-H20 D9-1: a bearer SSO session re-checks the IdP silently when due.
+      if (token && statusPayload?.ssoLoginAvailable === true) void runSsoRecheckIfDue();
     } catch (caughtError) {
       if (!isCurrentAuthCheck(operation)) return;
       console.error('[Auth] Auth status check failed:', caughtError);
@@ -857,8 +865,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       adoptPrimarySession(identity.user, exchange);
-      // ADR-194 A1: an owner SSO session makes the next SSO start re-authenticate.
-      if (identity.user.role === 'owner') setSsoReauthHint();
+      // ADR-194 A2: owner entry is no-click; never force prompt=login next time.
+      if (identity.user.role === 'owner') clearSsoReauthHint();
+      // ADR-H20 N1: a sign-in that completed ends the auto sign-in loop count.
+      resetAutoSignInGuard();
       // A completed SSO sign-in answers any pending re-attestation notice.
       consumeSsoReauthNotice();
       setIsMultiUser(identity.isMultiUser);
@@ -1028,10 +1038,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // this device's session. Only a sign-out the server confirms as
       // `scope: 'all'` leaves the "signed out on all devices" notice.
       const request = api.auth.logout(tokenToInvalidate);
+      // ADR-H20 N1: an explicit sign-out never auto-signs straight back in.
+      markExplicitSignOut();
       clearSession();
       void request.then(async (response: Response) => {
-        const payload = await parseJsonSafely<{ scope?: string }>(response);
+        const payload = await parseJsonSafely<{ scope?: string; endSessionUrl?: string }>(response);
         if (response.ok && payload?.scope === 'all') recordSignedOutEverywhereNotice();
+        // ADR-H20 N4: an SSO session goes on to the IdP end_session, which
+        // signs this browser out of every linked app.
+        if (response.ok) followEndSession(payload?.endSessionUrl);
       }).catch((caughtError: unknown) => {
         console.error('Logout endpoint error:', caughtError);
       });

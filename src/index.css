@@ -943,12 +943,15 @@
     hyphens: auto;
   }
 
-  /* Force wrap long URLs and code */
+  /* Force wrap long URLs and code. B-1665: wrap at the box edge only
+     (overflow-wrap: anywhere), never mid-word at any letter (break-all split
+     "sudo"). Direction stays with each element's own dir attribute: code
+     renderers set dir="ltr", deliberate RTL <pre> (skill bodies) keep theirs. */
   .chat-message pre,
   .chat-message code {
     white-space: pre-wrap !important;
-    word-break: break-all;
-    overflow-wrap: break-word;
+    word-break: normal;
+    overflow-wrap: anywhere;
   }
 
   /* Prevent horizontal scroll in chat area */

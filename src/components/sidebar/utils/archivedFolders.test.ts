@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ArchivedProjectListItem, ArchivedSessionListItem } from '../types/types';
 
-import { buildArchivedFolders, formatCompactArchivedAge } from './archivedFolders';
+import { buildArchivedFolders } from './archivedFolders';
 
 const archivedProject = (projectId: string, sessions: Array<Record<string, unknown>> = []): ArchivedProjectListItem => ({
   projectId,
@@ -71,19 +71,5 @@ describe('buildArchivedFolders', () => {
       archivedSession({ sessionId: 'o', projectId: null, projectPath: null }),
     ]);
     expect(folders.map((f) => f.key)).toEqual(['/x', 'session:o', 'old']);
-  });
-});
-
-describe('formatCompactArchivedAge', () => {
-  const now = Date.parse('2026-10-10T12:00:00.000Z');
-  it.each([
-    [null, ''],
-    ['not a date', ''],
-    ['2026-10-10T11:59:30.000Z', '<1m'],
-    ['2026-10-10T11:15:00.000Z', '45m'],
-    ['2026-10-10T09:00:00.000Z', '3hr'],
-    ['2026-10-08T12:00:00.000Z', '2d'],
-  ])('%s -> %s', (input, expected) => {
-    expect(formatCompactArchivedAge(input, now)).toBe(expected);
   });
 });

@@ -150,12 +150,13 @@ describe('B-426: لا صفّ يُكتب في محادثة ليست له', () => 
     assert.deepEqual(h.navigated, ['sess-fresh']);
   });
 
-  it('مزوّد لم يُرسل النسب بعد ⇒ السلوك القديم كما هو (لا كسر)', () => {
+  it('B-1666: غياب النسب (مُرسِل قديم لجلسة جديدة) لا يختطف المعروضة', () => {
     const h = harness();
 
     h.send({ kind: 'session_created', newSessionId: 'sess-legacy', sessionId: 'sess-legacy' });
 
-    assert.deepEqual(h.replaced, [{ from: VIEWED, to: 'sess-legacy' }]);
+    assert.deepEqual(h.replaced, []);
+    assert.deepEqual(h.navigated, []);
   });
 
   it('فرع متابعة آمن ينقل الطلب المعلّق ولا يحوّل الجلسة الأصلية إلى alias', () => {

@@ -111,7 +111,11 @@
   "subagent": {
     "badge": "Alt ajan",
     "shortBadge": "Alt ajan",
-    "badgeLabel": "Alt ajan görevi"
+    "badgeLabel": "Alt ajan görevi",
+    "title": "Alt ajan",
+    "titleWithType": "Alt ajan / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "Ajan arka planda başlatıldı"
   },
   "coordinator": {
     "label": "Koordinatör",
@@ -148,7 +152,19 @@
     "readFile": "Dosyayı oku",
     "updateTodo": "Yapılacaklar listesini güncelle",
     "readTodo": "Yapılacaklar listesini oku",
-    "searchResults": "sonuç"
+    "searchResults": "sonuç",
+    "titles": {
+      "parameters": "Parametreler",
+      "details": "Ayrıntılar",
+      "plan": "Plan",
+      "taskDetails": "Görev ayrıntıları",
+      "subagentResult": "Alt ajan sonucu",
+      "updatingTodoList": "Yapılacaklar listesi güncelleniyor",
+      "taskList": "Görev listesi",
+      "implementationPlan": "Uygulama planı",
+      "foundFiles_one": "{{count}} dosya bulundu",
+      "foundFiles_other": "{{count}} dosya bulundu"
+    }
   },
   "search": {
     "found": "{{count}} {{type}} bulundu",
@@ -676,5 +692,8 @@
   "inlineCode": {
     "copyLink": "Bağlantıyı kopyala",
     "copyHint": "Kopyala"
+  },
+  "agyMessage": {
+    "to": "{{name}} için mesaj"
   }
 }

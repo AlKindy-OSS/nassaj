@@ -358,5 +358,10 @@
       "saveGitConfigFailed": "Gagal menyimpan konfigurasi git",
       "completeFailed": "Gagal menyelesaikan penyiapan awal"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "Perbesar diagram",
+    "zoomedAria": "Diagram Mermaid yang diperbesar",
+    "close": "Tutup"
   }
 }

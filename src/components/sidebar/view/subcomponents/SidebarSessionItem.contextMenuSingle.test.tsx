@@ -49,7 +49,6 @@ function renderRow(
     onSaveEditingSession?: () => void;
     onCancelEditingSession?: () => void;
     onToggleStar?: (session: SessionWithProvider, projectId: string) => void;
-    onProjectSelect?: () => void;
     onSessionSelect?: () => void;
     editingSession?: string | null;
     onStartBulkSelectionWithId?: (kind: 'projects' | 'sessions', id: string) => void;
@@ -58,7 +57,6 @@ function renderRow(
   const {
     isStarred = false,
     onToggleStar = () => {},
-    onProjectSelect = () => {},
     onSessionSelect = () => {},
     editingSession = null,
     onStartBulkSelectionWithId = () => {},
@@ -78,7 +76,6 @@ function renderRow(
       onStartEditingSession={() => {}}
       onCancelEditingSession={overrides.onCancelEditingSession ?? (() => {})}
       onSaveEditingSession={overrides.onSaveEditingSession ?? (() => {})}
-      onProjectSelect={onProjectSelect}
       onSessionSelect={onSessionSelect}
       onDeleteSession={() => {}}
       onStartBulkSelectionWithId={onStartBulkSelectionWithId}
@@ -201,7 +198,6 @@ describe('B-379 — قائمة سياق واحدة لا كومة', () => {
         onStartEditingSession={() => {}}
         onCancelEditingSession={() => {}}
         onSaveEditingSession={() => {}}
-        onProjectSelect={() => {}}
         onSessionSelect={() => {}}
         onDeleteSession={() => {}}
         t={t}
@@ -243,7 +239,6 @@ describe('B-379 — قائمة سياق واحدة لا كومة', () => {
         onStartEditingSession={() => {}}
         onCancelEditingSession={() => {}}
         onSaveEditingSession={() => {}}
-        onProjectSelect={() => {}}
         onSessionSelect={() => {}}
         onDeleteSession={() => {}}
         t={t}
@@ -259,23 +254,20 @@ describe('B-379 — قائمة سياق واحدة لا كومة', () => {
   });
 
   it('يبقي الرابط سطح SPA مستقلاً ويترك modified-click للمتصفح', () => {
-    const onProjectSelect = vi.fn();
     const onSessionSelect = vi.fn();
-    const { container } = renderRow('sess-1', { onProjectSelect, onSessionSelect });
+    const { container } = renderRow('sess-1', { onSessionSelect });
     const link = container.querySelector('a')!;
 
     expect(link.getAttribute('href')).toContain('/session/sess-1');
     expect(link.querySelector('button,[role="button"]')).toBeNull();
 
     expect(fireEvent.click(link)).toBe(false);
-    expect(onProjectSelect).toHaveBeenCalledTimes(1);
     expect(onSessionSelect).toHaveBeenCalledTimes(1);
 
     // امنع jsdom من محاولة التنقّل بعد أن يمرّ الحدث بمعالج React؛ المتصفح
     // الحقيقي يتولى modified-click، والمهم هنا أن مسار SPA لا يعترضه.
     document.addEventListener('click', (event) => event.preventDefault(), { once: true });
     fireEvent.click(link, { ctrlKey: true });
-    expect(onProjectSelect).toHaveBeenCalledTimes(1);
     expect(onSessionSelect).toHaveBeenCalledTimes(1);
   });
 

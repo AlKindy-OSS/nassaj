@@ -113,7 +113,7 @@ export function resolveOpenCodeDatabasePathForUser(
  * before looking it up here by exact id.
  */
 export function knownOpenCodeDatabasePaths(): string[] {
-  const paths = new Set<string>([path.join(operatorOpenCodeDataHome(), OPENCODE_DB_FILENAME)]);
+  const paths = new Set<string>([operatorOpenCodeDatabasePath()]);
   try {
     for (const user of userDb.listUsers()) {
       paths.add(userConfigDir(user.id, path.join('.local', 'share', OPENCODE_DATA_SUBDIR, OPENCODE_DB_FILENAME)));
@@ -138,6 +138,57 @@ function openCodeSessionPresence(dbPath: string, sessionId: string): boolean | n
   } finally {
     db?.close();
   }
+}
+
+/** The operator (shared) opencode.db, honoring a server-level XDG_DATA_HOME. */
+export function operatorOpenCodeDatabasePath(): string {
+  return path.join(operatorOpenCodeDataHome(), OPENCODE_DB_FILENAME);
+}
+
+/** Upper bound on remembered sessionId → opencode.db locations (oldest dropped first). */
+const SESSION_DATABASE_MEMO_MAX = 512;
+
+/** B-1669: sessionId → the opencode.db last found to hold it. Every hit is re-confirmed. */
+const sessionDatabaseMemo = new Map<string, string>();
+
+function rememberSessionDatabase(sessionId: string, dbPath: string): void {
+  sessionDatabaseMemo.delete(sessionId);
+  sessionDatabaseMemo.set(sessionId, dbPath);
+  if (sessionDatabaseMemo.size > SESSION_DATABASE_MEMO_MAX) {
+    const oldest = sessionDatabaseMemo.keys().next().value as string | undefined;
+    if (oldest !== undefined) sessionDatabaseMemo.delete(oldest);
+  }
+}
+
+/**
+ * B-1669: the opencode.db that actually holds `sessionId`, or null when none does.
+ *
+ * The synchronizer indexes every member's own opencode.db, so a listed session
+ * may live outside the operator DB. This walks knownOpenCodeDatabasePaths() in
+ * its fixed order (operator DB first, then each member in listUsers order) and
+ * returns the first DB whose `session` table has the exact id; an absent or
+ * unreadable DB is skipped so it cannot hide a later match. Ids are unique in
+ * practice; if one ever appeared twice, that fixed order decides.
+ *
+ * A remembered location costs one presence probe; a miss drops it and rescans.
+ * Callers must already have authorised the session row (sessionsService runs
+ * isSessionAccessibleByUser before any provider read) — the same contract as
+ * knownOpenCodeDatabasePaths.
+ */
+export function findOpenCodeDatabaseForSession(sessionId: string): string | null {
+  const remembered = sessionDatabaseMemo.get(sessionId);
+  if (remembered !== undefined) {
+    if (openCodeSessionPresence(remembered, sessionId) === true) return remembered;
+    sessionDatabaseMemo.delete(sessionId);
+  }
+  for (const dbPath of knownOpenCodeDatabasePaths()) {
+    if (dbPath === remembered) continue;
+    if (openCodeSessionPresence(dbPath, sessionId) === true) {
+      rememberSessionDatabase(sessionId, dbPath);
+      return dbPath;
+    }
+  }
+  return null;
 }
 
 /**

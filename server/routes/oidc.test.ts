@@ -183,6 +183,10 @@ mock.module(url('../modules/database/index.js'), {
       updateLastLogin: () => {},
       listActiveOwnerIds: () => [1, 2],
     },
+    // ADR-H20: the back channel's stores (sid-matched sessions, processed jtis, node settings).
+    ssoDeviceSessionsDb: { findByIdpSid: () => [], bind: () => {} },
+    oidcLogoutJtisDb: { seen: () => false, countActive: () => 0, record: () => 'recorded' },
+    ssoLinkedSettingsDb: { read: () => ({ idpSignOutAffectsOwner: true }) },
     userIdentitiesDb: {
       findByIssuerAndSubject: () => {
         if (identityLookupFailure) throw identityLookupFailure;
@@ -230,7 +234,7 @@ const ssoRuntime = createSsoRuntimeDouble(sso, {
     if (verifyFailure) throw verifyFailure;
     return verifiedClaims;
   },
-  verifyLogoutToken: async () => ({ sub: 'subject-synthetic' }),
+  verifyLogoutToken: async () => ({ sub: 'subject-synthetic', sid: 'idp-sid-synthetic', jti: 'jti-synthetic' }),
 });
 
 mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
@@ -852,8 +856,8 @@ const keyAudits = () => audits.filter((record) => record.event === 'api_keys_rev
 async function backchannelLogout() {
   return fetch(`${baseUrl}/api/auth/oidc/backchannel-logout`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ logout_token: 'logout-token-synthetic' }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ logout_token: 'logout-token-synthetic' }).toString(),
   });
 }
 
@@ -887,20 +891,17 @@ test('T-1939 slice 3: no keys to delete → no audit row; a successful login del
   assert.deepEqual(apiKeyRevocations, []);
 });
 
-test('T-1939 slice 3: back-channel logout deletes a member\'s API keys, never the owner\'s', async () => {
-  resetLoginState('user', {});
-  const response = await backchannelLogout();
-  assert.equal(response.status, 200);
-  assert.deepEqual(apiKeyRevocations, [12]);
-  assert.deepEqual(keyAudits().map((record) => record.metadata), [{ trigger: 'backchannel_logout', count: 2 }]);
-  assert.deepEqual(epochBumps, [12], 'T-2035: back-channel logout bumps the sign-out epoch');
-
-  resetLoginState('user', {});
-  identityUserId = 1;
-  assert.equal((await backchannelLogout()).status, 200);
-  assert.deepEqual(apiKeyRevocations, [], 'owner keys are untouched');
-  assert.deepEqual(revocations, [], 'owner sessions are untouched (ADR-194 D6)');
-  assert.deepEqual(epochBumps, [], 'owner epoch is untouched (ADR-194 D6)');
+test('ADR-H20 D6: a back-channel logout is a sign-out, not offboarding — no API key or epoch change', async () => {
+  for (const userId of [12, 1]) {
+    resetLoginState('user', {});
+    identityUserId = userId;
+    const response = await backchannelLogout();
+    assert.equal(response.status, 200);
+    assert.deepEqual(apiKeyRevocations, [], 'API keys are untouched');
+    assert.deepEqual(keyAudits(), []);
+    assert.deepEqual(epochBumps, [], 'no sign-out everywhere');
+    assert.deepEqual(revocations, [], 'no password-stamp revocation');
+  }
 });
 
 test('ADR-194 D1: back-channel answers 501 only when the policy is not enforced', async () => {
@@ -928,12 +929,12 @@ test('ADR-194 D1: enforced but unverifiable back-channel asks the IdP to retry (
   }
 });
 
-test('ADR-194 D1: enforced with login unavailable still verifies and revokes when the verifier parses', async () => {
+test('ADR-194 D1: enforced with login unavailable still verifies when the verifier parses', async () => {
   sso.state.loginAvailable = false;
   try {
     resetLoginState('user', {});
     assert.equal((await backchannelLogout()).status, 200);
-    assert.deepEqual(apiKeyRevocations, [12]);
+    assert.deepEqual(apiKeyRevocations, [], 'ADR-H20 D6: keys stay');
   } finally {
     sso.state.loginAvailable = true;
   }
@@ -943,7 +944,6 @@ test('T-1939 slice 3: an API-key revocation failure never changes the response',
   t.mock.method(process.stderr, 'write', () => true);
   apiKeyFailure = new Error('db locked');
   try {
-    assert.equal((await backchannelLogout()).status, 200);
     await assertDeniedWithoutRole('user', {}, 'roles_claim_absent');
     assert.deepEqual(keyAudits(), []);
   } finally {
@@ -1103,11 +1103,10 @@ test('A1 always on: without a passkey the owner still gets the step-up, never a 
   await expectOwnerStepUp('amr_insufficient');
 });
 
-test('A1: password + security key (pwd, user, mfa) is accepted', async () => {
+test('A2 passkey_only: password + security key (pwd, user, mfa) gets the passkey step-up', async () => {
   resetOwnerState(passkeyClaims({ amr: ['pwd', 'user', 'mfa'] }));
-  const callback = await runCallback();
-  assert.match(callback.headers.get('location') ?? '', /oidc_code=/);
-  assert.deepEqual(mintedRoles, ['owner']);
+  storedOwnerStepUp = undefined;
+  await expectOwnerStepUp('amr_insufficient');
 });
 
 /** Runs the callback, expecting the automatic step-up interstitial; returns its new cookie and IdP URL. */
@@ -1143,7 +1142,7 @@ test('A1: a missing key or a stale auth_time redirects once to the IdP for the p
     [withClaims({ amr: ['pwd', 'otp', 'mfa'] }), 'amr_insufficient'],
     [withClaims({ amr: undefined }), 'amr_insufficient'],
     [withClaims({ auth_time: undefined }), 'auth_time_missing'],
-    [withClaims({ auth_time: nowSec() - 84 * 60 }), 'auth_time_stale'],
+    [withClaims({ auth_time: nowSec() - 31 * 24 * 3600 }), 'auth_time_stale'],
     [withClaims({ auth_time: nowSec() + 600 }), 'auth_time_in_future'],
   ];
   for (const [arrange, reason] of cases) {
@@ -1184,7 +1183,7 @@ test('A1 loop guard: pwd-only and otp are refused owner_sso_key_required after o
 });
 
 test('A1 loop guard: a still-stale auth_time after the step-up is refused owner_sso_reauth_required', async () => {
-  resetOwnerState(passkeyClaims({ auth_time: nowSec() - 3600 }));
+  resetOwnerState(passkeyClaims({ auth_time: nowSec() - 31 * 24 * 3600 }));
   storedOwnerStepUp = undefined;
   const { cookie } = await expectOwnerStepUp('auth_time_stale');
   const second = await secondCallback(cookie);

@@ -41,7 +41,7 @@ function projectItem() {
     isStarred={false} isSessionStarred={() => false} onToggleStarSession={() => {}}
     editingProject={null} editingName="" sessions={[]} initialSessionsLoaded isLoadingMoreSessions={false}
     currentTime={new Date()} editingSession={null} editingSessionName="" onEditingNameChange={() => {}}
-    onToggleProject={() => {}} onProjectSelect={() => {}} onToggleStarProject={() => {}}
+    onToggleProject={() => {}} onToggleStarProject={() => {}}
     onStartEditingProject={() => {}} onCancelEditingProject={() => {}} onSaveProjectName={() => {}}
     onDeleteProject={() => {}} onArchiveProject={() => {}} onSessionSelect={() => {}}
     onDeleteSession={() => {}} onLoadMoreSessions={() => {}} onNewSession={() => {}}
@@ -98,7 +98,7 @@ describe('SidebarProjectItem — تذكير الدفْع', () => {
       isStarred={false} isSessionStarred={() => false} onToggleStarSession={() => {}}
       editingProject={null} editingName="" sessions={[]} initialSessionsLoaded isLoadingMoreSessions={false}
       currentTime={new Date()} editingSession={null} editingSessionName="" onEditingNameChange={() => {}}
-      onToggleProject={onToggleProject} onProjectSelect={() => {}} onToggleStarProject={() => {}}
+      onToggleProject={onToggleProject} onToggleStarProject={() => {}}
       onStartEditingProject={() => {}} onCancelEditingProject={() => {}} onSaveProjectName={() => {}}
       onDeleteProject={() => {}} onArchiveProject={() => {}} onSessionSelect={() => {}}
       onDeleteSession={() => {}} onLoadMoreSessions={() => {}} onNewSession={() => {}}

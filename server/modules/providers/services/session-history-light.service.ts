@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
-import { resolveOpenCodeDatabasePathForUser } from '@/modules/providers/list/opencode/opencode-home.js';
+import {
+  findOpenCodeDatabaseForSession,
+  resolveOpenCodeDatabasePathForUser,
+} from '@/modules/providers/list/opencode/opencode-home.js';
 import { resolveVendorTranscriptForRead } from '@/modules/providers/shared/vendor/vendor-transcript.js';
 import { boundProgressPlan, boundProgressSubagent } from '@/shared/progress-normalize.js';
 import type { FetchHistoryResult, LLMProvider, NormalizedMessage } from '@/shared/types.js';
@@ -252,7 +255,10 @@ async function sourceFingerprint(
     ? null
     : source.jsonlPath;
   const sqliteBacked = source.provider === 'opencode' || source.provider === 'cursor';
-  if (!filePath && source.provider === 'opencode') filePath = resolveOpenCodeDatabasePathForUser(requesterUserId);
+  if (!filePath && source.provider === 'opencode') {
+    // B-1669: follow the DB that holds the session, so the revision tracks it.
+    filePath = findOpenCodeDatabaseForSession(sessionId) ?? resolveOpenCodeDatabasePathForUser(requesterUserId);
+  }
   if (!filePath && source.provider === 'cursor') filePath = cursorDatabasePath(sessionId, source.projectPath);
   if (!filePath && ['kimi', 'deepseek', 'glm', 'hermes', 'qwen'].includes(source.provider)) {
     filePath = await resolveVendorTranscriptForRead(

@@ -178,6 +178,13 @@ export interface ChatMessage {
     /** Latest self-reported progress line of the sub-agent (declared, not computed). */
     progress?: DeclaredProgress;
   };
+  /**
+   * B-1665: an orphaned tool result that only acknowledges a background
+   * sub-agent launch; rendered as a one-line chip, not a raw text dump.
+   */
+  backgroundAgentAck?: boolean;
+  /** Provider that produced this row (history and live), when the store knows it. */
+  provider?: LLMProvider;
   /** Task notification fields (B-94). */
   isTaskNotification?: boolean;
   taskStatus?: string;

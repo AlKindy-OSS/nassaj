@@ -95,6 +95,8 @@ app.use((req, _res, next) => {
   const id = Number(req.headers['x-test-user-id'] ?? owner.id);
   const user = userDb.getUserById(id);
   (req as { user?: unknown }).user = user ? { ...user, id: user.id } : undefined;
+  const refreshSid = req.headers['x-test-refresh-sid'];
+  if (typeof refreshSid === 'string') (req as { tokenSession?: unknown }).tokenSession = { sid: refreshSid, refreshSid };
   if (req.headers['x-test-device'] === '1') {
     (req as { devicePrincipal?: unknown }).devicePrincipal = { deviceSessionId: 'd', slotId: 's', generation: 1 };
   }

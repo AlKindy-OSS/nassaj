@@ -111,7 +111,11 @@
   "subagent": {
     "badge": "サブエージェント",
     "shortBadge": "サブエージェント",
-    "badgeLabel": "サブエージェントタスク"
+    "badgeLabel": "サブエージェントタスク",
+    "title": "サブエージェント",
+    "titleWithType": "サブエージェント / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "エージェントをバックグラウンドで起動しました"
   },
   "coordinator": {
     "label": "コーディネーター",
@@ -148,7 +152,18 @@
     "readFile": "ファイルを読み取り",
     "updateTodo": "Todoリストを更新",
     "readTodo": "Todoリストを読み取り",
-    "searchResults": "件の結果"
+    "searchResults": "件の結果",
+    "titles": {
+      "parameters": "パラメーター",
+      "details": "詳細",
+      "plan": "プラン",
+      "taskDetails": "タスクの詳細",
+      "subagentResult": "サブエージェントの結果",
+      "updatingTodoList": "ToDoリストを更新中",
+      "taskList": "タスク一覧",
+      "implementationPlan": "実装計画",
+      "foundFiles_other": "{{count}} 件のファイルが見つかりました"
+    }
   },
   "search": {
     "found": "{{count}}件の{{type}}が見つかりました",
@@ -674,5 +689,8 @@
   "inlineCode": {
     "copyLink": "リンクをコピー",
     "copyHint": "コピー"
+  },
+  "agyMessage": {
+    "to": "{{name}} へのメッセージ"
   }
 }

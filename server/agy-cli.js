@@ -1053,6 +1053,11 @@ async function spawnAntigravity(command, options = {}, ws) {
                     kind: 'session_created',
                     newSessionId: finalSessionId,
                     sessionId: finalSessionId,
+                    // B-1666: a fresh conversation, never a resume of the viewed one.
+                    parentSessionId: null,
+                    ...(typeof opts.clientMsgId === 'string' && opts.clientMsgId
+                        ? { clientMsgId: opts.clientMsgId }
+                        : {}),
                 });
             }
 

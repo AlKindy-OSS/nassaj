@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
@@ -64,19 +64,51 @@ describe('operator alerts — carrier thresholds and age', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('blinks the ring and opens the card once at 400K on a 1M window', () => {
+  // B-1665 (owner decision): the card used to open by itself here and covered
+  // the last message / the composer. It now opens on a user click only.
+  it('blinks the ring at 400K on a 1M window but never opens the card by itself', () => {
     render(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(400_000)} sessionId="s1" />);
     const t = trigger();
     expect(t.getAttribute('aria-label')).toContain('At 400K tokens');
     expect(t.querySelector('.animate-pulse')).not.toBeNull();
     expect(t.querySelector('svg')?.getAttribute('class')).toContain('text-danger');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(t);
     expect(screen.getByRole('dialog').textContent).toContain('/compact');
   });
 
-  it('escalates to close at 600K', () => {
+  it('escalates to close at 600K (shown on click)', () => {
     render(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(600_000)} sessionId="s1" />);
     expect(trigger().getAttribute('aria-label')).toContain('At 600K tokens');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(trigger());
     expect(screen.getByRole('dialog').textContent).toContain('new conversation');
+  });
+
+  it('opening a session already over the threshold stays silent and closed', () => {
+    render(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(650_000)} sessionId="s1" />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('context-alert-live').textContent).toBe('');
+  });
+
+  it('crossing a threshold during the session is announced once in the live region, card closed', () => {
+    const { rerender } = render(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(390_000)} sessionId="s1" />);
+    rerender(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(410_000)} sessionId="s1" />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const live = screen.getByTestId('context-alert-live');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(live.textContent).toContain('At 400K tokens');
+    rerender(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(420_000)} sessionId="s1" />);
+    expect(live.textContent).toContain('At 400K tokens');
+    rerender(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(610_000)} sessionId="s1" />);
+    expect(live.textContent).toContain('At 600K tokens');
+  });
+
+  it('switching to another session that is already over the threshold does not open or announce', () => {
+    const { rerender } = render(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(100_000)} sessionId="s1" />);
+    rerender(<TokenUsageSummary provider="claude" modelId="m1" usage={usage(700_000)} sessionId="s2" />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('context-alert-live').textContent).toBe('');
   });
 
   it('names the capped threshold on a 200K window', () => {

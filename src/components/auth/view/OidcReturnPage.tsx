@@ -14,6 +14,7 @@ import {
 } from '../oidc';
 import type { OidcFailureReason } from '../oidc';
 import { readStepUpReturn } from '../../settings/view/tabs/connectorStepUpClient';
+import { readSsoSessionReturn, type SsoSessionReturn } from '../ssoLinkedSession';
 
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthScreenLayout from './AuthScreenLayout';
@@ -94,8 +95,55 @@ export default function OidcReturnPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Classified once: the URL is scrubbed right after.
   const [stepUp] = useState(() => readStepUpReturn(searchParams));
+  const [sessionReturn] = useState(() => readSsoSessionReturn(searchParams));
   const scrubUrl = useCallback(() => setSearchParams({}, { replace: true }), [setSearchParams]);
+  if (sessionReturn) return <SsoSessionReturnView result={sessionReturn} scrubUrl={scrubUrl} />;
   return stepUp ? <OidcStepUpReturn result={stepUp} scrubUrl={scrubUrl} /> : <OidcLoginReturn />;
+}
+
+/**
+ * ADR-H20: the return of an owner passkey step-up or a silent re-check. Neither
+ * signs anyone in. A confirmed step-up or a kept/renewed session goes back to
+ * the app; a re-check that ended the session goes back too, where the revoked
+ * session lands on the sign-in page. Only a failed step-up stays here.
+ */
+function SsoSessionReturnView({ result, scrubUrl }: { result: SsoSessionReturn; scrubUrl: () => void }) {
+  const { t } = useTranslation('auth');
+  const navigate = useNavigate();
+  const started = useRef(false);
+  const failed = result.kind === 'owner_step_up' && !result.ok;
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    scrubUrl();
+    if (!failed) navigate('/', { replace: true });
+  }, [failed, navigate, scrubUrl]);
+
+  if (!failed) {
+    return (
+      <AuthScreenLayout title={t('sso.return.title')} description="" footerText="">
+        <p role="status" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          {t('sso.return.verifying')}
+        </p>
+      </AuthScreenLayout>
+    );
+  }
+  return (
+    <AuthScreenLayout title={t('sso.ownerStepUp.title')} description="" footerText="">
+      <div role="alert">
+        <AuthErrorAlert errorMessage={t('sso.ownerStepUp.returnFailed')} />
+      </div>
+      <button
+        type="button"
+        onClick={() => navigate('/', { replace: true })}
+        className="w-full rounded-md bg-blue-600 px-4 py-2 font-medium text-white transition-colors duration-200 hover:bg-blue-700"
+      >
+        {t('sso.ownerStepUp.back')}
+      </button>
+    </AuthScreenLayout>
+  );
 }
 
 function OidcLoginReturn() {

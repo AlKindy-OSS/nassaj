@@ -51,6 +51,9 @@ export function createMockOpenIdProvider(options: MockProviderOptions = {}) {
   const codes = new Map<string, PendingCode>();
   const requests: RecordedRequest[] = [];
   const discoveryOverrides: Record<string, unknown> = {};
+  let rotated: { kid: string; privateKey: crypto.KeyObject; jwk: Record<string, unknown> } | null = null;
+  let publishRotated = false;
+  let jwksDown = false;
 
   const discovery = () => ({
     issuer,
@@ -102,7 +105,9 @@ export function createMockOpenIdProvider(options: MockProviderOptions = {}) {
     if (input.url.origin !== new URL(issuer).origin) return jsonResponse(404, {});
     switch (input.url.pathname) {
       case '/.well-known/openid-configuration': return jsonResponse(200, discovery());
-      case '/jwks': return jsonResponse(200, { keys: [jwk] });
+      case '/jwks':
+        if (jwksDown) return jsonResponse(503, {});
+        return jsonResponse(200, { keys: rotated && publishRotated ? [jwk, rotated.jwk] : [jwk] });
       case '/token': return token(input.headers as Record<string, string>, body);
       default: return jsonResponse(404, {});
     }
@@ -114,6 +119,10 @@ export function createMockOpenIdProvider(options: MockProviderOptions = {}) {
     clientId,
     requests,
     discoveryOverrides,
+    /** Whether the JWKS publishes the rotated key (rotation reached the IdP's JWKS). */
+    setPublishRotated(value: boolean) { publishRotated = value; },
+    /** Makes the JWKS endpoint answer 503. */
+    setJwksDown(value: boolean) { jwksDown = value; },
     /** pinnedFetchJson dependencies routing every request to this provider. */
     network: { dependencies: { transport, resolver, interfaceAddresses: () => new Set<string>() } },
     /** The user "signs in" at the IdP: returns the code for an authorization URL. */
@@ -128,14 +137,42 @@ export function createMockOpenIdProvider(options: MockProviderOptions = {}) {
       });
       return { code, state: url.searchParams.get('state') ?? '' };
     },
-    /** A signed back-channel logout token for `sub`. */
-    logoutToken(sub: string) {
+    /**
+     * A signed back-channel logout token for `sub`, naming the IdP session
+     * `sid` (ADR-H20 D5). `extra` overrides any claim; an `undefined` value
+     * drops it (e.g. `{ sid: undefined }` for a sub-only token).
+     */
+    logoutToken(sub: string, extra: Record<string, unknown> = {}) {
+      const now = Math.floor(Date.now() / 1000);
+      const claims: Record<string, unknown> = {
+        iss: issuer, aud: clientId, sub, sid: 'V1_mock-sid', iat: now, exp: now + 900, jti: crypto.randomUUID(),
+        events: { 'http://schemas.openid.net/event/backchannel-logout': {} },
+        ...extra,
+      };
+      for (const [name, value] of Object.entries(claims)) if (value === undefined) delete claims[name];
+      return jwt.sign(claims, privateKey, { algorithm: 'RS256', keyid: kid });
+    },
+    /** Signs arbitrary claims with the provider key (negative tests). */
+    signRaw(claims: Record<string, unknown>, options: { kid?: string } = {}) {
+      return jwt.sign(claims, privateKey, { algorithm: 'RS256', keyid: options.kid ?? kid });
+    },
+    /** Rotates the published signing key (a new kid); the old one stops verifying. */
+    rotateKey(newKid: string) {
+      const pair = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+      rotated = { kid: newKid, privateKey: pair.privateKey, jwk: {
+        ...(pair.publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid: newKid, alg: 'RS256', use: 'sig',
+      } };
+    },
+    /** A logout token signed with the rotated key (call rotateKey first). */
+    rotatedLogoutToken(sub: string, extra: Record<string, unknown> = {}) {
+      if (!rotated) throw new Error('rotateKey first');
       const now = Math.floor(Date.now() / 1000);
       return jwt.sign({
-        iss: issuer, aud: clientId, sub, iat: now, exp: now + 120, jti: crypto.randomUUID(),
-        events: { 'http://schemas.openid.net/event/backchannel-logout': {} },
-      }, privateKey, { algorithm: 'RS256', keyid: kid });
+        iss: issuer, aud: clientId, sub, sid: 'V1_mock-sid', iat: now, exp: now + 900, jti: crypto.randomUUID(),
+        events: { 'http://schemas.openid.net/event/backchannel-logout': {} }, ...extra,
+      }, rotated.privateKey, { algorithm: 'RS256', keyid: rotated.kid });
     },
+    jwksFetches: () => requests.filter((request) => request.url.endsWith('/jwks')).length,
     discoveryFetches: () => requests.filter((request) => request.url.endsWith('/.well-known/openid-configuration')).length,
   };
 }

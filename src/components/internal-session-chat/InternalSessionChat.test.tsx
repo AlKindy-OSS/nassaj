@@ -98,6 +98,55 @@ describe('InternalSessionChat', () => {
     expect(authenticatedFetch).toHaveBeenLastCalledWith('/api/sessions/s1/internal-room', expect.objectContaining({ method: 'POST' }));
   });
 
+  it('B-1666: late answers for room A never land in room B, and A requests are aborted', async () => {
+    const roomOf = (owner: string) => ({ members: [{ userId: 1, username: owner, role: 'owner' }], unreadMentionCount: 0, lastReadSequence: 0 });
+    const held: Array<() => void> = [];
+    const signals: AbortSignal[] = [];
+    const hold = (payload: unknown) => new Promise((resolve) => { held.push(() => resolve(response(payload))); });
+    authenticatedFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/sessions/s1/') && init?.signal) signals.push(init.signal);
+      if (url === '/api/sessions/s1/internal-room') return response(roomOf('owner'));
+      if (url === '/api/sessions/s1/internal-messages') {
+        return hold(init?.method === 'POST'
+          ? { id: 'a-sent', sequence: 9, body: 'من الغرفة أ', authorUserId: 1, createdAt: '2026-01-01' }
+          : [{ id: 'a1', sequence: 1, body: 'رسالة الغرفة أ', authorUserId: 1, createdAt: '2026-01-01' }]);
+      }
+      if (url === '/api/sessions/s2/internal-room') return response(roomOf('owner'));
+      if (url === '/api/sessions/s2/internal-messages') return response([{ id: 'b1', sequence: 1, body: 'رسالة الغرفة ب', authorUserId: 1, createdAt: '2026-01-01' }]);
+      return response({});
+    });
+    const view = render(<InternalSessionChat sessionId="s1" enabled />);
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledWith('/api/sessions/s1/internal-room', expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: /محادثة الفريق$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'محادثة داخلية' }));
+    const textarea = screen.getByLabelText('رسالة داخلية');
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: 'مسودة أ' } });
+    fireEvent.click(screen.getByRole('button', { name: /إرسال للفريق/ }));
+    await waitFor(() => expect(held.length).toBeGreaterThanOrEqual(2));
+
+    view.rerender(<InternalSessionChat sessionId="s2" enabled />);
+    const roomARequests = authenticatedFetch.mock.calls
+      .filter(([url]) => String(url) === '/api/sessions/s1/internal-messages');
+    expect(roomARequests.length).toBeGreaterThanOrEqual(2);
+    expect(roomARequests.every(([, init]) => (init as RequestInit | undefined)?.signal?.aborted === true)).toBe(true);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledWith('/api/sessions/s2/internal-room', expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: /محادثة الفريق$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'محادثة داخلية' }));
+    fireEvent.change(screen.getByLabelText('رسالة داخلية'), { target: { value: 'مسودة ب' } });
+    for (const release of held) release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.queryByText('رسالة الغرفة أ')).toBeNull();
+    expect(screen.queryByText('من الغرفة أ')).toBeNull();
+    expect((screen.getByLabelText('رسالة داخلية') as HTMLTextAreaElement).value).toBe('مسودة ب');
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.focus(screen.getByLabelText('رسالة داخلية'));
+    expect(await screen.findByText('رسالة الغرفة ب')).toBeTruthy();
+  });
+
   it('does not treat a failed read acknowledgement as success', async () => {
     authenticatedFetch.mockResolvedValue(response({}, false));
     await expect(markInternalRead('s1', 3)).resolves.toBe(false);

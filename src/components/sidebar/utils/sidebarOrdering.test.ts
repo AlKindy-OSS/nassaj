@@ -8,6 +8,7 @@ import {
   compareSidebarSessions,
   getAllSessions,
   getProjectSortTime,
+  parseSessionTimestamp,
   sortProjects,
 } from './utils';
 
@@ -21,9 +22,9 @@ import {
  *  - projects were ordered by LAST ACTIVITY, which advances on every message,
  *    so the project being typed in climbed over its neighbours mid-sentence.
  *
- * The intended behaviour that must NOT change: a conversation keeps its place
- * while it is being worked on, i.e. ordering reads creation time, never
- * activity time.
+ * Conversations inside a project follow LAST ACTIVITY (B-1668 reversed the
+ * creation order of 106cd7482 on the owner's request); PROJECTS in "date" mode
+ * still follow the creation time of their newest conversation.
  */
 const session = (
   overrides: Partial<SessionWithProvider> & { id: string },
@@ -55,10 +56,29 @@ describe('compareSidebarSessions', () => {
     expect(ids([...list].sort(compareSidebarSessions))).toEqual(['new', 'old']);
   });
 
-  it('ignores last activity, so a conversation keeps its place while worked on', () => {
+  it('orders by LAST ACTIVITY, so the conversation worked on most recently leads (B-1668)', () => {
     const idle = session({ id: 'idle', created_at: '2026-03-01T00:00:00Z', lastActivity: '2026-03-01T00:00:00Z' });
     const busy = session({ id: 'busy', created_at: '2026-01-01T00:00:00Z', lastActivity: '2026-09-01T00:00:00Z' });
-    expect(ids([idle, busy].sort(compareSidebarSessions))).toEqual(['idle', 'busy']);
+    expect(ids([idle, busy].sort(compareSidebarSessions))).toEqual(['busy', 'idle']);
+  });
+
+  it('separates two sessions active within the same second by their milliseconds', () => {
+    const earlier = session({ id: 'z-earlier', lastActivity: '2026-09-01T10:00:00.100Z' });
+    const later = session({ id: 'a-later', lastActivity: '2026-09-01T10:00:00.900Z' });
+    expect(ids([earlier, later].sort(compareSidebarSessions))).toEqual(['a-later', 'z-earlier']);
+  });
+
+  it('reads a zone-less SQLite timestamp as UTC, as the server does', () => {
+    expect(parseSessionTimestamp('2026-09-01 10:00:00')).toBe(Date.parse('2026-09-01T10:00:00Z'));
+    expect(parseSessionTimestamp('garbage')).toBe(0);
+    expect(parseSessionTimestamp(undefined)).toBe(0);
+  });
+
+  it('breaks ties by code unit like SQLite BINARY, not by locale', () => {
+    const stamp = '2026-02-02T10:00:00Z';
+    // localeCompare puts "a" before "B"; SQLite BINARY puts "B" (0x42) before "a" (0x61).
+    const list = [session({ id: 'ses_a', lastActivity: stamp }), session({ id: 'ses_B', lastActivity: stamp })];
+    expect(ids([...list].sort(compareSidebarSessions))).toEqual(['ses_a', 'ses_B']);
   });
 
   it('breaks equal timestamps by id descending, whatever the input order', () => {
@@ -92,12 +112,13 @@ describe('compareSidebarSessions', () => {
     expect(ids([...list].sort(compareSidebarSessions))).toEqual(['valid', 'broken']);
   });
 
-  it('falls back to last activity only when no creation timestamp exists', () => {
+  it('falls back to the creation time when a row carries no last activity', () => {
     const list = [
-      session({ id: 'legacy', lastActivity: '2026-05-01T00:00:00Z' }),
       session({ id: 'made', created_at: '2026-04-01T00:00:00Z' }),
+      session({ id: 'active', lastActivity: '2026-05-01T00:00:00Z' }),
+      session({ id: 'newer', created_at: '2026-06-01T00:00:00Z' }),
     ];
-    expect(ids([...list].sort(compareSidebarSessions))).toEqual(['legacy', 'made']);
+    expect(ids([...list].sort(compareSidebarSessions))).toEqual(['newer', 'active', 'made']);
   });
 });
 
@@ -146,6 +167,18 @@ describe('getProjectSortTime', () => {
     } as unknown as Partial<Project> & { projectId: string });
 
     expect(getProjectSortTime(target)).toBe(Date.parse('2026-02-01T00:00:00Z'));
+  });
+
+  it('prefers the server-sent newest creation time over the loaded (activity-ordered) page', () => {
+    // The newest-created conversation is idle, so the activity-ordered first
+    // page does not contain it; the server still knows it.
+    const target = project({
+      projectId: 'p',
+      sessionMeta: { newestCreatedAt: '2026-08-01T00:00:00Z' },
+      sessions: [{ id: 's1', created_at: '2026-01-01T00:00:00Z', lastActivity: '2026-09-09T00:00:00Z' }],
+    } as unknown as Partial<Project> & { projectId: string });
+
+    expect(getProjectSortTime(target)).toBe(Date.parse('2026-08-01T00:00:00Z'));
   });
 
   it('scores a project with no sessions at 0 instead of throwing', () => {

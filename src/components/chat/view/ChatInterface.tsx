@@ -20,6 +20,7 @@ import {
   shouldShowResyncArrow,
 } from '../hooks/sessionActivity';
 import { useChatSessionState } from '../hooks/useChatSessionState';
+import { useStickToBottom } from './hooks/useStickToBottom';
 import { resolveRunStartedAt } from '../hooks/runStartedAt';
 import { useChatRealtimeHandlers, type StreamBuffer } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
@@ -68,6 +69,7 @@ import {
 } from '../../../stores/selectedProviderStore';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import { resolveIdleThresholdMs } from '../utils/idleThreshold';
+import { collectUserPrompts } from '../utils/promptHistory';
 import { resolveFallbackProvider, shouldResetProvider } from '../../provider-auth/providerAuthFilter';
 import { useServerErrorBanner } from '../hooks/useServerErrorBanner';
 // T-1822: إخطار مخزن الاستخدام المشترك عند انتهاء كل دور.
@@ -328,8 +330,6 @@ function ChatInterface({
     totalMessages,
     canAbortSession,
     setCanAbortSession,
-    isUserScrolledUp,
-    setIsUserScrolledUp,
     tokenBudget,
     setTokenBudget,
     visibleMessageCount,
@@ -348,7 +348,7 @@ function ChatInterface({
     activitySourceAvailable,
     createDiff,
     scrollContainerRef,
-    scrollToBottom,
+    searchScrollActiveRef,
     scrollToBottomAndReset,
     handleUserScrollIntent,
     handleScroll,
@@ -365,6 +365,43 @@ function ChatInterface({
     pendingViewSessionRef,
     sessionStore,
   });
+
+  // B-1665: the single owner of "stay at the latest message" and of the arrow's state.
+  const messagesContentRef = useRef<HTMLDivElement>(null);
+  const stick = useStickToBottom({
+    scrollRef: scrollContainerRef,
+    contentRef: messagesContentRef,
+    sessionKey: `${selectedProject?.projectId ?? ''}:${selectedSession?.id ?? ''}`,
+    ready: !isLoadingSessionMessages && chatMessages.length > 0,
+    follow: Boolean(autoScrollToBottom),
+    suppressRef: searchScrollActiveRef,
+  });
+  const {
+    pin: pinToBottom,
+    release: releaseBottom,
+    onScroll: onStickScroll,
+    onWheel: onStickWheel,
+    onTouchMove: onStickTouchMove,
+  } = stick;
+  /** Composer submit: `false` = "show my new message" (pin), `true` = let go. */
+  const setComposerScrolledUp = useCallback((scrolledUp: boolean) => {
+    if (scrolledUp) releaseBottom(); else pinToBottom();
+  }, [pinToBottom, releaseBottom]);
+  const handlePaneScroll = useCallback(() => {
+    onStickScroll();
+    void handleScroll();
+  }, [onStickScroll, handleScroll]);
+  const handlePaneWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    onStickWheel(event);
+    handleUserScrollIntent();
+  }, [onStickWheel, handleUserScrollIntent]);
+  const handlePaneTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    onStickTouchMove(event);
+    handleUserScrollIntent();
+  }, [onStickTouchMove, handleUserScrollIntent]);
+  const loadOlderAndRelease = useCallback(() => { releaseBottom(); loadMoreMessages(); }, [releaseBottom, loadMoreMessages]);
+  const loadAllAndRelease = useCallback(() => { releaseBottom(); loadAllMessages(); }, [releaseBottom, loadAllMessages]);
+  const loadEarlierAndRelease = useCallback(() => { releaseBottom(); loadEarlierMessages(); }, [releaseBottom, loadEarlierMessages]);
 
   // T-1660: automatic recovery for a sticky "unavailable" history banner —
   // schedules capped-backoff retries and reads immediately on WS reconnect,
@@ -619,6 +656,8 @@ function ChatInterface({
   }, [chatMessages, isRunActiveForViewer]);
   const runStarterUserId = steerTurnState?.starterUserId ?? fallbackRunStarterUserId;
   const currentUserIdNum = typeof currentAuthUser?.id === 'number' ? currentAuthUser.id : null;
+  // T-2046: ArrowUp/ArrowDown recall in the composer walks this session's own prompts.
+  const userPrompts = useMemo(() => collectUserPrompts(chatMessages, currentUserIdNum), [chatMessages, currentUserIdNum]);
   /**
    * T-1904 e2e (BLOCKER) — فشلٌ مغلَق: لا افتراض «أنا البادئ» في غياب دليل.
    * `true` فقط حين نعرف هوية البادئ فعلاً وتُطابق المستخدم الحالي — لا حين
@@ -785,16 +824,17 @@ function ChatInterface({
     onFileOpen,
     onShowSettings,
     pendingViewSessionRef,
-    scrollToBottom,
+    scrollToBottom: pinToBottom,
     addMessage,
     setIsLoading,
     setCanAbortSession,
     setClaudeStatus,
-    setIsUserScrolledUp,
+    setIsUserScrolledUp: setComposerScrolledUp,
     setPendingPermissionRequests,
     withdrawOptimisticUserMessage,
     verifyMessageDelivered,
     outboxHistory: sessionStore.getSessionSlot(currentSessionId || selectedSession?.id || '')?.serverMessages,
+    userPrompts,
   });
 
   // T-1904 e2e (bug 2) — يسجّل كلّ توجيهٍ أُدرِج محلياً (نصّه وجلسته ووقته)
@@ -1201,6 +1241,7 @@ function ChatInterface({
   // T-1821: المعالج الموحَّد — يستخدم resolveScrollResyncRoute (دالة صرفة مُصدَّرة ومختبَرة).
   const handleScrollToBottomWithResync = useCallback(async () => {
     scrollToBottomAndReset();
+    pinToBottom();
     const route = resolveScrollResyncRoute({
       historyError: Boolean(historyError),
       showManualRefresh,
@@ -1214,7 +1255,7 @@ function ChatInterface({
       await handleManualRefreshWithCost();
     }
     // scrollOnly: تشغيل حيّ قبل /activity → انزل فقط (B-208).
-  }, [scrollToBottomAndReset, historyError, retryHistory, showManualRefresh, handleManualRefreshWithCost]);
+  }, [scrollToBottomAndReset, pinToBottom, historyError, retryHistory, showManualRefresh, handleManualRefreshWithCost]);
 
   // T-1821: مزامنة تلقائية عند العودة للتبويب/الإنترنت/التركيز (خارج historyError —
   // useHistoryAutoRetry يتولّى حالة historyError). الشرط: showManualRefresh = لا تشغيل
@@ -1330,9 +1371,11 @@ function ChatInterface({
         )}
         <ChatMessagesPane
           scrollContainerRef={scrollContainerRef}
-          onWheel={handleUserScrollIntent}
-          onTouchMove={handleUserScrollIntent}
-          onScroll={handleScroll}
+          contentRef={messagesContentRef}
+          onWheel={handlePaneWheel}
+          onTouchStart={stick.onTouchStart}
+          onTouchMove={handlePaneTouchMove}
+          onScroll={handlePaneScroll}
           historyError={historyError}
           isLoadingSessionMessages={isLoadingSessionMessages}
           chatMessages={chatMessages}
@@ -1373,9 +1416,9 @@ function ChatInterface({
           sessionMessagesCount={chatMessages.length}
           visibleMessageCount={visibleMessageCount}
           visibleMessages={visibleMessages}
-          loadEarlierMessages={loadEarlierMessages}
-          loadMoreMessages={loadMoreMessages}
-          loadAllMessages={loadAllMessages}
+          loadEarlierMessages={loadEarlierAndRelease}
+          loadMoreMessages={loadOlderAndRelease}
+          loadAllMessages={loadAllAndRelease}
           allMessagesLoaded={allMessagesLoaded}
           isLoadingAllMessages={isLoadingAllMessages}
           loadAllJustFinished={loadAllJustFinished}
@@ -1397,7 +1440,7 @@ function ChatInterface({
           contextTokens={idleContextTokens}
           idleThresholdMs={idleThresholdMs}
           onNewSession={onNewSession}
-          isUserScrolledUp={isUserScrolledUp}
+          isUserScrolledUp={stick.isScrolledUp}
           hasMessages={chatMessages.length > 0}
           showResync={arrowNeedsResync}
           isResyncing={isRefreshing || (Boolean(historyError) && isLoadingSessionMessages)}

@@ -338,5 +338,10 @@
     "tooltip": {
       "none": "此会话运行在 Nassaj 治理之外 — 请检查提供商设置"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "放大图表",
+    "zoomedAria": "放大的 Mermaid 图表",
+    "close": "关闭"
   }
 }

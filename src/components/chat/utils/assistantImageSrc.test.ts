@@ -9,6 +9,7 @@ import {
   classifyImageSrc,
   parseFenceBody,
   buildAssistantImageUrl,
+  resolveAssistantImage,
   resolveAssistantImageError,
 } from './assistantImageSrc';
 
@@ -59,6 +60,57 @@ describe('classifyImageSrc', () => {
     expect(classifyImageSrc('  /home/operator/img.png')).toBe('path');
     expect(classifyImageSrc('  data:image/png;base64,')).toBe('data');
     expect(classifyImageSrc('  https://x.com')).toBe('remote');
+  });
+
+  it.each([
+    'HTTPS://evil.example/?d=secret',
+    'HttP://evil.example/x.png',
+    '//evil.example/x.png',
+    '/\\evil.example/x.png',
+    '\\\\evil.example/x.png',
+    '/\t/evil.example/x.png',
+    'ftp://evil.example/x.png',
+    'javascript:alert(1)',
+    'blob:https://evil.example/uuid',
+  ])('B-1667: %s is remote', (src) => {
+    expect(classifyImageSrc(src)).toBe('remote');
+  });
+
+  it.each([
+    '/api/projects/1/files?path=/etc/passwd',
+    '/api/user/delete-account',
+    '/api/chat-images/../auth/user',
+    '/api/chat-images/%2e%2e/auth/user',
+    '/api/chat-images/..%2Fauth',
+    '/api/assistant-images-evil',
+  ])('B-1667: /api/ outside the image allowlist (%s) is rejected', (src) => {
+    expect(classifyImageSrc(src)).toBe('empty');
+  });
+
+  it('B-1667: the allowlisted image APIs still classify as api', () => {
+    expect(classifyImageSrc('/api/assistant-images?path=%2Fhome%2Fuser%2Fa.png&session=s')).toBe('api');
+    expect(classifyImageSrc('/api/chat-images/s1/a.png')).toBe('api');
+  });
+});
+
+describe('resolveAssistantImage (B-1667)', () => {
+  it('remote → the disabled-links error, never a source', () => {
+    expect(resolveAssistantImage('  https://evil/?d=1', 's1')).toEqual({ ok: false, message: 'الروابط البعيدة معطّلة' });
+  });
+
+  it('absolute path → the authenticated assistant-images URL with the session', () => {
+    expect(resolveAssistantImage('/home/user/a.png', 's1')).toEqual({
+      ok: true, src: '/api/assistant-images?path=%2Fhome%2Fuser%2Fa.png&session=s1',
+    });
+  });
+
+  it('absolute path without a session → invalid request error', () => {
+    expect(resolveAssistantImage('/home/user/a.png', null)).toEqual({ ok: false, message: 'طلب صورة غير صالح' });
+  });
+
+  it('data: and allowlisted api pass through normalized', () => {
+    expect(resolveAssistantImage(' data:image/png;base64,AA== ', 's1')).toEqual({ ok: true, src: 'data:image/png;base64,AA==' });
+    expect(resolveAssistantImage('/api/chat-images/a.png', null)).toEqual({ ok: true, src: '/api/chat-images/a.png' });
   });
 });
 

@@ -31,7 +31,8 @@ export function useFilesSource(projectId: string | undefined, enabled: boolean) 
   return useApiSource<FileResult, unknown>({
     enabled: enabled && !!projectId,
     deps: [projectId],
-    fetcher: (signal) => api.getFiles(projectId!, { signal }),
+    // B-1669: the lean listing; a large repo would answer 413 to the full tree.
+    fetcher: (signal) => api.getFiles(projectId!, { signal, partial: true }),
     parse: (data) => {
       const tree: FileNode[] = Array.isArray(data) ? (data as FileNode[]) : [];
       const flat: FileResult[] = [];

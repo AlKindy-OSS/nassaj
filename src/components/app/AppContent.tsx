@@ -10,6 +10,7 @@ import { normalizeProjectForSettings } from '../sidebar/utils/utils';
 import MainContent from '../main-content/view/MainContent';
 import CommandPalette from '../command-palette/CommandPalette';
 import { useTerminalsController } from '../terminals/hooks/useTerminalsController';
+import { canUseTerminals } from '../terminals/utils/canUseTerminals';
 import TerminalDeleteConfirmModal from '../terminals/view/subcomponents/TerminalDeleteConfirmModal';
 import { readSidebarSection } from '../sidebar/utils/utils';
 import type { SidebarSection, SidebarTerminalsProps } from '../sidebar/types/types';
@@ -216,7 +217,7 @@ function AppContentInner() {
   // Standalone terminals (T-939): one shared controller high in the tree feeds
   // both the sidebar's Terminals section and the full-area terminals panel.
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null);
-  const terminalsController = useTerminalsController();
+  const terminalsController = useTerminalsController({ enabled: canUseTerminals(user?.role) });
   const {
     terminals: terminalItems,
     refresh: refreshTerminals,

@@ -14,6 +14,13 @@ import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
 import type { AgentReviewIngestor } from '../../services/agent-review-ingestor.js';
 import { lexicalMemberOf, physicalMemberOf } from '../../shared/contained-file.js';
+import {
+  claudePromptText,
+  firstRealPromptTitle,
+  isReplaceableStoredTitle,
+  promptTitleText,
+  readJsonlHeadRecords,
+} from '../../shared/session-title-source.js';
 
 import { claudeHomeForSessionFile, resolveClaudeHomes } from './claude-home.js';
 import { locateClaudeTranscript } from './claude-projects-roots.js';
@@ -226,65 +233,68 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
 
     const existingSession = sessionsDb.getSessionById(parsed.sessionId);
     const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Claude Session') {
+    if (existingSessionName && !isReplaceableStoredTitle(existingSessionName)) {
       return {
         ...parsed,
         sessionName: normalizeSessionName(existingSessionName, 'Untitled Claude Session'),
       };
     }
 
-    let sessionName = nameMap.get(parsed.sessionId);
-    if (!sessionName) {
-      sessionName = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
-    }
-
     return {
       ...parsed,
-      sessionName: normalizeSessionName(sessionName, 'Untitled Claude Session'),
+      sessionName: normalizeSessionName(
+        await this.deriveSessionTitle(filePath, parsed.sessionId, nameMap),
+        'Untitled Claude Session',
+      ),
     };
   }
 
-  private async extractSessionAiTitleFromEnd(
+  /**
+   * B-1668: a rename (`custom-title`), then Claude's own `ai-title`, then the
+   * FIRST real prompt — from history.jsonl when the CLI wrote it, else from a
+   * bounded head read. Never `last-prompt`: that is the latest prompt, raw,
+   * with the server's image list and injected context still attached.
+   */
+  private async deriveSessionTitle(
     filePath: string,
-    sessionId: string
+    sessionId: string,
+    nameMap: Map<string, string>,
   ): Promise<string | undefined> {
-    try {
-      // Tail only: the latest entry is what we want, and whole-file reads OOM'd (B-954).
-      const content = await readUtf8Tail(filePath);
-      const lines = content.split(/\r?\n/);
+    const named = await this.extractNamedTitleFromEnd(filePath, sessionId);
+    if (named) return named;
 
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) {
-          continue;
-        }
+    const historyTitle = promptTitleText(nameMap.get(sessionId));
+    if (historyTitle) return historyTitle;
 
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
+    return firstRealPromptTitle(await readJsonlHeadRecords(filePath), claudePromptText);
+  }
 
-        const data = parsed as Record<string, unknown>;
-        const eventType = typeof data.type === 'string' ? data.type : undefined;
-        const eventSessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
-        const aiTitle = typeof data.aiTitle === 'string' ? data.aiTitle : undefined;
-        const lastPrompt = typeof data.lastPrompt === 'string' ? data.lastPrompt : undefined;
-        const claudeRenamedTitle = typeof data.customTitle === 'string' ? data.customTitle : undefined;
+  /** The latest `custom-title`, else the latest `ai-title`, from the transcript tail. */
+  private async extractNamedTitleFromEnd(filePath: string, sessionId: string): Promise<string | undefined> {
+    // Tail only: the latest entry is what we want, and whole-file reads OOM'd (B-954).
+    const lines = (await readUtf8Tail(filePath)).split(/\r?\n/);
+    let aiTitle: string | undefined;
 
-        if (
-          (eventType === 'ai-title' && eventSessionId === sessionId && aiTitle?.trim()) ||
-          (eventType === 'last-prompt' && eventSessionId === sessionId && lastPrompt?.trim()) ||
-          (eventType === "custom-title" && eventSessionId === sessionId && claudeRenamedTitle?.trim())
-        ) {
-          return aiTitle || lastPrompt || claudeRenamedTitle;
-        }
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index]?.trim();
+      if (!line || !line.includes('-title"')) continue;
+
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
       }
-    } catch {
-      // Ignore missing/unreadable files so sync can continue.
+      if (data.sessionId !== sessionId) continue;
+
+      if (data.type === 'custom-title' && typeof data.customTitle === 'string' && data.customTitle.trim()) {
+        return data.customTitle;
+      }
+      if (!aiTitle && data.type === 'ai-title' && typeof data.aiTitle === 'string' && data.aiTitle.trim()) {
+        aiTitle = data.aiTitle;
+      }
     }
 
-    return undefined;
+    return aiTitle;
   }
 }

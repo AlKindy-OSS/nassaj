@@ -31,7 +31,7 @@ vi.mock('./AuthScreenLayout', () => ({
 
 type MockSsoState = 'off' | 'active' | 'unavailable' | 'paused';
 const oidcMock = vi.hoisted(() => ({
-  detect: vi.fn<() => Promise<{ loginAvailable: boolean; state: MockSsoState }>>(),
+  detect: vi.fn<() => Promise<{ loginAvailable: boolean; state: MockSsoState; autoSignIn?: boolean }>>(),
   start: vi.fn(),
 }));
 vi.mock('../oidc', () => ({
@@ -54,6 +54,8 @@ async function renderForm(isEnabled: boolean, state: MockSsoState = isEnabled ? 
 beforeEach(() => {
   oidcMock.detect.mockReset();
   oidcMock.start.mockReset();
+  localStorage.clear();
+  sessionStorage.clear();
   // Secure context keeps the (unsupported) passkey button hidden entirely.
   vi.stubGlobal('isSecureContext', true);
 });
@@ -164,5 +166,48 @@ describe('LoginForm SSO re-attestation notice (T-1939 slice 3)', () => {
     cleanup();
     await renderForm(true);
     expect(screen.queryByText(enAuth.login.errors.ssoReauthRequired)).toBeNull();
+  });
+});
+
+describe('LoginForm auto sign-in (ADR-H20 N1)', () => {
+  async function renderAuto(search = '') {
+    window.history.replaceState(null, '', `/login${search}`);
+    oidcMock.detect.mockResolvedValue({ loginAvailable: true, state: 'active', autoSignIn: true });
+    render(<LoginForm />);
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  it('leaves for the IdP with no click when the node setting is on', async () => {
+    await renderAuto();
+    expect(oidcMock.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays on the password form at /login?local=1', async () => {
+    await renderAuto('?local=1');
+    expect(oidcMock.start).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(enAuth.login.password)).toBeTruthy();
+  });
+
+  it('does not sign straight back in right after an explicit sign-out', async () => {
+    localStorage.setItem('nassaj:sso-explicit-sign-out', String(Date.now()));
+    await renderAuto();
+    expect(oidcMock.start).not.toHaveBeenCalled();
+  });
+
+  it('the loop guard stops after 3 bounces in 30 s and says why', async () => {
+    const now = Date.now();
+    sessionStorage.setItem('nassaj:sso-auto-sign-in-bounces', JSON.stringify([now - 3000, now - 2000, now - 1000]));
+    await renderAuto();
+    expect(oidcMock.start).not.toHaveBeenCalled();
+    expect(screen.getByText(enAuth.sso.autoSignInStopped)).toBeTruthy();
+  });
+
+  it('never auto-redirects when the setting is off', async () => {
+    oidcMock.detect.mockResolvedValue({ loginAvailable: true, state: 'active', autoSignIn: false });
+    render(<LoginForm />);
+    await act(async () => { await Promise.resolve(); });
+    expect(oidcMock.start).not.toHaveBeenCalled();
   });
 });

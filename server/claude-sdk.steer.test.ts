@@ -87,8 +87,13 @@ let logs: string[] = [];
 const originalLog = console.log;
 let tmp = '';
 
+function rawSocket(userId: number, frames: Array<Record<string, any>> = rawSent) {
+  // Production stamps the JWT user on the raw socket (chat-websocket.service).
+  return { userId, readyState: 1, send: (s: string) => { frames.push(JSON.parse(s)); }, once: () => {}, off: () => {} };
+}
+
 function makeWs(userId = 1) {
-  const raw = { readyState: 1, send: (s: string) => { rawSent.push(JSON.parse(s)); }, once: () => {}, off: () => {} };
+  const raw = rawSocket(userId);
   return { userId, ws: raw, send: (p: Record<string, any>) => { sent.push(p); },
     isPrimarySocketAlive: () => raw.readyState === 1 };
 }
@@ -259,6 +264,46 @@ test('taint gate in bypassPermissions: only the starter can approve; others, tim
   const offline = await hook({ tool_name: 'Edit', tool_input: {} });
   assert.equal(offline.hookSpecificOutput.permissionDecision, 'deny');
   assert.deepEqual(await hook({ tool_name: 'Read', tool_input: {} }), {});
+  releaseStream();
+  await run;
+});
+
+test('B-1666: the starter prompt stays on the socket pinned at run start, never a reclaimed one', async () => {
+  const { run, ws } = await startRun();
+  const hook = lastOptions!.hooks.PreToolUse.at(-1).hooks[0];
+  steer.handleSessionSteer({ sessionId: SID, turnId: turnState()!.turnId, clientMsgId: 't-pin', text: 'go' }, steerCtx(2));
+
+  const memberFrames: Array<Record<string, any>> = [];
+  const pinned = ws.ws;
+  ws.ws = rawSocket(2, memberFrames); // another member's socket adopted the writer
+  const asked = hook({ tool_name: 'Bash', tool_input: { command: 'cat .env' } });
+  await sleep(5);
+  assert.equal(memberFrames.length, 0, 'the reclaimed socket never receives the raw prompt');
+  const prompt = rawSent.find(p => p.kind === 'permission_request');
+  assert.ok(prompt, 'the starter socket captured at run start is asked');
+  assert.equal(sdk.resolveToolApproval(prompt.requestId, { allow: true, requesterUserId: 1 }).resolved, true);
+  assert.deepEqual(await asked, {});
+
+  pinned.readyState = 3;
+  const offline = await hook({ tool_name: 'Edit', tool_input: {} });
+  assert.equal(offline.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(memberFrames.length, 0);
+  releaseStream();
+  await run;
+});
+
+test('B-1666: a start socket that is not the starter\'s is treated as offline (deny)', async () => {
+  const ws = makeWs(1);
+  ws.ws.userId = 2;
+  const run = sdk.queryClaudeSDK('start the work', { cwd: tmp, sessionId: SID, permissionMode: 'bypassPermissions' }, ws);
+  await queryStarted;
+  await scriptedDone;
+  const hook = lastOptions!.hooks.PreToolUse.at(-1).hooks[0];
+  steer.handleSessionSteer({ sessionId: SID, turnId: turnState()!.turnId, clientMsgId: 't-foreign', text: 'go' }, steerCtx(2));
+
+  const denied = await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } });
+  assert.equal(denied.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(rawSent.some(p => p.kind === 'permission_request'), false);
   releaseStream();
   await run;
 });

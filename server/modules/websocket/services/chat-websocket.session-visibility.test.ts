@@ -82,7 +82,7 @@ mock.module('@/modules/database/index.js', {
 
 mock.module('@/modules/websocket/services/websocket-writer.service.js', {
   namedExports: {
-    addSessionMirror: (sessionId: string) => {
+    setSocketViewMirror: (sessionId: string) => {
       mirrorCalls.push(sessionId);
     },
     // Minimal WebSocketWriter matching the surface handleChatConnection touches.

@@ -11,6 +11,7 @@ import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messag
 import { newestContextUsage } from './contextUsagePresentation';
 import { normalizedToChatMessages } from './useChatMessages';
 import { runSessionActivityProbe, type SessionActivityProbeOutcome } from './sessionActivity';
+import { findSearchTargetElement } from './searchTargetMatch';
 
 const MESSAGES_PER_PAGE = 20;
 const INITIAL_VISIBLE_MESSAGES = 100;
@@ -47,6 +48,8 @@ const ACTIVE_RUN_HYDRATION_LIMIT = 400;
  * bound also covers a legacy server that keeps ignoring `payload=full`.
  */
 const MAX_FULL_REVISION_RETRIES = 3;
+/** B-1666: torn light400 reads retried with back-off before parking (non-blocking). */
+const MAX_LIGHT400_TORN_RETRIES = 3;
 
 /** Deferred-history scheduler state — one coalescing queue per session. */
 type HistoryQueueState = {
@@ -61,6 +64,8 @@ type HistoryQueueState = {
   fullRevisionRetries: number;
   /** B-1386: the next `full` request must omit `revision` (post-conflict retry). */
   fullSkipRevision: boolean;
+  /** B-1666: back-off attempts spent on a torn light400 read (file grew mid-read). */
+  light400TornRetries: number;
 };
 
 type PendingViewSession = {
@@ -74,7 +79,23 @@ type PendingViewSession = {
    * while this ref is still set, so the router-lag guard below only holds
    * for the SAME project. */
   projectId?: string | null;
+  /** B-1666: the session on screen when the send started a new conversation
+   * from it (useChatComposerState). The guard is held only while that
+   * session stays on screen. */
+  originSessionId?: string | null;
 };
+
+/**
+ * B-1666: whether the pending-view guard still belongs to what is on screen.
+ * It holds for the id it minted (router lag, B-1386) and, before the provider
+ * answers, for the session the send left from. Any other selection is a switch
+ * away, and the send it belonged to no longer owns this view.
+ */
+function pendingViewHoldsFor(pending: PendingViewSession, selectedId: string | null): boolean {
+  if (pending.originSessionId && selectedId === pending.originSessionId) return true;
+  if (pending.sessionId) return selectedId === null || selectedId === pending.sessionId;
+  return selectedId === null && !pending.originSessionId;
+}
 
 interface UseChatSessionStateArgs {
   selectedProject: Project | null;
@@ -217,7 +238,6 @@ export function useChatSessionState({
    * قبل أن يصل الخادم.
    */
   const [activitySourceAvailable, setActivitySourceAvailable] = useState(false);
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [tokenBudget, storeTokenBudget] = useState<Record<string, unknown> | null>(null);
   const setTokenBudget = useCallback((incoming: Record<string, unknown> | null) => {
     storeTokenBudget((current) => newestContextUsage(current, incoming));
@@ -242,16 +262,6 @@ export function useChatSessionState({
   const allMessagesLoadedRef = useRef(false);
   const topLoadLockRef = useRef(false);
   const pendingScrollRestoreRef = useRef<ScrollRestoreState | null>(null);
-  const pendingInitialScrollRef = useRef(true);
-  /**
-   * B-431: ميزانية إطارات «التمرير الابتدائي» **عبر إعادات تشغيل الأثر**.
-   * الأثر يعتمد على `chatMessages.length`، فكل رسالة جديدة تُلغي حلقة rAF
-   * الجارية وتبدأ أخرى بعدّاد صفر. أثناء بثّ حيّ (رسالة كل أقل من ثانية) لا
-   * تبلغ الحلقة سقفها أبداً، فتظلّ تثبّت scrollTop=scrollHeight كل إطار —
-   * والنتيجة أن التمرير لأعلى مستحيل حرفياً. العدّاد في ref فلا يُصفَّر إلا
-   * عند تبديل الجلسة.
-   */
-  const initialScrollFramesRef = useRef(0);
   const messagesOffsetRef = useRef(0);
   const scrollPositionRef = useRef({ height: 0, top: 0 });
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -281,10 +291,16 @@ export function useChatSessionState({
     fullLimit: MESSAGES_PER_PAGE,
     fullRevisionRetries: 0,
     fullSkipRevision: false,
+    light400TornRetries: 0,
   });
   /** مرآة معرّف الجلسة المعروضة، تُقرأ داخل مسارات لاتزامنية بلا closure بائت. */
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   selectedSessionIdRef.current = selectedSession?.id ?? null;
+  /** Running sessions, read by async history paths without re-creating callbacks. */
+  const processingSessionsRef = useRef(processingSessions);
+  processingSessionsRef.current = processingSessions;
+  /** B-1386: session whose `full` enrichment waits for its run to end. */
+  const deferredEnrichmentSessionRef = useRef<string | null>(null);
   /**
    * Tracks the last processed value from `useProjectsState.newSessionTrigger`.
    *
@@ -347,8 +363,6 @@ export function useChatSessionState({
     searchScrollActiveRef.current = false;
     topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
-    pendingInitialScrollRef.current = true;
-    initialScrollFramesRef.current = 0;
     lastLoadedSessionKeyRef.current = null;
 
     if (loadAllFinishedTimerRef.current) {
@@ -371,6 +385,18 @@ export function useChatSessionState({
     prevActiveForStoreRef.current = activeSessionId;
     sessionStore.setActiveSession(activeSessionId);
   }
+
+  /**
+   * B-1666 #10: the provider stamped on an optimistic row is the session's own.
+   * The global picker is only the fallback for a brand-new session before the
+   * router catches up — there it is exactly the provider the message went to.
+   */
+  const selectedSessionId = selectedSession?.id;
+  const selectedSessionProvider = selectedSession?.__provider;
+  const resolveRowProvider = useCallback((sessionId: string): LLMProvider => (
+    (selectedSessionId === sessionId ? selectedSessionProvider : undefined)
+    || (localStorage.getItem('selected-provider') as LLMProvider) || 'claude'
+  ), [selectedSessionId, selectedSessionProvider]);
 
   useEffect(() => {
     if (!pendingUserMessage) {
@@ -408,15 +434,14 @@ export function useChatSessionState({
       return;
     }
 
-    const prov = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
-    const normalized = chatMessageToNormalized(pendingUserMessage, activeSessionId, prov);
+    const normalized = chatMessageToNormalized(pendingUserMessage, activeSessionId, resolveRowProvider(activeSessionId));
     if (normalized) {
       sessionStore.appendRealtime(activeSessionId, normalized);
     }
 
     flushedPendingUserMessageRef.current = pendingUserMessage;
     setPendingUserMessage(null);
-  }, [activeSessionId, pendingUserMessage, pendingViewSessionRef, sessionStore]);
+  }, [activeSessionId, pendingUserMessage, pendingViewSessionRef, resolveRowProvider, sessionStore]);
 
   const historyError = activeSessionId ? sessionStore.getSessionSlot(activeSessionId)?.historyError ?? null : null;
   const storeMessages = activeSessionId ? sessionStore.getMessages(activeSessionId) : [];
@@ -455,13 +480,12 @@ export function useChatSessionState({
       setPendingUserMessage(msg);
       return null;
     }
-    const prov = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
-    const normalized = chatMessageToNormalized(msg, activeSessionId, prov);
+    const normalized = chatMessageToNormalized(msg, activeSessionId, resolveRowProvider(activeSessionId));
     if (normalized) {
       sessionStore.appendRealtime(activeSessionId, normalized);
     }
     return activeSessionId;
-  }, [activeSessionId, sessionStore]);
+  }, [activeSessionId, resolveRowProvider, sessionStore]);
 
   /**
    * T-1295 — سحب فقاعة المستخدم المتفائلة بعد أن يفشل **نقلُها** (‏`sendMessage`
@@ -574,9 +598,6 @@ export function useChatSessionState({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const nearBottom = isNearBottom();
-    setIsUserScrolledUp(!nearBottom);
-
     // T-1862 round 2 (qa T-2): wired straight onto `onScroll` — nothing
     // downstream awaits or catches this promise, so any rejection here would
     // otherwise surface as an unhandled rejection on every scroll tick.
@@ -597,16 +618,14 @@ export function useChatSessionState({
         console.error('handleScroll failed', error);
       }
     }
-  }, [isNearBottom, loadOlderMessages]);
+  }, [loadOlderMessages]);
 
   /**
-   * B-431: تُستدعى من إيماءة مستخدم حقيقية (wheel/touch) لا من حدث scroll
-   * البرمجي. حدث scroll لا يميّز الإيماءة من `scrollTop = scrollHeight`، فلو
-   * فسخنا التثبيت داخل handleScroll لفسخه التمرير الابتدائي نفسه. هنا نُنهي
-   * التمرير الابتدائي فوراً: من مسّ العجلة يريد أن يقود بنفسه.
+   * B-431: إيماءة مستخدم حقيقية (wheel/touch). عند أعلى قائمة قصيرة لا يقع
+   * حدث scroll أصلاً، فتمرّ الإيماءة هنا لتجلب الصفحة الأقدم. التثبيت عند
+   * الأسفل وفسخه انتقلا إلى useStickToBottom (B-1665).
    */
   const handleUserScrollIntent = useCallback(() => {
-    pendingInitialScrollRef.current = false;
     void handleScroll();
   }, [handleScroll]);
 
@@ -636,55 +655,10 @@ export function useChatSessionState({
     }
     searchScrollActiveRef.current = false;
 
-    pendingInitialScrollRef.current = true;
-    initialScrollFramesRef.current = 0;
     setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
     topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
-    setIsUserScrolledUp(false);
   }, [selectedProject?.projectId, selectedSession?.id]);
-
-  // Initial scroll to bottom — robust to lazy content reflow.
-  // The previous implementation fired one scrollToBottom() at +200ms and
-  // cleared the pending flag. When markdown blocks, code highlighting, or
-  // images finished rendering after that window, scrollHeight grew but
-  // nothing re-anchored the viewport, leaving the chat tab visually
-  // "scrolled way up" with the latest assistant message off-screen.
-  //
-  // This version re-scrolls every animation frame while scrollHeight is
-  // still growing, capped at ~1s (60 frames) or 3 consecutive stable
-  // frames. Cancels cleanly on session change via the pending flag.
-  useEffect(() => {
-    if (!pendingInitialScrollRef.current || !scrollContainerRef.current || isLoadingSessionMessages) return;
-    if (chatMessages.length === 0) { pendingInitialScrollRef.current = false; return; }
-    if (searchScrollActiveRef.current) { pendingInitialScrollRef.current = false; return; }
-
-    const container = scrollContainerRef.current;
-    let lastHeight = 0;
-    let stableCount = 0;
-    let rafId = 0;
-
-    const tick = () => {
-      if (!pendingInitialScrollRef.current || !scrollContainerRef.current) return;
-      container.scrollTop = container.scrollHeight;
-      if (container.scrollHeight === lastHeight) {
-        stableCount++;
-      } else {
-        stableCount = 0;
-        lastHeight = container.scrollHeight;
-      }
-      initialScrollFramesRef.current++;
-      if (stableCount < 3 && initialScrollFramesRef.current < 60) {
-        rafId = requestAnimationFrame(tick);
-      } else {
-        pendingInitialScrollRef.current = false;
-      }
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, [chatMessages.length, isLoadingSessionMessages, scrollToBottom]);
 
   const cancelHistoryPipeline = useCallback(() => {
     historyEpochRef.current += 1;
@@ -704,6 +678,7 @@ export function useChatSessionState({
       fullLimit: MESSAGES_PER_PAGE,
       fullRevisionRetries: 0,
       fullSkipRevision: false,
+      light400TornRetries: 0,
       };
   }, []);
 
@@ -792,6 +767,49 @@ export function useChatSessionState({
   }, [applyFullRevisionRebase, sessionStore]);
 
   /**
+   * B-1666: handle one `light400` result inside `drainHistoryQueue`. The
+   * request carries no `revision` (the transcript grows during the run it
+   * widens), so a 409 here is a torn read: retry with back-off, and after the
+   * bound park it as a non-blocking 'deferred' conflict. A success rebases the
+   * window onto the new revision and re-queues enrichment against it — after
+   * the run, exactly like the initial load (B-1386).
+   */
+  const applyLight400Result = useCallback((
+    sessionId: string,
+    result: Awaited<ReturnType<SessionStore['requestHistorySnapshot']>>,
+    queue: HistoryQueueState,
+    epoch: number,
+    redrain: () => void,
+  ) => {
+    if (!result.ok) {
+      const attempt = queue.light400TornRetries;
+      if (result.code === 'HISTORY_REVISION_CHANGED' && attempt < MAX_LIGHT400_TORN_RETRIES) {
+        queue.light400TornRetries = attempt + 1;
+        window.setTimeout(() => {
+          if (historyEpochRef.current !== epoch) return;
+          queue.light400Queued = true;
+          redrain();
+        }, 300 * (attempt + 1));
+        return;
+      }
+      queue.light400TornRetries = 0;
+      sessionStore.setHistoryError(sessionId, result, 'deferred');
+      queue.fullQueued = false;
+      queue.light400Queued = false;
+      return;
+    }
+    queue.light400TornRetries = 0;
+    if (result.snapshot.payloadMode !== 'light') return;
+    sessionStore.applyLightHistoryRebase(sessionId, result.snapshot);
+    queue.fullDone = false;
+    if (processingSessionsRef.current?.has(sessionId)) {
+      deferredEnrichmentSessionRef.current = sessionId;
+    } else {
+      queue.fullQueued = true;
+    }
+  }, [sessionStore]);
+
+  /**
    * One coalescing scheduler owns every deferred history request. A full tail
    * and an active-run light window can never run concurrently, and repeated
    * paint/activity/interaction signals collapse to one request of each kind.
@@ -802,7 +820,8 @@ export function useChatSessionState({
     const sessionId = queue.sessionId;
     const epoch = queue.epoch;
     const slot = sessionStore.getSessionSlot(sessionId);
-    if (!slot || slot.historyError || selectedSessionIdRef.current !== sessionId || historyEpochRef.current !== epoch) return;
+    if (!slot || !canAutomaticallyReadHistory(slot.historyError)
+      || selectedSessionIdRef.current !== sessionId || historyEpochRef.current !== epoch) return;
 
     let kind: 'full' | 'light400' | null = null;
     if (queue.fullQueued && !queue.fullDone && canEnrichHistoryNow()) {
@@ -819,7 +838,8 @@ export function useChatSessionState({
     historyRequestRef.current = controller;
     const generation = sessionStore.beginHistoryRequest(sessionId);
     try {
-      const skipRevision = kind === 'full' && queue.fullSkipRevision;
+      // B-1666: light400 never pins a revision — see applyLight400Result.
+      const skipRevision = kind === 'light400' || queue.fullSkipRevision;
       const result = await sessionStore.requestHistorySnapshot(sessionId, {
         limit: kind === 'light400' ? ACTIVE_RUN_HYDRATION_LIMIT : queue.fullLimit,
         offset: 0,
@@ -832,20 +852,9 @@ export function useChatSessionState({
         || historyEpochRef.current !== epoch
         || !sessionStore.isHistoryRequestCurrent(sessionId, generation)) return;
 
-      if (kind === 'full') {
-        applyFullHistoryResult(sessionId, slot, result, queue, epoch, () => void drainHistoryQueue());
-        return;
-      }
-      if (!result.ok) {
-        sessionStore.setHistoryError(sessionId, result, 'deferred');
-        queue.fullQueued = false;
-        queue.light400Queued = false;
-        return;
-      }
-      const snapshot = result.snapshot;
-      if (snapshot.payloadMode === 'light' && snapshot.revision === slot.historyRevision) {
-        sessionStore.applyLightHistoryExpansion(sessionId, snapshot);
-      }
+      const redrain = () => void drainHistoryQueue();
+      if (kind === 'full') applyFullHistoryResult(sessionId, slot, result, queue, epoch, redrain);
+      else applyLight400Result(sessionId, result, queue, epoch, redrain);
     } catch (error) {
       if (!(error instanceof Error && error.name === 'AbortError')) {
         if (selectedSessionIdRef.current === sessionId && historyEpochRef.current === epoch
@@ -861,12 +870,12 @@ export function useChatSessionState({
         if (queue.fullQueued || queue.light400Queued) void drainHistoryQueue();
       }
     }
-  }, [applyFullHistoryResult, canEnrichHistoryNow, sessionStore]);
+  }, [applyFullHistoryResult, applyLight400Result, canEnrichHistoryNow, sessionStore]);
 
   const queueHistoryWork = useCallback((kind: 'full' | 'light400', interaction = false) => {
     const queue = historyQueueRef.current;
     if (!queue.sessionId || selectedSessionIdRef.current !== queue.sessionId) return;
-    if (sessionStore.getSessionSlot(queue.sessionId)?.historyError) return;
+    if (!canAutomaticallyReadHistory(sessionStore.getSessionSlot(queue.sessionId)?.historyError)) return;
     if (kind === 'full') {
       if (interaction) {
         queue.fullDone = false;
@@ -917,14 +926,18 @@ export function useChatSessionState({
     };
   }, [queueHistoryWork]);
 
+  // B-1666 #7: running sessions keep their store slots whatever their recency.
+  useEffect(() => {
+    sessionStore.setRetainedSessions?.(processingSessions ?? []);
+  }, [processingSessions, sessionStore]);
+
   /**
    * B-1386: a brand-new session's first light snapshot is fetched while the
    * assistant is, by construction, still answering — scheduling the deferred
    * `full` enrichment right then all but guarantees the revision race this
-   * bug fixes. Hold it until the run this hook can observe (`processingSessions`)
-   * ends, instead of firing straight into that window.
+   * bug fixes. Hold it (`deferredEnrichmentSessionRef`) until the run this hook
+   * can observe (`processingSessions`) ends, instead of firing into that window.
    */
-  const deferredEnrichmentSessionRef = useRef<string | null>(null);
   useEffect(() => {
     const pending = deferredEnrichmentSessionRef.current;
     if (!pending || processingSessions?.has(pending)) return;
@@ -949,9 +962,10 @@ export function useChatSessionState({
       // to the abandoned project. A ref with no `projectId` at all (older
       // callers, or the pre-session_created phase) is not evidence of a
       // mismatch and keeps the pre-existing "any pending send" behavior.
-      const refProjectId = pendingViewSessionRef.current?.projectId;
+      const pending = pendingViewSessionRef.current;
+      const refProjectId = pending?.projectId;
       const projectMismatch = refProjectId != null && refProjectId !== (selectedProject?.projectId ?? null);
-      if (pendingViewSessionRef.current && !projectMismatch) {
+      if (pending && !projectMismatch && pendingViewHoldsFor(pending, null)) {
         return;
       }
 
@@ -982,7 +996,19 @@ export function useChatSessionState({
     // inside useChatRealtimeHandlers, so it never reaches here still set for
     // that path — but stale-resume does NOT null it there, only stamps
     // `.sessionId`, so this same match-and-release also covers stale-resume.
-    if (pendingViewSessionRef.current?.sessionId === selectedSession.id) {
+    //
+    //
+    // B-1666: a different id means the user opened another existing session
+    // while a new-chat send was still establishing. `sessionChanged` below
+    // only resets when `currentSessionId` was non-null, so from the new-chat
+    // screen the ref would outlive the switch and later pin a return to the
+    // new-chat screen onto this session. It belongs to the abandoned send:
+    // release it. A send that starts a new conversation from the session on
+    // screen (conversation_not_found restart, outbox retry) keeps it while that
+    // session stays selected, so its session_created can move this view.
+    const pendingView = pendingViewSessionRef.current;
+    if (pendingView && (pendingView.sessionId === selectedSession.id
+      || !pendingViewHoldsFor(pendingView, selectedSession.id))) {
       pendingViewSessionRef.current = null;
     }
 
@@ -990,7 +1016,9 @@ export function useChatSessionState({
     const sessionKey = `${selectedSession.id}:${selectedProject.projectId}:${provider}`;
 
     // A failed read needs explicit recovery; WS/property updates must not restart it.
-    if (lastLoadedSessionKeyRef.current === sessionKey && sessionStore.getSessionSlot(selectedSession.id)?.historyError) return;
+    // B-1666: a transient revision conflict of an automatic read does not park it.
+    if (lastLoadedSessionKeyRef.current === sessionKey
+      && !canAutomaticallyReadHistory(sessionStore.getSessionSlot(selectedSession.id)?.historyError)) return;
 
     // Skip if already loaded for this exact session/project/provider.
     //
@@ -1074,6 +1102,7 @@ export function useChatSessionState({
       fullLimit: MESSAGES_PER_PAGE,
       fullRevisionRetries: 0,
       fullSkipRevision: false,
+      light400TornRetries: 0,
       };
     setIsLoadingSessionMessages(true);
     const controller = new AbortController();
@@ -1313,13 +1342,11 @@ export function useChatSessionState({
 
     const reloadExternalMessages = async () => {
       try {
-        const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
-
         // Skip store refresh during active streaming
         if (!isLoading) {
           const refreshed = await sessionStore.refreshFromServer(sessionId, {
             signal: controller.signal,
-            provider: (selectedSession.__provider || provider) as LLMProvider,
+            provider: resolveRowProvider(sessionId),
             projectId: selectedProject.projectId,
             projectPath: selectedProject.fullPath || selectedProject.path || '',
           });
@@ -1339,29 +1366,30 @@ export function useChatSessionState({
     autoScrollToBottom,
     externalMessageUpdate,
     isNearBottom,
+    resolveRowProvider,
     scrollToBottom,
     selectedProject?.projectId,
     selectedProject?.fullPath,
     selectedProject?.path,
     selectedSession?.id,
-    selectedSession?.__provider,
     sessionStore,
     isLoading,
   ]);
 
-  // Search navigation target
+  // Search navigation target. Contract (B-1666 #8): the sidebar's search-result
+  // click passes `__searchTargetSnippet` (the server snippet of that match) on
+  // the ProjectSession it hands to onSessionSelect. Keyed by the values, not the
+  // object: a projects_updated rebuild of the same session must not re-scroll.
+  const searchTargetSnippet = selectedSession?.__searchTargetSnippet;
+  const searchTargetTimestamp = selectedSession?.__searchTargetTimestamp;
   useEffect(() => {
-    const session = selectedSession as Record<string, unknown> | null;
-    const targetSnippet = session?.__searchTargetSnippet;
-    const targetTimestamp = session?.__searchTargetTimestamp;
-    if (typeof targetSnippet === 'string' && targetSnippet) {
-      searchScrollActiveRef.current = true;
-      setSearchTarget({
-        snippet: targetSnippet,
-        timestamp: typeof targetTimestamp === 'string' ? targetTimestamp : undefined,
-      });
-    }
-  }, [selectedSession]);
+    if (typeof searchTargetSnippet !== 'string' || !searchTargetSnippet) return;
+    searchScrollActiveRef.current = true;
+    setSearchTarget({
+      snippet: searchTargetSnippet,
+      timestamp: typeof searchTargetTimestamp === 'string' ? searchTargetTimestamp : undefined,
+    });
+  }, [selectedSession?.id, searchTargetSnippet, searchTargetTimestamp]);
 
   // Scroll to search target
   useEffect(() => {
@@ -1413,19 +1441,8 @@ export function useChatSessionState({
         const container = scrollContainerRef.current;
         if (!container) return;
 
-        let targetElement: Element | null = null;
-
-        if (target.snippet) {
-          const cleanSnippet = target.snippet.replace(/^\.{3}/, '').replace(/\.{3}$/, '').trim();
-          const searchPhrase = cleanSnippet.slice(0, 80).toLowerCase().trim();
-          if (searchPhrase.length >= 10) {
-            const messageElements = container.querySelectorAll('.chat-message');
-            for (const el of messageElements) {
-              const text = (el.textContent || '').toLowerCase();
-              if (text.includes(searchPhrase)) { targetElement = el; break; }
-            }
-          }
-        }
+        // B-1666 #8: the snippet is raw text, the message rendered Markdown.
+        let targetElement = target.snippet ? findSearchTargetElement(container, target.snippet) : null;
 
         if (!targetElement && target.timestamp) {
           const targetDate = new Date(target.timestamp).getTime();
@@ -1461,8 +1478,11 @@ export function useChatSessionState({
   }, [chatMessages.length, isLoadingSessionMessages, searchTarget]);
 
   // Initial token usage fetch for providers with file-backed usage data.
+  // B-1666 #9: keyed by projectId — `selectedProject` is a new object on every
+  // projects_updated frame, which refetched the usage each time.
+  const tokenUsageProjectId = selectedProject?.projectId;
   useEffect(() => {
-    if (!selectedProject || !selectedSession?.id) {
+    if (!tokenUsageProjectId || !selectedSession?.id) {
       setTokenBudget(null);
       return;
     }
@@ -1477,7 +1497,7 @@ export function useChatSessionState({
       try {
         // Token usage endpoint is now keyed by the DB projectId.
         const params = new URLSearchParams({ provider: sessionProvider });
-        const url = `/api/projects/${selectedProject.projectId}/sessions/${selectedSession.id}/token-usage?${params.toString()}`;
+        const url = `/api/projects/${tokenUsageProjectId}/sessions/${selectedSession.id}/token-usage?${params.toString()}`;
         const response = await authenticatedFetch(url);
         if (response.ok) {
           const incoming = await response.json();
@@ -1497,7 +1517,7 @@ export function useChatSessionState({
     };
     fetchInitialTokenUsage();
     return () => { cancelled = true; };
-  }, [selectedProject, selectedSession?.id, selectedSession?.__provider, setTokenBudget]);
+  }, [tokenUsageProjectId, selectedSession?.id, selectedSession?.__provider, setTokenBudget]);
 
   const visibleMessages = useMemo(() => {
     if (chatMessages.length <= visibleMessageCount) return chatMessages;
@@ -1515,17 +1535,15 @@ export function useChatSessionState({
       const container = scrollContainerRef.current;
       scrollPositionRef.current = { height: container.scrollHeight, top: container.scrollTop };
     }
-  }, [autoScrollToBottom, chatMessages.length, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
+  }, [autoScrollToBottom, chatMessages.length, isLoadingMoreMessages]);
 
+  // B-1665: pinning to the bottom (initial open and live follow) lives in
+  // useStickToBottom, driven by a ResizeObserver rather than message count.
   useEffect(() => {
     if (!scrollContainerRef.current || chatMessages.length === 0) return;
     if (isLoadingMoreRef.current || isLoadingMoreMessages || pendingScrollRestoreRef.current) return;
     if (searchScrollActiveRef.current) return;
-
-    if (autoScrollToBottom) {
-      if (!isUserScrolledUp) setTimeout(() => scrollToBottom(), 50);
-      return;
-    }
+    if (autoScrollToBottom) return;
 
     const container = scrollContainerRef.current;
     const prevHeight = scrollPositionRef.current.height;
@@ -1533,19 +1551,7 @@ export function useChatSessionState({
     const newHeight = container.scrollHeight;
     const heightDiff = newHeight - prevHeight;
     if (heightDiff > 0 && prevTop > 0) container.scrollTop = prevTop + heightDiff;
-  }, [autoScrollToBottom, chatMessages.length, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
-
-  // T-1862 round 2 (qa T-1): content can grow WITHOUT any native 'scroll'
-  // event — a new message appends below the viewport while scrollTop itself
-  // never changes — so handleScroll (onScroll) never fires and isUserScrolledUp
-  // goes stale: the user is now further from the true bottom, but the arrow
-  // stays hidden until their next real scroll gesture. Only relevant when
-  // autoScrollToBottom is off (that path already pins the view to the bottom
-  // via scrollToBottom() above, whose own 'scroll' event keeps this accurate).
-  useEffect(() => {
-    if (autoScrollToBottom || !scrollContainerRef.current || chatMessages.length === 0) return;
-    setIsUserScrolledUp(!isNearBottom());
-  }, [autoScrollToBottom, chatMessages.length, isNearBottom]);
+  }, [autoScrollToBottom, chatMessages.length, isLoadingMoreMessages]);
 
   // T-1862: wired declaratively as `onScroll` on the container in
   // ChatMessagesPane (covers scrollbar drag/keyboard, not just wheel/touch)
@@ -1686,7 +1692,8 @@ export function useChatSessionState({
   /**
    * استرجاع فجوة بثّ للجلسة **المعروضة فقط** عبر طابور التاريخ الموسَّع
    * الموجود (`queueHistoryWork('light400')`): single-flight، إلغاء نظيف،
-   * حارس الرؤية وحارس `revision`. جلسة غير معروضة = لا شيء؛ الفجوة تُعاد
+   * وحارس الرؤية؛ بلا `revision` وبتراجع زمني محدود للقراءة الممزّقة
+   * (B-1666، `applyLight400Result`). جلسة غير معروضة = لا شيء؛ الفجوة تُعاد
    * تقييمها عند فتحها (مراجعة qa-critic — بند 2).
    */
   const requestStreamGapRecovery = useCallback((sessionId: string) => {
@@ -1706,7 +1713,6 @@ export function useChatSessionState({
   const loadMoreMessages = useCallback(async () => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    pendingInitialScrollRef.current = false;
     topLoadLockRef.current = false;
     await loadOlderMessages(container, true);
   }, [loadOlderMessages]);
@@ -1730,8 +1736,6 @@ export function useChatSessionState({
     totalMessages,
     canAbortSession,
     setCanAbortSession,
-    isUserScrolledUp,
-    setIsUserScrolledUp,
     tokenBudget,
     setTokenBudget,
     visibleMessageCount,
@@ -1750,6 +1754,7 @@ export function useChatSessionState({
     activitySourceAvailable,
     createDiff,
     scrollContainerRef,
+    searchScrollActiveRef,
     scrollToBottom,
     scrollToBottomAndReset,
     isNearBottom,

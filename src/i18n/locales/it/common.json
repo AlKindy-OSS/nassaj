@@ -338,5 +338,10 @@
     "tooltip": {
       "none": "Questa sessione è in esecuzione al di fuori della governance di Nassaj — controlla le impostazioni del provider"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "Ingrandisci diagramma",
+    "zoomedAria": "Diagramma Mermaid ingrandito",
+    "close": "Chiudi"
   }
 }

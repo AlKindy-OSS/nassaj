@@ -159,7 +159,7 @@ test('spawnOpenCode emits session_created before normalized live messages for ne
         : `.COM;.EXE;.BAT;.CMD${previousPathExt ? `;${previousPathExt}` : ''}`;
     }
 
-    await spawnOpenCode('Hi', { cwd: tempRoot }, writer);
+    await spawnOpenCode('Hi', { cwd: tempRoot, clientMsgId: 'cmid-oc-1666' }, writer);
 
     const sessionCreatedIndex = messages.findIndex((message) => message.kind === 'session_created');
     const assistantDeltaIndex = messages.findIndex((message) =>
@@ -172,6 +172,9 @@ test('spawnOpenCode emits session_created before normalized live messages for ne
     assert.notEqual(assistantDeltaIndex, -1);
     assert.ok(sessionCreatedIndex < assistantDeltaIndex);
     assert.equal(messages[sessionCreatedIndex].newSessionId, 'open-live-1');
+    // B-1666: a new conversation, never a stale resume of the viewed one.
+    assert.equal(messages[sessionCreatedIndex].parentSessionId, null);
+    assert.equal(messages[sessionCreatedIndex].clientMsgId, 'cmid-oc-1666');
     assert.equal(writer.sessionId, 'open-live-1');
     assert.equal(streamEnd?.sessionId, 'open-live-1');
     assert.equal(complete?.sessionId, 'open-live-1');

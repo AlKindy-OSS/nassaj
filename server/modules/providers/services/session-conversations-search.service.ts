@@ -21,7 +21,11 @@ import {
   type SessionTranscriptHandle,
 } from '@/modules/providers/shared/session-transcript.js';
 // eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
-import { displayLiteralsForSession, isDisplayMaskingEnabled, maskDisplayLabel, maskText } from '@/services/display-secret-mask.js';
+import { displayLiteralsForSession, isDisplayMaskingEnabled, maskText } from '@/services/display-secret-mask.js';
+// eslint-disable-next-line boundaries/no-unknown -- B-1668: one title/snippet text pipeline for every viewer egress.
+import { displaySearchText, displaySessionTitle } from '@/services/session-title-text.js';
+
+import { isInternalCodexContent, isInternalContent } from '../shared/internal-content.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex';
@@ -105,22 +109,6 @@ const RIPGREP_FILE_CHUNK_SIZE = 40;
 const RIPGREP_CHUNK_CONCURRENCY = 6;
 const UNKNOWN_PROJECT_KEY = '__unknown_project__';
 
-const INTERNAL_CONTENT_PREFIXES = [
-  '<system-reminder>',
-  'Caveat:',
-  'Invalid API key',
-  '[Request interrupted',
-] as const;
-
-/**
- * Codex includes extra internal metadata tags that should not surface as
- * user-facing searchable conversation content.
- */
-const CODEX_INTERNAL_CONTENT_PREFIXES = [
-  '<environment_context>',
-  '<cwd>',
-] as const;
-
 function chunkArray<TItem>(items: TItem[], size: number): TItem[][] {
   if (size <= 0) {
     return [items];
@@ -142,167 +130,139 @@ function makeProjectKey(projectPath: string | null): string {
   return normalized.length > 0 ? normalized : UNKNOWN_PROJECT_KEY;
 }
 
+/** Longest fallback summary, in code points. */
+const SUMMARY_FALLBACK_MAX = 50;
+
+/**
+ * The result's conversation title: the same display title the sidebar shows
+ * (B-1668), else the cleaned fallback message text. ADR-210: masked before
+ * truncating, so a cut can never leave half a secret unmatched; the cut is on
+ * code points, so it never splits an emoji into a lone surrogate.
+ */
 function toSummaryText(customName: string | null, fallback: string | null | undefined, emptyLabel: string): string {
-  const trimmedCustomName = typeof customName === 'string' ? maskDisplayLabel(customName.trim()) : '';
-  if (trimmedCustomName) {
-    return trimmedCustomName;
+  const title = displaySessionTitle(customName);
+  if (title) {
+    return title;
   }
 
-  // ADR-210: mask before truncating, so a cut can never leave half a secret unmatched.
-  const trimmedFallback = typeof fallback === 'string' ? maskDisplayLabel(fallback.trim()) : '';
-  if (!trimmedFallback) {
+  const fallbackText = displaySessionTitle(fallback);
+  if (!fallbackText) {
     return emptyLabel;
   }
 
-  return trimmedFallback.length > 50 ? `${trimmedFallback.slice(0, 50)}...` : trimmedFallback;
-}
-
-function isInternalContent(content: string): boolean {
-  return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
-}
-
-function isInternalCodexContent(content: string): boolean {
-  const normalized = content.trimStart();
-  return CODEX_INTERNAL_CONTENT_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+  const codePoints = Array.from(fallbackText);
+  return codePoints.length > SUMMARY_FALLBACK_MAX
+    ? `${codePoints.slice(0, SUMMARY_FALLBACK_MAX).join('')}...`
+    : fallbackText;
 }
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createWordMatcher(
-  rawQuery: string,
-  words: string[],
-): Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'> {
-  const normalizedQuery = rawQuery.trim().replace(/\s+/g, ' ');
-  const requireExactPhrase = words.length > 1 && normalizedQuery.length > 0;
-  const wordPatterns = words.map((word) => new RegExp(`(?<!\\p{L})${escapeRegex(word)}(?!\\p{L})`, 'u'));
-  const phrasePattern = words.map((word) => escapeRegex(word)).join('\\s+');
-  const phraseRegex = new RegExp(phrasePattern, 'iu');
+type SnippetMatcher = Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'>;
+type SnippetSpan = { start: number; length: number };
 
-  const allWordsMatch = (textLower: string): boolean =>
-    wordPatterns.every((pattern) => pattern.test(textLower));
+const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff;
+
+/**
+ * Moves a slice boundary off the middle of a surrogate pair (B-1668 item 9).
+ * A UTF-16 cut between the halves of an emoji leaves a lone surrogate, which
+ * the browser renders as "�". Stepping back keeps a start's pair whole and
+ * drops an end's half pair.
+ */
+export function alignToCodePoint(text: string, index: number): number {
+  return index > 0
+    && index < text.length
+    && isLowSurrogate(text.charCodeAt(index))
+    && isHighSurrogate(text.charCodeAt(index - 1))
+    ? index - 1
+    : index;
+}
+
+/** Merges overlapping highlight ranges after sorting them. */
+function mergeHighlights(highlights: SearchSnippetHighlight[]): SearchSnippetHighlight[] {
+  const merged: SearchSnippetHighlight[] = [];
+  for (const highlight of [...highlights].sort((left, right) => left.start - right.start)) {
+    const previous = merged[merged.length - 1];
+    if (previous && highlight.start <= previous.end) previous.end = Math.max(previous.end, highlight.end);
+    else merged.push({ ...highlight });
+  }
+  return merged;
+}
+
+/**
+ * Query matcher and snippet builder. Every position is computed on the text
+ * itself with case-insensitive regexps — never on a lower-cased copy, whose
+ * length can differ (`İ` lowers to two code units) and shift every highlight.
+ */
+function createWordMatcher(rawQuery: string, words: string[]): SnippetMatcher {
+  const requireExactPhrase = words.length > 1 && rawQuery.trim().length > 0;
+  const wordSource = (word: string) => `(?<!\\p{L})${escapeRegex(word)}(?!\\p{L})`;
+  const wordPatterns = words.map((word) => new RegExp(wordSource(word), 'iu'));
+  const phraseRegex = new RegExp(words.map((word) => escapeRegex(word)).join('\\s+'), 'iu');
 
   const matchesQuery = (text: string): boolean => {
-    if (typeof text !== 'string' || text.length === 0) {
-      return false;
-    }
-
-    if (requireExactPhrase) {
-      return phraseRegex.test(text);
-    }
-
-    if (phraseRegex.test(text)) {
-      return true;
-    }
-
-    if (words.length === 1) {
-      return allWordsMatch(text.toLowerCase());
-    }
-
-    return allWordsMatch(text.toLowerCase());
+    if (typeof text !== 'string' || text.length === 0) return false;
+    if (phraseRegex.test(text)) return true;
+    return !requireExactPhrase && wordPatterns.every((pattern) => pattern.test(text));
   };
 
-  const buildSnippet = (
-    text: string,
-    snippetLen = 150,
-  ): { snippet: string; highlights: SearchSnippetHighlight[] } => {
-    const textLower = text.toLowerCase();
-    let firstIndex = -1;
-    let firstWordLen = 0;
-    let phraseStart = -1;
-    let phraseLength = 0;
-
-    const phraseMatch = phraseRegex.exec(text);
-    if (phraseMatch) {
-      phraseStart = phraseMatch.index;
-      phraseLength = phraseMatch[0].length;
-      firstIndex = phraseStart;
-      firstWordLen = phraseLength;
+  const firstMatch = (text: string): SnippetSpan | null => {
+    const phrase = phraseRegex.exec(text);
+    if (phrase) return { start: phrase.index, length: phrase[0].length };
+    let first: SnippetSpan | null = null;
+    for (const pattern of wordPatterns) {
+      const match = pattern.exec(text);
+      if (match && (!first || match.index < first.start)) first = { start: match.index, length: match[0].length };
     }
+    return first;
+  };
 
-    if (firstIndex === -1) {
-      for (const word of words) {
-        const regex = new RegExp(`(?<!\\p{L})${escapeRegex(word)}(?!\\p{L})`, 'u');
-        const match = regex.exec(textLower);
-        if (match && (firstIndex === -1 || match.index < firstIndex)) {
-          firstIndex = match.index;
-          firstWordLen = word.length;
-        }
-      }
-    }
+  const highlightsIn = (snippet: string): SearchSnippetHighlight[] => {
+    const patterns = requireExactPhrase ? [phraseRegex.source] : [phraseRegex.source, ...words.map(wordSource)];
+    return patterns.flatMap((source) =>
+      [...snippet.matchAll(new RegExp(source, 'giu'))].map((match) => ({
+        start: match.index,
+        end: match.index + match[0].length,
+      })));
+  };
 
-    if (firstIndex === -1) {
-      firstIndex = 0;
-    }
-
+  const buildSnippet = (text: string, snippetLen = 150): { snippet: string; highlights: SearchSnippetHighlight[] } => {
+    const match = firstMatch(text) ?? { start: 0, length: 0 };
     const halfLen = Math.floor(snippetLen / 2);
-    const start = Math.max(0, firstIndex - halfLen);
-    const end = Math.min(text.length, firstIndex + halfLen + firstWordLen);
+    const start = alignToCodePoint(text, Math.max(0, match.start - halfLen));
+    const end = alignToCodePoint(text, Math.min(text.length, match.start + halfLen + match.length));
     const prefix = start > 0 ? '...' : '';
     const suffix = end < text.length ? '...' : '';
-    const snippetBody = text.slice(start, end).replace(/\n/g, ' ');
-    const snippet = `${prefix}${snippetBody}${suffix}`;
-
-    const snippetLower = snippet.toLowerCase();
-    const highlights: SearchSnippetHighlight[] = [];
-
-    if (phraseStart >= start && phraseStart + phraseLength <= end) {
-      const phraseOffset = prefix.length + (phraseStart - start);
-      highlights.push({
-        start: phraseOffset,
-        end: phraseOffset + phraseLength,
-      });
-    }
-
-    if (!requireExactPhrase) {
-      for (const word of words) {
-        const regex = new RegExp(`(?<!\\p{L})${escapeRegex(word)}(?!\\p{L})`, 'gu');
-        let match = regex.exec(snippetLower);
-        while (match) {
-          highlights.push({ start: match.index, end: match.index + word.length });
-          match = regex.exec(snippetLower);
-        }
-      }
-    }
-
-    highlights.sort((left, right) => left.start - right.start);
-    const merged: SearchSnippetHighlight[] = [];
-    for (const highlight of highlights) {
-      const previous = merged[merged.length - 1];
-      if (previous && highlight.start <= previous.end) {
-        previous.end = Math.max(previous.end, highlight.end);
-      } else {
-        merged.push({ ...highlight });
-      }
-    }
-
-    return { snippet, highlights: merged };
+    const snippet = `${prefix}${text.slice(start, end).replace(/\n/g, ' ')}${suffix}`;
+    return { snippet, highlights: mergeHighlights(highlightsIn(snippet)) };
   };
 
   return { matchesQuery, buildSnippet };
 }
 
 /**
- * ADR-210 (T-2036): a hit must survive masking. The raw match is only a cheap
- * prefilter; the query is matched again on the masked text and the snippet and
- * highlights are built from it, so searching a prefix of a stored secret finds
- * nothing and can never be used as an oracle. One-entry memo: the snippet call
- * always follows the match call for the same text.
+ * The text a search hit is scored and quoted on (ADR-210, T-2036, B-1668):
+ * injected blocks removed, then display-masked, then markdown removed — the
+ * same pipeline as the conversation title. The raw match is only a cheap
+ * prefilter; the query must also match the displayed text, and the snippet
+ * and highlights are built from it, so searching a prefix of a stored secret
+ * finds nothing and can never be used as an oracle. One-entry memo: the
+ * snippet call always follows the match call for the same text.
  */
-function withDisplayMasking(
-  matcher: Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'>,
-): Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'> {
-  if (!isDisplayMaskingEnabled()) return matcher;
-  const literals = displayLiteralsForSession(null);
-  let memo: { raw: string; masked: string } | null = null;
-  const masked = (text: string): string => {
-    if (memo?.raw !== text) memo = { raw: text, masked: maskText(text, { literals }) };
-    return memo.masked;
+function withDisplayText(matcher: SnippetMatcher): SnippetMatcher {
+  const literals = isDisplayMaskingEnabled() ? displayLiteralsForSession(null) : null;
+  const mask = literals ? (text: string) => maskText(text, { literals }) : (text: string) => text;
+  let memo: { raw: string; shown: string } | null = null;
+  const shown = (text: string): string => {
+    if (memo?.raw !== text) memo = { raw: text, shown: displaySearchText(text, mask) };
+    return memo.shown;
   };
   return {
-    matchesQuery: (text) => matcher.matchesQuery(text) && matcher.matchesQuery(masked(text)),
-    buildSnippet: (text) => matcher.buildSnippet(masked(text)),
+    matchesQuery: (text) => matcher.matchesQuery(text) && matcher.matchesQuery(shown(text)),
+    buildSnippet: (text) => matcher.buildSnippet(shown(text)),
   };
 }
 
@@ -1143,7 +1103,7 @@ export async function searchConversations(
   let scannedProjects = 0;
 
   const runtime: SearchRuntime = {
-    ...withDisplayMasking(createWordMatcher(safeQuery, words)),
+    ...withDisplayText(createWordMatcher(safeQuery, words)),
     limit: safeLimit,
     totalMatches: 0,
     isAborted,

@@ -29,7 +29,10 @@
     "projects": "مشاريع",
     "noMatchingProjects": "لا توجد مشاريع مطابقة",
     "tryDifferentSearch": "جرّب تعديل كلمة البحث",
-    "runClaudeCli": "شغّل Claude CLI داخل مجلد مشروع للبدء"
+    "runClaudeCli": "شغّل Claude CLI داخل مجلد مشروع للبدء",
+    "noMatchingConversations": "لا توجد محادثات مطابقة",
+    "searchingConversations": "جارٍ البحث في المحادثات…",
+    "matchedSessions": "محادثات مطابقة"
   },
   "sections": {
     "terminals": "الطرفيات",
@@ -111,7 +114,13 @@
     "loadingSessions": "جارٍ تحميل الجلسات...",
     "unnamed": "بدون اسم",
     "loading": "جارٍ التحميل...",
-    "showMore": "عرض المزيد من الجلسات"
+    "showMore": "عرض المزيد من الجلسات",
+    "age": {
+      "now": "الآن",
+      "minutes": "{{count}} د",
+      "hours": "{{count}} س",
+      "days": "{{count}} ي"
+    }
   },
   "bulk": {
     "actions": "إجراءات جماعية",

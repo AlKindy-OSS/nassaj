@@ -86,4 +86,20 @@ describe('useFileTreeData', () => {
     await waitFor(() => expect(result.current.error).toBeNull());
     expect(result.current.files).toHaveLength(1);
   });
+
+  it('B-1669: asks for the full tree (no partial flag) so a huge project still shows tooLarge', async () => {
+    mocks.getFiles.mockReset();
+    mocks.getFiles.mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ code: 'FILE_TREE_TOO_LARGE', limit: 10000 }),
+    });
+
+    const { result } = renderHook(() => useFileTreeData(project));
+
+    await waitFor(() => expect(result.current.error).toBe('tooLarge'));
+    expect(mocks.getFiles).toHaveBeenCalledTimes(1);
+    const [, options] = mocks.getFiles.mock.calls[0];
+    expect(options?.partial).toBeUndefined();
+  });
 });

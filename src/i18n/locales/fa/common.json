@@ -358,5 +358,10 @@
       "saveGitConfigFailed": "ذخیرهٔ پیکربندی git ناموفق بود",
       "completeFailed": "تکمیل راه‌اندازی ناموفق بود"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "بزرگ‌نمایی نمودار",
+    "zoomedAria": "نمودار Mermaid بزرگ‌شده",
+    "close": "بستن"
   }
 }

@@ -7,11 +7,16 @@ import {
   findFilesRecursivelyCreatedAfter,
   normalizeSessionName,
   readFileTimestamps,
-  readUtf8Tail,
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
 import { isCodexRolloutNameOf } from '../../shared/session-transcript-specs.js';
+import {
+  codexPromptText,
+  firstRealPromptTitle,
+  isReplaceableStoredTitle,
+  readJsonlHeadRecords,
+} from '../../shared/session-title-source.js';
 
 import { codexHomeForSessionFile, resolveCodexHomes } from './codex-home.js';
 
@@ -293,59 +298,23 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
 
     const existingSession = sessionsDb.getSessionById(parsed.sessionId);
     const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Codex Session') {
+    if (existingSessionName && !isReplaceableStoredTitle(existingSessionName)) {
       return {
         ...parsed,
         sessionName: normalizeSessionName(existingSessionName, 'Untitled Codex Session'),
       };
     }
 
-    let sessionName = nameMap.get(parsed.sessionId);
-    if (!sessionName) {
-      sessionName = await this.extractLastAgentMessageFromEnd(filePath);
-    }
+    // B-1668: Codex's own thread name, else the FIRST real user prompt from a
+    // bounded head read — never the assistant's `last_agent_message`. The
+    // AGENTS.md/environment envelope is a user-role record too; it is skipped
+    // because nothing of it survives title cleaning.
+    const sessionName = nameMap.get(parsed.sessionId)
+      ?? firstRealPromptTitle(await readJsonlHeadRecords(filePath), codexPromptText);
 
     return {
       ...parsed,
       sessionName: normalizeSessionName(sessionName, 'Untitled Codex Session'),
     };
-  }
-
-  private async extractLastAgentMessageFromEnd(filePath: string): Promise<string | undefined> {
-    try {
-      // Tail only: the latest entry is what we want, and whole-file reads OOM'd (B-954).
-      const content = await readUtf8Tail(filePath);
-      const lines = content.split(/\r?\n/);
-
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) {
-          continue;
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-
-        const data = parsed as Record<string, unknown>;
-        const eventType = typeof data.type === 'string' ? data.type : undefined;
-        const payload = data.payload as Record<string, unknown> | undefined;
-        const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
-        const lastAgentMessage = typeof payload?.last_agent_message === 'string'
-          ? payload.last_agent_message
-          : undefined;
-
-        if (eventType === 'event_msg' && payloadType === 'task_complete' && lastAgentMessage?.trim()) {
-          return lastAgentMessage;
-        }
-      }
-    } catch {
-      // Ignore missing/unreadable files so sync can continue.
-    }
-
-    return undefined;
   }
 }

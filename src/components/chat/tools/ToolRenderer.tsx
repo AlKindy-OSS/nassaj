@@ -1,7 +1,8 @@
 import React, { memo, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { Project } from '../../../types/app';
-import type { SubagentChildTool } from '../types/types';
+import type { ProgressSubagent, SubagentChildTool } from '../types/types';
 
 import { getToolConfig } from './configs/toolConfigs';
 import { OneLineDisplay, CollapsibleDisplay, ToolDiffViewer, MarkdownContent, FileListContent, TodoListContent, TaskListContent, TextContent, QuestionAnswerContent, SubagentContainer } from './components';
@@ -33,6 +34,8 @@ interface ToolRendererProps {
     currentToolIndex: number;
     isComplete: boolean;
   };
+  /** ADR-199 lifecycle record; names the card while the input is deferred (light history). */
+  subagent?: ProgressSubagent;
 }
 
 function getToolCategory(toolName: string): string {
@@ -41,7 +44,7 @@ function getToolCategory(toolName: string): string {
   if (toolName === 'Bash') return 'bash';
   if (['TodoWrite', 'TodoRead'].includes(toolName)) return 'todo';
   if (['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'].includes(toolName)) return 'task';
-  if (toolName === 'Task') return 'agent';
+  if (toolName === 'Task' || toolName === 'Agent') return 'agent';
   if (toolName === 'exit_plan_mode' || toolName === 'ExitPlanMode') return 'plan';
   if (toolName === 'AskUserQuestion') return 'question';
   return 'default';
@@ -84,8 +87,10 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   showRawParameters = false,
   rawToolInput,
   isSubagentContainer,
-  subagentState
+  subagentState,
+  subagent,
 }) => {
+  const { t } = useTranslation('chat');
   const config = getToolConfig(toolName);
   const displayConfig: any = mode === 'input' ? config.input : config.result;
 
@@ -119,6 +124,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         toolInput={toolInput}
         toolResult={toolResult}
         subagentState={subagentState}
+        subagent={subagent}
       />
     );
   }
@@ -151,8 +157,8 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
 
   if (displayConfig.type === 'plan') {
     const title = typeof displayConfig.title === 'function'
-      ? displayConfig.title(parsedData)
-      : displayConfig.title || 'Plan';
+      ? displayConfig.title(parsedData, t)
+      : displayConfig.title || t('tools.titles.plan');
 
     const contentProps = displayConfig.getContentProps?.(parsedData, {
       selectedProject,
@@ -178,8 +184,8 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
 
   if (displayConfig.type === 'collapsible') {
     const title = typeof displayConfig.title === 'function'
-      ? displayConfig.title(parsedData)
-      : displayConfig.title || 'Details';
+      ? displayConfig.title(parsedData, t)
+      : displayConfig.title || t('tools.titles.details');
 
     const defaultOpen = displayConfig.defaultOpen !== undefined
       ? displayConfig.defaultOpen

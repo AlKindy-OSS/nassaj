@@ -32,6 +32,9 @@ function batch(frames: any[]): StreamFrameMap {
 function mount(frames: StreamFrameMap) {
   return renderHook(({ streamFrames }) => {
     const sessionStore = useSessionStore();
+    // As useChatSessionState does in production: the viewed slot is the active
+    // one, which the store's LRU (B-1666 #7) never evicts.
+    sessionStore.setActiveSession(sessionId);
     useChatRealtimeHandlers({ ...base, streamFrames, sessionStore });
     return sessionStore;
   }, { initialProps: { streamFrames: frames } });

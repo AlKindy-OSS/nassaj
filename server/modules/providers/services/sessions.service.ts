@@ -32,7 +32,9 @@ import type {
 } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 // eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
-import { displayHistoryRevision, isDisplayMaskingEnabled, maskDisplayLabel, maskMessagesForSession, restoreMaskedLabel } from '@/services/display-secret-mask.js';
+import { displayHistoryRevision, isDisplayMaskingEnabled, maskMessagesForSession, restoreMaskedLabel } from '@/services/display-secret-mask.js';
+// eslint-disable-next-line boundaries/no-unknown -- B-1668: the one display-title pipeline shared by every viewer egress.
+import { displaySessionTitle, titleTextBeforeMask } from '@/services/session-title-text.js';
 
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
 import { isTranscriptHandle, openSessionTranscript } from '../shared/session-transcript.js';
@@ -804,7 +806,8 @@ export const sessionsService = {
         projectId: project?.project_id ?? null,
         projectPath,
         projectDisplayName: resolveProjectDisplayName(projectPath, project?.custom_project_name),
-        sessionTitle: maskDisplayLabel(session.custom_name?.trim() || session.session_id),
+        // B-1668: the same display title as the sidebar row.
+        sessionTitle: displaySessionTitle(session.custom_name) || session.session_id,
         createdAt: session.created_at ?? null,
         updatedAt: session.updated_at ?? null,
         lastActivity: session.updated_at ?? session.created_at ?? null,
@@ -928,9 +931,11 @@ export const sessionsService = {
     assertSessionAccessible(sessionId, requesterUserId, 'write');
 
     // ADR-210: a title edited from its masked form keeps the stored raw values.
+    // B-1668: the user edited the DISPLAY title, whose injected blocks were
+    // already removed, so the markers are matched against that same text.
     const stored = sessionsDb.getSessionById(sessionId)?.custom_name ?? null;
-    const title = restoreMaskedLabel(summary, stored);
+    const title = restoreMaskedLabel(summary, titleTextBeforeMask(stored));
     sessionsDb.updateSessionCustomName(sessionId, title);
-    return { sessionId, summary: maskDisplayLabel(title) };
+    return { sessionId, summary: displaySessionTitle(title) };
   },
 };

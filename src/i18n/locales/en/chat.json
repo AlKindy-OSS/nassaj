@@ -209,7 +209,11 @@
     "completed_one": "Completed ({{count}} tool)",
     "completed_other": "Completed ({{count}} tools)",
     "viewToolHistory": "View tool history ({{count}})",
-    "error": "(error)"
+    "error": "(error)",
+    "title": "Subagent",
+    "titleWithType": "Subagent / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "Agent launched in the background"
   },
   "coordinator": {
     "label": "Coordinator",
@@ -250,7 +254,19 @@
     "readFile": "Read file",
     "updateTodo": "Update todo list",
     "readTodo": "Read todo list",
-    "searchResults": "results"
+    "searchResults": "results",
+    "titles": {
+      "parameters": "Parameters",
+      "details": "Details",
+      "plan": "Plan",
+      "taskDetails": "Task details",
+      "subagentResult": "Subagent result",
+      "updatingTodoList": "Updating todo list",
+      "taskList": "Task list",
+      "implementationPlan": "Implementation plan",
+      "foundFiles_one": "Found {{count}} file",
+      "foundFiles_other": "Found {{count}} files"
+    }
   },
   "search": {
     "found": "Found {{count}} {{type}}",
@@ -1406,5 +1422,8 @@
   },
   "sessionDelete": {
     "forbidden": "Only the conversation's creator, the project owner, or an admin can delete it permanently. You can archive it instead."
+  },
+  "agyMessage": {
+    "to": "Message to {{name}}"
   }
 }

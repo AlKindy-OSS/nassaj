@@ -164,7 +164,8 @@ export async function fetchOidcIdentity(token?: string): Promise<OidcIdentityRes
 /** Server SSO state (ADR-194 D1); `unavailable` and `paused` mean SSO cannot sign anyone in now. */
 export type SsoState = 'off' | 'active' | 'unavailable' | 'paused';
 
-export type SsoStatus = Readonly<{ loginAvailable: boolean; state: SsoState }>;
+/** `autoSignIn` (ADR-H20 N1): the node sends unauthenticated visits straight to the IdP. */
+export type SsoStatus = Readonly<{ loginAvailable: boolean; state: SsoState; autoSignIn?: boolean }>;
 
 const SSO_STATES: ReadonlySet<unknown> = new Set<SsoState>(['off', 'active', 'unavailable', 'paused']);
 const SSO_OFF: SsoStatus = Object.freeze({ loginAvailable: false, state: 'off' });
@@ -174,11 +175,14 @@ let ssoStatus: Promise<SsoStatus> | null = null;
 async function probeSsoStatus(): Promise<SsoStatus> {
   // Preferred signal: the public status route's ssoState + ssoLoginAvailable.
   const statusResponse = await api.auth.status();
-  const status = await parseJsonSafely<{ ssoState?: unknown; ssoLoginAvailable?: unknown }>(statusResponse);
+  const status = await parseJsonSafely<{ ssoState?: unknown; ssoLoginAvailable?: unknown; ssoAutoSignIn?: unknown }>(
+    statusResponse,
+  );
   if (typeof status?.ssoLoginAvailable === 'boolean' && SSO_STATES.has(status.ssoState)) {
     const state = status.ssoState as SsoState;
     // The button is offered only when both fields agree.
-    return { loginAvailable: status.ssoLoginAvailable && state === 'active', state };
+    const loginAvailable = status.ssoLoginAvailable && state === 'active';
+    return { loginAvailable, state, autoSignIn: loginAvailable && status.ssoAutoSignIn === true };
   }
   // Fallback for a server without the fields: see api.auth.oidc.probe.
   const probe = await api.auth.oidc.probe();
@@ -258,16 +262,19 @@ export function clearSsoReauthHint(storage?: HintStorage): void {
   }
 }
 
-/** The SSO start URL: `?reauth=1` when asked or while the hint is set. */
-export function oidcLoginUrl(reauth: boolean = hasSsoReauthHint()): string {
+/** The SSO start URL: `?reauth=1` only when asked. */
+export function oidcLoginUrl(reauth: boolean = false): string {
   return reauth ? OIDC_REAUTH_LOGIN_PATH : OIDC_LOGIN_PATH;
 }
 
 /**
  * Leaves the SPA for the server-driven authorization redirect. Only a literal
- * `true` forces re-authentication; otherwise the hint decides (an event
- * object passed by an onClick never counts).
+ * `true` forces re-authentication (an event object passed by an onClick never
+ * counts). ADR-194 A2 (ADR-H20 N2): owner entry is no-click, so the old
+ * re-authentication hint no longer forces `prompt=login`; a stored one is
+ * cleared here.
  */
 export function startOidcLogin(reauth?: unknown): void {
-  window.location.assign(oidcLoginUrl(reauth === true || hasSsoReauthHint()));
+  if (hasSsoReauthHint()) clearSsoReauthHint();
+  window.location.assign(oidcLoginUrl(reauth === true));
 }

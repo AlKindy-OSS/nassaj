@@ -75,7 +75,29 @@ type PendingViewSession = {
   clientMsgId?: string | null;
   /** B-1386: المشروع الذي بدأ منه الإرسال (انظر useChatComposerState). */
   projectId?: string | null;
+  /**
+   * B-1666: الجلسة المعروضة لحظة إرسالٍ يبدأ محادثة جديدة من شاشة جلسة قائمة
+   * («ابدأ جلسة جديدة» بعد conversation_not_found، وإعادة الصادر). يثبت مع
+   * `clientMsgId` أن `session_created` يخصّ هذه الشاشة بعينها.
+   */
+  originSessionId?: string | null;
 };
+
+/**
+ * B-1666: `session_created` without lineage belongs to the viewed session only
+ * when this view itself sent it (matching clientMsgId) while showing that same
+ * session. The ref is released once the user opens another session, so a send
+ * left behind by a switch never matches here.
+ */
+function isFreshSendFromView(
+  pending: PendingViewSession | null,
+  clientMsgId: unknown,
+  currentSessionId: string,
+): pending is PendingViewSession {
+  return Boolean(pending?.clientMsgId)
+    && pending?.clientMsgId === clientMsgId
+    && pending?.originSessionId === currentSessionId;
+}
 
 type LatestChatMessage = {
   type?: string;
@@ -631,11 +653,37 @@ export function useChatRealtimeHandlers({
           // المستخدم رسالته ومحادثته الأولى داخل الثانية حتى يُحدّث الصفحة.
           //
           // `parentSessionId` يحسم النسب: يساوي معرّف الجلسة المعروضة ⇒ استئنافٌ
-          // بائت لها فعلاً ⇒ الترحيل مشروع. و`null` ⇒ محادثة وُلدت الآن من إرسالٍ
-          // آخر ⇒ لا تُمَسّ هذه الشاشة. وغيابُه (مزوّد لم يُحدَّث بعد) يُبقي
-          // السلوك القديم كما هو حتى لا نكسر مساراً قائماً.
+          // بائت لها فعلاً ⇒ الترحيل مشروع. وما عداه — `null` أو **غيابُه** —
+          // ⇒ محادثة وُلدت الآن من إرسالٍ آخر ⇒ لا تُمَسّ هذه الشاشة (B-1666).
+          // كل مُرسِلٍ لا يضع الحقل (cursor وkimi وqwen وvendor-runtime لـ
+          // kimi/deepseek/glm) يُرسل لجلسة جديدة فقط، فغيابُه ليس نسباً. ولا
+          // يكفي تطابق clientMsgId وحده: من أرسل من شاشة «محادثة جديدة» ثم فتح
+          // B يبقى clientMsgId مطابقاً وB معروضة، فتُختطف B. لذا يُشترط معه أن
+          // يكون الإرسال قد خرج من هذه الشاشة نفسها (`originSessionId`)، وهو
+          // حال «ابدأ جلسة جديدة» وإعادة الصادر من جلسة ميتة أو مسيَّجة: ينتقل
+          // العرض إلى الجلسة الوليدة حاملاً رسالة الإرسال وحدها، بلا alias.
           const parentSessionId = (msg as { parentSessionId?: string | null }).parentSessionId;
-          if (parentSessionId !== undefined && parentSessionId !== currentSessionId) {
+          if (parentSessionId !== currentSessionId) {
+            const pendingView = pendingViewSessionRef.current;
+            if (isFreshSendFromView(pendingView, msg.clientMsgId, currentSessionId)) {
+              sessionStore.branchSessionId(currentSessionId, newSessionId, msg.clientMsgId as string);
+              if (provider === 'claude') {
+                stampSessionEngineProvider(newSessionId, consumePendingEngineStamp());
+              }
+              sessionStorage.setItem('pendingSessionId', newSessionId);
+              // B-1386: held until the router reaches the new id (useChatSessionState).
+              pendingView.sessionId = newSessionId;
+              setCurrentSessionId(newSessionId);
+              setPendingPermissionRequests((prev) =>
+                prev.map((r) => (r.sessionId ? r : { ...r, sessionId: newSessionId })),
+              );
+              onSessionActive?.(newSessionId);
+              onSessionProcessing?.(newSessionId);
+              setIsLoading(true);
+              setCanAbortSession(true);
+              setClaudeStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+              onNavigateToSession?.(newSessionId, { replace: true });
+            }
             break;
           }
           console.log('Session reset: replacing', currentSessionId, 'with', newSessionId);
@@ -1140,9 +1188,12 @@ export function useChatRealtimeHandlers({
         }
         // الحارس على قيمة الفجوة لا على وجود الصفّ: صفّ محذوف بلا فجوة جديدة
         // لا يعيد الجلب (فيتو qa-critic ضدّ حلقة طلبات لا نهائية).
-        if (canAutomaticallyReadHistory(slot?.historyError)
-          && (!slot || streamGapFetchedHeads.get(slot) !== eviction.seq)) {
-          if (slot) streamGapFetchedHeads.set(slot, eviction.seq);
+        // B-1666: صفّ الفجوة أعلاه قد يكون أنشأ الخانة الآن، فيُقرأ الحارس منها
+        // هي؛ وإلا أعاد الرسم التالي الجلبَ نفسه مرّة ثانية.
+        const guardSlot = slot ?? sessionStore.getSessionSlot?.(viewedSessionId);
+        if (canAutomaticallyReadHistory(guardSlot?.historyError)
+          && (!guardSlot || streamGapFetchedHeads.get(guardSlot) !== eviction.seq)) {
+          if (guardSlot) streamGapFetchedHeads.set(guardSlot, eviction.seq);
           requestStreamGapRecovery(viewedSessionId);
         }
       }
@@ -1176,9 +1227,10 @@ export function useChatRealtimeHandlers({
         // الصفّ لا يفتح الجلب ثانيةً، وفجوة تالية بقيمة أعلى تفتحه فعلاً حتى
         // إن بقي الصفّ القديم ظاهراً.
         const gapKey = evictionGap ?? entry.droppedBeforeSeq;
-        if (canAutomaticallyReadHistory(slot?.historyError)
-          && (!slot || streamGapFetchedHeads.get(slot) !== gapKey)) {
-          if (slot) streamGapFetchedHeads.set(slot, gapKey);
+        const guardSlot = slot ?? sessionStore.getSessionSlot?.(sessionId);
+        if (canAutomaticallyReadHistory(guardSlot?.historyError)
+          && (!guardSlot || streamGapFetchedHeads.get(guardSlot) !== gapKey)) {
+          if (guardSlot) streamGapFetchedHeads.set(guardSlot, gapKey);
           requestStreamGapRecovery(sessionId);
         }
       }

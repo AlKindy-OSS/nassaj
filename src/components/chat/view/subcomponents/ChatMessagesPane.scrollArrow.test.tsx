@@ -6,13 +6,13 @@
  *
  * qa M-2's concern: a test that only exercises props (isUserScrolledUp passed
  * in directly) would pass on the OLD, buggy code too, because it never
- * proves the actual DOM `onScroll` wiring exists. This harness owns a real
- * `isUserScrolledUp` state and updates it the same way ChatInterface does —
- * via the exact `onScroll` prop ChatMessagesPane exposes — then drives it
- * with `fireEvent.scroll` on the real container node, so the test fails on
- * any regression that drops or breaks that wiring.
+ * proves the actual DOM `onScroll` wiring exists. This harness wires the real
+ * useStickToBottom controller exactly as ChatInterface does (B-1665: it is the
+ * single source of the arrow state) through the `onScroll` prop
+ * ChatMessagesPane exposes, then drives it with `fireEvent.scroll` on the real
+ * container node, so the test fails on any regression that drops that wiring.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +22,7 @@ vi.mock('./MessageComponent', () => ({ default: ({ message }: any) => <p>{messag
 vi.mock('./ProviderSelectionEmptyState', () => ({ default: () => <div>ordinary-empty-state</div> }));
 
 import ChatMessagesPane from './ChatMessagesPane';
+import { useStickToBottom } from '../hooks/useStickToBottom';
 
 const message = { id: 'm1', type: 'assistant', content: 'hi', timestamp: new Date() };
 
@@ -38,27 +39,23 @@ function stubMetrics(container: HTMLDivElement, { scrollHeight, clientHeight, sc
   Object.defineProperty(container, 'scrollTop', { value: scrollTop, configurable: true, writable: true });
 }
 
-/** Mirrors ChatInterface's real wiring: onScroll recomputes isUserScrolledUp from actual position. */
+/** Mirrors ChatInterface's real wiring: the stick controller owns the arrow state. */
 function ArrowHarness({ showResync = false }: { showResync?: boolean }) {
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const onScroll = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    setIsUserScrolledUp(!nearBottom);
-  }, []);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const stick = useStickToBottom({ scrollRef: ref, contentRef, sessionKey: 's1', ready: false, follow: true });
   return (
     <ChatMessagesPane
       {...baseProps}
       scrollContainerRef={ref}
-      onWheel={() => {}}
-      onTouchMove={() => {}}
-      onScroll={onScroll}
-      isUserScrolledUp={isUserScrolledUp}
+      contentRef={contentRef}
+      onWheel={stick.onWheel}
+      onTouchMove={stick.onTouchMove}
+      onScroll={stick.onScroll}
+      isUserScrolledUp={stick.isScrolledUp}
       hasMessages
       showResync={showResync}
-      onScrollToBottom={() => {}}
+      onScrollToBottom={stick.pin}
     />
   );
 }
@@ -100,5 +97,25 @@ describe('T-1862 round 2: scroll-to-bottom arrow follows real scroll position', 
     stubMetrics(container, { scrollHeight: 1000, clientHeight: 1000, scrollTop: 0 });
     fireEvent.scroll(container);
     expect(screen.getByRole('button', { name: 'Go to latest & refresh' })).toBeTruthy();
+  });
+
+  it('the arrow click pins to the bottom and hides the arrow', () => {
+    render(<ArrowHarness />);
+    const container = screen.getByText('hi').closest('[class*="overflow-y-auto"]') as HTMLDivElement;
+    stubMetrics(container, { scrollHeight: 1000, clientHeight: 400, scrollTop: 0 });
+    fireEvent.scroll(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll to bottom' }));
+    expect(container.scrollTop).toBe(1000);
+    expect(screen.queryByRole('button', { name: 'Scroll to bottom' })).toBeNull();
+  });
+
+  it('messages render inside the observed content wrapper, the arrow outside it', () => {
+    render(<ArrowHarness />);
+    const wrapper = screen.getByText('hi').closest('.space-y-2') as HTMLDivElement;
+    const container = wrapper.parentElement as HTMLDivElement;
+    expect(container.className).toContain('overflow-y-auto');
+    stubMetrics(container, { scrollHeight: 1000, clientHeight: 400, scrollTop: 0 });
+    fireEvent.scroll(container);
+    expect(wrapper.contains(screen.getByRole('button', { name: 'Scroll to bottom' }))).toBe(false);
   });
 });

@@ -106,7 +106,7 @@ mock.module(url('../utils/client-ip.js'), { namedExports: { clientIp: () => '127
 const { initializeDatabase } = await import('../modules/database/init-db.js');
 const { stopReconcileScheduler } = await import('../modules/database/project-reconcile.service.js');
 const { getConnection } = await import('../modules/database/connection.js');
-const { userDb, userIdentitiesDb } = await import('../modules/database/index.js');
+const { revokedTokenSidsDb, ssoDeviceSessionsDb, userDb, userIdentitiesDb } = await import('../modules/database/index.js');
 const { encryptSsoClientSecret } = await import('../modules/database/sso-secret-envelope.js');
 const { clearSsoConfig, writeSsoRow, FIXTURE_ISSUER } = await import('../services/__tests__/sso-config-fixture.js');
 const { resetSsoConfigCacheForTests, ssoState } = await import('../services/sso-config.service.js');
@@ -156,7 +156,7 @@ function useProvider(provider: ReturnType<typeof createMockOpenIdProvider>) {
 
 beforeEach(() => {
   clearSsoConfig(db);
-  db.exec('DELETE FROM user_identities; DELETE FROM sso_test_results; DELETE FROM sso_apply_proofs;');
+  db.exec('DELETE FROM user_identities; DELETE FROM sso_test_results; DELETE FROM sso_apply_proofs; DELETE FROM sso_device_sessions; DELETE FROM sso_device_session_idp_sids; DELETE FROM oidc_logout_jtis; DELETE FROM revoked_token_sids;');
   db.prepare('UPDATE users SET role = ? WHERE id IN (?, ?)').run('owner', owner.id, secondOwner.id);
   userIdentitiesDb.link(member.id, FIXTURE_ISSUER, 'sub-member');
   resetSsoConfigCacheForTests();
@@ -401,8 +401,18 @@ test('A1: an owner identity without a passkey only gets the step-up and nothing 
 
 async function logout(sub: string) {
   return fetch(`${baseUrl}/api/auth/oidc/backchannel-logout`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ logout_token: op.logoutToken(sub) }),
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ logout_token: op.logoutToken(sub) }).toString(),
   });
+}
+
+/** ADR-H20 N5: a member browser session bound to the mock IdP's default sid. */
+function bindMemberSession(refreshSid = 'M'.repeat(22)) {
+  ssoDeviceSessionsDb.bind({
+    refreshSid, userId: member.id, issuer: FIXTURE_ISSUER, idpSid: 'V1_mock-sid', loginHint: null,
+    ownerTier: false, privilegedUntil: null, nowMs: Date.now(), pruneAfter: Date.now() + 86_400_000,
+  });
+  return refreshSid;
 }
 
 for (const [label, overrides] of [
@@ -413,10 +423,12 @@ for (const [label, overrides] of [
     t.mock.method(process.stderr, 'write', () => true);
     activeRow(overrides);
     assert.equal(ssoState(), 'unavailable');
+    const refreshSid = bindMemberSession();
     const before = stamp(member.id);
     const res = await logout('sub-member');
     assert.equal(res.status, 200);
-    assert.notEqual(stamp(member.id), before, 'the member is revoked');
+    assert.equal(revokedTokenSidsDb.isRevoked(refreshSid, Date.now()), true, "that browser's session ends");
+    assert.equal(stamp(member.id), before, 'ADR-H20 D6: never every device');
     assert.equal(op.discoveryFetches(), 0, 'never a fresh discovery');
     assert.ok(op.requests.some((request) => request.url === `${FIXTURE_ISSUER}/jwks`));
   });
@@ -469,11 +481,12 @@ test('A1: an owner signs in with a passkey; role untouched; no mapping, sync or 
   assert.equal(auditRows('oidc_login').length, 1);
 });
 
-test('A1: password + security key (pwd, user, mfa) is accepted', async () => {
+test('A2 passkey_only: password + security key (pwd, user, mfa) gets the passkey step-up', async () => {
   activeRow();
   linkOwner();
   const res = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd', 'user', 'mfa'] });
-  assert.match(res.headers.get('location') ?? '', /oidc_code=/);
+  assert.equal(res.status, 200, 'the passkey interstitial');
+  assertNoPrivilegedWrite('pwd beside the key');
 });
 
 /** The interstitial's IdP URL and the new transaction cookie of the automatic step-up. */

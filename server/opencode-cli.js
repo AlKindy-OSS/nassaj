@@ -522,7 +522,12 @@ async function spawnOpenCode(command, options = {}, ws) {
           kind: 'session_created',
           newSessionId: capturedSessionId,
           sessionId: capturedSessionId,
+          // B-1666: a fresh conversation, not a stale resume of the viewed one.
+          parentSessionId: null,
           provider: 'opencode',
+          ...(typeof options.clientMsgId === 'string' && options.clientMsgId
+            ? { clientMsgId: options.clientMsgId }
+            : {}),
         }));
       }
     };

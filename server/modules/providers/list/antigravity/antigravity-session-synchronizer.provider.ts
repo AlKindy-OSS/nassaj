@@ -11,6 +11,7 @@ import { normalizeSessionName, readObjectRecord } from '@/shared/utils.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 
+import { isReplaceableStoredTitle, promptTitleText } from '../../shared/session-title-source.js';
 import { isTranscriptHandle, openRunTranscript } from '../../shared/session-transcript-reader.js';
 
 const ANTIGRAVITY_PLACEHOLDER_PROJECT_PATH = '/__antigravity__';
@@ -163,7 +164,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
         sessionId: parsed.sessionId,
         provider: this.provider,
         projectPath: this.resolveProjectPath(parsed.sessionId),
-        customName: parsed.title,
+        customName: this.customNameFor(parsed),
         createdAt: parsed.createdAt,
         updatedAt: parsed.updatedAt,
         jsonlPath: parsed.transcriptPath,
@@ -241,7 +242,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       sessionId: parsed.sessionId,
       provider: this.provider,
       projectPath: this.resolveProjectPath(parsed.sessionId),
-      customName: parsed.title,
+      customName: this.customNameFor(parsed),
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
       jsonlPath: parsed.transcriptPath,
@@ -315,7 +316,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
 
     return {
       sessionId: uuid,
-      title: normalizeSessionName(title, 'New Antigravity Chat'),
+      title: title ? normalizeSessionName(title, '') : undefined,
       createdAt,
       updatedAt: fileStat.mtime.toISOString(),
       transcriptPath,
@@ -366,41 +367,37 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
   }
 
   /**
-   * Pulls the user prompt out of the first USER_INPUT record for use as the title.
+   * Pulls the user prompt out of the first USER_INPUT record with user text,
+   * for use as the title.
    *
    * agy can emit system records (e.g. CONVERSATION_HISTORY) before the human's
-   * first turn, so we scan the leading records for the first USER_INPUT instead
-   * of assuming line 0. When no USER_INPUT is found within the scanned window we
-   * return undefined so the caller falls back to the default title.
-   *
-   * `<instructions>...</instructions>` blocks are stripped first because agy
-   * injects them as system-level directives (e.g. response-language rules), not
-   * as text the human typed; letting them seed the title would surface machine
-   * instructions as the conversation name. The match is global so every injected
-   * block is removed. When nothing user-authored remains we return undefined so
-   * the caller falls back to the default "New Antigravity Chat" title.
+   * first turn, so we scan the leading records for USER_INPUT instead of
+   * assuming line 0. The `<USER_REQUEST>` body is cleaned of every injected
+   * block (`<instructions>`, `<nassaj_document_sharing>`, image lists …) —
+   * machine directives must not become the conversation name. When nothing
+   * user-authored remains we return undefined and no title is written; the
+   * client shows its own localized "new session" label (B-1668).
    */
   private extractTitleFromLeadingRecords(records: AnyRecord[]): string | undefined {
-    const userInput = records.find((record) => record.type === 'USER_INPUT');
-    if (!userInput) {
-      return undefined;
+    for (const record of records) {
+      if (record.type !== 'USER_INPUT' || typeof record.content !== 'string') continue;
+      const request = /<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/.exec(record.content)?.[1];
+      // B-1668: the shared title cleaning also removes `<nassaj_document_sharing>`
+      // and every other injected block, not `<instructions>` alone.
+      const title = promptTitleText(request ?? record.content);
+      if (title) return title;
     }
+    return undefined;
+  }
 
-    const rawContent = typeof userInput.content === 'string' ? userInput.content : '';
-    if (!rawContent) {
-      return undefined;
-    }
-
-    let text = rawContent;
-    const match = rawContent.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
-    if (match && typeof match[1] === 'string') {
-      text = match[1];
-    }
-
-    text = text.replace(/<instructions>[\s\S]*?<\/instructions>/gi, '');
-
-    const trimmed = text.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
+  /**
+   * The name to write for one parsed session. A stored name that is not
+   * replaceable — a user rename included — is kept (undefined leaves the
+   * column as it is), and a transcript with no user text writes no placeholder.
+   */
+  private customNameFor(parsed: ParsedAgyMetadata): string | undefined {
+    const stored = sessionsDb.getSessionById(parsed.sessionId)?.custom_name;
+    return stored && !isReplaceableStoredTitle(stored) ? undefined : parsed.title;
   }
 
   /**

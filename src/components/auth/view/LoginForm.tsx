@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { useSsoStatus } from '../hooks/useOidcAvailability';
 import { useWebAuthn } from '../hooks/useWebAuthn';
 import type { WebAuthnLoginResult } from '../hooks/useWebAuthn';
 import { startOidcLogin } from '../oidc';
+import { decideAutoSignIn } from '../ssoLinkedSession';
 import { consumeSsoReauthNotice, hasSsoReauthNotice } from '../ssoReauth';
 import {
   consumeSignedOutEverywhereNotice,
@@ -166,6 +167,27 @@ export default function LoginForm() {
     setIsSsoRedirecting(true);
     startOidcLogin();
   }, []);
+
+  // ADR-H20 N1: with the node's auto sign-in on, an unauthenticated visit goes
+  // straight to the IdP (no click while its session lives). Never on
+  // `?local=1` (break-glass password sign-in), never once right after an
+  // explicit sign-out, and the loop guard stops it after 3 bounces in 30 s.
+  const autoSignInDecided = useRef(false);
+  useEffect(() => {
+    if (autoSignInDecided.current || ssoStatus === null) return;
+    autoSignInDecided.current = true;
+    const decision = decideAutoSignIn({
+      autoSignIn: ssoStatus.autoSignIn === true,
+      loginAvailable: ssoStatus.loginAvailable,
+      search: window.location.search,
+    });
+    if (decision === 'redirect') {
+      setIsSsoRedirecting(true);
+      startOidcLogin();
+    } else if (decision === 'loop_guard') {
+      setErrorMessage(t('sso.autoSignInStopped'));
+    }
+  }, [ssoStatus, t]);
 
   return (
     <AuthScreenLayout

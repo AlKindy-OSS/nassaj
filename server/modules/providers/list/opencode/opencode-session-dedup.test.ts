@@ -314,3 +314,55 @@ test('T-1906: a Coding Plan key in a title or first prompt never reaches the ses
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('B-1668: the default "New session - <ISO>" title is a placeholder; a later real title wins over the prompt', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp('/var/tmp/opencode-title-placeholder-');
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  const dbPath = path.join(tempRoot, '.local', 'share', 'opencode', 'opencode.db');
+  const setTitle = (title: string) => {
+    const db = new Database(dbPath);
+    try {
+      db.prepare('UPDATE session SET title = ? WHERE id = ?').run(title, 'ses_default');
+    } finally {
+      db.close();
+    }
+  };
+
+  try {
+    await createOpenCodeDatabase(tempRoot, workspacePath, [
+      { id: 'ses_default', parentId: null, title: 'New session - 2026-10-16T12:35:45.123Z', timeCreated: 1, timeUpdated: 2 },
+    ]);
+    const db = new Database(dbPath);
+    try {
+      db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)').run('m1', 'ses_default', 1, 1, JSON.stringify({ role: 'user' }));
+      db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)').run('p1', 'm1', 'ses_default', 1, 1, JSON.stringify({
+        type: 'text', text: '<nassaj_document_sharing>\nguidance\n</nassaj_document_sharing>',
+      }));
+      db.prepare('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)').run('p2', 'm1', 'ses_default', 2, 2, JSON.stringify({
+        type: 'text', text: 'اشرح خطأ البناء',
+      }));
+    } finally {
+      db.close();
+    }
+
+    await withIsolatedDatabase(async () => {
+      const sync = new OpenCodeSessionSynchronizer();
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById('ses_default')?.custom_name, 'اشرح خطأ البناء');
+
+      setTitle('Build error explained');
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById('ses_default')?.custom_name, 'Build error explained');
+
+      sessionsDb.updateSessionCustomName('ses_default', 'my own name');
+      setTitle('Another generated title');
+      await sync.synchronize();
+      assert.equal(sessionsDb.getSessionById('ses_default')?.custom_name, 'my own name');
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

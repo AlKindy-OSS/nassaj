@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { TFunction } from 'i18next';
 
 import type { LoadingProgress, Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import { setPageContextName } from '../../../../utils/pageTitleNotification';
-import type { ProjectToolbarProps, SessionWithProvider } from '../../types/types';
+import type { ProjectToolbarProps, SessionWithProvider, SidebarSearchScope } from '../../types/types';
+import { getProjectNameDisambiguators } from '../../utils/utils';
 import type { BulkSelectionKind } from '../../hooks/useSidebarController';
 
 import SidebarProjectItem from './SidebarProjectItem';
@@ -29,6 +30,11 @@ export type SidebarProjectListProps = ProjectToolbarProps & {
   onToggleBulkSelectedId: (id: string) => void;
   onStartBulkSelectionWithId: (kind: BulkSelectionKind, id: string) => void;
   getProjectSessions: (project: Project) => SessionWithProvider[];
+  /** Conversations the active search shows for a project; null when it does not narrow it. */
+  getSearchMatchCount?: (project: Project) => number | null;
+  isSearchActive?: boolean;
+  searchScope?: SidebarSearchScope;
+  isMessageSearching?: boolean;
   /** T-1951: the "+N" hint's count, pulled out of `SidebarProjectSessions`'s own subscription. */
   getSurfacedHiddenCount: (project: Project) => number;
   onLoadMoreSessions: (projectId: string) => void;
@@ -38,7 +44,6 @@ export type SidebarProjectListProps = ProjectToolbarProps & {
   onToggleStarSession: (session: SessionWithProvider, projectName: string) => void;
   onEditingNameChange: (value: string) => void;
   onToggleProject: (projectName: string) => void;
-  onProjectSelect: (project: Project) => void;
   onToggleStarProject: (projectName: string) => void;
   onStartEditingProject: (project: Project) => void;
   onCancelEditingProject: () => void;
@@ -83,6 +88,10 @@ export default function SidebarProjectList({
   onToggleBulkSelectedId,
   onStartBulkSelectionWithId,
   getProjectSessions,
+  getSearchMatchCount = () => null,
+  isSearchActive = false,
+  searchScope = 'all',
+  isMessageSearching = false,
   getSurfacedHiddenCount,
   onLoadMoreSessions,
   loadingMoreProjects,
@@ -91,7 +100,6 @@ export default function SidebarProjectList({
   onToggleStarSession,
   onEditingNameChange,
   onToggleProject,
-  onProjectSelect,
   onToggleStarProject,
   onStartEditingProject,
   onCancelEditingProject,
@@ -113,9 +121,14 @@ export default function SidebarProjectList({
       loadingProgress={loadingProgress}
       projectsCount={projects.length}
       filteredProjectsCount={filteredProjects.length}
+      isSearchActive={isSearchActive}
+      searchScope={searchScope}
+      isMessageSearching={isMessageSearching}
       t={t}
     />
   );
+  // Two checkouts that share a name are told apart by their path (B-1668).
+  const nameSuffixes = useMemo(() => getProjectNameDisambiguators(projects), [projects]);
 
   useEffect(() => {
     // اسم المشروع وحده — **لا العنوان كاملاً**: اسم العلامة يملكه
@@ -158,6 +171,8 @@ export default function SidebarProjectList({
               editingProject={editingProject}
               editingName={editingName}
               sessions={getProjectSessions(project)}
+              nameSuffix={nameSuffixes.get(project.projectId)}
+              searchMatchCount={getSearchMatchCount(project)}
               surfacedHiddenCount={getSurfacedHiddenCount(project)}
               initialSessionsLoaded={initialSessionsLoaded.has(project.projectId)}
               isLoadingMoreSessions={loadingMoreProjects.has(project.projectId)}
@@ -166,7 +181,6 @@ export default function SidebarProjectList({
               editingSessionName={editingSessionName}
               onEditingNameChange={onEditingNameChange}
               onToggleProject={onToggleProject}
-              onProjectSelect={onProjectSelect}
               onToggleStarProject={onToggleStarProject}
               onStartEditingProject={onStartEditingProject}
               onCancelEditingProject={onCancelEditingProject}

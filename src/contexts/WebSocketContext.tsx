@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../components/auth/context/AuthContext';
 import { resolveBearerRevocation } from '../components/auth/bearerRevocation';
 import { IS_PLATFORM } from '../constants/config';
+import { dispatchOwnerStepUp, OWNER_STEP_UP_REQUIRED_CODE } from '../utils/api';
 import {
   beginSessionProcessConnectionEpoch,
   invalidateSessionProcessAuthority,
@@ -377,6 +378,11 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   // This is what stops a token rotation's old-socket close from spawning a
   // duplicate reconnect alongside the fresh socket.
   const connEpochRef = useRef(0);
+  // ADR-H20 N6: whether an identity is signed in right now. connect() and every
+  // scheduled redial read it, so a socket that closes after a sign-out never
+  // starts a token-less reconnect loop (each one was refused at the upgrade).
+  const signedInRef = useRef(identityKey !== null);
+  signedInRef.current = identityKey !== null;
 
   useEffect(() => {
     // A process-state snapshot belongs to one authenticated identity. Clear it
@@ -419,6 +425,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
 
   const connect = useCallback(() => {
     if (unmountedRef.current) return; // Prevent connection if unmounted
+    if (!IS_PLATFORM && !signedInRef.current) return; // ADR-H20 N6: signed out, nothing to dial
     // Cancel any pending reconnect: a fresh connect (e.g. token rotation closing
     // the old socket, which schedules an onclose reconnect) must not later spawn
     // a duplicate socket. Prevents reconnect storms on rapid token changes.
@@ -577,6 +584,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
               typeof data.projectId === 'string' && data.projectId.length > 0 ? data.projectId : null,
             );
           }
+          // ADR-H20 N2: a turn refused until the owner's passkey step-up.
+          if (data?.code === OWNER_STEP_UP_REQUIRED_CODE) dispatchOwnerStepUp();
           setLatestMessage(data);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);

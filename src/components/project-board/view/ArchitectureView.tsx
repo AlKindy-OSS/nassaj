@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { BookOpen, FileCode2 } from 'lucide-react';
 
 import { Pill, PillBar } from '../../../shared/view/ui';
-import MermaidDiagram from '../../../shared/view/MermaidDiagram';
+import ZoomableMermaidDiagram from '../../../shared/view/ZoomableMermaidDiagram';
 
 type ArchitectureViewProps = {
   technical: string | null;
@@ -25,7 +25,7 @@ function MarkdownCode({ className, children, ...props }: CodeProps) {
   const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
 
   if (language === 'mermaid') {
-    return <MermaidDiagram code={raw.trim()} />;
+    return <ZoomableMermaidDiagram code={raw.trim()} />;
   }
 
   return (

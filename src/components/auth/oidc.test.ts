@@ -155,7 +155,7 @@ describe('detectOidcAvailability', () => {
 
   it.each(['unavailable', 'paused', 'off'])('hides the button when ssoState is %s', async (state) => {
     apiMock.status.mockResolvedValue(json({ ssoState: state, ssoLoginAvailable: false }));
-    await expect(detectSsoStatus()).resolves.toEqual({ loginAvailable: false, state });
+    await expect(detectSsoStatus()).resolves.toEqual({ loginAvailable: false, state, autoSignIn: false });
     expect(apiMock.probe).not.toHaveBeenCalled();
   });
 
@@ -220,14 +220,14 @@ describe('ADR-194 A1 re-authentication hint', () => {
     expect(hasSsoReauthHint()).toBe(false);
   });
 
-  it('targets ?reauth=1 with the hint and the plain URL without it', () => {
+  it('targets ?reauth=1 only when asked (A2: the hint no longer forces it)', () => {
     expect(oidcLoginUrl()).toBe('/api/auth/oidc/login');
     expect(oidcLoginUrl(true)).toBe('/api/auth/oidc/login?reauth=1');
     setSsoReauthHint();
-    expect(oidcLoginUrl()).toBe('/api/auth/oidc/login?reauth=1');
+    expect(oidcLoginUrl()).toBe('/api/auth/oidc/login');
   });
 
-  it('startOidcLogin follows the hint; only a literal true forces re-authentication', () => {
+  it('startOidcLogin: only a literal true forces re-authentication; a stored hint is cleared (no-click owner entry)', () => {
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign });
     startOidcLogin();
@@ -235,9 +235,19 @@ describe('ADR-194 A1 re-authentication hint', () => {
     startOidcLogin(true);
     setSsoReauthHint();
     startOidcLogin();
+    expect(hasSsoReauthHint()).toBe(false);
     expect(assign.mock.calls.map(([target]) => target)).toEqual([
-      '/api/auth/oidc/login', '/api/auth/oidc/login', '/api/auth/oidc/login?reauth=1', '/api/auth/oidc/login?reauth=1',
+      '/api/auth/oidc/login', '/api/auth/oidc/login', '/api/auth/oidc/login?reauth=1', '/api/auth/oidc/login',
     ]);
+  });
+
+  it('ADR-H20 N1: the status carries autoSignIn only when SSO can sign in', async () => {
+    resetOidcAvailabilityCache();
+    apiMock.status.mockResolvedValue(json({ ssoState: 'active', ssoLoginAvailable: true, ssoAutoSignIn: true }));
+    await expect(detectSsoStatus()).resolves.toEqual({ loginAvailable: true, state: 'active', autoSignIn: true });
+    resetOidcAvailabilityCache();
+    apiMock.status.mockResolvedValue(json({ ssoState: 'unavailable', ssoLoginAvailable: false, ssoAutoSignIn: true }));
+    await expect(detectSsoStatus()).resolves.toEqual({ loginAvailable: false, state: 'unavailable', autoSignIn: false });
   });
 
   it('a storage that throws reads as no hint and never breaks the start', () => {

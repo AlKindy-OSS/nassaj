@@ -61,6 +61,17 @@ export function isTokenSidRevoked(sid: string, nowMs = Date.now()): boolean {
 }
 
 /**
+ * True when `sid` is an SSO device session whose 24 h idle clock ran out
+ * (ADR-H20 N8). A password session has no row and never idles out here. A
+ * barrel without the repository has none; a read failure throws (fail closed).
+ */
+export function isSsoSessionIdleExpired(sid: string, nowMs = Date.now()): boolean {
+  const repository = databaseModule.ssoDeviceSessionsDb;
+  if (!repository || typeof databaseModule.ssoDeviceSessionIdleExpired !== 'function') return false;
+  return databaseModule.ssoDeviceSessionIdleExpired(repository.get(sid), nowMs);
+}
+
+/**
  * The device-session id of a verified token: its own `sid`, or for a
  * pre-release token the sid derived from the raw token. Null for a malformed
  * `sid` claim.
@@ -72,7 +83,8 @@ export function sessionSidOf(decoded: unknown, token: string): string | null {
 
 /**
  * True when a verified session JWT is still current: the account epoch
- * matches and its device session (own or derived sid) has not signed out. A
+ * matches, its device session (own or derived sid) has not signed out, and an
+ * SSO device session has not been idle for 24 h (ADR-H20 N8). A
  * `sid` claim that is present but malformed is refused. `token` is the raw
  * JWT the claims were verified from.
  */
@@ -82,7 +94,7 @@ export function tokenSessionCurrent(
   if (!tokenEpochCurrent(decoded, user)) return false;
   if (typeof token !== 'string' || !token) return false;
   const sid = sessionSidOf(decoded, token);
-  return sid !== null && !isTokenSidRevoked(sid, nowMs);
+  return sid !== null && !isTokenSidRevoked(sid, nowMs) && !isSsoSessionIdleExpired(sid, nowMs);
 }
 
 // ---------------------------------------------------------------------------

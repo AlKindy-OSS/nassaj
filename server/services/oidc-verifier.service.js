@@ -36,10 +36,17 @@ const TOKEN_MAX_BYTES = 16 * 1024;
 const FETCH_TIMEOUT_MS = 5_000;
 const CACHE_TTL_MS = 5 * 60_000;
 // Minimum spacing between JWKS fetches triggered by an unseen kid, so key
-// rotation is picked up without letting forged kids flood the IdP.
-const JWKS_REFRESH_COOLDOWN_MS = 30_000;
+// rotation is picked up without letting forged kids flood the IdP (ADR-H20
+// D5: at most once a minute).
+const JWKS_REFRESH_COOLDOWN_MS = 60_000;
 const MAX_JWKS_KEYS = 32;
-const MAX_REPLAY_ENTRIES = 10_000;
+// ADR-H20 D5: a logout token is signed RS256 only, and its iat lies inside a
+// window that covers the IdP's retries (V4: 2 min plus 60 s skew), checked as
+// both a lower and an upper bound.
+const LOGOUT_ALGORITHMS = Object.freeze(['RS256']);
+export const LOGOUT_IAT_MAX_AGE_SECONDS = 120 + 60;
+export const LOGOUT_IAT_MAX_FUTURE_SECONDS = 60;
+const MAX_LOGOUT_SID_LENGTH = 255;
 const LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
 const PINNED_KEYS = Object.freeze(['authorization_endpoint', 'token_endpoint', 'jwks_uri']);
 const CLIENT_AUTH_METHODS = new Set(['none', 'client_secret_basic', 'client_secret_post']);
@@ -337,7 +344,7 @@ function usableJwksKeyCount(keys) {
     && (!key.use || key.use === 'sig')).length;
 }
 
-function decodeProtectedHeader(token) {
+function decodeProtectedHeader(token, algorithms = ALLOWED_ALGORITHMS) {
   if (typeof token !== 'string' || token.length === 0 || Buffer.byteLength(token, 'utf8') > TOKEN_MAX_BYTES) {
     fail('invalid_token');
   }
@@ -351,7 +358,7 @@ function decodeProtectedHeader(token) {
   if (!header || typeof header !== 'object') {
     fail('invalid_token');
   }
-  if (!ALLOWED_ALGORITHMS.includes(header.alg)) {
+  if (!algorithms.includes(header.alg)) {
     fail('invalid_algorithm');
   }
   if (typeof header.kid !== 'string' || header.kid.length === 0 || header.kid.length > 128) {
@@ -385,6 +392,35 @@ function selectVerificationKey(keys, header) {
     return crypto.createPublicKey({ key: jwk, format: 'jwk' });
   } catch {
     fail('invalid_jwk');
+  }
+}
+
+function validateLogoutClaims(claims, nowSeconds) {
+  if ('nonce' in claims) {
+    fail('logout_nonce_forbidden');
+  }
+  const logoutEvent = claims.events?.[LOGOUT_EVENT];
+  if (
+    !claims.events
+    || typeof claims.events !== 'object'
+    || Array.isArray(claims.events)
+    || !(LOGOUT_EVENT in claims.events)
+    || !logoutEvent
+    || typeof logoutEvent !== 'object'
+    || Array.isArray(logoutEvent)
+  ) {
+    fail('logout_event_required');
+  }
+  if (typeof claims.jti !== 'string' || claims.jti.length === 0 || claims.jti.length > 128) {
+    fail('logout_jti_required');
+  }
+  // ADR-H20 D5: the sid names the one browser session to end. A sub-only
+  // token is refused (it never comes from the operator IdP, V8).
+  if (typeof claims.sid !== 'string' || claims.sid.length === 0 || claims.sid.length > MAX_LOGOUT_SID_LENGTH) {
+    fail('logout_sid_required');
+  }
+  if (claims.iat < nowSeconds - LOGOUT_IAT_MAX_AGE_SECONDS || claims.iat > nowSeconds + LOGOUT_IAT_MAX_FUTURE_SECONDS) {
+    fail('logout_iat_outside_window');
   }
 }
 
@@ -423,24 +459,7 @@ function validateClaims(claims, { issuer, clientId, expectedNonce, logout }) {
     fail('subject_required');
   }
   if (logout) {
-    if ('nonce' in claims) {
-      fail('logout_nonce_forbidden');
-    }
-    const logoutEvent = claims.events?.[LOGOUT_EVENT];
-    if (
-      !claims.events
-      || typeof claims.events !== 'object'
-      || Array.isArray(claims.events)
-      || !(LOGOUT_EVENT in claims.events)
-      || !logoutEvent
-      || typeof logoutEvent !== 'object'
-      || Array.isArray(logoutEvent)
-    ) {
-      fail('logout_event_required');
-    }
-    if (typeof claims.jti !== 'string' || claims.jti.length === 0 || claims.jti.length > 128) {
-      fail('logout_jti_required');
-    }
+    validateLogoutClaims(claims, nowSeconds);
   } else {
     if (typeof expectedNonce !== 'string' || claims.nonce !== expectedNonce) {
       fail('invalid_nonce');
@@ -540,7 +559,33 @@ function createDiscoveryState(config, cacheTtlMs) {
     return 'ok';
   }
 
-  return { getDiscovery, endpoint, checkDiscoveryDrift, fetchRawDiscovery };
+  let endSessionCache = null;
+
+  /**
+   * ADR-H20 N4: the IdP `end_session_endpoint` from discovery (cached for the
+   * TTL), or null. Only an exact https URL on the origin of the pinned
+   * authorization endpoint (discovery mode: the issuer's) is used; the browser
+   * is sent there, Nassaj never calls it. Never throws.
+   */
+  async function endSessionEndpoint() {
+    const now = Date.now();
+    if (endSessionCache && endSessionCache.expiresAt > now) return endSessionCache.value;
+    let value = null;
+    try {
+      const raw = await fetchRawDiscovery();
+      if (isPlainObject(raw) && raw.issuer === config.issuer && typeof raw.end_session_endpoint === 'string') {
+        const endpointUrl = new URL(parseExactHttpsEndpoint(raw.end_session_endpoint, 'invalid_end_session_endpoint'));
+        const anchor = config.pins?.authorization_endpoint ?? config.issuer;
+        if (endpointUrl.origin === new URL(anchor).origin && !endpointUrl.search) value = endpointUrl.toString();
+      }
+    } catch {
+      value = null;
+    }
+    endSessionCache = { value, expiresAt: now + cacheTtlMs };
+    return value;
+  }
+
+  return { getDiscovery, endpoint, checkDiscoveryDrift, fetchRawDiscovery, endSessionEndpoint };
 }
 
 /** JWKS cache with a rate-capped refresh for unseen kids (key rotation). */
@@ -568,21 +613,6 @@ function createJwksState(config, discovery, { cacheTtlMs, jwksRefreshCooldownMs 
   }
 
   return { getJwks, keysForKid };
-}
-
-/** Per-verifier replay guard for logout tokens (per process, D-threat 13). */
-function createReplayGuard(issuer) {
-  const replay = new Map();
-  return (claims) => {
-    const now = Date.now();
-    for (const [key, expiresAt] of replay) {
-      if (expiresAt <= now) replay.delete(key);
-    }
-    const replayKey = `${issuer}\0${claims.jti}`;
-    if (replay.has(replayKey)) fail('logout_replay');
-    if (replay.size >= MAX_REPLAY_ENTRIES) fail('logout_replay_store_full');
-    replay.set(replayKey, Math.min(claims.exp * 1000, now + 24 * 60 * 60_000));
-  };
 }
 
 /** Test-discovery fetch (S4 consumer): discovery + JWKS checked per D8/I10. */
@@ -615,15 +645,15 @@ export function createOidcVerifier({
   const config = verifierConfig(options);
   const discovery = createDiscoveryState(config, cacheTtlMs);
   const jwks = createJwksState(config, discovery, { cacheTtlMs, jwksRefreshCooldownMs });
-  const recordLogoutReplay = createReplayGuard(config.issuer);
 
   async function verify(token, verifyOptions) {
-    const header = decodeProtectedHeader(token);
+    const algorithms = verifyOptions.logout ? LOGOUT_ALGORITHMS : ALLOWED_ALGORITHMS;
+    const header = decodeProtectedHeader(token, algorithms);
     const key = selectVerificationKey(await jwks.keysForKid(header.kid), header);
     let claims;
     try {
       claims = jwt.verify(token, key, {
-        algorithms: ALLOWED_ALGORITHMS, issuer: config.issuer, audience: config.clientId, clockTolerance: 5,
+        algorithms, issuer: config.issuer, audience: config.clientId, clockTolerance: 5,
       });
     } catch {
       fail('signature_or_registered_claim_invalid');
@@ -638,6 +668,7 @@ export function createOidcVerifier({
     getDiscovery: discovery.getDiscovery,
     authorizationEndpoint: () => discovery.endpoint('authorization_endpoint'),
     checkDiscoveryDrift: discovery.checkDiscoveryDrift,
+    endSessionEndpoint: discovery.endSessionEndpoint,
     fetchDiscoveryForPinning: () => fetchDiscoveryForPinning(config, discovery),
 
     /** Code exchange at the token endpoint with the configured client authentication. */
@@ -653,10 +684,12 @@ export function createOidcVerifier({
       return verify(token, { expectedNonce, logout: false });
     },
 
-    async verifyLogoutToken(token) {
-      const claims = await verify(token, { logout: true });
-      recordLogoutReplay(claims);
-      return claims;
+    /**
+     * Verifies a back-channel logout token (ADR-H20 D5). Replay is NOT
+     * recorded here: the route stores the jti only after answering 200 (V4).
+     */
+    verifyLogoutToken(token) {
+      return verify(token, { logout: true });
     },
   });
 }

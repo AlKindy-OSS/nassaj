@@ -666,6 +666,34 @@ describe('إعادة الإرسال', () => {
     // بلا هذا لكانت الإعادة تستأنف المعرّف الميّت فتفشل ثانيةً — حلقة مغلقة.
     expect(live.state.sent[0].options.sessionId).toBeNull();
     expect(live.state.sent[0].options.resume).toBe(false);
+    // B-1666: الإعادة تملك الشاشة التي خرجت منها، فيُنقل العرض إلى الجلسة الوليدة.
+    const sentCmid = live.state.sent[0].options.clientMsgId;
+    expect(sentCmid).toMatch(/^cmid_/);
+    expect(live.props.pendingViewSessionRef.current).toMatchObject({
+      sessionId: null, clientMsgId: sentCmid, originSessionId: SESSION_ID,
+    });
+  });
+
+  it('B-1666: «ابدأ جلسة جديدة» يربط الإرسال بالجلسة الميتة المعروضة', () => {
+    const live = harness({ wsOpen: true, sessionId: SESSION_ID });
+
+    act(() => { live.result.current.startFreshSession('أعد في محادثة جديدة'); });
+
+    const sentCmid = live.state.sent[0].options.clientMsgId;
+    expect(sentCmid).toMatch(/^cmid_/);
+    expect(live.state.sent[0].options.resume).toBe(false);
+    expect(live.state.added[0].id).toBe(sentCmid);
+    expect(live.props.pendingViewSessionRef.current).toMatchObject({
+      sessionId: null, clientMsgId: sentCmid, originSessionId: SESSION_ID,
+    });
+  });
+
+  it('B-1666: فشل النقل في «ابدأ جلسة جديدة» لا يترك حارس العرض معلّقاً', () => {
+    const live = harness({ wsOpen: false, sessionId: SESSION_ID });
+
+    act(() => { live.result.current.startFreshSession('بلا اتصال'); });
+
+    expect(live.props.pendingViewSessionRef.current).toBeNull();
   });
 
   /**

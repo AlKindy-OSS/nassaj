@@ -338,5 +338,10 @@
     "tooltip": {
       "none": "Diese Sitzung läuft außerhalb der Nassaj-Governance — prüfe die Anbietereinstellungen"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "Diagramm vergrößern",
+    "zoomedAria": "Vergrößertes Mermaid-Diagramm",
+    "close": "Schließen"
   }
 }

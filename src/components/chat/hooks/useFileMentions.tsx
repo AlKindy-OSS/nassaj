@@ -46,6 +46,27 @@ const flattenFileTree = (files: ProjectFileNode[], basePath = ''): MentionableFi
   return flattened;
 };
 
+/**
+ * Mentionable files of one project from the lean `?partial=1` listing (B-1669):
+ * always 200, so a large repository yields a bounded list, never a 413.
+ * Resolves null on a non-ok answer or an aborted request.
+ */
+async function loadMentionableFiles(projectId: string, signal: AbortSignal): Promise<MentionableFile[] | null> {
+  try {
+    const response = await api.getFiles(projectId, { signal, partial: true });
+    if (!response.ok) {
+      return null;
+    }
+    return flattenFileTree((await response.json()) as ProjectFileNode[]);
+  } catch (error) {
+    // Ignore aborts from rapid project switches; we only care about the latest request.
+    if ((error as { name?: string })?.name !== 'AbortError') {
+      console.error('Error fetching files:', error);
+    }
+    return null;
+  }
+}
+
 export function useFileMentions({ selectedProject, input, setInput, textareaRef }: UseFileMentionsOptions) {
   const [fileList, setFileList] = useState<MentionableFile[]>([]);
   const [fileMentions, setFileMentions] = useState<string[]>([]);
@@ -54,43 +75,25 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
   const [selectedFileIndex, setSelectedFileIndex] = useState(-1);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [atSymbolPosition, setAtSymbolPosition] = useState(-1);
+  // File list is keyed by DB projectId; the backend resolves it to the path.
+  const projectId = selectedProject?.projectId ?? null;
+  // B-1669: the list loads on the first '@' typed for a project, not on open.
+  const [requestedProjectId, setRequestedProjectId] = useState<string | null>(null);
 
   useEffect(() => {
+    setFileList([]);
+    setFilteredFiles([]);
+    if (!projectId || requestedProjectId !== projectId) {
+      return undefined;
+    }
     const abortController = new AbortController();
-
-    const fetchProjectFiles = async () => {
-      // File list is keyed by DB projectId now; the backend resolves it to
-      // the project's path before reading.
-      const projectId = selectedProject?.projectId;
-      setFileList([]);
-      setFilteredFiles([]);
-      if (!projectId) {
-        return;
-      }
-
-
-      try {
-        const response = await api.getFiles(projectId, { signal: abortController.signal });
-        if (!response.ok) {
-          return;
-        }
-
-        const files = (await response.json()) as ProjectFileNode[];
-        setFileList(flattenFileTree(files));
-      } catch (error) {
-        // Ignore aborts from rapid project switches; we only care about the latest request.
-        if ((error as { name?: string })?.name === 'AbortError') {
-          return;
-        }
-        console.error('Error fetching files:', error);
-      }
-    };
-
-    fetchProjectFiles();
+    void loadMentionableFiles(projectId, abortController.signal).then((files) => {
+      if (files && !abortController.signal.aborted) setFileList(files);
+    });
     return () => {
       abortController.abort();
     };
-  }, [selectedProject?.projectId]);
+  }, [projectId, requestedProjectId]);
 
   useEffect(() => {
     const textBeforeCursor = input.slice(0, cursorPosition);
@@ -109,6 +112,7 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
       return;
     }
 
+    setRequestedProjectId(projectId);
     setAtSymbolPosition(lastAtIndex);
     setShowFileDropdown(true);
     setSelectedFileIndex(-1);
@@ -122,7 +126,7 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
       .slice(0, 10);
 
     setFilteredFiles(matchingFiles);
-  }, [input, cursorPosition, fileList]);
+  }, [input, cursorPosition, fileList, projectId]);
 
   const activeFileMentions = useMemo(() => {
     if (!input || fileMentions.length === 0) {

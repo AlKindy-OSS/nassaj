@@ -111,7 +111,11 @@
   "subagent": {
     "badge": "Unteragent",
     "shortBadge": "Unteragent",
-    "badgeLabel": "Unteragent-Aufgabe"
+    "badgeLabel": "Unteragent-Aufgabe",
+    "title": "Subagent",
+    "titleWithType": "Subagent / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "Agent im Hintergrund gestartet"
   },
   "coordinator": {
     "label": "Koordinator",
@@ -148,7 +152,19 @@
     "readFile": "Datei lesen",
     "updateTodo": "Aufgabenliste aktualisieren",
     "readTodo": "Aufgabenliste lesen",
-    "searchResults": "Ergebnisse"
+    "searchResults": "Ergebnisse",
+    "titles": {
+      "parameters": "Parameter",
+      "details": "Details",
+      "plan": "Plan",
+      "taskDetails": "Aufgabendetails",
+      "subagentResult": "Subagent-Ergebnis",
+      "updatingTodoList": "Aufgabenliste wird aktualisiert",
+      "taskList": "Aufgabenliste",
+      "implementationPlan": "Umsetzungsplan",
+      "foundFiles_one": "{{count}} Datei gefunden",
+      "foundFiles_other": "{{count}} Dateien gefunden"
+    }
   },
   "search": {
     "found": "{{count}} {{type}} gefunden",
@@ -676,5 +692,8 @@
   "inlineCode": {
     "copyLink": "Link kopieren",
     "copyHint": "Kopieren"
+  },
+  "agyMessage": {
+    "to": "Nachricht an {{name}}"
   }
 }

@@ -32,6 +32,9 @@ const APP_CONFIG_WRITERS = new Set([
   'server/modules/database/repositories/sso-oidc-config.ts',
   'server/modules/database/sso-oidc-config.migration.ts',
   'server/services/installation-origin.service.js',
+  // ADR-H20 S6: upserts/deletes only the five fixed 'sso.linked.*' keys
+  // (SSO_LINKED_KEYS) with bound parameters; never the engine_restamp namespace.
+  'server/modules/database/repositories/sso-linked-settings.ts',
   // T-1962 test fixtures (not *.test.* files, so the glob sees them).
   'server/routes/__tests__/settings-sso-harness.ts',
   'server/services/__tests__/sso-config-fixture.ts',

@@ -111,7 +111,11 @@
   "subagent": {
     "badge": "Субагент",
     "shortBadge": "Субагент",
-    "badgeLabel": "Задача субагента"
+    "badgeLabel": "Задача субагента",
+    "title": "Субагент",
+    "titleWithType": "Субагент / {{type}}",
+    "titleWithTask": "{{prefix}}: {{description}}",
+    "backgroundLaunched": "Агент запущен в фоне"
   },
   "coordinator": {
     "label": "Координатор",
@@ -148,7 +152,21 @@
     "readFile": "Чтение файла",
     "updateTodo": "Обновить список задач",
     "readTodo": "Прочитать список задач",
-    "searchResults": "результаты"
+    "searchResults": "результаты",
+    "titles": {
+      "parameters": "Параметры",
+      "details": "Подробности",
+      "plan": "План",
+      "taskDetails": "Сведения о задаче",
+      "subagentResult": "Результат субагента",
+      "updatingTodoList": "Обновление списка задач",
+      "taskList": "Список задач",
+      "implementationPlan": "План реализации",
+      "foundFiles_one": "Найден {{count}} файл",
+      "foundFiles_few": "Найдено {{count}} файла",
+      "foundFiles_many": "Найдено {{count}} файлов",
+      "foundFiles_other": "Найдено {{count}} файла"
+    }
   },
   "search": {
     "found": "Найдено {{count}} {{type}}",
@@ -680,5 +698,8 @@
   "inlineCode": {
     "copyLink": "Копировать ссылку",
     "copyHint": "Копировать"
+  },
+  "agyMessage": {
+    "to": "Сообщение для {{name}}"
   }
 }

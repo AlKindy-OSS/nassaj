@@ -15,6 +15,7 @@ import mime from 'mime-types';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
+import { buildPartialProjectFileTreeResponse } from './utils/file-tree-partial.js';
 import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 import {
@@ -2735,6 +2736,14 @@ app.put('/api/projects/:projectId/file', authenticateToken,
     }
 });
 
+/**
+ * GET /api/projects/:projectId/files — the project file tree.
+ * Default: the full tree with metadata, or 413 FILE_TREE_TOO_LARGE past the
+ * entry cap (the file panel's contract). `?partial=1` (exactly '1'; B-1669):
+ * always 200 with a lean, deterministic tree of at most 10,000 name/path/type
+ * nodes (about 2 MB at most) and `X-File-Tree-Truncated: 1` when entries were
+ * left out — for the @-mention list and the command palette.
+ */
 app.get('/api/projects/:projectId/files', authenticateToken, async (req, res) => {
     try {
 
@@ -2764,6 +2773,11 @@ app.get('/api/projects/:projectId/files', authenticateToken, async (req, res) =>
             return res.status(404).json({ error: `Project path not found: ${actualPath}` });
         }
 
+        if (req.query?.partial === '1') {
+            const { status, body, truncated } = await buildPartialProjectFileTreeResponse(actualPath);
+            if (truncated) res.set('X-File-Tree-Truncated', '1');
+            return res.status(status).json(body);
+        }
         const { status, body } = await buildProjectFileTreeResponse(actualPath);
         res.status(status).json(body);
     } catch (error) {

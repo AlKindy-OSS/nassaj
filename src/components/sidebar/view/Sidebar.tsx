@@ -128,6 +128,8 @@ function Sidebar({
     toggleStarSession,
     isSessionStarred,
     getSearchVisibleSessions,
+    getSearchMatchCount,
+    isSearchActive,
     getSurfacedHiddenCount,
     loadingMoreProjects,
     loadMoreSessionsForProject,
@@ -246,6 +248,10 @@ function Sidebar({
     // shows that conversation, not its whole project. The unfiltered
     // `getProjectSessions` stays behind for counts (e.g. the delete dialog).
     getProjectSessions: getSearchVisibleSessions,
+    getSearchMatchCount,
+    isSearchActive,
+    searchScope,
+    isMessageSearching,
     getSurfacedHiddenCount,
     loadingMoreProjects,
     isProjectStarred,
@@ -253,7 +259,6 @@ function Sidebar({
     onToggleStarSession: toggleStarSession,
     onEditingNameChange: setEditingName,
     onToggleProject: toggleProject,
-    onProjectSelect: handleProjectSelect,
     onToggleStarProject: toggleStarProject,
     onStartEditingProject: startEditing,
     onCancelEditingProject: cancelEditing,

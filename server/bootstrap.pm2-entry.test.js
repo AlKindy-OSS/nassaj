@@ -14,8 +14,11 @@ function fixture() {
     const staging = path.join(root, 'dist-server');
     const server = path.join(staging, 'server');
     mkdirSync(path.join(server, 'services'), { recursive: true });
+    mkdirSync(path.join(server, 'utils'));
     writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
     copyFileSync('server/bootstrap.js', path.join(server, 'bootstrap.js'));
+    // The compiled tree ships every server/utils module; bootstrap imports the pure .env parser.
+    copyFileSync('server/utils/env-file.js', path.join(server, 'utils/env-file.js'));
     writeFileSync(path.join(server, 'bootstrap-startup-context.js'),
         'export async function establishStartupAdmission(){return null;} export async function admitSecurityStartup(){}');
     writeFileSync(path.join(server, 'services/update-maintenance-gate.js'),

@@ -230,6 +230,21 @@ async function runSpawn(
   return promise;
 }
 
+// B-1666: a fresh agy run announces a NEW conversation — `parentSessionId: null`
+// plus the send's clientMsgId — so a client that switched to another chat while
+// it started never treats it as a stale resume of the chat it is viewing.
+test('a fresh run announces session_created with parentSessionId:null and the clientMsgId', async () => {
+  const ws = makeWs();
+  await runSpawn('hello', { projectPath: HOME_DIR, clientMsgId: 'cmid-agy-1666' }, ws, (child) => {
+    child.emitStdout('reply');
+    child.emitClose(0);
+  });
+  const created = ws.forwarded.find((m) => m.kind === 'session_created');
+  assert.ok(created, 'session_created was forwarded');
+  assert.equal(created.parentSessionId, null);
+  assert.equal(created.clientMsgId, 'cmid-agy-1666');
+});
+
 // ===========================================================================
 // 1. REAL rekey with no loss / no duplication (qa-critic gate #1).
 //    Drives the PRODUCTION ordering inside spawnAntigravity:

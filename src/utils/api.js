@@ -102,11 +102,22 @@ export const applyRefreshedToken = (token) => {
 // upstream OAuth refusal, …) and must never sign the member out (B-1043).
 /** T-1939: the linked member's SSO attestation aged out (server/services/sso-attestation.js). */
 export const SSO_REAUTH_REQUIRED_CODE = 'sso_reauth_required';
+/**
+ * ADR-H20 N8: an SSO device session idle for 24 h. Answered like an aged-out
+ * attestation: a silent re-run of the SSO sign-in, never a plain logout.
+ */
+export const SSO_SESSION_EXPIRED_CODE = 'sso_session_expired';
 /** Window event AuthContext answers by restarting the SSO flow (never a plain logout). */
 export const SSO_REAUTH_EVENT = 'auth:sso-reauth-required';
+/** ADR-H20 N2: a privileged owner action needs this browser's passkey step-up first. */
+export const OWNER_STEP_UP_REQUIRED_CODE = 'owner_step_up_required';
+/** Window event the owner step-up prompt answers (detail: nothing secret). */
+export const OWNER_STEP_UP_EVENT = 'auth:owner-step-up-required';
+const SSO_RESTART_CODES = new Set([SSO_REAUTH_REQUIRED_CODE, SSO_SESSION_EXPIRED_CODE]);
 
 const SESSION_REJECTION_CODES = new Set([
   SSO_REAUTH_REQUIRED_CODE,
+  SSO_SESSION_EXPIRED_CODE,
   'AUTH_REQUIRED',
   'AUTHENTICATION_REQUIRED',
   'UNAUTHENTICATED',
@@ -137,8 +148,9 @@ export const isSessionRejection = async (response) => {
 };
 
 /**
- * True when a 401 says the member must re-attest through SSO. Reads a CLONE of
- * the body so the caller can still consume the response.
+ * True when a 401 says the session must be restarted through SSO: an aged-out
+ * member attestation, or an SSO session idle for 24 h (ADR-H20 N8). Reads a
+ * CLONE of the body so the caller can still consume the response.
  *
  * @param {Response} response
  * @returns {Promise<boolean>}
@@ -147,10 +159,32 @@ export const isSsoReauthRejection = async (response) => {
   if (response.status !== 401) return false;
   try {
     const body = await response.clone().json();
-    return Boolean(body) && body.code === SSO_REAUTH_REQUIRED_CODE;
+    return Boolean(body) && SSO_RESTART_CODES.has(body.code);
   } catch {
     return false;
   }
+};
+
+/**
+ * True when a 403 asks for the owner's passkey step-up (ADR-H20 N2). Reads a
+ * CLONE of the body.
+ *
+ * @param {Response} response
+ * @returns {Promise<boolean>}
+ */
+export const isOwnerStepUpRejection = async (response) => {
+  if (response.status !== 403) return false;
+  try {
+    const body = await response.clone().json();
+    return Boolean(body) && body.code === OWNER_STEP_UP_REQUIRED_CODE;
+  } catch {
+    return false;
+  }
+};
+
+/** Asks the owner step-up prompt to appear (ADR-H20 N2). */
+export const dispatchOwnerStepUp = () => {
+  window.dispatchEvent(new CustomEvent(OWNER_STEP_UP_EVENT));
 };
 
 /**
@@ -312,6 +346,10 @@ export const authenticatedFetch = async (url, options = {}) => {
     return response;
   }
 
+  // ADR-H20 N2: the owner's privileged action needs a passkey touch; the
+  // response is still returned so the caller shows its own refusal.
+  if (await isOwnerStepUpRejection(response)) dispatchOwnerStepUp();
+
   const refreshedToken = response.headers.get('X-Refreshed-Token');
   if (refreshedToken) {
     applyRefreshedToken(refreshedToken);
@@ -456,6 +494,12 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       }),
+      // ADR-H20: this device session's SSO view { sso, recheckDue?, ownerTier?, privilegedUntil? }.
+      session: () => authenticatedFetch('/api/auth/oidc/session'),
+      // ADR-H20 D9-1: { authorizationUrl } for the silent prompt=none re-check of this session.
+      startRecheck: () => authenticatedFetch('/api/auth/oidc/recheck/start', { method: 'POST' }),
+      // ADR-H20 N2: { authorizationUrl } for the owner's passkey step-up (prompt=login).
+      startOwnerStepUp: () => authenticatedFetch('/api/auth/oidc/owner-step-up/start', { method: 'POST' }),
       // Any signed-in member, own account only (T-1939 slice 5): { linked, ssoStepUp? }.
       // 501 when OIDC is off, so the profile hides the self-link section.
       selfLinkStatus: (options = {}) => authenticatedFetch('/api/auth/oidc/link/self', options),
@@ -798,8 +842,19 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(confirmSecret ? { filePath, content, confirmSecret: true } : { filePath, content }),
     }),
-  getFiles: (projectId, options = {}) =>
-    authenticatedFetch(`/api/projects/${projectId}/files`, options),
+  /**
+   * Project file tree. `partial: true` (B-1669) asks for the lean, always-200
+   * listing the @-mention list and palette use; without it a huge project
+   * answers 413 FILE_TREE_TOO_LARGE, which the file panel shows.
+   * @param {string} projectId
+   * @param {{ partial?: boolean } & RequestInit} [options]
+   * @returns {Promise<Response>}
+   */
+  getFiles: (projectId, { partial = false, ...fetchOptions } = {}) =>
+    authenticatedFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/files${partial ? '?partial=1' : ''}`,
+      fetchOptions,
+    ),
 
   // File operations
   createFile: (projectId, { path, type, name }) =>

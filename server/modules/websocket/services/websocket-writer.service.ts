@@ -100,6 +100,40 @@ export function addSessionMirror(sessionId: string, rawWs: RealtimeClientConnect
   owned.add(sessionId);
 }
 
+/** Drops one (session, socket) registration from both indexes; true when it existed. */
+function detachSocketFromSession(rawWs: RealtimeClientConnection, sessionId: string): boolean {
+  mirroredSessionsBySocket.get(rawWs)?.delete(sessionId);
+  const mirrors = sessionMirrors.get(sessionId);
+  if (!mirrors) {
+    return false;
+  }
+  const removed = mirrors.delete(rawWs);
+  if (mirrors.size === 0) {
+    sessionMirrors.delete(sessionId);
+  }
+  return removed;
+}
+
+/**
+ * B-1666 #5: makes `sessionId` the ONE session this socket mirrors as its view.
+ * `check-session-status` means "this is the session now on screen for this
+ * socket"; registering a mirror per call (and dropping it only on close) left a
+ * long-lived tab receiving the live stream of every session it ever opened.
+ * Other sockets' mirrors of the same session are untouched (multi-viewer), and
+ * the socket's own runs still reach it through their primary writer.
+ */
+export function setSocketViewMirror(sessionId: string, rawWs: RealtimeClientConnection): void {
+  if (!sessionId || !rawWs) {
+    return;
+  }
+  for (const other of [...(mirroredSessionsBySocket.get(rawWs) ?? [])]) {
+    if (other !== sessionId) {
+      detachSocketFromSession(rawWs, other);
+    }
+  }
+  addSessionMirror(sessionId, rawWs);
+}
+
 /**
  * Unregisters a socket from EVERY session it mirrors (B-SEC-MIRROR-LEAK).
  *
@@ -123,22 +157,13 @@ export function removeSessionMirrorsForSocket(
   if (!owned) {
     return 0;
   }
-  mirroredSessionsBySocket.delete(rawWs);
-
   let removed = 0;
-  for (const sessionId of owned) {
-    const mirrors = sessionMirrors.get(sessionId);
-    if (!mirrors) {
-      continue;
-    }
-    if (mirrors.delete(rawWs)) {
+  for (const sessionId of [...owned]) {
+    if (detachSocketFromSession(rawWs, sessionId)) {
       removed += 1;
     }
-    if (mirrors.size === 0) {
-      sessionMirrors.delete(sessionId);
-    }
   }
-  owned.clear();
+  mirroredSessionsBySocket.delete(rawWs);
   return removed;
 }
 
@@ -355,8 +380,9 @@ export class WebSocketWriter {
 
   /**
    * Sends `owner` to every socket of the run owner (this writer's user) and
-   * `viewer` to everyone else — decided per socket, never by position: after a
-   * writer reclaim the primary socket may belong to another member (ADR-210).
+   * `viewer` to everyone else — decided per socket, never by position. Since
+   * B-1666 a writer reclaim is limited to the owner's own sockets (ADR-210
+   * amendment), so the per-socket check is defense in depth.
    */
   private deliver(owner: string, viewer: string, sessionId: string | null): void {
     const ownerSocket = owner !== viewer && isSameUser(this.ws.userId, this.userId);

@@ -23,6 +23,11 @@ vi.mock('../../../participants', () => ({
   ProjectParticipantsSummary: () => null,
 }));
 
+// A hover-capable device: the path card is hover-only since B-1668.
+vi.mock('../../../../hooks/useMediaQuery', () => ({
+  useMediaQuery: (query: string) => query === '(hover: hover)',
+}));
+
 const SidebarProjectItem = (await import('./SidebarProjectItem')).default;
 
 const t = ((key: string, opts?: { defaultValue?: string }) =>
@@ -81,7 +86,6 @@ function renderProject(
       editingSessionName=""
       onEditingNameChange={() => {}}
       onToggleProject={onToggleProject}
-      onProjectSelect={() => {}}
       onToggleStarProject={onToggleStarProject}
       onStartEditingProject={() => {}}
       onCancelEditingProject={overrides.onCancelEditingProject ?? (() => {})}

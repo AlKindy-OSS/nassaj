@@ -358,5 +358,10 @@
       "saveGitConfigFailed": "git ترتیب محفوظ نہ ہو سکی",
       "completeFailed": "ابتدائی سیٹ اپ مکمل نہ ہو سکا"
     }
+  },
+  "mermaidZoom": {
+    "zoom": "خاکہ بڑا کریں",
+    "zoomedAria": "بڑا کیا گیا Mermaid خاکہ",
+    "close": "بند کریں"
   }
 }

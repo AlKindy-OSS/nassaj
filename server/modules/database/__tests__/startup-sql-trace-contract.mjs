@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 // ADR-212 (T-2035): login_throttle and revoked_token_sids (table + index each), the users probe
 // and the token_epoch ALTER.
 // ADR-213 (T-2037): the shell_oneshot_runs table + index (durable one-shot runId ledger).
+// ADR-H20 (S6): sso_device_sessions, sso_device_session_idp_sids and oidc_logout_jtis (table + index each).
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -190,6 +191,42 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE INDEX IF NOT EXISTS idx_shell_oneshot_runs_ended_at ON shell_oneshot_runs(ended_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_device_sessions (\n  refresh_sid TEXT PRIMARY KEY,\n  user_id INTEGER NOT NULL,\n  issuer TEXT NOT NULL,\n  login_hint TEXT,\n  owner_tier INTEGER NOT NULL DEFAULT 0 CHECK (owner_tier IN (0, 1)),\n  created_at INTEGER NOT NULL,\n  last_seen_at INTEGER NOT NULL,\n  last_recheck_at INTEGER NOT NULL,\n  privileged_until INTEGER,\n  prune_after INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_sso_device_sessions_prune_after ON sso_device_sessions(prune_after)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_device_session_idp_sids (\n  issuer TEXT NOT NULL,\n  idp_sid TEXT NOT NULL,\n  refresh_sid TEXT NOT NULL,\n  added_at INTEGER NOT NULL,\n  PRIMARY KEY (issuer, idp_sid, refresh_sid)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_sso_device_session_idp_sids_refresh_sid ON sso_device_session_idp_sids(refresh_sid)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS oidc_logout_jtis (\n  issuer TEXT NOT NULL,\n  jti TEXT NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (issuer, jti)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_oidc_logout_jtis_expires_at ON oidc_logout_jtis(expires_at)",
     "shadow": null
   },
   {

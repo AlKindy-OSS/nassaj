@@ -37,6 +37,7 @@ import { migrateSsoOidc } from './sso-oidc-config.migration.js';
 import { migrateUserHarnessFilesMode } from './harness-files-mode.migration.js';
 import { migrateAuthTokenEpoch } from './auth-token-epoch.migration.js';
 import { migrateShellOneShotRuns } from './shell-oneshot-runs.migration.js';
+import { migrateSsoLinkedSessions } from './sso-linked-sessions.migration.js';
 
 /** True when a ledger project path still resolves to a real directory. */
 const projectPathResolves = (projectPath: string): boolean => {
@@ -76,6 +77,9 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     // ADR-213 (T-2037): the durable one-shot runId ledger. Without it a restart
     // would let a client's re-sent runId run its command again.
     migrateShellOneShotRuns(db);
+    // ADR-H20 (S6): SSO device sessions, their IdP sids and processed logout
+    // jtis. Without them every SSO sign-in fails to bind its session.
+    migrateSsoLinkedSessions(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
 };
@@ -113,6 +117,8 @@ export const initializeDatabase = async () => {
             migrateAuthTokenEpoch(db);
             // ADR-213 (T-2037): durable one-shot runId ledger (idempotent).
             migrateShellOneShotRuns(db);
+            // ADR-H20 (S6): linked sign-in and sign-out tables (idempotent).
+            migrateSsoLinkedSessions(db);
             migrateConnectorAuthSchema(db);
             const existingInstallation = db.prepare(`SELECT installation_id AS installationId
                 FROM connector_installations WHERE singleton=1`).get() as { installationId: string } | undefined;
