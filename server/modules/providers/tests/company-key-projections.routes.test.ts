@@ -2,12 +2,12 @@
  * company-key-projections.routes.test.ts — ADR-200 S9, `projections` on
  * GET /api/providers/company/:companyId/key:
  *   - flag OFF: the field is absent (T-1201 response unchanged);
- *   - flag ON: ledger states (adopted, failed), the shared-tree refusal and the
- *     link-mode classification (subscription, unset) per harness;
+ *   - flag ON: ledger states (adopted, failed), no shared-tree refusal (every
+ *     tree is the member's own, ADR-152 A1) and the link-mode classification (subscription, unset) per harness;
  *   - member isolation: one member's ledger never shows in another's view;
  *   - the response never carries a key value or a ledger fingerprint.
  *
- * Nothing is mocked: real database, sharing policy, AES store and harness
+ * Nothing is mocked: real database, AES store and harness
  * files, all inside the hermetic sandbox (B-1544).
  */
 
@@ -29,15 +29,12 @@ process.env.NASSAJ_PROVIDER_SECRETS_KEY = Buffer.alloc(32, 9).toString('base64')
 process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
 
 const { initializeDatabase, closeConnection, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { default: providerRoutes } = await import('../provider.routes.js');
 const { AppError } = await import('@/shared/utils.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', opencode: 'shared' });
 store._resetProviderSecretsServerKeyCache();
 
 let server: ReturnType<express.Express['listen']>;
@@ -121,14 +118,15 @@ test('flag OFF: the status carries no projections field', async () => {
   }
 });
 
-test('flag ON: ledger states and the shared-tree refusal, with no fingerprint in the body', async () => {
+test('flag ON: ledger states, no shared-tree refusal, and no fingerprint in the body', async () => {
   const member = newMember('proj-ledger');
   const fpA = seedLedger(member, 'anthropic', 'claude', 'synced', 'adopted', KEY_A);
   const fpO = seedLedger(member, 'openai', 'codex', 'failed', 'fanout', KEY_O);
   const anthropic = await status(member, 'anthropic', [fpA, fpO]);
   assert.deepEqual(byProvider(anthropic.projections, 'claude'), { vendorId: 'anthropic', provider: 'claude', state: 'adopted' });
-  assert.deepEqual(byProvider(anthropic.projections, 'opencode'),
-    { vendorId: 'anthropic-opencode', provider: 'opencode', target: 'anthropic', state: 'shared_scope_refused' });
+  // opencode is the member's own tree: with no ledger entry it reports nothing,
+  // and never `shared_scope_refused` (ADR-152 A1).
+  assert.equal(byProvider(anthropic.projections, 'opencode'), undefined);
   const openai = await status(member, 'openai', [fpA, fpO]);
   assert.deepEqual(byProvider(openai.projections, 'codex'), { vendorId: 'openai', provider: 'codex', state: 'failed' });
 });

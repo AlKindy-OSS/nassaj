@@ -1,3 +1,9 @@
+## 2.3.3.1 — 2026-11-10
+
+تغيير جوهري: انتهت مشاركة المزوّدات. لم يعد أي عضو يعمل على اشتراك المالك ضمنياً؛ كل عضو يربط اشتراكه الخاص أو يتلقّى منحة صريحة من المالك، ومن دونهما لا تعمل محادثاته مع المزوّد. السياسة القديمة محفوظة في السجلّ ولم يُحذف أي مفتاح. وأُغلقت ثغرات في إعدادات المشروع وحماية بيانات اعتماد الأعضاء. وصل وكيل DeepSeek Harness بنسخة معاينة وتحديثات مرحلية، ويُفحص حجم النموذج قبل تغييره، وتُحجز الرسائل بين أعضاء مختلفين لموافقة المالك، وخادم النماذج المحلي معطّل افتراضياً.
+
+Breaking change: provider sharing is retired. No member runs on the owner's subscription implicitly any more; each member links their own subscription or receives an explicit grant from the owner, and without one their chats with that provider do not run. The old policy is kept in the record and no key was deleted. Gaps in project settings and member credential protection are closed. The DeepSeek Harness agent arrives in preview with staged updates, a model's size is checked before a switch, cross-member messages wait for owner approval, and the local model server is off by default.
+
 ## 2.3.3.0 — 2026-10-28
 
 كل عقدة تجهّز الإصدار الجديد مسبقاً خلال نحو ربع ساعة من صدوره، حتى لو لم يفتح أحد نافذة التحديث. زرّ المالك في الإعدادات يثبّت الآن كل الواجهات، بما فيها Claude من إصداره الموقّع وagy. ونافذة التحديث تعرض للمالك زرّاً لإصلاح ربط فرع الإصدار عند الحاجة. السطور العربية في كتل النص تُقرأ بترتيبها الصحيح، ورُقّعت ثغرتان حرجتان في الاعتماديات.

@@ -38,7 +38,7 @@ const SUPPORTED_MODES = new Set([null, 'run']);
  * Changing `nassaj-release-launcher.mjs` means updating this digest in the same
  * commit; `pm2-entry.test.mjs` fails until you do, which is the intended alarm.
  */
-const EXPECTED_LAUNCHER_SHA256 = 'df9384a3427ce4208946b785e4663c2b6ab6574dd4200fc0fcee66678aaeb49d';
+const EXPECTED_LAUNCHER_SHA256 = '9e39588965eb37876eff7e4fc565ff1c497f80cfc5f6cb84d9fc29e04763930a';
 const LAUNCHER_FILE = fileURLToPath(new URL('./nassaj-release-launcher.mjs', import.meta.url));
 
 /** Refuse to supervise a launcher this entry was never reviewed against. */

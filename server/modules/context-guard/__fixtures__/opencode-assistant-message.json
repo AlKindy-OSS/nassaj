@@ -1,0 +1,1 @@
+{"parentID":"msg_fixture_redacted","role":"assistant","mode":"build","agent":"build","path":{"cwd":"/redacted","root":"/redacted"},"cost":0,"tokens":{"total":22716,"input":22572,"output":28,"reasoning":116,"cache":{"write":0,"read":0}},"modelID":"glm-5.3-flash-free","providerID":"opencode","time":{"created":1793113723781,"completed":1793145619885},"finish":"tool-calls"}

@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 // ADR-213 (T-2037): the shell_oneshot_runs table + index (durable one-shot runId ledger).
 // ADR-H20 (S6): sso_device_sessions, sso_device_session_idp_sids and oidc_logout_jtis (table + index each).
 // ADR-219 S1 (T-2072): peer_messages (table + four indexes), peer_session_cost_totals, peer_agent_origin_hops, session_permission_modes.
+// ADR-219 P2a-min (T-2074): peer_holds (table + four indexes), the peer_messages probe and the hold_id ALTER.
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -276,6 +277,54 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE TABLE IF NOT EXISTS session_permission_modes (\n  session_id TEXT NOT NULL,\n  owner_user_id INTEGER NOT NULL,\n  permission_mode TEXT NOT NULL,\n  updated_at INTEGER NOT NULL,\n  PRIMARY KEY (session_id, owner_user_id)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS peer_holds (\n  id TEXT PRIMARY KEY NOT NULL,\n  chain_id TEXT NOT NULL,\n  from_user_id INTEGER NOT NULL,\n  from_session_id TEXT NOT NULL,\n  from_agent_id TEXT,\n  from_mode TEXT NOT NULL,\n  to_user_id INTEGER NOT NULL,\n  to_session_id TEXT NOT NULL,\n  project_id TEXT,\n  body TEXT NOT NULL,\n  body_sha256 TEXT NOT NULL,\n  body_bytes INTEGER NOT NULL CHECK (body_bytes >= 0),\n  summary TEXT,\n  hop INTEGER NOT NULL CHECK (hop >= 1),\n  parent_id TEXT,\n  hold_causes TEXT NOT NULL CHECK (hold_causes IN ('cross_member', 'mode_mismatch', 'cross_member+mode_mismatch')),\n  state TEXT NOT NULL CHECK (state IN ('held', 'promoted', 'rejected', 'expired', 'cancelled')),\n  hold_version INTEGER NOT NULL DEFAULT 1 CHECK (hold_version >= 1),\n  cause TEXT,\n  target_mode_shown TEXT,\n  decided_by INTEGER,\n  decided_auth_kind TEXT,\n  decided_at INTEGER,\n  reject_reason TEXT,\n  message_id TEXT,\n  expires_at INTEGER NOT NULL,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_to_user_state ON peer_holds(to_user_id, state, created_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_to_session_state ON peer_holds(to_session_id, state)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_from_to_state ON peer_holds(from_user_id, to_user_id, state)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_state_expires ON peer_holds(state, expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(peer_messages)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE peer_messages ADD COLUMN hold_id TEXT",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS provider_sharing_retirement ( id INTEGER PRIMARY KEY CHECK (id = 1), retired_at TEXT NOT NULL, raw_policy TEXT, shared_providers TEXT NOT NULL, org_key_providers TEXT NOT NULL, members_at_retirement TEXT NOT NULL, notice_acknowledged_at TEXT, notice_acknowledged_by INTEGER )",
     "shadow": null
   },
   {

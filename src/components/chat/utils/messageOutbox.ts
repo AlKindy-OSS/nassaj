@@ -50,6 +50,13 @@
  */
 
 import {
+  readCredentialNotLinked,
+  type CredentialNotLinkedInfo,
+} from '../../credential-link/credentialNotLinked';
+
+import { readContextGuardRefusal, type ContextGuardInfo } from './contextGuard';
+import { isLocalizedDshRefusal } from './dshRefusal';
+import {
   isPermanentOutboxBlock,
   readServerErrorFence,
   readServerErrorRetryable,
@@ -123,6 +130,17 @@ export type OutboxEntry = {
    * لا يُخزَّن بمفرده والبطاقة قد تُعرض بعد إعادة تحميل الصفحة.
    */
   permanentlyBlocked?: boolean;
+  /**
+   * T-2083 (ADR-152 A1 §3.5): the CREDENTIAL_NOT_LINKED refusal — which
+   * provider is not linked and why — so the card can name it and offer "link my
+   * account" / "ask a member to share". Absent for every other reason.
+   */
+  credential?: CredentialNotLinkedInfo | null;
+  /**
+   * T-2087 (ADR-223): the pinned model could not hold the conversation — the
+   * fill, the model's budget and the model to switch back to. Absent otherwise.
+   */
+  contextGuard?: ContextGuardInfo | null;
   /** أسماء الصور المحفوظة في IndexedDB بترتيبها. */
   imageNames: string[];
   /** Original non-image attachment inventory; absent legacy values mean unknown. */
@@ -1005,6 +1023,10 @@ export type OutboxVerdict =
     fence?: OutboxFenceInfo | null;
     /** الحكم الخام من الخادم؛ `isPermanentOutboxBlock` وحدها تفسّره. */
     retryable?: boolean | null;
+    /** T-2083 — the CREDENTIAL_NOT_LINKED payload, when that is the refusal. */
+    credential?: CredentialNotLinkedInfo | null;
+    /** T-2087 — the context guard payload, when that is the refusal. */
+    contextGuard?: ContextGuardInfo | null;
   };
 
 export function resolveOutboxVerdict(
@@ -1021,6 +1043,7 @@ export function resolveOutboxVerdict(
     notStarted?: unknown;
     fence?: unknown;
     retryable?: unknown;
+    provider?: unknown;
   },
   context: {
     isActiveViewSession: boolean;
@@ -1036,6 +1059,13 @@ export function resolveOutboxVerdict(
   const fence = context.readErrorFence?.(msg) ?? null;
   const retryable = context.readErrorRetryable?.(msg) ?? null;
   const fenceFields = fence || retryable !== null ? { fence, retryable } : {};
+  // T-2083: the card renders this refusal from its fields, in the UI language;
+  // the server's sentence is not kept as the detail.
+  const credential = readCredentialNotLinked(msg);
+  const credentialFields = credential ? { credential, detail: null } : {};
+  // T-2087: likewise for the context guard refusal (built from its payload).
+  const contextGuard = readContextGuardRefusal(msg);
+  const guardFields = contextGuard ? { contextGuard, detail: null } : {};
 
   if (msg.kind === 'session_created') {
     // مولدُ جلسةٍ بمعرّف فارغ = فشلُ إقلاعٍ صريح. وبمعرّفٍ صحيح = قبولٌ مؤكَّد:
@@ -1057,15 +1087,20 @@ export function resolveOutboxVerdict(
   if (msg.kind === 'complete') {
     // ‏`aborted` قرارُ المستخدم لا فشلُ إرسال: الجولة بدأت والرسالة محفوظة.
     if (msg.success === false && !msg.aborted) {
+      const code = context.readErrorCode(msg) ?? 'run_failed';
+      // T-2086: a dsh refusal is rendered from its code in the UI language.
+      const keepDetail = typeof msg.error === 'string' && !isLocalizedDshRefusal(msg.provider, code);
       return {
         action: 'fail',
         id,
-        code: context.readErrorCode(msg) ?? 'run_failed',
-        detail: typeof msg.error === 'string' ? msg.error : null,
+        code,
+        detail: keepDetail ? msg.error as string : null,
         ...(typeof msg.sameClientMsgIdRetryable === 'boolean'
           ? { sameClientMsgIdRetryable: msg.sameClientMsgIdRetryable }
           : {}),
         ...fenceFields,
+        ...credentialFields,
+        ...guardFields,
       };
     }
     return { action: 'confirm', id };
@@ -1096,6 +1131,7 @@ export function resolveOutboxVerdict(
         ? { sameClientMsgIdRetryable: msg.sameClientMsgIdRetryable }
         : {}),
       ...fenceFields,
+      ...credentialFields,
     };
   }
 
@@ -1157,6 +1193,8 @@ export function consumeOutboxIngressVerdict(msg: Record<string, unknown>): Outbo
       sameClientMsgIdRetryable: verdict.sameClientMsgIdRetryable,
       fence: verdict.fence,
       retryable: verdict.retryable,
+      credential: verdict.credential,
+      contextGuard: verdict.contextGuard,
     });
   }
   return verdict;
@@ -1251,6 +1289,8 @@ export function markOutboxFailed(
     sameClientMsgIdRetryable?: boolean;
     fence?: OutboxFenceInfo | null;
     retryable?: boolean | null;
+    credential?: CredentialNotLinkedInfo | null;
+    contextGuard?: ContextGuardInfo | null;
   } = {},
 ): boolean {
   if (!activeUserKey || !id) return false;
@@ -1266,6 +1306,8 @@ export function markOutboxFailed(
     sameClientMsgIdRetryable: reason.sameClientMsgIdRetryable,
     fence: reason.fence ?? null,
     permanentlyBlocked,
+    credential: reason.credential ?? null,
+    contextGuard: reason.contextGuard ?? null,
   });
   if (v2ManagedIds.has(id)) {
     void patchV2Entry(id, entry => entry.status === 'delivered' ? entry : patch(entry));

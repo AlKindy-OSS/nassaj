@@ -24,14 +24,11 @@ export type KeySourceRef = { harness: ProjectionHarness | 'store'; target: strin
 
 export type KeySource = KeySourceRef & { value: string };
 
-/** A member's credential file for one harness: in their own tree, or shared (skipped). */
-export type HarnessFileLocation =
-  | { harness: ProjectionHarness; scope: 'own'; path: string }
-  | { harness: ProjectionHarness; scope: 'shared' };
+/** A member's credential file for one harness, always in their own tree (ADR-152 A1). */
+export type HarnessFileLocation = { harness: ProjectionHarness; scope: 'own'; path: string };
 
 /** One harness file as read. `json: null` = bytes present but not a JSON object. */
 export type HarnessFileRead =
-  | { harness: ProjectionHarness; scope: 'shared' }
   | { harness: ProjectionHarness; scope: 'own'; path: string; state: 'absent' }
   | { harness: ProjectionHarness; scope: 'own'; path: string; state: 'unreadable' }
   | {
@@ -65,7 +62,6 @@ export const MIGRATION_VENDORS: readonly MigrationVendor[] = Object.freeze(
 
 /** Reads one located harness file without parsing errors escaping. */
 export function readHarnessFile(location: HarnessFileLocation): HarnessFileRead {
-  if (location.scope === 'shared') return location;
   let bytes: Buffer;
   try {
     bytes = fs.readFileSync(location.path);
@@ -95,7 +91,7 @@ export function fileKeyValue(json: Record<string, unknown>, consumer: FileConsum
 /** The key at one (harness, target) among the read files, or null when absent or unknown. */
 export function currentFileValue(files: readonly HarnessFileRead[], consumer: FileConsumer): string | null | undefined {
   const file = files.find((entry) => entry.harness === consumer.harness);
-  if (!file || file.scope === 'shared' || file.state === 'unreadable') return undefined;
+  if (!file || file.state === 'unreadable') return undefined;
   if (file.state === 'absent' || file.json === null) return null;
   return fileKeyValue(file.json, consumer);
 }

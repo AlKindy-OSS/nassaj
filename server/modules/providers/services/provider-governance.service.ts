@@ -18,8 +18,8 @@
  * fail-closed spawn-time repair), which would rewrite a planted symlink/drift and turn
  * every first-touch query into a silent write that reports a freshly-repaired
  * "governed". So this module re-derives each provider's effective home read-only from
- * the SAME isolation map the spawn path uses (isProviderIsolated + userConfigDir /
- * operatorCodexHome), then inspects the material with pure reads. If a later spawn
+ * the SAME isolation map the spawn path uses (userConfigDir / the system tree),
+ * then inspects the material with pure reads. If a later spawn
  * repairs governance, a re-fetch simply flips the verdict — the badge is only ever the
  * truth at read time (design §2). materializeGovernanceCopy / ensureCodexGovernance are
  * NEVER called from here.
@@ -41,10 +41,8 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { operatorCodexHome } from '@/modules/providers/list/codex/codex-home.js';
 import {
   CODEX_AGENTS_FILENAME,
   governanceMatchesSource,
@@ -56,16 +54,22 @@ import {
   geminiGovernanceMatchesSource,
   geminiGovernanceSource,
 } from '@/services/isolation/gemini-governance-material.js';
+import { systemActorHome } from '@/services/isolation/credential-actor.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { KIMI_HOME_SUBDIR, userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import {
+  LOCAL_INSTRUCTION_TIER,
+  OPENCODE_LOCAL_CONFIG_SUBDIR,
+  verifyInstructionRev,
+} from '@/services/isolation/opencode-local-tier-material.js';
+import { localOpenCodeGovernanceSource } from '@/modules/providers/list/opencode/opencode-governance.js';
+import {
   fingerprintOf,
+  governanceMatchesSource as fingerprintMatchesSource,
   hasUsableSource,
   readNeutralSource,
 } from '@/services/isolation/vendor-cli-governance-material.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import type { LLMProvider } from '@/shared/types.js';
-import { readOptionalString } from '@/shared/utils.js';
 
 /** On-disk verdict. There is no third value: an unknown engine is 'ungoverned'; a
  *  server too old to answer is expressed as the ABSENCE of the response (404), which
@@ -251,13 +255,18 @@ export interface ProviderGovernanceOptions {
    * project channel is reported `project_unresolved` — never guessed from a list.
    */
   projectPath?: string | null;
+  /**
+   * ADR-LOCAL-INSTR-TIER-001 (I5): `local32` reports the opencode copy local-model
+   * turns run under (`.config-local`, checked against ~/.claude/AGENTS.local.md).
+   */
+  instructionTier?: typeof LOCAL_INSTRUCTION_TIER | null;
 }
 
 /**
- * The isolated user id to resolve a per-user home for `provider`, or null to use the
- * operator (shared) home. Mirrors resolveProviderEnv's gate exactly: isolation applies
- * only to an authenticated (non-empty) id AND only when the admin policy marks the
- * provider isolated; anonymous/null callers and shared providers use the operator home.
+ * The isolated user id to resolve a per-user home for `provider`, or null when there
+ * is no member. Mirrors resolveProviderEnv: every provider is isolated for an
+ * authenticated (non-empty) id (ADR-152 A1). A caller with no member reads the
+ * credential-less system tree (`noMemberHome`), never the operator's own home (D2).
  * Under a credential grant (T-1675) the id is the OWNER's, as on the spawn path.
  */
 function isolatedUserId(
@@ -267,7 +276,7 @@ function isolatedUserId(
   if (userId === null || userId === undefined || userId === '') {
     return null;
   }
-  return isProviderIsolated(provider) ? credentialPrincipalId(userId, provider) : null;
+  return credentialPrincipalId(userId, provider);
 }
 
 /**
@@ -276,7 +285,16 @@ function isolatedUserId(
  */
 function codexHomeFor(userId: string | number | null): string {
   const isolated = isolatedUserId(userId, 'codex');
-  return isolated !== null ? userConfigDir(isolated, '.codex') : operatorCodexHome();
+  return isolated !== null ? userConfigDir(isolated, '.codex') : noMemberHome('.codex');
+}
+
+/**
+ * The home a caller with NO member reads: the credential-less system tree
+ * (ADR-152 A1 §3.4, D2). It holds no governance material, so such a caller sees
+ * "ungoverned" and is offered nothing — never the operator's own files.
+ */
+function noMemberHome(sub: string): string {
+  return path.join(systemActorHome(), sub);
 }
 
 /** The caller's effective CLAUDE_CONFIG_DIR, resolved READ-ONLY. */
@@ -284,40 +302,54 @@ function claudeConfigDirFor(userId: string | number | null): string {
   const isolated = isolatedUserId(userId, 'claude');
   return isolated !== null
     ? userConfigDir(isolated, '.claude')
-    : path.join(os.homedir(), '.claude');
+    : noMemberHome('.claude');
 }
 
 /**
  * The caller's effective `$HOME/.gemini` for agy, resolved READ-ONLY.
  *
- * TWO NAMES, ONE ENGINE: the session/UI provider id is `antigravity`, but the
- * sharing policy and resolveProviderEnv both key this engine as **`agy`**
- * (resolve-provider-env.js:150). Asking isProviderIsolated('antigravity') would
- * always answer "shared" and quietly report the operator's home for an isolated
- * user — so the isolation gate is queried with the SAME key the spawn path uses.
+ * TWO NAMES, ONE ENGINE: the session/UI provider id is `antigravity`, but
+ * resolveProviderEnv and the grant table key this engine as **`agy`**, so the
+ * principal is resolved with the SAME key the spawn path uses.
  */
 function geminiHomeFor(userId: string | number | null): string {
   const isolated = isolatedUserId(userId, 'agy' as LLMProvider);
   return isolated !== null
     ? userConfigDir(isolated, GEMINI_HOME_SUBDIR)
-    : path.join(os.homedir(), GEMINI_HOME_SUBDIR);
+    : noMemberHome(GEMINI_HOME_SUBDIR);
 }
 
 /**
- * The caller's effective XDG_CONFIG_HOME for opencode, resolved READ-ONLY. In shared
- * mode opencode reads a server-level XDG_CONFIG_HOME when present, else ~/.config
- * (mirrors resolveProviderEnv's opencode case and opencode's own default).
+ * The caller's effective XDG_CONFIG_HOME for opencode, resolved READ-ONLY. With no
+ * member it is the system tree's .config (never the operator's XDG_CONFIG_HOME).
  */
 function opencodeConfigHomeFor(userId: string | number | null): string {
   // T-1675: only opencode's DATA home follows a grant; config is always the
   // member's own (resolve-provider-env.js `case 'opencode'`), so no principal here.
-  const isolated = userId === null || userId === undefined || userId === '' || !isProviderIsolated('opencode')
-    ? null
-    : userId;
+  const isolated = userId === null || userId === undefined || userId === '' ? null : userId;
   if (isolated !== null) {
     return userConfigDir(isolated, '.config');
   }
-  return readOptionalString(process.env.XDG_CONFIG_HOME) ?? path.join(os.homedir(), '.config');
+  return noMemberHome('.config');
+}
+
+/**
+ * The local-tier copy is governed only as the spawn gate would admit it: it matches
+ * the slim source by sha256 AND passes the REV / tier=local32 / header check.
+ */
+function localTierCopyGoverned(agentsPath: string, sourcePath: string): boolean {
+  if (!fingerprintMatchesSource(agentsPath, sourcePath)) return false;
+  try {
+    return verifyInstructionRev(fs.readFileSync(agentsPath, 'utf8'), LOCAL_INSTRUCTION_TIER) === null;
+  } catch {
+    return false;
+  }
+}
+
+/** The XDG_CONFIG_HOME of a member's local-model opencode turns (ADR-LOCAL-INSTR-TIER-001). */
+function opencodeLocalConfigHomeFor(userId: string | number | null): string {
+  const isolated = userId === null || userId === undefined || userId === '' ? null : userId;
+  return isolated !== null ? userConfigDir(isolated, OPENCODE_LOCAL_CONFIG_SUBDIR) : noMemberHome(OPENCODE_LOCAL_CONFIG_SUBDIR);
 }
 
 /**
@@ -370,8 +402,7 @@ function agyGovernanceStatus(
 /**
  * The caller's effective KIMI_CODE_HOME, resolved READ-ONLY.
  *
- * NOT the isProviderIsolated gate: kimi's native agent path isolates
- * UNCONDITIONALLY for any authenticated user (resolve-provider-env.js:210-217 —
+ * kimi's native agent path isolates UNCONDITIONALLY for any authenticated user (resolve-provider-env.js:210-217 —
  * `provider === 'kimi' && mode === 'agent'`), because that CLI writes credential
  * and session state to disk. Anonymous/operator turns get no KIMI_CODE_HOME, so
  * the launcher's own fallback applies (kimi-agent-cli.js:139-142: ~/.kimi).
@@ -380,7 +411,7 @@ function agyGovernanceStatus(
  */
 function kimiHomeFor(userId: string | number | null): string {
   if (userId === null || userId === undefined || userId === '') {
-    return path.join(os.homedir(), KIMI_HOME_SUBDIR);
+    return noMemberHome(KIMI_HOME_SUBDIR);
   }
   // T-1675: under a grant the agent CLI runs on the grantor's KIMI_CODE_HOME.
   return userConfigDir(credentialPrincipalId(userId, 'kimi'), KIMI_HOME_SUBDIR);
@@ -880,14 +911,17 @@ export const providerGovernanceService = {
         // as ensureOpenCodeGovernance rejects it. enforced:true because that gate blocks
         // an ungoverned carrier launch fail-closed (GL-7). Pure read — a symlink or drift
         // is reported ungoverned and left on disk untouched (no self-heal).
+        const local = options.instructionTier === LOCAL_INSTRUCTION_TIER;
         const agentsPath = path.join(
-          opencodeConfigHomeFor(userId),
+          local ? opencodeLocalConfigHomeFor(userId) : opencodeConfigHomeFor(userId),
           'opencode',
           CODEX_AGENTS_FILENAME,
         );
-        const verdict = classifyFingerprintChannel(agentsPath, neutralGovernanceSource());
+        const sourcePath = local ? localOpenCodeGovernanceSource() : neutralGovernanceSource();
+        const verdict = classifyFingerprintChannel(agentsPath, sourcePath);
         return {
-          status: governanceMatchesSource(agentsPath) ? 'governed' : 'ungoverned',
+          status: (local ? localTierCopyGoverned(agentsPath, sourcePath) : governanceMatchesSource(agentsPath))
+            ? 'governed' : 'ungoverned',
           enforced: true,
           mechanism: 'opencode-agents',
           sources: [

@@ -14,28 +14,31 @@
  */
 
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 
 import {
   isVendorBinaryPinEnabled,
   PINNED_VENDOR_DIGESTS,
 } from '@/services/isolation/vendor-binary-integrity.js';
 import { appConfigDb } from '@/modules/database/index.js';
-import { HarnessBinaryUnresolvedError } from '@/shared/harness-binaries.js';
+import { HARNESS_BINARY_SPECS, HarnessBinaryUnresolvedError, toHarnessBinaryId } from '@/shared/harness-binaries.js';
 
 import type {
   HarnessUpdateJob,
   HarnessVersionDrift,
+  HarnessIntegrationUpdate,
   HarnessVersionStatus,
 } from '../../../../shared/harness-update.contract.js';
 
 
 import { clearStaleNativeStageBeforeLaunch } from './native-staging.js';
+import { dshIntegrationStatus } from './npm-lock/dsh-pipeline-update.js';
 import {
   deriveHarnessNotices,
   getHarnessDescriptor,
   HARNESS_IDS,
   HARNESS_UPDATE_DESCRIPTORS,
-  parseVersionOutput,
+  parseVersionOutput, reviewedPinTarget,
   type HarnessDescriptor,
 } from './descriptors.js';
 import { activeHarnessJobId, isHarnessLeased } from './lease.js';
@@ -80,6 +83,26 @@ export interface VersionStatusDeps {
   pinEnabled?: () => boolean;
   /** Durable "restore-compatible ran successfully here" flag (T-1871). */
   compatVerified?: (provider: string) => boolean;
+  /** Server env the operator overrides are read from (process.env by default). */
+  serverEnv?: NodeJS.ProcessEnv;
+}
+
+/** Harnesses whose launches skip the managed install-tree check under an override. */
+const TREE_CHECKED_HARNESSES: ReadonlySet<string> = new Set(['dsh']);
+
+/** T-2091: the dsh update pipeline's status (installed | checking | held | switched | rolled_back). */
+function integrationUpdateFact(provider: string, home: string): Pick<HarnessVersionStatus, 'integrationUpdate'> {
+  if (provider !== 'dsh') return {};
+  const status = dshIntegrationStatus(home);
+  return status ? { integrationUpdate: status as HarnessIntegrationUpdate } : {};
+}
+
+/** T-2086: the operator override in force for `provider`, never silent (no path). */
+function operatorOverrideFact(provider: string, env: NodeJS.ProcessEnv): Pick<HarnessVersionStatus, 'operatorOverride'> {
+  const id = toHarnessBinaryId(provider);
+  const overrideEnv = id ? HARNESS_BINARY_SPECS[id].overrideEnv : null;
+  if (!overrideEnv || (env[overrideEnv] ?? '').trim() === '') return {};
+  return { operatorOverride: { env: overrideEnv, treeCheckSkipped: TREE_CHECKED_HARNESSES.has(provider) } };
 }
 
 interface LatestCacheEntry {
@@ -148,6 +171,22 @@ async function readInstalledVersion(
   const raw = await runVersion(binary, descriptor.versionArgs);
   installedCache.set(descriptor.id, { raw, readAt: t });
   return raw;
+}
+
+/**
+ * ADR-227 / T-2098: the parsed installed version of one harness through the same
+ * TTL cache as the status read (no latest-version probe, no network). Null when
+ * the harness is unknown, unresolved or unreadable.
+ */
+export async function readInstalledHarnessVersion(idOrAlias: string): Promise<string | null> {
+  const descriptor = getHarnessDescriptor(idOrAlias);
+  if (!descriptor) return null;
+  try {
+    const raw = await readInstalledVersion(descriptor, testDeps?.runVersion ?? defaultRunVersion, testDeps?.now ?? Date.now);
+    return parseVersionOutput(raw);
+  } catch {
+    return null;
+  }
 }
 
 /** Default installed-version reader: spawn with a hard timeout + kill. */
@@ -281,6 +320,7 @@ async function probeLatest(
 ): Promise<{ version: string | null; stale: boolean } | null> {
   const probe = descriptor.latestProbe;
   if (!probe) return null;
+  if (probe.kind === 'reviewed-pin') return { version: reviewedPinTarget(), stale: false };
   if (probe.kind === 'npm') {
     return resolveLatest(probe.pkg, deps.fetchNpmLatest ?? defaultFetchNpmLatest, now);
   }
@@ -410,6 +450,8 @@ export async function getHarnessVersionStatus(
     updating: activeIntent,
     activeJobId: activeIntent ? activeJobId : null,
     ...updateFacts(descriptor, deps.compatVerified ?? isRestoreCompatibleVerified),
+    ...operatorOverrideFact(descriptor.id, deps.serverEnv ?? process.env),
+    ...integrationUpdateFact(descriptor.id, os.homedir()),
   };
 
   // The same durable marker is written before the first installation mutation

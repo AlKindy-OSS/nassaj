@@ -47,6 +47,8 @@ let interruptCount = 0;
 let onYield: (() => void) | null = null;
 let profileFailure: (Error & { code?: string }) | null = null;
 let lastProfileInput: Record<string, unknown> | null = null;
+/** ADR-227: extra profile fields (a local-engine verdict) for one test. */
+let profileOverride: Record<string, unknown> | null = null;
 
 mock.module('@anthropic-ai/claude-agent-sdk', {
   namedExports: {
@@ -84,11 +86,30 @@ mock.module('./services/isolation/resolve-claude-run-profile.js', {
         effectiveEngine: null,
         engineHosts: null,
         pin: { storedEngine: 'claude' },
+        ...profileOverride,
       };
     },
   },
 });
 
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('./services/isolation/resolve-provider-env.js');
+  mock.module(new URL('./services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const sdk = (await import('./claude-sdk.js')) as unknown as {
   spawnClaudeSideQuery: (
     params: Record<string, unknown>,
@@ -122,6 +143,7 @@ beforeEach(() => {
   onYield = null;
   profileFailure = null;
   lastProfileInput = null;
+  profileOverride = null;
 
   // Hermetic env: no competitor base URL / token, cage OFF, and an EMPTY claude
   // config dir so the real settings-env guards read nothing (degrade-safe → inert)
@@ -188,7 +210,7 @@ test('T-881(a/C1/C2/C3/C4): fork isolation, no activeSessions registration, read
       sessionId: LIVE_SID,
       question: 'what is the build script?',
       upToMessageId: 'msg-uuid-42',
-      userId: null,
+      userId: MEMBER,
       cwd: process.cwd(),
     },
     {
@@ -267,7 +289,7 @@ test('T-881(C4): no upToMessageId ⇒ resumeSessionAt is not set (fork from the 
   ];
 
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', upToMessageId: null, userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', upToMessageId: null, userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
 
@@ -285,7 +307,7 @@ test('T-881: an error result maps to the sdk_error code (no complete)', async ()
   const errors: Array<{ code: string; message: string }> = [];
   let completed = false;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     {
       onChunk: () => {},
       onError: (code, message) => errors.push({ code, message }),
@@ -313,7 +335,7 @@ test('T-881: a "no conversation found" result maps to session_not_found', async 
 
   const errors: Array<{ code: string; message: string }> = [];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: (code, message) => errors.push({ code, message }), onComplete: () => {} }
   );
 
@@ -324,7 +346,7 @@ test('T-881: a "no conversation found" result maps to session_not_found', async 
 test('T-881: an empty question is rejected before any fork is constructed', async () => {
   const errors: Array<{ code: string; message: string }> = [];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: '   ', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: '   ', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: (code, message) => errors.push({ code, message }), onComplete: () => {} }
   );
 
@@ -339,7 +361,7 @@ test('T-881(A-2.3): a null/blank project path is refused (sdk_error, no fork con
     const errors: Array<{ code: string; message: string }> = [];
     let completed = false;
     await sdk.spawnClaudeSideQuery(
-      { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: badCwd },
+      { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: badCwd },
       {
         onChunk: () => {},
         onError: (code, message) => errors.push({ code, message }),
@@ -361,7 +383,7 @@ test('T-881(A-2.1): the tool wall is an allowlist — only Read/Grep/Glob/Notebo
   ];
   const projectRoot = process.cwd();
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: projectRoot },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: projectRoot },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -405,7 +427,7 @@ test('T-1060(A-2.2): NotebookRead is confined exactly like Read, and an allowlis
   ];
   const projectRoot = process.cwd();
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: projectRoot },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: projectRoot },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -439,7 +461,7 @@ test('T-881(A-2.2): Read/Grep/Glob are confined to the project root (absolute + 
   ];
   const projectRoot = process.cwd();
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: projectRoot },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: projectRoot },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -479,7 +501,7 @@ test('T-920(B-171): a broad settings allow-rule cannot bypass the cage — the P
   ];
   const projectRoot = process.cwd();
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: projectRoot },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: projectRoot },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -579,7 +601,7 @@ test('T-920(B-171 symlink): the boundary follows symlinks (real confinement) —
 
   try {
     await sdk.spawnClaudeSideQuery(
-      { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: root },
+      { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: root },
       { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
     );
     const opts = lastQueryArg!.options ?? {};
@@ -650,7 +672,7 @@ test('[BTW] diagnostic: an error logs code/session/userId-type but NEVER the que
   };
   try {
     await sdk.spawnClaudeSideQuery(
-      { sessionId: LIVE_SID, question: SECRET_QUESTION, userId: 2, cwd: process.cwd() },
+      { sessionId: LIVE_SID, question: SECRET_QUESTION, userId: MEMBER, cwd: process.cwd() },
       { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
     );
   } finally {
@@ -662,7 +684,7 @@ test('[BTW] diagnostic: an error logs code/session/userId-type but NEVER the que
   assert.ok(btwLine!.includes('code=sdk_error'), 'the error code is logged');
   assert.ok(btwLine!.includes(`session=${LIVE_SID}`), 'the session id is logged');
   assert.ok(btwLine!.includes('userIdType=number'), 'the userId TYPE is logged');
-  assert.ok(btwLine!.includes('userIdValue=2'), 'the userId value is logged');
+  assert.ok(btwLine!.includes(`userIdValue=${MEMBER}`), 'the userId value is logged');
   // The whole point: no conversation content ever reaches the log.
   for (const line of warnings) {
     assert.ok(!line.includes(SECRET_QUESTION), 'the question text is NEVER logged');
@@ -674,7 +696,7 @@ test('B-270(steering): the side-query directive is APPENDED to the claude_code p
     { type: 'result', session_id: FORK_SID, subtype: 'success', is_error: false, result: 'ok' },
   ];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -697,7 +719,7 @@ test('SDK 0.3.267: the /btw fork opts out of system-prompt recording (snapshot:f
     { type: 'result', session_id: FORK_SID, subtype: 'success', is_error: false, result: 'ok' },
   ];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -712,7 +734,7 @@ test('SDK 0.3.162: the /btw fork names Grep and Glob in its base tool set', asyn
     { type: 'result', session_id: FORK_SID, subtype: 'success', is_error: false, result: 'ok' },
   ];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const tools = (lastQueryArg!.options ?? {}).tools as unknown;
@@ -732,7 +754,7 @@ test('B-270(steering): appending does NOT widen the read-only allowlist (Read/Gr
   ];
   const projectRoot = process.cwd();
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: projectRoot },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: projectRoot },
     { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
   );
   const opts = lastQueryArg!.options ?? {};
@@ -773,7 +795,7 @@ test('B-270(errors): error_max_turns maps to a MEANINGFUL sdk_error, not the bar
   const errors: Array<{ code: string; message: string }> = [];
   let completed = false;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'test', userId: 2, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'test', userId: MEMBER, cwd: process.cwd() },
     {
       onChunk: () => {},
       onError: (code, message) => errors.push({ code, message }),
@@ -813,7 +835,7 @@ test('B-270(diagnostic): tool denials are logged by [BTW] with tool names+counts
   };
   try {
     await sdk.spawnClaudeSideQuery(
-      { sessionId: LIVE_SID, question: 'test', userId: 2, cwd: process.cwd() },
+      { sessionId: LIVE_SID, question: 'test', userId: MEMBER, cwd: process.cwd() },
       { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
     );
   } finally {
@@ -846,7 +868,7 @@ test('B-270(a): onComplete carries the FULL answer (the SDK result string) on su
   const chunks: string[] = [];
   let completedWith: string | undefined;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'what is the build script?', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'what is the build script?', userId: MEMBER, cwd: process.cwd() },
     {
       onChunk: (t) => chunks.push(t),
       onError: () => {},
@@ -872,7 +894,7 @@ test('B-270(b): onComplete carries the answer even when NO assistant chunk was s
 
   let completedWith: string | undefined;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'س؟', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'س؟', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: () => {}, onComplete: (full) => {
       completedWith = full;
     } }
@@ -891,7 +913,7 @@ test('B-270(c): with no result string, onComplete carries the JOINED assistant c
 
   let completedWith: string | undefined;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     { onChunk: () => {}, onError: () => {}, onComplete: (full) => {
       completedWith = full;
     } }
@@ -918,7 +940,7 @@ test('B-1084(a): thinking-only + empty result.result calls onError(empty_respons
   let completedWith: string | undefined;
   let errorCode: string | undefined;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'طولت', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'طولت', userId: MEMBER, cwd: process.cwd() },
     {
       onChunk: () => {},
       onError: (code) => { errorCode = code; },
@@ -947,7 +969,7 @@ test('B-1084(b): stream ends without result message and no chunks → onError(em
   let completedWith: string | undefined;
   let errorCode: string | undefined;
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'ping', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'ping', userId: MEMBER, cwd: process.cwd() },
     {
       onChunk: () => {},
       onError: (code) => { errorCode = code; },
@@ -983,7 +1005,7 @@ test('B-1286(btw): num_turns:0 notification-cycle result is skipped; the real an
   let errorCode: string | undefined;
   const chunks: string[] = [];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'تجربة', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'تجربة', userId: MEMBER, cwd: process.cwd() },
     {
       onChunk: (t) => { chunks.push(t); },
       onError: (code) => { errorCode = code; },
@@ -1002,7 +1024,7 @@ test('T-881(A-1): onStarted hands back an interrupt handle that tears the fork d
   ];
   const handles: Array<{ interrupt: () => void }> = [];
   await sdk.spawnClaudeSideQuery(
-    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
     {
       onStarted: (h) => {
         handles.push(h);
@@ -1017,4 +1039,25 @@ test('T-881(A-1): onStarted hands back an interrupt handle that tears the fork d
   const before = interruptCount;
   handles[0].interrupt();
   assert.ok(interruptCount >= before + 1, 'invoking the handle interrupts the underlying fork');
+});
+
+test('ADR-227: a /btw fork of a local-pinned session runs the pinned server model, never a catalog pick', async () => {
+  scriptedMessages = [
+    { type: 'result', session_id: FORK_SID, subtype: 'success', is_error: false, result: 'ok' },
+  ];
+  const pin = `local:0b9c6a3e-6f1e-4c41-9a4e-2f1b9e0c7d11:${MEMBER}:${'b'.repeat(32)}`;
+  profileOverride = {
+    effectiveEngine: pin,
+    engineHosts: new Set(),
+    engineOrigins: new Set(['http://127.0.0.1:18080']),
+    local: { pin, model: 'gpt-oss-20b' },
+  };
+  let errorCode: string | undefined;
+  await sdk.spawnClaudeSideQuery(
+    { sessionId: LIVE_SID, question: 'hi', userId: MEMBER, cwd: process.cwd() },
+    { onChunk: () => {}, onError: (code) => { errorCode = code; }, onComplete: () => {} },
+  );
+  assert.equal(errorCode, undefined);
+  assert.equal(lastProfileInput?.requireKnownResumePin, true);
+  assert.equal(lastQueryArg?.options?.model, 'gpt-oss-20b');
 });

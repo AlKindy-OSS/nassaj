@@ -13,6 +13,9 @@ export type ServerBackgroundLifecycleDeps = {
   stopCostLedgerScheduler: () => void;
   startScheduledMessages?: () => void;
   stopScheduledMessages?: () => Promise<void>;
+  /** B-1771: read-only observer of member credential files; a failure is logged, never fatal. */
+  startCredentialFileWatcher?: () => Promise<void>;
+  stopCredentialFileWatcher?: () => Promise<void>;
   logger?: Pick<Console, 'error'>;
 };
 
@@ -51,6 +54,12 @@ export function createServerBackgroundLifecycle(
       started = true;
       deps.startCostLedgerScheduler();
       deps.startScheduledMessages?.();
+      void deps.startCredentialFileWatcher?.().catch((error: unknown) => {
+        logger.error(
+          '[credential-watch] Error starting watcher:',
+          error instanceof Error ? error.message : String(error),
+        );
+      });
       watcherStart = deps.initializeSessionsWatcher().catch((error: unknown) => {
         logger.error(
           '[Sessions] Error initializing watcher:',
@@ -76,9 +85,11 @@ export function createServerBackgroundLifecycle(
       const watchdogStop = deps.stopTurnSupervisorWatchdogs();
       deps.stopCostLedgerScheduler();
       const scheduledStop = deps.stopScheduledMessages?.() ?? Promise.resolve();
+      const credentialWatchStop = deps.stopCredentialFileWatcher?.() ?? Promise.resolve();
       stopping = (async () => {
         await watchdogStop;
         await scheduledStop;
+        await credentialWatchStop;
         await watcherStart;
         await deps.closeSessionsWatcher();
       })().finally(() => {

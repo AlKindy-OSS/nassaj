@@ -58,6 +58,7 @@ import {
 import { isSessionId } from '../shared/session-id.js';
 import { ResponseCollector } from './agent-response-collector.js';
 import { isForbiddenProjectRoot } from '../shared/secret-path-guard.js';
+import { admitCredentialTurn, credentialNotLinkedPayload } from '../services/isolation/credential-gate.js';
 import { GIT_CLONE_ARGS, hardenGitArgs } from '../../shared/git-safety.js';
 
 const router = express.Router();
@@ -1236,6 +1237,37 @@ router.post(
 // `validateExternalApiKey` — the latter's IS_PLATFORM branch authenticates
 // without a credential, so a gate behind it would not gate that path at all.
 // The order is pinned by server/services/external-api-gate.test.ts.
+/**
+ * ADR-152 A1 §3.5: the credential gate for a REST agent run. Returns the 409
+ * body when the caller has no linked credential (own or granted), else null.
+ * glm runs on the OpenCode carrier, so its credential is OpenCode's `glm` entry.
+ * @param {unknown} actor
+ * @param {string} provider
+ * @param {unknown} model
+ * @param {unknown} sessionId
+ * @returns {{ error: string, code: string, credential: Record<string, unknown> } | null}
+ */
+export function refuseUnlinkedAgentRun(actor, provider, model, sessionId) {
+  const rawModel = typeof model === 'string' && model.trim() ? model.trim() : null;
+  const gateModel = provider === 'glm'
+    ? (rawModel ? (rawModel.startsWith('glm/') ? rawModel : `glm/${rawModel}`) : null)
+    : rawModel;
+  try {
+    admitCredentialTurn({
+      actor,
+      provider: provider === 'glm' ? 'opencode' : provider,
+      mode: 'agent',
+      model: gateModel,
+      sessionId: typeof sessionId === 'string' ? sessionId : null,
+    });
+    return null;
+  } catch (error) {
+    const payload = credentialNotLinkedPayload(error);
+    if (!payload) throw error;
+    return { error: error.message, code: 'CREDENTIAL_NOT_LINKED', credential: payload };
+  }
+}
+
 router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey, async (req, res) => {
   const { githubUrl, projectPath, message, provider = 'claude', model, effort, githubToken, branchName, sessionId } = req.body;
 
@@ -1281,6 +1313,21 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
   // behavior (glm was not an allowed agent provider at all).
   if (provider === 'glm' && !isOpenCodeCarrierEnabled()) {
     return res.status(400).json({ error: 'glm agent provider is not enabled' });
+  }
+
+  // ADR-152 A1 §3.5 (AT1): a member with no credential and no usable grant is
+  // refused before any clone, registration or writer — nothing starts.
+  let credentialRefusal;
+  try {
+    credentialRefusal = refuseUnlinkedAgentRun(req.user?.id, provider, model, sessionId);
+  } catch (error) {
+    console.error('[agent] credential gate failed', { code: error?.code ?? null });
+    return res.status(error?.statusCode ?? 500).json({
+      error: 'This run needs a signed-in member.', code: error?.code ?? 'CREDENTIAL_GATE_FAILED',
+    });
+  }
+  if (credentialRefusal) {
+    return res.status(409).json(credentialRefusal);
   }
 
   // B-36: a client-supplied projectPath (existing project or clone target) must

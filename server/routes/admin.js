@@ -3,66 +3,44 @@
  *
  * Mounted at /api/admin. Every handler runs behind authenticateToken (applied
  * at mount) + requireRole('owner', 'admin'), so no business logic here re-checks
- * authentication. Validation lives in the provider-sharing service; this layer
- * only translates HTTP <-> service calls and writes the audit trail.
+ * authentication.
+ *
+ * The install-wide provider-sharing policy is retired (ADR-152 amendment 1):
+ * a provider credential is usable by another member only through a grant its
+ * owner made at /api/credential-grants. Both of its old endpoints answer 410 and
+ * write nothing — no role may make another person's credential usable.
  */
 
 import express from 'express';
 
-import { auditLogDb } from '../modules/database/index.js';
 import { requireRole } from '../middleware/auth.js';
-import {
-  getProviderSharingConfig,
-  validateProviderSharingConfig,
-  setProviderSharingConfig,
-} from '../services/provider-sharing.js';
 
 const router = express.Router();
 
 // All admin endpoints require an elevated role. authenticateToken is applied
-// where this router is mounted (server/index.js).
+// where this router is mounted (server/index.js). A member still gets 403.
 router.use(requireRole('owner', 'admin'));
 
-// ---------------------------------------------------------------------------
-// Provider credential-sharing policy
-// ---------------------------------------------------------------------------
-
-// Read the current per-provider sharing policy.
-//
-//   curl -H "Authorization: Bearer <jwt>" \
-//        http://localhost:3004/api/admin/provider-sharing
-router.get('/provider-sharing', (req, res) => {
-  res.json({ config: getProviderSharingConfig() });
+/** Body of the retired provider-sharing endpoints (ADR-152 A1 §3.3). */
+const PROVIDER_SHARING_RETIRED = Object.freeze({
+  error: Object.freeze({
+    code: 'PROVIDER_SHARING_RETIRED',
+    message: 'The install-wide provider sharing policy is retired. A credential is shared only by '
+      + 'its owner, as a grant from the agent settings page.',
+    messageAr: 'أُلغيت سياسة مشاركة المزوّدات العامة. لا يُشارَك اعتماد إلا بمنحة من صاحبه '
+      + 'من صفحة إعدادات الوكلاء.',
+    replacement: '/api/credential-grants',
+  }),
 });
 
-// Update the policy. Body: a JSON object mapping known providers to
-// 'shared'|'isolated'. Partial patches are allowed (unspecified providers keep
-// their current mode). Unknown providers or invalid modes are rejected. Takes
-// effect immediately for subsequent provider spawns in this process.
+// Retired: read and update of the per-provider sharing policy. Nothing is read,
+// written or audited.
 //
-//   curl -X PUT -H "Authorization: Bearer <jwt>" -H "Content-Type: application/json" \
-//        -d '{"agy":"isolated"}' \
-//        http://localhost:3004/api/admin/provider-sharing
-router.put('/provider-sharing', (req, res) => {
-  try {
-    const result = validateProviderSharingConfig(req.body);
-    if (!result.ok) {
-      return res.status(400).json({ error: result.error });
-    }
-
-    const stored = setProviderSharingConfig(result.config);
-
-    auditLogDb.record('admin_provider_sharing_update', {
-      userId: req.user.id,
-      metadata: { config: stored },
-      ipAddress: req.ip ?? null,
-    });
-
-    res.json({ config: stored });
-  } catch (error) {
-    console.error('Provider sharing update error:', error?.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+//   curl -i -X PUT -H "Authorization: Bearer <jwt>" -H "Content-Type: application/json" \
+//        -d '{"claude":"shared"}' http://localhost:3004/api/admin/provider-sharing
+//   → HTTP/1.1 410 Gone  {"error":{"code":"PROVIDER_SHARING_RETIRED",…}}
+router.all('/provider-sharing', (_req, res) => {
+  res.status(410).json(PROVIDER_SHARING_RETIRED);
 });
 
 export default router;

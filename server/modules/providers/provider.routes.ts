@@ -6,6 +6,7 @@ import express, { type Request, type Response } from 'express';
 import costRoutes from '@/modules/providers/cost.routes.js';
 import resourceRoutes from '@/modules/providers/resources.routes.js';
 import { DeviceBoundSseStream } from '@/modules/account-wallet/index.js';
+import { contextGuard } from '@/modules/context-guard/index.js';
 import { antigravityActiveModelService } from '@/modules/providers/services/antigravity-active-model.service.js';
 import {
   providerQuotaService,
@@ -64,14 +65,12 @@ import {
   type WorkspaceTopologyFence,
 } from '@/modules/database/index.js';
 import { OFFICIAL_ENGINE, PIN_SOURCE } from '@/services/isolation/engine-pin.js';
-import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 import { isVendorSecretProvider } from '@/services/isolation/provider-secrets-store.js';
 import { withHarnessFilesLock } from '@/services/isolation/harness-files-lock.js';
 import { resolveHarnessFilesState, type PrivateSkillsHarness } from '@/services/isolation/harness-files-mode.js';
 import { privateSkillsStoreRoot } from '@/services/isolation/private-skills-store.js';
 import { coerceUserId } from '@/modules/projects/index.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import type {
   LLMProvider,
   McpScope,
@@ -107,11 +106,14 @@ import {
   isRetiredProvider,
 } from '../../../shared/retiredProviders.js';
 
+import claudeLocalRoutes from './claude-local.routes.js';
 import localModelsRoutes from './local-models.routes.js';
 import { HistoryHttpSink } from './services/history-response.service.js';
 
 const router = express.Router();
 router.use('/local', localModelsRoutes);
+// ADR-227 / T-2098 stage 3b: the Claude body's local overlay route.
+router.use('/claude', claudeLocalRoutes);
 
 const readPathParam = (value: unknown, name: string): string => {
   if (typeof value === 'string') {
@@ -336,42 +338,6 @@ const readOptionalTarget = (value: unknown): string | undefined => {
   return normalized.length > 0 ? normalized : undefined;
 };
 
-/** Why this caller may not write this credential. `undefined` when they may. */
-export type CredentialWriteRefusal = 'shared_requires_admin';
-
-/**
- * The T-866 authorization rule, evaluated ONCE for both the gate and the UI
- * (B-362). A write that would touch the OPERATOR's shared credentials (provider
- * not isolated per policy) is restricted to owner/admin; isolated per-user
- * writes are allowed for any authenticated member (their own tree — userId comes
- * from the token only).
- *
- * WHY THIS IS A FUNCTION AND NOT TWO IFs. The gate below existed; the UI had no
- * way to ask it. `GET /:provider/api-key/capability` is role-free BY DESIGN (it
- * says so at its handler) — it answers "how is this key written", never "may
- * YOU write it". So the entry surface rendered a field, a Save button and a
- * "get a key" link to every member, for the four opencode slots that default to
- * `shared` — and refused with 403 only AFTER they had bought a key and pasted
- * it. Nobody caught it because the only account that never sees that slot is the
- * operator's: they are `owner`, so every manual check passed.
- *
- * Deciding the same rule in two places is how those two answers drift, so the
- * gate and the status endpoint now read this one function.
- */
-const evaluateCredentialWrite = (
-  req: Request,
-  provider: string,
-): { writable: boolean; reason?: CredentialWriteRefusal } => {
-  if (!providerCredentialsService.requiresElevatedRole(provider)) {
-    return { writable: true };
-  }
-  const role = readAuthenticatedUserRole(req);
-  if (role === 'owner' || role === 'admin') {
-    return { writable: true };
-  }
-  return { writable: false, reason: 'shared_requires_admin' };
-};
-
 /**
  * Platform mode, read at CALL time from the same variable `server/constants/config.js`
  * defines it from (`VITE_IS_PLATFORM === 'true'`). Not imported from there because
@@ -474,17 +440,6 @@ const NO_CHANNEL_SHAPE: ProviderGovernanceChannel = {
   linkRefusal: 'no_mechanism',
 };
 
-/** Throws 403 when `evaluateCredentialWrite` refuses. */
-const assertCredentialWriteAllowed = (req: Request, provider: string): void => {
-  if (evaluateCredentialWrite(req, provider).writable) {
-    return;
-  }
-  throw new AppError('Configuring shared provider credentials requires an admin or owner.', {
-    code: 'CREDENTIAL_WRITE_FORBIDDEN',
-    statusCode: 403,
-  });
-};
-
 /**
  * Authorization gate for EVERY MCP mutation, at every scope (B-345).
  *
@@ -502,10 +457,11 @@ const assertCredentialWriteAllowed = (req: Request, provider: string): void => {
  * write into cross-user code execution.
  *
  * The line is WHERE THE FILE LIVES, not who owns the project:
- *  - `user` and `local` on a SHARED provider write the operator's own config
- *    file, which every member's sessions load → owner/admin, the bar
- *    `/mcp/servers/global` already keeps.
- *  - `user` and `local` on an ISOLATED provider write
+ *  - `user` and `local` through a writer that is NOT declared to follow the
+ *    caller (opencode in its cleanup-only shape, any new provider by default,
+ *    B-345) may write the operator's own config file, which every member's
+ *    sessions load → owner/admin, the bar `/mcp/servers/global` already keeps.
+ *  - `user` and `local` through a per-user writer write
  *    `~/.nassaj-users/<caller>/…`, a file only that member's own spawns read →
  *    any authenticated member, for their own tree (T-1177, see below).
  *  - `project` writes `<workspace>/.mcp.json`, which is inside the project and
@@ -523,15 +479,11 @@ const assertCredentialWriteAllowed = (req: Request, provider: string): void => {
  * Keeping the gate would deny a capability without closing anything, which is
  * the same trade the `project` scope was already deliberately allowed on.
  *
- * The condition is READ FROM THE SHARING POLICY rather than hard-coded per
- * provider: it is the same predicate `resolveProviderEnv` uses to place the file,
- * so the gate and the destination cannot disagree, and flipping a provider back
- * to `shared` through the admin route re-arms the bar on the next request. The
- * policy is cached in-process (the spawn hot path reads it constantly) and that
- * cache is refreshed synchronously on write — so the honest guarantee is that
- * this gate keeps no decision of its OWN, not that no cache exists anywhere.
- * Writing `app_config` behind the service would leave both this gate and the
- * spawn placement stale together, never one without the other.
+ * The condition is a property of the WRITER (`writesPerUserConfig`, declared
+ * next to the code that resolves the file), not of any policy: every provider
+ * spawn is isolated per user (ADR-152 A1), but a writer that still resolves the
+ * operator's file would hand every member a write there. Retiring the sharing
+ * policy therefore must not turn this gate into allow-all.
  *
  * Reads are untouched — listing is already workspace-authorized.
  */
@@ -545,13 +497,10 @@ const assertMcpWriteAllowed = (req: Request, scope: McpScope, provider: string):
   if (scope === 'project') {
     return;
   }
-  // BOTH halves are required, and neither implies the other. The policy says where
-  // the SPAWN reads; `writesPerUserConfig` says whether the WRITER follows the
-  // caller. opencode is the counter-example that makes this compound predicate
-  // mandatory: an admin can mark it `isolated` while its writer still resolves
-  // `os.homedir()/.config/opencode` with no userId, so trusting the policy alone
-  // would hand every member a write into the operator's file (B-345, reopened).
-  if (isProviderIsolated(provider) && providerMcpService.providerWritesPerUserMcpConfig(provider)) {
+  // Only a writer declared to follow the caller lands in the caller's own tree;
+  // any other writer keeps the owner/admin bar (B-345). Retiring the sharing
+  // policy must never turn this gate into allow-all (ADR-152 A1 condition 1).
+  if (providerMcpService.providerWritesPerUserMcpConfig(provider)) {
     return;
   }
   const role = readAuthenticatedUserRole(req);
@@ -1386,11 +1335,9 @@ router.get(
 // only `{ provider, configured }`. Once a key is set, GET /:provider/auth/status
 // flips authenticated=true (the auth facet reads the same surface).
 //
-// Authorization: a write that would touch the OPERATOR's shared credentials
-// (provider marked 'shared'/unenrolled in the sharing policy) is restricted to
-// owner/admin (403 otherwise); isolated per-user writes are open to any member
-// for their OWN tree. Terminal-only providers short-circuit to 400 before any
-// role/DB check.
+// Authorization: every write lands in the caller's OWN tree or key slot, for
+// every role (ADR-152 A1) — no role may write another person's credential.
+// Terminal-only providers short-circuit to 400 before any DB check.
 
 // ----------------- Company-wide key routes (T-1159) -----------------
 // ONE paste per COMPANY, fanned out by nassaj to every slot that company owns,
@@ -1399,12 +1346,8 @@ router.get(
 // `/:provider/api-key`, but registering it first keeps that true if a future
 // two-segment `/:provider/:x` route is ever added.
 //
-// The role rule is evaluated HERE (same `evaluateCredentialWrite` the per-slot
-// gate uses) and handed to the service as a boolean, so authorization keeps
-// living in exactly one place. A caller without elevated standing is NOT
-// refused outright: their isolated slots are still written and the shared ones
-// come back marked `forbidden`, because a member configuring their own tree is
-// a legitimate call that happens to include slots they cannot touch.
+// Every slot is written into the caller's own tree (ADR-152 A1); no role
+// decides whose credential file a key lands in.
 //
 // T-1201 — the body may carry `vendorIds` to narrow the fan-out to the slots
 // the operator ticked. It is a FILTER over the company named in the path, never
@@ -1413,11 +1356,6 @@ router.get(
 // survivor. So the request body cannot widen a member's reach, cannot reach
 // another company's slot, and cannot slip a key into a subscribed harness
 // without also asking for `includeSubscription`.
-const isElevatedCaller = (req: Request): boolean => {
-  const role = readAuthenticatedUserRole(req);
-  return role === 'owner' || role === 'admin';
-};
-
 /**
  * The slots the caller ticked (T-1201). Transport-shaped only: an array of ids
  * on a write body, a comma-separated list on a DELETE query string (a DELETE
@@ -1475,7 +1413,6 @@ const setCompanyKey = asyncHandler(async (req: Request, res: Response) => {
   // key into a harness that is currently signed in by subscription.
   const includeSubscription = body?.includeSubscription === true;
   const result = await companyCredentialsService.setKey(userId, companyId, apiKey, {
-    isElevated: isElevatedCaller(req),
     includeSubscription,
     replaceForeignKey: body?.replaceForeignKey === true,
     authenticatedPrincipal: (req as Request & { user?: unknown }).user,
@@ -1494,7 +1431,6 @@ router.delete(
     const companyId = readPathParam(req.params.companyId, 'companyId');
     const userId = readAuthenticatedUserId(req);
     const result = await companyCredentialsService.deleteKey(userId, companyId, {
-      isElevated: isElevatedCaller(req),
       // Removal stays PER SLOT in the UI — it acts on what is stored in one
       // place, not on an intention — so the query string usually carries a
       // single id. Absent still means "every slot", for the whole-company
@@ -1554,7 +1490,6 @@ router.post(
     if (!['claude', 'codex', 'opencode'].includes(harness)) {
       throw new AppError('Unknown harness.', { code: 'INVALID_HARNESS', statusCode: 400 });
     }
-    assertCredentialWriteAllowed(req, harness);
     const body = (req.body ?? {}) as Record<string, unknown>;
     if (body.mode !== undefined && body.mode !== 'keys' && body.mode !== 'full') {
       throw new AppError('`mode` must be "keys" or "full".', { code: 'INVALID_RESTORE_MODE', statusCode: 400 });
@@ -1574,20 +1509,12 @@ router.get(
     const companyId = readPathParam(req.params.companyId, 'companyId');
     const userId = readAuthenticatedUserId(req);
     const status = await companyCredentialsService.getStatus(userId, companyId);
-    // `writable` for a COMPANY is "can this caller write ANY of its slots", not
-    // "is this caller elevated". Most slots are per-user isolated and a member
-    // may set them freely; answering with the bare role would hide the field
-    // from every member for a company whose slots they are all allowed to
-    // write — the same over-refusal B-362 fixed at the slot level.
-    const writable = status.slots.some(
-      (slot) => !providerCredentialsService.requiresElevatedRole(slot.provider) || isElevatedCaller(req),
-    );
     // T-1906 / ADR-200 S7: for the Qwen slot, whether the saved key can drive
     // qwen-plan models (`ok`, `missing_key` or `legacy_profile`).
     const qwenPlan = status.slots.some((slot) => slot.provider === 'qwen')
       ? { qwenPlan: providerSecretsService.getQwenPlanStatus(userId) }
       : {};
-    res.json(createApiSuccessResponse({ ...status, writable, ...qwenPlan }));
+    res.json(createApiSuccessResponse({ ...status, ...qwenPlan }));
   }),
 );
 
@@ -1600,7 +1527,6 @@ const setProviderApiKey = asyncHandler(async (req: Request, res: Response) => {
       statusCode: 400,
     });
   }
-  assertCredentialWriteAllowed(req, provider);
   const userId = readAuthenticatedUserId(req);
   const apiKey = readApiKeyFromBody(req.body);
   const target = readOptionalTarget((req.body as Record<string, unknown> | undefined)?.target);
@@ -1648,7 +1574,6 @@ router.put(
   linkModeWriteLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const provider = normalizeProviderParam(req.params.provider);
-    assertCredentialWriteAllowed(req, provider);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const result = await providerAuthService.switchLinkMode(provider, readAuthenticatedUserId(req), {
       mode: body.mode,
@@ -1672,7 +1597,6 @@ router.delete(
         statusCode: 400,
       });
     }
-    assertCredentialWriteAllowed(req, provider);
     const userId = readAuthenticatedUserId(req);
 
     const target = readOptionalTarget(req.query.target);
@@ -1681,11 +1605,8 @@ router.delete(
   }),
 );
 
-// GET reports existence only — `{ provider, configured }` — never the key. It
-// also carries `writable` + `reason` (B-362): this request is already made once
-// per slot, and it is the only per-user, role-aware answer the entry surface
-// gets, so the alternative to riding along here is a second round trip that
-// would have to re-derive the same rule.
+// GET reports existence only — `{ provider, configured }` — never the key. Every
+// member may write their own slot, so no `writable`/`reason` rides along.
 router.get(
   '/:provider/api-key',
   asyncHandler(async (req: Request, res: Response) => {
@@ -1694,7 +1615,7 @@ router.get(
     const target = readOptionalTarget(req.query.target);
     const result = await providerCredentialsService.getStatus(userId, provider, target);
     const qwenPlan = provider === 'qwen' ? { qwenPlan: providerSecretsService.getQwenPlanStatus(userId) } : {};
-    res.json(createApiSuccessResponse({ ...result, ...evaluateCredentialWrite(req, provider), ...qwenPlan }));
+    res.json(createApiSuccessResponse({ ...result, ...qwenPlan }));
   }),
 );
 
@@ -1728,7 +1649,9 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseBodyProvider(req.params.provider);
     const userId = readAuthenticatedUserId(req);
-    const governance = providerGovernanceService.getGovernance(provider, userId);
+    // ADR-LOCAL-INSTR-TIER-001: `?tier=local32` reports the local-model copy instead.
+    const instructionTier = req.query.tier === 'local32' ? 'local32' : null;
+    const governance = providerGovernanceService.getGovernance(provider, userId, { instructionTier });
     // The link affordance is decided HERE and shipped as data, never re-derived in
     // the browser: the surface must not render a button the POST below will refuse
     // (the B-362 lesson, one rule read by both answers).
@@ -1873,15 +1796,11 @@ router.post(
 
     // A vendor engine with no resolvable key must fail VISIBLY here rather than
     // at spawn time: B-222's rule is that substituting another vendor — or
-    // falling through to official Anthropic — is never a safe degradation.
-    // `sharedFallback: true` mirrors the spawn path (apply-claude-engine-provider-env):
-    // this gate must accept exactly the keys a later turn will actually be able
-    // to spend, or it refuses a re-stamp that would have run fine. It is also the
-    // second existence oracle named in §6 of the design doc — a member learns an
-    // org key exists from the difference between this 400 and success — which
-    // closes in wave B, when the declaration becomes the thing being asked about.
-    if (engine !== OFFICIAL_ENGINE
-      && resolveSlotKey(credentialPrincipalId(userId, engine), engine, { sharedFallback: true }) === null) {
+    // falling through to official Anthropic — is never a safe degradation. This
+    // gate accepts exactly the key a later turn can spend: the caller's own
+    // (apply-claude-engine-provider-env; the install-wide slot is inert,
+    // ADR-152 A1 §3.8).
+    if (engine !== OFFICIAL_ENGINE && resolveSlotKey(userId, engine) === null) {
       throw new AppError(`No stored key for engine "${engine}".`, {
         code: 'ENGINE_PROVIDER_UNAVAILABLE',
         statusCode: 400,
@@ -2057,7 +1976,13 @@ router.get(
       // than throwing — so a session with no stored value yields a default, not a
       // 500. Provider-store vs catalog-default are indistinguishable through this
       // contract, so both are reported as 'provider-current'.
-      model = (await providerModelsService.getCurrentActiveModel(provider, sessionId)).model;
+      // B-1752: the caller's id selects THEIR opencode.db; without it a member's
+      // local-model session is looked up in the operator DB and reads as the default.
+      model = (await providerModelsService.getCurrentActiveModel(
+        provider,
+        sessionId,
+        readAuthenticatedUserId(req),
+      )).model;
       assertSessionRequestFence(req, accessFence, true);
       source = 'provider-current';
     }
@@ -2070,6 +1995,37 @@ router.get(
       supported: change.supported,
       changed: change.changed,
     }));
+  }),
+);
+
+/** A model id as the pickers send it: `haiku`, `opus[1m]`, `zai/glm-4.5v`, `nassaj_local_x/m:7b`. */
+const CONTEXT_FIT_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]{0,199}$/;
+
+// T-2087 / ADR-223 check-before-pin: would this session's conversation fit
+// `model`? Pure read of the session's last recorded fill and the model's window
+// — the same verdict the send path enforces. Same mandate and 404 as the
+// active-model GET above, so it confirms nothing about a probed sessionId.
+// The read touches a transcript tail or an opencode.db: bounded per caller.
+const contextFitLimiter = createRateLimiter({
+  windowMs: 60_000, max: 60, message: 'Too many context checks, please slow down',
+  key: (req: Request) => `context-fit:${String(readAuthenticatedUserId(req) ?? req.ip ?? 'unknown')}`,
+});
+
+router.get(
+  '/:provider/sessions/:sessionId/context-fit',
+  contextFitLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    parseBodyProvider(req.params.provider);
+    const sessionId = parseSessionId(req.params.sessionId);
+    // Access before input: a non-member learns nothing, not even the query contract.
+    const accessFence = captureSessionRequestFence(req, sessionId, 'read');
+    const model = typeof req.query.model === 'string' ? req.query.model.trim() : '';
+    if (!CONTEXT_FIT_MODEL.test(model)) {
+      throw new AppError('A valid model is required.', { code: 'INVALID_MODEL', statusCode: 400 });
+    }
+    const fit = await contextGuard.measure({ sessionId, model });
+    assertSessionRequestFence(req, accessFence, true);
+    res.json(createApiSuccessResponse(fit));
   }),
 );
 
@@ -2118,7 +2074,12 @@ router.delete(
     // provider-current value, since no override remains. Every adapter degrades to
     // its catalog DEFAULT rather than throwing, so this is always a non-empty
     // string (never a 500), mirroring the GET route's 'provider-current' branch.
-    const model = (await providerModelsService.getCurrentActiveModel(provider, sessionId)).model;
+    // B-1752: read the caller's own per-session store (see the GET route).
+    const model = (await providerModelsService.getCurrentActiveModel(
+      provider,
+      sessionId,
+      readAuthenticatedUserId(req),
+    )).model;
     assertSessionRequestFence(req, accessFence, false);
 
     res.json(createApiSuccessResponse({
@@ -2365,10 +2326,8 @@ router.delete(
 
 // ----------------- MCP routes -----------------
 // Two independent gates apply here (B-IDOR-MCP):
-//   - user scope   → touches the OPERATOR's shared config for every provider the
-//                    sharing policy does not isolate per user, and MCP entries
-//                    carry `env` / `headers` (bearer tokens). The elevated-role
-//                    check therefore covers ALL providers, not just codex.
+//   - user/local writes → assertMcpWriteAllowed: owner/admin unless the
+//                    provider's writer follows the caller into their own tree.
 //   - project/local→ resolve against a caller-supplied filesystem path, so they
 //                    go through resolveAuthorizedWorkspacePath, which pins them
 //                    to a registered project the caller may read/write.
@@ -2379,9 +2338,6 @@ router.get(
     const scope = parseMcpScope(req.query.scope);
     const userId = readAuthenticatedUserId(req);
 
-    if (!scope || scope === 'user') {
-      assertCredentialWriteAllowed(req, provider);
-    }
 
     const workspacePath = resolveAuthorizedWorkspacePath(
       req,
@@ -2476,11 +2432,8 @@ router.post(
     // Mirrors the service default (McpProvider.upsertServer: `input.scope ?? 'project'`).
     const scope = payload.scope ?? 'project';
     // B-345: 'local' too, not just 'user'. T-1177: the bar applies only when the
-    // provider is shared — on an isolated one the file is the caller's own.
+    // provider's writer does not follow the caller into their own tree.
     assertMcpWriteAllowed(req, scope, provider);
-    if (scope === 'user') {
-      assertCredentialWriteAllowed(req, provider);
-    }
 
     const workspacePath = resolveAuthorizedWorkspacePath(req, payload.workspacePath, 'write');
     assertWorkspacePathPresentForWrite(scope, workspacePath);
@@ -2508,11 +2461,9 @@ router.delete(
     // Mirrors the service default (McpProvider.removeServer: `input.scope ?? 'project'`).
     const scope = parseMcpScope(req.query.scope) ?? 'project';
     // B-345: removal is a write too — silently deleting another member's server
-    // is the same shared-file mutation as adding one (T-1177: on a shared provider).
+    // is the same shared-file mutation as adding one (T-1177: on a writer that
+    // does not follow the caller).
     assertMcpWriteAllowed(req, scope, provider);
-    if (scope === 'user') {
-      assertCredentialWriteAllowed(req, provider);
-    }
 
     const workspacePath = resolveAuthorizedWorkspacePath(
       req,

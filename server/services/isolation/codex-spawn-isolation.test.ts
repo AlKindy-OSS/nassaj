@@ -7,8 +7,8 @@
  * ~/.codex — sharing the owner's OpenAI auth.json (ToS violation) and exposing
  * other users' session transcripts via resumeThread. The fix routes the child env
  * through resolveProviderEnv(userId, 'codex', process.env), which sets CODEX_HOME
- * to ~/.nassaj-users/<userId>/.codex when codex is isolated and leaves the env
- * unchanged for anonymous/shared spawns.
+ * to ~/.nassaj-users/<userId>/.codex for every authenticated user (codex is
+ * always isolated, ADR-152 A1) and leaves the env unchanged for anonymous spawns.
  *
  * Unlike isolation.e2e.test.ts (which exercises resolveProviderEnv in isolation),
  * this drives queryCodex end-to-end with @openai/codex-sdk mocked at the module
@@ -107,9 +107,6 @@ mock.module('@openai/codex-sdk', { namedExports: { Codex: FakeCodex } });
 const { initializeDatabase, closeConnection, getConnection } = await import(
   '@/modules/database/index.js'
 );
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import(
-  '@/services/provider-sharing.js'
-);
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 // eslint-disable-next-line boundaries/no-unknown
 const { queryCodex } = await import('@/openai-codex.js');
@@ -144,17 +141,6 @@ after(() => {
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-/** Forces the codex sharing policy deterministically for a case. */
-function setCodexPolicy(state: 'isolated' | 'shared'): void {
-  _resetProviderSharingCache();
-  setProviderSharingConfig({
-    claude: 'isolated',
-    codex: state,
-    agy: 'shared',
-    cursor: 'shared',
-  });
-}
-
 /** Minimal ws stub: records sent frames and carries the spawner's userId. */
 function makeWs(userId: number | null): {
   userId: number | null;
@@ -179,7 +165,6 @@ async function spawnAndCapture(userId: number | null): Promise<CodexCtorOptions>
 
 describe('Codex spawn path — per-user credential isolation (B-136)', () => {
   it('constructs Codex WITH an env carrying the per-user CODEX_HOME when isolated', async () => {
-    setCodexPolicy('isolated');
     const opts = await spawnAndCapture(TEST_USER_A);
 
     // The load-bearing regression guard: `new Codex()` (bare) leaves opts undefined.
@@ -207,7 +192,6 @@ describe('Codex spawn path — per-user credential isolation (B-136)', () => {
   });
 
   it('gives two different users two different CODEX_HOME values (no cross-user leak)', async () => {
-    setCodexPolicy('isolated');
     const a = await spawnAndCapture(TEST_USER_A);
     const b = await spawnAndCapture(TEST_USER_B);
 
@@ -216,29 +200,17 @@ describe('Codex spawn path — per-user credential isolation (B-136)', () => {
     assert.notEqual(a?.env?.CODEX_HOME, b?.env?.CODEX_HOME);
   });
 
-  it('applies NO per-user CODEX_HOME for an anonymous (null userId) spawn', async () => {
-    setCodexPolicy('isolated');
-    const opts = await spawnAndCapture(null);
-
-    // Even anonymous spawns pass an explicit env, but it must be the base env
-    // unchanged: no isolation for system/anonymous/platform-mode runs.
-    assert.ok(opts && opts.env, 'anonymous spawn still passes an explicit env');
-    assert.equal(opts.env.CODEX_HOME, process.env.CODEX_HOME);
-    assert.ok(
-      opts.env.CODEX_HOME === undefined || !String(opts.env.CODEX_HOME).includes('.nassaj-users'),
-      'anonymous spawn must not point CODEX_HOME into a per-user tree',
-    );
+  it('refuses an anonymous (null userId) spawn and constructs no Codex (ADR-152 A1 §3.4)', async () => {
+    const before = codexConstructions.length;
+    await assert.rejects(queryCodex('ping', { cwd: sandboxCwd }, makeWs(null)), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
+    assert.equal(codexConstructions.length, before, 'no Codex child on the operator environment');
   });
 
-  it('honors the admin "shared" policy: an authenticated user gets the operator env', async () => {
-    setCodexPolicy('shared');
+  it('ADR-152 A1: no policy hands an authenticated user the operator CODEX_HOME', async () => {
     const opts = await spawnAndCapture(TEST_USER_A);
 
     assert.ok(opts && opts.env);
-    assert.equal(opts.env.CODEX_HOME, process.env.CODEX_HOME);
-    assert.ok(
-      opts.env.CODEX_HOME === undefined || !String(opts.env.CODEX_HOME).includes('.nassaj-users'),
-      'shared codex must not apply a per-user CODEX_HOME override',
-    );
+    assert.equal(opts.env.CODEX_HOME, userConfigDir(TEST_USER_A, '.codex'));
+    assert.notEqual(opts.env.CODEX_HOME, process.env.CODEX_HOME);
   });
 });

@@ -26,6 +26,8 @@ import {
 
 import type { HarnessVersionState } from '../../../../shared/harness-update.contract.js';
 
+import { activeNpmLockSource } from './npm-lock/npm-lock-source.js';
+import { npmLockCiArgv, stagingDir, targetPin } from './npm-lock/pins.js';
 import type { BinaryLayoutSpec } from './snapshot/binary-snapshot.js';
 import type { BinaryLayout, LinkMode } from './snapshot/manifest.js';
 import { CODEX_STORE, OPENCODE_STORE, type StoreSpec } from './snapshot/store-backup.js';
@@ -40,6 +42,8 @@ import {
 export type HarnessInstallMethod =
   | 'native-self-update'
   | 'npm-prefix'
+  /** T-2086 S4: `npm ci` of a committed reviewed lockfile into versioned dirs (dsh). */
+  | 'npm-lock'
   | 'none';
 
 export type HarnessChecksumSource = 'opencode-github' | 'npm-registry' | 'none';
@@ -69,6 +73,11 @@ export interface HarnessUpdateArgv {
 export type HarnessLatestProbe =
   | { kind: 'npm'; pkg: string }
   | { kind: 'github-release'; url: string }
+  /**
+   * T-2086 S4 (npm-lock): the target is the last REVIEWED pin, never npm
+   * `latest`; `publishedPkg` names the npm package for information only.
+   */
+  | { kind: 'reviewed-pin'; publishedPkg: string }
   | null;
 
 /** Fixed GitHub latest-release endpoint for opencode (repo moved sst → anomalyco). */
@@ -250,6 +259,28 @@ const QWEN_NPM_PREFIX = path.join(home(), '.local');
  */
 export function npmPrefixInstallArgs(prefix: string, spec: string): string[] {
   return ['install', '--global', '--prefix', prefix, spec];
+}
+
+/**
+ * The dsh update argv (documentation of the one install path; the npm-lock
+ * flow runs this same `npmLockCiArgv` with a per-job mkdtemp cache): `npm ci`
+ * of the reviewed target lock staged in `versions/.staging-<pin>`, never
+ * `install`, never a spec, never `@latest`.
+ */
+function dshUpdateArgv(): HarnessUpdateArgv {
+  const source = activeNpmLockSource();
+  const pin = targetPin(source);
+  const argv = npmLockCiArgv(process.execPath, path.join(NPM_UPDATE_TMPDIR, 'nassaj-harness-install-<job>', 'cache'));
+  return { ...argv, cwd: stagingDir(source, home(), pin), env: { TMPDIR: NPM_UPDATE_TMPDIR } };
+}
+
+/** The reviewed npm-lock target pin (the `reviewed-pin` probe), or null when none. */
+export function reviewedPinTarget(): string | null {
+  try {
+    return targetPin(activeNpmLockSource());
+  } catch {
+    return null;
+  }
 }
 
 /** The canonical descriptor table, keyed by canonical harness id. */
@@ -435,6 +466,41 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     // kimi data (~/.kimi-code, per-user KIMI_CODE_HOME) is not snapshotted.
     restoreCompatible: null,
   },
+  dsh: {
+    id: 'dsh',
+    aliases: [],
+    // T-2086 S4 (ADR-224): the reviewed pin's committed lockfile, `npm ci` into
+    // ~/.local/share/dsh/versions/<v>, full-tree manifest checked, launcher
+    // ~/.local/bin/dsh switched atomically; two versions kept for rollback.
+    // Bump checklist (T-2089, ADR-225; enforced by dsh-policy-plugin.test.ts): on the new
+    // version run services/permission-parity/__tests__/dsh-policy-live.test.ts against a fresh
+    // /var/tmp install, re-record fixtures/dsh-policy-tools.json, re-review the policy plugin's
+    // listener list and tool map, and rerun the stage-0 fd-inheritance probe.
+    // T-2091: the owner's update after the first install runs the staged pipeline
+    // (npm-lock/dsh-update-pipeline.js): exact newest version on the installed channel,
+    // offline contract suite (npm-lock/dsh-contract-run.js), atomic switch or "held: <code>";
+    // npm-lock/dsh-pipeline.real.test.ts is part of the checklist.
+    installMethod: 'npm-lock',
+    state: 'updatable',
+    updatable: true,
+    // Same posture as claude (owner 2026-11-07): the owner's button only.
+    manualOnly: true,
+    reason: null,
+    runProviders: ['dsh'],
+    pinKey: null,
+    checksumSource: 'none',
+    // S0 measured: the dsh code has no self-updater, so no knob is needed and
+    // nothing can replace the tree outside Nassaj (verified, not a guess).
+    disableAutoUpdaterEnv: null,
+    autoUpdaterDisableVerified: true,
+    resolveBinary: fromRegistry('dsh'),
+    versionArgs: ['--version'],
+    updateArgv: () => dshUpdateArgv(),
+    latestProbe: { kind: 'reviewed-pin', publishedPkg: '@deepseek-ai/dsh' },
+    // The previous version stays on disk as the rollback target (npm-lock/).
+    snapshot: null,
+    restoreCompatible: null,
+  },
   glm: {
     id: 'glm',
     aliases: [],
@@ -456,6 +522,8 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     snapshot: null,
     restoreCompatible: null,
   },
+  // The hosted DeepSeek API runtime (provider `deepseek`, still live: models,
+  // sessions, engine routes). It has no CLI; the dsh body is the row above.
   deepseek: {
     id: 'deepseek',
     aliases: [],

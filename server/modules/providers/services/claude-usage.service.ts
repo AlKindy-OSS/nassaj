@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type {
   ClaudeExtraUsage,
@@ -512,14 +512,12 @@ class ClaudeUsageService {
    * Resolves the credentials file path for the requesting user through the
    * central isolation seam (resolveProviderEnv), so usage is fetched against
    * the SAME credential a claude spawn for this user would use. An isolated
-   * user resolves to their own CLAUDE_CONFIG_DIR; shared/anonymous resolves to
-   * the operator env (its CLAUDE_CONFIG_DIR or ~/.claude).
+   * user resolves to their own CLAUDE_CONFIG_DIR (or a grantor's); a caller with
+   * no member is refused (ADR-152 A1 §3.4), never given the operator's ~/.claude.
    */
   private resolveCredentialsPath(userId: string | number | null): string {
     const env = resolveProviderEnv(userId, 'claude', process.env);
-    const configDir = readOptionalString(env.CLAUDE_CONFIG_DIR)
-      ?? path.join(os.homedir(), '.claude');
-    return path.join(configDir, '.credentials.json');
+    return path.join(resolvedKnob(env, 'CLAUDE_CONFIG_DIR'), '.credentials.json');
   }
 
   /**

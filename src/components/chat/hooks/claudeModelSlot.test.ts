@@ -20,10 +20,9 @@ import {
   CLAUDE_FALLBACK_MODELS,
   GLM_FALLBACK_MODELS,
   PROVIDER_FALLBACK_MODELS,
-  sanitizeStoredModel,
 } from '../../../constants/providerModelFallbacks';
 
-import { claudeSlotCatalogProvider } from './claudeModelSlot';
+import { claudeSlotCatalogProvider, sanitizeClaudeSlotModel } from './claudeModelSlot';
 import { pickStoredOrCurrent } from './normalizeProviderModel';
 
 const GLM_WIRE_MODEL = 'glm-5.2';
@@ -39,24 +38,44 @@ describe('claudeSlotCatalogProvider', () => {
   });
 });
 
+describe('local engine (ADR-227)', () => {
+  const LOCAL_MODEL = 'nassaj_local_0123456789abcdef0123456789abcdef/qwen3:8b';
+
+  it('leaves the slot to no catalog on the local engine', () => {
+    assert.equal(claudeSlotCatalogProvider('local'), null);
+  });
+
+  it('keeps a local model id when the local engine is stamped', () => {
+    assert.equal(sanitizeClaudeSlotModel('local', LOCAL_MODEL), LOCAL_MODEL);
+  });
+
+  it('falls back to the Claude default for a non-local id on the local engine', () => {
+    assert.equal(sanitizeClaudeSlotModel('local', GLM_WIRE_MODEL), CLAUDE_FALLBACK_MODELS.DEFAULT);
+  });
+
+  it('drops a local model id once the local engine is cleared', () => {
+    assert.equal(sanitizeClaudeSlotModel(null, LOCAL_MODEL), CLAUDE_FALLBACK_MODELS.DEFAULT);
+  });
+});
+
 describe('boot read of claude-model (sanitizeStoredModel)', () => {
   it('keeps the vendor model id when the stamped engine governs the slot', () => {
     assert.equal(
-      sanitizeStoredModel(claudeSlotCatalogProvider('glm'), GLM_WIRE_MODEL),
+      sanitizeClaudeSlotModel('glm', GLM_WIRE_MODEL),
       GLM_WIRE_MODEL,
     );
   });
 
   it('normalizes a leftover vendor id back to Claude once the engine is cleared', () => {
     assert.equal(
-      sanitizeStoredModel(claudeSlotCatalogProvider(null), GLM_WIRE_MODEL),
+      sanitizeClaudeSlotModel(null, GLM_WIRE_MODEL),
       CLAUDE_FALLBACK_MODELS.DEFAULT,
     );
   });
 
   it('normalizes a leftover Claude id to the engine default when a session is stamped', () => {
     assert.equal(
-      sanitizeStoredModel(claudeSlotCatalogProvider('glm'), CLAUDE_FALLBACK_MODELS.DEFAULT),
+      sanitizeClaudeSlotModel('glm', CLAUDE_FALLBACK_MODELS.DEFAULT),
       GLM_FALLBACK_MODELS.DEFAULT,
     );
   });
@@ -67,7 +86,7 @@ describe('reconcile of claude-model against the governing catalog', () => {
     pickStoredOrCurrent(
       stored,
       current,
-      PROVIDER_FALLBACK_MODELS[claudeSlotCatalogProvider(engine)],
+      PROVIDER_FALLBACK_MODELS[claudeSlotCatalogProvider(engine) ?? 'claude'],
     );
 
   it('leaves the just-picked engine model untouched (the exact B-235 path)', () => {

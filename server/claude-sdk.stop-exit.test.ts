@@ -59,6 +59,13 @@ mock.module('./services/isolation/resolve-claude-run-profile.js', {
   },
 });
 
+// ADR-152 A1 §3.4: a chat run needs a signed-in member, so the socket carries
+// member 1 and the schema it is recorded against must exist.
+{
+  const memberDb = await import('@/modules/database/index.js');
+  await memberDb.initializeDatabase();
+  if (!memberDb.userDb.getUserById(1)) memberDb.userDb.createUser('member-1', 'hash', 'user');
+}
 const sdk = (await import('./claude-sdk.js')) as unknown as {
   queryClaudeSDK: (command: string, options: Record<string, unknown>, ws: unknown) => Promise<unknown>;
   abortClaudeSDKSession: (sessionId: string, rawWs?: unknown) => Promise<{ aborted: boolean; reason: string }>;
@@ -76,7 +83,7 @@ const nextSid = () => `00001399-${String(++sidCounter).padStart(4, '0')}-4000-80
 
 function makeWs() {
   const sent: Payload[] = [];
-  return { sent, send: (p: Payload) => { sent.push(p); }, userId: null, ws: { readyState: 1 } };
+  return { sent, send: (p: Payload) => { sent.push(p); }, userId: 1, ws: { readyState: 1 } };
 }
 
 function replayFromStart(sessionId: string): Payload[] {

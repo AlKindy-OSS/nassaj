@@ -30,11 +30,10 @@ import {
 } from '@/modules/execution-permissions/index.js';
 import { isSessionAccessibleByUser } from '@/modules/providers/services/sessions.service.js';
 import { isSessionId } from '@/shared/session-id.js';
+import { isVerifiedActorKind } from '@/shared/verified-actor-kinds.js';
 
 // eslint-disable-next-line boundaries/no-unknown -- shared HTTP rate limiter, as in connectors.
 import { createRateLimiter } from '../../middleware/rate-limit.js';
-
-const VERIFIED_ACTOR_KINDS = new Set(['session', 'device_session']);
 
 export type DecisionOwnerNotice = Readonly<{ ownerUserId: number; sessionId: string; operationId: string }>;
 
@@ -95,7 +94,7 @@ type AccessLocals = { fenceAccess?: Access };
 /** POST gate: verified actor, readable session, writer; stores the access for the handler. */
 const requireWriterAccess = (req: Request, res: Response, next: NextFunction): void => {
   const kind = (req as AuthenticatedRequest).user?.authenticationKind;
-  if (typeof kind !== 'string' || !VERIFIED_ACTOR_KINDS.has(kind)) {
+  if (!isVerifiedActorKind(kind)) {
     res.status(403).json({ error: 'A verified user session is required', code: 'unverified_actor' });
     return;
   }

@@ -23,10 +23,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-
-import { isProviderIsolated } from '../provider-sharing.js';
 
 import { userConfigDir } from './provision-user-dirs.js';
 
@@ -169,28 +166,20 @@ async function hasSettingsSetupTokenOnly(claudeDir) {
 }
 
 /**
- * The Claude config dir this user's spawns actually read (B-1087). Mirrors
- * `resolveConfigDir` in claude-auth.provider.ts: under the 'isolated' policy it
- * is the user's own `~/.nassaj-users/<id>/.claude`; under 'shared' every spawn
- * (including the in-app `claude setup-token` terminal) runs on the operator's
- * dir, so the card must look there too or it contradicts a login that just
- * succeeded in front of the user.
+ * The Claude config dir this user's own spawns and login terminal read (B-1087):
+ * always the user's own `~/.nassaj-users/<id>/.claude`. Claude is always isolated
+ * (ADR-152 A1), so the card never reports the operator's account to a member.
  *
  * @param {string|number} userId authenticated user id
- * @param {boolean} isolated whether the Claude credential policy is 'isolated'
  * @returns {string} absolute config dir
  */
-export function resolveClaudeStatusDir(userId, isolated) {
-  if (isolated) {
-    return userConfigDir(userId, '.claude');
-  }
-  const operatorDir = nonEmptyString(process.env.CLAUDE_CONFIG_DIR);
-  return operatorDir ?? path.join(os.homedir(), '.claude');
+export function resolveClaudeStatusDir(userId) {
+  return userConfigDir(userId, '.claude');
 }
 
 /**
- * Reports whether `userId` has registered a Claude credential in the config dir
- * their spawns resolve to (isolated dir, or the operator's under 'shared').
+ * Reports whether `userId` has registered a Claude credential in their own
+ * config dir.
  *
  * B-1260: distinguishes a FULL link (`connected: true`) from a PARTIAL one
  * (`connected: false, incompleteLink: true`) — an inference-only setup-token, or
@@ -202,14 +191,12 @@ export function resolveClaudeStatusDir(userId, isolated) {
  * otherwise read "connected" while every turn fails with "Not logged in".
  *
  * @param {string|number} userId authenticated user id
- * @param {{ isolated?: boolean, verifyOauthLink?: () => Promise<boolean> }} [options]
- *   test seam for the sharing policy; live check that resolves false only when
- *   Anthropic refused the stored login
+ * @param {{ verifyOauthLink?: () => Promise<boolean> }} [options] live check that
+ *   resolves false only when Anthropic refused the stored login
  * @returns {Promise<{ connected: boolean, incompleteLink: boolean, provider: 'claude' }>}
  */
 export async function getClaudeConnectionStatus(userId, options = {}) {
-  const isolated = options.isolated ?? isProviderIsolated('claude');
-  const claudeDir = resolveClaudeStatusDir(userId, isolated);
+  const claudeDir = resolveClaudeStatusDir(userId);
 
   const fullApiKey = await hasSettingsCredential(claudeDir);
   const oauthQuality = await oauthLinkQuality(claudeDir);

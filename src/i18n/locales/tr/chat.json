@@ -148,7 +148,7 @@
     "ariaLabel": "Otomatik sistem mesajı"
   },
   "sessionNotResumable": {
-    "message": "Bu oturum sürdürülemedi — sağlayıcıda artık mevcut değil.",
+    "message": "Bu oturum sürdürülemedi — kodlama ajanında artık mevcut değil.",
     "startNew": "Yeni bir oturum başlat"
   },
   "tools": {
@@ -416,7 +416,7 @@
   },
   "providerSelection": {
     "title": "AI Asistanını Seç",
-    "description": "Yeni bir konuşma başlatmak için bir sağlayıcı seç",
+    "description": "Yeni bir konuşma başlatmak için bir kodlama ajanı seç",
     "selectModel": "Model Seç",
     "providerInfo": {
       "anthropic": "Anthropic tarafından",
@@ -428,11 +428,11 @@
       "codex": "Codex'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "antigravity": "Antigravity (agy) {{model}} ile kullanıma hazır. Mesajınızı aşağıya yazın.",
       "opencode": "OpenCode'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
-      "default": "Başlamak için yukarıdan bir sağlayıcı seç",
+      "default": "Başlamak için yukarıdan bir kodlama ajanı seç",
       "kimi": "Kimi'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "deepseek": "DeepSeek'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "glm": "GLM'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
-      "claudeEngine": "Hazır: Claude motoru {{provider}} üzerinde {{model}} ile çalışıyor. Mesajını aşağıya yazmaya başla."
+      "claudeEngine": "Hazır: Claude kodlama ajanı {{provider}} üzerinde {{model}} ile çalışıyor. Mesajını aşağıya yazmaya başla."
     },
     "antigravity": {
       "activeModel": "Etkin model",
@@ -445,10 +445,10 @@
       "button": "Modelleri ve kimlik doğrulama durumunu yenile",
       "refreshing": "Yenileniyor…"
     },
-    "providerUnavailable": "Sağlayıcı mevcut değil",
+    "providerUnavailable": "Kodlama ajanı mevcut değil",
     "signIn": "Giriş yap",
     "addApiKey": "Etkinleştirmek için {{provider}} API anahtarı ekle",
-    "engineOnVendor": "{{provider}} üzerinde Claude motoru"
+    "engineOnVendor": "{{provider}} üzerinde Claude ajanı"
   },
   "session": {
     "continue": {
@@ -598,7 +598,7 @@
     "subagentsSection": "Alt ajanlar",
     "turns_one": "{{count}} tur",
     "turns_other": "{{count}} tur",
-    "harnessLine": "Harness: {{harness}}",
+    "harnessLine": "Kodlama ajanı: {{harness}}",
     "olderModels_one": "{{count}} önceki model",
     "olderModels_other": "{{count}} önceki model"
   },

@@ -179,6 +179,23 @@ export const DEEPSEEK_FALLBACK_MODELS: ProviderModelsDefinition = {
   DEFAULT: 'deepseek-v4-pro',
 };
 
+/**
+ * DeepSeek Harness (T-2086, ADR-224). The server has no models facet for dsh
+ * yet, so this is the catalog itself, not a fallback. The ids are the ones dsh
+ * 0.2.2-rc.1 offers under its `deepseek-official` group (recorded in
+ * server/modules/providers/list/dsh/__tests__/fixtures/dsh-acp-recording.json);
+ * the server sends `["deepseek-official", <id>]` and ignores an id dsh does
+ * not offer.
+ */
+export const DSH_FALLBACK_MODELS: ProviderModelsDefinition = {
+  OPTIONS: [
+    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', description: 'DeepSeek Harness · deepseek-v4-flash' },
+    { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', description: 'DeepSeek Harness · deepseek-flash' },
+    { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: 'DeepSeek Harness · deepseek-v4-pro' },
+  ],
+  DEFAULT: 'deepseek-v4-flash',
+};
+
 export const GLM_FALLBACK_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
     { value: 'glm-5.2', label: 'GLM 5.2', description: 'Zhipu / Z.ai · glm-5.2' },
@@ -214,6 +231,7 @@ export const PROVIDER_FALLBACK_MODELS: Record<FallbackCatalogProvider, ProviderM
   deepseek: DEEPSEEK_FALLBACK_MODELS,
   glm: GLM_FALLBACK_MODELS,
   sakana: PLACEHOLDER_FALLBACK_MODELS,
+  dsh: DSH_FALLBACK_MODELS,
 };
 
 /**
@@ -230,6 +248,7 @@ export const FALLBACK_DEFAULT_MODEL: Record<FallbackCatalogProvider, string> = {
   deepseek: DEEPSEEK_FALLBACK_MODELS.DEFAULT,
   glm: GLM_FALLBACK_MODELS.DEFAULT,
   sakana: PLACEHOLDER_FALLBACK_MODELS.DEFAULT,
+  dsh: DSH_FALLBACK_MODELS.DEFAULT,
 };
 
 /**

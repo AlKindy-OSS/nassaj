@@ -68,7 +68,7 @@ test('live frames carry immutable coordination and resumed turn is persisted onc
     },
     spawnCursor: async () => {}, queryCodex: async () => {},
     spawnAntigravity: async () => {}, spawnKimi: async () => {},
-    spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+    spawnGlm: async () => {}, spawnOpenCode: async () => {},
     getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],
   } as never;
 
@@ -92,7 +92,7 @@ test('ambiguous started and fingerprint mismatch are rejected before launcher', 
     queryClaudeSDK: async () => { launches += 1; },
     spawnCursor: async () => {}, queryCodex: async () => {},
     spawnAntigravity: async () => {}, spawnKimi: async () => {},
-    spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+    spawnGlm: async () => {}, spawnOpenCode: async () => {},
     getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],
   } as never;
   for (const action of ['ambiguous_started', 'fingerprint_mismatch'] as const) {
@@ -123,7 +123,7 @@ test('B-726/B-727: legacy coordination sidecar failure cannot swallow terminal f
     },
     spawnCursor: async () => {}, queryCodex: async () => {},
     spawnAntigravity: async () => {}, spawnKimi: async () => {},
-    spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+    spawnGlm: async () => {}, spawnOpenCode: async () => {},
     getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],
   } as never;
 
@@ -154,7 +154,7 @@ test('a conflicting explicit turn identity cannot overwrite another ingress rece
     },
     spawnCursor: async () => {}, queryCodex: async () => {},
     spawnAntigravity: async () => {}, spawnKimi: async () => {},
-    spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+    spawnGlm: async () => {}, spawnOpenCode: async () => {},
     getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],
   } as never;
 
@@ -192,7 +192,7 @@ test('normalized Claude frames cannot grant acceptance, including synthetic auth
       queryClaudeSDK: async (_command: string, _options: unknown, runWriter: WebSocketWriter) => { runWriter.send(frame as never); },
       spawnCursor: async () => {}, queryCodex: async () => {},
       spawnAntigravity: async () => {}, spawnKimi: async () => {},
-      spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+      spawnGlm: async () => {}, spawnOpenCode: async () => {},
       getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],
     } as never;
     try {

@@ -1,0 +1,10 @@
+{
+ "zai": {"id": "zai", "name": "Z.AI", "models": {
+  "glm-4.5v": {"id": "glm-4.5v", "name": "GLM-4.5V", "limit": {"context": 64000, "output": 16384}},
+  "glm-5.3": {"id": "glm-5.3", "name": "GLM-5.3", "limit": {"context": 1000000, "output": 131072}}
+ }},
+ "opencode": {"id": "opencode", "name": "OpenCode", "models": {
+  "big-pickle": {"id": "big-pickle", "name": "Big Pickle", "limit": {"context": 200000, "input": 160000, "output": 32000}},
+  "glm-5.3-flash-free": {"id": "glm-5.3-flash-free", "name": "GLM-5.3-Flash Free", "limit": {"context": 200000, "output": 32000}}
+ }}
+}

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  readCredentialNotLinked,
+  type CredentialNotLinkedInfo,
+} from '../../credential-link/credentialNotLinked';
+
 const MESSAGE_FORK_TIMEOUT_MS = 30_000;
 
 type SendResult = { ok: boolean; reason?: string } | void;
@@ -10,6 +15,7 @@ type MessageForkFrame = {
   forkedSessionId?: string;
   code?: string;
   message?: string;
+  credential?: unknown;
 };
 
 type ForkRequest = {
@@ -25,7 +31,8 @@ type UseMessageForkArgs = {
   latestMessage: MessageForkFrame | null;
   sendMessage: (message: unknown) => SendResult;
   onForked: (sessionId: string) => void;
-  onError: (code: string, message?: string) => void;
+  /** `credential` only for CREDENTIAL_NOT_LINKED (T-2083): which account is missing. */
+  onError: (code: string, message?: string, credential?: CredentialNotLinkedInfo) => void;
 };
 
 function createRequestId(): string {
@@ -143,6 +150,11 @@ export function useMessageFork({
     }
     const missingResult = latestMessage.type === 'message-forked'
       || (errorCode === 'registration_failed' && !(typeof forkedSessionId === 'string' && forkedSessionId.trim()));
+    const credential = missingResult ? null : readCredentialNotLinked(latestMessage);
+    if (credential) {
+      onErrorRef.current(errorCode, errorMessage, credential);
+      return;
+    }
     onErrorRef.current(missingResult ? 'outcome_unknown' : errorCode, errorMessage);
   }, [clearPending, latestMessage]);
 

@@ -26,7 +26,15 @@ export type ProviderAuthStatus = {
    * `daysLeft: 0` تعني «ينتهي اليوم» لا «انتهى». لا يُرسَل مسار مفتاح API.
    */
   linkExpiry?: { expiresAt: string; daysLeft: number } | null;
+  /**
+   * ADR-152 A1 §3.9 (T-2083): set when this member runs on a credential another
+   * member granted them; `email` is then null. Absent/null = the member's own.
+   */
+  grantedBy?: ProviderGrantor | null;
 };
+
+/** The member whose credential a grantee runs on. Never carries an email. */
+export type ProviderGrantor = { userId: number; username: string };
 
 export type ProviderAuthStatusMap = Record<ActiveBodyProvider, ProviderAuthStatus>;
 
@@ -55,6 +63,7 @@ export const CLI_PROVIDERS: ActiveBodyProvider[] = filterDisabledProviders([
   'opencode',
   'deepseek',
   'glm',
+  'dsh',
 ]);
 
 export const PROVIDER_AUTH_STATUS_ENDPOINTS: Record<ActiveBodyProvider, string> = {
@@ -67,6 +76,10 @@ export const PROVIDER_AUTH_STATUS_ENDPOINTS: Record<ActiveBodyProvider, string> 
   // sakana: union-only placeholder (absent from CLI_PROVIDERS). Endpoint kept on
   // the same shape for when a real backend lands.
   sakana: '/api/providers/sakana/auth/status',
+  // T-2086/ADR-224: dsh runs on the member's DeepSeek key slot (the server's
+  // credential gate checks provider 'deepseek'), and dsh has no auth facet of
+  // its own, so its "connected" state IS the deepseek key status.
+  dsh: '/api/providers/deepseek/auth/status',
 };
 
 // fail-open: installed defaults to true so providers remain visible before the
@@ -77,6 +90,7 @@ const initialStatus = (loading: boolean): ProviderAuthStatus => ({
   email: null,
   method: null,
   error: null,
+  grantedBy: null,
   loading,
   checkFailed: false,
 });
@@ -90,6 +104,7 @@ export const createInitialProviderAuthStatusMap = (loading = true): ProviderAuth
   // CLI_PROVIDERS) — start in the loading state until their probe returns.
   deepseek: initialStatus(loading),
   glm: initialStatus(loading),
+  dsh: initialStatus(loading),
   // sakana is a union-only placeholder, never probed by CLI_PROVIDERS — start
   // not-loading and not-installed so its UI does not spin forever.
   sakana: { authenticated: false, installed: false, email: null, method: null, error: null, loading: false, checkFailed: false },

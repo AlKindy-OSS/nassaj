@@ -39,7 +39,6 @@ import {
   initializeDatabase,
   userDb,
 } from '@/modules/database/index.js';
-import { setProviderSharingConfig } from '@/services/provider-sharing.js';
 import { provisionUserDirs, invalidateProvisioned } from '@/services/isolation/provision-user-dirs.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -129,7 +128,6 @@ before(async () => {
   ownerUser = { ...(userDb.createUser('gov_pref_owner', 'hash', 'user') as TestUser), role: 'owner' };
   adminUser = { ...(userDb.createUser('gov_pref_admin', 'hash', 'user') as TestUser), role: 'admin' };
 
-  setProviderSharingConfig({ codex: 'isolated', opencode: 'isolated', claude: 'isolated', agy: 'isolated' });
   for (const user of [memberUser, ownerUser, adminUser]) {
     invalidateProvisioned(user.id);
     provisionUserDirs(user.id);

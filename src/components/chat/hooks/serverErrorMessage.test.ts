@@ -178,7 +178,17 @@ describe('B-928 shared row and banner classification', () => {
 
 describe('B-1707 an engine-side auto-rejection is not an unclassified error', () => {
   it.each([['ar', ar], ['en', en]] as const)('maps the OpenCode engine-side codes in %s', (_name, locale) => {
-    for (const code of ['permission_auto_rejected', 'opencode_cli_args_rejected'] as const) {
+    for (const code of ['permission_auto_rejected', 'opencode_cli_args_rejected',
+      'permission_denied_by_claude_rule',
+      'permission_requires_approval',
+      'permission_rule_unsupported',
+      'PERMISSION_EFFECTIVE_POLICY_REQUIRED',
+      'opencode_parity_rules_invalid',
+      'opencode_parity_unavailable',
+      'opencode_parity_not_loaded',
+      'opencode_parity_selftest_failed',
+      'opencode_parity_selftest_unavailable',
+    ] as const) {
       const text = locale.serverError[code];
       expect(typeof text).toBe('string');
       expect(resolveServerErrorMessage({ kind: 'error', code } as never, translate(locale)))

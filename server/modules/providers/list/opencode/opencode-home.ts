@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { userDb } from '@/modules/database/index.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import { readOptionalString } from '@/shared/utils.js';
 
 /**
@@ -45,22 +46,16 @@ export function operatorOpenCodeDataHome(): string {
 }
 
 /**
- * Resolves one user's effective opencode data dir through the central resolver.
- * When opencode is isolated this is ~/.nassaj-users/<userId>/.local/share/opencode;
- * when opencode is shared (admin policy) or the id is anonymous/null,
- * resolveProviderEnv returns the base env with no XDG_DATA_HOME override and this
- * falls back to the operator dir — i.e. the exact pre-isolation behavior.
+ * Resolves one user's effective opencode data dir through the central resolver:
+ * ~/.nassaj-users/<userId>/.local/share/opencode (or a grant home). A caller with
+ * no member is refused (ADR-152 A1 §3.4), never given the operator dir.
  */
 export function resolveOpenCodeDataHomeForUser(
   userId: string | number | null,
   options: { honorGrants?: boolean } = {},
 ): string {
   const env = resolveProviderEnv(userId, 'opencode', process.env, 'chat', options);
-  const xdgDataHome = readOptionalString(env.XDG_DATA_HOME);
-  if (xdgDataHome) {
-    return path.join(xdgDataHome, OPENCODE_DATA_SUBDIR);
-  }
-  return operatorOpenCodeDataHome();
+  return path.join(resolvedKnob(env, 'XDG_DATA_HOME'), OPENCODE_DATA_SUBDIR);
 }
 
 /**

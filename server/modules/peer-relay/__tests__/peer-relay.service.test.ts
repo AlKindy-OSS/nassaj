@@ -25,6 +25,7 @@ before(async () => { world = await createPeerWorld(); });
 after(async () => { await world.close(); });
 beforeEach(() => {
   getConnection().prepare('DELETE FROM peer_messages').run();
+  getConnection().prepare('DELETE FROM peer_holds').run();
   frames = [];
   kicks = 0;
   resetPeerRelayForTests({
@@ -66,13 +67,20 @@ test('same user, same mode ⇒ a durable queued row with a CSPRNG ref, hashed bo
   assert.equal(frames[0]!.frame.message.ref, undefined, 'the proof anchor never leaves the server');
 });
 
-test('test 10: a different user is refused with the explicit S1 text (row kept, never delivered)', () => {
+test('test 10 (P2a-min): a different user in the same mode is HELD for that owner (no row, never queued)', () => {
   const outcome = send({ targetSessionId: world.c });
+  assert.equal(outcome.status, 'held');
+  assert.match(outcome.text, /^SUCCESS \(not an error\): nassaj held this message/u);
+  assert.equal(peerMessagesDb.get(outcome.id!), undefined, 'a hold is not a peer_messages row');
+  assert.equal((getConnection().prepare('SELECT COUNT(*) AS n FROM peer_messages').get() as { n: number }).n, 0);
+  assert.equal(kicks, 0);
+});
+
+test('test 10: a different user in another mode stays refused with the explicit S1 text', () => {
+  const outcome = send({ run: run(world.alice, 'default'), targetSessionId: world.c });
   assert.equal(outcome.status, 'refused');
   assert.ok(outcome.text.includes(S1_REFUSAL_TEXT), outcome.text);
-  assert.equal(peerMessagesDb.get(outcome.id!)!.state, 'refused');
-  assert.equal(peerMessagesDb.get(outcome.id!)!.cause, 'cross_user');
-  assert.equal(kicks, 0);
+  assert.equal(peerMessagesDb.get(outcome.id!)!.cause, 'mode_mismatch');
 });
 
 test('test 10: a mode mismatch for the same user is refused with the explicit S1 text', () => {
@@ -144,13 +152,14 @@ test('test 14: during a drain the intake still queues with its normal text (no r
 });
 
 test('qa م-4: refused rows reach the sender only and are capped at 20/h per sender session', () => {
-  const first = send({ targetSessionId: world.c });
+  const refusedSend = () => send({ run: run(world.alice, 'default'), targetSessionId: world.c });
+  const first = refusedSend();
   assert.equal(first.status, 'refused');
   assert.deepEqual(frames.map((f) => f.sessionId), [world.a], 'never published to the target');
-  for (let i = 0; i < 19; i++) send({ targetSessionId: world.c });
+  for (let i = 0; i < 19; i++) refusedSend();
   const count = () => (getConnection().prepare("SELECT COUNT(*) AS n FROM peer_messages WHERE state = 'refused'").get() as { n: number }).n;
   assert.equal(count(), 20);
-  const capped = send({ targetSessionId: world.c });
+  const capped = refusedSend();
   assert.equal(capped.status, 'refused');
   assert.equal(capped.id, null);
   assert.equal(count(), 20, 'beyond the cap a refusal leaves no row');

@@ -13,6 +13,7 @@ import { createNormalizedMessage, stampCoordinatorId } from './shared/utils.js';
 import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
@@ -206,7 +207,7 @@ async function spawnCursor(command, options = {}, ws) {
       try {
         cursorProcess = spawnFunction(cursorLaunch.cmd, cursorLaunch.args, {
           cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'],
-          env: resolveProviderEnv(ws?.userId ?? null, 'cursor', { ...process.env }),
+          env: resolveProviderEnv(assertModelRunActor(ws?.userId), 'cursor', { ...process.env }),
         });
       } catch (error) {
         releaseHarnessLaunch();

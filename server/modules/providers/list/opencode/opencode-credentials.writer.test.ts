@@ -12,12 +12,30 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, beforeEach, test, mock } from 'node:test';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-cred-writer-'));
 const ORIGINAL_XDG = process.env.XDG_DATA_HOME;
 process.env.XDG_DATA_HOME = sandbox;
 
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const { OpenCodeCredentialsWriter } = await import('./opencode-credentials.writer.js');
 
 const authPath = path.join(sandbox, 'opencode', 'auth.json');
@@ -48,10 +66,10 @@ test('capability advertises native_file + the internal targets (incl. glm)', () 
 });
 
 test('setApiKey writes {type:api,key} for the default (anthropic) target', async () => {
-  const result = await writer.setApiKey(null, KEY);
+  const result = await writer.setApiKey(MEMBER, KEY);
   assert.deepEqual(result, { provider: 'opencode', configured: true });
   assert.deepEqual(readAuth().anthropic, { type: 'api', key: KEY });
-  assert.equal(await writer.isConfigured(null), true);
+  assert.equal(await writer.isConfigured(MEMBER), true);
   // File is 0600 (owner-only).
   assert.equal(fs.statSync(authPath).mode & 0o777, 0o600);
 });
@@ -63,7 +81,7 @@ test('setApiKey merges: other providers in auth.json are preserved untouched', a
     anthropic: { type: 'api', key: 'old-anthropic' },
   }));
 
-  await writer.setApiKey(null, KEY, 'openrouter');
+  await writer.setApiKey(MEMBER, KEY, 'openrouter');
   const auth = readAuth();
   // The new target is added, the pre-existing entries are byte-for-byte intact.
   assert.deepEqual(auth.openrouter, { type: 'api', key: KEY });
@@ -73,13 +91,13 @@ test('setApiKey merges: other providers in auth.json are preserved untouched', a
 
 test('setApiKey writes a glm entry as {type:api,key} into the same auth.json (GL-1)', async () => {
   const GLM_KEY = 'zai-glm-secret-DO-NOT-LEAK';
-  const result = await writer.setApiKey(null, GLM_KEY, 'glm');
+  const result = await writer.setApiKey(MEMBER, GLM_KEY, 'glm');
   assert.deepEqual(result, { provider: 'opencode', configured: true });
   // The glm entry uses opencode's native {type:'api',key} shape under the
   // provider id 'glm' — deliberately NOT 'anthropic' (would collide).
   assert.deepEqual(readAuth().glm, { type: 'api', key: GLM_KEY });
   assert.equal('anthropic' in readAuth(), false, 'glm never leaks into the anthropic id');
-  assert.equal(await writer.isConfigured(null, 'glm'), true);
+  assert.equal(await writer.isConfigured(MEMBER, 'glm'), true);
   // Same isolated, cage-covered file — 0600.
   assert.equal(fs.statSync(authPath).mode & 0o777, 0o600);
 });
@@ -92,7 +110,7 @@ test('glm merges without disturbing the existing anthropic/openai/openrouter tar
     openrouter: { type: 'api', key: 'existing-openrouter-key' },
   }));
 
-  await writer.setApiKey(null, 'glm-key-value', 'glm');
+  await writer.setApiKey(MEMBER, 'glm-key-value', 'glm');
   const auth = readAuth();
   // New glm entry added...
   assert.deepEqual(auth.glm, { type: 'api', key: 'glm-key-value' });
@@ -103,36 +121,36 @@ test('glm merges without disturbing the existing anthropic/openai/openrouter tar
 
   // Deleting glm removes only glm, leaving anthropic (regression guard for
   // "keep the existing anthropic target intact").
-  await writer.deleteApiKey(null, 'glm');
+  await writer.deleteApiKey(MEMBER, 'glm');
   const after = readAuth();
   assert.equal('glm' in after, false, 'glm target removed');
   assert.deepEqual(after.anthropic, { type: 'api', key: 'builtin-anthropic-key' });
 });
 
 test('deleteApiKey removes only the requested target, leaving the rest', async () => {
-  await writer.setApiKey(null, KEY, 'anthropic');
-  await writer.setApiKey(null, 'other-key', 'openai');
+  await writer.setApiKey(MEMBER, KEY, 'anthropic');
+  await writer.setApiKey(MEMBER, 'other-key', 'openai');
 
-  const result = await writer.deleteApiKey(null, 'anthropic');
+  const result = await writer.deleteApiKey(MEMBER, 'anthropic');
   assert.deepEqual(result, { provider: 'opencode', configured: false });
   const auth = readAuth();
   assert.equal('anthropic' in auth, false, 'anthropic target removed');
   assert.deepEqual(auth.openai, { type: 'api', key: 'other-key' }, 'openai target preserved');
   // Idempotent: deleting again is a no-op.
-  await writer.deleteApiKey(null, 'anthropic');
-  assert.equal(await writer.isConfigured(null, 'anthropic'), false);
+  await writer.deleteApiKey(MEMBER, 'anthropic');
+  assert.equal(await writer.isConfigured(MEMBER, 'anthropic'), false);
 });
 
 test('an unsupported target is rejected with 400 INVALID_CREDENTIAL_TARGET', async () => {
   await assert.rejects(
-    () => writer.setApiKey(null, KEY, 'bogus'),
+    () => writer.setApiKey(MEMBER, KEY, 'bogus'),
     (err: unknown) => (err as { code?: string }).code === 'INVALID_CREDENTIAL_TARGET',
   );
 });
 
 test('an empty key is rejected with 400 INVALID_API_KEY', async () => {
   await assert.rejects(
-    () => writer.setApiKey(null, '   '),
+    () => writer.setApiKey(MEMBER, '   '),
     (err: unknown) => (err as { code?: string }).code === 'INVALID_API_KEY',
   );
 });
@@ -140,9 +158,9 @@ test('an empty key is rejected with 400 INVALID_API_KEY', async () => {
 test('a corrupt auth.json degrades to not-configured instead of throwing', async () => {
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
   fs.writeFileSync(authPath, '{ this is not json');
-  assert.equal(await writer.isConfigured(null), false);
+  assert.equal(await writer.isConfigured(MEMBER), false);
   // And a subsequent write recovers the file to valid JSON.
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   assert.deepEqual(readAuth().anthropic, { type: 'api', key: KEY });
 });
 
@@ -163,7 +181,7 @@ test('B-377: refuses to overwrite an oauth login with an API key', async () => {
   );
 
   await assert.rejects(
-    () => writer.setApiKey(null, KEY),
+    () => writer.setApiKey(MEMBER, KEY),
     (err: unknown) => (err as { code?: string }).code === 'CREDENTIAL_IS_LOGIN',
   );
   // The login is still there, byte for byte.
@@ -175,7 +193,7 @@ test('B-377: refuses to DELETE an oauth login too', async () => {
   fs.writeFileSync(authPath, JSON.stringify({ glm: { type: 'oauth', refresh: 'r' } }));
 
   await assert.rejects(
-    () => writer.deleteApiKey(null, 'glm'),
+    () => writer.deleteApiKey(MEMBER, 'glm'),
     (err: unknown) => (err as { code?: string }).code === 'CREDENTIAL_IS_LOGIN',
   );
   assert.deepEqual(readAuth().glm, { type: 'oauth', refresh: 'r' });
@@ -188,14 +206,14 @@ test('B-377: fail-closed by shape — an unknown auth kind is protected too', as
   fs.writeFileSync(authPath, JSON.stringify({ openai: { type: 'device_code', code: 'x' } }));
 
   await assert.rejects(
-    () => writer.setApiKey(null, KEY, 'openai'),
+    () => writer.setApiKey(MEMBER, KEY, 'openai'),
     (err: unknown) => (err as { code?: string }).code === 'CREDENTIAL_IS_LOGIN',
   );
 });
 
 test('B-377: replacing an existing API key still works — the intended path', async () => {
-  await writer.setApiKey(null, 'sk-oc-first');
-  await writer.setApiKey(null, 'sk-oc-second');
+  await writer.setApiKey(MEMBER, 'sk-oc-first');
+  await writer.setApiKey(MEMBER, 'sk-oc-second');
   assert.deepEqual(readAuth().anthropic, { type: 'api', key: 'sk-oc-second' });
 });
 
@@ -204,6 +222,6 @@ test('B-377: an entry with no `type` is treated as ours (legacy records)', async
   // unwritable — the guard keys on a type that is present AND not 'api'.
   fs.mkdirSync(path.dirname(authPath), { recursive: true });
   fs.writeFileSync(authPath, JSON.stringify({ anthropic: { key: 'legacy' } }));
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   assert.deepEqual(readAuth().anthropic, { type: 'api', key: KEY });
 });

@@ -144,7 +144,7 @@ test('a release file modified after measurement refuses with CODEX_RUNTIME_CHANG
 
 test('A6: a member env carrying CODEX_PATH=/evil (via resolveProviderEnv) is ignored', async () => {
   const { resolveProviderEnv } = await import('@/services/isolation/resolve-provider-env.js');
-  const memberEnv = resolveProviderEnv(null, 'codex', { ...process.env, CODEX_PATH: '/evil' });
+  const memberEnv = resolveProviderEnv(7, 'codex', { ...process.env, CODEX_PATH: '/evil' });
   assert.equal(memberEnv.CODEX_PATH, '/evil', 'the member env really carries the override');
   const identity = acquireCodexLaunchIdentity();
   assert.equal(identity.releaseRoot, fs.realpathSync(machine.release));

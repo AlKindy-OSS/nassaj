@@ -268,6 +268,48 @@ const baseline = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS peer_holds (\n  id TEXT PRIMARY KEY NOT NULL,\n  chain_id TEXT NOT NULL,\n  from_user_id INTEGER NOT NULL,\n  from_session_id TEXT NOT NULL,\n  from_agent_id TEXT,\n  from_mode TEXT NOT NULL,\n  to_user_id INTEGER NOT NULL,\n  to_session_id TEXT NOT NULL,\n  project_id TEXT,\n  body TEXT NOT NULL,\n  body_sha256 TEXT NOT NULL,\n  body_bytes INTEGER NOT NULL CHECK (body_bytes >= 0),\n  summary TEXT,\n  hop INTEGER NOT NULL CHECK (hop >= 1),\n  parent_id TEXT,\n  hold_causes TEXT NOT NULL CHECK (hold_causes IN ('cross_member', 'mode_mismatch', 'cross_member+mode_mismatch')),\n  state TEXT NOT NULL CHECK (state IN ('held', 'promoted', 'rejected', 'expired', 'cancelled')),\n  hold_version INTEGER NOT NULL DEFAULT 1 CHECK (hold_version >= 1),\n  cause TEXT,\n  target_mode_shown TEXT,\n  decided_by INTEGER,\n  decided_auth_kind TEXT,\n  decided_at INTEGER,\n  reject_reason TEXT,\n  message_id TEXT,\n  expires_at INTEGER NOT NULL,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_to_user_state ON peer_holds(to_user_id, state, created_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_to_session_state ON peer_holds(to_session_id, state)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_from_to_state ON peer_holds(from_user_id, to_user_id, state)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_peer_holds_state_expires ON peer_holds(state, expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(peer_messages)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE peer_messages ADD COLUMN hold_id TEXT",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "run",
     "sql": "UPDATE connector_runtime_anchor SET\n    maximum_fencing_token = ?, maximum_writer_epoch = ?, clock_high_water_ms = ?, authority_mac = ?\n    WHERE singleton = 1 AND authority_mac = ?",
     "shadow": null

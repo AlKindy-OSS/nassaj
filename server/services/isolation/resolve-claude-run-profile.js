@@ -13,8 +13,15 @@ import { auditLogDb, sessionAgentsDb, sessionsDb } from '../../modules/database/
 import { providerModelsService } from '../../modules/providers/index.js';
 
 import { applyClaudeEngineProviderEnvOrThrow } from './apply-claude-engine-provider-env.js';
+import {
+  LOCAL_ENGINE_ENV_KEYS,
+  LOCAL_ENGINE_PRIVATE_ENTRIES,
+  applyClaudeLocalEngineEnvOrThrow,
+  localEngineUnavailableError,
+} from './apply-claude-local-engine-env.js';
 import { assertClaudeSpawnEnvAllowed } from './claude-spawn-env-guard.js';
-import { prepareEnginePinConfigDir } from './engine-pin-config-dir.js';
+import { localEngineDerivedDirName, prepareEnginePinConfigDir } from './engine-pin-config-dir.js';
+import { LOCAL_ENGINE, isLocalEngineValue, isLocalModelId, parseLocalEnginePin } from './local-engine-pin.js';
 import { assertLinkModeRunAllowed } from './link-mode-run-gate.js';
 import {
   OFFICIAL_ENGINE,
@@ -23,8 +30,9 @@ import {
   inferEngineFromHistory,
   resolveSpawnEngine,
 } from './engine-pin.js';
+import { assertModelRunActor } from './credential-actor.js';
+import { assertCredentialLinked } from './credential-gate.js';
 import { resolveProviderEnv } from './resolve-provider-env.js';
-import { resolveProviderEnvStrict } from './resolve-provider-env-strict.js';
 
 /** Resolve the server-authoritative engine pin for a Claude-body spawn. */
 export async function resolveClaudeSessionEngineForSpawn({
@@ -169,13 +177,72 @@ async function useEnginePinConfigDir(env, engineHosts) {
 }
 
 /**
+ * ADR-227: does this spawn take the local-engine path? Only a session already
+ * pinned to a local server, or a BRAND-NEW session that names a local model.
+ * A local model on any other existing session (official, vendor or unknown pin)
+ * is refused — `local` is never inferred, and an Anthropic chat never moves to a
+ * local server (nor a local chat to Anthropic: the official path refuses below).
+ * @returns {boolean}
+ * @throws {Error} ENGINE_PROVIDER_UNAVAILABLE (pin_conflict)
+ */
+function takesLocalEnginePath({ sessionId, storedEngine, requestedModel, clientEngine }) {
+  const localPinned = parseLocalEnginePin(storedEngine) !== null;
+  const localRequested = isLocalModelId(requestedModel);
+  if (!localPinned && !localRequested) return false;
+  const conflictingClient = typeof clientEngine === 'string' && clientEngine.trim() !== ''
+    && !isLocalEngineValue(clientEngine.trim());
+  if (!localPinned && (sessionId || conflictingClient)) {
+    throw localEngineUnavailableError({ status: 'unavailable', provider: LOCAL_ENGINE, reason: 'pin_conflict' });
+  }
+  return true;
+}
+
+/**
+ * ADR-227: the local-engine run profile. Server state wins over the client and
+ * over the shadow-mode switch: a local-pinned session never runs anywhere else.
+ * The child runs on a per-server credential-free config dir whose settings env
+ * cannot override the routing or model knobs set here.
+ */
+async function resolveLocalClaudeRunProfile({
+  actor, userId, pin, requestedModel, baseEnv, envAlreadyIsolated, honorGrants, cwd, localEngineDeps,
+}) {
+  const credential = honorGrants
+    ? assertCredentialLinked({ actor, provider: 'claude', mode: 'agent', engine: LOCAL_ENGINE, model: requestedModel })
+    : { principalId: actor, grantedBy: null };
+  const env = envAlreadyIsolated ? { ...baseEnv } : { ...resolveProviderEnv(actor, 'claude', baseEnv) };
+  const storedPin = parseLocalEnginePin(pin.storedEngine) ? pin.storedEngine : null;
+  const applied = await applyClaudeLocalEngineEnvOrThrow(env, { userId, requestedModel, storedPin }, localEngineDeps);
+  env.CLAUDE_CONFIG_DIR = await prepareEnginePinConfigDir(env, {
+    derivedName: localEngineDerivedDirName(applied.local.serverId),
+    stripEnvKeys: LOCAL_ENGINE_ENV_KEYS,
+    privateEntries: LOCAL_ENGINE_PRIVATE_ENTRIES,
+  });
+  await assertClaudeSpawnEnvAllowed(env, {
+    engineHosts: applied.engineHosts, engineOrigins: applied.engineOrigins, cwd,
+  });
+  return {
+    env,
+    effectiveEngine: applied.local.pin,
+    engineHosts: applied.engineHosts,
+    engineOrigins: applied.engineOrigins,
+    local: applied.local,
+    pin,
+    credential,
+  };
+}
+
+/**
  * Build the complete, spawn-ready env and engine verdict for a Claude body.
  * `authoritativeStoredPin` is for non-browser resume paths: they have no valid
  * client engine signal, so a stored/inferred pin is honoured even during the
  * browser-enforcement shadow period.
+ * The credential gate (ADR-152 A1 §3.5) runs here once the engine is known, so
+ * a vendor-engine run is admitted on that engine's key and an official run on
+ * the Claude tree. PTY terminals (`honorGrants: false`) are not gated: they run
+ * on the caller's own tree, and linking happens there.
  * @param {{userId:string|number|null,authenticatedPrincipal?:unknown,
  *   sessionId?:string|null,clientEngine?:string|null,
- *   baseEnv?:NodeJS.ProcessEnv,strictUser?:boolean,envAlreadyIsolated?:boolean,
+ *   baseEnv?:NodeJS.ProcessEnv,envAlreadyIsolated?:boolean,
  *   authoritativeStoredPin?:boolean,skipInferenceWhenUnknown?:boolean,
  *   requireKnownResumePin?:boolean,failOnAmbiguous?:boolean,
  *   honorGrants?:boolean,cwd?:string|null}} input `honorGrants: false` marks an
@@ -183,6 +250,11 @@ async function useEnginePinConfigDir(env, engineHosts) {
  *   (B-1546) reads that tree instead of a grantor's. `cwd` is the child's working directory; the
  *   engine credential check (B-1541) reads project/local settings there and
  *   falls back to this process's cwd, which a spawn without `cwd` inherits.
+ *   `requestedModel` is the client's RAW model id (before the Claude catalog
+ *   coerces it): a `nassaj_local_*` id selects the local-engine path (ADR-227).
+ *   `localEngineDeps` is a test seam for applyClaudeLocalEngineEnv.
+ *   A local-engine profile also returns `engineOrigins` and `local`; its
+ *   `engineHosts` is an EMPTY set (engaged, but no host-only authorization).
  */
 export async function resolveClaudeRunProfileOrThrow({
   userId,
@@ -190,7 +262,6 @@ export async function resolveClaudeRunProfileOrThrow({
   sessionId = null,
   clientEngine = null,
   baseEnv = process.env,
-  strictUser = false,
   envAlreadyIsolated = false,
   authoritativeStoredPin = false,
   skipInferenceWhenUnknown = false,
@@ -198,12 +269,11 @@ export async function resolveClaudeRunProfileOrThrow({
   failOnAmbiguous = false,
   honorGrants = true,
   cwd = null,
+  requestedModel = null,
+  localEngineDeps = undefined,
 }) {
-  const env = envAlreadyIsolated
-    ? { ...baseEnv }
-    : { ...(strictUser
-      ? resolveProviderEnvStrict(userId, 'claude', baseEnv)
-      : resolveProviderEnv(userId, 'claude', baseEnv)) };
+  // A model run names a member; null and the system actor never get this far.
+  const actor = assertModelRunActor(userId);
 
   const pin = await resolveClaudeSessionEngineForSpawn({
     sessionId,
@@ -221,9 +291,22 @@ export async function resolveClaudeRunProfileOrThrow({
     error.code = 'ENGINE_PIN_UNKNOWN';
     throw error;
   }
+  if (takesLocalEnginePath({ sessionId, storedEngine: pin.storedEngine, requestedModel, clientEngine })) {
+    return resolveLocalClaudeRunProfile({
+      actor, userId, pin, requestedModel, baseEnv, envAlreadyIsolated, honorGrants, cwd, localEngineDeps,
+    });
+  }
   const effectiveEngine = authoritativeStoredPin
     ? (pin.storedEngine === OFFICIAL_ENGINE ? null : (pin.storedEngine ?? pin.inferred ?? pin.effectiveEngine))
     : pin.effectiveEngine;
+
+  // ADR-152 A1 §3.5: admitted on a present credential, or refused before any env.
+  const credential = honorGrants
+    ? assertCredentialLinked({ actor, provider: 'claude', mode: 'agent', engine: effectiveEngine })
+    : { principalId: actor, grantedBy: null };
+  const env = envAlreadyIsolated
+    ? { ...baseEnv }
+    : { ...resolveProviderEnv(actor, 'claude', baseEnv) };
 
   const engineHosts = applyClaudeEngineProviderEnvOrThrow(env, userId, effectiveEngine);
   // B-1546: an official-vendor run in api_key link mode with no key is refused
@@ -234,5 +317,5 @@ export async function resolveClaudeRunProfileOrThrow({
   await useEnginePinConfigDir(env, engineHosts);
   await assertClaudeSpawnEnvAllowed(env, { engineHosts, cwd });
 
-  return { env, effectiveEngine, engineHosts, pin };
+  return { env, effectiveEngine, engineHosts, engineOrigins: null, local: null, pin, credential };
 }

@@ -186,7 +186,7 @@ const SPAWN_PRIMITIVE =
  * would also defeat the SL-7 digest pin, so the resolver is the sanctioned seam.
  */
 const VENDOR_BINARY_TOKEN =
-  /\bresolveOpenCodeBinaryPath\b|\bresolveKimiBinaryPath\b|@moonshot-ai\/kimi-code/;
+  /\bresolveOpenCodeBinaryPath\b|\bresolveKimiBinaryPath\b|@moonshot-ai\/kimi-code|\bprepareDshLaunch\b/;
 
 /**
  * Files that reference a vendor-binary resolver but are NOT agent launchers:
@@ -245,6 +245,11 @@ const VENDOR_AGENT_LAUNCHER_REGISTRY: ReadonlyArray<{
     file: 'server/modules/providers/list/opencode/opencode-models.provider.ts',
     sanitized: false, // GL-6/GL-9: opencode `models` enumeration spawn
     note: 'Spawns `opencode models` for catalog enumeration; wired by GL-6/GL-9.',
+  },
+  {
+    file: 'server/modules/providers/list/dsh/dsh-acp-runtime.js',
+    sanitized: true,
+    note: 'T-2086/ADR-224 dsh ACP launcher; allow-list env from prepareDshLaunch, sanitized last before spawn.',
   },
   {
     file: 'server/modules/turn-supervisor/adapters/extended-cli-adapter.ts',

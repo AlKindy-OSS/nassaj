@@ -64,7 +64,7 @@ async function dispatchOpenCode(authenticationKind: string, options: Record<stri
     writer,
     {
       authorizeProviderExecution: authorizeTestProviderExecution,
-      getSessionProvider: () => null,
+      getSessionProvider: () => null, admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
       getActiveClaudeSDKSessions: () => [],
       spawnOpenCode: async (_command: string, launchOptions: Record<string, unknown>) => {
         received.push(launchOptions);

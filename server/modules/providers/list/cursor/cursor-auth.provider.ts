@@ -1,6 +1,7 @@
 import spawn from 'cross-spawn';
 
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
@@ -59,10 +60,13 @@ export class CursorProviderAuth implements IProviderAuth {
    * knob that moves its tree (see resolve-provider-env.js `case 'cursor'`), so
    * inheriting the server's env made every member read the OPERATOR's login.
    *
-   * `userId == null` (shared policy, anonymous probe) keeps the operator's env
-   * deliberately: resolveProviderEnv returns the base env unchanged there.
+   * A caller with no member reads "not linked" and spawns nothing (ADR-152 A1
+   * §3.9) — the operator's login is never checked on anyone's behalf.
    */
   private checkCursorLogin(userId?: string | number | null): Promise<CursorLoginStatus> {
+    if (!isMemberActor(userId)) {
+      return Promise.resolve({ authenticated: false, email: null, method: null, error: 'Not linked' });
+    }
     return new Promise((resolve) => {
       let processCompleted = false;
       let childProcess: ReturnType<typeof spawn> | undefined;
@@ -91,7 +95,7 @@ export class CursorProviderAuth implements IProviderAuth {
 
       try {
         childProcess = spawn(resolveHarnessBinary('cursor'), ['status'], {
-          env: resolveProviderEnv(userId ?? null, 'cursor', process.env),
+          env: resolveProviderEnv(userId, 'cursor', process.env),
         });
       } catch {
         clearTimeout(timeout);

@@ -1,3 +1,7 @@
+// B-1771: FIRST import. Run ad hoc with the operator HOME, this test wrote into
+// the real home (member tree or provider state); the sandbox moves HOME first.
+import '@/shared/__tests__/sandbox-home.js';
+
 // Fixture must initialize an empty DB before the router module graph can open a connection.
 // eslint-disable-next-line import-x/order
 import { database, principal } from './codex-credential-principal.fixture.js';
@@ -123,12 +127,13 @@ test('ADR-200 S10: flag default ON makes the legacy Codex key route refuse befor
   });
 });
 
-test('ADR-200 S10: flag default ON stores the company OpenAI key without projecting into an unset tree', async () => {
+test('ADR-200 S10 / ADR-152 A1: flag default ON links the company OpenAI key into the caller\'s own tree, never the operator\'s', async () => {
   await withUnifiedDefault(async () => {
     const result = await save('/api/providers/company/openai/key', { apiKey: key, includeSubscription: true, vendorIds: ['openai'] });
     assert.equal(result.status, 200);
     assert.equal(calls.length, 0);
-    assert.deepEqual(result.body.data.slots.map((slot: { outcome: string }) => slot.outcome), ['shared_scope_refused']);
+    assert.deepEqual(result.body.data.slots.map((slot: { outcome: string }) => slot.outcome), ['linked']);
     assert.equal(JSON.stringify(result.body).includes(key), false);
+    assert.equal(fs.existsSync(path.join(home, 'auth.json')), false, 'the operator CODEX_HOME is never written');
   });
 });

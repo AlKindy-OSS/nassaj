@@ -1,5 +1,4 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { tryResolveHarnessBinary } from '@/shared/harness-binaries.js';
@@ -7,7 +6,7 @@ import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
-import { isProviderIsolated } from '../../../../services/provider-sharing.js';
+import { isMemberActor, systemActorHome } from '../../../../services/isolation/credential-actor.js';
 import { credentialPrincipalId } from '../../../../services/isolation/credential-principal.js';
 import { userConfigDir } from '../../../../services/isolation/provision-user-dirs.js';
 
@@ -23,30 +22,27 @@ import { userConfigDir } from '../../../../services/isolation/provision-user-dir
  *
  * B-357 — THE STATE ROOT IS PER CALL, NOT PER PROCESS. These paths used to be
  * instance fields resolved once from `os.homedir()`, so every member saw the
- * OPERATOR's brain, logs and Google e-mail no matter who asked. Under the
- * default `agy: 'shared'` policy that is correct and intended — a shared
- * provider deliberately inherits the operator's tree. Under `isolated` it is a
- * cross-user leak: `resolveProviderEnv` points a spawned agy at
- * `~/.nassaj-users/<id>/`, so the status panel was describing a different tree
- * than the one the user actually runs on.
+ * OPERATOR's brain, logs and Google e-mail no matter who asked — a cross-user
+ * leak: `resolveProviderEnv` points a spawned agy at `~/.nassaj-users/<id>/`, so
+ * the status panel was describing a different tree than the one the user
+ * actually runs on.
  *
- * The root is therefore resolved per call from (userId × sharing policy) — the
- * same pair `resolveProviderEnv` uses at spawn, so read and write can no longer
- * disagree. A field cannot express this: policy is admin-mutable at runtime and
- * userId differs per request.
+ * The root is therefore resolved per call from the userId (and its grant) — the
+ * same input `resolveProviderEnv` uses at spawn, so read and write can no longer
+ * disagree. agy is always isolated (ADR-152 A1).
  */
 export class AntigravityProviderAuth implements IProviderAuth {
   /**
-   * The HOME agy state is read from for this caller. Isolated + a known user →
-   * that user's provisioned root; otherwise the operator's home, which is what
-   * `shared` means.
+   * The HOME agy state is read from for this caller: a member's provisioned root
+   * (or their grantor's). A caller with no member reads the credential-less system
+   * tree, so status says "not linked" — never the operator's home (ADR-152 A1).
    */
   private stateHome(userId?: string | number | null): string {
-    if (userId !== undefined && userId !== null && isProviderIsolated('agy')) {
+    if (isMemberActor(userId)) {
       // T-1675: a grantee's state home is the OWNER's tree, as on the spawn path.
-      return userConfigDir(credentialPrincipalId(userId, 'agy'));
+      return userConfigDir(credentialPrincipalId(userId as string | number, 'agy'));
     }
-    return os.homedir();
+    return systemActorHome();
   }
 
   private brainDir(userId?: string | number | null): string {

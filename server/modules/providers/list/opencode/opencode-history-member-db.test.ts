@@ -26,7 +26,6 @@ process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base6
 const { initializeDatabase, closeConnection, userDb, sessionsDb, participantsDb } = await import('@/modules/database/index.js');
 const { _resetProviderSecretsServerKeyCache } = await import('@/services/isolation/provider-secrets-store.js');
 const { providerSecretsService } = await import('@/modules/providers/services/provider-secrets.service.js');
-const { getProviderSharingConfig, setProviderSharingConfig } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { peekHistoryRevision, resetHistorySnapshotCacheForTests } = await import('@/modules/providers/services/session-history-light.service.js');
 const { sessionsService } = await import('@/modules/providers/services/sessions.service.js');
@@ -35,7 +34,6 @@ const { findOpenCodeDatabaseForSession, operatorOpenCodeDatabasePath } = await i
 
 await initializeDatabase();
 _resetProviderSecretsServerKeyCache();
-setProviderSharingConfig({ ...getProviderSharingConfig(), opencode: 'isolated' });
 
 const OPERATOR_SESSION = 'ses_operatorfixture0000000001';
 const MEMBER_SESSION = 'ses_memberfixture00000000001';

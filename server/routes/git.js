@@ -1809,8 +1809,29 @@ router.post('/generate-commit-message', async (req, res) => {
   if (isRetiredProvider(provider)) {
     return res.status(400).json({ error: PROVIDER_REMOVED_MESSAGE, code: PROVIDER_REMOVED_CODE });
   }
+  // T-2086/ADR-224: dsh v1 has no commit-message path; a classified refusal,
+  // nothing is read or spawned.
+  if (provider === 'dsh') {
+    return res.status(400).json({
+      error: 'DeepSeek Harness cannot write commit messages yet. Choose Claude.',
+      code: 'DSH_COMMIT_MESSAGE_UNSUPPORTED',
+      notStarted: true,
+    });
+  }
   if (provider !== 'claude') {
     return res.status(400).json({ error: 'provider must be "claude"' });
+  }
+  // ADR-152 A1 §3.5: the commit message is a Claude turn on the caller's
+  // credential — refused (409) before any diff read or spawn when none is linked.
+  // Loaded on use: the gate pulls the isolation/database graph, which this
+  // router's other handlers (and their focused tests) never need.
+  const { admitCredentialTurn, credentialNotLinkedPayload } = await import('../services/isolation/credential-gate.js');
+  try {
+    admitCredentialTurn({ actor: req.user?.id ?? null, provider: 'claude', mode: 'agent' });
+  } catch (error) {
+    const credential = credentialNotLinkedPayload(error);
+    if (!credential) return res.status(error?.statusCode ?? 500).json({ error: 'A signed-in member is required.', code: error?.code });
+    return res.status(409).json({ error: error.message, code: 'CREDENTIAL_NOT_LINKED', credential });
   }
 
   try {

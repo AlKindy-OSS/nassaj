@@ -1,14 +1,25 @@
 import { appConfigDb, localModelServersDb } from '../../modules/database/index.js';
 
 import { resolveCredentialPrincipal } from './credential-principal.js';
+import { LOCAL_MODEL_PROVIDER_PREFIX, isLocalModelId } from './local-engine-pin.js';
 import { getLocalModelSecret } from './provider-secrets-store.js';
 
-export const LOCAL_MODEL_PROVIDER_PREFIX = 'nassaj_local_';
+export { LOCAL_MODEL_PROVIDER_PREFIX };
 /** Default-off consent gate; no request may enable it implicitly. */
 export function localModelsEnabled() {
   return appConfigDb.get('local_models.enabled') === 'true'
     && appConfigDb.get('local_models.consent_version') === '1';
 }
+/**
+ * ADR-227 / T-2098: the Claude body on a local server has its OWN switch, off unless
+ * `local_models.claude_enabled` is exactly 'true', and only under the master local
+ * models consent above. Enabling OpenCode local models never enables it.
+ * @returns {boolean}
+ */
+export function claudeLocalEngineEnabled() {
+  return localModelsEnabled() && appConfigDb.get('local_models.claude_enabled') === 'true';
+}
+const LIST_PAGE_SIZE = 100;
 /**
  * Caller-owned servers only, read fresh on every invocation and never from generated
  * files. B-1268: no union with the credential granter — sharing a granter's server
@@ -18,7 +29,14 @@ export function localModelsEnabled() {
 export function authorizedLocalModelServers(callerId) {
   const id = Number(callerId);
   if (!Number.isSafeInteger(id) || id <= 0 || !localModelsEnabled()) return [];
-  return localModelServersDb.list(id, 100, 0);
+  // T-2098 qa item 8: page through every row; a spawn that saw only the first page
+  // refused a later server as `server_not_found`.
+  const servers = [];
+  for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
+    const page = localModelServersDb.list(id, LIST_PAGE_SIZE, offset);
+    servers.push(...page);
+    if (page.length < LIST_PAGE_SIZE) return servers;
+  }
 }
 /**
  * Generated provider definitions; keys stay out of auth.json and DTOs. Only ids inside
@@ -31,9 +49,94 @@ export function localModelProviderBlocks(callerId) {
     options: { baseURL: server.baseUrl, ...localKeyOption(server, callerId) },
     models: Object.fromEntries(server.models.map(model => [model.id, {
       name: model.name ?? model.id,
-      ...(model.contextWindow ? { limit: { context: model.contextWindow, output: model.maxOutput ?? Math.min(8192, model.contextWindow) } } : {}),
+      ...(model.contextWindow ? { limit: { context: model.contextWindow, output: model.maxOutput ?? defaultLocalOutputLimit(model.contextWindow) } } : {}),
     }])),
   }]));
+}
+/**
+ * B-1755: output reservation when the owner set none. A quarter of the window, capped
+ * at 8192, so a small window is not consumed by the reply budget alone.
+ * @param {number} contextWindow
+ * @returns {number}
+ */
+function defaultLocalOutputLimit(contextWindow) {
+  return Math.max(1, Math.min(8192, Math.floor(contextWindow / 4)));
+}
+/** B-1755: refusal code when a launch's fixed base prompt does not fit the window. */
+export const LOCAL_MODEL_CONTEXT_EXCEEDED = 'LOCAL_MODEL_CONTEXT_EXCEEDED';
+/**
+ * B-1755: rough token estimate for prompt text (about four characters per token).
+ * @param {string} text
+ * @returns {number}
+ */
+export function estimatePromptTokens(text) {
+  return Math.ceil(String(text ?? '').length / 4);
+}
+/**
+ * B-1755: the stored context window of a caller-owned local model, or null when the
+ * model is not local, not authorized for the caller, or its window is unknown.
+ * @param {string|number|null|undefined} callerId
+ * @param {string} model full `<providerId>/<modelId>` id
+ * @returns {number|null}
+ */
+export function localModelContextWindow(callerId, model) {
+  if (!isLocalModel(model)) return null;
+  for (const server of authorizedLocalModelServers(callerId)) {
+    const option = server.models.find(entry => `${server.providerId}/${entry.id}` === model);
+    if (option) return Number.isSafeInteger(option.contextWindow) && option.contextWindow > 0 ? option.contextWindow : null;
+  }
+  return null;
+}
+/** I8: the least reply room counted for a local turn (the plan's per-model output). */
+export const LOCAL_OUTPUT_RESERVE_TOKENS = 4096;
+/** I8: the least room a fresh local turn must keep for tool output and replies. */
+export const LOCAL_MIN_WORKING_MARGIN_TOKENS = 4096;
+
+/**
+ * I8: reply room a local model reserves — the output limit written into opencode.json
+ * (declared maxOutput, else the generated default), never below
+ * LOCAL_OUTPUT_RESERVE_TOKENS. An unknown model counts the floor.
+ * @param {string|number|null|undefined} callerId
+ * @param {string} model full `<providerId>/<modelId>` id
+ * @returns {number}
+ */
+export function localModelOutputReserve(callerId, model) {
+  if (!isLocalModel(model)) return LOCAL_OUTPUT_RESERVE_TOKENS;
+  for (const server of authorizedLocalModelServers(callerId)) {
+    const option = server.models.find(entry => `${server.providerId}/${entry.id}` === model);
+    if (!option) continue;
+    const window = Number.isSafeInteger(option.contextWindow) && option.contextWindow > 0 ? option.contextWindow : null;
+    const output = option.maxOutput ?? (window ? defaultLocalOutputLimit(window) : 0);
+    return Math.max(LOCAL_OUTPUT_RESERVE_TOKENS, Number(output) || 0);
+  }
+  return LOCAL_OUTPUT_RESERVE_TOKENS;
+}
+
+/**
+ * B-1755 / I8 pre-launch guard. Refuses when
+ *  - `base`: the fixed base prompt plus the reply reserve and the working margin
+ *    reach the window (with no reserve/margin given: the base alone, as B-1755);
+ *  - `history`: a resumed session's stored fill plus the reply reserve reaches it.
+ * An unknown window passes (ADR-223: no window, no refusal); an unknown fill skips
+ * the history check.
+ * @param {{ contextWindow: number|null|undefined, basePromptTokens: number,
+ *   outputReserveTokens?: number, marginTokens?: number, storedFillTokens?: number|null }} input
+ * @returns {null | { code: string, reason: 'base'|'history', contextWindow: number,
+ *   basePromptTokens: number, outputReserveTokens: number, marginTokens: number,
+ *   storedFillTokens: number|null }} null to proceed, otherwise the refusal
+ */
+export function checkLocalModelContextFit(input) {
+  const { contextWindow, basePromptTokens, outputReserveTokens = 0, marginTokens = 0 } = input;
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) return null;
+  const storedFillTokens = Number.isFinite(input.storedFillTokens) && input.storedFillTokens > 0
+    ? input.storedFillTokens : null;
+  const refusal = (reason) => ({
+    code: LOCAL_MODEL_CONTEXT_EXCEEDED, reason, contextWindow, basePromptTokens,
+    outputReserveTokens, marginTokens, storedFillTokens,
+  });
+  if (basePromptTokens + outputReserveTokens + marginTokens >= contextWindow) return refusal('base');
+  if (storedFillTokens !== null && storedFillTokens + outputReserveTokens >= contextWindow) return refusal('history');
+  return null;
 }
 /**
  * Omits the API key entirely for unauthenticated local endpoints, and refuses to
@@ -51,6 +154,16 @@ export function localModelsRunnable(callerId) {
   return Number.isSafeInteger(id) && id > 0 && resolveCredentialPrincipal(id, 'opencode').grantedBy === null;
 }
 /**
+ * T-2098 stage 3b: the Claude body may use the caller's local servers only on the
+ * caller's OWN Claude credential (no grant), as for OpenCode. One definition for the
+ * spawn and the picker overlay.
+ * @param {string|number|null|undefined} callerId
+ * @returns {boolean}
+ */
+export function claudeLocalModelsRunnable(callerId) {
+  return localModelsRunnable(callerId) && resolveCredentialPrincipal(Number(callerId), 'claude').grantedBy === null;
+}
+/**
  * True ONLY when the activated feature leaves this caller with a local server they may
  * actually run. Every local-aware branch outside the local role itself is gated on this
  * so an untouched deployment keeps its previous behaviour exactly (B-1268).
@@ -63,7 +176,7 @@ export function hasRunnableLocalServers(callerId) {
 }
 /** Recognizes the reserved server namespace, even when activation has been revoked. */
 export function isLocalModel(model) {
-  return typeof model === 'string' && model.startsWith(LOCAL_MODEL_PROVIDER_PREFIX);
+  return isLocalModelId(model);
 }
 /** ADR-088: absent/deleted/revoked local endpoints fail without fallback. */
 export function assertLocalModelAvailable(callerId, model) {

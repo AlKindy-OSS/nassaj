@@ -178,7 +178,7 @@ function EngineSwitchHint({ agent }: { agent: AgentProvider }) {
       <span className="mt-2 block text-[13px] leading-relaxed text-muted-foreground">
         {t('engines.usageHint', {
           defaultValue:
-            'Once a key is stored, pick "Claude engine on <engine>" from the model picker in a chat. The chat shows which engine it is running on.',
+            'Pick "Claude agent on <model server>" from the model picker in a chat.',
         })}
       </span>
     );

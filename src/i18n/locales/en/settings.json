@@ -45,10 +45,10 @@
   },
   "harnessVersion": {
     "updateIndicator": "Update available",
-    "title": "Provider tool version",
+    "title": "Coding agent version",
     "checking": "Checking the version…",
     "unknown": "The version could not be checked.",
-    "noCli": "This provider has no CLI tool.",
+    "noCli": "This coding agent has no CLI tool.",
     "managedExternal": "This tool is managed outside Nassaj.",
     "current": "Running the latest version.",
     "unverified": "The latest version could not be checked.",
@@ -138,11 +138,40 @@
     "uncheckedReason": {
       "fd_unreadable": "open files unreadable",
       "identity_unverified": "identity not confirmed"
+    },
+    "integrationUpdate": {
+      "checking": "Checking the new version before switching:",
+      "held": "Update held:",
+      "keepsWorking": "The current version keeps working.",
+      "switched": "Switched to",
+      "rolledBack": "Rolled back to the previous version.",
+      "codeUnknown": "a check before switching did not pass.",
+      "code": {
+        "dsh_update_held_disk": "not enough disk space to stage the new version.",
+        "dsh_update_busy": "another update check is already running.",
+        "dsh_update_version_not_pinned": "the new version is not a fixed, reviewed release.",
+        "dsh_update_channel_mismatch": "the new version is from a different release channel.",
+        "dsh_update_install_failed": "the new version could not be installed.",
+        "dsh_update_contract_failed": "the new version failed Nassaj's compatibility checks.",
+        "dsh_update_registry_unavailable": "the package registry could not be reached.",
+        "dsh_plugin_engines_incompatible": "Nassaj's safety plugin does not support the new version yet.",
+        "dsh_tool_lost": "the new version removed a tool Nassaj relies on.",
+        "dsh_tool_schema_changed": "the new version changed a tool Nassaj relies on.",
+        "dsh_cap_security_rows": "the new version's safety settings are not in the expected state.",
+        "dsh_contract_conformance_failed": "the new version did not pass the safety contract tests.",
+        "dsh_contract_test_layer_invalid": "the safety contract test setup is not valid.",
+        "dsh_update_too_new": "the new version is too new; Nassaj waits 3 days after it is published before using it.",
+        "dsh_update_signature_failed": "the new version's signature or origin could not be verified.",
+        "dsh_update_interrupted": "the previous check was interrupted; it will run again."
+      },
+      "retry": "Retry this update",
+      "retryCleared": "The hold was cleared; the update will be checked again.",
+      "retryFailed": "The hold could not be cleared. Try again in a moment."
     }
   },
   "harnessAutoUpdate": {
     "title": "Global automatic updates",
-    "description": "A global setting for supported provider tools.",
+    "description": "A global setting for supported coding agents.",
     "enabled": "Enable global automatic updates",
     "interval": "Interval in minutes",
     "currentInterval": "Current interval: {{interval}} minutes",
@@ -218,7 +247,7 @@
     "description": "How long a conversation is kept before it is deleted for good, and the limits on images attached to its messages.",
     "warning": "Shortening the period makes conversations older than the new one eligible for deletion right away. Deletion is final: the transcript and its images together, with no trash bin.",
     "retentionLabel": "Delete a conversation after",
-    "retentionHint": "Measured from the last activity in the conversation, not from when it was created, and carried out by the engine itself.",
+    "retentionHint": "Measured from the last activity in the conversation, not from when it was created, and carried out by the coding agent itself.",
     "days_one": "{{count}} day",
     "days_other": "{{count}} days",
     "imageMbLabel": "Largest single image",
@@ -396,7 +425,7 @@
     "resetsIn": "Resets {{time}}",
     "extraUsageDetail": "{{used}} of {{limit}} used",
     "crossProviderNote": "Claude account usage — this session runs on {{provider}}",
-    "notApplicable": "Claude quotas don't apply to the current session's provider ({{provider}})",
+    "notApplicable": "Claude quotas don't apply to the current session's coding agent ({{provider}})",
     "windows": {
       "session": "Current session",
       "weeklyAllModels": "All models (weekly)",
@@ -559,10 +588,10 @@
         "projectUnnamed": "Belongs to a project — affects everyone working on it.",
         "operatorHome": "This material lives in the operator home; saving it affects every user."
       },
-      "no-channel": "No instruction channel on this engine"
+      "no-channel": "No instruction channel on this coding agent"
     },
     "fields": {
-      "engine": "Engine",
+      "engine": "Coding agent",
       "status": "Status",
       "mechanism": "Mechanism",
       "name": "Name",
@@ -592,7 +621,7 @@
       "ungoverned": "Not governed"
     },
     "reason": {
-      "no_mechanism": "This engine has no nassaj instruction channel.",
+      "no_mechanism": "This coding agent has no nassaj instruction channel.",
       "source_absent": "The canonical instruction source is absent.",
       "copy_missing": "The required instruction copy is missing.",
       "copy_empty": "The instruction file exists but is empty.",
@@ -608,7 +637,7 @@
     "error": {
       "list": "Could not read {{material}}.",
       "rootUnavailable": "The material source is unavailable on the server. Nothing was hidden as an empty list.",
-      "providerUnavailable": "The engine could not report its materials. Nothing was hidden as an empty list.",
+      "providerUnavailable": "The coding agent could not report its materials. Nothing was hidden as an empty list.",
       "retry": "Retry"
     },
     "actions": {
@@ -624,7 +653,7 @@
     },
     "instructions": {
       "title": "Instruction channels",
-      "description": "One channel per engine and scope. The verdict comes from reading the disk at that moment, not from UI memory."
+      "description": "One channel per coding agent and scope. The verdict comes from reading the disk at that moment, not from UI memory."
     },
     "memory": {
       "description": "The memory files an agent reads — shared by every member."
@@ -633,11 +662,11 @@
       "description": "Each agent's card: its model, effort, tools and role text. Independent of the engine — one card whoever runs it."
     },
     "skills": {
-      "description": "The skills each engine can reach. Writing to them affects every member, which is why writes are limited to the owner and admins."
+      "description": "The skills each coding agent can reach. Writing to them affects every member, which is why writes are limited to the owner and admins."
     },
     "governance": {
       "title": "Follows nassaj instructions",
-      "description": "Each engine is either governed — nassaj instructions reach it — or exempt, running with its own defaults.",
+      "description": "Each coding agent is either governed — nassaj instructions reach it — or exempt, running with its own defaults.",
       "toggleLabel": "Follows nassaj instructions: {{provider}}",
       "modeGoverned": "Governed",
       "modeExempt": "Exempt",
@@ -1136,16 +1165,16 @@
       "option": {
         "local": "Claude local",
         "project": "Project",
-        "projectAll": "Project (compatible providers)",
+        "projectAll": "Project (compatible coding agents)",
         "user": "User (global)",
-        "userAll": "User (compatible providers)"
+        "userAll": "User (compatible coding agents)"
       },
       "hint": {
         "local": "Stored in Claude user settings for the selected project.",
         "project": "Stored in the selected project workspace.",
-        "projectAll": "Writes only to compatible provider configs in the selected project workspace: {{providers}}.",
+        "projectAll": "Writes only to compatible coding agent configs in the selected project workspace: {{providers}}.",
         "user": "Available across all projects on your machine.",
-        "userAll": "Writes only to compatible provider user configs ({{providers}}) and is available across projects on this machine."
+        "userAll": "Writes only to compatible coding agent user configs ({{providers}}) and is available across projects on this machine."
       },
       "userGlobal": "User (Global)",
       "projectLocal": "Project (Local)",
@@ -1178,7 +1207,7 @@
       "jsonHelp": "Paste your MCP server configuration in JSON format. Example formats:",
       "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
       "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}",
-      "unsupportedTransport": "A global MCP server supports only stdio and http for compatible providers, not {{transport}}."
+      "unsupportedTransport": "A global MCP server supports only stdio and http for compatible coding agents, not {{transport}}."
     },
     "configDetails": "Configuration Details (from {{configFile}})",
     "projectPath": "Path: {{path}}",
@@ -1430,10 +1459,10 @@
         "none": "Not enforced"
       },
       "reason": {
-        "no_mechanism": "This engine reads no instruction file — its governance is the permission ceiling.",
+        "no_mechanism": "This coding agent reads no instruction file — its governance is the permission ceiling.",
         "source_absent": "No usable governance source on this node, so nothing can be verified.",
-        "copy_missing": "The source exists; the file the engine reads does not — it is established on the first governed launch.",
-        "copy_empty": "The file exists but is empty, so the engine ingests nothing.",
+        "copy_missing": "The source exists; the file the coding agent reads does not — it is established on the first governed launch.",
+        "copy_empty": "The file exists but is empty, so the coding agent ingests nothing.",
         "symlink_rejected": "The file is a symlink — rejected, because a write through it reaches the governance source.",
         "drifted": "A stale or tampered copy — it differs from the source.",
         "project_unresolved": "No project selected, so no file was read."
@@ -1459,7 +1488,7 @@
     "noAlternative": "This agent runs on its own engine only — there is nothing to switch.",
     "title": "Engines",
     "description": "Swap the model that answers behind this agent. Its tools, permissions and sessions are unchanged.",
-    "usageHint": "Pick \"Claude engine on <engine>\" from the model picker in a chat.",
+    "usageHint": "Pick \"Claude agent on <model server>\" from the model picker in a chat.",
     "endpointLabel": "Endpoint this engine is called on",
     "getKey": "Get a key",
     "inputLabel": "{{provider}} API key",
@@ -1492,12 +1521,12 @@
       "inferred": "inferred"
     },
     "cell": {
-      "claudeLocalForbidden": "Local models on the Claude body are prohibited by ADR-163.",
+      "claudeLocalForbidden": "Local models on the Claude coding agent are prohibited by ADR-163.",
       "claudeNative": "The engine Claude Code ships with, on the account already signed in here.",
       "claudeGlm": "Runs today: verified end to end on this machine.",
       "claudeKimi": "Runs today: kimi-k3 answered inside a Claude session here.",
       "claudeDeepseek": "The wire and the key are verified; only the DeepSeek account balance is missing. Topping it up is the sole remaining step.",
-      "claudeZen": "Zen exposes no Anthropic-compatible endpoint, so the Claude body cannot be pointed at it.",
+      "claudeZen": "Zen exposes no Anthropic-compatible endpoint, so the Claude coding agent cannot be pointed at it.",
       "opencodeLocal": "Local servers require administrator activation. Runtime verification is deferred.",
       "opencodeZen": "OpenCode's own engine. The path works; it bills against a Zen balance.",
       "opencodeGlm": "Runs today: returns real tokens through OpenCode.",
@@ -1624,10 +1653,10 @@
     },
     "addGlobal": {
       "label": "Global MCP server",
-      "description": "One common stdio or HTTP server, written only to providers compatible with the selected scope and transport.",
+      "description": "One common stdio or HTTP server, written only to coding agents compatible with the selected scope and transport.",
       "action": "Add global server",
       "modalTitle": "Add global MCP server",
-      "modalDescription": "Adds this MCP server to compatible provider configs for the selected scope and transport. Only stdio and HTTP transports are supported."
+      "modalDescription": "Adds this MCP server to compatible coding agent configs for the selected scope and transport. Only stdio and HTTP transports are supported."
     },
     "addProvider": {
       "label": "{{provider}} MCP server",
@@ -1889,7 +1918,7 @@
     "partial": "Partial",
     "pricesAsOf": "Prices as of {{date}}",
     "byModel": "By model",
-    "harnessTotal": "Harness total",
+    "harnessTotal": "Coding agent total",
     "showBreakdown": "Show model breakdown",
     "hideBreakdown": "Hide model breakdown",
     "unpricedModel": "No official price",
@@ -1946,10 +1975,6 @@
       "openrouterInOpenCode": "OpenRouter models inside OpenCode",
       "delegateTool": "the delegate_to_vendor tool under Claude"
     },
-    "notWritable": {
-      "sharedRequiresAdmin": "Shared credential — an owner or admin sets it.",
-      "generic": "You do not have permission to change this credential."
-    },
     "context": {
       "claudeAgent": "the Claude agent",
       "codexAgent": "the Codex agent",
@@ -1959,7 +1984,6 @@
     "company": {
       "label": "{{company}} API key",
       "description": "Enter it once; written to all {{count}} places in the form each expects.",
-      "notWritable": "Shared credential — an owner or admin sets it.",
       "incompatibleProfile": "The key saved here is not compatible with the current Coding Plan setup — re-enter a Coding Plan key to use it."
     },
     "consent": {
@@ -1988,9 +2012,7 @@
         "adopted": "Adopted key",
         "kept_on_subscription": "Kept on subscription",
         "mode_unset": "Link mode not chosen",
-        "login_present": "Signed in with a login",
-        "shared_scope_refused": "Shared with the team",
-        "forbidden": "Not permitted"
+        "login_present": "Signed in with a login"
       },
       "action": {
         "stale": "Save to rewrite it.",
@@ -2000,8 +2022,7 @@
         "adopted": "Found in the file before nassaj; a Save replaces it.",
         "kept_on_subscription": "To pass the key through, switch the link mode on the account page.",
         "mode_unset": "Choose the link mode on the account page.",
-        "login_present": "nassaj never overwrites a login.",
-        "shared_scope_refused": "Shared credential; the owner or an admin sets it."
+        "login_present": "nassaj never overwrites a login."
       },
       "replace": "Replace",
       "replacePasteFirst": "Paste the key first, then replace.",
@@ -2016,14 +2037,14 @@
       "error": {
         "subscriptionToken": "This is a subscription token, not an API key; link it from the Claude account page.",
         "rateLimited": "Too many attempts; try again in a minute.",
-        "vendorWide": "Deleting removes the key from every harness it feeds.",
+        "vendorWide": "Deleting removes the key from every coding agent it feeds.",
         "sourceNotFound": "The source no longer holds a key; refresh the page."
       },
       "delete": {
         "title": "Delete the {{company}} key?",
         "removedFrom": "Will be removed from:",
         "unifiedKey": "The unified key (Claude engine pin)",
-        "fixedLine": "Key-linked harnesses stay unlinked and do not fall back to a subscription. Subscription tokens and logins are not touched.",
+        "fixedLine": "Key-linked coding agents stay unlinked and do not fall back to a subscription. Subscription tokens and logins are not touched.",
         "foreignTitle": "Keys nassaj did not write:",
         "foreignToggle": "Remove these too",
         "confirm": "Delete"
@@ -2045,13 +2066,12 @@
       }
     },
     "restore": {
-      "title": "Restore harness files",
+      "title": "Restore coding agent files",
       "button": "Restore",
       "fullLink": "Full restore…",
       "done": "Restored",
       "skippedLogin": "{{target}} left as is: signed in with a login",
       "unavailable": "No intact backup",
-      "sharedScope": "Shared files; no restore",
       "dialogTitle": "Restore the {{harness}} file?",
       "confirm": "Restore",
       "keysBody": "Only API-key fields return to their backed-up values. Logins and other settings are untouched.",
@@ -2090,11 +2110,10 @@
       "failedDetail": "The process exited with code {{code}}. Read the terminal output above for the reason — a rejected login and a plan that does not cover this CLI both end here. You can run it again, or close and set an API key instead.",
       "blocked": "The terminal session could not start.",
       "blockedUpdateGate": "A source-update maintenance window is holding the writer lock, so no new terminal can start right now. Try again once it clears.",
-      "blockedForbidden": "Your role may not run this command in a terminal. Ask an administrator, or close and set an API key instead.",
+      "blockedForbidden": "Your role may not run this command in a terminal. Close and set an API key instead.",
       "blockedGeneric": "The server refused to open this terminal.",
       "blockedServerText": "The server said:",
-      "blockedCode": "Reason code:",
-      "blockedSharedLinkAdminOnly": "On this shared server, linking Claude is limited to an owner or admin. Ask an owner or admin to link the account, or close and set your own API key instead."
+      "blockedCode": "Reason code:"
     },
     "deviceAuth": {
       "title": "Device Authorization",
@@ -2239,11 +2258,11 @@
         },
         "saved_inactive": {
           "label": "Saved — inactive",
-          "detail": "Stored material remains isolated from every model body."
+          "detail": "Stored material remains isolated from every coding agent."
         }
       }
     },
-    "description": "Configure a platform once for eligible model bodies. Availability applies to the next session unless a runtime probe says otherwise.",
+    "description": "Configure a platform once for eligible coding agents. Availability applies to the next session unless a runtime probe says otherwise.",
     "loading": "Loading…",
     "connected": "Linked accounts",
     "addPlatform": "Add a platform",
@@ -2276,7 +2295,7 @@
     "whereTheyWork": "Where these keys work",
     "personalWorksWith": "A personal key works with: {{list}}.",
     "sharedOnlyWorksWith": "And with {{list}} only when the key is shared, since their config is one file everyone reads.",
-    "unsupportedNote": "Providers that cannot run external tools are omitted — they cannot use connectors at all.",
+    "unsupportedNote": "Coding agents that cannot run external tools are omitted — they cannot use connectors at all.",
     "unofficial": "Unofficial",
     "platformInfo": "About {{name}}",
     "unofficialNote": "A third party publishes this server and receives your key.",
@@ -2296,9 +2315,9 @@
     "reviewSetupNeeded": "Review",
     "setupNeededSection": "Needs setup",
     "googleProvider": "Google",
-    "oauthLinked": "The OAuth account is linked. Tool availability is reported above for each engine.",
+    "oauthLinked": "The OAuth account is linked. Tool availability is reported above for each coding agent.",
     "accountLinked": "Account linked",
-    "toolsByEngine": "Tools by engine",
+    "toolsByEngine": "Tools by coding agent",
     "retryPlacement": "Retry tool setup",
     "reconcileRequested": "Tool setup retried for {{name}}",
     "placement": {
@@ -2308,7 +2327,7 @@
       "untracked": "Tool setup not tracked",
       "pending": "Tool setup pending",
       "reconciling": "Setting up tools…",
-      "partial": "Tools ready on some engines",
+      "partial": "Tools ready on some coding agents",
       "degraded": "Tool setup needs attention",
       "blocked": "Tool setup blocked"
     },
@@ -2319,7 +2338,7 @@
       "untracked": "The account is linked, but no tool-placement record exists yet.",
       "pending": "The account is linked. Tool setup is waiting for its first verified pass.",
       "reconciling": "The account is linked and tool setup is in progress.",
-      "partial": "The account is linked, but only some required engines have the tools.",
+      "partial": "The account is linked, but only some required coding agents have the tools.",
       "degraded": "The account is linked, but tool setup did not verify successfully.",
       "blocked": "The account is linked, but the server blocked tool setup until its reported cause is cleared."
     },
@@ -3091,10 +3110,10 @@
     }
   },
   "harnessFiles": {
-    "title": "Harness files",
+    "title": "Coding agent files",
     "description": "Choose whether your agents use the shared skills or your own private copy.",
-    "loading": "Loading harness files settings…",
-    "loadFailed": "Could not load harness files settings.",
+    "loading": "Loading coding agent files settings…",
+    "loadFailed": "Could not load coding agent files settings.",
     "retry": "Try again",
     "cancel": "Cancel",
     "featureOff": "This feature is not enabled on this server. Everyone uses the shared files.",
@@ -3158,5 +3177,10 @@
   "security": {
     "displayMasking": "Mask sensitive values on screen",
     "displayMaskingDescription": "Keys and secrets are hidden in the interface and shown in full only when you explicitly reveal them."
+  },
+  "providerStatus": {
+    "own": "Runs on your own account.",
+    "grantedBy": "Runs on the account {{username}} shared with you.",
+    "notLinked": "Not linked to your account."
   }
 }

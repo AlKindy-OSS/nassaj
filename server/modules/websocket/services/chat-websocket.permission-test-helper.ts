@@ -60,7 +60,13 @@ export function dispatchAuthorizedProviderCommand(
     messageType,
     { ...data, options },
     writer,
-    { authorizeProviderExecution: authorizeTestProviderExecution, ...dependencies },
+    {
+      authorizeProviderExecution: authorizeTestProviderExecution,
+      // ADR-152 A1 §3.5: the credential gate is required (qa M1); focused
+      // harnesses admit every turn unless they pass their own gate.
+      admitCredentialTurn: () => ({ principalId, grantedBy: null }),
+      ...dependencies,
+    },
     principalId,
     Object.freeze({
       id: principalId,

@@ -13,6 +13,7 @@ import {
 } from '../stores/sessionProcessStateStore';
 import { applyOutcomeDelta, type OutcomeState } from '../stores/sessionCompletionStore';
 import { ingestPeerMessageFrame } from '../components/peer-relay/peerMessageStore';
+import { ingestPeerHoldFrame } from '../components/peer-relay/peerHoldStore';
 import { consumeOutboxIngressVerdict } from '../components/chat/utils/messageOutbox';
 import {
   consumeExpectedWalletRevocation,
@@ -503,6 +504,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           // ADR-219 S1 (T-2072): a cross-session message state change goes to its own
           // store synchronously, never through `latestMessage` (B-208 swallowing).
           if (ingestPeerMessageFrame(data)) return;
+          // ADR-219 P2a-min (T-2074): a cross-member hold change, same synchronous path.
+          if (ingestPeerHoldFrame(data)) return;
           // ADR-218: a snapshot per session; its own slice, never `latestMessage`.
           if (data && data.type === SESSION_AGENTS_MESSAGE_TYPE) {
             const agentsSessionId = typeof data.sessionId === 'string' ? data.sessionId : '';

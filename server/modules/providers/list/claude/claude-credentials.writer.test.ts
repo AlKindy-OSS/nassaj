@@ -4,7 +4,7 @@
  * Proves the Claude API-key writer merges env.ANTHROPIC_API_KEY into
  * settings.json while preserving every other setting, deletes only that key,
  * and — the load-bearing guarantee — enforces the IRON RULE: it can never write
- * a *_BASE_URL (or any other) env key. userId=null + a pinned CLAUDE_CONFIG_DIR
+ * a *_BASE_URL (or any other) env key. a member stub + a pinned CLAUDE_CONFIG_DIR
  * keep the suite hermetic (no isolation/DB). Runner: node:test + node:assert.
  */
 
@@ -12,12 +12,30 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, beforeEach, test } from 'node:test';
+import { after, beforeEach, test, mock } from 'node:test';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-cred-writer-'));
 const ORIGINAL_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR;
 process.env.CLAUDE_CONFIG_DIR = sandbox;
 
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ CLAUDE_CONFIG_DIR: sandbox } };
+      },
+    },
+  });
+}
 const { ClaudeCredentialsWriter, assertOnlyManagedEnvKeyChanged } =
   await import('./claude-credentials.writer.js');
 
@@ -50,7 +68,7 @@ test('setApiKey merges env.ANTHROPIC_API_KEY, preserving other settings', async 
     permissions: { allow: ['Bash'] },
   }));
 
-  const result = await writer.setApiKey(null, KEY);
+  const result = await writer.setApiKey(MEMBER, KEY);
   assert.deepEqual(result, { provider: 'claude', configured: true });
 
   const settings = readSettings();
@@ -63,10 +81,10 @@ test('setApiKey merges env.ANTHROPIC_API_KEY, preserving other settings', async 
 });
 
 test('setApiKey creates a valid settings.json when none exists', async () => {
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   const env = readSettings().env as Record<string, string>;
   assert.equal(env.ANTHROPIC_API_KEY, KEY);
-  assert.equal(await writer.isConfigured(null), true);
+  assert.equal(await writer.isConfigured(MEMBER), true);
 });
 
 test('deleteApiKey removes only ANTHROPIC_API_KEY, leaving other settings intact', async () => {
@@ -75,7 +93,7 @@ test('deleteApiKey removes only ANTHROPIC_API_KEY, leaving other settings intact
     env: { ANTHROPIC_API_KEY: KEY, SOME_OTHER: 'keep-me' },
   }));
 
-  const result = await writer.deleteApiKey(null);
+  const result = await writer.deleteApiKey(MEMBER);
   assert.deepEqual(result, { provider: 'claude', configured: false });
   const settings = readSettings();
   assert.equal(settings.theme, 'light');
@@ -86,7 +104,7 @@ test('deleteApiKey removes only ANTHROPIC_API_KEY, leaving other settings intact
 
 test('an explicit target is rejected (claude has a single implicit target)', async () => {
   await assert.rejects(
-    () => writer.setApiKey(null, KEY, 'anthropic'),
+    () => writer.setApiKey(MEMBER, KEY, 'anthropic'),
     (err: unknown) => (err as { code?: string }).code === 'INVALID_CREDENTIAL_TARGET',
   );
 });
@@ -97,7 +115,7 @@ test('a pre-existing ANTHROPIC_BASE_URL in settings is left untouched by a key w
   fs.writeFileSync(settingsPath, JSON.stringify({
     env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' },
   }));
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   const env = readSettings().env as Record<string, string>;
   assert.equal(env.ANTHROPIC_BASE_URL, 'https://api.anthropic.com', 'base url preserved, not stripped');
   assert.equal(env.ANTHROPIC_API_KEY, KEY);
@@ -126,25 +144,25 @@ test('IRON RULE: assertOnlyManagedEnvKeyChanged blocks *_BASE_URL and foreign ke
 const OAUTH_TOKEN = 'sk' + '-ant-oat01-DO-NOT-LEAK';
 
 test('setApiKey routes a setup-token to CLAUDE_CODE_OAUTH_TOKEN, not ANTHROPIC_API_KEY', async () => {
-  const result = await writer.setApiKey(null, OAUTH_TOKEN);
+  const result = await writer.setApiKey(MEMBER, OAUTH_TOKEN);
   assert.deepEqual(result, { provider: 'claude', configured: true });
   const env = readSettings().env as Record<string, string>;
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN);
   assert.equal('ANTHROPIC_API_KEY' in env, false, 'a setup-token is not an API key');
-  assert.equal(await writer.isConfigured(null), true);
+  assert.equal(await writer.isConfigured(MEMBER), true);
 });
 
 test('C2: an API-key write keeps the OAuth token; a setup-token write drops the key', async () => {
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   let env = readSettings().env as Record<string, string>;
   assert.equal(env.ANTHROPIC_API_KEY, KEY);
   // Saving a setup-token is the explicit subscription act: the key would outrank it.
-  await writer.setApiKey(null, OAUTH_TOKEN);
+  await writer.setApiKey(MEMBER, OAUTH_TOKEN);
   env = readSettings().env as Record<string, string>;
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN);
   assert.equal('ANTHROPIC_API_KEY' in env, false, 'stale API key removed');
   // ADR-200 C2: writing a key never removes the subscription token.
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   env = readSettings().env as Record<string, string>;
   assert.equal(env.ANTHROPIC_API_KEY, KEY);
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN, 'OAuth token preserved');
@@ -154,19 +172,19 @@ test('C2: deleteApiKey removes ANTHROPIC_API_KEY only, never the OAuth token', a
   fs.writeFileSync(settingsPath, JSON.stringify({
     env: { ANTHROPIC_API_KEY: KEY, CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN, SOME_OTHER: 'keep-me' },
   }));
-  const result = await writer.deleteApiKey(null);
+  const result = await writer.deleteApiKey(MEMBER);
   assert.deepEqual(result, { provider: 'claude', configured: true }, 'the token still configures Claude');
   const env = readSettings().env as Record<string, string>;
   assert.equal('ANTHROPIC_API_KEY' in env, false, 'API key removed');
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN, 'OAuth token preserved');
   assert.equal(env.SOME_OTHER, 'keep-me', 'other env preserved');
-  assert.equal(await writer.isConfigured(null), true);
+  assert.equal(await writer.isConfigured(MEMBER), true);
 });
 
 test('C2: deleteApiKey on a token-only file does not rewrite it', async () => {
   const raw = JSON.stringify({ env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN } });
   fs.writeFileSync(settingsPath, raw);
-  const result = await writer.deleteApiKey(null);
+  const result = await writer.deleteApiKey(MEMBER);
   assert.deepEqual(result, { provider: 'claude', configured: true });
   assert.equal(fs.readFileSync(settingsPath, 'utf8'), raw);
 });
@@ -181,9 +199,9 @@ test('C2: OAuth file -> set key -> delete key is byte-identical (settings and .c
     model: 'opus',
   }, null, 2)}\n`;
   fs.writeFileSync(settingsPath, settingsBytes);
-  await writer.setApiKey(null, KEY);
+  await writer.setApiKey(MEMBER, KEY);
   assert.equal((readSettings().env as Record<string, string>).CLAUDE_CODE_OAUTH_TOKEN, OAUTH_TOKEN);
-  await writer.deleteApiKey(null);
+  await writer.deleteApiKey(MEMBER);
   assert.equal(fs.readFileSync(settingsPath, 'utf8'), settingsBytes, 'settings.json byte-identical');
   assert.equal(fs.readFileSync(credentialsPath, 'utf8'), oauthLogin, '.credentials.json untouched');
   fs.rmSync(credentialsPath, { force: true });
@@ -193,7 +211,7 @@ test('isConfigured is true for a CLAUDE_CODE_OAUTH_TOKEN alone', async () => {
   fs.writeFileSync(settingsPath, JSON.stringify({
     env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN },
   }));
-  assert.equal(await writer.isConfigured(null), true);
+  assert.equal(await writer.isConfigured(MEMBER), true);
 });
 
 test('IRON RULE: the tripwire allows CLAUDE_CODE_OAUTH_TOKEN but still refuses base urls', () => {
@@ -206,7 +224,7 @@ test('IRON RULE: the tripwire allows CLAUDE_CODE_OAUTH_TOKEN but still refuses b
 });
 
 test('ADR-200 L2: every setup-token generation is stored as the OAuth token', async () => {
-  await writer.setApiKey(null, 'sk' + '-ant-oat02-NEXT-GEN-DO-NOT-LEAK');
+  await writer.setApiKey(MEMBER, 'sk' + '-ant-oat02-NEXT-GEN-DO-NOT-LEAK');
   const env = readSettings().env as Record<string, string>;
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk' + '-ant-oat02-NEXT-GEN-DO-NOT-LEAK');
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
@@ -219,7 +237,7 @@ test('ADR-200 S4: deleteSubscriptionToken removes only CLAUDE_CODE_OAUTH_TOKEN',
   }));
   const credentialsPath = path.join(sandbox, '.credentials.json');
   fs.writeFileSync(credentialsPath, '{"claudeAiOauth":{"accessToken":"at"}}');
-  const result = await writer.deleteSubscriptionToken(null);
+  const result = await writer.deleteSubscriptionToken(MEMBER);
   assert.deepEqual(result, { provider: 'claude', configured: true });
   const settings = readSettings();
   assert.equal(settings.theme, 'dark');
@@ -227,6 +245,12 @@ test('ADR-200 S4: deleteSubscriptionToken removes only CLAUDE_CODE_OAUTH_TOKEN',
   assert.equal(fs.readFileSync(credentialsPath, 'utf8'), '{"claudeAiOauth":{"accessToken":"at"}}');
   fs.rmSync(credentialsPath);
   const untouched = fs.readFileSync(settingsPath, 'utf8');
-  await writer.deleteSubscriptionToken(null);
+  await writer.deleteSubscriptionToken(MEMBER);
   assert.equal(fs.readFileSync(settingsPath, 'utf8'), untouched, 'nothing to remove leaves the file as is');
+});
+
+test('qa M4: the settings path comes from the resolved CLAUDE_CONFIG_DIR only, never the operator ~/.claude', () => {
+  const source = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'claude-credentials.writer.ts'), 'utf8');
+  assert.doesNotMatch(source, /os\.homedir\(\)/, 'no fallback to the operator home');
+  assert.match(source, /resolvedKnob\(env, 'CLAUDE_CONFIG_DIR'\)/);
 });

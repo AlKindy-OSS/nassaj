@@ -46,7 +46,7 @@ export default function HarnessAutoUpdateSection({ viewerRole }: { viewerRole?: 
   return <SettingsSection
     icon={RefreshCw}
     title={t('harnessAutoUpdate.title', { defaultValue: 'التحديث التلقائي العام' })}
-    description={t('harnessAutoUpdate.description', { defaultValue: 'إعداد عام يطبّق على أدوات المزوّدين المدعومة.' })}
+    description={t('harnessAutoUpdate.description', { defaultValue: 'إعداد عام يطبّق على الوكلاء البرمجيين المدعومين.' })}
   >
     <SettingsCard>
       {status === 'loading' && !settings ? (

@@ -16,6 +16,8 @@ import {
 } from '../../../../../hooks/useCredentialGrants';
 import type { AgentProvider } from '../../../../../types/types';
 
+import { CREDENTIAL_GRANTS_SECTION_ID } from './credentialGrantsAnchor';
+
 /** What the grantor's mode means for the grantee, in words: a key mode is billed by usage. */
 function GrantorModeBadge({ mode }: { mode: 'subscription' | 'api_key' | null | undefined }) {
   const { t } = useTranslation('settings');
@@ -119,7 +121,13 @@ export default function CredentialGrantsSection({ agent }: CredentialGrantsSecti
   };
 
   return (
-    <SettingsSection title={t('credentialGrants.heading')} icon={Share2} level="section">
+    // `anchorId`: the target of "ask a member to share" (CREDENTIAL_NOT_LINKED, T-2083).
+    <SettingsSection
+      title={t('credentialGrants.heading')}
+      icon={Share2}
+      level="section"
+      anchorId={CREDENTIAL_GRANTS_SECTION_ID}
+    >
       {/* `space-y-4` بين كتلتَي القسم — نفس الإيقاع الذي تفصل به بطاقةُ الاتصال
           كتلَها (‏T-1700)، بدل `space-y-5` التي كانت تفرد هذا القسم وحده. */}
       <div className="space-y-4" aria-busy={saving}>

@@ -15,8 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { hasCodexOAuthTokens, resolveCodexEffectiveAuth } from '@/modules/providers/list/codex/codex-auth.provider.js';
-import { operatorCodexHome } from '@/modules/providers/list/codex/codex-home.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
 export type LinkHarness = 'claude' | 'codex';
@@ -39,7 +39,7 @@ export type HarnessCredentialInventory = {
 type OwnEnv = NodeJS.ProcessEnv;
 
 function ownEnv(userId: string | number | null | undefined, harness: LinkHarness): OwnEnv {
-  return resolveProviderEnv(userId ?? null, harness, process.env, 'chat', { honorGrants: false });
+  return resolveProviderEnv(userId, harness, process.env, 'chat', { honorGrants: false });
 }
 
 function readJsonRecord(filePath: string): Record<string, unknown> {
@@ -93,8 +93,8 @@ export function readClaudeInventoryFromEnv(env: OwnEnv): HarnessCredentialInvent
 }
 
 /** Codex: auth.json under the caller's own CODEX_HOME, precedence per S3. */
-function readCodexInventory(env: OwnEnv): HarnessCredentialInventory {
-  const codexHome = readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+export function readCodexInventoryFromEnv(env: OwnEnv): HarnessCredentialInventory {
+  const codexHome = resolvedKnob(env, 'CODEX_HOME');
   const auth = readJsonRecord(path.join(codexHome, 'auth.json'));
   const tokens = readObjectRecord(auth.tokens) ?? {};
   const hasSubscription = hasCodexOAuthTokens(auth);
@@ -121,5 +121,5 @@ export function readHarnessCredentialInventory(
   harness: LinkHarness,
 ): HarnessCredentialInventory {
   const env = ownEnv(userId, harness);
-  return harness === 'claude' ? readClaudeInventoryFromEnv(env) : readCodexInventory(env);
+  return harness === 'claude' ? readClaudeInventoryFromEnv(env) : readCodexInventoryFromEnv(env);
 }

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { HARNESS_INSTALL_INFO, isInstallableHarness } from '../../../../../../../../shared/harness-install.contract';
 import { useHarnessInstall } from '../../../../../../../hooks/useHarnessInstall';
 import { isolateLtrRuns } from '../../../../../../../utils/isolateLtrRuns';
+import { isolateBidi } from '../../../../../../quick-settings-panel/subscriptionHelpers';
 import { Button } from '../../../../../../../shared/view/ui';
 import { useOptionalAuth } from '../../../../../../auth/context/AuthContext';
 import SettingsCard from '../../../../SettingsCard';
@@ -33,14 +34,6 @@ export type UserCredentialLink = {
   connected: boolean;
   loading: boolean;
   error: string | null;
-  /**
-   * دور الحساب `owner`. **لا يعني أنّ اعتماده مربوط** — الربط الرمزي الذي كان
-   * الخادم يصنعه لكل حساب دوره `owner` أُزيل ويُقتلع (ADR-105 / B-486)، والمالك
-   * يصادق لنفسه كسائر الأعضاء. يبقى أثره هنا في **لافتة الدعوة** وحدها: نداءُ
-   * التعريف بالتدفّق لمن لم يبدأه. أمّا مسارا الإكمال — صفّ الدخول وحقل لصق
-   * الرمز — فلا يشترطان الدور.
-   */
-  isOwner: boolean;
   /** i18n prefix of the subscription-link texts in the settings namespace. */
   i18nPrefix: 'claudeConnection' | 'agyConnection';
   /**
@@ -79,6 +72,7 @@ const AGENT_DISPLAY_NAMES: Record<AgentProvider, string> = {
   glm: 'GLM',
   hermes: 'Hermes',
   sakana: 'Sakana',
+  dsh: 'DeepSeek Harness',
 };
 
 /**
@@ -205,9 +199,12 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink, o
   const showIncompleteLink = Boolean(
     userLink && !userLink.loading && userLink.incompleteLink,
   );
+  // ADR-152 A1 (D2): an owner-role account links its own account like any
+  // member — nobody inherits the operator's credential. A member running on a
+  // grant is not told to link: the status line already says whose it runs on.
+  const grantor = authStatus.grantedBy ?? null;
   const showLinkBanner = Boolean(
-    userLink && !userLink.loading && !userLink.connected && !userLink.isOwner
-      && !userLink.incompleteLink,
+    userLink && !userLink.loading && !userLink.connected && !userLink.incompleteLink && !grantor,
   );
   /**
    * **كتلةُ ربط الاشتراك لا تُصيَّر فارغة** (‏T-1700). أبناؤها الثلاثة —
@@ -310,9 +307,20 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink, o
               : isConnected
               ? (
                 <>
-                  {t('agents.authStatus.loggedInAs', {
-                    email: authStatus.email || t('agents.authStatus.authenticatedUser'),
-                  })}
+                  {/* ADR-152 A1 §3.9: whose credential this runs on. A grant
+                      names the grantor and never an email. */}
+                  {grantor
+                    ? t('providerStatus.grantedBy', { username: isolateBidi(grantor.username) })
+                    : (
+                      <>
+                        {t('providerStatus.own')}
+                        {authStatus.email && (
+                          <span className="block">
+                            {t('agents.authStatus.loggedInAs', { email: authStatus.email })}
+                          </span>
+                        )}
+                      </>
+                    )}
                   {/* سطرا تجديد الاشتراك وقرب انتهاء الربط — يظهران فقط حين
                       تتوفّر البيانات؛ لا نصّ بديل ولا وميض أثناء التحميل.
                       والتجديدُ أوّلاً: دورةُ الاشتراك سياقٌ دائمٌ يصحّ دوماً،
@@ -415,7 +423,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink, o
                   )}
                 </>
               )
-              : t('agents.authStatus.notConnected')}
+              : t('providerStatus.notLinked')}
             {/* رابط الفوترة — يظهر دائماً بصرف النظر عن حالة الاتصال، أسفل سطرَي التاريخ.
                 جميع المزوّدين لديهم رابط فوترة (BILLING_LINKS كامل لا Partial). */}
             {billingHref && (

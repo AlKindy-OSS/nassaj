@@ -604,7 +604,7 @@ export default function ConnectorsSettingsTabM1() {
         || placement.connector?.availableNextSession !== true) {
         throw new Error('connector_distribution_not_verified');
       }
-      setNotice(copy('linkedNotice', '{{name}} is linked for your eligible model bodies.', 'تم ربط {{name}} بكل أجسادك المؤهلة.').replace('{{name}}', platformName(entry)));
+      setNotice(copy('linkedNotice', '{{name}} is linked for your eligible coding agents.', 'رُبط {{name}} بكل وكلائك البرمجيين المؤهلين.').replace('{{name}}', platformName(entry)));
       await refresh();
     } catch (reason) {
       handleWriteError(entry.service, reason);
@@ -679,7 +679,7 @@ export default function ConnectorsSettingsTabM1() {
             <p className="text-[13px] text-muted-foreground">{t('connectorsSettings.keyStoredNote')}</p>
             {storesWithoutVerification && <label className="flex items-start gap-3 rounded-md bg-warning/5 p-3 text-sm">
               <input type="checkbox" className="mt-1 h-4 w-4" checked={draft.acceptStoredUnverified} onChange={event => updateDraft({ acceptStoredUnverified: event.target.checked })} />
-              <span><strong className="block">{copy('storeWithoutEnabling', 'Save encrypted without enabling', 'حفظ مشفّر دون تفعيل')}</strong>{copy('storeWithoutEnablingHelp', 'This provider cannot be verified yet. The credential will not reach any model body until verification succeeds.', 'لا يمكن التحقق من هذه الخدمة بعد. لن تصل بيانات الاعتماد إلى أي جسد نموذج حتى ينجح التحقق.')}</span>
+              <span><strong className="block">{copy('storeWithoutEnabling', 'Save encrypted without enabling', 'حفظ مشفّر دون تفعيل')}</strong>{copy('storeWithoutEnablingHelp', 'This provider cannot be verified yet. The credential will not reach any coding agent until verification succeeds.', 'لا يمكن التحقق من هذه الخدمة بعد. لن تصل بيانات الاعتماد إلى أي وكيل برمجي حتى ينجح التحقق.')}</span>
             </label>}
             <p className="text-[13px] text-muted-foreground">
               {copy('sessionNextNote', 'After linking, the tool reaches your next session, not the current one.', 'بعد الربط تصل الأداة إلى جلستك القادمة لا الحالية.')}
@@ -780,7 +780,7 @@ export default function ConnectorsSettingsTabM1() {
               if (isConnected(grant)) return copy('availableNextSession', 'Connected · available next session', 'متصل · متاح في الجلسة القادمة');
               switch (grant.availabilityState) {
                 case 'stored_only': return copy('storedOnly', 'Saved encrypted · not enabled', 'محفوظ مشفّرًا · غير مفعّل');
-                case 'needs_reconciliation': return copy('needsReconciliation', 'Verified · preparing model bodies', 'تم التحقق · جارٍ تجهيز أجساد النماذج');
+                case 'needs_reconciliation': return copy('needsReconciliation', 'Verified · preparing coding agents', 'تم التحقق · جارٍ تجهيز الوكلاء البرمجيين');
                 case 'verification_expired': return copy('verificationExpired', 'Verification expired · not enabled', 'انتهت صلاحية التحقق · غير مفعّل');
                 case 'credential_rejected': return copy('credentialRejected', 'Credential rejected · not enabled', 'رُفضت بيانات الاعتماد · غير مفعّل');
                 case 'credential_corrupt': return copy('credentialCorrupt', 'Stored credential is unreadable · remove it', 'بيانات الاعتماد المخزنة غير قابلة للقراءة · أزلها');
@@ -806,8 +806,8 @@ export default function ConnectorsSettingsTabM1() {
                       {grant.verificationState === 'stored_unverified'
                         ? <StatusBadge tone="warning" className="mt-1"><AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />{statusLabel(grant)}</StatusBadge>
                         : <div className={cn('text-[13px]', isConnected(grant) ? 'text-success' : grant.verificationState === 'corrupt' || grant.verificationState === 'rejected' ? 'text-danger' : 'text-muted-foreground')}>{statusLabel(grant)}</div>}
-                      {grant.availableBodies.length > 0 && <div className="mt-1 text-[13px] text-muted-foreground">{copy('availableBodies', 'Available models:', 'النماذج المتاحة:')} {grant.availableBodies.join(', ')}</div>}
-                      {grant.pendingBodies.length > 0 && <div className="mt-1 text-[13px] text-muted-foreground">{copy('pendingBodies', 'Pending models:', 'النماذج قيد التجهيز:')} {grant.pendingBodies.join(', ')}</div>}
+                      {grant.availableBodies.length > 0 && <div className="mt-1 text-[13px] text-muted-foreground">{copy('availableBodies', 'Available coding agents:', 'الوكلاء البرمجيون المتاحون:')} {grant.availableBodies.join(', ')}</div>}
+                      {grant.pendingBodies.length > 0 && <div className="mt-1 text-[13px] text-muted-foreground">{copy('pendingBodies', 'Coding agents being prepared:', 'الوكلاء البرمجيون قيد التجهيز:')} {grant.pendingBodies.join(', ')}</div>}
                       {actionErrors[grant.grantId] && <p role="alert" className="mt-1 text-[13px] text-danger"><AlertCircle className="me-1 inline h-3.5 w-3.5" aria-hidden="true" />{actionErrors[grant.grantId]}</p>}
                     </div>
                     <div className="flex flex-wrap items-center gap-1">
@@ -849,7 +849,7 @@ export default function ConnectorsSettingsTabM1() {
   return (
     <SettingsSection
       title={t('connectorsSettings.title')}
-      description={copy('description', 'Connect each account once. Every eligible model body in your sessions receives the same tools.', 'اربط كل حساب مرة واحدة، فتستفيد منه جميع أجساد النماذج المؤهلة في جلساتك.')}
+      description={copy('description', 'Connect each account once. Every eligible coding agent in your sessions receives the same tools.', 'اربط كل حساب مرة واحدة، فيستفيد منه جميع الوكلاء البرمجيين المؤهلين في جلساتك.')}
       icon={Link2}
       tone="info"
       level="section"

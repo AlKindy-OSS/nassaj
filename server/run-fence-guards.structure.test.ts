@@ -17,7 +17,7 @@ const LAUNCHERS: Array<[file: string, spawnMarker: string]> = [
   ['qwen-cli.js', 'child = spawnFunction(launch.cmd'],
   ['modules/providers/shared/vendor/vendor-runtime.js', 'await fetch(config.messagesUrl'],
   ['cursor-cli.js', "runCursorProcess(baseArgs, 'initial')"],
-  ['opencode-cli.js', 'opencodeProcess = spawnFunction(opencodeLaunch.cmd'],
+  ['opencode-cli.js', 'opencodeProcess = spawnFunction(opencodeBinary'],
   ['kimi-agent-cli.js', 'kimiProcess = spawn(launch.cmd'],
 ];
 

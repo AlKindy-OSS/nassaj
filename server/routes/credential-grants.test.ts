@@ -36,17 +36,16 @@ process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base6
 assert.equal(os.homedir(), sandboxHome);
 
 const { initializeDatabase, closeConnection, userDb, credentialGrantsDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache, KNOWN_PROVIDERS } = await import('@/services/provider-sharing.js');
+const { KNOWN_PROVIDERS } = await import('@/services/isolation/known-providers.js');
 const { resolveProviderEnv } = await import('@/services/isolation/resolve-provider-env.js');
 const { resolveCredentialPrincipal, listDelegatedOwners, GRANTABLE_PROVIDERS, GRANTABLE_UNITS } = await import('@/services/isolation/credential-principal.js');
 const { providerSecretsService } = await import('@/modules/providers/services/provider-secrets.service.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { setProviderKey, _resetProviderSecretsServerKeyCache } = await import('@/services/isolation/provider-secrets-store.js');
 const { default: grantsRouter } = await import('./credential-grants.js');
+const { registerWarmCredentialProcess, WARM_PRINCIPAL_CHANGED } = await import('@/services/isolation/warm-credential-processes.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', kimi: 'isolated', agy: 'isolated', opencode: 'isolated' });
 
 const owner = userDb.createUser('owner-a', 'hash', 'user');
 const grantee = userDb.createUser('grantee-b', 'hash', 'user');
@@ -219,11 +218,13 @@ describe('resolveCredentialPrincipal + resolveProviderEnv', () => {
     assert.equal(resolveProviderEnv(grantee.id, 'kimi', { PATH: '/usr/bin' }).KIMI_API_KEY, undefined);
   });
 
-  it('every known provider except qwen is grantable (T-1906); self-grant is refused', () => {
+  it('every known provider except qwen and dsh is grantable (T-1906, T-2086); self-grant is refused', () => {
+    // dsh runs on the member's OWN deepseek key only (ADR-224): never a grant unit.
     assert.deepEqual(
       [...GRANTABLE_PROVIDERS].sort(),
-      [...KNOWN_PROVIDERS].filter((provider) => provider !== 'qwen').sort(),
+      [...KNOWN_PROVIDERS].filter((provider) => provider !== 'qwen' && provider !== 'dsh').sort(),
     );
+    assert.ok(!GRANTABLE_UNITS.includes('dsh'));
     assert.ok(!GRANTABLE_UNITS.includes('qwen'));
     assert.throws(() => credentialGrantsDb.grant(owner.id, owner.id, 'claude'), /distinct/);
   });
@@ -282,6 +283,25 @@ describe('routes /api/credential-grants — self-scoped wire contract', () => {
   };
   const asOwner = { id: owner.id, role: 'user' };
   const asGrantee = { id: grantee.id, role: 'user' };
+
+  it('AT3: revoking or declining ends the grantee\'s warm process on the grantor at once', async () => {
+    const killed: string[] = [];
+    let r = await call('PUT', '/cursor/grantees', asOwner, { userIds: [grantee.id] });
+    assert.equal(r.status, 200);
+    registerWarmCredentialProcess({ userId: grantee.id, unit: 'cursor', principalId: owner.id,
+      terminate: (reason) => killed.push(`revoke:${reason}`) });
+    r = await call('DELETE', `/cursor/grantees/${grantee.id}`, asOwner);
+    assert.equal(r.status, 200);
+    assert.deepEqual(killed, [`revoke:${WARM_PRINCIPAL_CHANGED}`]);
+
+    r = await call('PUT', '/cursor/grantees', asOwner, { userIds: [grantee.id] });
+    registerWarmCredentialProcess({ userId: grantee.id, unit: 'cursor', principalId: owner.id,
+      terminate: (reason) => killed.push(`decline:${reason}`) });
+    r = await call('PUT', '/cursor/use', asGrantee, { ownerUserId: null });
+    assert.equal(r.status, 200);
+    assert.deepEqual(killed.at(-1), `decline:${WARM_PRINCIPAL_CHANGED}`);
+    r = await call('PUT', '/cursor/grantees', asOwner, { userIds: [] });
+  });
 
   it('GET lists grantable providers and the other active members', async () => {
     const { status, json } = await call('GET', '/', asOwner);

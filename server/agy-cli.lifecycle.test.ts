@@ -68,7 +68,6 @@ async function awaitChild(sent: any[]) {
   assert.ok(child && childGeneration === generation, `spawn was not called within ${DEADLINE_MS}ms: ${JSON.stringify(sent)}`);
 }
 named('./services/isolation/provision-user-dirs.js', { userConfigDir: () => root });
-named('./services/provider-sharing.js', { isProviderIsolated: () => false });
 named('./modules/providers/list/antigravity/antigravity-project-registry.js', { registerAntigravityProjectPath() { }, clearAntigravityProjectPath() { } });
 const { spawnAntigravity, abortAntigravitySession } = await import('./agy-cli.js');
 const { AntigravitySessionsProvider } = await import('./modules/providers/list/antigravity/antigravity-sessions.provider.js');

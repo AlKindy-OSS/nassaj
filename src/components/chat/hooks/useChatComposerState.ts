@@ -77,6 +77,7 @@ import { isReservedSteerCommand, parseSteerText } from '../utils/steerCommand';
 
 import { resolveStickyEffortMode } from './stickyEffortMode';
 import { readSessionEngineProvider, writePendingEngineStamp } from './useChatProviderState';
+import type { EngineProvider } from './engineProviderSession';
 import { writePendingModelStamp } from './pendingModelStamp';
 import { useFileMentions } from './useFileMentions';
 import { usePromptRecall } from './usePromptRecall';
@@ -99,6 +100,13 @@ const effortStorageKey = (sessionId: string) => `thinking_mode_${sessionId}`;
 const coordinationLevelStorageKey = (sessionId: string) => `coordination_level_${sessionId}`;
 const COORDINATION_LEVELS = new Set<CoordinationLevel>(['direct', 'delegate', 'delegate_review']);
 const DEFAULT_COORDINATION_LEVEL: CoordinationLevel = 'delegate';
+/** T-2086: effort values a dsh turn may carry — derived from its capability modes. */
+const DSH_EFFORT_VALUES: ReadonlySet<string> = new Set(
+  effortModes
+    .filter((mode) => getProviderCapabilities('dsh').effort.modes?.includes(mode.id))
+    .map((mode) => mode.effortValue)
+    .filter(Boolean),
+);
 
 function narrowCoordinationLevel(
   value: unknown,
@@ -164,10 +172,12 @@ type DispatchMeta = {
 };
 
 /** فضاء قيم ختم المحرّك (ADR-037). ما سواه = المسار الرسمي. */
-const ENGINE_PROVIDERS = new Set(['kimi', 'deepseek', 'glm']);
+// ADR-227: `local` rides the same field; the server takes the local path only
+// for a new chat naming a local model or a chat already pinned to one.
+const ENGINE_PROVIDERS = new Set(['kimi', 'deepseek', 'glm', 'local']);
 
-function narrowEngineProvider(value: string | null | undefined): 'kimi' | 'deepseek' | 'glm' | null {
-  return value && ENGINE_PROVIDERS.has(value) ? (value as 'kimi' | 'deepseek' | 'glm') : null;
+function narrowEngineProvider(value: string | null | undefined): EngineProvider {
+  return value && ENGINE_PROVIDERS.has(value) ? (value as EngineProvider) : null;
 }
 
 interface UseChatComposerStateArgs {
@@ -187,7 +197,7 @@ interface UseChatComposerStateArgs {
    * only while provider==='claude'; when set, the claude-command carries
    * options.engineProvider so the server points the engine at that vendor.
    */
-  engineProvider: 'kimi' | 'deepseek' | 'glm' | null;
+  engineProvider: EngineProvider;
   permissionMode: PermissionMode | string;
   cyclePermissionMode: () => void;
   claudeModel: string;
@@ -197,6 +207,8 @@ interface UseChatComposerStateArgs {
   kimiModel: string;
   deepseekModel: string;
   glmModel: string;
+  /** T-2086/ADR-224: DeepSeek Harness model; optional so older callers stay valid. */
+  dshModel?: string;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
@@ -447,6 +459,7 @@ export function useChatComposerState({
   kimiModel,
   deepseekModel,
   glmModel,
+  dshModel = '',
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -751,7 +764,9 @@ export function useChatComposerState({
                         ? deepseekModel
                         : displayProvider === 'glm'
                           ? glmModel
-                          : claudeModel,
+                          : displayProvider === 'dsh'
+                            ? dshModel
+                            : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -823,6 +838,7 @@ export function useChatComposerState({
       kimiModel,
       deepseekModel,
       glmModel,
+      dshModel,
       handleBuiltInCommand,
       handleCustomCommand,
       input,
@@ -1097,10 +1113,11 @@ export function useChatComposerState({
             : target === 'kimi' ? kimiModel
               : target === 'deepseek' ? deepseekModel
                 : target === 'glm' ? glmModel
+                : target === 'dsh' ? dshModel
                 : claudeModel
   ), [
     antigravityModel, claudeModel, codexModel, deepseekModel,
-    glmModel, kimiModel, opencodeModel,
+    glmModel, kimiModel, opencodeModel, dshModel,
   ]);
 
   // Single source of truth for building and sending a provider chat command.
@@ -1362,6 +1379,27 @@ export function useChatComposerState({
             ...(wantsAgentMode ? { mode: 'agent' } : {}),
           },
         });
+      } else if (effectiveProvider === 'dsh') {
+        // T-2086/ADR-224: DeepSeek Harness over ACP. Same restriction inputs as a
+        // Claude send (owner decision 2026-11-07): `permissionMode` and the
+        // 'claude-settings' toolsSettings travel with the turn. `reasoningEffort`
+        // only when chosen (capabilities restrict it to low/high/max); no images
+        // or files — dsh's ACP prompt here carries text only.
+        const dshOptions: Record<string, unknown> = {
+          cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
+          resume, toolsSettings, permissionMode, model: dshModel, sessionSummary,
+        };
+        // The shared default mode ('medium') has no dsh value; the selector then
+        // shows its first entry ('standard'), so only a dsh-offered value is sent.
+        if (effortValue && DSH_EFFORT_VALUES.has(effortValue)) {
+          dshOptions.reasoningEffort = effortValue;
+        }
+        result = dispatch({
+          type: 'dsh-command',
+          command: messageContent,
+          sessionId: targetSessionId,
+          options: dshOptions,
+        });
       } else if (effectiveProvider === 'qwen') {
         result = dispatch({
           type: 'qwen-command',
@@ -1426,7 +1464,7 @@ export function useChatComposerState({
     },
     [
       antigravityModel, claudeModel, codexModel, opencodeModel,
-      kimiModel, deepseekModel, glmModel, engineProvider, composerMode, coordinationLevel,
+      kimiModel, deepseekModel, glmModel, dshModel, engineProvider, composerMode, coordinationLevel,
       getToolsSettings, permissionMode, provider, selectedProject, selectedSession, sendMessage,
       composerModelFor,
     ],

@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { assertNotRealHomeUnderTest } from './test-home-guard.js';
+
 const KEY_BYTES = 32;
 const KEY_MODE = 0o600;
 const KEY_ENV = 'NASSAJ_PROVIDER_SECRETS_KEY';
@@ -213,6 +215,7 @@ export function getProviderSecretsKey() {
     key = decodeConfiguredKey(configured);
     if (!key) throw new ProviderSecretsKeyError('provider_secrets_key_env_invalid');
   } else {
+    assertNotRealHomeUnderTest();
     key = loadProviderSecretsKeyFile({
       filePath: path.join(os.homedir(), '.nassaj-provider-secrets.key'),
     });

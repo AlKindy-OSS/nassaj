@@ -218,7 +218,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     spawnAntigravity: async () => {},
     spawnOpenCode: async () => {},
     spawnKimi: async () => {},
-    spawnDeepSeek: async () => {},
     spawnGlm: async () => {},
     getSessionProvider: (sid: string) => SESSION_PROVIDER[sid] ?? null,
     abortClaudeSDKSession: async () => false,
@@ -227,7 +226,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     abortAntigravitySession: () => false,
     abortOpenCodeSession: () => false,
     abortKimiSession: () => false,
-    abortDeepSeekSession: () => false,
     abortGlmSession: () => false,
     resolveToolApproval: () => {},
     isClaudeSDKSessionActive: () => false,
@@ -236,7 +234,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     isAntigravitySessionActive: () => false,
     isOpenCodeSessionActive: () => false,
     isKimiSessionActive: () => false,
-    isDeepSeekSessionActive: () => false,
     isGlmSessionActive: () => false,
     reconnectSessionWriter: () => true,
     attachAntigravitySession: () => 0,
@@ -248,9 +245,9 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     getActiveAntigravitySessions: () => [],
     getActiveOpenCodeSessions: () => [],
     getActiveKimiSessions: () => [],
-    getActiveDeepSeekSessions: () => [],
     getActiveGlmSessions: () => [],
     acquireWriterLease: async () => ({ release: () => {} }),
+    admitCredentialTurn: () => ({ principalId: OWNER_USER_ID, grantedBy: null }),
     ...overrides,
   };
   return {
@@ -941,5 +938,103 @@ describe('B-1411 chat spawn gate, membership flag off (ADR-089)', () => {
     assert.ok(refusal, 'the hidden project gets the 404-equivalent refusal');
     assert.equal(refusal.notStarted, true);
     assert.equal(queried, 0, 'the provider is never dispatched');
+  });
+});
+
+describe('ADR-152 A1 §3.5 credential gate — chat WebSocket entry points (AT1)', () => {
+  beforeEach(() => {
+    __resetBtwFloodStateForTests();
+  });
+
+  /** The gate's refusal for a member with no credential, as credential-gate.js throws it. */
+  const notLinked = (provider: string) => Object.assign(new Error(`You have not linked an account for ${provider}.`), {
+    code: 'CREDENTIAL_NOT_LINKED',
+    statusCode: 409,
+    details: {
+      code: 'CREDENTIAL_NOT_LINKED', provider, reason: 'not_linked',
+      actions: ['link_own', 'request_share'], settingsAnchor: `agents/${provider}`, messageAr: 'لم تربط حساباً',
+    },
+  });
+  const refuseAll = (calls: Array<Record<string, unknown>>) => ({
+    admitCredentialTurn: (input: Record<string, unknown>) => {
+      calls.push(input);
+      throw notLinked(String(input.provider));
+    },
+  });
+
+  test('chat command: refused with a typed CREDENTIAL_NOT_LINKED frame, nothing dispatched', async () => {
+    const gateCalls: Array<Record<string, unknown>> = [];
+    let queried = 0;
+    const { ws } = connect(OWNER_USER_ID, { ...refuseAll(gateCalls), queryClaudeSDK: async () => { queried += 1; } });
+    ws.emit('message', JSON.stringify({ type: 'claude-command', command: 'hi',
+      options: { cwd: PUBLIC_PATH, clientMsgId: 'm-gate', engineProvider: 'glm' } }));
+    for (let i = 0; i < 20; i += 1) await waitForWriterLease();
+    const refusal = ws.sent.find((m) => m.code === 'CREDENTIAL_NOT_LINKED');
+    assert.ok(refusal, 'a typed refusal frame was sent');
+    assert.equal(refusal.kind, 'complete');
+    assert.equal(refusal.notStarted, true);
+    assert.equal((refusal.credential as Record<string, unknown>).settingsAnchor, 'agents/claude');
+    assert.deepEqual((refusal.credential as Record<string, unknown>).actions, ['link_own', 'request_share']);
+    assert.equal(queried, 0, 'no provider process');
+    assert.equal(gateCalls.length, 1);
+    assert.equal(gateCalls[0].actor, OWNER_USER_ID);
+    assert.equal(gateCalls[0].clientEngine, 'glm', 'the client engine reaches the gate');
+  });
+
+  test('/btw: refused before the accept frame, no side query spawned', () => {
+    const gateCalls: Array<Record<string, unknown>> = [];
+    const { ws, sideQueryCalls } = connect(OWNER_USER_ID, refuseAll(gateCalls));
+    emitBtw(ws, { btwId: 'btw-gate', sessionId: 'sess-public-claude', question: 'why?' });
+    const err = findSent(ws, 'btw-error');
+    assert.ok(err);
+    assert.equal(err.code, 'CREDENTIAL_NOT_LINKED');
+    assert.equal((err.credential as Record<string, unknown>).provider, 'claude');
+    assert.equal(findSent(ws, 'btw-accepted'), undefined);
+    assert.equal(sideQueryCalls.length, 0);
+    assert.deepEqual(gateCalls.map((c) => [c.provider, c.sessionId]), [['claude', 'sess-public-claude']]);
+  });
+
+  test('session fork (message-fork): refused before the fork service, for Claude and Codex', () => {
+    for (const sessionId of ['sess-public-claude', 'sess-public-codex']) {
+      const gateCalls: Array<Record<string, unknown>> = [];
+      const { ws, messageForkCalls } = connect(OWNER_USER_ID, refuseAll(gateCalls));
+      ws.emit('message', JSON.stringify({ type: 'message-fork', requestId: `gate-${sessionId}`, sessionId,
+        upToMessageId: 'assistant-uuid-1' }));
+      const error = findSent(ws, 'message-fork-error');
+      assert.ok(error, sessionId);
+      assert.equal(error.code, 'CREDENTIAL_NOT_LINKED');
+      assert.equal((error.credential as Record<string, unknown>).provider, SESSION_PROVIDER[sessionId]);
+      assert.equal(messageForkCalls.length, 0, `${sessionId}: the fork service was not called`);
+    }
+  });
+});
+
+describe('qa M1: an unwired credential gate refuses, it never fails open', () => {
+  beforeEach(() => {
+    __resetBtwFloodStateForTests();
+  });
+
+  test('chat command with no admitCredentialTurn dependency: refused, nothing dispatched', async () => {
+    let queried = 0;
+    const { ws } = connect(OWNER_USER_ID, { admitCredentialTurn: undefined, queryClaudeSDK: async () => { queried += 1; } });
+    ws.emit('message', JSON.stringify({ type: 'claude-command', command: 'hi',
+      options: { cwd: PUBLIC_PATH, clientMsgId: 'm-unwired' } }));
+    for (let i = 0; i < 20; i += 1) await waitForWriterLease();
+    const refusal = ws.sent.find((m) => m.code === 'credential_gate_unavailable');
+    assert.ok(refusal, 'a typed refusal frame was sent');
+    assert.equal(refusal.notStarted, true);
+    assert.equal(queried, 0);
+  });
+
+  test('/btw and message-fork with no gate dependency are refused too', () => {
+    const btw = connect(OWNER_USER_ID, { admitCredentialTurn: undefined });
+    emitBtw(btw.ws, { btwId: 'btw-unwired', sessionId: 'sess-public-claude', question: 'q' });
+    assert.equal(findSent(btw.ws, 'btw-error')?.code, 'credential_gate_unavailable');
+    assert.equal(btw.sideQueryCalls.length, 0);
+    const fork = connect(OWNER_USER_ID, { admitCredentialTurn: undefined });
+    fork.ws.emit('message', JSON.stringify({ type: 'message-fork', requestId: 'unwired', sessionId: 'sess-public-claude',
+      upToMessageId: 'a-1' }));
+    assert.equal(findSent(fork.ws, 'message-fork-error')?.code, 'credential_gate_unavailable');
+    assert.equal(fork.messageForkCalls.length, 0);
   });
 });

@@ -9,7 +9,6 @@
 import * as database from '@/modules/database/index.js';
 import * as store from '@/services/isolation/provider-secrets-store.js';
 import { withProviderSecretsStore } from '@/services/isolation/provider-secrets-store.errors.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import type { IProviderCredentialWriter } from '@/shared/interfaces.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -101,8 +100,6 @@ export const vendorKeyFanoutService = createVendorKeyFanoutService({
   keyVersion: store.PROJECTION_FINGERPRINT_KEY_VERSION,
   now: () => new Date(),
   listMemberIds: listSweepMemberIds,
-  isOwnScope: (provider) => isProviderIsolated(provider),
-  requiresElevatedRole: (provider) => providerCredentialsService.requiresElevatedRole(provider),
   projections,
   secrets,
   audit: (userId, action, metadata, context) => {

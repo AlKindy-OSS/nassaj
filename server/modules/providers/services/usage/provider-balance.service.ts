@@ -23,6 +23,7 @@
  *     يمنع المبالغ في الشريط العلوي، وبطاقة الاشتراك تعرض مبلغاً أصلاً.
  */
 
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 import type { VendorKey } from '@/modules/providers/services/cost/model-vendor.js';
@@ -105,6 +106,15 @@ async function fetchJson(
 // ---------------------------------------------------------------------------
 
 /**
+ * The vendor key a usage read may spend for `userId`: their own, or the
+ * grantor's under a usable ADR-152 grant. A caller with no member gets null.
+ */
+function memberVendorKey(userId: string | number | null, slot: 'kimi'): string | null {
+  if (!isMemberActor(userId)) return null;
+  return resolveSlotKey(credentialPrincipalId(userId, slot), slot)?.key ?? null;
+}
+
+/**
  * ‏`api.moonshot.ai/v1/users/me/balance`. الردّ يلفّ الحقول في `data`، ويحمل
  * `code: 0` عند النجاح. `available_balance` وحده إلزامي: الشقّان الآخران
  * يُنقَلان حين يكونان رقمين، ولا يُلفَّقان بصفر حين يغيبان.
@@ -113,14 +123,9 @@ async function readMoonshotBalance(
   userId: string | number | null,
   deps: ProviderBalanceDeps,
 ): Promise<ProviderBalance | null> {
-  // T-1260 — see the twin note in provider-quota.service.ts: the env bypass
-  // outranks the store and stays, because removing it would change which
-  // credential this call spends. Wave A converts the store read only.
-  const key =
-    deps.credential
-    ?? process.env.KIMI_API_KEY
-    ?? resolveSlotKey(credentialPrincipalId(userId, 'kimi'), 'kimi', { sharedFallback: false })?.key
-    ?? null;
+  // B-1744 (ADR-152 A1): the requesting member's own key or a grantor's, never
+  // a key in the server environment. No key ⇒ "not linked" (null), no call.
+  const key = deps.credential ?? memberVendorKey(userId, 'kimi');
   if (!key) return null;
 
   const body = asRecord(

@@ -38,11 +38,10 @@ process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
 const { VENDOR_KEY_CATALOGUE, CANONICAL_VENDOR_IDS } = await import('../../../../../shared/vendors.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { resolveSlotKey } = await import('@/services/isolation/provider-slot-key.js');
+const { KNOWN_PROVIDERS } = await import('@/services/isolation/known-providers.js');
 const { resolveProviderEnv } = await import('@/services/isolation/resolve-provider-env.js');
 const { ELIGIBLE_ENGINE_PROVIDERS } = await import('@/services/isolation/provider-anthropic-endpoints.js');
 const { QWEN_PLAN_KEY_ENV } = await import('@/services/isolation/opencode-qwen-plan.js');
-const { KNOWN_PROVIDERS, setProviderSharingConfig, _resetProviderSharingCache } =
-  await import('@/services/provider-sharing.js');
 const { DELEGATE_PROVIDERS, buildVendorDelegateMcp } =
   await import('./vendor-delegate-mcp.js');
 const { OPENCODE_CREDENTIAL_TARGETS } =
@@ -117,21 +116,17 @@ describe('reverse drift: server key readers <-> catalogue rows', () => {
 });
 
 describe('canonical records are unreadable by every slot reader', () => {
-  it('resolveSlotKey refuses a canonical id in both spellings and both fallback modes', () => {
+  it('resolveSlotKey refuses a canonical id in both spellings, with or without a member', () => {
     for (const vendorId of CANONICAL_VENDOR_IDS) {
       for (const slot of [vendorId, `vendor:${vendorId}`]) {
-        for (const sharedFallback of [true, false]) {
-          assert.throws(() => resolveSlotKey(MEMBER, slot as never, { sharedFallback }), TypeError);
-          assert.throws(() => resolveSlotKey(null, slot as never, { sharedFallback }), TypeError);
-        }
+        assert.throws(() => resolveSlotKey(MEMBER, slot as never), TypeError);
+        assert.throws(() => resolveSlotKey(null, slot as never), TypeError);
       }
     }
   });
 
   it('resolveProviderEnv never hands a canonical key to any known provider', () => {
     seedCanonicalKeys();
-    _resetProviderSharingCache();
-    setProviderSharingConfig(Object.fromEntries(KNOWN_PROVIDERS.map((p: string) => [p, 'isolated'])));
     const secrets = CANONICAL_VENDOR_IDS.map(SECRET);
     // Non-vacuous: the isolated branch really ran (not the shared early return).
     assert.ok(resolveProviderEnv(MEMBER, 'claude', {}, 'agent').CLAUDE_CONFIG_DIR);

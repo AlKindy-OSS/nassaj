@@ -39,22 +39,18 @@ for (const name of ['KIMI_API_KEY', 'DEEPSEEK_API_KEY', 'GLM_API_KEY']) delete p
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
 const { initializeDatabase, closeConnection, userDb, credentialGrantsDb } = await import('@/modules/database/index.js');
+const { SYSTEM_ACTOR } = await import('./credential-actor.js');
 const shared = await import('../../../shared/engineProviders.js');
 const endpoints = await import('./provider-anthropic-endpoints.js');
 const { applyClaudeEngineProviderEnv } = await import('./apply-claude-engine-provider-env.js');
 const { resolveSpawnEngine, OFFICIAL_ENGINE } = await import('./engine-pin.js');
 const { resolveProviderEnv } = await import('./resolve-provider-env.js');
+const { KNOWN_PROVIDERS } = await import('./known-providers.js');
 const {
   credentialPrincipalId,
   resolveCredentialPrincipal,
   GRANTABLE_PROVIDERS,
 } = await import('./credential-principal.js');
-const {
-  KNOWN_PROVIDERS,
-  isProviderIsolated,
-  setProviderSharingConfig,
-  _resetProviderSharingCache,
-} = await import('../provider-sharing.js');
 const {
   VENDOR_SECRET_PROVIDERS,
   setProviderKey,
@@ -66,7 +62,6 @@ const { sanitizeVendorAgentEnv, sanitizeHostSecretEnv } = await import('./saniti
 const { VENDOR_RUNTIME } = await import('@/modules/providers/index.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
 
 const owner = userDb.createUser('survival-owner', 'hash', 'user');
 const grantee = userDb.createUser('survival-grantee', 'hash', 'user');
@@ -194,17 +189,11 @@ describe('credential policy: key slots and grants', () => {
     for (const id of ['kimi', 'deepseek', 'glm', 'qwen']) {
       assert.ok(KNOWN_PROVIDERS.includes(id), `${id} must stay in KNOWN_PROVIDERS`);
       assert.ok(VENDOR_SECRET_PROVIDERS.includes(id), `${id} must stay a secret slot`);
-      assert.equal(isProviderIsolated(id), true, `${id} must default to per-user isolation`);
     }
     for (const id of ENGINES) {
       assert.ok(GRANTABLE_PROVIDERS.includes(id), `${id} must stay grantable`);
     }
     assert.equal(GRANTABLE_PROVIDERS.includes('qwen'), false, 'the personal Qwen key is never grantable');
-  });
-
-  it('never lets the personal Qwen slot become an operator-wide account', () => {
-    setProviderSharingConfig({ qwen: 'shared' });
-    assert.equal(isProviderIsolated('qwen'), true);
   });
 
   it('resolves a grantee to the owner for a granted engine, and spends the owner key', () => {
@@ -244,18 +233,13 @@ describe('cage: operator credentials of retired bodies stay masked', () => {
   };
 
   for (const launching of ['claude', 'opencode', 'codex', 'agy']) {
-    for (const isolated of [true, false]) {
-      it(`masks the hermes and kimi credentials for a ${isolated ? 'isolated' : 'shared'} ${launching} launch`, () => {
-        const plan = cageMountPlan(
-          { provider: launching, userId: 7 },
-          { ...fakeFs, isProviderIsolated: () => isolated },
-        );
-        assert.ok(plan.maskFiles.includes(hermesCredential), 'the hermes credential must be masked');
-        assert.ok(plan.maskFiles.includes(kimiCredential), 'the kimi credential must be masked');
-        assert.equal(plan.writePaths.includes(hermesCredential), false);
-        assert.equal(plan.writePaths.includes(kimiCredential), false);
-      });
-    }
+    it(`masks the hermes and kimi credentials for a ${launching} launch`, () => {
+      const plan = cageMountPlan({ provider: launching, userId: 7 }, fakeFs);
+      assert.ok(plan.maskFiles.includes(hermesCredential), 'the hermes credential must be masked');
+      assert.ok(plan.maskFiles.includes(kimiCredential), 'the kimi credential must be masked');
+      assert.equal(plan.writePaths.includes(hermesCredential), false);
+      assert.equal(plan.writePaths.includes(kimiCredential), false);
+    });
   }
 });
 
@@ -314,7 +298,7 @@ describe('env sanitizer: vendor and harness namespaces are still stripped', () =
       assert.equal(name in clean, false, `${name} must not reach a provider child`);
     }
 
-    const resolved = resolveProviderEnv(null, 'claude', hostile);
+    const resolved = resolveProviderEnv(SYSTEM_ACTOR as never, 'claude', hostile);
     for (const name of ['NASSAJ_QWEN_PLAN_API_KEY', 'DASHSCOPE_API_KEY', 'BAILIAN_API_KEY']) {
       assert.equal(name in resolved, false, `${name} must not reach a Claude spawn`);
     }

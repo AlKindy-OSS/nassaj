@@ -1,0 +1,9 @@
+{
+  "versions": {
+    "2.1.312": {
+      "probe": "claude-local-engine.header-echo.test.ts",
+      "pass": 14,
+      "provenAt": "2026-11-09T23:36:01.894Z"
+    }
+  }
+}

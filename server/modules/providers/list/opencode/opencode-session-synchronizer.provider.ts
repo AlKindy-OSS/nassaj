@@ -5,6 +5,8 @@ import Database from 'better-sqlite3';
 
 import { participantsDb, sessionsDb } from '@/modules/database/index.js';
 import { redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
+// eslint-disable-next-line boundaries/no-unknown -- B-1757: the same title cleaner session-title-source uses.
+import { toTitleText } from '@/services/session-title-text.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import {
   normalizeProviderTimestamp,
@@ -13,6 +15,7 @@ import {
   readOptionalString,
 } from '@/shared/utils.js';
 
+import { stripRuntimeInstructionsPrefix } from '../../../../../shared/documentSharingInstructions.js';
 import {
   isPlaceholderSessionTitle,
   isReplaceableStoredTitle,
@@ -25,6 +28,7 @@ import {
   resolveOpenCodeDataHomes,
 } from './opencode-home.js';
 import { collectOpenCodeSessionSecrets } from './opencode-redaction-secrets.js';
+import { unwrapOpenCodeRunArgument } from './opencode-sessions.provider.js';
 
 type OpenCodeSessionRow = {
   id: string;
@@ -260,6 +264,11 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
    * is a placeholder, never a name. A stored name is kept — a rename included —
    * unless it is replaceable, or it is only the derived first prompt and
    * OpenCode has since generated a real title, which then wins.
+   *
+   * B-1757: OpenCode's title agent reads the whole first prompt, so when that
+   * prompt opened with Nassaj's runtime prefix the title describes the prefix
+   * ("Nassaj document sharing…"). Then the user's question names the session,
+   * and a stored name that is only that title is replaced too.
    */
   private resolveSessionName(
     db: Database.Database,
@@ -268,23 +277,29 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     existingName: string | null | undefined,
     redact: (text: string | undefined) => string | undefined,
   ): string | undefined {
-    const rowTitle = readOptionalString(rawRowTitle);
-    const realRowTitle = rowTitle && !isPlaceholderSessionTitle(rowTitle) ? redact(rowTitle) : undefined;
-    const firstPrompt = () => this.readFirstPromptTitle(db, sessionId, redact);
+    const rowTitle = toTitleText(readOptionalString(rawRowTitle));
+    const generatedTitle = rowTitle && !isPlaceholderSessionTitle(rowTitle) ? redact(rowTitle) : undefined;
+    const prompt = this.readFirstPrompt(db, sessionId, redact);
+    const realRowTitle = prompt.injectedPrefix ? undefined : generatedTitle;
 
     if (existingName && !isReplaceableStoredTitle(existingName)) {
-      const derivedFromPrompt = existingName === normalizeSessionName(firstPrompt(), '');
-      if (!realRowTitle || !derivedFromPrompt) return existingName;
+      const derivedFromPrompt = existingName === normalizeSessionName(prompt.title, '');
+      const fromPrefixTitle = prompt.injectedPrefix && existingName === generatedTitle;
+      if (!fromPrefixTitle && (!realRowTitle || !derivedFromPrompt)) return existingName;
     }
-    return realRowTitle ?? firstPrompt();
+    return realRowTitle ?? prompt.title;
   }
 
-  /** Title text of the first user text part that survives cleaning (bounded scan). */
-  private readFirstPromptTitle(
+  /**
+   * Title text of the first user text part that survives cleaning (bounded
+   * scan), and whether the first user text carried the runtime prefix.
+   */
+  private readFirstPrompt(
     db: Database.Database,
     sessionId: string,
     redact: (text: string | undefined) => string | undefined,
-  ): string | undefined {
+  ): { title: string | undefined; injectedPrefix: boolean } {
+    let injectedPrefix = false;
     try {
       const rows = db.prepare(`
         SELECT p.data AS data
@@ -299,13 +314,20 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
         LIMIT 8
       `).all(sessionId) as Array<{ data: string | null }>;
 
-      for (const row of rows) {
-        const title = promptTitleText(redact(readOptionalString(readJsonRecord(row.data)?.text)));
-        if (title) return title;
+      for (const [index, row] of rows.entries()) {
+        const part = readJsonRecord(row.data);
+        // B-1756: OpenCode's own continue prompt after a compaction is not a question.
+        if (part?.synthetic === true) continue;
+        const stored = readOptionalString(part?.text);
+        const text = stored === undefined ? undefined : unwrapOpenCodeRunArgument(stored);
+        const body = text === undefined ? undefined : stripRuntimeInstructionsPrefix(text);
+        if (index === 0) injectedPrefix = body !== text;
+        const title = promptTitleText(redact(body));
+        if (title) return { title, injectedPrefix };
       }
     } catch {
       // An unreadable opencode.db leaves the session untitled.
     }
-    return undefined;
+    return { title: undefined, injectedPrefix };
   }
 }

@@ -19,6 +19,7 @@ import {
   type SessionAgentRow,
   type SessionParticipantRow,
 } from '@/modules/database/index.js';
+import { publicEngineValue } from '@/services/isolation/local-engine-pin.js';
 import { AppError } from '@/shared/utils.js';
 
 // JS module (allowJs): mtime-cached transcript parser outside the modules tree.
@@ -80,7 +81,7 @@ export const participantsService = {
     return {
       agents: agents as AgentView[],
       harness: provider ?? null,
-      engine: session?.engine_provider ?? null,
+      engine: publicEngineValue(session?.engine_provider ?? null),
     };
   },
 

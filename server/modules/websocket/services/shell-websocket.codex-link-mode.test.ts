@@ -40,7 +40,6 @@ mock.module('node-pty', {
 const { installFakeHarnessOverrides } = await import('@/shared/__tests__/harness-binary-fixtures.js');
 const { acceptFixtureRuntimeCompat, createCodexMachineFixture } = await import('@/shared/tests/codex-release-fixture.js');
 const { initializeDatabase, closeConnection, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { handleShellConnection } = await import('./shell-websocket.service.js');
@@ -123,8 +122,6 @@ const RESUME = { hasSession: true, sessionId: '11111111-2222-7333-8444-555555555
 
 beforeEach(() => {
   process.env[FLAG] = '1';
-  _resetProviderSharingCache();
-  setProviderSharingConfig({ codex: 'isolated' });
 });
 
 after(() => {

@@ -5,10 +5,8 @@
  *
  * These guards run live on nassaj today but had NO integration test: the review
  * flagged that gap explicitly. This suite closes it by driving the REAL code
- * path — the production `provider.routes` router, the real
- * `assertCredentialWriteAllowed` → `providerCredentialsService.requiresElevatedRole`
- * → `isProviderIsolated` chain, and the real in-process provider-sharing policy
- * persisted in a sandboxed SQLite DB. Nothing about the guard is stubbed: only
+ * path — the production `provider.routes` router and the real credential writers
+ * against a sandboxed SQLite DB and HOME. Nothing about the guard is stubbed: only
  * the authentication middleware is faked (a header sets req.user.{id,role}),
  * exactly as authenticateToken populates it in production and as the sibling
  * provider-api-key.routes suite already does. The 403 is thrown at the
@@ -19,11 +17,10 @@
  *  - POST /mcp/servers/global as a member → 403 MCP_GLOBAL_WRITE_FORBIDDEN;
  *    as an owner the same request clears the role gate (fails later at payload
  *    validation, proving the 403 is role-driven not blanket).
- *  - POST /:provider/api-key for a SHARED provider (opencode, default policy) as
- *    a member → 403 CREDENTIAL_WRITE_FORBIDDEN; as an owner it clears the gate.
- *  - The same route for that provider set ISOLATED in the real policy → a member
- *    is NOT blocked (guard no-ops), proving the 403 keys on the live sharing
- *    policy rather than a hardcoded rule.
+ *  - ADR-152 A1 (T-2083) condition 2: POST /:provider/api-key has no role gate
+ *    any more — every write lands in the REQUESTER's own tree. A member's and an
+ *    admin's opencode key each land in their own auth.json, never the operator's
+ *    (there is no shared tree and no CREDENTIAL_WRITE_FORBIDDEN).
  */
 
 import assert from 'node:assert/strict';
@@ -37,10 +34,6 @@ import express, { type NextFunction, type Request, type Response } from 'express
 
 import providerRoutes from '@/modules/providers/provider.routes.js';
 import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
-import {
-  setProviderSharingConfig,
-  _resetProviderSharingCache,
-} from '@/services/provider-sharing.js';
 import { AppError } from '@/shared/utils.js';
 
 let server: ReturnType<express.Express['listen']>;
@@ -116,13 +109,11 @@ before(async () => {
   sandboxHome = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-write-guard-'));
   (os as unknown as { homedir: () => string }).homedir = () => sandboxHome;
 
-  // Sandbox the DB so isProviderIsolated resolves the real sharing policy from a
-  // hermetic store, and reset the in-process cache so it reloads from it.
+  // Sandbox the DB so every write and audit row stays hermetic.
   previousDatabasePath = process.env.DATABASE_PATH;
   closeConnection();
   process.env.DATABASE_PATH = path.join(sandboxHome, 'auth.db');
   await initializeDatabase();
-  _resetProviderSharingCache();
 
   const app = buildApp();
   await new Promise<void>((resolve) => {
@@ -141,7 +132,6 @@ after(async () => {
   } else {
     process.env.DATABASE_PATH = previousDatabasePath;
   }
-  _resetProviderSharingCache();
   await fs.rm(sandboxHome, { recursive: true, force: true });
 });
 
@@ -173,55 +163,47 @@ test('POST /mcp/servers/global as an owner clears the role gate (403 is role-dri
   assert.equal(res.body.error?.code, 'MCP_NAME_REQUIRED');
 });
 
-// ----------------- Shared provider credential write: policy-driven gate -----------------
+// ----------------- ADR-152 A1 condition 2: every credential write is the caller's own -----------------
 
-test('POST /:provider/api-key for a SHARED provider as a member → 403 CREDENTIAL_WRITE_FORBIDDEN', async () => {
-  // opencode defaults to 'shared' in the sharing policy → writing its key touches
-  // the operator's shared tree → requiresElevatedRole() is true. Pin it explicitly
-  // so the case does not depend on default drift.
-  setProviderSharingConfig({ opencode: 'shared' });
+const ownOpencodeAuth = (userId: string) =>
+  path.join(sandboxHome, '.nassaj-users', userId, '.local', 'share', 'opencode', 'auth.json');
+const operatorOpencodeAuth = () => path.join(sandboxHome, '.local', 'share', 'opencode', 'auth.json');
 
+async function readKey(file: string, target: string): Promise<string | undefined> {
+  try {
+    return (JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, { key?: string }>)[target]?.key;
+  } catch {
+    return undefined;
+  }
+}
+
+test('ADR-152 A1: a member\'s opencode key lands in the member\'s own tree (no 403, no shared tree)', async () => {
   const res = await call('POST', '/api/providers/opencode/api-key', {
     user: '2',
     role: 'member',
-    body: { apiKey: 'sk-should-never-be-written' },
+    body: { apiKey: 'sk-member-own', target: 'glm' },
   });
-  assert.equal(res.status, 403);
-  assert.equal(res.body.error?.code, 'CREDENTIAL_WRITE_FORBIDDEN');
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await readKey(ownOpencodeAuth('2'), 'glm'), 'sk-member-own');
+  assert.equal(await readKey(operatorOpencodeAuth(), 'glm'), undefined, 'the operator file is never written');
 });
 
-test('POST /:provider/api-key for a SHARED provider as an owner clears the role gate', async () => {
-  setProviderSharingConfig({ opencode: 'shared' });
-
-  // Owner passes the role gate; the empty key is then rejected by the service
-  // with 400 INVALID_API_KEY BEFORE the writer touches disk. A non-403 status
-  // proves the owner was allowed through the guard.
+test('ADR-152 A1 condition 2: an admin\'s write lands in the ADMIN\'s tree, not the operator HOME', async () => {
   const res = await call('POST', '/api/providers/opencode/api-key', {
-    user: '1',
-    role: 'owner',
-    body: { apiKey: '   ' },
+    user: '3',
+    role: 'admin',
+    body: { apiKey: 'sk-admin-own', target: 'glm' },
   });
-  assert.notEqual(res.status, 403);
-  assert.equal(res.status, 400);
-  assert.equal(res.body.error?.code, 'INVALID_API_KEY');
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await readKey(ownOpencodeAuth('3'), 'glm'), 'sk-admin-own');
+  assert.equal(await readKey(operatorOpencodeAuth(), 'glm'), undefined, 'no role writes the operator file');
+  assert.equal(await readKey(ownOpencodeAuth('2'), 'glm'), 'sk-member-own', 'and never another member\'s');
 });
 
-test('POST /:provider/api-key for an ISOLATED provider as a member is NOT gated (guard keys on live policy)', async () => {
-  // Flip opencode to 'isolated' in the real policy: now the write targets the
-  // caller's OWN tree, so requiresElevatedRole() is false and any member may
-  // write. Reaching INVALID_API_KEY (not 403) proves the guard consulted the
-  // live sharing policy rather than a hardcoded provider rule.
-  setProviderSharingConfig({ opencode: 'isolated' });
-
-  const res = await call('POST', '/api/providers/opencode/api-key', {
-    user: '2',
-    role: 'member',
-    body: { apiKey: '   ' },
-  });
-  assert.notEqual(res.status, 403);
-  assert.equal(res.status, 400);
-  assert.equal(res.body.error?.code, 'INVALID_API_KEY');
-
-  // Restore the default so the pinned state never leaks past this suite.
-  setProviderSharingConfig({ opencode: 'shared' });
+test('an empty key is still refused by validation, for every role, before any write', async () => {
+  for (const [user, role] of [['1', 'owner'], ['2', 'member']]) {
+    const res = await call('POST', '/api/providers/opencode/api-key', { user, role, body: { apiKey: '   ' } });
+    assert.equal(res.status, 400, role);
+    assert.equal(res.body.error?.code, 'INVALID_API_KEY', role);
+  }
 });

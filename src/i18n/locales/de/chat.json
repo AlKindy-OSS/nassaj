@@ -148,7 +148,7 @@
     "ariaLabel": "Automatisierte Systemnachricht"
   },
   "sessionNotResumable": {
-    "message": "Diese Sitzung konnte nicht fortgesetzt werden — sie existiert beim Anbieter nicht mehr.",
+    "message": "Diese Sitzung konnte nicht fortgesetzt werden — der Coding-Agent hat sie nicht mehr.",
     "startNew": "Neue Sitzung starten"
   },
   "tools": {
@@ -416,7 +416,7 @@
   },
   "providerSelection": {
     "title": "KI-Assistent wählen",
-    "description": "Anbieter auswählen, um eine neue Unterhaltung zu starten",
+    "description": "Coding-Agent auswählen, um eine neue Unterhaltung zu starten",
     "selectModel": "Modell auswählen",
     "providerInfo": {
       "anthropic": "von Anthropic",
@@ -428,11 +428,11 @@
       "codex": "Bereit, Codex mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "antigravity": "Bereit für Antigravity (agy) mit {{model}}. Schreiben Sie Ihre Nachricht unten.",
       "opencode": "Bereit, OpenCode mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
-      "default": "Wähl oben einen Anbieter, um zu beginnen",
+      "default": "Wähl oben einen Coding-Agenten, um zu beginnen",
       "kimi": "Bereit, Kimi mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "deepseek": "Bereit, DeepSeek mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "glm": "Bereit, GLM mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
-      "claudeEngine": "Bereit: die Claude-Engine läuft auf {{provider}} mit {{model}}. Gib unten deine Nachricht ein."
+      "claudeEngine": "Bereit: der Coding-Agent Claude läuft auf {{provider}} mit {{model}}. Gib unten deine Nachricht ein."
     },
     "antigravity": {
       "activeModel": "Aktives Modell",
@@ -445,10 +445,10 @@
       "button": "Modelle und Authentifizierungsstatus aktualisieren",
       "refreshing": "Wird aktualisiert…"
     },
-    "providerUnavailable": "Anbieter nicht verfügbar",
+    "providerUnavailable": "Coding-Agent nicht verfügbar",
     "signIn": "Anmelden",
     "addApiKey": "{{provider}}-API-Schlüssel hinzufügen, um zu aktivieren",
-    "engineOnVendor": "Claude-Engine auf {{provider}}"
+    "engineOnVendor": "Claude-Agent auf {{provider}}"
   },
   "session": {
     "continue": {
@@ -598,7 +598,7 @@
     "subagentsSection": "Subagenten",
     "turns_one": "{{count}} Runde",
     "turns_other": "{{count}} Runden",
-    "harnessLine": "Harness: {{harness}}",
+    "harnessLine": "Coding-Agent: {{harness}}",
     "olderModels_one": "{{count}} früheres Modell",
     "olderModels_other": "{{count}} frühere Modelle"
   },

@@ -20,13 +20,14 @@ import {
 } from '../../../constants/providerModelFallbacks';
 import { onApplyServerPreference } from '../../../preferences/preferencesSync';
 import { filterDisabledProviders } from '../../../../shared/disabledProviders';
+import { LOCAL_ENGINE } from '../../../../shared/localEngine';
 // انعكاس المزوّد العام في متجر قراءة-فقط ليستهلكه الهيدر (وغيره) تفاعلياً بلا
 // prop-drilling؛ الكتابة تبقى هنا لا في المتجر (انظر selectedProviderStore.ts).
 import { setSelectedProvider as mirrorSelectedProvider } from '../../../stores/selectedProviderStore';
 import { getProviderCapabilities } from '../constants/providerCapabilities';
 
 import { pickStoredOrCurrent } from './normalizeProviderModel';
-import { claudeSlotCatalogProvider } from './claudeModelSlot';
+import { claudeSlotCatalogProvider, sanitizeClaudeSlotModel } from './claudeModelSlot';
 
 // Re-export pure engine-provider storage helpers so existing callers keep their
 // import path (from './useChatProviderState') without touching ChatInterface.tsx
@@ -120,10 +121,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   // default. `engineProvider` is resolved just above, so the boot read is
   // governed by the engine that is actually stamped.
   const [claudeModel, setClaudeModel] = useState<string>(() => {
-    return sanitizeStoredModel(
-      claudeSlotCatalogProvider(engineProvider),
-      localStorage.getItem('claude-model'),
-    );
+    return sanitizeClaudeSlotModel(engineProvider, localStorage.getItem('claude-model'));
   });
   const [codexModel, setCodexModel] = useState<string>(() => {
     return sanitizeStoredModel('codex', localStorage.getItem('codex-model'));
@@ -147,6 +145,11 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   });
   const [glmModel, setGlmModel] = useState<string>(() => {
     return localStorage.getItem('glm-model') || FALLBACK_DEFAULT_MODEL.glm;
+  });
+  // T-2086/ADR-224: DeepSeek Harness. Its catalog is static (no server models
+  // facet yet), so the stored value is validated against it on boot.
+  const [dshModel, setDshModel] = useState<string>(() => {
+    return sanitizeStoredModel('dsh', localStorage.getItem('dsh-model'));
   });
 
   const [providerModelCatalog, setProviderModelCatalog] = useState<
@@ -201,7 +204,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   // Claude model (passed through unchanged server-side because an engine host is
   // engaged — ADR-037). Reused by the picker.
   const selectClaudeEngineProvider = useCallback(
-    (vendor: VendorProvider, model: string) => {
+    (vendor: VendorProvider | typeof LOCAL_ENGINE, model: string) => {
       setProvider('claude');
       localStorage.setItem('selected-provider', 'claude');
       persistEngineProvider(vendor);
@@ -239,6 +242,12 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     if (targetProvider === 'glm') {
       setGlmModel(model);
       localStorage.setItem('glm-model', model);
+      return;
+    }
+
+    if (targetProvider === 'dsh') {
+      setDshModel(model);
+      localStorage.setItem('dsh-model', model);
       return;
     }
 
@@ -360,6 +369,10 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       fallbackProviders.push(p);
     });
 
+    // T-2086/ADR-224: dsh's catalog is the static list dsh 0.2.2-rc.1 offers;
+    // there is no /api/providers/dsh/models to ask, so it is not a "fallback".
+    nextCatalog.dsh = PROVIDER_FALLBACK_MODELS.dsh;
+
     if (fallbackProviders.length > 0) {
       console.warn(
         `Provider model catalog using embedded fallback for: ${fallbackProviders.join(', ')}.`,
@@ -433,7 +446,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       // when one is engaged. Read through the ref because this subscription is
       // registered once ([] deps) and would otherwise close over the engine
       // value as it stood at mount.
-      setClaudeModel(sanitizeStoredModel(claudeSlotCatalogProvider(engineProviderRef.current), raw));
+      setClaudeModel(sanitizeClaudeSlotModel(engineProviderRef.current, raw));
     });
     const offCodex = onApplyServerPreference('codex-model', (raw) => {
       setCodexModel(sanitizeStoredModel('codex', raw));
@@ -499,7 +512,9 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
    * normalized to that engine's default). The slot itself stays global — only the
    * engine is per-session — which is unchanged behaviour.
    */
-  const claudeModelCatalog = providerModelCatalog[claudeSlotCatalogProvider(engineProvider)];
+  const claudeSlotProvider = claudeSlotCatalogProvider(engineProvider);
+  // ADR-227: no catalog governs a local model id, so nothing reconciles it.
+  const claudeModelCatalog = claudeSlotProvider === null ? undefined : providerModelCatalog[claudeSlotProvider];
 
   useEffect(() => {
     reconcileProviderModel('claude-model', claudeModelCatalog, claudeModel, setClaudeModel);
@@ -517,6 +532,10 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       setOpenCodeModel,
     );
   }, [providerModelCatalog.opencode, opencodeModel, reconcileProviderModel]);
+
+  useEffect(() => {
+    reconcileProviderModel('dsh-model', providerModelCatalog.dsh, dshModel, setDshModel);
+  }, [providerModelCatalog.dsh, dshModel, reconcileProviderModel]);
 
   useEffect(() => {
     const kimi = providerModelCatalog.kimi;
@@ -766,6 +785,8 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     setDeepSeekModel,
     glmModel,
     setGlmModel,
+    dshModel,
+    setDshModel,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

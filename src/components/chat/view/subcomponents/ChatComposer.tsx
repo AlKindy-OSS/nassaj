@@ -18,6 +18,7 @@ import type {
 import {
   Check,
   ImageIcon,
+  Info,
   XIcon,
   MicIcon,
   Loader2Icon,
@@ -92,6 +93,8 @@ import ImageAttachment from './ImageAttachment';
 import InlineModelSwitcher from './InlineModelSwitcher';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ThinkingModeSelector from './ThinkingModeSelector';
+import CredentialNotLinkedNotice from '../../../credential-link/CredentialNotLinkedNotice';
+import type { CredentialNotLinkedInfo } from '../../../credential-link/credentialNotLinked';
 import TokenUsageSummary from './TokenUsageSummary';
 import { useScheduledMessages } from '../../hooks/useScheduledMessages';
 import type { ScheduledMessage } from '../../hooks/useScheduledMessages';
@@ -246,6 +249,13 @@ interface ChatComposerProps {
   /** Non-null error message to display when the last send failed (e.g. WS disconnected). */
   sendError?: string | null;
   /**
+   * T-2083 — a run refused with CREDENTIAL_NOT_LINKED outside the outbox (a
+   * reply fork): which account is not linked and how to link it. Stays until
+   * dismissed, unlike the transient `sendError` strip.
+   */
+  credentialNotice?: CredentialNotLinkedInfo | null;
+  onDismissCredentialNotice?: () => void;
+  /**
    * T-1295 — رسائل هذه الجلسة التي لم تصل: بطاقةٌ لكلٍّ منها فوق المُؤلِّف،
    * بمعاينة النصّ ومصغّرات الصور وسبب الفشل وأفعاله الثلاثة.
    */
@@ -254,6 +264,15 @@ interface ChatComposerProps {
   onOutboxEdit?: (entryId: string) => void;
   onOutboxDelete?: (entryId: string) => void;
   onOutboxVerify?: (entryId: string) => void;
+  /** T-2087: actions of an outbox card refused by the context guard. */
+  onContextGuardSwitchBack?: (model: string) => void;
+  onContextGuardCompact?: () => void;
+  /**
+   * T-2087: the neutral "couldn't verify this model's capacity" line, shown
+   * once after a switch the server could not measure. Never blocks anything.
+   */
+  contextFitNotice?: string | null;
+  onDismissContextFitNotice?: () => void;
   /**
    * T-1028: النموذج الفعّال للجلسة المفتوحة (مشتقّ من displayProvider في ChatInterface).
    * يُعرَض في مبدّل النموذج المدمج بشريط الأدوات.
@@ -1122,11 +1141,17 @@ export default function ChatComposer({
   isWsConnected = true,
   executingCommand = null,
   sendError = null,
+  credentialNotice = null,
+  onDismissCredentialNotice,
   outboxEntries = EMPTY_OUTBOX_ENTRIES,
   onOutboxRetry,
   onOutboxEdit,
   onOutboxDelete,
   onOutboxVerify,
+  onContextGuardSwitchBack,
+  onContextGuardCompact,
+  contextFitNotice,
+  onDismissContextFitNotice,
   sessionCurrentModel = '',
   providerModelCatalog = {},
   onChangeSessionModel,
@@ -1758,6 +1783,35 @@ export default function ChatComposer({
         </div>
       )}
 
+      {contextFitNotice && (
+        <div
+          role="status"
+          data-testid="context-fit-notice"
+          className="mx-auto mb-2 flex max-w-4xl items-start gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 break-words">{contextFitNotice}</span>
+          {onDismissContextFitNotice && (
+            <button
+              type="button"
+              onClick={onDismissContextFitNotice}
+              aria-label={t('contextGuard.actions.dismissNotice')}
+              className="-my-0.5 shrink-0 rounded-md p-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <XIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {credentialNotice && (
+        <CredentialNotLinkedNotice
+          info={credentialNotice}
+          onDismiss={onDismissCredentialNotice}
+          className="mx-auto mb-2 max-w-4xl"
+        />
+      )}
+
       {/*
         T-1295 — بطاقة لكل رسالةٍ لم تصل، في موضع شريط الخطأ نفسه فوق المُؤلِّف:
         هذا هو المكان الذي ينظر إليه المستخدم لحظة الإرسال. الشريط أعلاه إشعارٌ
@@ -1788,6 +1842,8 @@ export default function ChatComposer({
           onEdit={onOutboxEdit ?? noopOutboxAction}
           onDelete={onOutboxDelete ?? noopOutboxAction}
           onVerify={onOutboxVerify ?? noopOutboxAction}
+          onContextGuardSwitchBack={onContextGuardSwitchBack}
+          onContextGuardCompact={onContextGuardCompact}
         />
       ))}
 

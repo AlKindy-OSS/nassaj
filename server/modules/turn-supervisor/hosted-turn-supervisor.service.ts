@@ -4,8 +4,9 @@ import { readVendorReceiptInvocation,
   appendVendorTranscriptTurnIdempotent,
   VENDOR_RUNTIME,
   writeVendorTranscriptMeta } from '@/modules/providers/index.js';
-import { getConnection } from '@/modules/database/index.js';
-import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { getConnection, sessionsDb } from '@/modules/database/index.js';
+import { isCredentialNotLinked, resolveModelRunEnv } from '@/services/isolation/credential-gate.js';
+import { isLocalEngineValue, isLocalModelId } from '@/services/isolation/local-engine-pin.js';
 
 // eslint-disable-next-line boundaries/no-unknown -- root-verified process context is a builtins-only leaf outside feature barrels.
 import { requireStartupAdmission } from '../../bootstrap-startup-context.js';
@@ -65,7 +66,8 @@ export class HostedTurnSupervisorError extends Error {
     | 'IDENTITY_UNAVAILABLE'
     | 'RECOVERY_AMBIGUOUS'
     | 'RECOVERY_REPLAY_UNAVAILABLE'
-    | 'CONFORMANCE_FAILED',
+    | 'CONFORMANCE_FAILED'
+    | 'LOCAL_ENGINE_UNSUPPORTED',
   options?: ErrorOptions) {
     super(code, options);
     this.name = 'HostedTurnSupervisorError';
@@ -148,13 +150,23 @@ export class HostedTurnSupervisorRuntime {
     private readonly env: NodeJS.ProcessEnv = process.env,
     adapter = createHostedVendorAdapter({
       resolveCredential(provider, userId): string | null {
-        const resolved = resolveProviderEnv(userId, provider, process.env);
-        return resolved[VENDOR_RUNTIME[provider].keyEnv] ?? null;
+        // ADR-152 A1 §3.5: admitted on a present credential (own or granted); a
+        // refusal is "no credential" here (probe false, invoke credential_unavailable).
+        try {
+          const resolved = resolveModelRunEnv(userId, provider, process.env);
+          return resolved[VENDOR_RUNTIME[provider].keyEnv] ?? null;
+        } catch (error) {
+          if (isCredentialNotLinked(error)) return null;
+          throw error;
+        }
       },
     }),
     claudeAdapter = createClaudeSdkTurnAdapter({
       enabled: () => isClaudeSdkMechanicalEnabled(env),
     }),
+    /** ADR-227: a Claude session's engine pin (test seam). */
+    private readonly readEnginePin: (sessionId: string) => string | null = (sessionId) =>
+      sessionsDb.getSessionEnginePin(sessionId)?.engine ?? null,
   ) {
     this.#registry = new TurnAdapterRegistry([adapter, claudeAdapter], {
       issueTerminalProof: this.#proofAuthority.bindIssuer(),
@@ -259,6 +271,8 @@ export class HostedTurnSupervisorRuntime {
     model?: string;
   }): boolean {
     if (!this.enabled({ provider: input.provider, mode: input.mode })) return false;
+    // ADR-227: the supervised Claude role runs on official Anthropic only.
+    if (input.provider === 'claude' && isLocalModelId(input.model)) return false;
     const runtime = input.provider === 'claude'
       ? 'claude_agent_sdk_ephemeral'
       : 'hosted_vendor_ephemeral';
@@ -304,12 +318,28 @@ export class HostedTurnSupervisorRuntime {
     return true;
   }
 
+  /**
+   * ADR-227: a Claude session pinned to a local model server never runs through
+   * this Anthropic-only role. An unreadable pin refuses too.
+   */
+  #assertNotLocalEngineSession(input: HostedSupervisorExecuteInput): void {
+    if (input.provider !== 'claude' || !input.sessionId) return;
+    let storedEngine: string | null;
+    try {
+      storedEngine = this.readEnginePin(input.sessionId);
+    } catch (error) {
+      throw new HostedTurnSupervisorError('LOCAL_ENGINE_UNSUPPORTED', { cause: error });
+    }
+    if (isLocalEngineValue(storedEngine)) throw new HostedTurnSupervisorError('LOCAL_ENGINE_UNSUPPORTED');
+  }
+
   async execute(input: HostedSupervisorExecuteInput): Promise<{
     text: string;
     model: string;
     sessionId: string;
     isNewSession: boolean;
   }> {
+    this.#assertNotLocalEngineSession(input);
     await this.#ensureReady();
     if (!this.supports(input)) throw new HostedTurnSupervisorError('CAPABILITY_UNAVAILABLE');
     if (!Number.isSafeInteger(input.userId) || input.userId < 1 || !input.clientMsgId.trim()) {

@@ -24,6 +24,10 @@ import { useWebPush } from '../../../hooks/useWebPush';
 import { useAuth } from '../../auth';
 import type { AgentCategory, AgentProvider, SettingsProps, SettingsMainTab } from '../types/types';
 import { canOpenSettingsTab, writeSettingsDestination } from '../settingsUrl';
+import {
+  CREDENTIAL_GRANTS_SECTION_ID,
+  revealSettingsSection,
+} from './tabs/agents-settings/sections/content/credentialGrantsAnchor';
 
 import ConnectorsSettingsTab from './tabs/ConnectorsSettingsTab';
 import SettingsCloseButton from './SettingsCloseButton';
@@ -97,6 +101,12 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
       }
     }
   }, [deepLink, isOpen]);
+
+  // T-2083: "ask a member to share" lands on the grant section, in view and focused.
+  const revealGrants = isOpen && deepLink?.tab === 'agents' && deepLink.section === 'credential-grants';
+  useEffect(() => (revealGrants ? revealSettingsSection(CREDENTIAL_GRANTS_SECTION_ID) : undefined), [
+    revealGrants, deepLink,
+  ]);
 
   // Shared links to role-restricted pages must not leave members on an empty
   // settings surface. Replace the unsupported URL in place so Back does not

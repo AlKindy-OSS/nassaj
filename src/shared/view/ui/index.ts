@@ -9,7 +9,7 @@ export { Collapsible, CollapsibleTrigger, CollapsibleContent } from './Collapsib
 export { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator } from './Command';
 export { default as DarkModeToggle } from './DarkModeToggle';
 export { default as ThemeModeSelector } from './ThemeModeSelector';
-export { Dialog, DialogTrigger, DialogContent, DialogTitle } from './Dialog';
+export { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } from './Dialog';
 export { ConfirmDialog } from './ConfirmDialog';
 export type { ConfirmDialogProps, ConfirmDialogTone } from './ConfirmDialog';
 export { Input } from './Input';

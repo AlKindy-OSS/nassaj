@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, beforeEach, describe, it } from 'node:test';
+import { after, beforeEach, describe, it, mock } from 'node:test';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-subscription-token-guard-'));
 const sandboxHome = path.join(sandbox, 'home');
@@ -34,6 +34,24 @@ process.env.XDG_DATA_HOME = path.join(sandbox, 'xdg');
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base64');
 
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const { assertNotClaudeSubscriptionToken, isClaudeSubscriptionToken } =
   await import('./subscription-token-guard.js');
 const { OpenCodeCredentialsWriter } =
@@ -118,26 +136,26 @@ describe('opencode writer', () => {
   });
 
   it('refuses the token and leaves auth.json untouched (never created)', async () => {
-    await assertRefused(() => openCodeWriter.setApiKey(null, SUBSCRIPTION_TOKEN, 'anthropic'));
+    await assertRefused(() => openCodeWriter.setApiKey(MEMBER, SUBSCRIPTION_TOKEN, 'anthropic'));
     assert.equal(fs.existsSync(openCodeAuthPath), false, 'no file created by a refused write');
   });
 
   it('refuses it for every target, not just anthropic', async () => {
     for (const target of ['openai', 'openrouter', 'glm']) {
-      await assertRefused(() => openCodeWriter.setApiKey(null, SUBSCRIPTION_TOKEN, target));
+      await assertRefused(() => openCodeWriter.setApiKey(MEMBER, SUBSCRIPTION_TOKEN, target));
     }
     assert.equal(fs.existsSync(openCodeAuthPath), false);
   });
 
   it('leaves an existing auth.json byte-identical when it refuses', async () => {
-    await openCodeWriter.setApiKey(null, ORDINARY_KEY, 'openai');
+    await openCodeWriter.setApiKey(MEMBER, ORDINARY_KEY, 'openai');
     const before = fs.readFileSync(openCodeAuthPath);
-    await assertRefused(() => openCodeWriter.setApiKey(null, SUBSCRIPTION_TOKEN, 'anthropic'));
+    await assertRefused(() => openCodeWriter.setApiKey(MEMBER, SUBSCRIPTION_TOKEN, 'anthropic'));
     assert.ok(fs.readFileSync(openCodeAuthPath).equals(before));
   });
 
   it('still accepts an ordinary API key', async () => {
-    const result = await openCodeWriter.setApiKey(null, ORDINARY_KEY);
+    const result = await openCodeWriter.setApiKey(MEMBER, ORDINARY_KEY);
     assert.deepEqual(result, { provider: 'opencode', configured: true });
     assert.deepEqual(
       JSON.parse(fs.readFileSync(openCodeAuthPath, 'utf8')).anthropic,
@@ -153,7 +171,7 @@ describe('codex writer', () => {
       spawned += 1;
       throw new Error(`the CLI must not be reached: ${args.length} args`);
     }) as never);
-    await assertRefused(() => writer.setApiKey(null, SUBSCRIPTION_TOKEN));
+    await assertRefused(() => writer.setApiKey(MEMBER, SUBSCRIPTION_TOKEN));
     assert.equal(spawned, 0, 'no process — the token never reaches a child stdin');
   });
 });
@@ -191,7 +209,7 @@ describe('a later token generation (sk-ant-oat02-) is refused everywhere', () =>
 
   it('opencode refuses it for every target and writes nothing', async () => {
     for (const target of ['anthropic', 'openai', 'openrouter', 'glm']) {
-      await assertRefused(() => openCodeWriter.setApiKey(null, NEXT_GENERATION, target));
+      await assertRefused(() => openCodeWriter.setApiKey(MEMBER, NEXT_GENERATION, target));
     }
     assert.equal(fs.existsSync(openCodeAuthPath), false);
   });
@@ -202,7 +220,7 @@ describe('a later token generation (sk-ant-oat02-) is refused everywhere', () =>
       spawned += 1;
       throw new Error('the CLI must not be reached');
     }) as never);
-    await assertRefused(() => writer.setApiKey(null, NEXT_GENERATION));
+    await assertRefused(() => writer.setApiKey(MEMBER, NEXT_GENERATION));
     assert.equal(spawned, 0);
   });
 

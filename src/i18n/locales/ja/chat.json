@@ -148,7 +148,7 @@
     "ariaLabel": "自動システムメッセージ"
   },
   "sessionNotResumable": {
-    "message": "このセッションは再開できません — プロバイダーに存在しなくなりました。",
+    "message": "このセッションは再開できません — コーディングエージェントに存在しなくなりました。",
     "startNew": "新しいセッションを開始"
   },
   "tools": {
@@ -415,7 +415,7 @@
   },
   "providerSelection": {
     "title": "AIアシスタントを選択",
-    "description": "新しい会話を始めるプロバイダーを選択してください",
+    "description": "新しい会話を始めるコーディングエージェントを選択してください",
     "selectModel": "モデルを選択",
     "providerInfo": {
       "anthropic": "Anthropic製",
@@ -427,11 +427,11 @@
       "codex": "{{model}}でCodexを使用する準備ができました。下にメッセージを入力してください。",
       "antigravity": "Antigravity (agy) を {{model}} で使用する準備ができました。下にメッセージを入力してください。",
       "opencode": "{{model}}でOpenCodeを使用する準備ができました。下にメッセージを入力してください。",
-      "default": "上からプロバイダーを選択して開始してください",
+      "default": "上からコーディングエージェントを選択して開始してください",
       "kimi": "{{model}}でKimiを使用する準備ができました。下にメッセージを入力してください。",
       "deepseek": "{{model}}でDeepSeekを使用する準備ができました。下にメッセージを入力してください。",
       "glm": "{{model}}でGLMを使用する準備ができました。下にメッセージを入力してください。",
-      "claudeEngine": "準備完了: Claudeエンジンが{{provider}}上で{{model}}を使用して実行中です。下にメッセージを入力してください。"
+      "claudeEngine": "準備完了: コーディングエージェント Claude が{{provider}}上で{{model}}を使用して実行中です。下にメッセージを入力してください。"
     },
     "antigravity": {
       "activeModel": "アクティブモデル",
@@ -444,10 +444,10 @@
       "button": "モデルと認証状態を更新",
       "refreshing": "更新中…"
     },
-    "providerUnavailable": "プロバイダーは利用できません",
+    "providerUnavailable": "コーディングエージェントは利用できません",
     "signIn": "サインイン",
     "addApiKey": "{{provider}} APIキーを追加して有効化",
-    "engineOnVendor": "{{provider}}上のClaudeエンジン"
+    "engineOnVendor": "{{provider}}上のClaudeエージェント"
   },
   "session": {
     "continue": {
@@ -596,7 +596,7 @@
     "modelsSection": "モデル",
     "subagentsSection": "サブエージェント",
     "turns_other": "{{count}} ターン",
-    "harnessLine": "ハーネス: {{harness}}",
+    "harnessLine": "コーディングエージェント: {{harness}}",
     "olderModels_other": "以前のモデル {{count}} 件"
   },
   "composer": {

@@ -85,6 +85,8 @@ describe('CLI_PROVIDERS — auth-status probe fan-out', () => {
       'codex',
       'antigravity',
       'opencode',
+      // T-2086: dsh is probed through the DeepSeek key status it runs on.
+      'dsh',
     ]);
   });
 });

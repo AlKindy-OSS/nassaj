@@ -97,7 +97,6 @@ function makeDeps() {
     spawnQwen: spawn('qwen'),
     spawnKimi: spawn('kimi'),
     spawnKimiAgent: spawn('kimi-agent'),
-    spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),
     getSessionProvider: (sessionId: string) => sessionRows.get(sessionId)?.provider ?? null,
   } as unknown as Parameters<typeof dispatchProviderCommand>[3];

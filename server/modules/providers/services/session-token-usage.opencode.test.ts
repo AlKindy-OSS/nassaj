@@ -17,7 +17,6 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 
 import { closeConnection, initializeDatabase, userDb } from '@/modules/database/index.js';
-import { _resetProviderSharingCache, setProviderSharingConfig } from '@/services/provider-sharing.js';
 
 import { readSessionTokenUsage, type TokenUsageDeps } from './session-token-usage.service.js';
 
@@ -45,7 +44,6 @@ test('isolated opencode: operator-DB and member-DB sessions are both read, with 
   closeConnection();
   await initializeDatabase();
   try {
-    setProviderSharingConfig({ opencode: 'isolated' });
     userDb.createUser('b1643_owner', 'hash', 'owner');
     const spawner = userDb.createUser('b1643_spawner', 'hash', 'user').id;
     const reader = userDb.createUser('b1643_reader', 'hash', 'user').id;
@@ -74,7 +72,6 @@ test('isolated opencode: operator-DB and member-DB sessions are both read, with 
     assert.deepEqual(fs.readdirSync(path.join(scratch, '.nassaj-users')).sort(), usersBefore, 'no member tree was provisioned');
     assert.equal(fs.existsSync(path.join(scratch, '.nassaj-users', String(reader))), false);
   } finally {
-    _resetProviderSharingCache();
     closeConnection();
     for (const [key, value] of [['HOME', previous.home], ['DATABASE_PATH', previous.db], ['XDG_DATA_HOME', previous.xdg]] as const) {
       if (value === undefined) delete process.env[key];

@@ -53,6 +53,7 @@ describe('quota.surface', () => {
       deepseek: 'cycle',
       glm: 'provider-windows',
       sakana: 'none',
+      dsh: 'none',
     });
   });
 

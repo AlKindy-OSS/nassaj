@@ -79,9 +79,22 @@ describe('Codex CLI Turn Supervisor adapter', () => {
     ]);
   });
 
+  it('ADR-152 A1 §3.5: the default env is the credential gate — an unlinked member never spawns', async () => {
+    let spawned = 0;
+    const adapter = createCodexCliAdapter({
+      governanceProbe: () => true, executableProbe: async () => true, ...machine,
+      spawnCapture: async () => { spawned += 1; return { code: 0, stdout: jsonl(), stderr: '' }; },
+    });
+    await assert.rejects(adapter.invoke({
+      provider: 'codex', userId: 1, model: 'gpt', prompt: 'x', persist: false, writer: { capture() {} },
+    }), (error: Error & { cause?: { code?: string } }) => error.cause?.code === 'CREDENTIAL_NOT_LINKED');
+    assert.equal(spawned, 0);
+  });
+
   it('fails closed on effects, non-ephemeral invocation, empty final output and abort', async () => {
     const adapter = createCodexCliAdapter({
       governanceProbe: () => true, executableProbe: async () => true, ...machine,
+      resolveEnv: () => ({ CODEX_HOME: '/isolated/codex', PATH: '/usr/bin' }),
       spawnCapture: async () => ({ code: 0, stdout: '', stderr: '' }),
     });
     const base = {

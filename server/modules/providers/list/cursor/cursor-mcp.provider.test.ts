@@ -34,16 +34,16 @@ test('Cursor user MCP writer uses the same per-user HOME as cursor-agent', async
     scope: 'user',
     transport: 'stdio',
     command: 'node',
-    userId: 'user-a',
+    userId: '11',
   });
 
   assert.deepEqual(
-    (await provider.listServersForScope('user', { userId: 'user-a' })).map(({ name }) => name),
+    (await provider.listServersForScope('user', { userId: '11' })).map(({ name }) => name),
     ['private-a'],
   );
-  assert.deepEqual(await provider.listServersForScope('user', { userId: 'user-b' }), []);
+  assert.deepEqual(await provider.listServersForScope('user', { userId: '12' }), []);
 
-  const configPath = path.join(root, 'user-a', '.cursor', 'mcp.json');
+  const configPath = path.join(root, '11', '.cursor', 'mcp.json');
   assert.match(await readFile(configPath, 'utf8'), /private-a/);
   assert.equal((await stat(configPath)).mode & 0o777, 0o600);
   assert.equal((await stat(path.dirname(configPath))).mode & 0o777, 0o700);
@@ -58,11 +58,11 @@ test('Cursor project MCP stays workspace-scoped and does not touch user HOME', a
     transport: 'http',
     url: 'https://example.test/mcp',
     workspacePath,
-    userId: 'user-a',
+    userId: '11',
   });
 
   assert.deepEqual(
-    (await provider.listServersForScope('project', { workspacePath, userId: 'user-b' }))
+    (await provider.listServersForScope('project', { workspacePath, userId: '12' }))
       .map(({ name }) => name),
     ['project-a'],
   );
@@ -78,7 +78,7 @@ test('real cursor-agent reader discovers both user and project writer outputs', 
   }
 
   const provider = new CursorMcpProvider();
-  const userId = 'real-reader-user';
+  const userId = '38';
   const workspacePath = path.join(root, 'real-reader-workspace');
   await provider.upsertServer({
     name: 'user_canary',

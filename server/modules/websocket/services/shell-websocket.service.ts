@@ -19,7 +19,6 @@ import {
 } from '@/modules/database/repositories/project-access.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { installManagedClaudeTerminalEnv } from '@/services/isolation/managed-claude-terminal-env.js';
 import {
   HarnessBinaryUnresolvedError,
@@ -235,36 +234,6 @@ export function isProviderLoginCommandMismatch(
   }
   const allowedForProvider = PROVIDER_CANONICAL_LOGIN_COMMANDS.get(provider);
   return !allowedForProvider || !allowedForProvider.has(command);
-}
-
-/** Roles permitted to write a credential into a SHARED (operator) Claude tree. */
-const SHARED_CLAUDE_WRITE_ROLES: readonly string[] = ['owner', 'admin'];
-
-/**
- * B-1260 — PRE-SPAWN CREDENTIAL-WRITE PERMISSION. `claude auth login` writes a
- * full OAuth credential (`.credentials.json`) into the config dir the spawn
- * resolves to. Under the ISOLATED policy that is the caller's OWN tree, so any
- * role may link their own account. Under the SHARED policy every claude spawn
- * runs on the OPERATOR's `~/.claude`, so a member's login would OVERWRITE the
- * operator credential every other user depends on — a member must be refused
- * BEFORE the CLI runs and destroys the shown code. `setup-token` prints to
- * stdout and persists nothing to the tree, so it is not gated here; only the
- * tree-writing `claude auth login` is.
- *
- * Exported for the regression suite.
- */
-export function isClaudeLoginCredentialWriteAllowed(
-  initialCommand: string,
-  role: string | null | undefined,
-  isClaudeShared: boolean,
-): boolean {
-  if (initialCommand.trim() !== 'claude auth login') {
-    return true;
-  }
-  if (!isClaudeShared) {
-    return true;
-  }
-  return typeof role === 'string' && SHARED_CLAUDE_WRITE_ROLES.includes(role);
 }
 
 /**
@@ -927,8 +896,8 @@ export function buildShellCommand(
 /**
  * Maps the provider declared by a shell init payload onto a credential-isolation
  * provider key understood by `resolveProviderEnv`. Providers without a per-user
- * credential knob (e.g. cursor, plain-shell) fall through to `claude`'s policy
- * gate, which returns the base env unchanged when that provider is shared.
+ * credential knob (e.g. plain-shell) fall through to `claude`, whose isolation
+ * case points the shell at the caller's own tree (ADR-152 A1).
  */
 /**
  * Reads an env value by case-insensitive key. PATH is `PATH` on Linux but the
@@ -1337,35 +1306,9 @@ export function handleShellConnection(
           return;
         }
 
-        // B-1260 — credential-write permission: under the SHARED claude policy a
-        // full `claude auth login` overwrites the operator credential, so only
-        // owner/admin may run it; members are refused BEFORE the CLI prints (and
-        // then destroys) the one-time code. Isolated users write their own tree
-        // and pass. isProviderIsolated resolves the same policy resolveProviderEnv
-        // consults for the spawn env, so the gate and the write can never drift.
-        const isClaudeShared =
-          readIsolationProvider(provider) === 'claude' && !isProviderIsolated('claude');
-        if (!isClaudeLoginCredentialWriteAllowed(initialCommand, userRole, isClaudeShared)) {
-          console.error(
-            `[ERROR] Shell WebSocket rejected: role '${userRole ?? 'none'}' may not run `
-            + 'claude auth login against the shared operator credential'
-          );
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message:
-                  'Linking Claude on this shared server is limited to administrators. '
-                  + 'Ask an owner or admin to link the account, or set a personal API key instead.',
-                // Dedicated code so the modal renders a tailored, localized "ask an
-                // owner/admin to link" message rather than the generic role refusal.
-                code: 'shared_link_admin_only',
-              })
-            );
-          }
-          ws.close(4403, 'Forbidden');
-          return;
-        }
+        // A login command always writes the CALLER's own tree (the PTY runs with
+        // honorGrants:false and every provider is isolated, ADR-152 A1), so every
+        // role may link its own account and no role may write another's tree.
 
         // B-36 / B-1411: same launch gate as chat (404-equivalent), before any
         // reattach or spawn: visibility with the membership flag off, the

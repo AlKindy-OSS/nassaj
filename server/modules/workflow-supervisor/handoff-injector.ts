@@ -90,6 +90,8 @@ export type ResumeTurnParams = {
   env: NodeJS.ProcessEnv;
   /** Hosts the profile's engine verdict authorized; the runner re-checks env against them (B-446). */
   engineHosts?: Set<string> | null;
+  /** ADR-227: origins a local-engine verdict authorized; re-checked whole by the runner. */
+  engineOrigins?: Set<string> | null;
   maxHoldMs: number;
 };
 
@@ -358,15 +360,16 @@ export async function injectForConversation(
   }
 
   try {
-    // (6) Build env (§هـ-1 strict + leaf-only env hygiene) & the coalesced prompt.
+    // (6) Build env (§هـ-1 member-only + credential gate, ADR-152 A1) & the coalesced prompt.
     let spawnEnv: NodeJS.ProcessEnv;
     let engineHosts: Set<string> | null = null;
+    let engineOrigins: Set<string> | null = null;
+    let localModel: string | null = null;
     try {
       const profile = await (deps.resolveProfile ?? resolveClaudeRunProfileOrThrow)({
         userId,
         sessionId: conversationId,
         baseEnv: env,
-        strictUser: true,
         authoritativeStoredPin: true,
         requireKnownResumePin: true,
         failOnAmbiguous: true,
@@ -374,6 +377,8 @@ export async function injectForConversation(
       });
       spawnEnv = profile.env;
       engineHosts = profile.engineHosts ?? null;
+      engineOrigins = profile.engineOrigins ?? null;
+      localModel = profile.local?.model ?? null;
     } catch (error) {
       audit({ event: 'tierb-denied-env', error: error instanceof Error ? error.message : String(error) });
       return { ...base, event: 'denied' };
@@ -410,11 +415,14 @@ export async function injectForConversation(
       projectPath: input.projectPath,
       prompt,
       systemFraming: SYSTEM_FRAMING,
-      model: injectorModel(env),
+      // ADR-227: a local-pinned conversation runs its server's model; the
+      // injector's Claude model id would be sent to the local server.
+      model: localModel ?? injectorModel(env),
       permissionMode: readSessionPermissionMode(input.jsonlPath),
       disallowedTools: LEAF_ONLY_DISALLOWED_TOOLS,
       env: spawnEnv,
       engineHosts,
+      engineOrigins,
       maxHoldMs: injectorMaxHoldMs(env),
     });
 

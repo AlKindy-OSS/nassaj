@@ -22,6 +22,7 @@ import {
 
 import { Badge, Button, Dialog, DialogContent, DialogTitle, Input } from '../../../../shared/view/ui';
 import { engineProviderLabel } from '../../../../../shared/engineProviders';
+import { LOCAL_ENGINE, isLocalModelId } from '../../../../../shared/localEngine';
 import type { LLMProvider, ProviderModelsCacheInfo, ProviderModelsDefinition } from '../../../../types/app';
 import { resolveEffectiveEngine } from './engineGuard';
 import type {
@@ -302,15 +303,15 @@ function ModelsContent({
   // carries a stamp, or its active model betrays one (engineGuard.ts). If so the
   // panel is READ-ONLY: pinning a Claude id here would send a model the engine
   // cannot serve, and re-pointing the engine needs the restamp contract (B-246).
-  const effectiveEngine = resolveEffectiveEngine(
-    sessionEngineProvider,
-    currentProvider,
-    currentModel,
-    providerModelCatalog,
-  );
+  // ADR-227: a local model id marks a local chat even without the stamp.
+  const effectiveEngine = currentProvider === 'claude' && isLocalModelId(currentModel)
+    ? LOCAL_ENGINE
+    : resolveEffectiveEngine(sessionEngineProvider, currentProvider, currentModel, providerModelCatalog);
   const isEngineLocked = effectiveEngine !== null;
-  // ADR-073 §6: one label source for the engine axis, never the wire id.
-  const engineLabel = effectiveEngine ? engineProviderLabel(effectiveEngine) : null;
+  // ADR-073 §6: one label source for the engine axis, never the wire id (nor a local pin).
+  const engineLabel = effectiveEngine === LOCAL_ENGINE
+    ? t('localModels.engineShort', { defaultValue: 'Local' })
+    : effectiveEngine ? engineProviderLabel(effectiveEngine) : null;
   // While locked, the list must come from the ENGINE's catalog — the body's
   // catalog is exactly what must not be offered.
   const catalogProvider = (effectiveEngine ?? currentProvider) as LLMProvider;
@@ -481,7 +482,9 @@ function ModelsContent({
               className="mt-2 h-8 w-full rounded-xl px-3"
             >
               <RefreshCw className={providerModelsRefreshing ? 'animate-spin' : ''} />
-              {providerModelsRefreshing ? 'Refreshing catalogs...' : 'Refresh from providers'}
+              {providerModelsRefreshing
+                ? t('commandResult.models.refreshingCatalogs')
+                : t('commandResult.models.refreshAll')}
             </Button>
           </div>
         </div>

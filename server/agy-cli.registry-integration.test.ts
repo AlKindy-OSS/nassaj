@@ -136,10 +136,8 @@ before(async () => {
   // database: mock ONLY the two leaf repositories agy-cli writes through, so the
   // real barrel (`./modules/database/index.js`) re-exports these doubles while
   // every OTHER consumer's import (appConfigDb / auditLogDb / userDb, used by the
-  // REAL provider-sharing + isolation modules we deliberately keep live) stays
-  // intact. getConnection() is lazy (per-method), so importing the real barrel
-  // never opens sqlite as long as those real repos are never invoked — and they
-  // are not on the null-userId (shared) path the ws double drives.
+  // REAL isolation modules we deliberately keep live) stays intact; the member
+  // spawn path may log their reads against the case database as best-effort.
   mock.module('@/modules/database/repositories/participants.db.js', {
     namedExports: { participantsDb: { recordSpawn: () => {} } },
   });
@@ -194,13 +192,15 @@ beforeEach(() => {
 });
 
 // A WebSocketWriter-like double: spawnAntigravity reads ws.ws (raw socket) for the
-// connectionId, ws.userId for isolation (left undefined → shared, no IO), and
+// connectionId, ws.userId for isolation (member 7: their own agy tree), and
 // ws.send for live forwarding. We capture forwarded payloads to prove the live
 // path AND the buffered path agree.
 function makeWs() {
   const raw = {}; // a fresh raw socket → a fresh connectionId each ws
   const forwarded: any[] = [];
   return {
+    // ADR-152 A1 §3.4: an agy run needs a signed-in member.
+    userId: 7,
     ws: raw,
     forwarded,
     send(msg: any) {
@@ -497,7 +497,7 @@ test('RESUME clean buffer: a second run on the same sessionId does not replay th
     session_id: sid,
     provider: 'antigravity',
     cwd: HOME_DIR,
-    jsonl_path: path.join(HOME_DIR, '.gemini', 'antigravity-cli', 'brain', 'vanished-brain', '.system_generated', 'logs', 'transcript.jsonl'),
+    jsonl_path: path.join(HOME_DIR, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain', 'vanished-brain', '.system_generated', 'logs', 'transcript.jsonl'),
   });
 
   const ws2 = makeWs();
@@ -527,7 +527,7 @@ test('RESUME clean buffer (real second spawn): drop-then-open clears the prior t
   // Make the resume path believe the brain is alive: point the DB row at a brain
   // folder that exists on disk under the temp HOME, and create that folder.
   const brainUUID = 'brain-resume-real';
-  const brainPath = path.join(HOME_DIR, '.gemini', 'antigravity-cli', 'brain', brainUUID);
+  const brainPath = path.join(HOME_DIR, '.nassaj-users', '7', '.gemini', 'antigravity-cli', 'brain', brainUUID);
   fsmod.mkdirSync(brainPath, { recursive: true });
   dbRows.set(sid, {
     session_id: sid,

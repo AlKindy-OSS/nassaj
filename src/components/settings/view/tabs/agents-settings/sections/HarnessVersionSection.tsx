@@ -11,6 +11,7 @@ import { useHarnessVersion } from '../../../../../../hooks/useHarnessVersion';
 import { Button } from '../../../../../../shared/view/ui';
 import SettingsCard from '../../../SettingsCard';
 
+import HarnessIntegrationUpdateLine from './HarnessIntegrationUpdateLine';
 import HarnessUpdateConfirmDialog from './HarnessUpdateConfirmDialog';
 
 const busy = new Set(['queued', 'running']);
@@ -148,11 +149,11 @@ export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemT
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h4 className="text-[15px] font-medium text-foreground">{t('harnessVersion.title', { defaultValue: 'إصدار أداة المزوّد' })}</h4>
+            <h4 className="text-[15px] font-medium text-foreground">{t('harnessVersion.title', { defaultValue: 'إصدار الوكيل البرمجي' })}</h4>
             <p className="mt-1 text-[13px] leading-relaxed text-foreground">
               {state.status === 'checking' && t('harnessVersion.checking', { defaultValue: 'جارٍ التحقق من الإصدار…' })}
               {state.status === 'unknown' && t('harnessVersion.unknown', { defaultValue: 'تعذّر التحقق من الإصدار.' })}
-              {state.status === 'no-cli' && t('harnessVersion.noCli', { defaultValue: 'لا توجد أداة سطر أوامر لهذا المزوّد.' })}
+              {state.status === 'no-cli' && t('harnessVersion.noCli', { defaultValue: 'لا توجد أداة سطر أوامر لهذا الوكيل البرمجي.' })}
               {state.status === 'managed-external' && (noRollback
                 ? t('harnessVersion.rollbackUnavailableStatus', { defaultValue: 'التحديث غير متاح لأن الأداة لا تدعم الاسترجاع الآمن.' })
                 : t('harnessVersion.managedExternal', { defaultValue: 'تُدار هذه الأداة من خارج نسّاج.' }))}
@@ -176,6 +177,8 @@ export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemT
             {state.latestVersion && state.latestVersion !== state.version && <bdi dir="ltr" className="font-mono text-[13px] text-foreground">→ {state.latestVersion}</bdi>}
           </div>
         </div>
+
+        <HarnessIntegrationUpdateLine update={state.integrationUpdate} isOwner={isOwner} onCleared={checkNow} />
 
         {busy.has(state.status) && <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={state.progressPercent ?? 0} aria-label={t('harnessVersion.progress', { defaultValue: 'تقدّم التحديث' })} className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${state.progressPercent ?? 0}%` }} /></div>}
 

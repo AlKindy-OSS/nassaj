@@ -207,13 +207,20 @@ test('a governed Antigravity instruction link is readable only through its decla
   (os as unknown as { homedir: () => string }).homedir = () => sandboxHome;
   try {
     const source = path.join(sandboxHome, 'nassaj-core', 'GEMINI.md');
-    const channel = path.join(sandboxHome, '.gemini', 'GEMINI.md');
+    // ADR-152 A1 §3.4: the agy-home channel is the asking member's own tree;
+    // a caller with no member gets the credential-less system tree.
+    const channel = path.join(sandboxHome, '.nassaj-users', String(ownerUser.id), '.gemini', 'GEMINI.md');
+    // The governance source agy material is fingerprinted against (operator home).
+    const governanceSource = path.join(sandboxHome, '.gemini', 'GEMINI.md');
     fs.mkdirSync(path.dirname(source), { recursive: true });
     fs.mkdirSync(path.dirname(channel), { recursive: true });
+    fs.mkdirSync(path.dirname(governanceSource), { recursive: true });
     fs.writeFileSync(source, '# governed antigravity\n', 'utf8');
-    fs.symlinkSync(source, channel);
+    fs.symlinkSync(source, governanceSource);
+    // An isolated member's channel is a fingerprinted COPY (a symlink is refused).
+    fs.copyFileSync(source, channel);
 
-    const listed = await call('GET', '/api/references/instructions?pageSize=100', null);
+    const listed = await call('GET', '/api/references/instructions?pageSize=100', ownerUser);
     assert.equal(listed.status, 200, JSON.stringify(listed.json));
     const entries = (listed.json.data as {
       entries: Array<{ id: string; provider: string; metadata?: { channelId?: string } }>;
@@ -223,7 +230,7 @@ test('a governed Antigravity instruction link is readable only through its decla
     ));
     assert.ok(agyHome, 'the governed agy-home channel must be listed');
 
-    const read = await call('GET', `/api/references/instructions/${agyHome.id}`, null);
+    const read = await call('GET', `/api/references/instructions/${agyHome.id}`, ownerUser);
     assert.equal(read.status, 200, JSON.stringify(read.json));
     const item = (read.json.data as { item: { content: string | null } }).item;
     assert.equal(item.content, '# governed antigravity\n', JSON.stringify(agyHome));

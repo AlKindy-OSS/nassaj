@@ -88,7 +88,9 @@ export type LLMProvider =
   // History-only (T-1953): the body is deleted; recorded conversations stay readable.
   | 'hermes'
   | 'qwen'
-  | 'sakana';
+  | 'sakana'
+  // T-2086/ADR-224: the DeepSeek Harness body (ACP runtime, Nassaj-owned transcript).
+  | 'dsh';
 
 /**
  * One selectable model row (matches the documentation `public/modelConstants.js` option shape).
@@ -850,6 +852,12 @@ export type ProviderAuthStatus = {
    * غيابُه/‏`false` = لا نقصَ على هذا الاعتماد.
    */
   incompleteLink?: boolean;
+  /**
+   * ADR-152 A1 §3.9: set when the caller runs on another member's credential
+   * through a grant — that member's USERNAME, never their email (`email` is
+   * then null). `null`/absent = the caller's own credential.
+   */
+  grantedBy?: { userId: number; username: string } | null;
 };
 
 /**

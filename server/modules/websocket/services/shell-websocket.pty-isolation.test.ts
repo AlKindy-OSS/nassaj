@@ -125,7 +125,11 @@ mock.module('@/services/isolation/resolve-provider-env.js', {
         ? { XDG_DATA_HOME: `/isolated/${String(userId)}/.local/share` }
         : provider === 'kimi'
           ? (mode === 'agent' ? { KIMI_CODE_HOME: `/isolated/${String(userId)}/.kimi` } : {})
-          : { CLAUDE_CONFIG_DIR: `/isolated/${String(userId)}/.claude` };
+          // ADR-152 A1: the real seam always sets CODEX_HOME for codex; readers
+          // (the link-mode gate) refuse an env without it.
+          : provider === 'codex'
+            ? { CODEX_HOME: `/isolated/${String(userId)}/.codex` }
+            : { CLAUDE_CONFIG_DIR: `/isolated/${String(userId)}/.claude` };
       return {
         ...baseEnv,
         ...(isolatedHome ? { HOME: isolatedHome } : {}),

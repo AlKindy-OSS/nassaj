@@ -21,11 +21,12 @@ import { createNormalizedMessage, resolveOpenCodeBinaryPath, stampCoordinatorId 
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveInboxAttachment } from './utils/attachment-inbox.js';
-import { provisionUserDirs, userConfigDir } from './services/isolation/provision-user-dirs.js';
+import { provisionUserDirs } from './services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
-import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
+import { resolvedKnob } from './services/isolation/resolved-knob.js';
 import { sanitizeVendorAgentEnv } from './services/isolation/sanitize-vendor-agent-env.js';
 import {
   OPENCODE_CONFIG_SOURCE_ENV,
@@ -44,18 +45,46 @@ import {
 import { collectOpenCodeTurnSecrets } from './modules/providers/list/opencode/opencode-redaction-secrets.js';
 import {
   createOpenCodeStderrReader,
-  resolveOpenCodePermissionLaunch,
-  withOpenCodePermissionEnv,
+  resolveOpenCodePermissionParity,
 } from './modules/providers/list/opencode/opencode-run-permissions.js';
 import {
+  PARITY_ERROR_TEXT,
+  applyOpenCodeParityEnv,
+  configuredOpenCodeMcpServers,
+  ensureParityPluginDir,
+  parityToolErrorCode,
+} from './modules/providers/list/opencode/opencode-parity-launch.js';
+import {
+  OPENCODE_RUNTIME_CODES,
+  OPENCODE_RUNTIME_TEXT,
+  auditProviderCageNotApplied,
+  prepareOpenCodeParityTurn,
+  startOpenCodeParityTurn,
+} from './modules/providers/list/opencode/opencode-parity-runtime.js';
+import {
+  LOCAL_MIN_WORKING_MARGIN_TOKENS,
+  LOCAL_MODEL_CONTEXT_EXCEEDED,
   assertLocalModelAvailable,
   authorizedLocalModelServers,
+  checkLocalModelContextFit,
+  estimatePromptTokens,
   isLocalModel,
+  localModelContextWindow,
+  localModelOutputReserve,
   localModelsEnabled,
 } from './services/isolation/local-model-config.js';
+import {
+  LOCAL_AGENT_CARDS_UNAVAILABLE,
+  LOCAL_INSTRUCTIONS_UNAVAILABLE,
+  LOCAL_INSTRUCTION_TIER,
+} from './services/isolation/opencode-local-tier-material.js';
+import { prepareOpenCodeLocalTier } from './modules/providers/list/opencode/opencode-local-tier.js';
+import { lastOpenCodeFill } from './modules/context-guard/adapters/opencode.adapter.js';
 import { watchLocalModelProgress } from './services/isolation/local-model-timeout.js';
-import { materializeOpenCodeConfig } from './services/isolation/opencode-config-material.js';
-import { ensureOpenCodeGovernance } from './modules/providers/list/opencode/opencode-governance.js';
+import {
+  OPENCODE_GOVERNANCE_MISSING_MESSAGE,
+  ensureOpenCodeGovernance,
+} from './modules/providers/list/opencode/opencode-governance.js';
 import {
   authorizeQwenPlanLaunch,
   createRedactingLineAssembler,
@@ -72,6 +101,11 @@ import {
   spawnVendorRunOf,
   withSpawnVendorEnv,
 } from './services/isolation/opencode-spawn-vendor.js';
+
+/** Local-turn refusals whose own message is the user-facing text. */
+const LOCAL_REFUSAL_CODES = new Set([
+  LOCAL_MODEL_CONTEXT_EXCEEDED, LOCAL_INSTRUCTIONS_UNAVAILABLE, LOCAL_AGENT_CARDS_UNAVAILABLE,
+]);
 
 /** User-facing text per qwen-plan refusal code (codes are the contract). */
 const QWEN_PLAN_REFUSAL_TEXT = Object.freeze({
@@ -146,6 +180,7 @@ function carrierRefusalPayload(guardError, refusalTexts, workingDir) {
     code: guardError?.code || 'opencode_carrier_blocked',
     content: guardError?.code === 'ENGINE_PROVIDER_UNAVAILABLE'
       ? 'خادم النموذج المحلي غير متاح. راجع إعدادات الخادم وصلاحية الوصول.'
+      : guardError?.code === 'governance_missing' ? OPENCODE_GOVERNANCE_MISSING_MESSAGE
       : refusalTexts?.[guardError?.code]
         || 'تعذّر تشغيل النموذج بسبب إعدادات الحوكمة أو الاتصال.',
   };
@@ -417,11 +452,19 @@ async function spawnOpenCode(command, options = {}, ws) {
     let participantRecorded = false;
     let resolvedLocalRun = false;
     let localProgressWatch = null;
+    // B-1751: the `--model` value this turn launched with, stamped onto live frames.
+    let launchedModel = null;
+    // B-1754: set once a context overflow stopped the child; later output is dropped.
+    let overflowStopped = false;
     // B-1298(b): the most recent specific provider error code (auth / context
     // overflow) seen on this run. Carried onto the terminal rejection so the WS
     // layer can surface it instead of only the generic dispatch fallback. It is a
     // fixed non-secret string — never the provider's raw message.
     let lastProviderErrorCode = null;
+    // ADR-226: the parity side of this turn (fd 3 broker, prompt release, tree kill), and
+    // the tool-refusal codes already shown.
+    let parityTurn = null;
+    const reportedParityCodes = new Set();
     // T-1906: the sender's Token Plan key on a qwen-plan run (else null).
     let qwenPlanKey = null;
     // ADR-200 S8: the sender's Moonshot / DeepSeek key on a spawn-vendor run (else null).
@@ -537,8 +580,32 @@ async function spawnOpenCode(command, options = {}, ws) {
       }
     };
 
+    /**
+     * B-1754: opencode answers a context overflow by compacting and retrying forever
+     * (events keep flowing, so the local-model watchdog never fires). Stop the child
+     * at the first overflow frame and send exactly one plain terminal error.
+     * @param {{ id?: string }} msg the normalized overflow error frame
+     */
+    const stopOnContextOverflow = (msg) => {
+      overflowStopped = true;
+      lastProviderErrorCode = CONTEXT_OVERFLOW_CODE;
+      ws.send(createNormalizedMessage({
+        ...(msg.id ? { id: msg.id } : {}),
+        kind: 'error',
+        code: CONTEXT_OVERFLOW_CODE,
+        content: CONTEXT_OVERFLOW_TEXT,
+        sessionId: capturedSessionId || sessionId || null,
+        provider: 'opencode',
+      }));
+      const child = opencodeProcess;
+      if (!child) return;
+      child.nassajAborted = true;
+      // ADR-226: the whole descendant tree (bash tools start their own process group).
+      parityTurn?.stop();
+    };
+
     const processOpenCodeOutputLine = (rawLine) => {
-      if (!rawLine || !rawLine.trim() || ws?.isRunOutputRevoked?.()) {
+      if (!rawLine || !rawLine.trim() || overflowStopped || ws?.isRunOutputRevoked?.()) {
         return;
       }
       // T-1906: redact on the ASSEMBLED line, before parse/send/persist.
@@ -559,6 +626,7 @@ async function spawnOpenCode(command, options = {}, ws) {
       }
 
       try {
+        parityTurn?.onStdoutEvent(response);
         registerSession(readOpenCodeSessionId(response));
         const normalized = sessionsService.normalizeMessage(
           'opencode',
@@ -566,7 +634,15 @@ async function spawnOpenCode(command, options = {}, ws) {
           capturedSessionId || sessionId || null,
         );
         for (const msg of normalized) {
+          if (overflowStopped) return;
+          if (msg.kind === 'error' && msg.code === CONTEXT_OVERFLOW_CODE) {
+            stopOnContextOverflow(msg);
+            return;
+          }
           turnTimer.markModelActivity();
+          if (launchedModel && !msg.model && MODEL_STAMPED_KINDS.has(msg.kind)) {
+            msg.model = launchedModel;
+          }
           // Live OpenCode text is normalized as `stream_delta` (it has no role),
           // while history is normalized later as `text/assistant`.  Treat the
           // live delta id as the answer id; requiring the history-only shape
@@ -579,6 +655,20 @@ async function spawnOpenCode(command, options = {}, ws) {
           // can carry it to the client (auth failure / context overflow).
           if (msg.kind === 'error' && typeof msg.code === 'string' && msg.code) {
             lastProviderErrorCode = msg.code;
+          }
+          // ADR-221: a tool call the parity plugin refused → one honest error per code.
+          const parityCode = msg.kind === 'tool_use' && msg.toolResult?.isError
+            ? parityToolErrorCode(msg.toolResult.content) : null;
+          if (parityCode && !reportedParityCodes.has(parityCode)) {
+            reportedParityCodes.add(parityCode);
+            lastProviderErrorCode = parityCode;
+            ws.send(createNormalizedMessage({
+              kind: 'error',
+              code: parityCode,
+              content: PARITY_ERROR_TEXT[parityCode],
+              sessionId: capturedSessionId || sessionId || null,
+              provider: 'opencode',
+            }));
           }
           // Coordinator attribution (B-MU-UX-FIX-ASSISTANT-AUTHOR): tag assistant
           // output with the JWT-sourced spawner so viewers attribute it correctly.
@@ -628,23 +718,30 @@ async function spawnOpenCode(command, options = {}, ws) {
         resolve();
         return;
       }
-      // B-1707 (owner ruling 2026-10-28): the mode Claude would run under for this
-      // same request, through Claude's own resolver; refused exactly where Claude
-      // refuses (parity enforce without full_delegation).
+      // B-1707 / ADR-226: the mode Claude would run under for this same request (Claude's own
+      // resolver and spawn env), refused exactly where Claude refuses; the per-turn parity
+      // engine is validated here, before any process starts.
       let permissionLaunch;
+      let parityPlugin;
       try {
-        permissionLaunch = resolveOpenCodePermissionLaunch(options, {
+        permissionLaunch = resolveOpenCodePermissionParity(options, {
           userId: ws?.userId ?? null,
           cwd: workingDir,
         });
+        // ADR-226: the channel-client plugin; its digest is what the hello must carry.
+        parityPlugin = ensureParityPluginDir();
       } catch (permissionError) {
+        const parityCode = typeof permissionError?.code === 'string' ? permissionError.code : null;
         console.error('[OpenCode] launch refused by the permission resolver', {
+          code: parityCode,
           error: permissionError instanceof Error ? permissionError.message : String(permissionError),
         });
         ws.send(createNormalizedMessage({
           kind: 'error',
-          code: 'permission_denied',
-          content: 'The requested permission profile is unavailable.',
+          code: parityCode || 'permission_denied',
+          content: parityCode && permissionError instanceof Error
+            ? permissionError.message
+            : 'The requested permission profile is unavailable.',
           sessionId: capturedSessionId || sessionId || null,
           provider: 'opencode',
         }));
@@ -670,10 +767,13 @@ async function spawnOpenCode(command, options = {}, ws) {
       }
       if (launchModel) {
         args.push('--model', launchModel);
+        launchedModel = launchModel;
       }
-      // B-1707: Claude bypass → skip flag, plan → `--agent plan`, else none.
+      // ADR-226: plan → `--agent plan`, else nothing (never OpenCode's skip flag).
       args.push(...permissionLaunch.args);
       // OC-22: attach images (materialized) and files via -f/--file, one per path.
+      // ADR-226: the prompt goes over stdin (written only after the plugin's hello), so
+      // the array option `--file` (B-1753) has no word after it to swallow.
       for (const attachmentPath of attachments.filePaths) {
         args.push('--file', attachmentPath);
       }
@@ -685,9 +785,6 @@ async function spawnOpenCode(command, options = {}, ws) {
         command && command.trim() ? command.trim() : '',
         options.coordinationLevel,
       );
-      if (promptToSend) {
-        args.push(promptToSend);
-      }
 
       // OC-06: resolve the binary through the OPENCODE_PATH knob instead of a
       // bare PATH lookup (PM2 does not see ~/.opencode/bin from .bashrc).
@@ -712,8 +809,19 @@ async function spawnOpenCode(command, options = {}, ws) {
       // also runs on the SENDER's own opencode data dir — the sender's key and
       // the session it writes never land in a grantor's opencode.db.
       let childEnv = spawnVendor
-        ? resolveProviderEnv(ws?.userId ?? null, 'opencode', process.env, 'chat', { honorGrants: false })
-        : resolveProviderEnv(ws?.userId ?? null, 'opencode');
+        ? resolveProviderEnv(assertModelRunActor(ws?.userId), 'opencode', process.env, 'chat', { honorGrants: false })
+        : resolveProviderEnv(assertModelRunActor(ws?.userId), 'opencode');
+
+      // B-1761: GL-5 governance on EVERY spawn, for the config home the child actually reads
+      // (grant trees and spawn-vendor own-tree runs included); the carrier branch below runs
+      // the same gate after its local-model XDG override.
+      if (!carrierRun && !pinnedLocalSession
+        && !attestLegacyGovernance(ws?.userId ?? null, childEnv, ws, capturedSessionId || sessionId || null)) {
+        void cleanupOpenCodeTempDir(attachmentsTempDir);
+        notifyTerminalState({ error: new Error(OPENCODE_GOVERNANCE_MISSING_MESSAGE) });
+        reject(Object.assign(new Error(OPENCODE_GOVERNANCE_MISSING_MESSAGE), { code: 'governance_missing' }));
+        return;
+      }
 
       if (carrierRun || pinnedLocalSession) {
         // CARRIER MODE ONLY (GL-3/GL-5/GL-6, ADR-062). Every step below is skipped on
@@ -751,13 +859,28 @@ async function spawnOpenCode(command, options = {}, ws) {
             throw error;
           }
           assertLocalModelAvailable(callerId, resolvedModel);
+          // ADR-LOCAL-INSTR-TIER-001: a local turn runs under its own config dir with the
+          // compact instructions (verified, no fallback to the full file), the task
+          // allow-list and generated agent cards; every other turn is unchanged.
+          let governance;
           if (localRun && callerId != null) {
             provisionUserDirs(callerId);
-            childEnv.XDG_CONFIG_HOME = userConfigDir(callerId, '.config');
+            const localTier = prepareOpenCodeLocalTier(callerId);
+            childEnv.XDG_CONFIG_HOME = localTier.configHome;
+            governance = localTier.governance;
+          } else {
+            governance = ensureOpenCodeGovernance(callerId, openCodeConfigHomeOf(childEnv));
           }
-          ensureOpenCodeGovernance(callerId, localRun ? path.dirname(resolveOpenCodeConfigPath(childEnv)) : undefined);
-          if (localRun && !materializeOpenCodeConfig(path.dirname(resolveOpenCodeConfigPath(childEnv)), { callerId })) {
-            throw new Error('تعذّر تهيئة إعداد خادم النماذج.');
+          // B-1755 / I8: refuse before spawn when the base prompt, the reply reserve and
+          // a working margin — or a resumed session's stored history — cannot fit.
+          if (localRun) {
+            assertLocalContextFits({
+              contextWindow: localModelContextWindow(callerId, resolvedModel),
+              outputReserveTokens: localModelOutputReserve(callerId, resolvedModel),
+              prompt: promptToSend,
+              governancePath: governance?.governancePath,
+              storedFillTokens: sessionId ? readStoredSessionFill(callerId, sessionId) : null,
+            });
           }
           if (localRun && sessionId) sessionsDb.setSessionEnginePin(sessionId, 'local', 'server_verdict');
           // GL-3: baseURL allowlist over the per-user opencode.json (expands
@@ -825,7 +948,9 @@ async function spawnOpenCode(command, options = {}, ws) {
             error: guardError instanceof Error ? guardError.message : String(guardError),
           });
           ws.send(createNormalizedMessage({
-            ...carrierRefusalPayload(guardError, refusalTextsFor(qwenPlanRun, spawnVendor), workingDir),
+            ...(LOCAL_REFUSAL_CODES.has(guardError?.code)
+              ? { kind: 'error', code: guardError.code, content: guardError.message }
+              : carrierRefusalPayload(guardError, refusalTextsFor(qwenPlanRun, spawnVendor), workingDir)),
             sessionId: finalSessionId,
             provider: 'opencode',
           }));
@@ -835,23 +960,58 @@ async function spawnOpenCode(command, options = {}, ws) {
         }
       }
 
-      // B-1707: OPENCODE_PERMISSION is nassaj's own (plan = edit/bash deny) or absent;
-      // set last, after every sanitize step, so an inherited one never reaches opencode.
-      childEnv = withOpenCodePermissionEnv(childEnv, permissionLaunch.permission);
+      // ADR-226: applied last, after every sanitize and endpoint guard: L1, the channel-client
+      // plugin FIRST in the inline config, lsp/formatter off, experimental flags stripped.
+      // `--pure`, `--command`, `--attach` and `--port` are never passed.
+      if (args.some((arg) => OPENCODE_FORBIDDEN_ARGS.has(arg))) {
+        throw new Error('opencode argv carries a flag that bypasses the nassaj parity plugin');
+      }
+      const mcpServers = configuredOpenCodeMcpServers(openCodeConfigHomeOf(childEnv), childEnv.OPENCODE_CONFIG_CONTENT);
+      childEnv = applyOpenCodeParityEnv(childEnv, { l1Text: permissionLaunch.permission, pluginFile: parityPlugin.file });
+      let parityPrepared;
+      try {
+        const mirrorHome = resolvedKnob(childEnv, 'XDG_DATA_HOME');
+        parityPrepared = prepareOpenCodeParityTurn({
+          mirrorHome, sessionId: sessionId || null, cwd: workingDir,
+          createEngine: (turn) => permissionLaunch.createEngine({
+            ...turn, home: childEnv.HOME || os.homedir(), mcpServers, harnessEnv: childEnv,
+          }),
+        });
+      } catch (engineError) {
+        const engineCode = typeof engineError?.code === 'string' ? engineError.code : 'PERMISSION_EFFECTIVE_POLICY_REQUIRED';
+        console.error('[OpenCode] launch refused by the parity engine', { code: engineCode });
+        ws.send(createNormalizedMessage({
+          kind: 'error', code: engineCode, content: engineError instanceof Error ? engineError.message : String(engineError),
+          sessionId: capturedSessionId || sessionId || null, provider: 'opencode',
+        }));
+        void cleanupOpenCodeTempDir(attachmentsTempDir);
+        notifyTerminalState({ error: engineError });
+        reject(engineError instanceof Error ? engineError : new Error(String(engineError)));
+        return;
+      }
 
-      // T-897: cage the opencode spawn behind NASSAJ_PROVIDER_CAGE (default OFF
-      // ⇒ launch returned unchanged; byte-identical to the previous spawn).
-      const opencodeLaunch = resolveCagedLaunch({
-        userId: ws?.userId ?? null,
-        provider: 'opencode',
-        cmd: opencodeBinary,
-        args,
+      // ADR-226 L4: NASSAJ_PROVIDER_CAGE no longer wraps OpenCode (Claude is not caged).
+      auditProviderCageNotApplied(process.env, ws?.userId ?? null);
+      // Detached: its own process group; fd 3 is the parity channel.
+      opencodeProcess = spawnFunction(opencodeBinary, args, {
         cwd: workingDir,
-      });
-      opencodeProcess = spawnFunction(opencodeLaunch.cmd, opencodeLaunch.args, {
-        cwd: workingDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
         env: childEnv,
+        detached: true,
+      });
+      parityTurn = startOpenCodeParityTurn(parityPrepared, {
+        child: opencodeProcess, pluginDigest: parityPlugin.hash, prompt: promptToSend,
+        userText: command && command.trim() ? command.trim() : '', userId: ws?.userId ?? null, writer: ws,
+      });
+      void parityTurn.released.then((outcome) => {
+        // A child that died before its plugin loaded and already said why (a usage dump)
+        // needs no second error.
+        if (outcome.ok || (outcome.code === OPENCODE_RUNTIME_CODES.notLoaded && lastProviderErrorCode)) return;
+        lastProviderErrorCode = outcome.code;
+        ws.send(createNormalizedMessage({
+          kind: 'error', code: outcome.code, content: outcome.message,
+          sessionId: capturedSessionId || sessionId || null, provider: 'opencode',
+        }));
       });
 
       if (resolvedLocalRun) {
@@ -868,7 +1028,7 @@ async function spawnOpenCode(command, options = {}, ws) {
       // reaping on top of the badge.
       runPresence.setPid(opencodeProcess.pid);
       opencodeProcess.sessionId = processKey;
-      opencodeProcess.stdin.end();
+      opencodeProcess.parityTurn = parityTurn;
 
       opencodeProcess.stdout.on('data', (data) => {
         stdoutLineBuffer += data.toString();
@@ -887,6 +1047,8 @@ async function spawnOpenCode(command, options = {}, ws) {
       // usage dump (refused argv), instead of unclassified stderr cards.
       const stderrReader = createOpenCodeStderrReader();
       const sendStderrLines = (lines) => {
+        // B-1754: after an overflow stop the one terminal error has been sent.
+        if (overflowStopped) return;
         const plainLines = [];
         for (const line of lines) {
           const verdict = stderrReader.read(line);
@@ -922,6 +1084,8 @@ async function spawnOpenCode(command, options = {}, ws) {
 
       opencodeProcess.on('close', async (code) => {
         if (opencodeProcess.nassajAborted && code === 0) code = 1;
+        // B-1754: a child stopped for context overflow is a failed turn, not a missing CLI.
+        if (overflowStopped) code = 1;
         const finalSessionId = capturedSessionId || sessionId || processKey;
         activeOpenCodeProcesses.delete(finalSessionId);
         activeOpenCodeProcesses.delete(processKey);
@@ -935,6 +1099,22 @@ async function spawnOpenCode(command, options = {}, ws) {
           stdoutLineBuffer = '';
         }
         sendStderrLines(stderrLines.flush());
+
+        // ADR-226: no open question, nothing of the tree left; a violation fails the turn.
+        const released = await parityTurn.released;
+        const violation = await parityTurn.finish();
+        if (!released.ok || violation) {
+          if (code === 0) code = 1;
+          if (released.ok) lastProviderErrorCode = violation;
+          else lastProviderErrorCode ??= released.code;
+        }
+        if (released.ok && violation) {
+          ws.send(createNormalizedMessage({
+            kind: 'error', code: violation,
+            content: OPENCODE_RUNTIME_TEXT[violation] ?? OPENCODE_RUNTIME_TEXT[OPENCODE_RUNTIME_CODES.violation],
+            sessionId: finalSessionId, provider: 'opencode',
+          }));
+        }
 
         const tokenBudget = readOpenCodeTokenUsage(finalSessionId, ws?.userId ?? null, {
           honorGrants: !ownDataTreeRun,
@@ -1003,6 +1183,7 @@ async function spawnOpenCode(command, options = {}, ws) {
         // OC-22: clean up materialized image temp files on spawn failure too.
         await cleanupOpenCodeTempDir(attachmentsTempDir);
         attachmentsTempDir = null;
+        await parityTurn?.finish();
 
         // B-32: map spawn errors to structured codes.
         const installed = await providerAuthService.isProviderInstalled('opencode');
@@ -1031,6 +1212,122 @@ async function spawnOpenCode(command, options = {}, ws) {
   });
 }
 
+/** ADR-226 H4: argv flags that would bypass the parity plugin or open another client surface. */
+const OPENCODE_FORBIDDEN_ARGS = new Set(['--pure', '--command', '--attach', '--port', '--dangerously-skip-permissions']);
+
+/** `$XDG_CONFIG_HOME/opencode` of the env the child actually runs with (throws when it has none). */
+function openCodeConfigHomeOf(env) {
+  return path.join(resolvedKnob(env, 'XDG_CONFIG_HOME'), 'opencode');
+}
+
+/**
+ * B-1761: GL-5 governance for a non-carrier spawn. Sends the neutral refusal and returns
+ * false when the member's AGENTS.md copy cannot be attested (no spawn follows).
+ * @param {string|number|null} callerId
+ * @param {NodeJS.ProcessEnv} childEnv the env the child would run with
+ * @param {{ send: Function }} ws
+ * @param {string|null} sessionId
+ * @returns {boolean}
+ */
+function attestLegacyGovernance(callerId, childEnv, ws, sessionId) {
+  try {
+    ensureOpenCodeGovernance(callerId, openCodeConfigHomeOf(childEnv));
+    return true;
+  } catch (error) {
+    console.error('[OpenCode] launch BLOCKED: governance cannot be attested', { code: error?.code || null });
+    ws.send(createNormalizedMessage({
+      kind: 'error', code: 'governance_missing', content: OPENCODE_GOVERNANCE_MISSING_MESSAGE,
+      sessionId, provider: 'opencode',
+    }));
+    return false;
+  }
+}
+
+/** B-1754: the fixed code the normalizer puts on a context-overflow error frame. */
+const CONTEXT_OVERFLOW_CODE = 'provider_context_overflow';
+const CONTEXT_OVERFLOW_TEXT = 'سياق النموذج أصغر من المطالبة الأساسية للوكيل، فأوقف نسّاج المحاولة بدل تكرار الضغط. اختر نموذجاً بسياق أكبر أو وسّع سياق الخادم المحلي.';
+/** B-1751: live assistant kinds that carry the launched model when the event has none. */
+const MODEL_STAMPED_KINDS = new Set(['stream_delta', 'thinking', 'stream_end']);
+
+/**
+ * B-1755 / I8: tokens OpenCode itself adds to every turn (its system prompt, skills
+ * list and tool schemas), beyond the prompt nassaj sends and the AGENTS.md it loads,
+ * per instruction tier. Local turns always run `local32`: 5 agents in the task tool,
+ * webfetch kept. S0 (2026-11-09, real opencode 1.19.5 via llama-swap, empty AGENTS.md,
+ * prompt "say ok"): qwen3.6-35b 11,780, gemma-4-26b 11,333, gpt-oss-20b 10,198
+ * prompt_n; rounded DOWN from the smallest so the guard never refuses a turn that fits.
+ * (The full tier measured ~11k on top of its AGENTS.md, B-1754.)
+ */
+const OPENCODE_SYSTEM_PROMPT_TOKENS = Object.freeze({ [LOCAL_INSTRUCTION_TIER]: 10_000 });
+
+/**
+ * B-1755: estimated fixed base prompt of a local turn: the prompt sent, the global
+ * instructions file the child loads (absent or unreadable counts as empty) and
+ * OpenCode's own system prompt.
+ * @param {string} prompt the prompt handed to opencode, runtime prefix included
+ * @param {string|undefined} governancePath the AGENTS.md the child will load
+ * @returns {number}
+ */
+function estimateLocalBasePromptTokens(prompt, governancePath) {
+  let instructions = '';
+  try {
+    if (governancePath) instructions = fsSync.readFileSync(governancePath, 'utf8');
+  } catch {
+    instructions = '';
+  }
+  return estimatePromptTokens(prompt) + estimatePromptTokens(instructions)
+    + OPENCODE_SYSTEM_PROMPT_TOKENS[LOCAL_INSTRUCTION_TIER];
+}
+
+/**
+ * I8: the fill of a resumed session — input + cache-read tokens of its last assistant
+ * message with usage, read-only from the caller's own opencode.db. Null when unknown
+ * (no db, no usage yet, a compaction summary last, or any read failure).
+ * @param {string|number} callerId
+ * @param {string} sessionId
+ * @returns {number|null}
+ */
+function readStoredSessionFill(callerId, sessionId) {
+  const dbPath = resolveOpenCodeDatabasePathForUser(callerId);
+  if (!fsSync.existsSync(dbPath)) return null;
+  let db = null;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const rows = db.prepare(
+      'SELECT data FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 50',
+    ).all(sessionId);
+    return lastOpenCodeFill(rows).usedTokens;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
+/**
+ * B-1755 / I8: throws LOCAL_MODEL_CONTEXT_EXCEEDED when the base prompt with the reply
+ * reserve and a working margin, or a resumed session's stored history with the reply
+ * reserve, does not fit the local model's window. An unknown window passes.
+ * @param {{ contextWindow: number|null, outputReserveTokens: number, prompt: string,
+ *   governancePath: string|undefined, storedFillTokens: number|null }} input
+ */
+function assertLocalContextFits(input) {
+  const verdict = checkLocalModelContextFit({
+    contextWindow: input.contextWindow,
+    basePromptTokens: estimateLocalBasePromptTokens(input.prompt, input.governancePath),
+    outputReserveTokens: input.outputReserveTokens,
+    marginTokens: LOCAL_MIN_WORKING_MARGIN_TOKENS,
+    storedFillTokens: input.storedFillTokens,
+  });
+  if (!verdict) return;
+  const n = (value) => value.toLocaleString('en-US');
+  const error = new Error(verdict.reason === 'history'
+    ? `هذه المحادثة بلغت نحو ${n(verdict.storedFillTokens)} رمزاً، وسياق هذا النموذج المحلي ${n(verdict.contextWindow)} رمزاً مع ${n(verdict.outputReserveTokens)} محجوزة للرد، فلن تتّسع. ابدأ محادثة جديدة بهذا النموذج، أو اضغط المحادثة على النموذج السابق ثم عُد.`
+    : `سياق هذا النموذج المحلي ${n(verdict.contextWindow)} رمزاً، والمطالبة الأساسية للوكيل تقارب ${n(verdict.basePromptTokens)} رمزاً، ومع ${n(verdict.outputReserveTokens)} محجوزة للرد و${n(verdict.marginTokens)} هامشاً للعمل لن يتّسع لمحادثة. اختر نموذجاً بسياق أكبر أو وسّع سياق الخادم المحلي.`);
+  error.code = LOCAL_MODEL_CONTEXT_EXCEEDED;
+  throw error;
+}
+
 function abortOpenCodeSession(sessionId) {
   const process = activeOpenCodeProcesses.get(sessionId);
   if (!process) {
@@ -1038,7 +1335,9 @@ function abortOpenCodeSession(sessionId) {
   }
 
   process.nassajAborted = true;
-  process.kill('SIGTERM');
+  // ADR-226: the whole descendant tree (bash tools start their own process group).
+  if (process.parityTurn) process.parityTurn.stop();
+  else process.kill('SIGTERM');
   activeOpenCodeProcesses.delete(sessionId);
   return true;
 }

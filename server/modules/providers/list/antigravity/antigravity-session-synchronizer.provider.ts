@@ -9,7 +9,6 @@ import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import type { AnyRecord } from '@/shared/types.js';
 import { normalizeSessionName, readObjectRecord } from '@/shared/utils.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 
 import { isReplaceableStoredTitle, promptTitleText } from '../../shared/session-title-source.js';
 import { isTranscriptHandle, openRunTranscript } from '../../shared/session-transcript-reader.js';
@@ -83,8 +82,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
    * Read-only: the path is computed, never provisioned, so a disabled member or
    * one who never ran agy gets no tree created by the indexer — a missing brain
    * dir simply scans as zero. Each member is resolved in its own try, so one bad
-   * row never drops the others. De-duplicated on the real path, so shared mode
-   * collapses to one directory.
+   * row never drops the others. De-duplicated on the real path.
    */
   private enumerateBrainDirs(): Map<string, string> {
     const dirs = new Map<string, string>();
@@ -95,7 +93,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     add(path.join(os.homedir(), BRAIN_RELATIVE_PATH));
     let members: Array<{ id: number; status?: string }> = [];
     try {
-      members = this.indexMemberBrains && isProviderIsolated('agy') ? userDb.listUsers() : [];
+      members = this.indexMemberBrains ? userDb.listUsers() : [];
     } catch (error) {
       console.error('Failed to enumerate members for agy brain indexing; operator brain only', {
         error: error instanceof Error ? error.message : String(error),

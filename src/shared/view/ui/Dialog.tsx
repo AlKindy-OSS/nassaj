@@ -7,6 +7,12 @@ interface DialogContextValue {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   triggerRef: React.MutableRefObject<HTMLElement | null>;
+  /** Id of the mounted DialogTitle (null when none): the content's accessible name. */
+  titleId: string | null;
+  setTitleId: (id: string | null) => void;
+  /** Id of the mounted DialogDescription (null when none). */
+  descriptionId: string | null;
+  setDescriptionId: (id: string | null) => void;
 }
 
 const DialogContext = React.createContext<DialogContextValue | null>(null);
@@ -37,7 +43,12 @@ const Dialog: React.FC<DialogProps> = ({ open: controlledOpen, onOpenChange: con
     [isControlled, controlledOnOpenChange]
   );
 
-  const value = React.useMemo(() => ({ open, onOpenChange, triggerRef }), [open, onOpenChange]);
+  const [titleId, setTitleId] = React.useState<string | null>(null);
+  const [descriptionId, setDescriptionId] = React.useState<string | null>(null);
+  const value = React.useMemo(
+    () => ({ open, onOpenChange, triggerRef, titleId, setTitleId, descriptionId, setDescriptionId }),
+    [open, onOpenChange, titleId, descriptionId],
+  );
 
   return <DialogContext.Provider value={value}>{children}</DialogContext.Provider>;
 };
@@ -92,7 +103,12 @@ DialogTrigger.displayName = 'DialogTrigger';
 interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
   /** A nested dialog may sit above its existing editor overlay. */
   layerClassName?: string;
-  onEscapeKeyDown?: () => void;
+  /**
+   * Runs before Escape closes the dialog. Calling `event.preventDefault()` keeps
+   * the dialog open and lets the key reach the focused element (e.g. to leave
+   * an inner step first).
+   */
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   onPointerDownOutside?: () => void;
 }
 
@@ -100,7 +116,7 @@ const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
   ({ className, layerClassName, children, onEscapeKeyDown, onPointerDownOutside, ...props }, ref) => {
-    const { open, onOpenChange, triggerRef } = useDialog();
+    const { open, onOpenChange, triggerRef, titleId, descriptionId } = useDialog();
     const contentRef = React.useRef<HTMLDivElement | null>(null);
     const previousFocusRef = React.useRef<HTMLElement | null>(null);
 
@@ -121,8 +137,9 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
+          onEscapeKeyDown?.(e);
+          if (e.defaultPrevented) return;
           e.stopPropagation();
-          onEscapeKeyDown?.();
           onOpenChange(false);
           return;
         }
@@ -202,6 +219,8 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           // default ring on this container — user-visible focus rings live on interactive
           // children via focus-visible:ring-* utilities.
           tabIndex={-1}
+          aria-labelledby={props['aria-label'] ? undefined : titleId ?? undefined}
+          aria-describedby={descriptionId ?? undefined}
           className={cn(
             'fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2',
             'rounded-xl border bg-popover text-popover-foreground shadow-lg',
@@ -219,11 +238,35 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 );
 DialogContent.displayName = 'DialogContent';
 
+/** Registers an element id with the dialog while mounted; returns the id to render. */
+function useRegisteredId(given: string | undefined, register: (id: string | null) => void): string {
+  const generated = React.useId();
+  const id = given ?? generated;
+  React.useLayoutEffect(() => {
+    register(id);
+    return () => register(null);
+  }, [id, register]);
+  return id;
+}
+
+/** The dialog's heading; its id names the dialog (aria-labelledby). Visually hidden unless overridden. */
 const DialogTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, ...props }, ref) => (
-    <h2 ref={ref} className={cn('sr-only', className)} {...props} />
-  )
+  ({ className, id, ...props }, ref) => {
+    const { setTitleId } = useDialog();
+    const titleId = useRegisteredId(id, setTitleId);
+    return <h2 ref={ref} id={titleId} className={cn('sr-only', className)} {...props} />;
+  }
 );
 DialogTitle.displayName = 'DialogTitle';
 
-export { Dialog, DialogTrigger, DialogContent, DialogTitle, useDialog };
+/** Optional supporting text; its id describes the dialog (aria-describedby). */
+const DialogDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ id, ...props }, ref) => {
+    const { setDescriptionId } = useDialog();
+    const descriptionId = useRegisteredId(id, setDescriptionId);
+    return <p ref={ref} id={descriptionId} {...props} />;
+  }
+);
+DialogDescription.displayName = 'DialogDescription';
+
+export { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription, useDialog };

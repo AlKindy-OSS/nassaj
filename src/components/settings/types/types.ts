@@ -105,6 +105,12 @@ export type SettingsDeepLink = {
    */
   localModels?: true;
   /**
+   * T-2083 — a section of the agent's Account tab to scroll to and focus on
+   * open. `credential-grants` is where a member asks for, and an owner gives, a
+   * credential grant (ADR-152); the CREDENTIAL_NOT_LINKED notice opens it.
+   */
+  section?: 'credential-grants';
+  /**
    * B-1076 — تُعرض قائمة حجوب الصلاحيات (تبويب `system`) مفلترةً بهذا
    * المحدِّد وحده حين يُفتح التبويب من بطاقة صادر بحجبٍ بنطاق `session`
    * (معرّف جلسة المحادثة الحالية للمستخدم لا سواها). صحّته (نمط UUID، سقف

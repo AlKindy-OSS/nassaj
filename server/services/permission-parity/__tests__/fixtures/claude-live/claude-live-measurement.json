@@ -1,0 +1,413 @@
+{
+ "claudeVersion": "2.1.312 (Claude Code)",
+ "measuredAt": "2026-11-07",
+ "model": "haiku",
+ "setup": "temp HOME (nassaj-core linked), real CLAUDE_CONFIG_DIR, host /etc/claude-code managed settings, extra --settings: logging hooks + ask Bash(echo t2089-ask:*)",
+ "results": [
+  {
+   "name": "edit-claude-dir-default",
+   "mode": "default",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Write",
+     "input": {
+      "file_path": "<RUN>/home/.claude/t2089-x",
+      "content": "x"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": true,
+     "text": "Claude requested permissions to edit <RUN>/home/.claude/t2089-x which is a sensitive file."
+    }
+   ],
+   "hookEvents": [
+    {
+     "event": "PreToolUse",
+     "tool": "Write",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path"
+     ]
+    },
+    {
+     "event": "PermissionRequest",
+     "tool": "Write",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "permission_suggestions",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "transcript_path"
+     ]
+    }
+   ],
+   "filesWritten": [],
+   "denials": [
+    {
+     "tool_name": "Write",
+     "tool_use_id": "toolu_01U5f41qguGvhyFf2dQEMaLm",
+     "tool_input": {
+      "file_path": "<RUN>/home/.claude/t2089-x",
+      "content": "x"
+     }
+    }
+   ]
+  },
+  {
+   "name": "edit-claude-dir-bypass",
+   "mode": "bypassPermissions",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Write",
+     "input": {
+      "file_path": "<RUN>/home/.claude/t2089-y",
+      "content": "y"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": false,
+     "text": "File created successfully at: <RUN>/home/.claude/t2089-y (file state is current in your context — no need to Read it back)"
+    }
+   ],
+   "hookEvents": [
+    {
+     "event": "PreToolUse",
+     "tool": "Write",
+     "permission_mode": "bypassPermissions",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path"
+     ]
+    }
+   ],
+   "filesWritten": [
+    "t2089-y"
+   ],
+   "denials": []
+  },
+  {
+   "name": "config-protection-default",
+   "mode": "default",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Write",
+     "input": {
+      "file_path": "<RUN>/ws/.eslintrc.json",
+      "content": "{}\n"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": true,
+     "text": "<tool_use_error>PreToolUse:Write hook error: [node $HOME/nassaj-core/hooks/config-protection.js]: BLOCKED: Modifying .eslintrc.json is not allowed. Fix the source code to satisfy linter/formatter rules instead of weakening the config. If this is a legitimate config change, disable the config-protection hook temporarily.\n</tool_use_error>"
+    }
+   ],
+   "hookEvents": [],
+   "filesWritten": [
+    "t2089-y"
+   ],
+   "denials": []
+  },
+  {
+   "name": "read-managed-settings-default",
+   "mode": "default",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Read",
+     "input": {
+      "file_path": "/etc/claude-code/managed-settings.json"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": true,
+     "text": "Claude requested permissions to read from /etc/claude-code/managed-settings.json, but you haven't granted it yet."
+    }
+   ],
+   "hookEvents": [
+    {
+     "event": "PreToolUse",
+     "tool": "Read",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path"
+     ]
+    },
+    {
+     "event": "PermissionRequest",
+     "tool": "Read",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "permission_suggestions",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "transcript_path"
+     ]
+    }
+   ],
+   "filesWritten": [
+    "t2089-y"
+   ],
+   "denials": [
+    {
+     "tool_name": "Read",
+     "tool_use_id": "toolu_01U2TXi9iDjP4grdD3NRuTJ9",
+     "tool_input": {
+      "file_path": "/etc/claude-code/managed-settings.json"
+     }
+    }
+   ]
+  },
+  {
+   "name": "read-outside-default",
+   "mode": "default",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Read",
+     "input": {
+      "file_path": "<RUN>/outside/secret.txt"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": true,
+     "text": "Claude requested permissions to read from <RUN>/outside/secret.txt, but you haven't granted it yet."
+    }
+   ],
+   "hookEvents": [
+    {
+     "event": "PreToolUse",
+     "tool": "Read",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path"
+     ]
+    },
+    {
+     "event": "PermissionRequest",
+     "tool": "Read",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "permission_suggestions",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "transcript_path"
+     ]
+    }
+   ],
+   "filesWritten": [
+    "t2089-y"
+   ],
+   "denials": [
+    {
+     "tool_name": "Read",
+     "tool_use_id": "toolu_014t85mLDX48yXAaHpuswhsH",
+     "tool_input": {
+      "file_path": "<RUN>/outside/secret.txt"
+     }
+    }
+   ]
+  },
+  {
+   "name": "ask-rule-bypass",
+   "mode": "bypassPermissions",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Bash",
+     "input": {
+      "command": "echo t2089-ask hi",
+      "description": "Echo the test string"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": true,
+     "text": "Claude requested permissions to use Bash, but you haven't granted it yet."
+    }
+   ],
+   "hookEvents": [
+    {
+     "event": "PreToolUse",
+     "tool": "Bash",
+     "permission_mode": "bypassPermissions",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path"
+     ]
+    },
+    {
+     "event": "PermissionRequest",
+     "tool": "Bash",
+     "permission_mode": "bypassPermissions",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "transcript_path"
+     ]
+    }
+   ],
+   "filesWritten": [
+    "t2089-y"
+   ],
+   "denials": [
+    {
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_01KTcxbwcRjaYY6AyQ7zjGG2",
+     "tool_input": {
+      "command": "echo t2089-ask hi",
+      "description": "Echo the test string"
+     }
+    }
+   ]
+  },
+  {
+   "name": "ask-rule-default",
+   "mode": "default",
+   "exit": 0,
+   "toolUses": [
+    {
+     "name": "Bash",
+     "input": {
+      "command": "echo t2089-ask hi",
+      "description": "Print the requested test string"
+     }
+    }
+   ],
+   "toolResults": [
+    {
+     "isError": true,
+     "text": "Claude requested permissions to use Bash, but you haven't granted it yet."
+    }
+   ],
+   "hookEvents": [
+    {
+     "event": "PreToolUse",
+     "tool": "Bash",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "tool_use_id",
+      "transcript_path"
+     ]
+    },
+    {
+     "event": "PermissionRequest",
+     "tool": "Bash",
+     "permission_mode": "default",
+     "keys": [
+      "cwd",
+      "effort",
+      "hook_event_name",
+      "permission_mode",
+      "prompt_id",
+      "session_id",
+      "tool_input",
+      "tool_name",
+      "transcript_path"
+     ]
+    }
+   ],
+   "filesWritten": [
+    "t2089-y"
+   ],
+   "denials": [
+    {
+     "tool_name": "Bash",
+     "tool_use_id": "toolu_015TtMQhcPJ6zp8PmAcV5Zut",
+     "tool_input": {
+      "command": "echo t2089-ask hi",
+      "description": "Print the requested test string"
+     }
+    }
+   ]
+  }
+ ]
+}

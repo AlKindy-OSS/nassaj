@@ -36,7 +36,6 @@
 
 import type { Dirent } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
@@ -143,25 +142,25 @@ function providerEnv(
   provider: string,
   userId: string | number | null,
   deps: BillingAnchorDeps,
-): NodeJS.ProcessEnv {
+): NodeJS.ProcessEnv | null {
   const resolve = deps.resolveEnv ?? (resolveProviderEnv as ProviderEnvResolver);
   try {
-    return resolve(userId, provider, deps.env ?? process.env) ?? {};
+    return resolve(userId, provider, deps.env ?? process.env) ?? null;
   } catch {
-    return {};
+    // qa M4 (ADR-152 A1 §3.9): a refusal (no member, …) is "no tree" — never
+    // the operator's own ~/.claude or ~/.codex.
+    return null;
   }
 }
 
-/** جذر إعداد كلود لهذا المستخدم (‏CLAUDE_CONFIG_DIR أو `~/.claude`). */
-function claudeConfigDir(userId: string | number | null, deps: BillingAnchorDeps): string {
-  const env = providerEnv('claude', userId, deps);
-  return readOptionalString(env.CLAUDE_CONFIG_DIR) ?? path.join(os.homedir(), '.claude');
+/** جذر إعداد كلود لهذا المستخدم من بيئته المحلولة، أو null (لا جذر ⇒ لا اكتشاف). */
+function claudeConfigDir(userId: string | number | null, deps: BillingAnchorDeps): string | null {
+  return readOptionalString(providerEnv('claude', userId, deps)?.CLAUDE_CONFIG_DIR) ?? null;
 }
 
-/** جذر كودكس لهذا المستخدم (‏CODEX_HOME أو `~/.codex`). */
-function codexHome(userId: string | number | null, deps: BillingAnchorDeps): string {
-  const env = providerEnv('codex', userId, deps);
-  return readOptionalString(env.CODEX_HOME) ?? path.join(os.homedir(), '.codex');
+/** جذر كودكس لهذا المستخدم من بيئته المحلولة، أو null. */
+function codexHome(userId: string | number | null, deps: BillingAnchorDeps): string | null {
+  return readOptionalString(providerEnv('codex', userId, deps)?.CODEX_HOME) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +207,7 @@ async function detectClaudeAnchor(
   deps: BillingAnchorDeps,
 ): Promise<BillingAnchorDiscovery | null> {
   const configDir = claudeConfigDir(userId, deps);
+  if (!configDir) return null;
   const candidates = [path.join(configDir, '.claude.json'), path.join(path.dirname(configDir), '.claude.json')];
 
   for (const candidate of candidates) {
@@ -299,7 +299,9 @@ async function detectCodexAnchor(
   userId: string | number | null,
   deps: BillingAnchorDeps,
 ): Promise<BillingAnchorDiscovery | null> {
-  const root = await readJsonFile(path.join(codexHome(userId, deps), 'auth.json'));
+  const home = codexHome(userId, deps);
+  if (!home) return null;
+  const root = await readJsonFile(path.join(home, 'auth.json'));
   const tokens = readObjectRecord(root?.tokens);
   const idToken = readOptionalString(tokens?.id_token);
   if (!idToken) {
@@ -346,10 +348,12 @@ function historyRootFor(
     return deps.historyRoot(provider, userId);
   }
   if (provider === 'claude') {
-    return path.join(claudeConfigDir(userId, deps), 'projects');
+    const configDir = claudeConfigDir(userId, deps);
+    return configDir ? path.join(configDir, 'projects') : null;
   }
   if (provider === 'codex') {
-    return path.join(codexHome(userId, deps), 'sessions');
+    const home = codexHome(userId, deps);
+    return home ? path.join(home, 'sessions') : null;
   }
   return null;
 }

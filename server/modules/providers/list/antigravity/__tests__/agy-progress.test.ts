@@ -8,14 +8,21 @@
  *
  * Runner: node scripts/run-isolated-node-tests.mjs server <this file>
  */
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and provider credential env move
+// into a sandbox, so an ad-hoc run cannot touch the operator's live logins.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, mock, test } from 'node:test';
 
+import { assertOutsideRealCredentials } from '@/shared/__tests__/real-credential-guard.js';
+
 // B-1564: history reads only brains under a provider root; numbered member trees are such roots.
 const sandbox = path.join(os.homedir(), '.nassaj-users');
+// The after() hook removes this whole tree: never let it be the real one (B-1771).
+assertOutsideRealCredentials(sandbox);
 fs.mkdirSync(sandbox, { recursive: true });
 let jsonlPath = '';
 mock.module('@/modules/database/index.js', { namedExports: {

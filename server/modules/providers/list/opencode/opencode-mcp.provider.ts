@@ -1,10 +1,15 @@
 import { access, lstat, readFile, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { lstatSync } from 'node:fs';
 import path from 'node:path';
 
 import { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
-import { resolveOpenCodeConfigHomeForUser } from '@/modules/providers/list/opencode/opencode-governance.js';
+import {
+  resolveOpenCodeConfigHomeForUser,
+  resolveOpenCodeLocalConfigHomeForUser,
+} from '@/modules/providers/list/opencode/opencode-governance.js';
 import { materializeOpenCodeConfig } from '@/services/isolation/opencode-config-material.js';
+import { LOCAL_INSTRUCTION_TIER } from '@/services/isolation/opencode-local-tier-material.js';
 import {
   recoverOpenCodeConfigMigration,
   secureNeutralizeOpenCodeFile,
@@ -152,6 +157,24 @@ const writeOpenCodeConfig = async (
   });
 };
 
+/**
+ * ADR-LOCAL-INSTR-TIER-001 (I5): a member who already has the local-model config dir
+ * gets the same MCP servers there, so they never vanish on local turns. The local
+ * spawn re-derives them from the ordinary config anyway, so a failure here only logs.
+ */
+function syncLocalTierMcp(userId: string | number | null, servers: Record<string, unknown>): void {
+  const localDir = resolveOpenCodeLocalConfigHomeForUser(userId);
+  if (!localDir) return;
+  try {
+    const stat = lstatSync(localDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+  } catch {
+    return;
+  }
+  const ok = materializeOpenCodeConfig(localDir, { mcp: servers, callerId: userId, tier: LOCAL_INSTRUCTION_TIER });
+  if (!ok) console.warn('[OpenCode] local-tier MCP overlay not materialized; the next local turn re-syncs it');
+}
+
 const resolveOpenCodeConfigPath = async (
   scope: McpScope,
   workspacePath: string,
@@ -291,6 +314,7 @@ export class OpenCodeMcpProvider extends McpProvider {
       }
 
       const ok = materializeOpenCodeConfig(path.dirname(filePath), { mcp: servers, lockHeld: true, callerId: userId });
+      if (ok) syncLocalTierMcp(userId ?? null, servers);
       if (!ok) {
         if (migratingPath) await rename(migratingPath, jsoncPath).catch(() => {});
         throw new AppError('Failed to materialize governed OpenCode MCP overlay.', {

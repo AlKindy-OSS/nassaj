@@ -31,7 +31,6 @@ const serverRoot = path.resolve(here, '..', '..');
 const SEAM_FILES: string[] = [
   // Run seam (CLI entrypoints + shared HTTP runtime).
   path.join(serverRoot, 'kimi-cli.js'),
-  path.join(serverRoot, 'deepseek-cli.js'),
   path.join(serverRoot, 'glm-cli.js'),
   path.join(serverRoot, 'modules', 'providers', 'shared', 'vendor', 'vendor-runtime.js'),
   // Provider/catalog/sessions/config that the seam pulls in.

@@ -5,10 +5,7 @@ import path from 'node:path';
 import { query, type ModelInfo, type Options } from '@anthropic-ai/claude-agent-sdk';
 
 import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
-import {
-  assertAnthropicBaseUrlAllowed,
-  assertSettingsEnvAllowed,
-} from '@/services/isolation/anthropic-base-url-guard.js';
+import { assertClaudeSpawnEnvAllowed } from '@/services/isolation/claude-spawn-env-guard.js';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { buildCagedSdkSpawn } from '@/services/isolation/provider-cage-wiring.js';
@@ -277,20 +274,11 @@ async function probeSupportedModels(
 
   try {
     // Resolve the SAME environment a real spawn for this user uses so the probe
-    // reports the catalog for the user's authenticated subscription (their own
-    // CLAUDE_CONFIG_DIR). When claude is admin-marked "shared", or userId is
-    // null/anon/platform, resolveProviderEnv returns the operator base env
-    // unchanged — identical to the previous behaviour for those cases. Held in a
-    // definite local so the fail-closed guard below sees a concrete env
-    // (Options.env is typed optional, which would otherwise widen to `| undefined`).
-    let probeEnv: NodeJS.ProcessEnv;
-    try {
-      probeEnv = resolveProviderEnv(userId, 'claude', process.env);
-    } catch {
-      // Never let env resolution (e.g. a provisioning hiccup) break the probe —
-      // fall back to the base env, which still yields a usable catalog.
-      probeEnv = { ...process.env };
-    }
+    // reports the catalog for the user's own subscription (their own
+    // CLAUDE_CONFIG_DIR). ADR-152 A1 §3.4: no fallback to the operator's
+    // environment — a resolver error (no actor, provisioning failure) throws to
+    // the catch below, which degrades to the fallback catalog and spawns nothing.
+    const probeEnv: NodeJS.ProcessEnv = resolveProviderEnv(userId, 'claude', process.env);
 
     const options: Options = {
       env: probeEnv,
@@ -303,16 +291,14 @@ async function probeSupportedModels(
 
     // Vendor-resilience iron rule (fail-closed): refuse to spawn this catalog
     // probe if a competitor ANTHROPIC_BASE_URL (or any *_BASE_URL routing var) in
-    // the operator OS env / per-user settings.json would route the Claude
-    // subprocess to a non-Anthropic endpoint. No-op when unset (default
-    // Anthropic). Mirrors the three spawn seams in server/claude-sdk.js. The
-    // throw is caught by probeSupportedModels()'s catch and degrades to the
+    // the operator OS env or any settings file the CLI loads (managed, the
+    // RESOLVED per-user config dir, and project/local at the probe cwd — B-1764)
+    // would route the Claude subprocess to a non-Anthropic endpoint. No-op when
+    // unset (default Anthropic). Mirrors the spawn seams in server/claude-sdk.js.
+    // The throw is caught by probeSupportedModels()'s catch and degrades to the
     // fallback catalog — never silently routes Claude traffic to an unknown
-    // vendor. The settings.json check now targets the RESOLVED per-user config
-    // dir, so a competitor base URL placed in a user's own settings.json is
-    // caught too. See server/services/isolation/anthropic-base-url-guard.js.
-    assertAnthropicBaseUrlAllowed(probeEnv);
-    assertSettingsEnvAllowed(probeEnv.CLAUDE_CONFIG_DIR ?? '', probeEnv);
+    // vendor. See server/services/isolation/claude-spawn-env-guard.js.
+    await assertClaudeSpawnEnvAllowed(probeEnv, { cwd: probeCwd });
 
     // T-1749/ADR-159: the probe spawns the claude binary through the SDK. While
     // the claude harness is mid-update the throw degrades to the fallback

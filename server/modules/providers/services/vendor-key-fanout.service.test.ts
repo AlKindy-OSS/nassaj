@@ -52,8 +52,6 @@ const ZAI_SLOTS: FanoutSlot[] = [
 
 let modes: Record<'claude' | 'codex', Mode> = { claude: 'api_key', codex: 'api_key' };
 let failing = new Set<string>();
-let shared = new Set<string>();
-let elevatedOnly = new Set<string>();
 let audits: Array<{ action: string; metadata: Record<string, unknown> }> = [];
 let userSeq = 500;
 
@@ -122,8 +120,6 @@ function makeService() {
     keyVersion: 1,
     now: () => new Date('2026-10-09T00:00:00.000Z'),
     listMemberIds: () => [...members],
-    isOwnScope: (provider) => !shared.has(provider),
-    requiresElevatedRole: (provider) => elevatedOnly.has(provider),
     projections: {
       async withWriteGate(_userId, provider, _key, work) {
         if (provider === 'claude' || provider === 'codex') {
@@ -199,8 +195,6 @@ beforeEach(() => {
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
   modes = { claude: 'api_key', codex: 'api_key' };
   failing = new Set();
-  shared = new Set();
-  elevatedOnly = new Set();
   audits = [];
   members.clear();
 });
@@ -208,7 +202,7 @@ beforeEach(() => {
 test('save writes the AES record, projects each slot, verifies and records the ledger', async () => {
   const userId = newMember();
   writeJson(userId, 'claude', { theme: 'dark', env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH } });
-  const results = await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const results = await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
 
   assert.deepEqual(outcomes(results), { anthropic: 'linked', 'anthropic-opencode': 'linked' });
   assert.equal(store.getCanonicalVendorKey(userId, 'anthropic'), KEY);
@@ -230,29 +224,25 @@ test('every save outcome code is produced', async () => {
   const a = newMember();
   modes.claude = 'subscription';
   writeJson(a, 'opencode', { anthropic: { type: 'oauth', refresh: 'oc-refresh' } });
-  (await service.save(a, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS })).forEach((r) => seen.add(r.outcome));
+  (await service.save(a, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS })).forEach((r) => seen.add(r.outcome));
   assert.deepEqual(readJson(a, 'opencode').anthropic, { type: 'oauth', refresh: 'oc-refresh' }, 'a login is never overwritten');
   assert.equal(readJson(a, 'claude').env, undefined, 'a subscription-mode harness gets no key');
 
   const b = newMember();
   modes.codex = 'unset';
   writeJson(b, 'opencode', { openai: { type: 'api', key: FOREIGN } });
-  (await service.save(b, 'openai', OPENAI_KEY, { isElevated: false, slots: OPENAI_SLOTS })).forEach((r) => seen.add(r.outcome));
-
-  const c = newMember();
-  elevatedOnly = new Set(['claude']);
-  shared = new Set(['claude', 'opencode']);
-  (await service.save(c, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS })).forEach((r) => seen.add(r.outcome));
-  elevatedOnly = new Set();
+  (await service.save(b, 'openai', OPENAI_KEY, { slots: OPENAI_SLOTS })).forEach((r) => seen.add(r.outcome));
 
   const d = newMember();
-  shared = new Set();
   failing = new Set(['write:opencode:glm']);
-  (await service.save(d, 'zai', ZAI_KEY, { isElevated: false, slots: ZAI_SLOTS })).forEach((r) => seen.add(r.outcome));
+  (await service.save(d, 'zai', ZAI_KEY, { slots: ZAI_SLOTS })).forEach((r) => seen.add(r.outcome));
 
-  for (const code of ['linked', 'kept_on_subscription', 'mode_unset', 'login_present', 'shared_scope_refused',
-    'foreign_credential', 'forbidden', 'failed']) {
+  for (const code of ['linked', 'kept_on_subscription', 'mode_unset', 'login_present', 'foreign_credential', 'failed']) {
     assert.ok(seen.has(code), `outcome ${code} is produced`);
+  }
+  // ADR-152 A1: no shared tree and no role gate exist, so these are never produced.
+  for (const code of ['shared_scope_refused', 'forbidden']) {
+    assert.equal(seen.has(code), false, `outcome ${code} is retired`);
   }
   assert.equal(entryFor(d, 'zai', 'opencode', 'glm')?.state, 'failed');
 });
@@ -260,7 +250,7 @@ test('every save outcome code is produced', async () => {
 test('a Claude subscription token is refused before anything is written', async () => {
   const userId = newMember();
   await assert.rejects(
-    makeService().save(userId, 'anthropic', 'sk' + '-ant-oat07-FUTURE-GEN-TOKEN', { isElevated: false, slots: ANTHROPIC_SLOTS }),
+    makeService().save(userId, 'anthropic', 'sk' + '-ant-oat07-FUTURE-GEN-TOKEN', { slots: ANTHROPIC_SLOTS }),
     (error: unknown) => (error as { code?: string }).code === 'SUBSCRIPTION_TOKEN_FORBIDDEN_TARGET',
   );
   assert.equal(store.getCanonicalVendorKey(userId, 'anthropic'), null);
@@ -272,13 +262,13 @@ test('a foreign value is untouched without confirm and replaced only with it', a
   writeJson(userId, 'opencode', { anthropic: { type: 'api', key: FOREIGN } });
   const service = makeService();
 
-  const first = await service.save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const first = await service.save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   assert.equal(outcomes(first)['anthropic-opencode'], 'foreign_credential');
   assert.equal(readJson(userId, 'opencode').anthropic.key, FOREIGN);
   assert.equal(entryFor(userId, 'anthropic', 'opencode', 'anthropic'), undefined);
 
   const confirmed = await service.save(userId, 'anthropic', KEY, {
-    isElevated: false, replaceForeignKey: true, slots: ANTHROPIC_SLOTS,
+    replaceForeignKey: true, slots: ANTHROPIC_SLOTS,
   });
   assert.equal(outcomes(confirmed)['anthropic-opencode'], 'linked');
   assert.equal(readJson(userId, 'opencode').anthropic.key, KEY);
@@ -288,14 +278,14 @@ test('a foreign value is untouched without confirm and replaced only with it', a
 test('rotation is the same save: owned projections are replaced, an unchanged key rewrites nothing', async () => {
   const userId = newMember();
   const service = makeService();
-  await service.save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await service.save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   const before = fs.statSync(filePath(userId, 'opencode')).mtimeMs;
   const bytes = fs.readFileSync(filePath(userId, 'opencode'));
-  await service.save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await service.save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   assert.deepEqual(fs.readFileSync(filePath(userId, 'opencode')), bytes);
   assert.equal(fs.statSync(filePath(userId, 'opencode')).mtimeMs, before, 'an idempotent save writes nothing');
 
-  const rotated = await service.save(userId, 'anthropic', NEW_KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const rotated = await service.save(userId, 'anthropic', NEW_KEY, { slots: ANTHROPIC_SLOTS });
   assert.deepEqual(outcomes(rotated), { anthropic: 'linked', 'anthropic-opencode': 'linked' });
   assert.equal(readJson(userId, 'claude').env.ANTHROPIC_API_KEY, NEW_KEY);
   assert.equal(entryFor(userId, 'anthropic', 'claude')?.fingerprint, store.projectionFingerprint(NEW_KEY, 1));
@@ -317,14 +307,14 @@ test('an adopted projection survives a delete without confirm and goes with it',
   writeJson(userId, 'claude', { env: { ANTHROPIC_API_KEY: FOREIGN, CLAUDE_CODE_OAUTH_TOKEN: OAUTH } });
   const service = makeService();
 
-  const kept = await service.remove(userId, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const kept = await service.remove(userId, 'anthropic', { slots: ANTHROPIC_SLOTS });
   assert.deepEqual(outcomes(kept), { anthropic: 'foreign_credential', 'anthropic-opencode': 'adopted_credential' });
   assert.equal(readJson(userId, 'opencode').anthropic.key, KEY, 'adopted: untouched without confirm');
   assert.equal(readJson(userId, 'claude').env.ANTHROPIC_API_KEY, FOREIGN, 'foreign: untouched without confirm');
   assert.equal(store.getCanonicalVendorKey(userId, 'anthropic'), null, 'the AES record is removed');
   assert.equal(entryFor(userId, 'anthropic', 'opencode', 'anthropic')?.origin, 'adopted', 'the adopted entry stays listed');
 
-  const confirmed = await service.remove(userId, 'anthropic', { isElevated: false, removeForeignKey: true, slots: ANTHROPIC_SLOTS });
+  const confirmed = await service.remove(userId, 'anthropic', { removeForeignKey: true, slots: ANTHROPIC_SLOTS });
   assert.deepEqual(outcomes(confirmed), { anthropic: 'removed', 'anthropic-opencode': 'removed' });
   assert.equal(readJson(userId, 'opencode').anthropic, undefined);
   const claude = readJson(userId, 'claude');
@@ -337,7 +327,7 @@ test('an adopted projection survives a delete without confirm and goes with it',
 test('an adopted projection is replaced by a save (only its deletion needs a confirm)', async () => {
   const userId = newMember();
   seedAdopted(userId);
-  const results = await makeService().save(userId, 'anthropic', NEW_KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const results = await makeService().save(userId, 'anthropic', NEW_KEY, { slots: ANTHROPIC_SLOTS });
   assert.equal(outcomes(results)['anthropic-opencode'], 'linked');
   assert.equal(readJson(userId, 'opencode').anthropic.key, NEW_KEY);
   assert.equal(entryFor(userId, 'anthropic', 'opencode', 'anthropic')?.origin, 'fanout');
@@ -345,10 +335,10 @@ test('an adopted projection is replaced by a save (only its deletion needs a con
 
 test('a delete with one failed projection is retried after a restart; the ledger outlives the key', async () => {
   const userId = newMember();
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
 
   failing = new Set(['remove:opencode:anthropic']);
-  const removed = await makeService().remove(userId, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const removed = await makeService().remove(userId, 'anthropic', { slots: ANTHROPIC_SLOTS });
   assert.deepEqual(outcomes(removed), { anthropic: 'removed', 'anthropic-opencode': 'failed' });
   assert.equal(store.getCanonicalVendorKey(userId, 'anthropic'), null, 'the key is gone');
   assert.equal(readJson(userId, 'claude').env.ANTHROPIC_API_KEY, undefined);
@@ -369,9 +359,9 @@ test('a delete with one failed projection is retried after a restart; the ledger
 
 test('a tombstone never removes a value that changed since it was marked', async () => {
   const userId = newMember();
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   failing = new Set(['remove:opencode:anthropic']);
-  await makeService().remove(userId, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().remove(userId, 'anthropic', { slots: ANTHROPIC_SLOTS });
   writeJson(userId, 'opencode', { anthropic: { type: 'api', key: FOREIGN } });
   failing = new Set();
   await makeService().sweepAll();
@@ -382,7 +372,7 @@ test('a tombstone never removes a value that changed since it was marked', async
 test('a failed save is retried by the sweep at server start', async () => {
   const userId = newMember();
   failing = new Set(['write:opencode:anthropic']);
-  const results = await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const results = await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   assert.equal(outcomes(results)['anthropic-opencode'], 'failed');
   assert.equal(entryFor(userId, 'anthropic', 'opencode', 'anthropic')?.state, 'failed');
 
@@ -394,7 +384,7 @@ test('a failed save is retried by the sweep at server start', async () => {
 
 test('B-1575: a stale entry whose file the user emptied is released by the sweep, not rewritten', async () => {
   const userId = newMember();
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   writeJson(userId, 'opencode', {});
   const entries = ledger(userId, 'anthropic') ?? [];
   store.setVendorLedger(userId, 'anthropic', { v: 1, entries: entries.map((entry) => (
@@ -408,7 +398,7 @@ test('B-1575: a stale entry whose file the user emptied is released by the sweep
 
 test('a key removed while the flag was off tombstones its fan-out projections at the next sweep', async () => {
   const userId = newMember();
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   store.deleteCanonicalVendorKey(userId, 'anthropic');
   await makeService().sweepAll();
   assert.equal(readJson(userId, 'claude').env.ANTHROPIC_API_KEY, undefined);
@@ -416,25 +406,24 @@ test('a key removed while the flag was off tombstones its fan-out projections at
   assert.equal(ledger(userId, 'anthropic'), null);
 });
 
-test('a shared tree is never written or removed (shared_scope_refused)', async () => {
+test('ADR-152 A1: every projection is the member\'s own tree — written and removed there', async () => {
   const userId = newMember();
-  shared = new Set(['opencode']);
-  const saved = await makeService().save(userId, 'zai', ZAI_KEY, { isElevated: true, slots: ZAI_SLOTS });
-  assert.deepEqual(outcomes(saved), { zai: 'linked', 'zai-opencode': 'shared_scope_refused' });
+  const saved = await makeService().save(userId, 'zai', ZAI_KEY, { slots: ZAI_SLOTS });
+  assert.deepEqual(outcomes(saved), { zai: 'linked', 'zai-opencode': 'linked' });
   assert.equal(store.getProviderKey(userId, 'glm'), ZAI_KEY);
-  assert.equal(fs.existsSync(filePath(userId, 'opencode')), false);
-  const removed = await makeService().remove(userId, 'zai', { isElevated: true, slots: ZAI_SLOTS });
-  assert.deepEqual(outcomes(removed), { zai: 'removed', 'zai-opencode': 'shared_scope_refused' });
+  assert.equal(fs.existsSync(filePath(userId, 'opencode')), true, 'the member\'s own opencode file holds it');
+  const removed = await makeService().remove(userId, 'zai', { slots: ZAI_SLOTS });
+  assert.deepEqual(outcomes(removed), { zai: 'removed', 'zai-opencode': 'removed' });
   assert.equal(store.getProviderKey(userId, 'glm'), null);
 });
 
 test('the service refuses with the flag off and without a member', async () => {
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
-  await assert.rejects(makeService().save('7', 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS }),
+  await assert.rejects(makeService().save('7', 'anthropic', KEY, { slots: ANTHROPIC_SLOTS }),
     (error: unknown) => (error as { code?: string }).code === 'UNIFIED_VENDOR_KEYS_OFF');
   assert.deepEqual(await makeService().sweepAll(), { status: 'flag_off', failed: 0 });
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
-  await assert.rejects(makeService().remove(null, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS }),
+  await assert.rejects(makeService().remove(null, 'anthropic', { slots: ANTHROPIC_SLOTS }),
     (error: unknown) => (error as { code?: string }).code === 'MEMBER_REQUIRED');
 });
 
@@ -448,7 +437,7 @@ function corruptEntry(userId: string, storageKey: string): void {
 
 test('G2: an undecryptable AES record is skipped by the sweep, never read as a deleted key', async () => {
   const userId = newMember();
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   const before = ledger(userId, 'anthropic');
   corruptEntry(userId, 'vendor:anthropic');
   assert.equal(store.readVendorKeyState(userId, 'vendor:anthropic').state, 'unreadable');
@@ -465,9 +454,9 @@ test('G2: a delete records the deletion marker and an explicit save clears it', 
     const read = store.readVendorMigrationState(userId);
     return read.state === 'ok' ? (read.record.deletedVendors as Record<string, string> | undefined) ?? {} : {};
   };
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
-  await makeService().remove(userId, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
+  await makeService().remove(userId, 'anthropic', { slots: ANTHROPIC_SLOTS });
   assert.equal(deleted().anthropic, '2026-10-09T00:00:00.000Z');
-  await makeService().save(userId, 'anthropic', KEY, { isElevated: false, slots: ANTHROPIC_SLOTS });
+  await makeService().save(userId, 'anthropic', KEY, { slots: ANTHROPIC_SLOTS });
   assert.equal('anthropic' in deleted(), false);
 });

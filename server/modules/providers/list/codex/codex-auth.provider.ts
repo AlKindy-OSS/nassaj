@@ -1,13 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import { resolveCodexMachineRuntime } from '@/shared/codex-executable.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
-import { operatorCodexHome } from './codex-home.js';
 
 type CodexCredentialsStatus = {
   authenticated: boolean;
@@ -97,6 +98,11 @@ export class CodexProviderAuth implements IProviderAuth {
    */
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {
     const installed = this.checkInstalled();
+    // ADR-152 A1 §3.9: with no member there is nothing to report but "not linked";
+    // the operator's ~/.codex is never read on anyone's behalf.
+    if (!isMemberActor(userId)) {
+      return { installed, provider: 'codex', authenticated: false, email: null, method: null, error: 'Not linked' };
+    }
     const credentials = await this.checkCredentials(this.resolveCodexHome(userId));
 
     return {
@@ -112,11 +118,11 @@ export class CodexProviderAuth implements IProviderAuth {
 
   /**
    * Resolves the Codex home for the given user via the central B-136 resolver.
-   * Isolated → ~/.nassaj-users/<userId>/.codex; shared/anonymous → ~/.codex.
+   * A member's own ~/.nassaj-users/<userId>/.codex (or a grantor's).
    */
   private resolveCodexHome(userId?: string | number | null): string {
-    const env = resolveProviderEnv(userId ?? null, 'codex', process.env);
-    return readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+    const env = resolveProviderEnv(userId, 'codex', process.env);
+    return resolvedKnob(env, 'CODEX_HOME');
   }
 
   /**

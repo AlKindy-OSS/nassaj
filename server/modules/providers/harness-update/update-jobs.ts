@@ -231,6 +231,9 @@ const FAILURE_MESSAGES_AR: Readonly<Record<string, string>> = Object.freeze({
   script_rejected: 'رُفض ملف التثبيت المنزَّل فلم يُشغَّل.',
   insufficient_space: 'المساحة الحرّة في مجلد المستخدم لا تكفي للتثبيت.',
   verifier_unavailable: 'أداة التحقق من التوقيع (gpgv) غير مثبّتة على الخادم، فلم يُثبَّت شيء.',
+  node_unsupported: 'إصدار Node على الخادم أقدم من الحدّ الأدنى لهذه الأداة (24.9)، فلم يُثبَّت شيء.',
+  pin_invalid: 'ملفات الإصدار المراجَع ناقصة أو غير متّسقة، فلم يُثبَّت شيء.',
+  no_previous_version: 'لا توجد نسخة سابقة محفوظة للرجوع إليها.',
 });
 
 /**

@@ -148,7 +148,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     spawnAntigravity: async () => {},
     spawnOpenCode: async () => {},
     spawnKimi: async () => {},
-    spawnDeepSeek: async () => {},
     spawnGlm: async () => {},
     getSessionProvider: () => null,
     abortClaudeSDKSession: async () => false,
@@ -157,7 +156,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     abortAntigravitySession: () => false,
     abortOpenCodeSession: () => false,
     abortKimiSession: () => false,
-    abortDeepSeekSession: () => false,
     abortGlmSession: () => false,
     resolveToolApproval: () => {},
     isClaudeSDKSessionActive: () => {
@@ -169,7 +167,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     isAntigravitySessionActive: () => true,
     isOpenCodeSessionActive: () => false,
     isKimiSessionActive: () => false,
-    isDeepSeekSessionActive: () => false,
     isGlmSessionActive: () => false,
     reconnectSessionWriter: () => {
       calls.reconnect += 1;
@@ -190,7 +187,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     getActiveAntigravitySessions: () => [],
     getActiveOpenCodeSessions: () => [],
     getActiveKimiSessions: () => [],
-    getActiveDeepSeekSessions: () => [],
     getActiveGlmSessions: () => [],
     ...overrides,
   };
@@ -296,21 +292,19 @@ describe('B-144 get-active-sessions membership filter + provider coverage', () =
     assert.deepEqual([...msg.sessions.claude].sort(), ['sess-private', 'sess-public']);
   });
 
-  test('kimi/deepseek/glm are now included in the response and filtered', () => {
+  test('kimi/glm are included and filtered; the deleted deepseek body has no entry (T-2088)', () => {
     const { ws } = connect(OUTSIDER_USER_ID, {
       getActiveKimiSessions: () => ['sess-public'],
-      getActiveDeepSeekSessions: () => ['sess-private'],
       getActiveGlmSessions: () => ['sess-public', 'sess-private'],
     });
     ws.emit('message', JSON.stringify({ type: 'get-active-sessions' }));
 
     const msg = findSent(ws, 'active-sessions') as { sessions: Record<string, string[]> } | undefined;
     assert.ok(msg);
-    assert.ok('kimi' in msg.sessions, 'kimi provider now present');
-    assert.ok('deepseek' in msg.sessions, 'deepseek provider now present');
-    assert.ok('glm' in msg.sessions, 'glm provider now present');
+    assert.ok('kimi' in msg.sessions, 'kimi provider present');
+    assert.ok('glm' in msg.sessions, 'glm provider present');
+    assert.equal('deepseek' in msg.sessions, false, 'no launcher, so no deepseek run list');
     assert.deepEqual(msg.sessions.kimi, ['sess-public']);
-    assert.deepEqual(msg.sessions.deepseek, [], 'private deepseek id hidden from the outsider');
     assert.deepEqual(msg.sessions.glm, ['sess-public'], 'only the public glm id survives the filter');
   });
 });
@@ -347,5 +341,37 @@ describe('ADR-218 session-agents snapshot rides the B-137 gate', () => {
     assert.deepEqual(requested, ['sess-private']);
     assert.equal(findSent(ws, 'session-agents')?.sessionId, 'sess-private');
     assert.equal(findSent(other, 'session-agents'), undefined, 'another socket never receives it');
+  });
+});
+
+describe('ADR-219 P2 (qa round 2 #3b): claude-permission-response stamps the answerer from the socket', () => {
+  test('requesterAuthKind comes from request.user; a client-supplied value is ignored', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { deps } = makeDeps({ resolveToolApproval: (_id: string, payload: Record<string, unknown>) => {
+      seen.push(payload);
+      return { resolved: false, sessionId: null };
+    } });
+    const ws = makeFakeWs();
+    handleChatConnection(ws as never, { user: { id: OWNER_USER_ID, authenticationKind: 'device_session' } } as never, deps);
+    ws.emit('message', JSON.stringify({ type: 'claude-permission-response', requestId: 'req-ws-1', allow: true,
+      requesterAuthKind: 'session', requesterUserId: 777 }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]!.requesterAuthKind, 'device_session', 'the socket\'s verified kind, not the payload\'s');
+    assert.equal(seen[0]!.requesterUserId, OWNER_USER_ID, 'the socket\'s user, not the payload\'s');
+  });
+
+  test('a socket whose user carries no kind stamps null, never a client value', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { deps } = makeDeps({ resolveToolApproval: (_id: string, payload: Record<string, unknown>) => {
+      seen.push(payload);
+      return { resolved: false, sessionId: null };
+    } });
+    const ws = makeFakeWs();
+    handleChatConnection(ws as never, { user: { id: OWNER_USER_ID } } as never, deps);
+    ws.emit('message', JSON.stringify({ type: 'claude-permission-response', requestId: 'req-ws-2', allow: true,
+      requesterAuthKind: 'session' }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen[0]!.requesterAuthKind, null);
   });
 });

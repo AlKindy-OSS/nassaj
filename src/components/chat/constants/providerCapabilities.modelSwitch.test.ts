@@ -39,6 +39,7 @@ const EXPECTED: Record<string, boolean> = {
   deepseek:     true,
   glm:          true,
   sakana:       false,  // stub — لا تنفيذ فعلي
+  dsh:          false,  // T-2086: لا واجهة نماذج dsh خادمياً بعد (سجلّ التاريخ وحده)
 };
 
 describe('providerCapabilities.modelSwitch — خريطة الدعم مقابل الحقيقة الخادمية', () => {

@@ -32,7 +32,6 @@ let fanoutCalls: Array<{ op: string; vendorId: string; options: Record<string, u
 mock.module(url('./provider-credentials.service.js'), {
   namedExports: {
     providerCredentialsService: {
-      requiresElevatedRole: () => false,
       setKey: async (_userId: unknown, provider: string, _key: string, target?: string) => {
         dispatched.push(`set:${provider}:${target ?? '-'}`);
         return { provider, configured: true };
@@ -95,7 +94,7 @@ function seedCanonical(userId: string): void {
 
 test('flag OFF: save is the T-1201 path exactly and writes no unified record', async () => {
   subscribed = new Set(['claude']);
-  const result = await companyCredentialsService.setKey('41', 'anthropic', KEY, { isElevated: false });
+  const result = await companyCredentialsService.setKey('41', 'anthropic', KEY, {});
   assert.deepEqual(result.slots.map((slot) => slot.outcome), ['skipped_subscription', 'written']);
   assert.deepEqual(dispatched, ['set:opencode:anthropic']);
   assert.equal(fanoutCalls.length, 0, 'the fan-out is never loaded with the flag off');
@@ -105,7 +104,7 @@ test('flag OFF: save is the T-1201 path exactly and writes no unified record', a
 
 test('flag OFF: the legacy company delete also removes the vendor:* record', async () => {
   seedCanonical('42');
-  const result = await companyCredentialsService.deleteKey('42', 'anthropic', { isElevated: false });
+  const result = await companyCredentialsService.deleteKey('42', 'anthropic', {});
   assert.deepEqual(result.slots.map((slot) => slot.outcome), ['written', 'written']);
   assert.deepEqual(dispatched, ['delete:claude:-', 'delete:opencode:anthropic']);
   assert.equal(store.getCanonicalVendorKey('42', 'anthropic'), null);
@@ -114,19 +113,19 @@ test('flag OFF: the legacy company delete also removes the vendor:* record', asy
 
 test('flag OFF: a single-slot legacy delete still removes the vendor:* record', async () => {
   seedCanonical('43');
-  await companyCredentialsService.deleteKey('43', 'anthropic', { isElevated: false, vendorIds: ['anthropic-opencode'] });
+  await companyCredentialsService.deleteKey('43', 'anthropic', { vendorIds: ['anthropic-opencode'] });
   assert.equal(store.getCanonicalVendorKey('43', 'anthropic'), null);
 });
 
 test('flag OFF: a company without a vendor:* record deletes exactly as before', async () => {
-  const result = await companyCredentialsService.deleteKey('44', 'zai', { isElevated: false });
+  const result = await companyCredentialsService.deleteKey('44', 'zai', {});
   assert.deepEqual(result.slots.map((slot) => `${slot.vendorId}:${slot.outcome}`), ['zai:written', 'zai-opencode:written']);
 });
 
 test('flag ON: save and delete go to the fan-out with the slots and the confirms', async () => {
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
   const saved = await companyCredentialsService.setKey('45', 'anthropic', ` ${KEY} `, {
-    isElevated: true, replaceForeignKey: true, vendorIds: ['anthropic-opencode'],
+    replaceForeignKey: true, vendorIds: ['anthropic-opencode'],
   });
   assert.equal(saved.configured, true);
   assert.equal(fanoutCalls[0].op, 'save');
@@ -134,7 +133,7 @@ test('flag ON: save and delete go to the fan-out with the slots and the confirms
   assert.equal(fanoutCalls[0].options.replaceForeignKey, true);
   assert.deepEqual(dispatched, [], 'the T-1201 dispatcher loop is not used in-flag');
 
-  const removed = await companyCredentialsService.deleteKey('45', 'anthropic', { isElevated: true, removeForeignKey: true });
+  const removed = await companyCredentialsService.deleteKey('45', 'anthropic', { removeForeignKey: true });
   assert.equal(fanoutCalls[1].op, 'remove');
   assert.equal(fanoutCalls[1].options.removeForeignKey, true);
   assert.deepEqual(removed.slots.map((slot) => slot.outcome), ['removed', 'removed']);
@@ -143,7 +142,7 @@ test('flag ON: save and delete go to the fan-out with the slots and the confirms
 
 test('flag ON without a member keeps the T-1201 path', async () => {
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
-  await companyCredentialsService.setKey(null, 'zai', KEY, { isElevated: true });
+  await companyCredentialsService.setKey(null, 'zai', KEY, {});
   assert.equal(fanoutCalls.length, 0);
   assert.deepEqual(dispatched, ['set:glm:-', 'set:opencode:glm']);
 });
@@ -151,7 +150,7 @@ test('flag ON without a member keeps the T-1201 path', async () => {
 test('G2 flag ON: a per-slot delete is refused (409 VENDOR_DELETE_IS_VENDOR_WIDE); all slots go through', async () => {
   process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '1';
   await assert.rejects(
-    companyCredentialsService.deleteKey('46', 'anthropic', { isElevated: true, vendorIds: ['anthropic-opencode'] }),
+    companyCredentialsService.deleteKey('46', 'anthropic', { vendorIds: ['anthropic-opencode'] }),
     (error: unknown) => {
       const err = error as { code?: string; statusCode?: number };
       return err.code === 'VENDOR_DELETE_IS_VENDOR_WIDE' && err.statusCode === 409;
@@ -160,7 +159,7 @@ test('G2 flag ON: a per-slot delete is refused (409 VENDOR_DELETE_IS_VENDOR_WIDE
   assert.equal(fanoutCalls.length, 0, 'nothing was removed');
   assert.deepEqual(dispatched, []);
 
-  await companyCredentialsService.deleteKey('46', 'anthropic', { isElevated: true, vendorIds: ['anthropic', 'anthropic-opencode'] });
+  await companyCredentialsService.deleteKey('46', 'anthropic', { vendorIds: ['anthropic', 'anthropic-opencode'] });
   assert.equal(fanoutCalls[0]?.op, 'remove', 'naming every slot is the vendor-wide delete');
 });
 

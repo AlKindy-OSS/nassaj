@@ -18,15 +18,15 @@
  *      unrecognized routing knob in the ANTHROPIC_ / CLAUDE_ namespace) is a
  *      potential bypass surface and is rejected outright (fail-closed) — the
  *      guard refuses any base-URL override it does not explicitly understand.
- *   3. Extra base-URL values the caller collected from the per-user settings.json
- *      `env` block (ctx.extraValues) are validated with the same host logic, so a
- *      base URL hidden there cannot reach the subprocess undetected.
+ *   3. Extra base-URL values a caller passes in ctx.extraValues are validated
+ *      with the same host logic.
  *
- * Two convenience entrypoints exist because the Claude CLI reads routing config
- * from BOTH the spawn env AND the per-user settings.json:
+ * Two entrypoints exist because the Claude CLI reads routing config from BOTH
+ * the spawn env AND every settings file it loads:
  *   - assertAnthropicBaseUrlAllowed(env, ctx) — the spawn env (+ ctx.extraValues).
- *   - assertSettingsEnvAllowed(claudeConfigDir, spawnEnv) — reads settings.json
- *     and validates its `env` block under the SAME allowlist.
+ *   - assertSettingsRoutingAllowed(settings, spawnEnv, label) — one parsed
+ *     settings object's `env` block under the SAME allowlist (B-1764: the caller
+ *     feeds it every managed / user / project / local source).
  *
  * SCOPE: this guard governs ONLY the Anthropic/Claude subprocess env. It does
  * not touch other providers (agy/AntigravityProvider, codex, cursor, opencode),
@@ -36,18 +36,22 @@
  * Allowlist (a host is approved if ANY of these hold):
  *   1. Official Anthropic hosts: exactly `anthropic.com` or any subdomain.
  *   2. This spawn's engine host(s): ctx.engineProviderHosts (the per-user engine
- *      provider endpoint authorized by applyClaudeEngineProviderEnv).
+ *      provider endpoint authorized by applyClaudeEngineProviderEnv), or — for
+ *      ANTHROPIC_BASE_URL only — this spawn's engine ORIGIN(s): ctx.engineOrigins
+ *      (a caller-owned local model server, ADR-227), matched on the full
+ *      normalized origin (scheme + host + explicit port), never on the host alone.
  *   3. Official managed-cloud endpoints, ONLY when that mode is explicitly
  *      enabled in the same env:
  *        - AWS Bedrock  (CLAUDE_CODE_USE_BEDROCK truthy): `*.amazonaws.com`.
  *        - Google Vertex (CLAUDE_CODE_USE_VERTEX truthy): `*.googleapis.com`.
  *   4. Any host listed (comma/space-separated) in NASSAJ_ALLOWED_ANTHROPIC_HOSTS
  *      — the documented escape hatch for a legitimate corporate proxy / gateway.
- *      Matched exactly OR as a parent domain suffix.
+ *      Matched exactly OR as a parent domain suffix. ADR-227: loopback, private,
+ *      link-local and CGNAT/tailnet literals, `localhost`, single-label names and
+ *      broad private suffixes (`ts.net`, `<tailnet>.ts.net`, `local`, `lan`, ...)
+ *      are IGNORED there: that list is exempt from B-1541 (the operator's own
+ *      Anthropic key may travel to it), so it must never name a local server.
  */
-
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { OFFICIAL_ANTHROPIC_HOSTS } from './provider-anthropic-endpoints.js';
 
@@ -134,6 +138,95 @@ function hostMatchesDomain(host, domain) {
 }
 
 /**
+ * ADR-227: the one normalizer for an authorized engine ORIGIN. Returns
+ * `scheme://host:port` with the WHATWG-normalized host (so `127.1`,
+ * `2130706433` and `127.0.0.1` agree, as do `[0:0::1]` and `[::1]`), a single
+ * trailing DNS dot removed, and the port always explicit (80/443 filled in).
+ * Only http/https, no credentials, query or fragment, and a path of `/` (the
+ * Claude CLI appends `/v1/messages` itself). Anything else is null — never a
+ * guessed origin.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+export function normalizeAuthorizedOrigin(raw) {
+  const value = nonEmpty(raw);
+  if (value === null) return null;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.username || url.password || url.search || url.hash) return null;
+  if (url.pathname !== '/' && url.pathname !== '') return null;
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host) return null;
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+  return `${url.protocol}//${host}:${port}`;
+}
+
+/** Private suffixes an allowlist entry may not name: each covers many hosts. */
+const BROAD_PRIVATE_SUFFIXES = new Set([
+  'ts.net', 'local', 'lan', 'home', 'internal', 'intranet', 'localdomain', 'home.arpa', 'corp', 'private',
+]);
+
+/**
+ * True when an IPv4 literal is loopback, unspecified, private, link-local or
+ * CGNAT/tailnet (100.64.0.0/10).
+ * @param {string} host WHATWG-normalized dotted quad
+ * @returns {boolean}
+ */
+function isNonPublicIPv4(host) {
+  const parts = host.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a, b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
+
+/**
+ * True when a bracketed IPv6 literal is loopback, unspecified, ULA, link-local
+ * or an IPv4-mapped non-public address.
+ * @param {string} host WHATWG-normalized `[...]` form
+ * @returns {boolean}
+ */
+function isNonPublicIPv6(host) {
+  const inner = host.slice(1, -1);
+  if (inner === '::1' || inner === '::') return true;
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(inner);
+  if (mapped) {
+    const high = parseInt(mapped[1], 16);
+    const low = parseInt(mapped[2], 16);
+    return isNonPublicIPv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
+  const first = parseInt(inner.split(':')[0] || '0', 16);
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+}
+
+/**
+ * ADR-227: an allowlist entry that could name a local model server (or a whole
+ * private network) instead of an Anthropic-backed proxy.
+ * @param {string} entry lowercased hostname (or raw entry when unparseable)
+ * @returns {boolean}
+ */
+export function isUnsafeAllowedHostEntry(entry) {
+  let host;
+  try {
+    host = new URL(`http://${entry.includes(':') && !entry.startsWith('[') ? `[${entry}]` : entry}`).hostname;
+  } catch {
+    return true;
+  }
+  host = host.toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('[')) return isNonPublicIPv6(host);
+  if (/^[0-9.]+$/u.test(host)) return isNonPublicIPv4(host);
+  if (host === 'localhost' || host.endsWith('.localhost') || !host.includes('.')) return true;
+  if (BROAD_PRIVATE_SUFFIXES.has(host)) return true;
+  // `<tailnet>.ts.net` admits every device on that tailnet by suffix matching.
+  return host.endsWith('.ts.net') && host.split('.').length <= 3;
+}
+
+/**
  * Parses NASSAJ_ALLOWED_ANTHROPIC_HOSTS into a list of lowercased host entries.
  * Accepts either bare hosts ("proxy.example.com") or full URLs; a URL entry is
  * reduced to its hostname. Comma- and/or whitespace-separated.
@@ -150,7 +243,7 @@ function parseAllowedHosts(raw) {
       if (e === '') return null;
       return parseHost(e) ?? e.toLowerCase();
     })
-    .filter((e) => e !== null);
+    .filter((e) => e !== null && !isUnsafeAllowedHostEntry(e));
 }
 
 /**
@@ -247,15 +340,25 @@ function notAllowedError(label, shown, reason = '', unparseable = false) {
  *   effective env for a settings.json block).
  * @param {string} [sourceLabel] human label for error context (e.g. a file path)
  * @param {Set<string>} [engineHosts] hostnames authorized for THIS spawn (ADR-037)
+ * @param {Set<string>} [engineOrigins] normalized origins authorized for THIS
+ *   spawn's ANTHROPIC_BASE_URL only (ADR-227, a caller-owned local server)
  * @throws {Error} code ANTHROPIC_BASE_URL_NOT_ALLOWED on any violation
  */
-function assertRoutingVarsAllowed(env, flagEnv, sourceLabel = '', engineHosts = null) {
+function assertRoutingVarsAllowed(env, flagEnv, sourceLabel = '', engineHosts = null, engineOrigins = null) {
   const where = sourceLabel ? ` (in ${sourceLabel})` : '';
 
   // 1. Known ANTHROPIC routing vars: each must resolve to an approved host.
   for (const { name, cloud } of ROUTING_VARS) {
     const raw = nonEmpty(env[name]);
     if (raw === null) continue; // unset -> default path, no-op.
+
+    // ADR-227: a local engine origin is matched whole (scheme, host, port, empty
+    // path) and only on the generic base URL; a same-host other port falls through
+    // to the host rules below, which never list a local host.
+    if (name === 'ANTHROPIC_BASE_URL' && engineOrigins instanceof Set && engineOrigins.size > 0) {
+      const origin = normalizeAuthorizedOrigin(raw);
+      if (origin !== null && engineOrigins.has(origin)) continue;
+    }
 
     const host = parseHost(raw);
     if (host === null) {
@@ -297,16 +400,20 @@ function assertRoutingVarsAllowed(env, flagEnv, sourceLabel = '', engineHosts = 
  * (default Anthropic).
  *
  * @param {NodeJS.ProcessEnv} [env=process.env] environment headed to the subprocess
- * @param {{ engineProviderHosts?: Set<string>, extraValues?: string[] }} [ctx]
+ * @param {{ engineProviderHosts?: Set<string>, engineOrigins?: Set<string>,
+ *   extraValues?: string[] }} [ctx]
  *   ADR-037 context: hostnames authorized for this spawn and extra base-URL
  *   values (e.g. from settings.json) to vet with the same host logic.
+ *   ADR-227: engineOrigins — normalized origins (normalizeAuthorizedOrigin)
+ *   authorized for ANTHROPIC_BASE_URL only; never applied to extraValues.
  * @throws {Error} when any base URL points at a non-approved host
  */
 export function assertAnthropicBaseUrlAllowed(env = process.env, ctx = {}) {
   const engineHosts = ctx && ctx.engineProviderHosts instanceof Set ? ctx.engineProviderHosts : null;
+  const engineOrigins = ctx && ctx.engineOrigins instanceof Set ? ctx.engineOrigins : null;
 
   // 1. Validate the spawn env's routing vars + any other *_BASE_URL keys.
-  assertRoutingVarsAllowed(env, env, '', engineHosts);
+  assertRoutingVarsAllowed(env, env, '', engineHosts, engineOrigins);
 
   // 2. Validate caller-supplied extra base-URL values (settings.json channel).
   if (ctx && Array.isArray(ctx.extraValues)) {
@@ -325,41 +432,40 @@ export function assertAnthropicBaseUrlAllowed(env = process.env, ctx = {}) {
 }
 
 /**
- * Fail-closed guard for the PER-USER settings.json `env` block that the Claude
- * CLI applies downstream of the spawn env. Reads CLAUDE_CONFIG_DIR/settings.json
- * and validates its `env` routing vars under the SAME allowlist as the process
- * env — closing the bypass where a competitor base URL set in settings.json
- * reaches the subprocess undetected.
+ * Fail-closed guard for ONE parsed settings object (any tier the Claude CLI
+ * loads: managed policy, user, project, local). The CLI applies the `env` block
+ * downstream of the spawn env, so its routing vars are validated under the SAME
+ * allowlist as the process env. The caller reads the file set (B-1764: every
+ * source from claudeSpawnSettingsFiles, see claude-spawn-env-guard.js); this
+ * function only judges content.
  *
  * Fail-closed details:
- *   - settings.json missing / unreadable / not an object / no `env` block -> no-op.
- *   - present & parseable but a routing var is disallowed -> throw.
- *   - present but INVALID JSON -> throw (cannot prove absence of an override).
+ *   - no `env` key -> no-op.
+ *   - `env` present but not a plain object -> throw (cannot prove absence of an
+ *     override; same rule as the B-1541 credential guard).
+ *   - a routing var is disallowed -> throw.
  *
- * @param {string} claudeConfigDir absolute CLAUDE_CONFIG_DIR (dir of settings.json).
- *   Falsy -> no-op.
- * @param {NodeJS.ProcessEnv} [spawnEnv=process.env] effective spawn env, read only
- *   for the mode flags / operator allowlist (never mutated).
+ * Engine hosts are deliberately NOT accepted here: an engine route is authorized
+ * for the spawn env only, never for a settings file.
+ *
+ * ADR-227 (`opts.localEngine`): on a local-engine spawn a settings file may not
+ * route at all. The CLI applies a settings `env` block over the spawn env, so
+ * even an OFFICIAL Anthropic base URL there would silently move a local chat to
+ * Anthropic; managed-cloud mode flags and a unix-socket route are refused too.
+ *
+ * @param {Record<string, unknown>} settings parsed settings object
+ * @param {NodeJS.ProcessEnv} spawnEnv effective spawn env, read only for the mode
+ *   flags / operator allowlist (never mutated)
+ * @param {string} sourceLabel human label for error context (e.g. a file path)
+ * @param {{ localEngine?: boolean }} [opts]
  * @throws {Error} code ANTHROPIC_BASE_URL_NOT_ALLOWED on any violation
  */
-export function assertSettingsEnvAllowed(claudeConfigDir, spawnEnv = process.env) {
-  if (!claudeConfigDir) return;
-
-  const settingsPath = join(claudeConfigDir, 'settings.json');
-
-  let raw;
-  try {
-    raw = readFileSync(settingsPath, 'utf8');
-  } catch {
-    return; // Missing / unreadable -> no settings env to honor. No-op.
-  }
-
-  let settings;
-  try {
-    settings = JSON.parse(raw);
-  } catch {
+export function assertSettingsRoutingAllowed(settings, spawnEnv, sourceLabel, opts = {}) {
+  const settingsEnv = settings?.env;
+  if (settingsEnv === undefined || settingsEnv === null) return;
+  if (typeof settingsEnv !== 'object' || Array.isArray(settingsEnv)) {
     const error = new Error(
-      `Refusing to spawn Claude Code: ${settingsPath} is not valid JSON, so its env ` +
+      `Refusing to spawn Claude Code: the env block in ${sourceLabel} is not an object, so its ` +
         'routing overrides cannot be validated against the vendor-resilience iron rule. ' +
         'Fix the file or remove it.'
     );
@@ -367,15 +473,37 @@ export function assertSettingsEnvAllowed(claudeConfigDir, spawnEnv = process.env
     throw error;
   }
 
-  const settingsEnv =
-    settings && typeof settings === 'object' && !Array.isArray(settings) &&
-    settings.env && typeof settings.env === 'object' && !Array.isArray(settings.env)
-      ? settings.env
-      : null;
-  if (!settingsEnv) return;
+  if (opts.localEngine === true) assertNoSettingsRouteForLocalEngine(settingsEnv, sourceLabel);
 
   // Effective env: a flag may live in either the spawn env or the settings env.
   const effectiveFlagEnv = { ...spawnEnv, ...settingsEnv };
 
-  assertRoutingVarsAllowed(settingsEnv, effectiveFlagEnv, settingsPath);
+  assertRoutingVarsAllowed(settingsEnv, effectiveFlagEnv, sourceLabel);
+}
+
+/** Settings `env` keys that would move a local-engine run off its server (ADR-227). */
+export const LOCAL_ENGINE_SETTINGS_ROUTE_KEYS = Object.freeze([
+  ...ROUTING_VARS.map((v) => v.name),
+  'ANTHROPIC_UNIX_SOCKET',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+]);
+
+/**
+ * Refuses any routing key in a settings `env` block of a local-engine spawn.
+ * @param {Record<string, unknown>} settingsEnv
+ * @param {string} sourceLabel
+ */
+function assertNoSettingsRouteForLocalEngine(settingsEnv, sourceLabel) {
+  const present = LOCAL_ENGINE_SETTINGS_ROUTE_KEYS.filter((key) => (key.startsWith('CLAUDE_CODE_USE_')
+    ? isFlagEnabled(settingsEnv[key])
+    : nonEmpty(settingsEnv[key]) !== null));
+  if (present.length === 0) return;
+  const error = new Error(
+    `Refusing to spawn Claude Code on a local model server: ${sourceLabel} sets ${present.join(', ')}, ` +
+      'which would route the run away from the server this chat is pinned to. Remove it from that file.'
+  );
+  error.code = 'ANTHROPIC_BASE_URL_NOT_ALLOWED';
+  throw error;
 }

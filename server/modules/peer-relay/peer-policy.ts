@@ -2,8 +2,8 @@
  * ADR-219 S1 policy — pure decisions over server-derived facts.
  *
  * S1 relays only between sessions of the SAME user in the SAME permission-mode
- * category; everything else is refused with explicit text (P2 replaces those
- * refusals with holds). Hop is a run property capped at 4; sends are throttled
+ * category; P2a-min (decideIntake) holds a cross-member send whose modes match
+ * for the target owner's approval, and refuses everything else with explicit text. Hop is a run property capped at 4; sends are throttled
  * per sender session (20/h) and per sender user (60/h). All numbers are
  * provisional (ADR-219 "Estimate").
  */
@@ -46,17 +46,6 @@ export type AclFacts = {
   senderCanWriteTarget: boolean;
 };
 
-export type AclVerdict = { ok: true } | { ok: false; cause: 'unwritable' | 'cross_user' | 'mode_unknown' | 'mode_mismatch' };
-
-/** S1 ACL: unwritable → refused; unknown target mode → refused (fail closed); same user and category → queued. */
-export function decideS1Acl(facts: AclFacts): AclVerdict {
-  if (!facts.senderCanWriteTarget) return { ok: false, cause: 'unwritable' };
-  if (facts.targetUserId === null || facts.targetUserId !== facts.senderUserId) return { ok: false, cause: 'cross_user' };
-  if (facts.targetMode === null) return { ok: false, cause: 'mode_unknown' };
-  if (facts.targetMode !== facts.senderMode) return { ok: false, cause: 'mode_mismatch' };
-  return { ok: true };
-}
-
 /** The effective hop a send is computed from: max(agent origin hop, run hop) (ح-2 b, c). */
 export function effectiveHop(runPeerHop: number, agentOriginHop: number): number {
   return Math.max(0, runPeerHop, agentOriginHop);
@@ -92,4 +81,36 @@ export function chargeFromTotals(lastTotal: number | null, baseline: number | nu
   if (lastTotal === null || !Number.isFinite(lastTotal) || baseline === null || !Number.isFinite(baseline)) return null;
   const delta = lastTotal - baseline;
   return delta >= 0 ? delta : null;
+}
+
+/** ADR-219 P2a-min: a held row (and an approved, undelivered one) lives 72 h. */
+export const PEER_HOLD_TTL_MS = 72 * 60 * 60 * 1000;
+
+/** م-7 overflow caps: held rows per target user, per sender within it, per session pair. */
+export const PEER_HOLD_LIMITS = { perTargetUser: 50, perSenderWithinTarget: 10, perSessionPair: 10 } as const;
+
+export type IntakeFacts = AclFacts & {
+  /** IS_PLATFORM: every session authenticates as the first user, so a target owner cannot be told apart. */
+  platform: boolean;
+};
+
+export type IntakeVerdict =
+  | { kind: 'queue' }
+  | { kind: 'hold'; causes: 'cross_member' }
+  | { kind: 'refuse'; cause: 'unwritable' | 'owner_unknown' | 'cross_user' | 'mode_unknown' | 'mode_mismatch' };
+
+/**
+ * P2a-min intake (§4): same user keeps the S1 rule; a cross-member send whose
+ * modes match is HELD for the target owner; a mode mismatch stays refused (P2c
+ * holds it); a null owner is `owner_unknown`; under IS_PLATFORM cross-member keeps
+ * the S1 refusal.
+ */
+export function decideIntake(facts: IntakeFacts): IntakeVerdict {
+  if (!facts.senderCanWriteTarget) return { kind: 'refuse', cause: 'unwritable' };
+  if (facts.targetUserId === null) return { kind: 'refuse', cause: 'owner_unknown' };
+  const crossMember = facts.targetUserId !== facts.senderUserId;
+  if (crossMember && facts.platform) return { kind: 'refuse', cause: 'cross_user' };
+  if (facts.targetMode === null) return { kind: 'refuse', cause: 'mode_unknown' };
+  if (facts.targetMode !== facts.senderMode) return { kind: 'refuse', cause: 'mode_mismatch' };
+  return crossMember ? { kind: 'hold', causes: 'cross_member' } : { kind: 'queue' };
 }

@@ -44,7 +44,8 @@ let originalServerKeyEnv: string | undefined;
 
 /**
  * Builds the app the way index.js mounts it, except authenticateToken is replaced
- * by a header-driven stub: `x-test-user: <id>` sets a canonical principal; absent → no user
+ * by a header-driven stub: `x-test-user: <id>` sets a canonical principal (a member id is a
+ * positive integer, ADR-152 A1 §3.4 — a non-canonical id is no member and owns no key); absent → no user
  * (single-operator / shared-store path). This isolates the routes under test from
  * JWT/DB concerns while preserving the exact req.user contract they depend on.
  */
@@ -141,70 +142,68 @@ after(async () => {
 });
 
 test('POST sets a key then GET reports configured:true without leaking the value', async () => {
-  const set = await call('POST', '/api/providers/kimi/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
+  const set = await call('POST', '/api/providers/kimi/api-key', { user: '11', body: { apiKey: TEST_API_KEY } });
   assert.equal(set.status, 200);
   assert.equal(set.body.success, true);
   assert.deepEqual(set.body.data, { provider: 'kimi', configured: true });
   // The set response must not echo the secret anywhere.
   assert.ok(!JSON.stringify(set.body).includes(TEST_API_KEY), 'set response leaked the key');
 
-  const status = await call('GET', '/api/providers/kimi/api-key', { user: 'u1' });
+  const status = await call('GET', '/api/providers/kimi/api-key', { user: '11' });
   assert.equal(status.status, 200);
-  // B-362: GET now also answers "may THIS caller write it". Vendor slots are
-  // per-user encrypted, so `requiresElevatedRole` is false and every member is
-  // writable — the shared-provider refusal is covered in credential-write-visibility.
-  assert.deepEqual(status.body.data, { provider: 'kimi', configured: true, writable: true });
+  // Every slot is the caller's own (ADR-152 A1), so no `writable` rides along.
+  assert.deepEqual(status.body.data, { provider: 'kimi', configured: true });
   assert.ok(!JSON.stringify(status.body).includes(TEST_API_KEY), 'status response leaked the key');
 });
 
 test('DELETE removes the key then GET reports configured:false (idempotent)', async () => {
-  await call('POST', '/api/providers/deepseek/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
+  await call('POST', '/api/providers/deepseek/api-key', { user: '11', body: { apiKey: TEST_API_KEY } });
 
-  const del = await call('DELETE', '/api/providers/deepseek/api-key', { user: 'u1' });
+  const del = await call('DELETE', '/api/providers/deepseek/api-key', { user: '11' });
   assert.equal(del.status, 200);
   assert.deepEqual(del.body.data, { provider: 'deepseek', configured: false });
 
-  const status = await call('GET', '/api/providers/deepseek/api-key', { user: 'u1' });
-  assert.deepEqual(status.body.data, { provider: 'deepseek', configured: false, writable: true });
+  const status = await call('GET', '/api/providers/deepseek/api-key', { user: '11' });
+  assert.deepEqual(status.body.data, { provider: 'deepseek', configured: false });
 
   // Deleting again is a no-op, still configured:false (idempotent contract).
-  const delAgain = await call('DELETE', '/api/providers/deepseek/api-key', { user: 'u1' });
+  const delAgain = await call('DELETE', '/api/providers/deepseek/api-key', { user: '11' });
   assert.equal(delAgain.status, 200);
   assert.deepEqual(delAgain.body.data, { provider: 'deepseek', configured: false });
 });
 
 test('PUT upserts the key exactly like POST', async () => {
-  const put = await call('PUT', '/api/providers/glm/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
+  const put = await call('PUT', '/api/providers/glm/api-key', { user: '11', body: { apiKey: TEST_API_KEY } });
   assert.equal(put.status, 200);
   assert.deepEqual(put.body.data, { provider: 'glm', configured: true });
 
-  const status = await call('GET', '/api/providers/glm/api-key', { user: 'u1' });
-  assert.deepEqual(status.body.data, { provider: 'glm', configured: true, writable: true });
+  const status = await call('GET', '/api/providers/glm/api-key', { user: '11' });
+  assert.deepEqual(status.body.data, { provider: 'glm', configured: true });
 });
 
 test('keys are isolated per user: A is configured, B is not', async () => {
-  await call('POST', '/api/providers/kimi/api-key', { user: 'userA', body: { apiKey: TEST_API_KEY } });
+  await call('POST', '/api/providers/kimi/api-key', { user: '21', body: { apiKey: TEST_API_KEY } });
 
-  const a = await call('GET', '/api/providers/kimi/api-key', { user: 'userA' });
-  assert.deepEqual(a.body.data, { provider: 'kimi', configured: true, writable: true });
+  const a = await call('GET', '/api/providers/kimi/api-key', { user: '21' });
+  assert.deepEqual(a.body.data, { provider: 'kimi', configured: true });
 
-  const b = await call('GET', '/api/providers/kimi/api-key', { user: 'userB' });
-  assert.deepEqual(b.body.data, { provider: 'kimi', configured: false, writable: true }, 'user B must not see user A key');
+  const b = await call('GET', '/api/providers/kimi/api-key', { user: '22' });
+  assert.deepEqual(b.body.data, { provider: 'kimi', configured: false }, 'user B must not see user A key');
 
   // Deleting B (who has none) must not affect A.
-  await call('DELETE', '/api/providers/kimi/api-key', { user: 'userB' });
-  const aStill = await call('GET', '/api/providers/kimi/api-key', { user: 'userA' });
-  assert.deepEqual(aStill.body.data, { provider: 'kimi', configured: true, writable: true }, 'A key wrongly removed by B delete');
+  await call('DELETE', '/api/providers/kimi/api-key', { user: '22' });
+  const aStill = await call('GET', '/api/providers/kimi/api-key', { user: '21' });
+  assert.deepEqual(aStill.body.data, { provider: 'kimi', configured: true }, 'A key wrongly removed by B delete');
 });
 
 test('setting a key flips GET /:provider/auth/status to authenticated:true', async () => {
-  const before = await call('GET', '/api/providers/kimi/auth/status', { user: 'u1' });
+  const before = await call('GET', '/api/providers/kimi/auth/status', { user: '11' });
   assert.equal(before.status, 200);
   assert.equal((before.body.data as { authenticated: boolean }).authenticated, false);
 
-  await call('POST', '/api/providers/kimi/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
+  await call('POST', '/api/providers/kimi/api-key', { user: '11', body: { apiKey: TEST_API_KEY } });
 
-  const afterSet = await call('GET', '/api/providers/kimi/auth/status', { user: 'u1' });
+  const afterSet = await call('GET', '/api/providers/kimi/auth/status', { user: '11' });
   const data = afterSet.body.data as { authenticated: boolean; installed: boolean; provider: string };
   assert.equal(data.authenticated, true, 'auth status must report authenticated after a key is set');
   assert.equal(data.installed, true);
@@ -215,11 +214,11 @@ test('setting a key flips GET /:provider/auth/status to authenticated:true', asy
 
 test('the secret value never appears in any response body across the lifecycle', async () => {
   const responses = [
-    await call('POST', '/api/providers/glm/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } }),
-    await call('GET', '/api/providers/glm/api-key', { user: 'u1' }),
-    await call('GET', '/api/providers/glm/auth/status', { user: 'u1' }),
-    await call('DELETE', '/api/providers/glm/api-key', { user: 'u1' }),
-    await call('GET', '/api/providers/glm/api-key', { user: 'u1' }),
+    await call('POST', '/api/providers/glm/api-key', { user: '11', body: { apiKey: TEST_API_KEY } }),
+    await call('GET', '/api/providers/glm/api-key', { user: '11' }),
+    await call('GET', '/api/providers/glm/auth/status', { user: '11' }),
+    await call('DELETE', '/api/providers/glm/api-key', { user: '11' }),
+    await call('GET', '/api/providers/glm/api-key', { user: '11' }),
   ];
   for (const res of responses) {
     assert.ok(!JSON.stringify(res.body).includes(TEST_API_KEY), 'a response leaked the key value');
@@ -232,27 +231,27 @@ test('a terminal-only provider is rejected with 400 TERMINAL_ONLY', async () => 
   // check). (Facet providers claude/codex/opencode are covered by their own
   // writer suites; exercising them here would require a provisioned per-user
   // tree/DB.) The subject was 'cursor' until T-1953 retired that body.
-  const set = await call('POST', '/api/providers/antigravity/api-key', { user: 'u1', body: { apiKey: TEST_API_KEY } });
+  const set = await call('POST', '/api/providers/antigravity/api-key', { user: '11', body: { apiKey: TEST_API_KEY } });
   assert.equal(set.status, 400);
   assert.equal(set.body.error?.code, 'TERMINAL_ONLY');
 
-  const status = await call('GET', '/api/providers/antigravity/api-key', { user: 'u1' });
+  const status = await call('GET', '/api/providers/antigravity/api-key', { user: '11' });
   assert.equal(status.status, 400);
   assert.equal(status.body.error?.code, 'TERMINAL_ONLY');
 });
 
 test('capability endpoint reports the writer method per provider', async () => {
   // Vendor: native_file (nassaj-managed encrypted store), no targets list.
-  const kimi = await call('GET', '/api/providers/kimi/api-key/capability', { user: 'u1' });
+  const kimi = await call('GET', '/api/providers/kimi/api-key/capability', { user: '11' });
   assert.equal(kimi.status, 200);
   assert.deepEqual(kimi.body.data, { provider: 'kimi', method: 'native_file' });
 
-  const qwen = await call('GET', '/api/providers/qwen/api-key/capability', { user: 'u1' });
+  const qwen = await call('GET', '/api/providers/qwen/api-key/capability', { user: '11' });
   assert.equal(qwen.status, 200);
   assert.deepEqual(qwen.body.data, { provider: 'qwen', method: 'native_file' });
 
   // Facet: opencode advertises native_file + its internal targets.
-  const opencode = await call('GET', '/api/providers/opencode/api-key/capability', { user: 'u1' });
+  const opencode = await call('GET', '/api/providers/opencode/api-key/capability', { user: '11' });
   assert.equal(opencode.status, 200);
   const oc = opencode.body.data as { provider: string; method: string; targets?: string[] };
   assert.equal(oc.provider, 'opencode');
@@ -260,15 +259,15 @@ test('capability endpoint reports the writer method per provider', async () => {
   assert.deepEqual(oc.targets, ['anthropic', 'openai', 'openrouter', 'glm']);
 
   // Facet: codex is cli_stdin (login CLI, key over stdin).
-  const codex = await call('GET', '/api/providers/codex/api-key/capability', { user: 'u1' });
+  const codex = await call('GET', '/api/providers/codex/api-key/capability', { user: '11' });
   assert.deepEqual(codex.body.data, { provider: 'codex', method: 'cli_stdin' });
 
   // Terminal-only: antigravity reports none.
-  const agy = await call('GET', '/api/providers/antigravity/api-key/capability', { user: 'u1' });
+  const agy = await call('GET', '/api/providers/antigravity/api-key/capability', { user: '11' });
   assert.deepEqual(agy.body.data, { provider: 'antigravity', method: 'none' });
 
   // T-1953: a retired body with no key slot has no capability left to report.
-  const cursor = await call('GET', '/api/providers/cursor/api-key/capability', { user: 'u1' });
+  const cursor = await call('GET', '/api/providers/cursor/api-key/capability', { user: '11' });
   assert.equal(cursor.status, 400);
   assert.equal(cursor.body.error?.code, 'provider_removed');
 });
@@ -330,11 +329,11 @@ test('ADR-200 S7: a Qwen key needs no consent, no sk-sp- prefix, and ignores pla
 });
 
 test('an empty or missing key is rejected with 400', async () => {
-  const empty = await call('POST', '/api/providers/kimi/api-key', { user: 'u1', body: { apiKey: '   ' } });
+  const empty = await call('POST', '/api/providers/kimi/api-key', { user: '11', body: { apiKey: '   ' } });
   assert.equal(empty.status, 400);
   assert.equal(empty.body.error?.code, 'INVALID_API_KEY');
 
-  const missing = await call('POST', '/api/providers/kimi/api-key', { user: 'u1', body: {} });
+  const missing = await call('POST', '/api/providers/kimi/api-key', { user: '11', body: {} });
   assert.equal(missing.status, 400);
   assert.equal(missing.body.error?.code, 'INVALID_API_KEY');
 });

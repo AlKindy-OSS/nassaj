@@ -134,19 +134,15 @@ describe('ProviderLoginTerminal — الرفض الخادمي', () => {
     expect(screen.getByTestId('login-run-status').textContent).toContain('Your role may not run');
   });
 
-  it('B-1260: رفض ربط Claude في الوضع المشترك يعرض رسالة «اطلب مالكاً/مسؤولاً» لا طرفيةً صامتة', () => {
+  it('ADR-152 A1 §3.7: the retired shared_link_admin_only code gets no admin wording', () => {
     mountModal();
-    raise({
-      message: 'Linking Claude on this shared server is limited to administrators.',
-      code: 'shared_link_admin_only',
-    });
+    raise({ message: 'Some refusal', code: 'shared_link_admin_only' });
 
-    // النافذة لا تُغلق صامتةً: تعرض حالة رفض مقروءة بزرّ «أعد التشغيل».
-    expect(screen.queryByTestId('login-retry')).not.toBeNull();
+    // Every role links its own account now; an old server's code is just unknown.
     const status = screen.getByTestId('login-run-status').textContent ?? '';
-    expect(status).toContain('owner or admin');
-    // الرمز حمل المعنى، فلا يُعرض نصّ الخادم الإنجليزي الخام.
-    expect(screen.queryByTestId('login-error-server-text')).toBeNull();
+    expect(status).not.toMatch(/owner or admin|shared server/i);
+    expect(status).toContain('The server refused to open this terminal.');
+    expect(screen.getByTestId('login-error-server-text').textContent).toBe('Some refusal');
   });
 
   it('تصفير الرفض يعيد النافذة لحالتها الطبيعية بلا قتل الجلسة', () => {

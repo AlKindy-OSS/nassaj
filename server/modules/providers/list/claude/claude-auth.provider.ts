@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
+import { isMemberActor } from '@/services/isolation/credential-actor.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import { HarnessBinaryUnresolvedError, resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus, ProviderLinkExpiry } from '@/shared/types.js';
@@ -43,7 +44,7 @@ const FULL_LINK_PROFILE_SCOPES = ['profile', 'user:profile'] as const;
  *   - 'linked'     access token present, a refresh token exists, at least one of
  *                  the two is alive, and scopes (when present) include profile.
  */
-function classifyOauthLink(
+export function classifyOauthLink(
   oauth: Record<string, unknown> | null | undefined,
   now: number,
 ): 'none' | 'expired' | 'incomplete' | 'linked' {
@@ -187,9 +188,8 @@ export class ClaudeProviderAuth implements IProviderAuth {
    * Returns Claude installation and credential status using Claude Code's auth
    * priority, reported against the SAME environment a spawn for this user would
    * use. `userId` is resolved through resolveProviderEnv so an isolated user is
-   * checked against their own CLAUDE_CONFIG_DIR, while a shared/anonymous check
-   * falls back to the operator's ~/.claude — i.e. the status always reflects the
-   * real spawn environment instead of a fixed operator path.
+   * checked against their own CLAUDE_CONFIG_DIR (or a grantor's); a caller with no
+   * member reads "not linked" (ADR-152 A1 §3.9) — never the operator's ~/.claude.
    */
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {
     const installed = this.checkInstalled();
@@ -207,10 +207,13 @@ export class ClaudeProviderAuth implements IProviderAuth {
       };
     }
 
-    // Build the same env the spawn path uses for this user. When claude is
-    // shared (admin policy) or there is no user, this returns the base env
-    // unchanged so the operator credential at ~/.claude is checked.
-    const env = resolveProviderEnv(userId ?? null, 'claude', process.env);
+    // ADR-152 A1 §3.9: status describes only this member's own (or grantor's)
+    // tree. With no member there is nothing to report but "not linked" — the
+    // operator's ~/.claude is never read.
+    if (!isMemberActor(userId)) {
+      return { installed, provider: 'claude', authenticated: false, email: null, method: null, error: 'Not linked' };
+    }
+    const env = resolveProviderEnv(userId, 'claude', process.env);
     const credentials = await this.checkCredentials(env);
 
     return {
@@ -231,12 +234,11 @@ export class ClaudeProviderAuth implements IProviderAuth {
 
   /**
    * Resolves the Claude config directory for the given (already-resolved) env.
-   * Honors CLAUDE_CONFIG_DIR (set by resolveProviderEnv when isolated) and falls
-   * back to the operator's ~/.claude when unset (shared / anonymous).
+   * CLAUDE_CONFIG_DIR is always set by resolveProviderEnv (ADR-152 A1); a
+   * missing one is refused, never replaced by the operator's ~/.claude.
    */
   private resolveConfigDir(env: NodeJS.ProcessEnv): string {
-    const configDir = readOptionalString(env.CLAUDE_CONFIG_DIR);
-    return configDir ?? path.join(os.homedir(), '.claude');
+    return resolvedKnob(env, 'CLAUDE_CONFIG_DIR');
   }
 
   /**
@@ -256,19 +258,15 @@ export class ClaudeProviderAuth implements IProviderAuth {
   }
 
   /**
-   * Reads the login email from the CLI's .claude.json (`oauthAccount.emailAddress`).
-   * `.credentials.json` only stores tokens, so this is the sole offline source of
-   * the account identity. With CLAUDE_CONFIG_DIR set the CLI keeps .claude.json
-   * inside that dir; otherwise it lives at the home-directory ROOT (~/.claude.json),
-   * not inside ~/.claude.
+   * Reads the login email from the CLI's .claude.json (`oauthAccount.emailAddress`)
+   * inside the resolved CLAUDE_CONFIG_DIR. `.credentials.json` only stores tokens,
+   * so this is the sole offline source of the account identity. There is no
+   * fallback to the operator's ~/.claude.json (ADR-152 A1 §3.9): a member never
+   * sees the operator's email.
    */
   private async readOauthAccountEmail(env: NodeJS.ProcessEnv): Promise<string | null> {
-    const configDir = readOptionalString(env.CLAUDE_CONFIG_DIR);
-    const configFile = configDir
-      ? path.join(configDir, '.claude.json')
-      : path.join(os.homedir(), '.claude.json');
-
     try {
+      const configFile = path.join(this.resolveConfigDir(env), '.claude.json');
       const content = await readFile(configFile, 'utf8');
       const config = readObjectRecord(JSON.parse(content));
       const account = readObjectRecord(config?.oauthAccount);
@@ -299,14 +297,9 @@ export class ClaudeProviderAuth implements IProviderAuth {
   private async checkCredentials(env: NodeJS.ProcessEnv): Promise<ClaudeCredentialsStatus> {
     const missingCredentialsError = 'Claude CLI is not authenticated. Run claude setup-token or configure ANTHROPIC_API_KEY.';
 
-    if (readOptionalString(env.ANTHROPIC_AUTH_TOKEN)) {
-      return { authenticated: true, email: 'Auth Token', method: 'api_key' };
-    }
-
-    if (readOptionalString(env.ANTHROPIC_API_KEY)) {
-      return { authenticated: true, email: 'API Key Auth', method: 'api_key' };
-    }
-
+    // ADR-152 A1 §3.5: a credential in the SPAWN env is either inherited from the
+    // server process (stripped, never this member's link) or injected later by a
+    // launcher — so only the member's own tree decides "linked" here.
     // ADR-200 S4 / G1 M-1, MEASURED on the wire (claude-auth.precedence.header-
     // echo test): an API key or auth token from settings.env beats an OAuth token
     // in the spawn env — every key source outranks every OAuth source.
@@ -321,19 +314,11 @@ export class ClaudeProviderAuth implements IProviderAuth {
       return { authenticated: true, email: 'Configured via settings.json', method: 'api_key' };
     }
 
-    // `claude setup-token` mints a long-lived OAuth token (sk-ant-oat01...) and
-    // instructs the user to export it as CLAUDE_CODE_OAUTH_TOKEN — the CLI honors
-    // that variable, so the status check must too (T-115). B-1260: this token is
-    // inference-only (`inferenceOnly:true` in the CLI), so it runs a turn but
-    // cannot read usage/profile — a PARTIAL link. It stays authenticated (the
-    // agent works) but is flagged incomplete so the card nudges a full re-link
-    // instead of claiming a complete subscription link.
-    if (readOptionalString(env.CLAUDE_CODE_OAUTH_TOKEN)) {
-      return {
-        authenticated: true, email: 'OAuth Token', method: 'oauth_token', incompleteLink: true,
-      };
-    }
-
+    // `claude setup-token` mints a long-lived OAuth token (sk-ant-oat01...); the
+    // member stores it in their own settings.json env (T-115). B-1260: this token
+    // is inference-only (`inferenceOnly:true` in the CLI), so it runs a turn but
+    // cannot read usage/profile — a PARTIAL link, flagged incomplete so the card
+    // nudges a full re-link instead of claiming a complete subscription link.
     if (readOptionalString(settingsEnv.CLAUDE_CODE_OAUTH_TOKEN)) {
       // B-1260: inference-only setup-token stored in settings.json — partial link.
       return {

@@ -24,7 +24,7 @@ import { vendorProviderRoot } from './vendor/vendor-transcript.js';
  * parsing them (a first record may be megabytes long).
  *   - agy: no id in the transcript; the brain directory is the session id:
  *     `<brain>/<id>/.system_generated/logs/transcript.jsonl`.
- *   - vendor (kimi/deepseek/glm/hermes/qwen): nassaj writes the file, the
+ *   - vendor (kimi/deepseek/glm/hermes/qwen/dsh): nassaj writes the file, the
  *     header (`{"type":"meta",…}`) carries no id; the file is `<id>.jsonl`.
  *   - native Kimi agent (M4): the CLI writes `<KIMI_CODE_HOME>/sessions/<id>/
  *     agents/<agentId>/wire.jsonl`; its header (`{"type":"metadata",…}`)
@@ -198,8 +198,8 @@ async function codexSharedRoots(): Promise<string[]> {
   return [...homes.map((home) => path.join(home, 'sessions')), vendorProviderRoot('codex')];
 }
 
-type VendorProvider = 'kimi' | 'deepseek' | 'glm' | 'hermes' | 'qwen';
-const VENDOR_PROVIDERS: ReadonlySet<string> = new Set<VendorProvider>(['kimi', 'deepseek', 'glm', 'hermes', 'qwen']);
+type VendorProvider = 'kimi' | 'deepseek' | 'glm' | 'hermes' | 'qwen' | 'dsh';
+const VENDOR_PROVIDERS: ReadonlySet<string> = new Set<VendorProvider>(['kimi', 'deepseek', 'glm', 'hermes', 'qwen', 'dsh']);
 
 function vendorSpec(provider: Exclude<VendorProvider, 'kimi'>): TranscriptSpec {
   return { sharedRoots: async () => [vendorProviderRoot(provider)], underHome: null, locate: identity, verify: verifyVendor };
@@ -224,6 +224,8 @@ const SPECS: Readonly<Record<string, TranscriptSpec>> = Object.freeze({
   glm: vendorSpec('glm'),
   hermes: vendorSpec('hermes'),
   qwen: vendorSpec('qwen'),
+  // T-2086: dsh-acp-runtime writes the dsh transcript in the vendor tree.
+  dsh: vendorSpec('dsh'),
 });
 
 /** Transcript rules of `provider`, or null when its history is not a recorded file (cursor, opencode). */

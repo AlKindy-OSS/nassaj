@@ -7,6 +7,7 @@ import express from "express";
 import { providerModelsService } from "../modules/providers/services/provider-models.service.js";
 import { getClaudeBuiltInCommands } from "../claude-sdk.js";
 import { resolveProviderEnv } from "../services/isolation/resolve-provider-env.js";
+import { isMemberActor } from "../services/isolation/credential-actor.js";
 import { parseFrontMatter } from "../shared/frontmatter.js";
 import { findAppRoot, getModuleDir } from "../utils/runtime-paths.js";
 import { projectsDb, sessionsDb } from "../modules/database/index.js";
@@ -174,9 +175,11 @@ const resolveCommandModel = async (provider, catalog, sessionId, userId) => {
     return catalog.DEFAULT;
   }
 
+  // B-1752: the caller's own session store, not the operator's.
   const currentActiveModel = await providerModelsService.getCurrentActiveModel(
     provider,
     sessionId,
+    userId,
   );
   return currentActiveModel?.model || catalog.DEFAULT;
 };
@@ -1335,10 +1338,10 @@ router.post("/list", async (req, res) => {
     // the dynamic-command cache is keyed by the actual probe context, not by the
     // provider alone — otherwise isolated users would share each other's (or a
     // stale) command set. resolveProviderEnv is the single source of truth for
-    // isolation (ADR-014); it returns the base env (no override) when the
-    // provider is shared or there is no user, collapsing to one shared key.
+    // isolation (ADR-014). A caller with no member has no command set of their
+    // own (ADR-152 A1 §3.4): null here, and the probe below spawns nothing.
     const probeConfigDir =
-      provider === "claude"
+      provider === "claude" && isMemberActor(userId)
         ? resolveProviderEnv(userId, "claude").CLAUDE_CONFIG_DIR ?? null
         : null;
     const builtInList = await resolveDynamicBuiltIns(provider, {

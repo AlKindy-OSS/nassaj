@@ -28,7 +28,6 @@ function entry(harness: LedgerEntry['harness'], target: string | null, state: Le
 
 type Fake = {
   ledger?: Record<string, readonly LedgerEntry[] | null>;
-  shared?: string[];
   modes?: Record<string, 'subscription' | 'api_key' | null | 'unreadable'>;
   ledgerReads?: unknown[];
 };
@@ -39,7 +38,6 @@ function deps(fake: Fake): ProjectionReadDeps {
       fake.ledgerReads?.push(userId);
       return fake.ledger?.[`${userId}:${vendorId}`] ?? [];
     },
-    isOwnScope: (provider) => !(fake.shared ?? []).includes(provider),
     readLinkMode: (_userId, harness) => (fake.modes && harness in fake.modes ? fake.modes[harness] : 'api_key'),
   };
 }
@@ -59,11 +57,12 @@ test('ledger states map one to one; synced is linked, an adopted synced entry is
   }
 });
 
-test('a shared tree is shared_scope_refused before the ledger is consulted', () => {
-  const fake: Fake = { shared: ['opencode'], ledger: { '7:anthropic': [entry('opencode', 'anthropic', 'synced')] } };
+test('ADR-152 A1: every tree is the member\'s own — the ledger decides, never a shared-scope refusal', () => {
+  const fake: Fake = { ledger: { '7:anthropic': [entry('opencode', 'anthropic', 'synced')] } };
   const out = deriveCompanyProjections(deps(fake), '7', 'anthropic', ANTHROPIC);
   assert.deepEqual(out.find((p) => p.provider === 'opencode'),
-    { vendorId: 'anthropic-opencode', provider: 'opencode', target: 'anthropic', state: 'shared_scope_refused' });
+    { vendorId: 'anthropic-opencode', provider: 'opencode', target: 'anthropic', state: 'linked' });
+  assert.equal(out.some((p) => (p.state as string) === 'shared_scope_refused'), false);
 });
 
 test('no ledger entry: link mode decides for Claude/Codex; opencode is omitted', () => {

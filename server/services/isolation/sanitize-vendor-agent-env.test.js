@@ -102,17 +102,21 @@ test('does NOT strip ANTHROPIC_BASE_URL — the iron-rule guard must still see i
   assert.equal(clean.ANTHROPIC_BASE_URL, 'https://api.z.ai/api/anthropic');
 });
 
-test('does NOT strip the per-user hosted-vendor keys', () => {
+test('does NOT strip the per-user hosted-vendor keys the resolver injects', () => {
   const clean = sanitizeHostSecretEnv({
     KIMI_API_KEY: 'k',
     DEEPSEEK_API_KEY: 'd',
     GLM_API_KEY: 'g',
-    GEMINI_API_KEY: 'gem',
   });
   assert.equal(clean.KIMI_API_KEY, 'k');
   assert.equal(clean.DEEPSEEK_API_KEY, 'd');
   assert.equal(clean.GLM_API_KEY, 'g');
-  assert.equal(clean.GEMINI_API_KEY, 'gem');
+});
+
+test('ADR-152 A1 §3.5: strips the six credentials the resolver never injects', () => {
+  const names = ['CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CURSOR_API_KEY'];
+  const clean = sanitizeHostSecretEnv(Object.fromEntries(names.map((name) => [name, 'inherited'])));
+  for (const name of names) assert.equal(clean[name], undefined, name);
 });
 
 test('an engine INJECTED after sanitizing survives — the order is the whole design', () => {

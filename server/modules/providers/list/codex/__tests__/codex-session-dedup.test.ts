@@ -39,25 +39,12 @@ assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $
 const { initializeDatabase, closeConnection, sessionsDb } = await import(
   '@/modules/database/index.js'
 );
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import(
-  '@/services/provider-sharing.js'
-);
 const { operatorCodexHome } = await import('@/modules/providers/list/codex/codex-home.js');
 const { CodexSessionSynchronizer } = await import(
   '@/modules/providers/list/codex/codex-session-synchronizer.provider.js'
 );
 
 await initializeDatabase();
-
-// Codex shared → the scan reads only the operator ~/.codex, keeping the fixture
-// tree a single directory.
-_resetProviderSharingCache();
-setProviderSharingConfig({
-  claude: 'isolated',
-  codex: 'shared',
-  agy: 'shared',
-  cursor: 'shared',
-});
 
 after(() => {
   closeConnection();

@@ -4,8 +4,6 @@
  * vendor card shows after a reload (`GET /company/:companyId/key` → `projections`).
  *
  * Sources, cheapest first, and nothing else:
- *   - the slot's scope: a shared tree is never written by a member's key (D6),
- *     so it reads `shared_scope_refused` (the fan-out's own precedence);
  *   - the caller's OWN ledger for the vendor (one sealed read per request):
  *     `synced` → `linked` (or `adopted` when the migration adopted it),
  *     `stale` / `failed` / `tombstone` as they are;
@@ -20,7 +18,6 @@
  */
 
 import * as store from '@/services/isolation/provider-secrets-store.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 
 import type { LinkHarness } from './harness-credential-inventory.js';
 import { deriveDefaultLinkMode, type LinkMode } from './harness-link-mode.policy.js';
@@ -37,7 +34,6 @@ export type ProjectionState =
   | 'foreign_credential'
   | 'kept_on_subscription'
   | 'login_present'
-  | 'shared_scope_refused'
   | 'mode_unset';
 
 export type CompanyProjection = { vendorId: string; provider: string; target?: string; state: ProjectionState };
@@ -51,8 +47,6 @@ type Member = string | number;
 export type ProjectionReadDeps = {
   /** The member's ledger entries for a vendor; [] when absent, null when unreadable. */
   readLedger(userId: Member, vendorId: string): readonly LedgerEntry[] | null;
-  /** True when the harness writes the member's own tree. */
-  isOwnScope(provider: string): boolean;
   /** The effective stored-or-derived mode; 'unreadable' when the record cannot be read. */
   readLinkMode(userId: Member | null, harness: LinkHarness): LinkMode | null | 'unreadable';
 };
@@ -90,7 +84,6 @@ function projectionState(
   slot: ProjectionSlot,
   ledger: readonly LedgerEntry[],
 ): ProjectionState | null {
-  if (!deps.isOwnScope(slot.provider)) return 'shared_scope_refused';
   const entry = ledger.find((candidate) => sameTarget(candidate, slot.provider, slot.target));
   if (entry) return fromLedger(entry);
   return isLinkModeHarness(slot.provider) ? fromLinkMode(deps.readLinkMode(userId, slot.provider)) : null;
@@ -139,7 +132,7 @@ function readLinkMode(userId: Member | null, harness: LinkHarness): LinkMode | n
   }
 }
 
-/** Production reads: the AES store, the sharing policy and the link-mode scope. */
+/** Production reads: the AES store, the ledger and the link-mode scope. */
 export const projectionReadDeps: ProjectionReadDeps = {
   readLedger(userId, vendorId) {
     try {
@@ -150,6 +143,5 @@ export const projectionReadDeps: ProjectionReadDeps = {
       return null;
     }
   },
-  isOwnScope: (provider) => isProviderIsolated(provider),
   readLinkMode,
 };

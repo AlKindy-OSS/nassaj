@@ -33,6 +33,8 @@
  * the security decision pure and deterministic.
  */
 
+import { localEngineSpawnRefusal } from '../../services/isolation/local-engine-pin.js';
+
 import { validateIntent, type DurableTask, type LaunchIntent } from './intent.js';
 
 /** Predicate: does `userId` own or is a member of the project at `projectPath`? */
@@ -49,7 +51,29 @@ export type AuthorizeDeps = {
   isOwnedOrMembered: OwnershipPredicate;
   resolveEnv: EnvResolver;
   baseEnv?: NodeJS.ProcessEnv;
+  /**
+   * ADR-227: reads the origin conversation's engine pin. A workflow task runs on
+   * official Anthropic, so a local-pinned conversation is denied. A throw denies.
+   */
+  readEnginePin?: (conversationId: string) => string | null;
 };
+
+/**
+ * ADR-227: the deny reason when the task would leave a local model server for
+ * Anthropic, or null. A local model id is refused even without a pin reader.
+ */
+function localEngineDenyReason(intent: LaunchIntent, deps: AuthorizeDeps): string | null {
+  let storedEngine: string | null = null;
+  if (intent.conversationId && deps.readEnginePin) {
+    try {
+      storedEngine = deps.readEnginePin(intent.conversationId);
+    } catch {
+      return 'engine pin read failed (fail-closed deny)';
+    }
+  }
+  const refusal = localEngineSpawnRefusal({ storedEngine, model: intent.model ?? null, site: 'background task' });
+  return refusal ? `${refusal.code}: local-engine conversation` : null;
+}
 
 /**
  * Authorization outcome. On ALLOW the isolated `env` and the validated `intent`
@@ -95,6 +119,9 @@ export function authorizeLaunch(raw: unknown, deps: AuthorizeDeps): AuthorizeRes
       reason: 'user does not own or is not a member of the project',
     };
   }
+
+  const localDeny = localEngineDenyReason(intent, deps);
+  if (localDeny) return { allow: false, reason: localDeny };
 
   // ALLOW: build the isolated env via the same seam every provider spawn uses.
   // CLAUDE_CONFIG_DIR is set to the per-user tree; nothing is unset, nothing

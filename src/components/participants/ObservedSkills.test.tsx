@@ -64,7 +64,7 @@ describe('observed skills disclosure', () => {
     expect(screen.getByRole('button').textContent).not.toContain('observed skills');
     fireEvent.click(screen.getByRole('button'));
     // Unsupported coverage has no count to show; the panel states that instead.
-    expect(within(screen.getByRole('dialog')).getByText(/not supported by this server or provider/)).toBeTruthy();
+    expect(within(screen.getByRole('dialog')).getByText(/not supported by this server or coding agent/)).toBeTruthy();
   });
   it('lists each skill once like a tool row, without raw evidence', () => {
     const i18n = setup();

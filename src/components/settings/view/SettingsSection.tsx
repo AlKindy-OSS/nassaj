@@ -65,6 +65,11 @@ type SettingsSectionProps = {
    * يجمع أكثر من صفّ، لا على قسمٍ محتواه سطر واحد.
    */
   boxed?: boolean;
+  /**
+   * T-2083: makes the section a deep-link target — an `id` to find it by, and
+   * focusable by script (`tabIndex=-1`) so focus lands on it, not before it.
+   */
+  anchorId?: string;
 };
 
 export default function SettingsSection({
@@ -76,11 +81,15 @@ export default function SettingsSection({
   tone = 'default',
   level = 'section',
   boxed = false,
+  anchorId,
 }: SettingsSectionProps) {
   const isPage = level === 'page';
 
   return (
-    <div className={cn('space-y-3', className)}>
+    <div
+      className={cn('space-y-3', anchorId && 'scroll-mt-4 focus:outline-none', className)}
+      {...(anchorId ? { id: anchorId, tabIndex: -1 } : {})}
+    >
       <div>
         {/* لا `uppercase` ولا `tracking-*`: نمط eyebrow اللاتيني يضع تباعد أحرف على
             نصّ عربي متصل فيقطع الاتصال (خطّ أحمر لغوي، وجذر B-329). هذا الحظر

@@ -316,7 +316,12 @@
       "body": "sakana",
       "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
       "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "dsh",
+      "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
+      "observedAt": "2026-11-07T15:00:00.000Z"
     }
   ],
-  "artifactDigest": "sha256:e4f42ebffc340adb7beb51a389206fc8cac11a20df81839bdd3914dfa50bf230"
+  "artifactDigest": "sha256:b2ddcf53ec93028687de22e7443f2f29adbcb3e63a8a39577e12c3e743cbc51e"
 }

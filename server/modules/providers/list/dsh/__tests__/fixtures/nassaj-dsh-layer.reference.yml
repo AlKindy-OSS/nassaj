@@ -1,0 +1,15 @@
+# Reference Nassaj governance layer for dsh (T-2086 S1, ADR-224).
+# Validated against real @deepseek-ai/dsh@0.2.2-rc.1 on 2026-11-07: passed as
+# the LAST `--patch`, it wins over a hostile <DSH_HOME>/profiles/nassaj-acp/
+# cordis.patch.yml. The recording pinned baseURL to the local fake LLM; production
+# pins the official endpoint below. The launcher's layer must contain at least
+# these entries (dsh-acceptance.test.ts checks it).
+- id: session-log-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: llm-deepseek
+  config:
+    baseURL: https://api.deepseek.com/anthropic

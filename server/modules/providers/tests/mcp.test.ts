@@ -1,3 +1,7 @@
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and provider credential env move
+// into a sandbox, so an ad-hoc run cannot touch the operator's live logins.
+import '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';

@@ -44,7 +44,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { after, afterEach, beforeEach, describe, it } from 'node:test';
+import { after, afterEach, beforeEach, describe, it, mock } from 'node:test';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: sandbox HOME + XDG_DATA_HOME before any project module is loaded.
@@ -82,6 +82,24 @@ after(() => {
 });
 
 // Dynamic imports AFTER env overrides are in place.
+// ADR-152 A1 §3.4: a credential reader/writer needs a member. The resolver is
+// stubbed so member MEMBER maps onto this suite's sandbox tree, and any other
+// actor is refused exactly like the real resolver.
+const MEMBER = 7;
+{
+  const realResolver = await import('../../../../services/isolation/resolve-provider-env.js');
+  mock.module(new URL('../../../../services/isolation/resolve-provider-env.js', import.meta.url).href, {
+    namedExports: {
+      ...realResolver,
+      resolveProviderEnv: (actor: unknown, _provider: string, env: NodeJS.ProcessEnv = process.env) => {
+        if (actor !== MEMBER && actor !== String(MEMBER)) {
+          throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+        }
+        return { ...env, ...{ HOME: process.env.HOME, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME}/.claude`, CODEX_HOME: process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`, XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`, KIMI_CODE_HOME: `${process.env.HOME}/.kimi` } };
+      },
+    },
+  });
+}
 const { sanitizeVendorAgentEnv } = await import(
   '@/services/isolation/sanitize-vendor-agent-env.js'
 );
@@ -368,7 +386,7 @@ describe('GL-10 — GLM key isolation in auth.json (GL-1)', () => {
   }
 
   it('writes the GLM key as {type:"api",key} under the "glm" provider id in auth.json', async () => {
-    const result = await writer.setApiKey(null, SAMPLE_GLM_KEY, 'glm');
+    const result = await writer.setApiKey(MEMBER, SAMPLE_GLM_KEY, 'glm');
     assert.deepEqual(result, { provider: 'opencode', configured: true });
 
     const auth = readAuth();
@@ -376,7 +394,7 @@ describe('GL-10 — GLM key isolation in auth.json (GL-1)', () => {
       'glm entry must have the native opencode auth shape');
     // The glm provider id MUST NOT collide with the built-in "anthropic" provider (OCC-2).
     assert.equal('anthropic' in auth, false, 'glm write must not create an anthropic entry');
-    assert.equal(await writer.isConfigured(null, 'glm'), true);
+    assert.equal(await writer.isConfigured(MEMBER, 'glm'), true);
     // 0600 owner-only (not world-readable).
     assert.equal(fs.statSync(authPath).mode & 0o777, 0o600);
   });
@@ -389,7 +407,7 @@ describe('GL-10 — GLM key isolation in auth.json (GL-1)', () => {
       openrouter: { type: 'api', key: 'or-key' },
     }));
 
-    await writer.setApiKey(null, SAMPLE_GLM_KEY, 'glm');
+    await writer.setApiKey(MEMBER, SAMPLE_GLM_KEY, 'glm');
     const auth = readAuth();
 
     assert.deepEqual(auth.glm, { type: 'api', key: SAMPLE_GLM_KEY }, 'glm entry added');
@@ -400,10 +418,10 @@ describe('GL-10 — GLM key isolation in auth.json (GL-1)', () => {
   });
 
   it('deleting the GLM key removes only glm, leaving anthropic and openrouter intact', async () => {
-    await writer.setApiKey(null, SAMPLE_ANTHROPIC_KEY, 'anthropic');
-    await writer.setApiKey(null, SAMPLE_GLM_KEY, 'glm');
+    await writer.setApiKey(MEMBER, SAMPLE_ANTHROPIC_KEY, 'anthropic');
+    await writer.setApiKey(MEMBER, SAMPLE_GLM_KEY, 'glm');
 
-    const deleteResult = await writer.deleteApiKey(null, 'glm');
+    const deleteResult = await writer.deleteApiKey(MEMBER, 'glm');
     assert.deepEqual(deleteResult, { provider: 'opencode', configured: false });
 
     const auth = readAuth();
@@ -411,8 +429,8 @@ describe('GL-10 — GLM key isolation in auth.json (GL-1)', () => {
     assert.deepEqual(auth.anthropic, { type: 'api', key: SAMPLE_ANTHROPIC_KEY },
       'anthropic must survive glm deletion');
     // Idempotent: a second delete is safe.
-    await writer.deleteApiKey(null, 'glm');
-    assert.equal(await writer.isConfigured(null, 'glm'), false);
+    await writer.deleteApiKey(MEMBER, 'glm');
+    assert.equal(await writer.isConfigured(MEMBER, 'glm'), false);
   });
 });
 
@@ -488,7 +506,7 @@ describe('GL-10 — governance fail-closed (GL-5)', () => {
     // No ~/.claude/AGENTS.md — the carrier must not spawn.
     let caught: unknown;
     try {
-      ensureOpenCodeGovernance(null);
+      ensureOpenCodeGovernance(MEMBER);
     } catch (err) {
       caught = err;
     }
@@ -500,7 +518,7 @@ describe('GL-10 — governance fail-closed (GL-5)', () => {
 
   it('SUCCEEDS and materializes a read-only 0444 COPY when the neutral source exists', () => {
     seedNeutralSource();
-    const result = ensureOpenCodeGovernance(null);
+    const result = ensureOpenCodeGovernance(MEMBER);
     assert.equal(result.ok, true);
 
     // The materialized copy is a REAL FILE (not a symlink) at the opencode config-home.
@@ -513,9 +531,9 @@ describe('GL-10 — governance fail-closed (GL-5)', () => {
 
   it('is idempotent: a second call is a no-op fast path when governance is already authentic', () => {
     seedNeutralSource();
-    ensureOpenCodeGovernance(null); // first: materializes
+    ensureOpenCodeGovernance(MEMBER); // first: materializes
     // Second call must not throw and must see the same authentic result.
-    const result2 = ensureOpenCodeGovernance(null);
+    const result2 = ensureOpenCodeGovernance(MEMBER);
     assert.equal(result2.ok, true);
   });
 });

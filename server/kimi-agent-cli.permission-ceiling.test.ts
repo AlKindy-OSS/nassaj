@@ -323,7 +323,7 @@ describe('KM-5 permission ceiling — wired through the full launch seam (G)', (
 
     const prepared = prepareKimiAgentLaunch(
       {
-        userId: null,
+        userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
         command: 'ceiling-test',
         model: 'kimi-k2.6',
         permissionMode: 'plan', // expect --plan in argv
@@ -380,7 +380,7 @@ describe('KM-5 permission ceiling — wired through the full launch seam (G)', (
 
     const prepared = prepareKimiAgentLaunch(
       {
-        userId: null,
+        userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
         command: 'bypass-test',
         model: 'kimi-k2.6',
         permissionMode: 'bypassPermissions',

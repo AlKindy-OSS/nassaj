@@ -1,9 +1,9 @@
 /**
  * subscription-visibility — who may see an AMOUNT on the subscription card (T-1098).
  *
- * THE LEAK THIS CLOSES. `sessionScope` returns `null` for a SHARED provider
- * (session-cost.service.ts), and null means "no filter": the cycle total is then
- * every member's spend on that provider, not the reader's. The card renders that
+ * THE LEAK THIS CLOSES. `sessionScope` returns `null` for a provider outside the
+ * isolation seam (session-cost.service.ts), and null means "no filter": the cycle
+ * total is then every member's spend on that provider, not the reader's. The card renders that
  * number to whoever asks, and `/costs/subscriptions` carried no role gate — so on
  * the live install (2 owners + 3 members) a plain member opened the card and read
  * the owners' spend, labelled as if it were their own. Two defects in one number:
@@ -15,24 +15,20 @@
  *   • Per-conversation costs and project boards → unchanged, visible to everyone
  *     as before. This module is deliberately NOT imported by those paths.
  *
- * WHO IS "THE HOLDER". A shared provider has no individual holder — it is one
- * company/operator credential, which is exactly why its total is everyone's. An
- * ISOLATED provider is the opposite: each member authenticates with their own
- * credential, and `sessionScope` already narrows the total to that member's own
- * conversations. So the reader of an isolated row IS its holder by construction,
- * and needs no extra check. The rule therefore reduces to: redact SHARED rows for
- * anyone who is not owner/admin, and leave isolated rows alone.
+ * WHO IS "THE HOLDER". Every provider in KNOWN_PROVIDERS is isolated (ADR-152 A1):
+ * each member authenticates with their own credential, and `sessionScope` narrows
+ * the total to that member's own conversations. So the reader of such a row IS
+ * its holder by construction, and needs no extra check. The rule therefore
+ * reduces to: redact rows fed by a harness outside KNOWN_PROVIDERS for anyone who
+ * is not owner/admin, and leave the others alone.
  *
- * FAIL-CLOSED ON UNKNOWN. A provider absent from the sharing policy is treated as
- * shared (redacted), never as isolated. `hermes` is the live example. Erring this
- * way hides a number the member might have been entitled to; erring the other way
- * publishes the team's spend — and only one of those is recoverable. Tracked as a
- * fidelity follow-up rather than fixed by editing the sharing policy: that policy
- * also drives real credential isolation at spawn time, so it must never be
- * retuned for a display concern.
+ * FAIL-CLOSED ON UNKNOWN. A harness absent from KNOWN_PROVIDERS is redacted,
+ * never treated as reader-owned. `hermes` is the live example. Erring this way
+ * hides a number the member might have been entitled to; erring the other way
+ * publishes the team's spend — and only one of those is recoverable.
  */
 
-import { isProviderIsolated as defaultIsProviderIsolated } from '@/services/provider-sharing.js';
+import { KNOWN_PROVIDERS } from '@/services/isolation/known-providers.js';
 
 import { vendorHarnesses as defaultVendorHarnesses } from './model-vendor.js';
 
@@ -55,15 +51,15 @@ export type AmountBearingSubscriptionRow = {
   assumedModels?: unknown;
 };
 
-/** Roles allowed to read a shared provider's amount. */
+/** Roles allowed to read an amount that may carry other members' spend. */
 const AMOUNT_PRIVILEGED_ROLES = new Set(['owner', 'admin']);
 
 /**
  * WHY THIS IS NOT A SIMPLE KEY LOOKUP (caught by live verification 2026-08-03).
  *
- * A card row is keyed by VENDOR (`anthropic`, `openai`, `google`), while
- * `provider_sharing` is keyed by HARNESS (`claude`, `codex`, `agy`). An earlier
- * cut of this file looked the vendor key up in the policy directly; `glm` and
+ * A card row is keyed by VENDOR (`anthropic`, `openai`, `google`), while the
+ * isolation seam is keyed by HARNESS (`claude`, `codex`, `agy`). An earlier
+ * cut of this file looked the vendor key up in the harness list directly; `glm` and
  * `deepseek` happened to pass because their names coincide, which made the unit
  * tests green — but on the live install `anthropic` and `moonshot` matched
  * nothing, fell to the unknown branch, and would have hidden a member's OWN
@@ -71,14 +67,14 @@ const AMOUNT_PRIVILEGED_ROLES = new Set(['owner', 'admin']);
  * because they were written in harness keys, which is not what the route emits.
  *
  * And the relation is many-to-one: the `google` row aggregates `antigravity`
- * and `agy`, which may carry different sharing modes. So the question is not
- * "is this provider isolated" but "is EVERY harness feeding this row isolated" —
- * one shared contributor is enough to put other members' spend into the total.
+ * and `agy`, and only `agy` is in KNOWN_PROVIDERS. So the question is not "is
+ * this provider isolated" but "is EVERY harness feeding this row isolated" — one
+ * unscoped contributor is enough to put other members' spend into the total.
  */
 
 /** Shown in place of the amount. Server-side English, like every other `reason`. */
 export const SHARED_AMOUNT_RESTRICTED_REASON =
-  'This provider is shared across the team, so the cycle total is everyone’s spend — not yours. Visible to an owner or admin.';
+  'This total may include other members’ spend, so it is not shown as yours. Visible to an owner or admin.';
 
 /**
  * True when this row's amount belongs to the reader alone.
@@ -91,7 +87,7 @@ export const SHARED_AMOUNT_RESTRICTED_REASON =
  * a name nothing recognises.
  *
  * @param rowKey the row's `provider` field (a vendor key in practice)
- * @param isIsolated injectable policy read (tests)
+ * @param isIsolated injectable isolation read (tests)
  * @param harnessesOf injectable vendor→harness expansion (tests)
  */
 function readerOwnsAmount(
@@ -103,7 +99,7 @@ function readerOwnsAmount(
   if (harnesses.length === 0) {
     return isIsolated(rowKey);
   }
-  // EVERY contributor must be isolated — one shared harness means the total can
+  // EVERY contributor must be isolated — one unscoped harness means the total can
   // carry someone else's spend, and that is precisely what must not be shown.
   return harnesses.every((harness) => isIsolated(harness));
 }
@@ -150,17 +146,16 @@ function redactRow<T extends AmountBearingSubscriptionRow>(view: T): T {
  *
  * @param views rows straight from `getSubscriptionCosts`
  * @param role the READER's role ('owner' | 'admin' | 'user' | null)
- * @param deps injectable policy seam (tests)
+ * @param deps injectable seams (tests)
  */
 export function applySubscriptionAmountVisibility<T extends AmountBearingSubscriptionRow>(
   views: readonly T[],
   role: string | null | undefined,
   deps: {
-    isProviderIsolated?: (provider: string) => boolean;
     vendorHarnesses?: (vendor: string) => string[];
   } = {},
 ): T[] {
-  const isIsolated = deps.isProviderIsolated ?? defaultIsProviderIsolated;
+  const isIsolated = (harness: string): boolean => (KNOWN_PROVIDERS as readonly string[]).includes(harness);
   const harnessesOf = deps.vendorHarnesses ?? defaultVendorHarnesses;
   if (typeof role === 'string' && AMOUNT_PRIVILEGED_ROLES.has(role)) {
     return [...views];

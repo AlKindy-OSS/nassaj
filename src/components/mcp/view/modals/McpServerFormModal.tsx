@@ -89,7 +89,7 @@ export default function McpServerFormModal({
   const scopeLabel = (scope: McpScope): string => {
     if (scope === 'user') {
       return isGlobalMode
-        ? t('mcpForm.scope.option.userAll', { defaultValue: 'User (compatible providers)' })
+        ? t('mcpForm.scope.option.userAll', { defaultValue: 'User (compatible coding agents)' })
         : t('mcpForm.scope.option.user', { defaultValue: 'User (global)' });
     }
 
@@ -98,7 +98,7 @@ export default function McpServerFormModal({
     }
 
     return isGlobalMode
-      ? t('mcpForm.scope.option.projectAll', { defaultValue: 'Project (compatible providers)' })
+      ? t('mcpForm.scope.option.projectAll', { defaultValue: 'Project (compatible coding agents)' })
       : t('mcpForm.scope.option.project', { defaultValue: 'Project' });
   };
 
@@ -111,7 +111,7 @@ export default function McpServerFormModal({
       return isGlobalMode
         ? t('mcpForm.scope.hint.userAll', {
           providers: compatibleProviders,
-          defaultValue: 'Writes only to compatible provider user configs ({{providers}}) and is available across projects on this machine.',
+          defaultValue: 'Writes only to compatible coding agent user configs ({{providers}}) and is available across projects on this machine.',
         })
         : t('mcpForm.scope.hint.user', {
           defaultValue: 'Available across all projects on your machine.',
@@ -127,7 +127,7 @@ export default function McpServerFormModal({
     return isGlobalMode
       ? t('mcpForm.scope.hint.projectAll', {
         providers: compatibleProviders,
-        defaultValue: 'Writes only to compatible provider configs in the selected project workspace: {{providers}}.',
+        defaultValue: 'Writes only to compatible coding agent configs in the selected project workspace: {{providers}}.',
       })
       : t('mcpForm.scope.hint.project', {
         defaultValue: 'Stored in the selected project workspace.',
@@ -158,7 +158,7 @@ export default function McpServerFormModal({
     unsupportedTransportMessage: isGlobalMode
       ? (transport) => t('mcpForm.validation.unsupportedTransport', {
         transport,
-        defaultValue: `A global MCP server supports only stdio and http for compatible providers, not ${transport}.`,
+        defaultValue: `A global MCP server supports only stdio and http for compatible coding agents, not ${transport}.`,
       })
       : undefined,
     onSubmit,

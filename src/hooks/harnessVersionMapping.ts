@@ -1,4 +1,4 @@
-import type { HarnessRestoreCompatibleOffer, HarnessUncheckedProcess, HarnessUncheckedReason, HarnessUpdateJob, HarnessUpdateNotices, HarnessVersionDrift, HarnessVersionStatus as WireStatus } from '../../shared/harness-update.contract';
+import type { HarnessIntegrationUpdate, HarnessRestoreCompatibleOffer, HarnessUncheckedProcess, HarnessUncheckedReason, HarnessUpdateJob, HarnessUpdateNotices, HarnessVersionDrift, HarnessVersionStatus as WireStatus } from '../../shared/harness-update.contract';
 
 export type HarnessVersionStatus = 'checking' | 'current' | 'unverified' | 'update-available' | 'unknown' | 'managed-external' | 'no-cli' | 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped-live' | 'pinned-refused' | 'noop' | 'rolled-back' | 'rollback-failed';
 export type HarnessVersionState = {
@@ -11,6 +11,8 @@ export type HarnessVersionState = {
   drift?: HarnessVersionDrift;
   /** T-1871 stage 4: dialog facts, restore-compatible offer, scheduler-skip flag. */
   notices?: HarnessUpdateNotices; restoreCompatible?: HarnessRestoreCompatibleOffer; manualOnly?: boolean;
+  /** T-2091: the dsh staged-update pipeline status (display-only). */
+  integrationUpdate?: HarnessIntegrationUpdate;
 };
 
 /** Known `reason` values (contract `HarnessUncheckedReason`); an unknown wire value is dropped, not shown. */
@@ -58,6 +60,7 @@ export function mapVersionStatus(wire: WireStatus): HarnessVersionState {
     version: wire.installedVersion ?? undefined, latestVersion: wire.latestVersion ?? undefined, reason: wire.reason ?? undefined, checkedAt: wire.checkedAt,
     drift: wire.drift,
     notices: wire.notices, restoreCompatible: wire.restoreCompatible, manualOnly: wire.manualOnly,
+    integrationUpdate: wire.integrationUpdate,
   };
   if (wire.updating) return { ...common, status: 'running', jobId: wire.activeJobId ?? undefined };
   if (wire.reason === 'recovery_failed') return { ...common, status: 'failed', retryReady: false };

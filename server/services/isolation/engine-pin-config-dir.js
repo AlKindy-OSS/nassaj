@@ -90,10 +90,25 @@ export function sourceLayout(env) {
 /**
  * Path of the derived dir for a source config dir.
  * @param {string} sourceConfigDir
+ * @param {string} [derivedName] sibling name (default: the vendor-engine dir)
  * @returns {string}
  */
-export function derivedConfigDirFor(sourceConfigDir) {
-  return path.join(path.dirname(path.resolve(sourceConfigDir)), DERIVED_DIR_NAME);
+export function derivedConfigDirFor(sourceConfigDir, derivedName = DERIVED_DIR_NAME) {
+  return path.join(path.dirname(path.resolve(sourceConfigDir)), derivedName);
+}
+
+/**
+ * ADR-227: the derived dir of a LOCAL-engine spawn, one per local server. The CLI
+ * caches the endpoint's model list inside its config dir (`cache/`, not linked),
+ * so sharing the vendor-engine dir — or one dir across servers — would show one
+ * endpoint's models in another's picker.
+ * @param {string} serverId local_model_servers.id
+ * @returns {string}
+ */
+export function localEngineDerivedDirName(serverId) {
+  const compact = String(serverId).replaceAll('-', '');
+  if (!/^[A-Za-z0-9]{1,64}$/u.test(compact)) throw refusal(ENGINE_PIN_CONFIG_DIR_CODE, 'invalid local server id');
+  return `.claude-engine-local-${compact}`;
 }
 
 /**
@@ -188,15 +203,32 @@ function linkEntry(src, dest, name) {
 }
 
 /**
+ * Gives the derived dir its own real directory for `name`; an existing link (an
+ * older build) is removed without following it, so the member tree is untouched.
+ * @param {string} derivedDir
+ * @param {string} name
+ */
+function ensurePrivateEntry(derivedDir, name) {
+  const dest = path.join(derivedDir, name);
+  const stat = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (stat && !stat.isDirectory()) fs.unlinkSync(dest);
+  fs.mkdirSync(dest, { recursive: true, mode: DIR_MODE });
+}
+
+/**
  * Links the shared entries and proves resume continuity: the derived
  * `projects/` must resolve to the same real directory as the source's.
+ * `privateEntries` are created as the derived dir's own directories instead.
  * @param {string} sourceDir
  * @param {string} derivedDir
+ * @param {readonly string[]} [privateEntries]
  */
-function linkSharedEntries(sourceDir, derivedDir) {
+function linkSharedEntries(sourceDir, derivedDir, privateEntries = []) {
   const sourceProjects = path.join(sourceDir, 'projects');
   if (!fs.existsSync(sourceProjects)) fs.mkdirSync(sourceProjects, { recursive: true, mode: DIR_MODE });
+  for (const name of privateEntries) ensurePrivateEntry(derivedDir, name);
   for (const name of LINKED_ENTRIES) {
+    if (privateEntries.includes(name)) continue;
     const src = path.join(sourceDir, name);
     if (!fs.existsSync(src)) continue;
     linkEntry(src, path.join(derivedDir, name), name);
@@ -206,10 +238,12 @@ function linkSharedEntries(sourceDir, derivedDir) {
 }
 
 /**
- * Re-reads the derived dir and refuses if any credential survived the build.
+ * Re-reads the derived dir and refuses if any credential (or any caller-named
+ * env key) survived the build.
  * @param {string} derivedDir
+ * @param {readonly string[]} [stripEnvKeys] extra settings env keys that must be absent
  */
-export function verifyDerivedConfigDir(derivedDir) {
+export function verifyDerivedConfigDir(derivedDir, stripEnvKeys = []) {
   for (const name of DERIVED_FORBIDDEN_FILES) {
     if (fs.existsSync(path.join(derivedDir, name))) {
       throw refusal(ENGINE_PIN_CONFIG_DIR_CODE, `${name} present in derived dir`);
@@ -221,6 +255,7 @@ export function verifyDerivedConfigDir(derivedDir) {
   const leaked = [
     ...SETTINGS_TOP_LEVEL_FORBIDDEN.filter((key) => key in settings),
     ...SETTINGS_ENV_FORBIDDEN.filter((key) => key in env),
+    ...stripEnvKeys.filter((key) => key in env),
     ...GLOBAL_CONFIG_FORBIDDEN.filter((key) => key in config),
   ];
   if (leaked.length > 0) {
@@ -229,21 +264,38 @@ export function verifyDerivedConfigDir(derivedDir) {
 }
 
 /**
+ * Removes caller-named keys from the derived settings `env` block (after the
+ * operator policy merge, which may write the file again).
+ * @param {string} derivedDir
+ * @param {readonly string[]} stripEnvKeys
+ */
+function stripDerivedSettingsEnv(derivedDir, stripEnvKeys) {
+  if (stripEnvKeys.length === 0) return;
+  const file = path.join(derivedDir, 'settings.json');
+  const settings = readJsonObject(file, 'derived settings') ?? {};
+  if (!settings.env || typeof settings.env !== 'object') return;
+  const env = { ...settings.env };
+  for (const key of stripEnvKeys) delete env[key];
+  writeJsonAtomic(file, { ...settings, env });
+}
+
+/**
  * Rebuilds the derived dir from the source layout. Caller holds the lock.
  * @param {{configDir: string, globalConfig: string}} source
  * @param {string} derivedDir
- * @param {string} [operatorHome] whose ~/.claude policy is applied (test seam)
+ * @param {{operatorHome?: string, stripEnvKeys?: readonly string[], privateEntries?: readonly string[]}} opts
  */
-function rebuildDerivedConfigDir(source, derivedDir, operatorHome) {
+function rebuildDerivedConfigDir(source, derivedDir, { operatorHome, stripEnvKeys = [], privateEntries = [] }) {
   ensurePrivateDir(derivedDir);
   for (const name of DERIVED_FORBIDDEN_FILES) fs.rmSync(path.join(derivedDir, name), { force: true });
   const settings = readJsonObject(path.join(source.configDir, 'settings.json'), 'user settings') ?? {};
   writeJsonAtomic(path.join(derivedDir, 'settings.json'), stripSettingsCredentials(settings));
   applyOperatorPolicy(derivedDir, operatorHome);
+  stripDerivedSettingsEnv(derivedDir, stripEnvKeys);
   const config = readJsonObject(source.globalConfig, 'global config', { retryOnce: true }) ?? {};
   writeJsonAtomic(path.join(derivedDir, '.claude.json'), stripGlobalConfigCredentials(config));
-  linkSharedEntries(source.configDir, derivedDir);
-  verifyDerivedConfigDir(derivedDir);
+  linkSharedEntries(source.configDir, derivedDir, privateEntries);
+  verifyDerivedConfigDir(derivedDir, stripEnvKeys);
 }
 
 /** @type {Map<string, Promise<void>>} */
@@ -336,12 +388,18 @@ export async function withDerivedDirLock(derivedDir, operation) {
  * returns its path; the caller sets it as the child's CLAUDE_CONFIG_DIR.
  * Throws a typed refusal (never degrades to the source dir).
  * @param {NodeJS.ProcessEnv} env the spawn env, before CLAUDE_CONFIG_DIR is replaced
- * @param {{operatorHome?: string}} [opts] test seam for the operator policy home
+ * @param {{operatorHome?: string, derivedName?: string, stripEnvKeys?: readonly string[],
+ *   privateEntries?: readonly string[]}} [opts]
+ *   operatorHome is a test seam; derivedName selects the sibling dir (ADR-227:
+ *   one per local server, see localEngineDerivedDirName); stripEnvKeys are
+ *   settings env keys the spawn env must win over (the CLI applies settings env
+ *   after the spawn env); privateEntries get the derived dir's own directory
+ *   instead of a link into the member tree
  * @returns {Promise<string>}
  */
 export async function prepareEnginePinConfigDir(env, opts = {}) {
   const source = sourceLayout(env);
-  const derivedDir = derivedConfigDirFor(source.configDir);
-  await withDerivedDirLock(derivedDir, () => rebuildDerivedConfigDir(source, derivedDir, opts.operatorHome));
+  const derivedDir = derivedConfigDirFor(source.configDir, opts.derivedName ?? DERIVED_DIR_NAME);
+  await withDerivedDirLock(derivedDir, () => rebuildDerivedConfigDir(source, derivedDir, opts));
   return derivedDir;
 }

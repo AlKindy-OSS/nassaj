@@ -1,0 +1,492 @@
+{
+  "cleanupPeriodDays": 14,
+  "enabledPlugins": {
+    "plugin1@market": true,
+    "plugin2@market": true,
+    "plugin3@market": true,
+    "plugin4@market": true
+  },
+  "extraKnownMarketplaces": {},
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h1.js"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h2.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h3.js"
+          },
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h4.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h5.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h6.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h7.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h8.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h9.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h10.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h11.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h12.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h13.js"
+          },
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h14.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill|SlashCommand|InvokeSkill|SkillTool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h15.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h16.js",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h17.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h18.js"
+          },
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h19.js"
+          },
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h20.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $HOME/hooks/h21.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Read(/w1/**)",
+      "Agent(*)",
+      "AskUserQuestion",
+      "WebSearch",
+      "Edit(~/w2/**)",
+      "Bash(w3 *)",
+      "Bash(w4 *)",
+      "Bash(w5)",
+      "Bash(w6 *)",
+      "Bash(w7 *)",
+      "Bash(w8 *)",
+      "Bash(w9 *)",
+      "Bash(w10 *)",
+      "Bash(w11 *)",
+      "Bash(w12 *)",
+      "Bash(w13 *)",
+      "Bash(w14 *)",
+      "Bash(w15 *)",
+      "Bash(w16 *)",
+      "Bash(w17 *)",
+      "Bash(w18 *)",
+      "Bash(w19 *)",
+      "Bash(w20 *)",
+      "Bash(w21 *)",
+      "Bash(w22 *)",
+      "Bash(w23 *)",
+      "Bash(w24 *)",
+      "Bash(w25 *)",
+      "Bash(w26 *)",
+      "Bash(w27)",
+      "Bash(w28 *)",
+      "Bash(w29)",
+      "Bash(w30 *)",
+      "Bash(w31)",
+      "Bash(w32 w33 *)",
+      "Bash(w32 w34 *)",
+      "Bash(w32 w18 *)",
+      "Bash(w32 w35 *)",
+      "Bash(w32 w36 *)",
+      "Bash(w32 w37 *)",
+      "Bash(w32 w38 *)",
+      "Bash(w32 w39 w40 *)",
+      "Bash(w32 w41 *)",
+      "Bash(w32 w42 *)",
+      "Bash(w32 w43 w44 *)",
+      "Bash(w32 w45 *)",
+      "Bash(w32 w46 *)",
+      "Bash(w32 w47 *)",
+      "Bash(w48 *)",
+      "Bash(w49 *)",
+      "Bash(w50 *)",
+      "Bash(w51 *)",
+      "Bash(w52 *)",
+      "Bash(w53 *)",
+      "Bash(w50 w54 *)",
+      "Bash(w55 *)",
+      "Bash(w56 *)",
+      "Bash(w57 *)",
+      "Bash(w58 *)",
+      "Bash(w59 *)",
+      "Bash(w60 w44 *)",
+      "Bash(w60 w33 *)",
+      "Bash(w60 w35 *)",
+      "Bash(w60 w61 *)",
+      "Bash(w60 w62 *)",
+      "Bash(w60 w27 *)",
+      "Bash(w60 w63 *)",
+      "Bash(w60 w64 *)",
+      "Bash(w60 w65 *)",
+      "Bash(w60 w66 *)",
+      "Bash(w60 w67 *)",
+      "Bash(w27 w68 w69 w69=w70 w71=w70 w72=w73 w74=w75 w76=/w77/w78/w79/w80 w60 w66 w81/w82/w83 w84 w85 w86)",
+      "Bash(w27 w68 w69 w60 w66 w87)",
+      "Bash(w58 /w77/w78/w88/w89)",
+      "Bash(w90 w91 *)",
+      "Bash(w90 w92 *)",
+      "Bash(w90 w33 *)",
+      "Bash(w90 w93 *)",
+      "Bash(w90 *)",
+      "Bash(w94 w90 w33 *)",
+      "Bash(w94 w90 w91 *)",
+      "Bash(w95 *)",
+      "Bash(w95 w96 *)",
+      "Bash(w97 *)",
+      "Bash(w98 w99)",
+      "Bash(w94 w4 /w1/w97/w100)",
+      "Bash(w94 w7 \"^w101:\" /w1/w97/w100)",
+      "Bash(w102 *)",
+      "Bash(w103 *)",
+      "Bash(w104 *)",
+      "Bash(w94 w104 w105)",
+      "Bash(w106 *)",
+      "Bash(w107 *)",
+      "Bash(w108 *)",
+      "Bash(w109 *)",
+      "Bash(w110 *)",
+      "Bash(w111 *)",
+      "Bash(w112 *)",
+      "Bash([ w113 \"w114/w115\" ])"
+    ],
+    "deny": [
+      "Bash(w116:*)",
+      "Bash(w117:*)",
+      "Bash(w118:*)",
+      "Bash(w119:*)",
+      "Bash(w60 w120 w121)",
+      "Bash(w60 w120 w121 *)",
+      "Bash(w60 w120 w122)",
+      "Bash(w60 w120 w122 *)",
+      "Bash(w60 w123 w121)",
+      "Bash(w60 w123 w121 *)",
+      "Bash(w60 w123 w122)",
+      "Bash(w60 w123 w122 *)",
+      "Bash(w60 w124 w121)",
+      "Bash(w60 w124 w121 *)",
+      "Bash(w60 w124 w122)",
+      "Bash(w60 w124 w122 *)",
+      "Bash(w60 w125 w121)",
+      "Bash(w60 w125 w121 *)",
+      "Bash(w60 w125 w122)",
+      "Bash(w60 w125 w122 *)",
+      "Bash(w60 w126 w121)",
+      "Bash(w60 w126 w121 *)",
+      "Bash(w60 w126 w122)",
+      "Bash(w60 w126 w122 *)",
+      "Bash(w60 w127 w121)",
+      "Bash(w60 w127 w121 *)",
+      "Bash(w60 w127 w122)",
+      "Bash(w60 w127 w122 *)",
+      "Bash(w60 w128 w121)",
+      "Bash(w60 w128 w121 *)",
+      "Bash(w60 w128 w122)",
+      "Bash(w60 w128 w122 *)",
+      "Bash(w60 w129 w121)",
+      "Bash(w60 w129 w121 *)",
+      "Bash(w60 w129 w122)",
+      "Bash(w60 w129 w122 *)",
+      "Bash(w60 w130 w121)",
+      "Bash(w60 w130 w121 *)",
+      "Bash(w60 w130 w122)",
+      "Bash(w60 w130 w122 *)",
+      "Bash(w60 w131)",
+      "Bash(w60 w131 *)",
+      "Bash(w94 w60 w120 w121)",
+      "Bash(w94 w60 w120 w121 *)",
+      "Bash(w94 w60 w120 w122)",
+      "Bash(w94 w60 w120 w122 *)",
+      "Bash(w94 w60 w123 w121)",
+      "Bash(w94 w60 w123 w121 *)",
+      "Bash(w94 w60 w123 w122)",
+      "Bash(w94 w60 w123 w122 *)",
+      "Bash(w94 w60 w124 w121)",
+      "Bash(w94 w60 w124 w121 *)",
+      "Bash(w94 w60 w124 w122)",
+      "Bash(w94 w60 w124 w122 *)",
+      "Bash(w94 w60 w125 w121)",
+      "Bash(w94 w60 w125 w121 *)",
+      "Bash(w94 w60 w125 w122)",
+      "Bash(w94 w60 w125 w122 *)",
+      "Bash(w94 w60 w126 w121)",
+      "Bash(w94 w60 w126 w121 *)",
+      "Bash(w94 w60 w126 w122)",
+      "Bash(w94 w60 w126 w122 *)",
+      "Bash(w94 w60 w127 w121)",
+      "Bash(w94 w60 w127 w121 *)",
+      "Bash(w94 w60 w127 w122)",
+      "Bash(w94 w60 w127 w122 *)",
+      "Bash(w94 w60 w128 w121)",
+      "Bash(w94 w60 w128 w121 *)",
+      "Bash(w94 w60 w128 w122)",
+      "Bash(w94 w60 w128 w122 *)",
+      "Bash(w94 w60 w129 w121)",
+      "Bash(w94 w60 w129 w121 *)",
+      "Bash(w94 w60 w129 w122)",
+      "Bash(w94 w60 w129 w122 *)",
+      "Bash(w94 w60 w130 w121)",
+      "Bash(w94 w60 w130 w121 *)",
+      "Bash(w94 w60 w130 w122)",
+      "Bash(w94 w60 w130 w122 *)",
+      "Bash(w94 w60 w131)",
+      "Bash(w94 w60 w131 *)",
+      "Bash(w94 w132 w60 w120 w121)",
+      "Bash(w94 w132 w60 w120 w121 *)",
+      "Bash(w94 w132 w60 w120 w122)",
+      "Bash(w94 w132 w60 w120 w122 *)",
+      "Bash(w94 w132 w60 w123 w121)",
+      "Bash(w94 w132 w60 w123 w121 *)",
+      "Bash(w94 w132 w60 w123 w122)",
+      "Bash(w94 w132 w60 w123 w122 *)",
+      "Bash(w94 w132 w60 w124 w121)",
+      "Bash(w94 w132 w60 w124 w121 *)",
+      "Bash(w94 w132 w60 w124 w122)",
+      "Bash(w94 w132 w60 w124 w122 *)",
+      "Bash(w94 w132 w60 w125 w121)",
+      "Bash(w94 w132 w60 w125 w121 *)",
+      "Bash(w94 w132 w60 w125 w122)",
+      "Bash(w94 w132 w60 w125 w122 *)",
+      "Bash(w94 w132 w60 w126 w121)",
+      "Bash(w94 w132 w60 w126 w121 *)",
+      "Bash(w94 w132 w60 w126 w122)",
+      "Bash(w94 w132 w60 w126 w122 *)",
+      "Bash(w94 w132 w60 w127 w121)",
+      "Bash(w94 w132 w60 w127 w121 *)",
+      "Bash(w94 w132 w60 w127 w122)",
+      "Bash(w94 w132 w60 w127 w122 *)",
+      "Bash(w94 w132 w60 w128 w121)",
+      "Bash(w94 w132 w60 w128 w121 *)",
+      "Bash(w94 w132 w60 w128 w122)",
+      "Bash(w94 w132 w60 w128 w122 *)",
+      "Bash(w94 w132 w60 w129 w121)",
+      "Bash(w94 w132 w60 w129 w121 *)",
+      "Bash(w94 w132 w60 w129 w122)",
+      "Bash(w94 w132 w60 w129 w122 *)",
+      "Bash(w94 w132 w60 w130 w121)",
+      "Bash(w94 w132 w60 w130 w121 *)",
+      "Bash(w94 w132 w60 w130 w122)",
+      "Bash(w94 w132 w60 w130 w122 *)",
+      "Bash(w94 w132 w60 w131)",
+      "Bash(w94 w132 w60 w131 *)"
+    ],
+    "ask": [
+      "Bash(w60 w120 *)",
+      "Bash(w60 w123 *)",
+      "Bash(w60 w124 *)",
+      "Bash(w60 w125 *)",
+      "Bash(w60 w126 *)",
+      "Bash(w60 w127 *)",
+      "Bash(w60 w128 *)",
+      "Bash(w60 w129 *)",
+      "Bash(w60 w130 *)",
+      "Bash(w90 w120 *)",
+      "Bash(w90 w124 *)",
+      "Bash(w90 w133 *)",
+      "Bash(w90 w134 *)",
+      "Bash(w90 w135 *)",
+      "Bash(w90 w136 *)",
+      "Bash(w90 w96 w120 *)",
+      "Bash(w90 w96 w124 *)",
+      "Bash(w90 w96 w133 *)",
+      "Bash(w90 w96 w134 *)",
+      "Bash(w90 w96 w135 *)",
+      "Bash(w90 w96 w136 *)",
+      "Bash(w94 w60 w120 *)",
+      "Bash(w94 w60 w123 *)",
+      "Bash(w94 w60 w124 *)",
+      "Bash(w94 w60 w125 *)",
+      "Bash(w94 w60 w126 *)",
+      "Bash(w94 w60 w127 *)",
+      "Bash(w94 w60 w128 *)",
+      "Bash(w94 w60 w129 *)",
+      "Bash(w94 w60 w130 *)",
+      "Bash(w94 w90 w120 *)",
+      "Bash(w94 w90 w124 *)",
+      "Bash(w94 w90 w133 *)",
+      "Bash(w94 w90 w134 *)",
+      "Bash(w94 w90 w135 *)",
+      "Bash(w94 w90 w136 *)",
+      "Bash(w94 w90 w96 w120 *)",
+      "Bash(w94 w90 w96 w124 *)",
+      "Bash(w94 w90 w96 w133 *)",
+      "Bash(w94 w90 w96 w134 *)",
+      "Bash(w94 w90 w96 w135 *)",
+      "Bash(w94 w90 w96 w136 *)",
+      "Bash(w94 w132 w60 w120 *)",
+      "Bash(w94 w132 w60 w123 *)",
+      "Bash(w94 w132 w60 w124 *)",
+      "Bash(w94 w132 w60 w125 *)",
+      "Bash(w94 w132 w60 w126 *)",
+      "Bash(w94 w132 w60 w127 *)",
+      "Bash(w94 w132 w60 w128 *)",
+      "Bash(w94 w132 w60 w129 *)",
+      "Bash(w94 w132 w60 w130 *)",
+      "Bash(w94 w132 w90 w120 *)",
+      "Bash(w94 w132 w90 w124 *)",
+      "Bash(w94 w132 w90 w133 *)",
+      "Bash(w94 w132 w90 w134 *)",
+      "Bash(w94 w132 w90 w135 *)",
+      "Bash(w94 w132 w90 w136 *)",
+      "Bash(w94 w132 w90 w96 w120 *)",
+      "Bash(w94 w132 w90 w96 w124 *)",
+      "Bash(w94 w132 w90 w96 w133 *)",
+      "Bash(w94 w132 w90 w96 w134 *)",
+      "Bash(w94 w132 w90 w96 w135 *)",
+      "Bash(w94 w132 w90 w96 w136 *)"
+    ]
+  },
+  "skipDangerousModePermissionPrompt": true
+}

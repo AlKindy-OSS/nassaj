@@ -35,7 +35,7 @@
  * Guard and material therefore share one source of truth and can never drift. Matching
  * is an EXACT host comparison (no subdomain widening) — strictly fail-closed.
  *
- * FAIL-CLOSED POSTURE (mirrors assertSettingsEnvAllowed):
+ * FAIL-CLOSED POSTURE (mirrors assertSettingsRoutingAllowed):
  *   - opencode.json ABSENT / unreadable-ENOENT → no provider override to validate →
  *     NO-OP (nothing routes; opencode falls back to its built-in providers).
  *   - opencode.json is a SYMLINK → REFUSE (the GL-2 copy invariant forbids a symlink;

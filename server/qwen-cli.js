@@ -26,6 +26,7 @@ import {
 } from './modules/providers/shared/vendor/vendor-transcript.js';
 import { credentialPrincipalId } from './services/isolation/credential-principal.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { materializeQwenSettings, QWEN_HOME_SUBDIR } from './services/isolation/qwen-settings-material.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { sanitizeVendorAgentEnv } from './services/isolation/sanitize-vendor-agent-env.js';
@@ -300,7 +301,7 @@ async function spawnQwen(command, options = {}, ws) {
     : planModels.DEFAULT;
   if (isNewSession) void providerModelsService.seedSessionModel('qwen', sessionId, model).catch(() => {});
 
-  const baseEnv = resolveProviderEnv(actorUserId, 'qwen', { ...process.env });
+  const baseEnv = resolveProviderEnv(assertModelRunActor(actorUserId), 'qwen', { ...process.env });
   // Qwen Code takes its model registry — and the `envKey` indirection that names
   // the BAILIAN_* variable carrying this member's key — from
   // <HOME>/.qwen/settings.json, and refuses a non-interactive turn without it.

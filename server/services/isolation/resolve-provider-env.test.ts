@@ -36,8 +36,8 @@ process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base6
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('../provider-sharing.js');
 const { resolveProviderEnv } = await import('./resolve-provider-env.js');
+const { SYSTEM_ACTOR } = await import('./credential-actor.js');
 const { setProviderKey, _resetProviderSecretsServerKeyCache } = await import('./provider-secrets-store.js');
 // KIMI_CODE_HOME's root is asserted from the SAME shared constant the production code
 // reads (provision-user-dirs.js), not a duplicated literal — so this test can never
@@ -45,12 +45,6 @@ const { setProviderKey, _resetProviderSecretsServerKeyCache } = await import('./
 const { KIMI_HOME_SUBDIR } = await import('./provision-user-dirs.js');
 
 await initializeDatabase();
-
-/** Force the vendor providers isolated (their default) for deterministic runs. */
-function isolateVendors(): void {
-  _resetProviderSharingCache();
-  setProviderSharingConfig({ kimi: 'isolated', deepseek: 'isolated', glm: 'isolated' });
-}
 
 after(() => {
   closeConnection();
@@ -83,7 +77,6 @@ function assertNoAnthropicNamespace(env: NodeJS.ProcessEnv): void {
 describe('resolveProviderEnv — hosted vendor key injection', () => {
   for (const provider of ['kimi', 'deepseek', 'glm'] as const) {
     it(`injects ${VENDOR_KEY_ENV[provider]} from the per-user store`, () => {
-      isolateVendors();
       _resetProviderSecretsServerKeyCache();
       setProviderKey(100, provider, `sk-${provider}-live`);
 
@@ -92,7 +85,6 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
     });
 
     it(`${provider}: never sets any ANTHROPIC_*/CLAUDE_* var (IRON RULE)`, () => {
-      isolateVendors();
       _resetProviderSecretsServerKeyCache();
       setProviderKey(100, provider, `sk-${provider}-live`);
 
@@ -104,7 +96,6 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
   }
 
   it('does not inject a key for a user that has none (absence is no-op)', () => {
-    isolateVendors();
     _resetProviderSecretsServerKeyCache();
     // user 200 has no stored key
     const env = resolveProviderEnv(200, 'kimi', { PATH: '/usr/bin' });
@@ -112,7 +103,6 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
   });
 
   it('per-user isolation: two users get only their own injected key', () => {
-    isolateVendors();
     _resetProviderSecretsServerKeyCache();
     setProviderKey(301, 'deepseek', 'sk-user301');
     setProviderKey(302, 'deepseek', 'sk-user302');
@@ -125,33 +115,30 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
     assert.notEqual(env301.DEEPSEEK_API_KEY, env302.DEEPSEEK_API_KEY);
   });
 
-  it('anonymous (null userId) vendor spawn injects nothing', () => {
-    isolateVendors();
+  it('a null actor is refused; the system actor gets no vendor key', () => {
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
-    const env = resolveProviderEnv(null, 'kimi', { ...base });
-    // Only the binary updater policy (T-1873) — no key, no config-home.
-    assert.deepEqual(env, { ...base, KIMI_CODE_NO_AUTO_UPDATE: '1' });
+    assert.throws(() => resolveProviderEnv(null, 'kimi', { ...base }), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
+    const env = resolveProviderEnv(SYSTEM_ACTOR as never, 'kimi', { ...base });
     assert.equal(env.KIMI_API_KEY, undefined);
+    assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1');
   });
 });
 
 describe('resolveProviderEnv — opencode XDG isolation (OC-07)', () => {
   const XDG_KEYS = ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'] as const;
 
-  it('shared mode applies the binary updater policy without credential isolation', () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ opencode: 'shared' });
-    const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
-    const env = resolveProviderEnv(400, 'opencode', { ...base });
-    assert.deepEqual(env, { ...base, OPENCODE_DISABLE_AUTOUPDATE: '1' });
+  it('a member never inherits the operator XDG dirs (no shared mode, ADR-152 A1)', () => {
+    const operator: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
+    for (const key of XDG_KEYS) operator[key] = path.join(sandboxHome, `operator-${key}`);
+    const env = resolveProviderEnv(400, 'opencode', { ...operator });
+    const userRoot = path.join(sandboxHome, '.nassaj-users', '400');
     for (const key of XDG_KEYS) {
-      assert.equal(env[key], undefined, `${key} must not be set in shared mode`);
+      assert.ok(env[key]?.startsWith(userRoot), `${key}=${env[key]} must be the member's tree`);
     }
+    assert.equal(env.OPENCODE_DISABLE_AUTOUPDATE, '1');
   });
 
   it('isolated: redirects all four XDG_* dirs into the per-user tree', () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ opencode: 'isolated' });
     const env = resolveProviderEnv(401, 'opencode', { PATH: '/usr/bin' });
 
     const userRoot = path.join(sandboxHome, '.nassaj-users', '401');
@@ -164,38 +151,47 @@ describe('resolveProviderEnv — opencode XDG isolation (OC-07)', () => {
   });
 
   it('isolated: never sets any ANTHROPIC_*/CLAUDE_* var (IRON RULE)', () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ opencode: 'isolated' });
     const env = resolveProviderEnv(402, 'opencode', { PATH: '/usr/bin' });
     assertNoAnthropicNamespace(env);
   });
 
-  it('anonymous (null userId) opencode spawn still disables the binary updater', () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ opencode: 'isolated' });
-    const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
-    const env = resolveProviderEnv(null, 'opencode', { ...base });
-    assert.deepEqual(env, { ...base, OPENCODE_DISABLE_AUTOUPDATE: '1' });
+  it('a system-actor opencode spawn still disables the binary updater', () => {
+    const env = resolveProviderEnv(SYSTEM_ACTOR as never, 'opencode', { PATH: '/usr/bin' });
+    assert.equal(env.OPENCODE_DISABLE_AUTOUPDATE, '1');
+  });
+});
+
+describe('resolveProviderEnv — the server working directory never reaches a child (B-1715)', () => {
+  it('drops PWD/OLDPWD for members and the system actor, every provider and mode', () => {
+    const base: NodeJS.ProcessEnv = { PATH: '/usr/bin', PWD: '/srv/live-root', OLDPWD: '/srv' };
+    for (const provider of ['opencode', 'claude', 'codex', 'kimi'] as const) {
+      for (const [actor, mode] of [[410, 'chat'], [411, 'agent'], [SYSTEM_ACTOR, 'chat']] as const) {
+        const env = resolveProviderEnv(actor as never, provider, { ...base }, mode);
+        assert.equal(env.PWD, undefined, `${provider}/${String(actor)}/${mode}`);
+        assert.equal(env.OLDPWD, undefined, `${provider}/${String(actor)}/${mode}`);
+        assert.equal(env.PATH, '/usr/bin');
+      }
+    }
+  });
+
+  it('never mutates the base env it was given', () => {
+    const base: NodeJS.ProcessEnv = { PATH: '/usr/bin', PWD: '/srv/live-root' };
+    resolveProviderEnv(SYSTEM_ACTOR as never, 'opencode', base);
+    assert.equal(base.PWD, '/srv/live-root');
   });
 });
 
 describe('resolveProviderEnv — updater policy covers every identity mode', () => {
-  it('kimi chat, agent, anonymous and shared modes all disable self-update (T-1873)', () => {
-    for (const [userId, sharing, mode] of [
-      [46, 'isolated', 'agent'], [47, 'isolated', 'chat'], [null, 'isolated', 'agent'], [48, 'shared', undefined],
-    ] as const) {
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ kimi: sharing });
-      const env = resolveProviderEnv(userId, 'kimi', { PATH: '/usr/bin' }, mode);
-      assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1', `${userId}/${sharing}/${mode}`);
+  it('kimi chat, agent, anonymous and default modes all disable self-update (T-1873)', () => {
+    for (const [userId, mode] of [[46, 'agent'], [47, 'chat'], [SYSTEM_ACTOR, 'agent'], [48, undefined]] as const) {
+      const env = resolveProviderEnv(userId as never, 'kimi', { PATH: '/usr/bin' }, mode);
+      assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1', `${userId}/${mode}`);
     }
   });
 
-  it('claude shared, anonymous and isolated modes all disable self-update', () => {
-    for (const [userId, sharing] of [[44, 'shared'], [null, 'isolated'], [45, 'isolated']] as const) {
-      _resetProviderSharingCache();
-      setProviderSharingConfig({ claude: sharing });
-      assert.equal(resolveProviderEnv(userId, 'claude', { PATH: '/usr/bin' }).DISABLE_AUTOUPDATER, '1');
+  it('claude anonymous and member modes all disable self-update', () => {
+    for (const userId of [SYSTEM_ACTOR, 44, 45]) {
+      assert.equal(resolveProviderEnv(userId as never, 'claude', { PATH: '/usr/bin' }).DISABLE_AUTOUPDATER, '1');
     }
   });
 });
@@ -211,22 +207,6 @@ describe('resolveProviderEnv — updater policy covers every identity mode', () 
 describe('SL-5 — mode parameter is backward-compatible across ALL providers', () => {
   const BASE: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
 
-  /** Full policy isolating every CLI so we exercise each isolated branch. */
-  function isolateAll(): void {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({
-      claude: 'isolated',
-      codex: 'isolated',
-      agy: 'isolated',
-      cursor: 'isolated',
-      opencode: 'isolated',
-      kimi: 'isolated',
-      deepseek: 'isolated',
-      glm: 'isolated',
-      qwen: 'isolated',
-    });
-  }
-
   /** Absolute per-user config subtree, mirroring userConfigDir under the sandbox. */
   function userDir(uid: number, sub = ''): string {
     const root = path.join(sandboxHome, '.nassaj-users', String(uid));
@@ -240,7 +220,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   ] as const;
   for (const provider of MODE_AGNOSTIC) {
     it(`${provider}: legacy 3-arg === mode 'chat' === mode 'agent' (mode is a no-op)`, () => {
-      isolateAll();
       _resetProviderSecretsServerKeyCache();
       const uid = 500;
 
@@ -257,7 +236,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   }
 
   it('first-party CLI overrides are unchanged (claude/codex/agy)', () => {
-    isolateAll();
     const uid = 501;
     assert.equal(
       resolveProviderEnv(uid, 'claude', { ...BASE }).CLAUDE_CONFIG_DIR,
@@ -272,7 +250,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   });
 
   it('deepseek/glm never get KIMI_CODE_HOME even in agent mode', () => {
-    isolateAll();
     _resetProviderSecretsServerKeyCache();
     setProviderKey(502, 'deepseek', 'sk-ds');
     setProviderKey(502, 'glm', 'sk-glm');
@@ -290,7 +267,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   // was really an absence: cursor had no case, so it inherited the operator's
   // environment in every mode. It now isolates through HOME, like agy.
   it('cursor: HOME is redirected to the user tree in every mode', () => {
-    isolateAll();
     for (const mode of [undefined, 'chat', 'agent'] as const) {
       const env = mode
         ? resolveProviderEnv(503, 'cursor', { ...BASE }, mode)
@@ -312,7 +288,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   // is refused like any ungoverned name — it must never fall back to the
   // operator environment, where the operator's hermes credential still sits.
   it('hermes: a deleted body is refused in every mode', () => {
-    isolateAll();
     for (const mode of [undefined, 'chat', 'agent'] as const) {
       assert.throws(
         () =>
@@ -329,7 +304,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
   // A provider the policy has never heard of is refused, shown with a name that
   // cannot silently become governed later.
   it('an unknown provider is refused rather than run on the operator environment', () => {
-    isolateAll();
     for (const mode of [undefined, 'chat', 'agent'] as const) {
       // Asserted on the CODE, not the message: the message is user-facing prose
       // that will be reworded, while the code is the contract every caller
@@ -356,8 +330,6 @@ describe('SL-5 — kimi agent-mode config-home isolation (KIMI_CODE_HOME)', () =
   const BASE: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
 
   function isolateKimi(): void {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ kimi: 'isolated' });
     _resetProviderSecretsServerKeyCache();
   }
 
@@ -409,20 +381,17 @@ describe('SL-5 — kimi agent-mode config-home isolation (KIMI_CODE_HOME)', () =
     assert.equal(env.ANTHROPIC_BASE_URL, undefined);
   });
 
-  it('anonymous (null userId) kimi agent spawn sets nothing (fail-open shared)', () => {
+  it('a null kimi agent actor is refused; the system actor gets the system tree, no key', () => {
     isolateKimi();
-    const env = resolveProviderEnv(null, 'kimi', { ...BASE }, 'agent');
-    // Only the binary updater policy (T-1873): no key, no config-home.
-    assert.deepEqual(env, { ...BASE, KIMI_CODE_NO_AUTO_UPDATE: '1' });
-    assert.equal(env.KIMI_CODE_HOME, undefined);
+    assert.throws(() => resolveProviderEnv(null, 'kimi', { ...BASE }, 'agent'), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
+    const env = resolveProviderEnv(SYSTEM_ACTOR as never, 'kimi', { ...BASE }, 'agent');
+    assert.equal(env.KIMI_CODE_HOME, path.join(sandboxHome, '.nassaj-users', '.system', KIMI_HOME_SUBDIR));
+    assert.equal(env.KIMI_API_KEY, undefined);
   });
 
-  it('shared policy: kimi agent mode returns base env unchanged (no config-home)', () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ kimi: 'shared' });
-    const env = resolveProviderEnv(604, 'kimi', { ...BASE }, 'agent');
-    // Only the binary updater policy (T-1873): no key, no config-home.
-    assert.deepEqual(env, { ...BASE, KIMI_CODE_NO_AUTO_UPDATE: '1' });
-    assert.equal(env.KIMI_CODE_HOME, undefined);
+  it('kimi agent mode always isolates the config-home for a member (no shared mode, ADR-152 A1)', () => {
+    const operator: NodeJS.ProcessEnv = { ...BASE, KIMI_CODE_HOME: path.join(sandboxHome, '.kimi') };
+    const env = resolveProviderEnv(604, 'kimi', operator, 'agent');
+    assert.equal(env.KIMI_CODE_HOME, kimiHome(604));
   });
 });

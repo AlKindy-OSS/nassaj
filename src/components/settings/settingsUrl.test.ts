@@ -144,4 +144,19 @@ describe('settings URL destination', () => {
       category: 'account',
     });
   });
+  it('T-2083: the credential-grants section round-trips on the agents tab only', () => {
+    window.history.replaceState(null, '', '/?projectId=p1');
+    writeSettingsDestination({
+      tab: 'agents', agent: 'claude', category: 'account', section: 'credential-grants',
+    });
+    expect(readSettingsDestination()).toEqual({
+      tab: 'agents', agent: 'claude', category: 'account', section: 'credential-grants',
+    });
+    expect(readSettingsDestination('?settings=vendors&settingsSection=credential-grants')).toEqual({
+      tab: 'vendors',
+    });
+    expect(readSettingsDestination('?settings=agents&settingsSection=elsewhere')).toEqual({ tab: 'agents' });
+    clearSettingsDestination();
+    expect(window.location.search).toBe('?projectId=p1');
+  });
 });

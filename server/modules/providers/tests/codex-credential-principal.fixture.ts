@@ -22,8 +22,6 @@ fs.chmodSync(process.env.DATABASE_PATH, 0o600);
 const { getConnection, closeConnection, migratePermissionExecution } = await import('@/modules/database/index.js');
 export const database = getConnection();
 migratePermissionExecution(database);
-const { setProviderSharingConfig } = await import('@/services/provider-sharing.js');
-setProviderSharingConfig({ codex: 'shared' });
 /** Canonical synthetic session principal, never inferred from the credential destination. */
 export const principal = Object.freeze({
   id: 1, role: 'owner', authenticationKind: 'session', authorizationGeneration: 1,

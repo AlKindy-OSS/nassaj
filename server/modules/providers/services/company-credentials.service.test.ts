@@ -43,15 +43,12 @@ process.env.NASSAJ_UNIFIED_VENDOR_KEYS = '0';
 let setCalls: Array<{ provider: string; target?: string; apiKey: string; auditContext?: Record<string, unknown> }> = [];
 /** Providers the stub dispatcher should refuse with a throw. */
 let failingProviders = new Set<string>();
-/** Providers the stub policy marks as shared (elevated role required). */
-let sharedProviders = new Set<string>();
 /** Providers the stub auth probe reports as signed in by subscription. */
 let subscribedProviders = new Set<string>();
 
 mock.module(url('./provider-credentials.service.js'), {
   namedExports: {
     providerCredentialsService: {
-      requiresElevatedRole: (provider: string) => sharedProviders.has(provider),
       setKey: async (
         _userId: unknown,
         provider: string,
@@ -92,13 +89,12 @@ const { companyCredentialsService } = await import('./company-credentials.servic
 beforeEach(() => {
   setCalls = [];
   failingProviders = new Set();
-  sharedProviders = new Set();
   subscribedProviders = new Set();
 });
 
 test('one paste reaches every slot the company owns', async () => {
   // Anthropic owns two slots: the claude harness and opencode's anthropic target.
-  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
+  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {});
 
   assert.equal(result.configured, true);
   assert.deepEqual(
@@ -111,7 +107,7 @@ test('one paste reaches every slot the company owns', async () => {
 test('a subscribed harness is skipped, and its siblings are still written', async () => {
   subscribedProviders = new Set(['claude']);
 
-  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
+  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {});
 
   const claude = result.slots.find((slot) => slot.provider === 'claude');
   assert.equal(claude?.outcome, 'skipped_subscription');
@@ -127,7 +123,6 @@ test('the subscription skip is overridable, but only when asked for', async () =
   subscribedProviders = new Set(['claude']);
 
   const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {
-    isElevated: true,
     includeSubscription: true,
   });
 
@@ -135,22 +130,17 @@ test('the subscription skip is overridable, but only when asked for', async () =
   assert.ok(setCalls.some((call) => call.provider === 'claude'));
 });
 
-test('a shared slot the caller may not write is reported, not thrown', async () => {
-  sharedProviders = new Set(['opencode']);
+test('ADR-152 A1: every slot is the caller\'s own — no role makes a slot `forbidden`', async () => {
+  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {});
 
-  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: false });
-
-  assert.equal(
-    result.slots.find((slot) => slot.provider === 'opencode')?.outcome,
-    'forbidden',
-  );
-  assert.deepEqual(setCalls.map((call) => call.provider), ['claude']);
+  assert.equal(result.slots.some((slot) => (slot.outcome as string) === 'forbidden'), false);
+  assert.deepEqual(setCalls.map((call) => call.provider).sort(), ['claude', 'opencode']);
 });
 
 test('one slot failing does not cancel the others', async () => {
   failingProviders = new Set(['claude']);
 
-  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
+  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {});
 
   const claude = result.slots.find((slot) => slot.provider === 'claude');
   assert.equal(claude?.outcome, 'failed');
@@ -162,14 +152,14 @@ test('one slot failing does not cancel the others', async () => {
 test('the failure report never carries the key value', async () => {
   failingProviders = new Set(['claude']);
 
-  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
+  const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {});
 
   assert.ok(!JSON.stringify(result).includes(KEY), 'no slot result echoes the secret');
 });
 
 test('an empty key is a 400 before any slot is touched', async () => {
   await assert.rejects(
-    () => companyCredentialsService.setKey(1, 'anthropic', '   ', { isElevated: true }),
+    () => companyCredentialsService.setKey(1, 'anthropic', '   ', {}),
     (error: { statusCode?: number }) => error.statusCode === 400,
   );
   assert.deepEqual(setCalls, []);
@@ -177,7 +167,7 @@ test('an empty key is a 400 before any slot is touched', async () => {
 
 test('an unknown company is a 404, not an empty success', async () => {
   await assert.rejects(
-    () => companyCredentialsService.setKey(1, 'nope', KEY, { isElevated: true }),
+    () => companyCredentialsService.setKey(1, 'nope', KEY, {}),
     (error: { statusCode?: number }) => error.statusCode === 404,
   );
 });
@@ -185,7 +175,7 @@ test('an unknown company is a 404, not an empty success', async () => {
 test('Z.AI — the pure duplicate — fans out to both of its slots', async () => {
   // The case that made this feature worth building: two api_key slots of the
   // same company, holding the very same key, pasted twice by hand until now.
-  const result = await companyCredentialsService.setKey(1, 'zai', KEY, { isElevated: true });
+  const result = await companyCredentialsService.setKey(1, 'zai', KEY, {});
 
   assert.deepEqual(
     setCalls.map((call) => `${call.provider}:${call.target ?? '-'}`).sort(),
@@ -198,7 +188,6 @@ test('Z.AI — the pure duplicate — fans out to both of its slots', async () =
 
 test('a selection writes ONLY the ticked slot and leaves its sibling untouched', async () => {
   const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {
-    isElevated: true,
     vendorIds: ['anthropic-opencode'],
   });
 
@@ -212,7 +201,7 @@ test('a selection writes ONLY the ticked slot and leaves its sibling untouched',
 
 test('omitting the selection keeps the old meaning — every slot', async () => {
   // The pre-checkbox client, and the client whose server answered no slot list.
-  await companyCredentialsService.setKey(1, 'anthropic', KEY, { isElevated: true });
+  await companyCredentialsService.setKey(1, 'anthropic', KEY, {});
 
   assert.equal(setCalls.length, 2, 'an absent selection is not an empty selection');
 });
@@ -223,7 +212,6 @@ test('a slot id from ANOTHER company cannot be written through this company', as
   // nothing and the call is refused rather than silently redirected.
   await assert.rejects(
     () => companyCredentialsService.setKey(1, 'moonshot', KEY, {
-      isElevated: true,
       vendorIds: ['anthropic-opencode'],
     }),
     (error: { statusCode?: number }) => error.statusCode === 400,
@@ -231,30 +219,25 @@ test('a slot id from ANOTHER company cannot be written through this company', as
   assert.deepEqual(setCalls, [], 'no slot of any company was touched');
 });
 
-test('a selection cannot smuggle a shared slot past the role gate', async () => {
-  sharedProviders = new Set(['opencode']);
-
+test('a selection narrows the write to the ticked slot, in the caller\'s own tree', async () => {
   const result = await companyCredentialsService.setKey(1, 'anthropic', KEY, {
-    isElevated: false,
     vendorIds: ['anthropic-opencode'],
   });
 
-  assert.equal(result.slots[0]?.outcome, 'forbidden');
-  assert.deepEqual(setCalls, [], 'ticking a box is not an authorization');
+  assert.equal(result.slots[0]?.outcome, 'written');
+  assert.deepEqual(setCalls.map((call) => call.provider), ['opencode']);
 });
 
 test('ticking a subscribed slot still needs the explicit override', async () => {
   subscribedProviders = new Set(['claude']);
 
   const skipped = await companyCredentialsService.setKey(1, 'anthropic', KEY, {
-    isElevated: true,
     vendorIds: ['anthropic'],
   });
   assert.equal(skipped.slots[0]?.outcome, 'skipped_subscription');
   assert.deepEqual(setCalls, [], 'a Max plan is not downgraded by a checkbox alone');
 
   const overridden = await companyCredentialsService.setKey(1, 'anthropic', KEY, {
-    isElevated: true,
     vendorIds: ['anthropic'],
     includeSubscription: true,
   });
@@ -265,7 +248,6 @@ test('ticking a subscribed slot still needs the explicit override', async () => 
 test('an empty selection is a 400, not a silent no-op success', async () => {
   await assert.rejects(
     () => companyCredentialsService.setKey(1, 'anthropic', KEY, {
-      isElevated: true,
       vendorIds: [],
     }),
     (error: { statusCode?: number }) => error.statusCode === 400,
@@ -275,7 +257,6 @@ test('an empty selection is a 400, not a silent no-op success', async () => {
 
 test('removal is per slot too — one place, not the whole company', async () => {
   const result = await companyCredentialsService.deleteKey(1, 'zai', {
-    isElevated: true,
     vendorIds: ['zai-opencode'],
   });
 
@@ -283,8 +264,7 @@ test('removal is per slot too — one place, not the whole company', async () =>
 });
 
 test('ADR-200 S7: alibaba-cloud saves a Token Plan key with no consent and no sk-sp- prefix', async () => {
-  const result = await companyCredentialsService.setKey(1, 'alibaba-cloud', 'tp-0123456789abcdef', {
-    isElevated: false, auditContext: { ipAddress: '127.0.0.1' },
+  const result = await companyCredentialsService.setKey(1, 'alibaba-cloud', 'tp-0123456789abcdef', { auditContext: { ipAddress: '127.0.0.1' },
   });
   assert.equal(result.configured, true);
   assert.equal(setCalls.length, 1);
@@ -296,7 +276,7 @@ test('ADR-200 S7: alibaba-cloud saves a Token Plan key with no consent and no sk
 test('ADR-200 S7: no company carries a consent requirement any more', async () => {
   for (const companyId of ['alibaba-cloud', 'anthropic']) {
     setCalls = [];
-    const result = await companyCredentialsService.setKey(1, companyId, KEY, { isElevated: true });
+    const result = await companyCredentialsService.setKey(1, companyId, KEY, {});
     assert.equal(result.configured, true, companyId);
     assert.ok(setCalls.every((call) => call.auditContext?.consentVersion === undefined));
   }

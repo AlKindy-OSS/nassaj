@@ -12,6 +12,30 @@ export interface WhatsNewEntry {
 }
 
 export const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '2.3.3.1': {
+    ar: [
+      'تغيير جوهري: لم يعد أي عضو يعمل على اشتراك المالك ضمنياً. اربط اشتراكك الخاص أو اطلب منحة من المالك.',
+      'السياسة القديمة محفوظة في السجلّ، ولم يُحذف أي مفتاح مزوّد.',
+      'أُغلقت ثغرات في إعدادات المشروع وحماية بيانات اعتماد الأعضاء.',
+      'قواعد الرفض والسماح في Claude تُطبَّق على OpenCode وDeepSeek Harness.',
+      'وكيل DeepSeek Harness الجديد بنسخة معاينة، وتحديثاته تمرّ بزرّ المالك.',
+      'يُفحص حجم النموذج قبل تغييره، ويُحذَّر من نموذج أصغر من أن يسع المحادثة.',
+      'الرسائل بين أعضاء مختلفين تنتظر موافقة المالك.',
+      'خادم النماذج المحلي داخل Claude متاح، ومعطّل افتراضياً.',
+      'إصلاحات في OpenCode: ردّ لا يتكرّر، ونموذج صحيح في المنتقي، وتكلفة لا تتضاعف.',
+    ],
+    en: [
+      'Breaking change: no member runs on the owner\'s subscription implicitly any more. Link your own subscription or ask the owner for a grant.',
+      'The old policy is kept in the record, and no provider key was deleted.',
+      'Gaps in project settings and member credential protection are closed.',
+      'Claude\'s deny and ask rules now apply to OpenCode and DeepSeek Harness.',
+      'The new DeepSeek Harness agent is in preview, and its updates go through the owner\'s button.',
+      'A model\'s size is checked before a switch, with a warning when it is too small for the conversation.',
+      'Messages between different members wait for the owner\'s approval.',
+      'The local model server inside Claude is available, and off by default.',
+      'OpenCode fixes: no duplicate replies, the right model in the picker, and no double-counted cost.',
+    ],
+  },
   '2.3.3.0': {
     ar: [
       'شريط الوكلاء يعرض كل وكلاء Claude، بما فيها الخلفية والمستأنفة، مع وسم «حالة تقديرية» عند الحالات المُعادة.',

@@ -50,7 +50,7 @@ function harness(supported: boolean, enabled = supported) {
   const dependencies = {
     queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
     spawnAntigravity: spawn, spawnOpenCode: spawn,
-    spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn, spawnQwen: spawn,
+    spawnKimi: spawn, spawnGlm: spawn, spawnQwen: spawn,
     getSessionProvider: () => null,
     cliTurnSupervisor: {
       enabledCell: () => enabled,

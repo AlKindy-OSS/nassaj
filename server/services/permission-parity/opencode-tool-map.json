@@ -1,0 +1,23 @@
+{
+ "$comment": "ADR-226 §1.1 (B-1759): the reviewed OpenCode 1.19.5 tool registry, from the stage-0 run (__tests__/fixtures/opencode-stage0/stage0-evidence.json, items 3 and 4) and the tool schemas of the installed binary. `fields`: every argument the adapter (opencode-claude-tools.js) reads, with its JSON type. `ignored`: the other declared properties, each reviewed as unable to change what or where the tool touches (bash timeout; read offset/limit: range of the same file; webfetch format/timeout; websearch result count/crawl/type/size; task task_id: resumes a subagent session whose calls are gated the same way; task command: free text naming the trigger). A field outside fields + ignored is denied per call (stage 0: glob/grep/todowrite accept unknown extra fields). A tool absent here is denied (custom tools, tools added by other plugins, lsp/plan/execute/batch/list/multiedit). `question` maps to AskUserQuestion and is always denied (`run` has no answer channel). MCP tools (`<server>_<tool>`) are not listed: their schema comes from the server.",
+ "opencode": "opencode@1.19.5",
+ "tools": {
+  "bash": { "claude": "Bash", "cls": "bash", "fields": { "command": "string", "description": "string", "workdir": "string" }, "ignored": ["timeout"] },
+  "read": { "claude": "Read", "cls": "read", "fields": { "filePath": "string" }, "ignored": ["offset", "limit"] },
+  "glob": { "claude": "Glob", "cls": "read", "fields": { "pattern": "string", "path": "string" }, "ignored": [] },
+  "grep": { "claude": "Grep", "cls": "read", "fields": { "pattern": "string", "path": "string", "include": "string" }, "ignored": [] },
+  "edit": { "claude": "Edit", "cls": "edit", "fields": { "filePath": "string", "oldString": "string", "newString": "string", "replaceAll": "boolean" }, "ignored": [] },
+  "write": { "claude": "Write", "cls": "edit", "fields": { "filePath": "string", "content": "string" }, "ignored": [] },
+  "apply_patch": { "claude": "Edit", "cls": "edit", "fields": { "patchText": "string" }, "ignored": [] },
+  "task": { "claude": "Task", "cls": "tool", "fields": { "description": "string", "prompt": "string", "subagent_type": "string" }, "ignored": ["task_id", "command"] },
+  "webfetch": { "claude": "WebFetch", "cls": "fetch", "fields": { "url": "string" }, "ignored": ["format", "timeout"] },
+  "websearch": { "claude": "WebSearch", "cls": "tool", "fields": { "query": "string" }, "ignored": ["numResults", "livecrawl", "type", "contextMaxCharacters"] },
+  "todowrite": { "claude": "TodoWrite", "cls": "free", "fields": { "todos": "array" }, "ignored": [] },
+  "skill": { "claude": "Skill", "cls": "tool", "fields": { "name": "string" }, "ignored": [] },
+  "question": { "claude": "AskUserQuestion", "cls": "denied", "fields": {}, "ignored": ["questions"] },
+  "invalid": { "claude": "Invalid", "cls": "free", "fields": { "tool": "string", "error": "string" }, "ignored": [] },
+  "list_mcp_resources": { "claude": "ListMcpResourcesTool", "cls": "tool", "fields": { "server": "string" }, "ignored": [] },
+  "list_mcp_resource_templates": { "claude": "ListMcpResourcesTool", "cls": "tool", "fields": { "server": "string" }, "ignored": [] },
+  "read_mcp_resource": { "claude": "ReadMcpResourceTool", "cls": "tool", "fields": { "server": "string", "uri": "string" }, "ignored": [] }
+ }
+}

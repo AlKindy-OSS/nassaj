@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, GitFork, Loader2, MessageCircleQuestion, MessageSquarePlus, X } from 'lucide-react';
 
 import { Dialog, DialogContent } from '../../../../shared/view/ui';
+import CredentialNotLinkedNotice from '../../../credential-link/CredentialNotLinkedNotice';
+import { CREDENTIAL_NOT_LINKED } from '../../../credential-link/credentialNotLinked';
 import type { BtwForkMode, BtwState } from '../../hooks/useBtwSideChannel';
 
 /**
@@ -267,7 +269,15 @@ export default function BtwOverlay({
             )}
           </div>
 
-          {isError ? (
+          {isError && state.errorCode === CREDENTIAL_NOT_LINKED ? (
+            // T-2083: the question ran on no credential; say which, and how to
+            // link it. Settings open over the chat, so the overlay closes first.
+            <CredentialNotLinkedNotice
+              info={state.errorCredential
+                ?? { provider: null, reason: 'not_linked', grantorUsername: null, settingsAgent: null }}
+              onNavigate={onClose}
+            />
+          ) : isError ? (
             <div
               role="alert"
               className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-foreground"

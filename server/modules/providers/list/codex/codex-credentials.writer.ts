@@ -53,6 +53,7 @@ import { createAuthenticatedLaunchActor, isAuthenticatedLaunchActorCurrent } fro
 import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissions/runtime-user-effect.js';
 import { assertHarnessNotUpdating } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolvedKnob } from '@/services/isolation/resolved-knob.js';
 import type {
   IProviderCredentialWriter,
   ProviderCredentialStatus,
@@ -66,7 +67,6 @@ import {
   withCodexApiKey,
   withoutCodexApiKey,
 } from './codex-auth-shape.js';
-import { operatorCodexHome } from './codex-home.js';
 
 /** Hard cap on how long the login CLI may run before it is killed. */
 const LOGIN_TIMEOUT_MS = 20_000;
@@ -315,12 +315,12 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
    */
   private resolveCodexHome(userId: string | number | null | undefined): string {
     const env = this.ownProviderEnv(userId);
-    return readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+    return resolvedKnob(env, 'CODEX_HOME');
   }
 
   /** The caller's own codex environment — never a grantor's (see resolveCodexHome). */
   private ownProviderEnv(userId: string | number | null | undefined): NodeJS.ProcessEnv {
-    return resolveProviderEnv(userId ?? null, 'codex', process.env, 'chat', { honorGrants: false });
+    return resolveProviderEnv(userId, 'codex', process.env, 'chat', { honorGrants: false });
   }
 
   async setApiKey(
@@ -350,7 +350,7 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
       });
     }
     const env = this.ownProviderEnv(userId);
-    const authPath = path.join(readOptionalString(env.CODEX_HOME) ?? operatorCodexHome(), 'auth.json');
+    const authPath = path.join(resolvedKnob(env, 'CODEX_HOME'), 'auth.json');
     await withCodexAuthLock(authPath, async () => {
       const before = readCodexAuthSnapshot(authPath);
       if (hasOwn(before.auth, 'tokens')) {

@@ -25,6 +25,41 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   permission_auto_rejected: 'serverError.permission_auto_rejected',
   // B-1707: نسخة OpenCode المثبّتة رفضت معاملات التشغيل وطبعت دليل الاستخدام؛ لم يعمل شيء.
   opencode_cli_args_rejected: 'serverError.opencode_cli_args_rejected',
+  // ADR-221 (B-1711): Claude's deny/ask rules bind OpenCode; each refusal names its cause.
+  permission_denied_by_claude_rule: 'serverError.permission_denied_by_claude_rule',
+  permission_requires_approval: 'serverError.permission_requires_approval',
+  permission_rule_unsupported: 'serverError.permission_rule_unsupported',
+  PERMISSION_EFFECTIVE_POLICY_REQUIRED: 'serverError.PERMISSION_EFFECTIVE_POLICY_REQUIRED',
+  // T-2086 (ADR-224): DeepSeek Harness pre-start refusals (dshRefusal.ts).
+  dsh_permission_mode_unsupported: 'serverError.dsh_permission_mode_unsupported',
+  dsh_permission_rule_unsupported: 'serverError.dsh_permission_rule_unsupported',
+  dsh_claude_hooks_unsupported: 'serverError.dsh_claude_hooks_unsupported',
+  dsh_coordination_unsupported: 'serverError.dsh_coordination_unsupported',
+  dsh_shared_session_unsupported: 'serverError.dsh_shared_session_unsupported',
+  dsh_session_unknown: 'serverError.dsh_session_unknown',
+  dsh_session_id_invalid: 'serverError.dsh_session_id_invalid',
+  dsh_effort_unsupported: 'serverError.dsh_effort_unsupported',
+  dsh_cwd_missing: 'serverError.dsh_cwd_missing',
+  dsh_tree_tampered: 'serverError.dsh_tree_tampered',
+  dsh_tree_unverified: 'serverError.dsh_tree_unverified',
+  dsh_tree_unmanaged: 'serverError.dsh_tree_unmanaged',
+  governance_missing: 'serverError.governance_missing',
+  // T-2089/ADR-225: the Claude-parity engine.
+  dsh_claude_sandbox_unsupported: 'serverError.dsh_claude_sandbox_unsupported',
+  dsh_policy_violation: 'serverError.dsh_policy_violation',
+  dsh_prompt_blocked: 'serverError.dsh_prompt_blocked',
+  // T-2091: capability probes and guard incidents.
+  dsh_cap_channel: 'serverError.dsh_cap_channel',
+  dsh_cap_tools_api: 'serverError.dsh_cap_tools_api',
+  dsh_cap_gate: 'serverError.dsh_cap_gate',
+  dsh_gate_bypassed: 'serverError.dsh_gate_bypassed',
+  dsh_post_hook_skipped: 'serverError.dsh_post_hook_skipped',
+  dsh_override_unverified: 'serverError.dsh_override_unverified',
+  opencode_parity_rules_invalid: 'serverError.opencode_parity_rules_invalid',
+  opencode_parity_unavailable: 'serverError.opencode_parity_unavailable',
+  opencode_parity_not_loaded: 'serverError.opencode_parity_not_loaded',
+  opencode_parity_selftest_failed: 'serverError.opencode_parity_selftest_failed',
+  opencode_parity_selftest_unavailable: 'serverError.opencode_parity_selftest_unavailable',
   // B-1298: رموز أخطاء المزوّد المحلي — تصل مباشرةً على إطار kind:'error' أو
   // في حقل providerErrorCode على إطار message_dispatch_unconfirmed.
   provider_auth_failed: 'serverError.provider_auth_failed',

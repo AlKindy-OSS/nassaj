@@ -30,7 +30,9 @@
 
 import express, { type Request, type Response } from 'express';
 
-import { projectsDb } from '@/modules/database/index.js';
+import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { admitCredentialTurn } from '@/services/isolation/credential-gate.js';
+import { localEngineSpawnRefusal } from '@/services/isolation/local-engine-pin.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 // Reuse the AUDITED shared limiter rather than duplicating security-sensitive
@@ -46,6 +48,23 @@ import { countBackgroundTasks } from './background-tasks-watcher.service.js';
 import { HANDOFF_POLICIES, type HandoffPolicy } from './intent.js';
 
 const router = express.Router();
+
+/**
+ * ADR-227: refuses a background launch from a local-pinned conversation or for a
+ * local model id (409 LOCAL_ENGINE_SPAWN_UNSUPPORTED). A pin read failure refuses
+ * too: absence of a local pin cannot be proven.
+ * @throws {AppError}
+ */
+function assertNotLocalEngineLaunch(conversationId: string, model: string | null | undefined): void {
+  let storedEngine: string | null;
+  try {
+    storedEngine = sessionsDb.getSessionEnginePin(conversationId)?.engine ?? null;
+  } catch {
+    throw new AppError('The conversation engine could not be read.', { code: 'ENGINE_PIN_READ_FAILED', statusCode: 503 });
+  }
+  const refusal = localEngineSpawnRefusal({ storedEngine, model: model ?? null, site: 'background task' });
+  if (refusal) throw new AppError(refusal.message, { code: refusal.code, statusCode: 409 });
+}
 
 /** Strict charset for the web-originated id fields (no path/unit injection). */
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -182,6 +201,16 @@ router.post(
         statusCode: 403,
       });
     }
+
+    // ADR-227: a background task runs `claude -p` on official Anthropic with no
+    // engine verdict. From a local-pinned conversation (or for a local model) it
+    // is refused before the credential gate, which admits a local pin on no
+    // credential, and before any intent is written.
+    assertNotLocalEngineLaunch(conversationId, model);
+
+    // ADR-152 A1 §3.5: a background task runs Claude on the caller's credential
+    // (own or granted). None linked => 409 CREDENTIAL_NOT_LINKED, ZERO intent.
+    admitCredentialTurn({ actor: userId, provider: 'claude', mode: 'agent', model, sessionId: conversationId });
 
     // C1 (T-820 audit) — per-user PENDING-intent cap. Reject an (N+1)th launch
     // with 429 BEFORE writing, so a single owner cannot flood the intents dir

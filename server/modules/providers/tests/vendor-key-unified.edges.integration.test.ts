@@ -31,15 +31,12 @@ for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OA
 }
 
 const { initializeDatabase, closeConnection, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { isOpencodeSpawnVendorsEnabled, spawnVendorRunOf } = await import('@/services/isolation/opencode-spawn-vendor.js');
 const { vendorKeyFanoutService } = await import('../services/vendor-key-fanout.runtime.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', opencode: 'isolated' });
 store._resetProviderSecretsServerKeyCache();
 
 after(() => {
@@ -69,7 +66,7 @@ function seedApiKeyMode(id: number, settings: unknown): void {
   });
 }
 
-const optionsOf = (member: { principal: unknown }) => ({ isElevated: false, slots: SLOTS, authenticatedPrincipal: member.principal });
+const optionsOf = (member: { principal: unknown }) => ({ slots: SLOTS, authenticatedPrincipal: member.principal });
 
 test('S10 flag default: unset and blank are ON; 0/false/no/off and unrecognised values are OFF', () => {
   assert.equal(store.isUnifiedVendorKeysEnabled({}), true, 'unset');
@@ -118,7 +115,7 @@ test('S10 kill switch: with the flag at 0 a Save and a Delete are refused and wr
   try {
     for (const run of [
       () => vendorKeyFanoutService.save(member.id, 'anthropic', KEY, optionsOf(member)),
-      () => vendorKeyFanoutService.remove(member.id, 'anthropic', { isElevated: false, slots: SLOTS }),
+      () => vendorKeyFanoutService.remove(member.id, 'anthropic', { slots: SLOTS }),
     ]) {
       await assert.rejects(run(), (error: { code?: string }) => error.code === 'UNIFIED_VENDOR_KEYS_OFF');
     }
@@ -146,7 +143,7 @@ test('S10 delete: a second delete is idempotent and OAuth material survives both
   const member = newMember('edge-delete-twice');
   seedApiKeyMode(member.id, { env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH } });
   await vendorKeyFanoutService.save(member.id, 'anthropic', KEY, optionsOf(member));
-  const options = { isElevated: false, slots: SLOTS };
+  const options = { slots: SLOTS };
   const first = await vendorKeyFanoutService.remove(member.id, 'anthropic', options);
   const second = await vendorKeyFanoutService.remove(member.id, 'anthropic', options);
   assert.equal(first.find((r) => r.provider === 'claude')?.outcome, 'removed');

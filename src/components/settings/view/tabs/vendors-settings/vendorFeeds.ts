@@ -11,8 +11,8 @@ import type { Vendor } from '../../../../../../shared/vendors';
  * the state table is unit-tested on plain objects.
  */
 
-/** Everything a badge can say: the ledger states plus the one Save-only refusal. */
-export type FeedState = ProjectionState | 'forbidden';
+/** Everything a badge can say: the ledger states. */
+export type FeedState = ProjectionState;
 
 export type FeedItem = {
   vendorId: string;
@@ -38,14 +38,12 @@ export const FEED_TONE: Record<FeedState, FeedTone> = {
   kept_on_subscription: 'neutral',
   mode_unset: 'neutral',
   login_present: 'neutral',
-  shared_scope_refused: 'neutral',
-  forbidden: 'neutral',
 };
 
-/** States that carry an action line in a tooltip. `linked` and `forbidden` do not. */
+/** States that carry an action line in a tooltip. `linked` does not. */
 export const FEED_STATES_WITH_ACTION: readonly FeedState[] = [
   'stale', 'failed', 'tombstone', 'foreign_credential', 'adopted',
-  'kept_on_subscription', 'mode_unset', 'login_present', 'shared_scope_refused',
+  'kept_on_subscription', 'mode_unset', 'login_present',
 ];
 
 /** Brand names, identical in every locale (hence not translated). */

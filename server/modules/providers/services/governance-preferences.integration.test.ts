@@ -52,10 +52,6 @@ import {
   invalidateProvisioned,
   provisionUserDirs,
 } from '@/services/isolation/provision-user-dirs.js';
-import {
-  _resetProviderSharingCache,
-  setProviderSharingConfig,
-} from '@/services/provider-sharing.js';
 import { isGovernanceExempt } from '@/services/isolation/governance-exemption.js';
 import type { LLMProvider } from '@/shared/types.js';
 
@@ -85,13 +81,11 @@ async function withHarness(runTest: (h: Harness) => void | Promise<void>): Promi
   delete process.env.VITE_IS_PLATFORM;
 
   closeConnection();
-  _resetProviderSharingCache();
   process.env.DATABASE_PATH = path.join(tempRoot, 'auth.db');
   await initializeDatabase();
   // This suite asserts a per-user material plan. Make that prerequisite
   // explicit instead of inheriting whichever agy sharing mode another test
   // left in the module cache.
-  setProviderSharingConfig({ agy: 'isolated' });
 
   // Neutral sources, in the same places the production resolvers look.
   fs.mkdirSync(path.join(tempRoot, '.claude'), { recursive: true });
@@ -118,7 +112,6 @@ async function withHarness(runTest: (h: Harness) => void | Promise<void>): Promi
     });
   } finally {
     invalidateProvisioned(userId);
-    _resetProviderSharingCache();
     closeConnection();
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;

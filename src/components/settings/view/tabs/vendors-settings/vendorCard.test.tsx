@@ -83,7 +83,6 @@ describe('«يغذّي:» badge states', () => {
     ['kept_on_subscription', 'باقٍ على الاشتراك'],
     ['mode_unset', 'لم يُختر نمط الربط'],
     ['login_present', 'داخل بتسجيل دخول'],
-    ['shared_scope_refused', 'مشترك مع الفريق'],
   ];
 
   it.each(STATES)('renders %s as «%s» beside the harness name', async (state, label) => {

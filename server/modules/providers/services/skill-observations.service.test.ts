@@ -14,10 +14,8 @@ test('real session projections: ACL, canonical owner/provider, children, paginat
   await fs.writeFile(process.env.DATABASE_PATH, '');
   const db = await import('@/modules/database/index.js');
   const { readSessionSkills, readProjectSkills } = await import('./skill-observations.service.js');
-  const sharing = await import('@/services/provider-sharing.js');
   db.closeConnection();
   await db.initializeDatabase();
-  sharing._resetProviderSharingCache();
   try {
     const alice = db.userDb.createUser('skill-alice', 'hash-a', 'user').id;
     const bob = db.userDb.createUser('skill-bob', 'hash-b', 'user').id;

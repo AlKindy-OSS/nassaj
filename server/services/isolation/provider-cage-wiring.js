@@ -22,8 +22,8 @@
  * caged turn) while re-binding the launching provider's own by-design-shared
  * stores + toolchain caches read-write (GAP 2: ro shared stores silently
  * dropped transcripts / EROFS-broke hermes). See cageMountPlan for the
- * entitlement rules (admin-policy shared mode ONLY — the forgeable isolated
- * owner-reuse-symlink exemption was removed, see the forgery-closure note below).
+ * rules (no credential is ever waived: every launch is isolated, ADR-152 A1 — the
+ * forgeable owner-reuse-symlink exemption was removed, see the note below).
  *
  * T-898 pre-go-live hardening (2026-07-15, second qa-critic pass): the GAP-1
  * sweep is widened past the provider-keyed set to the WHOLE shared-$HOME secret
@@ -44,15 +44,11 @@
  * next launch's fresh cageMountPlan hands it the LIVE operator credential rw (the
  * qa-critic extracted 509 B of OAuth + gained a rotate/corrupt primitive on the
  * fleet-shared credential = re-opened GAP 1). That exemption is REMOVED: the
- * shared-credential mask set is authoritative by realpath and is only ever waived
- * for the launching provider's OWN credential in admin-policy SHARED mode — a
- * sharing-DB decision, never a surface the cage can write. An isolated user's own
- * credential lives INSIDE its per-user tree (a real path that is a strict descendant
- * of ~/.nassaj-users/<id>) and stays writable through the tree rebind, untouched.
- *
- * The isProviderIsolated import is read lazily per caged launch only (flag-on
- * path); provider-sharing/appConfigDb open their connection on first use, so
- * merely importing this module still touches no database.
+ * shared-credential mask set is authoritative by realpath and is never waived —
+ * every provider launch is isolated (ADR-152 A1: the install-wide sharing policy
+ * that once waived the launching provider's own credential is retired). A user's
+ * own credential lives INSIDE its per-user tree (a real path that is a strict
+ * descendant of ~/.nassaj-users/<id>) and stays writable through the tree rebind.
  *
  * NOTE: resolve-provider-env.js (the natural env seam) is intentionally NOT
  * involved — it is under parallel work (handoff 2026-07-14); this module
@@ -63,8 +59,6 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
-import { isProviderIsolated } from '../provider-sharing.js';
 
 import { buildCagedLaunch, cageEnabled } from './provider-cage.js';
 
@@ -298,38 +292,27 @@ export const CAGE_SHARED_CREDENTIALS = Object.freeze({
  * own store is re-bound; every other provider's store stays read-only and the
  * per-user trees stay hidden.
  *
- * Shape note — isolated vs shared launches differ: an ISOLATED provider writes
- * its private state into the user's own re-bound tree and only needs the
- * narrow, by-design-shared store (e.g. ~/.claude/projects, reached through the
- * per-user `projects` symlink provisionUserDirs creates). A SHARED-mode
- * provider (admin policy, e.g. agy/opencode today) runs directly on the
- * operator tree and needs its whole state dir writable, exactly as it is
- * without the cage.
+ * Every launch is isolated (ADR-152 A1): the provider writes its private state
+ * into the user's own re-bound tree and only needs the narrow, by-design-shared
+ * store (e.g. ~/.claude/projects, reached through the per-user `projects`
+ * symlink provisionUserDirs creates).
  *
  * @param {string} launching normalized provider name
- * @param {boolean} isolated isProviderIsolated(launching)
  * @returns {string[]} homedir-relative paths
  */
-function launchingProviderWriteStores(launching, isolated) {
+function launchingProviderWriteStores(launching) {
   switch (launching) {
     case 'claude':
-      return isolated
-        ? [path.join('.claude', 'projects')]
-        : ['.claude', '.claude.json'];
+      return [path.join('.claude', 'projects')];
     case 'agy':
-      return isolated
-        ? [path.join('.gemini', 'antigravity-cli', 'brain')]
-        : [path.join('.gemini', 'antigravity-cli')];
+      return [path.join('.gemini', 'antigravity-cli', 'brain')];
     case 'opencode':
-      return isolated
-        ? []
-        : [path.join('.local', 'share', 'opencode'), path.join('.local', 'state', 'opencode')];
+      return [];
     case 'kimi':
-      // Kimi agent (SL-6) runs isolated per-user: KIMI_CODE_HOME points into the
-      // caller's own tree (rebound rw via usersRoot in buildCagedLaunch), so
-      // there is no operator-level shared store to re-bind — only the toolchain
-      // caches (added unconditionally by the caller) are needed. No shared-mode
-      // form exists (the agent is always per-user), so both branches are empty.
+      // Kimi agent (SL-6): KIMI_CODE_HOME points into the caller's own tree
+      // (rebound rw via usersRoot in buildCagedLaunch), so there is no
+      // operator-level store to re-bind — only the toolchain caches (added
+      // unconditionally by the caller) are needed.
       return [];
     default:
       // cursor + any future provider: no known shared store to re-bind.
@@ -379,15 +362,9 @@ function toRealMountPath(p, realpathSync) {
  *   maskFiles  (GAP 1) — EVERY shared-$HOME provider credential that exists is
  *   blanked with a /dev/null file-bind, keyed by REAL path (toRealMountPath) so no
  *   symlink alias escapes the mask. This shared-credential mask set is
- *   AUTHORITATIVE: a credential real path is only ever pulled OUT of the mask (into
- *   a read-write bind) for the launching provider's OWN credential AND ONLY in
- *   admin-policy SHARED mode (isProviderIsolated false) — the spawn legitimately
- *   runs on the operator credential, that IS the sharing policy, so it stays
- *   readable + rw (a refresh that cannot persist a rotated token breaks auth). That
- *   waiver is read from the sharing DB, NEVER from on-disk state.
- *
- *   An ISOLATED launch earns NO credential waiver: its operator credential is
- *   ALWAYS masked. The user runs on its own per-user tree (CLAUDE_CONFIG_DIR/
+ *   AUTHORITATIVE: no credential real path is ever pulled OUT of the mask. Every
+ *   launch is isolated (ADR-152 A1), so no launch earns a credential waiver: the
+ *   operator credential is ALWAYS masked. The user runs on its own per-user tree (CLAUDE_CONFIG_DIR/
  *   CODEX_HOME), whose real credential file lives INSIDE ~/.nassaj-users/<id>/ — a
  *   strict descendant of the user tree, already writable through the per-user tree
  *   rebind in buildCagedLaunch. The operator credential's real path is never a
@@ -397,8 +374,8 @@ function toRealMountPath(p, realpathSync) {
  *   forgeable (qa-critic 2026-07-15 disk PoC).
  *
  *   writePaths (GAP 2) — the launching provider's by-design-shared store(s) + the
- *   toolchain caches, re-bound read-write (see launchingProviderWriteStores), plus
- *   the shared-mode exempt credential, MINUS any candidate whose real path collides
+ *   toolchain caches, re-bound read-write (see launchingProviderWriteStores),
+ *   MINUS any candidate whose real path collides
  *   with a masked shared credential (a masked real path must NEVER be handed out
  *   read-write — belt to the "masks mounted last" suspenders in buildCagedLaunch).
  *
@@ -409,24 +386,21 @@ function toRealMountPath(p, realpathSync) {
  *
  * @param {{ provider: string, userId?: string|number|null }} spec
  * @param {{ homedir?: () => string, existsSync?: (p: string) => boolean,
- *           realpathSync?: (p: string) => string,
- *           isProviderIsolated?: (provider: string) => boolean }} [deps] test seam
+ *           realpathSync?: (p: string) => string }} [deps] test seam
  * @returns {{ writePaths: string[], maskFiles: string[] }}
  */
 export function cageMountPlan({ provider, userId }, deps = {}) {
   const homedir = deps.homedir ?? os.homedir;
   const existsSync = deps.existsSync ?? fs.existsSync;
   const realpathSync = deps.realpathSync ?? fs.realpathSync;
-  const providerIsolated = deps.isProviderIsolated ?? isProviderIsolated;
 
   const home = homedir();
   const launching = String(provider ?? '').trim().toLowerCase();
-  const isolatedLaunch = providerIsolated(launching);
   const real = (abs) => toRealMountPath(abs, realpathSync);
 
   // (1) AUTHORITATIVE shared-credential mask set: every shared-$HOME provider
   // credential that exists, by real path. This set always wins on overlap; it is
-  // only ever REDUCED by the shared-mode waiver below, never overridden by a bind.
+  // never reduced and never overridden by a bind.
   const sharedCredRealpaths = new Set();
   for (const relFiles of Object.values(CAGE_SHARED_CREDENTIALS)) {
     for (const rel of relFiles) {
@@ -435,34 +409,19 @@ export function cageMountPlan({ provider, userId }, deps = {}) {
     }
   }
 
-  // (2) The launching provider's OWN credential is waived from the mask (readable +
-  // rw) ONLY in admin-policy SHARED mode — a DB decision, never on-disk state. An
-  // ISOLATED launch earns no waiver (its operator credential stays masked; it runs
-  // on its per-user tree, whose own credential is a strict descendant, rw via the
-  // tree rebind). This is what closes the forgeable owner-reuse-symlink path.
-  const writeWaivedCreds = new Set();
-  if (!isolatedLaunch) {
-    for (const rel of CAGE_SHARED_CREDENTIALS[launching] ?? []) {
-      const abs = path.join(home, rel);
-      if (existsSync(abs)) writeWaivedCreds.add(real(abs));
-    }
-  }
+  const maskSet = sharedCredRealpaths;
 
-  const maskSet = new Set([...sharedCredRealpaths].filter((rp) => !writeWaivedCreds.has(rp)));
-
-  // (3) writePaths: by-design-shared stores + toolchain caches, each existsSync-
+  // (2) writePaths: by-design-shared stores + toolchain caches, each existsSync-
   // filtered and realpath-normalized, MINUS any whose real path is a masked shared
-  // credential; then the shared-mode waived credential(s). A masked real path can
-  // never enter a write bind.
+  // credential. A masked real path can never enter a write bind.
   const writePaths = new Set();
-  for (const rel of [...launchingProviderWriteStores(launching, isolatedLaunch), ...CAGE_TOOLCHAIN_CACHES]) {
+  for (const rel of [...launchingProviderWriteStores(launching), ...CAGE_TOOLCHAIN_CACHES]) {
     const abs = path.join(home, rel);
     if (!existsSync(abs)) continue;
     const rp = real(abs);
     if (maskSet.has(rp)) continue;
     writePaths.add(rp);
   }
-  for (const rp of writeWaivedCreds) writePaths.add(rp);
 
   return { writePaths: [...writePaths], maskFiles: [...maskSet] };
 }
@@ -491,7 +450,6 @@ export function cageMountPlan({ provider, userId }, deps = {}) {
  * @param {{ homedir?: () => string, existsSync?: (p: string) => boolean,
  *           lstatSync?: typeof fs.lstatSync, realpathSync?: (p: string) => string,
  *           readdirSync?: (p: string) => string[],
- *           isProviderIsolated?: (provider: string) => boolean,
  *           resolveBwrapPath?: () => (string|null) }} [deps] test seam
  * @returns {{ cmd: string, args: string[] }}
  */
@@ -563,7 +521,6 @@ export function resolveCagedLaunch({ userId, provider, mode, cmd, args = [], cwd
  *           existsSync?: (p: string) => boolean,
  *           lstatSync?: typeof fs.lstatSync, realpathSync?: (p: string) => string,
  *           readdirSync?: (p: string) => string[],
- *           isProviderIsolated?: (provider: string) => boolean,
  *           resolveBwrapPath?: () => (string|null) }} [deps] test seam
  * @returns {((spec: { command: string, args: string[], cwd?: string,
  *            env?: Record<string, string|undefined>, signal?: AbortSignal }) =>

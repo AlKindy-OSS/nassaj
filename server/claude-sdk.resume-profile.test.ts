@@ -43,13 +43,20 @@ mock.module('./services/isolation/resolve-claude-run-profile.js', {
   },
 });
 
+// ADR-152 A1 §3.4: a chat run needs a signed-in member, so the socket carries
+// member 1 and the schema it is recorded against must exist.
+{
+  const memberDb = await import('@/modules/database/index.js');
+  await memberDb.initializeDatabase();
+  if (!memberDb.userDb.getUserById(1)) memberDb.userDb.createUser('member-1', 'hash', 'user');
+}
 const sdk = await import('./claude-sdk.js') as unknown as {
   queryClaudeSDK: (prompt: string, options: Record<string, unknown>, ws: unknown) => Promise<unknown>;
 };
 
 function writer() {
   const sent: Record<string, unknown>[] = [];
-  return { sent, userId: null, ws: { readyState: 1 }, send: (payload: Record<string, unknown>) => sent.push(payload) };
+  return { sent, userId: 1, ws: { readyState: 1 }, send: (payload: Record<string, unknown>) => sent.push(payload) };
 }
 
 test('SDK resume profile refuses unknown/ambiguous/read failure before Agent SDK query', async () => {

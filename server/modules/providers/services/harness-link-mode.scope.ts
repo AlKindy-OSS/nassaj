@@ -11,7 +11,6 @@ import {
   readLinkModeRecordState,
 } from '@/services/isolation/provider-secrets-store.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
-import { isProviderIsolated } from '@/services/provider-sharing.js';
 
 import { readHarnessCredentialInventory, type LinkHarness } from './harness-credential-inventory.js';
 import { normalizeLinkModeRecord } from './harness-link-mode.policy.js';
@@ -24,13 +23,13 @@ import {
 } from './harness-link-mode.service.js';
 
 /**
- * G1 H-1: on a SHARED harness every member's writer lands in the operator's
- * ~/.claude or ~/.codex, so the link mode, its lock and its grantee count
- * belong to the operator tree, not to whoever is calling.
+ * G1 H-1: the tree a member's writer lands in, which owns the link mode, its lock
+ * and its grantee count. Every harness is isolated (ADR-152 A1), so it is the
+ * caller's own tree; only an anonymous caller maps to the operator tree.
  */
-function treeOwner(userId: string | number | null | undefined, harness: LinkHarness): string | number | null {
+function treeOwner(userId: string | number | null | undefined): string | number | null {
   if (userId === null || userId === undefined || userId === '') return null;
-  return isProviderIsolated(harness) ? userId : null;
+  return userId;
 }
 
 /** A run honours credential grants (T-1675): a grantee runs on the grantor's tree. */

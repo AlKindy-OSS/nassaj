@@ -21,23 +21,11 @@ import {
   type AmountBearingSubscriptionRow,
 } from './subscription-visibility.js';
 
-/** The live policy at the time of the decision: 4 shared, the rest isolated. */
-const LIVE_POLICY: Record<string, 'shared' | 'isolated'> = {
-  claude: 'isolated',
-  antigravity: 'isolated',
-  kimi: 'isolated',
-  deepseek: 'isolated',
-  glm: 'isolated',
-  codex: 'shared',
-  agy: 'shared',
-  cursor: 'shared',
-  opencode: 'shared',
-};
-const isProviderIsolated = (p: string): boolean => LIVE_POLICY[p] === 'isolated';
-// The REAL vendor→harness expansion, not a stub: the bug this suite now guards
-// lived precisely in the gap between the two key spaces, so faking the mapping
-// would reopen it.
-const deps = { isProviderIsolated, vendorHarnesses };
+// Every harness in KNOWN_PROVIDERS is isolated (ADR-152 A1); a row is redacted
+// for a member only when a harness outside that list (unscoped) feeds it.
+// The REAL vendor→harness expansion, not a stub: the bug this suite guards lived
+// precisely in the gap between the two key spaces, so faking it would reopen it.
+const deps = { vendorHarnesses };
 
 function row(provider: string, over: Partial<AmountBearingSubscriptionRow> = {}): AmountBearingSubscriptionRow {
   return {
@@ -71,9 +59,9 @@ describe('applySubscriptionAmountVisibility — owner/admin see everything', () 
 });
 
 describe('applySubscriptionAmountVisibility — a member cannot read the team total', () => {
-  it('redacts every vendor fed by a SHARED harness', () => {
-    // openai←codex, opencode-zen←opencode, google←antigravity+agy.
-    for (const vendor of ['openai', 'opencode-zen', 'google']) {
+  it('redacts every vendor fed by a harness outside the isolation seam', () => {
+    // opencode-zen←(none), google←antigravity+agy, nous←hermes.
+    for (const vendor of ['opencode-zen', 'google', 'nous']) {
       const [out] = applySubscriptionAmountVisibility([row(vendor)], 'user', deps);
       assert.equal(out.available, false, `${vendor} must not be marked available`);
       assert.equal(out.reason, SHARED_AMOUNT_RESTRICTED_REASON);
@@ -88,38 +76,38 @@ describe('applySubscriptionAmountVisibility — a member cannot read the team to
 
   it('leaves vendors whose harnesses are ALL isolated — the reader is the holder', () => {
     // The regression that live verification caught: `anthropic` and `moonshot`
-    // are vendor keys absent from the sharing policy, so a direct key lookup
-    // redacted a member's OWN Claude/Kimi spend.
-    for (const vendor of ['anthropic', 'moonshot', 'glm', 'deepseek']) {
+    // are vendor keys, not harness keys, so a direct key lookup redacted a
+    // member's OWN Claude/Kimi spend. openai←codex is isolated too (ADR-152 A1).
+    for (const vendor of ['anthropic', 'openai', 'moonshot', 'glm', 'deepseek']) {
       const input = row(vendor);
       const [out] = applySubscriptionAmountVisibility([input], 'user', deps);
       assert.deepEqual(out, input, `${vendor}: the member's own total must still show`);
     }
   });
 
-  it('redacts `google` because one of its harnesses is shared, though antigravity is isolated', () => {
+  it('redacts `google` because antigravity is outside the seam, though agy is isolated', () => {
     // The many-to-one case stated explicitly: a mixed row must follow its most
     // permissive contributor, not its most restrictive.
     assert.ok(vendorHarnesses('google').includes('antigravity'), 'antigravity feeds the google row');
     assert.ok(vendorHarnesses('google').includes('agy'), 'agy feeds it too');
     const [out] = applySubscriptionAmountVisibility([row('google')], 'user', deps);
-    assert.equal(out.available, false, 'one shared contributor must redact the whole row');
+    assert.equal(out.available, false, 'one unscoped contributor must redact the whole row');
   });
 
-  it('redacts a shared row while preserving its identity/cycle fields', () => {
+  it('redacts an unscoped row while preserving its identity/cycle fields', () => {
     // The card still has to render the row — it just may not show a figure.
-    const input = { ...row('openai'), displayName: 'OpenAI', anchorDay: 11 } as AmountBearingSubscriptionRow & {
+    const input = { ...row('google'), displayName: 'Google', anchorDay: 11 } as AmountBearingSubscriptionRow & {
       displayName: string;
       anchorDay: number;
     };
     const [out] = applySubscriptionAmountVisibility([input], 'user', deps);
-    assert.equal(out.displayName, 'OpenAI');
+    assert.equal(out.displayName, 'Google');
     assert.equal(out.anchorDay, 11);
-    assert.equal(out.provider, 'openai');
+    assert.equal(out.provider, 'google');
   });
 
   it('does not mutate the caller’s input rows', () => {
-    const input = row('openai');
+    const input = row('google');
     applySubscriptionAmountVisibility([input], 'user', deps);
     assert.equal(input.totalUsd, 137.42, 'redaction must be a copy, not an in-place edit');
     assert.equal(input.available, true);
@@ -129,19 +117,19 @@ describe('applySubscriptionAmountVisibility — a member cannot read the team to
 describe('applySubscriptionAmountVisibility — fail-closed on anything unclear', () => {
   it('treats an unknown role as unprivileged', () => {
     for (const role of ['user', 'viewer', 'ADMIN', 'Owner', '', 'root']) {
-      const [out] = applySubscriptionAmountVisibility([row('openai')], role, deps);
+      const [out] = applySubscriptionAmountVisibility([row('google')], role, deps);
       assert.equal(out.available, false, `role ${JSON.stringify(role)} must not unlock the amount`);
     }
   });
 
   it('treats a missing role as unprivileged', () => {
     for (const role of [null, undefined]) {
-      const [out] = applySubscriptionAmountVisibility([row('openai')], role, deps);
+      const [out] = applySubscriptionAmountVisibility([row('google')], role, deps);
       assert.equal(out.available, false, 'an unresolved role must redact, never leak');
     }
   });
 
-  it('treats `nous`/hermes as shared — its harness is absent from the policy', () => {
+  it('treats `nous`/hermes as unscoped — its harness is absent from KNOWN_PROVIDERS', () => {
     assert.deepEqual(vendorHarnesses('nous'), ['hermes']);
     const [out] = applySubscriptionAmountVisibility([row('nous')], 'user', deps);
     assert.equal(out.available, false, 'unknown sharing must fail closed (T-1201)');
@@ -153,18 +141,19 @@ describe('applySubscriptionAmountVisibility — fail-closed on anything unclear'
     assert.equal(out.available, false, 'a key with no known harness must not be trusted');
   });
 
-  it('expands the vendor key rather than looking it up in the policy directly', () => {
+  it('expands the vendor key rather than looking it up in the harness list directly', () => {
     // Guards the exact defect live verification caught: a direct lookup of
     // `anthropic` finds nothing and wrongly redacts the member's own spend.
     const seen: string[] = [];
-    applySubscriptionAmountVisibility([row('anthropic')], 'user', {
-      isProviderIsolated: (p) => {
-        seen.push(p);
-        return isProviderIsolated(p);
+    const input = row('anthropic');
+    const [out] = applySubscriptionAmountVisibility([input], 'user', {
+      vendorHarnesses: (vendor) => {
+        seen.push(vendor);
+        return vendorHarnesses(vendor);
       },
-      vendorHarnesses,
     });
-    assert.deepEqual(seen, ['claude'], 'anthropic must be resolved to its harness, not queried raw');
+    assert.deepEqual(seen, ['anthropic'], 'the row key is expanded to its harnesses');
+    assert.deepEqual(out, input, 'anthropic resolves to claude, which is isolated');
   });
 
   it('returns a new array and tolerates an empty set', () => {

@@ -69,7 +69,7 @@ export type VendorKeyAuditAction =
 
 export type VendorKeyMigrationDeps = {
   isEnabled(): boolean;
-  /** The member's own credential file per harness; shared trees are never inventoried. */
+  /** The member's own credential file per harness. */
   locateHarnessFiles(userId: string | number): HarnessFileLocation[];
   fingerprint(value: string, keyVersion: number): string;
   keyVersion: number;
@@ -98,7 +98,7 @@ export type VendorMigrationView = { vendorId: string; outcome: VendorMigrationOu
 
 export type HarnessFileView = {
   harness: ProjectionHarness;
-  scope: 'own' | 'shared';
+  scope: 'own';
   state?: 'absent' | 'unreadable' | 'ok' | 'unparseable';
 };
 
@@ -201,7 +201,6 @@ function viewOf(source: KeySource, values: readonly string[]): KeySourceView {
 }
 
 function harnessView(file: HarnessFileRead): HarnessFileView {
-  if (file.scope === 'shared') return { harness: file.harness, scope: 'shared' };
   const state = file.state === 'ok' && file.json === null ? 'unparseable' : file.state;
   return { harness: file.harness, scope: 'own', state };
 }
@@ -345,7 +344,7 @@ function applyPlan(ctx: RunContext, vendor: MigrationVendor, plan: VendorPlan): 
 function takeBackups(ctx: RunContext): ProjectionHarness[] {
   const taken: ProjectionHarness[] = [];
   for (const file of ctx.files) {
-    if (file.scope === 'shared' || file.state === 'unreadable') continue;
+    if (file.state === 'unreadable') continue;
     const bytes = file.state === 'ok' ? file.bytes : null;
     if (store.putHarnessBackupIfAbsent(ctx.userId, file.harness, bytes, ctx.nowIso)) taken.push(file.harness);
   }
@@ -372,7 +371,7 @@ function ledgerVerifies(ctx: RunContext, files: readonly HarnessFileRead[], vend
 function verificationPasses(ctx: RunContext, plans: readonly VendorPlan[]): boolean {
   const blocking: readonly VendorMigrationOutcome[] = ['conflict', 'ledger_unreadable', 'key_unreadable'];
   if (plans.some((plan) => blocking.includes(plan.outcome))) return false;
-  const own = ctx.files.filter((file) => file.scope === 'own');
+  const own = ctx.files;
   if (own.length === 0 || own.some((file) => file.state === 'unreadable')) return false;
   const intact = own.every((file) => store.readHarnessBackup(ctx.userId, file.harness)?.intact === true);
   if (!intact) return false;
@@ -486,7 +485,7 @@ export type RestoreOptions = {
  * only; with the flag off a stale projection only makes the value read as
  * foreign, which is the safe side).
  */
-function forgetProjections(deps: VendorKeyMigrationDeps, userId: string | number, location: HarnessFileLocation & { scope: 'own' }) {
+function forgetProjections(deps: VendorKeyMigrationDeps, userId: string | number, location: HarnessFileLocation) {
   for (const vendor of MIGRATION_VENDORS.filter((entry) => entry.files.some((file) => file.harness === location.harness))) {
     store.dropVendorLedgerHarness(userId, vendor.vendorId, location.harness);
   }
@@ -505,8 +504,8 @@ function restoreLocked(deps: VendorKeyMigrationDeps, userId: string | number, ha
   const backup = store.readHarnessBackup(userId, harness);
   if (!backup?.intact) throw migrationError('VENDOR_BACKUP_UNAVAILABLE', 'No intact backup exists for this harness.');
   const location = deps.locateHarnessFiles(userId).find((entry) => entry.harness === harness);
-  if (!location || location.scope !== 'own') {
-    throw migrationError('VENDOR_BACKUP_SHARED_SCOPE', 'This harness does not use your own credential files.');
+  if (!location) {
+    throw migrationError('VENDOR_BACKUP_UNAVAILABLE', 'No credential file is known for this harness.');
   }
   const { skipped } = restoreHarnessFile(harness, location.path, backup, mode);
   forgetProjections(deps, userId, location);

@@ -34,9 +34,6 @@ assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $
 const { initializeDatabase, closeConnection, sessionsDb, userDb } = await import(
   '@/modules/database/index.js'
 );
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import(
-  '@/services/provider-sharing.js'
-);
 const { operatorKimiHome, resolveKimiHomeForUser, kimiHomeForSessionFile } = await import(
   './kimi-agent-home.js'
 );
@@ -98,10 +95,8 @@ describe('parse/primary helpers (pure)', () => {
 });
 
 describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () => {
-  // kimi 'shared' → resolveKimiHomes collapses to the operator ~/.kimi, so the
-  // fixtures live in a single tree.
-  _resetProviderSharingCache();
-  setProviderSharingConfig({ kimi: 'shared' });
+  // The operator ~/.kimi is always one of the scanned homes, so the fixtures
+  // live in that single tree.
   const HOME = operatorKimiHome();
 
   it('indexes a single-agent conversation as ONE row (keyed on <id>)', async () => {
@@ -195,8 +190,6 @@ describe('Kimi agent synchronizer — indexing + subagent folding (B-172)', () =
 
 describe('Kimi agent synchronizer — per-user isolation (no B-152 gap)', () => {
   it('indexes BOTH isolated users’ trees and resolves each file to its OWN home', async () => {
-    _resetProviderSharingCache();
-    setProviderSharingConfig({ kimi: 'isolated' });
 
     const userA = userDb.createUser(`kimi_a_${Date.now()}`, 'hash', 'user').id;
     const userB = userDb.createUser(`kimi_b_${Date.now()}`, 'hash', 'user').id;

@@ -23,6 +23,8 @@ import { fileURLToPath } from 'node:url';
 
 import { readClaudeInventoryFromEnv } from '@/modules/providers/services/harness-credential-inventory.js';
 
+import { INHERITED_CREDENTIAL_ENV } from '@/services/isolation/resolve-provider-env.js';
+
 import { ClaudeProviderAuth } from './claude-auth.provider.js';
 
 const HARNESS = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
@@ -129,7 +131,14 @@ for (const row of ROWS) {
     assert.equal(wireWinner(sb, row), row.expect, 'measured wire winner');
     const verdicts = await nassajVerdicts(sb, row);
     const expectedMode = row.expect === 'oauth' ? 'subscription' : 'api_key';
-    assert.equal(verdicts.status, expectedMode, 'auth provider agrees with the wire');
+    if (row.env) {
+      // ADR-152 A1 §3.5: a credential in the SERVER env never reaches a child (the
+      // resolver pre-strips it), so the status reader no longer counts it; the wire
+      // row stays as the CLI's own precedence record.
+      for (const name of Object.keys(row.env)) assert.ok(INHERITED_CREDENTIAL_ENV.includes(name), `${name} is stripped`);
+    } else {
+      assert.equal(verdicts.status, expectedMode, 'auth provider agrees with the wire');
+    }
     assert.equal(verdicts.inventory, expectedMode, 'link-mode inventory agrees with the wire');
   });
 }

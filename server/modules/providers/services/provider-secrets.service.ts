@@ -104,7 +104,7 @@ function getQwenProfileForUser(
   userId: string | number | null | undefined,
 ): QwenCredentialProfile | null {
   if (userId === null || userId === undefined) return null;
-  const resolved = resolveSlotKey(userId, 'qwen', { sharedFallback: false });
+  const resolved = resolveSlotKey(userId, 'qwen');
   return resolved?.key ? parseQwenProfile(resolved.key) : null;
 }
 
@@ -148,7 +148,7 @@ function readVendorRedactionSecrets(userId: string | number | null | undefined):
   const secrets: string[] = [];
   for (const vendor of VENDOR_SECRET_PROVIDERS as readonly VendorSecretProviderId[]) {
     try {
-      const raw = resolveSlotKey(userId, vendor, { sharedFallback: false })?.key;
+      const raw = resolveSlotKey(userId, vendor)?.key;
       if (typeof raw !== 'string' || raw === '') continue;
       secrets.push(vendor === 'qwen' ? parseQwenProfile(raw)?.key ?? raw : raw);
     } catch {
@@ -278,15 +278,13 @@ export const providerSecretsService = {
     provider: string,
   ): ProviderSecretStatus {
     const vendor = assertVendorProvider(provider);
-    // `sharedFallback: false` preserved verbatim: `configured` has always meant
-    // "this scope holds a key", and today an org key does not make a member's
-    // slot read as configured. §5 of the design doc tracks that gap (a member on
-    // the org key sees `false`) as a wave-C disclosure fix, not a wave-A one.
+    // `configured` means "this member's own slot holds a key"; the install-wide
+    // slot is inert (ADR-152 A1 §3.8) and never makes a member configured.
     return {
       provider: vendor,
       configured: vendor === 'qwen'
         ? getQwenProfileForUser(userId) !== null
-        : resolveSlotKey(userId, vendor, { sharedFallback: false }) !== null,
+        : resolveSlotKey(userId, vendor) !== null,
     };
   },
 
@@ -324,7 +322,7 @@ export const providerSecretsService = {
     slot: 'kimi' | 'deepseek',
   ): string | null {
     if (userId === null || userId === undefined || userId === '') return null;
-    return resolveSlotKey(userId, slot, { sharedFallback: false })?.key ?? null;
+    return resolveSlotKey(userId, slot)?.key ?? null;
   },
 
   /** Returns the parsed personal Qwen profile for server-side runtime use only. */

@@ -4,9 +4,14 @@
  * Proves the Codex API-key writer drives `codex login --with-api-key` with the
  * key on STDIN ONLY (never argv — the /proc/cmdline leak), returns a clean
  * generic error on CLI failure, and deletes only the OPENAI_API_KEY field from
- * auth.json (OAuth tokens preserved). spawn is injected so no real CLI runs;
- * CODEX_HOME is pinned to a sandbox. Runner: node:test + node:assert.
+ * auth.json (OAuth tokens preserved). spawn is injected so no real CLI runs.
+ * Every write lands in the requester's own CODEX_HOME (~/.nassaj-users/<id>/.codex,
+ * ADR-152 A1), never the operator's. Runner: node:test + node:assert.
  */
+
+// B-1771: FIRST import. Run ad hoc with the operator HOME, this test wrote into
+// the real home (member tree or provider state); the sandbox moves HOME first.
+import '@/shared/__tests__/sandbox-home.js';
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -25,11 +30,15 @@ const ORIGINAL_CODEX_HOME = process.env.CODEX_HOME;
 process.env.CODEX_HOME = sandbox;
 
 const { CodexCredentialsWriter } = await import('./codex-credentials.writer.js');
+const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 // T-1872: `codex login` runs the machine release (a fixture here), never PATH.
 const codexMachine = createCodexMachineFixture(path.join(sandbox, 'codex-machine'));
 process.env.CODEX_PATH = codexMachine.launcher;
 
-const authPath = path.join(sandbox, 'auth.json');
+// The requester's own tree: the operator CODEX_HOME above must stay untouched.
+const ownCodexHome = userConfigDir(principal.id, '.codex');
+fs.mkdirSync(ownCodexHome, { recursive: true });
+const authPath = path.join(ownCodexHome, 'auth.json');
 const KEY = 'sk-codex-secret-DO-NOT-LEAK';
 
 type SpawnCall = { cmd: string; args: string[]; opts: Record<string, unknown>; stdin: string[] };
@@ -72,6 +81,7 @@ beforeEach(() => {
 });
 
 after(() => {
+  assert.equal(fs.existsSync(path.join(sandbox, 'auth.json')), false, 'operator CODEX_HOME was written');
   if (ORIGINAL_CODEX_HOME === undefined) delete process.env.CODEX_HOME;
   else process.env.CODEX_HOME = ORIGINAL_CODEX_HOME;
   fs.rmSync(sandbox, { recursive: true, force: true });
@@ -142,7 +152,7 @@ test('deleteApiKey removes only OPENAI_API_KEY, preserving OAuth tokens', async 
   }));
   const writer = new CodexCredentialsWriter();
 
-  const result = await writer.deleteApiKey(null);
+  const result = await writer.deleteApiKey(principal.id);
   assert.deepEqual(result, { provider: 'codex', configured: false });
   const auth = JSON.parse(fs.readFileSync(authPath, 'utf8'));
   assert.equal('OPENAI_API_KEY' in auth, false, 'api key removed');
@@ -151,9 +161,9 @@ test('deleteApiKey removes only OPENAI_API_KEY, preserving OAuth tokens', async 
 
 test('isConfigured reflects the OPENAI_API_KEY presence in auth.json', async () => {
   const writer = new CodexCredentialsWriter();
-  assert.equal(await writer.isConfigured(null), false);
+  assert.equal(await writer.isConfigured(principal.id), false);
   fs.writeFileSync(authPath, JSON.stringify({ OPENAI_API_KEY: KEY }));
-  assert.equal(await writer.isConfigured(null), true);
+  assert.equal(await writer.isConfigured(principal.id), true);
 });
 
 // ---------------------------------------------------------------------------

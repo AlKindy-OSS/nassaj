@@ -62,18 +62,18 @@ export const displayMaskRepositoriesReady: Promise<void> = Promise.all([
   import('@/modules/database/repositories/app-config.js'),
   import('@/modules/database/repositories/users.js'),
   import('@/modules/providers/services/provider-secrets.service.js'),
-  import('@/services/isolation/provider-slot-key.js'),
-]).then(([{ appConfigDb }, { userDb }, { providerSecretsService }, { resolveSlotKey }]) => {
+  import('@/services/isolation/provider-secrets-store.js'),
+]).then(([{ appConfigDb }, { userDb }, { providerSecretsService }, { getSharedVendorKey }]) => {
   repositories = {
     readSetting: (key) => appConfigDb.get(key),
     allUserIds: () => userDb.listUsers().map((row) => row.id),
     vendorLiterals: (userId) => providerSecretsService.getVendorRedactionSecrets(userId),
-    // The organisation-wide (shared) vendor slots: no member owns them, every run may print them.
-    // Qwen has no shared slot (ADR-101), so it is not listed. Read through the one
-    // door into the shared slot (T-1260): no identity means the shared slot only.
+    // The install-wide vendor slots: inert since ADR-152 A1 §3.8 (no run spends
+    // them), still masked because text written before retirement may hold them.
+    // Qwen has no install-wide slot (ADR-101). A redaction read, never a spend.
     sharedVendorLiterals: () => (['kimi', 'deepseek', 'glm'] as const).flatMap((provider) => {
       try {
-        const key = resolveSlotKey(null, provider, { sharedFallback: true })?.key;
+        const key = getSharedVendorKey(provider);
         return typeof key === 'string' && key ? [key] : [];
       } catch {
         return [];

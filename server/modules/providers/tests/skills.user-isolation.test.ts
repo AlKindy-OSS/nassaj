@@ -46,7 +46,11 @@ const resolveProviderEnvStandIn = (
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv => {
   const env = { ...baseEnv };
-  if (userId === null || userId === undefined || userId === '' || provider !== 'codex') {
+  // ADR-152 A1 §3.4: mirrors the real seam — no member, no environment.
+  if (userId === null || userId === undefined || userId === '') {
+    throw Object.assign(new Error('CREDENTIAL_ACTOR_REQUIRED'), { code: 'CREDENTIAL_ACTOR_REQUIRED', statusCode: 500 });
+  }
+  if (provider !== 'codex') {
     delete env.CODEX_HOME;
     return env;
   }
@@ -125,14 +129,14 @@ test(
         'the resolved sourcePath must sit inside the caller\'s isolated codex home',
       );
 
-      // Anonymous/system callers (no userId) keep the exact pre-B-153 behavior:
-      // the operator home. This is the regression guard for the fallback path.
+      // ADR-152 A1 §3.4: a caller with no member lists no Codex home at all —
+      // never the operator's ~/.codex, and never a member's.
       const shared = await providerSkillsService.listProviderSkills('codex', { workspacePath });
       const sharedNames = shared.map((skill) => skill.name);
 
       assert.ok(
-        sharedNames.includes('operator-system-skill'),
-        `anonymous caller must still see the operator home, got: ${sharedNames.join(', ')}`,
+        !sharedNames.includes('operator-system-skill'),
+        `anonymous caller must not read the operator Codex home, got: ${sharedNames.join(', ')}`,
       );
       assert.ok(
         !sharedNames.includes('isolated-system-skill'),

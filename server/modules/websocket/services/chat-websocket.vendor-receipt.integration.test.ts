@@ -42,7 +42,7 @@ function harness(options: { enabled: boolean; supported: boolean }) {
   const dependencies = {
     queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
     spawnAntigravity: spawn, spawnQwen: spawn, spawnOpenCode: spawn,
-    spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn,
+    spawnKimi: spawn, spawnGlm: spawn,
     getSessionProvider: () => null,
     hostedTurnSupervisor: {
       enabled() { calls.enabled += 1; return options.enabled; },

@@ -91,6 +91,12 @@ test('display-command parity: every script source URL is the command the UI show
     assert.ok(shown.includes(` ${source.url} `), `${id} display command must fetch ${source.url}`);
     assert.ok(source.allowedHosts.includes(new URL(source.url).hostname));
   }
+  // T-2086 S4: an npm-lock display command names exactly the reviewed target pin.
+  for (const [id, source] of Object.entries(HARNESS_INSTALL_SOURCES)) {
+    if (source.kind !== 'npm-lock') continue;
+    const shown = HARNESS_INSTALL_INFO[id as keyof typeof HARNESS_INSTALL_INFO].command;
+    assert.ok(shown.endsWith(` ${source.pkg}@${source.reviewedPins.at(-1)}`), `${id} display command names the pin`);
+  }
   assert.ok(Object.isFrozen(HARNESS_INSTALL_SOURCES) && Object.isFrozen(HARNESS_INSTALL_INFO));
 });
 

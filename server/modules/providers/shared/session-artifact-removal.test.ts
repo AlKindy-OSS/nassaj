@@ -28,7 +28,6 @@ import test from 'node:test';
 import { initializeDatabase, userDb } from '@/modules/database/index.js';
 import { AGY_BRAIN_UNDER_HOME } from '@/modules/providers/list/antigravity/agy-brain-layout.js';
 import { codexHeaderLine } from '@/modules/providers/services/cost/__tests__/bound-transcripts.js';
-import { setProviderSharingConfig } from '@/services/provider-sharing.js';
 
 import { isRetryableRefusal, removeSessionTranscript } from './session-transcript-removal.js';
 
@@ -40,7 +39,6 @@ const USERS = path.join(SANDBOX_HOME, '.nassaj-users');
 
 await initializeDatabase();
 for (let filler = 1; userDb.createUser(`artifact-member-${filler}`, 'hash', 'user').id < 10; filler += 1);
-setProviderSharingConfig({ claude: 'isolated' });
 
 let counter = 0;
 const nextId = (): string => `00000000-0000-4000-b000-${String(++counter).padStart(12, '0')}`;

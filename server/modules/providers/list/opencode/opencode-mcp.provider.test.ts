@@ -31,6 +31,7 @@ before(async () => {
     namedExports: {
       resolveOpenCodeConfigHomeForUser: (userId: string | number | null) =>
         path.join(root, String(userId ?? 'operator'), '.config', 'opencode'),
+      resolveOpenCodeLocalConfigHomeForUser: () => null,
     },
   });
   ({ OpenCodeMcpProvider } = await import('./opencode-mcp.provider.js'));
@@ -53,7 +54,7 @@ test('OpenCode MCP is dormant when its rollout feature flag is off', () => {
 
 test('user writer updates the governed canonical overlay and provisioning preserves it', async () => {
   const provider = new OpenCodeMcpProvider();
-  const userId = 'user-a';
+  const userId = '11';
   await provider.upsertServer({
     name: 'canary',
     scope: 'user',
@@ -80,7 +81,7 @@ test('user writer updates the governed canonical overlay and provisioning preser
 
 test('JSONC-only legacy state migrates once and cleanup leaves no old entry or secret', async () => {
   const provider = new OpenCodeMcpProvider();
-  const userId = 'legacy-jsonc';
+  const userId = '42';
   const configDir = path.join(root, userId, '.config', 'opencode');
   const jsoncPath = path.join(configDir, 'opencode.jsonc');
   await mkdir(configDir, { recursive: true });
@@ -113,7 +114,7 @@ test('JSONC-only legacy state migrates once and cleanup leaves no old entry or s
 
 test('dual JSON and JSONC state is rejected without returning or merging legacy entries', async () => {
   const provider = new OpenCodeMcpProvider();
-  const userId = 'dual-format';
+  const userId = '41';
   await provider.upsertServer({
     name: 'canonical',
     scope: 'user',
@@ -137,7 +138,7 @@ test('dual JSON and JSONC state is rejected without returning or merging legacy 
 
 test('secure user read refuses a symlink without reading its target', async () => {
   const provider = new OpenCodeMcpProvider();
-  const userId = 'symlink-config';
+  const userId = '45';
   const configDir = path.join(root, userId, '.config', 'opencode');
   const target = path.join(root, 'outside-secret.json');
   await mkdir(configDir, { recursive: true });
@@ -219,7 +220,7 @@ for (const phase of ['rename', 'canonical', 'neutralize'] as const) {
 }
 
 test('ordinary provisioning recovers a provider crash and preserves the legacy overlay', async () => {
-  const userId = 'crash-then-provision';
+  const userId = '40';
   const configDir = path.join(root, userId, '.config', 'opencode');
   await mkdir(configDir, { recursive: true });
   await writeFile(
@@ -291,7 +292,7 @@ test('failure after lock mkdir removes the ownerless directory immediately', asy
 });
 
 test('provider fault after lock mkdir leaves no lock and the next transaction succeeds', async () => {
-  const userId = 'provider-lock-mkdir-fault';
+  const userId = '43';
   const configDir = path.join(root, userId, '.config', 'opencode');
   const lockDir = path.join(configDir, 'opencode.json.nassaj-lock');
   await assert.rejects(
@@ -354,7 +355,7 @@ await withOpenCodeConfigLock(filePath, async () => {
 });
 
 test('cleanup-only mode removes legacy OpenCode entries while rollout stays off', async () => {
-  const userId = 'cleanup-only';
+  const userId = '39';
   const configDir = path.join(root, userId, '.config', 'opencode');
   const configPath = path.join(configDir, 'opencode.json');
   await mkdir(configDir, { recursive: true });
@@ -387,7 +388,7 @@ test('real OpenCode native list reads the dormant overlay and cleanup removes it
   }
 
   const provider = new OpenCodeMcpProvider();
-  const userId = 'real-reader';
+  const userId = '44';
   const home = path.join(root, userId);
   const fixturePath = path.join(root, 'synthetic-mcp.mjs');
   const methodLogPath = path.join(root, 'synthetic-methods.log');

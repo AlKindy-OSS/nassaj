@@ -221,6 +221,10 @@
   "class": "project",
   "creatorDenied": "probe session has no active-model pin for provider 'claude' → 404 [inferred from handler code, not individually probed]"
  },
+ "GET /api/providers/:provider/sessions/:sessionId/context-fit": {
+  "class": "project",
+  "creatorDenied": "same session read fence as GET active-model: the probe session has no workspace topology fence → 404 before the model is read; non-member is refused by the same fence"
+ },
  "GET /api/providers/:provider/sessions/:sessionId/skills": {
   "class": "project",
   "creatorDenied": "session skills need a live provider session; the probe session has none → 404 [inferred from handler code, not individually probed]"
@@ -243,6 +247,10 @@
  "GET /api/providers/claude/usage": {
   "class": "global",
   "reason": "per-user usage (upstream 502 in tests)"
+ },
+ "GET /api/providers/claude/local-overlay": {
+  "class": "global",
+  "reason": "picker block of the caller's own local model servers (ADR-227); identity from the session, no project context"
  },
  "GET /api/providers/claude/api-spend": {
   "class": "global",

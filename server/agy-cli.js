@@ -42,6 +42,7 @@ import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { SessionRegistry } from './session-registry.js';
 
@@ -986,11 +987,10 @@ async function spawnAntigravity(command, options = {}, ws) {
         releaseHarnessLaunch = beginHarnessLaunch('antigravity');
         agProcess = spawn(agyLaunch.cmd, agyLaunch.args, {
             cwd: cleanCwd,
-            // Single source of truth for the spawn env. When agy is isolated for
-            // this user (admin policy) the resolver overrides HOME to the per-user
-            // root so the brain store lands in the isolated tree; when shared it
-            // returns the operator env unchanged (ADR-016 default).
-            env: resolveProviderEnv(userId, 'agy', process.env),
+            // Single source of truth for the spawn env: the resolver points HOME
+            // at the member's own root (or grant home) so the brain store lands
+            // in their tree. No member ⇒ refused (ADR-152 A1 §3.4).
+            env: resolveProviderEnv(assertModelRunActor(userId), 'agy', process.env),
             stdio: ['ignore', 'pipe', 'pipe'],
         });
     } catch (err) {

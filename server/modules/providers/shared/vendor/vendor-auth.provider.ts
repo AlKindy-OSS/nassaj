@@ -20,14 +20,10 @@ export class VendorAuthProvider implements IProviderAuth {
   }
 
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {
-    // T-1260: `sharedFallback: false` preserves today's answer exactly — this
-    // facet reports whether THIS member has configured a key, and an org key
-    // does not make their account "authenticated". Wave B revisits that once a
-    // shared slot is something a member can be told about.
+    // This facet reports whether THIS member (or their grantor) holds a key; the
+    // install-wide slot is inert (ADR-152 A1 §3.8) and never counts.
     const authenticated =
-      resolveSlotKey(credentialPrincipalId(userId, this.provider), this.provider as 'kimi' | 'deepseek' | 'glm', {
-        sharedFallback: false,
-      }) !== null;
+      resolveSlotKey(credentialPrincipalId(userId, this.provider), this.provider as 'kimi' | 'deepseek' | 'glm') !== null;
     return {
       installed: true,
       provider: this.provider,

@@ -10,6 +10,9 @@
  * fixtures, 2026-06-28).
  */
 
+// B-1771: FIRST import — HOME, CLAUDE_CONFIG_DIR and provider credential env move
+// into a sandbox, so an ad-hoc run cannot touch the operator's live logins.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -26,10 +29,12 @@ import {
   remoteUrlFromArgs,
 } from './connector-oauth-flow.js';
 import { markGrantRevocationPending } from './grant-file.js';
+import { assertOutsideRealCredentials } from '@/shared/__tests__/real-credential-guard.js';
 
 /** A member id no real install has, so the tree can be removed wholesale. */
 const TEST_USER = 987654321;
 const TEST_TREE = path.join(os.homedir(), '.nassaj-users', String(TEST_USER));
+assertOutsideRealCredentials(TEST_TREE);
 const TEST_SOURCE_GATE = {
   get: (id: string) => ({
     id,

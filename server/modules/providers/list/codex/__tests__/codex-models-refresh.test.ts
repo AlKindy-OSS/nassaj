@@ -230,10 +230,9 @@ test('single-flight and backoff are keyed by CODEX_HOME, not user id', async () 
 
 test('ownCodexRefreshTarget: only the user own isolated home', () => {
   const own = (id: string | number) => ({ CODEX_HOME: `/users/${id}/.codex` });
-  const deps = { isIsolated: () => true, resolveOwnEnv: own };
+  const deps = { resolveOwnEnv: own };
   assert.deepEqual(ownCodexRefreshTarget(5, own(5), deps), { codexHome: '/users/5/.codex', env: own(5) });
   assert.equal(ownCodexRefreshTarget(5, own(9), deps), null, 'grant: grantor home');
-  assert.equal(ownCodexRefreshTarget(5, own(5), { ...deps, isIsolated: () => false }), null, 'shared');
   assert.equal(ownCodexRefreshTarget(5, {}, deps), null, 'operator home');
   for (const id of [null, undefined, '']) {
     assert.equal(ownCodexRefreshTarget(id, own(5), deps), null, `no user ${String(id)}`);

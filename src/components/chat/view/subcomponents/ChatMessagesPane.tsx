@@ -19,9 +19,11 @@ import { findQuickReplyEligibleIndex, type QuickReplyGate } from '../../utils/qu
 import TeamMessageBubble from '../../../internal-session-chat/TeamMessageBubble';
 import { placeTeamMessages } from '../../../internal-session-chat/interleaveTeamMessages';
 import type { InternalMessage } from '../../../internal-session-chat/internalSessionChatApi';
+import PeerHoldCard from '../../../peer-relay/PeerHoldCard';
 import PeerMessageCard from '../../../peer-relay/PeerMessageCard';
 import { isPeerTurnStart } from '../../../peer-relay/peerDisplay';
 import { usePeerTimeline } from '../../../peer-relay/usePeerTimeline';
+import type { EngineProvider } from '../../hooks/engineProviderSession';
 
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
@@ -63,11 +65,11 @@ interface ChatMessagesPaneProps {
   displayProvider: LLMProvider;
   setProvider: (provider: LLMProvider) => void;
   /** Active "Claude engine on a vendor endpoint" selection (ADR-037), or null. */
-  engineProvider: 'kimi' | 'deepseek' | 'glm' | null;
+  engineProvider: EngineProvider;
   /** Sets/clears the engine provider (clearing on plain model selection). */
-  setEngineProvider: (next: 'kimi' | 'deepseek' | 'glm' | null) => void;
+  setEngineProvider: (next: EngineProvider) => void;
   /** Selects the Claude engine routed through a vendor endpoint + a vendor model. */
-  onSelectClaudeEngineProvider: (vendor: 'kimi' | 'deepseek' | 'glm', model: string) => void;
+  onSelectClaudeEngineProvider: (vendor: NonNullable<EngineProvider>, model: string) => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
   claudeModel: string;
   setClaudeModel: (model: string) => void;
@@ -81,6 +83,8 @@ interface ChatMessagesPaneProps {
   setKimiModel: (model: string) => void;
   deepseekModel: string;
   setDeepSeekModel: (model: string) => void;
+  dshModel?: string;
+  setDshModel?: (model: string) => void;
   glmModel: string;
   setGlmModel: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
@@ -184,6 +188,8 @@ export default function ChatMessagesPane({
   setKimiModel,
   deepseekModel,
   setDeepSeekModel,
+  dshModel,
+  setDshModel,
   glmModel,
   setGlmModel,
   providerModelCatalog,
@@ -248,15 +254,29 @@ export default function ChatMessagesPane({
     () => placeTeamMessages(visibleMessages, peerTimeline.items, olderHistoryHidden),
     [visibleMessages, peerTimeline.items, olderHistoryHidden],
   );
-  const renderPeer = (peer: (typeof peerTimeline.items)[number]) => {
+  const renderPeer = (entry: (typeof peerTimeline.items)[number]) => {
+    const peer = entry.kind === 'message' ? entry.message : entry.hold;
     const otherId = peer.toSessionId === peerSessionId ? peer.fromSessionId : peer.toSessionId;
+    const openOther = onOpenPeerSession && peerTimeline.isReadable(otherId) ? onOpenPeerSession : undefined;
+    if (entry.kind === 'hold') {
+      return (
+        <PeerHoldCard
+          key={entry.id}
+          hold={entry.hold}
+          linked={entry.linked}
+          currentSessionId={peerSessionId}
+          viewerUserId={peerTimeline.viewerUserId}
+          onOpenSession={openOther}
+        />
+      );
+    }
     return (
       <PeerMessageCard
-        key={`peer-${peer.id}`}
-        message={peer}
+        key={entry.id}
+        message={entry.message}
         currentSessionId={peerSessionId ?? ''}
-        targetName={peerTimeline.nameOf(peer.toSessionId) ?? (peer.toName || undefined)}
-        onOpenSession={onOpenPeerSession && peerTimeline.isReadable(otherId) ? onOpenPeerSession : undefined}
+        targetName={peerTimeline.nameOf(entry.message.toSessionId) ?? (entry.message.toName || undefined)}
+        onOpenSession={openOther}
       />
     );
   };
@@ -403,6 +423,8 @@ export default function ChatMessagesPane({
             setKimiModel={setKimiModel}
             deepseekModel={deepseekModel}
             setDeepSeekModel={setDeepSeekModel}
+            dshModel={dshModel}
+            setDshModel={setDshModel}
             glmModel={glmModel}
             setGlmModel={setGlmModel}
             providerModelCatalog={providerModelCatalog}

@@ -2,6 +2,10 @@
 
 // Load environment variables before other imports execute
 import './load-env.js';
+// ADR-219 P2 (ش-4): the test-seam fence runs before any import can open the database.
+// A side-effect import, so import ordering never moves it below a database import.
+// eslint-disable-next-line boundaries/dependencies -- must precede every database import; a leaf with no DB access.
+import './modules/peer-relay/peer-relay.test-seams-guard.js';
 import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import { spawn as spawnChildProcess } from 'child_process';
@@ -26,7 +30,9 @@ import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.s
 import {
     createScheduledMessagesRouter, createScheduledMessagesService, createScheduledTurnDispatcher,
 } from '@/modules/scheduled-messages/index.js';
-import { createPeerRelayRuntime } from '@/modules/peer-relay/index.js';
+import {
+    createPeerHoldsRouter, createPeerRelayRuntime, createPeerRelayTestSeamsRouter, peerRelayTestSeamsEnabled,
+} from '@/modules/peer-relay/index.js';
 import { sessionCostService } from '@/modules/providers/services/cost/session-cost.service.js';
 import {
     closeUniversalConversationShadowRuntime,
@@ -36,6 +42,7 @@ import {
 import { createShutdownDrain, resolveDrainTimeoutMs } from '@/services/shutdown-drain.service.js';
 import { listenWithGuard, resolveBindWindowMs } from '@/services/listen-with-guard.service.js';
 import { createServerBackgroundLifecycle } from '@/services/server-background-lifecycle.service.js';
+import { createCredentialFileWatcher } from '@/services/credential-file-watcher.service.js';
 import { createSourceVersionHealthMiddleware } from '@/services/source-version.service.js';
 import { runConnectorCredentialRetentionAtStartup } from '@/modules/connectors/connector-user-grant.production.js';
 import {
@@ -66,6 +73,8 @@ import { findAppRoot, getModuleDir } from './utils/runtime-paths.js';
 import { acquireCodexLaunchIdentity, prewarmCodexLaunchIdentity } from './shared/codex-executable.js';
 import { prewarmCodexRuntimeCompat } from './shared/codex-runtime-compat.js';
 import { checkBundledCageBwrap } from './services/isolation/provider-cage.js';
+import { admitCredentialTurn } from './services/isolation/credential-gate.js';
+import { contextGuard } from './modules/context-guard/index.js';
 import { clientIp } from './utils/client-ip.js';
 import { isTrustedOrigin, multiAccountSwitchingEnabled, trustedOriginPolicy } from './utils/trusted-origin.js';
 import { corsAllowedOrigins } from './config/cors-origins.js';
@@ -162,12 +171,6 @@ import {
     isProviderRunRegistrationCurrent,
 } from './services/session-process-monitor.js';
 import {
-    spawnDeepSeek,
-    abortDeepSeekSession,
-    isDeepSeekSessionActive,
-    getActiveDeepSeekSessions,
-} from './deepseek-cli.js';
-import {
     spawnGlm,
     abortGlmSession,
     isGlmSessionActive,
@@ -179,6 +182,18 @@ import {
     isQwenSessionActive,
     getActiveQwenSessions,
 } from './qwen-cli.js';
+import {
+    spawnDsh,
+    abortDshSession,
+    isDshSessionActive,
+    countDshRuns,
+    stopDshProcesses,
+} from './modules/providers/list/dsh/dsh-acp-runtime.js';
+import {
+    resolveParityPermission,
+    cancelAllParityPermissions,
+} from './services/permission-parity/parity-permissions.js';
+import { warnDshPathOverride } from './modules/providers/list/dsh/dsh-launch.js';
 import sessionManager from './sessionManager.js';
 import {
     stripAnsiSequences,
@@ -197,6 +212,7 @@ import { applySsoBootPolicy, assertSsoApiKeyGateRegistered } from './services/ss
 import './services/sso-config.service.js';
 import adminRoutes from './routes/admin.js';
 import credentialGrantsRoutes from './routes/credential-grants.js';
+import credentialSharingRoutes from './routes/credential-sharing.js';
 import cursorRoutes from './routes/cursor.js';
 import projectBoardRoutes from './routes/project-board.js';
 import commandsRoutes from './routes/commands.js';
@@ -407,10 +423,9 @@ const countGovernedActiveSessions = () => [
     getActiveAntigravitySessions,
     getActiveOpenCodeSessions,
     getActiveKimiSessions,
-    getActiveDeepSeekSessions,
     getActiveGlmSessions,
     getActiveQwenSessions,
-].reduce((total, getSessions) => total + getSessions().length, 0);
+].reduce((total, getSessions) => total + getSessions().length, 0) + countDshRuns();
 // B-1056 (ADR-156 WI-2). A queued restart row carries the owner's consent for
 // ONE specific package: its job, transaction, activation identity and release
 // commit. When a NEW update job reaches the same build fingerprint and finds a
@@ -986,9 +1001,16 @@ const wss = createWebSocketServer(server, {
         spawnOpenCode,
         spawnKimi,
         spawnKimiAgent,
-        spawnDeepSeek,
         spawnGlm,
         spawnQwen,
+        spawnDsh,
+        abortDshSession,
+        isDshSessionActive,
+        resolveParityPermission,
+        // ADR-152 A1 §3.5: refuse a turn with no linked credential before anything starts.
+        admitCredentialTurn,
+        // T-2087 / ADR-223: refuse a pinned model too small for the conversation.
+        contextGuard,
         hostedTurnSupervisor,
         cliTurnSupervisor,
         // Authoritative provider lookup for resumed sessions. Routing must follow
@@ -1022,7 +1044,6 @@ const wss = createWebSocketServer(server, {
         abortKimiSession: (sessionId) => (
             spawnKimiAgent.abortSession(sessionId) || abortKimiSession(sessionId)
         ),
-        abortDeepSeekSession,
         abortGlmSession,
         abortQwenSession,
         getProviderRunsOwnedByWriter,
@@ -1038,7 +1059,6 @@ const wss = createWebSocketServer(server, {
         isAntigravitySessionActive,
         isOpenCodeSessionActive,
         isKimiSessionActive,
-        isDeepSeekSessionActive,
         isGlmSessionActive,
         isQwenSessionActive,
         reconnectSessionWriter,
@@ -1053,7 +1073,6 @@ const wss = createWebSocketServer(server, {
         getActiveAntigravitySessions,
         getActiveOpenCodeSessions,
         getActiveKimiSessions,
-        getActiveDeepSeekSessions,
         getActiveGlmSessions,
         getActiveQwenSessions,
     }),
@@ -1333,9 +1352,9 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         antigravity: safeCount(getActiveAntigravitySessions),
         opencode: safeCount(getActiveOpenCodeSessions),
         kimi: safeCount(getActiveKimiSessions),
-        deepseek: safeCount(getActiveDeepSeekSessions),
         glm: safeCount(getActiveGlmSessions),
         qwen: safeCount(getActiveQwenSessions),
+        dsh: countDshRuns(),
     };
     // T-928: detect build-after-startup skew (mtime approach). Re-stat on each
     // probe — a cheap single syscall each. A delta above 2 s (filesystem clock
@@ -1601,6 +1620,8 @@ app.use('/api/admin', authenticateToken, adminRoutes);
 
 // User-to-user credential grants (T-1675) — self-scoped, any authenticated member.
 app.use('/api/credential-grants', authenticateToken, credentialGrantsRoutes);
+// ADR-152 A1 §3.10: the one-time provider-sharing retirement notice (owner role only).
+app.use('/api/credential-sharing', authenticateToken, credentialSharingRoutes);
 
 // Projects API Routes (protected)
 app.use('/api/projects', authenticateToken, projectModuleRoutes);
@@ -1632,6 +1653,19 @@ app.use('/api/voice', authenticateToken, voiceRoutes);
 
 // Session participant/agent tracking (protected)
 app.use('/api/sessions', authenticateToken, participantsRoutes);
+// ADR-219 P2a-min (T-2074): cross-member holds. Behind authenticateToken so a cookie
+// mutation passes the Origin + CSRF guard; approve/reject also need an interactive
+// credential and the recomputed target owner (peer-holds.routes.ts).
+app.use('/api/peer-relay', authenticateToken, createPeerHoldsRouter({
+    canReadSession: (sessionId, userId) => {
+        const session = sessionsDb.getSessionById(sessionId);
+        return Boolean(session) && isSessionAccessibleByUser(sessionId, session.project_path, userId, 'read');
+    },
+    isPlatform: () => IS_PLATFORM,
+}));
+if (peerRelayTestSeamsEnabled()) {
+    app.use('/__test/peer-relay', createPeerRelayTestSeamsRouter(peerRelayDispatcher));
+}
 // T-1910 S4: "continue here" on a SESSION-scoped permission fence. Any session writer may
 // acknowledge; containment is proven and the lift is journaled by the audited fence core.
 app.use('/api/sessions', authenticateToken, createSessionPermissionFenceRouter({
@@ -1789,9 +1823,9 @@ setSessionLivenessProbes({
     antigravity: isAntigravitySessionActive,
     opencode: isOpenCodeSessionActive,
     kimi: isKimiSessionActive,
-    deepseek: isDeepSeekSessionActive,
     glm: isGlmSessionActive,
     qwen: isQwenSessionActive,
+    dsh: isDshSessionActive,
 });
 
 // ADR-099/T-1237: the engine re-stamp route needs the SAME live registry this
@@ -4300,6 +4334,7 @@ async function startServer() {
         // T-1873 boot check: name every harness CLI the registry cannot resolve
         // (logged, never fatal — only that harness is unavailable).
         logUnresolvedHarnessBinaries();
+        warnDshPathOverride();
         const harnessReconcile = await reconcileHarnessSnapshots();
         if (harnessReconcile.blocked.length > 0 || harnessReconcile.rollbackFailed > 0) {
             console.error('[harness-update] boot reconcile left harnesses blocked', {
@@ -4454,6 +4489,7 @@ async function startServer() {
             ],
             supervisors: [hostedTurnSupervisor, cliTurnSupervisor],
         });
+        const credentialFileWatcher = createCredentialFileWatcher();
         const backgroundLifecycle = createServerBackgroundLifecycle({
             prepareTurnSupervisor: () => turnSupervisorLifecycle.prepare(),
             startTurnSupervisorWatchdogs: () => turnSupervisorLifecycle.start(),
@@ -4464,6 +4500,9 @@ async function startServer() {
             stopCostLedgerScheduler,
             startScheduledMessages: () => scheduledMessagesService.start(),
             stopScheduledMessages: () => scheduledMessagesService.stop(),
+            // B-1771: logs every change of a member's provider credential file (read-only).
+            startCredentialFileWatcher: () => credentialFileWatcher.start(),
+            stopCredentialFileWatcher: () => credentialFileWatcher.stop(),
         });
         startupBackground = backgroundLifecycle;
         await backgroundLifecycle.prepare();
@@ -4607,22 +4646,24 @@ async function startServer() {
                 antigravity: getActiveAntigravitySessions().length,
                 opencode: getActiveOpenCodeSessions().length,
                 // B-143: count the hosted-vendor runs too, so a restart DRAINS
-                // (waits for) in-flight kimi/deepseek/glm sessions instead of
+                // (waits for) in-flight kimi/glm sessions instead of
                 // killing them. Same shape as the CLI providers above.
                 kimi: getActiveKimiSessions().length,
-                deepseek: getActiveDeepSeekSessions().length,
                 glm: getActiveGlmSessions().length,
                 qwen: getActiveQwenSessions().length,
+                // Every live dsh run, including one whose session id is not known yet.
+                dsh: countDshRuns(),
             }),
             finalCleanup: async () => {
                 peerRelayDispatcher.stop();
                 stopHarnessAutoUpdateScheduler();
+                await stopDshProcesses();
                 await backgroundLifecycle.stop();
             },
             // Resolve every waiting approval BEFORE the sockets close, so a
             // restart mid-turn cannot surface as "the user doesn't want to
             // proceed" for a tool the user never refused.
-            cancelPendingApprovals: cancelAllPendingApprovals,
+            cancelPendingApprovals: () => cancelAllParityPermissions() + cancelAllPendingApprovals(),
             // B-1390: no new scheduled turn may start once a drain begins; the
             // queue resumes from durable state in the successor process.
             onDrainStart: () => {

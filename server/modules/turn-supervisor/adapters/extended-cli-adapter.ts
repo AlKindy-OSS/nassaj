@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { collectOpenCodeTurnSecrets, providerSecretsService } from '@/modules/providers/index.js';
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
-import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolveModelRunEnv } from '@/services/isolation/credential-gate.js';
 import { sanitizeVendorAgentEnv } from '@/services/isolation/sanitize-vendor-agent-env.js';
 import { isQwenPlanModel, redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import { spawnVendorRunOf } from '@/services/isolation/opencode-spawn-vendor.js';
@@ -47,7 +47,7 @@ type AdapterOptions = Readonly<{
   /** Literal secrets of a turn, for stderr redaction (defaults to the M-6 collector). */
   turnSecrets?: (userId: string | number) => readonly string[];
   cwd?: string;
-  resolveEnv?: (userId: string | number) => NodeJS.ProcessEnv;
+  resolveEnv?: (userId: string | number, model?: string) => NodeJS.ProcessEnv;
   executableProbe?: (binary: string) => Promise<boolean>;
   versionProbe?: (binary: string) => Promise<string>;
   qwenCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv }) => Promise<boolean>;
@@ -166,8 +166,9 @@ function hiddenSystem(request: { hiddenContext?: readonly string[]; system?: str
   return [ROLE_SYSTEM, ...(request.hiddenContext ?? []), request.system ?? ''].filter(Boolean).join('\n\n');
 }
 
-function defaultResolvedEnv(userId: string | number, provider: ExtendedCliProvider): NodeJS.ProcessEnv {
-  const env = resolveProviderEnv(userId, provider, process.env);
+function defaultResolvedEnv(userId: string | number, provider: ExtendedCliProvider, model?: string): NodeJS.ProcessEnv {
+  // ADR-152 A1 §3.5: the credential gate admits the turn before the env exists.
+  const env = resolveModelRunEnv(userId, provider, process.env, 'agent', { model: model ?? null });
   if (provider !== 'qwen') return env;
   const profile = providerSecretsService.getQwenProfile(userId);
   if (!profile) return env;
@@ -248,7 +249,8 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
   const cwd = options.cwd ?? process.cwd();
   const flagEnv = options.env ?? process.env;
   const turnSecrets = options.turnSecrets ?? collectOpenCodeTurnSecrets;
-  const resolveEnv = options.resolveEnv ?? ((userId: string | number) => defaultResolvedEnv(userId, provider));
+  const resolveEnv = options.resolveEnv
+    ?? ((userId: string | number, model?: string) => defaultResolvedEnv(userId, provider, model));
   const executableProbe = options.executableProbe ?? executable;
   const versionProbe = options.versionProbe ?? defaultVersionProbe;
   const createRole = options.createRoleHome ?? createEphemeralRoleHome;
@@ -270,7 +272,12 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
         return false;
       }
       if (!await executableProbe(binary) || !versionAccepted(provider, await versionProbe(binary))) return false;
-      const env = resolveEnv(userId);
+      let env: NodeJS.ProcessEnv;
+      try {
+        env = resolveEnv(userId);
+      } catch {
+        return false; // no linked credential (or no member): this cell cannot run for them
+      }
       if (provider === 'qwen') {
         const capabilityProbe = options.qwenCapabilityProbe ?? defaultQwenCapabilityProbe;
         if (!await capabilityProbe({ binary, env })) return false;
@@ -301,7 +308,7 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
       const role = await createRole();
       try {
         const common = {
-          binary, cwd, env: resolveEnv(request.userId), model: request.model,
+          binary, cwd, env: resolveEnv(request.userId, request.model), model: request.model,
           prompt: request.prompt, system: hiddenSystem(request),
         };
         const spec = provider === 'qwen' ? qwenSpec(common) : opencodeSpec(common);

@@ -40,7 +40,7 @@ const scratch = fs.mkdtempSync(path.join(scratchParent, 't1873-guard-'));
 const FAKE_HOME = path.join(scratch, 'home');
 const OVERRIDE_ENVS = [
   'CLAUDE_CLI_PATH', 'CODEX_PATH', 'AGY_PATH', 'CURSOR_PATH', 'OPENCODE_PATH',
-  'QWEN_PATH', 'KIMI_PATH',
+  'QWEN_PATH', 'KIMI_PATH', 'DSH_PATH',
 ] as const;
 const savedEnv = Object.fromEntries(
   [...OVERRIDE_ENVS, 'HOME', 'NASSAJ_PROVIDER_CAGE', 'NASSAJ_VENDOR_BINARY_PIN'].map((key) => [key, process.env[key]]),
@@ -79,6 +79,11 @@ function buildFakeInstalls(home: string): void {
   );
   // kimi: the vendor's native install script puts one binary in ~/.kimi-code/bin.
   writeExecutable(path.join(home, '.kimi-code', 'bin', 'kimi'));
+  // dsh (T-2086 S4): npm-lock layout, a Node script behind ~/.local/bin/dsh.
+  linkInto(
+    writeExecutable(path.join(local, 'share', 'dsh', 'versions', '0.0.1', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')),
+    path.join(local, 'bin', 'dsh'),
+  );
 }
 
 buildFakeInstalls(FAKE_HOME);
@@ -173,6 +178,7 @@ describe('harness registry resolution rule', () => {
       opencode: fakePath('.opencode', 'bin', 'opencode'),
       qwen: fakePath('.local', 'bin', 'qwen'),
       kimi: fakePath('.kimi-code', 'bin', 'kimi'),
+      dsh: fakePath('.local', 'bin', 'dsh'),
     };
     assert.deepEqual([...registry.HARNESS_BINARY_IDS].sort(), Object.keys(expected).sort());
     for (const [id, file] of Object.entries(expected)) {
@@ -544,7 +550,7 @@ const SPAWN_NAMES = new Set([
   'spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'spawnFunction', 'spawnRaw',
   'crossSpawn', 'spawnImpl', 'spawnFn', 'execImpl', 'execFileAsync', 'rawSpawn',
 ]);
-const HARNESS_COMMANDS = new Set(['claude', 'codex', 'agy', 'cursor-agent', 'opencode', 'qwen', 'kimi']);
+const HARNESS_COMMANDS = new Set(['claude', 'codex', 'agy', 'cursor-agent', 'opencode', 'qwen', 'kimi', 'dsh']);
 
 /**
  * Named allowlist: `file#sink` → reason. A sink is the source text of the
@@ -574,6 +580,13 @@ const SINK_ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'modules/websocket/services/shell-websocket.service.ts#shell': 'bash/powershell host shell',
   'services/isolation/provider-cage-wiring.js#launch.cmd': 'cage bwrap or the caller-checked cmd',
   'services/isolation/provider-cage-wiring.js#spec.command': 'SDK-composed command from pathToClaudeCodeExecutable (registry)',
+  // dsh (T-2086): the sink is the verified absolute node; the harness script it
+  // runs is args[0] = resolveHarnessBinary('dsh') inside prepareDshLaunch.
+  'modules/providers/list/dsh/dsh-acp-runtime.js#launch.command': 'node running the registry dsh script (args[0])',
+  // T-2091/ADR-225: the DSH_PATH --dump-config check re-runs the SAME prepared
+  // launch (prepareDshLaunch: verified node + registry script as args[0]).
+  'modules/providers/list/dsh/dsh-dump-config-check.js#launch.command':
+    'node running the registry dsh script (args[0]) with --dump-config',
   // Generic git transport helper; its callers pass the literal 'git'.
   'routes/git.js#command': 'spawnAsync(git …) helper',
 });
@@ -1059,7 +1072,7 @@ describe('(5)+(6) launchers spawn the registry binary; member *_PATH is ignored'
     const bwrap = writeExecutable(path.join(scratch, 'bin', 'bwrap'));
     withEnv({ NASSAJ_PROVIDER_CAGE: 'true' }, () => {
       const prepared = prepareKimiAgentLaunch(
-        { userId: null, command: 'hi', model: 'kimi-k2.6', permissionMode: 'default', cwd: scratch, baseEnv: MEMBER_ENV },
+        { userId: 7, command: 'hi', model: 'kimi-k2.6', permissionMode: 'default', cwd: scratch, baseEnv: MEMBER_ENV },
         {
           resolveProviderEnv: (_u: unknown, _p: unknown, env: NodeJS.ProcessEnv) => ({ ...env }),
           verifyVendorBinaryDigest: (_id: string, file: string) => file,

@@ -25,7 +25,7 @@ import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import type { PermissionExecutionHandle } from '@/modules/execution-permissions/index.js';
 // eslint-disable-next-line boundaries/dependencies -- the read-only run gate leaf, not the providers barrel.
 import { assertLinkModeRunAllowed } from '@/modules/providers/services/harness-link-mode.scope.js';
-import { resolveProviderEnvStrict } from '@/services/isolation/resolve-provider-env-strict.js';
+import { resolveModelRunEnv } from '@/services/isolation/credential-gate.js';
 import { acquireApplicationWriterLease } from '@/services/update-writer-lease.js';
 // eslint-disable-next-line boundaries/dependencies -- ADR-201 A1: the supervisor process proves its target with the one transcript reader without loading the providers barrel (routes/SDK graph).
 import { isTranscriptHandle, openRecordedTranscript } from '@/modules/providers/shared/session-transcript-reader.js';
@@ -271,16 +271,17 @@ async function handleIntentFile(
       // STRICT ownership predicate — NOT visibility (§ج-3 حرج-2).
       isOwnedOrMembered: (projectPath, userId) =>
         projectsDb.isProjectPathOwnedOrMemberedBy(projectPath, userId),
-      // FAIL-CLOSED env resolver (§هـ-1): a non-integer id THROWS here instead
-      // of falling open to the owner subscription. GATE2 already guarantees an
-      // integer id before this runs, so it never throws on the happy path — this
-      // is the belt over the fail-open resolveProviderEnv the critic flagged.
-      // B-1546: api_key link mode with no key is refused here too, so a
+      // FAIL-CLOSED env resolver (§هـ-1): a non-member id THROWS here instead
+      // of falling open to the owner subscription, and the credential gate
+      // (ADR-152 A1 §3.5) refuses a member with no credential and no usable
+      // grant. B-1546: api_key link mode with no key is refused here too, so a
       // workflow task never falls back to a (grantor's) subscription. A throw
       // maps to DENY in authorizeLaunch — nothing is launched.
+      // ADR-227: a task from a local-pinned conversation is denied (no Anthropic run).
+      readEnginePin: (conversationId) => sessionsDb.getSessionEnginePin(conversationId)?.engine ?? null,
       resolveEnv: (userId, provider, baseEnv) => {
         assertLinkModeRunAllowed(userId, provider);
-        return resolveProviderEnvStrict(userId, provider, baseEnv);
+        return resolveModelRunEnv(userId, provider, baseEnv, 'agent');
       },
     },
     listActiveScopes: listActiveUserScopes,

@@ -180,24 +180,17 @@ export default function ProviderLoginTerminal({
         defaultValue:
           'A source-update maintenance window is holding the writer lock, so no new terminal can start right now. Try again once it clears.',
       })
-    : errorCode === 'shared_link_admin_only'
-      ? t('providerLogin.status.blockedSharedLinkAdminOnly', {
+    : errorCode === 'forbidden'
+      ? t('providerLogin.status.blockedForbidden', {
           defaultValue:
-            'On this shared server, linking Claude is limited to an owner or admin. '
-            + 'Ask an owner or admin to link the account, or close and set your own API key instead.',
+            'Your role may not run this command in a terminal. Close and set an API key instead.',
         })
-      : errorCode === 'forbidden'
-        ? t('providerLogin.status.blockedForbidden', {
-            defaultValue:
-              'Your role may not run this command in a terminal. Ask an administrator, or close and set an API key instead.',
-          })
-        : t('providerLogin.status.blockedGeneric', {
-            defaultValue: 'The server refused to open this terminal.',
-          });
+      : t('providerLogin.status.blockedGeneric', {
+          defaultValue: 'The server refused to open this terminal.',
+        });
   // Only worth showing when the code did not already carry the meaning.
   const showServerText = !isUpdateGateCode
     && errorCode !== 'forbidden'
-    && errorCode !== 'shared_link_admin_only'
     && Boolean(shellError?.message);
 
   return (

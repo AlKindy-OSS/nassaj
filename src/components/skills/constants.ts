@@ -13,6 +13,7 @@ export const PROVIDER_NAMES: Record<SkillsProvider, string> = {
   glm: 'GLM',
   hermes: 'Hermes',
   sakana: 'Sakana',
+  dsh: 'DeepSeek Harness',
 };
 
 /** Name for a provider id the map may not know yet (a newer server). */

@@ -13,6 +13,12 @@ export function migrateLocalModelServers(db: Database): void {
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   ); CREATE INDEX IF NOT EXISTS idx_local_model_servers_owner ON local_model_servers(owner_id);`);
+  // ADR-227 / T-2098: the IP literal where the owner's last connection test passed;
+  // NULL = never tested (or reset by a base URL edit). Additive and idempotent.
+  const columns = db.prepare('PRAGMA table_info(local_model_servers)').all() as Array<{ name: string }>;
+  if (!columns.some(column => column.name === 'verified_address')) {
+    db.exec('ALTER TABLE local_model_servers ADD COLUMN verified_address TEXT');
+  }
 }
 
 /** Explicit rollback; never invoked automatically or against live data. */

@@ -21,8 +21,8 @@
  *     and `stale` entries and drains tombstones; an AES record that does not
  *     decrypt is skipped, never read as a deleted key.
  *
- * Shared trees are never written (§3 outcome `shared_scope_refused`). No key
- * value is ever returned, logged, or put in an error or ledger entry.
+ * Every projection is the member's own tree (ADR-152 A1: no shared tree). No
+ * key value is ever returned, logged, or put in an error or ledger entry.
  */
 
 import { assertNotClaudeSubscriptionToken } from '@/modules/providers/shared/credentials/subscription-token-guard.js';
@@ -57,9 +57,7 @@ export type ProjectionOutcome =
   | 'kept_on_subscription'
   | 'mode_unset'
   | 'login_present'
-  | 'shared_scope_refused'
   | 'foreign_credential'
-  | 'forbidden'
   | 'failed';
 
 /** §6 Delete outcomes. `failed` = left as a tombstone for the retry sweep. */
@@ -68,8 +66,6 @@ export type RemovalOutcome =
   | 'absent'
   | 'adopted_credential'
   | 'foreign_credential'
-  | 'shared_scope_refused'
-  | 'forbidden'
   | 'failed';
 
 export type FanoutSlotResult = FanoutSlot & {
@@ -109,10 +105,6 @@ export type VendorKeyFanoutDeps = {
   keyVersion: number;
   now(): Date;
   listMemberIds(): Member[];
-  /** True when the harness writes the member's own tree (isolated), false for a shared tree. */
-  isOwnScope(provider: string): boolean;
-  /** The route's role rule: a shared-scoped provider needs owner/admin. */
-  requiresElevatedRole(provider: string): boolean;
   projections: ProjectionPort;
   secrets: CanonicalSecretPort;
   /** One row per save and per delete: vendor and per-slot outcomes, never a key. */
@@ -125,7 +117,6 @@ export type VendorKeyFanoutDeps = {
 };
 
 export type FanoutSaveOptions = {
-  isElevated: boolean;
   /** Explicit confirm to replace a value nassaj does not own. */
   replaceForeignKey?: boolean;
   authenticatedPrincipal?: unknown;
@@ -135,7 +126,6 @@ export type FanoutSaveOptions = {
 };
 
 export type FanoutRemoveOptions = {
-  isElevated: boolean;
   /** Explicit confirm to remove adopted and foreign projections too. */
   removeForeignKey?: boolean;
   auditContext?: FanoutAuditContext;
@@ -148,7 +138,6 @@ const DECIDED: Record<string, ProjectionOutcome> = {
   LINK_MODE_SUBSCRIPTION: 'kept_on_subscription',
   LINK_MODE_UNSET: 'mode_unset',
   CREDENTIAL_IS_LOGIN: 'login_present',
-  CREDENTIAL_SHARED_SCOPE_REFUSED: 'shared_scope_refused',
 };
 
 const PROJECTION_PROVIDERS: readonly string[] = ['claude', 'codex', 'opencode'];
@@ -158,7 +147,6 @@ type SaveContext = {
   userId: Member;
   vendorId: string;
   key: string;
-  isElevated: boolean;
   replaceForeignKey: boolean;
   principal: unknown;
   /** B-1575: a background retry, where an empty target is not always nassaj's to fill. */
@@ -200,21 +188,6 @@ function matchesEntry(deps: VendorKeyFanoutDeps, entry: LedgerEntry | undefined,
 
 function unverified(): AppError {
   return fanoutError('VENDOR_KEY_PROJECTION_UNVERIFIED', 'The harness file did not hold the expected key after the change.', 500);
-}
-
-/**
- * The role gate, then the shared-tree refusal (§3 outcome `shared_scope_refused`);
- * null when the slot may be written. Decided before the link mode, so a shared
- * tree reports `shared_scope_refused`, not `kept_on_subscription` (precedence
- * pending an owner decision; behaviour unchanged by G2).
- */
-function scopeRefusal(
-  deps: VendorKeyFanoutDeps,
-  provider: string,
-  isElevated: boolean,
-): 'forbidden' | 'shared_scope_refused' | null {
-  if (deps.requiresElevatedRole(provider) && !isElevated) return 'forbidden';
-  return deps.isOwnScope(provider) ? null : 'shared_scope_refused';
 }
 
 function newEntry(ctx: SaveContext, pair: FileConsumer, state: LedgerEntry['state'], origin: LedgerEntry['origin']): LedgerEntry {
@@ -283,8 +256,6 @@ function markFailed(ctx: SaveContext, pair: FileConsumer): void {
 
 /** Projects the key into one slot; never throws. */
 async function projectSlot(ctx: SaveContext, slot: FanoutSlot, pair: FileConsumer): Promise<FanoutSlotResult> {
-  const refused = scopeRefusal(ctx.deps, slot.provider, ctx.isElevated);
-  if (refused) return { ...slot, outcome: refused };
   try {
     const outcome = await ctx.deps.projections.withWriteGate(
       ctx.userId, slot.provider, ctx.key, () => projectLocked(ctx, slot, pair),
@@ -399,8 +370,7 @@ async function planRemoval(
   const pending: Array<{ slot: FanoutSlot; pair: FileConsumer }> = [];
   for (const pair of vendorPairs(ctx.vendorId)) {
     const slot = slotFor(options.slots, ctx.vendorId, pair);
-    const refused = scopeRefusal(ctx.deps, slot.provider, options.isElevated);
-    const outcome = refused ?? await markForRemoval(ctx, slot, pair);
+    const outcome = await markForRemoval(ctx, slot, pair);
     if (outcome === 'pending') pending.push({ slot, pair });
     else results.push({ ...slot, outcome });
   }
@@ -410,13 +380,13 @@ async function planRemoval(
 /** Retries one member's failed and stale projections with the stored key. */
 async function retryProjections(deps: VendorKeyFanoutDeps, userId: Member, vendorId: string, key: string): Promise<void> {
   const ctx: SaveContext = {
-    deps, userId, vendorId, key, isElevated: false, replaceForeignKey: false, principal: undefined, sweepRetry: true,
+    deps, userId, vendorId, key, replaceForeignKey: false, principal: undefined, sweepRetry: true,
   };
   const retry = readLedgerEntries(userId, vendorId).filter((entry) => entry.state === 'failed' || entry.state === 'stale');
   for (const entry of retry) {
     const pair = { harness: entry.harness, target: entry.target };
     const slot = slotFor([], vendorId, pair);
-    if (deps.isOwnScope(slot.provider)) await projectSlot(ctx, slot, pair);
+    await projectSlot(ctx, slot, pair);
   }
 }
 
@@ -474,7 +444,7 @@ async function saveVendorKey(
   deps.secrets.write(member, row.secretId, key, options.auditContext);
   clearVendorDeleted(member, vendorId);
   const ctx: SaveContext = {
-    deps, userId: member, vendorId, key, isElevated: options.isElevated,
+    deps, userId: member, vendorId, key,
     replaceForeignKey: options.replaceForeignKey === true, principal: options.authenticatedPrincipal,
   };
   const results: FanoutSlotResult[] = [];

@@ -103,7 +103,6 @@ function makeDeps(overrides: {
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
     spawnKimi: spawn('kimi-chat'),
-    spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),
     getSessionProvider: (sessionId: string) =>
       (overrides.sessionProvider ?? {})[sessionId] ?? null,
@@ -113,7 +112,6 @@ function makeDeps(overrides: {
     abortAntigravitySession: () => false,
     abortOpenCodeSession: () => false,
     abortKimiSession: () => false,
-    abortDeepSeekSession: () => false,
     abortGlmSession: () => false,
     resolveToolApproval: async () => {},
     spawnClaudeSideQuery: async () => {},

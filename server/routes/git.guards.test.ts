@@ -195,6 +195,10 @@ mock.module('@/modules/database/index.js', {
 // The AI helpers are never exercised here; keep their heavy graphs out.
 mock.module('@/claude-sdk.js', { namedExports: { queryClaudeSDK: async () => undefined } });
 mock.module('@/cursor-cli.js', { namedExports: { spawnCursor: async () => undefined } });
+// ADR-152 A1 §3.5: the gate itself is covered by credential-gate.entry-points.test.ts.
+mock.module('@/services/isolation/credential-gate.js', {
+  namedExports: { admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }), credentialNotLinkedPayload: () => null },
+});
 
 // ── import the REAL router after the mocks ────────────────────────────────────
 const gitModule = await import('./git.js');

@@ -13,6 +13,7 @@ import { useRawExecQueue } from '../../../../hooks/useRawExecConfig';
 import { SOURCE_REPO_URL } from '../../../../constants/sourceRepo';
 import { ActionMenu, Button, Dialog, DialogContent, DialogTitle } from '../../../../shared/view/ui';
 import type { SettingsDeepLink } from '../../../settings/types/types';
+import PeerHoldInbox from '../../../peer-relay/PeerHoldInbox';
 
 import { SystemStatsFooter } from './SystemStats';
 import UpstreamReleaseNotice from './UpstreamReleaseNotice';
@@ -72,6 +73,7 @@ export default function SidebarFooter({
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
   const userName = user?.username || t('account.fallbackName');
+  const peerViewerId = user?.id != null && Number.isInteger(Number(user.id)) ? Number(user.id) : null;
   const initials = Array.from(userName.trim()).slice(0, 2).join('').toLocaleUpperCase();
   const [showPanel, setShowPanel] = useState(false);
 
@@ -127,6 +129,10 @@ export default function SidebarFooter({
           onRawQueueChange={refreshRawQueue}
         />
       )}
+
+      {/* ADR-219 P2a-min: رسائل أعضاء آخرين تنتظر موافقتك؛ تختفي حين لا ينتظر شيء.
+          لا احتجاز في وضع المنصّة (الخادم يرفض الكتابة هناك). */}
+      {!IS_PLATFORM && <PeerHoldInbox userId={peerViewerId} />}
 
       {/* العتاد بنفس بطاقة الإحصاءات الأصلية؛ زرّ التشغيل/الإيقاف انتقل إلى
           لوحة الإعدادات السريعة (B-1044 follow-up) لأنها تخدم الجوّال أيضاً. */}

@@ -1,7 +1,7 @@
 /**
- * vendor-runtime — shared run seam for hosted vendor providers (kimi/deepseek/glm).
+ * vendor-runtime — shared run seam for hosted vendor providers (kimi/glm).
  *
- * This is the execution path for the three hosted models. It is DELIBERATELY and
+ * This is the execution path for the hosted kimi/glm runs. It is DELIBERATELY and
  * COMPLETELY independent of the Claude path:
  *   - It uses the platform `fetch` directly. It does NOT import @anthropic-ai/*
  *     and does NOT route through claude-sdk.js. (Enforced by a static test.)
@@ -32,6 +32,7 @@ import { beginProviderRun } from '@/services/provider-run-presence.js';
 // eslint-disable-next-line boundaries/no-unknown
 import { getRuntimeInstructions } from '../../../../services/runtime-instructions.js';
 import { resolveProviderEnv } from '../../../../services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from '../../../../services/isolation/credential-actor.js';
 import { sessionsService } from '../../services/sessions.service.js';
 import { providerModelsService } from '../../services/provider-models.service.js';
 import { createVendorResponseModelReader } from '../response-model.js';
@@ -50,7 +51,6 @@ const DEFAULT_MAX_TOKENS = 8192;
  */
 const activeByProvider = {
   kimi: new Map(),
-  deepseek: new Map(),
   glm: new Map(),
 };
 
@@ -92,7 +92,7 @@ function drainSseEvents(buffer) {
  * Builds the spawn function for one hosted vendor provider. The returned function
  * matches the CLI providers' signature: spawn<Provider>(command, options, ws).
  *
- * @param {'kimi'|'deepseek'|'glm'} provider
+ * @param {'kimi'|'glm'} provider
  */
 function createVendorSpawn(provider) {
   const config = VENDOR_RUNTIME[provider];
@@ -106,7 +106,7 @@ function createVendorSpawn(provider) {
 
     // Per-user isolated env: this is the ONLY place the API key comes from. No raw
     // process.env spread, no ANTHROPIC_* var.
-    const env = resolveProviderEnv(ws?.userId ?? null, provider, process.env);
+    const env = resolveProviderEnv(assertModelRunActor(ws?.userId), provider, process.env);
     const apiKey = env[config.keyEnv];
 
     const send = (fields) => {

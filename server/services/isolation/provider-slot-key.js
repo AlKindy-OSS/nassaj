@@ -16,11 +16,8 @@
  * since when"); a declaration is only as strong as the narrowest door into the
  * store, so the door had to become one door first.
  *
- * WHAT THIS MODULE DOES NOT DO — YET. It changes no precedence. `sharedFallback`
- * is a REQUIRED option with no default precisely so that every converted site
- * restates the behaviour it already had, out loud, and so the compiler refuses a
- * site that has not decided. Unifying those two dialects is a behavioural change
- * and belongs to a later wave, on the record, not smuggled in under a refactor.
+ * ADR-152 A1 §3.8 (D1) settled the precedence: there is no org fallback any
+ * more. The install-wide slot is inert data; only a member's own key resolves.
  *
  * The precedent this follows is voice-transcription.service.ts's
  * `resolveTranscriptionKey`: one function returning `{ key, scope }` so the
@@ -28,69 +25,44 @@
  * wave-C disclosure contract will read from.
  */
 
-import {
-  getProviderKey,
-  getSharedVendorKey,
-  isCanonicalVendorSecretId,
-} from './provider-secrets-store.js';
+import { isMemberActor } from './credential-actor.js';
+import { getProviderKey, isCanonicalVendorSecretId } from './provider-secrets-store.js';
 
 /**
  * @typedef {'kimi'|'deepseek'|'glm'|'qwen'} SlotProvider
- * @typedef {{ key: string, scope: 'user'|'shared' }} ResolvedSlotKey
+ * @typedef {{ key: string, scope: 'user' }} ResolvedSlotKey
  */
 
 /**
- * Resolves one slot for one caller.
+ * Resolves one slot for one member: their OWN key, or null.
  *
- * @param {string|number|null|undefined} userId the authenticated member, or
- *   null/undefined for a caller with no identity (system task, unauthenticated
- *   single-user mode). An EMPTY STRING is not an identity and not an absence —
- *   it is a call-site bug, and the store still throws on it, exactly as today.
+ * ADR-152 A1 §3.8 (D1): the install-wide ("shared") slot is retired as a
+ * runtime source. `sharedFallback` is gone, and a caller with no member — null,
+ * undefined or the system actor — gets null instead of the install-wide key. Keys
+ * stored there stay on disk, inert (listed by the retirement snapshot); a team
+ * key is shared by a member who stores it as their own and grants it. Callers
+ * that honour grants pass the credential principal (credential-principal.js).
+ *
+ * @param {string|number|null|undefined|object} userId the member whose slot to
+ *   read. An EMPTY STRING is a call-site bug and the store still throws on it.
  * @param {SlotProvider} slot vendor slot id. An id outside the vendor set
- *   resolves to null at runtime rather than throwing, matching the store's read
- *   contract — but the type keeps that from being the normal way in. A
- *   canonical vendor id (ADR-200) throws instead.
- * @param {{ sharedFallback: boolean }} options `sharedFallback: true` consults
- *   the operator-wide slot when the member holds no key of their own. Required,
- *   never defaulted — see the module note.
- * @returns {ResolvedSlotKey|null} null when no key is resolvable in any scope.
+ *   resolves to null; a canonical vendor id (ADR-200) throws.
+ * @returns {ResolvedSlotKey|null}
  */
-export function resolveSlotKey(userId, slot, options) {
-  const { sharedFallback } = options;
-
+export function resolveSlotKey(userId, slot) {
   // ADR-200 S1: a canonical `vendor:*` record (Anthropic, OpenAI, OpenRouter) is
   // never a slot. It feeds harness files only, so a caller asking for one here
   // is a call-site bug — refused loudly, never resolved to a key.
   if (isCanonicalVendorSecretId(slot)) {
     throw new TypeError(`provider-slot-key: "${slot}" is a canonical vendor record, not a slot`);
   }
-
-  // ADR-101: Coding Plan credentials are personal subscriptions. A Qwen run
-  // may never consume the operator/org slot, including when the caller has no
-  // authenticated identity. Make that invariant structural at the one key
-  // resolution seam rather than trusting every future caller to remember it.
-  if (slot === 'qwen') {
-    if (userId === null || userId === undefined) {
-      return null;
-    }
-    const personal = getProviderKey(userId, slot);
-    return personal ? { key: personal, scope: 'user' } : null;
+  if (userId === '') {
+    // B-342: an empty scope is a call-site bug; the store reports it loudly.
+    getProviderKey(userId, slot);
   }
-
-  // No identity at all: there is no member slot to prefer, so the operator-wide
-  // slot is the only candidate — with or without a fallback. This reproduces
-  // `userId ?? SYSTEM_SCOPE` byte-for-byte, including for the sites that never
-  // fell back.
-  if (userId !== null && userId !== undefined) {
-    const own = getProviderKey(userId, slot);
-    if (own) {
-      return { key: own, scope: 'user' };
-    }
-    if (!sharedFallback) {
-      return null;
-    }
+  if (!isMemberActor(userId)) {
+    return null;
   }
-
-  const shared = getSharedVendorKey(slot);
-  return shared ? { key: shared, scope: 'shared' } : null;
+  const own = getProviderKey(userId, slot);
+  return own ? { key: own, scope: 'user' } : null;
 }

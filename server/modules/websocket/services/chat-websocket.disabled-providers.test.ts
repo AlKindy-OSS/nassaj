@@ -107,7 +107,6 @@ function makeDependencies(sessionProviderById: Record<string, string> = {}) {
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
     spawnKimi: spawn('kimi'),
-    spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),
     spawnQwen: spawn('qwen'),
     getSessionProvider: (sessionId: string) => sessionProviderById[sessionId] ?? null,

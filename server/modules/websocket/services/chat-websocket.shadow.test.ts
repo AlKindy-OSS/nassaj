@@ -169,7 +169,7 @@ function dependencies(input: {
         authorizationProvenance: 'chat-test',
       }),
     attestUniversalConversationLegacySession: () => null,
-    getSessionProvider: () => null,
+    getSessionProvider: () => null, admitCredentialTurn: () => ({ principalId: 1, grantedBy: null }),
     queryCodex: async (_command: string, _options: unknown, writer: { send(payload: unknown): void }) =>
       input.codex(writer),
     queryClaudeSDK: unused,
@@ -177,7 +177,6 @@ function dependencies(input: {
     spawnAntigravity: async (_command: string, options: unknown) => input.antigravity?.(options),
     spawnOpenCode: unused,
     spawnKimi: unused,
-    spawnDeepSeek: unused,
     spawnGlm: unused,
   } as never;
 }

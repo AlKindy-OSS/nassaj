@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 
 import { assertRealtimePrincipalCurrent } from '@/modules/account-wallet/index.js';
+import type { ContextGuardPort } from '@/modules/context-guard/types.js';
 import type {
   TrustedLegacySessionAttestation,
   TrustedShadowAuthorization,
@@ -309,7 +310,6 @@ export type ChatWebSocketDependencies = {
    * behavior.
    */
   spawnKimiAgent?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  spawnDeepSeek: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnGlm: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   /**
    * Server-owned mechanical coordinator for hosted, toolless harnesses. It is
@@ -361,12 +361,40 @@ export type ChatWebSocketDependencies = {
     cancel(input: { provider: 'codex' | 'qwen' | 'opencode'; sessionId: string; userId: number | null }): boolean;
   };
   spawnQwen?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
+  /** T-2086/ADR-224: the dsh ACP runtime. OPTIONAL: absent = a dsh turn is refused. */
+  spawnDsh?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
+  /** An empty id aborts the newest dsh run on `rawWs` (Claude's abort-race rule). */
+  abortDshSession?: (sessionId: string, rawWs?: unknown) => boolean;
+  isDshSessionActive?: (sessionId: string) => boolean;
+  /**
+   * Owner-only, once-only answer to a parity-harness question (dsh, OpenCode — ADR-226); false when
+   * not one. An answer carrying updatedInput is a reject for OpenCode (a rewritten call, M11).
+   */
+  resolveParityPermission?: (requestId: string, decision: { allow: boolean; updatedInput?: unknown; requesterUserId: unknown }) => boolean;
+  /**
+   * ADR-152 A1 §3.5: the pre-spawn credential gate (credential-gate.js
+   * `admitCredentialTurn`), wired by the composition root. Throws
+   * CREDENTIAL_NOT_LINKED when the member has no credential and no usable grant;
+   * the turn is then refused with a typed frame before anything starts.
+   * Required: a composition root that does not wire it gets every turn refused
+   * (`credential_gate_unavailable`), never an ungated run (qa M1).
+   */
+  admitCredentialTurn: (input: {
+    actor: unknown; provider: string; mode: 'chat' | 'agent'; model: string | null;
+    clientEngine: string | null; sessionId: string | null;
+  }) => unknown;
   /**
    * Resolves the authoritative provider for an existing session from the
    * database. Returns null when the session is unknown (e.g. a brand-new
    * conversation that has not been persisted yet).
    */
   getSessionProvider: (sessionId: string) => LLMProvider | null;
+  /**
+   * T-2087 / ADR-223: refuses a turn whose pinned model cannot hold the
+   * conversation, before anything starts. Optional: an unwired guard or a
+   * guard failure lets the turn through (it never refuses on absence).
+   */
+  contextGuard?: ContextGuardPort;
   /**
    * T-881: runs a read-only /btw side query by FORKING the resumed live session
    * (resume + forkSession) — never registered in activeSessions, never fanned out
@@ -444,7 +472,6 @@ export type ChatWebSocketDependencies = {
   abortAntigravitySession: (sessionId: string) => boolean;
   abortOpenCodeSession: (sessionId: string) => boolean;
   abortKimiSession: (sessionId: string) => boolean;
-  abortDeepSeekSession: (sessionId: string) => boolean;
   abortGlmSession: (sessionId: string) => boolean;
   abortQwenSession?: (sessionId: string) => boolean;
   /** Active-run ownership bridge. Tokens are opaque and rechecked pre-abort. */
@@ -483,6 +510,8 @@ export type ChatWebSocketDependencies = {
        * production caller (below) always supplies it.
        */
       requesterUserId?: string | number | null;
+      /** ADR-219 P2: the answering socket's authentication kind (server-stamped), for the relay's decision record. */
+      requesterAuthKind?: string | null;
     }
   ) => void | { resolved: boolean; sessionId: string | null };
   isClaudeSDKSessionActive: (sessionId: string) => boolean;
@@ -491,7 +520,6 @@ export type ChatWebSocketDependencies = {
   isAntigravitySessionActive: (sessionId: string) => boolean;
   isOpenCodeSessionActive: (sessionId: string) => boolean;
   isKimiSessionActive: (sessionId: string) => boolean;
-  isDeepSeekSessionActive: (sessionId: string) => boolean;
   isGlmSessionActive: (sessionId: string) => boolean;
   isQwenSessionActive?: (sessionId: string) => boolean;
   reconnectSessionWriter: (sessionId: string, ws: WebSocket) => boolean;
@@ -542,7 +570,6 @@ export type ChatWebSocketDependencies = {
   getActiveAntigravitySessions: () => unknown;
   getActiveOpenCodeSessions: () => unknown;
   getActiveKimiSessions: () => unknown;
-  getActiveDeepSeekSessions: () => unknown;
   getActiveGlmSessions: () => unknown;
   getActiveQwenSessions?: () => unknown;
 };
@@ -562,6 +589,7 @@ function readProvider(value: unknown): LLMProvider | null {
     || value === 'deepseek'
     || value === 'glm'
     || value === 'qwen'
+    || value === 'dsh'
   ) {
     return value;
   }
@@ -629,6 +657,7 @@ const COMMAND_TYPE_TO_PROVIDER: Record<string, LLMProvider> = {
   'glm-command': 'glm',
   'qwen-command': 'qwen',
   'opencode-command': 'opencode',
+  'dsh-command': 'dsh',
 };
 
 /**
@@ -1092,9 +1121,9 @@ export function requestProviderAbort(
     case 'antigravity': return dependencies.abortAntigravitySession(run.sessionId) === true;
     case 'opencode': return dependencies.abortOpenCodeSession(run.sessionId) === true;
     case 'kimi': return dependencies.abortKimiSession(run.sessionId) === true;
-    case 'deepseek': return dependencies.abortDeepSeekSession(run.sessionId) === true;
     case 'glm': return dependencies.abortGlmSession(run.sessionId) === true;
     case 'qwen': return dependencies.abortQwenSession?.(run.sessionId) === true;
+    case 'dsh': return dependencies.abortDshSession?.(run.sessionId) === true;
     default:
       console.warn('[WARN] No abort bridge for provider run', {
         provider: run.provider,
@@ -1787,6 +1816,74 @@ export function withUniversalConversationShadow(
   }
 }
 
+/** A refusal the credential gate (or its absence) produced for one turn. */
+type CredentialRefusal = { code: string; payload: Record<string, unknown> | null; message: string };
+
+/**
+ * Runs the credential gate for one turn: the refusal to send, or null when the
+ * turn is admitted. An unwired gate refuses (fail closed, qa M1); any error
+ * other than CREDENTIAL_NOT_LINKED propagates.
+ */
+function credentialTurnRefusal(
+  dependencies: ChatWebSocketDependencies,
+  data: ChatIncomingMessage,
+  principalId: string | number | null,
+  turn: { provider: string; mode: 'chat' | 'agent'; model: string | null; sessionId: string | null },
+): CredentialRefusal | null {
+  if (typeof dependencies.admitCredentialTurn !== 'function') {
+    console.error('[chat-websocket] credential gate is not wired; refusing the turn');
+    return {
+      code: 'credential_gate_unavailable',
+      payload: null,
+      message: 'This server cannot check your provider account right now, so nothing was started.',
+    };
+  }
+  const engine = (data.options as { engineProvider?: unknown } | undefined)?.engineProvider;
+  try {
+    dependencies.admitCredentialTurn({
+      actor: principalId, ...turn, clientEngine: typeof engine === 'string' ? engine : null,
+    });
+    return null;
+  } catch (error) {
+    const details = (error as { code?: unknown; details?: unknown })?.code === 'CREDENTIAL_NOT_LINKED'
+      ? (error as { details?: unknown }).details
+      : null;
+    if (!details || typeof details !== 'object') throw error;
+    return {
+      code: 'CREDENTIAL_NOT_LINKED',
+      payload: { ...(details as Record<string, unknown>) },
+      message: (error as Error).message,
+    };
+  }
+}
+
+/**
+ * The compaction model is computed on the server from the session's own
+ * transcript (ADR-223 §3); a client-sent value is dropped before any provider.
+ */
+function stripClientCompactionModel(data: ChatIncomingMessage): void {
+  const options = data.options as Record<string, unknown> | undefined;
+  if (options && 'compactionModel' in options) delete options.compactionModel;
+}
+
+/** The guard's refusal for this turn, or null; a guard failure never refuses. */
+async function contextGuardRefusal(
+  dependencies: ChatWebSocketDependencies,
+  provider: string,
+  sessionId: string | null,
+  command: string,
+): Promise<Awaited<ReturnType<ContextGuardPort['checkTurn']>>> {
+  if (!dependencies.contextGuard || !sessionId) return null;
+  try {
+    return await dependencies.contextGuard.checkTurn({ provider, sessionId, command });
+  } catch (error) {
+    console.warn('[chat-websocket] context guard failed; admitting the turn', {
+      sessionId, error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 export async function dispatchProviderCommand(
   messageType: string,
   data: ChatIncomingMessage,
@@ -1975,6 +2072,38 @@ async function dispatchFencedProviderCommand(
         notStarted: true,
       })
     );
+    return;
+  }
+
+  // ADR-152 A1 §3.5 (AT1): a member with no credential and no usable grant is
+  // refused here, once, with a typed frame — nothing is claimed or started.
+  const credentialRefusal = credentialTurnRefusal(dependencies, data, principalId, {
+    provider: glmCarrierRun ? 'opencode' : targetProvider,
+    mode: hostedMode,
+    model: requestedModel ?? null,
+    sessionId: resumeSessionId,
+  });
+  if (credentialRefusal) {
+    writer.send(createNormalizedMessage({
+      kind: 'complete', provider: targetProvider, exitCode: 1, success: false,
+      code: credentialRefusal.code,
+      ...(credentialRefusal.payload ? { credential: credentialRefusal.payload } : {}),
+      error: credentialRefusal.message, ...clientMsgIdEcho(data), notStarted: true,
+    }));
+    return;
+  }
+
+  // T-2087 / ADR-223: a pinned model too small for the conversation is refused
+  // here, before supervision or spawn, so nothing reaches the model.
+  stripClientCompactionModel(data);
+  const contextRefusal = await contextGuardRefusal(dependencies, targetProvider, resumeSessionId, command);
+  if (contextRefusal) {
+    writer.send(createNormalizedMessage({
+      kind: 'complete', provider: targetProvider, exitCode: 1, success: false,
+      code: contextRefusal.code, contextGuard: contextRefusal.payload,
+      error: 'The conversation is larger than the selected model can hold, so nothing was sent.',
+      ...clientMsgIdEcho(data), notStarted: true,
+    }));
     return;
   }
 
@@ -2560,11 +2689,6 @@ async function dispatchFencedProviderCommand(
     }
     return;
   }
-  if (targetProvider === 'deepseek') {
-    await runAdmittedLegacyProvider('deepseek', 'deepseek', 'vendor_cli', options =>
-      dependencies.spawnDeepSeek(command, options, writer));
-    return;
-  }
   if (targetProvider === 'glm') {
     // GL-8: agent mode + carrier armed → run GLM through the OpenCode carrier
     // (provider-prefixed `glm/<model>`, options.carrier=true so opencode-cli.js
@@ -2598,6 +2722,20 @@ async function dispatchFencedProviderCommand(
     }
     await runAdmittedLegacyProvider('qwen', 'qwen', 'cli', options =>
       dependencies.spawnQwen!(command, options, writer));
+    return;
+  }
+  if (targetProvider === 'dsh') {
+    // T-2086/ADR-224: the ACP runtime; the ADR-134 permit encloses the turn.
+    if (!dependencies.spawnDsh) {
+      writer.send(createNormalizedMessage({
+        kind: 'complete', provider: 'dsh', exitCode: 1, success: false,
+        error: 'The DeepSeek Harness runtime is unavailable on this server.', notStarted: true,
+        ...clientMsgIdEcho(data),
+      }));
+      return;
+    }
+    await runAdmittedLegacyProvider('dsh', 'dsh', 'acp', options =>
+      dependencies.spawnDsh!(command, options, writer));
     return;
   }
 
@@ -2704,12 +2842,12 @@ export async function abortSessionTurn(
     success = dependencies.abortOpenCodeSession(sessionId);
   } else if (provider === 'kimi') {
     success = dependencies.abortKimiSession(sessionId);
-  } else if (provider === 'deepseek') {
-    success = dependencies.abortDeepSeekSession(sessionId);
   } else if (provider === 'glm') {
     success = dependencies.abortGlmSession(sessionId);
   } else if (provider === 'qwen') {
     success = dependencies.abortQwenSession?.(sessionId) ?? false;
+  } else if (provider === 'dsh') {
+    success = dependencies.abortDshSession?.(sessionId, rawWs ?? undefined) ?? false;
   } else if (provider === 'claude') {
     // Claude: pass the raw socket so the SDK can fall back to this
     // connection's newest active run when `sessionId` is EMPTY (the
@@ -3164,6 +3302,16 @@ export function handleChatConnection(
           emitBtwError('sdk_error', 'The project path for this session could not be determined.');
           return;
         }
+        // ADR-152 A1 §3.5: a /btw fork is a model run on the REQUESTER's
+        // credential — refused before the accept frame when none is linked.
+        const btwCredentialRefusal = credentialTurnRefusal(dependencies, data, presenceUserId, {
+          provider: sessionProvider, mode: 'chat', model: null, sessionId: btwSessionId,
+        });
+        if (btwCredentialRefusal) {
+          emitBtwError(btwCredentialRefusal.code, btwCredentialRefusal.message,
+            btwCredentialRefusal.payload ? { credential: btwCredentialRefusal.payload } : {});
+          return;
+        }
         // A-4 per-user flood cap (busy): across ALL of this user's sockets.
         if (btwUserInFlight(presenceUserId) >= BTW_MAX_INFLIGHT_PER_USER) {
           emitBtwError('busy', 'You have too many /btw queries running. Try again shortly.');
@@ -3605,6 +3753,17 @@ export function handleChatConnection(
           );
           return;
         }
+        // ADR-152 A1 §3.5: the branch continues on the caller's credential (a
+        // Codex fork starts the app server on it) — refused when none is linked.
+        const forkCredentialRefusal = credentialTurnRefusal(dependencies, data, presenceUserId, {
+          provider: forkProvider, mode: 'chat', model: null, sessionId: forkSessionId,
+        });
+        if (forkCredentialRefusal) {
+          sendRawToThisSocket({ type: 'message-fork-error', requestId, code: forkCredentialRefusal.code,
+            message: forkCredentialRefusal.message,
+            ...(forkCredentialRefusal.payload ? { credential: forkCredentialRefusal.payload } : {}) });
+          return;
+        }
         if (btwForkInFlight || btwUserForks(presenceUserId) >= BTW_MAX_FORKS_PER_USER) {
           emitMessageForkError('busy', 'A fork is already running. Try again shortly.');
           return;
@@ -3680,11 +3839,18 @@ export function handleChatConnection(
             // created and refuses a foreign answer / strips its updatedInput and
             // rememberEntry. Never sourced from the client payload.
             requesterUserId: presenceUserId,
+            requesterAuthKind: typeof request.user?.authenticationKind === 'string' ? request.user.authenticationKind : null,
           });
           // لا نحذف الطلب لمجرد وصول جواب من العميل: resolver هو بوابة الملكية
           // والوجود. بعد نجاحه فقط نحسم requestId ونبث زوال آخر سؤال معلق.
           if (result?.resolved && result.sessionId) {
             resolveQuestionRequest(result.sessionId, data.requestId);
+          }
+          // T-2086 / ADR-226: the same answer frame settles a dsh or OpenCode question (owner-only, once).
+          if (!result?.resolved) {
+            dependencies.resolveParityPermission?.(data.requestId, {
+              allow: data.allow === true, updatedInput: data.updatedInput, requesterUserId: presenceUserId,
+            });
           }
         }
         return;
@@ -3789,6 +3955,8 @@ export function handleChatConnection(
           isActive = dependencies.isOpenCodeSessionActive(sessionId);
         } else if (provider === 'qwen') {
           isActive = dependencies.isQwenSessionActive?.(sessionId) ?? false;
+        } else if (provider === 'dsh') {
+          isActive = dependencies.isDshSessionActive?.(sessionId) ?? false;
         } else if (provider === 'claude') {
           isActive = dependencies.isClaudeSDKSessionActive(sessionId);
           // [WS-DIAG] Re-subscribe decision for a reconnecting socket (point #4).
@@ -3942,7 +4110,7 @@ export function handleChatConnection(
         // every provider's active-id list through the SAME visibility predicate
         // as check-session-status (a private-project run is dropped for a
         // non-member, an unknown/null-path run stays visible like presence);
-        // (b) surface the kimi/deepseek/glm providers that were silently omitted
+        // (b) surface the kimi/glm providers that were silently omitted
         // from this listing.
         const visibleIds = (ids: unknown): string[] =>
           (Array.isArray(ids) ? ids : []).filter(
@@ -3959,7 +4127,6 @@ export function handleChatConnection(
             antigravity: visibleIds(dependencies.getActiveAntigravitySessions()),
             opencode: visibleIds(dependencies.getActiveOpenCodeSessions()),
             kimi: visibleIds(dependencies.getActiveKimiSessions()),
-            deepseek: visibleIds(dependencies.getActiveDeepSeekSessions()),
             glm: visibleIds(dependencies.getActiveGlmSessions()),
             qwen: visibleIds(dependencies.getActiveQwenSessions?.() ?? []),
           },

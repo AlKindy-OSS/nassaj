@@ -10,17 +10,15 @@
  * (claude-permission-mode.js: parity `enforce`, the route/client mode,
  * skipPermissions, the settings defaultMode for an implicit default, and the
  * settings `disableBypassPermissionsMode` gate), and this table only translates it:
- *   - bypassPermissions → `--dangerously-skip-permissions` (approve every prompt not
- *     explicitly denied). The SL-4 operator flag OPENCODE_ALLOW_FULL_ACCESS is
- *     RETIRED: Claude's bypass has no nassaj operator gate, so OpenCode has none.
+ *   - bypassPermissions → no flag (ADR-226): the shared Claude-parity engine decides every
+ *     tool call (bypass included) and OPENCODE_PERMISSION starts with `"*":"allow"`, so
+ *     OpenCode's own skip flag is never passed. The SL-4 operator flag
+ *     OPENCODE_ALLOW_FULL_ACCESS stays RETIRED.
  *   - plan → `--agent plan` plus a nassaj-generated OPENCODE_PERMISSION that denies
  *     `edit` and `bash`. Measured on 1.19.3: the plan agent alone is NOT read-only
  *     (bash stays allowed, and a user config `edit: allow` overrides its edit deny).
- *   - default / acceptEdits / auto / dontAsk → no flag: OpenCode's own rules. This
- *     is NOT Claude's restriction: OpenCode's build agent allows edits and bash in
- *     the workspace without asking, and `run` auto-rejects whatever would ask
- *     (e.g. external_directory). There is no OpenCode switch that asks per edit or
- *     per command in a non-interactive run, so this gap is documented, not hidden.
+ *   - default / acceptEdits / auto / dontAsk → no flag: the engine applies Claude's
+ *     rules and asks the member (ADR-226 §3).
  *
  * Kimi keeps its SL-4 ceiling below (KIMI_ALLOW_FULL_ACCESS); aligning Kimi with the
  * ruling is separate work.
@@ -31,10 +29,8 @@
  *      within the workspace (the safe autonomous tier, == Codex workspace-write);
  *      `--yolo` = full unrestricted access (== Codex danger-full-access).
  *   OpenCode (sst/opencode, run.ts read at v1.4.0, v1.14.33, v1.19.3, v2.2.0):
- *     `--dangerously-skip-permissions` is accepted by every one of them (hidden alias
- *     of `--auto` since that flag exists), and `run` parses argv strictly, so the
- *     widest-accepted spelling is used. `--agent plan` and OPENCODE_PERMISSION are
- *     verified on the installed 1.19.3.
+ *     `run` parses argv strictly. `--agent plan` and OPENCODE_PERMISSION are verified
+ *     on the installed 1.19.5 (ADR-226 stage 0).
  *
  * ASSUMPTION FLAGGED FOR LIVE VERIFICATION (§4.5 G-KIMI-LIVE): Kimi is not installed
  * on this node, so the plan/auto/yolo ORDERING is taken from the KG-1 research gate. If a live `kimi --help` ever shows `--auto` to be the
@@ -89,9 +85,6 @@ const SERVER_FLAGS = Object.freeze({
   KIMI_ALLOW_FULL_ACCESS: 'KIMI_ALLOW_FULL_ACCESS',
   KIMI_ALLOW_NETWORK: 'KIMI_ALLOW_NETWORK',
 });
-
-/** OpenCode `run` flag that approves every prompt not explicitly denied (v1.4.0–v2.2.0). */
-const OPENCODE_SKIP_PERMISSIONS_FLAG = '--dangerously-skip-permissions';
 
 /**
  * Plan = read-only for the top-level `edit`/`bash` rules: merged after every config
@@ -164,13 +157,10 @@ function mapOpencode(mode) {
     };
   }
   if (mode === MODE_BYPASS) {
-    return {
-      flags: [OPENCODE_SKIP_PERMISSIONS_FLAG], permission: null,
-      network: true, fullAccess: true, ceiling: 'full',
-    };
+    // ADR-226: no skip flag; the parity engine allows what Claude's bypass allows.
+    return { flags: [], permission: null, network: true, fullAccess: true, ceiling: 'full' };
   }
-  // default / acceptEdits / anything else: OpenCode's own rules (see the header for
-  // how they differ from Claude's prompting modes).
+  // default / acceptEdits / anything else: the parity engine applies Claude's rules.
   return { flags: [], permission: null, network: true, fullAccess: false, ceiling: 'default' };
 }
 
@@ -210,6 +200,5 @@ export {
   mapPermissionModeToVendorFlags,
   normalizePermissionMode,
   OPENCODE_PLAN_PERMISSION,
-  OPENCODE_SKIP_PERMISSIONS_FLAG,
   SERVER_FLAGS,
 };

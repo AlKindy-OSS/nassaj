@@ -1,0 +1,216 @@
+{
+ "$comment": "T-2091: the reviewed dsh tools. `fields`: every argument the parity adapter (dsh-claude-tools.js) reads, with its JSON type. `ignored`: the other declared properties, each reviewed as unable to change what or where the tool touches (bash timeoutMs/run_in_background/sandbox_permissions/justification: duration, async delivery of the same command, sandbox request (no sandbox runs: Claude sandbox refuses the launch), free text; edit/write sandbox_permissions/justification: same; read offset/limit: range of the same file; job_output wait/timeout_ms; job_kill reason). `required`: the declared required list. Derived from the live schemas of dsh 0.2.2-rc.1 (__tests__/fixtures/dsh-policy-tools.json). A launch hides and denies a tool absent here, with a property outside fields + ignored, a changed field type or a changed required list; an update candidate doing it is held.",
+ "dsh": "@deepseek-ai/dsh@0.2.2-rc.1",
+ "tools": {
+  "bash": {
+   "claude": "Bash",
+   "cls": "bash",
+   "fields": {
+    "command": "string",
+    "description": "string",
+    "workdir": "string"
+   },
+   "required": [
+    "command",
+    "description"
+   ],
+   "ignored": [
+    "timeoutMs",
+    "run_in_background",
+    "sandbox_permissions",
+    "justification"
+   ]
+  },
+  "edit": {
+   "claude": "Edit",
+   "cls": "edit",
+   "fields": {
+    "file_path": "string",
+    "old_string": "string",
+    "new_string": "string",
+    "replace_all": "boolean"
+   },
+   "required": [
+    "file_path",
+    "new_string",
+    "old_string"
+   ],
+   "ignored": [
+    "sandbox_permissions",
+    "justification"
+   ]
+  },
+  "glob": {
+   "claude": "Glob",
+   "cls": "read",
+   "fields": {
+    "pattern": "string",
+    "path": "string"
+   },
+   "required": [
+    "pattern"
+   ],
+   "ignored": []
+  },
+  "grep": {
+   "claude": "Grep",
+   "cls": "read",
+   "fields": {
+    "pattern": "string",
+    "path": "string",
+    "include": "string"
+   },
+   "required": [
+    "pattern"
+   ],
+   "ignored": []
+  },
+  "job_kill": {
+   "claude": "KillShell",
+   "cls": "tool",
+   "fields": {
+    "job_id": "string"
+   },
+   "required": [
+    "job_id"
+   ],
+   "ignored": [
+    "reason"
+   ]
+  },
+  "job_list": {
+   "claude": "BashOutput",
+   "cls": "free",
+   "fields": {},
+   "required": [],
+   "ignored": []
+  },
+  "job_output": {
+   "claude": "BashOutput",
+   "cls": "free",
+   "fields": {
+    "job_id": "string"
+   },
+   "required": [
+    "job_id"
+   ],
+   "ignored": [
+    "wait",
+    "timeout_ms"
+   ]
+  },
+  "read": {
+   "claude": "Read",
+   "cls": "read",
+   "fields": {
+    "file_path": "string"
+   },
+   "required": [
+    "file_path"
+   ],
+   "ignored": [
+    "offset",
+    "limit"
+   ]
+  },
+  "read_image": {
+   "claude": "Read",
+   "cls": "read",
+   "fields": {
+    "file_path": "string"
+   },
+   "required": [
+    "file_path"
+   ],
+   "ignored": []
+  },
+  "skill": {
+   "claude": "Skill",
+   "cls": "tool",
+   "fields": {
+    "name": "string"
+   },
+   "required": [
+    "name"
+   ],
+   "ignored": []
+  },
+  "subagent": {
+   "claude": "Task",
+   "cls": "tool",
+   "fields": {
+    "description": "string",
+    "prompt": "string",
+    "cwd": "string"
+   },
+   "required": [
+    "description",
+    "prompt"
+   ],
+   "ignored": []
+  },
+  "subagent_fork": {
+   "claude": "Task",
+   "cls": "tool",
+   "fields": {
+    "description": "string",
+    "prompt": "string",
+    "cwd": "string"
+   },
+   "required": [
+    "description",
+    "prompt"
+   ],
+   "ignored": []
+  },
+  "todo_write": {
+   "claude": "TodoWrite",
+   "cls": "free",
+   "fields": {
+    "todos": "array"
+   },
+   "required": [
+    "todos"
+   ],
+   "ignored": []
+  },
+  "web_fetch": {
+   "claude": "WebFetch",
+   "cls": "fetch",
+   "fields": {
+    "url": "string"
+   },
+   "required": [
+    "url"
+   ],
+   "ignored": []
+  },
+  "web_search": {
+   "claude": "WebSearch",
+   "cls": "tool",
+   "fields": {
+    "queries": "array"
+   },
+   "required": [
+    "queries"
+   ],
+   "ignored": []
+  },
+  "write": {
+   "claude": "Write",
+   "cls": "edit",
+   "fields": {
+    "file_path": "string",
+    "content": "string"
+   },
+   "required": [
+    "content",
+    "file_path"
+   ],
+   "ignored": [
+    "sandbox_permissions",
+    "justification"
+   ]
+  }
+ }
+}

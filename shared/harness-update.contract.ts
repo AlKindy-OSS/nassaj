@@ -82,6 +82,33 @@ export interface HarnessVersionStatus {
   notices?: HarnessUpdateNotices;
   /** T-1871: restoring a known release is offered (opencode only). */
   restoreCompatible?: HarnessRestoreCompatibleOffer;
+  /**
+   * T-2086: the operator set this harness's server override env (e.g. DSH_PATH):
+   * launches run that exact file. `treeCheckSkipped` is true when the managed
+   * install-tree check does not apply to it. Absent when no override is set.
+   */
+  operatorOverride?: HarnessOperatorOverride;
+  /**
+   * T-2091: the dsh staged-update pipeline. `held` keeps the current version (code = the
+   * failed check, e.g. dsh_cap_gate, dsh_update_held_disk); `rolled_back` = the first live
+   * launch on the switched version failed a capability probe. Absent for other harnesses.
+   */
+  integrationUpdate?: HarnessIntegrationUpdate;
+}
+
+/** The dsh update pipeline status shown by the client. */
+export interface HarnessIntegrationUpdate {
+  state: 'installed' | 'checking' | 'held' | 'switched' | 'rolled_back';
+  code: string | null;
+  candidateVersion: string | null;
+  /** True when the owner can clear the hold and retry (POST /api/harness/dsh/integration-hold/clear). */
+  clearable: boolean;
+}
+
+/** An operator binary override in force for one harness (never its path). */
+export interface HarnessOperatorOverride {
+  env: string;
+  treeCheckSkipped: boolean;
 }
 
 /** Dialog facts for one harness (qa condition 8). */

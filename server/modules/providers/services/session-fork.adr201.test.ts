@@ -36,7 +36,6 @@ mock.module('@/modules/providers/services/session-synchronizer.service.js', {
 });
 
 const { getConnection, initializeDatabase, participantsDb, projectsDb, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig } = await import('@/services/provider-sharing.js');
 const { forkSessionAtMessage, forkSessionFromSideQuery, SessionForkError } = await import('./session-fork.service.js');
 
 process.env.CLAUDE_CONFIG_DIR = path.join(SANDBOX_HOME, '.claude');
@@ -51,7 +50,6 @@ const USERS = path.join(SANDBOX_HOME, '.nassaj-users');
 await initializeDatabase();
 const ownerId = userDb.createUser('fork-owner', 'hash-o', 'user').id;
 for (let filler = 2; userDb.createUser(`fork-member-${filler}`, 'hash', 'user').id < 10; filler += 1);
-setProviderSharingConfig({ claude: 'isolated' });
 
 const projectPath = path.join(SANDBOX_HOME, 'workspaces', 'fork');
 fs.mkdirSync(projectPath, { recursive: true });

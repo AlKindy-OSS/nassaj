@@ -102,11 +102,15 @@ describe('backup restore', () => {
     expect((button() as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('says the files are shared on VENDOR_BACKUP_SHARED_SCOPE', async () => {
+  it('ADR-152 A1: the retired VENDOR_BACKUP_SHARED_SCOPE gets no "shared files" wording', async () => {
     installFetch(fetchMock, [restoreRoute(() => appError(409, 'VENDOR_BACKUP_SHARED_SCOPE'))]);
     open();
-    fireEvent.click(within(rowOf('Codex')).getByRole('button', { name: ar('vendors.restore.button') }));
+    const button = () => within(rowOf('Codex')).getByRole('button', { name: ar('vendors.restore.button') });
+    fireEvent.click(button());
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: ar('vendors.restore.confirm') }));
-    await waitFor(() => expect(within(rowOf('Codex')).getByText(ar('vendors.restore.sharedScope'))).toBeTruthy());
+    // An unknown code is just the server's message; the row stays usable.
+    await waitFor(() => expect(within(rowOf('Codex')).getByText('VENDOR_BACKUP_SHARED_SCOPE')).toBeTruthy());
+    expect((button() as HTMLButtonElement).disabled).toBe(false);
+    expect(plain(rowOf('Codex').textContent)).not.toContain('مشتركة');
   });
 });

@@ -8,8 +8,7 @@
  * ~/.nassaj-users/<userId>/.codex/sessions by the B-136 isolated spawn — were
  * never indexed and thus never displayed. The fix routes the scan through
  * resolveCodexHomes() (which reuses resolveProviderEnv), scanning the operator
- * home plus every isolated user's per-user home, and collapsing back to just
- * ~/.codex when codex is shared.
+ * home plus every user's per-user home (codex is always isolated, ADR-152 A1).
  *
  * Touches only the filesystem + the DB (no codex binary, no network), so it runs
  * against a sandboxed $HOME and a throwaway SQLite file. Runner: node:test.
@@ -44,9 +43,6 @@ assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $
 const { initializeDatabase, closeConnection, getConnection, sessionsDb } = await import(
   '@/modules/database/index.js'
 );
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import(
-  '@/services/provider-sharing.js'
-);
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const { operatorCodexHome } = await import('@/modules/providers/list/codex/codex-home.js');
 const { CodexSessionSynchronizer } = await import(
@@ -58,14 +54,14 @@ await initializeDatabase();
 // Seed the users whose per-user trees the scan resolves. Their id is a FK target
 // for provisioning's audit row, so a real insert keeps that path clean.
 const USER_ISOLATED = 8101;
-const USER_SHARED = 8102;
+const USER_SECOND = 8102;
 {
   const db = getConnection();
   const insertUser = db.prepare(
     "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
   );
   insertUser.run(USER_ISOLATED, 'codex-sess-iso');
-  insertUser.run(USER_SHARED, 'codex-sess-shared');
+  insertUser.run(USER_SECOND, 'codex-sess-second');
 }
 
 after(() => {
@@ -76,17 +72,6 @@ after(() => {
   else process.env.DATABASE_PATH = ORIGINAL_DB;
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
-
-/** Forces the codex sharing policy deterministically for a case. */
-function setCodexPolicy(state: 'isolated' | 'shared'): void {
-  _resetProviderSharingCache();
-  setProviderSharingConfig({
-    claude: 'isolated',
-    codex: state,
-    agy: 'shared',
-    cursor: 'shared',
-  });
-}
 
 /**
  * Writes a minimal but valid Codex rollout transcript under
@@ -105,8 +90,6 @@ function writeCodexSession(codexHome: string, sessionId: string, projectPath: st
 
 describe('Codex session synchronizer — per-user home indexing (B-152)', () => {
   it('indexes an isolated user session from THEIR CODEX_HOME, and still the operator home', async () => {
-    setCodexPolicy('isolated');
-
     const isolatedHome = userConfigDir(USER_ISOLATED, '.codex');
     const isolatedFile = writeCodexSession(isolatedHome, 'iso-sess-A', '/workspace/proj-iso-a');
     writeCodexSession(operatorCodexHome(), 'op-sess-A', '/workspace/proj-op-a');
@@ -131,30 +114,17 @@ describe('Codex session synchronizer — per-user home indexing (B-152)', () => 
     assert.ok(sessionsDb.getSessionById('op-sess-A'), 'operator session must still be indexed');
   });
 
-  it('does NOT scan per-user homes when codex is shared — only ~/.codex', async () => {
-    setCodexPolicy('shared');
-
-    // A session sitting in a user's isolated tree must be invisible to the scan
-    // while codex is shared: shared mode reads only the operator ~/.codex.
-    writeCodexSession(userConfigDir(USER_SHARED, '.codex'), 'iso-sess-B', '/workspace/proj-iso-b');
+  it('scans EVERY member\'s own home — there is no shared mode (ADR-152 A1)', async () => {
+    writeCodexSession(userConfigDir(USER_SECOND, '.codex'), 'iso-sess-B', '/workspace/proj-iso-b');
     writeCodexSession(operatorCodexHome(), 'op-sess-B', '/workspace/proj-op-b');
 
     await new CodexSessionSynchronizer().synchronize();
 
-    assert.equal(
-      sessionsDb.getSessionById('iso-sess-B'),
-      null,
-      'a per-user isolated session must NOT be indexed while codex is shared',
-    );
-    assert.ok(
-      sessionsDb.getSessionById('op-sess-B'),
-      'the operator ~/.codex session must still be indexed in shared mode',
-    );
+    assert.ok(sessionsDb.getSessionById('iso-sess-B'), 'a second member\'s own session must be indexed');
+    assert.ok(sessionsDb.getSessionById('op-sess-B'), 'the operator ~/.codex session must still be indexed');
   });
 
   it('single-file sync resolves the name index from the file’s OWN codex home', async () => {
-    setCodexPolicy('isolated');
-
     const isolatedHome = userConfigDir(USER_ISOLATED, '.codex');
     // Seed the isolated tree's session_index.jsonl so the name lookup is proven to
     // read from that tree (not the operator index).

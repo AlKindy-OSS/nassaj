@@ -26,9 +26,9 @@ import { NETWORK_FAILURE, readApiFailure, type ApiFailure } from './vendorKeyApi
 
 /** What happened to one slot during a Save or a Delete. Mirrors the server union. */
 export type CompanySlotOutcome =
-  | 'written' | 'skipped_subscription' | 'forbidden' | 'failed'
+  | 'written' | 'skipped_subscription' | 'failed'
   | 'linked' | 'kept_on_subscription' | 'mode_unset' | 'login_present'
-  | 'shared_scope_refused' | 'foreign_credential'
+  | 'foreign_credential'
   | 'removed' | 'absent' | 'adopted_credential';
 
 export type CompanySlotResult = {
@@ -54,7 +54,7 @@ export type CompanySlotStatus = {
 /** Ledger state of one projection (flag ON, `GET` only). */
 export type ProjectionState =
   | 'linked' | 'stale' | 'failed' | 'tombstone' | 'adopted' | 'foreign_credential'
-  | 'kept_on_subscription' | 'login_present' | 'shared_scope_refused' | 'mode_unset';
+  | 'kept_on_subscription' | 'login_present' | 'mode_unset';
 
 export type CompanyProjection = {
   vendorId: string;
@@ -75,7 +75,6 @@ type MutationResult =
 type CompanyKeyResponse = {
   data?: {
     configured?: boolean;
-    writable?: boolean;
     slots?: (CompanySlotResult & CompanySlotStatus)[];
     projections?: CompanyProjection[];
     migrationConflict?: MigrationConflict;
@@ -96,12 +95,6 @@ export function useCompanyKey(companyId: string) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<ApiFailure | null>(null);
-  /**
-   * `undefined` = unanswered, or a server that predates these routes. Silence
-   * degrades to the permissive behaviour and lets the server's own 403 speak,
-   * never locks the surface (B-367).
-   */
-  const [writable, setWritable] = useState<boolean | undefined>(undefined);
 
   const endpoint = `/api/providers/company/${encodeURIComponent(companyId)}/key`;
 
@@ -118,7 +111,6 @@ export function useCompanyKey(companyId: string) {
       setSlots((data?.slots ?? []) as CompanySlotStatus[]);
       setProjections(Array.isArray(data?.projections) ? data.projections : null);
       setMigrationConflict(data?.migrationConflict ?? null);
-      setWritable(data?.writable);
     } catch {
       setFailure(NETWORK_FAILURE);
     } finally {
@@ -204,7 +196,7 @@ export function useCompanyKey(companyId: string) {
   const configured = slots.some((slot) => slot.configured);
 
   return {
-    slots, projections, migrationConflict, configured, loading, saving, failure, writable,
+    slots, projections, migrationConflict, configured, loading, saving, failure,
     refresh, saveKey, deleteKey, resolveConflict, clearFailure,
   };
 }

@@ -33,7 +33,6 @@ for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OA
 }
 
 const { initializeDatabase, closeConnection, userDb } = await import('@/modules/database/index.js');
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
 const { userConfigDir } = await import('@/services/isolation/provision-user-dirs.js');
 const store = await import('@/services/isolation/provider-secrets-store.js');
 const { vendorKeyMigrationService } = await import('../services/vendor-key-migration.runtime.js');
@@ -41,8 +40,6 @@ const { vendorKeyFanoutService } = await import('../services/vendor-key-fanout.r
 const { listSweepMemberIds } = await import('../services/vendor-key-sweep-members.js');
 
 await initializeDatabase();
-_resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', opencode: 'isolated' });
 store._resetProviderSecretsServerKeyCache();
 
 after(() => {
@@ -106,7 +103,7 @@ test('G2 veto: a key deleted without confirm is not re-adopted after a restart; 
   assert.equal(adopted.vendors.find((v) => v.vendorId === 'anthropic')?.outcome, 'adopted');
   assert.equal(store.getCanonicalVendorKey(member.id, 'anthropic'), ANTHROPIC_KEY);
 
-  const removed = await vendorKeyFanoutService.remove(member.id, 'anthropic', { isElevated: false, slots: ANTHROPIC_SLOTS });
+  const removed = await vendorKeyFanoutService.remove(member.id, 'anthropic', { slots: ANTHROPIC_SLOTS });
   assert.equal(outcomeOf(removed, 'claude'), 'adopted_credential', 'the adopted value stays without confirm');
   assert.equal(store.getCanonicalVendorKey(member.id, 'anthropic'), null);
   assert.equal(readJson(claudeSettings(member.id)).env.ANTHROPIC_API_KEY, ANTHROPIC_KEY);
@@ -121,7 +118,7 @@ test('G2 veto: a key deleted without confirm is not re-adopted after a restart; 
 
   setApiKeyMode(member.id, 'claude');
   const saved = await vendorKeyFanoutService.save(member.id, 'anthropic', ANTHROPIC_KEY, {
-    isElevated: false, slots: ANTHROPIC_SLOTS, authenticatedPrincipal: member.principal,
+    slots: ANTHROPIC_SLOTS, authenticatedPrincipal: member.principal,
   });
   assert.equal(outcomeOf(saved, 'claude'), 'linked');
   assert.equal('anthropic' in deletedVendors(member.id), false, 'an explicit Save clears the marker');
@@ -136,7 +133,7 @@ test('G2: a fan-out Save runs the real gate (backup, link mode, lock) and the re
   writeJson(codexAuth(member.id), { auth_mode: 'chatgpt', OPENAI_API_KEY: null, tokens: { refresh_token: CODEX_REFRESH, account_id: 'acc' } });
   setApiKeyMode(member.id, 'claude');
   setApiKeyMode(member.id, 'codex');
-  const options = { isElevated: false, authenticatedPrincipal: member.principal };
+  const options = { authenticatedPrincipal: member.principal };
 
   const anthropic = await vendorKeyFanoutService.save(member.id, 'anthropic', ANTHROPIC_KEY, { ...options, slots: ANTHROPIC_SLOTS });
   const openai = await vendorKeyFanoutService.save(member.id, 'openai', OPENAI_KEY, { ...options, slots: OPENAI_SLOTS });
@@ -167,7 +164,7 @@ test('G2: a restore under the real lock puts the key fields back and survives th
   writeJson(claudeSettings(member.id), { env: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH } });
   setApiKeyMode(member.id, 'claude');
   await vendorKeyFanoutService.save(member.id, 'anthropic', ANTHROPIC_KEY, {
-    isElevated: false, slots: ANTHROPIC_SLOTS, authenticatedPrincipal: member.principal,
+    slots: ANTHROPIC_SLOTS, authenticatedPrincipal: member.principal,
   });
   assert.equal(readJson(claudeSettings(member.id)).env.ANTHROPIC_API_KEY, ANTHROPIC_KEY);
 
@@ -202,7 +199,7 @@ test('B-1575: a key the user removed from OpenCode auth.json is not re-projected
   assert.equal(store.getCanonicalVendorKey(member.id, 'anthropic'), ANTHROPIC_KEY, 'the stored key is untouched');
 
   const saved = await vendorKeyFanoutService.save(member.id, 'anthropic', ANTHROPIC_KEY, {
-    isElevated: false, slots: ANTHROPIC_SLOTS, authenticatedPrincipal: member.principal,
+    slots: ANTHROPIC_SLOTS, authenticatedPrincipal: member.principal,
   });
   assert.equal(outcomeOf(saved, 'opencode'), 'linked', 'an explicit Save still projects');
   assert.equal(readJson(opencodeAuth(member.id)).anthropic?.key, ANTHROPIC_KEY);

@@ -54,9 +54,17 @@ after(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-test('live catalog from a successful models run is NOT flagged degraded', async () => {
+test('ADR-152 A1: a caller with no member gets the degraded catalog, never the operator\'s live one', async () => {
   setCli('anthropic/claude-sonnet-4-5\nopenai/gpt-5.1\n', 0);
   const result = await new OpenCodeProviderModels().getSupportedModels(null);
+  assert.equal(result.degraded, true);
+  assert.deepEqual(result.OPTIONS, OPENCODE_FALLBACK_MODELS.OPTIONS);
+});
+
+test('live catalog from a successful models run is NOT flagged degraded', async () => {
+  setCli('anthropic/claude-sonnet-4-5\nopenai/gpt-5.1\n', 0);
+  // The live catalog is read on the asking member's own opencode tree.
+  const result = await new OpenCodeProviderModels().getSupportedModels(7);
 
   assert.deepEqual(result.OPTIONS.map((o) => o.value), ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.1']);
   assert.notEqual(result.degraded, true);

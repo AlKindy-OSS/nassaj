@@ -60,9 +60,6 @@ initializeDatabase();
  * temp databases from being seeded that way; the pin keeps this file independent
  * of any stored policy regardless.
  */
-const { setProviderSharingConfig, _resetProviderSharingCache } = await import('@/services/provider-sharing.js');
-_resetProviderSharingCache();
-setProviderSharingConfig({ cursor: 'isolated', agy: 'isolated' });
 
 const { CursorProviderAuth } = await import('./cursor/cursor-auth.provider.js');
 
@@ -89,9 +86,11 @@ test('B-587: cursor probes each member under their own HOME', async () => {
   assert.match(second!, /nassaj-users[/\\]2$/);
 });
 
-test('B-587: cursor keeps the operator env for an anonymous probe', async () => {
-  await cursor.checkCursorLogin(null);
-  assert.equal(lastSpawnEnv?.HOME, process.env.HOME, 'null userId keeps the base env');
+test('B-587 / ADR-152 A1: an anonymous cursor probe spawns nothing and reads "not linked"', async () => {
+  lastSpawnEnv = undefined;
+  const status = await cursor.checkCursorLogin(null);
+  assert.equal(lastSpawnEnv, undefined, 'no cursor-agent runs on the operator login');
+  assert.equal(status.authenticated, false);
 });
 
 /*
@@ -112,19 +111,11 @@ test('B-580: the agy token path is per member', () => {
   assert.match(first, /antigravity-oauth-token$/, 'the file itself must not move');
 });
 
-test('B-1346: an admin-shared agy policy is the ONE thing that collapses members onto the operator', () => {
-  try {
-    setProviderSharingConfig({ agy: 'shared' });
-    assert.equal(getAntigravityTokenPath(1), getAntigravityTokenPath(2), 'shared is a deliberate admin choice');
-  } finally {
-    setProviderSharingConfig({ agy: 'isolated' });
-  }
-  assert.notEqual(getAntigravityTokenPath(1), getAntigravityTokenPath(2), 'isolated again once the policy says so');
+test('B-1346 / ADR-152 A1: nothing collapses members onto the operator agy token', () => {
+  assert.notEqual(getAntigravityTokenPath(1), getAntigravityTokenPath(2));
+  assert.match(getAntigravityTokenPath(1), /nassaj-users[/\\]1[/\\]/, 'member 1 never reads the operator token');
 });
 
-test('B-580: a null userId still means the operator, explicitly', () => {
-  assert.ok(
-    getAntigravityTokenPath(null).startsWith(os.homedir()),
-    'null is the stated operator contract — but the caller now has to state it',
-  );
+test('B-580 / ADR-152 A1: a null userId is refused — there is no operator token answer', () => {
+  assert.throws(() => getAntigravityTokenPath(null), { code: 'CREDENTIAL_ACTOR_REQUIRED' });
 });

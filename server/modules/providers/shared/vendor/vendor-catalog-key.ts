@@ -6,30 +6,16 @@ import {
 } from '@/modules/providers/shared/vendor/vendor-catalog.client.js';
 
 /**
- * Resolves the key a vendor's LIVE model catalog should be fetched with — the
- * asking member's own key first, the org key second.
+ * Resolves the key a vendor's LIVE model catalog should be fetched with: the
+ * asking member's own key, or their grantor's (ADR-152). A key that is good
+ * enough to SPEND is good enough to ENUMERATE, so this answers exactly what the
+ * run path answers (B-436).
  *
- * WHY THE ORG FALLBACK BELONGS HERE (B-436). It already exists on the RUN path:
- * `apply-claude-engine-provider-env.js` resolves the member's key then the org's
- * (T-1208). The catalog path did not, and the two paths disagreeing produced a
- * failure that reads as a missing feature rather than a missing key:
+ * ADR-152 A1 §3.8 (D1): the install-wide slot is inert. A member with no key and
+ * no grant gets `null`, and so does a caller with no member; the caller then
+ * serves its built-in fallback flagged `degraded`.
  *
- *   member WITH a personal key   → 8 GLM models listed
- *   member WITHOUT one           → 1 (the built-in fallback), yet their turns
- *                                  still RUN on glm via the org key
- *
- * So the picker offered exactly one model — the one already selected — and every
- * other row in it belonged to a different engine. The member could not change
- * model without also changing vendor, and nothing on screen explained why.
- * Measured 2026-08-05 on the live store: user 1 → 8, user 2 → 1, no identity → 1.
- *
- * The two paths must answer the same question the same way: a key that is good
- * enough to SPEND is good enough to ENUMERATE. Diverging is what made a listing
- * bug look like a vendor limitation.
- *
- * Fail-soft by construction: any throw from the store degrades to the org key,
- * and a missing org key degrades to `null` — the caller then serves its built-in
- * fallback flagged `degraded`, exactly as before.
+ * Fail-soft by construction: any throw from the store degrades to `null`.
  */
 export function resolveVendorCatalogKey(
   identity: CatalogIdentity | null | undefined,
@@ -50,7 +36,8 @@ export function resolveVendorCatalogKey(
       : identity;
 
   try {
-    return resolveSlotKey(credentialPrincipalId(member, provider), provider, { sharedFallback: true })?.key ?? null;
+    if (member === null) return null;
+    return resolveSlotKey(credentialPrincipalId(member, provider), provider)?.key ?? null;
   } catch {
     // Fail-soft is this site's own contract, not the resolver's: a bad scope
     // must degrade to the built-in fallback catalog, never surface as a 500.

@@ -167,7 +167,7 @@ describe('KM-5 governance gate — refused when neutral source is absent (A)', (
     try {
       prepareKimiAgentLaunch(
         {
-          userId: null,
+          userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
           command: 'probe',
           model: 'kimi-k2.6',
           permissionMode: 'default',
@@ -211,7 +211,7 @@ describe('KM-5 governance gate — refused when neutral source is absent (A)', (
     try {
       prepareKimiAgentLaunch(
         {
-          userId: null,
+          userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
           command: 'probe',
           model: 'kimi-k2.6',
           cwd: sandboxHome,
@@ -253,7 +253,7 @@ describe('KM-5 seam order — digest drift throws before governance is reached (
     try {
       prepareKimiAgentLaunch(
         {
-          userId: null,
+          userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
           command: 'probe',
           model: 'kimi-k2.6',
           cwd: sandboxHome,
@@ -395,7 +395,7 @@ describe('KM-5 seam order — six steps run in ADR-062 §4.2 order, sanitize LAS
 
     prepareKimiAgentLaunch(
       {
-        userId: null,
+        userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
         command: 'x',
         model: 'kimi-k2.6',
         cwd: sandboxHome,
@@ -440,7 +440,7 @@ describe('KM-5 static env clean — produced env has no leaks after the seam (D)
 
     const prepared = prepareKimiAgentLaunch(
       {
-        userId: null,
+        userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
         command: 'probe',
         model: 'kimi-k2.6',
         permissionMode: 'default',
@@ -481,7 +481,7 @@ describe('KM-5 static env clean — produced env has no leaks after the seam (D)
 
     const prepared = prepareKimiAgentLaunch(
       {
-        userId: null,
+        userId: 7, // ADR-152 A1 §3.4: a kimi agent run needs a member
         command: 'probe',
         model: 'kimi-k2.6',
         cwd: sandboxHome,

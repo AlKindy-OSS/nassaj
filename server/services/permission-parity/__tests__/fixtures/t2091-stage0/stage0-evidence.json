@@ -1,0 +1,1181 @@
+{
+ "provenance": {
+  "task": "T-2091 S0",
+  "package": "@deepseek-ai/dsh@0.2.2-rc.1",
+  "recordedAt": "2026-11-08",
+  "layer": "server/governance/dsh-nassaj-layer.yml without the nassaj-policy insert, LLM row pointed at the stage0 fake LLM, plus t2091-probe, t2091-hostile and two engines.dsh packages",
+  "runner": "run.mjs"
+ },
+ "findings": {
+  "P1_public_api": "ctx.tools.guard/execute/restrict/definitions/get/executable/schemas/register are all functions",
+  "P2_probe": "ctx.tools.execute({calls:[{type:\"tool-call\",id,name:\"__nassaj_probe__\",arguments:\"{}\"}],signal}) at appReady: our pre-execute sees the call (agent null); guard without permit -> isError \"t2091: no permit\"; with permit -> UNKNOWN_TOOL (ToolNotFoundError)",
+  "guard_after_skipping_listener": "a prepend global pre-execute listener returning {kind:allow} without next(): our listener never runs (no pre event) and the guard still denies",
+  "guard_subagent_scope": "a subagent bash call without permit is denied by the global guard (agent id = subagent id); with permit it runs",
+  "restrict": "ctx.tools.restrict from the plugin global ctx THROWS (requires a scoped agent ctx); payload.agent.ctx.tools.restrict inside agent/pre-step works, but the FIRST model request of that agent still lists the tool (restriction applies from the next step); a later call of the restricted tool fails UNKNOWN_TOOL",
+  "engines_dsh": "ENFORCED for a --patch row loaded by relative file path: the nearest package.json engines.dsh is checked; >=99.0.0 -> row disabled with a stderr warning (dsh boots on); \">=0.2.2-rc.1 <1.0.0\" matches 0.2.2-rc.1 (prerelease in range). Bare package names resolve from the PROFILE dir, not the layer. An exemption exists (dsh plugin allow-version)",
+  "plugin_row_failure_non_fatal": "a plugin row that fails to import or is engines-disabled is skipped and dsh boots without it",
+  "unknown_layer_id": "a layer row whose id does not exist (disabled or config) is ignored silently; boot and turn succeed",
+  "fake_llm_test_layer": "replacing only the llm-deepseek row baseURL routes every request to the local fake LLM (all runs)",
+  "PTC_subcalls": "NOT measured: PTC stays disabled by the Nassaj layer (ptc-runtime, tool-executor-ptc)",
+  "synthetic_subagent_probe": "NOT possible at boot via the public API (no Agent object exists before a session); subagent coverage measured with a real subagent",
+  "engines_prerelease_semantics": "T-2091 S2 live: dsh compares engines.dsh with prereleases INCLUDED: 0.2.2-rc.1 satisfies \">=0.2.1 <1.0.0\" (plugin loaded) while \">=0.3.0 <1.0.0\" disables the row (incompatible)",
+  "dump_config": "dsh nassaj-acp --from-default-profile acp --patch <layer> --dump-config prints the composed rows (top-level - id:, 2-space keys, 4-space config scalars; inserted rows dedented); 100 rows under the T-2091 layer, every Nassaj security row in its expected state",
+  "reduced_layer_new_tools": "with the T-2091 layer (no tool-disable rows) dsh 0.2.2-rc.1 additionally registers exit_plan_mode, interrupt_agent, list_agents, send_message and working_directory (hidden and denied: outside dsh-tool-map.json); workflow-ptc, tool-workflow and tool-goal stay pending (ptc-runtime and goal disabled)"
+ },
+ "runs": {
+  "guard_restrict_hostile_first": {
+   "log": [
+    {
+     "k": "P1",
+     "guard": "function",
+     "execute": "function",
+     "restrict": "function",
+     "definitions": "function",
+     "get": "function",
+     "executable": "function",
+     "schemas": "function",
+     "register": "function"
+    },
+    {
+     "k": "restrict-global",
+     "ok": false,
+     "err": "tools.restrict() requires a scoped context (agent.ctx): a context-global restriction would mask every agent — deny the tool for the intended agent instead"
+    },
+    {
+     "k": "appReady",
+     "present": true
+    },
+    {
+     "k": "pre",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "P2",
+     "callId": "probe-nopermit",
+     "result": "{\"results\":[{\"callId\":\"probe-nopermit\",\"result\":{\"isError\":true,\"error\":{\"message\":\"t2091: no permit\"},\"content\":[{\"type\":\"text\",\"text\":\"Error: t2091: no permit\"}]}}],\"additionalContexts\":[],\"concluded\":false}"
+    },
+    {
+     "k": "pre",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "isError": true,
+     "error": "unknown tool \"__nassaj_probe__\""
+    },
+    {
+     "k": "P2",
+     "callId": "permit-probe",
+     "result": "{\"results\":[{\"callId\":\"permit-probe\",\"result\":{\"isError\":true,\"error\":{\"message\":\"unknown tool \\\"__nassaj_probe__\\\"\",\"info\":{\"name\":\"ToolNotFoundError\",\"code\":\"UNKNOWN_TOOL\"}},\"content\":[{\"type\":\"text\",\"text\":\"Error: unknown tool \\\"__nassaj_probe__\\\"\"}]}}],\"additionalContexts\":[],\"concluded\":false}"
+    },
+    {
+     "k": "restrict-agent",
+     "ok": true,
+     "agent": "<AGENT-15f7>"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "agent": "<AGENT-15f7>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "agent": "<AGENT-15f7>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "agent": "<AGENT-15f7>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "agent": "<AGENT-15f7>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "hostile-allow",
+     "callId": "toolu_probe_3",
+     "agent": "<AGENT-15f7>"
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_3",
+     "name": "bash",
+     "agent": "<AGENT-15f7>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_3",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "hostile-allow",
+     "callId": "toolu_probe_4",
+     "agent": "<AGENT-15f7>"
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "agent": "<AGENT-15f7>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "agent": "<AGENT-15f7>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "agent": "<AGENT-15f7>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "isError": true,
+     "error": "unknown tool \"web_search\""
+    }
+   ],
+   "prompt": {
+    "stopReason": "end_turn"
+   },
+   "files": [
+    "allowed-1"
+   ],
+   "toolsPerRequest": [
+    [
+     "bash",
+     "web_search"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ]
+   ],
+   "updates": [
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_1",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch allowed-1",
+      "description": "a"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_1",
+     "status": "completed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "(no output)"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_2",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch plain-1",
+      "description": "p"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_2",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_3",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch hostile-1",
+      "description": "h"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_3",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_4",
+     "title": "subagent",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "description": "sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"touch allowed-sub\\\",\\\"description\\\":\\\"s\\\"}\"},{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"touch hostile-sub\\\",\\\"description\\\":\\\"s\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_4",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_5",
+     "title": "web_search",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "queries": [
+       "allowed x"
+      ]
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_5",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: unknown tool \"web_search\""
+       }
+      }
+     ]
+    }
+   ],
+   "stderrLines": [
+    "t2091-eng-rc (t2091-eng-rc): failed to import: Error [ERR_MODULE_NOT_FOUND]: Cannot find package 't2091-eng-rc' imported from <RUN>"
+   ]
+  },
+  "subagent_engines": {
+   "log": [
+    {
+     "k": "engines-loaded",
+     "pkg": "rc"
+    },
+    {
+     "k": "P1",
+     "guard": "function",
+     "execute": "function",
+     "restrict": "function",
+     "definitions": "function",
+     "get": "function",
+     "executable": "function",
+     "schemas": "function",
+     "register": "function"
+    },
+    {
+     "k": "restrict-global",
+     "ok": false,
+     "err": "tools.restrict() requires a scoped context (agent.ctx): a context-global restriction would mask every agent — deny the tool for the intended agent instead"
+    },
+    {
+     "k": "appReady",
+     "present": true
+    },
+    {
+     "k": "pre",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "P2",
+     "callId": "probe-nopermit",
+     "result": "{\"results\":[{\"callId\":\"probe-nopermit\",\"result\":{\"isError\":true,\"error\":{\"message\":\"t2091: no permit\"},\"content\":[{\"type\":\"text\",\"text\":\"Error: t2091: no permit\"}]}}],\"additionalContexts\":[],\"concluded\":false}"
+    },
+    {
+     "k": "pre",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "isError": true,
+     "error": "unknown tool \"__nassaj_probe__\""
+    },
+    {
+     "k": "P2",
+     "callId": "permit-probe",
+     "result": "{\"results\":[{\"callId\":\"permit-probe\",\"result\":{\"isError\":true,\"error\":{\"message\":\"unknown tool \\\"__nassaj_probe__\\\"\",\"info\":{\"name\":\"ToolNotFoundError\",\"code\":\"UNKNOWN_TOOL\"}},\"content\":[{\"type\":\"text\",\"text\":\"Error: unknown tool \\\"__nassaj_probe__\\\"\"}]}}],\"additionalContexts\":[],\"concluded\":false}"
+    },
+    {
+     "k": "restrict-agent",
+     "ok": true,
+     "agent": "<AGENT-81e0>"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "agent": "<AGENT-81e0>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "agent": "<AGENT-81e0>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "agent": "<AGENT-81e0>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "agent": "<AGENT-81e0>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "hostile-allow",
+     "callId": "toolu_probe_3",
+     "agent": "<AGENT-81e0>"
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_3",
+     "name": "bash",
+     "agent": "<AGENT-81e0>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_3",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "agent": "<AGENT-81e0>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "agent": "<AGENT-81e0>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "restrict-agent",
+     "ok": true,
+     "agent": "<AGENT-c54c>"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "agent": "<AGENT-81e0>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "agent": "<AGENT-81e0>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "isError": true,
+     "error": "unknown tool \"web_search\""
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_6",
+     "name": "bash",
+     "agent": "<AGENT-c54c>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_6",
+     "name": "bash",
+     "agent": "<AGENT-c54c>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_6",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_8",
+     "name": "bash",
+     "agent": "<AGENT-c54c>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_8",
+     "name": "bash",
+     "agent": "<AGENT-c54c>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_8",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    }
+   ],
+   "prompt": {
+    "stopReason": "end_turn"
+   },
+   "files": [
+    "allowed-1",
+    "allowed-sub"
+   ],
+   "toolsPerRequest": [
+    [
+     "bash",
+     "web_search"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash",
+     "web_search"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ]
+   ],
+   "updates": [
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_1",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch allowed-1",
+      "description": "a"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_1",
+     "status": "completed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "(no output)"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_2",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch plain-1",
+      "description": "p"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_2",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_3",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch hostile-1",
+      "description": "h"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_3",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_4",
+     "title": "subagent",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "description": "sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"touch allowed-sub\\\",\\\"description\\\":\\\"s\\\"}\"},{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"touch nopermit-sub\\\",\\\"description\\\":\\\"s\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_4",
+     "status": "completed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "started subagent <AGENT-c54c>"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_5",
+     "title": "web_search",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "queries": [
+       "allowed x"
+      ]
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_5",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: unknown tool \"web_search\""
+       }
+      }
+     ]
+    }
+   ],
+   "stderrLines": [
+    "dsh: disabling profile plugin row \"t2091-eng-high\": Plugin t2091-eng-high@1.0.0 is incompatible with dsh 0.2.2-rc.1: requirements {\"engines.dsh\":\">=99.0.0\"}. Running it may cause crashes or data loss. Update the plugin or install a plugin version compatible with this dsh runtime. To accept this risk explicitly, grant the exact-version exemption for t2091-eng-high@1.0.0 on dsh 0.2.2-rc.1 with `dsh plugin allow-version` or the plugin manager, then retry the installation or restart dsh. Exact-version exemption: not active."
+   ]
+  },
+  "unknown_row_ids": {
+   "log": [
+    {
+     "k": "engines-loaded",
+     "pkg": "rc"
+    },
+    {
+     "k": "P1",
+     "guard": "function",
+     "execute": "function",
+     "restrict": "function",
+     "definitions": "function",
+     "get": "function",
+     "executable": "function",
+     "schemas": "function",
+     "register": "function"
+    },
+    {
+     "k": "restrict-global",
+     "ok": false,
+     "err": "tools.restrict() requires a scoped context (agent.ctx): a context-global restriction would mask every agent — deny the tool for the intended agent instead"
+    },
+    {
+     "k": "appReady",
+     "present": true
+    },
+    {
+     "k": "pre",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "probe-nopermit",
+     "name": "__nassaj_probe__",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "P2",
+     "callId": "probe-nopermit",
+     "result": "{\"results\":[{\"callId\":\"probe-nopermit\",\"result\":{\"isError\":true,\"error\":{\"message\":\"t2091: no permit\"},\"content\":[{\"type\":\"text\",\"text\":\"Error: t2091: no permit\"}]}}],\"additionalContexts\":[],\"concluded\":false}"
+    },
+    {
+     "k": "pre",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "agent": null,
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "permit-probe",
+     "name": "__nassaj_probe__",
+     "isError": true,
+     "error": "unknown tool \"__nassaj_probe__\""
+    },
+    {
+     "k": "P2",
+     "callId": "permit-probe",
+     "result": "{\"results\":[{\"callId\":\"permit-probe\",\"result\":{\"isError\":true,\"error\":{\"message\":\"unknown tool \\\"__nassaj_probe__\\\"\",\"info\":{\"name\":\"ToolNotFoundError\",\"code\":\"UNKNOWN_TOOL\"}},\"content\":[{\"type\":\"text\",\"text\":\"Error: unknown tool \\\"__nassaj_probe__\\\"\"}]}}],\"additionalContexts\":[],\"concluded\":false}"
+    },
+    {
+     "k": "restrict-agent",
+     "ok": true,
+     "agent": "<AGENT-a051>"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "agent": "<AGENT-a051>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "agent": "<AGENT-a051>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_1",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "agent": "<AGENT-a051>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "agent": "<AGENT-a051>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_2",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "hostile-allow",
+     "callId": "toolu_probe_3",
+     "agent": "<AGENT-a051>"
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_3",
+     "name": "bash",
+     "agent": "<AGENT-a051>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_3",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "agent": "<AGENT-a051>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "agent": "<AGENT-a051>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_4",
+     "name": "subagent",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "restrict-agent",
+     "ok": true,
+     "agent": "<AGENT-faeb>"
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "agent": "<AGENT-a051>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "agent": "<AGENT-a051>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_5",
+     "name": "web_search",
+     "isError": true,
+     "error": "unknown tool \"web_search\""
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_7",
+     "name": "bash",
+     "agent": "<AGENT-faeb>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_7",
+     "name": "bash",
+     "agent": "<AGENT-faeb>",
+     "ok": true
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_7",
+     "name": "bash",
+     "isError": false,
+     "error": null
+    },
+    {
+     "k": "pre",
+     "callId": "toolu_probe_8",
+     "name": "bash",
+     "agent": "<AGENT-faeb>",
+     "parent": false
+    },
+    {
+     "k": "guard",
+     "callId": "toolu_probe_8",
+     "name": "bash",
+     "agent": "<AGENT-faeb>",
+     "ok": false
+    },
+    {
+     "k": "result",
+     "callId": "toolu_probe_8",
+     "name": "bash",
+     "isError": true,
+     "error": "t2091: no permit"
+    }
+   ],
+   "prompt": {
+    "stopReason": "end_turn"
+   },
+   "files": [
+    "allowed-1",
+    "allowed-sub"
+   ],
+   "toolsPerRequest": [
+    [
+     "bash",
+     "web_search"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash",
+     "web_search"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ],
+    [
+     "bash"
+    ]
+   ],
+   "updates": [
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_1",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch allowed-1",
+      "description": "a"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_1",
+     "status": "completed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "(no output)"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_2",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch plain-1",
+      "description": "p"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_2",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_3",
+     "title": "bash",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "command": "touch hostile-1",
+      "description": "h"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_3",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: t2091: no permit"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_4",
+     "title": "subagent",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "description": "sub",
+      "prompt": "SUB_STEPS [{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"touch allowed-sub\\\",\\\"description\\\":\\\"s\\\"}\"},{\"name\":\"bash\",\"raw\":\"{\\\"command\\\":\\\"touch nopermit-sub\\\",\\\"description\\\":\\\"s\\\"}\"},{\"text\":\"sub done\"}] END_SUB"
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_4",
+     "status": "completed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "started subagent <AGENT-faeb>"
+       }
+      }
+     ]
+    },
+    {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "toolu_probe_5",
+     "title": "web_search",
+     "kind": "other",
+     "status": "in_progress",
+     "rawInput": {
+      "queries": [
+       "allowed x"
+      ]
+     }
+    },
+    {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "toolu_probe_5",
+     "status": "failed",
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Error: unknown tool \"web_search\""
+       }
+      }
+     ]
+    }
+   ],
+   "stderrLines": [
+    "dsh: disabling profile plugin row \"t2091-eng-high\": Plugin t2091-eng-high@1.0.0 is incompatible with dsh 0.2.2-rc.1: requirements {\"engines.dsh\":\">=99.0.0\"}. Running it may cause crashes or data loss. Update the plugin or install a plugin version compatible with this dsh runtime. To accept this risk explicitly, grant the exact-version exemption for t2091-eng-high@1.0.0 on dsh 0.2.2-rc.1 with `dsh plugin allow-version` or the plugin manager, then retry the installation or restart dsh. Exact-version exemption: not active."
+   ]
+  }
+ }
+}

@@ -27,6 +27,7 @@ import { engineProviderLabel } from '../shared/engineProviders.js';
 
 import { claudeDelegationProfile, prepareClaudeReviewedDelegation } from './services/claude-delegation-admission.js';
 import { evaluatePublicPageWrite } from './services/public-page-agent-guidance.js';
+import { claudeSpawnEnvFor } from './services/isolation/claude-spawn-env.js';
 import { isSameUser, restoreMaskedUpdatedInput } from './services/display-secret-mask.js';
 import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
 import {
@@ -70,6 +71,7 @@ import {
 import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
 import { recordBrokenModel } from './modules/providers/list/claude/claude-broken-models.store.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
+import { contextGuard, resolveClaudeCompactionModel } from './modules/context-guard/index.js';
 import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import {
   createNotificationEvent,
@@ -85,6 +87,7 @@ import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { buildChatImageNote, saveChatImages } from './services/chat-image-store.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { reconcileClaudeSkillsForEnv } from './services/isolation/claude-skills-link.js';
 import {
   assertHarnessNotUpdating,
@@ -93,14 +96,17 @@ import {
   isSpawnBlockedForRunProvider,
   refuseSpawnIfHarnessUpdating,
 } from './modules/providers/harness-update/spawn-admission.js';
-import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from './services/isolation/anthropic-base-url-guard.js';
+import { assertAnthropicBaseUrlAllowed } from './services/isolation/anthropic-base-url-guard.js';
+import { assertClaudeSpawnEnvAllowed } from './services/isolation/claude-spawn-env-guard.js';
 import { buildCagedSdkSpawn } from './services/isolation/provider-cage-wiring.js';
 import {
   OFFICIAL_ENGINE,
   PIN_SOURCE,
   pickEngineModel,
 } from './services/isolation/engine-pin.js';
+import { isLocalModelId, publicEngineValue } from './services/isolation/local-engine-pin.js';
 import { resolveClaudeRunProfileOrThrow } from './services/isolation/resolve-claude-run-profile.js';
+import { registerWarmCredentialProcess } from './services/isolation/warm-credential-processes.js';
 import { isLinkModeRunRefusal } from './modules/providers/services/harness-link-mode.service.js';
 import { runAuthorizedProviderCatalog } from './modules/execution-permissions/runtime-catalog.js';
 import { readRuntimeProcessIdentity } from './modules/execution-permissions/adapter.js';
@@ -147,7 +153,8 @@ import { claudeRunExited, hasSessionAgent, observeClaudeRunEvent } from './modul
 // ADR-219 S1 (T-2072): the cross-session relay — spawn-time mode, in-process hook, delivery turns.
 import {
   buildPeerRelayHookMatcher, createPeerHookDependencies, createPeerRunState, escapePeerWrapperTags,
-  observePeerRunMessage, readActiveMemberCount, readPeerDeliveryTurn, recordSessionMode, relayModeNow, relaySdkSettings,
+  observePeerRunMessage, readActiveMemberCount, readPeerDeliveryTurn, recordPeerPromptDecision, recordSessionMode,
+  relayModeNow, relaySdkSettings,
   settlePeerRunMode,
   relaySdkSpawnOptions,
 } from './modules/peer-relay/index.js';
@@ -770,6 +777,16 @@ function createWakeHoldController(deps) {
 const nativeRelayHoldReleasers = new Set();
 // ADR-219 (qa م-2): sessions whose live run is a relayed peer turn (the busy text names it).
 const peerDeliverySessions = new Set();
+
+/**
+ * Test seam (ADR-219 P2 qa round 2): marks a session as running a relay delivery
+ * turn, the condition under which prompt answers are recorded. Production marks
+ * sessions only where a delivery descriptor was consumed.
+ */
+function markPeerDeliverySessionForTests(sessionId, on) {
+  if (on) peerDeliverySessions.add(sessionId);
+  else peerDeliverySessions.delete(sessionId);
+}
 
 /**
  * Releases the input holds of native-mode runs once the node is in relay mode.
@@ -1418,6 +1435,14 @@ function resolveToolApproval(requestId, decision) {
     verdict.decision = once;
   }
 
+  // ADR-219 P2 (qa م-4): every answer to a prompt of a relay delivery turn is recorded
+  // with the answering member and credential kind (never the message text).
+  if (sessionId && peerDeliverySessions.has(sessionId)) {
+    recordPeerPromptDecision({ sessionId, requestId, toolName: resolver._toolName ?? null, allowed: verdict.allowed,
+      allow: verdict.allowed ? Boolean(verdict.decision?.allow ?? payload.allow) : false,
+      requesterUserId, requesterAuthKind: payload.requesterAuthKind ?? null, ownerUserId: resolver._ownerUserId ?? null });
+  }
+
   if (!verdict.allowed) {
     console.warn(
       `[SEC-APPROVAL] refused foreign permission response requestId=${requestId} `
@@ -1814,7 +1839,7 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
     // before the request (see the injectedHosts block in runClaudeSDKQuery), so
     // warning about it announces a substitution that does not happen — a false
     // trail for the next person debugging an engine run.
-    if (requested && !options.engineProvider) {
+    if (requested && !options.engineProvider && !isLocalModelId(requested)) {
       const sessionTag = sessionId ? ` [session=${sessionId}]` : '';
       const userTag = options.userId ? ` [user=${options.userId}]` : '';
       console.warn(
@@ -1940,12 +1965,16 @@ async function probeClaudeBuiltInCommands(context = {}) {
 
   // Resolve env the same way the live chat path does so the probe runs under
   // the correct Claude config dir / credentials (no elevated privileges).
-  let probeEnv = { ...process.env };
+  // ADR-152 A1 §3.4: a resolver error never falls back to the operator's env —
+  // the probe answers null (degraded catalog) and spawns nothing.
+  let probeEnv;
   try {
-    probeEnv = resolveProviderEnv(userId, 'claude', probeEnv);
-  } catch {
-    // Fall back to the base env; never let env resolution break the probe.
-    probeEnv = { ...process.env };
+    probeEnv = resolveProviderEnv(userId, 'claude', { ...process.env });
+  } catch (error) {
+    console.warn('[claude-sdk] built-in commands probe refused: no credential environment', {
+      code: error?.code ?? null,
+    });
+    return null;
   }
 
   const cleanup = async () => {
@@ -1982,10 +2011,9 @@ async function probeClaudeBuiltInCommands(context = {}) {
 
     // Iron-rule guard: this probe also spawns the Claude/Anthropic subprocess,
     // so fail-closed if ANTHROPIC_BASE_URL targets a non-approved host. No-op
-    // when unset (default Anthropic). Also validate the per-user settings.json
-    // env block the CLI applies from CLAUDE_CONFIG_DIR (same bypass surface).
-    assertAnthropicBaseUrlAllowed(sdkOptions.env);
-    assertSettingsEnvAllowed(sdkOptions.env.CLAUDE_CONFIG_DIR, sdkOptions.env);
+    // when unset (default Anthropic). B-1764: also every settings file the CLI
+    // loads at the probe's cwd (managed, user, project, local).
+    await assertClaudeSpawnEnvAllowed(sdkOptions.env, { cwd: sdkOptions.cwd ?? null });
 
     // T-897: cage this probe's Claude spawn too (flag OFF ⇒ undefined ⇒ unset).
     const cagedProbeSpawn = buildCagedSdkSpawn({ userId, cwd: cwd ?? null });
@@ -2357,6 +2385,34 @@ function recordSessionEnginePin({ newSessionId, parentSessionId, engagedEngine, 
 }
 
 /**
+ * ADR-227: records a LOCAL-engine pin strictly. Unlike recordSessionEnginePin it
+ * never swallows a failure: a local chat whose pin did not settle could resume
+ * on another engine, so the caller aborts the run instead. A lineage child must
+ * carry its parent's exact pin.
+ * @param {{newSessionId:string, parentSessionId:string|null, pin:string}} input
+ * @throws {Error} code ENGINE_PIN_WRITE_FAILED
+ */
+function recordLocalEnginePinOrThrow({ newSessionId, parentSessionId, pin }) {
+  let settled = null;
+  try {
+    const parentPin = parentSessionId && parentSessionId !== newSessionId
+      ? sessionsDb.getSessionEnginePin(parentSessionId)?.engine ?? null
+      : null;
+    if (parentPin === null || parentPin === pin) {
+      settled = sessionsDb.setSessionEnginePin(newSessionId, pin, PIN_SOURCE.SERVER_VERDICT);
+    }
+  } catch (error) {
+    console.warn(`[engine-pin] local pin write failed for ${newSessionId}: ${error?.message ?? error}`);
+  }
+  if (!settled || settled.outcome === 'missing_row' || settled.engine !== pin) {
+    throw Object.assign(
+      new Error('The local model server pin of this chat could not be recorded; the run was stopped.'),
+      { code: 'ENGINE_PIN_WRITE_FAILED' },
+    );
+  }
+}
+
+/**
  * Runs a one-shot, read-only /btw side query against a live session's transcript.
  *
  * @param {Object} params
@@ -2448,12 +2504,16 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
   }
 
   // Per-user credential isolation (C3): the fork runs under the REQUESTER's Claude
-  // config dir, never the session owner's. Falls back to base env on any failure.
-  let env = { ...process.env };
+  // config dir, never the session owner's. ADR-152 A1 §3.4: a resolver error is
+  // a refusal, never a fallback to the operator's environment.
+  let env;
   try {
-    env = resolveProviderEnv(userId, 'claude', env);
-  } catch {
-    env = { ...process.env };
+    env = resolveProviderEnv(userId, 'claude', { ...process.env });
+  } catch (error) {
+    finish(onError, 'sdk_error', error?.code === 'CREDENTIAL_ACTOR_REQUIRED'
+      ? 'This question needs a signed-in member.'
+      : 'Your Claude environment could not be prepared.');
+    return;
   }
   reconcileClaudeSkillsForEnv(env);
 
@@ -2579,8 +2639,8 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
 
     // C3 fail-closed guards on the FINAL env handed to query() — mirror the live
     // path exactly so a /btw fork can never reach a non-approved Anthropic host.
-    assertAnthropicBaseUrlAllowed(sdkOptions.env);
-    assertSettingsEnvAllowed(sdkOptions.env.CLAUDE_CONFIG_DIR, sdkOptions.env);
+    // B-1764: every settings file the fork loads at its cwd, not only the user tier.
+    await assertClaudeSpawnEnvAllowed(sdkOptions.env, { cwd: sdkOptions.cwd ?? projectRoot ?? null });
     // B-421: a /btw fork replays the live session's history too, so it inherits
     // the same poisoned-block failure. Repair the SOURCE transcript (`liveSid`)
     // before the fork reads it — same fail-open contract as the live path.
@@ -2613,13 +2673,18 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
     sdkOptions.env = sideProfile.env;
     const sideQueryEngine = sideProfile.effectiveEngine;
     const injectedHosts = sideProfile.engineHosts;
+    // ADR-227: a local-pinned fork runs the pinned server's model (the profile
+    // already mapped every model knob in the env to it).
+    if (sideProfile.local) {
+      sdkOptions.model = sideProfile.local.model;
+    }
 
     // ADR-088 (بند 9): an engine-driven fork must run an ENGINE-catalog model —
     // the SDK's own default is an Anthropic id, and sending it to the vendor
     // endpoint is a guaranteed dead turn. Prefer the session's transcript-
     // resolved model when it belongs to the engine's catalog (the transcript
     // may be polluted by a leaked official turn), else the engine default.
-    if (injectedHosts !== null && sideQueryEngine) {
+    if (injectedHosts !== null && sideQueryEngine && !sideProfile.local) {
       let engineCatalog = null;
       try {
         engineCatalog = (await providerModelsService.getProviderModels(
@@ -2819,6 +2884,9 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
     const msg = error?.message || String(error);
     if (isResumeSessionMissingError(msg)) {
       finish(onError, 'session_not_found', 'The session could not be resumed.');
+    } else if (error?.code === 'CREDENTIAL_NOT_LINKED') {
+      // ADR-152 A1 §3.5: the run profile's gate refused; nothing was spawned.
+      finish(onError, 'CREDENTIAL_NOT_LINKED', msg);
     } else {
       finish(onError, 'sdk_error', msg);
     }
@@ -3690,6 +3758,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // the query() call site may run twice (the retry-without-hooks path) and a
   // generator object can only be consumed once.
   let releaseInputStream = () => {};
+  // ADR-152 A1 §3.5: set once the run is admitted on a credential principal.
+  let unregisterWarmProcess = () => {};
   const inputStreamRelease = new Promise((resolve) => { releaseInputStream = resolve; });
   let inputCloseTimer = null;
   // B-503: closing this stream is a ONE-WAY door — stdin cannot be reopened, so a
@@ -3852,6 +3922,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // المبكّر يقرأ الحقيقة لا صدفةً.
   let injectedHosts = null;
   let effectiveEngineProvider = null;
+  // ADR-227: the local-engine verdict of this run (null on every other path).
+  let localEngine = null;
   // B-1136: declared out here so the catch below can tell a STOP-driven kill apart.
   let runAbortController = null;
   // B-1399: out here too — an interrupt() that answered leaves the controller
@@ -3868,7 +3940,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     if (sessionId) {
       claudeSessionRegistry.clearInactiveBuffer(sessionId);
     }
-    const resolvedModel = await providerModelsService.resolveResumeModel(
+    let resolvedModel = await providerModelsService.resolveResumeModel(
       'claude',
       sessionId,
       options.model,
@@ -3881,6 +3953,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // set undefined, and mapCliOptionsToSDK falls back to the static list — the
     // send path is never broken by catalog issues.
     let validModelValues;
+    let catalogOptions = CLAUDE_FALLBACK_MODELS.OPTIONS;
     try {
       const { models: catalog } = await providerModelsService.getProviderModels(
         'claude',
@@ -3889,9 +3962,24 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         options.authenticatedPrincipal,
       );
       validModelValues = buildValidClaudeModelValues(catalog);
+      if (Array.isArray(catalog?.OPTIONS)) catalogOptions = [...catalog.OPTIONS, ...catalogOptions];
     } catch {
       validModelValues = undefined;
     }
+
+    // T-2087 / ADR-223 §3: `/compact` runs on a model that can still hold the
+    // conversation — the last one the guard admitted, else the one the
+    // transcript says served it (1M tag restored) — read on the server and
+    // checked against the accepted set, never from client options. This turn
+    // only; the session's pin is untouched.
+    const compactionModel = await resolveClaudeCompactionModel({
+      command,
+      sessionId,
+      accepted: validModelValues instanceof Set ? validModelValues : buildValidClaudeModelValues(null),
+      lastAdmitted: sessionId ? contextGuard.lastAdmittedModel(sessionId) : null,
+      catalogOptions,
+    });
+    if (compactionModel) resolvedModel = compactionModel;
 
     // T-1665: a RESUMED session's model is read back from its own transcript
     // (resolveResumeModel → getCurrentActiveModel), so it arrives as the API id
@@ -3961,9 +4049,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
 
     // Per-user credential isolation (B-ISO-CLAUDE): rebuild the spawn env via the
     // central resolver so each authenticated user gets their own CLAUDE_CONFIG_DIR
-    // while conversations/instructions stay shared via symlinks. Falls back to the
-    // base env unchanged when no userId is present (single-user / platform mode).
-    sdkOptions.env = resolveProviderEnv(ws?.userId ?? null, 'claude', sdkOptions.env);
+    // while conversations/instructions stay shared via symlinks. ADR-152 A1 §3.4:
+    // a run without a signed-in member is refused (CREDENTIAL_ACTOR_REQUIRED).
+    sdkOptions.env = claudeSpawnEnvFor(assertModelRunActor(ws?.userId), sdkOptions.env);
     // ADR-203: point <CLAUDE_CONFIG_DIR>/skills at the shared or private skills the
     // resolver chose (deferred while another session of that tree is live). Never throws.
     reconcileClaudeSkillsForEnv(sdkOptions.env);
@@ -3971,12 +4059,12 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // Iron-rule re-check on the FINAL env actually handed to the subprocess.
     // resolveProviderEnv spreads the base env (ANTHROPIC_BASE_URL included) and
     // never strips it, so validate again here — fail-closed before query().
-    assertAnthropicBaseUrlAllowed(sdkOptions.env);
     // The CLI also applies env.ANTHROPIC_BASE_URL (and Bedrock/Vertex siblings)
-    // from settings.json INSIDE the per-user CLAUDE_CONFIG_DIR, downstream of the
-    // spawn env. Validate that file under the same allowlist so a competitor base
-    // URL placed there cannot bypass the OS-env guard above.
-    assertSettingsEnvAllowed(sdkOptions.env.CLAUDE_CONFIG_DIR, sdkOptions.env);
+    // from every settings file it loads — managed, the per-user CLAUDE_CONFIG_DIR,
+    // and the project's own .claude/settings(.local).json — downstream of the
+    // spawn env. B-1764: validate them all at the run's cwd under the same
+    // allowlist so a base URL planted in a shared project cannot bypass the guard.
+    await assertClaudeSpawnEnvAllowed(sdkOptions.env, { cwd: sdkOptions.cwd ?? options.cwd ?? null });
     // ADR-201: the spawn context the launch transcript path is derived from.
     launchTranscriptContext = {
       cwd: sdkOptions.cwd ?? options.cwd ?? null, configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR ?? null,
@@ -4143,8 +4231,24 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       requireKnownResumePin: Boolean(sessionId),
       failOnAmbiguous: Boolean(sessionId),
       cwd: sdkOptions.cwd ?? null,
+      // ADR-227: the client's RAW model id — mapCliOptionsToSDK has already
+      // coerced sdkOptions.model to the Claude catalog.
+      requestedModel: options.model ?? null,
     });
     sdkOptions.env = runProfile.env;
+    // ADR-152 A1 §3.5 (AT3): this CLI may outlive its turn (wake-up, background
+    // task hold). If the credential principal it runs on changes (grant revoked,
+    // declined, owner disabled), its input closes: the running turn finishes,
+    // no further turn starts on the former grantor's credential.
+    // Recorded under the credential unit it was admitted on (glm for a glm-engine
+    // run), so only a change of THAT unit's principal ends it (qa M3).
+    unregisterWarmProcess = registerWarmCredentialProcess({
+      userId: ws.userId,
+      unit: runProfile.credential?.unit ?? 'claude',
+      ownOnly: runProfile.credential?.ownOnly ?? false,
+      principalId: runProfile.credential?.principalId ?? ws.userId,
+      terminate: (reason) => releaseInput(reason),
+    });
     applySettingsPermissionMode(sdkOptions);
     // ADR-219 (qa م-A): the sender category and the hook follow the FINAL mode the SDK gets.
     settlePeerRunMode(peerRun, sdkOptions.permissionMode);
@@ -4157,6 +4261,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     }
     effectiveEngineProvider = runProfile.effectiveEngine ?? null;
     injectedHosts = runProfile.engineHosts;
+    localEngine = runProfile.local ?? null;
 
     // B-421: a resume replays the ENTIRE transcript to the API every turn, so a
     // single malformed content block is permanent — the session 400s forever and
@@ -4185,7 +4290,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
           userId: ws?.userId ?? null,
           metadata: {
             sessionId: sdkOptions.resume,
-            engineProvider: effectiveEngineProvider ?? OFFICIAL_ENGINE,
+            engineProvider: publicEngineValue(effectiveEngineProvider) ?? OFFICIAL_ENGINE,
             blocks: repair.blocks,
             lines: repair.lines.length,
             kinds: [...new Set((repair.seen ?? []).map((s) => `${s.type}:${s.name ?? '-'}`))],
@@ -4222,7 +4327,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // sending. A vendor session polluted by a leaked official turn resolves to
     // a claude-* id (incident 43b0dc60), and sending that to Moonshot/z.ai is
     // a guaranteed dead turn; the engine's own default is the safe landing.
-    if (injectedHosts !== null && effectiveEngineProvider) {
+    if (localEngine) {
+      // ADR-227: the local server's own model id, resolved and vetted by the run
+      // profile (never the transcript's, which records the server's file path).
+      sdkOptions.model = localEngine.model;
+    } else if (injectedHosts !== null && effectiveEngineProvider) {
       let engineCatalog = null;
       try {
         engineCatalog = (await providerModelsService.getProviderModels(
@@ -4519,7 +4628,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // tools never reach this branch.
       if (engineWriteFenceActive && ENGINE_FENCED_TOOLS.has(toolName)) {
         return denyWithLog(
-          `The ${engineProviderLabel(effectiveEngineProvider)} engine runs read-only in nassaj: `
+          `The ${engineProviderLabel(publicEngineValue(effectiveEngineProvider))} engine runs read-only in nassaj: `
           + `${toolName} is not available on a vendor engine. Switch this chat to the official `
           + 'Claude engine to edit files or run commands.',
           'engine-write-fence',
@@ -4988,12 +5097,21 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         // not silent). `bornThisSpawn` limits the official-engine stamp to
         // sessions minted this turn — an old NULL row stays UNKNOWN, and a
         // lineage child (resume minted a new id) inherits its parent's pin.
-        recordSessionEnginePin({
-          newSessionId: capturedSessionId,
-          parentSessionId: sessionId || null,
-          engagedEngine: injectedHosts !== null ? effectiveEngineProvider : null,
-          bornThisSpawn: !sessionId,
-        });
+        if (localEngine) {
+          // ADR-227: a local pin must settle or the run stops — never a chat that
+          // could later resume on another engine. Leaving the loop closes the CLI
+          // (not runAbortController: that is the user's STOP and hides the error).
+          recordLocalEnginePinOrThrow({
+            newSessionId: capturedSessionId, parentSessionId: sessionId || null, pin: localEngine.pin,
+          });
+        } else {
+          recordSessionEnginePin({
+            newSessionId: capturedSessionId,
+            parentSessionId: sessionId || null,
+            engagedEngine: injectedHosts !== null ? effectiveEngineProvider : null,
+            bornThisSpawn: !sessionId,
+          });
+        }
 
         // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
@@ -5471,7 +5589,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       ? classifyEngineFailure(error, Date.now())
       : null;
     const engineQuotaMessage = engineFailure
-      ? engineFailureMessage(engineFailure, engineProviderLabel(engagedEngine))
+      ? engineFailureMessage(engineFailure, engineProviderLabel(publicEngineValue(engagedEngine)))
       : null;
 
     // Persist an exhaustion so it survives a reload, and so the provider-level
@@ -5483,7 +5601,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     if (engineFailure?.kind === 'quota_exhausted' && (capturedSessionId || sessionId)) {
       providerRunFailuresDb.recordFailure({
         sessionId: capturedSessionId || sessionId,
-        provider: engagedEngine,
+        provider: publicEngineValue(engagedEngine),
         reason: engineQuotaMessage || 'Engine quota exhausted',
         exitCode: null,
         quotaResetsAtMs: engineFailure.quotaResetsAtMs,
@@ -5567,6 +5685,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // drain waiting.
     disarmInputClose();
     releaseInput('run-ended');
+    unregisterWarmProcess();
     // T-822 (§ج-4): release the per-conversation chat-turn lock on EVERY exit
     // (success, error, any return in the loop). No-op when the seam left it null
     // (flag off / new session / fail-open) so it is inert on the default path.
@@ -6038,6 +6157,7 @@ export {
   // (same discipline as the addSession/sweepGhostSessions ghost-detach seam).
   authorizeApprovalDecision,
   waitForToolApproval,
+  markPeerDeliverySessionForTests,
   reconnectSessionWriter,
   isSessionPrimarySocketAlive,
   attachClaudeSDKSession,

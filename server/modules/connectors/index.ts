@@ -64,4 +64,9 @@ export {
   hasOAuthTokens,
 } from './connector-oauth.js';
 
-export { safeFetchLocalModelJson, safeProbeLocalModelAuth, validateLocalModelUrl } from './connector-auth-safe-fetch.js';
+export {
+  resolvePrivateLocalModelAddress,
+  safeFetchLocalModelJson,
+  safeProbeLocalModelAuth,
+  validateLocalModelUrl,
+} from './connector-auth-safe-fetch.js';

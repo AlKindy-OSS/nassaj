@@ -21,7 +21,7 @@ import { transparentWriterWith, transparentWriterWithSend } from './writer-proxy
 
 const PROVIDERS = [
   'claude', 'cursor', 'codex', 'antigravity', 'opencode',
-  'kimi', 'deepseek', 'glm', 'qwen',
+  'kimi', 'glm', 'qwen',
 ] as const;
 
 function harness(current = true) {
@@ -41,7 +41,6 @@ function harness(current = true) {
     abortAntigravitySession: (id: string) => (calls.push(`antigravity:${id}`), true),
     abortOpenCodeSession: (id: string) => (calls.push(`opencode:${id}`), true),
     abortKimiSession: (id: string) => (calls.push(`kimi:${id}`), true),
-    abortDeepSeekSession: (id: string) => (calls.push(`deepseek:${id}`), true),
     abortGlmSession: (id: string) => (calls.push(`glm:${id}`), true),
     abortQwenSession: (id: string) => (calls.push(`qwen:${id}`), true),
   };
