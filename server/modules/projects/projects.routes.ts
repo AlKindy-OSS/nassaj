@@ -1,8 +1,11 @@
+/* eslint-disable boundaries/no-unknown -- project router composes shared HTTP middleware. */
 import crypto from 'node:crypto';
 
 import express from 'express';
 import multer from 'multer';
 
+import { createRateLimiter } from '@/middleware/rate-limit.js';
+import { DeviceBoundSseStream } from '@/modules/account-wallet/index.js';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import {
   deleteProjectLogo,
@@ -26,7 +29,9 @@ import {
   listMembers,
   recoverOrphanByTransfer,
   removeMember,
+  searchMemberCandidates,
 } from '@/modules/projects/services/project-visibility-management.service.js';
+import type { MembershipAuditContext } from '@/modules/projects/services/project-visibility-management.service.js';
 
 const router = express.Router();
 
@@ -435,17 +440,21 @@ router.get('/clone-progress', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  const sendEvent = (type: string, data: Record<string, unknown>) => {
-    if (res.writableEnded) {
-      return;
-    }
-
-    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
-  };
-
   let cloneOperation: Awaited<ReturnType<typeof startCloneProject>> | null = null;
+  let identityInvalidated = false;
+  const stream = new DeviceBoundSseStream(
+    res,
+    (req as express.Request & { user?: unknown }).user,
+    () => {
+      identityInvalidated = true;
+      cloneOperation?.cancel();
+    },
+  );
+  const sendEvent = (type: string, data: Record<string, unknown>) =>
+    stream.send({ type, ...data });
   const closeListener = () => {
     cloneOperation?.cancel();
+    stream.markClientGone();
   };
   req.on('close', closeListener);
 
@@ -479,14 +488,14 @@ router.get('/clone-progress', async (req, res) => {
       },
     );
 
+    if (identityInvalidated || !stream.isOpen()) cloneOperation.cancel();
+
     await cloneOperation.waitForCompletion;
   } catch (error) {
     sendEvent('error', { message: resolveRouteErrorMessage(error) });
   } finally {
     req.off('close', closeListener);
-    if (!res.writableEnded) {
-      res.end();
-    }
+    stream.end();
   }
 });
 
@@ -692,12 +701,12 @@ router.delete(
  * authorization — only for the *target* of an already-authorized operation).
  */
 function readBodyUserId(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isInteger(value)) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
     return value;
   }
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isNaN(parsed) ? null : parsed;
+  if (typeof value === 'string' && /^[1-9][0-9]*$/u.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
   }
   return null;
 }
@@ -721,14 +730,52 @@ router.patch(
   }),
 );
 
+/** Actor context of a membership mutation: ip, user agent, platform-owner flag (JWT). */
+function readAuditContext(req: express.Request): MembershipAuditContext {
+  return {
+    ipAddress: req.ip ?? null,
+    userAgent: req.get('user-agent') ?? null,
+    isPlatformOwner: isPlatformOwner(req),
+  };
+}
+
+function readProjectIdParam(req: express.Request): string {
+  return typeof req.params.projectId === 'string' ? req.params.projectId : '';
+}
+
+/** ADR-172: 30 candidate searches per minute per authenticated user. */
+const memberCandidatesLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 30,
+  code: 'RATE_LIMITED',
+  key: (req: express.Request) => `user:${readAuthenticatedUserId(req) ?? 'anonymous'}`,
+});
+
 /**
- * GET /api/projects/:projectId/members — manager-only membership listing.
+ * GET /api/projects/:projectId/members — membership listing (ADR-172: any user
+ * with access to the project; 404 otherwise).
  */
 router.get(
   '/:projectId/members',
   asyncHandler(async (req, res) => {
-    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
-    const result = listMembers(projectId, readAuthenticatedUserId(req), isPlatformOwner(req));
+    const result = listMembers(readProjectIdParam(req), readAuthenticatedUserId(req));
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+/**
+ * GET /api/projects/:projectId/member-candidates?q= — users that may be added.
+ * q must be 2..64 chars; returns {id, displayName, avatar} only, max 20.
+ */
+router.get(
+  '/:projectId/member-candidates',
+  memberCandidatesLimiter,
+  asyncHandler(async (req, res) => {
+    const result = searchMemberCandidates(
+      readProjectIdParam(req),
+      readQueryStringValue(req.query.q),
+      readAuthenticatedUserId(req),
+    );
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -740,42 +787,46 @@ router.get(
 router.post(
   '/:projectId/members',
   asyncHandler(async (req, res) => {
-    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
     const body = (req.body ?? {}) as { userId?: unknown; role?: unknown };
     const targetUserId = readBodyUserId(body.userId);
     if (targetUserId === null) {
       throw new AppError('A valid userId is required', { code: 'INVALID_USER_ID', statusCode: 400 });
     }
-    const role = body.role === 'owner' ? 'owner' : 'member';
+    if (body.role !== undefined && body.role !== 'owner' && body.role !== 'member') {
+      throw new AppError("role must be 'owner' or 'member'", {
+        code: 'INVALID_ROLE', statusCode: 400,
+      });
+    }
+    const role = body.role ?? 'member';
 
     const result = addMember(
-      projectId,
+      readProjectIdParam(req),
       targetUserId,
       role,
       readAuthenticatedUserId(req),
-      isPlatformOwner(req),
+      readAuditContext(req),
     );
     res.json(createApiSuccessResponse(result));
   }),
 );
 
 /**
- * DELETE /api/projects/:projectId/members/:userId — remove a member.
+ * DELETE /api/projects/:projectId/members/:userId — remove a member. The
+ * creator cannot be removed (409 cannot_remove_creator).
  */
 router.delete(
   '/:projectId/members/:userId',
   asyncHandler(async (req, res) => {
-    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
     const targetUserId = readBodyUserId(req.params.userId);
     if (targetUserId === null) {
       throw new AppError('A valid userId is required', { code: 'INVALID_USER_ID', statusCode: 400 });
     }
 
     const result = removeMember(
-      projectId,
+      readProjectIdParam(req),
       targetUserId,
       readAuthenticatedUserId(req),
-      isPlatformOwner(req),
+      readAuditContext(req),
     );
     res.json(createApiSuccessResponse(result));
   }),

@@ -30,6 +30,7 @@ import { probeSessionWorkspaceAlias } from '@/modules/session-workspaces/index.j
 import { requireStartupAdmission } from '../../bootstrap-startup-context.js';
 
 import { migrateDocumentShares } from './document-shares.js';
+import { migrateDeviceAccountSessions } from './device-account-sessions.migration.js';
 import { inspectExistingSecurityState } from './existing-security-state.js';
 
 /** True when a ledger project path still resolves to a real directory. */
@@ -54,6 +55,7 @@ export const initializeAdmittedDatabase = (db: ReturnType<typeof getConnection>,
     // write effect at all.
     inspectExistingConnectorPolicyV2Substrate(db, authorityRootPath);
     migrateAdmittedScheduledMessages(db);
+    migrateDeviceAccountSessions(db);
     migrateDocumentShares(db);
     const result = initializeConnectorPolicyV2SubstrateOnly(db, authorityRootPath);
     if (!result.ready) throw new Error(`existing_security_connector_initialization_failed:${result.reason}`);
@@ -82,6 +84,7 @@ export const initializeDatabase = async () => {
             db.exec(INIT_SCHEMA_SQL);
             console.log('Database schema applied');
             runMigrations(db);
+            migrateDeviceAccountSessions(db);
             migrateDocumentShares(db);
             migrateConnectorAuthSchema(db);
             const existingInstallation = db.prepare(`SELECT installation_id AS installationId

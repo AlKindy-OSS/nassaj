@@ -1,3 +1,8 @@
+## 2.3.0.6 — 2026-09-25
+
+استعادة محرّك نموذج Codex المجمَّد، حوكمة مشاريع وأجهزة محافظ، وقياس تكاليف متقدم.
+Engine model recovery for frozen Codex, project governance and device wallets, advanced cost telemetry.
+
 ## 2.3.0.4 — 2026-09-24
 
 تحسين حالات المزوّد وخيار عرض استهلاك العتاد والصور والقوائم.
@@ -8,6 +13,37 @@ Improve provider status localization, optional hardware usage, images and menus.
 هنا تجد ملخصاً عملياً لأحدث إصدارات نسّاج: ما الجديد، وما الذي ستلاحظه عند الاستخدام. أما التفاصيل التقنية الكاملة فتوجد في سجل التغييرات داخل المشروع.
 
 ---
+
+## الإصدار 2.3.0.6 — محفظة الجهاز وحدود المشروع واستعادة نموذج الجلسة
+
+مرشح بتاريخ 2026-09-25 لاحق للإصدار المنشور `2.3.0.5`.
+
+ما الذي يتغير عند نشره:
+
+- تعود محفظة الحسابات الجهازية: تُحفظ بيانات دخولك بهويتك الفريدة عبر الجلسات.
+- المشاريع تحصل على حدود عضوية: من يدخل أي مشروع يُحدّد دوره ورؤيته.
+- استعادة نموذج الجلسة: عند إعادة الإقلاع، يُسترجع النموذج النشط لكل جلسة من
+  ذاكرة الحالة السابقة.
+- تحديثات الموصلات والأداة موحّدة: مسار واحد آمن لتحديث نسخ النماذج المستخدمة.
+- قياس التكاليف المتقدم: نظام جديد غير فعّال بانتظار التفعيل الموضعي.
+- إصلاحات الفحوص: مقارنة أرقام الإصدارات تعمل بأمان مع الصيغ المختلفة.
+
+### English
+
+Candidate dated 2026-09-25, following published `2.3.0.5`.
+
+What changes when published:
+
+- Device account wallets return: your login is saved with your unique identity
+  across sessions.
+- Projects gain membership boundaries: anyone entering a project has their role
+  and visibility set.
+- Session model recovery: on restart, the active model for each session is
+  restored from prior state.
+- Unified connector and harness updates: one secure path to update active model
+  versions.
+- Advanced cost tracking: new system added but dormant, pending local activation.
+- Version check fixes: release numbers now safely compare with different formats.
 
 ## الإصدار 2.3.0.3 — حد أوضح للحوكمة ومنشأ إصدار قابل للتحقق
 

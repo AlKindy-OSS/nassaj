@@ -24,6 +24,8 @@ import test, { after, mock } from 'node:test';
 
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 import { dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
 const PROJECT_ID = 'coordination-all-engines-fixture';
@@ -38,6 +40,7 @@ after(() => {
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (candidate: string) => candidate === projectPath
         ? { project_id: PROJECT_ID, project_path: projectPath }

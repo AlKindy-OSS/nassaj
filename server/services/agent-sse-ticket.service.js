@@ -87,6 +87,28 @@ export function consumeAgentSseTicket(rawTicket, {
   };
 }
 
+/**
+ * Freezes the consumed ticket principal and optionally verifies a concurrently
+ * presented API-key principal without refreshing any captured authority.
+ */
+export function bindConsumedAgentSsePrincipal(consumed, currentPrincipal = null) {
+  if (!consumed?.ok) return null;
+  const principal = Object.freeze({
+    id: consumed.userId,
+    role: consumed.role,
+    authenticationKind: 'ck',
+    authenticationCredentialId: consumed.authenticationCredentialId,
+    authorizationGeneration: consumed.authorizationGeneration,
+  });
+  if (currentPrincipal && (
+    currentPrincipal.id !== principal.id
+    || currentPrincipal.role !== principal.role
+    || currentPrincipal.authenticationCredentialId !== principal.authenticationCredentialId
+    || currentPrincipal.authorizationGeneration !== principal.authorizationGeneration
+  )) return null;
+  return principal;
+}
+
 /** Test-only reset; never exposes bearer values. */
 export function resetAgentSseTicketsForTests() {
   ticketsByDigest.clear();

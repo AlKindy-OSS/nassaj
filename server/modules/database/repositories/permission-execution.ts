@@ -66,6 +66,9 @@ export type CreatePermissionAdmission = Readonly<{
   authenticationKind: 'session' | 'ck' | 'verified_proxy' | 'internal_service';
   authorizationGeneration: number;
   authenticationCredentialId?: string;
+  deviceSessionId?: string;
+  slotId?: string;
+  deviceGeneration?: number;
   launchId: string;
   sessionId?: string;
   projectId: string;
@@ -127,6 +130,15 @@ const assertAdmissionInput = (input: CreatePermissionAdmission): void => {
   if (!Number.isSafeInteger(input.authorizationGeneration) || input.authorizationGeneration <= 0) {
     throw new PermissionStateConflictError('INVALID_AUTHORIZATION_GENERATION');
   }
+  const deviceFields = [input.deviceSessionId, input.slotId, input.deviceGeneration];
+  const hasDeviceBinding = deviceFields.some((value) => value !== undefined);
+  if (hasDeviceBinding && (
+    typeof input.deviceSessionId !== 'string' || !input.deviceSessionId
+    || typeof input.slotId !== 'string' || !input.slotId
+    || !Number.isSafeInteger(input.deviceGeneration) || Number(input.deviceGeneration) <= 0
+  )) {
+    throw new PermissionStateConflictError('INVALID_DEVICE_BINDING');
+  }
   if (!Number.isSafeInteger(input.protocolGeneration) || input.protocolGeneration <= 0) {
     throw new PermissionStateConflictError('INVALID_PROTOCOL_GENERATION');
   }
@@ -175,15 +187,17 @@ export const createPermissionAdmission = (
     const reasonCodesJson = JSON.stringify(input.reasonCodes ?? []);
     database.prepare(`INSERT INTO permission_launch_decisions (
       decision_id, user_id, principal_id, authentication_kind, authorization_generation,
-      authentication_credential_id, launch_id, session_id, project_id, workspace_digest,
+      authentication_credential_id, device_session_id, device_slot_id, device_generation,
+      launch_id, session_id, project_id, workspace_digest,
       provider, body, engine, entrypoint, purpose, requested_profile,
       contract_version, profile_digest, capability_digest, release_build,
       protocol_generation, verdict, reason_codes_json, state, revision, created_at_ms,
       updated_at_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'authorized', ?,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'authorized', ?,
       'authorized', 1, ?, ?)`)
       .run(input.decisionId, input.userId, input.principalId, input.authenticationKind,
         input.authorizationGeneration, input.authenticationCredentialId ?? null,
+        input.deviceSessionId ?? null, input.slotId ?? null, input.deviceGeneration ?? null,
         input.launchId, input.sessionId ?? null, input.projectId, input.workspaceDigest,
         input.provider, input.body, input.engine, input.entrypoint, input.purpose, input.requestedProfile,
         input.contractVersion, input.profileDigest, input.capabilityDigest,
@@ -213,15 +227,17 @@ export const recordPermissionDenial = (
   }
   database.prepare(`INSERT INTO permission_launch_decisions (
     decision_id, user_id, principal_id, authentication_kind, authorization_generation,
-    authentication_credential_id, launch_id, session_id, project_id, workspace_digest,
+    authentication_credential_id, device_session_id, device_slot_id, device_generation,
+    launch_id, session_id, project_id, workspace_digest,
     provider, body, engine, entrypoint, purpose, requested_profile,
     contract_version, profile_digest, capability_digest, release_build,
     protocol_generation, verdict, reason_codes_json, state, revision, created_at_ms,
     updated_at_ms
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'denied', ?,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'denied', ?,
     'not_started', 1, ?, ?)`)
     .run(input.decisionId, input.userId, input.principalId, input.authenticationKind,
       input.authorizationGeneration, input.authenticationCredentialId ?? null,
+      input.deviceSessionId ?? null, input.slotId ?? null, input.deviceGeneration ?? null,
       input.launchId, input.sessionId ?? null, input.projectId, input.workspaceDigest,
       input.provider, input.body, input.engine, input.entrypoint, input.purpose, input.requestedProfile,
       input.contractVersion, input.profileDigest, input.capabilityDigest,
@@ -303,6 +319,33 @@ export const markPermissionEffectStarted = (
     if (lease.changes !== 1) throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
   }
   return expectedRevision + 1;
+}).immediate();
+
+/** Attaches a child minted at the effect seam after the durable start CAS. */
+export const attachPermissionEffectChild = (
+  database: Database,
+  decisionId: string,
+  child: PermissionChildIdentity,
+  nowMs: number,
+): void => database.transaction(() => {
+  if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
+    throw new PermissionStateConflictError('INVALID_CHILD_IDENTITY');
+  }
+  assertToken(child.bootId, 'child_boot_id');
+  assertToken(child.startTicks, 'child_start_ticks');
+  const result = database.prepare(`UPDATE permission_admission_leases
+    SET effect_child_pid = ?, effect_child_boot_id = ?, effect_child_start_ticks = ?,
+      revision = revision + 1, updated_at_ms = ?
+    WHERE decision_id = ? AND status = 'active'
+      AND effect_child_pid IS NULL AND effect_child_boot_id IS NULL
+      AND effect_child_start_ticks IS NULL
+      AND EXISTS (SELECT 1 FROM permission_launch_decisions decision
+        WHERE decision.decision_id = permission_admission_leases.decision_id
+          AND decision.state = 'started')`)
+    .run(child.pid, child.bootId, child.startTicks, nowMs, decisionId);
+  if (result.changes !== 1) {
+    throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
+  }
 }).immediate();
 
 /** Terminates an issued permit which provably never reached the provider boundary. */

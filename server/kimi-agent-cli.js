@@ -50,12 +50,10 @@ import path from 'path';
 import crossSpawn from 'cross-spawn';
 
 import { withRuntimeInstructions as withCoordinationDirective } from './services/runtime-instructions.js';
-
 import { appendVendorTranscriptEventIdempotent, writeVendorTranscriptMeta } from './modules/providers/shared/vendor/vendor-transcript.js';
 import { persistKimiTranscriptFinal } from './shared/kimi-transcript-final.js';
 import { observeProviderErrors, providerSucceeded } from './shared/provider-terminal-proof.js';
 import { createNormalizedMessage, stampCoordinatorId } from './shared/utils.js';
-import { resolveCliExecutablePath } from './shared/cli-executable-path.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import sessionManager from './sessionManager.js';
@@ -78,6 +76,7 @@ import { neutralGovernanceSource } from './services/isolation/codex-governance-m
 import { isGovernanceExempt } from './services/isolation/governance-exemption.js';
 import { KIMI_HOME_SUBDIR } from './services/isolation/provision-user-dirs.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
+import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { KimiAgentResponseHandler, KIMI_RATE_LIMIT_MESSAGE } from './kimi-agent-response-handler.js';
 
 // Use cross-spawn on Windows for correct .cmd resolution (parity with gemini/cursor).
@@ -89,8 +88,9 @@ const spawn = process.platform === 'win32' ? crossSpawn : spawnRaw;
 /** The npm package whose `kimi` bin this seam governs (KG-1 §1.1, pinned by SL-7). */
 export const KIMI_CODE_PACKAGE = '@moonshot-ai/kimi-code';
 
-/** Bare bin name resolved through $PATH when no KIMI_PATH override is set. */
-const KIMI_BIN = 'kimi';
+export const KIMI_USER_VENDOR_BIN = path.join(
+  os.homedir(), '.local', 'share', 'kimi-code-vendor', 'bin', 'kimi',
+);
 
 /** The governance filename kimi ingests from its config-home (a 0444 neutral COPY). */
 export const KIMI_AGENTS_FILENAME = 'AGENTS.md';
@@ -131,8 +131,8 @@ const activeKimiAgentProcesses = new Map();
  * @returns {string}
  */
 export function resolveKimiBinaryPath(env = process.env) {
-  const override = typeof env?.KIMI_PATH === 'string' ? env.KIMI_PATH : undefined;
-  return resolveCliExecutablePath(KIMI_BIN, { override, env });
+  const override = typeof env?.KIMI_PATH === 'string' ? env.KIMI_PATH.trim() : '';
+  return override || KIMI_USER_VENDOR_BIN;
 }
 
 /**
@@ -301,6 +301,11 @@ export function prepareKimiAgentLaunch(params, deps = {}) {
 export async function spawnKimiAgent(command, options = {}, ws) {
   const { sessionId, projectPath, cwd, permissionMode = 'default', sessionSummary } = options;
 
+  if (refuseSpawnIfHarnessUpdating('kimi', ws, {
+    sessionId,
+    clientMsgId: options.clientMsgId,
+  })) return;
+
   // Validate cwd before spawning (B-31 parity).
   const cwdToCheck = cwd || projectPath;
   if (cwdToCheck) {
@@ -386,9 +391,10 @@ export async function spawnKimiAgent(command, options = {}, ws) {
   const turnTimer = createTurnTimer();
   let sawAssistantOutput = false;
   let participantRecorded = false;
+  const outputIsRevoked = () => ws?.isRunOutputRevoked?.() === true;
 
   const recordParticipant = (sid) => {
-    if (participantRecorded || !sid || !ws?.userId) {
+    if (outputIsRevoked() || participantRecorded || !sid || !ws?.userId) {
       return;
     }
     participantRecorded = true;
@@ -396,11 +402,17 @@ export async function spawnKimiAgent(command, options = {}, ws) {
   };
 
   return new Promise((resolve, reject) => {
-    const kimiProcess = spawn(launch.cmd, launch.args, {
-      cwd: workingDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: spawnEnv,
-    });
+    const releaseHarnessLaunch = beginHarnessLaunch('kimi');
+    let kimiProcess;
+    try {
+      kimiProcess = spawn(launch.cmd, launch.args, {
+        cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'], env: spawnEnv,
+      });
+    } catch (error) {
+      releaseHarnessLaunch();
+      reject(error);
+      return;
+    }
 
     let terminalNotificationSent = false;
     let terminalFailureReason = null;
@@ -417,6 +429,7 @@ export async function spawnKimiAgent(command, options = {}, ws) {
       sessionId: capturedSessionId || sessionId || null,
       projectPath: workingDir,
       pid: kimiProcess.pid,
+      launchReservation: releaseHarnessLaunch,
     });
 
     const notifyTerminalState = ({ code = null, error = null } = {}) => {
@@ -459,6 +472,7 @@ export async function spawnKimiAgent(command, options = {}, ws) {
     const responseHandler = ws
       ? new KimiAgentResponseHandler(observeProviderErrors(ws, reason => { terminalFailureReason = reason; }), {
           onContentFragment: (content) => {
+            if (ws?.isRunOutputRevoked?.()) return;
             turnTimer.markModelActivity();
             sawAssistantOutput = true;
             const last = assistantBlocks[assistantBlocks.length - 1];
@@ -469,6 +483,7 @@ export async function spawnKimiAgent(command, options = {}, ws) {
             }
           },
           onToolUse: (event) => {
+            if (ws?.isRunOutputRevoked?.()) return;
             turnTimer.markModelActivity();
             assistantBlocks.push({
               type: 'tool_use',
@@ -478,6 +493,7 @@ export async function spawnKimiAgent(command, options = {}, ws) {
             });
           },
           onToolResult: (event) => {
+            if (ws?.isRunOutputRevoked?.()) return;
             if (assistantBlocks.length) transcriptMessages.push({ role: 'assistant', content: structuredClone(assistantBlocks) });
             transcriptMessages.push({              role: 'user', content: [{                type: 'tool_result', tool_use_id: event.toolId,
                 content: event.output === undefined ? null : event.output, is_error: event.isError === true              }]            });
@@ -499,6 +515,7 @@ export async function spawnKimiAgent(command, options = {}, ws) {
             terminalFailureReason = message;
           },
           onInit: (discoveredSessionId) => {
+            if (outputIsRevoked()) return;
             if (capturedSessionId || !discoveredSessionId) {
               // Still record the CLI session id for resume even on a known session.
               const known = sessionManager.getSession(capturedSessionId);
@@ -607,17 +624,26 @@ export async function spawnKimiAgent(command, options = {}, ws) {
       activeKimiAgentProcesses.delete(finalSessionId);
       activeKimiAgentProcesses.delete(processKey);
 
-      if (finalSessionId && assistantBlocks.length > 0) {
-        sessionManager.addMessage(finalSessionId, 'assistant', assistantBlocks);
+      if (!outputIsRevoked() && !sessionId && Number.isSafeInteger(ws?.userId) && ws.userId > 0) {
+        await writeVendorTranscriptMeta('kimi', finalSessionId, workingDir, command);
       }
 
-      recordParticipant(finalSessionId);
-      if (!sessionId && Number.isSafeInteger(ws?.userId) && ws.userId > 0) await writeVendorTranscriptMeta('kimi', finalSessionId, workingDir, command);
-      const assistantMessageId = await persistKimiTranscriptFinal({
-        sessionId: finalSessionId, userId: ws?.userId,
-        messages: transcriptMessages, assistantBlocks, succeeded: providerSucceeded(code, terminalFailureReason, kimiProcess.nassajAborted),
-      },
-        (event, id) => appendVendorTranscriptEventIdempotent('kimi', finalSessionId, workingDir, event, id));
+      let assistantMessageId = null;
+      if (!outputIsRevoked()) {
+        if (finalSessionId && assistantBlocks.length > 0) {
+          sessionManager.addMessage(finalSessionId, 'assistant', assistantBlocks);
+        }
+        recordParticipant(finalSessionId);
+      }
+      if (!outputIsRevoked()) {
+        assistantMessageId = await persistKimiTranscriptFinal({
+          sessionId: finalSessionId, userId: ws?.userId,
+          messages: transcriptMessages, assistantBlocks, succeeded: providerSucceeded(code, terminalFailureReason, kimiProcess.nassajAborted),
+        }, async (event, id) => {
+          if (outputIsRevoked()) throw new Error('identity revoked');
+          await appendVendorTranscriptEventIdempotent('kimi', finalSessionId, workingDir, event, id);
+        });
+      }
       const durableTiming = code === 0 && sawAssistantOutput && assistantMessageId
         ? settleTurnTiming({
           sessionId: finalSessionId,
@@ -730,6 +756,10 @@ export function abortKimiAgentSession(sessionId) {
     return false;
   }
 }
+
+// Composition roots that already receive the governed launcher can reach its
+// matching abort bridge without importing a second provider capability.
+spawnKimiAgent.abortSession = abortKimiAgentSession;
 
 /** @param {string} sessionId @returns {boolean} */
 export function isKimiAgentSessionActive(sessionId) {

@@ -46,6 +46,14 @@ test('presence lights up sessions this client never opened', () => {
   assert.equal(getSessionProcessState('b'), 'frozen');
 });
 
+test('identity reset invalidates a late frame from the previous account epoch', () => {
+  const accountAEpoch = beginSessionProcessConnectionEpoch();
+  setSessionProcessState('account-a-session', 'running', { epoch: accountAEpoch });
+  resetSessionProcessStates();
+  setSessionProcessState('account-a-session', 'running', { epoch: accountAEpoch });
+  assert.equal(getSessionProcessState('account-a-session'), null);
+});
+
 test('a run dropped from the snapshot clears — that is the live update', () => {
   reconcilePresenceProcessStates([
     { sessionId: 'a', state: 'running' },

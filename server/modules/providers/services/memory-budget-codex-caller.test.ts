@@ -34,9 +34,10 @@ test('actual Codex entry preserves busy failure metadata before an SDK effect', 
   } finally { occupied.forEach(owner => owner.release()); }
 });
 
-test('actual Codex caller permission failure after acquiring its iterator invokes return before release', async () => {
+// b72b50449 fences markStarted before the SDK effect, so a failing start never reaches runStreamed.
+test('actual Codex caller permission start failure refuses before any SDK effect and releases input', async () => {
   const f = fixture(); await f.run({ permissionExecution: { consume() {}, markStarted() { throw new Error('synthetic mark'); }, settle() {}, notStarted() {} } });
-  assert.equal(f.state.sdkCalls, 1); assert.equal(f.state.nextCalls, 0); assert.equal(f.state.returns, 1);
+  assert.equal(f.state.sdkCalls, 0); assert.equal(f.state.nextCalls, 0); assert.equal(f.state.returns, 0);
   assert.equal(f.state.inputHeld, false); assert.equal(f.ledger.stats().chargedBytes, 0);
 });
 

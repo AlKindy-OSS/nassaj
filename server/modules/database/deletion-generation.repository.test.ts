@@ -19,8 +19,16 @@ function fixture(){
  db.prepare("INSERT INTO session_tombstones(session_id,provider,operation_id) VALUES('old-session','claude','old-delete')").run();
  db.prepare("INSERT INTO platform_protocol_marker VALUES('deletion',1,'fixture','now')").run();registerPlatformProtocol(db,{buildId:'fixture',supports:{deletion:[1],credential_scope:[],outcomes:[]}});registerDeletionIntents(db,(p,f,k)=>p==='/fixture'&&f===fingerprint&&k===1);db.exec(PLATFORM_PROTOCOL_GUARDS_SQL);db.exec(DELETION_GUARDS_SQL);
  const input={operationId:'readd',actorId:1,canonicalPath:'/fixture',fingerprints:[{keyVersion:1,fingerprint}],writeKeyVersion:1};
- return {db,input,repository:createDeletionGenerationRepository(db)};
+ return {db,input,repository:createDeletionGenerationRepository(db,{offlineProjectionWriter:true})};
 }
+test('manual re-add is unreachable without the explicit offline projection-writer gate',()=>{
+ const f=fixture();try{
+  const repository=createDeletionGenerationRepository(f.db);
+  assert.throws(()=>f.db.transaction(()=>repository.manualReadd(f.input)).immediate(),
+   {code:'DELETION_OFFLINE_WRITER_REQUIRED'});
+  assert.equal((f.db.prepare('SELECT count(*) AS n FROM projects').get() as {n:number}).n,0);
+ }finally{f.db.close();}
+});
 test('same path yields a fresh generation, exact replay returns it, old sessions never bind or reappear',()=>{
  const f=fixture();try{
   const result=f.db.transaction(()=>f.repository.manualReadd(f.input)).immediate();assert.notEqual(result.projectId,'old');assert.notEqual(result.generation,'old-generation');

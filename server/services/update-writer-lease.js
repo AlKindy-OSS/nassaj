@@ -295,70 +295,109 @@ export function applicationWriterLeaseMiddleware(kind) {
     };
 }
 
+/** Mount path of a router layer from its Express 4 regexp ('' for root mounts). */
+function mountPathOf(layer) {
+    if (layer.regexp?.fast_slash) return '';
+    const source = layer.regexp?.source ?? '';
+    const match = /^\^((?:\\\/[^\\?()[\]|*+]*)*)\\\/\?\(\?=\\\/\|\$\)/.exec(source);
+    return match ? match[1].replace(/\\\//g, '/') : '';
+}
+
+/**
+ * Shared Express 4 stack walker: the ONE traversal both the update-lease
+ * installer and the ADR-172 route-protection probe use, so the probe sees the
+ * exact layer set the lease wraps. `visitLeaf(layer)` gets every handler layer;
+ * `visitRoute(route, fullPath)` (optional) gets every route with its mount prefix.
+ */
+export function walkExpressStack(stack, { visitLeaf = () => {}, visitRoute = null } = {}) {
+    const visited = new Set();
+    const walk = (layers, prefix) => {
+        for (const layer of layers || []) {
+            if (visited.has(layer)) continue;
+            visited.add(layer);
+            if (layer.route?.stack) {
+                if (visitRoute) visitRoute(layer.route, prefix + layer.route.path);
+                walk(layer.route.stack, prefix);
+                continue;
+            }
+            if (layer.handle?.stack) {
+                walk(layer.handle.stack, prefix + mountPathOf(layer));
+                continue;
+            }
+            visitLeaf(layer);
+        }
+    };
+    walk(stack, '');
+}
+
+/** Every registered route of an Express app as { method, path } (ADR-172 P1-1). */
+export function listExpressRoutes(app) {
+    const routes = [];
+    walkExpressStack(app._router?.stack || app.router?.stack || app.stack, {
+        visitRoute: (route, fullPath) => {
+            for (const method of Object.keys(route.methods || {})) {
+                if (route.methods[method]) routes.push({ method: method.toUpperCase(), path: fullPath });
+            }
+        },
+    });
+    return routes;
+}
+
 /** Retain application effects independently of response lifetime, including disconnected clients. */
 export function installLocalUpdateRouteLeases(app) {
     if (process.env.NASSAJ_UPDATE_MODE !== 'local-main') return;
-    const visited = new Set();
-    const walk = (stack) => {
-        for (const layer of stack || []) {
-            if (visited.has(layer)) continue;
-            visited.add(layer);
-            if (layer.route?.stack || layer.handle?.stack) {
-                walk(layer.route?.stack || layer.handle.stack);
-                continue;
-            }
-            const original = layer.handle;
-            if (typeof original !== 'function') continue;
-            if (original.length === 4) {
-                layer.handle = function admittedError(error, req, res, next) {
-                    return withLocalUpdateWriterLease('http-error-handler', () => original.call(this, error, req, res, next))
-                        .catch((leaseError) => {
-                            // This catch also sees whatever the WRAPPED ERROR
-                            // HANDLER threw, so classify before blaming the
-                            // gate: an unrelated throw is forwarded untouched to
-                            // the next error layer, never logged as a denial and
-                            // never answered with a misleading 503.
-                            if (!isGateDenial(leaseError)) return next(leaseError);
-                            // The 503 used to be wholly silent; name the reason
-                            // — once per window, and NEVER a second time for a
-                            // request whose handler layer already announced its
-                            // denial before handing it to `next` (that pairing
-                            // is what produced two lines per rejected request).
-                            if (!error?.[GATE_DENIAL_ANNOUNCED]) announceGateDenial('HTTP error-handler', leaseError);
-                            // Raw ServerResponse API on purpose: the denial can
-                            // fire at the `query`/`expressInit` layers, i.e.
-                            // BEFORE expressInit has given `res` the express
-                            // prototype, where `res.status()` does not exist yet
-                            // and threw a TypeError instead of answering 503.
-                            if (!res.headersSent) res.statusCode = 503;
-                            res.end();
-                        });
-                };
-                continue;
-            }
-            layer.handle = function admittedHandler(req, res, next) {
-                const rawPath = (req.originalUrl || req.url || '').split('?')[0];
-                const exempt = rawPath === '/health'
-                    || (req.method === 'POST' && /^\/api\/system\/update\/local\/[1-9][0-9]*\/confirm$/.test(rawPath));
-                if (exempt) return original.call(this, req, res, next);
-                return withLocalUpdateWriterLease('http-handler', () => original.call(this, req, res, next))
+    const wrapLeaf = (layer) => {
+        const original = layer.handle;
+        if (typeof original !== 'function') return;
+        if (original.length === 4) {
+            layer.handle = function admittedError(error, req, res, next) {
+                return withLocalUpdateWriterLease('http-error-handler', () => original.call(this, error, req, res, next))
                     .catch((leaseError) => {
-                        // This catch sees BOTH the lease refusal and every
-                        // rejection of the route handler it wraps. Announcing
-                        // unconditionally attributed ordinary application
-                        // failures to the update gate — a fabricated root cause
-                        // in the log, a throttle window burnt so a real denial
-                        // in the same minute was folded away, and a marked error
-                        // the error handler then declined to log as well.
+                        // This catch also sees whatever the WRAPPED ERROR
+                        // HANDLER threw, so classify before blaming the
+                        // gate: an unrelated throw is forwarded untouched to
+                        // the next error layer, never logged as a denial and
+                        // never answered with a misleading 503.
                         if (!isGateDenial(leaseError)) return next(leaseError);
-                        // Stamps the rejection as announced, so the wrapped
-                        // error handler it is about to reach does not log the
-                        // same denial a second time (2 lines per request).
-                        announceGateDenial('HTTP handler', leaseError);
-                        next(leaseError);
+                        // The 503 used to be wholly silent; name the reason
+                        // — once per window, and NEVER a second time for a
+                        // request whose handler layer already announced its
+                        // denial before handing it to `next` (that pairing
+                        // is what produced two lines per rejected request).
+                        if (!error?.[GATE_DENIAL_ANNOUNCED]) announceGateDenial('HTTP error-handler', leaseError);
+                        // Raw ServerResponse API on purpose: the denial can
+                        // fire at the `query`/`expressInit` layers, i.e.
+                        // BEFORE expressInit has given `res` the express
+                        // prototype, where `res.status()` does not exist yet
+                        // and threw a TypeError instead of answering 503.
+                        if (!res.headersSent) res.statusCode = 503;
+                        res.end();
                     });
             };
+            return;
         }
+        layer.handle = function admittedHandler(req, res, next) {
+            const rawPath = (req.originalUrl || req.url || '').split('?')[0];
+            const exempt = rawPath === '/health'
+                || (req.method === 'POST' && /^\/api\/system\/update\/local\/[1-9][0-9]*\/confirm$/.test(rawPath));
+            if (exempt) return original.call(this, req, res, next);
+            return withLocalUpdateWriterLease('http-handler', () => original.call(this, req, res, next))
+                .catch((leaseError) => {
+                    // This catch sees BOTH the lease refusal and every
+                    // rejection of the route handler it wraps. Announcing
+                    // unconditionally attributed ordinary application
+                    // failures to the update gate — a fabricated root cause
+                    // in the log, a throttle window burnt so a real denial
+                    // in the same minute was folded away, and a marked error
+                    // the error handler then declined to log as well.
+                    if (!isGateDenial(leaseError)) return next(leaseError);
+                    // Stamps the rejection as announced, so the wrapped
+                    // error handler it is about to reach does not log the
+                    // same denial a second time (2 lines per request).
+                    announceGateDenial('HTTP handler', leaseError);
+                    next(leaseError);
+                });
+        };
     };
-    walk(app._router?.stack || app.router?.stack);
+    walkExpressStack(app._router?.stack || app.router?.stack, { visitLeaf: wrapLeaf });
 }

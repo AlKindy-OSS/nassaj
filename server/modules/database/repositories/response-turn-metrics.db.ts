@@ -127,16 +127,17 @@ export const responseTurnMetricsDb = {
    * time, and the stored `assistant_message_id` is a normalized display id, not
    * a secret. Bounded by session; ordered for deterministic consumers.
    */
-  listSessionWindows(sessionId: string): Array<Pick<ResponseTurnMetric, 'assistantMessageId' | 'startedAt' | 'completedAt'>> {
+  listSessionWindows(sessionId: string): ResponseTurnMetric[] {
     if (!sessionId) return [];
     return getConnection().prepare(
       `SELECT assistant_message_id AS assistantMessageId,
               started_at AS startedAt,
-              completed_at AS completedAt
+              completed_at AS completedAt,
+              duration_ms AS durationMs
        FROM response_turn_metrics
        WHERE session_id = ?
        ORDER BY started_at ASC`,
-    ).all(sessionId) as Array<Pick<ResponseTurnMetric, 'assistantMessageId' | 'startedAt' | 'completedAt'>>;
+    ).all(sessionId) as ResponseTurnMetric[];
   },
 
   /** Null means "no measurement exists", which is not the same fact as a total

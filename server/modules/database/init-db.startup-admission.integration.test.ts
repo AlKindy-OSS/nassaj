@@ -95,6 +95,12 @@ test('real startup-admission boot adds the scheduled-message schema and is idemp
     admitted = true;
     await initializeDatabase();
     assert.equal(hasScheduledMessagesTable(database), true);
+    const walletTables = database.prepare(`SELECT name FROM sqlite_schema
+      WHERE type='table' AND name IN ('device_sessions', 'device_account_slots') ORDER BY name`).all();
+    assert.deepEqual(walletTables, [{ name: 'device_account_slots' }, { name: 'device_sessions' }]);
+    assert.equal((database.prepare('SELECT COUNT(*) AS count FROM device_sessions').get() as { count: number }).count, 0);
+    assert.equal((database.prepare('SELECT COUNT(*) AS count FROM device_account_slots').get() as { count: number }).count, 0,
+      'admitted migration must not convert existing users into device sessions');
     assert.equal(writerEpoch(database), epochBefore, 'admitted queue migration must not advance connector writer epoch');
     const columns = database.prepare('PRAGMA table_info(scheduled_messages)').all() as Array<{ name: string }>;
     assert.ok(columns.some(column => column.name === 'available_at'));
@@ -105,10 +111,15 @@ test('real startup-admission boot adds the scheduled-message schema and is idemp
 
 test('admitted boot does not mutate a pre-scheduled database when connector authority is missing', async () => {
   await withAdmittedFixture(async ({ database, authorityRootPath }) => {
+    const walletSchemaBefore = database.prepare(`SELECT name, sql FROM sqlite_schema
+      WHERE name IN ('device_sessions', 'device_account_slots') ORDER BY name`).all();
     await unlink(authorityRootPath);
     admitted = true;
     await assert.rejects(initializeDatabase());
     assert.equal(hasScheduledMessagesTable(database), false);
+    assert.deepEqual(database.prepare(`SELECT name, sql FROM sqlite_schema
+      WHERE name IN ('device_sessions', 'device_account_slots') ORDER BY name`).all(), walletSchemaBefore,
+    'rejected admitted boot must not mutate the existing wallet schema');
     admitted = false;
   });
 });

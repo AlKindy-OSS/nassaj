@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 
 import { IS_PLATFORM } from '../../../constants/config';
-import { applyRefreshedToken } from '../../../utils/api';
+import {
+  applyRefreshedToken,
+  isSessionRejection,
+  requestMutationCsrf,
+} from '../../../utils/api';
+import {
+  identityRequestSignal,
+  reconcileRevokedIdentity,
+} from '../../auth/accountIdentityBarrier';
 import type { Project } from '../../../types/app';
 import {
   MAX_FILE_UPLOAD_COUNT,
@@ -105,23 +113,46 @@ const buildUploadFormData = (files: File[], targetPath: string) => {
   return formData;
 };
 
-const uploadFormDataWithProgress = (
+/** Upload form data over XHR while preserving identity and progress fences. */
+export const uploadFormDataWithProgress = async (
   projectId: string,
   formData: FormData,
   onProgress: (progress: number) => void,
-) =>
-  new Promise<UploadResponse>((resolve, reject) => {
+) => {
+  const url = `/api/projects/${encodeURIComponent(projectId)}/files/upload`;
+  const signal = identityRequestSignal();
+  const token = localStorage.getItem('auth-token');
+  let csrfToken: string | null = null;
+  if (!IS_PLATFORM && !token) {
+    const csrf = await requestMutationCsrf(url, 'POST', signal);
+    if (!csrf.token) throw new Error(`Upload authorization failed with status ${csrf.response.status}`);
+    csrfToken = csrf.token;
+  }
+  if (signal.aborted) throw new DOMException('Identity transition in progress', 'AbortError');
+
+  return new Promise<UploadResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let settled = false;
 
-    xhr.open('POST', `/api/projects/${encodeURIComponent(projectId)}/files/upload`);
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abortForIdentityChange);
+      callback();
+    };
+    const abortForIdentityChange = () => xhr.abort();
 
-    const token = localStorage.getItem('auth-token');
+    xhr.open('POST', url);
+
     if (!IS_PLATFORM && token) {
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     }
+    if (csrfToken) xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+    signal.addEventListener('abort', abortForIdentityChange, { once: true });
+    if (signal.aborted) abortForIdentityChange();
 
     xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable) {
+      if (settled || signal.aborted || !event.lengthComputable) {
         return;
       }
 
@@ -130,24 +161,38 @@ const uploadFormDataWithProgress = (
       onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
     };
 
-    xhr.onload = () => {
+    xhr.onload = async () => {
+      if (signal.aborted) {
+        finish(() => reject(new DOMException('Identity transition in progress', 'AbortError')));
+        return;
+      }
       // Persist + broadcast a server-rotated JWT (mirrors authenticatedFetch).
       applyRefreshedToken(xhr.getResponseHeader('X-Refreshed-Token'));
 
       const payload = parseUploadResponse(xhr);
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(payload);
+        finish(() => resolve(payload));
         return;
       }
 
-      reject(new Error(payload.error || payload.message || `Upload failed with status ${xhr.status}`));
+      if (xhr.status === 401 && !token) {
+        const rejection = new Response(xhr.responseText || null, {
+          status: 401,
+          headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
+        });
+        const rejectedSession = await isSessionRejection(rejection);
+        if (!signal.aborted && rejectedSession) reconcileRevokedIdentity();
+      }
+
+      finish(() => reject(new Error(payload.error || payload.message || `Upload failed with status ${xhr.status}`)));
     };
 
-    xhr.onerror = () => reject(new Error('Upload failed. Check your connection and try again.'));
-    xhr.onabort = () => reject(new Error('Upload canceled.'));
+    xhr.onerror = () => finish(() => reject(new Error('Upload failed. Check your connection and try again.')));
+    xhr.onabort = () => finish(() => reject(new DOMException('Upload canceled.', 'AbortError')));
 
     xhr.send(formData);
   });
+};
 
 // Helper function to read all files from a directory entry recursively
 const readAllDirectoryEntries = async (directoryEntry: FileSystemDirectoryEntry, basePath = ''): Promise<File[]> => {

@@ -16,6 +16,7 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 
 import {
   setActiveWorkflows,
+  getWorkflowStatusGeneration,
   __resetWorkflowStatusStore,
   useSessionWorkflows,
   useProjectWorkflowRollup,
@@ -132,6 +133,17 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   __resetWorkflowStatusStore();
+});
+
+it('ignores an account A poll that settles after the identity reset', () => {
+  const accountAGeneration = getWorkflowStatusGeneration();
+  __resetWorkflowStatusStore();
+  setActiveWorkflows(
+    makeEnvelope([makeWorkflow('account-a-session', 'wf_a', 'running')]),
+    accountAGeneration,
+  );
+  const { result } = renderHook(() => useSessionWorkflows('account-a-session'));
+  expect(result.current).toHaveLength(0);
 });
 
 // ---------------------------------------------------------------------------

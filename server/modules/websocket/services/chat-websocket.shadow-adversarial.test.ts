@@ -12,10 +12,13 @@ import {
   ShadowContentIntegrityAccumulator,
 } from '@/modules/conversations/index.js';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: () => ({ project_id: 'test-project' }),
       isProjectVisibleToUser: () => true,

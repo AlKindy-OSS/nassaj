@@ -7,12 +7,14 @@ import {
   createPermissionAdmission,
   digestPermissionWorkspace,
   markPermissionEffectStarted,
+  attachPermissionEffectChild,
   PermissionStateConflictError,
   readPermissionRolloutState,
   recordPermissionDenial,
   settlePermissionEffect,
   settlePermissionNotStarted,
   type PermissionTerminalOutcome,
+  deviceAccountSessionsDb,
 } from '@/modules/database/index.js';
 
 import type { AuthenticatedLaunchActor } from './actor.js';
@@ -38,6 +40,7 @@ export type PermissionExecutionHandle = Readonly<{
   effectivePolicy: EffectivePolicy | null;
   consume(): LaunchPermitBinding;
   markStarted(child?: PermissionChildIdentity): void;
+  attachChildIdentity(child: PermissionChildIdentity): void;
   settle(outcome: PermissionTerminalOutcome): void;
   notStarted(): void;
 }>;
@@ -63,17 +66,52 @@ type GatewayDependencies = Readonly<{
   randomId(): string;
   nowMs(): number;
   leaseTtlMs?: number;
+  isDevicePrincipalCurrent?: (principal: {
+    deviceSessionId: string;
+    slotId: string;
+    generation: number;
+    userId: number;
+    authorizationGeneration: number;
+  }) => boolean;
 }>;
 
 const broker = createLaunchPermitBroker();
 
 /** Creates the local ADR-134 gateway. It performs no provider effect itself. */
 export const createExecutionPermissionGateway = (dependencies: GatewayDependencies) => {
+  const assertActorCurrent = (actor: AuthenticatedLaunchActor): void => {
+    const userCurrent = dependencies.database.prepare(`SELECT 1 FROM users
+      WHERE id = ? AND authorization_generation = ?
+        AND is_active = 1 AND status = 'active'`).get(actor.userId, actor.authorizationGeneration);
+    if (!userCurrent) throw new PermissionStateConflictError('IDENTITY_STALE');
+    if (actor.authenticationKind === 'ck') {
+      const match = /^api-key:(\d+)$/u.exec(actor.authenticationCredentialId ?? '');
+      const keyCurrent = match && dependencies.database.prepare(`SELECT 1 FROM api_keys
+        WHERE id = ? AND user_id = ? AND is_active = 1`).get(Number(match[1]), actor.userId);
+      if (!keyCurrent) throw new PermissionStateConflictError('IDENTITY_STALE');
+    }
+    if (!actor.deviceSessionId) {
+      return;
+    }
+    const isCurrent = dependencies.isDevicePrincipalCurrent
+      ?? ((principal) => deviceAccountSessionsDb.isPrincipalCurrent(principal));
+    if (!actor.slotId || !actor.deviceGeneration
+        || isCurrent({
+          deviceSessionId: actor.deviceSessionId,
+          slotId: actor.slotId,
+          generation: actor.deviceGeneration,
+          userId: actor.userId,
+          authorizationGeneration: actor.authorizationGeneration,
+        }) !== true) {
+      throw new PermissionStateConflictError('DEVICE_IDENTITY_STALE');
+    }
+  };
   const authorize = (
     actor: AuthenticatedLaunchActor,
     context: CanonicalLaunchContext,
     requestedProfile: 'full_delegation',
   ): PermissionGatewayResult => {
+    assertActorCurrent(actor);
     const decisionId = dependencies.randomId();
     const leaseId = dependencies.randomId();
     const nowMs = dependencies.nowMs();
@@ -113,6 +151,11 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
       principalId: actor.principalId,
       authenticationKind: actor.authenticationKind,
       authorizationGeneration: actor.authorizationGeneration,
+      ...(actor.deviceSessionId ? {
+        deviceSessionId: actor.deviceSessionId,
+        slotId: actor.slotId,
+        deviceGeneration: actor.deviceGeneration,
+      } : {}),
       authenticationCredentialId: actor.authenticationCredentialId,
       launchId: context.launchId,
       sessionId: context.sessionId ?? undefined,
@@ -177,6 +220,11 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
       leaseId,
       userId: actor.userId,
       authorizationGeneration: actor.authorizationGeneration,
+      ...(actor.deviceSessionId ? {
+        deviceSessionId: actor.deviceSessionId,
+        slotId: actor.slotId,
+        deviceGeneration: actor.deviceGeneration,
+      } : {}),
       provider: context.provider,
       body: context.body,
       engine: context.engine,
@@ -198,10 +246,16 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
     let settled = false;
     const consume = (): LaunchPermitBinding => {
       if (consumed) throw new PermissionStateConflictError('PERMIT_REPLAYED');
+      assertActorCurrent(actor);
       consumed = true;
       const expectation = {
         userId: binding.userId,
         authorizationGeneration: binding.authorizationGeneration,
+        ...(binding.deviceSessionId ? {
+          deviceSessionId: binding.deviceSessionId,
+          slotId: binding.slotId,
+          deviceGeneration: binding.deviceGeneration,
+        } : {}),
         provider: binding.provider,
         body: binding.body,
         engine: binding.engine,
@@ -224,6 +278,7 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
       if (!consumed || started || settled) {
         throw new PermissionStateConflictError('DECISION_NOT_STARTABLE');
       }
+      assertActorCurrent(actor);
       try {
         decisionRevision = markPermissionEffectStarted(
           dependencies.database,
@@ -268,6 +323,21 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
         throw error;
       }
     };
+    const attachChildIdentity = (child: PermissionChildIdentity): void => {
+      if (!started || settled) throw new PermissionStateConflictError('CHILD_IDENTITY_NOT_RECORDABLE');
+      try {
+        attachPermissionEffectChild(dependencies.database, decisionId, child, dependencies.nowMs());
+      } catch (error) {
+        blockPermissionGeneration(dependencies.database, {
+          protocolGeneration: rollout.generation,
+          reasonCode: 'START_EVIDENCE_WRITE_FAILED',
+          decisionId,
+          effectIdentity,
+          nowMs: dependencies.nowMs(),
+        });
+        throw error;
+      }
+    };
     const notStarted = (): void => {
       if (consumed || settled) throw new PermissionStateConflictError('DECISION_NOT_SETTLEABLE');
       settlePermissionNotStarted(dependencies.database, decisionId, dependencies.nowMs());
@@ -282,6 +352,7 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
         effectivePolicy: policy.kind === 'resolved' ? policy.policy : null,
         consume,
         markStarted,
+        attachChildIdentity,
         settle,
         notStarted,
       }),

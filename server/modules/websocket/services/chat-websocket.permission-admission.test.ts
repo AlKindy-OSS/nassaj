@@ -3,6 +3,8 @@ import test, { mock } from 'node:test';
 
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 const PROJECT_PATH = process.cwd();
 const PRINCIPAL = Object.freeze({
   id: 7,
@@ -13,6 +15,7 @@ const PRINCIPAL = Object.freeze({
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (candidate: string) => candidate === PROJECT_PATH
         ? { project_id: 'permission-admission-project' }

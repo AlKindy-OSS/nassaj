@@ -188,7 +188,7 @@ test('subagent transcripts whose parent was pruned are still counted, not silent
   });
 });
 
-test('codex day attribution subtracts the cumulative baseline instead of double counting', async () => {
+test('v1 Codex day attribution subtracts the cumulative baseline instead of double counting', async () => {
   await withLedger(async ({ workspace }) => {
     const temp = await mkdtemp(path.join(tmpdir(), 'codex-home-'));
     const sessionsDir = path.join(temp, 'sessions', '2026', '03', '10');
@@ -218,15 +218,12 @@ test('codex day attribution subtracts the cumulative baseline instead of double 
 
       const daily = costLedgerService.getProjectDaily(projectIdFor(workspace));
       assert.equal(daily.length, 2);
-
-      // العدّاد تراكمي: مجموع اليومين يساوي آخر عدّاد لا ضعفه.
       const wholeRun = costLedgerService.getProjectTotal(projectIdFor(workspace));
-      const summed = daily.reduce((accumulator, row) => accumulator + row.costUsd, 0);
+      const summed = daily.reduce((sum, row) => sum + row.costUsd, 0);
       assert.ok(Math.abs(wholeRun.totalUsd - summed) < 1e-9);
-      // اليوم الثاني حصّة (فرقُ العدّاد) لا كل تاريخ المحادثة.
       assert.ok(daily[1].costUsd < wholeRun.totalUsd);
 
-      // وإعادة المسح لا تُضاعف هنا أيضاً.
+      // v1 remains a compatibility reader; strict no-baseline semantics belong to v3.
       await costLedgerService.scan({ codexHomes: [temp], harnesses: ['codex'], force: true });
       assert.equal(costLedgerService.getProjectTotal(projectIdFor(workspace)).totalUsd, wholeRun.totalUsd);
     } finally {

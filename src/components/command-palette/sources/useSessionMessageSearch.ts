@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { api } from '../../../utils/api';
 import type { LLMProvider } from '../../../types/app';
+import {
+  getIdentityBarrierSnapshot,
+  reconcileRevokedIdentity,
+  subscribeIdentityBarrier,
+} from '../../auth/accountIdentityBarrier';
 
 export type SessionMessageMatch = {
   sessionId: string;
@@ -32,10 +37,15 @@ export function useSessionMessageSearch(
   const [items, setItems] = useState<SessionMessageMatch[]>([]);
   const seqRef = useRef(0);
   const esRef = useRef<EventSource | null>(null);
+  const identityBarrier = useSyncExternalStore(
+    subscribeIdentityBarrier,
+    getIdentityBarrierSnapshot,
+    getIdentityBarrierSnapshot,
+  );
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (!enabled || !projectId || trimmed.length < MIN_QUERY) {
+    if (identityBarrier.phase !== 'stable' || !enabled || !projectId || trimmed.length < MIN_QUERY) {
       setItems([]);
       esRef.current?.close();
       esRef.current = null;
@@ -83,18 +93,34 @@ export function useSessionMessageSearch(
       };
       es.addEventListener('done', finish);
       es.addEventListener('error', finish);
+      es.addEventListener('identity_revoked', () => {
+        es.close();
+        esRef.current = null;
+        reconcileRevokedIdentity();
+      });
     }, DEBOUNCE_MS);
 
     return () => {
       clearTimeout(handle);
     };
-  }, [projectId, query, enabled]);
+  }, [enabled, identityBarrier.phase, identityBarrier.version, projectId, query]);
 
   useEffect(() => {
     return () => {
       esRef.current?.close();
       esRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    const closeForIdentityChange = () => {
+      seqRef.current += 1;
+      esRef.current?.close();
+      esRef.current = null;
+      setItems([]);
+    };
+    window.addEventListener('auth:identity-changing', closeForIdentityChange);
+    return () => window.removeEventListener('auth:identity-changing', closeForIdentityChange);
   }, []);
 
   return items;

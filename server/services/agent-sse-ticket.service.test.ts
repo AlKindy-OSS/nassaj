@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 
 import {
+  bindConsumedAgentSsePrincipal,
   consumeAgentSseTicket,
   getAgentSseTicketSnapshotForTests,
   mintAgentSseTicket,
@@ -34,6 +35,22 @@ test('an SSE ticket is one-shot and rejects replay', () => {
     consumeAgentSseTicket(minted.ticket, { path: TARGET, userId: 7, now: 1_002 }),
     { ok: false, code: 'invalid' },
   );
+});
+
+test('a consumed ticket never adopts a newer API-key generation', () => {
+  const minted = mintAgentSseTicket({ userId: 7, ...ACTOR, path: TARGET, now: 1_000 });
+  const consumed = consumeAgentSseTicket(minted.ticket, { path: TARGET, now: 1_001 });
+  const exact = {
+    id: 7, role: ACTOR.role, authenticationKind: 'ck',
+    authorizationGeneration: ACTOR.authorizationGeneration,
+    authenticationCredentialId: ACTOR.authenticationCredentialId,
+  };
+
+  assert.deepEqual(bindConsumedAgentSsePrincipal(consumed, exact), exact);
+  assert.equal(Object.isFrozen(bindConsumedAgentSsePrincipal(consumed)), true);
+  assert.equal(bindConsumedAgentSsePrincipal(consumed, {
+    ...exact, authorizationGeneration: ACTOR.authorizationGeneration + 2,
+  }), null);
 });
 
 test('an expired SSE ticket is rejected', () => {

@@ -1,8 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { IS_PLATFORM } from '../../../constants/config';
 import { shareLoginPath } from '../../document-sharing/share-navigation';
-import { api } from '../../../utils/api';
+import { api, setCookieSessionKind } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
 import { exchangeOidcCode, fetchOidcIdentity } from '../oidc';
 import type {
@@ -15,9 +15,41 @@ import type {
   OnboardingStatusPayload,
 } from '../types';
 import { parseJsonSafely, resolveApiErrorMessage } from '../utils';
-import { hydratePreferencesFromServer } from '../../../preferences/preferencesSync';
+import {
+  hydratePreferencesFromServer,
+  setPreferenceIdentityAuthenticated,
+} from '../../../preferences/preferencesSync';
 import { clearOutbox, setOutboxUser } from '../../chat/utils/messageOutbox';
 import { useOutboxDurableRecovery } from '../../chat/hooks/useOutboxDurableRecovery';
+import {
+  beginIdentityTransition,
+  cancelIdentityTransition,
+  commitIdentityTransition,
+  enterPasswordChangeOnlyMode,
+  exitPasswordChangeOnlyMode,
+  getIdentityBarrierSnapshot,
+  isCurrentIdentityReconciliation,
+  lockIdentityBarrier,
+  reconcileRevokedIdentity,
+  stabilizeIdentityBarrier,
+  subscribeIdentityBarrier,
+} from '../accountIdentityBarrier';
+import { purgeAccountIdentityState } from '../accountIdentityIsolation';
+import {
+  AccountWalletError,
+  finishWalletIdentityTransition,
+  isAccountWallet,
+  mutateAccountWallet,
+  readAccountWallet,
+  type AccountWallet,
+} from '../accountWalletClient';
+import {
+  authUserKey,
+  clearIdentityCompletionReceipt,
+  readIdentityCompletionReceipt,
+  receiptMatchesIdentity,
+  writeIdentityCompletionReceipt,
+} from '../accountIdentityReceipt';
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -39,6 +71,11 @@ const clearStoredToken = () => {
 export const PROACTIVE_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 
 type TokenTimestamps = { exp?: number; iat?: number };
+type AuthCheckOperation = Readonly<{
+  epoch: number;
+  barrierVersion: string;
+  controller: AbortController;
+}>;
 
 /**
  * Decode a JWT's payload segment WITHOUT verifying the signature — used only to
@@ -98,6 +135,11 @@ export function useOptionalAuth(): AuthContextValue | null {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const identityBarrier = useSyncExternalStore(
+    subscribeIdentityBarrier,
+    getIdentityBarrierSnapshot,
+    getIdentityBarrierSnapshot,
+  );
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(() => readStoredToken());
   const [isLoading, setIsLoading] = useState(true);
@@ -109,19 +151,68 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // behaves like a single-user install — attribution UI stays hidden rather
   // than appearing with a lone avatar on every row.
   const [isMultiUser, setIsMultiUser] = useState(false);
+  const [deviceAccountSessionsEnabled, setDeviceAccountSessionsEnabled] = useState(false);
+  const mustChangePassword = Boolean(user?.mustChangePassword);
   // Prevent checkAuthStatus from re-running immediately after a successful login/register/invite.
   // Without this flag, changing `token` state causes checkAuthStatus to be rebuilt
   // (it closes over `token`), which re-triggers the useEffect and may call clearSession()
   // before the new token is settled in all async paths.
   const skipNextAuthCheck = useRef(false);
+  const reconcilingIdentityVersion = useRef<string | null>(null);
+  const authCheckEpoch = useRef(0);
+  const authCheckController = useRef<AbortController | null>(null);
+
+  const invalidateAuthCheck = useCallback(() => {
+    authCheckEpoch.current += 1;
+    authCheckController.current?.abort('identity_changed');
+    authCheckController.current = null;
+  }, []);
+
+  const beginAuthCheck = useCallback((): AuthCheckOperation | null => {
+    const barrier = getIdentityBarrierSnapshot();
+    if (barrier.phase !== 'stable') return null;
+    invalidateAuthCheck();
+    const controller = new AbortController();
+    authCheckController.current = controller;
+    return { epoch: authCheckEpoch.current, barrierVersion: barrier.version, controller };
+  }, [invalidateAuthCheck]);
+
+  const isCurrentAuthCheck = useCallback((operation: AuthCheckOperation): boolean => {
+    const barrier = getIdentityBarrierSnapshot();
+    return authCheckEpoch.current === operation.epoch
+      && authCheckController.current === operation.controller
+      && !operation.controller.signal.aborted
+      && barrier.phase === 'stable'
+      && barrier.version === operation.barrierVersion;
+  }, []);
+
+  // Abort at the barrier notification itself, rather than waiting for React's
+  // next effect pass. A mocked or already-buffered response may ignore abort,
+  // so every continuation also checks the epoch + barrier version before it
+  // commits state.
+  useEffect(() => subscribeIdentityBarrier(() => {
+    if (getIdentityBarrierSnapshot().phase !== 'stable') invalidateAuthCheck();
+  }), [invalidateAuthCheck]);
 
   const setSession = useCallback((nextUser: AuthUser, nextToken: string) => {
+    setCookieSessionKind('none');
+    setPreferenceIdentityAuthenticated(true);
     setUser(nextUser);
     setToken(nextToken);
     persistToken(nextToken);
   }, []);
 
+  const setDeviceSession = useCallback((nextUser: AuthUser, limited = false) => {
+    setCookieSessionKind(limited ? 'limited' : 'device');
+    setPreferenceIdentityAuthenticated(true);
+    setUser(nextUser);
+    setToken(null);
+    clearStoredToken();
+  }, []);
+
   const clearSession = useCallback(() => {
+    setCookieSessionKind('none');
+    setPreferenceIdentityAuthenticated(false);
     setUser(null);
     setToken(null);
     clearStoredToken();
@@ -198,11 +289,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // is authoritative — decision 2), or seed the account from this device on a
   // first sign-in (decision 3). Never throws: a missing route / network error
   // degrades silently to localStorage (the route only goes live after the
-  // server restart). Fire-and-forget; preferences must not gate sign-in.
-  const hydratePreferences = useCallback(() => {
-    void hydratePreferencesFromServer().catch((caughtError) => {
+  // server restart). Initial sign-in can hydrate in the background; identity
+  // transitions await it while their privacy barrier remains on screen.
+  const hydratePreferences = useCallback(async () => {
+    try {
+      return await hydratePreferencesFromServer();
+    } catch (caughtError) {
       console.error('Failed to hydrate UI preferences:', caughtError);
-    });
+      return { status: 'unavailable' as const };
+    }
   }, []);
 
   const checkOnboardingStatus = useCallback(async () => {
@@ -226,11 +321,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [checkOnboardingStatus]);
 
   const checkAuthStatus = useCallback(async () => {
+    const operation = beginAuthCheck();
+    if (!operation) return;
+
     // Skip the re-check that fires immediately after login/register/invite sets a new token.
     // The login flow already validates the session via the /login response itself.
     if (skipNextAuthCheck.current) {
       skipNextAuthCheck.current = false;
-      setIsLoading(false);
+      if (isCurrentAuthCheck(operation)) setIsLoading(false);
       return;
     }
 
@@ -238,8 +336,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(true);
       setError(null);
 
-      const statusResponse = await api.auth.status();
+      const statusResponse = await api.auth.status({ signal: operation.controller.signal });
       const statusPayload = await parseJsonSafely<AuthStatusPayload>(statusResponse);
+      if (!isCurrentAuthCheck(operation)) return;
+      setDeviceAccountSessionsEnabled(statusPayload?.deviceAccountSessionsEnabled === true);
 
       if (statusPayload?.needsSetup) {
         setNeedsSetup(true);
@@ -248,11 +348,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       setNeedsSetup(false);
 
-      if (!token) {
-        return;
-      }
-
-      const userResponse = await api.auth.user();
+      const userResponse = await api.auth.user({ signal: operation.controller.signal });
+      if (!isCurrentAuthCheck(operation)) return;
       if (!userResponse.ok) {
         // Only clear the session on definitive auth rejection (401/403).
         // Do not clear on transient errors (5xx, network) to avoid logout loops.
@@ -260,7 +357,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // have written a newer one while this check was in flight (B-131).
         const status = userResponse.status;
         if (status === 401 || status === 403) {
-          evictIfTokenStale(token);
+          if (token) evictIfTokenStale(token);
         } else {
           console.error('[Auth] Transient error checking auth status, keeping session:', status);
           setError(AUTH_ERROR_MESSAGES.authStatusCheckFailed);
@@ -269,23 +366,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const userPayload = await parseJsonSafely<AuthUserPayload>(userResponse);
+      if (!isCurrentAuthCheck(operation)) return;
       if (!userPayload?.user) {
-        clearSession();
+        if (token) clearSession();
         return;
       }
 
       setUser(userPayload.user);
+      setCookieSessionKind(token ? 'none' : 'device');
+      setPreferenceIdentityAuthenticated(true);
       setIsMultiUser(Boolean(userPayload.isMultiUser));
+      try {
+        if (statusPayload?.deviceAccountSessionsEnabled !== true) throw new Error('wallet_disabled');
+        const wallet = await readAccountWallet(operation.controller.signal);
+        if (isCurrentAuthCheck(operation)) {
+          writeIdentityCompletionReceipt(operation.barrierVersion, wallet, userPayload.user);
+        }
+      } catch {
+        // Legacy/single-account deployments have no wallet. Absence of a
+        // receipt only makes a later wallet event take the full safe path.
+      }
+      if (!isCurrentAuthCheck(operation)) return;
       await checkOnboardingStatus();
+      if (!isCurrentAuthCheck(operation)) return;
       hydratePreferences();
     } catch (caughtError) {
+      if (!isCurrentAuthCheck(operation)) return;
       console.error('[Auth] Auth status check failed:', caughtError);
       // Network error — do not clear the session, let the user retry.
       setError(AUTH_ERROR_MESSAGES.authStatusCheckFailed);
     } finally {
-      setIsLoading(false);
+      if (isCurrentAuthCheck(operation)) {
+        authCheckController.current = null;
+        setIsLoading(false);
+      }
     }
-  }, [checkOnboardingStatus, clearSession, evictIfTokenStale, hydratePreferences, token]);
+  }, [beginAuthCheck, checkOnboardingStatus, clearSession, evictIfTokenStale,
+    hydratePreferences, isCurrentAuthCheck, token]);
 
   // Listen for 401 responses dispatched by authenticatedFetch (api.js). When
   // any endpoint rejects the token we clear the local session and redirect to
@@ -424,6 +541,100 @@ export function AuthProvider({ children }: AuthProviderProps) {
     void checkAuthStatus();
   }, [checkAuthStatus, checkOnboardingStatus]);
 
+  useEffect(() => {
+    if (identityBarrier.phase !== 'committed'
+        || reconcilingIdentityVersion.current === identityBarrier.version) return;
+    reconcilingIdentityVersion.current = identityBarrier.version;
+    const reconciliationVersion = identityBarrier.version;
+    const reconcile = async () => {
+      try {
+        // A persisted revocation resumes on reload without emitting a fresh
+        // identity-changing event. Neutralize old account preferences before
+        // any identity can become visible.
+        setPreferenceIdentityAuthenticated(false);
+        let wallet: AccountWallet;
+        try {
+          wallet = await readAccountWallet(undefined, true);
+        } catch (caughtError) {
+          const status = caughtError && typeof caughtError === 'object'
+            && 'status' in caughtError ? caughtError.status : null;
+          const expectedWalletAbsence = status === 401
+            && ['logout', 'logout_all', 'identity_revoked'].includes(identityBarrier.reason);
+          if (!expectedWalletAbsence) throw caughtError;
+
+          // Removing the final slot makes /accounts itself unauthorized. In an
+          // explicit logout transition that absence is the authoritative end
+          // state, but local cleanup must still succeed before login is shown.
+          clearIdentityCompletionReceipt();
+          await purgeAccountIdentityState();
+          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+          clearSession(); setIsMultiUser(false);
+          setNeedsSetup(false); setError(null); setIsLoading(false);
+          stabilizeIdentityBarrier(reconciliationVersion);
+          return;
+        }
+        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        const receipt = readIdentityCompletionReceipt();
+        if (identityBarrier.reason === 'wallet_generation_changed'
+            && receiptMatchesIdentity(receipt, wallet, user)) {
+          setCookieSessionKind('device');
+          setPreferenceIdentityAuthenticated(true);
+          await hydratePreferences();
+          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+          writeIdentityCompletionReceipt(reconciliationVersion, wallet, user!);
+          setError(null);
+          setIsLoading(false);
+          stabilizeIdentityBarrier(reconciliationVersion);
+          return;
+        }
+
+        const mayReuseCompletedCleanup = receipt?.version === reconciliationVersion
+          && receipt.activeSlotId === wallet.activeSlotId
+          && receipt.walletGeneration === wallet.generation;
+        if (!mayReuseCompletedCleanup) {
+          clearIdentityCompletionReceipt();
+          await purgeAccountIdentityState();
+        }
+        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        const response = await api.auth.userForIdentityReconciliation();
+        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (response.status === 401) {
+          if (mayReuseCompletedCleanup) await purgeAccountIdentityState();
+          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+          clearIdentityCompletionReceipt();
+          clearSession(); setIsMultiUser(false);
+          setError(null); setIsLoading(false);
+          stabilizeIdentityBarrier(reconciliationVersion);
+          return;
+        }
+        const payload = await parseJsonSafely<AuthUserPayload>(response);
+        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        if (!response.ok || !payload?.user) throw new Error('identity_hydration_failed');
+        if (mayReuseCompletedCleanup && receipt.userKey !== authUserKey(payload.user)) {
+          clearIdentityCompletionReceipt();
+          await purgeAccountIdentityState();
+          if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        }
+        setCookieSessionKind('device');
+        setPreferenceIdentityAuthenticated(true);
+        setUser(payload.user); setToken(null); clearStoredToken();
+        setIsMultiUser(Boolean(payload.isMultiUser));
+        setError(null); setIsLoading(false);
+        writeIdentityCompletionReceipt(reconciliationVersion, wallet, payload.user);
+        await hydratePreferences();
+        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        await checkOnboardingStatus();
+        if (!isCurrentIdentityReconciliation(reconciliationVersion)) return;
+        stabilizeIdentityBarrier(reconciliationVersion);
+      } catch {
+        if (isCurrentIdentityReconciliation(reconciliationVersion)) {
+          lockIdentityBarrier(reconciliationVersion, 'identity_cleanup_or_hydration_failed');
+        }
+      }
+    };
+    void reconcile();
+  }, [checkOnboardingStatus, clearSession, hydratePreferences, identityBarrier, user]);
+
   const login = useCallback<AuthContextValue['login']>(
     async (username, password) => {
       try {
@@ -431,7 +642,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const response = await api.auth.login(username, password);
         const payload = await parseJsonSafely<AuthSessionPayload>(response);
 
-        if (!response.ok || !payload?.token || !payload.user) {
+        if (response.ok && payload?.passwordChangeRequired && payload.user) {
+          // This is a purpose-limited HttpOnly cookie, not a general session.
+          // Remove any legacy bearer before rendering the forced-change gate.
+          skipNextAuthCheck.current = true;
+          clearIdentityCompletionReceipt();
+          setDeviceSession({ ...payload.user, mustChangePassword: true }, true);
+          enterPasswordChangeOnlyMode();
+          setNeedsSetup(false);
+          setIsLoading(false);
+          return { success: true };
+        }
+
+        if (!response.ok || !payload?.user || (!payload.token && !payload.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.loginFailed);
           setError(message);
           return { success: false, error: message };
@@ -440,7 +663,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Prevent the token-change-driven useEffect from re-running checkAuthStatus
         // (which would call clearSession if any intermediate state is stale).
         skipNextAuthCheck.current = true;
-        setSession(payload.user, payload.token);
+        if (payload.token) setSession(payload.user, payload.token);
+        else {
+          setDeviceAccountSessionsEnabled(Boolean(payload.wallet));
+          setDeviceSession(payload.user);
+        }
         setNeedsSetup(false);
         await hydrateUserIdentity();
         await checkOnboardingStatus();
@@ -452,7 +679,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
       }
     },
-    [checkOnboardingStatus, hydratePreferences, hydrateUserIdentity, setSession],
+    [checkOnboardingStatus, hydratePreferences, hydrateUserIdentity, setDeviceSession, setSession],
   );
 
   // Passkey sign-in (C-PK-1). The WebAuthn ceremony itself (options +
@@ -575,31 +802,63 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const changePassword = useCallback<AuthContextValue['changePassword']>(
     async (currentPassword, newPassword) => {
+      const passwordChangeOnly = mustChangePassword
+        && getIdentityBarrierSnapshot().phase === 'limited';
       try {
         setError(null);
-        const response = await api.auth.changePassword(currentPassword, newPassword);
+        const response = await api.auth.changePassword(currentPassword, newPassword,
+          passwordChangeOnly ? { __identityBypass: true } : undefined);
         const payload = await parseJsonSafely<AuthSessionPayload>(response);
 
-        if (!response.ok || !payload?.token) {
+        if (response.ok && !payload) {
+          if (passwordChangeOnly) {
+            const version = getIdentityBarrierSnapshot().version;
+            lockIdentityBarrier(version, 'password_change_outcome_unknown');
+          }
+          return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
+        }
+
+        if (response.ok && payload?.success === true
+            && !payload.token && !payload.wallet && !passwordChangeOnly) {
+          // A normal device session remains cookie-backed after rotation. No
+          // bearer or replacement wallet is required in the body; reconcile
+          // the authoritative wallet + user instead of reporting false failure.
+          const transition = beginIdentityTransition('password_change');
+          commitIdentityTransition(transition, 'password_change');
+          return { success: true };
+        }
+
+        if (!response.ok || (!payload?.token && !payload?.wallet)) {
           const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.passwordChangeFailed);
           return { success: false, error: message };
+        }
+
+        if (payload.wallet) {
+          const transition = beginIdentityTransition('password_change');
+          commitIdentityTransition(transition, 'password_change');
+          return { success: true };
         }
 
         // Persist the fresh token so this device stays signed in (server rotated
         // pwd_iat and would otherwise invalidate the old token), and clear the
         // forced-change gate locally — the server has already cleared it.
-        setToken(payload.token);
-        persistToken(payload.token);
+        setToken(payload.token!);
+        persistToken(payload.token!);
         setUser((previous) =>
           previous ? { ...previous, mustChangePassword: false } : previous,
         );
+        if (passwordChangeOnly) exitPasswordChangeOnlyMode();
         return { success: true };
       } catch (caughtError) {
+        if (passwordChangeOnly && getIdentityBarrierSnapshot().phase === 'limited') {
+          const version = getIdentityBarrierSnapshot().version;
+          lockIdentityBarrier(version, 'password_change_outcome_unknown');
+        }
         console.error('Password change error:', caughtError);
         return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
       }
     },
-    [],
+    [mustChangePassword],
   );
 
   const changeUsername = useCallback<AuthContextValue['changeUsername']>(
@@ -634,14 +893,54 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = useCallback(() => {
     const tokenToInvalidate = token;
-    clearSession();
-
     if (tokenToInvalidate) {
+      clearSession();
       void api.auth.logout().catch((caughtError: unknown) => {
         console.error('Logout endpoint error:', caughtError);
       });
+      return;
     }
-  }, [clearSession, token]);
+
+    if (!user || !deviceAccountSessionsEnabled) {
+      clearSession();
+      return;
+    }
+
+    const logoutDeviceIdentity = async () => {
+      let wallet: AccountWallet;
+      try {
+        wallet = await readAccountWallet();
+      } catch {
+        reconcileRevokedIdentity();
+        return;
+      }
+      const transition = beginIdentityTransition('logout');
+      try {
+        const next = await mutateAccountWallet<{ generation: number; activeSlotId: string | null }>(
+          '/api/auth/logout', 'POST', 'logout', { expectedGeneration: wallet.generation },
+          { identityBypass: true },
+        );
+        finishWalletIdentityTransition(transition, wallet.activeSlotId, next.activeSlotId, 'logout');
+      } catch (caught) {
+        if (caught instanceof AccountWalletError && (caught.status === 409 || caught.outcomeUnknown)) {
+          try {
+            const authoritative = isAccountWallet(caught.wallet)
+              ? caught.wallet : await readAccountWallet(undefined, true);
+            finishWalletIdentityTransition(
+              transition, wallet.activeSlotId, authoritative.activeSlotId, 'logout',
+            );
+            return;
+          } catch {
+            lockIdentityBarrier(transition, 'logout_reconciliation_failed');
+            return;
+          }
+        }
+        // The state-changing request was not accepted; keep the verified identity.
+        cancelIdentityTransition(transition);
+      }
+    };
+    void logoutDeviceIdentity();
+  }, [clearSession, deviceAccountSessionsEnabled, token, user]);
 
   // T-1295 — ربط صندوق الصادر بصاحبه.
   //
@@ -659,8 +958,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useOutboxDurableRecovery(outboxIdentity);
 
-  const mustChangePassword = Boolean(user?.mustChangePassword);
-
   const contextValue = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -670,6 +967,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       hasCompletedOnboarding,
       mustChangePassword,
       isMultiUser,
+      deviceAccountSessionsEnabled,
       error,
       login,
       loginWithPasskey,
@@ -691,6 +989,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       hasCompletedOnboarding,
       isLoading,
       isMultiUser,
+      deviceAccountSessionsEnabled,
       login,
       loginWithPasskey,
       loginWithOidcCode,
@@ -704,5 +1003,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
     ],
   );
 
-  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
+  const arabic = document.documentElement.lang.startsWith('ar');
+  const barrierScreen = (
+    <div className="fixed inset-0 z-[1000] flex min-h-dvh items-center justify-center bg-background p-6 text-foreground" role={identityBarrier.phase === 'locked' ? 'alert' : 'status'} aria-live="assertive">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-xl">
+        <h1 className="text-lg font-semibold">{identityBarrier.phase === 'locked' ? (arabic ? 'تعذر تأمين تبديل الحساب' : 'Account switch could not be secured') : (arabic ? 'جارٍ تأمين الحساب…' : 'Securing account…')}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{identityBarrier.phase === 'locked' ? (arabic ? 'أُوقفت الطلبات والاتصالات لحماية بيانات الحساب. أعد تحميل الصفحة للمحاولة بأمان.' : 'Requests and realtime connections are stopped to protect account data. Reload to retry safely.') : (arabic ? 'لن تُعرض بيانات الحساب حتى يكتمل التنظيف والتحقق من الهوية.' : 'Account data stays hidden until cleanup and identity verification finish.')}</p>
+      </div>
+    </div>
+  );
+
+  return <AuthContext.Provider value={contextValue}>
+    {identityBarrier.phase === 'committed' || identityBarrier.phase === 'locked'
+      ? barrierScreen
+      : <>{children}{identityBarrier.phase === 'changing' ? barrierScreen : null}</>}
+  </AuthContext.Provider>;
 }

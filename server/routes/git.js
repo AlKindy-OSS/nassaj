@@ -36,6 +36,15 @@ const router = express.Router();
 const COMMIT_DIFF_CHARACTER_LIMIT = 500_000;
 const CONVENTIONAL_COMMIT_PATTERN = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)\r\n]+\))?!?: .+/;
 
+/** Final device-generation fence immediately before a request's first write. */
+function claimCurrentIdentity(req, res) {
+  if (req.assertCurrentIdentity?.() !== false) return true;
+  res.status(409).set('Cache-Control', 'no-store').json({
+    error: 'Identity changed during request', code: 'identity_changed',
+  });
+  return false;
+}
+
 /**
  * Commit exactly the selected worktree paths without staging through Git's
  * shared default index, then hand the immutable commit contract to the preview
@@ -1145,6 +1154,7 @@ router.post('/initial-commit', async (req, res) => {
       // No HEAD - this is good, we can create initial commit
     }
 
+    if (!claimCurrentIdentity(req, res)) return;
     // Add all files
     await spawnAsync('git', ['add', '.'], { cwd: projectPath });
 
@@ -1205,6 +1215,7 @@ router.post('/commit', async (req, res) => {
     // The per-user identity remains transient and is passed only to the final
     // commit-tree operation. It is never persisted in the request manifest.
     const authorEnv = buildGitAuthorEnv(req.user?.id);
+    if (!claimCurrentIdentity(req, res)) return;
     const result = await commitSelectedPathsWithArbiter({
       repositoryRootPath,
       repositoryRelativeFilePaths,
@@ -1261,6 +1272,7 @@ router.post('/resolve-commit-conflict', async (req, res) => {
     const projectPath = await getActualProjectPath(project, req);
     await validateGitRepository(projectPath);
     const repositoryRootPath = await getRepositoryRootPath(projectPath);
+    if (!claimCurrentIdentity(req, res)) return;
     const result = resumeRequest({
       repo: repositoryRootPath,
       requestId,
@@ -1336,6 +1348,7 @@ router.post('/commit-session-overlay', async (req, res) => {
       repositoryRelativeFilePaths.push(from.repositoryRelativeFilePath, to.repositoryRelativeFilePath);
     }
     const uniqueRepositoryPaths = [...new Set(repositoryRelativeFilePaths)];
+    if (!claimCurrentIdentity(req, res)) return;
     const result = await submitSessionOverlay({
       repositoryRootPath,
       projectPath,
@@ -1401,6 +1414,7 @@ router.post('/resolve-session-overlay-conflict', async (req, res) => {
     const projectPath = await getActualProjectPath(project, req);
     await validateGitRepository(projectPath);
     const repositoryRootPath = await getRepositoryRootPath(projectPath);
+    if (!claimCurrentIdentity(req, res)) return;
     const result = await resolveSessionOverlayConflict({
       repositoryRootPath,
       projectPath,
@@ -1457,6 +1471,7 @@ router.post('/revert-local-commit', async (req, res) => {
     }
 
     try {
+      if (!claimCurrentIdentity(req, res)) return;
       // Soft reset rewinds one commit while preserving all file changes in the index.
       await spawnAsync('git', ['reset', '--soft', 'HEAD~1'], { cwd: projectPath });
     } catch (error) {
@@ -1543,6 +1558,7 @@ router.post('/checkout', async (req, res) => {
     // '-'-prefixed name as an option (B-GIT-SEC-4); the validator rejects such
     // names anyway, so this is the second layer.
     validateBranchName(branch);
+    if (!claimCurrentIdentity(req, res)) return;
     const { stdout } = await spawnAsync('git', ['checkout', '--end-of-options', branch], { cwd: projectPath });
     
     res.json({ success: true, output: stdout });
@@ -1570,6 +1586,7 @@ router.post('/create-branch', async (req, res) => {
     // here because it would swallow `-b` itself. The validator's leading-'-'
     // rejection is the guard (B-GIT-SEC-4).
     validateBranchName(branch);
+    if (!claimCurrentIdentity(req, res)) return;
     const { stdout } = await spawnAsync('git', ['checkout', '-b', branch], { cwd: projectPath });
     
     res.json({ success: true, output: stdout });
@@ -1601,6 +1618,7 @@ router.post('/delete-branch', async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete the currently checked-out branch' });
     }
 
+    if (!claimCurrentIdentity(req, res)) return;
     const { stdout } = await spawnAsync('git', ['branch', '-d', '--end-of-options', branch], { cwd: projectPath });
     res.json({ success: true, output: stdout });
   } catch (error) {
@@ -2074,6 +2092,7 @@ router.post('/fetch', async (req, res) => {
 
     validateRemoteName(remoteName);
     // --end-of-options: a remote name can never be re-parsed as a git option.
+    if (!claimCurrentIdentity(req, res)) return;
     const { stdout } = await spawnAsync('git', ['fetch', '--end-of-options', remoteName], { cwd: projectPath });
 
     res.json({ success: true, output: stdout || 'Fetch completed successfully', remoteName });
@@ -2121,6 +2140,7 @@ router.post('/pull', async (req, res) => {
     validateRemoteName(remoteName);
     validateBranchName(remoteBranch);
     // --end-of-options: neither positional can be re-parsed as a git option.
+    if (!claimCurrentIdentity(req, res)) return;
     const { stdout } = await spawnAsync('git', ['pull', '--end-of-options', remoteName, remoteBranch], { cwd: projectPath });
 
     res.json({
@@ -2191,6 +2211,7 @@ router.post('/push', requireOwnerReleaseBroker, async (req, res) => {
     validateRemoteName(remoteName);
     validateBranchName(remoteBranch);
 
+    if (!claimCurrentIdentity(req, res)) return;
     const credentialLease = await resolvePushCredentialLease(projectPath, remoteName, req.user?.id);
     let stdout;
     try {
@@ -2292,6 +2313,7 @@ router.post('/publish', requireOwnerReleaseBroker, async (req, res) => {
 
     // Publish through the same canonical-remote askpass lease as ordinary push.
     validateRemoteName(remoteName);
+    if (!claimCurrentIdentity(req, res)) return;
     const credentialLease = await resolvePushCredentialLease(projectPath, remoteName, req.user?.id);
     let stdout;
     try {
@@ -2370,10 +2392,13 @@ router.post('/discard', async (req, res) => {
 
     const status = statusOutput.substring(0, 2);
 
+    if (!claimCurrentIdentity(req, res)) return;
+
     if (status === '??') {
       // Untracked file or directory - delete it
       const filePath = path.join(repositoryRootPath, repositoryRelativeFilePath);
       const stats = await fs.stat(filePath);
+      if (!claimCurrentIdentity(req, res)) return;
 
       if (stats.isDirectory()) {
         await fs.rm(filePath, { recursive: true, force: true });
@@ -2431,6 +2456,8 @@ router.post('/delete-untracked', async (req, res) => {
     // Delete the untracked file or directory
     const filePath = path.join(repositoryRootPath, repositoryRelativeFilePath);
     const stats = await fs.stat(filePath);
+
+    if (!claimCurrentIdentity(req, res)) return;
 
     if (stats.isDirectory()) {
       // Use rm with recursive option for directories

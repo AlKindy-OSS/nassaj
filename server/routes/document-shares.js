@@ -68,21 +68,34 @@ function validBody(body, fields) {
 }
 
 /** Recheck manager and project after asynchronous filesystem work, before SQL writes. */
-function assertManager(req, store, verifyUser, originalProject) {
-  const user = verifyUser(req.get('Authorization'));
+/**
+ * Management gate (ADR-172 P1-3): platform owner/admin, or — once membership
+ * enforcement is on — anyone `canManageProject` (= canAccessProject) admits.
+ * Owner decision 2026-09-23 (qa #7): every project member may manage share
+ * links, including public ones; this is intended, not an oversight.
+ * Public share-token reads (authorizeRead, audience 'client') are deliberately
+ * NOT subject to canAccessProject: the token IS the capability for outsiders.
+ */
+function assertManager(req, store, verifyUser, originalProject, canManageProject) {
+  if (req.assertCurrentIdentity?.() === false) {
+    throw new DocumentShareError('AUTH_REQUIRED', 401);
+  }
+  const user = req.user ?? verifyUser(req.get('Authorization'));
   if (!user) throw new DocumentShareError('AUTH_REQUIRED', 401);
-  if (!admin(user)) throw new DocumentShareError('ACCESS_DENIED', 403);
+  if (!admin(user) && !canManageProject(req.params.projectId, user.id)) {
+    throw new DocumentShareError('ACCESS_DENIED', 403);
+  }
   const project = store.project(req.params.projectId);
   if (!project || (originalProject && project.project_path !== originalProject.project_path)) throw unavailable();
   return { user, project };
 }
 
-function createManagementHandler({ getStore, verifyUser, audit }) {
+function createManagementHandler({ getStore, verifyUser, audit, canManageProject }) {
   return (handler) => async (req, res) => {
     try {
       const store = getStore();
-      const { user, project } = assertManager(req, store, verifyUser);
-      const checkWrite = () => assertManager(req, store, verifyUser, project);
+      const { user, project } = assertManager(req, store, verifyUser, undefined, canManageProject);
+      const checkWrite = () => assertManager(req, store, verifyUser, project, canManageProject);
       await handler(req, res, { store, project, user, audit, checkWrite });
     } catch (error) { respondError(res, error); }
   };
@@ -134,9 +147,10 @@ function registerUpdate(router, manage, writer) {
 }
 
 function registerRevoke(router, manage, writer) {
-  router.post('/projects/:projectId/document-shares/:id/revoke', writer, manage(async (req, res, { store, project, user, audit }) => {
+  router.post('/projects/:projectId/document-shares/:id/revoke', writer, manage(async (req, res, { store, project, user, audit, checkWrite }) => {
     const row = store.get(req.params.id);
     if (!row || row.project_id !== project.project_id) throw unavailable();
+    checkWrite();
     store.revoke(row.id, new Date().toISOString());
     audit('document_share_revoked', user.id, row.id);
     res.status(204).end();
@@ -193,10 +207,10 @@ function createReader({ getStore, verifyUser, isMember, buildPreview }) {
 }
 
 /** Build share routes with explicit verified-user and project-membership dependencies. */
-export function createDocumentSharesRouter({ getStore, verifyUser, isMember, audit = () => {}, writer = (_req, _res, next) => next(), publicOrigin, buildPreview = buildSharedDocumentPreview }) {
+export function createDocumentSharesRouter({ getStore, verifyUser, isMember, canManageProject = () => false, audit = () => {}, writer = (_req, _res, next) => next(), publicOrigin, buildPreview = buildSharedDocumentPreview }) {
   const router = express.Router();
   router.use(headers, boundedRequests());
-  const manage = createManagementHandler({ getStore, verifyUser, audit });
+  const manage = createManagementHandler({ getStore, verifyUser, audit, canManageProject });
   router.get('/projects/:projectId/document-shares', manage(async (_req, res, { store, project }) => {
     res.json({ shares: store.list(project.project_id).map(publicRow), projectPath: project.project_path });
   }));
@@ -213,7 +227,10 @@ export function createDocumentSharesRouter({ getStore, verifyUser, isMember, aud
 
 function authorizeRead(req, store, verifyUser, isMember) {
   const secret = req.get('X-Share-Token');
-  const user = secret ? null : verifyUser(req.get('Authorization'));
+  if (!secret && req.assertCurrentIdentity?.() === false) {
+    throw new DocumentShareError('AUTH_REQUIRED', 401);
+  }
+  const user = secret ? null : (req.user ?? verifyUser(req.get('Authorization')));
   // For member requests authenticate before looking up any identifier.
   if (!secret && !user) throw new DocumentShareError('AUTH_REQUIRED', 401);
   if (!ID.test(req.params.id)) throw unavailable();

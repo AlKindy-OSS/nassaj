@@ -7,6 +7,7 @@ export { default as ParticipantAvatarStack } from './ParticipantAvatarStack';
 // (utils.ts) with a single consumer, so it cannot fork into two counts again.
 export { default as SessionParticipantsBar } from './SessionParticipantsBar';
 export { default as ProjectParticipantsSummary } from './ProjectParticipantsSummary';
+export { default as ManageProjectMembersButton } from './ManageProjectMembersDialog';
 export { useSessionParticipants, useProjectParticipants } from './hooks';
 export type {
   SessionParticipant,

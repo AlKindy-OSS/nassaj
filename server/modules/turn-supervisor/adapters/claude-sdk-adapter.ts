@@ -1,5 +1,7 @@
 import { query, type Options, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
+// eslint-disable-next-line boundaries/dependencies -- admission is a synchronous leaf; importing the providers barrel here creates the provider-auth graph during adapter boot.
+import { isSpawnBlockedForRunProvider } from '../../providers/harness-update/spawn-admission.js';
 import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from '../../../services/isolation/anthropic-base-url-guard.js';
 import { resolveClaudeCodeExecutablePath } from '../../../shared/claude-cli-path.js';
 
@@ -74,6 +76,8 @@ export function createClaudeSdkTurnAdapter(
     },
     async probe(request): Promise<boolean> {
       if (request.provider !== 'claude' || !enabled()) return false;
+      // T-1749/ADR-159: claude is unavailable while its harness is being updated.
+      if (isSpawnBlockedForRunProvider('claude')) return false;
       const status = await getAuthStatus(request.userId);
       return status.installed && status.authenticated;
     },
@@ -88,6 +92,9 @@ export function createClaudeSdkTurnAdapter(
         throw new TurnAdapterError('effects_unsupported', 'Claude supervisor roles cannot execute effects');
       }
       if (request.signal?.aborted) throw aborted(request.signal.reason);
+      if (isSpawnBlockedForRunProvider('claude')) {
+        throw new TurnAdapterError('provider_unavailable', 'The claude runtime is being updated right now');
+      }
 
       const abortController = new AbortController();
       const forwardAbort = (): void => abortController.abort(request.signal?.reason);

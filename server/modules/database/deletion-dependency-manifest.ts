@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-export type DeletionDisposition = 'root' | 'cascade' | 'transactional_delete' | 'retained_ledger' | 'logical_retirement' | 'unrelated_identity';
+export type DeletionDisposition = 'root' | 'cascade' | 'transactional_delete' | 'retained_ledger' | 'isolated_retention' | 'logical_retirement' | 'unrelated_identity';
 export type DeletionDependency = Readonly<{ table: string; column: string; disposition: DeletionDisposition }>;
 
 /** Exhaustive fixed inventory. A new dependency is rejected until explicitly classified/reviewed. */
@@ -71,6 +71,17 @@ export const DELETION_DEPENDENCIES: readonly DeletionDependency[] = Object.freez
   { table: 'usage_request_events', column: 'project_path', disposition: 'retained_ledger' },
   { table: 'usage_request_events', column: 'session_id', disposition: 'retained_ledger' },
   { table: 'usage_request_occurrences', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'usage_statistics_runs', column: 'session_id', disposition: 'isolated_retention' },
+  { table: 'usage_statistics_runs', column: 'root_session_id', disposition: 'isolated_retention' },
+  { table: 'usage_statistics_lineage', column: 'root_session_id', disposition: 'isolated_retention' },
+  { table: 'usage_statistics_facts', column: 'run_id', disposition: 'cascade' },
+  { table: 'usage_statistics_lineage', column: 'run_id', disposition: 'cascade' },
+  { table: 'usage_source_snapshots_v3', column: 'run_id', disposition: 'cascade' },
+  { table: 'usage_run_events_v3', column: 'run_id', disposition: 'cascade' },
+  { table: 'usage_retention_v3', column: 'run_id', disposition: 'isolated_retention' },
+  { table: 'usage_v3_preflight_authorities', column: 'root_session_id', disposition: 'isolated_retention' },
+  { table: 'usage_v3_preflight_receipts', column: 'root_session_id', disposition: 'isolated_retention' },
+  { table: 'usage_v3_canonical_runs', column: 'root_session_id', disposition: 'isolated_retention' },
   { table: 'usage_source_links', column: 'session_id', disposition: 'retained_ledger' },
 ]);
 

@@ -16,12 +16,18 @@ import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js
 import { mapSpawnError } from './shared/spawn-error.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
+import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { participantsDb } from './modules/database/index.js';
 
 // Use cross-spawn on Windows for better command execution
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
 let activeCursorProcesses = new Map(); // Track active processes by session ID
+
+/** Resolves the same cursor-agent executable used by spawn and update probes. */
+export function resolveCursorBinaryPath(env = process.env) {
+  return resolveCliExecutablePath('cursor-agent', { override: env.CURSOR_PATH, env });
+}
 
 const WORKSPACE_TRUST_PATTERNS = [
   /workspace trust required/i,
@@ -39,6 +45,10 @@ function isWorkspaceTrustPrompt(text = '') {
 }
 
 async function spawnCursor(command, options = {}, ws) {
+  if (refuseSpawnIfHarnessUpdating('cursor', ws, {
+    sessionId: options.sessionId,
+    clientMsgId: options.clientMsgId,
+  })) return;
   // B-31: verify the project directory exists before spawning Cursor.
   const cwdToCheck = options.cwd || options.projectPath;
   if (cwdToCheck) {
@@ -174,7 +184,8 @@ async function spawnCursor(command, options = {}, ws) {
         console.log('Retrying Cursor CLI with --trust after workspace trust prompt');
       }
 
-      console.log('Spawning Cursor CLI:', 'cursor-agent', args.join(' '));
+      const cursorBinary = resolveCursorBinaryPath();
+      console.log('Spawning Cursor CLI:', cursorBinary, args.join(' '));
       console.log('Working directory:', workingDir);
       console.log('Session info - Input sessionId:', sessionId, 'Resume:', resume);
 
@@ -183,7 +194,7 @@ async function spawnCursor(command, options = {}, ws) {
       const cursorLaunch = resolveCagedLaunch({
         userId: ws?.userId ?? null,
         provider: 'cursor',
-        cmd: resolveCliExecutablePath('cursor-agent'),
+        cmd: cursorBinary,
         args,
         cwd: workingDir,
       });
@@ -195,11 +206,17 @@ async function spawnCursor(command, options = {}, ws) {
       // refusal. The refusal lives at the SPAWN rather than in the UI, because
       // hiding a button leaves every other caller — a resumed session, an API
       // client — spawning exactly as before.
-      const cursorProcess = spawnFunction(cursorLaunch.cmd, cursorLaunch.args, {
-        cwd: workingDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: resolveProviderEnv(ws?.userId ?? null, 'cursor', { ...process.env }),
-      });
+      const releaseHarnessLaunch = beginHarnessLaunch('cursor');
+      let cursorProcess;
+      try {
+        cursorProcess = spawnFunction(cursorLaunch.cmd, cursorLaunch.args, {
+          cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'],
+          env: resolveProviderEnv(ws?.userId ?? null, 'cursor', { ...process.env }),
+        });
+      } catch (error) {
+        releaseHarnessLaunch();
+        throw error;
+      }
 
       activeCursorProcesses.set(processKey, cursorProcess);
 
@@ -212,7 +229,8 @@ async function spawnCursor(command, options = {}, ws) {
         writer: ws,
         sessionId: capturedSessionId || sessionId || null,
         projectPath: workingDir,
-        pid: cursorProcess.pid
+        pid: cursorProcess.pid,
+        launchReservation: releaseHarnessLaunch,
       });
 
       const shouldSuppressForTrustRetry = (text) => {
@@ -240,6 +258,7 @@ async function spawnCursor(command, options = {}, ws) {
       };
 
       const processCursorOutputLine = (line) => {
+        if (ws?.isRunOutputRevoked?.()) return;
         if (!line || !line.trim()) {
           return;
         }
@@ -359,6 +378,7 @@ async function spawnCursor(command, options = {}, ws) {
 
       // Handle process completion
       cursorProcess.on('close', async (code) => {
+        if (cursorProcess.__aborted && code === 0) code = 1;
         // B-395: the child is gone — clear the badge here rather than in
         // notifyTerminalState, because the workspace-trust retry below returns
         // early without notifying and would otherwise strand it.
@@ -367,7 +387,7 @@ async function spawnCursor(command, options = {}, ws) {
         activeCursorProcesses.delete(finalSessionId);
 
         // Flush any final unterminated stdout line before completion handling.
-        if (stdoutLineBuffer.trim()) {
+        if (stdoutLineBuffer.trim() && !ws?.isRunOutputRevoked?.()) {
           processCursorOutputLine(stdoutLineBuffer.trim());
           stdoutLineBuffer = '';
         }

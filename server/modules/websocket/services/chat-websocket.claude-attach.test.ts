@@ -9,7 +9,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+
 import { handleChatConnection } from './chat-websocket.service.js';
+
+// 5ec5556c5: realtime session paths fail closed on unknown ids, so every session a
+// test reconnects to is persisted first (unregistered project, membership enforcement off).
+await initializeDatabase();
 
 // Inline replay double mirroring the SessionRegistry attach contract (seq>lastSeq,
 // read-only). The real registry internals are covered by session-registry.test.ts;
@@ -143,6 +149,7 @@ function sendCheckStatus(
   sessionId: string,
   lastSeq?: number,
 ) {
+  sessionsDb.createSession(sessionId, 'claude', process.cwd());
   ws.emit(
     'message',
     JSON.stringify({

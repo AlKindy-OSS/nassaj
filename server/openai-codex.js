@@ -32,6 +32,7 @@ import { mapSpawnError } from './shared/spawn-error.js';
 import { auditLogDb, participantsDb } from './modules/database/index.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
+import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { PROCESS_TAG_ENV_VAR } from './services/session-process-monitor.js';
 import { classifyCodexFailure } from './modules/providers/list/codex/codex-failure.js';
 import {
@@ -440,6 +441,11 @@ export {
 export function queryCodex(command, options = {}, ws) {
   let lockKey = null, locked = false;
   try {
+    // T-1749/ADR-159: refuse a new spawn while codex is mid-update. Inside the try so an
+    // options accessor failure still surfaces as a rejected Promise, never a sync throw.
+    if (refuseSpawnIfHarnessUpdating('codex', ws, { sessionId: options.sessionId, clientMsgId: options.clientMsgId })) {
+      return Promise.resolve();
+    }
     const clientMsgIdField = typeof options.clientMsgId === 'string' && options.clientMsgId
       ? { clientMsgId: options.clientMsgId } : {};
     lockKey = typeof options.sessionId === 'string' && options.sessionId ? options.sessionId : null;
@@ -860,22 +866,18 @@ async function queryCodexOwned(invocation) {
     // ambiguous (the child/turn may already exist), so it must never be
     // rewritten as the stronger `spawn_failed` fact.
     abortController.signal.throwIfAborted();
+    turnUsageBoundaryAt = new Date().toISOString();
+    if (permissionExecution) {
+      permissionExecution.markStarted();
+      permissionStarted = true;
+    }
+    // Only after the start fence: a refused start never entered the SDK, so its transfer is not stuck.
     permissionEffectAttempted = true;
     transferEffectEntered = Boolean(transferHandle);
-    turnUsageBoundaryAt = new Date().toISOString();
     streamedTurn = await thread.runStreamed(preparedInput.input, {
       signal: abortController.signal
     });
     streamIterator = streamedTurn.events[Symbol.asyncIterator]();
-    if (permissionExecution) {
-      try {
-        permissionExecution.markStarted();
-        permissionStarted = true;
-      } catch (error) {
-        abortController.abort();
-        throw error;
-      }
-    }
 
     while (true) {
       const step = transferHandle ? await nextCodexHistoryEvent(streamIterator, abortController.signal) : await streamIterator.next();

@@ -649,7 +649,23 @@
     "perModel": "按模型",
     "loading": "正在计算…",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "旧版摘要 — 已记录请求可能未覆盖整段对话",
+    "measurementIncomplete": "这些数字可能未覆盖整段对话",
+    "measurementQuarantined": "计量正在核验 — 总计尚未确认",
+    "modelCalls": "模型调用：{{count}}",
+    "modelCallUsage": "{{count}} 次模型调用 · {{tokens}} 个处理单位",
+    "legacyCodexModelUsage": "旧版摘要：{{count}} 次已记录请求 · {{tokens}} 个处理单位",
+    "rolloutChains": "贡献的执行链：{{count}}",
+    "subagentSpawnAttempts": "子代理创建尝试：{{count}}",
+    "resolvedSubagentRollouts": "已计入的子代理执行链：{{count}}",
+    "subagentModelCalls": "子代理模型调用：{{count}}",
+    "responseTurnDurationLabel": "响应时间",
+    "totalWorkDuration": "总工作时间（时长可能重叠）：{{duration}}"
+  },
+  "activityGap": {
+    "status": "智能体正在工作 — 最近一次活动在 {{time}} 前",
+    "ariaLabel": "智能体仍在工作，最近一次活动在 {{time}} 前"
   },
   "activityGap": {
     "status": "智能体正在工作 — 最近一次活动在 {{time}} 前",

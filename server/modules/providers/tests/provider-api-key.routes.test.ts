@@ -62,6 +62,8 @@ function buildApp(): express.Express {
         authenticationKind: 'session',
         authorizationGeneration: 1,
       };
+      // authenticateToken installs this identity fence (ecfdc7db5); the stub principal is current.
+      (req as Request & { assertCurrentIdentity?: () => boolean }).assertCurrentIdentity = () => true;
     }
     next();
   });

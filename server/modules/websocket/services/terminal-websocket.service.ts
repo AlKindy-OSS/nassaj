@@ -37,6 +37,7 @@
 
 import { WebSocket, type RawData } from 'ws';
 
+import { assertRealtimePrincipalCurrent } from '@/modules/account-wallet/index.js';
 import { readRequestUserId } from '@/modules/websocket/services/chat-websocket.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { parseIncomingJsonObject } from '@/shared/utils.js';
@@ -152,6 +153,10 @@ export function handleTerminalConnection(
   let gateDenialAnnounced = false;
 
   ws.on('message', async (rawMessage: RawData) => {
+    if (!assertRealtimePrincipalCurrent(request.user)) {
+      ws.close(4401, 'identity_revoked');
+      return;
+    }
     try { await withLocalUpdateWriterLease('terminal-websocket-frame', async () => {
     try {
       const data = parseIncomingJsonObject(rawMessage) as TerminalIncomingMessage | null;

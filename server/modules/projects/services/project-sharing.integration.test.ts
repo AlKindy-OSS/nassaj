@@ -166,7 +166,7 @@ test('membership survives: explicit member and session participant are still rec
     const created = projectsDb.createProjectPath('/workspace/membership', null, userA);
     const projectId = created.project!.project_id;
 
-    addMember(projectId, member, 'member', userA, false);
+    addMember(projectId, member, 'member', userA);
     sessionsDb.createSession('sess-1', 'claude', '/workspace/membership');
     participantsDb.recordSpawn('sess-1', participant);
 
@@ -175,7 +175,7 @@ test('membership survives: explicit member and session participant are still rec
   });
 });
 
-test('non-manager still cannot add members (management is not read access)', async () => {
+test('non-member cannot add members: 404, never disclosed (ADR-172)', async () => {
   await withIsolatedDatabase(() => {
     const userA = makeUser();
     const userB = makeUser();
@@ -183,8 +183,8 @@ test('non-manager still cannot add members (management is not read access)', asy
     const projectId = created.project!.project_id;
 
     assert.throws(
-      () => addMember(projectId, userB, 'member', userB, false),
-      (error: unknown) => error instanceof AppError && error.statusCode === 403,
+      () => addMember(projectId, userB, 'member', userB),
+      (error: unknown) => error instanceof AppError && error.statusCode === 404,
     );
   });
 });

@@ -28,6 +28,7 @@ import {
 } from './modules/providers/list/antigravity/antigravity-project-registry.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
+import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { createTurnTimer, settleTurnTiming } from './modules/providers/services/turn-timing.service.js';
 import { createNormalizedMessage } from './shared/utils.js';
 import { resolveAgyExecutablePath } from './shared/cli-executable-path.js';
@@ -573,6 +574,11 @@ async function spawnAntigravity(command, options = {}, ws) {
     const opts = options && typeof options === 'object' ? options : {};
     const { sessionId, projectPath, cwd, sessionSummary, model } = opts;
 
+    if (refuseSpawnIfHarnessUpdating('antigravity', ws, {
+        sessionId,
+        clientMsgId: opts.clientMsgId,
+    })) return;
+
     // The authenticated user driving this run. Drives both the spawn env
     // (resolveProviderEnv) and which brain dir we read for UUID discovery, so
     // an isolated agy reads/writes the same per-user brain store.
@@ -869,6 +875,7 @@ async function spawnAntigravity(command, options = {}, ws) {
     // B-395: assigned right after the spawn; declared here because notifyTerminal
     // above closes over it and may run on the pre-spawn failure path.
     let runPresence = null;
+    let releaseHarnessLaunch = null;
     try {
         // T-897: cage the agy spawn behind NASSAJ_PROVIDER_CAGE (default OFF ⇒
         // launch is returned unchanged, byte-identical to the previous spawn).
@@ -879,6 +886,7 @@ async function spawnAntigravity(command, options = {}, ws) {
             args,
             cwd: cleanCwd,
         });
+        releaseHarnessLaunch = beginHarnessLaunch('antigravity');
         agProcess = spawn(agyLaunch.cmd, agyLaunch.args, {
             cwd: cleanCwd,
             // Single source of truth for the spawn env. When agy is isolated for
@@ -889,6 +897,7 @@ async function spawnAntigravity(command, options = {}, ws) {
             stdio: ['ignore', 'pipe', 'pipe'],
         });
     } catch (err) {
+        releaseHarnessLaunch?.();
         freeDiscoveryLock();
         // B-32: map spawn error to a structured code.
         const mapped = mapSpawnError(err);
@@ -911,6 +920,7 @@ async function spawnAntigravity(command, options = {}, ws) {
         sessionId: finalSessionId,
         projectPath: cleanCwd,
         pid: agProcess.pid,
+        launchReservation: releaseHarnessLaunch,
     });
 
     // Record the authenticated human who spawned this agy run. Idempotent at the
@@ -1062,7 +1072,7 @@ async function spawnAntigravity(command, options = {}, ws) {
                 clearAntigravityProjectPath(discoveredBrainUUID);
             }
 
-            if (assistantText) {
+            if (assistantText && !ws?.isRunOutputRevoked?.()) {
                 sessionManager.addMessage(finalSessionId, 'assistant', assistantText);
             }
 

@@ -135,6 +135,7 @@ const PUBLIC_PROJECT = 'proj-public';   // visible to everyone, writable by memb
 const PRIVATE_PROJECT = 'proj-private'; // invisible to a non-member
 
 let currentUserId: number | null = 7;
+let identityCurrent = true;
 /** userId → { visible, writable } per project id. */
 const ACCESS: Record<string, Record<number, { visible: boolean; writable: boolean }>> = {
   [PUBLIC_PROJECT]: {
@@ -185,6 +186,7 @@ app.use((req, _res, next) => {
   if (currentUserId !== null) {
     (req as express.Request & { user: unknown }).user = { id: currentUserId, role: 'user' };
   }
+  (req as express.Request & { assertCurrentIdentity?: () => boolean }).assertCurrentIdentity = () => identityCurrent;
   next();
 });
 app.use('/api/git', gitRouter);
@@ -216,6 +218,7 @@ beforeEach(() => {
   currentUserId = 7;
   storedGithubToken = null;
   askpassCleanupCalls = 0;
+  identityCurrent = true;
 });
 
 after(async () => {
@@ -474,4 +477,19 @@ test('B-GIT-SEC-4: dash-prefixed refs are rejected, and user values are fenced',
   const showCall = spawnCalls.find((call) => call.args[0] === 'show');
   assert.ok(showCall, 'commit-diff ran');
   assert.deepEqual(showCall.args, ['show', '--end-of-options', 'HEAD']);
+});
+
+test('a wallet switch during async Git preflight prevents the first write effect', async () => {
+  currentUserId = 9;
+  gitScript = (args) => {
+    if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) {
+      identityCurrent = false;
+      return { stdout: 'true\n' };
+    }
+    return undefined;
+  };
+  const res = await request('POST', '/api/git/fetch', { project: PUBLIC_PROJECT });
+  assert.equal(res.status, 409);
+  assert.equal(res.json.code, 'identity_changed');
+  assert.ok(!spawnCalls.some((call) => call.args[0] === 'fetch'));
 });

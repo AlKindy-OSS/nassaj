@@ -39,17 +39,23 @@ function actualHandler(service: Record<string, unknown>) {
     ...[
       'readPathParam', 'SESSION_ID_PATTERN', 'parseSessionId', 'readOptionalQueryString', 'readRequesterUserId',
       'readErrorStatus', 'readErrorCode', 'serveSessionMessages',
+      'accessFenceError', 'captureSessionRequestFence', 'assertSessionRequestFence',
     ].map(name => declaration(route, name)),
     `globalThis.historyHandler = (${handler.getText(route)});`].join('\n');
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-  const context = vm.createContext({ sessionsService: service, HistoryHttpSink, AbortController, AbortSignal, Buffer, console });
+  // The request fence (ecfdc7db5) is extracted as-is; only its DB boundary is synthetic:
+  // an accessible session under the default-off membership flag, as in production.
+  const context = vm.createContext({
+    sessionsService: service, HistoryHttpSink, AbortController, AbortSignal, Buffer, console,
+    assertSessionAccessible: () => ({ project_path: null }), isProjectMembershipEnforced: () => false,
+  });
   vm.runInContext(code, context);
   return context.historyHandler as (req: express.Request, res: express.Response) => Promise<void>;
 }
 
 async function routeCall(query: string, service: Record<string, unknown>, allowLegacy = false) {
   const handler = actualHandler({ usesBoundedHistory: () => true, ...service }), app = express(), sockets = new Set<Socket>();
-  app.use((req, res, next) => { (req as any).user = { id: 7 }; if (!allowLegacy) res.json = (() => { throw new Error('history escaped to unleased res.json'); }) as typeof res.json; next(); });
+  app.use((req, res, next) => { (req as any).user = { id: 7 }; (req as any).assertCurrentIdentity = () => true; if (!allowLegacy) res.json = (() => { throw new Error('history escaped to unleased res.json'); }) as typeof res.json; next(); });
   app.get('/sessions/:sessionId/messages', (req, res, next) => { void handler(req, res).catch(next); });
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.statusCode = error.statusCode ?? 500; res.end(JSON.stringify({ error: { code: error.code ?? 'TEST_ROUTE_FAILURE' } }));

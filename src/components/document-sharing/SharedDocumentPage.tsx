@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Download, FileText, Link2Off, Loader2, LockKeyhole, RefreshCw } from 'lucide-react';
 
 import { useAuth } from '../auth/context/AuthContext';
+import { identityRequestSignal } from '../auth/accountIdentityBarrier';
 import AuthScreenLayout from '../auth/view/AuthScreenLayout';
 
 import { useSharingCopy } from './copy';
@@ -11,6 +12,7 @@ import { shareLoginPath } from './share-navigation';
 type DocumentInfo = { name: string; size: number; modifiedAt: string; downloadPath: string; previewPath?: string; previewScope?: string };
 type State = 'loading' | 'unavailable' | 'login' | 'denied' | 'temporary' | 'ready';
 const button = 'inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-60';
+const memberHeaders = (token: string | null): HeadersInit => token ? { Authorization: `Bearer ${token}` } : {};
 
 /** Map access failures separately from retryable service/network failures. */
 function shareResponseState(status: number, members: boolean): State {
@@ -33,12 +35,12 @@ function useSharedDocument(id: string, members: boolean) {
     setDocument(null);
     if (!/^[a-f0-9]{32}$/.test(id)) { setState('unavailable'); return; }
     if (members && isLoading) { setState('loading'); return; }
-    if (members && (!user || !token)) { setState('login'); return; }
+    if (members && !user) { setState('login'); return; }
     if (!members && !/^[A-Za-z0-9_-]{43}$/.test(secret)) { setState('unavailable'); return; }
     const controller = new AbortController();
     setState('loading');
-    void fetch(`/api/document-shares/${id}`, { headers: members ? { Authorization: `Bearer ${token}` } : { 'X-Share-Token': secret },
-      signal: controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit', redirect: 'error' })
+    void fetch(`/api/document-shares/${id}`, { headers: members ? memberHeaders(token) : { 'X-Share-Token': secret },
+      signal: members ? identityRequestSignal(controller.signal) : controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: members ? 'same-origin' : 'omit', redirect: 'error' })
       .then(async (response) => {
         if (controller.signal.aborted) return;
         if (!response.ok) { setState(shareResponseState(response.status, members)); return; }
@@ -70,8 +72,8 @@ function DocumentPreview({ id, members, access }: { id: string; members: boolean
     const controller = new AbortController();
     setHtml(''); setWarning(false); setFailed(false);
     void fetch(`/api/document-shares/${id}/preview`, {
-      headers: members ? { Authorization: `Bearer ${token}` } : { 'X-Share-Token': secret },
-      signal: controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit', redirect: 'error',
+      headers: members ? memberHeaders(token) : { 'X-Share-Token': secret },
+      signal: members ? identityRequestSignal(controller.signal) : controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: members ? 'same-origin' : 'omit', redirect: 'error',
     }).then(async response => {
       if (controller.signal.aborted) return;
       if (!response.ok) {
@@ -105,8 +107,7 @@ function useDocumentDownload(id: string, members: boolean, access: DocumentAcces
   const downloads = useRef(new Set<string>());
   const downloadRequest = useRef<AbortController | null>(null);
   const credential = members ? token : secret;
-  const requestHeaders = (): HeadersInit => members
-    ? { Authorization: `Bearer ${token ?? ''}` } : { 'X-Share-Token': secret };
+  const requestHeaders = (): HeadersInit => members ? memberHeaders(token) : { 'X-Share-Token': secret };
   useEffect(() => () => {
     downloadRequest.current?.abort();
     for (const url of downloads.current) URL.revokeObjectURL(url);
@@ -120,7 +121,7 @@ function useDocumentDownload(id: string, members: boolean, access: DocumentAcces
     setDownloading(true);
     try {
       const response = await fetch(`/api/document-shares/${id}/content`, { headers: requestHeaders(),
-        signal: controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit', redirect: 'error' });
+        signal: members ? identityRequestSignal(controller.signal) : controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: members ? 'same-origin' : 'omit', redirect: 'error' });
       if (!response.ok) { setDocument(null); setState(shareResponseState(response.status, members)); return; }
       const blob = await response.blob();
       if (controller.signal.aborted) return;

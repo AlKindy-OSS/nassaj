@@ -37,6 +37,29 @@ export type ConversationCostSnapshotStatus =
   | 'incomplete'
   | 'unavailable';
 
+/** قياس v2: أرقام الجلسة المثبتة بعد تسوية سلسلة التنفيذ. */
+export type ConversationMeasurementV2 = {
+  version: 2;
+  status: 'complete' | 'incomplete' | 'quarantined';
+  source: 'legacy' | 'v3';
+  window: { since: string | null; until: string | null };
+  attribution: { scopeFingerprint: string; attributionFingerprint: string } | null;
+  counts: {
+    facts: number | null;
+    requests: number;
+    rollouts: number | null;
+    subagentSpawns: number | null;
+    subagentRollouts: number | null;
+    subagentRequests: number;
+  };
+  durations: { workMs: number | null; responseTurnsMs: number | null };
+  reconciliation: Record<
+    'totalUsd' | 'perModel' | 'turns' | 'counts' | 'durations' | 'eventSets' | 'tokens',
+    'matched' | 'unavailable' | 'mismatch'
+  >;
+  comparison?: { status: 'matched' | 'mismatch' | 'unavailable'; reason?: string };
+};
+
 /** حمولة `GET /api/providers/costs/session/:sessionId` (حقل `cost`). */
 export type ConversationCost = {
   sessionId: string;
@@ -59,6 +82,8 @@ export type ConversationCost = {
   pricesAsOf: string;
   /** مجموع زمن العمل المنسوب إلى هذه المحادثة، بالميلي ثانية. */
   workDurationMs?: number;
+  /** عقد القياس wire غير موثوق حتى يجتاز resolveConversationMeasurement. */
+  measurement?: unknown;
   perModel: ConversationCostModel[];
   /**
    * تفصيل كلفة كل دور على حدة — يُضاف بخادم T-1676.
@@ -195,6 +220,93 @@ export function sumConversationCostTokens(cost: ConversationCost | null): number
   return cost.perModel.reduce((total, entry) => total + sumCostTokens(entry.tokens), 0);
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const validNonNegativeInteger = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+const nullableCountIsValid = (value: unknown): boolean =>
+  value === null || validNonNegativeInteger(value) !== null;
+
+export type ConversationMeasurementDisplay =
+  | { version: 'v1' }
+  | {
+      version: 'v2';
+      status: ConversationMeasurementV2['status'];
+      requestCount: number;
+      rolloutCount: number | null;
+      subagentSpawnCount: number | null;
+      subagentRolloutCount: number | null;
+      subagentRequestCount: number;
+      responseTurnDurationMs: number | null;
+      workDurationMs: number | null;
+    };
+
+/**
+ * يتحقق من عقد القياس عند الحد المرئي. أي عقد ناقص أو مستقبلي يعود إلى v1
+ * بوضوح؛ ولا تتحول القيم المفقودة إلى أصفار أو إلى استنتاجات v2.
+ */
+export function resolveConversationMeasurement(cost: ConversationCost | null): ConversationMeasurementDisplay {
+  const value = cost?.measurement;
+  if (!isRecord(value)
+    || value.version !== 2
+    || (value.status !== 'complete' && value.status !== 'incomplete' && value.status !== 'quarantined')
+    || (value.source !== 'legacy' && value.source !== 'v3')
+    || !isRecord(value.window)
+    || !((value.window.since === null || typeof value.window.since === 'string')
+      && (value.window.until === null || typeof value.window.until === 'string'))
+    || (value.attribution !== null && (!isRecord(value.attribution)
+      || typeof value.attribution.scopeFingerprint !== 'string'
+      || typeof value.attribution.attributionFingerprint !== 'string'))
+    || !isRecord(value.counts)
+    || validNonNegativeInteger(value.counts.requests) === null
+    || validNonNegativeInteger(value.counts.subagentRequests) === null
+    || !nullableCountIsValid(value.counts.facts)
+    || !nullableCountIsValid(value.counts.rollouts)
+    || !nullableCountIsValid(value.counts.subagentSpawns)
+    || !nullableCountIsValid(value.counts.subagentRollouts)
+    || !isRecord(value.durations)
+    || !nullableCountIsValid(value.durations.workMs)
+    || !nullableCountIsValid(value.durations.responseTurnsMs)
+    || !isRecord(value.reconciliation)) {
+    return { version: 'v1' };
+  }
+
+  const reconciliationKeys = [
+    'totalUsd', 'perModel', 'turns', 'counts', 'durations', 'eventSets', 'tokens',
+  ] as const;
+  const reconciliation = value.reconciliation as Record<string, unknown>;
+  const validReconciliation = (entry: unknown) =>
+    entry === 'matched' || entry === 'unavailable' || entry === 'mismatch';
+  if (reconciliationKeys.some((key) => !validReconciliation(reconciliation[key]))) {
+    return { version: 'v1' };
+  }
+  if (value.status === 'complete'
+    && reconciliationKeys.some((key) => reconciliation[key] !== 'matched')) {
+    return { version: 'v1' };
+  }
+  if (value.comparison !== undefined && (!isRecord(value.comparison)
+    || (value.comparison.status !== 'matched'
+      && value.comparison.status !== 'mismatch'
+      && value.comparison.status !== 'unavailable')
+    || (value.comparison.reason !== undefined && typeof value.comparison.reason !== 'string'))) {
+    return { version: 'v1' };
+  }
+
+  return {
+    version: 'v2',
+    status: value.status,
+    requestCount: value.counts.requests as number,
+    rolloutCount: value.counts.rollouts as number | null,
+    subagentSpawnCount: value.counts.subagentSpawns as number | null,
+    subagentRolloutCount: value.counts.subagentRollouts as number | null,
+    subagentRequestCount: value.counts.subagentRequests as number,
+    responseTurnDurationMs: value.durations.responseTurnsMs as number | null,
+    workDurationMs: value.durations.workMs as number | null,
+  };
+}
+
 /** Match the routing prefixes and case aliases accepted by server pricing. */
 function isAstraModel(model: string | null | undefined): boolean {
   if (!model) return false;
@@ -297,7 +409,7 @@ export function buildCostSummaryLines(cost: ConversationCost | null): CostSummar
     lines.push({ key: 'baseRateEstimate' });
   }
 
-  if (cost.subagentRequests > 0) {
+  if (cost.subagentRequests > 0 && resolveConversationMeasurement(cost).version === 'v1') {
     lines.push({ key: 'subagents', count: cost.subagentRequests });
   }
 

@@ -39,6 +39,8 @@ const children: FakeChild[] = [];
 let onAssistantAppend = () => {};
 const recordedTiming: Array<{ sessionId: string; assistantMessageId: string; completedAt: string }> = [];
 const recordedReplies: Array<{ sessionId: string; text: string; finalAnswer: boolean }> = [];
+const recordedTurns: Array<{ sessionId: string; role: string }> = [];
+let onTurnWrite = async (_role: string) => {};
 let failAssistantWrite = false;
 const spawnFake = () => {
   const child = new FakeChild();
@@ -115,6 +117,8 @@ mock.module(url('./modules/providers/shared/vendor/vendor-transcript.js'), {
   namedExports: {
     appendVendorTranscriptTurn: async (_provider: string, sessionId: string, _project: string,
       role: string, text: string, metadata?: { finalAnswer?: boolean }) => {
+      await onTurnWrite(role);
+      recordedTurns.push({ sessionId, role });
       if (role === 'assistant') onAssistantAppend();
       if (role === 'assistant') recordedReplies.push({ sessionId, text, finalAnswer: metadata?.finalAnswer === true });
       return role === 'assistant' && failAssistantWrite ? null : `saved-${sessionId}-${role}`;
@@ -131,19 +135,20 @@ const hermes = await import('./hermes-cli.js');
 
 after(() => mock.restoreAll());
 
-function writer() {
+function writer(isRunOutputRevoked: () => boolean = () => false) {
   const sent: Record<string, unknown>[] = [];
   return {
     sent,
     ws: {
       userId: 7,
       send: (payload: Record<string, unknown>) => sent.push(payload),
+      isRunOutputRevoked,
     },
   };
 }
 
-async function start(sessionId: string) {
-  const output = writer();
+async function start(sessionId: string, isRunOutputRevoked: () => boolean = () => false) {
+  const output = writer(isRunOutputRevoked);
   const run = hermes.spawnHermes('answer', { sessionId }, output.ws);
   await new Promise<void>((resolve) => setImmediate(resolve));
   return { ...output, run, child: children.at(-1)! };
@@ -302,4 +307,32 @@ test('Hermes completion time excludes transcript append latency', async (t) => {
     await run;
     assert.equal(recordedTiming.find(row => row.sessionId === 'hermes-append-latency')?.completedAt, completedAt);
   } finally { onAssistantAppend = () => {}; }
+});
+
+test('queued Hermes transcript writes recheck revocation after a pending write', async () => {
+  recordedTurns.length = 0;
+  recordedReplies.length = 0;
+  let revoked = false;
+  let enterUserWrite!: () => void;
+  const userWriteEntered = new Promise<void>((resolve) => { enterUserWrite = resolve; });
+  let releaseUserWrite!: () => void;
+  const userWriteRelease = new Promise<void>((resolve) => { releaseUserWrite = resolve; });
+  onTurnWrite = async (role) => {
+    if (role !== 'user') return;
+    enterUserWrite();
+    await userWriteRelease;
+  };
+  try {
+    const { child, run } = await start('hermes-queued-revocation', () => revoked);
+    await userWriteEntered;
+    child.stdout.write('late answer\n');
+    child.emit('close', 0);
+    revoked = true;
+    releaseUserWrite();
+    await run;
+    assert.deepEqual(recordedTurns.map((turn) => turn.role), ['user']);
+    assert.deepEqual(recordedReplies, []);
+  } finally {
+    onTurnWrite = async () => {};
+  }
 });

@@ -20,6 +20,12 @@ const idempotencyKey = (req: express.Request): string|null => {
   const value = req.get('idempotency-key');
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(value) ? value : null;
 };
+const current = (req: express.Request, res: express.Response): boolean => {
+  const check = (req as express.Request & { assertCurrentIdentity?: () => boolean }).assertCurrentIdentity;
+  if (check?.() !== false) return true;
+  res.status(409).json({ code: 'IDENTITY_CHANGED' });
+  return false;
+};
 
 /** The endpoint accepts no origin, pack, proof, or registration material from the browser. */
 export const createConnectorProvisioningRoutes = (deps: Dependencies): express.Router => {
@@ -40,7 +46,10 @@ export const createConnectorProvisioningRoutes = (deps: Dependencies): express.R
       || req.get('origin') !== origin.canonicalOrigin || !secureEqual(req.get('x-csrf-token'), session.csrfTokenHash)) {
       res.status(403).json({ code: 'CONNECTOR_PROVISIONING_RECENT_AUTH_OR_CSRF_REQUIRED' }); return;
     }
-    try { res.status(202).json(await deps.service.start((body as { providerId: string }).providerId, key)); }
+    try {
+      if (!current(req, res)) return;
+      res.status(202).json(await deps.service.start((body as { providerId: string }).providerId, key));
+    }
     catch (error) {
       const code = error instanceof Error ? error.message : '';
       const excluded = code === 'connector_provisioning_provider_excluded';

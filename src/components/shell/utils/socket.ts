@@ -9,10 +9,7 @@ export function getShellWebSocketUrl(): string | null {
   }
 
   const token = localStorage.getItem('auth-token');
-  if (!token) {
-    console.error('No authentication token found for Shell WebSocket connection');
-    return null;
-  }
+  if (!token) return `${protocol}//${window.location.host}/shell`;
 
   return `${protocol}//${window.location.host}/shell?token=${encodeURIComponent(token)}`;
 }

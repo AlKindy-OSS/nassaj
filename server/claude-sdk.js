@@ -52,6 +52,13 @@ import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { saveChatImages } from './services/chat-image-store.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
+import {
+  assertHarnessNotUpdating,
+  beginHarnessLaunch,
+  harnessUpdatingMessage,
+  isSpawnBlockedForRunProvider,
+  refuseSpawnIfHarnessUpdating,
+} from './modules/providers/harness-update/spawn-admission.js';
 import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from './services/isolation/anthropic-base-url-guard.js';
 import { buildCagedSdkSpawn } from './services/isolation/provider-cage-wiring.js';
 import {
@@ -1204,6 +1211,7 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
  *   Normalized command list, or `null` on any failure/timeout/old SDK.
  */
 async function probeClaudeBuiltInCommands(context = {}) {
+  assertHarnessNotUpdating('claude');
   const { userId = null, cwd = null } = context;
   const PROBE_TIMEOUT_MS = 4000;
 
@@ -1682,6 +1690,11 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
   const onChunk = typeof callbacks.onChunk === 'function' ? callbacks.onChunk : () => {};
   const onErrorRaw = typeof callbacks.onError === 'function' ? callbacks.onError : () => {};
   const onComplete = typeof callbacks.onComplete === 'function' ? callbacks.onComplete : () => {};
+
+  if (isSpawnBlockedForRunProvider('claude')) {
+    onErrorRaw('harness_updating', harnessUpdatingMessage('claude'));
+    return;
+  }
   // A-1: invoked once with an { interrupt } handle as soon as the fork is
   // constructed, so the caller (the WS layer) can tear the fork down if the
   // requesting socket closes before the one-shot answer arrives.
@@ -3627,6 +3640,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     if (permissionExecution) {
       permissionExecution.consume();
       permissionConsumed = true;
+      // markStarted rechecks the exact admitted actor and persists the effect
+      // claim. No await or provider invocation may occur between this fence and
+      // query(), otherwise a switched device identity could start a stale turn.
+      permissionExecution.markStarted();
+      permissionStarted = true;
     }
     try {
       try {
@@ -3654,11 +3672,6 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       } else {
         delete process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
       }
-    }
-
-    if (permissionExecution) {
-      permissionExecution.markStarted();
-      permissionStarted = true;
     }
 
     // Track the query instance for abort capability
@@ -4311,6 +4324,12 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
  * @returns {Promise<void>}
  */
 async function queryClaudeSDK(command, options = {}, ws) {
+  if (refuseSpawnIfHarnessUpdating('claude', ws, {
+    sessionId: options.sessionId,
+    clientMsgId: options.clientMsgId,
+  })) return;
+  const releaseHarnessLaunch = beginHarnessLaunch('claude');
+  try {
   const { sessionId } = options;
 
   // No resume requested → nothing to detect. Run once, plain.
@@ -4349,6 +4368,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
       ? { clientMsgId: options.clientMsgId }
       : {}),
   }));
+  } finally {
+    releaseHarnessLaunch();
+  }
 }
 
 /**

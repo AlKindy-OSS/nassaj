@@ -649,7 +649,23 @@
     "perModel": "モデル別",
     "loading": "計算中…",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "旧形式の要約 — 記録済みリクエストは会話全体を網羅していない可能性があります",
+    "measurementIncomplete": "数値は会話全体を網羅していない可能性があります",
+    "measurementQuarantined": "計測を確認中です — 合計は未確定です",
+    "modelCalls": "モデル呼び出し: {{count}}",
+    "modelCallUsage": "モデル呼び出し {{count}} 回 · 処理単位 {{tokens}}",
+    "legacyCodexModelUsage": "旧形式の要約: 記録済みリクエスト {{count}} 件 · 処理単位 {{tokens}}",
+    "rolloutChains": "寄与した実行チェーン: {{count}}",
+    "subagentSpawnAttempts": "サブエージェント作成試行: {{count}}",
+    "resolvedSubagentRollouts": "集計されたサブエージェント実行チェーン: {{count}}",
+    "subagentModelCalls": "サブエージェントのモデル呼び出し: {{count}}",
+    "responseTurnDurationLabel": "応答時間",
+    "totalWorkDuration": "合計作業時間（時間は重複する場合があります）: {{duration}}"
+  },
+  "activityGap": {
+    "status": "エージェントが作業中です — 最後のアクティビティから {{time}} 経過",
+    "ariaLabel": "エージェントは作業を継続中です。最後のアクティビティから {{time}} 経過しています"
   },
   "activityGap": {
     "status": "エージェントが作業中です — 最後のアクティビティから {{time}} 経過",

@@ -43,6 +43,22 @@ export type SpawnContext = {
 export type ParticipantAttribution = 'spawn' | 'provenance';
 
 /**
+ * Resolves the only authority-eligible owner for a session.
+ *
+ * This is deliberately narrower than display ownership and never falls back to
+ * inferred provenance, authorship, or a platform owner.  The aggregate makes a
+ * malformed duplicate-owner state fail closed as well.
+ */
+export function resolveStrictSpawnOwnerUserId(sessionId: string): number | null {
+  if (!sessionId) return null;
+  const row = getConnection().prepare(`SELECT MIN(user_id) AS user_id
+    FROM session_participants
+    WHERE session_id = ? AND role = 'owner' AND attribution = 'spawn'
+    HAVING COUNT(*) = 1`).get(sessionId) as { user_id: number } | undefined;
+  return row && Number.isInteger(row.user_id) && row.user_id > 0 ? row.user_id : null;
+}
+
+/**
  * A real spawn arriving on a session whose only owner is an inferred row takes
  * the badge from it. This is the fix for the opencode race (B-477), where the
  * synchronizer sees the session in the shared data dir and claims it ~2 seconds
@@ -143,6 +159,19 @@ export type SessionParticipantsListRow = {
 };
 
 export const participantsDb = {
+  /** Consent-bearing participation only; provenance and authorship do not grant control. */
+  hasSpawnConsent(sessionId: string, userId: number): boolean {
+    if (!sessionId || !Number.isInteger(userId)) return false;
+    return getConnection().prepare(
+      `SELECT 1
+       FROM session_participants
+       WHERE session_id = ? AND user_id = ? AND attribution = 'spawn'
+       LIMIT 1`,
+    ).get(sessionId, userId) !== undefined;
+  },
+
+  /** Exact owner proof for accounting authority; never infers a viewer. */
+  resolveStrictSpawnOwnerUserId,
   /**
    * Records (or refreshes) a human participant on a session spawn.
    *

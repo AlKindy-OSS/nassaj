@@ -23,10 +23,13 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: { getProjectPath: () => ({ project_id: 'test-project' }) },
     sessionsDb: { getSessionById: () => null },
     sessionWorkspaceModesDb: { markOverlay: () => undefined },

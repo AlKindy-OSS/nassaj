@@ -12,6 +12,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +27,7 @@ import {
   participantsDb,
   responseTurnMetricsDb,
   sessionsDb,
+  usageStatisticsV3Db,
   userDb,
 } from '@/modules/database/index.js';
 import { PRICES_AS_OF } from '@/modules/providers/services/cost/model-pricing.js';
@@ -123,6 +125,82 @@ const probeOnly = (providers: string[], method = 'credentials_file'): ProviderAu
 const SUBSCRIPTION_PROBE = probeOf('credentials_file');
 const CLAUDE_ONLY_PROBE = probeOnly(['claude']);
 
+const currentMetricsFingerprint = (sessionId: string): string => JSON.stringify(
+  responseTurnMetricsDb.listSessionWindows(sessionId).map((metric) => [
+    metric.assistantMessageId, metric.startedAt, metric.completedAt, metric.durationMs,
+  ]),
+);
+
+const seedCanonicalReadyV3 = (sessionId: string, input: {
+  occurredAt: string; model: string; inputTokens: number; cachedInputTokens: number;
+  outputTokens: number; workDurationMs: number;
+}): void => {
+  const owner = getConnection().prepare(`SELECT user_id AS userId FROM session_participants
+    WHERE session_id = ? AND role = 'owner' AND attribution = 'spawn'`).get(sessionId) as { userId: number } | undefined;
+  assert.ok(owner, 'canonical v3 fixture requires one trusted spawn owner');
+  const previousWriter = process.env.USAGE_STATISTICS_V3_WRITER;
+  const previousReader = process.env.USAGE_STATISTICS_V3_READER;
+  process.env.USAGE_STATISTICS_V3_WRITER = 'on';
+  delete process.env.USAGE_STATISTICS_V3_READER;
+  const sourceIdentityHash = createHash('sha256').update(`source:${sessionId}`).digest('hex');
+  const proof = { processIdentityId: `proc-${sessionId}`, hostBootId: `boot-${sessionId}`,
+    pid: 71, procStartTicks: '9001' };
+  const key = { ownerUserId: owner.userId, provider: 'codex', rootSessionId: sessionId,
+    scopeFingerprint: 'all', attributionFingerprint: 'none' };
+  const receiptId = `receipt-${sessionId}`;
+  const runId = `v3-${sessionId}`;
+  const merkle = { receiptId, sourceRootHex: createHash('sha256').update(`sources:${sessionId}`).digest('hex'),
+    topologyRootHex: createHash('sha256').update(`topology:${sessionId}`).digest('hex'),
+    rootSourceIdentityHash: sourceIdentityHash, envelopeJson: '{"manifestVersion":1}' };
+  try {
+    assert.deepEqual(usageStatisticsV3Db.beginPreflight({ ...key, authorityId: `authority-${sessionId}`,
+      receiptId, proof, nowMonotonicNs: 1n, leaseDeadlineMonotonicNs: 100n }), { token: 1, attemptNo: 1 });
+    const preflight = { status: 'preflighting' as const, activePreflightId: receiptId,
+      activeRunId: null, token: 1, proof, leaseDeadlineMonotonicNs: 100n };
+    assert.equal(usageStatisticsV3Db.recordPreflightSource(key, preflight, 2n, {
+      receiptId, sourceIdentityHash, generation: 0,
+      descriptorJson: '{"ctimeNs":"1","deviceId":"1","inode":"1","sizeBytes":100,"contentSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}',
+    }), true);
+    assert.equal(usageStatisticsV3Db.recordPreflightMerkle(key, preflight, 2n, merkle), true);
+    assert.equal(usageStatisticsV3Db.passPreflight(key, receiptId, 1, proof, 100n, 2n, 10_000), true);
+    assert.equal(usageStatisticsV3Db.claimCanonicalRun({ ...key, receiptId, runId, token: 2, proof,
+      nowMonotonicNs: 2n, expectedLeaseDeadlineMonotonicNs: 100n,
+      leaseDeadlineMonotonicNs: 100n, retainUntilMs: 20_000,
+      metricsFingerprint: currentMetricsFingerprint(sessionId), pricingVersion: PRICES_AS_OF,
+      envelopeJson: merkle.envelopeJson }), true);
+    const running = { status: 'running' as const, activePreflightId: receiptId, activeRunId: runId,
+      token: 3, proof, leaseDeadlineMonotonicNs: 100n };
+    assert.equal(usageStatisticsV3Db.recordCanonicalFact(key, running, 3n, {
+      eventKey: createHash('sha256').update(`${sourceIdentityHash}+0+0`).digest('hex'), sourceIdentityHash,
+      sourceGeneration: 0, byteStart: 0, occurredAt: input.occurredAt, model: input.model,
+      inputTokens: input.inputTokens, cachedInputTokens: input.cachedInputTokens,
+      outputTokens: input.outputTokens, requestCount: 1, isSubagent: false,
+      evidence: { generation: 0, byteStart: 0 },
+    }), true);
+    assert.equal(usageStatisticsV3Db.setCanonicalWorkDuration(key, running, 3n, input.workDurationMs), true);
+    assert.equal(usageStatisticsV3Db.finalizeCanonicalRun(key, running, 3n, merkle), true);
+  } finally {
+    if (previousWriter === undefined) delete process.env.USAGE_STATISTICS_V3_WRITER;
+    else process.env.USAGE_STATISTICS_V3_WRITER = previousWriter;
+    if (previousReader === undefined) delete process.env.USAGE_STATISTICS_V3_READER;
+    else process.env.USAGE_STATISTICS_V3_READER = previousReader;
+  }
+};
+
+const seedReadyV3 = (sessionId: string): void => seedCanonicalReadyV3(sessionId, {
+  occurredAt: '2026-09-22T10:00:00.000Z', model: 'gpt-5', inputTokens: 10,
+  cachedInputTokens: 2, outputTokens: 4, workDurationMs: 500,
+});
+
+const seedReadyCodexV3 = (sessionId: string): void => {
+  assert.equal(responseTurnMetricsDb.recordCompleted({
+    turnId: `turn-${sessionId}`, sessionId, assistantMessageId: `assistant-${sessionId}`,
+    startedAt: '2026-09-22T10:00:00.000Z', completedAt: '2026-09-22T10:00:02.000Z',
+  }).status, 'inserted');
+  seedCanonicalReadyV3(sessionId, { occurredAt: '2026-09-22T10:00:01.000Z', model: 'gpt-5.6-sol',
+    inputTokens: 100, cachedInputTokens: 40, outputTokens: 20, workDurationMs: 2_000 });
+};
+
 // ---------------------------------------------------------------------------
 // كلفة محادثة واحدة
 // ---------------------------------------------------------------------------
@@ -164,6 +242,70 @@ test('كلفة محادثة كلود: أرقام المحرّك نفسها دا�
       cacheWrite1h: 48985,
       cacheRead: 48140,
     });
+  });
+});
+
+test('v3 on يعيد measurement كاملاً حين تتطابق facts مع response metrics', async () => {
+  await withEnvironment(async (environment) => {
+    const transcript = await environment.addTranscript(
+      'v3-on.jsonl', 'codex-rollout.jsonl', new Date('2026-09-22T10:01:00.000Z'),
+    );
+    environment.addSession('v3-on', 'codex', transcript);
+    assert.equal(responseTurnMetricsDb.recordCompleted({
+      turnId: 'v3-on-turn', sessionId: 'v3-on', assistantMessageId: 'v3-on-message',
+      startedAt: '2026-09-22T09:59:00.000Z', completedAt: '2026-09-22T10:01:00.000Z',
+    }).status, 'inserted');
+    seedReadyV3('v3-on');
+    const reader = process.env.USAGE_STATISTICS_V3_READER;
+    try {
+      process.env.USAGE_STATISTICS_V3_READER = 'on';
+      const cost = await sessionCostService.getSessionCost('v3-on', environment.userId, { probeAuth: SUBSCRIPTION_PROBE });
+      assert.equal(cost.available, true, cost.reason);
+      assert.equal(cost.measurement.version, 2);
+      assert.equal(cost.measurement.source, 'v3');
+      assert.equal(cost.measurement.status, 'complete');
+      assert.equal(cost.measurement.counts.requests, 1);
+      assert.equal(cost.measurement.durations.workMs, 500);
+      assert.equal(cost.measurement.durations.responseTurnsMs, 120_000);
+      assert.equal(cost.measurement.reconciliation.totalUsd, 'matched');
+      assert.equal(cost.measurement.reconciliation.tokens, 'matched');
+      assert.equal(cost.turns?.length, 1);
+    } finally {
+      if (reader === undefined) delete process.env.USAGE_STATISTICS_V3_READER;
+      else process.env.USAGE_STATISTICS_V3_READER = reader;
+    }
+  });
+});
+
+test('v3 on يرفض نتيجة تغيّرت response metrics أثناء قراءتها', async () => {
+  await withEnvironment(async (environment) => {
+    const transcript = await environment.addTranscript(
+      'v3-race.jsonl', 'codex-rollout.jsonl', new Date('2026-09-22T10:01:00.000Z'),
+    );
+    environment.addSession('v3-race', 'codex', transcript);
+    assert.equal(responseTurnMetricsDb.recordCompleted({
+      turnId: 'v3-race-turn', sessionId: 'v3-race', assistantMessageId: 'v3-race-message',
+      startedAt: '2026-09-22T09:59:00.000Z', completedAt: '2026-09-22T10:01:00.000Z',
+    }).status, 'inserted');
+    seedReadyV3('v3-race');
+    const reader = process.env.USAGE_STATISTICS_V3_READER;
+    try {
+      process.env.USAGE_STATISTICS_V3_READER = 'on';
+      const cost = await sessionCostService.getSessionCost('v3-race', environment.userId, {
+        probeAuth: SUBSCRIPTION_PROBE,
+        afterV3Ready: () => {
+          getConnection().prepare(`UPDATE response_turn_metrics
+            SET completed_at = ?, duration_ms = ? WHERE session_id = ?`).run(
+            '2026-09-22T10:02:00.000Z', 180_000, 'v3-race',
+          );
+        },
+      });
+      assert.equal(cost.available, false);
+      assert.match(cost.reason ?? '', /metrics snapshot/);
+    } finally {
+      if (reader === undefined) delete process.env.USAGE_STATISTICS_V3_READER;
+      else process.env.USAGE_STATISTICS_V3_READER = reader;
+    }
   });
 });
 
@@ -250,7 +392,7 @@ test('summary GET never writes usage facts even when the background writer flag 
   });
 });
 
-test('ledger with writer off never resolves manifests or writes for missing/stale snapshots', async () => {
+test('ledger GET with writer on never resolves manifests, queues work, or mutates missing/stale snapshots', async () => {
   await withEnvironment(async (environment) => {
     const writer = process.env.USAGE_INGEST_WRITER;
     const reader = process.env.CONVERSATION_SNAPSHOT_READER;
@@ -270,7 +412,7 @@ test('ledger with writer off never resolves manifests or writes for missing/stal
         '{"type":"event_msg"}\n',
       )));
 
-      process.env.USAGE_INGEST_WRITER = 'off';
+      process.env.USAGE_INGEST_WRITER = 'on';
       process.env.CONVERSATION_SNAPSHOT_READER = 'ledger';
       let manifestResolutions = 0;
       const deps = {
@@ -291,6 +433,7 @@ test('ledger with writer off never resolves manifests or writes for missing/stal
 
       const beforeMissing = usageState();
       const missing = await sessionCostService.getSessionCost('ledger-off-codex', environment.userId, deps);
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
       assert.equal(missing.available, false);
       assert.equal(usageState(), beforeMissing, 'missing snapshot GET is read-only');
       assert.equal(manifestResolutions, 0);
@@ -327,6 +470,7 @@ test('ledger with writer off never resolves manifests or writes for missing/stal
       }, null), true);
       const beforeStale = usageState();
       const stale = await sessionCostService.getSessionCost('ledger-off-codex', environment.userId, deps);
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
       assert.equal(stale.available, true);
       assert.equal(stale.snapshotStatus, 'stale');
       assert.equal(usageState(), beforeStale, 'stale snapshot GET is read-only');
@@ -366,6 +510,83 @@ test('كلفة محادثة كودكس تُقرأ من ملف الـrollout بم
   });
 });
 
+test('reader=on يخدم API من facts v3 كاملة مع تطابق الكلفة والتوكنز والcounts والمدد', async () => {
+  await withEnvironment(async (environment) => {
+    const previousReader = process.env.USAGE_STATISTICS_V3_READER;
+    try {
+      const transcript = path.join(environment.root, 'codex-v3-api.jsonl');
+      await writeFile(transcript, `${JSON.stringify({ type: 'session_meta', payload: {
+        id: 'codex-v3-api', session_id: 'codex-v3-api', thread_source: 'user',
+      } })}\n`);
+      environment.addSession('codex-v3-api', 'codex', transcript);
+      seedReadyCodexV3('codex-v3-api');
+      process.env.USAGE_STATISTICS_V3_READER = 'on';
+
+      const cost = await sessionCostService.getSessionCost('codex-v3-api', environment.userId, {
+        probeAuth: SUBSCRIPTION_PROBE,
+      });
+      assert.equal(cost.available, true, cost.reason);
+      assert.equal(cost.measurement.source, 'v3');
+      assert.deepEqual(cost.measurement.window, { since: null, until: null });
+      assert.deepEqual(cost.measurement.attribution, { scopeFingerprint: 'all', attributionFingerprint: 'none' });
+      assert.deepEqual(cost.measurement.counts, {
+        facts: 1, requests: 1, rollouts: 1, subagentSpawns: 0, subagentRollouts: 0, subagentRequests: 0,
+      });
+      assert.deepEqual(cost.measurement.durations, { workMs: 2_000, responseTurnsMs: 2_000 });
+      assert.ok(Object.values(cost.measurement.reconciliation).every((status) => status === 'matched'));
+      assert.deepEqual(cost.perModel.map((row) => ({ model: row.model, requests: row.requests, tokens: row.tokens })), [{
+        model: 'gpt-5.6-sol', requests: 1,
+        tokens: { input: 60, output: 20, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 40 },
+      }]);
+      assert.equal(cost.turns?.length, 1);
+      assert.deepEqual(cost.turns?.[0].tokens, cost.perModel[0].tokens);
+      near(cost.turns?.[0].costUsd ?? -1, cost.totalUsd, 'v3 turn/perModel/total parity');
+    } finally {
+      if (previousReader === undefined) delete process.env.USAGE_STATISTICS_V3_READER;
+      else process.env.USAGE_STATISTICS_V3_READER = previousReader;
+    }
+  });
+});
+
+test('reader=on fails closed when response metrics change during the v3 cache read', async () => {
+  await withEnvironment(async (environment) => {
+    const previousReader = process.env.USAGE_STATISTICS_V3_READER;
+    const originalGetReadyCanonicalRun = usageStatisticsV3Db.getReadyCanonicalRun;
+    try {
+      const transcript = path.join(environment.root, 'codex-v3-race.jsonl');
+      await writeFile(transcript, `${JSON.stringify({ type: 'session_meta', payload: {
+        id: 'codex-v3-race', session_id: 'codex-v3-race', thread_source: 'user',
+      } })}\n`);
+      environment.addSession('codex-v3-race', 'codex', transcript);
+      seedReadyCodexV3('codex-v3-race');
+      process.env.USAGE_STATISTICS_V3_READER = 'on';
+      let injected = false;
+      usageStatisticsV3Db.getReadyCanonicalRun = (...args) => {
+        const ready = originalGetReadyCanonicalRun(...args);
+        if (!injected) {
+          injected = true;
+          assert.equal(responseTurnMetricsDb.recordCompleted({
+            turnId: 'turn-raced', sessionId: 'codex-v3-race', assistantMessageId: 'assistant-raced',
+            startedAt: '2026-09-22T10:00:03.000Z', completedAt: '2026-09-22T10:00:04.000Z',
+          }).status, 'inserted');
+        }
+        return ready;
+      };
+
+      const cost = await sessionCostService.getSessionCost('codex-v3-race', environment.userId, {
+        probeAuth: SUBSCRIPTION_PROBE,
+      });
+      assert.equal(injected, true);
+      assert.equal(cost.available, false);
+      assert.match(cost.reason ?? '', /not ready for this exact metrics snapshot/i);
+    } finally {
+      usageStatisticsV3Db.getReadyCanonicalRun = originalGetReadyCanonicalRun;
+      if (previousReader === undefined) delete process.env.USAGE_STATISTICS_V3_READER;
+      else process.env.USAGE_STATISTICS_V3_READER = previousReader;
+    }
+  });
+});
+
 test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي متّسق', async () => {
   await withEnvironment(async (environment) => {
     const rollout = path.join(environment.root, 'codex-turns.jsonl');
@@ -401,7 +622,7 @@ test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي مت
   });
 });
 
-test('مصالحة كودكس ترفع الإجمالي الشاذ إلى أرضية الأدوار دون جمعهما', async () => {
+test('V3 off keeps the legacy Codex duplicate/cumulative floor fix', async () => {
   await withEnvironment(async (environment) => {
     const rollout = path.join(environment.root, 'codex-low-cumulative.jsonl');
     const turn = (timestamp: string, id: string, totalOutput: number, lastOutput: number) => [
@@ -420,14 +641,25 @@ test('مصالحة كودكس ترفع الإجمالي الشاذ إلى أرض
     ].join('\n'));
     environment.addSession('codex-low-cumulative', 'codex', rollout);
 
-    const cost = await sessionCostService.getSessionCost('codex-low-cumulative', environment.userId, {
-      probeAuth: SUBSCRIPTION_PROBE,
-    });
-    const turnFloor = cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0;
-
-    assert.equal(cost.perModel[0].tokens.output, 2, 'يبقى المصدر التراكمي كما هو للتفصيل العام');
-    assert.ok(turnFloor > 2 * 30e-6, 'أرضية الأدوار تكشف تناقض المصدرين');
-    near(cost.totalUsd, turnFloor, 'الإجمالي يساوي الأرضية ولا يضيفها فوق نفسه');
+    const previousWriter = process.env.USAGE_STATISTICS_V3_WRITER;
+    const previousReader = process.env.USAGE_STATISTICS_V3_READER;
+    try {
+      delete process.env.USAGE_STATISTICS_V3_WRITER;
+      delete process.env.USAGE_STATISTICS_V3_READER;
+      const cost = await sessionCostService.getSessionCost('codex-low-cumulative', environment.userId, {
+        probeAuth: SUBSCRIPTION_PROBE,
+      });
+      const turnFloor = cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0;
+      assert.equal(cost.perModel[0].tokens.output, 2, 'يبقى المصدر التراكمي كما هو للتفصيل العام');
+      assert.ok(turnFloor > 2 * 30e-6, 'أرضية الأدوار تكشف تناقض المصدرين');
+      assert.ok(cost.totalUsd >= turnFloor, 'V3 off لا يعيد التراجع الذي يخفض الإجمالي تحت الأدوار');
+      near(cost.totalUsd, turnFloor, 'المصالحة تأخذ الحد الأعلى ولا تجمع المصدرين');
+    } finally {
+      if (previousWriter === undefined) delete process.env.USAGE_STATISTICS_V3_WRITER;
+      else process.env.USAGE_STATISTICS_V3_WRITER = previousWriter;
+      if (previousReader === undefined) delete process.env.USAGE_STATISTICS_V3_READER;
+      else process.env.USAGE_STATISTICS_V3_READER = previousReader;
+    }
   });
 });
 
@@ -770,7 +1002,7 @@ test('محادثة غير مفهرسة أو بلا سجلّ على القرص ت
   });
 });
 
-test('metered يتبع طريقة المصادقة القائمة، وعند الشكّ يبقى «قيمة مكافئة»', async () => {
+test('metered يتبع طريقة المصادقة وفشل الفحص يبقى unknown', async () => {
   await withEnvironment(async (environment) => {
     const transcript = await environment.addTranscript('sess.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
     environment.addSession('sess-1', 'claude', transcript);
@@ -790,7 +1022,22 @@ test('metered يتبع طريقة المصادقة القائمة، وعند ا�
         throw new Error('probe exploded');
       },
     });
-    assert.equal(broken.metered, false, 'فشل الفحص لا يُنتج ادّعاء فاتورة');
+    assert.equal(broken.metered, null, 'فشل الفحص لا يتحول إلى اشتراك وهمي');
+
+    const unauthenticated = await sessionCostService.getSessionCost('sess-1', environment.userId, {
+      probeAuth: async () => ({ installed: true, authenticated: false, method: 'credentials_file' }),
+    });
+    assert.equal(unauthenticated.metered, null, 'طريقة قديمة بلا جلسة مصادقة ليست اشتراكاً موثّقاً');
+
+    const missingMethod = await sessionCostService.getSessionCost('sess-1', environment.userId, {
+      probeAuth: async () => ({ installed: true, authenticated: true, method: null }),
+    });
+    assert.equal(missingMethod.metered, null, 'جلسة بلا طريقة مصادقة معروفة تبقى مجهولة');
+
+    const unknownMethod = await sessionCostService.getSessionCost('sess-1', environment.userId, {
+      probeAuth: async () => ({ installed: true, authenticated: true, method: 'future-auth-method' }),
+    });
+    assert.equal(unknownMethod.metered, null, 'طريقة جديدة لا تُعامل كاشتراك قبل إضافتها للقائمة الموثّقة');
     // والكلفة نفسها لا تتأثّر بطريقة المصادقة.
     near(broken.totalUsd, CLAUDE_PARENT_USD, 'الكلفة مستقلّة عن metered');
   });

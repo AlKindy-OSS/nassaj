@@ -20,6 +20,7 @@ const {
   markOutcomeUnread,
   refreshOutcomes,
   releaseManualUnread,
+  resetSessionCompletionStore,
   useSessionOutcome,
   useCanMarkOutcomeUnread,
 } = await import('./sessionCompletionStore');
@@ -287,6 +288,21 @@ describe('T-1340 — ظهور فعل غير مقروء', () => {
 });
 
 describe('T-1340 — تسلسل REST وWebSocket', () => {
+  it('لا تعيد لقطة الحساب A المتأخرة ملء متجر الحساب B', async () => {
+    let resolveBody!: (value: unknown) => void;
+    authenticatedFetch.mockResolvedValue({
+      ok: true,
+      json: () => new Promise((resolve) => { resolveBody = resolve; }),
+    });
+    const staleAccountA = refreshOutcomes();
+    await vi.waitFor(() => expect(resolveBody).toBeTypeOf('function'));
+    resetSessionCompletionStore();
+    resolveBody({ outcomes: [{ sessionId: 'account-a-only', outcome: 'done' }] });
+    await staleAccountA;
+    const { result } = renderHook(() => useSessionOutcome('account-a-only'));
+    expect(result.current).toBeNull();
+  });
+
   it('لا تستبدل لقطة REST المؤجلة دلتا WebSocket أحدث', async () => {
     let resolveBody!: (value: unknown) => void;
     authenticatedFetch.mockResolvedValue({

@@ -17,8 +17,9 @@ import { createDocumentSharesRouter } from './document-shares.js';
 
 const secret = 'synthetic-test-secret-document-shares-only-123456789';
 
-async function fixture(t, buildPreview) {
-  const base = await fs.mkdtemp(path.join(process.cwd(), 'document-sharing-test-'));
+async function fixture(t, buildPreview, identityMiddleware) {
+  // assertRoot refuses dotted segments and /tmp, so never derive the root from cwd.
+  const base = await fs.mkdtemp(path.join('/var/tmp', 'document-sharing-test-'));
   const root = path.join(base, 'project');
   await fs.mkdir(path.join(root, 'docs'), { recursive: true });
   await fs.writeFile(path.join(root, 'docs', 'proposal.txt'), 'first version');
@@ -37,6 +38,7 @@ async function fixture(t, buildPreview) {
   const verifyUser = createDocumentShareVerifier({ getUserById: (id) => users.get(id) }, secret);
   const app = express();
   app.use(express.json());
+  if (identityMiddleware) app.use(identityMiddleware);
   app.use('/api', createDocumentSharesRouter({ getStore: () => store, verifyUser,
     isMember: (_root, id) => members.has(id), audit: (...args) => audit.push(args), publicOrigin: 'https://nassaj.example', buildPreview }));
   const server = app.listen(0, '127.0.0.1');
@@ -59,6 +61,43 @@ async function fixture(t, buildPreview) {
   };
   return { base, root, db, store, users, members, audit, verifyUser, request, create, authorization };
 }
+
+test('management routes accept the composition-root device identity and recheck its fence', async (t) => {
+  let current = true;
+  const f = await fixture(t, undefined, (req, _res, next) => {
+    req.user = { id: 1, role: 'owner', status: 'active' };
+    req.assertCurrentIdentity = () => current;
+    next();
+  });
+  const accepted = await f.request('/api/projects/p1/document-shares', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ relativePath: 'docs/proposal.txt', audience: 'members' }),
+  });
+  assert.equal(accepted.status, 201);
+  current = false;
+  const denied = await f.request('/api/projects/p1/document-shares');
+  assert.equal(denied.status, 401);
+});
+
+test('member reads accept composition-root device identity and reject it after generation change', async (t) => {
+  let current = true;
+  const f = await fixture(t, undefined, (req, _res, next) => {
+    req.user = { id: 2, role: 'user', status: 'active' };
+    req.assertCurrentIdentity = () => current;
+    next();
+  });
+  const identity = await inspectSharedDocument(f.root, 'docs/proposal.txt');
+  f.store.insert({ id: 'a'.repeat(32), project_id: 'p1', relative_path: 'docs/proposal.txt',
+    audience: 'members', token_hash: null, root_dev: identity.root_dev, root_ino: identity.root_ino,
+    created_by: 1, created_at: new Date().toISOString(), expires_at: null, revoked_at: null });
+  const accepted = await f.request(`/api/document-shares/${'a'.repeat(32)}/content`);
+  assert.equal(accepted.status, 200);
+  assert.equal(await accepted.text(), 'first version');
+  current = false;
+  const denied = await f.request(`/api/document-shares/${'a'.repeat(32)}/content`);
+  assert.equal(denied.status, 401);
+});
 
 test('client capability persists, serves latest save, and never exposes secret in list or metadata', async (t) => {
   const f = await fixture(t);

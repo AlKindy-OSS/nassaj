@@ -48,3 +48,63 @@ test('a failing mirror cannot prevent delivery to other viewers or duplicate the
     for (const socket of [primary, broken, other]) removeSessionMirrorsForSocket(socket);
   }
 });
+
+test('identity revocation suppresses late primary, mirror and outcome persistence', () => {
+  outcomes.length = 0;
+  const primaryFrames: string[] = [];
+  const mirrorFrames: string[] = [];
+  const primary = { readyState: 1, send: (frame: string) => primaryFrames.push(frame) };
+  const mirror = { readyState: 1, send: (frame: string) => mirrorFrames.push(frame) };
+  const replacement = { readyState: 1, send: () => {} };
+  const writer = new WebSocketWriter(primary);
+  writer.setSessionId('revoked-run');
+  addSessionMirror('revoked-run', mirror);
+  try {
+    assert.equal(writer.revokeRunOutput(replacement), false, 'stale socket cannot revoke replacement');
+    assert.equal(writer.revokeRunOutput(primary), true);
+    writer.send({ kind: 'complete', sessionId: 'revoked-run', success: true });
+    assert.deepEqual(primaryFrames, []);
+    assert.deepEqual(mirrorFrames, []);
+    assert.deepEqual(outcomes, [], 'terminal outcome is not persisted after revocation');
+  } finally {
+    removeSessionMirrorsForSocket(mirror);
+  }
+});
+
+test('project revocation fences the affected session before a close handshake', () => {
+  outcomes.length = 0;
+  const primary = { readyState: 1, sent: [] as string[], send(frame: string) { this.sent.push(frame); } };
+  const mirror = { readyState: 1, sent: [] as string[], send(frame: string) { this.sent.push(frame); } };
+  const writer = new WebSocketWriter(primary, 42);
+  writer.setSessionId('project-session');
+  addSessionMirror('project-session', mirror);
+  writer.bindRevocableRun('project-session', 'opencode');
+
+  try {
+    assert.equal(writer.revokeProjectSessions(['project-session'], primary), 1);
+    writer.send({ kind: 'complete', sessionId: 'project-session' });
+    assert.equal(primary.sent.length, 0);
+    assert.equal(mirror.sent.length, 0);
+    assert.equal(outcomes.length, 0, 'late terminal outcome is not persisted');
+
+    writer.setSessionId('other-project-session');
+    writer.send({ kind: 'chunk', sessionId: 'other-project-session' });
+    assert.equal(primary.sent.length, 1, 'unrelated project output remains live');
+  } finally {
+    removeSessionMirrorsForSocket(mirror);
+  }
+});
+
+test('supervised run tokens reject reconnects and stale release generations', () => {
+  const first = { readyState: 1, send: () => undefined };
+  const second = { readyState: 1, send: () => undefined };
+  const writer = new WebSocketWriter(first);
+  const oldToken = writer.bindRevocableRun('same-session', 'claude');
+  const newToken = writer.bindRevocableRun('same-session', 'claude');
+  writer.releaseRevocableRun('same-session', oldToken);
+  const [current] = writer.getRevocableRuns(first);
+  assert.equal(current.token, newToken, 'old settlement cannot release the replacement run');
+  writer.updateWebSocket(second);
+  assert.deepEqual(writer.getRevocableRuns(first), [], 'old transport cannot enumerate the rejoined run');
+  assert.equal(writer.isRevocableRunCurrent(current, first), false);
+});

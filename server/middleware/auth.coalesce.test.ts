@@ -45,6 +45,7 @@ mock.module(url('../modules/database/index.js'), {
         username: 'coalesce-user',
         role: 'user',
         password_changed_at: null,
+        authorization_generation: 1,
       }),
     },
     appConfigDb: { getOrCreateJwtSecret: () => FIXED_SECRET },
@@ -71,7 +72,7 @@ function pastHalfLifeToken(userId: number): { token: string; exp: number } {
   const exp = iat + SEVEN_DAYS;
   // Explicit iat/exp (no expiresIn option, which would conflict with exp).
   const token = jwt.sign(
-    { userId, username: 'coalesce-user', role: 'user', pwd_iat: 0, iat, exp },
+    { userId, username: 'coalesce-user', role: 'user', pwd_iat: 0, auth_gen: 1, iat, exp },
     JWT_SECRET
   );
   return { token, exp };

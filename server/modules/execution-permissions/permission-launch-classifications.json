@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:cbb2b504647a05f1359e557fb2e87f2d7dee8b23eca183c1deaf042fd20825f6",
+  "reviewedSiteDigest": "sha256:389a595cf42a53803f24768650ec89f48675cecd776f2be6a5bc8136f15695a2",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -19,6 +19,15 @@
       "gate": "fixed /usr/bin/flock argv, private verified lock descriptor inherited as fd 3, bounded wait, shell false and PATH/LANG/LC_ALL-only environment; the parent retains the descriptor until release",
       "adapter": "acquirePublicPageLock",
       "test": "server/services/public-page-publisher-lock.test.mjs and permission inventory classification gate"
+    },
+    "server/modules/providers/services/engine-restamp-model-store.service.ts#child_process.spawn#1": {
+      "classification": "infrastructure_effect",
+      "owner": "provider active-model atomic store",
+      "purpose": "kernel_model_store_lock",
+      "actorSource": "trusted engine-restamp core; no caller-controlled executable, argument, environment, or descriptor number reaches the child",
+      "gate": "fixed /usr/bin/flock argv, verified retained lock descriptor inherited as fd 3, 1s helper deadline, shell false and PATH/LANG/LC_ALL-only environment; exact named inode is rechecked after acquisition and before every owner use",
+      "adapter": "runFlock",
+      "test": "engine-restamp-model-store.service.test.ts and permission inventory classification/mutation gates"
     },
     "server/services/preview-runtime-attestation.js#child_process.spawnSync#1": {
       "classification": "read_only_process_query",
@@ -835,6 +844,46 @@
       "gate": "local CLI",
       "adapter": "server cli",
       "test": "CLI tests"
+    },
+    {
+      "prefix": "server/modules/providers/harness-update/descriptors.ts#provider_launcher.import#",
+      "classification": "composition_binding",
+      "owner": "harness-update descriptor table (T-1749/ADR-159)",
+      "purpose": "dependency_wiring",
+      "actorSource": "no effect at import time",
+      "gate": "descriptors only import the providers' own path resolvers; every launch they describe runs through the owner-only update service",
+      "adapter": "HARNESS_UPDATE_DESCRIPTORS",
+      "test": "descriptors.test.ts and spawn-admission.test.ts"
+    },
+    {
+      "prefix": "server/modules/providers/harness-update/update.service.ts#child_process.spawn#",
+      "classification": "release_infrastructure_effect",
+      "owner": "harness update service (T-1749/ADR-159)",
+      "purpose": "harness_update",
+      "actorSource": "owner-only update endpoint or the server-side scheduler tick",
+      "gate": "fixed descriptor updateArgv (no client command string), per-harness single-flight lease, atomic no-live-session gate that also blocks new spawns, and an audited job row",
+      "adapter": "runHarnessUpdate",
+      "test": "update.service.test.ts and spawn-admission.test.ts"
+    },
+    {
+      "prefix": "server/modules/providers/harness-update/version-status.service.ts#child_process.spawn#",
+      "classification": "read_only_process_query",
+      "owner": "harness version indicator (T-1749/ADR-159)",
+      "purpose": "harness_version_read",
+      "actorSource": "authenticated settings reader; no caller-controlled executable or arguments",
+      "gate": "fixed descriptor versionArgs against the descriptor-resolved binary, bounded timeout, output parsed read-only",
+      "adapter": "readInstalledVersion",
+      "test": "version-status.service.test.ts"
+    },
+    {
+      "prefix": "server/modules/providers/harness-update/version-status.service.ts#http.fetch#",
+      "classification": "release_infrastructure_effect",
+      "owner": "harness latest-version probe (T-1749/ADR-159)",
+      "purpose": "latest_version_probe",
+      "actorSource": "authenticated settings reader; package name comes from the fixed descriptor table",
+      "gate": "vendor registry URL built from the descriptor package id only, abort-controller timeout, response used as a version string and never executed",
+      "adapter": "defaultFetchNpmLatest",
+      "test": "version-status.service.test.ts"
     }
   ]
 }

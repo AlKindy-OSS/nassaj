@@ -9,6 +9,7 @@ import {
   assertAnthropicBaseUrlAllowed,
   assertSettingsEnvAllowed,
 } from '@/services/isolation/anthropic-base-url-guard.js';
+import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { buildCagedSdkSpawn } from '@/services/isolation/provider-cage-wiring.js';
 import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/types.js';
@@ -240,6 +241,7 @@ async function probeSupportedModels(
 
   let queryInstance: ReturnType<typeof query> | null = null;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  let releaseHarnessLaunch: (() => void) | null = null;
 
   const cleanup = async (): Promise<void> => {
     if (timeoutHandle) {
@@ -307,16 +309,23 @@ async function probeSupportedModels(
     assertAnthropicBaseUrlAllowed(probeEnv);
     assertSettingsEnvAllowed(probeEnv.CLAUDE_CONFIG_DIR ?? '', probeEnv);
 
+    // T-1749/ADR-159: the probe spawns the claude binary through the SDK. While
+    // the claude harness is mid-update the throw degrades to the fallback
+    // catalog exactly like the guards above.
     // T-897: cage the catalog-probe Claude spawn (flag OFF ⇒ undefined ⇒ unset).
     const cagedProbeSpawn = buildCagedSdkSpawn({ userId, cwd: probeCwd });
     if (cagedProbeSpawn) {
       options.spawnClaudeCodeProcess = cagedProbeSpawn;
     }
 
-    queryInstance = query({
-      prompt: emptyPromptStream(),
-      options,
-    });
+    releaseHarnessLaunch = beginHarnessLaunch('claude');
+    try {
+      queryInstance = query({ prompt: emptyPromptStream(), options });
+    } catch (error) {
+      releaseHarnessLaunch();
+      releaseHarnessLaunch = null;
+      throw error;
+    }
 
     const modelsPromise = queryInstance.supportedModels();
     const timeoutPromise = new Promise<'__probe_timeout__'>((resolve) => {
@@ -337,6 +346,7 @@ async function probeSupportedModels(
     return null;
   } finally {
     await cleanup();
+    releaseHarnessLaunch?.();
   }
 }
 

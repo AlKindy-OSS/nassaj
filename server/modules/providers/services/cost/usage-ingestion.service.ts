@@ -20,6 +20,7 @@ import {
 
 import { calculateSessionCost, type SessionCost } from './cost-calculator.js';
 import { emptyTotals, type ModelUsage, type SessionUsage } from './usage-extractors.js';
+import { buildCodexStatisticsV3 } from './usage-statistics-v3.service.js';
 
 const PARSER_VERSION = 1;
 const MAX_READ_BYTES = 4 * 1024 * 1024;
@@ -43,6 +44,8 @@ export const conversationSnapshotReaderMode = (): ConversationSnapshotReaderMode
 
 export type IngestContext = {
   sessionId: string;
+  /** Trusted scheduler-supplied owner-spawn identity for ADR-169 only. */
+  ownerUserId?: number;
   provider: 'claude' | 'codex';
   transcriptPath: string;
   projectPath?: string | null;
@@ -661,8 +664,6 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
       && finalTree.sources.map((source) => path.resolve(source)).sort().join('\0')
         === sources.map((source) => path.resolve(source)).sort().join('\0');
   } else if (context.manifest) {
-    // Re-resolve links after writes to catch a late spawn that was not present
-    // in the pinned manifest. The scheduler will refresh and retry it.
     const refreshed = await resolveCodexLinkedRollouts(context.transcriptPath, context.signal);
     complete = complete && refreshed.complete
       && refreshed.files.map((file) => path.resolve(file.rolloutPath)).sort().join('\0')
@@ -671,6 +672,20 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
   writeSnapshot(context, complete, generation, { kind: 'coordinator', id: '', scope: 'conversation' });
   for (const attribution of usageIngestionDb.listConversationAttributions(context.sessionId)) {
     writeSnapshot(context, complete, generation, attribution);
+  }
+  // The watcher/scheduler owns this function, so v3 never runs on a summary
+  // request. Its own flag remains off by default and rollback rejects writes.
+  if (context.provider === 'codex' && complete && context.manifest) {
+    await buildCodexStatisticsV3({
+      sessionId: context.sessionId,
+      transcriptPath: context.transcriptPath,
+      scopeFingerprint: 'all',
+      attributionFingerprint: 'none',
+      ownerUserId: context.ownerUserId,
+      pricingVersion: 'runtime-pricing-v1',
+      manifest: context.manifest,
+      signal: context.signal,
+    });
   }
   return { skipped: false, caughtUp, ingestComplete: complete, eventsWritten, madeProgress };
 }

@@ -1,4 +1,23 @@
+export { AgentReviewReadonlyAuthRepository } from './repositories/agent-review-readonly-auth.db.js';
+export type { ReviewAuthUser } from './repositories/agent-review-readonly-auth.db.js';
+export { createReviewTransactionInvocation, readReviewEffectOutcome } from './repositories/agent-review-transaction-evidence.js';
+export type { ReviewTransactionInvocation, ReviewEffectOutcome } from './repositories/agent-review-transaction-evidence.js';
+export { readIncidentObservationChain } from './repositories/agent-review-observation-chain.js';
+export type { IncidentTransportReason } from './repositories/agent-review-observation-chain.js';
+export type { ReviewTransition, ReviewSuccess, ReviewSource, ReviewStatus } from './repositories/agent-review-lifecycle.db.js';
+export { assertReviewInteger, assertReviewKeys } from './repositories/agent-review-validation.js';
+export { applyAgentReviewSchema } from './agent-review-lifecycle.migration.js';
+export { AgentReviewRepository } from './repositories/agent-review-lifecycle.db.js';
+export { AgentReviewIngestionContextRepository } from './repositories/agent-review-ingestion-context.db.js';
+export { AgentReviewIngestionRepository } from './repositories/agent-review-ingestion.db.js';
+export { AgentReviewResultRepository } from './repositories/agent-review-result.db.js';
+export { AgentReviewError } from './repositories/agent-review-validation.js';
+export type { ReviewHead, ReviewIncident, ReviewIncidentInput } from './repositories/agent-review-ingestion-types.js';
+export type { ReviewResultFold } from './repositories/agent-review-result-types.js';
 export { initializeDatabase } from '@/modules/database/init-db.js';
+export type { ReviewContainer, ReviewIncidentReason } from './repositories/agent-review-ingestion-types.js';
+export type { ReviewBindingEvidence, ReviewCompletionEvidence } from './repositories/agent-review-result-types.js';
+export { assertReviewSession, assertReviewString, assertReviewToken, hashReviewTuple } from './repositories/agent-review-validation.js';
 export { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
 export { migrateScheduledMessages } from '@/modules/database/migrations.js';
 export {
@@ -10,6 +29,15 @@ export type { ReconcileResult } from '@/modules/database/project-reconcile.servi
 export { closeConnection, getConnection, getDatabasePath } from '@/modules/database/connection.js';
 export { ApiKeyInputError, apiKeysDb } from '@/modules/database/repositories/api-keys.js';
 export { appConfigDb } from '@/modules/database/repositories/app-config.js';
+export {
+  createEngineRestampIntentRepository,
+  engineRestampIntentsDb,
+  engineRestampIntentKey,
+  engineRestampRequestSha256,
+  canonicalizeEngineRestampIntent,
+  EngineRestampIntentError,
+} from '@/modules/database/repositories/engine-restamp-intent.db.js';
+export type { EngineRestampIntent } from '@/modules/database/repositories/engine-restamp-intent.db.js';
 export { auditLogDb } from '@/modules/database/repositories/audit-log.js';
 export { invitesDb } from '@/modules/database/repositories/invites.js';
 export { credentialsDb } from '@/modules/database/repositories/credentials.js';
@@ -68,6 +96,38 @@ export type {
   ProjectScope,
 } from '@/modules/database/repositories/project-cost-ledger.db.js';
 export { usageIngestionDb, MAX_USAGE_PARTIAL_TAIL_BYTES } from '@/modules/database/repositories/usage-ingestion.db.js';
+export {
+  MAX_USAGE_V3_FACTS_PER_RUN,
+  MAX_USAGE_V3_FACTS_PER_SOURCE,
+  MAX_USAGE_V3_SOURCES,
+  usageStatisticsV3Db,
+  usageStatisticsV3ReaderMode,
+  usageStatisticsV3WriterMode,
+} from '@/modules/database/repositories/usage-statistics-v3.db.js';
+export type {
+  UsageStatisticsRunStatus,
+  UsageStatisticsV3ReaderMode,
+  UsageStatisticsV3Fact,
+  UsageStatisticsV3Lineage,
+  UsageStatisticsV3Run,
+  UsageSourceSnapshotV3,
+  UsageReadyProjectionMetaV3,
+  UsageStatisticsV3WriterMode,
+  UsageV3AuthorityKey,
+  UsageV3BeginPreflight,
+  UsageV3PreflightClaim,
+  UsageV3ProcessProof,
+  UsageV3AuthorityTuple,
+  UsageV3DeathProof,
+  UsageV3MerkleSnapshot,
+  UsageV3SourceSnapshot,
+  UsageV3CanonicalFailureCode,
+  UsageV3CanonicalTerminalStatus,
+  UsageV3CanonicalFact,
+  UsageV3CanonicalLineage,
+  UsageV3CanonicalProjectionMeta,
+  UsageV3AuthorityRecoveryView,
+} from '@/modules/database/repositories/usage-statistics-v3.db.js';
 export type {
   AdvanceUsageCheckpoint,
   CreateUsageCheckpoint,
@@ -90,6 +150,33 @@ export type {
   ConversationUsageSnapshotStatus,
 } from '@/modules/database/repositories/conversation-usage-snapshots.db.js';
 export { projectMembersDb } from '@/modules/database/repositories/project-members.db.js';
+export {
+  canAccessProject,
+  canAccessProjectPath,
+  canAccessRegisteredProjectPath,
+  canSeeAllProjects,
+  describePlatformModeVisibilityRisk,
+  findOwningProject,
+  captureProjectFence,
+  captureWorkspaceTopologyFence,
+  isProjectFenceCurrent,
+  isProjectFenceRuntimeReady,
+  isWorkspaceTopologyFenceCurrent,
+  isProjectMembershipEnforced,
+  listAccessibleProjectPaths,
+  retireProjectStructure,
+  retireProjectSubjectAccess,
+  rotateProjectStructure,
+  rotateProjectStructureForPath,
+  rotateProjectSubjectAccess,
+  rotateWorkspaceTopology,
+  userCanSeeAllProjects,
+} from '@/modules/database/repositories/project-access.js';
+export type {
+  ProjectAccessFence,
+  ProjectlessTopologyFence,
+  WorkspaceTopologyFence,
+} from '@/modules/database/repositories/project-access.js';
 export type { ProjectMemberRole, ProjectMemberRow } from '@/modules/database/repositories/project-members.db.js';
 export { projectsDb } from '@/modules/database/repositories/projects.db.js';
 export { providerRunFailuresDb } from '@/modules/database/repositories/provider-run-failures.db.js';
@@ -117,6 +204,8 @@ export type { ClosedSessionRow } from '@/modules/database/repositories/closed-se
 export { uiPreferencesDb } from '@/modules/database/repositories/ui-preferences.js';
 export type { UiPreferences } from '@/modules/database/repositories/ui-preferences.js';
 export { userDb } from '@/modules/database/repositories/users.js';
+export { deviceAccountSessionsDb, DEVICE_COOKIE, MAX_ACCOUNT_SLOTS, WalletConflictError } from '@/modules/database/repositories/device-account-sessions.js';
+export type { AccountWalletSnapshot, DevicePrincipal } from '@/modules/database/repositories/device-account-sessions.js';
 export type { UserRole } from '@/modules/database/repositories/users.js';
 export {
   blockPermissionGeneration,
@@ -129,6 +218,7 @@ export {
   finishPermissionTransition,
   listPermissionEffectFences,
   markPermissionEffectStarted,
+  attachPermissionEffectChild,
   permissionUserProviderPurposeKey,
   resolvePermissionEffectScope,
   PermissionStateConflictError,

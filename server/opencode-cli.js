@@ -20,6 +20,7 @@ import { mapSpawnError } from './shared/spawn-error.js';
 import { provisionUserDirs, userConfigDir } from './services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
+import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { verifyVendorBinaryDigest } from './services/isolation/vendor-binary-integrity.js';
 import { sanitizeVendorAgentEnv } from './services/isolation/sanitize-vendor-agent-env.js';
@@ -249,6 +250,10 @@ async function cleanupOpenCodeTempDir(tempDir) {
 }
 
 async function spawnOpenCode(command, options = {}, ws) {
+  if (refuseSpawnIfHarnessUpdating('opencode', ws, {
+    sessionId: options.sessionId,
+    clientMsgId: options.clientMsgId,
+  })) return;
   // B-31: verify the project directory exists before spawning OpenCode.
   const cwdToCheck = options.cwd || options.projectPath;
   if (cwdToCheck) {
@@ -387,7 +392,7 @@ async function spawnOpenCode(command, options = {}, ws) {
     };
 
     const processOpenCodeOutputLine = (line) => {
-      if (!line || !line.trim()) {
+      if (!line || !line.trim() || ws?.isRunOutputRevoked?.()) {
         return;
       }
 
@@ -613,6 +618,7 @@ async function spawnOpenCode(command, options = {}, ws) {
       });
 
       opencodeProcess.on('close', async (code) => {
+        if (opencodeProcess.nassajAborted && code === 0) code = 1;
         const finalSessionId = capturedSessionId || sessionId || processKey;
         activeOpenCodeProcesses.delete(finalSessionId);
         activeOpenCodeProcesses.delete(processKey);
@@ -621,7 +627,7 @@ async function spawnOpenCode(command, options = {}, ws) {
         await cleanupOpenCodeTempDir(attachmentsTempDir);
         attachmentsTempDir = null;
 
-        if (stdoutLineBuffer.trim()) {
+        if (stdoutLineBuffer.trim() && !ws?.isRunOutputRevoked?.()) {
           processOpenCodeOutputLine(stdoutLineBuffer.trim());
           stdoutLineBuffer = '';
         }
@@ -725,6 +731,7 @@ function abortOpenCodeSession(sessionId) {
     return false;
   }
 
+  process.nassajAborted = true;
   process.kill('SIGTERM');
   activeOpenCodeProcesses.delete(sessionId);
   return true;

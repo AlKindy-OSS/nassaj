@@ -72,7 +72,7 @@ export default function ReferencesSettingsTab() {
 
   const providerOptions = useMemo(
     () => visibleSettingsAgents()
-      .filter((provider) => ['claude', 'codex', 'cursor', 'gemini'].includes(provider))
+      .filter((provider) => ['claude', 'codex', 'cursor'].includes(provider))
       .map((provider) => ({
       value: provider,
       label: AGENT_NAMES[provider] ?? provider,

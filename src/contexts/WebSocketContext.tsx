@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useAuth } from '../components/auth/context/AuthContext';
 import { IS_PLATFORM } from '../constants/config';
@@ -12,6 +12,12 @@ import {
 } from '../stores/sessionProcessStateStore';
 import { applyOutcomeDelta, type OutcomeState } from '../stores/sessionCompletionStore';
 import { consumeOutboxIngressVerdict } from '../components/chat/utils/messageOutbox';
+import {
+  getIdentityBarrierSnapshot,
+  isIdentityRevocationClose,
+  reconcileRevokedIdentity,
+  subscribeIdentityBarrier,
+} from '../components/auth/accountIdentityBarrier';
 import { rememberSessionWorkspaceGeneration } from '../utils/sessionWorkspaceBinding';
 
 import { applyStreamFrame, type StreamFrameMap } from './streamFrameLog';
@@ -110,7 +116,7 @@ export const useWebSocket = () => {
 const buildWebSocketUrl = (token: string | null) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   if (IS_PLATFORM) return `${protocol}//${window.location.host}/ws`; // Platform mode: Use same domain as the page (goes through proxy)
-  if (!token) return null;
+  if (!token) return `${protocol}//${window.location.host}/ws`;
   return `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`; // OSS mode: Use same host:port that served the page
 };
 
@@ -317,14 +323,23 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   const [wsStatus, setWsStatus] = useState<WsConnectionStatus>('disconnected');
   const [openSessionsCount, setOpenSessionsCount] = useState<number | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const identityBarrier = useSyncExternalStore(
+    subscribeIdentityBarrier,
+    getIdentityBarrierSnapshot,
+    getIdentityBarrierSnapshot,
+  );
   // The effect below is keyed on the token's IDENTITY, not on the token string:
   // login/logout, an account switch or a password change reconnect, while the
   // server's routine mid-session rotation does not. The socket URL is always
   // built from the freshest localStorage value inside connect()
   // (see resolveWebSocketUrl), so a socket that outlives a rotation is not stale
   // and any later reconnect still dials with the newest token.
-  const identityKey = identityKeyFromToken(token);
+  const authenticatedIdentityKey = identityKeyFromToken(token)
+    ?? (user ? `device:${String(user.id ?? user.username)}` : null);
+  const identityKey = identityBarrier.phase === 'stable' && authenticatedIdentityKey
+    ? `${authenticatedIdentityKey}:${identityBarrier.version}`
+    : null;
   // Monotonic connection epoch. Each connect() bumps it; a socket captures its
   // epoch and ignores its own onopen/onclose once a newer connection exists.
   // This is what stops a token rotation's old-socket close from spawning a
@@ -341,9 +356,24 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     // does not permanently block this fresh connection. A genuine React unmount
     // still leaves the flag true because no effect re-run follows it.
     unmountedRef.current = false;
-    connect();
+    const identityChanging = () => {
+      unmountedRef.current = true;
+      connEpochRef.current += 1;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      wsRef.current?.close(1000, 'identity-changing');
+      wsRef.current = null;
+      setIsConnected(false);
+      setWsStatus('disconnected');
+      resetSessionProcessStates();
+    };
+    window.addEventListener('auth:identity-changing', identityChanging);
+    if (identityKey) connect();
 
     return () => {
+      window.removeEventListener('auth:identity-changing', identityChanging);
       unmountedRef.current = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -376,7 +406,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       // reconnects that do not re-run the [token] effect.
       const wsUrl = resolveWebSocketUrl();
 
-      if (!wsUrl) return console.warn('No authentication token found for WebSocket connection');
+      if (!wsUrl) return;
 
       const websocket = new WebSocket(wsUrl);
 
@@ -538,6 +568,12 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         invalidateSessionProcessAuthority(processStateEpoch);
         setIsConnected(false);
         wsRef.current = null;
+        if (isIdentityRevocationClose(event.code)) {
+          unmountedRef.current = true;
+          setWsStatus('disconnected');
+          reconcileRevokedIdentity();
+          return;
+        }
 
         // Only show "reconnecting" if we've successfully connected before;
         // on the very first attempt a failure shows as "disconnected".

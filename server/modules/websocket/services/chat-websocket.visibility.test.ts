@@ -17,6 +17,8 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 // --- Module mock (must be registered before importing the service) -----------
 
 const REGISTERED_PATH = '/workspace/private-project';
@@ -27,6 +29,7 @@ let visibleResult = false;
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (projectPath: string) =>
         projectPath === REGISTERED_PATH ? { project_id: PROJECT_ID } : null,

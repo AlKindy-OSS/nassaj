@@ -29,6 +29,9 @@ mock.module(url('../modules/database/index.js'), {
     invitesDb: { list: () => [] },
   },
 });
+mock.module(url('../modules/account-wallet/index.js'), {
+  namedExports: { AccountWalletService: class { revokeDevices(): void {} } },
+});
 mock.module(url('../modules/connectors/index.js'), {
   namedExports: {
     connectorsService: {

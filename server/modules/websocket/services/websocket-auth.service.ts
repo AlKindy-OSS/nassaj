@@ -39,9 +39,17 @@ type WebSocketAuthDependencies = {
     username?: string;
     [key: string]: unknown;
   } | null;
+  authenticateDeviceWebSocket?: (secret: string) => {
+    id?: string | number;
+    userId?: string | number;
+    username?: string;
+    [key: string]: unknown;
+  } | null;
+  deviceSessionsEnabled?: () => boolean;
   jwtSecret: string;
   recordRejection: (record: AuthRejectionRecord) => void;
   clientIp: (req: IncomingMessage | null | undefined) => string | null;
+  isTrustedOrigin?: (req: IncomingMessage) => boolean;
 };
 
 /**
@@ -135,6 +143,42 @@ export function verifyWebSocketClient(
     upgradeUrl.searchParams.get('token') ??
     request.headers.authorization?.split(' ')[1] ??
     null;
+
+  const cookieMatch = String(request.headers.cookie || '')
+    .match(/(?:^|;\s*)__Host-nassaj_device=([^;]+)/);
+  const deviceCookieActive = Boolean(cookieMatch)
+    && (dependencies.deviceSessionsEnabled?.() ?? Boolean(dependencies.authenticateDeviceWebSocket));
+  if (deviceCookieActive && token) {
+    dependencies.recordRejection({
+      reason: 'ambiguous_authentication',
+      transport: 'ws',
+      ipAddress: dependencies.clientIp(request),
+      userAgent: request.headers['user-agent'] ?? null,
+    });
+    return false;
+  }
+
+  if (deviceCookieActive && cookieMatch) {
+    if (dependencies.isTrustedOrigin?.(request) !== true) {
+      dependencies.recordRejection({
+        reason: 'origin_rejected',
+        transport: 'ws',
+        ipAddress: dependencies.clientIp(request),
+        userAgent: request.headers['user-agent'] ?? null,
+      });
+      return false;
+    }
+    let secret = '';
+    try {
+      secret = decodeURIComponent(cookieMatch[1]);
+    } catch {
+      return false;
+    }
+    const deviceUser = dependencies.authenticateDeviceWebSocket?.(secret) ?? null;
+    if (!deviceUser) return false;
+    request.user = deviceUser;
+    return true;
+  }
 
   const user = dependencies.authenticateWebSocket(token);
   if (!user) {

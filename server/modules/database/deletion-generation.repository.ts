@@ -12,10 +12,14 @@ export type GenerationAdmission = Readonly<{operationId:string;actorId:number;ca
 export type ProvenSessionBinding = Readonly<{sessionId:string;projectId:string;generation:string;sourceIdentity:string;proofKind:'nassaj_created'|'provider_boundary';proofDigest:string}>;
 
 /** Data-only repository: caller already owns the verified lifecycle/source capability through commit. No issuer is supplied here. */
-export function createDeletionGenerationRepository(db:Database.Database){
+export function createDeletionGenerationRepository(
+ db:Database.Database,
+ options:{offlineProjectionWriter?:boolean}={},
+){
  return {
   /** Insert a fresh manual generation or return the same exact replay; never clear earlier identities/history. */
   manualReadd(input:GenerationAdmission):{projectId:string;generation:string}{
+   if(options.offlineProjectionWriter!==true)throw new DeletionOperationError('DELETION_OFFLINE_WRITER_REQUIRED');
    requireActiveDeletionActor(db,input.actorId);validateAdmission(input);
    const sortedFingerprints=[...input.fingerprints].sort((a,b)=>a.keyVersion-b.keyVersion);
    const hashes=JSON.stringify(sortedFingerprints);

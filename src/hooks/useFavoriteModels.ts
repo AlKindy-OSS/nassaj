@@ -36,7 +36,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api } from '../utils/api';
+import { api, authenticatedFetch } from '../utils/api';
+import { identityRequestSignal } from '../components/auth/accountIdentityBarrier';
 import { toggleFavorite } from '../components/chat/view/subcomponents/modelFavorites';
 import type { FavoriteModels } from '../components/chat/view/subcomponents/modelFavorites';
 
@@ -50,15 +51,6 @@ const DEBOUNCE_MS = 300;
  * always works regardless of size).
  */
 const MAX_FAVORITES = 200;
-
-/**
- * localStorage key for the JWT — must stay in sync with
- * `AUTH_TOKEN_STORAGE_KEY` in src/utils/api.js and
- * src/components/auth/constants.ts. Duplicated here (not imported) because
- * api.js does not export it; a local constant avoids a cross-module coupling
- * for a single string used only in the keepalive flush path.
- */
-const AUTH_TOKEN_STORAGE_KEY = 'auth-token';
 
 export interface UseFavoriteModelsReturn {
   /** Current favorites list (array of PickerRow.key strings). */
@@ -172,15 +164,11 @@ export function useFavoriteModels(): UseFavoriteModelsReturn {
     clearTimeout(flushTimerRef.current);
     flushTimerRef.current = null;
 
-    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    fetch('/api/settings/ui-preferences', {
+    authenticatedFetch('/api/settings/ui-preferences', {
       method: 'PUT',
-      headers,
       body: JSON.stringify({ favoriteModels: favoritesRef.current }),
       keepalive: true,
+      signal: identityRequestSignal(),
     }).catch(() => {
       /* best-effort — page may already be tearing down */
     });
@@ -192,12 +180,18 @@ export function useFavoriteModels(): UseFavoriteModelsReturn {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushImmediately();
     };
+    const handleIdentityChanging = () => {
+      if (flushTimerRef.current !== null) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    };
 
     window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('auth:identity-changing', handleIdentityChanging);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('auth:identity-changing', handleIdentityChanging);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       // Defensive: also flush synchronously when the component unmounts during
       // normal SPA navigation. For hard reloads the pagehide path covers this.

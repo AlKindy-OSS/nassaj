@@ -43,6 +43,7 @@ import {
   registerSessionProcess,
   unregisterSessionProcess,
 } from './session-process-monitor.js';
+import { beginHarnessLaunch } from '../modules/providers/harness-update/spawn-admission.js';
 
 /**
  * Registers a provider run and returns its lifecycle handle.
@@ -61,6 +62,8 @@ import {
  * @param {number|null} [details.pid] - Child pid when the provider spawns it.
  * @param {string|null} [details.runTag] - PROCESS_TAG_ENV_VAR value injected
  *   into the child env, for spawners that hide the pid.
+ * @param {(() => void)|null} [details.launchReservation] - Atomic reservation
+ *   acquired immediately before spawn; omitted when this call precedes spawn.
  * @returns {{ rekey: (sessionId: string|null|undefined) => void,
  *             setPid: (pid: number|null|undefined) => void,
  *             end: () => void }}
@@ -72,7 +75,9 @@ export function beginProviderRun({
   projectPath = null,
   pid = null,
   runTag = null,
+  launchReservation = null,
 }) {
+  const releaseHarnessLaunch = launchReservation ?? beginHarnessLaunch(provider);
   let currentId = null;
   let currentPid = pid ?? null;
   let ended = false;
@@ -132,6 +137,7 @@ export function beginProviderRun({
       if (currentId) {
         unregisterSessionProcess(currentId);
       }
+      releaseHarnessLaunch();
     },
   };
 }

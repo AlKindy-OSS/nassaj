@@ -72,6 +72,8 @@ const indexState = { impl: async (_provider: string, filePath: string) => {
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    // Link-only: execution-permissions/actor.ts imports these since ecfdc7db5; forks never call them.
+    apiKeysDb: {}, deviceAccountSessionsDb: {}, userDb: {},
     sessionsDb: {
       getSessionById: (sessionId: string) => sessionRows.get(sessionId) ?? null,
       deleteSessionById: (sessionId: string) => { deletedSessions.push(sessionId); },

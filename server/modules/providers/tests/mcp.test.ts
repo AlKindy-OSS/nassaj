@@ -1396,21 +1396,23 @@ test('providerMcpService blocks generic Gemini MCP while retaining Cursor manual
     assert.equal(cleanupOnly.supportsMcp, true);
     assert.equal(cleanupOnly.writesPerUserConfig, true);
     assert.deepEqual(await cleanupOnly.listServersForScope('project'), []);
+    // 035fe5fb1 (T-1749/ADR-159 D1) unregistered gemini: the service refuses it as an
+    // unsupported provider; the HTTP routes keep their 403 GEMINI_GENERIC_MCP_DISABLED.
     await assert.rejects(
       providerMcpService.upsertProviderMcpServer('gemini', {
         name: 'gemini-stdio', scope: 'user', transport: 'stdio', command: 'node',
       }),
-      (error: unknown) => error instanceof AppError && error.code === 'GEMINI_GENERIC_MCP_DISABLED',
+      (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
     );
     await assert.rejects(
       providerMcpService.listProviderMcpServers('gemini', { workspacePath }),
-      (error: unknown) => error instanceof AppError && error.code === 'GEMINI_GENERIC_MCP_DISABLED',
+      (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
     );
     await assert.rejects(
       providerMcpService.removeProviderMcpServer('gemini', {
         name: 'gemini-stdio', scope: 'user',
       }),
-      (error: unknown) => error instanceof AppError && error.code === 'GEMINI_GENERIC_MCP_DISABLED',
+      (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
     );
 
     await providerMcpService.upsertProviderMcpServer('cursor', {

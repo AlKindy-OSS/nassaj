@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Settings, ArrowUpCircle, LogOut, RefreshCw, UserRound, Palette, ChevronUp,
+  ArrowUpCircle, ChevronUp, LogOut, Palette, RefreshCw, Settings, UserRound,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -16,8 +16,10 @@ import type { SettingsDeepLink } from '../../../settings/types/types';
 import { SystemStatsFooter } from './SystemStats';
 import UpstreamReleaseNotice from './UpstreamReleaseNotice';
 import PendingActionsPanel from './PendingActionsPanel';
+import AccountSwitcher from './AccountSwitcher';
 
 import { staticAssetUrl } from '@/lib/static-asset-url';
+
 
 type SidebarFooterProps = {
   updateAvailable: boolean;
@@ -62,7 +64,7 @@ export default function SidebarFooter({
   onShowSettings,
   t,
 }: SidebarFooterProps) {
-  const { logout, user } = useAuth();
+  const { deviceAccountSessionsEnabled, logout, user } = useAuth();
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
   const userName = user?.username || t('account.fallbackName');
@@ -154,31 +156,36 @@ export default function SidebarFooter({
       {/* العتاد بنفس بطاقة الإحصاءات الأصلية. */}
       <SystemStatsFooter t={t} />
       <div className="px-3 pb-0 pt-0.5">
-        <ActionMenu
-          label={userName}
-          ariaLabel={t('account.menuLabel', { name: userName })}
-          side="top"
-          align="start"
-          variant="ghost"
-          className="w-full"
-          triggerClassName="h-14 w-full justify-start gap-3 rounded-xl bg-muted/40 px-3 text-start hover:bg-muted/60"
-          triggerContent={<>
-            {user?.avatarUrl && failedAvatar !== user.avatarUrl
-              ? <img src={staticAssetUrl(user.avatarUrl)} alt="" onError={() => setFailedAvatar(user.avatarUrl!)} className="h-8 w-8 shrink-0 rounded-full object-cover" />
-              : <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-foreground">{initials}</span>}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-foreground">{userName}</span>
-              <span className="block text-xs text-muted-foreground">{t(`account.roles.${user?.role || 'user'}`)}</span>
-            </span>
-            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          </>}
-          items={[
-            { key: 'profile', label: t('account.profile'), icon: UserRound, onSelect: () => onShowSettings({ tab: 'profile' }) },
-            { key: 'appearance', label: t('account.appearance'), icon: Palette, onSelect: () => onShowSettings({ tab: 'appearance' }) },
-            { key: 'settings', label: t('actions.settings'), icon: Settings, onSelect: () => onShowSettings() },
-            { key: 'logout', label: t('actions.logout'), icon: LogOut, isDanger: true, showDividerBefore: true, onSelect: () => setConfirmingLogout(true) },
-          ]}
-        />
+        {deviceAccountSessionsEnabled ? <AccountSwitcher
+            current={{ displayName: userName, avatarUrl: user?.avatarUrl, secondary: t(`account.roles.${user?.role || 'user'}`) }}
+            t={t}
+            onShowSettings={() => onShowSettings()}
+            onLegacyLogout={() => setConfirmingLogout(true)}
+          /> : <ActionMenu
+            label={userName}
+            ariaLabel={t('account.menuLabel', { name: userName })}
+            side="top"
+            align="start"
+            variant="ghost"
+            className="w-full"
+            triggerClassName="h-14 w-full justify-start gap-3 rounded-xl bg-muted/40 px-3 text-start hover:bg-muted/60"
+            triggerContent={<>
+              {user?.avatarUrl && failedAvatar !== user.avatarUrl
+                ? <img src={staticAssetUrl(user.avatarUrl)} alt="" onError={() => setFailedAvatar(user.avatarUrl!)} className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                : <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-foreground">{initials}</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-foreground">{userName}</span>
+                <span className="block text-xs text-muted-foreground">{t(`account.roles.${user?.role || 'user'}`)}</span>
+              </span>
+              <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            </>}
+            items={[
+              { key: 'profile', label: t('account.profile'), icon: UserRound, onSelect: () => onShowSettings({ tab: 'profile' }) },
+              { key: 'appearance', label: t('account.appearance'), icon: Palette, onSelect: () => onShowSettings({ tab: 'appearance' }) },
+              { key: 'settings', label: t('actions.settings'), icon: Settings, onSelect: () => onShowSettings() },
+              { key: 'logout', label: t('actions.logout'), icon: LogOut, isDanger: true, showDividerBefore: true, onSelect: () => setConfirmingLogout(true) },
+            ]}
+          />}
       </div>
       <Dialog open={confirmingLogout} onOpenChange={setConfirmingLogout}>
         <DialogContent className="max-w-sm p-0">

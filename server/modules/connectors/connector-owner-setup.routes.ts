@@ -37,6 +37,12 @@ const owner = (deps: Dependencies, req: express.Request, res: express.Response):
   if (!identity || identity.role !== 'owner') { res.status(404).json({ code: 'CONNECTOR_SETUP_NOT_FOUND' }); return null; }
   return identity;
 };
+const current = (req: express.Request, res: express.Response): boolean => {
+  const check = (req as express.Request & { assertCurrentIdentity?: () => boolean }).assertCurrentIdentity;
+  if (check?.() !== false) return true;
+  res.status(409).json({ code: 'IDENTITY_CHANGED' });
+  return false;
+};
 
 /** Builds routes without mounting any provider activation or I/O adapter. */
 export const createConnectorOwnerSetupRoutes = (deps: Dependencies): express.Router => {
@@ -73,6 +79,7 @@ export const createConnectorOwnerSetupRoutes = (deps: Dependencies): express.Rou
       res.status(403).json({ code: 'CONNECTOR_SETUP_RECENT_AUTH_OR_CSRF_REQUIRED' }); return;
     }
     try {
+      if (!current(req, res)) return;
       res.json(await effect(req.body as Record<string, unknown>, { ownerUserId: identity.userId,
         idempotencyKey: key, expectedRevision: revision, requestOrigin: expectedOrigin!,
         authTimeMs: session.authTimeMs, expiresAtMs: Math.min(session.expiresAtMs, nowMs + 30_000), nowMs }, res));

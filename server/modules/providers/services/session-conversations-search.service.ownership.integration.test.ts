@@ -31,7 +31,9 @@ import test from 'node:test';
 
 import {
   closeConnection,
+  getConnection,
   initializeDatabase,
+  messageAuthorsDb,
   participantsDb,
   projectMembersDb,
   projectsDb,
@@ -168,6 +170,31 @@ test('B-106: owner finds matches and snippets in their own session', async () =>
       snippets[0].includes(SECRET_TERM),
       'the streamed snippet is the owner-visible content',
     );
+  });
+});
+
+test('a queued search result is discarded when its captured access fence turns stale', async () => {
+  await withFixture(async ({ aliceId, addSession }) => {
+    await addSession({
+      sessionId: 'revoked-session',
+      projectPath: '/work/revoked-project',
+      ownerId: aliceId,
+      secretLine: `late ${SECRET_TERM} content`,
+    });
+    let checks = 0;
+    const updates: SessionConversationSearchProgressUpdate[] = [];
+    const result = await searchConversations(
+      SECRET_TERM,
+      aliceId,
+      50,
+      (update) => updates.push(update),
+      null,
+      () => ++checks === 1,
+    );
+
+    assert.ok(checks >= 2, 'access is rechecked after the asynchronous scan');
+    assert.equal(result.results.length, 0);
+    assert.equal(collectSnippets(updates).length, 0);
   });
 });
 
@@ -385,5 +412,36 @@ test('B-111: a null caller finds nothing even when the project is PUBLIC', async
     });
     assert.equal(result.totalMatches, 0, 'null caller owns/sees nothing even for a public project');
     assert.equal(collectSnippets(updates).length, 0, 'null caller receives no snippets');
+  });
+});
+
+test('ADR-172: projectless search requires author or spawn consent before scan', async () => {
+  await withFixture(async ({ aliceId, bobId, addSession }) => {
+    const previous = process.env.PROJECT_MEMBERSHIP_ENFORCE;
+    process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
+    try {
+      await addSession({
+        sessionId: 'projectless-search',
+        projectPath: '/work/temporary-projectless',
+        ownerId: aliceId,
+        secretLine: `projectless ${SECRET_TERM} content`,
+      });
+      getConnection().prepare('UPDATE sessions SET project_path = NULL WHERE session_id = ?')
+        .run('projectless-search');
+      getConnection().prepare('DELETE FROM session_participants WHERE session_id = ?')
+        .run('projectless-search');
+      messageAuthorsDb.recordUserMessage('projectless-search', aliceId, 'consented prompt');
+      getConnection().prepare(
+        "INSERT INTO session_participants (session_id, user_id, attribution) VALUES (?, ?, 'provenance')",
+      ).run('projectless-search', bobId);
+
+      const denied = await searchConversations(SECRET_TERM, bobId, 50);
+      assert.equal(denied.totalMatches, 0, 'provenance alone grants no projectless read');
+      const allowed = await searchConversations(SECRET_TERM, aliceId, 50);
+      assert.equal(allowed.totalMatches, 1, 'recorded author consent admits the projectless scan');
+    } finally {
+      if (previous === undefined) delete process.env.PROJECT_MEMBERSHIP_ENFORCE;
+      else process.env.PROJECT_MEMBERSHIP_ENFORCE = previous;
+    }
   });
 });

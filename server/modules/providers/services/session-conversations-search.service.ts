@@ -5,7 +5,16 @@ import readline from 'node:readline';
 import { spawn } from 'cross-spawn';
 import { rgPath } from '@vscode/ripgrep';
 
-import { parseStoredTimestampMs, participantsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import {
+  canAccessProject,
+  findOwningProject,
+  isProjectMembershipEnforced,
+  messageAuthorsDb,
+  parseStoredTimestampMs,
+  participantsDb,
+  projectsDb,
+  sessionsDb,
+} from '@/modules/database/index.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex' | 'gemini';
@@ -55,6 +64,7 @@ type SearchSessionConversationsInput = {
   requesterUserId: number | null;
   signal?: AbortSignal;
   onProgress?: (update: SessionConversationSearchProgressUpdate) => void;
+  authorizeSession?: (sessionId: string, projectPath: string | null) => boolean;
 };
 
 type SessionRepositoryRow = ReturnType<typeof sessionsDb.getAllSessions>[number];
@@ -571,10 +581,28 @@ function filterSessionsByOwnership(
     return projectVisibilityByPath.get(key) as boolean;
   };
 
+  // ADR-172 (qa ن2): under enforcement, participation alone no longer admits a
+  // session whose registered project the requester lost access to.
+  const enforced = isProjectMembershipEnforced();
+  const participantAdmits = (session: SearchableSessionRow): boolean => {
+    const hasConsent = participantsDb.isParticipant(session.session_id, requesterUserId)
+      || messageAuthorsDb.isAuthor(session.session_id, requesterUserId);
+    if (!hasConsent) {
+      return false;
+    }
+    if (!enforced) {
+      return true;
+    }
+    const owner = findOwningProject(session.project_path ?? '');
+    return owner === null || canAccessProject(owner.project_id, requesterUserId);
+  };
+
   return searchableSessions.filter(
-    (session) =>
-      participantsDb.isParticipant(session.session_id, requesterUserId) ||
-      isProjectPathVisible(session.project_path),
+    (session) => {
+      if (participantAdmits(session)) return true;
+      if (enforced && findOwningProject(session.project_path ?? '') === null) return false;
+      return isProjectPathVisible(session.project_path);
+    },
   );
 }
 
@@ -1230,6 +1258,7 @@ export async function searchConversations(
   limit = 50,
   onProjectResult: ((update: SessionConversationSearchProgressUpdate) => void) | null = null,
   signal: AbortSignal | null = null,
+  authorizeSession: ((sessionId: string, projectPath: string | null) => boolean) | null = null,
 ): Promise<{ results: ProjectConversationResult[]; totalMatches: number; query: string }> {
   const safeQuery = typeof query === 'string' ? query.trim() : '';
   const safeLimit = Math.max(1, Math.min(Number.isFinite(limit) ? limit : 50, 200));
@@ -1256,7 +1285,7 @@ export async function searchConversations(
   const searchableSessions = filterSessionsByOwnership(
     normalizeSearchableSessions(sessionsDb.getAllSessions()),
     requesterUserId,
-  );
+  ).filter((session) => authorizeSession?.(session.session_id, session.project_path) !== false);
   if (searchableSessions.length === 0) {
     return { results: [], totalMatches: 0, query: safeQuery };
   }
@@ -1345,14 +1374,27 @@ export async function searchConversations(
       if (!matchedSessionKeys.has(getSessionKey(session))) {
         continue;
       }
+      if (authorizeSession?.(session.session_id, session.project_path) === false) {
+        continue;
+      }
 
       const sessionResult = await parseSessionMatches(session, runtime);
+      if (authorizeSession?.(session.session_id, session.project_path) === false) {
+        continue;
+      }
       if (sessionResult) {
         projectResult.sessions.push(sessionResult);
       }
     }
 
     scannedProjects += 1;
+    if (authorizeSession) {
+      const pathsBySession = new Map(bucket.sessions.map(
+        (session) => [session.session_id, session.project_path] as const,
+      ));
+      projectResult.sessions = projectResult.sessions.filter((session) =>
+        authorizeSession(session.sessionId, pathsBySession.get(session.sessionId) ?? null));
+    }
     if (projectResult.sessions.length > 0) {
       results.push(projectResult);
       onProjectResult?.({
@@ -1396,6 +1438,7 @@ export const sessionConversationsSearchService = {
       input.limit,
       input.onProgress ?? null,
       input.signal ?? null,
+      input.authorizeSession ?? null,
     );
   },
 };

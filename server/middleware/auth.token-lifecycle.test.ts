@@ -39,11 +39,16 @@ const user = {
   username: 'lifecycle',
   role: 'user',
   password_changed_at: null as number | null,
+  authorization_generation: 1,
 };
 
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
-    userDb: { getUserById: () => user },
+    userDb: {
+      getUserById: () => user,
+      isAuthorizationPrincipalCurrent: (userId: number, generation: number) =>
+        user.id === userId && user.authorization_generation === generation,
+    },
     appConfigDb: { getOrCreateJwtSecret: () => FIXED_SECRET },
     auditLogDb: {
       record: (event: string, payload: Record<string, unknown>) => {
@@ -124,7 +129,7 @@ test('B-164: a 0-stamped token is invalidated once the row gains a stamp', () =>
 function pastHalfLifeToken(userId: number, pwdIat = 0): string {
   const iat = Math.floor(Date.now() / 1000) - 4 * 24 * 60 * 60;
   return jwt.sign(
-    { userId, username: 'lifecycle', role: 'user', pwd_iat: pwdIat, iat },
+    { userId, username: 'lifecycle', role: 'user', pwd_iat: pwdIat, auth_gen: user.authorization_generation, iat },
     JWT_SECRET,
     { expiresIn: 7 * 24 * 60 * 60 }
   );
@@ -161,6 +166,35 @@ test('B-165: the coalescing cache repeats one token until it is invalidated', as
   assert.notEqual(third, first, 'invalidateRefreshCache must force a fresh mint');
   assert.equal((decode(third) as { pwd_iat: number }).pwd_iat, user.password_changed_at);
   user.password_changed_at = null;
+});
+
+test('JWT final disclosure fence rejects a generation changed after admission', async () => {
+  user.authorization_generation = 1;
+  const token = generateToken(user);
+  const req = {
+    headers: { authorization: `Bearer ${token}` }, query: {}, socket: {},
+  } as Record<string, unknown>;
+  let status = 200;
+  let body: unknown;
+  const res = {
+    setHeader: () => undefined,
+    status: (value: number) => { status = value; return res; },
+    set: () => res,
+    json: (value: unknown) => { body = value; return res; },
+    send: (value: unknown) => { body = value; return res; },
+  };
+  let admitted = false;
+  await authenticateToken(req as never, res as never, () => { admitted = true; });
+  assert.equal(admitted, true);
+
+  user.authorization_generation = 2;
+  (res.json as (value: unknown) => unknown)({ secret: 'late-result' });
+  assert.equal(status, 409);
+  assert.deepEqual(body, {
+    error: 'Identity changed during request', code: 'identity_changed',
+    notStarted: false, effectState: 'outcome_unknown',
+  });
+  user.authorization_generation = 1;
 });
 
 // ---------------------------------------------------------------------------

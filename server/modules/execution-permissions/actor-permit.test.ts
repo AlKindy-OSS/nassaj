@@ -35,6 +35,34 @@ test('actor is server-shaped, frozen, and rejects platform and stale shapes', ()
   }), /ACTOR_CREDENTIAL_ID_REQUIRED/);
 });
 
+test('device principal becomes a launch actor without losing wallet fencing', () => {
+  const actor = createAuthenticatedLaunchActor({
+    id: 9,
+    role: 'user',
+    status: 'active',
+    is_active: 1,
+    authenticationKind: 'device_session',
+    authorizationGeneration: 7,
+    deviceSessionId: 'device_server_issued',
+    slotId: 'slot_server_issued',
+    deviceGeneration: 12,
+  }, '2030-01-01T00:00:00.000Z');
+  assert.deepEqual(actor, {
+    userId: 9,
+    principalId: 'user:9',
+    authenticationKind: 'session',
+    authorizationGeneration: 7,
+    roles: ['user'],
+    authenticatedAt: '2030-01-01T00:00:00.000Z',
+    deviceSessionId: 'device_server_issued',
+    slotId: 'slot_server_issued',
+    deviceGeneration: 12,
+  });
+  assert.throws(() => createAuthenticatedLaunchActor({
+    id: 9, role: 'user', authenticationKind: 'device_session', authorizationGeneration: 7,
+  }), /ACTOR_DEVICE_BINDING_INVALID/);
+});
+
 const binding: LaunchPermitBinding = Object.freeze({
   decisionId: 'decision-1', leaseId: 'lease-1', userId: 7, authorizationGeneration: 4,
   provider: 'codex', body: 'codex', engine: 'sdk', entrypoint: 'ws.chat',

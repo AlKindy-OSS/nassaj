@@ -19,6 +19,14 @@
 
 import { spawn } from 'node:child_process';
 
+/* eslint-disable boundaries/dependencies -- this runner needs the synchronous admission leaf without loading the full providers barrel into workflow boot. */
+import {
+  beginHarnessLaunch,
+  harnessUpdatingMessage,
+  isSpawnBlockedForRunProvider,
+} from '../providers/harness-update/spawn-admission.js';
+/* eslint-enable boundaries/dependencies */
+
 import type { ResumeTurnParams, ResumeTurnResult } from './handoff-injector.js';
 import { INJECTOR_SIGKILL_GRACE_MS } from './config.js';
 
@@ -31,6 +39,18 @@ const KILL_GRACE_MS = INJECTOR_SIGKILL_GRACE_MS;
 
 export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTurnResult> {
   return new Promise((resolve) => {
+    // T-1749/ADR-159: a headless `claude -p --resume` is a claude harness spawn;
+    // refuse (retryably) rather than run against a binary being replaced.
+    if (isSpawnBlockedForRunProvider('claude')) {
+      resolve({
+        ok: false,
+        exitCode: null,
+        timedOut: false,
+        resultObj: null,
+        error: harnessUpdatingMessage('claude'),
+      });
+      return;
+    }
     const args: string[] = [
       '-r',
       params.conversationId,
@@ -53,6 +73,10 @@ export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTu
     let hardTimer: NodeJS.Timeout | null = null;
 
     let child: ReturnType<typeof spawn>;
+    // T-1749 item 6: this headless claude child never registers in the presence
+    // run registry, so the harness-update live-session gate would not see it.
+    // Track it explicitly for the child's whole life.
+    const releaseLaunch = beginHarnessLaunch('claude');
     try {
       child = spawn(params.claudeBin, args, {
         cwd: params.projectPath,
@@ -60,6 +84,7 @@ export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTu
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
+      releaseLaunch();
       resolve({
         ok: false,
         exitCode: null,
@@ -107,11 +132,13 @@ export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTu
 
     child.on('error', (err) => {
       clearTimers();
+      releaseLaunch();
       resolve({ ok: false, exitCode: null, timedOut, resultObj: null, error: err.message });
     });
 
     child.on('close', (code) => {
       clearTimers();
+      releaseLaunch();
       let resultObj: unknown = null;
       try {
         resultObj = JSON.parse(stdout);

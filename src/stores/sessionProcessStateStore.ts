@@ -122,6 +122,7 @@ export function invalidateSessionProcessAuthority(epoch: number): void {
 
 /** Clears all process states when the authenticated WebSocket identity changes. */
 export function resetSessionProcessStates(): void {
+  connectionEpoch = ++epochSequence;
   if (states.size === 0 && presenceOwned.size === 0 && authorityEpochs.size === 0) {
     return;
   }
@@ -129,6 +130,10 @@ export function resetSessionProcessStates(): void {
   presenceOwned.clear();
   authorityEpochs.clear();
   emitChange();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:identity-changing', resetSessionProcessStates);
 }
 
 /**

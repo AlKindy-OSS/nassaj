@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
+import { AppError } from '@/shared/utils.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -447,7 +448,7 @@ test('providerSkillsService lists opencode project and user compatibility skills
  * This test covers Gemini and Cursor skill directory rules, including shared
  * `.agents/skills` project support.
  */
-test('providerSkillsService lists gemini and cursor skills from their configured directories', { concurrency: false }, async () => {
+test('providerSkillsService lists cursor skills and refuses the retired gemini provider', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-gc-'));
   const workspacePath = path.join(tempRoot, 'workspace');
   await fs.mkdir(workspacePath, { recursive: true });
@@ -491,13 +492,12 @@ test('providerSkillsService lists gemini and cursor skills from their configured
       'Cursor user skill',
     );
 
-    const geminiSkills = await providerSkillsService.listProviderSkills('gemini', { workspacePath });
-    const geminiByName = new Map(geminiSkills.map((skill) => [skill.name, skill]));
-    assert.equal(geminiByName.get('gemini-user')?.scope, 'user');
-    assert.equal(geminiByName.get('agents-user')?.scope, 'user');
-    assert.equal(geminiByName.get('gemini-project')?.scope, 'project');
-    assert.equal(geminiByName.get('agents-project')?.scope, 'project');
-    assert.equal(geminiByName.get('gemini-project')?.command, '/gemini-project');
+    // T-1749/ADR-159 D1 (035fe5fb1) removed the gemini provider: its skill
+    // directories stay on disk (agy shares ~/.gemini) but are no longer served.
+    await assert.rejects(
+      providerSkillsService.listProviderSkills('gemini', { workspacePath }),
+      (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
+    );
 
     const cursorSkills = await providerSkillsService.listProviderSkills('cursor', { workspacePath });
     const cursorByName = new Map(cursorSkills.map((skill) => [skill.name, skill]));
@@ -513,12 +513,12 @@ test('providerSkillsService lists gemini and cursor skills from their configured
 
 /**
  * Managed global skill creation for the providers that own a writable user skill
- * directory (claude/codex/gemini/cursor). Covers directory naming, folder
+ * directory (claude/codex/cursor; gemini is retired). Covers directory naming, folder
  * uploads with supporting files, front-matter fallback, overwrite-replaces-dir,
  * duplicate-target batch rejection, traversal rejection, and round-trip
  * discovery via listProviderSkills.
  */
-test('providerSkillsService adds global skills for claude, codex, gemini, and cursor', { concurrency: false }, async () => {
+test('providerSkillsService adds global skills for claude, codex, and cursor', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-create-'));
   const restoreHomeDir = patchHomeDir(tempRoot);
 
@@ -614,21 +614,19 @@ test('providerSkillsService adds global skills for claude, codex, gemini, and cu
     );
     await assert.rejects(fs.stat(pendingBatchSkillPath), { code: 'ENOENT' });
 
-    const createdGeminiSkills = await providerSkillsService.addProviderSkills('gemini', {
-      entries: [
-        {
-          directoryName: 'gemini-global-dir',
-          content: '---\nname: gemini-global\ndescription: Gemini global skill\n---\n\nGemini body.\n',
-        },
-      ],
-    });
-    const createdGeminiSkill = createdGeminiSkills[0];
-    assert.ok(createdGeminiSkill);
-    assert.equal(createdGeminiSkill.command, '/gemini-global');
-    assert.equal(
-      createdGeminiSkill.sourcePath.endsWith(path.join('.gemini', 'skills', 'gemini-global-dir', 'SKILL.md')),
-      true,
+    // The retired gemini provider (035fe5fb1) accepts no managed skill writes.
+    await assert.rejects(
+      providerSkillsService.addProviderSkills('gemini', {
+        entries: [
+          {
+            directoryName: 'gemini-global-dir',
+            content: '---\nname: gemini-global\ndescription: Gemini global skill\n---\n\nGemini body.\n',
+          },
+        ],
+      }),
+      (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
     );
+    await assert.rejects(fs.stat(path.join(tempRoot, '.gemini', 'skills', 'gemini-global-dir')), { code: 'ENOENT' });
 
     const createdCursorSkills = await providerSkillsService.addProviderSkills('cursor', {
       entries: [
@@ -651,8 +649,6 @@ test('providerSkillsService adds global skills for claude, codex, gemini, and cu
     assert.equal(listedClaudeSkills.some((skill) => skill.name === 'claude-global'), true);
     const listedCodexSkills = await providerSkillsService.listProviderSkills('codex');
     assert.equal(listedCodexSkills.some((skill) => skill.name === 'replacement'), true);
-    const listedGeminiSkills = await providerSkillsService.listProviderSkills('gemini');
-    assert.equal(listedGeminiSkills.some((skill) => skill.name === 'gemini-global'), true);
     const listedCursorSkills = await providerSkillsService.listProviderSkills('cursor');
     assert.equal(listedCursorSkills.some((skill) => skill.name === 'cursor-global'), true);
 

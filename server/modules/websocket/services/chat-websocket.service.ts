@@ -1,9 +1,10 @@
+/* eslint-disable boundaries/dependencies -- realtime composition uses dependency-light leaf seams and partial module mocks. */
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { WebSocket } from 'ws';
 
-
+import { assertRealtimePrincipalCurrent } from '@/modules/account-wallet/index.js';
 import type {
   TrustedLegacySessionAttestation,
   TrustedShadowAuthorization,
@@ -15,7 +16,6 @@ import type {
   PermissionGatewayResult,
 } from '@/modules/execution-permissions/index.js';
 // Runtime-only leaf import avoids evaluating the database-backed public barrel in partial mocks.
-// eslint-disable-next-line boundaries/dependencies
 import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
 // Namespace import (not `import { projectsDb, sessionsDb }`): the realtime
 // visibility gate below reads `sessionsDb`, but some unit tests module-mock this
@@ -23,6 +23,10 @@ import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/a
 // member a mock omits (it is only dereferenced on the gate's own code path),
 // whereas a static named import would fail ESM linking against such a mock.
 import * as databaseModule from '@/modules/database/index.js';
+import {
+  canAccessProjectPath,
+  isProjectMembershipEnforced,
+} from '@/modules/database/repositories/project-access.js';
 import { sendOpenSessionsCount } from '@/modules/websocket/services/open-sessions.service.js';
 import {
   presenceConnect,
@@ -220,7 +224,6 @@ type ChatWebSocketDependencies = {
   queryClaudeSDK: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnCursor: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   queryCodex: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  spawnGemini: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnAntigravity: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnOpenCode: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnHermes: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
@@ -368,7 +371,6 @@ type ChatWebSocketDependencies = {
   ) => Promise<boolean | { aborted: boolean; reason: string; sessionId: string | null }>;
   abortCursorSession: (sessionId: string) => boolean;
   abortCodexSession: (sessionId: string) => boolean;
-  abortGeminiSession: (sessionId: string) => boolean;
   abortAntigravitySession: (sessionId: string) => boolean;
   abortOpenCodeSession: (sessionId: string) => boolean;
   abortHermesSession: (sessionId: string) => boolean;
@@ -376,6 +378,16 @@ type ChatWebSocketDependencies = {
   abortDeepSeekSession: (sessionId: string) => boolean;
   abortGlmSession: (sessionId: string) => boolean;
   abortQwenSession?: (sessionId: string) => boolean;
+  /** Active-run ownership bridge. Tokens are opaque and rechecked pre-abort. */
+  getProviderRunsOwnedByWriter?: (
+    writer: WebSocketWriter,
+    rawWs: RealtimeClientConnection,
+  ) => Array<{ sessionId: string; provider: string; token: unknown }>;
+  isProviderRunOwnershipCurrent?: (
+    run: { sessionId: string; provider: string; token: unknown },
+    writer: WebSocketWriter,
+    rawWs: RealtimeClientConnection,
+  ) => boolean;
   resolveToolApproval: (
     requestId: string,
     payload: {
@@ -397,7 +409,6 @@ type ChatWebSocketDependencies = {
   isClaudeSDKSessionActive: (sessionId: string) => boolean;
   isCursorSessionActive: (sessionId: string) => boolean;
   isCodexSessionActive: (sessionId: string) => boolean;
-  isGeminiSessionActive: (sessionId: string) => boolean;
   isAntigravitySessionActive: (sessionId: string) => boolean;
   isOpenCodeSessionActive: (sessionId: string) => boolean;
   isHermesSessionActive: (sessionId: string) => boolean;
@@ -443,7 +454,6 @@ type ChatWebSocketDependencies = {
   getActiveClaudeSDKSessions: () => unknown;
   getActiveCursorSessions: () => unknown;
   getActiveCodexSessions: () => unknown;
-  getActiveGeminiSessions: () => unknown;
   getActiveAntigravitySessions: () => unknown;
   getActiveOpenCodeSessions: () => unknown;
   getActiveHermesSessions: () => unknown;
@@ -554,15 +564,17 @@ function isSpawnProjectVisible(
   userId: string | number | null
 ): boolean {
   const options = (data.options ?? {}) as { cwd?: unknown };
-  const cwd = typeof options.cwd === 'string' ? options.cwd.trim() : '';
+  const cwd = typeof options.cwd === 'string' && options.cwd.trim()
+    ? options.cwd.trim()
+    : process.cwd();
   return isProjectPathVisibleToUser(cwd, userId);
 }
 
 /**
  * Path-based form of the B-PRIV spawn guard, shared with the `/shell` PTY
  * handler (B-36): given a raw project path and the JWT-authenticated user id,
- * returns true when a run/terminal may be started inside that path. Empty and
- * unregistered paths are allowed (creation/first-run flow); a KNOWN private
+ * returns true when a run/terminal may be started inside that path. Unregistered
+ * rooted paths are allowed (creation/first-run flow); a KNOWN private
  * project is only visible to its members.
  */
 export function isProjectPathVisibleToUser(
@@ -571,7 +583,14 @@ export function isProjectPathVisibleToUser(
 ): boolean {
   const trimmedPath = typeof projectPath === 'string' ? projectPath.trim() : '';
   if (!trimmedPath) {
-    return true;
+    return !isProjectMembershipEnforced();
+  }
+
+  // ADR-172 (qa #4): under enforcement a sub-directory, `..` form or symlink
+  // into a registered project is gated by THAT project, not treated as an
+  // unregistered creation path.
+  if (isProjectMembershipEnforced()) {
+    return canAccessProjectPath(trimmedPath, toNumericUserId(userId));
   }
 
   const projectRow = databaseModule.projectsDb.getProjectPath(trimmedPath);
@@ -649,8 +668,12 @@ async function attestSharedSessionWorkspace(input: SharedWorkspaceAttestationInp
     error.code = 'SESSION_WORKSPACE_FORBIDDEN';
     throw error;
   }
+  // ADR-172 (qa #5): under enforcement the participant arm no longer grants
+  // write on its own — project access decides.
+  const participantArm = Boolean(input.sessionId) && !isProjectMembershipEnforced()
+    && databaseModule.participantsDb.isParticipant(input.sessionId as string, userId) === true;
   const authorized = input.sessionId
-    ? (databaseModule.participantsDb.isParticipant(input.sessionId, userId) === true
+    ? (participantArm
       || databaseModule.projectsDb.isProjectWritableByUser(project.project_id, userId) === true)
     : databaseModule.projectsDb.isProjectWritableByUser(project.project_id, userId) === true;
   if (!authorized) {
@@ -674,23 +697,16 @@ async function attestSharedSessionWorkspace(input: SharedWorkspaceAttestationInp
  * Layered exactly like the REST write gate (B-138 `isProjectWritableByUser`):
  *   1. the READ gate must pass first (a session in a project the user cannot see
  *      is refused with the same 404-equivalent, never disclosed);
- *   2. then MEMBERSHIP, not visibility, decides: a participant/author of THIS
- *      session (B-105 `participantsDb.isParticipant` — the spawner is recorded by
- *      every provider's run path at spawn time, so the run's own owner always
- *      passes), or a creator/member/participant of the owning project.
+ *   2. then MEMBERSHIP decides. A registered project uses current project
+ *      access. A projectless legacy session requires an attribution='spawn'
+ *      participant row; authorship/provenance grants read but never control.
  *
- * Fail-OPEN cases are exactly the two the read gate already documents, and for
- * the same reason — there is nothing to protect and refusing would break a
- * legitimate flow:
- *   - an EMPTY sessionId: the claude abort path resolves it against the newest
+ * The only connection-scoped exception is an EMPTY sessionId: the claude abort
+ * path resolves it against the newest
  *     active run on THIS SOCKET (the brand-new-session STOP race), so it is
  *     connection-scoped by construction; every other provider does an exact map
- *     lookup that an empty id can never match;
- *   - a session that resolves to no known project row (unpersisted brand-new run
- *     — the run path outruns the synchronizer): no membership data exists yet,
- *     and its SDK-generated id has never left its own socket/mirrors.
- * Everything else fails CLOSED, including an unresolvable (anonymous) user id on
- * a KNOWN project and any database error inside the membership probes.
+ *     lookup that an empty id can never match. Unknown ids, missing consent and
+ * database errors fail closed.
  *
  * Exported for unit tests.
  */
@@ -707,14 +723,30 @@ export function isSessionWritableByUser(
     return false;
   }
 
-  let projectPath = '';
+  let session: ReturnType<typeof databaseModule.sessionsDb.getSessionById>;
   try {
-    projectPath = databaseModule.sessionsDb.getSessionById(sessionId)?.project_path ?? '';
+    session = databaseModule.sessionsDb.getSessionById(sessionId);
   } catch {
-    projectPath = '';
+    return false;
   }
-  if (!projectPath.trim()) {
-    return true;
+  if (!session) {
+    return false;
+  }
+  const projectPath = session.project_path ?? '';
+
+  // ADR-172 (qa #4/#5): under enforcement the owning project (longest
+  // registered ancestor) decides, and session participation grants nothing.
+  if (isProjectMembershipEnforced()) {
+    try {
+      if (!databaseModule.findOwningProject(projectPath.trim())) {
+        const numericUserId = toNumericUserId(userId);
+        return numericUserId !== null
+          && databaseModule.participantsDb.hasSpawnConsent(sessionId, numericUserId);
+      }
+      return canAccessProjectPath(projectPath.trim(), toNumericUserId(userId));
+    } catch {
+      return false;
+    }
   }
 
   let projectRow: { project_id: string } | null = null;
@@ -760,15 +792,9 @@ export function isSessionWritableByUser(
  * the mirror exists for), while a private project's session is only
  * mirrored/attached/listed for a member (ADR-052).
  *
- * Fail-OPEN only when the session resolves to no known project_path — an
- * unpersisted brand-new session (the run path can outrace the synchronizer) or a
- * null-path session carries no private-project association to protect, matching
- * the spawn guard's unregistered-path allowance and the presence layer's
- * treatment of null-path runs. The lookup is wrapped so a database hiccup never
- * throws on the realtime path (same discipline as participation tracking): an
- * unresolved lookup falls through to that unregistered-path allowance. The actual
- * exploit path — a KNOWN private session whose row resolves — never errors, so
- * the guarantee against a non-member is not weakened by the fail-open.
+ * Under membership enforcement an existing projectless/unregistered session is
+ * visible only to a consent-bearing spawn participant or recorded message
+ * author. Unknown session ids and database errors fail closed.
  */
 export function isSessionVisibleToUser(
   sessionId: string,
@@ -778,16 +804,30 @@ export function isSessionVisibleToUser(
     return true;
   }
 
-  let projectPath = '';
+  let session: ReturnType<typeof databaseModule.sessionsDb.getSessionById>;
   try {
-    projectPath = databaseModule.sessionsDb.getSessionById(sessionId)?.project_path ?? '';
+    session = databaseModule.sessionsDb.getSessionById(sessionId);
   } catch {
-    return true;
+    return false;
   }
 
-  // Empty / unregistered project_path defers to the unregistered-path allowance
-  // inside isProjectPathVisibleToUser (returns true); a KNOWN private project is
-  // only visible to its members there.
+  if (!session) return false;
+  const projectPath = session.project_path ?? '';
+
+  if (isProjectMembershipEnforced()) {
+    try {
+      if (!databaseModule.findOwningProject(projectPath)) {
+        const numericUserId = toNumericUserId(userId);
+        return numericUserId !== null && (
+          databaseModule.participantsDb.isParticipant(sessionId, numericUserId)
+          || databaseModule.messageAuthorsDb.isAuthor(sessionId, numericUserId)
+        );
+      }
+    } catch {
+      return false;
+    }
+  }
+
   return isProjectPathVisibleToUser(projectPath, userId);
 }
 
@@ -874,6 +914,99 @@ export function abortHostedSupervisedTurn(
     && sessionId
     && supervisor.cancel({ provider, sessionId, userId }),
   );
+}
+
+type OwnedProviderRun = { sessionId: string; provider: string; token: unknown };
+
+/** Authorization close frames are the only transport exits that revoke work. */
+export function isIdentityRevocationClose(code: number, reason: Buffer): boolean {
+  return code === 4401 && reason?.toString() === 'identity_revoked';
+}
+
+/**
+ * Cancels only provider runs still owned by the device-revoked writer/socket.
+ * The opaque registry token is checked immediately before every cancellation,
+ * so an old close event cannot kill a replacement registration with the same
+ * session id. Output is fenced before any asynchronous provider abort begins.
+ */
+export function abortRunsForRevokedWriter(
+  writer: WebSocketWriter,
+  rawWs: RealtimeClientConnection,
+  dependencies: ChatWebSocketDependencies,
+): void {
+  abortOwnedRunsForWriter(writer, rawWs, dependencies, null, true);
+}
+
+/** Fences and aborts only writer-owned runs belonging to the removed project. */
+export function abortProjectRunsForRevokedWriter(
+  writer: WebSocketWriter,
+  rawWs: RealtimeClientConnection,
+  dependencies: ChatWebSocketDependencies,
+  projectSessionIds: Iterable<string>,
+): number {
+  const selected = new Set(projectSessionIds);
+  writer.revokeProjectSessions(selected, rawWs);
+  return abortOwnedRunsForWriter(writer, rawWs, dependencies, selected, false);
+}
+
+function abortOwnedRunsForWriter(
+  writer: WebSocketWriter,
+  rawWs: RealtimeClientConnection,
+  dependencies: ChatWebSocketDependencies,
+  selectedSessionIds: Set<string> | null,
+  revokeAllOutput: boolean,
+): number {
+  const listOwned = dependencies.getProviderRunsOwnedByWriter;
+  const isCurrent = dependencies.isProviderRunOwnershipCurrent;
+  const ownedRuns = [
+    ...(listOwned?.(writer, rawWs) ?? []),
+    ...(writer.getRevocableRuns?.(rawWs) ?? []),
+  ];
+  const runIsCurrent = (run: OwnedProviderRun): boolean => (
+    writer.isRevocableRunCurrent?.(run, rawWs) === true
+    || isCurrent?.(run, writer, rawWs) === true
+  );
+  const currentRuns = ownedRuns.filter((run) => runIsCurrent(run)
+    && (selectedSessionIds === null || selectedSessionIds.has(run.sessionId)));
+  if (currentRuns.length === 0) return 0;
+  if (revokeAllOutput && !writer.revokeRunOutput(rawWs)) return 0;
+
+  for (const run of currentRuns) {
+    const userId = toNumericUserId(writer.userId);
+    if (abortHostedSupervisedTurn(
+      dependencies.hostedTurnSupervisor, run.provider, run.sessionId, userId,
+    )) continue;
+    if (abortCliSupervisedTurn(
+      dependencies.cliTurnSupervisor, run.provider, run.sessionId, userId,
+    )) continue;
+
+    switch (run.provider) {
+      case 'claude':
+        void dependencies.abortClaudeSDKSession(run.sessionId, rawWs).catch((error) => {
+          console.error('[ERROR] Failed to abort identity-revoked Claude run', {
+            sessionId: run.sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+        break;
+      case 'cursor': dependencies.abortCursorSession(run.sessionId); break;
+      case 'codex': dependencies.abortCodexSession(run.sessionId); break;
+      case 'agy':
+      case 'antigravity': dependencies.abortAntigravitySession(run.sessionId); break;
+      case 'opencode': dependencies.abortOpenCodeSession(run.sessionId); break;
+      case 'hermes': dependencies.abortHermesSession(run.sessionId); break;
+      case 'kimi': dependencies.abortKimiSession(run.sessionId); break;
+      case 'deepseek': dependencies.abortDeepSeekSession(run.sessionId); break;
+      case 'glm': dependencies.abortGlmSession(run.sessionId); break;
+      case 'qwen': dependencies.abortQwenSession?.(run.sessionId); break;
+      default:
+        console.warn('[WARN] No abort bridge for identity-revoked provider run', {
+          provider: run.provider,
+          sessionId: run.sessionId,
+        });
+    }
+  }
+  return currentRuns.length;
 }
 
 /**
@@ -1978,6 +2111,9 @@ export async function dispatchProviderCommand(
       }));
       return;
     }
+    const supervisedOwnership: {
+      current: { sessionId: string; token: object } | null;
+    } = { current: null };
     try {
       const admission = await runAdmittedAdapter(
         targetProvider,
@@ -1997,6 +2133,18 @@ export async function dispatchProviderCommand(
         projectPath: sessionWorkspace?.cwd
           ?? (typeof data.options?.cwd === 'string' ? data.options.cwd : undefined),
         onSession(sessionId, isNew): void {
+          if (!supervisedOwnership.current || supervisedOwnership.current.sessionId !== sessionId) {
+            if (supervisedOwnership.current) {
+              writer.releaseRevocableRun?.(
+                supervisedOwnership.current.sessionId,
+                supervisedOwnership.current.token,
+              );
+            }
+            const token = writer.bindRevocableRun?.(sessionId, targetProvider);
+            if (token) {
+              supervisedOwnership.current = { sessionId, token };
+            }
+          }
           if (isNew && typeof writer.setSessionId === 'function') writer.setSessionId(sessionId);
           if (isNew) {
             writer.send(createNormalizedMessage({
@@ -2029,6 +2177,13 @@ export async function dispatchProviderCommand(
         error: 'The mechanically supervised hosted turn could not complete.',
         ...clientMsgIdEcho(data),
       }));
+    } finally {
+      if (supervisedOwnership.current) {
+        writer.releaseRevocableRun?.(
+          supervisedOwnership.current.sessionId,
+          supervisedOwnership.current.token,
+        );
+      }
     }
     return;
   }
@@ -2043,6 +2198,9 @@ export async function dispatchProviderCommand(
       }));
       return;
     }
+    const supervisedOwnership: {
+      current: { sessionId: string; token: object } | null;
+    } = { current: null };
     try {
       const admission = await runAdmittedAdapter(
         targetProvider,
@@ -2056,6 +2214,18 @@ export async function dispatchProviderCommand(
         projectPath: sessionWorkspace?.cwd
           ?? (typeof data.options?.cwd === 'string' ? data.options.cwd : undefined),
         onSession(sessionId, isNew): void {
+          if (!supervisedOwnership.current || supervisedOwnership.current.sessionId !== sessionId) {
+            if (supervisedOwnership.current) {
+              writer.releaseRevocableRun?.(
+                supervisedOwnership.current.sessionId,
+                supervisedOwnership.current.token,
+              );
+            }
+            const token = writer.bindRevocableRun?.(sessionId, targetProvider);
+            if (token) {
+              supervisedOwnership.current = { sessionId, token };
+            }
+          }
           if (isNew && typeof writer.setSessionId === 'function') writer.setSessionId(sessionId);
           if (isNew) writer.send(createNormalizedMessage({
             kind: 'session_created', provider: targetProvider, sessionId, newSessionId: sessionId,
@@ -2082,6 +2252,13 @@ export async function dispatchProviderCommand(
         code: code.toLowerCase(), error: 'The mechanically supervised CLI turn could not complete.',
         ...clientMsgIdEcho(data),
       }));
+    } finally {
+      if (supervisedOwnership.current) {
+        writer.releaseRevocableRun?.(
+          supervisedOwnership.current.sessionId,
+          supervisedOwnership.current.token,
+        );
+      }
     }
     return;
   }
@@ -2099,8 +2276,15 @@ export async function dispatchProviderCommand(
     return;
   }
   if (targetProvider === 'gemini') {
-    await runAdmittedLegacyProvider('gemini', 'gemini', 'cli', options =>
-      dependencies.spawnGemini(command, options, writer));
+    writer.send(createNormalizedMessage({
+      kind: 'complete',
+      provider: 'gemini',
+      exitCode: 1,
+      success: false,
+      code: 'provider_removed',
+      error: 'The Gemini provider has been removed. Existing history stays visible but read-only.',
+      ...clientMsgIdEcho(data),
+    }));
     return;
   }
   if (targetProvider === 'antigravity') {
@@ -2224,6 +2408,89 @@ export function readRequestUserId(
 }
 
 /**
+ * Stops the in-flight turn of `sessionId` through the provider that owns it —
+ * the dispatch chain of the `abort-session` message, extracted so the server
+ * can also stop a turn itself (ADR-172 م1: a removed member's in-flight turns).
+ * Authorization is the CALLER's job. `rawWs` is only the claude no-id fallback.
+ */
+export async function abortSessionTurn(
+  dependencies: ChatWebSocketDependencies,
+  sessionId: string,
+  requestedProvider: ReturnType<typeof readProvider>,
+  userId: number | null,
+  rawWs: unknown = null,
+): Promise<{
+  provider: ReturnType<typeof resolveSessionControlProvider>;
+  success: boolean;
+  resolvedSessionId: string | null;
+  abortReason: string | null;
+}> {
+  const provider = resolveSessionControlProvider(
+    sessionId,
+    requestedProvider,
+    dependencies.getSessionProvider
+  );
+  let success = false;
+  // The session the abort actually resolved to (claude may fall back to the
+  // newest active run on this connection when the id is missing entirely).
+  let resolvedSessionId: string | null = sessionId || null;
+  let abortReason: string | null = null;
+
+  if (abortHostedSupervisedTurn(
+    dependencies.hostedTurnSupervisor,
+    provider,
+    sessionId,
+    userId,
+  )) {
+    success = true;
+  } else if (abortCliSupervisedTurn(
+    dependencies.cliTurnSupervisor,
+    provider,
+    sessionId,
+    userId,
+  )) {
+    success = true;
+  } else if (provider === 'cursor') {
+    success = dependencies.abortCursorSession(sessionId);
+  } else if (provider === 'codex') {
+    success = dependencies.abortCodexSession(sessionId);
+  } else if (provider === 'antigravity') {
+    success = dependencies.abortAntigravitySession(sessionId);
+  } else if (provider === 'opencode') {
+    success = dependencies.abortOpenCodeSession(sessionId);
+  } else if (provider === 'hermes') {
+    success = dependencies.abortHermesSession(sessionId);
+  } else if (provider === 'kimi') {
+    success = dependencies.abortKimiSession(sessionId);
+  } else if (provider === 'deepseek') {
+    success = dependencies.abortDeepSeekSession(sessionId);
+  } else if (provider === 'glm') {
+    success = dependencies.abortGlmSession(sessionId);
+  } else if (provider === 'qwen') {
+    success = dependencies.abortQwenSession?.(sessionId) ?? false;
+  } else if (provider === 'claude') {
+    // Claude: pass the raw socket so the SDK can fall back to this
+    // connection's newest active run when `sessionId` is EMPTY (the
+    // brand-new-session abort race). B-ABORT-CROSSKILL: a named-but-stale
+    // id no longer falls back — one socket carries every session the tab
+    // opened, so that killed a bystander run. Result is structured.
+    const result = await dependencies.abortClaudeSDKSession(sessionId, rawWs ?? undefined);
+    if (typeof result === 'boolean') {
+      success = result;
+    } else {
+      success = result.aborted;
+      abortReason = result.reason;
+      if (result.sessionId) {
+        resolvedSessionId = result.sessionId;
+      }
+    }
+  } else {
+    abortReason = 'provider runtime unavailable';
+  }
+  return { provider, success, resolvedSessionId, abortReason };
+}
+
+/**
  * Handles authenticated chat websocket messages used by the main chat panel.
  */
 export function handleChatConnection(
@@ -2258,6 +2525,13 @@ export function handleChatConnection(
   sendOpenSessionsCount(ws as RealtimeClientConnection);
 
   const writer: WebSocketWriter = new websocketWriterService.WebSocketWriter(ws, presenceUserId);
+  (ws as RealtimeClientConnection & { abortIdentityRevokedRuns?: () => void })
+    .abortIdentityRevokedRuns = () => abortRunsForRevokedWriter(writer, ws, dependencies);
+  (ws as RealtimeClientConnection & {
+    abortProjectMembershipRuns?: (sessionIds: Iterable<string>) => number;
+  }).abortProjectMembershipRuns = (sessionIds) => (
+    abortProjectRunsForRevokedWriter(writer, ws, dependencies, sessionIds)
+  );
 
   /**
    * Raw, UNICAST send to THIS socket: bypasses WebSocketWriter entirely, so a
@@ -2292,6 +2566,10 @@ export function handleChatConnection(
   };
 
   ws.on('message', async (rawMessage) => {
+    if (!assertRealtimePrincipalCurrent(request.user)) {
+      ws.close(4401, 'identity_revoked');
+      return;
+    }
     return withLocalUpdateWriterLease('websocket-message', async () => {
     let failedCommandIdentity: Record<string, string> | null = null;
     let providerDispatchEntered = false;
@@ -2365,6 +2643,14 @@ export function handleChatConnection(
         let lease: { release(): void } | null = null;
         try {
           lease = await dependencies.acquireWriterLease?.('provider-turn') ?? null;
+          if (!isSpawnProjectVisible(data, presenceUserId)) {
+            writer.send(createNormalizedMessage({
+              kind: 'complete', provider: COMMAND_TYPE_TO_PROVIDER[messageType],
+              exitCode: 1, success: false, error: 'Project not found',
+              notStarted: true, ...clientMsgIdEcho(data),
+            }));
+            return;
+          }
           providerDispatchEntered = true;
           await dispatchProviderCommand(
             messageType,
@@ -2395,6 +2681,13 @@ export function handleChatConnection(
         let lease: { release(): void } | null = null;
         try {
           lease = await dependencies.acquireWriterLease?.('provider-turn') ?? null;
+          if (!isSpawnProjectVisible(data, presenceUserId)) {
+            writer.send(createNormalizedMessage({
+              kind: 'complete', provider: 'cursor', exitCode: 1, success: false,
+              error: 'Project not found', notStarted: true, ...clientMsgIdEcho(data),
+            }));
+            return;
+          }
           providerDispatchEntered = true;
           await dispatchProviderCommand(
             'cursor-resume',
@@ -2465,70 +2758,13 @@ export function handleChatConnection(
         // client-declared one (which may be the current global picker selection).
         // Empty/unknown id falls back to the client provider, preserving Claude's
         // empty-sessionId abort-race fallback below.
-        const provider = resolveSessionControlProvider(
+        const { provider, success, resolvedSessionId, abortReason } = await abortSessionTurn(
+          dependencies,
           sessionId,
           readProvider(data.provider),
-          dependencies.getSessionProvider
+          toNumericUserId(presenceUserId),
+          ws,
         );
-        let success = false;
-        // The session the abort actually resolved to (claude may fall back to the
-        // newest active run on this connection when the id is missing entirely).
-        let resolvedSessionId: string | null = sessionId || null;
-        let abortReason: string | null = null;
-
-        if (abortHostedSupervisedTurn(
-          dependencies.hostedTurnSupervisor,
-          provider,
-          sessionId,
-          toNumericUserId(presenceUserId),
-        )) {
-          success = true;
-        } else if (abortCliSupervisedTurn(
-          dependencies.cliTurnSupervisor,
-          provider,
-          sessionId,
-          toNumericUserId(presenceUserId),
-        )) {
-          success = true;
-        } else if (provider === 'cursor') {
-          success = dependencies.abortCursorSession(sessionId);
-        } else if (provider === 'codex') {
-          success = dependencies.abortCodexSession(sessionId);
-        } else if (provider === 'gemini') {
-          success = dependencies.abortGeminiSession(sessionId);
-        } else if (provider === 'antigravity') {
-          success = dependencies.abortAntigravitySession(sessionId);
-        } else if (provider === 'opencode') {
-          success = dependencies.abortOpenCodeSession(sessionId);
-        } else if (provider === 'hermes') {
-          success = dependencies.abortHermesSession(sessionId);
-        } else if (provider === 'kimi') {
-          success = dependencies.abortKimiSession(sessionId);
-        } else if (provider === 'deepseek') {
-          success = dependencies.abortDeepSeekSession(sessionId);
-        } else if (provider === 'glm') {
-          success = dependencies.abortGlmSession(sessionId);
-        } else if (provider === 'qwen') {
-          success = dependencies.abortQwenSession?.(sessionId) ?? false;
-        } else if (provider === 'claude') {
-          // Claude: pass the raw socket so the SDK can fall back to this
-          // connection's newest active run when `sessionId` is EMPTY (the
-          // brand-new-session abort race). B-ABORT-CROSSKILL: a named-but-stale
-          // id no longer falls back — one socket carries every session the tab
-          // opened, so that killed a bystander run. Result is structured.
-          const result = await dependencies.abortClaudeSDKSession(sessionId, ws);
-          if (typeof result === 'boolean') {
-            success = result;
-          } else {
-            success = result.aborted;
-            abortReason = result.reason;
-            if (result.sessionId) {
-              resolvedSessionId = result.sessionId;
-            }
-          }
-        } else {
-          abortReason = 'provider runtime unavailable';
-        }
 
         const abortPayload = {
             kind: 'complete',
@@ -3204,8 +3440,6 @@ export function handleChatConnection(
           isActive = dependencies.isCursorSessionActive(sessionId);
         } else if (provider === 'codex') {
           isActive = dependencies.isCodexSessionActive(sessionId);
-        } else if (provider === 'gemini') {
-          isActive = dependencies.isGeminiSessionActive(sessionId);
         } else if (provider === 'antigravity') {
           isActive = dependencies.isAntigravitySessionActive(sessionId);
           // B-N-ATTACH: read-only differential replay. A reconnecting socket gets
@@ -3358,7 +3592,6 @@ export function handleChatConnection(
             claude: visibleIds(dependencies.getActiveClaudeSDKSessions()),
             cursor: visibleIds(dependencies.getActiveCursorSessions()),
             codex: visibleIds(dependencies.getActiveCodexSessions()),
-            gemini: visibleIds(dependencies.getActiveGeminiSessions()),
             antigravity: visibleIds(dependencies.getActiveAntigravitySessions()),
             opencode: visibleIds(dependencies.getActiveOpenCodeSessions()),
             hermes: visibleIds(dependencies.getActiveHermesSessions()),
@@ -3429,10 +3662,16 @@ export function handleChatConnection(
       + `activeClaudeSessions=${JSON.stringify(wsDiagActiveClaude)} `
       + `hadActiveStreamAtClose=${Array.isArray(wsDiagActiveClaude) && wsDiagActiveClaude.length > 0}`
     );
-    // ADR-101: Qwen Coding Plan is foreground-interactive only. Losing the
-    // socket that supplied the human gesture ends model/tool execution; cleanup
-    // may continue during the adapter's bounded SIGINT→SIGKILL grace period.
-    if (writerSessionId && dependencies.isQwenSessionActive?.(writerSessionId)) {
+    // Identity revocation is an authorization event, unlike an ordinary tab or
+    // network close. Cancel every run still owned by this exact writer/socket;
+    // viewer sockets own no registry entry and therefore cannot cancel a run.
+    const identityRevoked = isIdentityRevocationClose(code, reason);
+    if (identityRevoked) {
+      abortRunsForRevokedWriter(writer, ws, dependencies);
+    }
+    // Preserve the foreground-only Qwen policy: any transport loss ends Qwen.
+    // Other providers are cancelled only by identity revocation.
+    if (!identityRevoked && writerSessionId && dependencies.isQwenSessionActive?.(writerSessionId)) {
       dependencies.abortQwenSession?.(writerSessionId);
     }
     // T-881 (A-1): the requester is gone, so any in-flight /btw fork bound to this

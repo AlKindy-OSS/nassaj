@@ -117,6 +117,18 @@ after(() => {
 // previously stored value — the equivalent of mocking isProviderIsolated.
 // A non-process baseEnv is passed so assertions never mutate the real env.
 // ===========================================================================
+/**
+ * 0d7a0bb93 (T-1749/ADR-159 D2) adds the built-in updater kill switch to EVERY
+ * claude/opencode launch, including anonymous and shared ones. It is not a
+ * credential or isolation knob, so "unchanged" below means unchanged apart
+ * from that one flag.
+ */
+function withUpdaterKillSwitch(provider: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (provider === 'claude') return { ...env, DISABLE_AUTOUPDATER: '1' };
+  if (provider === 'opencode') return { ...env, OPENCODE_DISABLE_AUTOUPDATE: '1' };
+  return env;
+}
+
 describe('resolveProviderEnv isolation logic', () => {
   /** Force a specific policy for the providers a case cares about. */
   function setPolicy(patch: Record<string, 'shared' | 'isolated'>) {
@@ -138,7 +150,7 @@ describe('resolveProviderEnv isolation logic', () => {
 
     for (const provider of ['claude', 'gemini', 'codex', 'agy', 'cursor'] as const) {
       const env = resolveProviderEnv(null, provider, { ...base });
-      assert.deepEqual(env, base, `${provider}: anonymous env must be unchanged`);
+      assert.deepEqual(env, withUpdaterKillSwitch(provider, base), `${provider}: anonymous env must be unchanged`);
       assert.equal(env.CLAUDE_CONFIG_DIR, undefined);
       assert.equal(env.GEMINI_CLI_HOME, undefined);
       assert.equal(env.CODEX_HOME, undefined);
@@ -150,10 +162,10 @@ describe('resolveProviderEnv isolation logic', () => {
   it('also treats empty-string and undefined userId as anonymous (no isolation)', () => {
     setPolicy({ claude: 'isolated' });
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
-    assert.deepEqual(resolveProviderEnv('', 'claude', { ...base }), base);
+    assert.deepEqual(resolveProviderEnv('', 'claude', { ...base }), withUpdaterKillSwitch('claude', base));
     assert.deepEqual(
       resolveProviderEnv(undefined as unknown as null, 'claude', { ...base }),
-      base
+      withUpdaterKillSwitch('claude', base)
     );
   });
 
@@ -178,7 +190,7 @@ describe('resolveProviderEnv isolation logic', () => {
     const base = { PATH: '/usr/bin', CLAUDE_CONFIG_DIR: '/operator/.claude' };
     const env = resolveProviderEnv(42, 'claude', { ...base });
 
-    assert.deepEqual(env, base, 'shared claude must not apply a per-user override');
+    assert.deepEqual(env, withUpdaterKillSwitch('claude', base), 'shared claude must not apply a per-user override');
     assert.equal(env.CLAUDE_CONFIG_DIR, '/operator/.claude');
   });
 

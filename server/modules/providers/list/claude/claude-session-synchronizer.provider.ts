@@ -12,6 +12,8 @@ import {
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
+import type { AgentReviewIngestor } from '../../services/agent-review-ingestor.js';
+
 import { claudeHomeForSessionFile, resolveClaudeHomes } from './claude-home.js';
 
 type ParsedSession = {
@@ -25,6 +27,9 @@ type ParsedSession = {
  */
 export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'claude' as const;
+
+  /** Review ingestion stays dormant until the admitted-schema composition explicitly injects it. */
+  constructor(private readonly reviewIngestor?: AgentReviewIngestor) {}
 
   /**
    * Scans the operator Claude home and each isolated user's config home, then
@@ -68,9 +73,16 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
         parsed.sessionId, this.provider, parsed.projectPath, parsed.sessionName,
         timestamps.createdAt, timestamps.updatedAt, filePath
       );
+      await this.reviewIngestor?.ingestFile(filePath);
       processed += 1;
     }
 
+    // Parent rows must exist before journal ingestion, regardless of filesystem enumeration order.
+    if (this.reviewIngestor) {
+      for (const filePath of files) {
+        if (filePath.includes('/subagents/')) await this.reviewIngestor.ingestFile(filePath);
+      }
+    }
     return processed;
   }
 
@@ -82,7 +94,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
     if (filePath.includes('/subagents/')) {
-      return null;
+      return this.reviewIngestor ? this.reviewIngestor.ingestFile(filePath) : null;
     }
 
     const claudeHome = claudeHomeForSessionFile(filePath);
@@ -93,7 +105,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     }
 
     const timestamps = await readFileTimestamps(filePath);
-    return sessionsDb.createSession(
+    const sessionId = sessionsDb.createSession(
       parsed.sessionId,
       this.provider,
       parsed.projectPath,
@@ -102,6 +114,8 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       timestamps.updatedAt,
       filePath
     );
+    await this.reviewIngestor?.ingestFile(filePath);
+    return sessionId;
   }
 
   /**

@@ -6,7 +6,7 @@ const MAIN_TABS = new Set<SettingsMainTab>([
 ]);
 
 const AGENTS = new Set<AgentProvider>([
-  'claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode', 'qwen',
+  'claude', 'cursor', 'codex', 'antigravity', 'opencode', 'qwen',
   'kimi', 'deepseek', 'glm', 'hermes', 'sakana',
 ]);
 

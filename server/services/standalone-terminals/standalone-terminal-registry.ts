@@ -45,6 +45,11 @@ import type { WebSocket } from 'ws';
 // barrel with only the subset they exercise; a namespace binding tolerates a
 // member a mock omits (same rationale as chat-websocket.service.ts).
 import * as databaseModule from '@/modules/database/index.js';
+import {
+  canAccessProjectPath,
+  isProjectMembershipEnforced,
+  resolveWorkspaceProjectAdmission,
+} from '@/modules/database/repositories/project-access.js';
 import { prioritizeUserNpmGlobalBin } from '@/modules/websocket/services/shell-websocket.service.js';
 import { resolveCagedLaunch } from '@/services/isolation/provider-cage-wiring.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
@@ -325,11 +330,6 @@ function trimExitedForUser(userId: number): void {
  * same INVALID_CWD failure as a nonexistent path (indistinguishable).
  */
 function isCwdVisibleToUser(cwd: string, userId: string | number): boolean {
-  const projectRow = databaseModule.projectsDb.getProjectPath(cwd);
-  if (!projectRow) {
-    return true;
-  }
-
   const numericUserId =
     typeof userId === 'number'
       ? userId
@@ -337,10 +337,16 @@ function isCwdVisibleToUser(cwd: string, userId: string | number): boolean {
         ? Number.parseInt(userId, 10)
         : null;
 
-  return databaseModule.projectsDb.isProjectVisibleToUser(
-    projectRow.project_id,
-    Number.isInteger(numericUserId) ? (numericUserId as number) : null
-  );
+  const resolvedUserId = Number.isInteger(numericUserId) ? (numericUserId as number) : null;
+  // ADR-172 (qa #4): sub-directories/symlinks of a project are gated by it.
+  if (isProjectMembershipEnforced()) {
+    return canAccessProjectPath(cwd, resolvedUserId);
+  }
+  const projectRow = databaseModule.projectsDb.getProjectPath(cwd);
+  if (!projectRow) {
+    return true;
+  }
+  return databaseModule.projectsDb.isProjectVisibleToUser(projectRow.project_id, resolvedUserId);
 }
 
 /** Clamps a resize dimension to a sane integer range, with a fallback. */
@@ -402,6 +408,11 @@ export function createStandaloneTerminal(
   }
   if (!isCwdVisibleToUser(cwd, userId)) {
     return INVALID_CWD;
+  }
+  if (isProjectMembershipEnforced()) {
+    const admission = resolveWorkspaceProjectAdmission(cwd, userId);
+    if (!admission.allowed || !admission.resolvedPath) return INVALID_CWD;
+    cwd = admission.resolvedPath;
   }
 
   // initialCommand — empty/whitespace-only collapses to null (plain shell).
@@ -499,6 +510,16 @@ export function createStandaloneTerminal(
     managedClaudeSelector: broker?.selector,
   };
 
+  // Final membership/path attestation immediately before the process effect.
+  // A membership removal or symlink replacement during env preparation must
+  // not inherit an earlier allow decision.
+  if (isProjectMembershipEnforced()) {
+    const finalAdmission = resolveWorkspaceProjectAdmission(cwd, userId);
+    if (!finalAdmission.allowed || finalAdmission.resolvedPath !== cwd) {
+      revokeManagedClaudeTerminal(broker?.selector);
+      return INVALID_CWD;
+    }
+  }
   const child = pty.spawn(ptyLaunch.cmd, ptyLaunch.args, {
     name: 'xterm-256color',
     cols: 80,

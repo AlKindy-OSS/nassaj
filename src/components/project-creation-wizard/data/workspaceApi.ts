@@ -166,15 +166,18 @@ export const cloneWorkspaceWithProgress = (
     const query = buildCloneProgressQuery(params);
     const eventSource = new EventSource(`/api/projects/clone-progress?${query}`);
     let settled = false;
+    const identityChanging = () => settle(() => reject(new DOMException('Identity changed', 'AbortError')));
 
     const settle = (callback: () => void) => {
       if (settled) {
         return;
       }
       settled = true;
+      window.removeEventListener('auth:identity-changing', identityChanging);
       eventSource.close();
       callback();
     };
+    window.addEventListener('auth:identity-changing', identityChanging);
 
     eventSource.onmessage = (event) => {
       try {

@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Copy, Link2, ShieldCheck } from 'lucide-react';
 
 import { useAuth } from '../auth/context/AuthContext';
+import { identityRequestSignal } from '../auth/accountIdentityBarrier';
+import { authenticatedFetch } from '../../utils/api';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger, useDialog } from '../../shared/view/ui/Dialog';
 
 import { useSharingCopy } from './copy';
@@ -11,6 +13,10 @@ type Share = { id: string; relativePath: string; audience: 'members' | 'client';
 type CopyText = ReturnType<typeof useSharingCopy>;
 const control = 'min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring';
 const action = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50';
+const authHeaders = (token: string | null, json = false): HeadersInit => ({
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  ...(json ? { 'Content-Type': 'application/json' } : {}),
+});
 
 /** The server remains authoritative; this only avoids offering unsupported file formats. */
 function shareableFileName(filePath: string) {
@@ -60,7 +66,7 @@ export default function DocumentShareButton({ projectId, filePath, showLabel = f
   const copy = useSharingCopy();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  const canManage = Boolean(token && user && ['owner', 'admin'].includes(user.role ?? ''));
+  const canManage = Boolean(user && ['owner', 'admin'].includes(user.role ?? ''));
   if (!projectId || !canManage || !shareableFileName(filePath)) return null;
   return <Dialog open={open} onOpenChange={(value) => {
     setOpen(value);
@@ -70,13 +76,13 @@ export default function DocumentShareButton({ projectId, filePath, showLabel = f
       <Link2 className="h-4 w-4" aria-hidden="true" />
       {showLabel && <span className="px-2 text-sm">{copy.share}</span>}
     </DialogTrigger>
-    {open && <ShareManager key={`${projectId}:${filePath}:${user?.id}:${token}`} projectId={projectId} filePath={filePath} token={token!} copy={copy} />}
+    {open && <ShareManager key={`${projectId}:${filePath}:${user?.id}:${token}`} projectId={projectId} filePath={filePath} token={token} copy={copy} />}
   </Dialog>;
 }
 
 type ShareListState = ReturnType<typeof useShareList>;
 
-function useShareList(base: string, token: string, filePath: string, failure: string) {
+function useShareList(base: string, token: string | null, filePath: string, failure: string) {
   const [shares, setShares] = useState<Share[]>([]);
   const [relativePath, setRelativePath] = useState('');
   const [ready, setReady] = useState(false);
@@ -85,7 +91,7 @@ function useShareList(base: string, token: string, filePath: string, failure: st
   useEffect(() => {
     const controller = new AbortController();
     setReady(false); setError('');
-    void fetch(base, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: 'no-store', referrerPolicy: 'no-referrer' })
+    void fetch(base, { headers: authHeaders(token), credentials: 'same-origin', signal: identityRequestSignal(controller.signal), cache: 'no-store', referrerPolicy: 'no-referrer' })
       .then(async (response) => {
         if (!response.ok) throw new Error('failed');
         const payload = await response.json();
@@ -100,7 +106,7 @@ function useShareList(base: string, token: string, filePath: string, failure: st
   return { shares, relativePath, ready, error, setError, setRevision };
 }
 
-function useShareMutations(base: string, token: string, copy: CopyText, list: ShareListState) {
+function useShareMutations(base: string, token: string | null, copy: CopyText, list: ShareListState) {
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -117,8 +123,8 @@ function useShareMutations(base: string, token: string, copy: CopyText, list: Sh
     request.current = new AbortController();
     setBusy(true); list.setError('');
     try {
-      const response = await fetch(base + suffix, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined, signal: request.current.signal, cache: 'no-store', referrerPolicy: 'no-referrer', redirect: 'error' });
+      const response = await authenticatedFetch(base + suffix, { method, headers: authHeaders(token, true), credentials: 'same-origin',
+        body: body ? JSON.stringify(body) : undefined, signal: identityRequestSignal(request.current.signal), cache: 'no-store', referrerPolicy: 'no-referrer', redirect: 'error' });
       if (!active.current) return;
       if (!response.ok) { list.setError(response.status === 400 ? copy.invalid : copy.failed); return; }
       if (response.status !== 204) {
@@ -193,7 +199,7 @@ function CreatedShareLink({ link, copy, status }: { link: string; copy: CopyText
   </div>;
 }
 
-function ShareManager({ projectId, filePath, token, copy }: { projectId: string; filePath: string; token: string; copy: CopyText }) {
+function ShareManager({ projectId, filePath, token, copy }: { projectId: string; filePath: string; token: string | null; copy: CopyText }) {
   const { onOpenChange } = useDialog();
   const [audience, setAudience] = useState<'members' | 'client'>('members');
   const [expiresAt, setExpiresAt] = useState('');

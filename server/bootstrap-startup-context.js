@@ -18,6 +18,9 @@ const HEX = /^[a-f0-9]{64}$/;
 let verifiedContext = null;
 let admissionAttempted = false;
 let claimedState = null;
+let predecessorAbsenceProved = false;
+let startupRecoveryClaimMinted = false;
+const startupRecoveryClaims = new WeakMap();
 let selectedManifest;
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
@@ -223,6 +226,63 @@ function checkResponse(value, expected, kind) {
 /** @typedef {{database:{realpath:string,device:string,inode:string},databaseTarget:{schemaDigest:string,compatibilityShapeDigest:string,migrationStateDigest:string},startup:{policyId:string,closureSha256:string},releaseIdentitySha256:string,databaseContractSha256:string,transactionId:string,revision:number,phase:string,mode:string,serverBuildId:string,claimId:string,generationEpoch:number,nodeInstanceId:string,generationId:string,process:{uid:number,pid:number,startTicks:string,bootId:string}} StartupContext */
 /** Return only the process-local context issued after the live, verified consume response. @returns {Readonly<StartupContext>|null} */
 export function readVerifiedStartupContext() { return verifiedContext; }
+function currentRecoveryClaimRecord(claim, requireAttempt = false) {
+    const record = claim && typeof claim === 'object' ? startupRecoveryClaims.get(claim) : null;
+    if (!record || record.released || (requireAttempt && !record.attempted)
+        || verifiedContext !== record.context || verifiedContext?.phase !== 'security_startup_authorized'
+        || !predecessorAbsenceProved || record.claimId !== verifiedContext.claimId
+        || record.generationEpoch !== verifiedContext.generationEpoch
+        || record.releaseIdentitySha256 !== verifiedContext.releaseIdentitySha256
+        || record.databaseContractSha256 !== verifiedContext.databaseContractSha256
+        || record.startupPolicyId !== verifiedContext.startup.policyId
+        || record.startupClosureSha256 !== verifiedContext.startup.closureSha256
+        || record.databaseRealpath !== verifiedContext.database.realpath
+        || record.databaseDevice !== verifiedContext.database.device
+        || record.databaseInode !== verifiedContext.database.inode
+        || canonical(processBinding()) !== canonical(record.process)) return null;
+    return record;
+}
+/** Mint the one boot-local E5 claim after governed security admission and before serving. */
+export function mintEngineRestampStartupRecoveryClaim() {
+    if (startupRecoveryClaimMinted || !predecessorAbsenceProved
+        || verifiedContext?.phase !== 'security_startup_authorized') throw Error('engine_restamp_recovery_claim_unavailable');
+    const currentProcess = processBinding();
+    if (canonical(currentProcess) !== canonical(verifiedContext.process)) throw Error('engine_restamp_recovery_claim_stale');
+    const claim = Object.freeze(Object.create(null));
+    startupRecoveryClaims.set(claim, { context: verifiedContext, claimId: verifiedContext.claimId,
+        generationEpoch: verifiedContext.generationEpoch, releaseIdentitySha256: verifiedContext.releaseIdentitySha256,
+        databaseContractSha256: verifiedContext.databaseContractSha256,
+        startupPolicyId: verifiedContext.startup.policyId,
+        startupClosureSha256: verifiedContext.startup.closureSha256,
+        databaseRealpath: verifiedContext.database.realpath,
+        databaseDevice: verifiedContext.database.device, databaseInode: verifiedContext.database.inode,
+        process: Object.freeze({ ...currentProcess }), attempted: false, released: false });
+    startupRecoveryClaimMinted = true;
+    return claim;
+}
+/** Start the sole recovery attempt; a failed attempt cannot be replayed in this process generation. */
+export function beginEngineRestampStartupRecoveryAttempt(claim) {
+    const record = currentRecoveryClaimRecord(claim);
+    if (!record || record.attempted) throw Error('engine_restamp_recovery_attempt_unavailable');
+    record.attempted = true;
+}
+/** Exact live-attempt predicate consumed by the recovery reservation registry. */
+export function isEngineRestampStartupRecoveryAttemptCurrent(claim) {
+    return currentRecoveryClaimRecord(claim, true) !== null;
+}
+/** Reject recovery of an intent created by this admitted process itself. */
+export function isEngineRestampStartupRecoveryPredecessorIntent(claim, ownerProcess) {
+    const record = currentRecoveryClaimRecord(claim, true);
+    if (!record || !ownerProcess || typeof ownerProcess !== 'object') return false;
+    return canonical(ownerProcess) !== canonical(record.process);
+}
+/** Permanently revoke the claim after attempt completion or mandatory cleanup. */
+export function releaseEngineRestampStartupRecoveryClaim(claim) {
+    const record = claim && typeof claim === 'object' ? startupRecoveryClaims.get(claim) : null;
+    if (!record || record.released) return false;
+    record.released = true;
+    return true;
+}
 /** Require the mandatory forward admission; ordinary v1 retains its existing bootstrap. @returns {Readonly<StartupContext>|null} */
 export function requireStartupAdmission() {
     if (!ROOT_ADMISSION_REQUIRED && !targetManifest()) return null;
@@ -311,6 +371,7 @@ export async function establishStartupAdmission() {
         releaseIdentitySha256: claim.releaseIdentitySha256, databaseContractSha256: claim.databaseContractSha256,
         transactionId: claim.authorityId, revision: claim.revision, phase: 'claimed', mode: claim.mode, serverBuildId: target.manifest.build?.serverBuildId ?? target.manifest.serverBuildId, claimId: claim.claimId,
         generationEpoch: claim.generationEpoch, nodeInstanceId: claim.nodeInstanceId, generationId: claim.generationId, process: Object.freeze({ ...caller }) });
+    predecessorAbsenceProved = true;
     return verifiedContext;
 }
 

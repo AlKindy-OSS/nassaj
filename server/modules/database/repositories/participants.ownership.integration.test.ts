@@ -102,6 +102,25 @@ function isListed(sessionId: string): boolean {
   return row !== undefined;
 }
 
+test('strict spawn-owner resolution has no provenance or missing-owner fallback', async () => {
+  await withIsolatedDatabase(() => {
+    const spawnOwner = makeUser();
+    const inferredOwner = makeUser();
+    makeSession('strict-spawn');
+    makeSession('strict-provenance');
+    makeSession('strict-empty');
+    participantsDb.recordSpawn('strict-spawn', spawnOwner, { provider: 'opencode', projectPath: PROJECT_PATH });
+    participantsDb.recordSpawn('strict-provenance', inferredOwner, {
+      provider: 'opencode', projectPath: PROJECT_PATH, attribution: 'provenance',
+    });
+
+    assert.equal(participantsDb.resolveStrictSpawnOwnerUserId('strict-spawn'), spawnOwner);
+    assert.equal(participantsDb.resolveStrictSpawnOwnerUserId('strict-provenance'), null);
+    assert.equal(participantsDb.resolveStrictSpawnOwnerUserId('strict-empty'), null);
+    assert.equal(participantsDb.resolveStrictSpawnOwnerUserId(''), null);
+  });
+});
+
 test('1 — a provenance write landing first does not steal the owner badge (B-477)', async () => {
   await withIsolatedDatabase(() => {
     const platformOwner = makeUser('owner');

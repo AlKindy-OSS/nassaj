@@ -300,4 +300,42 @@ function unregisterSessionProcess(sessionId) {
     if (runs.size === 0) stopPolling();
 }
 
-export { registerSessionProcess, unregisterSessionProcess };
+/** True when any in-process run uses one of the supplied provider ids. */
+function hasActiveRunForProviders(providerIds) {
+    const wanted = new Set(providerIds);
+    for (const run of runs.values()) {
+        if (run && wanted.has(run.provider)) return true;
+    }
+    return false;
+}
+
+/**
+ * Returns opaque registrations owned by one writer transport. The registration
+ * object itself is the run token: unregister + re-register creates a different
+ * object, so a delayed socket-close callback cannot target the replacement.
+ */
+function getProviderRunsOwnedByWriter(writer, rawWs) {
+    const owned = [];
+    for (const [sessionId, run] of runs) {
+        if (run?.writer === writer && writer?.ws === rawWs) {
+            owned.push({ sessionId, provider: run.provider, token: run });
+        }
+    }
+    return owned;
+}
+
+/** Revalidates an opaque run token immediately before an abort side effect. */
+function isProviderRunOwnershipCurrent(ownedRun, writer, rawWs) {
+    if (!ownedRun?.sessionId || !ownedRun.token) return false;
+    return runs.get(ownedRun.sessionId) === ownedRun.token
+        && ownedRun.token.writer === writer
+        && writer?.ws === rawWs;
+}
+
+export {
+    registerSessionProcess,
+    unregisterSessionProcess,
+    hasActiveRunForProviders,
+    getProviderRunsOwnedByWriter,
+    isProviderRunOwnershipCurrent,
+};

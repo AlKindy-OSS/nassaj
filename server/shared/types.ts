@@ -32,6 +32,7 @@ export type AnyRecord = Record<string, any>;
 export type RealtimeClientConnection = {
   readyState: number;
   send(data: string): void;
+  close?(code?: number, reason?: string): void;
   // JWT-authenticated identity stamped on the socket at connect time
   // (chat-websocket.service). Lets broadcasters personalize per-user fields
   // (e.g. `isMember` in projects_updated) without re-authenticating. Never
@@ -49,8 +50,11 @@ export type AuthenticatedWebSocketUser = {
   id?: string | number;
   userId?: string | number;
   username?: string;
-  authenticationKind?: 'session' | 'platform_unverified';
+  authenticationKind?: 'session' | 'device_session' | 'platform_unverified';
   authorizationGeneration?: number;
+  deviceSessionId?: string;
+  slotId?: string;
+  deviceGeneration?: number;
   [key: string]: unknown;
 };
 
@@ -75,6 +79,11 @@ export type AuthenticatedWebSocketRequest = IncomingMessage & {
 export type LLMProvider =
   | 'claude'
   | 'codex'
+  // T-1749/ADR-159 D1: 'gemini' is NOT a dispatchable provider any more. It is
+  // retained here ONLY as agy's on-disk CREDENTIAL UNIT id (~/.gemini —
+  // credential-principal.js maps agy→gemini, grant-home.js links `.gemini`), so
+  // the isolation/grant layer can keep typing that unit. No registry entry, no
+  // spawn path, no session bucket.
   | 'gemini'
   | 'cursor'
   | 'antigravity'
@@ -918,6 +927,53 @@ export type SessionCostModelBreakdown = {
 };
 
 /**
+ * Counts and durations attached to one cost measurement.  `null` means the
+ * source did not attest that dimension; it is deliberately not rendered as 0.
+ */
+export type SessionCostMeasurementCounts = {
+  facts: number | null;
+  requests: number;
+  rollouts: number | null;
+  subagentSpawns: number | null;
+  subagentRollouts: number | null;
+  subagentRequests: number;
+};
+
+export type SessionCostMeasurementDurations = {
+  workMs: number | null;
+  responseTurnsMs: number | null;
+};
+
+/** Reconciliation evidence for the aggregate, model rows, and turn rows. */
+export type SessionCostReconciliation = {
+  totalUsd: 'matched' | 'unavailable' | 'mismatch';
+  perModel: 'matched' | 'unavailable' | 'mismatch';
+  turns: 'matched' | 'unavailable' | 'mismatch';
+  counts: 'matched' | 'unavailable' | 'mismatch';
+  durations: 'matched' | 'unavailable' | 'mismatch';
+  eventSets: 'matched' | 'unavailable' | 'mismatch';
+  tokens: 'matched' | 'unavailable' | 'mismatch';
+};
+
+/**
+ * Versioned measurement envelope.  Version 2 makes the source's count,
+ * duration, and reconciliation semantics explicit without relabelling v1 data.
+ */
+export type SessionCostMeasurement = {
+  version: 2;
+  /** Complete only when every required reconciliation dimension is attested. */
+  status: 'complete' | 'incomplete' | 'quarantined';
+  source: 'legacy' | 'v3';
+  window: { since: string | null; until: string | null };
+  attribution: { scopeFingerprint: string; attributionFingerprint: string } | null;
+  counts: SessionCostMeasurementCounts;
+  durations: SessionCostMeasurementDurations;
+  reconciliation: SessionCostReconciliation;
+  /** Present only for compare-mode diagnostics; it never changes the chosen result. */
+  comparison?: { status: 'matched' | 'mismatch' | 'unavailable'; reason?: string };
+};
+
+/**
  * كلفة **دور ردٍّ واحد** (رسالة المستخدم البشرية → الردّ النهائي)، مجمِّعةً كل
  * طلبات API التي وقعت داخل الدور — بما فيها حلقات الأدوات والوكلاء الفرعيين —
  * لا طلب API واحد. تُستعمل في تذييل كل ردّ في الواجهة (توكنات الردّ + كلفته).
@@ -945,6 +1001,10 @@ export type SessionCostTurn = {
   models: string[];
   tokens: SessionCostTokens;
   costUsd: number | null;
+  /** مدة الدور المقاسة من صف المقياس، أو null حين لا يثبتها المصدر. */
+  responseTurnDurationMs?: number | null;
+  /** عدد طلبات الوكلاء الفرعيين داخل الدور نفسه. */
+  subagentRequests?: number;
 };
 
 /**
@@ -969,7 +1029,8 @@ export type SessionCostSummary = {
   provider: string;
   available: boolean;
   reason?: string;
-  metered: boolean;
+  /** null when authentication probing was unavailable. */
+  metered: boolean | null;
   totalUsd: number;
   /** Transcript snapshot completeness; independent from model pricing coverage. */
   snapshotStatus: 'fresh' | 'stale' | 'refreshing' | 'incomplete' | 'unavailable';
@@ -981,6 +1042,8 @@ export type SessionCostSummary = {
   subagentRequests: number;
   /** مجموع مدد العمل المبلّغ عنها بالميلي ثانية؛ null حين لا يوفّر السجل قياساً. */
   workDurationMs: number | null;
+  /** العقدة المعيارية للقياس؛ لا تستنتج منها حقولاً قديمة أو العكس. */
+  measurement: SessionCostMeasurement;
   pricesAsOf: string;
   perModel: SessionCostModelBreakdown[];
   /**
@@ -1115,7 +1178,8 @@ export type ProviderSubscriptionCost = {
   cycleEnd: string;
   available: boolean;
   reason?: string;
-  metered: boolean;
+  /** null when authentication probing was unavailable. */
+  metered: boolean | null;
   totalUsd: number;
   sessions: number;
   complete: boolean;

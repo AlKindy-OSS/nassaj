@@ -1,10 +1,61 @@
 import { IS_PLATFORM } from "../constants/config";
+import {
+  getIdentityBarrierSnapshot,
+  identityRequestSignal,
+  lockIdentityBarrier,
+  reconcileRevokedIdentity,
+} from "../components/auth/accountIdentityBarrier";
+
 import { decodeJwtExp } from "./jwt.js";
 
 // localStorage key holding the JWT. Kept in sync with AUTH_TOKEN_STORAGE_KEY
 // (src/components/auth/constants.ts) and the direct readers in
 // WebSocketContext.tsx and shell/utils/socket.ts.
 const AUTH_TOKEN_STORAGE_KEY = 'auth-token';
+let cookieSessionKind = 'none';
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export const setCookieSessionKind = (kind) => {
+  cookieSessionKind = ['device', 'limited'].includes(kind) ? kind : 'none';
+};
+
+export const hasAuthenticatedSession = () =>
+  Boolean(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) || cookieSessionKind !== 'none';
+
+const failClosedCookieIdentity = () => {
+  const barrier = getIdentityBarrierSnapshot();
+  if (barrier.phase === 'stable') reconcileRevokedIdentity();
+  else lockIdentityBarrier(barrier.version, 'cookie_identity_rejected');
+};
+
+/** Request the server-bound CSRF material used by cookie-authenticated mutations. */
+export const requestMutationCsrf = async (url, method, signal) => {
+  if (cookieSessionKind === 'none') {
+    return { response: new Response(null, { status: 401 }), token: null };
+  }
+  const target = new URL(url, window.location.origin);
+  if (target.origin !== window.location.origin) throw new Error('mutation_csrf_origin_invalid');
+  const pathname = target.pathname;
+  if (!pathname.startsWith('/api/')) throw new Error('mutation_csrf_path_invalid');
+  const query = new URLSearchParams({ method, path: pathname });
+  const response = await fetch(`/api/auth/mutation-csrf?${query}`, {
+    credentials: 'same-origin', cache: 'no-store', signal,
+  });
+  if (!response.ok) {
+    if (response.status === 401) failClosedCookieIdentity();
+    return { response, token: null };
+  }
+  const payload = await response.json().catch(() => null);
+  if (signal?.aborted) return { response, token: null };
+  const token = payload && typeof payload.csrfToken === 'string' && payload.csrfToken.length <= 4_096
+    ? payload.csrfToken : null;
+  const expiresAt = payload && typeof payload.expiresAt === 'number' ? payload.expiresAt : NaN;
+  if (!token || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    failClosedCookieIdentity();
+    return { response: new Response(null, { status: 403 }), token: null };
+  }
+  return { response, token };
+};
 
 /**
  * Persist a server-rotated JWT and broadcast it to the rest of the app.
@@ -54,6 +105,9 @@ const SESSION_REJECTION_CODES = new Set([
   'AUTHENTICATION_REQUIRED',
   'UNAUTHENTICATED',
   'UNAUTHORIZED',
+  'device_session_invalid',
+  'device_session_required',
+  'identity_revoked',
 ]);
 
 /**
@@ -108,6 +162,7 @@ export const refreshAuthToken = () => {
     try {
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
+        signal: identityRequestSignal(),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -138,15 +193,17 @@ export const refreshAuthToken = () => {
  * caller's `.then((response) => …)` parameter to implicit `any`.
  *
  * @param {string} url
- * @param {(RequestInit & { __isRetry?: boolean }) | undefined} [options]
+ * @param {(RequestInit & { __isRetry?: boolean, __identityBypass?: boolean }) | undefined} [options]
  * @returns {Promise<Response>}
  */
 export const authenticatedFetch = async (url, options = {}) => {
   // `__isRetry` is an internal marker (never forwarded to fetch) flagging the
   // single silent replay that follows a 401-triggered refresh, so a replay that
   // still 401s cannot loop.
-  const { __isRetry, ...fetchOptions } = options;
+  const { __isRetry, __identityBypass, ...fetchOptions } = options;
   const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  const method = String(fetchOptions.method ?? 'GET').toUpperCase();
+  const requestSignal = __identityBypass ? fetchOptions.signal : identityRequestSignal(fetchOptions.signal);
 
   const defaultHeaders = {};
 
@@ -159,8 +216,16 @@ export const authenticatedFetch = async (url, options = {}) => {
     defaultHeaders['Authorization'] = `Bearer ${token}`;
   }
 
+  if (!token && cookieSessionKind !== 'none' && UNSAFE_METHODS.has(method)) {
+    const csrf = await requestMutationCsrf(url, method, requestSignal);
+    if (!csrf.token) return csrf.response;
+    defaultHeaders['X-CSRF-Token'] = csrf.token;
+  }
+
   const response = await fetch(url, {
     ...fetchOptions,
+    credentials: fetchOptions.credentials ?? 'same-origin',
+    signal: requestSignal,
     headers: {
       ...defaultHeaders,
       ...fetchOptions.headers,
@@ -171,6 +236,15 @@ export const authenticatedFetch = async (url, options = {}) => {
   // sent — a 401 with no token is the expected response for an unauthenticated
   // visitor (e.g. the login screen eagerly probing /api/branding),
   // and evicting there would trigger a redirect loop on every mount.
+  if (response.status === 401 && !token && cookieSessionKind !== 'none') {
+    const rejectedSession = await isSessionRejection(response);
+    if (!requestSignal?.aborted && rejectedSession) {
+      // The mutation may already have reached the server. Fence the UI and
+      // reconcile the authoritative wallet; never replay or fall back to Bearer.
+      failClosedCookieIdentity();
+    }
+    return response;
+  }
   if (response.status === 401 && token && await isSessionRejection(response)) {
     // B-131 gap (د) — 401 recovery. On a long-lived tab a 401 is usually a
     // silently-expired token (sleeping device / throttled PWA timers) rather
@@ -178,7 +252,7 @@ export const authenticatedFetch = async (url, options = {}) => {
     // request with the fresh token before giving up. refreshAuthToken uses a
     // raw fetch (never re-enters here) and `__isRetry` blocks a second refresh,
     // so there is no loop.
-    if (!IS_PLATFORM && !__isRetry) {
+    if (!IS_PLATFORM && !__isRetry && ['GET', 'HEAD'].includes(method)) {
       const nextToken = await refreshAuthToken();
       if (nextToken) {
         return authenticatedFetch(url, { ...fetchOptions, __isRetry: true });
@@ -202,9 +276,10 @@ export const authenticatedFetch = async (url, options = {}) => {
 export const api = {
   // Auth endpoints (no token required)
   auth: {
-    status: () => fetch('/api/auth/status'),
+    status: (options = {}) => fetch('/api/auth/status', options),
     login: (username, password) => fetch('/api/auth/login', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
@@ -213,7 +288,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
-    user: () => authenticatedFetch('/api/auth/user'),
+    user: (options = {}) => authenticatedFetch('/api/auth/user', options),
+    userForIdentityReconciliation: () => authenticatedFetch('/api/auth/user', { __identityBypass: true }),
     // Current identity incl. role + status (Phase-MU).
     me: () => authenticatedFetch('/api/auth/me'),
     logout: () => authenticatedFetch('/api/auth/logout', { method: 'POST' }),
@@ -225,9 +301,11 @@ export const api = {
 
     // Self-service profile (Phase-MU F-1 / F-2).
     // Change own password — returns a fresh token so the current device stays signed in.
-    changePassword: (currentPassword, newPassword) =>
+    changePassword: (currentPassword, newPassword, options = {}) =>
       authenticatedFetch('/api/auth/me/password', {
+        ...options,
         method: 'PATCH',
+        credentials: 'same-origin',
         body: JSON.stringify({ currentPassword, newPassword }),
       }),
     // Change own username.
@@ -484,17 +562,23 @@ export const api = {
       body: JSON.stringify({ ids, action }),
     }),
   // Project membership management (manager-only). Optional in this UI wave.
-  getProjectMembers: (projectId) =>
-    authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/members`),
-  addProjectMember: (projectId, userId, role = 'member') =>
+  getProjectMembers: (projectId, options = {}) =>
+    authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/members`, options),
+  searchProjectMemberCandidates: (projectId, query, options = {}) =>
+    authenticatedFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/member-candidates?q=${encodeURIComponent(query)}`,
+      options,
+    ),
+  addProjectMember: (projectId, userId, role = 'member', options = {}) =>
     authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/members`, {
+      ...options,
       method: 'POST',
       body: JSON.stringify({ userId, role }),
     }),
-  removeProjectMember: (projectId, userId) =>
+  removeProjectMember: (projectId, userId, options = {}) =>
     authenticatedFetch(
       `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
-      { method: 'DELETE' },
+      { ...options, method: 'DELETE' },
     ),
   // Session deletion now mirrors project deletion:
   // - default: archive only (`isArchived = 1`)

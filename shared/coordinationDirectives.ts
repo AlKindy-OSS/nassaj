@@ -103,7 +103,7 @@ export function withCoordinationDirective(command: string | null | undefined, va
  *   والحدّ الميكانيكي `agents.max_depth` موجود لكنه **مثبَّت على 1 دائماً** بوصفه
  *   ضابطاً أمنياً (‏Gate 2 / T-886)، فلا يتحرّك مع المستوى ⇒ لا يُعدّ إنفاذاً
  *   للمستوى. رفعه عند `delegate_review` قرارٌ أمني ينتظر إذن المالك.
- * • antigravity/opencode/cursor/gemini/qwen/hermes/kimi — `textual`: لكلٍّ منها
+ * • antigravity/opencode/cursor/qwen/hermes/kimi — `textual`: لكلٍّ منها
  *   مُدخَل مطالبة واحد (‏`-p`/`--prompt`/وسيط موضعي) يُحقن فيه التوجيه؛ ولا
  *   مفتاحَ عمقٍ موثَّقاً لأيٍّ منها.
  * • deepseek/glm — `textual`: مسار HTTP، والتوجيه يُرسل في حقل `system` من صيغة
@@ -116,7 +116,6 @@ export const COORDINATION_ENFORCEMENT: Readonly<Record<string, CoordinationEnfor
     codex: 'textual',
     opencode: 'textual',
     qwen: 'textual',
-    gemini: 'textual',
     antigravity: 'textual',
     cursor: 'textual',
     hermes: 'textual',

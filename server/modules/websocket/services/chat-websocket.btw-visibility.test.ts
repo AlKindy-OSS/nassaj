@@ -21,6 +21,8 @@
 import assert from 'node:assert/strict';
 import { test, describe, mock, beforeEach } from 'node:test';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 const PRIVATE_PATH = '/workspace/private-project';
 const PUBLIC_PATH = '/workspace/public-project';
 const PRIVATE_PROJECT_ID = 'proj-private';
@@ -43,6 +45,7 @@ const SESSION_PROVIDER: Record<string, string> = {
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     sessionsDb: {
       getSessionById: (sessionId: string) =>
         SESSION_PROJECT[sessionId]
@@ -405,13 +408,14 @@ describe('T-881 /btw WS gate', () => {
     assert.equal(codexSideQueryCalls[0].params.cwd, PUBLIC_PATH);
   });
 
-  test('unknown session → session_not_found, no fork', () => {
+  // 5ec5556c5: the visibility gate fails closed on an unknown id before the provider lookup.
+  test('unknown session → not_visible (fail-closed), no fork', () => {
     const { ws, sideQueryCalls } = connect(OUTSIDER_USER_ID);
     emitBtw(ws, { btwId: 'btw-3', sessionId: 'sess-does-not-exist', question: 'hi' });
 
     const err = findSent(ws, 'btw-error');
     assert.ok(err);
-    assert.equal(err.code, 'session_not_found');
+    assert.equal(err.code, 'not_visible');
     assert.equal(sideQueryCalls.length, 0, 'no fork for an unknown session');
   });
 
@@ -522,16 +526,16 @@ describe('T-881 /btw WS gate', () => {
     assert.equal(findSent(ws, 'btw-error'), undefined, 'no busy error when serialized');
   });
 
-  test('(A-2.3) a claude session with no resolvable project path → sdk_error, no fork/accept', () => {
-    // getSessionById returns null for an unpersisted id (⇒ null project_path), but
-    // the provider gate is forced to claude, so the fork reaches the project-path
-    // gate. It must refuse rather than let the fork inherit the server cwd.
+  test('(A-2.3) a claude session with no resolvable project path → refused, no fork/accept', () => {
+    // getSessionById returns null for an unpersisted id (⇒ null project_path). Since
+    // 5ec5556c5 the visibility gate fails closed on it before the project-path gate,
+    // so the fork never inherits the server cwd.
     const { ws, sideQueryCalls } = connect(OWNER_USER_ID, { getSessionProvider: () => 'claude' });
     emitBtw(ws, { btwId: 'np', sessionId: 'sess-unpersisted', question: 'hi' });
 
     const err = findSent(ws, 'btw-error');
     assert.ok(err, 'a btw-error is returned');
-    assert.equal(err.code, 'sdk_error', 'a missing project path is refused with sdk_error');
+    assert.equal(err.code, 'not_visible', 'an unpersisted session is refused before any fork');
     assert.equal(err.btwId, 'np');
     assert.equal(sideQueryCalls.length, 0, 'no fork spawned without a project path');
     assert.equal(findSent(ws, 'btw-accepted'), undefined, 'no accept frame when the project-path gate fails');
@@ -715,13 +719,14 @@ describe('T-1090 /btw fork WS gate', () => {
     assert.equal(forkCalls.length, 0);
   });
 
-  test('an unknown session is refused session_not_found', () => {
+  // 5ec5556c5: the write gate fails closed on an unknown id before the provider lookup.
+  test('an unknown session is refused not_writable (fail-closed)', () => {
     const { ws, forkCalls } = connect(OWNER_USER_ID);
     emitFork(ws, { btwId: 'f-unknown', ...FORK_PAYLOAD, sessionId: 'sess-does-not-exist' });
 
     const err = findSent(ws, 'btw-fork-error');
     assert.ok(err);
-    assert.equal(err.code, 'session_not_found');
+    assert.equal(err.code, 'not_writable');
     assert.equal(forkCalls.length, 0);
   });
 

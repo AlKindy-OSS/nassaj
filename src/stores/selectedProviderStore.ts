@@ -173,10 +173,20 @@ export function useSelectedActiveModel(): string | null {
  * `__resetWorkflowStatusStore`.
  */
 export function __resetSelectedProviderStore(): void {
+  resetSelectedProviderIdentityState();
+  listeners.clear();
+}
+
+/** Clears account-derived provider reflections without detaching live consumers. */
+export function resetSelectedProviderIdentityState(): void {
   currentSnapshot = 'claude';
   currentEngineSnapshot = null;
   currentActiveModelSnapshot = null;
-  listeners.clear();
+  emitChange();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:identity-changing', resetSelectedProviderIdentityState);
 }
 
 /**

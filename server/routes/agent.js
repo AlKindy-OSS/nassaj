@@ -7,18 +7,30 @@ import crypto from 'crypto';
 import express from 'express';
 import { Octokit } from '@octokit/rest';
 
-import { apiKeysDb, githubTokensDb, projectsDb } from '../modules/database/index.js';
+import { SSEStreamWriter } from '../modules/account-wallet/index.js';
+import {
+  apiKeysDb,
+  captureWorkspaceTopologyFence,
+  githubTokensDb,
+  isProjectMembershipEnforced,
+  isWorkspaceTopologyFenceCurrent,
+  projectsDb,
+} from '../modules/database/index.js';
+import {
+  createAuthenticatedLaunchActor,
+  isAuthenticatedLaunchActorCurrent,
+} from '../modules/execution-permissions/actor.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive } from '../claude-sdk.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { spawnCursor } from '../cursor-cli.js';
 import { queryCodex } from '../openai-codex.js';
-import { spawnGemini } from '../gemini-cli.js';
 import { spawnOpenCode } from '../opencode-cli.js';
 import { spawnKimiAgent } from '../kimi-agent-cli.js';
 import { providerModelsService } from '../modules/providers/services/provider-models.service.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { requireExternalApiEnabled } from '../services/external-api-config.js';
 import {
+  bindConsumedAgentSsePrincipal,
   consumeAgentSseTicket,
   mintAgentSseTicket,
 } from '../services/agent-sse-ticket.service.js';
@@ -36,6 +48,30 @@ import {
 } from '../modules/websocket/services/chat-websocket.service.js';
 
 const router = express.Router();
+
+class AgentAccessFenceError extends Error {
+  constructor(code, notStarted) {
+    super(code);
+    this.code = code;
+    this.notStarted = notStarted;
+  }
+}
+
+const assertAgentAccessCurrent = (req, workspaceFence, notStarted) => {
+  if (req.assertCurrentIdentity?.() !== true) {
+    throw new AgentAccessFenceError('identity_changed', notStarted);
+  }
+  if (workspaceFence && !isWorkspaceTopologyFenceCurrent(workspaceFence)) {
+    throw new AgentAccessFenceError('project_access_changed', notStarted);
+  }
+};
+
+const sendAgentFenceError = (res, error) => res.status(409).set('Cache-Control', 'no-store').json({
+  error: error.code === 'identity_changed' ? 'Identity changed during request' : 'Project access changed during request',
+  code: error.code,
+  notStarted: error.notStarted,
+  ...(error.notStarted ? {} : { effectState: 'outcome_unknown' }),
+});
 
 /**
  * GL-8 (ADR-062): fleet flag reader gating the GLM OpenCode carrier. The single
@@ -82,6 +118,14 @@ const toCanonicalApiKeyActor = (user) => ({
   authorizationGeneration: user.authorization_generation,
 });
 
+const attachCanonicalAgentPrincipal = (req, user) => {
+  req.user = user?.authenticationKind === 'ck' ? user : toCanonicalApiKeyActor(user);
+  const principal = createAuthenticatedLaunchActor(req.user);
+  req.authenticatedPrincipal = principal;
+  req.assertCurrentIdentity = () => isAuthenticatedLaunchActorCurrent(principal);
+  return principal;
+};
+
 const validateExternalApiHeader = (req, res, next) => {
   if (IS_PLATFORM) return rejectUnverifiedPlatformActor(req, res);
   const apiKey = req.headers['x-api-key'];
@@ -90,7 +134,7 @@ const validateExternalApiHeader = (req, res, next) => {
   }
   const user = apiKeysDb.validateApiKey(apiKey);
   if (!user) return res.status(401).json({ error: 'Invalid or inactive API key' });
-  req.user = toCanonicalApiKeyActor(user);
+  attachCanonicalAgentPrincipal(req, user);
   return next();
 };
 
@@ -132,15 +176,15 @@ const validateExternalApiKey = (req, res, next) => {
       userId: headerUser?.id,
     });
     if (!consumed.ok) return res.status(401).json({ error: 'Invalid or expired SSE ticket' });
-    req.user = headerUser
-      ? toCanonicalApiKeyActor(headerUser)
-      : {
-          id: consumed.userId,
-          role: consumed.role,
-          authenticationKind: 'ck',
-          authenticationCredentialId: consumed.authenticationCredentialId,
-          authorizationGeneration: consumed.authorizationGeneration,
-        };
+    const ticketUser = bindConsumedAgentSsePrincipal(
+      consumed,
+      headerUser ? toCanonicalApiKeyActor(headerUser) : null,
+    );
+    if (!ticketUser) return res.status(401).json({ error: 'Invalid or expired SSE ticket' });
+    attachCanonicalAgentPrincipal(req, ticketUser);
+    if (req.assertCurrentIdentity() !== true) {
+      return res.status(401).json({ error: 'Invalid or inactive API key' });
+    }
     return next();
   }
   return validateExternalApiHeader(req, res, next);
@@ -528,12 +572,59 @@ async function createGitHubPR(octokit, owner, repo, branchName, title, body, bas
  * @param {string} projectPath - Path for cloning the repository
  * @returns {Promise<string>} - Path to the cloned repository
  */
-export async function cloneGitHubRepo(
+const serverCloneReceipts = new WeakSet();
+
+async function retireServerCloneReceipt(receipt) {
+  serverCloneReceipts.delete(receipt);
+  await receipt?.directoryHandle?.close().catch(() => undefined);
+}
+
+function isPathWithinRoot(candidate, root) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+async function createServerCloneReceipt(cloneDir, canonicalParent) {
+  const directoryHandle = await fs.open(cloneDir, 'r');
+  try {
+    const [cloneStat, pinnedStat, canonicalPath] = await Promise.all([
+      fs.lstat(cloneDir), directoryHandle.stat(), fs.realpath(cloneDir),
+    ]);
+    if (!cloneStat.isDirectory() || cloneStat.isSymbolicLink()
+        || cloneStat.dev !== pinnedStat.dev || cloneStat.ino !== pinnedStat.ino) {
+      throw new Error('Repository clone did not create a regular directory');
+    }
+    if (!isPathWithinRoot(canonicalPath, canonicalParent)) {
+      throw new Error('Repository clone escaped its target directory');
+    }
+    const receipt = Object.freeze({
+      projectPath: cloneDir,
+      canonicalPath,
+      canonicalParent,
+      device: cloneStat.dev,
+      inode: cloneStat.ino,
+      directoryHandle,
+    });
+    serverCloneReceipts.add(receipt);
+    return receipt;
+  } catch (error) {
+    await directoryHandle.close();
+    throw error;
+  }
+}
+
+/**
+ * Clones or reuses a repository and reports whether this process created it.
+ * `dependencies.log` receives progress lines (default `console.log`) so callers
+ * that do not own process stdout, such as node:test children, can capture them.
+ */
+export async function cloneGitHubRepoWithReceipt(
   githubUrl,
   githubToken = null,
   projectPath,
   dependencies = { spawnGit: spawn, createAskpass: createGitAskpassLease },
 ) {
+  const log = dependencies.log ?? console.log;
   try {
       // SEC-GIT-URL: allowlist validation (see parseSafeGitHubUrl). Replaces the
       // `.includes('github.com')` substring test that let `ext::sh -c …` through.
@@ -541,33 +632,38 @@ export async function cloneGitHubRepo(
 
       const cloneDir = path.resolve(projectPath);
 
-      // Check if directory already exists
+      // Reuse is never a creation receipt: cleanup may only remove a directory
+      // whose absence and subsequent inode were observed by this process.
+      let targetExists = false;
       try {
-        await fs.access(cloneDir);
-        // Directory exists - check if it's a git repo with the same URL
+        await fs.lstat(cloneDir);
+        targetExists = true;
+      } catch (accessError) {
+        if (accessError?.code !== 'ENOENT') throw accessError;
+      }
+      if (targetExists) {
         try {
           const existingUrl = await getGitRemoteUrl(cloneDir);
           const normalizedExisting = normalizeGitHubUrl(existingUrl);
           const normalizedRequested = normalizeGitHubUrl(canonicalUrl);
 
           if (normalizedExisting === normalizedRequested) {
-            console.log('✅ Repository already exists at path with correct URL');
-            return resolve(cloneDir);
+            log('✅ Repository already exists at path with correct URL');
+            return { projectPath: path.resolve(cloneDir), creationReceipt: null };
           } else {
             throw new Error(`Directory ${cloneDir} already exists with a different repository (${existingUrl}). Expected: ${githubUrl}`);
           }
         } catch (gitError) {
           throw new Error(`Directory ${cloneDir} already exists but is not a valid git repository or git command failed`);
         }
-      } catch (accessError) {
-        // Directory doesn't exist - proceed with clone
       }
 
       // Ensure parent directory exists
       await fs.mkdir(path.dirname(cloneDir), { recursive: true });
+      const canonicalParent = await fs.realpath(path.dirname(cloneDir));
 
-      console.log('🔄 Cloning repository:', canonicalUrl);
-      console.log('📁 Destination:', cloneDir);
+      log('🔄 Cloning repository:', canonicalUrl);
+      log('📁 Destination:', cloneDir);
 
       const askpass = await dependencies.createAskpass(githubToken);
       return await new Promise((resolve, reject) => {
@@ -586,8 +682,13 @@ export async function cloneGitHubRepo(
         gitProcess.on('close', async (code) => {
           await askpass.cleanup();
           if (code === 0) {
-            console.log('✅ Repository cloned successfully');
-            resolve(cloneDir);
+            log('✅ Repository cloned successfully');
+            try {
+              const creationReceipt = await createServerCloneReceipt(cloneDir, canonicalParent);
+              resolve({ projectPath: cloneDir, creationReceipt });
+            } catch (receiptError) {
+              reject(receiptError);
+            }
             return;
           }
           const failure = classifyGitCloneFailure(diagnostic);
@@ -605,6 +706,16 @@ export async function cloneGitHubRepo(
   } catch (error) {
     throw error;
   }
+}
+
+/** Backwards-compatible clone API for callers that do not own cleanup. */
+export async function cloneGitHubRepo(githubUrl, githubToken = null, projectPath, dependencies) {
+  const result = await cloneGitHubRepoWithReceipt(githubUrl, githubToken, projectPath, dependencies);
+  if (result.creationReceipt) {
+    await applyCloneRetentionPolicy(result.creationReceipt, { cleanup: false });
+    dependencies?.onCloneReceiptRetired?.(result.creationReceipt);
+  }
+  return result.projectPath;
 }
 
 /** Executes one authenticated canonical GitHub push without credential argv. */
@@ -650,85 +761,163 @@ export async function pushGitHubBranch(
 }
 
 /**
- * Clean up a temporary project directory and its Claude session
- * @param {string} projectPath - Path to the project directory
- * @param {string} sessionId - Session ID to clean up
+ * Moves the admitted clone into a private same-filesystem quarantine, then
+ * rechecks its pinned inode before recursive removal. A same-UID process that
+ * discovers and swaps the random quarantine path after that final check is
+ * outside this path-based primitive's guarantee.
  */
-async function cleanupProject(projectPath, sessionId = null) {
+export async function cleanupClonedProject(receipt, sessionId = null, dependencies = {}) {
+  if (!receipt || !serverCloneReceipts.has(receipt)) {
+    const error = new Error('Clone cleanup requires a server creation receipt');
+    error.code = 'CLONE_CLEANUP_REFUSED';
+    throw error;
+  }
+  const lstat = dependencies.lstat ?? fs.lstat;
+  const realpath = dependencies.realpath ?? fs.realpath;
+  const removeDirectory = dependencies.removeDirectory ?? fs.rm;
+  const makeQuarantine = dependencies.makeQuarantine ?? fs.mkdtemp;
+  const rename = dependencies.rename ?? fs.rename;
+  const removeQuarantine = dependencies.removeQuarantine ?? fs.rmdir;
+  let quarantineRoot = null;
+  let quarantineTarget = null;
+  let quarantineCommitted = false;
   try {
-    // Only clean up projects in the external-projects directory
-    if (!projectPath.includes('.claude/external-projects')) {
-      console.warn('⚠️ Refusing to clean up non-external project:', projectPath);
-      return;
-    }
-
-    console.log('🧹 Cleaning up project:', projectPath);
-    await fs.rm(projectPath, { recursive: true, force: true });
-    console.log('✅ Project cleaned up');
-
-    // Also clean up the Claude session directory if sessionId provided
+    let sessionPath = null;
     if (sessionId) {
-      try {
-        const sessionPath = path.join(os.homedir(), '.claude', 'sessions', sessionId);
-        console.log('🧹 Cleaning up session directory:', sessionPath);
-        await fs.rm(sessionPath, { recursive: true, force: true });
-        console.log('✅ Session directory cleaned up');
-      } catch (error) {
-        console.error('⚠️ Failed to clean up session directory:', error.message);
+      if (!/^[a-zA-Z0-9._-]{1,120}$/.test(sessionId)) {
+        const error = new Error('Clone session cleanup identifier is invalid');
+        error.code = 'CLONE_CLEANUP_REFUSED';
+        throw error;
+      }
+      const sessionsRoot = path.resolve(os.homedir(), '.claude', 'sessions');
+      sessionPath = path.resolve(sessionsRoot, sessionId);
+      if (!isPathWithinRoot(sessionPath, sessionsRoot)) {
+        const error = new Error('Clone session cleanup escaped its root');
+        error.code = 'CLONE_CLEANUP_REFUSED';
+        throw error;
       }
     }
-  } catch (error) {
-    console.error('❌ Failed to clean up project:', error);
+    const [currentStat, pinnedStat] = await Promise.all([
+      lstat(receipt.projectPath), receipt.directoryHandle.stat(),
+    ]);
+    const currentCanonicalPath = await realpath(receipt.projectPath);
+    if (!currentStat.isDirectory() || currentStat.isSymbolicLink()
+        || currentStat.dev !== receipt.device || currentStat.ino !== receipt.inode
+        || pinnedStat.dev !== receipt.device || pinnedStat.ino !== receipt.inode
+        || currentCanonicalPath !== receipt.canonicalPath
+        || !isPathWithinRoot(currentCanonicalPath, receipt.canonicalParent)) {
+      const error = new Error('Clone target changed before cleanup');
+      error.code = 'CLONE_CLEANUP_REFUSED';
+      throw error;
+    }
+
+    quarantineRoot = await makeQuarantine(path.join(receipt.canonicalParent, '.nassaj-clone-cleanup-'));
+    const quarantineRootCanonical = await realpath(quarantineRoot);
+    if (!isPathWithinRoot(quarantineRootCanonical, receipt.canonicalParent)) {
+      const error = new Error('Clone cleanup quarantine escaped its parent');
+      error.code = 'CLONE_CLEANUP_REFUSED';
+      throw error;
+    }
+    quarantineTarget = path.join(quarantineRoot, 'clone');
+    await dependencies.beforeQuarantine?.({
+      originalPath: receipt.projectPath,
+      quarantinePath: quarantineTarget,
+    });
+    await rename(receipt.projectPath, quarantineTarget);
+    quarantineCommitted = true;
+    const [quarantinedStat, quarantinedCanonical] = await Promise.all([
+      lstat(quarantineTarget), realpath(quarantineTarget),
+    ]);
+    if (!quarantinedStat.isDirectory() || quarantinedStat.isSymbolicLink()
+        || quarantinedStat.dev !== receipt.device || quarantinedStat.ino !== receipt.inode
+        || !isPathWithinRoot(quarantinedCanonical, quarantineRootCanonical)) {
+      const error = new Error('Clone target changed during cleanup admission');
+      error.code = 'CLONE_CLEANUP_REFUSED';
+      error.recoveryPath = quarantineTarget;
+      throw error;
+    }
+    await dependencies.beforeRemove?.({
+      originalPath: receipt.projectPath,
+      quarantinePath: quarantineTarget,
+    });
+    await removeDirectory(quarantineTarget, { recursive: true, force: true });
+    await retireServerCloneReceipt(receipt);
+    await removeQuarantine(quarantineRoot).catch(() => undefined);
+    if (sessionPath) {
+      await removeDirectory(sessionPath, { recursive: true, force: true });
+    }
+  } catch (cause) {
+    await retireServerCloneReceipt(receipt);
+    let survivingRecoveryPath = null;
+    if (quarantineCommitted) {
+      try {
+        await fs.lstat(quarantineTarget);
+        survivingRecoveryPath = quarantineTarget;
+      } catch {
+        survivingRecoveryPath = null;
+      }
+    }
+    if (cause && typeof cause === 'object') {
+      if (survivingRecoveryPath) cause.recoveryPath = survivingRecoveryPath;
+      else delete cause.recoveryPath;
+    }
+    if (quarantineRoot && !quarantineCommitted) {
+      await removeQuarantine(quarantineRoot).catch(() => undefined);
+    }
+    if (cause?.code === 'CLONE_CLEANUP_REFUSED') {
+      throw cause;
+    }
+    const error = new Error('Created repository cleanup failed');
+    error.code = 'CLONE_CLEANUP_FAILED';
+    error.cause = cause;
+    if (cause?.recoveryPath) error.recoveryPath = cause.recoveryPath;
+    throw error;
   }
+}
+
+/** Logs a bounded internal locator only when the retained quarantine still exists. */
+export async function reportScheduledCloneCleanupFailure(error, log = console.error) {
+  const rawCode = typeof error?.code === 'string' ? error.code : '';
+  const code = /^[A-Z0-9_]{1,64}$/.test(rawCode) ? rawCode : 'CLONE_CLEANUP_FAILED';
+  let cleanupLocator;
+  const recoveryPath = typeof error?.recoveryPath === 'string' && error.recoveryPath.length <= 4096
+    ? error.recoveryPath
+    : null;
+  if (recoveryPath && path.basename(recoveryPath) === 'clone') {
+    const candidate = path.basename(path.dirname(recoveryPath));
+    if (/^\.nassaj-clone-cleanup-[a-zA-Z0-9]{6}$/.test(candidate)) {
+      try {
+        const stat = await fs.lstat(recoveryPath);
+        if (stat.isDirectory() && !stat.isSymbolicLink()) cleanupLocator = candidate;
+      } catch {
+        cleanupLocator = undefined;
+      }
+    }
+  }
+  log('[agent] scheduled clone cleanup failed', {
+    code,
+    ...(cleanupLocator ? { cleanupLocator } : {}),
+  });
+}
+
+/** Applies the caller's retention choice only to a server-created clone. */
+export async function applyCloneRetentionPolicy(
+  receipt,
+  { cleanup, sessionId = null },
+  dependencies = {},
+) {
+  if (!receipt) return 'not_created';
+  if (!cleanup) {
+    await retireServerCloneReceipt(receipt);
+    return 'retained';
+  }
+  await cleanupClonedProject(receipt, sessionId, dependencies);
+  return 'removed';
 }
 
 /**
  * SSE Stream Writer - Adapts SDK/CLI output to Server-Sent Events
  */
-class SSEStreamWriter {
-  constructor(res, userId = null) {
-    this.res = res;
-    this.sessionId = null;
-    this.userId = userId;
-    this.isSSEStreamWriter = true;  // Marker for transport detection
-    // SEC-SSE-ABORT: set when the HTTP client vanished mid-run. `writableEnded`
-    // alone does NOT cover this — after a client disconnect the response is not
-    // "ended", so every subsequent provider chunk kept being written into a dead
-    // socket for the whole run.
-    this.clientGone = false;
-  }
-
-  /** Marks the peer as gone; all further writes become no-ops. */
-  markClientGone() {
-    this.clientGone = true;
-  }
-
-  send(data) {
-    if (this.clientGone || this.res.writableEnded) {
-      return;
-    }
-
-    // Format as SSE - providers send raw objects, we stringify
-    this.res.write(`data: ${JSON.stringify(data)}\n\n`);
-  }
-
-  end() {
-    if (!this.clientGone && !this.res.writableEnded) {
-      this.res.write('data: {"type":"done"}\n\n');
-      this.res.end();
-    }
-  }
-
-  setSessionId(sessionId) {
-    this.sessionId = sessionId;
-    this.send({ type: 'session-id', sessionId });
-  }
-
-  getSessionId() {
-    return this.sessionId;
-  }
-}
-
 /**
  * Non-streaming response collector
  */
@@ -1105,6 +1294,9 @@ router.post(
   requireExternalApiEnabled,
   validateExternalApiHeader,
   (req, res) => {
+    if (req.assertCurrentIdentity?.() !== true) {
+      return res.status(401).set('Cache-Control', 'no-store').json({ error: 'Invalid or inactive API key' });
+    }
     const minted = mintAgentSseTicket({
       userId: req.user.id,
       role: req.user.role,
@@ -1132,6 +1324,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
   // If branchName is provided, automatically enable createBranch
   const createBranch = branchName ? true : (req.body.createBranch === true || req.body.createBranch === 'true');
   const createPR = req.body.createPR === true || req.body.createPR === 'true';
+  let workspaceFence = null;
 
   // Validate inputs
   if (!githubUrl && !projectPath) {
@@ -1146,8 +1339,8 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
   // the /api/agent endpoint is inherently an agent run (never chat), so kimi maps
   // to the native governed launcher and glm to the OpenCode carrier (flag-gated,
   // enforced in the dispatch below). Their toolless CHAT path is unaffected.
-  if (!['claude', 'cursor', 'codex', 'gemini', 'opencode', 'kimi', 'glm'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", "gemini", "opencode", "kimi", or "glm"' });
+  if (!['claude', 'cursor', 'codex', 'opencode', 'kimi', 'glm'].includes(provider)) {
+    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", "opencode", "kimi", or "glm"' });
   }
 
   // GL-8 (ADR-062): the GLM agent surface rides ENTIRELY on the OpenCode carrier,
@@ -1167,11 +1360,19 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
   // host directories (e.g. /etc, another user's tree).
   if (projectPath) {
     const workspaceValidation = await validateWorkspacePath(projectPath);
+    assertAgentAccessCurrent(req, null, true);
     if (!workspaceValidation.valid) {
       return res.status(400).json({ error: workspaceValidation.error });
     }
     if (!isProjectPathVisibleToUser(projectPath, req.user?.id ?? null)) {
       return res.status(404).json({ error: 'Project not found' });
+    }
+    if (isProjectMembershipEnforced()) {
+      workspaceFence = captureWorkspaceTopologyFence(projectPath, req.user?.id ?? null, {
+        sessionId: typeof sessionId === 'string' ? sessionId : null,
+        consent: 'control',
+      });
+      if (!workspaceFence) return res.status(404).json({ error: 'Project not found' });
     }
   }
 
@@ -1186,6 +1387,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
   }
 
   let finalProjectPath = null;
+  let cloneCreationReceipt = null;
   let writer = null;
   // SEC-SSE-ABORT state. `requestCompleted` distinguishes the normal end-of-run
   // 'close' (which Node also emits) from a PREMATURE client disconnect.
@@ -1259,7 +1461,19 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         targetPath = path.join(os.homedir(), '.claude', 'external-projects', repoHash);
       }
 
-      finalProjectPath = await cloneGitHubRepo(githubUrl.trim(), tokenToUse, targetPath);
+      if (isProjectMembershipEnforced() && !workspaceFence) {
+        const targetValidation = await validateWorkspacePath(targetPath);
+        assertAgentAccessCurrent(req, null, true);
+        if (!targetValidation.valid) return res.status(400).json({ error: targetValidation.error });
+        workspaceFence = captureWorkspaceTopologyFence(targetPath, req.user?.id ?? null);
+        if (!workspaceFence) return res.status(404).json({ error: 'Project not found' });
+      }
+      assertAgentAccessCurrent(req, workspaceFence, true);
+
+      const cloneResult = await cloneGitHubRepoWithReceipt(githubUrl.trim(), tokenToUse, targetPath);
+      finalProjectPath = cloneResult.projectPath;
+      cloneCreationReceipt = cloneResult.creationReceipt;
+      assertAgentAccessCurrent(req, workspaceFence, false);
 
       // B-36 edge case: a githubUrl-only request generates its own clone path which
       // bypassed the validateWorkspacePath pre-flight above (only projectPath was
@@ -1267,7 +1481,18 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
       // generated clone target also stays inside WORKSPACES_ROOT and is never a
       // system directory.
       const clonePathValidation = await validateWorkspacePath(finalProjectPath);
+      assertAgentAccessCurrent(req, workspaceFence, false);
       if (!clonePathValidation.valid) {
+        if (cloneCreationReceipt) {
+          try {
+            await applyCloneRetentionPolicy(cloneCreationReceipt, { cleanup });
+          } catch (cleanupError) {
+            return res.status(500).json({
+              error: 'Created repository cleanup failed',
+              code: cleanupError?.code ?? 'CLONE_CLEANUP_FAILED',
+            });
+          }
+        }
         return res.status(400).json({ error: clonePathValidation.error });
       }
     } else {
@@ -1277,12 +1502,15 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
       // Verify the path exists
       try {
         await fs.access(finalProjectPath);
+        assertAgentAccessCurrent(req, workspaceFence, false);
       } catch (error) {
+        if (error instanceof AgentAccessFenceError) throw error;
         throw new Error(`Project path does not exist: ${finalProjectPath}`);
       }
     }
 
     finalProjectPath = normalizeProjectPath(finalProjectPath);
+    assertAgentAccessCurrent(req, workspaceFence, !githubUrl);
 
     // Register project path in DB (or reuse existing registration).
     // Attribute the creator so the private-project authorization layer (B-PRIV)
@@ -1306,6 +1534,16 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         notStarted: true,
       });
     }
+    workspaceFence = isProjectMembershipEnforced()
+      ? captureWorkspaceTopologyFence(finalProjectPath, req.user.id, {
+          sessionId: typeof sessionId === 'string' ? sessionId : null,
+          consent: 'control',
+        })
+      : null;
+    if (isProjectMembershipEnforced() && !workspaceFence) {
+      throw new AgentAccessFenceError('project_access_changed', true);
+    }
+    assertAgentAccessCurrent(req, workspaceFence, true);
     let permissionExecution;
     try {
       const authorizeProviderExecution = req.app?.locals?.authorizeProviderExecution;
@@ -1343,13 +1581,20 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
 
     // Set up writer based on streaming mode
     if (stream) {
+      assertAgentAccessCurrent(req, workspaceFence, true);
       // Set up SSE headers for streaming
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
 
-      writer = new SSEStreamWriter(res, req.user.id);
+      writer = new SSEStreamWriter(res, req.user.id, req.user, () => {
+        if (req.assertCurrentIdentity?.() !== true) return 'identity_changed';
+        return workspaceFence && !isWorkspaceTopologyFenceCurrent(workspaceFence)
+          ? 'project_access_changed' : null;
+      });
+      const registrationStale = writer.staleAccessCode();
+      if (registrationStale) throw new AgentAccessFenceError(registrationStale, true);
 
       // Send initial status
       writer.send({
@@ -1371,13 +1616,15 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
 
     let providerModels;
     try {
-      if (provider === 'codex' || provider === 'gemini' || provider === 'opencode') {
+      if (provider === 'codex' || provider === 'opencode') {
+        assertAgentAccessCurrent(req, workspaceFence, true);
         providerModels = (await providerModelsService.getProviderModels(
           provider,
           {},
           req.user?.id ?? null,
           req.user,
         )).models;
+        assertAgentAccessCurrent(req, workspaceFence, false);
       }
     } catch (error) {
       try { permissionExecution.notStarted(); } catch { /* durable generation block is authoritative */ }
@@ -1385,6 +1632,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     }
 
     // Start the appropriate session
+    assertAgentAccessCurrent(req, workspaceFence, true);
     if (provider === 'claude') {
       console.log('🤖 Starting Claude SDK session');
 
@@ -1426,16 +1674,6 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         permissionMode: 'acceptEdits',
         permissionExecution,
       }, writer);
-    } else if (provider === 'gemini') {
-      console.log('✨ Starting Gemini CLI session');
-
-      await runPermissionExecutionAdapter(permissionExecution, () => spawnGemini(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || providerModels.DEFAULT,
-        skipPermissions: true // CLI mode bypasses permissions
-      }, writer));
     } else if (provider === 'opencode') {
       console.log('Starting OpenCode CLI session');
 
@@ -1482,6 +1720,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         ...(carrierModel ? { model: carrierModel } : {})
       }, writer));
     }
+    assertAgentAccessCurrent(req, workspaceFence, false);
 
     // Handle GitHub branch and PR creation after successful agent completion
     let branchInfo = null;
@@ -1489,6 +1728,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
 
     if (createBranch || createPR) {
       try {
+        assertAgentAccessCurrent(req, workspaceFence, false);
         console.log('🔄 Starting GitHub branch/PR creation workflow...');
 
         // Get GitHub token
@@ -1516,8 +1756,11 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
           console.log('🔍 Getting GitHub URL from git remote...');
           let remoteUrl;
           try {
+            assertAgentAccessCurrent(req, workspaceFence, false);
             remoteUrl = await getGitRemoteUrl(finalProjectPath);
+            assertAgentAccessCurrent(req, workspaceFence, false);
           } catch (error) {
+            if (error instanceof AgentAccessFenceError) throw error;
             throw new Error(`Failed to get GitHub remote URL: ${error.message}`);
           }
           try {
@@ -1546,6 +1789,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         if (createBranch) {
           // Create and checkout the new branch locally
           console.log('🔄 Creating local branch...');
+          assertAgentAccessCurrent(req, workspaceFence, false);
           const checkoutProcess = spawn('git', ['checkout', '-b', finalBranchName], {
             cwd: finalProjectPath,
             stdio: 'pipe'
@@ -1562,6 +1806,12 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
                 // Branch might already exist locally, try to checkout
                 if (stderr.includes('already exists')) {
                   console.log(`ℹ️ Branch '${finalBranchName}' already exists locally, checking out...`);
+                  try {
+                    assertAgentAccessCurrent(req, workspaceFence, false);
+                  } catch (error) {
+                    reject(error);
+                    return;
+                  }
                   const checkoutExisting = spawn('git', ['checkout', finalBranchName], {
                     cwd: finalProjectPath,
                     stdio: 'pipe'
@@ -1586,12 +1836,14 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
           // Authentication is supplied through an ephemeral owner-only askpass
           // file, never through URL userinfo, argv, logs, or returned errors.
           console.log('🔄 Pushing branch to remote...');
+          assertAgentAccessCurrent(req, workspaceFence, false);
           const pushResult = await pushGitHubBranch({
             repoUrl,
             token: tokenToUse,
             branchName: finalBranchName,
             cwd: finalProjectPath,
           });
+          assertAgentAccessCurrent(req, workspaceFence, false);
           console.log(
             pushResult.reused
               ? `ℹ️ Branch '${finalBranchName}' already exists on remote, using existing branch`
@@ -1603,17 +1855,21 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
           // tracks origin — never the token-embedded URL.
           if (tokenToUse) {
             try {
+              assertAgentAccessCurrent(req, workspaceFence, false);
               await new Promise((resolve) => {
                 const cfg = spawn('git', ['config', `branch.${finalBranchName}.remote`, 'origin'], { cwd: finalProjectPath, stdio: 'pipe' });
                 cfg.on('close', () => resolve());
                 cfg.on('error', () => resolve());
               });
+              assertAgentAccessCurrent(req, workspaceFence, false);
               await new Promise((resolve) => {
                 const cfg = spawn('git', ['config', `branch.${finalBranchName}.merge`, `refs/heads/${finalBranchName}`], { cwd: finalProjectPath, stdio: 'pipe' });
                 cfg.on('close', () => resolve());
                 cfg.on('error', () => resolve());
               });
-            } catch {
+              assertAgentAccessCurrent(req, workspaceFence, false);
+            } catch (error) {
+              if (error instanceof AgentAccessFenceError) throw error;
               // Upstream tracking is best-effort; the push already succeeded.
             }
           }
@@ -1627,7 +1883,9 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         if (createPR) {
           // Get commit messages to generate PR description
           console.log('🔄 Generating PR title and description...');
+          assertAgentAccessCurrent(req, workspaceFence, false);
           const commitMessages = await getCommitMessages(finalProjectPath, 5);
+          assertAgentAccessCurrent(req, workspaceFence, false);
 
           // Use the first commit message as the PR title, or fallback to the agent message
           const prTitle = commitMessages.length > 0 ? commitMessages[0] : message;
@@ -1645,7 +1903,9 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
 
           // Create the pull request
           console.log('🔄 Creating pull request...');
+          assertAgentAccessCurrent(req, workspaceFence, false);
           prInfo = await createGitHubPR(octokit, owner, repo, finalBranchName, prTitle, prBody, 'main');
+          assertAgentAccessCurrent(req, workspaceFence, false);
         }
 
         // Send branch/PR info in response
@@ -1685,6 +1945,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     // Handle response based on streaming mode. Mark completion FIRST so the
     // 'close' Node emits after res.end() is not mistaken for a disconnect.
     requestCompleted = true;
+    assertAgentAccessCurrent(req, workspaceFence, false);
     if (stream) {
       // Streaming mode: end the SSE stream
       writer.end();
@@ -1713,12 +1974,17 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     }
 
     // Clean up if requested
-    if (cleanup && githubUrl) {
-      // Only cleanup if we cloned a repo (not for existing project paths)
-      const sessionIdForCleanup = writer.getSessionId();
-      setTimeout(() => {
-        cleanupProject(finalProjectPath, sessionIdForCleanup);
-      }, 5000);
+    if (cloneCreationReceipt) {
+      if (cleanup) {
+        const sessionIdForCleanup = writer.getSessionId();
+        setTimeout(() => {
+          void applyCloneRetentionPolicy(cloneCreationReceipt, {
+            cleanup: true, sessionId: sessionIdForCleanup,
+          }).catch((cleanupError) => reportScheduledCloneCleanupFailure(cleanupError));
+        }, 5000);
+      } else {
+        await applyCloneRetentionPolicy(cloneCreationReceipt, { cleanup: false });
+      }
     }
 
   } catch (error) {
@@ -1726,10 +1992,46 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
     // The request is terminating here; suppress the disconnect path.
     requestCompleted = true;
 
+    if (error instanceof AgentAccessFenceError) {
+      if (cloneCreationReceipt) {
+        const sessionIdForCleanup = writer ? writer.getSessionId() : null;
+        try {
+          await applyCloneRetentionPolicy(cloneCreationReceipt, {
+            cleanup, sessionId: sessionIdForCleanup,
+          });
+        } catch (cleanupError) {
+          if (!res.headersSent) {
+            return res.status(500).json({
+              error: 'Created repository cleanup failed',
+              code: cleanupError?.code ?? 'CLONE_CLEANUP_FAILED',
+              notStarted: false,
+              effectState: 'outcome_unknown',
+            });
+          }
+          console.error('[agent] created repository cleanup failed after access revocation:', cleanupError?.code);
+        }
+      }
+      if (writer?.isSSEStreamWriter) writer.revokeAccess(error.code);
+      if (!res.headersSent) return sendAgentFenceError(res, error);
+      return;
+    }
+
     // Clean up on error
-    if (finalProjectPath && cleanup && githubUrl) {
+    if (cloneCreationReceipt) {
       const sessionIdForCleanup = writer ? writer.getSessionId() : null;
-      cleanupProject(finalProjectPath, sessionIdForCleanup);
+      try {
+        await applyCloneRetentionPolicy(cloneCreationReceipt, {
+          cleanup, sessionId: sessionIdForCleanup,
+        });
+      } catch (cleanupError) {
+        console.error('[agent] created repository cleanup failed after run failure:', cleanupError?.code);
+        if (!res.headersSent) {
+          return res.status(500).json({
+            error: 'Created repository cleanup failed',
+            code: cleanupError?.code ?? 'CLONE_CLEANUP_FAILED',
+          });
+        }
+      }
     }
 
     if (stream) {
@@ -1740,7 +2042,7 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
-        writer = new SSEStreamWriter(res, req.user.id);
+        writer = new SSEStreamWriter(res, req.user.id, req.user);
       }
 
       if (!res.writableEnded) {

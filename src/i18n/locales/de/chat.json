@@ -651,7 +651,23 @@
     "perModel": "Nach Modell",
     "loading": "Wird berechnet…",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "Ältere Zusammenfassung — erfasste Anfragen decken die Unterhaltung möglicherweise nicht vollständig ab",
+    "measurementIncomplete": "Die Werte decken die Unterhaltung möglicherweise nicht vollständig ab",
+    "measurementQuarantined": "Die Messung wird geprüft — Summen sind nicht bestätigt",
+    "modelCalls": "Modellaufrufe: {{count}}",
+    "modelCallUsage": "{{count}} Modellaufrufe · {{tokens}} Verarbeitungseinheiten",
+    "legacyCodexModelUsage": "Ältere Zusammenfassung: {{count}} erfasste Anfragen · {{tokens}} Verarbeitungseinheiten",
+    "rolloutChains": "Beitragende Ausführungsketten: {{count}}",
+    "subagentSpawnAttempts": "Versuche, Subagenten zu erstellen: {{count}}",
+    "resolvedSubagentRollouts": "Gezählte Subagent-Ausführungsketten: {{count}}",
+    "subagentModelCalls": "Subagent-Modellaufrufe: {{count}}",
+    "responseTurnDurationLabel": "Antwortzeit",
+    "totalWorkDuration": "Gesamte Arbeitszeit (Dauern können überlappen): {{duration}}"
+  },
+  "activityGap": {
+    "status": "Agent arbeitet — letzte Aktivität vor {{time}}",
+    "ariaLabel": "Agent arbeitet noch, letzte Aktivität vor {{time}}"
   },
   "activityGap": {
     "status": "Agent arbeitet — letzte Aktivität vor {{time}}",

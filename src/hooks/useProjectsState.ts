@@ -688,6 +688,15 @@ export function useProjectsState({
       return;
     }
 
+    if (latestMessage.type === 'project_membership_revoked') {
+      const projectId = typeof latestMessage.projectId === 'string' ? latestMessage.projectId : null;
+      if (projectId && latestMessage.accessRevoked !== false) {
+        window.dispatchEvent(new CustomEvent('project:membership-revoked', { detail: { projectId } }));
+      }
+      void fetchProjects({ showLoadingState: false });
+      return;
+    }
+
     if (latestMessage.type !== 'projects_updated') {
       return;
     }
@@ -754,7 +763,7 @@ export function useProjectsState({
         setSelectedSession(null);
       }
     }
-  }, [latestMessage, selectedProject, selectedSession, activeSessions, projects]);
+  }, [latestMessage, selectedProject, selectedSession, activeSessions, projects, fetchProjects]);
 
   useEffect(() => {
     if (

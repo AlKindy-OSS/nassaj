@@ -17,8 +17,11 @@ import test, { mock } from 'node:test';
 
 import type { LLMProvider } from '@/shared/types.js';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: { getProjectPath: () => null, isProjectVisibleToUser: () => true },
     sessionsDb: { getSessionById: () => null },
     sessionOutcomesDb: { getOutcomeForBroadcast: () => null },

@@ -106,6 +106,26 @@ test('B-105: owner reads their own session history', async () => {
   });
 });
 
+test('history loaded under an old project capture is rejected before disclosure', async () => {
+  await withOwnedSession(async ({ ownerId }) => {
+    let checks = 0;
+    await assert.rejects(
+      sessionsService.fetchHistory(SESSION_ID, ownerId, {
+        limit: 10,
+        offset: 0,
+        assertCurrent: () => {
+          checks += 1;
+          if (checks > 1) throw Object.assign(new Error('project access changed'), {
+            code: 'project_access_changed', statusCode: 409,
+          });
+        },
+      }),
+      (error: unknown) => (error as { code?: string }).code === 'project_access_changed',
+    );
+    assert.equal(checks, 2, 'the async history boundary is rechecked before returning data');
+  });
+});
+
 test('T-1566: full remains the default, limit 0/1 are exact, and revision mismatches fail with 409', async () => {
   await withOwnedSession(async ({ ownerId }) => {
     const empty = await sessionsService.fetchHistory(SESSION_ID, ownerId, { limit: 0, offset: 0 });

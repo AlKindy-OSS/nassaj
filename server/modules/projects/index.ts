@@ -9,3 +9,4 @@ export {
   coerceUserId,
   isProjectVisible,
 } from './services/project-visibility-guard.service.js';
+export { addMember, removeMember } from './services/project-visibility-management.service.js';

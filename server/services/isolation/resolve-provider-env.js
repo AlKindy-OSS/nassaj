@@ -193,35 +193,27 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       // spawn would seed, so the tree the turn runs in is never unpoliced.
       applyOperatorPolicy(userConfigDir(credentialUserId, '.claude'));
       env.CLAUDE_CONFIG_DIR = userConfigDir(credentialUserId, '.claude');
+      // T-1749/ADR-159 D2: disable Claude Code's BUILT-IN auto-updater in the
+      // governed spawn env. The server owns harness updates (the allowlisted
+      // HARNESS_UPDATE_DESCRIPTORS path, gated on no-live-session + the digest
+      // pin); a CLI self-update at launch runs OUTSIDE that gate and would either
+      // swap in unverified bytes or leave a sha256 the next pinned spawn refuses
+      // fail-closed. DISABLE_AUTOUPDATER is the documented Anthropic knob (Claude
+      // Code settings). This is the ONLY built-in-updater flag verified for wiring
+      // today; the other harnesses' disable knobs are unverified and stay OFF —
+      // the server scheduler is their single controlled update path.
+      env.DISABLE_AUTOUPDATER = '1';
       return env;
     }
     case 'gemini': {
-      // B-548 — this case used to set GEMINI_CLI_HOME, citing
-      // `server/gemini-cli.js:83` as evidence the CLI honored it. That citation
-      // was circular: line 83 is nassaj's OWN `.env` lookup, introduced in the
-      // same wave, not a contract of any CLI. Three probes on 2026-08-07 against
-      // the binary this provider actually launches:
-      //   1. `strings` over the 199 MB executable: ZERO occurrences of the name.
-      //   2. `env -i HOME=A GEMINI_CLI_HOME=B <cli> -p …` created its ENTIRE tree
-      //      under A/.gemini (config/, antigravity-cli/ with the OAuth token,
-      //      brain, conversations, logs) and not one path under B.
-      //   3. Authenticated canary: the turn obeyed A/.gemini/GEMINI.md, while
-      //      atime proved B/.gemini/GEMINI.md, B/GEMINI.md and $CWD/GEMINI.md
-      //      were never opened at all.
-      // So the variable DID reach the spawn and nothing read it — every member's
-      // gemini turn ran on the operator's ~/.gemini token. HOME is the only knob
-      // that moves this CLI's tree, exactly as for agy/hermes/cursor.
-      //
-      // provisionUserDirs already builds the per-user `.gemini` on the HOME
-      // assumption (projects symlink, the read-only GEMINI.md governance copy,
-      // antigravity-cli/ with the shared brain link and NO inherited token), so
-      // this override lands in a tree that is already shaped for it.
-      //
-      // NOTE for whoever installs Google's real gemini-cli here later: `gemini`
-      // on this node is a SYMLINK to the agy binary, so `gemini` and `agy` are
-      // one executable reached by two provider names. HOME is correct for that
-      // binary. If a genuinely different CLI is installed under this name, its
-      // knob must be re-measured — not assumed — before this line changes.
+      // T-1749/ADR-159 D1: gemini is removed as a DISPATCHABLE provider (registry
+      // + WS branch), so no chat turn reaches here with provider='gemini' any
+      // more. This case is KEPT because 'gemini' is also agy's on-disk credential
+      // UNIT (~/.gemini/antigravity-cli — credential-principal.js maps agy→gemini,
+      // grant-home.js links `.gemini`): the grant/isolation machinery resolves the
+      // unit through this HOME override. agy's own `case 'agy'` is identical, and
+      // both point HOME at the isolated per-user tree. HOME is the only knob that
+      // moves this CLI's tree (B-548, measured).
       env.HOME = homeRoot();
       return env;
     }
@@ -254,6 +246,11 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       env.XDG_CONFIG_HOME = userConfigDir(userId, '.config');
       env.XDG_CACHE_HOME = userConfigDir(userId, '.cache');
       env.XDG_STATE_HOME = userConfigDir(userId, '.local/state');
+      // T-1749/ADR-159 D2: disable opencode's BUILT-IN auto-updater (verified
+      // env knob in the pinned binary). opencode is digest-pinned, so a launch
+      // self-update would change the sha256 and the next governed spawn would
+      // refuse fail-closed; the server scheduler owns updates instead.
+      env.OPENCODE_DISABLE_AUTOUPDATE = '1';
       // GL-4 (ADR-062): opencode has TWO shapes. The historical DEFAULT_TARGET
       // path (chat / the built-in `anthropic` provider — mode defaults to 'chat')
       // is a first-party Anthropic client whose env MUST stay untouched. But in
@@ -280,7 +277,15 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
       // together, while provisionUserDirs links the operator's config.yaml and
       // bin/ back in so the member inherits the model endpoints and helper tools
       // without inheriting the account.
-      env.HOME = homeRoot();
+      const hermesRoot = homeRoot();
+      env.HOME = hermesRoot;
+      // T-1749 / ADR-159 D3: also set HERMES_HOME explicitly (parity with
+      // CLAUDE_CONFIG_DIR / CODEX_HOME / KIMI_CODE_HOME). HOME already isolates
+      // ~/.hermes; naming the dedicated knob too makes the isolation independent
+      // of the CLI keeping its "~/.hermes derived from HOME" behaviour, and it is
+      // the same knob the isolated-cli-cage sandbox already passes through. Stays
+      // outside the ANTHROPIC_*/CLAUDE_* namespace so the IRON RULE holds.
+      env.HERMES_HOME = path.join(hermesRoot, '.hermes');
       return env;
     }
     case 'cursor': {
@@ -361,6 +366,20 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
 }
 
 /**
+ * Applies the built-in updater kill switches to every credential mode. These
+ * flags govern the binary itself, so shared/system launches need them just as
+ * much as isolated member launches do.
+ * @param {ProviderName} provider
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {NodeJS.ProcessEnv}
+ */
+function applyHarnessUpdaterPolicy(provider, env) {
+  if (provider === 'claude') env.DISABLE_AUTOUPDATER = '1';
+  if (provider === 'opencode') env.OPENCODE_DISABLE_AUTOUPDATE = '1';
+  return env;
+}
+
+/**
  * Resolves the environment for spawning a provider CLI on behalf of a user.
  *
  * SEC-ENV-1 — HOST-SECRET STRIP (unconditional, every provider, every mode):
@@ -399,5 +418,6 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
  */
 export function resolveProviderEnv(userId, provider, baseEnv = process.env, mode = 'chat', options = {}) {
   const honorGrants = options.honorGrants !== false;
-  return sanitizeHostSecretEnv(resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants));
+  const resolved = resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants);
+  return sanitizeHostSecretEnv(applyHarnessUpdaterPolicy(provider, resolved));
 }

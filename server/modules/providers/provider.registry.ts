@@ -3,14 +3,14 @@ import { ClaudeProvider } from '@/modules/providers/list/claude/claude.provider.
 import { CodexProvider } from '@/modules/providers/list/codex/codex.provider.js';
 import { CursorProvider } from '@/modules/providers/list/cursor/cursor.provider.js';
 import { DeepSeekProvider } from '@/modules/providers/list/deepseek/deepseek.provider.js';
-import { GeminiProvider } from '@/modules/providers/list/gemini/gemini.provider.js';
 import { GlmProvider } from '@/modules/providers/list/glm/glm.provider.js';
 import { HermesProvider } from '@/modules/providers/list/hermes/hermes.provider.js';
+import { GeminiSessionsProvider } from '@/modules/providers/list/gemini/gemini-sessions.provider.js';
 import { KimiProvider } from '@/modules/providers/list/kimi/kimi.provider.js';
 import { OpenCodeProvider } from '@/modules/providers/list/opencode/opencode.provider.js';
 import { QwenProvider } from '@/modules/providers/list/qwen/qwen.provider.js';
 import type { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
-import type { IProvider } from '@/shared/interfaces.js';
+import type { IProvider, IProviderSessions } from '@/shared/interfaces.js';
 import type { LLMProvider } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -26,7 +26,6 @@ const providers: Partial<Record<LLMProvider, IProvider>> = {
   claude: new ClaudeProvider(),
   codex: new CodexProvider(),
   cursor: new CursorProvider(),
-  gemini: new GeminiProvider(),
   hermes: new HermesProvider(),
   opencode: new OpenCodeProvider(),
   qwen: new QwenProvider(),
@@ -37,6 +36,12 @@ const providers: Partial<Record<LLMProvider, IProvider>> = {
   deepseek: new DeepSeekProvider(),
   glm: new GlmProvider(),
 };
+
+// Gemini is retired from every active provider surface, but persisted rows may
+// still name it. Keep only its stateless history reader: this map is never used
+// by model/auth/sync/dispatch paths and therefore cannot create a new session.
+const legacyHistoryProviders: Readonly<Partial<Record<LLMProvider, IProviderSessions>>> =
+  Object.freeze({ gemini: new GeminiSessionsProvider() });
 
 /**
  * Central registry for resolving concrete provider implementations by id.
@@ -57,6 +62,19 @@ export const providerRegistry = {
     }
 
     return resolvedProvider;
+  },
+
+  /** Resolves a read-only history facet, including retired persisted providers. */
+  resolveHistorySessions(provider: string): IProviderSessions {
+    const key = provider as LLMProvider;
+    const active = providers[key];
+    if (active) return active.sessions;
+    const legacy = legacyHistoryProviders[key];
+    if (legacy) return legacy;
+    throw new AppError(`Unsupported provider history "${provider}".`, {
+      code: 'UNSUPPORTED_PROVIDER',
+      statusCode: 400,
+    });
   },
 
   /** Same registered instances, narrowed explicitly for the connector writer. */
