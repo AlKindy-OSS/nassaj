@@ -4,9 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '../../../../lib/utils';
 import { formatWorkDuration } from '../../../../utils/workDurationFormat';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
+import { resolveOverallPercent } from '../../hooks/declaredProgress';
 import type { RunProgress } from '../../hooks/useRunProgress';
 
+import PercentMeter, { formatPercent } from './PercentMeter';
 import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
+import SettledPlanStatus from './SettledPlanStatus';
 
 type ClaudeStatusProps = {
   status: {
@@ -349,6 +352,16 @@ export default function ClaudeStatus({
     }
   }, [total, isLoading]);
 
+  // ADR-199: a plan reported once per turn stays, settled, after the run stops.
+  if (!isLoading && !runActiveOverride && progress?.settled && progress.total > 0) {
+    return (
+      <SettledPlanStatus
+        progress={progress}
+        provider={provider}
+        providerLabel={t(PROVIDER_LABEL_KEYS[provider] || 'claudeStatus.providers.assistant', { defaultValue: 'Assistant' })}
+      />
+    );
+  }
   if (!isLoading && !status && !runActiveOverride) return null;
 
   const isFrozenLoading = isLoading && frozen;
@@ -381,6 +394,9 @@ export default function ClaudeStatus({
   // stands alone.
   const showTaskCounter = showProgressArea && total > 0;
   const showAgentChip = showProgressArea && activeSubagent !== null;
+  // Overall percent: TodoWrite-computed (rides inside the Tasks chip) or, with no
+  // todo list, the agent-declared line (own chip, marked as declared). Never 0%.
+  const overall = showProgressArea && progress ? resolveOverallPercent(progress) : null;
 
   const localeNum = (n: number) => n.toLocaleString(locale);
 
@@ -493,6 +509,11 @@ export default function ClaudeStatus({
               <span className="shrink-0 tabular-nums">
                 {t('runProgress.tasksLabel', { defaultValue: 'Tasks' })} {localeNum(done)}/{localeNum(total)}
               </span>
+              {overall && (
+                <span className="shrink-0 tabular-nums" data-testid="tasks-percent">
+                  {formatPercent(overall.percent, locale)}
+                </span>
+              )}
               {/* Thin progress bar. Flex/`w` fill mirrors automatically under RTL. */}
               <div
                 className="h-1 w-10 shrink-0 overflow-hidden rounded-full bg-border/60"
@@ -508,6 +529,19 @@ export default function ClaudeStatus({
                 />
               </div>
             </div>
+          )}
+
+          {overall && (
+            <PercentMeter
+              testId="overall-percent"
+              percent={overall.percent}
+              declared={overall.source !== 'tasks'}
+              label={t('runProgress.overallAria', { defaultValue: 'Overall progress' })}
+              barFromSm
+              // With a todo list the desktop percent rides inside the Tasks chip
+              // (sm+ only); this standalone chip then serves narrow screens.
+              className={cn('bg-muted/50', overall.source === 'tasks' && 'sm:hidden')}
+            />
           )}
 
           {/* Active sub-agent pulse. Shows whenever a sub-agent is running,

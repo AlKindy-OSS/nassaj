@@ -29,6 +29,8 @@ import { claudeDelegationProfile, prepareClaudeReviewedDelegation } from './serv
 import { evaluatePublicPageWrite } from './services/public-page-agent-guidance.js';
 import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
 import { resolveClaudeTranscriptPath } from './modules/providers/list/claude/claude-transcript-path.js';
+import { createClaudeProgressFold, claudeNotifiedTasks } from './modules/providers/list/claude/claude-progress-fold.js';
+import { createSeededLiveFold } from './modules/providers/list/claude/claude-progress-seed.js';
 import {
   confirmWithRetry,
   createSteerRun,
@@ -416,36 +418,6 @@ const startsMainLoopActivity = (message) => !message?.parent_tool_use_id && (
   MAIN_LOOP_ACTIVITY_TYPES.has(message?.type)
   || (message?.type === 'system' && message.subtype === 'init'));
 
-// B-1400: the CLI's own `<task-notification>` text names the task and its tool call.
-const NOTIFICATION_BLOCK_RE = /<task-notification>([\s\S]*?)(?:<\/task-notification>|$)/g;
-const NOTIFICATION_TASK_ID_RE = /<task-id>([^<\s]+)<\/task-id>/;
-const NOTIFICATION_TOOL_USE_ID_RE = /<tool-use-id>([^<\s]+)<\/tool-use-id>/;
-
-/** Text of a user message, or '' — only used to find `<task-notification>` blocks. */
-function userMessageText(message) {
-  const content = message?.message?.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.map(b => (typeof b?.text === 'string' ? b.text : '')).join('');
-}
-
-/**
- * `{ taskId, toolUseId }` per `<task-notification>` block of a user message the CLI
- * itself delivered as a background-task notification. SDK types: such a message
- * carries `origin.kind === 'task-notification'` with no `subkind` (a subkind marks
- * scheduled/peer/relay deliveries, whose text another sender authored), so text a
- * human or a peer typed can never settle a task.
- */
-function notifiedTasks(message) {
-  const origin = message?.type === 'user' ? message.origin : null;
-  if (origin?.kind !== 'task-notification' || origin.subkind) return [];
-  const text = userMessageText(message);
-  return Array.from(text.matchAll(NOTIFICATION_BLOCK_RE), ([, block]) => ({
-    taskId: block.match(NOTIFICATION_TASK_ID_RE)?.[1] ?? null,
-    toolUseId: block.match(NOTIFICATION_TOOL_USE_ID_RE)?.[1] ?? null,
-  }));
-}
-
 // B-1401 review: Workflow calls a `complete` announced as still running
 // (`pendingWorkflowIds`), per session, until evidence ends each one. `complete` is
 // sent only after the run's iterator ended, so the end of such a workflow is seen
@@ -588,7 +560,8 @@ function createBackgroundTaskTracker() {
       let backgrounded = false;
       const endedToolUseIds = [];
       if (message?.type === 'system') backgrounded = observeSystem(message, endedToolUseIds);
-      for (const { taskId, toolUseId } of notifiedTasks(message)) {
+      // B-1400: parsing is shared with the history path (claude-progress-fold.ts).
+      for (const { taskId, toolUseId } of claudeNotifiedTasks(message)) {
         settleEnded(taskId, toolUseId, endedToolUseIds);
       }
       if (isPendingTaskActivity(message)) holdAnchorAt = Date.now();
@@ -4177,6 +4150,14 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     let continuationPossible = false;
     // B-1120: this run's pending CLI tasks and whether the main loop is quiet.
     const backgroundTasks = createBackgroundTaskTracker();
+    // ADR-199: this run's progress fold (task list, delegations); dies with the run.
+    // A resumed run is seeded from the full transcript before its first event;
+    // T-1988: the seed is size-capped and time-budgeted, past which the run
+    // continues with a fresh fold, so it never holds live events longer.
+    const progressFoldReady = sdkOptions.resume
+      ? createSeededLiveFold(sessionId || null, sdkOptions.resume,
+        { userId: ws?.userId ?? null, projectPath: sdkOptions.cwd || null })
+      : Promise.resolve(createClaudeProgressFold('live', sessionId || null));
     // B-1401: tool_use ids of this run's Workflow calls not yet resolved. The tool
     // returns at once and the workflow runs as a background task, so an id leaves
     // the set only when its tool_result is an error (never started) or its task is
@@ -4362,6 +4343,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
 
       // Use adapter to normalize SDK events into NormalizedMessage[]
       const normalized = sessionsService.normalizeMessage('claude', transformedMessage, sid);
+      const progressFold = await progressFoldReady;
+      normalized.push(...progressFold.observe(transformedMessage, normalized));
       for (const msg of normalized) {
         // A thinking/tool/text delta is model activity.  User echoes and tool
         // results are not: the latter can arrive long after model work began.

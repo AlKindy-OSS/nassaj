@@ -389,6 +389,20 @@ export type NormalizedMessage = {
   isSidechain?: boolean;
   isSynthetic?: boolean;
   /**
+   * ADR-199: provider-neutral plan snapshot (todo list) for the run. Built only
+   * through `server/shared/progress-normalize.ts`; item ids are snapshot
+   * indexes, so the latest plan inside the current turn wins. `items` is capped
+   * at 50; the optional `counts {done,total}` covers the full list after
+   * exclusions (ADR-199 Addendum A §12), and the client prefers it when present.
+   */
+  plan?: import('./progress-normalize.js').ProgressPlan;
+  /**
+   * ADR-199: provider-neutral subagent lifecycle. `id` is shared by every row of
+   * one subagent so the latest `state` wins. Rows emitted by the subagent itself
+   * carry `parentToolUseId` and never enter a public share snapshot.
+   */
+  subagent?: import('./progress-normalize.js').ProgressSubagent;
+  /**
    * Background-task notification fields (ADR-048, C5). Present on the derived
    * kind:'task_reconcile' correction row (and any kind:'workflow_reconciled'
    * event): `isTaskNotification` routes it through the frontend's existing

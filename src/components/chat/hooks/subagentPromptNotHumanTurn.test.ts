@@ -49,6 +49,8 @@ const ownerPrompt: NormalizedMessage = {
 const agentContainer = (id: string, toolId: string, ts: string, description: string) => ({
   ...base, id, kind: 'tool_use', toolId, toolName: 'Agent', timestamp: ts,
   toolInput: { subagent_type: 'general-purpose', model: 'haiku', description },
+  // ADR-199: neutral lifecycle the Claude adapter stamps on the call.
+  subagent: { id: toolId, parentId: null, label: description, state: 'started' },
 }) as NormalizedMessage;
 
 // Live sub-agent prompt as forwarded: role user, userId stamped, parentToolUseId set.

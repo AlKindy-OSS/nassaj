@@ -86,6 +86,26 @@ test('allow-list keeps only top-level user/assistant text and counts every dropp
   assert.equal(result.possibleSecretsNote, true);
 });
 
+test('ADR-199: subagent lifecycle rows and child prose never reach a public snapshot', () => {
+  const lifecycle = { id: 'toolu_1', parentId: null, label: 'Reply OK', state: 'completed' as const };
+  const rows = [
+    user('start the work'),
+    msg({ kind: 'tool_use', toolName: 'Agent', toolId: 'toolu_1', subagent: { ...lifecycle, state: 'started' } }),
+    msg({ kind: 'text', role: 'assistant', content: 'child secret prose', parentToolUseId: 'toolu_1', isSidechain: true }),
+    msg({ kind: 'text', role: 'assistant', content: 'lifecycle-only text row', subagent: lifecycle }),
+    msg({ kind: 'tool_result', toolId: 'toolu_1', subagent: lifecycle }),
+    assistant('all done'),
+  ];
+  const result = assembleShareSnapshot(rows, ownerOnly);
+  assert.deepEqual(result.snapshot?.messages.map((m) => m.parts), [
+    [{ t: 'text', text: 'start the work' }], [{ t: 'text', text: 'all done' }],
+  ]);
+  const json = JSON.stringify(result.snapshot);
+  for (const leaked of ['child secret prose', 'lifecycle-only', 'Reply OK', 'toolu_1', 'subagent']) {
+    assert.ok(!json.includes(leaked), `snapshot leaks ${leaked}`);
+  }
+});
+
 test('message objects are built fresh: unknown fields never pass through', () => {
   const result = assembleShareSnapshot([user('a', { projectPath: '/srv/x', email: 'a@b.c' } as never)], ownerOnly);
   assert.deepEqual(Object.keys(result.snapshot!.messages[0]).sort(), ['at', 'author', 'parts', 'role']);

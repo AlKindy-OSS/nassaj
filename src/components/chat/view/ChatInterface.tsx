@@ -44,7 +44,7 @@ import {
   getProviderDisplayName,
   PROVIDER_UI_CAPABILITIES,
 } from '../constants/providerCapabilities';
-import { useRunProgress } from '../hooks/useRunProgress';
+import { gateComputedProgress, gateTurnSubagents, useRunProgress } from '../hooks/useRunProgress';
 import { SessionParticipantsBar } from '../../participants';
 import { useSessionSkills } from '../../participants/useSessionSkills';
 import { attachObservedSkills } from '../../participants/skillObservationHelpers';
@@ -1111,8 +1111,24 @@ function ChatInterface({
 
   // Task/agent progress snapshot for the ClaudeStatus indicators. Scans the
   // FULL transcript (not the windowed visibleMessages) once per change; reads no
-  // clock, so it never recomputes on the per-second tick. Empty while idle.
-  const baseRunProgress = useRunProgress(chatMessages, isLoading);
+  // clock, so it never recomputes on the per-second tick. Empty while idle,
+  // except that a plan reported once per turn (capability `turn`) stays as a
+  // settled snapshot until the next human prompt (ADR-199).
+  // ADR-199: the computed task bar shows only for providers whose adapter
+  // emits a plan; the agent-declared percent shows for every provider.
+  const progressCapability = getProviderCapabilities(displayProvider).progress;
+  const progressPlanTiming = progressCapability.plan;
+  const progressOptions = useMemo(() => ({
+    keepPlanAfterStop: progressCapability.plan === 'turn',
+    statusSubagents: progressCapability.subagents === 'turn',
+  }), [progressCapability.plan, progressCapability.subagents]);
+  const scannedRunProgress = useRunProgress(chatMessages, isLoading, progressOptions);
+  const progressSubagentTiming = progressCapability.subagents;
+  // Subagents that arrive only once settled show only when finished (ADR-199 Decision 18).
+  const baseRunProgress = useMemo(
+    () => gateTurnSubagents(gateComputedProgress(scannedRunProgress, progressPlanTiming), progressSubagentTiming),
+    [scannedRunProgress, progressPlanTiming, progressSubagentTiming],
+  );
   const workflowStripAgents = useWorkflowStripAgents(currentSessionId || selectedSession?.id || null);
   const sessionSkills = useSessionSkills(selectedSession?.id ?? currentSessionId, displayProvider, isLoading || workflowStripAgents.some(agent => agent.status === 'running'), !isLoadingSessionMessages);
   const runProgress = useMemo(() => ({ ...baseRunProgress, agents: attachObservedSkills(baseRunProgress.agents, sessionSkills.projection, sessionSkills.stale) }), [baseRunProgress, sessionSkills.projection, sessionSkills.stale]);

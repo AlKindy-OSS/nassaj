@@ -1427,7 +1427,11 @@ export function useChatRealtimeHandlers({
     const shouldPersist =
       msg.kind !== 'session_created'
       && msg.kind !== 'complete'
-      && msg.kind !== 'status'
+      // ADR-199: a status row carrying a neutral `plan` or `subagent` is
+      // progress data (a turn-end snapshot or a background-agent settlement)
+      // and must reach the store; the normalizer never renders it. Text-only
+      // status rows stay spinner state.
+      && (msg.kind !== 'status' || Boolean(msg.plan || msg.subagent))
       && msg.kind !== 'permission_request'
       && msg.kind !== 'permission_cancelled'
       // T-1933 review round 2: a control event routed to `applyControlEvent`

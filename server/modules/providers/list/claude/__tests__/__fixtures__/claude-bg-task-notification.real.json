@@ -1,0 +1,104 @@
+{
+ "_provenance": "Real Claude Agent SDK stream-json events (Claude Code 2.1.289, claude -p --verbose, haiku), captured 2026-10-09 in a /var/tmp cwd that was removed: a background Agent and its structured system/task_notification. Thinking, usage, tool-result text, paths and session id scrubbed; keys and status values verbatim.",
+ "events": [
+  {
+   "type": "assistant",
+   "message": {
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01135AXrmV4GX3w5LpR3t9ts",
+      "name": "Agent",
+      "input": {
+       "description": "Bg demo",
+       "subagent_type": "general-purpose",
+       "prompt": "Reply with the single word PONG.",
+       "run_in_background": true
+      },
+      "caller": {
+       "type": "direct"
+      }
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000004",
+   "uuid": "536cbc5b-6e97-4327-be13-9a36808238fb",
+   "timestamp": "2026-10-09T07:42:43.607Z",
+   "wire_tool_inputs": {
+    "toolu_01135AXrmV4GX3w5LpR3t9ts": {
+     "description": "Bg demo",
+     "subagent_type": "general-purpose",
+     "prompt": "Reply with the single word PONG.",
+     "run_in_background": true
+    }
+   }
+  },
+  {
+   "type": "system",
+   "subtype": "task_started",
+   "task_id": "a58751c25e40a1508",
+   "tool_use_id": "toolu_01135AXrmV4GX3w5LpR3t9ts",
+   "description": "Bg demo",
+   "subagent_type": "general-purpose",
+   "is_backgrounded": true,
+   "spawn_depth": 1,
+   "task_type": "local_agent",
+   "prompt": "Reply with the single word PONG.",
+   "uuid": "52481c51-351b-440d-be67-19e9c4da6b55",
+   "session_id": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01135AXrmV4GX3w5LpR3t9ts",
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "text",
+        "text": "Async agent launched successfully. [scrubbed]"
+       }
+      ]
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-4000-8000-000000000004",
+   "uuid": "821d075e-69f5-4dd7-b4be-e0ad22bb04c9",
+   "timestamp": "2026-10-09T07:42:43.679Z",
+   "tool_use_result": "[scrubbed]"
+  },
+  {
+   "type": "system",
+   "subtype": "task_updated",
+   "task_id": "a58751c25e40a1508",
+   "patch": {
+    "status": "completed",
+    "end_time": 1791531765673
+   },
+   "uuid": "c6a676e3-0686-47fa-876b-5c5aab079daf",
+   "session_id": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+   "type": "system",
+   "subtype": "task_notification",
+   "task_id": "a58751c25e40a1508",
+   "tool_use_id": "toolu_01135AXrmV4GX3w5LpR3t9ts",
+   "status": "completed",
+   "output_file": "/var/tmp/[scrubbed]/tasks/a58751c25e40a1508.output",
+   "summary": "PONG",
+   "usage": {
+    "total_tokens": 19268,
+    "tool_uses": 0,
+    "duration_ms": 2005
+   },
+   "uuid": "e334747d-a708-44ba-aac2-c6bc76a05010",
+   "session_id": "00000000-0000-4000-8000-000000000004"
+  }
+ ]
+}

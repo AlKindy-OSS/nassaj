@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 import { closeConnection, getConnection, initializeDatabase, sessionsDb, messageCoordinationDb } from '@/modules/database/index.js';
 
@@ -22,7 +23,7 @@ test('real Claude reader and shared cache count all UUID records before filterin
     assert.equal(messageCoordinationDb.claim(base).action, 'dispatch');
     assert.equal(messageCoordinationDb.bindClaudeIdentity({ ...base, uuid, payloadSha256: claudeTextPayloadHash('hello')! }), true);
     assert.equal(messageCoordinationDb.markStarted(base), true);
-    const nativePath = path.join(directory, 'session.jsonl');
+    const nativePath = path.join(claudeProjectsSandbox('claude-reader-'), 'session.jsonl');
     const native = { uuid, sessionId: 'session', type: 'user', message: { role: 'user', content: 'hello' } };
     await writeFile(nativePath, JSON.stringify(native) + '\n');
     sessionsDb.createSession('session', 'claude', directory, undefined, undefined, undefined, nativePath);
@@ -56,7 +57,7 @@ test('B-1078: real coordination rows pair for display through claimed, started a
     getConnection().prepare("INSERT INTO users (id,username,password_hash,role) VALUES (1,'owner','hash','admin'),(2,'member','hash','admin')").run();
     const uuid = '41111111-2222-4333-8444-555555555555';
     const base = { userId: 1, clientMsgId: 'cmid_mid', provider: 'claude', sessionId: 'session', canonicalContent: 'hello', coordinationLevel: 'direct' as const };
-    const nativePath = path.join(directory, 'session.jsonl');
+    const nativePath = path.join(claudeProjectsSandbox('claude-reader-'), 'session.jsonl');
     await writeFile(nativePath, JSON.stringify({ uuid, sessionId: 'session', type: 'user', message: { role: 'user', content: 'hello' } }) + '\n');
     sessionsDb.createSession('session', 'claude', directory, undefined, undefined, undefined, nativePath);
     const provider = new ClaudeSessionsProvider();

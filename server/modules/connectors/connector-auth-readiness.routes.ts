@@ -12,7 +12,11 @@ import { connectorAuthServiceCapability } from './connector-auth-public-capabili
 import { connectorAuthProfileRuntime } from './connector-auth-profile.routes.js';
 import { CONNECTOR_OAUTH_CALLBACK_PATH } from './connector-auth-security.js';
 import { connectorRuntimeLiveOrigin } from './connector-substrate-only.production.js';
-import { connectorOwnerSessionOrigin } from './connector-owner-auth-session.js';
+import {
+  connectorOwnerSessionOrigin,
+  connectorOwnerSessionReader,
+  type ConnectorOwnerSessionReader,
+} from './connector-owner-auth-session.js';
 import { validatedConnectorCsrfToken } from './connector-owner-operation-gate.js';
 
 type ProfileReader = Readonly<{
@@ -33,6 +37,13 @@ type ReadinessRuntime = Readonly<{
   sessionOrigin?: string | null;
   installationId: string | null;
   repository: ProfileReader | null;
+  /**
+   * Store the recent-auth sessions are minted in (the step-up adapter's). It
+   * exists before any origin is persisted, unlike the profile repository, so
+   * the CSRF token is resolved from it when present; absent or null falls back
+   * to `repository`/`installationId`.
+   */
+  sessionReader?: ConnectorOwnerSessionReader | null;
 }>;
 
 type ReadinessDependencies = Readonly<{
@@ -98,7 +109,22 @@ const productionRuntime = (): ReadinessRuntime => {
     sessionOrigin: connectorOwnerSessionOrigin(),
     installationId: runtime?.installationId ?? null,
     repository: runtime?.repository ?? null,
+    sessionReader: connectorOwnerSessionReader(),
   };
+};
+
+/**
+ * Session store for CSRF validation: the step-up adapter's reader when
+ * installed (the only one that exists before an origin is persisted), else the
+ * profile runtime's repository (e.g. substrate init failed but the profile
+ * runtime was composed). Both resolve the same singleton installation and the
+ * validation itself is identical; with neither, null (fail closed).
+ */
+const csrfSessionSource = (runtime: ReadinessRuntime): ConnectorOwnerSessionReader | null => {
+  if (runtime.sessionReader) return runtime.sessionReader;
+  return runtime.repository && runtime.installationId
+    ? { installationId: runtime.installationId, repository: runtime.repository }
+    : null;
 };
 
 /** Authenticated, secret-free installation readiness for every member. */
@@ -132,11 +158,12 @@ export const createConnectorAuthReadinessRoutes = (
       const stored = enabled
         ? await runtime.repository!.listProfiles(runtime.installationId!)
         : [];
-      const csrfToken = runtime.repository && runtime.installationId
+      const sessions = csrfSessionSource(runtime);
+      const csrfToken = sessions
         ? validatedConnectorCsrfToken(
           req,
-          runtime.repository,
-          runtime.installationId,
+          sessions.repository,
+          sessions.installationId,
           caller.userId,
           runtime.sessionOrigin !== undefined ? runtime.sessionOrigin : (runtime.canonicalOrigin || null),
           dependencies.now?.() ?? Date.now(),

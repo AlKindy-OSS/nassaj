@@ -7,6 +7,10 @@ import test from 'node:test';
 
 import ts from 'typescript';
 
+import { codexSessionsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
+
+import { resolveClaudeHistoryTranscriptPath } from '../list/claude/claude-transcript-path.js';
+import { resolveCodexHistoryTranscriptPath } from '../list/codex/codex-transcript-path.js';
 import { HistoryAdmission, HistoryReadLease, HistoryBudgetError, HISTORY_LIMITS } from './history-budget.service.js';
 const sourcePath = path.join(import.meta.dirname, 'sessions.service.ts');
 async function actualService(bindings: Record<string, unknown>) {
@@ -21,12 +25,13 @@ async function actualService(bindings: Record<string, unknown>) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
   }).outputText;
   const context = vm.createContext({ HistoryReadLease, HistoryBudgetError, HISTORY_LIMITS,
+    resolveClaudeHistoryTranscriptPath, resolveCodexHistoryTranscriptPath,
     AbortController, AbortSignal, setTimeout, clearTimeout, ...bindings });
   vm.runInContext(code, context); return context.service;
 }
 for (const scenario of ['read-413', 'consumer-413', 'consumer-undefined', 'consumer-null', 'logger-throws', 'cleanup-only', 'primary-only'] as const) {
   test(`actual service preserves primary error identity across cleanup failure: ${scenario}`, async () => {
-    const root = await fs.mkdtemp(path.resolve('.memory-c1-cleanup-service-')), file = path.join(root, 'fixture.jsonl');
+    const root = codexSessionsSandbox('memory-c1-cleanup-service-'), file = path.join(root, 'fixture.jsonl');
     const open = fs.open, admission = new HistoryAdmission(), diagnostics: unknown[][] = [];
     let restore: (() => void) | undefined, closeCalls = 0, primary: unknown;
     const cleanupFails = scenario !== 'primary-only', primaryFails = scenario !== 'cleanup-only';

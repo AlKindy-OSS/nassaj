@@ -253,3 +253,87 @@ test('a login-established CSRF pair returned by readiness passes the unchanged w
   });
   assert.equal(write.status, 204);
 });
+
+test('pre-origin: the step-up session store yields CSRF with no profile runtime and the flag off', async () => {
+  const recentHash = createHash('sha256').update(RECENT).digest('hex');
+  const seen: string[] = [];
+  const sessionReader = {
+    installationId: INSTALLATION_ID,
+    repository: {
+      readOwnerAuthSession: (input: { sessionTokenHash: string; installationId: string; userId: number }) => {
+        seen.push(`${input.installationId}:${input.userId}`);
+        return input.sessionTokenHash === recentHash ? {
+          sessionId: 'step-up', csrfTokenHash: createHash('sha256').update(CSRF).digest('hex'),
+          authTime: 1, expiresAt: Number.MAX_SAFE_INTEGER,
+        } : null;
+      },
+    },
+  };
+  const serve = async (reader: typeof sessionReader | null, cookie: string) => {
+    const app = express();
+    app.use((req, _res, next) => {
+      (req as express.Request & { user?: { id: number; role: string } }).user = { id: 7, role: 'owner' };
+      next();
+    });
+    app.use('/r', createConnectorAuthReadinessRoutes({
+      env: {},
+      runtime: () => ({ canonicalOrigin: '', sessionOrigin: ORIGIN, installationId: null, repository: null,
+        sessionReader: reader }),
+    }));
+    const server = app.listen(0);
+    servers.push(server);
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/r`,
+      { headers: { cookie } });
+    return { status: response.status, body: await response.json() as Record<string, unknown> };
+  };
+  const both = `__Host-nassaj_connector_recent_auth=${RECENT}; __Secure-nassaj_connector_csrf=${CSRF}`;
+  const ok = await serve(sessionReader, both);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.csrfToken, CSRF);
+  assert.equal(ok.body.recentAuthRequired, false);
+  assert.deepEqual(seen, [`${INSTALLATION_ID}:7`], 'bound to the caller and the session installation');
+
+  const noSession = await serve(sessionReader, `__Secure-nassaj_connector_csrf=${CSRF}`);
+  assert.equal(noSession.body.csrfToken, null);
+  const wrongCsrf = await serve(sessionReader,
+    `__Host-nassaj_connector_recent_auth=${RECENT}; __Secure-nassaj_connector_csrf=${'b'.repeat(64)}`);
+  assert.equal(wrongCsrf.body.csrfToken, null);
+  const noAdapter = await serve(null, both);
+  assert.equal(noAdapter.body.csrfToken, null, 'no reader and no profile runtime fails closed');
+  assert.equal(noAdapter.body.recentAuthRequired, true);
+});
+
+test('a null session reader falls back to the profile runtime repository for CSRF', async () => {
+  const recentHash = createHash('sha256').update(RECENT).digest('hex');
+  const repository = {
+    listProfiles: () => [],
+    readOwnerAuthSession: ({ sessionTokenHash }: { sessionTokenHash: string }) =>
+      sessionTokenHash === recentHash ? {
+        sessionId: 'profile-runtime', csrfTokenHash: createHash('sha256').update(CSRF).digest('hex'),
+        authTime: 1, expiresAt: Number.MAX_SAFE_INTEGER,
+      } : null,
+  };
+  const app = express();
+  app.use((req, _res, next) => {
+    (req as express.Request & { user?: { id: number; role: string } }).user = { id: 7, role: 'owner' };
+    next();
+  });
+  app.use('/r', createConnectorAuthReadinessRoutes({
+    env: enabledEnv('github'),
+    runtime: () => ({ canonicalOrigin: ORIGIN, sessionOrigin: ORIGIN, installationId: INSTALLATION_ID,
+      repository, sessionReader: null }),
+  }));
+  const server = app.listen(0);
+  servers.push(server);
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/r`;
+  const both = `__Host-nassaj_connector_recent_auth=${RECENT}; __Secure-nassaj_connector_csrf=${CSRF}`;
+  const body = await (await fetch(url, { headers: { cookie: both } })).json() as Record<string, unknown>;
+  assert.equal(body.csrfToken, CSRF);
+  assert.equal(body.recentAuthRequired, false);
+  const forged = await (await fetch(url, {
+    headers: { cookie: `__Host-nassaj_connector_recent_auth=${'d'.repeat(64)}; __Secure-nassaj_connector_csrf=${CSRF}` },
+  })).json() as Record<string, unknown>;
+  assert.equal(forged.csrfToken, null, 'the fallback validates exactly like the reader');
+});

@@ -1,3 +1,19 @@
+## 2.3.1.1 — 2026-10-10
+
+عرض تقدّم التشغيل محايداً للمزوّد (ADR-199): نسبة إنجاز حيّة في شريط الحالة وبطاقة الوكيل الفرعي لـClaude
+وCodex وagy وOpenCode (T-1981..T-1993، B-1560، B-1563)؛ وإغلاق فجوات أمان: واجهات ملفات المشروع ترفض
+ملفات .env وقاعدة البيانات الحيّة وأي ملف SQLite وسجلات المحادثات ومخازن الاعتماد، وأوامر git بمسارات
+حرفية، وقراءة التاريخ من سجلات محصورة فقط (B-1564)، ومشغّل Claude يفشل مغلقاً في الإنتاج؛ وإصلاح CSRF
+في معالج إعداد الموصلات؛ وربط الأوامر الخام بجلستها مع تاريخ DD/MM/YYYY؛ وأداة تدقيق مصادر الجلسات
+(ADR-201، T-2001)؛ وإصلاحات واجهة (شارة Enter، تلميح cmd-K في RTL، B-1558).
+
+Provider-neutral run progress (ADR-199): live completion percent on the status bar and sub-agent card for
+Claude, Codex, agy and OpenCode (T-1981..T-1993, B-1560, B-1563); security fixes: project file APIs refuse
+.env files, the application database, any SQLite file, transcripts and credential stores, git runs with literal
+pathspecs, history reads only contained transcripts (B-1564), and the Claude launcher fails closed in
+production; connectors setup CSRF fix; raw commands link to their session with DD/MM/YYYY dates; a
+read-only session source audit (ADR-201, T-2001); UI fixes (Enter badge, RTL cmd-K hint, B-1558).
+
 ## 2.3.1.0 — 2026-10-04
 
 جلسات مشتركة برابط عام لأي شخص يملك التوكن مع عرض فقط (T-1970)، وتسجيل دخول موحد باسم مستخدم أو

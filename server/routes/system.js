@@ -2126,6 +2126,7 @@ const toRawHistoryItem = (entry) => ({
     executedAt: entry.executedAt,
     expiresAt: new Date(Date.parse(entry.executedAt) + HISTORY_RETENTION_MS).toISOString(),
     requestedAt: entry.requestedAt ?? null,
+    sessionId: entry.sessionId ?? null,
     exitCode: entry.exitCode ?? null,
     stdoutTail: entry.stdoutTail ?? '',
     stderrTail: entry.stderrTail ?? '',
@@ -2668,6 +2669,7 @@ router.post('/command-board-raw', rawExecInsertLimiter, requireRawExecTier, (req
         const result = insertRawCommand({
             command: body.command,
             requestedBy: typeof req.user?.username === 'string' ? req.user.username : null,
+            sessionId: body.sessionId,
         });
         if (!result.ok) {
             auditRawExec(req, 'reject', {
@@ -2858,6 +2860,7 @@ function runRawCommand(req, res, prep) {
                 command: row.command,
                 requestedBy: row.requestedBy ?? null,
                 requestedAt: row.requestedAt ?? null,
+                sessionId: row.sessionId ?? null,
                 executedBy: typeof req.user?.username === 'string' ? req.user.username : null,
                 outcome,
                 ...extra,

@@ -1,0 +1,72 @@
+{
+ "_provenance": {
+  "transcript": "real agy smoke transcript (operator brain, ADR-191 run 2026-09-27); step structure, types, statuses, ids, tool names and Role kept; all request, prompt, planner and message text replaced with placeholders; thinking dropped; paths neutralised",
+  "taskInProgress": "real task.md checklist structure ([x]/[/]/[ ] order kept); headings and item text replaced with \"step N\"",
+  "taskBackticks": "real task.md checklist structure (backtick boxes kept); item text replaced with \"step N\"",
+  "taskLinks": "real task.md checklist structure (markdown file links kept); link targets and text replaced with placeholders"
+ },
+ "brainUUID": "e8add010-85b1-42af-9fd9-87be9350fbd5",
+ "childUUID": "23e8835d-cab0-427f-a7ea-adf75952f16d",
+ "transcript": [
+  {
+   "step_index": 0,
+   "source": "USER_EXPLICIT",
+   "type": "USER_INPUT",
+   "status": "DONE",
+   "created_at": "2026-09-27T21:14:34Z",
+   "content": "<USER_REQUEST>\nuser request text\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nmetadata text\n</ADDITIONAL_METADATA>"
+  },
+  {
+   "step_index": 1,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-09-27T21:14:34Z",
+   "tool_calls": [
+    {
+     "name": "invoke_subagent",
+     "args": {
+      "Subagents": "[{\"Prompt\":\"prompt text 1\",\"Role\":\"scribe\",\"TypeName\":\"scribe\"}]",
+      "toolAction": "\"action text\"",
+      "toolSummary": "\"summary text\""
+     }
+    }
+   ]
+  },
+  {
+   "step_index": 2,
+   "source": "MODEL",
+   "type": "GENERIC",
+   "status": "DONE",
+   "created_at": "2026-09-27T21:14:52Z",
+   "content": "Created At: 2026-09-28T00:14:52+03:00\nCompleted At: 2026-09-28T00:14:52+03:00\nCreated the following subagents:\n{\n  \"conversationId\": \"23e8835d-cab0-427f-a7ea-adf75952f16d\",\n  \"logAbsoluteUri\": \"file:///home/user/.gemini/antigravity-cli/brain/23e8835d-cab0-427f-a7ea-adf75952f16d/.system_generated/logs/transcript.jsonl\",\n  \"workspaceUris\": [\n    \"file:///var/tmp/workspace\"\n  ]\n}\nThe subagents will send you a message when they have completed their task or require guidance. There is no need to poll for their responses."
+  },
+  {
+   "step_index": 3,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-09-27T21:14:52Z",
+   "content": "planner text 1"
+  },
+  {
+   "step_index": 4,
+   "source": "SYSTEM",
+   "type": "SYSTEM_MESSAGE",
+   "status": "DONE",
+   "created_at": "2026-09-27T21:15:05Z",
+   "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the system as important information to pay attention to.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-09-27T21:15:05Z sender=23e8835d-cab0-427f-a7ea-adf75952f16d priority=MESSAGE_PRIORITY_HIGH content=report text 1\n</SYSTEM_MESSAGE>"
+  },
+  {
+   "step_index": 5,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-09-27T21:15:05Z",
+   "content": "planner text 2"
+  }
+ ],
+ "taskInProgress": "# Tasks\n\n- [x] step 1\n- [x] step 2\n- [/] step 3\n- [ ] step 4\n- [ ] step 5\n",
+ "taskBackticks": "# Tasks\n\n- `[x]` step 1\n- `[x]` step 2\n- `[x]` step 3\n- `[x]` step 4\n- `[x]` step 5\n- `[x]` step 6\n- `[x]` step 7\n",
+ "taskLinks": "- [x] [file-1.ts](file:///home/user/project/file-1.ts) step 1\n- [x] [file-2.ts](file:///home/user/project/file-2.ts) step 2\n- [x] [file-3.ts](file:///home/user/project/file-3.ts) step 3\n- [x] [file-4.ts](file:///home/user/project/file-4.ts) step 4\n- [x] [file-5.ts](file:///home/user/project/file-5.ts) step 5\n- [x] [file-6.ts](file:///home/user/project/file-6.ts) step 6\n"
+}

@@ -105,6 +105,22 @@ export interface NormalizedMessage {
   skillName?: string;
   /** T-1862: locally-added "Context compaction started." row — see ChatMessage doc. */
   isCompactionBoundary?: boolean;
+  /**
+   * ADR-199 mirror of the server's provider-neutral progress fields
+   * (server/shared/progress-normalize.ts); read by useChatMessages/useRunProgress.
+   */
+  plan?: {
+    source: 'tool' | 'artifact';
+    items: { id: string; label: string; status: 'pending' | 'in_progress' | 'completed' }[];
+    /** ADR-199 item 12: totals over the full list (items are capped at 50), after exclusions. */
+    counts?: { done: number; total: number };
+  };
+  subagent?: {
+    id: string;
+    parentId: string | null;
+    label: string;
+    state: 'started' | 'running' | 'completed' | 'failed';
+  };
   images?: string[];
   files?: { name: string; path: string; relPath?: string; size?: number; mimeType?: string }[];
   /** Images deliberately omitted by the history API to cap memory usage. */

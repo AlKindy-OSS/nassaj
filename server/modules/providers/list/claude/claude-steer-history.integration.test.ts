@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 import { closeConnection, getConnection, initializeDatabase, messageCoordinationDb, participantsDb, sessionsDb } from '@/modules/database/index.js';
 import { buildSteerWrapper } from '@/modules/session-steer/index.js';
@@ -54,7 +55,7 @@ test('reload marks verified injections only, by ingress identity, never by text'
       { type: 'user', uuid: U2, sessionId: SID, message: { role: 'user', content: late } },
       { type: 'user', uuid: 'e1111111-2222-4333-8444-555555555555', sessionId: SID, message: { role: 'user', content: mid } },
     ];
-    const file = path.join(dir, `${SID}.jsonl`);
+    const file = path.join(claudeProjectsSandbox('steer-hist-'), `${SID}.jsonl`);
     await writeFile(file, `${lines.map(l => JSON.stringify(l)).join('\n')}\n`);
     sessionsDb.createSession(SID, 'claude', dir, undefined, undefined, undefined, file);
     participantsDb.recordSpawn(SID, 1);

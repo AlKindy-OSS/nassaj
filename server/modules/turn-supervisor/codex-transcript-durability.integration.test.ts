@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const sandbox = fs.mkdtempSync('/var/tmp/nassaj-supervised-codex-transcript-');
 process.env.DATABASE_PATH = `${sandbox}/db.sqlite`;
@@ -8,6 +9,7 @@ fs.writeFileSync(process.env.DATABASE_PATH, '');
 
 const { closeConnection, initializeDatabase, messageAuthorsDb, sessionsDb, userDb } = await import('@/modules/database/index.js');
 const { CodexSessionsProvider } = await import('@/modules/providers/index.js');
+const { vendorTranscriptPath } = await import('@/modules/providers/shared/vendor/vendor-transcript.js');
 await initializeDatabase();
 
 after(() => {
@@ -17,7 +19,9 @@ after(() => {
 
 test('supervised ephemeral Codex transcript is registered DB truth and readable by Codex history', async () => {
   const sessionId = 'codex_supervised_durable';
-  const transcript = `${sandbox}/supervised.jsonl`;
+  // B-1564: the supervisor writes to the nassaj-owned Codex tree (vendorTranscriptPath), the reader's root.
+  const transcript = vendorTranscriptPath('codex', sessionId, sandbox);
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
   fs.writeFileSync(transcript, [
     JSON.stringify({
       eventId: 'turn:user', timestamp: '2026-08-19T00:00:00.000Z', type: 'event_msg',

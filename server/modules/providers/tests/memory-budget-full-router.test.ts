@@ -78,7 +78,11 @@ before(async () => {
   // eslint-disable-next-line boundaries/dependencies -- full-router integration seeds the real sessions table.
   const { getConnection } = await import('@/modules/database/connection.js');
   for (const provider of ['claude', 'codex']) {
-    const session = `memory-router-${provider}`, source = path.join(scratch, `${provider}.jsonl`);
+    // B-1564: history reads only transcripts under the provider's root in this HOME.
+    const session = `memory-router-${provider}`, source = provider === 'claude'
+      ? path.join(scratch, '.claude', 'projects', '-memory-router', `${session}.jsonl`)
+      : path.join(scratch, '.codex', 'sessions', `${provider}.jsonl`);
+    await fs.mkdir(path.dirname(source), { recursive: true });
     const record = assistantRecord(provider, 0, 'history العربية 🧵');
     if (provider === 'claude') record.sessionId = session;
     await fs.writeFile(source, JSON.stringify(record) + '\n'); sources.set(provider, source);

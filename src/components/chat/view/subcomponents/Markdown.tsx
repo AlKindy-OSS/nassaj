@@ -508,7 +508,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   // تُعرَض نصّاً سليماً بنفس الإطار (تفصيل السقوط في src/syntax/prismRegistry).
   const { SyntaxHighlighter } = useCodeHighlighter();
   const {
-    catalog, runAction, userRole, inlineExecEnabled, liveStatusOf, messageTimestamp,
+    catalog, runAction, userRole, inlineExecEnabled, liveStatusOf, messageTimestamp, sessionId,
   } = useChatActions();
   const { isRestarting, isSuccess, startPolling } = useRestartWatch();
   const [copied, setCopied] = useState(false);
@@ -594,7 +594,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
       )(RAW_EXEC_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd }),
+        body: JSON.stringify(sessionId ? { command: cmd, sessionId } : { command: cmd }),
       });
       // B-257: الصفّ يعود مُعشَّشاً تحت `command` لا مسطَّحاً. قراءته مسطَّحة كانت
       // تُسقِط الحارس فيُبلَّغ المالك بالفشل بينما الأمر أُدرج فعلاً (201 وسجل
@@ -623,7 +623,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
     } finally {
       setIsInserting(false);
     }
-  }, [raw, isInserting, tChat, noteInsertFailure]);
+  }, [raw, isInserting, tChat, noteInsertFailure, sessionId]);
 
   // ─── كشف علامة nassaj-exec ───────────────────────────────────────────────
   const markerMatch = EXEC_MARKER_RE.exec(className || '');

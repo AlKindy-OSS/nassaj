@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { AGY_BRAIN_UNDER_HOME } from '@/modules/providers/list/antigravity/agy-brain-layout.js';
 import { AntigravitySessionsProvider } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555';
@@ -25,7 +26,9 @@ async function withTranscriptFixture(
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'agy-transcript-'));
   const databasePath = path.join(tempRoot, 'auth.db');
-  const transcriptDir = path.join(tempRoot, 'brain', SESSION_ID, '.system_generated', 'logs');
+  // B-1564: history reads only brains under a provider root (the sandbox HOME's brain).
+  const brainDir = path.join(homedir(), AGY_BRAIN_UNDER_HOME, SESSION_ID);
+  const transcriptDir = path.join(brainDir, '.system_generated', 'logs');
   const transcriptPath = path.join(transcriptDir, 'transcript.jsonl');
 
   closeConnection();
@@ -52,6 +55,7 @@ async function withTranscriptFixture(
       process.env.DATABASE_PATH = previousDatabasePath;
     }
     await rm(tempRoot, { recursive: true, force: true });
+    await rm(brainDir, { recursive: true, force: true });
   }
 }
 

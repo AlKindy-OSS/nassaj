@@ -36,6 +36,7 @@ import {
   connectorOwnerSessionOrigin,
   createRecentAuthOriginSource,
 } from './connector-owner-auth-session.js';
+import connectorAuthReadinessRoutes from './connector-auth-readiness.routes.js';
 import { createConnectorOwnerOperationGate } from './connector-owner-operation-gate.js';
 import connectorOwnerSessionRoutes from './connector-owner-session.production.js';
 import { executeConnectorPolicyV2LifecycleWrite } from './connector-substrate-only.production.js';
@@ -82,6 +83,7 @@ before(async () => {
     next();
   });
   app.use('/api/connectors/owner-session', connectorOwnerSessionRoutes);
+  app.use('/api/connectors/auth-readiness', connectorAuthReadinessRoutes);
   const gate = (operation: 'upsert_personal_api_key' | 'upsert_byo', ownerOnly: boolean) =>
     createConnectorOwnerOperationGate({ repository, installationId, canonicalOrigin: ORIGIN, operation, ownerOnly });
   const done: express.RequestHandler = (_req, res) => { res.status(204).end(); };
@@ -169,6 +171,35 @@ test('a member password step-up opens member gates and is refused at owner gates
   assert.equal((await operate('/api/connectors/owner-operation', ownerUser.id, ownerCookies)).status, 204);
   assert.equal((await operate('/api/connectors/owner-operation', ownerUser.id, cookies)).status, 403,
     'a session belongs to its own user only');
+});
+
+test('pre-origin owner step-up: production readiness returns the CSRF token', async () => {
+  // Live regression: no origin persisted, NASSAJ_CONNECTOR_AUTH_REGISTRY_V1 unset.
+  // The step-up mints its session under the NASSAJ_PUBLIC_ORIGIN proposal; the
+  // readiness route must hand the owner that CSRF token, or the origin wizard
+  // (PUT /origin needs it) can never be completed.
+  assert.equal(process.env.NASSAJ_CONNECTOR_AUTH_REGISTRY_V1, undefined);
+  const owner = newUser('owner');
+  const cookies = setCookies(await stepUp(owner.id, { method: 'password', password: PASSWORD }));
+  const read = (cookie: string) => fetch(`${baseUrl}/api/connectors/auth-readiness`, {
+    headers: { 'x-test-user': String(owner.id), cookie },
+  });
+  const both = `${RECENT_COOKIE}=${cookies.get(RECENT_COOKIE)}; ${CSRF_COOKIE}=${cookies.get(CSRF_COOKIE)}`;
+  const response = await read(both);
+  assert.equal(response.status, 200);
+  const body = await response.json() as { csrfToken: string | null; recentAuthRequired: boolean };
+  assert.equal(body.csrfToken, cookies.get(CSRF_COOKIE));
+  assert.equal(body.recentAuthRequired, false);
+
+  const withoutSession = await (await read(`${CSRF_COOKIE}=${cookies.get(CSRF_COOKIE)}`)).json() as
+    { csrfToken: string | null; recentAuthRequired: boolean };
+  assert.equal(withoutSession.csrfToken, null, 'the CSRF cookie alone never reveals a token');
+  assert.equal(withoutSession.recentAuthRequired, true);
+  const other = newUser('owner');
+  const foreign = await (await fetch(`${baseUrl}/api/connectors/auth-readiness`, {
+    headers: { 'x-test-user': String(other.id), cookie: both },
+  })).json() as { csrfToken: string | null };
+  assert.equal(foreign.csrfToken, null, 'a session belongs to its own user only');
 });
 
 test('the real verifier quota answers 429 with Retry-After and is audited once per window', async () => {

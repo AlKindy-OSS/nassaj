@@ -1,0 +1,106 @@
+{
+ "_provenance": "Real Claude JSONL transcript rows (two operator sessions, 2026-09-24 and 2026-10-06): a completed foreground Agent call and a background Agent call denied before it ran. Prompts, reports, descriptions, cwd and session ids scrubbed; keys and status values kept verbatim.",
+ "rows": [
+  {
+   "type": "assistant",
+   "uuid": "bdb1f11c-ed8e-44d6-ab9d-9f238b5036f9",
+   "parentUuid": "0fb98d13-2f6e-4c6f-b170-b29413337d20",
+   "isSidechain": false,
+   "timestamp": "2026-09-24T16:59:35.947Z",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "message": {
+    "role": "assistant",
+    "model": "claude-opus-5-5",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01BgA1BUJYo1PBna6KtE9ifb",
+      "name": "Agent",
+      "input": {
+       "subagent_type": "devops",
+       "description": "Diagnose send failure",
+       "run_in_background": false,
+       "prompt": "[scrubbed prompt]"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "type": "user",
+   "uuid": "cd2b1cd6-8427-48b6-ab31-0cd717cf7cbd",
+   "parentUuid": "bdb1f11c-ed8e-44d6-ab9d-9f238b5036f9",
+   "isSidechain": false,
+   "timestamp": "2026-09-24T17:01:02.179Z",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "toolUseResult": {
+    "status": "completed",
+    "agentId": "af3acf75cb5ff54d0",
+    "agentType": "devops",
+    "totalDurationMs": 86022,
+    "totalToolUseCount": 13
+   },
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01BgA1BUJYo1PBna6KtE9ifb",
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "text",
+        "text": "[scrubbed subagent report]"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "type": "assistant",
+   "uuid": "70fea634-7e0a-493f-93db-45966eb41efd",
+   "parentUuid": "f3adc864-5676-4a00-bbee-5c3c3f305977",
+   "isSidechain": false,
+   "timestamp": "2026-10-06T11:55:10.262Z",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "message": {
+    "role": "assistant",
+    "model": "claude-opus-5-5",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_017bCT3ChGLe3dM2Z5GZAZJ8",
+      "name": "Agent",
+      "input": {
+       "subagent_type": "architect",
+       "description": "Design activation change",
+       "run_in_background": true,
+       "prompt": "[scrubbed prompt]"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "type": "user",
+   "uuid": "4026bd65-6da0-4df9-ba1b-423c60da163c",
+   "parentUuid": "70fea634-7e0a-493f-93db-45966eb41efd",
+   "isSidechain": false,
+   "timestamp": "2026-10-06T11:55:10.277Z",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "toolUseResult": "Not run: the response that made this tool call was stopped by a safety classifier.",
+   "toolDenialKind": "cancelled",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "tool_use_id": "toolu_017bCT3ChGLe3dM2Z5GZAZJ8",
+      "is_error": true,
+      "content": "Not run: the response that made this tool call was stopped by a safety classifier."
+     }
+    ]
+   }
+  }
+ ]
+}

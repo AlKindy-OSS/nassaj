@@ -32,10 +32,12 @@ import {
   CollapsibleTrigger,
 } from '../../../../shared/view/ui';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
+import { resolveOverallPercent } from '../../hooks/declaredProgress';
 import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 
 import ClaudeStatus from './ClaudeStatus';
+import PercentMeter, { formatPercent } from './PercentMeter';
 import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
 
 // ── ثوابت مشتركة مع ClaudeStatus ─────────────────────────────────────────────
@@ -88,6 +90,43 @@ function writeHideCompletedPref(value: boolean): void {
   }
 }
 
+// ── ما أعلنه الوكيل: المنجز/التالي/المتبقي (يظهر داخل الجزء القابل للطيّ) ──────
+
+function DeclaredProgressNote({ progress }: { progress: NonNullable<RunAgent['progress']> }) {
+  const { t, i18n } = useTranslation('chat');
+  const { done, next, left } = progress;
+  if (!done && !next && left === undefined) return null;
+  return (
+    <section
+      className="space-y-0.5 py-1.5 text-[11px]"
+      data-testid="agent-declared-note"
+      aria-label={t('agentActivity.declaredHeading', { defaultValue: 'Reported by the agent' })}
+    >
+      <p className="font-medium text-violet-700 dark:text-violet-300">
+        {t('agentActivity.declaredHeading', { defaultValue: 'Reported by the agent' })}
+      </p>
+      {done && (
+        <p className="break-words text-muted-foreground">
+          <span className="font-medium">{t('agentActivity.declaredDone', { defaultValue: 'Done' })}:</span> {done}
+        </p>
+      )}
+      {next && (
+        <p className="break-words text-muted-foreground">
+          <span className="font-medium">{t('agentActivity.declaredNext', { defaultValue: 'Next' })}:</span> {next}
+        </p>
+      )}
+      {left !== undefined && (
+        <p className="text-muted-foreground">
+          {t('agentActivity.declaredLeft', {
+            minutes: left.toLocaleString(i18n.language),
+            defaultValue: '~{{minutes}} min left',
+          })}
+        </p>
+      )}
+    </section>
+  );
+}
+
 // ── AgentRow (صفّ الوكيل الواحد داخل البطاقة — غير مُصدَّر) ─────
 
 function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
@@ -104,6 +143,9 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
   const stale = agent.status === 'stale';
   const pulse = running && !frozen;
   const contentId = useId();
+  // No `subagent_type` on the delegation → a generic, untranslated label (as before ADR-199).
+  const typeLabel = agent.type || t('agentActivity.genericType', { defaultValue: 'Agent' });
+  const rowPercent = agent.status === 'done' ? 100 : running ? (agent.progress?.percent ?? null) : null;
 
   // صدق العرض (B-208، بند 8 — فيتو): الأداة الجارية وعدّاد الاستدعاءات يأتيان
   // حصراً من `childTools`، وهذه تُبنى إمّا من البثّ الحيّ (صفوف تحمل
@@ -130,7 +172,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
         ].join(' ')}
         aria-label={t('agentActivity.rowAria', {
-          type: agent.type,
+          type: typeLabel,
           status: statusLabel,
           defaultValue: '{{type}} — {{status}}',
         }) + (skillAria ? ` · ${skillAria}` : '')}
@@ -168,7 +210,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
 
         {/* نوع الوكيل + الوصف */}
         <span className="min-w-0 truncate text-xs font-medium text-foreground">
-          {agent.type}
+          {typeLabel}
           {agent.description && (
             <span className="text-muted-foreground/80">
               {' · '}
@@ -178,6 +220,19 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
         </span>
 
         {skillCount > 0 && <ObservedSkillCount count={skillCount} coverage={agent.skillCoverage} />}
+
+        {/* نسبة الإنجاز: «انتهى» عبر tool_result = 100% محسوبة؛ الجاري = ما أعلنه
+            الوكيل نفسه (موسومة). بعد تحديث الصفحة لا نثر → تُخفى، لا 0% مختلقة. */}
+        {rowPercent !== null && (
+          <PercentMeter
+            testId="agent-percent"
+            percent={rowPercent}
+            declared={running}
+            label={t('agentActivity.percentAria', { defaultValue: 'Agent progress' })}
+            barFromSm
+            barWidth="w-8"
+          />
+        )}
 
         {/* الأداة الحالية (sm+ فقط) — تُعرض فقط حين تكون معروفة فعلاً */}
         {showCurrentTool && (
@@ -252,6 +307,7 @@ function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
       {/* تاريخ أدوات الوكيل */}
       <CollapsibleContent id={contentId}>
         <div className="ms-3 mt-0.5 border-s border-border ps-3">
+          {agent.progress && <DeclaredProgressNote progress={agent.progress} />}
           {skillCount > 0 && agent.observedSkills && <section className="space-y-0.5 py-1.5" aria-label={t('skillObservations.title')}>
             <p className="text-xs font-medium text-muted-foreground">{t('skillObservations.title')}</p>
             {agent.skillsStale && <p className="text-xs text-muted-foreground">{t('skillObservations.stale')}</p>}
@@ -541,6 +597,9 @@ function MergedCard({
     ? agents.filter((a) => a.status !== 'done')
     : agents;
   const allHiddenAsCompleted = hideCompleted && completedCount > 0 && visibleAgents.length === 0;
+  // ADR-199 Decision 18: this provider reports a sub-agent only once it settled,
+  // so its rows are finished ones and the card says so instead of implying life.
+  const shownWhenFinished = Boolean(progress?.subagentsWhenFinished) && (progress?.agents.length ?? 0) > 0;
 
   // ── القيم المشتقة ──────────────────────────────────────────────────────────
   const isFrozenLoading = isLoading && frozen;
@@ -576,6 +635,9 @@ function MergedCard({
 
   const showProgressArea = isLoading && !frozen;
   const showTaskCounter = showProgressArea && total > 0;
+  // Overall percent: TodoWrite-computed (inside the Tasks chip), else declared by
+  // the coordinator, else the agents' average (only when every agent has a value).
+  const overall = showProgressArea && progress ? resolveOverallPercent(progress) : null;
   const canInterrupt = isConfirmedStarter && isLoading && status?.can_interrupt !== false && !!onAbort;
 
   const formatLocalizedDuration = (totalSecs: number) => {
@@ -708,6 +770,11 @@ function MergedCard({
                 {t('runProgress.tasksLabel', { defaultValue: 'Tasks' })}{' '}
                 {localeNum(done)}/{localeNum(total)}
               </span>
+              {overall && (
+                <span className="shrink-0 tabular-nums" data-testid="tasks-percent">
+                  {formatPercent(overall.percent, locale)}
+                </span>
+              )}
               <div
                 className="h-1 w-10 shrink-0 overflow-hidden rounded-full bg-border/60"
                 role="progressbar"
@@ -724,6 +791,20 @@ function MergedCard({
                 />
               </div>
             </div>
+          )}
+
+          {/* النسبة الكلية المعلنة من الوكيل (بلا قائمة مهام) — لا تُعرض أبداً كـ0% مختلقة */}
+          {overall && (
+            <PercentMeter
+              testId="overall-percent"
+              percent={overall.percent}
+              declared={overall.source !== 'tasks'}
+              label={t('runProgress.overallAria', { defaultValue: 'Overall progress' })}
+              barFromSm
+              // With a todo list the desktop percent rides inside the Tasks chip
+              // (sm+ only); this standalone chip then serves narrow screens.
+              className={cn('bg-muted/50', overall.source === 'tasks' && 'sm:hidden')}
+            />
           )}
 
           {/* تقدير الوقت المتبقّي (sm+، عند وجود مهام فقط) */}
@@ -874,6 +955,14 @@ function MergedCard({
         {/* ── صفوف الوكلاء (قابلة للطيّ) ───────────────────────────────────── */}
         {isExpanded && (
           <div className="border-t border-border/30 px-3 py-1.5">
+            {shownWhenFinished && (
+              <p
+                className="px-1.5 pb-0.5 text-[10px] text-muted-foreground/70"
+                data-testid="agents-shown-when-finished"
+              >
+                {t('agentActivity.shownWhenFinished', { defaultValue: 'Shown when finished' })}
+              </p>
+            )}
             {allHiddenAsCompleted ? (
               <p className="px-1.5 py-1 text-[11px] text-muted-foreground/70">
                 {t('agentActivity.allCompletedSummary', {

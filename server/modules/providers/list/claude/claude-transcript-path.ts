@@ -1,7 +1,10 @@
 import path from 'node:path';
-import { realpath, stat } from 'node:fs/promises';
 
 import { operatorClaudeHome, resolveClaudeHomeForUser } from './claude-home.js';
+import {
+  isStrictlyUnder, realFileOf, realRoots, resolveProviderTranscript,
+} from '../../shared/contained-file.js';
+
 import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
 
 /**
@@ -56,39 +59,9 @@ export function claudeProjectRoots(userId: string | number | null): string[] {
   return [...roots];
 }
 
-/** Resolves a root to its real location; absent roots simply drop out. */
-async function realRoots(roots: string[]): Promise<string[]> {
-  const resolved: string[] = [];
-
-  for (const root of roots) {
-    try {
-      resolved.push(await realpath(root));
-    } catch {
-      // A root that does not exist on this host cannot contain anything.
-    }
-  }
-
-  return resolved;
-}
-
-/** Realpath of `candidate` when it is a regular file, else null. */
-async function realFile(candidate: string): Promise<string | null> {
-  try {
-    const resolved = await realpath(candidate);
-    return (await stat(resolved)).isFile() ? resolved : null;
-  } catch {
-    return null;
-  }
-}
-
-function isUnder(target: string, root: string): boolean {
-  const rel = path.relative(root, target);
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
 /** True when the already-resolved path sits under any resolved root. */
 function isContained(target: string, roots: string[]): boolean {
-  return roots.some((root) => isUnder(target, root));
+  return roots.some((root) => isStrictlyUnder(target, root));
 }
 
 /**
@@ -116,7 +89,7 @@ export async function resolveClaudeTranscriptPath(
   if (stored) {
     // T-1880: a pre-separation spelling falls back to `<root>/<same rel path>`.
     const located = resolveStoredClaudeTranscript(stored);
-    const resolved = located ? await realFile(located) : null;
+    const resolved = located ? await realFileOf(located) : null;
     if (resolved && path.basename(resolved) === fileName && isContained(resolved, roots)) {
       return resolved;
     }
@@ -130,11 +103,32 @@ export async function resolveClaudeTranscriptPath(
 
   const encoded = encodeClaudeProjectDir(projectPath);
   for (const root of roots) {
-    const resolved = await realFile(path.join(root, encoded, fileName));
+    const resolved = await realFileOf(path.join(root, encoded, fileName));
     if (resolved && isContained(resolved, roots)) {
       return resolved;
     }
   }
 
   return null;
+}
+
+/**
+ * B-1564: transcript file for HISTORY reads of a session row, or null. A session
+ * is readable by every member allowed to see it, not only its author, so the
+ * file may live under the operator's (or the shared) Claude projects root or
+ * under a member tree's `.claude/projects`; it must realpath-resolve under one
+ * of them, be a regular file and be named `<sessionId>.jsonl`. A stored path
+ * outside every root is never opened. Nothing is enumerated or provisioned.
+ */
+export async function resolveClaudeHistoryTranscriptPath(row: ClaudeTranscriptRow): Promise<string | null> {
+  const sessionId = (row.session_id ?? '').trim();
+  const stored = (row.jsonl_path ?? '').trim();
+  if (!sessionId || sessionId !== path.basename(sessionId) || !stored) {
+    return null;
+  }
+  const shared = [operatorClaudeHome(), process.env.CLAUDE_CONFIG_DIR?.trim() || operatorClaudeHome()]
+    .map((home) => path.join(home, 'projects'));
+  // T-1880: a pre-separation spelling falls back to `<root>/<same rel path>`.
+  return resolveProviderTranscript(resolveStoredClaudeTranscript(stored), shared, path.join('.claude', 'projects'),
+    (resolved) => path.basename(resolved) === `${sessionId}.jsonl`);
 }

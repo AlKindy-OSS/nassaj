@@ -6,6 +6,9 @@ import readline from 'node:readline';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
+
+import { claudeParentToolUseId, claudeToolUseProgress } from './claude-progress.js';
+import { createClaudeChildToolsProgress, createClaudeProgressFold } from './claude-progress-fold.js';
 import { messageCoordinationDb, sessionsDb } from '@/modules/database/index.js';
 import {
   findLatestStoppedNotificationMs,
@@ -15,7 +18,9 @@ import { reconcileAgentMessages } from '@/modules/providers/list/claude/agent-re
 
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
 
-import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
+import { resolveContainedFile } from '../../shared/contained-file.js';
+
+import { resolveClaudeHistoryTranscriptPath } from './claude-transcript-path.js';
 import { detectClaudeSkillLoad } from './claude-skill-load.js';
 import { createClaudeRawIdentityCollector, markSteerCandidate, readQueuedSteerPrompt } from './claude-receipt-identity.js';
 
@@ -69,6 +74,7 @@ async function readAgentFileNames(subagentsDir: string, lease?: HistoryReadLease
 
 async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Promise<AnyRecord[]> {
   const tools: AnyRecord[] = [];
+  const progress = createClaudeChildToolsProgress();
 
   try {
     const fileStream = lease ? lease.stream(filePath) : fs.createReadStream(filePath);
@@ -88,12 +94,14 @@ async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Prom
         if (entry.message?.role === 'assistant' && Array.isArray(entry.message?.content)) {
           for (const part of entry.message.content as AnyRecord[]) {
             if (part.type === 'tool_use') {
-              tools.push({
+              const item: AnyRecord = {
                 toolId: part.id,
                 toolName: part.name,
                 toolInput: part.input,
                 timestamp: entry.timestamp,
-              });
+              };
+              tools.push(item);
+              progress.toolUse(item);
             }
           }
         }
@@ -119,12 +127,14 @@ async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Prom
                   : (lease ? lease.stringify(part.content) : JSON.stringify(part.content)),
               isError: Boolean(part.is_error),
             };
+            progress.toolResult(entry, tool, Boolean(part.is_error));
           }
         }
       } catch {
         // Skip malformed lines that can happen during concurrent writes.
       }
     }
+    progress.finish();
   } catch (error) {
     lease?.check();
     const message = error instanceof Error ? error.message : String(error);
@@ -134,10 +144,26 @@ async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Prom
   return tools;
 }
 
-/** Stored transcript path; T-1880: a pre-separation spelling resolves under the current roots. */
-function storedClaudeTranscript(sessionId: string): string | undefined {
-  const storedPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
-  return storedPath ? resolveStoredClaudeTranscript(storedPath) ?? storedPath : undefined;
+/**
+ * Contained transcript of `sessionId`, or null (B-1564). There is no raw-path
+ * fallback: a stored path that does not resolve under a Claude projects root
+ * reads as "no transcript", never as the file it names.
+ */
+async function storedClaudeTranscript(sessionId: string): Promise<string | null> {
+  const row = sessionsDb.getSessionById(sessionId);
+  return row ? resolveClaudeHistoryTranscriptPath(row) : null;
+}
+
+/**
+ * ADR-199: child tool items of a delegation name the delegating tool_use, like
+ * live child rows (`parentToolUseId`); the first delegation that owns them wins.
+ */
+function stampChildParent(message: AnyRecord, agentTools: AnyRecord[]): void {
+  const content = message.message?.content;
+  const part = Array.isArray(content) ? content.find((p: AnyRecord) => p?.type === 'tool_result') : null;
+  const parentToolUseId = typeof part?.tool_use_id === 'string' ? part.tool_use_id : null;
+  if (!parentToolUseId) return;
+  for (const tool of agentTools) tool.parentToolUseId ??= parentToolUseId;
 }
 
 async function getSessionMessages(
@@ -148,7 +174,7 @@ async function getSessionMessages(
   lease?: HistoryReadLease,
 ): Promise<ClaudeHistoryMessagesResult> {
   try {
-    const jsonLPath = lease?.mainFile ?? storedClaudeTranscript(sessionId);
+    const jsonLPath = lease?.mainFile ?? await storedClaudeTranscript(sessionId);
 
     if (!jsonLPath) {
       return { messages: [], total: 0, hasMore: false };
@@ -205,7 +231,12 @@ async function getSessionMessages(
         continue;
       }
 
-      const agentFilePath = path.join(subagentsDir, agentFileName);
+      // B-1564: an agent file is read only when it resolves inside its own
+      // subagents directory (the lease enforces the same for bounded reads).
+      const agentFilePath = lease
+        ? path.join(subagentsDir, agentFileName)
+        : await resolveContainedFile(path.join(subagentsDir, agentFileName), [subagentsDir]);
+      if (!agentFilePath) continue;
       const tools = await parseAgentTools(agentFilePath, lease);
       agentToolsCache.set(agentId, tools);
     }
@@ -219,6 +250,7 @@ async function getSessionMessages(
       const agentTools = agentToolsCache.get(String(agentId));
       if (agentTools && agentTools.length > 0) {
         message.subagentTools = agentTools;
+        stampChildParent(message, agentTools);
       }
     }
 
@@ -422,9 +454,12 @@ function stampProvenance(raw: AnyRecord, messages: NormalizedMessage[]): Normali
   const sidechain = isClaudeSubagentRow(raw);
   const synthetic = raw.isSynthetic === true;
   if (!sidechain && !synthetic) return messages;
+  // ADR-199: a row emitted inside a delegation names its parent on both paths.
+  const parentToolUseId = claudeParentToolUseId(raw);
   for (const message of messages) {
     if (sidechain) message.isSidechain = true;
     if (synthetic) message.isSynthetic = true;
+    if (parentToolUseId && !message.parentToolUseId) message.parentToolUseId = parentToolUseId;
   }
   return messages;
 }
@@ -679,6 +714,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         toolName: raw.toolName,
         toolInput: raw.toolInput,
         toolId: raw.toolCallId || baseId,
+        ...claudeToolUseProgress(raw.toolName, raw.toolCallId || baseId, raw.toolInput, claudeParentToolUseId(raw)),
       }));
       return messages;
     }
@@ -745,6 +781,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               toolName: part.name,
               toolInput: part.input,
               toolId: part.id,
+              ...claudeToolUseProgress(part.name, part.id, part.input, claudeParentToolUseId(raw)),
             }));
           } else if (part.type === 'thinking' && part.thinking) {
             messages.push(createNormalizedMessage({
@@ -821,11 +858,17 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     }
 
     const steerUuids = readSteerUuids(sessionId, options.historyLease);
+    // ADR-199 Addendum A §5: the progress fold runs over the FULL transcript,
+    // before any paging, so every page sees the same snapshots.
+    const progress = createClaudeProgressFold('history', sessionId);
     const normalized: NormalizedMessage[] = [];
     for (const raw of rawMessages) {
       options.historyLease?.reserveDto(raw);
-      normalized.push(...normalizeWithSteer(this, raw, sessionId, steerUuids, options.historyLease));
+      const rows = normalizeWithSteer(this, raw, sessionId, steerUuids, options.historyLease);
+      const settled = progress.observe(raw, rows);
+      normalized.push(...rows, ...settled);
     }
+    progress.endTurn();
 
     for (const msg of normalized) {
       if (msg.kind === 'tool_use' && msg.toolId && toolResultMap.has(msg.toolId)) {

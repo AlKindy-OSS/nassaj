@@ -19,6 +19,12 @@ import { withRuntimeInstructions as withCoordinationDirective } from './services
 
 import { finalAgyTranscriptMessage } from './modules/providers/list/antigravity/agy-transcript-identity.js';
 import { getAgyBrainDir } from './modules/providers/list/antigravity/agy-brain-dir.js';
+import {
+    agyChecklistPlan,
+    buildAgyTurnProgressRows,
+    readAgyTaskFile,
+    summarizeAgyTranscript,
+} from './modules/providers/list/antigravity/agy-progress.js';
 import { AGY_SPAWN_KEY_PATTERN } from './modules/providers/list/antigravity/agy-session-ids.js';
 import sessionManager from './sessionManager.js';
 import { messageAuthorsDb, participantsDb, providerRunFailuresDb, sessionsDb } from './modules/database/index.js';
@@ -382,6 +388,28 @@ async function readNewPlannerTextWithRetry(brainUUID, userId, afterStepIndex, at
         await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     return '';
+}
+
+// ADR-199 P5: at turn end, the plan (brain task.md) and invoked subagents of
+// THIS turn only (steps after the pre-spawn fence), read from the run's own
+// credential-principal brain root (getBrainDir(userId)); readAgyTaskFile
+// enforces the realpath containment. An aborted run or an unreadable
+// transcript yields no rows, never a guess.
+async function readTurnProgressRows(brainUUID, userId, afterStepIndex, sessionId, aborted) {
+    if (!brainUUID || aborted) return [];
+    try {
+        const transcript = await fs.readFile(buildTranscriptPath(brainUUID, userId), 'utf8');
+        const taskText = await readAgyTaskFile(getBrainDir(userId), brainUUID);
+        return buildAgyTurnProgressRows({
+            steps: summarizeAgyTranscript(transcript),
+            afterStepIndex,
+            brainUUID,
+            sessionId,
+            plan: taskText ? agyChecklistPlan(taskText) : null,
+        });
+    } catch {
+        return [];
+    }
 }
 
 // Extract the brain UUID embedded in a transcript jsonl_path, i.e. the path
@@ -1233,6 +1261,11 @@ async function spawnAntigravity(command, options = {}, ws) {
                     startedAt: turnTimer.startedAt(),
                     completedAt: processCompletedAt,
                 }) : {};
+
+            for (const row of await readTurnProgressRows(timingSessionId, userId, preSpawnTranscript.lastStepIndex,
+                finalSessionId, agProcess.nassajAborted)) {
+                safeSend(row);
+            }
 
             safeSend({
                 kind: 'complete',

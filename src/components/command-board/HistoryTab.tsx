@@ -18,11 +18,12 @@
  */
 import { useState } from 'react';
 import type { TFunction } from 'i18next';
-import { CheckCircle, ChevronDown, ChevronUp, Clock, History, XCircle } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronUp, Clock, ExternalLink, History, XCircle } from 'lucide-react';
 
 import { Button } from '../../shared/view/ui';
 import type { HistoryEntry } from '../../hooks/useServerActions';
 import { formatAge } from '../../utils/relativeAge';
+import { formatDayMonthYear } from '../../utils/formatDayMonthYear';
 
 import { resolveOutcomeMessageKey } from './actionErrorKey';
 
@@ -38,6 +39,8 @@ export type HistoryTabProps = {
   busyId: string | null;
   onRetry: (entry: HistoryEntry) => void;
   onRemove: (entry: HistoryEntry) => void;
+  /** Opens the chat session that requested the command. */
+  onOpenSession?: (sessionId: string) => void;
   t: TFunction;
 };
 
@@ -143,7 +146,7 @@ function canRemove(entry: HistoryEntry, isOwner: boolean): boolean {
   return isOwner && !(entry.kind === 'action' && entry.outcome === 'unknown');
 }
 
-function HistoryRow({ entry, isOwner, now, cooldownActive, cooldownSeconds, busyId, onRetry, onRemove, t }: HistoryTabProps & { entry: HistoryEntry }) {
+function HistoryRow({ entry, isOwner, now, cooldownActive, cooldownSeconds, busyId, onRetry, onRemove, onOpenSession, t }: HistoryTabProps & { entry: HistoryEntry }) {
   const expiry = expiryLabel(entry, now, t);
   const age = ageLabel(entry, now, t);
   // A plain success needs no sentence; a request fulfilled by another execution does.
@@ -188,6 +191,19 @@ function HistoryRow({ entry, isOwner, now, cooldownActive, cooldownSeconds, busy
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         {age && <span>{age}</span>}
         {expiry && <span>{expiry}</span>}
+        {entry.kind === 'raw' && formatDayMonthYear(entry.requestedAt) && (
+          <span dir="ltr" style={{ unicodeBidi: 'isolate' }}>{formatDayMonthYear(entry.requestedAt)}</span>
+        )}
+        {entry.sessionId && onOpenSession && (
+          <button
+            type="button"
+            onClick={() => onOpenSession(entry.sessionId as string)}
+            className="flex items-center gap-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            {t('pendingActions.openSession')}
+          </button>
+        )}
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">

@@ -55,6 +55,7 @@ function priorTurnWithStaleAgent(): ChatMessage[] {
       type: 'assistant', isToolUse: true, toolName: 'Agent', toolId: 'toolu_prior_agent',
       toolInput: JSON.stringify({ subagent_type: 'qa-critic', description: 'راجع الالتزام' }),
       subagentState: { childTools: [{ toolId: 'c1', toolName: 'Bash', toolInput: '{}', timestamp: new Date(ts(1)) }], currentToolIndex: 0, isComplete: false },
+      subagent: { id: 'toolu_prior_agent', parentId: null, label: 'راجع الالتزام', state: 'started' },
       timestamp: ts(1),
     },
   ];
@@ -104,6 +105,7 @@ describe('T-1862: compaction boundary scopes useRunProgress away from the prior 
         type: 'assistant', isToolUse: true, toolName: 'Agent', toolId: 'toolu_new_agent',
         toolInput: JSON.stringify({ subagent_type: 'general', description: 'مهمة جديدة' }),
         subagentState: { childTools: [], currentToolIndex: 0, isComplete: false },
+        subagent: { id: 'toolu_new_agent', parentId: null, label: 'مهمة جديدة', state: 'started' },
         timestamp: ts(6),
       },
     ];
@@ -120,6 +122,7 @@ describe('T-1862: compaction boundary scopes useRunProgress away from the prior 
         type: 'assistant', isToolUse: true, toolName: 'Agent', toolId: 'toolu_done_agent',
         toolInput: JSON.stringify({ subagent_type: 'qa-critic', description: 'مراجعة' }),
         subagentState: { childTools: [], currentToolIndex: 0, isComplete: true },
+        subagent: { id: 'toolu_done_agent', parentId: null, label: 'مراجعة', state: 'completed' },
         toolResult: { content: 'done' },
         timestamp: ts(1),
       },

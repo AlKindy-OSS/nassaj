@@ -1,0 +1,96 @@
+{
+ "_provenance": "Output of AntigravitySessionsProvider.fetchHistory (commit 85847b4d6) over the scrubbed server/modules/providers/list/antigravity/__tests__/__fixtures__/agy-progress.real.json (af8af064f): its transcript with task.md = taskInProgress, rebuilt in a temp brain tree as agy-progress.test.ts does. Only userId:1 was added to the human prompt row.",
+ "rows": [
+  {
+   "id": "antigravity_00000000-0000-4000-8000-000000000001_0",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "provider": "antigravity",
+   "kind": "text",
+   "role": "user",
+   "content": "user request text",
+   "timestamp": "2026-09-27T21:14:34Z",
+   "userId": 1
+  },
+  {
+   "id": "antigravity_00000000-0000-4000-8000-000000000001_3",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "provider": "antigravity",
+   "kind": "text",
+   "role": "assistant",
+   "content": "planner text 1",
+   "timestamp": "2026-09-27T21:14:52Z"
+  },
+  {
+   "id": "antigravity_00000000-0000-4000-8000-000000000001_4",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "provider": "antigravity",
+   "kind": "tool_result",
+   "toolId": "antigravity_00000000-0000-4000-8000-000000000001_4",
+   "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the system as important information to pay attention to.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-09-27T21:15:05Z sender=00000000-0000-4000-8000-000000000002 priority=MESSAGE_PRIORITY_HIGH content=report text 1\n</SYSTEM_MESSAGE>",
+   "timestamp": "2026-09-27T21:15:05Z"
+  },
+  {
+   "id": "antigravity_00000000-0000-4000-8000-000000000001_5",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "provider": "antigravity",
+   "kind": "text",
+   "role": "assistant",
+   "content": "planner text 2",
+   "timestamp": "2026-09-27T21:15:05Z"
+  },
+  {
+   "id": "antigravity_00000000-0000-4000-8000-000000000001_progress_0_plan",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "provider": "antigravity",
+   "kind": "status",
+   "plan": {
+    "source": "artifact",
+    "items": [
+     {
+      "id": "0",
+      "label": "step 1",
+      "status": "completed"
+     },
+     {
+      "id": "1",
+      "label": "step 2",
+      "status": "completed"
+     },
+     {
+      "id": "2",
+      "label": "step 3",
+      "status": "in_progress"
+     },
+     {
+      "id": "3",
+      "label": "step 4",
+      "status": "pending"
+     },
+     {
+      "id": "4",
+      "label": "step 5",
+      "status": "pending"
+     }
+    ],
+    "counts": {
+     "done": 2,
+     "total": 5
+    }
+   },
+   "timestamp": "2026-09-27T21:15:05Z"
+  },
+  {
+   "id": "antigravity_00000000-0000-4000-8000-000000000001_progress_0_agent_0",
+   "sessionId": "00000000-0000-4000-8000-000000000001",
+   "provider": "antigravity",
+   "kind": "status",
+   "subagent": {
+    "id": "antigravity_00000000-0000-4000-8000-000000000001_progress_0_agent_0",
+    "parentId": null,
+    "label": "scribe",
+    "state": "completed"
+   },
+   "timestamp": "2026-09-27T21:15:05Z"
+  }
+ ]
+}

@@ -23,7 +23,11 @@ import { spawnCursor } from '../cursor-cli.js';
 import { buildGitAuthorEnv, getUserGithubToken } from '../utils/gitIdentity.js';
 import { coerceUserId } from '../modules/projects/services/project-visibility-guard.service.js';
 import { isResolvedPathInsideRootReal } from '../utils/path-guard.js';
-import { isForbiddenProjectRoot } from '../shared/secret-path-guard.js';
+import {
+  containsSqliteContent,
+  isForbiddenProjectRoot,
+  isSqliteFileName,
+} from '../shared/secret-path-guard.js';
 import {
   acquireLease,
   captureRequest,
@@ -269,8 +273,15 @@ export function spawnAsync(command, args, options = {}) {
       maxOutputBytes = null,
       ...spawnOptions
     } = options;
+    // Client-supplied file paths reach git as pathspecs; literal mode stops
+    // `:(glob)`, `*`, `?` magic from matching a different (secret) file than
+    // the one the path guard validated.
+    const env = command === 'git'
+      ? { ...(spawnOptions.env ?? process.env), GIT_LITERAL_PATHSPECS: '1' }
+      : spawnOptions.env;
     const child = spawn(command, args, {
       ...spawnOptions,
+      ...(env ? { env } : {}),
       shell: false,
     });
 
@@ -775,6 +786,26 @@ function assertResolvedFilePathInsideProject(projectPath, repositoryRootPath, re
   return { repositoryRootPath, repositoryRelativeFilePath };
 }
 
+/**
+ * `resolveRepositoryFilePath` for routes that RETURN file content: SQLite
+ * databases and sidecars are refused by name, since database copies carry the
+ * live secrets under arbitrary backup names.
+ */
+async function resolveRepositoryReadableFilePath(projectPath, filePath) {
+  const resolved = await resolveRepositoryFilePath(projectPath, filePath);
+  if (isSqliteFileName(path.basename(resolved.repositoryRelativeFilePath))) {
+    throw new Error('Invalid file path: protected content');
+  }
+  return resolved;
+}
+
+/** Throws when any client-bound text embeds an SQLite file (renamed database copy). */
+function assertNoSqliteContent(...texts) {
+  if (texts.some((text) => containsSqliteContent(text))) {
+    throw new Error('Invalid file path: protected content');
+  }
+}
+
 async function resolveRepositoryFilePath(projectPath, filePath) {
   // The project root is passed EXPLICITLY: the previous single-argument call
   // left the whole traversal guard dead (B-GIT-SEC-2).
@@ -985,10 +1016,12 @@ router.get('/diff', async (req, res) => {
     const {
       repositoryRootPath,
       repositoryRelativeFilePath,
-    } = await resolveRepositoryFilePath(overlay?.cwd ?? projectPath, file);
+    } = await resolveRepositoryReadableFilePath(overlay?.cwd ?? projectPath, file);
 
     if (overlay) {
-      return res.json({ diff: await readGitWorkspaceDiff(overlay, repositoryRelativeFilePath) });
+      const overlayDiff = await readGitWorkspaceDiff(overlay, repositoryRelativeFilePath);
+      assertNoSqliteContent(overlayDiff);
+      return res.json({ diff: overlayDiff });
     }
 
     // Check if file is untracked or deleted
@@ -1048,6 +1081,7 @@ router.get('/diff', async (req, res) => {
       }
     }
 
+    assertNoSqliteContent(diff);
     res.json({ diff });
   } catch (error) {
     console.error('Git diff error:', error);
@@ -1082,7 +1116,7 @@ router.get('/file-with-diff', async (req, res) => {
     const {
       repositoryRootPath,
       repositoryRelativeFilePath,
-    } = await resolveRepositoryFilePath(projectPath, file);
+    } = await resolveRepositoryReadableFilePath(projectPath, file);
 
     // Check file status
     const { stdout: statusOutput } = await spawnAsync(
@@ -1133,6 +1167,7 @@ router.get('/file-with-diff', async (req, res) => {
       }
     }
 
+    assertNoSqliteContent(currentContent, oldContent);
     res.json({
       currentContent,
       oldContent,
@@ -1712,11 +1747,13 @@ router.get('/commit-diff', async (req, res) => {
     validateCommitRef(commit);
 
     // Get diff for the commit (--end-of-options: the ref can never be re-parsed
-    // as an option, e.g. `--output=<file>` — B-GIT-SEC-4).
+    // as an option, e.g. `--output=<file>` — B-GIT-SEC-4). `^{commit}` peels to
+    // a commit, so a raw blob/tree id can never print file content directly.
     const { stdout } = await spawnAsync(
-      'git', ['show', '--end-of-options', commit],
+      'git', ['show', '--end-of-options', `${commit}^{commit}`],
       { cwd: projectPath }
     );
+    assertNoSqliteContent(stdout);
 
     const isTruncated = stdout.length > COMMIT_DIFF_CHARACTER_LIMIT;
     const diff = isTruncated
@@ -1756,11 +1793,12 @@ router.post('/generate-commit-message', async (req, res) => {
     let diffContext = '';
     for (const file of files) {
       try {
-        const { repositoryRelativeFilePath } = await resolveRepositoryFilePath(projectPath, file);
+        const { repositoryRelativeFilePath } = await resolveRepositoryReadableFilePath(projectPath, file);
         const { stdout } = await spawnAsync(
           'git', ['diff', 'HEAD', '--', repositoryRelativeFilePath],
           { cwd: repositoryRootPath }
         );
+        assertNoSqliteContent(stdout);
         if (stdout) {
           diffContext += `\n--- ${repositoryRelativeFilePath} ---\n${stdout}`;
         }
@@ -1774,12 +1812,13 @@ router.post('/generate-commit-message', async (req, res) => {
       // Try to get content of untracked files
       for (const file of files) {
         try {
-          const { repositoryRelativeFilePath } = await resolveRepositoryFilePath(projectPath, file);
+          const { repositoryRelativeFilePath } = await resolveRepositoryReadableFilePath(projectPath, file);
           const filePath = path.join(repositoryRootPath, repositoryRelativeFilePath);
           const stats = await fs.stat(filePath);
 
           if (!stats.isDirectory()) {
             const content = await fs.readFile(filePath, 'utf-8');
+            assertNoSqliteContent(content);
             diffContext += `\n--- ${repositoryRelativeFilePath} (new file) ---\n${content.substring(0, 1000)}\n`;
           } else {
             diffContext += `\n--- ${repositoryRelativeFilePath} (new directory) ---\n`;

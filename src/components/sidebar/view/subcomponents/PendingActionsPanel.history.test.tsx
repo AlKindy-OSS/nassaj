@@ -52,7 +52,8 @@ vi.mock('react-i18next', () => ({
   Trans: ({ children }: { children?: React.ReactNode }) => children ?? null,
 }));
 
-vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+const navigateMock = vi.hoisted(() => vi.fn());
+vi.mock('react-router-dom', () => ({ useNavigate: () => navigateMock }));
 
 const authState = vi.hoisted(() => ({ user: { id: 1, username: 'owner', role: 'owner' } }));
 vi.mock('../../../auth/context/AuthContext', () => ({ useAuth: () => authState }));
@@ -173,6 +174,26 @@ describe('T-1684 — a settled operation leaves the queue', () => {
     fireEvent.click(screen.getByRole('button', { name: enSidebar.pendingActions.historyOutputShow }));
     expect(screen.getByText('done')).toBeTruthy();
     expect(screen.getByText('warning: none')).toBeTruthy();
+  });
+
+  it('links a raw receipt to its requesting session and shows a D/M/Y date', () => {
+    const props = baseProps({ history: [entry({
+      id: 'raw-s', kind: 'raw', actionType: undefined, retryable: false, outcome: 'success',
+      reasonCode: null, sessionId: 'sess-7', requestedAt: new Date(2026, 8, 10, 2, 0, 40).toISOString(),
+    })] });
+    render(<PendingActionsPanel {...props} />);
+    openHistory();
+    expect(screen.getByText('10/09/2026 02:00')).toBeTruthy();
+    fireEvent.click(screen.getByText(enSidebar.pendingActions.openSession));
+    expect(navigateMock).toHaveBeenCalledWith('/session/sess-7');
+  });
+
+  it('renders no session link on a receipt without sessionId', () => {
+    render(<PendingActionsPanel {...baseProps({ history: [entry({
+      id: 'raw-n', kind: 'raw', actionType: undefined, retryable: false, outcome: 'success',
+    })] })} />);
+    openHistory();
+    expect(screen.queryByText(enSidebar.pendingActions.openSession)).toBeNull();
   });
 });
 

@@ -12,7 +12,17 @@ import type {
 import { createNormalizedMessage, readObjectRecord } from '@/shared/utils.js';
 import { readResponseModel } from '@/modules/providers/shared/response-model.js';
 
+import {
+  agyBrainOfTranscript,
+  agyChecklistPlan,
+  buildAgyTurnProgressRows,
+  lastAgyTurnBaseline,
+  readAgyTaskFile,
+  summarizeAgyProgressStep,
+  type AgyProgressStep,
+} from './agy-progress.js';
 import { agyTranscriptMessageId } from './agy-transcript-identity.js';
+import { resolveAgyHistoryTranscriptPath } from './agy-transcript-path.js';
 
 const PROVIDER = 'antigravity' as const;
 
@@ -209,6 +219,7 @@ function mapAgyLineToNormalized(
 async function readAgyTranscript(
   filePath: string,
   sessionId: string,
+  steps: AgyProgressStep[] = [],
 ): Promise<NormalizedMessage[]> {
   const messages: NormalizedMessage[] = [];
 
@@ -238,12 +249,36 @@ async function readAgyTranscript(
       }
 
       messages.push(...mapAgyLineToNormalized(record as AgyTranscriptLine, sessionId));
+      const step = summarizeAgyProgressStep(record);
+      if (step) steps.push(step);
     }
   } catch {
     return [];
   }
 
   return messages;
+}
+
+/**
+ * ADR-199 P5: progress rows of the conversation's LAST turn only. task.md is
+ * overwritten per brain, so it is read from the brain this transcript lives in
+ * and never stamped on an earlier turn.
+ */
+async function readLastTurnProgress(
+  transcriptPath: string,
+  sessionId: string,
+  steps: readonly AgyProgressStep[],
+): Promise<NormalizedMessage[]> {
+  const brain = agyBrainOfTranscript(transcriptPath);
+  if (!brain || steps.length === 0) return [];
+  const taskText = await readAgyTaskFile(brain.brainRoot, brain.brainUUID);
+  return buildAgyTurnProgressRows({
+    steps,
+    afterStepIndex: lastAgyTurnBaseline(steps),
+    brainUUID: brain.brainUUID,
+    sessionId,
+    plan: taskText ? agyChecklistPlan(taskText) : null,
+  });
 }
 
 /**
@@ -304,7 +339,8 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     const failure = providerRunFailuresDb.getFailure(sessionId);
 
     const sessionRow = sessionsDb.getSessionById(sessionId);
-    const transcriptPath = sessionRow?.jsonl_path ?? null;
+    // B-1564: only a contained brain transcript is read; no raw stored path.
+    const transcriptPath = await resolveAgyHistoryTranscriptPath(sessionRow?.jsonl_path);
     if (!transcriptPath) {
       const only = failure ? [buildFailureMessage(sessionId, failure)] : [];
       return { messages: only, total: only.length, hasMore: false, offset: 0, limit: null };
@@ -312,7 +348,9 @@ export class AntigravitySessionsProvider implements IProviderSessions {
 
     let normalized: NormalizedMessage[];
     try {
-      normalized = await readAgyTranscript(transcriptPath, sessionId);
+      const steps: AgyProgressStep[] = [];
+      normalized = await readAgyTranscript(transcriptPath, sessionId, steps);
+      normalized = [...normalized, ...await readLastTurnProgress(transcriptPath, sessionId, steps)];
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[AntigravityProvider] Failed to load session ${sessionId}:`, message);

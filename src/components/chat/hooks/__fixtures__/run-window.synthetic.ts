@@ -31,6 +31,8 @@ export const SYNTHETIC_RUN_WINDOW: NormalizedMessage[] = [
       description: `Synthetic task ${index + 1}`,
       subagent_type: agentTypes[index % agentTypes.length],
     },
+    // ADR-199: neutral lifecycle as the Claude adapter stamps it (claude-progress.ts).
+    subagent: { id: `toolu_synthetic_agent_${index}`, parentId: null, label: `Synthetic task ${index + 1}`, state: 'started' },
     subagentTools: [{
       toolId: `toolu_synthetic_child_${index}`,
       toolName: 'Read',
@@ -48,6 +50,7 @@ export const SYNTHETIC_RUN_WINDOW: NormalizedMessage[] = [
     role: 'user',
     toolId: `toolu_synthetic_agent_${index}`,
     content: 'completed',
+    subagent: { id: `toolu_synthetic_agent_${index}`, parentId: null, label: `Synthetic task ${index + 1}`, state: 'completed' },
   } as NormalizedMessage)),
   ...Array.from({ length: 30 }, (_, index) => ({
     id: `msg_synthetic_tail_${index}`,

@@ -3,14 +3,15 @@
  * and show typed text; numeric key shortcuts must not fire while the input has
  * focus.
  *
- * Root cause (2026-09-21): the <kbd>Enter</kbd> badge was positioned absolutely
- * over the end of the input with default pointer-events, so clicking the input
- * near the badge area landed on the badge instead of the input.  The input
- * never received focus and all keystrokes were dropped.  Fix: pointer-events-none
- * on the badge so clicks pass through to the underlying input element.
- *
- * Secondary fix: useLayoutEffect + autoFocus ensure the input is focused
- * synchronously on mount, covering the keyboard-activation path (pressing 0).
+ * Root cause of the invisible text (2026-10-06, measured in real Chromium):
+ * the "Enter" badge was a <kbd>. The global `:root[dir="rtl"] kbd` rule makes
+ * every kbd an LTR island, so tailwindcss-rtl's `[dir=rtl] .end-2 {left}` and
+ * the LTR-resolved `inset-inline-end` (right) were both applied. The absolute
+ * badge stretched across the whole input (298px of 314px) and its opaque
+ * bg-muted painted over the value and placeholder. DOM value and computed
+ * input styles were all correct, which is why jsdom and earlier fixes (focus,
+ * pointer-events, outline) never caught it. Fix: the badge is a <span>.
+ * jsdom applies no CSS, so these tests guard the markup contract.
  */
 
 import React from 'react';
@@ -156,41 +157,7 @@ describe('AskUserQuestionPanel — Other input typing', () => {
     expect(Object.values(answers)[0]).toContain('إجابة مخصصة');
   });
 
-  it('Enter kbd badge has pointer-events-none so it does not intercept input clicks', async () => {
-    // Root cause: the <kbd>Enter</kbd> badge sits absolutely over the input end.
-    // Without pointer-events-none the badge intercepts clicks and the input
-    // never receives focus, so typed text is silently dropped.
-    render(
-      <AskUserQuestionPanel
-        request={makeRequest(false) as never}
-        onDecision={vi.fn()}
-      />,
-    );
-
-    const otherBtn = screen.getByText(/غير ذلك/);
-    await act(async () => { fireEvent.click(otherBtn); });
-
-    // Find the kbd badge by text content
-    const kbd = screen.getByText('Enter', { selector: 'kbd' });
-    expect(kbd).toBeDefined();
-
-    // The badge must carry the Tailwind class that neutralises pointer events
-    expect(kbd.className).toContain('pointer-events-none');
-  });
-
-  it('Other input never carries outline-none (measured paint-invisible bug)', async () => {
-    // Root cause (2026-09-30): measured live in the real production build in
-    // a real Chromium — Tailwind's `outline-none` utility on this exact input
-    // (`outline: 2px solid transparent; outline-offset: 2px`) made its value
-    // and placeholder paint nothing at all: DOM value, computed color and
-    // layout were all correct, but pixel-sampling the rendered box found
-    // zero dark pixels at the text position. A clean two-page A/B test that
-    // changed only this one class confirmed it (0 dark pixels with the
-    // class present, ~1700 with it removed). jsdom cannot reproduce the
-    // paint failure itself, so this guards the CSS contract instead: the
-    // class must never reappear. The focus ring is drawn separately by
-    // `ring-1`/`focus:ring-2` (box-shadow, not outline), so this class was
-    // always redundant here.
+  it('Enter badge is not a <kbd> (RTL LTR-island stretches it over the input)', async () => {
     render(
       <AskUserQuestionPanel
         request={makeRequest(false) as never}
@@ -202,6 +169,14 @@ describe('AskUserQuestionPanel — Other input typing', () => {
     await act(async () => { fireEvent.click(otherBtn); });
 
     const input = screen.getByRole<HTMLInputElement>('textbox');
-    expect(input.className.split(/\s+/)).not.toContain('outline-none');
+    const badge = input.nextElementSibling as HTMLElement;
+    expect(badge.textContent?.trim()).toBe('Enter');
+    // <kbd> would get `direction: ltr` and receive both left and right insets.
+    expect(badge.tagName).not.toBe('KBD');
+    // Still must not intercept clicks aimed at the input.
+    expect(badge.className).toContain('pointer-events-none');
+    expect(badge.getAttribute('aria-hidden')).toBe('true');
+    expect(input.className).toContain('pe-14');
+    expect(input.className).not.toMatch(/(^|\s)px-/);
   });
 });

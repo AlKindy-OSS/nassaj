@@ -74,14 +74,16 @@ export default function SidebarSearchRow({
             </button>
           </span>
         ) : (
-          <kbd
+          <span
             aria-hidden
             title={t('tooltips.openCommandPalette')}
             className="pointer-events-none absolute end-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground [@media(hover:hover)]:inline-flex"
           >
-            {MOD_KEY}
-            <span>K</span>
-          </kbd>
+            <span dir="ltr" className="inline-flex items-center gap-0.5">
+              {MOD_KEY}
+              <span>K</span>
+            </span>
+          </span>
         )}
       </div>
       {searchMode !== 'archived' && (

@@ -689,6 +689,9 @@
     }
   },
   "runProgress": {
+    "overallAria": "Overall progress",
+    "declaredNote": "Reported by the agent",
+    "settledLabel": "Plan at turn end",
     "tasksLabel": "Tasks",
     "barAria": "Task progress",
     "tasksTooltip": "Tasks: {{done}} of {{total}} done",
@@ -702,6 +705,12 @@
     "estimateTooltip": "Rough estimate — based on completed tasks so far."
   },
   "agentActivity": {
+    "genericType": "Agent",
+    "percentAria": "Agent progress",
+    "declaredHeading": "Reported by the agent",
+    "declaredDone": "Done",
+    "declaredNext": "Next",
+    "declaredLeft": "~{{minutes}} min left",
     "title": "Agent activity",
     "summary": "{{running}}/{{total}} running",
     "approvalSummary": "{{approved}}/{{total}} approved · {{percent}}%",
@@ -730,7 +739,8 @@
     "showCompleted": "Show completed ({{count}})",
     "hideCompletedAria": "Hide completed agents",
     "showCompletedAria": "Show completed agents",
-    "allCompletedSummary": "{{count}} completed"
+    "allCompletedSummary": "{{count}} completed",
+    "shownWhenFinished": "Shown when finished"
   },
   "projectSelection": {
     "startChatWithProvider": "Select a project to start chatting with {{provider}}"

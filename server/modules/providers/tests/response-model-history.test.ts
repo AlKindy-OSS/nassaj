@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { after, it, mock } from 'node:test';
 
@@ -18,6 +19,7 @@ mock.module('@/modules/providers/shared/vendor/vendor-transcript.js', { namedExp
 const { CursorSessionsProvider } = await import('../list/cursor/cursor-sessions.provider.js');
 const { OpenCodeSessionsProvider } = await import('../list/opencode/opencode-sessions.provider.js');
 const { AntigravitySessionsProvider } = await import('../list/antigravity/antigravity-sessions.provider.js');
+const { AGY_BRAIN_UNDER_HOME } = await import('../list/antigravity/agy-brain-layout.js');
 const { VendorSessionsProvider } = await import('../shared/vendor/vendor-sessions.provider.js');
 const { createVendorResponseModelReader, readResponseModel } = await import('../shared/response-model.js');
 after(() => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -65,7 +67,10 @@ it('OpenCode uses each persisted assistant modelID, preserving message/part iden
 });
 
 it('Antigravity preserves model only when the response line itself contains it', async () => {
-  transcript = path.join(scratch, 'agy.jsonl');
+  // B-1564: agy history reads only a brain transcript under a brain root (sandbox HOME).
+  transcript = path.join(os.homedir(), AGY_BRAIN_UNDER_HOME, '00000000-0000-4000-8000-0000000000a9',
+    '.system_generated', 'logs', 'transcript.jsonl');
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
   fs.writeFileSync(transcript, models.map((model, index) => JSON.stringify({
     step_index: index, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE',
     model, content: 'reply', created_at: '2026-09-05T12:00:00Z',

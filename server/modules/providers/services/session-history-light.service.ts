@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { resolveOpenCodeDatabasePathForUser } from '@/modules/providers/list/opencode/opencode-home.js';
 import { resolveVendorTranscriptForRead } from '@/modules/providers/shared/vendor/vendor-transcript.js';
+import { boundProgressPlan, boundProgressSubagent } from '@/shared/progress-normalize.js';
 import type { FetchHistoryResult, LLMProvider, NormalizedMessage } from '@/shared/types.js';
 import { AppError, sanitizeLeafDirectoryName } from '@/shared/utils.js';
 
@@ -90,6 +91,24 @@ const SAFE_SCALAR_FIELDS = [
   'parentToolUseId', 'isFinal', 'forked',
 ] as const;
 
+/** ADR-199 progress fields: re-bounded by the shared mapper, then copied inline. */
+const PROGRESS_FIELDS = { plan: boundProgressPlan, subagent: boundProgressSubagent } as const;
+
+/**
+ * Copies the bounded `plan`/`subagent` of a message into `projected`; a value
+ * that fails validation or the nested byte cap is deferred instead.
+ */
+function projectProgressFields(
+  message: NormalizedMessage, projected: Record<string, unknown>, deferred: Set<string>,
+): void {
+  for (const [field, bound] of Object.entries(PROGRESS_FIELDS)) {
+    if (message[field] === undefined) continue;
+    const copy = copySmallKnownValue(bound(message[field]) ?? undefined);
+    if (copy !== undefined && copy !== null) projected[field] = copy;
+    else deferred.add(field);
+  }
+}
+
 const HEAVY_FIELDS = new Set([
   'images', 'input', 'context', 'toolInput', 'toolUseResult', 'subagentTools', 'tokenBudget',
 ]);
@@ -135,6 +154,7 @@ export function projectLightHistory(result: FetchHistoryResult): FetchHistoryRes
     const responseTurnMetric = copySmallKnownValue(message.responseTurnMetric);
     if (responseTurnMetric !== undefined) projected.responseTurnMetric = responseTurnMetric;
     else if (message.responseTurnMetric !== undefined) deferred.add('responseTurnMetric');
+    projectProgressFields(message, projected, deferred);
 
     if (message.toolResult && typeof message.toolResult === 'object') {
       const toolResult: Record<string, unknown> = {};

@@ -91,6 +91,37 @@ test('light projector never returns standalone data URIs or oversized unknown ne
   assert.deepEqual(fields, ['content', 'providerPayload']);
 });
 
+test('ADR-199: plan and subagent round-trip inline without a deferredPayload entry', () => {
+  const plan = { source: 'tool' as const, items: [
+    { id: '0', label: 'Say hello', status: 'completed' as const },
+    { id: '1', label: 'Say bye', status: 'in_progress' as const },
+  ] };
+  const subagent = { id: 'toolu_1', parentId: null, label: 'Reply OK', state: 'running' as const };
+  const projected = projectLightHistory(baseResult([
+    { id: 'p', sessionId: 's', timestamp: 'now', provider: 'claude', kind: 'tool_use', toolId: 't', plan },
+    { id: 'a', sessionId: 's', timestamp: 'now', provider: 'claude', kind: 'tool_result', toolId: 'toolu_1', subagent },
+  ]));
+  const [planRow, agentRow] = projected.messages as Array<NormalizedMessage & { deferredPayload?: { fields: string[] } }>;
+  assert.deepEqual(planRow.plan, { ...plan, counts: { done: 1, total: 2 } }, 'counts derived when absent');
+  assert.deepEqual(agentRow.subagent, subagent);
+  assert.equal(planRow.deferredPayload, undefined);
+  assert.equal(agentRow.deferredPayload, undefined);
+});
+
+test('ADR-199: malformed or oversized progress fields are re-bounded or deferred, never copied raw', () => {
+  const items = Array.from({ length: 80 }, (_, i) => ({ id: `x${i}`, label: 'l'.repeat(500), status: 'done', note: 'n' }));
+  const projected = projectLightHistory(baseResult([
+    { id: 'p', sessionId: 's', timestamp: 'now', provider: 'codex', kind: 'status', plan: { source: 'tool', items } as never },
+    { id: 'b', sessionId: 's', timestamp: 'now', provider: 'codex', kind: 'status', subagent: { id: 1 } as never },
+  ]));
+  const [planRow, badRow] = projected.messages as Array<NormalizedMessage & { deferredPayload?: { fields: string[] } }>;
+  assert.equal(planRow.plan?.items.length, 50);
+  assert.equal(planRow.plan?.items[49].id, 'x49');
+  assert.ok(planRow.plan?.items.every((item) => Array.from(item.label).length <= 200 && !('note' in item)));
+  assert.equal(badRow.subagent, undefined);
+  assert.deepEqual(badRow.deferredPayload?.fields, ['subagent']);
+});
+
 test('projector contract is provider-neutral across the registered history matrix', () => {
   const providers: LLMProvider[] = [
     'claude', 'codex', 'cursor', 'antigravity', 'opencode', 'hermes',

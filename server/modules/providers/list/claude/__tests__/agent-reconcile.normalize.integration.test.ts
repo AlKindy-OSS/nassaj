@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { claudeProjectsSandbox } from '@/shared/__tests__/provider-root-sandbox.js';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import { buildUndeliveredAgentMessage } from '@/modules/providers/list/claude/agent-reconcile.service.js';
@@ -64,7 +65,7 @@ async function withSessionOnDisk(
   await initializeDatabase();
 
   try {
-    const jsonlPath = path.join(projectDir, `${SESSION_ID}.jsonl`);
+    const jsonlPath = path.join(claudeProjectsSandbox('agent-normalize-'), `${SESSION_ID}.jsonl`);
     await writeFile(jsonlPath, `${lines.join('\n')}\n`, 'utf8');
     sessionsDb.createSession(
       SESSION_ID,

@@ -113,6 +113,7 @@ export function parseRawInsertResponse(httpOk: boolean, body: unknown): RawInser
       command,
       digest,
       requestedBy: typeof row.requestedBy === 'string' ? row.requestedBy : null,
+      sessionId: typeof row.sessionId === 'string' && row.sessionId ? row.sessionId : null,
       requestedAt: typeof row.requestedAt === 'string' ? row.requestedAt : null,
     },
   };

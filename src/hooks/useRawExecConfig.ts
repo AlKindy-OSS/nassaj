@@ -66,6 +66,7 @@ function parseCommands(value: unknown): readonly RawCommand[] {
       command: v.command,
       digest: v.digest,
       requestedBy: typeof v.requestedBy === 'string' ? v.requestedBy : null,
+      sessionId: typeof v.sessionId === 'string' && v.sessionId ? v.sessionId : null,
       requestedAt: typeof v.requestedAt === 'string' ? v.requestedAt : null,
     }];
   });

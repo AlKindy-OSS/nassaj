@@ -1,4 +1,11 @@
+import type { DeclaredProgress } from '../hooks/declaredProgress';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
+import type { NormalizedMessage } from '../../../stores/useSessionStore';
+
+/** ADR-199 provider-neutral plan snapshot, as the server emits it. */
+export type ProgressPlan = NonNullable<NormalizedMessage['plan']>;
+/** ADR-199 provider-neutral subagent lifecycle record, as the server emits it. */
+export type ProgressSubagent = NonNullable<NormalizedMessage['subagent']>;
 
 export type Provider = LLMProvider;
 
@@ -31,6 +38,8 @@ export interface SubagentChildTool {
   toolInput: unknown;
   toolResult?: ToolResult | null;
   timestamp: Date;
+  /** ADR-199: plan snapshot carried by this child call or its result. */
+  plan?: ProgressPlan;
 }
 
 export interface ChatMessage {
@@ -150,10 +159,24 @@ export interface ChatMessage {
    */
   isCompactionBoundary?: boolean;
   isSubagentContainer?: boolean;
+  /** ADR-199: plan snapshot of this tool call or its result, or a turn-end snapshot carried here. */
+  plan?: ProgressPlan;
+  /**
+   * ADR-199: latest lifecycle of the subagent this row delegates to (the result
+   * row's state wins over the call's `started`).
+   */
+  subagent?: ProgressSubagent;
+  /**
+   * ADR-199: subagents known only from status rows of this reply (no
+   * delegating call in the transcript), carried here so progress counts them.
+   */
+  turnSubagents?: ProgressSubagent[];
   subagentState?: {
     childTools: SubagentChildTool[];
     currentToolIndex: number;
     isComplete: boolean;
+    /** Latest self-reported progress line of the sub-agent (declared, not computed). */
+    progress?: DeclaredProgress;
   };
   /** Task notification fields (B-94). */
   isTaskNotification?: boolean;

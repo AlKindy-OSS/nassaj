@@ -700,6 +700,9 @@
     }
   },
   "runProgress": {
+    "overallAria": "التقدّم الكلي",
+    "declaredNote": "معلنة من الوكيل",
+    "settledLabel": "الخطة عند نهاية الجولة",
     "tasksLabel": "مهام",
     "barAria": "تقدّم المهام",
     "tasksTooltip": "المهام: أُنجز {{done}} من {{total}}",
@@ -716,6 +719,11 @@
     "estimateTooltip": "تقدير تقريبي — مبني على المهام المكتملة حتى الآن."
   },
   "agentActivity": {
+    "percentAria": "تقدّم الوكيل",
+    "declaredHeading": "معلنة من الوكيل",
+    "declaredDone": "المنجز",
+    "declaredNext": "التالي",
+    "declaredLeft": "متبقٍّ ~{{minutes}} د",
     "title": "نشاط الوكلاء",
     "summary": "{{running}}/{{total}} يعمل",
     "approvalSummary": "{{approved}}/{{total}} معتمدة · {{percent}}٪",
@@ -744,7 +752,8 @@
     "showCompleted": "إظهار المكتمل ({{count}})",
     "hideCompletedAria": "إخفاء الوكلاء المكتملين",
     "showCompletedAria": "إظهار الوكلاء المكتملين",
-    "allCompletedSummary": "{{count}} مكتمل"
+    "allCompletedSummary": "{{count}} مكتمل",
+    "shownWhenFinished": "يظهر عند الانتهاء"
   },
   "projectSelection": {
     "startChatWithProvider": "اختر مشروعاً لبدء المحادثة مع {{provider}}"
