@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 
 // Exact QA-accepted lexical manifest. No support, entitlement or launch authority.
 export const R3_RESOLVER_MANIFEST = {
-  "schema": "nassaj-r3-resolver-manifest/v2",
+  "schema": "nassaj-r3-resolver-manifest/v3",
   "semantics": "native-evidence-identifiers-not-support-catalog",
   "roleResolver": {
-    "id": "native-role-evidence/v2",
+    "id": "native-role-evidence/v3",
     "choiceTable": null,
-    "requestedSource": "exact spawn_agent/multi_agent_v1 arguments member agent_type",
+    "requestedSource": "exact spawn_agent arguments member agent_type (namespace multi_agent_v1 or collaboration)",
     "observedSources": [
       "child first session_meta.payload.agent_role",
       "child first session_meta.payload.source.subagent.thread_spawn.agent_role"
@@ -20,9 +20,9 @@ export const R3_RESOLVER_MANIFEST = {
     "meaning": "opaque role identifier requested or emitted by the bound native record; never proof that the release, host or account supports it"
   },
   "modelResolver": {
-    "id": "native-model-evidence/v2",
+    "id": "native-model-evidence/v3",
     "choiceTable": null,
-    "requestedSource": "exact spawn_agent/multi_agent_v1 arguments member model",
+    "requestedSource": "exact spawn_agent arguments member model (namespace multi_agent_v1 or collaboration)",
     "observedSource": "exact model member of the single valid own turn_context inside a completed child-owned epoch",
     "absence": "canonical request member absent -> null; an own completed epoch without valid model produces no model observation",
     "presentValidation": "JSON string containing only Unicode scalar values; UTF-8 byte length 1..128; reject every scalar in modelForbiddenScalars; exact scalar/byte sequence; no trim/case-fold/normalization",
@@ -31,7 +31,7 @@ export const R3_RESOLVER_MANIFEST = {
     "meaning": "opaque model identifier requested or emitted by the bound native record; never proof of availability, entitlement, pricing, launch acceptance or current catalog membership"
   },
   "reasoningResolver": {
-    "id": "native-request-effort/v1",
+    "id": "native-request-effort/v2",
     "choiceTable": [
       "high",
       "low",
@@ -39,7 +39,7 @@ export const R3_RESOLVER_MANIFEST = {
       "minimal",
       "xhigh"
     ],
-    "requestedSource": "exact spawn_agent/multi_agent_v1 arguments member reasoning_effort",
+    "requestedSource": "exact spawn_agent arguments member reasoning_effort (namespace multi_agent_v1 or collaboration)",
     "absence": "canonical member absent -> null",
     "normalization": "ASCII lowercase only",
     "aliases": {
@@ -130,7 +130,7 @@ export const R3_RESOLVER_MANIFEST = {
     "functionCallOutputUtf8Bytes": 64000,
     "comparison": "Buffer byte length of the exact native string; values <=64000 may proceed to strict JSON parsing and values >=64001 reject before parsing",
     "terminology": "64000 decimal bytes exactly; never 64 KiB, 65536 bytes or a character count",
-    "outputShape": "The bounded function_call_output JSON must be one object with the exact usable agent_id evidence required by the accepted native-link contract; the cap is part of parserContractSha256."
+    "outputShape": "The bounded function_call_output JSON must be one object: multi_agent_v1 carries the exact usable agent_id; collaboration (v2) carries the child task_name path, and the child thread id comes only from the single item_completed SubAgentActivity started record keyed by the call id whose agent_path equals that path; the cap is part of parserContractSha256."
   }
 } as const;
 
@@ -155,7 +155,7 @@ function freeze(value: unknown): void {
   Object.values(value).forEach(freeze); Object.freeze(value);
 }
 freeze(R3_RESOLVER_MANIFEST);
-export const R3_RESOLVER_MANIFEST_SHA256 = '4938b4cc9cbb984e039470e29b0a9bac46d43091a91d97d06219b4df09f9874b';
+export const R3_RESOLVER_MANIFEST_SHA256 = '4897f99698fabd97950917981cc3ed98613fdf7259266e2a1c3676b2d746340b';
 const policy = R3_RESOLVER_MANIFEST.modelForbiddenScalars;
 const ranges = [...policy.Cc, ...policy.Cf, ...policy.bidiControls, ...policy.lineAndParagraphSeparators, ...policy.noncharacters]
   .map(range => { const [lo,hi = lo] = range.split('-').map(value => parseInt(value.slice(2),16)); return [lo,hi] as const; });

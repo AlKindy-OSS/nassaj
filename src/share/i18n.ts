@@ -19,8 +19,26 @@ export interface ViewerStrings {
   messagesHeading: string;
   owner: string;
   assistant: string;
-  toolsUsed: (count: number) => string;
-  redaction: Record<'secret' | 'path' | 'network' | 'image' | 'system' | 'generic', string>;
+  member: string;
+  redaction: Record<'secret' | 'path' | 'network' | 'image' | 'system' | 'truncated' | 'generic', string>;
+  live: {
+    badgeLive: string;
+    badgeEnded: string;
+    readOnlyNote: string;
+    working: string;
+    stale: string;
+    retrying: string;
+    rateLimitedNotice: string;
+    loadOlder: string;
+    loadingOlder: string;
+    olderFailed: string;
+    newMessages: (count: number) => string;
+    endedTitle: string;
+    ended: string;
+    empty: string;
+    conversationLabel: string;
+  };
+  attachment: { imageAlt: string; gone: string; tooLarge: string; download: string; unavailableImage: string; unavailableFile: string };
 }
 
 const AR: ViewerStrings = {
@@ -39,21 +57,47 @@ const AR: ViewerStrings = {
   createdOn: (date) => `أُنشئت ${date}`,
   expiresOn: (date) => `ينتهي الرابط ${date}`,
   messagesHeading: 'الرسائل',
-  owner: 'صاحب المحادثة',
+  owner: 'المالك',
+  member: 'عضو',
   assistant: 'المساعد',
-  toolsUsed: (count) => {
-    const form = new Intl.PluralRules('ar').select(count);
-    if (form === 'one') return 'استُخدمت أداة واحدة';
-    if (form === 'two') return 'استُخدمت أداتان';
-    return form === 'few' ? `استُخدمت ${count} أدوات` : `استُخدمت ${count} أداة`;
-  },
   redaction: {
     secret: 'محتوى سرّي محذوف',
     path: 'مسار محذوف',
     network: 'عنوان شبكة محذوف',
     image: 'صورة محذوفة',
     system: 'محتوى نظامي محذوف',
+    truncated: 'اقتُطع باقي الرسالة لطولها',
     generic: 'محتوى محذوف',
+  },
+  live: {
+    badgeLive: 'مباشر',
+    badgeEnded: 'انتهى',
+    readOnlyNote: 'عرض مباشر للقراءة فقط لمحادثة نسّاج',
+    working: 'المساعد يعمل الآن…',
+    stale: 'قد لا تكون أحدث الرسائل ظاهرة. نحاول التحديث.',
+    retrying: 'تعذّر التحديث مؤقتاً. نعيد المحاولة تلقائياً.',
+    rateLimitedNotice: 'طلبات كثيرة. سنعاود التحديث بعد قليل.',
+    loadOlder: 'تحميل رسائل أقدم',
+    loadingOlder: 'جارٍ تحميل رسائل أقدم…',
+    olderFailed: 'تعذّر تحميل الرسائل الأقدم.',
+    newMessages: (count) => {
+      const form = new Intl.PluralRules('ar').select(count);
+      if (form === 'one') return 'رسالة جديدة';
+      if (form === 'two') return 'رسالتان جديدتان';
+      return form === 'few' ? `${count} رسائل جديدة` : `${count} رسالة جديدة`;
+    },
+    endedTitle: 'انتهت هذه المشاركة',
+    ended: 'لم يعد هذا الرابط فعّالاً. ما سبق عرضه يبقى ظاهراً لكن لن تصل رسائل جديدة.',
+    empty: 'لا رسائل بعد.',
+    conversationLabel: 'المحادثة',
+  },
+  attachment: {
+    imageAlt: 'صورة مرفقة',
+    gone: 'المرفق لم يعد متاحاً',
+    tooLarge: 'المرفق كبير جداً للعرض',
+    download: 'تنزيل المرفق',
+    unavailableImage: 'صورة غير متاحة',
+    unavailableFile: 'ملف غير متاح',
   },
 };
 
@@ -73,16 +117,42 @@ const EN: ViewerStrings = {
   createdOn: (date) => `Created ${date}`,
   expiresOn: (date) => `Link expires ${date}`,
   messagesHeading: 'Messages',
-  owner: 'Conversation owner',
+  owner: 'Owner',
+  member: 'Member',
   assistant: 'Assistant',
-  toolsUsed: (count) => (count === 1 ? '1 tool used' : `${count} tools used`),
   redaction: {
     secret: 'Secret removed',
     path: 'Path removed',
     network: 'Network address removed',
     image: 'Image removed',
     system: 'System content removed',
+    truncated: 'The rest of this message was cut for length',
     generic: 'Content removed',
+  },
+  live: {
+    badgeLive: 'Live',
+    badgeEnded: 'Ended',
+    readOnlyNote: 'Live read-only view of a Nassaj conversation',
+    working: 'The assistant is working…',
+    stale: 'The latest messages may not be showing. Trying to refresh.',
+    retrying: 'Temporarily unable to refresh. Retrying automatically.',
+    rateLimitedNotice: 'Too many requests. Refreshing again shortly.',
+    loadOlder: 'Load older messages',
+    loadingOlder: 'Loading older messages…',
+    olderFailed: 'Older messages could not be loaded.',
+    newMessages: (count) => (count === 1 ? '1 new message' : `${count} new messages`),
+    endedTitle: 'This share has ended',
+    ended: 'This link is no longer active. What was shown stays visible, but no new messages will arrive.',
+    empty: 'No messages yet.',
+    conversationLabel: 'Conversation',
+  },
+  attachment: {
+    imageAlt: 'Attached image',
+    gone: 'Attachment no longer available',
+    tooLarge: 'Attachment too large to show',
+    download: 'Download attachment',
+    unavailableImage: 'Image unavailable',
+    unavailableFile: 'File unavailable',
   },
 };
 

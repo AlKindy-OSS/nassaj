@@ -105,3 +105,12 @@ export {
 // Live check that Anthropic still accepts a member's stored Claude login (the
 // onboarding route must not trust the credentials file's shape alone).
 export { claudeUsageService } from './services/claude-usage.service.js';
+
+// B-1596: the only way another module removes a session transcript (confined,
+// pinned, id-bound; a refused file stays). Project delete uses it.
+export {
+  createRemovalContext, isRetryableRefusal, probeSessionTranscript, removeSessionTranscript, type TranscriptRemoval,
+} from './shared/session-transcript-removal.js';
+export { descriptorNamed } from './shared/pinned-fd.js';
+// B-1608 T2: boot sweep of transcript park files a failed removal left behind.
+export { startParkedTranscriptSweep } from './shared/transcript-park-sweeper.js';

@@ -24,7 +24,9 @@ import {
   getSessionDeepLinkContext,
   getSessionDeepLinkContexts,
 } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
-import { deleteOrArchiveProject, restoreArchivedProject } from '@/modules/projects/services/project-delete.service.js';
+import {
+  deleteOrArchiveProject, restoreArchivedProject, type TranscriptRemovalSummary,
+} from '@/modules/projects/services/project-delete.service.js';
 import { updateProjectLink } from '@/modules/projects/services/project-link.service.js';
 import { applyLegacyStarredProjectIds, setProjectStar, toggleProjectStar } from '@/modules/projects/services/project-star.service.js';
 import { notifySessionMetadataChanged, participantsService, sessionSynchronizerService } from '@/modules/providers/index.js';
@@ -165,7 +167,7 @@ function parseBulkProjectIds(payload: unknown): string[] {
 }
 
 type BulkProjectResult =
-  | { id: string; success: true }
+  | { id: string; success: true; transcripts?: TranscriptRemovalSummary }
   | { id: string; success: false; error: { code: string; message: string } };
 
 function bulkProjectFailure(id: string, error: unknown): BulkProjectResult {
@@ -679,12 +681,13 @@ router.post(
     const results: BulkProjectResult[] = [];
     for (const id of ids) {
       try {
+        let transcripts: TranscriptRemovalSummary | undefined;
         // Capture the path before permanent deletion removes the row, allowing
         // the sidebar metadata channel to refresh its affected sessions.
         const projectPath = projectsDb.getProjectById(id)?.project_path;
         if (action === 'delete_permanently') {
           assertProjectManageable(req, id);
-          await deleteOrArchiveProject(id, true);
+          ({ transcripts } = await deleteOrArchiveProject(id, true));
         } else if (action === 'archive') {
           assertProjectWritable(req, id);
           await deleteOrArchiveProject(id, false);
@@ -693,7 +696,7 @@ router.post(
           restoreArchivedProject(id);
         }
         if (projectPath) notifyProjectSessionMetadata(projectPath);
-        results.push({ id, success: true });
+        results.push(transcripts ? { id, success: true, transcripts } : { id, success: true });
       } catch (error) {
         results.push(bulkProjectFailure(id, error));
       }
@@ -762,7 +765,9 @@ router.post(
 
 /**
  * - `force` not set / false: archive project in DB only (`isArchived` = 1; hidden from active list).
- * - `force=true`: remove DB row, delete session rows for that path, remove all `*.jsonl` under the Claude project dir.
+ * - `force=true`: remove DB row and the session rows for that path, then each session's recorded transcript
+ *   through the confined primitive (B-1596). `transcripts` reports removed / kept-for-safety / failed files;
+ *   a retryable check failure before the commit is a 409 with nothing deleted.
  */
 router.delete(
   '/:projectId',
@@ -778,8 +783,8 @@ router.delete(
     } else {
       assertProjectWritable(req, projectId);
     }
-    await deleteOrArchiveProject(projectId, force);
-    res.json({ success: true });
+    const { transcripts } = await deleteOrArchiveProject(projectId, force);
+    res.json(transcripts ? { success: true, transcripts } : { success: true });
   }),
 );
 
@@ -984,8 +989,8 @@ router.delete(
       });
     }
     const force = req.query.force === 'true';
-    await deleteOrArchiveProject(projectId, force);
-    res.json(createApiSuccessResponse({ projectId, deleted: true }));
+    const { transcripts } = await deleteOrArchiveProject(projectId, force);
+    res.json(createApiSuccessResponse({ projectId, deleted: true, ...(transcripts ? { transcripts } : {}) }));
   }),
 );
 

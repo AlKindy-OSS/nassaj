@@ -1,6 +1,4 @@
-import os from 'node:os';
 import path from 'node:path';
-import { lstat, realpath, unlink } from 'node:fs/promises';
 
 // Pure actor validation avoids importing the execution gateway barrel back into providers.
 // eslint-disable-next-line boundaries/dependencies
@@ -9,6 +7,8 @@ import { participantsDb, sessionsDb } from '@/modules/database/index.js';
 import {
   forkClaudeTranscript,
   TranscriptForkError,
+  type ForkClaudeTranscriptOptions,
+  type ForkClaudeTranscriptResult,
   type ForkExtraMessage,
 } from '@/modules/providers/list/claude/claude-transcript-fork.js';
 import { isLinkModeRunRefusal } from '@/modules/providers/services/harness-link-mode.service.js';
@@ -17,6 +17,10 @@ import { notifySessionMetadataChanged } from '@/modules/providers/services/sessi
 
 import { openCodexForkCutoff } from '../list/codex/codex-fork-cutoff.js';
 import type { CodexForkCutoff } from '../list/codex/codex-fork-cutoff.js';
+import {
+  isTranscriptHandle, openRecordedTranscript, type SessionTranscriptHandle,
+} from '../shared/session-transcript-reader.js';
+import { removeSessionTranscript } from '../shared/session-transcript-removal.js';
 
 /**
  * Session FORK orchestration (T-1090) — turns the one-shot `/btw` side question
@@ -143,8 +147,6 @@ export interface ForkSessionParams {
   upToMessageId?: string | null;
   /** Defaults to 'full' — the upstream-faithful branch. */
   mode?: SessionForkMode;
-  /** Test-only injected provider root; production callers leave this unset. */
-  claudeProjectsRoot?: string;
 }
 
 export interface ForkSessionResult {
@@ -161,8 +163,6 @@ export interface ForkSessionAtMessageParams {
   upToMessageId: string;
   /** Numeric user id of the requester; they own the resulting session. */
   userId: number | null;
-  /** Test-only injected provider root; production callers leave this unset. */
-  claudeProjectsRoot?: string;
   requestId?: string;
   authenticatedPrincipal?: unknown;
   retryRegistrationOnly?: boolean;
@@ -205,34 +205,74 @@ function requireForkAuthorization(sessionId: string, userId: number | null): voi
   }
 }
 
-async function resolveTrustedClaudeTranscript(
-  sourceFilePath: string,
-  projectPath: string,
-  sessionId: string,
-  claudeProjectsRoot = path.join(os.homedir(), '.claude', 'projects'),
-): Promise<string> {
-  try {
-    const projectRoot = await realpath(path.join(claudeProjectsRoot, encodeClaudeProjectDir(projectPath)));
-    const stats = await lstat(sourceFilePath);
-    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
-      throw new Error('unsafe transcript identity');
-    }
-    const sourceTarget = await realpath(sourceFilePath);
-    if (path.dirname(sourceTarget) !== projectRoot || path.basename(sourceTarget) !== `${sessionId}.jsonl`) {
-      throw new Error('transcript outside project root');
-    }
-    return sourceTarget;
-  } catch {
-    throw new SessionForkError('transcript_not_found', 'This session has no trusted transcript to fork.');
+const UNTRUSTED_SOURCE = 'This session has no trusted transcript to fork.';
+
+/**
+ * B-1597 (ADR-201 L2): the fork source, opened only through the pinned reader
+ * (openRecordedTranscript) — confined to the ONE tree that holds the recorded
+ * path (operator or member), pinned single-link with O_NOFOLLOW, and bound to
+ * `sessionId` by its name and header. It must also sit directly in the
+ * session's own project folder of that tree, where the branch is written.
+ * The caller closes the returned descriptor.
+ */
+async function openForkSource(
+  sessionId: string, recorded: string, projectPath: string,
+): Promise<SessionTranscriptHandle> {
+  const opened = await openRecordedTranscript(
+    { session_id: sessionId, provider: 'claude', jsonl_path: recorded }, 'session-fork',
+  ).catch(() => null);
+  if (!opened || !isTranscriptHandle(opened)) {
+    throw new SessionForkError('transcript_not_found', UNTRUSTED_SOURCE);
   }
+  const folder = path.dirname(opened.realpath);
+  if (path.basename(folder) !== encodeClaudeProjectDir(projectPath) || path.dirname(folder) !== opened.root) {
+    await opened.fd.close().catch(() => undefined);
+    throw new SessionForkError('transcript_not_found', UNTRUSTED_SOURCE);
+  }
+  return opened;
 }
 
+/**
+ * Rolls back a fork whose registration failed: the new branch is removed only
+ * through the confined deletion primitive (bound to the forked id by name and
+ * header, inside the source's tree), never by name. A refused removal leaves
+ * the file; the orphan prune is the backstop.
+ */
 async function removeFailedFork(filePath: string, sessionId: string): Promise<void> {
-  await unlink(filePath).catch(() => {});
+  await removeSessionTranscript({ session_id: sessionId, provider: 'claude', jsonl_path: filePath }, 'session-delete');
   try {
     sessionsDb.deleteSessionById(sessionId);
   } catch {
     // Preserve the primary registration error; later orphan pruning is a backstop.
+  }
+}
+
+/**
+ * Writes the branch from the pinned source (the fork reads the descriptor,
+ * never the name) and closes it. Fork errors map to stable codes; anything
+ * else is logged by `onUnexpected` (no raw filesystem message) and becomes
+ * `fork_failed`.
+ */
+async function forkFromSource(
+  source: SessionTranscriptHandle,
+  options: Omit<ForkClaudeTranscriptOptions, 'sourceFilePath' | 'sourceHandle'>,
+  onUnexpected: () => void,
+): Promise<ForkClaudeTranscriptResult> {
+  try {
+    return await forkClaudeTranscript({ ...options, sourceFilePath: source.realpath, sourceHandle: source.fd });
+  } catch (error) {
+    if (error instanceof TranscriptForkError) {
+      if (error.code === 'source_unreadable') {
+        throw new SessionForkError('transcript_not_found', 'This session has no transcript to fork.');
+      }
+      if (error.code === 'source_empty' || error.code === 'source_too_large' || error.code === 'message_not_found') {
+        throw new SessionForkError(error.code, error.message);
+      }
+    }
+    onUnexpected();
+    throw new SessionForkError('fork_failed', 'The conversation could not be forked.');
+  } finally {
+    await source.fd.close().catch(() => undefined);
   }
 }
 
@@ -246,7 +286,7 @@ export async function forkSessionFromSideQuery(
   params: ForkSessionParams,
 ): Promise<ForkSessionResult> {
   const {
-    sessionId, question, answer, userId, upToMessageId = null, mode = 'full', claudeProjectsRoot,
+    sessionId, question, answer, userId, upToMessageId = null, mode = 'full',
   } = params;
 
   let row: { provider: string; project_path: string | null; jsonl_path: string | null } | null =
@@ -268,24 +308,17 @@ export async function forkSessionFromSideQuery(
   }
 
   const projectPath = (row.project_path ?? '').trim() || null;
-  let sourceFilePath = (row.jsonl_path ?? '').trim();
-  if (!sourceFilePath) {
-    if (!projectPath) {
-      throw new SessionForkError('transcript_not_found', 'This session has no transcript to fork.');
-    }
-    sourceFilePath = path.join(
-      claudeProjectsRoot ?? path.join(os.homedir(), '.claude', 'projects'),
-      encodeClaudeProjectDir(projectPath),
-      `${sessionId}.jsonl`,
-    );
-  }
-
   if (!projectPath) {
     throw new SessionForkError('transcript_not_found', 'This session has no transcript to fork.');
   }
-  sourceFilePath = await resolveTrustedClaudeTranscript(
-    sourceFilePath, projectPath, sessionId, claudeProjectsRoot,
+  // A row the run path created before the synchronizer stamped its file: the
+  // requester's own Claude home is where their launch wrote it. Loaded on use:
+  // it pulls in the user and provider-env stores.
+  const recorded = (row.jsonl_path ?? '').trim() || path.join(
+    (await import('../list/claude/claude-home.js')).resolveClaudeHomeForUser(userId),
+    'projects', encodeClaudeProjectDir(projectPath), `${sessionId}.jsonl`,
   );
+  const source = await openForkSource(sessionId, recorded, projectPath);
 
   const title = buildForkTitle(question);
   const extraMessages: ForkExtraMessage[] = [
@@ -293,37 +326,15 @@ export async function forkSessionFromSideQuery(
     { role: 'assistant', content: clip(answer) },
   ];
 
-  let forked;
-  try {
-    forked = await forkClaudeTranscript({
-      sourceFilePath,
-      sourceSessionId: sessionId,
-      upToMessageId,
-      // 'fresh' carries no history: the branch is the exchange alone, seeded
-      // with the source's cwd/version so it still belongs to this project.
-      includeHistory: mode !== 'fresh',
-      extraMessages,
-      title,
-    });
-  } catch (error) {
-    if (error instanceof TranscriptForkError) {
-      if (error.code === 'source_unreadable') {
-        throw new SessionForkError('transcript_not_found', 'This session has no transcript to fork.');
-      }
-      if (
-        error.code === 'source_empty'
-        || error.code === 'source_too_large'
-        || error.code === 'message_not_found'
-      ) {
-        throw new SessionForkError(error.code, error.message);
-      }
-    }
-    console.error('[BTW] fork write failed', {
-      sessionId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw new SessionForkError('fork_failed', 'The conversation could not be forked.');
-  }
+  const forked = await forkFromSource(source, {
+    sourceSessionId: sessionId,
+    upToMessageId,
+    // 'fresh' carries no history: the branch is the exchange alone, seeded
+    // with the source's cwd/version so it still belongs to this project.
+    includeHistory: mode !== 'fresh',
+    extraMessages,
+    title,
+  }, () => console.error('[BTW] fork write failed', { sessionId }));
 
   // Registration is all-or-nothing: a transcript without an indexed session and
   // participant is an unauthorized orphan, so remove both file and partial row.
@@ -381,7 +392,7 @@ export async function forkSessionAtMessage(
 async function forkSessionAtMessageLocked(
   params: ForkSessionAtMessageParams,
 ): Promise<ForkSessionResult> {
-  const { sessionId, upToMessageId, userId, claudeProjectsRoot } = params;
+  const { sessionId, upToMessageId, userId } = params;
   const cutoff = typeof upToMessageId === 'string' ? upToMessageId.trim() : '';
   if (!cutoff) {
     throw new SessionForkError('message_not_found', 'No message was specified for the fork.');
@@ -405,45 +416,23 @@ async function forkSessionAtMessageLocked(
   }
 
   const projectPath = (row.project_path ?? '').trim() || null;
-  let sourceFilePath = (row.jsonl_path ?? '').trim();
+  const recorded = (row.jsonl_path ?? '').trim();
   // No constructed fallback here: this direct-navigation path must fork only a
   // synchronizer-indexed, DB-attested transcript in a known project.
-  if (!projectPath || !sourceFilePath || !path.isAbsolute(sourceFilePath)
-    || path.basename(sourceFilePath) !== `${sessionId}.jsonl`) {
-    throw new SessionForkError('transcript_not_found', 'This session has no trusted transcript to fork.');
+  if (!projectPath || !recorded) {
+    throw new SessionForkError('transcript_not_found', UNTRUSTED_SOURCE);
   }
-  sourceFilePath = await resolveTrustedClaudeTranscript(
-    sourceFilePath, projectPath, sessionId, claudeProjectsRoot,
-  );
+  const source = await openForkSource(sessionId, recorded, projectPath);
 
   const title = 'Forked conversation';
-  let forked;
-  try {
-    forked = await forkClaudeTranscript({
-      sourceFilePath,
-      sourceSessionId: sessionId,
-      upToMessageId: cutoff,
-      includeHistory: true,
-      extraMessages: [],
-      title,
-      requireAssistantCutoff: true,
-    });
-  } catch (error) {
-    if (error instanceof TranscriptForkError) {
-      if (error.code === 'source_unreadable') {
-        throw new SessionForkError('transcript_not_found', 'This session has no transcript to fork.');
-      }
-      if (
-        error.code === 'source_empty'
-        || error.code === 'source_too_large'
-        || error.code === 'message_not_found'
-      ) {
-        throw new SessionForkError(error.code, error.message);
-      }
-    }
-    console.error('[MESSAGE-FORK] fork write failed');
-    throw new SessionForkError('fork_failed', 'The conversation could not be forked.');
-  }
+  const forked = await forkFromSource(source, {
+    sourceSessionId: sessionId,
+    upToMessageId: cutoff,
+    includeHistory: true,
+    extraMessages: [],
+    title,
+    requireAssistantCutoff: true,
+  }, () => console.error('[MESSAGE-FORK] fork write failed'));
 
   // A successful response must be immediately openable and visible to its
   // creator. Unlike the best-effort legacy /btw promotion, this action is a

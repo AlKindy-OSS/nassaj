@@ -220,3 +220,67 @@ test('projector enforces a final serialized byte budget', () => {
     },
   );
 });
+
+/** A stable transcript file for cache-key fingerprints, removed after `run`. */
+async function withTranscript(run: (jsonlPath: string) => Promise<void>): Promise<void> {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'light-history-guest-'));
+  const transcript = path.join(dir, 'history.jsonl');
+  await fsp.writeFile(transcript, 'one\n');
+  try { await run(transcript); } finally { await fsp.rm(dir, { recursive: true, force: true }); }
+}
+
+const guestInput = (jsonlPath: string, load: () => Promise<FetchHistoryResult>, snapshotCache?: 'coalesce-only') => ({
+  sessionId: 'g', requesterUserId: 7, pageKey: '[null,0,null]', load, snapshotCache,
+  source: { provider: 'claude' as const, projectPath: '/p', jsonlPath, updatedAt: 'now' },
+});
+
+test('ADR-205: coalesce-only loads never enter the cache, so member entries are never written by guests', async () => {
+  await withTranscript(async (jsonlPath) => {
+    let reads = 0;
+    const load = async () => { reads += 1; return baseResult([]); };
+    for (let i = 0; i < 5; i += 1) await loadStableHistorySnapshot(guestInput(jsonlPath, load, 'coalesce-only'));
+    assert.equal(reads, 5, 'every guest load re-reads: nothing was cached');
+    await loadStableHistorySnapshot(guestInput(jsonlPath, load));
+    await loadStableHistorySnapshot(guestInput(jsonlPath, load));
+    assert.equal(reads, 6, 'a member load is cached as before');
+    await loadStableHistorySnapshot(guestInput(jsonlPath, load, 'coalesce-only'));
+    assert.equal(reads, 6, 'a guest may read a member cache entry');
+    for (let i = 0; i < 60; i += 1) {
+      await loadStableHistorySnapshot({ ...guestInput(jsonlPath, load, 'coalesce-only'), sessionId: `burst-${i}` });
+    }
+    await loadStableHistorySnapshot(guestInput(jsonlPath, load));
+    assert.equal(reads, 66, 'the member entry survived a burst of guest loads over the 48-entry cache');
+  });
+});
+
+test('ADR-205 condition 5: a member coalescing onto an in-flight guest load caches its own clone', async () => {
+  await withTranscript(async (jsonlPath) => {
+    let reads = 0;
+    const message = { id: 'm', sessionId: 'g', timestamp: 't', provider: 'claude', kind: 'text', content: 'x' } as NormalizedMessage;
+    const load = async () => {
+      reads += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return baseResult([message]);
+    };
+    const [guest, member] = await Promise.all([
+      loadStableHistorySnapshot(guestInput(jsonlPath, load, 'coalesce-only')),
+      loadStableHistorySnapshot(guestInput(jsonlPath, load)),
+    ]);
+    assert.equal(reads, 1, 'coalesced');
+    assert.notEqual(member.result, guest.result, 'member result is a clone, not the guest object');
+    assert.notEqual(member.result.messages[0], guest.result.messages[0]);
+    const again = await loadStableHistorySnapshot(guestInput(jsonlPath, load));
+    assert.equal(reads, 1, 'the member stored its result');
+    assert.notEqual(again.result, member.result);
+  });
+});
+
+test('ADR-205: a readFailed result is never cached', async () => {
+  await withTranscript(async (jsonlPath) => {
+    let reads = 0;
+    const load = async () => { reads += 1; return { ...baseResult([]), readFailed: true as const }; };
+    await loadStableHistorySnapshot(guestInput(jsonlPath, load));
+    await loadStableHistorySnapshot(guestInput(jsonlPath, load));
+    assert.equal(reads, 2);
+  });
+});

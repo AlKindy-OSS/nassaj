@@ -40,13 +40,13 @@ test('parsePublicOrigin accepts only a bare http(s) origin', () => {
 
 test('CSP matches the approved policy exactly', () => {
   assert.equal(buildSharePageCsp('https://n.example'), [
-    'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox',
+    'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads',
     "default-src 'none'",
     'script-src https://n.example/assets/',
     "style-src https://n.example/assets/ 'unsafe-inline'",
     'font-src https://n.example/assets/',
-    'img-src data:',
-    'connect-src https://n.example/api/session-shares/',
+    'img-src data: blob:',
+    'connect-src https://n.example/api/session-shares/ https://n.example/api/share-view/',
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'none'",

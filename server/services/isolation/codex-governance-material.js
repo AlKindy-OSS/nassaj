@@ -140,9 +140,13 @@ export const CODEX_COMPOSED_GOVERNANCE_FILENAME = 'AGENTS.codex.md';
  *
  * SUB-AGENTS read this same file (they share CODEX_HOME). That is safe because the
  * coordinator block opens with its own scope fence ("حدّ الانطباق": top role only,
- * applying it inside an agent produces circular delegation), and because
- * `agents.max_depth: 1` blocks a grandchild in the CLI config regardless of what any
- * text says — instruction and mechanism, not instruction alone.
+ * applying it inside an agent produces circular delegation). That fence is
+ * INSTRUCTION ONLY (B-1616): no launch sets `agents.max_depth`, and that key binds
+ * v1-engine models only anyway. On v2-engine models (most of the current catalog) a
+ * child may spawn its own children; the only mechanical bound there is Codex's own
+ * thread limit (`features.multi_agent_v2.max_concurrent_threads_per_session`; Nassaj
+ * sets none by default per the owner's 2026-10-13 decision, see codex-multi-agent.ts),
+ * which limits how many agents run at once, not their depth.
  *
  * Falls back to the neutral source when the composed file is absent (a node whose
  * build-agents predates this output, or a fresh checkout using the bundled default):

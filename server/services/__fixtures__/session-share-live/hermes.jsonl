@@ -1,0 +1,6 @@
+{"type": "meta", "projectPath": "/home/operator/Project/demo", "sessionName": "hello"}
+{"type": "message", "message": {"role": "user", "content": "مرحبا"}}
+{"type": "message", "message": {"role": "assistant", "content": "أهلاً! كيف أقدر أساعدك اليوم؟"}}
+{"type": "message", "message": {"role": "user", "content": "اكتب لي خطوات تثبيت المشروع"}}
+{"type": "message", "message": {"role": "assistant", "content": "1. استنسخ المستودع.\n2. ثبّت الحزم.\n3. ضع المفتاح __SECRET__ في ملف البيئة لا في الكود."}}
+{"type": "message", "message": {"role": "user", "content": "مرحبا"}}

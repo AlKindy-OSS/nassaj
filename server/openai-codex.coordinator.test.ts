@@ -31,6 +31,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
+import { codexMultiAgentConfig, resolveCodexAgentCap } from './modules/providers/list/codex/codex-multi-agent.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap — before importing any project module (mirrors the ceiling test): the DB
@@ -315,9 +316,15 @@ describe('delegation block — single Codex construction disables native multi-a
     );
   });
 
-  it('that construction pins features.multi_agent=false on every launch', () => {
-    assert.match(codexSrc, /'features\.multi_agent':\s*false/,
-      'the native delegation feature must be disabled in the Codex config');
+  it('that construction pins features.multi_agent=false on every launch (thread caps only by override)', () => {
+    // B-1616: the config object of the single construction spreads the per-launch
+    // multi-agent config (features.multi_agent=false + both thread-cap keys).
+    assert.match(codexSrc, /const multiAgentConfig = codexMultiAgentConfig\(resolveCodexAgentCap\(process\.env\)\);/);
+    assert.match(codexSrc, /config: \{[\s\S]{0,600}\.\.\.multiAgentConfig,/,
+      'the Codex config must carry the pinned multi-agent config');
+    // Owner decision 2026-10-13: no thread-cap key by default; Codex decides the count.
+    const config = codexMultiAgentConfig(resolveCodexAgentCap({}));
+    assert.deepEqual({ ...config }, { 'features.multi_agent': false }, 'the v1 delegation feature stays disabled');
   });
 
   it('both live callers route through queryCodex (no direct SDK spawn)', () => {

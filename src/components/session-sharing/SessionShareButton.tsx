@@ -3,15 +3,14 @@ import { Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../shared/view/ui';
-import { useOptionalAuth } from '../auth/context/AuthContext';
 
-import SessionShareDialog from './SessionShareDialog';
+import LiveShareDialog from './LiveShareDialog';
 import { getShareEligibility, type ShareEligibility } from './sessionShareApi';
 
 type Props = { sessionId: string };
 
 /**
- * Header button opening the read-only share flow. Offered only when the server
+ * Header button opening the live read-link flow (Bearer or device session). Offered only when the server
  * says the viewer may share (canShare) or manage existing links (canManage:
  * session owner, platform owner or admin only; session write access is not
  * enough). Manage-only covers e.g. a session owner whose project is
@@ -19,21 +18,19 @@ type Props = { sessionId: string };
  */
 export default function SessionShareButton({ sessionId }: Props) {
   const { t } = useTranslation('chat');
-  const hasBearer = Boolean(useOptionalAuth()?.token);
   const [eligibility, setEligibility] = useState<ShareEligibility | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     setEligibility(null);
-    if (!hasBearer) return undefined;
     let cancelled = false;
     getShareEligibility(sessionId)
       .then((result) => { if (!cancelled) setEligibility(result); })
       .catch(() => { if (!cancelled) setEligibility(null); });
     return () => { cancelled = true; };
-  }, [sessionId, hasBearer]);
+  }, [sessionId]);
 
-  if (!hasBearer || !eligibility || !(eligibility.canShare || eligibility.canManage)) return null;
+  if (!eligibility || !(eligibility.canShare || eligibility.canManage)) return null;
   const label = t('sessionShare.button');
   return (
     <>
@@ -44,7 +41,7 @@ export default function SessionShareButton({ sessionId }: Props) {
       >
         <Share2 aria-hidden />
       </Button>
-      {open && <SessionShareDialog sessionId={sessionId} canShare={eligibility.canShare} open onOpenChange={setOpen} />}
+      {open && <LiveShareDialog sessionId={sessionId} canShare={eligibility.canShare} open onOpenChange={setOpen} />}
     </>
   );
 }

@@ -14,13 +14,23 @@ import { createEditorToolbarPanelExtension } from '../utils/editorToolbarPanel';
 import CodeEditorFooter from './subcomponents/CodeEditorFooter';
 import CodeEditorHeader from './subcomponents/CodeEditorHeader';
 import CodeEditorLoadingState from './subcomponents/CodeEditorLoadingState';
+import CodeEditorCloseConfirm from './subcomponents/CodeEditorCloseConfirm';
 import CodeEditorSurface from './subcomponents/CodeEditorSurface';
 import CodeEditorBinaryFile from './subcomponents/CodeEditorBinaryFile';
 import CodeEditorMediaPreview from './subcomponents/CodeEditorMediaPreview';
 
 type CodeEditorProps = {
   file: CodeEditorFile;
+  /** Close request (X / Esc); the owner decides whether to prompt first. */
   onClose: () => void;
+  /** Close unconditionally, discarding unsaved edits. Defaults to `onClose`. */
+  onForceClose?: () => void;
+  /** Reports whether the buffer holds unsaved edits. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Show the unsaved-changes prompt (set by the owner of the close flow). */
+  closePromptOpen?: boolean;
+  /** Dismiss the prompt and keep the file open. */
+  onCloseDismiss?: () => void;
   projectPath?: string;
   isSidebar?: boolean;
   isExpanded?: boolean;
@@ -31,6 +41,10 @@ type CodeEditorProps = {
 export default function CodeEditor({
   file,
   onClose,
+  onForceClose,
+  onDirtyChange,
+  closePromptOpen = false,
+  onCloseDismiss,
   projectPath,
   isSidebar = false,
   isExpanded = false,
@@ -65,6 +79,7 @@ export default function CodeEditor({
     saveSuccess,
     saveError,
     isBinary,
+    isDirty,
     secretDeclined,
     previewKind,
     fileProjectId,
@@ -179,6 +194,21 @@ export default function CodeEditor({
     wordWrap,
   ]);
 
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
+  const forceClose = onForceClose ?? onClose;
+  const handleSaveAndClose = useCallback(async () => {
+    if (await handleSave()) {
+      forceClose();
+    } else {
+      // Save failed: keep the file open; the error banner explains why.
+      onCloseDismiss?.();
+    }
+  }, [forceClose, handleSave, onCloseDismiss]);
+
   useEditorKeyboardShortcuts({
     onSave: handleSave,
     onClose,
@@ -292,6 +322,16 @@ export default function CodeEditor({
             <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
               {saveError}
             </div>
+          )}
+
+          {closePromptOpen && (
+            <CodeEditorCloseConfirm
+              fileName={file.name}
+              saving={saving}
+              onSave={handleSaveAndClose}
+              onDiscard={forceClose}
+              onCancel={onCloseDismiss ?? (() => undefined)}
+            />
           )}
 
           <div className="flex-1 overflow-hidden">

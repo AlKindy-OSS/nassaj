@@ -38,7 +38,13 @@ for(const variant of ['wrong-parent','wrong-session','later-child','unknown-meta
   const child=await pin(write('child',[own,later,...turns()]));
   assert.throws(()=>{bindNativeChild(parent,child,nativeLaunches(parent,0)[0],0);childOwnedBoundary(child,[parent]);});
 }));
-for(const variant of ['duplicate-call','duplicate-output','missing-output','output-before-call','path-only','wrong-namespace'])test(`native linkage rejects ${variant}`,async()=>fixture(async(_r,write,pin)=>{
+// B-1616: a collaboration (v2) call whose spawn never started (no SubAgentActivity) mints
+// no edge, even with a v1-shaped agent_id output; the other variants still fail closed.
+test('native linkage: a collaboration call without its started activity confers no identity',async()=>fixture(async(_r,write,pin)=>{
+  const c=call();c.payload.namespace='collaboration';
+  const parent=await pin(write('root',[meta('root'),c,output()]));assert.deepEqual(nativeLaunches(parent,0),[]);
+}));
+for(const variant of ['duplicate-call','duplicate-output','missing-output','output-before-call','path-only'])test(`native linkage rejects ${variant}`,async()=>fixture(async(_r,write,pin)=>{
   const c=call(),o=output();if(variant==='wrong-namespace')c.payload.namespace='collaboration';if(variant==='path-only')o.payload.output=JSON.stringify({task_name:'/root/task'});
   const rows=variant==='duplicate-call'?[c,c,o]:variant==='duplicate-output'?[c,o,o]:variant==='missing-output'?[c]:variant==='output-before-call'?[o,c]:[c,o];
   const parent=await pin(write('root',[meta('root'),...rows]));assert.throws(()=>nativeLaunches(parent,0));
@@ -107,3 +113,47 @@ for(const bytes of [63999,64000,64001])test(`native output cap ${bytes} applies 
   const parent=await pin(write('root',[meta('root'),call(),row]));
   if(bytes<=64000)assert.equal(nativeLaunches(parent,0).length,1);else assert.throws(()=>nativeLaunches(parent,0));
 }));
+
+// ---------------------------------------------------------------------------
+// B-1616: codex-cli 0.160 (multi_agent v2) native evidence, from the redacted real
+// fixtures (see services/cost/codex-v2-children-cost.test.ts for their derivation).
+// ---------------------------------------------------------------------------
+const V2_FIXTURES = path.join(import.meta.dirname, '..', '..', 'services', 'cost', '__fixtures__', 'codex-0160-v2');
+const v2Rows = (name: string): Array<Record<string, any>> =>
+  readFileSync(path.join(V2_FIXTURES, name), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+const V2_CHILD = '00000002-0000-7000-8000-00000000c001';
+
+test('v2: the started activity binds the real 0.160 child; replayed parent history is not the child\'s',async()=>fixture(async(_r,write,pin)=>{
+  const parent=await pin(write('parent',v2Rows('parent.jsonl')));const child=await pin(write('child',v2Rows('child.jsonl')));
+  const launches=nativeLaunches(parent,0);
+  assert.equal(launches.length,1,'the refused spawn (no activity) mints no edge');
+  assert.equal(launches[0].engine,'v2');assert.equal(launches[0].childThreadId,V2_CHILD);
+  assert.equal(launches[0].agentPath,'/root/brand_directions');
+  const boundary=childOwnedBoundary(child,[parent]);assert.equal(boundary,4,'subagent_history_start_ordinal - 1');
+  assert.match(bindNativeChild(parent,child,launches[0],0).actorId,/^act_[a-f0-9]{64}$/);
+  const result=await resolveNativeActorFields(parent,child,launches[0],[]);
+  assert.equal(result.requested_role,'brand-marketer');assert.equal(result.observed_role,'brand-marketer');
+  assert.deepEqual(result.observations.map(x=>x.model),['gpt-6.1-sol']);
+  assert.equal(result.evidence_code,'complete');
+}));
+const V2_REJECTIONS = { 'path-mismatch': /child_binding_invalid/, 'orphan-activity': /child_binding_invalid/,
+  'duplicate-activity': /child_binding_invalid/, 'activity-before-call': /child_binding_invalid/, 'child-path': /child_binding_invalid/,
+  'late-meta': /child_lineage_invalid/, 'stranger-meta': /child_lineage_invalid/, 'bad-start': /child_lineage_invalid/ } as const;
+for(const [variant,code] of Object.entries(V2_REJECTIONS))
+  test(`v2 native evidence rejects ${variant} (the unmodified pair binds)`,async()=>fixture(async(_r,write,pin)=>{
+    const bind=(parent:ActorSource,child:ActorSource)=>{const launch=nativeLaunches(parent,0)[0];bindNativeChild(parent,child,launch,0);return childOwnedBoundary(child,[parent]);};
+    assert.equal(bind(await pin(write('clean-parent',v2Rows('parent.jsonl'))),await pin(write('clean-child',v2Rows('child.jsonl')))),4);
+    const parentRows=v2Rows('parent.jsonl'),childRows=v2Rows('child.jsonl');
+    const at=parentRows.findIndex(row=>row.payload.type==='item_completed'&&row.payload.item.kind==='started');
+    const started=parentRows[at];
+    if(variant==='path-mismatch')started.payload.item.agent_path='/root/other';
+    if(variant==='orphan-activity')started.payload.item.id='call_unknown';
+    if(variant==='duplicate-activity')parentRows.splice(at+1,0,structuredClone(started));
+    if(variant==='activity-before-call'){parentRows.splice(at,1);parentRows.splice(1,0,started);}
+    if(variant==='child-path')childRows[0].payload.agent_path='/root/other';
+    if(variant==='late-meta')childRows.splice(6,0,structuredClone(childRows[1]));
+    if(variant==='stranger-meta')childRows[1].payload.id='00000001-0000-7000-8000-00000000ffff';
+    if(variant==='bad-start')childRows[0].payload.subagent_history_start_ordinal=99;
+    const parent=await pin(write('parent',parentRows)),child=await pin(write('child',childRows));
+    assert.throws(()=>bind(parent,child),code);
+  }));

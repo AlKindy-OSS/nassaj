@@ -1,0 +1,15 @@
+{"type": "meta", "projectPath": "/home/operator/Project/demo", "sessionName": "لخص الملف"}
+{"type": "message", "message": {"role": "user", "content": "لخص ملف README واذكر أي سر فيه"}}
+{"type": "message_start", "message": {"id": "msg_20000000-0001", "type": "message", "role": "assistant", "model": "deepseek-fixture-model", "content": [], "usage": {"input_tokens": 12, "output_tokens": 1}}}
+{"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}
+{"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "The user wants a summary; first read the file."}}
+{"type": "content_block_stop", "index": 0}
+{"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "toolu_20000000-0001", "name": "delegate_task", "input": {"path": "README.md"}}}
+{"type": "content_block_stop", "index": 1}
+{"type": "content_block_start", "index": 2, "content_block": {"type": "text", "text": ""}}
+{"type": "content_block_delta", "index": 2, "delta": {"type": "text_delta", "text": "الملف يشرح طريقة التشغيل. "}}
+{"type": "content_block_delta", "index": 2, "delta": {"type": "text_delta", "text": "وفيه مفتاح ظاهر __SECRET__ يجب حذفه."}}
+{"type": "content_block_stop", "index": 2}
+{"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 40}}
+{"type": "message_stop"}
+{"type": "message", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_20000000-0001", "content": "[fixture: tool output truncated]"}]}}

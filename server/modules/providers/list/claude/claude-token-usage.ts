@@ -1,4 +1,5 @@
 import { cacheObservationMetadata, type CacheSnapshot, nativeContextId, nativeTokenCount } from '../codex/codex-token-budget.js';
+import { readPinnedTail } from '../../shared/pinned-tail.js';
 import { isTranscriptHandle, openRecordedTranscript } from '../../shared/session-transcript-reader.js';
 
 type RecordValue = Record<string, unknown>;
@@ -30,7 +31,9 @@ const tokenCount = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 
 /**
- * Reads the session's transcript text (ADR-201 A1): the row's recorded path,
+ * Reads the tail of the session's transcript (ADR-201 A1): at most
+ * TRANSCRIPT_TAIL_MAX_BYTES from the end, starting at a record (B-954, B-1599
+ * L8) — the latest usage is what the route reports. The row's recorded path,
  * tree-confined, pinned and bound to the session id by name and header; read
  * only from the pinned descriptor. Authorization-free core: the token-usage
  * route has already checked that the caller sees the project and that this
@@ -46,7 +49,7 @@ export async function readClaudeTranscriptForSession(
   );
   if (!isTranscriptHandle(opened)) return null;
   try {
-    return await opened.fd.readFile({ encoding: 'utf8' });
+    return await readPinnedTail(opened.fd);
   } catch {
     return null;
   } finally {

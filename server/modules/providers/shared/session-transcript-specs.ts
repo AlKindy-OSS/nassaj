@@ -68,6 +68,11 @@ async function verifyClaude(sessionId: string, realpath: string, scan: HeaderSca
   return verifyClaudeHeader(sessionId, scan);
 }
 
+/** True when `name` is a Codex rollout file name of `threadId` (`rollout-…-<threadId>.jsonl`). */
+export function isCodexRolloutNameOf(name: string, threadId: string): boolean {
+  return Boolean(threadId) && name.startsWith('rollout-') && name.endsWith(`-${threadId}.jsonl`);
+}
+
 /**
  * Codex rollout of ONE thread: named `rollout-…-<threadId>.jsonl`, and its
  * first record is `session_meta` whose `payload.id` is `threadId`. With
@@ -78,8 +83,7 @@ async function verifyClaude(sessionId: string, realpath: string, scan: HeaderSca
 export async function verifyCodexThread(
   threadId: string, realpath: string, scan: HeaderScan, rootAlias: boolean,
 ): Promise<HeaderVerdict> {
-  const name = path.basename(realpath);
-  if (!threadId || !name.startsWith('rollout-') || !name.endsWith(`-${threadId}.jsonl`)) return 'name_mismatch';
+  if (!isCodexRolloutNameOf(path.basename(realpath), threadId)) return 'name_mismatch';
   let verdict: HeaderVerdict = 'header_missing';
   const end = await scan([['type'], ['payload', 'id'], ['payload', 'session_id']], (record) => {
     const id = record['payload.id'];
@@ -225,6 +229,46 @@ const SPECS: Readonly<Record<string, TranscriptSpec>> = Object.freeze({
 /** Transcript rules of `provider`, or null when its history is not a recorded file (cursor, opencode). */
 export function transcriptSpecOf(provider: string): TranscriptSpec | null {
   return Object.hasOwn(SPECS, provider) ? SPECS[provider] : null;
+}
+
+/**
+ * Cursor agent chat (cursor-session-synchronizer): exactly
+ * `<root>/<slug>/agent-transcripts/<id>/<id>.jsonl`, and its first record is a
+ * turn carrying a string `role`. The header carries no id, so the chat
+ * directory and the file name bind it. No Cursor transcript existed on the
+ * host when this was written (2026-10-13); the shape is the synchronizer's.
+ */
+async function verifyCursor(sessionId: string, realpath: string, scan: HeaderScan, root: string): Promise<HeaderVerdict> {
+  const [slug, transcripts, id, file, ...rest] = path.relative(root, realpath).split(path.sep);
+  const exact = rest.length === 0 && Boolean(slug) && transcripts === 'agent-transcripts' && file === `${id}.jsonl`;
+  if (!exact) return 'name_mismatch';
+  if (id !== sessionId) return 'id_mismatch';
+  let verdict: HeaderVerdict = 'header_missing';
+  const end = await scan([['role']], (record) => {
+    if (record.role !== undefined) verdict = null;
+    return 'stop';
+  });
+  return end === 'oversize' ? 'header_oversize' : verdict;
+}
+
+/**
+ * Cursor's history is read from its `store.db`, never from `jsonl_path`, so it
+ * has no reader spec; its recorded chat file is still removed on delete. The
+ * synchronizer records only the operator's `~/.cursor/projects`, so members
+ * have no Cursor tree here. opencode needs none: its `jsonl_path` is always null.
+ */
+const REMOVAL_ONLY_SPECS: Readonly<Record<string, TranscriptSpec>> = Object.freeze({
+  cursor: {
+    sharedRoots: async () => [path.join(os.homedir(), '.cursor', 'projects')],
+    underHome: null,
+    locate: identity,
+    verify: verifyCursor,
+  },
+});
+
+/** Rules for removing the recorded transcript of `provider`: the reader's, plus removal-only providers. */
+export function removalSpecOf(provider: string): TranscriptSpec | null {
+  return transcriptSpecOf(provider) ?? (Object.hasOwn(REMOVAL_ONLY_SPECS, provider) ? REMOVAL_ONLY_SPECS[provider] : null);
 }
 
 /**

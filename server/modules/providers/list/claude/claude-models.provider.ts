@@ -1,4 +1,5 @@
 import { getClaudeModelCatalog } from '@/modules/providers/list/claude/claude-catalog.client.js';
+import { readPinnedTail } from '@/modules/providers/shared/pinned-tail.js';
 import { withRecordedTranscript } from '@/modules/providers/shared/session-transcript-reader.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
@@ -240,7 +241,7 @@ export class ClaudeProviderModels implements IProviderModels {
       // ADR-201 A1, authorization-free core: callers are fenced session routes or
       // an already-authorised resume, and only a model id leaves this method.
       const activeModel = await withRecordedTranscript(sessionId, 'claude', 'models',
-        async (transcript) => readClaudeSessionModelFromText(sessionId, await transcript.fd.readFile({ encoding: 'utf8' })));
+        async (transcript) => readClaudeSessionModelFromText(sessionId, await readPinnedTail(transcript.fd)));
       if (activeModel?.model) {
         return activeModel;
       }

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 // two TTL sweeps of expired test evidence at boot are reviewed effects too.
 // ADR-196 (T-1970): the four additive session_shares DDL statements (one per exec).
 // ADR-203 (T-2003): the one additive user_harness_files_mode CREATE TABLE.
+// ADR-205 (T-2013): the session_shares column probe and the mode/ref_key ALTERs (fresh boot).
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -90,6 +91,24 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE INDEX IF NOT EXISTS session_shares_liveness ON session_shares(revoked_at, expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(session_shares)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE session_shares ADD COLUMN mode TEXT NOT NULL\n  DEFAULT 'snapshot' CHECK (mode IN ('snapshot', 'live'))",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE session_shares ADD COLUMN ref_key BLOB",
     "shadow": null
   },
   {

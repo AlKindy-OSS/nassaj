@@ -1239,45 +1239,12 @@
   },
   "sessionShare": {
     "button": "Share conversation",
-    "dialogTitle": "Share this conversation with a read-only link",
-    "intro": "Anyone with the link can read a redacted copy of this conversation without signing in. They cannot write or see your files.",
-    "noBearer": "Sharing is not available in the current sign-in mode (device session). Sign in with your password or passkey and try again.",
-    "loading": "Preparing the preview…",
+    "dialogTitle": "Live read link for this conversation",
+    "intro": "This link gives read-only access to the live conversation. Anyone holding it can read the conversation without signing in, and cannot write to it.",
+    "loading": "Loading…",
     "retry": "Try again",
     "close": "Close",
     "cancel": "Cancel",
-    "previewTitle": "Preview of what the reader will see",
-    "previewMore": "Show more ({{n}} messages left)",
-    "messageCount": "{{n}} messages",
-    "roleUser": "Session owner",
-    "roleAssistant": "Assistant",
-    "summaryTitle": "Removed from the shared copy",
-    "summaryNone": "Nothing was removed.",
-    "summary": {
-      "secret": "{{n}} possible secrets",
-      "path": "{{n}} paths",
-      "image": "{{n}} images",
-      "network": "{{n}} network addresses",
-      "system": "{{n}} system instructions",
-      "tools": "{{n}} tool calls",
-      "thinking": "{{n}} thinking blocks",
-      "other": "{{n}} other items"
-    },
-    "summaryPrefix": "Removed: {{items}}",
-    "category": {
-      "secret": "Possible secret",
-      "path": "Path",
-      "image": "Image",
-      "network": "Network address",
-      "system": "System instructions"
-    },
-    "blockersTitle": "The link cannot be created",
-    "blockers": {
-      "FOREIGN_AUTHOR": "Someone other than the session owner wrote messages here; multi-author conversations are not published.",
-      "UNATTRIBUTED_MULTI_PARTICIPANT": "The author of some messages cannot be verified because the conversation has several participants.",
-      "UNATTRIBUTED_PARTICIPANTS_UNVERIFIED": "The author of some messages cannot be verified, so they cannot be proven to be the session owner."
-    },
-    "confirmUnattributed": "I confirm that {{n}} unattributed messages were written by the session owner and accept publishing them",
     "expiryLabel": "Link validity",
     "expiry": {
       "24h": "24 hours",
@@ -1285,9 +1252,6 @@
       "30d": "30 days",
       "90d": "90 days"
     },
-    "reviewed": "I reviewed the content and the removed items",
-    "reviewedNote": "Not every secret is detected; short unlabeled secrets may remain in the text. Review the preview carefully before publishing.",
-    "secretConfirm": "I acknowledge {{n}} possible secrets were removed and I accept responsibility for publishing the rest",
     "create": "Create link",
     "creating": "Creating…",
     "created": {
@@ -1316,7 +1280,11 @@
       "revokeConfirm": "Confirm revoke",
       "revokeCancel": "Keep",
       "revoking": "Revoking…",
-      "createdBy": "Created by: {{name}}"
+      "createdBy": "Created by: {{name}}",
+      "mode": {
+        "live": "Live",
+        "snapshot": "Legacy snapshot"
+      }
     },
     "panel": {
       "title": "My shared links",
@@ -1328,18 +1296,32 @@
       "network": "Could not reach the server.",
       "authRequired": "Your session expired or you are not signed in. Sign in and try again.",
       "unavailableMode": "Sharing is not available in the current sign-in mode.",
-      "accessDenied": "You are not allowed to share this conversation. Only its owner, the platform owner and admins can.",
+      "accessDenied": "You do not have permission over this conversation's links.",
       "notFound": "The conversation was not found.",
       "ownerUnresolved": "The owner of this conversation could not be determined, so it cannot be shared.",
-      "projectUnregistered": "The conversation project is unregistered or archived, so it cannot be shared.",
-      "authorsUnverifiable": "Message authors cannot be verified right now. Try again later.",
-      "snapshotChanged": "The conversation changed since the preview. The preview was refreshed; review it and confirm again.",
-      "blocked": "Publishing is no longer allowed for this conversation. The preview was refreshed.",
-      "tooLarge": "The conversation is too large to share. Try a shorter one.",
+      "projectUnregistered": "This conversation's project is unregistered, so a link cannot be created.",
       "rateLimited": "Too many requests. Wait a moment and try again.",
       "limitReached": "You reached the maximum number of links. Revoke an old one first.",
-      "notConfigured": "Sharing is not enabled on this server.",
-      "shareGone": "The link does not exist or was already revoked."
+      "notConfigured": "Read links are not enabled on this server.",
+      "shareGone": "The link does not exist or was already revoked.",
+      "invalidInput": "The chosen validity period is not valid. Pick one from the list.",
+      "ownerOnly": "Only the session owner can create a read link.",
+      "projectArchived": "This conversation's project is archived, so a link cannot be created.",
+      "unsupportedType": "The request could not be sent in its current form. Reload the page and try again.",
+      "snapshotRetired": "Fixed snapshots of a conversation are no longer available. Create a live read link instead."
+    },
+    "disclosure": {
+      "liveAccess": "The reader sees the conversation text, its images and its attached text files, read-only.",
+      "future": "Future messages appear automatically while the link is active, including other members' messages.",
+      "secrets": "Known secrets are hidden automatically, but hiding does not guarantee every secret is caught.",
+      "binary": "Binary files (such as PDF and ZIP) are not shared.",
+      "history": "The link stays in the browser history of every device that opens it, so send it only to people you trust.",
+      "attachments": "Some assistants do not keep attachments; those appear as \"attachment unavailable\"."
+    },
+    "ownerOnlyCreate": "Only the session owner can create a read link. You can view and revoke the existing links here.",
+    "notice": {
+      "short": "Public read link active",
+      "full": "A public read link is active for this session: anyone holding it can read it without signing in."
     }
   }
 }

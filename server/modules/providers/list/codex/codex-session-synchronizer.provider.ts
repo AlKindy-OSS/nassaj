@@ -11,10 +11,22 @@ import {
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
+import { isCodexRolloutNameOf } from '../../shared/session-transcript-specs.js';
+
 import { codexHomeForSessionFile, resolveCodexHomes } from './codex-home.js';
 
-/** Thread UUID at the end of a rollout filename (`rollout-<ts>-<uuid>.jsonl`). */
-const CODEX_ROLLOUT_ID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+const warnedMismatchedNames = new Set<string>();
+const MAX_WARNED_NAMES = 2048;
+
+/** Logs once per content id that a rollout under another name was not recorded (no path logged). */
+function warnMismatchedName(sessionId: string): void {
+  if (warnedMismatchedNames.has(sessionId)) return;
+  if (warnedMismatchedNames.size >= MAX_WARNED_NAMES) warnedMismatchedNames.clear();
+  warnedMismatchedNames.add(sessionId);
+  console.warn('Skipped a Codex rollout whose name is not its session_meta id (ADR-201 L7)', {
+    event: 'codex_rollout_name_mismatch', sessionId,
+  });
+}
 
 type ParsedSession = {
   sessionId: string;
@@ -146,8 +158,7 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
 
       // The name rides on the refresh (custom_name), so a file refused by the
       // ADR-201 source rules cannot rename the row either.
-      await this.recordSession(parsed, filePath);
-      processed += 1;
+      if (await this.recordSession(parsed, filePath)) processed += 1;
     }
 
     return processed;
@@ -193,12 +204,18 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
 
   /**
    * Records one root rollout through the ADR-201 discovery writers. A rollout
-   * whose filename UUID differs from its `session_meta` id may register a new
-   * id but never refreshes an existing row (A3).
+   * not named `rollout-…-<session_meta id>.jsonl` (a copy or a forgery, A3)
+   * neither refreshes nor inserts a row (R4, the Claude L7 rule): it is logged
+   * once and null is returned. The name rule is the reader's own
+   * ({@link isCodexRolloutNameOf}), so a recorded row is always readable.
    */
-  private async recordSession(parsed: ParsedSession, filePath: string): Promise<string> {
+  private async recordSession(parsed: ParsedSession, filePath: string): Promise<string | null> {
+    if (!isCodexRolloutNameOf(path.basename(filePath), parsed.sessionId)) {
+      warnMismatchedName(parsed.sessionId);
+      return null;
+    }
     const timestamps = await readFileTimestamps(filePath);
-    const input = {
+    return sessionsDb.recordDiscoveredSession({
       sessionId: parsed.sessionId,
       provider: this.provider,
       projectPath: parsed.projectPath,
@@ -206,13 +223,7 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       createdAt: timestamps.createdAt,
       updatedAt: timestamps.updatedAt,
       jsonlPath: filePath,
-    };
-    const fileId = CODEX_ROLLOUT_ID_RE.exec(path.basename(filePath))?.[1];
-    if (fileId?.toLowerCase() !== parsed.sessionId.toLowerCase()) {
-      sessionsDb.insertDiscoveredSession(input);
-      return parsed.sessionId;
-    }
-    return sessionsDb.recordDiscoveredSession(input);
+    });
   }
 
   /**
@@ -222,21 +233,25 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
     filePath: string,
     nameMap: Map<string, string>
   ): Promise<ParsedSession | null> {
-    const parsed = await extractFirstValidJsonlData<CodexSessionMeta>(filePath, (rawData) => {
+    // B-1616: identity is the FIRST record only. A 0.160 child rollout carries its
+    // parent's session_meta (thread_source "user") as line 1; scanning past an
+    // unusable line 0 would re-identify the child as its parent. The first record
+    // therefore always ends the scan: usable → its meta, anything else → no row.
+    const first = await extractFirstValidJsonlData<{ meta: CodexSessionMeta | null }>(filePath, (rawData) => {
       const data = rawData as Record<string, unknown>;
       // Anchor on the session_meta record specifically (robustness): a future
       // rollout format could emit an earlier line that happens to carry id+cwd,
       // and classifying it off the wrong record would mis-fold a real root. Only
       // the session_meta line carries the authoritative thread identity.
-      if (data.type !== 'session_meta') {
-        return null;
+      if (data?.type !== 'session_meta') {
+        return { meta: null };
       }
       const payload = data.payload as Record<string, unknown> | undefined;
       const sessionId = typeof payload?.id === 'string' ? payload.id : undefined;
       const projectPath = typeof payload?.cwd === 'string' ? payload.cwd : undefined;
 
       if (!sessionId || !projectPath) {
-        return null;
+        return { meta: null };
       }
 
       // Top-level sessions carry a string source ("exec"/"cli"); a subagent
@@ -245,7 +260,7 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       const sourceIsSubagent =
         typeof source === 'object' && source !== null && 'subagent' in source;
 
-      return {
+      return { meta: {
         sessionId,
         projectPath,
         threadSource: typeof payload?.thread_source === 'string' ? payload.thread_source : undefined,
@@ -253,8 +268,9 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
         forkedFromId: typeof payload?.forked_from_id === 'string' ? payload.forked_from_id : undefined,
         parentThreadId: typeof payload?.parent_thread_id === 'string' ? payload.parent_thread_id : undefined,
         rootSessionId: typeof payload?.session_id === 'string' ? payload.session_id : undefined,
-      };
+      } };
     });
+    const parsed = first?.meta ?? null;
 
     if (!parsed) {
       return null;

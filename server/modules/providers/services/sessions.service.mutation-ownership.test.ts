@@ -28,6 +28,10 @@
  * Framework: node:test + node:assert/strict via tsx.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox: the transcript lives in its Claude tree (B-1596).
+// eslint-disable-next-line import-x/order -- must evaluate before every other import
+import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -62,8 +66,10 @@ const PRIVATE_SESSION = 'idor-private-session-002';
 function seed(): void {
   publicProjectPath = fs.mkdtempSync(path.join(workspaceRoot, 'public-'));
   privateProjectPath = fs.mkdtempSync(path.join(workspaceRoot, 'private-'));
-  publicTranscript = path.join(publicProjectPath, `${PUBLIC_SESSION}.jsonl`);
-  fs.writeFileSync(publicTranscript, '{"type":"message"}\n', 'utf8');
+  // B-1596: a removable transcript sits in a provider tree, named and headed for its session.
+  publicTranscript = path.join(SANDBOX_HOME, '.claude', 'projects', '-idor-public', `${PUBLIC_SESSION}.jsonl`);
+  fs.mkdirSync(path.dirname(publicTranscript), { recursive: true });
+  fs.writeFileSync(publicTranscript, `${JSON.stringify({ type: 'user', sessionId: PUBLIC_SESSION })}\n`, 'utf8');
 
   projectsDb.createProjectPath(publicProjectPath, 'Public Project', ownerId);
   const privateProject = projectsDb.createProjectPath(privateProjectPath, 'Private Project', ownerId);

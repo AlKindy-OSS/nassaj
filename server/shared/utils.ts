@@ -1168,11 +1168,12 @@ export async function readBoundedFile(
   try {
     handle = await open(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const opened = await handle.stat();
-    const descriptorPath = await realpath(`/proc/self/fd/${handle.fd}`);
-    if (!opened.isFile() || !sameFileIdentity(before, opened) || descriptorPath !== canonicalPath) {
+    // B-1611: the kernel's name for the descriptor, compared verbatim — never
+    // re-resolved by name, which a planted "<name> (deleted)" link would answer (B-1609).
+    const descriptorName = await readlink(`/proc/self/fd/${handle.fd}`);
+    if (!opened.isFile() || !sameFileIdentity(before, opened) || descriptorName !== canonicalPath) {
       throw boundedReadFailure('BOUNDED_READ_IDENTITY', 'bounded file identity changed');
     }
-    assertCanonicalContainment(canonicalRoot, descriptorPath);
 
     const chunks: Buffer[] = [];
     let offset = 0;

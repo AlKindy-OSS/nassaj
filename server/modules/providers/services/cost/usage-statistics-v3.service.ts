@@ -11,6 +11,7 @@ import {
   type UsageStatisticsV3Fact,
 } from '@/modules/database/index.js';
 import {
+  createCodexOwnHistoryFilter,
   resolveCodexLinkedRollouts,
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
@@ -296,6 +297,8 @@ export async function preflightWriterAttemptSource(
   let records = 0;
   let model = options.modelHint ?? '';
   let vector = { input: 0, cached: 0, output: 0 };
+  // B-1616: a 0.160 child's replayed parent history is not its usage (read from byte 0).
+  const own = createCodexOwnHistoryFilter();
   try {
     const before = await handle.stat({ bigint: true });
     let offset = 0;
@@ -319,6 +322,7 @@ export async function preflightWriterAttemptSource(
           const byteStart = offset - joined.length + start;
           let entry: unknown;
           try { entry = JSON.parse(line.toString('utf8')); } catch { throw new V3WriterError('source_invalid', 'quarantined'); }
+          if (!own.accept(entry)) { start = end + 1; continue; }
           options.duration?.addEntry(entry, sourceIdentityHash);
           const parsed = parseFact(line, byteStart, byteStart + line.length + 1, model, vector);
           model = parsed.model; vector = parsed.vector;

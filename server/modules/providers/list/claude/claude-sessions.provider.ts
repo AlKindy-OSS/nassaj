@@ -39,6 +39,7 @@ type ClaudeHistoryResult =
     messages?: AnyRecord[];
     total?: number;
     hasMore?: boolean;
+    readFailed?: true;
   };
 
 type ClaudeHistoryMessagesResult =
@@ -49,6 +50,7 @@ type ClaudeHistoryMessagesResult =
     hasMore: boolean;
     offset?: number;
     limit?: number | null;
+    readFailed?: true;
   };
 
 /**
@@ -170,7 +172,7 @@ async function getSessionMessages(
     // ADR-201 A1: only the lease or a pinned, contained, id-bound transcript is read.
     source = await claudeHistorySource(sessionId, lease, transcript);
     if (!source) {
-      return { messages: [], total: 0, hasMore: false };
+      return { messages: [], total: 0, hasMore: false, readFailed: true };
     }
 
     // Claude writes subagent transcripts into a per-session `subagents`
@@ -293,7 +295,7 @@ async function getSessionMessages(
   } catch (error) {
     lease?.check();
     console.error(`Error reading messages for session ${sessionId}:`, error);
-    return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    return { messages: [], total: 0, hasMore: false, readFailed: true };
   } finally {
     await source?.close();
   }
@@ -821,10 +823,11 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       options.historyLease?.check();
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[ClaudeProvider] Failed to load session ${sessionId}:`, message);
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     }
 
     options.historyLease?.check();
+    if (!Array.isArray(result) && result.readFailed) return { messages: [], total: 0, hasMore: false, offset: 0, limit: null, readFailed: true };
     const rawMessages = Array.isArray(result) ? result : (result.messages || []);
 
     const toolResultMap = new Map<string, ClaudeToolResult>();

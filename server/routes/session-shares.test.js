@@ -10,18 +10,18 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 
 import {
-  SESSION_SHARE_CAPS, createSessionSharesStore, migrateSessionShares, revokeSharesByProject,
+  SESSION_SHARE_CAPS, createSessionSharesStore, migrateSessionShares, onSessionSharesRevoked, revokeSharesByProject,
   revokeSharesBySession, revokeSharesByUser,
 } from '../modules/database/session-shares.js';
 import { initializeDatabase } from '../modules/database/index.js';
 import { createDocumentShareVerifier } from '../services/document-share-auth.js';
 import { createShareId, createShareToken, hashShareToken } from '../services/share-capability.js';
-import { createShareOwnerNotifier, evaluateLiveness, shareOwnerNotice } from '../services/session-share-policy.js';
+import { evaluateLiveness, evaluateReadLiveness } from '../services/session-share-policy.js';
 import { startSessionShareSweeper, sweepSessionShares } from '../services/session-share-sweeper.js';
 
 import {
   createSessionShareManagementMount, createSessionShareManagementRouter, createSessionSharePublicHandler,
-  isSessionShareManagementPath, SNAPSHOT_RATE_LIMITS,
+  isSessionShareManagementPath,
 } from './session-shares.js';
 
 const secret = 'synthetic-test-secret-session-shares-only-123456789';
@@ -31,27 +31,12 @@ const DAY = 24 * 60 * 60 * 1000;
 // The verifier's SSO attestation check reads the (unconfigured) SSO state.
 before(async () => { await initializeDatabase(); });
 
-function appError(code, statusCode) {
-  return Object.assign(new Error(code), { code, statusCode });
-}
-
-/** Deterministic stand-in for buildSessionShareSnapshot honoring truncation. */
-function createSnapshotFake(state) {
-  return async ({ sessionId, upToMessageId, confirmUnattributed }) => {
-    if (state.gate) await state.gate;
-    const all = state.messages[sessionId] ?? [];
-    const index = upToMessageId === undefined ? all.length - 1 : all.indexOf(upToMessageId);
-    if (index === -1 && upToMessageId !== undefined) throw appError('SNAPSHOT_CHANGED', 409);
-    const ids = all.slice(0, index + 1);
-    const counts = { system: 0, image: 0, secret: state.secret ?? 0, path: 0, network: 0, toolCount: 0, thinking: 0, other: 0 };
-    const blockers = state.blockers && !confirmUnattributed ? state.blockers : [];
-    const base = { upToMessageId: ids.at(-1) ?? null, counts, possibleSecretsNote: true, blockers };
-    if (blockers.length) return { ...base, snapshot: null, sha256: null, blob: null };
-    const snapshot = { v: 1, title: 'Plan', providerLabel: 'Claude', toolCount: 0,
-      messages: ids.map((id) => ({ role: 'user', author: 'owner', parts: [{ t: 'text', text: id }] })) };
-    const json = JSON.stringify(snapshot);
-    return { ...base, snapshot, sha256: createHash('sha256').update(json).digest('hex'), blob: gzipSync(json) };
-  };
+/** A legacy (T-1970) snapshot blob: what existing snapshot rows hold until retirement. */
+function snapshotBlob(ids = ['m1', 'm2']) {
+  const snapshot = { v: 1, title: 'Plan', providerLabel: 'Assistant', toolCount: 0,
+    messages: ids.map((id) => ({ role: 'user', author: 'owner', parts: [{ t: 'text', text: id }] })) };
+  const json = JSON.stringify(snapshot);
+  return { blob: gzipSync(json), sha256: createHash('sha256').update(json).digest('hex') };
 }
 
 function createWorld() {
@@ -71,8 +56,7 @@ function createWorld() {
     sessions: new Map([['s1', { session_id: 's1', project_path: '/work/p1', provider: 'claude', custom_name: 'Plan' }],
       ['s-orphan', { session_id: 's-orphan', project_path: '/nowhere', provider: 'claude' }]]),
     owners: new Map([['s1', 3], ['s-orphan', 3]]),
-    readable: new Set(['s1:3', 's1:4']),
-    snapshotState: { messages: { s1: ['m1', 'm2'] } },
+    readable: new Set(['s1:3', 's1:4', 's-orphan:3']),
   };
   world.policy = {
     getSession: (id) => world.sessions.get(id) ?? null,
@@ -91,7 +75,7 @@ function createWorld() {
 async function fixture(t, options = {}) {
   const world = createWorld();
   const audit = [];
-  const notified = [];
+  const dropped = [];
   const verifyUser = options.verifyUser ?? createDocumentShareVerifier({ getUserById: (id) => world.users.get(id) }, secret);
   const clock = { now: options.now ?? Date.now() };
   const app = express();
@@ -102,8 +86,8 @@ async function fixture(t, options = {}) {
   if (options.identity) app.use(options.identity);
   // Through the same mount server/index.js uses, so every route below proves the mount admits it.
   const management = createSessionShareManagementRouter({ getStore: () => world.store, policy: world.policy, verifyUser,
-    buildSnapshot: createSnapshotFake(world.snapshotState), audit: (...args) => audit.push(args),
-    notify: (event) => notified.push(event), publicOrigin: 'publicOrigin' in options ? options.publicOrigin : ORIGIN,
+    audit: (...args) => audit.push(args), dropProjection: (sessionId) => dropped.push(sessionId),
+    publicOrigin: 'publicOrigin' in options ? options.publicOrigin : ORIGIN,
     now: () => clock.now, deviceCookieName: '__Host-nassaj_device', deviceCookiesEnabled: () => options.deviceCookies === true });
   app.use('/api', createSessionShareManagementMount(management));
   app.use((_req, res) => res.status(418).json({ fellThrough: true }));
@@ -123,37 +107,54 @@ async function fixture(t, options = {}) {
     const response = await post(`/api/sessions/${sessionId}/shares/preview`, userId, body);
     return { status: response.status, body: await response.json() };
   };
-  const create = async (userId = 3, extra = {}, sessionId = 's1') => {
-    const p = await preview(userId, sessionId);
-    const response = await post(`/api/sessions/${sessionId}/shares`, userId, { expiry: '30d', upToMessageId: p.body.upToMessageId,
-      previewSha256: p.body.previewSha256, reviewedRedactions: true, ...extra });
+  /** Live link through the management route (ADR-205). */
+  const createLive = async (userId = 3, body = {}, sessionId = 's1') => {
+    const response = await post(`/api/sessions/${sessionId}/shares`, userId, body);
     return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  /**
+   * A legacy snapshot row as T-1970 wrote it (new snapshot links can no longer
+   * be created; existing rows stay readable until they expire).
+   */
+  const create = async (createdBy = 3, { expiryMs = 30 * DAY, sessionId = 's1' } = {}) => {
+    const token = createShareToken();
+    const id = createShareId();
+    const { blob, sha256 } = snapshotBlob();
+    const nowMs = clock.now;
+    assert.equal(world.store.insertWithinCaps({ id, session_id: sessionId, project_id: 'p1', owner_user_id: 3,
+      token_hash: hashShareToken(token), created_by: createdBy, created_at: new Date(nowMs).toISOString(),
+      expires_at: new Date(nowMs + expiryMs).toISOString(), snapshot: blob, snapshot_sha256: sha256, up_to_message_id: 'm2',
+      message_count: 2, redaction_counts: '{}' }, new Date(nowMs).toISOString()), true);
+    return { status: 201, body: { share: { id }, shareUrl: `${ORIGIN}/s/${id}#token=${token}` } };
   };
   const read = (id, token, headers = {}) => fetch(`${base}/api/session-shares/${id}`, {
     headers: { ...(token ? { 'X-Share-Token': token } : {}), ...headers } });
   const tokenOf = (body) => body.shareUrl.split('#token=')[1];
-  return { ...world, base, audit, notified, clock, bearer, post, preview, create, read, tokenOf };
+  return { ...world, base, audit, dropped, clock, bearer, post, preview, create, createLive, read, tokenOf };
 }
 
-test('permission matrix: owner, platform owner and admin create; others refused', async (t) => {
+test('M9 permission matrix: only the strict session owner creates a live link', async (t) => {
   const f = await fixture(t);
-  const owner = await f.create(3);
+  const owner = await f.createLive(3);
   assert.equal(owner.status, 201, JSON.stringify(owner.body));
   assert.match(owner.body.shareUrl, /^https:\/\/nassaj\.example\/s\/[a-f0-9]{32}#token=[A-Za-z0-9_-]{43}$/);
-  assert.equal(f.notified.length, 0, 'the owner sharing their own session notifies nobody');
-  assert.equal((await f.create(1)).status, 201, 'platform owner on another user\'s session');
-  assert.equal((await f.create(2)).status, 201, 'admin on another user\'s session');
-  assert.deepEqual(f.notified.map((event) => [event.ownerUserId, event.creator.id]), [[3, 1], [3, 2]]);
-  assert.equal((await f.preview(4)).status, 403, 'a writer who is not the owner cannot create');
-  assert.equal((await f.preview(5)).status, 403);
-  assert.equal((await f.post('/api/sessions/s1/shares/preview', null, {})).status, 401);
-  const stale = await f.post('/api/sessions/s1/shares/preview', null, {}, f.bearer(3, { auth_gen: 0 }));
+  for (const [userId, name] of [[1, 'platform owner'], [2, 'admin'], [4, 'writer member'], [5, 'outsider']]) {
+    const refused = await f.createLive(userId);
+    assert.equal(refused.status, 403, name);
+    assert.equal(refused.body.error.code, 'OWNER_ONLY', name);
+  }
+  assert.equal((await f.post('/api/sessions/s1/shares', null, {})).status, 401);
+  const stale = await f.post('/api/sessions/s1/shares', null, {}, f.bearer(3, { auth_gen: 0 }));
   assert.equal(stale.status, 401, 'stale authorization generation');
-  assert.equal((await f.preview(3, 'nope')).status, 404);
-  const orphan = await f.preview(3, 's-orphan');
+  assert.equal((await f.createLive(3, {}, 'nope')).status, 404);
+  const orphan = await f.createLive(3, {}, 's-orphan');
   assert.equal(orphan.status, 422);
   assert.equal(orphan.body.error.code, 'SESSION_PROJECT_UNREGISTERED');
+  f.readable.delete('s1:3');
+  assert.equal((await f.createLive(3)).status, 403, 'an owner who cannot read the session cannot share it');
   assert.equal(JSON.stringify(f.audit).includes(f.tokenOf(owner.body)), false, 'token never audited');
+  assert.deepEqual(f.audit.find(([action]) => action === 'session_share_created')[2],
+    { shareId: owner.body.share.id, sessionId: 's1', expiry: '7d', mode: 'live' });
 });
 
 test('without the bridge a device cookie, platform principal or ambient identity never authenticates', async (t) => {
@@ -191,72 +192,48 @@ test('a bridged device identity authenticates only while current and not forced 
   assert.equal((await mine()).status, 401, 'a device kind without the server-resolved principal is not an identity');
 });
 
-test('create validation: expiry keys, confirmations, hash and blockers', async (t) => {
+test('live create: expiry keys (7d default), strict body, placeholders, no secret fields', async (t) => {
   const now = Date.parse('2026-10-04T00:00:00.000Z');
   const f = await fixture(t, { now });
-  const p = (await f.preview(3)).body;
-  assert.equal(p.upToMessageId, 'm2');
-  const base = { expiry: '7d', upToMessageId: p.upToMessageId, previewSha256: p.previewSha256, reviewedRedactions: true };
   const status = async (body) => (await f.post('/api/sessions/s1/shares', 3, body)).status;
-  assert.equal(await status({ ...base, expiry: 'never' }), 400);
-  assert.equal(await status({ ...base, expiry: '2027-01-01T00:00:00Z' }), 400);
-  assert.equal(await status({ ...base, expiresAt: '2027-01-01T00:00:00Z' }), 400, 'free date rejected');
-  assert.equal(await status({ ...base, reviewedRedactions: undefined }), 400);
-  assert.equal(await status({ ...base, previewSha256: 'a'.repeat(64) }), 409);
-  assert.equal(await status({ ...base, extra: 1 }), 400);
+  for (const bad of [{ expiry: 'never' }, { expiry: '2027-01-01T00:00:00Z' }, { expiresAt: '2027-01-01T00:00:00Z' },
+    { expiry: 7 }, { expiry: '7d', extra: 1 }, { upToMessageId: 'm2' }]) {
+    assert.equal(await status(bad), 400, JSON.stringify(bad));
+  }
   const textBody = await fetch(`${f.base}/api/sessions/s1/shares`, { method: 'POST',
     headers: { ...f.bearer(3), 'Content-Type': 'text/plain' }, body: 'x' });
   assert.equal(textBody.status, 415);
-  // New messages after the preview do not break creation: the snapshot is truncated.
-  f.snapshotState.messages.s1.push('m3');
-  const created = await f.post('/api/sessions/s1/shares', 3, base);
-  assert.equal(created.status, 201);
-  const share = (await created.json()).share;
-  assert.equal(share.expiresAt, new Date(now + 7 * DAY).toISOString());
-  assert.equal(share.upToMessageId, 'm2');
-  assert.equal(share.messageCount, 2);
-  // Possible secrets need the second confirmation.
-  f.snapshotState.secret = 2;
-  const q = (await f.preview(3)).body;
-  const secretBase = { ...base, upToMessageId: q.upToMessageId, previewSha256: q.previewSha256 };
-  assert.equal(await status(secretBase), 400);
-  assert.equal(await status({ ...secretBase, confirmPossibleSecrets: false }), 400);
-  assert.equal(await status({ ...secretBase, confirmPossibleSecrets: true }), 201);
-  // Policy blockers refuse with their codes.
-  f.snapshotState.blockers = [{ code: 'FOREIGN_AUTHOR', count: 1 }];
-  const blocked = await f.post('/api/sessions/s1/shares', 3, { ...secretBase, confirmPossibleSecrets: true });
-  assert.equal(blocked.status, 409);
-  assert.deepEqual((await blocked.json()).error, { code: 'SHARE_BLOCKED', blockers: ['FOREIGN_AUTHOR'] });
-  assert.equal((await f.preview(3)).body.blockers.length, 1, 'preview reports blockers instead of failing');
+  const made = await f.createLive(3);
+  assert.equal(made.status, 201);
+  const share = made.body.share;
+  assert.equal(share.expiresAt, new Date(now + 7 * DAY).toISOString(), 'default expiry is seven days');
+  assert.deepEqual([share.mode, share.upToMessageId, share.messageCount, share.redactionCounts], ['live', null, null, null]);
+  for (const key of ['token_hash', 'tokenHash', 'ref_key', 'refKey', 'snapshot']) assert.equal(key in share, false, key);
+  const row = f.store.get(share.id);
+  assert.deepEqual([row.mode, row.snapshot, row.snapshot_sha256, row.up_to_message_id, row.message_count,
+    row.redaction_counts], ['live', null, '', '', 0, '{}']);
+  assert.equal(Buffer.from(row.ref_key).length, 32);
+  for (const [expiry, days] of [['24h', 1], ['30d', 30], ['90d', 90]]) {
+    const other = await f.createLive(3, { expiry });
+    assert.equal(other.body.share.expiresAt, new Date(now + days * DAY).toISOString(), expiry);
+  }
+  assert.notDeepEqual(Buffer.from(f.store.get(share.id).ref_key), Buffer.from(f.store.get(
+    (await f.createLive(3)).body.share.id).ref_key), 'one random ref key per link');
 });
 
-test('preview and create are rate limited per user and bounded server-wide', async (t) => {
+test('D6 retirement: preview answers 410 and builds nothing; management is rate limited per IP bucket', async (t) => {
   const f = await fixture(t);
-  let open;
-  f.snapshotState.gate = new Promise((resolve) => { open = resolve; });
-  const pending = [f.preview(3), f.preview(1)];
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal((await f.preview(2)).status, 429, 'third concurrent snapshot build');
-  open();
-  await Promise.all(pending);
-  f.snapshotState.gate = null;
+  const retired = await f.preview(3);
+  assert.deepEqual([retired.status, retired.body.error.code], [410, 'SNAPSHOT_SHARES_RETIRED']);
   const statuses = [];
-  for (let index = 0; index < 4; index += 1) statuses.push((await f.preview(3)).status);
-  assert.deepEqual(statuses, [200, 200, 200, 429], 'fifth preview in one minute for the same user (4/min)');
-  // Create has its own 10/min bucket: an exhausted preview bucket never blocks it.
-  const ref = (await f.preview(1)).body;
-  const creates = [];
-  for (let index = 0; index < 11; index += 1) {
-    creates.push((await f.post('/api/sessions/s1/shares', 3, { expiry: '30d', upToMessageId: ref.upToMessageId,
-      previewSha256: ref.previewSha256, reviewedRedactions: true })).status);
-  }
-  assert.deepEqual(creates, [...Array(10).fill(201), 429], 'eleventh create in one minute (10/min)');
-  assert.deepEqual(SNAPSHOT_RATE_LIMITS, { preview: 4, create: 10 });
+  for (let index = 0; index < 120; index += 1) statuses.push((await fetch(`${f.base}/api/session-shares/mine`, { headers: f.bearer(3) })).status);
+  assert.equal(statuses.filter((status) => status === 200).length, 119, 'the preview above used one of 120');
+  assert.equal((await fetch(`${f.base}/api/session-shares/mine`, { headers: f.bearer(3) })).status, 429);
 });
 
 test('sharing is unavailable without a valid public origin', async (t) => {
   const f = await fixture(t, { publicOrigin: undefined });
-  const response = await f.preview(3);
+  const response = await f.createLive(3);
   assert.equal(response.status, 503);
   assert.equal(response.body.error.code, 'SHARING_NOT_CONFIGURED');
 });
@@ -285,6 +262,12 @@ test('active caps hold inside the INSERT across interleaved connections', async 
       if (stores[index % 2].insertWithinCaps(row(index, `s${index}`, 7))) accepted += 1;
     }
     assert.equal(accepted, SESSION_SHARE_CAPS.perCreator);
+    const live = (index) => ({ id: `live${index}`, session_id: 's-live', project_id: 'p1', owner_user_id: 3,
+      token_hash: 'f'.repeat(64), created_by: 20 + index, created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + DAY).toISOString(), ref_key: Buffer.alloc(32, index) });
+    const liveResults = Array.from({ length: 25 }, (_, index) => stores[index % 2].insertLiveWithinCaps(live(index)));
+    assert.equal(liveResults.filter(Boolean).length, SESSION_SHARE_CAPS.perSession, 'live rows share the per-session cap');
+    assert.equal(stores[0].countActiveLive('s-live'), SESSION_SHARE_CAPS.perSession);
     a.close();
     b.close();
   } finally {
@@ -320,6 +303,11 @@ test('public read: uniform 404 matrix and identical failure responses', async (t
   assert.equal((await ok.json()).messages.length, 2);
   f.clock.now += 31 * DAY;
   assert.equal((await f.read(id, token)).status, 404, 'expired');
+  f.clock.now -= 31 * DAY;
+  const live = await f.createLive(3);
+  const liveRead = await f.read(live.body.share.id, f.tokenOf(live.body));
+  assert.deepEqual([liveRead.status, await liveRead.text()], [404, '{"error":{"code":"SHARE_UNAVAILABLE"}}'],
+    'live rows are read through /api/share-view only');
 });
 
 test('public read is a 404 when the public origin is unset', async (t) => {
@@ -371,38 +359,19 @@ test('gzip passthrough of the stored blob, gunzip for clients without gzip', asy
   assert.equal(JSON.parse(plain.body.toString('utf8')).v, 1);
 });
 
-test('public reads are rate limited per IP and bounded in concurrency', async (t) => {
+test('legacy reader D1 order: failures charge the IP bucket only, and a valid token is never refused', async (t) => {
   const f = await fixture(t);
+  const created = await f.create(3);
+  const id = created.body.share.id;
+  const token = f.tokenOf(created.body);
   const statuses = [];
-  for (let index = 0; index < 61; index += 1) statuses.push((await f.read('a'.repeat(32), 'A'.repeat(43))).status);
-  assert.equal(statuses.filter((status) => status === 404).length, 60);
-  assert.equal(statuses[60], 429);
-
-  const world = createWorld();
-  const handler = createSessionSharePublicHandler({ getStore: () => world.store, policy: world.policy, publicOrigin: ORIGIN });
-  const responses = [];
-  const fakeResponse = () => {
-    const res = { statusCode: 200, headers: {}, listeners: {}, headersSent: false, destroyed: false };
-    Object.assign(res, {
-      set(values, value) { Object.assign(this.headers, typeof values === 'string' ? { [values]: value } : values); return this; },
-      status(code) { this.statusCode = code; return this; },
-      json(body) { this.body = body; return this; },
-      end() { return this; },
-      once(event, listener) { this.listeners[event] = listener; return this; },
-    });
-    responses.push(res);
-    return res;
-  };
-  for (let index = 0; index < 9; index += 1) {
-    handler({ method: 'GET', path: `/api/session-shares/${'b'.repeat(32)}`, headers: {}, socket: { remoteAddress: `10.0.0.${index}` },
-      get: () => undefined }, fakeResponse(), () => {});
-  }
-  assert.deepEqual(responses.map((res) => res.statusCode), [...Array(8).fill(404), 429], 'ninth open reader');
-  responses[0].listeners.close();
-  handler({ method: 'GET', path: `/api/session-shares/${'b'.repeat(32)}`, headers: {}, socket: { remoteAddress: '10.0.1.1' },
-    get: () => undefined }, fakeResponse(), () => {});
-  assert.equal(responses.at(-1).statusCode, 404, 'a closed reader frees its slot');
-  world.db.close();
+  for (let index = 0; index < 21; index += 1) statuses.push((await f.read('a'.repeat(32), 'A'.repeat(43))).status);
+  assert.equal(statuses.filter((status) => status === 404).length, 20);
+  assert.equal(statuses[20], 429, 'twenty-first failed verification from one bucket');
+  const ok = await f.read(id, token);
+  assert.equal(ok.status, 200, 'the same IP with a valid token is served');
+  const malformed = await f.read(id, 'x'.repeat(10));
+  assert.equal(malformed.status, 404, 'a malformed token is refused uncharged');
 });
 
 test('liveness matrix: every death cause refuses the read', async (t) => {
@@ -433,13 +402,17 @@ test('liveness matrix: every death cause refuses the read', async (t) => {
   assert.equal((await f.read(admin.body.share.id, f.tokenOf(admin.body))).status, 200, 'admins do not need the read gate');
   f.users.get(2).role = 'user';
   assert.equal((await f.read(admin.body.share.id, f.tokenOf(admin.body))).status, 404, 'demoted admin');
+  const g = await fixture(t);
+  const pinned = await g.create(2);
+  g.readable.delete('s1:3');
+  assert.equal((await g.read(pinned.body.share.id, g.tokenOf(pinned.body))).status, 404, 'owner_unreadable');
 });
 
 test('sweeper: definitive causes revoke at once, a missing session only after two sweeps', async (t) => {
   const f = await fixture(t);
   const keep = (await f.create(3)).body.share.id;
   const missing = (await f.create(3)).body.share.id;
-  const expired = (await f.create(3, { expiry: '24h' })).body.share.id;
+  const expired = (await f.create(3, { expiryMs: DAY })).body.share.id;
   f.db.prepare("UPDATE session_shares SET session_id='s-gone' WHERE id=?").run(missing);
   f.owners.set('s-gone', 3);
   f.readable.add('s-gone:3');
@@ -488,6 +461,14 @@ test('revoke, lists and ownership visibility', async (t) => {
   assert.equal((await revoke(byOwner.body.share.id, 4)).status, 404, 'a session member cannot revoke');
   assert.equal((await revoke(byOwner.body.share.id, 1)).status, 204, 'platform owner revokes');
   assert.ok(f.audit.some(([action]) => action === 'session_share_revoked'));
+  assert.deepEqual(f.dropped, [], 'snapshot revokes never touch the live projection');
+  const first = await f.createLive(3);
+  const second = await f.createLive(3);
+  assert.equal((await revoke(first.body.share.id, 2)).status, 204, 'an admin may revoke a live link (M9 keeps revoke open)');
+  assert.deepEqual(f.dropped, [], 'another live link of the session is still active');
+  assert.equal(f.store.get(first.body.share.id).ref_key, null, 'revoke nulls the ref key');
+  assert.equal((await revoke(second.body.share.id, 3)).status, 204);
+  assert.deepEqual(f.dropped, ['s1'], 'the last live revoke drops the projection');
 });
 
 test('revocation hooks null blobs by session, project and user', async (t) => {
@@ -509,27 +490,14 @@ test('revocation hooks null blobs by session, project and user', async (t) => {
   const empty = new Database(':memory:');
   assert.equal(revokeSharesBySession(empty, 's1', 'x'), 0, 'no table, no error');
   empty.close();
-});
-
-test('owner notification goes through web push with an audit row', async () => {
-  const audits = [];
-  const sent = [];
-  const notify = createShareOwnerNotifier({
-    audit: (...args) => audits.push(args),
-    loadOrchestrator: async () => ({
-      createNotificationEvent: (event) => ({ ...event, built: true }),
-      notifyUserIfEnabled: (payload) => sent.push(payload),
-    }),
-  });
-  await notify({ ownerUserId: 3, creator: { id: 2, username: 'admin' }, sessionId: 's1', title: 'Plan', shareId: 'abc' });
-  assert.deepEqual(audits, [['session_share_owner_notified', 2, { shareId: 'abc', sessionId: 's1', ownerUserId: 3 }]]);
-  assert.equal(sent[0].userId, 3);
-  assert.equal(sent[0].event.code, 'agent.notification');
-  assert.match(sent[0].event.meta.message, /admin created a public read-only link to your session 'Plan'; you can revoke it\./);
-  assert.match(sent[0].event.meta.message, /أنشأ رابطًا عامًا/);
-  const failing = createShareOwnerNotifier({ audit: () => { throw new Error('x'); }, loadOrchestrator: async () => { throw new Error('y'); } });
-  await failing({ ownerUserId: 3, creator: { id: 2 }, sessionId: 's1', title: '', shareId: 'abc' });
-  assert.ok(shareOwnerNotice('a', 'x'.repeat(200)).includes('…'));
+  const heard = [];
+  const stopA = onSessionSharesRevoked(() => { throw new Error('listener failure'); });
+  const stopB = onSessionSharesRevoked((sessionId) => heard.push(sessionId));
+  assert.equal(revokeSharesBySession(h.db, 's1', 'session_deleted'), 0, 'a throwing listener never breaks the revoke');
+  stopA();
+  stopB();
+  revokeSharesBySession(h.db, 's1', 'session_deleted');
+  assert.deepEqual(heard, ['s1'], 'archive/delete notify listeners (live projection drop); unregister works');
 });
 
 test('evaluateLiveness reports the ordered reason', () => {
@@ -544,6 +512,9 @@ test('evaluateLiveness reports the ordered reason', () => {
   assert.equal(evaluateLiveness({ ...row, created_by: 99 }, world.policy, Date.now()), 'creator_inactive');
   assert.equal(evaluateLiveness({ ...row, created_by: 5 }, world.policy, Date.now()), 'creator_unentitled');
   assert.equal(evaluateLiveness({ ...row, project_id: 'other' }, world.policy, Date.now()), 'project_gone');
+  assert.equal(evaluateReadLiveness(row, world.policy, Date.now()), null);
+  world.readable.delete('s1:3');
+  assert.equal(evaluateReadLiveness({ ...row, created_by: 2 }, world.policy, Date.now()), 'owner_unreadable');
   world.db.close();
 });
 
@@ -564,11 +535,8 @@ test('sweeper runs at boot under the writer lease and survives a refused lease',
   world.db.close();
 });
 
-test('eligibility matrix mirrors the create rule without building a snapshot', async (t) => {
+test('eligibility matrix mirrors the live create rule (M9)', async (t) => {
   const f = await fixture(t);
-  let builds = 0;
-  const original = f.snapshotState.messages;
-  f.snapshotState.messages = new Proxy(original, { get: (target, key) => { builds += 1; return target[key]; } });
   const eligibility = async (userId, sessionId = 's1', headers = undefined) => {
     const response = await fetch(`${f.base}/api/sessions/${sessionId}/shares/eligibility`,
       { headers: headers ?? (userId ? f.bearer(userId) : {}) });
@@ -578,8 +546,9 @@ test('eligibility matrix mirrors the create rule without building a snapshot', a
   const no = { canShare: false, canManage: false };
   const owner = await eligibility(3);
   assert.deepEqual([owner.status, owner.body, owner.cache], [200, yes, 'no-store'], 'strict session owner');
-  assert.deepEqual((await eligibility(1)).body, yes, 'platform owner on another user\'s session');
-  assert.deepEqual((await eligibility(2)).body, yes, 'admin on another user\'s session');
+  const manageOnly = { canShare: false, canManage: true };
+  assert.deepEqual((await eligibility(1)).body, manageOnly, 'platform owner manages but cannot create (M9)');
+  assert.deepEqual((await eligibility(2)).body, manageOnly, 'admin manages but cannot create (M9)');
   assert.deepEqual((await eligibility(4)).body, no, 'session member (read or write) neither shares nor manages');
   assert.deepEqual((await eligibility(5)).body, no, 'non-participant');
   assert.deepEqual((await eligibility(3, 's-orphan')).body, { canShare: false, canManage: true },
@@ -592,7 +561,30 @@ test('eligibility matrix mirrors the create rule without building a snapshot', a
   const g = await fixture(t, { verifyUser: () => ({ id: 1, role: 'owner', authenticationKind: 'platform_unverified' }) });
   assert.equal((await fetch(`${g.base}/api/sessions/s1/shares/eligibility`, { headers: g.bearer(1) })).status, 401,
     'platform_unverified');
-  assert.equal(builds, 0, 'eligibility never builds a snapshot');
+});
+
+test('D5 status: active live links for readers of the session, zero for everyone else', async (t) => {
+  const f = await fixture(t);
+  const status = async (userId, sessionId = 's1') => {
+    const response = await fetch(`${f.base}/api/sessions/${sessionId}/shares/status`, { headers: userId ? f.bearer(userId) : {} });
+    return { status: response.status, body: await response.json() };
+  };
+  assert.deepEqual(await status(4), { status: 200, body: { activeLiveLinks: 0 } });
+  await f.create(3);
+  assert.deepEqual((await status(4)).body, { activeLiveLinks: 0 }, 'snapshot rows are not live links');
+  const live = await f.createLive(3);
+  await f.createLive(3, { expiry: '24h' });
+  assert.deepEqual((await status(4)).body, { activeLiveLinks: 2 }, 'a reading member sees the notice');
+  assert.deepEqual((await status(3)).body, { activeLiveLinks: 2 });
+  for (const [userId, sessionId, name] of [[5, 's1', 'non-reader'], [2, 's1', 'admin without read'], [3, 'nope', 'unknown'],
+    [3, 'bad%20id', 'malformed']]) {
+    assert.deepEqual((await status(userId, sessionId)).body, { activeLiveLinks: 0 }, name);
+  }
+  assert.equal((await status(null)).status, 401);
+  await f.post(`/api/session-shares/${live.body.share.id}/revoke`, 3);
+  assert.deepEqual((await status(4)).body, { activeLiveLinks: 1 });
+  f.clock.now += 2 * DAY;
+  assert.deepEqual((await status(4)).body, { activeLiveLinks: 0 }, 'expired links do not count');
 });
 
 test('list items carry session title and creator name, never secrets', async (t) => {
@@ -612,7 +604,14 @@ test('list items carry session title and creator name, never secrets', async (t)
     }
     return JSON.parse(text).shares;
   };
+  const live = await f.createLive(3);
+  const liveItem = (await get('/api/sessions/s1/shares', 3)).find((item) => item.id === live.body.share.id);
+  assert.deepEqual([liveItem.mode, liveItem.messageCount, liveItem.redactionCounts], ['live', null, null]);
+  assert.equal(JSON.stringify(liveItem).includes('ref_key'), false);
+  await f.post(`/api/session-shares/${live.body.share.id}/revoke`, 3);
+  f.db.prepare('DELETE FROM session_shares WHERE id = ?').run(live.body.share.id);
   const bySession = await get('/api/sessions/s1/shares', 3);
+  assert.ok(bySession.every((item) => item.mode === 'snapshot'), 'legacy rows read mode snapshot');
   assert.deepEqual(bySession.map((s) => [s.sessionTitle, s.createdByName, s.createdBySelf]).sort(),
     [['Plan', 'admin', false], ['Plan', 'sara', true]]);
   const mine = await get('/api/session-shares/mine', 2);
@@ -630,6 +629,7 @@ const MANAGEMENT_PATHS = Object.freeze({
   preview: '/sessions/s1/shares/preview',
   'create/list': '/sessions/s1/shares',
   eligibility: '/sessions/s1/shares/eligibility',
+  status: '/sessions/s1/shares/status',
   mine: '/session-shares/mine',
   revoke: `/session-shares/${'a'.repeat(32)}/revoke`,
 });
@@ -639,7 +639,7 @@ test('management path predicate admits every management route and nothing else',
   for (const path of ['/sessions/s1', '/sessions/s1/messages', '/sessions/s1/shares/other', '/sessions/s1/shares/',
     '/sessions/s1/shares/preview/x', '/sessions//shares', '/sessions/a/b/shares', '/session-shares/abc',
     '/session-shares/mine/x', '/session-shares//revoke', '/api/sessions/s1/shares', '/projects/p/document-shares',
-    '/sessions/s1/shares/eligibilityx', undefined, null]) {
+    '/sessions/s1/shares/eligibilityx', '/sessions/s1/shares/statusx', '/sessions/s1/shares/status/x', undefined, null]) {
     assert.equal(isSessionShareManagementPath(path), false, String(path));
   }
 });
@@ -654,7 +654,8 @@ test('the app mount dispatches every management route and passes other paths on'
   // End to end through the real router: every route answers from the router, never the fallthrough.
   const f = await fixture(t);
   const calls = [['POST', MANAGEMENT_PATHS.preview, {}], ['POST', MANAGEMENT_PATHS['create/list'], {}],
-    ['GET', MANAGEMENT_PATHS['create/list']], ['GET', MANAGEMENT_PATHS.eligibility], ['GET', MANAGEMENT_PATHS.mine],
+    ['GET', MANAGEMENT_PATHS['create/list']], ['GET', MANAGEMENT_PATHS.eligibility], ['GET', MANAGEMENT_PATHS.status],
+    ['GET', MANAGEMENT_PATHS.mine],
     ['POST', MANAGEMENT_PATHS.revoke, {}]];
   for (const [method, path, body] of calls) {
     const response = await fetch(`${f.base}/api${path}`, { method, headers: { ...f.bearer(3), 'Content-Type': 'application/json' },
@@ -682,8 +683,14 @@ test('the mount runs the device bridge before management routes only', () => {
   assert.deepEqual(refused, ['bridge answered'], 'a bridge refusal never reaches the router');
 });
 
-test('a slow public reader is destroyed at the deadline and frees its slot exactly once', async () => {
+test('legacy reader slots: per-share concurrency 4 after verification, destroyed at the deadline, freed once', async () => {
   const world = createWorld();
+  const token = createShareToken();
+  const id = createShareId();
+  const { blob, sha256 } = snapshotBlob();
+  world.store.insertWithinCaps({ id, session_id: 's1', project_id: 'p1', owner_user_id: 3, token_hash: hashShareToken(token),
+    created_by: 3, created_at: new Date().toISOString(), expires_at: new Date(Date.now() + DAY).toISOString(), snapshot: blob,
+    snapshot_sha256: sha256, up_to_message_id: 'm2', message_count: 2, redaction_counts: '{}' });
   const handler = createSessionSharePublicHandler({ getStore: () => world.store, policy: world.policy, publicOrigin: ORIGIN,
     readTimeoutMs: 20 });
   const responses = [];
@@ -691,6 +698,7 @@ test('a slow public reader is destroyed at the deadline and frees its slot exact
     const res = { statusCode: 200, headers: {}, listeners: {}, headersSent: false, destroyed: false };
     Object.assign(res, {
       set(values, value) { Object.assign(this.headers, typeof values === 'string' ? { [values]: value } : values); return this; },
+      type() { return this; },
       status(code) { this.statusCode = code; return this; },
       json(body) { this.body = body; return this; },
       end() { return this; },
@@ -700,18 +708,22 @@ test('a slow public reader is destroyed at the deadline and frees its slot exact
     responses.push(res);
     return res;
   };
-  const request = (index) => handler({ method: 'GET', path: `/api/session-shares/${'c'.repeat(32)}`, headers: {},
-    socket: { remoteAddress: `10.9.0.${index}` }, get: () => undefined }, fakeResponse(), () => {});
-  for (let index = 0; index < 9; index += 1) request(index);
-  assert.equal(handler.activeReaders(), 8);
-  assert.equal(responses.at(-1).statusCode, 429, 'slots full');
+  const request = (index, presented = token) => handler({ method: 'GET', path: `/api/session-shares/${id}`, headers: {},
+    socket: { remoteAddress: `10.9.0.${index}` }, get: (name) => (name === 'X-Share-Token' ? presented : undefined),
+    acceptsEncodings: () => 'gzip' }, fakeResponse(), () => {});
+  for (let index = 0; index < 5; index += 1) request(index);
+  assert.equal(handler.activeReaders(), 4);
+  assert.deepEqual(responses.map((res) => res.statusCode), [200, 200, 200, 200, 429], 'fifth concurrent reader of one share');
+  assert.equal(responses[4].headers['Retry-After'], '1');
+  for (let index = 0; index < 30; index += 1) request(100 + index, 'A'.repeat(43));
+  assert.equal(handler.activeReaders(), 4, 'failed verifications never take a slot');
   await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.equal(responses.slice(0, 8).every((res) => res.destroyed), true, 'held readers destroyed');
+  assert.equal(responses.slice(0, 4).every((res) => res.destroyed), true, 'held readers destroyed');
   assert.equal(handler.activeReaders(), 0);
-  for (const res of responses.slice(0, 8)) { res.listeners.finish?.(); res.listeners.error?.(); res.listeners.close?.(); }
+  for (const res of responses.slice(0, 4)) { res.listeners.finish?.(); res.listeners.error?.(); res.listeners.close?.(); }
   assert.equal(handler.activeReaders(), 0, 'late close/finish/error never double-release');
   request(20);
-  assert.equal(responses.at(-1).statusCode, 404, 'a freed slot admits the next reader');
+  assert.equal(responses.at(-1).statusCode, 200, 'a freed slot admits the next reader');
   assert.equal(handler.activeReaders(), 1);
   responses.at(-1).listeners.finish();
   assert.equal(handler.activeReaders(), 0);

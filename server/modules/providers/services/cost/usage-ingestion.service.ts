@@ -14,6 +14,7 @@ import {
   type UsageSourceCheckpoint,
 } from '@/modules/database/index.js';
 import {
+  createCodexOwnHistoryFilter,
   resolveCodexLinkedRollouts,
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
@@ -304,13 +305,17 @@ function parseCodex(
   lines: ParsedLine[],
   attribution: { kind: UsageAttributionKind; id: string; subagent: boolean },
   modelHint?: string | null,
+  historyStartOrdinal: number | null = null,
 ): UsageRequestEventInput[] {
   const events: UsageRequestEventInput[] = [];
   let model = modelHint || 'unknown';
+  // B-1616: a 0.160 child's records below subagent_history_start_ordinal are its
+  // parent's replayed history (already counted on the parent); never count them twice.
+  const own = createCodexOwnHistoryFilter(historyStartOrdinal, checkpoint.offsetBytes === 0);
   for (const line of lines) {
     let entry: unknown;
     try { entry = JSON.parse(line.text); } catch { continue; }
-    if (!record(entry)) continue;
+    if (!record(entry) || !own.accept(entry)) continue;
     const payload = record(entry.payload) ? entry.payload : null;
     if (!payload) continue;
     if (typeof payload.model === 'string' && payload.model) model = payload.model;
@@ -402,6 +407,7 @@ async function ingestSource(
   bound: { root: BoundRoot; source: BoundSource },
   attribution: { kind: UsageAttributionKind; id: string; subagent: boolean },
   modelHint?: string | null,
+  historyStartOrdinal: number | null = null,
 ): Promise<{ complete: boolean; sourceKey: string; generation: number; eventsWritten: number; committedBytes: number }> {
   context.signal?.throwIfAborted();
   const source = await openSource(bound.root, bound.source);
@@ -448,7 +454,7 @@ async function ingestSource(
     const parsed = splitLines(checkpoint, buffer.subarray(0, bytesRead));
     const events = context.provider === 'claude'
       ? parseClaude(context, checkpoint, parsed.lines, attribution)
-      : parseCodex(context, checkpoint, parsed.lines, attribution, modelHint);
+      : parseCodex(context, checkpoint, parsed.lines, attribution, modelHint, historyStartOrdinal);
     const durationEvents = parseDurationEvents(context, checkpoint, parsed.lines, attribution);
     if (bytesRead === MAX_JSONL_RECORD_BYTES && parsed.committedBytes === 0) {
       throw new Error(`JSONL record exceeds ${MAX_JSONL_RECORD_BYTES} bytes for ${identity.sourceKey}`);
@@ -655,10 +661,11 @@ export async function ingestConversationUsage(context: IngestContext): Promise<C
       ? context.manifest?.linked.find((child) => child.rolloutPath === source.path)?.spawn.agentPath ?? ''
       : isRoot ? '' : path.basename(source.path, '.jsonl');
     let result: Awaited<ReturnType<typeof ingestSource>>;
+    const manifestFile = context.manifest?.files.find((file) => file.rolloutPath === source.path);
     try {
       result = await ingestSource(context, { root, source }, {
         kind: isRoot ? 'coordinator' : 'agent', id: agentId, subagent: !isRoot,
-      }, context.manifest?.files.find((file) => file.rolloutPath === source.path)?.model);
+      }, manifestFile?.model, manifestFile?.historyStartOrdinal ?? null);
     } catch (error) {
       // A child that is not bound to this conversation is never attributed to
       // it; the snapshot says so instead of failing the whole conversation.

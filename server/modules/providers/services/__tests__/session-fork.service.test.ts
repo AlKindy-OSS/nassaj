@@ -21,7 +21,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test, describe, beforeEach, after, mock } from 'node:test';
@@ -35,7 +36,8 @@ const { TranscriptForkError } = await import(
 const OWNER_USER_ID = 7;
 const PROJECT_PATH = '/workspace/demo';
 const SESSION_ID = 'sess-claude-1';
-const CLAUDE_PROJECTS_ROOT = path.join(os.tmpdir(), `nassaj-session-fork-${process.pid}`);
+const CLAUDE_HOME = path.join(os.tmpdir(), `nassaj-session-fork-${process.pid}`);
+const CLAUDE_PROJECTS_ROOT = path.join(CLAUDE_HOME, 'projects');
 const PROJECT_DIR = path.join(CLAUDE_PROJECTS_ROOT, '-workspace-demo');
 const JSONL_PATH = path.join(PROJECT_DIR, `${SESSION_ID}.jsonl`);
 
@@ -115,12 +117,44 @@ mock.module('@/modules/providers/services/sessions-watcher.service.js', {
   },
 });
 
+// B-1597: the source is opened by the pinned reader (covered for real in
+// session-fork.adr201.test.ts); here it is a minimal stand-in that refuses a
+// symlinked name, so the orchestration around it can be pinned in isolation.
+const readerCalls: Array<Record<string, unknown>> = [];
+const removals: Array<Record<string, unknown>> = [];
+mock.module('@/modules/providers/shared/session-transcript-reader.js', {
+  namedExports: {
+    isTranscriptHandle: (result: Record<string, unknown>) => 'fd' in result,
+    openRecordedTranscript: async (row: { jsonl_path: string }, purpose: string) => {
+      readerCalls.push({ ...row, purpose });
+      try {
+        if (lstatSync(row.jsonl_path).isSymbolicLink()) return { reason: 'symlink' };
+        const fd = await open(row.jsonl_path, 'r');
+        return { fd, realpath: realpathSync(row.jsonl_path), root: realpathSync(CLAUDE_PROJECTS_ROOT) };
+      } catch {
+        return { reason: 'missing' };
+      }
+    },
+  },
+});
+mock.module('@/modules/providers/shared/session-transcript-removal.js', {
+  namedExports: {
+    removeSessionTranscript: async (row: Record<string, unknown>, purpose: string) => {
+      removals.push({ ...row, purpose });
+      return { removed: true };
+    },
+  },
+});
+mock.module('../../list/claude/claude-home.js', {
+  namedExports: { resolveClaudeHomeForUser: () => CLAUDE_HOME },
+});
+
 const { forkSessionAtMessage, forkSessionFromSideQuery, buildForkTitle, SessionForkError } = await import(
   '../session-fork.service.js'
 );
 
 function resetState(): void {
-  rmSync(CLAUDE_PROJECTS_ROOT, { recursive: true, force: true });
+  rmSync(CLAUDE_HOME, { recursive: true, force: true });
   mkdirSync(PROJECT_DIR, { recursive: true });
   writeFileSync(JSONL_PATH, '{"type":"user"}\n', { mode: 0o600 });
   sessionRows.clear();
@@ -131,6 +165,8 @@ function resetState(): void {
     jsonl_path: JSONL_PATH,
   });
   forkCalls.length = 0;
+  readerCalls.length = 0;
+  removals.length = 0;
   spawnCalls.length = 0;
   indexedFiles.length = 0;
   notified.length = 0;
@@ -152,10 +188,9 @@ const PARAMS = {
   question: 'why is the build slow?',
   answer: 'the docs symlink is re-bundled every time',
   userId: OWNER_USER_ID,
-  claudeProjectsRoot: CLAUDE_PROJECTS_ROOT,
 };
 
-after(() => rmSync(CLAUDE_PROJECTS_ROOT, { recursive: true, force: true }));
+after(() => rmSync(CLAUDE_HOME, { recursive: true, force: true }));
 
 describe('forkSessionFromSideQuery', () => {
   beforeEach(resetState);
@@ -169,7 +204,9 @@ describe('forkSessionFromSideQuery', () => {
 
     // The branch is cut from the session's own transcript, carrying the exchange.
     assert.equal(forkCalls.length, 1);
-    assert.equal(forkCalls[0].sourceFilePath, JSONL_PATH);
+    assert.equal(forkCalls[0].sourceFilePath, realpathSync(JSONL_PATH));
+    assert.ok(forkCalls[0].sourceHandle, 'the fork reads the pinned descriptor, never the name');
+    assert.deepEqual(readerCalls.map((call) => call.purpose), ['session-fork']);
     assert.equal(forkCalls[0].sourceSessionId, SESSION_ID);
     assert.deepEqual(forkCalls[0].extraMessages, [
       { role: 'user', content: 'why is the build slow?' },
@@ -179,7 +216,7 @@ describe('forkSessionFromSideQuery', () => {
 
     // Indexed at once — not left to the watcher's next poll.
     assert.deepEqual(indexedFiles, [
-      path.join(PROJECT_DIR, 'forked-1.jsonl'),
+      path.join(realpathSync(PROJECT_DIR), 'forked-1.jsonl'),
     ]);
 
     // Without this row the branch fails the native-session predicate and is
@@ -220,10 +257,11 @@ describe('forkSessionFromSideQuery', () => {
     await forkSessionFromSideQuery(PARAMS);
 
     assert.equal(
-      forkCalls[0].sourceFilePath,
+      readerCalls[0].jsonl_path,
       JSONL_PATH,
-      'falls back to Claude\'s encoded project folder',
+      'falls back to the requester\'s Claude home, encoded project folder',
     );
+    assert.equal(forkCalls[0].sourceFilePath, realpathSync(JSONL_PATH));
   });
 
   test('refuses an unknown session and a non-claude session before touching disk', async () => {
@@ -329,6 +367,10 @@ describe('forkSessionFromSideQuery', () => {
     );
     assert.equal(spawnCalls.length, 0);
     assert.deepEqual(deletedSessions, ['forked-1']);
+    assert.deepEqual(removals, [{
+      session_id: 'forked-1', provider: 'claude', jsonl_path: path.join(realpathSync(PROJECT_DIR), 'forked-1.jsonl'),
+      purpose: 'session-delete',
+    }], 'the branch is removed only through the confined primitive');
   });
 
   test('an anonymous or non-participant requester is rejected before disk access', async () => {
@@ -344,7 +386,7 @@ describe('forkSessionFromSideQuery', () => {
     assert.equal(forkCalls.length, 0);
   });
 
-  test('rejects a DB transcript symlink that escapes the canonical project directory', async () => {
+  test('a source the pinned reader refuses is never forked', async () => {
     const outside = path.join(CLAUDE_PROJECTS_ROOT, 'outside.jsonl');
     writeFileSync(outside, '{}\n');
     rmSync(JSONL_PATH);
@@ -366,7 +408,6 @@ describe('forkSessionAtMessage', () => {
       sessionId: SESSION_ID,
       upToMessageId: 'assistant-uuid-7',
       userId: OWNER_USER_ID,
-      claudeProjectsRoot: CLAUDE_PROJECTS_ROOT,
     });
 
     assert.equal(result.sessionId, 'forked-1');
@@ -376,7 +417,7 @@ describe('forkSessionAtMessage', () => {
     assert.deepEqual(forkCalls[0].extraMessages, []);
     assert.equal(forkCalls[0].requireAssistantCutoff, true);
     assert.equal(spawnCalls.length, 1, 'the branch is attributed before success');
-    assert.deepEqual(indexedFiles, [path.join(path.dirname(JSONL_PATH), 'forked-1.jsonl')]);
+    assert.deepEqual(indexedFiles, [path.join(realpathSync(PROJECT_DIR), 'forked-1.jsonl')]);
   });
 
   test('fails closed when the indexed transcript path is absent instead of constructing one', async () => {
@@ -387,7 +428,7 @@ describe('forkSessionAtMessage', () => {
       jsonl_path: null,
     });
     await assert.rejects(
-      () => forkSessionAtMessage({ sessionId: SESSION_ID, upToMessageId: 'a-1', userId: OWNER_USER_ID, claudeProjectsRoot: CLAUDE_PROJECTS_ROOT }),
+      () => forkSessionAtMessage({ sessionId: SESSION_ID, upToMessageId: 'a-1', userId: OWNER_USER_ID }),
       (error: unknown) => error instanceof SessionForkError && error.code === 'transcript_not_found',
     );
     assert.equal(forkCalls.length, 0);
@@ -396,7 +437,7 @@ describe('forkSessionAtMessage', () => {
   test('does not report success when immediate indexing fails', async () => {
     indexState.impl = async () => { throw new Error('index offline'); };
     await assert.rejects(
-      () => forkSessionAtMessage({ sessionId: SESSION_ID, upToMessageId: 'a-1', userId: OWNER_USER_ID, claudeProjectsRoot: CLAUDE_PROJECTS_ROOT }),
+      () => forkSessionAtMessage({ sessionId: SESSION_ID, upToMessageId: 'a-1', userId: OWNER_USER_ID }),
       (error: unknown) => error instanceof SessionForkError && error.code === 'fork_failed',
     );
     assert.equal(spawnCalls.length, 0, 'participant registration does not run after failed indexing');

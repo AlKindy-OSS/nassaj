@@ -423,6 +423,12 @@ export type NormalizedMessage = {
   images?: unknown;
   /** Number of transcript-embedded images omitted by provider history safety caps. */
   imagesOmitted?: number;
+  /**
+   * Attachments a user message carried that the history records but does not
+   * keep (no recoverable bytes or path), by kind. Read-only links show each as
+   * "attachment unavailable" (ADR-205 D9).
+   */
+  attachmentsUnavailable?: { image?: number; file?: number };
   toolName?: string;
   toolInput?: unknown;
   toolId?: string;
@@ -478,6 +484,11 @@ export type FetchHistoryOptions = {
   offset?: number;
   /** Provider-owned stable anchor for loading rows before an earlier page. */
   cursor?: string;
+  /**
+   * ADR-205: 'coalesce-only' joins an identical in-flight read but never stores
+   * its result in the shared snapshot cache (guest projection loads).
+   */
+  snapshotCache?: 'default' | 'coalesce-only';
 };
 
 /**
@@ -497,6 +508,12 @@ export type FetchHistoryResult = {
   /** Sum of durable completed response durations for the whole conversation.
    * Null when nothing was ever measured; the client renders that as unknown. */
   responseTurnDurationTotalMs?: number | null;
+  /**
+   * ADR-205: the history could not be read (provider error, missing or refused
+   * transcript). The empty `messages` is then not an empty conversation, and
+   * the result is never cached.
+   */
+  readFailed?: true;
 };
 
 // ---------------------------

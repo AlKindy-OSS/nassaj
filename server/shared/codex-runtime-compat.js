@@ -16,7 +16,9 @@ import {
  * contract Nassaj actually speaks before any session may use it:
  *   a. version floor;
  *   b. every flag the installed @openai/codex-sdk emits parses on this binary;
- *   c. every config key/value Nassaj passes loads under --strict-config;
+ *   c. every config key/value Nassaj passes loads under --strict-config, except the
+ *      two thread-cap keys: only the supervised adapter sends them (pinned to 1),
+ *      and it runs --strict-config itself, so a renamed key fails that path visibly;
  *   d. the workspace-write sandbox refuses outside writes and network, but only
  *      when this node can actually produce workspace-write.
  * Verdicts are cached by what they depend on (release bytes + SDK bytes +
@@ -54,6 +56,10 @@ export const CODEX_NASSAJ_CONFIG_TOML = [
   '[features]',
   'multi_agent = false',
   '',
+  // B-1616: the thread-cap keys are deliberately NOT probed. Default launches send none
+  // (owner decision 2026-10-13); this probe's verdict gates every launch, so probing an
+  // optional key could refuse all Codex turns. An operator override rides on the
+  // non-strict SDK launch, where an unknown key is ignored, never refused.
   '[sandbox_workspace_write]',
   'network_access = false',
   'writable_roots = []',

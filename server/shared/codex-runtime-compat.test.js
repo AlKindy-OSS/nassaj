@@ -9,6 +9,7 @@ import { acquireCodexLaunchIdentity, codexFileDigest, resolveCodexSdkSourceEntry
 import {
   assertCodexRuntimeCompatible,
   clearCodexRuntimeCompatCache,
+  CODEX_CONFIG_VALUE_VARIANTS,
   CODEX_MIN_VERSION,
   CODEX_NASSAJ_CONFIG_TOML,
   CODEX_RUNTIME_INCOMPATIBLE,
@@ -199,6 +200,11 @@ test('the base config file carries every Nassaj key', () => {
   for (const key of ['approval_policy', 'sandbox_mode', 'web_search', 'model_reasoning_effort',
     'developer_instructions', 'project_doc_max_bytes', 'mcp_servers', 'multi_agent', 'network_access',
     'writable_roots']) assert.match(CODEX_NASSAJ_CONFIG_TOML, new RegExp(`^${key} = `, 'mu'));
+});
+
+test('B-1616: the probe never validates the optional thread-cap keys (no launch is refused for them)', () => {
+  assert.doesNotMatch(CODEX_NASSAJ_CONFIG_TOML, /max_concurrent_threads_per_session/u);
+  assert.equal(CODEX_CONFIG_VALUE_VARIANTS.flat().some(value => value.includes('max_concurrent_threads_per_session')), false);
 });
 
 test('a sandbox that permits an outside write or network is incompatible', async () => {

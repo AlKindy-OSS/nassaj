@@ -102,12 +102,18 @@ function MainContent({
     hasManualWidth,
     resizeHandleRef,
     handleFileOpen,
+    closePromptOpen,
+    handleDirtyChange,
+    handleRequestClose,
+    handleDismissClosePrompt,
     handleCloseEditor,
     handleToggleEditorExpand,
     handleResizeStart,
   } = useEditorSidebar({
     selectedProject,
     isMobile,
+    sessionId: selectedSession?.id ?? null,
+    isNewSessionScope: activeTab === 'chat',
   });
 
   // Project-board links (e.g. decision documents) are read-first: markdown
@@ -318,7 +324,11 @@ function MainContent({
           hasManualWidth={hasManualWidth}
           resizeHandleRef={resizeHandleRef}
           onResizeStart={handleResizeStart}
+          onRequestClose={handleRequestClose}
           onCloseEditor={handleCloseEditor}
+          closePromptOpen={closePromptOpen}
+          onDirtyChange={handleDirtyChange}
+          onDismissClosePrompt={handleDismissClosePrompt}
           onToggleEditorExpand={handleToggleEditorExpand}
           projectPath={project.path}
           fillSpace={activeTab === 'files'}

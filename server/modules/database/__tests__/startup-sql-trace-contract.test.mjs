@@ -88,6 +88,24 @@ const baseline = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(session_shares)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE session_shares ADD COLUMN mode TEXT NOT NULL\n  DEFAULT 'snapshot' CHECK (mode IN ('snapshot', 'live'))",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE session_shares ADD COLUMN ref_key BLOB",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE TABLE IF NOT EXISTS sso_oidc_config (\n  slot TEXT PRIMARY KEY CHECK (slot IN ('active','draft')),\n  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),\n  issuer TEXT NOT NULL,\n  client_id TEXT NOT NULL,\n  client_auth TEXT NOT NULL\n    CHECK (client_auth IN ('none','client_secret_basic','client_secret_post')),\n  client_secret_enc TEXT,\n  secret_version INTEGER NOT NULL DEFAULT 0,\n  extra_scopes TEXT NOT NULL DEFAULT '',\n  redirect_uri TEXT,\n  role_claim_path TEXT NOT NULL,\n  role_rules_json TEXT NOT NULL,\n  tenant_mode TEXT NOT NULL CHECK (tenant_mode IN ('none','claim','role_grant_scope')),\n  tenant_claim_path TEXT,\n  tenant_values_json TEXT NOT NULL DEFAULT '[]',\n  jit_enabled INTEGER NOT NULL DEFAULT 0 CHECK (jit_enabled IN (0,1)),\n  attestation_max_age_hours INTEGER NOT NULL DEFAULT 12\n    CHECK (attestation_max_age_hours BETWEEN 1 AND 24),\n  allow_private_network INTEGER NOT NULL DEFAULT 0 CHECK (allow_private_network IN (0,1)),\n  issuer_port INTEGER CHECK (issuer_port IS NULL OR issuer_port BETWEEN 1 AND 65535),\n  pinned_endpoints_json TEXT,\n  discovery_flags_json TEXT,\n  runtime_fault TEXT,\n  config_hash TEXT NOT NULL,\n  draft_version INTEGER NOT NULL DEFAULT 0,\n  version INTEGER NOT NULL DEFAULT 0,\n  updated_at INTEGER,\n  updated_by INTEGER\n)",
     "shadow": null

@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { types as utilTypes } from 'node:util';
 import type Database from 'better-sqlite3';
 
-import { openPinned, PinnedOpenError } from '../shared/pinned-fd.js';
+import { descriptorNamed, openPinned, PinnedOpenError } from '../shared/pinned-fd.js';
 
 const MiB = 1024 * 1024;
 // B-1025 (2026-09-10, owner decision): the interim envelope (4MiB / 10000
@@ -371,7 +371,8 @@ export class HistoryReadLease {
     try {
     this.check(); const current = await source.fd.stat({ bigint: true }); this.check();
     const named = await fsp.lstat(source.file, { bigint: true }); this.check();
-    if (await fsp.realpath(`/proc/self/fd/${source.fd.fd}`) !== source.file
+    // B-1611: the source's kernel name, compared verbatim (B-1609).
+    if (!await descriptorNamed(source.fd.fd, source.file)
       || !named.isFile() || named.ino !== source.stat.ino || named.dev !== source.stat.dev
       || current.size < source.stat.size) this.fail('HISTORY_REVISION_CHANGED');
     } catch { this.fail('HISTORY_REVISION_CHANGED'); }

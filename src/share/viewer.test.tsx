@@ -35,16 +35,15 @@ const respond = (status: number, body: unknown = {}) =>
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('parseTranscript (real v1 shape)', () => {
-  it('keeps toolCount and normalizes author and categories', () => {
+  it('ignores any toolCount sent by the server and normalizes author and categories', () => {
     const data = parsed();
-    expect(data.toolCount).toBe(3);
+    expect('toolCount' in data).toBe(false);
     expect(data.messages[0].author).toBe('owner');
     expect(data.messages[1].parts.map((p) => (p.t === 'redacted' ? p.cat : p.t))).toEqual(['text', 'secret', 'path', 'network', 'image', 'system']);
   });
 
-  it('treats an unknown category as a generic redaction and a bad toolCount as zero', () => {
-    const data = parseTranscript(snapshot({ toolCount: -2, messages: [{ role: 'assistant', parts: [{ t: 'redacted', cat: 'weird' }] }] }))!;
-    expect(data.toolCount).toBe(0);
+  it('treats an unknown category as a generic redaction', () => {
+    const data = parseTranscript(snapshot({ messages: [{ role: 'assistant', parts: [{ t: 'redacted', cat: 'weird' }] }] }))!;
     expect(data.messages[0].parts[0]).toEqual({ t: 'redacted', cat: undefined, text: undefined });
     expect(data.messages[0].author).toBe('assistant');
   });
@@ -76,22 +75,23 @@ describe('transcript rendering', () => {
     expect(html(data)).toContain('محتوى محذوف');
   });
 
-  it('localizes the default title, labels authors and shows the tool marker', () => {
+  it('localizes the default title and labels authors', () => {
     const out = html(parsed());
     expect(out).toContain('<h1>محادثة مشتركة</h1>');
-    expect(out).toContain('صاحب المحادثة');
+    expect(out).toContain('المالك');
     expect(out).toContain('المساعد');
-    expect(out).toContain('استُخدمت 3 أدوات');
     expect(out).toContain('نسخة للقراءة فقط');
     expect(out).toContain('Claude');
   });
 
-  it.each([[1, 'استُخدمت أداة واحدة'], [2, 'استُخدمت أداتان'], [11, 'استُخدمت 11 أداة']])('tool marker for %i', (n, label) => {
-    expect(html(parsed({ toolCount: n }))).toContain(label);
+  it('never mentions tools, whatever toolCount the server sends', () => {
+    const out = html(parsed({ toolCount: 7 }));
+    expect(out).not.toContain('استُخدمت');
+    expect(out).not.toMatch(/tool/i);
+    expect(html(parsed({ toolCount: 7 }), EN)).not.toMatch(/tools? used/i);
   });
 
-  it('omits the tool marker when no tools were used, and shows expiry only when provided', () => {
-    expect(html(parsed({ toolCount: 0 }))).not.toContain('استُخدمت');
+  it('shows expiry only when provided', () => {
     expect(html(parsed())).not.toContain('ينتهي الرابط');
     expect(html(parsed({ expiresAt: '2026-11-01T00:00:00.000Z' }))).toContain('ينتهي الرابط');
   });
@@ -100,7 +100,6 @@ describe('transcript rendering', () => {
     expect(displayTitle('خطتي', AR)).toBe('خطتي');
     const out = html(parsed(), EN);
     expect(out).toContain('<h1>Shared conversation</h1>');
-    expect(out).toContain('3 tools used');
     expect(out).toContain('Image removed');
   });
 
@@ -125,14 +124,12 @@ describe('transcript rendering', () => {
 });
 
 describe('readCredentials', () => {
-  it('returns the credentials and erases the token from the URL', () => {
-    const replaceState = vi.fn();
-    expect(readCredentials({ pathname: '/s/abcdefghij0123', hash: '#token=xyz' }, { replaceState })).toEqual({ id: 'abcdefghij0123', token: 'xyz' });
-    expect(replaceState).toHaveBeenCalledWith(null, '', '/s/abcdefghij0123');
+  it('returns the credentials from the fragment and does not touch the URL', () => {
+    expect(readCredentials({ pathname: '/s/abcdefghij0123', hash: '#token=xyz' })).toEqual({ id: 'abcdefghij0123', token: 'xyz' });
   });
 
   it.each([['/s/abcdefghij0123', ''], ['/s/abcdefghij0123', '#other=1'], ['/s/short', '#token=x'], ['/x', '#token=x']])('returns null for %s %s', (pathname, hash) => {
-    expect(readCredentials({ pathname, hash }, { replaceState: vi.fn() })).toBeNull();
+    expect(readCredentials({ pathname, hash })).toBeNull();
   });
 });
 
@@ -157,18 +154,36 @@ describe('loadShare', () => {
   });
 });
 
-describe('ShareApp states', () => {
-  it('shows loading, then the transcript', async () => {
-    vi.stubGlobal('fetch', respond(200, snapshot()));
+const META_SNAPSHOT = { v: 2, mode: 'snapshot' };
+const routed = (routes: Record<string, () => Response>) => vi.fn(async (input: RequestInfo | URL) => {
+  const path = new URL(String(input)).pathname;
+  const route = routes[path] ?? routes['*'];
+  return route ? route() : new Response('{}', { status: 404 });
+});
+const json = (status: number, body: unknown, headers: Record<string, string> = {}) => () =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
+const legacyRoutes = (over: Record<string, () => Response> = {}) => ({
+  [`/api/share-view/${CREDS.id}/meta`]: json(200, META_SNAPSHOT),
+  [`/api/session-shares/${CREDS.id}`]: json(200, snapshot()),
+  ...over,
+});
+
+describe('ShareApp states (legacy v1 fallback through meta)', () => {
+  it('shows loading, then the v1 snapshot when meta says snapshot', async () => {
+    const fetchMock = routed(legacyRoutes());
+    vi.stubGlobal('fetch', fetchMock);
     render(<ShareApp credentials={CREDS} language="ar" />);
     expect(screen.getByRole('status')).toBeTruthy();
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('محادثة مشتركة'));
+    expect(screen.getAllByRole('article').length).toBe(2);
     expect(document.documentElement.lang).toBe('ar');
     expect(document.documentElement.dir).toBe('rtl');
+    const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(paths).toEqual([`/api/share-view/${CREDS.id}/meta`, `/api/session-shares/${CREDS.id}`]);
   });
 
   it('uses the same generic message for every 404 and never fetches without a token', async () => {
-    const fetchMock = respond(404);
+    const fetchMock = routed({ '*': json(404, { error: { code: 'SHARE_UNAVAILABLE' } }) });
     vi.stubGlobal('fetch', fetchMock);
     const first = render(<ShareApp credentials={CREDS} language="ar" />);
     await waitFor(() => screen.getByRole('alert'));
@@ -182,14 +197,16 @@ describe('ShareApp states', () => {
   });
 
   it('offers retry on rate limit and recovers', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response('{}', { status: 429, headers: { 'Retry-After': '60' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(snapshot()), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
+    let calls = 0;
+    vi.stubGlobal('fetch', routed(legacyRoutes({
+      [`/api/share-view/${CREDS.id}/meta`]: () => (++calls === 1
+        ? new Response('{}', { status: 429, headers: { 'Retry-After': '60' } })
+        : new Response(JSON.stringify(META_SNAPSHOT), { status: 200 })),
+    })));
     render(<ShareApp credentials={CREDS} language="ar" />);
     await waitFor(() => screen.getByText(AR.rateLimited));
     fireEvent.click(screen.getByRole('button', { name: AR.retry }));
-    await waitFor(() => expect(screen.getAllByRole("article").length).toBe(2));
+    await waitFor(() => expect(screen.getAllByRole('article').length).toBe(2));
   });
 
   it('shows a network error with retry', async () => {

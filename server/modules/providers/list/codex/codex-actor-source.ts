@@ -4,6 +4,8 @@ import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 
+import { descriptorNamed } from '../../shared/pinned-fd.js';
+
 import { withTranscriptReadPermit } from './codex-rollout-links.js';
 
 const LIMIT = 64n * 1024n * 1024n;
@@ -25,6 +27,10 @@ function sameIdentity(a: BigIntStats, b: BigIntStats): boolean {
 }
 function ownedFile(stat: BigIntStats): boolean {
   return stat.isFile() && stat.nlink === 1n && stat.uid === BigInt(process.getuid!()) && stat.size <= LIMIT;
+}
+/** B-1611: the kernel names the single-link `file` exactly `canonical` (B-1609 rule, settled). */
+async function namedCanonical(file: FileHandle, canonical: string): Promise<boolean> {
+  return descriptorNamed(file.fd, canonical, { singleLink: true }).catch(() => false);
 }
 async function prefix(file: FileHandle, size: bigint, signal?: AbortSignal): Promise<Buffer> {
   const parts: Buffer[] = [];
@@ -88,14 +94,14 @@ export async function openActorSource(sessionsRoot: string, filePath: string, si
     const close = async () => { if (!closed) { closed = true; if (witness) pins.delete(witness); await file.close(); } };
     try {
       const pinned = await file.stat({ bigint: true });
-      if (!ownedFile(pinned) || !sameIdentity(initial, pinned) || await realpath(`/proc/self/fd/${file.fd}`) !== canonical) throw failure();
+      if (!ownedFile(pinned) || !sameIdentity(initial, pinned) || !await namedCanonical(file, canonical)) throw failure();
       const bytes = await prefix(file, pinned.size, signal), prefixSha256 = digest(bytes);
       const verifyPinned = async () => {
         signal?.throwIfAborted();
         const current = await lstat(filePath, { bigint: true }), currentRoot = await lstat(root, { bigint: true });
         if (closed || !ownedFile(current) || !sameIdentity(pinned, current) || !sameIdentity(pinned, await file.stat({ bigint: true }))
           || currentRoot.dev !== rootStat.dev || currentRoot.ino !== rootStat.ino || await realpath(sessionsRoot) !== root
-          || await realpath(filePath) !== canonical || await realpath(`/proc/self/fd/${file.fd}`) !== canonical
+          || await realpath(filePath) !== canonical || !await namedCanonical(file, canonical)
           || digest(await prefix(file, pinned.size, signal)) !== prefixSha256) throw failure();
         if (!sameIdentity(pinned, await file.stat({ bigint: true }))
           || !sameIdentity(pinned, await lstat(filePath, { bigint: true })) || await realpath(filePath) !== canonical) throw failure();

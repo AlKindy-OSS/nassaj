@@ -22,10 +22,13 @@ function assertOffline(databasePath) {
 }
 
 const hasTable = (db, name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+/** True when session_shares carries the ADR-205 live-share MAC key column (copies older than T-2013 do not). */
+const hasRefKey = (db) => Boolean(db.prepare("SELECT 1 FROM pragma_table_info('session_shares') WHERE name='ref_key'").get());
 
 /**
  * Disable document AND session share links (ADR-196) in one transaction.
- * Session shares also lose their snapshot blob, as every revocation does.
+ * Session shares also lose their snapshot blob and, for live shares (ADR-205),
+ * their MAC key, as every revocation does.
  * @returns {{ documentShares: number, sessionShares: number }}
  */
 function disableAll(db, at) {
@@ -34,7 +37,8 @@ function disableAll(db, at) {
       ? db.prepare('UPDATE document_shares SET revoked_at=COALESCE(revoked_at,?)').run(at).changes : 0,
     sessionShares: hasTable(db, 'session_shares')
       ? db.prepare(`UPDATE session_shares SET revoked_at=COALESCE(revoked_at,@at),
-          revoke_reason=COALESCE(revoke_reason,'restored'), snapshot=NULL`).run({ at }).changes : 0,
+          revoke_reason=COALESCE(revoke_reason,'restored'), snapshot=NULL${hasRefKey(db) ? ', ref_key=NULL' : ''}`)
+        .run({ at }).changes : 0,
   }))();
 }
 

@@ -22,6 +22,10 @@
  * Framework: node:test + node:assert/strict via tsx.
  */
 
+// FIRST import — HOME becomes a /var/tmp sandbox: transcripts live in its Claude tree (B-1596).
+// eslint-disable-next-line import-x/order -- must evaluate before every other import
+import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -56,8 +60,10 @@ let transcriptPath = '';
 /** Recreates the project + session + transcript fixture from scratch. */
 function seedPublicProject(): void {
   projectPath = fs.mkdtempSync(path.join(workspaceRoot, 'proj-'));
-  transcriptPath = path.join(projectPath, `${SESSION_ID}.jsonl`);
-  fs.writeFileSync(transcriptPath, '{"type":"message"}\n', 'utf8');
+  // B-1596: a removable transcript sits in a provider tree, named and headed for its session.
+  transcriptPath = path.join(SANDBOX_HOME, '.claude', 'projects', path.basename(projectPath), `${SESSION_ID}.jsonl`);
+  fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
+  fs.writeFileSync(transcriptPath, `${JSON.stringify({ type: 'user', sessionId: SESSION_ID })}\n`, 'utf8');
 
   const created = projectsDb.createProjectPath(projectPath, 'Owner Project', ownerUser.id);
   projectId = created.project?.project_id ?? '';

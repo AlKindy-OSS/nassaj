@@ -47,5 +47,12 @@
   },
   "imageViewer": {
     "loading": "Loading image…"
+  },
+  "unsavedChanges": {
+    "title": "Unsaved changes",
+    "message": "You have unsaved changes in",
+    "save": "Save",
+    "discard": "Discard changes",
+    "keepEditing": "Keep editing"
   }
 }

@@ -277,7 +277,14 @@
     "restoreSessionFailed": "Failed to restore session. Please try again.",
     "restoreSessionError": "Error restoring session. Please try again.",
     "archiveSessionFailed": "Failed to archive the session. Please try again.",
-    "archiveProjectFailed": "Failed to archive the project. Please try again."
+    "archiveProjectFailed": "Failed to archive the project. Please try again.",
+    "deleteSessionRetry": "The conversation was not deleted; some of its auxiliary files may have been removed. Try again?",
+    "deleteProjectRetry": "A conversation file in this project could not be checked right now. Nothing was deleted. Try again?",
+    "deleteSessionFileKept": "The conversation was deleted. Its file was not removed from this device: either it no longer exists, or it was kept for safety reasons.",
+    "projectTranscriptsFailed": "{{count}} conversation file(s) could not be removed from this device. The project was deleted; those files remain and can be removed manually.",
+    "projectTranscriptsKept": "{{count}} conversation file(s) were kept on this device for safety reasons.",
+    "bulkTranscriptRetry": "{{count}} item(s) were not deleted because a conversation file could not be removed right now. They are still selected; try again.",
+    "bulkSessionFilesKept": "For {{count}} deleted conversation(s), no file was removed from this device (it was missing or kept for safety reasons)."
   },
   "version": {
     "updateAvailable": "Update available",

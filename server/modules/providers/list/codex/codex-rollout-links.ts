@@ -7,7 +7,11 @@ import { openFileNoFollow, PinnedOpenError, type PinnedHandle } from '../../shar
 export type CodexSpawn = {
   callId: string | null;
   taskName: string;
-  linkKind: 'legacy' | 'direct' | 'custom';
+  /**
+   * `activity` (B-1616): a 0.160 v2 parent links a child only through
+   * `event_msg item_completed {item.type:"SubAgentActivity", kind:"started"}`.
+   */
+  linkKind: 'legacy' | 'direct' | 'custom' | 'activity';
   agentPath: string | null;
   agentThreadId: string | null;
   childRolloutPath: string | null;
@@ -26,6 +30,8 @@ export type CodexRolloutMetadata = {
   agentPath: string | null;
   /** Role declared by this rollout's own session metadata. */
   agentRole: string | null;
+  /** First ordinal of this rollout's own history (B-1616); null when none is declared. */
+  historyStartOrdinal: number | null;
   spawns: CodexSpawn[];
   /** False when the same open file descriptor changed during the metadata pass. */
   snapshotStable: boolean;
@@ -38,6 +44,8 @@ export type CodexRolloutFile = {
   /** Thread id of this rollout's own first `session_meta` (its name carries it). */
   threadId: string | null;
   model: string | null;
+  /** See {@link CodexRolloutMetadata.historyStartOrdinal}. */
+  historyStartOrdinal: number | null;
   size: number;
   mtimeMs: number;
 };
@@ -119,6 +127,48 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const validThreadId = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f0-9-]{20,}$/i.test(value);
+
+/**
+ * B-1616: `subagent_history_start_ordinal` of a first `session_meta` payload. A
+ * 0.160 child rollout replays its parent's history (a second, parent
+ * `session_meta` included) before its own; records with a lower ordinal are not
+ * this thread's. Only a positive safe integer counts.
+ */
+export function readCodexHistoryStartOrdinal(payload: unknown): number | null {
+  const value = isRecord(payload) ? payload.subagent_history_start_ordinal : undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * B-1616: decides, record by record in file order, whether a rollout record is
+ * the file's OWN history. Identity comes from the first record only, and only
+ * when it is a `session_meta`; a later `session_meta` (the forked parent's) is
+ * never identity. Records whose native `ordinal` (else their position, when the
+ * caller starts at byte 0) is below the declared start are inherited history.
+ * `knownStart` serves incremental readers that resume mid-file.
+ */
+export function createCodexOwnHistoryFilter(knownStart: number | null = null, fromStart = true) {
+  let start = knownStart;
+  let index = -1;
+  let identity: Record<string, unknown> | null = null;
+  return {
+    /** The first record's `session_meta` payload, or null. */
+    get identity(): Record<string, unknown> | null { return identity; },
+    get historyStartOrdinal(): number | null { return start; },
+    /** True when `entry` belongs to this rollout's own history. */
+    accept(entry: unknown): boolean {
+      index += 1;
+      if (fromStart && index === 0 && isRecord(entry) && entry.type === 'session_meta' && isRecord(entry.payload)) {
+        identity = entry.payload;
+        start ??= readCodexHistoryStartOrdinal(entry.payload);
+      }
+      if (start === null) return true;
+      const ordinal = isRecord(entry) && Number.isSafeInteger(entry.ordinal) ? entry.ordinal as number
+        : fromStart ? index : null;
+      return ordinal === null || ordinal >= start;
+    },
+  };
+}
 
 function readSpawnArguments(value: unknown): { taskName: string } {
   if (typeof value !== 'string') return { taskName: 'subagent' };
@@ -300,6 +350,8 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
     occurredAtMs: number | null;
   }> = [];
   const seenThreads = new Set<string>();
+  const own = createCodexOwnHistoryFilter();
+  let identityRead = false;
 
   const before = await handle.stat();
   const stream = handle.createReadStream({ encoding: 'utf8', signal, autoClose: false });
@@ -311,20 +363,26 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
       let entry: unknown;
       try { entry = JSON.parse(line); } catch { continue; }
       if (!isRecord(entry)) continue;
-      const payload = isRecord(entry.payload) ? entry.payload : null;
-      if (!payload) continue;
-
-      // A forked child may embed the parent's historical session_meta after its
-      // own first line. The first session_meta is the identity of THIS file.
-      if (entry.type === 'session_meta' && threadId === null) {
-        threadId = validThreadId(payload.id) ? payload.id : threadId;
-        sessionId = validThreadId(payload.session_id) ? payload.session_id : sessionId;
-        parentThreadId = validThreadId(payload.parent_thread_id) ? payload.parent_thread_id : parentThreadId;
-        threadSource = typeof payload.thread_source === 'string' ? payload.thread_source : threadSource;
+      const isOwn = own.accept(entry);
+      const identity = identityRead ? null : own.identity;
+      // B-1616: identity is the FIRST record's session_meta only. A 0.160 child
+      // carries its parent's session_meta as line 1 (thread_source "user"): it
+      // must never re-identify the child, and nothing before the child's
+      // subagent_history_start_ordinal (forked parent history) is the child's.
+      if (identity !== null) {
+        identityRead = true;
+        const payload = identity;
+        threadId = validThreadId(payload.id) ? payload.id : null;
+        sessionId = validThreadId(payload.session_id) ? payload.session_id : null;
+        parentThreadId = validThreadId(payload.parent_thread_id) ? payload.parent_thread_id : null;
+        threadSource = typeof payload.thread_source === 'string' ? payload.thread_source : null;
         sourceIsSubagent = isRecord(payload.source) && 'subagent' in payload.source;
-        ownAgentPath = typeof payload.agent_path === 'string' ? payload.agent_path : ownAgentPath;
+        ownAgentPath = typeof payload.agent_path === 'string' ? payload.agent_path : null;
         agentRole = readAgentRole(payload);
       }
+      if (!isOwn) continue;
+      const payload = isRecord(entry.payload) ? entry.payload : null;
+      if (!payload) continue;
 
       if (typeof payload.model === 'string' && payload.model) {
         model = payload.model;
@@ -409,6 +467,31 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
         continue;
       }
 
+      // B-1616: the 0.160 (v2) link form. `item.id` is the spawn's call id.
+      if (entry.type === 'event_msg' && payload.type === 'item_completed') {
+        const item = isRecord(payload.item) ? payload.item : null;
+        if (
+          !item || item.type !== 'SubAgentActivity' || item.kind !== 'started' ||
+          !validThreadId(item.agent_thread_id) || seenThreads.has(item.agent_thread_id)
+        ) continue;
+        const agentPath = typeof item.agent_path === 'string' ? item.agent_path : null;
+        // A child links only its own descendants (same path-prefix rule as legacy).
+        if (threadSource === 'subagent' && (!ownAgentPath || !agentPath?.startsWith(`${ownAgentPath}/`))) continue;
+        seenThreads.add(item.agent_thread_id);
+        const callId = typeof item.id === 'string' ? item.id : null;
+        const startedAtMs = Number(payload.started_at_ms);
+        started.push({
+          callId,
+          taskName: (callId ? calls.get(callId)?.taskName : undefined) ?? (path.basename(agentPath ?? '') || 'subagent'),
+          linkKind: 'activity',
+          agentPath,
+          agentThreadId: item.agent_thread_id,
+          occurredAtMs: (callId ? calls.get(callId)?.occurredAtMs : null)
+            ?? (Number.isFinite(startedAtMs) ? startedAtMs : Date.parse(String(entry.timestamp ?? '')) || null),
+        });
+        continue;
+      }
+
       if (
         entry.type !== 'event_msg' ||
         payload.type !== 'sub_agent_activity' ||
@@ -458,6 +541,7 @@ async function readRolloutMetadataFrom(handle: FileHandle, signal?: AbortSignal)
     sourceIsSubagent,
     agentPath: ownAgentPath,
     agentRole,
+    historyStartOrdinal: own.historyStartOrdinal,
     spawns,
     snapshotStable,
     snapshotSize: before.size,
@@ -531,6 +615,7 @@ async function buildCodexRolloutManifest(
         rolloutPath: rootRolloutPath,
         threadId: root.threadId,
         model: root.model,
+        historyStartOrdinal: root.historyStartOrdinal,
         size: root.snapshotSize,
         mtimeMs: root.snapshotMtimeMs,
       }],
@@ -590,7 +675,7 @@ async function buildCodexRolloutManifest(
         child.sessionId === rootSessionId &&
         child.threadSource === 'subagent'
       );
-      const legacyPathValid = spawn.linkKind !== 'legacy' || Boolean(
+      const legacyPathValid = (spawn.linkKind !== 'legacy' && spawn.linkKind !== 'activity') || Boolean(
         spawn.agentPath && child.agentPath && spawn.agentPath === child.agentPath
       );
       const resolvedCustomRole = spawn.linkKind === 'custom' ? child.agentRole : null;
@@ -621,6 +706,7 @@ async function buildCodexRolloutManifest(
     rolloutPath,
     threadId: metadata.threadId,
     model: metadata.model,
+    historyStartOrdinal: metadata.historyStartOrdinal,
     size: metadata.snapshotSize,
     mtimeMs: metadata.snapshotMtimeMs,
   }));

@@ -14,7 +14,7 @@ afterEach(() => cleanup());
 describe('SteerBubble', () => {
   it('renders the sender name wrapped in <bdi>, the content and a status label', () => {
     render(
-      <SteerBubble senderUserId={7} senderName="سارة" content="focus on the auth bug" deliveryStatus="delivered" />,
+      <SteerBubble senderName="سارة" content="focus on the auth bug" deliveryStatus="delivered" />,
     );
     const bdi = screen.getByText('سارة');
     expect(bdi.tagName.toLowerCase()).toBe('bdi');
@@ -24,7 +24,7 @@ describe('SteerBubble', () => {
 
   it('carries a data-steer-injected marker and a descriptive aria-label', () => {
     const { container } = render(
-      <SteerBubble senderUserId={7} senderName="Sara" content="hello" deliveryStatus="queued" />,
+      <SteerBubble senderName="Sara" content="hello" deliveryStatus="queued" />,
     );
     const root = container.querySelector('[data-steer-injected="true"]');
     expect(root).not.toBeNull();
@@ -32,12 +32,18 @@ describe('SteerBubble', () => {
   });
 
   it('uses the dedicated --session-steer-accent token, not --primary or --session-internal-accent', () => {
-    const { container } = render(<SteerBubble senderUserId={1} senderName="A" content="x" />);
+    const { container } = render(<SteerBubble senderName="A" content="x" />);
     const html = container.innerHTML;
     expect(html).toContain('var(--session-steer-accent)');
     expect(html).not.toContain('var(--primary)');
     expect(html).not.toContain('var(--project-accent)');
     expect(html).not.toContain('var(--session-internal-accent)');
     expect(html).not.toContain('var(--user-bubble-background');
+  });
+
+  it('uses solid rule token and omits the header for a continuation', () => {
+    const { container } = render(<SteerBubble senderName="Sara" content="more" isContinuation />);
+    expect(container.innerHTML).toContain('var(--session-steer-rule)');
+    expect(container.querySelector('bdi')).toBeNull();
   });
 });

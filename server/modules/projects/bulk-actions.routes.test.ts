@@ -1,3 +1,7 @@
+// FIRST import — HOME becomes a /var/tmp sandbox: transcripts live in its Claude tree (B-1596).
+// eslint-disable-next-line import-x/order -- must evaluate before every other import
+import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -179,8 +183,10 @@ test('bulk fence reports outcome unknown after any earlier item effect', async (
 test('bulk remembers transcript unlink when row settlement fails before the next item', async (context) => {
   const firstId = `bulk-unlink-${Date.now()}`;
   const secondId = `${firstId}-next`;
-  const transcript = path.join(workspaceRoot, `${firstId}.jsonl`);
-  fs.writeFileSync(transcript, '{"type":"user"}\n');
+  // B-1596: a removable transcript sits in a provider tree, named and headed for its session.
+  const transcript = path.join(SANDBOX_HOME, '.claude', 'projects', '-bulk', `${firstId}.jsonl`);
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
+  fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', sessionId: firstId })}\n`);
   sessionsDb.createSession(firstId, 'claude', ownProjectPath, undefined, undefined, undefined, transcript);
   sessionsDb.createSession(secondId, 'claude', ownProjectPath);
   participantsDb.recordSpawn(firstId, owner.id);
@@ -205,4 +211,33 @@ test('bulk remembers transcript unlink when row settlement fails before the next
   assert.equal(fs.existsSync(transcript), false);
   assert.notEqual(sessionsDb.getSessionById(firstId), null);
   assert.notEqual(sessionsDb.getSessionById(secondId), null);
+});
+
+test('B-1596 M1: a retryable transcript failure fails only that item and keeps its row', async (context) => {
+  const firstId = `bulk-retry-${Date.now()}`;
+  const secondId = `${firstId}-next`;
+  const transcript = path.join(SANDBOX_HOME, '.claude', 'projects', '-bulk-retry', `${firstId}.jsonl`);
+  fs.mkdirSync(path.dirname(transcript), { recursive: true });
+  fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', sessionId: firstId })}\n`);
+  sessionsDb.createSession(firstId, 'claude', ownProjectPath, undefined, undefined, undefined, transcript);
+  sessionsDb.createSession(secondId, 'claude', ownProjectPath);
+  participantsDb.recordSpawn(firstId, owner.id);
+  participantsDb.recordSpawn(secondId, owner.id);
+  const open = fs.promises.open.bind(fs.promises);
+  context.mock.method(fs.promises, 'open', async (...args: Parameters<typeof fs.promises.open>) => {
+    if (args[0] === transcript) throw Object.assign(new Error('synthetic EIO'), { code: 'EIO' });
+    return open(...args);
+  });
+
+  const response = await call('/api/providers/sessions/bulk', {
+    action: 'delete_permanently', ids: [firstId, secondId],
+  }, owner);
+
+  assert.equal(response.status, 200);
+  const [first, second] = response.json.data.results;
+  assert.deepEqual([first.success, first.error?.code], [false, 'TRANSCRIPT_REMOVAL_RETRY']);
+  assert.equal(second.success, true);
+  assert.notEqual(sessionsDb.getSessionById(firstId), null, 'the failed item keeps its row for a retry');
+  assert.equal(fs.existsSync(transcript), true);
+  assert.equal(sessionsDb.getSessionById(secondId), null);
 });

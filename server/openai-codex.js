@@ -55,6 +55,12 @@ import {
 } from './modules/providers/list/codex/codex-progress.js';
 import { createCodexRunSubagentTail } from './modules/providers/list/codex/codex-rollout-tail.js';
 import {
+  codexMultiAgentConfig,
+  codexRunMayDelegate,
+  resolveCodexAgentCap,
+  resolveCodexMultiAgentEngine,
+} from './modules/providers/list/codex/codex-multi-agent.js';
+import {
   accumulateCodexCoordinatorUsage,
   extractCodexTokenBudget,
   selectCodexPostTurnUsage,
@@ -85,11 +91,12 @@ import { captureCodexReceiptWindow, resolveCodexUserProof, codexReceiptPayloadHa
 
 // Track active sessions
 const activeCodexSessions = new Map();
-// ADR-134 v1: native multi-agent delegation is denied on every launch. One source for the
-// Codex config override AND the ADR-199 P4b rollout tail gate, so the tail opens nothing
-// (no fd, no permit, no polling) while spawning is impossible.
-const CODEX_MULTI_AGENT_CONFIG = Object.freeze({ 'features.multi_agent': false });
-const CODEX_MULTI_AGENT_ENABLED = CODEX_MULTI_AGENT_CONFIG['features.multi_agent'] === true;
+// B-1616 (ADR-206 containment): `features.multi_agent=false` (ADR-134 v1) only keeps v1
+// models single-agent. On v2-engine models (most of the current catalog) Codex delegates
+// regardless. Owner decision 2026-10-13: Nassaj applies no sub-agent count cap; Codex's own
+// default (or the user's config) decides. codexMultiAgentConfig pins the thread-cap keys only
+// when the operator sets NASSAJ_CODEX_AGENT_CAP. The ADR-199 P4b tail is gated per run on
+// the model's engine (codexRunMayDelegate), not on this flag.
 const activeCodexTurnLocks = new Set();
 
 async function prepareCodexInput(command, images) {
@@ -771,8 +778,20 @@ async function queryCodexOwned(invocation) {
     : null;
   // ADR-199 P4b: one parent-rollout tail per run, rooted at the principal CODEX_HOME the
   // spawn env uses; started at thread.started, stopped after the stream and in finally.
+  const multiAgentConfig = codexMultiAgentConfig(resolveCodexAgentCap(process.env));
+  const multiAgentEngine = await resolveCodexMultiAgentEngine(
+    resolveCodexHomeForUser(requesterUserId), resolvedModel,
+  );
+  const subagentTailEnabled = codexRunMayDelegate(multiAgentEngine, multiAgentConfig);
+  // B-1616: one structured line per launch; model id and engine only, never a path.
+  console.log('[Codex] multi-agent engine', {
+    engine: multiAgentEngine,
+    model: resolvedModel || null,
+    childCap: multiAgentConfig['agents.max_concurrent_threads_per_session'] ?? null,
+    tail: subagentTailEnabled,
+  });
   const subagentTail = createCodexRunSubagentTail({
-    enabled: CODEX_MULTI_AGENT_ENABLED,
+    enabled: subagentTailEnabled,
     codexHome: () => resolveCodexHomeForUser(requesterUserId),
     signal: abortController.signal,
     sessionId: () => capturedSessionId || sessionId || null,
@@ -880,8 +899,10 @@ async function queryCodexOwned(invocation) {
         ...resolveProviderEnv(ws?.userId ?? null, 'codex', process.env),
         [PROCESS_TAG_ENV_VAR]: processRunTag,
       }, launchIdentity),
-      // ADR-134 v1 supersedes the earlier depth-1 delegation allowance: external
-      // delegation is denied, so every launch pins depth to zero.
+      // ADR-134 v1 supersedes the earlier depth-1 delegation allowance. Note (B-1616): no
+      // depth key is set here, and `agents.max_depth` would bind v1 models only; on v2
+      // models the only mechanical bound is Codex's own thread limit (Nassaj sets none by
+      // default, owner decision 2026-10-13; an operator override pins it below).
       //
       // T-1315 (الموجة الثانية) — **لم يُرفع عمداً.** كان المطلوب أن يتبع مستوى
       // التنسيق صعوداً (1 → 2) عند `delegate_review`، وهذا بالضبط نقضٌ لضابط أمني
@@ -894,7 +915,9 @@ async function queryCodexOwned(invocation) {
         // ADR-134 v1 denies MCP and external delegation as surfaces, not merely
         // as UI choices. These parent-controlled overrides replace any entries
         // in the user's config before the CLI starts.
-        ...CODEX_MULTI_AGENT_CONFIG,
+        // B-1616: no thread-cap key by default (owner decision 2026-10-13); both keys only
+        // under an operator NASSAJ_CODEX_AGENT_CAP override (see codex-multi-agent.ts).
+        ...multiAgentConfig,
         mcp_servers: {},
         developer_instructions: getRuntimeInstructions(options?.coordinationLevel),
         ...(sandboxMode === 'workspace-write' && docsWritableRoots.length > 0
@@ -972,8 +995,8 @@ async function queryCodexOwned(invocation) {
     // وأي مسٍّ بها يُفشل بصمة T-1283 fail-closed)، وهذا قرارٌ يتغيّر بين رسالة
     // وأخرى فلا موضع له إلا مُدخَل الجولة. `direct` لا يضيف حرفاً.
     //
-    // ADR-134 v1 يفرض منع التفويض الخارجي ميكانيكياً؛ لذلك يبقى
-    // `features.multi_agent=false` حتى يدخل التفويض عقداً مستقلاً في إصدار لاحق.
+    // ADR-134 v1: يبقى `features.multi_agent=false`، لكنه لا يمنع التفويض إلا على نماذج
+    // محرّك v1؛ نماذج v2 تفوّض رغمه، فالضابط الفعلي سقف الخيوط المثبّت أعلاه (B-1616).
     preparedInput = await prepareCodexInput(branchContext ? branchContext.input : command, images);
     imagesTempDir = preparedInput.tempDir;
     // Identity selection is native; this bounded hash only verifies all submitted/displayed parts.

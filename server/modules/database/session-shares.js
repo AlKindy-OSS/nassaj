@@ -10,10 +10,20 @@
 /** Active-share caps enforced inside the INSERT itself (race-free under concurrency). */
 export const SESSION_SHARE_CAPS = Object.freeze({ perCreator: 50, perSession: 20 });
 
+/** ADR-205 (T-2013): share mode; existing T-1970 rows read 'snapshot'. */
+export const SESSION_SHARES_MODE_COLUMN_SQL = `ALTER TABLE session_shares ADD COLUMN mode TEXT NOT NULL
+  DEFAULT 'snapshot' CHECK (mode IN ('snapshot', 'live'))`;
+
+/** ADR-205 (T-2013): per-live-share MAC key for cursors and refs; nulled on revoke. */
+export const SESSION_SHARES_REF_KEY_COLUMN_SQL = 'ALTER TABLE session_shares ADD COLUMN ref_key BLOB';
+
 /**
  * Additive schema, one statement per exec (reviewed startup SQL contract).
  * `owner_user_id` pins the strict session owner at creation so an ownership
  * change is a definitive death cause even for shares made by an admin.
+ * ADR-205 adds one column probe and two conditional ALTERs; the probe and the
+ * ALTERs share one immediate transaction so two admitted processes cannot
+ * both observe the old shape and race into a duplicate-column error.
  * @param {import('better-sqlite3').Database} db
  */
 export function migrateSessionShares(db) {
@@ -30,15 +40,23 @@ export function migrateSessionShares(db) {
   db.exec('CREATE INDEX IF NOT EXISTS session_shares_session ON session_shares(session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS session_shares_creator ON session_shares(created_by)');
   db.exec('CREATE INDEX IF NOT EXISTS session_shares_liveness ON session_shares(revoked_at, expires_at)');
+  db.transaction(() => {
+    const columns = new Set(db.prepare('PRAGMA table_info(session_shares)').all().map((column) => column.name));
+    if (!columns.has('mode')) db.exec(SESSION_SHARES_MODE_COLUMN_SQL);
+    if (!columns.has('ref_key')) db.exec(SESSION_SHARES_REF_KEY_COLUMN_SQL);
+  }).immediate();
 }
 
 /** Columns safe to return to management callers: no token hash, no blob. */
 const LISTED = `id, session_id, project_id, owner_user_id, created_by, created_at, expires_at,
   revoked_at, revoke_reason, snapshot_sha256, up_to_message_id, message_count, redaction_counts,
-  view_count, last_viewed_at`;
+  view_count, last_viewed_at, mode`;
 
 const REVOKE_SET = `revoked_at = COALESCE(revoked_at, @at),
-  revoke_reason = COALESCE(revoke_reason, @reason), snapshot = NULL`;
+  revoke_reason = COALESCE(revoke_reason, @reason), snapshot = NULL, ref_key = NULL`;
+
+/** Rows a revoke pass still has to touch: live, or revoked with a leftover blob or key (L2). */
+const NEEDS_REVOKE = '(revoked_at IS NULL OR snapshot IS NOT NULL OR ref_key IS NOT NULL)';
 
 /**
  * True when the session_shares table exists on this connection. Revocation
@@ -50,21 +68,39 @@ export function sessionSharesTableExists(db) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_shares'").get());
 }
 
+const sessionRevokeListeners = new Set();
+
+/**
+ * ADR-205 D2/D8: registers `listener(sessionId)`, called after every
+ * revokeSharesBySession (session archive or delete) so in-memory state of
+ * that session's live links (the shared projection) is dropped. A throwing
+ * listener never affects the revocation.
+ * @returns {() => void} unregister
+ */
+export function onSessionSharesRevoked(listener) {
+  sessionRevokeListeners.add(listener);
+  return () => sessionRevokeListeners.delete(listener);
+}
+
 /**
  * Revokes every share of one session (archive/delete hooks).
  * @returns {number} rows changed
  */
 export function revokeSharesBySession(db, sessionId, reason, at = new Date().toISOString()) {
   if (!sessionSharesTableExists(db)) return 0;
-  return db.prepare(`UPDATE session_shares SET ${REVOKE_SET} WHERE session_id = @sessionId
-    AND (revoked_at IS NULL OR snapshot IS NOT NULL)`).run({ sessionId, reason, at }).changes;
+  const changes = db.prepare(`UPDATE session_shares SET ${REVOKE_SET} WHERE session_id = @sessionId
+    AND ${NEEDS_REVOKE}`).run({ sessionId, reason, at }).changes;
+  for (const listener of sessionRevokeListeners) {
+    try { listener(sessionId); } catch { /* in-memory cleanup is best effort; TTL still bounds it */ }
+  }
+  return changes;
 }
 
 /** Revokes every share in one project (archive/delete hooks). @returns {number} */
 export function revokeSharesByProject(db, projectId, reason, at = new Date().toISOString()) {
   if (!sessionSharesTableExists(db)) return 0;
   return db.prepare(`UPDATE session_shares SET ${REVOKE_SET} WHERE project_id = @projectId
-    AND (revoked_at IS NULL OR snapshot IS NOT NULL)`).run({ projectId, reason, at }).changes;
+    AND ${NEEDS_REVOKE}`).run({ projectId, reason, at }).changes;
 }
 
 /**
@@ -75,7 +111,7 @@ export function revokeSharesByUser(db, userId, reason, at = new Date().toISOStri
   if (!sessionSharesTableExists(db)) return 0;
   return db.prepare(`UPDATE session_shares SET ${REVOKE_SET}
     WHERE (created_by = @userId OR owner_user_id = @userId)
-    AND (revoked_at IS NULL OR snapshot IS NOT NULL)`).run({ userId, reason, at }).changes;
+    AND ${NEEDS_REVOKE}`).run({ userId, reason, at }).changes;
 }
 
 /**
@@ -107,6 +143,26 @@ export function createSessionSharesStore(db) {
           AND revoked_at IS NULL AND expires_at > @now) < @perSession`)
       .run({ ...row, now, perCreator: SESSION_SHARE_CAPS.perCreator, perSession: SESSION_SHARE_CAPS.perSession })
       .changes === 1,
+    /**
+     * ADR-205: inserts a live share (mode 'live', its random `ref_key`, and
+     * placeholders in the snapshot columns) only while both active caps hold.
+     * @returns {boolean} false when a cap was reached
+     */
+    insertLiveWithinCaps: (row, now = new Date().toISOString()) => db.prepare(`INSERT INTO session_shares
+      (id, session_id, project_id, owner_user_id, token_hash, created_by, created_at, expires_at,
+       snapshot, snapshot_sha256, up_to_message_id, message_count, redaction_counts, mode, ref_key)
+      SELECT @id, @session_id, @project_id, @owner_user_id, @token_hash, @created_by, @created_at,
+       @expires_at, NULL, '', '', 0, '{}', 'live', @ref_key
+      WHERE (SELECT COUNT(*) FROM session_shares WHERE created_by = @created_by
+          AND revoked_at IS NULL AND expires_at > @now) < @perCreator
+        AND (SELECT COUNT(*) FROM session_shares WHERE session_id = @session_id
+          AND revoked_at IS NULL AND expires_at > @now) < @perSession`)
+      .run({ ...row, now, perCreator: SESSION_SHARE_CAPS.perCreator, perSession: SESSION_SHARE_CAPS.perSession })
+      .changes === 1,
+    /** ADR-205 D5: active (not revoked, not expired) live shares of one session. @returns {number} */
+    countActiveLive: (sessionId, now = new Date().toISOString()) => db.prepare(`SELECT COUNT(*) AS n
+      FROM session_shares WHERE session_id = ? AND mode = 'live' AND revoked_at IS NULL AND expires_at > ?`)
+      .get(sessionId, now).n,
     revoke: (id, reason, at = new Date().toISOString()) => db.prepare(`UPDATE session_shares
       SET ${REVOKE_SET} WHERE id = @id`).run({ id, reason, at }).changes,
     /** Adds pending views; the caller batches so this runs at most once a minute per share. */
@@ -119,7 +175,7 @@ export function createSessionSharesStore(db) {
      */
     listSweepable: (afterId = '', limit = 500) => db.prepare(`SELECT id, session_id, project_id,
       owner_user_id, created_by, expires_at, revoked_at, sweep_miss_count FROM session_shares
-      WHERE (revoked_at IS NULL OR snapshot IS NOT NULL) AND id > ? ORDER BY id LIMIT ?`).all(afterId, limit),
+      WHERE ${NEEDS_REVOKE} AND id > ? ORDER BY id LIMIT ?`).all(afterId, limit),
     /**
      * Revokes (reason 'expired', blob nulled) up to `limit` live rows whose
      * ISO expiry is at or before `at`.

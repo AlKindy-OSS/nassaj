@@ -1,6 +1,6 @@
 {
   "name": "nassaj",
-  "version": "2.3.1.5",
+  "version": "2.3.1.6",
   "description": "Nassaj — multi-provider AI coding workspace with RTL Arabic support",
   "type": "module",
   "private": true,
@@ -59,7 +59,7 @@
     "publish:client:isolated": "node scripts/client-isolated-publish.mjs",
     "test:client:isolated-publish": "node scripts/client-isolated-publish.test.mjs",
     "test:share:build": "node tests/e2e/session-share-assets.test.mjs",
-    "test:share:browser": "node tests/e2e/session-share-isolation.browser.mjs",
+    "test:share:browser": "node tests/e2e/session-share-isolation.browser.mjs && node tests/e2e/session-share-live.browser.mjs",
     "test:share:realstack": "node scripts/run-isolated-node-tests.mjs server tests/e2e/session-share-real-stack.browser.test.ts",
     "build:client:watch": "node scripts/client-build-watch.mjs",
     "typecheck:client:preview": "tsc --noEmit -p tsconfig.preview.json",

@@ -67,6 +67,24 @@ describe('inline header controls', () => {
   });
 });
 
+describe('إشعار رابط القراءة الحيّ', () => {
+  const statusIs = (activeLiveLinks: number) => authenticatedFetch.mockImplementation((url: string) => Promise.resolve({
+    ok: true, status: 200,
+    json: async () => (url.endsWith('/shares/status') ? { activeLiveLinks } : { success: true }),
+  }));
+
+  it('يظهر في الشريط لكل عضو حين يوجد رابط فعّال ويغيب عند الصفر', async () => {
+    statusIs(1);
+    const view = mountBar();
+    expect((await screen.findByRole('status', { name: 'sessionShare.notice.full' }))).toBeTruthy();
+    view.unmount();
+    statusIs(0);
+    mountBar();
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalled());
+    expect(screen.queryByRole('status', { name: 'sessionShare.notice.full' })).toBeNull();
+  });
+});
+
 describe('حضور الضوابط', () => {
   it('تظهر حتى بلا وكلاء ولا مشاركين — الشريط لم يعد يختفي', () => {
     rosterOf([], []);

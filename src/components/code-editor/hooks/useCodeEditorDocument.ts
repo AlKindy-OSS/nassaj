@@ -20,6 +20,9 @@ const getErrorMessage = (error: unknown) => {
 
 export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocumentParams) => {
   const [content, setContent] = useState('');
+  // Last content that matches the disk (loaded or successfully saved); the
+  // buffer is dirty when it differs from this.
+  const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -53,6 +56,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         // stray save can't write stale content over the binary file.
         if (getPreviewKind(file.name)) {
           setContent('');
+          setSavedContent('');
           setLoading(false);
           return;
         }
@@ -60,6 +64,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         // Check if file is binary by extension
         if (isBinaryFile(file.name)) {
           setContent('');
+          setSavedContent('');
           setIsBinary(true);
           setLoading(false);
           return;
@@ -68,6 +73,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         // Diff payload may already include full old/new snapshots, so avoid disk read.
         if (file.diffInfo && fileDiffNewString !== undefined && fileDiffOldString !== undefined) {
           setContent(fileDiffNewString);
+          setSavedContent(fileDiffNewString);
           setLoading(false);
           return;
         }
@@ -88,6 +94,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         if (response === SECRET_FILE_DECLINED) {
           setSecretAccess('declined');
           setContent('');
+          setSavedContent('');
           return;
         }
         if (!response.ok) {
@@ -97,10 +104,13 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         const data = await response.json();
         setSecretAccess(readWithConfirmation ? 'confirmed' : 'none');
         setContent(data.content);
+        setSavedContent(data.content);
       } catch (error) {
         const message = getErrorMessage(error);
         console.error('Error loading file:', error);
-        setContent(`// Error loading file: ${message}\n// File: ${fileName}\n// Path: ${filePath}`);
+        const errorText = `// Error loading file: ${message}\n// File: ${fileName}\n// Path: ${filePath}`;
+        setContent(errorText);
+        setSavedContent(errorText);
       } finally {
         setLoading(false);
       }
@@ -109,12 +119,13 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     loadFileContent();
   }, [file.diffInfo, file.name, fileDiffNewString, fileDiffOldString, fileName, filePath, fileProjectId]);
 
-  const handleSave = useCallback(async () => {
+  /** Resolves true only when the content reached the disk (or there was nothing to write). */
+  const handleSave = useCallback(async (): Promise<boolean> => {
     // Preview-only and binary files have no editable text buffer; never write
     // them back (e.g. via Cmd/Ctrl+S) or we'd corrupt the file on disk.
     // A secrets file the user declined to open has no real buffer either.
     if (previewKind || isBinaryFile(fileName) || secretAccess === 'declined') {
-      return;
+      return true;
     }
 
     setSaving(true);
@@ -132,7 +143,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         { fileName, alreadyConfirmed: secretAccess === 'confirmed' },
       );
       if (response === SECRET_FILE_DECLINED) {
-        return;
+        return false;
       }
 
       if (!response.ok) {
@@ -149,12 +160,15 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
       await response.json();
 
+      setSavedContent(content);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
+      return true;
     } catch (error) {
       const message = getErrorMessage(error);
       console.error('Error saving file:', error);
       setSaveError(message);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -183,6 +197,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     saveSuccess,
     saveError,
     isBinary,
+    isDirty: !loading && content !== savedContent,
     secretDeclined: secretAccess === 'declined',
     previewKind,
     fileProjectId,

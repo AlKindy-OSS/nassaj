@@ -1,56 +1,85 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-
 import {
   getConnection, projectsDb, revokeSharesByProject, rotateProjectStructureForPath, sessionsDb,
 } from '@/modules/database/index.js';
 import { purgeProjectLogoFiles } from '@/modules/projects/services/project-logo.service.js';
+import {
+  createRemovalContext, isRetryableRefusal, probeSessionTranscript, removeSessionTranscript, type TranscriptRemoval,
+} from '@/modules/providers/index.js';
 import { AppError } from '@/shared/utils.js';
 
-function uniqueJsonlPathsFromSessions(
-  sessions: Array<{ jsonl_path: string | null }>,
-): string[] {
+type TranscriptRow = { session_id: string; provider: string; jsonl_path: string | null };
+
+/**
+ * Session rows that record a transcript, one per distinct recorded path (the
+ * first row wins), in row order. Only the fields the removal primitive needs.
+ */
+function transcriptRowsOf(sessions: TranscriptRow[]): TranscriptRow[] {
   const seen = new Set<string>();
-  const result: string[] = [];
-
+  const result: TranscriptRow[] = [];
   for (const row of sessions) {
-    const raw = row.jsonl_path?.trim();
-    if (!raw) {
-      continue;
-    }
-    const absolute = path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(raw);
-    if (seen.has(absolute)) {
-      continue;
-    }
-    seen.add(absolute);
-    result.push(absolute);
+    const recorded = row.jsonl_path?.trim();
+    if (!recorded || seen.has(recorded)) continue;
+    seen.add(recorded);
+    result.push({ session_id: row.session_id, provider: row.provider, jsonl_path: row.jsonl_path });
   }
-
   return result;
 }
 
-async function unlinkJsonlIfExists(filePath: string): Promise<void> {
-  try {
-    await fs.unlink(filePath);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return;
-    }
-    console.warn(`[project-delete] Failed to remove ${filePath}:`, (error as Error).message);
+/**
+ * T8 (B-1608): transcripts handled at once. Measured on a sandbox project of
+ * 2,000 Claude sessions (each with a subagent dir): ~10 s one by one. Every
+ * removal works on its own file and directory names, so they are independent.
+ */
+const TRANSCRIPT_CONCURRENCY = 8;
+
+/** `task` over `items` with at most `limit` in flight; results in item order. */
+async function mapBounded<T, R>(items: T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let index = next++; index < items.length; index = next++) results[index] = await task(items[index]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** What happened to the recorded transcripts of a force-deleted project (B-1596). */
+export type TranscriptRemovalSummary = { removed: number; keptForSafety: number; failed: number };
+
+export type ProjectDeleteOutcome = { transcripts?: TranscriptRemovalSummary };
+
+/**
+ * Admission check BEFORE the commit: a retryable refusal (I/O, a concurrent
+ * change) refuses the whole delete with 409 while nothing has changed, so the
+ * user can retry. Security refusals do not block: their files are kept.
+ */
+async function assertTranscriptsRemovable(rows: TranscriptRow[]): Promise<void> {
+  const refusals = await mapBounded(rows, TRANSCRIPT_CONCURRENCY, (row) => probeSessionTranscript(row, 'project-delete'));
+  if (refusals.some((refusal) => refusal !== null && isRetryableRefusal(refusal))) {
+    throw new AppError('A conversation file could not be checked right now. Nothing was deleted; please try again.', {
+      code: 'TRANSCRIPT_REMOVAL_RETRY', statusCode: 409,
+    });
   }
 }
 
 /**
- * Loads all session rows for the project path and removes each distinct `jsonl_path` file on disk.
+ * Removes each row's transcript through the confined primitive (B-1596),
+ * at most {@link TRANSCRIPT_CONCURRENCY} at a time, after the commit. Never throws: a file refused for safety is kept,
+ * and a retryable failure at this point (the rows are already gone) is counted
+ * as `failed` so the response does not claim a clean removal.
  */
-export async function deleteSessionJsonlFilesForProjectPath(projectPath: string): Promise<void> {
-  const sessions = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath);
-  const paths = uniqueJsonlPathsFromSessions(sessions);
-
-  for (const filePath of paths) {
-    await unlinkJsonlIfExists(filePath);
+async function removeTranscripts(rows: TranscriptRow[]): Promise<TranscriptRemovalSummary> {
+  const summary: TranscriptRemovalSummary = { removed: 0, keptForSafety: 0, failed: 0 };
+  // One context for the whole delete: each Codex day directory is indexed once (B-1607/T8).
+  const context = createRemovalContext();
+  const removals: TranscriptRemoval[] = await mapBounded(rows, TRANSCRIPT_CONCURRENCY,
+    (row) => removeSessionTranscript(row, 'project-delete', context));
+  for (const removal of removals) {
+    if (removal.removed) summary.removed += 1;
+    else if (isRetryableRefusal(removal.reason)) summary.failed += 1;
+    else if (removal.reason !== 'missing') summary.keptForSafety += 1;
   }
+  return summary;
 }
 
 /**
@@ -113,15 +142,17 @@ function deleteProjectRowsAtomically(projectId: string, projectPath: string): vo
 
 /**
  * - **Soft delete** (`force` false): set `isArchived` on the `projects` row (hide from the active list; DB only).
- * - **Force** (`force` true): remove the session rows and the `projects` row in one transaction, then delete
- *   each session's `jsonl_path` file from disk.
+ * - **Force** (`force` true): check every recorded transcript is admissible (a retryable refusal → 409,
+ *   nothing changed), remove the session rows and the `projects` row in one transaction, then remove each
+ *   transcript through the confined primitive (B-1596). The outcome counts removed, kept-for-safety and
+ *   failed files; a failure after the commit is reported, never silently claimed as removed.
  *
  * Ordering is deliberate: the database commit happens FIRST and the (non
  * transactional, irreversible) file deletions only after it succeeds. Removing
  * files first would leave rows pointing at transcripts that no longer exist if
  * the commit then failed.
  */
-export async function deleteOrArchiveProject(projectId: string, force: boolean): Promise<void> {
+export async function deleteOrArchiveProject(projectId: string, force: boolean): Promise<ProjectDeleteOutcome> {
   const row = projectsDb.getProjectById(projectId);
   if (!row) {
     throw new AppError(`Unknown projectId: ${projectId}`, {
@@ -133,25 +164,26 @@ export async function deleteOrArchiveProject(projectId: string, force: boolean):
   if (!force) {
     projectsDb.updateProjectIsArchivedById(projectId, true);
     revokeSharesByProject(getConnection(), projectId, 'project_archived');
-    return;
+    return {};
   }
 
-  // Collect the transcript paths BEFORE the rows are gone — they are only
+  // Collect the transcript rows BEFORE the rows are gone — they are only
   // recoverable from those rows.
-  const jsonlPaths = uniqueJsonlPathsFromSessions(
-    sessionsDb.getSessionsByProjectPathIncludingArchived(row.project_path),
-  );
+  const transcripts = transcriptRowsOf(sessionsDb.getSessionsByProjectPathIncludingArchived(row.project_path));
+  await assertTranscriptsRemovable(transcripts);
 
   deleteProjectRowsAtomically(projectId, row.project_path);
 
-  for (const filePath of jsonlPaths) {
-    await unlinkJsonlIfExists(filePath);
+  const summary = await removeTranscripts(transcripts);
+  if (summary.failed > 0) {
+    console.warn('[project-delete] Some transcripts could not be removed after the commit', { projectId, ...summary });
   }
 
   // The row that pointed at the logo file is gone, so nothing would ever clean
   // it up again. Best-effort and last: a failure here must not turn a completed
   // deletion into an error.
   await purgeProjectLogoFiles(projectId);
+  return { transcripts: summary };
 }
 
 /**

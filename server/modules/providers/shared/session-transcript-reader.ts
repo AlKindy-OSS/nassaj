@@ -1,11 +1,12 @@
 import type { BigIntStats } from 'node:fs';
-import { realpath, type FileHandle } from 'node:fs/promises';
+import { lstat, realpath, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 
 import { sessionsDb } from '@/modules/database/index.js';
 
 import { isStrictlyUnder, realRoots, recordedTreeRoots } from './contained-file.js';
+import { headerVerdicts } from './header-verdict-cache.js';
 import {
   listPinnedDirectory, openFileNoFollow, openPinned, PinnedOpenError, type PinnedHandle, type PinnedRefusal,
 } from './pinned-fd.js';
@@ -30,14 +31,16 @@ export { claudeFileBinder, codexThreadBinder, type FileBinder } from './session-
  *   4. it is pinned (pinned-fd.ts) as a single-link regular file;
  *   5. its name and its leading record(s), scanned from the pinned descriptor
  *      (≤16 MiB, usually one short line), bind it to the session id
- *      (session-transcript-specs.ts).
+ *      (session-transcript-specs.ts); the verdict is reused for an unchanged,
+ *      settled file (header-verdict-cache.ts).
  * The caller owns the returned descriptor and must close it.
  */
 
 export type TranscriptPurpose =
   | 'history' | 'history-lease' | 'search' | 'agent-status' | 'workflow-status'
   | 'models' | 'turn-metrics' | 'receipt-proof' | 'token-usage' | 'progress-seed' | 'rollout-tail'
-  | 'agents' | 'cost' | 'handoff' | 'steer' | 'sync-discovery' | 'transcript-repair' | 'skill-observations';
+  | 'agents' | 'cost' | 'handoff' | 'steer' | 'sync-discovery' | 'transcript-repair' | 'skill-observations'
+  | 'project-delete' | 'session-delete' | 'session-fork';
 
 export type TranscriptRefusal =
   | 'not_found' | 'unsupported_provider' | 'no_transcript' | 'outside_tree'
@@ -60,13 +63,15 @@ export function isTranscriptHandle(result: SessionTranscriptResult): result is S
 }
 
 const QUIET_REASONS = new Set<TranscriptRefusal>(['not_found', 'no_transcript', 'missing', 'unsupported_provider']);
+/** Purposes whose caller logs its own single warning per refused file (session-transcript-removal.ts). */
+const SELF_LOGGING_PURPOSES = new Set<TranscriptPurpose>(['project-delete', 'session-delete']);
 const loggedRefusals = new Set<string>();
 const LOGGED_REFUSALS_MAX = 2048;
 
 /** Structured warning once per session/reason per process; no paths of other members, no content. */
 function refuse(row: RecordedTranscriptRow, purpose: TranscriptPurpose, reason: TranscriptRefusal) {
   const key = `${row.session_id}\0${reason}`;
-  if (!QUIET_REASONS.has(reason) && !loggedRefusals.has(key)) {
+  if (!QUIET_REASONS.has(reason) && !SELF_LOGGING_PURPOSES.has(purpose) && !loggedRefusals.has(key)) {
     if (loggedRefusals.size >= LOGGED_REFUSALS_MAX) loggedRefusals.clear();
     loggedRefusals.add(key);
     console.warn('Session transcript refused', {
@@ -101,13 +106,23 @@ async function noFollowSpelling(candidate: string): Promise<string | null> {
   return directory ? path.join(directory, path.basename(candidate)) : null;
 }
 
+/**
+ * True when `recorded` exists but this process may not reach it (N1): such a
+ * row is tried at its recorded spelling, so the pinned open names the refusal
+ * (`unreadable`) instead of the lookup reporting the file as missing.
+ */
+async function isDenied(recorded: string): Promise<boolean> {
+  return lstat(recorded).then(() => false, (error: NodeJS.ErrnoException) =>
+    error.code === 'EACCES' || error.code === 'EPERM');
+}
+
 /** Candidate (canonical directory + literal name) and its containing root, or the refusal reason. */
 async function confinedCandidate(
   row: RecordedTranscriptRow, spec: TranscriptSpec,
 ): Promise<{ real: string; root: string } | TranscriptRefusal> {
   const recorded = (row.jsonl_path ?? '').trim();
   if (!recorded || !path.isAbsolute(recorded)) return 'no_transcript';
-  const candidate = await spec.locate(recorded);
+  const candidate = (await spec.locate(recorded)) ?? (await isDenied(recorded) ? recorded : null);
   const real = candidate ? await noFollowSpelling(candidate) : null;
   if (!real) return 'missing';
   const root = await containingRoot(recorded, real, spec);
@@ -122,7 +137,11 @@ async function admitCandidate(
   if (typeof pinned === 'string') return refuse(row, purpose, pinned);
   try {
     const scan: HeaderScan = (paths, visit) => scanHeaderRecords(pinned.handle, paths, visit);
-    const verdict = await spec.verify(row.session_id, located.real, scan, located.root);
+    const subject = {
+      rules: spec, provider: row.provider, sessionId: row.session_id, realpath: located.real, root: located.root, stat: pinned.stat,
+    };
+    // L6: an unchanged, settled file is not scanned again (see header-verdict-cache.ts).
+    const verdict = await headerVerdicts.verify(subject, () => spec.verify(row.session_id, located.real, scan, located.root));
     if (verdict === null) {
       return {
         fd: pinned.handle, realpath: located.real, stat: pinned.stat,
@@ -145,12 +164,14 @@ function isLeafId(sessionId: string): boolean {
 /**
  * Steps 2–6 for a row the caller has ALREADY authorised (the history service
  * after its own gate, or a provider reader reached only through it). Every
- * other caller uses {@link openSessionTranscript}.
+ * other caller uses {@link openSessionTranscript}. `specOf` defaults to the
+ * reader's rules; removal passes `removalSpecOf` (adds Cursor).
  */
 export async function openRecordedTranscript(
   row: RecordedTranscriptRow, purpose: TranscriptPurpose,
+  specOf: (provider: string) => TranscriptSpec | null = transcriptSpecOf,
 ): Promise<SessionTranscriptResult> {
-  const spec = transcriptSpecOf(row.provider);
+  const spec = specOf(row.provider);
   if (!spec) return refuse(row, purpose, 'unsupported_provider');
   if (!isLeafId(row.session_id)) return refuse(row, purpose, 'not_found');
   const located = await confinedCandidate(row, spec);
