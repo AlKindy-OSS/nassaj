@@ -1,3 +1,20 @@
+## 2.3.0.5 — 2026-09-24
+
+توفيق إجمالي تكلفة Codex مع إبقاء تذييل كل ردّ، وإصلاحات فحص الإصدار ونشاط الأدوات،
+ونواة توقيع الموصلات مع إعداد أولي اختياري خامل، وترقيع الاعتماديات.
+Reconcile Codex cost totals while keeping per-reply footers, fix version checks and tool
+activity, add connector signing core with dormant opt-in auto-setup, and patch dependencies.
+
+قيد معروف: يقرأ `/status` الإصدار من `package.json` على القرص فقد يعرض إصداراً أحدث من
+المشغَّل حين يسبق المصدرُ الإصدارَ؛ الإصلاح في 2.3.0.6 بالقراءة كما يفعل `/health`.
+Known limitation: `/status` reads the version from `package.json` on disk, so while a node's
+source is ahead of its running release it can show a newer version than is running; fix
+planned for 2.3.0.6 (read the version the way `/health` does).
+
+التحقق / Verification: مجموعة مواقع جرد الصلاحيات = v2.3.0.4 ∪
+{connector-auto-setup.ts#child_process.spawnSync#1}. / Permission inventory site set =
+v2.3.0.4 ∪ {connector-auto-setup.ts#child_process.spawnSync#1}.
+
 ## 2.3.0.4 — 2026-09-24
 
 تحسين حالات المزوّد وخيار عرض استهلاك العتاد والصور والقوائم.

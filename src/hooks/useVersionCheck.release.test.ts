@@ -23,6 +23,12 @@ function response(status: number, body: unknown): Response {
   } as Response;
 }
 
+function deferredResponse() {
+  let resolve!: (value: Response) => void;
+  const promise = new Promise<Response>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   authenticatedFetch.mockReset();
   vi.stubGlobal('fetch', vi.fn(async () => response(200, {
@@ -175,6 +181,80 @@ describe('private release update indicator', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
     expect(hook.result.current.updateAvailable).toBe(true);
     expect(hook.result.current.latestVersion).toBe('99.0.0.0');
+    hook.unmount();
+  });
+
+  it('exposes a failed check and HTTP status instead of looking up to date', async () => {
+    authenticatedFetch.mockResolvedValue(response(503, { success: false }));
+    const hook = renderHook(() => useVersionCheck());
+
+    await waitFor(() => expect(hook.result.current.checkStatus).toBe('error'));
+    expect(hook.result.current.checkHttpStatus).toBe(503);
+    expect(hook.result.current.lastCheckedAt).not.toBeNull();
+    expect(hook.result.current.updateAvailable).toBe(false);
+    hook.unmount();
+  });
+
+  it('distinguishes a missing release from a transport failure', async () => {
+    authenticatedFetch.mockResolvedValue(response(404, { success: false, code: 'release_not_found' }));
+    const hook = renderHook(() => useVersionCheck());
+
+    await waitFor(() => expect(hook.result.current.checkStatus).toBe('unavailable'));
+    expect(hook.result.current.checkHttpStatus).toBe(404);
+    hook.unmount();
+  });
+
+  it('recheck replaces a visible failure with the new successful result', async () => {
+    authenticatedFetch
+      .mockResolvedValueOnce(response(503, { success: false }))
+      .mockResolvedValueOnce(response(200, { success: true, version: '99.0.0.0' }));
+    const hook = renderHook(() => useVersionCheck());
+    await waitFor(() => expect(hook.result.current.checkStatus).toBe('error'));
+
+    await act(async () => { await hook.result.current.recheck(); });
+    expect(hook.result.current.checkStatus).toBe('ok');
+    expect(hook.result.current.latestVersion).toBe('99.0.0.0');
+    hook.unmount();
+  });
+
+  it('ignores an older successful response that arrives after a newer success', async () => {
+    const older = deferredResponse();
+    authenticatedFetch
+      .mockImplementationOnce(() => older.promise)
+      .mockResolvedValueOnce(response(200, { success: true, version: '99.0.0.0' }));
+    const hook = renderHook(() => useVersionCheck());
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
+
+    await act(async () => { await hook.result.current.recheck(); });
+    expect(hook.result.current.latestVersion).toBe('99.0.0.0');
+
+    await act(async () => {
+      older.resolve(response(200, { success: true, version: '2.3.0.5' }));
+      await older.promise;
+    });
+    expect(hook.result.current.latestVersion).toBe('99.0.0.0');
+    expect(hook.result.current.checkStatus).toBe('ok');
+    hook.unmount();
+  });
+
+  it('ignores an older success after the newer retry established failure', async () => {
+    const older = deferredResponse();
+    authenticatedFetch
+      .mockImplementationOnce(() => older.promise)
+      .mockResolvedValueOnce(response(503, { success: false }));
+    const hook = renderHook(() => useVersionCheck());
+    await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
+
+    await act(async () => { await hook.result.current.recheck(); });
+    expect(hook.result.current.checkStatus).toBe('error');
+    expect(hook.result.current.latestVersion).toBeNull();
+
+    await act(async () => {
+      older.resolve(response(200, { success: true, version: '99.0.0.0' }));
+      await older.promise;
+    });
+    expect(hook.result.current.checkStatus).toBe('error');
+    expect(hook.result.current.latestVersion).toBeNull();
     hook.unmount();
   });
 });

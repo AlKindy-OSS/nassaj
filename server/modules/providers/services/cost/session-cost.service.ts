@@ -37,7 +37,12 @@ import type { BillingAnchorSource, LLMProvider, SessionCostTurn } from '@/shared
 import { providerBalanceService } from '../usage/provider-balance.service.js';
 
 import { breakdownFromSessionCosts, type ModelBreakdownRow } from './cost-breakdown.js';
-import { calculateSessionCost, sumSessionCosts, type SessionCost } from './cost-calculator.js';
+import {
+  calculateSessionCost,
+  reconcileSessionCostTurnFloor,
+  sumSessionCosts,
+  type SessionCost,
+} from './cost-calculator.js';
 import { buildSessionTurns, type TurnMetricWindow } from './session-turns.js';
 import {
   collectHermesCycleUsage,
@@ -582,9 +587,16 @@ async function costForTranscript(
           captureRequests: captureTurns,
         })
       : await extractClaudeSessionUsage(transcriptPath, window, attribution?.filter, flightSignal, { captureRequests: captureTurns });
-    const cost = calculateSessionCost(usage);
+    let cost = calculateSessionCost(usage);
     if (captureTurns && options.sessionId && usage.requests && usage.requests.length > 0) {
-      cost.turns = turnsForSession(options.sessionId, usage.requests, usage.userBoundariesMs ?? []);
+      const turns = turnsForSession(options.sessionId, usage.requests, usage.userBoundariesMs ?? []);
+      if (turns) {
+        // This path is intentionally full-conversation only: captureTurns is
+        // false for billing windows and user-attributed reads, so their
+        // independent counters are never mixed with displayed turn costs.
+        cost = reconcileSessionCostTurnFloor(cost, turns);
+        cost.turns = turns;
+      }
     }
     const post = await transcriptSignature(provider, transcriptPath, {
       deep: true,

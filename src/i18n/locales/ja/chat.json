@@ -651,6 +651,10 @@
     "turnTokens": "tokens",
     "turnCostUnavailable": "Turn cost unavailable"
   },
+  "activityGap": {
+    "status": "エージェントが作業中です — 最後のアクティビティから {{time}} 経過",
+    "ariaLabel": "エージェントは作業を継続中です。最後のアクティビティから {{time}} 経過しています"
+  },
   "closeConversation": {
     "close": "会話を閉じる",
     "reopen": "会話を再開する",

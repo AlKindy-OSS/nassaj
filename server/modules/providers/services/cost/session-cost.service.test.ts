@@ -24,6 +24,7 @@ import {
   getConnection,
   initializeDatabase,
   participantsDb,
+  responseTurnMetricsDb,
   sessionsDb,
   userDb,
 } from '@/modules/database/index.js';
@@ -163,6 +164,31 @@ test('كلفة محادثة كلود: أرقام المحرّك نفسها دا�
       cacheWrite1h: 48985,
       cacheRead: 48140,
     });
+  });
+});
+
+test('كلفة كلود تُبقي تفصيل كل ردّ من صفوف المقياس دون أرضية كودكس', async () => {
+  await withEnvironment(async (environment) => {
+    const transcript = await environment.addTranscript(
+      'claude-turns.jsonl', 'claude-parent.jsonl', new Date('2026-07-28T12:00:00.000Z'));
+    environment.addSession('claude-turns', 'claude', transcript);
+    const finalUuid = '1f9ab7c1-7899-4232-acf0-f0bd38fa3ef7';
+    const outcome = responseTurnMetricsDb.recordCompleted({
+      turnId: 'claude-turn-1',
+      sessionId: 'claude-turns',
+      assistantMessageId: `${finalUuid}_0`,
+      startedAt: '2026-07-28T15:41:29.000Z',
+      completedAt: '2026-07-28T15:41:44.000Z',
+    });
+    assert.equal(outcome.status, 'inserted');
+
+    const cost = await sessionCostService.getSessionCost('claude-turns', environment.userId, {
+      probeAuth: SUBSCRIPTION_PROBE,
+    });
+
+    assert.ok(cost.turns && cost.turns.length > 0, 'تذييل كل ردّ يحتاج أدوار كلود');
+    assert.ok(cost.turns.some((turn) => turn.assistantMessageId === finalUuid), 'دور النافذة محلول');
+    near(cost.totalUsd, CLAUDE_PARENT_USD, 'إجمالي كلود بلا أرضية أدوار');
   });
 });
 
@@ -372,6 +398,126 @@ test('كلفة كودكس تعرض تفصيل كل دور مع إجمالي مت
     assert.equal(cost.turns?.reduce((sum, turn) => sum + turn.tokens.output, 0), cost.perModel[0].tokens.output);
     near(cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0, cost.totalUsd,
       'مجموع كلفة الأدوار');
+  });
+});
+
+test('مصالحة كودكس ترفع الإجمالي الشاذ إلى أرضية الأدوار دون جمعهما', async () => {
+  await withEnvironment(async (environment) => {
+    const rollout = path.join(environment.root, 'codex-low-cumulative.jsonl');
+    const turn = (timestamp: string, id: string, totalOutput: number, lastOutput: number) => [
+      JSON.stringify({ timestamp, type: 'response_item', payload: {
+        type: 'message', role: 'assistant', phase: 'final_answer', id, content: [{ type: 'output_text', text: 'تم' }],
+      } }),
+      JSON.stringify({ timestamp, type: 'event_msg', payload: { type: 'token_count', info: {
+        total_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: totalOutput },
+        last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: lastOutput },
+      } } }),
+    ].join('\n');
+    await writeFile(rollout, [
+      JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+      turn('2026-09-01T00:00:01.000Z', 'msg-first', 1, 1_000),
+      turn('2026-09-01T00:01:01.000Z', 'msg-second', 2, 2_000),
+    ].join('\n'));
+    environment.addSession('codex-low-cumulative', 'codex', rollout);
+
+    const cost = await sessionCostService.getSessionCost('codex-low-cumulative', environment.userId, {
+      probeAuth: SUBSCRIPTION_PROBE,
+    });
+    const turnFloor = cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0;
+
+    assert.equal(cost.perModel[0].tokens.output, 2, 'يبقى المصدر التراكمي كما هو للتفصيل العام');
+    assert.ok(turnFloor > 2 * 30e-6, 'أرضية الأدوار تكشف تناقض المصدرين');
+    near(cost.totalUsd, turnFloor, 'الإجمالي يساوي الأرضية ولا يضيفها فوق نفسه');
+  });
+});
+
+test('مصالحة كودكس لا تغيّر إجمالياً تراكميّاً طبيعياً ولا تعدّه مرتين', async () => {
+  await withEnvironment(async (environment) => {
+    const rollout = path.join(environment.root, 'codex-normal-cumulative.jsonl');
+    const turn = (timestamp: string, id: string, totalOutput: number, lastOutput: number) => [
+      JSON.stringify({ timestamp, type: 'response_item', payload: {
+        type: 'message', role: 'assistant', phase: 'final_answer', id, content: [{ type: 'output_text', text: 'تم' }],
+      } }),
+      JSON.stringify({ timestamp, type: 'event_msg', payload: { type: 'token_count', info: {
+        total_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: totalOutput },
+        last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: lastOutput },
+      } } }),
+    ].join('\n');
+    await writeFile(rollout, [
+      JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+      turn('2026-09-01T00:00:01.000Z', 'msg-first', 10, 10),
+      turn('2026-09-01T00:01:01.000Z', 'msg-second', 35, 25),
+    ].join('\n'));
+    environment.addSession('codex-normal-cumulative', 'codex', rollout);
+
+    const cost = await sessionCostService.getSessionCost('codex-normal-cumulative', environment.userId, {
+      probeAuth: SUBSCRIPTION_PROBE,
+    });
+    const turnFloor = cost.turns?.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0) ?? 0;
+    const cumulativeUsd = 35 * 30e-6;
+
+    near(turnFloor, cumulativeUsd, 'أدوار السجل الطبيعي تساوي آخر عدّاده');
+    near(cost.totalUsd, cumulativeUsd, 'المصالحة لا تضيف الأرضية مرة ثانية');
+  });
+});
+
+test('نافذة اشتراك كودكس تبقى تفاضلية ولا تخلط أرضية الأدوار', async () => {
+  await withEnvironment(async (environment) => {
+    subscriptionConfigService.update('codex', { anchorDay: 20 }, environment.userId);
+    const rollout = path.join(environment.root, 'codex-cycle-window.jsonl');
+    await writeFile(rollout, [
+      JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+      JSON.stringify({ timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
+        total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
+        last_token_usage: { input_tokens: 9_999, cached_input_tokens: 0, output_tokens: 9_999 },
+      } } }),
+      JSON.stringify({ timestamp: '2026-07-21T12:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
+        total_token_usage: { input_tokens: 300, cached_input_tokens: 0, output_tokens: 30 },
+        last_token_usage: { input_tokens: 8_888, cached_input_tokens: 0, output_tokens: 8_888 },
+      } } }),
+    ].join('\n'));
+    await utimes(rollout, NOW_IN_CYCLE(), NOW_IN_CYCLE());
+    environment.addSession('codex-cycle-window', 'codex', rollout);
+
+    const subscriptions = await sessionCostService.getSubscriptionCosts(environment.userId, {
+      probeAuth: probeOnly(['codex']),
+      now: NOW_IN_CYCLE,
+    });
+    const subscription = subscriptions.find((entry) => entry.provider === 'openai');
+
+    assert.ok(subscription, 'بطاقة OpenAI موجودة لاشتراك Codex');
+    near(subscription.totalUsd, 200 * 5e-6 + 20 * 30e-6,
+      'نافذة الدورة تستخدم فرق العدّاد التراكمي وحده');
+  });
+});
+
+test('جلسة Codex المنسوبة لا تلتقط أرضية turns من last_token_usage شاذ', async () => {
+  await withEnvironment(async (environment) => {
+    subscriptionConfigService.update('codex', { anchorDay: 20 }, environment.userId);
+    const rollout = path.join(environment.root, 'codex-attributed-window.jsonl');
+    await writeFile(rollout, [
+      JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+      JSON.stringify({ timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
+        total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
+        last_token_usage: { input_tokens: 9_999, cached_input_tokens: 0, output_tokens: 9_999 },
+      } } }),
+      JSON.stringify({ timestamp: '2026-07-21T12:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: {
+        total_token_usage: { input_tokens: 300, cached_input_tokens: 0, output_tokens: 30 },
+        last_token_usage: { input_tokens: 8_888, cached_input_tokens: 0, output_tokens: 8_888 },
+      } } }),
+    ].join('\n'));
+    await utimes(rollout, NOW_IN_CYCLE(), NOW_IN_CYCLE());
+    environment.addSession('codex-attributed-window', 'codex', rollout);
+
+    const subscriptions = await sessionCostService.getSubscriptionCosts(environment.userId, {
+      probeAuth: probeOnly(['codex']),
+      now: NOW_IN_CYCLE,
+    });
+    const subscription = subscriptions.find((entry) => entry.provider === 'openai');
+
+    assert.ok(subscription, 'العزل يمرر نطاق المستخدم المنسوب إلى مسح الدورة');
+    near(subscription.totalUsd, 200 * 5e-6 + 20 * 30e-6,
+      'النسبة لا تخلط عدّادات الدور مع نافذة الدورة');
   });
 });
 

@@ -651,6 +651,10 @@
     "turnTokens": "tokens",
     "turnCostUnavailable": "Turn cost unavailable"
   },
+  "activityGap": {
+    "status": "에이전트가 작업 중입니다 — 마지막 활동은 {{time}} 전",
+    "ariaLabel": "에이전트가 계속 작업 중입니다. 마지막 활동은 {{time}} 전입니다"
+  },
   "closeConversation": {
     "close": "대화 닫기",
     "reopen": "대화 다시 열기",

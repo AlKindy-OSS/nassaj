@@ -657,6 +657,10 @@
     "turnTokens": "tokens",
     "turnCostUnavailable": "Turn cost unavailable"
   },
+  "activityGap": {
+    "status": "Агент работает — последняя активность {{time}} назад",
+    "ariaLabel": "Агент всё ещё работает, последняя активность была {{time}} назад"
+  },
   "closeConversation": {
     "close": "Закрыть беседу",
     "reopen": "Открыть беседу снова",

@@ -689,7 +689,15 @@
     },
     "loading": "Lädt...",
     "version": {
-      "updateAvailable": "Update verfügbar: v{{version}}"
+      "updateAvailable": "Update verfügbar: v{{version}}",
+      "upToDate": "Sie verwenden die neueste Version",
+      "upToDateAt": "Aktuell — geprüft um {{time}}",
+      "lastChecked": "Zuletzt geprüft um {{time}}",
+      "checked": "Updateprüfung abgeschlossen",
+      "checkFailed": "Updateprüfung fehlgeschlagen",
+      "checkFailedCode": "Updateprüfung fehlgeschlagen (HTTP {{code}})",
+      "noReleases": "Die Updatequelle stellt keine Version bereit",
+      "retry": "Erneut versuchen"
     },
     "deleteAria": "Delete key {{name}}"
   },

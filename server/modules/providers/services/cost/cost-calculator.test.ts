@@ -3,8 +3,10 @@ import test from 'node:test';
 
 import {
   calculateSessionCost,
+  reconcileSessionCostTurnFloor,
   sumSessionCosts,
 } from '@/modules/providers/services/cost/cost-calculator.js';
+import type { SessionCostTurn } from '@/shared/types.js';
 import {
   findModelPrice,
   normalizeModelId,
@@ -136,6 +138,20 @@ test('محادثة فارغة تعطي صفراً كاملاً لا نقصاً',
 
   assert.equal(cost.totalUsd, 0);
   assert.equal(cost.complete, true);
+});
+
+test('مصالحة أرضية الأدوار محصورة في Codex ولا تجمع المصدرين', () => {
+  const codex = calculateSessionCost(usageOf('gpt-5.6-sol', { output: 1 }, 'codex'));
+  const turns: SessionCostTurn[] = [{
+    assistantMessageId: 'turn-1', startedAt: null, completedAt: null, requests: 1,
+    models: ['gpt-5.6-sol'], tokens: { ...emptyTotals(), output: 10 }, costUsd: 2,
+  }];
+
+  assert.equal(reconcileSessionCostTurnFloor(codex, turns).totalUsd, 2);
+
+  const claude = { ...codex, provider: 'claude' };
+  assert.equal(reconcileSessionCostTurnFloor(claude, turns), claude,
+    'لا تتغير كلفة غير Codex حتى لو كانت أرضية الأدوار أعلى');
 });
 
 

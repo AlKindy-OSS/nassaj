@@ -13,9 +13,8 @@ import { migrateConnectorAuthSchema } from '../database/connector-auth.migration
 import { migrateConnectorPolicyV2Substrate } from '../database/connector-policy-v2.migration.js';
 import { createConnectorAuthDb } from '../database/repositories/connector-auth.db.js';
 /* eslint-enable boundaries/dependencies */
-
-// eslint-disable-next-line boundaries/no-unknown -- test derives the certified api_key spec.
 import { providerAuthSpecFor } from '../../../shared/connector-auth-registry.js';
+
 import { createConnectorProfileManagementService } from './connector-auth-profile-management.js';
 import { createConnectorUserGrantService } from './connector-user-grant.service.js';
 import { createConnectorUserGrantRoutes } from './connector-user-grant.routes.js';
@@ -130,6 +129,7 @@ test('T-1539: real provider-effect gate lets the fixed api-key route through on 
   Object.assign(process.env, {
     NASSAJ_CONNECTOR_GRANTS_V2: '1', NASSAJ_CONNECTOR_AUTH_REGISTRY_V1: '1',
     NASSAJ_CONNECTOR_AUTH_CERT_GITHUB: '1', NASSAJ_CONNECTOR_GRANT_CERT_GITHUB: '1',
+    NASSAJ_CONNECTOR_AUTO_SETUP: '0',
   });
   const directory = mkdtempSync(join(process.cwd(), '.artifacts', 'nassaj-grant-gate-integration-'));
   const database = new Database(':memory:');

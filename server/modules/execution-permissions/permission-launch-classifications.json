@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:abed286aa3cfe890012193caa60139d2c0a2ac6649fc997faddb8b4b6a12693e",
+  "reviewedSiteDigest": "sha256:cbb2b504647a05f1359e557fb2e87f2d7dee8b23eca183c1deaf042fd20825f6",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -354,6 +354,15 @@
       "gate": "test helper imported only by tests; scratch fixture paths and synthetic database; no production route",
       "adapter": "startOwnerAt",
       "test": "source activation crash and owner integration tests"
+    },
+    "server/modules/connectors/connector-auto-setup.ts#child_process.spawnSync#1": {
+      "classification": "infrastructure_effect",
+      "owner": "connector first-boot auto-setup",
+      "purpose": "kernel_auto_setup_lock",
+      "actorSource": "trusted server boot configuration; no request value, command, identity, credential, or model argument reaches the child",
+      "gate": "fixed /usr/bin/flock argv, private non-symlink 0700-equivalent lock directory, O_NOFOLLOW descriptor inherited as fd 3, shell false, status zero only, and fail-closed unavailable/contended handling",
+      "adapter": "acquireLock",
+      "test": "connector-auto-setup.test.ts"
     }
   },
   "rules": [
