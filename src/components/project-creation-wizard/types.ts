@@ -86,6 +86,29 @@ export type CloneProgressEvent = {
   project?: Record<string, unknown>;
 };
 
+export type CloneTicketResponse = {
+  ticket?: string;
+  expiresInSeconds?: number;
+  error?: string;
+};
+
+export type CloneWorkspaceErrorCode =
+  | 'INVALID_CLONE_REQUEST'
+  | 'INVALID_GITHUB_URL'
+  | 'CLONE_TICKET_LIMIT_REACHED'
+  | 'AUTHENTICATION_REQUIRED'
+  | 'CLONE_TICKET_CREATE_FAILED';
+
+export class CloneWorkspaceError extends Error {
+  code: CloneWorkspaceErrorCode | null;
+
+  constructor(message: string, code: CloneWorkspaceErrorCode | null) {
+    super(message);
+    this.name = 'CloneWorkspaceError';
+    this.code = code;
+  }
+}
+
 export type WizardFormState = {
   workspacePath: string;
   githubUrl: string;

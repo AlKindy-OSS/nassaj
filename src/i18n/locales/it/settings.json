@@ -115,6 +115,7 @@
     "showToolCalls": "Mostra chiamate agli strumenti",
     "autoScrollToBottom": "Scorrimento automatico in basso",
     "tabsIconOnly": "Schede compatte (solo icone)",
+    "showHardwareUsage": "Mostra utilizzo hardware",
     "sendByCtrlEnter": "Invia con Ctrl+Invio",
     "sendByCtrlEnterDescription": "Se abilitato, premere Ctrl+Invio invierà il messaggio invece di Invio. Utile per gli utenti IME per evitare invii accidentali.",
     "dragHandle": {
@@ -215,7 +216,8 @@
     "notifications": "Notifiche",
     "users": "Utenti",
     "about": "Informazioni",
-    "commandBoard": "Pannello comandi"
+    "commandBoard": "Pannello comandi",
+    "system": "Sistema"
   },
   "profile": {
     "title": "Profilo",
@@ -1119,8 +1121,8 @@
   "error": "Error",
   "stop": "Stop",
   "tmpfsCap": {
-    "title": "Shared memory cap (/tmp)",
-    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "title": "Shared memory cap ({{path}})",
+    "description": "{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
     "desiredLabel": "Desired cap",
     "capped": "Capped",
     "uncapped": "No cap",

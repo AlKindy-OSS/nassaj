@@ -23,6 +23,7 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { participantsDb, responseTurnMetricsDb, sessionsDb, usageStatisticsV3ReaderMode } from '@/modules/database/index.js';
+import { resolveStoredClaudeTranscript } from '@/modules/providers/list/claude/claude-projects-roots.js';
 import {
   claudeProjectRoots,
   encodeClaudeProjectDir,
@@ -516,8 +517,13 @@ async function resolveTranscriptPath(row: SessionRow, userId: string | number | 
     return stored;
   }
 
-  if (row.provider !== 'claude' || !row.project_path) {
+  if (row.provider !== 'claude') {
     return null;
+  }
+  // T-1880: a pre-separation spelling of the stored path, same relative file.
+  const relocated = stored ? resolveStoredClaudeTranscript(stored) : null;
+  if (relocated || !row.project_path) {
+    return relocated;
   }
 
   const encoded = encodeClaudeProjectDir(row.project_path);

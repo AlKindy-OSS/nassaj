@@ -4,6 +4,8 @@
  * spawn, or the process is registered (activeQwenProcesses ~344) in the same
  * synchronous block, so abortQwenSession succeeds right after spawn.
  */
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';

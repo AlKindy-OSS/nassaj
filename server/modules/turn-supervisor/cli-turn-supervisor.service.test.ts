@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 
 /* eslint-disable boundaries/dependencies -- deterministic lease fixture verifies the capability probe's cross-module admission contract. */
+import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
+
 import {
   acquireHarnessLease, releaseHarnessLease,
 } from '../providers/harness-update/lease.js';
@@ -55,8 +59,14 @@ describe('CLI Turn Supervisor capability gate', () => {
   });
 
   it('refuses capability child creation during update without caching a denial', () => {
+    // T-1873: the probe runs the registry qwen (operator HOME), never a member
+    // QWEN_PATH; a stub that prints nothing keeps the probe hermetic (→ false).
+    const originalHome = process.env.HOME;
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-capability-home-'));
+    process.env.HOME = home;
+    const stub = installFakeHarnessBinary(home, 'qwen');
     const env = { ...process.env, QWEN_PATH: '/definitely/not/a/qwen-binary' };
-    const key = `qwen:${env.QWEN_PATH}`;
+    const key = `qwen:${stub}`;
     cliCapabilityInternals.clearProbeCache();
     assert.ok('lease' in acquireHarnessLease('qwen', 'capability-test'));
     try {
@@ -69,6 +79,8 @@ describe('CLI Turn Supervisor capability gate', () => {
       ...env, NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
     }), false);
     assert.equal(cliCapabilityInternals.hasCachedProbe(key), true);
+    process.env.HOME = originalHome;
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   it('requires an independent configured reviewer for delegate_review', () => {

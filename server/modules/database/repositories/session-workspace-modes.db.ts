@@ -77,6 +77,62 @@ export const sessionWorkspaceModesDb = {
     }
   },
 
+  /**
+   * Declared session handover (agy spawn key -> brain UUID): moves the ledger
+   * row from `fromSessionId` to `toSessionId` in ONE transaction that first
+   * proves every precondition against the committed state, so a concurrent
+   * writer cannot slip between check and rekey:
+   *   - `from` has the exact expected binding (mode, project, provider);
+   *   - `to` has no ledger row;
+   *   - no principal other than `principalUserId` participates in `to`;
+   *   - `to` has a sessions row of the same provider and project;
+   *   - `verifyTarget(row)` accepts that row (caller-owned evidence checks).
+   * Throws, leaving nothing changed, when any check fails.
+   */
+  rekeyForHandover(input: {
+    fromSessionId: string;
+    toSessionId: string;
+    mode: SessionWorkspaceMode;
+    projectPath: string;
+    provider: string;
+    principalUserId: number | null;
+    verifyTarget: (row: { provider: string; project_path: string; jsonl_path: string | null }) => void;
+  }): void {
+    const { fromSessionId, toSessionId, mode, projectPath, provider, principalUserId } = input;
+    if (!fromSessionId || !toSessionId || fromSessionId === toSessionId || !projectPath || !provider) {
+      throw new Error('invalid workspace handover');
+    }
+    const db = getConnection();
+    db.transaction(() => {
+      const source = db.prepare(`
+        SELECT mode, project_path, provider FROM session_workspace_modes WHERE session_id = ?
+      `).get(fromSessionId) as Pick<StoredRow, 'mode' | 'project_path' | 'provider'> | undefined;
+      if (!source || source.mode !== mode || source.project_path !== projectPath
+          || source.provider !== provider) {
+        throw new Error('handover source binding does not match this launch');
+      }
+      if (db.prepare('SELECT 1 FROM session_workspace_modes WHERE session_id = ?').get(toSessionId)) {
+        throw new Error('handover target already has a workspace binding');
+      }
+      const foreignParticipant = db.prepare(`
+        SELECT 1 FROM session_participants
+        WHERE session_id = ? AND (? IS NULL OR user_id <> ?) LIMIT 1
+      `).get(toSessionId, principalUserId, principalUserId);
+      if (foreignParticipant) throw new Error('handover target has another participant');
+      const target = db.prepare(`
+        SELECT provider, project_path, jsonl_path FROM sessions WHERE session_id = ?
+      `).get(toSessionId) as { provider: string; project_path: string; jsonl_path: string | null } | undefined;
+      if (!target || target.provider !== provider || target.project_path !== projectPath) {
+        throw new Error('handover target session does not match this launch');
+      }
+      input.verifyTarget(target);
+      const moved = db.prepare(
+        'UPDATE session_workspace_modes SET session_id = ? WHERE session_id = ?',
+      ).run(toSessionId, fromSessionId);
+      if (moved.changes !== 1) throw new Error('handover ledger rekey did not apply');
+    })();
+  },
+
   /** Ratchets legacy_shared to overlay and never permits an overlay downgrade. */
   markOverlay(sessionId: string, projectPath: string, provider: string): void {
     if (!sessionId || !projectPath || !provider) throw new Error('invalid workspace ledger binding');

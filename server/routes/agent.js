@@ -1627,8 +1627,9 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
         // SEC-GIT-URL: both sources go through the SAME strict validator; the
         // old `.includes('github.com')` here had the identical bypass as the
         // clone gate. `repoUrl` is then replaced by the CANONICAL rebuilt URL,
-        // so everything downstream (buildTokenPushUrl → `git push <url>`) only
-        // ever sees https://github.com/<owner>/<repo>.git.
+        // so everything downstream (`git push <url>`, authenticated through an
+        // ephemeral askpass helper, never a token in the URL) only ever sees
+        // https://github.com/<owner>/<repo>.git.
         let repoUrl;
         let owner;
         let repo;

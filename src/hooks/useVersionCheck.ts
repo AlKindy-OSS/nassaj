@@ -15,7 +15,8 @@ export type InstallMode = 'git' | 'npm';
 export type VersionCheckStatus = 'idle' | 'checking' | 'ok' | 'error' | 'unavailable';
 
 const SOURCE_VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/;
-const UNKNOWN_VERSION = '—';
+/** T-1862 round 2: exported so callers can hide a version label outright on /health failure — showing "v—" reads as a real version. */
+export const UNKNOWN_VERSION = '—';
 const SERVER_BUILD_ID_PATTERN = /^[a-f0-9]{64}$/;
 
 type ServerPreviewHealth = {

@@ -25,7 +25,12 @@ const ICON_TONE: Record<SettingsTone, string> = {
 };
 
 type SettingsSectionProps = {
-  title: string;
+  /**
+   * سلسلة في الغالب؛ `ReactNode` مسموحٌ لأغراض ضيّقة كعزل مسارٍ لاتيني وسط
+   * عنوانٍ عربي بـ`<bdi dir="ltr">` (سقف `/tmp` مثالاً) — لا لتركيب عناصر
+   * تفاعلية هنا.
+   */
+  title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
   className?: string;

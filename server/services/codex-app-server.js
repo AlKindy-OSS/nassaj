@@ -3,7 +3,7 @@
  * non-interactive TypeScript SDK does not expose (currently manual compaction).
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { Transform } from 'node:stream';
 
@@ -11,7 +11,15 @@ import { assertSessionAccessible } from '../modules/providers/services/sessions.
 import { ensureCodexGovernance } from '../modules/providers/list/codex/codex-governance.js';
 import { runPermissionExecutionAdapter } from '../modules/execution-permissions/adapter.js';
 import { authorizeRuntimeUserProviderEffect } from '../modules/execution-permissions/runtime-user-effect.js';
-import { codexLaunchOptions, readCodexExecutableIdentity } from '../shared/codex-executable.js';
+import {
+  acquireCodexLaunchIdentity,
+  assertCodexIdentityUnchanged,
+  codexIdentityFromExecution,
+  codexLaunchOptions,
+  CODEX_MACHINE_CLI_MISSING_MESSAGE,
+  isCodexMachineCliMissing,
+} from '../shared/codex-executable.js';
+import { assertCodexRuntimeCompatible, peekCodexRuntimeVerdict } from '../shared/codex-runtime-compat.js';
 import {
   beginHarnessLaunch,
 } from '../modules/providers/harness-update/spawn-admission.js';
@@ -27,10 +35,33 @@ const MAX_ACTIVE_RPCS = 8;
 const MAX_ACTIVE_RPCS_PER_USER = 3;
 const activeRpcs = new Map();
 
-function spawnReservedCodex(spawnImpl, command, args, options) {
+/**
+ * T-1872: the machine Codex identity for one launch — the admission's own
+ * object when a permit exists (never re-acquired), otherwise acquired here once.
+ * An unresolvable or incompatible runtime releases the unconsumed permit before rethrowing.
+ */
+async function codexLaunchIdentityFor(permissionExecution) {
+  try {
+    const identity = permissionExecution
+      ? codexIdentityFromExecution(permissionExecution) : acquireCodexLaunchIdentity();
+    // T-1872 part 2: refuse a machine release outside Nassaj's contract (cached verdict).
+    return await assertCodexRuntimeCompatible(identity);
+  } catch (error) {
+    permissionExecution?.notStarted?.();
+    if (isCodexMachineCliMissing(error)) {
+      throw Object.assign(new Error(CODEX_MACHINE_CLI_MISSING_MESSAGE), { code: error.code });
+    }
+    throw error;
+  }
+}
+
+/** Spawn `codex app-server` from the exact measured executable after a final re-stat. */
+function spawnReservedCodex(spawnImpl, identity, env, args, options) {
   const release = beginHarnessLaunch('codex');
   try {
-    const child = spawnImpl(command, args, options);
+    assertCodexIdentityUnchanged(identity);
+    const launch = codexLaunchOptions(env, identity);
+    const child = spawnImpl(launch.codexPathOverride, args, { ...options, env: launch.env });
     child.once?.('exit', release);
     child.once?.('error', release);
     return child;
@@ -40,14 +71,35 @@ function spawnReservedCodex(spawnImpl, command, args, options) {
   }
 }
 
-/** Gate the selected-turn fork against the native build whose schema was reviewed. No model turn runs. */
-export function assertCodexMessageForkRuntimeReady() {
-  const identity = readCodexExecutableIdentity();
-  const version = execFileSync(identity.executablePath, ['--version'], {
-    encoding: 'utf8', shell: false, timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
-  if (version !== 'codex-cli 0.153.2') throw new Error('runtime_not_ready');
+/**
+ * Release trees whose native fork was exercised end-to-end by a real fork test
+ * (T-1872). Empty: no such test can run safely on this host (it needs a
+ * completed model turn), so the fork stays closed on every machine release.
+ */
+const REVIEWED_FORK_TREE_DIGESTS = new Set([]);
+export const CODEX_FORK_UNREVIEWED = 'CODEX_FORK_UNREVIEWED';
+
+/**
+ * Gate the selected-turn fork. Open only when this exact release tree passed a
+ * real fork test AND its own protocol schema still declares every RPC method the
+ * fork sends (runtime-compat verdict). No process is spawned here.
+ */
+export function assertCodexMessageForkRuntimeReady(acquire = acquireCodexLaunchIdentity) {
+  const identity = acquire();
+  const schema = peekCodexRuntimeVerdict(identity)?.checks?.forkSchema;
+  if (!REVIEWED_FORK_TREE_DIGESTS.has(identity.treeDigest) || schema !== 'verified') {
+    throw Object.assign(new Error('runtime_not_ready'), {
+      code: CODEX_FORK_UNREVIEWED, version: identity.version,
+      reason: REVIEWED_FORK_TREE_DIGESTS.has(identity.treeDigest)
+        ? `fork schema ${schema ?? 'not yet checked'}` : 'no reviewed real fork test for this Codex release',
+    });
+  }
   return identity;
+}
+
+/** Re-check before the fork RPC: the gated release must be byte-for-byte unchanged. */
+export function assertCodexMessageForkRuntimeUnchanged(identity) {
+  return assertCodexIdentityUnchanged(identity);
 }
 
 /** Bound bytes before readline can retain an unbounded incomplete JSON frame. */
@@ -147,6 +199,7 @@ async function executeCodexAppServerRpc(sessionId, userId, method, params = {}, 
       projectId: String(session.project_id ?? `session:${sessionId}`),
       workspacePath: session.project_path || process.cwd(),
       });
+  const launchIdentity = await codexLaunchIdentityFor(permissionExecution);
   return runPermissionExecutionAdapter(permissionExecution, async () => {
     const authorizedParams = bindRpcParamsToAuthorizedSession(
       method,
@@ -155,10 +208,9 @@ async function executeCodexAppServerRpc(sessionId, userId, method, params = {}, 
       session,
     );
     const spawnImpl = options.spawnImpl || spawn;
-    const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
-    const child = spawnReservedCodex(spawnImpl, launch.codexPathOverride, ['app-server'], {
+    const env = envResolver(userId, 'codex', process.env);
+    const child = spawnReservedCodex(spawnImpl, launchIdentity, env, ['app-server'], {
       cwd: session.project_path || process.cwd(),
-      env: launch.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const boundedOutput = boundedRpcOutput();
@@ -322,12 +374,11 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
     return;
   }
 
-  const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
   let child;
   try {
-    child = spawnReservedCodex(spawnImpl, launch.codexPathOverride, ['app-server'], {
+    const launchIdentity = await codexLaunchIdentityFor(null);
+    child = spawnReservedCodex(spawnImpl, launchIdentity, envResolver(userId, 'codex', process.env), ['app-server'], {
     cwd,
-    env: launch.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -526,12 +577,12 @@ export async function startCodexCompaction(sessionId, userId, options = {}) {
       projectId: String(session.project_id ?? `session:${sessionId}`),
       workspacePath: session.project_path || process.cwd(),
       });
+  const launchIdentity = await codexLaunchIdentityFor(permissionExecution);
   return runPermissionExecutionAdapter(permissionExecution, async () => {
     const spawnImpl = options.spawnImpl || spawn;
-    const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
-    const child = spawnReservedCodex(spawnImpl, launch.codexPathOverride, ['app-server'], {
+    const env = envResolver(userId, 'codex', process.env);
+    const child = spawnReservedCodex(spawnImpl, launchIdentity, env, ['app-server'], {
       cwd: session.project_path || process.cwd(),
-      env: launch.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   const lines = createInterface({ input: child.stdout });

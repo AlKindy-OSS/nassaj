@@ -75,7 +75,7 @@ function miniFixture(root) {
     writeFileSync(path.join(pkg, 'run.sh'), '#!/bin/sh\nexit 0\n'); chmodSync(path.join(pkg, 'run.sh'), 0o555);
     writeFileSync(path.join(source, 'package.json'), JSON.stringify({type:'module'}));
     writeFileSync(path.join(source, 'package-lock.json'), JSON.stringify({lockfileVersion:3,packages:{'':{},
-        'node_modules/@openai/codex-sdk': { version: '0.153.2', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture':{version:'1.0.0',integrity:'sha512-YQ=='}}}));
+        'node_modules/@openai/codex-sdk': { version: '0.157.1', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture':{version:'1.0.0',integrity:'sha512-YQ=='}}}));
     for(const entry of FORWARD_EXECUTABLE_ENTRIES) {
         const target=path.join(source,entry);mkdirSync(path.dirname(target),{recursive:true});
         writeFileSync(target,entry==='scripts/safe-restart.sh'?readFileSync(path.join(ROOT,entry)):entry==='scripts/release-runtime-forward-child.mjs'

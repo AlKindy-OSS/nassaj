@@ -129,7 +129,8 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
     isolateVendors();
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
     const env = resolveProviderEnv(null, 'kimi', { ...base });
-    assert.deepEqual(env, base);
+    // Only the binary updater policy (T-1873) — no key, no config-home.
+    assert.deepEqual(env, { ...base, KIMI_CODE_NO_AUTO_UPDATE: '1' });
     assert.equal(env.KIMI_API_KEY, undefined);
   });
 });
@@ -179,6 +180,17 @@ describe('resolveProviderEnv — opencode XDG isolation (OC-07)', () => {
 });
 
 describe('resolveProviderEnv — updater policy covers every identity mode', () => {
+  it('kimi chat, agent, anonymous and shared modes all disable self-update (T-1873)', () => {
+    for (const [userId, sharing, mode] of [
+      [46, 'isolated', 'agent'], [47, 'isolated', 'chat'], [null, 'isolated', 'agent'], [48, 'shared', undefined],
+    ] as const) {
+      _resetProviderSharingCache();
+      setProviderSharingConfig({ kimi: sharing });
+      const env = resolveProviderEnv(userId, 'kimi', { PATH: '/usr/bin' }, mode);
+      assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1', `${userId}/${sharing}/${mode}`);
+    }
+  });
+
   it('claude shared, anonymous and isolated modes all disable self-update', () => {
     for (const [userId, sharing] of [[44, 'shared'], [null, 'isolated'], [45, 'isolated']] as const) {
       _resetProviderSharingCache();
@@ -397,7 +409,8 @@ describe('SL-5 — kimi agent-mode config-home isolation (KIMI_CODE_HOME)', () =
   it('anonymous (null userId) kimi agent spawn sets nothing (fail-open shared)', () => {
     isolateKimi();
     const env = resolveProviderEnv(null, 'kimi', { ...BASE }, 'agent');
-    assert.deepEqual(env, BASE);
+    // Only the binary updater policy (T-1873): no key, no config-home.
+    assert.deepEqual(env, { ...BASE, KIMI_CODE_NO_AUTO_UPDATE: '1' });
     assert.equal(env.KIMI_CODE_HOME, undefined);
   });
 
@@ -405,7 +418,8 @@ describe('SL-5 — kimi agent-mode config-home isolation (KIMI_CODE_HOME)', () =
     _resetProviderSharingCache();
     setProviderSharingConfig({ kimi: 'shared' });
     const env = resolveProviderEnv(604, 'kimi', { ...BASE }, 'agent');
-    assert.deepEqual(env, BASE);
+    // Only the binary updater policy (T-1873): no key, no config-home.
+    assert.deepEqual(env, { ...BASE, KIMI_CODE_NO_AUTO_UPDATE: '1' });
     assert.equal(env.KIMI_CODE_HOME, undefined);
   });
 });

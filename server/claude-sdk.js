@@ -37,7 +37,7 @@ import {
 import { CLAUDE_FALLBACK_MODELS } from './modules/providers/list/claude/claude-models.provider.js';
 import { recordBrokenModel } from './modules/providers/list/claude/claude-broken-models.store.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
-import { resolveClaudeCodeExecutablePath } from './shared/claude-cli-path.js';
+import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import {
   createNotificationEvent,
   notifyRunFailed,
@@ -1042,9 +1042,9 @@ function mapCliOptionsToSDK(options = {}, validModelValues) {
   sdkOptions.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = coordinationProfile.depth;
   sdkOptions.env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = coordinationProfile.concurrent;
 
-  // Resolve the executable eagerly on Windows because the SDK uses raw child_process.spawn,
-  // which does not reliably follow npm's shell wrappers like cross-spawn does.
-  sdkOptions.pathToClaudeCodeExecutable = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH);
+  // The harness registry (T-1873) resolves the one claude the terminal runs; the
+  // SDK never falls back to a bundled or PATH-found copy.
+  sdkOptions.pathToClaudeCodeExecutable = resolveHarnessBinary('claude');
 
   // Map working directory
   if (cwd) {
@@ -1269,7 +1269,7 @@ async function probeClaudeBuiltInCommands(context = {}) {
   try {
     const sdkOptions = {
       env: probeEnv,
-      pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
+      pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
       // No tools/prompt/model work happens; keep options minimal & deterministic.
       systemPrompt: { type: 'preset', preset: 'claude_code' },
     };
@@ -1364,8 +1364,8 @@ async function getClaudeBuiltInCommands(context = {}) {
 //        guard all run fail-closed before spawn; and a canUseTool ALLOWLIST wall
 //        (A-2) admits only Read/Grep/Glob/NotebookRead, each confined to the root, and
 //        denies every other tool — a read-only, project-scoped query.
-//   C4 — resumeSessionAt := upToMessageId when the client pins one (SDK 0.3.152
-//        exposes Options.resumeSessionAt — verified in sdk.d.ts:1706).
+//   C4 — resumeSessionAt := upToMessageId when the client pins one (the SDK
+//        exposes Options.resumeSessionAt — re-verified in sdk.d.ts at 0.3.283).
 //   C5 — the fork materialises from the LAST MESSAGE PERSISTED ON DISK in
 //        `<liveSid>.jsonl`. A live turn still mid-flight (its half not yet flushed)
 //        is NOT visible to the fork — the side answer reflects the conversation as
@@ -1458,8 +1458,8 @@ function isEngineWriteFenceEnabled() {
 const BTW_MAX_TURNS = 8;
 const BTW_DEFAULT_TIMEOUT_MS = 120000;
 
-// B-270/T-1045: steering appended to the claude_code preset (SDK 0.3.152 supports
-// `append` on a preset systemPrompt — sdk.d.ts:1908). It does NOT widen the fork's
+// B-270/T-1045: steering appended to the claude_code preset (the SDK supports
+// `append` on a preset systemPrompt — re-verified at 0.3.283). It does NOT widen the fork's
 // permissions (the allowlist + hook are unchanged and authoritative); it tells the
 // model to answer from the conversation already in context and NOT to reach for the
 // tools the cage hard-denies, so a general question no longer burns its whole turn
@@ -1776,13 +1776,22 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
       persistSession: false,  // C1/C2 — ephemeral: the fork writes nothing to disk
       maxTurns: BTW_MAX_TURNS,
       env,
-      pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
+      pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
       // B-270/T-1045: keep the claude_code preset (so CLAUDE.md/governance context
       // still loads) and APPEND the side-query steering — never replace the preset,
       // which would drop the session's own context the answer draws from.
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: BTW_SIDE_QUERY_DIRECTIVE },
+      // snapshot:false — since SDK 0.3.267 a recorded system prompt is replayed on
+      // resume/fork and a different `append` is ignored until compaction, so the
+      // directive would never reach the fork. The fork is ephemeral: no cache cost.
+      systemPrompt: {
+        type: 'preset', preset: 'claude_code', append: BTW_SIDE_QUERY_DIRECTIVE, snapshot: false,
+      },
       settingSources: ['project', 'user', 'local'],
       cwd: projectRoot,
+      // SDK 0.3.162+: native builds no longer register Grep/Glob by default (search
+      // moves into Bash, which the cage denies). Name the base tool set explicitly so
+      // the allowlisted inspection tools exist; canUseTool below stays authoritative.
+      tools: [...BTW_ALLOWED_TOOLS],
       disallowedTools: [...BTW_DISALLOWED_TOOLS], // C3 + A-2.1 config belt
       // Read-only wall (C3 + A-2): an ALLOWLIST — only BTW_ALLOWED_TOOLS may run,
       // each confined to the session's project root (A-2.2). Every other tool

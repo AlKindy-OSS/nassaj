@@ -24,7 +24,7 @@ import type {
 } from '@/shared/types.js';
 import {
   buildDefaultProviderCurrentActiveModel,
-  isCliInstalled,
+  isHarnessCliInstalled,
   writeProviderSessionActiveModelChange,
 } from '@/shared/utils.js';
 
@@ -90,7 +90,7 @@ class QwenModels implements IProviderModels {
 
 class QwenAuth implements IProviderAuth {
   isInstalled(): boolean {
-    return isCliInstalled(process.env.QWEN_PATH?.trim() || 'qwen');
+    return isHarnessCliInstalled('qwen');
   }
 
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {

@@ -359,6 +359,11 @@ function resolveIsolatedProviderEnv(userId, provider, baseEnv, mode, honorGrants
 function applyHarnessUpdaterPolicy(provider, env) {
   if (provider === 'claude') env.DISABLE_AUTOUPDATER = '1';
   if (provider === 'opencode') env.OPENCODE_DISABLE_AUTOUPDATE = '1';
+  // kimi-code: fully disables the auto-update check, background install and
+  // staged swap (vendor dist, isAutoUpdateDisabledByEnv). Every kimi child —
+  // agent turns AND the kimi terminal/login PTY — so only the update button
+  // moves the one installed copy (T-1873).
+  if (provider === 'kimi') env.KIMI_CODE_NO_AUTO_UPDATE = '1';
   return env;
 }
 

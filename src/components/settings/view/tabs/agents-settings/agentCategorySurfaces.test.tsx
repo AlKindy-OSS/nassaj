@@ -37,8 +37,13 @@ vi.mock('../../../../auth', () => ({
 }));
 
 // AgentUsageSection imports directly from the context path (not the barrel).
+// HarnessVersionSection additionally reads useOptionalAuth from this same
+// path — its absence here (pre-existing gap, T-1866) failed every 'account'
+// case with an unrelated mock error before this guard ever reached its own
+// assertion.
 vi.mock('../../../../auth/context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 1, username: 'owner', role: 'owner' } }),
+  useOptionalAuth: () => ({ user: { id: 1, username: 'owner', role: 'owner' } }),
 }));
 
 vi.mock('../../../../../utils/api', () => ({
@@ -159,5 +164,35 @@ describe('لا فئةَ تفتح على فراغ (B-414)', () => {
         `لوح «${agent} × ${category}» أبيض — الفئة معروضة ولا شيء يُرسم فيها`,
       ).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('T-1866: HarnessAutoUpdateSection moved off agent pages into النظام', () => {
+  it('the account category for a harness-backed agent no longer renders the auto-update policy widget', async () => {
+    const { container, findByText } = render(
+      <ThemeProvider>
+        <AgentCategoryContentSection
+          selectedAgent="claude"
+          selectedCategory="account"
+          agentContextById={agentContextById}
+          claudePermissions={{
+            allowedTools: [], disallowedTools: [], skipPermissions: false, allowVendorDelegation: false,
+          }}
+          onClaudePermissionsChange={() => {}}
+          cursorPermissions={{ allowedCommands: [], disallowedCommands: [], skipPermissions: false }}
+          onCursorPermissionsChange={() => {}}
+          codexPermissionMode="default"
+          onCodexPermissionModeChange={() => {}}
+          projects={[]}
+        />
+      </ThemeProvider>,
+    );
+
+    // HarnessVersionSection (the per-agent CLI status card) is still here —
+    // only the global auto-update POLICY widget moved.
+    await findByText('إصدار أداة المزوّد');
+    expect(container.textContent).not.toContain('التحديث التلقائي العام');
+    // The pointer that replaced it, instead.
+    expect(container.textContent).toContain('التحديث التلقائي يُضبط من الإعدادات ← النظام');
   });
 });

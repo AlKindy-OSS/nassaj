@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Pure native-package identity utility; does not import a runtime or database module.
-import { readCodexExecutableIdentity } from '../../shared/codex-executable.js';
+// Pure machine-release identity utility; does not import a runtime or database module.
+import { codexFingerprintFields } from '../../shared/codex-executable.js';
+// Registry of the one installed CLI per harness (T-1873); pure path resolution.
+import { resolveHarnessBinary } from '../../shared/harness-binaries.js';
 
 import capabilityArtifact from './fixtures/permission-capabilities.v1.json' with { type: 'json' };
 import { computeCandidateEvidenceDigest, computeReferenceEvidenceDigest } from './parity.js';
@@ -109,7 +111,7 @@ export const resolveInstalledClaudeBuildFingerprint = (
 ): Readonly<{ buildFingerprint: string; sdkFingerprint: string; cliFingerprint: string }> => {
   const serverSource = fs.readFileSync(new URL('../../claude-sdk.js', import.meta.url), 'utf8');
   const sdkVersion = installedPackageVersion('@anthropic-ai/claude-agent-sdk');
-  const rawCliVersion = String(execImpl('claude', ['--version'], {
+  const rawCliVersion = String(execImpl(resolveHarnessBinary('claude'), ['--version'], {
     encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'],
   })).trim();
   return Object.freeze({
@@ -124,25 +126,32 @@ export const resolveInstalledClaudeBuildFingerprint = (
   });
 };
 
-/** Measure the installed Codex adapter/SDK/CLI identity using the live-probe formula. */
+/** The frozen per-launch machine Codex identity (server/shared/codex-executable.js). */
+export type CodexLaunchIdentity = Readonly<{
+  executablePath: string; releaseRoot: string; version: string; treeDigest: string;
+  nativeDigest: string; resolverDigest: string; pathDirs: readonly string[];
+  platform: string; arch: string;
+}>;
+
+/**
+ * Fingerprint the Codex adapter/SDK and the machine release of THIS launch.
+ * The identity is mandatory: admission never re-resolves a binary of its own.
+ */
 export const resolveInstalledCodexBuildFingerprint = (
-  execImpl: typeof execFileSync = execFileSync,
-  readNativeIdentity = readCodexExecutableIdentity,
+  identity: CodexLaunchIdentity,
 ): Readonly<{ buildFingerprint: string; sdkFingerprint: string; cliFingerprint: string }> => {
   const serverSource = fs.readFileSync(new URL('../../openai-codex.js', import.meta.url), 'utf8');
   const sdkVersion = installedPackageVersion('@openai/codex-sdk');
-  const { executablePath, pathDirs: _pathDirs, ...nativeIdentity } = readNativeIdentity();
-  const rawCliVersion = String(execImpl(executablePath, ['--version'], {
-    shell: false, encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'],
-  })).trim();
-  const cliVersion = rawCliVersion.match(/\b(\d+\.\d+\.\d+)\b/u)?.[1];
-  if (!cliVersion) throw new Error('PERMISSION_CODEX_CLI_VERSION_INVALID');
+  const cliVersion = identity?.version;
+  if (typeof cliVersion !== 'string' || !/^\d+\.\d+\.\d+$/u.test(cliVersion)) {
+    throw new Error('PERMISSION_CODEX_CLI_VERSION_INVALID');
+  }
   return Object.freeze({
     buildFingerprint: digest({
       serverSourceDigest: digest(serverSource),
       sdkVersion,
-      cliVersion: rawCliVersion,
-      suiteId: 'codex-production-sdk-full-delegation-v1', ...nativeIdentity,
+      cliVersion: `codex-cli ${cliVersion}`,
+      suiteId: 'codex-production-sdk-full-delegation-v1', ...codexFingerprintFields(identity),
     }),
     sdkFingerprint: `openai-codex-sdk@${sdkVersion}`,
     cliFingerprint: `codex-cli@${cliVersion}`,
@@ -154,7 +163,7 @@ export const resolveInstalledAgyBuildFingerprint = (
   execImpl: typeof execFileSync = execFileSync,
 ): Readonly<{ buildFingerprint: string; cliFingerprint: string }> => {
   const serverSource = fs.readFileSync(new URL('../../agy-cli.js', import.meta.url), 'utf8');
-  const rawCliVersion = String(execImpl('agy', ['--version'], {
+  const rawCliVersion = String(execImpl(resolveHarnessBinary('antigravity'), ['--version'], {
     encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'],
   })).trim();
   const cliVersion = rawCliVersion.match(/\b(\d+\.\d+\.\d+)\b/u)?.[1];
@@ -175,8 +184,9 @@ export const resolveMeasuredPermissionCandidate = (
   evaluatedAt = new Date().toISOString(),
   installedIdentity: InstalledPermissionIdentity | null = context.body === 'claude'
     ? resolveInstalledClaudeBuildFingerprint()
+    // Codex needs the launch's own identity; without it there is no candidate.
     : context.body === 'codex'
-      ? resolveInstalledCodexBuildFingerprint()
+      ? null
       : context.body === 'antigravity'
         ? resolveInstalledAgyBuildFingerprint()
         : null,

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { collectMigrationClosure, verifyMigrationClosure, bindMigrationClosureToAsset } from './lib/release-database-migration-closure.mjs';
-const version = '0.153.2-linux-x64';
+const version = '0.157.1-linux-x64';
 const spec = `npm:@openai/codex@${version}`;
 function fixture(t, nested = false) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'b952-alias-'));

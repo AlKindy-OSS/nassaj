@@ -1,6 +1,7 @@
 import {
   ArrowDown,
   Brain,
+  Cpu,
   Eye,
   Maximize2,
   PanelTop,
@@ -63,6 +64,11 @@ export const VIEW_OPTION_TOGGLES: PreferenceToggleItem[] = [
     key: 'tabsIconOnly',
     labelKey: 'quickSettings.tabsIconOnly',
     icon: PanelTop,
+  },
+  {
+    key: 'showHardwareUsage',
+    labelKey: 'quickSettings.showHardwareUsage',
+    icon: Cpu,
   },
 ];
 

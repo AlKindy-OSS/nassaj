@@ -6,6 +6,7 @@ export {
   readSessionSubmittedBlobs,
   readSessionFileBlob,
   reapSessionWorkspaces,
+  rebindSessionWorkspace,
   requireBoundSessionWorkspace,
   resolveSessionWorkspace,
   resolveSessionWorkspaceForLaunch,

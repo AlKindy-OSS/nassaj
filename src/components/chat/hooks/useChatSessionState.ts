@@ -118,6 +118,9 @@ export function chatMessageToNormalized(
     // sender's own avatar resolves immediately (mirrors get the same id from
     // the server-stamped WS echo / history rows).
     userId: typeof msg.userId === 'number' ? msg.userId : undefined,
+    // T-1862: carry the compaction-boundary marker through the store round
+    // trip — dropped here it never reaches useRunProgress/runStartedAt.
+    isCompactionBoundary: msg.isCompactionBoundary,
   } as NormalizedMessage;
 }
 
@@ -502,6 +505,16 @@ export function useChatSessionState({
         setTotalMessages(slot.total);
         setVisibleMessageCount((prev) => prev + MESSAGES_PER_PAGE);
         return true;
+      } catch (error) {
+        // T-1862 round 2 (qa T-2): handleScroll calls this from a bare
+        // `onScroll` handler with nothing downstream to catch a rejection —
+        // an aborted or failed fetch must resolve to "nothing loaded", not an
+        // unhandled promise rejection. The user can simply scroll again.
+        if ((error as Error)?.name !== 'AbortError') {
+          // eslint-disable-next-line no-console
+          console.error('loadOlderMessages failed', error);
+        }
+        return false;
       } finally {
         paginationRequestsRef.current.delete(controller);
         if (selectedSessionIdRef.current === requestSessionId && historyEpochRef.current === epoch) {
@@ -520,15 +533,25 @@ export function useChatSessionState({
     const nearBottom = isNearBottom();
     setIsUserScrolledUp(!nearBottom);
 
-    if (!allMessagesLoadedRef.current) {
-      const scrolledNearTop = container.scrollTop < 100;
-      if (!scrolledNearTop) { topLoadLockRef.current = false; return; }
-      if (topLoadLockRef.current) {
-        if (container.scrollTop > 20) topLoadLockRef.current = false;
-        return;
+    // T-1862 round 2 (qa T-2): wired straight onto `onScroll` — nothing
+    // downstream awaits or catches this promise, so any rejection here would
+    // otherwise surface as an unhandled rejection on every scroll tick.
+    try {
+      if (!allMessagesLoadedRef.current) {
+        const scrolledNearTop = container.scrollTop < 100;
+        if (!scrolledNearTop) { topLoadLockRef.current = false; return; }
+        if (topLoadLockRef.current) {
+          if (container.scrollTop > 20) topLoadLockRef.current = false;
+          return;
+        }
+        const didLoad = await loadOlderMessages(container);
+        if (didLoad) topLoadLockRef.current = true;
       }
-      const didLoad = await loadOlderMessages(container);
-      if (didLoad) topLoadLockRef.current = true;
+    } catch (error) {
+      if ((error as Error)?.name !== 'AbortError') {
+        // eslint-disable-next-line no-console
+        console.error('handleScroll failed', error);
+      }
     }
   }, [isNearBottom, loadOlderMessages]);
 
@@ -1333,12 +1356,21 @@ export function useChatSessionState({
     if (heightDiff > 0 && prevTop > 0) container.scrollTop = prevTop + heightDiff;
   }, [autoScrollToBottom, chatMessages.length, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
 
+  // T-1862 round 2 (qa T-1): content can grow WITHOUT any native 'scroll'
+  // event — a new message appends below the viewport while scrollTop itself
+  // never changes — so handleScroll (onScroll) never fires and isUserScrolledUp
+  // goes stale: the user is now further from the true bottom, but the arrow
+  // stays hidden until their next real scroll gesture. Only relevant when
+  // autoScrollToBottom is off (that path already pins the view to the bottom
+  // via scrollToBottom() above, whose own 'scroll' event keeps this accurate).
   useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
+    if (autoScrollToBottom || !scrollContainerRef.current || chatMessages.length === 0) return;
+    setIsUserScrolledUp(!isNearBottom());
+  }, [autoScrollToBottom, chatMessages.length, isNearBottom]);
+
+  // T-1862: wired declaratively as `onScroll` on the container in
+  // ChatMessagesPane (covers scrollbar drag/keyboard, not just wheel/touch)
+  // instead of an imperative addEventListener effect — same handler, one path.
 
   useEffect(() => {
     const activeViewSessionId = selectedSession?.id || currentSessionId;

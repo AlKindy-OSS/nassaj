@@ -2,6 +2,8 @@ import { api } from '../../../utils/api';
 import type {
   BrowseFilesystemResponse,
   CloneProgressEvent,
+  CloneTicketResponse,
+  CloneWorkspaceErrorCode,
   CreateFolderResponse,
   CreateProjectPayload,
   CreateProjectResponse,
@@ -11,7 +13,7 @@ import type {
   GithubReposResponse,
   TokenMode,
 } from '../types';
-import { GithubReposError } from '../types';
+import { CloneWorkspaceError, GithubReposError } from '../types';
 
 type CloneWorkspaceParams = {
   workspacePath: string;
@@ -23,6 +25,10 @@ type CloneWorkspaceParams = {
 
 type CloneProgressHandlers = {
   onProgress: (message: string) => void;
+  /** Fired once the clone ticket is created (the request body, including any
+   * raw PAT, was accepted by the server) so the caller can clear sensitive
+   * form fields before the (possibly slow) clone itself finishes. */
+  onTicketCreated?: () => void;
 };
 
 const parseJson = async <T>(response: Response): Promise<T> => {
@@ -129,42 +135,85 @@ export const createProjectRequest = async (payload: CreateProjectPayload) => {
   return data.project;
 };
 
-const buildCloneProgressQuery = ({
+const buildCloneTicketRequestBody = ({
   workspacePath,
   githubUrl,
   tokenMode,
   selectedGithubToken,
   newGithubToken,
 }: CloneWorkspaceParams) => {
-  const query = new URLSearchParams({
+  const body: Record<string, unknown> = {
     path: workspacePath.trim(),
     githubUrl: githubUrl.trim(),
-  });
+  };
 
   if (tokenMode === 'stored' && selectedGithubToken) {
-    query.set('githubTokenId', selectedGithubToken);
+    const tokenId = Number(selectedGithubToken);
+    if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+      throw new CloneWorkspaceError('Invalid stored GitHub token', 'INVALID_CLONE_REQUEST');
+    }
+    body.githubTokenId = tokenId;
   }
 
   if (tokenMode === 'new' && newGithubToken.trim()) {
-    query.set('newGithubToken', newGithubToken.trim());
+    body.newGithubToken = newGithubToken.trim();
   }
 
-  // EventSource cannot send custom headers, so the auth token is passed as query.
-  const authToken = localStorage.getItem('auth-token');
-  if (authToken) {
-    query.set('token', authToken);
-  }
-
-  return query.toString();
+  return body;
 };
 
-export const cloneWorkspaceWithProgress = (
+const KNOWN_CLONE_ERROR_CODES: readonly CloneWorkspaceErrorCode[] = [
+  'INVALID_CLONE_REQUEST',
+  'INVALID_GITHUB_URL',
+  'CLONE_TICKET_LIMIT_REACHED',
+  'AUTHENTICATION_REQUIRED',
+  'CLONE_TICKET_CREATE_FAILED',
+];
+
+const isKnownCloneErrorCode = (value: unknown): value is CloneWorkspaceErrorCode =>
+  typeof value === 'string' && (KNOWN_CLONE_ERROR_CODES as readonly string[]).includes(value);
+
+const createCloneTicket = async (params: CloneWorkspaceParams) => {
+  // buildCloneTicketRequestBody may throw a CloneWorkspaceError synchronously
+  // (invalid stored token id) before any request is made.
+  const body = buildCloneTicketRequestBody(params);
+  const response = await api.createCloneTicket(body);
+
+  let data: CloneTicketResponse | null = null;
+  try {
+    data = await parseJson<CloneTicketResponse>(response);
+  } catch {
+    // Non-JSON body (e.g. a 502 gateway HTML page or a CSRF interstitial):
+    // fall through to the generic failure below instead of surfacing the
+    // raw parse error / response text to the user.
+    data = null;
+  }
+
+  if (!response.ok || !data || !data.ticket) {
+    const rawCode = data?.error;
+    const code = isKnownCloneErrorCode(rawCode) ? rawCode : 'CLONE_TICKET_CREATE_FAILED';
+    throw new CloneWorkspaceError(
+      (typeof rawCode === 'string' && rawCode) || 'Failed to create clone request',
+      code,
+    );
+  }
+
+  return data.ticket;
+};
+
+export const cloneWorkspaceWithProgress = async (
   params: CloneWorkspaceParams,
   handlers: CloneProgressHandlers,
-) =>
-  new Promise<Record<string, unknown> | undefined>((resolve, reject) => {
-    const query = buildCloneProgressQuery(params);
-    const eventSource = new EventSource(`/api/projects/clone-progress?${query}`);
+) => {
+  // The ticket carries the workspace path, GitHub URL, and any token, so none
+  // of that (nor the raw PAT) ever reaches the SSE URL, browser history, or
+  // server access logs. The ticket is single-use (server-enforced), so a
+  // reconnect after settlement must not be attempted.
+  const ticket = await createCloneTicket(params);
+  handlers.onTicketCreated?.();
+
+  return new Promise<Record<string, unknown> | undefined>((resolve, reject) => {
+    const eventSource = new EventSource(api.cloneProgressUrl(ticket));
     let settled = false;
     const identityChanging = () => settle(() => reject(new DOMException('Identity changed', 'AbortError')));
 
@@ -174,10 +223,19 @@ export const cloneWorkspaceWithProgress = (
       }
       settled = true;
       window.removeEventListener('auth:identity-changing', identityChanging);
+      eventSource.removeEventListener('identity_revoked', identityRevoked);
+      eventSource.removeEventListener('access_fence', accessFenced);
       eventSource.close();
       callback();
     };
+    const identityRevoked = () => settle(() => reject(new DOMException('Identity changed', 'AbortError')));
+    // The device-bound stream closes with this event when the connection's
+    // device/session access is fenced off mid-clone (account-wallet guard).
+    const accessFenced = () => settle(() => reject(new DOMException('Identity changed', 'AbortError')));
+
     window.addEventListener('auth:identity-changing', identityChanging);
+    eventSource.addEventListener('identity_revoked', identityRevoked);
+    eventSource.addEventListener('access_fence', accessFenced);
 
     eventSource.onmessage = (event) => {
       try {
@@ -205,3 +263,4 @@ export const cloneWorkspaceWithProgress = (
       settle(() => reject(new Error('Connection lost during clone')));
     };
   });
+};

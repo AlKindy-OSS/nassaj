@@ -10,7 +10,8 @@ import { after, test } from 'node:test';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-auth-home-'));
 const operatorHome = path.join(sandbox, 'operator');
-const binDir = path.join(sandbox, 'bin');
+// T-1873: the registry resolves hermes at the measured ~/.local/bin/hermes.
+const binDir = path.join(operatorHome, '.local', 'bin');
 const userId = 42;
 const userHome = path.join(operatorHome, '.nassaj-users', String(userId));
 

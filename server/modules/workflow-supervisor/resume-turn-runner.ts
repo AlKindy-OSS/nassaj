@@ -19,6 +19,8 @@
 
 import { spawn } from 'node:child_process';
 
+import { resolveHarnessBinaryWithOverride } from '@/shared/harness-binaries.js';
+
 /* eslint-disable boundaries/dependencies -- this runner needs the synchronous admission leaf without loading the full providers barrel into workflow boot. */
 import {
   beginHarnessLaunch,
@@ -29,6 +31,9 @@ import {
 
 import type { ResumeTurnParams, ResumeTurnResult } from './handoff-injector.js';
 import { INJECTOR_SIGKILL_GRACE_MS } from './config.js';
+
+/** Server-env override of the claude the supervisor's resume turns run (absolute path). */
+export const WORKFLOW_CLAUDE_BIN_ENV = 'WORKFLOW_SUPERVISOR_CLAUDE_BIN';
 
 /** Cap the captured stdout so a runaway turn cannot balloon memory. */
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
@@ -78,7 +83,10 @@ export function defaultRunResumeTurn(params: ResumeTurnParams): Promise<ResumeTu
     // Track it explicitly for the child's whole life.
     const releaseLaunch = beginHarnessLaunch('claude');
     try {
-      child = spawn(params.claudeBin, args, {
+      // The one claude the terminal runs, from the harness registry (T-1873);
+      // the supervisor's own WORKFLOW_SUPERVISOR_CLAUDE_BIN (server env,
+      // absolute) still wins, under the registry's override rules.
+      child = spawn(resolveHarnessBinaryWithOverride('claude', WORKFLOW_CLAUDE_BIN_ENV), args, {
         cwd: params.projectPath,
         env: params.env,
         stdio: ['ignore', 'pipe', 'pipe'],

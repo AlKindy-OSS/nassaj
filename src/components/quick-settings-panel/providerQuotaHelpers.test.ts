@@ -22,6 +22,7 @@ import { describe, it } from 'vitest';
 
 import {
   looksLikeAnthropicModel,
+  resolveCreditDisplay,
   resolveWindowLength,
   nextQuotaTickMs,
   resolveHorizon,
@@ -237,5 +238,41 @@ describe('resolveWindowLength — حروف موحَّدة على كل المزو
     )[0];
     assert.equal(resolveWindowLength(weekly.windowSeconds)?.letter, 'W');
     assert.deepEqual(weekly.horizon, { value: 7, unit: 'hour' });
+  });
+});
+
+describe('resolveCreditDisplay — قرار عرض واحد لرصيد المزوّد الإضافي', () => {
+  it('مفقود/غير معروف/غير مدعوم ⇒ hidden (لا صفر مختلَق)', () => {
+    assert.deepEqual(resolveCreditDisplay(undefined), { kind: 'hidden' });
+    assert.deepEqual(resolveCreditDisplay(null), { kind: 'hidden' });
+    assert.deepEqual(
+      resolveCreditDisplay({ balance: -1, unlimited: false } as never),
+      { kind: 'hidden' },
+    );
+    assert.deepEqual(
+      resolveCreditDisplay({ balance: Number.NaN, unlimited: false } as never),
+      { kind: 'hidden' },
+    );
+    assert.deepEqual(
+      resolveCreditDisplay({ unlimited: 'false' } as never),
+      { kind: 'hidden' },
+    );
+  });
+
+  it('رصيد موجب ⇒ amount بقيمته الحرفية', () => {
+    assert.deepEqual(resolveCreditDisplay({ balance: 42, unlimited: false }), {
+      kind: 'amount',
+      value: 42,
+    });
+  });
+
+  it('صفر مؤكَّد (رصيد محدود نافد فعلاً) ⇒ zero لا hidden', () => {
+    assert.deepEqual(resolveCreditDisplay({ balance: 0, unlimited: false }), { kind: 'zero' });
+  });
+
+  it('غير محدود ⇒ unlimited، برقم إرشادي أو بلا رقم إطلاقاً', () => {
+    assert.deepEqual(resolveCreditDisplay({ balance: 0, unlimited: true }), { kind: 'unlimited' });
+    assert.deepEqual(resolveCreditDisplay({ balance: null, unlimited: true }), { kind: 'unlimited' });
+    assert.deepEqual(resolveCreditDisplay({ unlimited: true } as never), { kind: 'unlimited' });
   });
 });

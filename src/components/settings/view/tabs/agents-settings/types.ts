@@ -42,6 +42,12 @@ export type AgentsSettingsTabProps = {
   onDestinationChange?: (agent: AgentProvider, category: AgentCategory, options?: { replace?: boolean }) => void;
   /** Called when the «النماذج المحلية» grid card is selected; parent writes the URL. */
   onLocalModelsSelect?: (options?: { replace?: boolean }) => void;
+  /**
+   * T-1866: opens the owner-only «النظام» tab from HarnessVersionSection's
+   * pointer to where auto-update is now configured. Absent (e.g. no owner
+   * role) ⇒ the pointer renders as plain text instead of a link.
+   */
+  onOpenSystemTab?: () => void;
 };
 
 export type AgentCategoryTabsSectionProps = {
@@ -78,4 +84,6 @@ export type AgentCategoryContentSectionProps = {
   codexPermissionMode: CodexPermissionMode;
   onCodexPermissionModeChange: (value: CodexPermissionMode) => void;
   projects: SettingsProject[];
+  /** T-1866: see AgentsSettingsTabProps. */
+  onOpenSystemTab?: () => void;
 };

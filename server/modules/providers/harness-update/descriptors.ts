@@ -8,25 +8,35 @@
  *
  * ONE resolver per harness, used for spawn, version read AND update target
  * (never `command -v`): a divergence would let the indicator report a different
- * binary than the one that actually runs. The resolvers below reuse each
- * provider's own spawn resolver where one exists (kimi/cursor/qwen), and mirror
- * the documented resolution order otherwise (agy AGY_PATH, opencode OPENCODE_PATH
- * → ~/.opencode, …). All resolvers prefer a user-owned install and degrade to a
- * bare name only when no user copy exists.
+ * binary than the one that actually runs. Every `resolveBinary` delegates to the
+ * shared harness registry (server/shared/harness-binaries.ts, T-1873), the same
+ * resolver every launch site uses; the parity guard
+ * (server/shared/harness-binary-parity.guard.test.ts) fails on any divergence.
  */
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// eslint-disable-next-line boundaries/no-unknown -- provider launchers own the exact binary resolvers this descriptor must share.
-import { resolveCursorBinaryPath } from '@/cursor-cli.js';
-// eslint-disable-next-line boundaries/no-unknown -- provider launchers own the exact binary resolvers this descriptor must share.
-import { resolveKimiBinaryPath } from '@/kimi-agent-cli.js';
-// eslint-disable-next-line boundaries/no-unknown -- provider launchers own the exact binary resolvers this descriptor must share.
-import { resolveQwenBinaryPath } from '@/qwen-cli.js';
-import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
+import { PINNED_VENDOR_DIGESTS } from '@/services/isolation/vendor-binary-integrity.js';
+import {
+  resolveHarnessBinary,
+  tryResolveHarnessBinary,
+  type HarnessBinaryId,
+} from '@/shared/harness-binaries.js';
+
 import type { HarnessVersionState } from '../../../../shared/harness-update.contract.js';
+
+import type { BinaryLayoutSpec } from './snapshot/binary-snapshot.js';
+import type { BinaryLayout, LinkMode } from './snapshot/manifest.js';
+import { CODEX_STORE, OPENCODE_STORE, type StoreSpec } from './snapshot/store-backup.js';
+import {
+  claudeLayout,
+  codexLayout,
+  codexUpdateEnv,
+  cursorLayout,
+  singleFileLayout,
+} from './snapshot-layouts.js';
 
 export type HarnessInstallMethod =
   | 'native-self-update'
@@ -45,7 +55,7 @@ export interface HarnessUpdateArgv {
   /**
    * Extra env merged OVER `cleanSpawnEnv()` for this harness's update AND its
    * recovery run. Two uses today:
-   *   - `TMPDIR=/var/tmp` for the npm harnesses (kimi, qwen): npm stages the
+   *   - `TMPDIR=/var/tmp` for the npm harness (qwen): npm stages the
    *     tarball in TMPDIR, and the host's /tmp is tmpfs = RAM (the 2026-07 OOM
    *     incident). ADR-159 Addendum 3 makes /var/tmp binding for both.
    *   - `HERMES_HOME` for hermes: the updater rewrites the checkout, so it must
@@ -55,10 +65,65 @@ export interface HarnessUpdateArgv {
   env?: Record<string, string>;
 }
 
-/** Async latest-version probe spec. Only `npm` is cheap enough to run today. */
+/**
+ * Async latest-version probe spec. `npm` reads the registry `latest` dist-tag;
+ * `github-release` reads a FIXED GitHub `releases/latest` URL (code-owned, never
+ * a request field). Both were validated on-host (docs/ops/t1871-measurements.md
+ * §b/§c): the published numbering equals the native `--version` output.
+ */
 export type HarnessLatestProbe =
   | { kind: 'npm'; pkg: string }
+  | { kind: 'github-release'; url: string }
   | null;
+
+/**
+ * Compatibility data for the indicator (T-1871 / ADR-159 Addendum 4).
+ *   - `baseline`: the version installed when the baseline was recorded. It is
+ *     NOT a test result; the UI says "baseline as of <date>", never "tested".
+ *   - `alwaysEnforcedMode`: a mode that enforces the digest pin whatever
+ *     NASSAJ_VENDOR_BINARY_PIN says (opencode in GLM carrier mode, GL-6).
+ */
+export interface HarnessCompat {
+  baseline: { version: string; date: string } | null;
+  alwaysEnforcedMode: string | null;
+}
+
+/** Date the compat baselines below were measured (stage 1 of T-1871). */
+const BASELINE_DATE = '2026-09-27';
+
+function baselineOf(version: string): HarnessCompat {
+  return { baseline: { version, date: BASELINE_DATE }, alwaysEnforcedMode: null };
+}
+
+/** Fixed GitHub latest-release endpoint for opencode (repo moved sst → anomalyco). */
+export const OPENCODE_LATEST_RELEASE_URL =
+  'https://api.github.com/repos/anomalyco/opencode/releases/latest';
+
+/**
+ * How a harness install is snapshotted before an update (T-1871 stage 3,
+ * spec §1). `resolveLayout` derives the live paths from the resolved launcher.
+ */
+export interface HarnessSnapshotSpec {
+  layout: BinaryLayout;
+  linkMode: LinkMode;
+  /** SQLite stores backed up with the binary (none for most harnesses). */
+  stores: readonly StoreSpec[];
+  resolveLayout: (binaryPath: string) => BinaryLayoutSpec;
+}
+
+/** "Restore compatible version" source (opencode only: the pinned release asset). */
+export interface HarnessRestoreCompatibleSpec {
+  /** Version the action installs; always the digest pin, never changed here. */
+  version: string;
+}
+
+/** Facts the update dialog must state for this harness (qa condition 8). */
+export interface HarnessNotices {
+  /** The harness's own data is not backed up by the snapshot. */
+  dataNotBackedUp: boolean;
+  /** The CLI may replace itself outside Nassaj (auto-updater not proven off). */
+  selfUpdating: boolean;
+}
 
 export interface HarnessDescriptor {
   /** Canonical harness id (provider-registry id where one exists). */
@@ -70,6 +135,17 @@ export interface HarnessDescriptor {
   state: HarnessVersionState;
   /** Whether the update button is actionable at all. */
   updatable: boolean;
+  /**
+   * Only the owner's button may update this harness; the auto-update scheduler
+   * always skips it (T-1871: every snapshot-backed native harness).
+   */
+  manualOnly: boolean;
+  /** Snapshot/rollback spec; null = the legacy recovery path (npm, git). */
+  snapshot: HarnessSnapshotSpec | null;
+  /** "Restore compatible version" source, or null when not offered. */
+  restoreCompatible: HarnessRestoreCompatibleSpec | null;
+  /** Dialog facts; null when there is nothing extra to state. */
+  notices: HarnessNotices | null;
   /** Baseline machine reason (null when a plain updatable harness). */
   reason: string | null;
   /**
@@ -92,7 +168,7 @@ export interface HarnessDescriptor {
    *              short-circuits on `config.autoupdate===false || env.OPENCODE_
    *              DISABLE_AUTOUPDATE`. Asserted on the resolved env by
    *              `resolve-provider-env.opencode-autoupdate.test.js`.
-   * Unverified entries (qwen/kimi `NO_UPDATE_NOTIFIER`) stay DATA-only: an
+   * Unverified entries (qwen `NO_UPDATE_NOTIFIER`) stay DATA-only: an
    * unverified knob silently wired is a no-op that reads like a guarantee, and
    * the scheduler skips any harness whose knob is unverified.
    * `null` = no known knob (listed in AUTOUPDATER_DISABLE_NONE).
@@ -103,8 +179,12 @@ export interface HarnessDescriptor {
   npm?: { prefix: string; pkg: string };
   /** For git-shallow (hermes): the shallow git checkout the updater rewrites. */
   gitCheckoutDir?: string;
-  /** Resolves the final spawn/version/update binary. Never `command -v`. */
-  resolveBinary: (env?: NodeJS.ProcessEnv) => string;
+  /**
+   * Resolves the final spawn/version/update binary through the shared harness
+   * registry (no env parameter: a member env can never redirect it). Throws
+   * HarnessBinaryUnresolvedError when the CLI is not installed.
+   */
+  resolveBinary: () => string;
   /** Argv appended to the binary to read the installed version. */
   versionArgs: string[];
   /** Builds the exact fixed update argv, or null when not updatable. */
@@ -113,66 +193,44 @@ export interface HarnessDescriptor {
     context?: { gitCheckoutDir?: string },
   ) => HarnessUpdateArgv | null;
   latestProbe: HarnessLatestProbe;
+  /** Compatibility data; absent = no data (→ `untested`). */
+  compat?: HarnessCompat;
+  /**
+   * The CLI's own updater only STAGES the new exe in `<bin dir>/.staging` and
+   * swaps it in on the next run (kimi-code, native-staging.ts): the update
+   * forces that swap inside the lease, restores and launches clear any stage.
+   */
+  stagesNativeUpdate?: boolean;
 }
 
 const home = () => os.homedir();
 
-/** agy resolver — mirrors agy-cli.js:42 (AGY_PATH || ~/.local/bin/agy). */
-function resolveAgyBinary(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.AGY_PATH?.trim();
-  return override || path.join(home(), '.local', 'bin', 'agy');
-}
-
-/** opencode resolver — mirrors resolveOpenCodeBinaryPathRaw (no pin throw here). */
-function resolveOpenCodeBinary(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.OPENCODE_PATH?.trim();
-  if (override) return override;
-  const installed = path.join(home(), '.opencode', 'bin', 'opencode');
-  try {
-    if (fs.existsSync(installed)) return installed;
-  } catch {
-    /* fall through */
-  }
-  return 'opencode';
-}
-
-/** Claude resolver shared with every SDK launch (`CLAUDE_CLI_PATH`, PATH, then known installs). */
-function resolveClaudeBinary(env: NodeJS.ProcessEnv = process.env): string {
-  return resolveClaudeCodeExecutablePath(env.CLAUDE_CLI_PATH, { env });
-}
-
-/** codex resolver — CODEX_PATH override, else the user launcher, else bare. */
-function resolveCodexBinary(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.CODEX_PATH?.trim();
-  if (override) return override;
-  try {
-    const launcher = path.join(home(), '.local', 'bin', 'codex');
-    if (fs.existsSync(launcher)) return launcher;
-  } catch {
-    /* fall through */
-  }
-  return 'codex';
+/** The registry resolver for `id`, as a descriptor `resolveBinary`. */
+function fromRegistry(id: HarnessBinaryId): () => string {
+  return () => resolveHarnessBinary(id);
 }
 
 /**
- * hermes resolver — HERMES_PATH override, else the MEASURED launcher
- * `~/.local/bin/hermes` (a bash shim that execs `<checkout>/venv/bin/hermes`),
- * else bare. `~/.hermes/bin` holds uv/uvx/tirith only — never the CLI.
+ * `<resolved binary> <args>` for a native self-updating CLI; null (→ no update)
+ * when the registry cannot resolve the CLI.
  */
-function resolveHermesBinary(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.HERMES_PATH?.trim();
-  if (override) return override;
-  for (const candidate of [
-    path.join(home(), '.local', 'bin', 'hermes'),
-    path.join(home(), '.hermes', 'hermes-agent', 'venv', 'bin', 'hermes'),
-  ]) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch {
-      /* fall through */
-    }
+function nativeUpdateArgv(id: HarnessBinaryId, args: string[]): HarnessUpdateArgv | null {
+  const cmd = tryResolveHarnessBinary(id);
+  return cmd ? { cmd, args } : null;
+}
+
+/**
+ * `codex update` with the install targets derived from the launcher link; null
+ * (→ no update) when the launcher is not the measured standalone layout.
+ */
+function codexUpdateArgv(): HarnessUpdateArgv | null {
+  const cmd = tryResolveHarnessBinary('codex');
+  if (!cmd) return null;
+  try {
+    return { cmd, args: ['update'], env: codexUpdateEnv(cmd) };
+  } catch {
+    return null;
   }
-  return 'hermes';
 }
 
 /** hermes git checkout (measured: shallow clone at ~/.hermes/hermes-agent). */
@@ -218,9 +276,9 @@ export const NPM_UPDATE_TMPDIR = '/var/tmp';
  *   - cursor:       no auto-update env in --help.
  *   - hermes:       git-shallow (Addendum 3); no built-in updater knob, so the
  *                   scheduler skips it and the manual button owns its updates.
- *   - qwen/kimi:    npm-managed; NO_UPDATE_NOTIFIER is carried in the descriptor
+ *   - qwen:         npm-managed; NO_UPDATE_NOTIFIER is carried in the descriptor
  *                   but UNVERIFIED on-host, so it is not wired into the spawn env.
- * KNOB VERIFIED and WIRED (claude, opencode):
+ * KNOB VERIFIED and WIRED (claude, opencode, kimi):
  *   - claude:   DISABLE_AUTOUPDATER=1 — documented Anthropic knob, WIRED into the
  *               governed spawn env (resolve-provider-env.js) and asserted on the
  *               spawned env by claude-sdk.disable-autoupdater.test.ts.
@@ -229,20 +287,32 @@ export const NPM_UPDATE_TMPDIR = '/var/tmp';
  *               the auto-update check returns early on it. WIRED in
  *               resolve-provider-env.js, asserted by
  *               resolve-provider-env.opencode-autoupdate.test.js.
+ *   - kimi:     KIMI_CODE_NO_AUTO_UPDATE=1 — read by the native binary
+ *               (isAutoUpdateDisabledByEnv), WIRED in resolve-provider-env.js
+ *               for every kimi child incl. the terminal PTY (T-1873).
  * A harness with `autoUpdaterDisableVerified !== true` is SKIPPED by the
  * auto-update scheduler (its built-in updater could still race the server).
  */
 export const AUTOUPDATER_DISABLE_NONE = Object.freeze([
-  'codex', 'antigravity', 'cursor', 'hermes', 'qwen', 'kimi',
+  'codex', 'antigravity', 'cursor', 'hermes', 'qwen',
 ]);
 
 /**
- * npm install prefixes measured on-host (T-1749 D3):
- *   kimi  → ~/.local/share/kimi-code-vendor  (bin/kimi + node_modules/)
- *   qwen  → ~/.local                         (lib/node_modules + bin/qwen)
+ * qwen's npm install prefix (T-1873): a USER-LEVEL GLOBAL install into
+ * `~/.local` — `lib/node_modules/<pkg>` + `bin/qwen` — so the launcher the
+ * registry resolves (`~/.local/bin/qwen`) is exactly what the update and the
+ * recovery rewrite. (The update used to run WITHOUT `-g` and so wrote
+ * `~/.local/node_modules`, a tree `~/.local/bin/qwen` never ran.)
  */
-const KIMI_NPM_PREFIX = path.join(home(), '.local', 'share', 'kimi-code-vendor');
 const QWEN_NPM_PREFIX = path.join(home(), '.local');
+
+/**
+ * The one npm argv for an npm-prefix harness install (update AND recovery):
+ * a global install into `prefix`, so npm links `prefix/bin/<bin>`.
+ */
+export function npmPrefixInstallArgs(prefix: string, spec: string): string[] {
+  return ['install', '--global', '--prefix', prefix, spec];
+}
 
 /** The canonical descriptor table, keyed by canonical harness id. */
 export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescriptor>> = Object.freeze({
@@ -250,9 +320,10 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     id: 'claude',
     aliases: [],
     installMethod: 'native-self-update',
-    state: 'managed-external',
-    updatable: false,
-    reason: 'rollback-unavailable',
+    state: 'updatable',
+    updatable: true,
+    manualOnly: true,
+    reason: null,
     runProviders: ['claude'],
     pinKey: null,
     checksumSource: 'none',
@@ -261,70 +332,97 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     // claude-sdk.disable-autoupdater.test.ts asserts it on the spawned env.
     disableAutoUpdaterEnv: { DISABLE_AUTOUPDATER: '1' },
     autoUpdaterDisableVerified: true,
-    resolveBinary: resolveClaudeBinary,
+    resolveBinary: fromRegistry('claude'),
     versionArgs: ['--version'],
-    updateArgv: (env = process.env) => ({ cmd: resolveClaudeBinary(env), args: ['update'] }),
-    latestProbe: null,
+    updateArgv: () => nativeUpdateArgv('claude', ['update']),
+    // npm numbering equals the native version (measured). npm `latest` tracks the
+    // `next` channel, so a newer latest is "published", not "the updater will move".
+    latestProbe: { kind: 'npm', pkg: '@anthropic-ai/claude-code' },
+    compat: baselineOf('2.1.280'),
+    snapshot: { layout: 'versioned-file', linkMode: 'hardlink', stores: [], resolveLayout: claudeLayout },
+    restoreCompatible: null,
+    notices: null,
   },
   codex: {
     id: 'codex',
     aliases: [],
     installMethod: 'native-self-update',
-    state: 'managed-external',
-    updatable: false,
-    reason: 'rollback-unavailable',
+    state: 'updatable',
+    updatable: true,
+    manualOnly: true,
+    reason: null,
     runProviders: ['codex'],
     pinKey: null,
     checksumSource: 'none',
     disableAutoUpdaterEnv: null,
     autoUpdaterDisableVerified: false,
-    resolveBinary: resolveCodexBinary,
+    resolveBinary: fromRegistry('codex'),
     versionArgs: ['--version'],
-    updateArgv: (env = process.env) => ({ cmd: resolveCodexBinary(env), args: ['update'] }),
-    latestProbe: null,
+    // CODEX_HOME / CODEX_INSTALL_DIR are derived from the launcher link so the
+    // installer rewrites exactly the install Nassaj runs (measurements §a).
+    updateArgv: () => codexUpdateArgv(),
+    // npm `latest` carries the plain native number (platform builds are suffixed).
+    latestProbe: { kind: 'npm', pkg: '@openai/codex' },
+    compat: baselineOf('0.156.0'),
+    snapshot: { layout: 'versioned-dir', linkMode: 'hardlink', stores: [CODEX_STORE], resolveLayout: codexLayout },
+    restoreCompatible: null,
+    notices: null,
   },
   antigravity: {
     id: 'antigravity',
     aliases: ['agy'],
     installMethod: 'native-self-update',
-    state: 'managed-external',
-    updatable: false,
-    reason: 'rollback-unavailable',
+    state: 'updatable',
+    updatable: true,
+    manualOnly: true,
+    reason: null,
     // agy runs register under the `antigravity` run-registry provider id.
     runProviders: ['antigravity', 'agy'],
     pinKey: null,
     checksumSource: 'none',
     disableAutoUpdaterEnv: null,
     autoUpdaterDisableVerified: false,
-    resolveBinary: resolveAgyBinary,
+    resolveBinary: fromRegistry('antigravity'),
     versionArgs: ['--version'],
-    updateArgv: (env = process.env) => ({ cmd: resolveAgyBinary(env), args: ['update'] }),
+    updateArgv: () => nativeUpdateArgv('antigravity', ['update']),
     latestProbe: null,
+    compat: baselineOf('1.2.12'),
+    // agy data (~/.gemini/antigravity-cli) is out of scope, and its built-in
+    // updater is not proven off until the stage 7 off-switch run.
+    snapshot: { layout: 'single-file', linkMode: 'copy', stores: [], resolveLayout: singleFileLayout },
+    restoreCompatible: null,
+    notices: { dataNotBackedUp: true, selfUpdating: true },
   },
   cursor: {
     id: 'cursor',
     aliases: ['cursor-agent'],
     installMethod: 'native-self-update',
-    state: 'managed-external',
-    updatable: false,
-    reason: 'rollback-unavailable',
+    state: 'updatable',
+    updatable: true,
+    manualOnly: true,
+    reason: null,
     runProviders: ['cursor'],
     pinKey: null,
     checksumSource: 'none',
     disableAutoUpdaterEnv: null,
     autoUpdaterDisableVerified: false,
-    resolveBinary: (env) => resolveCursorBinaryPath(env),
+    resolveBinary: fromRegistry('cursor'),
     versionArgs: ['--version'],
-    updateArgv: (env) => ({ cmd: resolveCursorBinaryPath(env), args: ['update'] }),
+    updateArgv: () => nativeUpdateArgv('cursor', ['update']),
     latestProbe: null,
+    compat: baselineOf('2026.09.18-9a7762b'),
+    snapshot: { layout: 'versioned-dir', linkMode: 'hardlink', stores: [], resolveLayout: cursorLayout },
+    restoreCompatible: null,
+    notices: null,
   },
   opencode: {
     id: 'opencode',
     aliases: [],
     installMethod: 'native-self-update',
-    state: 'managed-external',
-    updatable: false,
-    reason: 'rollback-unavailable',
+    state: 'updatable',
+    updatable: true,
+    manualOnly: true,
+    reason: null,
     // opencode carries the GLM row: one opencode update moves both UI rows.
     runProviders: ['opencode', 'glm'],
     pinKey: 'opencode',
@@ -335,10 +433,16 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     // 'opencode') and asserted there by a test on the resolved env.
     disableAutoUpdaterEnv: { OPENCODE_DISABLE_AUTOUPDATE: '1' },
     autoUpdaterDisableVerified: true,
-    resolveBinary: resolveOpenCodeBinary,
+    resolveBinary: fromRegistry('opencode'),
     versionArgs: ['--version'],
-    updateArgv: (env = process.env) => ({ cmd: resolveOpenCodeBinary(env), args: ['upgrade'] }),
-    latestProbe: null,
+    updateArgv: () => nativeUpdateArgv('opencode', ['upgrade']),
+    latestProbe: { kind: 'github-release', url: OPENCODE_LATEST_RELEASE_URL },
+    // GL-6: the GLM carrier verifies the 1.17.18 digest with enforced:true, so
+    // any other version is refused in that mode even while the flag is off.
+    compat: { ...baselineOf('1.18.32'), alwaysEnforcedMode: 'glm-carrier' },
+    snapshot: { layout: 'single-file', linkMode: 'copy', stores: [OPENCODE_STORE], resolveLayout: singleFileLayout },
+    restoreCompatible: { version: PINNED_VENDOR_DIGESTS.opencode.version },
+    notices: null,
   },
   qwen: {
     id: 'qwen',
@@ -354,41 +458,61 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     disableAutoUpdaterEnv: { NO_UPDATE_NOTIFIER: '1' },
     autoUpdaterDisableVerified: false,
     npm: { prefix: QWEN_NPM_PREFIX, pkg: '@qwen-code/qwen-code' },
-    resolveBinary: (env) => resolveQwenBinaryPath(env),
+    resolveBinary: fromRegistry('qwen'),
     versionArgs: ['--version'],
     // Deterministic npm reinstall into the MEASURED user prefix. `qwen update`
     // exists ("check and install") but re-derives its own prefix; the fixed
     // reinstall is prefix-correct, non-interactive and recoverable (D3/item 3).
     updateArgv: () => ({
       cmd: 'npm',
-      args: ['install', '--prefix', QWEN_NPM_PREFIX, '@qwen-code/qwen-code@latest'],
+      args: npmPrefixInstallArgs(QWEN_NPM_PREFIX, '@qwen-code/qwen-code@latest'),
       // /tmp is tmpfs (RAM) on this host; npm stages tarballs in TMPDIR.
       env: { TMPDIR: NPM_UPDATE_TMPDIR },
     }),
     latestProbe: { kind: 'npm', pkg: '@qwen-code/qwen-code' },
+    compat: baselineOf('0.24.0'),
+    // Legacy exact-version recovery (npm reinstall / git reset); no snapshot yet.
+    manualOnly: false,
+    snapshot: null,
+    restoreCompatible: null,
+    notices: null,
   },
   kimi: {
     id: 'kimi',
     aliases: [],
-    installMethod: 'npm-prefix',
+    // Owner decision (ADR-189): the vendor's official native install script,
+    // one self-contained binary at ~/.kimi-code/bin/kimi (measured 2.1.1).
+    installMethod: 'native-self-update',
     state: 'updatable',
     updatable: true,
     reason: null,
     runProviders: ['kimi'],
     pinKey: 'kimi',
-    checksumSource: 'npm-registry',
-    disableAutoUpdaterEnv: { NO_UPDATE_NOTIFIER: '1' },
-    autoUpdaterDisableVerified: false,
-    npm: { prefix: KIMI_NPM_PREFIX, pkg: '@moonshot-ai/kimi-code' },
-    resolveBinary: (env) => resolveKimiBinaryPath(env),
+    checksumSource: 'none',
+    // KIMI_CODE_NO_AUTO_UPDATE — verified in the native binary's bundled source
+    // (isAutoUpdateDisabledByEnv: no check, no background install, no staged
+    // swap) and WIRED for every kimi child in resolve-provider-env.js.
+    disableAutoUpdaterEnv: { KIMI_CODE_NO_AUTO_UPDATE: '1' },
+    autoUpdaterDisableVerified: true,
+    resolveBinary: fromRegistry('kimi'),
     versionArgs: ['--version'],
-    updateArgv: () => ({
-      cmd: 'npm',
-      args: ['install', '--prefix', KIMI_NPM_PREFIX, '@moonshot-ai/kimi-code@latest'],
-      // /tmp is tmpfs (RAM) on this host; npm stages tarballs in TMPDIR.
-      env: { TMPDIR: NPM_UPDATE_TMPDIR },
-    }),
+    // `kimi update --yes` (measured `kimi upgrade|update [-y]`): a manual,
+    // non-interactive native self-update of this same binary (staged, below).
+    updateArgv: () => nativeUpdateArgv('kimi', ['update', '--yes']),
+    // Measured: `kimi update` downloads into ~/.kimi-code/bin/.staging and the
+    // swap runs on the NEXT kimi start (even with KIMI_CODE_NO_AUTO_UPDATE=1).
+    stagesNativeUpdate: true,
+    // npm `latest` carries the same numbering as the native release.
     latestProbe: { kind: 'npm', pkg: '@moonshot-ai/kimi-code' },
+    compat: baselineOf('2.1.1'),
+    // Button-only: the one installed copy moves only when the owner updates it.
+    manualOnly: true,
+    // One native file replaced in place, copied like agy/opencode.
+    snapshot: { layout: 'single-file', linkMode: 'copy', stores: [], resolveLayout: singleFileLayout },
+    restoreCompatible: null,
+    // kimi data (~/.kimi-code, per-user KIMI_CODE_HOME) is not snapshotted, and a
+    // kimi run outside Nassaj (a login shell) can still update itself.
+    notices: { dataNotBackedUp: true, selfUpdating: true },
   },
   hermes: {
     id: 'hermes',
@@ -408,7 +532,7 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     disableAutoUpdaterEnv: null,
     autoUpdaterDisableVerified: false,
     gitCheckoutDir: resolveHermesCheckoutDir(),
-    resolveBinary: resolveHermesBinary,
+    resolveBinary: fromRegistry('hermes'),
     versionArgs: ['--version'],
     updateArgv: (env = process.env, context = {}) => ({
       cmd: path.join(
@@ -422,6 +546,12 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
       env: { HERMES_HOME: resolveHermesHome(env) },
     }),
     latestProbe: null,
+    compat: baselineOf('0.21.4'),
+    // Legacy exact-version recovery (npm reinstall / git reset); no snapshot yet.
+    manualOnly: false,
+    snapshot: null,
+    restoreCompatible: null,
+    notices: null,
   },
   glm: {
     id: 'glm',
@@ -436,10 +566,14 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     checksumSource: 'none',
     disableAutoUpdaterEnv: null,
     autoUpdaterDisableVerified: false,
-    resolveBinary: () => 'opencode',
+    resolveBinary: () => '',
     versionArgs: ['--version'],
     updateArgv: () => null,
     latestProbe: null,
+    manualOnly: false,
+    snapshot: null,
+    restoreCompatible: null,
+    notices: null,
   },
   deepseek: {
     id: 'deepseek',
@@ -457,6 +591,10 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     versionArgs: ['--version'],
     updateArgv: () => null,
     latestProbe: null,
+    manualOnly: false,
+    snapshot: null,
+    restoreCompatible: null,
+    notices: null,
   },
 });
 
@@ -504,4 +642,25 @@ export function parseVersionOutput(raw: string | null | undefined): string | nul
   // Otherwise the first version-looking token (date-versions included).
   const token = text.match(/\d+\.\d+(?:\.\d+)?[\w.-]*/);
   return token ? token[0] : null;
+}
+
+/**
+ * True when `toVersion` is strictly newer than `fromVersion` (numeric dotted
+ * compare of the first version token). Unparseable → false (never "advanced").
+ */
+export function isVersionAdvance(fromVersion: string, toVersion: string): boolean {
+  const parse = (value: string): number[] | null => {
+    const match = value.match(/\d+(?:\.\d+)+/u);
+    return match ? match[0].split('.').map((part) => Number.parseInt(part, 10)) : null;
+  };
+  const from = parse(fromVersion);
+  const to = parse(toVersion);
+  if (!from || !to) return false;
+  for (let i = 0; i < Math.max(from.length, to.length); i += 1) {
+    const left = from[i] ?? 0;
+    const right = to[i] ?? 0;
+    if (right > left) return true;
+    if (right < left) return false;
+  }
+  return false;
 }

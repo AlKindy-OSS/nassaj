@@ -27,15 +27,21 @@ import {
   getAutoUpdateSettings,
   markSchedulerRun,
 } from './autoupdate-settings.js';
+import { pruneHarnessSnapshots } from './harness-retention.js';
+import { resolveSnapshotRuntime } from './snapshot-runtime.js';
 import { startHarnessUpdate, type UpdateServiceDeps } from './update.service.js';
+
+/** Snapshot retention runs at most once per this period, on a scheduler tick. */
+export const SNAPSHOT_PRUNE_PERIOD_MS = 24 * 60 * 60 * 1000;
 
 interface SchedulerState {
   timer: NodeJS.Timeout | null;
   ticking: boolean;
   intervalMinutes: number;
+  lastPruneAt: number | null;
 }
 
-const state: SchedulerState = { timer: null, ticking: false, intervalMinutes: DEFAULT_INTERVAL_MINUTES };
+const state: SchedulerState = { timer: null, ticking: false, intervalMinutes: DEFAULT_INTERVAL_MINUTES, lastPruneAt: null };
 
 export interface SchedulerDeps {
   now?: () => number;
@@ -48,6 +54,8 @@ export interface SchedulerDeps {
   getSettings?: () => { enabled: boolean; intervalMinutes: number };
   /** Injectable last-run stamp (defaults to the persisted store). */
   markRun?: (at: string) => void;
+  /** Injectable daily snapshot retention pass (defaults to the audited prune). */
+  prune?: () => void;
 }
 
 /**
@@ -73,6 +81,11 @@ export async function runAutoUpdateTick(deps: SchedulerDeps = {}): Promise<strin
     if (!descriptor.updatable || descriptor.state === 'managed-external' || descriptor.state === 'no-cli') {
       continue;
     }
+    // T-1871: snapshot-backed native harnesses update only from the owner's button.
+    if (descriptor.manualOnly) {
+      logSkip({ provider: descriptor.id, reason: 'manual-only' });
+      continue;
+    }
     // The field had NO reader before (a data-only flag that read like a gate).
     if (descriptor.autoUpdaterDisableVerified !== true) {
       logSkip({ provider: descriptor.id, reason: 'autoupdater-disable-unverified' });
@@ -94,11 +107,33 @@ function defaultLogSkip(entry: { provider: string; reason: string }): void {
   console.warn('[harness-autoupdate-skipped]', entry);
 }
 
+/**
+ * Daily snapshot retention (spec §11) on the scheduler's own tick, whether or
+ * not auto-update is enabled. Never throws.
+ */
+export function runDailySnapshotPrune(deps: SchedulerDeps = {}): boolean {
+  const now = (deps.now ?? Date.now)();
+  if (state.lastPruneAt !== null && now - state.lastPruneAt < SNAPSHOT_PRUNE_PERIOD_MS) return false;
+  state.lastPruneAt = now;
+  try {
+    (deps.prune ?? (() => pruneHarnessSnapshots(resolveSnapshotRuntime())))();
+  } catch {
+    /* retention retries on the next period, at preflight and at boot */
+  }
+  return true;
+}
+
+/** Test hook: forget when retention last ran. */
+export function _resetSchedulerPruneClock(): void {
+  state.lastPruneAt = null;
+}
+
 /** The guarded, non-overlapping tick used by the interval. */
 async function guardedTick(deps: SchedulerDeps): Promise<void> {
   if (state.ticking) return; // never overlap
   state.ticking = true;
   try {
+    runDailySnapshotPrune(deps);
     await runAutoUpdateTick(deps);
   } catch {
     /* runAutoUpdateTick already swallows per-harness errors */

@@ -12,13 +12,14 @@
 
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
-import os from 'os';
 import path from 'path';
 import { StringDecoder } from 'string_decoder';
 
 import { withRuntimeInstructions as withCoordinationDirective } from './services/runtime-instructions.js';
 
 import { finalAgyTranscriptMessage } from './modules/providers/list/antigravity/agy-transcript-identity.js';
+import { getAgyBrainDir } from './modules/providers/list/antigravity/agy-brain-dir.js';
+import { AGY_SPAWN_KEY_PATTERN } from './modules/providers/list/antigravity/agy-session-ids.js';
 import sessionManager from './sessionManager.js';
 import { messageAuthorsDb, participantsDb, providerRunFailuresDb, sessionsDb } from './modules/database/index.js';
 import { classifyAgyFailure, isQuotaFailure, parseQuotaResetMs } from './modules/providers/list/antigravity/agy-failure-reason.js';
@@ -31,14 +32,11 @@ import { beginProviderRun } from './services/provider-run-presence.js';
 import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { createTurnTimer, settleTurnTiming } from './modules/providers/services/turn-timing.service.js';
 import { createNormalizedMessage } from './shared/utils.js';
-import { resolveAgyExecutablePath } from './shared/cli-executable-path.js';
+import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
-import { credentialPrincipalId } from './services/isolation/credential-principal.js';
-import { userConfigDir } from './services/isolation/provision-user-dirs.js';
-import { isProviderIsolated } from './services/provider-sharing.js';
 import { SessionRegistry } from './session-registry.js';
 
 
@@ -101,21 +99,8 @@ function connectionIdFor(ws) {
     return raw.__agyConnectionId;
 }
 
-// Brain store location. When agy is isolated for this user (admin policy) the
-// spawn env sets HOME to the per-user root, so agy materializes its brain under
-// that user's ~/.gemini/antigravity-cli/brain. The filesystem-based brain
-// discovery and transcript-path logic must read from the SAME directory, so we
-// compute it from the per-user home whenever isolation is active. When agy is
-// shared (default / ADR-016) or there is no authenticated user, fall back to the
-// operator home — identical to the previous static BRAIN_DIR.
-function getBrainDir(userId = null) {
-    const shouldIsolate =
-        userId !== null && userId !== undefined && userId !== '' && isProviderIsolated('agy');
-    // T-1675: under a credential grant the brain lives in the OWNER's tree, the
-    // same root resolveProviderEnv sets HOME to for this user.
-    const homeRoot = shouldIsolate ? userConfigDir(credentialPrincipalId(userId, 'agy'), '') : os.homedir();
-    return path.join(homeRoot, '.gemini', 'antigravity-cli', 'brain');
-}
+// Brain store location for this run's user (see agy-brain-dir.js).
+const getBrainDir = getAgyBrainDir;
 
 // Project-level instructions filename, mirrored at both the project root and the
 // global config dir (~/.claude). agy has no native equivalent of CLAUDE.md, so we
@@ -244,7 +229,79 @@ function generateNassajSessionId() {
  * UUID needs no swap.
  */
 function isRuntimeSpawnKey(sessionId) {
-    return typeof sessionId === 'string' && /^agy_\d+_[a-z0-9]+$/.test(sessionId);
+    return typeof sessionId === 'string' && AGY_SPAWN_KEY_PATTERN.test(sessionId);
+}
+
+/**
+ * Asks the launch's isolation layer to accept `from` -> `to`. Synchronous by
+ * contract: the verdict must be known before the caller adopts and emits.
+ * A launch with no workspace binding has nothing to rebind, so it proceeds as
+ * before; a workspace-bound launch without an explicit acceptance fails closed.
+ * @returns {{accepted: boolean, reason: string}}
+ */
+function requestAgySessionHandover(ws, { from, to, spawnStartedAtMs, workspaceBound }) {
+    if (ws?.runFenceRevoked === true) return { accepted: false, reason: 'run_fence_revoked' };
+    if (!workspaceBound) return { accepted: true, reason: 'launch_not_workspace_bound' };
+    if (typeof ws?.requestSessionHandover !== 'function') {
+        return { accepted: false, reason: 'handover_unavailable' };
+    }
+    let verdict;
+    try {
+        verdict = ws.requestSessionHandover({ from, to, spawnStartedAtMs });
+    } catch (err) {
+        return { accepted: false, reason: `handover_error: ${err?.message || err}` };
+    }
+    if (verdict && typeof verdict === 'object' && verdict.accepted === true) {
+        return { accepted: true, reason: String(verdict.reason || 'accepted') };
+    }
+    return { accepted: false, reason: String(verdict?.reason || 'handover_rejected') };
+}
+
+/**
+ * Moves a finished run from its spawn key onto the brain UUID: ensure the
+ * destination row, get the handover accepted, adopt the stub, announce the id.
+ * qa M3: everything from the verdict to the emit is synchronous — no `await`
+ * may be inserted between adopt and the `session_created` send, or a reader
+ * could observe the stub gone while the client still addresses it.
+ */
+function handOverSpawnKey({ ws, from, to, spawnStartedAtMs, workspaceBound, cleanCwd, userId, safeSend }) {
+    try {
+        // The destination row must exist before the handover checks it and
+        // before the client is sent to it. The upsert preserves custom_name
+        // and the archived flag.
+        sessionsDb.createSession(
+            to, 'antigravity', cleanCwd, undefined, undefined, undefined,
+            buildTranscriptPath(to, userId),
+        );
+    } catch (err) {
+        console.error('[agy] failed to register handover target row:', err?.message || err);
+    }
+    const verdict = requestAgySessionHandover(ws, { from, to, spawnStartedAtMs, workspaceBound });
+    if (!verdict.accepted) {
+        console.warn(JSON.stringify({
+            event: 'agy_session_handover_rejected',
+            spawnKey: from,
+            brainUUID: to,
+            reason: verdict.reason,
+        }));
+        return false;
+    }
+    try {
+        sessionsDb.adoptRuntimeSessionId(from, to);
+    } catch (err) {
+        // The handover is committed; the swap below still gives the user a
+        // working conversation even if the stub cleanup is lost.
+        console.error('[agy] failed to adopt runtime session id:', err?.message || err);
+    }
+    // qa M5: parentSessionId lets the client migrate only the view that is
+    // actually on the spawn key (a user who switched chats is left alone).
+    safeSend({
+        kind: 'session_created',
+        newSessionId: to,
+        sessionId: to,
+        parentSessionId: from,
+    });
+    return true;
 }
 
 function buildTranscriptPath(brainUUID, userId = null) {
@@ -632,6 +689,9 @@ async function spawnAntigravity(command, options = {}, ws) {
     };
 
     // Snapshot brain UUIDs *before* spawn so we can detect the new one after close.
+    // The clock is read first: a brain born before it cannot belong to this run,
+    // which the session handover re-checks against the brain dir's birth time.
+    const spawnStartedAtMs = Date.now();
     const priorBrainIds = await listBrainIds(userId);
 
     // Resumed runs: agy's print mode REPLAYS the conversation's previous planner
@@ -886,7 +946,7 @@ async function spawnAntigravity(command, options = {}, ws) {
         const agyLaunch = resolveCagedLaunch({
             userId,
             provider: 'agy',
-            cmd: resolveAgyExecutablePath(),
+            cmd: resolveHarnessBinary('antigravity'),
             args,
             cwd: cleanCwd,
         });
@@ -1123,8 +1183,9 @@ async function spawnAntigravity(command, options = {}, ws) {
                 //
                 // Recorded under the BRAIN UUID, not finalSessionId: the spawn
                 // key `agy_<ts>_<rand>` is a transient handle whose stub row is
-                // never reconciled (see the session_created comment below), so a
-                // row filed under it would be looked up by nobody. The fallback
+                // adopted by the brain UUID once the handover below is accepted,
+                // so a row filed under it would normally be looked up by nobody
+                // (a refused handover is the rare exception). The fallback
                 // to finalSessionId covers the case where the run died before a
                 // brain existed — that row is orphaned, but the alternative is
                 // recording nothing at all for the earliest failures.
@@ -1186,48 +1247,28 @@ async function spawnAntigravity(command, options = {}, ws) {
             // `agy_<ts>_<rand>` is a SPAWN KEY (see generateNassajSessionId) — the
             // brain UUID is the conversation identity: it is what the synchronizer
             // indexes, what carries jsonl_path, and what resolveBrainUUIDFromDb
-            // resumes from. While the run is live, participants.recordSpawn creates
-            // a stub sessions row for the spawn key to satisfy its FK, and nothing
-            // ever reconciles it. The result is the reported symptom: the reply
-            // streams in fine, then the chat is empty on the next load, because
-            // fetchHistory reads jsonl_path and the stub has none — while the real
-            // conversation shows up beside it as a second, separate chat.
+            // resumes from. participants.recordSpawn created a stub sessions row
+            // for the spawn key; left alone, the chat is empty on the next load
+            // while the real conversation shows up beside it as a second chat.
             //
-            // Codex already solves this by announcing its real id via
-            // `session_created`; the client's handler is provider-agnostic and
-            // migrates the open view (messages + pending permissions) onto the new
-            // id. Sent AFTER `complete` on purpose: `complete` only clears the
-            // spinner when its sessionId is the one on screen, so swapping first
-            // would leave the view spinning.
+            // A workspace-bound launch (session isolation) also keyed its overlay
+            // alias and ledger row to the spawn key, so the swap must be DECLARED
+            // to the isolation layer and accepted before anything moves: the stub
+            // is adopted and the client is told only on acceptance. A rejected
+            // handover keeps the stub, which stays resumable under its spawn key.
+            // Sent AFTER `complete` on purpose: `complete` only clears the spinner
+            // when its sessionId is the one on screen.
             const boundBrainUUID = discoveryState.brainUUID || existingBrainUUID || null;
             if (boundBrainUUID && isRuntimeSpawnKey(finalSessionId)) {
-                try {
-                    // Make sure the destination exists before handing the client to
-                    // it. On a fresh run discovery already wrote it; on a RESUME of
-                    // a chat still addressed by an old spawn key it may only exist
-                    // once the synchronizer has scanned. Sending the client to a
-                    // row that is not there yet would show an empty chat — the very
-                    // symptom this fixes. The upsert preserves custom_name and the
-                    // archived flag.
-                    sessionsDb.createSession(
-                        boundBrainUUID,
-                        'antigravity',
-                        cleanCwd,
-                        undefined,
-                        undefined,
-                        undefined,
-                        buildTranscriptPath(boundBrainUUID, userId),
-                    );
-                    sessionsDb.adoptRuntimeSessionId(finalSessionId, boundBrainUUID);
-                } catch (err) {
-                    // Losing the stub cleanup must never break the turn; the swap
-                    // below still gives the user a working conversation.
-                    console.error('[agy] failed to adopt runtime session id:', err?.message || err);
-                }
-                safeSend({
-                    kind: 'session_created',
-                    newSessionId: boundBrainUUID,
-                    sessionId: boundBrainUUID,
+                handOverSpawnKey({
+                    ws,
+                    from: finalSessionId,
+                    to: boundBrainUUID,
+                    spawnStartedAtMs,
+                    workspaceBound: Boolean(opts.nassajWorkspaceIsolation),
+                    cleanCwd,
+                    userId,
+                    safeSend,
                 });
             }
 

@@ -60,6 +60,60 @@ test('materializes only verified agent entrypoints as regular 0444 files', () =>
   }
 });
 
+/** Builds a committed governance checkout plus an empty product tree under one temp root. */
+function fixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'link-content-'));
+  const core = path.join(root, 'core');
+  const home = path.join(root, 'home');
+  const product = path.join(root, 'product');
+  fs.mkdirSync(core);
+  fs.mkdirSync(home);
+  fs.mkdirSync(path.join(product, 'scripts'), { recursive: true });
+  fs.copyFileSync(SOURCE, path.join(product, 'scripts', 'link-content.sh'));
+  for (const name of ['AGENTS.md', 'GEMINI.md', 'NASSAJ.md']) fs.writeFileSync(path.join(core, name), `${name}\n`);
+  execFileSync('git', ['-C', core, 'init', '-q']);
+  execFileSync('git', ['-C', core, '-c', 'user.email=t@n.local', '-c', 'user.name=t', 'add', '.']);
+  execFileSync('git', ['-C', core, '-c', 'user.email=t@n.local', '-c', 'user.name=t', 'commit', '-qm', 'm']);
+  const run = (env = {}) => execFileSync('bash', [path.join(product, 'scripts', 'link-content.sh')], {
+    cwd: product, env: { ...process.env, NASSAJ_GOVERNANCE_DIR: '', HOME: home, ...env }, stdio: 'pipe',
+  });
+  return { root, core, home, product, run };
+}
+
+test('T-1880: separated layout finds the checkout through ~/.claude/NASSAJ.md', () => {
+  const { root, core, home, product, run } = fixture();
+  fs.mkdirSync(path.join(home, '.claude'));
+  fs.symlinkSync(path.join(core, 'NASSAJ.md'), path.join(home, '.claude', 'NASSAJ.md'));
+  run();
+  assert.equal(fs.readFileSync(path.join(product, 'AGENTS.md'), 'utf8'), 'AGENTS.md\n');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('T-1880: NASSAJ_GOVERNANCE_DIR wins and is strict', () => {
+  const { root, core, home, product, run } = fixture();
+  fs.mkdirSync(path.join(home, '.claude'));
+  run({ NASSAJ_GOVERNANCE_DIR: core });
+  assert.equal(fs.readFileSync(path.join(product, 'GEMINI.md'), 'utf8'), 'GEMINI.md\n');
+  assert.throws(() => run({ NASSAJ_GOVERNANCE_DIR: path.join(root, 'missing') }), /cannot locate/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('T-1880: a real ~/.claude without governance links is refused, never used as the repo', () => {
+  const { root, home, run } = fixture();
+  fs.mkdirSync(path.join(home, '.claude', '.git'), { recursive: true });
+  assert.throws(() => run(), /cannot locate/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('T-1880: ~/nassaj-core is the default when ~/.claude carries no NASSAJ.md', () => {
+  const { root, core, home, product, run } = fixture();
+  fs.renameSync(core, path.join(home, 'nassaj-core'));
+  fs.mkdirSync(path.join(home, '.claude'));
+  run();
+  assert.equal(fs.readFileSync(path.join(product, 'AGENTS.md'), 'utf8'), 'AGENTS.md\n');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('contains a manifest guard and no destructive content-link cleanup', () => {
   const source = fs.readFileSync(SOURCE, 'utf8');
   assert.doesNotMatch(source, /rm\s+-rf/);

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { realpath, stat } from 'node:fs/promises';
 
 import { operatorClaudeHome, resolveClaudeHomeForUser } from './claude-home.js';
+import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
 
 /**
  * Transcript-path resolution for Claude sessions, shared by every reader that
@@ -113,7 +114,9 @@ export async function resolveClaudeTranscriptPath(
 
   const stored = (row.jsonl_path ?? '').trim();
   if (stored) {
-    const resolved = await realFile(stored);
+    // T-1880: a pre-separation spelling falls back to `<root>/<same rel path>`.
+    const located = resolveStoredClaudeTranscript(stored);
+    const resolved = located ? await realFile(located) : null;
     if (resolved && path.basename(resolved) === fileName && isContained(resolved, roots)) {
       return resolved;
     }

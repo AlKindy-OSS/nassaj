@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-import { resolveAgyExecutablePath } from '@/shared/cli-executable-path.js';
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/types.js';
 import { ANTIGRAVITY_FALLBACK_MODELS } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
@@ -37,9 +37,6 @@ import { ANTIGRAVITY_FALLBACK_MODELS } from '@/modules/providers/list/antigravit
  * binary cannot be run) does not diverge from the live label set.
  */
 
-/** Resolve the agy binary the same way agy-cli.js does. */
-const getAgyPath = resolveAgyExecutablePath;
-
 /** Hard cap on the subprocess so a hung binary never stalls a model lookup. */
 const AGY_MODELS_TIMEOUT_MS = 6_000;
 
@@ -59,7 +56,7 @@ const defaultRunner: AgyModelsRunner = () =>
     let child;
     try {
       releaseLaunch = beginHarnessLaunch('antigravity');
-      child = spawn(getAgyPath(), ['models'], {
+      child = spawn(resolveHarnessBinary('antigravity'), ['models'], {
         // stdin MUST be 'ignore' (/dev/null), NEVER a pipe. `agy models` blocks
         // reading stdin to EOF before printing anything, so an open stdin pipe
         // hangs it forever: measured 2.9s + exit 0 with 'ignore', vs no output

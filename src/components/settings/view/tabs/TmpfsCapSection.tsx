@@ -11,7 +11,7 @@
  * فعلاً 2.7GB خمساً وأربعين ساعة في 29–31 يوليو 2026.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, Copy, Loader2, MemoryStick } from 'lucide-react';
 
@@ -64,6 +64,31 @@ const formatMb = (mb: number | null): string => {
   if (mb === null || !Number.isFinite(mb)) return '—';
   return mb < 1024 ? `${Math.round(mb)}MB` : `${(mb / 1024).toFixed(1)}GB`;
 };
+
+/**
+ * T-1868/B-1342-follow-up: العنوان والوصف كانا يضعان `/tmp` نصّاً حرفياً
+ * وسط جملة عربية — فتنعكس قراءته (يقرأ `pmt/` من اليسار) لأن السياق ثنائي
+ * الاتجاه بلا تمييز، وكان التعويض المؤقّت علامة RLM مضمَّنة في الترجمة
+ * نفسها. الحلّ البنيوي: `{{path}}` توكن في الترجمة، ويُعزَل هنا فعلاً
+ * بـ`<bdi dir="ltr">` بدل علامة اتجاه خفيّة لا تصمد أمام كل سياق.
+ *
+ * qa round: سبع لغاتٍ (‏de/it/ja/ko/ru/tr/zh-CN) كانت تحمل النصّ الإنجليزي
+ * القديم بلا التوكن — فيُعرَض المسار مرّتين: مرّةً حرفياً من الترجمة، ومرّةً
+ * من هذه الدالّة التي كانت تُلحق `<bdi>` دائماً بصرف النظر عن وجود التوكن.
+ * أُصلحت السبع لتحمل `{{path}}` (T-1868)، وهذه الدالّة صارت متسامحةً بذاتها:
+ * توكنٌ غائبٌ = النصّ كما هو بلا `<bdi>` زائدة، وتوكنّاتٌ متعدّدة = عزلٌ لكل
+ * موضع منها — فلا تتكرّر الثغرة مع لغةٍ تُضاف لاحقاً بلا التوكن.
+ */
+const PATH_TOKEN = '\u0000';
+function withBidiIsolatedPath(template: string, path: string): ReactNode {
+  const segments = template.split(PATH_TOKEN);
+  if (segments.length === 1) return segments[0];
+  return segments.reduce<ReactNode[]>((nodes, segment, index) => {
+    nodes.push(<span key={`text-${index}`}>{segment}</span>);
+    if (index < segments.length - 1) nodes.push(<bdi key={`path-${index}`} dir="ltr">{path}</bdi>);
+    return nodes;
+  }, []);
+}
 
 export default function TmpfsCapSection() {
   const { t } = useTranslation('settings');
@@ -139,8 +164,12 @@ export default function TmpfsCapSection() {
     <SettingsSection
       boxed
       icon={MemoryStick}
-      title={t('tmpfsCap.title')}
-      description={t('tmpfsCap.description')}
+      title={withBidiIsolatedPath(t('tmpfsCap.title', {
+        path: PATH_TOKEN, defaultValue: 'Shared memory cap ({{path}})',
+      }) as string, '/tmp')}
+      description={withBidiIsolatedPath(t('tmpfsCap.description', {
+        path: PATH_TOKEN, defaultValue: '{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.',
+      }) as string, '/tmp')}
     >
       {loading ? (
         /* نمط التحميل الموحَّد: كان أيقونةً دوّارة عارية بلا نصّ — دوّارٌ بلا

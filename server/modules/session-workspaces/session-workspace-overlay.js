@@ -401,6 +401,91 @@ export function bindSessionWorkspace({ projectPath, launchKey, sessionId, princi
   });
 }
 
+function assertAliasAbsent(file) {
+  try {
+    fs.lstatSync(file);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw new Error('handover target alias state is unreadable');
+  }
+  throw new Error('handover target is already bound to a workspace');
+}
+
+/**
+ * Moves an overlay's session binding from a provider's transient launch id to
+ * its durable id (declared handover). Additive first (qa M2), all under the
+ * state lock:
+ *   1. write the `to` alias, then the manifest keyed to `to`;
+ *   2. `commitLedger()` — the caller's DB transaction (checks + rekey); it
+ *      throws to refuse;
+ *   3. only then remove the `from` alias.
+ * A failure before step 3 restores the manifest and removes the `to` alias
+ * (and rethrows). A crash that skips the restore leaves the `from` alias
+ * pointing at a manifest keyed to `to`, which strict resume rejects — fail
+ * closed, never two live aliases without a ledger row. A failure of step 3
+ * alone is logged: the leftover `from` alias is inert for the same reason.
+ * `onStep` is a fault-injection seam for tests.
+ * @param {{projectPath: string, launchKey: string, fromSessionId: string, toSessionId: string,
+ *   principalId?: string|number|null, commitLedger: () => void,
+ *   onStep?: (step: 'workspace_written'|'ledger_committed') => void}} input
+ */
+export function rebindSessionWorkspace({
+  projectPath, launchKey, fromSessionId, toSessionId, principalId = null, commitLedger, onStep,
+}) {
+  for (const id of [fromSessionId, toSessionId]) {
+    if (typeof id !== 'string' || !id.trim() || id.length > 512) {
+      throw new Error('a bounded session id is required');
+    }
+  }
+  if (fromSessionId === toSessionId) throw new Error('handover requires two distinct ids');
+  if (typeof commitLedger !== 'function') throw new Error('handover requires a ledger commit');
+  const repository = resolveRepository(projectPath);
+  const root = stateRoot(repository);
+  const ownerPrincipalId = normalizePrincipalId(principalId);
+  return withStateLock(root, () => {
+    const launch = readAliasedManifest(root, 'launch', launchKey);
+    const manifest = readStrictSessionManifest(root, fromSessionId, repository, ownerPrincipalId);
+    if (!manifest || !launch || launch.overlayId !== manifest.overlayId) {
+      throw new Error('handover source is not this launch overlay');
+    }
+    const toAlias = aliasFile(root, 'session', toSessionId);
+    assertAliasAbsent(toAlias);
+    const manifestPath = manifestFile(root, manifest.overlayId);
+    const rebound = { ...manifest, sessionId: toSessionId, lastUsedAt: new Date().toISOString() };
+    let ledgerCommitted = false;
+    try {
+      atomicJson(toAlias, { schema: OVERLAY_SCHEMA, overlayId: manifest.overlayId });
+      atomicJson(manifestPath, rebound);
+      onStep?.('workspace_written');
+      commitLedger();
+      ledgerCommitted = true;
+      onStep?.('ledger_committed');
+    } catch (error) {
+      if (!ledgerCommitted) {
+        try {
+          atomicJson(manifestPath, manifest);
+          fs.rmSync(toAlias, { force: true });
+        } catch (revertError) {
+          console.error('session overlay handover revert failed; resume stays fail-closed', {
+            overlayId: manifest.overlayId,
+            error: revertError instanceof Error ? revertError.message : String(revertError),
+          });
+        }
+      }
+      throw error;
+    }
+    try {
+      fs.rmSync(aliasFile(root, 'session', fromSessionId), { force: true });
+    } catch (error) {
+      console.error('session overlay handover left an inert source alias', {
+        overlayId: manifest.overlayId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return publicBinding(rebound);
+  });
+}
+
 /**
  * Resolves a launch cwd. Unknown resumed sessions are deliberately quarantined
  * on the legacy shared cwd; they are never silently migrated mid-conversation.

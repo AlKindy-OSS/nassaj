@@ -396,3 +396,46 @@ test('enforce authorizes a measured Codex candidate and exposes the sealed effec
     database.close();
   }
 });
+
+test('T-1872: one acquired launch identity flows to the candidate and the execution handle', () => {
+  const database = setup();
+  try {
+    const identity = Object.freeze({ executablePath: '/machine/releases/0.156.0/bin/codex' });
+    let acquisitions = 0;
+    const seen: unknown[] = [];
+    let sequence = 0;
+    const build = (acquire: () => Readonly<Record<string, unknown>> | null) => createExecutionPermissionGateway({
+      database, authority: authority(1), reference: CLAUDE_REFERENCE_VECTOR_V1,
+      candidateFor: (_context, launchIdentity) => { seen.push(launchIdentity); return null; },
+      acquireLaunchIdentity: acquire,
+      capabilityArtifactDigest: PERMISSION_CAPABILITY_ARTIFACT_DIGEST, releaseBuild: TEST_RELEASE_BUILD,
+      manifestDigest: null,
+      processIdentity: { ownerId: 'process:1', ownerPid: 10, ownerBootId: 'boot', ownerStartTicks: '100' },
+      randomId: () => `identity-${++sequence}`, nowMs: () => 100, isDevicePrincipalCurrent: () => true,
+    });
+    const result = build(() => { acquisitions += 1; return identity; })
+      .authorize(actor, { ...context, launchId: 'identity-launch' }, 'full_delegation');
+    assert.equal(result.kind, 'authorized');
+    if (result.kind !== 'authorized') return;
+    assert.equal(acquisitions, 1);
+    assert.equal(seen[0], identity);
+    assert.equal(result.execution.launchIdentity, identity);
+    assert.equal(result.execution.launchIdentityError, null);
+    // An unresolvable harness yields no identity (and so no candidate), never a throw;
+    // the cause rides on the handle (qa M1) so the launch refuses instead of re-acquiring.
+    const cause = Object.assign(new Error('CODEX_MACHINE_CLI_MISSING'), { code: 'CODEX_MACHINE_CLI_MISSING' });
+    const missing = build(() => { throw cause; })
+      .authorize(actor, { ...context, launchId: 'missing-launch' }, 'full_delegation');
+    assert.equal(missing.kind, 'authorized');
+    if (missing.kind === 'authorized') {
+      assert.equal(missing.execution.launchIdentity, null);
+      assert.equal(missing.execution.launchIdentityError, cause);
+    }
+    assert.equal(seen[1], null);
+    const opaque = build(() => { throw 'not an error'; })
+      .authorize(actor, { ...context, launchId: 'opaque-launch' }, 'full_delegation');
+    if (opaque.kind === 'authorized') assert.match(String(opaque.execution.launchIdentityError), /not an error/u);
+  } finally {
+    database.close();
+  }
+});

@@ -3,15 +3,28 @@ import { api } from '../../../utils/api';
 import type { Project } from '../../../types/app';
 import type { FileTreeNode } from '../types/types';
 
+export type FileTreeDataError = 'tooLarge' | 'loadFailed' | null;
+
+type FileTreeErrorResponseBody = {
+  error?: string;
+  code?: string;
+  limit?: number;
+};
+
 type UseFileTreeDataResult = {
   files: FileTreeNode[];
   loading: boolean;
+  error: FileTreeDataError;
+  /** Only set when `error === 'tooLarge'`: the server's max entry count. */
+  limit: number | null;
   refreshFiles: () => void;
 };
 
 export function useFileTreeData(selectedProject: Project | null): UseFileTreeDataResult {
   const [files, setFiles] = useState<FileTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<FileTreeDataError>(null);
+  const [limit, setLimit] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -27,6 +40,8 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
     if (!projectId) {
       setFiles([]);
       setLoading(false);
+      setError(null);
+      setLimit(null);
       return;
     }
 
@@ -42,15 +57,28 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
     const fetchFiles = async () => {
       if (isActive) {
         setLoading(true);
+        setError(null);
+        setLimit(null);
       }
       try {
         const response = await api.getFiles(projectId, { signal: abortControllerRef.current!.signal });
 
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error('File fetch failed:', response.status, errorText);
+          let body: FileTreeErrorResponseBody = {};
+          try {
+            body = (await response.json()) as FileTreeErrorResponseBody;
+          } catch {
+            // Non-JSON error body; fall through to the generic failure state.
+          }
+          console.error('File fetch failed:', response.status, body.error || response.statusText);
           if (isActive) {
             setFiles([]);
+            if (response.status === 413 && body.code === 'FILE_TREE_TOO_LARGE') {
+              setError('tooLarge');
+              setLimit(typeof body.limit === 'number' ? body.limit : null);
+            } else {
+              setError('loadFailed');
+            }
           }
           return;
         }
@@ -59,14 +87,15 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
         if (isActive) {
           setFiles(data);
         }
-      } catch (error) {
-        if ((error as { name?: string }).name === 'AbortError') {
+      } catch (error_) {
+        if ((error_ as { name?: string }).name === 'AbortError') {
           return;
         }
 
-        console.error('Error fetching files:', error);
+        console.error('Error fetching files:', error_);
         if (isActive) {
           setFiles([]);
+          setError('loadFailed');
         }
       } finally {
         if (isActive) {
@@ -86,6 +115,8 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
   return {
     files,
     loading,
+    error,
+    limit,
     refreshFiles,
   };
 }

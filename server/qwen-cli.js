@@ -34,15 +34,10 @@ import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/prov
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { createNormalizedMessage, stampCoordinatorId } from './shared/utils.js';
-import { resolveCliExecutablePath } from './shared/cli-executable-path.js';
+import { resolveHarnessBinary } from './shared/harness-binaries.js';
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 const activeQwenProcesses = new Map();
-
-/** Resolves the same qwen executable used by spawn and update probes. */
-export function resolveQwenBinaryPath(env = process.env) {
-  return resolveCliExecutablePath('qwen', { override: env.QWEN_PATH, env });
-}
 
 const DEFAULT_RUN_TIMEOUT_MS = 15 * 60 * 1000;
 const MIN_RUN_TIMEOUT_MS = 10 * 1000;
@@ -325,7 +320,7 @@ async function spawnQwen(command, options = {}, ws) {
     baseEnv,
   });
 
-  const binary = resolveQwenBinaryPath();
+  const binary = resolveHarnessBinary('qwen');
   const launch = resolveCagedLaunch({
     userId: actorUserId,
     provider: 'qwen',

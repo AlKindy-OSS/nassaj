@@ -17,7 +17,13 @@ import type { ProviderAuthStatus } from '../../provider-auth/types';
 // 'local-models' was a standalone sidebar tab; removed as a top-level tab and
 // merged into the Agents tab as a grid card. Deep links (?settings=local-models)
 // are redirected to ?settings=agents&settingsLocalModels=true by settingsUrl.ts.
-export type SettingsMainTab = 'profile' | 'agents' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'command-board' | 'about';
+// 'system' (T-1866, owner-approved IA option B): split out of `command-board`,
+// which used to also carry TmpfsCapSection/StoragePolicySection/
+// PermissionFencesSection and HarnessAutoUpdateSection (duplicated on every
+// agent page) — none of those are command-board concerns (role access, the
+// raw-exec layer, safe/custom commands). `command-board` keeps only those;
+// `system` groups Updates/Storage/Permissions, owner-only like command-board.
+export type SettingsMainTab = 'profile' | 'agents' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'command-board' | 'system' | 'about';
 export type AgentProvider = LLMProvider;
 // `engines` (ADR-073) is a category of a BODY, not a peer tab: an agent's engines
 // belong to the agent the way its permissions do. It replaced the top-level

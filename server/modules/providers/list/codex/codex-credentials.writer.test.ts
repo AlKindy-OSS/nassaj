@@ -15,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 
+import { createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
+
 import { principal } from '../../tests/codex-credential-principal.fixture.js';
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cred-writer-'));
@@ -22,7 +24,9 @@ const ORIGINAL_CODEX_HOME = process.env.CODEX_HOME;
 process.env.CODEX_HOME = sandbox;
 
 const { CodexCredentialsWriter } = await import('./codex-credentials.writer.js');
-const { resolveCliExecutablePath } = await import('@/shared/cli-executable-path.js');
+// T-1872: `codex login` runs the machine release (a fixture here), never PATH.
+const codexMachine = createCodexMachineFixture(path.join(sandbox, 'codex-machine'));
+process.env.CODEX_PATH = codexMachine.launcher;
 
 const authPath = path.join(sandbox, 'auth.json');
 const KEY = 'sk-codex-secret-DO-NOT-LEAK';
@@ -80,7 +84,7 @@ test('setApiKey passes the key on STDIN and NEVER in argv', async () => {
 
   assert.equal(calls.length, 1, 'the login CLI was spawned exactly once');
   const call = calls[0];
-  assert.equal(call.cmd, resolveCliExecutablePath('codex'));
+  assert.equal(call.cmd, path.join(fs.realpathSync(codexMachine.release), 'bin', 'codex'));
   assert.ok(path.isAbsolute(call.cmd), 'the login executable must have an explicit resolved path');
   assert.deepEqual(call.args, ['login', '--with-api-key'], 'fixed, secret-free argv');
   // The key must appear NOWHERE in argv (the /proc/<pid>/cmdline leak).

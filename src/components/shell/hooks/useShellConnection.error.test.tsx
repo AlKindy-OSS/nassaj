@@ -310,8 +310,10 @@ describe('useShellConnection — عمر اللافتة', () => {
     expect(result.errorFeed.at(-1)).toBeNull();
   });
 
+  // 4403 (role) and 4404 (project not visible) stay on the original
+  // "outright refusal" contract from 9359bccf6: the socket close is final,
+  // nothing clears, and the banner from the `error` frame stays on screen.
   it.each([
-    ['مصادقة', 4401],
     ['صلاحية', 4403],
     ['مشروع غير مرئي', 4404],
   ])(
@@ -339,6 +341,44 @@ describe('useShellConnection — عمر اللافتة', () => {
       }
     },
   );
+
+  // 4401 is special-cased separately (95acca416, "restore device account
+  // wallet frontend"): unlike a per-request auth refusal, this code now means
+  // the owner's whole identity was revoked (forced logout elsewhere / rotated
+  // credential). `isIdentityRevocationClose` intercepts it BEFORE the
+  // final-refusal check above and fences + wipes the pane through
+  // disconnectFromShell(), so — unlike 4403/4404 — the terminal DOES clear
+  // once. There is still no reconnect: `suppressAutoConnectRef` stays set
+  // until the identity barrier reports `phase: 'stable'` again, which this
+  // test never triggers.
+  //
+  // Before B-1344's fix, this cleared TWICE per close: accountIdentityBarrier's
+  // applySnapshot() dispatches `auth:identity-changing` on every non-stable
+  // phase (both 'changing' and 'committed'), so one revocation cycle fired the
+  // shell's listener twice. `identityDisconnectedRef` in useShellConnection.ts
+  // now dedupes that to a single disconnect+clear per revocation.
+  it('إغلاق مصادقة بعد إطار الخطأ: مسح واحد فقط (تفعيل حاجز الهوية) ولا إعادة اتصال', () => {
+    vi.useFakeTimers();
+    try {
+      const { result, socket } = mount();
+      const socketsBefore = FakeWebSocket.instances.length;
+
+      act(() => {
+        socket.emit({ type: 'error', message: 'Authentication required for terminal session' });
+        socket.onclose?.({ code: 4401 });
+      });
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      expect(FakeWebSocket.instances.length).toBe(socketsBefore);
+      expect(result.clears).toBe(1);
+      expect(result.isReconnecting).toBe(false);
+      expect(plainText(result.writes)).toContain('Authentication required for terminal session');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('إغلاق شاذّ بلا إطار خطأ سابق: يعيد الاتصال كما كان (لا انحدار)', () => {
     vi.useFakeTimers();

@@ -1,10 +1,18 @@
-import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 import { ensureCodexGovernance } from '@/modules/providers/index.js';
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import {
+  acquireCodexLaunchIdentity,
+  assertCodexIdentityUnchanged,
+  codexLaunchOptions,
+  CODEX_MACHINE_CLI_MISSING_MESSAGE,
+  isCodexMachineCliMissing,
+  resolveCodexMachineRuntime,
+} from '@/shared/codex-executable.js';
+import { assertCodexRuntimeCompatible, isCodexRuntimeIncompatible } from '@/shared/codex-runtime-compat.js';
 
 import {
   TurnAdapterError,
@@ -15,7 +23,6 @@ import {
   type TurnCaptureEvent,
 } from './types.js';
 
-const DEFAULT_CODEX_BINARY = 'codex';
 const INTERNAL_ROLE_CONTRACT = [
   'You are an internal capture-only role in the server Turn Supervisor.',
   'Do not use tools, shell commands, file operations, network tools, MCP, apps, skills, or native sub-agents.',
@@ -36,20 +43,30 @@ export const CODEX_CLI_CAPABILITIES: TurnAdapterCapabilities = Object.freeze({
 
 type SpawnResult = Readonly<{ code: number | null; stdout: string; stderr: string }>;
 
+type CodexLaunchIdentity = ReturnType<typeof acquireCodexLaunchIdentity>;
+
 export type CodexCliAdapterOptions = Readonly<{
-  binary?: string;
   cwd?: string;
   resolveEnv?: (userId: string | number) => NodeJS.ProcessEnv;
   governanceProbe?: (userId: string | number) => boolean;
-  executableProbe?: (binary: string) => Promise<boolean>;
+  executableProbe?: () => Promise<boolean>;
+  /** T-1872 seams: the machine Codex identity for one invocation and its pre-spawn re-check. */
+  acquireIdentity?: () => CodexLaunchIdentity;
+  assertUnchanged?: (identity: CodexLaunchIdentity) => void;
+  /** T-1872 part 2 seam: the cached runtime-compatibility verdict for that identity. */
+  assertCompatible?: (identity: CodexLaunchIdentity) => Promise<unknown>;
   spawnCapture?: (input: {
     binary: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal;
   }) => Promise<SpawnResult>;
 }>;
 
-async function executable(binary: string): Promise<boolean> {
+/**
+ * Available when the machine Codex release layout resolves. Deliberately cheap
+ * (qa M2): no tree hash and no process; invoke() seals and judges the release.
+ */
+async function machineCodexAvailable(): Promise<boolean> {
   try {
-    await access(binary);
+    resolveCodexMachineRuntime();
     return true;
   } catch {
     return false;
@@ -142,11 +159,13 @@ function parseCodexJsonl(stdout: string): { text: string; usage?: TurnCaptureEve
 
 /** Actual Codex CLI adapter: ephemeral JSONL, read-only sandbox, no native agents. */
 export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): TurnAdapterRegistration {
-  const binary = options.binary ?? DEFAULT_CODEX_BINARY;
+  const acquireIdentity = options.acquireIdentity ?? acquireCodexLaunchIdentity;
+  const assertUnchanged = options.assertUnchanged ?? assertCodexIdentityUnchanged;
+  const assertCompatible = options.assertCompatible ?? assertCodexRuntimeCompatible;
   const cwd = options.cwd ?? process.cwd();
   const resolveEnv = options.resolveEnv ?? ((userId) => resolveProviderEnv(userId, 'codex', process.env));
   const governanceProbe = options.governanceProbe ?? ((userId) => ensureCodexGovernance(userId).ok);
-  const executableProbe = options.executableProbe ?? executable;
+  const executableProbe = options.executableProbe ?? machineCodexAvailable;
   const run = options.spawnCapture ?? spawnCapture;
   const registration: TurnAdapterRegistration = {
     id: 'codex-cli-ephemeral',
@@ -157,7 +176,7 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
     async probe({ userId }: TurnAdapterProbeRequest): Promise<boolean> {
       // T-1749/ADR-159: a harness mid-update is unavailable, not merely busy.
       if (isSpawnBlockedForRunProvider('codex')) return false;
-      return governanceProbe(userId) && executableProbe(binary);
+      return governanceProbe(userId) && executableProbe();
     },
     async invoke(request): Promise<TurnAdapterResult> {
       if (request.provider !== 'codex') {
@@ -185,9 +204,22 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
         '--config', `developer_instructions=${JSON.stringify(hidden)}`,
         request.prompt,
       ] as const;
+      let identity: CodexLaunchIdentity;
+      try {
+        identity = acquireIdentity();
+        await assertCompatible(identity);
+      } catch (error) {
+        const message = isCodexRuntimeIncompatible(error) ? (error as Error).message
+          : isCodexMachineCliMissing(error) ? CODEX_MACHINE_CLI_MISSING_MESSAGE : 'The Codex installation is not usable';
+        throw new TurnAdapterError('provider_unavailable', message, { cause: error });
+      }
       let result: SpawnResult;
       try {
-        result = await run({ binary, args, cwd, env: resolveEnv(request.userId), signal: request.signal });
+        assertUnchanged(identity);
+        const launch = codexLaunchOptions(resolveEnv(request.userId), identity);
+        result = await run({
+          binary: launch.codexPathOverride, args, cwd, env: launch.env, signal: request.signal,
+        });
       } catch (error) {
         if (error instanceof TurnAdapterError) throw error;
         throw new TurnAdapterError('remote_error', 'Codex CLI could not be launched', { cause: error });

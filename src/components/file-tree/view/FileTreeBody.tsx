@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from 'react';
-import { Folder, Search } from 'lucide-react';
+import { AlertTriangle, Folder, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { FileTreeDataError } from '../hooks/useFileTreeData';
 import type { FileTreeNode, FileTreeViewMode } from '../types/types';
 import FileTreeEmptyState from './FileTreeEmptyState';
 import FileTreeList from './FileTreeList';
@@ -10,6 +11,10 @@ type FileTreeBodyProps = {
   filteredFiles: FileTreeNode[];
   searchQuery: string;
   viewMode: FileTreeViewMode;
+  /** Set when the file list failed to load; takes priority over the empty state. */
+  error?: FileTreeDataError;
+  /** Only meaningful when `error === 'tooLarge'`: the server's max entry count. */
+  limit?: number | null;
   expandedDirs: Set<string>;
   onItemClick: (item: FileTreeNode) => void;
   renderFileIcon: (filename: string) => ReactNode;
@@ -37,6 +42,8 @@ export default function FileTreeBody({
   filteredFiles,
   searchQuery,
   viewMode,
+  error = null,
+  limit = null,
   expandedDirs,
   onItemClick,
   renderFileIcon,
@@ -61,7 +68,23 @@ export default function FileTreeBody({
 
   return (
     <>
-      {files.length === 0 ? (
+      {error === 'tooLarge' ? (
+        <FileTreeEmptyState
+          icon={AlertTriangle}
+          title={
+            limit == null
+              ? t('fileTree.tooLargeNoLimit')
+              : t('fileTree.tooLarge', { limit })
+          }
+          description={t('fileTree.checkProjectPath')}
+        />
+      ) : error === 'loadFailed' ? (
+        <FileTreeEmptyState
+          icon={AlertTriangle}
+          title={t('fileTree.loadFailed')}
+          description={t('fileTree.checkProjectPath')}
+        />
+      ) : files.length === 0 ? (
         <FileTreeEmptyState
           icon={Folder}
           title={t('fileTree.noFilesFound')}

@@ -170,6 +170,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       isLocalCommand: msg.isLocalCommand,
       isLocalCommandStdout: msg.isLocalCommandStdout,
       isCompactSummary: msg.isCompactSummary,
+      isCompactionBoundary: msg.isCompactionBoundary,
       // Per-message coordinator attribution (server commit 9c61b60). Carried on
       // every converted row via the shared spread; only assistant rows ever
       // hold a value (user rows use `userId`), and MessageComponent resolves it

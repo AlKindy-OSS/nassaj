@@ -32,7 +32,7 @@ import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { createNormalizedMessage, stampCoordinatorId } from './shared/utils.js';
-import { resolveCliExecutablePath } from './shared/cli-executable-path.js';
+import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
@@ -467,7 +467,7 @@ async function spawnHermes(command, options = {}, ws) {
       const hermesLaunch = resolveCagedLaunch({
         userId: ws?.userId ?? null,
         provider: 'hermes',
-        cmd: resolveCliExecutablePath('hermes'),
+        cmd: resolveHarnessBinary('hermes'),
         args,
         cwd: workingDir,
       });

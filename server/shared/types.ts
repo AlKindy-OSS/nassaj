@@ -848,7 +848,10 @@ export type ClaudeUsageWindow = {
 
 /**
  * Extra (pay-as-you-go) usage block, present only for accounts that have it
- * enabled. Mirrors the Anthropic `extra_usage` object in normalized casing.
+ * enabled (upstream `is_enabled: true`). Mirrors the Anthropic `extra_usage`
+ * object in normalized casing. A disabled or absent block is `null` on the
+ * summary, so `enabled` is always `true` when this object exists; numeric
+ * fields are `null` when upstream omits them and are never zero-filled.
  *
  * `monthlyLimit` / `usedCredits` are in CENTS (minor currency units), exactly
  * as the upstream oauth/usage endpoint reports them (5127 = $51.27); the
@@ -1076,6 +1079,21 @@ export type ProviderQuotaWindow = {
 };
 
 /**
+ * A confirmed credit pool on the shared credit-display rule (every harness).
+ *
+ * Presence alone means the pool exists; the UI never has to guess:
+ *  - `unlimited: true`  → show "unlimited"; `balance` may be null (not reported).
+ *  - `unlimited: false` → `balance` is a finite number >= 0. `0` is a CONFIRMED
+ *    empty pool and may be shown as zero; a positive value is shown as is.
+ * `balance` has the provider's own unit; no currency is inferred.
+ * Older servers always sent a numeric `balance`; `null` only occurs with
+ * `unlimited: true`.
+ */
+export type ProviderExtraUsageCredits =
+  | { balance: number; unlimited: false }
+  | { balance: number | null; unlimited: true };
+
+/**
  * Response of `GET /api/providers/:provider/quota` — quota windows read from the
  * provider's OFFICIAL endpoint. `null`/404 means "we don't know", never "zero".
  *
@@ -1090,13 +1108,11 @@ export type ProviderQuotaWindows = {
   plan: string | null;
   windows: ProviderQuotaWindow[];
   /**
-   * Codex prepaid extra-usage credit information, when the provider explicitly
-   * reports it. `balance` has the provider's own unit; no currency is inferred.
+   * Prepaid extra-usage credit pool, present ONLY when the provider confirms the
+   * account really has one. Absent means "hide": no credits concept, provider
+   * without credit support, unknown, or fetch error. See `ProviderExtraUsageCredits`.
    */
-  extraUsageCredits?: {
-    balance: number;
-    unlimited: boolean;
-  };
+  extraUsageCredits?: ProviderExtraUsageCredits;
   /** ISO instant this was read from the provider (not from cache). */
   observedAt?: string;
   /** The endpoint it came from — provenance for auditing, shown in no UI. */

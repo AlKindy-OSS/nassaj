@@ -30,11 +30,21 @@ vi.mock('../../../auth/context/AuthContext', () => ({
 // qa-critic (T-1858، جولة 2): يتتبّع enabled لإثبات أن حصّة Claude معطَّلة على
 // جلسة Codex في السطحين معاً (كانت مُفعَّلة أيضاً لعرض هارنس Claude بجانب
 // رصيد Codex بشارة "+" غير موسومة — عطلٌ مُصلَح، والتطابق شرطُ هذا الملف A1).
+//
+// قابلٌ للتهيئة (‏claudeUsageMockResult) لتغطية شارة "+" الخاصة بكلود على جلسة
+// claude فعلية (المُصلَح في هذه الجولة): الافتراضي `idle` يحافظ على كل
+// الاختبارات الحالية (جلسة Codex لا تُفعِّل هذا الهوك إطلاقاً).
+type ClaudeUsageMockResult =
+  | { status: 'idle' | 'loading' }
+  | { status: 'error'; code: string | null }
+  | { status: 'success'; data: Record<string, unknown> };
+let claudeUsageMockResult: ClaudeUsageMockResult = { status: 'idle' };
 const claudeUsageEnabledCalls: boolean[] = [];
 vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
   useClaudeUsageShared: (enabled: boolean) => {
     claudeUsageEnabledCalls.push(enabled);
-    return { status: 'idle', refetch: () => {} };
+    if (!enabled) return { status: 'idle', refetch: () => {} };
+    return { ...claudeUsageMockResult, refetch: () => {} };
   },
 }));
 
@@ -79,6 +89,7 @@ type QuotaResult = {
   }>;
   plan: string | null;
   isAnthropic: boolean;
+  data?: { extraUsageCredits?: { balance: number | null; unlimited: boolean } };
   refetch: () => void;
 };
 
@@ -95,10 +106,17 @@ import HeaderUsageIndicator from '../../../main-content/view/subcomponents/Heade
 
 import { ClaudeUsageCollapsed } from './ClaudeUsageCollapsed';
 
-function renderBoth() {
-  const header = render(<HeaderUsageIndicator sessionProvider="codex" tabsMode="full" />);
-  const collapsed = render(<ClaudeUsageCollapsed sessionProvider="codex" />);
+function renderBoth(sessionProvider: string | null = 'codex') {
+  const header = render(<HeaderUsageIndicator sessionProvider={sessionProvider} tabsMode="full" />);
+  const collapsed = render(<ClaudeUsageCollapsed sessionProvider={sessionProvider} />);
   return { header: header.container, collapsed: collapsed.container };
+}
+
+/** span[aria-hidden] whose visible text is exactly the "+" mark, in a container. */
+function plusMarks(container: HTMLDocument | Element): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>('span[aria-hidden="true"]')).filter(
+    (el) => el.textContent?.trim() === '+',
+  );
 }
 
 afterEach(cleanup);
@@ -109,6 +127,7 @@ beforeEach(() => {
   setSelectedProvider('codex');
   cycleEnabledCalls.length = 0;
   claudeUsageEnabledCalls.length = 0;
+  claudeUsageMockResult = { status: 'idle' };
   _lastCollapsedCyclesSuccess = null;
   // الصف الافتراضي: codex بمرساة مُكتشَفة.
   cyclesRows = [
@@ -252,5 +271,101 @@ describe('ClaudeUsageCollapsed — تطابق حالة حصة Codex مع اله�
     renderBoth();
     expect(claudeUsageEnabledCalls.length).toBeGreaterThan(0);
     expect(claudeUsageEnabledCalls).not.toContain(true);
+  });
+});
+
+// ── رصيد هارنس Claude الإضافي — قاعدة العرض الواحدة على السطحين ─────────────
+//
+// جلسة claude فعلية (لا Codex): تُشغِّل مسار نوافذ كلود (useClaudeUsageShared)
+// لا مسار provider-windows، فـ`quotaResult` أعلاه لا يتدخّل هنا (‏activeModel
+// فارغ ⇒ claudeWindowsAllowed يحسمها بلا انتظار حكم الخادم).
+const CLAUDE_SUCCESS_DATA = {
+  plan: 'max',
+  session: { utilization: 4, resetsAt: '2026-08-04T00:00:00.000Z' },
+  weeklyAllModels: { utilization: 10, resetsAt: '2026-08-08T00:00:00.000Z' },
+  weeklySonnet: null,
+  weeklyOpus: null,
+  fetchedAt: '2026-08-01T00:00:00.000Z',
+  stale: false,
+};
+
+describe('رصيد هارنس Claude الإضافي — مكتوم عند الصفر، مخفيّ حين لا يُعرف', () => {
+  beforeEach(() => {
+    setSelectedProvider('claude');
+  });
+
+  it('لا رصيد إضافي (‏extraUsage: null) ⇒ إخفاء تام في السطحين — لا "+"', () => {
+    claudeUsageMockResult = {
+      status: 'success',
+      data: { ...CLAUDE_SUCCESS_DATA, extraUsage: null },
+    };
+
+    const { header, collapsed } = renderBoth('claude');
+
+    expect(header.textContent).not.toContain('+');
+    expect(collapsed.textContent).not.toContain('+');
+  });
+
+  it('نافد فعلاً بالمساواة (‏used === limit) ⇒ شارة صفر مكتومة في السطحين', () => {
+    claudeUsageMockResult = {
+      status: 'success',
+      data: {
+        ...CLAUDE_SUCCESS_DATA,
+        extraUsage: { enabled: true, usedCredits: 8_000, monthlyLimit: 8_000, utilization: 100, currency: 'USD' },
+      },
+    };
+
+    const { header, collapsed } = renderBoth('claude');
+
+    for (const container of [header, collapsed]) {
+      const plus = plusMarks(container);
+      expect(plus.length).toBe(1);
+      expect(plus[0].className).toContain('text-muted-foreground');
+      expect(plus[0].className).not.toContain('text-primary');
+    }
+    expect(header.textContent).toContain('$0.00');
+    expect(collapsed.textContent).toContain('$0.00');
+  });
+
+  it('تجاوز الحدّ (‏used > limit، بلا عملة معروفة) ⇒ صفر مكتوم أيضاً لا إخفاء', () => {
+    // الخادم يرسل utilization/currency كـnull على حساب مُفعَّل متجاوز الحدّ —
+    // القرار "0" لا يحتاج أياً منهما.
+    claudeUsageMockResult = {
+      status: 'success',
+      data: {
+        ...CLAUDE_SUCCESS_DATA,
+        extraUsage: { enabled: true, usedCredits: 9_000, monthlyLimit: 8_000, utilization: null, currency: null },
+      },
+    };
+
+    const { header, collapsed } = renderBoth('claude');
+
+    for (const container of [header, collapsed]) {
+      const plus = plusMarks(container);
+      expect(plus.length).toBe(1);
+      expect(plus[0].className).toContain('text-muted-foreground');
+      expect(plus[0].className).not.toContain('text-primary');
+      // لا عملة معروفة ⇒ "0" مجرَّدة لا مبلغاً مُختلَقاً.
+      const value = plus[0].nextElementSibling as HTMLElement | null;
+      expect(value?.textContent).toBe('0');
+    }
+  });
+
+  it('loading ⇒ صمت كامل في السطحين (لا شارة صفر مؤقّتة)', () => {
+    claudeUsageMockResult = { status: 'loading' };
+
+    const { header, collapsed } = renderBoth('claude');
+
+    expect(header.textContent).toBe('');
+    expect(collapsed.textContent).toBe('');
+  });
+
+  it('error ⇒ صمت كامل في السطحين (لا شارة صفر مؤقّتة)', () => {
+    claudeUsageMockResult = { status: 'error', code: null };
+
+    const { header, collapsed } = renderBoth('claude');
+
+    expect(header.textContent).toBe('');
+    expect(collapsed.textContent).toBe('');
   });
 });

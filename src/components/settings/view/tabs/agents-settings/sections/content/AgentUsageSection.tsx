@@ -18,10 +18,14 @@ import { useAuth } from '../../../../../../auth/context/AuthContext';
 import { useProviderQuota } from '../../../../../../quick-settings-panel/hooks/useProviderQuota';
 import {
   clampUtilization,
+  formatCreditBalance,
   formatCredits,
   hasDisplayableExtraUsageCredits,
 } from '../../../../../../quick-settings-panel/claudeUsageHelpers';
-import { resolveWindowLength } from '../../../../../../quick-settings-panel/providerQuotaHelpers';
+import {
+  resolveCreditDisplay,
+  resolveWindowLength,
+} from '../../../../../../quick-settings-panel/providerQuotaHelpers';
 import ClaudeUsageBar from '../../../../../../quick-settings-panel/view/ClaudeUsageBar';
 import SettingsSection from '../../../../SettingsSection';
 
@@ -41,22 +45,6 @@ type AgentUsageSectionProps = {
 };
 
 /**
- * يتحقق من عقد رصيد Codex قبل عرضه. الصفر رصيد صحيح، أمّا الرصيد السالب أو
- * الناقص فليس صفراً ويجب ألا يتحوّل إلى ادعاءٍ للمستخدم.
- */
-export function hasDisplayableCodexCredits(
-  credits: { balance: number; unlimited: boolean } | undefined,
-): boolean {
-  return Boolean(
-    credits &&
-      typeof credits.unlimited === 'boolean' &&
-      typeof credits.balance === 'number' &&
-      Number.isFinite(credits.balance) &&
-      credits.balance >= 0,
-  );
-}
-
-/**
  * يعرض نوافذ استخدام الهارنس المحدَّد.
  * يُدمج مباشرةً في تبويب الحساب (account) في AgentCategoryContentSection.
  */
@@ -70,11 +58,12 @@ export default function AgentUsageSection({ agent }: AgentUsageSectionProps) {
   /* كلا الـhook يُستدعيان غير مشروطَين — الـenabled يوقف الجلب فقط */
   const claudeUsage = useClaudeUsage(isClaudeAgent, user?.id);
   const providerQuota = useProviderQuota(agent, null, isQuotaProvider);
-  const codexCredits =
+  const codexCreditsRaw =
     agent === 'codex' && providerQuota.status === 'success'
       ? providerQuota.data.extraUsageCredits
       : undefined;
-  const hasCodexCredits = hasDisplayableCodexCredits(codexCredits);
+  const codexCreditDisplay = resolveCreditDisplay(codexCreditsRaw);
+  const hasCodexCredits = codexCreditDisplay.kind !== 'hidden';
   const hasProviderUsageData =
     providerQuota.status === 'success' && (providerQuota.windows.length > 0 || hasCodexCredits);
 
@@ -201,18 +190,19 @@ export default function AgentUsageSection({ agent }: AgentUsageSectionProps) {
                 );
               })}
 
-              {hasCodexCredits && codexCredits && (
+              {hasCodexCredits && (
                 <div className="space-y-1 border-t border-border pt-3">
                   <p className="text-sm font-medium text-foreground">
                     {t('agentUsage.codexExtraCredits')}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {codexCredits.unlimited
+                    {codexCreditDisplay.kind === 'unlimited'
                       ? t('agentUsage.unlimited')
                       : t('agentUsage.creditUnits', {
-                          formattedCount: new Intl.NumberFormat(i18n.language, {
-                            maximumFractionDigits: 2,
-                          }).format(codexCredits.balance),
+                          formattedCount: formatCreditBalance(
+                            codexCreditDisplay.kind === 'amount' ? codexCreditDisplay.value : 0,
+                            i18n.language,
+                          ),
                         })}
                   </p>
                 </div>

@@ -3,13 +3,8 @@ import type fs from 'node:fs';
 import test from 'node:test';
 
 import {
-  resolveRealClaudeBinary,
-  wellKnownClaudeInstallCandidates as linkPathCandidates,
-} from '@/services/isolation/managed-claude-terminal-env.js';
-import {
   isRunnableClaudeExecutable,
   resolveClaudeCodeExecutablePath,
-  wellKnownClaudeInstallCandidates,
   type ExecutableProbeDependencies,
   type ResolveClaudeCodeExecutablePathDependencies,
 } from '@/shared/claude-cli-path.js';
@@ -230,33 +225,6 @@ test('B-1091: win32 resolution is unchanged by the posix well-known fallback', (
   assert.equal(resolved, scriptPath);
 });
 
-test('B-1091 parity: detection and the login path resolve identically over one filesystem', () => {
-  // Not a deepEqual on a literal delegation: run BOTH resolvers against the same
-  // seam where ~/.local/bin/claude exists but is NOT executable and
-  // /usr/local/bin/claude is. A shared acceptance criterion must make both skip
-  // the first and pick the second.
-  const home = '/home/op';
-  const localBin = `${home}/.local/bin/claude`;
-  const systemBin = '/usr/local/bin/claude';
-  const seam = fsSeam({ notExecutable: [localBin], runnable: [systemBin] });
-
-  const detection = resolveClaudeCodeExecutablePath('claude', {
-    platform: 'linux',
-    env: { PATH: '/usr/bin:/bin' },
-    homedir: () => home,
-    ...seam,
-  });
-  const linkPath = resolveRealClaudeBinary(
-    { HOME: home, PATH: '/usr/bin:/bin' } as NodeJS.ProcessEnv,
-    'claude',
-    seam,
-  );
-
-  assert.equal(detection, systemBin);
-  assert.equal(linkPath, systemBin);
-  assert.equal(detection, linkPath);
-});
-
 test('B-1091 parity: the shared predicate rejects a non-file and a non-executable alike', () => {
   const seam = fsSeam({
     runnable: ['/bin/claude'],
@@ -267,11 +235,4 @@ test('B-1091 parity: the shared predicate rejects a non-file and a non-executabl
   assert.equal(isRunnableClaudeExecutable('/opt/claude', seam), false);
   assert.equal(isRunnableClaudeExecutable('/srv/claude', seam), false);
   assert.equal(isRunnableClaudeExecutable('/nope/claude', seam), false);
-});
-
-test('B-1091: detection and the login path share one candidate list', () => {
-  const detection = wellKnownClaudeInstallCandidates('/home/op', 'claude');
-  const linkList = linkPathCandidates({ HOME: '/home/op' } as NodeJS.ProcessEnv, 'claude');
-  assert.deepEqual(linkList, detection);
-  assert.ok(detection.includes('/home/op/.local/bin/claude'));
 });

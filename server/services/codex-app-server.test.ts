@@ -1,32 +1,39 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import test from 'node:test';
-import { execFileSync } from 'node:child_process';
+import test, { after } from 'node:test';
 
-import { resolveCodexRuntime } from '../shared/codex-executable.js';
+import { acquireCodexLaunchIdentity } from '../shared/codex-executable.js';
+import { acceptFixtureRuntimeCompat, createCodexMachineFixture, pointCurrent, writeCodexRelease } from '../shared/tests/codex-release-fixture.js';
 import { resolveInstalledCodexBuildFingerprint } from '../modules/execution-permissions/capability-registry.js';
 
+// T-1872: every App Server spawn runs the machine release, here a fixture.
+const machineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-machine-'));
+const machine = createCodexMachineFixture(machineRoot);
+await acceptFixtureRuntimeCompat();
+process.env.CODEX_PATH = machine.launcher;
+after(() => fs.rmSync(machineRoot, { recursive: true, force: true }));
+
 function assertPackagedSpawn(command: string, options: { env: NodeJS.ProcessEnv }) {
-  const runtime = resolveCodexRuntime();
-  assert.equal(command, runtime.executablePath, 'PATH must not choose the App Server executable');
-  assert.ok(command.startsWith('/'));
-  for (const directory of runtime.pathDirs) assert.ok(options.env.PATH?.startsWith(directory));
+  const identity = acquireCodexLaunchIdentity();
+  assert.equal(command, identity.executablePath, 'PATH must not choose the App Server executable');
+  assert.equal(command, path.join(fs.realpathSync(machine.release), 'bin', 'codex'));
+  for (const directory of identity.pathDirs) assert.ok(options.env.PATH?.startsWith(directory));
 }
 
-test('App Server binary is the native binary version measured by permission capability admission', () => {
-  const measured: string[] = [];
-  const fingerprint = resolveInstalledCodexBuildFingerprint(((file: string, args: string[], options: object) => {
-    measured.push(file);
-    assert.deepEqual(args, ['--version'], 'no provider turn may be used for identity verification');
-    return execFileSync(file, args, options);
-  }) as typeof execFileSync);
-  assert.deepEqual(measured, [resolveCodexRuntime().executablePath]);
-  assert.equal(fingerprint.cliFingerprint.replace('codex-cli@', ''),
-    fingerprint.sdkFingerprint.replace('openai-codex-sdk@', ''));
+test('App Server binary is the machine release measured by permission capability admission', () => {
+  const identity = acquireCodexLaunchIdentity();
+  const fingerprint = resolveInstalledCodexBuildFingerprint(identity);
+  assert.equal(fingerprint.cliFingerprint, `codex-cli@${identity.version}`);
+  assert.ok(!identity.executablePath.includes('node_modules'));
 });
 
 import {
+  assertCodexMessageForkRuntimeReady,
+  assertCodexMessageForkRuntimeUnchanged,
   CODEX_SIDE_QUERY_MAX_ANSWER_BYTES,
   callCodexAppServer,
   isCodexCompactionActive,
@@ -631,6 +638,8 @@ test('one user cannot keep more than two App Server compactions open', async () 
 
   nextSession = 'limit-a';
   const first = startCodexCompaction(nextSession, 55, options);
+  // The spawn follows an awaited runtime-compat verdict; let it happen before re-pointing.
+  await new Promise((resolve) => setImmediate(resolve));
   nextSession = 'limit-b';
   const second = startCodexCompaction(nextSession, 55, options);
   await new Promise((resolve) => setImmediate(resolve));
@@ -844,3 +853,95 @@ for (const mode of ['timeout', 'exit', 'error']) {
     assert.equal(isCodexCompactionActive(threadId, 93), false);
   });
 }
+
+test('T-1872: the native fork gate fails closed on a machine release without a reviewed fork test', () => {
+  // No version literal: an unreviewed release tree stays closed whatever its version says.
+  assert.throws(() => assertCodexMessageForkRuntimeReady(), (error: Error & { code?: string; reason?: string }) => (
+    error.message === 'runtime_not_ready' && error.code === 'CODEX_FORK_UNREVIEWED'
+    && /no reviewed real fork test/u.test(error.reason ?? '')));
+  const fake = { treeDigest: 'sha256:unreviewed', version: '0.153.2' };
+  assert.throws(() => assertCodexMessageForkRuntimeReady(() => fake as never), /runtime_not_ready/u);
+});
+
+test('T-1872: the fork pre-RPC re-check refuses a release that changed after the gate', () => {
+  const identity = acquireCodexLaunchIdentity();
+  assert.equal(assertCodexMessageForkRuntimeUnchanged(identity), identity);
+  fs.appendFileSync(path.join(machine.release, 'codex-package.json'), ' ');
+  try {
+    assert.throws(() => assertCodexMessageForkRuntimeUnchanged(identity), /CODEX_RUNTIME_CHANGED/u);
+  } finally {
+    const manifest = path.join(machine.release, 'codex-package.json');
+    fs.writeFileSync(manifest, fs.readFileSync(manifest, 'utf8').trimEnd());
+  }
+});
+
+/** A permit handle carrying `launchIdentity` (or only the gateway's acquisition error). */
+function permitWith(launchIdentity: unknown, trace: string[], launchIdentityError: Error | null = null) {
+  return {
+    launchIdentity, launchIdentityError,
+    consume: () => { trace.push('consume'); }, markStarted: () => { trace.push('started'); },
+    attachChildIdentity: () => {}, settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+    notStarted: () => { trace.push('not-started'); },
+  };
+}
+
+test('T-1872 M5: App Server rpc and compaction run the permit identity, never a fresh acquisition', async () => {
+  const admitted = acquireCodexLaunchIdentity();
+  // Re-point `current`: any re-acquisition would now resolve a different executable.
+  pointCurrent(machine.pkg, writeCodexRelease(machine.pkg, '0.157.0'));
+  const spawned: string[] = [];
+  const base = {
+    authorizeImpl: () => ({ project_path: process.cwd(), provider: 'codex' }), envResolver: () => process.env,
+  };
+  try {
+    assert.notEqual(acquireCodexLaunchIdentity().executablePath, admitted.executablePath);
+    const trace: string[] = [];
+    await callCodexAppServer('m5-rpc', 7, 'skills/list', {}, { ...base, permissionExecution: permitWith(admitted, trace),
+      spawnImpl: (command: string) => { spawned.push(command); return createRpcChild(() => ({ data: [] })); } });
+    assert.deepEqual(spawned, [admitted.executablePath]);
+    assert.deepEqual(trace, ['consume', 'started', 'settle:succeeded']);
+
+    const child = createRpcChild();
+    const compaction = startCodexCompaction('m5-compact', 7, { ...base, permissionExecution: permitWith(admitted, []),
+      spawnImpl: (command: string) => { spawned.push(command); return child; } });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    emitRpc(child, compactionItem('m5-compact'), compactionTerminal('m5-compact'));
+    await compaction;
+    assert.deepEqual(spawned, [admitted.executablePath, admitted.executablePath]);
+  } finally {
+    pointCurrent(machine.pkg, machine.release);
+  }
+});
+
+test('T-1872 M5: a release edited after admission refuses the App Server spawn', async () => {
+  const admitted = acquireCodexLaunchIdentity();
+  const manifest = path.join(machine.release, 'codex-package.json');
+  const original = fs.readFileSync(manifest);
+  let spawns = 0;
+  const trace: string[] = [];
+  fs.appendFileSync(manifest, ' ');
+  try {
+    await assert.rejects(callCodexAppServer('m5-changed', 7, 'skills/list', {}, {
+      authorizeImpl: () => ({ project_path: process.cwd(), provider: 'codex' }), envResolver: () => process.env,
+      permissionExecution: permitWith(admitted, trace),
+      spawnImpl: () => { spawns += 1; return createRpcChild(); },
+    }), /CODEX_RUNTIME_CHANGED/u);
+  } finally { fs.writeFileSync(manifest, original); }
+  assert.equal(spawns, 0);
+  assert.ok(!trace.includes('settle:succeeded'));
+});
+
+test('T-1872 M1: a permit without an identity refuses with its cause even when acquisition would succeed', async () => {
+  let spawns = 0;
+  const trace: string[] = [];
+  const cause = Object.assign(new Error('CODEX_MACHINE_CLI_MISSING'), { code: 'CODEX_MACHINE_CLI_MISSING' });
+  assert.ok(acquireCodexLaunchIdentity(), 'a fresh acquisition would succeed here');
+  await assert.rejects(callCodexAppServer('m1-missing', 7, 'skills/list', {}, {
+    authorizeImpl: () => ({ project_path: process.cwd(), provider: 'codex' }), envResolver: () => process.env,
+    permissionExecution: permitWith(null, trace, cause),
+    spawnImpl: () => { spawns += 1; return createRpcChild(); },
+  }), /Codex غير مثبّت على الجهاز/u);
+  assert.equal(spawns, 0);
+  assert.deepEqual(trace, ['not-started']);
+});

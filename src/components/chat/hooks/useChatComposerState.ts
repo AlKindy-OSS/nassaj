@@ -536,6 +536,8 @@ export function useChatComposerState({
               defaultValue: 'Context compaction started.',
             }),
             timestamp: Date.now(),
+            // T-1862: fresh progress scope — see field doc in types.ts.
+            isCompactionBoundary: true,
           });
           break;
         }
@@ -1358,6 +1360,8 @@ export function useChatComposerState({
         type: 'assistant',
         content: t('commands.compactStarted', { defaultValue: 'Context compaction started.' }),
         timestamp: Date.now(),
+        // T-1862: fresh progress scope — see field doc in types.ts.
+        isCompactionBoundary: true,
       });
       setIsLoading(true);
       setCanAbortSession(true);

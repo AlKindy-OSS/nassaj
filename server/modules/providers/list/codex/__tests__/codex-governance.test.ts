@@ -35,6 +35,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
+
 // --- Bootstrap: sandbox HOME + DB BEFORE importing any project module. ---
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'nassaj-codex-gov-guard-'));
 const ORIGINAL_HOME = process.env.HOME;
@@ -57,6 +59,10 @@ try {
 }
 
 process.env.HOME = sandboxHome;
+// T-1872: a machine Codex release fixture stands in for ~/.local/bin/codex.
+const codexMachine = createCodexMachineFixture(path.join(sandbox, 'codex-machine'));
+await acceptFixtureRuntimeCompat();
+process.env.CODEX_PATH = codexMachine.launcher;
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');

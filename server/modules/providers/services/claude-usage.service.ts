@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type {
   ClaudeExtraUsage,
   ClaudeUsageSummary,
@@ -464,7 +465,7 @@ class ClaudeUsageService {
 
   private async readCliVersion(): Promise<string> {
     try {
-      const { stdout } = await execFileAsync('claude', ['--version'], { timeout: 5000 });
+      const { stdout } = await execFileAsync(resolveHarnessBinary('claude'), ['--version'], { timeout: 5000 });
       const match = stdout.match(/(\d+\.\d+\.\d+)/);
       return match?.[1] ?? FALLBACK_CLI_VERSION;
     } catch {
@@ -491,7 +492,7 @@ class ClaudeUsageService {
       // seven_day/five_hour). The UI hides null windows; if Anthropic later
       // populates seven_day_opus, the row appears automatically.
       weeklyOpus: this.toWindow(raw.seven_day_opus),
-      extraUsage: this.toExtraUsage(raw.extra_usage),
+      extraUsage: normalizeClaudeExtraUsage(raw.extra_usage),
       fetchedAt: new Date().toISOString(),
       stale,
     };
@@ -506,20 +507,6 @@ class ClaudeUsageService {
     return {
       utilization,
       resetsAt: readOptionalString(record.resets_at) ?? null,
-    };
-  }
-
-  private toExtraUsage(value: unknown): ClaudeExtraUsage | null {
-    const record = readObjectRecord(value);
-    if (!record) {
-      return null;
-    }
-    return {
-      enabled: record.is_enabled === true,
-      monthlyLimit: typeof record.monthly_limit === 'number' ? record.monthly_limit : null,
-      usedCredits: typeof record.used_credits === 'number' ? record.used_credits : null,
-      utilization: typeof record.utilization === 'number' ? record.utilization : null,
-      currency: readOptionalString(record.currency) ?? null,
     };
   }
 
@@ -552,6 +539,33 @@ class ClaudeUsageService {
 
     return null;
   }
+}
+
+function finiteNonNegative(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Normalizes Anthropic's `extra_usage` block onto the shared credit-display rule.
+ *
+ * `is_enabled` is the upstream flag that says the account has an extra-usage
+ * pool at all. Anything other than `is_enabled: true` (absent block, `false`,
+ * malformed) returns `null` = "hide": the plan has no extra-usage concept, so no
+ * zero may be derived from it. When enabled, numeric fields that are missing or
+ * invalid stay `null` — never zero-filled — and the UI hides what it cannot show.
+ */
+export function normalizeClaudeExtraUsage(value: unknown): ClaudeExtraUsage | null {
+  const record = readObjectRecord(value);
+  if (!record || record.is_enabled !== true) {
+    return null;
+  }
+  return {
+    enabled: true,
+    monthlyLimit: finiteNonNegative(record.monthly_limit),
+    usedCredits: finiteNonNegative(record.used_credits),
+    utilization: finiteNonNegative(record.utilization),
+    currency: readOptionalString(record.currency) ?? null,
+  };
 }
 
 export const claudeUsageService = new ClaudeUsageService();

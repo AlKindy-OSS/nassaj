@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:41a94fabd00092645baa1dccf4fb815d06ca008403b40b56a1e7d96147e797c4",
+  "reviewedSiteDigest": "sha256:7832fcb093b9a2b0a819c3b97f1bd4022270ac5677a83b784c38f3017083ec4e",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -292,14 +292,23 @@
       "adapter": "exchange",
       "test": "bootstrap-startup-context.test.js, bootstrap-initial-arm.integration.test.js and permission inventory classification regression"
     },
-    "server/services/codex-app-server.js#child_process.execFileSync#1": {
+    "server/shared/codex-runtime-compat.js#child_process.spawn#1": {
+      "classification": "infrastructure_effect",
+      "owner": "T-1872 machine Codex runtime compatibility verdict",
+      "purpose": "codex_runtime_compat_probe",
+      "actorSource": "server-side verdict for an acquired launch identity (boot prewarm or launch guard); no user input, model or credential reaches argv or env",
+      "gate": "exact machine-release realpath from the sealed identity; fixed probe argv (--help parses, app-server --strict-config on stdin EOF, generate-json-schema, codex sandbox -P :workspace on a private 0700 /var/tmp fixture); shell false; HOME/CODEX_HOME/PATH-only environment without TMPDIR; 15 s SIGKILL deadline; 64 KiB output caps; fixture removed in finally; release re-stat after the verdict",
+      "adapter": "runCodexProbe",
+      "test": "server/shared/codex-runtime-compat.test.js and permission inventory classification regression"
+    },
+    "server/shared/codex-executable.js#child_process.execFileSync#1": {
       "classification": "read_only_process_query",
-      "owner": "Codex native fork runtime schema gate",
-      "purpose": "codex_native_fork_version_query",
-      "actorSource": "session-authorized native fork caller before runtime path resolution",
-      "gate": "SDK-local executable identity; fixed --version argv; shell false; 5000 ms timeout; exact codex-cli 0.153.2 match",
-      "adapter": "assertCodexMessageForkRuntimeReady",
-      "test": "codex-app-server.test.ts, codex-message-fork.test.ts and permission inventory classification regression"
+      "owner": "T-1872 machine Codex launch identity",
+      "purpose": "codex_machine_version_query",
+      "actorSource": "server-side launch identity acquisition before admission and spawn; no user input reaches argv",
+      "gate": "machine-release realpath inside the validated versioned release; fixed --version argv; shell false; empty environment; 5000 ms timeout; exact codex-cli X.Y.Z match equal to codex-package.json",
+      "adapter": "readCodexCliVersion",
+      "test": "codex-executable.test.js and permission inventory classification regression"
     },
     "server/index.js#child_process.spawn#1": {
       "classification": "read_only_process_query",
@@ -372,6 +381,15 @@
       "gate": "fixed /usr/bin/flock argv, private non-symlink 0700-equivalent lock directory, O_NOFOLLOW descriptor inherited as fd 3, shell false, status zero only, and fail-closed unavailable/contended handling",
       "adapter": "acquireLock",
       "test": "connector-auto-setup.test.ts"
+    },
+    "server/modules/providers/harness-update/version-status.service.ts#http.fetch#2": {
+      "classification": "release_infrastructure_effect",
+      "owner": "harness latest-version GitHub probe (T-1871)",
+      "purpose": "latest_version_probe",
+      "actorSource": "authenticated settings reader; release URL comes from the fixed descriptor table",
+      "gate": "descriptor-fixed https://api.github.com/ URL only (other prefixes refused), no auth header, abort-controller timeout, tag_name used as a version-shaped string and never executed",
+      "adapter": "defaultFetchGithubLatest",
+      "test": "version-status.service.test.ts"
     }
   },
   "rules": [
@@ -836,14 +854,14 @@
       "test": "descriptors.test.ts and spawn-admission.test.ts"
     },
     {
-      "prefix": "server/modules/providers/harness-update/update.service.ts#child_process.spawn#",
+      "prefix": "server/modules/providers/harness-update/run-command.ts#child_process.spawn#",
       "classification": "release_infrastructure_effect",
-      "owner": "harness update service (T-1749/ADR-159)",
+      "owner": "harness update/rollback child runner (T-1749/ADR-159, moved for T-1871)",
       "purpose": "harness_update",
-      "actorSource": "owner-only update endpoint or the server-side scheduler tick",
-      "gate": "fixed descriptor updateArgv (no client command string), per-harness single-flight lease, atomic no-live-session gate that also blocks new spawns, and an audited job row",
-      "adapter": "runHarnessUpdate",
-      "test": "update.service.test.ts and spawn-admission.test.ts"
+      "actorSource": "owner-only update/rollback endpoints, the server-side scheduler tick or boot reconcile (mutating runs); any authenticated reader of the version-status routes (`<binary> --version` reads only)",
+      "gate": "cmd/args are always server-owned: descriptor updateArgv, descriptor binary + versionArgs, or fixed git/npm/uv argv whose only variable parts are the descriptor npm prefix/package, a version parsed from the installed binary, a 40-hex rev captured from the checkout, and the operator uv path (HERMES_UV_PATH, else ~/.local/bin/uv, else a PATH lookup of uv for the hermes rollback only); no client command string. Every run uses cleanSpawnEnv, a hard timeout with process-group SIGKILL, and bounded output capture. Mutating runs additionally hold the per-harness single-flight lease and the atomic no-live-session gate that also blocks new spawns, and write an audited job row; snapshot-path updaters are also recorded in the durable spawn ledger. Version reads are capped at 10 s and take no lease.",
+      "adapter": "runHarnessUpdateCommand (and defaultRunVersion)",
+      "test": "update.service.test.ts, run-command tests and spawn-admission.test.ts"
     },
     {
       "prefix": "server/modules/providers/harness-update/version-status.service.ts#child_process.spawn#",
@@ -861,8 +879,8 @@
       "owner": "harness latest-version probe (T-1749/ADR-159)",
       "purpose": "latest_version_probe",
       "actorSource": "authenticated settings reader; package name comes from the fixed descriptor table",
-      "gate": "vendor registry URL built from the descriptor package id only, abort-controller timeout, response used as a version string and never executed",
-      "adapter": "defaultFetchNpmLatest",
+      "gate": "fixed code-owned URL only: npm registry URL built from the descriptor package id, or the descriptor's fixed https://api.github.com/ releases/latest URL (prefix-checked); no auth, abort-controller timeout, response used only as a version string and never executed",
+      "adapter": "defaultFetchNpmLatest / defaultFetchGithubLatest",
       "test": "version-status.service.test.ts"
     }
   ]

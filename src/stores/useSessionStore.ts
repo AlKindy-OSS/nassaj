@@ -100,6 +100,8 @@ export interface NormalizedMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /** T-1862: locally-added "Context compaction started." row — see ChatMessage doc. */
+  isCompactionBoundary?: boolean;
   images?: string[];
   files?: { name: string; path: string; relPath?: string; size?: number; mimeType?: string }[];
   /** Images deliberately omitted by the history API to cap memory usage. */

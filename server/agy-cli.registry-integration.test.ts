@@ -28,6 +28,8 @@ import path from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import test, { mock, before, beforeEach, after } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // Preserve transitive import exports without granting this fixture new process effects.
 let unexpectedProcessCalls = 0;
 const rejectUnexpectedProcess = () => {
@@ -92,6 +94,7 @@ before(async () => {
   // no resume path is taken.
   HOME_DIR = mkdtempSync(path.join(os.tmpdir(), 'agy-reg-it-'));
   process.env.HOME = HOME_DIR;
+  installFakeHarnessBinary(HOME_DIR, 'antigravity');
   // Enable the registry: this is the whole point — the REAL gated path runs.
   process.env.SESSION_REGISTRY_agy = '1';
 

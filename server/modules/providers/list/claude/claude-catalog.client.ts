@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { query, type ModelInfo, type Options } from '@anthropic-ai/claude-agent-sdk';
 
-import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import {
   assertAnthropicBaseUrlAllowed,
   assertSettingsEnvAllowed,
@@ -292,7 +292,7 @@ async function probeSupportedModels(
     const options: Options = {
       env: probeEnv,
       cwd: probeCwd,
-      pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
+      pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
       systemPrompt: { type: 'preset', preset: 'claude_code' },
     };
 

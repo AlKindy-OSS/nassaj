@@ -192,6 +192,37 @@ const dayRangeSql = (since?: string, until?: string): { sql: string; params: str
   return { sql: clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '', params };
 };
 
+/**
+ * T-1880: folds the rows of legacy keys that named the SAME file into the new
+ * key, inside the caller's transaction. Only exact keys owned by the same
+ * provider in `project_cost_sources` are touched (no LIKE, no suffix match).
+ * Days the new reading covers are dropped (they are rewritten next); every
+ * other legacy day is re-keyed, not deleted, so the ADR-078 "a recorded day
+ * survives a shorter re-read" rule still holds.
+ */
+function absorbSupersededSources(
+  watermark: LedgerSourceWatermark,
+  supersededKeys: string[],
+  entries: LedgerRowInput[],
+): void {
+  const candidates = [...new Set(supersededKeys)].filter((key) => key !== watermark.sourceKey);
+  if (candidates.length === 0) return;
+  const db = getConnection();
+  const owned = db
+    .prepare(`SELECT source_key FROM project_cost_sources
+              WHERE provider = ? AND source_key IN (${candidates.map(() => '?').join(', ')})`)
+    .all(watermark.provider, ...candidates) as { source_key: string }[];
+  const dropDay = db.prepare('DELETE FROM project_cost_daily WHERE source_key = ? AND day = ?');
+  const rekey = db.prepare('UPDATE OR REPLACE project_cost_daily SET source_key = ? WHERE source_key = ?');
+  const forget = db.prepare('DELETE FROM project_cost_sources WHERE provider = ? AND source_key = ?');
+  const days = new Set(entries.map((entry) => entry.day));
+  for (const { source_key: legacyKey } of owned) {
+    for (const day of days) dropDay.run(legacyKey, day);
+    rekey.run(watermark.sourceKey, legacyKey);
+    forget.run(watermark.provider, legacyKey);
+  }
+}
+
 export const projectCostLedgerDb = {
   /**
    * يكتب مساهمة مصدر واحد كاملةً: **حذف كل صفوفه ثم إدراج المُعاد حسابه**،
@@ -204,7 +235,7 @@ export const projectCostLedgerDb = {
    * `rows` فارغة مسموحة: سجلٌّ بلا استهلاك (أو خارج كل يوم معروف) يُسجَّل
    * بعلامته المائية وحدها فلا يُعاد فتحه في كل مسح.
    */
-  replaceSource(watermark: LedgerSourceWatermark, rows: LedgerRowInput[]): number {
+  replaceSource(watermark: LedgerSourceWatermark, rows: LedgerRowInput[], supersededKeys: string[] = []): number {
     const db = getConnection();
 
     // **لا يُحذف إلا ما سيُعاد كتابته.** الحذف الشامل لصفوف المصدر يجعل أي
@@ -241,6 +272,7 @@ export const projectCostLedgerDb = {
     );
 
     const run = db.transaction((entries: LedgerRowInput[]) => {
+      absorbSupersededSources(watermark, supersededKeys, entries);
       // تُمسح أيام القراءة الجديدة وحدها ثم تُكتب — فتُصحَّح دون أن يُمحى يومٌ
       // لم تعد القراءة تغطّيه.
       for (const day of new Set(entries.map((entry) => entry.day))) {

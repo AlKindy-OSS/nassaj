@@ -210,6 +210,38 @@ describe('ManageProjectMembersButton', () => {
     expect(screen.getByText('Fresh project')).toBeTruthy();
   });
 
+  it('T-1868: a non-manager gets the reserved search-area height with a muted permission note, not a blank box', async () => {
+    getProjectMembers.mockReturnValue(response(payload('proj-1', [member(1, 'owner', true), member(2, 'member')], viewer({ canManageMembers: false }))));
+    await open();
+    expect(screen.queryByLabelText('Add a member')).toBeNull();
+    expect(await screen.findByText("You don't have permission to add members")).toBeTruthy();
+  });
+
+  it('T-1868: the candidate dropdown fade overlay only shows once the list overflows and is not scrolled to its end', async () => {
+    getProjectMembers.mockReturnValue(response(payload('proj-1', [member(1, 'owner', true)], viewer())));
+    searchProjectMemberCandidates.mockReturnValue(response({
+      projectId: 'proj-1',
+      candidates: [{ id: 9, displayName: 'Nadia', avatar: null }, { id: 10, displayName: 'Omar', avatar: null }],
+    }));
+    await open();
+    const input = await screen.findByLabelText('Add a member');
+    fireEvent.change(input, { target: { value: 'na' } });
+    await screen.findByText('Nadia');
+    const list = screen.getByText('Nadia').closest('ul')!;
+    // jsdom reports zero layout by default — a non-overflowing list must not show the fade.
+    expect(document.querySelector('.bg-gradient-to-t')).toBeNull();
+    // Simulate an overflowing list scrolled away from its last row.
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 200 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 80 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, value: 0 });
+    fireEvent.scroll(list);
+    expect(document.querySelector('.bg-gradient-to-t')).toBeTruthy();
+    // Scrolled to the last row: the fade disappears even though it still overflows.
+    Object.defineProperty(list, 'scrollTop', { configurable: true, value: 120 });
+    fireEvent.scroll(list);
+    expect(document.querySelector('.bg-gradient-to-t')).toBeNull();
+  });
+
   it('discards delayed reconciliation JSON when identity changes', async () => {
     let resolveJson!: (value: unknown) => void;
     getProjectMembers.mockReturnValueOnce(response(payload('proj-1', [member(3, 'member')]))).mockResolvedValueOnce({ ok: true, status: 200, json: () => new Promise(resolve => { resolveJson = resolve; }) });

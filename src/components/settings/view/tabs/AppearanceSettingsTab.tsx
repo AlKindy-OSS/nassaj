@@ -154,7 +154,11 @@ export default function AppearanceSettingsTab({
                   void i18n.changeLanguage(event.target.value);
                 }}
                 aria-label={t('account.languageLabel')}
-                className={cn(SELECT_CLASS, 'sm:w-40')}
+                // round 3 (qa): sm:w-40 clipped long native names (and, on
+                // the font row below, "IBM Plex Sans Arabic") right under the
+                // select's own arrow. Widened together with UiFontPicker's
+                // select so the two stay aligned in this box.
+                className={cn(SELECT_CLASS, 'pe-8 sm:w-52')}
               >
                 {languages.map((lang) => (
                   <option key={lang.value} value={lang.value}>
@@ -163,12 +167,14 @@ export default function AppearanceSettingsTab({
                 ))}
               </select>
             </SettingsRow>
+
+            {/* T-1862: صفٌّ لا قسمٌ مستقلّ — يتبع اللغة داخل نفس صندوق «السمة
+                واللغة» بدل بطاقته الخاصة. */}
+            <UiFontPicker />
           </SettingsGroup>
         </SettingsSection>
 
         <ThemePresetPicker />
-
-        <UiFontPicker />
 
         <SettingsSection boxed icon={PanelLeft} title={t('appearanceSettings.sidebar.title')}>
           <SettingsGroup>

@@ -25,7 +25,7 @@ import type {
   HarnessUpdateJob,
   HarnessVersionStatus,
 } from '../../shared/harness-update.contract';
-import { isTerminalJob, mapUpdateJob, mapVersionStatus, mayRetryAfterFreshStatus, normalizeHarnessProvider } from './harnessVersionMapping';
+import { isTerminalJob, mapUpdateJob, mapVersionStatus, mayRetryAfterFreshStatus, needsRecovery, normalizeHarnessProvider } from './harnessVersionMapping';
 
 /** A contract-shaped status row; overrides are type-checked against the wire type. */
 function status(over: Partial<HarnessVersionStatus> = {}): HarnessVersionStatus {
@@ -185,6 +185,36 @@ test('aliases and GLM carrier resolve to the server harness id', () => {
   assert.equal(normalizeHarnessProvider('cursor-agent'), 'cursor');
   assert.equal(normalizeHarnessProvider('glm'), 'opencode');
   assert.equal(normalizeHarnessProvider('deepseek'), 'deepseek');
+});
+
+test('T-1871 stage 4 job outcomes: noop, rolled_back and rollback_failed are their own states', () => {
+  const noop = mapUpdateJob(job({ status: 'noop', phase: 'done', percent: 100, fromVersion: '1.0.0', toVersion: '1.0.0' }));
+  assert.equal(noop.status, 'noop');
+  assert.equal(noop.version, '1.0.0');
+  assert.equal(isTerminalJob('noop'), true);
+
+  const rolledBack = mapUpdateJob(job({ status: 'rolled_back', phase: 'done', percent: 100, fromVersion: '1.0.0', toVersion: '1.1.0' }));
+  assert.equal(rolledBack.status, 'rolled-back');
+  assert.equal(rolledBack.version, '1.0.0');
+  assert.equal(isTerminalJob('rolled_back'), true);
+
+  const rollbackFailed = mapUpdateJob(job({ status: 'rollback_failed', phase: 'recovering', percent: 60 }));
+  assert.equal(rollbackFailed.status, 'rollback-failed');
+  assert.equal(rollbackFailed.retryReady, false);
+  assert.equal(isTerminalJob('rollback_failed'), true);
+  assert.equal(needsRecovery(rollbackFailed), true);
+  assert.equal(needsRecovery(noop), false);
+});
+
+test('wire status carries notices, restoreCompatible and manualOnly through unchanged', () => {
+  const state = mapVersionStatus(status({
+    notices: { dataNotBackedUp: true, selfUpdating: true },
+    restoreCompatible: { version: '1.17.18', verified: false },
+    manualOnly: true,
+  }));
+  assert.deepEqual(state.notices, { dataNotBackedUp: true, selfUpdating: true });
+  assert.deepEqual(state.restoreCompatible, { version: '1.17.18', verified: false });
+  assert.equal(state.manualOnly, true);
 });
 
 test('recovery and rollback failures never expose retry; restored failures require fresh status', () => {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test, { after, before, mock } from 'node:test';
+import test, { after, before } from 'node:test';
 
 // B-1283: proves getSupportedModels flags every fallback path `degraded: true`
 // (short cache TTL, re-probe soon) while a live success stays unflagged, and that
@@ -37,14 +37,8 @@ before(async () => {
   );
   await chmod(fakeBinary, 0o755);
 
-  // Preserve every other export of the resolver module; only the path lookup is faked.
-  const realResolver = await import('@/shared/cli-executable-path.js');
-  mock.module('@/shared/cli-executable-path.js', {
-    namedExports: {
-      ...realResolver,
-      resolveCliExecutablePath: () => (process.env.FAKE_CURSOR_USE_MISSING === '1' ? missingBinary : fakeBinary),
-    },
-  });
+  // T-1873: the harness registry honours an absolute server CURSOR_PATH override.
+  process.env.CURSOR_PATH = fakeBinary;
 
   ({ CursorProviderModels, CURSOR_FALLBACK_MODELS } = await import('./cursor-models.provider.js'));
 });
@@ -52,7 +46,7 @@ before(async () => {
 after(async () => {
   delete process.env.FAKE_CURSOR_STDOUT;
   delete process.env.FAKE_CURSOR_EXIT;
-  delete process.env.FAKE_CURSOR_USE_MISSING;
+  delete process.env.CURSOR_PATH;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -80,13 +74,29 @@ test('a non-zero exit falls back to the degraded catalog', async () => {
   assert.deepEqual(result, { ...CURSOR_FALLBACK_MODELS, degraded: true });
 });
 
-test('a missing binary (spawn error) falls back to the degraded catalog', async () => {
-  process.env.FAKE_CURSOR_USE_MISSING = '1';
+test('a missing binary (registry refusal) falls back to the degraded catalog', async () => {
+  // A missing override is refused by the registry before any spawn (T-1873).
+  process.env.CURSOR_PATH = missingBinary;
   try {
     const result = await new CursorProviderModels().getSupportedModels();
     assert.deepEqual(result, { ...CURSOR_FALLBACK_MODELS, degraded: true });
   } finally {
-    delete process.env.FAKE_CURSOR_USE_MISSING;
+    process.env.CURSOR_PATH = fakeBinary;
+  }
+});
+
+test('a resolved binary whose spawn fails ENOENT falls back to the degraded catalog', async () => {
+  // Runnable to the registry (regular file, 0755) but its interpreter is
+  // missing, so the spawn itself emits 'error' ENOENT after resolution.
+  const brokenBinary = path.join(root, 'broken-cursor-agent');
+  await writeFile(brokenBinary, '#!/nonexistent/interpreter\n');
+  await chmod(brokenBinary, 0o755);
+  process.env.CURSOR_PATH = brokenBinary;
+  try {
+    const result = await new CursorProviderModels().getSupportedModels();
+    assert.deepEqual(result, { ...CURSOR_FALLBACK_MODELS, degraded: true });
+  } finally {
+    process.env.CURSOR_PATH = fakeBinary;
   }
 });
 

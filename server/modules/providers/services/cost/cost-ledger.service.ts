@@ -30,18 +30,23 @@
 
 import { createReadStream } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import Database from 'better-sqlite3';
 
-import { projectCostLedgerDb, projectsDb, sessionsDb, userDb } from '@/modules/database/index.js';
-import type { LedgerDailyRow, LedgerRowInput, ProjectScope } from '@/modules/database/index.js';
+import { projectCostLedgerDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import type { LedgerDailyRow, LedgerRowInput, LedgerSourceWatermark, ProjectScope } from '@/modules/database/index.js';
+import {
+  buildClaudeRootCatalog,
+  claudeRelativeSourceKey,
+  legacySourceKeyCandidates,
+  resolveClaudeRootCatalog,
+  type ClaudeRootEntry,
+} from '@/modules/providers/list/claude/claude-projects-roots.js';
 import { resolveOpenCodeDataHomes } from '@/modules/providers/list/opencode/opencode-home.js';
 import { resolveCodexHomes } from '@/modules/providers/list/codex/codex-home.js';
-import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { normalizeProjectPath, readOptionalString } from '@/shared/utils.js';
+import { normalizeProjectPath } from '@/shared/utils.js';
 
 import { runLocalUpdateBackground } from '../../../../services/update-writer-lease.js';
 
@@ -67,6 +72,8 @@ export type LedgerScanOptions = {
   harnesses?: LedgerHarness[];
   /** جذور اختبارية تُحقن بدل جذور الجهاز. */
   claudeRoots?: string[];
+  /** تهجئات قديمة إضافية لجذر المشغّل تُحقن في الاختبار (T-1880). */
+  claudeLegacyRoots?: string[];
   codexHomes?: string[];
   openCodeDatabases?: string[];
 };
@@ -321,32 +328,28 @@ function costToRows(ref: ProjectRef, day: string, harness: string, cost: Session
 // الجذور على القرص
 // ---------------------------------------------------------------------------
 
-/**
- * جذور مشاريع كلود: جذر المشغّل **وكل جذر مستخدم معزول**. الاثنان يلتقيان
- * عملياً على هذا التثبيت (‏provisionUserDirs يربط `projects/` رمزياً إلى جذر
- * المشغّل) — ولذلك يُفكّ الرابط بـ`realpath` قبل إزالة التكرار: بدونها يُمسح
- * نفس الملف مرّةً لكل مستخدم، وبمفاتيح مصادر مختلفة، فيتضاعف الإجمالي.
- */
-async function resolveClaudeProjectRoots(): Promise<string[]> {
-  const candidates = new Set<string>([path.join(os.homedir(), '.claude', 'projects')]);
+/** هوية مصدر كلود: مفتاح مستقلّ عن التهجئة ومفاتيحه المطلقة القديمة (T-1880). */
+type ClaudeSourceIdentity = { key: string; legacy: string[] };
 
-  try {
-    for (const user of userDb.listUsers()) {
-      try {
-        const env = resolveProviderEnv(user.id, 'claude', process.env);
-        const configDir = readOptionalString(env.CLAUDE_CONFIG_DIR);
-        if (configDir) {
-          candidates.add(path.join(configDir, 'projects'));
-        }
-      } catch {
-        // فشل حلّ بيئة مستخدم واحد لا يمنع مسح البقيّة.
-      }
-    }
-  } catch {
-    // تعذّر تعداد المستخدمين ⇒ جذر المشغّل وحده (تدهور لا سقوط).
-  }
+function claudeSourceIdentity(root: ClaudeRootEntry, absolutePath: string): ClaudeSourceIdentity {
+  return {
+    key: claudeRelativeSourceKey(root, absolutePath),
+    legacy: legacySourceKeyCandidates(root, absolutePath),
+  };
+}
 
-  return dedupeByRealPath([...candidates]);
+/** العلامة المائية بالمفتاح الجديد أولاً، ثم بمجموعة المرشّحين القديمة نفسها. */
+function findClaudeWatermark(
+  watermarks: Map<string, LedgerSourceWatermark>,
+  identity: ClaudeSourceIdentity,
+): LedgerSourceWatermark | undefined {
+  return watermarks.get(identity.key) ?? identity.legacy.map((key) => watermarks.get(key)).find(Boolean);
+}
+
+/** جذور كلود المحقونة للاختبار، أو جذور الجهاز كلّها مع تهجئات الحوكمة القديمة. */
+function claudeRootCatalog(options: LedgerScanOptions): ClaudeRootEntry[] {
+  if (!options.claudeRoots) return resolveClaudeRootCatalog();
+  return buildClaudeRootCatalog(options.claudeRoots, options.claudeRoots[0] ?? '', options.claudeLegacyRoots ?? []);
 }
 
 /** يُزيل تكرار المسارات بعد فكّ الروابط الرمزية. غير الموجود يُسقَط. */
@@ -673,6 +676,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
     provider: string,
     signature: FileSignature,
     scan: TranscriptScan,
+    supersededKeys: string[] = [],
   ): void => {
     const stats = (report.perHarness[harness] ??= emptyHarnessStat());
     report.undatedEntries += scan.undatedEntries;
@@ -687,6 +691,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
     projectCostLedgerDb.replaceSource(
       { sourceKey, provider, mtimeMs: signature.mtimeMs, sizeBytes: signature.size },
       scan.rows,
+      supersededKeys,
     );
     report.rowsWritten += scan.rows.length;
     stats.rows += scan.rows.length;
@@ -696,12 +701,12 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
   if (harnesses.includes('claude')) {
     const stats = (report.perHarness.claude ??= emptyHarnessStat());
     const watermarks = projectCostLedgerDb.getSourceWatermarks('claude');
-    const roots = options.claudeRoots ? await dedupeByRealPath(options.claudeRoots) : await resolveClaudeProjectRoots();
+    const roots = claudeRootCatalog(options);
 
     for (const root of roots) {
       let projectDirs;
       try {
-        projectDirs = await readdir(root, { withFileTypes: true });
+        projectDirs = await readdir(root.real, { withFileTypes: true });
       } catch {
         continue;
       }
@@ -710,7 +715,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
         if (!projectDir.isDirectory()) {
           continue;
         }
-        const directory = path.join(root, projectDir.name);
+        const directory = path.join(root.real, projectDir.name);
         let entries;
         try {
           entries = await readdir(directory, { withFileTypes: true });
@@ -742,14 +747,15 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
               // ولذلك: يُبتلَع اليتيم **فقط** حين لا علامة مائية للأمّ، أي حين
               // لم نره قطّ (تثبيت جديد، أو كُنِس قبل أوّل مسح) فيكون المجلّد
               // هو السجلّ الوحيد لذلك الإنفاق.
-              const parentSourceKey = path.join(directory, `${entry.name}.jsonl`);
-              if (watermarks.has(parentSourceKey)) {
+              const parentIdentity = claudeSourceIdentity(root, path.join(directory, `${entry.name}.jsonl`));
+              if (findClaudeWatermark(watermarks, parentIdentity)) {
                 report.skippedUnchanged += 1;
                 stats.skipped += 1;
                 continue;
               }
               const signature = await signatureOf(orphanFiles);
-              const known = watermarks.get(orphanDirectory);
+              const orphanIdentity = claudeSourceIdentity(root, orphanDirectory);
+              const known = findClaudeWatermark(watermarks, orphanIdentity);
               if (!options.force && known && known.mtimeMs >= signature.mtimeMs && known.sizeBytes === signature.size) {
                 report.skippedUnchanged += 1;
                 stats.skipped += 1;
@@ -758,7 +764,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
               const scan = await scanClaudeTranscript(orphanFiles, entry.name);
               report.scanned += 1;
               stats.scanned += 1;
-              persist('claude', orphanDirectory, 'claude', signature, scan);
+              persist('claude', orphanIdentity.key, 'claude', signature, scan, orphanIdentity.legacy);
             } catch (error) {
               report.errors.push(`claude:${orphanDirectory}: ${error instanceof Error ? error.message : String(error)}`);
             }
@@ -777,7 +783,8 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
           try {
             const files = [transcriptPath, ...(await collectJsonlFiles(transcriptPath.replace(/\.jsonl$/, '')))];
             const signature = await signatureOf(files);
-            const known = watermarks.get(transcriptPath);
+            const identity = claudeSourceIdentity(root, transcriptPath);
+            const known = findClaudeWatermark(watermarks, identity);
             if (!options.force && known && known.mtimeMs >= signature.mtimeMs && known.sizeBytes === signature.size) {
               report.skippedUnchanged += 1;
               stats.skipped += 1;
@@ -787,7 +794,7 @@ async function runScan(options: LedgerScanOptions): Promise<LedgerScanReport> {
             const scan = await scanClaudeTranscript(files, sessionId);
             report.scanned += 1;
             stats.scanned += 1;
-            persist('claude', transcriptPath, 'claude', signature, scan);
+            persist('claude', identity.key, 'claude', signature, scan, identity.legacy);
           } catch (error) {
             report.errors.push(`claude:${transcriptPath}: ${error instanceof Error ? error.message : String(error)}`);
           }

@@ -38,6 +38,7 @@ import { CodexCredentialsWriter } from '@/modules/providers/list/codex/codex-cre
 import { OpenCodeCredentialsWriter } from '@/modules/providers/list/opencode/opencode-credentials.writer.js';
 import { _resetProviderSecretsServerKeyCache } from '@/services/isolation/provider-secrets-store.js';
 import { AppError } from '@/shared/utils.js';
+import { createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
 
 const KEY = 'sk-lifecycle-secret-DO-NOT-LEAK-9999';
 const TEST_SERVER_KEY = Buffer.alloc(32, 9).toString('base64');
@@ -103,6 +104,8 @@ async function call(method: string, routePath: string, user: string, body?: unkn
 before(async () => {
   sandboxHome = await fs.mkdtemp(path.join(os.tmpdir(), 'no-log-leak-'));
   (os as unknown as { homedir: () => string }).homedir = () => sandboxHome;
+  // T-1872: `codex login` runs the machine release; a fixture stands in for it.
+  process.env.CODEX_PATH = createCodexMachineFixture(path.join(sandboxHome, 'codex-machine')).launcher;
   originalServerKeyEnv = process.env.NASSAJ_PROVIDER_SECRETS_KEY;
   process.env.NASSAJ_PROVIDER_SECRETS_KEY = TEST_SERVER_KEY;
   _resetProviderSecretsServerKeyCache();

@@ -188,6 +188,56 @@ export function claudeContextSnapshot(
   };
 }
 
+const ONE_MILLION_CONTEXT = 1_000_000;
+const STANDARD_CONTEXT = 200_000;
+
+/**
+ * B-1356: context window for a model id read back from a transcript, or null
+ * when the id does not name it unambiguously enough to state one.
+ *
+ * No model catalog in this codebase (live `supportedModels()`, the degraded
+ * CLAUDE_FALLBACK_MODELS) carries a numeric window, so this applies the family
+ * rules already documented by `resolveContextWindow` in claude-sdk.js, with one
+ * deliberate difference: a transcript records the BASE id (`claude-sonnet-4-6`)
+ * even when the run used the `sonnet[1m]` variant, and the catalog lists the
+ * base Sonnet as a separate, non-1M option. Ambiguity resolves to the smaller
+ * window, so the ring can over-state fullness but never under-state it.
+ *  - explicit `[1m]` suffix → 1M;
+ *  - Fable, and Opus 4.6 or later → 1M (the catalog's default Opus is 1M);
+ *  - every other recognised Claude id (Sonnet, Haiku, older Opus, claude-3*) → 200K;
+ *  - anything unrecognised (`<synthetic>`, non-Claude, empty) → null, never a guess.
+ */
+export function claudeTranscriptWindowTokens(modelId: string | null): number | null {
+  const id = typeof modelId === 'string' ? modelId.trim().toLowerCase() : '';
+  if (!id.startsWith('claude-')) return null;
+  if (id.endsWith('[1m]')) return ONE_MILLION_CONTEXT;
+  if (/^claude-\d+(?:-\d{1,2})?-(?:opus|sonnet|haiku)(?:-|$)/.test(id)) return STANDARD_CONTEXT;
+  const match = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-|$)/.exec(id);
+  if (!match) return null;
+  const [, family, majorText, minorText] = match;
+  if (family === 'fable') return ONE_MILLION_CONTEXT;
+  const major = Number(majorText);
+  const minor = Number(minorText ?? 0);
+  if (family === 'opus' && (major > 4 || (major === 4 && minor >= 6))) return ONE_MILLION_CONTEXT;
+  return STANDARD_CONTEXT;
+}
+
+/**
+ * Snapshot for a transcript-restored session: last-request input against the
+ * model's known window. Not a runtime observation, so `observedAt` stays null
+ * and usageKind stays `last_request_input`.
+ */
+export function claudeTranscriptContextSnapshot(
+  sessionId: string | null,
+  modelId: string | null,
+  inputTokens: number,
+): import('../codex/codex-token-budget.js').ContextSnapshot {
+  const snapshot = claudeContextSnapshot(null, { sessionId, modelId }, modelId ? inputTokens : null);
+  snapshot.observedAt = null;
+  snapshot.windowTokens = snapshot.usageKind === 'last_request_input' ? claudeTranscriptWindowTokens(modelId) : null;
+  return snapshot;
+}
+
 /** One bounded control request; telemetry failure must never fail a conversation. */
 export async function readClaudeContextSnapshot(
   query: { getContextUsage?: () => Promise<unknown> } | null,

@@ -207,7 +207,15 @@ const KNOWN_BWRAP_PATHS = Object.freeze([
   '/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap',
 ]);
 
-/** Yields executable bwrap paths bundled with @openai/codex, best-first. */
+/**
+ * Yields executable bwrap paths bundled with @openai/codex, best-first.
+ *
+ * T-1872: this is the cage's sandbox tool, NOT a Codex harness copy. Codex
+ * launches run the machine release (server/shared/codex-executable.js); the
+ * cage deliberately stays on the bundled @openai/codex-<platform> package so a
+ * harness update never swaps the isolation binary. Rationale: the T-1872 ADR
+ * (machine Codex CLI for all harnesses; written in part 2).
+ */
 function* bundledBwrapCandidates() {
   const base = platformPackageBaseName();
 
@@ -260,6 +268,24 @@ function systemBwrapOnPath() {
 export function resolveBwrapPath() {
   for (const candidate of bundledBwrapCandidates()) return candidate;
   return systemBwrapOnPath();
+}
+
+/**
+ * Boot check (T-1872 qa I6): the cage's tool is the bwrap bundled with the
+ * repo-pinned @openai/codex-<platform> package. A missing copy is reported
+ * loudly at boot instead of surfacing only as a per-spawn warning, and even
+ * when a system bwrap would stand in (it is not the reviewed tool).
+ * @param {{ candidates?: () => Iterable<string>, report?: (entry: object) => void }} [seams]
+ * @returns {string|null} the bundled bwrap path, or null after reporting
+ */
+export function checkBundledCageBwrap({ candidates = bundledBwrapCandidates, report = console.error } = {}) {
+  for (const candidate of candidates()) return candidate;
+  report({
+    event: 'provider_cage_bwrap_missing', severity: 'error',
+    package: `@openai/${platformPackageBaseName()}`, cageEnabled: process.env.NASSAJ_PROVIDER_CAGE === 'true',
+    message: 'The bundled cage bwrap is missing; reinstall dependencies before enabling the provider cage.',
+  });
+  return null;
 }
 
 // --- caged launch builder ---------------------------------------------------

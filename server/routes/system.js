@@ -1447,8 +1447,9 @@ function readTmpfsMountOptions() {
 const buildRemountCommand = capMb =>
     TMPFS_WATCHED.map(m => `sudo mount -o remount,size=${capMb}M ${m}`).join(' && ');
 
-// GET /api/system/tmpfs-policy — الواقع والمرغوب والأمر الجاهز.
-router.get('/tmpfs-policy', statsLimiter, (req, res) => {
+// GET /api/system/tmpfs-policy — الواقع والمرغوب والأمر الجاهز. المالك وحده (B-1341):
+// قارئه الوحيد تبويب «النظام» المقصور على المالك.
+router.get('/tmpfs-policy', statsLimiter, requireRole('owner'), (req, res) => {
     try {
         const stored = appConfigDb.get(TMPFS_POLICY_KEY);
         const desiredMb = stored === null ? null : Number(stored);
@@ -1469,9 +1470,8 @@ router.get('/tmpfs-policy', statsLimiter, (req, res) => {
     }
 });
 
-// PUT /api/system/tmpfs-policy — يحفظ المرغوب فقط (المالك/المشرف).
-// ‏`requireRole` مطابقة صريحة لا هرمية: 'admin' وحدها كانت تحجب المالك بـ403.
-router.put('/tmpfs-policy', requireRole('owner', 'admin'), (req, res) => {
+// PUT /api/system/tmpfs-policy — يحفظ المرغوب فقط. المالك وحده (B-1341).
+router.put('/tmpfs-policy', requireRole('owner'), (req, res) => {
     const raw = req.body?.desiredMb;
     if (raw === null) {
         appConfigDb.set(TMPFS_POLICY_KEY, '');
@@ -1484,7 +1484,12 @@ router.put('/tmpfs-policy', requireRole('owner', 'admin'), (req, res) => {
     }
     try {
         appConfigDb.set(TMPFS_POLICY_KEY, String(desiredMb));
-        auditLogDb.record('tmpfs_policy_set', { metadata: { desiredMb } });
+        auditLogDb.record('tmpfs_policy_set', {
+            userId: req.user?.id ?? null,
+            metadata: { desiredMb },
+            ipAddress: clientIp(req),
+            userAgent: req.headers['user-agent'] ?? null,
+        });
     } catch (error) {
         console.error('[system] tmpfs-policy write failed:', error.message);
         return res.status(500).json({ error: 'Failed to store tmpfs policy' });
@@ -1539,8 +1544,9 @@ function readStoragePolicy() {
     return out;
 }
 
-// GET /api/system/storage-policy — القيم السارية + الواقع المقيس على القرص.
-router.get('/storage-policy', statsLimiter, (req, res) => {
+// GET /api/system/storage-policy — القيم السارية. المالك وحده (B-1341): حدود صور
+// المحادثة تُقرأ خادمياً من appConfigDb في chat-image-store لا من هذا المسار.
+router.get('/storage-policy', statsLimiter, requireRole('owner'), (req, res) => {
     try {
         res.json({ ...readStoragePolicy(), bounds: STORAGE_POLICY_BOUNDS });
     } catch (error) {
@@ -1549,8 +1555,8 @@ router.get('/storage-policy', statsLimiter, (req, res) => {
     }
 });
 
-// PUT /api/system/storage-policy — المالك/المشرف. مطابقة صريحة لا هرمية.
-router.put('/storage-policy', requireRole('owner', 'admin'), (req, res) => {
+// PUT /api/system/storage-policy — المالك وحده (B-1341).
+router.put('/storage-policy', requireRole('owner'), (req, res) => {
     const updates = {};
     for (const field of Object.keys(STORAGE_POLICY_KEYS)) {
         if (req.body?.[field] === undefined) continue;
@@ -1581,7 +1587,12 @@ router.put('/storage-policy', requireRole('owner', 'admin'), (req, res) => {
             }
         }
         // تغيير عمر المحادثة فعلٌ يُتلف بيانات لاحقاً — يُسجَّل دائماً.
-        auditLogDb.record('storage_policy_set', { metadata: updates });
+        auditLogDb.record('storage_policy_set', {
+            userId: req.user?.id ?? null,
+            metadata: updates,
+            ipAddress: clientIp(req),
+            userAgent: req.headers['user-agent'] ?? null,
+        });
     } catch (error) {
         console.error('[system] storage-policy write failed:', error.message);
         return res.status(500).json({ error: 'Failed to store storage policy' });

@@ -1,6 +1,15 @@
+// B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
+// eslint-disable-next-line import-x/order -- must evaluate before every other import
+import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 
+import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
+
+import { writeCodexMachineRelease } from './__tests__/harness-world.js';
+import { makeFixtureRoot, removeFixture, writeFixtureFile } from './snapshot/__tests__/fixtures.js';
 import {
   AUTOUPDATER_DISABLE_NONE,
   getHarnessDescriptor,
@@ -72,59 +81,110 @@ test('opencode carries the glm run id for the live-session gate', () => {
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.opencode.runProviders, ['opencode', 'glm']);
 });
 
-test('npm-prefix harnesses carry a measured prefix + package and fixed reinstall argv', () => {
-  const kimi = HARNESS_UPDATE_DESCRIPTORS.kimi;
-  assert.equal(kimi.installMethod, 'npm-prefix');
-  assert.equal(kimi.npm?.pkg, '@moonshot-ai/kimi-code');
-  const kArgv = kimi.updateArgv();
-  assert.ok(kArgv);
-  assert.equal(kArgv.cmd, 'npm');
-  assert.ok(kArgv.args.includes('@moonshot-ai/kimi-code@latest'));
-  assert.ok(kArgv.args.includes('--prefix'));
-
+test('qwen is the npm-prefix harness: measured prefix + package, global reinstall argv', () => {
+  const npmHarnesses = Object.values(HARNESS_UPDATE_DESCRIPTORS).filter((d) => d.installMethod === 'npm-prefix');
+  assert.deepEqual(npmHarnesses.map((d) => d.id), ['qwen']);
   const qwen = HARNESS_UPDATE_DESCRIPTORS.qwen;
   assert.equal(qwen.npm?.pkg, '@qwen-code/qwen-code');
-  assert.ok(qwen.updateArgv()!.args.includes('@qwen-code/qwen-code@latest'));
+  const argv = qwen.updateArgv()!;
+  assert.equal(argv.cmd, 'npm');
+  assert.ok(argv.args.includes('@qwen-code/qwen-code@latest'));
+  assert.ok(argv.args.includes('--global') && argv.args.includes('--prefix'));
 });
 
-test('both npm updates carry TMPDIR=/var/tmp — /tmp here is tmpfs (RAM)', () => {
+test('the npm update carries TMPDIR=/var/tmp — /tmp here is tmpfs (RAM)', () => {
   assert.equal(NPM_UPDATE_TMPDIR, '/var/tmp');
-  for (const id of ['kimi', 'qwen'] as const) {
-    assert.equal(
-      HARNESS_UPDATE_DESCRIPTORS[id].updateArgv()!.env?.TMPDIR,
-      '/var/tmp',
-      `${id} stages its npm tarball outside tmpfs`,
-    );
-  }
+  assert.equal(HARNESS_UPDATE_DESCRIPTORS.qwen.updateArgv()!.env?.TMPDIR, '/var/tmp');
   // The spawn-level proof lives in update.service.spawn-env.test.ts.
 });
 
+test('kimi is the official native install: single-file snapshot, `kimi update --yes`', () => {
+  const kimi = HARNESS_UPDATE_DESCRIPTORS.kimi;
+  assert.equal(kimi.installMethod, 'native-self-update');
+  assert.equal(kimi.npm, undefined);
+  assert.equal(kimi.manualOnly, true);
+  assert.deepEqual(
+    { layout: kimi.snapshot?.layout, linkMode: kimi.snapshot?.linkMode },
+    { layout: 'single-file', linkMode: 'copy' },
+  );
+  assert.deepEqual(kimi.notices, { dataNotBackedUp: true, selfUpdating: true });
+  const bin = installFakeHarnessBinary(SANDBOX_HOME, 'kimi');
+  assert.equal(bin, path.join(SANDBOX_HOME, '.kimi-code', 'bin', 'kimi'));
+  assert.deepEqual(kimi.updateArgv(), { cmd: bin, args: ['update', '--yes'] });
+  assert.equal(kimi.updateArgv()!.env, undefined, 'a native update stages nothing in TMPDIR');
+});
+
+/** Sets (or clears) one server-process env var for the duration of `fn`. */
+function withServerEnv<T>(key: string, value: string | undefined, fn: () => T): T {
+  const saved = process.env[key];
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+  try {
+    return fn();
+  } finally {
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+  }
+}
+
 test('native self-updaters use their own update/upgrade subcommand', () => {
+  // T-1873: the registry only resolves installed CLIs (test HOME = case dir).
+  for (const id of ['claude', 'antigravity', 'cursor', 'opencode'] as const) installFakeHarnessBinary(SANDBOX_HOME, id);
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.claude.updateArgv()!.args, ['update']);
-  assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.codex.updateArgv()!.args, ['update']);
+  // codex derives its install env from the launcher; no standalone launcher → no argv.
+  assert.equal(withServerEnv('CODEX_PATH', '/nonexistent/codex', () => HARNESS_UPDATE_DESCRIPTORS.codex.updateArgv()), null);
+  const root = makeFixtureRoot();
+  try {
+    const standalone = path.join(root, '.codex', 'packages', 'standalone');
+    // T-1873: the registry codex is T-1872's validated machine release.
+    writeCodexMachineRelease(path.join(standalone, 'releases', '1.0.0'), '1.0.0');
+    fs.symlinkSync(path.join(standalone, 'releases', '1.0.0'), path.join(standalone, 'current'));
+    const bin = path.join(root, 'bin', 'codex');
+    fs.mkdirSync(path.dirname(bin));
+    fs.symlinkSync(path.join(standalone, 'current', 'bin', 'codex'), bin);
+    const argv = withServerEnv('CODEX_PATH', bin, () => HARNESS_UPDATE_DESCRIPTORS.codex.updateArgv())!;
+    assert.deepEqual(argv.args, ['update']);
+    assert.deepEqual(argv.env, { CODEX_HOME: path.join(root, '.codex'), CODEX_INSTALL_DIR: path.dirname(bin) });
+  } finally {
+    removeFixture(root);
+  }
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.antigravity.updateArgv()!.args, ['update']);
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.cursor.updateArgv()!.args, ['update']);
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.opencode.updateArgv()!.args, ['upgrade']);
 });
 
-test('claude update resolves the exact SDK launch binary', () => {
-  const argv = HARNESS_UPDATE_DESCRIPTORS.claude.updateArgv({
-    CLAUDE_CLI_PATH: '/opt/operator/bin/claude',
-  });
-  assert.equal(argv?.cmd, '/opt/operator/bin/claude');
+test('claude update resolves the exact SDK launch binary (server CLAUDE_CLI_PATH)', () => {
+  const root = makeFixtureRoot();
+  try {
+    const custom = path.join(root, 'opt', 'claude');
+    writeFixtureFile(custom, '#!/bin/sh\n', 0o755);
+    const argv = withServerEnv('CLAUDE_CLI_PATH', custom, () => HARNESS_UPDATE_DESCRIPTORS.claude.updateArgv());
+    assert.equal(argv?.cmd, custom);
+  } finally {
+    removeFixture(root);
+  }
 });
 
-test('verified built-in auto-updater disable knobs (D2): claude + opencode', () => {
+test('an uninstalled native harness has no update target', () => {
+  withServerEnv('AGY_PATH', '/nonexistent/agy', () => {
+    assert.equal(HARNESS_UPDATE_DESCRIPTORS.antigravity.updateArgv(), null);
+  });
+});
+
+test('verified built-in auto-updater disable knobs (D2): claude + opencode + kimi', () => {
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.claude.disableAutoUpdaterEnv, { DISABLE_AUTOUPDATER: '1' });
   assert.equal(HARNESS_UPDATE_DESCRIPTORS.claude.autoUpdaterDisableVerified, true);
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.opencode.disableAutoUpdaterEnv, { OPENCODE_DISABLE_AUTOUPDATE: '1' });
   assert.equal(HARNESS_UPDATE_DESCRIPTORS.opencode.autoUpdaterDisableVerified, true);
+  // T-1873: kimi-code's own kill switch, wired for every kimi child.
+  assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.kimi.disableAutoUpdaterEnv, { KIMI_CODE_NO_AUTO_UPDATE: '1' });
+  assert.equal(HARNESS_UPDATE_DESCRIPTORS.kimi.autoUpdaterDisableVerified, true);
 });
 
 test('AUTOUPDATER_DISABLE_NONE lists only harnesses with no verified knob', () => {
   assert.ok(AUTOUPDATER_DISABLE_NONE.includes('codex'));
   assert.ok(AUTOUPDATER_DISABLE_NONE.includes('qwen'));
-  assert.ok(AUTOUPDATER_DISABLE_NONE.includes('kimi'));
+  assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('kimi'));
   assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('claude'));
   assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('opencode'));
 });

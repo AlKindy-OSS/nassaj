@@ -12,6 +12,13 @@ import {
   measureCodexCandidate, defaultRunTurn,
   resolveMeasurementRuntime, readInstalledIdentity, identityDigest,
 } from './permission-parity-measure-codex.mjs';
+import { createCodexMachineFixture } from '../server/shared/tests/codex-release-fixture.js';
+
+// T-1872: measurement targets the machine Codex release; a fixture stands in for it.
+const codexMachineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'measure-codex-machine-'));
+const codexMachine = createCodexMachineFixture(codexMachineRoot);
+process.env.CODEX_PATH = codexMachine.launcher;
+process.on('exit', () => fs.rmSync(codexMachineRoot, { recursive: true, force: true }));
 
 test('Codex candidate sealing rejects incomplete observations', () => {
   const complete = {
@@ -32,10 +39,11 @@ test('Codex probe reads markers and removes its temporary directory', async () =
     const result = await measureCodexCandidate({
       codexHome: '/codex-home', temporaryParent,
       now: () => new Date('2030-01-01T00:00:00.000Z'),
-      execImpl: () => 'codex-cli 0.147.0',
-      runTurn: async ({ prompt, executablePath, pathDirs }) => {
-        assert.ok(path.isAbsolute(executablePath));
-        assert.ok(Array.isArray(pathDirs));
+      runTurn: async ({ prompt, launchIdentity }) => {
+        // T-1872: the probe runs the exact frozen machine identity it measured.
+        assert.ok(Object.isFrozen(launchIdentity));
+        assert.equal(launchIdentity.executablePath, path.join(fs.realpathSync(codexMachine.release), 'bin', 'codex'));
+        assert.ok(Array.isArray(launchIdentity.pathDirs));
         const nonce = prompt.match(/DONE=([a-f0-9]+)/u)?.[1];
         const commands = prompt.split('\n').slice(1);
         assert.ok(nonce);
@@ -57,7 +65,7 @@ test('Codex probe reads markers and removes its temporary directory', async () =
   }
 });
 
-for (const field of ['serverSourceDigest', 'sdkVersion', 'cliVersion', 'nativeDigest', 'resolverDigest', 'sdkSourceDigest', 'pathClosure']) {
+for (const field of ['serverSourceDigest', 'sdkVersion', 'cliVersion', 'nativeDigest', 'resolverDigest', 'sdkSourceDigest', 'treeDigest']) {
   test(`Codex probe refuses evidence if ${field} changes during measurement`, async () => {
     const temporaryParent = fs.mkdtempSync(path.join(os.tmpdir(), 'permission-codex-drift-'));
     const identity = { serverSourceDigest: 'source-before', sdkVersion: '1.0.0', cliVersion: 'codex-cli 1.0.0' };
@@ -79,7 +87,7 @@ test('Codex probe quotes shell metacharacters in its disk-backed paths literally
   const temporaryParent = fs.mkdtempSync(path.join(os.tmpdir(), "permission-codex-$(:)-`:`-'quote-"));
   try {
     const result = await measureCodexCandidate({
-      codexHome: '/codex-home', temporaryParent, execImpl: () => 'codex-cli 0.147.0',
+      codexHome: '/codex-home', temporaryParent,
       runTurn: async ({ prompt, cwd }) => {
         const nonce = prompt.match(/DONE=([a-f0-9]+)/u)?.[1];
         const commands = prompt.split('\n').slice(1);
@@ -114,6 +122,7 @@ test('compiled runtime measurement matches compiled registry instead of source b
   };
   try {
     for (const filename of ['server/shared/codex-executable.js', 'server/openai-codex.js',
+      'server/shared/harness-binaries.ts', 'server/shared/claude-cli-path.ts',
       ...['capability-registry', 'parity', 'types', 'validation'].map(name => `server/modules/execution-permissions/${name}.ts`)]) emit(filename);
     const fixture = 'server/modules/execution-permissions/fixtures/permission-capabilities.v1.json';
     fs.mkdirSync(path.dirname(path.join(root, fixture)), { recursive: true });
@@ -126,7 +135,7 @@ test('compiled runtime measurement matches compiled registry instead of source b
     let captured;
     await defaultRunTurn({
       prompt: 'test', cwd: root, codexHome: root,
-      ...runtime.readNative(),
+      launchIdentity: runtime.acquire(),
       launchOptions: (...args) => { usedLauncher = true; return { ...runtime.launchOptions(...args), marker: 'compiled-launcher' }; },
       RuntimeCodex: class {
         constructor(options) { captured = options; }
@@ -135,10 +144,10 @@ test('compiled runtime measurement matches compiled registry instead of source b
     });
     assert.equal(usedLauncher, true);
     assert.equal(captured.marker, 'compiled-launcher');
-    const version = () => 'codex-cli 0.153.2';
-    const measurement = identityDigest(readInstalledIdentity(version, runtime));
-    assert.equal(compiled.resolveInstalledCodexBuildFingerprint(version).buildFingerprint, measurement);
-    assert.notEqual(identityDigest(readInstalledIdentity(version)), measurement);
+    const measured = readInstalledIdentity(runtime);
+    const measurement = identityDigest(measured);
+    assert.equal(compiled.resolveInstalledCodexBuildFingerprint(measured.launchIdentity).buildFingerprint, measurement);
+    assert.notEqual(identityDigest(readInstalledIdentity()), measurement);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -169,6 +178,12 @@ test('measurement integration rejects bad evidence and preserves unrelated body 
     }
     fs.mkdirSync(path.join(root, 'server/shared'), { recursive: true });
     fs.copyFileSync('server/shared/codex-executable.js', path.join(root, 'server/shared/codex-executable.js'));
+    for (const name of ['harness-binaries', 'claude-cli-path']) {
+      fs.writeFileSync(path.join(root, `server/shared/${name}.js`), ts.transpileModule(
+        fs.readFileSync(`server/shared/${name}.ts`, 'utf8'),
+        { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } },
+      ).outputText);
+    }
     const validators = await loadMeasurementValidators(root);
     const artifact = JSON.parse(fs.readFileSync('server/modules/execution-permissions/fixtures/permission-capabilities.v1.json'));
     const now = artifact.reference.evidence.measuredAt;

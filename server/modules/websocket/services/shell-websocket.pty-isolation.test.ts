@@ -33,7 +33,31 @@ import test, { mock } from 'node:test';
 // imports of connection.js / init-db.js are only legal for tests that live
 // inside server/modules/database/ itself.
 import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
+import { installFakeHarnessOverrides } from '@/shared/__tests__/harness-binary-fixtures.js';
+import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
+
 import { RETIRED_PROVIDER_IDS } from '../../../../shared/retiredProviders.js';
+
+// T-1873: PTY command lines are built from the harness registry; stub every
+// non-codex harness through its server override so no case depends on host installs.
+const harnessStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pty-harness-stubs-'));
+const restoreHarnessOverrides = installFakeHarnessOverrides(harnessStubDir);
+test.after(() => {
+  restoreHarnessOverrides();
+  fs.rmSync(harnessStubDir, { recursive: true, force: true });
+});
+
+// T-1872: codex PTYs run the machine release; a fixture stands in for it.
+const codexMachineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pty-codex-machine-'));
+const codexMachine = createCodexMachineFixture(codexMachineRoot);
+await acceptFixtureRuntimeCompat();
+process.env.CODEX_PATH = codexMachine.launcher;
+process.on('exit', () => fs.rmSync(codexMachineRoot, { recursive: true, force: true }));
+const codexExecutable = () => path.join(fs.realpathSync(codexMachine.release), 'bin', 'codex');
+/** The file a (possibly bwrap-caged) PTY launch finally executes via `bash -c`. */
+const unwrapPtyCommand = (call: { shell: string; args: string[] }): string[] => (
+  path.basename(call.shell) === 'bwrap' ? call.args.slice(call.args.indexOf('--') + 1) : [call.shell, ...call.args]
+);
 
 // The PTY itself is mocked; point the managed launcher preflight at a real,
 // inert executable so this suite is hermetic on CI hosts without Claude.
@@ -324,7 +348,7 @@ test('general Claude shell omits a stale sessionId when hasSession is false', as
 });
 
 test('Codex conversation terminal resumes the SDK thread directly, never opens a fresh Codex TUI', async () => {
-  await withIsolatedDatabase(() => {
+  await withIsolatedDatabase(async () => {
     spawnCalls.length = 0;
     resolveCalls.length = 0;
     const sessionId = '11111111-2222-7333-8444-555555555555';
@@ -336,14 +360,18 @@ test('Codex conversation terminal resumes the SDK thread directly, never opens a
       hasSession: true,
       sessionId,
     }));
+    // T-1872 part 2: the runtime-compat verdict is awaited before the PTY spawns.
+    await new Promise(resolve => setImmediate(resolve));
 
     assert.equal(spawnCalls.length, 1, 'one Codex conversation PTY spawned');
     assert.equal(resolveCalls[0]?.provider, 'codex', 'Codex credentials are resolved per user');
     assert.equal(
-      spawnCalls[0]?.args.at(-1),
-      `codex resume --include-non-interactive "${sessionId}"`,
-      'SDK-created (non-interactive) thread is resumed by its exact id'
+      unwrapPtyCommand(spawnCalls[0]!).at(-1),
+      `'${codexExecutable()}' 'resume' '--include-non-interactive' '${sessionId}'`,
+      'SDK-created (non-interactive) thread is resumed by its exact id on the machine release'
     );
+    assert.ok(String(spawnCalls[0]?.env.PATH).startsWith(
+      path.join(fs.realpathSync(codexMachine.release), 'codex-path')));
     assert.ok(
       !spawnCalls[0]?.args.at(-1)?.includes('|| codex'),
       'a failed resume must not silently open an unrelated fresh/sign-in TUI'
@@ -353,6 +381,39 @@ test('Codex conversation terminal resumes the SDK thread directly, never opens a
       '902',
       'resume uses only the authenticated user credential environment'
     );
+  });
+});
+
+test('T-1872: a missing machine Codex refuses the PTY with the install hint', async () => {
+  await withIsolatedDatabase(() => {
+    spawnCalls.length = 0;
+    const saved = process.env.CODEX_PATH;
+    process.env.CODEX_PATH = path.join(codexMachineRoot, 'absent', 'codex');
+    try {
+      const ws = makeFakeWs();
+      handleShellConnection(ws as never, asRequest(904), deps);
+      ws.emit('message', initMessage(PROJECT_PATH, { provider: 'codex' }));
+      assert.equal(spawnCalls.length, 0, 'no PTY without the machine release');
+      const frame = ws.sent.find((item) => (item as { code?: string }).code === 'codex_not_installed') as
+        { message?: string } | undefined;
+      assert.match(String(frame?.message), /Codex غير مثبّت على الجهاز/u);
+    } finally { process.env.CODEX_PATH = saved; }
+  });
+});
+
+test('T-1872: codex login PTY runs the machine release by quoted realpath, never PATH codex', async () => {
+  await withIsolatedDatabase(() => {
+    spawnCalls.length = 0;
+    const ws = makeFakeWs();
+    handleShellConnection(ws as never, asRequest(903), deps);
+    ws.emit('message', initMessage(PROJECT_PATH, {
+      provider: 'codex',
+      initialCommand: 'codex login --device-auth',
+    }));
+    assert.equal(spawnCalls.length, 1, 'one login PTY spawned');
+    const argv = unwrapPtyCommand(spawnCalls[0]!);
+    assert.equal(argv.at(-1), `'${codexExecutable()}' 'login' '--device-auth'`);
+    assert.ok(!/(^|\s)codex\s/u.test(argv.at(-1)!), 'no PATH-resolved codex word');
   });
 });
 

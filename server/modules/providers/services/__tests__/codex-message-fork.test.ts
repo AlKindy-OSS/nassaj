@@ -56,6 +56,9 @@ mock.module('../../../../services/isolation/resolve-provider-env.js', { namedExp
 } });
 mock.module('../../../../services/codex-app-server.js', { namedExports: {
   assertCodexMessageForkRuntimeReady: () => { runtimeChecks++; return { executablePath: '/native/pinned' }; },
+  assertCodexMessageForkRuntimeUnchanged: (identity: { executablePath: string }) => {
+    assert.equal(identity.executablePath, '/native/pinned'); runtimeChecks++; return identity;
+  },
   callCodexAppServer: async (source: string, user: number, method: string, params: any, options: any) => {
     assert.equal(user, 7); assert.equal(method, 'thread/fork');
     assert.deepEqual(params, { lastTurnId: 'turn-1', ephemeral: false, excludeTurns: true, threadSource: 'user' });

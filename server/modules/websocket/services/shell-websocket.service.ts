@@ -20,6 +20,12 @@ import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { installManagedClaudeTerminalEnv } from '@/services/isolation/managed-claude-terminal-env.js';
 import {
+  HarnessBinaryUnresolvedError,
+  quotedHarnessBinary,
+  resolveHarnessBinary,
+  type HarnessBinaryId,
+} from '@/shared/harness-binaries.js';
+import {
   bindManagedClaudeTerminal,
   registerManagedClaudeTerminal,
   revokeManagedClaudeTerminal,
@@ -34,6 +40,16 @@ import {
   isRetiredProvider,
 } from '../../../../shared/retiredProviders.js';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
+import { clearStaleNativeStageBeforeLaunch } from '@/modules/providers/harness-update/native-staging.js';
+import {
+  acquireCodexLaunchIdentity,
+  assertCodexIdentityUnchanged,
+  codexLaunchOptions,
+  codexShellCommand,
+  CODEX_MACHINE_CLI_MISSING_MESSAGE,
+  isCodexMachineCliMissing,
+} from '@/shared/codex-executable.js';
+import { assertCodexRuntimeCompatible, isCodexRuntimeIncompatible } from '@/shared/codex-runtime-compat.js';
 
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 
@@ -422,12 +438,76 @@ function parseShellMessage(rawMessage: RawData): ShellIncomingMessage | null {
 }
 
 /**
+ * Prefix of the error a PTY raises when a harness CLI is not installed; matched
+ * by shell-error-frame.ts (the probed path in the tail is never published).
+ */
+export const SHELL_HARNESS_CLI_MISSING_PREFIX = 'Harness CLI not installed for this terminal';
+
+/**
+ * The shell-quoted registry path of a harness CLI for a PTY command line
+ * (T-1873): the terminal runs the SAME binary every other launch site runs,
+ * never a bare name looked up on the PTY's PATH.
+ */
+function ptyHarnessCli(id: HarnessBinaryId): string {
+  try {
+    // kimi swaps a staged update in on its next start: a terminal never does
+    // it outside a Nassaj update window (T-1873, native-staging.ts).
+    if (id === 'kimi') clearStaleNativeStageBeforeLaunch('kimi', resolveHarnessBinary('kimi'));
+    return quotedHarnessBinary(id);
+  } catch (error) {
+    if (!(error instanceof HarnessBinaryUnresolvedError)) throw error;
+    throw new Error(`${SHELL_HARNESS_CLI_MISSING_PREFIX} (${error.message})`);
+  }
+}
+
+/**
+ * Leading command token → registry harness for the fixed provider-login
+ * commands. claude is absent on purpose: a claude PTY's bare `claude` is the
+ * managed launcher shim (installManagedClaudeTerminalEnv), which execs the
+ * registry-resolved real binary. codex runs its frozen launch identity.
+ */
+const PTY_LOGIN_COMMAND_HARNESS: ReadonlyMap<string, HarnessBinaryId> = new Map([
+  ['agy', 'antigravity'],
+  ['cursor-agent', 'cursor'],
+  ['opencode', 'opencode'],
+  ['hermes', 'hermes'],
+  ['kimi', 'kimi'],
+]);
+
+type CodexLaunchIdentity = ReturnType<typeof acquireCodexLaunchIdentity>;
+
+/** True for an allowlisted codex login command (`codex login`, `--device-auth`). */
+export function isCodexLoginCommand(command: string): boolean {
+  return PROVIDER_CANONICAL_LOGIN_COMMANDS.get('codex')?.has(command.trim()) ?? false;
+}
+
+/**
+ * THE one place a fixed provider-login command (already validated against
+ * PROVIDER_LOGIN_COMMAND_ALLOWLIST by the caller) becomes a PTY command line:
+ * its leading harness token is replaced by the quoted registry path, or — for
+ * codex — by the frozen launch identity's executable (T-1872). Any other
+ * command is returned unchanged.
+ */
+export function materializeProviderLoginCommand(
+  command: string,
+  codexIdentity: CodexLaunchIdentity | null = null,
+): string {
+  if (!ALL_PROVIDER_LOGIN_COMMANDS.has(command.trim())) return command;
+  const [head, ...rest] = command.trim().split(' ');
+  if (head === 'codex') return codexShellCommand(codexIdentity, rest);
+  const harness = PTY_LOGIN_COMMAND_HARNESS.get(head);
+  return harness ? [ptyHarnessCli(harness), ...rest].join(' ') : command;
+}
+
+/**
  * Resolves provider command line for plain shell and agent-backed shell modes.
  */
 
-function buildShellCommand(
+/** Exported for the T-1873 PTY parity guard (harness-binary-parity.guard.test.ts). */
+export function buildShellCommand(
   message: ShellIncomingMessage,
-  dependencies: ShellWebSocketDependencies
+  dependencies: ShellWebSocketDependencies,
+  codexIdentity: CodexLaunchIdentity | null = null
 ): string {
   const hasSession = readBoolean(message.hasSession);
   const sessionId = readString(message.sessionId);
@@ -440,14 +520,15 @@ function buildShellCommand(
     provider === 'plain-shell';
 
   if (isPlainShell) {
-    return initialCommand;
+    return materializeProviderLoginCommand(initialCommand, codexIdentity);
   }
 
   if (provider === 'cursor') {
+    const cursor = ptyHarnessCli('cursor');
     if (hasSession && sessionId) {
-      return `cursor-agent --resume="${sessionId}"`;
+      return `${cursor} --resume="${sessionId}"`;
     }
-    return 'cursor-agent';
+    return cursor;
   }
 
   if (provider === 'codex') {
@@ -462,16 +543,20 @@ function buildShellCommand(
       // Fail closed instead: resume exactly the authenticated user's requested
       // thread from their isolated CODEX_HOME, or let the process error. Never
       // substitute an unrelated fresh conversation.
-      return `codex resume --include-non-interactive "${sessionId}"`;
+      return codexShellCommand(codexIdentity, ['resume', '--include-non-interactive', sessionId]);
     }
-    return 'codex';
+    return codexShellCommand(codexIdentity);
   }
 
   if (provider === 'opencode') {
-    if (hasSession && sessionId) {
-      return `opencode --session "${sessionId}"`;
+    if (initialCommand) {
+      return materializeProviderLoginCommand(initialCommand);
     }
-    return initialCommand || 'opencode';
+    const opencode = ptyHarnessCli('opencode');
+    if (hasSession && sessionId) {
+      return `${opencode} --session "${sessionId}"`;
+    }
+    return opencode;
   }
 
   if (provider === 'kimi') {
@@ -481,12 +566,13 @@ function buildShellCommand(
     // wins; otherwise resume by id (`kimi -S <id>`, verified against `kimi
     // --help`) with a bare `kimi` fallback, mirroring the codex branch.
     if (initialCommand) {
-      return initialCommand;
+      return materializeProviderLoginCommand(initialCommand);
     }
+    const kimi = ptyHarnessCli('kimi');
     if (hasSession && sessionId) {
-      return `kimi -S "${sessionId}" || kimi`;
+      return `${kimi} -S "${sessionId}" || ${kimi}`;
     }
-    return 'kimi';
+    return kimi;
   }
 
   if (provider === 'agy' || provider === 'antigravity') {
@@ -496,12 +582,13 @@ function buildShellCommand(
     // login command (agy has no `agy login` subcommand). An explicit
     // initialCommand (e.g. a login command from the UI) wins.
     if (initialCommand) {
-      return initialCommand;
+      return materializeProviderLoginCommand(initialCommand);
     }
+    const agy = ptyHarnessCli('antigravity');
     if (hasSession && sessionId) {
-      return `agy --conversation "${sessionId}" || agy`;
+      return `${agy} --conversation "${sessionId}" || ${agy}`;
     }
-    return 'agy';
+    return agy;
   }
 
   const command = initialCommand || 'claude';
@@ -738,6 +825,10 @@ export function handleShellConnection(
   let gateDenialAnnounced = false;
   let urlDetectionBuffer = '';
   const announcedAuthUrls = new Set<string>();
+
+  /** True while this socket is the one attached to its PTY session. */
+  const isCurrentSessionOwner = (): boolean =>
+    ptySessionKey !== null && ptySessionsMap.get(ptySessionKey)?.ws === ws;
 
   ws.on('message', async (rawMessage) => {
     if (!assertRealtimePrincipalCurrent(request.user)) {
@@ -981,7 +1072,27 @@ export function handleShellConnection(
           return;
         }
 
-        const shellCommand = buildShellCommand(data, dependencies);
+        // T-1872: a codex PTY runs the machine release by exact realpath; the
+        // identity is acquired once here and re-checked just before pty.spawn.
+        let codexIdentity: CodexLaunchIdentity | null = null;
+        if (provider === 'codex' && (!isPlainShell || isCodexLoginCommand(initialCommand))) {
+          try {
+            codexIdentity = acquireCodexLaunchIdentity();
+            // T-1872 part 2: a Codex session needs a release inside Nassaj's contract.
+            if (!isPlainShell) await assertCodexRuntimeCompatible(codexIdentity);
+          } catch (error) {
+            const incompatible = isCodexRuntimeIncompatible(error);
+            ws.send(JSON.stringify({
+              type: 'error',
+              code: incompatible ? 'codex_runtime_incompatible' : 'codex_not_installed',
+              message: incompatible ? (error as Error).message : isCodexMachineCliMissing(error)
+                ? CODEX_MACHINE_CLI_MISSING_MESSAGE
+                : 'The Codex installation on this machine is not usable.',
+            }));
+            return;
+          }
+        }
+        const shellCommand = buildShellCommand(data, dependencies, codexIdentity);
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
         const shellArgs =
           os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
@@ -1106,13 +1217,14 @@ export function handleShellConnection(
               throw error;
             }
           }
+          if (codexIdentity) assertCodexIdentityUnchanged(codexIdentity);
           shellProcess = pty.spawn(ptyLaunch.cmd, ptyLaunch.args, {
           name: 'xterm-256color',
           cols: termCols,
           rows: termRows,
           cwd: resolvedProjectPath,
           env: {
-            ...terminalEnv,
+            ...(codexIdentity ? codexLaunchOptions(terminalEnv, codexIdentity).env : terminalEnv),
             ...(broker ? {
               NASSAJ_MANAGED_CLAUDE_BROKER_SOCKET: broker.socketPath,
               NASSAJ_MANAGED_CLAUDE_BROKER_SELECTOR: broker.selector,
@@ -1289,6 +1401,12 @@ export function handleShellConnection(
         return;
       }
 
+      // T-1895: after another socket reattached, this one is stale; its
+      // keystrokes and resizes must not reach the PTY the new owner drives.
+      if ((data.type === 'input' || data.type === 'resize') && !isCurrentSessionOwner()) {
+        return;
+      }
+
       if (data.type === 'input') {
         if (shellProcess) {
           shellProcess.write(readString(data.data));
@@ -1350,7 +1468,9 @@ export function handleShellConnection(
     }
 
     const session = ptySessionsMap.get(ptySessionKey);
-    if (!session) {
+    // T-1895: a newer socket owns the session (reattach or forceRestart); a
+    // late close of this stale socket must not detach it or arm the kill timer.
+    if (!session || session.ws !== ws) {
       return;
     }
 

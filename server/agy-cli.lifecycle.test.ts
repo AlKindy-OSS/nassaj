@@ -6,6 +6,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { after, mock, test } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // Preserve transitive import exports without granting this fixture new process effects.
 let unexpectedProcessCalls = 0;
 const rejectUnexpectedProcess = () => {
@@ -16,6 +18,7 @@ after(() => assert.equal(unexpectedProcessCalls, 0));
 const root = await fs.mkdtemp(path.join(process.env.TMPDIR!, 'runner-history-'));
 after(() => fs.rm(root, { recursive: true, force: true }));
 mock.method(os, 'homedir', () => root);
+installFakeHarnessBinary(root, 'antigravity');
 let child: any;
 // CI hardening: `child` must be awaited on a wall clock, not on a fixed number of
 // event-loop turns. spawnAntigravity performs ~10 real fs awaits (readdir/stat/

@@ -29,6 +29,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
+
 // ---------------------------------------------------------------------------
 // Bootstrap — MUST run before importing any project module (mirrors
 // codex-spawn-isolation.test.ts): the DB singleton resolves DATABASE_PATH on first
@@ -52,6 +54,10 @@ fs.writeFileSync(
   '# AGENTS.md — neutral nassaj governance\nplatform-agnostic instructions.\n',
 );
 process.env.HOME = sandboxHome;
+// T-1872: a machine Codex release fixture stands in for ~/.local/bin/codex.
+const codexMachine = createCodexMachineFixture(path.join(sandbox, 'codex-machine'));
+await acceptFixtureRuntimeCompat();
+process.env.CODEX_PATH = codexMachine.launcher;
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 // Start from a known-clean flag state; individual cases opt in explicitly.
 delete process.env.CODEX_ALLOW_FULL_ACCESS;
@@ -397,6 +403,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     const trace: string[] = [];
     await spawnAndCapture({
       permissionExecution: {
+        launchIdentity: (await import('./shared/codex-executable.js')).acquireCodexLaunchIdentity(),
         consume: () => { trace.push('consume'); },
         markStarted: () => { trace.push('started'); },
         settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
@@ -411,6 +418,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     runStreamedFailure = new Error('ambiguous SDK start');
     await spawnAndCapture({
       permissionExecution: {
+        launchIdentity: (await import('./shared/codex-executable.js')).acquireCodexLaunchIdentity(),
         consume: () => { trace.push('consume'); },
         markStarted: () => { trace.push('started'); },
         settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
@@ -418,6 +426,89 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
       },
     });
     assert.deepEqual(trace, ['consume', 'started', 'settle:failed']);
+  });
+
+  it('T-1872: the SDK runs exactly the launch identity the admission fingerprinted', async () => {
+    const { acquireCodexLaunchIdentity } = await import('./shared/codex-executable.js');
+    const identity = acquireCodexLaunchIdentity();
+    const trace: string[] = [];
+    await spawnAndCapture({
+      permissionExecution: {
+        launchIdentity: identity,
+        consume: () => { trace.push('consume'); },
+        markStarted: () => { trace.push('started'); },
+        settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+        notStarted: () => { trace.push('not-started'); },
+      },
+    });
+    assert.equal(codexStarts.at(-1)?.codexPathOverride, identity.executablePath);
+    assert.equal(identity.executablePath, path.join(fs.realpathSync(codexMachine.release), 'bin', 'codex'));
+    assert.ok(String(codexStarts.at(-1)?.env?.PATH).startsWith(identity.pathDirs[0]));
+    assert.deepEqual(trace, ['consume', 'started', 'settle:succeeded']);
+  });
+
+  it('T-1872: a release changed after admission refuses before the start fence', async () => {
+    const { acquireCodexLaunchIdentity } = await import('./shared/codex-executable.js');
+    const identity = acquireCodexLaunchIdentity();
+    const trace: string[] = [];
+    const bwrap = path.join(codexMachine.release, 'codex-resources', 'bwrap');
+    const original = fs.readFileSync(bwrap);
+    fs.appendFileSync(bwrap, 'tampered');
+    const ws = makeWs(null);
+    try {
+      await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: {
+        launchIdentity: identity,
+        consume: () => { trace.push('consume'); },
+        markStarted: () => { trace.push('started'); },
+        settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+        notStarted: () => { trace.push('not-started'); },
+      } }, ws);
+    } finally { fs.writeFileSync(bwrap, original); }
+    assert.deepEqual(trace, ['consume', 'settle:spawn_failed'], 'never marked started');
+    const frames = ws.sent.map((frame) => JSON.parse(String(frame)) as { code?: string });
+    assert.ok(frames.some((frame) => frame.code === 'codex_runtime_changed'));
+  });
+
+  it('T-1872: a missing machine Codex reports the install hint and never constructs the SDK', async () => {
+    const saved = process.env.CODEX_PATH;
+    process.env.CODEX_PATH = path.join(sandbox, 'absent', 'codex');
+    const before = codexStarts.length;
+    const trace: string[] = [];
+    const ws = makeWs(null);
+    try {
+      await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: {
+        launchIdentity: null,
+        launchIdentityError: Object.assign(new Error('CODEX_MACHINE_CLI_MISSING'), { code: 'CODEX_MACHINE_CLI_MISSING' }),
+        consume: () => { trace.push('consume'); },
+        markStarted: () => { trace.push('started'); },
+        settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+        notStarted: () => { trace.push('not-started'); },
+      } }, ws);
+    } finally { process.env.CODEX_PATH = saved; }
+    assert.equal(codexStarts.length, before);
+    assert.deepEqual(trace, ['not-started']);
+    const frame = ws.sent.map((item) => JSON.parse(String(item)) as { code?: string; content?: string })
+      .find((item) => item.code === 'cli_not_installed');
+    assert.match(String(frame?.content), /Codex غير مثبّت على الجهاز؛ ثبّته بالطريقة الرسمية/u);
+  });
+
+  it('T-1872 M1: an admission without an identity never re-acquires one, even when it would resolve', async () => {
+    const before = codexStarts.length;
+    const trace: string[] = [];
+    const ws = makeWs(null);
+    // CODEX_PATH points at a valid fixture release: a re-acquisition here would succeed.
+    await queryCodex('ping', { cwd: sandboxCwd, model: 'gpt-5-codex', permissionExecution: {
+      launchIdentity: null,
+      launchIdentityError: Object.assign(new Error('CODEX_MACHINE_CLI_MISSING'), { code: 'CODEX_MACHINE_CLI_MISSING' }),
+      consume: () => { trace.push('consume'); },
+      markStarted: () => { trace.push('started'); },
+      settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
+      notStarted: () => { trace.push('not-started'); },
+    } }, ws);
+    assert.equal(codexStarts.length, before, 'no SDK constructed');
+    assert.deepEqual(trace, ['not-started']);
+    const frames = ws.sent.map((item) => JSON.parse(String(item)) as { code?: string });
+    assert.ok(frames.some((frame) => frame.code === 'cli_not_installed'));
   });
 
   it('pins MCP empty and delegation depth zero in parent-controlled config', async () => {

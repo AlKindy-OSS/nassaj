@@ -2,7 +2,7 @@ import type { AgentCategory, AgentProvider, SettingsDeepLink, SettingsMainTab } 
 
 const MAIN_TABS = new Set<SettingsMainTab>([
   'profile', 'agents', 'references', 'vendors', 'appearance', 'git', 'api',
-  'connectors', 'notifications', 'users', 'command-board', 'about',
+  'connectors', 'notifications', 'users', 'command-board', 'system', 'about',
 ]);
 
 const AGENTS = new Set<AgentProvider>([
@@ -77,5 +77,6 @@ export function clearSettingsDestination(): void {
 export function canOpenSettingsTab(tab: SettingsMainTab, role?: string): boolean {
   if (tab === 'users') return role === 'owner' || role === 'admin';
   if (tab === 'command-board') return role === 'owner';
+  if (tab === 'system') return role === 'owner';
   return true;
 }

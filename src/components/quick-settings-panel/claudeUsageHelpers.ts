@@ -1,5 +1,7 @@
 // Pure helpers for rendering Claude usage. No React, no i18n side effects.
 
+import type { ClaudeExtraUsage } from './claudeUsageTypes';
+
 // Bar color thresholds (matches TokenUsageSummary context-rot scale):
 // emerald < 50 (safe), amber < 75 (attention), orange < 90 (warning), red >= 90 (critical).
 // Returns Tailwind background classes so dark mode is handled by the palette.
@@ -88,24 +90,33 @@ export function formatPercent(utilization: number, locale: string): string {
 export function hasDisplayableExtraUsageCredits(
   extraUsage: {
     enabled: boolean;
-    usedCredits: number;
-    monthlyLimit: number;
-    utilization: number;
-    currency: string;
+    usedCredits: number | null;
+    monthlyLimit: number | null;
+    utilization: number | null;
+    currency: string | null;
   } | null | undefined,
-): extraUsage is NonNullable<typeof extraUsage> {
+): extraUsage is NonNullable<typeof extraUsage> & {
+  usedCredits: number;
+  monthlyLimit: number;
+  utilization: number;
+  currency: string;
+} {
+  if (!extraUsage?.enabled) return false;
+  const { usedCredits, monthlyLimit, utilization, currency } = extraUsage;
   return Boolean(
-    extraUsage?.enabled
-      && Number.isFinite(extraUsage.usedCredits)
-      && extraUsage.usedCredits >= 0
-      && Number.isFinite(extraUsage.monthlyLimit)
-      && extraUsage.monthlyLimit >= 0
-      && extraUsage.usedCredits <= extraUsage.monthlyLimit
-      && Number.isFinite(extraUsage.utilization)
-      && extraUsage.utilization >= 0
-      && extraUsage.utilization <= 100
-      && typeof extraUsage.currency === 'string'
-      && extraUsage.currency.trim(),
+    typeof usedCredits === 'number'
+      && Number.isFinite(usedCredits)
+      && usedCredits >= 0
+      && typeof monthlyLimit === 'number'
+      && Number.isFinite(monthlyLimit)
+      && monthlyLimit >= 0
+      && usedCredits <= monthlyLimit
+      && typeof utilization === 'number'
+      && Number.isFinite(utilization)
+      && utilization >= 0
+      && utilization <= 100
+      && typeof currency === 'string'
+      && currency.trim(),
   );
 }
 
@@ -140,15 +151,83 @@ export function formatCreditBalance(balance: number, locale: string): string {
 }
 
 /**
- * Remaining harness credits (monthlyLimit - usedCredits), formatted as
- * currency via `formatCredits`. Both HeaderUsageIndicator and
- * ClaudeUsageCollapsed compute this identically for the Claude "extra usage"
- * badge (visible text + aria-label duplicate the same subtraction) — a
- * single helper keeps them from drifting apart.
+ * قرار عرض واحد لرصيد هارنس Claude الإضافي (‏"+" badge في الهيدر/الشريط
+ * الجانبي)، بديل تكرار الحساب في كل سطح. مقصودٌ أنها **لا** تستدعي
+ * `hasDisplayableExtraUsageCredits`: تلك تخدم شريط التقدّم الكامل
+ * (‏ClaudeUsageSection/AgentUsageSection) وتشترط `usedCredits ≤ monthlyLimit`
+ * ونسبة استهلاك وعملة صالحتين لرسم الشريط ولون تنبيهه — وهو نطاقٌ خارج هذا
+ * الإصلاح (القرار بشأن ألوانه عند المالك). أمّا شارة "+" فمعناها أبسط: رقمٌ أو
+ * "صفر مؤكَّد" أو اختفاء، ولا تحتاج نسبة استهلاك إطلاقاً ولا حتى عملة لتقرير
+ * الصفر — فتجاوز الحدّ (‏`usedCredits > monthlyLimit`، وهي حالة اعتذار توفّرها
+ * الخادم فعلاً) هو نفاد مؤكَّد بقدر المساواة تماماً.
+ *
+ * `currency` في حالة `zero` قد يكون `null`: الحدّ/المستهلك قد يصلان دون عملة
+ * على حساب مُفعَّل (تجاوز الحدّ)، وحينها يُعرض "0" مجرَّدة لا مبلغاً مُختلَقاً.
  */
-export function formatRemainingHarnessCredits(
-  extraUsage: { monthlyLimit: number; usedCredits: number; currency: string },
+export type ClaudeExtraUsageDisplay =
+  | { kind: 'hidden' }
+  | { kind: 'zero'; usedCents: number; limitCents: number; currency: string | null }
+  | { kind: 'amount'; remainingCents: number; usedCents: number; limitCents: number; currency: string };
+
+export function resolveClaudeExtraUsageDisplay(
+  extraUsage: ClaudeExtraUsage | null | undefined,
+): ClaudeExtraUsageDisplay {
+  if (!extraUsage || !extraUsage.enabled) return { kind: 'hidden' };
+
+  const { usedCredits, monthlyLimit, currency } = extraUsage;
+  // الحدّ مفقود: معناه غير مؤكَّد، فلا صفر ولا مبلغ يُختلَق منه.
+  if (typeof monthlyLimit !== 'number' || !Number.isFinite(monthlyLimit) || monthlyLimit < 0) {
+    return { kind: 'hidden' };
+  }
+  if (typeof usedCredits !== 'number' || !Number.isFinite(usedCredits) || usedCredits < 0) {
+    return { kind: 'hidden' };
+  }
+
+  const validCurrency =
+    typeof currency === 'string' && currency.trim() ? currency : null;
+
+  // نافدٌ فعلاً — بما فيه تجاوز الحدّ، لا المساواة معه فقط — بلا حاجة لعملة
+  // معروفة لتقرير هذا وحده.
+  if (usedCredits >= monthlyLimit) {
+    return { kind: 'zero', usedCents: usedCredits, limitCents: monthlyLimit, currency: validCurrency };
+  }
+
+  // الباقي الموجب يحتاج عملة ليُصاغ مبلغاً صادقاً؛ غيابها يُخفي لا يخترع رقماً.
+  if (!validCurrency) return { kind: 'hidden' };
+  return {
+    kind: 'amount',
+    remainingCents: monthlyLimit - usedCredits,
+    usedCents: usedCredits,
+    limitCents: monthlyLimit,
+    currency: validCurrency,
+  };
+}
+
+/**
+ * نصّ شارة "+" الظاهر (والمُستخدَم أيضاً في aria-label) — حساب واحد بدل تكراره
+ * في الهيدر والشريط الجانبي. "∞" لا تصدر من هنا (ملك حصص Codex/GLM فحسب عبر
+ * `resolveCreditDisplay`)؛ هذه لحصّة كلود التي لا تعرف "غير محدود".
+ */
+export function formatClaudeExtraBadgeText(
+  display: ClaudeExtraUsageDisplay,
   locale: string,
-): string {
-  return formatCredits(extraUsage.monthlyLimit - extraUsage.usedCredits, extraUsage.currency, locale);
+): string | null {
+  if (display.kind === 'hidden') return null;
+  if (display.kind === 'amount') return formatCredits(display.remainingCents, display.currency, locale);
+  return display.currency ? formatCredits(0, display.currency, locale) : formatCreditBalance(0, locale);
+}
+
+/**
+ * مبلغا التلميح (المستهلَك/الحدّ) بصياغة العملة — `null` حين لا عملة معروفة
+ * (‏نفاد بتجاوز الحدّ بلا عملة)، إذ لا مبلغ صادق يُقال بلا وحدة.
+ */
+export function formatClaudeExtraDetailAmounts(
+  display: ClaudeExtraUsageDisplay,
+  locale: string,
+): { used: string; limit: string } | null {
+  if (display.kind === 'hidden' || !display.currency) return null;
+  return {
+    used: formatCredits(display.usedCents, display.currency, locale),
+    limit: formatCredits(display.limitCents, display.currency, locale),
+  };
 }

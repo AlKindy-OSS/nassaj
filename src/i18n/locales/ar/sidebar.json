@@ -234,9 +234,7 @@
         "session": "جلسة",
         "other": ""
       }
-    },
-    "hardwareToggleCollapsed": "تشغيل/إيقاف عرض استهلاك العتاد",
-    "hardwareToggleFooter": "استهلاك العتاد"
+    }
   },
   "branding": {
     "openSource": "مفتوح المصدر"
@@ -289,7 +287,9 @@
     "restartRequired": "الخادم محدَّث — يلزم إعادة التشغيل",
     "restartBannerAriaLabel": "إعادة تشغيل الخادم معلّقة — انقر للتفاصيل",
     "updatePrepared": "مُحضَّر — بانتظار التفعيل",
-    "updatePreparedTitle": "إصدار مُحضَّر"
+    "updatePreparedTitle": "إصدار مُحضَّر",
+    "currentVersionLabel": "نسّاج v{{version}}",
+    "updateToLabel": "تحديث إلى"
   },
   "restart": {
     "modalTitle": "إعادة تشغيل الخادم",
@@ -387,7 +387,8 @@
       "makeOwner": "منح دور مالك",
       "makeMember": "تحويل إلى عضو",
       "role": "دور المشروع",
-      "saving": "جارٍ حفظ تغيير العضوية"
+      "saving": "جارٍ حفظ تغيير العضوية",
+      "noAddPermission": "لا تملك صلاحية إضافة أعضاء"
     },
     "agentKinds": {
       "model": "النموذج الأساسي",

@@ -55,7 +55,7 @@ function releaseFixture(bootstrapCode = 'process.exitCode = 0;\n') {
     writeFileSync(path.join(source, 'dist-server', 'BUILD_PROVENANCE.json'), JSON.stringify(provenance));
     writeFileSync(path.join(source, 'package.json'), '{}\n');
     writeFileSync(path.join(source, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
-        '': {}, 'node_modules/@openai/codex-sdk': { version: '0.153.2', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture': { version: '1.0.0', integrity: 'sha512-YQ==' },
+        '': {}, 'node_modules/@openai/codex-sdk': { version: '0.157.1', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture': { version: '1.0.0', integrity: 'sha512-YQ==' },
     } }));
     const runtimeTarget = currentReleaseRuntimeTarget();
     const built = buildReleaseAsset({ sourceRoot: source, outputDirectory: output, temporaryRoot: root,
@@ -182,6 +182,13 @@ async function compiledPermissionRegistry(directory) {
     }
     mkdirSync(path.join(directory, 'server/shared'), { recursive: true });
     copyFileSync(path.join(ROOT, 'server/shared/codex-executable.js'), path.join(directory, 'server/shared/codex-executable.js'));
+    // T-1873: capability-registry now also resolves harness binaries through the registry.
+    for (const name of ['harness-binaries', 'claude-cli-path']) {
+        writeFileSync(path.join(directory, `server/shared/${name}.js`), ts.transpileModule(
+            readFileSync(path.join(ROOT, `server/shared/${name}.ts`), 'utf8'),
+            { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } },
+        ).outputText);
+    }
     const fixture = 'server/modules/execution-permissions/fixtures/permission-capabilities.v1.json';
     mkdirSync(path.dirname(path.join(directory, fixture)), { recursive: true });
     copyFileSync(path.join(ROOT, fixture), path.join(directory, fixture));

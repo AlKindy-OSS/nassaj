@@ -11,10 +11,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 export const CODEX_IMAGE_ONLY_PATCH = Object.freeze({
-  version: '0.153.2',
+  version: '0.157.1',
   originalSha256: 'd62ed107033bdba802b283c77d875e4bec3deb2704a910bb7e3f95059473b16f',
   patchedSha256: 'f0741050088c636aef4ee970fd25e582ab1c961c18499702c26ae7962fe025d2',
-  upstreamIntegrity: 'sha512-If4CYvo+Zpf6CCKxhuoyhgNbaS93UI9pYfscWr529CxCQK5fhlLQA29efutQVwuj8w9EcMhNM4rjn7zu67S+/w==',
+  upstreamIntegrity: 'sha512-JPfUXFtXnADlOFYNlf3WzwOEbhQ4zpn4d53ikAF9UjVy2Fr3vESuhvGZquoENW8h60Gskx9spwO20EoZAbKI0g==',
 });
 const MARKER = '    const env = {};';
 const ADDITION = '    // B-990: preserve image-only input as an explicit empty positional prompt.\n'

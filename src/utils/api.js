@@ -624,6 +624,20 @@ export const api = {
     if (token) params.set('token', token);
     return `/api/providers/search/sessions?${params.toString()}`;
   },
+  createCloneTicket: (body) =>
+    authenticatedFetch('/api/projects/clone-ticket', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // EventSource cannot send custom headers, so the auth token is passed as
+  // query. Cookie-mode sessions have no localStorage token, so it is omitted
+  // there (sending both yields a 400 ambiguous_authentication).
+  cloneProgressUrl: (ticket) => {
+    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    const params = new URLSearchParams({ ticket });
+    if (token) params.set('token', token);
+    return `/api/projects/clone-progress?${params.toString()}`;
+  },
   createProject: (projectData) =>
     authenticatedFetch('/api/projects/create-project', {
       method: 'POST',

@@ -37,6 +37,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // ---------------------------------------------------------------------------
 // Bootstrap — MUST precede any project import.
 // DB singleton reads DATABASE_PATH on first use; isolation helpers read $HOME.
@@ -53,6 +55,8 @@ const GOVERNANCE_TEXT = '# AGENTS.md — nassaj neutral governance\nPlatform-agn
 fs.writeFileSync(path.join(sandboxHome, '.claude', 'AGENTS.md'), GOVERNANCE_TEXT);
 
 process.env.HOME = sandboxHome;
+// T-1873: the registry resolves kimi at ~/.local/bin/kimi under this HOME.
+installFakeHarnessBinary(sandboxHome, 'kimi');
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
@@ -255,6 +259,8 @@ describe('KM-5 seam order — digest drift throws before governance is reached (
           cwd: sandboxHome,
           baseEnv: {
             ...hostileBaseEnv(),
+            // A member KIMI_PATH is ignored (T-1873); the registry stub is itself
+            // unapproved bytes, so the armed pin must still refuse.
             KIMI_PATH: fakeBin,
             // Arm the integrity pin so verifyVendorBinaryDigest actually hashes.
             NASSAJ_VENDOR_BINARY_PIN: 'true',

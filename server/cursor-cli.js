@@ -10,7 +10,7 @@ import { createTurnTimer, settleTurnTiming } from './modules/providers/services/
 import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
 import { providerModelsService } from './modules/providers/services/provider-models.service.js';
 import { createNormalizedMessage, stampCoordinatorId } from './shared/utils.js';
-import { resolveCliExecutablePath } from './shared/cli-executable-path.js';
+import { resolveHarnessBinary } from './shared/harness-binaries.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { mapSpawnError } from './shared/spawn-error.js';
@@ -23,11 +23,6 @@ import { participantsDb } from './modules/database/index.js';
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
 let activeCursorProcesses = new Map(); // Track active processes by session ID
-
-/** Resolves the same cursor-agent executable used by spawn and update probes. */
-export function resolveCursorBinaryPath(env = process.env) {
-  return resolveCliExecutablePath('cursor-agent', { override: env.CURSOR_PATH, env });
-}
 
 const WORKSPACE_TRUST_PATTERNS = [
   /workspace trust required/i,
@@ -184,7 +179,7 @@ async function spawnCursor(command, options = {}, ws) {
         console.log('Retrying Cursor CLI with --trust after workspace trust prompt');
       }
 
-      const cursorBinary = resolveCursorBinaryPath();
+      const cursorBinary = resolveHarnessBinary('cursor');
       console.log('Spawning Cursor CLI:', cursorBinary, args.join(' '));
       console.log('Working directory:', workingDir);
       console.log('Session info - Input sessionId:', sessionId, 'Resume:', resume);

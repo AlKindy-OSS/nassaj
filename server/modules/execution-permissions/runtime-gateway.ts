@@ -11,6 +11,9 @@ import {
 // eslint-disable-next-line boundaries/no-unknown
 import { IS_PLATFORM } from '@/constants/config.js';
 
+// Pure shared resolver outside the module graph (self-contained by contract).
+import { acquireCodexLaunchIdentity } from '../../shared/codex-executable.js';
+
 import { createAuthenticatedLaunchActor } from './actor.js';
 import {
   resolveInstalledAgyBuildFingerprint,
@@ -19,9 +22,14 @@ import {
   resolveInstalledCodexBuildFingerprint,
   resolveMeasuredPermissionCandidate,
 } from './capability-registry.js';
-import { createExecutionPermissionGateway, type PermissionGatewayResult } from './execution-gateway.service.js';
+import {
+  createExecutionPermissionGateway,
+  type PermissionGatewayResult,
+  type PermissionLaunchIdentity,
+} from './execution-gateway.service.js';
 import { CLAUDE_REFERENCE_VECTOR_V1 } from './fixtures/claude-reference-v1.js';
 import { resolveRuntimePermissionIdentity } from './runtime-release-identity.js';
+import type { CodexLaunchIdentity } from './capability-registry.js';
 import type { CanonicalLaunchContext } from './types.js';
 
 const readSmallIdentity = (file: string, fallback: string, maxLength = 256): string => {
@@ -50,10 +58,16 @@ type RuntimeInstalledIdentity = Readonly<{
   buildFingerprint: string; sdkFingerprint?: string; cliFingerprint?: string;
 }>;
 
+/** Codex bodies run the machine release; every other body has no per-launch identity yet. */
+export const acquireRuntimeLaunchIdentity = (
+  context: CanonicalLaunchContext,
+  acquireCodex: () => PermissionLaunchIdentity = acquireCodexLaunchIdentity,
+): PermissionLaunchIdentity | null => (context.body === 'codex' ? acquireCodex() : null);
+
 /** Build a drift-sensitive resolver. Installed identities are re-read for every admission. */
 export const createRuntimeCandidateResolver = (dependencies: Readonly<{
   resolveClaude(): RuntimeInstalledIdentity;
-  resolveCodex(): RuntimeInstalledIdentity;
+  resolveCodex(identity: CodexLaunchIdentity): RuntimeInstalledIdentity;
   resolveAntigravity(): RuntimeInstalledIdentity;
   now(): string;
 }> = {
@@ -61,12 +75,13 @@ export const createRuntimeCandidateResolver = (dependencies: Readonly<{
   resolveCodex: resolveInstalledCodexBuildFingerprint,
   resolveAntigravity: resolveInstalledAgyBuildFingerprint,
   now: () => new Date().toISOString(),
-}) => (context: CanonicalLaunchContext) => {
+}) => (context: CanonicalLaunchContext, launchIdentity: PermissionLaunchIdentity | null = null) => {
   try {
     const installedIdentity = context.body === 'claude'
       ? dependencies.resolveClaude()
       : context.body === 'codex'
-        ? dependencies.resolveCodex()
+        // The SAME frozen object the launch will execute; never re-resolved here.
+        ? (launchIdentity ? dependencies.resolveCodex(launchIdentity as CodexLaunchIdentity) : null)
         : context.body === 'antigravity'
           ? dependencies.resolveAntigravity()
           : null;
@@ -89,6 +104,7 @@ const getGateway = (): ReturnType<typeof createExecutionPermissionGateway> => {
     authority: runtimeIdentity.authority,
     reference: CLAUDE_REFERENCE_VECTOR_V1,
     candidateFor: candidateForRuntime,
+    acquireLaunchIdentity: context => acquireRuntimeLaunchIdentity(context),
     capabilityArtifactDigest: PERMISSION_CAPABILITY_ARTIFACT_DIGEST,
     releaseBuild: runtimeIdentity.releaseBuild,
     manifestDigest: runtimeIdentity.manifestSha256,

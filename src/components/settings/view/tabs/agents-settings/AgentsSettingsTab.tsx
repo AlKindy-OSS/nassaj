@@ -29,6 +29,7 @@ export default function AgentsSettingsTab({
   initialLocalModels,
   onDestinationChange,
   onLocalModelsSelect,
+  onOpenSystemTab,
 }: AgentsSettingsTabProps) {
   const { t } = useTranslation('settings');
   // B-256: honour deep-link destination from ProviderSelectionEmptyState CTA.
@@ -254,6 +255,7 @@ export default function AgentsSettingsTab({
             codexPermissionMode={codexPermissionMode}
             onCodexPermissionModeChange={onCodexPermissionModeChange}
             projects={projects}
+            onOpenSystemTab={onOpenSystemTab}
           />
         </div>
       )}

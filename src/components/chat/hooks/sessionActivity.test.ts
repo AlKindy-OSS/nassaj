@@ -24,6 +24,7 @@ import {
   sessionActivityUrl,
   shouldClearLoadingAfterRecovery,
   shouldShowManualRefresh,
+  shouldShowResyncArrow,
 } from './sessionActivity';
 
 const SESSION = 'sess-A';
@@ -207,4 +208,22 @@ describe('single history recovery control', () => {
         isLoading, activitySourceAvailable: true }), true);
     });
   }
+});
+
+describe('T-1862 round 2 (qa HIGH) — shouldShowResyncArrow decoupled from plain idle', () => {
+  it('plain idle (no error, not stuck) never needs the arrow signal', () => {
+    assert.equal(shouldShowResyncArrow({ hasHistoryError: false, isStuck: false }), false);
+  });
+
+  it('a history error always needs it', () => {
+    assert.equal(shouldShowResyncArrow({ hasHistoryError: true, isStuck: false }), true);
+  });
+
+  it('a stuck live run needs it even with no history error', () => {
+    assert.equal(shouldShowResyncArrow({ hasHistoryError: false, isStuck: true }), true);
+  });
+
+  it('both at once still needs it', () => {
+    assert.equal(shouldShowResyncArrow({ hasHistoryError: true, isStuck: true }), true);
+  });
 });

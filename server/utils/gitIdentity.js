@@ -11,7 +11,6 @@
  * Fallback contract (attribution, not isolation):
  *   - No stored git_name/git_email  -> {} (commit falls back to system/global config).
  *   - No active GitHub token         -> null (push falls back to the shared remote).
- *   - origin not an https github URL -> null (skip token injection, push as-is).
  */
 
 import { userDb, githubTokensDb } from '../modules/database/index.js';
@@ -73,40 +72,4 @@ export function getUserGithubToken(userId) {
   } catch {
     return null;
   }
-}
-
-/**
- * Builds a token-authenticated https URL for a push, mirroring the existing
- * clone approach (`https://<token>@github.com/<owner>/<repo>.git`).
- *
- * Returns null — so the caller skips token injection and uses the stored remote
- * unchanged — when there is no token, or when the remote is not an https
- * github.com URL (SSH remotes, other hosts, agy/placeholder repos, missing
- * origin). The token is used only to build a transient URL passed directly to
- * `git push`; it is NEVER written into `.git/config` and NEVER logged.
- *
- * @param {string|null|undefined} remoteUrl resolved URL of the current remote
- * @param {string|null|undefined} token user's active GitHub token
- * @returns {string|null} token-embedded https URL, or null to fall back
- */
-export function buildTokenPushUrl(remoteUrl, token) {
-  if (!token || !remoteUrl) {
-    return null;
-  }
-
-  const url = remoteUrl.trim();
-
-  // Only inject into plain https github.com remotes. Anything else (SSH,
-  // git://, other hosts, or a URL that already embeds credentials) is left
-  // untouched so we never corrupt the remote or leak a token into a non-github
-  // host.
-  if (!/^https:\/\/github\.com\//i.test(url)) {
-    return null;
-  }
-  if (url.includes('@github.com')) {
-    // Remote already carries credentials — don't double-inject.
-    return null;
-  }
-
-  return url.replace(/^https:\/\/github\.com\//i, `https://${token}@github.com/`);
 }

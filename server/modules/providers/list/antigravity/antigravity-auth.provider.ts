@@ -2,8 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { resolveAgyExecutablePath } from '@/shared/cli-executable-path.js';
-import { isRunnableClaudeExecutable } from '@/shared/claude-cli-path.js';
+import { tryResolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
@@ -59,9 +58,9 @@ export class AntigravityProviderAuth implements IProviderAuth {
   }
 
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {
-    // The agy binary is a host install, never per-user; resolved exactly as the
-    // spawn resolves it (AGY_PATH → PATH → well-known dirs, B-1138).
-    const installed = isRunnableClaudeExecutable(resolveAgyExecutablePath());
+    // The agy binary is a host install, never per-user; resolved by the same
+    // harness registry the spawn uses (AGY_PATH server override → ~/.local/bin/agy).
+    const installed = tryResolveHarnessBinary('antigravity') !== null;
 
     if (!installed) {
       return {
@@ -70,7 +69,7 @@ export class AntigravityProviderAuth implements IProviderAuth {
         authenticated: false,
         email: null,
         method: null,
-        error: 'agy CLI not found (AGY_PATH, PATH, ~/.local/bin)',
+        error: 'agy CLI not found (AGY_PATH or ~/.local/bin/agy)',
       };
     }
 

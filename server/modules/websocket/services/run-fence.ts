@@ -191,6 +191,19 @@ class RunFenceController {
   }
 
   /**
+   * A declared session handover (see session-handover.ts) is never granted to
+   * a revoked run: the provider then keeps its stub and announces nothing.
+   */
+  requestSessionHandover(request: unknown): unknown {
+    if (this.revoked) return { accepted: false, reason: 'run_fence_revoked' };
+    const inner = this.input.inner as { requestSessionHandover?: (request: unknown) => unknown };
+    if (typeof inner.requestSessionHandover !== 'function') {
+      return { accepted: false, reason: 'handover_unavailable' };
+    }
+    return inner.requestSessionHandover(request);
+  }
+
+  /**
    * Persistence boundary. The sweep answers immediately via `revoked`; the
    * database re-check (R5) runs at most once per OUTPUT_ACCESS_RECHECK_MS and a
    * denial is sticky (qa M-B).
@@ -340,6 +353,7 @@ export function createRunFence(input: RunFenceInput): RunFence {
     send: (payload: unknown) => controller.send(payload),
     setSessionId: (sessionId: string) => controller.setSessionId(sessionId),
     isRunOutputRevoked: (sessionId?: string | null) => controller.isRunOutputRevoked(sessionId),
+    requestSessionHandover: (request: unknown) => controller.requestSessionHandover(request),
     get runFenceRevoked(): boolean { return controller.revoked; },
   });
   controller.fenced = fenced;

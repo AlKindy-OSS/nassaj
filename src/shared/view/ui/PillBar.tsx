@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
 
 import { cn } from '../../../lib/utils';
@@ -8,16 +9,23 @@ type PillBarProps = {
   className?: string;
 } & Omit<HTMLAttributes<HTMLDivElement>, 'className' | 'children'>;
 
-export function PillBar({ children, className, ...rest }: PillBarProps) {
+// T-1867: `ref` مُوجَّه إلى الحاوية — مصدر السكرول الأفقي في الجوّال — كي
+// يمكن تمرير اللصيقة النشطة إليه (`scrollIntoView`) عند تغيّر التبويب من
+// مصدرٍ غير النقر عليه مباشرة (رابط عميق، مؤشّر نصّي في قسم آخر).
+export const PillBar = forwardRef<HTMLDivElement, PillBarProps>(function PillBar(
+  { children, className, ...rest },
+  ref,
+) {
   return (
     <div
+      ref={ref}
       {...rest}
       className={cn('inline-flex items-center gap-[2px] rounded-lg bg-muted/60 p-[3px]', className)}
     >
       {children}
     </div>
   );
-}
+});
 
 /* ── Individual pill button ────────────────────────────────────── */
 type PillProps = {

@@ -114,8 +114,7 @@
   },
   "systemStats": {
     "cpuUsage": "CPU 사용량",
-    "memoryUsage": "메모리 사용량",
-    "hardwareToggleCollapsed": "하드웨어 사용량 위젯 토글"
+    "memoryUsage": "메모리 사용량"
   },
   "branding": {
     "openSource": "오픈 소스"
@@ -164,7 +163,9 @@
     "updateAvailable": "업데이트 가능",
     "newUpdate": "New update",
     "restartRequired": "서버 업데이트됨 — 재시작 필요",
-    "restartBannerAriaLabel": "서버 재시작 대기 중 — 자세한 내용을 보려면 클릭하세요"
+    "restartBannerAriaLabel": "서버 재시작 대기 중 — 자세한 내용을 보려면 클릭하세요",
+    "currentVersionLabel": "Nassaj v{{version}}",
+    "updateToLabel": "Update to"
   },
   "restart": {
     "modalTitle": "서버 재시작",

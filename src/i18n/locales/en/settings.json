@@ -22,8 +22,86 @@
     "logs": "Update log",
     "ownerOnly": "The owner can run updates; version status is visible to all members.",
     "glmManagedNote": "This is the OpenCode carrier status used by GLM; there is no second update action.",
-    "phase": { "queued": "Queued", "preflight": "Preflight check", "updating": "Updating", "verifying": "Verifying", "recovering": "Recovering", "done": "Done" },
-    "outcome": { "succeeded": "The tool update completed.", "failed": "The tool update failed.", "skipped-live": "The update was deferred for an active session.", "pinned-refused": "The pin policy refused the update." }
+    "autoUpdateMovedNote": "Automatic updates are configured from Settings → System",
+    "phase": {
+      "queued": "Queued",
+      "preflight": "Preflight check",
+      "updating": "Updating",
+      "verifying": "Verifying",
+      "recovering": "Recovering",
+      "done": "Done"
+    },
+    "outcome": {
+      "succeeded": "The tool update completed.",
+      "failed": "The tool update failed.",
+      "skipped-live": "The update was deferred for an active session.",
+      "pinned-refused": "The pin policy refused the update.",
+      "noop": "The installed version is already current.",
+      "rolled-back": "The update failed and the previous version was restored automatically.",
+      "rollback-failed": "Automatic safe rollback failed."
+    },
+    "compat": {
+      "installedLabel": "Installed version:",
+      "targetLabel": "Latest version:",
+      "state": {
+        "compatible": "Compatible",
+        "baseline": "Baseline as of {{date}}",
+        "untested": "Untested",
+        "incompatible": "Incompatible"
+      },
+      "reason": {
+        "pin-match": "Matches the pinned, reviewed version.",
+        "pin-armed-blocked": "Nassaj refuses to run this version: the security pin is armed.",
+        "glm-carrier-blocked": "GLM is blocked: Nassaj only accepts opencode {{reference}} as its carrier.",
+        "pin-mismatch-unreviewed": "This version has not been security-reviewed yet.",
+        "baseline-match": "Matches the recorded baseline version.",
+        "not-baselined": "No baseline data covers this version.",
+        "no-compat-data": "No compatibility data is available for this provider yet.",
+        "version-unknown": "The version could not be determined for comparison.",
+        "mode-blocked": "Nassaj blocks this mode: {{mode}}.",
+        "unknown": ""
+      },
+      "driftPrefix": "Changed from",
+      "driftTo": "to",
+      "driftSuffix": "outside Nassaj",
+      "driftDate": "on {{date}}"
+    },
+    "noop": "The installed version is already current.",
+    "rolledBack": "The update failed and the previous version was restored automatically.",
+    "rollbackFailed": "Automatic safe rollback failed. Owner intervention is required.",
+    "manualOnlyNote": "This tool only updates manually; the scheduler skips it.",
+    "notices": {
+      "dataNotBackedUp": "This tool's data is not backed up before an update.",
+      "selfUpdating": "This tool may update itself outside Nassaj."
+    },
+    "restoreCompatible": {
+      "button": "Restore compatible version",
+      "unverified": "This path has not been proven by a real restore on this host yet."
+    },
+    "rollback": {
+      "button": "Roll back to previous update",
+      "withData": "With data",
+      "panelToggle": "Rollback options",
+      "loading": "Loading rollback snapshots…",
+      "none": "No rollback snapshot is available for this tool."
+    },
+    "recovery": {
+      "retry": "Retry safe recovery",
+      "acknowledge": "Acknowledge"
+    },
+    "confirm": {
+      "title": "Confirm a sensitive action",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "expired": "The confirmation request expired. Refresh it for a new confirmation.",
+      "refresh": "Refresh request"
+    },
+    "actionError": {
+      "STORE_IN_USE": "The tool is using its data files right now; close it, then retry.",
+      "STORE_ACCESS_UNPROVABLE": "The tool is using its data files right now; close it, then retry.",
+      "INSUFFICIENT_STORAGE": "Not enough storage is available to update this tool safely.",
+      "generic": "The action could not be completed."
+    }
   },
   "harnessAutoUpdate": {
     "title": "Global automatic updates",
@@ -217,6 +295,7 @@
     "showToolCalls": "Show tool calls",
     "autoScrollToBottom": "Auto-scroll to bottom",
     "tabsIconOnly": "Compact tabs (icons only)",
+    "showHardwareUsage": "Show hardware usage",
     "sendByCtrlEnter": "Send by Ctrl+Enter",
     "sendByCtrlEnterDescription": "When enabled, pressing Ctrl+Enter will send the message instead of just Enter. This is useful for IME users to avoid accidental sends.",
     "dragHandle": {
@@ -326,6 +405,7 @@
     "users": "Users",
     "about": "About",
     "commandBoard": "Command Board",
+    "system": "System",
     "vendors": "Vendors & credentials"
   },
   "references": {
@@ -752,7 +832,7 @@
         "irukhaimi": "Al-Rukhaimi",
         "cursor": "Cursor",
         "codex": "Codex",
-          "custom": "Custom"
+        "custom": "Custom"
       },
       "custom": {
         "title": "Custom colors",
@@ -1164,7 +1244,7 @@
         "kimi-agents": "The neutral AGENTS.md copy inside KIMI_CODE_HOME, matched by sha256.",
         "opencode-agents": "The neutral AGENTS.md copy inside the OpenCode config home, matched by sha256.",
         "claude-md": "CLAUDE.md in the Claude config dir — normally a symlink into the governance source.",
-        "gemini-md": "GEMINI.md in agy's home — the file it actually ingests.",
+        "gemini-md": "AGENTS.md in agy's home — the file it actually ingests.",
         "nassaj-project-md": "Project instructions (NASSAJ.md, else CLAUDE.md) injected by nassaj into the first message of each new conversation.",
         "none": "No mechanism."
       },
@@ -1242,11 +1322,13 @@
       "inferred": "inferred"
     },
     "cell": {
+      "claudeLocalForbidden": "Local models on the Claude body are prohibited by ADR-163.",
       "claudeNative": "The engine Claude Code ships with, on the account already signed in here.",
       "claudeGlm": "Runs today: verified end to end on this machine.",
       "claudeKimi": "Runs today: kimi-k3 answered inside a Claude session here.",
       "claudeDeepseek": "The wire and the key are verified; only the DeepSeek account balance is missing. Topping it up is the sole remaining step.",
       "claudeZen": "Zen exposes no Anthropic-compatible endpoint, so the Claude body cannot be pointed at it.",
+      "opencodeLocal": "Local servers require administrator activation. Runtime verification is deferred.",
       "opencodeZen": "OpenCode's own engine. The path works; it bills against a Zen balance.",
       "opencodeGlm": "Runs today: returns real tokens through OpenCode.",
       "opencodeAnthropic": "API key only. Passing a personal Claude subscription through OpenCode is forbidden outright.",
@@ -1434,6 +1516,10 @@
       "title": "About Codex MCP",
       "description": ""
     }
+  },
+  "systemSettings": {
+    "title": "System",
+    "description": "Automatic updates, storage caps, and permission fences — owner settings for the whole server."
   },
   "commandBoardSettings": {
     "title": "Command Board",
@@ -1841,8 +1927,8 @@
   "error": "Error",
   "stop": "Stop",
   "tmpfsCap": {
-    "title": "Shared memory cap (/tmp)",
-    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "title": "Shared memory cap ({{path}})",
+    "description": "{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
     "desiredLabel": "Desired cap",
     "capped": "Capped",
     "uncapped": "No cap",

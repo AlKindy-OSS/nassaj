@@ -10,7 +10,23 @@ import { useGithubTokens } from './hooks/useGithubTokens';
 import { useGithubRepos } from './hooks/useGithubRepos';
 import { cloneWorkspaceWithProgress, createProjectRequest } from './data/workspaceApi';
 import { isCloneWorkflow } from './utils/pathUtils';
-import type { GithubRepository, GithubSourceMode, TokenMode, WizardFormState, WizardStep } from './types';
+import { CloneWorkspaceError } from './types';
+import type {
+  CloneWorkspaceErrorCode,
+  GithubRepository,
+  GithubSourceMode,
+  TokenMode,
+  WizardFormState,
+  WizardStep,
+} from './types';
+
+const CLONE_ERROR_I18N_KEYS: Record<CloneWorkspaceErrorCode, string> = {
+  INVALID_CLONE_REQUEST: 'projectWizard.errors.invalidCloneRequest',
+  INVALID_GITHUB_URL: 'projectWizard.errors.invalidGithubUrl',
+  CLONE_TICKET_LIMIT_REACHED: 'projectWizard.errors.cloneTicketLimitReached',
+  AUTHENTICATION_REQUIRED: 'projectWizard.errors.authenticationRequired',
+  CLONE_TICKET_CREATE_FAILED: 'projectWizard.errors.cloneTicketCreateFailed',
+};
 
 type ProjectCreationWizardProps = {
   onClose: () => void;
@@ -151,6 +167,11 @@ export default function ProjectCreationWizard({
           },
           {
             onProgress: setCloneProgress,
+            onTicketCreated: () => {
+              // The raw PAT already reached the server; drop it from local
+              // form state so it doesn't linger longer than needed.
+              setFormState((previous) => ({ ...previous, newGithubToken: '' }));
+            },
           },
         );
 
@@ -166,11 +187,16 @@ export default function ProjectCreationWizard({
       onProjectCreated?.(project);
       onClose();
     } catch (createError) {
-      const errorMessage =
-        createError instanceof Error
-          ? createError.message
-          : t('projectWizard.errors.failedToCreate');
-      setError(errorMessage);
+      if (createError instanceof CloneWorkspaceError) {
+        const i18nKey = createError.code ? CLONE_ERROR_I18N_KEYS[createError.code] : null;
+        setError(i18nKey ? t(i18nKey) : t('projectWizard.errors.failedToCreate'));
+      } else {
+        const errorMessage =
+          createError instanceof Error
+            ? createError.message
+            : t('projectWizard.errors.failedToCreate');
+        setError(errorMessage);
+      }
     } finally {
       setIsCreating(false);
     }

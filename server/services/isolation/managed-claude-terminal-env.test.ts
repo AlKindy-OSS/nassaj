@@ -1,8 +1,9 @@
 /**
- * B-1058: the managed terminal launcher must find a Claude binary that a
- * pm2/systemd-launched server cannot see on its minimal PATH (native installer
- * in ~/.local/bin). Regression seen on a fleet node after 1.47.0.9:
- * "Claude executable not found before installing the managed terminal launcher".
+ * B-1058 / T-1873: the managed terminal launcher runs the ONE claude the harness
+ * registry resolves — the native installer's `~/.local/bin/claude` under the
+ * OPERATOR home (or the server `CLAUDE_CLI_PATH` override). A pm2/systemd
+ * server's minimal PATH, the PTY's isolated HOME and a member env's
+ * CLAUDE_CLI_PATH never change which binary runs.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,8 +13,8 @@ import test from 'node:test';
 
 import {
   installManagedClaudeTerminalEnv,
+  MANAGED_CLAUDE_WRAPPER,
   resolveRealClaudeBinary,
-  wellKnownClaudeInstallCandidates,
 } from './managed-claude-terminal-env.js';
 
 const SYSTEM_PATH = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/games'].join(path.delimiter);
@@ -24,89 +25,70 @@ function makeExecutable(file: string): string {
   return file;
 }
 
-function withTempHome<T>(fn: (home: string) => T): T {
+/** Runs `fn` with a temp OPERATOR home ($HOME) and no server CLAUDE_CLI_PATH. */
+function withOperatorHome<T>(fn: (home: string) => T): T {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'b1058-home-'));
+  const saved = { HOME: process.env.HOME, CLAUDE_CLI_PATH: process.env.CLAUDE_CLI_PATH };
+  process.env.HOME = home;
+  delete process.env.CLAUDE_CLI_PATH;
   try {
     return fn(home);
   } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     fs.rmSync(home, { recursive: true, force: true });
   }
 }
 
-test('B-1058: falls back to the native installer path ~/.local/bin/claude when PATH lacks it', () => {
-  withTempHome((home) => {
+test('resolves the native installer path under the operator home', () => {
+  withOperatorHome((home) => {
     const real = makeExecutable(path.join(home, '.local', 'bin', 'claude'));
-    const env = { HOME: home, PATH: SYSTEM_PATH } as NodeJS.ProcessEnv;
-    delete env.CLAUDE_CLI_PATH;
-    const resolved = resolveRealClaudeBinary(env, 'claude', {
-      // Only the temp HOME exists; every system PATH entry is treated as missing.
-      existsSync: (p) => String(p).startsWith(home) && fs.existsSync(p),
-    });
-    assert.equal(resolved, path.resolve(real));
+    assert.equal(resolveRealClaudeBinary(), path.resolve(real));
   });
 });
 
-test('B-1058: a PATH hit still wins over the well-known install dirs', () => {
-  withTempHome((home) => {
-    makeExecutable(path.join(home, '.local', 'bin', 'claude'));
-    const onPath = makeExecutable(path.join(home, 'custom-bin', 'claude'));
-    const env = {
-      HOME: home,
+test('a claude found first on some PATH never wins over the registry', () => {
+  withOperatorHome((home) => {
+    const real = makeExecutable(path.join(home, '.local', 'bin', 'claude'));
+    makeExecutable(path.join(home, 'custom-bin', 'claude'));
+    const base = {
+      HOME: path.join(home, 'member'),
       PATH: [path.join(home, 'custom-bin'), SYSTEM_PATH].join(path.delimiter),
+      CLAUDE_CLI_PATH: path.join(home, 'custom-bin', 'claude'),
     } as NodeJS.ProcessEnv;
-    assert.equal(resolveRealClaudeBinary(env, 'claude'), path.resolve(onPath));
+    const env = installManagedClaudeTerminalEnv(base, { userId: 7, mode: 'general' });
+    assert.equal(env.NASSAJ_MANAGED_CLAUDE_REAL_BIN, path.resolve(real));
+    assert.equal(env.NASSAJ_MANAGED_CLAUDE_MODE, 'general');
   });
 });
 
-test('B-1058: well-known candidates are ordered native → legacy local → npm-global → /usr/local/bin', () => {
-  const list = wellKnownClaudeInstallCandidates({ HOME: '/home/user' } as NodeJS.ProcessEnv, 'claude');
-  assert.deepEqual(list, [
-    '/home/user/.local/bin/claude',
-    '/home/user/.claude/local/claude',
-    '/home/user/.claude/local/bin/claude',
-    '/home/user/.npm-global/bin/claude',
-    '/usr/local/bin/claude',
-  ]);
-  assert.deepEqual(
-    wellKnownClaudeInstallCandidates({} as NodeJS.ProcessEnv, 'claude'),
-    ['/usr/local/bin/claude'],
-    'no HOME ⇒ only the system-wide candidate',
-  );
+test('the server CLAUDE_CLI_PATH override is honoured', () => {
+  withOperatorHome((home) => {
+    const custom = makeExecutable(path.join(home, 'opt', 'claude'));
+    process.env.CLAUDE_CLI_PATH = custom;
+    assert.equal(resolveRealClaudeBinary(), custom);
+  });
 });
 
-test('B-1058: the error names the command, HOME, and the CLAUDE_CLI_PATH remedy', () => {
-  withTempHome((home) => {
-    const env = { HOME: home, PATH: SYSTEM_PATH } as NodeJS.ProcessEnv;
+test('the error keeps the publishable prefix and names the CLAUDE_CLI_PATH remedy', () => {
+  withOperatorHome(() => {
     assert.throws(
-      () => resolveRealClaudeBinary(env, 'claude', { existsSync: () => false }),
+      () => resolveRealClaudeBinary(),
       (error: unknown) => {
         const message = (error as Error).message;
         return message.startsWith('Claude executable not found before installing the managed terminal launcher')
-          && message.includes(`HOME=${home}`)
+          && message.includes('~/.local/bin/claude')
           && message.includes('CLAUDE_CLI_PATH');
       },
     );
   });
 });
 
-test('B-1058: installManagedClaudeTerminalEnv records the fallback binary as the real bin', () => {
-  withTempHome((home) => {
-    const real = makeExecutable(path.join(home, '.local', 'bin', 'claude'));
-    const base = { HOME: home, PATH: SYSTEM_PATH } as NodeJS.ProcessEnv;
-    // Use a working dir whose PATH really lacks claude: mask CLAUDE_CLI_PATH.
-    const saved = process.env.CLAUDE_CLI_PATH;
-    delete process.env.CLAUDE_CLI_PATH;
-    try {
-      const env = installManagedClaudeTerminalEnv(base, { userId: 7, mode: 'general' });
-      // The launcher only wins when the system PATH genuinely has no claude;
-      // on a dev box that has one, the PATH hit is the correct answer instead.
-      const expectedFromPath = SYSTEM_PATH.split(path.delimiter)
-        .map((dir) => path.join(dir, 'claude'))
-        .find((file) => fs.existsSync(file));
-      assert.equal(env.NASSAJ_MANAGED_CLAUDE_REAL_BIN, expectedFromPath ?? path.resolve(real));
-      assert.equal(env.NASSAJ_MANAGED_CLAUDE_MODE, 'general');
-    } finally {
-      if (saved !== undefined) process.env.CLAUDE_CLI_PATH = saved;
-    }
+test('the launcher never resolves to its own shim', () => {
+  withOperatorHome(() => {
+    process.env.CLAUDE_CLI_PATH = MANAGED_CLAUDE_WRAPPER;
+    assert.throws(() => resolveRealClaudeBinary(), /managed terminal launcher itself/);
   });
 });

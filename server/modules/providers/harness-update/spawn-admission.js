@@ -6,7 +6,7 @@
  *
  * WHY A SEPARATE, DEPENDENCY-LIGHT MODULE. `update.service.ts` already exposes
  * `isHarnessSpawnBlocked`, but it reaches it through `descriptors.ts`, which
- * imports the provider CLI resolvers (`resolveCursorBinaryPath` etc.) — so a CLI
+ * imported the provider CLI resolvers before T-1873 (`resolveCursorBinaryPath` etc.) — so a CLI
  * spawn file importing the service would form an import cycle CLI → service →
  * descriptors → CLI. This module depends ONLY on the lease (`lease.ts`, which
  * imports nothing) plus a frozen run-provider→harness map, so any spawn file can
@@ -68,6 +68,7 @@ import { createNormalizedMessage } from '../../../shared/utils.js';
 import { appConfigDb } from '../../database/repositories/app-config.js';
 
 import { isHarnessLeased } from './lease.js';
+import { sharedSpawnLedger } from './spawn-ledger.js';
 
 const RECOVERY_BLOCK_PREFIX = 'harness_update_recovery_failed:';
 
@@ -112,14 +113,47 @@ export const RUN_PROVIDER_TO_HARNESS = Object.freeze({
 });
 
 /**
- * True when a spawn of `runProviderId` must be refused because its harness is
- * mid-update. Unknown run ids (no updatable harness) are never blocked.
+ * Harnesses whose boot reconcile (T-1871 §8) has not resolved yet. Spawns of
+ * such a harness stay blocked until reconcile clears it.
+ * @type {Set<string>}
+ */
+const reconcilePending = new Set();
+
+/** Blocks spawns of `harnessId` until its boot reconcile resolves. */
+export function markHarnessReconcilePending(harnessId) {
+  reconcilePending.add(harnessId);
+}
+
+/** Lifts the reconcile block of `harnessId`. */
+export function clearHarnessReconcilePending(harnessId) {
+  reconcilePending.delete(harnessId);
+}
+
+/**
+ * THE single admission path (T-1871 qa condition 2): every spawn guard —
+ * `refuseSpawnIfHarnessUpdating`, `assertHarnessNotUpdating`,
+ * `beginHarnessLaunch` and the boolean form used by writer-less sites — ends
+ * here. True when a spawn of `runProviderId` must be refused because its
+ * harness is mid-update, recovery-blocked or not yet reconciled at boot.
+ * Unknown run ids (no updatable harness) are never blocked.
+ *
+ * An ADMITTED spawn is noted in the durable spawn ledger BEFORE the caller
+ * creates the child (the first spawn after an update success is fsynced). A
+ * guard that admits twice for one launch (writer frame, then reservation)
+ * counts twice: over-counting only ever asks for a data-loss acknowledgement
+ * the owner might not strictly need, never the reverse. The ledger never
+ * throws; a write failure marks the run unknown (= spawned).
  * @param {string} runProviderId
  * @returns {boolean}
  */
 export function isSpawnBlockedForRunProvider(runProviderId) {
   const harnessId = RUN_PROVIDER_TO_HARNESS[runProviderId];
-  return harnessId ? isHarnessLeased(harnessId) || isHarnessRecoveryBlocked(harnessId) : false;
+  if (!harnessId) return false;
+  const blocked = isHarnessLeased(harnessId)
+    || reconcilePending.has(harnessId)
+    || isHarnessRecoveryBlocked(harnessId);
+  if (!blocked) sharedSpawnLedger().noteSpawn(harnessId);
+  return blocked;
 }
 
 /** User-facing (generic, retryable) refusal message. */
@@ -219,9 +253,10 @@ export function hasLiveHarnessLaunch(runProviderIds) {
   return false;
 }
 
-/** Test hook: drop every tracked launch. Never used on the request path. */
+/** Test hook: drop every tracked launch and reconcile block. Never used on the request path. */
 export function _resetHarnessLaunches() {
   liveLaunches.clear();
+  reconcilePending.clear();
 }
 
 /**

@@ -44,6 +44,7 @@ export default function HarnessAutoUpdateSection({ viewerRole }: { viewerRole?: 
   const fallbackDate = t('harnessAutoUpdate.notYet', { defaultValue: 'لا يوجد' });
 
   return <SettingsSection
+    icon={RefreshCw}
     title={t('harnessAutoUpdate.title', { defaultValue: 'التحديث التلقائي العام' })}
     description={t('harnessAutoUpdate.description', { defaultValue: 'إعداد عام يطبّق على أدوات المزوّدين المدعومة.' })}
   >

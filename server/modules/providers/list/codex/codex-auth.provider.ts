@@ -2,10 +2,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { resolveCodexRuntime } from '@/shared/codex-executable.js';
+import { resolveCodexMachineRuntime } from '@/shared/codex-executable.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
-import { isCliInstalled, readObjectRecord, readOptionalString } from '@/shared/utils.js';
+import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
 import { operatorCodexHome } from './codex-home.js';
 
@@ -16,10 +16,10 @@ type CodexCredentialsStatus = {
   error?: string;
 };
 
-/** True when the SDK-bundled native codex binary resolves on this host. */
-const isCodexSdkRuntimeAvailable = (): boolean => {
+/** True when the machine Codex release (T-1872) resolves with a valid layout on this host. */
+const isCodexMachineRuntimeAvailable = (): boolean => {
   try {
-    resolveCodexRuntime();
+    resolveCodexMachineRuntime();
     return true;
   } catch {
     return false;
@@ -27,16 +27,16 @@ const isCodexSdkRuntimeAvailable = (): boolean => {
 };
 
 export class CodexProviderAuth implements IProviderAuth {
-  /** @param sdkRuntimeAvailable test seam for the SDK-bundled binary probe. */
-  constructor(private readonly sdkRuntimeAvailable: () => boolean = isCodexSdkRuntimeAvailable) {}
+  /** @param machineRuntimeAvailable test seam for the machine-release probe. */
+  constructor(private readonly machineRuntimeAvailable: () => boolean = isCodexMachineRuntimeAvailable) {}
 
   /**
-   * Checks whether Codex is available to the server runtime. Chat turns run the
-   * SDK-bundled native binary (resolveCodexRuntime), never PATH — so that binary
-   * is the truth for "installed" (B-1138); a host CLI is the fallback.
+   * Checks whether Codex is available to the server runtime. Every launch runs
+   * the machine release (resolveCodexMachineRuntime), never PATH and never the
+   * SDK-bundled copy — so that release alone is the truth for "installed".
    */
   private checkInstalled(): boolean {
-    return this.sdkRuntimeAvailable() || isCliInstalled('codex');
+    return this.machineRuntimeAvailable();
   }
 
   /**

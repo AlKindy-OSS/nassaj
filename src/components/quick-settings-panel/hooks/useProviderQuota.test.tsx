@@ -75,7 +75,11 @@ describe('useProviderQuota', () => {
   it.each([
     { label: 'positive', credits: { balance: 125.5, unlimited: false } },
     { label: 'zero', credits: { balance: 0, unlimited: false } },
-    { label: 'unlimited', credits: { balance: 0, unlimited: true } },
+    { label: 'unlimited with balance', credits: { balance: 0, unlimited: true } },
+    // Unlimited pools may arrive with no measurable balance at all (no cap to
+    // report) — `null` is a valid "∞" signal, not a missing amount.
+    { label: 'unlimited with null balance', credits: { balance: null, unlimited: true } },
+    { label: 'unlimited with missing balance', credits: { unlimited: true } },
   ])('preserves $label credits without quota windows', async ({ credits }) => {
     const { result } = renderHook(() => useProviderQuota('codex', null, true));
     await settle(calls[0], response(200, { ...CODEX_BODY, windows: [], extraUsageCredits: credits }));
@@ -83,7 +87,8 @@ describe('useProviderQuota', () => {
     expect(result.current.status).toBe('success');
     expect(result.current.windows).toEqual([]);
     if (result.current.status !== 'success') throw new Error('Expected quota success');
-    expect(result.current.data.extraUsageCredits).toEqual(credits);
+    const expected = 'balance' in credits ? credits : { balance: null, unlimited: true };
+    expect(result.current.data.extraUsageCredits).toEqual(expected);
   });
 
   it.each([
@@ -94,7 +99,7 @@ describe('useProviderQuota', () => {
     { label: 'non-finite balance', credits: { balance: Infinity, unlimited: false } },
     { label: 'NaN balance', credits: { balance: NaN, unlimited: false } },
     { label: 'string balance', credits: { balance: '25', unlimited: false } },
-    { label: 'missing balance', credits: { unlimited: true } },
+    { label: 'missing balance (bounded)', credits: { unlimited: false } },
     { label: 'missing unlimited', credits: { balance: 25 } },
     { label: 'non-boolean unlimited', credits: { balance: 25, unlimited: 'false' } },
   ])('omits $label credits without inventing a zero balance', async ({ credits }) => {

@@ -114,8 +114,7 @@
   },
   "systemStats": {
     "cpuUsage": "CPU使用率",
-    "memoryUsage": "メモリ使用率",
-    "hardwareToggleCollapsed": "ハードウェア使用状況を表示/非表示"
+    "memoryUsage": "メモリ使用率"
   },
   "branding": {
     "openSource": "オープンソース"
@@ -164,7 +163,9 @@
     "updateAvailable": "アップデートあり",
     "newUpdate": "New update",
     "restartRequired": "サーバーが更新されました — 再起動が必要です",
-    "restartBannerAriaLabel": "サーバーの再起動が保留中です — 詳細はクリックしてください"
+    "restartBannerAriaLabel": "サーバーの再起動が保留中です — 詳細はクリックしてください",
+    "currentVersionLabel": "Nassaj v{{version}}",
+    "updateToLabel": "Update to"
   },
   "restart": {
     "modalTitle": "サーバー再起動",

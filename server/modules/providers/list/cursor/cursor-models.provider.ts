@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
 
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
-import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderChangeActiveModelInput,
@@ -651,7 +651,7 @@ const runCursorListModels = (): Promise<string> => new Promise((resolve, reject)
   const releaseLaunch = beginHarnessLaunch('cursor');
   let cursorProcess;
   try {
-    cursorProcess = spawnFunction(resolveCliExecutablePath('cursor-agent'), ['--list-models'], {
+    cursorProcess = spawnFunction(resolveHarnessBinary('cursor'), ['--list-models'], {
       env: { ...process.env },
     });
   } catch (error) {

@@ -29,7 +29,7 @@ function ModelFields({ model, onChange, onRemove }: { model: LocalModel; onChang
       <Field title={t('localModels.modelName')}><Input dir="inherit" maxLength={160} value={model.name ?? ''} onChange={event => onChange({ ...model, name: event.target.value || undefined })} /></Field>
       {sizeField('contextWindow')}{sizeField('maxOutput')}
     </div>
-    <Button type="button" variant="ghost" className="min-h-11 text-danger" onClick={onRemove}><Trash2 aria-hidden="true" />{t('localModels.removeModel')}</Button>
+    <Button type="button" variant="ghost" size="lg" className="px-4 text-danger" onClick={onRemove}><Trash2 aria-hidden="true" />{t('localModels.removeModel')}</Button>
   </div>;
 }
 
@@ -73,10 +73,10 @@ export default function LocalServerForm({ server, busy, onSave, onClose }: Props
       {value.models.map((model, index) => <ModelFields key={index} model={model}
         onChange={updated => setValue({ ...value, models: value.models.map((row, i) => i === index ? updated : row) })}
         onRemove={() => setValue({ ...value, models: value.models.filter((_, i) => i !== index) })} />)}
-      <Button type="button" variant="outline" className="min-h-11" disabled={value.models.length >= 200} onClick={() => setValue({ ...value, models: [...value.models, { id: '' }] })}><Plus aria-hidden="true" />{t('localModels.addModel')}</Button>
+      <Button type="button" variant="outline" size="lg" className="px-4" disabled={value.models.length >= 200} onClick={() => setValue({ ...value, models: [...value.models, { id: '' }] })}><Plus aria-hidden="true" />{t('localModels.addModel')}</Button>
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" className="min-h-11">{t(busy ? 'localModels.saving' : 'localModels.save')}</Button>
-        <Button type="button" variant="ghost" className="min-h-11" onClick={onClose}>{t('localModels.cancel')}</Button>
+        <Button type="submit" size="lg" className="px-4">{t(busy ? 'localModels.saving' : 'localModels.save')}</Button>
+        <Button type="button" variant="ghost" size="lg" className="px-4" onClick={onClose}>{t('localModels.cancel')}</Button>
       </div>
     </fieldset>
   </form>;

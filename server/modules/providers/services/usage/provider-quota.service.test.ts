@@ -112,8 +112,10 @@ test('codex: تحويل النافذة الأساسية وتمرير رصيد ا
   assert.equal(state.urls[0], 'https://chatgpt.com/backend-api/wham/usage');
   assert.equal(state.headers[0].Authorization, 'Bearer fake-access-token');
 
-  // لا هوية ولا كائن credits الخام في المخرج؛ العقد يمرّر الحقلين اللازمين للعرض فقط.
-  assert.deepEqual(result.extraUsageCredits, { balance: 0, unlimited: false });
+  // الردّ الحيّ لخطة بلا رصيد: has_credits=false مع balance="0" ⇒ لا رصيد (يُخفى)،
+  // لا صفرٌ مُلفَّق. ولا هوية ولا كائن credits الخام في المخرج.
+  assert.equal(result.extraUsageCredits, undefined);
+  assert.equal('extraUsageCredits' in result, false);
   const serialized = JSON.stringify(result);
   for (const forbidden of ['email', 'user_id', 'account_id', 'has_credits']) {
     assert.equal(serialized.includes(forbidden), false, `${forbidden} يجب ألا يعبر العقد`);
@@ -249,6 +251,86 @@ test('codex: balance يقبل عشرياً صريحاً فقط ودقةً آمن
     credential: 'fake-access-token',
   });
   assert.deepEqual(result?.extraUsageCredits, { balance: Number.MAX_SAFE_INTEGER, unlimited: true });
+});
+
+async function codexCreditsFor(credits: unknown, extra: Record<string, unknown> = {}) {
+  providerQuotaService.__resetCache();
+  const { impl } = countingFetch({ ...CODEX_LIVE_BODY, ...extra, credits });
+  return providerQuotaService.getWindows('codex', 'u1', {
+    fetchImpl: impl,
+    credential: 'fake-access-token',
+  });
+}
+
+test('codex credits rule: plan without a credit pool is hidden, never zero', async () => {
+  for (const credits of [
+    { has_credits: false, unlimited: false, balance: '0' },
+    { has_credits: false, unlimited: false, balance: '5' },
+    { has_credits: false, unlimited: true, balance: null },
+  ]) {
+    const result = await codexCreditsFor(credits);
+    assert.ok(result, 'windows still returned');
+    assert.equal(result.extraUsageCredits, undefined, JSON.stringify(credits));
+  }
+});
+
+test('codex credits rule: confirmed pool at zero is reported as zero', async () => {
+  const result = await codexCreditsFor({ has_credits: true, unlimited: false, balance: '0' });
+  assert.deepEqual(result?.extraUsageCredits, { balance: 0, unlimited: false });
+});
+
+test('codex credits rule: positive balance is shown', async () => {
+  const result = await codexCreditsFor({ has_credits: true, unlimited: false, balance: '3.40' });
+  assert.deepEqual(result?.extraUsageCredits, { balance: 3.4, unlimited: false });
+});
+
+test('codex credits rule: confirmed unlimited is shown even without a balance', async () => {
+  const noBalance = await codexCreditsFor({ has_credits: true, unlimited: true, balance: null });
+  assert.deepEqual(noBalance?.extraUsageCredits, { balance: null, unlimited: true });
+  const legacy = await codexCreditsFor({ unlimited: true });
+  assert.deepEqual(legacy?.extraUsageCredits, { balance: null, unlimited: true });
+});
+
+test('codex credits rule: missing or malformed credits are hidden', async () => {
+  for (const credits of [
+    undefined,
+    null,
+    'x',
+    [],
+    {},
+    { has_credits: true, balance: '4' },
+    { has_credits: true, unlimited: false },
+    { has_credits: true, unlimited: false, balance: null },
+    { has_credits: 'yes', unlimited: false, balance: '4' },
+  ]) {
+    const result = await codexCreditsFor(credits);
+    assert.equal(result?.extraUsageCredits, undefined, JSON.stringify(credits));
+  }
+});
+
+test('codex credits rule: without has_credits only an unambiguous value is shown', async () => {
+  const zero = await codexCreditsFor({ unlimited: false, balance: '0' });
+  assert.equal(zero?.extraUsageCredits, undefined, 'bare zero may mean no pool');
+  const positive = await codexCreditsFor({ unlimited: false, balance: '2' });
+  assert.deepEqual(positive?.extraUsageCredits, { balance: 2, unlimited: false });
+});
+
+test('codex credits rule: fetch error yields no credits and no payload', async () => {
+  providerQuotaService.__resetCache();
+  const { impl } = countingFetch({ credits: { has_credits: true, unlimited: false, balance: '9' } }, false, 500);
+  const result = await providerQuotaService.getWindows('codex', 'u1', {
+    fetchImpl: impl,
+    credential: 'fake-access-token',
+  });
+  assert.equal(result, null);
+});
+
+test('codex credits rule: no windows and no pool yields null', async () => {
+  const result = await codexCreditsFor(
+    { has_credits: false, unlimited: false, balance: '0' },
+    { rate_limit: null },
+  );
+  assert.equal(result, null);
 });
 
 test('glm: ثلاث نوافذ، والنسبة هي المستهلك، والترويسة بلا Bearer', async () => {

@@ -205,3 +205,25 @@ export function resolveScrollResyncRoute({
   if (showManualRefresh) return 'manualRefresh';
   return 'scrollOnly';
 }
+
+/**
+ * T-1862 round 2 (qa HIGH): هل تظهر إشارة «تحتاج مزامنة» على سهم النزول
+ * بصرف النظر عن موضع التمرير؟
+ *
+ * لم تكن `showResync` (ChatInterface) تُميّز — تساوي `showManualRefresh`
+ * الذي يعود `true` لمجرّد الخمول (`!isLoading`)، فالسهم يظهر دائماً حتى في
+ * أسفل المحادثة تماماً بلا سببٍ حقيقي. الشرط الحقيقي كما وثّقه تعليق الزرّ
+ * أصلاً: خطأ تاريخ صريح، أو جلسة عالقة (probeSessionActivity أطلق تحرّياً
+ * واحداً على الأقل أثناء تشغيل حيّ ولم يُحسم بعد) — لا الخمول العادي.
+ * «محتوى جديد لم يُشاهَد» يغطّيه `isUserScrolledUp` نفسه (بعد إصلاح
+ * إعادة تقييمه عند نمو المحتوى)، فلا حاجة لعلمٍ ثالث هنا.
+ */
+export function shouldShowResyncArrow({
+  hasHistoryError,
+  isStuck,
+}: {
+  hasHistoryError: boolean;
+  isStuck: boolean;
+}): boolean {
+  return hasHistoryError || isStuck;
+}
