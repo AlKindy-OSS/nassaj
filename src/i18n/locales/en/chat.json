@@ -675,7 +675,8 @@
       "analyzing": "Analyzing",
       "working": "Working",
       "computing": "Computing",
-      "reasoning": "Reasoning"
+      "reasoning": "Reasoning",
+      "waitingPermission": "Waiting for permission"
     },
     "state": {
       "live": "Live",

@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "CPU 使用率",
-    "memoryUsage": "内存使用率"
+    "memoryUsage": "内存使用率",
+    "hardwareToggleCollapsed": "切换硬件使用情况显示"
   },
   "branding": {
     "openSource": "开源"

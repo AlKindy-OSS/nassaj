@@ -1,4 +1,4 @@
-import { Archive, CheckSquare, Lock, MoreHorizontal, RotateCcw, Square, Trash2, Unlock, X } from 'lucide-react';
+import { Archive, CheckSquare, Lock, MoreHorizontal, RotateCcw, Square, Trash2, Unlock } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,7 +25,6 @@ export default function SidebarBulkToolbar({
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const wasMoreOpenRef = useRef(false);
   const disabled = selectedCount === 0 || isBusy || !isAvailable;
   const unavailableReason = t('bulk.unavailable', 'Bulk changes are unavailable until the server update completes.');
@@ -38,19 +37,21 @@ export default function SidebarBulkToolbar({
   ) => (
     <button
       type="button"
+      role={inMoreDialog ? 'menuitem' : undefined}
       disabled={disabled}
       title={!isAvailable ? unavailableReason : undefined}
-      onClick={() => onAction(action)}
+      onClick={() => { onAction(action); if (inMoreDialog) setMoreOpen(false); }}
       className={cn(
-        'bulk-more-action flex min-h-11 items-center justify-start gap-1 rounded-md px-1.5 text-[11px] font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 md:min-h-8 md:px-1',
-        inMoreDialog && 'bulk-more-dialog-button',
+        inMoreDialog
+          ? 'bulk-more-dialog-button bulk-more-action flex min-h-11 w-full items-center justify-start gap-2 rounded-md px-2 text-xs font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 md:min-h-9'
+          : 'bulk-more-action flex min-h-11 items-center justify-start gap-1 rounded-md px-1.5 text-[11px] font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 md:min-h-8 md:px-1',
         destructive ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-accent',
       )}
     >{icon}{label}</button>
   );
 
   const utilityButton = (label: string, onClick: () => void, icon: ReactNode, disabledValue = false) => (
-    <button type="button" disabled={disabledValue} onClick={onClick} className="bulk-more-dialog-button bulk-more-action flex min-h-11 items-center justify-start gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45 md:min-h-8 md:px-1">{icon}{label}</button>
+    <button type="button" role="menuitem" disabled={disabledValue} onClick={() => { onClick(); setMoreOpen(false); }} className="bulk-more-dialog-button bulk-more-action flex min-h-11 w-full items-center justify-start gap-2 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 md:min-h-9">{icon}{label}</button>
   );
 
   useEffect(() => {
@@ -63,13 +64,12 @@ export default function SidebarBulkToolbar({
     }
 
     wasMoreOpenRef.current = true;
-    closeButtonRef.current?.focus();
+    dialogRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
     const keepFocusInDialog = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setMoreOpen(false);
         return;
       }
-      if (event.key !== 'Tab') return;
 
       const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -77,20 +77,38 @@ export default function SidebarBulkToolbar({
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        focusable[(activeIndex + step + focusable.length) % focusable.length]?.focus();
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        (event.key === 'Home' ? first : last).focus();
+      } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (event.key === 'Tab' && !event.shiftKey && document.activeElement === last) {
         event.preventDefault();
         first.focus();
       }
     };
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node
+        && !dialogRef.current?.contains(target)
+        && !moreButtonRef.current?.contains(target)) setMoreOpen(false);
+    };
     document.addEventListener('keydown', keepFocusInDialog);
-    return () => document.removeEventListener('keydown', keepFocusInDialog);
+    document.addEventListener('pointerdown', closeOutside, true);
+    return () => {
+      document.removeEventListener('keydown', keepFocusInDialog);
+      document.removeEventListener('pointerdown', closeOutside, true);
+    };
   }, [moreOpen]);
 
   return (
-    <div className="sticky top-0 z-20 min-h-11 bg-background px-2 md:h-9 md:min-h-9" aria-label={t('bulk.actions', 'Bulk actions')}>
+    <div className="sticky top-0 z-20 min-h-11 bg-background px-2 md:relative md:h-9 md:min-h-9" aria-label={t('bulk.actions', 'Bulk actions')}>
       {/* The presence strip owns the selection count and exit control. This row
           deliberately owns actions only, avoiding duplicate state summaries. */}
       <div className="flex h-full min-h-11 min-w-0 items-center gap-1 md:min-h-9">
@@ -101,25 +119,16 @@ export default function SidebarBulkToolbar({
         <button
           ref={moreButtonRef}
           type="button"
-          onClick={() => setMoreOpen(true)}
+          onClick={() => setMoreOpen((open) => !open)}
           className="bulk-more-trigger flex min-h-11 min-w-11 items-center justify-center rounded-md text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:size-8 md:min-h-8 md:min-w-8"
           aria-label={t('bulk.moreActions', 'More actions')}
           aria-expanded={moreOpen}
+          aria-haspopup="menu"
         ><MoreHorizontal className="h-4 w-4" /></button>
       </div>
       {moreOpen && (
-        <div ref={dialogRef} className="bulk-more-dialog fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background p-1 shadow-2xl md:absolute md:inset-x-auto md:end-0 md:top-full md:mt-1 md:w-fit md:max-w-[200px] md:rounded-lg md:border" role="dialog" aria-modal="true" aria-label={t('bulk.moreActions', 'More actions')}>
-          <div className="bulk-more-dialog-header flex h-9 items-center justify-between px-1 md:h-8 md:px-0.5">
-            <h2 className="text-xs font-medium">{t('bulk.moreActions', 'More actions')}</h2>
-            <button
-              ref={closeButtonRef}
-              type="button"
-              onClick={() => setMoreOpen(false)}
-              className="bulk-more-close flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:size-8"
-              aria-label={t('bulk.closeMenu', 'Close menu')}
-            ><X className="h-4 w-4" /></button>
-          </div>
-          <div className="bulk-more-dialog-grid grid grid-cols-2 gap-0.5 md:w-[154px]">
+        <div ref={dialogRef} className="bulk-more-dialog absolute end-0 top-full z-50 mt-1 w-44 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg ring-1 ring-border/40" role="menu" aria-label={t('bulk.moreActions', 'More actions')}>
+          <div className="bulk-more-dialog-grid flex flex-col gap-0.5">
             {utilityButton(t('bulk.selectVisible', 'Select visible'), onSelectVisible, <CheckSquare className="h-4 w-4" />, isBusy || visibleCount === 0)}
             {utilityButton(t('bulk.clear', 'Clear'), onClear, <Square className="h-4 w-4" />, isBusy || selectedCount === 0)}
             {!isArchived && kind === 'sessions' && actionButton(t('bulk.close', 'Close'), 'close', <Lock className="h-4 w-4" />, false, true)}

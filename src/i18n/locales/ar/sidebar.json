@@ -201,7 +201,8 @@
         "session": "جلسة",
         "other": ""
       }
-    }
+    },
+    "hardwareToggleCollapsed": "تشغيل/إيقاف عرض استهلاك العتاد"
   },
   "branding": {
     "openSource": "مفتوح المصدر"

@@ -126,7 +126,8 @@
       "low": "Aman",
       "medium": "Sedang",
       "high": "Tinggi"
-    }
+    },
+    "hardwareToggleCollapsed": "Tampilkan/sembunyikan widget penggunaan perangkat keras"
   },
   "branding": {
     "openSource": "Sumber Terbuka"

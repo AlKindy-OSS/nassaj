@@ -1336,7 +1336,10 @@ function ChatInterface({
         providerModelsFallbackProviders={providerModelsFallbackProviders}
         onHardRefreshProviderModels={hardRefreshProviderModels}
         currentSessionId={currentSessionId || selectedSession?.id || null}
-        onSelectProviderModel={selectProviderModel}
+        // /models والمنتقي المدمج يكتبان عبر المعالج نفسه: هو مصدر الحقيقة
+        // للجلسة ويحدّث `sessionCurrentModel` فوراً ثم يصالح ردّ الخادم.
+        onSelectProviderModel={async (_provider, model) => handleChangeSessionModel(model)}
+        activeSessionModel={sessionCurrentModel}
         sessionEngineProvider={sessionEngineStamp}
       />
 

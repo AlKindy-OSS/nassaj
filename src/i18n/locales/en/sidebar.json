@@ -189,7 +189,8 @@
         "session": "session",
         "other": ""
       }
-    }
+    },
+    "hardwareToggleCollapsed": "Toggle hardware usage widget"
   },
   "branding": {
     "openSource": "Open Source"

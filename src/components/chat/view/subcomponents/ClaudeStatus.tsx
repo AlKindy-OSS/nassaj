@@ -55,6 +55,25 @@ const ACTION_KEYS = [
 ];
 const DEFAULT_ACTION_WORDS = ['Thinking', 'Processing', 'Analyzing', 'Working', 'Computing', 'Reasoning'];
 
+// Providers and client hooks emit raw English status words ("Processing",
+// "Working...", "Waiting for permission"); map them to i18n keys so every
+// harness shows the localized label. Unknown text passes through unchanged.
+const STATUS_TEXT_KEYS: Record<string, string> = {
+  ...Object.fromEntries(DEFAULT_ACTION_WORDS.map((word, i) => [word.toLowerCase(), ACTION_KEYS[i]])),
+  'waiting for permission': 'claudeStatus.actions.waitingPermission',
+};
+
+function normalizeStatusText(text: string): string {
+  return text.trim().replace(/[.…]+$/, '').toLowerCase();
+}
+
+function statusTranslationKey(text: string): string | undefined {
+  const normalized = normalizeStatusText(text);
+  return Object.prototype.hasOwnProperty.call(STATUS_TEXT_KEYS, normalized)
+    ? STATUS_TEXT_KEYS[normalized]
+    : undefined;
+}
+
 const PROVIDER_LABEL_KEYS: Record<string, string> = {
   claude: 'messageTypes.claude',
   codex: 'messageTypes.codex',
@@ -294,9 +313,13 @@ export default function ClaudeStatus({
 
   const isFrozenLoading = isLoading && frozen;
   const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
+  const statusKey = status?.text ? statusTranslationKey(status.text) : undefined;
+  const liveText = statusKey
+    ? t(statusKey, { defaultValue: status?.text })
+    : status?.text || actionWords[Math.floor(elapsedTime / 3) % actionWords.length];
   const statusText = isFrozenLoading
     ? t('claudeStatus.frozen', { defaultValue: 'Paused (process frozen)' })
-    : (status?.text || actionWords[Math.floor(elapsedTime / 3) % actionWords.length]).replace(/[.]+$/, '');
+    : liveText.replace(/[.…]+$/, '');
   // Hide only the rotating action word (+ its dots) when the AgentActivityStrip
   // above already conveys "working". The frozen "Paused" state is NOT a rotating
   // word but a real status, so it is always kept so the user still sees the

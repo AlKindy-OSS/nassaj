@@ -67,7 +67,7 @@ const buildNewSessionUrl = (projectId: string | undefined): string => {
   return `${base}?newSessionProject=${encodeURIComponent(projectId)}`;
 };
 
-const PROJECT_SESSION_ACTION_CLASS = 'relative h-auto min-h-[var(--sidebar-load-more-height)] w-full justify-center whitespace-normal rounded-lg px-2 py-0.5 text-xs font-medium leading-4 text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))] hover:bg-[var(--project-hover,hsl(var(--foreground)/0.03))] hover:text-[color:var(--project-foreground,hsl(var(--foreground)))] active:bg-[var(--project-session-selected,hsl(var(--foreground)/0.06))] focus-visible:ring-[var(--project-accent,hsl(var(--ring)))] [&_svg]:size-3';
+const PROJECT_SESSION_ACTION_CLASS = 'relative h-auto min-h-[var(--sidebar-load-more-height)] w-full justify-center whitespace-normal rounded-lg px-2 py-0.5 text-xs font-medium leading-4 text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))] transition-colors duration-150 motion-reduce:transition-none hover:text-[color:var(--project-foreground,hsl(var(--foreground)))] active:bg-[var(--project-session-selected,hsl(var(--foreground)/0.06))] focus-visible:ring-[var(--project-accent,hsl(var(--ring)))] [&_svg]:size-3';
 
 const NEW_SESSION_CTX_MENU_WIDTH = 180;
 const NEW_SESSION_CTX_MENU_HEIGHT = 60;

@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { authenticatedFetch } = vi.hoisted(() => ({ authenticatedFetch: vi.fn() }));
 
@@ -87,6 +87,33 @@ describe('SidebarProjectItem — تذكير الدفْع', () => {
     observers.forEach((notify) => notify());
     await waitFor(() => expect(authenticatedFetch).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('img', { name: /commits ready to push/ })).toBeNull();
+  });
+
+  it('يعرض Tooltip بلمسٍ خفيف دون تفعيل توسيع الصفّ، وبتحويم الفأرة كذلك', async () => {
+    globalThis.IntersectionObserver = ProjectRowObserver as unknown as typeof IntersectionObserver;
+    authenticatedFetch.mockResolvedValue({ ok: true, json: async () => ({ isRepositoryRoot: true, hasUpstream: true, ahead: 3 }) });
+    const onToggleProject = vi.fn();
+    render(<SidebarProjectItem
+      project={project} selectedProject={null} selectedSession={null} isExpanded={false} isDeleting={false}
+      isStarred={false} isSessionStarred={() => false} onToggleStarSession={() => {}}
+      editingProject={null} editingName="" sessions={[]} initialSessionsLoaded isLoadingMoreSessions={false}
+      currentTime={new Date()} editingSession={null} editingSessionName="" onEditingNameChange={() => {}}
+      onToggleProject={onToggleProject} onProjectSelect={() => {}} onToggleStarProject={() => {}}
+      onStartEditingProject={() => {}} onCancelEditingProject={() => {}} onSaveProjectName={() => {}}
+      onDeleteProject={() => {}} onArchiveProject={() => {}} onSessionSelect={() => {}}
+      onDeleteSession={() => {}} onLoadMoreSessions={() => {}} onNewSession={() => {}}
+      onEditingSessionNameChange={() => {}} onStartEditingSession={() => {}} onCancelEditingSession={() => {}}
+      onSaveEditingSession={() => {}} activeProjectTool={undefined} onOpenProjectTool={undefined}
+      onProjectToolbarPresence={undefined} t={t}
+    />);
+    observers.forEach((notify) => notify());
+    const badge = await screen.findByRole('img', { name: '3 commits ready to push' });
+    expect(badge.getAttribute('title')).toBeNull();
+
+    fireEvent.touchStart(badge, { touches: [{ clientX: 5, clientY: 5 }] });
+    fireEvent.touchEnd(badge, { changedTouches: [{ clientX: 5, clientY: 5 }] });
+    await waitFor(() => expect(screen.getByRole('tooltip').textContent).toBe('3 commits ready to push'));
+    expect(onToggleProject).not.toHaveBeenCalled();
   });
 
   it('يخفي الشارة عند فشل واجهة البرمجة', async () => {

@@ -9,7 +9,7 @@
 import { cloneElement, type ComponentProps } from 'react';
 import type { TFunction } from 'i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'ar', dir: () => 'rtl' } }),
@@ -221,6 +221,38 @@ describe('SidebarProjectItem — التثبيت والشعار', () => {
     cleanup();
     renderProject({ logoUrl: null });
     expect(document.querySelector('img[src^="/project-logos/"]')).toBeNull();
+  });
+
+  it('يعرض Tooltip مخصَّصاً بالاسم والمسار عند التحويم على الاسم والشعار، ويبقي النقر مبدِّلاً للتوسيع', () => {
+    vi.useFakeTimers();
+    try {
+      const { onToggleProject } = renderProject({ logoUrl: '/project-logos/project-1.png?v=7' });
+      const nameText = screen.getByText('nassaj-dev');
+      const nameTrigger = nameText.parentElement!;
+      // لا title أصليّاً على المُشغِّل حتى لا تظهر فقاعتان معاً (b449ad002).
+      expect(nameTrigger.getAttribute('title')).toBeNull();
+      // نسخة واحدة من المسار موجودة دوماً (span مخفيّ لقارئ الشاشة عبر aria-describedby).
+      expect(screen.getAllByText('/workspace/sample-project')).toHaveLength(1);
+
+      fireEvent.mouseEnter(nameTrigger);
+      act(() => vi.advanceTimersByTime(400));
+      // نسخة ثانية ظهرت: محتوى الـTooltip المخصَّص.
+      expect(screen.getAllByText('/workspace/sample-project')).toHaveLength(2);
+
+      fireEvent.click(nameText);
+      expect(onToggleProject).toHaveBeenCalledWith('project-1');
+
+      fireEvent.mouseLeave(nameTrigger);
+      act(() => vi.advanceTimersByTime(50));
+
+      const logo = document.querySelector('img[src="/project-logos/project-1.png?v=7"]')!;
+      expect(logo.getAttribute('title')).toBeNull();
+      fireEvent.mouseEnter(logo.parentElement!);
+      act(() => vi.advanceTimersByTime(400));
+      expect(screen.getAllByText('/workspace/sample-project')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('يضع بندَي الشعار في القائمة، وبند الإزالة للمشروع صاحب الشعار وحده', () => {

@@ -498,7 +498,8 @@
       "analyzing": "Анализирует",
       "working": "Работает",
       "computing": "Вычисляет",
-      "reasoning": "Рассуждает"
+      "reasoning": "Рассуждает",
+      "waitingPermission": "Ожидает разрешения"
     },
     "state": {
       "live": "В сети",

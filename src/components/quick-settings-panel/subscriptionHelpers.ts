@@ -68,10 +68,10 @@ export type SubscriptionCost = {
   available: boolean;
   reason?: string;
   /**
-   * false = a flat-fee subscription. The amount is then the API-equivalent
-   * value of the usage, NOT money billed — the UI must say which it is.
+   * false = a verified flat-fee subscription. null = authentication could not
+   * be checked, so the UI must not infer either subscription or metered usage.
    */
-  metered: boolean;
+  metered: boolean | null;
   totalUsd: number;
   sessions: number;
   /** false = some model in the window has no official price; the total is a floor. */
@@ -122,6 +122,9 @@ export function resolveRowState(subscription: SubscriptionCost): SubscriptionRow
   }
   if (typeof subscription.totalUsd !== 'number' || !Number.isFinite(subscription.totalUsd)) {
     return { kind: 'unavailable', reason: null };
+  }
+  if (subscription.metered === null) {
+    return { kind: 'unavailable', reason: subscription.reason ?? null };
   }
   return {
     kind: 'amount',

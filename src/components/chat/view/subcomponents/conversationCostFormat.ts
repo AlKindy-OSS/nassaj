@@ -43,8 +43,8 @@ export type ConversationCost = {
   provider: string;
   available: boolean;
   reason?: string;
-  /** false = خطة اشتراك: الرقم قيمة مكافئة لا مبلغ محاسَب. */
-  metered: boolean;
+  /** false = اشتراك مثبت؛ null = تعذّر فحص المصادقة، فلا يُصنَّف الرقم. */
+  metered: boolean | null;
   totalUsd: number;
   complete: boolean;
   /**
@@ -234,6 +234,12 @@ export function resolveCostDisplay(input: {
     return { kind: 'unavailable', reason: cost.reason?.trim() ? cost.reason : null };
   }
 
+  // `null` ليس اشتراكاً: يعني أن الخادم لم يستطع فحص نوع المصادقة. عرض
+  // المبلغ كمحاسَب أو كمكافئ API سيكون ادعاءً بلا دليل، لذلك نفشل مغلقاً.
+  if (cost.metered === null) {
+    return { kind: 'unavailable', reason: cost.reason?.trim() ? cost.reason : null };
+  }
+
   if (hasUnavailablePricing(cost)) {
     return { kind: 'unavailable', reason: 'pricing_unavailable' };
   }
@@ -272,6 +278,10 @@ export function buildCostSummaryLines(cost: ConversationCost | null): CostSummar
   }
 
   if (!cost.available) {
+    return [{ key: 'unavailable', reason: cost.reason?.trim() ? cost.reason : null }];
+  }
+
+  if (cost.metered === null) {
     return [{ key: 'unavailable', reason: cost.reason?.trim() ? cost.reason : null }];
   }
 

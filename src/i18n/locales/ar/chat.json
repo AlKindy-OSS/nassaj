@@ -686,7 +686,8 @@
       "analyzing": "يحلّل",
       "working": "يعمل",
       "computing": "يحسب",
-      "reasoning": "يستنتج"
+      "reasoning": "يستنتج",
+      "waitingPermission": "بانتظار الإذن"
     },
     "state": {
       "live": "مباشر",

@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "CPU 사용량",
-    "memoryUsage": "메모리 사용량"
+    "memoryUsage": "메모리 사용량",
+    "hardwareToggleCollapsed": "하드웨어 사용량 위젯 토글"
   },
   "branding": {
     "openSource": "오픈 소스"

@@ -401,7 +401,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
       ? t('agents.login.reAuthenticate')
       : t('agents.login.title');
 
-  // رابط صفحة الفوترة — undefined لمزوّدَي opencode وsakana اللذين بلا صفحة.
+  // رابط صفحة الفوترة — موجود لجميع المزوّدين (BILLING_LINKS كامل).
   const billingHref = BILLING_LINKS[agent];
 
   const installInfo = INSTALL_INFO[agent];
@@ -578,7 +578,7 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
               )
               : t('agents.authStatus.notConnected')}
             {/* رابط الفوترة — يظهر دائماً بصرف النظر عن حالة الاتصال، أسفل سطرَي التاريخ.
-                المزوّدان opencode وsakana بلا صفحة فوترة أصلاً فلا رابط لهما. */}
+                جميع المزوّدين لديهم رابط فوترة (BILLING_LINKS كامل لا Partial). */}
             {billingHref && (
               <span className="mt-1.5 flex items-center gap-1 text-muted-foreground">
                 <ExternalLink

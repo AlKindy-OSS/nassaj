@@ -175,6 +175,19 @@ test('استهلاك مُقاس بمفتاح API يُقال «محاسَب» ل�
   assert.ok(!lines.some((line) => line.key === 'apiEquivalent'));
 });
 
+test('metered=null يبقى غير متاح ولا يتحول إلى اشتراك', () => {
+  const unknownAuth = cost({ metered: null, reason: 'authentication check unavailable' });
+  assert.deepEqual(resolveCostDisplay({ status: 'success', cost: unknownAuth }), {
+    kind: 'unavailable',
+    reason: 'authentication check unavailable',
+  });
+  assert.deepEqual(buildCostSummaryLines(unknownAuth), [{
+    key: 'unavailable',
+    reason: 'authentication check unavailable',
+  }]);
+  assert.ok(!buildCostSummaryLines(unknownAuth).some((line) => line.key === 'apiEquivalent'));
+});
+
 test('الملخّص يذكر النماذج غير المسعَّرة والوكلاء الفرعيين وتاريخ الأسعار', () => {
   const lines = buildCostSummaryLines(
     cost({ complete: false, unpricedModels: ['glm-5.2', 'kimi-k2.6'], subagentRequests: 7 }),

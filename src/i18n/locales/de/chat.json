@@ -498,7 +498,8 @@
       "analyzing": "Analysiert",
       "working": "Arbeitet",
       "computing": "Berechnet",
-      "reasoning": "Schlussfolgert"
+      "reasoning": "Schlussfolgert",
+      "waitingPermission": "Wartet auf Berechtigung"
     },
     "state": {
       "live": "Live",

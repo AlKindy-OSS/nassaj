@@ -498,7 +498,8 @@
       "analyzing": "分析中",
       "working": "作業中",
       "computing": "計算中",
-      "reasoning": "推論中"
+      "reasoning": "推論中",
+      "waitingPermission": "許可待ち"
     },
     "state": {
       "live": "ライブ",

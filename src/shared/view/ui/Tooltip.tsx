@@ -10,6 +10,14 @@ type TooltipProps = {
   content?: ReactNode;
   position?: TooltipPosition;
   className?: string;
+  /**
+   * Extra classes for the trigger's own wrapper div (default `relative
+   * inline-block`). Needed when the trigger sits inside a `pointer-events-none`
+   * ancestor (e.g. an overlaid row) and must opt back into hover/tap, or when
+   * it must participate in a flex/grid layout (e.g. `min-w-0` for a truncating
+   * flex child) that the default `inline-block` wrapper would otherwise break.
+   */
+  wrapperClassName?: string;
   delay?: number;
   /**
    * When true, a short touch tap toggles the tooltip instead of requiring a
@@ -53,6 +61,7 @@ function Tooltip({
   content,
   position = 'top',
   className = '',
+  wrapperClassName = '',
   delay = 350,
   tapToToggle = false,
   multiline = false,
@@ -321,7 +330,7 @@ function Tooltip({
   return (
     <div
       ref={containerRef}
-      className="relative inline-block"
+      className={cn('relative inline-block', wrapperClassName)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onPointerEnter={(event) => {

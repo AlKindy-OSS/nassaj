@@ -534,6 +534,10 @@
       "showSearchAndArchive": {
         "label": "Mostra ricerca e interruttore archivio",
         "description": "Mostra il campo di ricerca e la riga con l’interruttore archivio in cima all’elenco dei progetti"
+      },
+      "showHardwareUsage": {
+        "label": "Mostra utilizzo hardware",
+        "description": "CPU, memoria e disco nella barra laterale"
       }
     },
     "codeHighlighting": {

@@ -76,22 +76,46 @@ describe('SidebarBulkToolbar', () => {
 
     expect(screen.queryByText('2 selected conversations')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    const selectVisible = screen.getByRole('button', { name: 'Select visible' });
-    const closeMenu = screen.getByRole('button', { name: 'Close menu' });
+    const selectVisible = screen.getByRole('menuitem', { name: 'Select visible' });
     expect(selectVisible).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Close' })).not.toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(closeMenu));
+    expect(screen.getByRole('menuitem', { name: 'Close' })).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(selectVisible));
 
-    const reopen = screen.getByRole('button', { name: 'Reopen' });
-    closeMenu.focus();
+    const reopen = screen.getByRole('menuitem', { name: 'Reopen' });
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Clear' }));
+    fireEvent.keyDown(document, { key: 'End' });
+    expect(document.activeElement).toBe(reopen);
+    selectVisible.focus();
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(reopen);
     fireEvent.keyDown(document, { key: 'Tab' });
-    expect(document.activeElement).toBe(closeMenu);
+    expect(document.activeElement).toBe(selectVisible);
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More actions' }));
+  });
+
+  it('closes the menu when the user points outside it', async () => {
+    render(
+      <SidebarBulkToolbar
+        kind="projects"
+        selectedCount={1}
+        visibleCount={1}
+        isArchived={false}
+        isBusy={false}
+        isAvailable
+        onSelectVisible={vi.fn()}
+        onClear={vi.fn()}
+        onAction={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menu')).not.toBeNull();
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   });
 
   it('uses 44px touch targets below the compact desktop breakpoint', () => {
@@ -110,19 +134,18 @@ describe('SidebarBulkToolbar', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    const dialog = screen.getByRole('dialog');
-    expect(dialog.className).toContain('p-1');
-    expect(dialog.className).toContain('md:w-fit');
-    expect(dialog.className).toContain('md:max-w-[200px]');
-    expect(dialog.querySelector('.grid')?.className).toContain('md:w-[154px]');
-    expect(dialog.querySelector('.grid')?.className).toContain('gap-0.5');
-    expect(screen.getByRole('button', { name: 'Select visible' }).className).toContain('min-h-11');
-    expect(screen.getByRole('button', { name: 'Select visible' }).className).toContain('md:min-h-8');
-    expect(screen.getByRole('button', { name: 'Select visible' }).className).toContain('justify-start');
-    expect(screen.getByRole('button', { name: 'Select visible' }).className).toContain('bulk-more-dialog-button');
-    expect(screen.getByRole('button', { name: 'Close menu' }).className).toContain('md:size-8');
+    const dialog = screen.getByRole('menu');
+    expect(dialog.className).toContain('w-44');
+    expect(dialog.className).toContain('bg-popover');
+    expect(dialog.className).toContain('text-popover-foreground');
+    expect(dialog.className).toContain('absolute');
+    expect(dialog.querySelector('.bulk-more-dialog-grid')?.className).toContain('flex-col');
+    expect(dialog.querySelector('.bulk-more-dialog-grid')?.className).toContain('gap-0.5');
+    expect(screen.getByRole('menuitem', { name: 'Select visible' }).className).toContain('min-h-11');
+    expect(screen.getByRole('menuitem', { name: 'Select visible' }).className).toContain('md:min-h-9');
+    expect(screen.getByRole('menuitem', { name: 'Select visible' }).className).toContain('justify-start');
+    expect(screen.getByRole('menuitem', { name: 'Select visible' }).className).toContain('bulk-more-dialog-button');
     expect(screen.getByRole('button', { name: 'More actions' }).className).toContain('md:size-8');
-    expect(dialog.querySelector('.bulk-more-dialog-header')?.className).toContain('md:h-8');
   });
 
   it('uses a clean 36px desktop rail without doubled separators or shadow', () => {
@@ -143,6 +166,7 @@ describe('SidebarBulkToolbar', () => {
     const toolbar = container.firstElementChild as HTMLElement;
     expect(toolbar.className).toContain('min-h-11');
     expect(toolbar.className).toContain('md:h-9');
+    expect(toolbar.className).toContain('md:relative');
     expect(toolbar.className).not.toContain('border-y');
     expect(toolbar.className).not.toContain('shadow');
   });
@@ -163,7 +187,7 @@ describe('SidebarBulkToolbar', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    expect(screen.getByRole('dialog').querySelectorAll('.bulk-more-dialog-button')).toHaveLength(2);
+    expect(screen.getByRole('menu').querySelectorAll('.bulk-more-dialog-button')).toHaveLength(2);
   });
 
   it('provides every bulk label in every bundled sidebar locale', () => {

@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "Utilizzo CPU",
-    "memoryUsage": "Utilizzo memoria"
+    "memoryUsage": "Utilizzo memoria",
+    "hardwareToggleCollapsed": "Mostra/nascondi utilizzo hardware"
   },
   "branding": {
     "openSource": "Open Source"

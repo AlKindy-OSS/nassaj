@@ -1,6 +1,6 @@
 {
   "name": "nassaj",
-  "version": "2.3.0.3",
+  "version": "2.3.0.4",
   "description": "Nassaj — multi-provider AI coding workspace with RTL Arabic support",
   "type": "module",
   "private": true,

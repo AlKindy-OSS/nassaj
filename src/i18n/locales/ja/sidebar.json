@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "CPU使用率",
-    "memoryUsage": "メモリ使用率"
+    "memoryUsage": "メモリ使用率",
+    "hardwareToggleCollapsed": "ハードウェア使用状況を表示/非表示"
   },
   "branding": {
     "openSource": "オープンソース"

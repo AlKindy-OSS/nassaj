@@ -126,7 +126,8 @@
       "low": "ایمن",
       "medium": "متوسط",
       "high": "زیاد"
-    }
+    },
+    "hardwareToggleCollapsed": "نمایش/پنهان‌کردن مصرف سخت‌افزار"
   },
   "branding": {
     "openSource": "متن‌باز"

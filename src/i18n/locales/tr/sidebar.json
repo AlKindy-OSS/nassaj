@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "CPU kullanımı",
-    "memoryUsage": "Bellek kullanımı"
+    "memoryUsage": "Bellek kullanımı",
+    "hardwareToggleCollapsed": "Donanım kullanımını göster/gizle"
   },
   "branding": {
     "openSource": "Açık Kaynak"

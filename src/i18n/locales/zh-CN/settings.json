@@ -534,6 +534,10 @@
       "showSearchAndArchive": {
         "label": "显示搜索与归档开关",
         "description": "在项目列表顶部显示搜索框和归档切换行"
+      },
+      "showHardwareUsage": {
+        "label": "显示硬件使用情况",
+        "description": "在侧边栏中显示CPU、内存和磁盘使用情况"
       }
     },
     "codeHighlighting": {

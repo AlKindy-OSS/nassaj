@@ -498,7 +498,8 @@
       "analyzing": "Analisi",
       "working": "In lavorazione",
       "computing": "Calcolo",
-      "reasoning": "Ragionamento"
+      "reasoning": "Ragionamento",
+      "waitingPermission": "In attesa di autorizzazione"
     },
     "state": {
       "live": "Attivo",

@@ -16,7 +16,19 @@ describe('ChatMessageImage', () => {
   it('يعرض معاينة قابلة للنقر ويفتح الصورة المكبّرة ثم يغلقها', () => {
     render(<ChatMessageImage src="data:image/png;base64,AA==" alt="shot.png" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Preview shot.png' }));
+    const preview = screen.getByRole('button', { name: 'Preview shot.png' });
+    expect(preview.className).toContain('rounded-none');
+    expect(preview.className).toContain('border-0');
+    expect(preview.className).toContain('bg-transparent');
+    expect(preview.className).toContain('focus-visible:ring-ring');
+    expect(preview.className).not.toContain('overflow-hidden');
+    expect(preview.className).not.toContain('rounded-lg');
+
+    const image = screen.getByRole('img', { name: 'shot.png' });
+    expect(image.className).toContain('h-auto');
+    expect(image.className).toContain('max-w-full');
+
+    fireEvent.click(preview);
     expect(screen.getByRole('dialog', { name: 'shot.png' })).toBeDefined();
     fireEvent.click(screen.getByRole('button', { name: 'images.closePreview' }));
     expect(screen.queryByRole('dialog')).toBeNull();

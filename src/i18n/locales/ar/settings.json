@@ -824,6 +824,10 @@
       "showSearchAndArchive": {
         "label": "إظهار البحث ومبدّل الأرشيف",
         "description": "في أعلى قائمة المشاريع"
+      },
+      "showHardwareUsage": {
+        "label": "إظهار استهلاك العتاد",
+        "description": "CPU وذاكرة وقرص في ذيل الشريط وفي السكة المطوية"
       }
     },
     "codeHighlighting": {
