@@ -127,10 +127,14 @@ test('CRUX: a public project stays READABLE while its session refuses destructio
     'write: refused — public confers read, never write',
   );
 
+  // B-1647: the stranger can already READ this session, so the permanent-delete
+  // refusal is an explanatory 403 rather than the non-disclosing 404.
   await assert.rejects(
     () => sessionsService.deleteOrArchiveSessionById(PUBLIC_SESSION, strangerId, { force: true, deletedFromDisk: true }),
     (error: unknown) => {
-      assertNotFound(error);
+      assert.ok(error instanceof AppError, 'refusal is an AppError');
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, 'session_delete_forbidden');
       return true;
     },
   );

@@ -16,7 +16,7 @@ import {
 const ROUTES: Array<[string, string]> = [
   ['GET', '/'], ['PUT', '/draft'], ['POST', '/draft/test-discovery'], ['POST', '/draft/test-login/start'],
   ['GET', `/draft/test-login/result/${'A'.repeat(43)}`], ['POST', '/apply'], ['POST', '/enable'],
-  ['POST', '/disable'], ['POST', '/import-env'], ['PUT', '/installation-origin'], ['PUT', '/owner-sign-in'],
+  ['POST', '/disable'], ['POST', '/import-env'], ['PUT', '/installation-origin'],
 ];
 
 beforeEach(() => resetSsoFixture());

@@ -10,6 +10,7 @@ import test, { mock } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import { createSsoConfigDouble } from './__tests__/sso-config-double.js';
+import { configureMemoryLoginThrottle } from './__tests__/login-throttle-memory-store.js';
 
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const verifyCalls: string[] = [];
@@ -46,6 +47,9 @@ const attempt = (userId: number, password: string) =>
   verifyStepUpEvidence({} as never, { id: userId }, 'passkey_registration', { method: 'password', password })
     .then(() => 'ok', (error: { code: string }) => error.code);
 
+// T-2035: the auth middleware (the throttle's configurer) is a double here.
+const throttleStore = await configureMemoryLoginThrottle();
+
 test('the limiter refuses the 6th attempt before argon2 runs', async () => {
   for (let index = 0; index < 5; index += 1) {
     assert.equal(await attempt(1, `wrong-${index}`), 'step_up_failed');
@@ -74,4 +78,25 @@ test('SSO-linked member and missing evidence are refused without touching the pa
     .then(() => 'ok', (error: { code: string }) => error.code);
   assert.equal(none, 'step_up_required');
   assert.deepEqual(verifyCalls, []);
+});
+
+test('T-2035: password step-up refuses an account locked by the shared login throttle, before argon2', async () => {
+  verifyCalls.length = 0;
+  const { sharedLoginThrottle } = await import('./login-throttle.service.js');
+  const key = sharedLoginThrottle().keyForUser(2);
+  try {
+    for (let index = 0; index < 5; index += 1) sharedLoginThrottle().admit(key);
+    assert.equal(await attempt(2, 'right'), 'login_temporarily_locked');
+    assert.deepEqual(verifyCalls, []);
+  } finally {
+    throttleStore.rows.clear();
+  }
+});
+
+test('T-2035: a correct step-up password clears the account counter', async () => {
+  const { sharedLoginThrottle } = await import('./login-throttle.service.js');
+  const key = sharedLoginThrottle().keyForUser(2);
+  sharedLoginThrottle().admit(key);
+  assert.equal(await attempt(2, 'right'), 'ok');
+  assert.equal(throttleStore.rows.has(key), false);
 });

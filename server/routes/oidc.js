@@ -110,6 +110,11 @@ import {
 } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { verifyPassword } from '../services/password.service.js';
+import {
+  admitPasswordCheck,
+  lockedPasswordRefusal,
+  sharedLoginThrottle,
+} from '../services/login-throttle.service.js';
 import { revokeUserIdentity } from '../modules/account-wallet/user-identity-revocation.js';
 import {
   isRoleDowngrade,
@@ -255,6 +260,9 @@ function stampSessionsRevoked(userId) {
 
 function revokeUserSessions(userId) {
   stampSessionsRevoked(userId);
+  // T-2035 (ADR-212): the sign-out epoch too, so a back-channel logout ends
+  // every JWT exactly like a local sign-out; the stamp above is kept as is.
+  userDb.bumpTokenEpoch(userId);
   invalidateRefreshCache(userId);
 }
 
@@ -708,8 +716,8 @@ async function startOwnerPasskeyStepUp(req, res, { client, claims, userId, decis
 
 /**
  * `login` branch for an owner (ADR-194 A1): forced password change, the
- * owner's own opt-in, the WebAuthn factor and auth_time freshness, in that
- * order. A missing key or stale auth_time triggers one automatic step-up;
+ * WebAuthn factor and auth_time freshness, in that order (always on, no
+ * per-owner opt-in). A missing key or stale auth_time triggers one automatic step-up;
  * after it, the refusal stands. On success the session is handed out
  * directly: no role mapping, no role sync and no attestation stamp (the
  * owner role never comes from the IdP). Every successful sign-in is audited
@@ -718,7 +726,7 @@ async function startOwnerPasskeyStepUp(req, res, { client, claims, userId, decis
 async function completeOwnerLogin(req, res, { entry, claims, transaction, identity, linkedUser, client }) {
   const account = userDb.getRawById(linkedUser.id);
   if (!account) return res.status(401).json({ error: 'Linked account is unavailable' });
-  const decision = decideOwnerSignIn({ account, identity, claims, nowMs: Date.now() });
+  const decision = decideOwnerSignIn({ account, claims, nowMs: Date.now() });
   if (!decision.ok && decision.stepUp && entry.ownerStepUp !== true) {
     return startOwnerPasskeyStepUp(req, res, { client, claims, userId: linkedUser.id, decision });
   }
@@ -1030,6 +1038,41 @@ function recordSelfLinkFailure(req, userId, reason) {
 }
 
 /**
+ * T-2035: charges one own-password check against the shared login throttle
+ * (keyed by user id, like PATCH /me/password). Returns the throttle key, or a
+ * 429 refusal while the account is locked.
+ */
+function admitOwnPasswordCheck(req, context) {
+  try {
+    const throttle = sharedLoginThrottle();
+    const key = throttle.keyForUser(req.user.id);
+    const admission = admitPasswordCheck(throttle, key, {
+      userId: req.user.id, context, ...auditContext(req),
+    });
+    return admission.allowed ? { key } : { refusal: lockedPasswordRefusal(admission.retryAfterSeconds) };
+  } catch {
+    // Fail closed: no password is checked without the throttle.
+    logOidcFailure('login_throttle_unavailable');
+    return { refusal: { status: 500, body: { error: 'Internal server error' } } };
+  }
+}
+
+/** Clears the caller's counter after a correct password (best-effort). */
+function clearOwnPasswordCheck(key) {
+  try {
+    sharedLoginThrottle().clear(key);
+  } catch {
+    logOidcFailure('login_throttle_clear_failed');
+  }
+}
+
+/** Sends a refusal, with Retry-After when it is a throttle lock. */
+function sendPasswordRefusal(res, refusal) {
+  if (refusal.retryAfterSeconds) res.set('Retry-After', String(refusal.retryAfterSeconds));
+  return res.status(refusal.status).json(refusal.body);
+}
+
+/**
  * Verifies the caller's own current password for self-link start. Returns
  * null on success, else the refusal to send. The body never carries a session
  * rejection shape: a wrong password is `current_password_incorrect` (see
@@ -1048,8 +1091,11 @@ async function selfLinkPasswordRefusal(req, currentPassword) {
       body: { error: 'Change your password first', code: 'password_change_required' },
     };
   }
+  const admitted = admitOwnPasswordCheck(req, 'self_link');
+  if (admitted.refusal) return admitted.refusal;
   const isValid = typeof account.password_hash === 'string'
     && await verifyPassword(account.password_hash, currentPassword);
+  if (isValid) clearOwnPasswordCheck(admitted.key);
   if (!isValid) {
     recordSelfLinkFailure(req, req.user.id, 'bad_current_password');
     return {
@@ -1096,7 +1142,7 @@ router.post(
     }
     const refusal = ownerSelfLinkRefusal(req) ?? await selfLinkPasswordRefusal(req, currentPassword);
     if (refusal) {
-      return res.status(refusal.status).json(refusal.body);
+      return sendPasswordRefusal(res, refusal);
     }
     const client = activeSsoClient();
     if (!client) return res.status(503).json({ error: 'Identity provider temporarily unavailable' });
@@ -1609,8 +1655,11 @@ router.delete(
         code: 'sso_only_account',
       });
     }
+    const admitted = admitOwnPasswordCheck(req, 'self_unlink');
+    if (admitted.refusal) return sendPasswordRefusal(res, admitted.refusal);
     const isValid = typeof account?.password_hash === 'string'
       && await verifyPassword(account.password_hash, currentPassword);
+    if (isValid) clearOwnPasswordCheck(admitted.key);
     if (!isValid) {
       // Never log the password — the reason code only.
       auditLogDb.record('oidc_identity_self_unlink_failed', {

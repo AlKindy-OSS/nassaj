@@ -34,6 +34,7 @@ const BRAIN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const TASK_FILE = 'task.md';
 const TASK_FILE_MAX_BYTES = 256 * 1024;
 const MAX_SUBAGENTS_PER_TURN = 50;
+const CHILD_TRANSCRIPT_MAX_BYTES = 1024 * 1024;
 const CHECKBOX_LINE = /^\s*(?:[-*+]|\d+[.)])\s+`?\[(.)\]`?\s+(.+?)\s*$/;
 const CHECKBOX_STATUS: Readonly<Record<string, string>> = Object.freeze({
   ' ': 'pending', x: 'completed', X: 'completed', '/': 'in_progress',
@@ -193,6 +194,7 @@ export function buildAgyTurnProgressRows(input: {
   brainUUID: string;
   sessionId: string;
   plan: ProgressPlan | null;
+  childTools?: Map<string, Array<{ name: string; status?: string }>>;
 }): NormalizedMessage[] {
   const turn = input.steps.filter((step) => step.stepIndex > input.afterStepIndex)
     .sort((a, b) => a.stepIndex - b.stepIndex);
@@ -211,6 +213,8 @@ export function buildAgyTurnProgressRows(input: {
       parentId: null,
       ...record,
       agentName: record.label,
+      ...(record.conversationId && input.childTools?.has(record.conversationId)
+        ? { tools: input.childTools.get(record.conversationId) } : {}),
     });
     if (subagent) rows.push(createNormalizedMessage({ ...base, id: `${idBase}_agent_${index}`, subagent }));
   });
@@ -227,7 +231,9 @@ function childListingAfter(turn: readonly AgyProgressStep[], position: number): 
 }
 
 /** Invoked subagents of one turn with their settled state. */
-function turnSubagents(turn: readonly AgyProgressStep[]): Array<{ label: string; state: 'running' | 'completed' }> {
+function turnSubagents(turn: readonly AgyProgressStep[]): Array<{
+  label: string; state: 'running' | 'completed'; conversationId?: string;
+}> {
   const reported = new Set(turn.map((step) => step.sender).filter(Boolean));
   const result: Array<{ label: string; state: 'running' | 'completed' }> = [];
   turn.forEach((step, position) => {
@@ -236,8 +242,65 @@ function turnSubagents(turn: readonly AgyProgressStep[]): Array<{ label: string;
     step.invoked.forEach((label, index) => {
       if (result.length >= MAX_SUBAGENTS_PER_TURN) return;
       const child = listing?.conversationIds?.[index];
-      result.push({ label, state: child && reported.has(child) ? 'completed' : 'running' });
+      result.push({
+        label,
+        state: child && reported.has(child) ? 'completed' : 'running',
+        ...(child ? { conversationId: child } : {}),
+      });
     });
   });
   return result;
+}
+
+/** Reads child tool names from their sibling conversation transcripts. */
+export async function readAgyChildTools(
+  brainRoot: string,
+  steps: readonly AgyProgressStep[],
+): Promise<Map<string, Array<{ name: string }>>> {
+  const ids = [...new Set(steps.flatMap((step) => step.conversationIds ?? []))];
+  const tools = new Map<string, Array<{ name: string }>>();
+  if (!ids.length) return tools;
+  let realRoot: string;
+  try { realRoot = await fsp.realpath(brainRoot); } catch { return tools; }
+  for (const id of ids) {
+    if (!BRAIN_UUID.test(id)) continue;
+    let handle: fsp.FileHandle | null = null;
+    try {
+      const brainDir = await fsp.realpath(path.join(realRoot, id));
+      if (path.dirname(brainDir) !== realRoot) continue;
+      const systemDir = await fsp.realpath(path.join(brainDir, '.system_generated'));
+      if (path.dirname(systemDir) !== brainDir) continue;
+      const logsDir = await fsp.realpath(path.join(systemDir, 'logs'));
+      if (path.dirname(logsDir) !== systemDir) continue;
+      const file = path.join(logsDir, 'transcript.jsonl');
+      handle = await fsp.open(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const stat = await handle.stat();
+      if (!stat.isFile()) continue;
+      const start = Math.max(0, stat.size - CHILD_TRANSCRIPT_MAX_BYTES);
+      const buffer = Buffer.alloc(stat.size - start);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+      let text = buffer.subarray(0, bytesRead).toString('utf8');
+      if (start > 0) {
+        const firstNewline = text.indexOf('\n');
+        text = firstNewline < 0 ? '' : text.slice(firstNewline + 1);
+      }
+      const childTools: Array<{ name: string }> = [];
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        let row: AnyRecord;
+        try { row = JSON.parse(line) as AnyRecord; } catch { continue; }
+        if (!Array.isArray(row.tool_calls)) continue;
+        for (const call of row.tool_calls) {
+          const name = call && typeof call.name === 'string' ? call.name : '';
+          if (name) childTools.push({ name });
+        }
+      }
+      if (childTools.length) tools.set(id, childTools.slice(-100));
+    } catch {
+      // Missing, linked or unreadable child transcripts do not affect the parent.
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+  return tools;
 }

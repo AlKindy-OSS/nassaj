@@ -22,6 +22,7 @@
  * them into a live installation still goes through the browser owner Setup handlers.
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,7 +33,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 const DIST = path.join(REPO_ROOT, 'dist-server');
 
-// Runs at import time, outside main()'s catch, so it refuses with exit 2 directly.
+// Runs before main()'s command dispatch, outside its catch, so it refuses with exit 2 directly.
 const need = rel => {
   const abs = path.join(DIST, rel);
   if (!fs.existsSync(abs)) {
@@ -69,18 +70,28 @@ function warnIfDistStale() {
       'run "npm run build:server" so this tool signs against the current verifier/digests.\n');
   }
 }
-warnIfDistStale();
-
-const core = await import(need('server/modules/connectors/connector-signing-core.js'));
-
-const {
-  ConnectorSigningError, CONNECTOR_SIGNING_DEFAULT_CERTIFY,
+let ConnectorSigningError, CONNECTOR_SIGNING_DEFAULT_CERTIFY,
   assertSafeConnectorKeyDir, validateConnectorSigningId,
   connectorPrivateKeyPath, connectorPublicKeyPath, connectorPublicKeyFingerprint,
   writeConnectorSigningFile, readConnectorPrivateKey, generateConnectorEd25519KeyPair,
   parseConnectorCertifySpec, buildConnectorTrustBundle, buildConnectorGlobalPack,
-  signAndVerifyConnectorGlobalPack, loadConnectorTrustBundle, connectorTrustBundleDigestB64u,
-} = core;
+  signAndVerifyConnectorGlobalPack, loadConnectorTrustBundle, connectorTrustBundleDigestB64u;
+
+/**
+ * Load the production signing core from dist-server. Every command needs it (key-dir
+ * policy included), so it stays fail-closed; only --help runs without a server build.
+ */
+async function loadSigningCore() {
+  warnIfDistStale();
+  ({
+    ConnectorSigningError, CONNECTOR_SIGNING_DEFAULT_CERTIFY,
+    assertSafeConnectorKeyDir, validateConnectorSigningId,
+    connectorPrivateKeyPath, connectorPublicKeyPath, connectorPublicKeyFingerprint,
+    writeConnectorSigningFile, readConnectorPrivateKey, generateConnectorEd25519KeyPair,
+    parseConnectorCertifySpec, buildConnectorTrustBundle, buildConnectorGlobalPack,
+    signAndVerifyConnectorGlobalPack, loadConnectorTrustBundle, connectorTrustBundleDigestB64u,
+  } = await import(need('server/modules/connectors/connector-signing-core.js')));
+}
 
 class SignExit extends Error {}
 function fail(code, detail) {
@@ -89,7 +100,22 @@ function fail(code, detail) {
   throw new SignExit(code);
 }
 
-const GIT_DIR = path.join(REPO_ROOT, '.git');
+/**
+ * Every git directory a private key must never land in: REPO_ROOT/.git and, in a linked
+ * worktree (where .git is a file), the shared common dir. GIT_DIR/GIT_COMMON_DIR are
+ * dropped so the caller's env cannot redirect the probe; .git alone is the fallback only
+ * when git itself fails.
+ */
+function forbiddenGitDirs() {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_COMMON_DIR;
+  const probe = spawnSync('git', ['-C', REPO_ROOT, 'rev-parse', '--path-format=absolute',
+    '--git-common-dir'], { encoding: 'utf8', env });
+  const dirs = [path.join(REPO_ROOT, '.git')];
+  if (probe.status === 0 && probe.stdout.trim()) dirs.push(probe.stdout.trim());
+  return dirs;
+}
 const DEFAULT_KEY_DIR = path.join(os.homedir(), '.config', 'nassaj', 'connector-signing');
 
 const arg = (args, flag, fallback = null) => {
@@ -97,7 +123,12 @@ const arg = (args, flag, fallback = null) => {
   return at >= 0 && at + 1 < args.length ? args[at + 1] : fallback;
 };
 const has = (args, flag) => args.includes(flag);
-const safeDir = raw => assertSafeConnectorKeyDir(arg(raw, '--dir', DEFAULT_KEY_DIR), GIT_DIR);
+const safeDir = raw => {
+  const dir = arg(raw, '--dir', DEFAULT_KEY_DIR);
+  let resolved;
+  for (const gitDir of forbiddenGitDirs()) resolved = assertSafeConnectorKeyDir(dir, gitDir);
+  return resolved;
+};
 
 function readJsonFile(p, label) {
   const stat = fs.lstatSync(p, { throwIfNoEntry: false });
@@ -239,9 +270,10 @@ Commands:
 The private key is the operator's root of trust: keep it off the server and out of git.
 `;
 
-function main() {
+async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === '--help' || command === '-h') { process.stdout.write(HELP); return; }
+  await loadSigningCore();
   try {
     if (command === 'keygen') cmdKeygen(args);
     else if (command === 'trust') cmdTrust(args);
@@ -260,4 +292,4 @@ function main() {
   }
 }
 
-main();
+await main();

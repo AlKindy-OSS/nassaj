@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Fingerprint, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 
@@ -12,8 +12,6 @@ import type { SsoActionFailure, SsoActionResult, StepUpEvidence } from './ssoTyp
 
 type Props = {
   open: boolean;
-  /** Optional context shown above the form (e.g. the private-network note). */
-  intro?: ReactNode;
   onClose: () => void;
   /** Runs the guarded write with the evidence. */
   onSubmit: (stepUp: StepUpEvidence) => Promise<SsoActionResult>;
@@ -31,7 +29,7 @@ type Busy = null | 'password' | 'passkey';
  * no SSO option. Modelled on ConnectorStepUpDialog. Step-up refusals (wrong
  * password, lockout) stay in the dialog; any other outcome is handed back.
  */
-export default function SsoStepUpDialog({ open, intro, onClose, onSubmit, onDone, onOpenProfile }: Props) {
+export default function SsoStepUpDialog({ open, onClose, onSubmit, onDone, onOpenProfile }: Props) {
   const { t } = useTranslation('settings');
   const titleId = useId();
   const descriptionId = useId();
@@ -108,8 +106,6 @@ export default function SsoStepUpDialog({ open, intro, onClose, onSubmit, onDone
             <p id={descriptionId} className="mt-1 text-sm text-muted-foreground">{t('sso.stepUp.description')}</p>
           </div>
         </div>
-
-        {intro && <div className="mt-4 text-sm text-foreground">{intro}</div>}
 
         {failure && !mustChangePassword && (
           <div className="mt-4"><SsoError code={failure.code} details={failure.details} retryAfterSeconds={failure.retryAfterSeconds} /></div>

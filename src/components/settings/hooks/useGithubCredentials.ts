@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
+import { confirmDialog } from '../../../shared/dialogs/dialogService';
 import type {
   GithubCredentialItem,
   GithubCredentialsResponse,
@@ -80,7 +81,7 @@ export function useGithubCredentials({ confirmDeleteText }: UseGithubCredentials
   }, [fetchData, newGithubDescription, newGithubName, newGithubToken]);
 
   const deleteGithubCredential = useCallback(async (credentialId: string) => {
-    if (!window.confirm(confirmDeleteText)) {
+    if (!(await confirmDialog({ message: confirmDeleteText, tone: 'danger' }))) {
       return;
     }
     try {

@@ -2,8 +2,9 @@
  * B-1327: user-level revocation of live agent work, decided by account
  * administration (disable, delete, role change) — never by transport events.
  *
- * Logout, token expiry, network loss, tab close and ordinary socket closes do
- * NOT come through here: runs survive them and the user can reattach. Only an
+ * Token expiry, network loss, tab close and ordinary socket closes do NOT come
+ * through here: runs survive them and the user can reattach. Sign-out (T-2035)
+ * comes through only to close the user's sockets; its runs keep going. Only an
  * explicit administrative identity change stops a user's running turns.
  *
  * The realtime layer binds the concrete handler at startup (the websocket
@@ -131,4 +132,16 @@ export const SSO_ROLE_WITHDRAWN_REVOCATION: UserRealtimeRevocation = Object.free
 export const SSO_ATTESTATION_EXPIRED_REVOCATION: UserRealtimeRevocation = Object.freeze({
   abortReason: null,
   endInteractiveSessions: true,
+});
+
+/**
+ * T-2035 (ADR-212): a user signed out, which ends every bearer token they hold.
+ * Their realtime sockets close with 4401 so no device keeps a channel opened
+ * under a dead token; running turns are left to finish (B-1327: a sign-out is
+ * not an administrative identity change) and shells/terminals stay attachable
+ * after the user signs in again.
+ */
+export const SIGN_OUT_EVERYWHERE_REVOCATION: UserRealtimeRevocation = Object.freeze({
+  abortReason: null,
+  endInteractiveSessions: false,
 });

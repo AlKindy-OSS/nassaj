@@ -106,7 +106,8 @@ export default function AgentSelectorSection({
 }: AgentSelectorSectionProps) {
   const { t } = useTranslation('settings');
   const updateLabel = t('harnessVersion.updateIndicator', { defaultValue: 'Update available' });
-  // الاسم المُعلَن يجمع الاسم وما يُرى على البلاطة من علامات (تحديث، افتراضي).
+  // الاسم المُعلَن: الاسم + التحديث المرئي، و«الافتراضي» لقارئ الشاشة والتلميح فقط
+  // (أُزيلت العلامة المرئية تحت الاسم بطلب المالك 2026-10-16).
   const tileLabel = (agent: AgentProvider, hasUpdate: boolean, isDefault: boolean) => [
     AGENT_NAMES[agent],
     hasUpdate ? updateLabel : null,
@@ -207,17 +208,6 @@ export default function AgentSelectorSection({
               >
                 {AGENT_NAMES[agent]}
               </span>
-              {/* علامة «الافتراضي» نصّاً لا رمزاً: نجمةٌ في الزاوية تحتاج تفسيراً،
-                  والزاويتان العلويتان محجوزتان لنقطتي الاتصال والتحديث. */}
-              {isDefault && defaultLabel && (
-                <span
-                  className="w-full truncate text-center text-[13px] leading-tight text-primary"
-                  aria-hidden="true"
-                  data-testid="default-agent-indicator"
-                >
-                  {defaultLabel}
-                </span>
-              )}
             </button>
           );
         })}

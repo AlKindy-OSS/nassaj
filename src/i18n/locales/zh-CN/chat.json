@@ -601,7 +601,6 @@
     "agent": "智能体"
   },
   "customCommand": {
-    "confirmBashExecution": "此命令包含将要执行的 bash 命令。是否继续？",
     "executionCancelled": "命令执行已取消",
     "executeError": "执行命令时出错：{{message}}",
     "unknownError": "未知错误"

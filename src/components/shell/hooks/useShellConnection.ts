@@ -6,7 +6,7 @@ import type { Terminal } from '@xterm/xterm';
 import { sanitizeTerminalText } from '../../../../shared/terminalText';
 import type { Project, ProjectSession } from '../../../types/app';
 import { isIdentityRevocationClose, reconcileRevokedIdentity } from '../../auth/accountIdentityBarrier';
-import type { ShellErrorInfo } from '../types/types';
+import type { OneShotFrame, ShellErrorInfo } from '../types/types';
 import { TERMINAL_INIT_DELAY_MS } from '../constants/constants';
 import { getShellWebSocketUrl, parseShellMessage, sendSocketMessage } from '../utils/socket';
 import {
@@ -14,6 +14,8 @@ import {
   computeBackoffDelay,
   isFinalShellRefusalClose,
   isIntentionalShellClose,
+  isOneShotRefusalCode,
+  ONESHOT_CAPTURE_UNAVAILABLE_CODE,
   shouldRetryReconnect,
   UPDATE_TERMINALS_CLOSED_REASON,
 } from '../utils/reconnect';
@@ -58,6 +60,15 @@ type UseShellConnectionOptions = {
   onShellErrorRef?: MutableRefObject<
     ((error: ShellErrorInfo | null) => void) | null | undefined
   >;
+  /**
+   * T-2037: the one-shot run this shell is bound to (null for every other
+   * shell). Re-sent unchanged on every init so a reconnect or remount can only
+   * re-attach; see ShellInitMessage.runId.
+   */
+  oneShotRunIdRef?: MutableRefObject<string | null | undefined>;
+  onOneShotFrameRef?: MutableRefObject<((frame: OneShotFrame) => void) | null | undefined>;
+  /** Grants the single launching init of a run; absent/false → attach-only. */
+  claimOneShotLaunchRef?: MutableRefObject<((runId: string) => boolean) | null | undefined>;
   isInitialized: boolean;
   autoConnect: boolean;
   closeSocket: () => void;
@@ -89,6 +100,9 @@ export function useShellConnection({
   providerOverrideRef,
   onProcessCompleteRef,
   onShellErrorRef,
+  oneShotRunIdRef,
+  onOneShotFrameRef,
+  claimOneShotLaunchRef,
   isInitialized,
   autoConnect,
   closeSocket,
@@ -122,6 +136,9 @@ export function useShellConnection({
   // the refusal for the consumer, and refusing to auto-reconnect over the
   // banner that carries the only reason the user will ever see.
   const hasShellErrorRef = useRef(false);
+  // T-2037: a one-shot run that finished or was refused is settled for good —
+  // no close after that point may re-attach, and no auto-connect may re-init.
+  const oneShotSettledRef = useRef(false);
 
   const clearShellError = useCallback(() => {
     if (!hasShellErrorRef.current) {
@@ -188,6 +205,20 @@ export function useShellConnection({
       // writing to the pane); this hook used to drop it on the floor entirely,
       // which is exactly how a failed provider login became a silent black
       // pane. Neither a process completion nor a reconnect trigger.
+      if (
+        message.type === 'error' &&
+        message.code === ONESHOT_CAPTURE_UNAVAILABLE_CODE &&
+        oneShotRunIdRef?.current
+      ) {
+        // Only the attach request failed; the run, the pane and the socket
+        // are untouched, so this is neither a banner nor a refusal.
+        onOneShotFrameRef?.current?.({
+          type: 'oneshot_capture_unavailable',
+          runId: oneShotRunIdRef.current,
+        });
+        return;
+      }
+
       if (message.type === 'error') {
         const rawText = typeof message.message === 'string' ? message.message.trim() : '';
         const rawCode = typeof message.code === 'string' ? message.code.trim() : '';
@@ -207,7 +238,25 @@ export function useShellConnection({
         if (code === UPDATE_TERMINALS_CLOSED_REASON) {
           setClosedForUpdate(true);
         }
+        if (oneShotRunIdRef?.current && isOneShotRefusalCode(rawCode)) {
+          // Final for a one-shot (T-2037): disarm every path back to an init
+          // before the 4403 close even lands.
+          oneShotSettledRef.current = true;
+          suppressAutoConnectRef.current = true;
+          clearReconnectTimer();
+        }
         onShellErrorRef?.current?.({ message: text, code });
+        return;
+      }
+
+      if (message.type === 'oneshot_finished' || message.type === 'oneshot_capture') {
+        const frame = toOneShotFrame(message, oneShotRunIdRef?.current);
+        if (!frame) return;
+        if (frame.type === 'oneshot_finished') {
+          oneShotSettledRef.current = true;
+          suppressAutoConnectRef.current = true;
+        }
+        onOneShotFrameRef?.current?.(frame);
         return;
       }
 
@@ -218,7 +267,17 @@ export function useShellConnection({
         }
       }
     },
-    [clearShellError, handleProcessCompletion, onOutputRef, onShellErrorRef, setAuthUrl, terminalRef],
+    [
+      clearReconnectTimer,
+      clearShellError,
+      handleProcessCompletion,
+      onOneShotFrameRef,
+      onOutputRef,
+      onShellErrorRef,
+      oneShotRunIdRef,
+      setAuthUrl,
+      terminalRef,
+    ],
   );
 
   const scheduleReconnect = useCallback(() => {
@@ -320,6 +379,30 @@ export function useShellConnection({
             const forceRestart = forceRestartOnInitRef.current;
             forceRestartOnInitRef.current = false;
 
+            const oneShotRunId = oneShotRunIdRef?.current;
+            if (oneShotRunId) {
+              // T-2037: the same runId on every init, never forceRestart. Only
+              // the first init of a run submitted in this page lifetime carries
+              // the command; every other one (reconnect, remount, Connect,
+              // restored run) is attach-only — no stale replay is possible.
+              const launch = claimOneShotLaunchRef?.current?.(oneShotRunId) === true;
+              sendSocketMessage(socket, {
+                type: 'init',
+                projectPath: currentProject.fullPath || currentProject.path || '',
+                sessionId: null,
+                hasSession: false,
+                provider: 'plain-shell',
+                cols: currentTerminal.cols,
+                rows: currentTerminal.rows,
+                initialCommand: launch ? initialCommandRef.current : undefined,
+                isPlainShell: true,
+                runId: oneShotRunId,
+                origin: 'composer_shell',
+                ...(launch ? {} : { attachOnly: true as const }),
+              });
+              return;
+            }
+
             sendSocketMessage(socket, {
               type: 'init',
               projectPath: currentProject.fullPath || currentProject.path || '',
@@ -385,6 +468,16 @@ export function useShellConnection({
           // server restart — so a 1006 that lands after a gate banner must
           // still re-attach, or the release that fixes the terminal would
           // strand it after every update.
+          if (oneShotRunIdRef?.current && oneShotSettledRef.current) {
+            // A finished or refused one-shot: keep its output on screen and
+            // never re-attach (T-2037 — no unrequested re-execution path).
+            setIsReconnecting(false);
+            clearReconnectTimer();
+            reconnectAttemptsRef.current = 0;
+            suppressAutoConnectRef.current = true;
+            return;
+          }
+
           if (isFinalShellRefusalClose(event.code)) {
             if (event.reason === UPDATE_TERMINALS_CLOSED_REASON) {
               setClosedForUpdate(true);
@@ -443,6 +536,8 @@ export function useShellConnection({
       isConnected,
       isConnecting,
       isPlainShellRef,
+      oneShotRunIdRef,
+      claimOneShotLaunchRef,
       providerOverrideRef,
       scheduleReconnect,
       selectedProjectRef,
@@ -463,18 +558,23 @@ export function useShellConnection({
     if (!isInitialized || isConnected || isConnecting || connectingRef.current) {
       return;
     }
+    // A settled one-shot (finished/refused) is never re-initialised from here.
+    if (oneShotRunIdRef?.current && oneShotSettledRef.current) {
+      return;
+    }
 
     // A deliberate connect supersedes any pending auto re-attach.
     clearReconnectTimer();
     reconnectAttemptsRef.current = 0;
     isReconnectAttemptRef.current = false;
     setIsReconnecting(false);
-    forceRestartOnInitRef.current = Boolean(options?.forceRestart);
+    // A one-shot never restarts: the init always re-attaches to its runId.
+    forceRestartOnInitRef.current = oneShotRunIdRef?.current ? false : Boolean(options?.forceRestart);
     suppressAutoConnectRef.current = false;
     connectingRef.current = true;
     setIsConnecting(true);
     connectWebSocket(true);
-  }, [clearReconnectTimer, connectWebSocket, isConnected, isConnecting, isInitialized]);
+  }, [clearReconnectTimer, connectWebSocket, isConnected, isConnecting, isInitialized, oneShotRunIdRef]);
 
   const disconnectFromShell = useCallback((options?: { suppressAutoConnect?: boolean }) => {
     if (options?.suppressAutoConnect) {
@@ -545,5 +645,42 @@ export function useShellConnection({
     closeSocket,
     connectToShell,
     disconnectFromShell,
+  };
+}
+
+/**
+ * Narrows a raw `oneshot_*` frame to the typed shape, and drops any frame for a
+ * run other than the one this shell is bound to (a stale socket's replay).
+ */
+function toOneShotFrame(
+  message: { type: string; [key: string]: unknown },
+  boundRunId: string | null | undefined,
+): OneShotFrame | null {
+  // The server echoes the runId lowercased; ours is a lowercase UUID already.
+  if (
+    !boundRunId ||
+    typeof message.runId !== 'string' ||
+    message.runId.toLowerCase() !== boundRunId.toLowerCase()
+  ) {
+    return null;
+  }
+  const exitCode = typeof message.exitCode === 'number' ? message.exitCode : null;
+  if (message.type === 'oneshot_finished') {
+    // Outcome flags are copied only when true, so a plain finish stays plain.
+    return {
+      type: 'oneshot_finished',
+      runId: boundRunId,
+      exitCode,
+      ...(message.interrupted === true ? { interrupted: true as const } : {}),
+      ...(message.unknown === true ? { unknown: true as const } : {}),
+      ...(message.refused === true ? { refused: true as const } : {}),
+    };
+  }
+  return {
+    type: 'oneshot_capture',
+    runId: boundRunId,
+    text: typeof message.text === 'string' ? message.text : '',
+    truncated: message.truncated === true,
+    exitCode,
   };
 }

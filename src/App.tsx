@@ -3,6 +3,7 @@ import { I18nextProvider } from 'react-i18next';
 
 import { ThemeProvider } from './contexts/ThemeContext';
 import { RtlProvider } from './contexts/RtlContext';
+import { DialogHost } from './shared/dialogs';
 import { AuthProvider, ProtectedRoute } from './components/auth';
 import JoinPage from './components/auth/view/JoinPage';
 import SharedDocumentPage from './components/document-sharing/SharedDocumentPage';
@@ -177,6 +178,9 @@ export default function App() {
     <I18nextProvider i18n={i18n}>
       <ThemeProvider>
         <RtlProvider>
+            {/* T-2039: themed confirm/alert queue, above the auth gate so login
+                screens are covered too. */}
+            <DialogHost />
             <AuthProvider>
               {/* Branding sits ABOVE the auth gate: its endpoint is public, so the
                   login/setup/join screens and the document chrome (title/favicon)

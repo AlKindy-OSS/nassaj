@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../../shared/view/ui';
 import { useAuth } from '../../../../auth';
 import { MIN_PASSWORD_LENGTH } from '../../../../auth/constants';
+import { LOGIN_LOCKED_CODE, loginLockedMessage } from '../../../../auth/loginLock';
 import MySharesPanel from '../../../../session-sharing/MySharesPanel';
 import SettingsSection from '../../SettingsSection';
 import SettingsSubNav from '../SettingsSubNav';
@@ -117,7 +118,10 @@ export default function ProfileSettingsTab() {
       setIsSavingPassword(false);
 
       if (!result.success) {
-        setPasswordFeedback({ kind: 'error', message: result.error });
+        // T-2035: a throttle lock names the wait; it never signs the user out.
+        const message = result.code === LOGIN_LOCKED_CODE
+          ? loginLockedMessage(t, result.retryAfterSeconds) : result.error;
+        setPasswordFeedback({ kind: 'error', message });
         return;
       }
       setPasswordFeedback({ kind: 'success', message: t('profile.password.success') });

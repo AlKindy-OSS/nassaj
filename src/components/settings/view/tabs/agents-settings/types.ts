@@ -1,5 +1,4 @@
 import type { ActiveBodyProvider } from '../../../../../types/app';
-import type { CoordinationLevel } from '../../../../../../shared/coordinationDirectives';
 import type {
   AgentProvider,
   AuthStatus,
@@ -105,6 +104,4 @@ export type AgentDefaultsSectionProps = {
   /** Whether `selectedAgent` is already the stored, usable default. */
   isDefault: boolean;
   onMakeDefault: () => void;
-  coordinationLevel: CoordinationLevel;
-  onCoordinationLevelChange: (level: CoordinationLevel) => void;
 };

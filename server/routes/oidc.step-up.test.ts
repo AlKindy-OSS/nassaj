@@ -122,6 +122,7 @@ mock.module(url('../modules/database/index.js'), {
       },
     }),
     userDb: {
+      bumpTokenEpoch: () => 1,
       getUserById: (id: number) => {
         if (userLookupFailure) throw new Error('SQLITE_BUSY: database is locked');
         return publicUser(users.get(id));

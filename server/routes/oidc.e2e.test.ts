@@ -386,13 +386,13 @@ test('drift: a moved endpoint persists runtime_fault and SSO becomes unavailable
   assert.ok(audit, 'audited');
 });
 
-test('I6: an owner identity is refused for login and nothing is written', async () => {
+test('A1: an owner identity without a passkey only gets the step-up and nothing is written', async () => {
   activeRow();
   userIdentitiesDb.link(owner.id, FIXTURE_ISSUER, 'sub-owner');
   for (const repoSpy of repoSpies) repoSpy.mock.resetCalls();
   const res = await complete(await startLogin(), { sub: 'sub-owner', roles: ['admin'], org: 'org-1' });
-  assert.equal(res.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
-  assertNoPrivilegedWrite('owner refused');
+  assert.equal(res.status, 200, 'the passkey interstitial, not a session');
+  assertNoPrivilegedWrite('owner without a passkey');
 });
 
 // ---------------------------------------------------------------------------
@@ -431,14 +431,13 @@ test('back channel: an owner subject is a 200 no-op', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// ADR-194 A1: an opted-in owner with a fresh passkey (real database)
+// ADR-194 A1: an owner with a fresh passkey (real database)
 // ---------------------------------------------------------------------------
 
 const OWNER_PASSKEY = Object.freeze({ sub: 'sub-owner', roles: ['member'], org: 'org-1', amr: ['user', 'mfa'] });
 
-function linkOwner({ optedIn }: { optedIn: boolean }) {
+function linkOwner() {
   const id = userIdentitiesDb.link(owner.id, FIXTURE_ISSUER, 'sub-owner');
-  if (optedIn) userIdentitiesDb.setOwnerSsoOptIn(id, owner.id, Date.now());
   for (const repoSpy of repoSpies) repoSpy.mock.resetCalls();
   calls.clear();
   return id;
@@ -447,10 +446,10 @@ function linkOwner({ optedIn }: { optedIn: boolean }) {
 const auditRows = (action: string) => (db.prepare('SELECT user_id AS userId, metadata FROM audit_log WHERE action = ?')
   .all(action) as Array<{ userId: number; metadata: string }>).map((row) => ({ ...row, metadata: JSON.parse(row.metadata) }));
 
-test('A1: an opted-in owner signs in with a passkey; role untouched; no mapping, sync or attestation', async () => {
+test('A1: an owner signs in with a passkey; role untouched; no mapping, sync or attestation', async () => {
   activeRow();
   db.exec("DELETE FROM audit_log WHERE action IN ('oidc_owner_sign_in', 'oidc_login')");
-  const identityId = linkOwner({ optedIn: true });
+  const identityId = linkOwner();
   db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(owner.id);
   const res = await complete(await startLogin(), OWNER_PASSKEY);
   assert.match(res.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
@@ -472,7 +471,7 @@ test('A1: an opted-in owner signs in with a passkey; role untouched; no mapping,
 
 test('A1: password + security key (pwd, user, mfa) is accepted', async () => {
   activeRow();
-  linkOwner({ optedIn: true });
+  linkOwner();
   const res = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd', 'user', 'mfa'] });
   assert.match(res.headers.get('location') ?? '', /oidc_code=/);
 });
@@ -487,7 +486,7 @@ async function ownerStepUpFrom(res: Response): Promise<Started> {
 
 test('A1: a password-only IdP session steps up once to the passkey, then signs in', async () => {
   activeRow();
-  linkOwner({ optedIn: true });
+  linkOwner();
   const first = await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd'], preferred_username: 'owner@idp' });
   const stepUp = await ownerStepUpFrom(first);
   const idp = new URL(stepUp.authorizationUrl);
@@ -503,16 +502,16 @@ test('A1: a password-only IdP session steps up once to the passkey, then signs i
 
 test('A1: a password-only IdP session is refused owner_sso_key_required after the one step-up', async () => {
   activeRow();
-  linkOwner({ optedIn: true });
+  linkOwner();
   const stepUp = await ownerStepUpFrom(await complete(await startLogin(), { ...OWNER_PASSKEY, amr: ['pwd'] }));
   const second = await complete(stepUp, { ...OWNER_PASSKEY, amr: ['pwd', 'otp', 'mfa'] });
   assert.equal(second.headers.get('location'), '/auth/oidc/return?error=owner_sso_key_required');
   assertNoPrivilegedWrite('step-up exhausted');
 });
 
-test('A1: an opted-in owner flagged must_change_password is refused password_change_required', async () => {
+test('A1: an owner flagged must_change_password is refused password_change_required', async () => {
   activeRow();
-  linkOwner({ optedIn: true });
+  linkOwner();
   db.prepare('UPDATE users SET must_change_password = 1 WHERE id = ?').run(owner.id);
   try {
     const res = await complete(await startLogin(), OWNER_PASSKEY);
@@ -523,12 +522,15 @@ test('A1: an opted-in owner flagged must_change_password is refused password_cha
   }
 });
 
-test('A1: owner links with no opt-in are refused even with a passkey token', async () => {
+test('A1 always on: a fresh owner link (no opt-in recorded) signs in with a passkey token', async () => {
   activeRow();
-  linkOwner({ optedIn: false });
+  linkOwner();
+  db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(owner.id);
+  const optIn = db.prepare('SELECT owner_sso_opt_in_at AS v FROM user_identities WHERE user_id = ?').get(owner.id) as
+    { v: number | null };
+  assert.equal(optIn.v, null, 'no opt-in on the link');
   const res = await complete(await startLogin(), OWNER_PASSKEY);
-  assert.equal(res.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
-  assertNoPrivilegedWrite('owner not opted in');
+  assert.match(res.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
 });
 
 test('A1: reauth=1 reaches the IdP with prompt=login and max_age=0', async () => {
@@ -539,9 +541,9 @@ test('A1: reauth=1 reaches the IdP with prompt=login and max_age=0', async () =>
   assert.equal(location.searchParams.get('max_age'), '0');
 });
 
-test('A1 unchanged: an opted-in owner is still local-only for self-link, step-up and back channel', async () => {
+test('A1 unchanged: an owner is still local-only for self-link, step-up and back channel', async () => {
   activeRow();
-  linkOwner({ optedIn: true });
+  linkOwner();
   const asOwner = { 'content-type': 'application/json', 'x-test-user-id': String(owner.id), 'x-test-role': 'owner' };
   const selfLink = await fetch(`${baseUrl}/api/auth/oidc/link/self/start`, {
     method: 'POST', headers: asOwner, body: JSON.stringify({ currentPassword: 'x' }),

@@ -603,7 +603,6 @@
     "agent": "Ajan"
   },
   "customCommand": {
-    "confirmBashExecution": "Bu komut çalıştırılacak bash komutları içeriyor. Devam etmek istiyor musunuz?",
     "executionCancelled": "Komut çalıştırma iptal edildi",
     "executeError": "Komut çalıştırma hatası: {{message}}",
     "unknownError": "Bilinmeyen hata"

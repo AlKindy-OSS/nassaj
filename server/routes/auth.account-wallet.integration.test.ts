@@ -201,8 +201,12 @@ test('candidate limiter is independent across devices', async () => {
     const response = await f.mutate('/accounts/add', 'add', {
       identifier: candidate, password: 'wrong', expectedGeneration: 1,
     });
-    assert.equal(response.status, attempt === 8 ? 429 : 401);
-    assert.equal((await response.json()).code, 'add_account_failed');
+    // T-2035: the per-identifier throttle (shared with /login) locks after the
+    // fifth failure; the candidate limiter still answers first at its own cap.
+    const expected = attempt < 5 ? [401, 'add_account_failed']
+      : attempt < 8 ? [429, 'login_temporarily_locked'] : [429, 'add_account_failed'];
+    assert.equal(response.status, expected[0]);
+    assert.equal((await response.json()).code, expected[1]);
   }
 });
 
@@ -343,6 +347,8 @@ test('switch closes old realtime identity; logout selects remaining account and 
     const all = await f.mutate('/logout-all', 'logout_all', { expectedGeneration: 4 });
     assert.equal(all.status, 204);
     assert.match(all.headers.get('set-cookie') ?? '', /__Host-nassaj_device=;/);
+    // T-2035: the active account's bearer epoch advances with the device sign-out.
+    assert.equal(userDb.getTokenEpoch(current.principal.userId), 1);
     assert.equal((await f.request('/accounts')).status, 401);
   } finally { unregister(); }
 });
@@ -835,4 +841,46 @@ test('T6c: legacy usernames differing only by case resolve to no account, withou
   } finally {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(lower(username))');
   }
+});
+
+test('T-2035: /login and /accounts/add share one per-identifier counter', async () => {
+  const f = fixture();
+  const login = (ip: string) => fetch(`${origin}/api/auth/login`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
+    body: JSON.stringify({ username: f.email, password: 'wrong' }),
+  });
+  const add = (ip: string) => f.mutate('/accounts/add', 'add', {
+    identifier: f.email, password: 'wrong', expectedGeneration: 1,
+  }, 'POST', ip);
+  // Alternate endpoints and addresses: only the identifier counter can add up.
+  const answers = [];
+  for (const [index, call] of [login, add, login, add, login].entries()) {
+    answers.push((await call(`203.0.113.${100 + index}`)).status);
+  }
+  assert.deepEqual(answers, [401, 401, 401, 401, 401]);
+  const viaAdd = await add('203.0.113.120');
+  assert.equal(viaAdd.status, 429);
+  assert.equal((await viaAdd.json()).code, 'login_temporarily_locked');
+  const viaLogin = await login('203.0.113.121');
+  assert.equal(viaLogin.status, 429);
+  assert.equal((await viaLogin.json()).code, 'login_temporarily_locked');
+});
+
+test('T-2035: a correct add-account password clears the counter even when the add is refused', async () => {
+  const f = fixture();
+  const { JWT_SECRET } = await import('../middleware/auth.js');
+  const { createLoginThrottle } = await import('../services/login-throttle.service.js');
+  const key = createLoginThrottle({ secret: JWT_SECRET }).keyForIdentifier(f.email);
+  const row = () => getConnection().prepare('SELECT failures FROM login_throttle WHERE key_hash = ?').get(key);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await f.mutate('/accounts/add', 'add', { identifier: f.email, password: 'wrong', expectedGeneration: 1 },
+      'POST', `198.18.0.${attempt + 1}`);
+  }
+  assert.deepEqual(row(), { failures: 3 });
+  const refused = await f.mutate('/accounts/add', 'add', {
+    identifier: f.email, password: 'correct horse battery staple', expectedGeneration: 99,
+  }, 'POST', '198.18.0.9');
+  assert.equal(refused.status, 409, 'stale generation: the add itself is refused');
+  assert.equal(row(), undefined, 'the proven password cleared the counter');
 });

@@ -30,7 +30,7 @@ function releaseEvidence(root, runtime, entry) {
 }
 
 function fixture(t, name) {
-    const root = mkdtempSync(path.join(PROJECT, `.host-migration-${name}-`)); chmodSync(root, 0o700);
+    const root = mkdtempSync(path.join(process.env.NASSAJ_TEST_TMP ?? PROJECT, `.host-migration-${name}-`)); chmodSync(root, 0o700);
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const generationRoot = path.join(root, 'generation'); const runtime = path.join(generationRoot, 'dist-server');
     mkdirSync(generationRoot, { mode: 0o700 }); cpSync(path.join(PROJECT, 'dist-server'), runtime, { recursive: true });

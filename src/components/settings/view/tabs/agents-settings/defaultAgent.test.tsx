@@ -43,6 +43,7 @@ vi.mock('./sections/AgentCategoryContentSection', () => ({
 import { __resetUiPreferencesStoreForTests } from '../../../../../hooks/useUiPreferences';
 
 import AgentsSettingsTab from './AgentsSettingsTab';
+import DelegationModeSection from './sections/content/DelegationModeSection';
 import type { AgentsSettingsTabProps } from './types';
 import { resolveInitialSettingsAgent } from './visibleAgents';
 
@@ -126,8 +127,15 @@ describe('AgentsSettingsTab — الوكيل الافتراضي', () => {
     expect((current as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('منتقي وضع التفويض يحفظ الافتراضي الجديد', () => {
+  it('وضع التفويض لم يعد أعلى الصفحة', () => {
     render(<AgentsSettingsTab {...baseProps} />);
+    expect(screen.queryByRole('radio', { name: 'chat:coordinationLevel.levels.direct.full' })).toBeNull();
+  });
+});
+
+describe('DelegationModeSection — وضع التفويض داخل «التعليمات»', () => {
+  it('منتقي وضع التفويض يحفظ الافتراضي الجديد عامّاً', () => {
+    render(<DelegationModeSection />);
     const direct = screen.getByRole('radio', { name: 'chat:coordinationLevel.levels.direct.full' });
     act(() => { fireEvent.click(direct); });
     const stored = JSON.parse(localStorage.getItem('uiPreferences') ?? '{}');

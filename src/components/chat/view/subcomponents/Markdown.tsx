@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -47,6 +47,8 @@ import DocumentShareButton from '../../../document-sharing/DocumentShareButton';
 import { shareableReference } from '../../../document-sharing/share-contract';
 
 import ChatMessageImage from './ChatMessageImage';
+import { isClosedFenceNode, remarkFenceClosed, richLangOf } from './rich-blocks/richBlockLangs';
+import { SortableHeaderCell, SortableTable } from './rich-blocks/SortableTable';
 
 type MarkdownProps = {
   children: React.ReactNode;
@@ -97,6 +99,27 @@ type ExecStatus = 'idle' | 'executing' | 'restarting' | 'deferred' | 'success' |
  * يراه: تصديقُ وسمٍ يكتبه منتِج النصّ حارسٌ يثق بمن يحرسه منه.
  */
 const RUN_TAG = 'nassaj-run';
+
+/**
+ * T-2040 — the server masks secrets in what viewers receive as `[masked:<rule>]`.
+ * A block carrying that marker is not the command that was written: running it
+ * would run the placeholder text. Its run buttons stay visible but disabled.
+ */
+const MASK_MARKER = '[masked:';
+
+/** Plain source for a rich fence: the Suspense fallback and the failed-chunk fallback. */
+const RichSourceFallback = ({ source }: { source: string }) => (
+  <pre dir="ltr" className="my-2 overflow-x-auto rounded-lg bg-muted/40 p-3 text-xs">{source}</pre>
+);
+
+/**
+ * Diagram/chart renderers, loaded only when a closed rich fence appears (ADR-211).
+ * A failed chunk load (offline, stale deployment) degrades to plain source here;
+ * an uncaught rejection would reach MainContent's error boundary and blank the chat.
+ */
+const RichCodeBlock = React.lazy(() =>
+  import('./rich-blocks/RichCodeBlock').catch(() => ({ default: RichSourceFallback })),
+);
 
 /**
  * هل تحمل الكتلة وسم التشغيل؟
@@ -562,7 +585,11 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
 
   // ── كشف وسم النيّة (```bash nassaj-run) ──────────────────────────────
   // اللغة لم تعد معياراً: الوسم وحده يقول «هذه الكتلة مقصودة للتشغيل».
-  const isRunTagged = !shouldInline && hasRunTag(node);
+  // A rich fence (```mermaid nassaj-run) is a diagram, never a command — even
+  // while it is still shown as source (streaming or unclosed).
+  const richLang = shouldInline ? null : richLangOf(className);
+  const isRunTagged = !shouldInline && !richLang && hasRunTag(node);
+  const isMasked = raw.includes(MASK_MARKER);
 
   // Editing the block is the one event that can change the verdict, since every
   // refusal here is a judgement on these exact bytes. Note that it does NOT fire
@@ -583,7 +610,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   // ── معالج إدراج الأمر في الطابور ثم فتح حوار المراجعة ─────────────────
   const handleRawExec = useCallback(async () => {
     const cmd = raw.trim();
-    if (!cmd || isInserting) return;
+    if (!cmd || isInserting || isMasked) return;
     setIsInserting(true);
     // NOT cleared here: a refusal that is about to repeat identically would blink
     // out and back with nothing changed. The attempt counter below carries the
@@ -623,7 +650,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
     } finally {
       setIsInserting(false);
     }
-  }, [raw, isInserting, tChat, noteInsertFailure, sessionId]);
+  }, [raw, isInserting, isMasked, tChat, noteInsertFailure, sessionId]);
 
   // ─── كشف علامة nassaj-exec ───────────────────────────────────────────────
   const markerMatch = EXEC_MARKER_RE.exec(className || '');
@@ -649,6 +676,9 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   //   • !isStreaming      — لا نقرة على أمرٍ لم يكتمل بعد.
   const showRawExecButton =
     canUseRaw && inlineExecEnabled && isRunTagged && !isExecBlock && !isStreaming;
+  const maskedTitle = tChat('codeBlock.maskedRunDisabled', {
+    defaultValue: 'Contains masked secrets — run it from the original source',
+  }) as string;
 
   // Durable «already ran» record (server ledger keyed by command digest): survives
   // a refresh and reflects a run started from the board. A clean run retires the
@@ -681,7 +711,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
 
   // ─── معالج التنفيذ ────────────────────────────────────────────────────────
   const handleExec = useCallback(async () => {
-    if (!execActionType || isInFlight || effectiveStatus === 'unverified') return;
+    if (!execActionType || isMasked || isInFlight || effectiveStatus === 'unverified') return;
     setExecStatus('executing');
     setExecDetail('');
 
@@ -700,7 +730,7 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
       setExecStatus(['outcome_unverified', 'execution_unresolved'].includes(outcome.code) ? 'unverified' : 'failed');
       setExecDetail(outcome.code ?? 'internal');
     }
-  }, [execActionType, isInFlight, effectiveStatus, runAction, startPolling]);
+  }, [execActionType, isMasked, isInFlight, effectiveStatus, runAction, startPolling]);
 
   // الشارة السطرية تُعرَض بعد استدعاء كل الـhooks (قاعدة React)
   //
@@ -720,6 +750,18 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
   // فلا فرع بديل «كتلة سياج قصيرة بلا سلوك نقر» يبقى ممكناً بعد `isImageFence`.
   if (shouldInline) {
     return <InlineCode className={className} {...props}>{children}</InlineCode>;
+  }
+
+  // ADR-211 — a closed rich fence in a finished message renders as a diagram or
+  // chart. While streaming, or when the closing fence never arrived, it stays
+  // ordinary source below (never half a spec handed to a renderer).
+  if (richLang && !isStreaming && isClosedFenceNode(node)) {
+    const source = raw.replace(/\n$/, '');
+    return (
+      <Suspense fallback={<RichSourceFallback source={source} />}>
+        <RichCodeBlock lang={richLang} source={source} />
+      </Suspense>
+    );
   }
 
   // ─── عرض اللغة في العنوان ────────────────────────────────────────────────
@@ -785,9 +827,11 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
               <button
                 type="button"
                 onClick={() => void handleExec()}
-                disabled={!roleOk}
+                disabled={!roleOk || isMasked}
                 title={
-                  roleOk
+                  isMasked
+                    ? maskedTitle
+                    : roleOk
                     ? tSidebar('pendingActions.inlineExecute', { defaultValue: 'تنفيذ' })
                     : tSidebar('pendingActions.inlineRequiresOwner', {
                         defaultValue: 'يتطلب صلاحية owner',
@@ -800,9 +844,9 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
                         defaultValue: 'يتطلب صلاحية owner',
                       })
                 }
-                aria-disabled={!roleOk}
+                aria-disabled={!roleOk || isMasked}
                 className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors ${
-                  roleOk
+                  roleOk && !isMasked
                     ? 'border-amber-500 bg-amber-600/90 text-white hover:bg-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-400'
                     : 'cursor-not-allowed border-gray-600 bg-gray-700/50 text-muted-foreground opacity-60'
                 }`}
@@ -886,14 +930,16 @@ const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockPro
           <button
             type="button"
             onClick={() => { void handleRawExec(); }}
-            disabled={isInserting}
-            title={tChat('codeBlock.executeRawTitle', {
+            disabled={isInserting || isMasked}
+            title={isMasked ? maskedTitle : tChat('codeBlock.executeRawTitle', {
               defaultValue: 'Execute this command on the Nassaj server (opens review dialog)',
             }) as string}
             aria-label={tChat('codeBlock.executeRawTitle', {
               defaultValue: 'Execute this command on the Nassaj server (opens review dialog)',
             }) as string}
-            className="flex items-center gap-1 rounded-md border border-amber-600/70 bg-amber-700/80 px-2 py-1 text-xs text-white transition-colors hover:bg-amber-700 focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:cursor-wait disabled:opacity-60"
+            className={`flex items-center gap-1 rounded-md border border-amber-600/70 bg-amber-700/80 px-2 py-1 text-xs text-white transition-colors hover:bg-amber-700 focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-60 ${
+              isMasked ? 'disabled:cursor-not-allowed' : 'disabled:cursor-wait'
+            }`}
           >
             {isInserting ? (
               <>
@@ -1172,6 +1218,22 @@ function ProjectFileLink({ href, children }: { href?: string; children?: React.R
   return <a href={href} className="text-blue-600 hover:underline dark:text-blue-400" target="_blank" rel="noopener noreferrer">{inside(children)}</a>;
 }
 
+/** Header cell: the shared direction rule, plus sort controls inside sortable tables. */
+const HeaderCell = ({ node, children, style }: BlockProps) => {
+  const dir = useBlockDir(node);
+  return (
+    <SortableHeaderCell
+      node={node}
+      dir={dir}
+      style={style}
+      className="border border-border px-3 py-2 text-start text-sm font-semibold"
+    >
+      {children}
+    </SortableHeaderCell>
+  );
+};
+HeaderCell.displayName = 'MarkdownBlock_th';
+
 const markdownComponents = {
   code: CodeBlock,
   pre: PreBlock,
@@ -1186,22 +1248,13 @@ const markdownComponents = {
   ),
   // فقرة الماركداون تُصيَّر <div> لا <p>: قد تحوي كتل شيفرة، و<pre> داخل <p> HTML غير صالح.
   p: blockComponent('div', 'mb-2 last:mb-0'),
-  th: blockComponent(
-    'th',
-    'border border-border px-3 py-2 text-start text-sm font-semibold'
-  ),
+  th: HeaderCell,
   td: blockComponent(
     'td',
     'border border-border px-3 py-2 align-top text-sm'
   ),
   a: ProjectFileLink,
-  table: ({ children }: { children?: React.ReactNode }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse border border-border">
-        {children}
-      </table>
-    </div>
-  ),
+  table: SortableTable,
   thead: ({ children }: { children?: React.ReactNode }) => (
     <thead className="bg-muted">{children}</thead>
   ),
@@ -1220,7 +1273,7 @@ const REMARK_MATH_OPTIONS = { singleDollarTextMath: false };
 export function Markdown({ children, className, streaming = false }: MarkdownProps) {
   const content = normalizeInlineCodeFences(String(children ?? ''));
   const remarkPlugins = useMemo<PluggableList>(
-    () => [remarkGfm, [remarkMath, REMARK_MATH_OPTIONS]],
+    () => [remarkGfm, [remarkMath, REMARK_MATH_OPTIONS], remarkFenceClosed],
     []
   );
   const rehypePlugins = useMemo(() => [rehypeKatex], []);

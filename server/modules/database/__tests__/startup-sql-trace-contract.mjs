@@ -8,6 +8,9 @@ import assert from 'node:assert/strict';
 // ADR-196 (T-1970): the four additive session_shares DDL statements (one per exec).
 // ADR-203 (T-2003): the one additive user_harness_files_mode CREATE TABLE.
 // ADR-205 (T-2013): the session_shares column probe and the mode/ref_key ALTERs (fresh boot).
+// ADR-212 (T-2035): login_throttle and revoked_token_sids (table + index each), the users probe
+// and the token_epoch ALTER.
+// ADR-213 (T-2037): the shell_oneshot_runs table + index (durable one-shot runId ledger).
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -139,6 +142,54 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE TABLE IF NOT EXISTS user_harness_files_mode (\n  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n  mode TEXT NOT NULL CHECK (mode IN ('shared','private')),\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS login_throttle (\n  key_hash TEXT PRIMARY KEY,\n  failures INTEGER NOT NULL,\n  first_failure_at INTEGER NOT NULL,\n  locked_until INTEGER,\n  lock_count INTEGER NOT NULL DEFAULT 0,\n  updated_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_login_throttle_updated_at ON login_throttle(updated_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS revoked_token_sids (\n  sid TEXT PRIMARY KEY,\n  user_id INTEGER NOT NULL,\n  revoked_at INTEGER NOT NULL,\n  expires_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_revoked_token_sids_expires_at ON revoked_token_sids(expires_at)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(users)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "ALTER TABLE users ADD COLUMN token_epoch INTEGER NOT NULL DEFAULT 0 CHECK (token_epoch >= 0)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS shell_oneshot_runs (\n  user_id INTEGER NOT NULL,\n  run_id TEXT NOT NULL,\n  consumed_at INTEGER NOT NULL,\n  state TEXT NOT NULL DEFAULT 'started' CHECK (state IN ('started', 'finished', 'refused')),\n  exit_code INTEGER,\n  ended_at INTEGER,\n  PRIMARY KEY (user_id, run_id)\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_shell_oneshot_runs_ended_at ON shell_oneshot_runs(ended_at)",
     "shadow": null
   },
   {

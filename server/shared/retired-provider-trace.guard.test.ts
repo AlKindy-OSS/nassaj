@@ -152,7 +152,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'scripts/export-public.sh': 'publishes the neutral GEMINI.md that agy reads',
   'scripts/link-content.sh': 'materializes the GEMINI.md agy reads',
   'scripts/link-content.test.mjs': 'asserts GEMINI.md materialization for agy',
-  'scripts/governance-write-guard.test.mjs': 'asserts the GEMINI.md governance entrypoint agy reads',
+  'scripts/governance-write-guard-check.mjs': 'asserts the GEMINI.md governance entrypoint agy reads',
   'docs/team-wiki/00-updates.md': 'historical release note (history stays untouched)',
   '.env.example': 'GEMINI_API_KEY for OpenCode Google models and the GEMINI_* strip namespace',
   'src/lib/themeBoot.test.ts': THEME,

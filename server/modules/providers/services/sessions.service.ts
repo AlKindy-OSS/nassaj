@@ -31,6 +31,8 @@ import type {
   NormalizedMessage,
 } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
+import { displayHistoryRevision, isDisplayMaskingEnabled, maskDisplayLabel, maskMessagesForSession, restoreMaskedLabel } from '@/services/display-secret-mask.js';
 
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
 import { isTranscriptHandle, openSessionTranscript } from '../shared/session-transcript.js';
@@ -42,9 +44,9 @@ import { runtimeInstructionsPrefix, stripRuntimeInstructionsPrefix } from '../..
 
 import { HISTORY_LIMITS, HistoryReadLease, HistoryBudgetError, historyAdmission } from './history-budget.service.js';
 import { HistoryHttpSink } from './history-response.service.js';
-import { isSessionAccessibleByUser, type SessionAccessMode } from './session-access.js';
+import { canPermanentlyDeleteSession, isSessionAccessibleByUser, type SessionAccessMode } from './session-access.js';
 
-export { isSessionAccessibleByUser, type SessionAccessMode };
+export { canPermanentlyDeleteSession, isSessionAccessibleByUser, type SessionAccessMode };
 
 type ArchivedSessionListItem = {
   sessionId: string;
@@ -84,6 +86,29 @@ export function assertSessionAccessible(
     });
   }
 
+  return session;
+}
+
+/**
+ * Gate for permanently deleting a session (B-1647).
+ *
+ * A caller who cannot even READ the session gets the usual non-disclosing 404.
+ * A caller who can read it but lacks the permanent-delete mandate (creator,
+ * project owner, or platform owner/admin — see canPermanentlyDeleteSession)
+ * gets 403 `session_delete_forbidden`: existence is already known to them, and
+ * the UI needs a reason it can explain. Archive is unaffected by this gate.
+ */
+export function assertSessionPermanentlyDeletable(
+  sessionId: string,
+  requesterUserId: number | null,
+): NonNullable<ReturnType<typeof sessionsDb.getSessionById>> {
+  const session = assertSessionAccessible(sessionId, requesterUserId, 'read');
+  if (!canPermanentlyDeleteSession(sessionId, session.project_path, requesterUserId)) {
+    throw new AppError('Only the conversation creator, the project owner, or an admin can delete it permanently.', {
+      code: 'session_delete_forbidden',
+      statusCode: 403,
+    });
+  }
   return session;
 }
 
@@ -526,7 +551,7 @@ export const sessionsService = {
   async withHistoryLeaseCallback(sessionId: string, requesterUserId: number | null,
     options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'cursor'> & {
       payloadMode?: HistoryPayloadMode; revision?: string; access?: 'read' | 'restamp';
-      assertCurrent?: (notStarted: boolean) => void;
+      assertCurrent?: (notStarted: boolean) => void; displayMask?: boolean;
     }, signal: AbortSignal, consume: (payload: HistoryResponse, lease: HistoryReadLease) => Promise<void> | void): Promise<void> {
     let release: (() => void) | undefined, lease: HistoryReadLease | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -578,7 +603,7 @@ export const sessionsService = {
   async withHistoryLease(sessionId: string, requesterUserId: number | null,
     options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'cursor'> & {
       payloadMode?: HistoryPayloadMode; revision?: string;
-      assertCurrent?: (notStarted: boolean) => void;
+      assertCurrent?: (notStarted: boolean) => void; displayMask?: boolean;
     }, sink: HistoryHttpSink): Promise<void> {
     if (!HistoryHttpSink.isConcrete(sink)) throw new HistoryBudgetError('HISTORY_SOURCE_INVALID');
     try {
@@ -602,6 +627,8 @@ export const sessionsService = {
       revision?: string;
       historyLease?: HistoryReadLease;
       assertCurrent?: (notStarted: boolean) => void;
+      /** ADR-210: mask secrets for a viewer; the revision then folds in the mask version. */
+      displayMask?: boolean;
     } = {},
   ): Promise<HistoryResponse> {
     options.assertCurrent?.(true);
@@ -682,7 +709,9 @@ export const sessionsService = {
     } finally {
       await transcript?.fd.close().catch(() => undefined);
     }
-    const { result, revision } = snapshot;
+    const { result } = snapshot;
+    const displayMask = options.displayMask === true && isDisplayMaskingEnabled();
+    const revision = displayMask ? displayHistoryRevision(snapshot.revision) : snapshot.revision;
     options.assertCurrent?.(true);
 
     if (options.revision !== undefined && options.revision !== revision) {
@@ -700,6 +729,7 @@ export const sessionsService = {
     let payload = payloadMode === 'light' ? projectLightHistory(ownedResult) : ownedResult;
     if (provider === 'codex') payload = projectCodexHistoryIdentities(
       copyCodexHistoryIdentities(result, payload), sessionId, requesterUserId, options.historyLease, messageCoordinationDb.readCodexVerdicts);
+    if (displayMask) payload = { ...payload, messages: maskMessagesForSession(payload.messages, sessionId) };
     options.assertCurrent?.(true);
     return {
       ...payload,
@@ -774,7 +804,7 @@ export const sessionsService = {
         projectId: project?.project_id ?? null,
         projectPath,
         projectDisplayName: resolveProjectDisplayName(projectPath, project?.custom_project_name),
-        sessionTitle: session.custom_name?.trim() || session.session_id,
+        sessionTitle: maskDisplayLabel(session.custom_name?.trim() || session.session_id),
         createdAt: session.created_at ?? null,
         updatedAt: session.updated_at ?? null,
         lastActivity: session.updated_at ?? session.created_at ?? null,
@@ -794,8 +824,10 @@ export const sessionsService = {
    * Authorization (B-IDOR-SESSION): this is the most destructive session
    * operation — it unlinks `jsonl_path` from disk and drops the row — and it ran
    * with NO ownership check at all, so any authenticated caller could destroy any
-   * conversation by id. It now requires the 'write' mandate (session participant
+   * conversation by id. Archiving requires the 'write' mandate (session participant
    * or writable project); a refusal is a 404, identical to a missing session.
+   * `force` (permanent delete) additionally requires the permanent-delete mandate
+   * (B-1647): a reader without it receives 403 session_delete_forbidden.
    * `requesterUserId` sits in the second position to match fetchHistory so the
    * gate cannot be lost to an argument-order slip.
    */
@@ -809,7 +841,10 @@ export const sessionsService = {
       markEffectStarted?: () => void;
     } = {},
   ): Promise<{ sessionId: string; action: 'archived' | 'deleted'; deletedFromDisk: boolean }> {
-    const session = assertSessionAccessible(sessionId, requesterUserId, 'write');
+    // B-1647: archive keeps the 'write' mandate; destruction needs the narrower one.
+    const session = options.force
+      ? assertSessionPermanentlyDeletable(sessionId, requesterUserId)
+      : assertSessionAccessible(sessionId, requesterUserId, 'write');
 
     if (!options.force) {
       options.assertCurrent?.(true);
@@ -892,7 +927,10 @@ export const sessionsService = {
   ): { sessionId: string; summary: string } {
     assertSessionAccessible(sessionId, requesterUserId, 'write');
 
-    sessionsDb.updateSessionCustomName(sessionId, summary);
-    return { sessionId, summary };
+    // ADR-210: a title edited from its masked form keeps the stored raw values.
+    const stored = sessionsDb.getSessionById(sessionId)?.custom_name ?? null;
+    const title = restoreMaskedLabel(summary, stored);
+    sessionsDb.updateSessionCustomName(sessionId, title);
+    return { sessionId, summary: maskDisplayLabel(title) };
   },
 };

@@ -47,7 +47,9 @@ import { isSideChannelCommandForProvider } from '../../utils/btwCommand';
 import { isReservedSteerCommand } from '../../utils/steerCommand';
 import { normalizeArabicSlashCommand } from '../../utils/commandLocalization';
 import { effortModes } from '../../constants/thinkingModes';
+import { useComposerShellMode } from '../../hooks/useComposerShellMode';
 import FileAttachment from './FileAttachment';
+import ComposerShellToggle from './ComposerShellToggle';
 import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 import {
@@ -1123,6 +1125,9 @@ export default function ChatComposer({
   const localOutbox = useSyncExternalStore(subscribeOutbox, getOutboxSnapshot, getOutboxSnapshot);
   const dismissReceivedCopies = useMemo(() => createDeliveredOutboxDismissal(), [localOutbox]);
   const scheduled = useScheduledMessages(sessionId);
+  // T-2037: explicit shell mode. While active, Enter/submit run the draft as a
+  // one-shot in the Shell tab; nothing reaches the chat transcript.
+  const shellMode = useComposerShellMode({ input, onClearInput });
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduledEdit, setScheduledEdit] = useState<ScheduledMessage | null>(null);
 
@@ -1753,7 +1758,7 @@ export default function ChatComposer({
             باستخدام إزاحة سالبة هشّة تتوقّف على ما يسبقه في DOM. */}
       {!hasQuestionPanel && <div className="relative mx-auto max-w-4xl">
 
-        {showFileDropdown && filteredFiles.length > 0 && (
+        {!shellMode.active && showFileDropdown && filteredFiles.length > 0 && (
           <div className="absolute bottom-full start-0 end-0 z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border/50 bg-card/95 shadow-lg backdrop-blur-md">
             {filteredFiles.map((file, index) => (
               <div
@@ -1786,7 +1791,7 @@ export default function ChatComposer({
           onSelect={onCommandSelect}
           onClose={onCloseCommandMenu}
           position={commandMenuPosition}
-          isOpen={isCommandMenuOpen}
+          isOpen={isCommandMenuOpen && !shellMode.active}
           frequentCommands={frequentCommands}
           isCommandDisabled={isCommandDisabled}
         />
@@ -1825,9 +1830,16 @@ export default function ChatComposer({
         />
 
         <PromptInput
-          onSubmit={onSubmit as (event: FormEvent<HTMLFormElement>) => void}
-          status={isLoading ? 'streaming' : 'ready'}
-          className={isTextareaExpanded ? 'chat-input-expanded' : ''}
+          onSubmit={shellMode.active
+            ? shellMode.handleSubmit
+            : (onSubmit as (event: FormEvent<HTMLFormElement>) => void)}
+          status={isLoading && !shellMode.active ? 'streaming' : 'ready'}
+          className={cn(
+            isTextareaExpanded && 'chat-input-expanded',
+            // design-ok: إشارة وضع الطرفية — حدّ مميّز لا يُخلط بوضع المحادثة.
+            shellMode.active && 'border-emerald-500/70 ring-1 ring-emerald-500/40 focus-within:border-emerald-500 focus-within:ring-emerald-500/40',
+          )}
+          data-shell-mode={shellMode.active ? 'on' : undefined}
           {...getRootProps()}
         >
           {isDragActive && (
@@ -1877,6 +1889,22 @@ export default function ChatComposer({
 
           <input {...getInputProps()} />
 
+          {shellMode.active && (
+            <div className="flex items-center gap-2 px-4 pt-2 text-xs" data-testid="composer-shell-badge">
+              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-600/15 px-2 py-0.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                <Terminal size={12} aria-hidden="true" />
+                {t('shellMode.badge')}
+              </span>
+              <button
+                type="button"
+                onClick={shellMode.exit}
+                className="ms-auto rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t('shellMode.exit')} <kbd className="font-mono text-[10px]">Esc</kbd>
+              </button>
+            </div>
+          )}
+
           <PromptInputBody>
             {/*
               طبقة مرآة الـ@mentions: نصّ شفّاف مرسوم فوق الـtextarea لتلوين
@@ -1886,9 +1914,9 @@ export default function ChatComposer({
               من أول حرف قوي في المسودّة، فتسقط مستطيلات التمييز على حروف أخرى
               في كل مسودّة تفتح بحرف مخالف (126 من 1916 مسودّة حقيقية).
             */}
-            <div ref={inputHighlightRef} dir={composerDir} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl">
-              <div className="chat-input-placeholder block w-full whitespace-pre-wrap break-words px-4 py-2 text-sm leading-6 text-transparent">
-                {renderInputWithMentions(input)}
+            <div ref={inputHighlightRef} dir={shellMode.active ? 'ltr' : composerDir} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl">
+              <div className={cn('chat-input-placeholder block w-full whitespace-pre-wrap break-words px-4 py-2 text-sm leading-6 text-transparent', shellMode.active && 'font-mono')}>
+                {shellMode.active ? input : renderInputWithMentions(input)}
               </div>
             </div>
 
@@ -1899,17 +1927,22 @@ export default function ChatComposer({
               // سطراً خالياً بين النائب والتلميح. الارتفاع عند الكتابة يضبطه
               // الـautosize بـstyle مباشرة، فلا أثر لـrows عليه.
               rows={1}
-              dir={composerDir}
+              // وضع الطرفية: الأوامر لاتينية دائماً، فالاتجاه ltr والخط أحادي المسافة.
+              dir={shellMode.active ? 'ltr' : composerDir}
+              className={shellMode.active ? 'font-mono' : undefined}
+              spellCheck={shellMode.active ? false : undefined}
+              autoCapitalize={shellMode.active ? 'off' : undefined}
+              aria-label={shellMode.active ? t('shellMode.badge') : undefined}
               value={input}
               onChange={onInputChange}
               onClick={onTextareaClick}
-              onKeyDown={onTextareaKeyDown}
+              onKeyDown={shellMode.active ? shellMode.handleKeyDown : onTextareaKeyDown}
               onPaste={onTextareaPaste}
               onScroll={(event) => onTextareaScrollSync(event.target as HTMLTextAreaElement)}
               onFocus={() => onInputFocusChange?.(true)}
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
-              placeholder={placeholder}
+              placeholder={shellMode.active ? t('shellMode.placeholder') : placeholder}
             />
 
             {/* تلميح مفاتيح الإرسال — داخل صندوق الكتابة تحت الحقل مباشرة، لا في
@@ -1922,7 +1955,7 @@ export default function ChatComposer({
               // ‏-mt-2 يلغي حشوة الـtextarea السفلية (py-2) فيلتصق التلميح بالنائب
               // سطراً تالياً له تماماً (24px = leading-6) بدل فجوة ~36px.
               className={`pointer-events-none -mt-2 hidden select-none px-4 pb-2 text-sm leading-6 text-muted-foreground/50 transition-opacity duration-200 sm:block ${
-                input.trim() ? 'opacity-0' : 'opacity-100'
+                input.trim() || shellMode.active ? 'opacity-0' : 'opacity-100'
               }`}
             >
               {sendByCtrlEnter ? t('input.hintText.ctrlEnter') : t('input.hintText.enter')}
@@ -2089,6 +2122,12 @@ export default function ChatComposer({
                 <Terminal size={16} strokeWidth={2.2} />
               </span>
             </PromptInputButton>
+
+            <ComposerShellToggle
+              availability={shellMode.availability}
+              active={shellMode.active}
+              onToggle={shellMode.toggle}
+            />
 
             {/* مبدّل النموذج يأتي بعد زر الأوامر: صورة، صوت، أوامر، نموذج. */}
             {capabilities.modelSwitch?.supported && onChangeSessionModel && (
@@ -2263,14 +2302,16 @@ export default function ChatComposer({
 
           <div className="flex shrink-0 items-center gap-2">
             <ScheduleMessageButton
-              disabled={!sessionId || !input.trim() || attachedImages.length > 0 || attachedFiles.length > 0 || isSubmitSealed || Boolean(executingCommand)}
+              disabled={shellMode.active || !sessionId || !input.trim() || attachedImages.length > 0 || attachedFiles.length > 0 || isSubmitSealed || Boolean(executingCommand)}
               onClick={openNewSchedule}
             />
             <PromptInputSubmit
-              status={promptSubmitStatus}
-              disabled={(!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady && !isSteerReady && !isViewerComposer) || !isWsConnected || isImageCropping}
-              title={!isWsConnected ? t('ws.sendDisabledTitle', { defaultValue: 'Cannot send — connection lost' }) : undefined}
-              aria-label={promptSubmitAriaLabel}
+              status={shellMode.active ? 'ready' : promptSubmitStatus}
+              disabled={shellMode.active
+                ? !input.trim()
+                : (!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady && !isSteerReady && !isViewerComposer) || !isWsConnected || isImageCropping}
+              title={!shellMode.active && !isWsConnected ? t('ws.sendDisabledTitle', { defaultValue: 'Cannot send — connection lost' }) : undefined}
+              aria-label={shellMode.active ? t('shellMode.run') : promptSubmitAriaLabel}
               className="h-8 w-8 shrink-0 sm:h-8 sm:w-8"
             />
           </div>

@@ -1,5 +1,5 @@
 /**
- * B-823: the Claude branch of GET /api/projects/:projectId/sessions/:sessionId/token-usage.
+ * B-823 / B-1643: the Claude branch of GET /api/projects/:projectId/sessions/:sessionId/token-usage.
  *
  * The unit test next door proves the resolver; this proves the WIRING — that the
  * route actually asks the resolver instead of re-deriving the path from the
@@ -19,18 +19,13 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import fsPromises, { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import {
-  latestClaudeTokenUsage,
-  claudeTranscriptContextSnapshot,
-  latestClaudeCacheTtlMinutes,
-  readClaudeTranscriptForSession,
-} from '@/modules/providers/list/claude/claude-token-usage.js';
+import { readSessionTokenUsage } from '@/modules/providers/services/session-token-usage.service.js';
+
 import { contextUsagePresentation } from '../../../../../../src/components/chat/hooks/contextUsagePresentation.js';
 
 const INDEX_PATH = path.resolve(
@@ -153,36 +148,28 @@ type Collaborators = {
 function buildHandler(collaborators: Collaborators) {
   const handlerSrc = extractRouteHandler();
 
-  // Sanity: the route must delegate, not re-derive the transcript path.
+  // Sanity: the route delegates to the service, which reads through the pinned reader.
   assert.ok(
-    handlerSrc.includes('readClaudeTranscriptForSession'),
-    'token-usage handler must read the transcript through the race-safe helper',
+    handlerSrc.includes('readSessionTokenUsage'),
+    'token-usage handler must delegate to readSessionTokenUsage',
   );
   assert.ok(
-    !handlerSrc.includes("path.join(homeDir, '.claude', 'projects'"),
-    'token-usage handler must not re-derive the Claude projects path',
+    !/fsPromises|readdir|readFile|path\.join/.test(handlerSrc),
+    'token-usage handler must not touch the filesystem itself',
   );
 
   const factory = new Function(
-    'os', 'path', 'fsPromises', 'projectsDb', 'sessionsDb', 'isProjectVisible',
-    'coerceUserId', 'readClaudeTranscriptForSession', 'latestClaudeTokenUsage',
-    'console', 'claudeTranscriptContextSnapshot', 'latestClaudeCacheTtlMinutes',
+    'projectsDb', 'sessionsDb', 'isProjectVisible', 'coerceUserId', 'readSessionTokenUsage', 'console',
     `return ${handlerSrc};`,
   );
 
   return factory(
-    os,
-    path,
-    fsPromises,
     { getProjectPathById: async () => collaborators.projectPathById },
     { getSessionById: () => collaborators.sessionRow },
     () => collaborators.visible !== false,
     (id: unknown) => id ?? null,
-    readClaudeTranscriptForSession,
-    latestClaudeTokenUsage,
+    readSessionTokenUsage,
     console,
-    claudeTranscriptContextSnapshot,
-    latestClaudeCacheTtlMinutes,
   );
 }
 

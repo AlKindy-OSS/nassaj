@@ -20,6 +20,7 @@ import {
   agyChecklistPlan,
   buildAgyTurnProgressRows,
   lastAgyTurnBaseline,
+  readAgyChildTools,
   readAgyTaskFile,
   summarizeAgyProgressStep,
   type AgyProgressStep,
@@ -274,12 +275,14 @@ async function readLastTurnProgress(
   const brain = agyBrainOfTranscript(transcriptPath);
   if (!brain || steps.length === 0) return [];
   const taskText = await readAgyTaskFile(brain.brainRoot, brain.brainUUID);
+  const childTools = await readAgyChildTools(brain.brainRoot, steps);
   return buildAgyTurnProgressRows({
     steps,
     afterStepIndex: lastAgyTurnBaseline(steps),
     brainUUID: brain.brainUUID,
     sessionId,
     plan: taskText ? agyChecklistPlan(taskText) : null,
+    childTools,
   });
 }
 

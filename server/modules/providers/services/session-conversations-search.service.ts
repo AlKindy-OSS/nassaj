@@ -20,6 +20,8 @@ import {
   pinnedReadStream,
   type SessionTranscriptHandle,
 } from '@/modules/providers/shared/session-transcript.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
+import { displayLiteralsForSession, isDisplayMaskingEnabled, maskDisplayLabel, maskText } from '@/services/display-secret-mask.js';
 
 type AnyRecord = Record<string, any>;
 type SearchableProvider = 'claude' | 'codex';
@@ -141,12 +143,13 @@ function makeProjectKey(projectPath: string | null): string {
 }
 
 function toSummaryText(customName: string | null, fallback: string | null | undefined, emptyLabel: string): string {
-  const trimmedCustomName = typeof customName === 'string' ? customName.trim() : '';
+  const trimmedCustomName = typeof customName === 'string' ? maskDisplayLabel(customName.trim()) : '';
   if (trimmedCustomName) {
     return trimmedCustomName;
   }
 
-  const trimmedFallback = typeof fallback === 'string' ? fallback.trim() : '';
+  // ADR-210: mask before truncating, so a cut can never leave half a secret unmatched.
+  const trimmedFallback = typeof fallback === 'string' ? maskDisplayLabel(fallback.trim()) : '';
   if (!trimmedFallback) {
     return emptyLabel;
   }
@@ -278,6 +281,29 @@ function createWordMatcher(
   };
 
   return { matchesQuery, buildSnippet };
+}
+
+/**
+ * ADR-210 (T-2036): a hit must survive masking. The raw match is only a cheap
+ * prefilter; the query is matched again on the masked text and the snippet and
+ * highlights are built from it, so searching a prefix of a stored secret finds
+ * nothing and can never be used as an oracle. One-entry memo: the snippet call
+ * always follows the match call for the same text.
+ */
+function withDisplayMasking(
+  matcher: Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'>,
+): Pick<SearchRuntime, 'matchesQuery' | 'buildSnippet'> {
+  if (!isDisplayMaskingEnabled()) return matcher;
+  const literals = displayLiteralsForSession(null);
+  let memo: { raw: string; masked: string } | null = null;
+  const masked = (text: string): string => {
+    if (memo?.raw !== text) memo = { raw: text, masked: maskText(text, { literals }) };
+    return memo.masked;
+  };
+  return {
+    matchesQuery: (text) => matcher.matchesQuery(text) && matcher.matchesQuery(masked(text)),
+    buildSnippet: (text) => matcher.buildSnippet(masked(text)),
+  };
 }
 
 function extractClaudeText(content: unknown): string {
@@ -1117,7 +1143,7 @@ export async function searchConversations(
   let scannedProjects = 0;
 
   const runtime: SearchRuntime = {
-    ...createWordMatcher(safeQuery, words),
+    ...withDisplayMasking(createWordMatcher(safeQuery, words)),
     limit: safeLimit,
     totalMatches: 0,
     isAborted,

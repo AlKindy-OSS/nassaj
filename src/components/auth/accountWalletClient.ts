@@ -70,7 +70,7 @@ export function finishWalletIdentityTransition(
   return true;
 }
 
-type WalletErrorBody = { code?: string; wallet?: AccountWallet };
+type WalletErrorBody = { code?: string; wallet?: AccountWallet; retryAfterSeconds?: number };
 
 export class AccountWalletError extends Error {
   constructor(
@@ -78,6 +78,8 @@ export class AccountWalletError extends Error {
     public readonly status: number,
     public readonly wallet?: AccountWallet,
     public readonly outcomeUnknown = false,
+    /** T-2035: seconds until a `login_temporarily_locked` lock ends. */
+    public readonly retryAfterSeconds?: number,
   ) {
     super(code);
   }
@@ -101,7 +103,8 @@ async function readJson<T>(response: Response, mutationSent = false): Promise<T>
     if (!code && mutationSent) {
       throw new AccountWalletError('wallet_mutation_outcome_unknown', response.status, undefined, true);
     }
-    throw new AccountWalletError(code ?? `http_${response.status}`, response.status, body?.wallet);
+    const retryAfterSeconds = typeof body?.retryAfterSeconds === 'number' ? body.retryAfterSeconds : undefined;
+    throw new AccountWalletError(code ?? `http_${response.status}`, response.status, body?.wallet, false, retryAfterSeconds);
   }
   if (!body) {
     throw new AccountWalletError(

@@ -339,7 +339,18 @@ export const api = {
     userForIdentityReconciliation: () => authenticatedFetch('/api/auth/user', { __identityBypass: true }),
     // Current identity incl. role + status (Phase-MU).
     me: () => authenticatedFetch('/api/auth/me'),
-    logout: () => authenticatedFetch('/api/auth/logout', { method: 'POST' }),
+    // T-2035: sign-out ends the presenting device's session (its token `sid`),
+    // so the request must carry the token being signed out even though the
+    // caller clears the session at once. With `bearerToken` it is sent explicitly on a raw fetch (no 401
+    // eviction/refresh path, no identity fence); without one the regular
+    // cookie/bearer path is used.
+    logout: (bearerToken) => (bearerToken
+      ? fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bearerToken}` },
+        })
+      : authenticatedFetch('/api/auth/logout', { method: 'POST' })),
 
     // Proactively mint a fresh JWT before the current one expires (B-131 gap أ).
     // Single-flight + raw fetch (see refreshAuthToken) so it never recurses

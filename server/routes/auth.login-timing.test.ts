@@ -27,6 +27,8 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createMemoryLoginThrottleStore } from '../services/__tests__/login-throttle-memory-store.js';
+
 // --- controllable test state -------------------------------------------------
 
 // verifyPassword spy: records (hash, password) per call, returns `verifyResult`.
@@ -55,6 +57,7 @@ class MockInviteError extends Error {
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: { getUserByLoginIdentifier: (id: string) => { lookups.push(id); return userRow; }, updateLastLogin: () => {} },
+    loginThrottleDb: createMemoryLoginThrottleStore(),
     // ADR-194 D1: the mocked store makes the SSO state read fail closed
     // (enforced); this account has no IdP link, so local login stays open.
     userIdentitiesDb: { hasAnyLink: () => false },

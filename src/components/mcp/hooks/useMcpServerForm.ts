@@ -11,6 +11,7 @@ import {
   parseKeyValueLines,
   parseListLines,
 } from '../utils/mcpFormatting';
+import { alertDialog } from '../../../shared/dialogs/dialogService';
 
 type UseMcpServerFormArgs = {
   provider: McpProvider;
@@ -224,7 +225,7 @@ export function useMcpServerForm({
       // lines or partial KEY=value entries without the form rewriting them.
       await onSubmit(createSubmitFormData(), editingServer);
     } catch (error) {
-      alert(`Error: ${getErrorMessage(error)}`);
+      void alertDialog(`Error: ${getErrorMessage(error)}`);
     } finally {
       setIsSubmitting(false);
     }

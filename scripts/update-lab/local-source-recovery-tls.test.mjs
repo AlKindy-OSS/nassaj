@@ -33,6 +33,7 @@ console.log(JSON.stringify({schema:'nassaj-local-recovery-tls-proof/v1',trustedT
     const result=runBridgeIsolated(lab,entry,{privateDependencies:true,timeout:20000});
     assert.equal(result.status,0,result.stderr);const proof=JSON.parse(result.stdout.trim());
     assert.equal(proof.trustedTls,true);
-    const report=path.resolve(path.dirname(modulePath),'../../.artifacts/t1772-current-readiness-20260919/local-source-recovery-lab-tls.json');
+    // Keep the proof with this run's lab; a fixed readiness directory exists only on one host.
+    const report=path.join(lab,'local-source-recovery-lab-tls.json');
     fs.writeFileSync(report,JSON.stringify({lab,...proof},null,2),{mode:0o600});
 });

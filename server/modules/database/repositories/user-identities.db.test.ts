@@ -180,18 +180,3 @@ test('T-1939 slice 5: legacy duplicates are counted per user, never per row', ()
   assert.equal(userIdentitiesDb.countForUserAndIssuer(member.id, 'https://issuer.example'), 3);
   assert.equal(userIdentitiesDb.countUsersWithDuplicateIssuerLinks(), 1);
 }));
-
-test('ADR-194 A1: setOwnerSsoOptIn writes only the owning link; findForUserAndIssuer reads it', () => withDatabase(() => {
-  const owner = userDb.createUser('opt-in-owner', 'hash', 'owner');
-  const other = userDb.createUser('opt-in-other', 'hash', 'owner');
-  const id = userIdentitiesDb.link(owner.id, 'https://issuer.example', 'sub-opt-in');
-  assert.equal(userIdentitiesDb.findForUserAndIssuer(owner.id, 'https://issuer.example')[0]?.owner_sso_opt_in_at, null);
-  assert.equal(userIdentitiesDb.setOwnerSsoOptIn(id, other.id, 123), false, 'a mismatched user id never writes');
-  assert.equal(userIdentitiesDb.findByIssuerAndSubject('https://issuer.example', 'sub-opt-in')?.owner_sso_opt_in_at, null);
-  assert.equal(userIdentitiesDb.setOwnerSsoOptIn(id, owner.id, 1_700_000_000_000), true);
-  assert.equal(userIdentitiesDb.findForUserAndIssuer(owner.id, 'https://issuer.example')[0]?.owner_sso_opt_in_at,
-    1_700_000_000_000);
-  assert.equal(userIdentitiesDb.setOwnerSsoOptIn(id, owner.id, null), true);
-  assert.equal(userIdentitiesDb.findByIssuerAndSubject('https://issuer.example', 'sub-opt-in')?.owner_sso_opt_in_at, null);
-  assert.deepEqual(userIdentitiesDb.findForUserAndIssuer(owner.id, 'https://other.example'), []);
-}));

@@ -190,7 +190,10 @@ export const listActionTypes = () => Object.keys(SERVER_ACTIONS);
 
 // A sessionId is written by the coordinator; it must never reach a shell or a
 // path, so it is validated defensively as an opaque, bounded token regardless.
-const SAFE_SESSION_ID = /^[\w.-]{1,128}$/;
+// B-1643: the shared session-id grammar (server/shared/session-id.ts), copied
+// here because plain-node scripts import this file and cannot load that TS
+// module: no leading dot and no '..'; a parity test pins the two together.
+export const SAFE_SESSION_ID = /^[A-Za-z0-9_-](?:[A-Za-z0-9_-]|\.(?!\.)){0,127}$/;
 export const SAFE_SERVER_BUILD_ID = /^[a-f0-9]{64}$/;
 
 /** Hard cap on a stored reason string (defensive; the UI shows it verbatim). */

@@ -64,7 +64,7 @@ test('live: an Agent launch is started then running; its child row carries the p
   assert.deepEqual(lifecycle, [
     ['tool_use', {
       id: agentId, parentId: null, label: 'Reply OK', state: 'started',
-      agentName: 'general-purpose', model: 'claude-haiku-4-5-20251001', modelInherited: true,
+      agentName: 'general-purpose',
     }],
     ['tool_result', {
       id: agentId, parentId: null, label: 'Reply OK', state: 'running',
@@ -86,17 +86,22 @@ test('live: parent_tool_use_id streams child tool snapshots while the Agent is r
   ]);
   const provider = new ClaudeSessionsProvider();
   const fold = createClaudeProgressFold('live', SID);
+  const tracker = createClaudeSubagentTracker();
   const launch = sdk.events.find((event: Record<string, any>) => event.message?.content?.some((part: any) => part.name === 'Agent'));
   const launchRows = provider.normalizeMessage(launch, SID);
   fold.observe(launch, launchRows);
+  tracker.observe(launch, launchRows);
   const parentId = launch.message.content.find((part: any) => part.name === 'Agent').id;
   const childTool = transcript.subagent.find((entry: Record<string, any>) => entry.message?.content?.some((part: any) => part.type === 'tool_use'));
   const rawChild = { ...childTool, parent_tool_use_id: parentId };
   const childRows = provider.normalizeMessage(rawChild, SID);
   fold.observe(rawChild, childRows);
-  assert.deepEqual(childRows.filter((row) => row.kind === 'status').map((row) => row.subagent?.tools), [[{ name: 'ToolSearch', status: 'running' }]]);
-
+  tracker.observe(rawChild, childRows);
   const toolId = childTool.message.content.find((part: any) => part.type === 'tool_use').id;
+  const snapshots = childRows.filter((row) => row.kind === 'status')
+    .map((row) => row.subagent?.tools);
+  assert.deepEqual(snapshots, [[{ id: toolId, name: 'ToolSearch', status: 'running' }]]);
+
   const rawResult = transcript.subagent.find((entry: Record<string, any>) =>
     entry.message?.content?.some((part: any) => part.type === 'tool_result' && part.tool_use_id === toolId));
   const resultEvent = { ...rawResult, parent_tool_use_id: parentId };
@@ -104,6 +109,68 @@ test('live: parent_tool_use_id streams child tool snapshots while the Agent is r
   fold.observe(resultEvent, resultRows);
   assert.ok(resultRows.some((row) => row.kind === 'status'
     && row.subagent?.tools?.some((tool) => tool.name === 'ToolSearch' && tool.status === 'completed')));
+  const settled = tracker.settle(parentId, 'completed');
+  assert.ok(settled?.tools?.length);
+  assert.ok(settled?.tools?.every((tool) => tool.id && tool.status === 'completed'),
+    'settled tool rows retain ids and close any tool left running');
+
+  const failedTracker = createClaudeSubagentTracker();
+  failedTracker.observe(launch, provider.normalizeMessage(launch, SID));
+  failedTracker.observe(rawChild, provider.normalizeMessage(rawChild, SID));
+  const failed = failedTracker.settle(parentId, 'failed');
+  assert.equal(failed?.state, 'failed');
+  assert.equal(failed?.tools?.[0]?.status, 'failed',
+    'a failed agent fails tools still running when it settles');
+});
+
+test('live: background child transcript updates carry model and tool status', async () => {
+  const transcript = await fixture('claude-subagent-task-plan.real.json');
+  const provider = new ClaudeSessionsProvider();
+  const fold = createClaudeProgressFold('live', SID);
+  const launch = transcript.main.find((event: Record<string, any>) =>
+    Array.isArray(event.message?.content)
+      && event.message.content.some((part: any) => part.name === 'Agent'));
+  fold.observe(launch, provider.normalizeMessage(launch, SID));
+  const parentId = launch.message.content.find((part: any) => part.name === 'Agent').id;
+  const childUse = transcript.subagent.find((entry: Record<string, any>) =>
+    entry.message?.content?.some((part: any) => part.type === 'tool_use'));
+  const use = childUse.message.content.find((part: any) => part.type === 'tool_use');
+  const progressRows: NormalizedMessage[] = [];
+  fold.observe({ type: 'system', subtype: 'task_progress',
+    tool_use_id: parentId, tool_id: use.id, last_tool_name: use.name,
+    resolvedModel: childUse.message.model }, progressRows);
+  assert.deepEqual(progressRows[0].subagent, {
+    id: parentId, parentId: null, label: 'Plan demo', state: 'running',
+    agentName: 'general-purpose', model: 'claude-haiku-4-5-20251001',
+    tools: [{ id: use.id, name: use.name, status: 'running' }],
+  });
+  const childResult = transcript.subagent.find((entry: Record<string, any>) =>
+    entry.message?.content?.some((part: any) =>
+      part.type === 'tool_result' && part.tool_use_id === use.id));
+  const resultRows: NormalizedMessage[] = [];
+  fold.observe({ type: 'system', subtype: 'task_progress',
+    tool_use_id: parentId, tool_id: use.id, last_tool_name: use.name,
+    tool_status: 'completed', resolvedModel: childResult.message.model }, resultRows);
+  assert.equal(resultRows[0].subagent?.tools?.[0].status, 'completed');
+  assert.equal(resultRows[0].subagent?.model, 'claude-haiku-4-5-20251001');
+});
+
+test('live: a settled subagent ignores late running progress', async () => {
+  const { events } = await fixture('claude-progress-sdk-stream.real.json');
+  const provider = new ClaudeSessionsProvider();
+  const fold = createClaudeProgressFold('live', SID);
+  const launch = events.find((event: Record<string, any>) =>
+    event.message?.content?.some((part: any) => part.name === 'Agent'));
+  const rows = provider.normalizeMessage(launch, SID);
+  fold.observe(launch, rows);
+  const parentId = launch.message.content.find((part: any) => part.name === 'Agent').id;
+  const settledRows = fold.observe({ type: 'system', subtype: 'task_notification',
+    tool_use_id: parentId, status: 'completed' }, []);
+  const lateRows: NormalizedMessage[] = [];
+  fold.observe({ type: 'system', subtype: 'task_progress', tool_use_id: parentId,
+    last_tool_name: 'Read', tool_id: 'late-tool' }, lateRows);
+  assert.equal(settledRows[0].subagent?.state, 'completed');
+  assert.equal(lateRows.some((row) => row.subagent?.state === 'running'), false);
 });
 
 test('history: recorded transcript rows yield completed and failed lifecycles; light projection round-trips', async () => {

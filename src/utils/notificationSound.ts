@@ -1,4 +1,6 @@
 const NOTIFICATION_SOUND_ENABLED_STORAGE_KEY = 'notificationSoundEnabled';
+/** مفتاح صوت الأسئلة (‏T-2041) — مستقلّ عن صوت الانتهاء، ومُفعَّل افتراضياً مثله. */
+export const NOTIFICATION_QUESTION_SOUND_ENABLED_STORAGE_KEY = 'notificationQuestionSoundEnabled';
 const AudioContextConstructor =
   typeof window !== 'undefined'
     ? window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
@@ -20,6 +22,46 @@ export const setNotificationSoundEnabled = (enabled: boolean): void => {
   }
 
   localStorage.setItem(NOTIFICATION_SOUND_ENABLED_STORAGE_KEY, String(enabled));
+};
+
+export const isNotificationQuestionSoundEnabled = (): boolean => {
+  if (typeof localStorage === 'undefined') {
+    return true;
+  }
+
+  return localStorage.getItem(NOTIFICATION_QUESTION_SOUND_ENABLED_STORAGE_KEY) !== 'false';
+};
+
+export const setNotificationQuestionSoundEnabled = (enabled: boolean): void => {
+  if (typeof localStorage === 'undefined') {
+    return;
+  }
+
+  localStorage.setItem(NOTIFICATION_QUESTION_SOUND_ENABLED_STORAGE_KEY, String(enabled));
+};
+
+/**
+ * سياسة التشغيل التلقائي: لا صوت قبل أول تفاعلٍ من المستخدم مع الصفحة.
+ * المحاولة قبله تُرفض أو تُعلّق `AudioContext` وتملأ السجلّ تحذيرات، فيُصمت
+ * عنها بصمت. ‏`navigator.userActivation` هو الحكم حيث يتوفّر، وإلا فمستمعٌ محلّي.
+ */
+let sawUserGesture = false;
+
+if (typeof window !== 'undefined') {
+  const markGesture = () => {
+    sawUserGesture = true;
+    window.removeEventListener('pointerdown', markGesture, true);
+    window.removeEventListener('keydown', markGesture, true);
+  };
+  window.addEventListener('pointerdown', markGesture, true);
+  window.addEventListener('keydown', markGesture, true);
+}
+
+export const hasUserGesture = (): boolean => {
+  const activation = typeof navigator !== 'undefined'
+    ? (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation
+    : undefined;
+  return sawUserGesture || activation?.hasBeenActive === true;
 };
 
 const getAudioContext = (): AudioContext | null => {
@@ -84,11 +126,21 @@ const ERROR_TONES: readonly ToneStep[] = [
   { frequency: 622, offsetSeconds: 0.11, durationSeconds: 0.16, peakVolume: 0.06 },
 ];
 
+/**
+ * تتابع **نبضتين متساويتين ثم أعلى**: سؤالٌ ينتظر جوابك (‏T-2041).
+ * يختلف عن الصاعد (رد جاهز) والهابط (فشل) فيُميَّز بالسمع وحده.
+ */
+const QUESTION_TONES: readonly ToneStep[] = [
+  { frequency: 880, offsetSeconds: 0, durationSeconds: 0.09, peakVolume: 0.07 },
+  { frequency: 880, offsetSeconds: 0.14, durationSeconds: 0.09, peakVolume: 0.07 },
+  { frequency: 1319, offsetSeconds: 0.28, durationSeconds: 0.18, peakVolume: 0.06 },
+];
+
 const playToneSequence = async (
   steps: readonly ToneStep[],
-  force: boolean,
+  isEnabled: (() => boolean) | null,
 ): Promise<void> => {
-  if (!force && !isNotificationSoundEnabled()) {
+  if (isEnabled && !isEnabled()) {
     return;
   }
 
@@ -119,7 +171,18 @@ const playToneSequence = async (
 };
 
 export const playChatCompletionSound = async ({ force = false } = {}): Promise<void> =>
-  playToneSequence(COMPLETION_TONES, force);
+  playToneSequence(COMPLETION_TONES, force ? null : isNotificationSoundEnabled);
 
 export const playChatErrorSound = async ({ force = false } = {}): Promise<void> =>
-  playToneSequence(ERROR_TONES, force);
+  playToneSequence(ERROR_TONES, force ? null : isNotificationSoundEnabled);
+
+/**
+ * نغمة السؤال. بلا `force` تحترم مفتاحها وسياسة التشغيل التلقائي معاً؛
+ * و`force` لزرّ التجربة في الإعدادات (وهو نفسه تفاعلٌ من المستخدم).
+ */
+export const playChatQuestionSound = async ({ force = false } = {}): Promise<void> => {
+  if (!force && !hasUserGesture()) {
+    return;
+  }
+  return playToneSequence(QUESTION_TONES, force ? null : isNotificationQuestionSoundEnabled);
+};

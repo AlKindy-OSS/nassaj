@@ -5,11 +5,13 @@
  * resolved an active owner. The owner is admitted only when, in this order:
  *
  *   1. the account has no forced password change pending;
- *   2. the identity row carries the owner's own opt-in;
- *   3. the id_token `amr` proves the factor rule (default: a WebAuthn key,
+ *   2. the id_token `amr` proves the factor rule (default: a WebAuthn key,
  *      with or without a password);
- *   4. `auth_time` is at most 5 minutes old (plus 60 s skew) and at most
+ *   3. `auth_time` is at most 5 minutes old (plus 60 s skew) and at most
  *      60 s in the future.
+ *
+ * Owner SSO sign-in is always on (owner decision 2026-10-16): there is no
+ * per-owner opt-in any more; the factor and freshness rules are the gate.
  *
  * The first failure wins. Nothing here touches the database or the network;
  * the route writes the audit rows and the redirect.
@@ -50,7 +52,6 @@ const MAX_AMR_ITEM_LENGTH = 32;
 /** Refusal per failed step: the audited reason and the return-page code. */
 const REFUSALS = Object.freeze({
   password_change_required: 'password_change_required',
-  not_opted_in: 'owner_must_sign_in_locally',
   amr_insufficient: 'owner_sso_key_required',
   auth_time_missing: 'owner_sso_reauth_required',
   auth_time_stale: 'owner_sso_reauth_required',
@@ -119,7 +120,6 @@ export function ownerAuthTimeFailure(authTime, nowMs) {
  * The owner admission decision, in the A1.2 order.
  * @param {{
  *   account: { must_change_password?: number },
- *   identity: { owner_sso_opt_in_at?: number | null } | null | undefined,
  *   claims: Record<string, unknown> | null | undefined,
  *   nowMs: number,
  *   rule?: string,
@@ -128,12 +128,9 @@ export function ownerAuthTimeFailure(authTime, nowMs) {
  *   | { ok: false, reason: keyof typeof REFUSALS, code: string, stepUp: boolean }}
  *   `stepUp` is true when one fresh IdP sign-in with the key can fix it.
  */
-export function decideOwnerSignIn({ account, identity, claims, nowMs, rule = OWNER_SSO_FACTOR_RULE }) {
+export function decideOwnerSignIn({ account, claims, nowMs, rule = OWNER_SSO_FACTOR_RULE }) {
   const refuse = (reason) => ({ ok: false, reason, code: REFUSALS[reason], stepUp: STEP_UP_REASONS.has(reason) });
   if (account?.must_change_password === 1) return refuse('password_change_required');
-  if (identity?.owner_sso_opt_in_at === null || identity?.owner_sso_opt_in_at === undefined) {
-    return refuse('not_opted_in');
-  }
   if (!amrSatisfiesRule(claims?.amr, rule)) return refuse('amr_insufficient');
   const authFailure = ownerAuthTimeFailure(claims?.auth_time, nowMs);
   if (authFailure) return refuse(authFailure);

@@ -8,6 +8,8 @@ import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
+import { maskDisplayLabel } from '@/services/display-secret-mask.js';
 
 import type { SessionOutcome } from '../../../../shared/session-outcome.js';
 import {
@@ -280,7 +282,8 @@ function mapSessionRowToSummary(
 ): SessionSummary {
   return {
     id: row.session_id,
-    summary: row.custom_name || '',
+    // ADR-210 (T-2036): a title derived from a first message may carry a pasted credential.
+    summary: maskDisplayLabel(row.custom_name || ''),
     messageCount: 0,
     createdAt: row.created_at ?? null,
     lastActivity: row.updated_at ?? row.created_at ?? new Date().toISOString(),

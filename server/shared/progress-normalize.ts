@@ -17,7 +17,7 @@ export type ProgressPlanItem = { id: string; label: string; status: ProgressItem
 export type ProgressPlanCounts = { done: number; total: number };
 export type ProgressPlan = { source: 'tool' | 'artifact'; items: ProgressPlanItem[]; counts?: ProgressPlanCounts };
 export type SubagentState = 'started' | 'running' | 'completed' | 'failed';
-export type ProgressSubagentTool = { name: string; status?: string };
+export type ProgressSubagentTool = { id?: string; name: string; status?: string };
 export type ProgressSubagent = {
   id: string;
   parentId: string | null;
@@ -182,8 +182,9 @@ function boundProgressSubagentTools(value: unknown): ProgressSubagentTool[] | un
     const record = item as Record<string, unknown>;
     const name = toPlainLabel(record.name, SUBAGENT_LABEL_MAX_CHARS);
     if (!name) continue;
+    const id = toPlainLabel(record.id, ID_MAX_CHARS);
     const status = toPlainLabel(record.status, 32);
-    tools.push({ name, ...(status ? { status } : {}) });
+    tools.push({ ...(id ? { id } : {}), name, ...(status ? { status } : {}) });
   }
   return tools;
 }

@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Project, ProjectSession } from '../../../types/app';
-import type { ShellErrorInfo } from '../types/types';
+import type { OneShotFrame, ShellErrorInfo } from '../types/types';
+import { registerOneShotCaptureSender } from '../oneShot/oneShotRunsStore';
+import { isOneShotRefusalCode } from '../utils/reconnect';
 import {
   PROMPT_BUFFER_SCAN_LINES,
   PROMPT_DEBOUNCE_MS,
@@ -40,6 +42,15 @@ type ShellProps = {
   minimal?: boolean;
   autoConnect?: boolean;
   isActive?: boolean;
+  /**
+   * T-2037: binds this shell to one composer one-shot run. Every connect —
+   * auto, reconnect, remount, the Connect button — re-attaches to this runId;
+   * Restart is not offered, so only a fresh composer submit starts a command.
+   */
+  oneShotRunId?: string | null;
+  onOneShotFrame?: ((frame: OneShotFrame) => void) | null;
+  /** True once per run: only that init may carry the command (T-2037). */
+  claimOneShotLaunch?: ((runId: string) => boolean) | null;
 };
 
 export default function Shell({
@@ -53,6 +64,9 @@ export default function Shell({
   minimal = false,
   autoConnect = false,
   isActive = true,
+  oneShotRunId = null,
+  onOneShotFrame = null,
+  claimOneShotLaunch = null,
 }: ShellProps) {
   const { t } = useTranslation('chat');
   const { t: tTerminals } = useTranslation('terminals');
@@ -62,6 +76,26 @@ export default function Shell({
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartAfterInitRef = useRef(false);
   const onOutputRef = useRef<(() => void) | null>(null);
+  const isOneShot = Boolean(oneShotRunId);
+  // A finished or refused one-shot keeps its output on screen without the
+  // connect card on top: there is nothing left to (re)connect to.
+  const [oneShotSettled, setOneShotSettled] = useState(false);
+
+  const handleOneShotFrame = useCallback(
+    (frame: OneShotFrame) => {
+      if (frame.type === 'oneshot_finished') setOneShotSettled(true);
+      onOneShotFrame?.(frame);
+    },
+    [onOneShotFrame],
+  );
+
+  const handleShellError = useCallback(
+    (error: ShellErrorInfo | null) => {
+      if (isOneShot && error && isOneShotRefusalCode(error.code ?? '')) setOneShotSettled(true);
+      onShellError?.(error);
+    },
+    [isOneShot, onShellError],
+  );
 
   const {
     terminalContainerRef,
@@ -84,13 +118,27 @@ export default function Shell({
     initialCommand,
     isPlainShell,
     provider,
-    onShellError,
+    onShellError: handleShellError,
     minimal,
     autoConnect,
     isRestarting,
     onProcessComplete,
     onOutputRef,
+    oneShotRunId,
+    onOneShotFrame: handleOneShotFrame,
+    claimOneShotLaunch,
   });
+
+  // T-2037: lets the run strip ask this mounted shell for its run's capture.
+  useEffect(() => {
+    if (!oneShotRunId) return undefined;
+    return registerOneShotCaptureSender(oneShotRunId, () => {
+      const socket = wsRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+      sendSocketMessage(socket, { type: 'oneshot_capture', runId: oneShotRunId });
+      return true;
+    });
+  }, [oneShotRunId, wsRef]);
 
   const { themeId: terminalThemeId, setThemeId: setTerminalThemeId } = useTerminalTheme(terminalRef);
 
@@ -211,6 +259,11 @@ export default function Shell({
     [sessionDisplayName],
   );
 
+  // One-shot Connect: re-attach to the same runId, never a forced restart.
+  const handleReattachOneShot = useCallback(() => {
+    connectToShell();
+  }, [connectToShell]);
+
   const handleRestartShell = useCallback(() => {
     restartAfterInitRef.current = true;
     setIsRestarting(true);
@@ -297,7 +350,9 @@ export default function Shell({
 
   // `reconnecting` outranks `connect`/`connecting`: an in-flight auto re-attach
   // should show its own affordance, never the manual connect button.
-  const overlayMode = !isInitialized
+  const overlayMode = isOneShot && oneShotSettled && isInitialized
+    ? null
+    : !isInitialized
     ? 'loading'
     : isReconnecting
       ? 'reconnecting'
@@ -333,6 +388,7 @@ export default function Shell({
         restartLabel={t('shell.actions.restart')}
         restartTitle={t('shell.actions.restartTitle')}
         disableRestart={isRestarting || !isInitialized}
+        showRestart={!isOneShot}
         terminalThemeId={terminalThemeId}
         onTerminalThemeChange={setTerminalThemeId}
       />
@@ -354,7 +410,7 @@ export default function Shell({
             connectTitle={t('shell.actions.connectTitle')}
             connectingLabel={t('shell.connecting')}
             reconnectingLabel={t('shell.reconnecting')}
-            onConnect={handleRestartShell}
+            onConnect={isOneShot ? handleReattachOneShot : handleRestartShell}
           />
         )}
 

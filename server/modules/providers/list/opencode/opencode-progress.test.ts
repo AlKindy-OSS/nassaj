@@ -11,13 +11,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { OpenCodeSessionsProvider } from './opencode-sessions.provider.js';
+import { OpenCodeSessionsProvider, readChildTools } from './opencode-sessions.provider.js';
 import { openCodeToolPart } from './opencode-tool-part.js';
 
 type AnyRecord = Record<string, any>;
 
 const fixture = JSON.parse(fs.readFileSync(
   path.join(import.meta.dirname, '__fixtures__', 'opencode-progress.real.json'), 'utf8')) as AnyRecord;
+const childFixturePath = path.join(import.meta.dirname, '__fixtures__',
+  'opencode-child-tools.real.json');
+const childFixture = JSON.parse(fs.readFileSync(childFixturePath, 'utf8')) as AnyRecord;
 const provider = new OpenCodeSessionsProvider();
 const SESSION = fixture.sessionId as string;
 
@@ -66,6 +69,22 @@ describe('OpenCode live tool parts — real capture (B-1560)', () => {
       id: 'call_1eb88656fe0840c4937553d3', parentId: null, label: 'Read a.txt content', state: 'completed',
       agentName: 'general', model: 'big-pickle',
     }]);
+  });
+});
+
+describe('OpenCode child session tools — real backup capture', () => {
+  it('joins child tool parts through parent_id and task metadata.sessionId', () => {
+    const parentId = childFixture.parentSessionId as string;
+    const childId = childFixture.childSessionId as string;
+    const db = { prepare: () => ({ all: () => [{
+      session_id: childId, part_id: 'scrubbed_part',
+      part_data: JSON.stringify(childFixture.childTool),
+    }] }) } as any;
+    const toolsByChild = readChildTools(db, parentId);
+    const metadata = childFixture.parentTask.state.metadata;
+    assert.equal(metadata.sessionId, childId);
+    assert.equal(metadata.parentSessionId, parentId);
+    assert.deepEqual(toolsByChild.get(metadata.sessionId), [{ name: 'read', status: 'completed' }]);
   });
 });
 

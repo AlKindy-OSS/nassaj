@@ -93,12 +93,7 @@ export type SsoStatus = {
   ignoredEnv: string[];
   identityCountsByIssuer: Array<{ issuer: string; linkedUsers: number }>;
   applyImpact: SsoApplyImpact | null;
-  /** The caller's own owner SSO sign-in opt-in (ADR-194 A1); absent on older servers. */
-  ownerSignIn?: SsoOwnerSignIn;
 };
-
-/** `ownerSignIn` of GET /api/settings/sso and PUT /owner-sign-in. */
-export type SsoOwnerSignIn = { linked: boolean; enabled: boolean };
 
 /** POST /draft/test-discovery answer. */
 export type SsoDiscoveryResult = {

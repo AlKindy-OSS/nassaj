@@ -41,7 +41,9 @@ import { createNormalizedMessage } from '@/shared/utils.js';
 import { isTranscriptHandle, openRunTranscript } from '../../shared/session-transcript-reader.js';
 
 import { codexSpawnSubagent, humanizeCodexToolName, parseCodexSubagentMessage } from './codex-progress.js';
-import { withTranscriptReadPermit } from './codex-rollout-links.js';
+import {
+  createCodexOwnHistoryFilter, resolveCodexChildRolloutPath, withTranscriptReadPermit,
+} from './codex-rollout-links.js';
 
 export type CodexTailLimits = {
   pollMs: number;
@@ -68,7 +70,12 @@ export const CODEX_TAIL_LIMITS: Readonly<CodexTailLimits> = Object.freeze({
 });
 
 /** A spawn surfaced from the rollout, or its settlement. */
-export type CodexTailSignal = { kind: 'spawn' | 'settle'; callId: string; label: string };
+export type CodexTailSignal = {
+  kind: 'spawn' | 'settle' | 'progress'; callId: string; label: string;
+  agentType?: string; model?: string; effort?: string;
+  agentPath?: string; agentThreadId?: string; occurredAtMs?: number | null;
+  tools?: Array<{ id: string; name: string; status: string }>;
+};
 
 const SPAWN_MARKER = Buffer.from('"spawn_agent"');
 const AGENT_MESSAGE_MARKER = Buffer.from('"agent_message"');
@@ -88,7 +95,11 @@ function parseJsonRecord(value: unknown): AnyRecord | null {
   }
 }
 
-type TrackedSpawn = { callId: string; label: string; agentPath: string | null; settled: boolean };
+type TrackedSpawn = {
+  callId: string; label: string; agentPath: string | null; settled: boolean;
+  agentThreadId?: string; occurredAtMs?: number | null;
+  agentType?: string; model?: string; effort?: string;
+};
 
 /**
  * Folds rollout entries into spawn/settle signals, mirroring the history fold:
@@ -108,12 +119,22 @@ export function createCodexSpawnFold(maxTracked = CODEX_TAIL_LIMITS.maxTracked) 
     }
     byCall.set(spawn.callId, spawn);
   };
-  const bindPath = (callId: unknown, agentPath: unknown) => {
+  const bindPath = (callId: unknown, agentPath: unknown, agentThreadId?: unknown,
+    occurredAtMs?: unknown): CodexTailSignal | null => {
     const spawn = typeof callId === 'string' ? byCall.get(callId) : undefined;
     const pathValue = nonEmpty(agentPath);
-    if (!spawn || !pathValue || spawn.agentPath) return;
+    if (!spawn || !pathValue) return null;
+    if (spawn.agentPath && spawn.agentPath !== pathValue) byPath.delete(spawn.agentPath);
     spawn.agentPath = pathValue;
     byPath.set(pathValue, spawn);
+    const threadId = nonEmpty(agentThreadId);
+    if (!threadId || spawn.agentThreadId === threadId) return null;
+    spawn.agentThreadId = threadId;
+    spawn.occurredAtMs = typeof occurredAtMs === 'number' ? occurredAtMs : null;
+    return { kind: 'progress', callId: spawn.callId, label: spawn.label,
+      agentType: spawn.agentType, agentPath: pathValue,
+      agentThreadId: threadId,
+      ...(typeof occurredAtMs === 'number' ? { occurredAtMs } : {}) };
   };
 
   return {
@@ -132,21 +153,27 @@ export function createCodexSpawnFold(maxTracked = CODEX_TAIL_LIMITS.maxTracked) 
       if (payload.type === 'function_call' && payload.name === 'spawn_agent') {
         const callId = nonEmpty(payload.call_id);
         if (!callId || callId.length > MAX_CALL_ID_CHARS || byCall.has(callId)) return null;
-        const label = humanizeCodexToolName(nonEmpty(parseJsonRecord(payload.arguments)?.task_name) ?? 'agent');
-        track({ callId, label, agentPath: null, settled: false });
-        return { kind: 'spawn', callId, label };
+        const args = parseJsonRecord(payload.arguments);
+        const label = humanizeCodexToolName(nonEmpty(args?.task_name) ?? 'agent');
+        const metadata = {
+          ...(nonEmpty(args?.agent_type) ? { agentType: nonEmpty(args?.agent_type)! } : {}),
+          ...(nonEmpty(args?.model) ? { model: nonEmpty(args?.model)! } : {}),
+          ...(nonEmpty(args?.reasoning_effort)
+            ? { effort: nonEmpty(args?.reasoning_effort)! } : {}),
+        };
+        track({ callId, label, agentPath: null, settled: false, ...metadata });
+        return { kind: 'spawn', callId, label, ...metadata };
       }
       if (payload.type === 'function_call_output') {
-        bindPath(payload.call_id, parseJsonRecord(payload.output)?.task_name);
-        return null;
+        return bindPath(payload.call_id, parseJsonRecord(payload.output)?.task_name);
       }
       if (payload.type === 'item_completed' && isRecord(payload.item) && payload.item.type === 'SubAgentActivity') {
-        if (payload.item.kind === 'started') bindPath(payload.item.id, payload.item.agent_path);
+        if (payload.item.kind === 'started') return bindPath(payload.item.id, payload.item.agent_path,
+          payload.item.agent_thread_id, payload.started_at_ms);
         return null;
       }
       if (payload.type === 'sub_agent_activity' && payload.kind === 'started') {
-        bindPath(payload.event_id, payload.agent_path);
-        return null;
+        return bindPath(payload.event_id, payload.agent_path, payload.agent_thread_id, payload.timestamp);
       }
       if (payload.type !== 'agent_message') return null;
       const message = parseCodexSubagentMessage(payload);
@@ -154,7 +181,8 @@ export function createCodexSpawnFold(maxTracked = CODEX_TAIL_LIMITS.maxTracked) 
       const spawn = byPath.get(message.author);
       if (!spawn || spawn.settled) return null;
       spawn.settled = true;
-      return { kind: 'settle', callId: spawn.callId, label: spawn.label };
+      return { kind: 'settle', callId: spawn.callId, label: spawn.label,
+        agentType: spawn.agentType, model: spawn.model, effort: spawn.effort };
     },
   };
 }
@@ -294,6 +322,18 @@ class RolloutTail implements CodexRolloutTail {
   private readonly stopper = new AbortController();
   private readonly read: RolloutReadState = { offset: 0, carry: [], carryBytes: 0, discarding: false };
   private readonly fold: ReturnType<typeof createCodexSpawnFold>;
+  private readonly children = new Map<string, {
+    path: string; handle: FileHandle; identity: FileIdentity; read: RolloutReadState;
+    agentType?: string; label: string; model?: string; effort?: string;
+    tools: Map<string, { id: string; name: string; status: string }>;
+    ownHistory: ReturnType<typeof createCodexOwnHistoryFilter>;
+    snapshot?: string;
+  }>();
+  private readonly pendingChildren = new Map<string, CodexTailSignal>();
+  private readonly skippedChildren = new Set<string>();
+  private nextChildRefreshAt = 0;
+  private childRefreshRunning = false;
+  private childRefresh: Promise<void> | null = null;
   private readonly permit: NonNullable<CodexRolloutTailOptions['permit']>;
   private readonly onAbort = () => { void this.stop(); };
   private readonly done: Promise<void>;
@@ -319,6 +359,12 @@ class RolloutTail implements CodexRolloutTail {
         await this.permit(this.stopper.signal, () => this.tick()).catch((error: unknown) => {
           if (!this.stopper.signal.aborted) throw error;
         });
+        if (!this.childRefresh && Date.now() >= this.nextChildRefreshAt) {
+          this.nextChildRefreshAt = Date.now() + 2000;
+          this.childRefresh = this.updateLinkedChildren().finally(() => {
+            this.childRefresh = null;
+          });
+        }
       }
       if (this.drain && this.phase === 'tailing' && this.spawnSeen) {
         // Bounded: a saturated read gate gives up the drain instead of delaying completion.
@@ -382,6 +428,74 @@ class RolloutTail implements CodexRolloutTail {
     await readRolloutTick(handle, this.read, this.limits, (line) => this.onLine(line));
   }
 
+  private async updateLinkedChildren(): Promise<void> {
+    if (!this.spawnSeen || !this.filePath || this.stopper.signal.aborted
+      || this.childRefreshRunning) return;
+    this.childRefreshRunning = true;
+    try {
+      for (const [callId, spawn] of this.pendingChildren) {
+        if (!spawn.agentThreadId || this.children.has(callId)
+          || this.skippedChildren.has(callId)) continue;
+        const candidate = await resolveCodexChildRolloutPath(this.filePath,
+          spawn.agentThreadId, spawn.occurredAtMs ?? null, this.stopper.signal);
+        if (!candidate || this.stopper.signal.aborted) continue;
+        const opened = await openRunTranscript({ provider: 'codex', sessionId: spawn.agentThreadId,
+          candidate, root: this.options.sessionsRoot, purpose: 'rollout-tail' });
+        if (!isTranscriptHandle(opened)) continue;
+        this.children.set(callId, { path: opened.realpath, handle: opened.fd,
+          identity: { dev: Number(opened.stat.dev), ino: Number(opened.stat.ino) },
+          read: { offset: 0, carry: [], carryBytes: 0, discarding: false },
+          agentType: spawn.agentType, label: spawn.label, tools: new Map(),
+          ownHistory: createCodexOwnHistoryFilter() });
+      }
+      for (const [callId, child] of this.children) {
+        const [onPath, onFd] = await Promise.all([lstat(child.path).catch(() => null), child.handle.stat()]);
+        if (!sameFile(onPath, child.identity) || !sameFile(onFd, child.identity)
+          || onFd.size < child.read.offset) {
+          console.warn('Codex child rollout replaced or truncated; skipping live tools');
+          await child.handle.close().catch(() => undefined);
+          this.children.delete(callId);
+          this.skippedChildren.add(callId);
+          continue;
+        }
+        await readRolloutTick(child.handle, child.read, this.limits, (line) => {
+          let entry: unknown;
+          try { entry = JSON.parse(line.toString('utf8')); } catch { return; }
+          if (!isRecord(entry) || !isRecord(entry.payload)) return;
+          if (!child.ownHistory.accept(entry)) return;
+          const payload = entry.payload;
+          if (typeof payload.model === 'string') child.model = payload.model;
+          if (typeof payload.effort === 'string') child.effort = payload.effort;
+          if (entry.type === 'turn_context' && typeof payload.reasoning_effort === 'string') {
+            child.effort = payload.reasoning_effort;
+          }
+          if (payload.type === 'function_call' && typeof payload.call_id === 'string'
+            && typeof payload.name === 'string') {
+            child.tools.set(payload.call_id, { id: payload.call_id, name: payload.name, status: 'running' });
+          } else if (payload.type === 'function_call_output' && typeof payload.call_id === 'string') {
+            const tool = child.tools.get(payload.call_id);
+            if (tool) tool.status = payload.is_error ? 'failed' : 'completed';
+          }
+        });
+        const snapshot = JSON.stringify([child.model, child.effort, [...child.tools.values()]]);
+        if (snapshot === child.snapshot) continue;
+        child.snapshot = snapshot;
+        this.emit({ kind: 'progress', callId, label: child.label,
+          ...(child.agentType ? { agentType: child.agentType } : {}),
+          ...(child.model ? { model: child.model } : {}), ...(child.effort ? { effort: child.effort } : {}),
+          tools: [...child.tools.values()] });
+      }
+    } catch {
+      // Child rollout enrichment is optional; the parent tail remains live.
+    } finally {
+      this.childRefreshRunning = false;
+    }
+  }
+
+  private emit(signal: CodexTailSignal): void {
+    try { this.options.onSignal(signal); } catch { /* Consumer failures do not stop the tail. */ }
+  }
+
   private onLine(line: Buffer): void {
     if (!this.fold.wants(line)) return;
     let entry: unknown;
@@ -393,15 +507,17 @@ class RolloutTail implements CodexRolloutTail {
     const signal = this.fold.accept(entry);
     if (!signal) return;
     if (signal.kind === 'spawn') this.spawnSeen = true;
-    try {
-      this.options.onSignal(signal);
-    } catch {
-      // A failing consumer must not end the tail or leak its fd.
+    if (signal.kind === 'progress') {
+      if (signal.agentPath) this.pendingChildren.set(signal.callId, signal);
+      return;
     }
+    this.emit(signal);
   }
 
   private async close(): Promise<void> {
     this.options.signal?.removeEventListener('abort', this.onAbort);
+    await this.childRefresh;
+    await Promise.all([...this.children.values()].map((child) => child.handle.close().catch(() => undefined)));
     this.phase = 'closed';
     this.read.carry = [];
     this.read.carryBytes = 0;
@@ -423,16 +539,25 @@ export function startCodexRolloutTail(options: CodexRolloutTailOptions): CodexRo
  */
 export function codexTailRow(signal: CodexTailSignal, sessionId: string | null, timestamp: string): NormalizedMessage {
   const base = { sessionId, timestamp, provider: 'codex' as const, toolId: signal.callId };
+  if (signal.kind === 'progress') {
+    return createNormalizedMessage({
+      ...base,
+      id: `${signal.callId}-live-progress`,
+      kind: 'status',
+      subagent: codexSpawnSubagent(signal.callId, signal.label, 'running', signal),
+    });
+  }
   if (signal.kind === 'spawn') {
     return createNormalizedMessage({
       ...base,
       id: signal.callId,
       kind: 'tool_use',
       toolName: 'Task',
-      // Codex does not expose the child role on this parent event; label is a
-      // task description, so leave subagent_type absent for honest UI fallback.
-      toolInput: { description: signal.label },
-      subagent: codexSpawnSubagent(signal.callId, signal.label, 'started'),
+      toolInput: {
+        description: signal.label,
+        ...(signal.agentType ? { subagent_type: signal.agentType } : {}),
+      },
+      subagent: codexSpawnSubagent(signal.callId, signal.label, 'started', signal),
     });
   }
   return createNormalizedMessage({
@@ -441,7 +566,7 @@ export function codexTailRow(signal: CodexTailSignal, sessionId: string | null, 
     kind: 'tool_result',
     content: '',
     isError: false,
-    subagent: codexSpawnSubagent(signal.callId, signal.label, 'completed'),
+    subagent: codexSpawnSubagent(signal.callId, signal.label, 'completed', signal),
   });
 }
 

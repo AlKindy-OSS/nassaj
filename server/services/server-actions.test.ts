@@ -172,8 +172,12 @@ test('buildPendingAction rejects null/undefined/numeric actionType', () => {
   assert.equal(buildPendingAction({} as { actionType: string }).ok, false);
 });
 
-test('buildPendingAction rejects sessionId that fails ^[\\w.-]{1,128}$ pattern', () => {
+test('buildPendingAction rejects sessionId outside the shared session-id grammar', () => {
   const invalidIds = [
+    '.',
+    '..',
+    '.x',
+    'a..b',
     'has space',
     'has/slash',
     'has@at',

@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3';
 import express, { type Request, type Response, type RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 
-import { enrollC4ReviewResponse, matchC4ReviewRequest, enforceCookieMutationGuard } from '../account-wallet/index.js';
+import { enrollC4ReviewResponse, matchC4ReviewRequest, enforceCookieMutationGuard, tokenSessionCurrent } from '../account-wallet/index.js';
 import { AgentReviewReadonlyAuthRepository, type ReviewAuthUser, deviceAccountSessionsDb, DEVICE_COOKIE, getConnection } from '../database/index.js';
 import { createAuthenticatedLaunchActor } from '../execution-permissions/index.js';
 
@@ -55,6 +55,8 @@ function authenticateBearer(req: AuthRequest, bearer: string, repository: AgentR
     || !Number.isSafeInteger(decoded.auth_gen) || !Number.isSafeInteger(decoded.pwd_iat)) return false;
   const user = repository.user(decoded.userId);
   if (!user || decoded.auth_gen !== user.authorization_generation || decoded.pwd_iat < user.password_changed_at) return false;
+  // T-2035: a sign-out (this device or everywhere) ends the token here too.
+  if (!tokenSessionCurrent(decoded, user, bearer)) return false;
   attach(req, user, 'session', () => repository.current(user.id, user.authorization_generation, user.password_changed_at));
   return true;
 }

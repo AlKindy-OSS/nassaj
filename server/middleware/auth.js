@@ -14,6 +14,15 @@ import { refuseStaleAttestation, userSsoAttestationFresh } from '../services/sso
 
 import { recordAuthRejection } from './auth-rejection-audit.js';
 import { registerServiceSecretValue } from '../shared/secret-path-guard.js';
+import { currentTokenEpoch } from '../modules/account-wallet/token-epoch.js';
+import {
+  legacyTokenSid,
+  mintTokenSid,
+  sessionSidOf,
+  tokenSessionCurrent,
+  tokenSidOf,
+} from '../modules/account-wallet/token-session.js';
+import { configureLoginThrottle } from '../services/login-throttle.service.js';
 
 const { userDb, appConfigDb, auditLogDb } = databaseModule;
 const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
@@ -56,7 +65,12 @@ const JWT_SECRET = resolveJwtSecret();
 // B-1593: a project file holding this value (a copy of the service .env, or of
 // app_config's persisted secret) is a service secret and is never served.
 registerServiceSecretValue(JWT_SECRET);
-const TOKEN_TTL = '7d';
+// T-2035: every password check (login, self-link, step-up...) keys the shared
+// login throttle under an HKDF derivative of this secret.
+configureLoginThrottle(JWT_SECRET);
+// Session JWT lifetime. Numeric so a device sign-out can keep its revocation
+// for as long as any token of that session could still exist (T-2035 C1).
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Attaches a current-identity fence and guards late HTTP disclosures. */
 function installIdentityFence(req, res) {
@@ -237,27 +251,35 @@ function normalizeRequestPath(req) {
 }
 
 // Refresh coalescing (B-163). Single fork-mode process (PM2 instances:1), so an
-// in-process Map is authoritative for every concurrent request. Keyed by userId:
-//   userId -> { token, mintedAtMs }
+// in-process Map is authoritative for every concurrent request. Keyed by the
+// device session (T-2035 round 3), so two devices never receive each other's
+// token and a refresh keeps the device's sid:
+//   `${userId}:${sid}` -> { token, mintedAtMs, ... }
 // A boot burst (~16 parallel requests) past half-life collapses to ONE minted
 // token, so the client adopts it once and redials the WebSocket once.
 const REFRESH_COALESCE_WINDOW_MS = 10_000;
 const refreshedTokenCache = new Map();
 
-function getCoalescedRefreshToken(user) {
+
+const refreshCacheKey = (userId, sid) => `${userId}:${sid}`;
+
+function getCoalescedRefreshToken(user, sid) {
   const nowMs = Date.now();
-  const cached = refreshedTokenCache.get(user.id);
+  const key = refreshCacheKey(user.id, sid);
+  const cached = refreshedTokenCache.get(key);
   if (cached && cached.authorizationGeneration === user.authorization_generation
       && cached.passwordStamp === user.password_changed_at
+      && cached.tokenEpoch === currentTokenEpoch(user)
       && nowMs - cached.mintedAtMs < REFRESH_COALESCE_WINDOW_MS) {
     return { token: cached.token, minted: false };
   }
-  const token = generateToken(user);
-  refreshedTokenCache.set(user.id, {
+  const token = generateToken(user, { sid });
+  refreshedTokenCache.set(key, {
     token,
     mintedAtMs: nowMs,
     authorizationGeneration: user.authorization_generation,
     passwordStamp: user.password_changed_at,
+    tokenEpoch: currentTokenEpoch(user),
   });
   if (refreshedTokenCache.size > 256) {
     for (const [id, entry] of refreshedTokenCache) {
@@ -281,14 +303,30 @@ function getCoalescedRefreshToken(user) {
  * @returns {void}
  */
 function invalidateRefreshCache(userId) {
-  refreshedTokenCache.delete(userId);
+  const prefix = `${userId}:`;
+  for (const key of refreshedTokenCache.keys()) {
+    if (key.startsWith(prefix)) refreshedTokenCache.delete(key);
+  }
+}
+
+/** Drops the coalesced refresh token of one device session (T-2035 sign-out). */
+function invalidateRefreshCacheForSession(userId, sid) {
+  refreshedTokenCache.delete(refreshCacheKey(userId, sid));
+}
+
+/**
+ * The sid a refresh of `token` keeps: its own, or for a pre-release token
+ * without one, a sid derived from that exact token (T-2035 round 3).
+ */
+function refreshSidOf(decoded, token) {
+  return sessionSidOf(decoded, token) ?? legacyTokenSid(token);
 }
 
 // ---------------------------------------------------------------------------
 // SEC-REFRESH-GRACE — narrow renewal window for a just-expired token (B-154)
 // ---------------------------------------------------------------------------
 //
-// Tokens live TOKEN_TTL (7d). A user who is away longer than that returns to a
+// Tokens live TOKEN_TTL_MS (7d). A user who is away longer than that returns to a
 // hard logout even though nothing is wrong with their account — the last
 // remaining forced-logout case after B-131. POST /api/auth/refresh may therefore
 // accept a token that is expired but only RECENTLY so, within a strict window.
@@ -520,6 +558,14 @@ const authenticateToken = async (req, res, next) => {
       });
       return res.status(401).json({ error: 'Token invalidated' });
     }
+    // T-2035: a sign-out everywhere bumped the epoch, or this device signed out.
+    if (!tokenSessionCurrent(decoded, user, token)) {
+      recordAuthRejection({
+        reason: 'token_session_revoked', transport: 'rest', userId: user.id,
+        ipAddress: ip, userAgent: ua,
+      });
+      return res.status(401).json({ error: 'Token invalidated' });
+    }
 
     // T-1939 slice 3: a linked member whose SSO attestation aged out is refused
     // BEFORE the auto-renew below, so a stale member is never re-issued a token.
@@ -536,7 +582,7 @@ const authenticateToken = async (req, res, next) => {
       const now = Math.floor(Date.now() / 1000);
       const halfLife = (decoded.exp - decoded.iat) / 2;
       if (now > decoded.iat + halfLife) {
-        const { token: newToken, minted } = getCoalescedRefreshToken(user);
+        const { token: newToken, minted } = getCoalescedRefreshToken(user, refreshSidOf(decoded, token));
         res.setHeader('X-Refreshed-Token', newToken);
         // Record the implicit (header-driven) refresh — distinct from the
         // explicit POST /api/auth/refresh, which logs its own row (T-182). Only
@@ -554,6 +600,13 @@ const authenticateToken = async (req, res, next) => {
     }
 
     req.user = user;
+    // T-2035 round 3: the device session this bearer belongs to. `sid` is null
+    // for a pre-release token; `refreshSid` is what a refresh of it keeps.
+    req.tokenSession = Object.freeze({
+      sid: tokenSidOf(decoded),
+      refreshSid: refreshSidOf(decoded, token),
+      expiresAtMs: decoded.exp * 1000,
+    });
     // Canonical launch-actor fields (B-820). createAuthenticatedLaunchActor()
     // reads `authenticationKind` and camelCase `authorizationGeneration`, but a
     // raw users row carries neither — it only has snake_case
@@ -666,7 +719,8 @@ const hasCurrentBearer = (authorization) => {
     const user = userDb.getUserById(decoded.userId);
     return Boolean(user)
       && !(user.password_changed_at && decoded.pwd_iat < user.password_changed_at)
-      && decoded.auth_gen === user.authorization_generation;
+      && decoded.auth_gen === user.authorization_generation
+      && tokenSessionCurrent(decoded, user, token);
   } catch {
     return false;
   }
@@ -769,7 +823,26 @@ const requireRole = (...allowedRoles) => (req, res, next) => {
 // password_changed_at stamp, every 0-stamped token is invalidated. With
 // createUser now stamping at insert and the migration healing legacy NULLs, this
 // fallback is only reachable for a partial user object.
-const generateToken = (user) => {
+/**
+ * The `tok_ep` claim for a mint (T-2035). A partial user object (a createUser
+ * result) reads the row's epoch. Security-neutral on failure: every verifier
+ * compares the claim with the stored epoch, so a wrong claim only yields a
+ * token that is refused, never one that outlives a sign-out.
+ */
+function mintTokenEpoch(user) {
+  if (Number.isSafeInteger(user.token_epoch)) return user.token_epoch;
+  try {
+    return userDb.getTokenEpoch?.(user.id) ?? 0;
+  } catch (error) {
+    console.error('[auth] token epoch read failed; minting epoch 0', {
+      userId: user.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
+}
+
+const generateToken = (user, { sid } = {}) => {
   return jwt.sign(
     {
       userId: user.id,
@@ -778,9 +851,13 @@ const generateToken = (user) => {
       pwd_iat: user.password_changed_at ?? 0,
       auth_gen: Number.isSafeInteger(user.authorization_generation)
         ? user.authorization_generation : 1,
+      tok_ep: mintTokenEpoch(user),
+      // T-2035 round 3: the device session. A refresh passes the device's sid;
+      // every sign-in mints a new one.
+      sid: typeof sid === 'string' && sid ? sid : mintTokenSid(),
     },
     JWT_SECRET,
-    { expiresIn: TOKEN_TTL }
+    { expiresIn: TOKEN_TTL_MS / 1000 }
   );
 };
 
@@ -844,6 +921,10 @@ const authenticateWebSocket = (token) => {
         || decoded.auth_gen !== user.authorization_generation) {
       return null;
     }
+    // T-2035: a sign-out on any device ends every older token here too.
+    if (!tokenSessionCurrent(decoded, user, token)) {
+      return null;
+    }
     // T-1939 slice 3: same SSO attestation window as the REST verifier.
     if (!userSsoAttestationFresh(user)) {
       return null;
@@ -855,6 +936,9 @@ const authenticateWebSocket = (token) => {
       role: user.role,
       authenticationKind: 'session',
       authorizationGeneration: user.authorization_generation,
+      // T-2035: tags the socket so this device's sign-out closes it; a
+      // pre-release token is tagged with its derived sid.
+      tokenSid: sessionSidOf(decoded, token),
     };
   } catch {
     return null;
@@ -894,6 +978,10 @@ export {
   authenticateWebSocket,
   authenticateDeviceWebSocket,
   invalidateRefreshCache,
+  invalidateRefreshCacheForSession,
+  refreshSidOf,
+  tokenSessionCurrent,
+  TOKEN_TTL_MS,
   verifyTokenAllowingRecentExpiry,
   resolveRefreshGraceMs,
   assertPlatformAuthBypassSafe,

@@ -9,6 +9,7 @@ import express from 'express';
 
 import { createSsoConfigDouble, doubleMapping } from '../services/__tests__/sso-config-double.js';
 import { createSsoRuntimeDouble } from '../services/__tests__/sso-runtime-double.js';
+import { configureMemoryLoginThrottle } from '../services/__tests__/login-throttle-memory-store.js';
 
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
@@ -19,6 +20,8 @@ const sso = createSsoConfigDouble({ mapping: doubleMapping({ role_claim_path: `[
 let currentTransaction: string | null = null;
 const audits: Array<Record<string, unknown>> = [];
 const revocations: number[] = [];
+// T-2035: users whose sign-out epoch was bumped.
+const epochBumps: number[] = [];
 const refreshInvalidations: number[] = [];
 let unlinkedUserId: number | null = null;
 let storedCode: Record<string, unknown> | null = null;
@@ -54,8 +57,7 @@ let identityLookupFailure: Error | null = null;
 // T-1939 slice 5: legacy duplicate (user, issuer) links.
 let userIssuerLinkCount = 1;
 let duplicateUsersCount = 0;
-// ADR-194 A1: owner opt-in on the matched link, forced password change, strict audit and alerts.
-let ownerOptInAt: number | null = null;
+// ADR-194 A1: forced password change, strict audit and alerts.
 let mustChangePassword = 0;
 let strictAuditFailure: Error | null = null;
 const ownerAlerts: Array<{ userId: number; dedupeKey: string }> = [];
@@ -168,6 +170,7 @@ mock.module(url('../modules/database/index.js'), {
       },
     }),
     userDb: {
+      bumpTokenEpoch: (id: number) => { epochBumps.push(id); return epochBumps.length; },
       getUserById: () => ({ ...storedUser }),
       setRoleIfUnchanged: (_id: number, from: string, to: string) => {
         if (storedUser.role !== from || from === 'owner' || to === 'owner') return false;
@@ -183,7 +186,7 @@ mock.module(url('../modules/database/index.js'), {
     userIdentitiesDb: {
       findByIssuerAndSubject: () => {
         if (identityLookupFailure) throw identityLookupFailure;
-        return { id: 40, user_id: identityUserId, owner_sso_opt_in_at: ownerOptInAt };
+        return { id: 40, user_id: identityUserId, owner_sso_opt_in_at: null };
       },
       markAttested: (identityId: number, userId: number, at: number) => {
         if (attestationFailure === 'throw') throw new Error('database is locked');
@@ -254,6 +257,9 @@ after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
+// T-2035: the auth middleware (the throttle's configurer) is a double here.
+const throttleStore = await configureMemoryLoginThrottle();
+
 test('OIDC browser transaction cookie binds callback and POST exchange, with no-store', async () => {
   const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
   assert.equal(login.status, 302);
@@ -300,6 +306,7 @@ test('OIDC browser transaction cookie binds callback and POST exchange, with no-
 
 function resetUnlinkState() {
   revocations.length = 0;
+  epochBumps.length = 0;
   refreshInvalidations.length = 0;
   identityRevocations.length = 0;
   audits.length = 0;
@@ -460,6 +467,23 @@ test('B-1410 C1: a wrong password is 401, audited without the password, and unli
   assert.equal((await unlinkSelf({})).status, 400, 'a missing password is a 400');
 });
 
+test('T-2035: owner self-unlink shares the account login throttle — the sixth wrong password is 429', async () => {
+  resetUnlinkState();
+  throttleStore.rows.clear();
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      assert.equal((await unlinkSelf({ currentPassword: 'wrong-pw' })).status, 401);
+    }
+    const locked = await unlinkSelf({ currentPassword: 'anything' });
+    assert.equal(locked.status, 429);
+    assert.ok(Number(locked.headers.get('retry-after')) > 0);
+    assert.equal((await locked.json()).code, 'login_temporarily_locked');
+    assert.equal(unlinkedUserId, null);
+  } finally {
+    throttleStore.rows.clear();
+  }
+});
+
 test('B-1410 C1: an owner with no password_hash gets the same coded 401', async () => {
   resetUnlinkState();
   rawUsers.set(2, { id: 2, role: 'owner', password_hash: undefined });
@@ -544,11 +568,11 @@ function resetLoginState(role: string, claims: Record<string, unknown>) {
   attestations.length = 0;
   attestationFailure = null;
   revocations.length = 0;
+  epochBumps.length = 0;
   refreshInvalidations.length = 0;
   identityRevocations.length = 0;
   apiKeyRevocations.length = 0;
   identityUserId = 12;
-  ownerOptInAt = null;
   mustChangePassword = 0;
   strictAuditFailure = null;
   ownerAlerts.length = 0;
@@ -573,19 +597,17 @@ test('T-958: the verified roles claim sets the minted role and is audited withou
   assert.ok(audits.every((record) => !JSON.stringify(record).includes('subject-synthetic')));
 });
 
-test('ADR-194 I6: an owner identity is refused with owner_must_sign_in_locally and writes nothing', async () => {
+test('ADR-194 A1: an owner identity without a passkey gets no session, only the passkey step-up', async () => {
   resetLoginState('owner', { [ROLES_CLAIM]: ['viewer'] });
   const callback = await runCallback();
-  assert.equal(callback.status, 302);
-  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
-  assert.equal(callback.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(callback.status, 200, 'the passkey interstitial, not a session');
   assert.deepEqual(mintedRoles, [], 'no token is minted');
   assert.equal(storedCode, null);
   assert.deepEqual(attestations, [], 'no attestation stamp');
   assert.deepEqual(revocations, []);
   assert.equal(storedUser.role, 'owner');
   assert.deepEqual(audits.map((record) => record.event), ['oidc_owner_sign_in_refused']);
-  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login', reason: 'not_opted_in' });
+  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login', reason: 'amr_insufficient', stepUp: 'started' });
 });
 
 test('T-958: an attested owner value is ignored', async () => {
@@ -661,10 +683,11 @@ test('ADR-194: a mapping that vanished mid-flight refuses without treating it as
   }
 });
 
-test('ADR-194 I6: an owner without a role is refused as an owner, before any mapping', async () => {
+test('ADR-194 I6: an owner without a role takes the owner branch, before any mapping', async () => {
   resetLoginState('owner', {});
   const callback = await runCallback();
-  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
+  assert.equal(callback.status, 200, 'the owner passkey step-up, never a role-mapping denial');
+  assert.equal(storedCode, null);
   assert.deepEqual(revocations, []);
   assert.deepEqual(identityRevocations, []);
   assert.deepEqual(apiKeyRevocations, [], 'owner keys are untouched');
@@ -816,8 +839,8 @@ test('B-1327 (qa M1): an SSO downgrade revokes live work; a promotion does not',
   }]);
 
   resetLoginState('owner', { [ROLES_CLAIM]: ['member'] });
-  assert.equal((await runCallback()).status, 302);
-  assert.deepEqual(identityRevocations, [], 'an owner identity is refused, so nothing is revoked');
+  assert.equal((await runCallback()).status, 200, 'owner without a passkey: step-up only');
+  assert.deepEqual(identityRevocations, [], 'an owner identity is never mapped, so nothing is revoked');
 });
 
 // ---------------------------------------------------------------------------
@@ -870,12 +893,14 @@ test('T-1939 slice 3: back-channel logout deletes a member\'s API keys, never th
   assert.equal(response.status, 200);
   assert.deepEqual(apiKeyRevocations, [12]);
   assert.deepEqual(keyAudits().map((record) => record.metadata), [{ trigger: 'backchannel_logout', count: 2 }]);
+  assert.deepEqual(epochBumps, [12], 'T-2035: back-channel logout bumps the sign-out epoch');
 
   resetLoginState('user', {});
   identityUserId = 1;
   assert.equal((await backchannelLogout()).status, 200);
   assert.deepEqual(apiKeyRevocations, [], 'owner keys are untouched');
   assert.deepEqual(revocations, [], 'owner sessions are untouched (ADR-194 D6)');
+  assert.deepEqual(epochBumps, [], 'owner epoch is untouched (ADR-194 D6)');
 });
 
 test('ADR-194 D1: back-channel answers 501 only when the policy is not enforced', async () => {
@@ -998,11 +1023,10 @@ const passkeyClaims = (overrides: Record<string, unknown> = {}) => ({
 
 function resetOwnerState(claims: Record<string, unknown> = passkeyClaims()) {
   resetLoginState('owner', claims);
-  ownerOptInAt = Date.now() - 60_000;
   storedOwnerStepUp = undefined;
 }
 
-test('A1: an opted-in owner with a fresh passkey gets a code, both audits and a per-sign-in alert', async () => {
+test('A1: an owner with a fresh passkey gets a code, both audits and a per-sign-in alert', async () => {
   resetOwnerState();
   const callback = await runCallback();
   assert.equal(callback.status, 302);
@@ -1050,7 +1074,7 @@ test('A1: the owner role is untouched — no mapping, role sync, denial or attes
   }
 });
 
-test('A1: an opted-in owner flagged must_change_password is refused, audited only, and gets no code', async () => {
+test('A1: an owner flagged must_change_password is refused, audited only, and gets no code', async () => {
   resetOwnerState();
   mustChangePassword = 1;
   const callback = await runCallback();
@@ -1066,14 +1090,17 @@ const withClaims = (overrides: Record<string, unknown>) => () => {
   verifiedClaims = { sub: 'subject-synthetic', ...passkeyClaims(overrides) };
 };
 
-test('A1: opt-in and forced-change refusals redirect at once, audited with their reason only', async () => {
+test('A1 always on: an owner whose link never opted in signs in with a fresh passkey', async () => {
   resetOwnerState();
-  ownerOptInAt = null;
   const callback = await runCallback();
-  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
-  assert.equal(storedCode, null);
-  assert.deepEqual(audits.map((record) => record.event), ['oidc_owner_sign_in_refused']);
-  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login', reason: 'not_opted_in' });
+  assert.match(callback.headers.get('location') ?? '', /^\/auth\/oidc\/return\?oidc_code=/);
+  assert.deepEqual(mintedRoles, ['owner']);
+  assert.ok(!audits.some((record) => record.event === 'oidc_owner_sign_in_refused'));
+});
+
+test('A1 always on: without a passkey the owner still gets the step-up, never a session', async () => {
+  resetOwnerState(passkeyClaims({ amr: ['pwd'] }));
+  await expectOwnerStepUp('amr_insufficient');
 });
 
 test('A1: password + security key (pwd, user, mfa) is accepted', async () => {
@@ -1176,7 +1203,7 @@ test('A1: a failed strict sign-in audit drops the code and refuses', async (t) =
   assert.deepEqual(ownerAlerts, [], 'no alert for a sign-in that did not happen');
 });
 
-test('A1: an apply between start and callback still refuses an opted-in owner with oidc_config_changed', async () => {
+test('A1: an apply between start and callback still refuses an owner with oidc_config_changed', async () => {
   resetOwnerState();
   const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
   const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
@@ -1206,7 +1233,7 @@ test('A1: an apply after the code is minted drops it before the owner sign-in is
   }
 });
 
-test('A1: wallet mode hands off a device-session code for an opted-in owner (no JWT)', async () => {
+test('A1: wallet mode hands off a device-session code for an owner (no JWT)', async () => {
   const keys = ['MULTI_ACCOUNT_SWITCHING', 'NASSAJ_PUBLIC_ORIGIN', 'ALLOWED_ORIGINS'] as const;
   const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   process.env.MULTI_ACCOUNT_SWITCHING = 'true';

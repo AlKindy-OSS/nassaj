@@ -31,7 +31,12 @@ import { readSessionSkills } from '@/modules/providers/services/skill-observatio
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { readSessionActivity } from '@/modules/providers/services/session-activity.service.js';
 import type { HistoryPayloadMode } from '@/modules/providers/services/session-history-light.service.js';
-import { assertSessionAccessible, readMessageDelivery, sessionsService } from '@/modules/providers/services/sessions.service.js';
+import {
+  assertSessionAccessible,
+  assertSessionPermanentlyDeletable,
+  readMessageDelivery,
+  sessionsService,
+} from '@/modules/providers/services/sessions.service.js';
 import { notifySessionMetadataChanged } from '@/modules/providers/services/sessions-watcher.service.js';
 import { workflowStatusService } from '@/modules/providers/services/workflow-status.service.js';
 import { isEngineSwitchBlocked } from '@/modules/providers/services/engine-switch-liveness.service.js';
@@ -73,6 +78,7 @@ import type {
   ProviderSkillCreateInput,
   UpsertProviderMcpServerInput,
 } from '@/shared/types.js';
+import { isSessionId, parseSessionIdParam } from '@/shared/session-id.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 // Deliberately use the narrow leaf modules: the database barrel is expensive and
 // creates circular test mocks for routes that only need the permission seam.
@@ -212,8 +218,6 @@ export function retainDistinctWorkspaceFence(
   return candidate;
 }
 
-const BULK_SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
-
 /** Parses a bounded, order-preserving set of session ids for bulk mutations. */
 function parseBulkSessionIds(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -229,9 +233,8 @@ function parseBulkSessionIds(payload: unknown): string[] {
   }
   const uniqueIds: string[] = [];
   const seen = new Set<string>();
-  for (const value of ids) {
-    const id = typeof value === 'string' ? value.trim() : '';
-    if (!BULK_SESSION_ID_PATTERN.test(id)) {
+  for (const id of ids as unknown[]) {
+    if (!isSessionId(id)) {
       throw new AppError('ids contains an invalid session id.', {
         code: 'INVALID_BULK_IDS', statusCode: 400,
       });
@@ -656,19 +659,7 @@ const assertWorkspacePathPresentForWrite = (
   }
 };
 
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
-
-const parseSessionId = (value: unknown): string => {
-  const sessionId = readPathParam(value, 'sessionId').trim();
-  if (!SESSION_ID_PATTERN.test(sessionId)) {
-    throw new AppError('Invalid sessionId.', {
-      code: 'INVALID_SESSION_ID',
-      statusCode: 400,
-    });
-  }
-
-  return sessionId;
-};
+const parseSessionId = (value: unknown): string => parseSessionIdParam(readPathParam(value, 'sessionId'));
 
 /**
  * The engine axis as this route accepts it: an eligible vendor engine, or the
@@ -2473,6 +2464,8 @@ router.post(
 
     for (const id of ids) {
       try {
+        // B-1647: a permanent delete is refused (403 to a reader) before the write fence.
+        if (action === 'delete_permanently') assertSessionPermanentlyDeletable(id, requesterUserId);
         const accessFence = captureSessionRequestFence(req, id, 'write');
         const assertCurrent = (notStarted: boolean) => {
           if (!notStarted) anyEffectStarted = true;
@@ -2539,6 +2532,8 @@ router.delete(
     const sessionId = parseSessionId(req.params.sessionId);
     const force = parseOptionalBooleanQuery(req.query.force, 'force') ?? false;
     const deletedFromDisk = parseOptionalBooleanQuery(req.query.deletedFromDisk, 'deletedFromDisk') ?? force;
+    // B-1647: permanent delete needs the narrower mandate; a reader gets 403, others 404.
+    if (force) assertSessionPermanentlyDeletable(sessionId, readRequesterUserId(req));
     const accessFence = captureSessionRequestFence(req, sessionId, 'write');
     const assertCurrent = (notStarted: boolean) =>
       assertSessionRequestFence(req, accessFence, notStarted);
@@ -2694,7 +2689,7 @@ async function serveSessionMessages(req: Request, res: Response, sessionId: stri
     if (sessionsService.usesBoundedHistory(sessionId)) {
       await sessionsService.withHistoryLease(sessionId, readRequesterUserId(req), {
         limit, offset, cursor, payloadMode: (payloadRaw ?? 'full') as HistoryPayloadMode, revision,
-        assertCurrent,
+        assertCurrent, displayMask: true,
       }, new HistoryHttpSink(res));
       return;
     }
@@ -2705,6 +2700,8 @@ async function serveSessionMessages(req: Request, res: Response, sessionId: stri
       payloadMode: (payloadRaw ?? 'full') as HistoryPayloadMode,
       revision,
       assertCurrent,
+      // ADR-210 (T-2036): a viewer's history is masked; the revision folds in the mask version.
+      displayMask: true,
     });
     assertCurrent(true);
     res.json(result);

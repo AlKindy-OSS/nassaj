@@ -356,3 +356,122 @@ export function redactForShare(text, ctx = {}) {
 export function segmentsToText(segments) {
   return segments.map((s) => (s.t === 'text' ? s.text : s.text ?? `[redacted:${s.cat}]`)).join('');
 }
+
+// ── Display rules (ADR-210) ────────────────────────────────────────────────
+//
+// A third profile for what a viewer sees in the live chat, history, search and
+// sidebar. It reuses the share credential rules unchanged and adds a few vendor
+// prefixes, but deliberately drops the high-entropy rule and the path and
+// network categories: build ids, SHAs, SRI hashes, UUIDs and paths are working
+// data a member must read, not secrets. The legacy audit and share rule sets
+// above are untouched by this profile.
+
+/** Share rules a viewer's display also masks, by id. */
+const DISPLAY_SHARED_RULE_IDS = Object.freeze(new Set([
+  'json-field', 'json-escaped-field', 'assignment', 'table-cell', 'jwt', 'anthropic-openai-key',
+  'github-token', 'aws-access-key', 'bearer', 'url-userinfo', 'pem-private-key', 'cookie-header',
+]));
+
+/** Vendor token prefixes masked for display only (bounded, linear). */
+const DISPLAY_EXTRA_RULES = Object.freeze([
+  { id: 'slack-token', cat: 'secret', group: 0, re: /\bxox[abposr]-[A-Za-z0-9-]{10,255}/g },
+  { id: 'google-api-key', cat: 'secret', group: 0, re: /\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g },
+  { id: 'gitlab-token', cat: 'secret', group: 0, re: /\bglpat-[A-Za-z0-9_-]{20,255}/g },
+  { id: 'huggingface-token', cat: 'secret', group: 0, re: /\bhf_[A-Za-z0-9]{30,255}/g },
+  { id: 'npm-token', cat: 'secret', group: 0, re: /\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])/g },
+  { id: 'stripe-live-key', cat: 'secret', group: 0, re: /\b(?:sk|rk)_live_[A-Za-z0-9]{16,255}/g },
+]);
+
+const DISPLAY_RULES = Object.freeze([
+  ...SHARE_RULES.filter((rule) => DISPLAY_SHARED_RULE_IDS.has(rule.id)),
+  ...DISPLAY_EXTRA_RULES,
+].map((rule) => (rule.scan ? rule : { ...rule, reD: new RegExp(rule.re.source, `${rule.re.flags}d`) })));
+
+/** Ids of every display rule, for tests and the marker vocabulary. */
+export const DISPLAY_RULE_IDS = Object.freeze([...DISPLAY_RULES.map((rule) => rule.id), 'known-secret']);
+
+/** Shortest literal secret value matched verbatim (shorter values collide with prose). */
+const MIN_DISPLAY_LITERAL_LENGTH = 8;
+
+/** Literal occurrences of known secret values (service secrets, member vendor keys). */
+function collectLiteralHits(text, literals) {
+  const hits = [];
+  if (!literals) return hits;
+  for (const value of literals) {
+    if (typeof value !== 'string' || value.length < MIN_DISPLAY_LITERAL_LENGTH) continue;
+    for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + value.length)) {
+      hits.push({ start: at, end: at + value.length, cat: 'secret', rule: 'known-secret' });
+    }
+  }
+  return hits;
+}
+
+/** A value that is only a number (counts, budgets, ports), optionally quoted. */
+const NUMERIC_VALUE = /^["'`]?[0-9][0-9_,.]{0,63}["'`]?$/;
+/** Names whose numeric value is still a credential (PINs, numeric passwords). */
+const NUMERIC_SECRET_NAME = /passwo?rd|passwd|pwd|pin|passphrase|secret/i;
+const NUMERIC_CREDENTIAL_NAME = /key|token|secret/i;
+const NAME_BEFORE_VALUE = /([A-Za-z_][A-Za-z0-9_. -]{0,63})[^A-Za-z0-9_]{0,24}$/;
+
+/**
+ * Display-only veto: a purely numeric `assignment` / `table-cell` value is a
+ * count or budget ("| Token budget | 200000 |"), not a credential — unless its
+ * name is password-like. Share redaction keeps its own behaviour.
+ */
+function isDisplayCredentialHit(text, hit) {
+  if (hit.rule !== 'assignment' && hit.rule !== 'table-cell') return true;
+  const value = text.slice(hit.start, hit.end).trim();
+  if (!NUMERIC_VALUE.test(value)) return true;
+  const name = NAME_BEFORE_VALUE.exec(text.slice(Math.max(0, hit.start - 96), hit.start))?.[1] ?? '';
+  // A long numeric value under a key/token/secret name is a numeric credential, not a count.
+  return NUMERIC_SECRET_NAME.test(name) || (value.length >= 16 && NUMERIC_CREDENTIAL_NAME.test(name));
+}
+
+/**
+ * Merged display hits of `text`, sorted, non-overlapping: [{start, end, rule}].
+ * @param {string} text
+ * @param {{literals?: Iterable<string>}} [ctx] known secret values to mask verbatim
+ */
+export function collectDisplayHits(text, ctx = {}) {
+  if (typeof text !== 'string' || text.length === 0) return [];
+  const hits = collectLiteralHits(text, ctx.literals);
+  for (const rule of DISPLAY_RULES) {
+    if (rule.scan) {
+      for (const hit of rule.scan(text)) if (isDisplayCredentialHit(text, hit)) hits.push(hit);
+      continue;
+    }
+    rule.reD.lastIndex = 0;
+    for (const m of text.matchAll(rule.reD)) {
+      if (rule.accept && !rule.accept(m)) continue;
+      const [start, end] = groupSpan(m, rule.group);
+      const hit = { start, end, cat: rule.cat, rule: rule.id };
+      if (end > start && isDisplayCredentialHit(text, hit)) hits.push(hit);
+    }
+  }
+  return mergeHits(hits);
+}
+
+/** ASCII, bidi-neutral marker written in place of a masked value. */
+export function displayMarker(rule) {
+  return `[masked:${rule}]`;
+}
+
+/**
+ * Masks credentials in `text` for a viewer (ADR-210). The NAME of a
+ * `NAME=value` pair stays visible; only the value becomes `[masked:<rule>]`.
+ * @param {string} text
+ * @param {{literals?: Iterable<string>}} [ctx]
+ * @returns {string}
+ */
+export function redactForDisplay(text, ctx = {}) {
+  if (typeof text !== 'string') return text;
+  const hits = collectDisplayHits(text, ctx);
+  if (hits.length === 0) return text;
+  let out = '';
+  let cursor = 0;
+  for (const hit of hits) {
+    out += text.slice(cursor, hit.start) + displayMarker(hit.rule);
+    cursor = hit.end;
+  }
+  return out + text.slice(cursor);
+}

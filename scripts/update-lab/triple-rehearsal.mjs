@@ -5,7 +5,7 @@ import {homedir} from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
-import {captureBridgeBaseline,prepareBridgeBaseline,prepareBridgeWorkspace,runBridgeIsolated} from './bridge-rehearsal.mjs';
+import {captureBridgeBaseline,gitObjectsRoot,prepareBridgeBaseline,prepareBridgeWorkspace,runBridgeIsolated} from './bridge-rehearsal.mjs';
 import {hashDependencyTreeV2} from '../lib/dependency-tree-identity-v2.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -42,7 +42,7 @@ export function prepareTripleRehearsal({oid,serverBuildId,clientBuildId}) {
     if(JSON.stringify(hashDependencyTreeV2(path.join(root,'node_modules')))!==JSON.stringify(originalModules)
         || JSON.stringify(hashDependencyTreeV2(path.join(app,'node_modules')))!==JSON.stringify(originalModules))throw Error('triple_private_dependency_copy_changed');
     fs.writeFileSync(path.join(lab,'private-dependencies.json'),JSON.stringify({schema:'triple-private-dependencies/v1',identity:originalModules,sourceReadOnly:true}),{mode:0o600});
-    fs.writeFileSync(path.join(app,'.git/objects/info/alternates'),path.join(root,'.git/objects')+'\n');
+    fs.writeFileSync(path.join(app,'.git/objects/info/alternates'),gitObjectsRoot()+'\n');
     const archive=spawnSync('/usr/bin/git',['archive',oid],{cwd:root,maxBuffer:128*1024*1024});
     if(archive.status!==0)throw Error('triple_private_source_archive_failed');
     execute('/usr/bin/tar',['--no-same-owner','-xf','-','-C',app],{input:archive.stdout});

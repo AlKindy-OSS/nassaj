@@ -20,7 +20,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Maximize2, X } from 'lucide-react';
 
-import MermaidDiagram from '../../project-board/view/MermaidDiagram';
+import MermaidDiagram from '../../../shared/view/MermaidDiagram';
 import { useWikiLabels } from '../useWikiLabels';
 
 type WikiMermaidDiagramProps = {

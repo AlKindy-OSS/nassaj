@@ -4,7 +4,9 @@ import {
   isProjectMembershipEnforced,
   messageAuthorsDb,
   participantsDb,
+  projectMembersDb,
   projectsDb,
+  userDb,
 } from '@/modules/database/index.js';
 
 /**
@@ -140,4 +142,58 @@ export function isSessionAccessibleByUser(
   return mode === 'read'
     ? projectsDb.isProjectPathVisibleToUser(projectPath ?? null, requesterUserId)
     : isProjectPathWritableByUser(projectPath, requesterUserId);
+}
+
+/** Platform roles that may permanently delete any session they can write (B-1647). */
+const DESTROY_ELEVATED_APP_ROLES: ReadonlySet<string> = new Set(['owner', 'admin']);
+
+/** Exact project row first, then the nested-path owner (ADR-172 resolution). */
+function resolveSessionProject(projectPath: string | null | undefined) {
+  if (typeof projectPath !== 'string' || projectPath.trim().length === 0) return null;
+  const exact = projectsDb.getProjectPath(projectPath);
+  if (exact) return exact;
+  const owning = findOwningProject(projectPath);
+  return owning ? projectsDb.getProjectById(owning.project_id) : null;
+}
+
+/** Project creator or explicit 'owner' member — the same rule as canManageProject. */
+function isSessionProjectOwner(projectPath: string | null | undefined, userId: number): boolean {
+  const project = resolveSessionProject(projectPath);
+  if (!project) return false;
+  if (project.created_by === userId) return true;
+  return projectMembersDb.getRole(project.project_id, userId) === 'owner';
+}
+
+/** Active user whose platform role is owner/admin; read from the DB, never the request. */
+function hasElevatedAppRole(userId: number): boolean {
+  const user = userDb.getUserById(userId);
+  return user !== undefined && DESTROY_ELEVATED_APP_ROLES.has(user.role);
+}
+
+/**
+ * Permanent-delete mandate for a session (B-1647, owner decision 2026-10-16).
+ *
+ * Archive stays on the ordinary 'write' mandate. Destroying the row and its
+ * transcript is narrower: the caller must hold 'write' AND be one of
+ *   - the session's strict spawn owner (its creator; never provenance/authorship),
+ *   - the owner of the session's project (creator or 'owner' member), or
+ *   - a platform owner/admin.
+ * Under ADR-173 shared writing any author is a participant, so 'write' alone
+ * would let one message's author erase the creator's conversation from disk.
+ * The 'write' conjunct keeps project privacy absolute for the elevated arms.
+ */
+export function canPermanentlyDeleteSession(
+  sessionId: string,
+  projectPath: string | null | undefined,
+  requesterUserId: number | null,
+): boolean {
+  if (requesterUserId === null || !Number.isInteger(requesterUserId)) return false;
+  if (!isSessionAccessibleByUser(sessionId, projectPath, requesterUserId, 'write')) return false;
+  try {
+    return participantsDb.resolveStrictSpawnOwnerUserId(sessionId) === requesterUserId
+      || isSessionProjectOwner(projectPath, requesterUserId)
+      || hasElevatedAppRole(requesterUserId);
+  } catch {
+    return false;
+  }
 }

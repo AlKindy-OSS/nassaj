@@ -607,7 +607,6 @@
     "agent": "Агент"
   },
   "customCommand": {
-    "confirmBashExecution": "Эта команда содержит bash-команды, которые будут выполнены. Продолжить?",
     "executionCancelled": "Выполнение команды отменено",
     "executeError": "Ошибка выполнения команды: {{message}}",
     "unknownError": "Неизвестная ошибка"

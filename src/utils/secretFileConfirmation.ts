@@ -10,6 +10,8 @@
  */
 import i18n from 'i18next';
 
+import { confirmDialog } from '../shared/dialogs/dialogService';
+
 /** Error code of the 428 answer that asks for confirmation. */
 export const SECRET_FILE_CONFIRMATION_CODE = 'secret_file_confirmation_required';
 
@@ -28,11 +30,16 @@ export async function isSecretConfirmationRequired(response: Response): Promise<
 }
 
 /**
- * Default prompt: a native confirm dialog with the localized question. Uses
- * the global i18next instance that src/i18n/config.js initialises at startup.
+ * Default prompt: the app's themed confirm dialog (T-2039) with the localized
+ * question, danger tone so Cancel holds the initial focus. Uses the global
+ * i18next instance that src/i18n/config.js initialises at startup.
  */
-export function confirmOpenSecretFile(fileName: string): boolean {
-  return window.confirm(i18n.t('secretFile.confirm', { fileName }));
+export function confirmOpenSecretFile(fileName: string): Promise<boolean> {
+  return confirmDialog({
+    title: i18n.t('secretFile.title'),
+    message: i18n.t('secretFile.confirm', { fileName }),
+    tone: 'danger',
+  });
 }
 
 /**
@@ -47,10 +54,10 @@ export async function requestWithSecretConfirmation(
     fileName,
     alreadyConfirmed = false,
     confirm = confirmOpenSecretFile,
-  }: { fileName: string; alreadyConfirmed?: boolean; confirm?: (fileName: string) => boolean },
+  }: { fileName: string; alreadyConfirmed?: boolean; confirm?: (fileName: string) => Promise<boolean> },
 ): Promise<Response | typeof SECRET_FILE_DECLINED> {
   const first = await request(alreadyConfirmed);
   if (alreadyConfirmed || !(await isSecretConfirmationRequired(first))) return first;
-  if (!confirm(fileName)) return SECRET_FILE_DECLINED;
+  if (!(await confirm(fileName))) return SECRET_FILE_DECLINED;
   return request(true);
 }

@@ -252,8 +252,12 @@ class SessionRegistry {
         if (!this.enabled || !key || typeof send !== 'function') return null;
         const entry = this.entries.get(key);
         if (!entry) return null;
-        let highest = Number.isFinite(lastSeq) ? lastSeq : 0;
-        for (const { seq, payload } of entry.buffer.since(lastSeq)) {
+        // A floor above anything this entry ever assigned belongs to an earlier
+        // entry (dropped after a turn and re-created, counter back at 1): the
+        // client's floor means nothing here, so the whole current ring replays.
+        const floor = Number.isFinite(lastSeq) && lastSeq <= entry.buffer.lastSeq ? lastSeq : 0;
+        let highest = floor;
+        for (const { seq, payload } of entry.buffer.since(floor)) {
             send(payload);
             if (seq > highest) highest = seq;
         }

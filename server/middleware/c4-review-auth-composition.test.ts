@@ -51,8 +51,11 @@ async function fixture(t: TestContext, run: (value: Fixture) => Promise<void>): 
   t.mock.method(fsSync, 'copyFileSync', () => { throw new Error('legacy DB copy forbidden in C4 fixtures'); });
   const db = getConnection(); db.pragma('busy_timeout=0'); db.transaction(() => applyAgentReviewSchema(db)).immediate();
   db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,role TEXT,is_active INTEGER,status TEXT,
-    authorization_generation INTEGER,password_changed_at INTEGER,must_change_password INTEGER,avatar_url TEXT);
-    INSERT INTO users VALUES (1,'synthetic','admin',1,'active',1,100,0,NULL);
+    authorization_generation INTEGER,password_changed_at INTEGER,must_change_password INTEGER,avatar_url TEXT,
+    token_epoch INTEGER NOT NULL DEFAULT 0);
+    INSERT INTO users VALUES (1,'synthetic','admin',1,'active',1,100,0,NULL,0);
+    CREATE TABLE revoked_token_sids(sid TEXT PRIMARY KEY,user_id INTEGER NOT NULL,revoked_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL);
     CREATE TABLE api_keys(id INTEGER PRIMARY KEY,user_id INTEGER,key_digest TEXT,is_active INTEGER,last_used TEXT);
     CREATE TABLE user_identities(id INTEGER PRIMARY KEY,user_id INTEGER,issuer TEXT,subject TEXT,last_attested_at INTEGER);
     CREATE TABLE device_sessions(id TEXT PRIMARY KEY,secret_hash TEXT,active_slot_id TEXT,generation INTEGER,revoked_at INTEGER,expires_at INTEGER);
@@ -103,10 +106,32 @@ test('real JWT before/after half-life, near expiry and rejected tokens never ref
   const now = Math.floor(Date.now() / 1000);
   for (const [index, signed] of [token(), token({ iat: now - 7200, exp: now + 3600 }), token({ exp: now + 2 }),
     token({ exp: now - 1 }), token({}, 'different-signing-secret'), token({ auth_gen: 2 }), token({ pwd_iat: 99 }),
-    token({ userId: 2 }), token({ purpose: 'password_change' })].entries()) {
+    token({ userId: 2 }), token({ purpose: 'password_change' }), token({ tok_ep: 1 })].entries()) {
     const before = changes(db); const reply = await call({ Authorization: `Bearer ${signed}` });
     assert.equal(reply.status, index < 3 ? 200 : 401); assert.equal(reply.headers.get('x-refreshed-token'), null);
     assert.deepEqual(changes(db), before);
+  }
+  // T-2035: after a sign-out bumped the epoch, only the current epoch is accepted.
+  db.prepare('UPDATE users SET token_epoch=2').run();
+  assert.equal((await call({ Authorization: `Bearer ${token()}` })).status, 401, 'legacy token after sign-out');
+  assert.equal((await call({ Authorization: `Bearer ${token({ tok_ep: 1 })}` })).status, 401, 'older epoch');
+  assert.equal((await call({ Authorization: `Bearer ${token({ tok_ep: 2 })}` })).status, 200, 'current epoch');
+  db.prepare('UPDATE users SET token_epoch=0').run();
+  // T-2035 round 3: a signed-out device session (revoked sid) is refused.
+  const { legacyTokenSid } = await import('../modules/account-wallet/token-session.js');
+  db.prepare('INSERT INTO revoked_token_sids VALUES (?,?,?,?)')
+    .run('revokedSid000000000000', 1, Date.now(), Date.now() + 3_600_000);
+  const legacy = token();
+  db.prepare('INSERT INTO revoked_token_sids VALUES (?,?,?,?)')
+    .run(legacyTokenSid(legacy), 1, Date.now(), Date.now() + 3_600_000);
+  try {
+    assert.equal((await call({ Authorization: `Bearer ${legacy}` })).status, 401, 'signed-out pre-release token');
+    assert.equal((await call({ Authorization: `Bearer ${token({ sid: 'revokedSid000000000000' })}` })).status, 401,
+      'signed-out device');
+    assert.equal((await call({ Authorization: `Bearer ${token({ sid: 'liveDeviceSid000000000' })}` })).status, 200,
+      'another device');
+  } finally {
+    db.prepare('DELETE FROM revoked_token_sids').run();
   }
   db.prepare('UPDATE users SET must_change_password=1').run();
   const before = changes(db); assert.equal((await call(jwtHeader())).status, 401); assert.deepEqual(changes(db), before);

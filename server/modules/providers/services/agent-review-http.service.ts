@@ -1,6 +1,8 @@
 import type { Database } from 'better-sqlite3';
 import type { Request, Response } from 'express';
 
+import { isSessionId } from '@/shared/session-id.js';
+
 import { c4ReviewInvocation } from '../../account-wallet/index.js';
 import { AgentReviewError, AgentReviewRepository, assertReviewInteger, assertReviewKeys, assertReviewSession,
   assertReviewToken, type ReviewTransition, type ReviewSource, type ReviewStatus } from '../../database/index.js';
@@ -15,6 +17,12 @@ export type AgentReviewPageDto = { sessionId: string; canReview: boolean; availa
   rows: AgentReviewRowDto[]; summary: Record<string, number>; incidents: AgentReviewIncidentDto[];
   pagination: { limit: number; offset: number; incidentLimit: number; incidentAfterId: number; nextIncidentAfterId: number | null } };
 type Reply<T> = { data: T; assertCurrent: () => true };
+
+/** HTTP session ids follow the shared grammar (B-1643) on top of the review validator. */
+function assertReviewHttpSession(value: unknown): asserts value is string {
+  assertReviewSession(value);
+  if (!isSessionId(value)) throw new AgentReviewError('invalid_input');
+}
 
 function pageInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
   if (value === undefined) return fallback;
@@ -31,7 +39,7 @@ export class AgentReviewHttpService {
 
   /** Return bounded durable rows and quarantine references, with a late-disclosure assertion. */
   async get(req: Request): Promise<Reply<AgentReviewPageDto>> {
-    const sessionId = req.params.sessionId; assertReviewSession(sessionId);
+    const sessionId = req.params.sessionId; assertReviewHttpSession(sessionId);
     const keys = Object.keys(req.query);
     if (keys.some(key => !['limit', 'offset', 'incidentLimit', 'incidentAfterId'].includes(key))) throw new AgentReviewError('invalid_input');
     const page = { limit: pageInteger(req.query.limit, 50, 1, 100), offset: pageInteger(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER),
@@ -57,7 +65,7 @@ export class AgentReviewHttpService {
 
   /** Reauthorize inside BEGIN IMMEDIATE before receipt replay/CAS; return a late-disclosure assertion. */
   async patch(req: Request, res?: Response): Promise<Reply<ReturnType<AgentReviewRepository['transition']>>> {
-    const sessionId = req.params.sessionId; assertReviewSession(sessionId);
+    const sessionId = req.params.sessionId; assertReviewHttpSession(sessionId);
     const agentId = req.params.agentId; assertReviewToken(agentId, 'agent');
     if (Object.keys(req.query).length) throw new AgentReviewError('invalid_input');
     assertReviewKeys(req.body, ['source', 'resultGeneration', 'action', 'expectedRevision', 'idempotencyKey']);

@@ -248,6 +248,14 @@ function serviceSecretValues(): string[] {
 }
 
 /**
+ * Secret values the running service holds, for display masking only (ADR-210).
+ * Callers compare and replace them; they must never log or return them.
+ */
+export function listServiceSecretValues(): string[] {
+  return serviceSecretValues();
+}
+
+/**
  * True when `content` contains the value of any secret the running service
  * holds (JWT, encryption keys, OIDC/client/session secrets …). A copy of the
  * service's .env under any name is then a service secret, never a project file.

@@ -13,6 +13,7 @@ import type { Server } from 'node:http';
 import express from 'express';
 
 import { createSsoConfigDouble } from '../services/__tests__/sso-config-double.js';
+import { createMemoryLoginThrottleStore } from '../services/__tests__/login-throttle-memory-store.js';
 
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
@@ -37,6 +38,7 @@ mock.module(url('../services/sso-config.service.js'), { namedExports: sso.export
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: { getUserByLoginIdentifier: () => userRow, updateLastLogin: () => {} },
+    loginThrottleDb: createMemoryLoginThrottleStore(),
     auditLogDb: { record: (action: string, data: { metadata?: unknown }) => audits.push({ action, ...data }) },
     userIdentitiesDb: { hasAnyLink: (userId: number) => linkedUserIds.has(userId) },
     invitesDb: {},

@@ -111,7 +111,6 @@ import {
     recordRawExecution,
     listRawHistory,
     deleteRawHistoryEntry,
-    redactSecretsForAudit,
     MAX_RAW_QUEUE,
     MAX_RAW_OUTPUT_BYTES,
 } from '../services/command-board-raw.js';
@@ -125,6 +124,11 @@ import {
     deleteCustomCommand,
 } from '../services/command-board-custom.js';
 import { clientIp } from '../utils/client-ip.js';
+import {
+    actorFromRequest,
+    auditRawExec as sharedAuditRawExec,
+    auditRawExecStrict as sharedAuditRawExecStrict,
+} from '../services/raw-exec-audit.js';
 import { getBootSecurityWarnings } from '../services/isolation/boot-security-status.js';
 import { setOperatorPolicyKey } from '../services/isolation/claude-managed-settings.js';
 import { createUpdateMaintenanceGate, readUpdateMaintenanceRecoveryEvidence } from '../services/update-maintenance-gate.js';
@@ -2642,70 +2646,23 @@ const rawExecRunLimiter = createRateLimiter({
 let rawExecInFlight = false;
 
 /**
- * Audit for a raw-exec attempt (insert/reject/success/failure). The FULL command
- * + digest + actor + reason/exit go to audit_log (an owner-only, internal sink)
- * — NEVER to console/pm2 logs which may be shared.
- *
- * HONEST DESCRIPTION OF THE SINK: audit_log is append-only by USAGE (nothing in
- * this codebase updates or deletes rows; retention pruning is separate), but the
- * WRITE IS BEST-EFFORT: auditLogDb.record swallows every error and only logs to
- * console. A full disk or a locked DB therefore drops the row silently. For the
- * one place where that is unacceptable — the record that a raw command is about
- * to run — use auditRawExecStrict below, which verifies the row landed.
+ * Audit for a raw-exec attempt (insert/reject/success/failure). The sink, its
+ * redaction and its honest limits live in services/raw-exec-audit.js (T-2037),
+ * shared with the composer shell one-shot so both write the same row shape.
  */
 function auditRawExec(req, result, extra = {}) {
-    // B-197 (branch ٣): the command is the owner's own free-form shell, so it may
-    // carry an INLINE credential. audit_log is owner-only but long-lived and
-    // exported/backed-up, so the labelled credential VALUES are masked here
-    // before the row is written. Redaction touches the AUDIT COPY only — the
-    // stored/executed bytes and the digest are untouched (WYSIWYG is preserved).
-    // See redactSecretsForAudit for its honest, name-directed limits.
-    const metadata = { result, ...extra };
-    if ('command' in metadata) {
-        metadata.command = redactSecretsForAudit(metadata.command);
-    }
-    auditLogDb.record('command_board_raw_exec', {
-        userId: req.user?.id ?? null,
-        metadata,
-        ipAddress: clientIp(req),
-        userAgent: req.headers['user-agent'] ?? null,
-    });
+    sharedAuditRawExec(actorFromRequest(req), result, extra);
 }
 
 /**
- * STRICT audit: writes the row and then PROVES it is readable, throwing if not.
- * Used for the pre-spawn 'exec_start' record so that an unauditable execution is
- * REFUSED rather than run silently (ADR-068 discipline: no unlogged raw exec).
- *
- * Verification method: a random nonce is embedded in the metadata and looked up
- * in the most recent rows. auditLogDb.record cannot report failure (it swallows
- * errors and returns void) and this module must not modify audit-log.ts, so a
- * read-back is the only way to distinguish "written" from "silently dropped".
- *
- * LIMIT, stated plainly: the read-back scans the newest AUDIT_READBACK_LIMIT
- * rows. Raw execs are serialized by rawExecInFlight and rate-limited to 5/min,
- * so a concurrent flood of other audit events large enough to push the row out
- * of that window would produce a FALSE failure — i.e. it errs toward refusing to
- * execute, never toward executing unlogged.
+ * STRICT audit for the pre-spawn 'exec_start' record: writes the row and proves
+ * it is readable, throwing if not (see services/raw-exec-audit.js). Raw execs are
+ * serialized by rawExecInFlight and rate-limited to 5/min here, so the read-back
+ * window's false-failure limit errs toward refusing, never toward running unlogged.
  * @throws {Error} when the row cannot be confirmed.
  */
-const AUDIT_READBACK_LIMIT = 50;
 function auditRawExecStrict(req, result, extra = {}) {
-    const auditNonce = crypto.randomUUID();
-    auditRawExec(req, result, { ...extra, auditNonce });
-    let landed = false;
-    try {
-        landed = auditLogDb
-            .recent(AUDIT_READBACK_LIMIT)
-            .some((r) => r.action === 'command_board_raw_exec'
-                && typeof r.metadata === 'string'
-                && r.metadata.includes(auditNonce));
-    } catch (error) {
-        throw new Error(`audit_unverifiable: ${error.message}`);
-    }
-    if (!landed) {
-        throw new Error('audit_write_failed');
-    }
+    sharedAuditRawExecStrict(actorFromRequest(req), result, extra);
 }
 
 /**

@@ -5,8 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { BookOpen, FileCode2 } from 'lucide-react';
 
 import { Pill, PillBar } from '../../../shared/view/ui';
-
-import MermaidDiagram from './MermaidDiagram';
+import MermaidDiagram from '../../../shared/view/MermaidDiagram';
 
 type ArchitectureViewProps = {
   technical: string | null;

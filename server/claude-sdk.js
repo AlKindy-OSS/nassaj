@@ -27,10 +27,19 @@ import { engineProviderLabel } from '../shared/engineProviders.js';
 
 import { claudeDelegationProfile, prepareClaudeReviewedDelegation } from './services/claude-delegation-admission.js';
 import { evaluatePublicPageWrite } from './services/public-page-agent-guidance.js';
+import { restoreMaskedUpdatedInput } from './services/display-secret-mask.js';
 import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
-import { createClaudeProgressFold, claudeNotifiedTasks } from './modules/providers/list/claude/claude-progress-fold.js';
+import {
+  createClaudeProgressFold, claudeNotifiedTasks, claudeSettlements,
+} from './modules/providers/list/claude/claude-progress-fold.js';
 import { createSeededLiveFold } from './modules/providers/list/claude/claude-progress-seed.js';
 import { createClaudeLaunchTranscriptRecorder } from './modules/providers/list/claude/claude-launch-transcript.js';
+import { readAgentMeta } from './modules/providers/list/claude/agent-transcript.reader.js';
+import {
+  isTranscriptHandle,
+  openRecordedTranscript,
+  openSessionArtifactDir,
+} from './modules/providers/shared/session-transcript-reader.js';
 import {
   confirmWithRetry,
   createSteerRun,
@@ -219,6 +228,177 @@ function bufferThenSend(ws, sessionKey, payload) {
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
+
+function createClaudeAgentSidecarPoller(dependencies = {}) {
+  const agents = new Map();
+  const pending = new Map();
+  const settled = new Set();
+  let artifactDir = null;
+  let artifactTranscript = null;
+  let latestSessionId = null;
+  let nextAgentIndex = 0;
+  let timer = null;
+  let ticking = false;
+  let activeTick = null;
+
+  async function openArtifacts(sessionId) {
+    const row = sessionsDb.getHistorySource(sessionId);
+    if (!row || row.provider !== 'claude') return null;
+    const transcript = await openRecordedTranscript(row, 'agents');
+    if (!isTranscriptHandle(transcript)) return null;
+    const artifacts = await openSessionArtifactDir(transcript, 'subagents');
+    if ('dir' in artifacts) {
+      await transcript.fd.close().catch(() => undefined);
+      return artifacts;
+    }
+    artifactTranscript = transcript;
+    return null;
+  }
+
+  async function readNewLines(agent) {
+    const stat = await agent.file.handle.stat();
+    if (stat.size <= agent.offset) return [];
+    const length = Math.min(stat.size - agent.offset, 256 * 1024);
+    const buffer = Buffer.alloc(length);
+    const result = await agent.file.handle.read(buffer, 0, length, agent.offset);
+    agent.offset += result.bytesRead;
+    const text = agent.pending + buffer.subarray(0, result.bytesRead).toString('utf8');
+    const lines = text.split('\n');
+    agent.pending = lines.pop() || '';
+    return lines.filter((line) => line.trim()).flatMap((line) => {
+      try { return [JSON.parse(line)]; } catch { return []; }
+    });
+  }
+
+  return {
+    observe(raw, sessionId) {
+      if (sessionId) latestSessionId = sessionId;
+      for (const { toolUseId } of claudeSettlements(raw)) settled.add(toolUseId);
+      const blocks = Array.isArray(raw?.message?.content) ? raw.message.content : [];
+      for (const block of blocks) {
+        const result = block?.toolUseResult ?? block?.tool_use_result
+          ?? raw?.toolUseResult ?? raw?.tool_use_result;
+        const agentId = result?.agentId ?? block?.agentId;
+        const toolId = block?.tool_use_id ?? block?.id ?? raw?.tool_use_id;
+        if (typeof agentId === 'string' && typeof toolId === 'string' && pending.size < 100) {
+          pending.set(agentId, toolId);
+        }
+      }
+    },
+    start(progressFoldReady, emit, ws, clientMsgIdField, responseToMessageIdField) {
+      if (timer) return;
+      timer = setInterval(async () => {
+        if (ticking || !latestSessionId) return;
+        ticking = true;
+        activeTick = (async () => {
+          try {
+            const progressFold = await progressFoldReady;
+            const updates = await this.poll(null, latestSessionId, progressFold);
+            for (const update of updates) {
+              stampCoordinatorId(update, ws?.userId);
+              Object.assign(update, clientMsgIdField, responseToMessageIdField);
+              emit(update);
+            }
+          } catch {
+            // An optional sidecar read must never stop the SDK stream.
+          } finally {
+            ticking = false;
+            activeTick = null;
+          }
+        })();
+        await activeTick;
+      }, 500);
+      timer.unref?.();
+    },
+    async poll(_raw, sessionId, progressFold) {
+      if (!sessionId) return [];
+      if (!artifactDir) {
+      artifactDir = artifactTranscript
+        ? await openSessionArtifactDir(artifactTranscript, 'subagents').then((result) =>
+          'dir' in result ? result : null)
+        : await (dependencies.openArtifacts ?? openArtifacts)(sessionId);
+        if (artifactDir && artifactTranscript) {
+          await artifactTranscript.fd.close().catch(() => undefined);
+          artifactTranscript = null;
+        }
+      }
+      if (!artifactDir) return [];
+
+      for (const [agentId, toolId] of pending) {
+        if (agents.has(agentId)) continue;
+        let meta;
+        let file;
+        try {
+          meta = await (dependencies.readAgentMeta ?? readAgentMeta)(artifactDir, agentId);
+          if (meta.toolUseId !== toolId) { pending.delete(agentId); continue; }
+          file = await artifactDir.openFile(`agent-${agentId}.jsonl`);
+          if (!('handle' in file)) { pending.delete(agentId); continue; }
+        } catch {
+          pending.delete(agentId);
+          continue;
+        }
+        agents.set(agentId, { file, offset: 0, pending: '', parentId: toolId, tools: new Map() });
+        pending.delete(agentId);
+      }
+
+      const updates = [];
+      const tickStarted = Date.now();
+      const agentEntries = [...agents.entries()];
+      if (agentEntries.length) {
+        const startIndex = nextAgentIndex % agentEntries.length;
+        agentEntries.push(...agentEntries.splice(0, startIndex));
+        nextAgentIndex = (startIndex + 1) % agentEntries.length;
+      }
+      for (const [agentId, agent] of agentEntries) {
+        if (settled.has(agent.parentId)) {
+          await artifactDir.closeFile(agent.file);
+          agents.delete(agentId);
+          continue;
+        }
+        if (Date.now() - tickStarted >= 50) break;
+        for (const entry of await readNewLines(agent)) {
+          const model = entry?.message?.model ?? entry?.model;
+          const effort = entry?.message?.effort ?? entry?.message?.reasoning_effort
+            ?? entry?.effort ?? entry?.reasoning_effort;
+          const content = Array.isArray(entry?.message?.content) ? entry.message.content : [];
+          let lastTool = null;
+          for (const part of content) {
+            if (part?.type === 'tool_use' && typeof part.name === 'string') {
+              agent.tools.set(part.id, { name: part.name, status: 'running' });
+              lastTool = { ...agent.tools.get(part.id), id: part.id };
+            } else if (part?.type === 'tool_result') {
+              const tool = agent.tools.get(part.tool_use_id);
+              if (tool) {
+                tool.status = part.is_error ? 'failed' : 'completed';
+                lastTool = { ...tool, id: part.tool_use_id };
+              }
+            }
+          }
+          const progress = {
+            type: 'system', subtype: 'task_progress', tool_use_id: agent.parentId,
+            session_id: latestSessionId,
+            ...(lastTool ? { last_tool_name: lastTool.name,
+              tool_status: lastTool.status, tool_id: lastTool.id } : {}),
+            ...(typeof model === 'string' ? { resolvedModel: model } : {}),
+            ...(typeof effort === 'string' ? { effort } : {}),
+          };
+          const rows = [];
+          const foldedRows = progressFold.observe(progress, rows);
+          updates.push(...rows, ...foldedRows);
+        }
+      }
+      return updates;
+    },
+    async close() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      await activeTick;
+      for (const agent of agents.values()) await artifactDir?.closeFile(agent.file);
+      await artifactTranscript?.fd.close().catch(() => undefined);
+      await artifactDir?.close();
+    },
+  };
+}
 
 // T-1903: Claude is the first provider with the server-registered
 // `midTurnInjection` capability. A run is steerable only while its entry is
@@ -959,6 +1139,14 @@ function resolveToolApproval(requestId, decision) {
     );
   }
 
+  // ADR-210: an answer built from a masked view must not feed `[masked:…]`
+  // text to the model — keep the recorded input, take only the user's answers.
+  if (verdict.decision && typeof verdict.decision === 'object' && 'updatedInput' in verdict.decision) {
+    verdict.decision = {
+      ...verdict.decision,
+      updatedInput: restoreMaskedUpdatedInput(verdict.decision.updatedInput, resolver._input),
+    };
+  }
   resolver(verdict.decision);
   return { resolved: true, sessionId };
 }
@@ -2974,6 +3162,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   const responseTurnId = crypto.randomUUID();
   let durableFinalAssistantMessageId = null;
   let capturedSessionId = sessionId;
+  const agentSidecars = createClaudeAgentSidecarPoller();
   let sessionCreatedSent = false;
   let tempImagePaths = [];
   let tempDir = null;
@@ -4175,6 +4364,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     const progressFoldReady = sdkOptions.resume
       ? createSeededLiveFold(sessionId || null, sdkOptions.resume)
       : Promise.resolve(createClaudeProgressFold('live', sessionId || null));
+    agentSidecars.start(progressFoldReady, sendAndBuffer, ws, clientMsgIdField,
+      responseToMessageIdField);
     // B-1401: tool_use ids of this run's Workflow calls not yet resolved. The tool
     // returns at once and the workflow runs as a background task, so an id leaves
     // the set only when its tool_result is an error (never started) or its task is
@@ -4365,6 +4556,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       const normalized = sessionsService.normalizeMessage('claude', transformedMessage, sid);
       const progressFold = await progressFoldReady;
       normalized.push(...progressFold.observe(transformedMessage, normalized));
+      agentSidecars.observe(message, sid);
       for (const msg of normalized) {
         // A thinking/tool/text delta is model activity.  User echoes and tool
         // results are not: the latter can arrive long after model work began.
@@ -4779,6 +4971,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     });
     return { ok: false };
   } finally {
+    await agentSidecars.close().catch(() => undefined);
     if (permissionExecution && permissionConsumed) {
       try {
         permissionExecution.settle(permissionOutcome
@@ -5153,6 +5346,8 @@ function getPendingApprovalsForSession(sessionId) {
       pending.push({
         requestId,
         toolName: resolver._toolName || 'UnknownTool',
+        // ADR-210: lets the listing keep input raw only for the run owner; stripped before sending.
+        ownerUserId: resolver._ownerUserId ?? null,
         input: resolver._input,
         context: resolver._context,
         sessionId,
@@ -5250,6 +5445,7 @@ function attachClaudeSDKSession(sessionId, lastSeq, send) {
 
 // Export public API
 export {
+  createClaudeAgentSidecarPoller,
   queryClaudeSDK,
   abortClaudeSDKSession,
   isClaudeSDKSessionActive,

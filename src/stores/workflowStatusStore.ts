@@ -74,7 +74,14 @@ function workflowSig(w: ActiveWorkflow): string {
   // store would suppress the update as "identical snapshot". The strip would then
   // freeze on the first sample it ever received.
   const agentsSig = w.agents
-    .map((a) => `${a.agentId}:${a.status}:${a.callCount}:${a.currentTool ?? ''}`)
+    .map((a) => [
+      a.agentId,
+      a.status,
+      a.callCount,
+      a.currentTool ?? '',
+      a.model ?? '',
+      a.effort ?? '',
+    ].join(':'))
     .join(',');
   // `projectId` MUST be part of the signature too (T-1949): it can change
   // without any other field moving (e.g. the run's project attribution is

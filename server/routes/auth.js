@@ -15,7 +15,10 @@ import {
   ACCOUNT_DELETED_REVOCATION,
   revocationForRoleChange,
   revocationForStatusChange,
+  revokeUserRealtimeAccess,
+  SIGN_OUT_EVERYWHERE_REVOCATION,
 } from '../modules/account-wallet/user-realtime-revocation.js';
+import { revokeTokenSession } from '../modules/account-wallet/token-session.js';
 import {
   canonicalMutationPath,
   mintMutationCsrfToken,
@@ -33,6 +36,13 @@ import * as authMiddleware from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { verifyPassword, needsRehash, hashPassword } from '../services/password.service.js';
 import { createInvite, acceptInvite, InviteError } from '../services/invite.service.js';
+import {
+  admitPasswordCheck,
+  configureLoginThrottle,
+  lockedPasswordRefusal,
+  sharedLoginThrottle,
+  unlockAccountLogin,
+} from '../services/login-throttle.service.js';
 import { clientIp } from '../utils/client-ip.js';
 import { isTrustedOrigin, multiAccountSwitchingEnabled } from '../utils/trusted-origin.js';
 import { userConfigDir } from '../services/isolation/provision-user-dirs.js';
@@ -331,6 +341,46 @@ router.post('/accounts/switch', walletAuth, walletCsrf('switch'), (req, res) => 
     return walletError(res, error, req.devicePrincipal);
   }
 });
+// ---------------------------------------------------------------------------
+// Per-identifier login throttle (ADR-212, T-2035)
+// ---------------------------------------------------------------------------
+
+// The process-wide throttle (shared with OIDC self-link/unlink and step-up);
+// configured here too so this router works when the middleware is a double.
+const loginThrottle = () => {
+  configureLoginThrottle(JWT_SECRET);
+  return sharedLoginThrottle();
+};
+
+/** 429 for a locked identifier: same status and body for known and unknown ones. */
+const refuseLockedLogin = (res, retryAfterSeconds) => {
+  const refusal = lockedPasswordRefusal(retryAfterSeconds);
+  return res.status(refusal.status)
+    .set('Retry-After', String(retryAfterSeconds))
+    .set('Cache-Control', 'no-store')
+    .json(refusal.body);
+};
+
+/**
+ * Charges one password attempt against `keyHash` BEFORE the password is
+ * verified. Answers 429 and returns false while the key is locked. A lock this
+ * attempt starts is audited; `resolveUserId` names the account only when it
+ * exists (never the identifier).
+ */
+function admitPasswordAttempt(req, res, keyHash, resolveUserId, context) {
+  const admission = admitPasswordCheck(loginThrottle(), keyHash, {
+    userId: resolveUserId,
+    ipAddress: clientIp(req),
+    userAgent: req.headers['user-agent'] ?? null,
+    context,
+  });
+  if (!admission.allowed) {
+    refuseLockedLogin(res, admission.retryAfterSeconds);
+    return false;
+  }
+  return true;
+}
+
 const addAccountFailed = (res) => res.status(401).json({
   error: 'Account could not be added', code: 'add_account_failed',
 });
@@ -343,14 +393,21 @@ router.post('/accounts/add', walletAuth, ...addAccountLimiters, walletCsrf('add'
       || !validGeneration(expectedGeneration)) {
     return res.status(400).json({ error: 'Invalid request', code: 'invalid_request' });
   }
-  if (identifier.error) {
-    // Same verification cost and answer as an unknown account (I-ENUM).
-    await verifyPassword(DECOY_PASSWORD_HASH, password);
-    return addAccountFailed(res);
-  }
   try {
+    const throttleKey = loginThrottle().keyForIdentifier(field.value);
+    const knownUserId = () => (identifier.normalized
+      ? userDb.getUserByLoginIdentifier(identifier.normalized)?.id : undefined);
+    if (!admitPasswordAttempt(req, res, throttleKey, knownUserId, 'wallet_add')) return undefined;
+    if (identifier.error) {
+      // Same verification cost and answer as an unknown account (I-ENUM).
+      await verifyPassword(DECOY_PASSWORD_HASH, password);
+      return addAccountFailed(res);
+    }
+    // T-2035: a correct password clears the counter even when the add itself
+    // is then refused (SSO-only account, conflict, wallet full).
     const wallet = await accountWalletService.addLocal(
       req.devicePrincipal, identifier.normalized, password, expectedGeneration,
+      () => loginThrottle().clear(throttleKey),
     );
     if (!wallet) return addAccountFailed(res);
     return res.status(201).set('Cache-Control', 'no-store').json(wallet);
@@ -469,6 +526,9 @@ router.post('/login', authLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required' });
     }
     const user = identifier.normalized ? userDb.getUserByLoginIdentifier(identifier.normalized) : undefined;
+    // T-2035: charged before any verification, for known and unknown identifiers alike.
+    const throttleKey = loginThrottle().keyForIdentifier(username);
+    if (!admitPasswordAttempt(req, res, throttleKey, () => user?.id, 'login')) return undefined;
     // Always run a verification path; generic error to avoid user enumeration.
     if (!user) {
       // Constant-time defence (B-142): perform a real argon2id verification
@@ -493,6 +553,7 @@ router.post('/login', authLimiter, async (req, res) => {
       });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
+    loginThrottle().clear(throttleKey);
 
     // T-1939: checked only after a correct password, so the answer never
     // reveals whether an account exists or is SSO-linked.
@@ -607,6 +668,11 @@ const graceRefresh = (req, res, next) => {
         || result.decoded.auth_gen !== user.authorization_generation) {
       return res.status(401).json({ error: 'Token invalidated' });
     }
+    // T-2035: a token from before a sign-out (this device or everywhere) is
+    // never renewed.
+    if (!authMiddleware.tokenSessionCurrent(result.decoded, user, token)) {
+      return res.status(401).json({ error: 'Token invalidated' });
+    }
     // T-1939 slice 3: a linked member past the SSO attestation window is never
     // renewed; they re-attest at the IdP instead.
     if (!userSsoAttestationFresh(user)) {
@@ -619,7 +685,8 @@ const graceRefresh = (req, res, next) => {
       });
     }
 
-    const renewed = generateToken(user);
+    // The device keeps its session id across the renewal (T-2035 round 3).
+    const renewed = generateToken(user, { sid: authMiddleware.refreshSidOf(result.decoded, token) });
     auditLogDb.record('token_refresh', {
       userId: user.id,
       ipAddress: ip,
@@ -637,7 +704,7 @@ router.post('/refresh', graceRefresh, authenticateToken, (req, res) => {
       code: 'device_session_no_refresh',
     });
   }
-  const token = generateToken(req.user);
+  const token = generateToken(req.user, { sid: req.tokenSession?.refreshSid });
   auditLogDb.record('token_refresh', {
     userId: req.user.id,
     ipAddress: clientIp(req),
@@ -687,7 +754,99 @@ router.get('/me', authenticateToken, (req, res) => {
   res.json({ id, username, role, status, avatarUrl: avatar_url ?? null });
 });
 
-router.post('/logout', authenticateToken, walletMutationGuard, (req, res) => {
+/**
+ * T-2035 (ADR-212): advances the user's token epoch (every JWT they hold dies,
+ * on REST, WebSocket upgrade and refresh), drops the coalesced refresh token,
+ * and closes the user's realtime sockets with 4401. Running turns continue
+ * (B-1327); API keys are untouched. A realtime failure is logged, never thrown:
+ * the epoch already ended every token.
+ */
+function signOutEverywhere(userId) {
+  if (userDb.bumpTokenEpoch(userId) === null) throw new Error('sign_out_user_missing');
+  invalidateRefreshCache(userId);
+  try {
+    revokeUserRealtimeAccess(userId, SIGN_OUT_EVERYWHERE_REVOCATION);
+  } catch (error) {
+    console.error('[ERROR] Sign-out socket revocation failed', {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+const SESSION_TOKEN_TTL_MS = Number.isFinite(authMiddleware.TOKEN_TTL_MS)
+  ? authMiddleware.TOKEN_TTL_MS : 7 * 24 * 60 * 60 * 1000;
+const GRACE_MS = Number.isFinite(REFRESH_GRACE_MS) ? REFRESH_GRACE_MS : 0;
+
+/**
+ * T-2035: how long a signed-out device session stays revoked. Any token of
+ * that session minted before the sign-out — even one refreshed later than the
+ * presented token — expires within one TTL from now, and no new token can be
+ * minted for a revoked sid, so the row outlives every possible token (+grace).
+ */
+function deviceRevocationExpiry(presentedExpiresAtMs, nowMs = Date.now()) {
+  return Math.max(presentedExpiresAtMs, nowMs + SESSION_TOKEN_TTL_MS) + GRACE_MS;
+}
+
+/**
+ * T-2035 round 3: ends one bearer's device session — its sid (own, or derived
+ * from a pre-release token) is recorded until no token of the session can
+ * exist, its coalesced refresh token is dropped, and its realtime sockets
+ * close with 4401. Other devices, running turns and API keys are untouched.
+ */
+function signOutDeviceSession(userId, sid, presentedExpiresAtMs) {
+  revokeTokenSession({ sid, userId, expiresAt: deviceRevocationExpiry(presentedExpiresAtMs) });
+  authMiddleware.invalidateRefreshCacheForSession?.(userId, sid);
+}
+
+/** Records the sign-out in the auth timeline (T-182). Best-effort. */
+function auditLogout(req, userId, scope) {
+  auditLogDb.record('logout', {
+    userId,
+    metadata: { scope },
+    ipAddress: clientIp(req),
+    userAgent: req.headers['user-agent'] ?? null,
+  });
+}
+
+/**
+ * T-2035 H2: a bearer that expired only recently can still be grace-renewed,
+ * so it must also be able to sign its device out. Runs before
+ * authenticateToken on POST /logout and handles ONLY such a token: it is
+ * verified like the grace refresh (signature, account, pwd_iat, auth_gen,
+ * epoch and session) and used for nothing but its own revocation. Every other
+ * request passes to the normal path untouched.
+ */
+const logoutRecentlyExpiredBearer = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7) : null;
+  // A device cookie beside a bearer is the normal path's ambiguity refusal.
+  if (!token || readCookie(req, DEVICE_COOKIE)) return next();
+  const result = verifyTokenAllowingRecentExpiry(token);
+  if (!result.ok || !result.expired) return next();
+  const { decoded } = result;
+  const user = userDb.getUserById(decoded.userId);
+  if (!user
+      || (user.password_changed_at && decoded.pwd_iat < user.password_changed_at)
+      || !Number.isSafeInteger(decoded.auth_gen) || decoded.auth_gen !== user.authorization_generation
+      || !authMiddleware.tokenSessionCurrent(decoded, user, token)) {
+    return res.status(401).json({ error: 'Token invalidated' });
+  }
+  try {
+    signOutDeviceSession(user.id, authMiddleware.refreshSidOf(decoded, token), decoded.exp * 1000);
+  } catch (error) {
+    console.error('[ERROR] Sign-out revocation failed', {
+      userId: user.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+  auditLogout(req, user.id, 'device');
+  return res.json({ success: true, message: 'Logged out successfully', scope: 'device' });
+};
+
+router.post('/logout', logoutRecentlyExpiredBearer, authenticateToken, walletMutationGuard, (req, res) => {
   if (req.devicePrincipal) {
     const expectedGeneration = req.body?.expectedGeneration;
     if (!validGeneration(expectedGeneration)) return res.status(400).json({ error: 'Invalid request' });
@@ -701,15 +860,29 @@ router.post('/logout', authenticateToken, walletMutationGuard, (req, res) => {
       });
     } catch(error) { return walletError(res, error, req.devicePrincipal); }
   }
-  // Behind authenticateToken, so req.user is guaranteed. Record the explicit
-  // logout for the auth timeline (T-182). Best-effort: never blocks the response.
-  auditLogDb.record('logout', {
-    userId: req.user.id,
-    ipAddress: clientIp(req),
-    userAgent: req.headers['user-agent'] ?? null,
-  });
+  // Behind authenticateToken, so req.user is guaranteed. T-2035 round 3
+  // (owner decision 2026-10-16): sign-out ends THIS device's session only.
+  // If the revocation cannot be stored the sign-out did not happen, so it is
+  // never reported.
+  // Platform mode authenticates no bearer, so there is no session to end.
+  const session = req.tokenSession;
+  if (session) {
+    try {
+      signOutDeviceSession(req.user.id, session.refreshSid, session.expiresAtMs);
+    } catch (error) {
+      console.error('[ERROR] Sign-out revocation failed', {
+        userId: req.user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+  const scope = session ? 'device' : 'none';
+  // A refreshed token minted by authenticateToken belongs to the ended session.
+  res.removeHeader('X-Refreshed-Token');
+  auditLogout(req, req.user.id, scope);
   clearConnectorOwnerAuthentication(req, res, req.user.id);
-  res.json({ success: true, message: 'Logged out successfully' });
+  res.json({ success: true, message: 'Logged out successfully', scope });
 });
 
 router.post('/logout-all', walletAuth, walletCsrf('logout_all'), (req,res) => {
@@ -717,8 +890,21 @@ router.post('/logout-all', walletAuth, walletCsrf('logout_all'), (req,res) => {
   if (!validGeneration(expectedGeneration)) return res.status(400).json({error:'Invalid request'});
   try {
     accountWalletService.logoutAll(req.devicePrincipal, expectedGeneration);
-    return res.clearCookie(DEVICE_COOKIE,{secure:true,httpOnly:true,sameSite:'lax',path:'/'}).status(204).end();
   } catch(error) { return walletError(res, error, req.devicePrincipal); }
+  // The device session is already revoked, so its cookie is cleared whatever
+  // happens next. T-2035: the active account's bearer tokens end with it; if
+  // that fails the caller learns the sign-out did not reach other devices.
+  res.clearCookie(DEVICE_COOKIE,{secure:true,httpOnly:true,sameSite:'lax',path:'/'});
+  try {
+    signOutEverywhere(req.devicePrincipal.userId);
+  } catch (error) {
+    console.error('[ERROR] Sign-out revocation failed', {
+      userId: req.devicePrincipal.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return res.status(500).json({ error: 'Internal server error', code: 'sign_out_incomplete' });
+  }
+  return res.status(204).end();
 });
 
 // ---------------------------------------------------------------------------
@@ -856,6 +1042,36 @@ function revokeLiveAccess(userId, deviceSessionIds, revocation) {
     });
   }
 }
+
+/**
+ * Owner break-glass for the login throttle (T-2035, ADR-212). A third party
+ * can keep re-locking an account's password sign-in every time a lock ends;
+ * the owner (signed in by passkey or SSO when the own password path is the
+ * one held locked) clears every throttle row of the target account. Audited.
+ * The offline equivalent is `server/scripts/unlock-login.ts`.
+ */
+router.post('/users/:id/login-unlock', authenticateToken, requireRole('owner'), (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid user id' });
+  const identifiers = userDb.listLoginIdentifiers(id);
+  if (identifiers.length === 0) return res.status(404).json({ error: 'User not found' });
+  try {
+    const cleared = unlockAccountLogin(loginThrottle(), { userId: id, identifiers });
+    auditLogDb.record('login_unlocked', {
+      userId: req.user.id,
+      metadata: { targetUserId: id, cleared, via: 'api' },
+      ipAddress: clientIp(req),
+      userAgent: req.headers['user-agent'] ?? null,
+    });
+    return res.set('Cache-Control', 'no-store').json({ success: true, cleared });
+  } catch (error) {
+    console.error('[ERROR] Login unlock failed', {
+      targetUserId: id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Change a user's role (owner only). An owner may not demote themselves, and the
 // last remaining owner may not be demoted (avoids locking out administration).
@@ -1068,6 +1284,9 @@ router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // T-2035: the current-password check is throttled per account.
+    const throttleKey = loginThrottle().keyForUser(req.user.id);
+    if (!admitPasswordAttempt(req, res, throttleKey, () => req.user.id, 'password_change')) return undefined;
     const isValid = await verifyPassword(fullUser.password_hash, currentPassword);
     if (!isValid) {
       auditLogDb.record('login_failure', {
@@ -1081,6 +1300,7 @@ router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req
         error: 'Current password is incorrect', code: 'current_password_incorrect',
       });
     }
+    loginThrottle().clear(throttleKey);
 
     const changedAt = Date.now();
     const newHash = await hashPassword(newPassword);

@@ -140,6 +140,7 @@ mock.module('@/services/isolation/resolve-provider-env.js', {
 const { handleShellConnection } = await import('./shell-websocket.service.js');
 const { isProjectPathWritableByUser } = await import('./chat-websocket.service.js');
 const { createStandaloneTerminal, resetStandaloneTerminalsForTest } = await import(
+  // eslint-disable-next-line boundaries/no-unknown -- the standalone terminal registry is a leaf service.
   '@/services/standalone-terminals/standalone-terminal-registry.js'
 );
 
@@ -898,22 +899,30 @@ test('SEC-SHELL-ROLE: a plain member may still run the fixed provider-login comm
 });
 
 test('SEC-SHELL-ROLE: the owner keeps the free-form terminal (the gate is role-based, not a global ban)', async () => {
-  await withIsolatedDatabase(() => {
+  await withIsolatedDatabase(async () => {
     spawnCalls.length = 0;
     resolveCalls.length = 0;
+    // T-2037: a free-form command is now a composer one-shot, so it also needs
+    // the raw-exec brakes open, a runId, and an owner row for its audit record.
+    const ownerId = userDb.createUser('sec-shell-owner', 'hash', 'owner').id;
+    // eslint-disable-next-line boundaries/no-unknown -- arms raw exec exactly as the settings route does.
+    const { setCommandBoardConfig } = await import('@/services/command-board-config.js');
+    setCommandBoardConfig({ rawExecEnabled: true, roleModes: { owner: 'raw' } });
 
     const ws = makeFakeWs();
-    handleShellConnection(ws as never, asRequest(1, 'owner'), deps);
+    handleShellConnection(ws as never, asRequest(ownerId, 'owner'), deps);
     ws.emit('message', initMessage(PROJECT_PATH, {
       isPlainShell: true,
       initialCommand: 'ls -la',
+      runId: '5b0c2d1e-7a3f-4e2b-9c1d-0f1e2d3c4b5a',
     }));
+    await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(ws.closes.length, 0, 'the owner terminal was not closed');
     assert.equal(spawnCalls.length, 1, 'the owner still gets a pty for a free-form command');
     assert.equal(
       spawnCalls[0].env.__ISOLATED_FOR__,
-      '1',
+      String(ownerId),
       'and it is still built through the per-user isolation seam'
     );
   });

@@ -3,6 +3,8 @@ import {
   applyOutcomePayload,
   isOutcomeSignalKind,
 } from '@/modules/websocket/services/session-outcome.service.js';
+// eslint-disable-next-line boundaries/no-unknown -- ADR-210: display masking is a leaf service shared by every viewer egress.
+import { isSameUser, prepareDisplayFrames } from '@/services/display-secret-mask.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
 import { abortIfWriterRevoked, stampWriterEpoch } from '@/shared/user-revocation-epoch.js';
 
@@ -190,6 +192,7 @@ function fanOutToMirrors(
   sessionId: string,
   serialized: string,
   primary: RealtimeClientConnection,
+  ownerView?: { serialized: string; userId: string | number | null },
 ): void {
   const mirrors = sessionMirrors.get(sessionId);
   if (!mirrors || mirrors.size === 0) {
@@ -204,7 +207,9 @@ function fanOutToMirrors(
       continue;
     }
     try {
-      mirror.send(serialized);
+      // ADR-210: a socket of the run owner (e.g. its second tab) gets the
+      // owner view — raw permission input it may edit and send back.
+      mirror.send(ownerView && isSameUser(mirror.userId, ownerView.userId) ? ownerView.serialized : serialized);
     } catch {
       mirrors.delete(mirror);
     }
@@ -296,26 +301,27 @@ export class WebSocketWriter {
   }
 
   send(data: unknown): void {
-    const serialized = JSON.stringify(data);
     const targetSessionId =
       data && typeof data === 'object' && typeof (data as { sessionId?: unknown }).sessionId === 'string'
         ? (data as { sessionId: string }).sessionId
         : this.sessionId;
-    if (this.primarySuppression === 0 && this.ws.readyState === WS_OPEN_STATE) {
-      try {
-        this.ws.send(serialized);
-      } catch {
-        // B-891: a transport failure belongs to this viewer, not the run.
-        // Preserve mirror delivery and outcome recording even if send fails
-        // after the OPEN check. Never swap the active writer as recovery.
-      }
-    }
     // Mirror fan-out: key by the payload's own sessionId when present (most
     // normalized messages carry it; covers resumed runs where setSessionId was
     // never called on this writer), falling back to the writer's sessionId.
     const payloadSessionId = targetSessionId;
-    if (payloadSessionId) {
-      fanOutToMirrors(payloadSessionId, serialized, this.ws);
+    // ADR-210 (T-2036): every viewer egress is masked here; outcome recording
+    // below keeps the raw payload. Unmasked kinds pass byte-for-byte.
+    const display = prepareDisplayFrames(data, payloadSessionId);
+    if (!display) {
+      const serialized = JSON.stringify(data);
+      this.deliver(serialized, serialized, payloadSessionId);
+    } else {
+      for (const frame of display.before) {
+        const serialized = JSON.stringify(frame);
+        this.deliver(serialized, serialized, payloadSessionId);
+      }
+      const viewer = JSON.stringify(display.viewer);
+      this.deliver(display.owner === display.viewer ? viewer : JSON.stringify(display.owner), viewer, payloadSessionId);
     }
 
     /**
@@ -333,6 +339,42 @@ export class WebSocketWriter {
       && isOutcomeSignalKind((data as { kind?: unknown }).kind)
     ) {
       applyOutcomePayload(payloadSessionId, data as Parameters<typeof applyOutcomePayload>[1]);
+    }
+  }
+
+  /**
+   * ADR-210: sends an already-decided pair of views — `primary` to this
+   * writer's socket, `mirror` to the session's mirrors. For listings whose
+   * masking depends on who the requester is (pending permissions).
+   */
+  sendViewerFrames(primary: unknown, mirror: unknown, sessionId: string | null): void {
+    const serialized = JSON.stringify(primary);
+    this.sendToPrimary(serialized);
+    if (sessionId) fanOutToMirrors(sessionId, mirror === primary ? serialized : JSON.stringify(mirror), this.ws);
+  }
+
+  /**
+   * Sends `owner` to every socket of the run owner (this writer's user) and
+   * `viewer` to everyone else — decided per socket, never by position: after a
+   * writer reclaim the primary socket may belong to another member (ADR-210).
+   */
+  private deliver(owner: string, viewer: string, sessionId: string | null): void {
+    const ownerSocket = owner !== viewer && isSameUser(this.ws.userId, this.userId);
+    this.sendToPrimary(ownerSocket ? owner : viewer);
+    if (sessionId) {
+      fanOutToMirrors(sessionId, viewer, this.ws, owner === viewer ? undefined : { serialized: owner, userId: this.userId });
+    }
+  }
+
+  private sendToPrimary(serialized: string): void {
+    if (this.primarySuppression === 0 && this.ws.readyState === WS_OPEN_STATE) {
+      try {
+        this.ws.send(serialized);
+      } catch {
+        // B-891: a transport failure belongs to this viewer, not the run.
+        // Preserve mirror delivery and outcome recording even if send fails
+        // after the OPEN check. Never swap the active writer as recovery.
+      }
     }
   }
 

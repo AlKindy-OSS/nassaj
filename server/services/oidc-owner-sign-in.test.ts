@@ -16,7 +16,6 @@ import {
 
 const NOW_MS = 1_800_000_000_000;
 const NOW_SEC = NOW_MS / 1000;
-const OPTED_IN = Object.freeze({ owner_sso_opt_in_at: NOW_MS - 1000 });
 const ACCOUNT = Object.freeze({ must_change_password: 0 });
 const PASSKEY = Object.freeze({ amr: ['user', 'mfa'], auth_time: NOW_SEC });
 
@@ -78,25 +77,22 @@ test('auth_time: 0 s and 5 min + 59 s pass; 5 min + 61 s, 61 s ahead, missing an
 
 test('success returns the distinct amr and the auth age in seconds', () => {
   const decision = decideOwnerSignIn({
-    account: ACCOUNT, identity: OPTED_IN, claims: { amr: ['mfa', 'user', 'mfa'], auth_time: NOW_SEC - 42 }, nowMs: NOW_MS,
+    account: ACCOUNT, claims: { amr: ['mfa', 'user', 'mfa'], auth_time: NOW_SEC - 42 }, nowMs: NOW_MS,
   });
   assert.deepEqual(decision, { ok: true, amr: ['mfa', 'user'], authAgeSec: 42 });
 });
 
 test('each refusal carries its audited reason and return code', () => {
   const cases: Array<[Parameters<typeof decideOwnerSignIn>[0], string, string]> = [
-    [{ account: { must_change_password: 1 }, identity: OPTED_IN, claims: PASSKEY, nowMs: NOW_MS },
+    [{ account: { must_change_password: 1 }, claims: PASSKEY, nowMs: NOW_MS },
       'password_change_required', 'password_change_required'],
-    [{ account: ACCOUNT, identity: { owner_sso_opt_in_at: null }, claims: PASSKEY, nowMs: NOW_MS },
-      'not_opted_in', 'owner_must_sign_in_locally'],
-    [{ account: ACCOUNT, identity: {}, claims: PASSKEY, nowMs: NOW_MS }, 'not_opted_in', 'owner_must_sign_in_locally'],
-    [{ account: ACCOUNT, identity: OPTED_IN, claims: { ...PASSKEY, amr: ['pwd', 'otp', 'mfa'] }, nowMs: NOW_MS },
+    [{ account: ACCOUNT, claims: { ...PASSKEY, amr: ['pwd', 'otp', 'mfa'] }, nowMs: NOW_MS },
       'amr_insufficient', 'owner_sso_key_required'],
-    [{ account: ACCOUNT, identity: OPTED_IN, claims: { amr: ['user', 'mfa'] }, nowMs: NOW_MS },
+    [{ account: ACCOUNT, claims: { amr: ['user', 'mfa'] }, nowMs: NOW_MS },
       'auth_time_missing', 'owner_sso_reauth_required'],
-    [{ account: ACCOUNT, identity: OPTED_IN, claims: { ...PASSKEY, auth_time: NOW_SEC - 3600 }, nowMs: NOW_MS },
+    [{ account: ACCOUNT, claims: { ...PASSKEY, auth_time: NOW_SEC - 3600 }, nowMs: NOW_MS },
       'auth_time_stale', 'owner_sso_reauth_required'],
-    [{ account: ACCOUNT, identity: OPTED_IN, claims: { ...PASSKEY, auth_time: NOW_SEC + 120 }, nowMs: NOW_MS },
+    [{ account: ACCOUNT, claims: { ...PASSKEY, auth_time: NOW_SEC + 120 }, nowMs: NOW_MS },
       'auth_time_in_future', 'owner_sso_reauth_required'],
   ];
   const stepUpReasons = new Set(['amr_insufficient', 'auth_time_missing', 'auth_time_stale', 'auth_time_in_future']);
@@ -105,23 +101,31 @@ test('each refusal carries its audited reason and return code', () => {
   }
 });
 
-test('order: must_change_password, then opt-in, then amr, then auth_time — an earlier failure wins', () => {
+test('order: must_change_password, then amr, then auth_time — an earlier failure wins', () => {
   const allBad = { amr: ['pwd'], auth_time: NOW_SEC - 3600 };
   const reasonOf = (input: Parameters<typeof decideOwnerSignIn>[0]) => {
     const decision = decideOwnerSignIn(input);
     return decision.ok ? 'ok' : decision.reason;
   };
-  assert.equal(reasonOf({ account: { must_change_password: 1 }, identity: {}, claims: allBad, nowMs: NOW_MS }),
+  assert.equal(reasonOf({ account: { must_change_password: 1 }, claims: allBad, nowMs: NOW_MS }),
     'password_change_required');
-  assert.equal(reasonOf({ account: ACCOUNT, identity: {}, claims: allBad, nowMs: NOW_MS }), 'not_opted_in');
-  assert.equal(reasonOf({ account: ACCOUNT, identity: OPTED_IN, claims: allBad, nowMs: NOW_MS }), 'amr_insufficient');
-  assert.equal(reasonOf({ account: ACCOUNT, identity: OPTED_IN, claims: { ...allBad, amr: ['user', 'mfa'] }, nowMs: NOW_MS }),
+  assert.equal(reasonOf({ account: ACCOUNT, claims: allBad, nowMs: NOW_MS }), 'amr_insufficient');
+  assert.equal(reasonOf({ account: ACCOUNT, claims: { ...allBad, amr: ['user', 'mfa'] }, nowMs: NOW_MS }),
     'auth_time_stale');
-  assert.equal(reasonOf({ account: ACCOUNT, identity: OPTED_IN, claims: null, nowMs: NOW_MS }), 'amr_insufficient');
+  assert.equal(reasonOf({ account: ACCOUNT, claims: null, nowMs: NOW_MS }), 'amr_insufficient');
+});
+
+test('always on: no opt-in is needed, the passkey and freshness rules still apply', () => {
+  assert.deepEqual(decideOwnerSignIn({ account: ACCOUNT, claims: PASSKEY, nowMs: NOW_MS }),
+    { ok: true, amr: ['user', 'mfa'], authAgeSec: 0 });
+  const pwdOnly = decideOwnerSignIn({ account: ACCOUNT, claims: { ...PASSKEY, amr: ['pwd'] }, nowMs: NOW_MS });
+  assert.deepEqual(pwdOnly, { ok: false, reason: 'amr_insufficient', code: 'owner_sso_key_required', stepUp: true });
+  const stale = decideOwnerSignIn({ account: ACCOUNT, claims: { ...PASSKEY, auth_time: NOW_SEC - 3600 }, nowMs: NOW_MS });
+  assert.equal(stale.ok, false);
 });
 
 test('the rule parameter switches the factor check in one place', () => {
-  const input = { account: ACCOUNT, identity: OPTED_IN, claims: { amr: ['pwd', 'user', 'mfa'], auth_time: NOW_SEC }, nowMs: NOW_MS };
+  const input = { account: ACCOUNT, claims: { amr: ['pwd', 'user', 'mfa'], auth_time: NOW_SEC }, nowMs: NOW_MS };
   assert.equal(decideOwnerSignIn(input).ok, true);
   assert.equal(decideOwnerSignIn({ ...input, rule: 'passkey_only' }).ok, false);
 });

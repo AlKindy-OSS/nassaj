@@ -22,6 +22,8 @@ import { userDb } from '@/modules/database/repositories/users.js';
 /* eslint-enable boundaries/dependencies */
 // eslint-disable-next-line boundaries/no-unknown
 import { hashPassword } from '../../services/password.service.js';
+// eslint-disable-next-line boundaries/no-unknown
+import { configureLoginThrottle } from '../../services/login-throttle.service.js';
 
 import { connectorAuthProfileRuntimeForOwnerSetup } from './connector-auth-profile.routes.js';
 import connectorAuthReadinessRoutes from './connector-auth-readiness.routes.js';
@@ -50,6 +52,9 @@ before(async () => {
   process.env.DATABASE_PATH = path.join(tempDirectory, 'db.sqlite');
   await initializeDatabase();
   passwordHash = await hashPassword(PASSWORD);
+  // The auth middleware configures the step-up password throttle at load (ADR-212);
+  // authentication is replaced here, so configure it as that module does, on this database.
+  configureLoginThrottle('connector-step-up-test-secret-0123456789abcdef');
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {

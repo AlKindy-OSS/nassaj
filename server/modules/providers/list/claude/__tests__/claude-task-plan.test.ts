@@ -251,6 +251,7 @@ test('history: a subagent\'s own Task* plan rides its last child tool item, with
   await withSession(capture.main, async () => {
     const history = await sessionsService.fetchHistory(sid, 1, {});
     const agentRow = history.messages.find((m) => m.kind === 'tool_use' && m.toolName === 'Agent');
+    assert.equal(agentRow?.subagent?.model, 'claude-haiku-4-5-20251001');
     const children = (agentRow?.subagentTools ?? []) as Row[];
     assert.deepEqual(children.map((c) => c.toolName), ['ToolSearch', 'ToolSearch', 'TaskCreate', 'TaskUpdate']);
     const withPlan = children.filter((c) => c.plan);

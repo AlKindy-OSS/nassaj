@@ -365,3 +365,21 @@ test('B-1399 clearInactiveBuffer: a finished run\'s frames are cleared, seq keep
     assert.equal(reg.clearInactiveBuffer('unknown'), false);
   });
 });
+
+// ADR-210 (T-2036): a floor from an earlier, dropped entry (counter restarted at
+// 1 on the next turn) must not hide the current ring.
+test('attach: a lastSeq above the entry counter replays the whole current ring', () => {
+  withFlag(true, () => {
+    const registry = new SessionRegistry(FLAG);
+    for (let index = 0; index < 500; index += 1) registry.record('s', { turn: 1, index });
+    registry.drop('s');
+    registry.open('s');
+    for (let index = 0; index < 3; index += 1) registry.record('s', { turn: 2, index });
+    const got: unknown[] = [];
+    assert.equal(registry.attach('s', 500, (payload) => got.push(payload)), 3);
+    assert.deepEqual(got, [{ turn: 2, index: 0 }, { turn: 2, index: 1 }, { turn: 2, index: 2 }]);
+    const none: unknown[] = [];
+    assert.equal(registry.attach('s', 3, (payload) => none.push(payload)), 3, 'a valid floor stays differential');
+    assert.deepEqual(none, []);
+  });
+});

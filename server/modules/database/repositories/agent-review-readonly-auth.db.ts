@@ -5,14 +5,31 @@ import { digestApiKey } from '../api-key-digest.js';
 import { apiKeySsoAttestationClause } from './api-key-sso-window.js';
 
 export type ReviewAuthUser = { id: number; username: string; role: 'owner' | 'admin' | 'user';
-  authorization_generation: number; password_changed_at: number; must_change_password: number; api_key_id?: number };
-const USER_COLUMNS = 'u.id,u.username,u.role,u.authorization_generation,u.password_changed_at,u.must_change_password';
+  authorization_generation: number; password_changed_at: number; must_change_password: number; api_key_id?: number;
+  /** T-2035 sign-out epoch, compared with the JWT `tok_ep` claim. */
+  token_epoch: number };
+const BASE_USER_COLUMNS = 'u.id,u.username,u.role,u.authorization_generation,u.password_changed_at,u.must_change_password';
+
+/**
+ * T-2035: a compatible-forward database may predate `users.token_epoch`. Such a
+ * database has never recorded a sign-out, so epoch 0 is its exact truth.
+ */
+function userColumns(db: Database): string {
+  const columns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === 'token_epoch')
+    ? `${BASE_USER_COLUMNS},u.token_epoch` : `${BASE_USER_COLUMNS},0 AS token_epoch`;
+}
 
 /** C4-only explicit-connection auth reads. No refresh, settings creation, audit, last_used or repair. */
 export class AgentReviewReadonlyAuthRepository {
   private readonly keyBindings = new WeakMap<ReviewAuthUser, string>();
+  private columns: string | null = null;
 
   constructor(private readonly db: Database) {}
+
+  private get userColumnList(): string {
+    return this.columns ??= userColumns(this.db);
+  }
 
   /** Require the literal persisted TEXT gate; absence, read errors and coerced values deny. */
   ckEnabled(): boolean {
@@ -25,7 +42,7 @@ export class AgentReviewReadonlyAuthRepository {
   /** Resolve an active user eligible for the review surface, without updating authentication metadata. */
   user(id: number): ReviewAuthUser | null {
     if (!Number.isSafeInteger(id) || id <= 0) return null;
-    return this.db.prepare(`SELECT ${USER_COLUMNS} FROM users u WHERE u.id=? AND u.is_active=1 AND u.status='active'
+    return this.db.prepare(`SELECT ${this.userColumnList} FROM users u WHERE u.id=? AND u.is_active=1 AND u.status='active'
       AND u.must_change_password=0`).get(id) as ReviewAuthUser | undefined ?? null;
   }
 
@@ -34,7 +51,7 @@ export class AgentReviewReadonlyAuthRepository {
     if (!this.ckEnabled()) return null;
     const digest = digestApiKey(secret); if (!digest) return null;
     const window = apiKeySsoAttestationClause(this.db);
-    const user = this.db.prepare(`SELECT ${USER_COLUMNS},ak.id AS api_key_id FROM api_keys ak JOIN users u ON u.id=ak.user_id
+    const user = this.db.prepare(`SELECT ${this.userColumnList},ak.id AS api_key_id FROM api_keys ak JOIN users u ON u.id=ak.user_id
       WHERE ak.key_digest=? AND ak.is_active=1 AND u.is_active=1 AND u.status='active' AND u.must_change_password=0
         AND ${window.sql}`)
       .get(digest, ...window.params) as ReviewAuthUser | undefined;

@@ -38,7 +38,9 @@
  */
 
 import { userDb, webauthnCredentialsDb } from '../modules/database/index.js';
+import { clientIp } from '../utils/client-ip.js';
 
+import { admitPasswordCheck, LOGIN_LOCKED_CODE, sharedLoginThrottle } from './login-throttle.service.js';
 import { readBrowserTransaction } from './oidc-browser-transaction.js';
 import { oidcStepUpGrantStore } from './oidc-step-up-grant.store.js';
 import { verifyPassword } from './password.service.js';
@@ -63,6 +65,8 @@ const STATUS_BY_CODE = Object.freeze({
   sso_step_up_required: 403,
   password_change_required: 403,
   step_up_rate_limited: 429,
+  // T-2035: the account's password checks are locked by the shared throttle.
+  [LOGIN_LOCKED_CODE]: 429,
 });
 
 const MESSAGE_BY_CODE = Object.freeze({
@@ -72,6 +76,7 @@ const MESSAGE_BY_CODE = Object.freeze({
   sso_step_up_required: 'Confirm your identity through SSO to continue',
   password_change_required: 'Change your password before continuing',
   step_up_rate_limited: 'Too many verification attempts, please try again later',
+  [LOGIN_LOCKED_CODE]: 'Too many failed sign-in attempts. Try again later.',
 });
 
 /** Client-safe step-up refusal; `code` is stable and machine-readable. */
@@ -121,9 +126,29 @@ function parseEvidence(evidence) {
   throw new StepUpError('step_up_invalid_request');
 }
 
-async function verifyPasswordEvidence(dbUser, password) {
+async function verifyPasswordEvidence(req, dbUser, password) {
   if (dbUser.must_change_password === 1) {
     throw new StepUpError('password_change_required');
+  }
+  // T-2035: one shared per-account counter for every own-password check.
+  let throttle;
+  let throttleKey;
+  let admission;
+  try {
+    throttle = sharedLoginThrottle();
+    throttleKey = throttle.keyForUser(dbUser.id);
+    admission = admitPasswordCheck(throttle, throttleKey, {
+      userId: dbUser.id,
+      ipAddress: req ? clientIp(req) : null,
+      userAgent: req?.headers?.['user-agent'] ?? null,
+      context: 'step_up',
+    });
+  } catch {
+    // Fail closed: no password is checked without the throttle.
+    throw new StepUpError('step_up_failed', { reason: 'throttle_unavailable' });
+  }
+  if (!admission.allowed) {
+    throw new StepUpError(LOGIN_LOCKED_CODE, { retryAfterSeconds: admission.retryAfterSeconds });
   }
   const raw = userDb.getRawById(dbUser.id);
   // SSO-only accounts carry a sentinel hash that verifyPassword always rejects
@@ -132,6 +157,7 @@ async function verifyPasswordEvidence(dbUser, password) {
   if (!valid) {
     throw new StepUpError('step_up_failed', { reason: 'bad_password' });
   }
+  throttle.clear(throttleKey);
   return { authMethod: 'password', authTimeMs: Date.now() };
 }
 
@@ -230,7 +256,7 @@ export async function verifyStepUpEvidence(req, dbUser, audience, evidence) {
   }
 
   const result = parsed.method === 'password'
-    ? await verifyPasswordEvidence(user, parsed.password)
+    ? await verifyPasswordEvidence(req, user, parsed.password)
     : await verifyPasskeyEvidence(user, audience, parsed.response);
   // ADR-194 D8: the attempt was reserved before argon2/signature work; a
   // successful local verification returns it, so only failures consume it.

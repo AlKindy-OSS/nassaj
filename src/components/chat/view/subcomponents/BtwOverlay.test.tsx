@@ -62,6 +62,21 @@ describe('BtwOverlay', () => {
     expect(alert.textContent).toContain('btw.errors.timeout');
   });
 
+  it('B-1647: btw_forbidden maps to its own localized message', () => {
+    const state: BtwState = {
+      btwId: 'b1', forkStatus: 'idle',
+      question: 'سؤال',
+      answer: '',
+      status: 'error',
+      errorCode: 'btw_forbidden',
+      errorMessage: 'raw server text',
+    };
+    render(<BtwOverlay state={state} onClose={() => {}} />);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('btw.errors.btw_forbidden');
+    expect(alert.textContent).not.toContain('raw server text');
+  });
+
   it('يسقط لرسالة الخادم الخام عند كود خطأ غير معروف', () => {
     const state: BtwState = {
       btwId: 'b1', forkStatus: 'idle',

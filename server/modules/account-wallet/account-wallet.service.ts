@@ -86,12 +86,15 @@ export class AccountWalletService {
    * Re-authenticates and adds a local account without issuing a JWT or changing
    * the active slot. Unknown and invalid credentials take the same verify path.
    * Throws SsoRequiredError for a verified SSO-only account (T-1939).
+   * `onPasswordVerified` runs once the password is proven correct, before any
+   * later refusal (T-2035: the caller clears the login throttle).
    */
   async addLocal(
     principal: DevicePrincipal,
     identifier: string,
     password: string,
     expectedGeneration: number,
+    onPasswordVerified: () => void = () => {},
   ): Promise<AccountWalletSnapshot | null> {
     const normalizedIdentifier = identifier.trim().toLowerCase();
     const credential = this.dependencies.findLocalCredential(normalizedIdentifier);
@@ -100,6 +103,7 @@ export class AccountWalletService {
       password,
     );
     if (!credential || !verified) return null;
+    onPasswordVerified();
     if (this.dependencies.requiresSso?.(credential.id)) throw new SsoRequiredError(credential.id);
     let wallet: AccountWalletSnapshot;
     try {

@@ -603,7 +603,6 @@
     "agent": "Agent"
   },
   "customCommand": {
-    "confirmBashExecution": "Dieser Befehl enthält Bash-Befehle, die ausgeführt werden. Möchten Sie fortfahren?",
     "executionCancelled": "Befehlsausführung abgebrochen",
     "executeError": "Fehler beim Ausführen des Befehls: {{message}}",
     "unknownError": "Unbekannter Fehler"

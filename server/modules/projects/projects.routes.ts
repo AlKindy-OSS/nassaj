@@ -16,6 +16,7 @@ import {
 import { createProject, updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
 import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
 import { parseCanonicalGitHubUrl } from '@/modules/projects/services/git-transport-security.service.js';
+import { isSessionId } from '@/shared/session-id.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 import {
   getArchivedProjectsWithSessions,
@@ -335,8 +336,8 @@ router.get(
 router.get(
   '/session-context/:sessionId',
   asyncHandler(async (req, res) => {
-    const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
-    const context = getSessionDeepLinkContext(sessionId, readAuthenticatedUserId(req));
+    const sessionId = req.params.sessionId;
+    const context = isSessionId(sessionId) ? getSessionDeepLinkContext(sessionId, readAuthenticatedUserId(req)) : null;
     if (!context) {
       throw new AppError('Session not found', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
     }

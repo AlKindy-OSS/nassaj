@@ -19,23 +19,12 @@ import { participantsService } from '@/modules/providers/services/participants.s
 import { notifySessionMetadataChanged } from '@/modules/providers/services/sessions-watcher.service.js';
 import { assertSessionAccessible } from '@/modules/providers/services/sessions.service.js';
 import { notifyOutcomeChanged } from '@/modules/websocket/index.js';
+import { parseSessionIdParam } from '@/shared/session-id.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 const router = express.Router();
 
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
 const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9._/-]{1,400}$/;
-
-function parseSessionId(value: unknown): string {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!SESSION_ID_PATTERN.test(raw)) {
-    throw new AppError('Invalid sessionId.', {
-      code: 'INVALID_SESSION_ID',
-      statusCode: 400,
-    });
-  }
-  return raw;
-}
 
 function parseExpectedOutcomeAt(value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
@@ -118,7 +107,7 @@ router.post(
     const userId = readAuthenticatedUserId(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
 
-    const sessionId = parseSessionId(body.sessionId);
+    const sessionId = parseSessionIdParam(body.sessionId);
     const projectName = parseOptionalProjectName(body.projectName);
 
     if (typeof body.starred !== 'boolean') {
@@ -157,7 +146,7 @@ router.post(
 router.get(
   '/:sessionId/participants',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     assertSessionAccessible(sessionId, readAuthenticatedUserId(req), 'read');
     const participants = participantsService.listSessionParticipants(sessionId);
     res.json(createApiSuccessResponse({ participants }));
@@ -167,7 +156,7 @@ router.get(
 router.get(
   '/:sessionId/agents',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     assertSessionAccessible(sessionId, readAuthenticatedUserId(req), 'read');
     // `{ agents, harness, engine }` — the two provider axes travel with the
     // roster because the header draws the harness mark next to the model name
@@ -191,7 +180,7 @@ router.get(
 router.post(
   '/:sessionId/close',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     const userId = readAuthenticatedUserId(req);
     assertSessionAccessible(sessionId, userId, 'write');
 
@@ -210,7 +199,7 @@ router.post(
 router.delete(
   '/:sessionId/close',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     assertSessionAccessible(sessionId, readAuthenticatedUserId(req), 'write');
 
     closedSessionsDb.reopenSession(sessionId);
@@ -256,7 +245,7 @@ router.get(
 router.post(
   '/:sessionId/outcome-seen',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     const expectedOutcomeAt = parseExpectedOutcomeAt(req.body?.expectedOutcomeAt);
     const userId = readAuthenticatedUserId(req);
     if (userId) {
@@ -288,7 +277,7 @@ router.post(
 router.delete(
   '/:sessionId/outcome-seen',
   asyncHandler(async (req: Request, res: Response) => {
-    const sessionId = parseSessionId(req.params.sessionId);
+    const sessionId = parseSessionIdParam(req.params.sessionId);
     const userId = readAuthenticatedUserId(req);
     if (!userId) {
       res.json({ outcome: null, outcomeAt: null });

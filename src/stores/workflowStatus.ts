@@ -54,6 +54,10 @@ export type WorkflowAgent = {
   currentTool: string | null;
   /** Short task label when derivable from the prompt; null otherwise. */
   label: string | null;
+  /** Actual model reported by the workflow agent transcript, when available. */
+  model?: string;
+  /** Actual effort reported at the top level of assistant transcript lines. */
+  effort?: string;
   /** Last write to this agent's transcript (ISO), or null. */
   updatedAt: string | null;
 };
@@ -260,6 +264,8 @@ export function normalizeWorkflowAgents(raw: unknown): WorkflowAgent[] {
           ? a.currentTool
           : null,
       label: typeof a.label === 'string' && a.label.trim() ? a.label.trim() : null,
+      ...(typeof a.model === 'string' && a.model.trim() ? { model: a.model.trim() } : {}),
+      ...(typeof a.effort === 'string' && a.effort.trim() ? { effort: a.effort.trim() } : {}),
       updatedAt: typeof a.updatedAt === 'string' ? a.updatedAt : null,
     });
   }

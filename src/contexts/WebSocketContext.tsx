@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useAuth } from '../components/auth/context/AuthContext';
+import { resolveBearerRevocation } from '../components/auth/bearerRevocation';
 import { IS_PLATFORM } from '../constants/config';
 import {
   beginSessionProcessConnectionEpoch,
@@ -614,6 +615,19 @@ const useWebSocketProviderState = (): WebSocketContextType => {
               if (unmountedRef.current) return;
               connect();
             }, calcReconnectDelay(0));
+            return;
+          }
+          if (localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
+            // T-2035: a bearer tab has no wallet to reconcile. Ask the server
+            // once: a dead token (sign-out elsewhere) lands on the login
+            // screen via auth:unauthorized; a live one redials at most once
+            // per cooldown. Never the reconnect backoff loop.
+            setWsStatus('disconnected');
+            void resolveBearerRevocation().then((outcome) => {
+              if (outcome !== 'reconnect' || unmountedRef.current || myEpoch !== connEpochRef.current) return;
+              setWsStatus('reconnecting');
+              connect();
+            });
             return;
           }
           unmountedRef.current = true;
