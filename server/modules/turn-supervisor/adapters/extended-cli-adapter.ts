@@ -53,7 +53,7 @@ type AdapterOptions = Readonly<{
 }>;
 
 const EXACT_VERSIONS: Readonly<Record<ExtendedCliProvider, string>> = Object.freeze({
-  qwen: '0.21.12', opencode: '1.17.18', hermes: '0.17.0',
+  qwen: '0.21.12', opencode: '1.18.32', hermes: '0.17.0',
 });
 
 async function executable(binary: string): Promise<boolean> {

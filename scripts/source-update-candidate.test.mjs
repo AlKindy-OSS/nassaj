@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { normalizeReleaseViteEnvironment } from './client-build-atomic.mjs';
 import { installReleaseBootstrapEntry } from './server-build-atomic.mjs';
-import { buildSourceUpdateCandidate, readCandidatePlan } from './source-update-candidate.mjs';
+import { buildSourceUpdateCandidate, command, readCandidatePlan } from './source-update-candidate.mjs';
 
 function fixture() {
     const root = mkdtempSync(path.join(os.tmpdir(), 'nassaj-update-candidate-'));
@@ -210,4 +210,14 @@ test('the candidate orchestrator never imports the installed release builders (B
     const source = readFileSync(new URL('./source-update-candidate.mjs', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /from '\.\/(?:client|server)-build-atomic\.mjs'/);
     assert.doesNotMatch(source, /plan\.localSource \? targetBuilder/);
+});
+
+test('a failed child command carries its sanitized stderr reason (B-1383)', () => {
+    const script = "console.error('CODEX_IMAGE_ONLY_PATCH_VERSION token=s3cr3t'); process.exit(3);";
+    assert.throws(() => command(process.execPath, ['-e', script]), (error) => {
+        assert.match(error.message, /failed \(3\)/);
+        assert.match(error.message, /CODEX_IMAGE_ONLY_PATCH_VERSION/);
+        assert.ok(!error.message.includes('s3cr3t'));
+        return true;
+    });
 });

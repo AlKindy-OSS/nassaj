@@ -7,4 +7,5 @@ export * from './actor.js';
 export * from './permit.js';
 export * from './execution-gateway.service.js';
 export * from './adapter.js';
+export * from './admission-failure.js';
 export * from './runtime-release-identity.js';

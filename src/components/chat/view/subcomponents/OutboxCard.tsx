@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2Icon, PencilIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
+import { CheckCircle2Icon, PencilIcon, RefreshCwIcon, ShieldAlertIcon, Trash2Icon } from 'lucide-react';
 
+import { useAuth } from '../../../auth';
+import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
 import { resolveTextDirection } from '../../../../utils/textDirection';
 import { SERVER_ERROR_CODE_KEYS } from '../../hooks/useChatRealtimeHandlers';
+import {
+  PERMANENT_OUTBOX_CODES,
+  resolveOutboxFenceAction,
+  resolveOutboxFenceReasonKey,
+} from '../../utils/serverErrorMessage';
 import { outboxRetryMode, readOutboxImages, type OutboxEntry } from '../../utils/messageOutbox';
 import CoordinationLevelBadge from './CoordinationLevelBadge';
 
@@ -31,6 +38,9 @@ const PREVIEW_LIMIT = 320;
  */
 export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify }: OutboxCardProps) {
   const { t } = useTranslation('chat');
+  const { user } = useAuth();
+  const { openSettings } = usePaletteOps();
+  const isOwner = user?.role === 'owner';
   const [expanded, setExpanded] = useState(false);
   const [thumbnails, setThumbnails] = useState<string[]>([]);
 
@@ -67,6 +77,20 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
   const isUnconfirmed = entry.status === 'unconfirmed' || entry.status === 'pending';
   const retryMode = outboxRetryMode(entry);
 
+  // B-1076: الرمزان القاطعان وحدهما يُطفئان إعادة الإرسال — الرمز محفوظٌ حرفياً
+  // ومسبقاً مبنياً على `retryable:false` صريح (isPermanentOutboxBlock وقت
+  // الكتابة)، فالتحقّق هنا مجرّد قراءةِ العلم لا إعادة حكم.
+  const isPermanentlyBlocked = Boolean(entry.permanentlyBlocked)
+    && Boolean(entry.reasonCode && PERMANENT_OUTBOX_CODES.has(entry.reasonCode));
+  const fenceActions = useMemo(
+    () => (isPermanentlyBlocked && entry.reasonCode
+      ? resolveOutboxFenceAction(entry.reasonCode, entry.fence ?? null, isOwner)
+      : []),
+    [isPermanentlyBlocked, entry.reasonCode, entry.fence, isOwner],
+  );
+  const hasNewConversationAction = fenceActions.some((action) => action.kind === 'new_conversation');
+  const reviewUnlockAction = fenceActions.find((action) => action.kind === 'review_unlock');
+
   /**
    * السبب يُترجَم عند العرض من **الرمز** المحفوظ، لا من نصٍّ مترجَم وقت الفشل:
    * البطاقة قد تُعرض بعد أن يبدّل المستخدم لغة الواجهة.
@@ -78,14 +102,22 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
       return t('outbox.reason.unconfirmed');
     }
     const code = entry.reasonCode ?? 'unknown';
-    const localKey = `outbox.reason.${code}`;
-    const local = t(localKey, { defaultValue: '' });
-    const headline = local
-      || t(SERVER_ERROR_CODE_KEYS[code] ?? 'serverError.unknown', {
+    const fenceKey = resolveOutboxFenceReasonKey(code, entry.fence ?? null);
+    const local = fenceKey ? '' : t(`outbox.reason.${code}`, { defaultValue: '' });
+    const headline = fenceKey
+      ? t(fenceKey)
+      : local || t(SERVER_ERROR_CODE_KEYS[code] ?? 'serverError.unknown', {
         defaultValue: t('serverError.unknown'),
       });
-    return entry.reasonDetail ? `${headline} (${entry.reasonDetail})` : headline;
-  }, [entry.reasonCode, entry.reasonDetail, entry.retryBlockCode, isUnconfirmed, isDelivered, t]);
+    // من ليس مالكاً ولا يملك أي فعلٍ هنا (حجب مزوّدٍ أو الخادم كله) يحتاج
+    // توجيهاً صريحاً بدل بطاقةٍ ساكنة بلا مخرج.
+    const memberHint = !isOwner && isPermanentlyBlocked && !hasNewConversationAction
+      ? ` ${t('outbox.reason.fenceMemberHint')}` : '';
+    return (entry.reasonDetail ? `${headline} (${entry.reasonDetail})` : headline) + memberHint;
+  }, [
+    entry.reasonCode, entry.reasonDetail, entry.retryBlockCode, entry.fence, isUnconfirmed,
+    isDelivered, isOwner, isPermanentlyBlocked, hasNewConversationAction, t,
+  ]);
 
   const isTruncated = entry.text.length > PREVIEW_LIMIT;
   const preview = expanded || !isTruncated ? entry.text : `${entry.text.slice(0, PREVIEW_LIMIT)}…`;
@@ -154,7 +186,7 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        {!isDelivered && (retryMode === 'verify' ? (
+        {!isDelivered && !isPermanentlyBlocked && (retryMode === 'verify' ? (
           <button
             type="button"
             onClick={() => onVerify(entry.id)}
@@ -174,7 +206,47 @@ export default function OutboxCard({ entry, onRetry, onEdit, onDelete, onVerify 
           </button>
         ))}
 
-        {!isDelivered && <button
+        {/*
+         * B-1076 — «الاستمرار في محادثة جديدة» يستدعي `onRetry` نفسه: حجبٌ
+         * بنطاق `session` جعل `useChatComposerState.retryOutboxEntry` يحسب
+         * `targetSessionId=null` لهذا الرمز بعينه (كما يفعل بالضبط مع
+         * `conversation_not_found`)، فإعادة الإرسال هنا تفتح محادثةً نظيفة لا
+         * تكرّر المعرّف المحجوب.
+         */}
+        {!isDelivered && hasNewConversationAction && (
+          <button
+            type="button"
+            onClick={() => onRetry(entry.id)}
+            className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-xs font-medium text-foreground hover:bg-accent"
+          >
+            <RefreshCwIcon className="h-4 w-4" aria-hidden="true" />
+            {t('outbox.startNewConversation')}
+          </button>
+        )}
+
+        {!isDelivered && reviewUnlockAction && (
+          <button
+            type="button"
+            onClick={() => openSettings('system', {
+              tab: 'system',
+              ...(reviewUnlockAction.scopeKind === 'session' && entry.sessionId
+                ? { fenceFilter: entry.sessionId }
+                : {}),
+            })}
+            className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-background/60 px-2 py-1 text-xs font-medium text-danger hover:bg-destructive/10"
+          >
+            <ShieldAlertIcon className="h-4 w-4" aria-hidden="true" />
+            {t('outbox.reviewAndUnlock')}
+          </button>
+        )}
+
+        {/*
+         * B-1076 (qa-critic round 1): «تعديل» يعيد النصّ إلى المُؤلِّف الحالي،
+         * وإرسالُه من هناك يستهدف الجلسة الجارية بعينها — أي الجلسة المحجوبة
+         * نفسها حين يكون الحجب بنطاقها. يُخفى هنا فقط؛ «الاستمرار في محادثة
+         * جديدة» أعلاه هو المسار الآمن لنقل النصّ، و«حذف» يبقى متاحاً دوماً.
+         */}
+        {!isDelivered && !isPermanentlyBlocked && <button
           type="button"
           onClick={() => onEdit(entry.id)}
           className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-xs font-medium text-foreground hover:bg-accent"

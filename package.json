@@ -1,6 +1,6 @@
 {
   "name": "nassaj",
-  "version": "2.3.0.10",
+  "version": "2.3.0.11",
   "description": "Nassaj — multi-provider AI coding workspace with RTL Arabic support",
   "type": "module",
   "private": true,
@@ -115,7 +115,7 @@
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@octokit/rest": "^22.0.0",
-    "@openai/codex-sdk": "0.153.2",
+    "@openai/codex-sdk": "0.157.1",
     "@replit/codemirror-minimap": "^0.5.2",
     "@sigstore/bundle": "5.0.0",
     "@sigstore/core": "4.0.1",

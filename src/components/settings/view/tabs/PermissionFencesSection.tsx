@@ -16,6 +16,7 @@ import { authenticatedFetch } from '../../../../utils/api';
 import SettingsCard from '../SettingsCard';
 import SettingsSection from '../SettingsSection';
 import StatusBadge from '../StatusBadge';
+import { FENCE_FILTER_PATTERN } from '../../settingsUrl';
 
 type FenceDecision = {
   provider: string | null;
@@ -50,6 +51,17 @@ function liftSelector(fence: PermissionFence) {
 
 function fenceKey(fence: PermissionFence): string {
   return fence.scopeKind ? `${fence.scopeKind}:${fence.scopeKey}` : `generation:${fence.generation}`;
+}
+
+/**
+ * B-1076 — محدِّد الفلترة القادم من رابطٍ عميق (بطاقة صادرٍ بحجب `session`).
+ * النمط نفسه المُصدَّر من `settingsUrl.ts` (نسخة واحدة لا نسختان قد تنفرجان)
+ * — سقف طول يرفض أي حمولة (`<script>`, `javascript:`, نصّ 10ك) قبل أن تُقارَن
+ * أو تُعرض — لا تُستعمَل أبداً في `href` ولا HTML خام، نصّاً عادياً في React
+ * وحده، وكمطابقةٍ تامّة (`===`) لا احتواء.
+ */
+function sanitizeFenceFilterProp(value: string | undefined): string | undefined {
+  return typeof value === 'string' && FENCE_FILTER_PATTERN.test(value) ? value : undefined;
 }
 
 type FenceCardProps = {
@@ -146,9 +158,21 @@ function liftErrorKey(status: number, code: string | undefined): string {
   return 'permissionFences.liftFailed';
 }
 
+type PermissionFencesSectionProps = {
+  /** B-1076 — معرّف جلسةٍ (مطابقة تامة على `scopeKey`) من رابطٍ عميق. */
+  fenceFilter?: string;
+};
+
 /** قسم إعدادات المالك: يعرض كل حجب قائم ويتيح رفعه بسبب وإقرار. */
-export default function PermissionFencesSection() {
+export default function PermissionFencesSection({ fenceFilter }: PermissionFencesSectionProps) {
   const { t } = useTranslation('settings');
+  const propFenceFilter = sanitizeFenceFilterProp(fenceFilter);
+  const [filterCleared, setFilterCleared] = useState(false);
+  // qa-critic (B-1076 round 1): وصول رابطٍ عميقٍ جديد (فتحُ بطاقة صادرٍ أخرى
+  // بينما القسم لا يزال مُركَّباً) يجب أن ينسى «إظهار الكل» السابق — وإلا رأى
+  // المالك حجب المحادثة الجديدة وقد اختفى بفعل ضغطةٍ فعلها على حجبٍ آخر.
+  useEffect(() => { setFilterCleared(false); }, [propFenceFilter]);
+  const safeFenceFilter = filterCleared ? undefined : propFenceFilter;
   const [data, setData] = useState<FencesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -194,7 +218,12 @@ export default function PermissionFencesSection() {
     }
   };
 
-  const fences = [...(data?.fences ?? []), ...(data?.scopedFences ?? [])];
+  const allFences = [...(data?.fences ?? []), ...(data?.scopedFences ?? [])];
+  // مطابقة تامّة على `scopeKey` — لا احتواء ولا مطابقة جزئية، فحجبٌ لجلسةٍ
+  // أخرى لا يظهر بصدفة معرّفٍ مشترك. `session` وحده يملك دلالة «هذه الجلسة».
+  const fences = safeFenceFilter
+    ? allFences.filter((fence) => fence.scopeKind === 'session' && fence.scopeKey === safeFenceFilter)
+    : allFences;
 
   return (
     <SettingsSection
@@ -225,6 +254,23 @@ export default function PermissionFencesSection() {
             <p className="text-[13px] text-muted-foreground" role="status">
               {t('permissionFences.lifted', { operationId: lifted })}
             </p>
+          )}
+          {safeFenceFilter && (
+            <SettingsCard tone="warning">
+              <div className="space-y-2 text-[13px] leading-relaxed text-foreground">
+                <p className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" aria-hidden="true" />
+                  <span>{t('permissionFences.filteredWarning')}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFilterCleared(true)}
+                  className="touch-manipulation text-danger underline underline-offset-2 hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t('permissionFences.showAll')}
+                </button>
+              </div>
+            </SettingsCard>
           )}
           {fences.length === 0 ? (
             <StatusBadge>{t('permissionFences.none')}</StatusBadge>

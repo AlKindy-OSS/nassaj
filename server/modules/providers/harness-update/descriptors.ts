@@ -437,7 +437,7 @@ export const HARNESS_UPDATE_DESCRIPTORS: Readonly<Record<string, HarnessDescript
     versionArgs: ['--version'],
     updateArgv: () => nativeUpdateArgv('opencode', ['upgrade']),
     latestProbe: { kind: 'github-release', url: OPENCODE_LATEST_RELEASE_URL },
-    // GL-6: the GLM carrier verifies the 1.17.18 digest with enforced:true, so
+    // GL-6: the GLM carrier verifies the pinned 1.18.32 digest with enforced:true, so
     // any other version is refused in that mode even while the flag is off.
     compat: { ...baselineOf('1.18.32'), alwaysEnforcedMode: 'glm-carrier' },
     snapshot: { layout: 'single-file', linkMode: 'copy', stores: [OPENCODE_STORE], resolveLayout: singleFileLayout },

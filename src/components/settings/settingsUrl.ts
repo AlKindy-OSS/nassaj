@@ -18,6 +18,22 @@ const writeSearch = (url: URL, replace: boolean) => {
   window.history[replace ? 'replaceState' : 'pushState'](null, '', `${url.pathname}${url.search}${url.hash}`);
 };
 
+/**
+ * B-1076 — محدِّد حجب صلاحيةٍ بمعرّف جلسةٍ فقط: نمط UUID (v1–v5 فضفاضاً، يكفي
+ * لمنع الحقن) وسقف طول 64 حرفاً. أي قيمة أخرى (`<script>`, `javascript:`,
+ * نصّ عشوائي طويل) تُرفض بصمت — رابطٌ مُشارَك مشوَّه يفتح تبويب «النظام» غير
+ * مفلتَر بدل أن يُدرَج نصّه في الصفحة أو في رابطٍ.
+ *
+ * مُصدَّر لأن `PermissionFencesSection.tsx` يطبّق النمط نفسه على الفلترة
+ * المعروضة — نسخة واحدة، لا نسختان قد تنفرجان (درس «منطق مكرَّر يحتاج حارس
+ * تطابق»).
+ */
+export const FENCE_FILTER_PATTERN = /^[0-9a-zA-Z_-]{1,64}$/;
+
+function sanitizeFenceFilter(value: string | null): string | undefined {
+  return value && FENCE_FILTER_PATTERN.test(value) ? value : undefined;
+}
+
 /** Reads only recognized settings parameters so malformed shared links stay harmless. */
 export function readSettingsDestination(search = window.location.search): SettingsDeepLink | undefined {
   const params = new URLSearchParams(search);
@@ -42,6 +58,10 @@ export function readSettingsDestination(search = window.location.search): Settin
   if (destination.tab === 'agents' && params.get('settingsLocalModels') === 'true') {
     destination.localModels = true;
   }
+  if (destination.tab === 'system') {
+    const fenceFilter = sanitizeFenceFilter(params.get('settingsFenceFilter'));
+    if (fenceFilter) destination.fenceFilter = fenceFilter;
+  }
   return destination;
 }
 
@@ -52,6 +72,7 @@ export function writeSettingsDestination(destination: SettingsDeepLink, options:
   url.searchParams.delete('settingsAgent');
   url.searchParams.delete('settingsCategory');
   url.searchParams.delete('settingsLocalModels');
+  url.searchParams.delete('settingsFenceFilter');
   if (destination.tab === 'agents') {
     if (destination.localModels) {
       url.searchParams.set('settingsLocalModels', 'true');
@@ -59,6 +80,10 @@ export function writeSettingsDestination(destination: SettingsDeepLink, options:
       if (destination.agent) url.searchParams.set('settingsAgent', destination.agent);
       if (destination.category) url.searchParams.set('settingsCategory', destination.category);
     }
+  }
+  if (destination.tab === 'system') {
+    const fenceFilter = sanitizeFenceFilter(destination.fenceFilter ?? null);
+    if (fenceFilter) url.searchParams.set('settingsFenceFilter', fenceFilter);
   }
   writeSearch(url, Boolean(options.replace));
 }
@@ -70,6 +95,7 @@ export function clearSettingsDestination(): void {
   url.searchParams.delete('settingsAgent');
   url.searchParams.delete('settingsCategory');
   url.searchParams.delete('settingsLocalModels');
+  url.searchParams.delete('settingsFenceFilter');
   writeSearch(url, false);
 }
 

@@ -691,6 +691,65 @@ it.each(['kimi', 'glm'])('B-894 excludes the %s native agent path', async (provi
   } finally { view.unmount(); vi.unstubAllEnvs(); }
 });
 
+describe('B-1076 session-fence retry mints a fresh clientMsgId', () => {
+  // The real server frame (withCoordinationMetadata in chat-websocket.service.ts):
+  // a fenced turn is `notStarted:true`, which the server ALSO stamps
+  // `sameClientMsgIdRetryable:true` on (it proves the turn never started —
+  // that flag alone says nothing about whether the retry targets the same
+  // session). Replaying that exact clientMsgId against a different session
+  // (here: null, a brand-new conversation) is rejected server-side as
+  // `client_msg_id_fingerprint_mismatch` because the claim fingerprint binds
+  // the id to its original sessionId — so this fixture must keep
+  // `sameClientMsgIdRetryable: true` to reproduce the reported loop.
+  it('mints a new clientMsgId and drops sessionId for a session-scoped fence', async () => {
+    recordOutboxEntry({ id: 'fenced-1', projectId: 'p1', sessionId: 's1', text: 'hello',
+      historyEligibility: 'text_only', intent: { provider: 'codex' } });
+    markOutboxFailed('fenced-1', {
+      code: 'effect_scope_fenced',
+      sameClientMsgIdRetryable: true,
+      retryable: false,
+      fence: { scopeKind: 'session', reasonCode: 'unknown_effect' },
+    });
+    const view = renderComposer('codex');
+    await act(async () => view.result.current.retryOutboxEntry('fenced-1'));
+
+    expect(view.sent).toHaveLength(1);
+    expect(view.sent[0].sessionId).toBeFalsy();
+    expect(view.sent[0].options.clientMsgId).not.toBe('fenced-1');
+    // The stale fenced entry is dropped; only the fresh new-conversation
+    // attempt remains in the outbox.
+    expect(getOutboxSnapshot()).toHaveLength(1);
+    expect(getOutboxSnapshot()[0].id).not.toBe('fenced-1');
+    view.unmount();
+  });
+
+  it('mints a new clientMsgId for conversation_not_found even with sameClientMsgIdRetryable:true', async () => {
+    recordOutboxEntry({ id: 'gone-1', projectId: 'p1', sessionId: 's1', text: 'hello',
+      historyEligibility: 'text_only', intent: { provider: 'codex' } });
+    markOutboxFailed('gone-1', { code: 'conversation_not_found', sameClientMsgIdRetryable: true });
+    const view = renderComposer('codex');
+    await act(async () => view.result.current.retryOutboxEntry('gone-1'));
+
+    expect(view.sent).toHaveLength(1);
+    expect(view.sent[0].sessionId).toBeFalsy();
+    expect(view.sent[0].options.clientMsgId).not.toBe('gone-1');
+    view.unmount();
+  });
+
+  it('keeps replaying the SAME clientMsgId when the target session is unchanged', async () => {
+    recordOutboxEntry({ id: 'same-session', projectId: 'p1', sessionId: 's1', text: 'hello',
+      historyEligibility: 'text_only', intent: { provider: 'codex' } });
+    markOutboxFailed('same-session', { code: 'run_failed', sameClientMsgIdRetryable: true });
+    const view = renderComposer('codex');
+    await act(async () => view.result.current.retryOutboxEntry('same-session'));
+
+    expect(view.sent).toHaveLength(1);
+    expect(view.sent[0].sessionId).toBe('s1');
+    expect(view.sent[0].options.clientMsgId).toBe('same-session');
+    view.unmount();
+  });
+});
+
 it.each([true, false])('B-894 preserves eligible text on retry (same ID: %s)', async (sameId) => {
   recordOutboxEntry({ id: 'original-text', projectId: 'p1', sessionId: 's1', text: 'hello',
     historyEligibility: 'text_only', intent: { provider: 'qwen' } });

@@ -538,7 +538,7 @@ async function spawnOpenCode(command, options = {}, ws) {
           assertOpenCodeBaseUrlAllowed(resolveOpenCodeConfigPath(childEnv), childEnv, localServerOrigins(callerId));
           // GL-6: MANDATORY sha256 pin of the opencode binary in carrier mode
           // (independent of the NASSAJ_VENDOR_BINARY_PIN flag) — checks the FINAL
-          // resolved path (M-4), refusing spawn on any deviation from 1.17.18.
+          // resolved path (M-4), refusing spawn on any deviation from the pinned 1.18.32.
           verifyVendorBinaryDigest('opencode', opencodeBinary, { enforced: true });
           // GL-6: confine opencode's embedded local HTTP server to loopback so the
           // one-shot `run` never exposes a boot token/endpoint off-box.

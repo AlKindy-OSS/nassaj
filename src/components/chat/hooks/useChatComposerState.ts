@@ -2047,7 +2047,7 @@ export function useChatComposerState({
         return;
       }
 
-      const retryMode = outboxRetryMode(entry);
+      let retryMode = outboxRetryMode(entry);
       if (retryMode === 'verify') {
         return;
       }
@@ -2058,9 +2058,29 @@ export function useChatComposerState({
         // ‏`conversation_not_found` يعني أن المحادثة **ذهبت**، فاستئنافُها يفشل
         // ثانيةً ويعيد البطاقة إلى الشاشة — حلقةٌ مغلقة. الإعادة حينئذٍ تبدأ
         // محادثة جديدة، وهو بالضبط ما يفعله زرّ «ابدأ جلسة جديدة» في فقاعة الخطأ.
-        const targetSessionId = entry.reasonCode === 'conversation_not_found'
+        //
+        // B-1076: حجبُ صلاحيةٍ بنطاق `session` معناه أن **هذه الجلسة بعينها**
+        // مقفلة احتياطاً لأن جولتها السابقة انتهت بأثرٍ مجهول — إعادةُ نفس
+        // المعرّف تُرفض ثانيةً بلا فرق. زرّ «الاستمرار في محادثة جديدة» في
+        // البطاقة يستدعي هذه الدالة نفسها فيعيد هذا الفرع فتحَ محادثةٍ نظيفة.
+        const isSessionFenced = entry.reasonCode === 'effect_scope_fenced'
+          && entry.fence?.scopeKind === 'session';
+        const targetSessionId = entry.reasonCode === 'conversation_not_found' || isSessionFenced
           ? null
           : (currentSessionId || selectedSession?.id || entry.sessionId || null);
+
+        // qa-critic (B-1076 round 1, CRITICAL): the real fence frame sets
+        // `sameClientMsgIdRetryable:true` (server proves the turn never
+        // started), so `outboxRetryMode` alone would replay the SAME
+        // `clientMsgId` here. The server's claim fingerprint binds that id to
+        // its original `sessionId`; replaying it against a different target
+        // (including `null`, a brand-new conversation) is rejected as
+        // `client_msg_id_fingerprint_mismatch` — and that rejection is a
+        // *plain* retryable failure, so the next press targets the still-
+        // fenced session again. A new conversation always needs a new id.
+        if (targetSessionId !== entry.sessionId) {
+          retryMode = 'new_id';
+        }
 
         const payload = await readOutboxRetryPayload(entry);
         // A receipt, another retry, removal, or account switch may win during the read.

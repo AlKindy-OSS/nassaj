@@ -42,6 +42,10 @@ function autoActivationMessage(job: UpdateJobSnapshot, t: Translate): string {
     }
     if (status?.state === 'restarting') return t('versionUpdate.autoActivate.restarting');
     if (status?.state === 'expired') return t('versionUpdate.autoActivate.expired');
+    if (status?.state === 'refused' && status.terminal) {
+        const cause = status.reason ? `${status.code ?? 'unknown'}: ${status.reason}` : (status.code ?? 'unknown');
+        return t('versionUpdate.autoActivate.refusedTerminal', { code: cause });
+    }
     if (status?.state === 'refused') return t('versionUpdate.autoActivate.refused', { code: status.code ?? 'unknown' });
     return t('versionUpdate.autoActivate.pending');
 }

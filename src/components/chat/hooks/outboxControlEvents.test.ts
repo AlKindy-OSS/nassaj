@@ -23,6 +23,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveOutboxVerdict } from '../utils/messageOutbox';
+import { readServerErrorFence, readServerErrorRetryable } from '../utils/serverErrorMessage';
 import { readServerErrorCode, readServerErrorDetail } from './useChatRealtimeHandlers';
 
 const CMID = 'cmid_1';
@@ -35,6 +36,17 @@ function verdict(
     isActiveViewSession: options.isActiveViewSession ?? false,
     readErrorCode: readServerErrorCode as (m: unknown) => string | null,
     readErrorDetail: readServerErrorDetail as (m: unknown) => string | null,
+  });
+}
+
+/** Wired exactly like `consumeOutboxIngressVerdict` (fence/retryable readers included). */
+function verdictWithFence(msg: Record<string, unknown>) {
+  return resolveOutboxVerdict(msg, {
+    isActiveViewSession: false,
+    readErrorCode: readServerErrorCode as (m: unknown) => string | null,
+    readErrorDetail: readServerErrorDetail as (m: unknown) => string | null,
+    readErrorFence: readServerErrorFence as (m: unknown) => ReturnType<typeof readServerErrorFence>,
+    readErrorRetryable: readServerErrorRetryable as (m: unknown) => ReturnType<typeof readServerErrorRetryable>,
   });
 }
 
@@ -141,6 +153,61 @@ describe('session_created', () => {
     expect(verdict({ kind: 'session_created', clientMsgId: CMID, newSessionId: null })).toMatchObject({
       action: 'fail',
       code: 'session_create_failed',
+    });
+  });
+});
+
+describe('B-1076 حجب الصلاحيات — إطار complete', () => {
+  // qa-critic (B-1076 round 1, CRITICAL): الإطار الحقيقي من
+  // `withCoordinationMetadata` (chat-websocket.service.ts) يضع
+  // `sameClientMsgIdRetryable: notStarted===true` على كل إطار طرفي — فحجبٌ
+  // بـ`notStarted:true` يصل **دائماً** بهذا العلم `true` أيضاً. حذفه من
+  // fixtures هذا الملف كان يخفي عطلاً حقيقياً: البطاقة كانت تُعيد نفس
+  // `clientMsgId` إلى جلسةٍ مختلفة (`useChatComposerState.retryOutboxEntry`).
+  it('effect_scope_fenced بنطاق session يحمل الحجب و retryable:false و sameClientMsgIdRetryable:true', () => {
+    expect(verdictWithFence({
+      kind: 'complete',
+      clientMsgId: CMID,
+      success: false,
+      notStarted: true,
+      retryable: false,
+      sameClientMsgIdRetryable: true,
+      code: 'effect_scope_fenced',
+      fence: { scopeKind: 'session', reasonCode: 'unknown_effect' },
+    })).toEqual({
+      action: 'fail',
+      id: CMID,
+      code: 'effect_scope_fenced',
+      detail: null,
+      fence: { scopeKind: 'session', reasonCode: 'unknown_effect' },
+      retryable: false,
+      sameClientMsgIdRetryable: true,
+    });
+  });
+
+  it('generation_blocked بلا fence يحمل الرمز و retryable:false بلا نطاق', () => {
+    expect(verdictWithFence({
+      kind: 'complete', clientMsgId: CMID, success: false, code: 'generation_blocked',
+      notStarted: true, retryable: false, sameClientMsgIdRetryable: true,
+    })).toEqual({
+      action: 'fail', id: CMID, code: 'generation_blocked', detail: null, fence: null,
+      retryable: false, sameClientMsgIdRetryable: true,
+    });
+  });
+
+  it.each(['generation_transitioning', 'actor_revoked_or_stale', 'sqlite_busy', 'unknown'])(
+    '%s يبقى بلا fence/retryable حين لا يصلان — لا تغيير عن السلوك السابق',
+    (code) => {
+      expect(verdictWithFence({ kind: 'complete', clientMsgId: CMID, success: false, code }))
+        .toEqual({ action: 'fail', id: CMID, code, detail: null });
+    },
+  );
+
+  it('retryable:true على أحد الرمزين القاطعين لا يُخترع حجباً (يُنقل كما وصل)', () => {
+    expect(verdictWithFence({
+      kind: 'complete', clientMsgId: CMID, success: false, code: 'effect_scope_fenced', retryable: true,
+    })).toEqual({
+      action: 'fail', id: CMID, code: 'effect_scope_fenced', detail: null, fence: null, retryable: true,
     });
   });
 });

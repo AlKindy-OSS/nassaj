@@ -84,7 +84,7 @@ export interface SnapshotRuntime {
   /** Durable "a real restore-compatible run succeeded here" flag (qa cond. 4). */
   compatVerified: { get(harness: string): boolean; set(harness: string): void };
   installCompatAsset: (opts: AssetInstallOptions) => Promise<void>;
-  /** The pinned release asset restore-compatible installs (opencode 1.17.18). */
+  /** The pinned release asset restore-compatible installs (opencode 1.18.32). */
   compatAsset: ReleaseAssetSpec;
   /** Liveness + kill of a persisted updater process group (boot reconcile). */
   updaterGroup: { isAlive(g: UpdaterGroup): boolean; kill(g: UpdaterGroup): void };

@@ -72,12 +72,10 @@ const ENGINES: Array<{ provider: string; messageType: string; dep: string }> = [
   { provider: 'codex', messageType: 'codex-command', dep: 'queryCodex' },
   { provider: 'cursor', messageType: 'cursor-command', dep: 'spawnCursor' },
   { provider: 'antigravity', messageType: 'antigravity-command', dep: 'spawnAntigravity' },
-  { provider: 'hermes', messageType: 'hermes-command', dep: 'spawnHermes' },
   { provider: 'opencode', messageType: 'opencode-command', dep: 'spawnOpenCode' },
   // kimi في وضع الدردشة يسلك `spawnKimi` أي **مسار vendor-runtime بعينه** الذي
   // يخدم deepseek/glm أيضاً. فهذا الصفّ هو ما يُبقي قناة `system` المضافة هناك
   // حيّةً ومختبَرة رغم أن صاحبَيها الآخرَين معطَّلان عالمياً (أدناه).
-  { provider: 'qwen', messageType: 'qwen-command', dep: 'spawnQwen' },
 ];
 
 /**
@@ -90,6 +88,10 @@ const ENGINES: Array<{ provider: string; messageType: string; dep: string }> = [
 const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: string }> = [
   { provider: 'deepseek', messageType: 'deepseek-command', dep: 'spawnDeepSeek' },
   { provider: 'glm', messageType: 'glm-command', dep: 'spawnGlm' },
+  // hermes: disabled 2026-09-28 (owner decision); its launcher stays dormant.
+  { provider: 'hermes', messageType: 'hermes-command', dep: 'spawnHermes' },
+  // qwen: disabled 2026-09-28 (owner decision); its launcher stays dormant.
+  { provider: 'qwen', messageType: 'qwen-command', dep: 'spawnQwen' },
 ];
 
 const DEP_NAMES = [

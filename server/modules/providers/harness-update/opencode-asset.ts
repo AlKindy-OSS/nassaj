@@ -41,14 +41,14 @@ export interface ReleaseAssetSpec {
   maxUncompressedBytes: number;
 }
 
-/** opencode 1.17.18 linux-x64 (docs/ops/t1871-measurements.md §c). */
+/** opencode 1.18.32 linux-x64 (docs/ops/t1871-measurements.md §c2, B-1370). */
 export const OPENCODE_COMPAT_ASSET: ReleaseAssetSpec = Object.freeze({
-  url: 'https://github.com/anomalyco/opencode/releases/download/v1.17.18/opencode-linux-x64.tar.gz',
+  url: 'https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-linux-x64.tar.gz',
   allowedHosts: Object.freeze(['github.com', 'release-assets.githubusercontent.com']),
   maxRedirects: 3,
-  size: 69_427_073,
+  size: 60_608_353,
   capBytes: 80 * 1024 * 1024,
-  tarballSha256: 'e149d32ee5667c0cd5fb84d0bf8393b312e93782eeb4d74d29bbb0392de7133c',
+  tarballSha256: '3046e0404fdc60fb80307e7a47824ba07477364178a4d09baa8548496dd6d43b',
   entryName: 'opencode',
   binarySha256: PINNED_VENDOR_DIGESTS.opencode.sha256,
   version: PINNED_VENDOR_DIGESTS.opencode.version,

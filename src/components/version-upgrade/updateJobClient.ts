@@ -68,6 +68,10 @@ export interface AutoActivationStatus {
   scheduledDueSoon: ScheduledDueSoon | null;
   /** True once the owner skipped this job's scheduled-message hold (T-1912). */
   scheduledOverride: boolean;
+  /** True when a refusal settled the queued restart: no retry until activation is confirmed again. */
+  terminal: boolean;
+  /** Sanitized gate reason accompanying a refusal, when the server has one. */
+  reason: string | null;
 }
 
 export interface UpdateJobSnapshot {
@@ -172,6 +176,8 @@ function normalizeAutoActivation(value: unknown): AutoActivationStatus | null {
     deadlineAt: typeof raw.deadlineAt === 'number' ? raw.deadlineAt : null,
     scheduledDueSoon: normalizeScheduledDueSoon(raw.scheduledDueSoon),
     scheduledOverride: raw.scheduledOverride === true,
+    terminal: raw.terminal === true,
+    reason: typeof raw.reason === 'string' && raw.reason ? raw.reason.slice(0, 200) : null,
   };
 }
 

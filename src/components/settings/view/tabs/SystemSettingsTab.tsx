@@ -21,7 +21,12 @@ import SteerPolicySection from './SteerPolicySection';
  * `Settings.tsx` (شرط الرسم) وفي `settingsUrl.canOpenSettingsTab` (الروابط
  * العميقة) — الثلاثة معاً لا واحدة منها بمفردها.
  */
-export default function SystemSettingsTab() {
+type SystemSettingsTabProps = {
+  /** B-1076 — معرّف جلسةٍ يفلتر قائمة حجوب الصلاحيات حين يصل من بطاقة صادر. */
+  fenceFilter?: string;
+};
+
+export default function SystemSettingsTab({ fenceFilter }: SystemSettingsTabProps) {
   const { t } = useTranslation('settings');
   const { user } = useAuth();
 
@@ -41,7 +46,7 @@ export default function SystemSettingsTab() {
         <HarnessAutoUpdateSection viewerRole={user?.role} />
         <TmpfsCapSection />
         <StoragePolicySection />
-        <PermissionFencesSection />
+        <PermissionFencesSection fenceFilter={fenceFilter} />
         <SteerPolicySection />
       </div>
     </SettingsSection>

@@ -1,3 +1,8 @@
+## 2.3.0.11 — 2026-09-29
+
+اكتمال سلسلة الترقية بعودة codex-sdk إلى 0.157.1، وتفعيل تحديث أمتن يسجّل سبب الفشل ولا يَعِد بإعادة محاولة وهمية، وإيقاف Qwen وHermes، وتثبيت OpenCode 1.18.32، وشرح حجب الصلاحيات في صندوق الإرسال (الترقية من 2.3.0.10 فقط).
+Upgrade chain completed with codex-sdk back on 0.157.1, sturdier update activation that records failure reasons and no longer promises a phantom retry, Qwen and Hermes disabled, OpenCode pinned to 1.18.32, and permission-fence explanations in the outbox (upgrade from 2.3.0.10 only).
+
 ## 2.3.0.10 — 2026-09-28
 
 إصدار جسر للترقية من 2.3.0.8 (إعادة codex-sdk إلى 0.153.2 وبناء كل إصدار لاحق بأدواته)، وتوجيه الدور الجاري بـ/steer، وتسليم الرسائل المجدولة لكل جلسة مع تأجيل التحديث لها، وإقلاع بلا sharp، وأساس الإصدارات الموثَّقة محلياً (حدّث عقد 2.3.0.8 إلى 2.3.0.10 قبل صدور 2.3.0.11).
@@ -31,6 +36,48 @@ Improve provider status localization, optional hardware usage, images and menus.
 # التحديثات
 
 هنا تجد ملخصاً عملياً لأحدث إصدارات نسّاج: ما الجديد، وما الذي ستلاحظه عند الاستخدام. أما التفاصيل التقنية الكاملة فتوجد في سجل التغييرات داخل المشروع.
+
+---
+
+## الإصدار 2.3.0.12 — قيد التطوير
+
+الدورة التالية مفتوحة؛ يُكتب ملخّصها هنا عند صدورها.
+
+### English
+
+The next cycle is open; its summary is written here when it ships.
+
+---
+
+## الإصدار 2.3.0.11 — اكتمال سلسلة الترقية وتفعيل تحديث أمتن
+
+ما الذي ستلاحظه:
+
+- يعود codex-sdk إلى 0.157.1. حدّث من 2.3.0.10؛ العقد الأقدم لا تترقى إلى هذا الإصدار مباشرة.
+- عقدة لم تُشغّل ورشة Claude من جذرها الحيّ لم تعد تفشل فحص إعادة التشغيل الآمنة عند التفعيل.
+- إن فشل فحص السلامة، تعرض نافذة التحديث وسجلّها السبب وتقول إن المحاولة لن تُعاد تلقائياً:
+  عالج السبب ثم أكّد التفعيل مجدداً.
+- لم يعد Qwen وHermes متاحين في اختيار المزوّد؛ محادثاتهما السابقة تبقى مقروءة.
+- ناقل GLM عبر OpenCode يعمل مجدداً بعد تثبيت OpenCode 1.18.32.
+- حين يُحجَب إرسالٌ بحاجز صلاحيات، تشرح بطاقة صندوق الإرسال السبب وتعرض المتابعة في محادثة جديدة،
+  وللمالك رابط يفتح الإعدادات ← النظام لمراجعة الحجب وفكّه.
+- سجلّ مهمة التحديث يعرض سبب فشل بناء الإصدار الجديد.
+- أُزيل شريط تغيّر المراجعة من المحادثة؛ سهم الانتقال إلى الأسفل وحده يشير إلى التحديث.
+
+### English
+
+- codex-sdk returns to 0.157.1. Update from 2.3.0.10; older nodes cannot upgrade to this release
+  directly.
+- A node whose live root never ran a Claude workflow no longer fails the safe-restart check on
+  activation.
+- If the safety check fails, the update dialog and job log show the reason and say it will not be
+  retried automatically: fix the cause, then confirm activation again.
+- Qwen and Hermes are no longer offered as providers; their earlier conversations stay readable.
+- The GLM carrier through OpenCode runs again with OpenCode pinned to 1.18.32.
+- When a send is blocked by a permission fence, the outbox card explains why and offers to continue
+  in a new conversation; the owner gets a link into Settings → System to review and unlock it.
+- The update job log shows why building the new release failed.
+- The history-revision banner is gone from chat; the jump-down arrow alone signals a refresh.
 
 ---
 

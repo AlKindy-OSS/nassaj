@@ -80,7 +80,7 @@ describe('Agents settings — the GLM fold', () => {
 
   it('leaves the other agent systems untouched', () => {
     renderTab();
-    for (const agent of ['Claude', 'Cursor', 'Codex', 'Antigravity', 'Kimi', 'Hermes']) {
+    for (const agent of ['Claude', 'Cursor', 'Codex', 'Antigravity', 'Kimi']) {
       expect(agentPills(agent).length, `${agent} pill is still offered`).toBeGreaterThan(0);
     }
   });

@@ -122,6 +122,8 @@
     "title": "Permission fences",
     "description": "When a run ends and its effect is unknown, Nassaj pauses launches as a precaution until the owner reviews it.",
     "warning": "Lifting a fence does not prove the old run ended safely. It may have had an effect outside this machine. Lift only if you verified this or accept the risk.",
+    "filteredWarning": "Showing only the fence for this conversation. Before lifting, check its transcript and workspace (git status, any pushes) for the interrupted turn's effect.",
+    "showAll": "Show all fences",
     "none": "No active fences",
     "kindGeneration": "All launches paused (generation {{generation}})",
     "kindScoped": "Paused scope: {{scope}}",

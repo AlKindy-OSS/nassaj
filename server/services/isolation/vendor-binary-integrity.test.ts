@@ -101,9 +101,9 @@ function withEnv(overrides: Record<string, string | undefined>, fn: () => void):
 test('PINNED_VENDOR_DIGESTS: opencode + kimi carry the exact OCC-15/KG-1 digests', () => {
   assert.equal(
     PINNED_VENDOR_DIGESTS.opencode.sha256,
-    '0cbfb6de55aa4ce3c74da12d8516376033693a88abca6238c5be32bf98130636',
+    '513f500a1a5ea1dc7d865547ac87b32a8936334e8d5abd5b3ff585c45a170080',
   );
-  assert.equal(PINNED_VENDOR_DIGESTS.opencode.version, '1.17.18');
+  assert.equal(PINNED_VENDOR_DIGESTS.opencode.version, '1.18.32');
   assert.equal(
     PINNED_VENDOR_DIGESTS.kimi.sha256,
     '46a0095fa08385027e2e2d02d3c3ee274ecc2094f136dc745910bd72273f7763',

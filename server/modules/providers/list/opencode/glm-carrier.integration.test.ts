@@ -580,7 +580,7 @@ describe('GL-10 — binary digest deviation (SL-7/GL-6)', () => {
     // zero-value initialization that would make the guard a no-op).
     const pin = PINNED_VENDOR_DIGESTS.opencode;
     assert.ok(pin, 'opencode pin entry must exist');
-    assert.equal(pin.version, '1.17.18', 'pinned opencode version');
+    assert.equal(pin.version, '1.18.32', 'pinned opencode version');
     assert.equal(pin.artifact, 'opencode', 'pinned opencode artifact name');
     assert.match(pin.sha256, /^[0-9a-f]{64}$/, 'sha256 must be a 64-char hex string');
   });

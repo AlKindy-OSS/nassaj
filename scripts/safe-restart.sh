@@ -616,10 +616,15 @@ show_live_provider_sessions() {
 }
 
 # ── فحص توفّر القراءة ───────────────────────────────────────────────────────
+# 2026-09-29 (activation defect): غياب WF_BASE يعني أن هذه العقدة لم تُشغّل أي ورشة
+# claude من جذرها الحيّ قطّ (جذر حيّ جديد، أو عقدة بلا جلسات claude فيه) — أي صفر
+# ورشات حيّة، لا خطأ إعداد. كان يخرج بـ2 (wf_base_missing) فتفشل بوّابة التفعيل على
+# كل عقدة جديدة. الآن: فحص بقيمة صفر وملاحظة wfBaseMissing في JSON، ويبقى كشف جلسات
+# المحادثة الحيّة من شجرة /proc (أدناه) حارساً مستقلاً لا يعتمد على هذا المسار.
+WF_BASE_MISSING=0
 if [ ! -d "$WF_BASE" ]; then
-  emit ERR "WF_BASE غير موجود / not found: $WF_BASE"
-  [ "$JSON" -eq 1 ] && printf '{"ok":false,"error":"wf_base_missing","wfBase":%s}\n' "\"$WF_BASE\""
-  exit 2
+  WF_BASE_MISSING=1
+  emit WARN "WF_BASE غير موجود — فحص الورشات أعمى، يُعامَل كصفر ورشات حيّة / absent, workflow scan blind, treated as zero live workflows: $WF_BASE"
 fi
 if ! command -v node >/dev/null 2>&1; then
   emit ERR "node غير متوفّر — مطلوب لتحليل JSONL / node required for JSONL parsing"
@@ -633,7 +638,7 @@ fi
 # الشرطان معاً: started>result يلتقط عدم اكتمال، ونافذة الحداثة تستبعد الأشباح
 # (وكيل مات دون "result"). نستخدم Node لتحليل JSON بأمان (لا grep هشّ، ولا jq).
 SCAN_JSON="$(
-  WF_BASE="$WF_BASE" FRESH_WINDOW_S="$FRESH_WINDOW_S" node - <<'NODE'
+  WF_BASE="$WF_BASE" WF_BASE_MISSING="$WF_BASE_MISSING" FRESH_WINDOW_S="$FRESH_WINDOW_S" node - <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const base = process.env.WF_BASE;
@@ -701,6 +706,13 @@ process.stdout.write(JSON.stringify({
   scanned: wfDirs.length,
   liveCount: live.length,
   live,
+  ...(process.env.WF_BASE_MISSING === '1'
+    ? {
+        wfBaseMissing: true,
+        wfScanBlind: true,
+        note: 'wf_base_missing: no workflow root, treated as zero live workflows',
+      }
+    : {}),
 }));
 NODE
 )"
@@ -1536,7 +1548,7 @@ fi
 # نُقل إلى هنا من قبل حارس online (~716) وكتلة recompute حالة الحافة (~963): الآن
 # PROC_ONLINE_CONFIRMED وSERVER_PID وحالة الكشف (SESSION_DETECT_ERROR/REASON) وقرار
 # الحجب (SESSION_DETECT_BLOCK) كلها محسومة، فيعكس الكائنُ القرارَ الفعلي لا حالة
-# وسطى. مسارات الخطأ الطرفية (wf_base_missing/scan_parse/proc_not_in_pm2/proc_not_online)
+# وسطى. مسارات الخطأ الطرفية (scan_parse/proc_not_in_pm2/proc_not_online)
 # أصدرت كائنها وخرجت قبل هنا، فلا يُصدَر كائنان متناقضان على stdout في أي مسار.
 # sessionDetectError/Reason/Block مصدرها متغيّرات bash النهائية لا حقول SESSION_JSON
 # الخام (التي لا تُعاد كتابتها عند recompute حالة الحافة online+pid-غير-محلول).

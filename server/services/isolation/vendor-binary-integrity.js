@@ -6,7 +6,7 @@
  * ---
  * Kimi (`@moonshot-ai/kimi-code`) and the GLM carrier (`sst/opencode`) are
  * third-party binaries downloaded from npm/GitHub. OCC-15 cleared their supply
- * chain for the pinned versions ONLY (opencode 1.17.18, kimi-code 0.28.1). A
+ * chain for the pinned versions ONLY (opencode 1.18.32, kimi-code 0.28.1). A
  * later silent swap — a tampered install, a compromised npm tarball, a
  * PATH-shadowing `opencode` earlier in $PATH — would run un-reviewed code with
  * the vendor's cage/permission ceiling around it. This guard pins the exact
@@ -50,11 +50,12 @@ import path from 'node:path';
  * @type {Readonly<Record<string, { version: string, artifact: string, sha256: string }>>}
  */
 export const PINNED_VENDOR_DIGESTS = Object.freeze({
-  // sst/opencode 1.17.18 — byte-for-byte with the official release (OCC-15 §1.3).
+  // anomalyco/opencode 1.18.32 — byte-for-byte with the official linux-x64 release
+  // archive (B-1370, 2026-09-28; was 1.17.18 per OCC-15 §1.3).
   opencode: Object.freeze({
-    version: '1.17.18',
+    version: '1.18.32',
     artifact: 'opencode',
-    sha256: '0cbfb6de55aa4ce3c74da12d8516376033693a88abca6238c5be32bf98130636',
+    sha256: '513f500a1a5ea1dc7d865547ac87b32a8936334e8d5abd5b3ff585c45a170080',
   }),
   // @moonshot-ai/kimi-code 0.28.1 — the bundled dist/main.mjs entrypoint (KG-1 §1.1).
   kimi: Object.freeze({

@@ -1,7 +1,8 @@
 /**
  * computeHarnessCompatibility (T-1871 / ADR-159 Addendum 4, qa M-4).
  * Fixtures are the values measured on-host 2026-09-27
- * (docs/ops/t1871-measurements.md): opencode 1.18.32 vs pin 1.17.18,
+ * (docs/ops/t1871-measurements.md), with the opencode pin raised to 1.18.32 (B-1370)
+ * so the mismatch fixture is a newer untested 1.18.33,
  * kimi 2.1.1 vs pin 0.28.1, cursor baseline 2026.09.18-9a7762b.
  */
 // B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
@@ -28,24 +29,24 @@ const input = (over: Partial<CompatibilityInput>): CompatibilityInput => ({
 });
 
 test('fixtures match the real pin table', () => {
-  assert.equal(PINNED_VENDOR_DIGESTS.opencode.version, '1.17.18');
+  assert.equal(PINNED_VENDOR_DIGESTS.opencode.version, '1.18.32');
   assert.equal(PINNED_VENDOR_DIGESTS.kimi.version, '0.28.1');
   assert.equal(opencode.compat?.alwaysEnforcedMode, 'glm-carrier');
 });
 
-test('opencode 1.18.32, pin off, GLM carrier always enforces → incompatible in that mode', () => {
+test('opencode 1.18.33, pin off, GLM carrier always enforces → incompatible in that mode', () => {
   const v = computeHarnessCompatibility(input({
-    version: '1.18.32', descriptor: opencode, carrierAlwaysEnforced: true,
+    version: '1.18.33', descriptor: opencode, carrierAlwaysEnforced: true,
   }));
   assert.equal(v.state, 'incompatible');
   assert.equal(v.reason, 'glm-carrier-blocked');
   assert.deepEqual(v.blockedModes, ['glm-carrier']);
-  assert.equal(v.referenceVersion, '1.17.18');
+  assert.equal(v.referenceVersion, '1.18.32');
 });
 
 test('pin armed + mismatch → incompatible everywhere, takes precedence over the carrier', () => {
   const v = computeHarnessCompatibility(input({
-    version: '1.18.32', descriptor: opencode, pinArmed: true, carrierAlwaysEnforced: true,
+    version: '1.18.33', descriptor: opencode, pinArmed: true, carrierAlwaysEnforced: true,
   }));
   assert.equal(v.state, 'incompatible');
   assert.equal(v.reason, 'pin-armed-blocked');
@@ -70,7 +71,7 @@ test('kimi 2.1.1 with the pin armed → incompatible', () => {
 test('version equal to the reviewed pin → compatible, even with the pin armed', () => {
   for (const pinArmed of [false, true]) {
     const v = computeHarnessCompatibility(input({
-      version: '1.17.18', descriptor: opencode, pinArmed, carrierAlwaysEnforced: true,
+      version: '1.18.32', descriptor: opencode, pinArmed, carrierAlwaysEnforced: true,
     }));
     assert.equal(v.state, 'compatible');
     assert.equal(v.reason, 'pin-match');

@@ -111,6 +111,14 @@ export type SettingsDeepLink = {
    * or ?settings=agents&settingsLocalModels=true.
    */
   localModels?: true;
+  /**
+   * B-1076 — تُعرض قائمة حجوب الصلاحيات (تبويب `system`) مفلترةً بهذا
+   * المحدِّد وحده حين يُفتح التبويب من بطاقة صادر بحجبٍ بنطاق `session`
+   * (معرّف جلسة المحادثة الحالية للمستخدم لا سواها). صحّته (نمط UUID، سقف
+   * طول) تُتحقَّق في `settingsUrl.ts`؛ تُعرض نصّاً محضاً، لا تُبنى بها HTML
+   * ولا رابط، ولا تُستعمَل لملء سبب الرفع مسبقاً.
+   */
+  fenceFilter?: string;
 };
 
 export type SettingsProps = {

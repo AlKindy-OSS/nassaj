@@ -1,9 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject, ReactNode } from 'react';
 
+import type { SettingsDeepLink } from '../components/settings/types/types';
+
 export type PaletteOps = {
   openFile: (path: string) => void;
-  openSettings: (tab?: string) => void;
+  /**
+   * ‏`deepLink` اختياري: بطاقة الصادر (B-1076) تفتح تبويب «النظام» مباشرةً على
+   * حجب صلاحيةٍ بعينه (فلترته بجلسة المحادثة الحالية أو بلا فلترة) بدل أن
+   * تكتفي بفتح التبويب فارغاً ويُترَك المستخدم يبحث بنفسه.
+   */
+  openSettings: (tab?: string, deepLink?: SettingsDeepLink) => void;
   refreshProjects: () => Promise<void> | void;
 };
 
@@ -27,7 +34,7 @@ export function usePaletteOps(): PaletteOps {
   return useMemo<PaletteOps>(
     () => ({
       openFile: (path) => (ref?.current.openFile ?? defaultOps.openFile)(path),
-      openSettings: (tab) => (ref?.current.openSettings ?? defaultOps.openSettings)(tab),
+      openSettings: (tab, deepLink) => (ref?.current.openSettings ?? defaultOps.openSettings)(tab, deepLink),
       refreshProjects: () => (ref?.current.refreshProjects ?? defaultOps.refreshProjects)(),
     }),
     [ref],

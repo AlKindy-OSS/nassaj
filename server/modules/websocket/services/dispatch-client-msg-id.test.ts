@@ -98,15 +98,16 @@ const MESSAGE_TYPES: ReadonlyArray<[string, string]> = [
   ['cursor-command', 'cursor'],
   ['codex-command', 'codex'],
   ['antigravity-command', 'antigravity'],
-  ['hermes-command', 'hermes'],
   ['kimi-command', 'kimi'],
-  ['qwen-command', 'qwen'],
   ['opencode-command', 'opencode'],
 ];
 
-/** معطَّلان عالمياً (`shared/disabledProviders.ts`): مسارهما الرفضُ قبل الإقلاع. */
+/** معطَّلة عالمياً (`shared/disabledProviders.ts`): مسارها الرفضُ قبل الإقلاع.
+ *  hermes وqwen أُضيفا بقرار المالك 2026-09-28. */
 const DISABLED_MESSAGE_TYPES: ReadonlyArray<[string, string]> = [
   ['deepseek-command', 'deepseek'],
+  ['hermes-command', 'hermes'],
+  ['qwen-command', 'qwen'],
 ];
 
 test('كل مسار بثّ يُصدي هوية الجولة على أول stream delta وعلى حكمه النهائي', async () => {

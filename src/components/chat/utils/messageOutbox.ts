@@ -32,6 +32,13 @@
  *     IndexedDB ككائنات `File` أصلية، والبيانات الوصفية وحدها في
  *     `localStorage`، **والتقليم يقع قبل الكتابة لا بعد الامتلاء**.
  *
+ *  5. **حجب الصلاحيات قاطعٌ لا فشل** (B-1076). `effect_scope_fenced` و
+ *     `generation_blocked` وحدهما — بشرط `retryable:false` صريح من الخادم —
+ *     يُطفئان زرّ إعادة الإرسال كلياً؛ خطأً هنا يقفل رسالةً كان يمكن إرسالها،
+ *     فالتحقّق محصورٌ بهذين الرمزين حرفياً (`isPermanentOutboxBlock`). و
+ *     `fence.scopeKind` يُحفظ مع الإدخال لأن نصّ البطاقة وفعلها يفترقان بحسبه
+ *     (جلسة هذه المحادثة وحدها / كل محادثات المزوّد / الخادم كله).
+ *
  *  4. **إخلاء تلقائي عند القبول (B-1034) — v2 وحده.** مخزن v2 كان بلا
  *     تقادم فتراكمت إدخالات `delivered` و`pending` يتيمة حتى يبلغ العدد 20
  *     فيُقفل الإرسال. الآن: `evictV2ForAdmission` تُخلي قبل فحص السعة:
@@ -41,6 +48,13 @@
  *     fail-closed عمداً، والتباعد عن دلالة v1 (T-1648/B-894) مقصود.
  *     **لا يُخلى أبداً**: `failed` و`unconfirmed`.
  */
+
+import {
+  isPermanentOutboxBlock,
+  readServerErrorFence,
+  readServerErrorRetryable,
+  type OutboxFenceInfo,
+} from './serverErrorMessage';
 
 /* ------------------------------------------------------------------ */
 /*  الأنواع                                                            */
@@ -97,6 +111,18 @@ export type OutboxEntry = {
   reasonDetail: string | null;
   /** Server verdict: only true permits replaying this exact clientMsgId. */
   sameClientMsgIdRetryable?: boolean;
+  /**
+   * B-1076 — حجب صلاحيةٍ يخصّ `reasonCode`، حين وصل مع الرفض. `null`/غائب
+   * لكل سبب فشلٍ آخر ولحجبٍ لم يفصح الخادم عن نطاقه.
+   */
+  fence?: OutboxFenceInfo | null;
+  /**
+   * `true` فقط حين حكم `isPermanentOutboxBlock` بأن هذا الرفض قاطعٌ — الرمز
+   * أحد `effect_scope_fenced`/`generation_blocked` حرفياً و`retryable:false`
+   * صريح. يُحفظ على الإدخال (لا يُعاد حسابه عند العرض) لأن `retryable` الخام
+   * لا يُخزَّن بمفرده والبطاقة قد تُعرض بعد إعادة تحميل الصفحة.
+   */
+  permanentlyBlocked?: boolean;
   /** أسماء الصور المحفوظة في IndexedDB بترتيبها. */
   imageNames: string[];
   /** Original non-image attachment inventory; absent legacy values mean unknown. */
@@ -956,6 +982,10 @@ export type OutboxVerdict =
     code: string;
     detail: string | null;
     sameClientMsgIdRetryable?: boolean;
+    /** B-1076 — حجب الصلاحية المرفَق بالرفض، إن وُجد. */
+    fence?: OutboxFenceInfo | null;
+    /** الحكم الخام من الخادم؛ `isPermanentOutboxBlock` وحدها تفسّره. */
+    retryable?: boolean | null;
   };
 
 export function resolveOutboxVerdict(
@@ -970,15 +1000,23 @@ export function resolveOutboxVerdict(
     sameClientMsgIdRetryable?: unknown;
     deliveryDisposition?: unknown;
     notStarted?: unknown;
+    fence?: unknown;
+    retryable?: unknown;
   },
   context: {
     isActiveViewSession: boolean;
     readErrorCode: (m: unknown) => string | null;
     readErrorDetail: (m: unknown) => string | null;
+    readErrorFence?: (m: unknown) => OutboxFenceInfo | null;
+    readErrorRetryable?: (m: unknown) => boolean | null;
   },
 ): OutboxVerdict | null {
   const id = typeof msg.clientMsgId === 'string' ? msg.clientMsgId : '';
   if (!id) return null;
+
+  const fence = context.readErrorFence?.(msg) ?? null;
+  const retryable = context.readErrorRetryable?.(msg) ?? null;
+  const fenceFields = fence || retryable !== null ? { fence, retryable } : {};
 
   if (msg.kind === 'session_created') {
     // مولدُ جلسةٍ بمعرّف فارغ = فشلُ إقلاعٍ صريح. وبمعرّفٍ صحيح = قبولٌ مؤكَّد:
@@ -993,6 +1031,7 @@ export function resolveOutboxVerdict(
         ...(typeof msg.sameClientMsgIdRetryable === 'boolean'
           ? { sameClientMsgIdRetryable: msg.sameClientMsgIdRetryable }
           : {}),
+        ...fenceFields,
       };
   }
 
@@ -1007,6 +1046,7 @@ export function resolveOutboxVerdict(
         ...(typeof msg.sameClientMsgIdRetryable === 'boolean'
           ? { sameClientMsgIdRetryable: msg.sameClientMsgIdRetryable }
           : {}),
+        ...fenceFields,
       };
     }
     return { action: 'confirm', id };
@@ -1036,6 +1076,7 @@ export function resolveOutboxVerdict(
       ...(typeof msg.sameClientMsgIdRetryable === 'boolean'
         ? { sameClientMsgIdRetryable: msg.sameClientMsgIdRetryable }
         : {}),
+      ...fenceFields,
     };
   }
 
@@ -1070,12 +1111,18 @@ export function consumeOutboxIngressVerdict(msg: Record<string, unknown>): Outbo
     if (typeof structured?.detail === 'string' && structured.detail) return structured.detail;
     return typeof payload.reason === 'string' && payload.reason ? payload.reason : null;
   };
+  const readErrorFence = (value: unknown): OutboxFenceInfo | null =>
+    value && typeof value === 'object' ? readServerErrorFence(value as Record<string, unknown>) : null;
+  const readErrorRetryable = (value: unknown): boolean | null =>
+    value && typeof value === 'object' ? readServerErrorRetryable(value as Record<string, unknown>) : null;
   const verdict = resolveOutboxVerdict(msg, {
     // Ingress has no trustworthy proof that the active composer restored a
     // rejected send. Therefore session_busy must remain recoverable by card.
     isActiveViewSession: false,
     readErrorCode,
     readErrorDetail,
+    readErrorFence,
+    readErrorRetryable,
   });
   if (verdict?.action === 'confirm') {
     if (msg.kind === 'session_created' && typeof msg.newSessionId === 'string' && msg.newSessionId) {
@@ -1089,6 +1136,8 @@ export function consumeOutboxIngressVerdict(msg: Record<string, unknown>): Outbo
       code: verdict.code,
       detail: verdict.detail,
       sameClientMsgIdRetryable: verdict.sameClientMsgIdRetryable,
+      fence: verdict.fence,
+      retryable: verdict.retryable,
     });
   }
   return verdict;
@@ -1177,28 +1226,34 @@ export function markOutboxDispatchUnconfirmed(id: string): boolean {
 /** ترقية إدخال معلّق إلى «فاشل» — أو تسجيله فاشلاً ابتداءً إن لم يكن موجوداً. */
 export function markOutboxFailed(
   id: string,
-  reason: { code?: string | null; detail?: string | null; sameClientMsgIdRetryable?: boolean } = {},
+  reason: {
+    code?: string | null;
+    detail?: string | null;
+    sameClientMsgIdRetryable?: boolean;
+    fence?: OutboxFenceInfo | null;
+    retryable?: boolean | null;
+  } = {},
 ): boolean {
   if (!activeUserKey || !id) return false;
   const target = entries.find((entry) => entry.id === id);
   if (!target || target.status === 'delivered') return false;
+  const code = reason.code ?? target.reasonCode ?? 'unknown';
+  const permanentlyBlocked = isPermanentOutboxBlock(code, reason.retryable ?? null);
+  const patch = <T extends OutboxEntry>(entry: T): T => ({
+    ...entry,
+    status: 'failed' as const,
+    reasonCode: code,
+    reasonDetail: reason.detail ?? null,
+    sameClientMsgIdRetryable: reason.sameClientMsgIdRetryable,
+    fence: reason.fence ?? null,
+    permanentlyBlocked,
+  });
   if (v2ManagedIds.has(id)) {
-    void patchV2Entry(id, entry => entry.status === 'delivered' ? entry : ({ ...entry, status: 'failed', reasonCode: reason.code ?? entry.reasonCode ?? 'unknown',
-      reasonDetail: reason.detail ?? null, sameClientMsgIdRetryable: reason.sameClientMsgIdRetryable }));
+    void patchV2Entry(id, entry => entry.status === 'delivered' ? entry : patch(entry));
     return true;
   }
   return commit(
-    entries.map((entry) =>
-      entry.id === id
-        ? {
-          ...entry,
-          status: 'failed' as const,
-          reasonCode: reason.code ?? entry.reasonCode ?? 'unknown',
-          reasonDetail: reason.detail ?? null,
-          sameClientMsgIdRetryable: reason.sameClientMsgIdRetryable,
-        }
-        : entry,
-    ),
+    entries.map((entry) => (entry.id === id ? patch(entry) : entry)),
     id,
   );
 }

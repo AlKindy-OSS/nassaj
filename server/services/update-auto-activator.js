@@ -103,7 +103,27 @@ function outcomeOf(reply) {
     if (reply?.status >= 200 && reply.status < 300 && body.status !== 'error') {
         return { state: 'restarting', code: null, liveSessions: 0 };
     }
-    return { state: 'refused', code: typeof body.code === 'string' ? body.code : `http_${reply?.status ?? 'unknown'}`, liveSessions: null };
+    const refused = { state: 'refused', code: typeof body.code === 'string' ? body.code : `http_${reply?.status ?? 'unknown'}`, liveSessions: null };
+    return typeof body.reason === 'string' && body.reason ? { ...refused, reason: body.reason } : refused;
+}
+
+/**
+ * Activation defect 2026-09-29: a refusal that SETTLED the queued row (gate_failed
+ * marks it failed) can never be retried by this loop — the next tick would only
+ * find no pending row and wait forever while the log still said "retrying". Such
+ * a refusal is terminal until the owner confirms activation again. Chosen over
+ * re-queueing the row: re-running a restart whose safety check failed, with no
+ * proof the cause is gone, is not safe, and the confirm path already exists.
+ */
+function isRowSettled(listQueuedRestarts, rowId) {
+    try {
+        // Only a row the refusal marked `failed` is settled. An absent row is an
+        // unresolved `executing` claim (listActionable excludes it; B-1158) that may
+        // still return to pending, so it is never treated as terminal.
+        return listQueuedRestarts().some((candidate) => candidate.id === rowId && candidate.status === 'failed');
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -137,6 +157,8 @@ export function createUpdateAutoActivator({
     // so the first interval of each deferral streak is counted too.
     const scheduledHolds = new Map();
     const scheduledOverrides = new Set();
+    // jobId → the consent time a terminal refusal belongs to; fresh consent clears it.
+    const terminalFailures = new Map();
     let running = false;
     let timer = null;
 
@@ -185,6 +207,8 @@ export function createUpdateAutoActivator({
         const queuedAt = restartQueuedAt(jobs, job);
         if (queuedAt === null || queuedAt > now()) return settle(job, null, { state: 'refused', code: 'consent_evidence_unavailable', liveSessions: null }, null);
         const deadlineAt = queuedAt + deadlineMs;
+        if (terminalFailures.get(job.id) === queuedAt && statuses.has(job.id)) return statuses.get(job.id);
+        terminalFailures.delete(job.id);
         if (now() >= deadlineAt) {
             if (statuses.get(job.id)?.state !== 'expired') {
                 audit('update_auto_activate_expired', { sourceUpdateJobId: job.id });
@@ -225,6 +249,14 @@ export function createUpdateAutoActivator({
             : '▶ Node is idle; running the governed safe restart (consented at update start).');
         audit('update_auto_activate_attempt', { sourceUpdateJobId: job.id, pendingActionId: row.id });
         const outcome = outcomeOf(await executeAsOwner({ id: row.id, user: currentOwner }));
+        if (outcome.state === 'refused' && isRowSettled(listQueuedRestarts, row.id)) {
+            terminalFailures.set(job.id, queuedAt);
+            audit('update_auto_activate_failed', { sourceUpdateJobId: job.id, pendingActionId: row.id, code: outcome.code });
+            const cause = outcome.reason ? `${outcome.code}: ${outcome.reason}` : outcome.code;
+            return settle(job, deadlineAt, { ...outcome, terminal: true },
+                `✖ Safe restart failed its safety check (${cause}); automatic activation stopped. `
+                + 'Fix the cause, then confirm activation again in the update dialog.');
+        }
         const message = outcome.state === 'restarting'
             ? '↻ Safe restart started; activation continues in the new process.'
             : outcome.state === 'waiting_sessions'
@@ -243,6 +275,7 @@ export function createUpdateAutoActivator({
             for (const id of statuses.keys()) if (!live.has(id)) statuses.delete(id);
             for (const id of scheduledHolds.keys()) if (!live.has(id)) scheduledHolds.delete(id);
             for (const id of scheduledOverrides) if (!live.has(id)) scheduledOverrides.delete(id);
+            for (const id of terminalFailures.keys()) if (!live.has(id)) terminalFailures.delete(id);
             // One restart ends this process; never attempt a second in the same tick.
             for (const job of pending) {
                 const status = await considerJob(job);

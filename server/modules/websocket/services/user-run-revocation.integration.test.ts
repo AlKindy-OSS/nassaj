@@ -176,7 +176,8 @@ const hostedTurnSupervisor = {
 
 const PROVIDER_COMMANDS: Record<string, string> = {
   claude: 'claude-command', codex: 'codex-command', cursor: 'cursor-command', antigravity: 'antigravity-command',
-  hermes: 'hermes-command', opencode: 'opencode-command', kimi: 'kimi-command', qwen: 'qwen-command',
+  opencode: 'opencode-command', kimi: 'kimi-command',
+  // hermes, qwen: globally disabled 2026-09-28 (owner decision) — refused before any run.
 };
 
 const chatDependencies = {
@@ -516,7 +517,7 @@ test('PROJECT_MEMBERSHIP_ENFORCE on: runs registered through the run fence are f
   process.env.PROJECT_MEMBERSHIP_ENFORCE = '1';
   const bob = createUser('user');
   const socket = connect(bob);
-  const runs = [await launch(socket, 'claude'), await launch(socket, 'hermes')];
+  const runs = [await launch(socket, 'claude'), await launch(socket, 'opencode')];
   const fenced = monitor.getProviderRunWriter(runs[0]) as { runFenceRevoked?: boolean } | null;
   assert.equal(typeof fenced?.runFenceRevoked, 'boolean', 'registered writer is the run-fence proxy');
   await admin('PATCH', `/users/${bob.id}/status`, { status: 'disabled' });

@@ -315,8 +315,9 @@ export default function ChatMessagesPane({
       className="relative flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-0 py-1 sm:space-y-3 sm:px-4"
     >
       {/* T-1821: حُذف زرّ التحديث من هنا — الزرّ الموحَّد (jump-down) في ChatComposer
-            يتولّى دور retryHistory عند وجود historyError. النصّ يبقى للإعلام. */}
-      {historyError && (
+            يتولّى دور retryHistory عند وجود historyError. النصّ يبقى للإعلام، إلا «revision»
+            فحلّه التحديث وحده، فيكفي ظهور السهم. */}
+      {historyError && historyFailureKey !== 'revision' && (
         <div role="alert" className="sticky top-0 z-10 mx-3 rounded-lg border border-border bg-muted p-3 text-sm sm:mx-0">
           <p>{t(`session.historyError.${historyFailureKey}`)}</p>
           {chatMessages.length > 0 && <p className="mt-1 text-muted-foreground">{t('session.historyError.retained')}</p>}

@@ -427,7 +427,8 @@
       "waiting": "Waiting for {{count}} live session(s) to finish, then the safe restart runs by itself. No session will be stopped.",
       "restarting": "Safe restart in progress. This window reconnects when the new version is up.",
       "expired": "Consent expired. Confirm activation again in this dialog.",
-      "refused": "The safe restart was refused ({{code}}) and will be retried. You can also press safe restart in the command board."
+      "refused": "The safe restart was refused ({{code}}) and will be retried. You can also press safe restart in the command board.",
+      "refusedTerminal": "The safe restart failed its safety check ({{code}}) and will not be retried automatically. Fix the cause, then confirm activation again in this dialog."
     },
     "terminal": {
       "show": "Show terminal output",

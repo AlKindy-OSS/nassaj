@@ -16,7 +16,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); });
 // ChatMessagesPane يعرض النصّ فقط — لا زرّ.
 describe('history pane error state (T-1821)', () => {
   it.each([[413, 'HISTORY_BUDGET_EXCEEDED', 'budget'], [409, 'HISTORY_SOURCE_INCOMPLETE', 'incomplete'],
-    [409, 'HISTORY_REVISION_CHANGED', 'revision'], [409, 'CURSOR_STALE', 'revision'], [503, 'HISTORY_BUSY', 'busy'], [504, 'HISTORY_TIMEOUT', 'timeout']])(
+    [503, 'HISTORY_BUSY', 'busy'], [504, 'HISTORY_TIMEOUT', 'timeout']])(
     'renders %i %s as an accessible error banner with no button (button in jump-down)', (status, code, key) => {
       // T-1821: retryHistory prop removed — banner is text-only.
       render(<ChatMessagesPane {...props} historyError={{ ok: false, status: Number(status), code: String(code), retryAfterMs: null, retryAt: 0, operation: 'initial' }} />);
@@ -25,6 +25,12 @@ describe('history pane error state (T-1821)', () => {
       // No interactive button in the banner — only text.
       expect(screen.queryByRole('button')).toBeNull();
     });
+
+  it.each([['HISTORY_REVISION_CHANGED'], ['CURSOR_STALE']])('hides the banner for %s — the jump-down arrow alone signals refresh', (code) => {
+    render(<ChatMessagesPane {...props} historyError={{ ok: false, status: 409, code, retryAfterMs: null, retryAt: 0, operation: 'initial' }} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('ordinary-empty-state')).toBeNull();
+  });
 
   it('keeps held rows visible while historyError is set', () => {
     const message = { id: 'held', type: 'assistant', content: 'held reply', timestamp: new Date() };
