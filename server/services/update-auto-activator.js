@@ -178,6 +178,15 @@ function isRowSettled(listQueuedRestarts, rowId) {
 }
 
 /**
+ * B-1583: whether the row is still visible to this loop at all. A refused row that
+ * is neither settled nor listed is held by an unresolved `executing` claim; this
+ * loop cannot run it again, so its message must not promise a retry.
+ */
+function isRowListed(listQueuedRestarts, rowId) {
+    try { return listQueuedRestarts().some((candidate) => candidate.id === rowId); } catch { return true; }
+}
+
+/**
  * @param {object} deps
  * @param {{ listAutoActivatable: () => any[], listReceipts: (id: string) => any[] }} deps.jobs
  * @param {() => any[]} deps.listQueuedRestarts actionable safe-restart rows
@@ -336,8 +345,11 @@ export function createUpdateAutoActivator({
             terminalFailures.set(job.id, queuedAt);
             audit('update_auto_activate_failed', { sourceUpdateJobId: job.id, pendingActionId: row.id, code: outcome.code });
             const cause = outcome.reason ? `${outcome.code}: ${outcome.reason}` : outcome.code;
+            // B-1583: a rejected activation action is not a safety-check verdict.
+            const what = outcome.code.startsWith('source_update_action_')
+                ? 'The update\'s activation action is invalid' : 'Safe restart failed its safety check';
             return settle(job, deadlineAt, { ...outcome, terminal: true },
-                `✖ Safe restart failed its safety check (${cause}); automatic activation stopped. `
+                `✖ ${what} (${cause}); automatic activation stopped. `
                 + 'Fix the cause, then confirm activation again in the update dialog.');
         }
         const base = outcome.state === 'restarting'
@@ -346,7 +358,10 @@ export function createUpdateAutoActivator({
                 ? terminalWaitMessage(outcome.openTerminals)
                 : outcome.state === 'waiting_sessions' || outcome.state === 'waiting_terminals'
                     ? `⏸ The restart gate deferred (${outcome.code}); retrying when the node is idle.`
-                    : `⚠ Safe restart was refused (${outcome.code}); retrying.`;
+                    : isRowListed(listQueuedRestarts, row.id)
+                        ? `⚠ Safe restart was refused (${outcome.code}); retrying.`
+                        : `⚠ Safe restart was refused (${outcome.code}); the queued restart is still claimed, `
+                            + 'so activation resumes only if it returns to the queue.';
         // B-1448 (R3): a deferral whose row could not return to the queue would
         // otherwise leave the job silently in waiting_row until the deadline.
         const message = outcome.requeued === false

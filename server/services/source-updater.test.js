@@ -5,6 +5,8 @@ import path from 'path';
 import { execFileSync, spawn } from 'child_process';
 import test from 'node:test';
 
+import { isSourceUpdateActionShape } from '../../scripts/lib/source-update-action-schema.mjs';
+
 import { createUpdateMaintenanceGate } from './update-maintenance-gate.js';
 import { assertUpdateStorage, defaultSourceUpdateControlRoot, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
 
@@ -520,6 +522,8 @@ test('stages only the exact fast-forward commit and builds both runtime artifact
         .filter((file) => fs.existsSync(file)).map((file) => JSON.parse(fs.readFileSync(file, 'utf8')));
     assert.equal(actions.length, 1);
     assert.equal(actions[0].previousRuntimeOid, 'c'.repeat(40));
+    // B-1583: what the real writer persisted is a shape every strict reader accepts.
+    assert.equal(isSourceUpdateActionShape(actions[0]), true);
     assert.equal(fake.calls.some(({ args }) => args.includes('merge') || args.includes('reset') || args.includes('clean')), false);
     assert.equal(result.restartActionQueued, true);
     assert.match(result.candidateManifestSha256, /^[0-9a-f]{64}$/);

@@ -48,6 +48,7 @@ import { assertLegacyTransitionAllowed } from '../bootstrap-startup-context.js';
 import { readOidPairServingReceipt, reconcileOidPairServingReceipt, validateOidPairTerminal } from '../../scripts/oid-control-capsule.mjs';
 import { computeOidTripleTargetDigest } from '../../scripts/lib/oid-triple-target.mjs';
 import { tryCommonGitDir } from '../../scripts/git-control-root.mjs';
+import { isSourceUpdateActionShape } from '../../scripts/lib/source-update-action-schema.mjs';
 import { hasCurrentUpdateConsent } from '../services/update-auto-activator.js';
 import { summarizeOpenTerminals, withLocalUpdateWriterLease } from '../services/update-writer-lease.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
@@ -330,7 +331,6 @@ const DATABASE_SNAPSHOT_ROOT = path.join(path.dirname(LIVE_DATABASE_PATH), 'nass
 // Detached --exec output is captured here (not discarded) so a failed restart
 // is diagnosable after the fact.
 const RESTART_LOG_PATH = path.join(DATA_DIR, 'last-restart.log');
-const SOURCE_UPDATE_ACTION_SCHEMA = 'nassaj-source-update-activation/v1';
 const SOURCE_UPDATE_TX = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
 const SOURCE_UPDATE_SHA40 = /^[a-f0-9]{40}$/;
 const SOURCE_UPDATE_SHA256 = /^[a-f0-9]{64}$/;
@@ -343,7 +343,12 @@ const UPDATE_CAPABILITY_FILE = typeof process.env.NASSAJ_UPDATE_CAPABILITY_FILE 
     ? path.resolve(process.env.NASSAJ_UPDATE_CAPABILITY_FILE)
     : UPDATE_CONTROL_ROOT ? path.join(UPDATE_CONTROL_ROOT, 'UPDATE_RUNTIME_CAPABILITY.json') : null;
 
-function readCanonicalSourceUpdateAction(file, candidateRoot, expectedServerBuildId) {
+/**
+ * Read the mode-0600 activation action of one candidate. Returns null when it
+ * belongs to another server build; throws a bounded code when it is unsafe or
+ * not exactly the shape the updater writes (shared schema, B-1583).
+ */
+export function readCanonicalSourceUpdateAction(file, candidateRoot, expectedServerBuildId) {
     const canonicalFile = path.join(candidateRoot, 'activation-action.json');
     if (path.resolve(file) !== canonicalFile) throw new Error('source_update_action_not_canonical');
     const candidateMetadata = fs.lstatSync(candidateRoot);
@@ -358,21 +363,11 @@ function readCanonicalSourceUpdateAction(file, candidateRoot, expectedServerBuil
         throw new Error('source_update_action_unsafe');
     }
     const action = JSON.parse(fs.readFileSync(canonicalFile, 'utf8'));
-    const keys = Object.keys(action || {}).sort().join(',');
-    const expectedKeys = [
-        'expectedServerBuildId', 'manifestPath', 'manifestSha256', 'originalHead',
-        'schema', 'targetCommit', 'transactionId', 'version',
-    ].sort().join(',');
     const expectedManifest = path.join(candidateRoot, 'candidate-manifest.json');
     if (action?.expectedServerBuildId !== expectedServerBuildId) return null;
-    if (keys !== expectedKeys || action?.schema !== SOURCE_UPDATE_ACTION_SCHEMA
-        || !SOURCE_UPDATE_TX.test(action.transactionId || '')
+    if (!isSourceUpdateActionShape(action)
         || action.transactionId !== path.basename(candidateRoot)
-        || !SOURCE_UPDATE_SHA40.test(action.originalHead || '')
-        || !SOURCE_UPDATE_SHA40.test(action.targetCommit || '')
-        || typeof action.version !== 'string'
-        || path.resolve(action.manifestPath || '') !== expectedManifest
-        || !SOURCE_UPDATE_SHA256.test(action.manifestSha256 || '')) {
+        || path.resolve(action.manifestPath) !== expectedManifest) {
         throw new Error('source_update_action_invalid');
     }
     return Object.freeze({ ...action, candidateRoot, manifestPath: expectedManifest });
@@ -854,6 +849,105 @@ export function reconcileStrandedActivationJobs({
             return { jobId: job.id, state: job.state, settled: false, error: String(error?.message || error).slice(0, 200) };
         }
     });
+}
+
+/** The bound activation action of a queued job, or null when it is absent, unsafe or not bound. */
+function readBoundQueuedAction(job, controlRoot) {
+    if (!SOURCE_UPDATE_TX.test(job.transaction_id || '')) return null;
+    const file = path.join(controlRoot, 'candidates', job.transaction_id, 'activation-action.json');
+    const metadata = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (!metadata?.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o600
+        || metadata.size > 16 * 1024) return null;
+    const raw = fs.readFileSync(file, 'utf8');
+    if (crypto.createHash('sha256').update(raw.trim()).digest('hex') !== job.activation_identity_sha256) return null;
+    const action = JSON.parse(raw);
+    return isSourceUpdateActionShape(action) && action.transactionId === job.transaction_id
+        && action.targetCommit === job.release_commit ? action : null;
+}
+
+/** Why a queued activation can no longer apply, or null while it still can. */
+function supersededQueuedReason(action, { runtimeCommit, head }) {
+    if (SOURCE_UPDATE_SHA40.test(runtimeCommit || '') && runtimeCommit === action.targetCommit) {
+        return 'source_update_target_already_loaded';
+    }
+    if (SOURCE_UPDATE_SHA40.test(head || '') && head !== action.originalHead) return 'source_update_source_moved';
+    return null;
+}
+
+/** Settle the open command-board rows of one superseded job; never restarts anything. */
+function settleSupersededJobRows(jobId, code, actions) {
+    let settled = 0;
+    for (const row of actions.listOpenForSourceUpdateJob(jobId)) {
+        settled += row.status === 'executing'
+            ? actions.failExecutingAttempt(row.id, row.executionAttemptNonce, code)
+            : actions.supersedeQueued(row.id, code);
+    }
+    return settled;
+}
+
+/**
+ * B-1583: boot-time settlement of git-checkout jobs left in `restart_queued`
+ * whose activation can no longer apply: the runtime already loaded the target
+ * (an out-of-band install of the same build) or the source moved past the
+ * action's originalHead. The job becomes `superseded` with a receipt, its open
+ * rows are settled, and the outcome is audited. Idempotent; never restarts;
+ * runs after completeBootstrappedSourceUpdate, so an in-flight activation is
+ * already past `restart_queued` and is not touched.
+ */
+export function reconcileSupersededQueuedSourceUpdates({
+    jobs = sourceUpdateJobsDb, actions = pendingServerActionsDb, audit = auditLogDb,
+    runtimeCommit = null, readHead = () => readSourceHead(APP_ROOT),
+    controlRoot = null,
+} = {}) {
+    const queued = jobs.listRestartQueuedGitCheckout();
+    if (!queued.length) return [];
+    let head = null;
+    try { head = readHead(); } catch { head = null; }
+    const root = controlRoot || createUpdateMaintenanceGate({ projectPath: APP_ROOT }).paths.controlRoot;
+    return queued.map((job) => {
+        let action = null;
+        try { action = readBoundQueuedAction(job, root); } catch { action = null; }
+        const code = action ? supersededQueuedReason(action, { runtimeCommit, head }) : null;
+        if (!code) return { jobId: job.id, settled: false };
+        const identity = { jobId: job.id, transactionId: job.transaction_id, activationIdentitySha256: job.activation_identity_sha256 };
+        try {
+            jobs.appendActivationReceipt(identity, 'restart_queued', 'recovery', { code, intervention: 'automatic' });
+            if (!jobs.transitionActivation(identity, ['restart_queued'], 'superseded')) return { jobId: job.id, settled: false, code };
+            const rows = settleSupersededJobRows(job.id, code, actions);
+            audit.record('source_update_superseded_at_boot', { metadata: { sourceUpdateJobId: job.id, code, rows } });
+            return { jobId: job.id, settled: true, code, rows };
+        } catch (error) {
+            return { jobId: job.id, settled: false, error: String(error?.message || error).slice(0, 200) };
+        }
+    });
+}
+
+/**
+ * The commit HEAD resolves to in the source tree, or null when unreadable. Read
+ * from the ref files (no process launch): loose ref first, then packed-refs.
+ */
+export function readSourceHead(root) {
+    const dotGit = path.join(root, '.git');
+    const gitDir = fs.statSync(dotGit).isDirectory() ? dotGit
+        : path.resolve(root, fs.readFileSync(dotGit, 'utf8').replace(/^gitdir:\s*/, '').trim());
+    const commonFile = path.join(gitDir, 'commondir');
+    const commonDir = fs.existsSync(commonFile) ? path.resolve(gitDir, fs.readFileSync(commonFile, 'utf8').trim()) : gitDir;
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    if (SOURCE_UPDATE_SHA40.test(head)) return head;
+    const ref = /^ref: (refs\/[A-Za-z0-9._/-]+)$/.exec(head)?.[1];
+    if (!ref || ref.includes('..')) return null;
+    for (const directory of [gitDir, commonDir]) {
+        const loose = path.join(directory, ref);
+        if (fs.existsSync(loose)) {
+            const oid = fs.readFileSync(loose, 'utf8').trim();
+            return SOURCE_UPDATE_SHA40.test(oid) ? oid : null;
+        }
+    }
+    const packed = path.join(commonDir, 'packed-refs');
+    const line = fs.existsSync(packed)
+        ? fs.readFileSync(packed, 'utf8').split('\n').find((entry) => entry.endsWith(` ${ref}`)) : null;
+    const oid = line?.split(' ')[0] ?? '';
+    return SOURCE_UPDATE_SHA40.test(oid) ? oid : null;
 }
 
 async function waitForActivationState(expectedServerBuildId, state, timeoutMs = 5_000) {
@@ -3157,6 +3251,10 @@ async function executeActionRow(req, res, { id }) {
     // other exit — success, refusal, thrown error — releases it in `finally`.
     let heldForRestart = false;
     let sourceActivationContext = null;
+    // B-1583: the claimed attempt and whether a restart child was launched, so
+    // an unexpected throw can settle exactly this attempt instead of stranding it.
+    let claimedRow = null;
+    let restartLaunched = false;
     try {
         const beforeClaim = pendingServerActionsDb.getById(id);
         if (resolveHostUpdateMode() === 'local-main' && beforeClaim?.actionType === 'safe-restart'
@@ -3189,6 +3287,7 @@ async function executeActionRow(req, res, { id }) {
         }
 
         const row = pendingServerActionsDb.getById(id);
+        claimedRow = row;
 
         // (2) Resolve the action definition (static allowlist OR a valid custom
         // command — T-948 Phase 2). Unknown → fail the row. resolveAction is the
@@ -3245,9 +3344,23 @@ async function executeActionRow(req, res, { id }) {
 
         // Generation-bound restarts are revalidated after the durable claim.
         // Missing manifests and unknown/sensitive changes block fail-closed.
-        const sourceUpdate = row.expectedServerBuildId
-            ? resolveSourceUpdateActivation(row)
-            : null;
+        let sourceUpdate = null;
+        try {
+            sourceUpdate = row.expectedServerBuildId ? resolveSourceUpdateActivation(row) : null;
+        } catch (error) {
+            // B-1583: an unreadable or malformed activation action is not
+            // transient. Settle the claimed row as failed with the real code
+            // (left `executing`, nothing ever retried it) and restart nothing.
+            const reason = boundedActivationReason(error) ?? 'source_update_action_unreadable';
+            console.error('[system] source-update action rejected:', reason);
+            pendingServerActionsDb.markFailed(id, reason);
+            recordActionOutcome(req, row, 'gate_failed', { reason });
+            broadcastPendingActionsUpdated(req);
+            return res.status(422).json({
+                status: 'error', code: reason, traceId: req.serverActionTraceId,
+                detail: 'The governed source update action is invalid',
+            });
+        }
         let serverCandidate = null;
         let localPair = null;
         if (resolveHostUpdateMode() === 'local-main' && row.actionType === 'safe-restart') {
@@ -3598,6 +3711,7 @@ async function executeActionRow(req, res, { id }) {
                     };
                     try {
                         const logFd = fs.openSync(RESTART_LOG_PATH, 'a');
+                        restartLaunched = true;
                         child = spawn(executionAction.cmd, [...executionAction.args], {
                             cwd: executionAction.cwd,
                             env: { ...process.env, NASSAJ_OID_ACTION_ID: id,
@@ -3774,6 +3888,7 @@ async function executeActionRow(req, res, { id }) {
 
             try {
                 const logFd = fs.openSync(RESTART_LOG_PATH, 'a');
+                restartLaunched = true;
                 const child = spawn(executionAction.cmd, [...executionAction.args], {
                     cwd: executionAction.cwd,
                     // force-restart (T-1677): NASSAJ_RESTART_KILL_SESSIONS reaches
@@ -3873,6 +3988,13 @@ async function executeActionRow(req, res, { id }) {
         return undefined;
     } catch (error) {
         console.error('[system] execute action failed:', error.message);
+        // B-1583: nothing was launched, so no later exit or receipt will settle
+        // this attempt. Fail it (nonce-guarded: a row another path already
+        // settled or re-claimed is untouched) rather than leave it `executing`.
+        if (claimedRow?.executionAttemptNonce && !heldForRestart && !restartLaunched && !sourceActivationContext
+            && pendingServerActionsDb.failExecutingAttempt(id, claimedRow.executionAttemptNonce, 'internal') === 1) {
+            broadcastPendingActionsUpdated(req);
+        }
         if (!res.headersSent) {
             return res.status(500).json({ status: 'error', code: 'internal', detail: 'Action failed' });
         }

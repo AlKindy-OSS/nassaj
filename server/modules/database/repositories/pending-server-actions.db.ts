@@ -605,6 +605,27 @@ export const pendingServerActionsDb = {
       .run(reasonCode.slice(0, MAX_ERROR_LEN), id).changes;
   },
 
+  /**
+   * B-1583: fail exactly one claimed attempt. Guarded by status 'executing' and
+   * the attempt nonce, so a row another path already settled or re-claimed is
+   * left alone (0 changes).
+   */
+  failExecutingAttempt(id: string, nonce: string, reasonCode: string): number {
+    if (!/^[a-f0-9]{64}$/.test(nonce || '')) return 0;
+    return getConnection().prepare(
+      `UPDATE pending_server_actions SET status = 'failed', error = ?, settled_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'executing' AND execution_attempt_nonce = ?`,
+    ).run(reasonCode.slice(0, MAX_ERROR_LEN), id, nonce).changes;
+  },
+
+  /** B-1583: the rows bound to one source-update job that are not yet settled history. */
+  listOpenForSourceUpdateJob(jobId: string): PendingServerActionRow[] {
+    return (getConnection().prepare(
+      `SELECT * FROM pending_server_actions WHERE source_update_job_id = ?
+       AND status IN ('pending', 'failed', 'executing') ORDER BY requested_at, id`,
+    ).all(jobId) as PendingServerActionDbRow[]).map(mapRow);
+  },
+
   /** Marks an action failed with a bounded error string (kept for visibility). */
   markFailed(id: string, error: string): number {
     const db = getConnection();

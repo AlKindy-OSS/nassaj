@@ -135,6 +135,8 @@ export const SERVER_BUILD_INPUTS = [...new Set([
     'scripts/safe-restart.sh',
     ...UPDATE_RUNTIME_BUNDLE_ENTRIES,
     'scripts/lib/source-update-tree-identity.mjs',
+    // B-1583: the activation-action schema the server writes and reads.
+    'scripts/lib/source-update-action-schema.mjs',
     'scripts/lib/dependency-tree-identity-v2.mjs',
     'scripts/lib/node-update-mode.mjs',
     'scripts/lib/node-update-publication-guard.mjs',

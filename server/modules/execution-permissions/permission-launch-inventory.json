@@ -627,7 +627,7 @@
     {
       "id": "server/index.js#child_process.spawn#1",
       "file": "server/index.js",
-      "line": 655,
+      "line": 657,
       "primitive": "child_process.spawn",
       "expression": "spawnChildProcess",
       "classification": "read_only_process_query",
@@ -1635,7 +1635,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#1",
       "file": "server/routes/system.js",
-      "line": 882,
+      "line": 976,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1649,7 +1649,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#2",
       "file": "server/routes/system.js",
-      "line": 935,
+      "line": 1029,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1663,7 +1663,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#3",
       "file": "server/routes/system.js",
-      "line": 2876,
+      "line": 2970,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1677,7 +1677,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#4",
       "file": "server/routes/system.js",
-      "line": 3601,
+      "line": 3715,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1691,7 +1691,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#5",
       "file": "server/routes/system.js",
-      "line": 3777,
+      "line": 3892,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1705,7 +1705,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#6",
       "file": "server/routes/system.js",
-      "line": 4109,
+      "line": 4231,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1831,7 +1831,7 @@
     {
       "id": "server/services/source-updater.js#child_process.spawn#1",
       "file": "server/services/source-updater.js",
-      "line": 334,
+      "line": 335,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1845,7 +1845,7 @@
     {
       "id": "server/services/source-updater.js#child_process.spawnSync#1",
       "file": "server/services/source-updater.js",
-      "line": 215,
+      "line": 216,
       "primitive": "child_process.spawnSync",
       "expression": "spawnSync",
       "classification": "read_only_process_query",
@@ -1859,7 +1859,7 @@
     {
       "id": "server/services/source-updater.js#child_process.spawnSync#2",
       "file": "server/services/source-updater.js",
-      "line": 423,
+      "line": 424,
       "primitive": "child_process.spawnSync",
       "expression": "spawnSync",
       "classification": "read_only_process_query",
@@ -1887,7 +1887,7 @@
     {
       "id": "server/services/tests/source-activation-fixture.js#child_process.execFileSync#1",
       "file": "server/services/tests/source-activation-fixture.js",
-      "line": 42,
+      "line": 43,
       "primitive": "child_process.execFileSync",
       "expression": "execFileSync",
       "classification": "test_only",
@@ -1901,7 +1901,7 @@
     {
       "id": "server/services/tests/source-activation-fixture.js#child_process.execFileSync#2",
       "file": "server/services/tests/source-activation-fixture.js",
-      "line": 132,
+      "line": 148,
       "primitive": "child_process.execFileSync",
       "expression": "execFileSync",
       "classification": "test_only",
@@ -1915,7 +1915,7 @@
     {
       "id": "server/services/tests/source-activation-fixture.js#child_process.execFileSync#3",
       "file": "server/services/tests/source-activation-fixture.js",
-      "line": 141,
+      "line": 157,
       "primitive": "child_process.execFileSync",
       "expression": "execFileSync",
       "classification": "test_only",
@@ -1929,7 +1929,7 @@
     {
       "id": "server/services/tests/source-activation-fixture.js#child_process.execFileSync#4",
       "file": "server/services/tests/source-activation-fixture.js",
-      "line": 156,
+      "line": 172,
       "primitive": "child_process.execFileSync",
       "expression": "execFileSync",
       "classification": "test_only",
@@ -1943,7 +1943,7 @@
     {
       "id": "server/services/tests/source-activation-fixture.js#child_process.spawn#1",
       "file": "server/services/tests/source-activation-fixture.js",
-      "line": 226,
+      "line": 242,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "test_only",
