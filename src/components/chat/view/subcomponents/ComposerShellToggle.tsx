@@ -1,9 +1,10 @@
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SquareTerminal } from 'lucide-react';
+import { Terminal } from 'lucide-react';
 
 import { PromptInputButton } from '../../../../shared/view/ui';
 import { cn } from '../../../../lib/utils';
+import { COMPOSER_ICON_BUTTON_CLASS } from './composerToolbarStyles';
 import type { ShellAvailability } from '../../hooks/useComposerShellMode';
 
 type ComposerShellToggleProps = {
@@ -29,7 +30,7 @@ export default function ComposerShellToggle({ availability, active, onToggle }: 
     <>
       <PromptInputButton
         className={cn(
-          'h-8 w-8 shrink-0 rounded-lg [&_svg]:size-4',
+          COMPOSER_ICON_BUTTON_CLASS,
           active && 'bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/20 dark:text-emerald-300',
           unavailable && 'cursor-not-allowed opacity-50 hover:bg-transparent',
         )}
@@ -43,7 +44,7 @@ export default function ComposerShellToggle({ availability, active, onToggle }: 
           if (!unavailable) onToggle();
         }}
       >
-        <SquareTerminal aria-hidden="true" />
+        <Terminal aria-hidden="true" />
       </PromptInputButton>
       {reason && (
         <span id={reasonId} className="sr-only" data-testid="composer-shell-toggle-reason">

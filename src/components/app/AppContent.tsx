@@ -40,6 +40,8 @@ import ScheduledMessagesCenterRoute from '../scheduled-messages/view/ScheduledMe
 import BuildUpdateBanner from './BuildUpdateBanner';
 import { useUpdateCompletionNotice } from '../version-upgrade/useUpdateCompletionNotice';
 import { UpdateCompletionBanner } from '../version-upgrade/view/UpdateCompletionBanner';
+import { useWhatsNew } from '../version-upgrade/whatsNew/useWhatsNew';
+import { WhatsNewDialog } from '../version-upgrade/whatsNew/WhatsNewDialog';
 import { useSessionOutcomeAcknowledgement } from './hooks/useSessionOutcomeAcknowledgement';
 import { getShellVisualViewportGeometry } from './visualViewportGeometry';
 import {
@@ -88,7 +90,7 @@ function AppContentInner() {
   const navigate = useNavigate();
   const location = useLocation();
   const sessionId = useMemo(() => routeSessionIdFromPathname(location.pathname), [location.pathname]);
-  const { t } = useTranslation('common');
+  const { t, i18n } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { user } = useAuth();
   // Success signal for an update that finished while its dialog was closed
@@ -98,6 +100,8 @@ function AppContentInner() {
   const { currentVersion: updateCurrentVersion } = useVersionCheck();
   const { notice: updateCompletionNotice, dismiss: dismissUpdateCompletionNotice } =
     useUpdateCompletionNotice(updateCurrentVersion);
+  // Once-per-browser highlights of the version now running, for every signed-in user.
+  const whatsNew = useWhatsNew(updateCurrentVersion, i18n.language ?? 'en');
   const scheduledCenterEnabled = isScheduledMessagesCenterEnabled(user?.role);
   const scheduledSummary = useScheduledMessagesSummary(scheduledCenterEnabled);
   const isScheduledRoute = location.pathname === '/scheduled' && scheduledCenterEnabled;
@@ -637,6 +641,9 @@ function AppContentInner() {
             onDismiss={dismissUpdateCompletionNotice}
           />
         </div>
+      )}
+      {whatsNew.version && whatsNew.items && (
+        <WhatsNewDialog version={whatsNew.version} items={whatsNew.items} onDismiss={whatsNew.dismiss} />
       )}
       {!isMobile ? (
         <div className="sidebar-host-panel h-full flex-shrink-0">

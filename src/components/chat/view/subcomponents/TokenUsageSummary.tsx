@@ -71,10 +71,11 @@ function useSessionAgeMs(sessionStartedAt: string | null | undefined): number | 
 }
 
 // نفس هندسة أزرار أدوات المُؤلِّف (h-8 w-8) مع توسيط الحلقة داخل الزر.
-// بلا خلفية عند المرور (كزرّ مستوى التفكير المجاور): الخلفية `ghost` مربّعٌ
+// بلا خلفية عند المرور: الخلفية `ghost` مربّعٌ
 // مستدير الحواف يحتضن شكلاً دائرياً بحجمه تقريباً، فيقرأه العين هالةً مربّعة
 // حول دائرة لا تمييزَ تحويم. البديل إشارةُ تحويم بلا سطح: خفوت طفيف.
-// الحلقة تملأ مساحة الزر 32px، لتساوي قطر دائرة مستوى التفكير.
+// الحلقة تملأ مساحة الزر 32px: مقياسُ حالةٍ يحمل النسبة في مركزه، فهي الدائرة
+// الوحيدة في الصفّ، وبقية الأزرار أيقونات بلا إطار.
 const TRIGGER_CLASS =
   'flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 shadow-none transition-opacity hover:bg-transparent hover:opacity-75 hover:shadow-none active:bg-transparent [&_svg]:size-8';
 

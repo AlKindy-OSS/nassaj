@@ -9,18 +9,21 @@ import { useResolvedTabsMode } from '../../../hooks/useResolvedTabsMode';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { FINE_POINTER_QUERY, resolveEnterSends, type EnterBehavior } from '../../../lib/enter-behavior';
 import { useQuickSettingsDrag } from '../hooks/useQuickSettingsDrag';
+import { useQuickSettingsSessionProvider } from '../sessionProviderStore';
 import type { PreferenceToggleKey, QuickSettingsPreferences } from '../types';
 
 import QuickSettingsContent from './QuickSettingsContent';
 import QuickSettingsHandle from './QuickSettingsHandle';
 import QuickSettingsPanelHeader from './QuickSettingsPanelHeader';
 
-type QuickSettingsPanelViewProps = {
-  /** T-5: مزوّد الجلسة المفتوحة حالياً — يُمرَّر إلى ClaudeUsageSection للوسم. */
-  sessionProvider?: string | null;
-};
-
-export default function QuickSettingsPanelView({ sessionProvider }: QuickSettingsPanelViewProps = {}) {
+/**
+ * The side notch and its quick-settings drawer. Mounted once in
+ * AuthenticatedApp so it is available on every signed-in page, not only in
+ * chat. It sits above the settings modal (z-[9999]) so it works there too.
+ */
+export default function QuickSettingsPanelView() {
+  // T-5: provider of the chat on screen (null elsewhere) for the usage section.
+  const sessionProvider = useQuickSettingsSessionProvider();
   const [isOpen, setIsOpen] = useState(false);
   const { t, i18n } = useTranslation('settings');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
@@ -121,7 +124,7 @@ export default function QuickSettingsPanelView({ sessionProvider }: QuickSetting
       />
 
       <div
-        className={`fixed end-0 top-0 z-40 h-full w-64 transform border-s border-border bg-background shadow-xl transition-transform duration-150 ease-out ${isOpen ? 'translate-x-0' : 'ltr:translate-x-full rtl:-translate-x-full'} ${isMobile ? 'h-screen' : ''}`}
+        className={`fixed end-0 top-0 z-[10001] h-full w-64 transform border-s border-border bg-background shadow-xl transition-transform duration-150 ease-out ${isOpen ? 'translate-x-0' : 'ltr:translate-x-full rtl:-translate-x-full'} ${isMobile ? 'h-screen' : ''}`}
       >
         <div className="flex h-full flex-col">
           <QuickSettingsPanelHeader />
@@ -141,7 +144,7 @@ export default function QuickSettingsPanelView({ sessionProvider }: QuickSetting
 
       {isOpen && (
         <div
-          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm transition-opacity duration-150 ease-out"
+          className="fixed inset-0 z-[10000] bg-background/80 backdrop-blur-sm transition-opacity duration-150 ease-out"
           onClick={() => setIsOpen(false)}
         />
       )}

@@ -163,17 +163,9 @@ function ThinkingModeSelector({
   const currentMode = translatedModes.find(mode => mode.id === selectedMode) || translatedModes[0];
   const IconComponent = currentMode.icon || Minus;
   const isUltracode = selectedMode === 'ultracode';
-  // Keep the trigger's colour calm: effort is a setting, not a destructive
-  // action. The icon carries the tier's emphasis while the surface stays faint.
-  const triggerBg: Record<string, string> = {
-    none: 'bg-muted/70 hover:bg-muted dark:bg-muted/40 dark:hover:bg-muted/60',
-    low: 'bg-amber-50/70 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-950/35',
-    medium: 'bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/35',
-    high: 'bg-blue-50/70 hover:bg-blue-100/70 dark:bg-blue-950/20 dark:hover:bg-blue-950/35',
-    xhigh: 'bg-violet-50/70 hover:bg-violet-100/70 dark:bg-violet-950/20 dark:hover:bg-violet-950/35',
-    max: 'bg-orange-50/70 hover:bg-orange-100/70 dark:bg-orange-950/20 dark:hover:bg-orange-950/35',
-    ultracode: 'bg-red-50/70 hover:bg-red-100/70 dark:bg-red-950/20 dark:hover:bg-red-950/35',
-  };
+  // A plain icon button like the rest of the composer row: no frame, no
+  // tinted disc. The tier lives in the glyph and its colour; the surface only
+  // appears on hover, exactly as on the neighbouring icon buttons.
   const triggerIconColor: Record<string, string> = {
     none: 'text-slate-500 dark:text-slate-400',
     low: 'text-amber-600 dark:text-amber-400',
@@ -191,7 +183,7 @@ function ThinkingModeSelector({
           `border-radius` (كانت تفوز على الصنف لتساوي الأولوية وترتيب الملف). */}
       {isUltracode && (
         <span
-          className="ultracode-ring pointer-events-none absolute inset-0 rounded-full"
+          className="ultracode-ring pointer-events-none absolute inset-0 rounded-lg"
           aria-hidden="true"
         />
       )}
@@ -206,7 +198,7 @@ function ThinkingModeSelector({
           }
           setIsOpen(true);
         }}
-        className={`flex h-8 w-8 items-center justify-center rounded-full border border-border/50 transition-colors duration-200 dark:border-border/60 ${triggerBg[selectedMode] || triggerBg.none}`}
+        className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         title={t('effortMode.buttonTitle', { mode: currentMode.displayName })}
         aria-haspopup="listbox"
         aria-expanded={isOpen}

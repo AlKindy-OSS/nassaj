@@ -98,10 +98,10 @@ describe('Visual gate — 3 required modal states', () => {
     expect(progressbar.getAttribute('aria-valuemin')).toBe('0');
     expect(progressbar.getAttribute('aria-valuemax')).toBe('100');
 
-    // Step counter line shows "Step 4 of 9 · 38%"
-    expect(screen.getByText('Step 4 of 9 · 38%')).not.toBeNull();
-    // Percent text also visible separately
-    expect(screen.getAllByText('38%').length).toBeGreaterThan(0);
+    // Step counter line shows "Step 4 of 9" and the percentage exactly once (owner, 2.3.1.11)
+    expect(screen.getByText('Step 4 of 9')).not.toBeNull();
+    expect(screen.queryByText(/Step 4 of 9 · /)).toBeNull();
+    expect(screen.getAllByText(/38%/)).toHaveLength(1);
 
     // Loader spinner present (not restart_queued, not activated)
     expect(document.querySelector('svg.animate-spin')).not.toBeNull();
@@ -142,8 +142,9 @@ describe('Visual gate — 3 required modal states', () => {
     const progressbar = screen.getByRole('progressbar');
     expect(progressbar.getAttribute('aria-valuenow')).toBe('63');
 
-    // Step counter shows step 6 of 9 · 63%
-    expect(screen.getByText('Step 6 of 9 · 63%')).not.toBeNull();
+    // Step counter shows step 6 of 9, with the percentage shown once
+    expect(screen.getByText('Step 6 of 9')).not.toBeNull();
+    expect(screen.getAllByText(/63%/)).toHaveLength(1);
 
     // No spinning Loader2 (Clock is used for restart_queued)
     expect(document.querySelector('svg.animate-spin')).toBeNull();
