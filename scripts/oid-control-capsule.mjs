@@ -277,6 +277,11 @@ import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 var SAFE_CONTROL_NAME = /^nassaj-[A-Za-z0-9][A-Za-z0-9._-]{0,191}$/;
+function isInitialisedGitDir(directory) {
+  const head = lstatSync(path.join(directory, "HEAD"), { throwIfNoEntry: false });
+  const objects = lstatSync(path.join(directory, "objects"), { throwIfNoEntry: false });
+  return Boolean(head?.isFile() && objects?.isDirectory() && !objects.isSymbolicLink() && !lstatSync(path.join(directory, "commondir"), { throwIfNoEntry: false }));
+}
 function commonGitDir(root) {
   const repository = realpathSync(path.resolve(root));
   const gitEntry = path.join(repository, ".git");
@@ -284,6 +289,7 @@ function commonGitDir(root) {
   if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile()) {
     throw new Error("git_control_entry_unsafe");
   }
+  if (entry.isDirectory() && isInitialisedGitDir(gitEntry)) return gitEntry;
   const result = spawnSync("git", [
     "rev-parse",
     "--path-format=absolute",

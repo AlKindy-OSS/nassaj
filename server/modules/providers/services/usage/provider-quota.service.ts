@@ -96,11 +96,25 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Codex currently returns `credits.balance` as a decimal string. Do not use
+ * Codex currently returns `credits.balance` as a decimal string or number. Do not use
  * JavaScript's broad number coercion here: it accepts hex/exponent spellings
  * and can round a billing value before it crosses the API contract.
  */
 function parseCodexCreditBalance(value: unknown): number | null {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) return null;
+    if (Number.isInteger(value)) return Number.isSafeInteger(value) ? value : null;
+
+    // Codex balances carry at most cent precision. A JSON number can arrive
+    // with a float-arithmetic tail (0.30000000000000004) that has nothing to
+    // do with the actual billed amount — rounding to cents absorbs that
+    // instead of rejecting an otherwise-valid balance as "too many digits".
+    const rounded = Math.round(value * 100) / 100;
+    return Number.isFinite(rounded) && rounded >= 0 && rounded <= Number.MAX_SAFE_INTEGER
+      ? rounded
+      : null;
+  }
+
   if (typeof value !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return null;
 
   const [whole, fraction = ''] = value.split('.');

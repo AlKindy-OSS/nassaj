@@ -50,6 +50,7 @@ import {
   SESSION_AGENTS_CACHE_TABLE_SCHEMA_SQL,
   SESSION_AGENTS_META_TABLE_SCHEMA_SQL,
   SESSION_PARTICIPANTS_TABLE_SCHEMA_SQL,
+  INTERNAL_SESSION_CHAT_SCHEMA_SQL,
   SESSION_WORKSPACE_MODES_TABLE_SCHEMA_SQL,
   SESSIONS_TABLE_SCHEMA_SQL,
   STARRED_SESSIONS_TABLE_SCHEMA_SQL,
@@ -64,6 +65,10 @@ import {
   USAGE_SOURCE_LINKS_TABLE_SCHEMA_SQL,
   WEBAUTHN_CREDENTIALS_TABLE_SCHEMA_SQL,
 } from '@/modules/database/schema.js';
+import {
+  isInternalSessionChatFlagOn,
+  setInternalSessionChatSchemaBlocked,
+} from '@/modules/database/internal-session-chat-flag.js';
 
 import { migrateLocalModelServers } from './local-model-servers.migration.js';
 
@@ -85,6 +90,70 @@ export const migrateScheduledMessages = (db: Database): void => {
       ON scheduled_messages(status, available_at, lease_expires_at)`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_messages_lease_token
       ON scheduled_messages(lease_token) WHERE lease_token IS NOT NULL`);
+  }).immediate();
+};
+
+/** ADR-187 tables in safe drop order (children first). */
+export const INTERNAL_SESSION_CHAT_TABLES = Object.freeze([
+  'session_internal_message_mentions',
+  'session_internal_messages',
+  'session_internal_room_members',
+  'session_internal_rooms',
+] as const);
+
+/** User-reference columns that must be nullable `ON DELETE SET NULL` (never RESTRICT). */
+const INTERNAL_SESSION_CHAT_ACTOR_COLUMNS = Object.freeze([
+  ['session_internal_rooms', 'created_by'],
+  ['session_internal_room_members', 'added_by'],
+  ['session_internal_messages', 'author_user_id'],
+] as const);
+
+/** True when an existing table carries the pre-integration draft shape (NOT NULL/RESTRICT actor FK). */
+const hasLegacyInternalChatShape = (db: Database): boolean =>
+  INTERNAL_SESSION_CHAT_ACTOR_COLUMNS.some(([table, column]) => {
+    if (!tableExists(db, table)) return false;
+    const fk = db.prepare('SELECT on_delete AS onDelete FROM pragma_foreign_key_list(?) WHERE "from" = ?')
+      .get(table, column) as { onDelete: string } | undefined;
+    const info = db.prepare('SELECT "notnull" AS required FROM pragma_table_info(?) WHERE name = ?')
+      .get(table, column) as { required: number } | undefined;
+    return !info || info.required === 1 || fk?.onDelete !== 'SET NULL';
+  });
+
+/**
+ * Replaces a legacy-shaped chat schema ONLY when every chat table is empty.
+ * Returns false (and changes nothing) when any table holds a row: the caller
+ * then keeps the feature disabled instead of crashing server boot.
+ */
+const replaceEmptyLegacyInternalChatSchema = (db: Database): boolean => {
+  const present = INTERNAL_SESSION_CHAT_TABLES.filter((table) => tableExists(db, table));
+  const populated = present.filter((table) => db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get());
+  if (populated.length > 0) {
+    console.error('INTERNAL_CHAT_LEGACY_SCHEMA_NOT_EMPTY: internal session chat stays disabled', {
+      tables: populated,
+    });
+    return false;
+  }
+  console.log('Running migration: Replacing empty legacy-shaped internal session chat tables');
+  for (const table of present) db.exec(`DROP TABLE ${table}`);
+  return true;
+};
+
+/**
+ * ADR-187 schema, created ONLY while NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=1 so a
+ * rollback to a binary that does not classify these tables keeps working until
+ * the flag is first enabled. Additive (CREATE ... IF NOT EXISTS), idempotent, no
+ * backfill; FKs reference sessions and users, so it runs after both. A populated
+ * legacy-shaped schema is left untouched and blocks the feature for this process.
+ */
+export const migrateInternalSessionChat = (db: Database, env: NodeJS.ProcessEnv = process.env): void => {
+  setInternalSessionChatSchemaBlocked(false);
+  if (!isInternalSessionChatFlagOn(env)) return;
+  db.transaction(() => {
+    if (hasLegacyInternalChatShape(db) && !replaceEmptyLegacyInternalChatSchema(db)) {
+      setInternalSessionChatSchemaBlocked(true);
+      return;
+    }
+    db.exec(INTERNAL_SESSION_CHAT_SCHEMA_SQL);
   }).immediate();
 };
 
@@ -2960,6 +3029,10 @@ export const runMigrations = (db: Database) => {
     // agent_model column on session_agents_cache — stores the resolved model
     // string for each agent row so the UI can display per-agent model badges.
     migrateSessionAgentsModel(db);
+
+    // Internal session team chat (T-1860, ADR-187) — ordered after every
+    // existing migration; its FKs need sessions and users only.
+    migrateInternalSessionChat(db);
 
     // Refresh the query planner's statistics (sqlite_stat1). Without them SQLite
     // plans on defaults alone and picks indexes on its own guesswork — which is

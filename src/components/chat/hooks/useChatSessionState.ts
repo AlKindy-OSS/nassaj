@@ -181,7 +181,6 @@ export function useChatSessionState({
   const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
   const [isLoadingAllMessages, setIsLoadingAllMessages] = useState(false);
   const [loadAllJustFinished, setLoadAllJustFinished] = useState(false);
-  const [showLoadAllOverlay, setShowLoadAllOverlay] = useState(false);
   const [viewHiddenCount, setViewHiddenCount] = useState(0);
   const lightHistoryCapability = useLightHistoryCapability();
 
@@ -210,7 +209,6 @@ export function useChatSessionState({
   const messagesOffsetRef = useRef(0);
   const scrollPositionRef = useRef({ height: 0, top: 0 });
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedSessionKeyRef = useRef<string | null>(null);
   /* --- لقطة نشاط الجلسة (B-208) ------------------------------------- */
   /** حارس single-flight: لا لقطتان متزامنتان أبداً. */
@@ -300,7 +298,6 @@ export function useChatSessionState({
     allMessagesLoadedRef.current = false;
     setIsLoadingAllMessages(false);
     setLoadAllJustFinished(false);
-    setShowLoadAllOverlay(false);
     setViewHiddenCount(0);
     setSearchTarget(null);
     if (searchScrollTimeoutRef.current) {
@@ -314,10 +311,6 @@ export function useChatSessionState({
     initialScrollFramesRef.current = 0;
     lastLoadedSessionKeyRef.current = null;
 
-    if (loadAllOverlayTimerRef.current) {
-      clearTimeout(loadAllOverlayTimerRef.current);
-      loadAllOverlayTimerRef.current = null;
-    }
     if (loadAllFinishedTimerRef.current) {
       clearTimeout(loadAllFinishedTimerRef.current);
       loadAllFinishedTimerRef.current = null;
@@ -853,9 +846,7 @@ export function useChatSessionState({
     allMessagesLoadedRef.current = false;
     setIsLoadingAllMessages(false);
     setLoadAllJustFinished(false);
-    setShowLoadAllOverlay(false);
     setViewHiddenCount(0);
-    if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
     if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
 
     if (sessionChanged) {
@@ -1359,24 +1350,6 @@ export function useChatSessionState({
     }
   }, [currentSessionId, isLoading, processingSessions, selectedSession?.id]);
 
-  // "Load all" overlay
-  const prevLoadingRef = useRef(false);
-  useEffect(() => {
-    const wasLoading = prevLoadingRef.current;
-    prevLoadingRef.current = isLoadingMoreMessages;
-
-    if (wasLoading && !isLoadingMoreMessages && hasMoreMessages) {
-      if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
-      setShowLoadAllOverlay(true);
-      loadAllOverlayTimerRef.current = setTimeout(() => setShowLoadAllOverlay(false), 2000);
-    }
-    if (!hasMoreMessages && !isLoadingMoreMessages) {
-      if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
-      setShowLoadAllOverlay(false);
-    }
-    return () => { if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current); };
-  }, [isLoadingMoreMessages, hasMoreMessages]);
-
   const loadAllMessages = useCallback(async () => {
     if (!selectedSession || !selectedProject) return;
     if (isLoadingAllMessages || isLoadingMoreRef.current) return;
@@ -1391,7 +1364,6 @@ export function useChatSessionState({
     paginationRequestsRef.current.add(controller);
     isLoadingMoreRef.current = true;
     setIsLoadingAllMessages(true);
-    setShowLoadAllOverlay(true);
 
     const container = scrollContainerRef.current;
     const previousScrollHeight = container ? container.scrollHeight : 0;
@@ -1424,16 +1396,14 @@ export function useChatSessionState({
 
         setLoadAllJustFinished(true);
         if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
-        loadAllFinishedTimerRef.current = setTimeout(() => { if (isCurrent()) { setLoadAllJustFinished(false); setShowLoadAllOverlay(false); } }, 1000);
+        loadAllFinishedTimerRef.current = setTimeout(() => { if (isCurrent()) setLoadAllJustFinished(false); }, 1000);
       } else {
         allMessagesLoadedRef.current = false;
-        setShowLoadAllOverlay(false);
       }
     } catch (error) {
       if (!isCurrent()) return;
       console.error('Error loading all messages:', error);
       allMessagesLoadedRef.current = false;
-      setShowLoadAllOverlay(false);
     } finally {
       paginationRequestsRef.current.delete(controller);
       if (isCurrent()) {
@@ -1563,7 +1533,6 @@ export function useChatSessionState({
     loadAllJustFinished,
     requestDeferredHistory: () => queueHistoryWork('full', true),
     requestStreamGapRecovery,
-    showLoadAllOverlay,
     claudeStatus,
     setClaudeStatus,
     probeSessionActivity,

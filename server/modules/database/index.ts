@@ -193,6 +193,12 @@ export { scheduledMessagesDb } from '@/modules/database/repositories/scheduled-m
 export type { ScheduledMessage, ScheduledMessageOptions, ScheduledMessageStatus } from '@/modules/database/repositories/scheduled-messages.db.js';
 export { scanStateDb } from '@/modules/database/repositories/scan-state.db.js';
 export { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
+export { onSessionProjectTransfer } from '@/modules/database/repositories/session-project-transfer-events.js';
+export {
+  isInternalSessionChatFlagOn,
+  isInternalSessionChatSchemaBlocked,
+} from '@/modules/database/internal-session-chat-flag.js';
+export type { SessionProjectTransferListener } from '@/modules/database/repositories/session-project-transfer-events.js';
 export { sessionWorkspaceModesDb } from '@/modules/database/repositories/session-workspace-modes.db.js';
 export type { SessionWorkspaceModeRow } from '@/modules/database/repositories/session-workspace-modes.db.js';
 export { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';

@@ -67,6 +67,12 @@ export type AuditAction =
   | 'command_board_raw_exec'
   | 'passkey_registered'
   | 'passkey_removed'
+  // ADR-187: internal team-chat room grants. Who can read a team room is the
+  // question asked later; metadata carries ids and roles only, never text.
+  | 'internal_chat_room_created'
+  | 'internal_chat_room_revalidated'
+  | 'internal_chat_member_added'
+  | 'internal_chat_member_removed'
   // ADR-098 (T-1228): external platform connectors. A connector's key is
   // nassaj-wide, so the questions asked afterwards are "who added this
   // platform" and "when was the key last rotated" — rotation being the only

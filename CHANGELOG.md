@@ -1,3 +1,26 @@
+## 2.3.0.8 — 2026-09-26
+
+يعرض رصيد Codex الإضافي في مؤشّر الاستهلاك وشريط الحصة المطوي، ويقبل الأرصدة الرقمية مقرّبةً إلى
+السنت، وجلسة Codex تعرض شارتها وحدها بلا استطلاع لاستهلاك Claude. ويزيل زر «تحميل كل الرسائل» المكرّر.
+وأقفال البناء وملفات المعاينة والتفعيل في النسخ المعزولة تُحدَّد عبر مجلد git المشترك. وميزة جديدة
+مطفأة افتراضياً: محادثة الفريق داخل الجلسة (NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=1، والجداول تُنشأ
+عند التفعيل فقط؛ الرجوع بعد التفعيل يتطلب حذفها، انظر ADR-187).
+Shows Codex extra credits in the usage indicator and collapsed quota rail, accepts numeric balances
+rounded to cents, and a Codex session shows only its own badge without polling Claude usage. Removes
+the duplicate "load all messages" button. Build locks and preview/activation files in linked
+worktrees resolve through the common git directory. New, off by default: internal session team chat
+(NASSAJ_INTERNAL_SESSION_CHAT_ENABLED=1; tables created only when enabled; rolling back after
+enabling requires dropping them, see ADR-187).
+
+قيد معروف: ما زال Qwen يوقف دوره عند انقطاع الشبكة (مُتابَع)، واختيار نموذج لكل وكيل فرعي في Codex
+مؤجَّل بانتظار فحص حيّ لحوكمته.
+Known limitations: Qwen still stops its turn on network loss (tracked); per-subagent Codex models
+are deferred pending a live governance check.
+
+التحقق / Verification: permission launch inventory digest
+sha256:f70e451187709ac33c55dc096a29f55c10c9481da4bd337ef3a08ad60d0ba737 (143 sites), unchanged
+from 2.3.0.7 (line numbers refreshed only).
+
 ## 2.3.0.7 — 2026-09-25
 
 يحذف مزوّد Gemini CLI كاملاً (طلبات HTTP باسمه تعيد الآن 400 UNSUPPORTED_PROVIDER)، ويُصلح فشل

@@ -5,6 +5,14 @@ import { spawnSync } from 'node:child_process';
 
 const SAFE_CONTROL_NAME = /^nassaj-[A-Za-z0-9][A-Za-z0-9._-]{0,191}$/;
 
+/** True for a non-linked, initialised Git dir: regular HEAD, real objects/, no commondir. */
+function isInitialisedGitDir(directory) {
+    const head = lstatSync(path.join(directory, 'HEAD'), { throwIfNoEntry: false });
+    const objects = lstatSync(path.join(directory, 'objects'), { throwIfNoEntry: false });
+    return Boolean(head?.isFile() && objects?.isDirectory() && !objects.isSymbolicLink()
+        && !lstatSync(path.join(directory, 'commondir'), { throwIfNoEntry: false }));
+}
+
 /**
  * Return the repository's real shared Git directory.
  *
@@ -19,6 +27,10 @@ export function commonGitDir(root) {
     if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
         throw new Error('git_control_entry_unsafe');
     }
+    // An initialised `.git` directory without a `commondir` link *is* the common
+    // dir, so Git's upward discovery can never pick an ancestor repository. An
+    // empty or partial `.git` is not a repository and keeps Git's own verdict.
+    if (entry.isDirectory() && isInitialisedGitDir(gitEntry)) return gitEntry;
     const result = spawnSync('git', [
         'rev-parse', '--path-format=absolute', '--git-common-dir',
     ], { cwd: repository, encoding: 'utf8', stdio: 'pipe' });
@@ -30,6 +42,11 @@ export function commonGitDir(root) {
     const resolved = realpathSync(reported);
     if (resolved !== path.resolve(reported)) throw new Error('git_control_common_dir_redirected');
     return resolved;
+}
+
+/** Read-only variant for optional evidence: `null` when no safe common dir exists. */
+export function tryCommonGitDir(root) {
+    try { return commonGitDir(root); } catch { return null; }
 }
 
 /** Backwards-readable name for the durable, shared Git control directory. */

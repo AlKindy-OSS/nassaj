@@ -47,6 +47,7 @@ import { announceContextMenuOpen, useDismissableContextMenu } from '../../hooks/
 import { useSidebarSessionExtras } from '../../context/SidebarSessionExtrasContext';
 import { ParticipantAvatarStack } from '../../../participants';
 import { useOptionalAuth } from '../../../../contexts/AuthContext';
+import { useInternalMentionCount } from '../../../internal-session-chat/internalSessionChatStore';
 import type { SessionParticipant } from '../../../participants';
 
 import SessionRowStatusIndicator from './SessionRowStatusIndicator';
@@ -197,6 +198,7 @@ export default function SidebarSessionItem({
   const isBulkSessionSelection = bulkSelectionKind === 'sessions';
   const hasSelectedSurface = isSelected || (isBulkSessionSelection && isBulkSelected);
   const compactSessionAge = formatCompactSessionAge(sessionView.sessionTime, currentTime);
+  const internalMentionCount = useInternalMentionCount(session.id);
   const visibleProcessState = useSessionProcessState(session.id);
   const processStateAuthoritative = useSessionProcessStateAuthority(session.id);
   const visibleOutcome = useSessionOutcome(session.id);
@@ -706,6 +708,17 @@ export default function SidebarSessionItem({
                 className="pointer-events-auto relative z-20 flex h-7 w-auto flex-none items-center justify-end"
               >
                 {/* التثبيت: دائم الظهور، لا يتحرّك، لا طبقة تغطيه */}
+                {/* ADR-187: شارة منشن الفريق الشخصية بجوار التثبيت، خارج فتحته الثابتة (w-7) */}
+                {!isBulkSessionSelection && internalMentionCount > 0 && (
+                  <span
+                    data-session-internal-mention
+                    className="border-[color:var(--session-internal-accent)]/40 bg-[color:var(--session-internal-accent)]/15 me-0.5 inline-flex h-5 min-w-5 flex-none items-center justify-center rounded-full border px-1 text-xs font-bold text-foreground"
+                    aria-label={t('internalChat.unreadMention', { defaultValue: 'Unread team mention' })}
+                    title={t('internalChat.unreadMention', { defaultValue: 'Unread team mention' })}
+                  >
+                    @
+                  </span>
+                )}
                 {!isBulkSessionSelection && (
                   <div data-session-pin-slot className="h-7 w-7 flex-none">
                     <button

@@ -24,10 +24,11 @@ import {
     recordPreviewLedgerEvent,
 } from './local-preview-ledger.mjs';
 import { readMutableWatcherInhibit } from './client-isolated-publish.mjs';
+import { gitControlPath } from './git-control-root.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 assertStandaloneNodePublication(ROOT);
-const GENERATION_FILE = path.join(ROOT, '.git', 'nassaj-client-source-generation');
+const GENERATION_FILE = gitControlPath(ROOT, 'nassaj-client-source-generation');
 const WATCHED = [...CLIENT_SOURCE_ENTRIES, ...CLIENT_ENV_FILES];
 const DEBOUNCE_MS = Number.parseInt(process.env.NASSAJ_CLIENT_BUILD_DEBOUNCE_MS || '1500', 10);
 const BACKOFF_MS = Number.parseInt(process.env.NASSAJ_CLIENT_BUILD_BACKOFF_MS || '15000', 10);

@@ -46,7 +46,7 @@ function repairForTest(health, hook) {
 test('refuses any root which is not the pinned legacy provenance chain', async () => {
     const root = mkdtempSync(path.join(process.env.TMPDIR || '/var/tmp', 'oid-ledger-repair-'));
     try {
-        mkdirSync(path.join(root, '.git'), { recursive: true });
+        execFileSync('git', ['init', '--quiet', root]);
         await assert.rejects(() => repairTerminalLedgerProvenance(root, { fetchImpl: async () => ({ ok: true, json: async () => ({ status: 'ok' }) }) }), /terminal_ledger_not_exact_legacy_state/);
     } finally { rmSync(root, { recursive: true, force: true }); }
 });

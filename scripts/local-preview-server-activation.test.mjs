@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -118,7 +119,7 @@ test('candidate-installed race times out only when neither readiness nor restart
 test('candidate install uses activating slot, is crash-resumable, and restores keyed candidate on rollback', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activation-runner-'));
   try {
-    fs.mkdirSync(path.join(root, '.git'));
+    execFileSync('git', ['init', '--quiet', root]); // controls live in the common Git dir
     const loaded = inputManifest('a');
     const candidate = inputManifest('b');
     artifact(path.join(root, 'dist-server'), loaded);
@@ -149,7 +150,7 @@ test('candidate install uses activating slot, is crash-resumable, and restores k
 test('candidate install fails closed when atomic exchange is unavailable', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activation-no-exchange-'));
   try {
-    fs.mkdirSync(path.join(root, '.git'));
+    execFileSync('git', ['init', '--quiet', root]); // controls live in the common Git dir
     const loaded = inputManifest('a');
     const candidate = inputManifest('b');
     artifact(path.join(root, 'dist-server'), loaded);
@@ -177,7 +178,7 @@ test('candidate install fails closed when atomic exchange is unavailable', () =>
 test('candidate install rejects a symlinked activating parent before moving the candidate', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activation-symlink-'));
   try {
-    fs.mkdirSync(path.join(root, '.git'));
+    execFileSync('git', ['init', '--quiet', root]); // controls live in the common Git dir
     const loaded = inputManifest('a');
     const candidate = inputManifest('b');
     artifact(path.join(root, 'dist-server'), loaded);

@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ADR-187: لون المحادثة الداخلية يرث هوية المشروع، بينما يبقى النص بلون
+   الواجهة لضمان تباين WCAG حتى مع مشروع يختار لوناً فاتحاً. */
+:root { --session-internal-accent: var(--project-accent, hsl(var(--primary))); }
+
 /* ── Ultracode effort mode: terminal glow ring ──────────────────────────────
    ⚠ ميزانية 8px — لا تتجاوزها. المجموع (spread + blur) لكل ظلٍّ هنا يجب أن
    يبقى ≤ 8px، وإلا عاد التوهّج مقصوصاً بحافةٍ أفقية صلبة.
@@ -1378,5 +1382,4 @@
   border-color: hsl(var(--primary) / 0.2);
   box-shadow: 0 1px 6px hsl(var(--primary) / 0.07);
 }
-
 

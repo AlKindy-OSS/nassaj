@@ -59,6 +59,7 @@ import { resolveFallbackProvider, shouldResetProvider } from '../../provider-aut
 import { useServerErrorBanner } from '../hooks/useServerErrorBanner';
 // T-1822: إخطار مخزن الاستخدام المشترك عند انتهاء كل دور.
 import { notifyClaudeUsageTurnEnd } from '../../quick-settings-panel/hooks/useClaudeUsageShared';
+import { useInternalSessionChatCapability } from '../../../stores/serverCapabilitiesStore';
 
 import { buildTurnsMap } from './subcomponents/conversationCostFormat';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
@@ -67,6 +68,7 @@ import { resolveEffectiveEngine } from './subcomponents/engineGuard';
 import WsConnectionBadge from './subcomponents/WsConnectionBadge';
 import CommandResultModal from './subcomponents/CommandResultModal';
 import BtwOverlay from './subcomponents/BtwOverlay';
+import SessionHeaderControls from './subcomponents/SessionHeaderControls';
 
 
 type PendingViewSession = {
@@ -103,6 +105,7 @@ function ChatInterface({
 }: ChatInterfaceProps) {
   const { t } = useTranslation('chat');
   const { isConnected, wsStatus, controlFrames, controlEvents, streamFrames, reconnectEpoch } = useWebSocket();
+  const internalSessionChatCapability = useInternalSessionChatCapability();
 
   // Manual refresh state — prevents double-clicks and shows a spinner.
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -324,7 +327,6 @@ function ChatInterface({
     loadAllJustFinished,
     requestDeferredHistory,
     requestStreamGapRecovery,
-    showLoadAllOverlay,
     claudeStatus,
     setClaudeStatus,
     probeSessionActivity,
@@ -1071,6 +1073,7 @@ function ChatInterface({
     }, 45_000);
     return () => window.clearTimeout(timer);
   // chatMessages.length يُعيد الضبط حين تصل رسالة جديدة (وكيل إطار WS).
+   
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, selectedSession, stuckProbeCount, handleWebSocketReconnect, chatMessages.length]);
 
@@ -1108,6 +1111,10 @@ function ChatInterface({
     <PermissionContext.Provider value={permissionContextValue}>
       <div data-chat-reading-surface style={{ backgroundColor: 'var(--chat-reading-surface, transparent)' }} className="flex h-full flex-col">
         {sessionHeaderTarget && createPortal(
+          <SessionHeaderControls
+            sessionId={selectedSession?.id ?? currentSessionId ?? null}
+            internalChatEnabled={internalSessionChatCapability.enabled}
+          >
           <SessionParticipantsBar
             key={selectedSession?.id ?? currentSessionId}
             skills={sessionSkills}
@@ -1120,7 +1127,8 @@ function ChatInterface({
               if (sessionId) onSelectedSessionClosedChange?.(sessionId, closed);
             }}
             historyReady={!isLoadingSessionMessages && (!selectedSession || currentSessionId === selectedSession.id)}
-          />,
+          />
+          </SessionHeaderControls>,
           sessionHeaderTarget,
         )}
         {/* Top floating column: WsConnectionBadge فقط (T-1821: زرّ التحديث الدائري
@@ -1190,7 +1198,6 @@ function ChatInterface({
           loadAllJustFinished={loadAllJustFinished}
           onRequestDeferredHistory={requestDeferredHistory}
           onResumeStreamRecovery={resumeStreamRecovery}
-          showLoadAllOverlay={showLoadAllOverlay}
           createDiff={createDiff}
           onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}

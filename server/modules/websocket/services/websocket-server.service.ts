@@ -24,6 +24,7 @@ import {
 } from '@/modules/websocket/services/shell-websocket.service.js';
 import { handleTerminalConnection } from '@/modules/websocket/services/terminal-websocket.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
+import { handleInternalChatConnection } from '@/modules/internal-session-chat/index.js';
 
 type WebSocketServerDependencies = {
   verifyClient: Parameters<typeof verifyWebSocketClient>[1];
@@ -195,6 +196,11 @@ export function createWebSocketServer(
 
     if (pathname === '/ws') {
       handleChatConnection(ws, incomingRequest, dependencies.chat);
+      return;
+    }
+    if (pathname === '/internal-session-chat') {
+      // ADR-187: its own registry; refusals close with terminal 4404.
+      handleInternalChatConnection(ws, url, Number(incomingRequest.user?.id));
       return;
     }
 

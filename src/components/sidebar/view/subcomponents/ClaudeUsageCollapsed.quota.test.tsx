@@ -27,8 +27,15 @@ vi.mock('../../../auth/context/AuthContext', () => ({
   useAuth: () => ({ user: null }),
 }));
 
+// qa-critic (T-1858، جولة 2): يتتبّع enabled لإثبات أن حصّة Claude معطَّلة على
+// جلسة Codex في السطحين معاً (كانت مُفعَّلة أيضاً لعرض هارنس Claude بجانب
+// رصيد Codex بشارة "+" غير موسومة — عطلٌ مُصلَح، والتطابق شرطُ هذا الملف A1).
+const claudeUsageEnabledCalls: boolean[] = [];
 vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
-  useClaudeUsageShared: () => ({ status: 'idle', refetch: () => {} }),
+  useClaudeUsageShared: (enabled: boolean) => {
+    claudeUsageEnabledCalls.push(enabled);
+    return { status: 'idle', refetch: () => {} };
+  },
 }));
 
 // دورة التجديد — قابلة للتهيئة بين الاختبارات (إصلاح B-1290 follow-up item 4).
@@ -101,6 +108,7 @@ beforeEach(() => {
   __resetSelectedProviderStore();
   setSelectedProvider('codex');
   cycleEnabledCalls.length = 0;
+  claudeUsageEnabledCalls.length = 0;
   _lastCollapsedCyclesSuccess = null;
   // الصف الافتراضي: codex بمرساة مُكتشَفة.
   cyclesRows = [
@@ -224,5 +232,25 @@ describe('ClaudeUsageCollapsed — تطابق حالة حصة Codex مع اله�
     expect(header.textContent).not.toContain('↻');
     expect(collapsed.textContent).not.toContain('↻');
     expect(cycleEnabledCalls).not.toContain(true);
+  });
+
+  it('حصّة Claude معطَّلة في السطحين على جلسة Codex (qa-critic T-1858 ج2)', () => {
+    quotaResult = {
+      ...quotaResult,
+      status: 'success',
+      plan: 'plus',
+      windows: [
+        {
+          key: 'primary',
+          usedPercent: 12,
+          resetsAt: '2026-08-01T05:00:00.000Z',
+          windowSeconds: 18_000,
+          horizon: { value: 5, unit: 'hour' },
+        },
+      ],
+    };
+    renderBoth();
+    expect(claudeUsageEnabledCalls.length).toBeGreaterThan(0);
+    expect(claudeUsageEnabledCalls).not.toContain(true);
   });
 });

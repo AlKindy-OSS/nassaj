@@ -1,6 +1,7 @@
 import { getConnection } from '@/modules/database/connection.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { rotateProjectStructureForPath } from '@/modules/database/repositories/project-access.js';
+import { notifyProjectTransfer } from '@/modules/database/repositories/session-project-transfer-events.js';
 import { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';
 import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/index.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
@@ -105,6 +106,7 @@ export const sessionsDb = {
     // concurrent UNIQUE violation or mid-flight crash never leaves the sessions
     // table with a dangling project_path reference or a partial row.  (B-38.)
     let createdProjectId: string | null = null;
+    let transferred = false;
     const run = db.transaction(() => {
       // Ensure the project path exists in the projects table before writing the
       // session row that carries the FK reference.
@@ -128,6 +130,8 @@ export const sessionsDb = {
       // failure all over again. Their sole writer is setSessionEnginePin.
       // BEFORE INSERT guards deliberately reject existing identities. Update first
       // so synchronization preserves children and never runs an INSERT conflict path.
+      const previous = db.prepare('SELECT project_path FROM sessions WHERE session_id = ?')
+        .get(sessionId) as { project_path: string | null } | undefined;
       const updated = db.prepare(
         `UPDATE sessions SET provider = ?, updated_at = COALESCE(?, ${NOW_ISO_SQL}),
            project_path = ?, jsonl_path = ?, custom_name = COALESCE(?, custom_name)
@@ -138,10 +142,22 @@ export const sessionsDb = {
           `INSERT INTO sessions (session_id, provider, custom_name, project_path, jsonl_path, isArchived, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, 0, COALESCE(?, ${NOW_ISO_SQL}), COALESCE(?, ${NOW_ISO_SQL}))`
         ).run(sessionId, provider, customName ?? null, normalizedProjectPath, jsonlPath ?? null, createdAtValue, updatedAtValue);
+      } else if (previous?.project_path !== normalizedProjectPath) {
+        // ADR-187: a cross-project transfer never silently retains human-room grants.
+        // The tables exist only once the feature flag has been enabled.
+        const hasRooms = db.prepare(`SELECT 1 FROM sqlite_master
+          WHERE type='table' AND name='session_internal_rooms'`).get();
+        if (hasRooms) {
+          db.prepare(`UPDATE session_internal_rooms
+            SET membership_state='revalidation_required', version=version+1, updated_at=CURRENT_TIMESTAMP
+            WHERE session_id=?`).run(sessionId);
+        }
+        transferred = true;
       }
     });
 
     run.immediate();
+    if (transferred) notifyProjectTransfer(sessionId);
     // The new row may be a lexical alias of an already-registered physical root.
     // Rotate through the committed path so every canonical alias is fenced.
     if (createdProjectId) rotateProjectStructureForPath(createdProjectId, normalizedProjectPath);

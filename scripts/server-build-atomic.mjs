@@ -27,6 +27,7 @@ import ts from 'typescript';
 import { fileURLToPath } from 'node:url';
 import { verifyCodexSdkImageOnlySync } from './patch-codex-sdk-image-only.mjs';
 import { previewControlPaths, recordPreviewLedgerEvent } from './local-preview-ledger.mjs';
+import { gitControlPath } from './git-control-root.mjs';
 import { assertNoNonterminalOidTransaction } from './oid-control-journal.mjs';
 import {
     installUpdateRuntimeBundle, verifyUpdateRuntimeBundle, UPDATE_RUNTIME_BUNDLE_ENTRIES,
@@ -42,7 +43,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIVE_DIR = path.join(ROOT, 'dist-server');
 const STAGING_DIR = path.join(ROOT, 'dist-server.bak-staging');
 const PREVIOUS_DIR = path.join(ROOT, 'dist-server.bak-previous');
-const LOCK_FILE = path.join(ROOT, '.git', 'nassaj-server-build.lock');
+/** Build lock in the common Git dir; a linked worktree's `.git` is a file. */
+export function serverBuildLockPath(root = ROOT) {
+    return gitControlPath(root, 'nassaj-server-build.lock');
+}
 export const BUNDLED_UPDATE_CONTROL_SCRIPTS = [
     'local-preview-ledger.mjs',
     'local-preview-server-activation.mjs',
@@ -985,7 +989,7 @@ function main() {
     const localPreview = argv.includes('--local-preview');
     if (!localPreview) assertStandaloneNodePublication(ROOT);
     if (!argv.includes('--locked')) {
-        const lockFile = localPreview ? previewControlPaths(ROOT).buildLock : LOCK_FILE;
+        const lockFile = localPreview ? previewControlPaths(ROOT).buildLock : serverBuildLockPath(ROOT);
         const result = runWithFlock(lockFile, process.execPath, [fileURLToPath(import.meta.url), '--locked', ...argv], {
             cwd: ROOT,
             stdio: 'inherit',

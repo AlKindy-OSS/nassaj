@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { listOidControlTransactions, OID_TERMINAL_STATES } from './oid-control-journal.mjs';
 import { previewControlPaths, readPreviewLedger, applyPreviewLedgerEvent } from './local-preview-ledger.mjs';
 import { settleTerminalOidControlLocked } from './oid-terminal-control-reconcile.mjs';
+import { commonGitDir } from './git-control-root.mjs';
 
 const BUILD = /^[a-f0-9]{64}$/;
 const OID = /^[a-f0-9]{40}$/;
@@ -131,7 +132,7 @@ function sameHashMap(left, right, keys) {
 }
 
 function terminalControlProof(root, nonce, expectedControls) {
-    const gitDirectory = commonGitDirectory(root);
+    const gitDirectory = commonGitDir(root);
     const request = path.join(gitDirectory, 'nassaj-preview-oid-control-request-v1.json');
     const event = path.join(gitDirectory, `nassaj-preview-oid-event-control-${String(LEGACY.sequence).padStart(16, '0')}.json`);
     const consumerFile = path.join(gitDirectory, 'nassaj-preview-oid-consumer-v1.json');
@@ -157,7 +158,7 @@ function terminalControlProof(root, nonce, expectedControls) {
 }
 
 function terminalControlReceiptExists(root, nonce) {
-    return existsSync(path.join(commonGitDirectory(root), `nassaj-oid-terminal-control-${LEGACY.sequence}-${nonce}.json`));
+    return existsSync(path.join(commonGitDir(root), `nassaj-oid-terminal-control-${LEGACY.sequence}-${nonce}.json`));
 }
 
 function receiptBaseMatches(receipt, proof, event) {
@@ -209,10 +210,6 @@ function validateReceiptState(receipt, proof, event, current) {
     throw new Error('terminal_ledger_receipt_mismatch');
 }
 
-function commonGitDirectory(root) {
-    const result = spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
-    return result.status === 0 ? path.resolve(root, String(result.stdout).trim()) : path.join(root, '.git');
-}
 
 function exactStaleLedger(ledger) {
     return ledger?.serverPublisher === 'oid' && ledger.serverSourceGeneration === LEGACY.sequence
@@ -344,7 +341,7 @@ async function repairLocked(root, { fetchImpl = fetch, testHooks = undefined } =
 export async function repairTerminalLedgerProvenance(root, options = {}) {
     if (options.fetchImpl || options.testHooks) return repairLocked(root, options);
     const absoluteRoot = path.resolve(root);
-    const gitDirectory = commonGitDirectory(absoluteRoot);
+    const gitDirectory = commonGitDir(absoluteRoot);
     const result = spawnSync('flock', ['-x', '-w', '10', '-F', path.join(gitDirectory, 'nassaj-preview-event-mutation.lock'),
         'flock', '-x', '-w', '10', '-F', path.join(gitDirectory, 'nassaj-local-preview-ledger.lock'),
         process.execPath, fileURLToPath(import.meta.url), '--apply-locked', absoluteRoot], { encoding: 'utf8' });

@@ -493,5 +493,8 @@
     "copyCommand": "Copy",
     "copied": "Copied",
     "copyCommandAria": "Copy the operator command"
+  },
+  "internalChat": {
+    "unreadMention": "Unread team mention"
   }
 }

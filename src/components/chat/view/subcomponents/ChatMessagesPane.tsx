@@ -93,7 +93,6 @@ interface ChatMessagesPaneProps {
   onRequestDeferredHistory: () => void;
   /** زرّ «استكمِل الآن» على صفّ فجوة البثّ (bypass صريح، بلا إخفاء تلقائي). */
   onResumeStreamRecovery?: (sessionId: string) => void;
-  showLoadAllOverlay: boolean;
   createDiff: any;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
@@ -190,7 +189,6 @@ export default function ChatMessagesPane({
   loadAllJustFinished,
   onRequestDeferredHistory,
   onResumeStreamRecovery,
-  showLoadAllOverlay,
   createDiff,
   onFileOpen,
   onShowSettings,
@@ -409,33 +407,21 @@ export default function ChatMessagesPane({
             </div>
           )}
 
-          {/* Floating "Load all messages" overlay */}
-          {(showLoadAllOverlay || isLoadingAllMessages || loadAllJustFinished) && (
+          {/*
+            "Load all" confirmation toast. The floating CTA button that used
+            to sit here duplicated the one in the "showingOf" row above (both
+            called loadAllMessages and were visible together while loading);
+            only the completion toast is kept, since the acting button
+            disappears the moment allMessagesLoaded flips true.
+          */}
+          {loadAllJustFinished && (
             <div className="pointer-events-none sticky top-2 z-20 flex justify-center">
-              {loadAllJustFinished ? (
-                <div className="flex items-center gap-2 rounded-full bg-success px-4 py-1.5 text-xs font-medium text-primary-foreground shadow-lg">
-                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>{t('session.messages.allLoaded')}</span>
-                </div>
-              ) : (
-                <button
-                  className="pointer-events-auto flex items-center gap-2 rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:bg-primary/90 disabled:cursor-wait disabled:opacity-75"
-                  onClick={loadAllMessages}
-                  disabled={isLoadingAllMessages}
-                >
-                  {isLoadingAllMessages && (
-                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-                  )}
-                  <span>
-                    {isLoadingAllMessages
-                      ? t('session.messages.loadingAll')
-                      : <>{t('session.messages.loadAll')} {totalMessages > 0 && `(${totalMessages})`}</>
-                    }
-                  </span>
-                </button>
-              )}
+              <div className="flex items-center gap-2 rounded-full bg-success px-4 py-1.5 text-xs font-medium text-primary-foreground shadow-lg">
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>{t('session.messages.allLoaded')}</span>
+              </div>
             </div>
           )}
 
@@ -448,10 +434,11 @@ export default function ChatMessagesPane({
               </button>
               {' | '}
               <button
-                className="text-blue-600 underline hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                className="text-blue-600 underline hover:text-blue-700 disabled:cursor-wait disabled:no-underline disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
                 onClick={loadAllMessages}
+                disabled={isLoadingAllMessages}
               >
-                {t('session.messages.loadAll')}
+                {isLoadingAllMessages ? t('session.messages.loadingAll') : t('session.messages.loadAll')}
               </button>
             </div>
           )}

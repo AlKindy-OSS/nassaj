@@ -1,3 +1,8 @@
+## 2.3.0.8 — 2026-09-26
+
+رصيد Codex الإضافي في مؤشّر الاستهلاك، وزر واحد لتحميل كل الرسائل، وأقفال البناء المشتركة في النسخ المعزولة، ومحادثة فريق داخل الجلسة مطفأة افتراضياً.
+Codex extra credits in the usage indicator, a single load-all-messages button, shared build locks in linked worktrees, and internal team chat (off by default).
+
 ## 2.3.0.7 — 2026-09-25
 
 حذف مزوّد Gemini CLI، وحدود عضوية المشاريع، وإيقاف دورات الوكلاء عند تعديل المستخدمين.
@@ -16,6 +21,32 @@ Improve provider status localization, optional hardware usage, images and menus.
 # التحديثات
 
 هنا تجد ملخصاً عملياً لأحدث إصدارات نسّاج: ما الجديد، وما الذي ستلاحظه عند الاستخدام. أما التفاصيل التقنية الكاملة فتوجد في سجل التغييرات داخل المشروع.
+
+---
+
+## الإصدار 2.3.0.8 — رصيد Codex الإضافي ومحادثة الفريق (مطفأة)
+
+ما الذي ستلاحظه:
+
+- يظهر رصيد Codex الإضافي في مؤشّر الاستهلاك أعلى الصفحة وفي شريط الحصة المطوي. جلسة Codex
+  تعرض شارة رصيدها وحدها.
+- في المحادثة زر واحد فقط لـ«تحميل كل الرسائل»، ويعرض حالة التحميل.
+- البناء والمعاينة في النسخ المعزولة من المستودع يستخدمان الأقفال نفسها التي تستخدمها النسخة الرئيسية.
+- محادثة الفريق داخل الجلسة ميزة جديدة مطفأة افتراضياً: حوار بين الأعضاء لا يصل إلى الوكيل.
+  تبقى مطفأة حتى تتوفر واجهة لإدارة الأعضاء.
+
+قيد معروف: ما زال Qwen يوقف دوره عند انقطاع الشبكة (مُتابَع).
+
+### English
+
+- Codex extra credits appear in the header usage indicator and the collapsed quota rail; a Codex
+  session shows only its own badge.
+- Chat has a single "load all messages" control, with a loading state.
+- Builds and previews in linked worktrees share the same locks as the main checkout.
+- Internal session team chat is new and off by default: a members-only conversation that never
+  reaches the agent. It stays off until a member-management UI exists.
+
+Known limitation: Qwen still stops its turn on network loss (tracked).
 
 ---
 

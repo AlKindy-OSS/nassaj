@@ -6,8 +6,11 @@ import { useClaudeUsageShared as useClaudeUsage } from '../../../quick-settings-
 import { useAuth } from '../../../auth/context/AuthContext';
 import {
   clampUtilization,
+  formatCreditBalance,
   formatPercent,
+  formatRemainingHarnessCredits,
   formatResetTime,
+  hasDisplayableExtraUsageCredits,
   usageTextColorClass,
 } from '../../../quick-settings-panel/claudeUsageHelpers';
 import type { ClaudeUsage } from '../../../quick-settings-panel/claudeUsageTypes';
@@ -141,7 +144,10 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
     quota.isClaudeAccount &&
     engineProvider === null &&
     (!activeModel || providerQuota.isAnthropic || looksLikeAnthropicModel(activeModel));
-  const usage = useClaudeUsage(claudeWindowsAllowed, user?.id);
+  // qa-critic (T-1858، جولة 2): كان يُشغَّل أيضاً حين effectiveProvider==='codex'
+  // فيُعرض رصيد هارنس Claude بجانب رصيد Codex بشارة «+» غير موسومة — نفس عطل
+  // الهيدر. حُصر بـ`claudeWindowsAllowed` (يتضمّن `quota.isClaudeAccount`).
+  const usage = useClaudeUsage(isNarrow && claudeWindowsAllowed, user?.id);
   const cyclesState = useProviderCycles(isNarrow && cycleFallbackResolved);
   const cycle = useCycleCountdown(
     cyclesState.status === 'success' ? cyclesState.rows : null,
@@ -153,7 +159,15 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
 
   // غير كلود: دورة التجديد إن كانت مرساتها مُكتشَفة/يدوية، وإلا صمت.
   if (!claudeWindowsAllowed) {
-    if (quotaWindows.length > 0) {
+    const extraCredits =
+      providerQuota.status === 'success' ? providerQuota.data?.extraUsageCredits : undefined;
+    const hasExtraCredits =
+      extraCredits &&
+      Number.isFinite(extraCredits.balance) &&
+      extraCredits.balance >= 0 &&
+      typeof extraCredits.unlimited === 'boolean';
+
+    if (quotaWindows.length > 0 || hasExtraCredits) {
       return (
         <>
           <div className="flex flex-col items-center xl:hidden">
@@ -191,6 +205,28 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
                 </div>
               );
             })}
+            {hasExtraCredits && extraCredits && (
+              <div
+                className="flex flex-col items-center gap-1 py-1"
+                title={`${t('agentUsage.codexExtraCredits')}: ${
+                  extraCredits.unlimited
+                    ? t('agentUsage.unlimited')
+                    : formatCreditBalance(extraCredits.balance, i18n.language)
+                }`}
+                aria-label={`${t('agentUsage.codexExtraCredits')}: ${
+                  extraCredits.unlimited
+                    ? t('agentUsage.unlimited')
+                    : formatCreditBalance(extraCredits.balance, i18n.language)
+                }`}
+              >
+                <span className="text-[10px] font-semibold leading-none text-primary" aria-hidden="true">
+                  +
+                </span>
+                <span className="text-[11px] tabular-nums leading-none text-muted-foreground">
+                  {extraCredits.unlimited ? '∞' : formatCreditBalance(extraCredits.balance, i18n.language)}
+                </span>
+              </div>
+            )}
           </div>
         </>
       );
@@ -256,9 +292,12 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
 
   if (usage.status !== 'success') return null;
   const { data } = usage;
+  const extraUsage = hasDisplayableExtraUsageCredits(data.extraUsage)
+    ? data.extraUsage
+    : null;
 
   const visible = WINDOWS.filter(({ key }) => data[key] !== null);
-  if (visible.length === 0) return null;
+  if (visible.length === 0 && !extraUsage) return null;
 
   return (
     // CSS double-guard: JS hides on wide viewports; xl:hidden covers any
@@ -295,6 +334,18 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
           </div>
         );
       })}
+      {extraUsage && (
+        <div
+          className="flex flex-col items-center gap-1 py-1"
+          title={`${t('claudeUsage.windows.extraUsage')}: ${formatRemainingHarnessCredits(extraUsage, i18n.language)}`}
+          aria-label={`${t('claudeUsage.windows.extraUsage')}: ${formatRemainingHarnessCredits(extraUsage, i18n.language)}`}
+        >
+          <span className="text-[10px] font-semibold leading-none text-primary" aria-hidden="true">+</span>
+          <span className="text-[11px] tabular-nums leading-none text-muted-foreground">
+            {formatRemainingHarnessCredits(extraUsage, i18n.language)}
+          </span>
+        </div>
+      )}
     </div>
     </>
   );

@@ -1114,5 +1114,21 @@
     "error": "Could not crop the image. Please try again.",
     "cropArea": "Crop area",
     "cropHint": "Use arrow keys to move or resize the crop area"
+  },
+  "internalChat": {
+    "button": "Team chat",
+    "title": "Team chat",
+    "privacyNote": "Internal to the team — never sent to the model",
+    "close": "Close team chat",
+    "unavailable": "Team chat is not available for this session, or you are not allowed to create it.",
+    "createFailed": "Team chat is not available for this session.",
+    "empty": "No internal messages yet.",
+    "unknownAuthor": "Team member",
+    "modeToggle": "Internal message",
+    "draftLabel": "Internal message draft",
+    "placeholder": "Write to the team… use @ to mention a member",
+    "notSentNote": "This message is not sent to the model.",
+    "send": "Send to team",
+    "sendFailed": "Could not send the internal message."
   }
 }

@@ -126,3 +126,29 @@ export function formatCredits(
     return `${new Intl.NumberFormat(locale).format(amount)} ${currency}`;
   }
 }
+
+/**
+ * Plain (non-currency) balance formatting for provider-native credit units
+ * (e.g. Codex extra credits) — at most 2 fraction digits, locale-shaped
+ * digits. Distinct from `formatCredits`, which is for cents-denominated,
+ * currency-coded amounts (Claude harness extra usage). Both
+ * HeaderUsageIndicator and ClaudeUsageCollapsed render the same "+N" badge
+ * for provider credits; sharing this keeps their formatting from drifting.
+ */
+export function formatCreditBalance(balance: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(balance);
+}
+
+/**
+ * Remaining harness credits (monthlyLimit - usedCredits), formatted as
+ * currency via `formatCredits`. Both HeaderUsageIndicator and
+ * ClaudeUsageCollapsed compute this identically for the Claude "extra usage"
+ * badge (visible text + aria-label duplicate the same subtraction) — a
+ * single helper keeps them from drifting apart.
+ */
+export function formatRemainingHarnessCredits(
+  extraUsage: { monthlyLimit: number; usedCredits: number; currency: string },
+  locale: string,
+): string {
+  return formatCredits(extraUsage.monthlyLimit - extraUsage.usedCredits, extraUsage.currency, locale);
+}

@@ -155,6 +155,11 @@ test('REBUILD (حرج 12): a legacy-shaped sessions table is rebuilt WITHOUT los
       'closed_sessions',
       'response_turn_metrics',
       'scheduled_messages',
+      // ADR-187 room tables (created by the last migration, never on a legacy DB).
+      'session_internal_message_mentions',
+      'session_internal_messages',
+      'session_internal_room_members',
+      'session_internal_rooms',
     ]) {
       db.exec(`DROP TABLE IF EXISTS ${dependant}`);
     }

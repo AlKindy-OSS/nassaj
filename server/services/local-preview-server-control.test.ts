@@ -19,6 +19,11 @@ import {
   transitionActivationTransaction,
 } from './local-preview-server-control.js';
 
+/** Controls live in the common Git dir, so fixtures must be real (initialised) repositories. */
+const initFixtureRepository = (root: string) => {
+  const initialized = spawnSync('git', ['init', '--quiet', root], { encoding: 'utf8' });
+  assert.equal(initialized.status, 0, initialized.stderr);
+};
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
 const sha = (value: string) => ({ path: value, sha256: 'c'.repeat(64) });
@@ -105,7 +110,7 @@ test('classifier is fail-closed for sensitive, malformed, and unclassified input
 test('candidate inspection binds ledger identity and manifests to the visible generation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'server-control-'));
   try {
-    fs.mkdirSync(path.join(root, '.git'));
+    initFixtureRepository(root);
     fs.mkdirSync(path.join(root, 'dist-server'));
     const loadedManifest = manifest([sha('server/modules/projects/services/base.ts'), ...controlInputs()]);
     const candidateManifest = manifest([
@@ -173,7 +178,7 @@ test('candidate inspection binds ledger identity and manifests to the visible ge
 test('candidate inspection accepts schema-v2 manifests with canonical bytewise path ordering', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'server-control-v2-'));
   try {
-    fs.mkdirSync(path.join(root, '.git'));
+    initFixtureRepository(root);
     fs.mkdirSync(path.join(root, 'dist-server'));
     const controls = controlInputs().map((entry) => ({ ...entry, mode: 0o444 }));
     const uppercasePath = {
@@ -229,7 +234,7 @@ test('candidate inspection accepts schema-v2 manifests with canonical bytewise p
 test('activation transaction is durable, identity-fenced, and CAS-like', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activation-transaction-'));
   try {
-    fs.mkdirSync(path.join(root, '.git'));
+    initFixtureRepository(root);
     prepareActivationTransaction({
       allowed: true, expectedServerBuildId: B, loadedBuildId: A, generation: 8,
     }, 'request-1', root);
@@ -238,6 +243,49 @@ test('activation transaction is durable, identity-fenced, and CAS-like', () => {
     assert.equal(transitionActivationTransaction(B, ['prepared'], { state: 'guard_ready' }, root)?.state, 'guard_ready');
     assert.equal(transitionActivationTransaction(A, ['guard_ready'], { state: 'complete' }, root), null);
     assert.equal(readActivationTransaction(root)?.state, 'guard_ready');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('linked worktree (.git is a file) keeps activation controls in the common Git dir', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activation-worktree-'));
+  const worktree = `${root}-linked`;
+  const git = (cwd: string, args: string[]) => {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  try {
+    git(root, ['init', '--quiet']);
+    git(root, ['-c', 'user.name=Control', '-c', 'user.email=control@example.invalid',
+      'commit', '--quiet', '--allow-empty', '-m', 'fixture']);
+    git(root, ['worktree', 'add', '--quiet', '--detach', worktree]);
+    assert.ok(fs.lstatSync(path.join(worktree, '.git')).isFile());
+    const common = path.join(fs.realpathSync(root), '.git');
+    prepareActivationTransaction({
+      allowed: true, expectedServerBuildId: B, loadedBuildId: A, generation: 3,
+    }, 'request-worktree', worktree);
+    assert.equal(fs.lstatSync(path.join(common, 'nassaj-server-activation-v1.json')).isFile(), true);
+    assert.equal(readActivationTransaction(worktree)?.state, 'prepared');
+    fs.writeFileSync(path.join(common, 'nassaj-local-preview-ledger-v1.json'), '{}');
+    // No OID request in the common dir: classification reaches the legacy reader,
+    // which now reads the common-dir ledger instead of failing on the `.git` file.
+    // An empty ledger is read successfully and classified as superseded; the old
+    // `<root>/.git/...` path failed with ENOTDIR (`candidate_inspection_failed`).
+    assert.deepEqual(inspectServerActivationCandidate(B, worktree),
+      { allowed: false, code: 'superseded', activationKind: 'legacy' });
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release layout without .git has no activation transaction instead of throwing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activation-release-layout-'));
+  try {
+    assert.equal(readActivationTransaction(root), null);
+    assert.deepEqual(inspectLegacyRestartDisposition(A, null, root),
+      { allowed: false, code: 'node_update_button_required', activationKind: 'legacy' });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -258,7 +306,7 @@ test('candidate failure diagnostics classify safe causes without leaking interna
 test('new legacy activation is denied; only exact loaded maintenance and existing matching recovery remain', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'button-only-legacy-'));
   t.after(() => { setLocalUpdateRuntimeIdentity({}); fs.rmSync(root, { recursive: true, force: true }); });
-  fs.mkdirSync(path.join(root, '.git')); const live = path.join(root, 'dist-server'); fs.mkdirSync(live);
+  initFixtureRepository(root); const live = path.join(root, 'dist-server'); fs.mkdirSync(live);
   const inputManifest = manifest(controlInputs()), buildId = inputManifest.buildId;
   fs.writeFileSync(path.join(live, 'BUILD_PROVENANCE.json'), JSON.stringify({ artifact: 'server', buildId }));
   fs.writeFileSync(path.join(live, 'SERVER_INPUT_MANIFEST.json'), JSON.stringify(inputManifest));

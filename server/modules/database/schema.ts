@@ -293,6 +293,56 @@ CREATE TABLE IF NOT EXISTS session_participants (
 `;
 
 /**
+ * ADR-187: deliberately separate human-only session chat substrate.
+ * Actor columns are nullable ON DELETE SET NULL so userDb.deleteUser (FKs ON)
+ * is never blocked; the deleted account's own membership and mentions cascade.
+ */
+export const INTERNAL_SESSION_CHAT_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS session_internal_rooms (
+  session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  membership_state TEXT NOT NULL DEFAULT 'active' CHECK (membership_state IN ('active','revalidation_required')),
+  next_sequence INTEGER NOT NULL DEFAULT 1 CHECK (next_sequence > 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_message_at TEXT,
+  version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS session_internal_room_members (
+  session_id TEXT NOT NULL REFERENCES session_internal_rooms(session_id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('owner','member','viewer')),
+  added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_read_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_read_sequence >= 0),
+  PRIMARY KEY(session_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS session_internal_messages (
+  id TEXT PRIMARY KEY NOT NULL,
+  session_id TEXT NOT NULL REFERENCES session_internal_rooms(session_id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 8000),
+  client_message_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  edited_at TEXT,
+  deleted_at TEXT,
+  UNIQUE(session_id,sequence),
+  UNIQUE(session_id,author_user_id,client_message_id)
+);
+CREATE TABLE IF NOT EXISTS session_internal_message_mentions (
+  message_id TEXT NOT NULL REFERENCES session_internal_messages(id) ON DELETE CASCADE,
+  mentioned_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(message_id,mentioned_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_internal_messages_session_sequence ON session_internal_messages(session_id, sequence DESC);
+CREATE INDEX IF NOT EXISTS idx_internal_members_user_session ON session_internal_room_members(user_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_internal_mentions_user_message ON session_internal_message_mentions(mentioned_user_id, message_id DESC);
+`;
+
+/**
  * message_authors — per-message sender attribution for multi-user sessions
  * (B-MU-UX-FIX-MSG-AUTHOR). One row is written on the run path for every user
  * prompt an authenticated user sends; history loads join user-authored text

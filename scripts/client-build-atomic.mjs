@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { loadEnv } from 'vite';
 import { previewControlPaths, recordPreviewLedgerEvent, recordPublishBaseGuardDecision } from './local-preview-ledger.mjs';
 import { readMutableWatcherInhibit } from './client-isolated-publish.mjs';
+import { gitControlPath } from './git-control-root.mjs';
 import { supportsAtomicExchange } from './lib/atomic-exchange-capability.mjs';
 
 export { supportsAtomicExchange, verifyAssetClosure };
@@ -34,7 +35,10 @@ const LIVE_DIR = path.join(ROOT, 'dist');
 const GENERATIONS_DIR = ROOT;
 const PREVIEW_GENERATIONS_DIR = path.join(ROOT, '.nassaj-local-preview', 'client');
 const RUNTIME_PREFIX = 'dist.atomic.predeploy-';
-const LOCK_FILE = path.join(ROOT, '.git', 'nassaj-client-build.lock');
+/** Build lock in the common Git dir; a linked worktree's `.git` is a file. */
+export function clientBuildLockPath(root = ROOT) {
+    return gitControlPath(root, 'nassaj-client-build.lock');
+}
 export const CLIENT_SOURCE_ENTRIES = [
     'src', 'public', 'docs/team-wiki', 'index.html', 'package.json', 'package-lock.json',
     'vite.config.js', 'postcss.config.js', 'tailwind.config.js', 'tsconfig.json', 'tsconfig.preview.json', 'shared',
@@ -508,7 +512,7 @@ function parseArgs(argv) {
 }
 
 function acquireFlock(argv, localPreview) {
-    const lockFile = localPreview ? previewControlPaths(ROOT).buildLock : LOCK_FILE;
+    const lockFile = localPreview ? previewControlPaths(ROOT).buildLock : clientBuildLockPath(ROOT);
     return acquireBuildLock(lockFile, process.execPath, [fileURLToPath(import.meta.url), '--locked', ...argv], { cwd: ROOT, stdio: 'inherit' });
 }
 
