@@ -21,8 +21,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatObservedCount, ObservedSkillCount, ObservedSkillsList } from '../../../participants/ObservedSkills';
 
+import { formatObservedCount, ObservedSkillCount, ObservedSkillsList } from '../../../participants/ObservedSkills';
 import { cn } from '../../../../lib/utils';
 import { formatWorkDuration } from '../../../../utils/workDurationFormat';
 import {
@@ -35,6 +35,7 @@ import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 
 import ClaudeStatus from './ClaudeStatus';
+import { RunStatusActions, RunStatusIdentityLabel } from './RunStatusViewerActions';
 
 // ── ثوابت مشتركة مع ClaudeStatus ─────────────────────────────────────────────
 const ACTION_KEYS = [
@@ -316,6 +317,14 @@ type AgentStatusCardProps = {
   provider?: string;
   runStartedAt?: number | null;
   progress?: RunProgress | null;
+  /** T-1904 — see ClaudeStatus.tsx. Only reaches ClaudeStatus (agents.length===0). */
+  viewerStarterName?: string | null;
+  steerable?: boolean;
+  onSteerClick?: () => void;
+  /** T-1904 e2e (BLOCKER) — see ChatComposer.tsx. Only reaches ClaudeStatus. */
+  runActiveOverride?: boolean;
+  /** T-1904 e2e (BLOCKER) — see ClaudeStatus.tsx. Fail-closed; defaults true (legacy solo). */
+  isConfirmedStarter?: boolean;
 };
 
 // ── البطاقة الموحّدة — تُعرض فقط حين agents.length > 0 ──────────────────────
@@ -330,7 +339,12 @@ function MergedCard({
   runStartedAt = null,
   progress = null,
   workflowStatus = null,
+  viewerStarterName = null,
+  steerable = false,
+  onSteerClick,
+  isConfirmedStarter = true,
 }: AgentStatusCardProps) {
+  const isViewer = viewerStarterName != null;
   const { t, i18n } = useTranslation('chat');
   // The workflow labels live in `common` (shared with the sidebar badge, so the
   // two surfaces cannot drift apart); everything else on this card is `chat`.
@@ -513,7 +527,7 @@ function MergedCard({
 
   const showProgressArea = isLoading && !frozen;
   const showTaskCounter = showProgressArea && total > 0;
-  const canInterrupt = isLoading && status?.can_interrupt !== false && !!onAbort;
+  const canInterrupt = isConfirmedStarter && isLoading && status?.can_interrupt !== false && !!onAbort;
 
   const formatLocalizedDuration = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
@@ -588,11 +602,13 @@ function MergedCard({
 
           {/* اسم المزوّد + نص الحالة */}
           <div className="flex min-w-0 grow flex-col sm:flex-row sm:items-center sm:gap-2">
-            {/* اسم المزوّد مُترجَم (عربي في الواجهة العربية): لا `tracking-*`
-                عليه — التباعد الحرفي يكسر التحام الحروف العربية. */}
-            <span className="shrink-0 text-[10px] font-bold uppercase text-muted-foreground/70">
-              {providerLabel}
-            </span>
+            {/* اسم المزوّد مُترجَم — أو اسم بادئ الدور لغير البادئ (T-1904)،
+                قطعة مشتركة مع ClaudeStatus (RunStatusViewerActions.tsx). */}
+            <RunStatusIdentityLabel
+              isViewer={isViewer}
+              viewerStarterName={viewerStarterName}
+              providerLabel={providerLabel}
+            />
             <div className="flex items-center gap-1.5">
               <span
                 className={cn(
@@ -713,30 +729,17 @@ function MergedCard({
                 })}
           </span>
 
-          {/* زر STOP — مستقل لا يُطلق toggle */}
-          {canInterrupt && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onAbort?.(); }}
-              className={[
-                'group flex shrink-0 items-center gap-1.5 rounded-full',
-                'bg-destructive/10 px-2.5 py-1 text-[10px] font-bold text-destructive',
-                'transition-all hover:bg-destructive hover:text-destructive-foreground',
-              ].join(' ')}
-            >
-              <svg
-                className="h-3 w-3 fill-current"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path d="M6 6h12v12H6z" />
-              </svg>
-              <span className="hidden sm:inline">{i18n.language?.startsWith('ar') ? 'إيقاف' : 'STOP'}</span>
-              <kbd className="hidden rounded bg-black/10 px-1 text-[9px] group-hover:bg-card/20 sm:block">
-                ESC
-              </kbd>
-            </button>
-          )}
+          {/* زر الإجراء الوحيد — STOP للبادئ أو التوجيه لغير البادئ، مستقلّ لا
+              يُطلق toggle. قطعة مشتركة مع ClaudeStatus (RunStatusViewerActions.tsx):
+              لا مسار يُظهر STOP لغير البادئ، بصرف النظر عن canInterrupt. */}
+          <RunStatusActions
+            canStop={canInterrupt}
+            onAbort={onAbort}
+            steerable={steerable}
+            onSteerClick={onSteerClick}
+            t={t}
+            isArabic={Boolean(i18n.language?.startsWith('ar'))}
+          />
 
           {/* زر chevron الطيّ — عنصر تفاعلي مستقل.
               stopPropagation يمنع الحدث من الوصول إلى الصف الأب فيُطلق toggle مرتين. */}
@@ -817,6 +820,11 @@ export default function AgentStatusCard(props: AgentStatusCardProps) {
         provider={props.provider}
         runStartedAt={props.runStartedAt}
         progress={props.progress}
+        viewerStarterName={props.viewerStarterName}
+        steerable={props.steerable}
+        onSteerClick={props.onSteerClick}
+        runActiveOverride={props.runActiveOverride}
+        isConfirmedStarter={props.isConfirmedStarter}
       />
     );
   }

@@ -27,7 +27,19 @@ import { engineProviderLabel } from '../shared/engineProviders.js';
 
 import { claudeDelegationProfile, prepareClaudeReviewedDelegation } from './services/claude-delegation-admission.js';
 import { evaluatePublicPageWrite } from './services/public-page-agent-guidance.js';
-import { createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
+import { claudeTextPayloadHash, createClaudeReceiptPrompt, isTrustedClaudeActivity } from './modules/providers/list/claude/claude-receipt-identity.js';
+import { resolveClaudeTranscriptPath } from './modules/providers/list/claude/claude-transcript-path.js';
+import {
+  confirmWithRetry,
+  createSteerRun,
+  createSteerTaintHook,
+  createTranscriptScanner,
+  getSteerConsent,
+  getSteerPolicy,
+  registerMidTurnInjection,
+  STEER_TAINT_MATCHER,
+  steerHookTimeoutSeconds,
+} from './modules/session-steer/index.js';
 import { claudeCacheSnapshot, claudeCacheTtlMinutes, claudeContextSnapshot, readClaudeContextSnapshot } from './modules/providers/list/claude/claude-token-usage.js';
 import { messageCoordinationDb, providerRunFailuresDb, auditLogDb, messageAuthorsDb, participantsDb, sessionsDb  } from './modules/database/index.js';
 import {
@@ -199,6 +211,26 @@ function bufferThenSend(ws, sessionKey, payload) {
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
+
+// T-1903: Claude is the first provider with the server-registered
+// `midTurnInjection` capability. A run is steerable only while its entry is
+// active AND it armed a steer controller at start (policy + starter consent).
+registerMidTurnInjection('claude', {
+  findRun(sessionId) {
+    const session = activeSessions.get(sessionId);
+    return session && session.status === 'active' && session.steerRun ? session.steerRun : null;
+  },
+  hasUnarmedRun(sessionId) {
+    const session = activeSessions.get(sessionId);
+    return Boolean(session && session.status === 'active' && !session.steerRun);
+  },
+  payloadHash: (wrapped) => claudeTextPayloadHash(wrapped),
+});
+
+/** Starter-approval ceiling for a tool in a steered (tainted) turn. */
+function steerApprovalTimeoutMs() {
+  return Number.parseInt(process.env.CLAUDE_STEER_APPROVAL_TIMEOUT_MS, 10) || 120000;
+}
 // Per-connection active-session index (abort robustness, B-ABORT-FALLBACK).
 // Maps a raw WebSocket → an insertion-ordered Set of the claude sessionIds that
 // are currently active on THAT socket. Lets abortClaudeSDKSession fall back to
@@ -771,6 +803,18 @@ function resolveToolApproval(requestId, decision) {
     isCollaborator: () => isApprovalSessionCollaborator(sessionId, requesterUserId),
     decision: payload,
   });
+
+  // T-1903: a steer-taint approval belongs to the turn STARTER alone — a
+  // collaborator (possibly the very member who steered) may not answer it.
+  if (resolver._starterOnly === true && verdict.role !== 'owner') {
+    verdict.allowed = false;
+  }
+  // T-1903 (E2E): an approval born of another member's steer is ALLOW-ONCE. A
+  // "remember / always allow" rule or an edited input can never persist from it.
+  if (resolver._starterOnly === true && verdict.allowed) {
+    const { rememberEntry: _remember, updatedInput: _input, ...once } = verdict.decision ?? {};
+    verdict.decision = once;
+  }
 
   if (!verdict.allowed) {
     console.warn(
@@ -2645,6 +2689,92 @@ async function loadMcpConfig(cwd, configDir) {
 }
 
 /**
+ * T-1903 — asks ONLY the turn starter to approve a gated tool in a steered turn.
+ * The prompt is unicast to the starter's own socket (never buffered, never
+ * fanned out to mirrors, never listed by get-pending-permissions) and only the
+ * starter may answer it (`_starterOnly`). No live socket, a closed socket, a
+ * timeout or a cancellation all end in a deny.
+ *
+ * The prompt is bound to the starter's raw socket captured at RUN START. A
+ * reconnect (new tab, page refresh) does not move it: the old socket's close
+ * settles it as offline and the tool is denied — a safe deny, never an allow.
+ */
+function createSteerStarterApproval({ ws, sessionIdRef, waitForApproval, settleApproval }) {
+  return async (toolName, input, signal) => {
+    const raw = ws?.ws;
+    if (!raw || raw.readyState !== 1 || !Number.isInteger(ws?.userId)) return 'offline';
+    const sid = sessionIdRef();
+    const requestId = createRequestId();
+    const send = (payload) => { raw.send(JSON.stringify(payload)); };
+    try {
+      send(createNormalizedMessage({ kind: 'permission_request', requestId, toolName, input, sessionId: sid,
+        provider: 'claude', steerTainted: true }));
+    } catch {
+      return 'offline';
+    }
+    const onClose = () => { settleApproval(requestId, { allow: false, cancelled: true, offline: true }); };
+    raw.once?.('close', onClose);
+    try {
+      const decision = await waitForApproval(requestId, {
+        timeoutMs: steerApprovalTimeoutMs(), signal,
+        metadata: { _sessionId: sid, _ownerUserId: ws.userId, _starterOnly: true, _toolName: toolName,
+          _input: input, _receivedAt: new Date() },
+        onCancel: (reason) => {
+          try { send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: sid, provider: 'claude' })); } catch { /* socket gone */ }
+        },
+      });
+      if (!decision) return 'timeout';
+      if (decision.offline) return 'offline';
+      return decision.cancelled || decision.allow !== true ? 'deny' : 'allow';
+    } finally {
+      raw.off?.('close', onClose);
+    }
+  };
+}
+
+/**
+ * T-1903 — arms mid-turn steering for one run, or returns null. Armed only when
+ * the global policy is on AND the starter consented AT RUN START (the taint hook
+ * must be registered before query(); consent is re-read at each injection too),
+ * never in plan mode, never without a persisted session. The taint hook is
+ * appended to the run's PreToolUse hooks; it is inert until a steer arrives.
+ */
+function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, hooksArmed, onQueued, waitForApproval, settleApproval }) {
+  const starterUserId = ws?.userId;
+  try {
+    if (!Number.isInteger(starterUserId) || sdkOptions.permissionMode === 'plan'
+      || sdkOptions.persistSession === false || !sdkOptions.hooks || typeof sdkOptions.hooks !== 'object'
+      || getSteerPolicy().mode === 'off' || !getSteerConsent(starterUserId)) return null;
+  } catch {
+    return null;
+  }
+  const scanner = createTranscriptScanner(() => resolveClaudeTranscriptPath({
+    session_id: sessionIdRef() || '', project_path: sdkOptions.cwd || null,
+    jsonl_path: sessionsDb.getSessionById(sessionIdRef() || '')?.jsonl_path ?? null,
+  }, starterUserId));
+  const run = createSteerRun({
+    sessionId: sessionIdRef, turnId: crypto.randomUUID(), starterUserId,
+    permissionMode: () => sdkOptions.permissionMode || 'default',
+    hooksArmed,
+    onQueued: (item) => { void scanner.mark(item.uuid); onQueued?.(); },
+    broadcast: (event) => sendAndBuffer(event),
+    persistStatus: (item, status) => { messageCoordinationDb.updateSteerStatus(item.clientMsgId, item.senderUserId, status); },
+    confirmDelivery: (item) => confirmWithRetry(() => scanner.has(item.uuid)),
+  });
+
+  const hook = createSteerTaintHook({
+    isTainted: run.isTainted,
+    askStarter: createSteerStarterApproval({ ws, sessionIdRef, waitForApproval, settleApproval }),
+    log: (line) => { try { console.log(`${line} session=${sessionIdRef() || 'NEW'}`); } catch { /* never break a tool call */ } },
+  });
+  const preToolUse = Array.isArray(sdkOptions.hooks.PreToolUse) ? sdkOptions.hooks.PreToolUse : [];
+  sdkOptions.hooks.PreToolUse = [...preToolUse, {
+    matcher: STEER_TAINT_MATCHER, hooks: [hook], timeout: steerHookTimeoutSeconds(steerApprovalTimeoutMs()),
+  }];
+  return run;
+}
+
+/**
  * Executes a Claude query using the SDK
  * @param {string} command - User prompt/command
  * @param {Object} options - Query options
@@ -2719,6 +2849,23 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // B-SEC-DUP-RUN لمنعه («both interleaved writes into the same replay
     // RingBuffer»): ستُعطي الرفضَ رقماً تسلسلياً من عدّاد جولةٍ ليس منها، وتُعيد
     // بثّه لاحقاً لكل مقبس يستأنف تلك الجولة السليمة فيرى فشلاً انقضى.
+    // T-1903: a "/steer …" typed into the normal composer is a steer attempt,
+    // not a second run — say so instead of a generic busy error. Nothing is
+    // injected: steering only exists on the `session-steer` message.
+    if (/^\/steer(?:\s|$)/iu.test(String(command ?? '').trimStart())) {
+      ws.send(createNormalizedMessage({
+        kind: 'error',
+        code: 'steer_requires_session_steer',
+        content: 'Steering a running turn must use the steer action; "/steer" sent as a chat message '
+          + 'was not delivered.',
+        sessionId,
+        provider: 'claude',
+        notStarted: true,
+        ...clientMsgIdField,
+      }));
+      permissionExecution?.notStarted();
+      return { ok: false };
+    }
     ws.send(createNormalizedMessage({
       kind: 'error',
       code: 'session_busy',
@@ -2835,7 +2982,13 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // background tasks never reported back within the idle ceiling), `abort`, or
   // `run-ended` (the finally).
   let inputReleasedAt = null;
+  // T-1903: the run-owned steer controller (null unless policy + the starter's
+  // consent allowed steering when this run started) and whether its taint hook
+  // actually reached the CLI. Declared before releaseInput, which closes it.
+  let steerRun = null;
+  let steerHooksArmed = false;
   const releaseInput = (reason) => {
+    steerRun?.close(reason === 'abort' ? 'turn_aborted' : 'input_closed');
     if (inputReleasedAt === null) {
       inputReleasedAt = Date.now();
       try {
@@ -2877,7 +3030,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   const reconsiderInputClose = (taskState, continuationPossible) => {
     disarmInputClose();
     if (inputReleasedAt !== null || !taskState.quiet) return;
-    if (taskState.pending > 0) {
+    // T-1903: an injection still queued or not yet answered by a `result` keeps
+    // the channel open (idle-capped like background tasks).
+    if (steerRun?.hasPendingWork()) {
+      armInputClose(sdkBackgroundHoldIdleMaxMs(), 'steer-hold-cap');
+    } else if (taskState.pending > 0) {
       armInputClose(sdkBackgroundHoldIdleMaxMs(), 'background-idle-cap');
     } else if (taskState.continuationExpected) {
       armInputClose(sdkContinuationWaitMs(), 'continuation-wait-expired');
@@ -3401,6 +3558,20 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       } : {}),
     };
 
+    steerRun = armSteerRun({
+      ws, sdkOptions, sessionIdRef: () => capturedSessionId || sessionId || null,
+      sendAndBuffer: (payload) => bufferThenSend(ws, capturedSessionId || sessionId || null, payload),
+      hooksArmed: () => steerHooksArmed && Boolean(sdkOptions.hooks),
+      // M2: a steer landing while a close is ARMED (the run went quiet) must
+      // not be cut off by that timer — swap it for the steer hold.
+      onQueued: () => {
+        if (inputReleasedAt === null && inputCloseTimer) armInputClose(sdkBackgroundHoldIdleMaxMs(), 'steer-hold-cap');
+      },
+      waitForApproval: waitForToolApproval,
+      settleApproval: settleToolApproval,
+    });
+    if (steerRun) steerHooksArmed = true;
+
     // Caveat: in 'auto' and 'bypassPermissions' modes the SDK resolves approval
     // at the permission-mode step and skips this callback, so interactive tools
     // (AskUserQuestion, ExitPlanMode) won't reach the UI — the classifier/bypass
@@ -3632,6 +3803,22 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       }
     }
 
+    // T-1903: hang the steer controller on OUR active entry (never a newer
+    // run's) and announce the steerable turn to the starter and every mirror.
+    let steerTurnAnnounced = false;
+    const attachSteerRun = (sid) => {
+      const entry = sid ? activeSessions.get(sid) : null;
+      if (!steerRun || !entry || entry.runToken !== runToken) return;
+      entry.steerRun = steerRun;
+      if (steerTurnAnnounced) return;
+      steerTurnAnnounced = true;
+      bufferThenSend(ws, sid, {
+        type: 'steer-turn-state', sessionId: sid, turnId: steerRun.turnId,
+        starterUserId: steerRun.starterUserId, steerable: steerRun.hooksArmed(),
+        forViewerUserId: null, capability: { midTurnInjection: true },
+      });
+    };
+
     let queryInstance;
     // B-117: the streaming-input prompt. Yields this turn's single user message —
     // byte-identical text to the string form, which the SDK itself wrapped the
@@ -3640,7 +3827,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     const receiptPrompt = createClaudeReceiptPrompt({
       capability: options.vendorReceiptInvocation, command, content: finalCommand,
       userId: ws?.userId, sessionId: sessionId || null,
-      persistSession: sdkOptions.persistSession, release: inputStreamRelease,
+      persistSession: sdkOptions.persistSession, release: inputStreamRelease, steer: steerRun,
     });
     const makePromptStream = receiptPrompt.make;
     // B-SEC-ENV-LEAK: the restore MUST be in a finally welded to the query block.
@@ -3670,6 +3857,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         // Keep notification behavior operational via runtime events even if hook registration fails.
         console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
         delete sdkOptions.hooks;
+        // T-1903: no hooks → no taint gate → no steering on this run (fail-closed).
+        steerHooksArmed = false;
         // The logical execution permit covers this broker-managed retry. It is
         // intentionally not consumed a second time.
         queryInstance = query({
@@ -3689,6 +3878,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // Track the query instance for abort capability
     if (capturedSessionId) {
       addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort());
+      attachSteerRun(capturedSessionId);
       recordParticipant(capturedSessionId);
     }
 
@@ -3814,6 +4004,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
           claudeSessionRegistry.drop(capturedSessionId);
         }
         addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort());
+        attachSteerRun(capturedSessionId);
         recordParticipant(capturedSessionId);
         // ADR-088: record the engine this spawn ACTUALLY engaged (the resolved
         // verdict, never the client's word) onto the session row. Runs AFTER
@@ -3872,6 +4063,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // Bash is not caught by the tool_use scan below, yet re-enters the same way.
       const taskState = backgroundTasks.observe(message);
       if (taskState.backgrounded || taskState.continuationExpected) continuationPossible = true;
+      // T-1903: an injected message can start another invocation after a
+      // `result`, and a `result` settles every injection yielded before it.
+      if (steerRun?.everInjected()) continuationPossible = true;
+      if (steerRun && message.type === 'result' && !message.parent_tool_use_id) steerRun.onResult(message);
+      const steerEcho = message.type === 'user' ? steerRun?.findByUuid(message.uuid) ?? null : null;
 
       // Transform and normalize message via adapter
       const transformedMessage = transformMessage(message);
@@ -3920,7 +4116,13 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         // Task tool, also 'peer'/'channel'/'task-notification') carry
         // `originKind` from the adapter and are never attributed to the
         // human, otherwise agent directives render as user bubbles.
-        stampHumanUserId(msg, ws?.userId);
+        if (steerEcho && msg.kind === 'text' && msg.role === 'user') {
+          // T-1903: the CLI echoed an injection — it is the SENDER's, never the starter's.
+          Object.assign(msg, { injected: true, userId: steerEcho.senderUserId, content: steerEcho.text,
+            steerClientMsgId: steerEcho.clientMsgId, deliveryStatus: 'delivered' });
+        } else {
+          stampHumanUserId(msg, ws?.userId);
+        }
         // Coordinator attribution (B-MU-UX-FIX-ASSISTANT-AUTHOR): every
         // assistant-driven payload this run emits was spawned by the human on
         // this socket. Stamp the JWT-sourced coordinatorId so live viewers (and
@@ -4124,7 +4326,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         durableTiming = { ...responseToMessageIdField, ...timing };
       }
     }
-    sendAndBuffer(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude', pendingWorkflows, ...clientMsgIdField, ...durableTiming }));
+    // T-1903: a steered run may produce several `result`s; the aggregate rides the terminal frame.
+    const steerUsage = steerRun?.everInjected() ? { runUsage: steerRun.usage() } : {};
+    sendAndBuffer(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude', pendingWorkflows, ...clientMsgIdField, ...durableTiming, ...steerUsage }));
     // ADR-041: terminal state — flip the single source of truth to inactive and
     // schedule a deferred buffer drop (post-close replay window, not an immediate
     // drop). No-op when SESSION_REGISTRY_claude is off.
@@ -4640,7 +4844,9 @@ function cancelAllPendingApprovals() {
 function getPendingApprovalsForSession(sessionId) {
   const pending = [];
   for (const [requestId, resolver] of pendingToolApprovals.entries()) {
-    if (resolver._sessionId === sessionId) {
+    // T-1903: starter-only prompts are unicast to the starter, never re-listed
+    // (this listing fans out to every mirror of the session).
+    if (resolver._sessionId === sessionId && resolver._starterOnly !== true) {
       pending.push({
         requestId,
         toolName: resolver._toolName || 'UnknownTool',

@@ -241,6 +241,23 @@ export async function withLocalUpdateWriterLease(kind, operation, options = {}) 
     try { return await writerContext.run(context, operation); } finally { retained.release(); }
 }
 
+/**
+ * Run `operation` detached from any enclosing writer context.
+ *
+ * A long-lived task started from inside a short admitted operation (a
+ * scheduled turn launched by a queue tick) would otherwise inherit that
+ * operation's context: every nested acquire made before the parent released
+ * would RETAIN the parent's lease, keeping it held for the lifetime of the
+ * child. Detached, a nested acquire is admitted (or refused) on its own.
+ *
+ * @template T
+ * @param {() => T} operation work to start outside the current writer context
+ * @returns {T} the operation's result
+ */
+export function runOutsideWriterContext(operation) {
+    return writerContext.exit(operation);
+}
+
 /** A denied background tick remains pending and performs no work; later ticks may retry. */
 export async function runLocalUpdateBackground(kind, operation) {
     try { return await withLocalUpdateWriterLease(kind, operation); }

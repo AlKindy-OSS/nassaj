@@ -80,9 +80,19 @@ export default function PermissionRequestsBanner({
                     {t('permissions.tool')} <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{request.toolName}</code>
                   </span>
                 </div>
-                {permissionEntry && (
+                {permissionEntry && !request.steerTainted && (
                   <div className="mt-1 text-xs text-muted-foreground">
                     {t('permissions.allowRule')} <code className="rounded bg-muted px-1 py-0.5 text-xs">{permissionEntry}</code>
+                  </div>
+                )}
+                {/* T-1903 (ADR-190): طلبٌ تلا توجيهاً من زميل — تنبيهٌ صريح
+                    ولا خيار حفظ قاعدة (أدناه). التصلّب الفعلي خادميّ؛ هذا
+                    عرضٌ صادقٌ له لا فرضٌ عميليّ. */}
+                {request.steerTainted && (
+                  <div className="mt-1 text-xs text-[color:var(--session-steer-accent)]">
+                    {t('permissions.steerTaintedNote', {
+                      defaultValue: 'This request follows a colleague’s steer — only allow once or deny.',
+                    })}
                   </div>
                 )}
               </ConfirmationRequest>
@@ -106,18 +116,23 @@ export default function PermissionRequestsBanner({
               >
                 {t('permissions.deny')}
               </ConfirmationAction>
-              <ConfirmationAction
-                variant="outline"
-                onClick={() => {
-                  if (permissionEntry && !alreadyAllowed) {
-                    handleGrantToolPermission({ entry: permissionEntry, toolName: request.toolName });
-                  }
-                  handlePermissionDecision(matchingRequestIds, { allow: true, rememberEntry: permissionEntry });
-                }}
-                disabled={!permissionEntry}
-              >
-                {rememberLabel}
-              </ConfirmationAction>
+              {/* T-1903 (ADR-190): لا خيار «اسمح واحفظ» على طلبٍ مُلطَّخ
+                  بتوجيه — قاعدة محفوظة تحت تلطّخ تُوافق ضمناً على تشغيلاتٍ
+                  لاحقة غير مرتبطة، وهذا يخالف نيّة التلطّخ (لمرّة واحدة). */}
+              {!request.steerTainted && (
+                <ConfirmationAction
+                  variant="outline"
+                  onClick={() => {
+                    if (permissionEntry && !alreadyAllowed) {
+                      handleGrantToolPermission({ entry: permissionEntry, toolName: request.toolName });
+                    }
+                    handlePermissionDecision(matchingRequestIds, { allow: true, rememberEntry: permissionEntry });
+                  }}
+                  disabled={!permissionEntry}
+                >
+                  {rememberLabel}
+                </ConfirmationAction>
+              )}
               <ConfirmationAction
                 variant="default"
                 onClick={() => handlePermissionDecision(request.requestId, { allow: true })}

@@ -24,8 +24,6 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 
-import sharp from 'sharp';
-
 import { appConfigDb } from '../modules/database/index.js';
 
 import { sanitizeSvg } from './svg-sanitizer.js';
@@ -41,6 +39,51 @@ import { sanitizeSvg } from './svg-sanitizer.js';
  * nothing the user attached is ever lost (B-430 durability still holds).
  */
 const MODEL_MAX_EDGE_PX = 1568;
+/**
+ * `sharp` is OPTIONAL at runtime (ADR-174 P1): it is a devDependency because
+ * its prebuilt libvips binary is LGPL-3.0-or-later, which the release license
+ * gate refuses. A production tree (`npm ci --omit=dev`) therefore has no sharp,
+ * and a static import crashed the server at boot. It is loaded lazily, once, on
+ * the first image that could need downscaling; when it is absent the store keeps
+ * the original bytes (every validation below still runs — only the resize step
+ * is skipped).
+ */
+const defaultSharpImporter = () => import('sharp');
+let sharpImporter = defaultSharpImporter;
+/** @type {Promise<Function|null>|null} */
+let sharpPromise = null;
+
+/**
+ * Resolves the sharp factory, or null when the package cannot be loaded. The
+ * result (including a failure) is cached, so the import is attempted and the
+ * warning logged at most once per process.
+ * @returns {Promise<Function|null>}
+ */
+function loadSharp() {
+  if (!sharpPromise) {
+    sharpPromise = Promise.resolve()
+      .then(() => sharpImporter())
+      .then((mod) => mod?.default ?? mod ?? null)
+      .catch((error) => {
+        console.warn('[chat-image-store] sharp unavailable; images are stored without downscaling', {
+          code: error?.code || 'UNKNOWN',
+        });
+        return null;
+      });
+  }
+  return sharpPromise;
+}
+
+/**
+ * Test seam: swaps the sharp importer and clears the cached load result.
+ * Passing nothing restores the real `import('sharp')`.
+ * @param {(() => Promise<unknown>)|undefined} [importer]
+ */
+export function setSharpImporterForTesting(importer) {
+  sharpImporter = importer || defaultSharpImporter;
+  sharpPromise = null;
+}
+
 /** Raster formats sharp re-encodes; svg/gif are stored untouched. */
 const RESIZABLE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 
@@ -177,7 +220,7 @@ function decodeImagePayload(image, maxBytesPerImage) {
  * Returns a resized copy when the image's longest side exceeds
  * {@link MODEL_MAX_EDGE_PX}, otherwise null (store the original as-is). Any
  * decode/encode failure also yields null: a picture the model sees at full
- * size beats a picture it never sees.
+ * size beats a picture it never sees. So does a missing sharp package.
  *
  * @param {Buffer} bytes
  * @param {string} extension - already vetted against ALLOWED_EXTENSIONS
@@ -185,6 +228,8 @@ function decodeImagePayload(image, maxBytesPerImage) {
  */
 async function downscaleForModel(bytes, extension) {
   if (!RESIZABLE_EXTENSIONS.has(extension)) return null;
+  const sharp = await loadSharp();
+  if (!sharp) return null;
   try {
     const meta = await sharp(bytes).metadata();
     const longest = Math.max(meta.width || 0, meta.height || 0);

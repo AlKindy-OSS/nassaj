@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from 'vite';
 import { previewControlPaths, recordPreviewLedgerEvent, recordPublishBaseGuardDecision } from './local-preview-ledger.mjs';
+import { releaseBuiltAt } from './lib/release-generation/source-date.mjs';
 import { readMutableWatcherInhibit } from './client-isolated-publish.mjs';
 import { gitControlPath } from './git-control-root.mjs';
 import { supportsAtomicExchange } from './lib/atomic-exchange-capability.mjs';
@@ -798,7 +799,7 @@ export async function buildClientReleaseCandidate(options, injected = {}) {
             artifact: 'client', version: options.version, commit: releaseCommit,
             baseCommit: releaseCommit, commitShort: releaseCommit.slice(0, 8),
             branch: null, describe: options.version, dirty: false, dirtyFiles: 0,
-            builtAt: new Date().toISOString(), buildId, generationId,
+            builtAt: releaseBuiltAt(), buildId, generationId,
             publicVite: Object.fromEntries(publicVite),
         }, null, 2)}\n`, { mode: 0o644, flag: 'wx' });
         await smoke(staging, buildId, null);

@@ -33,7 +33,7 @@ import { AppError } from '@/shared/utils.js';
 
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
 import { resolveStoredClaudeTranscript } from '../list/claude/claude-projects-roots.js';
-import { projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
+import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
 import { DOCUMENT_SHARING_INSTRUCTIONS, stripRuntimeInstructionsPrefix } from '../../../../shared/documentSharingInstructions.js';
@@ -389,6 +389,23 @@ function coordinationTranscriptVariants(row: MessageCoordinationRow): string[] {
   return [withCoordinationDirective(row.canonicalContent, row.coordinationLevel)];
 }
 
+/**
+ * T-1903: marks verified mid-turn injections (sender userId, injected:true) —
+ * AFTER author attribution so an injection never becomes the "coordinator" of
+ * the assistant rows that follow it. Never throws.
+ */
+function stampClaudeSteerInjections(sessionId: string, messages: NormalizedMessage[], lease?: HistoryReadLease): NormalizedMessage[] {
+  try {
+    return applyClaudeSteerInjections(messages, messageCoordinationDb.listSteerBySession(sessionId, lease));
+  } catch (error) {
+    console.error('Failed to load steer injections for history stamping', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return messages;
+  }
+}
+
 function stampMessageCoordination(sessionId: string, messages: NormalizedMessage[], lease?: HistoryReadLease): void {
   try {
     applyMessageCoordination(messages, messageCoordinationDb.listBySession(sessionId, lease), lease);
@@ -732,6 +749,7 @@ export const sessionsService = {
         options.historyLease?.reserveDto(loaded);
         stampMessageAuthors(sessionId, loaded.messages, options.historyLease);
         stampMessageCoordination(sessionId, loaded.messages, options.historyLease);
+        if (provider === 'claude') loaded.messages = stampClaudeSteerInjections(sessionId, loaded.messages, options.historyLease);
         stampResponseTurnMetrics(sessionId, loaded.messages, options.historyLease);
         loaded.responseTurnDurationTotalMs = responseTurnMetricsDb.sumSessionDuration(sessionId, options.historyLease);
         return loaded;

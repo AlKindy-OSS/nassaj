@@ -25,6 +25,13 @@ import { useChatComposerState } from '../hooks/useChatComposerState';
 import { hasOutboxDeliveryEvidence, verifyOutboxReceipt } from '../utils/messageOutbox';
 import { authenticatedFetch } from '../../../utils/api';
 import { useBtwSideChannel } from '../hooks/useBtwSideChannel';
+import { useSessionSteer } from '../../session-steer/useSessionSteer';
+import { isDuplicateSteerInjectionMatch } from '../../session-steer/steerDuplicateDetection';
+import SteerStarterNotice from '../../session-steer/SteerStarterNotice';
+import SteerComposerNote from '../../session-steer/SteerComposerNote';
+import { useAuth } from '../../auth/context/AuthContext';
+import { useSessionParticipants } from '../../participants/hooks';
+import { Button } from '../../../shared/view/ui';
 import { useMessageFork } from '../hooks/useMessageFork';
 import { useSessionActiveModel } from '../hooks/useSessionActiveModel';
 import {
@@ -76,6 +83,9 @@ import SessionHeaderControls from './subcomponents/SessionHeaderControls';
 type PendingViewSession = {
   sessionId: string | null;
   startedAt: number;
+  clientMsgId?: string | null;
+  /** B-1386: the project this send started under (see useChatComposerState). */
+  projectId?: string | null;
 };
 
 function ChatInterface({
@@ -565,6 +575,82 @@ function ChatInterface({
   // closeBtw يُعرَّف بعد handleBtwForked، فنمرّره عبر ref لكسر الدورة.
   closeBtwRef.current = closeBtw;
 
+  // T-1903 (ADR-190): حالة التوجيه أثناء الدور — نفس فتحة latestMessage
+  // المشتركة (steer-turn-state/steer-queued/steer-delivered/steer-rejected كلها
+  // تحمل `type` صريحاً فتمرّ عبر useChatRealtimeHandlers دون أن يلتقطها).
+  const { user: currentAuthUser } = useAuth();
+  const {
+    turnState: steerTurnState,
+    events: steerEvents,
+    canSteer,
+    sendSteer,
+  } = useSessionSteer({
+    sessionId: currentSessionId ?? selectedSession?.id ?? null,
+    currentUserId: typeof currentAuthUser?.id === 'number' ? currentAuthUser.id : null,
+    latestMessage,
+    controlEvents,
+    sendMessage,
+  });
+  // T-1904 e2e (BLOCKER) — لا نشترط `isLoading` هنا: وصول steer-turn-state
+  // نفسه دليلٌ قاطع على أن دوراً جارٍ لهذه الجلسة، وقد يسبق (أو يتأخّر عن)
+  // إشارة isLoading المحلّية للمشاهد (سباقٌ ميدانيٌّ مثبَت — مشاهدٌ كان على
+  // الصفحة قبل بدء الدور لم ير الشريط إطلاقاً رغم أن الخادم أرسل الحالة).
+  const isRunActiveForViewer = Boolean(steerTurnState) || isLoading;
+  // T-1904 — بادئ الدور الجاري: steer-turn-state أولاً (مصدر خادميّ موثوق
+  // الآن حتى لغير القابل للتوجيه، ولانضمام متأخّر — إصلاح 44e8ccc4e)، وإلا
+  // آخر رسالة type:'user' إنسانية حقيقية (لا coordinatorPrompt ولا injected)
+  // في نافذة الجلب الحالية — بديلٌ فوريّ محلّي (لا ينتظر جولة شبكة) يعمل حتى
+  // حين لا steer-turn-state إطلاقاً (دورٌ غير قابل للتوجيه من الأساس).
+  const fallbackRunStarterUserId = useMemo(() => {
+    if (!isRunActiveForViewer) return null;
+    for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
+      const message = chatMessages[i];
+      if (message.type === 'user' && !message.originKind && !message.injected && typeof message.userId === 'number') {
+        return message.userId;
+      }
+    }
+    return null;
+  }, [chatMessages, isRunActiveForViewer]);
+  const runStarterUserId = steerTurnState?.starterUserId ?? fallbackRunStarterUserId;
+  const currentUserIdNum = typeof currentAuthUser?.id === 'number' ? currentAuthUser.id : null;
+  /**
+   * T-1904 e2e (BLOCKER) — فشلٌ مغلَق: لا افتراض «أنا البادئ» في غياب دليل.
+   * `true` فقط حين نعرف هوية البادئ فعلاً وتُطابق المستخدم الحالي — لا حين
+   * تغيب المعرفة (كانت `steerTurnState?.starterUserId == null` تُعامَل خطأً
+   * كدليل على «لا أحد غيري»، فرأى مشاهدٌ ينضمّ أثناء أول دورٍ شريط CLAUDE +
+   * STOP الكامل، وأوقف Esc عندهم دور المالك).
+   */
+  const isKnownStarter =
+    runStarterUserId != null && currentUserIdNum != null && Number(currentUserIdNum) === Number(runStarterUserId);
+  const isKnownNonStarter =
+    runStarterUserId != null && currentUserIdNum != null && Number(currentUserIdNum) !== Number(runStarterUserId);
+  const isViewerOfOthersRun = isRunActiveForViewer && isKnownNonStarter;
+  // يُستعمَل لتحويل معرّف بادئ الدور إلى اسمٍ، لملاحظة صندوق الكتابة (T-1903)
+  // ولتسمية شريط الحالة (T-1904) معاً — نفس مصدر ChatMessagesPane لاسم المؤلّف.
+  const { participants: steerParticipants } = useSessionParticipants(
+    currentSessionId ?? selectedSession?.id ?? null,
+    canSteer || isViewerOfOthersRun,
+  );
+  const steerStarterName = useMemo(() => {
+    if (runStarterUserId == null) return null;
+    const found = steerParticipants.find((p) => String(p.userId) === String(runStarterUserId));
+    return found?.username ?? null;
+  }, [steerParticipants, runStarterUserId]);
+  const viewerStarterName = isViewerOfOthersRun ? steerStarterName : null;
+  const latestSteerEventForStarter = steerEvents.length > 0 ? steerEvents[steerEvents.length - 1] : null;
+  const [steerSendFeedback, setSteerSendFeedback] = useState<{ code: string; text: string } | null>(null);
+  const handleSteerSend = useCallback(
+    (text: string) => {
+      setSteerSendFeedback(null);
+      void sendSteer(text).then((outcome) => {
+        if (!outcome.ok) {
+          setSteerSendFeedback({ code: outcome.code, text });
+        }
+      });
+    },
+    [sendSteer],
+  );
+
   const handleMessageForked = useCallback(
     (forkedSessionId: string) => onNavigateToSession?.(forkedSessionId),
     [onNavigateToSession],
@@ -677,6 +763,8 @@ function ChatInterface({
     tokenBudget,
     sendMessage,
     onBtwQuery: startBtwQuery,
+    onSteerSend: handleSteerSend,
+    steerAvailable: canSteer,
     sendByCtrlEnter,
     onSessionActive,
     onSessionProcessing,
@@ -695,6 +783,71 @@ function ChatInterface({
     verifyMessageDelivered,
     outboxHistory: sessionStore.getSessionSlot(currentSessionId || selectedSession?.id || '')?.serverMessages,
   });
+
+  // T-1903 (ADR-190): يظهر توجيهٌ حيّ فوراً كفقاعة SteerBubble قبل أن يعيد
+  // الخادم History الرسمي (بحقل injected:true). لا نُحدِّث حالة التسليم لاحقاً
+  // (steer-delivered/steer-rejected) على هذا الصفّ المتفائل عمداً — الجولة
+  // التالية للتاريخ هي مصدر الحقيقة النهائي؛ دَينٌ مؤجَّل توثيقاً لا سهواً.
+  const insertedSteerClientMsgIdsRef = useRef<Set<string>>(new Set());
+  // T-1904 e2e (bug 2) — يسجّل كلّ توجيهٍ أُدرِج محلياً (نصّه وجلسته ووقته)
+  // ليطابقه isDuplicateSteerInjection أدناه ضد الإطار الحيّ العام (الصفّ
+  // الحقيقي الذي يحفظه الخادم في المحادثة ويصل لكل مشاركي الجلسة — البادئ
+  // والمُوجِّه نفسه سواء)، فلا يُضاف صفّاً أزرق مكرَّراً بجانب SteerBubble.
+  const steerInjectionsRef = useRef<Map<string, { text: string; sessionId: string; at: number }>>(new Map());
+  useEffect(() => {
+    const sid = currentSessionId ?? selectedSession?.id ?? undefined;
+    for (const event of steerEvents) {
+      if (event.type !== 'steer-queued' || !event.text) continue;
+      if (insertedSteerClientMsgIdsRef.current.has(event.clientMsgId)) continue;
+      insertedSteerClientMsgIdsRef.current.add(event.clientMsgId);
+      steerInjectionsRef.current.set(event.clientMsgId, {
+        text: event.text,
+        sessionId: sid ?? '',
+        at: Date.now(),
+      });
+      addMessage({
+        type: 'user',
+        content: event.text,
+        userId: event.sender.userId,
+        injected: true,
+        deliveryStatus: 'queued',
+        steerClientMsgId: event.clientMsgId,
+        // T-1904 e2e: اسمٌ مباشر لا يعتمد على تحميل قائمة المشاركين — سبب
+        // ظهور "؟" بدل الاسم/الصورة الرمزية حين وصلت الفقاعة قبل أن يتحمّل
+        // الطاقم (roster) على الطرف الآخر.
+        steerSenderDisplayName: event.sender.displayName,
+        timestamp: Date.now(),
+        sessionId: sid,
+      });
+    }
+  }, [steerEvents, addMessage, currentSessionId, selectedSession?.id]);
+
+  // T-1904 e2e (bug 2) — مطابقة أولى بمعرّف العميل (steerClientMsgId أو
+  // clientMsgId، إذ لا يُعرف بعد اسم الحقل الذي يحمله الإطار الحيّ)، وبديلٌ
+  // بمطابقة النصّ + الجلسة ضمن نافذة 30 ثانية حين لا يحمل الإطار أيّ معرّف.
+  const isDuplicateSteerInjection = useCallback(
+    (msg: { sessionId?: string; content?: string; clientMsgId?: string; steerClientMsgId?: string }): boolean =>
+      isDuplicateSteerInjectionMatch(steerInjectionsRef.current, msg),
+    [],
+  );
+
+  // T-1904 (ADR-190): زرّ التوجيه في شريط الحالة يضع «/steer » في صندوق
+  // الكتابة ويُركِّز عليه — لا إرسال تلقائي.
+  const handleSteerButtonClick = useCallback(() => {
+    setInput('/steer ');
+    textareaRef.current?.focus();
+  }, [setInput, textareaRef]);
+
+  // T-1903 (ADR-190): «إرسال كرسالة عادية» — زرّ إجراء واحد على رفض 409
+  // turn_not_active. يعيد نصّ التوجيه المرفوض إلى صندوق الإدخال العادي بدل
+  // ابتلاعه؛ لا إرسال تلقائي، المستخدم يضغط إرسال بنفسه.
+  const handleSteerSendAsNormalMessage = useCallback(
+    (text: string) => {
+      setSteerSendFeedback(null);
+      setInput(text);
+    },
+    [setInput],
+  );
 
   /**
    * handleReplaceImage — يستبدل الصورة الأصلية بالمقصوصة.
@@ -891,10 +1044,16 @@ function ChatInterface({
     onRejectedSendRestore: handleRejectedSendRestore,
     onRequestExpandedHistory: requestStreamGapRecovery,
     sessionStore,
+    isDuplicateSteerInjection,
   });
 
+  // T-1904 e2e (BLOCKER) — Esc يوقف الدور فقط حين يُعرَف صراحةً أن المستخدم
+  // الحالي هو البادئ (`isKnownStarter`، فشلٌ مغلَق — انظر تعليقه أعلاه). لا
+  // فرضية افتراضية عند غياب الدليل بعد الآن.
+  const canEscapeAbortTurn = isKnownStarter;
+
   useEffect(() => {
-    if (!isLoading || !canAbortSession) {
+    if (!isLoading || !canAbortSession || !canEscapeAbortTurn) {
       return;
     }
 
@@ -911,7 +1070,7 @@ function ChatInterface({
     return () => {
       document.removeEventListener('keydown', handleGlobalEscape, { capture: true });
     };
-  }, [canAbortSession, handleAbortSession, isLoading]);
+  }, [canAbortSession, canEscapeAbortTurn, handleAbortSession, isLoading]);
 
   useEffect(() => {
     return () => {
@@ -1223,6 +1382,35 @@ function ChatInterface({
           onScrollToBottom={handleScrollToBottomWithResync}
         />
 
+        {isKnownStarter && latestSteerEventForStarter && latestSteerEventForStarter.deliveryStatus !== 'rejected' && (
+          <SteerStarterNotice
+            senderName={latestSteerEventForStarter.sender.displayName}
+            onStopTurn={handleAbortSession}
+            canStopTurn={canAbortSession}
+          />
+        )}
+
+        {steerSendFeedback && (
+          <div
+            role="alert"
+            className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-0"
+          >
+            <span>{t(`steer.errors.${steerSendFeedback.code}`, { defaultValue: t('steer.errors.internal_error', { defaultValue: "Couldn't send the steer." }) })}</span>
+            {steerSendFeedback.code === 'turn_not_active' && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleSteerSendAsNormalMessage(steerSendFeedback.text)}
+              >
+                {t('steer.errors.sendAsNormalMessage', { defaultValue: 'Send as normal message' })}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {canSteer && steerStarterName && <SteerComposerNote starterName={steerStarterName} />}
+
         <ChatComposer
           pendingPermissionRequests={pendingPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
@@ -1235,6 +1423,11 @@ function ChatInterface({
           runProgress={runProgress}
           workflowAgents={observedWorkflowAgents}
           workflowStatus={workflowStripStatus}
+          viewerStarterName={viewerStarterName}
+          steerable={canSteer}
+          runActiveOverride={isRunActiveForViewer && !isLoading}
+          isConfirmedStarter={isKnownStarter}
+          onSteerClick={handleSteerButtonClick}
           onAbortSession={handleAbortSession}
           provider={provider}
           displayProvider={displayProvider}

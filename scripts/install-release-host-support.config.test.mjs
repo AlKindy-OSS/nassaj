@@ -43,7 +43,7 @@ function runtimeFixture(root, options = {}) {
     const semverLock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'))).packages['node_modules/semver'];
     write(path.join(source, 'package.json'), JSON.stringify({ type: 'module' }));
     write(path.join(source, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: { '': {},
-        'node_modules/@openai/codex-sdk': { version: '0.157.1', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture': { version: '1.0.0', integrity: 'sha512-YQ==' }, 'node_modules/semver': semverLock } }));
+        'node_modules/@openai/codex-sdk': { version: '0.153.2', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture': { version: '1.0.0', integrity: 'sha512-YQ==' }, 'node_modules/semver': semverLock } }));
     for (const file of collectForwardExecutableClosure(ROOT).files) write(path.join(source, file.path), fs.readFileSync(path.join(ROOT, file.path)), file.mode);
     fs.cpSync(path.join(ROOT, 'scripts/vendor/pm2-codec'), path.join(source, 'scripts/vendor/pm2-codec'), { recursive: true });
     installUpdateRuntimeBundle(ROOT, runtime);

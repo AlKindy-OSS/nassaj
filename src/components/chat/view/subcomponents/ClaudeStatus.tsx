@@ -6,6 +6,8 @@ import { formatWorkDuration } from '../../../../utils/workDurationFormat';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { RunProgress } from '../../hooks/useRunProgress';
 
+import { RunStatusActions, RunStatusIdentityLabel } from './RunStatusViewerActions';
+
 type ClaudeStatusProps = {
   status: {
     text?: string;
@@ -43,6 +45,36 @@ type ClaudeStatusProps = {
    * to avoid two competing activity labels). Defaults to false → no change.
    */
   suppressActionWord?: boolean;
+  /**
+   * T-1904 (ADR-190) — set only when the CURRENT viewer is NOT this run's
+   * starter and the starter's display name is known (from
+   * `steer-turn-state.starterUserId`, or a best-effort fallback for a
+   * non-steerable run). Swaps the "CLAUDE" provider label for this name and
+   * suppresses the STOP button unconditionally — a non-starter never gets an
+   * abort control here, independent of `can_interrupt`. The starter's OWN bar
+   * (this prop absent/null) is unchanged.
+   */
+  viewerStarterName?: string | null;
+  /** T-1904: show the Steer pill. Only meaningful alongside `viewerStarterName`. */
+  steerable?: boolean;
+  /** T-1904: puts "/steer " in the composer and focuses it. */
+  onSteerClick?: () => void;
+  /**
+   * T-1904 e2e (BLOCKER) — see ChatComposer.tsx. Lets the bar render even
+   * while THIS client's own `isLoading` hasn't caught up (or never does, for
+   * a mirror already on the page before the turn started): `steer-turn-state`
+   * itself is proof the run is active. Never affects the elapsed-timer/anchor
+   * state machine below, which stays keyed on real `isLoading` only.
+   */
+  runActiveOverride?: boolean;
+  /**
+   * T-1904 e2e (BLOCKER) — fail-closed authoritative signal that the CURRENT
+   * user is positively known to be this run's starter; gates STOP/Esc.
+   * Defaults to `true` (legacy solo behaviour) ONLY for a caller that omits
+   * it entirely — ChatInterface, the sole production caller, always passes
+   * the real resolved value (never leaves multi-user identity ambiguous).
+   */
+  isConfirmedStarter?: boolean;
 };
 
 const ACTION_KEYS = [
@@ -102,7 +134,13 @@ export default function ClaudeStatus({
   runStartedAt = null,
   progress = null,
   suppressActionWord = false,
+  viewerStarterName = null,
+  steerable = false,
+  onSteerClick,
+  runActiveOverride = false,
+  isConfirmedStarter = true,
 }: ClaudeStatusProps) {
+  const isViewer = viewerStarterName != null;
   const { t, i18n } = useTranslation('chat');
   const locale = i18n.language;
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -308,7 +346,7 @@ export default function ClaudeStatus({
     }
   }, [total, isLoading]);
 
-  if (!isLoading && !status) return null;
+  if (!isLoading && !status && !runActiveOverride) return null;
 
   const isFrozenLoading = isLoading && frozen;
   const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
@@ -402,7 +440,15 @@ export default function ClaudeStatus({
       <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 overflow-hidden rounded-full border border-border/50 bg-muted px-3 py-1.5 shadow-sm backdrop-blur-md">
 
         {/* Left Side: Identity & Status */}
-        <div className="flex min-w-0 items-center gap-2.5">
+        <div
+          className="flex min-w-0 items-center gap-2.5"
+          title={isViewer
+            ? t('claudeStatus.viewerTooltip', { name: viewerStarterName, defaultValue: 'Running on {{name}}’s quota' })
+            : undefined}
+          aria-label={isViewer
+            ? t('claudeStatus.viewerAriaLabel', { name: viewerStarterName, defaultValue: 'Claude is working for {{name}}' })
+            : undefined}
+        >
           <div className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 ring-1 ring-primary/10">
             <SessionProviderLogo provider={provider} className="h-3.5 w-3.5" />
             {isLoading && !frozen && (
@@ -411,11 +457,15 @@ export default function ClaudeStatus({
           </div>
 
           <div className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-2">
-            {/* اسم المزوّد مُترجَم (عربي في الواجهة العربية): لا `tracking-*`
-                عليه — التباعد الحرفي يكسر التحام الحروف العربية. */}
-            <span className="text-[10px] font-bold uppercase text-muted-foreground/70">
-              {providerLabel}
-            </span>
+            {/* اسم المزوّد مُترجَم (عربي في الواجهة العربية) — أو، لغير بادئ
+                الدور (T-1904)، اسم من بدأه بدلاً من التسمية الثابتة. قطعة
+                مشتركة مع MergedCard (RunStatusViewerActions.tsx) — لا نسخة
+                ثانية من قرار «من يظهر». */}
+            <RunStatusIdentityLabel
+              isViewer={isViewer}
+              viewerStarterName={viewerStarterName}
+              providerLabel={providerLabel}
+            />
             {showActionWordLine && (
               <div className="flex items-center gap-1.5">
                 <span className={cn("h-1.5 w-1.5 rounded-full", isLoading && !frozen ? "bg-emerald-500 animate-pulse" : "bg-amber-500")} />
@@ -506,21 +556,18 @@ export default function ClaudeStatus({
             </div>
           )}
 
-          {isLoading && status?.can_interrupt !== false && onAbort && (
-              <button
-                type="button"
-                onClick={onAbort}
-                className="group flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-[10px] font-bold text-destructive transition-all hover:bg-destructive hover:text-destructive-foreground"
-              >
-                <svg className="h-3 w-3 fill-current" viewBox="0 0 24 24">
-                  <path d="M6 6h12v12H6z" />
-                </svg>
-                <span className="hidden sm:inline">{i18n.language?.startsWith('ar') ? 'إيقاف' : 'STOP'}</span>
-                <kbd className="hidden rounded bg-black/10 px-1 text-[9px] group-hover:bg-card/20 sm:block">
-                  ESC
-                </kbd>
-              </button>
-          )}
+          {/* T-1904 e2e (BLOCKER): قطعة مشتركة مع MergedCard — STOP لا يظهر
+              إلا لمن نعرف يقيناً أنه البادئ (`isConfirmedStarter`، فشلٌ
+              مغلَق)، وغير البادئ يملك زرّ التوجيه وحده حين steerable. لا نسخة
+              ثانية من هذا القرار. */}
+          <RunStatusActions
+            canStop={isConfirmedStarter && isLoading && status?.can_interrupt !== false && Boolean(onAbort)}
+            onAbort={onAbort}
+            steerable={steerable}
+            onSteerClick={onSteerClick}
+            t={t}
+            isArabic={Boolean(i18n.language?.startsWith('ar'))}
+          />
         </div>
       </div>
     </div>

@@ -3,7 +3,7 @@ import type { MutableRefObject } from 'react';
 
 import { authenticatedFetch } from '../../../utils/api';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
-import { canAutomaticallyReadHistory, isHistoryRebaseFailure, historyTransportFailure, type SessionStore, type NormalizedMessage } from '../../../stores/useSessionStore';
+import { canAutomaticallyReadHistory, isHistoryRebaseFailure, historyTransportFailure, type SessionStore, type SessionSlot, type NormalizedMessage } from '../../../stores/useSessionStore';
 import { useLightHistoryCapability } from '../../../stores/serverCapabilitiesStore';
 import type { ChatMessage, Provider } from '../types/types';
 import { createCachedDiffCalculator, type DiffCalculator } from '../utils/messageTransforms';
@@ -37,9 +37,43 @@ const INITIAL_VISIBLE_MESSAGES = 100;
  * طلب واحد إضافي محدود، لا polling.
  */
 const ACTIVE_RUN_HYDRATION_LIMIT = 400;
+/**
+ * B-1386: bound for a deferred `full` enrichment whose revision has moved —
+ * near-guaranteed right after a brand-new session's first message, since the
+ * assistant is still answering during exactly that window. The real server
+ * (sessions.service.ts) 409s a mismatched `revision` outright, so each bounded
+ * attempt omits `revision` entirely (no conflict possible) and rebases onto
+ * whatever the server answers with (see `applyFullHistoryResult`). The same
+ * bound also covers a legacy server that keeps ignoring `payload=full`.
+ */
+const MAX_FULL_REVISION_RETRIES = 3;
+
+/** Deferred-history scheduler state — one coalescing queue per session. */
+type HistoryQueueState = {
+  sessionId: string | null;
+  epoch: number;
+  running: boolean;
+  fullQueued: boolean;
+  light400Queued: boolean;
+  fullDone: boolean;
+  fullLimit: number;
+  /** B-1386: attempts spent retrying a full-enrichment revision conflict. */
+  fullRevisionRetries: number;
+  /** B-1386: the next `full` request must omit `revision` (post-conflict retry). */
+  fullSkipRevision: boolean;
+};
 
 type PendingViewSession = {
   startedAt: number;
+  /** B-1386: set by useChatRealtimeHandlers for a brand-new conversation so
+   * this hook can tell "still routing to the id we just minted" apart from
+   * "navigated to a different session" and clear the guard itself below. */
+  sessionId?: string | null;
+  /** B-1386: the project the send started under (useChatComposerState). A
+   * genuine project switch (handleProjectSelect) must reset chat state even
+   * while this ref is still set, so the router-lag guard below only holds
+   * for the SAME project. */
+  projectId?: string | null;
 };
 
 interface UseChatSessionStateArgs {
@@ -121,6 +155,15 @@ export function chatMessageToNormalized(
     // T-1862: carry the compaction-boundary marker through the store round
     // trip — dropped here it never reaches useRunProgress/runStartedAt.
     isCompactionBoundary: msg.isCompactionBoundary,
+    // T-1904 e2e (bug 2) — بلا هذه الثلاثة كان طابع «توجيه» (steer) المحقون
+    // محلياً (ChatInterface، فور steer-queued) يُفقَد هنا تحديداً: هذا المحوِّل
+    // مسارٌ ثانٍ مستقلّ عن مُحوِّل التاريخ (useChatMessages.ts) الذي أصلحته
+    // أولاً، فبقيت الفقاعة الحيّة زرقاء عادية بصورة رمزية "؟" رغم أن التاريخ
+    // بعد إعادة التحميل يعرضها صحيحة — قاعدة عدم تطابق منطق مكرَّر بعينها.
+    injected: msg.injected,
+    deliveryStatus: msg.deliveryStatus,
+    steerClientMsgId: msg.steerClientMsgId,
+    steerSenderDisplayName: msg.steerSenderDisplayName,
   } as NormalizedMessage;
 }
 
@@ -228,15 +271,7 @@ export function useChatSessionState({
   const historyRequestRef = useRef<AbortController | null>(null);
   const paginationRequestsRef = useRef(new Set<AbortController>());
   const historyIdleCancelRef = useRef<(() => void) | null>(null);
-  const historyQueueRef = useRef<{
-    sessionId: string | null;
-    epoch: number;
-    running: boolean;
-    fullQueued: boolean;
-    light400Queued: boolean;
-    fullDone: boolean;
-    fullLimit: number;
-  }>({
+  const historyQueueRef = useRef<HistoryQueueState>({
     sessionId: null,
     epoch: 0,
     running: false,
@@ -244,6 +279,8 @@ export function useChatSessionState({
     light400Queued: false,
     fullDone: false,
     fullLimit: MESSAGES_PER_PAGE,
+    fullRevisionRetries: 0,
+    fullSkipRevision: false,
   });
   /** مرآة معرّف الجلسة المعروضة، تُقرأ داخل مسارات لاتزامنية بلا closure بائت. */
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
@@ -355,13 +392,17 @@ export function useChatSessionState({
     // كان يحقن الرسالة في مخزن جلسةٍ لم تستقبلها قط، فتظهر معلّقة أسفلها حتى
     // تحديث الصفحة (صفّ realtime عميلي لا وجود له على الخادم).
     //
-    // `pendingViewSessionRef` هو المميِّز الدقيق: يُضبط عند الإرسال بلا جلسة،
-    // ويُصفَّر داخل معالج `session_created` **قبل** أن يُرى تغيّر
-    // `currentSessionId` هنا (تصفيرٌ متزامن على ref في نفس المعالج) — فالإفراغ
-    // المشروع يمرّ، والانتقال إلى محادثة أخرى لا يمرّ. وفي الحالة الثانية
-    // نُسقِط النسخة المتفائلة بدل حقنها: الخادم يحفظ رسالة المستخدم، فتظهر
-    // صحيحةً في جلستها عند فتحها.
-    if (pendingViewSessionRef.current) {
+    // `pendingViewSessionRef` هو المميِّز الدقيق: يُضبط عند الإرسال بلا جلسة.
+    // B-1386: لم يعد يُصفَّر فوراً داخل معالج `session_created` — يبقى حاملاً
+    // معرّف الجلسة المولودة توّاً حتى يلحق به الموجّه (`selectedSession`)، وإلا
+    // كان تصفيره الفوري هو ما يجعل تأثير إعادة الضبط أعلاه يمحو `currentSessionId`
+    // في اللحظة نفسها (الحادثة الأصلية). فالتمييز هنا يجب أن يقرأ **معرّف** الرسالة
+    // المعلّقة لا مجرّد وجودها: تطابقه مع `activeSessionId` يعني هذه الجلسة
+    // بعينها ما تزال «تحت التأسيس» ⇒ الإفراغ مشروع. وغيابه أو اختلافه يعني
+    // انتقالاً حقيقياً إلى محادثة أخرى بينما الإرسال ما زال طائراً ⇒ نُسقِط
+    // النسخة المتفائلة بدل حقنها: الخادم يحفظ رسالة المستخدم، فتظهر صحيحةً في
+    // جلستها عند فتحها.
+    if (pendingViewSessionRef.current && pendingViewSessionRef.current.sessionId !== activeSessionId) {
       flushedPendingUserMessageRef.current = pendingUserMessage;
       setPendingUserMessage(null);
       return;
@@ -658,6 +699,8 @@ export function useChatSessionState({
       light400Queued: false,
       fullDone: false,
       fullLimit: MESSAGES_PER_PAGE,
+      fullRevisionRetries: 0,
+      fullSkipRevision: false,
       };
   }, []);
 
@@ -672,6 +715,78 @@ export function useChatSessionState({
       && connection?.effectiveType !== 'slow-2g'
       && connection?.effectiveType !== '2g';
   }, []);
+
+  /**
+   * B-1386: handle one `full` result inside `drainHistoryQueue` -- exact-
+   * revision merge, legacy (no-revision) merge, or a bounded revision-conflict
+   * retry. Extracted so `drainHistoryQueue` itself stays small.
+   *
+   * The real server 409s outright on a mismatched `revision`
+   * (`HISTORY_REVISION_CHANGED`), so `!result.ok` is the ordinary conflict
+   * path; `result.ok` with a mismatched revision is a defensive fallback for
+   * an old/odd server that never enforced the check.
+   */
+  const applyFullRevisionRebase = useCallback((
+    sessionId: string,
+    snapshot: Parameters<SessionStore['applyHistoryRebase']>[1],
+    queue: HistoryQueueState,
+  ) => {
+    const heldSlot = sessionStore.applyHistoryRebase(sessionId, snapshot);
+    setHasMoreMessages(heldSlot.hasMore);
+    setTotalMessages(heldSlot.total);
+    if (heldSlot.tokenUsage) setTokenBudget(heldSlot.tokenUsage as Record<string, unknown>);
+    messagesOffsetRef.current = heldSlot.serverMessages.length;
+    // The merge only adds/refreshes rows (never removes an already-widened
+    // window), so "everything loaded" tracks the merged slot's own hasMore.
+    allMessagesLoadedRef.current = !heldSlot.hasMore;
+    setAllMessagesLoaded(!heldSlot.hasMore);
+    queue.fullSkipRevision = false;
+    queue.fullRevisionRetries = 0;
+    queue.fullDone = true;
+  }, [sessionStore, setHasMoreMessages, setTotalMessages, setTokenBudget, setAllMessagesLoaded]);
+
+  const applyFullHistoryResult = useCallback((
+    sessionId: string,
+    slot: SessionSlot,
+    result: Awaited<ReturnType<SessionStore['requestHistorySnapshot']>>,
+    queue: HistoryQueueState,
+    epoch: number,
+    redrain: () => void,
+  ) => {
+    const retryRevisionConflict = (): boolean => {
+      if (queue.fullRevisionRetries >= MAX_FULL_REVISION_RETRIES) return false;
+      const attempt = queue.fullRevisionRetries;
+      queue.fullRevisionRetries = attempt + 1;
+      window.setTimeout(() => {
+        if (historyEpochRef.current !== epoch) return;
+        queue.fullSkipRevision = true;
+        queue.fullQueued = true;
+        redrain();
+      }, 300 * (attempt + 1));
+      return true;
+    };
+
+    if (!result.ok) {
+      if (result.code === 'HISTORY_REVISION_CHANGED' && retryRevisionConflict()) return;
+      sessionStore.setHistoryError(sessionId, result, 'deferred');
+      return;
+    }
+
+    const snapshot = result.snapshot;
+    if (queue.fullSkipRevision) {
+      applyFullRevisionRebase(sessionId, snapshot, queue);
+    } else if (slot.historyRevision && snapshot.revision === slot.historyRevision && snapshot.payloadMode === 'full') {
+      sessionStore.applyHistoryEnrichment(sessionId, snapshot);
+      queue.fullDone = true;
+      queue.fullRevisionRetries = 0;
+    } else if (snapshot.payloadMode === 'full' && !snapshot.revision) {
+      sessionStore.applyHistoryEnrichment(sessionId, snapshot);
+      queue.fullDone = true;
+    } else if (!retryRevisionConflict()) {
+      sessionStore.setHistoryError(sessionId,
+        { ok: false, status: 409, code: 'HISTORY_REVISION_CHANGED', retryAfterMs: null }, 'deferred');
+    }
+  }, [applyFullRevisionRebase, sessionStore]);
 
   /**
    * One coalescing scheduler owns every deferred history request. A full tail
@@ -701,11 +816,12 @@ export function useChatSessionState({
     historyRequestRef.current = controller;
     const generation = sessionStore.beginHistoryRequest(sessionId);
     try {
+      const skipRevision = kind === 'full' && queue.fullSkipRevision;
       const result = await sessionStore.requestHistorySnapshot(sessionId, {
         limit: kind === 'light400' ? ACTIVE_RUN_HYDRATION_LIMIT : queue.fullLimit,
         offset: 0,
         payload: kind === 'light400' ? 'light' : 'full',
-        revision: slot.historyRevision ?? undefined,
+        revision: skipRevision ? undefined : slot.historyRevision ?? undefined,
         signal: controller.signal,
       });
       if (controller.signal.aborted
@@ -713,6 +829,10 @@ export function useChatSessionState({
         || historyEpochRef.current !== epoch
         || !sessionStore.isHistoryRequestCurrent(sessionId, generation)) return;
 
+      if (kind === 'full') {
+        applyFullHistoryResult(sessionId, slot, result, queue, epoch, () => void drainHistoryQueue());
+        return;
+      }
       if (!result.ok) {
         sessionStore.setHistoryError(sessionId, result, 'deferred');
         queue.fullQueued = false;
@@ -720,18 +840,7 @@ export function useChatSessionState({
         return;
       }
       const snapshot = result.snapshot;
-      // Full enrichment is valid only for the exact light revision it enriches.
-      if (kind === 'full') {
-        if (!slot.historyRevision
-          || snapshot.revision !== slot.historyRevision
-          || snapshot.payloadMode !== 'full') {
-          sessionStore.setHistoryError(sessionId, { ok: false, status: 409, code: 'HISTORY_REVISION_CHANGED', retryAfterMs: null }, 'deferred');
-          return;
-        }
-        sessionStore.applyHistoryEnrichment(sessionId, snapshot);
-        queue.fullDone = true;
-      } else if (snapshot.payloadMode === 'light'
-        && snapshot.revision === slot.historyRevision) {
+      if (snapshot.payloadMode === 'light' && snapshot.revision === slot.historyRevision) {
         sessionStore.applyLightHistoryExpansion(sessionId, snapshot);
       }
     } catch (error) {
@@ -749,7 +858,7 @@ export function useChatSessionState({
         if (queue.fullQueued || queue.light400Queued) void drainHistoryQueue();
       }
     }
-  }, [canEnrichHistoryNow, sessionStore]);
+  }, [applyFullHistoryResult, canEnrichHistoryNow, sessionStore]);
 
   const queueHistoryWork = useCallback((kind: 'full' | 'light400', interaction = false) => {
     const queue = historyQueueRef.current;
@@ -805,6 +914,21 @@ export function useChatSessionState({
     };
   }, [queueHistoryWork]);
 
+  /**
+   * B-1386: a brand-new session's first light snapshot is fetched while the
+   * assistant is, by construction, still answering — scheduling the deferred
+   * `full` enrichment right then all but guarantees the revision race this
+   * bug fixes. Hold it until the run this hook can observe (`processingSessions`)
+   * ends, instead of firing straight into that window.
+   */
+  const deferredEnrichmentSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const pending = deferredEnrichmentSessionRef.current;
+    if (!pending || processingSessions?.has(pending)) return;
+    deferredEnrichmentSessionRef.current = null;
+    if (selectedSessionIdRef.current === pending) scheduleHistoryEnrichment();
+  }, [processingSessions, scheduleHistoryEnrichment]);
+
   // Main session loading effect — store-based
   useEffect(() => {
     // Wait for the application's existing health read. Starting a legacy full
@@ -813,8 +937,18 @@ export function useChatSessionState({
     if (selectedSession && selectedProject && !lightHistoryCapability.resolved) return;
     if (!selectedSession || !selectedProject) {
       // A new provider run can be in flight before the router has a canonical
-      // selectedSession. Keep the processing banner alive until complete/error.
-      if (pendingViewSessionRef.current) {
+      // selectedSession. Keep the processing banner alive until complete/error
+      // — but ONLY while we're still waiting on the SAME project's router to
+      // catch up. B-1386: `handleProjectSelect` also nulls `selectedSession`
+      // (no `newSessionTrigger` bump) when the user switches to a DIFFERENT
+      // project mid-send; an EXPLICIT, differing `projectId` on the ref means
+      // that, and lets the reset through instead of pinning `currentSessionId`
+      // to the abandoned project. A ref with no `projectId` at all (older
+      // callers, or the pre-session_created phase) is not evidence of a
+      // mismatch and keeps the pre-existing "any pending send" behavior.
+      const refProjectId = pendingViewSessionRef.current?.projectId;
+      const projectMismatch = refProjectId != null && refProjectId !== (selectedProject?.projectId ?? null);
+      if (pendingViewSessionRef.current && !projectMismatch) {
         return;
       }
 
@@ -836,6 +970,17 @@ export function useChatSessionState({
       isLoadingMoreRef.current = false;
       cancelHistoryPipeline();
       return;
+    }
+
+    // B-1386: the router caught up with the id useChatRealtimeHandlers minted
+    // for a brand-new conversation — the guard above no longer needs to hold
+    // this effect back, so release it now instead of leaving it for the next
+    // `complete`/`error` to clear. Fork nulls this ref itself, synchronously,
+    // inside useChatRealtimeHandlers, so it never reaches here still set for
+    // that path — but stale-resume does NOT null it there, only stamps
+    // `.sessionId`, so this same match-and-release also covers stale-resume.
+    if (pendingViewSessionRef.current?.sessionId === selectedSession.id) {
+      pendingViewSessionRef.current = null;
     }
 
     const provider = (selectedSession.__provider || localStorage.getItem('selected-provider') as Provider) || 'claude';
@@ -912,6 +1057,8 @@ export function useChatSessionState({
       light400Queued: false,
       fullDone: false,
       fullLimit: MESSAGES_PER_PAGE,
+      fullRevisionRetries: 0,
+      fullSkipRevision: false,
       };
     setIsLoadingSessionMessages(true);
     const controller = new AbortController();
@@ -939,7 +1086,13 @@ export function useChatSessionState({
         // Missing markers mean an old server returned full, even if it ignored
         // `payload=light`; never issue an enrichment request in that case.
         if (result.snapshot.payloadMode === 'light' && result.snapshot.revision) {
-          scheduleHistoryEnrichment();
+          // B-1386: defer while this exact run is still active; the effect
+          // above fires it once `processingSessions` no longer holds it.
+          if (processingSessions?.has(requestSessionId)) {
+            deferredEnrichmentSessionRef.current = requestSessionId;
+          } else {
+            scheduleHistoryEnrichment();
+          }
         } else {
           historyQueueRef.current.fullDone = true;
         }

@@ -66,6 +66,7 @@ import {
   parseBtwQuestion,
 } from '../utils/btwCommand';
 import { isArabicCodexSideAlias, normalizeArabicSlashCommand } from '../utils/commandLocalization';
+import { isReservedSteerCommand, parseSteerText } from '../utils/steerCommand';
 
 import { resolveStickyEffortMode } from './stickyEffortMode';
 import { readSessionEngineProvider, writePendingEngineStamp } from './useChatProviderState';
@@ -131,6 +132,10 @@ type PendingViewSession = {
   startedAt: number;
   /** Correlates a new-session view with its originating composer submission. */
   clientMsgId?: string | null;
+  /** B-1386: the project this send started under, so a genuine project switch
+   * (handleProjectSelect) is never mistaken for "still routing to the id we
+   * just minted" by useChatSessionState's router-lag guard. */
+  projectId?: string | null;
 };
 
 /**
@@ -191,6 +196,15 @@ interface UseChatComposerStateArgs {
    * العادي (لا سجلّ محادثة ولا دور). منطق القناة نفسه في useBtwSideChannel.
    */
   onBtwQuery?: (question: string) => void;
+  /**
+   * T-1903 (ADR-190): مُطلِق التوجيه أثناء الدور. حين يبدأ الإدخال بـ«/steer »
+   * ومدخلة «/steer» ظاهرة (steerAvailable)، يُعترَض في handleSubmit ويُمرَّر
+   * النصّ هنا بدل مسار الرسائل العادي — يُرسل كإطار `session-steer` لا
+   * كرسالة محادثة.
+   */
+  onSteerSend?: (text: string) => void;
+  /** T-1903: أهلية إظهار مدخلة «/steer» — من useSessionSteer.canSteer. */
+  steerAvailable?: boolean;
   /**
    * ‏T-1319 — **لم يعد يقرّر سلوك Enter**. القرار صار ثلاثيّ القيم
    * (`enterBehavior`) ويُحلّ محلياً عبر `useResolvedEnterBehavior` داخل هذا
@@ -386,6 +400,8 @@ export function useChatComposerState({
   tokenBudget,
   sendMessage,
   onBtwQuery,
+  onSteerSend,
+  steerAvailable = false,
   onSessionActive,
   onSessionProcessing,
   onInputFocusChange,
@@ -792,6 +808,7 @@ export function useChatComposerState({
     onExecuteCommand: executeCommand,
     onDispatchPassthroughCommand: dispatchPassthroughCommand,
     isExecutableCommandRunning: executingCommand !== null,
+    steerAvailable,
   });
 
   const {
@@ -1615,6 +1632,26 @@ export function useChatComposerState({
         return;
       }
 
+      // T-1904 e2e (bug 3) — «/steer» حجزٌ نحويّ دائم بصرف النظر عن
+      // `steerAvailable`/canSteer: يُعترَض هنا قبل أيّ بوابة أخرى (بما فيها
+      // isLoading، تماماً كـ«/btw» أعلاه) فلا يسقط أبداً إلى مسار الرسالة
+      // العادية. السبب الدقيق (موافقة معطَّلة/سياسة معطَّلة/دور غير جارٍ) من
+      // الخادم عبر session-steer-result — onSteerSend/sendSteer يعرضانه.
+      if (isReservedSteerCommand(currentInput)) {
+        const steerText = parseSteerText(currentInput);
+        if (steerText && onSteerSend) {
+          onSteerSend(steerText);
+        }
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        return;
+      }
+
       if ((!currentInput.trim() && attachedImages.length === 0) || isLoading || submitSealRef.current || !selectedProject) {
         return;
       }
@@ -1828,6 +1865,7 @@ export function useChatComposerState({
           sessionId: null,
           startedAt: Date.now(),
           clientMsgId,
+          projectId: selectedProject?.projectId ?? null,
         };
       }
       if (effectiveSessionId) {
@@ -1916,6 +1954,7 @@ export function useChatComposerState({
       executeCommand,
       isLoading,
       onBtwQuery,
+      onSteerSend,
       provider,
       onSessionActive,
       onSessionProcessing,
@@ -1956,7 +1995,7 @@ export function useChatComposerState({
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('pendingSessionId');
       }
-      pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now() };
+      pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now(), projectId: selectedProject?.projectId ?? null };
 
       addMessage({ type: 'user', content: command, timestamp: new Date(), userId: authUserId });
       setIsLoading(true);

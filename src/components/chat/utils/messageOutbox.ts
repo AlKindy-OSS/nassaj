@@ -1368,6 +1368,81 @@ export function createDeliveredOutboxDismissal(): () => number {
   };
 }
 
+/**
+ * B-1370 — تنظيف الرسائل العالقة يدوياً من الإعدادات.
+ *
+ * المشكلة المقيسة: `evictV2ForAdmission` (B-1034) لا يُخلي أبداً `failed` أو
+ * `unconfirmed` عمداً — بحقّ، فالإخلاء التلقائي الصامت لرسالةٍ لم تُسلَّم كان
+ * سيُضيع كلاماً بلا علم صاحبه. لكن هذا يعني أن رسائل فشلت، أو انقطع شاهدها، أو
+ * بقيت `pending` يتيمة من محادثاتٍ أخرى، تتراكم بصمتٍ حتى تبلغ ‏`MAX_OUTBOX_ENTRIES`
+ * فيُقفَل الإرسال — و**لا فعل في الواجهة يُخليها**، فالمستخدم يقف أمام
+ * `outbox.storageFull` بلا مخرج.
+ *
+ * هذا فعلٌ **صريح بإذن المستخدم**، لا إخلاءً صامتاً: عالقٌ يعني `failed` أو
+ * `unconfirmed` دائماً (نهائيّان أصلاً)، أو `pending` غير مسلَّم تجاوز عمره
+ * ‏`STUCK_OUTBOX_STALE_AFTER_MS` (أبعد بكثير من مهلة الشكّ التسعين ثانية) ولا
+ * جولة حيّة على جلسته الآن. `isSessionLive` عالميّة عبر `sessionProcessStateStore`
+ * (لا مقصورة على المحادثة المفتوحة حالياً كما في `selectVisibleEntries`)، لأن
+ * الإعدادات ليست شاشة محادثة بعينها — والقيد يحمي أي جولةٍ لا تزال تعمل فعلاً
+ * من الحذف، مهما طال عمرها.
+ */
+export const STUCK_OUTBOX_STALE_AFTER_MS = 10 * 60 * 1000;
+
+function isStuckOutboxEntry(
+  entry: OutboxEntry,
+  now: number,
+  isSessionLive: (sessionId: string | null) => boolean,
+): boolean {
+  if (entry.status === 'delivered') return false;
+  if (entry.status === 'failed' || entry.status === 'unconfirmed') return true;
+  // status === 'pending'
+  if (entry.sessionId && isSessionLive(entry.sessionId)) return false;
+  return now - entry.createdAt >= STUCK_OUTBOX_STALE_AFTER_MS;
+}
+
+/** دالّة صرفة قابلة للاختبار بلا متجر عالمي — راجع `isStuckOutboxEntry` أعلاه. */
+export function selectStuckOutboxEntries(
+  all: readonly OutboxEntry[],
+  options?: { now?: number; isSessionLive?: (sessionId: string | null) => boolean },
+): OutboxEntry[] {
+  const now = options?.now ?? Date.now();
+  const isSessionLive = options?.isSessionLive ?? (() => false);
+  return all.filter((entry) => isStuckOutboxEntry(entry, now, isSessionLive));
+}
+
+/**
+ * لقطة العالق الآن (للعدّاد ونصّ «نسخ») + إغلاقٌ يُنفّذ الحذف الفعلي عند التأكيد.
+ *
+ * يتبع بنية `createDeliveredOutboxDismissal`: اللقطة تُؤخذ لحظة فتح حوار
+ * التأكيد، والحذف الفعلي (`commit`) يُعاد فحص كل إدخال فيه بهويّة المرجع
+ * (`entries.includes(entry)`) — أي تغييرٍ متزامن (تسليمٌ وصل، إعادة إرسال،
+ * حذفٌ سابق، تبديل حساب) يُبدّل مرجع الكائن فيُستبعد الإدخال تلقائياً بلا فحصٍ
+ * إضافي. الحذف عبر `removeOutboxEntryExplicit` كي يُنتظر التزام معاملة v2
+ * (والصور معها) قبل أن يُحسب العدد المُعاد للمُستدعي.
+ */
+export function createStuckOutboxDismissal(
+  isSessionLive: (sessionId: string | null) => boolean = () => false,
+  now = Date.now(),
+): { count: number; texts: string[]; commit: () => Promise<number> } {
+  const owner = activeUserKey;
+  const stuck = selectStuckOutboxEntries(entries, { now, isSessionLive });
+  return {
+    count: stuck.length,
+    texts: stuck.map((entry) => entry.text),
+    commit: async () => {
+      let removed = 0;
+      const wasRefused = admissionRefused;
+      admissionRefused = false;
+      for (const entry of stuck) {
+        if (activeUserKey !== owner) break;
+        if (entries.includes(entry) && await removeOutboxEntryExplicit(entry.id)) removed += 1;
+      }
+      if (wasRefused && removed === 0) notify();
+      return removed;
+    },
+  };
+}
+
 /** Await and read back replacement blobs before relinquishing the original copy. */
 export async function verifyOutboxImagePersistence(entry: OutboxEntry, expected: File[]): Promise<boolean> {
   if (expected.length === 0) return true;

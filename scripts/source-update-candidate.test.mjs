@@ -166,3 +166,48 @@ test('orchestrator rejects a mismatched HEAD and lifecycle source mutations', as
         } finally { rmSync(value.root, { recursive: true, force: true }); }
     }
 });
+
+test('release candidates build with the candidate\'s own builders, not the installed runtime (B-1381)', async () => {
+    const value = fixture();
+    try {
+        const builds = [];
+        const result = await buildSourceUpdateCandidate(value.planFile, {
+            commonDir: value.commonDir,
+            env: { PATH: process.env.PATH, NASSAJ_SECRET_PROBE: 'must-not-leak' },
+            run(executable, args, options = {}) {
+                if (executable === 'git' && args.includes('--show-toplevel')) return { status: 0, stdout: `${value.sourceRoot}\n` };
+                if (executable === 'git' && args.includes('HEAD^{commit}')) return { status: 0, stdout: `${'a'.repeat(40)}\n` };
+                if (executable === 'git' && args[0] === 'status') return { status: 0, stdout: '' };
+                if (executable === 'npm' && args[0] === 'ci') {
+                    mkdirSync(path.join(value.sourceRoot, 'node_modules'));
+                    return { status: 0, stdout: '' };
+                }
+                if (executable === 'npm' && args[0] === 'ls') return { status: 0, stdout: '{}' };
+                if (executable === process.execPath) {
+                    const domain = /client-build-atomic/.test(args[2]) ? 'client' : 'server';
+                    builds.push({ domain, program: args[2], cwd: options.cwd, env: options.env });
+                    const request = JSON.parse(args[3]);
+                    mkdirSync(request.outputRoot);
+                    return { status: 0, stdout: `${JSON.stringify({ buildId: (domain === 'client' ? 'b' : 'c').repeat(64) })}\n` };
+                }
+                throw new Error(`unexpected command: ${executable} ${args.join(' ')}`);
+            },
+        });
+        assert.deepEqual(builds.map(build => build.domain), ['client', 'server']);
+        for (const build of builds) {
+            // `../<domain>-build-atomic.mjs` resolved from the candidate's scripts/lib.
+            assert.equal(build.cwd, path.join(value.sourceRoot, 'scripts', 'lib'));
+            assert.match(build.program, new RegExp(`from '\\.\\./${build.domain}-build-atomic\\.mjs'`));
+            assert.equal(build.env.NASSAJ_SECRET_PROBE, undefined, 'builder env stays the restricted install env');
+            assert.equal(build.env.NODE_ENV, 'production');
+        }
+        assert.equal(result.clientBuildId, 'b'.repeat(64));
+        assert.equal(result.serverBuildId, 'c'.repeat(64));
+    } finally { rmSync(value.root, { recursive: true, force: true }); }
+});
+
+test('the candidate orchestrator never imports the installed release builders (B-1381)', () => {
+    const source = readFileSync(new URL('./source-update-candidate.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /from '\.\/(?:client|server)-build-atomic\.mjs'/);
+    assert.doesNotMatch(source, /plan\.localSource \? targetBuilder/);
+});

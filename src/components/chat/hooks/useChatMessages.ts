@@ -182,6 +182,12 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       // userId). MessageComponent uses this to render coordinator-to-subagent
       // prompts distinctly from human input.
       originKind: msg.originKind,
+      // T-1903 (ADR-190): verified mid-turn steer injection markers, carried
+      // through untouched so MessageComponent can render the distinct bubble.
+      injected: msg.injected,
+      deliveryStatus: msg.deliveryStatus,
+      steerClientMsgId: msg.steerClientMsgId,
+      steerSenderDisplayName: msg.steerSenderDisplayName,
       // Per-turn model attribution (B-352). Only assistant rows carry it; the
       // footer badge renders it so the reader can see WHICH model answered,
       // which the session-level chip cannot say once a conversation changes

@@ -1,0 +1,8 @@
+{
+  "schema": "nassaj-release-generation-identity/v1",
+  "repository": "AlKindy-OSS/nassaj",
+  "repositoryId": "1373279714",
+  "ownerId": "281052786",
+  "workflowPath": ".github/workflows/release-generation.yml",
+  "workflowSource": "scripts/release-workflow/release-generation.yml"
+}

@@ -36,11 +36,21 @@ export type ScheduledMessageActionableCounts = Readonly<{
   failed: number;
 }>;
 
+export type ScheduledMessagesDueSoon = Readonly<{
+  count: number;
+  earliestAt: string | null;
+}>;
+
+/** Marks the five user positions in the writable-session template. */
+const USER_SLOT = '{{user}}';
+
 /**
  * Set-wise equivalent of `isSessionWritableByUser` for persisted sessions.
- * Keep the five user bindings in the same order as `accessBindings` below.
+ * `userExpr` fills every USER_SLOT: `?` for a bound user (keep the five
+ * bindings in the order of `accessBindings`), or a column reference for a
+ * per-row correlated check.
  */
-const WRITABLE_SESSION_SQL = `EXISTS (
+const WRITABLE_SESSION_TEMPLATE = `EXISTS (
   SELECT 1
   FROM sessions s
   WHERE s.session_id = scheduled_messages.session_id
@@ -49,27 +59,27 @@ const WRITABLE_SESSION_SQL = `EXISTS (
       OR NOT EXISTS (SELECT 1 FROM projects p0 WHERE p0.project_path = TRIM(s.project_path))
       OR EXISTS (
         SELECT 1 FROM session_participants sp
-        WHERE sp.session_id = s.session_id AND sp.user_id = ? AND sp.attribution = 'spawn'
+        WHERE sp.session_id = s.session_id AND sp.user_id = {{user}} AND sp.attribution = 'spawn'
       )
       OR EXISTS (
         SELECT 1 FROM message_authors ma
-        WHERE ma.session_id = s.session_id AND ma.user_id = ?
+        WHERE ma.session_id = s.session_id AND ma.user_id = {{user}}
       )
       OR EXISTS (
         SELECT 1
         FROM projects p
         WHERE p.project_path = TRIM(s.project_path)
           AND (
-            p.created_by = ?
+            p.created_by = {{user}}
             OR EXISTS (
               SELECT 1 FROM project_members pm
-              WHERE pm.project_id = p.project_id AND pm.user_id = ?
+              WHERE pm.project_id = p.project_id AND pm.user_id = {{user}}
             )
             OR EXISTS (
               SELECT 1
               FROM session_participants project_sp
               JOIN sessions project_s ON project_s.session_id = project_sp.session_id
-              WHERE project_sp.user_id = ?
+              WHERE project_sp.user_id = {{user}}
                 AND project_sp.attribution = 'spawn'
                 AND TRIM(project_s.project_path) = p.project_path
             )
@@ -77,6 +87,10 @@ const WRITABLE_SESSION_SQL = `EXISTS (
       )
     )
 )`;
+
+const writableSessionSql = (userExpr: string): string => WRITABLE_SESSION_TEMPLATE.split(USER_SLOT).join(userExpr);
+
+const WRITABLE_SESSION_SQL = writableSessionSql('?');
 
 const accessBindings = (userId: number): number[] => [userId, userId, userId, userId, userId];
 
@@ -175,6 +189,35 @@ export const scheduledMessagesDb = {
     return row.count;
   },
 
+  /**
+   * T-1912: node-wide count and earliest due time of scheduled messages that
+   * the queue WILL deliver by `untilIso` (UTC ISO, compared as text like
+   * claimDue). Eligibility mirrors claimDue and the due-time re-authorization:
+   * - `pending` with attempts left, due by `untilIso` (overdue rows included);
+   * - `running` still in flight (unexpired lease, pre-acceptance by construction:
+   *   an accepted row is settled `sent`), or with an expired lease and attempts
+   *   left (claimDue will re-lease it);
+   * - owner still active, and the target session still writable by the owner.
+   * Cancelled, sent, failed, exhausted, revoked-session and inactive-user rows
+   * never count. Returns metadata only: no content, ids or owners.
+   */
+  nextDueWithin(nowIso: string, untilIso: string): ScheduledMessagesDueSoon {
+    const row = getConnection().prepare(`SELECT COUNT(*) AS count, MIN(available_at) AS earliestAt
+      FROM scheduled_messages
+      WHERE available_at <= ?
+        AND (
+          (status = 'pending' AND attempts < max_attempts)
+          OR (status = 'running' AND (lease_expires_at > ? OR attempts < max_attempts))
+        )
+        AND EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id = scheduled_messages.user_id AND u.is_active = 1 AND u.status = 'active'
+        )
+        AND ${writableSessionSql('scheduled_messages.user_id')}`)
+      .get(untilIso, nowIso) as { count: number; earliestAt: string | null };
+    return { count: row.count, earliestAt: row.count > 0 ? row.earliestAt : null };
+  },
+
   failExpiredExhausted(nowIso: string): ScheduledMessage[] {
     const db = getConnection();
     return db.transaction(() => {
@@ -227,13 +270,51 @@ export const scheduledMessagesDb = {
     })();
   },
 
-  claimDue(nowIso: string, leaseMs: number): ScheduledMessage | null {
+  /**
+   * Atomically leases the earliest due row that is the HEAD of its session.
+   *
+   * - `excludeSessionIds` names sessions that already have a delivery or turn in
+   *   flight, so a busy session neither blocks other sessions (B-1390) nor gets
+   *   a second concurrent turn; its next row stays pending in line.
+   * - `excludeUserIds` names users at their concurrent-delivery cap, so one
+   *   user's many sessions cannot monopolise the provider pool.
+   * - Only a session's head (earliest `scheduled_for`, then `created_at`, then
+   *   insertion order) among its open rows is claimable: a retryable failure
+   *   that pushes the head's `available_at` later must not let a later message
+   *   of the same session overtake it. A pending row that has exhausted its
+   *   attempts can never be claimed, so it is never a head either; otherwise
+   *   it would block its whole session forever.
+   *
+   * Both exclusion lists are IN-PROCESS state of the caller: they describe
+   * deliveries this process started, not work another process may be running.
+   * Cross-process exclusivity rests on the lease CAS below, nothing else.
+   */
+  claimDue(
+    nowIso: string,
+    leaseMs: number,
+    excludeSessionIds: readonly string[] = [],
+    excludeUserIds: readonly number[] = [],
+  ): ScheduledMessage | null {
     const db = getConnection();
     return db.transaction(() => {
-      const candidate = db.prepare(`SELECT id FROM scheduled_messages
-        WHERE available_at <= ? AND attempts < max_attempts
-          AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))
-        ORDER BY available_at ASC LIMIT 1`).get(nowIso, nowIso) as { id: string } | undefined;
+      const candidate = db.prepare(`SELECT sm.id FROM scheduled_messages sm
+        WHERE sm.available_at <= ? AND sm.attempts < sm.max_attempts
+          AND (sm.status = 'pending' OR (sm.status = 'running' AND sm.lease_expires_at <= ?))
+          AND sm.session_id NOT IN (SELECT value FROM json_each(?))
+          AND sm.user_id NOT IN (SELECT value FROM json_each(?))
+          AND NOT EXISTS (
+            SELECT 1 FROM scheduled_messages e
+            WHERE e.session_id = sm.session_id AND e.rowid <> sm.rowid
+              AND e.status IN ('pending','running')
+              AND NOT (e.status = 'pending' AND e.attempts >= e.max_attempts)
+              AND (e.scheduled_for < sm.scheduled_for
+                OR (e.scheduled_for = sm.scheduled_for AND (e.created_at < sm.created_at
+                  OR (e.created_at = sm.created_at AND e.rowid < sm.rowid))))
+          )
+        ORDER BY sm.available_at ASC, sm.scheduled_for ASC, sm.created_at ASC, sm.rowid ASC
+        LIMIT 1`)
+        .get(nowIso, nowIso, JSON.stringify(excludeSessionIds), JSON.stringify(excludeUserIds)) as
+        { id: string } | undefined;
       if (!candidate) return null;
       const leaseToken = randomUUID();
       const leaseExpiresAt = new Date(Date.parse(nowIso) + leaseMs).toISOString();
@@ -255,19 +336,34 @@ export const scheduledMessagesDb = {
       .run(leaseExpiresAt, id, leaseToken).changes === 1;
   },
 
-  settle(id: string, leaseToken: string, outcome: { success: boolean; retryable: boolean; errorCode?: string; retryAt?: string }): boolean {
+  /**
+   * Settles a claimed row. `refundAttempt` (a retryable refusal before any
+   * provider effect, e.g. update maintenance) gives back the attempt the claim
+   * spent, so a maintenance window cannot exhaust `max_attempts`.
+   *
+   * Both statements run in one transaction: a crash between them must not
+   * leave a row `pending` with `attempts >= max_attempts`.
+   */
+  settle(id: string, leaseToken: string, outcome: {
+    success: boolean; retryable: boolean; errorCode?: string; retryAt?: string; refundAttempt?: boolean;
+  }): boolean {
     const db = getConnection();
     const status = outcome.success ? 'sent' : outcome.retryable ? 'pending' : 'failed';
     const boundedCode = outcome.errorCode?.slice(0, 128) ?? null;
-    const result = db.prepare(`UPDATE scheduled_messages SET status = ?, last_error_code = ?, available_at = COALESCE(?, available_at),
-      sent_at = CASE WHEN ? = 'sent' THEN CURRENT_TIMESTAMP ELSE sent_at END,
-      lease_token = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND status = 'running' AND lease_token = ?`)
-      .run(status, boundedCode, outcome.retryAt ?? null, status, id, leaseToken);
-    if (!outcome.success && outcome.retryable) {
-      db.prepare(`UPDATE scheduled_messages SET status = 'failed', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'pending' AND attempts >= max_attempts`).run(id);
-    }
-    return result.changes === 1;
+    const refund = status === 'pending' && outcome.refundAttempt === true ? 1 : 0;
+    return db.transaction(() => {
+      const result = db.prepare(`UPDATE scheduled_messages SET status = ?, last_error_code = ?,
+        available_at = COALESCE(?, available_at),
+        sent_at = CASE WHEN ? = 'sent' THEN CURRENT_TIMESTAMP ELSE sent_at END,
+        attempts = CASE WHEN ? = 1 AND attempts > 0 THEN attempts - 1 ELSE attempts END,
+        lease_token = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'running' AND lease_token = ?`)
+        .run(status, boundedCode, outcome.retryAt ?? null, status, refund, id, leaseToken);
+      if (result.changes === 1 && !outcome.success && outcome.retryable) {
+        db.prepare(`UPDATE scheduled_messages SET status = 'failed', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'pending' AND attempts >= max_attempts`).run(id);
+      }
+      return result.changes === 1;
+    })();
   },
 };

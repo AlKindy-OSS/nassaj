@@ -12,15 +12,10 @@
  *   - reads the SHARED operator agent cards (~/.claude/agents/<name>.md) — the same
  *     operator-home base codex-governance-material uses — so it is fleet-portable and
  *     HOME-sandboxable (real-fs testable, no mocks).
- *   - takes the SESSION-RESOLVED Codex model. Gate 1B proved a custom agent REQUIRES
- *     an explicit `model` and that a Claude model id is invalid for Codex; delegation
- *     fails ("could not resolve the child model") without a real Codex model. The model
- *     is additionally normalized to a bare id (no `provider@`/`@` prefix) — Gate 1B: a
- *     native reference with `@` fails.
  *   - emits an `agentDefinitionHash` over the generating inputs (card bytes + resolved
- *     model + child sandbox + contract-template version) for drift detection and
+ *     child contract-template version) for drift detection and
  *     turn-to-turn idempotence (rewrite only when an input changed).
- *   - returns ok:false (never throws) on a missing/malformed card, a missing model, or a
+ *   - returns ok:false (never throws) on a missing/malformed card or a
  *     write failure. The caller (openai-codex.js) treats this FAIL-OPEN as of the
  *     2026-07-15 redirect: it logs loudly and STILL launches — coordination is now a
  *     PERMANENT textual layer, so a transient materialization glitch must not take down
@@ -36,7 +31,7 @@
  * TEXTUAL (the root contract + each delegate's leaf contract carrying its card's own
  * refusal gates), mirroring Claude Code's zero-rule; a structural OS guard for the
  * Codex root is a separate future follow-up. The agentDefinitionHash detects INPUT
- * drift (card/model/template changed); it is not a tamper-seal — the agents dir is
+ * drift (card/template changed); it is not a tamper-seal — the agents dir is
  * 0700-isolated per user.
  *
  * No project-internal imports beyond node builtins (mirrors codex-governance-material):
@@ -99,7 +94,13 @@ export const COORDINATOR_ROOT_CONTRACT =
   'طاقم التفويض هو كامل وكلاء نسّاج المتاحين في مجلد الوكلاء — تحليلاً وتنفيذاً — ' +
   'ومنهم architect وbackend-dev وfrontend-dev وtester وdevops وui-designer وqa-critic وغيرهم. ' +
   'فوّض فقط إلى وكيلٍ مُهيّأ له تعريف متاح؛ وإن تطلّبت المهمة تخصصاً غير متاح فأبلغ المالك ' +
-  'ولا تُفرّخ وكيلاً غير مُهيّأ ولا تنفّذ العمل بنفسك.';
+  'ولا تُفرّخ وكيلاً غير مُهيّأ ولا تنفّذ العمل بنفسك. ' +
+  'النموذج والجهد: هذا يلغي افتراض spawn_agent المدمج «لا تضبط model»؛ مرّر model ' +
+  'وreasoning_effort في كل spawn_agent: الحسّاسة (قرار، معمارية، مراجعة، إنتاج، devops، ' +
+  'أمن/صلاحيات) أعلى فئة متاحة وجهد high (وxhigh للمعمارية والمراجعة الحرجة والأخطاء العالقة)؛ ' +
+  'الروتينية فئة متوسطة وجهد medium؛ الخفيفة/الآلية/التوثيق أصغر فئة وجهد low؛ ' +
+  'غير المصنّفة أعلى فئة. اختر فقط من النماذج التي يُعلنها spawn_agent متاحةً ولا تثبّت ' +
+  'أسماء نماذج؛ واختيار المالك الصريح يتقدّم على ذلك.';
 
 /** Structural error code when a coordinator launch cannot prepare its delegates. */
 export const COORDINATOR_AGENTS_MISSING_CODE = 'coordinator_agents_missing';
@@ -113,7 +114,7 @@ export const COORDINATOR_AGENTS_MISSING_MESSAGE =
  * so every already-materialized TOML drifts (input-hash mismatch) and is rewritten on
  * the next coordinator spawn.
  */
-const CONTRACT_TEMPLATE_VERSION = 'v2';
+const CONTRACT_TEMPLATE_VERSION = 'v3';
 
 /** Dir mode for the per-user agents dir (matches the 0700 isolation tree). */
 const DIR_MODE = 0o700;
@@ -143,27 +144,6 @@ function sha256(s) {
 /** Human-readable error text from an unknown throw. */
 function errMessage(err) {
   return err instanceof Error ? err.message : String(err);
-}
-
-/**
- * Normalizes a picker/session model to a BARE Codex model id: strips any
- * `provider@`/`@` prefix (Gate 1B — a native reference carrying `@` fails to resolve
- * the child model). A bare id passes through unchanged. Codex/OpenAI model ids never
- * contain `@`, so slicing after the last `@` is safe.
- *
- * @param {unknown} model
- * @returns {string|null} the bare id, or null when unusable (fail-closed upstream)
- */
-export function normalizeCodexModel(model) {
-  if (typeof model !== 'string') {
-    return null;
-  }
-  const trimmed = model.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const bare = trimmed.includes('@') ? trimmed.slice(trimmed.lastIndexOf('@') + 1).trim() : trimmed;
-  return bare || null;
 }
 
 /**
@@ -214,19 +194,15 @@ function buildDeveloperInstructions(fm, body, identityName) {
 }
 
 /**
- * Builds a Codex custom-agent TOML (schema codex-cli 0.144.1) for `name`, bound to a
- * bare Codex `model`, from the shared operator card at ~/.claude/agents/<name>.md.
+ * Builds a Codex custom-agent TOML for `name` from the shared operator card at
+ * ~/.claude/agents/<name>.md. It deliberately omits `model` and reasoning settings so
+ * the coordinator can select them dynamically for each spawn_agent call.
  *
  * @param {string} name agent filename/identity (e.g. 'architect')
- * @param {string} model resolved Codex model (already-bare or `@`-prefixed — normalized here)
  * @returns {{ toml: string, hash: string, name: string } | null} null when the card is
- *   missing/malformed or the model is unusable (caller fails closed)
+ *   missing or malformed
  */
-export function buildAgentToml(name, model) {
-  const cleanModel = normalizeCodexModel(model);
-  if (!cleanModel) {
-    return null;
-  }
+export function buildAgentToml(name) {
   let raw;
   try {
     raw = fs.readFileSync(coordinatorAgentCardPath(name), 'utf8');
@@ -244,7 +220,7 @@ export function buildAgentToml(name, model) {
   const developerInstructions = buildDeveloperInstructions(fm, body, identityName);
 
   // Drift/idempotence fingerprint over the INPUTS that determine the output.
-  const hash = sha256([CONTRACT_TEMPLATE_VERSION, cleanModel, raw].join('\0'));
+  const hash = sha256([CONTRACT_TEMPLATE_VERSION, raw].join('\0'));
 
   const lines = [
     '# nassaj coordinator delegate — generated at launch (T-886). Do not hand-edit.',
@@ -257,7 +233,6 @@ export function buildAgentToml(name, model) {
     // No sandbox_mode: the delegate INHERITS the session's sandbox (workspace-write for
     // default/acceptEdits) so a write agent can actually write (E12). The leaf contract
     // + the card's own refusal gates constrain the role textually.
-    `model = ${JSON.stringify(cleanModel)}`,
     'developer_instructions = """',
     tomlMultiline(developerInstructions),
     '"""',
@@ -273,6 +248,42 @@ function existingAgentHash(tomlPath) {
     return m ? m[1] : null;
   } catch {
     return null;
+  }
+}
+
+/** Reads an existing TOML as UTF-8, or null when absent/unreadable. */
+function readTomlOrNull(tomlPath) {
+  try {
+    return fs.readFileSync(tomlPath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Atomically replaces a generated delegate TOML in its final directory. The exclusive
+ * temporary file prevents collisions between concurrent launches; rename publishes a
+ * fully closed 0600 file in one step and preserves the previous target on failure.
+ *
+ * @param {string} tomlPath final delegate TOML path
+ * @param {string} content complete generated TOML
+ */
+function writeAgentTomlAtomic(tomlPath, content) {
+  const tempPath = path.join(
+    path.dirname(tomlPath),
+    `.${path.basename(tomlPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempPath, content, { mode: FILE_MODE, flag: 'wx' });
+    fs.renameSync(tempPath, tomlPath);
+  } finally {
+    // Successful rename makes tempPath disappear. On any write/rename failure, remove
+    // only this invocation's random temporary entry and leave the old target untouched.
+    try {
+      fs.rmSync(tempPath, { force: true });
+    } catch {
+      // Best effort: retain the original write error rather than masking it.
+    }
   }
 }
 
@@ -346,26 +357,22 @@ export function pruneStaleCoordinatorAgents(agentsDir, keepNames) {
  */
 
 /**
- * Materializes ALL coordinator delegate TOMLs into <codexHome>/agents/, bound to the
- * session-resolved `model`. Idempotent: a delegate whose embedded input-hash already
- * matches is left untouched; a missing/drifted one is (re)written. The first unusable
- * model, missing/malformed card, or write failure aborts with ok:false. Never throws.
+ * Materializes ALL coordinator delegate TOMLs into <codexHome>/agents/ without pinning
+ * a model or reasoning effort. Idempotent: a delegate whose file content already
+ * matches byte-for-byte is left untouched; a missing/drifted one is (re)written. The first unusable
+ * card or write failure aborts with ok:false. Never throws.
  * The caller (openai-codex.js) is now FAIL-OPEN: on ok:false it logs and still launches
  * (coordination is a permanent textual layer), so ok:false degrades delegation rather
  * than blocking the whole Codex launch.
  *
  * @param {string} codexHome the effective CODEX_HOME whose agents/ to populate
- * @param {string} model     the session-resolved Codex model (bare or `@`-prefixed)
  * @returns {MaterializeResult}
  */
-export function materializeCoordinatorAgents(codexHome, model) {
-  const agentsDir = path.join(codexHome, CODEX_AGENTS_SUBDIR);
-
-  if (!normalizeCodexModel(model)) {
-    // Gate 1B: a custom agent REQUIRES an explicit Codex model; without it delegation
-    // fails. Refuse before writing anything.
-    return { ok: false, agentsDir, agents: [], reason: 'model_missing' };
+export function materializeCoordinatorAgents(codexHome) {
+  if (typeof codexHome !== 'string' || !codexHome) {
+    return { ok: false, agentsDir: '', agents: [], reason: 'codex_home_invalid' };
   }
+  const agentsDir = path.join(codexHome, CODEX_AGENTS_SUBDIR);
 
   try {
     fs.mkdirSync(agentsDir, { recursive: true, mode: DIR_MODE });
@@ -385,23 +392,21 @@ export function materializeCoordinatorAgents(codexHome, model) {
 
   const materialized = [];
   for (const name of roster) {
-    const built = buildAgentToml(name, model);
+    const built = buildAgentToml(name);
     if (!built) {
       // A missing/malformed delegate card ⇒ the coordinator cannot delegate to it.
       return { ok: false, agentsDir, agents: materialized, reason: `card_unavailable:${name}` };
     }
     const tomlPath = path.join(agentsDir, `${name}.toml`);
-    if (existingAgentHash(tomlPath) === built.hash) {
-      // Same card + model + template already materialized — no rewrite (idempotent).
+    if (readTomlOrNull(tomlPath) === built.toml) {
+      // Byte-identical file already materialized — no rewrite (idempotent). Full-content
+      // comparison (not the hash header) so a hand-edited file keeping a valid hash but
+      // injecting e.g. `model`/`sandbox_mode` is still rewritten.
       materialized.push(name);
       continue;
     }
     try {
-      // Remove whatever is there first (stale copy / hostile symlink / wrong type),
-      // then write 0600. rmSync removes the directory ENTRY; it does not follow a
-      // symlink to write its target.
-      fs.rmSync(tomlPath, { force: true });
-      fs.writeFileSync(tomlPath, built.toml, { mode: FILE_MODE });
+      writeAgentTomlAtomic(tomlPath, built.toml);
     } catch (err) {
       console.error('[Codex] coordinator delegate write FAILED — coordinator BLOCKED', {
         tomlPath,

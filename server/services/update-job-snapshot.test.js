@@ -146,3 +146,25 @@ test('the drift validator refuses anything that is not a bounded dist-relative l
     assert.equal(normalizeManifestDrift(DRIFT, absent).recoveryCommandAvailable, false);
     assert.equal(normalizeManifestDrift({ ...DRIFT, recoveryCommandAvailable: false }, present).recoveryCommandAvailable, true);
 });
+
+test('the terminal metrics receipt does not relabel a staging failure as "failed" (B-1381)', () => {
+    // Worker order on a staging failure: rollback(staging, {code}) then the
+    // metrics summary rollback('failed', {downtimeMs, …}) with no failedPhase.
+    const job = { id: 'j6', state: 'failed', error_code: 'candidate_build_failed', error_message: 'CODEX_IMAGE_ONLY_PATCH_VERSION' };
+    const out = deriveUpdateJobFailure(job, receiptsDb([
+        receipt('staging', 'intent', {}),
+        receipt('staging', 'rollback', { code: 'candidate_build_failed' }),
+        receipt('failed', 'rollback', { interventionsRequired: 0, automaticRepairs: 1, intervention: 'automatic', downtimeMs: null, reachedManual: false }),
+    ]));
+    assert.equal(out.failedPhase, 'staging');
+    assert.equal(out.errorCode, 'candidate_build_failed');
+});
+
+test('a bare terminal-state phase never becomes failedPhase (B-1381)', () => {
+    const job = { id: 'j7', state: 'manual_recovery_required' };
+    const out = deriveUpdateJobFailure(job, receiptsDb([
+        receipt('manual_recovery_required', 'rollback', { code: 'source_update_receipt_mismatch' }),
+    ]));
+    assert.equal(out.failedPhase, null, 'unknown stays unknown rather than a fake phase');
+    assert.equal(out.errorCode, 'source_update_receipt_mismatch');
+});

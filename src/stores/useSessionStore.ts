@@ -133,6 +133,12 @@ export interface NormalizedMessage {
    * Rule: role:'user' + originKind present ⇒ machine-authored; absent ⇒ human.
    */
   originKind?: 'coordinator' | 'peer' | 'channel' | 'task-notification' | string;
+  /** T-1903 (ADR-190): verified mid-turn steer injection — see ChatMessage.injected. */
+  injected?: boolean;
+  deliveryStatus?: 'queued' | 'delivered' | 'unconfirmed' | 'rejected';
+  steerClientMsgId?: string;
+  /** T-1904 e2e — see ChatMessage.steerSenderDisplayName. */
+  steerSenderDisplayName?: string;
   /** Original command that failed to resume, used to retry as a new session. */
   command?: string;
   text?: string;
@@ -850,20 +856,60 @@ export function useSessionStore() {
     return slot;
   }, [getSlot, notify, resolveSessionId]);
 
-  /** Replace equal-id light rows with their full forms without shrinking a wider light window. */
-  const applyHistoryEnrichment = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
-    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
-    const slot = getSlot(resolvedSessionId);
-    slot.historyGeneration += 1;
+  /**
+   * Merge a `full` snapshot's rows into `slot.serverMessages` by id, in place —
+   * shared by `applyHistoryEnrichment` (exact-revision merge) and
+   * `applyHistoryRebase` (post-conflict rebase). Existing rows outside the
+   * snapshot's own range (an already-widened light400/load-older window)
+   * survive untouched; matching ids are replaced with the fresher full row.
+   */
+  function mergeFullRowsIntoSlot(slot: SessionSlot, snapshot: HistorySnapshot): void {
     const fullById = new Map(snapshot.messages.map((message) => [message.id, message]));
     slot.serverMessages = slot.serverMessages.map((message) => fullById.get(message.id) ?? message);
-    // If the light tail was shorter for any reason, retain every full response row.
     const heldIds = new Set(slot.serverMessages.map((message) => message.id));
     for (const message of snapshot.messages) {
       if (!heldIds.has(message.id)) slot.serverMessages.push(message);
     }
     slot.serverMessages.sort(compareMessagesByTimestamp);
+  }
+
+  /** Replace equal-id light rows with their full forms without shrinking a wider light window. */
+  const applyHistoryEnrichment = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
+    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
+    const slot = getSlot(resolvedSessionId);
+    slot.historyGeneration += 1;
+    mergeFullRowsIntoSlot(slot, snapshot);
     slot.responseTurnDurationTotalMs = snapshot.responseTurnDurationTotalMs;
+    slot.historyPayloadMode = 'full';
+    if (slot.historyError?.operation === 'deferred') slot.historyError = null;
+    if (!slot.historyError) slot.status = 'idle';
+    slot.fetchedAt = Date.now();
+    if (snapshot.tokenUsage) slot.tokenUsage = snapshot.tokenUsage;
+    slot.realtimeMessages = retainUnconfirmedRealtime(slot.realtimeMessages, slot.serverMessages);
+    recomputeMergedIfNeeded(slot);
+    notify(resolvedSessionId);
+    return slot;
+  }, [getSlot, notify, resolveSessionId]);
+
+  /**
+   * B-1386: adopt a fresh `full` snapshot as the new revision baseline after a
+   * bounded revision-conflict retry (the request omitted `revision`, so the
+   * server answered unconditionally with whatever is current now). Same
+   * merge-by-id as `applyHistoryEnrichment` — an already-widened window
+   * (light400 expansion / load-older rows outside this snapshot's own range)
+   * is never shrunk — but it also moves the revision/pagination baseline
+   * forward instead of leaving them pinned to the stale light snapshot.
+   */
+  const applyHistoryRebase = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
+    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
+    const slot = getSlot(resolvedSessionId);
+    slot.historyGeneration += 1;
+    mergeFullRowsIntoSlot(slot, snapshot);
+    slot.total = Math.max(slot.total, snapshot.total);
+    slot.hasMore = slot.hasMore || snapshot.hasMore;
+    slot.offset = slot.serverMessages.length;
+    slot.responseTurnDurationTotalMs = snapshot.responseTurnDurationTotalMs;
+    slot.historyRevision = snapshot.revision;
     slot.historyPayloadMode = 'full';
     if (slot.historyError?.operation === 'deferred') slot.historyError = null;
     if (!slot.historyError) slot.status = 'idle';
@@ -1525,6 +1571,7 @@ export function useSessionStore() {
     setHistoryError,
     applyHistorySnapshot,
     applyHistoryEnrichment,
+    applyHistoryRebase,
     applyLightHistoryExpansion,
   }), [
     getSlot, has, fetchFromServer, fetchMore,
@@ -1534,7 +1581,7 @@ export function useSessionStore() {
     branchSessionId,
     recordSeq, getLastSeq,
     requestHistorySnapshot, beginHistoryRequest, isHistoryRequestCurrent, setHistoryError, applyHistorySnapshot,
-    applyHistoryEnrichment, applyLightHistoryExpansion,
+    applyHistoryEnrichment, applyHistoryRebase, applyLightHistoryExpansion,
   ]);
 }
 

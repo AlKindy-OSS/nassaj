@@ -378,7 +378,7 @@ function archivePeakFixture(overrides = {}) {
     fs.writeFileSync(path.join(source, 'dist-server', 'BUILD_PROVENANCE.json'), JSON.stringify(provenance));
     fs.writeFileSync(path.join(source, 'package.json'), '{}\n');
     fs.writeFileSync(path.join(source, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
-        '': {}, 'node_modules/@openai/codex-sdk': { version: '0.157.1', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture': { version: '1.0.0', integrity: 'sha512-YQ==' },
+        '': {}, 'node_modules/@openai/codex-sdk': { version: '0.153.2', integrity: 'sha512-YQ==' }, 'node_modules/runtime-fixture': { version: '1.0.0', integrity: 'sha512-YQ==' },
     } }));
     const runtimeTarget = currentReleaseRuntimeTarget();
     const options = { sourceRoot: source, outputDirectory: output, temporaryRoot: root,

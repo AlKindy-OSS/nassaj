@@ -43,6 +43,14 @@ interface UseSlashCommandsOptions {
   onDispatchPassthroughCommand?: (command: SlashCommand, remainingInput: string) => void;
   /** True while another execute-style command owns the HTTP execution lock. */
   isExecutableCommandRunning?: boolean;
+  /**
+   * T-1903 (ADR-190): true only when the OPEN session has a live
+   * `steer-turn-state` with `steerable:true` (+ `capability.midTurnInjection`)
+   * AND the current user is NOT the turn's starter. The caller (ChatInterface,
+   * via useSessionSteer) owns that computation; this hook only decides whether
+   * to show the `/steer` menu entry.
+   */
+  steerAvailable?: boolean;
 }
 
 type ProviderSkill = {
@@ -189,6 +197,13 @@ export const isOpenCodePassthroughCommand = (command: SlashCommand) =>
 export const isBtwSlashEntry = (command: SlashCommand): boolean =>
   command.type === 'btw' && command.namespace === 'nassaj';
 
+// T-1903 (ADR-190): مدخلة «/steer» العميلية المحضة — تُحقن فقط حين تحمل الجلسة
+// المفتوحة `steer-turn-state` حيّاً بـsteerable:true والمستخدم الحالي ليس بادئ
+// الدور. عند الاختيار تُدرج «/steer » فيكتب المستخدم توجيهه ثم يرسل؛ لا تُوجَّه
+// إلى /api/commands/execute ولا خاماً إلى CLI — تُرسَل كإطار `session-steer`.
+export const isSteerSlashEntry = (command: SlashCommand): boolean =>
+  command.type === 'steer' && command.namespace === 'nassaj';
+
 export type SlashCommandSelectionMode = 'insert' | 'execute';
 
 /**
@@ -204,7 +219,8 @@ export const getSlashCommandSelectionMode = (
   (isPassthroughBuiltInCommand(command) &&
     !isProviderHandledBuiltInCommand(provider, command)) ||
   isOpenCodePassthroughCommand(command) ||
-  isBtwSlashEntry(command)
+  isBtwSlashEntry(command) ||
+  isSteerSlashEntry(command)
     ? 'insert'
     : 'execute'
 );
@@ -290,6 +306,7 @@ export function useSlashCommands({
   onExecuteCommand,
   onDispatchPassthroughCommand,
   isExecutableCommandRunning = false,
+  steerAvailable = false,
 }: UseSlashCommandsOptions) {
   const { t, i18n } = useTranslation('chat');
 
@@ -322,13 +339,26 @@ export function useSlashCommands({
     [t],
   );
 
-  // قائمة الأوامر النهائية: الخادمية + مدخلة «/btw» حين يدعمها المزوّد.
+  // T-1903: مدخلة «/steer» — لا تعتمد المزوّد ولا القناة الجانبية، بل حصراً
+  // على أهلية التوجيه المحسوبة في ChatInterface (useSessionSteer.canSteer).
+  const steerEntry = useMemo<SlashCommand>(
+    () => ({
+      name: '/steer',
+      description: t('steer.command.description', { defaultValue: 'Send a mid-turn steer to the running turn' }),
+      namespace: 'nassaj',
+      type: 'steer',
+    }),
+    [t],
+  );
+
+  // قائمة الأوامر النهائية: الخادمية + مدخلة «/btw» حين يدعمها المزوّد + مدخلة
+  // «/steer» حين تسمح حالة الدور الجارية بالتوجيه.
   // /btw يسأل سياق thread قائم، لذلك لا نعرض وعداً لا يمكن تنفيذه في محادثة جديدة.
   const slashCommands = useMemo<SlashCommand[]>(() => {
     const visibleCommands = provider === 'codex' && !selectedSession?.id
       ? fetchedCommands.filter((command) => !CODEX_SESSION_COMMANDS.has(command.name))
       : fetchedCommands;
-    const rawCommands = (
+    const withBtw = (
       !selectedSession?.id ||
       !getProviderCapabilities(sideChannelProvider).sideChannel.supported
     )
@@ -338,6 +368,7 @@ export function useSlashCommands({
       : sideChannelProvider === 'codex'
         ? [sideEntry, ...visibleCommands]
         : [btwEntry, ...visibleCommands];
+    const rawCommands = steerAvailable ? [steerEntry, ...withBtw] : withBtw;
     return rawCommands.map((command) => ({
       ...command,
       view: createCommandViewModel(command.name, command.description, sideChannelProvider as LLMProvider, i18n?.language, command.type),
@@ -349,6 +380,8 @@ export function useSlashCommands({
     sideChannelProvider,
     btwEntry,
     sideEntry,
+    steerEntry,
+    steerAvailable,
     i18n?.language,
   ]);
   const [showCommandMenu, setShowCommandMenu] = useState(false);

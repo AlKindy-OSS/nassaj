@@ -63,19 +63,54 @@ export const uiPreferencesDb = {
     }
 
     const current = uiPreferencesDb.getUiPreferences(userId);
-    const merged: UiPreferences = { ...current, ...partial };
-    const serialized = JSON.stringify(merged);
-    assertWithinSizeLimit(serialized);
+    const merged = preserveSteerConsent({ ...current, ...partial }, current);
+    return writePreferences(userId, merged);
+  },
 
-    const db = getConnection();
-    db.prepare(
-      `INSERT INTO user_ui_preferences (user_id, preferences_json, updated_at)
-       VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(user_id) DO UPDATE SET
-         preferences_json = excluded.preferences_json,
-         updated_at = CURRENT_TIMESTAMP`
-    ).run(userId, serialized);
+  /**
+   * T-1903: the ONLY writer of `collab.allowSteerOnMyRuns` (the generic PUT
+   * above preserves the stored value). Strict boolean; stored under `collab`.
+   */
+  setSteerConsent(userId: number, allow: boolean): boolean {
+    if (typeof allow !== 'boolean') throw new TypeError('allowSteerOnMyRuns must be a boolean');
+    const current = uiPreferencesDb.getUiPreferences(userId);
+    const collab = isPlainObject(current.collab) ? current.collab : {};
+    writePreferences(userId, { ...current, collab: { ...collab, [STEER_CONSENT_KEY]: allow } });
+    return allow;
+  },
 
-    return merged;
+  /** Missing, corrupt or non-boolean consent reads as false (fail-closed). */
+  getSteerConsent(userId: number): boolean {
+    const collab = uiPreferencesDb.getUiPreferences(userId).collab;
+    return isPlainObject(collab) && collab[STEER_CONSENT_KEY] === true;
   },
 };
+
+const STEER_CONSENT_KEY = 'allowSteerOnMyRuns';
+
+/** Keeps the stored steer consent whatever a generic preferences write carries. */
+function preserveSteerConsent(merged: UiPreferences, current: UiPreferences): UiPreferences {
+  const storedCollab = isPlainObject(current.collab) ? current.collab : null;
+  const stored = storedCollab ? storedCollab[STEER_CONSENT_KEY] : undefined;
+  if (merged.collab === undefined) return merged;
+  const incoming = isPlainObject(merged.collab) ? { ...merged.collab } : {};
+  delete incoming[STEER_CONSENT_KEY];
+  if (typeof stored === 'boolean') incoming[STEER_CONSENT_KEY] = stored;
+  return { ...merged, collab: incoming };
+}
+
+function writePreferences(userId: number, merged: UiPreferences): UiPreferences {
+  const serialized = JSON.stringify(merged);
+  assertWithinSizeLimit(serialized);
+
+  const db = getConnection();
+  db.prepare(
+    `INSERT INTO user_ui_preferences (user_id, preferences_json, updated_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id) DO UPDATE SET
+       preferences_json = excluded.preferences_json,
+       updated_at = CURRENT_TIMESTAMP`
+  ).run(userId, serialized);
+
+  return merged;
+}

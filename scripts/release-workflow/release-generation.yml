@@ -1,0 +1,275 @@
+# Release generation (ADR-174 §9). DRAFT — Phase 1 local part; never run from the private repo.
+#
+# The source of this file is scripts/release-workflow/release-generation.yml.
+# scripts/export-public.sh copies it byte-for-byte to .github/workflows/ in the
+# public export ONLY when the committed opt-in scripts/release-workflow/EXPORT_ENABLED
+# exists (§16 "Still gated" until O1-O3; default: not placed). Placed or not, the
+# export gate (scripts/operator-gate/workflow-static-check.mjs) enforces the §9.3
+# rules on it. Every job is guarded by the public repository id,
+# so a copy in any other repository (the private one, a fork) runs nothing.
+#
+# Jobs: plan -> build -> attest -> verify -> publish.
+#   build   runs repository and dependency code; no id-token, no write.
+#   attest  is the only job holding id-token/attestations write; no checkout, no npm.
+#   verify  runs the built verifier (self-check), the previous generation's
+#           verifier (fleet simulation, H2) and an independent TUF root fetch (M4).
+#   publish is the only job holding contents: write; gh only, literal scripts.
+# Edits to the attest/publish run scripts must match the literals in the gate.
+name: Release generation
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+concurrency:
+  group: release-generation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    if: github.repository_id == 1373279714
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      channel: ${{ steps.plan.outputs.channel }}
+      release-sequence: ${{ steps.plan.outputs.release-sequence }}
+      min-upgrade-from: ${{ steps.plan.outputs.min-upgrade-from }}
+      migration-class: ${{ steps.plan.outputs.migration-class }}
+    steps:
+      - name: Checkout the tag with history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install the pinned official Node
+        run: |
+          bash scripts/release-workflow/install-official-node.sh \
+            --pins scripts/release-generation-pins.json "$RUNNER_TEMP/node"
+      - name: Plan the release (advisory; the node check is the control)
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/release-workflow/plan-release.mjs \
+            --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
+            --github-output "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: plan
+    if: github.repository_id == 1373279714
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    # TODO(ADR-174 §9.1, D2): run in a job container pinned by digest once the image is chosen.
+    # D2 must not close without --max-glibc-floor 2.34 on the build below (M4; the gate checks it).
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install the pinned official Node
+        run: |
+          bash scripts/release-workflow/install-official-node.sh \
+            --pins scripts/release-generation-pins.json "$RUNNER_TEMP/node"
+      - name: License, exclusion and lockfile gate
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/release-license-gate.mjs --root "$GITHUB_WORKSPACE"
+      - name: Install workflow tool dependencies without lifecycle scripts
+        run: |
+          PATH="$RUNNER_TEMP/node/bin:$PATH" \
+            npm ci --ignore-scripts --include=dev --no-audit --no-fund
+      - name: Fetch the Sigstore trusted root through TUF (§7.9)
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/release-workflow/trusted-root.mjs fetch \
+            --out "$RUNNER_TEMP/trusted_root.json" --cache "$RUNNER_TEMP/tuf-cache"
+          rm -rf node_modules
+      - name: Build the installer
+        # TODO(ADR-174 §7.7): the installer builder does not exist yet. Fail closed
+        # rather than publish the local-gate placeholder installer.
+        run: |
+          echo "installer_not_built: ADR-174 §7.7 installer builder is not implemented" >&2
+          exit 1
+      - name: Build and boot-smoke the generation
+        env:
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          RELEASE_SEQUENCE: ${{ needs.plan.outputs.release-sequence }}
+          MIN_UPGRADE_FROM: ${{ needs.plan.outputs.min-upgrade-from }}
+          MIGRATION_CLASS: ${{ needs.plan.outputs.migration-class }}
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/build-release-generation.mjs \
+            --export-dir "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/generation" \
+            --work-root "$RUNNER_TEMP/work" --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --repository-id "$GITHUB_REPOSITORY_ID" \
+            --channel "$CHANNEL" --release-sequence "$RELEASE_SEQUENCE" \
+            --min-upgrade-from "$MIN_UPGRADE_FROM" --migration-class "$MIGRATION_CLASS" \
+            --installer "$RUNNER_TEMP/installer/nassaj-install.mjs" \
+            --sigstore-trusted-root "$RUNNER_TEMP/trusted_root.json" --boot-smoke \
+            --max-glibc-floor 2.34
+          rm -f "$RUNNER_TEMP/generation/build-report.json"
+      - name: Upload the generation outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-generation
+          path: ${{ runner.temp }}/generation
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: Attest
+    needs: build
+    if: github.repository_id == 1373279714
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the generation outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-generation
+          path: generation
+      - name: Compare every output with digests.txt
+        shell: bash
+        run: |
+          cd generation
+          sha256sum --strict --check digests.txt
+      - name: Attest the release subjects
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: generation/digests.txt
+      - name: Upload the attestation bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-attestation
+          path: ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify
+    needs: [plan, attest]
+    if: github.repository_id == 1373279714
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the tag (verification scripts only)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Download the generation outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-generation
+          path: ${{ runner.temp }}/generation
+      - name: Download the attestation bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-attestation
+          path: ${{ runner.temp }}/attestation
+      - name: Install the pinned official Node
+        run: |
+          bash scripts/release-workflow/install-official-node.sh \
+            --pins scripts/release-generation-pins.json "$RUNNER_TEMP/node"
+      - name: Install workflow tool dependencies without lifecycle scripts
+        run: |
+          PATH="$RUNNER_TEMP/node/bin:$PATH" \
+            npm ci --ignore-scripts --include=dev --no-audit --no-fund
+      - name: Fleet simulation with the previous published generations (H2)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/release-workflow/verify-generation.mjs fleet \
+            --dir "$RUNNER_TEMP/generation" --bundle-dir "$RUNNER_TEMP/attestation" \
+            --tag "$GITHUB_REF_NAME" --work "$RUNNER_TEMP/fleet"
+      - name: Independent trusted-root re-fetch (M4)
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/release-workflow/trusted-root.mjs recheck \
+            --manifest "$RUNNER_TEMP/generation/release-manifest.json" \
+            --shipped "$RUNNER_TEMP/generation/trusted_root.json" \
+            --previous-dir "$RUNNER_TEMP/fleet" --cache "$RUNNER_TEMP/tuf-cache"
+      - name: Self-check with the built standalone verifier
+        run: |
+          "$RUNNER_TEMP/node/bin/node" scripts/release-workflow/verify-generation.mjs self-check \
+            --dir "$RUNNER_TEMP/generation" --bundle-dir "$RUNNER_TEMP/attestation"
+
+  publish:
+    name: Publish
+    needs: [plan, verify]
+    if: github.repository_id == 1373279714
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download the generation outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-generation
+          path: generation
+      - name: Download the attestation bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-attestation
+          path: attestation
+      - name: Create the draft release
+        shell: bash
+        run: |
+          export GH_TOKEN="${{ github.token }}"
+          bundles=(attestation/*.json)
+          test "${#bundles[@]}" -eq 1
+          test -f "${bundles[0]}"
+          cp -- "${bundles[0]}" generation/release-attestation.sigstore.json
+          unsafe="$(awk '{ print $2 }' generation/digests.txt \
+            | grep -Ev '^[A-Za-z0-9][A-Za-z0-9._-]*$' || true)"
+          test -z "$unsafe"
+          installer_sha="$(awk '$2 == "nassaj-install.mjs" { print $1 }' generation/digests.txt)"
+          test -n "$installer_sha"
+          {
+            printf 'Corresponding source (AGPL-3.0-only): https://github.com/%s/tree/%s\n\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf 'Installer nassaj-install.mjs sha256: %s\n' "$installer_sha"
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+      - name: Upload every asset to the draft
+        shell: bash
+        run: |
+          export GH_TOKEN="${{ github.token }}"
+          files=(generation/release-attestation.sigstore.json)
+          while read -r _ name; do files+=("generation/$name"); done < generation/digests.txt
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" -- "${files[@]}"
+      - name: Check the uploaded asset list equals digests.txt
+        shell: bash
+        run: |
+          export GH_TOKEN="${{ github.token }}"
+          expected="$( { awk '{ print $2 }' generation/digests.txt
+            echo release-attestation.sigstore.json; } | LC_ALL=C sort)"
+          actual="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          test "$expected" = "$actual"
+      - name: Publish the stable release and mark it latest
+        if: needs.plan.outputs.channel == 'stable'
+        shell: bash
+        run: |
+          export GH_TOKEN="${{ github.token }}"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Publish the canary release as a prerelease, not latest
+        if: needs.plan.outputs.channel == 'canary'
+        shell: bash
+        run: |
+          export GH_TOKEN="${{ github.token }}"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease --latest=false

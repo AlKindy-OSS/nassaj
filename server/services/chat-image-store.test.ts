@@ -1,4 +1,4 @@
-import { describe, it, after } from 'node:test';
+import { describe, it, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -11,7 +11,9 @@ const sandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-image-store-test-'
 const ORIGINAL_DB = process.env.DATABASE_PATH;
 process.env.DATABASE_PATH = path.join(sandbox, 'db.sqlite');
 
-const { saveChatImages, resolveChatImagePath, getChatImageRoot } = await import('./chat-image-store.js');
+const {
+  saveChatImages, resolveChatImagePath, getChatImageRoot, setSharpImporterForTesting,
+} = await import('./chat-image-store.js');
 
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -157,5 +159,88 @@ describe('chat-image-store', () => {
     const stored = await fs.readFile(result.paths[0]);
     assert.ok(stored.equals(small), 'small image was re-encoded');
     await assert.rejects(fs.access(result.paths[0].replace(/image_0\.png$/, 'image_0.orig.png')));
+  });
+
+  // ADR-174 P1 — sharp is a devDependency (LGPL libvips), so a production tree
+  // has none. The store must boot and keep working without it.
+  describe('when sharp cannot be loaded', () => {
+    afterEach(() => {
+      setSharpImporterForTesting();
+      mock.restoreAll();
+    });
+
+    function failSharpImport() {
+      const importer = mock.fn(async () => {
+        const error = Object.assign(new Error("Cannot find package 'sharp'"), { code: 'ERR_MODULE_NOT_FOUND' });
+        throw error;
+      });
+      setSharpImporterForTesting(importer);
+      return importer;
+    }
+
+    it('stores an oversized raster untouched, with no .orig twin', async () => {
+      const sharp = (await import('sharp')).default;
+      const big = await sharp({ create: { width: 3200, height: 2000, channels: 3, background: '#4080c0' } }).jpeg().toBuffer();
+      const warn = mock.method(console, 'warn', () => {});
+      failSharpImport();
+
+      const result = await saveChatImages([{ data: `data:image/jpeg;base64,${big.toString('base64')}` }]);
+
+      assert.equal(result.failures.length, 0);
+      assert.equal(path.basename(result.paths[0]), 'image_0.jpeg');
+      assert.ok((await fs.readFile(result.paths[0])).equals(big), 'original bytes were altered');
+      await assert.rejects(fs.access(result.paths[0].replace(/image_0\.jpeg$/, 'image_0.orig.jpeg')));
+      assert.equal(warn.mock.callCount(), 1);
+    });
+
+    it('attempts the import and warns only once across many messages', async () => {
+      const warn = mock.method(console, 'warn', () => {});
+      const importer = failSharpImport();
+
+      await saveChatImages([{ data: `data:image/png;base64,${PNG_BASE64}` }]);
+      await saveChatImages([
+        { data: `data:image/png;base64,${PNG_BASE64}` },
+        { data: `data:image/webp;base64,${PNG_BASE64}` },
+      ]);
+
+      assert.equal(importer.mock.callCount(), 1);
+      assert.equal(warn.mock.callCount(), 1);
+      const [message, detail] = warn.mock.calls[0].arguments;
+      assert.match(String(message), /sharp unavailable/);
+      assert.deepEqual(detail, { code: 'ERR_MODULE_NOT_FOUND' });
+    });
+
+    it('never tries sharp for svg/gif', async () => {
+      const importer = failSharpImport();
+      const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>');
+      await saveChatImages([
+        { data: `data:image/svg+xml;base64,${svg.toString('base64')}` },
+        { data: `data:image/gif;base64,${PNG_BASE64}` },
+      ]);
+      assert.equal(importer.mock.callCount(), 0);
+    });
+
+    it('still enforces the size ceiling and SVG sanitization', async () => {
+      mock.method(console, 'warn', () => {});
+      failSharpImport();
+
+      const huge = Buffer.alloc(6 * 1024 * 1024, 0x41).toString('base64');
+      const oversized = await saveChatImages([{ data: `data:image/png;base64,${huge}` }]);
+      assert.equal(oversized.paths.length, 0);
+      assert.match(oversized.failures[0].reason, /exceeds/);
+
+      const hostile = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+      const { paths } = await saveChatImages([
+        { data: `data:image/svg+xml;base64,${Buffer.from(hostile).toString('base64')}` },
+      ]);
+      assert.ok(!/<script/i.test(await fs.readFile(paths[0], 'utf8')));
+    });
+
+    it('treats a module without a usable export as unavailable', async () => {
+      setSharpImporterForTesting(async () => ({ default: null }));
+      const result = await saveChatImages([{ data: `data:image/png;base64,${PNG_BASE64}` }]);
+      assert.equal(result.failures.length, 0);
+      assert.equal(result.paths.length, 1);
+    });
   });
 });

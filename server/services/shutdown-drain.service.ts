@@ -88,6 +88,18 @@ export type ShutdownDrainDeps = {
    * previous behaviour exactly.
    */
   cancelPendingApprovals?: () => number;
+  /**
+   * Runs once when a drain begins, BEFORE waiting on active sessions: stops
+   * background producers (the scheduled-message queue) from launching new
+   * provider turns that would extend the drain. Failures are logged, never
+   * allowed to block the drain. Optional.
+   *
+   * A scheduled turn ALREADY running is not paused: the drain waits for it
+   * like any live session. Forcing past that (a second stop signal, or
+   * safe-restart.sh --force / --kill-sessions) interrupts it; its row stays
+   * `sent` (settled at acceptance) with a partial reply and is not retried.
+   */
+  onDrainStart?: () => void;
   /** 0 = wait with no deadline (the owner-mandated default, B-N-DRAIN). */
   drainTimeoutMs?: number;
   pollMs?: number;
@@ -120,6 +132,7 @@ export function createShutdownDrain(deps: ShutdownDrainDeps): (signal: string) =
     finalCleanup,
     exit,
     cancelPendingApprovals,
+    onDrainStart,
     drainTimeoutMs = 0,
     pollMs = DEFAULT_DRAIN_POLL_MS,
     logger = console,
@@ -247,6 +260,13 @@ export function createShutdownDrain(deps: ShutdownDrainDeps): (signal: string) =
       return;
     }
     drainStarted = true;
+    if (onDrainStart) {
+      try {
+        onDrainStart();
+      } catch (error) {
+        logger.warn('[DRAIN] drain-start hook failed:', (error as Error)?.message ?? error);
+      }
+    }
 
     let counts = safeCounts();
     let total = totalActiveSessions(counts);

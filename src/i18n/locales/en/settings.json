@@ -544,7 +544,8 @@
     "subtitle": "Manage your account username, password, and passkeys",
     "tabs": {
       "identity": "Identity",
-      "security": "Security"
+      "security": "Security",
+      "collaboration": "Collaboration"
     },
     "saving": "Saving...",
     "avatar": {
@@ -656,6 +657,24 @@
         "saveFailed": "Could not save your choice. Please try again.",
         "network": "Network error. Please check your connection and try again."
       }
+    },
+    "outboxCleanup": {
+      "title": "Clean up stuck messages in this browser",
+      "description": "Messages that failed to send or whose delivery could not be confirmed stay saved in this browser only. If their box fills up, new messages can't be sent — this clears them out.",
+      "none": "No stuck messages right now.",
+      "count_one": "{{count}} stuck message.",
+      "count_other": "{{count}} stuck messages.",
+      "start": "Clean up stuck messages",
+      "confirmCount_one": "{{count}} stuck message will be deleted from this browser.",
+      "confirmCount_other": "{{count}} stuck messages will be deleted from this browser.",
+      "confirmWarning": "Their text will be lost from this browser for good unless you copy it first. Messages currently being sent will not be deleted.",
+      "copyTexts": "Copy texts first",
+      "copySuccess": "Texts copied to the clipboard.",
+      "copyFailed": "Could not copy to the clipboard.",
+      "cancel": "Cancel",
+      "confirm": "Delete stuck messages",
+      "success_one": "Deleted {{count}} stuck message.",
+      "success_other": "Deleted {{count}} stuck messages."
     }
   },
   "claudeConnection": {
@@ -1519,7 +1538,14 @@
   },
   "systemSettings": {
     "title": "System",
-    "description": "Automatic updates, storage caps, and permission fences — owner settings for the whole server."
+    "description": "Automatic updates, storage caps, and permission fences — owner settings for the whole server.",
+    "steer": {
+      "title": "Mid-turn steering",
+      "description": "Server-wide switch for letting session members inject text into a running turn.",
+      "modeLabel": "Mode",
+      "modeOff": "Off (disabled for everyone)",
+      "modePerUser": "Per user (each member opts in)"
+    }
   },
   "commandBoardSettings": {
     "title": "Command Board",
@@ -2353,5 +2379,13 @@
     "page": "{{from}}–{{to}} of {{total}}",
     "sharingDisclosure": "Sharing follows OpenCode grants. Running local models through a grant is currently deferred. Hiding a key in this interface does not isolate it from execution tools.",
     "sharing": "Manage OpenCode sharing"
+  },
+  "steer": {
+    "consent": {
+      "title": "Mid-turn steering",
+      "toggleLabel": "Allow others to steer my running sessions",
+      "toggleDescription": "Another member can inject a short message into a turn you started.",
+      "globallyDisabledNote": "The owner/admin turned this feature off for everyone."
+    }
   }
 }

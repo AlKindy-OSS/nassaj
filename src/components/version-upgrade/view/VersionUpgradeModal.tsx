@@ -30,6 +30,7 @@ import { UpdatePreflightNotice } from "./UpdatePreflightNotice";
 import { UpdateTerminalLog } from "./UpdateTerminalLog";
 import { UpdateConsentPanel } from "./UpdateConsentPanel";
 import { DeferralWaitingPanel } from "./DeferralWaitingPanel";
+import { ScheduledWaitPanel } from "./ScheduledWaitPanel";
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -112,7 +113,7 @@ function resolvePhases(job: UpdateJobSnapshot): ReadonlyArray<UpdateJobState> {
 
 /**
  * Resolve which phase index is "failed". Uses `failedPhase` from server if present,
- * otherwise falls back to the current job state if it is a failure state.
+ * otherwise the job state when it is itself a listed phase; -1 when unknown.
  */
 function resolveFailedPhaseIndex(
     job: UpdateJobSnapshot,
@@ -127,17 +128,22 @@ function resolveFailedPhaseIndex(
     // Fall back to the last known active state visible in the phase list.
     const stateIdx = phases.indexOf(job.state);
     if (stateIdx !== -1) return stateIdx;
-    // If the failure state itself (e.g. 'failed') isn't in the list, mark the last phase before terminal.
-    return Math.max(0, phases.length - 2);
+    // B-1381: an unknown failing phase marks no phase. Guessing one (formerly the
+    // phase before "Done", i.e. "Verifying runtime") mislabels staging failures.
+    return -1;
 }
 
 // ─── Phase Stepper ────────────────────────────────────────────────────────────
 
 interface PhaseStepperProps {
     job: UpdateJobSnapshot;
+    /** Extracted from job.statusUrl, for the scheduled-wait "update now" call. */
+    jobId: string | null;
+    /** Called after the owner skips this job's scheduled-message hold (T-1912). */
+    onScheduledOverridden: () => void;
 }
 
-function PhaseStepper({ job }: PhaseStepperProps) {
+function PhaseStepper({ job, jobId, onScheduledOverridden }: PhaseStepperProps) {
     const { t } = useTranslation('common');
     const phases = resolvePhases(job);
     const strategy = inferStrategy(job.state, job.strategy);
@@ -301,7 +307,15 @@ function PhaseStepper({ job }: PhaseStepperProps) {
             </ol>
 
             {/* Owner action text for restart_queued */}
-            {job.state === 'restart_queued' && (job.autoActivate
+            {job.state === 'restart_queued' && job.autoActivation?.state === 'waiting_scheduled'
+                && job.autoActivation.scheduledDueSoon ? (
+                <ScheduledWaitPanel
+                    dueSoon={job.autoActivation.scheduledDueSoon}
+                    jobId={jobId}
+                    overridden={job.autoActivation.scheduledOverride}
+                    onOverridden={onScheduledOverridden}
+                />
+            ) : job.state === 'restart_queued' && (job.autoActivate
                 && job.autoActivation?.state !== 'expired' && job.autoActivation?.state !== 'refused' ? (
                 <div
                     role="status"
@@ -979,7 +993,15 @@ export function VersionUpgradeModal({
                         {/* Phase stepper — skip for awaiting_sessions (handled above) */}
                         {job && (jobActive || isFailed) && !isDeferralWaiting && (
                             <div className="rounded-md border border-border bg-card p-3">
-                                <PhaseStepper job={job} />
+                                <PhaseStepper
+                                    job={job}
+                                    jobId={jobIdFromUrl(job.statusUrl)}
+                                    onScheduledOverridden={() => {
+                                        setJob(prev => prev && prev.autoActivation
+                                            ? { ...prev, autoActivation: { ...prev.autoActivation, scheduledOverride: true } }
+                                            : prev);
+                                    }}
+                                />
                             </div>
                         )}
 

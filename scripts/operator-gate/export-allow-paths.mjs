@@ -30,10 +30,15 @@ import { fileURLToPath } from 'node:url';
 //     as fixtures, so they leak exactly like their subjects and are private CI only;
 //   - the export builder, its test and the content linker describe OUR layout;
 //   - prepare-release-version.test.mjs asserts on the excluded release.yml, so its
-//     subject is absent in the public tree.
+//     subject is absent in the public tree;
+//   - dependabot.yml, docker.yml and discord-release.yml are not part of the public
+//     workflow set, which is exactly ci.yml + release-generation.yml (ADR-174 §9.3).
 const DENY_EXACT = new Set([
     'server/modules/database/deletion-writer-inventory.test.ts',
+    '.github/dependabot.yml',
     '.github/workflows/android-wrapper.yml',
+    '.github/workflows/discord-release.yml',
+    '.github/workflows/docker.yml',
     '.github/workflows/release.yml',
     'scripts/export-public.sh',
     'scripts/export-public.test.mjs',

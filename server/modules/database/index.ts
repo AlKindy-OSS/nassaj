@@ -19,7 +19,7 @@ export type { ReviewContainer, ReviewIncidentReason } from './repositories/agent
 export type { ReviewBindingEvidence, ReviewCompletionEvidence } from './repositories/agent-review-result-types.js';
 export { assertReviewSession, assertReviewString, assertReviewToken, hashReviewTuple } from './repositories/agent-review-validation.js';
 export { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
-export { migrateScheduledMessages } from '@/modules/database/migrations.js';
+export { migrateScheduledMessages, reverseSessionSteerIngress } from '@/modules/database/migrations.js';
 export {
   reconcileProjects,
   startReconcileScheduler,
@@ -71,7 +71,7 @@ export { githubTokensDb } from '@/modules/database/repositories/github-tokens.js
 export { hashMessageAuthorContent, messageAuthorsDb } from '@/modules/database/repositories/message-authors.db.js';
 export type { MessageAuthorRow } from '@/modules/database/repositories/message-authors.db.js';
 export { messageCoordinationDb } from '@/modules/database/repositories/message-coordination.db.js';
-export type { MessageCoordinationRow, StoredCoordinationLevel } from '@/modules/database/repositories/message-coordination.db.js';
+export type { MessageCoordinationRow, StoredCoordinationLevel, SteerIngressRow, SteerStatus } from '@/modules/database/repositories/message-coordination.db.js';
 export { responseTurnMetricsDb } from '@/modules/database/repositories/response-turn-metrics.db.js';
 export type { ResponseTurnMetric } from '@/modules/database/repositories/response-turn-metrics.db.js';
 export { notificationPreferencesDb } from '@/modules/database/repositories/notification-preferences.js';

@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { collectMigrationClosure, verifyMigrationClosure, bindMigrationClosureToAsset } from './lib/release-database-migration-closure.mjs';
-const version = '0.157.1-linux-x64';
+// The real-tree assertion follows the repository lock, so an SDK pin move
+// cannot silently strand this fixture on a stale version again.
+const version = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
+    .packages['node_modules/@openai/codex-linux-x64'].version;
 const spec = `npm:@openai/codex@${version}`;
 function fixture(t, nested = false) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'b952-alias-'));

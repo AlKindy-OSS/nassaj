@@ -1,0 +1,317 @@
+{
+  "schema": "nassaj-release-license-policy/v1",
+  "allowed": [
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "MIT-0",
+    "Apache-2.0",
+    "Zlib",
+    "BlueOak-1.0.0",
+    "Unlicense",
+    "CC0-1.0",
+    "CC-BY-4.0",
+    "OFL-1.1",
+    "MPL-2.0"
+  ],
+  "denied": [
+    "AGPL-1.0-only",
+    "AGPL-1.0-or-later",
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "BUSL-1.1",
+    "CC-BY-NC-4.0",
+    "CC-BY-NC-ND-4.0",
+    "CC-BY-NC-SA-4.0",
+    "CC-BY-ND-4.0",
+    "CC-BY-SA-4.0",
+    "Elastic-2.0",
+    "GPL-1.0-only",
+    "GPL-1.0-or-later",
+    "GPL-2.0",
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "GPL-3.0",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "LGPL-2.0-only",
+    "LGPL-2.0-or-later",
+    "LGPL-2.1-only",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    "SSPL-1.0",
+    "WTFPL"
+  ],
+  "texts": [
+    {
+      "id": "Apache-2.0",
+      "file": "release-license-texts/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/Apache-2.0.txt"
+    },
+    {
+      "id": "CC0-1.0",
+      "file": "release-license-texts/CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/CC0-1.0.txt"
+    },
+    {
+      "id": "ISC",
+      "file": "release-license-texts/ISC.txt",
+      "sha256": "f2ec607f67bb0dd3053b49835b02110d5cd0f8eb6da3aac4dc0b142a6b299be9",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/ISC.txt"
+    },
+    {
+      "id": "MIT",
+      "file": "release-license-texts/MIT.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "source": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt"
+    }
+  ],
+  "overrides": [
+    {
+      "package": "@epic-web/invariant@1.0.0",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 197,
+        "toLine": 199
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 197-199 state \"MIT\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@esbuild/linux-x64@0.28.2",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file (esbuild platform binary); canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@openai/codex@0.153.2",
+      "suppliedText": "Apache-2.0",
+      "evidence": "package.json declares \"Apache-2.0\"; the npm tarball ships no LICENSE file (JS wrapper; Apache-2.0 §4(a) requires a copy of the license); canonical SPDX Apache-2.0 text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@radix-ui/react-compose-refs@1.1.2",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@radix-ui/react-context@1.1.2",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@radix-ui/react-id@1.1.1",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@radix-ui/react-use-callback-ref@1.1.1",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@radix-ui/react-use-escape-keydown@1.1.1",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@radix-ui/react-use-layout-effect@1.1.1",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@replit/codemirror-minimap@0.5.2",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@rollup/rollup-linux-x64-gnu@4.61.0",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file (rollup platform binary); canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@sigstore/verify@4.1.2",
+      "suppliedText": "Apache-2.0",
+      "evidence": "package.json declares \"Apache-2.0\"; the npm tarball ships no LICENSE file (ADR-174 §6.5 decision: gate supplies the Apache-2.0 text); canonical SPDX Apache-2.0 text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@uiw/codemirror-extensions-basic-setup@4.24.1",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 218,
+        "toLine": 220
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 218-220 state \"Licensed under the MIT License.\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "@uiw/react-codemirror@4.24.1",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 618,
+        "toLine": 620
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 618-620 state \"Licensed under the MIT License.\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "busboy@1.6.0",
+      "license": "MIT",
+      "evidence": "package.json uses the legacy form licenses:[{type:\"MIT\"}]; the shipped LICENSE file is the MIT text (Copyright Brian White)",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "cookie-signature@1.0.6",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "Readme.md",
+        "fromLine": 19,
+        "toLine": 42
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; Readme.md lines 19-42 carry the full MIT text with Copyright (c) 2012 LearnBoost",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "dlv@1.1.3",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 70,
+        "toLine": 72
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 70-72 state MIT (oss.ninja/mit/developit)",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "eastasianwidth@0.2.0",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "format@0.2.2",
+      "license": "MIT",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "Readme.md",
+        "fromLine": 40,
+        "toLine": 45
+      },
+      "evidence": "package.json uses the legacy form licenses:[{type:\"MIT\",url:\"http://sjs.mit-license.org\"}]; no LICENSE file; Readme.md lines 40-45 give the copyright (2010-2014 Sami Samhuri) and state the MIT license",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "highlightjs-vue@1.0.0",
+      "suppliedText": "CC0-1.0",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 31,
+        "toLine": 33
+      },
+      "evidence": "package.json declares \"CC0-1.0\"; no LICENSE file in the tarball; README.md lines 31-33 state CC0-1.0",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "html-parse-stringify@3.0.1",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 152,
+        "toLine": 154
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 152-154 state \"MIT\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "http_ece@1.2.0",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "isarray@1.0.0",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 38,
+        "toLine": 60
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 38-60 carry the full MIT text with Copyright (c) 2013 Julian Gruber",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "khroma@2.1.0",
+      "license": "MIT",
+      "evidence": "package.json has no license field; the shipped file \"license\" is the MIT text (Copyright (c) 2019-present Fabio Spampinato, Andrew Maney) and readme.md line 536 says \"MIT (c) Fabio Spampinato, Andrew Maney\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "react-remove-scroll-bar@2.3.8",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "README.md",
+        "fromLine": 51,
+        "toLine": 52
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; README.md lines 51-52 state \"MIT\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "rehype-katex@7.0.1",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "readme.md",
+        "fromLine": 274,
+        "toLine": 276
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; readme.md lines 274-276 state \"MIT (c) Junyoung Choi\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "remark-math@6.0.0",
+      "suppliedText": "MIT",
+      "excerpt": {
+        "file": "readme.md",
+        "fromLine": 271,
+        "toLine": 273
+      },
+      "evidence": "package.json declares \"MIT\"; no LICENSE file in the tarball; readme.md lines 271-273 state \"MIT (c) Junyoung Choi\"",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "saxes@6.0.0",
+      "suppliedText": "ISC",
+      "evidence": "package.json declares \"ISC\"; the npm tarball ships no LICENSE file; canonical SPDX ISC text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "standardwebhooks@1.0.0",
+      "suppliedText": "MIT",
+      "evidence": "package.json declares \"MIT\"; the npm tarball ships no LICENSE file; canonical SPDX MIT text supplied",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    },
+    {
+      "package": "streamsearch@1.1.0",
+      "license": "MIT",
+      "evidence": "package.json uses the legacy form licenses:[{type:\"MIT\"}]; the shipped LICENSE file is the MIT text (Copyright Brian White)",
+      "reviewed": "2026-09-28 devops agent (ADR-174 P1 stage 3); legal confirmation pending"
+    }
+  ]
+}
