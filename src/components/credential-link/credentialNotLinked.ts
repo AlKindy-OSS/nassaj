@@ -111,7 +111,6 @@ const PROVIDER_NAMES: Readonly<Record<string, string>> = {
   kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM',
-  hermes: 'Hermes',
   sakana: 'Sakana',
 };
 

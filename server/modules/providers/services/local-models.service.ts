@@ -105,6 +105,11 @@ function withContextWindow(model: LocalModel, probed: number | undefined): Local
   const { maxOutput, ...rest } = model;
   return { ...rest, contextWindow: probed, ...(maxOutput && maxOutput <= probed ? { maxOutput } : {}) };
 }
+/** ADR-227 / T-2107 / T-2108: the bodies with their own local switch, and its config key. */
+const LOCAL_BODY_SWITCH_KEYS = Object.freeze({
+  claude: 'local_models.claude_enabled', codex: 'local_models.codex_enabled', dsh: 'local_models.dsh_enabled',
+});
+type LocalBody = keyof typeof LOCAL_BODY_SWITCH_KEYS;
 /** Canonical server-generated provider namespace, never supplied by clients. */
 export const localProviderId = (id: string): string => `${LOCAL_PROVIDER_PREFIX}${id.replaceAll('-', '')}`;
 
@@ -130,8 +135,14 @@ class LocalModelsService {
   /** Reads the persisted manager consent gate without side effects. */
   enabled = (): boolean => this.deps.config.get('local_models.enabled') === 'true'
     && this.deps.config.get('local_models.consent_version') === LOCAL_MODELS_CONSENT_VERSION;
+  /** ADR-227 / T-2107: each body's own local switch, off unless exactly 'true'. */
+  bodies = (): Record<LocalBody, boolean> => ({
+    claude: this.deps.config.get(LOCAL_BODY_SWITCH_KEYS.claude) === 'true',
+    codex: this.deps.config.get(LOCAL_BODY_SWITCH_KEYS.codex) === 'true',
+    dsh: this.deps.config.get(LOCAL_BODY_SWITCH_KEYS.dsh) === 'true',
+  });
   /** Returns only activation state and current caller management capability. */
-  feature = (role: string) => ({ enabled: this.enabled(), consentVersion: this.deps.config.get('local_models.consent_version'), requiredConsentVersion: LOCAL_MODELS_CONSENT_VERSION, canManage: role === 'owner' || role === 'admin' });
+  feature = (role: string) => ({ enabled: this.enabled(), consentVersion: this.deps.config.get('local_models.consent_version'), requiredConsentVersion: LOCAL_MODELS_CONSENT_VERSION, canManage: role === 'owner' || role === 'admin', bodies: this.bodies() });
   private requireEnabled = () => { if (!this.enabled()) throw failure('LOCAL_MODELS_DISABLED', 403); };
   private own = (callerId: number, id: string) => {
     const server = this.deps.repository.get(text(id, 64), callerId);
@@ -270,6 +281,25 @@ class LocalModelsService {
       this.deps.audit.recordStrict('local_models_settings_updated', { userId: callerId, metadata: { enabled: body.enabled, consentVersion: LOCAL_MODELS_CONSENT_VERSION } });
       this.deps.config.set('local_models.enabled', String(body.enabled));
       if (body.enabled) this.deps.config.set('local_models.consent_version', LOCAL_MODELS_CONSENT_VERSION);
+    });
+    return this.feature(role);
+  }
+  /**
+   * ADR-227 / T-2107: one body's local switch (Claude, Codex or DSH), manager-only and
+   * audited. Turning one on needs the local models consent above; turning one off
+   * never does. Writes that body's key only, so OpenCode local models are untouched.
+   */
+  bodySettings(callerId: number, role: string, input: unknown) {
+    if (role !== 'owner' && role !== 'admin') throw failure('FORBIDDEN', 403);
+    this.throttle(callerId);
+    const body = object(input);
+    if (Object.keys(body).some(key => !['body', 'enabled'].includes(key)) || typeof body.enabled !== 'boolean'
+      || typeof body.body !== 'string' || !Object.hasOwn(LOCAL_BODY_SWITCH_KEYS, body.body)) throw failure();
+    if (body.enabled) this.requireEnabled();
+    const target = body.body as LocalBody;
+    this.deps.transaction(() => {
+      this.deps.audit.recordStrict('local_models_settings_updated', { userId: callerId, metadata: { body: target, enabled: body.enabled } });
+      this.deps.config.set(LOCAL_BODY_SWITCH_KEYS[target], String(body.enabled));
     });
     return this.feature(role);
   }

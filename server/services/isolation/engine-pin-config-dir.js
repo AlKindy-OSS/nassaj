@@ -147,7 +147,7 @@ export function stripGlobalConfigCredentials(config) {
  * non-directory in its place (it could redirect writes elsewhere).
  * @param {string} dir
  */
-function ensurePrivateDir(dir) {
+export function ensurePrivateDir(dir) {
   try {
     const stat = fs.lstatSync(dir);
     if (stat.isSymbolicLink() || !stat.isDirectory()) {
@@ -184,7 +184,7 @@ function writeJsonAtomic(file, value) {
  * @param {string} dest
  * @param {string} name
  */
-function linkEntry(src, dest, name) {
+export function linkEntry(src, dest, name) {
   let stat = null;
   try {
     stat = fs.lstatSync(dest);

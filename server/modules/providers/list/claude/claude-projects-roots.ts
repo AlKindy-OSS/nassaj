@@ -117,6 +117,18 @@ export type TranscriptLocation =
   | { state: 'unknown' };
 
 /**
+ * ADR-173 L3: a fallback candidate counts only when no link sits below its root
+ * (a shared writer's bridge link reaches another tree's file). A present file
+ * reached through a link is `unknown`, never returned and never `absent`.
+ */
+function candidatePresence(root: string, rel: string): PathPresence {
+  const presence = filePresence(path.join(root, rel));
+  if (presence !== 'present') return presence;
+  const realRoot = realOrNull(root);
+  return realRoot && realOrNull(path.join(root, rel)) === path.join(realRoot, rel) ? 'present' : 'unknown';
+}
+
+/**
  * Finds a transcript by its stored path, falling back to the same relative
  * path under every current Claude projects root. The stored path is checked
  * first; root lists are resolved only when it is not present. `absent` means
@@ -130,11 +142,11 @@ export function locateClaudeTranscript(
   if (stored === 'present') return { state: 'present', path: storedPath };
   const { roots, spellings } = rootLists();
   const rel = relativeTranscriptPath(storedPath, unique([...spellings, ...roots]));
-  const candidates = unique(roots.map((root) => path.join(root, rel))).filter((candidate) => candidate !== storedPath);
+  const candidateRoots = unique(roots).filter((root) => path.join(root, rel) !== storedPath);
   let uncertain = stored === 'unknown';
-  for (const candidate of candidates) {
-    const presence = filePresence(candidate);
-    if (presence === 'present') return { state: 'present', path: candidate };
+  for (const root of candidateRoots) {
+    const presence = candidatePresence(root, rel);
+    if (presence === 'present') return { state: 'present', path: path.join(root, rel) };
     if (presence === 'unknown') uncertain = true;
   }
   return uncertain ? { state: 'unknown' } : { state: 'absent' };

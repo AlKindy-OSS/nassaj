@@ -475,7 +475,8 @@ function readProjectSessionsIncludingArchived(
   projectPath: string,
   currentUserId: number | null,
 ): ProjectSessionsPageResult {
-  const rows = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath) as SessionRepositoryRow[];
+  // ADR-229: display read — conversations of removed harnesses are hidden.
+  const rows = sessionsDb.getVisibleSessionsByProjectPathIncludingArchived(projectPath) as SessionRepositoryRow[];
 
   return {
     sessionBuckets: bucketSessionRowsByProvider(rows, currentUserId),

@@ -233,7 +233,7 @@ test('provider-login allowlist still works for role user', async () => {
   await withDb(async () => {
     const logins: Array<[string, string]> = [
       ['claude', 'claude setup-token'], ['cursor', 'cursor-agent login'], ['codex', 'codex login'],
-      ['codex', 'codex login --device-auth'], ['opencode', 'opencode auth login'], ['kimi', 'kimi login'],
+      ['codex', 'codex login --device-auth'], ['opencode', 'opencode auth login'],
       ['claude', 'claude auth login'], ['agy', 'agy'],
     ];
     for (const [provider, initialCommand] of logins) {

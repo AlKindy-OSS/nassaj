@@ -29,7 +29,7 @@ export const QWEN_PLAN_MODEL_PREFIX = `${QWEN_PLAN_PROVIDER_ID}/`;
 
 /**
  * Token Plan international endpoint (OpenAI wire, D4). Constant — never from
- * env. Same value as the token_plan/international entry of qwen-cli.js.
+ * env.
  */
 export const QWEN_PLAN_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1';
 
@@ -37,8 +37,8 @@ export const QWEN_PLAN_BASE_URL = 'https://token-plan.ap-southeast-1.maas.aliyun
 export const QWEN_PLAN_KEY_ENV = 'NASSAJ_QWEN_PLAN_API_KEY';
 
 /**
- * Token Plan models. MIRRORS QWEN_TOKEN_PLAN_MODELS in
- * modules/providers/list/qwen/qwen.provider.ts — a drift test pins the two.
+ * Token Plan models. THE source of the Alibaba Token Plan catalog (ADR-229):
+ * QWEN_TOKEN_PLAN_MODELS and qwenModelsForPlan below are derived from it.
  * @type {ReadonlyArray<{ value: string, label: string }>}
  */
 export const QWEN_PLAN_MODELS = Object.freeze([
@@ -58,6 +58,41 @@ export const QWEN_PLAN_MODELS = Object.freeze([
   { value: 'glm-5', label: 'GLM-5' },
   { value: 'MiniMax-M2.5', label: 'MiniMax M2.5' },
 ].map((model) => Object.freeze(model)));
+
+/** Token Plan catalog in the provider-models shape (derived from QWEN_PLAN_MODELS). */
+export const QWEN_TOKEN_PLAN_MODELS = Object.freeze({
+  OPTIONS: QWEN_PLAN_MODELS,
+  DEFAULT: 'qwen3.7-plus',
+});
+
+/**
+ * Legacy Coding Plan catalog. ADR-200 D3 stopped saving Coding Plan profiles;
+ * a stored legacy record still resolves to this list until it is replaced.
+ */
+export const QWEN_CODING_PLAN_MODELS = Object.freeze({
+  OPTIONS: Object.freeze([
+    { value: 'qwen3-coder-plus', label: 'Qwen3 Coder Plus' },
+    { value: 'qwen3-coder-next', label: 'Qwen3 Coder Next' },
+    { value: 'qwen3.7-plus', label: 'Qwen3.7 Plus' },
+    { value: 'qwen3.6-plus', label: 'Qwen3.6 Plus' },
+    { value: 'qwen3.5-plus', label: 'Qwen3.5 Plus' },
+    { value: 'qwen3-max-2026-01-23', label: 'Qwen3 Max' },
+    { value: 'glm-5', label: 'GLM-5' },
+    { value: 'glm-4.7', label: 'GLM-4.7' },
+    { value: 'kimi-k2.5', label: 'Kimi K2.5' },
+    { value: 'MiniMax-M2.5', label: 'MiniMax M2.5' },
+  ].map((model) => Object.freeze(model))),
+  DEFAULT: 'qwen3-coder-plus',
+});
+
+/**
+ * The model catalog of a saved Qwen plan.
+ * @param {string} plan 'token_plan' or the legacy 'coding_plan'
+ * @returns {{ OPTIONS: ReadonlyArray<{ value: string, label: string }>, DEFAULT: string }}
+ */
+export function qwenModelsForPlan(plan) {
+  return plan === 'token_plan' ? QWEN_TOKEN_PLAN_MODELS : QWEN_CODING_PLAN_MODELS;
+}
 
 /** Refusal codes a qwen-plan launch can end with (fixed, non-secret strings). */
 export const QWEN_PLAN_REFUSAL = Object.freeze({

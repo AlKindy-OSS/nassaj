@@ -23,7 +23,7 @@
  *      `error`, abort, a terminal-failure branch). `end()` is idempotent, so
  *      belt-and-braces calls are safe and encouraged.
  *   3. NO PID. Some providers have no child process at all (the vendor HTTP
- *      runtime behind glm/kimi/deepseek). The monitor accepts that: it emits
+ *      runtime behind glm/deepseek). The monitor accepts that: it emits
  *      the initial 'running' and the terminal 'idle', and simply never reports
  *      'frozen' for a run it cannot see in /proc. Degrading to a badge without
  *      freeze-detection is the point — a correct badge beats no badge.

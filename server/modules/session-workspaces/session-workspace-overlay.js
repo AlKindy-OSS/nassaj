@@ -225,12 +225,45 @@ function readAliasedManifest(root, kind, key) {
   return manifest;
 }
 
+const OVERLAY_ACCESS = new Set(['owner', 'session_writer']);
+
+/** Validates a resolver access mode; anything but the two known modes fails closed. */
+function normalizeOverlayAccess(access) {
+  if (!OVERLAY_ACCESS.has(access)) throw new Error('invalid overlay access');
+  return access;
+}
+
+/**
+ * ADR-173: 'owner' requires principal equality. 'session_writer' (granted only by
+ * the server's isSharedSessionWriter predicate) skips that equality alone, and
+ * still needs an identified writer and a determinable creator (qa condition 4).
+ * 'none' is the structural probe used by callers that authorize separately.
+ */
+function assertOverlayPrincipal(manifest, principalId, principalCheck) {
+  if (principalCheck === 'none') return;
+  if (principalCheck === 'owner') {
+    if (manifest.ownerPrincipalId !== principalId) throw new Error('session overlay principal mismatch');
+    return;
+  }
+  if (principalCheck !== 'session_writer') throw new Error('invalid overlay access');
+  if (principalId === null) throw new Error('a shared writer must be identified');
+  if (typeof manifest.ownerPrincipalId !== 'string' || !manifest.ownerPrincipalId) {
+    throw new Error('session overlay creator is undeterminable');
+  }
+}
+
+/** Public binding of a resumed overlay; a session_writer read also says whether the sender is not its creator. */
+function resumedBinding(manifest, principalId, access) {
+  if (access !== 'session_writer') return publicBinding(manifest);
+  return Object.freeze({ ...publicBinding(manifest), sharedWriter: manifest.ownerPrincipalId !== principalId });
+}
+
 /**
  * Resume-time alias reader. Unlike the idempotent creation helper above, this
  * distinguishes a genuinely absent alias from corrupt or dangling state. Only
  * genuine absence may cross the one-time legacy compatibility boundary.
  */
-function readStrictSessionManifest(root, sessionId, repository, ownerPrincipalId, checkPrincipal = true) {
+function readStrictSessionManifest(root, sessionId, repository, ownerPrincipalId, principalCheck = 'owner') {
   const file = aliasFile(root, 'session', sessionId);
   try {
     const aliasStat = fs.lstatSync(file);
@@ -285,9 +318,7 @@ function readStrictSessionManifest(root, sessionId, repository, ownerPrincipalId
       || manifest.repositoryRoot !== repository.repositoryRoot) {
     throw new Error('session overlay manifest mismatch');
   }
-  if (checkPrincipal && manifest.ownerPrincipalId !== ownerPrincipalId) {
-    throw new Error('session overlay principal mismatch');
-  }
+  assertOverlayPrincipal(manifest, ownerPrincipalId, principalCheck);
   let workspace;
   try {
     const workspaceStat = fs.lstatSync(manifest.cwd);
@@ -323,7 +354,7 @@ export function probeSessionWorkspaceAlias({ projectPath, sessionId }) {
     return 'present_invalid';
   }
   try {
-    return readStrictSessionManifest(root, sessionId, repository, null, false)
+    return readStrictSessionManifest(root, sessionId, repository, null, 'none')
       ? 'present_valid'
       : 'present_invalid';
   } catch {
@@ -346,7 +377,7 @@ export function findSessionOverlayWorkspace({ projectPath, sessionId }) {
   const resolved = tryResolveOverlayRepository(projectPath);
   if (resolved.kind !== 'exact_repository') return null;
   const manifest = readStrictSessionManifest(
-    stateRoot(resolved.repository), sessionId, resolved.repository, null, false,
+    stateRoot(resolved.repository), sessionId, resolved.repository, null, 'none',
   );
   if (!manifest) return null;
   return Object.freeze({ cwd: fs.realpathSync(manifest.cwd), overlayId: manifest.overlayId });
@@ -577,20 +608,26 @@ export function rebindSessionWorkspace({
 /**
  * Resolves a launch cwd. Unknown resumed sessions are deliberately quarantined
  * on the legacy shared cwd; they are never silently migrated mid-conversation.
- * @param {{projectPath: string, sessionId?: string|null, launchKey?: string|null, principalId?: string|number|null}} input
+ * `access` 'session_writer' (ADR-173) skips only the owner-principal equality on
+ * a resumed overlay; a new launch always creates a sender-owned overlay.
+ * @param {{projectPath: string, sessionId?: string|null, launchKey?: string|null,
+ *   principalId?: string|number|null, access?: 'owner'|'session_writer'}} input
  */
-export function resolveSessionWorkspace({ projectPath, sessionId = null, launchKey = null, principalId = null }) {
+export function resolveSessionWorkspace({
+  projectPath, sessionId = null, launchKey = null, principalId = null, access = 'owner',
+}) {
+  const accessMode = normalizeOverlayAccess(access);
   const repository = resolveRepository(projectPath);
   const root = stateRoot(repository);
   const ownerPrincipalId = normalizePrincipalId(principalId);
   if (sessionId) {
     const manifest = readStrictSessionManifest(
-      root, sessionId, repository, ownerPrincipalId,
+      root, sessionId, repository, ownerPrincipalId, accessMode,
     );
     if (!manifest) {
       throw new Error('legacy session has no isolated workspace');
     }
-    return publicBinding(manifest);
+    return resumedBinding(manifest, ownerPrincipalId, accessMode);
   }
   return createSessionWorkspace({
     projectPath: repository.logicalProjectPath,
@@ -619,7 +656,8 @@ export function resolveSessionWorkspace({ projectPath, sessionId = null, launchK
  * refused before provider launch. Client cwd is deliberately not accepted by
  * this API.
  * @param {{projectPath: string, sessionId?: string|null, launchKey?: string|null,
- *   principalId?: string|number|null, legacyEligible?: boolean}} input
+ *   principalId?: string|number|null, legacyEligible?: boolean,
+ *   access?: 'owner'|'session_writer'}} input
  */
 export function resolveSessionWorkspaceForLaunch({
   projectPath,
@@ -627,7 +665,9 @@ export function resolveSessionWorkspaceForLaunch({
   launchKey = null,
   principalId = null,
   legacyEligible = false,
+  access = 'owner',
 }) {
+  const accessMode = normalizeOverlayAccess(access);
   const resolved = tryResolveOverlayRepository(projectPath);
   // Alias-substitution guard for every non-overlay shape (non-git folder or
   // repository subdirectory): trust it only at its canonical physical path. An
@@ -660,22 +700,27 @@ export function resolveSessionWorkspaceForLaunch({
   // shared session resumes on that same canonical subdirectory.
   const manifest = repository
     ? readStrictSessionManifest(
-      stateRoot(repository), sessionId, repository, ownerPrincipalId,
+      stateRoot(repository), sessionId, repository, ownerPrincipalId, accessMode,
     )
     : null;
-  if (manifest) return publicBinding(manifest);
+  if (manifest) return resumedBinding(manifest, ownerPrincipalId, accessMode);
   if (legacyEligible !== true) throw new Error('session has no isolated workspace');
   // This compatibility path is shared by definition. Canonicalization narrows
   // alias substitution, while filesystem TOCTOU remains bounded to legacy use.
   return sharedWorkspaceBinding('legacy_shared', resolved.logicalProjectPath, sessionId);
 }
 
-/** Resolve an exact, owner-bound session generation for a production submit. */
-export function requireBoundSessionWorkspace({ projectPath, sessionId, generation, principalId }) {
+/**
+ * Resolve an exact, generation-bound session overlay. Default 'owner' access is the
+ * production-submit rule; 'session_writer' serves ADR-173 shared-writer reads only.
+ */
+export function requireBoundSessionWorkspace({
+  projectPath, sessionId, generation, principalId, access = 'owner',
+}) {
   if (typeof generation !== 'string' || !generation.trim() || generation.length > 128) {
     throw new Error('invalid overlay generation');
   }
-  const binding = resolveSessionWorkspace({ projectPath, sessionId, principalId });
+  const binding = resolveSessionWorkspace({ projectPath, sessionId, principalId, access });
   if (binding.isolation !== 'overlay' || !binding.overlayId) {
     throw new Error('session overlay not found');
   }

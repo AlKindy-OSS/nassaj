@@ -98,17 +98,13 @@ function withEnv(overrides: Record<string, string | undefined>, fn: () => void):
 
 // ---------- the shipped pins are exactly the OCC-15/KG-1 root-of-trust values ----------
 
-test('PINNED_VENDOR_DIGESTS: opencode + kimi carry the exact OCC-15/KG-1 digests', () => {
+test('PINNED_VENDOR_DIGESTS: opencode carries the exact OCC-15 digest; kimi is unpinned (ADR-229)', () => {
   assert.equal(
     PINNED_VENDOR_DIGESTS.opencode.sha256,
     '513f500a1a5ea1dc7d865547ac87b32a8936334e8d5abd5b3ff585c45a170080',
   );
   assert.equal(PINNED_VENDOR_DIGESTS.opencode.version, '1.18.32');
-  assert.equal(
-    PINNED_VENDOR_DIGESTS.kimi.sha256,
-    '46a0095fa08385027e2e2d02d3c3ee274ecc2094f136dc745910bd72273f7763',
-  );
-  assert.equal(PINNED_VENDOR_DIGESTS.kimi.version, '0.28.1');
+  assert.deepEqual(Object.keys(PINNED_VENDOR_DIGESTS), ['opencode']);
 });
 
 // ---------- the arming flag ----------
@@ -181,16 +177,6 @@ test('verifyVendorBinaryDigest: ENABLED + unlocatable binary fails closed (unver
 test('verifyVendorBinaryDigest: ENABLED but vendor has no pin is a pass-through no-op', () => {
   const out = verifyVendorBinaryDigest('some-future-cli', '/whatever/bin', { enforced: true });
   assert.equal(out, '/whatever/bin');
-});
-
-// ---------- both pinned vendors are enforced by the SAME primitive ----------
-
-test('verifyVendorBinaryDigest: kimi is pinned too (deviated dist/main.mjs refused)', () => {
-  const dir = tmpDir();
-  const { file } = writeFileWith(dir, 'main.mjs', 'not-the-real-kimi-0.28.1');
-  const err = catchIntegrityError(() => verifyVendorBinaryDigest('kimi', file, { enforced: true }));
-  assert.equal(err.vendorId, 'kimi');
-  assert.equal(err.expected, PINNED_VENDOR_DIGESTS.kimi.sha256);
 });
 
 // ---------- PATH-fallback resolution (M-4: covers the bare-`opencode` branch) ----------

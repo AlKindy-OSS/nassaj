@@ -10,11 +10,13 @@ export interface ShareCredentials {
 /**
  * Result of one load attempt. `unavailable` is deliberately a single outcome: the
  * server answers 404 for unknown, expired, revoked and wrong-token alike, and the
- * viewer must not reintroduce a distinction.
+ * viewer must not reintroduce a distinction. `provider-removed` (ADR-229) is the
+ * one exception: the server sends 410 `provider_removed` only to a valid token.
  */
 export type LoadResult =
   | { kind: 'ready'; transcript: ShareTranscriptData }
   | { kind: 'unavailable' }
+  | { kind: 'provider-removed' }
   | { kind: 'rate-limited' }
   | { kind: 'network' };
 
@@ -39,6 +41,15 @@ async function readTranscript(response: Response): Promise<LoadResult> {
   }
 }
 
+async function isProviderRemoved(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    return body?.error?.code === 'provider_removed';
+  } catch {
+    return false;
+  }
+}
+
 /** One cross-origin read of the snapshot; never throws. */
 export async function loadShare(
   credentials: ShareCredentials,
@@ -58,5 +69,6 @@ export async function loadShare(
   }
   if (response.ok) return readTranscript(response);
   if (response.status === 429) return { kind: 'rate-limited' };
+  if (response.status === 410 && await isProviderRemoved(response)) return { kind: 'provider-removed' };
   return response.status >= 500 ? { kind: 'network' } : { kind: 'unavailable' };
 }

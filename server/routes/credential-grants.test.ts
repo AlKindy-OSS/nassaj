@@ -148,7 +148,13 @@ describe('resolveCredentialPrincipal + resolveProviderEnv', () => {
     assert.equal(fs.readlinkSync(path.join(home, '.claude')), userConfigDir(grantee.id, '.claude'));
     assert.equal(fs.readlinkSync(path.join(home, '.codex')), userConfigDir(grantee.id, '.codex'));
     assert.equal(fs.readlinkSync(path.join(home, '.hermes')), userConfigDir(grantee.id, '.hermes'));
-    assert.equal(fs.readlinkSync(path.join(home, '.qwen')), userConfigDir(grantee.id, '.qwen'));
+    // Qwen Code's body is gone (ADR-229): provisioning no longer creates .qwen, so
+    // the grant home must not carry a link for it — not even a dangling one (lstat).
+    assert.equal(
+      fs.lstatSync(path.join(home, '.qwen'), { throwIfNoEntry: false }),
+      undefined,
+      'no .qwen entry in the grant home after ADR-229',
+    );
     assert.ok(!fs.existsSync(path.join(home, '.grants')), 'the grant dir is not mirrored into itself');
     assert.equal(resolveCredentialPrincipal(grantee.id, 'agy').grantedBy, owner.id);
     // The owner's own spawn is unaffected.

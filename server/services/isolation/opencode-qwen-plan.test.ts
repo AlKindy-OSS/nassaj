@@ -6,13 +6,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-// eslint-disable-next-line boundaries/dependencies -- drift test pins the provider's own model list.
-import { QWEN_TOKEN_PLAN_MODELS } from '@/modules/providers/list/qwen/qwen.provider.js';
-
 import {
   QWEN_PLAN_BASE_URL,
   QWEN_PLAN_KEY_ENV,
   QWEN_PLAN_MODELS,
+  QWEN_TOKEN_PLAN_MODELS,
   authorizeQwenPlanLaunch,
   buildQwenPlanConfigContent,
   createRedactingLineAssembler,

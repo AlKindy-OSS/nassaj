@@ -31,7 +31,6 @@ import type {
 } from '../../../../shared/harness-update.contract.js';
 
 
-import { clearStaleNativeStageBeforeLaunch } from './native-staging.js';
 import { dshIntegrationStatus } from './npm-lock/dsh-pipeline-update.js';
 import {
   deriveHarnessNotices,
@@ -165,9 +164,6 @@ async function readInstalledVersion(
   } catch (error) {
     if (!(error instanceof HarnessBinaryUnresolvedError)) throw error;
   }
-  // A staging harness's `--version` would swap in a stale stage: never outside
-  // an update window (native-staging.ts).
-  if (descriptor.stagesNativeUpdate && binary) clearStaleNativeStageBeforeLaunch(descriptor.id, binary);
   const raw = await runVersion(binary, descriptor.versionArgs);
   installedCache.set(descriptor.id, { raw, readAt: t });
   return raw;

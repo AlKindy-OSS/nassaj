@@ -5,7 +5,7 @@ import type { LLMProvider } from '@/shared/types.js';
 import { withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 
 type SessionSynchronizeResult = {
-  processedByProvider: Record<LLMProvider, number>;
+  processedByProvider: Partial<Record<LLMProvider, number>>;
   failures: string[];
 };
 
@@ -75,7 +75,9 @@ export const sessionSynchronizerService = {
     const run = async (): Promise<SessionSynchronizeResult> => {
     const lastScanAt = options.ignoreScanCursor ? null : scanStateDb.getLastScannedAt();
     const scanBoundary = new Date();
-    const processedByProvider: Record<LLMProvider, number> = {
+    // Removed bodies (kimi, qwen, hermes — ADR-229) are not seeded: nothing of
+    // theirs is synchronized any more.
+    const processedByProvider: Partial<Record<LLMProvider, number>> = {
       claude: 0,
       codex: 0,
       cursor: 0,
@@ -83,13 +85,8 @@ export const sessionSynchronizerService = {
       opencode: 0,
       // Hosted vendors have real synchronizers; seeded to 0 here and overwritten
       // by the Promise.allSettled loop below with their actual processed counts.
-      kimi: 0,
       deepseek: 0,
       glm: 0,
-      // History-only id (T-1953): its body is deleted, so nothing is synchronized.
-      hermes: 0,
-      // Qwen uses the shared nassaj-owned transcript synchronizer.
-      qwen: 0,
       sakana: 0,
       // dsh (T-2086): no synchronizer registered yet; its history is read on demand.
       dsh: 0,

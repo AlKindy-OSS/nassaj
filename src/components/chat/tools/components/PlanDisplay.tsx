@@ -44,6 +44,10 @@ export const PlanDisplay: React.FC<PlanDisplayProps> = ({
   const pendingRequest = permissionCtx?.pendingPermissionRequests.find(
     (r) => r.toolName === 'ExitPlanMode' || r.toolName === 'exit_plan_mode'
   );
+  // ADR-173 M-c: the plan is the turn starter's to approve; others see it read-only.
+  const canAnswer = pendingRequest
+    ? (permissionCtx?.answerRole?.(pendingRequest) ?? 'starter') === 'starter'
+    : false;
 
   const handleBuild = () => {
     if (pendingRequest && permissionCtx) {
@@ -115,7 +119,12 @@ export const PlanDisplay: React.FC<PlanDisplayProps> = ({
         </CollapsibleContent>
 
         {/* Footer — always visible when permission is pending */}
-        {pendingRequest && (
+        {pendingRequest && !canAnswer && (
+          <CardFooter className="border-t border-border/40 px-4 pb-3 pt-3 text-xs text-muted-foreground">
+            {t('plan.waitingStarter', { name: t('sharedWriting.approval.starterFallback') })}
+          </CardFooter>
+        )}
+        {pendingRequest && canAnswer && (
           <CardFooter className="justify-end gap-2 border-t border-border/40 px-4 pb-3 pt-3">
             <Button
               variant="ghost"

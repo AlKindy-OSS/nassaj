@@ -8,6 +8,8 @@ export interface ViewerStrings {
   loading: string;
   unavailableTitle: string;
   unavailable: string;
+  providerRemovedTitle: string;
+  providerRemoved: string;
   rateLimitedTitle: string;
   rateLimited: string;
   networkTitle: string;
@@ -48,6 +50,8 @@ const AR: ViewerStrings = {
   loading: 'جارٍ التحميل…',
   unavailableTitle: 'المحادثة غير متاحة',
   unavailable: 'تعذّر عرض هذه المحادثة. قد يكون الرابط غير صحيح أو منتهياً أو أُلغيت مشاركته.',
+  providerRemovedTitle: 'الأداة أُزيلت',
+  providerRemoved: 'هذه المحادثة تخصّ أداةً أُزيلت من نسّاج، فلم يعد عرضها ممكناً.',
   rateLimitedTitle: 'طلبات كثيرة',
   rateLimited: 'تجاوزت عدد المحاولات المسموح. انتظر نحو دقيقة ثم أعد المحاولة.',
   networkTitle: 'تعذّر الاتصال',
@@ -108,6 +112,8 @@ const EN: ViewerStrings = {
   loading: 'Loading…',
   unavailableTitle: 'Conversation unavailable',
   unavailable: 'This conversation cannot be shown. The link may be wrong, expired, or no longer shared.',
+  providerRemovedTitle: 'Tool removed',
+  providerRemoved: 'This conversation belongs to a tool that was removed from Nassaj, so it can no longer be shown.',
   rateLimitedTitle: 'Too many requests',
   rateLimited: 'Too many attempts. Wait about a minute, then try again.',
   networkTitle: 'Connection problem',

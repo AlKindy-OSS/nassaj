@@ -137,7 +137,7 @@ function renderComposer(provider = 'codex', overrides: Record<string, unknown> =
     permissionMode: 'default',
     cyclePermissionMode: () => {},
     cursorModel: 'cursor', claudeModel: 'claude', codexModel: 'gpt-5',
-    antigravityModel: 'ag', opencodeModel: 'oc', hermesModel: 'hermes', kimiModel: 'kimi',
+    antigravityModel: 'ag', opencodeModel: 'oc',
     deepseekModel: 'deepseek', glmModel: 'glm',
     isLoading: false,
     canAbortSession: false,
@@ -590,19 +590,19 @@ it('B-894 refuses a full outbox before dispatch and preserves the composer', asy
 
 
 describe('B-894 original payload eligibility', () => {
-  it.each(['qwen', 'hermes', 'kimi', 'deepseek', 'glm', 'claude', 'codex', 'cursor', 'opencode', 'antigravity'])(
+  it.each(['deepseek', 'glm', 'claude', 'codex', 'cursor', 'opencode', 'antigravity'])(
     '%s sends a completeness manifest only on eligible text receipt paths', async (provider) => {
       const view = renderComposer(provider);
       act(() => view.result.current.setInput('Same text'));
       await act(async () => view.result.current.handleSubmit(fakeSubmitEvent));
       expect(getOutboxSnapshot()[0].historyEligibility).toBe('text_only');
-      const expected = ['claude', 'qwen', 'hermes', 'kimi', 'deepseek', 'glm'].includes(provider);
+      const expected = ['claude', 'deepseek', 'glm'].includes(provider);
       expect(view.sent[0].options.receiptPayload).toEqual(expected
         ? { version: 1, kind: 'text', imageCount: 0, fileCount: 0 } : undefined);
       view.unmount();
     });
 
-  it.each([['qwen', 'image'], ['qwen', 'file'], ['claude', 'image'], ['claude', 'file']])('keeps %s original %s ineligible when upload returns no attachments', async (provider, kind) => {
+  it.each([['deepseek', 'image'], ['deepseek', 'file'], ['claude', 'image'], ['claude', 'file']])('keeps %s original %s ineligible when upload returns no attachments', async (provider, kind) => {
     executeResponse = { ok: true, body: { images: [], files: [] } };
     const view = renderComposer(provider);
     act(() => {
@@ -646,7 +646,7 @@ describe('B-894 original payload eligibility', () => {
     view.unmount();
   });
 
-  it.each([true, false].flatMap(sameId => ['qwen', 'claude'].map(provider => [sameId, provider] as const)))('retry refuses unknown original files (same ID: %s, %s)', async (sameId, provider) => {
+  it.each([true, false].flatMap(sameId => ['deepseek', 'claude'].map(provider => [sameId, provider] as const)))('retry refuses unknown original files (same ID: %s, %s)', async (sameId, provider) => {
     recordOutboxEntry({ id: 'original-file', projectId: 'p1', sessionId: 's1', text: 'Same text',
       historyEligibility: 'ineligible', intent: { provider } });
     markOutboxFailed('original-file', { code: 'transport', sameClientMsgIdRetryable: sameId });
@@ -658,7 +658,7 @@ describe('B-894 original payload eligibility', () => {
     view.unmount();
   });
 
-  it.each(['qwen', 'claude'])('%s legacy retries cannot acquire a text-only declaration', async (provider) => {
+  it.each(['deepseek', 'claude'])('%s legacy retries cannot acquire a text-only declaration', async (provider) => {
     recordOutboxEntry({ id: 'legacy', projectId: 'p1', sessionId: 's1', text: 'Same text',
       status: 'failed', intent: { provider } });
     const view = renderComposer(provider);
@@ -669,7 +669,7 @@ describe('B-894 original payload eligibility', () => {
     view.unmount();
   });
 
-  it.each(['hermes', 'claude'])('%s manual verification preserves an ineligible copy on a positive text receipt', async (provider) => {
+  it.each(['deepseek', 'claude'])('%s manual verification preserves an ineligible copy on a positive text receipt', async (provider) => {
     recordOutboxEntry({ id: 'file-check', projectId: 'p1', sessionId: 's1', text: 'Same text',
       historyEligibility: 'ineligible', intent: { provider } });
     const view = renderComposer(provider, { verifyMessageDelivered: async () => true });
@@ -757,9 +757,9 @@ describe('B-1076 session-fence retry mints a fresh clientMsgId', () => {
 
 it.each([true, false])('B-894 preserves eligible text on retry (same ID: %s)', async (sameId) => {
   recordOutboxEntry({ id: 'original-text', projectId: 'p1', sessionId: 's1', text: 'hello',
-    historyEligibility: 'text_only', intent: { provider: 'qwen' } });
+    historyEligibility: 'text_only', intent: { provider: 'deepseek' } });
   markOutboxFailed('original-text', { code: 'transport', sameClientMsgIdRetryable: sameId });
-  const view = renderComposer('qwen');
+  const view = renderComposer('deepseek');
   await act(async () => view.result.current.retryOutboxEntry('original-text'));
   expect(view.sent[0].options.receiptPayload).toEqual({ version: 1, kind: 'text', imageCount: 0, fileCount: 0 });
   expect(getOutboxSnapshot()[0].historyEligibility).toBe('text_only');
@@ -786,11 +786,11 @@ describe('B-894 complete attachment retry guard', () => {
       const fileNames = kind === 'legacy' ? undefined : kind === 'files' ? ['source.pdf'] : [];
       recordOutboxEntry({ id: 'held', projectId: 'p1', sessionId: 's1', text: 'Do not lose attachments',
         images: ['files', 'legacy'].includes(kind) ? [] : originalImages, fileNames,
-        historyEligibility: 'ineligible', intent: { provider: 'qwen' } });
+        historyEligibility: 'ineligible', intent: { provider: 'deepseek' } });
       markOutboxFailed('held', { code: 'conversation_not_found', sameClientMsgIdRetryable: sameId });
       const original = getOutboxSnapshot()[0];
       const randomUUID = vi.spyOn(crypto, 'randomUUID');
-      const view = renderComposer('qwen');
+      const view = renderComposer('deepseek');
       try {
         await act(async () => view.result.current.retryOutboxEntry('held'));
         expect(view.sent).toHaveLength(0);
@@ -875,7 +875,7 @@ describe('B-894 complete attachment retry guard', () => {
   it('snapshots the file inventory before upload completes', async () => {
     const pending = deferred<ExecuteHttpResponse>();
     executeFetch = () => pending.promise;
-    const view = renderComposer('qwen');
+    const view = renderComposer('deepseek');
     act(() => { view.result.current.setInput('original file'); view.result.current.setAttachedFiles([new File(['a'], 'original.pdf')]); });
     let sending!: Promise<void>;
     act(() => { sending = view.result.current.handleSubmit(fakeSubmitEvent); });
@@ -887,7 +887,7 @@ describe('B-894 complete attachment retry guard', () => {
 });
 
 
-it.each(['qwen', 'hermes', 'kimi', 'deepseek', 'glm', 'cursor', 'antigravity'])(
+it.each(['deepseek', 'glm', 'cursor', 'antigravity'])(
   'B-894 refuses restored images when the %s wire path cannot carry them', async (provider) => {
     const file = new File(['image'], 'image.png', { type: 'image/png' });
     const deleteMany = vi.fn(async () => {});

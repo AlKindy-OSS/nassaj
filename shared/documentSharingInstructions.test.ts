@@ -30,8 +30,8 @@ test('outbound prompt retains exact user bytes and does not repeat its own wrapp
   }
 });
 
-test('all five CLI launchers import the shared outbound wrapper', () => {
-  for (const file of ['agy-cli', 'opencode-cli', 'qwen-cli', 'kimi-agent-cli', 'cursor-cli']) {
+test('all three CLI launchers import the shared outbound wrapper', () => {
+  for (const file of ['agy-cli', 'opencode-cli', 'cursor-cli']) {
     const source = readFileSync(new URL(`../server/${file}.js`, import.meta.url), 'utf8');
     assert.match(source, /withRuntimeInstructions as withCoordinationDirective.*runtime-instructions/);
     assert.match(source, /withCoordinationDirective\(/);
@@ -41,10 +41,11 @@ test('all five CLI launchers import the shared outbound wrapper', () => {
 test('native instruction channels carry guidance without rewriting the user command', () => {
   const channels = [
     ['../server/claude-sdk.js', /append: getRuntimeInstructions\(coordinationLevel\)/],
-    // ADR-206: the Codex slot goes through the B = 0/1 helper, which still calls the facade.
+    // ADR-206: the Codex slot goes through the B = 0/1 helper, which still calls the facade;
+    // T-2107: the spawn hands it to composeCodexLaunchConfig (behaviour: codex-launch-config.instructions.test.ts).
     [
       '../server/openai-codex.js',
-      /developer_instructions: codexTurnDeveloperInstructions\(\s*options\?\.coordinationLevel, helpersDecision, getRuntimeInstructions,/,
+      /config: composeCodexLaunchConfig\(\{[^}]*developerInstructions: codexTurnDeveloperInstructions\(\s*options\?\.coordinationLevel, helpersDecision, getRuntimeInstructions,/,
     ],
     ['../server/modules/providers/shared/vendor/vendor-runtime.js', /getRuntimeInstructions\(options\?\.coordinationLevel\)/],
   ] as const;
@@ -138,7 +139,7 @@ test('stripping never removes user text that merely resembles the wrapper', () =
 test('no launcher carries its own copy of the publish command', () => {
   const launchers = [
     'claude-sdk', 'openai-codex', 'agy-cli',
-    'opencode-cli', 'qwen-cli', 'kimi-agent-cli', 'cursor-cli',
+    'opencode-cli', 'cursor-cli',
   ];
   for (const file of launchers) {
     const source = readFileSync(new URL(`../server/${file}.js`, import.meta.url), 'utf8');

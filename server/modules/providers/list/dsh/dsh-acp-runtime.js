@@ -14,7 +14,13 @@
  *     Claude's UserPromptSubmit hooks (a block sends nothing to DeepSeek; additional
  *     context is appended to the prompt as text parts);
  *   - the launch seam (dsh-launch.js): own deepseek key, governance, pinned
- *     Nassaj layers, exact env, verified node.
+ *     Nassaj layers, exact env, verified node;
+ *   - a LOCAL turn (ADR-227 "DSH local corrector", T-2108, dsh-local-turn.js): a chat
+ *     pinned to the member's local model server, or a new chat on a local model,
+ *     runs through a per-turn loopback corrector (opened after the prompt hooks,
+ *     closed when the run exits or fails) with no DeepSeek key, and is pinned to
+ *     that server through the shared local-pin writer; it never moves to DeepSeek,
+ *     nor a DeepSeek chat to it.
  * One process per turn (detached; its whole group is killed once it exits):
  *   initialize (pv 1) → session/new | session/resume → set_config_option (model
  *   ["deepseek-official", <model>], reasoning_effort off|low|high|max)
@@ -40,6 +46,7 @@ import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from '@/modules/prov
 import { participantsDb } from '../../../database/index.js';
 import { credentialNotLinkedPayload } from '../../../../services/isolation/credential-gate.js';
 import { sanitizeVendorAgentEnv } from '../../../../services/isolation/sanitize-vendor-agent-env.js';
+import { recordLocalEnginePinOrThrow } from '../../../../services/isolation/local-engine-pin-writer.js';
 import { GOVERNANCE_MISSING_CODE } from '../../../../services/isolation/vendor-cli-governance.js';
 import { ClaudeTranscriptMirror, claudeTranscriptMirrorPath }
   from '../../../../services/permission-parity/claude-transcript-mirror.js';
@@ -52,10 +59,11 @@ import { createNormalizedMessage } from '../../../../shared/utils.js';
 
 import { ACP_PROTOCOL_VERSION, AcpConnection, RPC_METHOD_NOT_FOUND } from './dsh-acp-connection.js';
 import { assertDshOverrideSemantics } from './dsh-dump-config-check.js';
-import { assertExactDshEnv, prepareDshLaunch } from './dsh-launch.js';
+import { DSH_LOCAL_ENV_ALLOW_LIST, assertExactDshEnv, prepareDshLaunch } from './dsh-launch.js';
+import { dshLocalModelIds, dshLocalPath, openDshLocalTurn, prepareDshLocalLaunch } from './dsh-local-turn.js';
 import { DshParityRefusal, resolveDshPermissionParity } from './dsh-permission-parity.js';
 import { cancelDshPermissionsForRun, requestDshPermission } from './dsh-permissions.js';
-import { DshTranscriptRecorder, readDshSessionOwner } from './dsh-transcript.js';
+import { DshTranscriptRecorder, readDshSessionRecord } from './dsh-transcript.js';
 
 const PROVIDER = 'dsh';
 /** The only dsh model group Nassaj selects (official DeepSeek). */
@@ -89,6 +97,7 @@ const MESSAGES = Object.freeze({
   PERMISSION_EFFECTIVE_POLICY_REQUIRED: 'تعذّر تحديد ملف الصلاحيات لهذه الجولة، فلم تبدأ.',
   dsh_cwd_missing: 'مجلد المشروع لهذه الجولة غير موجود.',
   dsh_effort_unsupported: 'مستوى التفكير المطلوب غير مدعوم في DeepSeek Harness.',
+  dsh_handshake_missing: 'لم تصل مصافحة طبقة سياسة نسّاج قبل إرسال الرسالة، فأُوقفت الجولة.',
   launch_refused: 'تعذّر تشغيل DeepSeek Harness على هذا الخادم.',
 });
 
@@ -109,6 +118,9 @@ function refuse(writer, sessionId, code, extra = {}) {
   });
 }
 
+/** Typed local-engine refusals (T-2108) whose message the member must read intact. */
+const LOCAL_REFUSAL_CODES = new Set(['ENGINE_PROVIDER_UNAVAILABLE', 'ENGINE_PIN_WRITE_FAILED']);
+
 /** Maps a pre-spawn error to its refusal; false for an unexpected error. */
 function refuseLaunchError(writer, sessionId, error) {
   const credential = credentialNotLinkedPayload(error);
@@ -118,6 +130,11 @@ function refuseLaunchError(writer, sessionId, error) {
   }
   if (error instanceof DshParityRefusal || error?.code === GOVERNANCE_MISSING_CODE) {
     refuse(writer, sessionId, error.code);
+    return true;
+  }
+  // ADR-227 / T-2108: a local-engine refusal reads intact (it names no key and no address).
+  if (LOCAL_REFUSAL_CODES.has(error?.code)) {
+    refuse(writer, sessionId, error.code, { error: error.message, ...(error.reason ? { reason: error.reason } : {}) });
     return true;
   }
   if (error?.name === 'DshLaunchError' || error?.code === 'HARNESS_BINARY_UNRESOLVED'
@@ -282,8 +299,12 @@ async function openSession(run, { requested, cwd, model, effort, command }, busy
     run.mirror?.rename(run.sessionId, transcriptPath);
     run.engine?.setSession({ sessionId: run.sessionId, transcriptPath });
   }
-  run.recorder.start(run.sessionId, { isNew: !requested, command, ownerUserId: run.userId });
+  run.recorder.start(run.sessionId, {
+    isNew: !requested, command, ownerUserId: run.userId, localModel: run.local ? dshLocalModelIds(run.local).recorded : null,
+  });
   recordParticipant(run, cwd);
+  // ADR-227 / T-2108: a new local chat's pin must settle, or the run stops.
+  if (run.local && !requested) recordLocalEnginePinOrThrow({ newSessionId: run.sessionId, parentSessionId: null, pin: run.local.pin });
   if (model) {
     const value = modelConfigValue(opened.configOptions, model);
     if (!value) throw Object.assign(new Error(`dsh does not offer model ${model}`), { code: 'dsh_model_unavailable' });
@@ -300,6 +321,8 @@ async function openSession(run, { requested, cwd, model, effort, command }, busy
 async function exchange(run, input, busySessions) {
   try {
     await openSession(run, input, busySessions);
+    // T-2108 qa condition 1: nothing reaches the model unless the policy plugin's hello was accepted.
+    if (!run.broker?.state?.hello) throw Object.assign(new Error(MESSAGES.dsh_handshake_missing), { code: 'dsh_cap_channel' });
     const context = (run.promptContext ?? []).map((text) => ({ type: 'text', text }));
     const result = await run.connection.request('session/prompt', {
       sessionId: run.sessionId, prompt: [...promptBlocks(input.command, input.coordinationLevel), ...context],
@@ -312,9 +335,11 @@ async function exchange(run, input, busySessions) {
   }
 }
 
-/** Stderr summary for the log: its length and last line only (never the body). */
+/** Stderr summary for the log: its length and last line only (never the body); every secret redacted. */
 function stderrSummary(run) {
-  const lines = run.stderrTail.replaceAll(run.apiKey, '[key]').trim().split('\n');
+  const secrets = [run.apiKey, run.localToken].filter((value) => typeof value === 'string' && value !== '');
+  const tail = secrets.reduce((text, secret) => text.replaceAll(secret, '[key]'), run.stderrTail);
+  const lines = tail.trim().split('\n');
   return { stderrBytes: run.stderrBytes, stderrLastLine: (lines.at(-1) ?? '').slice(0, 200) };
 }
 
@@ -368,8 +393,10 @@ function readTurnInput(options) {
 /**
  * Builds a dsh runtime. The default instance below is what the server uses;
  * tests build their own with their seams.
- * @param {{ claudeEnv?: (userId: unknown) => NodeJS.ProcessEnv|null, managedSettingsDir?: string }} [deps]
- *   passed to the Claude permission parity resolver
+ * @param {{ claudeEnv?: (userId: unknown) => NodeJS.ProcessEnv|null, managedSettingsDir?: string,
+ *   serverEnv?: NodeJS.ProcessEnv, localDeps?: Record<string, Function>, localRunsRoot?: string }} [deps]
+ *   `claudeEnv`/`managedSettingsDir` go to the Claude permission parity resolver; `localDeps`
+ *   (resolveDshLocalEngineOrThrow) and `localRunsRoot` are the local-turn seams (T-2108)
  */
 export function createDshRuntime(deps = {}) {
   /** @type {Map<string, any>} live runs by run id */
@@ -377,17 +404,21 @@ export function createDshRuntime(deps = {}) {
   /** dsh session ids with a turn admitted or running. */
   const busySessions = new Set();
 
-  /** Refusals that need the session record (ownership); null when the turn may go on. */
-  async function sessionRefusal(input, userId) {
-    if (!input.requested) return null;
-    const owner = await readDshSessionOwner(input.requested, input.projectPath);
-    if (owner === null) return 'dsh_session_unknown';
-    return owner === String(userId) ? null : 'dsh_shared_session_unsupported';
+  /**
+   * The session record of a resume: a refusal (ownership), or the model recorded
+   * for a local chat (T-2108 qa HIGH 4: the server's own record of it).
+   */
+  async function sessionRecord(input, userId) {
+    if (!input.requested) return { refusal: null, model: null };
+    const record = await readDshSessionRecord(input.requested, input.projectPath);
+    if (record === null) return { refusal: 'dsh_session_unknown', model: null };
+    return record.ownerUserId === String(userId)
+      ? { refusal: null, model: record.model } : { refusal: 'dsh_shared_session_unsupported', model: null };
   }
 
   /** Spawns the prepared launch (the one dsh spawn site) and wires its ACP connection. */
   function startRun(launch, input, writer, base) {
-    const env = assertExactDshEnv(sanitizeVendorAgentEnv(launch.env));
+    const env = assertExactDshEnv(sanitizeVendorAgentEnv(launch.env), base.local ? DSH_LOCAL_ENV_ALLOW_LIST : undefined);
     // fd 3: the policy plugin's channel (T-2089); the plugin decides nothing on its own.
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd, env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'], shell: false, detached: true,
@@ -413,16 +444,30 @@ export function createDshRuntime(deps = {}) {
     return run;
   }
 
-  /** Every pre-spawn check that needs the member: parity, the launch seam, the turn's engine. */
-  function prepare(options, input, userId, runId) {
+  /** Every pre-spawn check that needs the member: parity, the launch seam (local or cloud), the turn's engine. */
+  async function prepare(options, input, userId, runId, localPath, recordedModel) {
     const parity = resolveDshPermissionParity(options, { userId, cwd: input.cwd }, deps);
-    const launch = prepareDshLaunch({ userId });
-    assertDshOverrideSemantics(launch, deps.serverEnv ?? process.env);
+    const local = localPath ? await prepareDshLocalLaunch({
+      userId, storedEngine: localPath.storedEngine, requestedModel: options.model ?? null, recordedModel,
+    }, deps) : null;
+    const launch = local?.launch ?? prepareDshLaunch({ userId });
+    if (!local) assertDshOverrideSemantics(launch, deps.serverEnv ?? process.env);
     const sessionId = input.requested ?? `pending-${runId}`;
     const transcriptPath = claudeTranscriptMirrorPath(launch.home, sessionId);
     const engine = parity.createEngine({ home: launch.home, sessionId, transcriptPath });
     const mirror = new ClaudeTranscriptMirror({ file: transcriptPath, sessionId, cwd: input.cwd });
-    return { launch, engine, mirror };
+    return { launch, engine, mirror, resolved: local?.resolved ?? null };
+  }
+
+  /** The run's fixed fields; a local turn records its qualified model id and carries its token. */
+  function runBase({ runId, userId, input, options, prepared, promptContext, token }) {
+    const local = prepared.resolved?.local ?? null;
+    const model = local ? dshLocalModelIds(local).recorded : (options.model || null);
+    return {
+      runId, userId, sessionId: input.requested, local, localToken: token ?? null,
+      recorder: new DshTranscriptRecorder({ projectPath: input.projectPath, model }),
+      apiKey: prepared.launch.env.DEEPSEEK_API_KEY, engine: prepared.engine, mirror: prepared.mirror, promptContext,
+    };
   }
 
   /** Claude's UserPromptSubmit hooks, before any process exists: a block sends nothing to DeepSeek. */
@@ -437,34 +482,50 @@ export function createDshRuntime(deps = {}) {
     return gate.additionalContext ?? [];
   }
 
+  /** Prepares, gates and spawns an admitted turn; `cleanup` collects what a failure must undo. */
+  async function spawnAdmitted(options, writer, input, command, localPath, cleanup) {
+    const userId = writer?.userId ?? null;
+    const record = await sessionRecord(input, userId);
+    if (record.refusal) throw Object.assign(new Error(record.refusal), { refusal: record.refusal });
+    const runId = crypto.randomUUID();
+    const prepared = await prepare(options, input, userId, runId, localPath, record.model);
+    const promptContext = await promptGate(prepared.engine, prepared.mirror, command, writer, input);
+    if (promptContext === null) throw Object.assign(new Error('dsh_prompt_blocked'), { refused: true });
+    if (refuseSpawnIfHarnessUpdating(PROVIDER, writer, { sessionId: input.requested, clientMsgId: options.clientMsgId })) {
+      throw Object.assign(new Error('harness_updating'), { refused: true });
+    }
+    cleanup.push(beginHarnessLaunch(PROVIDER));
+    // T-2108 qa condition 4: the corrector opens only after the prompt hooks admitted the turn.
+    const opened = prepared.resolved
+      ? await openDshLocalTurn({ launch: prepared.launch, resolved: prepared.resolved, runId },
+        { serverEnv: deps.serverEnv, runsRoot: deps.localRunsRoot })
+      : null;
+    if (opened) cleanup.push(() => void opened.close().catch(() => {}));
+    const run = startRun(opened?.launch ?? prepared.launch, input, writer,
+      runBase({ runId, userId, input, options, prepared, promptContext, token: opened?.token }));
+    const undo = cleanup.splice(0);
+    run.exited.then(() => { for (const step of undo) step(); });
+    return run;
+  }
+
   /** Admits, prepares and spawns one turn; returns the run, or null after a refusal frame. */
   async function launchTurn(options, writer, input, command) {
-    const userId = writer?.userId ?? null;
     const inputRefusal = checkInput(input);
     if (inputRefusal) return void refuse(writer, input.requested, inputRefusal);
+    let localPath;
+    try {
+      localPath = dshLocalPath(input, options.model);
+    } catch (error) {
+      if (refuseLaunchError(writer, input.requested, error)) return null;
+      throw error;
+    }
     if (input.requested && busySessions.has(input.requested)) return void refuse(writer, input.requested, 'session_busy');
     if (input.requested) busySessions.add(input.requested);
-    let releaseHarnessLaunch = null;
+    const cleanup = [];
     try {
-      const sessionCode = await sessionRefusal(input, userId);
-      if (sessionCode) throw Object.assign(new Error(sessionCode), { refusal: sessionCode });
-      const runId = crypto.randomUUID();
-      const { launch, engine, mirror } = prepare(options, input, userId, runId);
-      const promptContext = await promptGate(engine, mirror, command, writer, input);
-      if (promptContext === null) throw Object.assign(new Error('dsh_prompt_blocked'), { refused: true });
-      if (refuseSpawnIfHarnessUpdating(PROVIDER, writer, { sessionId: input.requested, clientMsgId: options.clientMsgId })) {
-        throw Object.assign(new Error('harness_updating'), { refused: true });
-      }
-      releaseHarnessLaunch = beginHarnessLaunch(PROVIDER);
-      const recorder = new DshTranscriptRecorder({ projectPath: input.projectPath, model: options.model || null });
-      const run = startRun(launch, input, writer, {
-        runId, userId, sessionId: input.requested, recorder, apiKey: launch.env.DEEPSEEK_API_KEY, engine, mirror, promptContext,
-      });
-      const release = releaseHarnessLaunch;
-      run.exited.then(() => release());
-      return run;
+      return await spawnAdmitted(options, writer, input, command, localPath, cleanup);
     } catch (error) {
-      releaseHarnessLaunch?.();
+      for (const step of cleanup) step();
       if (input.requested) busySessions.delete(input.requested);
       if (error?.refusal) return void refuse(writer, input.requested, error.refusal);
       if (error?.refused) return null;
@@ -488,7 +549,8 @@ export function createDshRuntime(deps = {}) {
     if (!run) return;
     try {
       const failure = await exchange(run, {
-        requested: input.requested, cwd: input.cwd, model: options.model || null, effort: input.effort,
+        requested: input.requested, cwd: input.cwd, model: run.local ? dshLocalModelIds(run.local).selected : (options.model || null),
+        effort: input.effort,
         command, coordinationLevel: input.coordinationLevel,
       }, busySessions);
       await finishRun(run, input.requested, failure);

@@ -582,25 +582,13 @@ function realBwrapUsable(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// resolveCagedLaunch — per-mode (SL-6): a kimi/glm AGENT run is wrapped; the
-// chat/omitted run stays a byte-identical passthrough.
+// resolveCagedLaunch — per-mode (SL-6): a glm AGENT run is wrapped; the
+// chat/omitted run stays a byte-identical passthrough. kimi has no agent CLI
+// any more (ADR-229), so it is a passthrough in every mode.
 // ---------------------------------------------------------------------------
 
 describe('resolveCagedLaunch — per-mode (SL-6)', () => {
-  it('wraps a kimi AGENT launch (mode: "agent") in the unified bwrap argv', () => {
-    setCage(true);
-    const { deps } = allExist();
-    const out = resolveCagedLaunch(
-      { userId: 42, provider: 'kimi', mode: 'agent', cmd: 'kimi', args: ['-p', 'hi'], cwd: '/proj' },
-      deps,
-    );
-    assert.equal(out.cmd, '/opt/codex/bwrap');
-    assertContainsSeq(out.args, ['--unshare-user', '--unshare-pid', '--unshare-ipc']);
-    const dash = out.args.indexOf('--');
-    assert.deepEqual(out.args.slice(dash + 1), ['kimi', '-p', 'hi']);
-  });
-
-  it('wraps a glm AGENT launch (carrier identity) in bwrap', () => {
+  it('wraps a glm AGENT launch (carrier identity) in the unified bwrap argv', () => {
     setCage(true);
     const { deps } = allExist();
     const out = resolveCagedLaunch(
@@ -608,9 +596,12 @@ describe('resolveCagedLaunch — per-mode (SL-6)', () => {
       deps,
     );
     assert.equal(out.cmd, '/opt/codex/bwrap');
+    assertContainsSeq(out.args, ['--unshare-user', '--unshare-pid', '--unshare-ipc']);
+    const dash = out.args.indexOf('--');
+    assert.deepEqual(out.args.slice(dash + 1), ['opencode', 'run']);
   });
 
-  it('passes a kimi CHAT / omitted-mode launch through byte-identically (no fs)', () => {
+  it('passes a glm CHAT / omitted-mode launch and a kimi launch through byte-identically (no fs)', () => {
     setCage(true);
     let fsTouched = 0;
     const argsRef = ['stream'];
@@ -623,68 +614,39 @@ describe('resolveCagedLaunch — per-mode (SL-6)', () => {
       },
     };
     const chat = resolveCagedLaunch(
-      { userId: 42, provider: 'kimi', mode: 'chat', cmd: 'kimi', args: argsRef, cwd: '/proj' },
+      { userId: 42, provider: 'glm', mode: 'chat', cmd: 'opencode', args: argsRef, cwd: '/proj' },
       probeDeps,
     );
-    assert.equal(chat.cmd, 'kimi');
+    assert.equal(chat.cmd, 'opencode');
     assert.equal(chat.args, argsRef, 'chat mode must return the SAME args reference');
     const omitted = resolveCagedLaunch(
-      { userId: 42, provider: 'kimi', cmd: 'kimi', args: argsRef, cwd: '/proj' },
+      { userId: 42, provider: 'glm', cmd: 'opencode', args: argsRef, cwd: '/proj' },
       probeDeps,
     );
     assert.equal(omitted.args, argsRef, 'omitted mode must return the SAME args reference');
+    const kimiAgent = resolveCagedLaunch(
+      { userId: 42, provider: 'kimi', mode: 'agent', cmd: 'kimi', args: argsRef, cwd: '/proj' },
+      probeDeps,
+    );
+    assert.equal(kimiAgent.args, argsRef, 'kimi has no agent CLI to cage (ADR-229)');
     assert.equal(fsTouched, 0, 'the exempt chat path must not stat anything');
   });
 });
 
 // ---------------------------------------------------------------------------
-// cageMountPlan / argv — kimi agent credential mask (SL-6 / KG-1)
+// cageMountPlan — a leftover operator kimi credential stays masked (ADR-229)
 // ---------------------------------------------------------------------------
 
-describe('kimi agent credential mask (SL-6)', () => {
+describe('leftover kimi credential mask', () => {
   const kimiCred = path.join(HOME, '.kimi-code', 'auth.json');
-  const opencodeAuth = path.join(HOME, '.local', 'share', 'opencode', 'auth.json');
 
-  it('registers the kimi config-home credential file', () => {
-    assert.ok(
-      Object.prototype.hasOwnProperty.call(CAGE_SHARED_CREDENTIALS, 'kimi'),
-      'CAGE_SHARED_CREDENTIALS must include a kimi entry',
-    );
+  it('keeps the operator kimi credential registered, so every cage masks it', () => {
     const rels = Object.values(CAGE_SHARED_CREDENTIALS).flat();
-    assert.ok(rels.includes(path.join('.kimi-code', 'auth.json')), 'kimi credential path must be registered');
-  });
-
-  it('ISOLATED kimi agent: masks its OWN config-home credential + every other provider credential', () => {
-    const { deps } = allExist(); // every launch is isolated ⇒ no waiver for anyone
-    const plan = cageMountPlan({ provider: 'kimi', userId: 7 }, deps);
-    // kimi's own operator credential is masked (its per-user key lives in the tree)
-    assert.ok(plan.maskFiles.includes(kimiCred), 'the kimi operator credential must be masked');
-    assert.ok(!plan.writePaths.includes(kimiCred), 'the kimi credential must never be granted rw');
-    // the glm key rides inside opencode auth.json — masked in a kimi cage (cross-provider isolation)
-    assert.ok(plan.maskFiles.includes(opencodeAuth), 'opencode auth.json (carrier for glm) must be masked in a kimi cage');
-    // isolated kimi has no operator-level shared store; only the toolchain caches are rw
-    assert.ok(plan.writePaths.includes(path.join(HOME, '.npm')), 'MCP npm cache must be writable');
-    assert.ok(plan.writePaths.includes(path.join(HOME, '.cache')));
-    assert.ok(
-      !plan.writePaths.some((p) => p.startsWith(path.join(HOME, '.kimi-code'))),
-      'no operator kimi store is re-bound for an isolated agent',
-    );
-  });
-
-  it('argv of a caged kimi AGENT launch masks the kimi credential with /dev/null, after the user rebind', () => {
-    setCage(true);
+    assert.ok(rels.includes(path.join('.kimi-code', 'auth.json')), 'kimi credential path must stay registered');
     const { deps } = allExist();
-    const out = resolveCagedLaunch(
-      { userId: 42, provider: 'kimi', mode: 'agent', cmd: 'kimi', args: ['-p', 'x'], cwd: '/proj' },
-      deps,
-    );
-    assertContainsSeq(out.args, ['--ro-bind', '/dev/null', kimiCred]);
-    const userDir = path.join(USERS_ROOT, '42');
-    assert.ok(
-      indexOfSubsequence(out.args, ['--ro-bind', '/dev/null', kimiCred]) >
-        indexOfSubsequence(out.args, ['--bind', userDir, userDir]),
-      'the kimi credential mask must mount after the per-user rebind',
-    );
+    const plan = cageMountPlan({ provider: 'claude', userId: 7 }, deps);
+    assert.ok(plan.maskFiles.includes(kimiCred), 'a claude cage masks the leftover kimi credential');
+    assert.ok(!plan.writePaths.includes(kimiCred), 'the kimi credential is never granted rw');
   });
 });
 

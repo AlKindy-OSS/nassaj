@@ -57,6 +57,7 @@ import {
 import { readContextGuardRefusal, type ContextGuardInfo } from './contextGuard';
 import { isLocalizedDshRefusal } from './dshRefusal';
 import {
+  SELF_EXPLAINING_REFUSAL_CODES,
   isPermanentOutboxBlock,
   readServerErrorFence,
   readServerErrorRetryable,
@@ -1089,7 +1090,9 @@ export function resolveOutboxVerdict(
     if (msg.success === false && !msg.aborted) {
       const code = context.readErrorCode(msg) ?? 'run_failed';
       // T-2086: a dsh refusal is rendered from its code in the UI language.
-      const keepDetail = typeof msg.error === 'string' && !isLocalizedDshRefusal(msg.provider, code);
+      // ADR-173 P6/P8: likewise every shared-writing refusal (its English sentence would leak).
+      const keepDetail = typeof msg.error === 'string' && !isLocalizedDshRefusal(msg.provider, code)
+        && !SELF_EXPLAINING_REFUSAL_CODES.has(code);
       return {
         action: 'fail',
         id,
@@ -1703,7 +1706,7 @@ export function selectVisibleEntries(
 export function canReconcileOutboxHistory(entry: OutboxEntry): boolean {
   const provider = entry.intent.provider;
   if (provider === 'codex') return Array.isArray(entry.fileNames) && entry.fileNames.length === 0;
-  return ['claude', 'qwen', 'hermes', 'kimi', 'deepseek', 'glm'].includes(provider ?? '')
+  return ['claude', 'deepseek', 'glm'].includes(provider ?? '')
     && entry.historyEligibility === 'text_only' && entry.imageNames.length === 0
     && Array.isArray(entry.fileNames) && entry.fileNames.length === 0;
 }

@@ -92,7 +92,6 @@ const WRITE_SUPPORTED_PROVIDERS: ReadonlySet<SkillsProvider> = new Set([
   'claude',
   'codex',
   'cursor',
-  'qwen',
 ]);
 
 // Install paths shown in the add-skill dialog.

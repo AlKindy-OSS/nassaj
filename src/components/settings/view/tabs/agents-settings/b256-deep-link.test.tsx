@@ -97,6 +97,12 @@ describe('B-256 AgentsSettingsTab initialAgent/initialCategory', () => {
     expect(screen.getByTestId('agent-selector').dataset.agent).toBe('glm');
   });
 
+  it('opens the active DeepSeek Harness on its account panel from a deep link', () => {
+    render(<AgentsSettingsTab {...baseProps} initialAgent="dsh" initialCategory="account" />);
+    expect(screen.getByTestId('agent-selector').dataset.agent).toBe('dsh');
+    expect(screen.getByTestId('category-tabs').dataset.category).toBe('account');
+  });
+
   it('pre-selects the given initialCategory', () => {
     render(<AgentsSettingsTab {...baseProps} initialAgent="deepseek" initialCategory="account" />);
     expect(screen.getByTestId('category-tabs').dataset.category).toBe('account');
@@ -107,13 +113,13 @@ describe('B-256 AgentsSettingsTab initialAgent/initialCategory', () => {
     render(
       <AgentsSettingsTab
         {...baseProps}
-        initialAgent="kimi"
+        initialAgent="glm"
         initialCategory="permissions"
         onDestinationChange={onDestinationChange}
       />,
     );
 
     await waitFor(() => expect(screen.getByTestId('category-tabs').dataset.category).toBe('account'));
-    expect(onDestinationChange).toHaveBeenCalledWith('kimi', 'account', { replace: true });
+    expect(onDestinationChange).toHaveBeenCalledWith('glm', 'account', { replace: true });
   });
 });

@@ -43,6 +43,12 @@ import { auditLogDb, participantsDb } from './modules/database/index.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { assertModelRunActor } from './services/isolation/credential-actor.js';
 import { assertLinkModeRunAllowed } from './services/isolation/link-mode-run-gate.js';
+import { CODEX_HOOK_TRUST_CODE, ensureCodexHomeHookTrust } from './services/isolation/codex-hook-trust.js';
+import { CODEX_LOCAL_HOME_CODE } from './services/isolation/codex-local-home.js';
+import {
+  codexLocalPathOrThrow, isModelMetadataNotice, resolveCodexLocalRunOrThrow,
+} from './services/isolation/codex-local-run.js';
+import { recordLocalEnginePinOrThrow } from './services/isolation/local-engine-pin-writer.js';
 import { isLinkModeRunRefusal } from './modules/providers/services/harness-link-mode.service.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
 import { refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
@@ -61,6 +67,7 @@ import {
   resolveCodexAgentCap,
   resolveCodexMultiAgentEngine,
 } from './modules/providers/list/codex/codex-multi-agent.js';
+import { composeCodexLaunchConfig } from './modules/providers/list/codex/codex-launch-config.js';
 import {
   codexHelpersOffUserNotice,
   codexTurnDeveloperInstructions,
@@ -521,6 +528,12 @@ export {
   transformCodexEvent,
 };
 
+/** ADR-227 / T-2107: typed local-engine refusals whose message the user must read intact. */
+const LOCAL_ENGINE_REFUSAL_CODES = new Set([
+  'ENGINE_PROVIDER_UNAVAILABLE', 'ENGINE_PIN_WRITE_FAILED', CODEX_LOCAL_HOME_CODE, 'ENGINE_PIN_CONFIG_DIR_FAILED',
+  CODEX_HOOK_TRUST_CODE,
+]);
+
 /**
  * Execute a Codex query with streaming
  * @param {string} command - The prompt to send
@@ -589,6 +602,8 @@ async function queryCodexOwned(invocation) {
   const abortController = new AbortController();
   let transferHandle, branchContext = null, coordinatorTokenBudget = null;
   let codex, thread, preparedInput, streamedTurn, streamIterator;
+  // ADR-227 / T-2107: the local-engine launch, or null for a cloud Codex chat.
+  let localRun = null;
   let transferEffectEntered = false, iteratorDone = false;
   let receiptWindow = null, reservedNewReceiptSession = null, receiptPayloadHash = null;
   // ADR-206 S2: the run tag of a helpers lease this turn still has to finish (B = 1 only).
@@ -921,15 +936,40 @@ async function queryCodexOwned(invocation) {
     // once per launch (by the gateway, or here for handle-less callers) and
     // executed by exact realpath — never the SDK-bundled copy, never PATH.
     let launchIdentity;
+    let spawnEnv;
     try {
+      // ADR-227 / T-2107: a local-pinned chat, or a new chat on a local model, runs
+      // on the member's own local server or is refused; a cloud chat never moves.
+      const localPath = codexLocalPathOrThrow({
+        sessionId: sessionId || null, requestedModel: resolvedModel ?? null,
+      });
       // B-1546: api_key link mode with no key → refused before any spawn, so the
       // run never falls back to the (possibly a grantor's) ChatGPT subscription.
-      await assertLinkModeRunAllowed(ws?.userId ?? null, 'codex');
+      // A local run carries no OpenAI credential at all, so the gate does not apply.
+      if (!localPath) await assertLinkModeRunAllowed(ws?.userId ?? null, 'codex');
       // An admitted launch runs only the identity its decision fingerprinted.
       launchIdentity = permissionExecution
         ? codexIdentityFromExecution(permissionExecution) : acquireCodexLaunchIdentity();
       // T-1872 part 2: a machine release Nassaj cannot speak to refuses here (cached verdict).
       await assertCodexRuntimeCompatible(launchIdentity);
+      localRun = localPath ? await resolveCodexLocalRunOrThrow({
+        userId: ws?.userId, storedEngine: localPath.storedEngine,
+        requestedModel: resolvedModel ?? null, cliVersion: launchIdentity.version,
+        codexBin: launchIdentity.executablePath, cwd: workingDirectory,
+        // T-2107 qa high 6: no explicit re-pick → a bare rollout id may be the pinned server's.
+        qualifyBareModel: Boolean(sessionId)
+          && !(await providerModelsService.getChangedActiveModel('codex', sessionId)).changed,
+      }) : null;
+      spawnEnv = localRun ? localRun.env : resolveProviderEnv(assertModelRunActor(ws?.userId), 'codex', process.env);
+      // B-1790: the CLI runs a hooks.json hook only when config.toml trusts it, so a
+      // cloud run trusts nassaj's own hooks (the B-95 service gate) in the member's
+      // CODEX_HOME first, or is refused. A local run's derived home carries its own.
+      if (!localRun) {
+        await ensureCodexHomeHookTrust({
+          codexBin: launchIdentity.executablePath, cwd: workingDirectory,
+          codexHome: spawnEnv.CODEX_HOME || path.join(spawnEnv.HOME || os.homedir(), '.codex'),
+        });
+      }
     } catch (identityError) {
       permissionExecution?.notStarted();
       throw identityError;
@@ -944,7 +984,7 @@ async function queryCodexOwned(invocation) {
       // Appended AFTER the isolation resolver so it can never displace a
       // per-user credential var.
       ...codexLaunchOptions({
-        ...resolveProviderEnv(assertModelRunActor(ws?.userId), 'codex', process.env),
+        ...spawnEnv,
         [PROCESS_TAG_ENV_VAR]: processRunTag,
       }, launchIdentity),
       // ADR-206 S1: `agents.max_depth = 10` (T-1601) rides every launch but binds v1 models
@@ -958,23 +998,19 @@ async function queryCodexOwned(invocation) {
       // ودرجةُ إنفاذ كودكس أُعلنت **نصّية** في الواصف — لا وعدَ بحدٍّ لا يُفرض.
       //
       // ADR-174: no product-derived path may widen the sandbox into governance.
-      config: {
-        // ADR-134 v1 denies MCP and external delegation as surfaces, not merely
-        // as UI choices. These parent-controlled overrides replace any entries
-        // in the user's config before the CLI starts.
-        // B-1616: no thread-cap key by default (owner decision 2026-10-13); both keys only
-        // under an operator NASSAJ_CODEX_AGENT_CAP override (see codex-multi-agent.ts).
-        // ADR-206 S1: a B = 0 turn pins root-only slots here, for this launch only.
-        ...multiAgentConfig,
-        mcp_servers: {},
-        // T-1315 slot; ADR-206 §2.2: when B = 0 the notice replaces the level directive.
-        developer_instructions: codexTurnDeveloperInstructions(
+      // B-1616: no thread-cap key by default (owner decision 2026-10-13); both keys only
+      // under an operator NASSAJ_CODEX_AGENT_CAP override (see codex-multi-agent.ts).
+      // ADR-206 S1: a B = 0 turn pins root-only slots here, for this launch only.
+      // T-1315 slot; ADR-206 §2.2: when B = 0 the notice replaces the level directive.
+      config: composeCodexLaunchConfig({
+        multiAgentConfig,
+        developerInstructions: codexTurnDeveloperInstructions(
           options?.coordinationLevel, helpersDecision, getRuntimeInstructions,
         ),
-        ...(sandboxMode === 'workspace-write' && docsWritableRoots.length > 0
-          ? { 'sandbox_workspace_write.writable_roots': docsWritableRoots }
-          : {}),
-      },
+        sandboxMode,
+        docsWritableRoots,
+        localConfig: localRun ? localRun.config : null,
+      }),
     });
 
     // Thread options with sandbox and approval settings. networkAccessEnabled is
@@ -990,7 +1026,7 @@ async function queryCodexOwned(invocation) {
       skipGitRepoCheck: true,
       sandboxMode,
       approvalPolicy,
-      model: resolvedModel,
+      model: localRun ? localRun.local.model : resolvedModel,
       webSearchEnabled: false,
       webSearchMode: 'disabled',
       ...(networkAccessEnabled === true ? { networkAccessEnabled: true } : {}),
@@ -1091,6 +1127,11 @@ async function queryCodexOwned(invocation) {
       const step = transferHandle ? await nextCodexHistoryEvent(streamIterator, abortController.signal) : await streamIterator.next();
       if (step.done) { iteratorDone = true; break; }
       const event = step.value;
+      // T-2107 qa high 7: a local model has no Codex catalog entry; the CLI's notice is logged.
+      if (localRun && isModelMetadataNotice(event)) {
+        console.info('[Codex] local model has no catalog metadata (expected)', { model: localRun.local.model });
+        continue;
+      }
       // ADR-206 §3.4: oom_score_adj 1000 on the codex exec at the first stream event (one
       // /proc pass); the breaker sampler covers it and every tagged descendant afterwards.
       if (!execChildProtectTried) {
@@ -1120,6 +1161,14 @@ async function queryCodexOwned(invocation) {
           capturedSessionId = discoveredSessionId;
           registerSession(capturedSessionId);
           recordParticipant(capturedSessionId);
+          // ADR-227 / T-2107: a local chat's pin must settle, or the run stops.
+          if (localRun) {
+            recordLocalEnginePinOrThrow({
+              newSessionId: capturedSessionId,
+              parentSessionId: isCrossHomeBranch ? sessionId : null,
+              pin: localRun.local.pin,
+            });
+          }
           // Capture the physical transcript before consuming any model item.
           // If the synchronizer has not indexed it yet, persistence remains
           // unavailable for this turn; a late baseline would skip evidence.
@@ -1402,8 +1451,9 @@ async function queryCodexOwned(invocation) {
       if (isCodexMachineCliMissing(error)) {
         errorCode = 'cli_not_installed';
         errorContent = CODEX_MACHINE_CLI_MISSING_MESSAGE;
-      } else if (isLinkModeRunRefusal(error?.code)) {
+      } else if (isLinkModeRunRefusal(error?.code) || LOCAL_ENGINE_REFUSAL_CODES.has(error?.code)) {
         // B-1546/B-1547: refused before spawn; the message names no credential.
+        // ADR-227 / T-2107: a local-engine refusal reads intact (no key, no address).
         errorCode = 'spawn_failed';
         errorContent = error.message;
       } else if (error?.code === CODEX_RUNTIME_INCOMPATIBLE) {

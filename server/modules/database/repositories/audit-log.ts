@@ -171,6 +171,17 @@ export type AuditAction =
   // a different field would again be discovered only by a user's dead session.
   // Metadata carries the engine id, block types and tool names — never content.
   | 'transcript_block_repaired'
+  // ADR-173 rev.3 P3: a shared writer's turn reached the conversation's one recorded
+  // transcript (same tree or through bridge links). Metadata: session id, link mode,
+  // links created now — never paths or content.
+  | 'shared_write_turn'
+  // ADR-173 rev.3 P5: a member other than the turn starter answered a tool prompt of
+  // the turn, or anyone answered an external-identity (mcp__*) prompt. Metadata:
+  // session id, request id, tool name, admitted/allow, deny-text sha256 — never the text.
+  | 'shared_turn_approval'
+  // ADR-173 rev.3 P5: a member other than the starter asked to stop a turn. Metadata:
+  // session id, starter id, role (privileged | stuck_writer), allowed, stuck.
+  | 'shared_turn_stop'
   // ADR-099/T-1237: the session owner re-stamped the engine mid-conversation.
   // This row is the ONLY durable proof that the export acknowledgement was given
   // before a vendor-pinned history was replayed to a different company — the

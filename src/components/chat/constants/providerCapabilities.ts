@@ -132,7 +132,6 @@ export interface ProviderUiCapabilities {
    * T-1028 / B-247: هل يدعم هذا المزوّد تبديل النموذج وسط المحادثة عبر
    * `POST /api/providers/<id>/sessions/<sid>/active-model`؟
    * false = يُخفى مبدّل النموذج المدمج في شريط الأدوات. القيم:
-   * - hermes: false — changeActiveModel يرمي 501 (hermes.provider.ts:58).
    * - antigravity: true — agy يقبل --model فعلاً (مقيس على 1.1.9)، ويحذفه عند
    *   الاستئناف العادي فقط كي لا يتسرّب اختيار محادثة أخرى؛ أما التبديل الصريح
    *   من هذا المبدّل فيُقرأ عبر getChangedActiveModel (agy-cli.js:513-540).
@@ -169,8 +168,6 @@ const PROGRESS_NONE: ProgressCapability = { plan: 'none', subagents: 'none' };
  * - opencode: plan live (each todowrite part settles at once); subagents
  *   `turn` — `run --format json` emits only settled parts, so a delegation
  *   appears when it finishes (Addendum B, Decisions 16–18).
- * - kimi: the native CLI is unreachable; Kimi as a model runs inside the
- *   opencode body and is covered there (Decision 19).
  * - the rest: none until their adapters are proven.
  */
 const PROGRESS_CAPABILITIES: Readonly<Record<string, ProgressCapability>> = Object.freeze({
@@ -178,8 +175,6 @@ const PROGRESS_CAPABILITIES: Readonly<Record<string, ProgressCapability>> = Obje
   codex: { plan: 'live', subagents: 'live' },
   antigravity: { plan: 'turn', subagents: 'turn' },
   opencode: { plan: 'live', subagents: 'turn' },
-  kimi: PROGRESS_NONE,
-  qwen: PROGRESS_NONE,
   cursor: PROGRESS_NONE,
   deepseek: PROGRESS_NONE,
   glm: PROGRESS_NONE,
@@ -476,4 +471,19 @@ export function isAgentModeAvailable(
     return true;
   }
   return env?.[`VITE_${flag}`] === 'true';
+}
+
+/**
+ * ADR-173 rev.3 decision 8 (v1): can a member continue a conversation another
+ * member started on this provider? Mirrors the server's refusal set
+ * (SHARED_WRITING_UNSUPPORTED_PROVIDERS); display only — the server decides.
+ * `unknown` = the server keeps today's path for it, so the UI says nothing.
+ */
+const SHARED_WRITING_CREATOR_ONLY: ReadonlySet<string> = new Set(['codex', 'antigravity', 'opencode', 'dsh']);
+
+export function getSharedWritingSupport(
+  provider: string | null | undefined,
+): 'supported' | 'creator_only' | 'unknown' {
+  if (provider === 'claude') return 'supported';
+  return provider && SHARED_WRITING_CREATOR_ONLY.has(provider) ? 'creator_only' : 'unknown';
 }

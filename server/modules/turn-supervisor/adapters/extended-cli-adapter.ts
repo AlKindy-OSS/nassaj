@@ -1,14 +1,13 @@
 import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
-import { collectOpenCodeTurnSecrets, providerSecretsService } from '@/modules/providers/index.js';
+import { collectOpenCodeTurnSecrets } from '@/modules/providers/index.js';
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveModelRunEnv } from '@/services/isolation/credential-gate.js';
 import { sanitizeVendorAgentEnv } from '@/services/isolation/sanitize-vendor-agent-env.js';
 import { isQwenPlanModel, redactLiteralSecrets } from '@/services/isolation/opencode-qwen-plan.js';
 import { spawnVendorRunOf } from '@/services/isolation/opencode-spawn-vendor.js';
-import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { resolveOpenCodeBinaryPath } from '@/shared/utils.js';
 
 import {
@@ -27,7 +26,7 @@ import {
   type TurnAdapterResult,
 } from './types.js';
 
-export type ExtendedCliProvider = Extract<CliTurnProvider, 'qwen' | 'opencode'>;
+export type ExtendedCliProvider = Extract<CliTurnProvider, 'opencode'>;
 
 const ROLE_SYSTEM = [
   'You are an internal capture-only role in the server Turn Supervisor.',
@@ -50,7 +49,6 @@ type AdapterOptions = Readonly<{
   resolveEnv?: (userId: string | number, model?: string) => NodeJS.ProcessEnv;
   executableProbe?: (binary: string) => Promise<boolean>;
   versionProbe?: (binary: string) => Promise<string>;
-  qwenCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv }) => Promise<boolean>;
   /** opencode cell: the run flags exist and the zero-tools/deny config resolves (not a version pin). */
   opencodeCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv; cwd: string }) => Promise<boolean>;
   createRoleHome?: () => Promise<EphemeralRoleHome>;
@@ -59,18 +57,11 @@ type AdapterOptions = Readonly<{
 }>;
 
 /**
- * Exact release pin for the disabled qwen cell. opencode is not pinned
- * (owner decision 2026-09-29): any release that runs and reports a version is
- * accepted, so the cell survives harness updates.
+ * opencode is not version-pinned (owner decision 2026-09-29): any release that
+ * runs and reports a version is accepted, so the cell survives harness updates.
  */
-const EXACT_VERSIONS: Readonly<Partial<Record<ExtendedCliProvider, string>>> = Object.freeze({
-  qwen: '0.21.12',
-});
-
-/** True when `version` was reported and satisfies this provider's pin, if any. */
-function versionAccepted(provider: ExtendedCliProvider, version: string): boolean {
-  const pin = EXACT_VERSIONS[provider];
-  return version !== '' && (pin === undefined || version === pin);
+function versionAccepted(version: string): boolean {
+  return version !== '';
 }
 
 async function executable(binary: string): Promise<boolean> {
@@ -96,18 +87,6 @@ async function defaultVersionProbe(binary: string): Promise<string> {
     if (result.code !== 0) return '';
     return `${result.stdout}\n${result.stderr}`.match(/\bv?(\d+\.\d+\.\d+)\b/u)?.[1] ?? '';
   } catch { return ''; }
-}
-
-async function defaultQwenCapabilityProbe(input: { binary: string; env: NodeJS.ProcessEnv }): Promise<boolean> {
-  try {
-    const result = await captureCommand(input.binary, ['--help'], input.env);
-    if (result.code !== 0) return false;
-    const help = `${result.stdout}\n${result.stderr}`;
-    return [
-      '--system-prompt', '--safe-mode', '--sandbox', '--approval-mode',
-      '--max-tool-calls', '--exclude-tools', '--disabled-slash-commands',
-    ].every((option) => help.includes(option));
-  } catch { return false; }
 }
 
 /** Flags the opencode cell passes to `opencode run` (see opencodeSpec). */
@@ -168,33 +147,7 @@ function hiddenSystem(request: { hiddenContext?: readonly string[]; system?: str
 
 function defaultResolvedEnv(userId: string | number, provider: ExtendedCliProvider, model?: string): NodeJS.ProcessEnv {
   // ADR-152 A1 §3.5: the credential gate admits the turn before the env exists.
-  const env = resolveModelRunEnv(userId, provider, process.env, 'agent', { model: model ?? null });
-  if (provider !== 'qwen') return env;
-  const profile = providerSecretsService.getQwenProfile(userId);
-  if (!profile) return env;
-  const codingPlan = profile.plan === 'coding_plan';
-  const china = profile.region === 'china';
-  return {
-    ...env,
-    [codingPlan ? 'BAILIAN_CODING_PLAN_API_KEY' : 'BAILIAN_TOKEN_PLAN_API_KEY']: profile.key,
-    OPENAI_BASE_URL: codingPlan
-      ? (china ? 'https://coding.dashscope.aliyuncs.com/v1' : 'https://coding-intl.dashscope.aliyuncs.com/v1')
-      : (china ? 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' : 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1'),
-  };
-}
-
-function qwenSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessEnv; model: string; prompt: string; system: string }): IsolatedCliProcessSpec {
-  return Object.freeze({
-    binary: input.binary, cwd: input.cwd, env: input.env,
-    args: Object.freeze([
-      '--prompt', input.prompt, '--system-prompt', input.system,
-      '--output-format', 'stream-json', '--safe-mode', '--sandbox',
-      '--approval-mode', 'plan', '--max-tool-calls', '0',
-      '--exclude-tools', 'agent,task,subagent,spawn_agent,shell,bash,write_file,edit_file,delete_file,mcp,web_fetch,web_search',
-      '--disabled-slash-commands', 'agents,agent,task,tools,mcp,extensions,hooks,skills',
-      '--model', input.model,
-    ]),
-  });
+  return resolveModelRunEnv(userId, provider, process.env, 'agent', { model: model ?? null });
 }
 
 /** The cell's sanitized env with its zero-tools, deny-all inline config. */
@@ -215,36 +168,21 @@ function opencodeSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessE
   });
 }
 
-function parseJsonLines(provider: 'qwen' | 'opencode', stdout: string): string {
+/** Final assistant text from `opencode run --format json` output lines. */
+function parseOutput(stdout: string): string {
   let text = '';
   for (const line of stdout.split(/\r?\n/u)) {
     if (!line.trim()) continue;
     let event: Record<string, unknown>;
     try { event = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
-    if (provider === 'qwen') {
-      const message = event.message as Record<string, unknown> | undefined;
-      const content = message?.content;
-      if (typeof event.result === 'string') text = event.result;
-      else if (typeof content === 'string' && (message?.role === 'assistant' || event.type === 'assistant')) text += content;
-    } else {
-      const part = (event.part ?? event) as Record<string, unknown>;
-      if (typeof part.text === 'string' && (part.type === 'text' || event.type === 'text')) text += part.text;
-      else if (typeof event.content === 'string' && event.type === 'assistant') text += event.content;
-    }
+    const part = (event.part ?? event) as Record<string, unknown>;
+    if (typeof part.text === 'string' && (part.type === 'text' || event.type === 'text')) text += part.text;
+    else if (typeof event.content === 'string' && event.type === 'assistant') text += event.content;
   }
   return text.trim();
 }
 
-function parseOutput(provider: ExtendedCliProvider, stdout: string): string {
-  return parseJsonLines(provider, stdout);
-}
-
-/** Registry-resolved binary; opencode goes through its (opt-in) digest-pin wrapper. Throws when unresolved. */
-function resolveExtendedCliBinary(provider: ExtendedCliProvider): string {
-  return provider === 'opencode' ? resolveOpenCodeBinaryPath() : resolveHarnessBinary(provider);
-}
-
-/** Strict, capture-only Qwen/OpenCode registrations. There is no legacy passthrough path. */
+/** Strict, capture-only OpenCode registration. There is no legacy passthrough path. */
 export function createExtendedCliAdapter(provider: ExtendedCliProvider, options: AdapterOptions = {}): TurnAdapterRegistration {
   const cwd = options.cwd ?? process.cwd();
   const flagEnv = options.env ?? process.env;
@@ -267,25 +205,20 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
       // T-1749/ADR-159: never probe (spawn) a binary that is being replaced.
       if (isSpawnBlockedForRunProvider(provider)) return false;
       try {
-        binary = options.binary ?? resolveExtendedCliBinary(provider);
+        // opencode goes through its (opt-in) digest-pin wrapper; throws when unresolved.
+        binary = options.binary ?? resolveOpenCodeBinaryPath();
       } catch {
         return false;
       }
-      if (!await executableProbe(binary) || !versionAccepted(provider, await versionProbe(binary))) return false;
+      if (!await executableProbe(binary) || !versionAccepted(await versionProbe(binary))) return false;
       let env: NodeJS.ProcessEnv;
       try {
         env = resolveEnv(userId);
       } catch {
         return false; // no linked credential (or no member): this cell cannot run for them
       }
-      if (provider === 'qwen') {
-        const capabilityProbe = options.qwenCapabilityProbe ?? defaultQwenCapabilityProbe;
-        if (!await capabilityProbe({ binary, env })) return false;
-      }
-      if (provider === 'opencode') {
-        const capabilityProbe = options.opencodeCapabilityProbe ?? defaultOpencodeCapabilityProbe;
-        if (!await capabilityProbe({ binary, env, cwd })) return false;
-      }
+      const capabilityProbe = options.opencodeCapabilityProbe ?? defaultOpencodeCapabilityProbe;
+      if (!await capabilityProbe({ binary, env, cwd })) return false;
       pinnedAndSafe = true;
       return true;
     },
@@ -311,12 +244,12 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
           binary, cwd, env: resolveEnv(request.userId, request.model), model: request.model,
           prompt: request.prompt, system: hiddenSystem(request),
         };
-        const spec = provider === 'qwen' ? qwenSpec(common) : opencodeSpec(common);
+        const spec = opencodeSpec(common);
         const result = await run({ ...spec, role, signal: request.signal });
         if (result.code !== 0) {
           throw new TurnAdapterError('remote_error', `${provider} CLI exited ${result.code}: ${redactedStderr(result.stderr, turnSecrets(request.userId))}`);
         }
-        const text = parseOutput(provider, result.stdout);
+        const text = parseOutput(result.stdout);
         if (!text) throw new TurnAdapterError('remote_error', `${provider} CLI returned no final assistant response`);
         await request.writer.capture({ type: 'text', text });
         await request.writer.capture({ type: 'complete' });
@@ -333,7 +266,6 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
 }
 
 export const extendedCliAdapterInternals = Object.freeze({
-  EXACT_VERSIONS, ROLE_SYSTEM, qwenSpec, opencodeSpec, parseOutput,
+  ROLE_SYSTEM, opencodeSpec, parseOutput,
   defaultVersionProbe, opencodeAgentIsToolless, OPENCODE_RUN_FLAGS,
-  defaultQwenCapabilityProbe,
 });

@@ -104,7 +104,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -141,6 +140,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "安全チェックが時間内に応答しなかったため、この操作はチェックされていません。",
+      "no_answer": "安全チェックが有効な応答を返さなかったため、この操作はチェックされていません。"
+    },
+    "hookFailed": "このステップのチェック中にフックが失敗しました。",
+    "hookDetails": "詳細を表示",
+    "sessionWritesLost": {
+      "ENOSPC": "サーバーのディスクがいっぱいのため、このセッションの一部が保存されませんでした。",
+      "EDQUOT": "サーバーのディスククォータを使い切ったため、このセッションの一部が保存されませんでした。",
+      "unknown": "このセッションの一部をディスクに保存できませんでした。",
+      "transcript": "後でこの会話を再開すると、一部が欠ける可能性があります。",
+      "globalConfig": "最近の Claude 設定の変更は保存されませんでした。"
+    },
+    "credentialExpiring": {
+      "soon": "Claude へのサインインは {{date}} に期限切れになります。中断せずに続けるには Claude アカウントを再連携してください。",
+      "expired": "Claude へのサインインは期限切れの可能性があります（{{date}}）。続けるには Claude アカウントを再連携してください。",
+      "action": "アカウント設定を開く"
     }
   },
   "systemMessage": {
@@ -370,7 +387,7 @@
     "removeFile": "ファイルを削除",
     "uploading": "アップロード中…",
     "errorType": "このファイル形式は許可されていません",
-    "errorSize": "ファイルが大きすぎます（最大50 MB）",
+    "errorSize": "ファイルが大きすぎます（最大{{maxMb}} MB）",
     "errorCount": "添付ファイルが多すぎます（最大{{max}}件）"
   },
   "effortMode": {
@@ -428,7 +445,6 @@
       "antigravity": "Antigravity (agy) を {{model}} で使用する準備ができました。下にメッセージを入力してください。",
       "opencode": "{{model}}でOpenCodeを使用する準備ができました。下にメッセージを入力してください。",
       "default": "上からコーディングエージェントを選択して開始してください",
-      "kimi": "{{model}}でKimiを使用する準備ができました。下にメッセージを入力してください。",
       "deepseek": "{{model}}でDeepSeekを使用する準備ができました。下にメッセージを入力してください。",
       "glm": "{{model}}でGLMを使用する準備ができました。下にメッセージを入力してください。",
       "claudeEngine": "準備完了: コーディングエージェント Claude が{{provider}}上で{{model}}を使用して実行中です。下にメッセージを入力してください。"
@@ -504,7 +520,8 @@
       "working": "作業中",
       "computing": "計算中",
       "reasoning": "推論中",
-      "waitingPermission": "許可待ち"
+      "waitingPermission": "許可待ち",
+      "runningChecks": "チェック実行中"
     },
     "state": {
       "live": "ライブ",

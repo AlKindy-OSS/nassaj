@@ -13,7 +13,6 @@
  *            current → releases/<v>                                         (dir)
  *   agy      ~/.local/bin/agy                                    (single file)
  *   opencode ~/.opencode/bin/opencode                            (single file)
- *   kimi     ~/.kimi-code/bin/kimi (official native install, ADR-189) (single file)
  */
 
 import fs from 'node:fs';
@@ -112,7 +111,7 @@ export function codexUpdateEnv(binaryPath: string): Record<string, string> {
   return { CODEX_HOME: s.codexHome, CODEX_INSTALL_DIR: s.installDir };
 }
 
-/** agy / opencode / kimi: one regular file replaced in place (copied, never linked). */
+/** agy / opencode: one regular file replaced in place (copied, never linked). */
 export function singleFileLayout(binaryPath: string): BinaryLayoutSpec {
   assertAbsolute(binaryPath);
   if (!lstatOrNull(binaryPath)?.isFile()) throw snapshotError('SNAPSHOT_LAYOUT_MISMATCH');

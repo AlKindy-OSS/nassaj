@@ -15,6 +15,7 @@ import {
   CODEX_RUNTIME_INCOMPATIBLE,
   CODEX_SDK_EXEC_FLAGS,
   CODEX_SDK_RESUME_FLAGS,
+  CODEX_SDK_UNUSED_EXEC_FLAGS,
   codexFlagProbeArgv,
   codexRuntimeCacheKey,
   codexRuntimeIncompatibleMessage,
@@ -89,12 +90,21 @@ test('the runtime flag list equals what the installed SDK source emits (cannot d
   const flagsIn = text => [...new Set([...text.matchAll(/"(--[a-z][a-z-]*)"/gu)].map(match => match[1]))];
   const resumeAt = body.indexOf('commandArgs.push("resume"');
   assert.ok(resumeAt > 0);
-  assert.deepEqual(new Set(flagsIn(body)), new Set(CODEX_SDK_EXEC_FLAGS));
+  assert.deepEqual(new Set(flagsIn(body)), new Set([...CODEX_SDK_EXEC_FLAGS, ...CODEX_SDK_UNUSED_EXEC_FLAGS]));
   assert.deepEqual(flagsIn(body.slice(resumeAt)), [...CODEX_SDK_RESUME_FLAGS]);
   const [start, resume] = codexFlagProbeArgv({ workspace: '/w', schemaFile: '/s' });
   for (const flag of CODEX_SDK_EXEC_FLAGS) assert.ok(start.args.includes(flag), `start probe carries ${flag}`);
+  // An unused flag is never probed: a machine CLI older than the flag must stay compatible.
+  for (const flag of CODEX_SDK_UNUSED_EXEC_FLAGS) assert.ok(!start.args.includes(flag), `start probe omits ${flag}`);
   const afterResume = resume.args.slice(resume.args.indexOf('resume'));
   for (const flag of CODEX_SDK_RESUME_FLAGS) assert.ok(afterResume.includes(flag), `resume probe carries ${flag}`);
+});
+
+test('Nassaj never sets the turn option behind an unused SDK flag (T-2115)', () => {
+  // SDK 0.169 emits --cyber-access-program only for turnOptions.cyberAccessProgram.
+  const launcher = fs.readFileSync(fileURLToPath(new URL('../openai-codex.js', import.meta.url)), 'utf8');
+  assert.deepEqual([...CODEX_SDK_UNUSED_EXEC_FLAGS], ['--cyber-access-program']);
+  assert.equal(launcher.includes('cyberAccessProgram'), false);
 });
 
 test('workspace-write reachability mirrors mapPermissionModeToCodexOptions', async () => {

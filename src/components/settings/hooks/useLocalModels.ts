@@ -14,7 +14,13 @@ export type LocalServerInput = {
   name: string; baseUrl: string; runtime: LocalRuntime; models: LocalModel[];
   apiKey?: string; removeApiKey?: boolean;
 };
-type Feature = { enabled: boolean; consentVersion: string | null; requiredConsentVersion: string; canManage: boolean };
+/** ADR-227 / T-2107, T-2108: the coding agents with their own local switch. */
+export const LOCAL_BODIES = ['claude', 'codex', 'dsh'] as const;
+export type LocalBody = (typeof LOCAL_BODIES)[number];
+type Feature = {
+  enabled: boolean; consentVersion: string | null; requiredConsentVersion: string; canManage: boolean;
+  bodies: Record<LocalBody, boolean>;
+};
 type Overview = { servers: LocalServer[]; total: number; limit: number; offset: number; feature: Feature };
 const ROOT = '/api/providers/local';
 
@@ -93,5 +99,7 @@ export function useLocalModels() {
       () => request('/settings', 'PUT',
         { enabled, consentVersion: overview?.feature.requiredConsentVersion }),
       'settingsSaved', 'settingsFailed'),
+    setBodyEnabled: (body: LocalBody, enabled: boolean) => act(
+      () => request('/settings/body', 'PUT', { body, enabled }), 'settingsSaved', 'settingsFailed'),
   };
 }

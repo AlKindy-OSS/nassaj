@@ -1,7 +1,7 @@
 /**
- * InlineModelSwitcher.local.test.tsx — T-2098 stage 3b (ADR-227 Decision 10):
- * the local blocks in the mid-chat switcher, their pin rules and the rule that no
- * surface prints the raw `local:…` pin.
+ * InlineModelSwitcher.local.test.tsx — T-2098 stage 3b / T-2107 stage 5 (ADR-227
+ * Decision 10, T-2108): the local blocks in the mid-chat switcher of the Claude,
+ * Codex and DeepSeek Harness bodies, their pin rules and the rule that no surface prints the raw `local:…` pin.
  *
  * Run: npx vitest run src/components/chat/view/subcomponents/InlineModelSwitcher.local.test.tsx
  */
@@ -18,7 +18,7 @@ vi.mock('react-i18next', async (importOriginal) => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, string>) => {
       const text = opts?.defaultValue ?? key;
-      return text.replace(/\{\{(\w+)\}\}/g, (_m, name: string) => opts?.[name] ?? '');
+      return text.replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(opts?.[name] ?? ''));
     },
     i18n: { language: 'en' },
   }),
@@ -41,35 +41,42 @@ const overlay: LocalOverlayServer[] = [
     providerId: A,
     label: 'Desk GPU',
     models: [
-      { value: `${A}/qwen3:8b`, label: 'qwen3:8b', contextWindow: 32768, eligibility: 'ok' },
-      { value: `${A}/mystery`, label: 'mystery', contextWindow: null, eligibility: 'context_unknown' },
+      { value: `${A}/qwen3:8b`, label: 'qwen3:8b', contextWindow: 32768, minContextWindow: 18096, eligibility: 'ok' },
+      { value: `${A}/mystery`, label: 'mystery', contextWindow: null, minContextWindow: 18096, eligibility: 'context_unknown' },
     ],
   },
   {
     serverId: 'srv-b',
     providerId: B,
     label: 'Laptop',
-    models: [{ value: `${B}/llama`, label: 'llama', contextWindow: 65536, eligibility: 'ok' }],
+    models: [{ value: `${B}/llama`, label: 'llama', contextWindow: 65536, minContextWindow: 18096, eligibility: 'ok' }],
   },
 ];
-vi.mock('../../hooks/useClaudeLocalOverlay', () => ({ useClaudeLocalOverlay: () => overlay }));
+/** Every (body, enabled) the switcher asked the overlay hook for. */
+const overlayReads: Array<[string, boolean]> = [];
+vi.mock('../../hooks/useLocalOverlay', () => ({
+  useLocalOverlay: (body: string, enabled: boolean) => {
+    overlayReads.push([body, enabled]);
+    return enabled ? overlay : null;
+  },
+}));
 
-// The claude × local cell is closed until T-2103; open it here to exercise the rows.
+// The matrix opens claude × local and codex × local; close them here to prove the gate.
 let cellOpen = true;
 vi.mock('../../../../../shared/bodyEngineMatrix', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../../shared/bodyEngineMatrix')>();
   return {
     ...actual,
-    actionableEngineCells: (body: string) => (
-      body === 'claude' && cellOpen
-        ? [...actual.actionableEngineCells(body), { engine: 'local', status: 'available', evidence: 'measured', note: '', noteDefault: '' }]
-        : actual.actionableEngineCells(body)
-    ),
+    actionableEngineCells: (body: string) => actual.actionableEngineCells(body)
+      .filter((cell) => cellOpen || cell.engine !== 'local'),
   };
 });
 
 const catalog: Record<string, ProviderModelsDefinition> = {
   claude: { OPTIONS: [{ value: 'claude-opus-5', label: 'Opus 5' }], DEFAULT: 'claude-opus-5' },
+  codex: { OPTIONS: [{ value: 'gpt-6-codex', label: 'GPT-6 Codex' }], DEFAULT: 'gpt-6-codex' },
+  dsh: { OPTIONS: [{ value: 'deepseek-v5', label: 'DeepSeek V5' }], DEFAULT: 'deepseek-v5' },
+  antigravity: { OPTIONS: [{ value: 'gemini-4', label: 'Gemini 4' }], DEFAULT: 'gemini-4' },
 };
 
 beforeEach(() => {
@@ -79,6 +86,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   cellOpen = true;
+  overlayReads.length = 0;
   cleanup();
 });
 
@@ -145,5 +153,74 @@ describe('existing chats', () => {
     open({ sessionId: 's1', currentModel: gone, engineProvider: 'local' });
     expect(screen.getByText('On Deleted local server')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/local:[^:\s]+:\d+:/);
+  });
+});
+
+describe('Codex body (T-2107)', () => {
+  const codex = (props: Partial<Parameters<typeof InlineModelSwitcher>[0]> = {}) => open({
+    provider: 'codex', currentModel: 'gpt-6-codex', ...props,
+  });
+
+  it('a new Codex chat lists "Local models · <server>" from the Codex overlay', async () => {
+    const onSelect = codex({ sessionId: null });
+    expect(overlayReads.some(([body, enabled]) => body === 'codex' && enabled)).toBe(true);
+    expect(overlayReads.some(([body, enabled]) => body === 'claude' && enabled)).toBe(false);
+    expect(screen.getByText('Local models · Desk GPU')).toBeTruthy();
+    fireEvent.click(option('qwen3:8b'));
+    await Promise.resolve();
+    // Codex has no engine axis: the local model id alone starts the local chat.
+    expect(onSelect).toHaveBeenCalledWith(`${A}/qwen3:8b`, null);
+  });
+
+  it('a cloud Codex chat cannot move to a local server', () => {
+    codex({ sessionId: 's1' });
+    expect((option('qwen3:8b') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText('Start a new chat').length).toBe(3);
+    expect((option('GPT-6 Codex') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a local Codex chat offers only its own server and no cloud row', () => {
+    codex({ sessionId: 's1', currentModel: `${A}/qwen3:8b` });
+    expect(screen.queryByRole('option', { name: /GPT-6 Codex/ })).toBeNull();
+    expect((option('qwen3:8b') as HTMLButtonElement).disabled).toBe(false);
+    expect((option('llama') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('reads nothing and shows no block while codex × local is closed', () => {
+    cellOpen = false;
+    codex({ sessionId: null });
+    expect(overlayReads.every(([, enabled]) => !enabled)).toBe(true);
+    expect(screen.queryByText(/Local models ·/)).toBeNull();
+  });
+
+  it('never reads an overlay for a body without local servers (Antigravity)', () => {
+    open({ provider: 'antigravity', currentModel: 'gemini-4', sessionId: null });
+    expect(overlayReads.every(([, enabled]) => !enabled)).toBe(true);
+    expect(screen.queryByText(/Local models ·/)).toBeNull();
+  });
+});
+
+describe('DeepSeek Harness body (T-2108)', () => {
+  const dsh = (props: Partial<Parameters<typeof InlineModelSwitcher>[0]> = {}) => open({
+    provider: 'dsh', currentModel: 'deepseek-v5', ...props,
+  });
+
+  it('a new DSH chat lists "Local models · <server>" and starts it by the local id alone', async () => {
+    const onSelect = dsh({ sessionId: null });
+    expect(overlayReads.some(([body, enabled]) => body === 'dsh' && enabled)).toBe(true);
+    expect(screen.getByText('Local models · Desk GPU')).toBeTruthy();
+    fireEvent.click(option('qwen3:8b'));
+    await Promise.resolve();
+    expect(onSelect).toHaveBeenCalledWith(`${A}/qwen3:8b`, null);
+  });
+
+  it('a cloud DSH chat cannot move to a local server, and a local one not to the cloud', () => {
+    dsh({ sessionId: 's1' });
+    expect((option('qwen3:8b') as HTMLButtonElement).disabled).toBe(true);
+    expect((option('DeepSeek V5') as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+    dsh({ sessionId: 's1', currentModel: `${A}/qwen3:8b` });
+    expect(screen.queryByRole('option', { name: /DeepSeek V5/ })).toBeNull();
+    expect((option('llama') as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -32,15 +32,22 @@ export type SpawnContext = {
    * synchronizer) pass 'provenance' — see ADR-104.
    */
   attribution?: ParticipantAttribution;
+  /**
+   * ADR-173 (H2): the sender writes into a conversation another member created.
+   * Recorded as participant/'shared_write'; overrides `attribution`.
+   */
+  sharedWriter?: boolean;
 };
 
 /**
  * Where a participant row came from (ADR-104). `'spawn'` = an authenticated
  * human started a run through this server, so the row carries their consent.
  * `'provenance'` = the server inferred the row from data provenance and it
- * grants nothing. See the schema comment on session_participants.
+ * grants nothing. `'shared_write'` (ADR-173) = a member wrote into another
+ * member's conversation: counted for display and cost, lowest privilege, never
+ * spawn consent. See the schema comment on session_participants.
  */
-export type ParticipantAttribution = 'spawn' | 'provenance';
+export type ParticipantAttribution = 'spawn' | 'provenance' | 'shared_write';
 
 /**
  * Resolves the only authority-eligible owner for a session.
@@ -79,13 +86,20 @@ export function listParticipantUserIdsStrict(sessionId: string): number[] {
  * add a second 'owner'.
  *
  * Scoped to OTHER users: a returning spawner's own row is handled by the upsert.
+ * ADR-173 (CRIT-1): a sender already recorded as a shared writer never demotes it.
+ *
+ * Bind order: sessionId, userId, sessionId, userId.
  */
 const DEMOTE_INFERRED_OWNER_SQL = `UPDATE session_participants
    SET role = 'participant'
    WHERE session_id = ?
      AND user_id <> ?
      AND role = 'owner'
-     AND attribution = 'provenance'`;
+     AND attribution = 'provenance'
+     AND NOT EXISTS (
+       SELECT 1 FROM session_participants
+       WHERE session_id = ? AND user_id = ? AND attribution = 'shared_write'
+     )`;
 
 /**
  * Bind order: sessionId, userId, attribution, sessionId, attribution, sessionId,
@@ -105,7 +119,9 @@ const DEMOTE_INFERRED_OWNER_SQL = `UPDATE session_participants
  *
  * On conflict the counters move and attribution RATCHETS one way: provenance can
  * be promoted to spawn (the human showed up after all), never the reverse — a
- * background rescan must not be able to revoke consent already granted.
+ * background rescan must not be able to revoke consent already granted. A
+ * 'shared_write' row (ADR-173, CRIT-1) is never upgraded: consent is never earned
+ * by writing in another member's conversation.
  */
 const RECORD_SPAWN_SQL = `INSERT INTO session_participants (session_id, user_id, role, message_count, attribution)
    VALUES (
@@ -128,7 +144,18 @@ const RECORD_SPAWN_SQL = `INSERT INTO session_participants (session_id, user_id,
    ON CONFLICT(session_id, user_id) DO UPDATE SET
      last_seen = CURRENT_TIMESTAMP,
      message_count = message_count + 1,
-     attribution = CASE WHEN ? = 'spawn' THEN 'spawn' ELSE attribution END`;
+     attribution = CASE WHEN ? = 'spawn' AND attribution <> 'shared_write' THEN 'spawn' ELSE attribution END`;
+
+/**
+ * ADR-173 (H2): a shared writer's row is always 'participant'/'shared_write'. No
+ * demote, no ownership, ever. On conflict only the counters move: the existing
+ * attribution is kept, so a spawn row is never downgraded and nothing is raised.
+ */
+const RECORD_SHARED_WRITE_SQL = `INSERT INTO session_participants (session_id, user_id, role, message_count, attribution)
+   VALUES (?, ?, 'participant', 1, 'shared_write')
+   ON CONFLICT(session_id, user_id) DO UPDATE SET
+     last_seen = CURRENT_TIMESTAMP,
+     message_count = message_count + 1`;
 
 export type SessionParticipantRow = {
   userId: number;
@@ -209,19 +236,26 @@ export const participantsDb = {
    * human who actually started the conversation ends up owning it even when a
    * background scan named it first (B-477). Both statements run in one
    * transaction: a demote that landed without its insert would leave the session
-   * ownerless.
+   * ownerless. A `sharedWriter` context (ADR-173) skips all of that: see
+   * RECORD_SHARED_WRITE_SQL.
    */
   recordSpawn(sessionId: string, userId: number, context?: SpawnContext): void {
     if (!sessionId || !Number.isInteger(userId)) {
       return;
     }
 
-    const attribution: ParticipantAttribution = context?.attribution ?? 'spawn';
+    const attribution: ParticipantAttribution = context?.sharedWriter === true
+      ? 'shared_write'
+      : context?.attribution ?? 'spawn';
 
     const write = (db: ReturnType<typeof getConnection>): void => {
       db.transaction(() => {
+        if (attribution === 'shared_write') {
+          db.prepare(RECORD_SHARED_WRITE_SQL).run(sessionId, userId);
+          return;
+        }
         if (attribution === 'spawn') {
-          db.prepare(DEMOTE_INFERRED_OWNER_SQL).run(sessionId, userId);
+          db.prepare(DEMOTE_INFERRED_OWNER_SQL).run(sessionId, userId, sessionId, userId);
         }
         db.prepare(RECORD_SPAWN_SQL).run(
           sessionId,

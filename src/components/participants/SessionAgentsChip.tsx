@@ -23,8 +23,6 @@ const HARNESS_DISPLAY_NAME: Readonly<Record<string, string>> = Object.freeze({
   opencode: 'OpenCode',
   cursor: 'Cursor',
   antigravity: 'Antigravity',
-  kimi: 'Kimi CLI',
-  hermes: 'Hermes',
 });
 
 type SessionAgentsChipProps = {

@@ -66,6 +66,10 @@ test('inventory: every production reader of the engine column is classified', ()
     'server/modules/providers/services/engine-restamp-model-store.service.ts': 'internal',
     // T-2087 context guard: compares against the official engines only; a local pin is "not official".
     'server/modules/context-guard/index.ts': 'internal',
+    // T-2107: the App Server and Codex fork refuse a local-pinned chat (localEngineSpawnRefusal);
+    // the raw pin is only compared, and neither the refusal text nor the row leaves the server.
+    'server/services/codex-app-server.js': 'internal',
+    'server/modules/providers/services/session-fork.service.ts': 'internal',
     'server/modules/providers/services/participants.service.ts': 'dto',
   };
   const files = fs.globSync('server/**/*.{ts,js}', { cwd: ROOT })

@@ -9,8 +9,8 @@ cloned from records already in those files.
 
 | File | Provider | Record shape | Where the test lays it |
 |---|---|---|---|
-| `qwen.jsonl` | Qwen | CLI turn writer (`appendVendorTranscriptTurn`): `meta`, then `message` events with `id`, `timestamp`, `eventId`, a receipt on the user turn, and one duplicated event id (the reader de-duplicates it) | `~/.nassaj-vendor-sessions/qwen/<project hash>/<session>.jsonl` |
-| `hermes.jsonl` | Hermes | Same writer, rows without timestamps or ids (the reader falls back to parse-time values) and a repeated identical prompt | `~/.nassaj-vendor-sessions/hermes/<project hash>/<session>.jsonl` |
+| `qwen.jsonl` | Qwen | CLI turn writer (`appendVendorTranscriptTurn`): `meta`, then `message` events with `id`, `timestamp`, `eventId`, a receipt on the user turn, and one duplicated event id (the reader de-duplicates it) | `~/.nassaj-vendor-sessions/qwen/<project hash>/<session>.jsonl` (hidden, ADR-229) and again under `glm/` so the shape stays covered |
+| `hermes.jsonl` | Hermes | Same writer, rows without timestamps or ids (the reader falls back to parse-time values) and a repeated identical prompt | `~/.nassaj-vendor-sessions/hermes/<project hash>/<session>.jsonl` (hidden, ADR-229) and again under `deepseek/` so the shape stays covered |
 | `glm.jsonl`, `deepseek.jsonl` | GLM, DeepSeek | Hosted runtime (`vendor-runtime.js`): the user turn, then the raw Anthropic-compatible SSE events of the reply (thinking delta, tool_use block, text deltas, stop) and a tool_result turn | `~/.nassaj-vendor-sessions/<provider>/<project hash>/<session>.jsonl` |
 | `cursor.json` | Cursor | The JSON message blobs of `store.db` (system, user with `<user_info>` and `<user_query>`, assistant reasoning and tool-call, tool result, assistant text), in insertion order | the test writes them into a `blobs` table in `~/.cursor/chats/<md5(project)>/<session>/store.db` |
 

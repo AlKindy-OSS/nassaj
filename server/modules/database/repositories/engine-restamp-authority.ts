@@ -102,6 +102,33 @@ function assertPrincipal(db: Database.Database, actor: EngineRestampIntent['acto
   }
 }
 
+/** The session's sole owner row when it carries spawn consent, else null (fails closed on duplicates). */
+function readStrictSpawnOwner(db: Database.Database, sessionId: string): number | null {
+  const owner = db.prepare(`SELECT MIN(user_id) AS userId, MIN(attribution) AS attribution
+    FROM session_participants WHERE session_id = ? AND role = 'owner' HAVING COUNT(*) = 1`)
+    .get(sessionId) as { userId: number; attribution: string } | undefined;
+  return owner && owner.attribution === 'spawn' ? owner.userId : null;
+}
+
+/**
+ * ADR-173 R2: the same mandate as canRestampSession — the strict spawn owner, or (for a
+ * project session) the project owner (creator or 'owner' member). A participant row alone,
+ * spawn or shared_write, is never enough; write access is the project fence rechecked above.
+ */
+function assertRestampMandate(db: Database.Database, intent: EngineRestampIntent): void {
+  const actorId = intent.actor.userId;
+  if (readStrictSpawnOwner(db, intent.sessionId) === actorId) return;
+  if (intent.projectBinding.kind === 'project') {
+    const projectOwner = db.prepare(`SELECT 1 FROM projects WHERE project_id = @projectId
+        AND created_by = @actorId
+      UNION ALL SELECT 1 FROM project_members WHERE project_id = @projectId
+        AND user_id = @actorId AND role = 'owner' LIMIT 1`)
+      .get({ projectId: intent.projectBinding.projectId, actorId });
+    if (projectOwner) return;
+  }
+  fail('ENGINE_RESTAMP_PARTICIPANT_STALE');
+}
+
 /** Revalidates every captured principal, session and project dimension on the caller's transaction. */
 export function assertEngineRestampAuthorityOnConnection(
   db: Database.Database,
@@ -124,11 +151,7 @@ export function assertEngineRestampAuthorityOnConnection(
   if (session.engine !== intent.fromPin.engine || session.source !== intent.fromPin.source) {
     fail('ENGINE_RESTAMP_SESSION_PIN_STALE');
   }
-  const currentSession = session;
-  const participant = db.prepare(`SELECT 1 FROM session_participants
-    WHERE session_id = ? AND user_id = ? AND attribution = 'spawn' LIMIT 1`).get(
-    intent.sessionId, intent.actor.userId);
-  if (!participant) fail('ENGINE_RESTAMP_PARTICIPANT_STALE');
+  assertRestampMandate(db, intent);
   if (intent.projectBinding.kind === 'project') {
     if (intent.projectBinding.participantUserId !== intent.actor.userId
         || capture.workspaceFence.kind !== 'project'
@@ -137,17 +160,13 @@ export function assertEngineRestampAuthorityOnConnection(
     }
     const project = db.prepare(`SELECT 1 FROM projects
       WHERE project_id = ? AND project_path = ? AND isArchived = 0`).get(
-      intent.projectBinding.projectId, currentSession.projectPath);
-    const controller = db.prepare(`SELECT MIN(user_id) AS userId,
-      MIN(attribution) AS attribution FROM session_participants
-      WHERE session_id = ? AND role = 'owner' HAVING COUNT(*) = 1`).get(intent.sessionId) as
-      { userId: number; attribution: string } | undefined;
-    if (!project || controller?.userId !== intent.projectBinding.controllerUserId
-        || controller.attribution !== 'spawn') {
+      intent.projectBinding.projectId, session.projectPath);
+    const controller = readStrictSpawnOwner(db, intent.sessionId);
+    if (!project || controller === null || controller !== intent.projectBinding.controllerUserId) {
       fail('ENGINE_RESTAMP_PROJECT_BINDING_STALE');
     }
   } else if (capture.workspaceFence.kind !== 'projectless'
-      || currentSession.projectPath !== intent.projectBinding.workspaceId
+      || session.projectPath !== intent.projectBinding.workspaceId
       || capture.workspaceFence.resolvedPath !== intent.projectBinding.workspaceId
       || capture.workspaceFence.sessionId !== intent.sessionId
       || capture.workspaceFence.consent !== 'control') {

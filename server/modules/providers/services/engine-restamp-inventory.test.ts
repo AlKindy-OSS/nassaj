@@ -16,7 +16,6 @@ const EXPECTED = new Set([
   'server/modules/providers/list/claude/claude-models.provider.ts',
   'server/modules/providers/list/codex/codex-models.provider.ts',
   'server/modules/providers/list/opencode/opencode-models.provider.ts',
-  'server/modules/providers/list/qwen/qwen.provider.ts',
   // ADR-227 (T-2098): read-only getSessionEnginePin, so a local-pinned conversation
   // is refused at spawn sites that cannot run a local engine; they never write a pin.
   'server/modules/turn-supervisor/hosted-turn-supervisor.service.ts',
@@ -25,6 +24,14 @@ const EXPECTED = new Set([
   // T-2087 context guard: read-only (getChangedActiveModel / getSessionEnginePin).
   'server/modules/context-guard/index.ts',
   'server/modules/context-guard/claude-compaction-model.ts',
+  // ADR-227 local engines (T-2103, T-2107, T-2108), recorded late here: read-only
+  // getSessionEnginePin in the cost book and the Codex terminal refusal, a read-only
+  // getChangedActiveModel in the Codex local run, and the strict local-pin writer that
+  // goes through the single sessionsDb.setSessionEnginePin writer (ADR-088).
+  'server/modules/providers/services/cost/local-engine-usage.ts',
+  'server/modules/websocket/services/shell-websocket.service.ts',
+  'server/openai-codex.js',
+  'server/services/isolation/local-engine-pin-writer.js',
 ]);
 const APP_CONFIG_WRITERS = new Set([
   'server/modules/database/migrations.ts',

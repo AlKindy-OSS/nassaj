@@ -1,7 +1,7 @@
 /**
  * sanitize-vendor-agent-env — SL-3 (ADR-062 §3), the LOAD-BEARING compliance
- * defense line for the governed vendor-CLI providers (Kimi native + GLM via the
- * OpenCode carrier).
+ * defense line for the governed vendor-CLI providers (GLM and the other vendors
+ * carried by OpenCode; the Kimi native body it also guarded was removed, ADR-229).
  *
  * WHY THIS EXISTS (the corrected compliance model — §2 of the plan):
  *
@@ -55,11 +55,11 @@
  *     these ARE the explicit private key that resolveProviderEnv injects for the
  *     target provider (first conjunct of the compliance model). Stripping them
  *     would break the very provider we are launching. Cross-vendor sibling keys
- *     (e.g. a GLM key leaking into a Kimi turn) are handled by the single
+ *     (e.g. a GLM key leaking into a DeepSeek turn) are handled by the single
  *     launcher passing `options.extraDeny` for the non-target vendors.
  *
  * No project imports: this is a pure primitive shared by every governed launcher
- * seam (KM-1 kimi, GL-4 opencode carrier) and by their static isolation tests.
+ * seam (GL-4 opencode carrier) and by its static isolation tests.
  *
  * @typedef {Record<string, string | undefined>} EnvLike
  */
@@ -83,11 +83,11 @@
  * the same value also leaves the machine.
  *
  * These names are secrets of the HOST APPLICATION. No provider CLI (claude,
- * codex, agy, cursor, opencode, hermes, kimi, deepseek, glm) reads any
+ * codex, agy, cursor, opencode, deepseek, glm) reads any
  * of them — they are stripped for EVERY provider, in every mode, at the single
  * `resolveProviderEnv` choke point. Everything a CLI actually needs (PATH, HOME,
  * USER, LOGNAME, SHELL, LANG, TERM, TMPDIR, XDG_*, NODE_*, npm_*, and the
- * isolation knobs CLAUDE_CONFIG_DIR / CODEX_HOME / KIMI_CODE_HOME / the vendor
+ * isolation knobs CLAUDE_CONFIG_DIR / CODEX_HOME / the vendor
  * KEY vars) is deliberately NOT listed here.
  *
  * @type {ReadonlyArray<string>}
@@ -153,8 +153,8 @@ export const NASSAJ_HOST_SECRET_EXACT_DENY = Object.freeze([
 
 /**
  * Host-secret PREFIXES (case-insensitive), T-1906: Alibaba credential
- * namespaces. The qwen launchers set their own BAILIAN_* variable after
- * resolveProviderEnv; an inherited one must reach no run at all.
+ * namespaces. No launcher sets a BAILIAN_* variable any more (the Qwen Code body
+ * was removed, ADR-229); an inherited one must reach no run at all.
  * @type {ReadonlyArray<string>}
  */
 export const NASSAJ_HOST_SECRET_PREFIX_DENY = Object.freeze([

@@ -1,5 +1,5 @@
 /**
- * StoragePolicySection — عمر المحادثة وحدود صورها، في مكان واحد.
+ * StoragePolicySection — عمر المحادثة وحدود صورها وملفاتها المرفقة، في مكان واحد.
  *
  * لماذا الثلاثة معاً: في ذهن المالك سؤالٌ واحد — «كم أحتفظ، وبأي حجم؟». وفصلُ
  * عمر المحادثة عن حدود صورها يجعل نصف الجواب في شاشة ونصفه في أخرى.
@@ -18,7 +18,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, HardDrive, Loader2, Trash2 } from 'lucide-react';
 
-import { api, authenticatedFetch } from '../../../../utils/api';
+import { api } from '../../../../utils/api';
+import {
+  ATTACHMENT_MAX_MB_LIMIT,
+  DEFAULT_ATTACHMENT_MAX_MB,
+  fetchStoragePolicy,
+  publishStoragePolicy,
+  saveStoragePolicy,
+  type StoragePolicy,
+} from '../../../../utils/storagePolicy';
 import { SESSION_BUCKET_KEYS } from '../../../../../shared/sessionBuckets';
 import type { Project, ProjectSession } from '../../../../types/app';
 import { cn } from '../../../../lib/utils';
@@ -30,15 +38,6 @@ import SettingsSection from '../SettingsSection';
 import StatusBadge from '../StatusBadge';
 import { confirmDialog } from '../../../../shared/dialogs/dialogService';
 
-type StoragePolicy = {
-  retentionDays: number;
-  retentionDaysIsDefault: boolean;
-  imageMaxMb: number;
-  imageMaxMbIsDefault: boolean;
-  imageMaxCount: number;
-  imageMaxCountIsDefault: boolean;
-};
-
 /**
  * نفس صنف المنسدلات في تبويب المظهر (`UiFontPicker`, `AppearanceSettingsTab`)
  * — سطحُ تحكّمٍ واحد عبر الإعدادات كلّها لا ثلاثة أشكال لثلاث شاشات.
@@ -49,8 +48,64 @@ const SELECT_CLASS =
 /** مدى مدّة الاحتفاظ بالأيام؛ يطابق تقييد الخادم في `/api/system/storage-policy`. */
 const RETENTION_MIN_DAYS = 7;
 const RETENTION_MAX_DAYS = 365;
-const IMAGE_MB_CHOICES = [2, 5, 10, 25];
-const IMAGE_COUNT_CHOICES = [5, 15, 30, 50];
+/** حدود الصور؛ تطابق `STORAGE_POLICY_BOUNDS` في `server/routes/system.js` حرفياً. */
+const IMAGE_MB_BOUNDS = { min: 1, max: 25 };
+const IMAGE_COUNT_BOUNDS = { min: 1, max: 50 };
+/** حجم الملف المرفق الواحد؛ يطابق `STORAGE_POLICY_BOUNDS.attachmentMaxMb` في الخادم. */
+const ATTACHMENT_MB_BOUNDS = { min: 1, max: ATTACHMENT_MAX_MB_LIMIT };
+
+type BoundedNumberInputProps = {
+  value: number;
+  min: number;
+  max: number;
+  label: string;
+  unit: string;
+  disabled: boolean;
+  onCommit: (next: number) => void;
+};
+
+/**
+ * حقل عدد صحيح بمسودّة محلية: يُحفظ عند المغادرة أو Enter فقط إن كان صحيحاً
+ * داخل المدى، وإلا تعود المسودّة للقيمة المحفوظة ولا يُرسل شيء للخادم.
+ */
+function BoundedNumberInput({ value, min, max, label, unit, disabled, onCommit }: BoundedNumberInputProps) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const parsed = Number(draft);
+    const valid = draft.trim() !== '' && Number.isInteger(parsed) && parsed >= min && parsed <= max;
+    if (!valid) {
+      setDraft(String(value));
+      return;
+    }
+    if (parsed !== value) onCommit(parsed);
+  };
+
+  return (
+    <div className="flex items-center gap-2 sm:w-56">
+      <input
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+        }}
+        aria-label={label}
+        disabled={disabled}
+        className={cn(SELECT_CLASS, 'min-w-0 flex-1')}
+      />
+      <span className="shrink-0 text-sm text-muted-foreground" aria-hidden="true">
+        {unit}
+      </span>
+    </div>
+  );
+}
 
 /**
  * ينفّذ الاحتفاظ الآن عبر المسارين الحيّين القائمين: قائمة جلسات كل مشروع ثم
@@ -114,9 +169,8 @@ export default function StoragePolicySection() {
 
   const load = useCallback(async () => {
     try {
-      const res = await authenticatedFetch('/api/system/storage-policy');
-      if (!res.ok) throw new Error(String(res.status));
-      const next = (await res.json()) as StoragePolicy;
+      const next = await fetchStoragePolicy();
+      publishStoragePolicy(next);
       setPolicy(next);
       setRetentionDraft(String(next.retentionDays));
       setError(null);
@@ -134,13 +188,7 @@ export default function StoragePolicySection() {
   const save = async (patch: Partial<Record<keyof StoragePolicy, number>>) => {
     setSaving(true);
     try {
-      const res = await authenticatedFetch('/api/system/storage-policy', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const next = (await res.json()) as StoragePolicy;
+      const next = await saveStoragePolicy(patch);
       setPolicy(next);
       setRetentionDraft(String(next.retentionDays));
       setError(null);
@@ -276,38 +324,42 @@ export default function StoragePolicySection() {
             <SettingsRow
               label={t('storagePolicy.imageMbLabel')}
             >
-              <select
+              <BoundedNumberInput
                 value={policy?.imageMaxMb ?? 5}
-                onChange={(event) => void save({ imageMaxMb: Number(event.target.value) })}
-                aria-label={t('storagePolicy.imageMbLabel')}
+                {...IMAGE_MB_BOUNDS}
+                label={t('storagePolicy.imageMbLabel')}
+                unit={t('storagePolicy.imageMbUnit')}
                 disabled={saving}
-                className={cn(SELECT_CLASS, 'sm:w-56')}
-              >
-                {IMAGE_MB_CHOICES.map((option) => (
-                  <option key={option} value={option}>
-                    {`${option}MB`}
-                  </option>
-                ))}
-              </select>
+                onCommit={(imageMaxMb) => void save({ imageMaxMb })}
+              />
             </SettingsRow>
 
             <SettingsRow
               label={t('storagePolicy.imageCountLabel')}
               description={t('storagePolicy.imageCountHint')}
             >
-              <select
+              <BoundedNumberInput
                 value={policy?.imageMaxCount ?? 15}
-                onChange={(event) => void save({ imageMaxCount: Number(event.target.value) })}
-                aria-label={t('storagePolicy.imageCountLabel')}
+                {...IMAGE_COUNT_BOUNDS}
+                label={t('storagePolicy.imageCountLabel')}
+                unit={t('storagePolicy.imageCountUnit')}
                 disabled={saving}
-                className={cn(SELECT_CLASS, 'sm:w-56')}
-              >
-                {IMAGE_COUNT_CHOICES.map((option) => (
-                  <option key={option} value={option}>
-                    {t('storagePolicy.imagesCount', { count: option })}
-                  </option>
-                ))}
-              </select>
+                onCommit={(imageMaxCount) => void save({ imageMaxCount })}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label={t('storagePolicy.attachmentMbLabel')}
+              description={t('storagePolicy.attachmentMbHint')}
+            >
+              <BoundedNumberInput
+                value={policy?.attachmentMaxMb ?? DEFAULT_ATTACHMENT_MAX_MB}
+                {...ATTACHMENT_MB_BOUNDS}
+                label={t('storagePolicy.attachmentMbLabel')}
+                unit={t('storagePolicy.attachmentMbUnit')}
+                disabled={saving}
+                onCommit={(attachmentMaxMb) => void save({ attachmentMaxMb })}
+              />
             </SettingsRow>
           </SettingsGroup>
         </div>

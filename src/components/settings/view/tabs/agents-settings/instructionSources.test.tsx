@@ -6,7 +6,6 @@
  *    لا تفصيل تجميلي — §1.2/§6-3)؛
  *  - «محكوم» لا تُقال لقناة تحقُّقُها حضورٌ فقط: كلود تُعرَض «حاضر بلا تحقّق
  *    هوية» (§2.3-2)؛
- *  - kimi تُعلن آليتها وفرضها الحاجب بعد تصحيح §2.3-1؛
  *  - لكل سبب من الأسباب جملةٌ خاصّة به — «غير محكوم» وحدها لا تُترك للمالك؛
  *  - محرّك بلا آلية يُقال عنه ذلك صراحةً بلا صفوف فارغة (§2.4)؛
  *  - خادمٌ أقدم من T-1195 (لا `sources`) ⇒ لا يُرسم اللوح: غيابُ الجواب إخفاءٌ
@@ -192,28 +191,6 @@ describe('ADR-093 §2.3-2 — claude is present-but-unverified, never plain "gov
   });
 });
 
-describe('ADR-093 §2.3-1 — kimi declares its fail-closed channel', () => {
-  it('shows the KIMI_CODE_HOME copy, its fingerprint check and the blocking enforcement', async () => {
-    responder = () => ({
-      ok: true,
-      body: envelope('kimi', { status: 'governed', enforced: true, mechanism: 'kimi-agents' }, [
-        codexChannel({
-          id: 'kimi-home',
-          mechanism: 'kimi-agents',
-          path: '/workspace/users/3/.kimi/AGENTS.md',
-        }),
-      ]),
-    });
-    render(<InstructionSourcesContent agent="kimi" />);
-
-    expect(await screen.findByText('/workspace/users/3/.kimi/AGENTS.md')).toBeTruthy();
-    expect(screen.getByText(lookup('agents.instructionSources.mechanism.kimi-agents')!)).toBeTruthy();
-    expect(
-      screen.getByText(lookup('agents.instructionSources.enforcement.fail-closed')!),
-    ).toBeTruthy();
-  });
-});
-
 describe('ADR-093 §2.2 — every reason gets its own sentence, none is left as "ungoverned"', () => {
   const REASONS = [
     'source_absent',
@@ -246,7 +223,7 @@ describe('ADR-093 §2.2 — every reason gets its own sentence, none is left as 
   it('no_mechanism is a sentence, not a grey badge with empty rows (§2.4)', async () => {
     responder = () => ({
       ok: true,
-      body: envelope('hermes', {}, [
+      body: envelope('sakana', {}, [
         {
           id: 'none',
           scope: 'user',
@@ -260,7 +237,7 @@ describe('ADR-093 §2.2 — every reason gets its own sentence, none is left as 
         },
       ]),
     });
-    render(<InstructionSourcesContent agent="hermes" />);
+    render(<InstructionSourcesContent agent="sakana" />);
 
     expect(
       await screen.findByText(lookup('agents.instructionSources.reason.no_mechanism')!),

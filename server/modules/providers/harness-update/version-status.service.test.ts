@@ -63,18 +63,18 @@ test('the installed-version probe is TTL-cached and invalidated by an update', a
     runVersion: async () => { reads += 1; return '0.42.0'; },
     fetchNpmLatest: async () => '0.42.0',
   });
-  await getHarnessVersionStatus('kimi', deps);
-  await getHarnessVersionStatus('kimi', deps);
-  await getHarnessVersionStatus('kimi', deps);
+  await getHarnessVersionStatus('claude', deps);
+  await getHarnessVersionStatus('claude', deps);
+  await getHarnessVersionStatus('claude', deps);
   assert.equal(reads, 1, 'three status reads spawn ONE `--version` child');
 
   // An update changing the bytes must not leave a stale version on screen.
-  invalidateInstalledVersion('kimi');
-  await getHarnessVersionStatus('kimi', deps);
+  invalidateInstalledVersion('claude');
+  await getHarnessVersionStatus('claude', deps);
   assert.equal(reads, 2);
 
   // And the TTL expires on its own.
-  await getHarnessVersionStatus('kimi', baseDeps({
+  await getHarnessVersionStatus('claude', baseDeps({
     now: () => 1_000 + INSTALLED_TTL_MS + 1,
     runVersion: async () => { reads += 1; return '0.43.0'; },
     fetchNpmLatest: async () => '0.43.0',
@@ -82,9 +82,9 @@ test('the installed-version probe is TTL-cached and invalidated by an update', a
   assert.equal(reads, 3);
 });
 
-test('kimi up-to-date: installed === npm latest', async () => {
+test('claude up-to-date: installed === npm latest', async () => {
   _resetLatestCache();
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
+  const s = await getHarnessVersionStatus('claude', baseDeps({
     runVersion: async () => '0.42.0',
     fetchNpmLatest: async () => '0.42.0',
   }));
@@ -96,9 +96,9 @@ test('kimi up-to-date: installed === npm latest', async () => {
   assert.equal(s!.reason, null);
 });
 
-test('kimi update-available when latest is newer', async () => {
+test('claude update-available when latest is newer', async () => {
   _resetLatestCache();
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
+  const s = await getHarnessVersionStatus('claude', baseDeps({
     runVersion: async () => '0.42.0',
     fetchNpmLatest: async () => '0.43.0',
   }));
@@ -108,7 +108,7 @@ test('kimi update-available when latest is newer', async () => {
 
 test('probe failure with no cache → latest unknown but the update stays offered', async () => {
   _resetLatestCache();
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
+  const s = await getHarnessVersionStatus('claude', baseDeps({
     runVersion: async () => '0.42.0',
     fetchNpmLatest: async () => null,
   }));
@@ -122,14 +122,14 @@ test('probe failure with no cache → latest unknown but the update stays offere
 test('stale-on-network-failure: an expired cache is served, marked latest-stale', async () => {
   _resetLatestCache();
   // Prime the cache with a success at t=1000.
-  await getHarnessVersionStatus('qwen', baseDeps({
+  await getHarnessVersionStatus('codex', baseDeps({
     now: () => 1_000,
     runVersion: async () => '0.23.0',
     fetchNpmLatest: async () => '0.23.0',
   }));
   // Later than TTL + rate-limit, the probe fails but the stale value survives.
   const later = 1_000 + LATEST_TTL_MS + LATEST_RATE_LIMIT_MS + 1;
-  const s = await getHarnessVersionStatus('qwen', baseDeps({
+  const s = await getHarnessVersionStatus('codex', baseDeps({
     now: () => later,
     runVersion: async () => '0.23.0',
     fetchNpmLatest: async () => null,
@@ -174,20 +174,10 @@ test('every status row carries exactly the derived notices (none when nothing is
 
 test('binary missing → no-cli/not-installed, never a crash', async () => {
   _resetLatestCache();
-  const s = await getHarnessVersionStatus('qwen', baseDeps({ runVersion: async () => null }));
+  const s = await getHarnessVersionStatus('codex', baseDeps({ runVersion: async () => null }));
   assert.equal(s!.state, 'no-cli');
   assert.equal(s!.reason, 'not-installed');
   assert.equal(s!.updatable, false);
-});
-
-test('armed pin over kimi (snapshot-backed, ADR-189) is not refused outright', async () => {
-  _resetLatestCache();
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
-    runVersion: async () => '0.42.0',
-    pinEnabled: () => true,
-  }));
-  // Leaving the pin needs a pinBreak ack at update time (T-1871 §9), like opencode.
-  assert.notEqual(s!.reason, 'pinned');
 });
 
 test('a running job surfaces updating + activeJobId', async () => {
@@ -208,7 +198,7 @@ test('a running job surfaces updating + activeJobId', async () => {
 test('durable recovery fence survives memory reset and skips unsafe probes', async () => {
   _resetLatestCache();
   let probes = 0;
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
+  const s = await getHarnessVersionStatus('claude', baseDeps({
     recoveryBlocked: () => true,
     runVersion: async () => { probes += 1; return '0.42.0'; },
     fetchNpmLatest: async () => { probes += 1; return '0.43.0'; },
@@ -223,7 +213,7 @@ test('durable recovery fence survives memory reset and skips unsafe probes', asy
 test('durable fence read failure fails closed without probing the binary', async () => {
   _resetLatestCache();
   let probes = 0;
-  const s = await getHarnessVersionStatus('qwen', baseDeps({
+  const s = await getHarnessVersionStatus('codex', baseDeps({
     recoveryBlocked: () => { throw new Error('database unavailable'); },
     runVersion: async () => { probes += 1; return '0.23.0'; },
   }));
@@ -236,12 +226,12 @@ test('durable fence read failure fails closed without probing the binary', async
 test('a coherent active mutation intent remains running without probing', async () => {
   _resetLatestCache();
   let probes = 0;
-  const s = await getHarnessVersionStatus('qwen', baseDeps({
+  const s = await getHarnessVersionStatus('codex', baseDeps({
     recoveryBlocked: () => true,
     isLeased: () => true,
     activeJobId: () => 'job-running',
     getJob: () => ({
-      jobId: 'job-running', provider: 'qwen', status: 'running', phase: 'updating',
+      jobId: 'job-running', provider: 'codex', status: 'running', phase: 'updating',
       percent: 50, log: [], fromVersion: '0.23.0', toVersion: null, error: null,
     }),
     runVersion: async () => { probes += 1; return '0.23.0'; },
@@ -256,12 +246,12 @@ test('a coherent active mutation intent remains running without probing', async 
 test('failed recovery holding a lease is not reported as endlessly running', async () => {
   _resetLatestCache();
   let probes = 0;
-  const s = await getHarnessVersionStatus('qwen', baseDeps({
+  const s = await getHarnessVersionStatus('codex', baseDeps({
     recoveryBlocked: () => true,
     isLeased: () => true,
     activeJobId: () => 'job-failed',
     getJob: () => ({
-      jobId: 'job-failed', provider: 'qwen', status: 'failed', phase: 'done',
+      jobId: 'job-failed', provider: 'codex', status: 'failed', phase: 'done',
       percent: 100, log: [], fromVersion: '0.23.0', toVersion: null,
       error: { code: 'recovery_failed', message: 'repair required' },
     }),
@@ -317,16 +307,6 @@ test('opencode latest probe uses the fixed GitHub URL', async () => {
   assert.match(OPENCODE_LATEST_RELEASE_URL, /^https:\/\/api\.github\.com\/repos\/anomalyco\/opencode\/releases\/latest$/);
 });
 
-test('kimi 2.1.1 (pin 0.28.1, flag off) → a newer release is simply update-available', async () => {
-  _resetLatestCache();
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
-    runVersion: async () => '2.1.1',
-    fetchNpmLatest: async () => '2.1.2',
-  }));
-  assert.equal(s!.reason, 'update-available');
-  assert.equal(s!.updatable, true);
-});
-
 test('restore-compatible offer turns verified only from the durable flag', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('opencode', baseDeps({
@@ -334,8 +314,6 @@ test('restore-compatible offer turns verified only from the durable flag', async
     compatVerified: (id) => id === 'opencode',
   }));
   assert.deepEqual(s!.restoreCompatible, { version: '1.18.32', verified: true });
-  const kimi = await getHarnessVersionStatus('kimi', baseDeps({ runVersion: async () => '2.1.1' }));
-  assert.equal(kimi!.restoreCompatible, undefined, 'kimi restore dropped (stale pin)');
 });
 
 test('armed pin: a snapshot-backed pinned harness stays updatable (pinBreak ack instead)', async () => {
@@ -382,7 +360,7 @@ test('a failed latest probe keeps latest null', async () => {
 test('rows without a readable version carry no drift', async () => {
   _resetLatestCache();
   const ledger = memoryLedger();
-  const none = await getHarnessVersionStatus('qwen', baseDeps({ versionLedger: ledger }));
+  const none = await getHarnessVersionStatus('codex', baseDeps({ versionLedger: ledger }));
   assert.equal(none!.drift, undefined);
   const hosted = await getHarnessVersionStatus('deepseek', baseDeps({ versionLedger: ledger }));
   assert.equal(hosted!.drift, undefined);
@@ -418,10 +396,10 @@ test('drift: unchanged version → no drift, no audit', async () => {
 
 test('drift: change made by a Nassaj job is not drift', async () => {
   _resetLatestCache();
-  const ledger = memoryLedger({ kimi: { version: '0.42.0', at: 'x', drift: null } });
+  const ledger = memoryLedger({ claude: { version: '0.42.0', at: 'x', drift: null } });
   const audits: unknown[] = [];
-  recordJobVersionChange('kimi', '2.1.1', { ledger, nowIso: () => '2026-09-27T07:00:00.000Z' });
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
+  recordJobVersionChange('claude', '2.1.1', { ledger, nowIso: () => '2026-09-27T07:00:00.000Z' });
+  const s = await getHarnessVersionStatus('claude', baseDeps({
     runVersion: async () => '2.1.1',
     versionLedger: ledger,
     driftAudit: (m) => audits.push(m),

@@ -13,9 +13,10 @@
  *    before spawn with one error; an unknown or large enough window launches.
  *  • ADR-LOCAL-INSTR-TIER-001 (S4): a local turn runs under the separate local config
  *    dir, never disables OpenCode's CLAUDE.md fallback (C1), refuses with its own code
- *    when the slim instructions are unavailable, keeps the L1/L2 parity rules identical
- *    to a GLM turn (I1), and counts the output reserve, a working margin and a resumed
- *    session's stored history against the window (I8).
+ *    when the slim instructions are unavailable, carries a GLM turn's L1 plus only the
+ *    local permission block (task allow-list, webfetch deny — owner 2026-11-13), and
+ *    counts the output reserve, a working margin and a resumed session's stored
+ *    history against the window (I8).
  */
 // B-1544: must stay the first app-side import (HOME, DATABASE_PATH, harness roots).
 import { removeSandbox } from './modules/providers/tests/helpers/hermetic-sandbox.js';
@@ -375,7 +376,7 @@ test('S4: unavailable slim instructions refuse the turn with their own code', { 
   assert.equal(errors[0].content, localTierError.message);
 });
 
-test('S4 I1 / ADR-226: a local turn carries the same L1 and parity plugin as a GLM turn', { timeout: 3000 }, async () => {
+test('S4 I1 / ADR-226 + owner 2026-11-13: a local turn carries the GLM L1 plus only the local block, same plugin', { timeout: 3000 }, async () => {
   resolvedModel = LOCAL_MODEL;
   const local = await launch('hello');
   child?.emit('close', 0);
@@ -388,11 +389,33 @@ test('S4 I1 / ADR-226: a local turn carries the same L1 and parity plugin as a G
   assert.equal(spawned.length, 2);
   const [a, b] = spawned.map((entry) => entry.env);
   // ADR-226: L2 lives in the per-turn engine (server side); the child gets L1 and the plugin.
-  assert.ok(a.OPENCODE_PERMISSION !== undefined);
-  assert.equal(a.OPENCODE_PERMISSION, b.OPENCODE_PERMISSION);
+  assert.equal(b.OPENCODE_PERMISSION, '{"*":"allow"}', 'a GLM turn L1 is unchanged');
+  const localL1 = JSON.parse(a.OPENCODE_PERMISSION ?? '{}');
+  assert.deepEqual(Object.keys(localL1), ['*', 'task', 'webfetch'], 'the local block comes LAST');
+  assert.equal(localL1['*'], 'allow');
+  assert.equal(localL1.webfetch, 'deny', 'the local coordinator has no webfetch');
+  assert.deepEqual(localL1.task, {
+    '*': 'deny', researcher: 'allow', 'backend-dev': 'allow', devops: 'allow', scribe: 'allow', 'qa-critic': 'allow',
+  });
   const pluginOf = (env: NodeJS.ProcessEnv) => JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}').plugin?.[0];
   assert.ok(pluginOf(a));
   assert.equal(pluginOf(a), pluginOf(b));
+});
+
+test('owner 2026-11-13: a bypass local turn still denies webfetch in L1; a bypass GLM turn does not', { timeout: 3000 }, async () => {
+  resolvedModel = LOCAL_MODEL;
+  const local = await launch('hello', { permissionMode: 'bypassPermissions' });
+  child?.emit('close', 0);
+  await local.run;
+  resolvedModel = 'glm/glm-5.2';
+  const glm = await launch('hello', { permissionMode: 'bypassPermissions' });
+  for (let i = 0; i < 100 && spawned.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  child?.emit('close', 0);
+  await glm.run;
+  assert.equal(spawned.length, 2);
+  assert.equal(JSON.parse(spawned[0].env.OPENCODE_PERMISSION ?? '{}').webfetch, 'deny');
+  assert.ok(!('webfetch' in JSON.parse(spawned[1].env.OPENCODE_PERMISSION ?? '{}')));
+  assert.ok(!spawned[0].args.includes('--dangerously-skip-permissions'), 'never the skip flag');
 });
 
 test('S4 I8: a 16K window is refused once the output reserve and working margin count', { timeout: 3000 }, async () => {

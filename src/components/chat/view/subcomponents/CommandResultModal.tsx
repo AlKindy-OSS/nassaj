@@ -25,6 +25,7 @@ import { engineProviderLabel } from '../../../../../shared/engineProviders';
 import { LOCAL_ENGINE, isLocalModelId } from '../../../../../shared/localEngine';
 import type { LLMProvider, ProviderModelsCacheInfo, ProviderModelsDefinition } from '../../../../types/app';
 import { resolveEffectiveEngine } from './engineGuard';
+import { isLocalBody } from './localOverlayRows';
 import type {
   CommandModalPayload,
   CostCommandData,
@@ -97,8 +98,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   codex: 'Codex',
   antigravity: 'Antigravity',
   opencode: 'OpenCode',
-  hermes: 'Hermes',
-  kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM',
 };
@@ -303,8 +302,9 @@ function ModelsContent({
   // carries a stamp, or its active model betrays one (engineGuard.ts). If so the
   // panel is READ-ONLY: pinning a Claude id here would send a model the engine
   // cannot serve, and re-pointing the engine needs the restamp contract (B-246).
-  // ADR-227: a local model id marks a local chat even without the stamp.
-  const effectiveEngine = currentProvider === 'claude' && isLocalModelId(currentModel)
+  // ADR-227: a local model id marks a local chat even without the stamp, on
+  // either body that runs on local servers (Claude, Codex — T-2107).
+  const effectiveEngine = isLocalBody(currentProvider) && isLocalModelId(currentModel)
     ? LOCAL_ENGINE
     : resolveEffectiveEngine(sessionEngineProvider, currentProvider, currentModel, providerModelCatalog);
   const isEngineLocked = effectiveEngine !== null;

@@ -43,7 +43,16 @@ import { createWakeupHoldBudget, peakUsagePercent, planWakeupHold, readWakeupHol
   from './modules/providers/list/claude/claude-wakeup-hold-policy.js';
 import { claudeUsageService } from './modules/providers/services/claude-usage.service.js';
 import { createSeededLiveFold } from './modules/providers/list/claude/claude-progress-seed.js';
+import { createClaudeStreamNotices } from './modules/providers/list/claude/claude-stream-notices.js';
+import { createLaunchReservations, createRunActivity, describeRunOccupancy, isForeignRunSender,
+  readLaunchReservationMaxMs, readRunStuckAfterMs } from './modules/providers/list/claude/claude-run-occupancy.js';
+import { claudeParticipantContext } from './modules/providers/list/claude/claude-participant-context.js';
+import { auditSharedTurn, boundNonStarterDecision, decideTurnStop, hashDecisionText, isExternalIdentityTool,
+  isSharedTurnWriter, isStarterOnlyTool, memberDisplayName, sharedUserTurnFrame,
+  shouldAnnounceUserTurn } from './modules/providers/list/claude/claude-shared-turn-authority.js';
+import { isSharedSessionWritingEnabled } from './modules/providers/list/claude/shared-session-writing-flag.js';
 import { createClaudeLaunchTranscriptRecorder } from './modules/providers/list/claude/claude-launch-transcript.js';
+import { ensureClaudeResumeReachable, recordedClaudeTranscriptPath } from './modules/providers/list/claude/claude-resume-bridge.js';
 import { readAgentMeta } from './modules/providers/list/claude/agent-transcript.reader.js';
 import {
   isTranscriptHandle,
@@ -105,6 +114,7 @@ import {
   pickEngineModel,
 } from './services/isolation/engine-pin.js';
 import { isLocalModelId, publicEngineValue } from './services/isolation/local-engine-pin.js';
+import { recordLocalEnginePinOrThrow } from './services/isolation/local-engine-pin-writer.js';
 import { resolveClaudeRunProfileOrThrow } from './services/isolation/resolve-claude-run-profile.js';
 import { registerWarmCredentialProcess } from './services/isolation/warm-credential-processes.js';
 import { isLinkModeRunRefusal } from './modules/providers/services/harness-link-mode.service.js';
@@ -248,6 +258,23 @@ function bufferThenSend(ws, sessionKey, payload) {
     );
   }
   ws.send(payload);
+}
+
+/**
+ * T-2113: sends the stream-notice frames of one SDK message. Broadcast frames go
+ * through the replay buffer like any chat row. Owner-only frames (an ending
+ * sign-in belongs to the run owner's own Claude login; a hook failure's server
+ * detail) go to the owner's socket alone, unbuffered and never mirrored. A writer
+ * without that channel, or whose socket is not the run owner's, drops them.
+ */
+function sendStreamNotices(ws, frames, sendAndBuffer) {
+  for (const frame of frames.broadcast) sendAndBuffer(frame);
+  if (frames.ownerOnly.length === 0 || typeof ws?.sendViewerFrames !== 'function') return;
+  if (!isSameUser(ws.ws?.userId, ws.userId)) return;
+  for (const frame of frames.ownerOnly) {
+    if (ws.userId !== null && ws.userId !== undefined) frame.audienceUserId = ws.userId;
+    ws.sendViewerFrames(frame, frame, null);
+  }
 }
 
 const activeSessions = new Map();
@@ -687,6 +714,158 @@ async function yieldWakeOnlyHold(sessionId, waitMs = 20000) {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   return true;
+}
+
+// ADR-173 rev.3 P1 (always on): one launch at a time per resumed session, taken in the
+// same tick as the busy check (claimClaudeRunLaunch) and released by registration or
+// by the launch's end. A launch that hangs before registering is ended by a privileged
+// stop or by the valve: aborted and revoked (it never spawns or registers), then freed.
+const launchReservations = createLaunchReservations({
+  maxMs: () => readLaunchReservationMaxMs(),
+  onExpire: (sessionId, userId) => console.warn(`[ADR-173] launch reservation overdue `
+    + `session=${sessionId} user=${userId ?? 'none'}; launch aborted and revoked, reservation freed`),
+});
+
+function hasPendingApprovalForSession(sessionId) {
+  for (const resolver of pendingToolApprovals.values()) {
+    if (resolver._sessionId === sessionId) return true;
+  }
+  return false;
+}
+
+/** True only when the run's CLI pid (resolved by the process monitor) is recorded and gone. */
+function isRunProcessKnownDead(sessionId) {
+  try {
+    const { known, alive } = probeWorkflowLiveness(sessionId);
+    return known && !alive;
+  } catch {
+    return false;
+  }
+}
+
+/** Phase and stuck verdict of a registered active run (ADR-173 rev.3; M-b process liveness). */
+function activeRunOccupancy(sessionId, entry) {
+  return describeRunOccupancy({
+    activity: entry.activity?.snapshot() ?? null,
+    wakeOnly: [...wakeOnlyHolds.values()].includes(sessionId),
+    pendingApproval: hasPendingApprovalForSession(sessionId),
+    now: Date.now(),
+    stuckAfterMs: readRunStuckAfterMs(),
+    processDead: isRunProcessKnownDead(sessionId),
+  });
+}
+
+/**
+ * ADR-173 rev.3: what occupies `sessionId` now, as session_busy fields
+ * `{ busyBy, phase, stuck, canStop }`, or null when nothing does. `canStop` answers
+ * for `viewerUserId` with the P5 stop rights (today's gate when the flag is off).
+ */
+function describeSessionOccupancy(sessionId, viewerUserId = null) {
+  const reservation = launchReservations.holder(sessionId);
+  const entry = reservation ? null : activeSessions.get(sessionId);
+  if (!reservation && (!entry || entry.status !== 'active')) return null;
+  const { phase, stuck } = reservation ? { phase: 'launching', stuck: false } : activeRunOccupancy(sessionId, entry);
+  const starterUserId = (reservation ? reservation.userId : entry.writer?.userId) ?? null;
+  const canStop = !isSharedSessionWritingEnabled()
+    || decideTurnStop({ sessionId, requesterUserId: viewerUserId, starterUserId, stuck }).allowed;
+  return { busyBy: starterUserId, phase, stuck, canStop };
+}
+
+/**
+ * ADR-173 rev.3 P5 (owner decision 2): may `requesterUserId` stop the active turn of
+ * `sessionId`? The caller has already passed the write gate. No active run = nothing
+ * to refuse; flag '0' = today's gate (any writer). A non-starter's request is audited.
+ *
+ * @returns {{ allowed: boolean, role: string|null, stuck: boolean, starterUserId: unknown }}
+ */
+function authorizeClaudeTurnStop(sessionId, requesterUserId) {
+  const entry = sessionId ? activeSessions.get(sessionId) : null;
+  const active = entry?.status === 'active';
+  // qa r2 #1: a launch not yet registered is stopped by the same rights (never stuck).
+  const reservation = !active && sessionId ? launchReservations.holder(sessionId) : null;
+  if ((!active && !reservation) || !isSharedSessionWritingEnabled()) {
+    return { allowed: true, role: null, stuck: false, starterUserId: entry?.writer?.userId ?? reservation?.userId ?? null };
+  }
+  const starterUserId = (active ? entry.writer?.userId : reservation.userId) ?? null;
+  const { stuck } = active ? activeRunOccupancy(sessionId, entry) : { stuck: false };
+  const { allowed, role } = decideTurnStop({ sessionId, requesterUserId, starterUserId, stuck });
+  if (role !== 'starter') {
+    auditSharedTurn('shared_turn_stop', requesterUserId, { sessionId, starterUserId, role, allowed, stuck });
+  }
+  return { allowed, role, stuck, starterUserId };
+}
+
+/**
+ * ADR-173 rev.3 (always on, H3/H4): admits a launch on `sessionId` by `senderUserId`
+ * and reserves it in the same tick, or returns the session_busy fields refusing it:
+ * any launch in progress, or an active run of another user (whatever its phase).
+ * Runs before any hold is yielded, so a member never ends another member's hold.
+ */
+function claimClaudeRunLaunch(sessionId, senderUserId, runToken) {
+  if (!sessionId) return null;
+  const entry = activeSessions.get(sessionId);
+  const foreignRun = entry?.status === 'active' && isForeignRunSender(entry.writer?.userId ?? null, senderUserId);
+  if (launchReservations.holder(sessionId) || foreignRun) return describeSessionOccupancy(sessionId, senderUserId);
+  launchReservations.reserve(sessionId, senderUserId ?? null, runToken);
+  return null;
+}
+
+/** T-1903: a "/steer …" typed into the normal composer (a steer attempt, not a turn). */
+function isSteerChatCommand(command) {
+  return /^\/steer(?:\s|$)/iu.test(String(command ?? '').trimStart());
+}
+
+/** T-1903: the refusal of a "/steer" chat message on a busy session; nothing is injected. */
+function steerRequiresSessionSteerFrame(sessionId, clientMsgId) {
+  return createNormalizedMessage({
+    kind: 'error',
+    code: 'steer_requires_session_steer',
+    content: 'Steering a running turn must use the steer action; "/steer" sent as a chat message '
+      + 'was not delivered.',
+    sessionId,
+    provider: 'claude',
+    notStarted: true,
+    ...(typeof clientMsgId === 'string' && clientMsgId ? { clientMsgId } : {}),
+  });
+}
+
+/** The session_busy refusal frame carrying the occupancy fields. */
+function sessionBusyFrame(sessionId, occupancy, clientMsgId) {
+  return createNormalizedMessage({
+    kind: 'error',
+    code: 'session_busy',
+    content: 'This conversation already has a run in progress. '
+      + 'Wait for it to finish before sending another message.',
+    sessionId,
+    provider: 'claude',
+    ...occupancy,
+    ...(typeof clientMsgId === 'string' && clientMsgId ? { clientMsgId } : {}),
+  });
+}
+
+/**
+ * ADR-173 qa condition 2: registering `runToken` on `sessionId` would displace
+ * another active run. The run owner still takes over its own listener-less ghost
+ * (B-SEC-DUP-RUN); a foreign or live run is never replaced. Legacy null tokens pass.
+ */
+function registrationConflict(sessionId, runToken, writer) {
+  const existing = activeSessions.get(sessionId);
+  if (!existing || existing.status !== 'active') return false;
+  if (runToken === null || existing.runToken === null || existing.runToken === undefined
+    || existing.runToken === runToken) return false;
+  return isForeignRunSender(existing.writer?.userId ?? null, writer?.userId ?? null) || isSessionRunLive(sessionId);
+}
+
+const RUN_REGISTRATION_REFUSED = 'CLAUDE_RUN_REGISTRATION_REFUSED';
+
+/**
+ * The refusal of a run that may not register on `sessionId`. Its own CLI is aborted at
+ * once (M-a): leaving the stream loop alone could keep it running behind the refusal.
+ */
+function runRegistrationRefused(sessionId, abortController) {
+  console.warn(`[ADR-173] refused a second run registration on session ${sessionId}; aborting this run`);
+  abortController?.abort();
+  return Object.assign(new Error('Another run owns this conversation.'), { code: RUN_REGISTRATION_REFUSED });
 }
 
 /** Whether the session still has a viewer: its primary socket or a live mirror. */
@@ -1339,11 +1518,11 @@ function normalizeApprovalIdentity(value) {
  *   - OWNER (the JWT identity that spawned the run, captured when the prompt was
  *     created): full decision, `updatedInput`/`rememberEntry` honoured — this is
  *     the UI's legitimate "edit before approving" / "always allow" feature.
- *   - COLLABORATOR (a recorded participant/author of that same session — the
- *     live-viewer case the read-only mirrors exist for): may only ALLOW or DENY.
- *     `updatedInput` and `rememberEntry` are STRIPPED, so a second viewer can
- *     unblock a prompt but can never rewrite what runs nor widen the session's
- *     standing permissions.
+ *   - COLLABORATOR (ADR-173 P5: a shared writer of that session, rechecked with
+ *     isSharedSessionWriter at answer time — a participant row alone no longer
+ *     qualifies): may only ALLOW or DENY. `updatedInput` and `rememberEntry` are
+ *     STRIPPED, so another member can unblock a prompt but can never rewrite what
+ *     runs nor widen the session's standing permissions.
  *   - STRANGER: refused outright; the approval stays pending for its real owner.
  *
  * Identity comparison is string-normalized, so a deployment with no identities at
@@ -1381,23 +1560,35 @@ function authorizeApprovalDecision({ ownerUserId, requesterUserId, isCollaborato
 }
 
 /**
- * Is `requesterUserId` a recorded participant/author of `sessionId`? The same
- * B-105 predicate the REST layer uses to authorize session content. Fail-closed:
- * an unresolvable id, an unknown session or any database error answers false.
+ * T-1903 and ADR-173 P5 on an authorized verdict (mutated in place):
+ *   - a steer-taint prompt, an external-identity (mcp__*) prompt, an AskUserQuestion
+ *     prompt (M-c) and a plan approval (ExitPlanMode) belong to the turn STARTER alone; a steer-taint answer is also ALLOW-ONCE for him;
+ *   - any other admitted (collaborator) answer is allow/deny only, its deny text
+ *     capped and prefixed with the author's name.
  */
-function isApprovalSessionCollaborator(sessionId, requesterUserId) {
-  if (!sessionId) {
-    return false;
+function applyStarterRules(resolver, verdict, requesterUserId) {
+  const starterOnly = resolver._starterOnly === true || isStarterOnlyTool(resolver._toolName);
+  if (starterOnly && verdict.role !== 'owner') verdict.allowed = false;
+  if (resolver._starterOnly === true && verdict.allowed) {
+    const { rememberEntry: _remember, updatedInput: _input, ...once } = verdict.decision ?? {};
+    verdict.decision = once;
   }
-  const numericUserId = Number.parseInt(requesterUserId, 10);
-  if (!Number.isInteger(numericUserId)) {
-    return false;
+  if (verdict.allowed && verdict.role === 'collaborator') {
+    verdict.decision = boundNonStarterDecision(verdict.decision ?? {}, memberDisplayName(requesterUserId));
   }
-  try {
-    return participantsDb.isParticipant(sessionId, numericUserId) === true;
-  } catch {
-    return false;
-  }
+}
+
+/** ADR-173 P5: audits a non-starter's answer and every answer to an external-identity prompt. */
+function auditApprovalAnswer(resolver, requestId, verdict, requesterUserId) {
+  const sessionId = resolver._sessionId ?? null;
+  const externalIdentity = isExternalIdentityTool(resolver._toolName);
+  if (!sessionId || (verdict.role === 'owner' && !externalIdentity)) return;
+  const allow = verdict.allowed && verdict.decision?.allow === true;
+  auditSharedTurn('shared_turn_approval', requesterUserId, {
+    sessionId, requestId, toolName: resolver._toolName ?? null, externalIdentity,
+    starterUserId: resolver._ownerUserId ?? null, admitted: verdict.allowed, allow,
+    textSha256: verdict.allowed && !allow ? hashDecisionText(verdict.decision?.message) : null,
+  });
 }
 
 /**
@@ -1419,21 +1610,11 @@ function resolveToolApproval(requestId, decision) {
   const verdict = authorizeApprovalDecision({
     ownerUserId: resolver._ownerUserId ?? null,
     requesterUserId,
-    isCollaborator: () => isApprovalSessionCollaborator(sessionId, requesterUserId),
+    isCollaborator: () => isSharedTurnWriter(sessionId, requesterUserId),
     decision: payload,
   });
-
-  // T-1903: a steer-taint approval belongs to the turn STARTER alone — a
-  // collaborator (possibly the very member who steered) may not answer it.
-  if (resolver._starterOnly === true && verdict.role !== 'owner') {
-    verdict.allowed = false;
-  }
-  // T-1903 (E2E): an approval born of another member's steer is ALLOW-ONCE. A
-  // "remember / always allow" rule or an edited input can never persist from it.
-  if (resolver._starterOnly === true && verdict.allowed) {
-    const { rememberEntry: _remember, updatedInput: _input, ...once } = verdict.decision ?? {};
-    verdict.decision = once;
-  }
+  applyStarterRules(resolver, verdict, requesterUserId);
+  auditApprovalAnswer(resolver, requestId, verdict, requesterUserId);
 
   // ADR-219 P2 (qa م-4): every answer to a prompt of a relay delivery turn is recorded
   // with the answering member and credential kind (never the message text).
@@ -2385,34 +2566,6 @@ function recordSessionEnginePin({ newSessionId, parentSessionId, engagedEngine, 
 }
 
 /**
- * ADR-227: records a LOCAL-engine pin strictly. Unlike recordSessionEnginePin it
- * never swallows a failure: a local chat whose pin did not settle could resume
- * on another engine, so the caller aborts the run instead. A lineage child must
- * carry its parent's exact pin.
- * @param {{newSessionId:string, parentSessionId:string|null, pin:string}} input
- * @throws {Error} code ENGINE_PIN_WRITE_FAILED
- */
-function recordLocalEnginePinOrThrow({ newSessionId, parentSessionId, pin }) {
-  let settled = null;
-  try {
-    const parentPin = parentSessionId && parentSessionId !== newSessionId
-      ? sessionsDb.getSessionEnginePin(parentSessionId)?.engine ?? null
-      : null;
-    if (parentPin === null || parentPin === pin) {
-      settled = sessionsDb.setSessionEnginePin(newSessionId, pin, PIN_SOURCE.SERVER_VERDICT);
-    }
-  } catch (error) {
-    console.warn(`[engine-pin] local pin write failed for ${newSessionId}: ${error?.message ?? error}`);
-  }
-  if (!settled || settled.outcome === 'missing_row' || settled.engine !== pin) {
-    throw Object.assign(
-      new Error('The local model server pin of this chat could not be recorded; the run was stopped.'),
-      { code: 'ENGINE_PIN_WRITE_FAILED' },
-    );
-  }
-}
-
-/**
  * Runs a one-shot, read-only /btw side query against a live session's transcript.
  *
  * @param {Object} params
@@ -2925,8 +3078,13 @@ async function spawnClaudeSideQuery(params = {}, callbacks = {}) {
  *   NEWER run created for the same sessionId (which left the newer run
  *   unstoppable: abort/`isActive` resolve by sessionId only). Defaults to null =
  *   the legacy unconditional behaviour, so existing callers/tests are unchanged.
+ * @param {object|null} activity - ADR-173: the run's stream activity (createRunActivity).
+ * @returns {boolean} false when ADR-173 refused to displace another active run.
  */
-function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null, runTag = null, projectPath = null, runToken = null, releaseInput = null, forceStop = null) {
+function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null, runTag = null, projectPath = null, runToken = null, releaseInput = null, forceStop = null, activity = null) {
+  if (registrationConflict(sessionId, runToken, writer)) return false;
+  // qa r2 #1: a cancelled launch never registers beside the run that replaced it.
+  if (runToken !== null && typeof runToken === 'symbol' && launchReservations.isRevoked(runToken)) return false;
   activeSessions.set(sessionId, {
     instance: queryInstance,
     startTime: Date.now(),
@@ -2948,8 +3106,11 @@ function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = nul
     // lazy sweep; harmless dead fields when CLAUDE_GHOST_DETACH is OFF.
     detached: false,
     noListenerSince: null,
-    lastListenerSeenAt: Date.now()
+    lastListenerSeenAt: Date.now(),
+    // ADR-173: lastEventAt, open tool calls and held state of this run (phase / stuck).
+    activity,
   });
+  if (runToken !== null) launchReservations.release(sessionId, runToken);
   // ADR-041: mark the session live in the replay registry (single source of
   // truth for the active flag + replay buffer). Cancel any pending post-close
   // drop first so a quick resume reuses the entry instead of losing it. No-op
@@ -2979,6 +3140,7 @@ function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = nul
   // ADR-042 (B-80c): start the lazy ghost sweep (no-op unless the flag is ON or
   // the timer already runs). Stopped again in removeSession when the map empties.
   startGhostSweep();
+  return true;
 }
 
 /**
@@ -3596,7 +3758,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   let promptTextForAuthorship = command;
   // B-SEC-DUP-RUN: identity of THIS run, stamped on its activeSessions entry so a
   // late teardown from another run can never remove it (see removeSession).
-  const runToken = Symbol('claude-run');
+  // ADR-173: queryClaudeSDK passes the token its launch reservation was taken with.
+  const runToken = internalOptions.runToken ?? Symbol('claude-run');
+  const runActivity = createRunActivity();
 
   // B-SEC-DUP-RUN: refuse a SECOND concurrent run on a sessionId that already has
   // a live, still-watched run. `activeSessions` is keyed by sessionId alone, so
@@ -3608,7 +3772,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // as live, so a stale entry can never lock a conversation out of sending.
   // B-1699 (M2): a run held only for a scheduled wake-up yields to a new message
   // (its hold is released and the run ends) instead of refusing it as session_busy.
-  if (sessionId && !/^\/steer(?:\s|$)/iu.test(String(command ?? '').trimStart())) {
+  if (sessionId && !isSteerChatCommand(command)) {
     await yieldWakeOnlyHold(sessionId);
   }
   if (sessionId && isSessionRunLive(sessionId)) {
@@ -3622,17 +3786,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // T-1903: a "/steer …" typed into the normal composer is a steer attempt,
     // not a second run — say so instead of a generic busy error. Nothing is
     // injected: steering only exists on the `session-steer` message.
-    if (/^\/steer(?:\s|$)/iu.test(String(command ?? '').trimStart())) {
-      ws.send(createNormalizedMessage({
-        kind: 'error',
-        code: 'steer_requires_session_steer',
-        content: 'Steering a running turn must use the steer action; "/steer" sent as a chat message '
-          + 'was not delivered.',
-        sessionId,
-        provider: 'claude',
-        notStarted: true,
-        ...clientMsgIdField,
-      }));
+    if (isSteerChatCommand(command)) {
+      ws.send(steerRequiresSessionSteerFrame(sessionId, options.clientMsgId));
       permissionExecution?.notStarted();
       return { ok: false };
     }
@@ -3695,10 +3850,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     participantRecorded = true;
     // ADR-219: the EFFECTIVE mode this spawn handed the CLI, the relay's only mode source.
     recordSessionMode(sid, ws.userId, spawnPermissionMode);
-    participantsDb.recordSpawn(sid, ws.userId, {
-      provider: 'claude',
-      projectPath: options.cwd || options.projectPath || process.cwd(),
-    });
+    // ADR-173 (H2): a shared writer is recorded participant/shared_write, never owner.
+    participantsDb.recordSpawn(sid, ws.userId, claudeParticipantContext(options, process.cwd()));
     // ADR-201 A2 (case g): a just-launched session gets the transcript path its
     // spawn writes to, so pinned readers of the recorded path work before the
     // synchronizer indexes it. After recordSpawn: the fill is admitted only from
@@ -4136,6 +4289,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // transport and SIGTERM→SIGKILL the CLI child (the caged spawn forwards it).
     runAbortController = new AbortController();
     sdkOptions.abortController = runAbortController;
+    // qa r2 #1: a privileged stop or the valve can end this launch before it registers.
+    if (sessionId) launchReservations.attachAbort(sessionId, runToken, () => runAbortController.abort());
 
     // B-86: when the control flag is enabled, pass CLAUDE_CODE_WORKFLOWS=1 to the
     // CLI to activate the Workflow/multi-agent orchestration (ultrawork) tier of
@@ -4263,6 +4418,25 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     injectedHosts = runProfile.engineHosts;
     localEngine = runProfile.local ?? null;
 
+    // ADR-173 rev.3 P3: on the FINAL config dir (engine pin / grant applied), make this
+    // resume replay the conversation's one recorded transcript. A shared writer's resume
+    // is re-authorized and bridged, or refused before anything spawns; others: no-op.
+    let resumeBridge = null;
+    if (sdkOptions.resume) {
+      try {
+        resumeBridge = await ensureClaudeResumeReachable({
+          sessionId: sdkOptions.resume, recordedJsonlPath: recordedClaudeTranscriptPath(sdkOptions.resume),
+          runCwd: sdkOptions.cwd ?? options.cwd ?? null, configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR ?? null,
+          sharedResume: options.sharedResume === true, userId: ws?.userId ?? null,
+        });
+      } catch (error) {
+        ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 1, success: false, notStarted: true,
+          code: error?.code || 'shared_write_transcript_unavailable', error: error?.message || 'Shared writing refused.',
+          sessionId: sdkOptions.resume, provider: 'claude', ...clientMsgIdField }));
+        return { ok: false }; // the finally settles the unconsumed permission as not started
+      }
+    }
+
     // B-421: a resume replays the ENTIRE transcript to the API every turn, so a
     // single malformed content block is permanent — the session 400s forever and
     // never heals itself. The one that bit us came from a vendor ENGINE
@@ -4277,10 +4451,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // Fail-open twice over: the repair swallows every error, and the audit write
     // never throws. A session that would have spawned still spawns.
     if (sdkOptions.resume) {
+      // ADR-173: the recorded file's home, never the writer's tree (never through its links).
       const repair = repairResumeTranscript({
         sessionId: sdkOptions.resume,
         cwd: sdkOptions.cwd ?? options.cwd ?? null,
-        configDir: sdkOptions.env?.CLAUDE_CONFIG_DIR ?? null,
+        configDir: resumeBridge?.transcriptHome ?? sdkOptions.env?.CLAUDE_CONFIG_DIR ?? null,
       });
       if (repair.repaired > 0) {
         // Without this row the repair is invisible: a SECOND occurrence under a
@@ -4686,7 +4861,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // يُلغي المكرَّر بـ`requestId`، و`get-pending-permissions` عند كل إعادة
       // اتصال يستبدل القائمة كاملةً بما هو معلَّق فعلاً — وإعادةُ البثّ محكومة
       // ببوابة الرؤية نفسها التي تحكم الإرسال الحيّ.
-      bufferThenSend(ws, capturedSessionId || sessionId || null, createNormalizedMessage({ kind: 'permission_request', requestId, toolName, input, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      bufferThenSend(ws, capturedSessionId || sessionId || null, createNormalizedMessage({ kind: 'permission_request', requestId, toolName, input, sessionId: capturedSessionId || sessionId || null, provider: 'claude',
+        // ADR-173 P5: starter-only; mirrors show it read-only.
+        ...(isExternalIdentityTool(toolName) ? { externalIdentity: true, starterUserId: ws?.userId ?? null } : {}) }));
       emitNotification(createNotificationEvent({
         provider: 'claude',
         sessionId: capturedSessionId || sessionId || null,
@@ -4856,6 +5033,13 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       synthetic: Boolean(peerDelivery),
     });
     const makePromptStream = receiptPrompt.make;
+    // ADR-173 qa condition 2: never spawn a CLI that could not register on its session,
+    // nor one whose launch was cancelled (qa r2 #1: revoked = treated as a stop).
+    if (launchReservations.isRevoked(runToken)) {
+      runAbortController.abort();
+      throw new Error('This launch was stopped before its run started.');
+    }
+    if (sessionId && registrationConflict(sessionId, runToken, ws)) throw runRegistrationRefused(sessionId, runAbortController);
     // B-SEC-ENV-LEAK: the restore MUST be in a finally welded to the query block.
     // It used to be a plain statement after the try/catch, so when BOTH attempts
     // threw (the retry-without-hooks path rethrows) the exception escaped before
@@ -4923,9 +5107,22 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
 
     // Track the query instance for abort capability
     if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort());
+      if (!addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort(), runActivity)) {
+        throw runRegistrationRefused(capturedSessionId, runAbortController);
+      }
       attachSteerRun(capturedSessionId);
       recordParticipant(capturedSessionId);
+      // ADR-173 P6/P8 B3: the other viewers see every turn's prompt as it starts.
+      if (shouldAnnounceUserTurn({
+        sharingEnabled: isSharedSessionWritingEnabled(), peerDelivery: Boolean(peerDelivery),
+        bridgedSharedResume: options.sharedResume === true && Boolean(resumeBridge) && resumeBridge.state !== 'not_bridged',
+        otherViewers: countLiveMirrors(capturedSessionId, ws?.ws ?? null) > 0,
+      })) {
+        bufferThenSend(ws, capturedSessionId, sharedUserTurnFrame({ sessionId: capturedSessionId, content: command,
+          authorUserId: ws?.userId ?? null, clientMsgId: options.clientMsgId,
+          imageCount: Array.isArray(options.images) ? options.images.length : 0,
+          messageUuid: receiptPrompt.messageUuid() }));
+      }
     }
 
     // Process streaming messages
@@ -4974,6 +5171,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     let topLevelResultCount = 0;
     // B-1120: this run's pending CLI tasks and whether the main loop is quiet.
     const backgroundTasks = createBackgroundTaskTracker();
+    // T-2113: hook health, lost transcript writes and an ending sign-in (live-only lines).
+    const streamNotices = createClaudeStreamNotices();
     // B-1699: wake-ups this CLI process owes (no task_* event announces them).
     const scheduledWakeups = createScheduledWakeupTracker(readWakeupHoldConfig().marginMs);
     notifyWakeHold = sendAndBuffer;
@@ -5081,7 +5280,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         ) {
           claudeSessionRegistry.drop(capturedSessionId);
         }
-        addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort());
+        if (!addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, processRunTag, options.cwd || options.projectPath || null, runToken, () => releaseInput('abort'), () => runAbortController.abort(), runActivity)) {
+          throw runRegistrationRefused(capturedSessionId, runAbortController);
+        }
         // ADR-218: the socket that started a NEW session mirrors it, so
         // session-level frames (session-agents) reach it too. ADDITIVE, never the
         // view-replacing setter: the user may already be viewing another session
@@ -5168,6 +5369,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // so does a known task ending after the main loop went quiet. A background
       // Bash is not caught by the tool_use scan below, yet re-enters the same way.
       const taskState = backgroundTasks.observe(message);
+      runActivity.observe(message, taskState);
       for (const toolUseId of taskState.endedToolUseIds) unresolvedWorkflows.delete(toolUseId);
       settleAnnouncedWorkflows(capturedSessionId || sessionId, taskState.endedToolUseIds, 'notified',
         sendAndBuffer);
@@ -5265,6 +5467,7 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         Object.assign(msg, responseToMessageIdField);
         sendAndBuffer(msg);
       }
+      sendStreamNotices(ws, streamNotices.observe(message, sid), sendAndBuffer);
 
       // B-117: track whether anything in this run can re-enter the loop AFTER a
       // `result` — that is the only situation where holding the control channel
@@ -5506,6 +5709,15 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     return { ok: true };
 
   } catch (error) {
+    // ADR-173 qa condition 2: another run owns the session. Nothing of it (approvals,
+    // replay buffer, registry flag) is touched; the refusal is sent unbuffered.
+    if (error?.code === RUN_REGISTRATION_REFUSED && !launchReservations.isRevoked(runToken)) {
+      if (permissionStarted) permissionOutcome = 'reconciled_unknown';
+      await cleanupTempFiles(tempImagePaths, tempDir);
+      const busySessionId = capturedSessionId || sessionId;
+      ws.send(sessionBusyFrame(busySessionId, describeSessionOccupancy(busySessionId, ws?.userId ?? null) ?? {}, options.clientMsgId));
+      return { ok: false };
+    }
     // B-1399: a STOP ends the run either by killing the CLI (controller aborted,
     // B-1136) or by an answered interrupt() after which the CLI may still exit
     // non-zero. Both are the user's own stop, never a failure.
@@ -5726,17 +5938,30 @@ async function queryClaudeSDK(command, options = {}, ws) {
     clientMsgId: options.clientMsgId,
   })) return;
   const releaseHarnessLaunch = beginHarnessLaunch('claude');
+  const runToken = Symbol('claude-run');
   try {
   const { sessionId } = options;
+  // ADR-173 rev.3 (always on): busy check and launch reservation in one tick, before
+  // any await — every entry (chat socket, /api/agent, git) passes through here.
+  const occupancy = claimClaudeRunLaunch(sessionId, ws?.userId ?? null, runToken);
+  if (occupancy) {
+    console.warn(`[ADR-173] refused a launch on session ${sessionId} (phase=${occupancy.phase})`);
+    ws.send(isSteerChatCommand(command)
+      ? steerRequiresSessionSteerFrame(sessionId, options.clientMsgId)
+      : sessionBusyFrame(sessionId, occupancy, options.clientMsgId));
+    options.permissionExecution?.notStarted?.();
+    return;
+  }
 
   // No resume requested → nothing to detect. Run once, plain.
   if (!sessionId) {
-    await runClaudeSDKQuery(command, options, ws);
+    await runClaudeSDKQuery(command, options, ws, { runToken });
     return;
   }
 
   const result = await runClaudeSDKQuery(command, options, ws, {
     suppressResumeMissError: true,
+    runToken,
   });
 
   if (!result?.resumeSessionMissing) {
@@ -5766,6 +5991,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       : {}),
   }));
   } finally {
+    if (options.sessionId) launchReservations.release(options.sessionId, runToken);
     releaseHarnessLaunch();
   }
 }
@@ -5836,6 +6062,13 @@ async function abortClaudeSDKSession(sessionId, rawWs = null) {
         `[WS-DIAG] sdk-abort fallback: requested=none resolved-by-connection=${resolvedId}`
       );
     }
+  }
+
+  // qa r2 #1: a launch that has not registered yet (the caller already authorized the stop).
+  const launch = !session && sessionId ? launchReservations.cancel(sessionId) : null;
+  if (launch) {
+    console.log(`[ADR-173] stopped launch on session ${sessionId} (aborted=${launch.aborted})`);
+    return { aborted: true, reason: null, sessionId };
   }
 
   if (!session) {
@@ -6036,6 +6269,8 @@ function getPendingApprovalsForSession(sessionId) {
         toolName: resolver._toolName || 'UnknownTool',
         // ADR-210: lets the listing keep input raw only for the run owner; stripped before sending.
         ownerUserId: resolver._ownerUserId ?? null,
+        // ADR-173 P5: only the starter may answer it (the UI shows it read-only to others).
+        externalIdentity: isExternalIdentityTool(resolver._toolName),
         input: resolver._input,
         context: resolver._context,
         sessionId,
@@ -6145,6 +6380,7 @@ export {
   createClaudeAgentSidecarPoller,
   queryClaudeSDK,
   abortClaudeSDKSession,
+  authorizeClaudeTurnStop,
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
   resolveToolApproval,

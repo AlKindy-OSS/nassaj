@@ -125,11 +125,14 @@ mock.module('./modules/providers/services/claude-usage.service.js', {
   namedExports: { claudeUsageService: { getUsage: async () => usageSummary } },
 });
 
+// ADR-173 qa r2 #1: a gate that holds a launch before its CLI is spawned (a hung launch).
+let profileGate: Promise<void> | null = null;
 mock.module('./services/isolation/resolve-claude-run-profile.js', {
   namedExports: {
-    resolveClaudeRunProfileOrThrow: async ({ baseEnv = process.env } = {}) => ({
-      env: { ...baseEnv }, effectiveEngine: null, engineHosts: null, pin: {},
-    }),
+    resolveClaudeRunProfileOrThrow: async ({ baseEnv = process.env } = {}) => {
+      if (profileGate) await profileGate;
+      return { env: { ...baseEnv }, effectiveEngine: null, engineHosts: null, pin: {} };
+    },
   },
 });
 
@@ -148,6 +151,8 @@ const sdk = (await import('./claude-sdk.js')) as unknown as {
   releaseScheduledWakeupHoldsForDrain: () => number;
   resetScheduledWakeupDrainForTests: () => void;
 };
+const { configureClaudeSharedTurnAuthority } = await import(
+  './modules/providers/list/claude/claude-shared-turn-authority.js');
 const liveness = (await import('./services/workflow-liveness.js')) as unknown as {
   registerWorkflowPid: (sessionId: string, pid: number) => void;
   forgetWorkflowPid: (sessionId: string) => void;
@@ -269,7 +274,7 @@ const ENV_KEYS = [
   'CLAUDE_SDK_CONTINUATION_WAIT_MS', 'CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS', 'CLAUDE_SDK_SCHEDULED_WAKEUP_MARGIN_MS',
   'CLAUDE_SDK_SCHEDULED_WAKEUP_HOLD', 'CLAUDE_SDK_SCHEDULED_WAKEUP_TOTAL_MAX_MS',
   'CLAUDE_SDK_SCHEDULED_WAKEUP_MAX_PULSES', 'CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_GRACE_MS',
-  'CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_POLL_MS',
+  'CLAUDE_SDK_SCHEDULED_WAKEUP_LISTENER_POLL_MS', 'CLAUDE_RUN_STUCK_AFTER_MS',
 ] as const;
 let savedEnv: Record<string, string | undefined> = {};
 let tmpConfigDir = '';
@@ -1345,4 +1350,255 @@ test('B-1699 H1: while draining, a far wake-up never extends the run\'s own cont
   assert.ok(Date.now() - t0 < 2000, `closed after ${Date.now() - t0}ms`);
   releaseMessageStream();
   await run;
+});
+
+// ── ADR-173 rev.3 P1: one run per session (foreign-run gate, launch reservation) ──
+// Always on, no flag. A sender who is not the active run's owner is refused
+// session_busy with the run's phase, BEFORE any hold is yielded, so a member can
+// never end another member's hold; the run owner's own path is unchanged.
+const runs = sdk as unknown as {
+  addSession: (...args: unknown[]) => boolean;
+  removeSession: (sessionId: string, token?: unknown) => boolean;
+  getSession: (sessionId: string) => { runToken?: unknown } | undefined;
+};
+
+/** A second member's socket with its own frame log. */
+function memberWs(userId = 2) {
+  const frames: Array<Record<string, unknown>> = [];
+  return { frames, ws: { send: (p: Record<string, unknown>) => { frames.push(p); }, userId, ws: { readyState: 1 } } };
+}
+
+async function foreignBusy(sessionId = SID, userId = 2) {
+  const member = memberWs(userId);
+  const queried = lastQueryArg;
+  await sdk.queryClaudeSDK('my turn', { cwd: process.cwd(), sessionId, clientMsgId: 'cmid-member' }, member.ws);
+  assert.equal(lastQueryArg, queried, 'the refused sender never reached query()');
+  const busy = member.frames.filter(p => p.code === 'session_busy');
+  assert.equal(busy.length, 1, `refused once: ${JSON.stringify(member.frames)}`);
+  assert.equal(busy[0].clientMsgId, 'cmid-member');
+  return busy[0];
+}
+
+test('ADR-173 H3: a member sending during another member\'s wake-up hold is refused; the hold stays', async () => {
+  process.env.CLAUDE_SDK_INPUT_CLOSE_GRACE_MS = '50';
+  scriptedMessages = wakeScenario('scheduleWakeup', 600_000).scheduling;
+  const { run } = await startRun({ sessionId: SID });
+  assert.equal(await promptClosedWithin(200), false, 'held for the wake-up');
+
+  const busy = await foreignBusy();
+  assert.deepEqual({ busyBy: busy.busyBy, phase: busy.phase, stuck: busy.stuck, canStop: busy.canStop },
+    { busyBy: 1, phase: 'scheduled_wake', stuck: false, canStop: false });
+  assert.equal(await promptClosedWithin(300), false, 'the owner\'s wake-up hold was not ended');
+  assert.equal(closeReason(), null);
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-173: a member is refused with phase running while a tool call is in flight, never stuck', async () => {
+  process.env.CLAUDE_RUN_STUCK_AFTER_MS = '1';
+  scriptedMessages = [systemInit, assistantToolUse('Bash', { command: 'sleep 999' })];
+  const { run } = await startRun({ sessionId: SID });
+  await sleep(20);
+  const busy = await foreignBusy();
+  assert.deepEqual({ phase: busy.phase, stuck: busy.stuck, canStop: busy.canStop },
+    { phase: 'running', stuck: false, canStop: false });
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-173: a running turn silent past the threshold with nothing in flight is stuck', async () => {
+  process.env.CLAUDE_RUN_STUCK_AFTER_MS = '1';
+  scriptedMessages = [systemInit, assistantText('thinking out loud')];
+  const { run } = await startRun({ sessionId: SID });
+  await sleep(20);
+  // P5: canStop answers for the refused sender — a shared writer may stop a stuck turn.
+  configureClaudeSharedTurnAuthority({ isSharedWriter: (_sid: string, uid: unknown) => uid === 2 });
+  try {
+    const busy = await foreignBusy();
+    assert.deepEqual({ busyBy: busy.busyBy, phase: busy.phase, stuck: busy.stuck, canStop: busy.canStop },
+      { busyBy: 1, phase: 'running', stuck: true, canStop: true });
+    const outsider = await foreignBusy(SID, 7);
+    assert.equal(outsider.canStop, false, 'a sender who is not a shared writer cannot stop it');
+  } finally {
+    configureClaudeSharedTurnAuthority({ isSharedWriter: () => false });
+  }
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-173: a run held after its result for a background task is post_result', async () => {
+  scriptedMessages = [systemInit, taskStarted('t1'), launchedToolResult, resultMsg];
+  const { run } = await startRun({ sessionId: SID });
+  const busy = await foreignBusy();
+  assert.equal(busy.phase, 'post_result');
+  assert.equal(busy.stuck, false);
+  releaseMessageStream();
+  await run;
+});
+
+test('ADR-173 H4: two simultaneous sends on one session start one run; the loser sees launching', async () => {
+  scriptedMessages = [resultMsg];
+  const ownerRun = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd(), sessionId: SID }, makeWs());
+  const busy = await foreignBusy();
+  assert.deepEqual({ busyBy: busy.busyBy, phase: busy.phase, canStop: busy.canStop },
+    { busyBy: 1, phase: 'launching', canStop: false });
+  const self = memberWs(1);
+  await sdk.queryClaudeSDK('again', { cwd: process.cwd(), sessionId: SID }, self.ws);
+  assert.equal(self.frames.filter(p => p.code === 'session_busy' && p.phase === 'launching').length, 1,
+    'a second launch by the same user is refused too');
+  await queryStarted;
+  releaseScriptedMessages();
+  releaseMessageStream();
+  await ownerRun;
+  assert.ok(lastQueryArg, 'the first launcher ran');
+});
+
+test('ADR-173: the run owner\'s own send is not refused by the foreign gate', async () => {
+  // Its own id: earlier tests leave live mirrors on SID, which B-SEC-DUP-RUN counts.
+  const sid = 'adr173-owner-session-0001';
+  scriptedMessages = [{ ...systemInit, session_id: sid }, { ...assistantText('working'), session_id: sid }];
+  const { run } = await startRun({ sessionId: sid });
+  const owner = memberWs(1);
+  const second = sdk.queryClaudeSDK('more', { cwd: process.cwd(), sessionId: sid }, owner.ws);
+  await sleep(100);
+  const busy = owner.frames.filter(p => p.code === 'session_busy');
+  assert.equal(busy.length, 0, 'a listener-less owner run is taken over as before (B-SEC-DUP-RUN)');
+  releaseMessageStream();
+  await run;
+  await second;
+});
+
+test('ADR-173 qa condition 2: addSession refuses a second registration of a different run', () => {
+  const sid = 'adr173-register-0001';
+  const first = Symbol('first');
+  const liveOwner = { userId: 1, isPrimarySocketAlive: () => true };
+  assert.equal(runs.addSession(sid, {}, [], null, liveOwner, null, null, first), true);
+  assert.equal(runs.addSession(sid, {}, [], null, { userId: 2 }, null, null, Symbol('foreign')), false,
+    'another member never replaces an active run');
+  assert.equal(runs.addSession(sid, {}, [], null, { userId: 1 }, null, null, Symbol('second')), false,
+    'nor does a second live run of the owner');
+  assert.equal(runs.getSession(sid)?.runToken, first);
+  assert.equal(runs.addSession(sid, {}, [], null, liveOwner, null, null, first), true,
+    'the same run re-registers (eager id, then the reported id)');
+  runs.removeSession(sid, first);
+
+  const ghost = Symbol('ghost');
+  assert.equal(runs.addSession(sid, {}, [], null, { userId: 1 }, null, null, ghost), true);
+  const takeover = Symbol('takeover');
+  assert.equal(runs.addSession(sid, {}, [], null, { userId: 1 }, null, null, takeover), true,
+    'the owner still takes over its own listener-less ghost (unchanged)');
+  assert.equal(runs.addSession(sid, {}, [], null, { userId: 2 }, null, null, Symbol('foreign')), false,
+    'a foreign registration is refused even over a ghost');
+  runs.removeSession(sid, takeover);
+});
+
+test('ADR-173 M-a: a run refused at registration is aborted, not left running', async () => {
+  const sid = 'adr173-refused-abort-0001';
+  const foreign = Symbol('foreign');
+  assert.equal(runs.addSession(sid, {}, [], null, { userId: 2, isPrimarySocketAlive: () => true },
+    null, null, foreign), true);
+  try {
+    // A new launch (no reservation) whose CLI reports the foreign run's session id.
+    scriptedMessages = [{ ...systemInit, session_id: sid }];
+    const ws = makeWs();
+    const run = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd() }, ws);
+    await queryStarted;
+    await firstPrompt;
+    releaseScriptedMessages();
+    await sleep(100);
+    const signal = (lastQueryArg?.options?.abortController as AbortController | undefined)?.signal;
+    // Read while the CLI stream is still open: the abort must not wait for the stream to end.
+    const abortedWhileOpen = signal?.aborted;
+    releaseMessageStream();
+    await run;
+    assert.equal(abortedWhileOpen, true, 'the refused run\'s CLI is aborted at once');
+    assert.ok(sentPayloads.some(p => p.code === 'session_busy'), 'the refusal is sent');
+    assert.equal(runs.getSession(sid)?.runToken, foreign, 'the foreign run is untouched');
+  } finally {
+    runs.removeSession(sid, foreign);
+  }
+});
+
+test('ADR-173 M-b: a silent run with an open tool call whose CLI died is stuck', async () => {
+  process.env.CLAUDE_RUN_STUCK_AFTER_MS = '1';
+  scriptedMessages = [systemInit, assistantToolUse('Bash', { command: 'sleep 999' })];
+  const { run } = await startRun({ sessionId: SID });
+  await sleep(20);
+  assert.equal((await foreignBusy()).stuck, false, 'liveness unknown: an open tool call is not stuck');
+  // A pid that cannot exist (> pid_max): recorded for the session, then gone.
+  liveness.registerWorkflowPid(SID, 2 ** 30);
+  try {
+    assert.equal((await foreignBusy()).stuck, true, 'the dead CLI can no longer answer its tool call');
+  } finally {
+    liveness.forgetWorkflowPid(SID);
+  }
+  releaseMessageStream();
+  await run;
+});
+
+/** A launch on `sid` held before its CLI is spawned: it stays 'launching' until `release()`. */
+async function hungLaunch(sid: string) {
+  resetQueryHarness();
+  let release: () => void = () => {};
+  profileGate = new Promise<void>((resolve) => { release = resolve; });
+  scriptedMessages = [{ ...systemInit, session_id: sid }];
+  const ws = makeWs();
+  const run = sdk.queryClaudeSDK(PROMPT, { cwd: process.cwd(), sessionId: sid }, ws);
+  await sleep(50);
+  return { run, release: () => { profileGate = null; release(); } };
+}
+
+/** A fresh launch on `sid` (member 1, the only user in this schema) that is not refused as busy. */
+async function launchesFree(sid: string) {
+  const member = memberWs(1);
+  resetQueryHarness();
+  scriptedMessages = [{ ...resultMsg, session_id: sid }];
+  const next = sdk.queryClaudeSDK('mine now', { cwd: process.cwd(), sessionId: sid }, member.ws);
+  await queryStarted;
+  assert.equal(member.frames.some(p => p.code === 'session_busy'), false, 'the session is free again');
+  releaseScriptedMessages();
+  releaseMessageStream();
+  await next;
+}
+
+test('ADR-173 qa r2 #1: a hung launch is freed by a privileged stop and never spawns later', async () => {
+  const sid = 'adr173-hung-launch-0001';
+  const { run, release } = await hungLaunch(sid);
+  try {
+    const outsider = await foreignBusy(sid, 2);
+    assert.deepEqual([outsider.phase, outsider.canStop], ['launching', false], 'a plain member cannot stop it');
+    configureClaudeSharedTurnAuthority({ isStopPrivileged: (_s: string, uid: unknown) => uid === 9 });
+    try {
+      assert.equal((await foreignBusy(sid, 9)).canStop, true, 'the project owner / admin can stop a launch');
+      const stopSdk = sdk as unknown as { authorizeClaudeTurnStop: (s: string, u: unknown) => { allowed: boolean } };
+      assert.equal(stopSdk.authorizeClaudeTurnStop(sid, 2).allowed, false, 'a plain member is refused');
+      assert.equal(stopSdk.authorizeClaudeTurnStop(sid, 9).allowed, true);
+    } finally {
+      configureClaudeSharedTurnAuthority({ isStopPrivileged: () => false });
+    }
+    const stopped = await sdk.abortClaudeSDKSession(sid);
+    assert.equal(stopped.aborted, true, 'the stop reaches a session that has no registered run yet');
+  } finally {
+    release();
+  }
+  await run;
+  assert.equal(lastQueryArg, null, 'the cancelled launch never spawned a CLI');
+  assert.equal(runs.getSession(sid), undefined, 'and never registered');
+  await launchesFree(sid);
+});
+
+test('ADR-173 qa r2 #1: the valve aborts an overdue launch and frees it; it never spawns', async () => {
+  process.env.CLAUDE_LAUNCH_RESERVATION_MAX_MS = '50';
+  const sid = 'adr173-hung-launch-0002';
+  try {
+    const { run, release } = await hungLaunch(sid);
+    await sleep(150);
+    release();
+    await run;
+    assert.equal(lastQueryArg, null, 'a revoked launch never spawns: no second CLI beside the next run');
+    assert.equal(runs.getSession(sid), undefined);
+    await launchesFree(sid);
+  } finally {
+    delete process.env.CLAUDE_LAUNCH_RESERVATION_MAX_MS;
+  }
 });

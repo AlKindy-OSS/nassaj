@@ -65,6 +65,7 @@ import {
   type WorkspaceTopologyFence,
 } from '@/modules/database/index.js';
 import { OFFICIAL_ENGINE, PIN_SOURCE } from '@/services/isolation/engine-pin.js';
+import { ENGINE_RESTAMP_LOCAL_PIN, restampCrossesLocalPin } from '@/services/isolation/local-engine-pin.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 import { isVendorSecretProvider } from '@/services/isolation/provider-secrets-store.js';
 import { withHarnessFilesLock } from '@/services/isolation/harness-files-lock.js';
@@ -106,14 +107,14 @@ import {
   isRetiredProvider,
 } from '../../../shared/retiredProviders.js';
 
-import claudeLocalRoutes from './claude-local.routes.js';
 import localModelsRoutes from './local-models.routes.js';
+import localOverlayRoutes from './local-overlay.routes.js';
 import { HistoryHttpSink } from './services/history-response.service.js';
 
 const router = express.Router();
 router.use('/local', localModelsRoutes);
-// ADR-227 / T-2098 stage 3b: the Claude body's local overlay route.
-router.use('/claude', claudeLocalRoutes);
+// ADR-227 (T-2098 stage 3b, T-2107 stage 5): GET /:body/local-overlay (claude, codex).
+router.use(localOverlayRoutes);
 
 const readPathParam = (value: unknown, name: string): string => {
   if (typeof value === 'string') {
@@ -1792,6 +1793,15 @@ router.post(
       });
     }
 
+    // ADR-227 / T-2107: never across a local pin, in either direction (checked
+    // before validation so a local target is refused by name, not as unknown).
+    const requestedEngine = typeof req.body?.engine === 'string' ? req.body.engine.trim() : '';
+    if (restampCrossesLocalPin(sessionsDb.getSessionEnginePin(sessionId)?.engine ?? null, requestedEngine)) {
+      throw new AppError('A chat on a local model server cannot move to another engine, nor another chat onto one.', {
+        code: ENGINE_RESTAMP_LOCAL_PIN,
+        statusCode: 409,
+      });
+    }
     const { engine, model, acknowledgedExport } = parseEngineRestampPayload(req.body);
 
     // A vendor engine with no resolvable key must fail VISIBLY here rather than

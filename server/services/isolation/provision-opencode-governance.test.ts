@@ -76,6 +76,9 @@ const NEUTRAL_FP = sha256(neutralContent);
 
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 const { provisionUserDirs, userConfigDir } = await import('./provision-user-dirs.js');
+const { OPENCODE_CONFIG_FILENAME, GLM_CARRIER_BASE_URL, GLM_CARRIER_PROVIDER_ID } = await import(
+  './opencode-config-material.js'
+);
 
 await initializeDatabase();
 
@@ -210,5 +213,57 @@ describe('provisionUserDirs — OpenCode carrier governance seam (GL-5, ADR-062)
       NEUTRAL_FP,
       'copy still matches the neutral source after a repeat pass',
     );
+  });
+});
+
+// Moved from the deleted provision-kimi-home.test.ts (ADR-229): the GL-2 opencode.json
+// is OpenCode's own seam, and it carries the glm block the qwen-plan/kimi-k3 engines
+// keep running on after the native Kimi/Qwen bodies were removed.
+describe('provisionUserDirs — governed opencode.json (GL-2) write-through safety', () => {
+  /** Asserts a member's opencode.json is a real 0444 file carrying the glm block. */
+  function assertGovernedOpenCodeJson(userId: number): void {
+    const ocFile = path.join(opencodeHome(userId), OPENCODE_CONFIG_FILENAME);
+    assert.equal(fs.lstatSync(ocFile).isSymbolicLink(), false, 'opencode.json is a real file');
+    assert.equal(fs.statSync(ocFile).mode & 0o777, 0o444, 'opencode.json is read-only 0444');
+    const glm = JSON.parse(fs.readFileSync(ocFile, 'utf8')).provider[GLM_CARRIER_PROVIDER_ID];
+    assert.ok(glm, 'opencode.json carries the glm provider block');
+    // This pins materialization of the ONE carrier constant, not the URL choice itself.
+    assert.equal(glm.options.baseURL, GLM_CARRIER_BASE_URL);
+    assert.equal(new URL(glm.options.baseURL).host, 'api.z.ai');
+  }
+
+  it("writes the member's opencode.json 0444 with the glm block into the per-user dir", () => {
+    const USER = 8507;
+    provisionUserDirs(USER);
+    assertGovernedOpenCodeJson(USER);
+  });
+
+  it("never writes opencode.json THROUGH a legacy whole-dir symlink into the operator's", () => {
+    // The operator has an opencode.json of their own; a pre-GL-5 member tree links the
+    // whole config dir to the operator's. Provisioning must not follow that link.
+    const operatorOcFile = path.join(OPERATOR_OPENCODE, OPENCODE_CONFIG_FILENAME);
+    const operatorBytes = '{"operator":"own opencode.json, never written by a member pass"}\n';
+    fs.writeFileSync(operatorOcFile, operatorBytes);
+    try {
+      const USER = 8508;
+      fs.mkdirSync(userConfigDir(USER, '.config'), { recursive: true });
+      fs.symlinkSync(OPERATOR_OPENCODE, opencodeHome(USER));
+
+      provisionUserDirs(USER);
+
+      assert.equal(
+        fs.lstatSync(opencodeHome(USER)).isSymbolicLink(),
+        false,
+        'the legacy link was replaced by a real per-user dir',
+      );
+      assertGovernedOpenCodeJson(USER);
+      assert.equal(
+        fs.readFileSync(operatorOcFile, 'utf8'),
+        operatorBytes,
+        "the operator's opencode.json is byte-identical: nothing was written through",
+      );
+    } finally {
+      fs.rmSync(operatorOcFile, { force: true });
+    }
   });
 });

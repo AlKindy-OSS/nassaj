@@ -3,7 +3,7 @@
  *
  * المصادر الموجودة في الباك-إند:
  *  • claude  → خدمة منفصلة (useClaudeUsage / GET /api/providers/claude/usage)
- *  • codex / glm / kimi → /api/providers/:provider/quota (QUOTA_WINDOW_PROVIDERS)
+ *  • codex / glm → /api/providers/:provider/quota (QUOTA_WINDOW_PROVIDERS)
  *  • بقية المزوّدات → لا مصدر، رسالة محايدة
  *
  * القاعدة: كلا الـhook يُستدعيان دائماً (rules of hooks) والـenabled يوقفهما.
@@ -30,7 +30,7 @@ import ClaudeUsageBar from '../../../../../../quick-settings-panel/view/ClaudeUs
 import SettingsSection from '../../../../SettingsSection';
 
 /** المزوّدات التي يدعمها /api/providers/:provider/quota في الباك-إند. */
-const QUOTA_WINDOW_PROVIDERS = new Set<string>(['codex', 'glm', 'kimi']);
+const QUOTA_WINDOW_PROVIDERS = new Set<string>(['codex', 'glm']);
 
 /** نوافذ حساب Claude المعروضة — نفس ترتيب ClaudeUsageSection. */
 const CLAUDE_WINDOWS = [
@@ -145,7 +145,7 @@ export default function AgentUsageSection({ agent }: AgentUsageSectionProps) {
         </>
       )}
 
-      {/* ───── Codex / GLM / Kimi ───── */}
+      {/* ───── Codex / GLM ───── */}
       {isQuotaProvider && (
         <>
           {(providerQuota.status === 'idle' || providerQuota.status === 'loading') && (

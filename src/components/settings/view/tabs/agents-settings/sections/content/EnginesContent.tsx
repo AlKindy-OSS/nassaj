@@ -287,7 +287,9 @@ export function resolveRowStatus(
   if (credential === 'stored' && declared === 'blocked_by_owner') {
     return 'ready';
   }
-  if (credential === 'missing' && (declared === 'available' || declared === 'blocked_by_owner')) {
+  // A pair with no slot has no credential to miss (T-2107: a local server's key is
+  // the member's own, set on the server row, never here).
+  if (credential === 'missing' && hasSlot && (declared === 'available' || declared === 'blocked_by_owner')) {
     return 'needs_credential';
   }
   return declared;

@@ -12,6 +12,30 @@ export interface WhatsNewEntry {
 }
 
 export const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '2.3.3.2': {
+    ar: [
+      'محادثات OpenCode على نموذج محلي صغير تعمل بتعليمات مختصرة تناسب سعته.',
+      'المنسّق المحلي بلا جلب ويب، ويفوّض إلى خمسة وكلاء فقط.',
+      'وكيل البحث وحده يعمل على نموذج سحابي مجاني، ولا يقرأ ملفات الأسرار.',
+      'Codex يعمل على خادم النماذج المحلي الخاص بك، بمفتاح يفعّله المالك أو المدير.',
+      'أدوار النماذج المحلية تُحسب بتكلفة صفر.',
+      'إعدادات DeepSeek Harness ظاهرة في الإعدادات.',
+      'تستطيع أن تكتب في محادثة Claude بدأها زميلك في المشروع نفسه.',
+      'يحدّد المالك أكبر حجم للمرفق بين 1 و200 ميغابايت.',
+      'لم تعد تعليمات النظام تظهر في سجلّ محادثات Antigravity.',
+    ],
+    en: [
+      'OpenCode chats on a small local model run with compact instructions that fit its context.',
+      'The local coordinator has no web fetch and delegates to five agents only.',
+      'Only the researcher runs on a free cloud model, and it cannot read secret files.',
+      'Codex runs on your own local model server, behind a switch the owner or an admin turns on.',
+      'Local model turns are booked at zero cost.',
+      'The DeepSeek Harness settings are visible in Settings.',
+      'You can write in a Claude conversation a teammate started in the same project.',
+      'The owner sets the largest attachment size, between 1 and 200 MB.',
+      'System instructions no longer show in Antigravity chat history.',
+    ],
+  },
   '2.3.3.1': {
     ar: [
       'تغيير جوهري: لم يعد أي عضو يعمل على اشتراك المالك ضمنياً. اربط اشتراكك الخاص أو اطلب منحة من المالك.',

@@ -104,7 +104,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -141,6 +140,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "一项安全检查未能及时响应，因此未检查此操作。",
+      "no_answer": "一项安全检查未给出有效答复，因此未检查此操作。"
+    },
+    "hookFailed": "检查此步骤时有一个钩子失败。",
+    "hookDetails": "显示详情",
+    "sessionWritesLost": {
+      "ENOSPC": "服务器磁盘已满，因此本会话的部分内容未保存。",
+      "EDQUOT": "服务器磁盘配额已用尽，因此本会话的部分内容未保存。",
+      "unknown": "本会话的部分内容无法保存到磁盘。",
+      "transcript": "稍后恢复此对话时可能缺失部分内容。",
+      "globalConfig": "最近对 Claude 设置的更改未保存。"
+    },
+    "credentialExpiring": {
+      "soon": "你的 Claude 登录将于 {{date}} 到期。请重新关联 Claude 帐户，以免对话中断。",
+      "expired": "你的 Claude 登录可能已过期（{{date}}）。请重新关联 Claude 帐户以继续对话。",
+      "action": "打开帐户设置"
     }
   },
   "systemMessage": {
@@ -370,7 +387,7 @@
     "removeFile": "移除文件",
     "uploading": "上传中…",
     "errorType": "不支持此文件类型",
-    "errorSize": "文件过大（最大 50 MB）",
+    "errorSize": "文件过大（最大 {{maxMb}} MB）",
     "errorCount": "附加文件过多（最多 {{max}} 个）"
   },
   "effortMode": {
@@ -428,7 +445,6 @@
       "antigravity": "已准备好通过 {{model}} 使用 Antigravity（agy）。请在下方输入消息。",
       "opencode": "准备好使用带有 {{model}} 的 OpenCode。请在下方开始输入您的消息。",
       "default": "请在上方选择一个编程智能体以开始",
-      "kimi": "准备好使用带有 {{model}} 的 Kimi。请在下方开始输入您的消息。",
       "deepseek": "准备好使用带有 {{model}} 的 DeepSeek。请在下方开始输入您的消息。",
       "glm": "准备好使用带有 {{model}} 的 GLM。请在下方开始输入您的消息。",
       "claudeEngine": "已就绪：Claude 编程智能体在 {{provider}} 上使用 {{model}} 运行。请在下方开始输入您的消息。"
@@ -504,7 +520,8 @@
       "working": "工作中",
       "computing": "计算中",
       "reasoning": "推理中",
-      "waitingPermission": "等待授权"
+      "waitingPermission": "等待授权",
+      "runningChecks": "正在运行检查"
     },
     "state": {
       "live": "实时",

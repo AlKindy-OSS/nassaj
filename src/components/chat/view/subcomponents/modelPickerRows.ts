@@ -145,8 +145,6 @@ const NATIVE_ENGINE: Partial<Record<LLMProvider, { key: string; vars: Record<str
   codex: { key: 'subscription', vars: { engine: 'OpenAI' } },
   cursor: { key: 'subscription', vars: { engine: 'Cursor' } },
   antigravity: { key: 'subscription', vars: { engine: 'Antigravity' } },
-  hermes: { key: 'subscription', vars: { engine: 'Nous' } },
-  kimi: { key: 'native', vars: { engine: 'Moonshot' } },
   dsh: { key: 'apiKey', vars: { engine: 'DeepSeek' } },
 };
 
@@ -192,11 +190,7 @@ const splitOpenCodeId = (id: string): { upstream: string; slug: string } => {
 };
 
 /** The engine descriptor for one model id under one body. */
-function engineFor(
-  body: LLMProvider,
-  modelId: string,
-  authMode?: 'api_key' | 'subscription_oauth' | 'both' | null,
-): PickerRow['engine'] {
+function engineFor(body: LLMProvider, modelId: string): PickerRow['engine'] {
   if (body === 'opencode') {
     const { upstream } = splitOpenCodeId(modelId);
     if (/^nassaj_local_[a-f0-9]{32}$/.test(upstream)) {
@@ -208,15 +202,6 @@ function engineFor(
     }
     // An upstream we have not characterised: name it and claim nothing else.
     return { key: 'upstream', vars: { engine: upstream || 'opencode' } };
-  }
-
-  // kimi has TWO paths: subscription (Kimi Code OAuth) and API key. The
-  // static `native` label hid that difference — now the mode decides.
-  if (body === 'kimi' && authMode) {
-    if (authMode === 'subscription_oauth' || authMode === 'both') {
-      return { key: 'subscription', vars: { engine: 'Kimi Code' } };
-    }
-    return { key: 'apiKey', vars: { engine: 'Moonshot' } };
   }
 
   return NATIVE_ENGINE[body] ?? { key: 'upstream', vars: { engine: body } };
@@ -260,7 +245,7 @@ export function rowsForBody(
     model: option.value,
     label: option.label,
     description: option.description === 'local' ? undefined : option.description,
-    engine: engineFor(body, option.value, bodyAuthMode),
+    engine: engineFor(body, option.value),
     engineProvider: null,
     locked: false,
     authMode: bodyAuthMode ?? undefined,

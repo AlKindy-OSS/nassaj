@@ -292,19 +292,18 @@ describe('B-144 get-active-sessions membership filter + provider coverage', () =
     assert.deepEqual([...msg.sessions.claude].sort(), ['sess-private', 'sess-public']);
   });
 
-  test('kimi/glm are included and filtered; the deleted deepseek body has no entry (T-2088)', () => {
+  test('glm is included and filtered; the deleted deepseek, kimi and qwen bodies have no entry', () => {
     const { ws } = connect(OUTSIDER_USER_ID, {
-      getActiveKimiSessions: () => ['sess-public'],
       getActiveGlmSessions: () => ['sess-public', 'sess-private'],
     });
     ws.emit('message', JSON.stringify({ type: 'get-active-sessions' }));
 
     const msg = findSent(ws, 'active-sessions') as { sessions: Record<string, string[]> } | undefined;
     assert.ok(msg);
-    assert.ok('kimi' in msg.sessions, 'kimi provider present');
     assert.ok('glm' in msg.sessions, 'glm provider present');
-    assert.equal('deepseek' in msg.sessions, false, 'no launcher, so no deepseek run list');
-    assert.deepEqual(msg.sessions.kimi, ['sess-public']);
+    for (const removed of ['deepseek', 'kimi', 'qwen']) {
+      assert.equal(removed in msg.sessions, false, `no launcher, so no ${removed} run list`);
+    }
     assert.deepEqual(msg.sessions.glm, ['sess-public'], 'only the public glm id survives the filter');
   });
 });

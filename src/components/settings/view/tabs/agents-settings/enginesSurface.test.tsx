@@ -168,7 +168,8 @@ describe('ADR-085 — one resolved status per row, and no second writer', () => 
    * (‏ADR-085: كاتبٌ واحد لكل سرّ). والمضاف: جملةٌ تُسمّي الحقيقة.
    */
   it('يعرض جملةً لا صفوفاً لجسمٍ كلُّ خلاياه حاجز (T-1152 ثم T-1232)', () => {
-    const { container } = render(<EnginesContent agent="codex" />);
+    // T-2107: codex × local opened, so Codex lists a row; Antigravity has none.
+    const { container } = render(<EnginesContent agent="antigravity" />);
 
     // لا صفوفَ محرّكات: لا اسمَ محرّكٍ ولا شارةَ حالةٍ ولا مضيف.
     expect(screen.queryByText('GLM')).toBeNull();

@@ -12,7 +12,7 @@
  * The fixtures are realistic, not synthetic: real users are created in the DB,
  * the owner is recorded through the exact production run-path call
  * (participantsDb.recordSpawn), and a real vendor transcript .jsonl is written
- * to disk and resolved through the live provider. The provider choice (kimi)
+ * to disk and resolved through the live provider. The provider choice (glm; kimi until ADR-229 removed its body)
  * is incidental — the gate sits in the service ahead of provider resolution.
  *
  * node:test does not isolate state, so each scenario gets its own DB + temp
@@ -47,7 +47,7 @@ type Fixture = {
 };
 
 /**
- * Builds an isolated DB + temp home, writes a real kimi vendor transcript for
+ * Builds an isolated DB + temp home, writes a real glm vendor transcript for
  * SESSION_ID, registers the session row, and records `ownerUsername` as the
  * session owner through the production spawn path. Returns the created user ids.
  */
@@ -70,8 +70,8 @@ async function withOwnedSession(
     const ownerId = userDb.createUser('alice', 'hash-a', 'user').id;
     const outsiderId = userDb.createUser('bob', 'hash-b', 'user').id;
 
-    // production-shaped synthetic transcripts on disk, resolved through the live kimi provider path.
-    const dir = path.join(tempRoot, '.nassaj-vendor-sessions', 'kimi', vendorProjectHash(PROJECT_PATH));
+    // production-shaped synthetic transcripts on disk, resolved through the live glm provider path.
+    const dir = path.join(tempRoot, '.nassaj-vendor-sessions', 'glm', vendorProjectHash(PROJECT_PATH));
     await fs.mkdir(dir, { recursive: true });
     const lines = [
       JSON.stringify({ type: 'meta', projectPath: PROJECT_PATH, sessionName: 'secret' }),
@@ -80,7 +80,7 @@ async function withOwnedSession(
     ];
     await fs.writeFile(path.join(dir, `${SESSION_ID}.jsonl`), `${lines.join('\n')}\n`);
 
-    sessionsDb.createSession(SESSION_ID, 'kimi', PROJECT_PATH);
+    sessionsDb.createSession(SESSION_ID, 'glm', PROJECT_PATH);
     // Production run-path ownership stamp: alice is the first (owner) participant.
     participantsDb.recordSpawn(SESSION_ID, ownerId);
 

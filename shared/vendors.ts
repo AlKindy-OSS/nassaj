@@ -169,12 +169,6 @@ export const VENDORS: readonly Vendor[] = Object.freeze([
     keyUrl: 'https://platform.moonshot.ai/console/api-keys',
     consumers: [
       {
-        axis: 'body',
-        body: 'kimi',
-        labelKey: 'vendors.consumer.kimiBody',
-        labelDefault: 'the Kimi agent',
-      },
-      {
         axis: 'engine',
         body: 'claude',
         engine: 'kimi',

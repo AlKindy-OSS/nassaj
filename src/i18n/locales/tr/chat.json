@@ -104,7 +104,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -141,6 +140,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "Bir güvenlik denetimi zamanında yanıt vermedi, bu yüzden bu işlem denetlenmedi.",
+      "no_answer": "Bir güvenlik denetimi kullanılabilir bir yanıt vermedi, bu yüzden bu işlem denetlenmedi."
+    },
+    "hookFailed": "Bu adım denetlenirken bir hook başarısız oldu.",
+    "hookDetails": "Ayrıntıları göster",
+    "sessionWritesLost": {
+      "ENOSPC": "Sunucu diski dolu, bu yüzden bu oturumun bir kısmı kaydedilmedi.",
+      "EDQUOT": "Sunucunun disk kotası doldu, bu yüzden bu oturumun bir kısmı kaydedilmedi.",
+      "unknown": "Bu oturumun bir kısmı diske kaydedilemedi.",
+      "transcript": "Bu konuşmaya daha sonra devam edildiğinde bir kısmı eksik olabilir.",
+      "globalConfig": "Son Claude ayar değişiklikleri kaydedilmedi."
+    },
+    "credentialExpiring": {
+      "soon": "Claude oturum açmanız {{date}} tarihinde sona eriyor. Kesintisiz devam etmek için Claude hesabınızı yeniden bağlayın.",
+      "expired": "Claude oturum açmanız muhtemelen sona erdi ({{date}}). Devam etmek için Claude hesabınızı yeniden bağlayın.",
+      "action": "Hesap ayarlarını aç"
     }
   },
   "systemMessage": {
@@ -371,7 +388,7 @@
     "removeFile": "Dosyayı kaldır",
     "uploading": "Yükleniyor…",
     "errorType": "Dosya türüne izin verilmiyor",
-    "errorSize": "Dosya çok büyük (maks. 50 MB)",
+    "errorSize": "Dosya çok büyük (maks. {{maxMb}} MB)",
     "errorCount": "Çok fazla dosya eklendi (maks. {{max}})"
   },
   "effortMode": {
@@ -429,7 +446,6 @@
       "antigravity": "Antigravity (agy) {{model}} ile kullanıma hazır. Mesajınızı aşağıya yazın.",
       "opencode": "OpenCode'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "default": "Başlamak için yukarıdan bir kodlama ajanı seç",
-      "kimi": "Kimi'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "deepseek": "DeepSeek'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "glm": "GLM'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "claudeEngine": "Hazır: Claude kodlama ajanı {{provider}} üzerinde {{model}} ile çalışıyor. Mesajını aşağıya yazmaya başla."
@@ -505,7 +521,8 @@
       "working": "Çalışıyor",
       "computing": "Hesaplıyor",
       "reasoning": "Mantık yürütüyor",
-      "waitingPermission": "İzin bekleniyor"
+      "waitingPermission": "İzin bekleniyor",
+      "runningChecks": "Denetimler çalışıyor"
     },
     "state": {
       "live": "Canlı",

@@ -127,10 +127,10 @@ test('B-1468: a 423 STORE_ACCESS_UNPROVABLE body names unchecked processes as { 
 
 test('only an owner may mutate; admin/member/anonymous are refused', async () => {
   for (const user of [{ id: 2, role: 'admin' }, { id: 3, role: 'user' }]) {
-    const res = await call('POST', '/api/providers/kimi/update', user);
+    const res = await call('POST', '/api/providers/cursor/update', user);
     assert.equal(res.status, 403);
   }
-  const anonymous = await call('POST', '/api/providers/kimi/update', null);
+  const anonymous = await call('POST', '/api/providers/cursor/update', null);
   assert.equal(anonymous.status, 401);
 });
 
@@ -138,7 +138,7 @@ test('authenticated owner/admin/member may read status without host details', as
   for (const user of [
     { id: 1, role: 'owner' }, { id: 2, role: 'admin' }, { id: 3, role: 'user' },
   ]) {
-    const res = await call('GET', '/api/providers/kimi/version-status', user);
+    const res = await call('GET', '/api/providers/cursor/version-status', user);
     assert.equal(res.status, 200);
     const keys = Object.keys(res.json).sort();
     const required = [
@@ -146,7 +146,7 @@ test('authenticated owner/admin/member may read status without host details', as
       'reason', 'state', 'upToDate', 'updatable', 'updating',
     ];
     // T-1871 optional fields carry versions/verdicts only (no paths); their
-    // presence depends on whether this host has a readable kimi binary.
+    // presence depends on whether this host has a readable cursor binary.
     const optional = ['drift', 'manualOnly', 'notices', 'restoreCompatible'];
     for (const key of required) assert.ok(keys.includes(key), `missing ${key}`);
     for (const key of keys) {
@@ -156,9 +156,9 @@ test('authenticated owner/admin/member may read status without host details', as
 });
 
 test('GET reflects a durable recovery fence after in-memory state is absent', async () => {
-  appConfigDb.set('harness_update_recovery_failed:qwen', '1');
+  appConfigDb.set('harness_update_recovery_failed:cursor', '1');
   try {
-    const res = await call('GET', '/api/providers/qwen/version-status', { id: 1, role: 'owner' });
+    const res = await call('GET', '/api/providers/cursor/version-status', { id: 1, role: 'owner' });
     assert.equal(res.status, 200);
     assert.equal(res.json.reason, 'recovery_failed');
     assert.equal(res.json.updatable, false);
@@ -166,22 +166,33 @@ test('GET reflects a durable recovery fence after in-memory state is absent', as
     assert.equal(res.json.activeJobId, null);
     assert.equal(res.json.installedVersion, null);
   } finally {
-    appConfigDb.set('harness_update_recovery_failed:qwen', '');
+    appConfigDb.set('harness_update_recovery_failed:cursor', '');
   }
 });
 
 test('a harness already updating answers 409 with { activeJobId }', async () => {
-  _resetHarnessLeases();
-  // qwen: a legacy (non-snapshot) harness, so the lease check is the first refusal.
-  acquireHarnessLease('qwen', 'job-held-by-another-run');
-  const res = await call('POST', '/api/providers/qwen/update', { id: 1, role: 'owner' });
-  assert.equal(res.status, 409);
-  assert.deepEqual(res.json, {
-    code: 'HARNESS_UPDATE_IN_PROGRESS',
-    message: 'Harness action refused (HARNESS_UPDATE_IN_PROGRESS).',
-    activeJobId: 'job-held-by-another-run',
-  });
-  _resetHarnessLeases();
+  // agy: a snapshot harness installed in a fixture world, so preflight passes and
+  // the lease is the refusal (the npm-prefix qwen fixture left with ADR-229).
+  const savedHome = process.env.HOME;
+  const w = makeWorld();
+  try {
+    installSingleFile(w, '.local/bin/agy', 'agy 1.2.11');
+    _setSnapshotRuntimeOverrides(w.rt);
+    _resetHarnessLeases();
+    acquireHarnessLease('antigravity', 'job-held-by-another-run');
+    const res = await call('POST', '/api/providers/antigravity/update', { id: 1, role: 'owner' });
+    assert.equal(res.status, 409);
+    assert.deepEqual(res.json, {
+      code: 'HARNESS_UPDATE_IN_PROGRESS',
+      message: 'Harness action refused (HARNESS_UPDATE_IN_PROGRESS).',
+      activeJobId: 'job-held-by-another-run',
+    });
+  } finally {
+    _setSnapshotRuntimeOverrides(null);
+    _resetHarnessLeases();
+    process.env.HOME = savedHome;
+    removeFixture(w.root);
+  }
 });
 
 test('an unknown harness id is a clean 404, never a crash', async () => {

@@ -22,7 +22,7 @@ import { AppError } from '@/shared/utils.js';
 export type GovernanceMode = 'governed' | 'exempt';
 export const GOVERNANCE_EXEMPTION_TTL_MS = 24 * 60 * 60 * 1_000;
 export const GOVERNANCE_CHANNEL_PROVIDERS: readonly LLMProvider[] = Object.freeze([
-  'codex', 'opencode', 'kimi', 'antigravity', 'claude',
+  'codex', 'opencode', 'antigravity', 'claude',
 ] as LLMProvider[]);
 
 const expiryTimers = new Map<string, NodeJS.Timeout>();

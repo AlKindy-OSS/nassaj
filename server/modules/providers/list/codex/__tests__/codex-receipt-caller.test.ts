@@ -4,6 +4,24 @@ import test from 'node:test';
 import { attachCodexCompletionProof, readCodexCompletionProof } from '@/shared/utils.js';
 
 import { createCodexReceiptCallerFixture } from '../../../../../../tests/helpers/codex-receipt-caller-fixture.js';
+import { unboundCodexIdentifiers } from '../../../../../../tests/helpers/codex-receipt-current-caller.mjs';
+
+/**
+ * B-1794: names the fixture leaves unbound on purpose — each sits on a path no fixture
+ * test drives (history transfer, missing cwd, missing governance, branch input, the
+ * coordinator usage roll-up). A new import on the launch path must be bound, or every
+ * caller test fails with a ReferenceError (as after T-2107).
+ */
+const UNREACHED_UNBOUND = [
+  'GOVERNANCE_MISSING_CODE', 'GOVERNANCE_MISSING_MESSAGE', 'HISTORY_LIMITS', 'accumulateCodexCoordinatorUsage',
+  'buildCodexBranchInput', 'buildCwdMissingPayload', 'historyTransferLedger', 'selectCodexPostTurnUsage',
+  'wrapCodexBranchInput',
+];
+
+test('B-1794: every name the actual caller uses is bound, except the documented unreached ones', () => {
+  const f = createCodexReceiptCallerFixture({ installedSdk: { Codex: class {} } });
+  assert.deepEqual(unboundCodexIdentifiers(f.bindings), UNREACHED_UNBOUND);
+});
 
 test('actual new caller reserves minted ID before session_created, rejects collision, and only owner releases it', async () => {
   let release!: () => void, entered!: () => void, runs = 0;

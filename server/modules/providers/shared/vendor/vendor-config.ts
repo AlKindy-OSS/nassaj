@@ -186,14 +186,6 @@ export const GLM_CARRIER_MODELS: Record<string, { name: string }> = Object.fromE
 );
 
 /**
- * Kimi agent (native `@moonshot-ai/kimi-code` CLI) model catalog. The agent path
- * reuses the SAME conservative catalog as the chat path (ADR-062 §4.6 M-1 — one source
- * of truth), exported under an agent-scoped name so KM-4 can import it without
- * depending on the chat-path symbol. The live `/v1/models` catalog stays authoritative.
- */
-export const KIMI_AGENT_MODELS: ProviderModelsDefinition = KIMI_FALLBACK_MODELS;
-
-/**
  * DeepSeek quirk: ~11% of tool calls can arrive as plain assistant text that is
  * really a JSON tool_call object. This best-effort extractor recognizes a JSON
  * payload shaped like `{ "name": "...", "arguments"|"input": {...} }` (optionally

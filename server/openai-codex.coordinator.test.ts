@@ -32,6 +32,7 @@ import os from 'os';
 import path from 'path';
 import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
 import { codexMultiAgentConfig, resolveCodexAgentCap } from './modules/providers/list/codex/codex-multi-agent.js';
+import { composeCodexLaunchConfig } from './modules/providers/list/codex/codex-launch-config.js';
 import { codexHelpersRuntime } from './modules/providers/list/codex/codex-helpers-switch.js';
 
 // ---------------------------------------------------------------------------
@@ -333,8 +334,15 @@ describe('delegation block — single Codex construction disables native multi-a
     // multi-agent config (features.multi_agent=false + both thread-cap keys).
     assert.match(codexSrc,
       /const multiAgentConfig = codexMultiAgentConfig\(resolveCodexAgentCap\(process\.env\), helpersDecision\.helpers\);/);
-    assert.match(codexSrc, /config: \{[\s\S]{0,600}\.\.\.multiAgentConfig,/,
+    // T-2107: the config is composed by composeCodexLaunchConfig (shared with the proofs).
+    assert.match(codexSrc, /config: composeCodexLaunchConfig\(\{[\s\S]{0,200}multiAgentConfig,/,
       'the Codex config must carry the pinned multi-agent config');
+    const composed = composeCodexLaunchConfig({
+      multiAgentConfig: { 'features.multi_agent': false }, developerInstructions: 'x',
+      sandboxMode: 'read-only', docsWritableRoots: [], localConfig: null,
+    });
+    assert.equal(composed['features.multi_agent'], false);
+    assert.deepEqual(composed.mcp_servers, {});
     // Owner decision 2026-10-13: no thread-cap key by default; Codex decides the count.
     const config = codexMultiAgentConfig(resolveCodexAgentCap({}));
     assert.deepEqual({ ...config }, { 'features.multi_agent': true, 'agents.max_depth': 10 },

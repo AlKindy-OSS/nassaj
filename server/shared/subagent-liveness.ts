@@ -21,9 +21,9 @@
  *   moment (`ClaudeProgressFold.processExit`), so open clients settle.
  * - codex: the SDK turn stream ends and the session leaves status `running`
  *   (`isCodexSessionActive`).
- * - cursor, opencode, antigravity, kimi agent: the child process `close`
+ * - cursor, opencode, antigravity: the child process `close`
  *   handler drops the session from the runtime's active map.
- * - qwen, glm, deepseek, kimi: the shared vendor runtime's child exit
+ * - glm, deepseek: the shared vendor runtime's child exit
  *   (`isVendorSessionActive`).
  *   None of these emits a live inferred record yet (P2b); the overlay applies on
  *   the next history read.

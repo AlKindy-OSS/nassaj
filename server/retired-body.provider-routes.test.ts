@@ -8,12 +8,13 @@
  *     `provider_removed` — never a 5xx, and never the old behaviour;
  *   - the surfaces where the same id has a live non-body meaning keep working:
  *     kimi is an engine (catalog + key status) and a key slot, qwen is a key slot;
- *   - historical conversations of all four stay listable and readable.
+ *   - historical cursor conversations stay listable and open; since ADR-229 S3
+ *     those of hermes, qwen and kimi are hidden from every list (rows kept).
  *
  * The router runs behind a header-less stand-in for `authenticateToken`, against
  * the case-local database and HOME the test runner provides. History fixtures
  * are written by the SAME writers the run seams call (`writeVendorTranscriptMeta`,
- * `appendVendorTranscriptTurn`, `persistKimiTranscriptFinal`), not hand-built.
+ * `appendVendorTranscriptTurn`), not hand-built.
  *
  * It lives at the server root, not inside a module, because it crosses three
  * modules and `server/shared` on purpose (the module boundary lint forbids that
@@ -43,14 +44,12 @@ import {
 import { getProjectSessionsPage } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
 import providerRouter from '@/modules/providers/provider.routes.js';
 import {
-  appendVendorTranscriptEventIdempotent,
   appendVendorTranscriptTurn,
   writeVendorTranscriptMeta,
 } from '@/modules/providers/shared/vendor/vendor-transcript.js';
-import { persistKimiTranscriptFinal } from '@/shared/kimi-transcript-final.js';
 import { AppError } from '@/shared/utils.js';
 
-import { PROVIDER_REMOVED_CODE, RETIRED_PROVIDER_IDS } from '../shared/retiredProviders.js';
+import { PROVIDER_REMOVED_CODE, RETIRED_PROVIDER_IDS, isHiddenHistoryProvider } from '../shared/retiredProviders.js';
 import { sessionBucketKey } from '../shared/sessionBuckets.js';
 
 /** The four bodies this step retires. The id retired by T-1853 is no longer parseable at all. */
@@ -231,7 +230,7 @@ describe('ids outside the retired list are unaffected', () => {
   });
 });
 
-describe('historical conversations of the retired bodies stay listable and readable', () => {
+describe('historical conversations: cursor stays listable, the removed harnesses are hidden', () => {
   const PROMPT: Record<RetiredBody, string> = {
     cursor: 'cursor prompt', hermes: 'hermes prompt', qwen: 'qwen prompt', kimi: 'kimi prompt',
   };
@@ -242,27 +241,12 @@ describe('historical conversations of the retired bodies stay listable and reada
   /** Writes one turn the way that body's run seam wrote it. Cursor has no nassaj-owned writer. */
   async function writeTranscript(provider: RetiredBody): Promise<void> {
     const sessionId = SESSION_ID[provider];
-    if (provider === 'hermes' || provider === 'qwen') {
-      // hermes-cli.js / qwen-cli.js: meta line, then one line per side of the turn.
-      await writeVendorTranscriptMeta(provider, sessionId, projectPath, PROMPT[provider]);
-      await appendVendorTranscriptTurn(provider, sessionId, projectPath, 'user', PROMPT[provider]);
-      await appendVendorTranscriptTurn(provider, sessionId, projectPath, 'assistant', REPLY[provider]);
-    }
-    if (provider === 'kimi') {
-      // kimi-agent-cli.js: meta line, then the ordered turn through the idempotent event writer.
-      await writeVendorTranscriptMeta('kimi', sessionId, projectPath, PROMPT.kimi);
-      const finalId = await persistKimiTranscriptFinal(
-        {
-          sessionId,
-          userId: requesterId,
-          messages: [{ role: 'user', content: PROMPT.kimi }],
-          assistantBlocks: [{ type: 'text', text: REPLY.kimi }],
-          succeeded: true,
-        },
-        (event: unknown, key: string) => appendVendorTranscriptEventIdempotent('kimi', sessionId, projectPath, event, key),
-      );
-      assert.ok(finalId, 'the kimi writer acknowledged the final answer');
-    }
+    if (provider === 'cursor') return;
+    // hermes-cli.js / qwen-cli.js / the kimi agent launcher (all removed, ADR-229)
+    // wrote a meta line, then the turn; the shared vendor writer stands in here.
+    await writeVendorTranscriptMeta(provider, sessionId, projectPath, PROMPT[provider]);
+    await appendVendorTranscriptTurn(provider, sessionId, projectPath, 'user', PROMPT[provider]);
+    await appendVendorTranscriptTurn(provider, sessionId, projectPath, 'assistant', REPLY[provider]);
   }
 
   before(async () => {
@@ -273,25 +257,19 @@ describe('historical conversations of the retired bodies stay listable and reada
     }
   });
 
-  it('each one is listed in its own bucket of the project payload', async () => {
+  it('cursor is listed in its own bucket; hermes, qwen and kimi are hidden (ADR-229)', async () => {
     const page = await getProjectSessionsPage(projectId, { currentUserId: requesterId }) as unknown as
-      Record<string, Array<{ id: string }>>;
+      Record<string, Array<{ id: string }> | undefined>;
     for (const provider of RETIRED_BODIES) {
-      const bucket = page[sessionBucketKey(provider)];
-      assert.ok(Array.isArray(bucket), `${provider}: the bucket exists`);
-      assert.ok(bucket.some((session) => session.id === SESSION_ID[provider]), `${provider}: the session is listed`);
+      const listed = (page[sessionBucketKey(provider)] ?? []).some((session) => session.id === SESSION_ID[provider]);
+      assert.equal(listed, !isHiddenHistoryProvider(provider), `${provider}: listed only when not hidden`);
+      assert.ok(sessionsDb.getSessionById(SESSION_ID[provider]), `${provider}: the row stays`);
     }
   });
 
-  for (const provider of ['hermes', 'qwen', 'kimi'] as const) {
-    it(`${provider}: the transcript reads back over the history route`, async () => {
-      const response = await call('GET', `/sessions/${SESSION_ID[provider]}/messages`);
-      assert.equal(response.status, 200, JSON.stringify(response.body));
-      const messages = response.body.messages ?? [];
-      assert.ok(messages.some((message) => message.role === 'user' && message.content === PROMPT[provider]));
-      assert.ok(messages.some((message) => message.role === 'assistant' && message.content === REPLY[provider]));
-    });
-  }
+  // ADR-229 deleted the qwen (S1), hermes and kimi (S2) readers; opening their
+  // conversations is the provider_removed contract of
+  // removed-harness-hidden.acceptance.test.ts (d).
 
   it('cursor: the history route is not refused (its store is the external CLI\'s and is empty here)', async () => {
     const response = await call('GET', `/sessions/${SESSION_ID.cursor}/messages`);

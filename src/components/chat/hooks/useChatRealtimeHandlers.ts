@@ -6,6 +6,16 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { readServerErrorCode, resolveServerErrorMessage } from '../utils/serverErrorMessage';
+import {
+  isTurnStopForbidden,
+  newestUserAuthor,
+  readSendRefusalClientMsgId,
+  readSessionBusy,
+  readSharedWritingRefusal,
+  sharedUserTurnRow,
+  stoppedByNotice,
+  type SharedWritingNotice,
+} from '../utils/sharedWriting';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import {
   MAX_CONTROL_FRAMES,
@@ -250,6 +260,13 @@ interface UseChatRealtimeHandlersArgs {
    * فقاعتها المتفائلة — إعادةُ ملكية الكلام لصاحبه لا إعادةُ إرسال.
    */
   onRejectedSendRestore?: (text: string) => void;
+  /** ADR-173 P6: the signed-in user (users.id), to drop the echo of the viewer's own prompt. */
+  currentUserId?: number | null;
+  /**
+   * ADR-173 P6: the shared-writing notice above the composer (who holds the
+   * session, a refused stop, a provider that cannot be continued by another member).
+   */
+  onSharedWritingNotice?: Dispatch<SetStateAction<SharedWritingNotice | null>>;
   /**
    * استرجاع موسَّع لفجوة بثّ في الجلسة المعروضة (طابور التاريخ المُجمِّع
    * `queueHistoryWork('light400')` في `useChatSessionState`). غيابه يفعّل
@@ -302,6 +319,8 @@ export function useChatRealtimeHandlers({
   onWebSocketReconnect,
   onServerError,
   onRejectedSendRestore,
+  currentUserId = null,
+  onSharedWritingNotice,
   onRequestExpandedHistory,
   sessionStore,
   isDuplicateSteerInjection,
@@ -500,12 +519,44 @@ export function useChatRealtimeHandlers({
    * الاشتقاقات الثلاثة (`activeViewSessionId`, `sid`, `isActiveViewSession`)
    * مُعادة الحساب حرفياً كما في المسار الآخر — لا فرق دلالي بينهما.
    */
+  /**
+   * B-518 / ADR-173 P6: a send the server refused before anything ran. Its
+   * optimistic bubble is withdrawn by the frame's own id (B-1078) and the text
+   * returned to the composer; the outbox copy goes only once the text is back.
+   */
+  const restoreRejectedSend = useCallback((sid: string | null, msg: { clientMsgId?: unknown }) => {
+    if (!sid) return;
+    const rejectedClientMsgId = typeof msg.clientMsgId === 'string' && msg.clientMsgId
+      ? msg.clientMsgId : null;
+    const withdrawn = rejectedClientMsgId
+      ? sessionStore.withdrawOptimisticUserRow(sid, rejectedClientMsgId) : null;
+    if (rejectedClientMsgId && withdrawn && onRejectedSendRestore) {
+      onRejectedSendRestore(withdrawn);
+      removeOutboxEntry(rejectedClientMsgId);
+    }
+  }, [onRejectedSendRestore, sessionStore]);
+
+  /**
+   * ADR-173 P8 B2: whether a refused send is this tab's own — an optimistic
+   * bubble it still holds, or an outbox entry of this account.
+   */
+  const isOwnSend = useCallback((sessionId: string, clientMsgId: string): boolean => (
+    Boolean(sessionStore.hasOptimisticUserRow?.(sessionId, clientMsgId))
+    || getOutboxSnapshot().some((entry) => entry.id === clientMsgId)
+  ), [sessionStore]);
+
   const applyControlEvent = useCallback((event: LatestChatMessage) => {
     const msg = event as any;
     const activeViewSessionId = selectedSession?.id || currentSessionId || null;
     const sid = msg.sessionId || activeViewSessionId;
     // True only when the event belongs to the session currently on screen.
     const isActiveViewSession = !sid || sid === activeViewSessionId;
+
+    // ADR-173 P8 B2: a refusal of someone else's send (another member, or an
+    // older server that fanned it out) is not about this viewer: no banner, no
+    // spinner change, the live turn on screen stays exactly as it is.
+    const refusedSend = msg.sessionId ? readSendRefusalClientMsgId(msg) : null;
+    if (refusedSend && !isOwnSend(msg.sessionId, refusedSend)) return;
 
 
     switch (msg.kind) {
@@ -740,6 +791,49 @@ export function useChatRealtimeHandlers({
       }
 
       case 'complete': {
+        // ADR-173 P6: a refused stop is not the end of anything — the turn it
+        // names is still live (its stream, spinner and approvals stay as they are).
+        if (isTurnStopForbidden(msg)) {
+          if (isActiveViewSession && sid) {
+            const busy = readSessionBusy({ ...msg, kind: 'error', code: 'session_busy' });
+            onSharedWritingNotice?.({
+              kind: 'stop_forbidden', sessionId: sid, busyBy: busy?.busyBy ?? null, stuck: busy?.stuck === true,
+            });
+          }
+          break;
+        }
+        // ADR-173 P6: another member's conversation on a provider without shared
+        // writing — refused before anything ran. Same treatment as a busy refusal
+        // (text back to the composer), plus the fork banner; a stream the viewer
+        // may be watching (the creator's own turn) is left untouched.
+        const sharedRefusal = readSharedWritingRefusal(msg);
+        if (sharedRefusal) {
+          bumpSessionActivityEpoch(sid);
+          onSessionInactive?.(sid);
+          onSessionNotProcessing?.(sid);
+          if (isActiveViewSession) {
+            setIsLoading(false);
+            setCanAbortSession(false);
+            setClaudeStatus(null);
+            pendingViewSessionRef.current = null;
+            restoreRejectedSend(sid, msg);
+            if (sid) onSharedWritingNotice?.({ kind: 'unsupported', sessionId: sid, ...sharedRefusal });
+          }
+          break;
+        }
+        // ADR-173 P8: an own send refused before it ran becomes its outbox card
+        // (text, retry, edit); the bubble above it would look sent, so it goes.
+        if (refusedSend && sid && msg.success === false
+          && getOutboxSnapshot().some((entry) => entry.id === refusedSend)) {
+          sessionStore.withdrawOptimisticUserRow(sid, refusedSend);
+        }
+        // A turn ended on this session: whoever held it no longer does.
+        if (isActiveViewSession && sid) {
+          onSharedWritingNotice?.((previous) => (
+            previous && previous.kind !== 'unsupported' && previous.sessionId === sid ? null : previous
+          ));
+        }
+
         // T-1295: نهايةُ الجولة حكمٌ على إدخال صندوق الصادر.
         //
         //  • `success === false` — رفضٌ صريح من طبقة الـWS (مزوّد مُعطَّل،
@@ -850,6 +944,13 @@ export function useChatRealtimeHandlers({
           if (msg.success === false || msg.abortFailed) {
             onServerError?.(resolveServerErrorMessage(msg, t, 'abort_failed'));
           }
+          // ADR-173 P8 B4: another member stopped this reply — say who.
+          const stopped = isActiveViewSession && sid ? stoppedByNotice(msg, {
+            sessionId: sid,
+            currentUserId,
+            starterUserId: newestUserAuthor(sessionStore.getMessages?.(sid) ?? []),
+          }) : null;
+          if (stopped) onSharedWritingNotice?.(stopped);
           break;
         }
 
@@ -921,6 +1022,11 @@ export function useChatRealtimeHandlers({
         // فتح أخرى قبل أن يصل الرفض ⇒ لا ردّ إلى مُؤلِّف، فحذفُ الإدخال هنا يُتلف
         // النسخة الأخيرة من كلامه. فالحذف حيث يقع الردّ، والبطاقة حيث لا يقع.
 
+        // ADR-173 P6: a busy refusal that names who holds the session (and how).
+        // The viewer's own turn (another tab) keeps the generic banner.
+        const busyFrame = isSendRejection ? readSessionBusy(msg) : null;
+        const busyInfo = busyFrame && busyFrame.busyBy !== currentUserId ? busyFrame : null;
+
         // View mutations only for the session on screen.
         if (isActiveViewSession) {
           setIsLoading(false);
@@ -934,36 +1040,32 @@ export function useChatRealtimeHandlers({
           // session, silently and forever. `complete` already clears them here;
           // the error path did not, which is the asymmetry that made a failed
           // run look like a dead UI.
-          setPendingPermissionRequests([]);
+          // ADR-173 P6: except a send rejection — no run ended; the live turn
+          // (often a colleague's) still owns its open prompts.
+          if (!isSendRejection) setPendingPermissionRequests([]);
 
           // Surface a human-readable, localised message via onServerError for
           // any error event — structured `{ error: {...} }`, a flat code, or an
           // unrecognised failure (general fallback). Previously this fired only
           // when a known top-level `code` was present, so structured new-session
           // failures and unknown errors failed silently (T-83).
-          onServerError?.(resolveServerErrorMessage(msg, t));
+          // ADR-173 P6: a busy refusal with occupancy gets its own notice instead.
+          if (busyInfo && sid) {
+            onSharedWritingNotice?.({ kind: 'busy', sessionId: sid, ...busyInfo });
+          } else {
+            onServerError?.(resolveServerErrorMessage(msg, t));
+          }
 
           // B-518: رفضٌ قاطع قبل أي تنفيذ — الرسالة لم تصل المحرّك ولن تصل،
           // ولا نسخة لها في أي سجلّ. نسحب فقاعتها المتفائلة (وإلا بقيت كذبةً
           // على الشاشة يُبنى عليها انتظارٌ ثم إعادةُ إرسال) ونردّ نصّها إلى
           // المُؤلِّف كي لا يفقد المستخدم كلامه ولا يعيد كتابته.
-          if (isSendRejection && sid) {
-            // B-1078: only the frame's own id may select a bubble. A busy frame
-            // without one (older qwen/hermes) withdraws NOTHING: it fans out to
-            // mirror tabs, where "the last pending row" is another tab's live send.
-            // An attachment-only bubble returns '' ⇒ no draft restore and no
-            // outbox delete, so its card keeps the images for retry.
-            const rejectedClientMsgId = typeof msg.clientMsgId === 'string' && msg.clientMsgId
-              ? msg.clientMsgId : null;
-            const withdrawn = rejectedClientMsgId
-              ? sessionStore.withdrawOptimisticUserRow(sid, rejectedClientMsgId) : null;
-            if (rejectedClientMsgId && withdrawn && onRejectedSendRestore) {
-              onRejectedSendRestore(withdrawn);
-              // The ingress consumer kept a recoverable failed copy. Remove it
-              // only after the active composer really accepted the text back.
-              removeOutboxEntry(rejectedClientMsgId);
-            }
-          }
+          // B-1078: only the frame's own id may select a bubble. A busy frame
+          // without one (older qwen/hermes) withdraws NOTHING: it fans out to
+          // mirror tabs, where "the last pending row" is another tab's live send.
+          // An attachment-only bubble returns '' ⇒ no draft restore and no
+          // outbox delete, so its card keeps the images for retry.
+          if (isSendRejection) restoreRejectedSend(sid, msg);
         }
         break;
       }
@@ -983,6 +1085,9 @@ export function useChatRealtimeHandlers({
             sessionId: sid || null,
             receivedAt: new Date(),
             steerTainted: msg.steerTainted === true,
+            // ADR-173 P5: connector prompts are the starter's alone (read-only to others).
+            ...(msg.externalIdentity === true ? { externalIdentity: true } : {}),
+            ...(typeof msg.starterUserId === 'number' ? { starterUserId: msg.starterUserId } : {}),
           }];
         });
         setIsLoading(true);
@@ -1019,7 +1124,6 @@ export function useChatRealtimeHandlers({
     accumulatedStreamRef,
     currentSessionId,
     onNavigateToSession,
-    onRejectedSendRestore,
     onServerError,
     onSessionActive,
     onSessionInactive,
@@ -1039,6 +1143,10 @@ export function useChatRealtimeHandlers({
     t,
     pendingWorkflowIdsRef,
     settlePendingWorkflow,
+    restoreRejectedSend,
+    onSharedWritingNotice,
+    currentUserId,
+    isOwnSend,
   ]);
 
   /**
@@ -1480,6 +1588,18 @@ export function useChatRealtimeHandlers({
       return;
     }
 
+    // ADR-173 P6: a colleague's prompt in a shared conversation, live. Stored as
+    // an authored user row; the viewer's own echo (author or own id) is dropped.
+    if ((msg.kind as string) === 'user_turn') {
+      const row = sharedUserTurnRow(msg as Record<string, unknown>, {
+        currentUserId,
+        isOwnMessageId: (id) => Boolean(sid && sessionStore.hasMessageId?.(sid, id)),
+      });
+      if (row) sessionStore.appendRealtime(row.sessionId, row);
+      return;
+    }
+
+
     // --- All other messages: route to store ---
     const shouldPersist =
       msg.kind !== 'session_created'
@@ -1620,6 +1740,7 @@ export function useChatRealtimeHandlers({
     sessionStore,
     isDuplicateSteerInjection,
     pendingWorkflowIdsRef,
+    currentUserId,
   ]);
 
   // زرّ «استكمِل الآن» على صفّ `stream_recovery_gap` (بلا إخفاء تلقائي

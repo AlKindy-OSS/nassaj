@@ -17,8 +17,6 @@ const EXPECTED = {
   codex: { plan: 'live', subagents: 'live' },
   antigravity: { plan: 'turn', subagents: 'turn' },
   opencode: { plan: 'live', subagents: 'turn' },
-  kimi: { plan: 'none', subagents: 'none' },
-  qwen: { plan: 'none', subagents: 'none' },
   cursor: { plan: 'none', subagents: 'none' },
   deepseek: { plan: 'none', subagents: 'none' },
   glm: { plan: 'none', subagents: 'none' },

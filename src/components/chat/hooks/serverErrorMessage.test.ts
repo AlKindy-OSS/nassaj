@@ -20,8 +20,9 @@ const translate = (locale: typeof en | typeof ar) => (key: string, opts?: Record
 
 describe('B-928 safe server error banners', () => {
   it.each([['ar', ar], ['en', en]] as const)('translates the reason and keeps its code in %s', (_name, locale) => {
-    const message = resolveServerErrorMessage({ error: { code: 'session_busy' } }, translate(locale));
-    expect(message).toBe(`${locale.serverError.session_busy}. ${locale.serverError.codeLabel}: session_busy`);
+    // ADR-173 P8: session_busy is a self-explaining refusal (no code); a fault keeps its code.
+    const message = resolveServerErrorMessage({ error: { code: 'cli_not_installed' } }, translate(locale));
+    expect(message).toBe(`${locale.serverError.cli_not_installed}. ${locale.serverError.codeLabel}: cli_not_installed`);
   });
 
   it.each([
@@ -33,8 +34,8 @@ describe('B-928 safe server error banners', () => {
   });
 
   it('prefers a valid structured code and falls back to a valid top-level code', () => {
-    expect(resolveServerErrorMessage({ code: 'spawn_failed', error: { code: 'session_busy' } }, translate(en)))
-      .toContain('Code: session_busy');
+    expect(resolveServerErrorMessage({ code: 'spawn_failed', error: { code: 'cli_not_installed' } }, translate(en)))
+      .toContain('Code: cli_not_installed');
     expect(resolveServerErrorMessage({ code: 'spawn_failed', error: { code: '/private/auth' } }, translate(en)))
       .toBe(`${en.serverError.spawn_failed}. Code: spawn_failed`);
   });

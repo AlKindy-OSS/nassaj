@@ -23,6 +23,13 @@
  *      npm-lock/trust.ts; unconditional, not behind NASSAJ_VENDOR_BINARY_PIN).
  *   7. the env is rebuilt FROM SCRATCH as an exact allow-list; nothing inherited
  *      from the server survives (no *_BASE_URL, ANTHROPIC_*, XDG_*, NODE_OPTIONS).
+ *
+ * A LOCAL turn (ADR-227 "DSH local corrector", T-2108) differs in two places only:
+ * step 1 builds the isolated env without the deepseek credential gate (the turn
+ * spends no DeepSeek key; the run is admitted by its local pin or local model id),
+ * and the env carries NASSAJ_DSH_LOCAL_TOKEN instead of DEEPSEEK_API_KEY
+ * (DSH_LOCAL_ENV_ALLOW_LIST). Its layer is generated per turn (dsh-local-layer.js)
+ * and set by finalizeDshLocalLaunch once the turn's corrector is open.
  */
 
 import crypto from 'node:crypto';
@@ -30,6 +37,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { credentialNotLinkedError, resolveModelRunEnv } from '../../../../services/isolation/credential-gate.js';
+import { assertModelRunActor } from '../../../../services/isolation/credential-actor.js';
+import { resolveProviderEnv } from '../../../../services/isolation/resolve-provider-env.js';
 import { neutralGovernanceSource } from '../../../../services/isolation/codex-governance-material.js';
 import { sanitizeVendorAgentEnv } from '../../../../services/isolation/sanitize-vendor-agent-env.js';
 import { ensureVendorCliGovernance } from '../../../../services/isolation/vendor-cli-governance.js';
@@ -60,6 +69,12 @@ export const DSH_POLICY_PLUGIN_SHA256 = Object.freeze({
 /** The exact env keys a dsh child receives (sorted). */
 export const DSH_ENV_ALLOW_LIST = Object.freeze([
   'DEEPSEEK_API_KEY', 'DSH_AGENTS_HOME', 'DSH_HOME', 'DSH_TELEMETRY_DISABLED', 'HOME', 'LANG', 'PATH', 'TERM',
+  'TMPDIR',
+]);
+
+/** The exact env keys of a LOCAL dsh child (sorted): the corrector token, never a DeepSeek key. */
+export const DSH_LOCAL_ENV_ALLOW_LIST = Object.freeze([
+  'DSH_AGENTS_HOME', 'DSH_HOME', 'DSH_TELEMETRY_DISABLED', 'HOME', 'LANG', 'NASSAJ_DSH_LOCAL_TOKEN', 'PATH', 'TERM',
   'TMPDIR',
 ]);
 
@@ -132,11 +147,12 @@ export function buildDshLaunchArgv(layerPath) {
 }
 
 /**
- * The child env, built from scratch: exactly DSH_ENV_ALLOW_LIST.
- * @param {{ home: string, apiKey: string, serverEnv?: NodeJS.ProcessEnv }} input
+ * The child env, built from scratch: exactly DSH_ENV_ALLOW_LIST, or for a local
+ * turn (`localToken`) exactly DSH_LOCAL_ENV_ALLOW_LIST.
+ * @param {{ home: string, apiKey?: string, localToken?: string, serverEnv?: NodeJS.ProcessEnv }} input
  * @returns {Record<string, string>}
  */
-export function buildDshLaunchEnv({ home, apiKey, serverEnv = process.env }) {
+export function buildDshLaunchEnv({ home, apiKey, localToken, serverEnv = process.env }) {
   const { dshHome, agentsHome, tmpDir } = dshPaths(home);
   const locale = (value, fallback) => (typeof value === 'string' && SAFE_LOCALE.test(value) ? value : fallback);
   return {
@@ -147,15 +163,15 @@ export function buildDshLaunchEnv({ home, apiKey, serverEnv = process.env }) {
     TMPDIR: tmpDir,
     DSH_HOME: dshHome,
     DSH_AGENTS_HOME: agentsHome,
-    DEEPSEEK_API_KEY: apiKey,
+    ...(localToken === undefined ? { DEEPSEEK_API_KEY: apiKey } : { NASSAJ_DSH_LOCAL_TOKEN: localToken }),
     DSH_TELEMETRY_DISABLED: '1',
   };
 }
 
 /** Throws unless `env` holds exactly the allow-list keys, each a non-empty string. */
-export function assertExactDshEnv(env) {
+export function assertExactDshEnv(env, allowList = DSH_ENV_ALLOW_LIST) {
   const keys = Object.keys(env).sort();
-  const exact = keys.length === DSH_ENV_ALLOW_LIST.length && keys.every((key, i) => key === DSH_ENV_ALLOW_LIST[i]);
+  const exact = keys.length === allowList.length && keys.every((key, i) => key === allowList[i]);
   if (!exact || keys.some((key) => typeof env[key] !== 'string' || env[key] === '')) {
     throw new DshLaunchError(DSH_LAUNCH_ERROR.ENV_NOT_EXACT, 'dsh launch env is not the exact allow-list.');
   }
@@ -245,18 +261,30 @@ export function assertDshTreeTrusted(script, { serverEnv = process.env, home } =
   throw new DshLaunchError(code, message);
 }
 
-/** Verifies the shipped layer: a regular file (no symlink) whose bytes match the pin. */
-export function verifyNassajDshLayer(file = nassajDshLayerPath(), expected = DSH_LAYER_SHA256) {
-  let digest = null;
+/**
+ * Reads the shipped layer ONCE and verifies those bytes in memory: a regular file
+ * (no symlink) whose sha256 matches the pin. The returned text is the verified
+ * bytes, so a generated layer derived from it cannot see a later edit (T-2108).
+ * @param {string} [file]
+ * @param {string} [expected]
+ * @returns {{ file: string, text: string }}
+ */
+export function readVerifiedNassajDshLayer(file = nassajDshLayerPath(), expected = DSH_LAYER_SHA256) {
+  let bytes = null;
   try {
-    if (fs.lstatSync(file).isFile()) digest = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    if (fs.lstatSync(file).isFile()) bytes = fs.readFileSync(file);
   } catch {
-    digest = null;
+    bytes = null;
   }
-  if (digest !== expected) {
+  if (!bytes || crypto.createHash('sha256').update(bytes).digest('hex') !== expected) {
     throw new DshLaunchError(DSH_LAUNCH_ERROR.LAYER_UNTRUSTED, 'The Nassaj dsh patch layer is missing or altered.');
   }
-  return file;
+  return { file, text: bytes.toString('utf8') };
+}
+
+/** Verifies the shipped layer: a regular file (no symlink) whose bytes match the pin. */
+export function verifyNassajDshLayer(file = nassajDshLayerPath(), expected = DSH_LAYER_SHA256) {
+  return readVerifiedNassajDshLayer(file, expected).file;
 }
 
 /** Verifies the policy plugin dir: each pinned file regular (no symlink) and matching its pin. */
@@ -295,33 +323,80 @@ export function ensureRealDirectory(dir) {
 }
 
 /**
+ * Step 1 of the seam: the member home, and the member's own DeepSeek key for a
+ * cloud turn. A local turn builds the isolated env without the credential gate.
+ * @returns {{ home: string, apiKey: string|undefined }}
+ */
+function memberRunEnv(userId, serverEnv, local) {
+  if (local) return { home: resolveProviderEnv(assertModelRunActor(userId), 'dsh', serverEnv, 'agent').HOME, apiKey: undefined };
+  const resolved = resolveModelRunEnv(userId, 'dsh', serverEnv, 'agent', { honorGrants: false });
+  const apiKey = resolved.DEEPSEEK_API_KEY;
+  if (typeof apiKey !== 'string' || apiKey === '') throw credentialNotLinkedError('deepseek', null);
+  return { home: resolved.HOME, apiKey };
+}
+
+/**
  * Runs the ordered seam for one dsh launch (see the file header). Throws
  * CREDENTIAL_NOT_LINKED (AppError), VendorGovernanceMissingError
  * (governance_missing), HarnessBinaryUnresolvedError or DshLaunchError; no
- * process exists on any throw.
+ * process exists on any throw. With `local`, the returned launch carries the
+ * verified shipped layer's bytes and the absolute plugin entry instead of a
+ * spawnable env; finalizeDshLocalLaunch completes it.
  * @param {{ userId: unknown }} input
- * @param {{ serverEnv?: NodeJS.ProcessEnv, layerPath?: string }} [options]
- * @returns {{ command: string, args: string[], env: Record<string, string>, home: string, dshHome: string }}
+ * @param {{ serverEnv?: NodeJS.ProcessEnv, layerPath?: string, local?: boolean }} [options]
+ * @returns {{ command: string, args: string[], env: Record<string, string>, home: string, dshHome: string,
+ *   script: string, layerPath: string, layerText: string, pluginEntry: string }}
  */
 export function prepareDshLaunch({ userId }, options = {}) {
   const serverEnv = options.serverEnv ?? process.env;
-  const resolved = resolveModelRunEnv(userId, 'dsh', serverEnv, 'agent', { honorGrants: false });
-  const home = resolved.HOME;
-  const apiKey = resolved.DEEPSEEK_API_KEY;
-  if (typeof apiKey !== 'string' || apiKey === '') throw credentialNotLinkedError('deepseek', null);
+  const local = options.local === true;
+  const { home, apiKey } = memberRunEnv(userId, serverEnv, local);
 
   const { dshHome, agentsHome, tmpDir } = dshPaths(home);
   for (const dir of [dshHome, agentsHome, tmpDir]) ensureRealDirectory(dir);
   ensureVendorCliGovernance('dsh', dshHome, neutralGovernanceSource(), { filename: DSH_GOVERNANCE_FILENAME });
   resetDshUserLayers(dshHome);
-  const layerPath = verifyNassajDshLayer(options.layerPath ?? nassajDshLayerPath());
-  verifyNassajDshPolicyPlugin(path.join(path.dirname(layerPath), 'dsh-policy-plugin'));
+  const { file: layerPath, text: layerText } = readVerifiedNassajDshLayer(options.layerPath ?? nassajDshLayerPath());
+  const pluginDir = verifyNassajDshPolicyPlugin(path.join(path.dirname(layerPath), 'dsh-policy-plugin'));
 
   // Resolved ONCE per launch (T-2091): the real entry is checked and spawned, so an update that
   // renames the launcher link meanwhile cannot change the version this launch runs.
   const script = assertNodeScript(resolveHarnessBinary('dsh'));
   assertDshTreeTrusted(script, { serverEnv });
   const command = resolveDshNode();
-  const env = assertExactDshEnv(sanitizeVendorAgentEnv(buildDshLaunchEnv({ home, apiKey, serverEnv })));
-  return { command, args: [script, ...buildDshLaunchArgv(layerPath)], env, home, dshHome, script, layerPath };
+  const env = local ? {} : assertExactDshEnv(sanitizeVendorAgentEnv(buildDshLaunchEnv({ home, apiKey, serverEnv })));
+  return {
+    command, args: [script, ...buildDshLaunchArgv(layerPath)], env, home, dshHome, script, layerPath, layerText,
+    pluginEntry: path.resolve(pluginDir, 'index.mjs'),
+  };
+}
+
+/**
+ * Completes a local launch once its corrector is open: the generated layer as the
+ * one `--patch`, and the exact local env carrying the corrector token.
+ * @param {ReturnType<typeof prepareDshLaunch>} launch from prepareDshLaunch with `local`
+ * @param {{ token: string, layerPath: string, serverEnv?: NodeJS.ProcessEnv }} input
+ * @returns {ReturnType<typeof prepareDshLaunch>}
+ */
+export function finalizeDshLocalLaunch(launch, { token, layerPath, serverEnv = process.env }) {
+  const env = buildDshLaunchEnv({ home: launch.home, localToken: token, serverEnv });
+  return {
+    ...launch, layerPath, args: [launch.script, ...buildDshLaunchArgv(layerPath)],
+    env: assertExactDshEnv(sanitizeVendorAgentEnv(env), DSH_LOCAL_ENV_ALLOW_LIST),
+  };
+}
+
+/**
+ * The version of the dsh package a resolved entry belongs to (its package.json),
+ * read without running it; null when it is not a dsh package entry.
+ * @param {string} script the resolved dsh entry (…/@deepseek-ai/dsh/lib/bin.js)
+ * @returns {string|null}
+ */
+export function dshInstalledVersion(script) {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(path.dirname(script)), 'package.json'), 'utf8'));
+    return manifest?.name === '@deepseek-ai/dsh' && typeof manifest.version === 'string' ? manifest.version : null;
+  } catch {
+    return null;
+  }
 }

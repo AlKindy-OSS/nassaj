@@ -157,6 +157,55 @@ test('fetchHistory drops a USER_INPUT that is nothing but an <instructions> bloc
   );
 });
 
+test('fetchHistory strips all injected system directives (sharing, pages, quick replies, coordination)', async () => {
+  const compositePrompt = [
+    '<USER_REQUEST>',
+    '<nassaj_document_sharing>',
+    'Nassaj document sharing guidance...',
+    '</nassaj_document_sharing>',
+    '',
+    '<nassaj_public_pages>',
+    'Nassaj public page publishing guidance...',
+    '</nassaj_public_pages>',
+    '',
+    '<nassaj_quick_replies>',
+    'Nassaj quick replies guidance...',
+    '</nassaj_quick_replies>',
+    '',
+    '<coordination>',
+    'Coordination level for this turn: delegated.',
+    '</coordination>',
+    '',
+    '<instructions>',
+    'IMPORTANT: Arabic only',
+    '</instructions>',
+    '',
+    'تجربة المستخدم الحقيقية',
+    '</USER_REQUEST>',
+    '<ADDITIONAL_METADATA>',
+    'time info',
+    '</ADDITIONAL_METADATA>',
+  ].join('\n');
+
+  await withTranscriptFixture(
+    [
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-01-01T00:00:00Z',
+        content: compositePrompt,
+      },
+    ],
+    async (provider) => {
+      const { messages } = await provider.fetchHistory(SESSION_ID);
+      assert.equal(messages.length, 1);
+      assert.equal(messages[0]?.content, 'تجربة المستخدم الحقيقية');
+    },
+  );
+});
+
 test('fetchHistory falls back to raw content when USER_REQUEST wrapper is missing', async () => {
   await withTranscriptFixture(
     [

@@ -266,7 +266,7 @@ function inspectFileStat(p) {
 function auditIdentity(report, row, loc, header, knownIds) {
   const id = row.session_id;
   const lid = locationId(row.provider, row.jsonl_path);
-  if (lid !== null && lid !== id && !(row.provider === 'kimi' && lid === `kimi_${id}`)) {
+  if (lid !== null && lid !== id) {
     bucket(report, ['idMismatch', 'rowIdVsFilename', row.provider], id);
   }
   if (row.provider === 'claude') {

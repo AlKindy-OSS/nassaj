@@ -228,11 +228,6 @@ const VENDOR_AGENT_LAUNCHER_REGISTRY: ReadonlyArray<{
   note: string;
 }> = [
   {
-    file: 'server/kimi-agent-cli.js',
-    sanitized: true, // KM-1 (W3-A): sanitizeVendorAgentEnv is the LAST step before spawn.
-    note: 'Kimi native agent launcher; ordered seam ends with sanitizeVendorAgentEnv (SL-3).',
-  },
-  {
     file: 'server/opencode-cli.js',
     // sanitized:true — carrier mode (carrier=true) calls sanitizeVendorAgentEnv as its
     // LAST step before spawn (GL-4, W3-B). The sanitize call is CONDITIONAL on carrier

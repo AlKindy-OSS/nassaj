@@ -43,6 +43,7 @@ import { LOCAL_ENGINE_ROUTE_OVERRIDE_KEYS } from './engine-anthropic-credential-
 import {
   LOCAL_ENGINE,
   formatLocalEnginePin,
+  isLocalEngineValue,
   isLocalModelId,
   localOriginDigest,
   parseLocalEnginePin,
@@ -154,6 +155,44 @@ const loadDefaultDeps = memoizeUntilRejected(() => Promise.all([
   cliVersionProven: async () => proof.isClaudeLocalVersionProven(await providers.readInstalledHarnessVersion('claude')),
 })));
 
+const VERSION_GATED_DEP_KEYS = Object.freeze(['enabled', 'runnable', 'listServers', 'getSecret', 'resolvePrivate', 'isVersionProven']);
+
+/**
+ * T-2107/T-2108: the production dependencies of a body whose CLI version gate is
+ * bound to the exact executable of the launch (Codex, DSH), loaded on first local
+ * use only. `pick` supplies the body's own switch and grant rule.
+ * @param {string} body proof registry of the body (claude-local-cli-proof.js)
+ * @param {(config: Record<string, Function>) => {enabled: Function, runnable: Function}} pick
+ * @returns {() => Promise<Record<string, Function>>}
+ */
+export function versionGatedLocalDeps(body, pick) {
+  return memoizeUntilRejected(() => Promise.all([
+    import('./local-model-config.js'),
+    import('./provider-secrets-store.js'),
+    import('../../modules/connectors/index.js'),
+    import('./claude-local-cli-proof.js'),
+  ]).then(([config, secrets, connectors, proof]) => ({
+    ...pick(config),
+    listServers: config.authorizedLocalModelServers,
+    getSecret: secrets.getLocalModelSecret,
+    resolvePrivate: (url) => connectors.resolvePrivateLocalModelAddress(url),
+    isVersionProven: (version) => proof.isLocalCliVersionProven(body, version),
+  })));
+}
+
+/**
+ * Injected dependencies win; missing ones come from `loadDefaults`. The CLI gate
+ * is bound to the exact version of the executable this launch will run.
+ * @param {Record<string, Function>} deps
+ * @param {() => Promise<Record<string, Function>>} loadDefaults
+ * @param {string|null|undefined} cliVersion
+ * @returns {Promise<Record<string, Function>>}
+ */
+export async function resolveVersionGatedDeps(deps, loadDefaults, cliVersion) {
+  const d = VERSION_GATED_DEP_KEYS.every((key) => typeof deps[key] === 'function') ? deps : { ...(await loadDefaults()), ...deps };
+  return { ...d, cliVersionProven: async () => Boolean(await d.isVersionProven(cliVersion)) };
+}
+
 /**
  * Injected dependencies win; missing ones come from production.
  * @param {Record<string, Function>} deps
@@ -205,11 +244,11 @@ function selectServer(servers, userId, pin, requestedModel) {
 
 /**
  * Output tokens a run reserves for a model: the cap, lowered by the owner's
- * `maxOutput`, never below the floor.
+ * `maxOutput`, never below the floor. Body-neutral (T-2107: Codex reserves the same).
  * @param {{maxOutput?: unknown}} model
  * @returns {number}
  */
-function claudeLocalOutputTokens(model) {
+export function localModelOutputTokens(model) {
   const ownerCap = Number.isSafeInteger(model.maxOutput) && model.maxOutput > 0 ? model.maxOutput : Infinity;
   return Math.max(CLAUDE_LOCAL_MIN_OUTPUT_TOKENS, Math.min(CLAUDE_LOCAL_OUTPUT_CAP_TOKENS, ownerCap));
 }
@@ -224,7 +263,7 @@ export function claudeLocalModelEligibility(model) {
   if (/^claude-/iu.test(model.id)) return 'model_id_reserved';
   const window = model.contextWindow;
   if (!Number.isSafeInteger(window) || window <= 0) return 'context_unknown';
-  if (window < minimumClaudeLocalContextWindow(claudeLocalOutputTokens(model))) return 'context_too_small';
+  if (window < minimumClaudeLocalContextWindow(localModelOutputTokens(model))) return 'context_too_small';
   return 'ok';
 }
 
@@ -238,19 +277,19 @@ export function isUnusableLocalModelId(id) {
 }
 
 /**
- * Picks and vets the model on the server.
+ * Picks and vets the model on the server with the body's static eligibility.
+ * @param {(model: object) => string} eligibility 'ok' or a refusal reason
  * @returns {{model:object, outputTokens:number}|LocalUnavailable}
  */
-function selectModel(server, requestedModel) {
+function selectModel(server, requestedModel, eligibility) {
   if (requestedModel && !requestedModel.startsWith(`${server.providerId}/`)) return refuse('pin_conflict');
   const id = requestedModel ? requestedModel.slice(server.providerId.length + 1) : server.models[0]?.id;
   const model = server.models.find((row) => row.id === id);
   if (!model) return refuse('model_not_found');
-  if (/^claude-/iu.test(model.id)) return refuse('model_id_reserved');
+  const verdict = eligibility(model);
+  if (verdict !== 'ok') return refuse(verdict);
   if (isUnusableLocalModelId(model.id)) return refuse('model_not_found');
-  const eligibility = claudeLocalModelEligibility(model);
-  if (eligibility !== 'ok') return refuse(eligibility);
-  return { model, outputTokens: claudeLocalOutputTokens(model) };
+  return { model, outputTokens: localModelOutputTokens(model) };
 }
 
 /**
@@ -329,6 +368,96 @@ function writeLocalEnv(env, { connectOrigin, token, model, contextWindow, output
 }
 
 /**
+ * Shape of the request: no local engine, a refusal, or the parsed model and pin.
+ * T-2107 qa high 6: on a pinned chat with no explicit re-pick (`qualifyBareModel`),
+ * a bare model id is kept as `bareModel` for the pinned server to qualify.
+ * @returns {{status:'none'}|LocalUnavailable|{requestedModel:string, pin:object|null, bareModel:string|null}}
+ */
+function readLocalRequest(input) {
+  const requestedModel = typeof input.requestedModel === 'string' ? input.requestedModel.trim() : '';
+  const pin = input.storedPin ? parseLocalEnginePin(input.storedPin) : null;
+  if (input.storedPin && !pin) return refuse('pin_conflict');
+  if (!pin && !isLocalModelId(requestedModel)) return { status: 'none' };
+  if (pin && requestedModel && !isLocalModelId(requestedModel)) {
+    return input.qualifyBareModel === true ? { requestedModel: '', pin, bareModel: requestedModel } : refuse('pin_conflict');
+  }
+  return { requestedModel, pin, bareModel: null };
+}
+
+/**
+ * The pinned server's full id for a bare model it lists; null otherwise.
+ * @param {{providerId: string, models: Array<{id: string}>}} server
+ * @param {string} bareModel
+ * @returns {string|null}
+ */
+function qualifyOnServer(server, bareModel) {
+  return server.models.some((row) => row.id === bareModel) ? `${server.providerId}/${bareModel}` : null;
+}
+
+/**
+ * Locates the vetted server, model and literal address for an admitted request.
+ * @returns {Promise<{local:LocalEngine, secret:unknown}|LocalUnavailable>}
+ */
+async function locateLocalEngine(d, userId, { requestedModel, pin, bareModel }, eligibility) {
+  const chosen = selectServer(d.listServers(userId), userId, pin, requestedModel);
+  if ('status' in chosen) return chosen;
+  const { server } = chosen;
+  const model = bareModel ? qualifyOnServer(server, bareModel) : requestedModel;
+  if (model === null) return refuse('pin_conflict');
+  const vetted = selectModel(server, model, eligibility);
+  if ('status' in vetted) return vetted;
+  const origin = localServerOrigin(server.baseUrl);
+  if (origin === null) return refuse('base_url_unsupported');
+  if (pin && pin.originDigest !== localOriginDigest(origin)) return refuse('origin_changed');
+  const target = await vetServerAddress(d, server, origin);
+  if ('status' in target) return target;
+  // T-2098 qa item 2: only an address of the set the member's last connection test vetted.
+  const verified = Array.isArray(server.verifiedAddresses) ? server.verifiedAddresses : [];
+  if (!verified.includes(target.address)) return refuse('address_changed');
+  const ownerId = Number(server.ownerId);
+  const local = {
+    pin: formatLocalEnginePin({ serverId: server.id, ownerId, origin }),
+    serverId: server.id,
+    ownerId,
+    providerId: server.providerId,
+    model: vetted.model.id,
+    origin,
+    address: target.address,
+    connectOrigin: target.connectOrigin,
+    contextWindow: vetted.model.contextWindow,
+    outputTokens: vetted.outputTokens,
+  };
+  return { local, secret: d.getSecret(server.ownerId, server.id) };
+}
+
+/**
+ * T-2107: the body-neutral half of a local-engine spawn, shared by the Claude and
+ * Codex bodies so the vetting, the pin and the eligibility gates exist once. The
+ * body supplies its dependencies (its own switch, grant rule and CLI version gate)
+ * and its static model eligibility. Loads `loadDeps` only for a local request.
+ * @param {{ userId: string|number, requestedModel?: string|null, storedPin?: string|null,
+ *   qualifyBareModel?: boolean }} input `qualifyBareModel`: the chat is pinned and the
+ *   model was not re-picked, so a bare id listed on the pinned server is that server's
+ * @param {() => Promise<Record<string, Function>>} loadDeps
+ * @param {(model: object) => string} eligibility
+ * @returns {Promise<LocalNotRequested|LocalUnavailable|{status:'resolved', local:LocalEngine, secret:string}>}
+ */
+export async function resolveLocalEngine(input, loadDeps, eligibility) {
+  const request = readLocalRequest(input);
+  if ('status' in request) return request;
+  const d = await loadDeps();
+  if (!d.enabled()) return refuse('feature_disabled');
+  if (!d.runnable(input.userId)) return refuse('grant_not_supported');
+  // T-2098 qa item 3: credential behaviour is CLI-version dependent (ADR-227).
+  if (!(await d.cliVersionProven())) return refuse('cli_version_unproven');
+  const located = await locateLocalEngine(d, input.userId, request, eligibility);
+  if ('status' in located) return located;
+  const { secret } = located;
+  if (typeof secret === 'string' && /[\r\n]/u.test(secret)) return refuse('key_invalid');
+  return { status: 'resolved', local: located.local, secret: typeof secret === 'string' ? secret : '' };
+}
+
+/**
  * Decides — without throwing — whether this spawn runs on a local server, and
  * applies the env when it can be honoured. `env` is mutated only on `applied`.
  *
@@ -340,53 +469,15 @@ function writeLocalEnv(env, { connectOrigin, token, model, contextWindow, output
  * @returns {Promise<LocalEngineVerdict>}
  */
 export async function applyClaudeLocalEngineEnv(env, input, deps = {}) {
-  const requestedModel = typeof input.requestedModel === 'string' ? input.requestedModel.trim() : '';
-  const pin = input.storedPin ? parseLocalEnginePin(input.storedPin) : null;
-  if (input.storedPin && !pin) return refuse('pin_conflict');
-  if (!pin && !isLocalModelId(requestedModel)) return { status: 'none' };
-  if (pin && requestedModel && !isLocalModelId(requestedModel)) return refuse('pin_conflict');
-  const d = await resolveDeps(deps);
-
-  if (!d.enabled()) return refuse('feature_disabled');
-  if (!d.runnable(input.userId)) return refuse('grant_not_supported');
-  // T-2098 qa item 3: credential behaviour is CLI-version dependent (ADR-227).
-  if (!(await d.cliVersionProven())) return refuse('cli_version_unproven');
-
-  const chosen = selectServer(d.listServers(input.userId), input.userId, pin, requestedModel);
-  if ('status' in chosen) return chosen;
-  const { server } = chosen;
-  const vetted = selectModel(server, requestedModel);
-  if ('status' in vetted) return vetted;
-
-  const origin = localServerOrigin(server.baseUrl);
-  if (origin === null) return refuse('base_url_unsupported');
-  if (pin && pin.originDigest !== localOriginDigest(origin)) return refuse('origin_changed');
-  const target = await vetServerAddress(d, server, origin);
-  if ('status' in target) return target;
-  // T-2098 qa item 2: only an address of the set the member's last connection test vetted.
-  const verified = Array.isArray(server.verifiedAddresses) ? server.verifiedAddresses : [];
-  if (!verified.includes(target.address)) return refuse('address_changed');
-
-  const secret = d.getSecret(server.ownerId, server.id);
-  if (typeof secret === 'string' && /[\r\n]/u.test(secret)) return refuse('key_invalid');
-  const local = {
-    pin: formatLocalEnginePin({ serverId: server.id, ownerId: Number(server.ownerId), origin }),
-    serverId: server.id,
-    ownerId: Number(server.ownerId),
-    providerId: server.providerId,
-    model: vetted.model.id,
-    origin,
-    address: target.address,
-    connectOrigin: target.connectOrigin,
-    contextWindow: vetted.model.contextWindow,
-    outputTokens: vetted.outputTokens,
-  };
-  writeLocalEnv(env, { ...local, token: secret || LOCAL_NO_KEY_PLACEHOLDER });
+  const resolved = await resolveLocalEngine(input, () => resolveDeps(deps), claudeLocalModelEligibility);
+  if (resolved.status !== 'resolved') return resolved;
+  const { local } = resolved;
+  writeLocalEnv(env, { ...local, token: resolved.secret || LOCAL_NO_KEY_PLACEHOLDER });
   return {
     status: 'applied',
     provider: LOCAL_ENGINE,
     hosts: new Set(),
-    origins: new Set([normalizeAuthorizedOrigin(target.connectOrigin)]),
+    origins: new Set([normalizeAuthorizedOrigin(local.connectOrigin)]),
     local,
   };
 }
@@ -415,10 +506,12 @@ const REASON_DETAIL = Object.freeze({
 /**
  * Typed refusal, same code as a vendor engine that cannot be honoured.
  * @param {LocalUnavailable} verdict
+ * @param {Readonly<Record<string, string>>} [bodyDetail] body-specific wording that
+ *   replaces the Claude text for some reasons (T-2107)
  * @returns {Error & {code:string, engineProvider:string, reason:string}}
  */
-export function localEngineUnavailableError(verdict) {
-  const detail = REASON_DETAIL[verdict.reason] ?? 'The local model server cannot be used.';
+export function localEngineUnavailableError(verdict, bodyDetail = {}) {
+  const detail = bodyDetail[verdict.reason] ?? REASON_DETAIL[verdict.reason] ?? 'The local model server cannot be used.';
   const error = new Error(
     `تعذّر تشغيل المحادثة على خادم النموذج المحلي، ولم تُشغَّل على أي مزوّد آخر. Refusing to run elsewhere. ${detail}`,
   );
@@ -440,4 +533,28 @@ export async function applyClaudeLocalEngineEnvOrThrow(env, input, deps = {}) {
   if (verdict.status === 'unavailable') throw localEngineUnavailableError(verdict);
   if (verdict.status === 'none') return null;
   return { engineHosts: verdict.hosts, engineOrigins: verdict.origins, local: verdict.local };
+}
+
+/**
+ * ADR-227: does this spawn take the local-engine path? Only a session already
+ * pinned to a local server, or a BRAND-NEW session that names a local model.
+ * A local model on any other existing session (official, vendor, cloud or unknown
+ * pin) is refused — `local` is never inferred, and a cloud chat never moves to a
+ * local server (nor a local chat to the cloud: the local resolver refuses a
+ * non-local model on a local pin). Shared by the Claude and Codex bodies (T-2107).
+ * @param {{sessionId?: string|null, storedEngine?: string|null, requestedModel?: string|null,
+ *   clientEngine?: string|null}} input
+ * @returns {boolean}
+ * @throws {Error} ENGINE_PROVIDER_UNAVAILABLE (pin_conflict)
+ */
+export function takesLocalEnginePath({ sessionId = null, storedEngine = null, requestedModel = null, clientEngine = null }) {
+  const localPinned = parseLocalEnginePin(storedEngine) !== null;
+  const localRequested = isLocalModelId(requestedModel);
+  if (!localPinned && !localRequested) return false;
+  const conflictingClient = typeof clientEngine === 'string' && clientEngine.trim() !== ''
+    && !isLocalEngineValue(clientEngine.trim());
+  if (!localPinned && (sessionId || conflictingClient)) {
+    throw localEngineUnavailableError(refuse('pin_conflict'));
+  }
+  return true;
 }

@@ -100,9 +100,9 @@ export function bundledGovernanceSource() {
  * non-empty, otherwise the bundled default.
  *
  * This is the single seam every governed provider resolves through — Codex (via the
- * wrappers below and codex-governance.ts), Kimi (kimi-agent-cli.js), and the
- * opencode carrier (provision-user-dirs.js) — so the fallback applies to all three
- * at once and cannot drift apart per vendor.
+ * wrappers below and codex-governance.ts) and the opencode carrier
+ * (provision-user-dirs.js) — so the fallback applies to both at once and cannot
+ * drift apart per vendor.
  *
  * @returns {string}
  */
@@ -132,7 +132,7 @@ export const CODEX_COMPOSED_GOVERNANCE_FILENAME = 'AGENTS.codex.md';
  * fingerprint-checked fail-closed — a mismatch REFUSES the launch outright.
  *
  * WHY A SEPARATE FILE rather than adding the layer to AGENTS.md. That file is also
- * read by Kimi (kimi-agent-cli.js) and fingerprint-classified by
+ * read by the opencode carrier and fingerprint-classified by
  * provider-governance.service for the UI badge; folding coordinator rules into it
  * would make top-role rules govern another provider and flip that badge. So
  * `neutralGovernanceSource()` above is deliberately LEFT ALONE — it stays the shared

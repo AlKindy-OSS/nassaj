@@ -56,7 +56,8 @@ Current provider ids in this repo are:
 - `kimi`
 - `deepseek`
 - `glm`
-- `qwen`
+
+`qwen` is no longer a harness id (ADR-229). Its key slot and the `qwen-plan` models stay live through OpenCode.
 
 Those ids are mirrored in backend unions and frontend provider constants. If
 adding a new provider, update every place that hardcodes this list.

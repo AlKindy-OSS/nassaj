@@ -171,3 +171,29 @@ describe('(ج) جلسة رسمية — لا انحدار', () => {
     expect(onSelect).toHaveBeenCalledWith('claude', 'sonnet', 'session-eng');
   });
 });
+
+describe('(د) محادثة Codex على خادم محلي (T-2107)', () => {
+  it('اللوحة للقراءة فقط: لا تنقل المحادثة المحلية إلى نموذج سحابي', async () => {
+    const onSelect = vi.fn() as unknown as SelectModel & { mock: unknown };
+    const local = 'nassaj_local_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/qwen3-coder:30b';
+    render(
+      <CommandResultModal
+        payload={{ kind: 'models', data: { current: { provider: 'codex', providerLabel: 'Codex', model: local } } }}
+        onClose={vi.fn()}
+        providerModelCatalog={{ ...CATALOG, codex: def('gpt-6-codex') }}
+        providerModelCacheCatalog={{}}
+        providerModelsRefreshing={false}
+        providerModelsFallbackProviders={[]}
+        onHardRefreshProviderModels={vi.fn()}
+        currentSessionId="session-codex-local"
+        onSelectProviderModel={onSelect}
+        sessionEngineProvider={null}
+      />,
+    );
+    expect(screen.queryByText('gpt-6-codex')).toBeNull();
+    for (const button of screen.queryAllByRole('button', { name: /gpt-6-codex/ })) {
+      await act(async () => { fireEvent.click(button); });
+    }
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});

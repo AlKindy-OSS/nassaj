@@ -4,9 +4,8 @@ import { CodexProvider } from '@/modules/providers/list/codex/codex.provider.js'
 import { CursorProvider } from '@/modules/providers/list/cursor/cursor.provider.js';
 import { DeepSeekProvider } from '@/modules/providers/list/deepseek/deepseek.provider.js';
 import { GlmProvider } from '@/modules/providers/list/glm/glm.provider.js';
-import { KimiProvider } from '@/modules/providers/list/kimi/kimi.provider.js';
+import { KimiEngineProvider } from '@/modules/providers/list/kimi/kimi-engine.provider.js';
 import { OpenCodeProvider } from '@/modules/providers/list/opencode/opencode.provider.js';
-import { QwenProvider } from '@/modules/providers/list/qwen/qwen.provider.js';
 import type { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
 import { VendorSessionsProvider } from '@/modules/providers/shared/vendor/vendor-sessions.provider.js';
 import type { IProvider, IProviderSessions } from '@/shared/interfaces.js';
@@ -26,27 +25,30 @@ const providers: Partial<Record<LLMProvider, IProvider>> = {
   codex: new CodexProvider(),
   cursor: new CursorProvider(),
   opencode: new OpenCodeProvider(),
-  qwen: new QwenProvider(),
   // Hosted vendor providers (single internal user). Registered here so their
   // models surface automatically in /api/providers/:provider/models and the
   // model picker, and resolveProvider returns them for the chat dispatch.
-  kimi: new KimiProvider(),
   deepseek: new DeepSeekProvider(),
   glm: new GlmProvider(),
 };
 
 /**
- * History-only readers (T-1953, ADR-192): ids whose body was deleted but whose
- * recorded conversations must stay readable. They are NOT providers — nothing
- * here can launch, authenticate or configure anything, and `resolveProvider`
- * keeps refusing them.
- *
- * hermes: every turn was appended to the nassaj-owned JSONL transcript
- * (`~/.nassaj-vendor-sessions/hermes/<projectHash>/<sessionId>.jsonl`), never
- * read from the CLI's own store, so the generic vendor reader is the whole reader.
+ * Engine faces (ADR-229): ids whose BODY was removed but which stay an engine of
+ * the Claude body. `resolveProvider` returns them for the catalog and key-status
+ * reads; `listProviders` and `resolveHistorySessions` never see them, and every
+ * body facet answers a typed refusal.
+ */
+const engineFaces: Partial<Record<LLMProvider, IProvider>> = {
+  kimi: new KimiEngineProvider(),
+};
+
+/**
+ * History-only readers (T-1953, ADR-192): ids whose body has no provider module
+ * but whose recorded conversations must stay readable. They are NOT providers —
+ * nothing here can launch, authenticate or configure anything, and
+ * `resolveProvider` keeps refusing them. (ADR-229 removed the hermes reader.)
  */
 const historyOnlySessions: Partial<Record<LLMProvider, IProviderSessions>> = {
-  hermes: new VendorSessionsProvider({ provider: 'hermes' }),
   // dsh (T-2086, ADR-224): a live body whose ONLY history is the nassaj-owned
   // vendor transcript dsh-acp-runtime writes (dsh has no session/load). Its full
   // provider facets (models/auth/MCP/skills/synchronizer) are not registered yet,
@@ -64,7 +66,8 @@ export const providerRegistry = {
 
   resolveProvider(provider: string): IProvider {
     const key = provider as LLMProvider;
-    const resolvedProvider = providers[key];
+    const resolvedProvider = providers[key]
+      ?? (Object.hasOwn(engineFaces, key) ? engineFaces[key] : undefined);
     if (!resolvedProvider) {
       throw new AppError(`Unsupported provider "${provider}".`, {
         code: 'UNSUPPORTED_PROVIDER',

@@ -41,6 +41,8 @@ import { displaySessionTitle, titleTextBeforeMask } from '@/services/session-tit
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
 import { isTranscriptHandle, openSessionTranscript } from '../shared/session-transcript.js';
 import { isRetryableRefusal, removeSessionTranscript } from '../shared/session-transcript-removal.js';
+import { listClaudeConfigDirsReadOnly } from '../list/claude/claude-home.js';
+import { removeClaudeResumeBridgeLinks } from '../list/claude/claude-resume-bridge.js';
 import { applyClaudeSteerInjections, projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 // eslint-disable-next-line boundaries/dependencies -- ADR-219: the peer history-marker leaf (relay repository only).
 import { projectPeerDeliveryMarkers } from '../../peer-relay/peer-history.js';
@@ -48,6 +50,7 @@ import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../li
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
 import { runtimeInstructionsPrefix, stripRuntimeInstructionsPrefix } from '../../../../shared/documentSharingInstructions.js';
 import { SUBAGENT_SESSION_TIMEOUT_MS } from '../../../../shared/subagent-states.js';
+import { PROVIDER_REMOVED_CODE, isHiddenHistoryProvider } from '../../../../shared/retiredProviders.js';
 
 import { HISTORY_LIMITS, HistoryReadLease, HistoryBudgetError, historyAdmission } from './history-budget.service.js';
 import { HistoryHttpSink } from './history-response.service.js';
@@ -168,6 +171,20 @@ function transcriptRetryError(): AppError {
   return new AppError('The conversation file could not be removed safely right now. Please try again.', {
     code: 'TRANSCRIPT_REMOVAL_RETRY', statusCode: 409,
   });
+}
+
+/**
+ * ADR-229: the classified answer for a conversation of a removed harness. It is
+ * a failed read (`readFailed`, so the client never renders it as an empty
+ * conversation) carrying `unavailableReason: provider_removed`; no transcript
+ * content, and a fixed revision so nothing about the transcript is disclosed.
+ */
+function providerRemovedHistory(payloadMode: HistoryPayloadMode, limit: number | null, offset: number): HistoryResponse {
+  return {
+    messages: [], total: 0, hasMore: false, offset, limit, nextCursor: null,
+    readFailed: true, unavailableReason: PROVIDER_REMOVED_CODE,
+    historySchema: LIGHT_HISTORY_SCHEMA, payloadMode, revision: PROVIDER_REMOVED_CODE,
+  };
 }
 
 /**
@@ -593,6 +610,8 @@ export const sessionsService = {
     // opt-in until its limits are accepted; default routing is the full reader.
     if (process.env.NASSAJ_BOUNDED_HISTORY !== '1') return false;
     const source = sessionsDb.getHistorySource(sessionId);
+    // ADR-229: a hidden conversation is classified by fetchHistory, never by the bounded reader.
+    if (isHiddenHistoryProvider(source?.provider)) return false;
     return Boolean(source?.sourceOversized) || source?.provider === 'claude' || source?.provider === 'codex';
   },
 
@@ -705,6 +724,12 @@ export const sessionsService = {
     }
 
     const payloadMode = options.payloadMode ?? 'full';
+    // ADR-229: a conversation of a removed harness is classified, never read.
+    // After the read gate (an unauthorized caller still gets today's 404), before
+    // any transcript, cache or provider reader is touched.
+    if (isHiddenHistoryProvider(session.provider)) {
+      return providerRemovedHistory(payloadMode, options.limit ?? null, options.offset ?? 0);
+    }
     if (payloadMode === 'light' && !isLightHistoryEnabled()) {
       throw new AppError('Lightweight session history is not enabled.', {
         code: 'LIGHT_HISTORY_DISABLED', statusCode: 409,
@@ -936,6 +961,13 @@ export const sessionsService = {
       throw new AppError(`Session "${sessionId}" was not found.`, {
         code: 'SESSION_NOT_FOUND',
         statusCode: 404,
+      });
+    }
+    // ADR-173 (qa condition 6): drop shared writers' bridge links to this transcript.
+    // Links only, lstat only, never recursive; never throws.
+    if (session.provider === 'claude') {
+      removeClaudeResumeBridgeLinks({
+        sessionId, recordedJsonlPath: session.jsonl_path, configDirs: listClaudeConfigDirsReadOnly(),
       });
     }
     options.assertCurrent?.(false);

@@ -23,20 +23,24 @@ const PROVIDER = 'dsh';
 const OWNER_EVENT = 'dsh_owner';
 
 /**
- * The member whose dsh home holds `sessionId` (from the transcript's owner
- * event), or null when there is no readable record.
+ * The session's owner event: the member whose dsh home holds `sessionId`, and
+ * (ADR-227 / T-2108) the qualified local model id a local chat was created on —
+ * the server's own record of a local chat's model. Null when there is no readable
+ * record; `model` is null for a cloud chat.
  * @param {string} sessionId
  * @param {string} projectPath
- * @returns {Promise<string|null>}
+ * @returns {Promise<{ ownerUserId: string, model: string|null }|null>}
  */
-export async function readDshSessionOwner(sessionId, projectPath) {
+export async function readDshSessionRecord(sessionId, projectPath) {
   try {
     const file = await resolveVendorTranscriptForRead(PROVIDER, sessionId, projectPath);
     if (!file) return null;
     for (const line of (await fs.readFile(file, 'utf8')).split('\n').slice(0, 8)) {
       try {
         const event = JSON.parse(line);
-        if (event?.type === OWNER_EVENT && event.ownerUserId !== undefined) return String(event.ownerUserId);
+        if (event?.type === OWNER_EVENT && event.ownerUserId !== undefined) {
+          return { ownerUserId: String(event.ownerUserId), model: typeof event.model === 'string' ? event.model : null };
+        }
       } catch {
         // not JSON
       }
@@ -57,13 +61,16 @@ export class DshTranscriptRecorder {
     this.chain = Promise.resolve();
   }
 
-  /** Binds the session; a new session also gets the transcript header and its owner. */
-  start(sessionId, { isNew, command, ownerUserId }) {
+  /**
+   * Binds the session; a new session also gets the transcript header and its owner
+   * (with `localModel`, the qualified local model id a local chat runs on, T-2108).
+   */
+  start(sessionId, { isNew, command, ownerUserId, localModel = null }) {
     this.sessionId = sessionId;
     if (isNew) {
       this.enqueue(() => writeVendorTranscriptMeta(PROVIDER, sessionId, this.projectPath, command));
       this.enqueue(() => appendVendorTranscript(PROVIDER, sessionId, this.projectPath, {
-        type: OWNER_EVENT, ownerUserId: String(ownerUserId),
+        type: OWNER_EVENT, ownerUserId: String(ownerUserId), ...(localModel ? { model: localModel } : {}),
       }));
     }
     this.enqueue(() => appendVendorTranscriptTurn(PROVIDER, sessionId, this.projectPath, 'user', String(command ?? '')));

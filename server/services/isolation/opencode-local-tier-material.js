@@ -4,9 +4,20 @@
  * config dir (~/.nassaj-users/<id>/.config-local/opencode) holding:
  *  - AGENTS.md: a verified copy of ~/.claude/AGENTS.local.md (`tier=local32` REV);
  *  - opencode.json: the usual provider/limit material plus a `permission.task`
- *    allow-list (LOCAL_TASK_AGENTS), and NO webfetch rule (qa C4);
- *  - agent/: GENERATED copies of the allowed cards, by default without their
- *    `model:` pin so subagents inherit the local session model (qa C2).
+ *    allow-list (LOCAL_TASK_AGENTS) and a deny of LOCAL_COORDINATOR_DENIED_TOOLS;
+ *  - agent/: GENERATED copies of the allowed cards. The cards drop their `model:` pin so
+ *    the subagents inherit the local session model (qa C2), except LOCAL_CLOUD_SUBAGENTS
+ *    (the researcher), which keep their cloud `opencode/<model>` pin (owner decision
+ *    2026-11-13). The research agents' cards give the denied tools back (unless the card
+ *    has its own rule for them); the others deny them too.
+ * opencode merges L1 (`OPENCODE_PERMISSION`, opening with `"*":"allow"`) into the file's
+ * `permission` in the FILE's key order (measured, opencode 1.19.5): an L1 key the file
+ * also has keeps the file's position. So the file block's leading `"*":"allow"`
+ * (localTierFilePermission) is the essential anchor: without it the file's `task` sits
+ * before L1's `"*"` and the built-in explore/general agents come back, whatever L1
+ * appends (qa round 1, probe F). The local block is also appended last in the turn's L1
+ * (localTierL1); that protects only keys the file lacks (webfetch, if a file ever drops
+ * it) and the case where the file is missing. The layers do NOT each hold alone.
  * Nothing here falls back to the full instructions file.
  */
 
@@ -30,10 +41,89 @@ export const LOCAL_INSTRUCTIONS_FILENAME = 'AGENTS.local.md';
 export const LOCAL_TASK_AGENTS = Object.freeze(['researcher', 'backend-dev', 'devops', 'scribe', 'qa-critic']);
 
 /**
- * true: generated cards drop `model:`, so subagents run on the local session model.
- * false: cards keep their cloud pins. Default pending the owner's decision (qa C2).
+ * Tools the local coordinator (whatever its primary agent: build, plan or a card) must
+ * not have. Owner decision 2026-11-13 (supersedes qa C4): on qwen3.6-35b the local
+ * coordinator ignored the written rule "delegate research to researcher, never fetch
+ * whole pages", fetched pages itself and overflowed its 32K context, so webfetch is
+ * removed from it outright and research goes to the researcher subagent.
  */
-export const LOCAL_SUBAGENTS_INHERIT_SESSION_MODEL = true;
+export const LOCAL_COORDINATOR_DENIED_TOOLS = Object.freeze(['webfetch']);
+
+/**
+ * Subagents whose generated card gives LOCAL_COORDINATOR_DENIED_TOOLS back (`allow`).
+ * Every other allowed subagent denies them too: page fetching is research, and a
+ * whole page overflows a 32K context in any role (bash stays as each card has it).
+ */
+export const LOCAL_WEB_RESEARCH_AGENTS = Object.freeze(['researcher']);
+
+/**
+ * Subagents whose generated card KEEPS its source card's cloud `model:` pin; every other
+ * allowed subagent drops it and inherits the local session model (qa C2).
+ * Owner decision 2026-11-13 ("yes, agreed"): on a local model only the researcher runs on
+ * a cloud free model with a large context. On qwen3.6-35b at 32K it overflowed three
+ * times per run: single fetched pages are 11-12K characters, 3-5 at a time, on top of its
+ * own ~11K-token prompt. It still runs under the local32 AGENTS.md and the same
+ * permissions; only the model changes.
+ */
+export const LOCAL_CLOUD_SUBAGENTS = Object.freeze(['researcher']);
+
+/**
+ * The exact models a LOCAL_CLOUD_SUBAGENTS pin may name (qa round 1: a provider check let
+ * `opencode/big-pickle`, which trains on data, and the paid `opencode/claude-opus-4-8`
+ * through). Each is a cost-0 model of opencode's built-in `opencode` (Zen) provider, which
+ * opencode serves with `apiKey: "public"` when no Zen key is configured (measured, opencode
+ * 1.19.5), so no secret is added. Any other pin, a missing pin, or more than one top-level
+ * `model:` line refuses the turn: a silent local run would overflow again. nassaj-core's
+ * opencode/test asserts its researcher card pins one of these (keep both lists in step).
+ */
+export const LOCAL_CLOUD_SUBAGENT_MODELS = Object.freeze(['opencode/deepseek-v4.1-flash-free']);
+
+/**
+ * Read-family tools whose generated LOCAL_CLOUD_SUBAGENTS card denies the secret files
+ * (LOCAL_CLOUD_SECRET_PATTERNS). The nassaj-governance plugin enforces this on the
+ * operator's paths but is not loaded on the per-member ones, so without it a cloud
+ * subagent could read a workspace `.env` and send it off-box (qa round 1). opencode
+ * matches `read`/`list` on the path and `glob` on the search pattern.
+ */
+export const LOCAL_CLOUD_SECRET_TOOLS = Object.freeze(['read', 'glob', 'list']);
+
+/**
+ * Tools a LOCAL_CLOUD_SUBAGENTS card denies outright, replacing any rule of its own.
+ * grep: opencode runs ripgrep with `--hidden` and matches the grep permission on the
+ * search pattern, so `grep "API_KEY"` returned a `.env` line to the cloud (measured,
+ * opencode 1.19.5). Coordinator decision (Code Security: secrets never leave the host;
+ * the cloud researcher's job is web research).
+ */
+export const LOCAL_CLOUD_DENIED_TOOLS = Object.freeze(['grep']);
+
+/**
+ * The bare secret patterns of the nassaj-governance plugin's SECRETS `decl` fields
+ * (nassaj-core opencode/plugin/nassaj-governance.js, mirrored in its opencode.json); each
+ * is denied as written and with a leading `**` path segment. Deny-only on purpose: the plugin's `.env.example`
+ * style allows are left out, since a card allow would beat a deny of the turn's L1.
+ */
+export const LOCAL_CLOUD_SECRET_PATTERNS = Object.freeze([
+  '.env', '.env.*', '.credentials.json', 'auth.json', 'db.sqlite', 'db.sqlite*', 'auth.db', '.cloudcli/**',
+  'id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa', '*.pem', '*.p12', '*.pfx', '.git-credentials', 'provider-key*',
+  '.npmrc', '.pypirc', '.netrc', '.pgpass', '.my.cnf', '.htpasswd', '.aws/credentials', '.docker/config.json',
+  '.kube/config', 'gh/hosts.yml', '.ssh/**', '.gnupg/**', '*.key', '*.keystore', '*.jks', '*.kdbx', '*.ovpn',
+  '*.tfstate*', '*.tfvars', 'credentials.json', 'service-account*.json', '.claude.json', '.mcp.json',
+  'settings.local.json',
+]);
+
+/**
+ * Appended to the GENERATED local researcher card body only. The local coordinator has a
+ * 32K window; in the C5 acceptance run it reached 23.5K after taking in an 18K-character
+ * researcher report, about 5K from the edge. A ~6,000-character cap keeps that margin.
+ */
+export const LOCAL_RESEARCHER_REPORT_LIMIT_LINE = 'Local-chat handoff: return a concise report of at most '
+  + '~6,000 characters (about 1,500 tokens): ranked findings with source links; no raw page text.';
+
+/** A top-level frontmatter `model` key: plain, quoted, or with space before the colon. */
+const MODEL_KEY = /^["']?model["']?\s*:/u;
+
+/** The operator triage reason of a wrong researcher pin (never shown to the user). */
+const CLOUD_PIN_FIX = 'fix the researcher model pin in nassaj-core (opencode/agent/researcher.md)';
 
 /** Refusal code of a local turn whose slim instructions are missing or invalid. */
 export const LOCAL_INSTRUCTIONS_UNAVAILABLE = 'local_instructions_unavailable';
@@ -136,23 +226,238 @@ export function carriesCompactTierMarks(content) {
     || content.split('\n').includes(LOCAL_TIER_HEADER);
 }
 
-/** @returns {{ task: Record<string, 'allow'|'deny'> }} the local permission block */
-export function localTaskPermission() {
-  return { task: { '*': 'deny', ...Object.fromEntries(LOCAL_TASK_AGENTS.map((agent) => [agent, 'allow'])) } };
+/**
+ * The local permission block: the task allow-list, then a deny of every
+ * LOCAL_COORDINATOR_DENIED_TOOLS entry.
+ * @returns {Record<string, unknown>}
+ */
+export function localTierPermission() {
+  return {
+    task: { '*': 'deny', ...Object.fromEntries(LOCAL_TASK_AGENTS.map((agent) => [agent, 'allow'])) },
+    ...Object.fromEntries(LOCAL_COORDINATOR_DENIED_TOOLS.map((tool) => [tool, 'deny'])),
+  };
 }
 
 /**
- * A generated card: the source card without its frontmatter `model:` line (C2).
+ * The local block as written to the local opencode.json. opencode merges L1 into the
+ * file's `permission` keeping the FILE's key order (measured, opencode 1.19.5), so a
+ * file block without `"*"` would sit before L1's leading `"*":"allow"` and be
+ * re-opened by it (task list and webfetch both). The file therefore opens with the
+ * same `"*":"allow"` every nassaj spawn's L1 opens with (ADR-226), which changes
+ * nothing L1 does not already set.
+ * @returns {Record<string, unknown>}
+ */
+export function localTierFilePermission() {
+  return { '*': 'allow', ...localTierPermission() };
+}
+
+/**
+ * L1 (`OPENCODE_PERMISSION`) of a local-tier turn: the turn's own L1 with the local
+ * permission block moved LAST (within one permission the last matching rule wins, and
+ * L1 opens with `"*":"allow"`). A tool L1 already denies outright stays denied; nothing
+ * else in L1 changes.
+ * Limit: opencode merges L1 in the config FILE's key order, so a key the file also has
+ * keeps the file's position and this append does not move it. It protects only keys
+ * absent from the file and a missing file; the task list depends on the file block's
+ * leading `"*"` (localTierFilePermission), not on this function.
+ * @param {string} l1Text the turn's L1 JSON (an object)
+ * @returns {string}
+ */
+export function localTierL1(l1Text) {
+  const l1 = JSON.parse(l1Text);
+  if (!l1 || typeof l1 !== 'object' || Array.isArray(l1)) throw new Error('L1 is not a JSON object');
+  // localTierPermission never carries "*": moving it last would re-open everything.
+  for (const [tool, rule] of Object.entries(localTierPermission())) {
+    if (l1[tool] === 'deny') continue;
+    delete l1[tool];
+    l1[tool] = rule;
+  }
+  return JSON.stringify(l1);
+}
+
+/**
+ * The child env of a local-tier turn whose OWN L1 (Claude's rules) already denies a
+ * LOCAL_COORDINATOR_DENIED_TOOLS entry outright: the inline config then denies it to
+ * the research agents too, since their card's `allow` would otherwise beat that deny
+ * (an inline agent rule beats the card; measured, opencode 1.19.5). Otherwise unchanged.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string} turnL1Text the turn's L1 BEFORE localTierL1
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function withLocalTierClaudeDenies(env, turnL1Text) {
+  const l1 = JSON.parse(turnL1Text);
+  const denied = LOCAL_COORDINATOR_DENIED_TOOLS.filter((tool) => l1?.[tool] === 'deny');
+  if (!denied.length) return env;
+  const inline = env.OPENCODE_CONFIG_CONTENT ? JSON.parse(env.OPENCODE_CONFIG_CONTENT) : {};
+  if (!inline || typeof inline !== 'object' || Array.isArray(inline)) throw new Error('inline config is not a JSON object');
+  const agents = inline.agent && typeof inline.agent === 'object' ? inline.agent : {};
+  for (const agent of LOCAL_WEB_RESEARCH_AGENTS) {
+    const entry = agents[agent] && typeof agents[agent] === 'object' ? agents[agent] : {};
+    const permission = entry.permission && typeof entry.permission === 'object' ? entry.permission : {};
+    for (const tool of denied) permission[tool] = 'deny';
+    agents[agent] = { ...entry, permission };
+  }
+  inline.agent = agents;
+  return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify(inline) };
+}
+
+/** `allow` for a research agent, else `deny` (LOCAL_WEB_RESEARCH_AGENTS). */
+function localToolActionFor(agent) {
+  return LOCAL_WEB_RESEARCH_AGENTS.includes(agent) ? 'allow' : 'deny';
+}
+
+/**
+ * Frontmatter lines with `permission.<tool>` set for every LOCAL_COORDINATOR_DENIED_TOOLS
+ * entry. `deny` replaces whatever rule the card has (a scalar or a pattern map) with a
+ * whole-tool deny. `allow` is added only when the card has NO rule of its own for the
+ * tool: a card's own rule (deny, ask, or a pattern map that denies some URLs) is left
+ * exactly as written, so the research agent's grant never weakens it (qa round 1, B4).
+ * @param {string[]} lines frontmatter lines (opening `---` included)
+ * @param {'allow'|'deny'} action
+ */
+function withLocalToolRules(lines, action) {
+  const out = [...lines];
+  let at = out.findIndex((line) => /^permission:\s*$/u.test(line));
+  for (const tool of LOCAL_COORDINATOR_DENIED_TOOLS) {
+    let own = -1;
+    let stop = -1;
+    if (at >= 0) {
+      let end = at + 1;
+      while (end < out.length && /^\s/u.test(out[end])) end += 1;
+      own = out.slice(at + 1, end).findIndex((line) => new RegExp(`^\\s+${tool}:`, 'u').test(line));
+      if (own >= 0) {
+        own += at + 1;
+        stop = own + 1;
+        while (stop < end && /^\s{3,}/u.test(out[stop])) stop += 1;
+      }
+    }
+    if (own >= 0 && action === 'allow') continue;
+    if (at < 0) {
+      out.push('permission:');
+      at = out.length - 1;
+    }
+    if (own >= 0) out.splice(own, stop - own);
+    out.splice(at + 1, 0, `  ${tool}: ${action}`);
+  }
+  return out;
+}
+
+/** The frontmatter lines of a card (opening `---` included), or null without frontmatter. */
+function frontmatterLines(source) {
+  if (!source.startsWith('---\n')) return null;
+  const end = source.indexOf('\n---', 4);
+  return end < 0 ? null : source.slice(0, end).split('\n');
+}
+
+/**
+ * The checked cloud pin of a LOCAL_CLOUD_SUBAGENTS card: exactly one top-level `model`
+ * line whose value (optionally quoted, nothing else on the line) is in
+ * LOCAL_CLOUD_SUBAGENT_MODELS.
  * @param {string} source
- * @param {{ inheritSessionModel?: boolean }} [options]
+ * @returns {string}
+ * @throws {LocalAgentCardsUnavailableError} otherwise, with a fix-the-pin reason
+ */
+export function localCloudModelPin(source) {
+  const lines = (frontmatterLines(source) ?? []).filter((entry) => MODEL_KEY.test(entry));
+  if (lines.length !== 1) {
+    throw new LocalAgentCardsUnavailableError(`${CLOUD_PIN_FIX}: expected one model line, found ${lines.length}`);
+  }
+  const value = lines[0].replace(MODEL_KEY, '').trim().replace(/^(["'])(.*)\1$/u, '$2');
+  if (!LOCAL_CLOUD_SUBAGENT_MODELS.includes(value)) {
+    throw new LocalAgentCardsUnavailableError(
+      `${CLOUD_PIN_FIX}: ${JSON.stringify(value)} is not one of ${LOCAL_CLOUD_SUBAGENT_MODELS.join(', ')}`,
+    );
+  }
+  return value;
+}
+
+/** Index range [start, end) of the frontmatter `permission:` block, or null. */
+function permissionBlock(lines) {
+  const start = lines.findIndex((line) => /^permission:\s*$/u.test(line));
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length && /^\s/u.test(lines[end])) end += 1;
+  return [start, end];
+}
+
+/**
+ * Adds a deny-only LOCAL_CLOUD_SECRET_PATTERNS map for every LOCAL_CLOUD_SECRET_TOOLS
+ * entry at the end of the permission block. A card's own whole-tool `deny` is kept; any
+ * other own rule for those tools refuses (it could be an allow this map cannot narrow).
+ * @param {string[]} lines frontmatter lines (opening `---` included)
+ */
+function withSecretDenies(lines) {
+  const out = [...lines];
+  let block = permissionBlock(out);
+  if (!block) {
+    out.push('permission:');
+    block = [out.length - 1, out.length];
+  }
+  const added = [];
+  for (const tool of LOCAL_CLOUD_SECRET_TOOLS) {
+    const own = out.slice(block[0] + 1, block[1]).find((line) => new RegExp(`^ {2}${tool}\\s*:`, 'u').test(line));
+    if (own !== undefined) {
+      if (/^ {2}\w+\s*:\s*deny\s*$/u.test(own)) continue;
+      throw new LocalAgentCardsUnavailableError(`researcher card has its own ${tool} rule; make it a deny or remove it`);
+    }
+    added.push(`  ${tool}:`);
+    for (const pattern of LOCAL_CLOUD_SECRET_PATTERNS) {
+      added.push(`    ${JSON.stringify(pattern)}: deny`, `    ${JSON.stringify(`**/${pattern}`)}: deny`);
+    }
+  }
+  out.splice(block[1], 0, ...added);
+  return withWholeToolDenies(out);
+}
+
+/** Replaces any own rule of every LOCAL_CLOUD_DENIED_TOOLS entry with a whole-tool deny. */
+function withWholeToolDenies(lines) {
+  let out = [...lines];
+  for (const tool of LOCAL_CLOUD_DENIED_TOOLS) {
+    const [start, end] = permissionBlock(out);
+    const own = new RegExp(`^ {2}${tool}\\s*:`, 'u');
+    const kept = [];
+    for (let index = start + 1; index < end; index += 1) {
+      if (!own.test(out[index])) {
+        kept.push(out[index]);
+        continue;
+      }
+      while (index + 1 < end && /^ {3,}/u.test(out[index + 1])) index += 1;
+    }
+    out = [...out.slice(0, start + 1), ...kept, `  ${tool}: deny`, ...out.slice(end)];
+  }
+  return out;
+}
+
+/** The checked pin written back as the only `model` line, where the first one stood. */
+function withSingleCloudPin(lines, pin) {
+  const at = lines.findIndex((line) => MODEL_KEY.test(line));
+  const out = lines.filter((line) => !MODEL_KEY.test(line));
+  out.splice(at, 0, `model: ${pin}`);
+  return out;
+}
+
+/**
+ * A generated card: the source card without any top-level `model` line (C2) and, when
+ * `agent` is given, with its LOCAL_COORDINATOR_DENIED_TOOLS rules set (allow for a
+ * research agent, deny otherwise). A LOCAL_CLOUD_SUBAGENTS card instead keeps its checked
+ * cloud pin as a single line, gets the secret read denies and the LOCAL_CLOUD_DENIED_TOOLS
+ * denies, and ends with
+ * LOCAL_RESEARCHER_REPORT_LIMIT_LINE.
+ * @param {string} source
+ * @param {{ agent?: string }} [options]
+ * @throws {LocalAgentCardsUnavailableError} a cloud card with a wrong pin or own read rule
  */
 export function localAgentCardContent(source, options = {}) {
-  const inherit = options.inheritSessionModel ?? LOCAL_SUBAGENTS_INHERIT_SESSION_MODEL;
-  if (!inherit || !source.startsWith('---\n')) return source;
+  let lines = frontmatterLines(source);
+  if (!lines) return source;
   const end = source.indexOf('\n---', 4);
-  if (end < 0) return source;
-  const front = source.slice(0, end).split('\n').filter((line) => !/^model:/u.test(line)).join('\n');
-  return front + source.slice(end);
+  const cloud = Boolean(options.agent) && LOCAL_CLOUD_SUBAGENTS.includes(options.agent);
+  lines = cloud ? withSingleCloudPin(lines, localCloudModelPin(source)) : lines.filter((line) => !MODEL_KEY.test(line));
+  if (options.agent) lines = withLocalToolRules(lines, localToolActionFor(options.agent));
+  if (cloud) lines = withSecretDenies(lines);
+  const body = source.slice(end);
+  if (!cloud) return lines.join('\n') + body;
+  return `${lines.join('\n')}${body}${body.endsWith('\n') ? '' : '\n'}${LOCAL_RESEARCHER_REPORT_LIMIT_LINE}\n`;
 }
 
 /** Replaces a symlink or non-directory at `dir` with a real private directory. */
@@ -189,15 +494,18 @@ function writeReadOnly(file, content) {
  * never a link to the shared one) and removes anything else there.
  * @param {string} configDir the local `<XDG_CONFIG_HOME>/opencode`
  * @param {string} sourceDir the shared agent dir (read only)
- * @throws {LocalAgentCardsUnavailableError} when an allowed card is missing
+ * @throws {LocalAgentCardsUnavailableError} when an allowed card is missing, or a
+ *   LOCAL_CLOUD_SUBAGENTS card lacks an allowed cloud pin (never a silent local run)
  */
 export function materializeLocalAgentCards(configDir, sourceDir) {
   const cards = LOCAL_TASK_AGENTS.map((agent) => {
+    let source;
     try {
-      return [`${agent}.md`, localAgentCardContent(fs.readFileSync(path.join(sourceDir, `${agent}.md`), 'utf8'))];
+      source = fs.readFileSync(path.join(sourceDir, `${agent}.md`), 'utf8');
     } catch {
       throw new LocalAgentCardsUnavailableError(`agent card missing: ${agent}`);
     }
+    return [`${agent}.md`, localAgentCardContent(source, { agent })];
   });
   const agentDir = path.join(configDir, 'agent');
   ensureRealAgentDir(agentDir);

@@ -9,6 +9,7 @@
  */
 
 import { getConnection } from '@/modules/database/connection.js';
+import { visibleHistoryPredicateSql } from '@/modules/database/repositories/hidden-history.sql.js';
 
 export type StarredSessionRow = {
   sessionId: string;
@@ -57,6 +58,7 @@ export const starredSessionsDb = {
    * entire filter in one query avoids an authorization-query pair per star.
    * The deterministic order and hard cap bound response memory/latency without
    * widening the route contract with pagination that no client consumes.
+   * Stars on conversations of removed harnesses are hidden, not deleted (ADR-229).
    */
   listAccessibleStarredSessions(userId: number): StarredSessionRow[] {
     const db = getConnection();
@@ -66,6 +68,7 @@ export const starredSessionsDb = {
          FROM starred_sessions ss
          INNER JOIN sessions s ON s.session_id = ss.session_id
          WHERE ss.user_id = ?
+           AND ${visibleHistoryPredicateSql('s.provider')}
            AND (
              EXISTS (
                SELECT 1

@@ -172,11 +172,11 @@ describe('predicates — every KNOWN_PROVIDER, fail closed', () => {
     assert.equal(assertCredentialLinked({ actor: user.id, provider: 'codex' }).principalId, user.id);
   });
 
-  it('kimi agent mode also accepts the native CLI subscription; chat mode does not', () => {
+  it('ADR-229: a leftover native kimi CLI login admits no kimi run in any mode (key slot only)', () => {
     const user = member();
     writeTree(user.id, '.kimi/credentials/kimi-code.json', { access_token: 'kimi-sub' });
     refusal(() => assertCredentialLinked({ actor: user.id, provider: 'kimi', mode: 'chat' }));
-    assert.equal(assertCredentialLinked({ actor: user.id, provider: 'kimi', mode: 'agent' }).principalId, user.id);
+    refusal(() => assertCredentialLinked({ actor: user.id, provider: 'kimi', mode: 'agent' }));
   });
 
   it('opencode: the model\'s vendor must be in auth.json; free and local models need nothing; a bare model is refused', () => {

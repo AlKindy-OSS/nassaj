@@ -6,8 +6,8 @@
  *
  * خط الأساس مقروء من مصادر المزوّدين في يوليو 2026؛ الإضافات اللاحقة تحمل
  * تاريخ تحقق مستقلّاً بجانب صفّ النموذج (المصادر في تعليق كل عائلة).
- * **لا صفّ اليوم يحمل `assumed`** — الآلية باقية في النوع
- * لنموذج قد يظهر مستقبلاً بلا سعر منشور، فيُعرَض حينها تقديراً مسمّى وتصير
+ * `assumed` يُرفَع على صفّ لا يُعرَف سعره الفعلي من المجاميع (اليوم
+ * ‏claude-haiku-5-5 وحده: سعره بالشريحة)، فيُعرَض تقديراً مسمّى وتصير
  * البطاقة «جزئية». والنموذج غير المُسعَّر أصلاً يُترك خارج الجدول ويُعرَض
  * «سعره غير متاح» بدل تلفيق صفر.
  *
@@ -34,7 +34,8 @@ export type ModelPrice = {
   cacheWrite1hPerMTok: number | null;
   cacheReadPerMTok: number | null;
   /**
-   * `true` = السعر **مفترَض بالقياس على عائلته**، لا مقروءاً من صفحة رسمية.
+   * `true` = الرقم الناتج **تقدير لا قياس**: سعر مفترَض بالقياس على عائلته،
+   * أو سعر رسمي متدرّج لا تحسم المجاميع شريحته فيُحسَب بالدنيا (حدّ أدنى).
    *
    * لا يجوز أن يمرّ مثل هذا الرقم كأنه مقيس: نماذج غير معلَنة تظهر في سجلّاتنا
    * (‏fable-5 يشكّل ~27% من أكبر بطاقة) ولا صفحة تسعير لها تُقرأ — والمستودع
@@ -46,21 +47,47 @@ export type ModelPrice = {
    * تغيير سعر **مجدول ومعلَن** لهذا النموذج.
    *
    * سعرٌ ترويجي ينتهي هو قنبلة موقوتة صامتة: الجدول يبقى صحيحاً حتى يوم
-   * الانتهاء ثم يبخس الكلفة بلا أي إشارة. سونيت 5 مثالها الحيّ — ‏$2/$10
-   * ترويجي حتى 2026-08-31، ثم $3/$15، أي أن الرقم المعروض بعدها سيكون أقلّ
-   * من الحقيقة بالثلث. فيُسجَّل التغيير هنا وقت معرفته لا وقت وقوعه.
+   * الانتهاء ثم يبخس الكلفة بلا أي إشارة. فيُسجَّل التغيير هنا وقت معرفته لا
+   * وقت وقوعه، ويُزال إن ألغاه المورّد. (لا صفّ يحمله اليوم: رفع سونيت 5 المجدول
+   * أُلغي رسمياً — B-1796.)
    */
   scheduled?: { effectiveFrom: string } & Omit<ModelPrice, 'assumed' | 'scheduled'>;
 };
 
-/** تاريخ خط أساس الجدول؛ لا يتغيّر عند التحقق من نموذج واحد فقط. */
-export const PRICES_AS_OF = '2026-07-31';
+/**
+ * تاريخ آخر مراجعة للجدول: يُرفَع حين تتغيّر صفوفه (لا حين يُتحقَّق من صفّ
+ * دون تعديل). ‏2026-11-14 = صفوف أنثروبيك 5.x وتصحيح sonnet-5 (B-1409/B-1796).
+ * الصفوف التي لم تُقرأ يومها تحمل تاريخ تحققها في تعليقها. والقيمة جزء من
+ * مفتاح كاش الكلفة ومن صفّ دفتر المشروع، فبقاؤها قديمة بعد تغيير صفّ يُبقي
+ * كلفاً محسوبة بالسعر السابق ويَنسب صفوفاً جديدة إلى جدول لم يُنتجها.
+ */
+export const PRICES_AS_OF = '2026-11-14';
 
 /**
  * أنثروبيك — platform.claude.com/docs/en/about-claude/pricing
- * مضاعفات المخبّأ رسمية ومطّردة: 5د = 1.25× المدخلات، ساعة = 2×، قراءة = 0.1×.
+ * مضاعفات الكتابة رسمية ومطّردة: 5د = 1.25× المدخلات، ساعة = 2×. أمّا القراءة
+ * فـ0.1× **عدا** الجيل الأحدث: ‏0.025× لـfable/mythos 5.1 و5.2، و0.05× لـopus/
+ * sonnet 5.5 — فلا تُشتقّ القراءة من المدخلات، تُنقَل من الصفحة كما هي.
  */
 const ANTHROPIC_PRICES: Record<string, ModelPrice> = {
+  // ── الجيل 5.x — مقروء من صفحة التسعير أعلاه في 2026-11-14 (B-1409) ──────────
+  // بلا هذه الصفوف كانت المطابقة بالبادئة ترفض اللاحقة '-5'/'-2' فيُعرَض
+  // النموذج «سعره غير متاح». والصفّ الأخصّ يغلب دائماً لأن المفاتيح مرتّبة
+  // تنازلياً بالطول ('claude-opus-5-5' قبل 'claude-opus-5').
+  // وضع fast (‏opus-5.5 ‏$8/$40، fable/mythos-5.2 ‏$16/$80) غير ممثَّل: اللاحقة
+  // '-fast' تُسقَط في normalizeModelId والسجلّ لا يميّزه، فيُسعَّر بالقياسي.
+  'claude-fable-5-2': { inputPerMTok: 8, outputPerMTok: 40, cacheWrite5mPerMTok: 10, cacheWrite1hPerMTok: 16, cacheReadPerMTok: 0.2 },
+  'claude-mythos-5-2': { inputPerMTok: 8, outputPerMTok: 40, cacheWrite5mPerMTok: 10, cacheWrite1hPerMTok: 16, cacheReadPerMTok: 0.2 },
+  'claude-fable-5-1': { inputPerMTok: 10, outputPerMTok: 50, cacheWrite5mPerMTok: 12.5, cacheWrite1hPerMTok: 20, cacheReadPerMTok: 0.25 },
+  'claude-mythos-5-1': { inputPerMTok: 10, outputPerMTok: 50, cacheWrite5mPerMTok: 12.5, cacheWrite1hPerMTok: 20, cacheReadPerMTok: 0.25 },
+  'claude-opus-5-5': { inputPerMTok: 4, outputPerMTok: 20, cacheWrite5mPerMTok: 5, cacheWrite1hPerMTok: 8, cacheReadPerMTok: 0.2 },
+  'claude-sonnet-5-5': { inputPerMTok: 2, outputPerMTok: 10, cacheWrite5mPerMTok: 2.5, cacheWrite1hPerMTok: 4, cacheReadPerMTok: 0.1 },
+  // ‏haiku-5-5 مسعَّر بالشريحة: الطلب الذي يتجاوز موجّهه 100 ألف توكن (المخبّأ
+  // يُحسَب في طوله) يدفع ‏$0.50/$2.50 (‏5د 0.625، ساعة 1، قراءة 0.05) — خمسة
+  // أضعاف. التسعير يجري على ModelUsage، وهي مجاميع جلسة/يوم بلا طول كل طلب
+  // (ومسار الدفتر يقرأ مجاميع القاعدة أصلاً) ⇒ الجدول يحمل الشريحة الدنيا،
+  // والرقم حدٌّ أدنى لا قياس؛ `assumed` يُسمّيه في الواجهة ويُسقط «كامل».
+  'claude-haiku-5-5': { inputPerMTok: 0.1, outputPerMTok: 0.5, cacheWrite5mPerMTok: 0.125, cacheWrite1hPerMTok: 0.2, cacheReadPerMTok: 0.01, assumed: true },
   // ‏fable-5 و mythos-5: ‏$10/$50 — **ضعف opus-4-8 بالضبط**، وهو سعر رسمي
   // منشور في كتالوج النماذج لا تقديراً. (وُسِما `assumed` خطأً في مراجعة سابقة
   // بناءً على تعليق في claude-models.provider.ts؛ وذاك التعليق يخصّ **منتقي
@@ -75,23 +102,10 @@ const ANTHROPIC_PRICES: Record<string, ModelPrice> = {
   'claude-opus-4-5': { inputPerMTok: 5, outputPerMTok: 25, cacheWrite5mPerMTok: 6.25, cacheWrite1hPerMTok: 10, cacheReadPerMTok: 0.5 },
   'claude-opus-4-1': { inputPerMTok: 15, outputPerMTok: 75, cacheWrite5mPerMTok: 18.75, cacheWrite1hPerMTok: 30, cacheReadPerMTok: 1.5 },
   'claude-opus-4': { inputPerMTok: 15, outputPerMTok: 75, cacheWrite5mPerMTok: 18.75, cacheWrite1hPerMTok: 30, cacheReadPerMTok: 1.5 },
-  // ‏$2/$10 **ترويجي** ينتهي 2026-08-31؛ السعر المعلَن بعده $3/$15 (وهو نفسه
-  // سعر sonnet-4-6 — مرساة تحقّق مفيدة). مسجَّل الآن كي لا يُبخَس الحساب صامتاً.
-  'claude-sonnet-5': {
-    inputPerMTok: 2,
-    outputPerMTok: 10,
-    cacheWrite5mPerMTok: 2.5,
-    cacheWrite1hPerMTok: 4,
-    cacheReadPerMTok: 0.2,
-    scheduled: {
-      effectiveFrom: '2026-09-01',
-      inputPerMTok: 3,
-      outputPerMTok: 15,
-      cacheWrite5mPerMTok: 3.75,
-      cacheWrite1hPerMTok: 6,
-      cacheReadPerMTok: 0.3,
-    },
-  },
+  // ‏$2/$10 هو السعر القياسي (B-1796). أُعلن عند الإطلاق ترويجياً حتى 2026-08-31
+  // ثم $3/$15، لكن الحاشية 3 في platform.claude.com/docs/en/about-claude/pricing
+  // (مقروءة 2026-11-14) تنصّ أن الرفع المجدول في 2026-09-01 «will not occur».
+  'claude-sonnet-5': { inputPerMTok: 2, outputPerMTok: 10, cacheWrite5mPerMTok: 2.5, cacheWrite1hPerMTok: 4, cacheReadPerMTok: 0.2 },
   'claude-sonnet-4-6': { inputPerMTok: 3, outputPerMTok: 15, cacheWrite5mPerMTok: 3.75, cacheWrite1hPerMTok: 6, cacheReadPerMTok: 0.3 },
   'claude-sonnet-4-5': { inputPerMTok: 3, outputPerMTok: 15, cacheWrite5mPerMTok: 3.75, cacheWrite1hPerMTok: 6, cacheReadPerMTok: 0.3 },
   'claude-sonnet-4': { inputPerMTok: 3, outputPerMTok: 15, cacheWrite5mPerMTok: 3.75, cacheWrite1hPerMTok: 6, cacheReadPerMTok: 0.3 },

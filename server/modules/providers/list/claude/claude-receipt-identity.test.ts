@@ -57,9 +57,30 @@ test('binding conflict blocks yield; missing completeness capability and ephemer
   for (const patch of [{ capability: undefined }, { persistSession: false }, { userId: 2 }, { content: [{ type: 'image' }] }]) {
     const prompt = createClaudeReceiptPrompt({ ...input, ...patch }, () => { throw Error('must not bind'); });
     const stream = prompt.make();
-    assert.equal((await stream.next()).value!.uuid, undefined); await stream.next();
+    // ADR-173 P8 B1: the prompt still carries a native uuid (the transcript row id), unbound.
+    assert.equal((await stream.next()).value!.uuid, prompt.messageUuid()); await stream.next();
+    assert.match(String(prompt.messageUuid()), /^[0-9a-f-]{36}$/);
     assert.equal(prompt.promptUuid(), null);
   }
+});
+
+test('ADR-173 P8 B1: the transcript uuid is known before the prompt is consumed and equals the yielded one', async () => {
+  const bound: unknown[] = [];
+  const prompt = createClaudeReceiptPrompt({ capability: capability(), command: 'hello', content: 'hello',
+    userId: 1, sessionId: sid, release: Promise.resolve() }, input => { bound.push(input); return true; });
+  const early = prompt.messageUuid();
+  assert.match(String(early), /^[0-9a-f-]{36}$/, 'known at emit time, before the SDK reads the stream');
+  const stream = prompt.make();
+  assert.equal((await stream.next()).value!.uuid, early);
+  assert.equal(prompt.promptUuid(), early, 'a receipt binds that same uuid');
+  assert.equal((bound[0] as { uuid: string }).uuid, early);
+  await stream.next();
+  const relayed = createClaudeReceiptPrompt({ capability: undefined, command: 'x', content: 'x', userId: 1,
+    sessionId: sid, release: Promise.resolve(), synthetic: true });
+  const relayedStream = relayed.make();
+  assert.equal((await relayedStream.next()).value!.uuid, undefined, 'a relayed delivery is not a human row');
+  assert.equal(relayed.messageUuid(), null);
+  await relayedStream.next();
 });
 
 test('raw trusted model excludes auth synthetic, replay, sidechains and error events', () => {

@@ -130,10 +130,10 @@ test('actual authorized session service preserves participant privacy across cac
     await initializeDatabase();
     const owner = userDb.createUser('vendor-owner', 'fixture-hash', 'user').id;
     const participant = userDb.createUser('vendor-participant', 'fixture-hash', 'user').id;
-    sessionsDb.createSession('vendor-service', 'kimi', project);
+    sessionsDb.createSession('vendor-service', 'glm', project);
     participantsDb.recordSpawn('vendor-service', owner);
     participantsDb.recordSpawn('vendor-service', participant);
-    await appendVendorTranscriptTurnIdempotent('kimi', 'vendor-service', project, 'user', 'text', 'native-id', { ...input(), userId: owner });
+    await appendVendorTranscriptTurnIdempotent('glm', 'vendor-service', project, 'user', 'text', 'native-id', { ...input(), userId: owner });
     for (const order of [[owner, participant], [participant, owner]]) {
       resetHistorySnapshotCacheForTests();
       for (const userId of order) {

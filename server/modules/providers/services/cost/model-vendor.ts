@@ -19,7 +19,9 @@
  * القاعدة يحفظه في التسمية `glm/glm-5.2`. فالبادئة هنا **مصدر حقيقة** لا زينة.
  */
 
-/** مفتاح المورّد = مفتاح الاشتراك. */
+import { LOCAL_MODEL_PROVIDER_PREFIX } from '../../../../../shared/localEngine.js';
+
+/** مفتاح المورّد = مفتاح الاشتراك؛ `local` وحده ليس اشتراكاً (T-2103). */
 export type VendorKey =
   | 'anthropic'
   | 'openai'
@@ -29,6 +31,7 @@ export type VendorKey =
   | 'deepseek'
   | 'opencode-zen'
   | 'nous'
+  | 'local'
   | 'unknown';
 
 /**
@@ -102,6 +105,7 @@ const VENDOR_LABELS: Readonly<Record<VendorKey, string>> = Object.freeze({
   deepseek: 'DeepSeek',
   'opencode-zen': 'OpenCode Zen',
   nous: 'Hermes',
+  local: 'Local models',
   unknown: 'Unknown',
 });
 
@@ -136,6 +140,10 @@ export const vendorHarnesses = (vendor: VendorKey | string): string[] =>
  */
 export function resolveModelVendor(modelLabel: string, harness?: string): VendorKey {
   const label = (modelLabel ?? '').trim().toLowerCase();
+  // T-2103: the reserved local namespace is the member's own server — no vendor is paid.
+  if (label.startsWith(LOCAL_MODEL_PROVIDER_PREFIX)) {
+    return 'local';
+  }
 
   const slash = label.indexOf('/');
   if (slash > 0) {

@@ -14,8 +14,10 @@ import { useTranslation } from 'react-i18next';
 
 import { validateCodexImageInput } from '../../../../shared/codex-image-input';
 import { authenticatedFetch } from '../../../utils/api';
+import { describeAttachmentUploadFailure } from '../../../utils/attachmentUpload';
 import { useResolvedEnterBehavior } from '../../../hooks/useResolvedEnterBehavior';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
+import { useAttachmentMaxMb } from '../../../hooks/useAttachmentMaxMb';
 import { decideEnterAction } from '../../../lib/enter-behavior';
 import { computeListContinuation } from '../../../lib/list-continuation';
 import {
@@ -79,6 +81,7 @@ import { resolveStickyEffortMode } from './stickyEffortMode';
 import { readSessionEngineProvider, writePendingEngineStamp } from './useChatProviderState';
 import type { EngineProvider } from './engineProviderSession';
 import { writePendingModelStamp } from './pendingModelStamp';
+import { dshTurnModel } from './dshTurnModel';
 import { useFileMentions } from './useFileMentions';
 import { usePromptRecall } from './usePromptRecall';
 import {
@@ -144,8 +147,7 @@ const ALLOWED_FILE_TYPES = new Set([
   'application/x-zip-compressed',
 ]);
 
-// 50 MB cap for non-image files.
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const BYTES_PER_MB = 1024 * 1024;
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -204,7 +206,6 @@ interface UseChatComposerStateArgs {
   codexModel: string;
   antigravityModel: string;
   opencodeModel: string;
-  kimiModel: string;
   deepseekModel: string;
   glmModel: string;
   /** T-2086/ADR-224: DeepSeek Harness model; optional so older callers stay valid. */
@@ -456,7 +457,6 @@ export function useChatComposerState({
   codexModel,
   antigravityModel,
   opencodeModel,
-  kimiModel,
   deepseekModel,
   glmModel,
   dshModel = '',
@@ -511,6 +511,9 @@ export function useChatComposerState({
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [uploadingFiles, setUploadingFiles] = useState<Map<string, number>>(new Map());
   const [fileErrors, setFileErrors] = useState<Map<string, string>>(new Map());
+  // Per-file attachment cap from the owner's storage policy (50 MB until it loads).
+  const attachmentMaxMb = useAttachmentMaxMb();
+  const maxFileBytes = attachmentMaxMb * BYTES_PER_MB;
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const [thinkingMode, setThinkingMode] = useState(DEFAULT_EFFORT_MODE);
   // KM-3/GL-8 (ADR-062): the composer's chat⇄agent toggle. Default 'chat' keeps
@@ -758,15 +761,13 @@ export function useChatComposerState({
                   ? antigravityModel
                   : displayProvider === 'opencode'
                     ? opencodeModel
-                    : displayProvider === 'kimi'
-                      ? kimiModel
-                      : displayProvider === 'deepseek'
-                        ? deepseekModel
-                        : displayProvider === 'glm'
-                          ? glmModel
-                          : displayProvider === 'dsh'
-                            ? dshModel
-                            : claudeModel,
+                    : displayProvider === 'deepseek'
+                      ? deepseekModel
+                      : displayProvider === 'glm'
+                        ? glmModel
+                        : displayProvider === 'dsh'
+                          ? dshModel
+                          : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -835,7 +836,6 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       opencodeModel,
-      kimiModel,
       deepseekModel,
       glmModel,
       dshModel,
@@ -980,10 +980,10 @@ export function useChatComposerState({
           return false;
         }
 
-        if (file.size > MAX_FILE_SIZE) {
+        if (file.size > maxFileBytes) {
           setFileErrors((previous) => {
             const next = new Map(previous);
-            next.set(file.name, t('fileAttachment.errorSize'));
+            next.set(file.name, t('fileAttachment.errorSize', { maxMb: attachmentMaxMb }));
             return next;
           });
           return false;
@@ -1013,7 +1013,7 @@ export function useChatComposerState({
         return next;
       });
     }
-  }, [t]);
+  }, [t, maxFileBytes, attachmentMaxMb]);
 
   const handlePaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1069,7 +1069,7 @@ export function useChatComposerState({
       'application/json': ['.json'],
       'application/zip': ['.zip'],
     },
-    maxSize: MAX_FILE_SIZE,
+    maxSize: maxFileBytes,
     maxFiles: MAX_IMAGES + MAX_FILES,
     onDrop: handleDroppedFiles,
     noClick: true,
@@ -1110,14 +1110,13 @@ export function useChatComposerState({
     target === 'codex' ? codexModel
       : target === 'antigravity' ? antigravityModel
           : target === 'opencode' ? opencodeModel
-            : target === 'kimi' ? kimiModel
               : target === 'deepseek' ? deepseekModel
                 : target === 'glm' ? glmModel
                 : target === 'dsh' ? dshModel
                 : claudeModel
   ), [
     antigravityModel, claudeModel, codexModel, deepseekModel,
-    glmModel, kimiModel, opencodeModel, dshModel,
+    glmModel, opencodeModel, dshModel,
   ]);
 
   // Single source of truth for building and sending a provider chat command.
@@ -1154,7 +1153,11 @@ export function useChatComposerState({
       const composerProvider = (intent?.provider as LLMProvider | undefined) ?? provider;
       const effectiveProvider = resolveSendProvider(resume, selectedSession?.__provider, composerProvider);
       // النموذج: نيّة صاحب الرسالة إن وُجدت، وإلا اختيار المُؤلِّف لهذا المزوّد.
-      const effectiveModel = intent?.model ?? composerModelFor(effectiveProvider);
+      const composerModel = intent?.model ?? composerModelFor(effectiveProvider);
+      // T-2108: a dsh turn never crosses between a local server and the cloud.
+      const effectiveModel = effectiveProvider === 'dsh'
+        ? dshTurnModel(resume, composerModel)
+        : composerModel;
       const effectivePermissionMode = intent?.permissionMode ?? permissionMode;
       const effectiveComposerMode = intent?.composerMode ?? composerMode;
       const effectiveCoordinationLevel = intent
@@ -1233,7 +1236,7 @@ export function useChatComposerState({
         const receiptImageCount = uploadedImages.length;
         const receiptFileCount = uploadedFiles.length;
         if (clientMsgId
-          && ['claude', 'qwen', 'hermes', 'kimi', 'deepseek', 'glm'].includes(effectiveProvider)
+          && ['claude', 'deepseek', 'glm'].includes(effectiveProvider)
           && options.mode !== 'agent'
           && (meta.historyEligibility === 'text_only' || receiptImageCount > 0 || receiptFileCount > 0)) {
           options.receiptPayload = { version: 1, kind: 'text', imageCount: receiptImageCount, fileCount: receiptFileCount };
@@ -1245,10 +1248,13 @@ export function useChatComposerState({
       };
 
       let result: { ok: boolean } | void;
-      // T-1953: cursor/hermes/qwen are retired bodies — no longer reachable
+      // ADR-229: kimi/qwen/hermes have no branch at all — their conversations are
+      // hidden, and a stale resume falls through to `claude-command`, which the
+      // server refuses by the session's persisted provider (`provider_removed`).
+      // T-1953: cursor is a retired body — no longer reachable
       // from a brand-new send (resolveSendProvider only returns the global
       // selection there, and the picker can no longer select them), but a
-      // RESUME into an old conversation of theirs still seals to the session's
+      // RESUME into an old conversation of its own still seals to the session's
       // own `__provider`. The command TYPE must stay `<id>-command` so the
       // server's retired-provider refusal (`provider_removed`) fires correctly
       // instead of the turn silently misrouting to Claude below; only the
@@ -1333,29 +1339,6 @@ export function useChatComposerState({
           sessionId: targetSessionId,
           options: opencodeOptions,
         });
-      } else if (effectiveProvider === 'hermes') {
-        result = dispatch({
-          type: 'hermes-command',
-          command: messageContent,
-          sessionId: targetSessionId,
-          options: {
-            cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-            resume, model: effectiveModel, sessionSummary,
-          },
-        });
-      } else if (effectiveProvider === 'kimi') {
-        result = dispatch({
-          type: 'kimi-command',
-          command: messageContent,
-          sessionId: targetSessionId,
-          options: {
-            cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-            resume, model: kimiModel, sessionSummary,
-            // KM-3: 'agent' routes the WS dispatch to the native governed launcher
-            // (spawnKimiAgent); omitted on the default chat turn.
-            ...(wantsAgentMode ? { mode: 'agent' } : {}),
-          },
-        });
       } else if (effectiveProvider === 'deepseek') {
         result = dispatch({
           type: 'deepseek-command',
@@ -1387,7 +1370,7 @@ export function useChatComposerState({
         // or files — dsh's ACP prompt here carries text only.
         const dshOptions: Record<string, unknown> = {
           cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-          resume, toolsSettings, permissionMode, model: dshModel, sessionSummary,
+          resume, toolsSettings, permissionMode, model: effectiveModel, sessionSummary,
         };
         // The shared default mode ('medium') has no dsh value; the selector then
         // shows its first entry ('standard'), so only a dsh-offered value is sent.
@@ -1399,16 +1382,6 @@ export function useChatComposerState({
           command: messageContent,
           sessionId: targetSessionId,
           options: dshOptions,
-        });
-      } else if (effectiveProvider === 'qwen') {
-        result = dispatch({
-          type: 'qwen-command',
-          command: messageContent,
-          sessionId: targetSessionId,
-          options: {
-            cwd: resolvedProjectPath, projectPath: resolvedProjectPath, sessionId: targetSessionId,
-            resume, model: effectiveModel, sessionSummary, permissionMode: effectivePermissionMode,
-          },
         });
       } else {
         // T-915 (privacy fix, qa-critic correction): record the value being
@@ -1464,7 +1437,7 @@ export function useChatComposerState({
     },
     [
       antigravityModel, claudeModel, codexModel, opencodeModel,
-      kimiModel, deepseekModel, glmModel, dshModel, engineProvider, composerMode, coordinationLevel,
+      deepseekModel, glmModel, engineProvider, composerMode, coordinationLevel,
       getToolsSettings, permissionMode, provider, selectedProject, selectedSession, sendMessage,
       composerModelFor,
     ],
@@ -1896,7 +1869,7 @@ export function useChatComposerState({
           headers: {},
           body: formData,
         });
-        if (!response.ok) throw new Error('Failed to upload attachments');
+        if (!response.ok) throw new Error(await describeAttachmentUploadFailure(response, t));
         const result = await response.json();
         uploadedFiles = (result.files ?? []) as ChatFile[];
       })();

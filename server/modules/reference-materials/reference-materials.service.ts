@@ -57,7 +57,6 @@ const PROVIDERS: readonly LLMProvider[] = Object.freeze([
   'cursor',
   'antigravity',
   'opencode',
-  'kimi',
   'deepseek',
   'glm',
 ]);

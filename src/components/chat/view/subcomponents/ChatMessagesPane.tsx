@@ -16,6 +16,7 @@ import type {
 import type { ProviderAuthStatusMap } from '../../../provider-auth/types';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { findQuickReplyEligibleIndex, type QuickReplyGate } from '../../utils/quickReplyEligibility';
+import { hasSeveralHumanAuthors } from '../../utils/sharedWriting';
 import TeamMessageBubble from '../../../internal-session-chat/TeamMessageBubble';
 import { placeTeamMessages } from '../../../internal-session-chat/interleaveTeamMessages';
 import type { InternalMessage } from '../../../internal-session-chat/internalSessionChatApi';
@@ -309,6 +310,9 @@ export default function ChatMessagesPane({
     return byId;
   }, [participants]);
 
+  // ADR-173 P8: author captions on every prompt only where more than one human wrote.
+  const isMultiAuthor = useMemo(() => hasSeveralHumanAuthors(chatMessages), [chatMessages]);
+
   const messageKeyMapRef = useRef<WeakMap<ChatMessage, string>>(new WeakMap());
   const allocatedKeysRef = useRef<Set<string>>(new Set());
   const generatedMessageKeyCounterRef = useRef(0);
@@ -557,6 +561,7 @@ export default function ChatMessagesPane({
                     selectedProject={selectedProject}
                     owner={selectedSession?.owner ?? null}
                     participantsById={participantsById}
+                    isMultiAuthor={isMultiAuthor}
                     provider={displayProvider}
                     onRequestDeferredHistory={onRequestDeferredHistory}
                     onResumeStreamRecovery={onResumeStreamRecovery}

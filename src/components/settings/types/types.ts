@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 
-import type { LLMProvider } from '../../../types/app';
+import type { KnownBodyProvider } from '../../../types/app';
 import type { ProviderAuthStatus } from '../../provider-auth/types';
 
 // ADR-073: there is no top-level `engines` tab. The engine axis is a category of
@@ -24,7 +24,7 @@ import type { ProviderAuthStatus } from '../../provider-auth/types';
 // raw-exec layer, safe/custom commands). `command-board` keeps only those;
 // `system` groups Updates/Storage/Permissions, owner-only like command-board.
 export type SettingsMainTab = 'profile' | 'agents' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'sso' | 'command-board' | 'system' | 'about';
-export type AgentProvider = LLMProvider;
+export type AgentProvider = KnownBodyProvider;
 // `engines` (ADR-073) is a category of a BODY, not a peer tab: an agent's engines
 // belong to the agent the way its permissions do. It replaced the top-level
 // Engines tab, which held half of a fact the Agents tab held the other half of.

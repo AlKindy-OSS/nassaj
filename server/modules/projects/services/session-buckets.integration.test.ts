@@ -12,6 +12,10 @@
  * provider in `shared/sessionBuckets.ts` survives the round trip. A provider
  * added later without a bucket fails this test instead of failing silently in
  * the sidebar, which is the only difference that mattered.
+ *
+ * ADR-229: a bucket of a removed harness (kimi, qwen, hermes) is the one
+ * deliberate exception — its conversations are hidden at read time, so its
+ * bucket is present-and-empty or absent, and the count excludes it.
  */
 
 import assert from 'node:assert/strict';
@@ -33,7 +37,13 @@ import {
 } from '@/modules/database/index.js';
 import { getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
 
+import { isHiddenHistoryProvider } from '../../../../shared/retiredProviders.js';
 import { SESSION_BUCKET_PROVIDERS, sessionBucketKey } from '../../../../shared/sessionBuckets.js';
+
+/** The ids a bucket must hold: the seeded session, or nothing for a hidden (ADR-229) provider. */
+const expectedBucket = (provider: string, sessionIdByProvider: Map<string, string>): string[] =>
+  (isHiddenHistoryProvider(provider) ? [] : [sessionIdByProvider.get(provider)!]);
+const VISIBLE_BUCKET_PROVIDERS = SESSION_BUCKET_PROVIDERS.filter((provider) => !isHiddenHistoryProvider(provider));
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -92,17 +102,17 @@ test('B-598: every provider owns a bucket in the project list payload', async ()
     for (const provider of SESSION_BUCKET_PROVIDERS) {
       const key = sessionBucketKey(provider);
       const bucket = (project as unknown as Record<string, Array<{ id: string }>>)[key];
-      assert.ok(Array.isArray(bucket), `payload is missing the "${key}" bucket`);
+      if (!isHiddenHistoryProvider(provider)) assert.ok(Array.isArray(bucket), `payload is missing the "${key}" bucket`);
       assert.deepEqual(
-        bucket.map((session) => session.id),
-        [sessionIdByProvider.get(provider)],
+        (bucket ?? []).map((session) => session.id),
+        expectedBucket(provider, sessionIdByProvider),
         `a ${provider} session was dropped instead of landing in "${key}"`,
       );
     }
 
     assert.equal(
       project.sessionMeta.total,
-      SESSION_BUCKET_PROVIDERS.length,
+      VISIBLE_BUCKET_PROVIDERS.length,
       'the count and the buckets must agree — a row counted but not bucketed is the B-598 shape',
     );
   });
@@ -146,8 +156,8 @@ test('B-598: the paginated sessions endpoint carries the same buckets', async ()
       const key = sessionBucketKey(provider);
       const bucket = (page as unknown as Record<string, Array<{ id: string }>>)[key];
       assert.deepEqual(
-        bucket?.map((session) => session.id),
-        [sessionIdByProvider.get(provider)],
+        (bucket ?? []).map((session) => session.id),
+        expectedBucket(provider, sessionIdByProvider),
         `"load more" dropped the ${provider} bucket`,
       );
     }

@@ -56,7 +56,7 @@ import {
 } from '@/services/isolation/gemini-governance-material.js';
 import { systemActorHome } from '@/services/isolation/credential-actor.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
-import { KIMI_HOME_SUBDIR, userConfigDir } from '@/services/isolation/provision-user-dirs.js';
+import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import {
   LOCAL_INSTRUCTION_TIER,
   OPENCODE_LOCAL_CONFIG_SUBDIR,
@@ -81,7 +81,6 @@ export type ProviderGovernanceMechanism =
   | 'codex-fingerprint'
   | 'claude-md'
   | 'opencode-agents'
-  | 'kimi-agents'
   | 'gemini-md'
   | 'nassaj-project-md'
   | 'none';
@@ -101,7 +100,7 @@ export type ProviderGovernanceVerification = 'fingerprint' | 'presence' | 'none'
  * governance channel at all.
  *
  *  - fail-closed   : a spawn guard refuses the launch when unattested (codex,
- *                    opencode, kimi).
+ *                    opencode).
  *  - best-effort   : nassaj materializes and verifies the material, but no guard
  *                    blocks a launch (agy home — T-1186 pending).
  *  - informational : the channel is read by the engine, but nassaj neither verifies
@@ -399,24 +398,6 @@ function agyGovernanceStatus(
   return claudeInstructionsPresent(geminiMdPath) ? 'governed' : 'ungoverned';
 }
 
-/**
- * The caller's effective KIMI_CODE_HOME, resolved READ-ONLY.
- *
- * kimi's native agent path isolates UNCONDITIONALLY for any authenticated user (resolve-provider-env.js:210-217 —
- * `provider === 'kimi' && mode === 'agent'`), because that CLI writes credential
- * and session state to disk. Anonymous/operator turns get no KIMI_CODE_HOME, so
- * the launcher's own fallback applies (kimi-agent-cli.js:139-142: ~/.kimi).
- * resolveProviderEnv also calls provisionUserDirs there — a WRITE this service must
- * never make, so the path is re-derived from the same shared constant instead.
- */
-function kimiHomeFor(userId: string | number | null): string {
-  if (userId === null || userId === undefined || userId === '') {
-    return noMemberHome(KIMI_HOME_SUBDIR);
-  }
-  // T-1675: under a grant the agent CLI runs on the grantor's KIMI_CODE_HOME.
-  return userConfigDir(credentialPrincipalId(userId, 'kimi'), KIMI_HOME_SUBDIR);
-}
-
 /** Shorthand: the plan fields a linkable channel carries. */
 function linkablePlan(
   home: string,
@@ -477,15 +458,6 @@ export function resolveGovernanceLinkPlan(
         CODEX_AGENTS_FILENAME,
         neutralGovernanceSource(),
         isolatedUserId(userId, 'opencode') !== null,
-      );
-    case 'kimi':
-      // kimi's agent path isolates for ANY authenticated user (not by admin
-      // policy), so an authenticated caller always writes into their own tree.
-      return linkablePlan(
-        kimiHomeFor(userId),
-        CODEX_AGENTS_FILENAME,
-        neutralGovernanceSource(),
-        userId !== null && userId !== undefined && userId !== '',
       );
     case 'antigravity': {
       const isolated = isolatedUserId(userId, 'agy' as LLMProvider) !== null;
@@ -621,19 +593,6 @@ export function resolveGovernanceMaterialPlan(
         'fail-closed',
       );
     }
-    case 'kimi': {
-      // kimi's agent path isolates for ANY authenticated user (not by admin
-      // policy — resolve-provider-env.js:210-217), so an authenticated caller
-      // always has a tree of their own; only anonymous falls back to ~/.kimi.
-      if (userId === null || userId === undefined || userId === '') {
-        return unexemptibleMaterial('shared_tree', 'fail-closed');
-      }
-      return exemptibleMaterial(
-        [path.join(kimiHomeFor(userId), CODEX_AGENTS_FILENAME)],
-        'user',
-        'fail-closed',
-      );
-    }
     case 'antigravity': {
       if (isolatedUserId(userId, 'agy' as LLMProvider) === null) {
         // The shared home's GEMINI.md IS the neutral source (§4.1). Deleting it
@@ -671,7 +630,7 @@ export function resolveGovernanceMaterialPlan(
       );
     }
     default:
-      // cursor / hermes / deepseek / glm / sakana: no governance
+      // cursor / hermes / kimi / qwen / deepseek / glm / sakana: no governance
       // channel exists, so these engines are already running in their vendor
       // default and there is nothing an exemption could remove.
       return unexemptibleMaterial('no_mechanism', 'none');
@@ -940,42 +899,6 @@ export const providerGovernanceService = {
           ],
         };
       }
-      case 'kimi': {
-        // ADR-093 §2.3-1, and §7-أ TRACED to the live path before wiring it: the WS
-        // chat dispatcher routes an agent-mode kimi turn to spawnKimiAgent
-        // (chat-websocket.service.ts:707, injected in index.js:303), which calls
-        // prepareKimiAgentLaunch (kimi-agent-cli.js:305) → ensureVendorCliGovernance
-        // (kimi-agent-cli.js:243). That gate THROWS VendorGovernanceMissingError and
-        // the launcher answers with a refusal message instead of spawning — so kimi
-        // is genuinely fail-closed on every agent turn, and the old
-        // mechanism:'none' badge was a lie about a governed engine.
-        //
-        // SCOPE OF THE CLAIM: it holds for the AGENT path only. kimi's tool-less
-        // chat path (spawnKimi) passes through no gate — it is globally disabled on
-        // this deployment (DISABLED_PROVIDERS; only the agent run bypasses that
-        // disable), so no ungoverned kimi turn is reachable, but the enforcement
-        // belongs to the agent launcher, not to the provider id in the abstract.
-        const agentsPath = path.join(kimiHomeFor(userId), CODEX_AGENTS_FILENAME);
-        const verdict = classifyFingerprintChannel(agentsPath, neutralGovernanceSource());
-        return {
-          status: verdict.status,
-          enforced: true,
-          mechanism: 'kimi-agents',
-          sources: [
-            {
-              id: 'kimi-home',
-              ...linkFieldsOf(resolveGovernanceLinkPlan(provider, userId)),
-              scope: 'user',
-              path: agentsPath,
-              link: linkTargetOf(agentsPath),
-              mechanism: 'kimi-agents',
-              verification: 'fingerprint',
-              enforcement: 'fail-closed',
-              ...verdict,
-            },
-          ],
-        };
-      }
       case 'antigravity': {
         // TWO channels (ADR-093 §2.3-3). (1) the home GEMINI.md agy actually ingests
         // — fingerprinted when isolated, presence-only when it IS the shared source;
@@ -1007,7 +930,7 @@ export const providerGovernanceService = {
         };
       }
       default:
-        // cursor / hermes / deepseek / glm / sakana:
+        // cursor / hermes / kimi / qwen / deepseek / glm / sakana:
         // no governance mechanism in the code ⇒ always honestly ungoverned. This is
         // the total default, so a provider added to the union later is ungoverned
         // (never accidentally inherits another engine's badge) until wired here.

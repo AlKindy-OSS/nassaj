@@ -20,10 +20,11 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
 import { buildPartialProjectFileTreeResponse } from './utils/file-tree-partial.js';
-import { claudeUsageService, closeSessionsWatcher, configureSessionAgents, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, readSessionWorkflowAgents, sendSessionAgentsSnapshot, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
+import { claudeUsageService, closeSessionsWatcher, configureClaudeResumeBridge, configureClaudeSharedTurnAuthority, configureSessionAgents, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, isSessionOwnProjectOwner, isSessionTurnStopPrivileged, readSessionWorkflowAgents, sendSessionAgentsSnapshot, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, startParkedTranscriptSweep, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { broadcastToSessionMirrors, countLiveMirrors, createWebSocketServer } from '@/modules/websocket/index.js';
 import {
     abortSessionTurn, dispatchProviderCommand, isModelActivityFrame, isSessionWritableByUser,
+    isSharedSessionWriter, isSharedSessionWritingEnabled,
 } from '@/modules/websocket/services/chat-websocket.service.js';
 import { terminateAllShellSessionsForUpdate } from '@/modules/websocket/services/shell-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
@@ -111,6 +112,7 @@ import {
     queryClaudeSDK,
     spawnClaudeSideQuery,
     abortClaudeSDKSession,
+    authorizeClaudeTurnStop,
     isClaudeSDKSessionActive,
     isSessionEngineSwitchBlocked,
     getActiveClaudeSDKSessions,
@@ -153,17 +155,6 @@ import {
     getActiveOpenCodeSessions,
 } from './opencode-cli.js';
 import {
-    spawnKimi,
-    abortKimiSession,
-    isKimiSessionActive,
-    getActiveKimiSessions,
-} from './kimi-cli.js';
-// KM-3 (ADR-062): the NATIVE governed Kimi agent launcher (distinct from spawnKimi,
-// the toolless chat path). Injected as the OPTIONAL `spawnKimiAgent` chat dependency
-// so a kimi `mode==='agent'` WS turn routes to the governed native CLI; its absence
-// would leave that path inert (chat behavior unchanged).
-import { spawnKimiAgent } from './kimi-agent-cli.js';
-import {
     getProviderRunsOwnedByUser,
     getProviderRunsOwnedByWriter,
     getProviderRunWriter,
@@ -177,12 +168,6 @@ import {
     getActiveGlmSessions,
 } from './glm-cli.js';
 import {
-    spawnQwen,
-    abortQwenSession,
-    isQwenSessionActive,
-    getActiveQwenSessions,
-} from './qwen-cli.js';
-import {
     spawnDsh,
     abortDshSession,
     isDshSessionActive,
@@ -194,6 +179,7 @@ import {
     cancelAllParityPermissions,
 } from './services/permission-parity/parity-permissions.js';
 import { warnDshPathOverride } from './modules/providers/list/dsh/dsh-launch.js';
+import { sweepStaleDshLocalRuns } from './modules/providers/list/dsh/dsh-local-layer.js';
 import sessionManager from './sessionManager.js';
 import {
     stripAnsiSequences,
@@ -203,7 +189,7 @@ import {
 } from './utils/url-detection.js';
 import { createRateLimiter } from './middleware/rate-limit.js';
 import { enforceFrameSrcPolicy } from './middleware/frame-src-csp.js';
-import gitRoutes from './routes/git.js';
+import gitRoutes, { configureGitSharedWriterAccess } from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import { warnOnOwnerOidcLinks } from './services/oidc-owner-link-check.js';
 import { applySsoBootPolicy, assertSsoApiKeyGateRegistered } from './services/sso-lifecycle.service.js';
@@ -318,6 +304,13 @@ import { ensureOwnerBootstrapped } from './services/bootstrap-owner.service.js';
 import { enforcePlatformIsolationGuard } from './services/platform-isolation-guard.service.js';
 import { enforceDockerSockBootGuard } from './services/isolation/docker-sock-boot-guard.js';
 import { resolveSecurityPosture } from './services/isolation/security-posture.js';
+import {
+    attachmentUploadErrorResponse, checkAttachmentRequestSize, createAttachmentUploadLimiter, readAttachmentLimit,
+} from './services/attachment-limits.js';
+import {
+    buildTempUploadMulter as buildStagedMulter, resolveUploadStagingRoot,
+} from './services/temp-upload-multer.js';
+import { resolveDatabaseFilePath } from './modules/database/database-path.js';
 import { validateApiKey, authenticateToken, authenticateDeviceCookieIfPresent, authenticateWebSocket, authenticateDeviceWebSocket, liveDeviceSession, requireRole, JWT_SECRET } from './middleware/auth.js';
 import { recordAuthRejection } from './middleware/auth-rejection-audit.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -422,9 +415,7 @@ const countGovernedActiveSessions = () => [
     getActiveCodexSessions,
     getActiveAntigravitySessions,
     getActiveOpenCodeSessions,
-    getActiveKimiSessions,
     getActiveGlmSessions,
-    getActiveQwenSessions,
 ].reduce((total, getSessions) => total + getSessions().length, 0) + countDshRuns();
 // B-1056 (ADR-156 WI-2). A queued restart row carries the owner's consent for
 // ONE specific package: its job, transaction, activation identity and release
@@ -831,10 +822,8 @@ const SERVER_BUILD_MTIME_AT_STARTUP = (() => {
 const MAX_FILE_UPLOAD_SIZE_MB = 200;
 const MAX_FILE_UPLOAD_SIZE_BYTES = MAX_FILE_UPLOAD_SIZE_MB * 1024 * 1024;
 const MAX_FILE_UPLOAD_COUNT = 20;
-// Per-file cap for agent attachment uploads (POST /upload-attachments). Distinct
-// from MAX_FILE_UPLOAD_SIZE_BYTES so the attachment surface can be tuned without
-// affecting the file-manager upload path.
-const MAX_ATTACHMENT_SIZE_BYTES = 50 * 1024 * 1024;
+// The per-file cap for agent attachment uploads is an owner setting read per
+// request (services/attachment-limits.js), separate from MAX_FILE_UPLOAD_SIZE_BYTES.
 const MAX_ATTACHMENT_COUNT = 20;
 
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
@@ -999,10 +988,7 @@ const wss = createWebSocketServer(server, {
         queryCodex,
         spawnAntigravity,
         spawnOpenCode,
-        spawnKimi,
-        spawnKimiAgent,
         spawnGlm,
-        spawnQwen,
         spawnDsh,
         abortDshSession,
         isDshSessionActive,
@@ -1037,15 +1023,12 @@ const wss = createWebSocketServer(server, {
         // Branch a normal conversation from a selected persisted assistant reply.
         forkSessionAtMessage,
         abortClaudeSDKSession,
+        authorizeClaudeTurnStop,
         abortCursorSession,
         abortCodexSession,
         abortAntigravitySession,
         abortOpenCodeSession,
-        abortKimiSession: (sessionId) => (
-            spawnKimiAgent.abortSession(sessionId) || abortKimiSession(sessionId)
-        ),
         abortGlmSession,
-        abortQwenSession,
         getProviderRunsOwnedByWriter,
         getProviderRunWriter,
         isProviderRunOwnershipCurrent,
@@ -1058,9 +1041,7 @@ const wss = createWebSocketServer(server, {
         isCodexSessionActive,
         isAntigravitySessionActive,
         isOpenCodeSessionActive,
-        isKimiSessionActive,
         isGlmSessionActive,
-        isQwenSessionActive,
         reconnectSessionWriter,
         isPrimarySocketAlive: isSessionPrimarySocketAlive,
         sendSessionAgentsSnapshot,
@@ -1072,9 +1053,7 @@ const wss = createWebSocketServer(server, {
         getActiveCodexSessions,
         getActiveAntigravitySessions,
         getActiveOpenCodeSessions,
-        getActiveKimiSessions,
         getActiveGlmSessions,
-        getActiveQwenSessions,
     }),
     shell: {
         acquireWriterLease: (kind, holder) => acquireApplicationWriterLease(kind, { waitMs: 100, holder }),
@@ -1351,9 +1330,7 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         codex: safeCount(getActiveCodexSessions),
         antigravity: safeCount(getActiveAntigravitySessions),
         opencode: safeCount(getActiveOpenCodeSessions),
-        kimi: safeCount(getActiveKimiSessions),
         glm: safeCount(getActiveGlmSessions),
-        qwen: safeCount(getActiveQwenSessions),
         dsh: countDshRuns(),
     };
     // T-928: detect build-after-startup skew (mtime approach). Re-stat on each
@@ -1705,6 +1682,18 @@ app.use('/api/sessions', authenticateToken, createInternalSessionChatRouter({
 app.use('/api/scheduled-messages', authenticateToken, createScheduledMessagesRouter(scheduledMessagesService));
 
 // Git API Routes (protected)
+// ADR-173: overlay status/diff accept a shared writer; commit/conflict-resolve add the project owner.
+configureGitSharedWriterAccess({
+    isWriter: (sessionId, userId) => isSharedSessionWritingEnabled() && isSharedSessionWriter(sessionId, userId),
+    isProjectOwner: isSessionOwnProjectOwner,
+});
+// ADR-173 P3 (qa condition 1): the transcript bridge re-checks the shared writer itself.
+configureClaudeResumeBridge({ isSharedWriter: isSharedSessionWriter });
+// ADR-173 rev.3 P5: a non-starter's approval answer and stop request are rechecked here.
+configureClaudeSharedTurnAuthority({
+    isSharedWriter: isSharedSessionWriter,
+    isStopPrivileged: (sessionId, userId) => isSessionTurnStopPrivileged(sessionId, Number(userId)),
+});
 app.use('/api/git', authenticateToken, (req, res, next) => {
     if (req.method === 'GET') return next();
     return applicationWriterLeaseMiddleware('git-write')(req, res, next);
@@ -1822,9 +1811,7 @@ setSessionLivenessProbes({
     codex: isCodexSessionActive,
     antigravity: isAntigravitySessionActive,
     opencode: isOpenCodeSessionActive,
-    kimi: isKimiSessionActive,
     glm: isGlmSessionActive,
-    qwen: isQwenSessionActive,
     dsh: isDshSessionActive,
 });
 
@@ -2983,10 +2970,23 @@ app.get('/api/projects/:projectId/files', authenticateToken, async (req, res) =>
  * @returns {Promise<string>} absolute path of the 0700 staging directory
  */
 let uploadStagingDirPromise = null;
+/**
+ * T-2116: the staging root is disk-backed (never os.tmpdir(), which is tmpfs on
+ * the fleet hosts) — see resolveUploadStagingRoot for the candidate order.
+ * @returns {Promise<string>}
+ */
+async function createUploadStagingDir() {
+    let mounts = null;
+    try { mounts = await fsPromises.readFile('/proc/mounts', 'utf8'); } catch { /* path heuristic */ }
+    const root = resolveUploadStagingRoot({
+        mounts, fallbackDir: path.dirname(resolveDatabaseFilePath()),
+    });
+    await fsPromises.mkdir(root, { recursive: true, mode: 0o700 });
+    return fsPromises.mkdtemp(path.join(root, 'nassaj-uploads-'));
+}
 function getUploadStagingDir() {
     if (!uploadStagingDirPromise) {
-        uploadStagingDirPromise = fsPromises
-            .mkdtemp(path.join(os.tmpdir(), 'nassaj-uploads-'))
+        uploadStagingDirPromise = createUploadStagingDir()
             .catch((error) => {
                 uploadStagingDirPromise = null; // don't cache the failure
                 throw error;
@@ -3007,39 +3007,18 @@ function stageUploadDestination(_req, _file, cb) {
 
 /**
  * Builds a multer instance for endpoints that receive uploads into the private
- * staging dir before the route copies them into the project tree. Centralises the
- * dynamic multer import, the temp diskStorage (collision-proof unique name with
- * NO path components — folder-upload originalnames may contain separators), and
- * the size/count limits.
+ * staging dir before the route copies them into the project tree. The builder
+ * lives in services/temp-upload-multer.js (T-2116); this binds the staging dir.
  *
  * NOTE: deliberately NOT wired into the legacy `uploadFilesHandler` or the
  * `upload-images` endpoint — their filename/destination/limit semantics differ
  * and changing them is out of scope. New attachment endpoint only.
  *
- * @param {Object} opts
- * @param {Function} opts.fileFilter - multer fileFilter(req, file, cb)
- * @param {number} opts.maxSizeBytes - per-file byte cap (limits.fileSize)
- * @param {number} opts.maxCount - max file count (limits.files)
+ * @param {{ fileFilter: Function, maxSizeBytes: number, maxCount: number }} opts
  * @returns {Promise<import('multer').Multer>}
  */
-async function buildTempUploadMulter({ fileFilter, maxSizeBytes, maxCount }) {
-    const multer = (await import('multer')).default;
-    return multer({
-        storage: multer.diskStorage({
-            destination: stageUploadDestination,
-            filename: (req, file, cb) => {
-                // Unique temp name only; the original (possibly unsafe) name is
-                // preserved on file.originalname and sanitised by the route.
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-                cb(null, `upload-${uniqueSuffix}`);
-            }
-        }),
-        fileFilter,
-        limits: {
-            fileSize: maxSizeBytes,
-            files: maxCount
-        }
-    });
+function buildTempUploadMulter(opts) {
+    return buildStagedMulter({ ...opts, destination: stageUploadDestination });
 }
 
 /**
@@ -3844,7 +3823,8 @@ const ATTACHMENT_ALLOWED = {
     zip:  ['application/zip', 'application/x-zip-compressed', 'application/octet-stream']
 };
 
-app.post('/api/projects/:projectId/upload-attachments', authenticateToken,
+const attachmentUploadLimiter = createAttachmentUploadLimiter();
+app.post('/api/projects/:projectId/upload-attachments', authenticateToken, attachmentUploadLimiter,
     applicationWriterLeaseMiddleware('attachment-upload'), async (req, res) => {
     try {
         // B-138 write guard: attachment uploads land inside the project tree
@@ -3868,9 +3848,17 @@ app.post('/api/projects/:projectId/upload-attachments', authenticateToken,
             cb(null, true);
         };
 
+        const attachmentLimit = readAttachmentLimit();
+        // T-2116: bound the whole request by its declared length before any byte
+        // is staged; the per-file cap below is enforced by multer while streaming.
+        const sizeRefusal = checkAttachmentRequestSize(req, attachmentLimit);
+        if (sizeRefusal) {
+            res.set('Connection', 'close');
+            return res.status(sizeRefusal.status).json(sizeRefusal.body);
+        }
         const upload = await buildTempUploadMulter({
             fileFilter,
-            maxSizeBytes: MAX_ATTACHMENT_SIZE_BYTES,
+            maxSizeBytes: attachmentLimit.maxBytes,
             maxCount: MAX_ATTACHMENT_COUNT
         });
 
@@ -3879,13 +3867,11 @@ app.post('/api/projects/:projectId/upload-attachments', authenticateToken,
           void (async () => {
             if (err) {
                 // multer surfaces fileFilter errors, LIMIT_FILE_SIZE, LIMIT_FILE_COUNT, etc.
-                if (err.code === 'LIMIT_FILE_SIZE') {
-                    return res.status(400).json({ error: `File too large. Maximum size is ${MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024)}MB per file.` });
-                }
-                if (err.code === 'LIMIT_FILE_COUNT') {
-                    return res.status(400).json({ error: `Too many files. Maximum is ${MAX_ATTACHMENT_COUNT} files.` });
-                }
-                return res.status(400).json({ error: err.message });
+                // and has already removed every file it staged for this request.
+                const { status, body } = attachmentUploadErrorResponse(err, {
+                    maxMb: attachmentLimit.maxMb, maxCount: MAX_ATTACHMENT_COUNT,
+                });
+                return res.status(status).json(body);
             }
 
             if (!req.files || req.files.length === 0) {
@@ -4335,6 +4321,8 @@ async function startServer() {
         // (logged, never fatal — only that harness is unavailable).
         logUnresolvedHarnessBinaries();
         warnDshPathOverride();
+        // T-2108: per-turn layer directories left by a server that died mid local DSH turn.
+        sweepStaleDshLocalRuns();
         const harnessReconcile = await reconcileHarnessSnapshots();
         if (harnessReconcile.blocked.length > 0 || harnessReconcile.rollbackFailed > 0) {
             console.error('[harness-update] boot reconcile left harnesses blocked', {
@@ -4646,11 +4634,9 @@ async function startServer() {
                 antigravity: getActiveAntigravitySessions().length,
                 opencode: getActiveOpenCodeSessions().length,
                 // B-143: count the hosted-vendor runs too, so a restart DRAINS
-                // (waits for) in-flight kimi/glm sessions instead of
+                // (waits for) in-flight glm sessions instead of
                 // killing them. Same shape as the CLI providers above.
-                kimi: getActiveKimiSessions().length,
                 glm: getActiveGlmSessions().length,
-                qwen: getActiveQwenSessions().length,
                 // Every live dsh run, including one whose session id is not known yet.
                 dsh: countDshRuns(),
             }),

@@ -87,7 +87,7 @@ const OPERATOR_ENV: NodeJS.ProcessEnv = Object.freeze({
  * The credential knob(s) each provider reads, per mode. A provider added to
  * KNOWN_PROVIDERS without an entry here fails the sweep (fail closed): its
  * isolation must be stated before it ships. Hosted vendors read a key value,
- * not a tree; their tree knob exists only for kimi's native agent CLI.
+ * not a tree (kimi's native agent CLI and its tree knob were removed, ADR-229).
  */
 const CREDENTIAL_KNOBS: Record<string, { chat: string[]; agent: string[] }> = {
   claude: { chat: ['CLAUDE_CONFIG_DIR'], agent: ['CLAUDE_CONFIG_DIR'] },
@@ -96,7 +96,7 @@ const CREDENTIAL_KNOBS: Record<string, { chat: string[]; agent: string[] }> = {
   cursor: { chat: ['HOME'], agent: ['HOME'] },
   qwen: { chat: ['HOME'], agent: ['HOME'] },
   opencode: { chat: ['XDG_DATA_HOME', 'XDG_CONFIG_HOME'], agent: ['XDG_DATA_HOME', 'XDG_CONFIG_HOME'] },
-  kimi: { chat: [], agent: ['KIMI_CODE_HOME'] },
+  kimi: { chat: [], agent: [] },
   deepseek: { chat: [], agent: [] },
   glm: { chat: [], agent: [] },
   // T-2086: dsh keys every path off HOME (its launcher derives DSH_HOME from it).

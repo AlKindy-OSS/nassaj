@@ -36,7 +36,7 @@ import { localModelProviderBlocks } from './local-model-config.js';
 import {
   LOCAL_INSTRUCTION_TIER,
   OPENCODE_LOCAL_CONFIG_SUBDIR,
-  localTaskPermission,
+  localTierFilePermission,
 } from './opencode-local-tier-material.js';
 import {
   ensurePrivateRealDirectory,
@@ -146,7 +146,9 @@ export function fingerprintOf(content) {
  * Builds the canonical opencode.json object with the governed `glm` provider block.
  * The provider id is deliberately `glm` (NOT `anthropic`, which would collide with the
  * built-in provider — OCC-2). The local tier (ADR-LOCAL-INSTR-TIER-001) adds only the
- * `permission.task` allow-list; provider and limit material stay identical.
+ * local permission block (localTierFilePermission: task allow-list +
+ * LOCAL_COORDINATOR_DENIED_TOOLS deny, opened by the same "*":"allow" L1 opens with);
+ * provider and limit material stay identical.
  *
  * @param {unknown} [mcp] the MCP overlay to keep
  * @param {string|number|null} [callerId] owner of the local provider blocks
@@ -165,7 +167,7 @@ export function buildOpenCodeConfig(mcp, callerId = null, tier = null) {
     },
   };
   if (tier === LOCAL_INSTRUCTION_TIER) {
-    config.permission = localTaskPermission();
+    config.permission = localTierFilePermission();
   }
   const overlay = normalizeOpenCodeMcpOverlay(mcp);
   if (Object.keys(overlay).length > 0) {

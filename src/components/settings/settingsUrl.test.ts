@@ -144,6 +144,19 @@ describe('settings URL destination', () => {
       category: 'account',
     });
   });
+  // T-2107: DeepSeek Harness is a visible settings tile, so a shared link to its
+  // account panel must pin it; the hidden legacy `deepseek` id must not.
+  it('T-2107: a deep link to the DeepSeek Harness pins dsh; legacy deepseek falls back', () => {
+    expect(readSettingsDestination('?settings=agents&settingsAgent=dsh&settingsCategory=account')).toEqual({
+      tab: 'agents',
+      agent: 'dsh',
+      category: 'account',
+    });
+    expect(readSettingsDestination('?settings=agents&settingsAgent=deepseek&settingsCategory=account')).toEqual({
+      tab: 'agents',
+      category: 'account',
+    });
+  });
   it('T-2083: the credential-grants section round-trips on the agents tab only', () => {
     window.history.replaceState(null, '', '/?projectId=p1');
     writeSettingsDestination({

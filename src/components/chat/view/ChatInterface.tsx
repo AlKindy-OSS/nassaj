@@ -10,7 +10,7 @@ import { TurnCostContext } from '../context/TurnCostContext';
 import PermissionContext from '../../../contexts/PermissionContext';
 import { usePublishQuickSettingsSessionProvider } from '../../quick-settings-panel';
 import { useWebSocket } from '../../../contexts/WebSocketContext';
-import type { ChatInterfaceProps, Provider  } from '../types/types';
+import type { ChatInterfaceProps, PendingPermissionRequest, Provider } from '../types/types';
 import type { ActiveBodyProvider, LLMProvider } from '../../../types/app';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import {
@@ -38,6 +38,9 @@ import { isDuplicateSteerInjectionMatch } from '../../session-steer/steerDuplica
 import { useSteerQueuedInsertion } from '../../session-steer/useSteerQueuedInsertion';
 import SteerStarterNotice from '../../session-steer/SteerStarterNotice';
 import SteerComposerNote from '../../session-steer/SteerComposerNote';
+import SharedWritingNotice from './subcomponents/SharedWritingNotice';
+import { useSharedWritingNotice } from '../hooks/useSharedWritingNotice';
+import { lastForkableMessageId, permissionAnswerRole } from '../utils/sharedWriting';
 import { useAuth } from '../../auth/context/AuthContext';
 import { useSessionParticipants } from '../../participants/hooks';
 import { Button } from '../../../shared/view/ui';
@@ -63,6 +66,7 @@ import {
   useSessionStore,
   historyRetryDelay,
   canAutomaticallyReadHistory,
+  isProviderRemovedHistory,
 } from '../../../stores/useSessionStore';
 import { useHistoryAutoRetry } from '../hooks/useHistoryAutoRetry';
 import { useSessionProcessState } from '../../../stores/sessionProcessStateStore';
@@ -271,7 +275,7 @@ function ChatInterface({
   // loading), reset to the first qualified (installed===true) provider.
   // fail-open: only act on a confirmed installed===false, never during loading.
   useEffect(() => {
-    // A retired/historical provider (cursor/hermes/qwen/kimi/gemini) is never
+    // A retired/historical provider (cursor/gemini, or a removed harness) is never
     // an ActiveBodyProvider key of providerAuthStatus (T-1953): such a stale
     // `provider` value has no status row and must not be treated as installed.
     const currentStatus = providerAuthStatus[provider as ActiveBodyProvider];
@@ -280,7 +284,7 @@ function ChatInterface({
     // Find first qualified provider (installed===true), defaulting to 'claude'.
     // Derived from PROVIDER_UI_CAPABILITIES (Record<ActiveBodyProvider, …>, so
     // TS enforces every provider is a key) instead of a hand-maintained literal —
-    // the previous hard-coded list omitted kimi/deepseek/glm (and sakana),
+    // the previous hard-coded list omitted deepseek/glm (and sakana),
     // so a user on one of those could be silently bounced to an unauthenticated
     // 'claude' the moment its auth status resolved to installed===false.
     // resolveFallbackProvider drops the globally disabled ids from that order
@@ -314,17 +318,16 @@ function ChatInterface({
     if (dp === 'codex') return codexModel;
     if (dp === 'antigravity') return antigravityModel;
     if (dp === 'opencode') return opencodeModel;
-    if (dp === 'kimi') return kimiModel;
     if (dp === 'deepseek') return deepseekModel;
     if (dp === 'glm') return glmModel;
     if (dp === 'dsh') return dshModel;
-    // Retired bodies (cursor/hermes/qwen, T-1953) can still be `displayProvider`
+    // A retired body (cursor, T-1953) can still be `displayProvider`
     // for a historical session (__provider), but never take a new turn — this
     // value only seeds "the model that would apply to a first turn", which is
     // moot for them. Falls through to the Claude default like any unknown id.
     return claudeModel;
   }, [displayProvider, claudeModel, codexModel,
-      antigravityModel, opencodeModel, kimiModel, deepseekModel, glmModel, dshModel]);
+      antigravityModel, opencodeModel, deepseekModel, glmModel, dshModel]);
 
   const {
     historyError,
@@ -694,6 +697,17 @@ function ChatInterface({
   }, [chatMessages, isRunActiveForViewer]);
   const runStarterUserId = steerTurnState?.starterUserId ?? fallbackRunStarterUserId;
   const currentUserIdNum = typeof currentAuthUser?.id === 'number' ? currentAuthUser.id : null;
+  // ADR-173 P6: who holds a shared conversation, a refused stop, a creator-only provider.
+  const {
+    notice: sharedWritingNotice,
+    setNotice: setSharedWritingNotice,
+    dismiss: dismissSharedWritingNotice,
+  } = useSharedWritingNotice({
+    sessionId: currentSessionId ?? selectedSession?.id ?? null,
+    provider: displayProvider,
+    owner: selectedSession?.owner,
+    currentUserId: currentUserIdNum,
+  });
   // T-2046: ArrowUp/ArrowDown recall in the composer walks this session's own prompts.
   const userPrompts = useMemo(() => collectUserPrompts(chatMessages, currentUserIdNum), [chatMessages, currentUserIdNum]);
   /**
@@ -712,8 +726,17 @@ function ChatInterface({
   // ولتسمية شريط الحالة (T-1904) معاً — نفس مصدر ChatMessagesPane لاسم المؤلّف.
   const { participants: steerParticipants } = useSessionParticipants(
     currentSessionId ?? selectedSession?.id ?? null,
-    canSteer || isViewerOfOthersRun,
+    canSteer || isViewerOfOthersRun || Boolean(sharedWritingNotice) || isKnownNonStarter,
   );
+  /** ADR-173 P6: users.id → display name (live roster, then the session row's own list). */
+  const resolveMemberName = useCallback((userId: number | null): string | null => {
+    if (userId == null) return null;
+    const live = steerParticipants.find((p) => String(p.userId) === String(userId));
+    if (live?.username) return live.username;
+    const row = selectedSession?.participants?.find((p) => p.userId === userId);
+    if (row?.username) return row.username;
+    return selectedSession?.owner?.userId === userId ? selectedSession.owner.username : null;
+  }, [steerParticipants, selectedSession?.participants, selectedSession?.owner]);
   const steerStarterName = useMemo(() => {
     if (runStarterUserId == null) return null;
     const found = steerParticipants.find((p) => String(p.userId) === String(runStarterUserId));
@@ -764,6 +787,16 @@ function ChatInterface({
     onForked: handleMessageForked,
     onError: handleMessageForkError,
   });
+  // ADR-173 P6: "branch to my account" forks at the newest reply that has a transcript id.
+  const sharedWritingForkTarget = useMemo(() => lastForkableMessageId(chatMessages), [chatMessages]);
+  // ADR-173 P6: a stuck colleague turn is stopped through the existing abort
+  // message. Sent directly: the busy refusal leaves `canAbortSession` false
+  // (the turn is not the viewer's), which would make the composer's stop a no-op.
+  const handleStopStuckTurn = useCallback(() => {
+    const targetSessionId = currentSessionId ?? selectedSession?.id ?? null;
+    if (!targetSessionId) return;
+    sendMessage({ type: 'abort-session', sessionId: targetSessionId, provider: displayProvider });
+  }, [currentSessionId, selectedSession?.id, sendMessage, displayProvider]);
 
   // T-1933 (B-1401): `useChatRealtimeHandlers` (يُستدعى أدناه بعد
   // `useChatComposerState`، فمعرّفه غير متاح بعدُ نحوياً هنا) يملك
@@ -854,7 +887,6 @@ function ChatInterface({
     codexModel,
     antigravityModel,
     opencodeModel,
-    kimiModel,
     deepseekModel,
     glmModel,
     dshModel,
@@ -1153,6 +1185,8 @@ function ChatInterface({
     onWebSocketReconnect: handleWebSocketReconnect,
     onServerError: handleServerError,
     onRejectedSendRestore: handleRejectedSendRestore,
+    currentUserId: currentUserIdNum,
+    onSharedWritingNotice: setSharedWritingNotice,
     onRequestExpandedHistory: requestStreamGapRecovery,
     sessionStore,
     isDuplicateSteerInjection,
@@ -1203,7 +1237,10 @@ function ChatInterface({
   const permissionContextValue = useMemo(() => ({
     pendingPermissionRequests,
     handlePermissionDecision,
-  }), [pendingPermissionRequests, handlePermissionDecision]);
+    // ADR-173 M-c: tool cards answering a prompt (PlanDisplay) follow the banner's role rule.
+    answerRole: (request: PendingPermissionRequest) =>
+      permissionAnswerRole(request, currentUserIdNum, runStarterUserId ?? null),
+  }), [pendingPermissionRequests, handlePermissionDecision, currentUserIdNum, runStarterUserId]);
 
   // Real start of the current run — see resolveRunStartedAt's doc (extracted,
   // T-1862 round 2 qa M-3, for standalone unit tests).
@@ -1308,6 +1345,9 @@ function ChatInterface({
 
   // T-1821: زرّ موحَّد — يُظهَر حين المستخدم مرَّ للأعلى أو حين showManualRefresh أو historyError.
   // للحد الأدنى من السطور: يُحتسب showResync هنا لتمريره إلى ChatComposer.
+  // ADR-229: a conversation of a removed tool can never be re-read, so the
+  // arrow must not offer a refresh that only repeats the same answer.
+  const historyRemoved = isProviderRemovedHistory(historyError);
   const showResync = showManualRefresh || Boolean(historyError);
 
   // T-1821: المعالج الموحَّد — يستخدم resolveScrollResyncRoute (دالة صرفة مُصدَّرة ومختبَرة).
@@ -1317,6 +1357,7 @@ function ChatInterface({
     const route = resolveScrollResyncRoute({
       historyError: Boolean(historyError),
       showManualRefresh,
+      historyRemoved,
     });
     if (route === 'retryHistory') {
       // retryAt يُحترم داخل retryHistory/useHistoryAutoRetry — نستدعي دائماً
@@ -1327,7 +1368,7 @@ function ChatInterface({
       await handleManualRefreshWithCost();
     }
     // scrollOnly: تشغيل حيّ قبل /activity → انزل فقط (B-208).
-  }, [scrollToBottomAndReset, pinToBottom, historyError, retryHistory, showManualRefresh, handleManualRefreshWithCost]);
+  }, [scrollToBottomAndReset, pinToBottom, historyError, historyRemoved, retryHistory, showManualRefresh, handleManualRefreshWithCost]);
 
   // T-1821: مزامنة تلقائية عند العودة للتبويب/الإنترنت/التركيز (خارج historyError —
   // useHistoryAutoRetry يتولّى حالة historyError). الشرط: showManualRefresh = لا تشغيل
@@ -1376,6 +1417,7 @@ function ChatInterface({
   const arrowNeedsResync = shouldShowResyncArrow({
     hasHistoryError: Boolean(historyError),
     isStuck: isLoading && stuckProbeCount >= 1,
+    historyRemoved,
   });
 
   // T-1822: إخطار مخزن الاستخدام المشترك عند انتهاء الدور (isLoading: true→false).
@@ -1557,7 +1599,24 @@ function ChatInterface({
           <SteerComposerNote starterName={steerStarterName} />
         )}
 
+        {sharedWritingNotice && (
+          <SharedWritingNotice
+            notice={sharedWritingNotice}
+            resolveName={resolveMemberName}
+            providerName={getProviderDisplayName(
+              sharedWritingNotice.kind === 'unsupported' ? sharedWritingNotice.provider : displayProvider,
+            )}
+            onStop={handleStopStuckTurn}
+            onFork={sharedWritingForkTarget ? () => forkFromMessage(sharedWritingForkTarget) : undefined}
+            isForking={isForkingMessage}
+            onDismiss={dismissSharedWritingNotice}
+          />
+        )}
+
         <ChatComposer
+          permissionViewerUserId={currentUserIdNum}
+          permissionRunStarterUserId={runStarterUserId ?? null}
+          resolveMemberName={resolveMemberName}
           pendingPermissionRequests={pendingPermissionRequests}
           pendingQuestionStates={pendingQuestionStates}
           handlePermissionDecision={handlePermissionDecision}
@@ -1645,7 +1704,7 @@ function ChatInterface({
           placeholder={t('input.placeholder', {
             // T-224 (م0): اسم العرض من الواصف — لا ترناريات مكرّرة.
             // مزوّد الجلسة المعروضة لا الاختيار العام: داخل جلسة Codex يجب ألّا
-            // يظهر «ask Hermes anything» لمجرّد أن المزوّد العام hermes.
+            // يظهر «ask OpenCode anything» لمجرّد أن المزوّد العام opencode.
             provider: getProviderDisplayName(displayProvider),
           })}
           isTextareaExpanded={isTextareaExpanded}

@@ -217,17 +217,21 @@ export function measuredBuildControls(sourceFile) {
     return [...files].sort().map(measuredRootFile);
 }
 
+/** Every file of codex-sdk, codex and codex-linux-x64 0.169.0 (the 0.169 platform
+ * package dropped zsh and added the voice runtime, so 17 became 54). */
+export const SDK_REFERENCE_RECORDS = 54;
+
 function verifySdkReference(options, dependencies) {
     const reference = options.sdkReference?.path === undefined && options.sdkReference?.sha256 === undefined
         ? { path: path.join(options.repoRoot, 'scripts/lib/codex-sdk-dependencies.json'),
-            sha256: '5be6a78e70415e77576855d1409074684320c9ab59e27c70e6a105728cc42401' }
+            sha256: 'adae5ea04cc574f43d486f171cc6a8559333514bc43912c00a26f567c0d485fd' }
         : options.sdkReference;
     if (!reference || Object.keys(reference).sort().join(',') !== 'path,sha256' || !SHA.test(reference.sha256 || '')
         || typeof reference.path!=='string' || !inside(options.repoRoot,reference.path)
         || fs.realpathSync(reference.path)!==reference.path) throw Error('build_sdk_reference');
     const bytes=readPinnedBytes(reference.path,reference.sha256,256*1024);
     const value=JSON.parse(bytes), files=new Map(dependencies.map(file=>[file.path,file]));
-    if (value.schema !== 'b890-isolated-measurement-dependencies/v1' || value.records?.length !== 17) throw Error('build_sdk_reference_schema');
+    if (value.schema !== 'b890-isolated-measurement-dependencies/v1' || value.records?.length !== SDK_REFERENCE_RECORDS) throw Error('build_sdk_reference_schema');
     const seen=new Set();
     for (const row of value.records) {
         const current=files.get(row.path);

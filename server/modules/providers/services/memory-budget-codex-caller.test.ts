@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { unboundCodexIdentifiers } from '../../../../tests/helpers/codex-receipt-current-caller.mjs';
 import { createCodexCallerFixture as fixture } from '../../../../tests/helpers/memory-c0-current-source-codex-fixture.js';
 
 import * as budget from './history-budget.service.js';
+
+test('B-1794: every name the actual caller uses is bound, except the two this fixture never reaches', () => {
+  // Missing cwd and the post-turn usage roll-up are not driven here; anything new on the
+  // launch path must be bound, or every test below dies with a ReferenceError.
+  assert.deepEqual(unboundCodexIdentifiers(fixture({}).bindings), ['buildCwdMissingPayload', 'selectCodexPostTurnUsage']);
+});
 
 for (const phase of ['governance', 'source-auth', 'history-read', 'history-close', 'model', 'baseline']) {
   test(`actual Codex caller releases ownership after ${phase} failure`, async () => {

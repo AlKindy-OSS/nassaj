@@ -13,6 +13,8 @@ import { authenticatedFetch } from '../utils/api';
 import type { LLMProvider } from '../types/app';
 import type { SubagentInferredCause, SubagentState } from '../../shared/subagent-states';
 
+import { durablyCoveredSharedTurns, foldSharedTurns, isSharedLiveTurn } from './sharedTurnReconcile';
+
 // ─── NormalizedMessage (mirrors server/adapters/types.js) ────────────────────
 
 export type MessageKind =
@@ -41,6 +43,16 @@ export interface NormalizedMessage {
   noticeCode?: string;
   /** B-1699: why a scheduled wake-up hold closed (`scheduled_wakeup_closed`). */
   noticeReason?: string;
+  /** T-2113: notice tone; absent = neutral muted line. */
+  noticeLevel?: 'warning' | 'error';
+  /** T-2113: what a `session_writes_lost` notice says was not saved. */
+  lostWrites?: string[];
+  /** T-2113: ISO end of the Claude sign-in on a `credential_expiring` notice. */
+  credentialExpiresAt?: string;
+  /** T-2113: the only user a notice is meant for (the run owner); absent = everyone. */
+  audienceUserId?: number | string;
+  /** Owner-only detail of the shared notice with this id (a hook failure's server text). */
+  noticeDetailOf?: string;
   id: string;
   sessionId: string;
   timestamp: string;
@@ -77,6 +89,22 @@ export interface NormalizedMessage {
    * never assume the viewing user wrote it.
    */
   userId?: number;
+  /**
+   * ADR-173 P6: the author's display name carried on a live `user_turn` row (a
+   * colleague's prompt in a shared conversation), so it is named before the
+   * participants roster resolves `userId`. Live-only; history uses the roster.
+   */
+  authorName?: string;
+  /** ADR-173 P6: number of images a colleague's live prompt carried (not sent to viewers). */
+  sharedImageCount?: number;
+  /**
+   * ADR-173 P8 B1: a colleague's live prompt from a `user_turn` frame. Never the
+   * viewer's optimistic send; retired by the saved row of the same turn
+   * (`transcriptMessageId` when the server named it, see sharedTurnReconcile).
+   */
+  sharedTurn?: true;
+  /** ADR-173 P8 B1: the sender's send id echoed on `user_turn` (never an optimistic row id here). */
+  sharedClientMsgId?: string;
   /**
    * Coordinator attribution for a kind:'text' role:'assistant' message (server
    * commit 9c61b60): the users.id of the participant who launched the run that
@@ -290,16 +318,31 @@ export function isHistoryRebaseFailure(error: Pick<HistoryFailure, 'code'> | nul
  * banner (ChatMessagesPane) and the diagnostic log below share a single source
  * of truth, so their verdicts can never drift.
  */
-export type HistoryBannerKey = 'revision' | 'incomplete' | 'budget' | 'busy' | 'timeout' | 'unavailable';
+export type HistoryBannerKey = 'revision' | 'incomplete' | 'budget' | 'busy' | 'timeout' | 'removed' | 'unavailable';
 export function classifyHistoryFailure(
   error: Pick<HistoryFailure, 'status' | 'code'> | null | undefined,
 ): HistoryBannerKey {
+  if (isProviderRemovedHistory(error)) return 'removed';
   if (isHistoryRebaseFailure(error)) return 'revision';
   if (error?.code === 'HISTORY_SOURCE_INCOMPLETE') return 'incomplete';
   if (error?.status === 413) return 'budget';
   if (error?.status === 503) return 'busy';
   if (error?.status === 504) return 'timeout';
   return 'unavailable';
+}
+
+/**
+ * ADR-229: the conversation belongs to a harness removed from Nassaj (kimi, qwen,
+ * hermes). The server answers its history read with `readFailed: true,
+ * unavailableReason: 'provider_removed'` (or 410 `provider_removed`); the client
+ * turns both into this one failure. 410 is not retryable, so no automatic read
+ * ever repeats it.
+ */
+export const PROVIDER_REMOVED_HISTORY_CODE = 'PROVIDER_REMOVED';
+
+/** True when a history failure means "this conversation's tool was removed". */
+export function isProviderRemovedHistory(error: Pick<HistoryFailure, 'code'> | null | undefined): boolean {
+  return error?.code === PROVIDER_REMOVED_HISTORY_CODE;
 }
 
 /** Reads the app issues on its own (open, enrichment/window, reconnect, refresh). */
@@ -350,7 +393,8 @@ async function readHistoryFailure(response: Response): Promise<HistoryFailure> {
   try {
     const body = await response.json();
     const value = body?.error?.code ?? body?.code;
-    if (typeof value === 'string' && /^[A-Z_]{1,80}$/.test(value)) code = value;
+    if (value === 'provider_removed') code = PROVIDER_REMOVED_HISTORY_CODE;
+    else if (typeof value === 'string' && /^[A-Z_]{1,80}$/.test(value)) code = value;
   } catch { /* A proxy may return non-JSON. */ }
   const header = response.headers?.get('Retry-After');
   let retryAfterMs: number | null = null;
@@ -460,7 +504,7 @@ export function serverTextCoversLocal(serverText: string, localFingerprint: stri
 
 /** Whether a user row carries a current composer or legacy local identity. */
 function isOptimisticUser(row: NormalizedMessage): boolean {
-  return row.kind === 'text' && row.role === 'user'
+  return row.kind === 'text' && row.role === 'user' && row.sharedTurn !== true
     && (row.id.startsWith('cmid_') || row.id.startsWith('local_'));
 }
 
@@ -623,9 +667,11 @@ function retainUnconfirmedRealtime(
   const unsyncedUsers = new Set(retainUnsyncedOptimisticRows(realtime, server));
   const pendingSends = new Set([...unsyncedUsers].map(row => row.id));
   const coveredCodex = coveredLiveCodexReplies(realtime, server, capturedRows, pendingSends);
+  const coveredShared = durablyCoveredSharedTurns(realtime, server);
   return realtime.filter(row => {
     if (!capturedRows.has(row) || row.id.startsWith('stream_gap_')) return true;
     if (isLiveCodexReply(row)) return !coveredCodex.has(row);
+    if (isSharedLiveTurn(row)) return !coveredShared.has(row);
     if (row.kind === 'stream_delta' || (row.kind === 'text' && row.role === 'assistant')) {
       return !persistedReplyCovers(row, server);
     }
@@ -691,7 +737,9 @@ function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedM
 
 export function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
   if (realtime.length === 0) return server;
-  if (server.length === 0) return dedupeAdjacentAssistantEchoes([...realtime].sort(compareMessagesByTimestamp));
+  if (server.length === 0) {
+    return dedupeAdjacentAssistantEchoes(foldSharedTurns([...realtime].sort(compareMessagesByTimestamp)));
+  }
   const serverIds = new Set(server.map(m => m.id));
   // A live SteerBubble (useSteerQueuedInsertion) and the verified history row
   // share `steerClientMsgId`. Without this, a reload during a still-running turn
@@ -707,7 +755,7 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
   });
   if (extra.length === 0) return server;
   const merged = [...server, ...extra].sort(compareMessagesByTimestamp);
-  return dedupeAdjacentAssistantEchoes(merged);
+  return dedupeAdjacentAssistantEchoes(foldSharedTurns(merged));
 }
 
 // design-ok: ‏`left:`/`right:` أدناه وسيطان في توقيع دالة مقارنة (TypeScript)،
@@ -1048,6 +1096,9 @@ export function useSessionStore() {
           return failure;
         }
         const data = await response.json();
+        if (data?.readFailed === true && data.unavailableReason === 'provider_removed') {
+          return { ok: false, status: 410, code: PROVIDER_REMOVED_HISTORY_CODE, retryAfterMs: null };
+        }
         if (!data || !Array.isArray(data.messages)
           || !data.messages.every((row: unknown) => row && typeof row === 'object'
             && typeof (row as NormalizedMessage).id === 'string' && typeof (row as NormalizedMessage).kind === 'string')
@@ -1405,6 +1456,30 @@ export function useSessionStore() {
     notify(resolvedSessionId);
     return text;
   }, [notify, resolveSessionId]);
+
+  /**
+   * ADR-173 P6: whether this session already holds a row with `id` (a send of
+   * this tab, or a saved row) — used to drop the echo of the viewer's own prompt.
+   */
+  const hasMessageId = useCallback((sessionId: string, id: string): boolean => {
+    if (!id) return false;
+    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
+    const slot = storeRef.current.get(resolvedSessionId);
+    if (!slot) return false;
+    return slot.realtimeMessages.some(row => row.id === id || row.clientMsgId === id)
+      || slot.serverMessages.some(row => row.id === id || row.clientMsgId === id || row.displayClientMsgId === id);
+  }, [resolveSessionId]);
+
+  /**
+   * ADR-173 P8 B2: whether this tab holds an optimistic (unsent or unacknowledged)
+   * bubble for `clientMsgId` — a refusal naming any other id is not ours.
+   */
+  const hasOptimisticUserRow = useCallback((sessionId: string, clientMsgId: string): boolean => {
+    if (!clientMsgId) return false;
+    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
+    const slot = storeRef.current.get(resolvedSessionId);
+    return slot ? findOptimisticUserRowIndex(slot.realtimeMessages, clientMsgId) >= 0 : false;
+  }, [resolveSessionId]);
 
   /**
    * Append multiple realtime messages at once (batch).
@@ -1901,6 +1976,8 @@ export function useSessionStore() {
     applyResponseTurnCompletion,
     clearRealtime,
     withdrawOptimisticUserRow,
+    hasMessageId,
+    hasOptimisticUserRow,
     getMessages,
     getSessionSlot,
     replaceSessionId,
@@ -1920,7 +1997,7 @@ export function useSessionStore() {
     getSlot, has, fetchFromServer, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshFromServer, mergeTailFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming, applyResponseTurnCompletion,
-    clearRealtime, withdrawOptimisticUserRow, getMessages, getSessionSlot, replaceSessionId,
+    clearRealtime, withdrawOptimisticUserRow, hasMessageId, hasOptimisticUserRow, getMessages, getSessionSlot, replaceSessionId,
     branchSessionId,
     recordSeq, getLastSeq,
     requestHistorySnapshot, beginHistoryRequest, isHistoryRequestCurrent, setHistoryError, applyHistorySnapshot,

@@ -53,10 +53,6 @@ const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> =
   // Hosted vendor providers write nassaj-owned JSONL transcripts; watch each
   // provider's transcript root so new/updated sessions are indexed into the DB.
   {
-    provider: 'kimi',
-    rootPath: vendorProviderRoot('kimi'),
-  },
-  {
     provider: 'deepseek',
     rootPath: vendorProviderRoot('deepseek'),
   },

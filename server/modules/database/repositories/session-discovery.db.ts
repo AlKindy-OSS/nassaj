@@ -182,10 +182,13 @@ function grantProviderKey(provider: string): string {
 /**
  * Trees allowed to fill a NULL `jsonl_path` (case g): the operator/shared root,
  * plus each recorded spawn participant's own tree and credential-principal tree.
+ * An ADR-173 shared writer's tree never qualifies: the conversation's one
+ * recorded file lives in its creator's tree and is never rebound.
  */
 function allowedFillTrees(db: Database, sessionId: string, provider: string): Set<string> {
   const allowed = new Set([OPERATOR_TREE]);
-  const rows = db.prepare('SELECT DISTINCT user_id FROM session_participants WHERE session_id = ?')
+  const rows = db.prepare(`SELECT DISTINCT user_id FROM session_participants
+    WHERE session_id = ? AND attribution <> 'shared_write'`)
     .all(sessionId) as Array<{ user_id: number | string }>;
   for (const { user_id: userId } of rows) {
     allowed.add(memberTreeKey(userId));

@@ -26,6 +26,10 @@ router.put('/settings', asyncHandler(async (req, res) => {
   const user = identity(req);
   res.json(createApiSuccessResponse(localModelsService.settings(user.id, user.role, req.body)));
 }));
+router.put('/settings/body', asyncHandler(async (req, res) => {
+  const user = identity(req);
+  res.json(createApiSuccessResponse(localModelsService.bodySettings(user.id, user.role, req.body)));
+}));
 router.post('/servers', asyncHandler(async (req, res) => {
   res.status(201).json(createApiSuccessResponse(localModelsService.save(identity(req).id, req.body)));
 }));

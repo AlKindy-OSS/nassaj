@@ -20,6 +20,8 @@ export const DEFAULT_ACTION_WORDS = ['Thinking', 'Processing', 'Analyzing', 'Wor
 const STATUS_TEXT_KEYS: Record<string, string> = {
   ...Object.fromEntries(DEFAULT_ACTION_WORDS.map((word, i) => [word.toLowerCase(), ACTION_KEYS[i]])),
   'waiting for permission': 'claudeStatus.actions.waitingPermission',
+  // T-2113: the server's line while a turn waits on hooks (tool_progress heartbeats).
+  'running checks': 'claudeStatus.actions.runningChecks',
 };
 
 const TRAILING_ELLIPSIS = /[.…]+$/;

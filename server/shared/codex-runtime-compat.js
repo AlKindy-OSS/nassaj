@@ -30,6 +30,12 @@ export const CODEX_MIN_VERSION = '0.153.2';
 /** Flags the SDK's CodexExec.run emits before `resume` (proved equal to the SDK source by test). */
 export const CODEX_SDK_EXEC_FLAGS = Object.freeze(['--experimental-json', '--config', '--model',
   '--thread-source', '--sandbox', '--cd', '--add-dir', '--skip-git-repo-check', '--output-schema', '--image']);
+/**
+ * Flags the SDK can emit but only for a turn option Nassaj never sets, so they are
+ * not probed: probing would wrongly refuse a machine CLI older than the flag.
+ * `--cyber-access-program` (SDK 0.169, CLI 0.161+) needs `turnOptions.cyberAccessProgram`.
+ */
+export const CODEX_SDK_UNUSED_EXEC_FLAGS = Object.freeze(['--cyber-access-program']);
 /** Flags the SDK emits after `resume <id>`, parsed by `codex exec resume`. */
 export const CODEX_SDK_RESUME_FLAGS = Object.freeze(['--image']);
 /** Sandbox values Nassaj can hand the CLI (SDK turns and the read-only supervisor adapter). */

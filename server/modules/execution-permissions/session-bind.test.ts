@@ -269,3 +269,24 @@ test('a pre-existing user-wide sdk_turn fence row still blocks new chats, resume
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('ADR-173 R1: a shared writer resumes another member\'s session; only a new-chat bind is foreign', () => {
+  const { database, admit } = harness();
+  try {
+    const creatorTurn = admit(null);
+    creatorTurn.bindSession(SESSION_A);
+    database.prepare("INSERT INTO session_participants (session_id, user_id, role) VALUES (?, 1, 'owner')")
+      .run(SESSION_A);
+    // The writer's turn is a resume: admitted already bound, so SESSION_FOREIGN is never consulted.
+    const writerResume = admit(SESSION_A, 'claude', 2);
+    assert.equal(writerResume.isSessionBound(), true);
+    writerResume.consume();
+    writerResume.markStarted();
+    assert.equal(decisionSession(database, writerResume.decisionId), SESSION_A);
+    // Claiming that id for a NEW chat of another user (any non-member included) stays refused.
+    const strangerNewChat = admit(null, 'claude', 2);
+    assert.throws(() => strangerNewChat.bindSession(SESSION_A), refusedWith('SESSION_FOREIGN'));
+  } finally {
+    database.close();
+  }
+});

@@ -138,6 +138,7 @@ export async function submitSessionOverlay({
   sessionId,
   generation,
   principalId,
+  access = 'owner',
   message,
   authorEnv = {},
   dispatchPreview = dispatchCommittedPreview,
@@ -147,6 +148,7 @@ export async function submitSessionOverlay({
     sessionId,
     generation,
     principalId,
+    access,
   });
   const submittedBlobs = readSessionSubmittedBlobs(binding, repositoryRelativeFilePaths);
   const arbiterSession = `overlay-${binding.overlayId}`;
@@ -216,12 +218,13 @@ export async function resolveSessionOverlayConflict({
   sessionId,
   generation,
   principalId,
+  access = 'owner',
   message,
   authorEnv = {},
   dispatchPreview = dispatchCommittedPreview,
 }) {
   const binding = requireBoundSessionWorkspace({
-    projectPath, sessionId, generation, principalId,
+    projectPath, sessionId, generation, principalId, access,
   });
   const original = inspectRequest({ repo: repositoryRootPath, requestId });
   if (original.session !== `overlay-${binding.overlayId}`) {
@@ -235,6 +238,7 @@ export async function resolveSessionOverlayConflict({
     sessionId,
     generation,
     principalId,
+    access,
     message,
     authorEnv,
     dispatchPreview,
@@ -588,8 +592,47 @@ function readOverlayCoordinates(query) {
   return { sessionId: sessionId.trim(), generation: generation.trim() };
 }
 
-/** Resolve a read to the same principal- and generation-bound overlay as commit. */
-export function requireGitReadWorkspace({ projectPath, query, principalId }) {
+/**
+ * ADR-173 shared-writer ports, injected by the composition root (server/index.js)
+ * so this router keeps its light import graph. Until configured both refuse:
+ * every overlay access stays principal-bound (fail closed).
+ */
+const sharedWriterAccess = { isWriter: () => false, isProjectOwner: () => false };
+
+/**
+ * @param {{isWriter: (sessionId: string, userId: unknown) => boolean,
+ *   isProjectOwner: (sessionId: string, userId: unknown) => boolean}} ports
+ *   `isProjectOwner`: owner of the session's own recorded project (never a client path).
+ */
+export function configureGitSharedWriterAccess({ isWriter, isProjectOwner }) {
+  sharedWriterAccess.isWriter = isWriter;
+  sharedWriterAccess.isProjectOwner = isProjectOwner;
+}
+
+/** The only source of 'session_writer' access on this router (flag and authority live in the port). */
+function isSharedOverlayWriter(sessionId, userId) {
+  return sharedWriterAccess.isWriter(sessionId, userId) === true;
+}
+
+/**
+ * Overlay submit (commit, conflict resolve) access, owner decision 4: the creator
+ * through the principal-bound 'owner' path, or the project owner who is also a
+ * shared writer of the session — the owner of the session's own project, whatever
+ * projectPath the client sent. Any other writer stays principal-bound (refused).
+ */
+export function overlaySubmitAccess(sessionId, userId, deps = {}) {
+  const {
+    isWriter = isSharedOverlayWriter,
+    isProjectOwner = (session, user) => sharedWriterAccess.isProjectOwner(session, user) === true,
+  } = deps;
+  return isWriter(sessionId, userId) && isProjectOwner(sessionId, userId) ? 'session_writer' : 'owner';
+}
+
+/**
+ * Resolve a read to the generation-bound overlay. The creator reads through the
+ * principal match; a shared writer of the session (ADR-173) reads it too.
+ */
+export function requireGitReadWorkspace({ projectPath, query, principalId, isWriter = isSharedOverlayWriter }) {
   const coordinates = readOverlayCoordinates(query);
   if (!coordinates) return null;
   return requireBoundSessionWorkspace({
@@ -597,6 +640,7 @@ export function requireGitReadWorkspace({ projectPath, query, principalId }) {
     sessionId: coordinates.sessionId,
     generation: coordinates.generation,
     principalId,
+    access: isWriter(coordinates.sessionId, principalId) ? 'session_writer' : 'owner',
   });
 }
 
@@ -1429,6 +1473,7 @@ router.post('/commit-session-overlay', async (req, res) => {
       sessionId: sessionId.trim(),
       generation: generation.trim(),
       principalId: req.user?.id ?? null,
+      access: overlaySubmitAccess(sessionId.trim(), req.user?.id ?? null),
       message: message.trim(),
       authorEnv: buildGitAuthorEnv(req.user?.id),
     });
@@ -1494,6 +1539,7 @@ router.post('/resolve-session-overlay-conflict', async (req, res) => {
       sessionId: sessionId.trim(),
       generation: generation.trim(),
       principalId: req.user?.id ?? null,
+      access: overlaySubmitAccess(sessionId.trim(), req.user?.id ?? null),
       message: message.trim(),
       authorEnv: buildGitAuthorEnv(req.user?.id),
     });

@@ -495,6 +495,14 @@ describe('dsh provider — T-2086 acceptance (ADR-224)', () => {
       assert.equal(fs.existsSync(target), false);
     });
 
+    it('ADR-227 / T-2108: with the DSH local switch off (default), a local model id is refused before spawn', async () => {
+      const member = await newMember(true);
+      const writer = makeWriter(member.id);
+      const model = 'nassaj_local_5d0b8a512c3e4f6a9b7c1e2d3f4a5b6c/local-test-model';
+      await within(mod.spawnDsh('hello', { cwd: workspace, model }, writer), 'refused turn');
+      refusedBeforeSpawn(writer.frames, 'ENGINE_PROVIDER_UNAVAILABLE', member);
+    });
+
     it('ADR-226 C1: a member whose Claude env cannot be built is refused before spawn (was: managed-only rules)', async () => {
       const member = await newMember(true);
       const own = mod.createDshRuntime({ managedSettingsDir: managedDir,

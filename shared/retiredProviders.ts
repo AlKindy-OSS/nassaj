@@ -1,19 +1,17 @@
 /**
  * Provider ids that are retired AS AGENT BODIES (T-1853, T-1953).
  *
- * `gemini` has no runtime left in the codebase. `hermes`'s body code was
- * deleted (T-1953, ADR-192), keeping only a history-only reader so past
- * conversations stay listable. `cursor`, `qwen` and `kimi` are refused on
- * every body surface while their body code (launchers, provider modules,
- * auth wiring) still exists as dormant code — deleting it is a separate,
- * not-yet-scheduled step; this list is what makes that later deletion safe
- * by making the code unreachable now.
+ * `gemini` has no runtime left in the codebase. The `hermes`, `qwen` and `kimi`
+ * body code was deleted (T-1953, ADR-192, ADR-229). `cursor` is refused on every
+ * body surface while its body code still exists as dormant code; this list is
+ * what makes that later deletion safe by making the code unreachable now.
  *
  * A request that still names one of them as a body — a stale client selection,
  * an old bookmark, a persisted session row, or an external API caller — must get
- * a typed refusal instead of a crash, a silent drop, or a spawn. Historical
- * conversations of these ids stay listable and readable; only new runs, logins
- * and body configuration are refused.
+ * a typed refusal instead of a crash, a silent drop, or a spawn. New runs, logins
+ * and body configuration are refused for every id here. Historical conversations
+ * of `cursor` and `gemini` stay listable and readable; those of the ids in
+ * {@link HIDDEN_HISTORY_PROVIDER_IDS} are hidden at read time (ADR-229).
  *
  * BODY AXIS ONLY. This list must never be consulted on the engine axis or for
  * credentials: `kimi` remains a live engine of the Claude body and a live key
@@ -30,6 +28,25 @@ export const RETIRED_PROVIDER_IDS: ReadonlySet<string> = new Set([
   'qwen',
   'kimi',
 ]);
+
+/**
+ * Retired bodies whose past conversations are HIDDEN at read time (ADR-229): they
+ * vanish from every list a member sees, opening one answers `provider_removed`,
+ * and their share links are refused. No row is deleted or rewritten — project
+ * delete and membership revocation still see every row. A subset of
+ * {@link RETIRED_PROVIDER_IDS}; `cursor` and `gemini` are retired but stay visible.
+ * Same body-axis-only scope as above: never consult it for engines or key slots.
+ */
+export const HIDDEN_HISTORY_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  'kimi',
+  'qwen',
+  'hermes',
+]);
+
+/** True when `value` names a provider whose past conversations are hidden (ADR-229). */
+export function isHiddenHistoryProvider(value: unknown): boolean {
+  return typeof value === 'string' && HIDDEN_HISTORY_PROVIDER_IDS.has(value.trim().toLowerCase());
+}
 
 /** Stable machine-readable code carried by every retired-provider refusal. */
 export const PROVIDER_REMOVED_CODE = 'provider_removed';

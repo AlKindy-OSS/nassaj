@@ -13,8 +13,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 
 const STAGE_3B_FILES = [
   'shared/localEngine.ts',
-  'server/services/isolation/claude-local-overlay.js',
-  'server/modules/providers/claude-local.routes.ts',
+  'server/services/isolation/local-overlay.js',
+  'server/modules/providers/local-overlay.routes.ts',
 ];
 
 const FORBIDDEN = /\b(ollama|llama(?:\.cpp|-swap|cpp)?|lm ?studio|vllm|localai|koboldcpp|jan|gpt-oss|qwen\w*|gemma\w*|mistral|mixtral|phi-?\d|deepseek|kimi|moonshot|glm|z\.ai|openai|tailscale)\b/iu;

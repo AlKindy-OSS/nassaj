@@ -80,7 +80,7 @@ describe('dsh refusal copy', () => {
 
   it('another provider keeps its server sentence', () => {
     const verdict = resolveOutboxVerdict({
-      kind: 'complete', clientMsgId: 'm1', success: false, provider: 'claude', code: 'session_busy', error: 'busy',
+      kind: 'complete', clientMsgId: 'm1', success: false, provider: 'claude', code: 'spawn_failed', error: 'busy',
     } as never, { isActiveViewSession: true, readErrorCode: (m) => (m as { code: string }).code, readErrorDetail: () => null });
     expect(verdict).toMatchObject({ detail: 'busy' });
   });
@@ -137,5 +137,30 @@ describe('OutboxCard: dsh refusals', () => {
     expect(card.textContent).toMatch(/few seconds/i);
     expect(card.className).not.toMatch(/red/);
     expect(screen.getByRole('button', { name: en.outbox.tryAgain })).toBeTruthy();
+  });
+});
+
+describe('OutboxCard: dsh local-engine refusals (T-2108)', () => {
+  const SENTENCE = 'Refusing to run elsewhere. DeepSeek Harness on local model servers is turned off on this installation.';
+
+  it.each(['ENGINE_PROVIDER_UNAVAILABLE', 'ENGINE_PIN_WRITE_FAILED'])('%s has plain ar and en copy', (code) => {
+    expect(DSH_REFUSAL_CODES.has(code)).toBe(false);
+    expect(lookup(en, SERVER_ERROR_CODE_KEYS[code])).toMatch(/\w/);
+    expect(lookup(ar, SERVER_ERROR_CODE_KEYS[code])).toMatch(/[؀-ۿ]/);
+  });
+
+  it('keeps the readable server sentence and shows it under a plain headline', () => {
+    const verdict = resolveOutboxVerdict({
+      kind: 'complete', clientMsgId: 'm1', success: false, notStarted: true, provider: 'dsh',
+      code: 'ENGINE_PROVIDER_UNAVAILABLE', reason: 'feature_disabled', error: SENTENCE,
+    } as never, { isActiveViewSession: true, readErrorCode: (m) => (m as { code: string }).code, readErrorDetail: () => null });
+    expect(verdict).toMatchObject({ action: 'fail', code: 'ENGINE_PROVIDER_UNAVAILABLE', detail: SENTENCE });
+    render(<OutboxCard entry={{ ...entry('ENGINE_PROVIDER_UNAVAILABLE'), reasonDetail: SENTENCE }}
+      onRetry={noop} onEdit={noop} onDelete={noop} onVerify={noop} />);
+    const card = screen.getByTestId('outbox-card');
+    expect(card.textContent).toContain(reasonOf('ENGINE_PROVIDER_UNAVAILABLE'));
+    expect(card.textContent).toContain(SENTENCE);
+    expect(card.textContent).not.toContain(en.serverError.unknown);
+    expect(card.textContent).toContain('my draft');
   });
 });

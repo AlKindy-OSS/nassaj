@@ -47,3 +47,12 @@ describe('history pane error state (T-1821)', () => {
     expect(screen.queryByText('ordinary-empty-state')).toBeNull();
   });
 });
+
+describe('removed-harness conversation (ADR-229 S5)', () => {
+  it('shows the removed-tool message, not the generic read failure or an empty chat', () => {
+    render(<ChatMessagesPane {...props} historyError={{ ok: false, status: 410, code: 'PROVIDER_REMOVED', retryAfterMs: null, retryAt: 0, operation: 'initial' }} />);
+    expect(screen.getByRole('alert').textContent).toContain('session.historyError.removed');
+    expect(screen.getByRole('alert').textContent).not.toContain('session.historyError.unavailable');
+    expect(screen.queryByText('ordinary-empty-state')).toBeNull();
+  });
+});

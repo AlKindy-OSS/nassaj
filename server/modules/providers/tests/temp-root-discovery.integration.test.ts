@@ -23,7 +23,6 @@ import { CodexSessionSynchronizer } from '@/modules/providers/list/codex/codex-s
 import { CursorSessionSynchronizer } from '@/modules/providers/list/cursor/cursor-session-synchronizer.provider.js';
 import { OpenCodeSessionSynchronizer } from '@/modules/providers/list/opencode/opencode-session-synchronizer.provider.js';
 import { VendorSessionSynchronizer } from '@/modules/providers/shared/vendor/vendor-session-synchronizer.provider.js';
-import { KimiAgentSessionSynchronizer } from '@/services/isolation/kimi-agent-session-synchronizer.provider.js';
 
 /**
  * B-1620 — nested CLI runs in a scratch dir must not become sidebar projects
@@ -33,9 +32,8 @@ import { KimiAgentSessionSynchronizer } from '@/services/isolation/kimi-agent-se
  * (a `codex exec` rollout with originator codex_exec and cwd /var/tmp/...,
  * a `claude -p` SDK transcript with cwd /var/tmp/...), with content sanitized.
  * Antigravity (USER_INPUT step) and vendor (`meta` line) shapes also come from
- * real files. Cursor and kimi-agent use the shapes of their existing unit
- * tests: this host has no cursor project dir, and its real kimi wire files
- * carry no cwd at all (so they are never indexed in the first place).
+ * real files. Cursor uses the shape of its existing unit tests: this host has
+ * no cursor project dir.
  */
 
 const SID = '00000000-0000-7000-8000-00000000b162'; // synthetic v7, codex rollout id shape
@@ -331,20 +329,5 @@ test('Vendor: a vendor transcript whose projectPath is a temp dir is not indexed
     registerByUser(tempCwd);
     await sync.synchronizeFile(transcript);
     assert.equal(sessionsDb.getSessionById(vendorId)?.project_path, tempCwd, 'control: indexed once registered');
-  });
-});
-
-test('Kimi agent: a wire transcript whose cwd is a temp dir is not indexed', async () => {
-  await withBox(async ({ home, tempCwd }) => {
-    const wire = writeJsonl(path.join(home, '.kimi', 'sessions', 'conv-b1620', 'agents', 'main', 'wire.jsonl'),
-      [{ type: 'session', cwd: tempCwd, title: 'sanitized' }]);
-    const sync = new KimiAgentSessionSynchronizer();
-    await sync.synchronizeFile(wire);
-    await sync.synchronize();
-    assert.equal(sessionsDb.getSessionById('conv-b1620'), null);
-    assert.equal(projectCount(tempCwd), 0);
-    registerByUser(tempCwd);
-    await sync.synchronizeFile(wire);
-    assert.equal(sessionsDb.getSessionById('conv-b1620')?.project_path, tempCwd, 'control: indexed once registered');
   });
 });

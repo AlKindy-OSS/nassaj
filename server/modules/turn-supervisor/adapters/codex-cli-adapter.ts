@@ -6,6 +6,7 @@ import { CODEX_SINGLE_AGENT_CONFIG, codexConfigArgv } from '@/modules/providers/
 // eslint-disable-next-line boundaries/dependencies
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { assertLinkModeRunAllowed } from '@/services/isolation/link-mode-run-gate.js';
+import { localEngineSpawnRefusal } from '@/services/isolation/local-engine-pin.js';
 import { resolveModelRunEnv } from '@/services/isolation/credential-gate.js';
 import {
   acquireCodexLaunchIdentity,
@@ -198,6 +199,10 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
         throw new TurnAdapterError('effects_unsupported', 'Codex supervised roles deny effects');
       }
       if (request.signal?.aborted) throw new TurnAdapterError('aborted', 'Codex role aborted before launch');
+      // ADR-227 / T-2107: this role runs on the member's cloud Codex with no engine
+      // verdict; a local model id is refused, never sent to the cloud.
+      const localRefusal = localEngineSpawnRefusal({ model: request.model, site: 'supervisor role' });
+      if (localRefusal) throw new TurnAdapterError('provider_unavailable', localRefusal.message);
       if (isSpawnBlockedForRunProvider('codex')) {
         throw new TurnAdapterError('provider_unavailable', 'The codex runtime is being updated right now');
       }

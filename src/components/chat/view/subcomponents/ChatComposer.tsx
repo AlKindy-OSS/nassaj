@@ -128,6 +128,12 @@ interface ChatComposerProps {
     decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
   ) => void;
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
+  /** ADR-173 P6: the signed-in user, to give a non-starter the shared-writer approval controls. */
+  permissionViewerUserId?: number | null;
+  /** ADR-173 P6: users.id of the running turn's starter; null when unknown. */
+  permissionRunStarterUserId?: number | null;
+  /** ADR-173 P6: users.id → display name for "waiting for <starter>". */
+  resolveMemberName?: (userId: number | null) => string | null;
   claudeStatus: { text: string; tokens: number; can_interrupt: boolean } | null;
   isLoading: boolean;
   /** Synchronous submit/upload seal before the run flips `isLoading`. */
@@ -1061,6 +1067,9 @@ function CoordinationLevelSelector({
 }
 
 export default function ChatComposer({
+  permissionViewerUserId = null,
+  permissionRunStarterUserId = null,
+  resolveMemberName,
   pendingPermissionRequests,
   pendingQuestionStates,
   handlePermissionDecision,
@@ -1770,6 +1779,9 @@ export default function ChatComposer({
             pendingQuestionStates={pendingQuestionStates}
             handlePermissionDecision={handlePermissionDecision}
             handleGrantToolPermission={handleGrantToolPermission}
+            viewerUserId={permissionViewerUserId}
+            runStarterUserId={permissionRunStarterUserId}
+            resolveName={resolveMemberName}
           />
         </div>
       )}

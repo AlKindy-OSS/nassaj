@@ -12,6 +12,8 @@
 
 import type { SessionCostTurn } from '@/shared/types.js';
 
+import { isLocalModelId } from '../../../../../shared/localEngine.js';
+
 import { findModelPrice, PRICES_AS_OF, type ModelPrice } from './model-pricing.js';
 import type { ModelUsage, SessionUsage, TokenTotals } from './usage-extractors.js';
 
@@ -67,6 +69,13 @@ export function priceModelUsage(usage: ModelUsage): ModelCost & {
   unpricedTokens: number;
   assumedPrice: boolean;
 } {
+  // T-2103: a local engine is the member's own machine — measured, and free.
+  if (isLocalModelId(usage.model)) {
+    return {
+      model: usage.model, costUsd: 0, tokens: usage.totals, requests: usage.requests,
+      unpricedTokens: 0, assumedPrice: false,
+    };
+  }
   const price: ModelPrice | null = findModelPrice(usage.model);
 
   if (!price) {

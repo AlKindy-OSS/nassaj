@@ -67,7 +67,6 @@ test('every synchronizer discovery write passes origin: watcher (B-1620)', () =>
     'modules/providers/list/cursor/cursor-session-synchronizer.provider.ts',
     'modules/providers/list/opencode/opencode-session-synchronizer.provider.ts',
     'modules/providers/shared/vendor/vendor-session-synchronizer.provider.ts',
-    'services/isolation/kimi-agent-session-synchronizer.provider.ts',
   ]) {
     assert.ok(files.includes(expected), `scan must cover ${expected}`);
   }

@@ -7,8 +7,8 @@
  *  - sessions: normalizeMessage maps Anthropic streaming/message events; the
  *    DeepSeek textual-tool-call quirk is rescued into a tool_use; GLM long streams
  *    do not drop messages (event-per-line replay).
- *  - registry: resolveProvider returns all three without throwing and listProviders
- *    includes them; each satisfies the six-facet contract.
+ *  - registry: resolveProvider returns all three without throwing; deepseek/glm are
+ *    listed six-facet bodies, kimi is an engine face only (ADR-229).
  *  - IRON RULE (static): the vendor seam source imports no @anthropic-ai SDK and
  *    does not route through claude-sdk.js.
  */
@@ -27,7 +27,6 @@ import {
 import { KimiProviderModels } from '@/modules/providers/list/kimi/kimi-models.provider.js';
 import { DeepSeekSessionsProvider } from '@/modules/providers/list/deepseek/deepseek-sessions.provider.js';
 import { GlmSessionsProvider } from '@/modules/providers/list/glm/glm-sessions.provider.js';
-import { KimiSessionsProvider } from '@/modules/providers/list/kimi/kimi-sessions.provider.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 
 const stubFetch = (impl: typeof fetch): (() => void) => {
@@ -112,8 +111,8 @@ test('KimiProviderModels.getSupportedModels: returns live list (not degraded) on
 
 // ---------------- sessions: normalizeMessage ----------------
 
-test('Kimi normalizeMessage: text_delta becomes a stream_delta', () => {
-  const sessions = new KimiSessionsProvider();
+test('Vendor normalizeMessage: text_delta becomes a stream_delta', () => {
+  const sessions = new GlmSessionsProvider();
   const out = sessions.normalizeMessage(
     { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello' } },
     'sess-1',
@@ -121,11 +120,11 @@ test('Kimi normalizeMessage: text_delta becomes a stream_delta', () => {
   assert.equal(out.length, 1);
   assert.equal(out[0].kind, 'stream_delta');
   assert.equal(out[0].content, 'hello');
-  assert.equal(out[0].provider, 'kimi');
+  assert.equal(out[0].provider, 'glm');
 });
 
-test('Kimi normalizeMessage: content_block_start tool_use becomes a tool_use message', () => {
-  const sessions = new KimiSessionsProvider();
+test('Vendor normalizeMessage: content_block_start tool_use becomes a tool_use message', () => {
+  const sessions = new GlmSessionsProvider();
   const out = sessions.normalizeMessage(
     { type: 'content_block_start', content_block: { type: 'tool_use', id: 't1', name: 'Read', input: { path: '/x' } } },
     'sess-1',
@@ -137,8 +136,8 @@ test('Kimi normalizeMessage: content_block_start tool_use becomes a tool_use mes
   assert.deepEqual(out[0].toolInput, { path: '/x' });
 });
 
-test('Kimi normalizeMessage: a full assistant message with text + tool_use yields both', () => {
-  const sessions = new KimiSessionsProvider();
+test('Vendor normalizeMessage: a full assistant message with text + tool_use yields both', () => {
+  const sessions = new GlmSessionsProvider();
   const out = sessions.normalizeMessage(
     {
       type: 'message',
@@ -197,10 +196,10 @@ test('Vendor fetchHistory: replays a JSONL transcript and paginates', async () =
   const originalHome = os.homedir;
   (os as unknown as { homedir: () => string }).homedir = () => sandbox;
   try {
-    const sessions = new KimiSessionsProvider();
+    const sessions = new GlmSessionsProvider();
     const projectHash = (await import('@/modules/providers/shared/vendor/vendor-transcript.js'))
       .vendorProjectHash('/work/proj');
-    const dir = path.join(sandbox, '.nassaj-vendor-sessions', 'kimi', projectHash);
+    const dir = path.join(sandbox, '.nassaj-vendor-sessions', 'glm', projectHash);
     await fs.mkdir(dir, { recursive: true });
     const lines = [
       JSON.stringify({ type: 'meta', projectPath: '/work/proj', sessionName: 'demo' }),
@@ -222,8 +221,8 @@ test('Vendor fetchHistory: replays a JSONL transcript and paginates', async () =
 
 // ---------------- registry: resolution + contract ----------------
 
-test('registry: resolveProvider returns kimi/deepseek/glm and listProviders includes them', () => {
-  for (const id of ['kimi', 'deepseek', 'glm'] as const) {
+test('registry: deepseek/glm are listed bodies; kimi resolves as an engine face only', () => {
+  for (const id of ['deepseek', 'glm'] as const) {
     const provider = providerRegistry.resolveProvider(id);
     assert.equal(provider.id, id);
     // Six-facet contract: none undefined.
@@ -236,9 +235,18 @@ test('registry: resolveProvider returns kimi/deepseek/glm and listProviders incl
   }
 
   const ids = providerRegistry.listProviders().map((p) => p.id);
-  for (const id of ['kimi', 'deepseek', 'glm'] as const) {
+  for (const id of ['deepseek', 'glm'] as const) {
     assert.ok(ids.includes(id), `listProviders must include ${id}`);
   }
+
+  // ADR-229: the Kimi body is removed; its catalog and key status stay as an engine face.
+  const kimi = providerRegistry.resolveProvider('kimi');
+  assert.equal(kimi.id, 'kimi');
+  assert.equal(typeof kimi.models.getSupportedModels, 'function');
+  assert.equal(typeof kimi.auth.getStatus, 'function');
+  assert.equal(ids.includes('kimi'), false, 'kimi is not a listed body');
+  assert.throws(() => kimi.sessions.normalizeMessage({}, null), /not a body/);
+  assert.throws(() => providerRegistry.resolveHistorySessions('kimi'), /Unsupported provider history/);
 });
 
 test('registry: vendor auth getStatus never throws and reports unauthenticated without a key', async () => {

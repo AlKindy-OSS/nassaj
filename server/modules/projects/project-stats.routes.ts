@@ -294,9 +294,10 @@ function readModelRows(value: unknown): ProjectStatsModelRow[] {
  *
  * Returns `null` (unknown) when no session of this project has ever been parsed,
  * so an unparsed project is never shown an authoritative empty roster.
+ * Conversations of removed harnesses do not feed the roster (ADR-229).
  */
 function readProjectAgents(projectPath: string): ProjectStatsAgentRow[] | null {
-  const sessions = sessionsDb.getSessionsByProjectPath(projectPath);
+  const sessions = sessionsDb.getVisibleSessionsByProjectPath(projectPath);
   const sessionIds = sessions.map((session) => session.session_id);
   if (sessionIds.length === 0) {
     return null;
@@ -316,10 +317,10 @@ function readProjectAgents(projectPath: string): ProjectStatsAgentRow[] | null {
     }));
 }
 
-/** Latest active-session timestamp represented as an ISO day, or null. */
+/** Latest visible active-session timestamp (ADR-229) represented as an ISO day, or null. */
 function readProjectActivityThrough(projectPath: string): string | null {
   let latest = Number.NEGATIVE_INFINITY;
-  for (const session of sessionsDb.getSessionsByProjectPath(projectPath)) {
+  for (const session of sessionsDb.getVisibleSessionsByProjectPath(projectPath)) {
     const parsed = Date.parse(session.updated_at ?? session.created_at);
     if (Number.isFinite(parsed)) latest = Math.max(latest, parsed);
   }

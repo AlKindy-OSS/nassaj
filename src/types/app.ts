@@ -21,7 +21,22 @@ export type LLMProvider = SessionBucketProvider;
  * `shared/retiredProviders.ts`'s `RETIRED_PROVIDER_IDS` (a literal type
  * cannot derive from a runtime `Set`).
  */
-export type ActiveBodyProvider = Exclude<LLMProvider, 'gemini' | 'cursor' | 'hermes' | 'qwen' | 'kimi'>;
+export type ActiveBodyProvider = Exclude<KnownBodyProvider, 'gemini' | 'cursor'>;
+
+/**
+ * Harness bodies removed from Nassaj (ADR-229): their code is gone and their past
+ * conversations are hidden at read time. Mirrors `shared/retiredProviders.ts`'s
+ * `HIDDEN_HISTORY_PROVIDER_IDS`. Body axis only — `kimi` is still a Claude
+ * engine and a Moonshot key slot, `qwen` still a Coding Plan key slot and the
+ * `qwen-plan/*` model family inside OpenCode.
+ */
+export type RemovedHarnessProvider = 'kimi' | 'qwen' | 'hermes';
+
+/**
+ * Every body the client still names on a body surface (settings tiles, MCP,
+ * skills, billing): the active ones plus retired-but-readable `cursor`.
+ */
+export type KnownBodyProvider = Exclude<LLMProvider, RemovedHarnessProvider>;
 
 export type ProviderModelOption = {
   value: string;

@@ -104,7 +104,6 @@
     "codex": "Codex",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
-    "kimi": "Kimi",
     "deepseek": "DeepSeek",
     "glm": "GLM"
   },
@@ -141,6 +140,24 @@
       "listeners_gone": "Scheduled wake-ups stopped: nobody has had the conversation open for a while.",
       "quota": "Scheduled wake-ups stopped: usage is at or above 90%.",
       "disabled": "Scheduled wake-ups are turned off on this server."
+    },
+    "hookNoVerdict": {
+      "timed_out": "Un controllo di sicurezza non ha risposto in tempo, quindi questa azione non è stata verificata.",
+      "no_answer": "Un controllo di sicurezza non ha dato una risposta utilizzabile, quindi questa azione non è stata verificata."
+    },
+    "hookFailed": "Un hook non è riuscito durante il controllo di questo passaggio.",
+    "hookDetails": "Mostra dettagli",
+    "sessionWritesLost": {
+      "ENOSPC": "Il disco del server è pieno, quindi parte di questa sessione non è stata salvata.",
+      "EDQUOT": "La quota disco del server è esaurita, quindi parte di questa sessione non è stata salvata.",
+      "unknown": "Non è stato possibile salvare su disco parte di questa sessione.",
+      "transcript": "Riprendendo questa conversazione in seguito potrebbe mancarne una parte.",
+      "globalConfig": "Le ultime modifiche alle impostazioni di Claude non sono state salvate."
+    },
+    "credentialExpiring": {
+      "soon": "Il tuo accesso a Claude scade il {{date}}. Ricollega il tuo account Claude per continuare senza interruzioni.",
+      "expired": "Il tuo accesso a Claude è probabilmente scaduto ({{date}}). Ricollega il tuo account Claude per continuare.",
+      "action": "Apri impostazioni account"
     }
   },
   "systemMessage": {
@@ -371,7 +388,7 @@
     "removeFile": "Rimuovi file",
     "uploading": "Caricamento…",
     "errorType": "Tipo di file non consentito",
-    "errorSize": "File troppo grande (max 50 MB)",
+    "errorSize": "File troppo grande (max {{maxMb}} MB)",
     "errorCount": "Troppi file allegati (max {{max}})"
   },
   "effortMode": {
@@ -429,7 +446,6 @@
       "antigravity": "Pronto per Antigravity (agy) con {{model}}. Inizia a scrivere il tuo messaggio qui sotto.",
       "opencode": "Pronto a usare OpenCode con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "default": "Seleziona un agente di programmazione sopra per iniziare",
-      "kimi": "Pronto a usare Kimi con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "deepseek": "Pronto a usare DeepSeek con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "glm": "Pronto a usare GLM con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "claudeEngine": "Pronto: l'agente di programmazione Claude gira su {{provider}} con {{model}}. Inizia a digitare il tuo messaggio qui sotto."
@@ -505,7 +521,8 @@
       "working": "In lavorazione",
       "computing": "Calcolo",
       "reasoning": "Ragionamento",
-      "waitingPermission": "In attesa di autorizzazione"
+      "waitingPermission": "In attesa di autorizzazione",
+      "runningChecks": "Esegue i controlli"
     },
     "state": {
       "live": "Attivo",

@@ -217,3 +217,9 @@ test('registration-only Claude request cannot enter native creation', async () =
     assert.equal(rpcCalls, 0);
     assert.equal(spawnCalls, 0);
 });
+
+test('ADR-227 / T-2107: a chat pinned to a local model server is never forked through the cloud App Server', async () => {
+  rows.set(source, { ...row(source), engine_provider: 'local:0b9c6a3e-6f1e-4c41-9a4e-2f1b9e0c7d11:7:0123456789abcdef0123456789abcdef' });
+  await assert.rejects(forkSessionAtMessage(params), { code: 'local_engine_unsupported' });
+  assert.equal(runtimeChecks, 0); assert.equal(rpcCalls, 0); assert.equal(spawnCalls, 0);
+});

@@ -58,6 +58,7 @@ import {
   resolveOpenCodeCostDatabasePath,
   type DbCycleUsageOutcome,
 } from './db-usage-extractors.js';
+import { isLocalPinnedSession, localizeSessionUsage } from './local-engine-usage.js';
 import {
   harnessVendor,
   resolveModelVendor,
@@ -611,8 +612,11 @@ async function costForTranscript(
   const { transcriptPath } = transcript;
   const canonicalPath = await realpath(transcriptPath).catch(() => transcriptPath);
   const metricsBefore = metricsFingerprint(options.sessionId, captureTurns);
+  // T-2103: the pin may change without the transcript changing, so it keys the cache.
+  const local = isLocalPinnedSession(transcript.sessionId);
   const key = [
     provider,
+    local ? 'local' : 'cloud',
     options.sessionId ?? canonicalPath,
     manifestFingerprint(options.manifest),
     windowKey(window),
@@ -635,13 +639,14 @@ async function costForTranscript(
     };
   }
   return joinTranscriptFlight(key, options.signal, async (flightSignal) => {
-    const usage = provider === 'codex'
+    const usage = localizeSessionUsage(provider === 'codex'
       ? await extractCodexConversationUsage(transcript, window, {
           manifest: options.manifest,
           signal: flightSignal,
           captureRequests: captureTurns,
         })
-      : await extractClaudeSessionUsage(transcript, window, attribution?.filter, flightSignal, { captureRequests: captureTurns });
+      : await extractClaudeSessionUsage(transcript, window, attribution?.filter, flightSignal, { captureRequests: captureTurns }),
+    local);
     let cost = calculateSessionCost(usage);
     if (captureTurns && options.sessionId && usage.requests && usage.requests.length > 0) {
       const turns = turnsForSession(options.sessionId, usage.requests, usage.userBoundariesMs ?? []);
@@ -1618,7 +1623,8 @@ export const sessionCostService = {
       for (const cost of collected.costs) {
         for (const row of cost.perModel) {
           const vendor = resolveModelVendor(row.model, entry.provider);
-          if (vendor !== 'unknown') {
+          // A local engine is the member's own server, not a subscription (T-2103).
+          if (vendor !== 'unknown' && vendor !== 'local') {
             discovered.add(vendor);
           }
         }

@@ -11,11 +11,12 @@
  * credential value or any part of one, only booleans, mtime and size.
  *
  * Coverage (parity: provider-credential-files.test.ts): every provider of
- * KNOWN_PROVIDERS is `provider` or in `covers` of some row. Vendor-key bodies
- * (glm, deepseek, dsh, qwen, kimi chat) keep their keys in the member's
- * encrypted provider-secrets store; its row reports which vendor entries are
- * present, never a ciphertext. hermes is `legacy` (body removed, T-1953) but
- * its auth.json still sits in member trees, so a write to it is still recorded.
+ * KNOWN_PROVIDERS is `provider` or in `covers` of some row. Vendor-key slots
+ * (glm, deepseek, dsh, qwen, kimi) keep their keys in the member's encrypted
+ * provider-secrets store; its row reports which vendor entries are present,
+ * never a ciphertext. hermes (T-1953) and the kimi native CLI (ADR-229) are
+ * `legacy`: their bodies are removed, but their credential files still sit in
+ * member trees, so a write to one is still recorded.
  */
 import fs from 'node:fs';
 
@@ -84,6 +85,9 @@ export const PROVIDER_CREDENTIAL_FILES: ReadonlyArray<CredentialFileSpec> = Obje
     file: 'kimi-code.json',
     fields: { accessToken: 'access_token', refreshToken: 'refresh_token', expiresAt: 'expires_at' },
     completeWhen: [['accessToken', 'expiresAt']],
+    // ADR-229: the native kimi CLI body is removed; kimi stays a key slot
+    // (provider-secrets row below). The file stays watched, like hermes.
+    legacy: true,
   },
   {
     provider: 'agy',

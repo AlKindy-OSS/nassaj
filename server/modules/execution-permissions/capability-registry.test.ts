@@ -94,7 +94,15 @@ test('measured Antigravity is classified but remains non-parity on forbidden sur
   );
   assert.ok(candidate);
   assert.equal(evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, candidate).kind, 'deny');
-  assert.equal(PERMISSION_UNAVAILABLE_BODIES.length, 9);
+  assert.equal(PERMISSION_UNAVAILABLE_BODIES.length, 6);
+  // ADR-229: the removed Kimi, Qwen Code and Hermes bodies are no longer classified,
+  // and an unclassified body is rejected outright rather than listed as unavailable.
+  for (const removed of ['kimi', 'qwen', 'hermes']) {
+    assert.equal(PERMISSION_UNAVAILABLE_BODIES.some(item => item.body === removed), false);
+    assert.equal(validateUnavailablePermissionBody(
+      { body: removed, reasonCode: 'AUTHENTICATION_UNAVAILABLE', observedAt: '2026-09-01T05:19:00.000Z' },
+    ), false);
+  }
   assert.ok(PERMISSION_UNAVAILABLE_BODIES.some(item => item.body === 'cursor'));
   // T-2086: dsh has no v1 measurement contract, so enforce denies it like deepseek.
   assert.deepEqual(PERMISSION_UNAVAILABLE_BODIES.find(item => item.body === 'dsh')?.reasonCode,

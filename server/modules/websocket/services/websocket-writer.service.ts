@@ -250,8 +250,9 @@ function fanOutToMirrors(
  * as `fanOutToMirrors`). Used by the claude-sdk ghost sweep to decide whether a
  * session has lost every listener; it imports this — never the reverse — so the
  * dependency stays one-directional (claude-sdk → writer) with no circularity.
+ * `except` leaves one socket out of the count (ADR-173 P8 B3: "another viewer").
  */
-export function countLiveMirrors(sessionId: string): number {
+export function countLiveMirrors(sessionId: string, except: RealtimeClientConnection | null = null): number {
   const mirrors = sessionMirrors.get(sessionId);
   if (!mirrors || mirrors.size === 0) {
     return 0;
@@ -262,7 +263,7 @@ export function countLiveMirrors(sessionId: string): number {
       mirrors.delete(mirror);
       continue;
     }
-    live += 1;
+    if (mirror !== except) live += 1;
   }
   if (mirrors.size === 0) {
     sessionMirrors.delete(sessionId);
@@ -301,6 +302,19 @@ export function broadcastToSessionMirrors(sessionId: string, serialized: string)
     sessionMirrors.delete(sessionId);
   }
   return delivered;
+}
+
+/**
+ * ADR-173 P8 B2: a refusal of one send — `session_busy`, or any terminal frame
+ * stamped `notStarted: true` (nothing ran) — answers the sending socket only.
+ * Fanned out, every other viewer of the conversation read "your message was not
+ * sent" for a message they never wrote. Run frames keep the mirror fan-out.
+ */
+export function isSenderOnlyRefusal(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const frame = data as { kind?: unknown; notStarted?: unknown; code?: unknown };
+  if (frame.kind !== 'error' && frame.kind !== 'complete') return false;
+  return frame.notStarted === true || frame.code === 'session_busy';
 }
 
 /** A supervised run as seen by user-level revocation (B-1327). */
@@ -370,16 +384,18 @@ export class WebSocketWriter {
     // ADR-210 (T-2036): every viewer egress is masked here; outcome recording
     // below keeps the raw payload. Unmasked kinds pass byte-for-byte.
     const display = prepareDisplayFrames(data, payloadSessionId);
+    // ADR-173 P8 B2: a per-send refusal is the sender's alone; it never fans out.
+    const fanOutSessionId = isSenderOnlyRefusal(data) ? null : payloadSessionId;
     if (!display) {
       const serialized = JSON.stringify(data);
-      this.deliver(serialized, serialized, payloadSessionId);
+      this.deliver(serialized, serialized, fanOutSessionId);
     } else {
       for (const frame of display.before) {
         const serialized = JSON.stringify(frame);
-        this.deliver(serialized, serialized, payloadSessionId);
+        this.deliver(serialized, serialized, fanOutSessionId);
       }
       const viewer = JSON.stringify(display.viewer);
-      this.deliver(display.owner === display.viewer ? viewer : JSON.stringify(display.owner), viewer, payloadSessionId);
+      this.deliver(display.owner === display.viewer ? viewer : JSON.stringify(display.owner), viewer, fanOutSessionId);
     }
 
     /**

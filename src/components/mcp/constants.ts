@@ -10,11 +10,8 @@ export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
   codex: 'Codex',
   antigravity: 'Antigravity',
   opencode: 'OpenCode',
-  qwen: 'Qwen Code',
-  kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM 5.2',
-  hermes: 'Hermes',
   sakana: 'Sakana',
   dsh: 'DeepSeek Harness',
 };
@@ -34,11 +31,8 @@ export const MCP_SUPPORTED_SCOPES: Record<McpProvider, McpScope[]> = {
   antigravity: [],
   // Backend adapter is contract-tested but rollout-disabled by default.
   opencode: [],
-  qwen: [],
-  kimi: [],
   deepseek: [],
   glm: [],
-  hermes: [],
   sakana: [],
   // dsh (T-2086): no MCP surface — dsh-nassaj-layer.yml launches it with none.
   dsh: [],
@@ -50,11 +44,8 @@ export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
   codex: ['stdio', 'http'],
   antigravity: [],
   opencode: [],
-  qwen: [],
-  kimi: [],
   deepseek: [],
   glm: [],
-  hermes: [],
   sakana: [],
   // dsh (T-2086): no MCP surface — dsh-nassaj-layer.yml launches it with none.
   dsh: [],
@@ -92,7 +83,7 @@ export function globalManualTargets(scope: McpScope, transport: McpTransport): M
 // مفتوح» وهو ما يقوله المنتقي المضيء فوقه أصلاً؛ ولا أحد قاس تباين `text-white`
 // فوق هذه الدرجات على البريستات الستة. العلامة التجارية لا تُلوّن تحكّماً
 // وظيفياً — الزرّ الآن `Button` المشترك بنبراته (`default` للفعل الأساسي،
-// `outline` لما دونه)، فصفحةُ Claude وصفحةُ Hermes من نظامٍ واحد.
+// `outline` لما دونه)، فصفحةُ Claude وصفحةُ Codex من نظامٍ واحد.
 
 export const MCP_SUPPORTS_WORKING_DIRECTORY: Record<McpProvider, boolean> = {
   claude: false,
@@ -100,11 +91,8 @@ export const MCP_SUPPORTS_WORKING_DIRECTORY: Record<McpProvider, boolean> = {
   codex: true,
   antigravity: false,
   opencode: false,
-  qwen: false,
-  kimi: false,
   deepseek: false,
   glm: false,
-  hermes: false,
   sakana: false,
   dsh: false,
 };

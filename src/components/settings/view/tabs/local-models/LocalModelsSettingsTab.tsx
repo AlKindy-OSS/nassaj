@@ -8,6 +8,7 @@ import SettingsSection from '../../SettingsSection';
 import SettingsRow from '../../SettingsRow';
 import SettingsToggle from '../../SettingsToggle';
 
+import LocalBodySwitches from './LocalBodySwitches';
 import LocalServerForm from './LocalServerForm';
 import LocalServerRow from './LocalServerRow';
 
@@ -30,6 +31,7 @@ function Activation({ control }: { control: Controller }) {
           onChange={value => { void control.setEnabled(value).then(ok => { if (ok) setConsent(false); }); }} />
       </SettingsRow>
     </> : <p className="text-sm">{t(feature.enabled ? 'localModels.enabled' : 'localModels.disabled')}</p>}
+    <LocalBodySwitches control={control} />
   </SettingsSection>;
 }
 

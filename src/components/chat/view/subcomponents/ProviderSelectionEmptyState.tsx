@@ -3,7 +3,7 @@ import { Check, ChevronDown, KeyRound, RefreshCw, Settings, Star } from "lucide-
 import { Trans, useTranslation } from "react-i18next";
 
 import { useAntigravityActiveModel } from "../../hooks/useAntigravityActiveModel";
-import { useClaudeLocalOverlay } from "../../hooks/useClaudeLocalOverlay";
+import { useNewChatLocalBlocks } from "../../hooks/useNewChatLocalBlocks";
 import type { EngineProvider } from "../../hooks/engineProviderSession";
 import { usePaletteOps } from "../../../../contexts/PaletteOpsContext";
 import { useUnifiedKeysEnabled } from "../../../provider-auth/hooks/useLinkMode";
@@ -13,7 +13,7 @@ import {
 } from "../../../provider-auth/vendorProviders";
 import { isProviderGloballyDisabled } from "../../../../../shared/disabledProviders";
 import { engineProviderLabel, isEngineProviderEligible } from "../../../../../shared/engineProviders";
-import { LOCAL_ENGINE } from "../../../../../shared/localEngine";
+import { LOCAL_ENGINE, isLocalModelId } from "../../../../../shared/localEngine";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
 import type {
   ActiveBodyProvider,
@@ -61,9 +61,10 @@ import {
 import { isFavorite, resolveFavoriteRows } from "./modelFavorites";
 import LocalModelPickerBlocks from "./LocalModelPickerBlocks";
 import {
+  isLocalBody,
   localModelLabel,
-  localPickerBlocks,
   localServerForModel,
+  type LocalBody,
   type LocalPickerRow,
 } from "./localOverlayRows";
 import { localServerText } from "./localModelText";
@@ -116,7 +117,7 @@ const ENGINE_LINE_FALLBACK: Record<string, string> = {
  */
 function credentialDeepLink(
   destination: CredentialDestination | null | undefined,
-  fallbackAgent: LLMProvider,
+  fallbackAgent: ActiveBodyProvider,
 ): SettingsDeepLink {
   if (!destination) {
     // لا شركة معروفة لهذا الموضع: لا مفتاحَ يُوعَد به — حساب المجموعة نفسها.
@@ -172,7 +173,7 @@ type ProviderSelectionEmptyStateProps = {
 };
 
 type ProviderGroup = {
-  id: LLMProvider;
+  id: ActiveBodyProvider;
   name: string;
   models: { value: string; label: string; description?: string }[];
 };
@@ -299,14 +300,17 @@ export default function ProviderSelectionEmptyState({
   // ADR-200 S9: with the unified key mode on, the picker lists only runnable
   // cells — an unlinked vendor is absent, not greyed. Off: the locked CTA stays.
   const hideUnlinked = useUnifiedKeysEnabled();
-  // ADR-227: the member's own local servers, read when the picker opens or a
-  // local model is the pending choice (its card names the server).
-  const localOverlay = useClaudeLocalOverlay(dialogOpen || engineProvider === LOCAL_ENGINE);
-  // This picker only renders for a chat that does not exist yet.
-  const localBlocks = useMemo(
-    () => localPickerBlocks(localOverlay ?? [], { isNewChat: true, chatEngine: null, chatModel: "" }),
-    [localOverlay],
-  );
+  // ADR-227 / T-2107, T-2108: the member's own local servers under Claude, Codex
+  // and DeepSeek Harness.
+  const { overlays: localOverlays, blocks: localBlocks } = useNewChatLocalBlocks({
+    dialogOpen,
+    pendingLocal: {
+      claude: engineProvider === LOCAL_ENGINE,
+      codex: isLocalModelId(codexModel),
+      dsh: isLocalModelId(dshModel),
+    },
+  });
+  const localOverlay = localOverlays.claude;
 
   // Per-user favourites — stored server-side in user_ui_preferences, no
   // localStorage. isLoading hides the group until the first GET resolves so
@@ -484,7 +488,8 @@ export default function ProviderSelectionEmptyState({
 
 
   // T-1953: keyed by FallbackCatalogProvider, not the wider LLMProvider — a
-  // retired body (cursor/hermes/qwen) has no picker model state left to index.
+  // retired body (cursor) has no picker model state left to index; `kimi` here
+  // is the Claude ENGINE model slot (ADR-229), not a body.
   // A historical session displaying one of them falls back to `claudeModel`
   // below, same as `getCurrentModel`'s default for any id absent from the map.
   const modelByProvider = useMemo<Record<FallbackCatalogProvider, string>>(
@@ -520,15 +525,17 @@ export default function ProviderSelectionEmptyState({
     // its label against the vendor catalog rather than the Claude one.
     const lookupProvider =
       provider === "claude" && engineProvider ? engineProvider : provider;
-    if (lookupProvider === LOCAL_ENGINE) {
-      return localModelLabel(localOverlay ?? [], currentModel) ?? currentModel.slice(currentModel.indexOf("/") + 1);
-    }
+    // Claude runs a local model on its local engine; Codex and dsh by the local id alone.
+    const localLabel = (body: LocalBody) => localModelLabel(localOverlays[body] ?? [], currentModel)
+      ?? currentModel.slice(currentModel.indexOf("/") + 1);
+    if (lookupProvider === LOCAL_ENGINE) return localLabel("claude");
+    if (isLocalBody(lookupProvider) && isLocalModelId(currentModel)) return localLabel(lookupProvider);
     const config = getModelConfig(lookupProvider, providerModelCatalog);
     const found = config.OPTIONS.find(
       (o: { value: string; label: string }) => o.value === currentModel,
     );
     return found?.label || currentModel;
-  }, [provider, engineProvider, currentModel, providerModelCatalog, localOverlay]);
+  }, [provider, engineProvider, currentModel, providerModelCatalog, localOverlays]);
 
   const setModelForProvider = useCallback(
     (providerId: LLMProvider, modelValue: string) => {
@@ -557,7 +564,8 @@ export default function ProviderSelectionEmptyState({
         setDshModel?.(modelValue);
         localStorage.setItem("dsh-model", modelValue);
       }
-      // A retired body (cursor/hermes/qwen, T-1953) is never reachable here:
+      // `kimi` above is the Claude engine slot. A retired body (cursor, T-1953)
+      // or removed harness (ADR-229) is never reachable here:
       // the picker no longer offers them, so `providerId` never names one on a
       // live selection. No fallback branch — silently writing to a deleted
       // provider's storage key would be as wrong as picking one at random.
@@ -632,8 +640,17 @@ export default function ProviderSelectionEmptyState({
         : localServerText(t, localServerForModel(localOverlay, claudeModel) ?? { kind: "deleted" }))
     : engineProvider ? engineProviderLabel(engineProvider) : null;
   const isLocalRowSelected = useCallback(
-    (row: LocalPickerRow) => isEngineActive && engineProvider === LOCAL_ENGINE && claudeModel === row.model,
-    [isEngineActive, engineProvider, claudeModel],
+    (row: LocalPickerRow) => (row.body === "claude"
+      ? isEngineActive && engineProvider === LOCAL_ENGINE && claudeModel === row.model
+      : provider === row.body && modelByProvider[row.body] === row.model),
+    [isEngineActive, engineProvider, claudeModel, provider, modelByProvider],
+  );
+  // Claude runs a local model on its local engine; Codex and dsh by the local model id alone.
+  const handleLocalSelect = useCallback(
+    (row: LocalPickerRow) => (row.body === "claude"
+      ? handleEngineSelect(LOCAL_ENGINE, row.model)
+      : handleModelSelect(row.body, row.model)),
+    [handleModelSelect, handleEngineSelect],
   );
 
   // B-266: cmdk's <CommandEmpty> counts the items it has RENDERED, and a
@@ -1135,11 +1152,11 @@ export default function ProviderSelectionEmptyState({
                           </>
                         )}
                       </CommandGroup>
-                      {group.id === "claude" && localBlocks.length > 0 && (
+                      {isLocalBody(group.id) && localBlocks[group.id].length > 0 && (
                         <LocalModelPickerBlocks
-                          blocks={localBlocks}
+                          blocks={localBlocks[group.id]}
                           isSelected={isLocalRowSelected}
-                          onSelect={(row) => handleEngineSelect(LOCAL_ENGINE, row.model)}
+                          onSelect={handleLocalSelect}
                           onOpenServerSettings={() => {
                             setDialogOpen(false);
                             onShowSettings?.({ tab: "agents", localModels: true });
@@ -1167,7 +1184,7 @@ export default function ProviderSelectionEmptyState({
                   model: claudeModel,
                 }),
                 codex: t("providerSelection.readyPrompt.codex", {
-                  model: codexModel,
+                  model: isLocalModelId(codexModel) ? currentModelLabel : codexModel,
                 }),
                 antigravity: t("providerSelection.readyPrompt.antigravity", {
                   model: antigravityModel,
@@ -1176,10 +1193,6 @@ export default function ProviderSelectionEmptyState({
                 opencode: t("providerSelection.readyPrompt.opencode", {
                   model: opencodeModel,
                   defaultValue: "Ready with OpenCode {{model}}",
-                }),
-                kimi: t("providerSelection.readyPrompt.kimi", {
-                  model: kimiModel,
-                  defaultValue: "Ready to use Kimi with {{model}}. Start typing your message below.",
                 }),
                 deepseek: t("providerSelection.readyPrompt.deepseek", {
                   model: deepseekModel,
@@ -1193,20 +1206,19 @@ export default function ProviderSelectionEmptyState({
                   defaultValue: "Ready with Sakana",
                 }),
                 dsh: t("providerSelection.readyPrompt.dsh", {
-                  model: dshModel,
+                  model: isLocalModelId(dshModel) ? currentModelLabel : dshModel,
                   defaultValue: "Ready to use DeepSeek Harness with {{model}}. Start typing your message below.",
                 }),
-                // A retired body (cursor/hermes/qwen, T-1953) has no entry: the
-                // picker never selects one, and an empty historical session of
-                // theirs falls back to the Claude prompt below rather than a
-                // missing-key lookup.
-              }[provider as FallbackCatalogProvider] ?? t("providerSelection.readyPrompt.claude", {
+                // A retired body (cursor, T-1953) or a removed harness (ADR-229)
+                // has no entry: the picker never selects one, and an empty
+                // historical session falls back to the Claude prompt below.
+              }[provider as ActiveBodyProvider] ?? t("providerSelection.readyPrompt.claude", {
                 model: claudeModel,
               })
             }
           </p>
 
-          {provider === "dsh" && !isEngineActive && <DshSelectionDisclosure />}
+          {provider === "dsh" && !isEngineActive && <DshSelectionDisclosure local={isLocalModelId(dshModel)} />}
 
           <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/60">
             <Trans

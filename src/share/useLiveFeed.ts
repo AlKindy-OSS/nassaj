@@ -26,6 +26,9 @@ const INITIAL: FeedState = {
   moreBefore: false, loadingOlder: false, olderFailed: false, notice: null,
 };
 
+/** The share is over for good: polling again can never succeed (ADR-229 adds provider-removed). */
+const isTerminal = (failure: LiveFailure): boolean => failure.kind === 'ended' || failure.kind === 'provider-removed';
+
 const noticeFor = (failure: LiveFailure): FeedNotice =>
   failure.kind === 'rate-limited' ? 'rate-limited' : failure.kind === 'temporary' ? 'temporary' : null;
 
@@ -105,7 +108,7 @@ export function useLiveFeed(client: LiveClient) {
         }
         if (cancelled.current) return;
         if (failure) {
-          if (failure.kind === 'ended') { commit({ status: 'ended', notice: null }); return; }
+          if (isTerminal(failure)) { commit({ status: 'ended', notice: null }); return; }
           failures += 1;
           const base = 'retryAfterMs' in failure ? failure.retryAfterMs : POLL_INTERVAL_MS;
           delay = Math.min(base * 2 ** Math.min(failures - 1, 4), MAX_BACKOFF_MS);
@@ -138,7 +141,7 @@ export function useLiveFeed(client: LiveClient) {
         messages: mergeOlder(ref.current.messages, result.value.messages),
         moreBefore: result.value.moreBefore,
       });
-    } else if (result.failure.kind === 'ended') {
+    } else if (isTerminal(result.failure)) {
       commit({ status: 'ended', loadingOlder: false });
     } else if (result.failure.kind === 'cursor-stale') {
       const tail = await client.messages({});

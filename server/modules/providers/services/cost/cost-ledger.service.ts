@@ -60,6 +60,7 @@ import { runLocalUpdateBackground } from '../../../../services/update-writer-lea
 import { calculateSessionCost, type SessionCost } from './cost-calculator.js';
 import { extractOpenCodeSessionUsage } from './db-usage-extractors.js';
 import { PRICES_AS_OF } from './model-pricing.js';
+import { isLocalPinnedSession, localizeSessionUsage } from './local-engine-usage.js';
 import { resolveModelVendor, vendorDisplayName } from './model-vendor.js';
 import {
   ClaudeUsageAccumulator,
@@ -614,8 +615,10 @@ async function scanClaudeTranscript(
   }
 
   const rows: LedgerRowInput[] = [];
+  const local = isLocalPinnedSession(sessionId);
   for (const [day, accumulator] of byDay) {
-    rows.push(...costToRows(ref, day, 'claude', calculateSessionCost(accumulator.result('claude'))));
+    const usage = localizeSessionUsage(accumulator.result('claude'), local);
+    rows.push(...costToRows(ref, day, 'claude', calculateSessionCost(usage)));
   }
 
   return { rows, undatedEntries, attributed: true, errors };
@@ -636,6 +639,8 @@ async function scanCodexRollout(root: string, rolloutPath: string): Promise<Tran
   const days = new Set<string>();
   let projectPath = '';
   let undatedEntries = 0;
+  // T-2103: ids of the first session_meta; a child thread runs on its parent's engine.
+  const meta: { ids: unknown[] | null } = { ids: null };
 
   // ADR-201 A-P2c: the rollout's name carries its thread id and its first
   // `session_meta` must carry the same one before any usage is attributed.
@@ -652,6 +657,9 @@ async function scanCodexRollout(root: string, rolloutPath: string): Promise<Tran
     }
     if (!projectPath && typeof payload.cwd === 'string' && payload.cwd.trim()) {
       projectPath = payload.cwd.trim();
+    }
+    if (meta.ids === null && entry.type === 'session_meta') {
+      meta.ids = [payload.id, payload.session_id, payload.parent_thread_id];
     }
     if (payload.type !== 'token_count') {
       return;
@@ -671,9 +679,11 @@ async function scanCodexRollout(root: string, rolloutPath: string): Promise<Tran
   }
 
   const rows: LedgerRowInput[] = [];
+  const ids = (meta.ids ?? []).filter((id): id is string => typeof id === 'string');
+  const local = isLocalPinnedSession(threadId, ...ids);
   for (const day of days) {
     const usage = await extractCodexSessionUsage({ rolloutPath, threadId, root }, dayBounds(day));
-    rows.push(...costToRows(ref, day, 'codex', calculateSessionCost(usage)));
+    rows.push(...costToRows(ref, day, 'codex', calculateSessionCost(localizeSessionUsage(usage, local))));
   }
 
   return { rows, undatedEntries, attributed: true };

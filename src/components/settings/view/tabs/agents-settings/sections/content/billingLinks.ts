@@ -6,7 +6,6 @@ import type { AgentProvider } from '../../../../../types/types';
  * ملاحظة: الروابط هنا للاشتراك أو إدارة الخطة، لا لكونسول API.
  * deepseek وglm بلا اشتراك أصلاً — روابطهما إلى صفحة الرصيد/المفاتيح.
  * opencode: صفحة خطة Zen (PAYG + اشتراك شهري عبر opencode.ai/zen).
- * qwen: كونسول Alibaba Cloud Model Studio (Bailian) لإدارة الرصيد والمفاتيح.
  * sakana: خطط API مدفوعة ($20/$100/$200/شهر) عبر console.sakana.ai.
  *
  * النوع Record<AgentProvider, string> (لا Partial) يضمن فشل الـtypecheck
@@ -18,11 +17,8 @@ export const BILLING_LINKS: Record<AgentProvider, string> = {
   codex:       'https://chatgpt.com/settings',
   antigravity: 'https://one.google.com/about/google-ai-plans/',
   opencode:    'https://opencode.ai/zen',
-  kimi:        'https://www.kimi.com/membership',
   deepseek:    'https://platform.deepseek.com/top-up',
   glm:         'https://z.ai/manage-apikey/billing',
-  hermes:      'https://portal.nousresearch.com',
-  qwen:        'https://bailian.console.alibabacloud.com',
   sakana:      'https://console.sakana.ai/billing',
   // dsh spends the member's DeepSeek key: same top-up page as deepseek.
   dsh:         'https://platform.deepseek.com/top-up',

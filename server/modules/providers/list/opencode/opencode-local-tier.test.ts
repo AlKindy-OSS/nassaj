@@ -26,7 +26,7 @@ process.env.NASSAJ_OPENCODE_MCP_ENABLED = '1';
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 const { prepareOpenCodeLocalTier } = await import('./opencode-local-tier.js');
 const { ensureOpenCodeGovernance, resolveOpenCodeLocalConfigHomeForUser } = await import('./opencode-governance.js');
-const { localTaskPermission, LOCAL_TASK_AGENTS } = await import('@/services/isolation/opencode-local-tier-material.js');
+const { localTierFilePermission, LOCAL_TASK_AGENTS } = await import('@/services/isolation/opencode-local-tier-material.js');
 const { materializeOpenCodeConfig } = await import('@/services/isolation/opencode-config-material.js');
 const { providerGovernanceService } = await import('@/modules/providers/services/provider-governance.service.js');
 const { OpenCodeMcpProvider } = await import('./opencode-mcp.provider.js');
@@ -46,7 +46,7 @@ const sharedCommandDir = path.join(sandboxHome, '.config', 'opencode', 'command'
 const userRoot = path.join(sandboxHome, '.nassaj-users', String(USER));
 const localDir = path.join(userRoot, '.config-local', 'opencode');
 const mainDir = path.join(userRoot, '.config', 'opencode');
-const CARD = '---\ndescription: "x"\nmode: subagent\nmodel: opencode/gone-free\n---\nbody\n';
+const CARD = '---\ndescription: "x"\nmode: subagent\nmodel: opencode/deepseek-v4.1-flash-free\n---\nbody\n';
 
 const write = (file: string, text: string) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -113,12 +113,17 @@ describe('local config dir', () => {
   it('writes the allow-list, links command/, generates agent cards', () => {
     prepareOpenCodeLocalTier(USER);
     const config = JSON.parse(fs.readFileSync(path.join(localDir, 'opencode.json'), 'utf8'));
-    assert.deepEqual(config.permission, localTaskPermission());
+    assert.deepEqual(config.permission, localTierFilePermission());
     assert.ok(config.provider.glm, 'same provider material');
     assert.ok(fs.lstatSync(path.join(localDir, 'command')).isSymbolicLink());
     assert.equal(fs.readlinkSync(path.join(localDir, 'command')), sharedCommandDir);
     assert.ok(!fs.lstatSync(path.join(localDir, 'agent')).isSymbolicLink());
     assert.deepEqual(fs.readdirSync(path.join(localDir, 'agent')).sort(), LOCAL_TASK_AGENTS.map((a) => `${a}.md`).sort());
+    // Owner 2026-11-13: the researcher keeps its cloud pin, the others inherit the local model.
+    for (const agent of LOCAL_TASK_AGENTS) {
+      const card = fs.readFileSync(path.join(localDir, 'agent', `${agent}.md`), 'utf8');
+      assert.equal(card.includes('model: opencode/deepseek-v4.1-flash-free'), agent === 'researcher', `${agent}: ${card}`);
+    }
   });
 
   it('carries the MCP servers of the ordinary config', () => {
@@ -161,7 +166,7 @@ describe('MCP writer (I5)', () => {
     await provider.upsertServer({ name: 'fresh', scope: 'user', transport: 'stdio', command: 'false', userId: String(USER) });
     const local = JSON.parse(fs.readFileSync(path.join(localDir, 'opencode.json'), 'utf8'));
     assert.ok(local.mcp?.fresh, JSON.stringify(local.mcp));
-    assert.deepEqual(local.permission, localTaskPermission(), 'still the local tier file');
+    assert.deepEqual(local.permission, localTierFilePermission(), 'still the local tier file');
   });
 });
 

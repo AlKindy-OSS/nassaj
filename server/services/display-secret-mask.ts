@@ -608,6 +608,8 @@ const MASKED_KINDS: ReadonlySet<string> = new Set([
   'text', 'stream_delta', 'thinking', 'tool_use', 'tool_result', 'error', 'notice',
   'permission_request',
   'interactive_prompt', 'task_notification',
+  // ADR-173 P6: a shared writer's prompt, shown live to the other viewers.
+  'user_turn',
 ]);
 /** Kinds that end every stream of the session. */
 const SESSION_TERMINAL_KINDS: ReadonlySet<string> = new Set(['complete', 'error']);

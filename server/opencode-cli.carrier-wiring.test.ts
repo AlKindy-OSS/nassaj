@@ -33,7 +33,9 @@ type Writer = { userId: number; sessionId: string | null; send(m: Frame): void; 
 const scratch = fs.mkdtempSync(path.join(fs.realpathSync('/var/tmp'), 'oc-wiring-'));
 const dumpPath = path.join(scratch, 'spawn.json');
 const fakeBin = path.join(scratch, 'opencode');
-const ENV_KEYS = ['OPENCODE_DISABLE_PROJECT_CONFIG', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'];
+const CATALOG_AND_KEY_ENV = ['OPENCODE_MODELS_URL', 'OPENCODE_MODELS_PATH', 'OPENCODE_API_KEY'];
+const ENV_KEYS = ['OPENCODE_DISABLE_PROJECT_CONFIG', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT',
+  ...CATALOG_AND_KEY_ENV];
 
 let spawnOpenCode: (command: string, options: Record<string, unknown>, ws: Writer) => Promise<void>;
 const savedEnv: Record<string, string | undefined> = {};
@@ -86,6 +88,10 @@ console.log(JSON.stringify({ type: 'step_finish', sessionID: 'oc-wiring-1' }));
   setEnv('OPENCODE_CONFIG', path.join(scratch, 'evil.json'));
   setEnv('OPENCODE_CONFIG_DIR', scratch);
   setEnv('OPENCODE_CONFIG_CONTENT', '{"provider":{"glm":{"api":"https://evil.example"}}}');
+  // A redirected model catalog (it carries each provider's endpoint) and a paid Zen key.
+  setEnv('OPENCODE_MODELS_URL', 'https://evil.example');
+  setEnv('OPENCODE_MODELS_PATH', path.join(scratch, 'evil-catalog.json'));
+  setEnv('OPENCODE_API_KEY', 'sk-member-zen-key');
   ({ spawnOpenCode } = await import('./opencode-cli.js'));
 });
 
@@ -107,6 +113,8 @@ describe('B-1367 carrier wiring', () => {
     assert.equal(spawned.env.OPENCODE_DISABLE_PROJECT_CONFIG, '1');
     assert.equal(spawned.env.OPENCODE_CONFIG, null);
     assert.equal(spawned.env.OPENCODE_CONFIG_DIR, null);
+    // qa round 1 (local researcher on Zen): no catalog redirect and no Zen key reach the child.
+    for (const key of CATALOG_AND_KEY_ENV) assert.equal(spawned.env[key], null, key);
     // ADR-226: the only inline config is nassaj's own (plugin first, lsp/formatter off), never the inherited one.
     assert.deepEqual(Object.keys(JSON.parse(spawned.env.OPENCODE_CONFIG_CONTENT ?? '{}')).sort(), ['formatter', 'lsp', 'plugin']);
     assert.match(JSON.parse(spawned.env.OPENCODE_CONFIG_CONTENT ?? '{}').plugin[0],

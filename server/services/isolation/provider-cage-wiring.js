@@ -260,7 +260,7 @@ export function cageOperatorSecretMasks({
  *    Revisit when a node has it (T-897 spike note).
  *  - glm: no glm credential FILE of its own — the glm key is written as a JSON
  *    entry INSIDE opencode's auth.json (carrier model, GL-1), already covered by
- *    the `opencode` entry, so a kimi/other-provider cage masks it via that path.
+ *    the `opencode` entry, so any other provider's cage masks it via that path.
  * @type {Readonly<Record<string, readonly string[]>>}
  */
 export const CAGE_SHARED_CREDENTIALS = Object.freeze({
@@ -269,15 +269,10 @@ export const CAGE_SHARED_CREDENTIALS = Object.freeze({
   agy: Object.freeze([path.join('.gemini', 'antigravity-cli', 'antigravity-oauth-token')]),
   hermes: Object.freeze([path.join('.hermes', 'auth.json')]),
   opencode: Object.freeze([path.join('.local', 'share', 'opencode', 'auth.json')]),
-  // Kimi agent (SL-6/KG-1): the native CLI WRITES a credential/state file to its
-  // config-home (KIMI_CODE_HOME), unlike the chat path which only injects an env
-  // key. The operator-level credential lives under the default config-home
-  // ~/.kimi-code/ (the same subdir the agent MCP config uses,
-  // <KIMI_CODE_HOME>/.kimi-code/mcp.json). Masked like every other provider
-  // credential: an isolated kimi agent reads its OWN key from its per-user tree,
-  // so the operator copy is always masked (no waiver). existsSync-filtered, so a
-  // node that never ran `kimi login` masks nothing; the exact on-disk filename is
-  // reconfirmed by the G-KIMI-LIVE field gate and adjusted here if it differs.
+  // Kimi: the native agent body is removed (ADR-229), but an operator credential
+  // its CLI wrote under ~/.kimi-code/ may still sit on disk, so it stays masked
+  // in every cage (the hermes precedent above). existsSync-filtered, so a node
+  // that never ran `kimi login` masks nothing.
   kimi: Object.freeze([path.join('.kimi-code', 'auth.json')]),
 });
 
@@ -307,12 +302,6 @@ function launchingProviderWriteStores(launching) {
     case 'agy':
       return [path.join('.gemini', 'antigravity-cli', 'brain')];
     case 'opencode':
-      return [];
-    case 'kimi':
-      // Kimi agent (SL-6): KIMI_CODE_HOME points into the caller's own tree
-      // (rebound rw via usersRoot in buildCagedLaunch), so there is no
-      // operator-level store to re-bind — only the toolchain caches (added
-      // unconditionally by the caller) are needed.
       return [];
     default:
       // cursor + any future provider: no known shared store to re-bind.

@@ -58,38 +58,16 @@ test('opencode carries the glm run id for the live-session gate', () => {
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.opencode.runProviders, ['opencode', 'glm']);
 });
 
-test('qwen is the npm-prefix harness: measured prefix + package, global reinstall argv', () => {
-  const npmHarnesses = Object.values(HARNESS_UPDATE_DESCRIPTORS).filter((d) => d.installMethod === 'npm-prefix');
-  assert.deepEqual(npmHarnesses.map((d) => d.id), ['qwen']);
-  const qwen = HARNESS_UPDATE_DESCRIPTORS.qwen;
-  assert.equal(qwen.npm?.pkg, '@qwen-code/qwen-code');
-  const argv = qwen.updateArgv()!;
-  assert.equal(argv.cmd, 'npm');
-  assert.ok(argv.args.includes('@qwen-code/qwen-code@latest'));
-  assert.ok(argv.args.includes('--global') && argv.args.includes('--prefix'));
-});
-
 test('the npm update carries TMPDIR=/var/tmp — /tmp here is tmpfs (RAM)', () => {
   assert.equal(NPM_UPDATE_TMPDIR, '/var/tmp');
-  assert.equal(HARNESS_UPDATE_DESCRIPTORS.qwen.updateArgv()!.env?.TMPDIR, '/var/tmp');
   // The spawn-level proof lives in update.service.spawn-env.test.ts.
 });
 
-test('kimi is the official native install: single-file snapshot, `kimi update --yes`', () => {
-  const kimi = HARNESS_UPDATE_DESCRIPTORS.kimi;
-  assert.equal(kimi.installMethod, 'native-self-update');
-  assert.equal(kimi.npm, undefined);
-  assert.equal(kimi.manualOnly, true);
-  assert.deepEqual(
-    { layout: kimi.snapshot?.layout, linkMode: kimi.snapshot?.linkMode },
-    { layout: 'single-file', linkMode: 'copy' },
-  );
-  // Verified + wired KIMI_CODE_NO_AUTO_UPDATE: only the no-store notice remains.
-  assert.deepEqual(deriveHarnessNotices(kimi), { dataNotBackedUp: true, selfUpdating: false });
-  const bin = installFakeHarnessBinary(SANDBOX_HOME, 'kimi');
-  assert.equal(bin, path.join(SANDBOX_HOME, '.kimi-code', 'bin', 'kimi'));
-  assert.deepEqual(kimi.updateArgv(), { cmd: bin, args: ['update', '--yes'] });
-  assert.equal(kimi.updateArgv()!.env, undefined, 'a native update stages nothing in TMPDIR');
+test('no harness is an npm-prefix install any more (qwen removed, ADR-229)', () => {
+  const npmPrefix = Object.values(HARNESS_UPDATE_DESCRIPTORS).filter((d) => d.installMethod === 'npm-prefix');
+  assert.deepEqual(npmPrefix.map((d) => d.id), []);
+  assert.equal(getHarnessDescriptor('qwen'), null);
+  assert.equal(getHarnessDescriptor('kimi'), null);
 });
 
 /** Sets (or clears) one server-process env var for the duration of `fn`. */
@@ -149,20 +127,15 @@ test('an uninstalled native harness has no update target', () => {
   });
 });
 
-test('verified built-in auto-updater disable knobs (D2): claude + opencode + kimi', () => {
+test('verified built-in auto-updater disable knobs (D2): claude + opencode', () => {
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.claude.disableAutoUpdaterEnv, { DISABLE_AUTOUPDATER: '1' });
   assert.equal(HARNESS_UPDATE_DESCRIPTORS.claude.autoUpdaterDisableVerified, true);
   assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.opencode.disableAutoUpdaterEnv, { OPENCODE_DISABLE_AUTOUPDATE: '1' });
   assert.equal(HARNESS_UPDATE_DESCRIPTORS.opencode.autoUpdaterDisableVerified, true);
-  // T-1873: kimi-code's own kill switch, wired for every kimi child.
-  assert.deepEqual(HARNESS_UPDATE_DESCRIPTORS.kimi.disableAutoUpdaterEnv, { KIMI_CODE_NO_AUTO_UPDATE: '1' });
-  assert.equal(HARNESS_UPDATE_DESCRIPTORS.kimi.autoUpdaterDisableVerified, true);
 });
 
 test('AUTOUPDATER_DISABLE_NONE lists only harnesses with no verified knob', () => {
   assert.ok(AUTOUPDATER_DISABLE_NONE.includes('codex'));
-  assert.ok(AUTOUPDATER_DISABLE_NONE.includes('qwen'));
-  assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('kimi'));
   assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('claude'));
   assert.ok(!AUTOUPDATER_DISABLE_NONE.includes('opencode'));
 });
@@ -196,8 +169,6 @@ const EXPECTED_NOTICES: Record<string, { dataNotBackedUp: boolean; selfUpdating:
   antigravity: { dataNotBackedUp: true, selfUpdating: true },
   cursor: { dataNotBackedUp: true, selfUpdating: true },
   opencode: null,
-  qwen: { dataNotBackedUp: true, selfUpdating: true },
-  kimi: { dataNotBackedUp: true, selfUpdating: false },
   // dsh: member data (~/.dsh per member) is not copied; no self-updater (S0).
   dsh: { dataNotBackedUp: true, selfUpdating: false },
   glm: null,

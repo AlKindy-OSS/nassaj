@@ -1,6 +1,6 @@
-import type { LLMProvider } from '../../types/app';
+import type { KnownBodyProvider } from '../../types/app';
 
-export type McpProvider = LLMProvider;
+export type McpProvider = KnownBodyProvider;
 export type McpScope = 'user' | 'local' | 'project';
 export type McpTransport = 'stdio' | 'http' | 'sse';
 export type McpImportMode = 'form' | 'json';

@@ -40,7 +40,7 @@ const scratch = fs.mkdtempSync(path.join(scratchParent, 't1873-guard-'));
 const FAKE_HOME = path.join(scratch, 'home');
 const OVERRIDE_ENVS = [
   'CLAUDE_CLI_PATH', 'CODEX_PATH', 'AGY_PATH', 'CURSOR_PATH', 'OPENCODE_PATH',
-  'QWEN_PATH', 'KIMI_PATH', 'DSH_PATH',
+  'DSH_PATH',
 ] as const;
 const savedEnv = Object.fromEntries(
   [...OVERRIDE_ENVS, 'HOME', 'NASSAJ_PROVIDER_CAGE', 'NASSAJ_VENDOR_BINARY_PIN'].map((key) => [key, process.env[key]]),
@@ -72,13 +72,6 @@ function buildFakeInstalls(home: string): void {
   pointCurrent(standalone, writeCodexRelease(standalone, '9.9.9'));
   linkInto(path.join(standalone, 'current', 'bin', 'codex'), path.join(local, 'bin', 'codex'));
   writeExecutable(path.join(home, '.opencode', 'bin', 'opencode'));
-  // npm `--global --prefix ~/.local` layouts: lib/node_modules/<pkg> + bin link.
-  linkInto(
-    writeExecutable(path.join(local, 'lib', 'node_modules', '@qwen-code', 'qwen-code', 'cli-entry.js')),
-    path.join(local, 'bin', 'qwen'),
-  );
-  // kimi: the vendor's native install script puts one binary in ~/.kimi-code/bin.
-  writeExecutable(path.join(home, '.kimi-code', 'bin', 'kimi'));
   // dsh (T-2086 S4): npm-lock layout, a Node script behind ~/.local/bin/dsh.
   linkInto(
     writeExecutable(path.join(local, 'share', 'dsh', 'versions', '0.0.1', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')),
@@ -98,7 +91,7 @@ delete process.env.NASSAJ_VENDOR_BINARY_PIN;
 
 type SpawnCall = { fn: 'spawn' | 'spawnSync'; cmd: string; args: readonly string[]; env?: NodeJS.ProcessEnv };
 const spawnCalls: SpawnCall[] = [];
-let spawnSyncStdout = '';
+const spawnSyncStdout = '';
 
 function fakeChild(): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => boolean; pid: number } {
   const child = Object.assign(new EventEmitter(), {
@@ -123,7 +116,7 @@ mock.module('node:child_process', {
 });
 
 const registry = await import('./harness-binaries.js');
-const { HARNESS_UPDATE_DESCRIPTORS, npmPrefixInstallArgs } = await import(
+const { HARNESS_UPDATE_DESCRIPTORS } = await import(
   '../modules/providers/harness-update/descriptors.js'
 );
 
@@ -176,8 +169,6 @@ describe('harness registry resolution rule', () => {
       antigravity: fakePath('.local', 'bin', 'agy'),
       cursor: fakePath('.local', 'bin', 'cursor-agent'),
       opencode: fakePath('.opencode', 'bin', 'opencode'),
-      qwen: fakePath('.local', 'bin', 'qwen'),
-      kimi: fakePath('.kimi-code', 'bin', 'kimi'),
       dsh: fakePath('.local', 'bin', 'dsh'),
     };
     assert.deepEqual([...registry.HARNESS_BINARY_IDS].sort(), Object.keys(expected).sort());
@@ -200,26 +191,26 @@ describe('harness registry resolution rule', () => {
   });
 
   test('an absolute runnable server override wins', () => {
-    const override = writeExecutable(path.join(scratch, 'opt', 'kimi'));
-    withEnv({ KIMI_PATH: `  ${override}  ` }, () => {
-      assert.equal(registry.resolveHarnessBinary('kimi'), override);
+    const override = writeExecutable(path.join(scratch, 'opt', 'opencode'));
+    withEnv({ OPENCODE_PATH: `  ${override}  ` }, () => {
+      assert.equal(registry.resolveHarnessBinary('opencode'), override);
     });
   });
 
   test('a relative override fails instead of a PATH lookup', () => {
-    withEnv({ QWEN_PATH: 'qwen' }, () => {
+    withEnv({ DSH_PATH: 'dsh' }, () => {
       assert.throws(
-        () => registry.resolveHarnessBinary('qwen'),
+        () => registry.resolveHarnessBinary('dsh'),
         (error: unknown) => error instanceof registry.HarnessBinaryUnresolvedError
-          && error.reason === 'override-not-absolute' && /QWEN_PATH must be an absolute path/.test(error.message),
+          && error.reason === 'override-not-absolute' && /DSH_PATH must be an absolute path/.test(error.message),
       );
     });
   });
 
   test('a missing override fails instead of falling back to the measured path', () => {
-    withEnv({ KIMI_PATH: path.join(scratch, 'nope', 'kimi') }, () => {
+    withEnv({ OPENCODE_PATH: path.join(scratch, 'nope', 'opencode') }, () => {
       assert.throws(
-        () => registry.resolveHarnessBinary('kimi'),
+        () => registry.resolveHarnessBinary('opencode'),
         (error: unknown) => error instanceof registry.HarnessBinaryUnresolvedError
           && error.reason === 'override-not-runnable',
       );
@@ -297,7 +288,7 @@ describe('harness registry resolution rule', () => {
 
   test('shell quoting survives embedded quotes and spaces', () => {
     assert.equal(registry.shellQuoteBinary("/a b/it's"), `'/a b/it'\\''s'`);
-    assert.equal(registry.quotedHarnessBinary('kimi'), `'${fakePath('.kimi-code', 'bin', 'kimi')}'`);
+    assert.equal(registry.quotedHarnessBinary('opencode'), `'${fakePath('.opencode', 'bin', 'opencode')}'`);
   });
 
   test('win32 claude keeps the claude-cli-path resolver', () => {
@@ -337,14 +328,8 @@ describe('harness registry resolution rule', () => {
     const warnings: Array<{ message: string; details: Record<string, unknown> }> = [];
     const warn = (message: string, details: Record<string, unknown>) => warnings.push({ message, details });
     withHiddenFile(fakePath('.local', 'bin', 'cursor-agent'), () => {
-      withHiddenFile(fakePath('.local', 'bin', 'qwen'), () => {
-        withHiddenFile(fakePath('.kimi-code', 'bin', 'kimi'), () => {
-          const statuses = registry.logUnresolvedHarnessBinaries(warn);
-          for (const id of ['cursor', 'qwen', 'kimi']) {
-            assert.equal(statuses.find((status) => status.id === id)!.resolved, false, id);
-          }
-        });
-      });
+      const statuses = registry.logUnresolvedHarnessBinaries(warn);
+      assert.equal(statuses.find((status) => status.id === 'cursor')!.resolved, false, 'cursor');
     });
     assert.equal(warnings.length, 0);
   });
@@ -352,7 +337,7 @@ describe('harness registry resolution rule', () => {
   test('boot check names only the non-retired harness when a retired body is also missing', () => {
     const warnings: Array<{ message: string; details: Record<string, unknown> }> = [];
     const warn = (message: string, details: Record<string, unknown>) => warnings.push({ message, details });
-    withHiddenFile(fakePath('.local', 'bin', 'qwen'), () => {
+    withHiddenFile(fakePath('.local', 'bin', 'cursor-agent'), () => {
       withHiddenFile(fakePath('.opencode', 'bin', 'opencode'), () => {
         registry.logUnresolvedHarnessBinaries(warn);
       });
@@ -377,15 +362,15 @@ describe('B-1349 test fixtures refuse the real home', async () => {
     for (const id of registry.HARNESS_BINARY_IDS) {
       assert.throws(() => fixtures.installFakeHarnessBinary(realHome, id), /B-1349: .*real home/);
     }
-    assert.throws(() => fixtures.installFakeHarnessBinary('/usr/share/nassaj-not-a-sandbox', 'qwen'), /B-1349/);
+    assert.throws(() => fixtures.installFakeHarnessBinary('/usr/share/nassaj-not-a-sandbox', 'dsh'), /B-1349/);
     assert.throws(() => fixtures.installFakeHarnessOverrides(realHome), /B-1349/);
   });
 
   test('a stub replaces a launcher link instead of writing through it', () => {
     const home = path.join(scratch, 'b1349-home');
     const target = writeExecutable(path.join(scratch, 'b1349-pkg', 'cli-entry.js'), 'REAL PACKAGE ENTRY');
-    linkInto(target, path.join(home, '.local', 'bin', 'qwen'));
-    const file = fixtures.installFakeHarnessBinary(home, 'qwen');
+    linkInto(target, path.join(home, '.local', 'bin', 'dsh'));
+    const file = fixtures.installFakeHarnessBinary(home, 'dsh');
     assert.equal(fs.readFileSync(target, 'utf8'), 'REAL PACKAGE ENTRY', 'the link target is untouched');
     assert.equal(fs.lstatSync(file).isSymbolicLink(), false);
   });
@@ -394,8 +379,8 @@ describe('B-1349 test fixtures refuse the real home', async () => {
     const home = path.join(scratch, 'b1349-escape');
     fs.mkdirSync(home, { recursive: true });
     fs.symlinkSync('/usr/share', path.join(home, '.local'));
-    fs.symlinkSync('/usr/share', path.join(home, '.kimi-code'));
-    for (const id of ['qwen', 'kimi'] as const) {
+    fs.symlinkSync('/usr/share', path.join(home, '.opencode'));
+    for (const id of ['dsh', 'opencode'] as const) {
       assert.throws(() => fixtures.installFakeHarnessBinary(home, id), /B-1349/);
     }
   });
@@ -496,29 +481,10 @@ describe('(2) descriptor resolver and update target == registry', () => {
     }
   });
 
-  test('npm-prefix harnesses install globally into the prefix whose bin IS the resolver', () => {
-    const npmDescriptors = cliDescriptors.filter((d) => d.installMethod === 'npm-prefix');
-    assert.deepEqual(npmDescriptors.map((d) => d.id).sort(), ['qwen']);
-    for (const d of npmDescriptors) {
-      const argv = d.updateArgv()!;
-      assert.equal(argv.cmd, 'npm');
-      assert.deepEqual(argv.args, npmPrefixInstallArgs(d.npm!.prefix, `${d.npm!.pkg}@latest`));
-      assert.ok(argv.args.includes('--global'), `${d.id}: a non-global install writes prefix/node_modules`);
-      assert.equal(d.npm!.prefix, fakePath('.local'));
-      const spec = registry.HARNESS_BINARY_SPECS[d.id as 'qwen'];
-      const prefixBin = path.join(d.npm!.prefix, 'bin', spec.command);
-      assert.equal(realpath(prefixBin), realpath(registry.resolveHarnessBinary(d.id)), d.id);
-      assert.ok(
-        realpath(prefixBin).startsWith(path.join(d.npm!.prefix, 'lib', 'node_modules', ...d.npm!.pkg.split('/'))),
-        `${d.id}: the bin must point into the global package tree the update rewrites`,
-      );
-    }
-  });
-
   test('a descriptor resolver ignores a member env handed to it', () => {
     for (const d of cliDescriptors) {
       const call = d.resolveBinary as unknown as (env: NodeJS.ProcessEnv) => string;
-      assert.equal(call({ KIMI_PATH: '/evil/kimi', QWEN_PATH: '/evil/qwen' }), registry.resolveHarnessBinary(d.id));
+      assert.equal(call({ OPENCODE_PATH: '/evil/opencode', DSH_PATH: '/evil/dsh' }), registry.resolveHarnessBinary(d.id));
     }
   });
 });
@@ -562,12 +528,8 @@ const SINK_ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   // extended-cli-adapter pins from the registry at probe() time.
   'modules/turn-supervisor/adapters/isolated-cli-cage.ts#systemdRun': 'systemd-run unit wrapping the spec binary',
   'modules/turn-supervisor/adapters/isolated-cli-cage.ts#systemctl': 'systemctl control of that unit',
-  // kimi: POSIX `sh -c 'exec "$0" "$@"' <registry kimi>` wrapper (see (6)).
-  'kimi-agent-cli.js#spawnCmd': 'sh exec-wrapper around the registry kimi (binaryPath)',
-  // Extended adapter: `binary` is pinned by probe() from resolveExtendedCliBinary.
-  'modules/turn-supervisor/adapters/extended-cli-adapter.ts#binary': 'pinned at probe() from resolveExtendedCliBinary',
-  // cli-capability: `binary` params are the registry value passed by the probes.
-  'modules/turn-supervisor/cli-capability.ts#binary': 'parameter fed only by tryResolveHarnessBinary',
+  // Extended adapter: `binary` is pinned by probe() from resolveOpenCodeBinaryPath.
+  'modules/turn-supervisor/adapters/extended-cli-adapter.ts#binary': 'pinned at probe() from resolveOpenCodeBinaryPath',
   // Managed claude terminal: realBinary is resolveRealClaudeBinary() (registry),
   // carried server → PTY env contract.
   'services/isolation/managed-claude-launcher.ts#realBinary': 'server-resolved resolveRealClaudeBinary() via the PTY contract',
@@ -830,8 +792,8 @@ describe('(3) every harness launch site resolves through the registry', () => {
   test('the launch set is derived from the inventory and admission users', () => {
     const relative = files.map((file) => path.relative(SERVER_ROOT, file));
     for (const expected of [
-      'claude-sdk.js', 'cursor-cli.js', 'qwen-cli.js', 'agy-cli.js', 'kimi-agent-cli.js',
-      'opencode-cli.js', 'modules/turn-supervisor/cli-capability.ts',
+      'claude-sdk.js', 'cursor-cli.js', 'agy-cli.js',
+      'opencode-cli.js',
       'modules/turn-supervisor/adapters/extended-cli-adapter.ts',
       'modules/workflow-supervisor/resume-turn-runner.ts', 'modules/workflow-supervisor/systemd.ts',
       'modules/websocket/services/shell-websocket.service.ts',
@@ -944,7 +906,6 @@ describe('(4) PTY command lines start with the quoted registry path', async () =
 
   test('provider login commands', () => {
     const cases: Array<[string, string, string]> = [
-      ['kimi', 'kimi login', 'kimi'],
       ['cursor', 'cursor-agent login', 'cursor'],
       ['opencode', 'opencode auth login', 'opencode'],
       ['agy', 'agy', 'antigravity'],
@@ -958,13 +919,13 @@ describe('(4) PTY command lines start with the quoted registry path', async () =
 
   test('interactive and resume commands', () => {
     const cases: Array<[string, string]> = [
-      ['cursor', 'cursor'], ['opencode', 'opencode'], ['kimi', 'kimi'], ['agy', 'antigravity'], ['antigravity', 'antigravity'],
+      ['cursor', 'cursor'], ['opencode', 'opencode'], ['agy', 'antigravity'], ['antigravity', 'antigravity'],
     ];
     for (const [provider, id] of cases) {
       assert.equal(build({ provider }), q(id), provider);
       const resumed = build({ provider, hasSession: true, sessionId: 'abc-1' });
       assert.ok(resumed.startsWith(q(id)), resumed);
-      assert.ok(!/(^|\|\| )(kimi|agy|cursor-agent|opencode)\b/.test(resumed), `bare fallback in: ${resumed}`);
+      assert.ok(!/(^|\|\| )(agy|cursor-agent|opencode)\b/.test(resumed), `bare fallback in: ${resumed}`);
     }
   });
 
@@ -987,20 +948,12 @@ describe('(4) PTY command lines start with the quoted registry path', async () =
     assert.equal(build({ provider: 'claude' }), 'claude');
     assert.equal(build({ provider: 'claude', initialCommand: 'claude auth login' }), 'claude auth login');
     assert.equal(build({ isPlainShell: true, initialCommand: 'ls -la' }), 'ls -la');
-    assert.equal(shell.materializeProviderLoginCommand('kimi login; curl x'), 'kimi login; curl x');
-  });
-
-  test('a kimi PTY removes a stale native update stage before it runs (T-1873 qa HIGH)', () => {
-    const staging = path.join(path.dirname(registry.resolveHarnessBinary('kimi')), '.staging');
-    fs.mkdirSync(staging, { recursive: true });
-    fs.writeFileSync(path.join(staging, 'staged.json'), '{"manual":true}');
-    assert.ok(build({ provider: 'kimi', hasSession: true, sessionId: 's-1' }).startsWith(q('kimi')));
-    assert.equal(fs.existsSync(staging), false);
+    assert.equal(shell.materializeProviderLoginCommand('ls; curl x'), 'ls; curl x');
   });
 
   test('an unresolved harness fails with the publishable diagnostic prefix', () => {
-    withHiddenFile(fakePath('.kimi-code', 'bin', 'kimi'), () => {
-      assert.throws(() => build({ provider: 'kimi' }), (error: unknown) => (
+    withHiddenFile(fakePath('.opencode', 'bin', 'opencode'), () => {
+      assert.throws(() => build({ provider: 'opencode' }), (error: unknown) => (
         error instanceof Error && error.message.startsWith(shell.SHELL_HARNESS_CLI_MISSING_PREFIX)
       ));
     });
@@ -1011,38 +964,14 @@ describe('(4) PTY command lines start with the quoted registry path', async () =
 // (5) + (6) behaviour: member env ignored, representative launchers
 // ---------------------------------------------------------------------------
 
-/**
- * The binary a launch finally execs: unwraps the cage's `bwrap … -- <cmd>` and
- * the POSIX `sh -c 'exec "$0" "$@"' <cmd>` exec-wrapper.
- */
-function unwrapLaunch(cmd: string, args: readonly string[]): string {
-  if (path.basename(cmd) === 'bwrap') {
-    const separator = args.indexOf('--');
-    assert.ok(separator >= 0 && args[separator + 1], 'a bwrap launch must carry `-- <cmd>`');
-    return unwrapLaunch(args[separator + 1], args.slice(separator + 2));
-  }
-  if (cmd === 'sh' && args[0] === '-c' && args[1] === 'exec "$0" "$@"') return args[2];
-  return cmd;
-}
-
 const MEMBER_ENV: NodeJS.ProcessEnv = Object.freeze({
   PATH: '/usr/bin:/bin',
-  CLAUDE_CLI_PATH: '/evil/claude', KIMI_PATH: '/evil/kimi', QWEN_PATH: '/evil/qwen',
+  CLAUDE_CLI_PATH: '/evil/claude', DSH_PATH: '/evil/dsh',
   AGY_PATH: '/evil/agy', CURSOR_PATH: '/evil/cursor-agent',
   OPENCODE_PATH: '/evil/opencode',
 });
 
 describe('(5)+(6) launchers spawn the registry binary; member *_PATH is ignored', () => {
-  test('cli-capability probes (spawnSync) use the registry binary for a member env', async () => {
-    const { installedMechanicalCliProbe } = await import('../modules/turn-supervisor/cli-capability.js');
-    spawnCalls.length = 0;
-    spawnSyncStdout = '0.21.12\n';
-    installedMechanicalCliProbe('qwen', MEMBER_ENV);
-    const commands = new Set(spawnCalls.map((call) => call.cmd));
-    assert.ok(spawnCalls.length > 0);
-    assert.deepEqual([...commands], [registry.resolveHarnessBinary('qwen')]);
-  });
-
   test('resume-turn runner (spawn) runs the registry claude, whatever the turn env says', async () => {
     const { defaultRunResumeTurn } = await import('../modules/workflow-supervisor/resume-turn-runner.js');
     spawnCalls.length = 0;
@@ -1066,44 +995,19 @@ describe('(5)+(6) launchers spawn the registry binary; member *_PATH is ignored'
     assert.equal(spawnCalls.length, 0);
   });
 
-  test('kimi agent launch (cage ON, bwrap unwrapped) runs the registry kimi, not the member KIMI_PATH', async () => {
-    const { prepareKimiAgentLaunch } = await import('../kimi-agent-cli.js');
-    const { resolveCagedLaunch } = await import('../services/isolation/provider-cage-wiring.js');
-    const bwrap = writeExecutable(path.join(scratch, 'bin', 'bwrap'));
-    withEnv({ NASSAJ_PROVIDER_CAGE: 'true' }, () => {
-      const prepared = prepareKimiAgentLaunch(
-        { userId: 7, command: 'hi', model: 'kimi-k2.6', permissionMode: 'default', cwd: scratch, baseEnv: MEMBER_ENV },
-        {
-          resolveProviderEnv: (_u: unknown, _p: unknown, env: NodeJS.ProcessEnv) => ({ ...env }),
-          verifyVendorBinaryDigest: (_id: string, file: string) => file,
-          ensureVendorCliGovernance: (id: string, home: string) => ({ ok: true, vendorId: id, home, repaired: false }),
-          isGovernanceExempt: () => false,
-          resolveCagedLaunch: (spec: Parameters<typeof resolveCagedLaunch>[0]) => resolveCagedLaunch(spec, {
-            resolveBwrapPath: () => bwrap,
-            homedir: () => FAKE_HOME,
-            existsSync: () => false,
-          }),
-        },
-      );
-      assert.equal(prepared.binaryPath, registry.resolveHarnessBinary('kimi'));
-      assert.equal(path.basename(prepared.launch.cmd), 'bwrap', 'the cage must be on for this case');
-      assert.equal(unwrapLaunch(prepared.launch.cmd, prepared.launch.args), registry.resolveHarnessBinary('kimi'));
-    });
-  });
-
   test('extended CLI adapter pins the registry binary at probe time', async () => {
     const { createExtendedCliAdapter } = await import('../modules/turn-supervisor/adapters/extended-cli-adapter.js');
     const seen: string[] = [];
-    const adapter = createExtendedCliAdapter('qwen', {
+    const adapter = createExtendedCliAdapter('opencode', {
       executableProbe: async (binary: string) => { seen.push(binary); return false; },
     });
     await adapter.probe({ userId: 1 } as never);
-    assert.deepEqual(seen, [registry.resolveHarnessBinary('qwen')]);
-    const missing = createExtendedCliAdapter('qwen', {
+    assert.deepEqual(seen, [registry.resolveHarnessBinary('opencode')]);
+    const missing = createExtendedCliAdapter('opencode', {
       executableProbe: async () => { throw new Error('must not probe an unresolved binary'); },
     });
     // probe() resolves synchronously before its first await, inside the hide window.
-    const probed = withHiddenFile(fakePath('.local', 'bin', 'qwen'), () => missing.probe({ userId: 1 } as never));
+    const probed = withHiddenFile(fakePath('.opencode', 'bin', 'opencode'), () => missing.probe({ userId: 1 } as never));
     assert.equal(await probed, false);
   });
 });

@@ -437,3 +437,31 @@ test('ADR-099: a signed thinking block is NOT touched', () => {
   assert.equal(repairRecord(record, [], 'cross-engine'), 0);
   assert.equal(record.message.content[0].type, 'thinking');
 });
+
+test('ADR-173 P3: a shared writer\'s bridge link is never repaired through; the recorded home is', () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join('/var/tmp', 'adr173-repair-')));
+  try {
+    const sessionId = '00000003-0000-4000-8000-000000000003'; // the fixture's own header id
+    const cwd = path.join(base, 'cwd');
+    const creator = path.join(base, '1', '.claude');
+    const member = path.join(base, '2', '.claude');
+    const recorded = path.join(creator, 'projects', encodeProjectDir(cwd), `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(recorded), { recursive: true });
+    fs.copyFileSync(FIXTURE, recorded);
+    const original = fs.readFileSync(recorded, 'utf8');
+    const linkDir = path.join(member, 'projects', encodeProjectDir(cwd));
+    fs.mkdirSync(linkDir, { recursive: true });
+    fs.symlinkSync(recorded, path.join(linkDir, `${sessionId}.jsonl`));
+
+    const viaLink = repairResumeTranscript({ sessionId, cwd, configDir: member });
+    assert.equal(viaLink.repaired, 0);
+    assert.match(String(viaLink.reason), /^(unresolved|refused:)/u);
+    assert.equal(fs.readFileSync(recorded, 'utf8'), original, 'nothing written through the link');
+
+    const viaHome = repairResumeTranscript({ sessionId, cwd, configDir: creator });
+    assert.ok(viaHome.repaired > 0, 'the recorded file itself is repaired');
+    assert.ok(fs.lstatSync(path.join(linkDir, `${sessionId}.jsonl`)).isSymbolicLink(), 'the link stays a link');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

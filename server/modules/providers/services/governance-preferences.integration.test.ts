@@ -163,7 +163,7 @@ test('migration creates governance_exemptions, and an empty table means governed
 
     // No rows have ever been written. Every engine reads governed — the default
     // is the ABSENCE of an exemption, not a value some code had to choose.
-    for (const provider of ['codex', 'opencode', 'kimi', 'antigravity', 'claude']) {
+    for (const provider of ['codex', 'opencode', 'antigravity', 'claude']) {
       assert.equal(governanceExemptionsDb.isExempt(userId, provider), false);
       assert.equal(isGovernanceExempt(userId, provider), false);
     }
@@ -269,24 +269,12 @@ test('opencode: exempting removes the copy and the fail-closed gate stops throwi
   });
 });
 
-test('kimi: exempting removes the copy and re-provisioning leaves it removed', async () => {
-  await withHarness(({ userId, owner }) => {
+test('kimi has no governance channel any more (native body removed, ADR-229)', async () => {
+  await withHarness(({ userId }) => {
     provisionFresh(userId);
-
-    const agentsPath = path.join(
-      os.homedir(),
-      '.nassaj-users',
-      String(userId),
-      '.kimi',
-      'AGENTS.md',
-    );
-    assert.ok(entryExists(agentsPath), 'baseline: kimi governance must be materialized');
-
-    governancePreferencesService.setMode('kimi' as LLMProvider, 'exempt', owner);
-    assert.equal(entryExists(agentsPath), false, '(a) governance copy must be removed');
-
-    provisionFresh(userId);
-    assert.equal(entryExists(agentsPath), false, 'rebound: provisioning must not re-materialize');
+    const agentsPath = path.join(os.homedir(), '.nassaj-users', String(userId), '.kimi', 'AGENTS.md');
+    assert.equal(entryExists(agentsPath), false, 'provisioning writes no kimi governance copy');
+    assert.equal(resolveGovernanceMaterialPlan('kimi' as LLMProvider, userId).exemptible, false);
   });
 });
 
@@ -417,7 +405,7 @@ test('canManage reflects the role, and the read surface stays open to a member',
     const ownerView = governancePreferencesService.listChannels(owner);
     assert.deepEqual(
       ownerView.map((channel) => channel.provider),
-      ['codex', 'opencode', 'kimi', 'antigravity', 'claude'],
+      ['codex', 'opencode', 'antigravity', 'claude'],
     );
     assert.ok(ownerView.every((channel) => channel.mode === 'governed'));
     assert.ok(ownerView.every((channel) => channel.canManage), 'an owner may flip every switch');
@@ -429,9 +417,9 @@ test('canManage reflects the role, and the read surface stays open to a member',
       'a member may flip none of them',
     );
 
-    governancePreferencesService.setMode('kimi' as LLMProvider, 'exempt', owner);
+    governancePreferencesService.setMode('opencode' as LLMProvider, 'exempt', owner);
     const after = governancePreferencesService.listChannels(member);
-    assert.equal(after.find((channel) => channel.provider === 'kimi')?.mode, 'exempt');
+    assert.equal(after.find((channel) => channel.provider === 'opencode')?.mode, 'exempt');
     assert.equal(after.find((channel) => channel.provider === 'codex')?.mode, 'governed');
   });
 });
@@ -457,7 +445,7 @@ test('the material plan refuses an anonymous caller and every non-channel engine
 test('every plan path lands inside the caller OWN tree', async () => {
   await withHarness(({ userId }) => {
     const userRoot = path.join(os.homedir(), '.nassaj-users', String(userId));
-    for (const provider of ['codex', 'opencode', 'kimi', 'antigravity', 'claude']) {
+    for (const provider of ['codex', 'opencode', 'antigravity', 'claude']) {
       const plan = resolveGovernanceMaterialPlan(provider as LLMProvider, userId);
       assert.equal(plan.exemptible, true, `${provider} must be exemptible for an isolated user`);
       assert.equal(plan.scope, 'user');

@@ -88,7 +88,6 @@ const PROVIDER_LABEL_KEYS: Record<string, string> = {
   codex: 'messageTypes.codex',
   cursor: 'messageTypes.cursor',
   opencode: 'messageTypes.opencode',
-  kimi: 'messageTypes.kimi',
   deepseek: 'messageTypes.deepseek',
   glm: 'messageTypes.glm',
 };
