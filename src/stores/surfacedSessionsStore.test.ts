@@ -20,6 +20,8 @@ import {
   isSurfacedSessionNegativeCached,
   pruneSurfacedContextsToProjects,
   resetSurfacedSessionsStore,
+  __getSurfacedContextIdsForTests,
+  __isSurfacedContextStaleForTests,
   __resetSurfacedSessionsStoreForTests,
   type SurfacedContext,
 } from './surfacedSessionsStore';
@@ -261,5 +263,123 @@ describe('collectWantedSurfacedSessionIds', () => {
       lastStateById,
     );
     expect(wanted).toEqual(['s1']);
+  });
+
+  // T-1951: contexts are fetched-once snapshots (title/last activity) that
+  // used to live forever once resolved — this describes the two fixes.
+  describe('T-1951 — context refresh and pruning', () => {
+    it('keeps a resolved context (stale-while-revalidate) once its indicator state transitions, and refetches', () => {
+      applyOutcomeDelta('s1', 'error', null, 'visible', 'p1');
+      const lastStateById = new Map<string, SessionRowIndicatorState | null>();
+
+      // Prior cycle primes `lastStateById` and the id resolves to a context.
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+
+      // An unchanged state must NOT evict an already-resolved context.
+      const unchanged = collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      expect(unchanged).toEqual([]);
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+
+      // A real transition (error -> done) must want it again for a refetch —
+      // qa-critic fix: it must NOT evict the existing context in the
+      // meantime, or the row vanishes for the length of the fetch cycle.
+      applyOutcomeDelta('s1', 'done', null, 'visible', 'p1');
+      const wanted = collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      expect(wanted).toEqual(['s1']);
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+      expect(__isSurfacedContextStaleForTests('s1')).toBe(true);
+
+      // The row must still render (stale-while-revalidate) while the refetch
+      // is in flight — this is the qa-critic regression probe itself.
+      expect(computeSurfacedSessionsForProject('p1', new Set(), null).sessions.map((s) => s.id)).toEqual(['s1']);
+
+      // Once the refetch response lands, the stale mark clears and the fresh
+      // context replaces the old one.
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+      expect(__isSurfacedContextStaleForTests('s1')).toBe(false);
+    });
+
+    it('keeps the SELECTED session visible across its own indicator transition (qa-critic regression)', () => {
+      applyOutcomeDelta('s1', 'error', null, 'visible', 'p1');
+      const lastStateById = new Map<string, SessionRowIndicatorState | null>();
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById, 's1');
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+
+      // s1 is selected and open — the owner is reading it when its indicator
+      // transitions (error -> done). The row must not disappear mid-refetch.
+      applyOutcomeDelta('s1', 'done', null, 'visible', 'p1');
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById, 's1');
+      expect(computeSurfacedSessionsForProject('p1', new Set(), 's1').sessions.map((s) => s.id)).toEqual(['s1']);
+    });
+
+    it('prunes a context no indicator attributes to the project any more (bounded memory)', () => {
+      applyOutcomeDelta('s1', 'error', null, 'visible', 'p1');
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], new Map());
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+
+      // The indicator clears entirely — s1 is no longer any store's candidate.
+      applyOutcomeDelta('s1', null, null, 'absent');
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], new Map());
+      expect(__getSurfacedContextIdsForTests()).not.toContain('s1');
+    });
+
+    it("prunes the id from the caller's lastStateById too, so it does not grow unbounded (qa-critic)", () => {
+      applyOutcomeDelta('s1', 'error', null, 'visible', 'p1');
+      const lastStateById = new Map<string, SessionRowIndicatorState | null>();
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+      expect(lastStateById.has('s1')).toBe(true);
+
+      // The indicator clears entirely — the prune loop drops the context AND
+      // must drop the now-meaningless `lastStateById` entry alongside it, the
+      // same map the driver's ref carries for the lifetime of the tab.
+      applyOutcomeDelta('s1', null, null, 'absent');
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      expect(lastStateById.has('s1')).toBe(false);
+    });
+
+    it('exempts the selected session from pruning even once its indicator clears', () => {
+      applyOutcomeDelta('s1', 'error', null, 'visible', 'p1');
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], new Map(), 's1');
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+
+      applyOutcomeDelta('s1', null, null, 'absent');
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], new Map(), 's1');
+      // Still selected — the context the render path relies on must survive.
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+    });
+
+    it('drops the ghost context when a refetch response omits the id (server decides)', () => {
+      applyOutcomeDelta('s1', 'error', null, 'visible', 'p1');
+      const lastStateById = new Map<string, SessionRowIndicatorState | null>();
+
+      // Prior cycle resolves s1 to a context.
+      collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      applySurfacedSessionContexts(['s1'], [ctx('s1', 'p1')], getSurfacedSessionsIdentityEpoch());
+      expect(__getSurfacedContextIdsForTests()).toContain('s1');
+
+      // error -> done marks s1 stale and re-wants it for a refetch.
+      applyOutcomeDelta('s1', 'done', null, 'visible', 'p1');
+      const wanted = collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      expect(wanted).toEqual(['s1']);
+
+      // The server drops s1 from the response (missing/archived/invisible) —
+      // the stale old context must NOT keep rendering it as a ghost row.
+      applySurfacedSessionContexts(['s1'], [], getSurfacedSessionsIdentityEpoch());
+      expect(__getSurfacedContextIdsForTests()).not.toContain('s1');
+      expect(computeSurfacedSessionsForProject('p1', new Set(), null).sessions).toEqual([]);
+
+      // Also true when s1 is the selected/open session — the server's "gone"
+      // verdict applies even to the row the owner is currently reading.
+      expect(computeSurfacedSessionsForProject('p1', new Set(), 's1').sessions).toEqual([]);
+
+      // Having been negative-cached, it must not be re-wanted right away.
+      const rewanted = collectWantedSurfacedSessionIds([project('p1')], new Set(['p1']), ['sessions'], lastStateById);
+      expect(rewanted).toEqual([]);
+    });
   });
 });

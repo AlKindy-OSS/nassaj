@@ -40,6 +40,34 @@ describe('owner setup API client', () => {
     }] })).toBeNull();
   });
 
+  it('B-1461: parses the owner origin proposal only while no origin is persisted', () => {
+    const unbound = { ...status('origin'), origin: null };
+    expect(parseConnectorOwnerSetupStatus(unbound)?.originProposal).toBeNull();
+    for (const originProposal of [
+      { canonicalOrigin: 'https://sso-node.example', source: 'oidc_redirect_uri' },
+      { canonicalOrigin: null, source: 'invalid_public_origin' },
+    ]) {
+      expect(parseConnectorOwnerSetupStatus({ ...unbound, originProposal })?.originProposal).toEqual(originProposal);
+    }
+    for (const bad of [
+      { canonicalOrigin: 'https://sso-node.example/', source: 'oidc_redirect_uri' },
+      { canonicalOrigin: 'http://sso-node.example', source: 'public_origin' },
+      { canonicalOrigin: 'https://sso-node.example', source: 'request_host' },
+      { canonicalOrigin: 'https://sso-node.example', source: 'invalid_public_origin' },
+      { canonicalOrigin: 'https://sso-node.example', source: 'public_origin', extra: 1 },
+    ]) expect(parseConnectorOwnerSetupStatus({ ...unbound, originProposal: bad })).toBeNull();
+    expect(parseConnectorOwnerSetupStatus({ ...status(), originProposal: {
+      canonicalOrigin: 'https://other.example', source: 'public_origin' } })?.originProposal).toBeNull();
+  });
+
+  it('B-1461: carries the bootstrap-refusal reason on the request error', async () => {
+    authenticatedFetch.mockResolvedValue(new Response(JSON.stringify({
+      code: 'CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', reason: 'startup_profile' }), { status: 409 }));
+    await expect(mutateConnectorOwnerSetup({ route: 'origin', method: 'PUT', expectedRevision: 0,
+      csrfToken: 'c'.repeat(64), body: {} })).rejects.toMatchObject({
+      code: 'CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', status: 409, reason: 'startup_profile' });
+  });
+
   it('sends CAS, idempotency, CSRF, and the exact mutation body', async () => {
     authenticatedFetch.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const body = { canonicalOrigin: 'https://nassaj.example', expectedOriginRevision: 1 };

@@ -13,10 +13,21 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createSsoRuntimeDouble } from '../services/__tests__/sso-runtime-double.js';
+import { createSsoConfigDouble, doubleMapping } from '../services/__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
+const sso = createSsoConfigDouble();
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const ISSUER = 'https://issuer.example';
-const ROLES_CLAIM = 'urn:zitadel:iam:org:project:proj-synth:roles';
+// Project-scoped roles claim in the nested-grant shape (fixture data, neutral name).
+const ROLES_CLAIM = 'urn:example:iam:org:project:proj-synth:roles';
+const ROLE_MAPPING = doubleMapping({ role_claim_path: `["${ROLES_CLAIM}"]` });
+/** `role_grant_scope` over ROLES_CLAIM allowing only the given scopes (D5). */
+const scopedMapping = (scopes: string[]) => doubleMapping({
+  role_claim_path: `["${ROLES_CLAIM}"]`, tenant_mode: 'role_grant_scope', tenant_values_json: JSON.stringify(scopes),
+});
 const MEMBER_ROLE = { member: { '1': 'org.example' } };
 
 type FakeUser = { id: number; username: string; role: string; password_hash: string;
@@ -53,8 +64,8 @@ function resetState() {
   linkConflict = false;
   rateLimitExhausted = false;
   claims = { sub: 'subject-new', [ROLES_CLAIM]: MEMBER_ROLE, auth_time: Math.floor(Date.now() / 1000) };
-  process.env.OIDC_ENABLED = 'true';
-  delete process.env.OIDC_ALLOWED_ORG_IDS;
+  sso.setActive(true);
+  sso.state.mapping = ROLE_MAPPING;
 }
 
 const publicUser = (user: FakeUser | undefined) => (user && user.active
@@ -174,19 +185,17 @@ mock.module(url('../services/oidc-verifier.service.js'), {
         ? (verified.auth_time as number) * 1000
         : null
     ),
-    createOidcVerifier: () => ({
-      getDiscovery: async () => ({ authorization_endpoint: 'https://issuer.example/authorize' }),
-      exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
-      verifyIdToken: async () => claims,
-      verifyLogoutToken: async () => ({ sub: 'unused' }),
-    }),
   },
 });
+// ADR-194: the routes read the SSO configuration rows, never OIDC_* env.
+const ssoRuntime = createSsoRuntimeDouble(sso, {
+  exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
+  verifyIdToken: async () => claims,
+  verifyLogoutToken: async () => ({ sub: 'unused' }),
+});
+mock.module(url('../services/sso-oidc-runtime.service.js'), { namedExports: ssoRuntime.exports });
 
-process.env.OIDC_ISSUER_URL = ISSUER;
-process.env.OIDC_CLIENT_ID = 'client-synthetic';
-process.env.OIDC_REDIRECT_URI = 'https://app.example/api/auth/oidc/callback';
-process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+for (const key of ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_REDIRECT_URI']) delete process.env[key];
 resetState();
 
 const { default: oidcRouter } = await import('./oidc.js');
@@ -259,8 +268,8 @@ const failureReasons = () => audits
 // POST /link/self/start
 // ---------------------------------------------------------------------------
 
-test('start: OIDC off answers 501 before authentication, like every OIDC route', async () => {
-  process.env.OIDC_ENABLED = 'false';
+test('start: SSO login unavailable answers 501 before authentication, like every OIDC route', async () => {
+  sso.state.loginAvailable = false;
   const res = await startLink(null);
   assert.equal(res.status, 501);
   const status = await fetch(`${baseUrl}/api/auth/oidc/link/self`, { headers: { 'x-test-user-id': '12' } });
@@ -487,24 +496,43 @@ test('link: a unique conflict at write time is 409; a failed stamp rolls the lin
   assert.deepEqual(minted, []);
 });
 
-test('link: the owner linking their own account raises the owner alert, WARN and audit', async () => {
-  const writes: string[] = [];
-  const write = mock.method(process.stderr, 'write', (chunk: string) => { writes.push(String(chunk)); return true; });
-  let res: Response;
+test('ADR-194 I6: POST /link/self/start refuses an owner with owner_must_sign_in_locally', async () => {
+  const res = await startLink(1);
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { error: 'The owner signs in locally only', code: 'owner_must_sign_in_locally' });
+  assert.equal(res.headers.get('set-cookie'), null, 'no PKCE transaction is started');
+  const failure = audits.find((record) => record.event === 'oidc_identity_self_link_failed');
+  assert.deepEqual(failure?.metadata, { reason: 'owner_must_sign_in_locally' });
+});
+
+test('ADR-194 I6: a link entry whose account became an owner is refused and writes nothing', async () => {
+  const txn = await startedLink(12);
+  const member = users.get(12) as FakeUser;
+  member.role = 'owner';
   try {
-    const txn = await startedLink(1);
-    res = await callback(txn);
-    await new Promise((resolve) => setImmediate(resolve));
+    const res = await callback(txn);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
+    assert.deepEqual(identities, [], 'no link is written');
+    assert.deepEqual(minted, [], 'no session is minted');
+    assert.ok(auditEvents().includes('oidc_owner_sign_in_refused'));
+    assert.ok(!auditEvents().includes('oidc_identity_self_linked'));
   } finally {
-    write.mock.restore();
+    member.role = 'user';
   }
-  assert.equal(res.status, 302);
-  assert.equal(identities[0]?.user_id, 1);
-  assert.equal(users.get(1)?.role, 'owner', 'the IdP role never replaces owner');
-  assert.ok(auditEvents().includes('oidc_owner_account_linked'));
-  assert.deepEqual(notifications, [1]);
-  assert.ok(writes.some((line) => JSON.parse(line).code === 'owner_account_self_linked'));
-  assert.ok(!writes.join('').includes('subject-new'));
+});
+
+test('ADR-194 D9: an apply landing before the link write refuses with oidc_config_changed', async () => {
+  const txn = await startedLink(12);
+  ssoRuntime.runtime.fenceVersion = 8;
+  try {
+    const res = await callback(txn);
+    assert.equal(res.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.deepEqual(identities, [], 'no link is written');
+    assert.deepEqual(minted, []);
+  } finally {
+    ssoRuntime.runtime.fenceVersion = null;
+  }
 });
 
 test('link: the attested role is applied through the shared mapper', async () => {
@@ -516,20 +544,30 @@ test('link: the attested role is applied through the shared mapper', async () =>
   assert.ok(auditEvents().includes('external_role_synced'));
 });
 
-test('link: with an org allowlist, a role granted only by a foreign org is refused', async () => {
-  process.env.OIDC_ALLOWED_ORG_IDS = '1';
+test('link: a mapping that vanished mid-flight refuses with 503 and links nothing', async () => {
+  const txn = await startedLink(12);
+  sso.state.mapping = null;
+  const res = await callback(txn);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'temporarily_unavailable');
+  assert.deepEqual(failureReasons(), ['mapping_unavailable']);
+  assert.equal(identities.length, 0);
+});
+
+test('link: with a grant-scope restriction, a role granted only by a foreign org is refused', async () => {
+  sso.state.mapping = scopedMapping(['1']);
   const txn = await startedLink(12);
   claims = { ...claims, [ROLES_CLAIM]: { admin: { '999': 'foreign.example' } } };
   const res = await callback(txn);
   assert.equal(res.status, 403);
   assert.equal((await res.json()).error, 'oidc_not_authorized');
-  assert.deepEqual(failureReasons(), ['org_not_allowed']);
+  assert.deepEqual(failureReasons(), ['tenant_not_allowed']);
   assert.equal(identities.length, 0);
   assert.equal(users.get(12)?.role, 'user');
 });
 
-test('link: with an org allowlist, a foreign admin grant never raises the role', async () => {
-  process.env.OIDC_ALLOWED_ORG_IDS = '1';
+test('link: with a grant-scope restriction, a foreign admin grant never raises the role', async () => {
+  sso.state.mapping = scopedMapping(['1']);
   const txn = await startedLink(12);
   claims = { ...claims, [ROLES_CLAIM]: { ...MEMBER_ROLE, admin: { '999': 'foreign.example' } } };
   const res = await callback(txn);
@@ -538,7 +576,7 @@ test('link: with an org allowlist, a foreign admin grant never raises the role',
   assert.equal(users.get(12)?.role, 'user');
 });
 
-test('link: without an org allowlist a grant of any org still counts (unchanged)', async () => {
+test('link: without a tenant restriction a grant of any org still counts (unchanged)', async () => {
   const txn = await startedLink(12);
   claims = { ...claims, [ROLES_CLAIM]: { admin: { '999': 'foreign.example' } } };
   assert.equal((await callback(txn)).status, 302);

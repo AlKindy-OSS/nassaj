@@ -8,6 +8,9 @@ import express from 'express';
 import {
   CONNECTOR_OAUTH_CALLBACK_PATH, RECENT_AUTH_MAX_AGE_MS,
 } from './connector-auth-security.js';
+import {
+  ConnectorOriginBootstrapRefusedError, connectorOriginBootstrapRefusal,
+} from './connector-origin-bootstrap-refusal.js';
 import type { SqliteConnectorPolicyV2Store } from './connector-policy-v2-store.js';
 
 export const CONNECTOR_INSTALLATION_READINESS_V2_ENABLED = false as const;
@@ -236,9 +239,9 @@ export class ConnectorInstallationOriginV2Store {
 
   #bindInitialOrigin(input: Readonly<{ installationId: string; expectedOriginRevision: number;
     nowMs: number }>, origin: string): void {
-    if (!this.#allowInitialOriginBootstrap || input.expectedOriginRevision !== 0) {
-      throw new Error('connector_origin_bootstrap_unsafe');
-    }
+    // B-1461 H3: each refusal cause carries its own operator-visible reason.
+    if (!this.#allowInitialOriginBootstrap) throw new ConnectorOriginBootstrapRefusedError('startup_profile');
+    if (input.expectedOriginRevision !== 0) throw new Error('connector_origin_revision_conflict');
     this.#policyAuthority.bindInitialOrigin({ installationId: input.installationId, nowMs: input.nowMs,
       persistOrigin: () => this.#persistOrigin(input.installationId, origin, input.nowMs) });
   }
@@ -361,6 +364,8 @@ export const createConnectorInstallationReadinessV2Routes = (dependencies: Reado
   readRecentOwnerSession: (req: express.Request) => ConnectorRecentOwnerSession | null
     | Promise<ConnectorRecentOwnerSession | null>;
   executeOriginWrite: (advanceWriterEpoch: boolean, effect: () => void) => boolean | Promise<boolean>;
+  /** Live trusted-config origin proposal (B-1461 H2); a first bind must equal it. */
+  readOriginProposal: () => string | null;
   now?: () => number;
 }>): express.Router => {
   if (!idValid(dependencies.installationId)) throw new Error('connector_installation_id_invalid');
@@ -399,6 +404,41 @@ const getCatalog = async (req: ConnectorM5Request, res: express.Response,
   } catch { res.status(503).json({ code: 'CONNECTOR_READINESS_UNAVAILABLE' }); }
 };
 
+const safeProposal = (read: () => string | null): string | null => {
+  try { return read() ?? null; } catch { return null; }
+};
+
+/**
+ * Origin gates before any auth work. While nothing is persisted the body must
+ * equal the live trusted-config proposal (B-1461 H2), and the request Origin
+ * must equal the persisted origin, else the body origin.
+ */
+const originGateRefusal = (current: ConnectorCanonicalOrigin | null, proposedOrigin: string,
+  requestOrigin: string | undefined, dependencies: RouteDependencies): string | null => {
+  if (current === null && proposedOrigin !== safeProposal(dependencies.readOriginProposal)) {
+    return 'CONNECTOR_ORIGIN_PROPOSAL_MISMATCH';
+  }
+  return requestOrigin === (current?.canonicalOrigin ?? proposedOrigin) ? null : 'CONNECTOR_ORIGIN_REJECTED';
+};
+
+/** Bounded, secret-free mapping of an origin write failure. */
+const sendOriginWriteError = (res: express.Response, error: unknown): void => {
+  const bootstrap = connectorOriginBootstrapRefusal(error);
+  if (bootstrap) { res.status(bootstrap.status).json(bootstrap.body); return; }
+  const code = error instanceof Error ? error.message : '';
+  if (code === 'connector_origin_revision_conflict') {
+    res.status(409).json({ code: 'CONNECTOR_ORIGIN_REVISION_CONFLICT' }); return;
+  }
+  if (code === 'connector_origin_oauth_pending') {
+    res.status(409).json({ code: 'CONNECTOR_ORIGIN_OAUTH_PENDING' }); return;
+  }
+  if (code === 'connector_installation_readiness_unavailable'
+    || code === 'connector_policy_state_missing' || code === 'connector_policy_state_corrupt') {
+    res.status(503).json({ code: 'CONNECTOR_READINESS_UNAVAILABLE' }); return;
+  }
+  res.status(403).json({ code: 'CONNECTOR_ORIGIN_WRITE_REJECTED' });
+};
+
 const putOrigin = async (req: ConnectorM5Request, res: express.Response,
   dependencies: RouteDependencies): Promise<void> => {
   res.set('Cache-Control', 'no-store');
@@ -419,8 +459,9 @@ const putOrigin = async (req: ConnectorM5Request, res: express.Response,
   let current: ConnectorCanonicalOrigin | null;
   try { current = dependencies.store.read(dependencies.installationId); }
   catch { res.status(503).json({ code: 'CONNECTOR_READINESS_UNAVAILABLE' }); return; }
-  if (requestOrigin !== (current?.canonicalOrigin ?? proposedOrigin)) {
-    res.status(403).json({ code: 'CONNECTOR_ORIGIN_REJECTED' }); return;
+  const refusal = originGateRefusal(current, proposedOrigin, requestOrigin, dependencies);
+  if (refusal || requestOrigin === undefined) {
+    res.status(403).json({ code: refusal ?? 'CONNECTOR_ORIGIN_REJECTED' }); return;
   }
   const trusted = session !== null && session.installationId === dependencies.installationId
     && session.userId === identity.userId && session.authTimeMs <= nowMs
@@ -445,18 +486,5 @@ const putOrigin = async (req: ConnectorM5Request, res: express.Response,
       res.status(503).json({ code: 'CONNECTOR_READINESS_UNAVAILABLE' }); return;
     }
     res.json({ schemaVersion: 2, origin });
-  } catch (error) {
-    const code = error instanceof Error ? error.message : '';
-    if (code === 'connector_origin_revision_conflict') {
-      res.status(409).json({ code: 'CONNECTOR_ORIGIN_REVISION_CONFLICT' }); return;
-    }
-    if (code === 'connector_origin_oauth_pending') {
-      res.status(409).json({ code: 'CONNECTOR_ORIGIN_OAUTH_PENDING' }); return;
-    }
-    if (code === 'connector_installation_readiness_unavailable'
-      || code === 'connector_policy_state_missing' || code === 'connector_policy_state_corrupt') {
-      res.status(503).json({ code: 'CONNECTOR_READINESS_UNAVAILABLE' }); return;
-    }
-    res.status(403).json({ code: 'CONNECTOR_ORIGIN_WRITE_REJECTED' });
-  }
+  } catch (error) { sendOriginWriteError(res, error); }
 };

@@ -104,6 +104,8 @@ type SidebarProjectItemProps = ProjectToolbarProps & {
   editingProject: string | null;
   editingName: string;
   sessions: SessionWithProvider[];
+  /** T-1951: the "+N" surfaced-hint count for this project, from the controller. */
+  surfacedHiddenCount?: number;
   initialSessionsLoaded: boolean;
   isLoadingMoreSessions: boolean;
   currentTime: Date;
@@ -153,6 +155,7 @@ export default function SidebarProjectItem({
   editingProject,
   editingName,
   sessions,
+  surfacedHiddenCount = 0,
   initialSessionsLoaded,
   isLoadingMoreSessions,
   currentTime,
@@ -940,11 +943,21 @@ export default function SidebarProjectItem({
           onProjectToolbarPresence={isSelected ? onProjectToolbarPresence : undefined}
           contentDirection={i18n.dir()}
           participantsSummary={isExpanded && showParticipantAvatars ? (
-            // The add-member trigger reads as one more face appended to the
-            // stack — `[&>*+*]:-ms-2` gives it the same overlap the avatars
-            // use on each other (ParticipantAvatarStack), instead of a plain
-            // gap that would set it visually apart from the members it adds to.
+            // Owner decision (2026-09-30): the add-member circle now sits
+            // before the avatar stack in visual order (avatars, then
+            // add-member). The avatar stack reads as one more face appended to
+            // the add-member trigger — `[&>*+*]:-ms-2` gives it the same
+            // overlap the avatars use on each other (ParticipantAvatarStack),
+            // instead of a plain gap that would set it visually apart.
             <span className="flex min-w-0 items-center [&>*+*]:-ms-2">
+              {canOpenProjectMembers && (
+                <ManageProjectMembersButton
+                  projectId={project.projectId}
+                  t={t}
+                  currentUserId={currentUserId}
+                  variant="circle"
+                />
+              )}
               <ProjectParticipantsSummary
                 projectId={project.projectId}
                 loadedSessions={getAllSessions(project)}
@@ -956,19 +969,12 @@ export default function SidebarProjectItem({
                 maxAvatars={2}
                 className="mt-0 min-w-0 justify-end"
               />
-              {canOpenProjectMembers && (
-                <ManageProjectMembersButton
-                  projectId={project.projectId}
-                  t={t}
-                  currentUserId={currentUserId}
-                  variant="circle"
-                />
-              )}
             </span>
           ) : null}
           project={project}
           isExpanded={isExpanded}
           sessions={sessions}
+          surfacedHiddenCount={surfacedHiddenCount}
           selectedSession={selectedSession}
           isSessionStarred={isSessionStarred}
           onToggleStarSession={onToggleStarSession}

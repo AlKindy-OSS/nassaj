@@ -116,6 +116,73 @@ test('a beginUpdate refusal fails the job with its reason instead of stranding i
     assert.deepEqual(JSON.parse(last.facts_json), { code: 'update_source_state_degraded', failedPhase: 'activating', intervention: null });
 });
 
+const receiptCount = (id: string) => (sourceUpdateJobsDb.listReceipts(id) as unknown[]).length;
+const retire = (id: string) => getConnection().prepare("UPDATE source_update_jobs SET state = 'failed' WHERE id = ?").run(id);
+
+test('B-1448: a contended activity lock returns the job to restart_queued with no receipt', async () => {
+    const job = queuedJob();
+    const receiptsBefore = receiptCount(job.id);
+    const { row, resolved } = activationInputs(job, async () => { throw new Error('update_lock_contended'); });
+    await assert.rejects(executeSourceUpdateActivation(row, resolved), /update_lock_contended/);
+    assert.equal(sourceUpdateJobsDb.getById(job.id)?.state, 'restart_queued');
+    // No receipt: restartQueuedAt (the 24 h consent clock) is read from receipts, so it is unchanged.
+    assert.equal(receiptCount(job.id), receiptsBefore);
+    retire(job.id);
+});
+
+for (const code of ['update_maintenance_active', 'update_source_state_degraded', 'update_lock_unavailable']) {
+    test(`B-1448: ${code} from beginUpdate is not deferred: the job fails with its receipt`, async () => {
+        const job = queuedJob();
+        const { row, resolved } = activationInputs(job, async () => { throw new Error(code); });
+        await assert.rejects(executeSourceUpdateActivation(row, resolved), new RegExp(code));
+        assert.equal(sourceUpdateJobsDb.getById(job.id)?.state, 'failed');
+        const last = (sourceUpdateJobsDb.listReceipts(job.id) as { facts_json: string }[]).at(-1)!;
+        assert.equal(JSON.parse(last.facts_json).code, code);
+    });
+}
+
+test('B-1448: when the CAS back to restart_queued fails, the refusal is recorded as a failure', async () => {
+    const job = queuedJob();
+    const { row, resolved } = activationInputs(job, async () => {
+        // Something else moved the job while the lock was contended.
+        getConnection().prepare("UPDATE source_update_jobs SET state = 'cancelled' WHERE id = ?").run(job.id);
+        throw new Error('update_lock_contended');
+    });
+    await assert.rejects(executeSourceUpdateActivation(row, resolved), /update_lock_contended/);
+    assert.notEqual(sourceUpdateJobsDb.getById(job.id)?.state, 'restart_queued');
+    const last = (sourceUpdateJobsDb.listReceipts(job.id) as { facts_json: string }[]).at(-1)!;
+    assert.equal(JSON.parse(last.facts_json).code, 'update_lock_contended');
+});
+
+test('B-1448: release-layout contention (beginUpdate before the claim) leaves the job queued, untouched', async (t) => {
+    const { execFileSync } = await import('node:child_process');
+    const { createUpdateMaintenanceGate } = await import('../../services/update-maintenance-gate.js');
+    const root = path.join(tmpDir, `release-layout-${crypto.randomUUID()}`);
+    mkdirSync(root, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    writeFileSync(path.join(root, 'RELEASE_ASSET_MANIFEST.json'), JSON.stringify({ commit: 'c'.repeat(40) }));
+    const writer = await createUpdateMaintenanceGate({ projectPath: root })
+        .acquireWriterLease({ kind: 'standalone-pty', waitMs: 100 });
+    t.after(() => writer.release());
+    const job = queuedJob();
+    const receiptsBefore = receiptCount(job.id);
+    const row = {
+        sourceUpdateJobId: job.id, sourceUpdateTransactionId: job.transactionId,
+        activationIdentitySha256: job.activationIdentitySha256, releaseCommit: 'b'.repeat(40),
+    };
+    const resolved = {
+        strategy: 'release-layout-v2', releaseLayout: { current: { path: root } }, maintenance: null,
+        action: { generationId: 'generation-b1448-contended', commit: 'b'.repeat(40), version: '1.47.0.16',
+            jobId: job.id, activationIdentitySha256: job.activationIdentitySha256 },
+    };
+    // Runs with the production activity wait (1 s): this path passes no wait option.
+    await assert.rejects(executeSourceUpdateActivation(row, resolved), /update_lock_contended/);
+    assert.equal(sourceUpdateJobsDb.getById(job.id)?.state, 'restart_queued');
+    assert.equal(receiptCount(job.id), receiptsBefore);
+    assert.equal(createUpdateMaintenanceGate({ projectPath: root }).readPublicStatus().gateClosed, false);
+    retire(job.id);
+});
+
 type Stranded = { id: string; state: string; strategy: string; transaction_id: string; activation_identity_sha256: string };
 
 function fakeJobs(rows: Stranded[]) {

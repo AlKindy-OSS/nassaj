@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "generatedBy": "scripts/permission-launch-inventory.mjs",
-  "siteDigest": "sha256:81fdf54286c1ef6a3d6db448ccc18d56beab19a4d6d2051a074be3b0f9c5cd13",
-  "digest": "sha256:a84490ca3fa2b963ec947f7a17eb0cf56e941e7706e68f6a12502ca89257f4d0",
+  "siteDigest": "sha256:8b543087e738cf74711de3ad4f5faeecb0c40dd06d2952410b5c4d2eedad5e37",
+  "digest": "sha256:195011a322686d6578e8022a94376fe4fedf7e252cf47d0c95c4bb1cef8c068f",
   "entries": [
     {
       "id": "runtime#claude.managed-launcher",
@@ -112,21 +112,6 @@
       "test": "chat websocket and execution adapter tests"
     },
     {
-      "id": "runtime#hermes.cli",
-      "file": "server/hermes-cli.js",
-      "anchor": "async function spawnHermes",
-      "primitive": "injected_spawn",
-      "expression": "hermes CLI",
-      "line": 194,
-      "classification": "provider_effect_enclosed",
-      "owner": "Hermes CLI adapter",
-      "purpose": "spawn",
-      "actorSource": "enclosed WS caller",
-      "gate": "caller ADR-134 LaunchPermit",
-      "adapter": "spawnHermes",
-      "test": "chat websocket and execution adapter tests"
-    },
-    {
       "id": "runtime#kimi.agent-cli",
       "file": "server/kimi-agent-cli.js",
       "anchor": "export async function spawnKimiAgent",
@@ -207,7 +192,7 @@
       "anchor": "export function buildCagedSdkSpawn",
       "primitive": "injected_spawn",
       "expression": "provider cage spawn",
-      "line": 569,
+      "line": 566,
       "classification": "provider_effect_enclosed",
       "owner": "Claude cage subprocess adapter",
       "purpose": "inherited from enclosing effect",
@@ -267,7 +252,7 @@
       "anchor": "router.post('/', agentLimiter",
       "primitive": "runtime.provider_call",
       "expression": "REST provider dispatch",
-      "line": 1200,
+      "line": 1233,
       "classification": "provider_effect_enclosed",
       "owner": "REST agent provider dispatch",
       "purpose": "spawn or sdk_turn",
@@ -282,7 +267,7 @@
       "anchor": "router.post('/generate-commit-message'",
       "primitive": "runtime.provider_call",
       "expression": "commit-message provider dispatch",
-      "line": 1723,
+      "line": 1728,
       "classification": "provider_effect_enclosed",
       "owner": "REST commit-message generation",
       "purpose": "spawn or sdk_turn",
@@ -312,7 +297,7 @@
       "anchor": "if (targetProvider === 'antigravity')",
       "primitive": "runtime.provider_call",
       "expression": "spawnAntigravity",
-      "line": 2492,
+      "line": 2489,
       "classification": "provider_effect_enclosed",
       "owner": "main WS provider dispatch",
       "purpose": "spawn",
@@ -327,7 +312,7 @@
       "anchor": "const spawnSideQuery = sessionProvider === 'codex'",
       "primitive": "runtime.provider_call",
       "expression": "spawnSideQuery",
-      "line": 3233,
+      "line": 3223,
       "classification": "provider_effect_enclosed",
       "owner": "WS side query",
       "purpose": "sdk_turn",
@@ -342,7 +327,7 @@
       "anchor": "if (targetProvider === 'cursor')",
       "primitive": "runtime.provider_call",
       "expression": "spawnCursor",
-      "line": 2480,
+      "line": 2477,
       "classification": "provider_effect_enclosed",
       "owner": "main WS provider dispatch",
       "purpose": "spawn",
@@ -357,7 +342,7 @@
       "anchor": "if (messageType === 'cursor-resume') {\n        let lease",
       "primitive": "runtime.provider_call",
       "expression": "dispatchProviderCommand cursor resume",
-      "line": 2881,
+      "line": 2871,
       "classification": "provider_effect_enclosed",
       "owner": "Cursor resume WS branch",
       "purpose": "spawn",
@@ -372,7 +357,7 @@
       "anchor": "if (targetProvider === 'deepseek')",
       "primitive": "runtime.provider_call",
       "expression": "spawnDeepSeek",
-      "line": 2521,
+      "line": 2513,
       "classification": "provider_effect_enclosed",
       "owner": "main WS provider dispatch",
       "purpose": "spawn",
@@ -387,22 +372,7 @@
       "anchor": "if (targetProvider === 'glm')",
       "primitive": "runtime.provider_call",
       "expression": "spawnGlm",
-      "line": 2526,
-      "classification": "provider_effect_enclosed",
-      "owner": "main WS provider dispatch",
-      "purpose": "spawn",
-      "actorSource": "authenticated WS principal",
-      "gate": "ADR-134 admission + LaunchPermit",
-      "adapter": "dispatchProviderCommand",
-      "test": "chat-websocket.shadow.test.ts"
-    },
-    {
-      "id": "runtime#ws.hermes",
-      "file": "server/modules/websocket/services/chat-websocket.service.ts",
-      "anchor": "if (targetProvider === 'hermes')",
-      "primitive": "runtime.provider_call",
-      "expression": "spawnHermes",
-      "line": 2497,
+      "line": 2518,
       "classification": "provider_effect_enclosed",
       "owner": "main WS provider dispatch",
       "purpose": "spawn",
@@ -417,7 +387,7 @@
       "anchor": "if (targetProvider === 'kimi')",
       "primitive": "runtime.provider_call",
       "expression": "spawnKimi",
-      "line": 2507,
+      "line": 2499,
       "classification": "provider_effect_enclosed",
       "owner": "main WS provider dispatch",
       "purpose": "spawn",
@@ -432,7 +402,7 @@
       "anchor": "if (targetProvider === 'opencode')",
       "primitive": "runtime.provider_call",
       "expression": "spawnOpenCode",
-      "line": 2502,
+      "line": 2494,
       "classification": "provider_effect_enclosed",
       "owner": "main WS provider dispatch",
       "purpose": "spawn",
@@ -640,7 +610,7 @@
     {
       "id": "server/index.js#provider_launcher.import#1",
       "file": "server/index.js",
-      "line": 74,
+      "line": 75,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    queryClaudeSDK,\n    spawnClaudeSideQuery,\n    abortClaudeSDKSession,\n    isClaudeSDKSessionActive,\n    isSessionEngineSwitchBlocked,\n    getActiveC",
       "classification": "composition_binding",
@@ -654,7 +624,7 @@
     {
       "id": "server/index.js#provider_launcher.import#2",
       "file": "server/index.js",
-      "line": 90,
+      "line": 91,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnCursor,\n    abortCursorSession,\n    isCursorSessionActive,\n    getActiveCursorSessions,\n} from './cursor-cli.js';",
       "classification": "composition_binding",
@@ -668,7 +638,7 @@
     {
       "id": "server/index.js#provider_launcher.import#3",
       "file": "server/index.js",
-      "line": 96,
+      "line": 97,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    queryCodex,\n    abortCodexSession,\n    isCodexSessionActive,\n    getActiveCodexSessions,\n} from './openai-codex.js';",
       "classification": "composition_binding",
@@ -682,7 +652,7 @@
     {
       "id": "server/index.js#provider_launcher.import#4",
       "file": "server/index.js",
-      "line": 103,
+      "line": 104,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnAntigravity,\n    abortAntigravitySession,\n    isAntigravitySessionActive,\n    getActiveAntigravitySessions,\n    attachAntigravitySession,\n} fr",
       "classification": "composition_binding",
@@ -696,7 +666,7 @@
     {
       "id": "server/index.js#provider_launcher.import#5",
       "file": "server/index.js",
-      "line": 110,
+      "line": 111,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnOpenCode,\n    abortOpenCodeSession,\n    isOpenCodeSessionActive,\n    getActiveOpenCodeSessions,\n} from './opencode-cli.js';",
       "classification": "composition_binding",
@@ -710,21 +680,7 @@
     {
       "id": "server/index.js#provider_launcher.import#6",
       "file": "server/index.js",
-      "line": 116,
-      "primitive": "provider_launcher.import",
-      "expression": "import {\n    spawnHermes,\n    abortHermesSession,\n    isHermesSessionActive,\n    getActiveHermesSessions,\n} from './hermes-cli.js';",
-      "classification": "composition_binding",
-      "owner": "server composition root",
-      "purpose": "dependency_wiring",
-      "actorSource": "no effect at import time",
-      "gate": "all exported launchers receive authorization in their route/WS adapters",
-      "adapter": "server composition",
-      "test": "inventory plus route/WS permission tests"
-    },
-    {
-      "id": "server/index.js#provider_launcher.import#7",
-      "file": "server/index.js",
-      "line": 132,
+      "line": 127,
       "primitive": "provider_launcher.import",
       "expression": "import { spawnKimiAgent } from './kimi-agent-cli.js';",
       "classification": "composition_binding",
@@ -736,9 +692,9 @@
       "test": "inventory plus route/WS permission tests"
     },
     {
-      "id": "server/index.js#provider_launcher.import#8",
+      "id": "server/index.js#provider_launcher.import#7",
       "file": "server/index.js",
-      "line": 152,
+      "line": 147,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnQwen,\n    abortQwenSession,\n    isQwenSessionActive,\n    getActiveQwenSessions,\n} from './qwen-cli.js';",
       "classification": "composition_binding",
@@ -848,23 +804,9 @@
       "test": "gateway forbidden-purpose and provider MCP containment tests"
     },
     {
-      "id": "server/modules/connectors/connector-auth-safe-fetch.ts#http_client.request#1",
-      "file": "server/modules/connectors/connector-auth-safe-fetch.ts",
-      "line": 248,
-      "primitive": "http_client.request",
-      "expression": "(input.url.protocol === 'http:' ? httpRequest : httpsRequest)",
-      "classification": "connector_management_effect",
-      "owner": "connector authentication fetch",
-      "purpose": "connector_setup",
-      "actorSource": "authenticated connector management flow",
-      "gate": "connector URL/ownership and SSRF policy",
-      "adapter": "connector safe fetch",
-      "test": "connector auth security tests"
-    },
-    {
       "id": "server/modules/connectors/connector-auto-setup.ts#child_process.spawnSync#1",
       "file": "server/modules/connectors/connector-auto-setup.ts",
-      "line": 346,
+      "line": 350,
       "primitive": "child_process.spawnSync",
       "expression": "spawnSync",
       "classification": "infrastructure_effect",
@@ -1002,6 +944,20 @@
       "test": "runtime-release-identity.test.ts"
     },
     {
+      "id": "server/modules/net/pinned-transport.ts#http_client.request#1",
+      "file": "server/modules/net/pinned-transport.ts",
+      "line": 85,
+      "primitive": "http_client.request",
+      "expression": "(input.url.protocol === 'http:' ? httpRequest : httpsRequest)",
+      "classification": "pinned_outbound_fetch_effect",
+      "owner": "shared pinned outbound fetch (ADR-194 D7)",
+      "purpose": "connector_setup_and_sso_relying_party",
+      "actorSource": "authenticated connector management flow; SSO relying party (owner-configured discovery, JWKS and token exchange carrying the client secret)",
+      "gate": "DNS pinning, D7 address matrix, port rule, bounded redirects and bodies; connector ownership or owner-only SSO settings with sso_config step-up",
+      "adapter": "pinnedFetchJson (connector safe fetch wrapper and OIDC verifier transport)",
+      "test": "address-policy.test.ts, pinned-fetch.test.ts, oidc-verifier.service.test.ts, settings-sso.api.test.ts"
+    },
+    {
       "id": "server/modules/projects/services/git-transport-security.service.ts#child_process.spawn#1",
       "file": "server/modules/projects/services/git-transport-security.service.ts",
       "line": 140,
@@ -1039,7 +995,7 @@
       "owner": "harness update/rollback child runner (T-1749/ADR-159, moved for T-1871)",
       "purpose": "harness_update",
       "actorSource": "owner-only update/rollback endpoints, the server-side scheduler tick or boot reconcile (mutating runs); any authenticated reader of the version-status routes (`<binary> --version` reads only)",
-      "gate": "cmd/args are always server-owned: descriptor updateArgv, descriptor binary + versionArgs, or fixed git/npm/uv argv whose only variable parts are the descriptor npm prefix/package, a version parsed from the installed binary, a 40-hex rev captured from the checkout, and the operator uv path (HERMES_UV_PATH, else ~/.local/bin/uv, else a PATH lookup of uv for the hermes rollback only); no client command string. Every run uses cleanSpawnEnv, a hard timeout with process-group SIGKILL, and bounded output capture. Mutating runs additionally hold the per-harness single-flight lease and the atomic no-live-session gate that also blocks new spawns, and write an audited job row; snapshot-path updaters are also recorded in the durable spawn ledger. Version reads are capped at 10 s and take no lease.",
+      "gate": "cmd/args are always server-owned: descriptor updateArgv, descriptor binary + versionArgs, or fixed npm argv whose only variable parts are the descriptor npm prefix/package and a version parsed from the installed binary; no client command string. Every run uses cleanSpawnEnv, a hard timeout with process-group SIGKILL, and bounded output capture. Mutating runs additionally hold the per-harness single-flight lease and the atomic no-live-session gate that also blocks new spawns, and write an audited job row; snapshot-path updaters are also recorded in the durable spawn ledger. Version reads are capped at 10 s and take no lease.",
       "adapter": "runHarnessUpdateCommand (and defaultRunVersion)",
       "test": "update.service.test.ts, run-command tests and spawn-admission.test.ts"
     },
@@ -1256,7 +1212,7 @@
     {
       "id": "server/modules/turn-supervisor/adapters/extended-cli-adapter.ts#child_process.spawn#1",
       "file": "server/modules/turn-supervisor/adapters/extended-cli-adapter.ts",
-      "line": 80,
+      "line": 78,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "provider_effect_enclosed",
@@ -1298,7 +1254,7 @@
     {
       "id": "server/modules/turn-supervisor/cli-capability.ts#child_process.spawnSync#1",
       "file": "server/modules/turn-supervisor/cli-capability.ts",
-      "line": 24,
+      "line": 23,
       "primitive": "child_process.spawnSync",
       "expression": "spawnSync",
       "classification": "capability_probe_effect",
@@ -1326,7 +1282,7 @@
     {
       "id": "server/modules/websocket/services/shell-websocket.service.ts#node_pty.spawn#1",
       "file": "server/modules/websocket/services/shell-websocket.service.ts",
-      "line": 1221,
+      "line": 1267,
       "primitive": "node_pty.spawn",
       "expression": "pty.spawn",
       "classification": "interactive_shell_effect",
@@ -1410,7 +1366,7 @@
     {
       "id": "server/openai-codex.js#codex_sdk.runStreamed#1",
       "file": "server/openai-codex.js",
-      "line": 902,
+      "line": 913,
       "primitive": "codex_sdk.runStreamed",
       "expression": "thread.runStreamed",
       "classification": "provider_effect_enclosed",
@@ -1424,7 +1380,7 @@
     {
       "id": "server/openai-codex.js#codex_sdk.startThread#1",
       "file": "server/openai-codex.js",
-      "line": 834,
+      "line": 845,
       "primitive": "codex_sdk.startThread",
       "expression": "codex.startThread",
       "classification": "provider_effect_enclosed",
@@ -1438,7 +1394,7 @@
     {
       "id": "server/routes/agent.js#child_process.spawn#1",
       "file": "server/routes/agent.js",
-      "line": 203,
+      "line": 235,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",
@@ -1452,7 +1408,7 @@
     {
       "id": "server/routes/agent.js#child_process.spawn#2",
       "file": "server/routes/agent.js",
-      "line": 473,
+      "line": 505,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",
@@ -1466,7 +1422,7 @@
     {
       "id": "server/routes/agent.js#child_process.spawn#3",
       "file": "server/routes/agent.js",
-      "line": 1679,
+      "line": 1719,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",
@@ -1480,7 +1436,7 @@
     {
       "id": "server/routes/agent.js#child_process.spawn#4",
       "file": "server/routes/agent.js",
-      "line": 1701,
+      "line": 1741,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",
@@ -1494,7 +1450,7 @@
     {
       "id": "server/routes/agent.js#child_process.spawn#5",
       "file": "server/routes/agent.js",
-      "line": 1746,
+      "line": 1786,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",
@@ -1508,7 +1464,7 @@
     {
       "id": "server/routes/agent.js#child_process.spawn#6",
       "file": "server/routes/agent.js",
-      "line": 1752,
+      "line": 1792,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "infrastructure_effect",
@@ -1522,7 +1478,7 @@
     {
       "id": "server/routes/agent.js#provider_launcher.import#1",
       "file": "server/routes/agent.js",
-      "line": 23,
+      "line": 25,
       "primitive": "provider_launcher.import",
       "expression": "import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive } from '../claude-sdk.js';",
       "classification": "infrastructure_effect",
@@ -1536,7 +1492,7 @@
     {
       "id": "server/routes/agent.js#provider_launcher.import#2",
       "file": "server/routes/agent.js",
-      "line": 25,
+      "line": 27,
       "primitive": "provider_launcher.import",
       "expression": "import { spawnCursor } from '../cursor-cli.js';",
       "classification": "infrastructure_effect",
@@ -1550,7 +1506,7 @@
     {
       "id": "server/routes/agent.js#provider_launcher.import#3",
       "file": "server/routes/agent.js",
-      "line": 26,
+      "line": 28,
       "primitive": "provider_launcher.import",
       "expression": "import { queryCodex } from '../openai-codex.js';",
       "classification": "infrastructure_effect",
@@ -1564,7 +1520,7 @@
     {
       "id": "server/routes/agent.js#provider_launcher.import#4",
       "file": "server/routes/agent.js",
-      "line": 27,
+      "line": 29,
       "primitive": "provider_launcher.import",
       "expression": "import { spawnOpenCode } from '../opencode-cli.js';",
       "classification": "infrastructure_effect",
@@ -1578,7 +1534,7 @@
     {
       "id": "server/routes/agent.js#provider_launcher.import#5",
       "file": "server/routes/agent.js",
-      "line": 28,
+      "line": 30,
       "primitive": "provider_launcher.import",
       "expression": "import { spawnKimiAgent } from '../kimi-agent-cli.js';",
       "classification": "infrastructure_effect",
@@ -1606,7 +1562,7 @@
     {
       "id": "server/routes/git.js#child_process.spawn#1",
       "file": "server/routes/git.js",
-      "line": 266,
+      "line": 271,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "repository_effect",
@@ -1648,7 +1604,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#1",
       "file": "server/routes/system.js",
-      "line": 832,
+      "line": 879,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1662,7 +1618,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#2",
       "file": "server/routes/system.js",
-      "line": 885,
+      "line": 932,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1676,7 +1632,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#3",
       "file": "server/routes/system.js",
-      "line": 2788,
+      "line": 2835,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1690,7 +1646,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#4",
       "file": "server/routes/system.js",
-      "line": 3480,
+      "line": 3560,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1704,7 +1660,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#5",
       "file": "server/routes/system.js",
-      "line": 3656,
+      "line": 3736,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1718,7 +1674,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#6",
       "file": "server/routes/system.js",
-      "line": 3970,
+      "line": 4068,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1984,7 +1940,7 @@
     {
       "id": "server/services/update-maintenance-gate.js#child_process.spawnSync#1",
       "file": "server/services/update-maintenance-gate.js",
-      "line": 767,
+      "line": 787,
       "primitive": "child_process.spawnSync",
       "expression": "spawnSync",
       "classification": "release_infrastructure_effect",

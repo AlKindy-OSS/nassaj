@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { KeyRound, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, KeyRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { IS_PLATFORM } from '../../../constants/config';
 import { useBranding } from '../../../contexts/BrandingContext';
 import { useAuth } from '../context/AuthContext';
-import { useOidcAvailability } from '../hooks/useOidcAvailability';
+import { useSsoStatus } from '../hooks/useOidcAvailability';
 import { useWebAuthn } from '../hooks/useWebAuthn';
 import { startOidcLogin } from '../oidc';
 import { consumeSsoReauthNotice, hasSsoReauthNotice } from '../ssoReauth';
@@ -54,7 +54,11 @@ export default function LoginForm() {
   const { t } = useTranslation('auth');
   const { login } = useAuth();
   const { isSupported: isPasskeySupported, loginWithPasskey } = useWebAuthn();
-  const isSsoAvailable = useOidcAvailability();
+  const ssoStatus = useSsoStatus();
+  const isSsoAvailable = ssoStatus?.loginAvailable === true;
+  // ADR-194 D1: SSO is enforced but cannot sign anyone in right now
+  // (`unavailable`, or `paused` on a legacy-env node awaiting import).
+  const isSsoUnavailable = ssoStatus?.state === 'unavailable' || ssoStatus?.state === 'paused';
   // Custom branding title (if configured) is interpolated into the description
   // copy (`{{appName}}`) so the login screen never names the stock product.
   const { title: brandingTitle } = useBranding();
@@ -185,6 +189,13 @@ export default function LoginForm() {
             <span className="text-xs uppercase text-muted-foreground">{t('passkey.divider')}</span>
             <div className="h-px flex-1 bg-border" />
           </div>
+        )}
+
+        {isSsoUnavailable && (
+          <p role="status" className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-foreground">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+            {t('sso.unavailableNotice')}
+          </p>
         )}
 
         {isSsoAvailable && (

@@ -8,6 +8,8 @@ import path from 'node:path';
 import test, { after, beforeEach, mock } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
+import { createSsoConfigDouble } from './__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const HOUR_MS = 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -17,6 +19,7 @@ let staleRows: StaleRow[] = [];
 const queries: Array<{ cutoffMs: number; afterUserId: number; limit: number }> = [];
 const audits: Array<{ event: string; payload: Record<string, unknown> }> = [];
 let queryFailure: Error | null = null;
+const sso = createSsoConfigDouble();
 
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
@@ -32,6 +35,7 @@ mock.module(url('../modules/database/index.js'), {
     },
   },
 });
+mock.module(url('./sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/account-wallet/user-identity-revocation.js'), {
   namedExports: { revokeUserIdentity: () => { throw new Error('default revoke must not run'); } },
 });
@@ -43,19 +47,12 @@ const { SSO_ATTESTATION_EXPIRED_REVOCATION } = await import(
   '../modules/account-wallet/user-realtime-revocation.js'
 );
 
-const KEYS = ['OIDC_ENABLED', 'OIDC_ROLE_PROJECT_ID', 'OIDC_ATTESTATION_MAX_AGE_HOURS'] as const;
-const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
 after(() => {
   stopSsoAttestationSweep();
-  for (const key of KEYS) {
-    if (saved[key] === undefined) delete process.env[key];
-    else process.env[key] = saved[key];
-  }
 });
 beforeEach(() => {
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
-  delete process.env.OIDC_ATTESTATION_MAX_AGE_HOURS;
+  sso.setActive(true);
+  sso.state.maxAgeHours = 12;
   staleRows = [];
   queries.length = 0;
   audits.length = 0;
@@ -143,8 +140,24 @@ test('errors are logged, never thrown; a failed revocation is retried next tick'
   assert.ok(logged.some((line) => line.includes('sweep_failed')));
 });
 
-test('OIDC disabled: no query and no revocation', () => {
-  process.env.OIDC_ENABLED = 'false';
+test('enforced but login unavailable: every linked non-owner is stale and swept (D1)', () => {
+  sso.state.loginAvailable = false;
+  staleRows = [{ userId: 3, latestAttestedAt: NOW }, { userId: 4, latestAttestedAt: null }];
+  const { calls, revoke } = recorder();
+  assert.equal(runSsoAttestationSweep({ nowMs: NOW, revoke }), 2);
+  assert.equal(queries[0].cutoffMs, Number.MAX_SAFE_INTEGER, 'no attestation is fresh while nobody can re-attest');
+  assert.deepEqual(calls.map((call) => call.userId), [3, 4]);
+  assert.equal(runSsoAttestationSweep({ nowMs: NOW, revoke }), 0, 'each attestation is revoked once');
+});
+
+test('the window comes from the active config', () => {
+  sso.state.maxAgeHours = 3;
+  runSsoAttestationSweep({ nowMs: NOW, revoke: recorder().revoke });
+  assert.equal(queries[0].cutoffMs, NOW - 3 * HOUR_MS);
+});
+
+test('policy not enforced: no query and no revocation', () => {
+  sso.setActive(false);
   staleRows = [{ userId: 3, latestAttestedAt: null }];
   const { calls, revoke } = recorder();
   assert.equal(runSsoAttestationSweep({ nowMs: NOW, revoke }), 0);

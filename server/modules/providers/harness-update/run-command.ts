@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 
 // eslint-disable-next-line boundaries/no-unknown -- the root command service owns the canonical secret-stripping environment.
 import { cleanSpawnEnv } from '@/services/command-board-custom.js';
-import { listAllActiveScopes } from '@/modules/workflow-supervisor/index.js';
+import { probeUserWorkflowUnits, type UserUnitProbe } from '@/modules/workflow-supervisor/index.js';
 
 import { hasLiveHarnessLaunch } from './spawn-admission.js';
 import type { RunResult } from './update-jobs.js';
@@ -128,19 +128,26 @@ export function runHarnessUpdateCommand(
   });
 }
 
+/** Which unregistered launch keeps a harness busy (null = none). */
+export type UnregisteredLaunch = 'live_launch' | 'live_unit' | null;
+
 /**
  * The gate's second leg (item 6): launches this process started outside the
- * presence run registry. In-process children are counted by spawn-admission;
- * the workflow leg runs as a DETACHED systemd user unit (`wf-*.service` →
- * task-runner → `claude -p`) that outlives this process, so it is probed with
- * `systemctl --user list-units`. A probe failure throws and the caller fails
- * CLOSED (treats the harness as busy) rather than updating under a live turn.
+ * presence run registry. In-process children are counted by spawn-admission
+ * (`live_launch`); the workflow leg runs as a DETACHED systemd user unit
+ * (`wf-*.service` → task-runner → `claude -p`) that outlives this process, so
+ * it is probed via probeUserWorkflowUnits (`live_unit`). A host with no user
+ * manager for this uid (B-1474) cannot run such units and reads as free; a
+ * probe that cannot decide throws and the caller fails CLOSED.
  */
-export async function defaultHasUnregisteredLaunch(providerIds: string[]): Promise<boolean> {
-  if (hasLiveHarnessLaunch(providerIds)) return true;
-  if (!providerIds.includes('claude')) return false;
-  const units = await listAllActiveScopes();
-  return units.length > 0;
+export async function defaultHasUnregisteredLaunch(
+  providerIds: string[],
+  probeUnits: () => Promise<UserUnitProbe> = probeUserWorkflowUnits,
+): Promise<UnregisteredLaunch> {
+  if (hasLiveHarnessLaunch(providerIds)) return 'live_launch';
+  if (!providerIds.includes('claude')) return null;
+  const probe = await probeUnits();
+  return probe.state === 'present' && probe.units.length > 0 ? 'live_unit' : null;
 }
 
 /** `<binary> --version` under cleanSpawnEnv with a 10 s cap; stdout, else stderr, else null. */

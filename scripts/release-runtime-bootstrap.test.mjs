@@ -9,7 +9,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import ts from 'typescript';
+import { compileModuleClosure } from './lib/compile-module-closure.mjs';
 import { createUpdateMaintenanceGate } from '../server/services/update-maintenance-gate.js';
 import { bootstrapServer } from '../server/bootstrap.js';
 import { requireReleaseLayout } from './lib/update-release-layout-adapter.mjs';
@@ -173,25 +173,8 @@ test('release manifest validation rejects version traversal before a generation 
 
 
 async function compiledPermissionRegistry(directory) {
-    for (const name of ['parity', 'types', 'validation', 'capability-registry']) {
-        const relative = `server/modules/execution-permissions/${name}`;
-        mkdirSync(path.dirname(path.join(directory, relative)), { recursive: true });
-        writeFileSync(path.join(directory, `${relative}.js`), ts.transpileModule(readFileSync(path.join(ROOT, `${relative}.ts`), 'utf8'), {
-            compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-        }).outputText);
-    }
-    mkdirSync(path.join(directory, 'server/shared'), { recursive: true });
-    copyFileSync(path.join(ROOT, 'server/shared/codex-executable.js'), path.join(directory, 'server/shared/codex-executable.js'));
-    // T-1873: capability-registry now also resolves harness binaries through the registry.
-    for (const name of ['harness-binaries', 'claude-cli-path']) {
-        writeFileSync(path.join(directory, `server/shared/${name}.js`), ts.transpileModule(
-            readFileSync(path.join(ROOT, `server/shared/${name}.ts`), 'utf8'),
-            { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } },
-        ).outputText);
-    }
-    const fixture = 'server/modules/execution-permissions/fixtures/permission-capabilities.v1.json';
-    mkdirSync(path.dirname(path.join(directory, fixture)), { recursive: true });
-    copyFileSync(path.join(ROOT, fixture), path.join(directory, fixture));
+    const entry = 'server/modules/execution-permissions/capability-registry.ts';
+    compileModuleClosure({ sourceRoot: ROOT, destinationRoot: directory, entries: [entry] });
     return import(pathToFileURL(path.join(directory, 'server/modules/execution-permissions/capability-registry.js')).href);
 }
 

@@ -7,8 +7,15 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createSsoConfigDouble, doubleMapping } from '../services/__tests__/sso-config-double.js';
+import { createSsoRuntimeDouble } from '../services/__tests__/sso-runtime-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
+// Project-scoped roles claim in the nested-grant shape (fixture data, neutral name).
+const ROLES_CLAIM = 'urn:example:iam:org:project:proj-synth:roles';
+const GENERIC_ROLES_CLAIM = 'urn:example:iam:org:project:roles';
+const sso = createSsoConfigDouble({ mapping: doubleMapping({ role_claim_path: `["${ROLES_CLAIM}"]` }) });
 let currentTransaction: string | null = null;
 const audits: Array<Record<string, unknown>> = [];
 const revocations: number[] = [];
@@ -19,7 +26,7 @@ const mintedRoles: string[] = [];
 // Default attestation carries a recognized role on the configured project (T-1939).
 let verifiedClaims: Record<string, unknown> = {
   sub: 'subject-synthetic',
-  'urn:zitadel:iam:org:project:proj-synth:roles': { member: { '1': 'org.example' } },
+  [ROLES_CLAIM]: { member: { '1': 'org.example' } },
 };
 const attestations: Array<{ identityId: number; userId: number; at: number }> = [];
 let attestationFailure: 'throw' | 'no_row' | null = null;
@@ -47,14 +54,16 @@ let identityUserId = 12;
 let userIssuerLinkCount = 1;
 let duplicateUsersCount = 0;
 
+let storedConfigVersion: unknown = null;
 const pkceStore = {
   store: (_state: string, value: Record<string, unknown>) => {
     currentTransaction = typeof value.browserTransaction === 'string' ? value.browserTransaction : null;
+    storedConfigVersion = value.configVersion;
     return currentTransaction !== null;
   },
   consume: (state: string, browserTransaction: string | null) => (
     state === 'state-synthetic' && browserTransaction === currentTransaction
-      ? { nonce: 'nonce-synthetic', codeVerifier: 'verifier-synthetic', purpose: 'login' }
+      ? { nonce: 'nonce-synthetic', codeVerifier: 'verifier-synthetic', purpose: 'login', configVersion: storedConfigVersion }
       : null
   ),
   consumeWithOutcome: (state: string, browserTransaction: string | null) => ({
@@ -71,6 +80,11 @@ const codeStore = {
       ? { token: storedCode.token, userId: storedCode.userId }
       : null
   ),
+  discard: (code: string) => {
+    if (code !== storedCode?.code) return false;
+    storedCode = null;
+    return true;
+  },
 };
 
 mock.module(url('../middleware/auth.js'), {
@@ -176,24 +190,21 @@ mock.module(url('../services/oidc-verifier.service.js'), {
     idTokenAuthTimeMs: (claims: { auth_time?: number }) => (
       typeof claims?.auth_time === 'number' ? claims.auth_time * 1000 : null
     ),
-    createOidcVerifier: () => ({
-      getDiscovery: async () => ({ authorization_endpoint: 'https://issuer.example/authorize' }),
-      exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
-      verifyIdToken: async () => {
-        if (verifyFailure) throw verifyFailure;
-        return verifiedClaims;
-      },
-      verifyLogoutToken: async () => ({ sub: 'subject-synthetic' }),
-    }),
   },
 });
+// ADR-194: the routes read the SSO configuration rows, never OIDC_* env.
+const ssoRuntime = createSsoRuntimeDouble(sso, {
+  exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
+  verifyIdToken: async () => {
+    if (verifyFailure) throw verifyFailure;
+    return verifiedClaims;
+  },
+  verifyLogoutToken: async () => ({ sub: 'subject-synthetic' }),
+});
 
-process.env.OIDC_ENABLED = 'true';
-process.env.OIDC_ISSUER_URL = 'https://issuer.example';
-process.env.OIDC_CLIENT_ID = 'client-synthetic';
-process.env.OIDC_REDIRECT_URI = 'https://app.example/api/auth/oidc/callback';
-// Required for OIDC to be live (fail-closed): role mapping must be project-scoped.
-process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
+mock.module(url('../services/sso-oidc-runtime.service.js'), { namedExports: ssoRuntime.exports });
+for (const key of ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_REDIRECT_URI']) delete process.env[key];
 
 const { default: oidcRouter } = await import('./oidc.js');
 const { warnOnOwnerOidcLinks } = await import('../services/oidc-owner-link-check.js');
@@ -266,6 +277,8 @@ function resetUnlinkState() {
   unlinkFailure = null;
   selfUnlinkLimitExhausted = false;
   liveRevocationFailure = null;
+  apiKeyRevocations.length = 0;
+  apiKeyCount = 2;
 }
 
 const IDENTITY_UNLINK_REVOCATION = { abortReason: null, endInteractiveSessions: true };
@@ -311,6 +324,26 @@ test('B-1410: owner unlinks a lower-ranked member in one transaction, then cuts 
   const audit = audits.find((record) => record.event === 'oidc_identity_unlinked');
   assert.deepEqual(audit?.metadata, { targetUserId: 3 });
   assert.equal(audit?.userId, 1);
+});
+
+test('T-1946: unlinking a member deletes their API keys in the unlink transaction', async () => {
+  resetUnlinkState();
+  const res = await unlinkUser(3);
+  assert.equal(res.status, 200);
+  assert.deepEqual(apiKeyRevocations, [3]);
+  const audit = audits.find((record) => record.event === 'api_keys_revoked_sso');
+  assert.deepEqual(audit?.metadata, { trigger: 'identity_unlinked', count: 2 });
+  assert.equal(audit?.userId, 3);
+
+  resetUnlinkState();
+  apiKeyCount = 0;
+  assert.equal((await unlinkUser(3)).status, 200);
+  assert.ok(!audits.some((record) => record.event === 'api_keys_revoked_sso'), 'no keys → no audit');
+
+  resetUnlinkState();
+  unlinkFailure = new Error('disk full');
+  assert.equal((await unlinkUser(3)).status, 500);
+  assert.deepEqual(apiKeyRevocations, [], 'a failed unlink deletes no key');
 });
 
 test('B-1410: a live-revocation failure never blocks the audit or the response', async () => {
@@ -377,6 +410,7 @@ test('B-1410 C1: owner self-unlink with the right password', async () => {
   const audit = audits.find((record) => record.event === 'oidc_identity_self_unlinked');
   assert.equal(audit?.userId, 1);
   assert.ok(audits.every((record) => !JSON.stringify(record).includes('correct-pw')));
+  assert.deepEqual(apiKeyRevocations, [], 'the owner keeps its API keys');
 });
 
 test('B-1410 C1: a wrong password is 401, audited without the password, and unlinks nothing', async () => {
@@ -460,8 +494,6 @@ test('B-1410: boot warns once, with a count only, when an owner holds an SSO lin
 });
 
 // Roles are read ONLY from the project-scoped claim (fail-closed).
-const ROLES_CLAIM = `urn:zitadel:iam:org:project:${process.env.OIDC_ROLE_PROJECT_ID}:roles`;
-const GENERIC_ROLES_CLAIM = 'urn:zitadel:iam:org:project:roles';
 
 async function runCallback() {
   const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
@@ -507,13 +539,22 @@ test('T-958: the verified roles claim sets the minted role and is audited withou
   assert.ok(audits.every((record) => !JSON.stringify(record).includes('subject-synthetic')));
 });
 
-test('T-958: an owner keeps owner with a known role; an attested owner is ignored', async () => {
+test('ADR-194 I6: an owner identity is refused with owner_must_sign_in_locally and writes nothing', async () => {
   resetLoginState('owner', { [ROLES_CLAIM]: ['viewer'] });
-  assert.equal((await runCallback()).status, 302);
-  assert.deepEqual(mintedRoles, ['owner']);
+  const callback = await runCallback();
+  assert.equal(callback.status, 302);
+  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
+  assert.equal(callback.headers.get('referrer-policy'), 'no-referrer');
+  assert.deepEqual(mintedRoles, [], 'no token is minted');
+  assert.equal(storedCode, null);
+  assert.deepEqual(attestations, [], 'no attestation stamp');
+  assert.deepEqual(revocations, []);
   assert.equal(storedUser.role, 'owner');
-  assert.ok(!audits.some((record) => record.event === 'external_role_synced'));
+  assert.deepEqual(audits.map((record) => record.event), ['oidc_owner_sign_in_refused']);
+  assert.deepEqual(audits[0]?.metadata, { provider: 'oidc', purpose: 'login' });
+});
 
+test('T-958: an attested owner value is ignored', async () => {
   resetLoginState('user', { [ROLES_CLAIM]: ['owner', 'member'] });
   assert.equal((await runCallback()).status, 302);
   assert.deepEqual(mintedRoles, ['user'], 'an attested owner is ignored');
@@ -555,10 +596,116 @@ test('cross-project leak: the generic roles claim alone is refused, not elevated
   }, 'roles_claim_absent');
 });
 
-test('T-1939: an owner without a role is refused but its other sessions are untouched', async () => {
-  await assertDeniedWithoutRole('owner', {}, 'roles_claim_absent');
+test('ADR-194 D5: the claim tenant mode refuses an unlisted tenant with tenant_not_allowed', async () => {
+  const saved = sso.state.mapping;
+  sso.state.mapping = doubleMapping({
+    role_claim_path: 'groups', tenant_mode: 'claim', tenant_claim_path: 'tid', tenant_values_json: '["t-1"]',
+  });
+  try {
+    await assertDeniedWithoutRole('user', { groups: ['member'], tid: 't-2' }, 'tenant_not_allowed');
+    resetLoginState('user', { groups: ['admin'], tid: 't-1' });
+    assert.equal((await runCallback()).status, 302);
+    assert.deepEqual(mintedRoles, ['admin']);
+  } finally {
+    sso.state.mapping = saved;
+  }
+});
+
+test('ADR-194: a mapping that vanished mid-flight refuses without treating it as a withdrawal', async () => {
+  const saved = sso.state.mapping;
+  sso.state.mapping = null;
+  try {
+    resetLoginState('admin', { [ROLES_CLAIM]: ['admin'] });
+    const callback = await runCallback();
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=temporarily_unavailable');
+    assert.equal(storedCode, null);
+    assert.deepEqual(revocations, [], 'no session revocation');
+    assert.deepEqual(apiKeyRevocations, [], 'no API key revocation');
+    assert.ok(!audits.some((record) => record.event === 'oidc_access_denied_no_role'));
+  } finally {
+    sso.state.mapping = saved;
+  }
+});
+
+test('ADR-194 I6: an owner without a role is refused as an owner, before any mapping', async () => {
+  resetLoginState('owner', {});
+  const callback = await runCallback();
+  assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=owner_must_sign_in_locally');
   assert.deepEqual(revocations, []);
   assert.deepEqual(identityRevocations, []);
+  assert.deepEqual(apiKeyRevocations, [], 'owner keys are untouched');
+  assert.ok(!audits.some((record) => record.event === 'oidc_access_denied_no_role'));
+});
+
+test('ADR-194 D9: an apply between start and callback refuses with oidc_config_changed', async () => {
+  resetLoginState('user', { [ROLES_CLAIM]: ['member'] });
+  const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+  const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+  ssoRuntime.runtime.version = 8;
+  try {
+    const callback = await fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=provider-code`, {
+      headers: { cookie: cookiePair }, redirect: 'manual',
+    });
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.equal(storedCode, null);
+    assert.deepEqual(mintedRoles, []);
+    assert.deepEqual(attestations, []);
+  } finally {
+    ssoRuntime.runtime.version = 7;
+  }
+});
+
+test('ADR-194 D9: the fence refuses the writes when an apply lands before them', async () => {
+  resetLoginState('admin', {});
+  ssoRuntime.runtime.fenceVersion = 8;
+  try {
+    const callback = await runCallback();
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.deepEqual(revocations, [], 'denyLoginWithoutRole writes nothing on mismatch');
+    assert.deepEqual(apiKeyRevocations, []);
+    assert.ok(!audits.some((record) => record.event === 'oidc_access_denied_no_role'));
+  } finally {
+    ssoRuntime.runtime.fenceVersion = null;
+  }
+});
+
+test('ADR-194 D9: an apply after the JWT is minted drops the one-time code', async () => {
+  resetLoginState('user', { [ROLES_CLAIM]: ['member'] });
+  ssoRuntime.runtime.postMintVersion = 8;
+  try {
+    const callback = await runCallback();
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=oidc_config_changed');
+    assert.equal(storedCode, null, 'the code is deleted');
+    assert.ok(!audits.some((record) => record.event === 'oidc_login'));
+  } finally {
+    ssoRuntime.runtime.postMintVersion = null;
+  }
+});
+
+test('ADR-194 D2: RFC 9207 iss is checked against the selected config', async () => {
+  ssoRuntime.runtime.discoveryFlags = { authorization_response_iss_parameter_supported: true };
+  try {
+    for (const [query, expected] of [
+      ['', 'iss_mismatch'], ['&iss=https%3A%2F%2Fother.example', 'iss_mismatch'],
+    ] as const) {
+      resetLoginState('user', { [ROLES_CLAIM]: ['member'] });
+      const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+      const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+      const callback = await fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=c${query}`, {
+        headers: { cookie: cookiePair }, redirect: 'manual',
+      });
+      assert.equal(callback.headers.get('location'), `/auth/oidc/return?error=${expected}`, query);
+      assert.deepEqual(mintedRoles, []);
+    }
+    resetLoginState('user', { [ROLES_CLAIM]: ['member'] });
+    const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+    const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+    const ok = await fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=c&iss=${
+      encodeURIComponent('https://issuer.example')}`, { headers: { cookie: cookiePair }, redirect: 'manual' });
+    assert.match(ok.headers.get('location') ?? '', /oidc_code=/);
+  } finally {
+    ssoRuntime.runtime.discoveryFlags = {};
+  }
 });
 
 test('T-1939: a live-revocation failure still refuses the login', async () => {
@@ -593,20 +740,31 @@ test('T-1939: the link is stamped before a token exists; a failed stamp issues n
   attestationFailure = null;
 });
 
-test('fail-closed: a missing/invalid OIDC_ROLE_PROJECT_ID disables OIDC (routes 501)', async () => {
-  const saved = process.env.OIDC_ROLE_PROJECT_ID;
+test('fail-closed: browser routes answer 501 while SSO login is unavailable (ADR-194 D1)', async () => {
+  sso.state.loginAvailable = false;
   try {
-    delete process.env.OIDC_ROLE_PROJECT_ID;
     const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
-    assert.equal(login.status, 501, 'missing project id disables OIDC');
-
-    process.env.OIDC_ROLE_PROJECT_ID = 'bad id with spaces';
+    assert.equal(login.status, 501, 'login');
     const exchange = await fetch(`${baseUrl}/api/auth/oidc/exchange`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: 'x' }),
     });
-    assert.equal(exchange.status, 501, 'invalid project id disables OIDC');
+    assert.equal(exchange.status, 501, 'exchange');
   } finally {
-    process.env.OIDC_ROLE_PROJECT_ID = saved;
+    sso.state.loginAvailable = true;
+  }
+  // D2: the callback consumes the entry first, then refuses a non-test purpose.
+  resetLoginState('user', { [ROLES_CLAIM]: ['member'] });
+  const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+  const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+  sso.state.loginAvailable = false;
+  try {
+    const callback = await fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=c`, {
+      headers: { cookie: cookiePair }, redirect: 'manual',
+    });
+    assert.equal(callback.headers.get('location'), '/auth/oidc/return?error=sso_unavailable', 'callback');
+    assert.deepEqual(mintedRoles, []);
+  } finally {
+    sso.state.loginAvailable = true;
   }
 });
 
@@ -625,7 +783,7 @@ test('B-1327 (qa M1): an SSO downgrade revokes live work; a promotion does not',
 
   resetLoginState('owner', { [ROLES_CLAIM]: ['member'] });
   assert.equal((await runCallback()).status, 302);
-  assert.deepEqual(identityRevocations, [], 'an owner is never demoted, so nothing is revoked');
+  assert.deepEqual(identityRevocations, [], 'an owner identity is refused, so nothing is revoked');
 });
 
 // ---------------------------------------------------------------------------
@@ -650,8 +808,9 @@ test('T-1939 slice 3: oidc_not_authorized deletes the member\'s API keys, audite
   ]);
 });
 
-test('T-1939 slice 3: an owner refused for a missing role keeps its API keys', async () => {
-  await assertDeniedWithoutRole('owner', {}, 'roles_claim_absent');
+test('T-1939 slice 3: an owner identity keeps its API keys', async () => {
+  resetLoginState('owner', {});
+  await runCallback();
   assert.deepEqual(apiKeyRevocations, []);
   assert.deepEqual(keyAudits(), []);
 });
@@ -682,6 +841,43 @@ test('T-1939 slice 3: back-channel logout deletes a member\'s API keys, never th
   identityUserId = 1;
   assert.equal((await backchannelLogout()).status, 200);
   assert.deepEqual(apiKeyRevocations, [], 'owner keys are untouched');
+  assert.deepEqual(revocations, [], 'owner sessions are untouched (ADR-194 D6)');
+});
+
+test('ADR-194 D1: back-channel answers 501 only when the policy is not enforced', async () => {
+  sso.setActive(false);
+  try {
+    assert.equal((await backchannelLogout()).status, 501);
+  } finally {
+    sso.setActive(true);
+  }
+});
+
+test('ADR-194 D1: enforced but unverifiable back-channel asks the IdP to retry (503 + Retry-After)', async (t) => {
+  t.mock.method(process.stderr, 'write', () => true);
+  sso.state.loginAvailable = false;
+  ssoRuntime.runtime.backchannelAvailable = false;
+  try {
+    resetLoginState('user', {});
+    const response = await backchannelLogout();
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '300');
+    assert.deepEqual(apiKeyRevocations, [], 'nothing is revoked without a verified token');
+  } finally {
+    ssoRuntime.runtime.backchannelAvailable = true;
+    sso.state.loginAvailable = true;
+  }
+});
+
+test('ADR-194 D1: enforced with login unavailable still verifies and revokes when the verifier parses', async () => {
+  sso.state.loginAvailable = false;
+  try {
+    resetLoginState('user', {});
+    assert.equal((await backchannelLogout()).status, 200);
+    assert.deepEqual(apiKeyRevocations, [12]);
+  } finally {
+    sso.state.loginAvailable = true;
+  }
 });
 
 test('T-1939 slice 3: an API-key revocation failure never changes the response', async (t) => {

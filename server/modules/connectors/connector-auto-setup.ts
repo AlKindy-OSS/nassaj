@@ -37,7 +37,7 @@ import path from 'node:path';
 
 import type { Database } from 'better-sqlite3';
 
-import { connectorEnvironmentOriginProposal } from './connector-installation-origin-resolver.js';
+import { connectorOriginProposalFromConfig } from './connector-installation-origin-resolver.js';
 import type { ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
 import type { ConnectorRuntimeAuthority } from './connector-runtime-fence.js';
 import type { ConnectorLocalActivation } from './connector-local-activation.js';
@@ -82,12 +82,16 @@ const result = (ran: boolean, reason: string, stepsApplied: readonly string[] = 
 /** Default operator key directory, outside the repo and off tmpfs. */
 const defaultKeyDir = (): string => path.join(os.homedir(), '.config', 'nassaj', 'connector-signing');
 
-/** Resolves the exact public origin from NASSAJ_PUBLIC_ORIGIN, or null when unusable. */
+/**
+ * Resolves the exact public origin from NASSAJ_PUBLIC_ORIGIN, or null when unusable.
+ * Shares the setup proposal rules (B-1461, ADR-193): a padded or invalid value is
+ * rejected, and only the public_origin source is ever adopted here.
+ */
 const resolveOrigin = (env: NodeJS.ProcessEnv): string | null => {
   const production = env.NODE_ENV === 'production';
   try {
-    const proposal = connectorEnvironmentOriginProposal(env[ORIGIN_ENV]?.trim() || undefined, !production);
-    if (!proposal) return null;
+    const proposal = connectorOriginProposalFromConfig(env, { allowLoopback: !production, legacyRedirectProposal: false });
+    if (proposal?.source !== 'public_origin') return null;
     const hostname = new URL(proposal.canonicalOrigin).hostname;
     if (production && ['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) return null;
     return proposal.canonicalOrigin;

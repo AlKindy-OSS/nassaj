@@ -10,10 +10,18 @@
  * This file lives in the top-level `shared/` directory on purpose: it is the
  * only tree compiled into BOTH bundles (the server tsconfig includes
  * `../shared/**` and emits it into `dist-server/shared/`; the Vite root is the
- * project root so the client imports it directly). Disabling — not deleting —
- * keeps upstream sync and reversibility: to re-enable a provider, remove its
- * id from this list. The provider implementations, `resolve-provider-env`
- * cases and `<provider>-cli.js` files stay in place as dormant code.
+ * project root so the client imports it directly). For `deepseek` and `glm`
+ * (never retired bodies), disabling — not deleting — keeps upstream sync and
+ * reversibility: to re-enable, remove the id from this list; their provider
+ * implementations, `resolve-provider-env` cases and `<provider>-cli.js` files
+ * stay in place as dormant code. `hermes`, `qwen`, `cursor` and `kimi` are
+ * DIFFERENT: they are also in `shared/retiredProviders.ts` now, so the server
+ * refuses them with `provider_removed` before this list is ever consulted,
+ * and (for hermes) the body's server code was deleted outright. They remain
+ * in this list only so the client filters that still lean on it keep hiding
+ * them; re-enabling one is no longer the one-line change it is for the other
+ * two — it needs the id removed from `RETIRED_PROVIDER_IDS` first (and, for
+ * hermes, the deleted body code rebuilt).
  *
  * Rationale per id: `deepseek` stays disabled — still a plain API vendor, not
  * an agent environment. `kimi` was RE-ENABLED per ADR-062: it is a governed
@@ -34,25 +42,27 @@
  *
  * `hermes` is disabled (owner decision 2026-09-28): Hermes is hidden from every
  * surface — no settings card, no chat-picker group, no model fetch, no login
- * CTA — and new runs are refused at the dispatch seam. It is disabled, not
- * deleted: `hermes-cli.js`, the provider module under
- * `server/modules/providers/list/hermes/` and its env/cage wiring stay in place
- * as dormant code, and historical Hermes sessions stay listable and readable.
- * Re-enabling is removing the id from this list.
+ * CTA — and new runs are refused at the dispatch seam. Its server body was then
+ * deleted (T-1953, ADR-192): there is no launcher, provider module, login or
+ * updater left, so removing the id from this list does NOT re-enable it.
+ * Historical Hermes sessions stay listable and readable through the
+ * history-only reader in `provider.registry.ts`.
  *
  * `qwen` is disabled (owner decision 2026-09-28): the Qwen body is hidden from
  * every surface — no settings card, no chat-picker group, no model fetch, no
- * login CTA — and new runs are refused at the dispatch seam. Its Coding Plan key
- * is to become a plain key field used through the OpenCode carrier, like GLM;
- * that redesign is a separate designed task. Until then the Qwen launcher,
- * provider module and auth/login wiring stay in place as dormant code, and
- * historical Qwen sessions stay listable and readable.
+ * login CTA — and new runs are refused at the dispatch seam. Its Coding Plan
+ * key is now a plain key field used through the OpenCode carrier, like GLM
+ * (implemented: `qwen-plan/*` models dispatched under provider `opencode`).
+ * The Qwen launcher, provider module and auth/login wiring stay in place as
+ * dormant code, and historical Qwen sessions stay listable and readable.
  *
  * `cursor` and `kimi` are disabled, and `deepseek` loses its "coming soon"
  * settings tile (owner decision 2026-09-29): all three are hidden from every
  * surface and new runs are refused at the dispatch seam. Launchers, provider
  * modules and auth wiring stay as dormant code; historical sessions stay
- * listable and readable. Re-enabling is removing the id from this list.
+ * listable and readable. For `deepseek` alone, re-enabling is removing the id
+ * from this list; `cursor` and `kimi` are also retired bodies (see above) —
+ * re-enabling either needs the id removed from `RETIRED_PROVIDER_IDS` first.
  *
  * NOTE: the provider registry itself is NOT filtered — `resolveProvider` must
  * keep returning disabled providers so historical sessions stay listable and

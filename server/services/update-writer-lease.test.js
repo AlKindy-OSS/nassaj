@@ -7,7 +7,7 @@ import express from 'express';
 
 import {
     acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases,
-    runLocalUpdateBackground, setApplicationWriterGateForTests, withLocalUpdateWriterLease,
+    runLocalUpdateBackground, setApplicationWriterGateForTests, summarizeOpenTerminals, withLocalUpdateWriterLease,
 } from './update-writer-lease.js';
 
 const previous = { mode: process.env.NASSAJ_UPDATE_MODE, environment: process.env.NODE_ENV };
@@ -333,4 +333,80 @@ test('a non-gate acquisition failure is refused as itself, not as update mainten
         assert.equal(lines.length, 1, `expected one denial line, got: ${lines.join(' | ')}`);
         assert.match(lines[0], /^\[ERROR\] HTTP writer lease \(kind http\) denied by update gate \(update_lock_contended\)$/);
     });
+});
+
+test('B-1448: the open-terminal count records real acquisitions only and releases exactly once', async () => {
+    const state = gate();
+    assert.equal(summarizeOpenTerminals().count, 0);
+    const shell = await acquireApplicationWriterLease('managed-pty', { holder: { username: 'sara' } });
+    const terminal = await acquireApplicationWriterLease('standalone-pty', { waitMs: 100, holder: { username: 'owner' } });
+    const turn = await acquireApplicationWriterLease('provider-turn');
+    const { snapshot, ...counted } = summarizeOpenTerminals();
+    assert.deepEqual(counted, {
+        count: 2, attached: 2, detached: 0, usernames: ['owner', 'sara'], detachedClosesAt: null,
+    }, 'only the two terminal kinds count; a provider turn does not');
+    assert.match(snapshot, /^[a-f0-9]{32}$/);
+    // Nested acquisitions retain the parent lease: never a second entry.
+    await withLocalUpdateWriterLease('request', async () => {
+        const nested = await acquireApplicationWriterLease('standalone-pty');
+        assert.equal(summarizeOpenTerminals().count, 2);
+        nested.release();
+    });
+    terminal.release();
+    terminal.release();
+    assert.equal(summarizeOpenTerminals().count, 1, 'a double release decrements once');
+    shell.release();
+    turn.release();
+    assert.equal(summarizeOpenTerminals().count, 0);
+    assert.equal(state.released, 4, 'every real lease reached the gate release once (3 + the request)');
+});
+
+test('B-1448: a failed acquisition is never counted', async () => {
+    const state = gate();
+    state.closed = true;
+    await assert.rejects(acquireApplicationWriterLease('standalone-pty'), /update_maintenance_active/);
+    assert.equal(summarizeOpenTerminals().count, 0);
+});
+
+test('B-1448: a detached Shell tab is reported apart, with the time it closes by itself', async () => {
+    gate();
+    const now = 1_000_000;
+    const shell = await acquireApplicationWriterLease('managed-pty', { holder: { username: 'sara' } });
+    shell.annotate({ detachedUntil: now + 30 * 60 * 1000 });
+    const { snapshot: _snapshot, ...counted } = summarizeOpenTerminals(now);
+    assert.deepEqual(counted, {
+        count: 1, attached: 0, detached: 1, usernames: ['sara'], detachedClosesAt: now + 30 * 60 * 1000,
+    });
+    shell.annotate({ detachedUntil: null });
+    assert.equal(summarizeOpenTerminals(now).attached, 1, 'a reattached tab is attached again');
+    shell.release();
+    shell.annotate({ detachedUntil: now });
+    assert.equal(summarizeOpenTerminals(now).count, 0, 'annotating a released lease cannot resurrect it');
+});
+
+test('B-1448: installing a fresh test gate resets the count', async () => {
+    gate();
+    await acquireApplicationWriterLease('standalone-pty');
+    assert.equal(summarizeOpenTerminals().count, 1);
+    gate();
+    assert.equal(summarizeOpenTerminals().count, 0);
+});
+
+test('B-1448 slice 2: the snapshot names which terminals are open, not how they are attached', async () => {
+    gate();
+    const empty = summarizeOpenTerminals().snapshot;
+    const first = await acquireApplicationWriterLease('standalone-pty', { holder: { username: 'sara' } });
+    const one = summarizeOpenTerminals().snapshot;
+    assert.notEqual(one, empty);
+    first.annotate({ detachedUntil: Date.now() + 60_000 });
+    assert.equal(summarizeOpenTerminals().snapshot, one, 'detaching does not change it');
+    const second = await acquireApplicationWriterLease('managed-pty', { holder: { username: 'sara' } });
+    assert.notEqual(summarizeOpenTerminals().snapshot, one, 'a new terminal changes it');
+    second.release();
+    assert.equal(summarizeOpenTerminals().snapshot, one);
+    first.release();
+    // Same holder and kind but a NEW lease is a different terminal.
+    const replacement = await acquireApplicationWriterLease('standalone-pty', { holder: { username: 'sara' } });
+    assert.notEqual(summarizeOpenTerminals().snapshot, one);
+    replacement.release();
 });

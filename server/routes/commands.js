@@ -119,7 +119,7 @@ async function readContainedCommandFile(commandPath, allowedRoots) {
 // excluded: it has no model state in useChatComposerState/useChatProviderState
 // yet, so context.provider never carries it.
 const MODEL_PROVIDERS = [
-  "claude", "cursor", "codex", "antigravity", "opencode", "hermes",
+  "claude", "cursor", "codex", "antigravity", "opencode",
   "kimi", "deepseek", "glm",
 ];
 
@@ -129,7 +129,6 @@ const MODEL_PROVIDER_LABELS = {
   codex: "Codex",
   antigravity: "Antigravity",
   opencode: "OpenCode",
-  hermes: "Hermes",
   kimi: "Kimi",
   deepseek: "DeepSeek",
   glm: "GLM",

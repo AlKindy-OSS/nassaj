@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import { createElement, type ComponentType } from 'react';
 import {
   Bell,
   Bot,
@@ -9,15 +9,16 @@ import {
   KeyRound,
   Library,
   Link2,
+  LogIn,
   Palette,
   SlidersHorizontal,
   User,
   Users,
 } from 'lucide-react';
 
+import { cn } from '../../../lib/utils';
 import type {
   CodeEditorSettingsState,
-  CursorPermissionsState,
   ProjectSortOrder,
   SettingsMainTab,
 } from '../types/types';
@@ -33,6 +34,14 @@ export type SettingsMainTabMeta = {
   /** When set, the item is only shown to users whose role is included. */
   roles?: ReadonlyArray<string>;
 };
+
+/** «LogIn» points at the inline end, so it mirrors in RTL (brief §9). */
+function SsoTabIcon({ className }: { className?: string }) {
+  return createElement(LogIn, { className: cn(className, 'rtl:-scale-x-100') });
+}
+
+/** ADR-194 D8: the SSO settings tab and its API are owner-only. */
+export const SSO_TAB_ROLES: ReadonlyArray<string> = ['owner'];
 
 /**
  * Roles that can reach the Command Board tab in the settings nav.
@@ -155,6 +164,15 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
     icon: Users,
     roles: ['owner', 'admin'],
   },
+  // ADR-194 (T-1962 S7): right after Users — both decide who may enter.
+  {
+    id: 'sso',
+    label: 'Single sign-on',
+    labelKey: 'mainTabs.sso',
+    keywords: 'sso single sign-on oidc identity provider login دخول موحد مزود الهوية',
+    icon: SsoTabIcon,
+    roles: SSO_TAB_ROLES,
+  },
   {
     id: 'command-board',
     label: 'Command Board',
@@ -192,10 +210,4 @@ export const DEFAULT_CODE_EDITOR_SETTINGS: CodeEditorSettingsState = {
   showMinimap: true,
   lineNumbers: true,
   fontSize: '14',
-};
-
-export const DEFAULT_CURSOR_PERMISSIONS: CursorPermissionsState = {
-  allowedCommands: [],
-  disallowedCommands: [],
-  skipPermissions: false,
 };

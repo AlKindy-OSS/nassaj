@@ -8,6 +8,7 @@ import type {
   SteerRejectCode,
   SteerTurnState,
 } from '../../../shared/session-steer.contract';
+import { readServerErrorCode } from '../chat/utils/serverErrorMessage';
 
 /**
  * T-1903/1904 (client) — «`steer-turn-state`/`steer-queued`/`steer-delivered`/
@@ -34,11 +35,36 @@ export interface ControlEventLogLike {
   droppedBeforeSeq: number;
 }
 
+/**
+ * خريطة إطارات التحكّم الحيّة (أحدث حالة لكل جلسة — `WebSocketContext`'s
+ * `ControlFrameMap`)، مُعاد تعريفها هنا محلياً كي لا يستورد هذا الخطّاف من
+ * `contexts/WebSocketContext` (يبقيه قابلاً للاختبار بمعزل عن React context).
+ */
+export interface ControlFrameMapLike {
+  get(sessionId: string): { seq: number; frame: unknown } | undefined;
+}
+
 export interface UseSessionSteerArgs {
   sessionId: string | null;
   currentUserId: number | null;
   latestMessage: { type?: string; [key: string]: unknown } | null;
   controlEvents: ControlEventLogLike;
+  /**
+   * B-1449 — إطار `session-status` الأحدث لكل جلسة (حالة، لا حدثاً؛ نفس ما
+   * تستهلكه `sessionActivity.ts`). مصدر انتهاء الدور الموثوق الوحيد المتاح
+   * للعميل اليوم: الخادم لا يبثّ `steer-turn-state` ثانيةً عند انتهاء الدور
+   * (يُعلَن مرّة واحدة فقط عند بدايته — `attachSteerRun` في claude-sdk.js)،
+   * فبقاء `turnState` معلَّقاً إلى الأبد بعد `isLoading→false` كان هو العلّة:
+   * شريط «CLAUDE ● يفكّر» + زرّ التوجيه يظلّان ظاهرَين حتى تبديل الجلسة أو
+   * إعادة التحميل. اختيارٌ متعمَّد ألّا نتّكئ على `isLoading` المحلّي: ذاك
+   * يخصّ البادئ فقط (ChatInterface.tsx `isRunActiveForViewer`)، بينما
+   * `session-status` إطارٌ عامّ يصل كل مشاهدي الجلسة (مُصادَق في
+   * chat-websocket.service.ts) فيُبقي شريط المشاهد ظاهراً طالما الدور حيّ
+   * فعلاً، ويمسحه فوراً حين يُصرَّح الخادم بانتهائه — بلا فرضٍ خاطئ على مشاهدٍ
+   * دورُه غيره لم ينتهِ. اختياري: غيابه (اختبارات قديمة، أو مستهلكٌ لم يُحدَّث
+   * بعد) يُبقي السلوك القديم دون كسر شيء.
+   */
+  controlFrames?: ControlFrameMapLike;
   sendMessage: (message: unknown) => { ok: boolean; reason?: string } | void;
 }
 
@@ -48,6 +74,79 @@ const STEER_CONTROL_EVENT_TYPES = new Set([
   'steer-delivered',
   'steer-rejected',
 ]);
+
+/**
+ * B-1470 review — `kind:'error'` codes that reject a SEND attempt rather than
+ * end the run, so a live turn must survive them:
+ *  - `session_busy` / `steer_requires_session_steer`: a second message (or a
+ *    typed "/steer") while the turn runs (claude-sdk.js; B-518 treats
+ *    `session_busy` as non-terminal in useChatRealtimeHandlers too);
+ *  - `message_dispatch_unconfirmed` / `message_dispatch_not_started`: the
+ *    socket handler's catch for a failed command (chat-websocket.service.ts),
+ *    which carries the resumed `sessionId` but says nothing about a run that
+ *    was already going.
+ */
+const NON_TERMINAL_ERROR_CODES = new Set([
+  'session_busy',
+  'steer_requires_session_steer',
+  'message_dispatch_unconfirmed',
+  'message_dispatch_not_started',
+]);
+
+type SteerLogFrame = {
+  type?: string;
+  kind?: string;
+  sessionId?: string;
+  forViewerUserId?: number | null;
+  notStarted?: unknown;
+  code?: unknown;
+  error?: unknown;
+};
+
+/**
+ * B-1470 — does this control event end the current run? `complete` always
+ * does; `error` only when it is not a rejected send attempt (`notStarted`, or
+ * a code in NON_TERMINAL_ERROR_CODES). The live client receives `complete` at
+ * turn end but no session-status{isProcessing:false}.
+ */
+export function isTurnEndingEvent(frame: SteerLogFrame): boolean {
+  if (frame.kind === 'complete') return true;
+  if (frame.kind !== 'error' || frame.notStarted === true) return false;
+  const code = readServerErrorCode(frame);
+  return code == null || !NON_TERMINAL_ERROR_CODES.has(code);
+}
+
+type SteerLogAction =
+  | { kind: 'turn-ended' }
+  | { kind: 'turn-state'; state: SteerTurnState }
+  | { kind: 'steer-event'; event: SteerEvent };
+
+/**
+ * What one control-log entry means for this session's steer state, or null
+ * when it is irrelevant (other session, other kind, unicast for another
+ * viewer). The log is ordered by the shared `seq`, so a previous turn's end is
+ * applied before the next turn's steer-turn-state and cannot clear it.
+ */
+export function classifySteerLogEntry(
+  raw: unknown,
+  sessionId: string,
+  currentUserId: number | null,
+): SteerLogAction | null {
+  const frame = raw as SteerLogFrame | null;
+  if (!frame || frame.sessionId !== sessionId) return null;
+  if (isTurnEndingEvent(frame)) return { kind: 'turn-ended' };
+  if (typeof frame.type !== 'string' || !STEER_CONTROL_EVENT_TYPES.has(frame.type)) return null;
+  if (frame.type !== 'steer-turn-state') {
+    return { kind: 'steer-event', event: frame as unknown as SteerEvent };
+  }
+  // T-1903 (backend fix 44e8ccc4e): a broadcast frame (forViewerUserId=null,
+  // at turn start) is for the whole session; a unicast one (on
+  // check-session-status) is for its recipient only — ignore another viewer's.
+  const forOther = typeof frame.forViewerUserId === 'number'
+    && currentUserId != null
+    && frame.forViewerUserId !== currentUserId;
+  return forOther ? null : { kind: 'turn-state', state: frame as unknown as SteerTurnState };
+}
 
 const SEND_TIMEOUT_MS = 15_000;
 
@@ -80,6 +179,7 @@ export function useSessionSteer({
   currentUserId,
   latestMessage,
   controlEvents,
+  controlFrames,
   sendMessage,
 }: UseSessionSteerArgs) {
   const [turnState, setTurnState] = useState<SteerTurnState | null>(null);
@@ -89,6 +189,11 @@ export function useSessionSteer({
   const [events, setEvents] = useState<SteerEvent[]>([]);
   const lastProcessedRef = useRef<unknown>(null);
   const lastEventSeqRef = useRef<number | null>(null);
+  // B-1470 — `seq` of the steer-turn-state entry that set `turnState`. The
+  // control-events log and `controlFrames` share one monotonic counter
+  // (WebSocketContext `controlSeqRef`), so a session-status whose `seq` is not
+  // above this one was stored before the current turn started.
+  const turnStateSeqRef = useRef<number | null>(null);
   const pendingRef = useRef<Map<string, { resolve: (outcome: SteerSendOutcome) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
 
   // جلسة جديدة/مغادَرة تصفّر حالة الدور — لا معنى لحمل turnId جلسة سابقة، ولا
@@ -98,17 +203,21 @@ export function useSessionSteer({
     setTurnState(null);
     setEvents([]);
     lastEventSeqRef.current = null;
+    turnStateSeqRef.current = null;
   }, [sessionId]);
 
-  // استهلاك steer-turn-state/steer-queued/steer-delivered/steer-rejected من
-  // `controlEvents` — سجلّ مُلحَق لا يبتلع شيئاً (انظر التعليق أعلى الملف).
+  // استهلاك steer-turn-state/steer-queued/steer-delivered/steer-rejected (ونهاية
+  // الدور، B-1470) من `controlEvents` — سجلّ مُلحَق لا يبتلع شيئاً (انظر
+  // التعليق أعلى الملف). القرار لكل إدخال في `classifySteerLogEntry` أدناه.
   useEffect(() => {
     if (!sessionId) return;
     const allEvents = controlEvents.events;
     if (allEvents.length === 0) return;
 
-    // أول مرور لهذه الجلسة: ابدأ من نهاية السجلّ الحالي — لا نُعيد تشغيل
-    // أحداث جلساتٍ سابقة (السجلّ عابر لكل الجلسات المفتوحة، بسقف 256).
+    // أول مرور لهذه الجلسة: يُعاد تشغيل السجلّ المحتفَظ به كلّه (من أول إدخال
+    // فيه)، لا من نهايته — فيُستعاد steer-turn-state لدورٍ بدأ قبل فتح
+    // الجلسة، ونهاية دورٍ سابق تُطبَّق قبل بداية التالي بترتيب `seq`. أحداث
+    // الجلسات الأخرى في السجلّ (عابر للجلسات، بسقف 256) تُستبعَد بـ`sessionId`.
     if (lastEventSeqRef.current === null) {
       lastEventSeqRef.current = allEvents[0].seq - 1;
     }
@@ -117,32 +226,47 @@ export function useSessionSteer({
     for (const entry of allEvents) {
       if (entry.seq <= cursor) continue;
       cursor = entry.seq;
-      const frame = entry.frame as { type?: string; sessionId?: string; forViewerUserId?: number | null };
-      if (!frame || typeof frame.type !== 'string' || !STEER_CONTROL_EVENT_TYPES.has(frame.type)) {
-        continue;
-      }
-      if (frame.sessionId !== sessionId) continue;
-
-      if (frame.type === 'steer-turn-state') {
-        // T-1903 (backend fix 44e8ccc4e): إطارٌ عام (forViewerUserId=null، عند
-        // بداية الدور) يخصّ الجلسة كلها؛ إطارٌ أحادي المقصد (عند
-        // check-session-status) يخصّ مُستقبِله وحده — تجاهل ما يخصّ غيري وإن
-        // وصل (دفاعياً؛ unicast لا يُفترض أن يصل أصلاً).
-        if (
-          typeof frame.forViewerUserId === 'number' &&
-          currentUserId != null &&
-          frame.forViewerUserId !== currentUserId
-        ) {
-          continue;
-        }
-        setTurnState(frame as unknown as SteerTurnState);
-      } else {
-        const event = frame as unknown as SteerEvent;
+      const action = classifySteerLogEntry(entry.frame, sessionId, currentUserId);
+      if (action?.kind === 'turn-ended') {
+        turnStateSeqRef.current = null;
+        setTurnState(null);
+        setEvents([]);
+      } else if (action?.kind === 'turn-state') {
+        turnStateSeqRef.current = entry.seq;
+        setTurnState(action.state);
+      } else if (action?.kind === 'steer-event') {
+        const { event } = action;
         setEvents((previous) => [...previous.slice(-63), event]);
       }
     }
     lastEventSeqRef.current = cursor;
   }, [controlEvents, sessionId, currentUserId]);
+
+  // B-1449 — انتهاء الدور: `session-status{isProcessing:false}` هو الإعلان
+  // العامّ الوحيد الذي يصل بعد إعلان `steer-turn-state` (مرّة واحدة عند
+  // البداية) ولا يبتلعه شيء (خريطة «أحدث حالة» لكل جلسة، مصادَقة خادمياً على
+  // كل اتصال جديد عبر `check-session-status` — انظر التعليق أعلى
+  // `controlFrames` في التوقيع). `isProcessing:true` لا يمسح شيئاً — هذا
+  // بالضبط ما يُبقي شريط/زرّ التوجيه ظاهرَين لمشاهدٍ ما زال يرى دوراً حيّاً
+  // لغيره. لا نمسح حين لا يوجد turnState أصلاً (لا شيء لنمسحه).
+  //
+  // B-1470 — الخريطة «أحدث حالة تفوز»، فعند بداية دورٍ ثانٍ ما زالت تحمل
+  // `isProcessing:false` من نهاية الدور السابق (لا يسبق `steer-turn-state`
+  // الجديد إطارُ `isProcessing:true` بالضرورة)، فكان هذا الأثر يمسح حالة الدور
+  // الجديد فور وصولها ويُطفئ التوجيه للدور كلّه. المسح الآن مشروط بأن يكون
+  // إطار الانتهاء أحدث (`seq` أعلى، عدّاد مشترك رتيب) من إطار بداية الدور.
+  // إطار إعادة الاتصال (`check-session-status`) يأخذ `seq` جديداً فيمسح كما قبل.
+  useEffect(() => {
+    if (!sessionId || !controlFrames || turnState === null) return;
+    const entry = controlFrames.get(sessionId);
+    const frame = entry?.frame as { type?: string; isProcessing?: unknown } | undefined;
+    const startedAt = turnStateSeqRef.current;
+    const arrivedAfterTurnStart = entry != null && (startedAt == null || entry.seq > startedAt);
+    if (frame && frame.type === 'session-status' && frame.isProcessing === false && arrivedAfterTurnStart) {
+      setTurnState(null);
+      setEvents([]);
+    }
+  }, [controlFrames, sessionId, turnState]);
 
   // session-steer-result يبقى على latestMessage (انظر التعليق أعلى الملف).
   useEffect(() => {

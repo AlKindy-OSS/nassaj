@@ -219,11 +219,11 @@ test('a planted SYMLINK is replaced by a real copy, and the shared source is NOT
   );
 });
 
-test('kimi links into the caller\'s own KIMI_CODE_HOME (isolated for any authenticated user)', async () => {
+test('T-1953: kimi is retired as a body — its link is refused and nothing is written', async () => {
   const response = await call('POST', '/api/providers/kimi/governance/link', memberUser);
-  assert.equal(response.status, 200);
-  assertAuthenticCopy(userKimiAgents(memberUser.id), neutralSource());
-  assert.equal((response.json.data as { status: string }).status, 'governed');
+  assert.equal(response.status, 400);
+  assert.equal((response.json.error as { code: string }).code, 'provider_removed');
+  assert.equal(fs.existsSync(userKimiAgents(memberUser.id)), false, 'no file lands in the member KIMI_CODE_HOME');
 });
 
 test('a SHARED provider is owner-only, and the refusal writes NOTHING', async () => {
@@ -315,11 +315,13 @@ test('an ISOLATED agy user CAN link — into their own .gemini, never the operat
 });
 
 test('an engine with no mechanism has no action at all', async () => {
-  const advertised = await channelsOf('hermes', ownerUser);
+  // A hosted vendor id: it has no governance file of its own. (The hermes body
+  // that stood here is retired — T-1953 — and refused before this rule is read.)
+  const advertised = await channelsOf('deepseek', ownerUser);
   assert.equal(advertised[0].linkable, false);
   assert.equal(advertised[0].linkRefusal, 'no_mechanism');
 
-  const refused = await call('POST', '/api/providers/hermes/governance/link', ownerUser);
+  const refused = await call('POST', '/api/providers/deepseek/governance/link', ownerUser);
   assert.equal(refused.status, 400);
 });
 

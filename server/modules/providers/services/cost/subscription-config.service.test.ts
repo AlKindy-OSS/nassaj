@@ -427,6 +427,7 @@ test('خطة المالك تعلو على خطة المصدر حتى مع مرس
 
 test('قائمة المزوّدات المقبولة لا تحوي مُعرِّفاً بلا تنفيذ خلفه', () => {
   assert.equal(SUBSCRIPTION_PROVIDERS.includes('sakana'), false);
+  assert.equal(SUBSCRIPTION_PROVIDERS.includes('hermes'), false, 'T-1953: retired body');
   assert.ok(SUBSCRIPTION_PROVIDERS.includes('claude'));
   assert.ok(SUBSCRIPTION_PROVIDERS.includes('codex'));
 });

@@ -36,6 +36,8 @@
     "messageCount_one": "{{count}} pesan",
     "messageCount_other": "{{count}} pesan",
     "allClosedHidden": "Percakapan tertutup disembunyikan",
+    "surfacedHiddenHint_one": "+{{count}} percakapan lagi dengan aktivitas",
+    "surfacedHiddenHint_other": "+{{count}} percakapan lagi dengan aktivitas",
     "loadingSessions": "Memuat sesi...",
     "unnamed": "Tanpa nama",
     "loading": "Memuat...",

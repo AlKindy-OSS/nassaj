@@ -38,6 +38,7 @@ import {
   startRestoreCompatible,
 } from './rollback.service.js';
 import { getAutoUpdateSettings, setAutoUpdateSettings } from './autoupdate-settings.js';
+import { uncheckedDetailsOf } from './snapshot/open-handles.js';
 import { startHarnessAutoUpdateScheduler } from './scheduler.js';
 
 const router = express.Router();
@@ -73,7 +74,9 @@ const snapshotListLimiter = createRateLimiter({
 /**
  * Codes answered with a harness-specific body `{ code, message, … }` (spec
  * §9: every 409 carries `code`). Messages are generic server strings; only
- * `required` (server-built acks) and `activeJobId` are added.
+ * `required` (server-built acks), `activeJobId` and, for
+ * STORE_ACCESS_UNPROVABLE, `uncheckedProcesses` (pid + comm + reason, capped)
+ * and `uncheckedProcessCount` are added.
  */
 const HARNESS_ACTION_CODES: ReadonlySet<string> = new Set([
   'HARNESS_UPDATE_IN_PROGRESS', 'HARNESS_RECOVERY_FAILED', 'HARNESS_MANUAL_ONLY', 'CONFIRMATION_REQUIRED',
@@ -91,6 +94,7 @@ function sendActionError(res: Response, err: unknown): boolean {
   const body: Record<string, unknown> = { code: err.code, message: `Harness action refused (${err.code}).` };
   if (err.code === 'CONFIRMATION_REQUIRED') body.required = Array.isArray(details.required) ? details.required : [];
   if (err.code === 'HARNESS_UPDATE_IN_PROGRESS') body.activeJobId = typeof details.activeJobId === 'string' ? details.activeJobId : '';
+  if (err.code === 'STORE_ACCESS_UNPROVABLE') Object.assign(body, uncheckedDetailsOf(err.details) ?? {});
   res.status(err.statusCode).json(body);
   return true;
 }

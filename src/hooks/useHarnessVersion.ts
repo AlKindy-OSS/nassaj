@@ -15,7 +15,10 @@ import { getIdentityBarrierSnapshot, subscribeIdentityBarrier } from '../compone
 import type { AgentProvider } from '../components/settings/types/types';
 import { authenticatedFetch } from '../utils/api';
 
-import { isTerminalJob, mapUpdateJob, mapVersionStatus, normalizeHarnessProvider, type HarnessVersionState } from './harnessVersionMapping';
+import {
+  isTerminalJob, mapUpdateJob, mapVersionStatus, normalizeHarnessProvider, parseUncheckedDetails,
+  type HarnessUncheckedDetails, type HarnessVersionState,
+} from './harnessVersionMapping';
 
 const JOB_POLL_MS = 1000;
 const identityKey = () => { const snapshot = getIdentityBarrierSnapshot(); return `${snapshot.version}:${snapshot.phase}`; };
@@ -33,9 +36,9 @@ export interface HarnessPendingConfirmation {
 }
 
 /** A refused action outside the confirmation/in-progress flows (423/507/404/other 409 codes). */
-export interface HarnessActionError { code: string; message: string }
+export interface HarnessActionError { code: string; message: string; unchecked?: HarnessUncheckedDetails }
 
-type ActionOutcome = { kind: 'accepted'; jobId: string } | { kind: 'confirmation'; required: HarnessRequiredAck[] } | { kind: 'conflict'; activeJobId: string | null } | { kind: 'error'; code: string; message: string };
+type ActionOutcome = { kind: 'accepted'; jobId: string } | { kind: 'confirmation'; required: HarnessRequiredAck[] } | { kind: 'conflict'; activeJobId: string | null } | { kind: 'error'; code: string; message: string; unchecked?: HarnessUncheckedDetails };
 
 const bodyCode = (body: unknown): string | undefined => (body && typeof body === 'object' && 'code' in body ? String((body as { code?: unknown }).code ?? '') : undefined);
 const bodyMessage = (body: unknown): string => (body && typeof body === 'object' && 'message' in body ? String((body as { message?: unknown }).message ?? '') : '');
@@ -100,7 +103,7 @@ export function useHarnessVersion(agent: AgentProvider, isOwner: boolean) {
         const conflict = json as HarnessUpdateConflict;
         return { kind: 'conflict', activeJobId: typeof conflict.activeJobId === 'string' && conflict.activeJobId.length > 0 ? conflict.activeJobId : null };
       }
-      if (!response.ok) return { kind: 'error', code: bodyCode(json) ?? `http_${response.status}`, message: bodyMessage(json) };
+      if (!response.ok) return { kind: 'error', code: bodyCode(json) ?? `http_${response.status}`, message: bodyMessage(json), unchecked: parseUncheckedDetails(json) };
       return { kind: 'accepted', jobId: (json as HarnessUpdateAccepted).jobId };
     } catch (error) {
       if (valid(request, identity) && (error as Error).name !== 'AbortError') return { kind: 'error', code: 'network', message: '' };
@@ -125,7 +128,7 @@ export function useHarnessVersion(agent: AgentProvider, isOwner: boolean) {
       return;
     }
     setConfirmation(null);
-    setActionError({ code: outcome.code, message: outcome.message });
+    setActionError({ code: outcome.code, message: outcome.message, unchecked: outcome.unchecked });
     setState(previous => ({ ...previous, status: 'failed', reason: outcome.code, retryReady: false }));
   }, [followJob, isOwner, postAction]);
 
@@ -170,7 +173,7 @@ export function useHarnessVersion(agent: AgentProvider, isOwner: boolean) {
       const response = await authenticatedFetch(`/api/providers/${encodeURIComponent(provider)}/recovery`, { method: 'POST', body: JSON.stringify({ action }) });
       if (!valid(request, identity)) return;
       const json = await response.json().catch(() => ({})) as { jobId?: string; code?: string; message?: string };
-      if (!response.ok) { setActionError({ code: json.code ?? `http_${response.status}`, message: json.message ?? '' }); return; }
+      if (!response.ok) { setActionError({ code: json.code ?? `http_${response.status}`, message: json.message ?? '', unchecked: parseUncheckedDetails(json) }); return; }
       if (typeof json.jobId === 'string') { followJob(json.jobId); return; }
       void fetchStatus();
     } catch (error) {

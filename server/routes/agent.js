@@ -9,6 +9,7 @@ import { Octokit } from '@octokit/rest';
 
 import { SSEStreamWriter } from '../modules/account-wallet/index.js';
 import {
+  API_KEY_SSO_ATTESTATION_EXPIRED_CODE,
   apiKeysDb,
   captureWorkspaceTopologyFence,
   githubTokensDb,
@@ -16,6 +17,7 @@ import {
   isWorkspaceTopologyFenceCurrent,
   projectsDb,
 } from '../modules/database/index.js';
+import { parseApiKeyCredentialId } from '../modules/database/repositories/api-key-sso-window.js';
 import {
   createAuthenticatedLaunchActor,
   isAuthenticatedLaunchActorCurrent,
@@ -47,6 +49,11 @@ import {
   isProjectPathVisibleToUser,
   isSessionVisibleToUser,
 } from '../modules/websocket/services/chat-websocket.service.js';
+import {
+  PROVIDER_REMOVED_CODE,
+  PROVIDER_REMOVED_MESSAGE,
+  isRetiredProvider,
+} from '../../shared/retiredProviders.js';
 
 import { ResponseCollector } from './agent-response-collector.js';
 
@@ -129,15 +136,38 @@ const attachCanonicalAgentPrincipal = (req, user) => {
   return principal;
 };
 
+/**
+ * 401 for a refused API key. T-1946: a key of an SSO-linked member whose last
+ * SSO sign-in is older than the owner's window carries a distinct code so
+ * the client can say "sign in through SSO"; the key itself stays intact.
+ */
+const refuseApiKey = (res, reason) => res.status(401).json(reason === 'sso_attestation_expired'
+  ? { error: 'Sign in through SSO to use this API key again', code: API_KEY_SSO_ATTESTATION_EXPIRED_CODE }
+  : { error: 'Invalid or inactive API key' });
+
+/**
+ * Why a once-authenticated API-key principal is no longer current, for
+ * refuseApiKey: `sso_attestation_expired` only when the key row and account are
+ * still valid but the SSO window has closed; anything else is generic.
+ */
+const apiKeyPrincipalRefusal = (principal) => {
+  const apiKeyId = parseApiKeyCredentialId(principal?.authenticationCredentialId);
+  if (principal?.authenticationKind !== 'ck' || apiKeyId === null) return 'invalid';
+  const state = apiKeysDb.authenticationPrincipalState(
+    apiKeyId, principal.id, principal.authorizationGeneration,
+  );
+  return state === 'sso_attestation_expired' ? state : 'invalid';
+};
+
 const validateExternalApiHeader = (req, res, next) => {
   if (IS_PLATFORM) return rejectUnverifiedPlatformActor(req, res);
   const apiKey = req.headers['x-api-key'];
   if (typeof apiKey !== 'string' || !apiKey) {
     return res.status(401).json({ error: 'API key required' });
   }
-  const user = apiKeysDb.validateApiKey(apiKey);
-  if (!user) return res.status(401).json({ error: 'Invalid or inactive API key' });
-  attachCanonicalAgentPrincipal(req, user);
+  const resolution = apiKeysDb.resolveApiKey(apiKey);
+  if (!resolution.ok) return refuseApiKey(res, resolution.reason);
+  attachCanonicalAgentPrincipal(req, resolution.user);
   return next();
 };
 
@@ -167,12 +197,13 @@ const validateExternalApiKey = (req, res, next) => {
       return res.status(401).json({ error: 'Invalid SSE ticket' });
     }
     const headerKey = req.headers['x-api-key'];
-    const headerUser = typeof headerKey === 'string' && headerKey
-      ? apiKeysDb.validateApiKey(headerKey)
+    const headerResolution = typeof headerKey === 'string' && headerKey
+      ? apiKeysDb.resolveApiKey(headerKey)
       : null;
-    if (headerKey && !headerUser) {
-      return res.status(401).json({ error: 'Invalid or inactive API key' });
+    if (headerKey && headerResolution?.ok !== true) {
+      return refuseApiKey(res, headerResolution?.reason);
     }
+    const headerUser = headerResolution?.user ?? null;
     const consumed = consumeAgentSseTicket(rawTicket, {
       path: `${req.baseUrl}${req.path}`,
       method: req.method,
@@ -186,7 +217,8 @@ const validateExternalApiKey = (req, res, next) => {
     if (!ticketUser) return res.status(401).json({ error: 'Invalid or expired SSE ticket' });
     attachCanonicalAgentPrincipal(req, ticketUser);
     if (req.assertCurrentIdentity() !== true) {
-      return res.status(401).json({ error: 'Invalid or inactive API key' });
+      // T-1946: a ticket outliving the member's SSO window says so, header or not.
+      return refuseApiKey(res, apiKeyPrincipalRefusal(req.user));
     }
     return next();
   }
@@ -1178,7 +1210,8 @@ router.post(
   validateExternalApiHeader,
   (req, res) => {
     if (req.assertCurrentIdentity?.() !== true) {
-      return res.status(401).set('Cache-Control', 'no-store').json({ error: 'Invalid or inactive API key' });
+      res.set('Cache-Control', 'no-store');
+      return refuseApiKey(res, apiKeyPrincipalRefusal(req.user));
     }
     const minted = mintAgentSseTicket({
       userId: req.user.id,
@@ -1222,8 +1255,15 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
   // the /api/agent endpoint is inherently an agent run (never chat), so kimi maps
   // to the native governed launcher and glm to the OpenCode carrier (flag-gated,
   // enforced in the dispatch below). Their toolless CHAT path is unaffected.
-  if (!['claude', 'cursor', 'codex', 'opencode', 'kimi', 'glm'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", "opencode", "kimi", or "glm"' });
+  //
+  // T-1953: cursor and kimi are retired as bodies. They get the same typed
+  // refusal as the sockets, before any writer, clone or project registration;
+  // their dispatch branches below are unreachable until they are deleted.
+  if (isRetiredProvider(provider)) {
+    return res.status(400).json({ error: PROVIDER_REMOVED_MESSAGE, code: PROVIDER_REMOVED_CODE });
+  }
+  if (!['claude', 'codex', 'opencode', 'glm'].includes(provider)) {
+    return res.status(400).json({ error: 'provider must be "claude", "codex", "opencode", or "glm"' });
   }
 
   // GL-8 (ADR-062): the GLM agent surface rides ENTIRELY on the OpenCode carrier,

@@ -272,7 +272,8 @@ test('catalog refresh becoming stale reports post-effect unknown and discloses n
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   try {
-    const response = await fetch(`${baseUrl}/api/providers/qwen/models`);
+    // T-1953: any live catalog route serves; the qwen body's is refused as provider_removed.
+    const response = await fetch(`${baseUrl}/api/providers/opencode/models`);
     assert.equal(response.status, 409);
     const body = await response.json() as Record<string, unknown>;
     assert.deepEqual(body, {

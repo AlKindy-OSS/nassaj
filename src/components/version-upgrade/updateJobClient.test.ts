@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   GIT_CHECKOUT_V2_PHASES,
@@ -7,6 +7,7 @@ import {
   UPDATE_PROGRESS_STATES,
   blockedReasonI18nArgs,
   clearStoredUpdateAttempt,
+  closeTerminals,
   formatBytesDirectional,
   inferStrategy,
   isTerminalUpdateState,
@@ -19,6 +20,7 @@ import {
   storeUpdateAttempt,
   updateJobPercent,
 } from './updateJobClient';
+import { closeTerminalsErrorKey } from './useCloseTerminals';
 
 describe('updateJobClient', () => {
   beforeEach(() => localStorage.clear());
@@ -476,5 +478,92 @@ describe('formatBytesDirectional', () => {
     const bytes = Math.round(4.04 * 1024 * 1024 * 1024);
     expect(formatBytesDirectional(bytes, 'down')).toBe('4 GB');
     expect(formatBytesDirectional(bytes, 'up')).toBe('4.1 GB');
+  });
+});
+
+describe('B-1448: waiting_terminals', () => {
+  it('keeps the state and a sanitized open-terminal reading', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivation: {
+        state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0,
+        openTerminals: { count: 3, attached: 2, detached: 1, usernames: ['sara', 7, '', 'owner'], detachedClosesAt: 123 },
+      },
+    });
+    expect(snapshot.autoActivation?.state).toBe('waiting_terminals');
+    expect(snapshot.autoActivation?.openTerminals).toEqual({
+      count: 3, attached: 2, detached: 1, usernames: ['sara', 'owner'], detachedClosesAt: 123, snapshot: null,
+    });
+  });
+
+  it('drops a malformed or empty reading, and other states carry none', () => {
+    const bad = normalizeUpdateJob({ state: 'restart_queued',
+      autoActivation: { state: 'waiting_terminals', openTerminals: { count: -1 } } });
+    expect(bad.autoActivation?.openTerminals).toBeNull();
+    const other = normalizeUpdateJob({ state: 'restart_queued', autoActivation: { state: 'waiting_sessions' } });
+    expect(other.autoActivation?.openTerminals).toBeNull();
+  });
+});
+
+describe('close terminals and update (B-1448 slice 2)', () => {
+  const SNAP = '0123456789abcdef0123456789abcdef';
+  const set = (snapshot: unknown) => normalizeUpdateJob({
+    state: 'restart_queued',
+    autoActivation: { state: 'waiting_terminals', openTerminals: { count: 1, attached: 1, detached: 0, usernames: ['sara'], snapshot } },
+  }).autoActivation?.openTerminals;
+  const reply = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
+
+  it('passes a 32-hex snapshot through and drops anything else', () => {
+    expect(set(SNAP)?.snapshot).toBe(SNAP);
+    for (const bad of [undefined, 42, 'ABCDEF0123456789ABCDEF0123456789', SNAP.slice(1), `${SNAP}0`, '../../etc']) {
+      expect(set(bad)?.snapshot).toBeNull();
+    }
+  });
+
+  it('POSTs the expected snapshot to the job route and reads a close', async () => {
+    const fetcher = vi.fn().mockResolvedValue(reply(200, { jobId: 'j/1', status: 'closed', closed: 2, remaining: 0, activation: 'triggered' }));
+    await expect(closeTerminals(fetcher, 'j/1', SNAP)).resolves.toEqual({ kind: 'closed', closed: 2, remaining: 0 });
+    expect(fetcher).toHaveBeenCalledWith('/api/system/update/jobs/j%2F1/close-terminals', {
+      method: 'POST', body: JSON.stringify({ expectedSnapshot: SNAP }),
+    });
+  });
+
+  it('409 terminals_changed returns the validated fresh set', async () => {
+    const fresh = { count: 2, attached: 1, detached: 1, usernames: ['a', 'b'], detachedClosesAt: 5, snapshot: 'f'.repeat(32) };
+    const fetcher = vi.fn().mockResolvedValue(reply(409, { code: 'terminals_changed', openTerminals: fresh }));
+    await expect(closeTerminals(fetcher, 'j', SNAP)).resolves.toEqual({ kind: 'changed', openTerminals: fresh });
+  });
+
+  it('every other refusal keeps its code and status; a thrown fetch is a network error', async () => {
+    const cases: Array<[number, unknown, { code: string; status: number; reason?: string | null }]> = [
+      [409, { code: 'update_not_overridable' }, { code: 'update_not_overridable', status: 409, reason: null }],
+      [409, { code: 'update_not_overridable', reason: 'sessions_active' },
+        { code: 'update_not_overridable', status: 409, reason: 'sessions_active' }],
+      [409, { code: 'update_not_overridable', reason: '<b>x</b>' }, { code: 'update_not_overridable', status: 409, reason: null }],
+      [404, { code: 'update_job_not_found' }, { code: 'update_job_not_found', status: 404, reason: null }],
+      [400, { code: 'terminal_snapshot_invalid' }, { code: 'terminal_snapshot_invalid', status: 400, reason: null }],
+      [403, { error: 'Insufficient permissions' }, { code: 'forbidden', status: 403 }],
+      [429, 'not json', { code: 'rate_limited', status: 429 }],
+      [502, null, { code: 'unknown', status: 502 }],
+    ];
+    for (const [status, body, expected] of cases) {
+      const result = await closeTerminals(vi.fn().mockResolvedValue(reply(status, body)), 'j', SNAP);
+      expect(result).toEqual({ kind: 'error', ...expected });
+    }
+    const offline = await closeTerminals(vi.fn().mockRejectedValue(new TypeError('offline')), 'j', SNAP);
+    expect(offline).toEqual({ kind: 'error', code: 'network', status: 0 });
+  });
+
+  it('maps each refusal to its own message key', () => {
+    expect(closeTerminalsErrorKey({ code: 'update_not_overridable', status: 409 })).toBe('notOverridable');
+    expect(closeTerminalsErrorKey({ code: 'update_job_not_found', status: 404 })).toBe('jobNotFound');
+    expect(closeTerminalsErrorKey({ code: 'terminal_snapshot_invalid', status: 400 })).toBe('snapshotInvalid');
+    expect(closeTerminalsErrorKey({ code: 'snapshot_unavailable', status: 0 })).toBe('snapshotInvalid');
+    expect(closeTerminalsErrorKey({ code: 'owner_identity_unavailable', status: 403 })).toBe('ownerIdentity');
+    expect(closeTerminalsErrorKey({ code: 'forbidden', status: 403 })).toBe('forbidden');
+    expect(closeTerminalsErrorKey({ code: 'whatever', status: 401 })).toBe('forbidden');
+    expect(closeTerminalsErrorKey({ code: 'rate_limit_exceeded', status: 429 })).toBe('rateLimited');
+    expect(closeTerminalsErrorKey({ code: 'network', status: 0 })).toBe('network');
+    expect(closeTerminalsErrorKey({ code: 'boom', status: 500 })).toBe('unknown');
   });
 });

@@ -1,4 +1,3 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 import { tryResolveHarnessBinary } from '@/shared/harness-binaries.js';
@@ -6,7 +5,7 @@ import { tryResolveHarnessBinary } from '@/shared/harness-binaries.js';
 // eslint-disable-next-line boundaries/dependencies -- capability probes execute provider binaries and share the updater's atomic admission seam.
 import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
 
-export type MechanicalCliHarnessProvider = 'codex' | 'qwen' | 'opencode' | 'hermes';
+export type MechanicalCliHarnessProvider = 'codex' | 'qwen' | 'opencode';
 export type MechanicalCliCapabilityProbe = (
   provider: MechanicalCliHarnessProvider, env: NodeJS.ProcessEnv,
 ) => boolean;
@@ -57,34 +56,6 @@ function qwenProbe(env: NodeJS.ProcessEnv): boolean {
   }
 }
 
-function hermesProbe(env: NodeJS.ProcessEnv): boolean {
-  const releaseHarnessLaunch = beginHarnessLaunch('hermes');
-  try {
-    const binary = tryResolveHarnessBinary('hermes');
-    if (!binary || !exactVersion('hermes', binary, '0.17.0', env)) return false;
-    const directory = mkdtempSync('/var/tmp/nassaj-hermes-capability-probe-');
-    const isolated = {
-      ...env, HOME: `${directory}/home`, HERMES_HOME: `${directory}/hermes`,
-      XDG_CONFIG_HOME: `${directory}/config`, XDG_DATA_HOME: `${directory}/data`,
-      XDG_STATE_HOME: `${directory}/state`, XDG_CACHE_HOME: `${directory}/cache`,
-    };
-    Object.values(isolated).filter((value) => typeof value === 'string' && value.startsWith(directory))
-      .forEach((entry) => mkdirSync(entry!, { recursive: true, mode: 0o700 }));
-    try {
-      const raw = output('hermes', binary, [
-        '--safe-mode', '--ignore-user-config', '--ignore-rules', '--toolsets', '',
-        'prompt-size', '--json',
-      ], isolated);
-      if (!raw) return false;
-      const parsed = JSON.parse(raw) as { tools?: { count?: unknown } };
-      return parsed.tools?.count === 0;
-    } catch { return false; }
-    finally { rmSync(directory, { recursive: true, force: true }); }
-  } finally {
-    releaseHarnessLaunch();
-  }
-}
-
 /** Installed-binary proof. Browser and environment claims cannot replace it. */
 export const installedMechanicalCliProbe: MechanicalCliCapabilityProbe = (provider, env) => {
   if (provider === 'codex' || provider === 'opencode') return true;
@@ -94,7 +65,7 @@ export const installedMechanicalCliProbe: MechanicalCliCapabilityProbe = (provid
   if (!binary) return false;
   const key = `${provider}:${binary}`;
   if (probeCache.has(key)) return probeCache.get(key)!;
-  const result = provider === 'qwen' ? qwenProbe(env) : hermesProbe(env);
+  const result = qwenProbe(env);
   probeCache.set(key, result);
   return result;
 };
@@ -114,9 +85,8 @@ export function isCliTurnSupervisorArmed(
     codex: env.NASSAJ_TURN_SUPERVISOR_CODEX_CHAT,
     qwen: env.NASSAJ_TURN_SUPERVISOR_QWEN_CHAT,
     opencode: env.NASSAJ_TURN_SUPERVISOR_OPENCODE_CHAT,
-    hermes: env.NASSAJ_TURN_SUPERVISOR_HERMES_CHAT,
   } as const)[provider as MechanicalCliHarnessProvider];
-  return ['codex', 'qwen', 'opencode', 'hermes'].includes(provider) && enabled(flag);
+  return ['codex', 'qwen', 'opencode'].includes(provider) && enabled(flag);
 }
 
 /** Armed plus installed-binary proof; false must never cue legacy fallback. */
@@ -132,7 +102,6 @@ export function isCliTurnSupervisorEnabled(
 
 export const cliCapabilityInternals = Object.freeze({
   qwenProbe,
-  hermesProbe,
   exactVersion,
   hasCachedProbe: (key: string) => probeCache.has(key),
   clearProbeCache: () => probeCache.clear(),

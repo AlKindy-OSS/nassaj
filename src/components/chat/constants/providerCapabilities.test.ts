@@ -2,10 +2,14 @@
  * T-224 (م0+م1) — الواصف الكانوني لقدرات مزوّدات الواجهة.
  *
  * يثبت:
- *   • hermes.permissions.modes === ['default'] (م1 — الخلفي يتجاوز الأذونات).
+ *   • hermes.permissions.modes === ['default'] — لم يعد وصفاً مقصوداً (T-1953
+ *     قاعَدَ hermes كجسم)، بل أثرٌ جانبي صادق لـsafeFallbackCapabilities، الذي
+ *     يُعيد نفس القيمة الوحيدة لأي مزوّدٍ لا يملك واصفاً بعد اليوم — محفوظٌ هنا
+ *     لأنه لا يزال يمنع انكسار دوّار الأذونات لجلسة hermes تاريخية.
  *   • cyclePermissionMode مع مجموعة أحادية (hermes) لا ينكسر — يبقى في 'default'.
- *   • getProviderDisplayName: hermes/kimi/deepseek/glm لا تُسقَط إلى «Claude».
- *   • safeFallbackCapabilities: مزوّد غير معروف يعرض اسمه الخام لا «Claude».
+ *   • getProviderDisplayName: kimi/deepseek/glm لا تُسقَط إلى «Claude».
+ *   • safeFallbackCapabilities: مزوّد غير معروف (أو مُتقاعِد) يعرض اسمه الخام
+ *     بحرفه الأول كبيراً لا «Claude» — hermes/cursor يمرّان من هنا الآن أيضاً.
  *
  * Run: NODE_ENV=test npx vitest run src/components/chat/constants/providerCapabilities.test.ts
  */
@@ -53,8 +57,8 @@ describe('getProviderDisplayName — إصلاح وسم هرمز (T-224 م0)', ()
     expect(getProviderDisplayName('hermes')).not.toBe('Claude');
   });
 
-  it('hermes يعرض «Hermes (Nous)»', () => {
-    expect(getProviderDisplayName('hermes')).toBe('Hermes (Nous)');
+  it('hermes يعرض اسمه الخام «Hermes» — جسمٌ متقاعد (T-1953)، لا واصف مخصَّص له بعد الآن', () => {
+    expect(getProviderDisplayName('hermes')).toBe('Hermes');
   });
 
   it('kimi لا يُسقَط إلى «Claude»', () => {

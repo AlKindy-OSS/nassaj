@@ -650,6 +650,48 @@ export function terminateStandaloneTerminalsForUser(userId: string | number): nu
   return removed;
 }
 
+/**
+ * B-1448 slice 2: the reason code an update-driven close carries — on the error
+ * frame and as the WebSocket close reason. The client maps it to the
+ * `terminals.errors.closedForUpdate` string. 4404 is a FINAL close for both
+ * terminal clients, so a closed terminal is not silently re-attached.
+ */
+export const UPDATE_TERMINAL_CLOSE_REASON = 'update_terminals_closed';
+export const UPDATE_TERMINAL_CLOSE_CODE = 4404;
+
+/**
+ * B-1448 slice 2: closes EVERY standalone terminal of every user because the
+ * owner confirmed "close terminals and update". The attached viewer gets an
+ * error frame naming the reason before its socket closes; the lease is released
+ * synchronously so the updater sees it gone at once. Returns terminals closed.
+ */
+export function terminateAllStandaloneTerminalsForUpdate(): number {
+  let closed = 0;
+  for (const entry of [...terminals.values()]) {
+    if (!entry.pty) {
+      continue;
+    }
+    try {
+      entry.pty.kill();
+    } catch {
+      // already dead — the close proceeds regardless
+    }
+    entry.pty = null;
+    entry.writerLease.release();
+    revokeManagedClaudeTerminal(entry.managedClaudeSelector);
+    sendFrame(entry.ws, {
+      type: 'error',
+      code: UPDATE_TERMINAL_CLOSE_REASON,
+      message: 'The owner closed this terminal to install an update.',
+    });
+    closeSocket(entry.ws, UPDATE_TERMINAL_CLOSE_CODE, UPDATE_TERMINAL_CLOSE_REASON);
+    entry.ws = null;
+    terminals.delete(entry.id);
+    closed += 1;
+  }
+  return closed;
+}
+
 // ── WS-facing API (injected into terminal-websocket.service.ts) ─────────────
 
 /**

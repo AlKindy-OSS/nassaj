@@ -12,14 +12,7 @@ beforeAll(async () => {
 afterEach(() => cleanup());
 
 describe('SteerComposerNote', () => {
-  it('names the /steer command for the starter, without quota language', () => {
-    render(<SteerComposerNote starterName="Sara" isStarter />);
-    const note = screen.getByTestId('steer-composer-note');
-    expect(note.textContent).toMatch(/\/steer/);
-    expect(note.textContent).not.toMatch(/quota/i);
-  });
-
-  it('mentions the starter’s quota for a non-starter (default isStarter)', () => {
+  it('mentions the starter’s quota and never the /steer hint (T-1956)', () => {
     render(<SteerComposerNote starterName="Sara" />);
     const note = screen.getByTestId('steer-composer-note');
     expect(note.textContent).toMatch(/Sara/);

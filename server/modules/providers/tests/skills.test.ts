@@ -681,8 +681,8 @@ test('providerSkillsService removes an installed global skill', { concurrency: f
 /**
  * Read-only / remote providers that own no writable managed global skill
  * directory must reject both write operations. This spans the OpenCode reuse
- * case, an empty-source native provider (antigravity), a hosted vendor
- * (deepseek), and the directly-implemented Hermes facet.
+ * case, an empty-source native provider (antigravity) and a hosted vendor
+ * (deepseek).
  */
 test('providerSkillsService rejects managed skill writes for read-only providers', { concurrency: false }, async () => {
   const entries = [
@@ -701,10 +701,4 @@ test('providerSkillsService rejects managed skill writes for read-only providers
       `${provider} removeProviderSkill must reject`,
     );
   }
-
-  // Hermes implements the skills facet directly and reports not-implemented.
-  await assert.rejects(
-    providerSkillsService.addProviderSkills('hermes', { entries }),
-    /not yet implemented/i,
-  );
 });

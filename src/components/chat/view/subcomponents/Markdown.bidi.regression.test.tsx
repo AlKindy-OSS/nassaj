@@ -7,7 +7,7 @@
  *
  * السبب الذي يحرسه هذا الملف: كان كل مكوّن كتلة في المُصيِّر يحمل `dir="auto"`،
  * وهي خوارزمية «أول حرف قوي». كل عنصر قائمة في الرسالة الحقيقية أدناه يبدأ
- * بمعرّف لاتيني داخل `<code>` (`ZITADEL_PORT`، `ALTER ROLE…`، `LOGINV2_REQUIRED`)
+ * بمعرّف لاتيني داخل `<code>` (`IDPHOST_PORT`، `ALTER ROLE…`، `LOGINV2_REQUIRED`)
  * فيُحسب اتجاهه LTR رغم أن محتواه عربي. والحاوية نفسها كانت تُحسب LTR لأن
  * خوارزمية `dir=auto` تتخطّى كل فرع يحمل `dir` خاصاً به — وأبناؤها جميعاً
  * كانوا كذلك — فلا تجد أي حرف قوي وتسقط إلى الافتراضي LTR.
@@ -125,8 +125,8 @@ describe('Markdown — اتجاه أساس واحد للرسالة (bidi)', () =
     expect(items).toHaveLength(3);
     // كل عنصر يبدأ فعلاً بمعرّف لاتيني — وهو ما كان يقلب الاتجاه.
     expect(items.map((li) => (li.textContent ?? '').trim().slice(0, 12))).toEqual([
-      'ZITADEL_PORT',
-      'ALTER ROLE z',
+      'IDPHOST_PORT',
+      'ALTER ROLE i',
       'LOGINV2_REQU',
     ]);
     expect(items.map((li) => effectiveDirection(li, 'rtl'))).toEqual(['rtl', 'rtl', 'rtl']);

@@ -5,11 +5,13 @@
  * `dispatchProviderCommand` (defence in depth behind the UI filtering, single
  * source of truth: shared/disabledProviders.ts):
  *
- *   - a new run for a disabled provider (deepseek/glm/hermes/qwen/cursor/kimi —
- *     glm folded into the OpenCode carrier 2026-07-26; hermes and qwen disabled
- *     by owner decision 2026-09-28; cursor and kimi disabled again by owner
- *     decision 2026-09-29) is refused with a normalized error `complete`
+ *   - a new run for a disabled provider (deepseek/glm — glm folded into the
+ *     OpenCode carrier 2026-07-26) is refused with a normalized error `complete`
  *     message and NO spawn call;
+ *   - cursor/hermes/qwen/kimi are retired AS BODIES (T-1953): they get the typed
+ *     `provider_removed` refusal instead, asserted in the last section, while a
+ *     `kimi` ENGINE stamp and the `qwen-plan/*` / `glm/*` OpenCode models keep
+ *     dispatching;
  *   - the guard runs on the RESOLVED provider, so resuming a historical
  *     session persisted under a disabled provider is refused too — even when
  *     the client sends it under an enabled message type;
@@ -102,7 +104,6 @@ function makeDependencies(sessionProviderById: Record<string, string> = {}) {
     queryCodex: spawn('codex'),
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
-    spawnHermes: spawn('hermes'),
     spawnKimi: spawn('kimi'),
     spawnDeepSeek: spawn('deepseek'),
     spawnGlm: spawn('glm'),
@@ -152,26 +153,6 @@ test('an unknown command has no implicit Claude fallback', async () => {
   assert.equal((data as SentPayload & { notStarted?: boolean }).notStarted, true);
 });
 
-test('a resumed Qwen session is refused and never falls through to Claude (disabled 2026-09-28)', async () => {
-  // Qwen sessions stay readable, but a new turn on one must not spawn the CLI
-  // nor silently re-route to Claude, even under an enabled message type.
-  const { writer, sent } = makeWriter();
-  const { dependencies, calls } = makeDependencies({ 's-qwen-1': 'qwen' });
-
-  await dispatchProviderCommand(
-    'claude-command',
-    { command: 'hi', options: { sessionId: 's-qwen-1' } },
-    writer,
-    dependencies,
-    1,
-  );
-
-  assert.deepEqual(calls, []);
-  const data = readError(sent);
-  assert.equal(data.provider, 'qwen');
-  assert.match(data.error ?? '', /disabled/i);
-});
-
 test('resume of a session persisted under a disabled provider is refused', async () => {
   // Historical deepseek session resumed under the (enabled) claude message type:
   // the DB provider wins, so the guard must still fire. (deepseek is still in
@@ -190,47 +171,6 @@ test('resume of a session persisted under a disabled provider is refused', async
   const data = readError(sent);
   assert.equal(data.provider, 'deepseek');
   assert.match(data.error ?? '', /disabled/i);
-});
-
-test('resume of a historical hermes session is refused (disabled 2026-09-28)', async () => {
-  // Hermes sessions stay readable, but a new turn on one must not spawn the CLI,
-  // even when the client sends it under an enabled message type.
-  const { writer, sent } = makeWriter();
-  const { dependencies, calls } = makeDependencies({ 's-hermes-1': 'hermes' });
-
-  await dispatchProviderCommand(
-    'claude-command',
-    { command: 'hi', options: { sessionId: 's-hermes-1' } },
-    writer,
-    dependencies
-  );
-
-  assert.deepEqual(calls, []);
-  const data = readError(sent);
-  assert.equal(data.provider, 'hermes');
-  assert.match(data.error ?? '', /disabled/i);
-});
-
-test('resume of a historical cursor or kimi session is refused (disabled 2026-09-29)', async () => {
-  // Their transcripts stay readable over REST; a new turn must not spawn a CLI,
-  // even when the client sends it under an enabled message type.
-  for (const provider of ['cursor', 'kimi']) {
-    const { writer, sent } = makeWriter();
-    const sessionId = `s-${provider}-1`;
-    const { dependencies, calls } = makeDependencies({ [sessionId]: provider });
-
-    await dispatchProviderCommand(
-      'claude-command',
-      { command: 'hi', options: { sessionId } },
-      writer,
-      dependencies
-    );
-
-    assert.deepEqual(calls, [], `${provider}: no handler is spawned`);
-    const data = readError(sent);
-    assert.equal(data.provider, provider);
-    assert.match(data.error ?? '', /disabled/i);
-  }
 });
 
 test('resumed session persisted under an enabled provider dispatches despite a stale disabled type', async () => {
@@ -269,41 +209,117 @@ test('enabled providers dispatch exactly as before', async () => {
   }
 });
 
-// --- T-1853: providers whose runtime was deleted ------------------------------
+// --- T-1853 / T-1953: providers retired as bodies ------------------------------
 
-const [RETIRED_PROVIDER] = [...RETIRED_PROVIDER_IDS];
+type RetiredRefusal = SentPayload & { code?: string; notStarted?: boolean };
 
-test('a retired provider command type gets a typed provider_removed refusal and no spawn', async () => {
+/** Asserts the one typed frame a retired body gets, and that nothing was spawned. */
+function assertProviderRemoved(sent: SentPayload[], calls: string[], provider: string): void {
+  assert.deepEqual(calls, [], `${provider}: no handler is spawned`);
+  const payload = readError(sent) as RetiredRefusal;
+  assert.equal(payload.code, PROVIDER_REMOVED_CODE, `${provider}: typed code`);
+  assert.equal(payload.provider, provider);
+  assert.equal(payload.notStarted, true, `${provider}: refused before any run started`);
+}
+
+for (const retired of RETIRED_PROVIDER_IDS) {
+  test(`${retired}: its command type gets a typed provider_removed refusal and no spawn`, async () => {
+    const { writer, sent } = makeWriter();
+    const { dependencies, calls } = makeDependencies();
+
+    await dispatchProviderCommand(`${retired}-command`, { command: 'hi', options: {} }, writer, dependencies, 1);
+
+    assertProviderRemoved(sent, calls, retired);
+  });
+
+  test(`${retired}: resuming a session persisted under it is refused, never re-routed to Claude`, async () => {
+    // The transcript stays readable over REST; a new turn must not spawn a CLI
+    // nor fall through to Claude, even under an enabled message type.
+    const sessionId = `s-${retired}-1`;
+    const { writer, sent } = makeWriter();
+    const { dependencies, calls } = makeDependencies({ [sessionId]: retired });
+
+    await dispatchProviderCommand(
+      'claude-command', { command: 'hi', options: { sessionId } }, writer, dependencies, 1,
+    );
+
+    assertProviderRemoved(sent, calls, retired);
+  });
+
+  test(`${retired}: agent mode does not revive it, even with the native launcher wired`, async () => {
+    // The kimi agent bypass (ADR-062) sits AFTER the retired refusal, so it can
+    // no longer be reached; the same holds for any hosted-supervision cell.
+    const { writer, sent } = makeWriter();
+    const { dependencies, calls } = makeDependencies();
+    (dependencies as unknown as Record<string, unknown>).spawnKimiAgent = async () => {
+      calls.push('kimi-agent');
+    };
+
+    await dispatchProviderCommand(
+      `${retired}-command`, { command: 'hi', options: { mode: 'agent' } }, writer, dependencies, 1,
+    );
+
+    assertProviderRemoved(sent, calls, retired);
+  });
+}
+
+test('the legacy cursor-resume type gets the same typed refusal', async () => {
   const { writer, sent } = makeWriter();
   const { dependencies, calls } = makeDependencies();
 
-  await dispatchProviderCommand(
-    `${RETIRED_PROVIDER}-command`,
-    { command: 'hi', options: {} },
-    writer,
-    dependencies,
-    1,
-  );
+  await dispatchProviderCommand('cursor-resume', { sessionId: 's-cursor-9', options: {} }, writer, dependencies, 1);
 
-  assert.deepEqual(calls, []);
-  const payload = readError(sent) as SentPayload & { code?: string; notStarted?: boolean };
-  assert.equal(payload.code, PROVIDER_REMOVED_CODE);
-  assert.equal(payload.notStarted, true);
+  assertProviderRemoved(sent, calls, 'cursor');
 });
 
-test('resuming a session persisted under a retired provider is refused before any spawn', async () => {
+test('glm and deepseek are NOT retired: they keep the disabled refusal, not provider_removed', async () => {
+  // Retiring them is an open owner decision — the retired refusal would run
+  // before the GLM carrier bypass and the hosted-supervision bypass.
+  for (const provider of ['glm', 'deepseek']) {
+    assert.equal(RETIRED_PROVIDER_IDS.has(provider), false);
+    const { writer, sent } = makeWriter();
+    const { dependencies, calls } = makeDependencies();
+
+    await dispatchProviderCommand(`${provider}-command`, { command: 'hi' }, writer, dependencies);
+
+    assert.deepEqual(calls, []);
+    const payload = readError(sent) as RetiredRefusal;
+    assert.equal(payload.code, undefined);
+    assert.match(payload.error ?? '', /disabled/i);
+  }
+});
+
+test('a kimi ENGINE stamp on a claude-command still dispatches to the Claude SDK', async () => {
+  // The engine axis never travels as `kimi-command`: retiring the body must not
+  // touch a Claude turn whose engine is kimi, new or resumed.
   const { writer, sent } = makeWriter();
-  const { dependencies, calls } = makeDependencies({ 's-retired-1': RETIRED_PROVIDER });
+  const { dependencies, calls } = makeDependencies({ 's-claude-on-kimi': 'claude' });
 
   await dispatchProviderCommand(
     'claude-command',
-    { command: 'hi', options: { sessionId: 's-retired-1' } },
-    writer,
-    dependencies,
-    1,
+    { command: 'hi', options: { engineProvider: 'kimi', model: 'kimi-k2.6' } },
+    writer, dependencies, 1,
+  );
+  await dispatchProviderCommand(
+    'claude-command',
+    { command: 'again', options: { sessionId: 's-claude-on-kimi', engineProvider: 'kimi', model: 'kimi-k2.6' } },
+    writer, dependencies, 1,
   );
 
-  assert.deepEqual(calls, []);
-  const payload = readError(sent) as SentPayload & { code?: string };
-  assert.equal(payload.code, PROVIDER_REMOVED_CODE);
+  assert.deepEqual(calls, ['claude', 'claude']);
+  assert.deepEqual(sent, []);
+});
+
+test('an OpenCode run on a qwen-plan/* or glm/* model is unaffected', async () => {
+  // Both carriers dispatch under provider `opencode`; the retired list names
+  // bodies, never model families.
+  for (const model of ['qwen-plan/qwen3-coder-plus', 'glm/glm-5.2']) {
+    const { writer, sent } = makeWriter();
+    const { dependencies, calls } = makeDependencies();
+
+    await dispatchProviderCommand('opencode-command', { command: 'hi', options: { model } }, writer, dependencies, 1);
+
+    assert.deepEqual(calls, ['opencode'], model);
+    assert.deepEqual(sent, [], model);
+  }
 });

@@ -40,7 +40,7 @@ function harness(options: { enabled: boolean; supported?: boolean }) {
   const legacy = async () => { calls.legacy += 1; };
   const dependencies = {
     queryClaudeSDK: legacy, queryCodex: legacy, spawnCursor: legacy,
-    spawnAntigravity: legacy, spawnHermes: legacy, spawnOpenCode: legacy,
+    spawnAntigravity: legacy, spawnOpenCode: legacy,
     spawnKimi: legacy, spawnDeepSeek: legacy, spawnGlm: legacy,
     getSessionProvider: () => null,
     hostedTurnSupervisor: {

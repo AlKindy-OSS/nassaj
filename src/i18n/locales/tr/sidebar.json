@@ -35,6 +35,8 @@
     "deleteSession": "Oturumu Sil",
     "renameSession": "Oturumu Yeniden Adlandır",
     "noSessions": "Henüz oturum yok",
+    "surfacedHiddenHint_one": "+etkin {{count}} konuşma daha",
+    "surfacedHiddenHint_other": "+etkin {{count}} konuşma daha",
     "loadingSessions": "Oturumlar yükleniyor...",
     "unnamed": "Adsız",
     "loading": "Yükleniyor...",

@@ -5,8 +5,15 @@ import os from 'os';
 import express from 'express';
 
 import { CURSOR_FALLBACK_MODELS } from '../modules/providers/list/cursor/cursor-models.provider.js';
+import { PROVIDER_REMOVED_CODE, PROVIDER_REMOVED_MESSAGE } from '../../shared/retiredProviders.js';
 
 const router = express.Router();
+
+// T-1953: Cursor is retired as a body. Every /api/cursor/* request gets the typed
+// refusal; the handlers below are unreachable until this router is deleted.
+router.use((req, res) => {
+  res.status(400).json({ error: PROVIDER_REMOVED_MESSAGE, code: PROVIDER_REMOVED_CODE });
+});
 
 // GET /api/cursor/config - Read Cursor CLI configuration.
 router.get('/config', async (req, res) => {

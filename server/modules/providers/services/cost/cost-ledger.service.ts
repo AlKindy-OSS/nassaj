@@ -172,10 +172,9 @@ export type ProjectLedgerStats = {
 // ---------------------------------------------------------------------------
 
 /**
- * ‏Hermes خارج السجلّ لسببٍ بنيوي لا كسل: نسّاج يولّد مُعرِّف المحادثة بنفسه
- * لأن `hermes -z` لا يُعيد مُعرِّفه الداخلي، و`state.db` ترقّم جلساتها بترقيم
- * آخر — فلا مفتاح وصل، ولا حقل مجلَّد عمل في صفوفها أصلاً. نسبة إنفاقه إلى
- * مشروع ستكون تخميناً يُعرض كقياس.
+ * ‏Hermes خارج السجلّ لأن جسمه أُزيل (T-1953) مع قارئ قاعدته: محادثاته القديمة
+ * تبقى مقروءةً بلا سجلّ استهلاك يقرؤه نسّاج، فلا شيء لنسبته إلى مشروع أو يوم.
+ * نصّ السبب هو نفسه في session-cost.service (‏UNMEASURABLE_REASONS.hermes).
  *
  * والمزوّدات التي لا تكتب عدّاداً أصلاً (‏agy/antigravity، cursor) لا شيء
  * لنسبته من الأساس.
@@ -184,7 +183,7 @@ const KNOWN_GAPS: readonly LedgerGap[] = Object.freeze([
   Object.freeze({
     harness: 'hermes',
     reason:
-      'Hermes records its token counts in ~/.hermes/state.db with no working-directory field and no id nassaj can match, so its spend cannot be attributed to a project or a day.',
+      'Hermes was removed as an agent body; its past conversations carry no usage record nassaj can read.',
   }),
   Object.freeze({
     harness: 'antigravity',

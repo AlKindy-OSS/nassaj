@@ -18,6 +18,7 @@ import { isIdentityRevocationClose, reconcileRevokedIdentity } from '../../auth/
 import { getTerminalWebSocketUrl, parseTerminalMessage, sendTerminalMessage } from '../utils/socket';
 import {
   MAX_RECONNECT_ATTEMPTS,
+  UPDATE_TERMINALS_CLOSED_REASON,
   classifyTerminalClose,
   computeBackoffDelay,
   shouldRetryReconnect,
@@ -271,6 +272,9 @@ export function useTerminalConnection({
 
       const socket = new WebSocket(url);
       wsRef.current = socket;
+      // B-1448: the owner closed every terminal for an update. The server sends
+      // an error frame with this code, then a final 4404; either one is enough.
+      let closedForUpdate = false;
 
       socket.onopen = () => {
         window.setTimeout(() => {
@@ -339,6 +343,13 @@ export function useTerminalConnection({
         }
 
         if (message.type === 'error') {
+          if ((message as { code?: unknown }).code === UPDATE_TERMINALS_CLOSED_REASON) {
+            closedForUpdate = true;
+            setInputEnabled(false);
+            setErrorMessage(null);
+            setState('closedForUpdate');
+            return;
+          }
           const errored = message as { message?: string };
           setErrorMessage(typeof errored.message === 'string' ? errored.message : null);
           setState('error');
@@ -361,15 +372,21 @@ export function useTerminalConnection({
           return;
         }
 
-        // Route by close code. 4409/4404/4403/1001 are final (no auto-loop);
+        // Route by close code. 4409/4404/4403/1001 are final (no auto-loop), and
+        // 4404 with reason update_terminals_closed says why (B-1448);
         // any abnormal drop (1006 / keepalive timeout / transient network) is
         // re-attached with backoff — the PTY survives server-side, no kill timer.
-        switch (classifyTerminalClose(event.code)) {
+        const reason = closedForUpdate ? UPDATE_TERMINALS_CLOSED_REASON : event.reason;
+        switch (classifyTerminalClose(event.code, reason)) {
           case 'superseded':
             setState('superseded');
             return;
           case 'notFound':
             setState('notFound');
+            return;
+          case 'closedForUpdate':
+            // Final: the PTY is gone and a re-attach would only hold the update back.
+            setState('closedForUpdate');
             return;
           case 'forbidden':
             // Do NOT null the message: the server sends its `error` frame and

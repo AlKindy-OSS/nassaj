@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { PROVIDER_UI_CAPABILITIES } from '../chat/constants/providerCapabilities';
-import type { LLMProvider } from '../../types/app';
+import type { ActiveBodyProvider } from '../../types/app';
 import { DISABLED_PROVIDERS } from '../../../shared/disabledProviders';
 
 import type { ProviderAuthStatus, ProviderAuthStatusMap } from './types';
@@ -134,7 +134,7 @@ describe('provider reset logic (sanitize stored provider)', () => {
 describe('initial provider map (fail-open defaults)', () => {
   it('(و) createInitialProviderAuthStatusMap sets installed=true and checkFailed=false by default', () => {
     const map = createInitialProviderAuthStatusMap(true);
-    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'codex', 'antigravity', 'opencode'] as const;
     for (const p of providers) {
       expect(map[p].installed).toBe(true);
       expect(map[p].loading).toBe(true);
@@ -144,7 +144,7 @@ describe('initial provider map (fail-open defaults)', () => {
 
   it('(و) no provider is hidden during initial loading (fail-open)', () => {
     const map = createInitialProviderAuthStatusMap(true);
-    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'codex', 'antigravity', 'opencode'] as const;
     for (const p of providers) {
       expect(isProviderVisible(map[p])).toBe(true);
     }
@@ -152,7 +152,7 @@ describe('initial provider map (fail-open defaults)', () => {
 
   it('(و) no provider is disabled during initial loading (fail-open)', () => {
     const map = createInitialProviderAuthStatusMap(true);
-    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'codex', 'antigravity', 'opencode'] as const;
     for (const p of providers) {
       expect(isProviderDisabled(map[p])).toBe(false);
     }
@@ -202,12 +202,12 @@ describe('toProviderAuthStatus payload parsing (installed field)', () => {
  * so these assertions fail if a future reordering re-exposes a disabled id.
  */
 describe('resolveFallbackProvider — auto-reset never lands on a dead end', () => {
-  const REAL_ORDER = Object.keys(PROVIDER_UI_CAPABILITIES) as LLMProvider[];
+  const REAL_ORDER = Object.keys(PROVIDER_UI_CAPABILITIES) as ActiveBodyProvider[];
 
   /** Marks every provider as confirmed-not-installed except the named ones. */
-  function statusWithInstalled(...installed: LLMProvider[]): ProviderAuthStatusMap {
+  function statusWithInstalled(...installed: ActiveBodyProvider[]): ProviderAuthStatusMap {
     const map = createInitialProviderAuthStatusMap(false);
-    for (const provider of Object.keys(map) as LLMProvider[]) {
+    for (const provider of Object.keys(map) as ActiveBodyProvider[]) {
       map[provider] = makeStatus({ installed: installed.includes(provider) });
     }
     return map;
@@ -226,7 +226,12 @@ describe('resolveFallbackProvider — auto-reset never lands on a dead end', () 
     //
     // T-1211: the set is DERIVED from the source of truth rather than written
     // out here, so a policy change cannot leave a stale hand-written list.
-    for (const disabled of DISABLED_PROVIDERS as readonly LLMProvider[]) {
+    // Retired bodies (cursor/hermes/qwen/kimi, T-1953) are no longer part of
+    // REAL_ORDER at all — they are covered by retiredProviderSurfaces.test.ts,
+    // not here — so this loop only needs the still-active-body disabled ids.
+    for (const disabled of (DISABLED_PROVIDERS as readonly string[]).filter(
+      (id): id is ActiveBodyProvider => (REAL_ORDER as readonly string[]).includes(id),
+    )) {
       expect(
         resolveFallbackProvider(REAL_ORDER, statusWithInstalled(disabled)),
         `${disabled} must never be an auto-reset target`,
@@ -237,7 +242,7 @@ describe('resolveFallbackProvider — auto-reset never lands on a dead end', () 
   it('lands on each selectable provider when it alone is installed', () => {
     // Derive eligible cases from the current policy.
     for (const provider of REAL_ORDER.filter((candidate) =>
-      !(DISABLED_PROVIDERS as readonly LLMProvider[]).includes(candidate))) {
+      !(DISABLED_PROVIDERS as readonly string[]).includes(candidate))) {
       expect(resolveFallbackProvider(REAL_ORDER, statusWithInstalled(provider))).toBe(provider);
     }
   });

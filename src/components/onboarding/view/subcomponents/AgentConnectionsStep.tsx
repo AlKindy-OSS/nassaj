@@ -1,14 +1,14 @@
 import { useTranslation } from 'react-i18next';
 
 import { isProviderGloballyDisabled } from '../../../../../shared/disabledProviders';
-import type { LLMProvider } from '../../../../types/app';
+import type { ActiveBodyProvider } from '../../../../types/app';
 import type { ProviderAuthStatusMap } from '../../../provider-auth/types';
 
 import AgentConnectionCard from './AgentConnectionCard';
 
 type AgentConnectionsStepProps = {
   providerStatuses: ProviderAuthStatusMap;
-  onOpenProviderLogin: (provider: LLMProvider) => void;
+  onOpenProviderLogin: (provider: ActiveBodyProvider) => void;
 };
 
 export const providerCards = [
@@ -18,13 +18,6 @@ export const providerCards = [
     connectedClassName: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
     iconContainerClassName: 'bg-blue-100 dark:bg-blue-900/30',
     loginButtonClassName: 'bg-blue-600 hover:bg-blue-700',
-  },
-  {
-    provider: 'cursor' as const,
-    title: 'Cursor',
-    connectedClassName: 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
-    iconContainerClassName: 'bg-purple-100 dark:bg-purple-900/30',
-    loginButtonClassName: 'bg-purple-600 hover:bg-purple-700',
   },
   {
     provider: 'codex' as const,

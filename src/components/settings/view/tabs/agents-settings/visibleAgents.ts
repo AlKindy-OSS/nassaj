@@ -24,24 +24,22 @@ import type { AgentProvider } from '../../../types/types';
  *
  *   antigravity  Google         Smart Reply (Inbox)    2015-11-04
  *   codex        OpenAI         GPT-1                  2018-06
- *   cursor       Anysphere      Cursor code editor     2023-01-20
  *   claude       Anthropic      Claude 1               2023-03-14
- *   qwen         Alibaba        Tongyi Qianwen         2023-04-11
- *   hermes       Nous Research  GPT4-x-Vicuna-13b      2023-05-06
- *   kimi         Moonshot AI    Kimi                   2023-10-09
  *   deepseek     DeepSeek       DeepSeek-Coder         2023-11-02
  *   opencode     SST/Anomaly    OpenCode               2025-06-19
  *
  * Verified 2026-09-12: Smart Reply decodes replies with a word-level LSTM
- * (Google Research blog); Cursor's editor launch is the HN post of 2023-01-20
- * (cursor.so, "Code Editing, Redefined"); Nous's first Hugging Face model is
- * dated by the HF API (Nous-Hermes-13b followed on 2023-06-03). DeepSeek ships
- * its own agent too (deepseek-harness, first public 2026-08-13), but the
- * company's row is dated by its first release. glm stays hidden and undated at
- * the end.
+ * (Google Research blog). DeepSeek ships its own agent too (deepseek-harness,
+ * first public 2026-08-13), but the company's row is dated by its first
+ * release. glm stays hidden and undated at the end.
+ *
+ * cursor/qwen/hermes/kimi are retired BODIES (T-1953) and are gone from this
+ * order permanently, not merely disabled — `visibleSettingsAgents()` must
+ * never show them again even after they eventually leave DISABLED_PROVIDERS
+ * too (finding H6).
  */
 export const SETTINGS_AGENT_ORDER: readonly AgentProvider[] = Object.freeze([
-  'antigravity', 'codex', 'cursor', 'claude', 'qwen', 'hermes', 'kimi',
+  'antigravity', 'codex', 'claude',
   'deepseek', 'opencode', 'glm',
 ] as AgentProvider[]);
 

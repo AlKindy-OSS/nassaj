@@ -2,7 +2,7 @@
  * grant-home — a HOME for a grantee's spawn of a HOME/XDG-steered provider
  * (T-1675 / ADR-152, closing qa-critic finding 1).
  *
- * agy, hermes and cursor find their credential relative to $HOME, and
+ * agy and cursor find their credential relative to $HOME, and
  * opencode relative to $XDG_DATA_HOME. Handing such a spawn the OWNER's root
  * would expose every credential the owner holds — `.claude/`, `.codex/`,
  * `.qwen/`, the lot — through a grant for one provider. So a grantee never
@@ -10,7 +10,6 @@
  *
  *   ~/.nassaj-users/<grantee>/.grants/<owner>/
  *     .gemini                -> ~/.nassaj-users/<owner>/.gemini    (only if agy is granted)
- *     .hermes                -> ~/.nassaj-users/<owner>/.hermes    (only if hermes is granted)
  *     .cursor                -> ~/.nassaj-users/<owner>/.cursor    (only if cursor is granted)
  *     .local/                   (real dir)
  *       share/                  (real dir)
@@ -40,7 +39,6 @@ const DIR_MODE = 0o700;
 /** Where each HOME/XDG-steered provider keeps its credential, relative to root. */
 const OWNER_LINKED_PATHS = Object.freeze({
   agy: ['.gemini'],
-  hermes: ['.hermes'],
   cursor: ['.cursor'],
   opencode: [path.join('.local', 'share', 'opencode')],
   qwen: ['.qwen'],

@@ -136,8 +136,6 @@ function makeProps(overrides: Partial<AgentsSettingsTabProps> = {}): AgentsSetti
     onRefreshAuthStatus: vi.fn(),
     claudePermissions: {} as unknown as AgentsSettingsTabProps['claudePermissions'],
     onClaudePermissionsChange: vi.fn(),
-    cursorPermissions: {} as unknown as AgentsSettingsTabProps['cursorPermissions'],
-    onCursorPermissionsChange: vi.fn(),
     codexPermissionMode: 'default',
     onCodexPermissionModeChange: vi.fn(),
     projects: [],

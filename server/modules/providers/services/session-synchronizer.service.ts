@@ -86,7 +86,7 @@ export const sessionSynchronizerService = {
       kimi: 0,
       deepseek: 0,
       glm: 0,
-      // Placeholder providers: declared in the union, no synchronizer yet.
+      // History-only id (T-1953): its body is deleted, so nothing is synchronized.
       hermes: 0,
       // Qwen uses the shared nassaj-owned transcript synchronizer.
       qwen: 0,

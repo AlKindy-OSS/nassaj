@@ -68,7 +68,6 @@ export const BODY_AXIS_IDS = Object.freeze([
   'kimi',
   'antigravity',
   'cursor',
-  'hermes',
 ] as const);
 
 export type BodyAxisId = (typeof BODY_AXIS_IDS)[number];
@@ -287,10 +286,6 @@ export const BODY_ENGINE_MATRIX: Readonly<Record<BodyAxisId, readonly BodyEngine
       cell('anthropic', 'closed_at_vendor', 'inferred', 'cursorClosed',
         'Cursor resolves its own model server-side and accepts no external engine.'),
     ],
-    hermes: [
-      cell('anthropic', 'unverified', 'none', 'hermesUnverified',
-        'Hermes has its own model layer; no engine pair has been examined.'),
-    ],
   });
 
 /** The row for a body, or an empty list for an id that has no row. */
@@ -327,7 +322,7 @@ export function actionableEngineCells(body: string): readonly BodyEngineCell[] {
  * Reads the SAME predicate the panel renders from, deliberately: gating the tab
  * on "any declared cell" while the panel draws "any actionable cell" is two
  * answers to one question, and it shows up as a tab that opens onto nothing —
- * which is exactly what codex, cursor, hermes and antigravity would do, since
+ * which is exactly what codex, cursor and antigravity would do, since
  * every cell they declare is a barrier.
  */
 export function bodyHasEngineAxis(body: string): boolean {

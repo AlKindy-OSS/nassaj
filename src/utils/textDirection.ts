@@ -7,7 +7,7 @@
  * that heuristic make it actively harmful for Arabic technical prose:
  *
  *  1. Arabic technical writing very often OPENS with a Latin identifier —
- *     `` `ZITADEL_PORT` لا يقيّد عنوان الربط `` — so the first strong character
+ *     `` `IDPHOST_PORT` لا يقيّد عنوان الربط `` — so the first strong character
  *     is `Z` and the whole block resolves to LTR. The Unicode bidi algorithm
  *     then lays every Arabic run and every neutral (parentheses, dashes,
  *     digits, em dash) out against an LTR base: `(~200MB على ذاكرة 2GB)`
@@ -40,7 +40,7 @@
  * So direction is resolved at two levels:
  *
  *  1. PER BLOCK, by majority — never by first-strong. An Arabic paragraph that
- *     opens with `ZITADEL_PORT` stays RTL because its majority is Arabic. This
+ *     opens with `IDPHOST_PORT` stays RTL because its majority is Arabic. This
  *     is what killed the original bug; the bug was first-strong, not per-block.
  *  2. PER CONTAINER, by a vote of the blocks — one block, one vote. Paragraph
  *     length then stops deciding the message, so the bias above disappears.

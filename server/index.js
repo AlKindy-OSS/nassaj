@@ -21,6 +21,7 @@ import { createWebSocketServer } from '@/modules/websocket/index.js';
 import {
     abortSessionTurn, dispatchProviderCommand, isModelActivityFrame, isSessionWritableByUser,
 } from '@/modules/websocket/services/chat-websocket.service.js';
+import { terminateAllShellSessionsForUpdate } from '@/modules/websocket/services/shell-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 import {
     createScheduledMessagesRouter, createScheduledMessagesService, createScheduledTurnDispatcher,
@@ -114,12 +115,6 @@ import {
     getActiveOpenCodeSessions,
 } from './opencode-cli.js';
 import {
-    spawnHermes,
-    abortHermesSession,
-    isHermesSessionActive,
-    getActiveHermesSessions,
-} from './hermes-cli.js';
-import {
     spawnKimi,
     abortKimiSession,
     isKimiSessionActive,
@@ -166,6 +161,10 @@ import { createRateLimiter } from './middleware/rate-limit.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import { warnOnOwnerOidcLinks } from './services/oidc-owner-link-check.js';
+import { applySsoBootPolicy, assertSsoApiKeyGateRegistered } from './services/sso-lifecycle.service.js';
+// ADR-194 D6: loading the SSO state model registers the API key gate; the boot
+// sequence asserts it (assertSsoApiKeyGateRegistered) before serving.
+import './services/sso-config.service.js';
 import adminRoutes from './routes/admin.js';
 import credentialGrantsRoutes from './routes/credential-grants.js';
 import cursorRoutes from './routes/cursor.js';
@@ -189,7 +188,9 @@ import {
     resizeStandaloneTerminal,
     detachStandaloneTerminalSocket,
     terminateStandaloneTerminalsForUser,
+    terminateAllStandaloneTerminalsForUpdate,
 } from './services/standalone-terminals/standalone-terminal-registry.js';
+import { createCloseTerminalsHandler } from './routes/update-close-terminals.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { CLAUDE_HOME_READY } from './modules/providers/list/claude/claude-projects-roots.js';
 import harnessUpdateRoutes from './modules/providers/harness-update/harness-update.routes.js';
@@ -247,7 +248,7 @@ import { resolveDegraded } from './services/health-degraded.js';
 import { readRuntimeIdentity } from './services/runtime-identity.js';
 import { assertLegacyTransitionAllowed, requireStartupAdmission, confirmStartupServing } from './bootstrap-startup-context.js';
 import { createUpdateMaintenanceGate } from './services/update-maintenance-gate.js';
-import { acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases, withLocalUpdateWriterLease } from './services/update-writer-lease.js';
+import { acquireApplicationWriterLease, applicationWriterLeaseMiddleware, installLocalUpdateRouteLeases, summarizeOpenTerminals, withLocalUpdateWriterLease } from './services/update-writer-lease.js';
 import { createClientPublicationStaticMiddleware, createClientManifestHandler } from './services/client-publication-static.js';
 import { resolveHostUpdateMode, setLocalUpdateRuntimeIdentity, localUpdateActivationJobs, ensureLocalUpdateAction,
     getLocalUpdatePolicyCapability } from './services/local-preview-server-control.js';
@@ -364,7 +365,6 @@ const countGovernedActiveSessions = () => [
     getActiveCodexSessions,
     getActiveAntigravitySessions,
     getActiveOpenCodeSessions,
-    getActiveHermesSessions,
     getActiveKimiSessions,
     getActiveDeepSeekSessions,
     getActiveGlmSessions,
@@ -944,7 +944,6 @@ const wss = createWebSocketServer(server, {
         queryCodex,
         spawnAntigravity,
         spawnOpenCode,
-        spawnHermes,
         spawnKimi,
         spawnKimiAgent,
         spawnDeepSeek,
@@ -980,7 +979,6 @@ const wss = createWebSocketServer(server, {
         abortCodexSession,
         abortAntigravitySession,
         abortOpenCodeSession,
-        abortHermesSession,
         abortKimiSession: (sessionId) => (
             spawnKimiAgent.abortSession(sessionId) || abortKimiSession(sessionId)
         ),
@@ -999,7 +997,6 @@ const wss = createWebSocketServer(server, {
         isCodexSessionActive,
         isAntigravitySessionActive,
         isOpenCodeSessionActive,
-        isHermesSessionActive,
         isKimiSessionActive,
         isDeepSeekSessionActive,
         isGlmSessionActive,
@@ -1014,14 +1011,13 @@ const wss = createWebSocketServer(server, {
         getActiveCodexSessions,
         getActiveAntigravitySessions,
         getActiveOpenCodeSessions,
-        getActiveHermesSessions,
         getActiveKimiSessions,
         getActiveDeepSeekSessions,
         getActiveGlmSessions,
         getActiveQwenSessions,
     }),
     shell: {
-        acquireWriterLease: (kind) => acquireApplicationWriterLease(kind, { waitMs: 100 }),
+        acquireWriterLease: (kind, holder) => acquireApplicationWriterLease(kind, { waitMs: 100, holder }),
         getSessionById: (sessionId) => sessionManager.getSession(sessionId),
         stripAnsiSequences,
         normalizeDetectedUrl,
@@ -1240,7 +1236,6 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         codex: safeCount(getActiveCodexSessions),
         antigravity: safeCount(getActiveAntigravitySessions),
         opencode: safeCount(getActiveOpenCodeSessions),
-        hermes: safeCount(getActiveHermesSessions),
         kimi: safeCount(getActiveKimiSessions),
         deepseek: safeCount(getActiveDeepSeekSessions),
         glm: safeCount(getActiveGlmSessions),
@@ -1656,7 +1651,6 @@ setSessionLivenessProbes({
     codex: isCodexSessionActive,
     antigravity: isAntigravitySessionActive,
     opencode: isOpenCodeSessionActive,
-    hermes: isHermesSessionActive,
     kimi: isKimiSessionActive,
     deepseek: isDeepSeekSessionActive,
     glm: isGlmSessionActive,
@@ -1942,6 +1936,9 @@ const updateAutoActivator = releaseSourceInvalid && !localActivationMode ? null 
     listQueuedRestarts: () => pendingServerActionsDb.listActionable().filter((row) => row.actionType === 'safe-restart')
         .map(row => localActivationMode ? { ...row, sourceUpdateJobId: row.reason } : row),
     countSessions: countGovernedActiveSessions,
+    // B-1448: release mode only; in local-main the reading undercounts (a
+    // terminal's lease is a nested retain of its request's http-handler lease).
+    openTerminals: localActivationMode ? null : () => summarizeOpenTerminals(),
     executeAsOwner: ({ id, user }) => executeActionRowAs({ id, user, wss: app.locals.wss, trigger: localActivationMode ? 'local-update-activate' : 'update-auto-activate' }),
     getUser: (id) => userDb.getUserById(id),
     audit: (action, metadata) => auditLogDb.record(action, { metadata }),
@@ -2191,6 +2188,19 @@ app.post('/api/system/update/jobs/:jobId/skip-scheduled-wait', authenticateToken
     auditLogDb.record('update_scheduled_override', { userId: ownerId, metadata: { jobId: job.id } });
     return res.json({ jobId: job.id, state: job.state, scheduledOverride: true });
 });
+
+// B-1448 slice 2: owner "close N terminals and update". Closes every open
+// terminal (all members, attached and detached) only when the request echoes
+// the snapshot the owner saw; a changed set is 409 terminals_changed.
+const closeTerminalsLimiter = createRateLimiter({ windowMs: 60_000, max: 10, message: 'Too many close requests, please slow down' });
+app.post('/api/system/update/jobs/:jobId/close-terminals', authenticateToken, requireRole('owner'), closeTerminalsLimiter, createCloseTerminalsHandler({
+    getJobForOwner: (jobId, ownerId) => sourceUpdateJobsDb.getForOwner(jobId, ownerId),
+    summarizeOpenTerminals: () => summarizeOpenTerminals(),
+    closeAllTerminals: () => terminateAllStandaloneTerminalsForUpdate() + terminateAllShellSessionsForUpdate(),
+    activateNow: updateAutoActivator ? (jobId) => updateAutoActivator.activateNow(jobId) : null,
+    closeTerminalsRefusal: updateAutoActivator ? (jobId) => updateAutoActivator.closeTerminalsRefusal(jobId) : null,
+    audit: (action, details) => auditLogDb.record(action, details),
+}));
 
 // T-1768: the job's live terminal log, read from a byte offset so the modal
 // polls only what is new. Owner-only and already sanitized at write time.
@@ -4086,6 +4096,11 @@ async function startServer() {
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP) runConnectorCredentialRetentionAtStartup();
         // B-1410: flag SSO links on owner accounts (planted before the fix). Never throws.
         warnOnOwnerOidcLinks();
+        // ADR-194 D1 (T-1962): one-time FORCE_OFF revocation, or clear a stale
+        // disabled record next to an enabled config. Never throws.
+        applySsoBootPolicy();
+        // S9 M1: refuse to serve without the SSO-unavailable API key gate.
+        assertSsoApiKeyGateRegistered();
 
         // T-1871 §8: harness snapshot jobs interrupted by a crash are abandoned,
         // rolled back or resumed HERE — after the DB (durable fences) and before
@@ -4354,7 +4369,6 @@ async function startServer() {
                 codex: getActiveCodexSessions().length,
                 antigravity: getActiveAntigravitySessions().length,
                 opencode: getActiveOpenCodeSessions().length,
-                hermes: getActiveHermesSessions().length,
                 // B-143: count the hosted-vendor runs too, so a restart DRAINS
                 // (waits for) in-flight kimi/deepseek/glm sessions instead of
                 // killing them. Same shape as the CLI providers above.

@@ -100,7 +100,9 @@ router.post('/', async (req, res) => {
         }
         let writerLease;
         try {
-            writerLease = await acquireApplicationWriterLease('standalone-pty', { waitMs: 100 });
+            writerLease = await acquireApplicationWriterLease('standalone-pty', {
+                waitMs: 100, holder: { username: req.user?.username ?? null },
+            });
         } catch (leaseError) {
             // The 409 used to be silent server-side, so a terminal that simply
             // never opened had no diagnosable cause in the logs. Same wording

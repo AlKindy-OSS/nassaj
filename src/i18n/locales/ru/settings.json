@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "Пропускать запросы разрешений (используйте с осторожностью)",
       "claudeDescription": "Эквивалентно флагу --dangerously-skip-permissions",
-      "cursorDescription": "Эквивалентно флагу -f в Cursor CLI",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "Заблокированные инструменты не настроены",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "Разрешенные команды оболочки",
-      "description": "Команды оболочки, которые автоматически разрешены без запроса",
-      "placeholder": "например, \"Shell(ls)\" или \"Shell(git status)\"",
-      "quickAdd": "Быстро добавить общие команды:",
-      "empty": "Разрешенные команды не настроены",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "Заблокированные команды оболочки",
-      "description": "Команды оболочки, которые автоматически блокируются",
-      "placeholder": "например, \"Shell(rm -rf)\" или \"Shell(sudo)\"",
-      "empty": "Заблокированные команды не настроены",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "Примеры шаблонов инструментов:",
       "bashGitLog": "- Разрешить все команды git log",
       "bashGitDiff": "- Разрешить все команды git diff",
       "write": "- Разрешить все использование инструмента Write",
       "bashRm": "- Заблокировать все команды rm (опасно)"
-    },
-    "shellExamples": {
-      "title": "Примеры команд оболочки:",
-      "ls": "- Разрешить команду ls",
-      "gitStatus": "- Разрешить git status",
-      "npmInstall": "- Разрешить npm install",
-      "rmRf": "- Заблокировать рекурсивное удаление"
     },
     "codex": {
       "permissionMode": "Режим разрешений",

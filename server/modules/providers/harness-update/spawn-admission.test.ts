@@ -33,7 +33,6 @@ const SPAWN_ENTRY_POINTS: ReadonlyArray<{ file: string; runProvider: string }> =
   { file: 'opencode-cli.js', runProvider: 'opencode' },
   { file: 'qwen-cli.js', runProvider: 'qwen' },
   { file: 'kimi-agent-cli.js', runProvider: 'kimi' },
-  { file: 'hermes-cli.js', runProvider: 'hermes' },
 ];
 
 test('every provider spawn entry file consults the harness-update guard', () => {

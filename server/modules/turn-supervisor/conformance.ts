@@ -19,7 +19,7 @@ import type { ReviewVerdict } from './planner-schema.js';
 export type HarnessMode = 'chat';
 export type HarnessRuntime =
   | 'hosted_vendor_ephemeral' | 'claude_agent_sdk_ephemeral' | 'codex_cli_ephemeral'
-  | 'qwen_cli_ephemeral' | 'opencode_cli_ephemeral' | 'hermes_cli_ephemeral';
+  | 'qwen_cli_ephemeral' | 'opencode_cli_ephemeral';
 
 export type HarnessCoordinates = {
   readonly provider: string;
@@ -75,7 +75,7 @@ const CODEX_CLI_HARNESS_CONFORMANCE: HostedHarnessConformance = Object.freeze({
 });
 
 const EXTENDED_CLI_HARNESS_CONFORMANCE: readonly HostedHarnessConformance[] = Object.freeze(
-  (['qwen', 'opencode', 'hermes'] as const).map((provider) => Object.freeze({
+  (['qwen', 'opencode'] as const).map((provider) => Object.freeze({
     provider, mode: 'chat' as const, runtime: `${provider}_cli_ephemeral` as HarnessRuntime,
     enforcement: 'mechanical' as const, execution: 'capture_only' as const,
     spawnAuthority: 'supervisor_only' as const, rootEffects: 'denied' as const,
@@ -87,8 +87,8 @@ const EXTENDED_CLI_HARNESS_CONFORMANCE: readonly HostedHarnessConformance[] = Ob
 export function isExtendedCliMechanicalEnabled(
   provider: string, env: NodeJS.ProcessEnv = process.env,
   probe: MechanicalCliCapabilityProbe = installedMechanicalCliProbe,
-): provider is 'qwen' | 'opencode' | 'hermes' {
-  return (provider === 'qwen' || provider === 'opencode' || provider === 'hermes')
+): provider is 'qwen' | 'opencode' {
+  return (provider === 'qwen' || provider === 'opencode')
     && isCliTurnSupervisorEnabled(provider, 'chat', env, probe);
 }
 

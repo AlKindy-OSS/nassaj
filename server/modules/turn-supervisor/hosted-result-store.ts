@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS turn_supervisor_hosted_results (
 `;
 
 export type DurableHostedResult = {
-  turnId: string; runId: string; provider: 'kimi' | 'deepseek' | 'glm' | 'codex' | 'claude' | 'qwen' | 'opencode' | 'hermes'; model: string;
+  turnId: string; runId: string; provider: 'kimi' | 'deepseek' | 'glm' | 'codex' | 'claude' | 'qwen' | 'opencode'; model: string;
   sessionId: string; isNewSession: boolean; projectPath?: string; text: string;
   transcriptState: 'pending' | 'writing' | 'written';
 };

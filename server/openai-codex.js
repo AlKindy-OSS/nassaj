@@ -165,10 +165,17 @@ function transformCodexEvent(event) {
             }
           };
 
+        // B-1482: every tool-shaped item carries a stable SDK `item.id`
+        // (CommandExecutionItem/FileChangeItem/McpToolCallItem/WebSearchItem/
+        // TodoListItem — @openai/codex-sdk). `agent_message` above already
+        // forwards it as `uuid`; these cases used to drop it, so
+        // normalizeMessage() fell back to a FRESH random id
+        // (generateMessageId) on every call instead of the tool's own id.
         case 'command_execution':
           return {
             type: 'item',
             itemType: 'command_execution',
+            uuid: typeof item.id === 'string' ? item.id : undefined,
             command: item.command,
             output: item.aggregated_output,
             exitCode: item.exit_code,
@@ -179,6 +186,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'file_change',
+            uuid: typeof item.id === 'string' ? item.id : undefined,
             changes: item.changes,
             status: item.status
           };
@@ -187,6 +195,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'mcp_tool_call',
+            uuid: typeof item.id === 'string' ? item.id : undefined,
             server: item.server,
             tool: item.tool,
             arguments: item.arguments,
@@ -199,6 +208,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'web_search',
+            uuid: typeof item.id === 'string' ? item.id : undefined,
             query: item.query
           };
 
@@ -206,6 +216,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'todo_list',
+            uuid: typeof item.id === 'string' ? item.id : undefined,
             items: item.items
           };
 

@@ -1,3 +1,31 @@
+## 2.3.0.13 — 2026-09-30
+
+طرفية مفتوحة كانت تُفشل تحديث النظام بخطأ عام، فصار التحديث يؤجَّل بدلاً من الفشل مع عرض عدد
+الطرفيات المفتوحة وتراجع أُسّي عن المحاولات (B-1448)، وإصلاح بقاء شريط توجيه الدور ظاهراً بعد
+انتهائه (B-1449)، وإصلاح زرّ إرسال ‎/steer‎ على اللمس أثناء دورك الجاري (B-1450)، وتقاعد أربعة أجساد
+(cursor، hermes، qwen، kimi؛ ADR-192/T-1953)، وإصلاح رفض محدِّث الأجساد الزائف لجلسة طبيعية (B-1468)،
+وإصلاح رفض صور المساعد المضمَّنة على عُقَد umask-002 (B-1471)، وإصلاح اختفاء أول رسالة في جلسة جديدة
+(B-1469)، وإصلاح توجيه الدور («Steer») من الدور الثاني فصاعداً (B-1470)، وإصلاح محدِّث الأجساد على عقدة
+بلا مدير systemd للمستخدم (B-1474)، وإعداد مدة صلاحية مفاتيح API لأعضاء SSO (T-1946)، وإصلاح معالج
+إعداد الموصلات العالق بلا رابط عام (B-1461/ADR-193)، وإصلاح نوافذ إعدادات تُفتح خلف نافذة الإعدادات
+(B-1459)، وإصلاح بطاقات أدوات Codex العالقة واختيار النموذج قبل الجلسة (B-1482/B-1483)، ودخول موحّد
+محايد المزوّد (OIDC) للأعضاء من صفحة إعدادات موجّهة بلا إعادة تشغيل سيرفر (T-1962/ADR-194). **تحذير:**
+قفزة 2.3.0.12←2.3.0.13 تحديداً غير محمية؛ أغلق كل الطرفيات وتبويبات Shell قبلها (الترقية من 2.3.0.12).
+An open terminal used to fail a system update with a generic error; the update now defers instead,
+showing the open-terminal count, with exponential backoff (B-1448); a fix for the steer status strip
+staying visible after the turn ended (B-1449); a fix for the `/steer` send button on touch during
+your own running turn (B-1450); four chat bodies retired (cursor, hermes, qwen, kimi; ADR-192/
+T-1953); a fix for a false harness-update refusal on a normal session (B-1468); a fix for assistant
+inline images on umask-002 hosts (B-1471); a fix for a vanishing first message in a new conversation
+(B-1469); a fix for `/steer` breaking from the second turn onward (B-1470); a fix for the harness
+updater on a host without a user systemd manager (B-1474); a new setting for SSO member API-key
+validity (T-1946); a fix for the connector setup wizard getting stuck with no public origin
+(B-1461/ADR-193); a fix for Settings dialogs opening behind the Settings window (B-1459); and fixes
+for stuck Codex tool cards and the model picker resetting before a session exists (B-1482/B-1483);
+and provider-neutral single sign-on (OIDC) for members from a guided Settings page with no server
+restart (T-1962/ADR-194). **Warning:** the 2.3.0.12 → 2.3.0.13 hop specifically is unprotected; close
+every terminal and Shell tab first (upgrade from 2.3.0.12).
+
 ## 2.3.0.12 — 2026-09-30
 
 توجيه صاحب الدور لدوره الجاري بنفسه، ونافذة تحديث أوضح (إخفاء بطاقة التأكيد أثناء التحديث، والعائق الحقيقي وعجز القرص، وإشعار نجاح بعد إعادة الاتصال)، وظهور فقاعة الرسالة قبل الحفظ الدائم، ورابط اختياري لكل مشروع، ومؤشّر انشغال يعكس جلسات خارج الصفحة، وحوار أعضاء لا يُعاد تحميله، وتحديث مذكّر الالتزامات كل دقيقة، وأوامر تثبيت الأجساد الرسمية، وإصلاح عاصفة طلبات عميلية / حلقة 429، ومدة رابط الدعوة، وإيقاف الدور بـSTOP، وإصلاحات الورشات العالقة، وإغلاق ثغرة ربط SSO، وتعطيل Cursor وKimi وDeepSeek، ودخول SSO التجريبي المطفأ افتراضياً، وتأكيد الهوية قبل إضافة مفتاح مرور وفي الموصلات، وفكّ تثبيت OpenCode (الترقية من 2.3.0.11).
@@ -41,6 +69,93 @@ Improve provider status localization, optional hardware usage, images and menus.
 # التحديثات
 
 هنا تجد ملخصاً عملياً لأحدث إصدارات نسّاج: ما الجديد، وما الذي ستلاحظه عند الاستخدام. أما التفاصيل التقنية الكاملة فتوجد في سجل التغييرات داخل المشروع.
+
+---
+
+## الإصدار 2.3.0.13 — تحديث لا يفشل بسبب طرفية مفتوحة
+
+> **تحذير قبل الترقية:** قفزة 2.3.0.12 إلى 2.3.0.13 تحديداً تُنفَّذ بمحدِّث 2.3.0.12 القديم، فعيب
+> الطرفية المفتوحة أدناه ما زال حاضراً فيها بالذات. أغلق كل الطرفيات وتبويبات Shell المفتوحة على هذه
+> العقدة، على أجهزة كل الأعضاء، قبل الضغط على تحديث.
+
+ما الذي ستلاحظه:
+
+- طرفية مفتوحة (أو تبويب Shell) لم تعد تُفشل التحديث؛ يؤجَّل بدلاً من ذلك وتُعرض لك عدد الطرفيات
+  المفتوحة (ولصاحب المشروع أصحابها).
+- المحاولات المتكرّرة أثناء الانتظار تتباطأ تدريجياً (30 ثانية حتى 10 دقائق) بدل محاولة كل 30 ثانية
+  طوال 24 ساعة (B-1448).
+- شريط توجيه الدور («Steer») لم يعد يبقى ظاهراً بعد انتهاء الدور فعلياً (B-1449).
+- زرّ إرسال أمر ‎/steer‎ صار يعمل باللمس أثناء دورك الجاري، لا من لوحة المفاتيح فقط (B-1450).
+- تقاعدت أربعة أجساد دردشة لا تحمل محوراً آخر: cursor، hermes، qwen، kimi. دخولها اختفى من الواجهة،
+  وطلباتها تُرفض بـ400، وعميل kimi الأصلي غير قابل للوصول، وقياس تكلفة Hermes توقّف (ADR-192، T-1953).
+- محدِّث الأجساد لم يعد يرفض جلسة طبيعية زوراً بخطأ «تعذّر إثبات عزل المخزن»؛ صار يُفرَّق بين «المخزن
+  قيد الاستخدام» و«تعذّر إثبات الوصول» الحقيقي (B-1468).
+- صور المساعد المضمَّنة في الرسائل صارت تعمل على عُقَد umask-002 (مجلدات 775 مملوكة لمجموعة خاصة
+  مُبرهَنة) (B-1471).
+- أول رسالة في جلسة جديدة تماماً لم تعد تختفي من الشاشة بُعيد إرسالها (B-1469)، وإرسال رسالة أثناء
+  ردّ جارٍ لم يعد يُسقَط بصمت بل يظهر تلميح لإيقاف الدور أولاً.
+- توجيه الدور («Steer») لم يعد يتعطّل من الدور الثاني فصاعداً (B-1470)، وشرحه صار تلميحاً عند التحويم
+  بدل سطر ثابت في الدردشة (T-1956).
+- محدِّث الأجساد لم يعد يرفض كل تحديث للأبد على عقدة بلا مدير systemd للمستخدم (B-1474).
+- إعداد جديد للمالك: مدة صلاحية مفاتيح API لأعضاء دخول SSO (1 حتى 365 يوماً، افتراضياً 7)، وتُحذف
+  تلقائياً عند التعليق أو الإزالة أو فكّ الربط (T-1946).
+- معالج إعداد الموصلات لم يعد يتعطّل بلا رابط عام مضبوط صراحة (B-1461/ADR-193).
+- بعض نوافذ الإعدادات (تأكيد الهوية، إضافة مهارة، تأكيد تحديث الأجساد) لم تعد تُفتح خلف نافذة
+  الإعدادات (B-1459).
+- بطاقات أدوات Codex الجارية لم تعد تعلق على «يعمل» (B-1482)، واختيار نموذج قبل إنشاء الجلسة لم يعد
+  يُستبدَل بالافتراضي بعد إنشائها (B-1483).
+- حقل «غيره» الحرّ في سؤال الوكيل صار نصّه مرئياً أثناء الكتابة.
+- صفوف جلسات الشريط الجانبي خارج الصفحة المحمَّلة لم تعد تختفي أو تومض أثناء التحديث (T-1951)، وأُعيد
+  ترتيب شريط أدوات المشروع.
+- دخول موحّد محايد المزوّد (SSO/OIDC): أعضاء الفريق يدخلون الآن بحسابات مزوّد هوية خارجي، بلا كلمة
+  مرور منفصلة؛ المالك يعدّه من صفحة إعدادات موجّهة بلا إعادة تشغيل. الأعضاء المرتبطون يُرفضون من
+  الدخول المحلي عند التفعيل، والمالك يدخل محلياً دائماً. عُقَد `OIDC_*` القديمة تظهر «مستوقف» مع زرّ
+  استيراد (T-1962، ADR-194).
+
+> **قيد معروف:** الحماية تسري من هذا الإصدار فصاعداً؛ القفزة من 2.3.0.12 إلى 2.3.0.13 نفسها غير
+> محمية لأنها تعمل بالمحدِّث القديم.
+
+### English
+
+- An open terminal (or Shell tab) no longer fails an update; it defers instead and shows you the
+  open-terminal count (and, to the owner, who holds them).
+- Repeated attempts while waiting back off gradually (30 s up to 10 minutes) instead of retrying
+  every 30 s for 24 hours (B-1448).
+- The steer status strip no longer stays visible after a turn has actually ended (B-1449).
+- The `/steer` send button now works on touch during your own running turn, not just from the
+  keyboard (B-1450).
+- Four chat bodies with no other axis were retired: cursor, hermes, qwen, kimi. Their logins are
+  gone from the UI, their requests refuse with 400, the native kimi agent is unreachable, and Hermes
+  cost metering has stopped (ADR-192, T-1953).
+- The harness updater no longer falsely refuses a normal session with "store access unprovable"; it
+  now tells "store in use" apart from a genuine "access unprovable" (B-1468).
+- Assistant inline images in messages now work on umask-002 hosts (775 dirs owned by a proven
+  private group) (B-1471).
+- Your first message in a brand-new conversation no longer vanishes from the screen moments after
+  sending (B-1469), and sending while a reply is running is no longer silently dropped — a hint now
+  tells you to stop the run first.
+- `/steer` no longer breaks from the second turn onward (B-1470), and its explanation is now a hover
+  tooltip instead of a permanent line in the chat (T-1956).
+- The harness updater no longer permanently refuses every update on a host without a running user
+  systemd manager (B-1474).
+- New owner setting: validity window for SSO-linked members' API keys (1–365 days, default 7); keys
+  are deleted automatically on suspension, removal, or unlink (T-1946).
+- The connector setup wizard no longer gets stuck with no public origin explicitly set (B-1461/ADR-193).
+- Some Settings dialogs (step-up, add-skill, harness-update confirmation) no longer open behind the
+  Settings window (B-1459).
+- Running Codex tool cards no longer get stuck on "running" (B-1482), and a model picked before a
+  session exists is no longer overwritten by the default once it's created (B-1483).
+- The free-text "Other" field on an agent question now shows what you type.
+- Sidebar session rows surfaced from beyond the loaded page no longer flicker or disappear during a
+  refresh (T-1951), and the project toolbar was reordered.
+- Provider-neutral single sign-on (SSO/OIDC): team members can now sign in with accounts from an
+  external identity provider, no separate password, set up by the owner from a guided Settings page
+  with no server restart. Linked members' local sign-in is refused once enabled, and the owner
+  always signs in locally. Nodes with legacy `OIDC_*` env show "Paused" with an import button
+  (T-1962, ADR-194).
+
+> **Known limitation:** the protection applies from this release forward; the 2.3.0.12 → 2.3.0.13
+> hop itself is unprotected because it runs the old updater.
 
 ---
 

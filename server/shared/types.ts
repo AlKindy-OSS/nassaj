@@ -85,6 +85,7 @@ export type LLMProvider =
   | 'kimi'
   | 'deepseek'
   | 'glm'
+  // History-only (T-1953): the body is deleted; recorded conversations stay readable.
   | 'hermes'
   | 'qwen'
   | 'sakana';

@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next';
 
 import type { AgentProvider } from '../../../../types/types';
 import { useOptionalAuth } from '../../../../../auth/context/AuthContext';
-import { mayRetryAfterFreshStatus } from '../../../../../../hooks/harnessVersionMapping';
+import { isolateBidi } from '../../../../../quick-settings-panel/subscriptionHelpers';
+import type { HarnessUncheckedProcess, HarnessUncheckedReason } from '../../../../../../../shared/harness-update.contract';
+import { mayRetryAfterFreshStatus, type HarnessUncheckedDetails } from '../../../../../../hooks/harnessVersionMapping';
 import { useHarnessVersion } from '../../../../../../hooks/useHarnessVersion';
 import { Button } from '../../../../../../shared/view/ui';
 import SettingsCard from '../../../SettingsCard';
@@ -14,12 +16,61 @@ import HarnessUpdateConfirmDialog from './HarnessUpdateConfirmDialog';
 const busy = new Set(['queued', 'running']);
 const terminal = new Set(['succeeded', 'failed', 'skipped-live', 'pinned-refused', 'noop', 'rolled-back', 'rollback-failed']);
 
-/** T-1871 stage 4: default server message when the client has no specific string for an action-refusal code. */
+/**
+ * B-1468: STORE_IN_USE (a process really holds the data files) and
+ * STORE_ACCESS_UNPROVABLE (Nassaj could not *verify* that no process does)
+ * are different facts and must not share one string. The latter also needs
+ * `uncheckedProcesses` named when the server sent them — handled separately
+ * below via `actionErrorText`, not through this flat per-code map.
+ */
 const ACTION_ERROR_DEFAULTS: Record<string, string> = {
   STORE_IN_USE: 'الأداة تستخدم ملفات بياناتها الآن؛ أغلقها ثم أعد المحاولة.',
-  STORE_ACCESS_UNPROVABLE: 'الأداة تستخدم ملفات بياناتها الآن؛ أغلقها ثم أعد المحاولة.',
   INSUFFICIENT_STORAGE: 'المساحة المتاحة لا تكفي لتحديث آمن.',
 };
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+const UNCHECKED_REASON_DEFAULTS: Record<HarnessUncheckedReason, string> = {
+  fd_unreadable: 'ملفاتها المفتوحة غير مقروءة',
+  identity_unverified: 'تعذّر تأكيد هويتها',
+};
+
+/** "comm (pid N)", bidi-isolated (LTR token inside an Arabic sentence), plus the reason when known. */
+function formatUncheckedProcess(t: Translate, process: HarnessUncheckedProcess): string {
+  const token = isolateBidi(`${process.comm} (pid ${process.pid})`);
+  if (!process.reason) return token;
+  const reason = t(`harnessVersion.uncheckedReason.${process.reason}`, { defaultValue: UNCHECKED_REASON_DEFAULTS[process.reason] });
+  return `${token} (${reason})`;
+}
+
+/** Locale-aware list of the shown processes, then "+N more" when the server capped the list (B-1468). */
+function formatUncheckedProcesses(t: Translate, details: HarnessUncheckedDetails): string {
+  const separator = t('vendors.listSeparator', { defaultValue: ' · ' });
+  const entries = details.processes.map((process) => formatUncheckedProcess(t, process));
+  const hidden = details.total - details.processes.length;
+  if (hidden > 0) {
+    entries.push(t('harnessVersion.uncheckedMore', { count: hidden, defaultValue: '+{{count}} أخرى' }));
+  }
+  return entries.join(separator);
+}
+
+/**
+ * STORE_ACCESS_UNPROVABLE reads honestly: named processes when known, an
+ * honest "could not verify" otherwise. Shared by the synchronous 423 refusal
+ * and a job that failed with the same code, so both read the same (B-1468).
+ */
+function storeAccessUnprovableText(t: Translate, details: HarnessUncheckedDetails | undefined): string {
+  if (!details) {
+    return t('harnessVersion.actionError.STORE_ACCESS_UNPROVABLE_UNKNOWN', {
+      defaultValue: 'تعذّر التأكد من أن ملفات بيانات الأداة محمية من المستخدمين الآخرين على هذا الجهاز؛ لم يُنفَّذ التحديث.',
+    });
+  }
+  return t('harnessVersion.actionError.STORE_ACCESS_UNPROVABLE_PROCESSES', {
+    count: details.total,
+    processes: formatUncheckedProcesses(t, details),
+    defaultValue: 'تعذّر التأكد من أن الأداة لا تستخدم ملفات بياناتها: لم يُسمح بفحص: {{processes}}. أغلقها أو أعد المحاولة لاحقاً.',
+  });
+}
 
 export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemTab }: {
   agent: AgentProvider; viewerRole?: string;
@@ -70,9 +121,16 @@ export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemT
     ? snapshots.reduce((newest, entry) => (entry.createdAt >= newest.createdAt ? entry : newest))
     : null;
   const actionErrorText = actionError
-    ? t(`harnessVersion.actionError.${actionError.code}`, {
-        defaultValue: ACTION_ERROR_DEFAULTS[actionError.code] ?? t('harnessVersion.actionError.generic', { defaultValue: 'تعذّر تنفيذ الإجراء.' }),
-      })
+    ? (actionError.code === 'STORE_ACCESS_UNPROVABLE'
+        ? storeAccessUnprovableText(t, actionError.unchecked)
+        : t(`harnessVersion.actionError.${actionError.code}`, {
+            defaultValue: ACTION_ERROR_DEFAULTS[actionError.code] ?? t('harnessVersion.actionError.generic', { defaultValue: 'تعذّر تنفيذ الإجراء.' }),
+          }))
+    : '';
+  // B-1468: a job that failed with STORE_ACCESS_UNPROVABLE carries the same
+  // details in `job.error`; the 423 path above already says it, so no repeat.
+  const jobErrorText = !actionError && state.status === 'failed' && state.reason === 'STORE_ACCESS_UNPROVABLE'
+    ? storeAccessUnprovableText(t, state.unchecked)
     : '';
 
   return (
@@ -92,7 +150,9 @@ export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemT
               {state.status === 'unverified' && t('harnessVersion.unverified', { defaultValue: 'تعذّر التحقق من أحدث إصدار.' })}
               {state.status === 'update-available' && t('harnessVersion.available', { defaultValue: 'يتوفر إصدار أحدث.' })}
               {state.status === 'pinned-refused' && t('harnessVersion.pinned', { defaultValue: 'قفل الإصدار المفعَّل يمنع التحديث.' })}
-              {state.status === 'skipped-live' && t('harnessVersion.liveBusy', { defaultValue: 'توجد جلسة نشطة؛ أعد التحقق بعد انتهائها.' })}
+              {state.status === 'skipped-live' && (state.reason === 'live_gate_unverifiable'
+                ? t('harnessVersion.liveGateUnverifiable', { defaultValue: 'تعذّر التحقق من خلوّ الأداة من جلسات نشطة؛ أعد المحاولة لاحقاً.' })
+                : t('harnessVersion.liveBusy', { defaultValue: 'توجد جلسة نشطة؛ أعد التحقق بعد انتهائها.' }))}
               {state.status === 'failed' && (needsOperator ? t('harnessVersion.recoveryFailed', { defaultValue: 'تعذّر الاسترجاع الآمن؛ يلزم تدخّل يدوي.' }) : noRollback ? t('harnessVersion.rollbackUnavailable', { defaultValue: 'فشل التحديث ولا يتوفر استرجاع تلقائي.' }) : t('harnessVersion.failed', { defaultValue: 'فشل التحديث.' }))}
               {state.status === 'succeeded' && t('harnessVersion.succeeded', { defaultValue: 'اكتمل التحديث.' })}
               {state.status === 'noop' && t('harnessVersion.noop', { defaultValue: 'تعمل بأحدث إصدار.' })}
@@ -186,6 +246,7 @@ export default function HarnessVersionSection({ agent, viewerRole, onOpenSystemT
         )}
 
         {actionError && <p role="alert" className="text-[13px] text-destructive">{actionErrorText}</p>}
+        {jobErrorText && <p role="alert" className="text-[13px] text-destructive">{jobErrorText}</p>}
 
         {state.log && state.log.length > 0 && <details className="rounded-md border border-border"><summary className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-[13px] font-medium text-foreground"><ChevronDown className="h-4 w-4" aria-hidden />{t('harnessVersion.logs', { defaultValue: 'سجلّ التحديث' })}</summary><pre dir="ltr" aria-live="off" className="max-h-48 overflow-auto border-t border-border bg-muted p-3 text-start font-mono text-[13px] text-foreground">{state.log.slice(-200).join('\n')}</pre></details>}
         <span className="sr-only" aria-live="polite" aria-atomic="true">{announcement !== previousAnnouncement.current ? announcement : ''}</span>

@@ -992,8 +992,20 @@ export function useChatSessionState({
     // A failed read needs explicit recovery; WS/property updates must not restart it.
     if (lastLoadedSessionKeyRef.current === sessionKey && sessionStore.getSessionSlot(selectedSession.id)?.historyError) return;
 
-    // Skip if already loaded and fresh
-    if (lastLoadedSessionKeyRef.current === sessionKey && sessionStore.has(selectedSession.id) && !sessionStore.isStale(selectedSession.id)) {
+    // Skip if already loaded for this exact session/project/provider.
+    //
+    // B-1469: this used to also require `!sessionStore.isStale(...)`, a
+    // time-only check (`Date.now() - fetchedAt > 30s`) that `appendRealtime`
+    // never refreshes. Any reply running longer than 30s made the slot
+    // "stale", and `selectedProject` re-renders as a new object on every
+    // `projects_updated` WS frame (below), so this effect re-ran mid-stream,
+    // reset pagination, and re-fetched a 20-row tail that replaced
+    // `serverMessages` wholesale — dropping the bubble sitting outside that
+    // tail. Identity (same session/project/provider we already loaded) is the
+    // right freshness signal here; genuine staleness is handled by the other
+    // paths that already own it: reconnect via `lastSeq` (ADR-041),
+    // complete→409→full refetch, and `hydrateActiveRunWindow`.
+    if (lastLoadedSessionKeyRef.current === sessionKey && sessionStore.has(selectedSession.id)) {
       return;
     }
 
@@ -1082,7 +1094,13 @@ export function useChatSessionState({
         || historyEpochRef.current !== epoch
         || !sessionStore.isHistoryRequestCurrent(requestSessionId, generation)) return;
       if (result.ok) {
-        const slot = sessionStore.applyHistorySnapshot(requestSessionId, result.snapshot);
+        // B-1469: `merge: true` — this exact call is the one the bug hit
+        // (see `applyHistorySnapshot`'s own doc comment): the load effect can
+        // legitimately re-run for a session this slot already holds a wider
+        // window for (session revisited, or the effect re-running for any
+        // other reason now that the identity-key guard above no longer does),
+        // and a narrower re-issued tail must not shrink that window.
+        const slot = sessionStore.applyHistorySnapshot(requestSessionId, result.snapshot, { merge: true });
         setHasMoreMessages(slot.hasMore);
         setTotalMessages(slot.total);
         if (slot.tokenUsage) setTokenBudget(slot.tokenUsage as Record<string, unknown>);
@@ -1139,11 +1157,16 @@ export function useChatSessionState({
     // تُنتظر قبل توسيع النافذة كي لا يدهس ردُّ الـ20 صفاً المتأخرُ النافذةَ
     // الأوسع (كلاهما يكتب `slot.serverMessages`).
     initialLoadRef.current = { sessionId: selectedSession.id, promise: initialLoad };
+    // B-1469: depend on `selectedProject?.projectId`, not the `selectedProject`
+    // object itself. `projects_updated` WS frames rebuild that object with the
+    // same identity, so keying the effect on the object re-ran this whole load
+    // (reset pagination + re-fetch) on every such frame while a reply streamed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pendingViewSessionRef,
     resetStreamingState,
     setTokenBudget,
-    selectedProject,
+    selectedProject?.projectId,
     selectedSession?.id,
     sendMessage,
     ws,

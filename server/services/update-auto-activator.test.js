@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    AUTO_ACTIVATE_DEADLINE_MS, createUpdateAutoActivator, parseDbTimestamp,
+    AUTO_ACTIVATE_DEADLINE_MS, CONTENTION_BACKOFF_CAP_MS, contentionBackoffMs, createUpdateAutoActivator,
+    parseDbTimestamp,
 } from './update-auto-activator.js';
 
 const QUEUED_AT = Date.UTC(2026, 8, 12, 10, 0, 0);
@@ -11,9 +12,9 @@ const receipts = [{ phase: 'restart_queued', kind: 'done', created_at: '2026-09-
 
 function harness({ jobs = [job()], rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }],
     sessions = 0, user = { id: 1, role: 'owner' }, reply = { status: 200, body: { status: 'restarting' } },
-    now = QUEUED_AT + 1_000, beforeTick } = {}) {
+    now = QUEUED_AT + 1_000, beforeTick, terminals, scheduledDueSoon } = {}) {
     const calls = { executed: [], audit: [], lines: [] };
-    const state = { sessions, now, reply };
+    const state = { sessions, now, reply, terminals };
     const activator = createUpdateAutoActivator({
         jobs: { listAutoActivatable: () => jobs, listReceipts: () => receipts },
         listQueuedRestarts: () => rows,
@@ -24,6 +25,11 @@ function harness({ jobs = [job()], rows = [{ id: 7, sourceUpdateJobId: 'job-1', 
         jobLog: { line: (jobId, message) => calls.lines.push({ jobId, message }) },
         now: () => state.now,
         beforeTick,
+        scheduledDueSoon,
+        openTerminals: terminals === undefined ? null : () => {
+            if (state.terminals instanceof Error) throw state.terminals;
+            return state.terminals;
+        },
     });
     return { activator, calls, state };
 }
@@ -207,4 +213,221 @@ test('a refusal while the row is still an unresolved executing claim is not term
     await activator.tick();
     assert.equal(activator.statusFor('job-1').state, 'refused');
     assert.equal(activator.statusFor('job-1').terminal, undefined);
+});
+
+const TERMINALS = { count: 2, attached: 1, detached: 1, usernames: ['owner', 'sara'], detachedClosesAt: QUEUED_AT + 1_800_000 };
+
+test('B-1448: open terminals are waited on without an attempt, named, and logged once per change', async () => {
+    const { activator, calls, state } = harness({ terminals: TERMINALS });
+    await activator.tick();
+    await activator.tick();
+    assert.equal(calls.executed.length, 0, 'no executeAsOwner while terminals are open');
+    assert.equal(calls.audit.length, 0, 'no attempt audit either');
+    const status = activator.statusFor('job-1');
+    assert.deepEqual([status.state, status.code, status.openTerminals],
+        ['waiting_terminals', 'open_terminals', { ...TERMINALS, snapshot: null }]);
+    assert.equal(calls.lines.length, 1);
+    assert.match(calls.lines[0].message, /2 open terminal\(s\) \(owner, sara\)/);
+    assert.match(calls.lines[0].message, /1 of them detached/);
+    state.terminals = { ...TERMINALS, count: 1, attached: 0, usernames: ['sara'] };
+    await activator.tick();
+    assert.equal(calls.lines.length, 2, 'a changed count is logged again');
+    // Closing the last terminal lets the next tick proceed.
+    state.terminals = { count: 0 };
+    await activator.tick();
+    assert.equal(calls.executed.length, 1);
+    assert.equal(activator.statusFor('job-1').state, 'restarting');
+});
+
+test('B-1448: a failing terminal reader never holds the restart', async () => {
+    const { activator, calls } = harness({ terminals: new Error('boom') });
+    await activator.tick();
+    assert.equal(calls.executed.length, 1);
+});
+
+test('B-1448: the executor\'s open-terminal deferral is a wait, never terminal, and is retried', async () => {
+    const reply = { status: 200, body: { status: 'deferred', reasonCode: 'open_terminals', retryable: true, requeued: true,
+        openTerminals: 1, attachedTerminals: 1, detachedTerminals: 0, terminalUsers: ['sara'], detachedClosesAt: null,
+        terminalSnapshot: 'nothex' } };
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls, state } = harness({ rows, reply });
+    await activator.tick();
+    let status = activator.statusFor('job-1');
+    assert.deepEqual([status.state, status.code, status.terminal], ['waiting_terminals', 'open_terminals', undefined]);
+    assert.deepEqual(status.openTerminals,
+        { count: 1, attached: 1, detached: 0, usernames: ['sara'], detachedClosesAt: null, snapshot: null });
+    assert.match(calls.lines.at(-1).message, /1 open terminal\(s\) \(sara\)/);
+    state.reply = { status: 200, body: { status: 'restarting' } };
+    await activator.tick();
+    assert.equal(calls.executed.length, 2, 'a deferral does not stop the loop');
+    status = activator.statusFor('job-1');
+    assert.equal(status.state, 'restarting');
+    assert.ok(!calls.audit.some((entry) => entry.action === 'update_auto_activate_failed'));
+});
+
+test('B-1448: a lock-contention deferral waits and says so; a row not re-queued is reported', async () => {
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls, state } = harness({ rows, reply: { status: 200,
+        body: { status: 'deferred', reasonCode: 'update_lock_contended', retryable: true, requeued: true } } });
+    await activator.tick();
+    assert.deepEqual([activator.statusFor('job-1').state, activator.statusFor('job-1').code],
+        ['waiting_sessions', 'update_lock_contended']);
+    assert.match(calls.lines.at(-1).message, /deferred \(update_lock_contended\); retrying/);
+    state.reply = { status: 200, body: { status: 'deferred', reasonCode: 'update_lock_contended', requeued: false } };
+    state.now += 30_000; // past the first backoff step (M4)
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').requeued, false);
+    assert.match(calls.lines.at(-1).message, /could not be returned to the queue/);
+});
+
+test('B-1448: waiting on terminals still expires at the deadline', async () => {
+    const { activator, calls, state } = harness({ terminals: TERMINALS });
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').state, 'waiting_terminals');
+    state.now = QUEUED_AT + AUTO_ACTIVATE_DEADLINE_MS;
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').state, 'expired');
+    assert.equal(calls.executed.length, 0);
+    assert.ok(calls.audit.some((entry) => entry.action === 'update_auto_activate_expired'));
+});
+
+const CONTENDED = { status: 200, body: { status: 'deferred', reasonCode: 'update_lock_contended', requeued: true } };
+
+test('B-1448 M4: the contention backoff doubles from 30 s and is capped at 10 min', () => {
+    assert.deepEqual([1, 2, 3, 4, 5, 6].map(contentionBackoffMs), [30_000, 60_000, 120_000, 240_000, 480_000, 600_000]);
+    assert.equal(contentionBackoffMs(50), CONTENTION_BACKOFF_CAP_MS);
+    assert.equal(contentionBackoffMs(0), 0);
+});
+
+test('B-1448 M4: consecutive lock contention backs off; no attempt or audit inside the window', async () => {
+    const { activator, calls, state } = harness({ reply: CONTENDED });
+    const attempts = () => calls.audit.filter((entry) => entry.action === 'update_auto_activate_attempt').length;
+    await activator.tick();
+    assert.equal(calls.executed.length, 1);
+    assert.equal(activator.statusFor('job-1').retryAt, state.now + 30_000);
+    // Streak 1: the next 30 s tick may try again.
+    state.now += 30_000;
+    await activator.tick();
+    assert.equal(calls.executed.length, 2);
+    // Streak 2: 60 s. A tick 30 s later is skipped without an attempt or an audit row.
+    const secondAt = state.now;
+    state.now += 30_000;
+    await activator.tick();
+    assert.equal(calls.executed.length, 2);
+    assert.equal(attempts(), 2);
+    assert.equal(activator.statusFor('job-1').state, 'waiting_sessions');
+    assert.equal(activator.statusFor('job-1').retryAt, secondAt + 60_000);
+    state.now = secondAt + 60_000;
+    await activator.tick();
+    assert.equal(calls.executed.length, 3);
+    // Streak 3: 120 s.
+    assert.equal(activator.statusFor('job-1').retryAt, state.now + 120_000);
+});
+
+test('B-1448 M4: any other outcome resets the backoff', async () => {
+    const { activator, calls, state } = harness({ reply: CONTENDED });
+    await activator.tick();
+    state.now += 30_000;
+    await activator.tick(); // streak 2 → next attempt in 60 s
+    state.now += 60_000;
+    state.reply = { status: 200, body: { status: 'deferred', reasonCode: 'live_sessions', sessionCount: 1 } };
+    await activator.tick();
+    assert.equal(calls.executed.length, 3);
+    assert.equal(activator.statusFor('job-1').retryAt, undefined);
+    // Contended again: the streak starts over at 30 s, not 120 s.
+    state.reply = CONTENDED;
+    state.now += 30_000;
+    await activator.tick();
+    assert.equal(calls.executed.length, 4);
+    assert.equal(activator.statusFor('job-1').retryAt, state.now + 30_000);
+});
+
+test('B-1448 T6: an invalid detached deadline never throws while formatting the wait', async () => {
+    const { activator, calls } = harness({ terminals: { count: 1, attached: 0, detached: 1, usernames: [], detachedClosesAt: null } });
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').state, 'waiting_terminals');
+    assert.match(calls.lines.at(-1).message, /1 of them detached, closing by themselves\.$/);
+});
+
+test('B-1448 slice 2: activateNow clears the contention backoff and ticks at once', async () => {
+    const { activator, calls, state } = harness({ reply: CONTENDED });
+    await activator.tick();
+    state.now += 30_000;
+    await activator.tick(); // streak 2: the next attempt would wait 60 s
+    state.reply = { status: 200, body: { status: 'restarting' } };
+    await activator.tick();
+    assert.equal(calls.executed.length, 2, 'still backing off');
+    assert.equal(activator.activateNow('job-1'), true);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.executed.length, 3, 'the scheduled tick attempted immediately');
+    assert.equal(activator.statusFor('job-1').state, 'restarting');
+    assert.equal(activator.activateNow(''), false);
+});
+
+test('B-1448 slice 2: the terminal snapshot reaches the owner\'s status so the close can be confirmed', async () => {
+    const snapshot = 'a'.repeat(32);
+    const { activator } = harness({ terminals: { ...TERMINALS, snapshot } });
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').openTerminals.snapshot, snapshot);
+});
+
+test('B-1448 slice 2 M1: closing terminals is allowed only while they alone hold the job', async () => {
+    const { activator, state } = harness({ terminals: TERMINALS });
+    assert.equal(activator.closeTerminalsRefusal('job-1'), 'not_waiting_terminals', 'no tick yet');
+    await activator.tick();
+    assert.equal(activator.closeTerminalsRefusal('job-1'), null);
+    state.sessions = 2;
+    assert.equal(activator.closeTerminalsRefusal('job-1'), 'sessions_active');
+    state.sessions = new Error('unreadable');
+    assert.equal(activator.closeTerminalsRefusal('job-1'), 'sessions_active', 'unknown counts as busy');
+});
+
+test('B-1448 slice 2 M1: a due scheduled message refuses even though terminals are checked first', async () => {
+    const { activator } = harness({ terminals: TERMINALS, scheduledDueSoon: () => ({ count: 1, earliestAt: null }) });
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').state, 'waiting_terminals');
+    assert.equal(activator.closeTerminalsRefusal('job-1'), 'scheduled_wait');
+    activator.overrideScheduled('job-1');
+    assert.equal(activator.closeTerminalsRefusal('job-1'), null, 'the owner skipped the scheduled wait first');
+});
+
+test('B-1448 slice 2 M1: a terminal refusal or an expired job is activator_failed', async () => {
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls } = harness({ rows,
+        reply: { status: 500, body: { status: 'error', code: 'gate_failed' } } });
+    const originalPush = calls.executed.push.bind(calls.executed);
+    calls.executed.push = (input) => { rows[0].status = 'failed'; return originalPush(input); };
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').terminal, true);
+    assert.equal(activator.closeTerminalsRefusal('job-1'), 'activator_failed');
+    const expired = harness({ terminals: TERMINALS });
+    expired.state.now = QUEUED_AT + AUTO_ACTIVATE_DEADLINE_MS;
+    await expired.activator.tick();
+    assert.equal(expired.activator.closeTerminalsRefusal('job-1'), 'activator_failed');
+});
+
+test('B-1448 slice 2 T2: activateNow during a running tick re-runs the tick afterwards', async () => {
+    let release = () => {};
+    let block = true;
+    const executed = [];
+    const activator = createUpdateAutoActivator({
+        jobs: { listAutoActivatable: () => [job()], listReceipts: () => receipts },
+        listQueuedRestarts: () => [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }],
+        countSessions: () => 0,
+        // The first tick is held inside considerJob until released.
+        prepareJob: async () => { if (block) await new Promise((resolve) => { release = () => resolve(undefined); }); },
+        executeAsOwner: async (input) => { executed.push(input); return { status: 200, body: { status: 'deferred', reasonCode: 'live_sessions' } }; },
+        getUser: () => ({ id: 1, role: 'owner' }),
+        now: () => QUEUED_AT + 1_000,
+    });
+    const first = activator.tick();
+    await new Promise((resolve) => setImmediate(resolve));
+    block = false;
+    activator.activateNow('job-1'); // lands while the first tick is running
+    await new Promise((resolve) => setImmediate(resolve)); // its own tick finds one running: dropped
+    release();
+    await first;
+    for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(executed.length, 2, 'the first tick attempted, then the re-run attempted again');
 });

@@ -175,21 +175,6 @@ const KIMI_AGENTS_FILENAME = 'AGENTS.md';
 // is best-effort (no-op while the target is absent, e.g. before kimi is installed).
 const KIMI_CREDENTIAL_FILES = ['auth.json'];
 
-/**
- * Entries under the operator's ~/.hermes that every user SHARES by symlink.
- *
- * The split is credential vs configuration, and only these two names are on the
- * configuration side: `config.yaml` declares which model providers and endpoints
- * hermes may use (operator policy, ~15KB of it), and `bin/` holds the helper
- * executables it shells out to (uv, uvx, tirith). Everything else hermes writes
- * under that directory — auth.json, sessions/, state.db, the caches — is the
- * member's own and stays inside their tree.
- *
- * Nothing here carries an account, so a link cannot leak one. ensureSymlink is a
- * no-op when a name is absent, so an install without hermes provisions cleanly.
- */
-const HERMES_SHARED_ENTRIES = ['config.yaml', 'bin'];
-
 // --- OpenCode carrier config-home layout (GL-5, ADR-062) ---
 // opencode's config-home is a REAL per-user dir (NOT the old whole-dir operator
 // symlink), so its AGENTS.md is a per-user governance COPY — never a followed link into
@@ -659,7 +644,7 @@ export function provisionUserDirs(userId) {
 
     // --- Qwen (ADR-101: isolated credential + shared knowledge, ADR-105's split) ---
     // resolveProviderEnv points HOME at userRoot, so the CLI's ~/.qwen tree is
-    // this real 0700 directory. That tree mixes the same two things Hermes' does:
+    // this real 0700 directory. That tree mixes two things:
     // the ACCOUNT (sessions/, projects/, usage/, the credential) and the SETUP
     // (skills, collective memory, nassaj's rules). The account stays per-user;
     // the knowledge is linked back, because a member launched without it is a
@@ -709,22 +694,12 @@ export function provisionUserDirs(userId) {
     // through the child environment. A link left by an older pass is reaped.
     unlinkForeignCredential(path.join(qwenHome, QWEN_SETTINGS_FILENAME));
 
-    // --- Hermes (ADR-105: isolated credential + shared configuration) ---
-    // hermes resolves ~/.hermes from HOME, and that one directory mixes two very
-    // different things: the account (auth.json, sessions/, state.db) and the
-    // setup (config.yaml naming the model endpoints, bin/ holding helper tools
-    // like uv/uvx). Isolating HOME separates them the right way round — the
-    // account becomes per-user, and the setup is linked back so a member is not
-    // asked to re-declare 15KB of endpoint configuration before their first run.
-    //
-    // auth.json is deliberately NOT linked: it is the credential, and each user
-    // authenticates their own hermes (`hermes setup --portal`).
-    const hermesDir = path.join(userRoot, '.hermes');
-    ensureDir(hermesDir);
-    for (const name of HERMES_SHARED_ENTRIES) {
-      ensureSymlink(path.join(home, '.hermes', name), path.join(hermesDir, name));
-    }
-    unlinkForeignCredential(path.join(hermesDir, 'auth.json'));
+    // --- Hermes (body deleted, T-1953 / ADR-192) ---
+    // Nothing is created for hermes any more. The one thing that stays is the
+    // security repair: a member tree provisioned before ADR-105 may still hold a
+    // link to the operator's `auth.json`, and that credential file remains on
+    // disk after the body's removal, so the link is still reaped on every pass.
+    unlinkForeignCredential(path.join(userRoot, '.hermes', 'auth.json'));
 
     // --- OpenCode (OC-07 + GL-5: isolated XDG_DATA_HOME data, REAL per-user CONFIG) ---
     // resolveProviderEnv points opencode's four XDG base dirs at this user tree.

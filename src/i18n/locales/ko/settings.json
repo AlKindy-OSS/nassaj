@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "권한 확인 건너뛰기 (주의해서 사용)",
       "claudeDescription": "--dangerously-skip-permissions 플래그와 동일",
-      "cursorDescription": "Cursor CLI의 -f 플래그와 동일",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "설정된 차단 도구 없음",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "허용된 Shell 명령어",
-      "description": "권한 확인 없이 자동으로 허용되는 Shell 명령어",
-      "placeholder": "예: \"Shell(ls)\" 또는 \"Shell(git status)\"",
-      "quickAdd": "자주 쓰는 명령어 빠른 추가:",
-      "empty": "설정된 허용 명령어 없음",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "차단된 Shell 명령어",
-      "description": "자동으로 차단되는 Shell 명령어",
-      "placeholder": "예: \"Shell(rm -rf)\" 또는 \"Shell(sudo)\"",
-      "empty": "설정된 차단 명령어 없음",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "도구 패턴 예시:",
       "bashGitLog": "- 모든 git log 명령어 허용",
       "bashGitDiff": "- 모든 git diff 명령어 허용",
       "write": "- 모든 Write 도구 사용 허용",
       "bashRm": "- 모든 rm 명령어 차단 (위험)"
-    },
-    "shellExamples": {
-      "title": "Shell 명령어 예시:",
-      "ls": "- ls 명령어 허용",
-      "gitStatus": "- git status 허용",
-      "npmInstall": "- npm install 허용",
-      "rmRf": "- 재귀 삭제 차단"
     },
     "codex": {
       "permissionMode": "권한 모드",

@@ -10,6 +10,7 @@
     "available": "A newer version is available.",
     "pinned": "The armed version pin blocks updates.",
     "liveBusy": "A session is active. Check again after it ends.",
+    "liveGateUnverifiable": "Could not verify that no session is using this tool. Try again later.",
     "recoveryFailed": "Safe recovery failed. Operator repair is required.",
     "rollbackUnavailable": "The update failed and automatic rollback is unavailable.",
     "rollbackUnavailableStatus": "Direct updating is unavailable because this tool has no safe rollback path.",
@@ -78,9 +79,17 @@
     },
     "actionError": {
       "STORE_IN_USE": "The tool is using its data files right now; close it, then retry.",
-      "STORE_ACCESS_UNPROVABLE": "The tool is using its data files right now; close it, then retry.",
+      "STORE_ACCESS_UNPROVABLE_UNKNOWN": "Could not confirm the tool's data files are protected from other users on this device; the update did not run.",
+      "STORE_ACCESS_UNPROVABLE_PROCESSES_one": "Could not confirm the tool is not using its data files: access to the following process was not permitted: {{processes}}. Close it, or retry later.",
+      "STORE_ACCESS_UNPROVABLE_PROCESSES_other": "Could not confirm the tool is not using its data files: access to the following processes was not permitted: {{processes}}. Close them, or retry later.",
       "INSUFFICIENT_STORAGE": "Not enough storage is available to update this tool safely.",
       "generic": "The action could not be completed."
+    },
+    "uncheckedMore_one": "+{{count}} more",
+    "uncheckedMore_other": "+{{count}} more",
+    "uncheckedReason": {
+      "fd_unreadable": "open files unreadable",
+      "identity_unverified": "identity not confirmed"
     }
   },
   "harnessAutoUpdate": {
@@ -388,7 +397,8 @@
     "about": "About",
     "commandBoard": "Command Board",
     "system": "System",
-    "vendors": "Vendors & credentials"
+    "vendors": "Vendors & credentials",
+    "sso": "Single sign-on"
   },
   "references": {
     "title": "References",
@@ -1104,8 +1114,28 @@
     "ownerOnly": "Only the owner can change this setting.",
     "warning": {
       "title": "This surface runs an agent with permissions bypassed",
-      "description": "A request carrying a valid key can run an agent inside a workspace, clone repositories, and push branches or open pull requests. The keys never expire and have no scopes — treat one like a full credential and turn this off when no automation needs it."
+      "description": "A request carrying a valid key can run an agent inside a workspace, clone repositories, and push branches or open pull requests. Keys have no scopes. Your keys and local members' keys never expire; an SSO member's keys pause after the number of days set below without a single sign-on, and are deleted when the member is suspended or removed in Nassaj, or when your identity provider sends a sign-out notice for them. Treat a key like a full credential and turn this off when no automation needs it."
     }
+  },
+  "apiKeySsoWindow": {
+    "title": "API key validity for SSO members",
+    "description": "An SSO member's API keys stop working if the member has not signed in through your identity provider for this many days, and work again after their next single sign-on. Their keys are deleted immediately if the member is suspended or removed in Nassaj, or when your identity provider sends a sign-out notice for them (it does so when they sign out or their account is deactivated). If their role at your identity provider is withdrawn without a notice, the keys are deleted at their next sign-in attempt, or pause when the window ends. After deletion the member has to create new keys. Your own keys and those of local-only members are not affected.",
+    "label": "Validity (days)",
+    "hint": "A whole number from {{min}} to {{max}}. Default: {{default}}.",
+    "unit_one": "day",
+    "unit_other": "days",
+    "save": "Save",
+    "saved": "Saved. It applies from the next request.",
+    "loading": "Loading…",
+    "errors": {
+      "invalid": "Enter a whole number of days from {{min}} to {{max}}.",
+      "forbidden": "Only the owner can change this setting.",
+      "conflict": "Your session changed while saving. Reload the page and try again.",
+      "save": "Could not save the setting. Try again.",
+      "load": "Could not load this setting."
+    },
+    "retry": "Retry",
+    "disabledNote": "Programmatic access is off, so no key works right now. This setting applies once you turn it on."
   },
   "apiKeys": {
     "title": "Nassaj API Keys",
@@ -1388,8 +1418,7 @@
       "kimiDeepseek": "Catalogued; no field for a DeepSeek key here yet.",
       "kimiZen": "Catalogued and bills against a Zen balance; no field for its key here yet.",
       "agyClosed": "Antigravity resolves its own model inside its CLI and accepts no external engine.",
-      "cursorClosed": "Cursor resolves its own model server-side and accepts no external engine.",
-      "hermesUnverified": "Hermes has its own model layer; no engine pair has been examined."
+      "cursorClosed": "Cursor resolves its own model server-side and accepts no external engine."
     },
     "managedInVendors": "Managed in Settings → Vendors & credentials",
     "managedInAccount": "Managed in this agent’s Account tab",
@@ -1402,7 +1431,6 @@
     "skipPermissions": {
       "label": "Skip permission prompts (use with caution)",
       "claudeDescription": "Equivalent to --dangerously-skip-permissions flag",
-      "cursorDescription": "Equivalent to -f flag in Cursor CLI",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -1424,34 +1452,12 @@
       "empty": "No blocked tools configured",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "Allowed Shell Commands",
-      "description": "Shell commands that are automatically allowed without prompting",
-      "placeholder": "e.g., \"Shell(ls)\" or \"Shell(git status)\"",
-      "quickAdd": "Quick add common commands:",
-      "empty": "No allowed commands configured",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "Blocked Shell Commands",
-      "description": "Shell commands that are automatically blocked",
-      "placeholder": "e.g., \"Shell(rm -rf)\" or \"Shell(sudo)\"",
-      "empty": "No blocked commands configured",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "Tool Pattern Examples:",
       "bashGitLog": "- Allow all git log commands",
       "bashGitDiff": "- Allow all git diff commands",
       "write": "- Allow all Write tool usage",
       "bashRm": "- Block all rm commands (dangerous)"
-    },
-    "shellExamples": {
-      "title": "Shell Command Examples:",
-      "ls": "- Allow ls command",
-      "gitStatus": "- Allow git status",
-      "npmInstall": "- Allow npm install",
-      "rmRf": "- Block recursive delete"
     },
     "codex": {
       "permissionMode": "Permission Mode",
@@ -1957,29 +1963,7 @@
       "codex": {
         "intro": "The terminal below will display a link and a device code. Open the link in your browser and enter the code to authorize Codex — no localhost required.",
         "retry": "Enable device code authorization for Codex in ChatGPT Security Settings, then run <cmd>codex login --device-auth</cmd> again."
-      },
-      "kimi": {
-        "intro": "The terminal below runs <cmd>kimi login</cmd>, which prints a link and a device code. Open the link in your browser and enter the code to link your Kimi account — no localhost required.",
-        "subscription": "This links a Kimi <b>subscription</b>. If you would rather use a metered API key, skip this and set the key in Settings → Vendors & credentials instead."
       }
-    },
-    "qwen": {
-      "intro": "Enter the Alibaba Cloud key issued for your Coding Plan or Token Plan. nassaj stores it encrypted for your account.",
-      "planLabel": "Plan type",
-      "regionLabel": "Service region",
-      "international": "International",
-      "internationalHint": "For most accounts outside mainland China",
-      "china": "Beijing",
-      "chinaHint": "For mainland China ModelStudio accounts",
-      "keyLabel": "Access key",
-      "encrypted": "Stored in the encrypted nassaj vault; never written to Qwen settings.",
-      "save": "Save and connect",
-      "saving": "Saving securely…",
-      "cancel": "Cancel",
-      "done": "Done",
-      "error": "The credential could not be saved. Check the plan, region, and key, then try again.",
-      "successTitle": "Qwen is connected",
-      "successDescription": "The encrypted credential will be used on the next Qwen message."
     }
   },
   "actionRequired": "Action required",
@@ -2363,12 +2347,28 @@
         "ssoGrantFailed": "The confirmation through SSO could not be completed. Try again.",
         "originRejected": "You opened Nassaj from an address that is not this installation's public address, so the check is refused. Open Nassaj from its public address and try again. Current address:",
         "originUnconfigured": "The installation's public address has not been set yet, so identity checks for connectors are unavailable. Ask the installation owner to set it. Current address:",
-        "originUnconfiguredOwner": "The installation's public address has not been set yet, so identity checks for connectors are unavailable. Set NASSAJ_PUBLIC_ORIGIN to the public address on the server, then restart through the safe restart path. Current address:",
+        "originUnconfiguredOwner": "The installation's public address has not been set yet, so identity checks for connectors are unavailable. On the server, set NASSAJ_PUBLIC_ORIGIN to the public address, or enable SSO with OIDC_REDIRECT_URI, or set a single https WEBAUTHN_ORIGIN. Then restart through the safe restart path. Current address:",
         "timeout": "The identity provider took too long to respond. Try again.",
         "unavailable": "Identity confirmation is temporarily unavailable. Try again shortly.",
         "sessionEnded": "Your session has ended. Sign in again to continue.",
         "network": "Could not reach the server. Check your connection and try again.",
         "generic": "Your identity could not be confirmed."
+      }
+    },
+    "ownerSetup": {
+      "origin": {
+        "proposalSource": {
+          "public_origin": "Suggested from NASSAJ_PUBLIC_ORIGIN on the server. Make sure it is the address people use to open Nassaj.",
+          "oidc_redirect_uri": "Suggested from the enterprise sign-in (SSO) return address. Make sure it is the address people use to open Nassaj.",
+          "webauthn_origin": "Suggested from the passkey address (WEBAUTHN_ORIGIN). Make sure it is the address people use to open Nassaj."
+        },
+        "invalidPublicOrigin": "NASSAJ_PUBLIC_ORIGIN is set on the server but is not a valid address. It must be https://host with no path or trailing slash. Fix it on the server; while it is invalid, no other setting is used.",
+        "errors": {
+          "proposalMismatch": "This address does not match the one the server suggests. Before the first save, use the suggested address, or change the server setting.",
+          "bootstrapRefused": "The first public address cannot be set from here.",
+          "bootstrapStartupProfile": "This installation was started in a mode that does not allow setting the first public address from here. Ask the server operator to complete this step.",
+          "bootstrapExistingEffects": "This installation already has connector activity, so setting the first public address here is not safe. Ask the server operator to recover it."
+        }
       }
     }
   },
@@ -2465,6 +2465,441 @@
       "toggleLabel": "Allow others to steer my running sessions",
       "toggleDescription": "Another member can inject a short message into a turn you started.",
       "globallyDisabledNote": "The owner/admin turned this feature off for everyone."
+    }
+  },
+  "sso": {
+    "title": "Single sign-on (SSO)",
+    "description": "Let members sign in with your organisation's identity provider instead of separate passwords.",
+    "intro": "You will copy two addresses into your provider, paste two values back here, test with your own account, then turn it on.",
+    "loading": "Loading single sign-on settings…",
+    "contacting": "Contacting your identity provider…",
+    "retryIn": "Try again in {{seconds}} seconds.",
+    "error": {
+      "load": "Could not load single sign-on settings."
+    },
+    "status": {
+      "heading": "Single sign-on status",
+      "off": "Off",
+      "active": "Active",
+      "unavailable": "Unavailable",
+      "paused": "Paused",
+      "hostDisabled": "Disabled by host",
+      "readyNotOn": "Ready, not on",
+      "meaning": {
+        "off": "Members sign in with their own passwords.",
+        "offByOwner": "Turned off by you. Members sign in with their own passwords.",
+        "active": "Members sign in through your identity provider.",
+        "unavailable": "Members who sign in through your identity provider cannot sign in right now.",
+        "paused": "This installation was set up the old way. Members cannot sign in until you finish the move below.",
+        "hostDisabled": "A server setting has turned single sign-on off.",
+        "readyNotOn": "Settings are applied but sign-in is not turned on."
+      },
+      "ownerNote": "You (the owner) always sign in with your own password or passkey.",
+      "liveSince": "Live since {{date}} · {{count}} linked members",
+      "liveSince_one": "Live since {{date}} · {{count}} linked member",
+      "liveSince_other": "Live since {{date}} · {{count}} linked members"
+    },
+    "action": {
+      "disable": "Disable SSO",
+      "enableAgain": "Turn on again",
+      "import": "Import old settings",
+      "startFresh": "Start fresh instead",
+      "recheck": "Check my provider again",
+      "setup": "Set up single sign-on",
+      "change": "Change settings",
+      "copied": "Copied",
+      "copyNamed": "Copy {{name}}",
+      "save": "Save",
+      "retry": "Try again",
+      "review": "Review settings",
+      "toStep1": "Go to step 1",
+      "toStep5": "See step 5"
+    },
+    "draft": {
+      "pending": "Changes not applied yet",
+      "recheckNeeded": "Needs re-checking",
+      "savedRetest": "Saved. Test sign-in again before applying."
+    },
+    "banner": {
+      "label": {
+        "hostDisabled": "Turned off on the server",
+        "endpointChanged": "Your identity provider changed",
+        "unavailable": "Single sign-on is not working",
+        "linksNoConfig": "Linked members cannot sign in",
+        "paused": "Finish moving the old settings",
+        "originMismatch": "Return address changed",
+        "noBackchannel": "Removals take effect later",
+        "noAuthTime": "Sign-in time not confirmed"
+      },
+      "hostDisabled": "Whoever manages the server turned single sign-on off and can turn it back on. The settings below are view-only.",
+      "endpointChanged": "Your identity provider changed its addresses. To protect members, sign-in is stopped until you check it again.",
+      "unavailableTail": "Members are signed out until this is fixed. Your own sign-in is not affected.",
+      "linksNoConfig": "Some members were linked to an identity provider, but no settings are saved here. They cannot sign in.",
+      "linksNoConfigOff": "Turn it off and let them use passwords",
+      "paused": "We found the old server settings. Import them, add the role setting, test, then apply.",
+      "originMismatch": "This installation's address changed. Your identity provider still has the old return address. Update it there, then test and apply again.",
+      "importRedirect": "The old settings used a different return address. Update it in your identity provider, then test and apply.",
+      "oldAddress": "Old address:",
+      "newAddress": "New return address",
+      "noBackchannel": "When you remove someone in your identity provider, they lose access here only after up to {{hours}} hours.",
+      "noAuthTime": "Linked members will not be able to confirm sensitive connector actions.",
+      "more": "More notices ({{count}})",
+      "more_one": "More notices ({{count}})",
+      "more_other": "More notices ({{count}})"
+    },
+    "fault": {
+      "endpointChanged": "Your identity provider changed its addresses.",
+      "runtimeFault": "The saved connection to your identity provider stopped working.",
+      "configInvalid": "The saved settings are incomplete or damaged.",
+      "linksNoConfig": "Members are linked but no settings are saved.",
+      "cannotUse": "The saved settings cannot be used right now. The saved secret may no longer be readable on this server."
+    },
+    "summary": {
+      "title": "Live settings",
+      "titleNotInUse": "Last applied settings (not in use)",
+      "tenant": {
+        "none": "No restriction",
+        "claim": "By a value in the sign-in",
+        "role_grant_scope": "By where the role was granted"
+      },
+      "jitOn": "Accounts created on first sign-in",
+      "jitOff": "Invite first",
+      "hours": "Re-check every {{count}} hours",
+      "hours_one": "Re-check every {{count}} hour",
+      "hours_other": "Re-check every {{count}} hours",
+      "on": "On",
+      "off": "Off",
+      "linked": "Members linked",
+      "problem": "Problem"
+    },
+    "step": {
+      "locked": "Finish step {{n}} first",
+      "lockedImport": "Import the old settings or start fresh",
+      "edit": "Edit",
+      "done": "Done",
+      "number": "Step {{n}}:"
+    },
+    "step0": {
+      "title": "Installation address",
+      "confirmed": "Your installation address is confirmed:",
+      "missing": "Before anything else, confirm the web address people use to open this installation. Your identity provider will send people back to it.",
+      "field": "Installation address",
+      "fieldHint": "This is the address in your browser now. Change it if people use a different one.",
+      "action": "Confirm the address",
+      "connectors": "Or set it in Connectors"
+    },
+    "step1": {
+      "title": "Details for your identity provider",
+      "lead": "Paste these two addresses into your identity provider when you create the application.",
+      "redirect": "Return address (redirect URI)",
+      "redirectWhere": "Paste into \"Redirect URI\" or \"Callback URL\".",
+      "backchannel": "Sign-out address (back-channel logout)",
+      "backchannelWhere": "Paste into \"Back-channel logout URI\". Optional, but recommended.",
+      "choose": "When you create the application, choose:",
+      "req": {
+        "code": "Sign-in type: authorization code",
+        "pkce": "PKCE on, method",
+        "signed": "ID token signed",
+        "roles": "Include the user's roles in the ID token",
+        "scopes": "Scopes:"
+      },
+      "done": "I added these to my identity provider"
+    },
+    "step2": {
+      "title": "Connect your identity provider",
+      "lead": "Copy these from the application you just created in your identity provider.",
+      "issuer": "Identity provider address (issuer)",
+      "issuerHint": "Copy it exactly as your provider shows it, including any slash at the end.",
+      "clientId": "Application ID (client ID)",
+      "type": "Application type",
+      "typeHint": "Choose what you chose when you created the application.",
+      "public": "Public (no secret)",
+      "confidential": "Confidential (with secret)",
+      "secret": "Secret (client secret)",
+      "secretSaved": "A secret is saved",
+      "secretReplace": "Replace",
+      "secretRemove": "Remove",
+      "secretStale": "Enter the secret again; it no longer matches.",
+      "method": "How to send the secret",
+      "methodBasic": "In the request header (usual)",
+      "methodPost": "In the request body",
+      "private": "My identity provider is on my private network",
+      "port": "Port",
+      "portHint": "Leave empty to use 443.",
+      "portInvalid": "Enter a port number from 1 to 65535.",
+      "advanced": "Advanced",
+      "extraScopes": "Extra scopes",
+      "extraScopesHint": "Separated by spaces. openid, profile and email are always sent.",
+      "extraScopesInvalid": "Use up to 10 different scope names separated by spaces, without openid, profile or email.",
+      "check": "Save and check connection",
+      "pinned": "Addresses that will be used"
+    },
+    "discovery": {
+      "passed": "Connection check · passed",
+      "failed": "Connection check · failed",
+      "checked": "checked {{when}}",
+      "issuerOk": "Address matches exactly",
+      "httpsOk": "Secure addresses (https)",
+      "codeFlowOk": "Supports the sign-in type we need",
+      "keysOk": "Signing keys found ({{count}})",
+      "keysOk_one": "Signing key found ({{count}})",
+      "keysOk_other": "Signing keys found ({{count}})",
+      "backchannelOk": "Supports sign-out notices",
+      "backchannelMissing": "Does not support sign-out notices (see step 5)",
+      "category": "Address type:",
+      "endpoint": {
+        "authorization_endpoint": "Sign-in:",
+        "token_endpoint": "Token:",
+        "jwks_uri": "Keys:"
+      }
+    },
+    "step3": {
+      "title": "Roles",
+      "lead": "Tell us where your identity provider puts each person's role, and which values mean Admin or Member. Anyone without a matching value cannot sign in.",
+      "path": "Where the role is",
+      "pathHint": "For example",
+      "or": "or",
+      "pathEditable": "This value can be changed by the person themselves, so it cannot decide roles.",
+      "shape": {
+        "list": "Last test found: a list of names",
+        "single": "Last test found: a single name",
+        "grouped": "Last test found: names grouped by organisation",
+        "none": "Not found yet — run the test in step 6"
+      },
+      "colValue": "Value in the role",
+      "colRole": "Role here",
+      "roleAdmin": "Admin",
+      "roleMember": "Member",
+      "noAccess": "no access",
+      "ownerNote": "The owner role is never given through single sign-on.",
+      "addRule": "Add rule",
+      "removeRule": "Remove rule {{n}}",
+      "maxRules": "Limit reached (64 rules)",
+      "collision": "These words are common. Another application in your identity provider may use the same value and give people access here by mistake. Prefer values made for this application.",
+      "previewLead": "With your last test account: role value",
+      "ruleCount": "{{count}} rules",
+      "ruleCount_one": "{{count}} rule",
+      "ruleCount_other": "{{count}} rules"
+    },
+    "step4": {
+      "title": "Restrict to your organisation",
+      "none": "No restriction",
+      "noneHint": "Anyone your identity provider signs in with a matching role can enter. Creating accounts automatically is not available in this mode.",
+      "claim": "By a value in the sign-in",
+      "grant": "By where the role was granted",
+      "grantBlocked": "Available after a test sign-in shows roles grouped by organisation.",
+      "path": "Where the value is",
+      "values": "Allowed values (one per line)",
+      "emailValues": "Allowed e-mail addresses (exact, one per line)",
+      "emailWarning": "Each person must be listed by their full e-mail address. Typing only a domain such as example.com lets no one in. The address must also be verified by your identity provider.",
+      "emailInvalid": "Write the full address, for example name@example.com"
+    },
+    "step5": {
+      "title": "Accounts",
+      "jit": "Create an account on first sign-in",
+      "jitHint": "When on, a new person with a matching role gets an account the first time they sign in. When off, you invite people first and they link their account.",
+      "jitBlocked": "Requires an organisation restriction (step 4).",
+      "hours": "Re-check each person every",
+      "hoursHint": "If you remove someone in your identity provider, they lose access here within this time at most.",
+      "unit": "hours",
+      "hoursInvalid": "Enter a whole number of hours from 1 to 24."
+    },
+    "step6": {
+      "title": "Test sign-in",
+      "lead": "Sign in with your own account at your identity provider. Nothing is changed for anyone; we only read what your provider sends.",
+      "leaveNote": "You will leave this page and come back here.",
+      "start": "Start test sign-in",
+      "again": "Test again",
+      "checkFirst": "Check connection",
+      "alreadyShown": "This result was already shown. Your last test status is in step 7."
+    },
+    "result": {
+      "passed": "Test sign-in · passed",
+      "failed": "Test sign-in · failed",
+      "wouldSignInAs": "Your account would sign in as: {{role}}",
+      "wouldNotSignIn": "Your account would NOT be able to sign in",
+      "roleValue": "Role value found",
+      "rule": "Matching rule",
+      "tenant": "Organisation check",
+      "tenantPassed": "passed",
+      "tenantFailed": "not passed",
+      "authTime": "Sign-in time sent",
+      "claims": "Information received",
+      "oauthErrorLabel": "Your identity provider replied:",
+      "yes": "yes",
+      "no": "no",
+      "arrow": "→"
+    },
+    "step7": {
+      "title": "Apply and turn on",
+      "checkConn": "Connection checked",
+      "checkTest": "Test sign-in passed",
+      "validFor": "valid for 24 hours",
+      "apply": "Apply and turn on",
+      "applyChanges": "Apply changes",
+      "notReady": "Check the connection and pass the test sign-in for these settings first."
+    },
+    "dialog": {
+      "cancel": "Cancel",
+      "impact": {
+        "title": "Before you apply",
+        "apply": "Apply",
+        "reattest": "{{count}} members will need to sign in again",
+        "reattest_one": "{{count}} member will need to sign in again",
+        "reattest_other": "{{count}} members will need to sign in again",
+        "invites": "Invitations with a password will close. New members join through your identity provider.",
+        "none": "No member is signed out by this change."
+      },
+      "issuer": {
+        "title": "You are switching to a different identity provider.",
+        "orphans": "{{count}} members are linked only to the old one. Their sessions and keys will be revoked. They can link again after you reset their password.",
+        "orphans_one": "{{count}} member is linked only to the old one. Their sessions and keys will be revoked. They can link again after you reset their password.",
+        "orphans_other": "{{count}} members are linked only to the old one. Their sessions and keys will be revoked. They can link again after you reset their password.",
+        "jitOff": "Creating accounts on first sign-in will be turned off. Turn it on again later after you check the new provider.",
+        "keptLinks": "The old links are kept. Switching back restores them.",
+        "keep": "Keep these {{count}} members signed in",
+        "keep_one": "Keep this {{count}} member signed in",
+        "keep_other": "Keep these {{count}} members signed in",
+        "typePrompt": "Type {{phrase}} to confirm",
+        "phrase": "KEEP SIGNED IN",
+        "matched": "The text matches. You can apply.",
+        "notMatched": "Type the text exactly to enable Apply."
+      },
+      "disable": {
+        "title": "Turn off single sign-on?",
+        "signOut": "{{count}} linked members will be signed out.",
+        "signOut_one": "{{count}} linked member will be signed out.",
+        "signOut_other": "{{count}} linked members will be signed out.",
+        "forced": "{{count}} linked members will be signed out. This cannot be avoided while single sign-on is not working.",
+        "forced_one": "{{count}} linked member will be signed out. This cannot be avoided while single sign-on is not working.",
+        "forced_other": "{{count}} linked members will be signed out. This cannot be avoided while single sign-on is not working.",
+        "passwords": "Members will sign in with their own passwords again. Invitations with a password reopen.",
+        "kept": "You can turn it on again later; your settings are kept.",
+        "keep": "Keep linked members signed in",
+        "confirm": "Turn off"
+      },
+      "private": {
+        "title": "Allow a private network address?",
+        "body": "Only do this if your identity provider runs on your own private network (for example, at the office or on a private network between your devices). This lets the server contact private addresses you choose. Addresses of this server itself and other sensitive addresses stay blocked.",
+        "stepUpNote": "You will be asked to confirm it's you.",
+        "allow": "Allow"
+      }
+    },
+    "stepUp": {
+      "title": "Confirm it's you",
+      "description": "Changing single sign-on needs your own password or passkey. Single sign-on itself cannot confirm this.",
+      "passwordLabel": "Your current password",
+      "confirm": "Confirm",
+      "confirming": "Confirming…",
+      "or": "or",
+      "usePasskey": "Use passkey",
+      "openProfile": "Open Profile"
+    },
+    "technical": {
+      "title": "Technical details",
+      "ignoredEnv": "These old server variables are no longer used:",
+      "hostSwitch": "Host switch:",
+      "activeVersion": "Live settings version:",
+      "draftVersion": "Draft version:"
+    },
+    "diag": {
+      "unknown": "Something went wrong ({{code}}).",
+      "roles_claim_absent": "Your identity provider did not send the role setting you entered in step 3. Check the setting name, and that roles are included in the ID token.",
+      "no_recognized_role": "Your account's role value does not match any rule in step 3, so it cannot sign in.",
+      "claim_too_large": "Your identity provider sent too many role values to check safely. Use a smaller, application-specific setting.",
+      "email_unverified": "Your identity provider says this e-mail address is not verified, so it cannot be used to allow access.",
+      "tenant_not_allowed": "Your account is not in an allowed organisation (step 4).",
+      "iss_mismatch": "The reply came from a different identity provider address than the one you entered.",
+      "sso_test_config_changed": "Settings changed while you were signing in. Start the test again.",
+      "sso_test_discovery_required": "Check the connection in step 2 first.",
+      "sso_test_config_invalid": "The saved settings are incomplete. Review steps 2 to 5 and save again.",
+      "access_denied": "The sign-in was cancelled at your identity provider.",
+      "mapping_incomplete": "The role settings are incomplete. Finish step 3 and save.",
+      "mapping_unavailable": "The role settings could not be checked. Review step 3 and save.",
+      "temporarily_unavailable": "Your identity provider could not be reached just now. Try again.",
+      "sso_test_result_not_found": "This result was already shown. Your last test status is in step 7.",
+      "callback_rejected": "Your identity provider's reply could not be verified. Check the settings in step 2 and try again.",
+      "auth_time": "Your identity provider did not confirm when you signed in. Linked members will not be able to confirm sensitive actions.",
+      "discovery_issuer_mismatch": "The address your identity provider reports is not exactly the one you entered. Copy it again, including any slash at the end.",
+      "discovery_endpoint_invalid": "Your identity provider uses an address that is not secure (https) or not valid.",
+      "discovery_code_flow_unsupported": "Your identity provider does not offer the sign-in type we need (authorization code).",
+      "discovery_signing_alg_unsupported": "Your identity provider signs with a method we do not accept. Choose RS256, PS256 or ES256 there.",
+      "discovery_client_auth_unsupported": "Your identity provider does not accept the way you chose to send the secret. Choose the other option in step 2.",
+      "discovery_pkce_s256_unsupported": "Your identity provider does not support PKCE with S256. Turn it on there.",
+      "discovery_pkce_methods_unadvertised": "Your identity provider does not say it supports PKCE. It may still work; the test sign-in will tell.",
+      "jwks_no_usable_key": "No usable signing key was found at your identity provider.",
+      "invalid_jwks": "Your identity provider's signing keys could not be read.",
+      "discovery_unavailable": "Your identity provider's settings could not be read. Check the address and try again.",
+      "jwks_unavailable": "Your identity provider's signing keys could not be fetched. Try again later.",
+      "fetch_dns_failed": "We could not find this address. Check it for typos.",
+      "fetch_address_private": "This address is on a private network. If your identity provider runs on your own network, tick \"My identity provider is on my private network\".",
+      "fetch_address_blocked": "This address cannot be used for security reasons.",
+      "fetch_port_blocked": "This port is not allowed. Use 443, or the one port you entered in step 2.",
+      "fetch_tls_failed": "The secure connection failed. Your identity provider's certificate may be invalid or expired.",
+      "fetch_connect_failed": "We could not connect to your identity provider. Check that it is running and reachable.",
+      "fetch_timeout": "Your identity provider did not answer within 5 seconds. Try again.",
+      "fetch_redirect_refused": "Your identity provider tried to send us elsewhere. Enter its final address.",
+      "fetch_request_invalid": "This address cannot be requested. Check it for mistakes.",
+      "fetch_http_4xx": "Your identity provider refused the request. Check the address.",
+      "fetch_http_5xx": "Your identity provider had an error. Try again later.",
+      "fetch_http_other": "Your identity provider gave an unexpected answer. Check the address.",
+      "fetch_unexpected": "Your identity provider's reply was not what we expected. Check that this is the right address.",
+      "sso_draft_changed": "The settings were changed at the same time elsewhere. Reload and try again.",
+      "sso_draft_missing": "Save the settings in step 2 first.",
+      "sso_secret_key_unavailable": "This server cannot store the secret right now. Ask whoever manages the server to check its encryption key.",
+      "sso_apply_invalid": "The request was not complete. Reload and try again.",
+      "sso_apply_proof_missing": "The checks are missing or out of date. Check the connection and test sign-in again.",
+      "sso_force_off": "A server setting has turned single sign-on off, so it cannot be turned on here.",
+      "sso_keep_confirmation_required": "Type the confirmation text exactly to keep members signed in.",
+      "sso_config_invalid": "The settings are incomplete or damaged. Review them and try again.",
+      "sso_secret_undecryptable": "The saved secret can no longer be read. Enter the secret again in step 2, then test and apply.",
+      "sso_active_config_missing": "There are no applied settings to turn on. Finish the steps below.",
+      "sso_runtime_fault": "The live settings stopped working. Check your identity provider again in step 2, then test and apply.",
+      "sso_disable_invalid": "The request was not complete. Reload and try again.",
+      "legacy_env_incomplete": "The old server settings are incomplete, so they cannot be imported. Start fresh instead.",
+      "sso_active_config_exists": "Settings are already applied here, so the old settings were not imported.",
+      "installation_origin_invalid": "Enter the full web address, for example https://nassaj.example.com, without a path.",
+      "installation_origin_managed_by_connectors": "The installation address is managed in the Connectors tab. Confirm it there.",
+      "identity_changed": "Your session changed during the request. Reload the page and try again.",
+      "oidc_config_changed": "Settings changed at the same moment. Reload and try again.",
+      "rate_limited": "Too many attempts. Wait a minute and try again.",
+      "network": "Could not reach the server. Check your connection and try again.",
+      "internal_error": "The server could not finish this request. Try again.",
+      "step_up_required": "Confirm it's you to continue.",
+      "step_up_failed": "That password is not correct.",
+      "step_up_invalid_request": "This confirmation cannot be used here. Use your password or a passkey.",
+      "step_up_rate_limited": "Too many attempts.",
+      "password_change_required": "Change your password first, then come back.",
+      "no_eligible_passkey": "You have no passkey that can confirm this. Use your password.",
+      "passkey_failed": "The passkey could not confirm it's you. Try again or use your password.",
+      "field": {
+        "generic": "One of the values is not valid. Check the fields and try again.",
+        "issuer": "Enter the identity provider address exactly, starting with https://.",
+        "clientId": "Enter the application ID.",
+        "clientAuth": "Choose the application type.",
+        "clientSecret": "Enter the secret, or choose the public application type.",
+        "clearClientSecret": "Remove the secret or enter a new one, not both.",
+        "extraScopes": "Use up to 10 different scope names separated by spaces, without openid, profile or email.",
+        "attestationMaxAgeHours": "Enter a whole number of hours from 1 to 24.",
+        "allowPrivateNetwork": "The private network choice is not valid.",
+        "issuerPort": "Enter a port from 1 to 65535, only with the private network choice on.",
+        "roleClaimPath": "The role setting name is too long or not valid.",
+        "roleRules": "Use at most 64 rules.",
+        "tenantMode": "Choose an organisation restriction.",
+        "tenantClaimPath": "The organisation setting name is not valid.",
+        "tenantValues": "Use from 1 to 64 allowed values.",
+        "jitEnabled": "The account creation choice is not valid."
+      },
+      "mapping": {
+        "generic": "The role or organisation settings are not valid.",
+        "claim_path_user_editable": "This value can be changed by the person themselves, so it cannot decide roles or organisations.",
+        "claim_path_invalid": "The setting name is not valid. Use names like roles or realm_access.roles.",
+        "role_rules_invalid": "Each rule needs a value, values must not repeat, and the role must be Admin or Member.",
+        "tenant_values_invalid": "Enter from 1 to 64 different allowed values.",
+        "tenant_config_invalid": "The organisation restriction is incomplete.",
+        "tenant_mode_invalid": "Choose an organisation restriction.",
+        "jit_requires_tenant_restriction": "Creating accounts on first sign-in requires an organisation restriction (step 4)."
+      }
     }
   }
 }

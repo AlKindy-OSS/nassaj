@@ -5,16 +5,13 @@ import { loadConnectors } from '../../../stores/connectorsStore';
 import { authenticatedFetch } from '../../../utils/api';
 import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
-import {
-  DEFAULT_CODE_EDITOR_SETTINGS,
-  DEFAULT_CURSOR_PERMISSIONS,
-} from '../constants/constants';
+import type { ActiveBodyProvider } from '../../../types/app';
+import { DEFAULT_CODE_EDITOR_SETTINGS } from '../constants/constants';
 import type {
   AgentProvider,
   ClaudePermissionsState,
   CodeEditorSettingsState,
   CodexPermissionMode,
-  CursorPermissionsState,
   NotificationPreferencesState,
   ProjectSortOrder,
   SettingsMainTab,
@@ -38,12 +35,6 @@ type ClaudeSettingsStorage = {
   projectSortOrder?: ProjectSortOrder;
 };
 
-type CursorSettingsStorage = {
-  allowedCommands?: string[];
-  disallowedCommands?: string[];
-  skipPermissions?: boolean;
-};
-
 type CodexSettingsStorage = {
   permissionMode?: CodexPermissionMode;
 };
@@ -57,7 +48,7 @@ type ActiveLoginProvider = AgentProvider | '';
 
 const KNOWN_MAIN_TABS: SettingsMainTab[] = [
   'profile', 'agents', 'references', 'vendors', 'connectors', 'appearance', 'git', 'api', 'notifications',
-  'users', 'command-board', 'system', 'about',
+  'users', 'sso', 'command-board', 'system', 'about',
 ];
 
 const normalizeMainTab = (tab: string): SettingsMainTab => {
@@ -106,10 +97,6 @@ const createEmptyClaudePermissions = (): ClaudePermissionsState => ({
   allowVendorDelegation: false,
 });
 
-const createEmptyCursorPermissions = (): CursorPermissionsState => ({
-  ...DEFAULT_CURSOR_PERMISSIONS,
-});
-
 const createDefaultNotificationPreferences = (): NotificationPreferencesState => ({
   channels: {
     inApp: true,
@@ -156,9 +143,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const [claudePermissions, setClaudePermissions] = useState<ClaudePermissionsState>(() => (
     createEmptyClaudePermissions()
   ));
-  const [cursorPermissions, setCursorPermissions] = useState<CursorPermissionsState>(() => (
-    createEmptyCursorPermissions()
-  ));
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferencesState>(() => (
     createDefaultNotificationPreferences()
   ));
@@ -186,16 +170,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
       });
       setProjectSortOrder(savedClaudeSettings.projectSortOrder === 'date' ? 'date' : 'name');
 
-      const savedCursorSettings = parseJson<CursorSettingsStorage>(
-        localStorage.getItem('cursor-tools-settings'),
-        {},
-      );
-      setCursorPermissions({
-        allowedCommands: savedCursorSettings.allowedCommands || [],
-        disallowedCommands: savedCursorSettings.disallowedCommands || [],
-        skipPermissions: Boolean(savedCursorSettings.skipPermissions),
-      });
-
       const savedCodexSettings = parseJson<CodexSettingsStorage>(
         localStorage.getItem('codex-settings'),
         {},
@@ -221,7 +195,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     } catch (error) {
       console.error('Error loading settings:', error);
       setClaudePermissions(createEmptyClaudePermissions());
-      setCursorPermissions(createEmptyCursorPermissions());
       setNotificationPreferences(createDefaultNotificationPreferences());
       setCodexPermissionMode('default');
       setProjectSortOrder('name');
@@ -239,7 +212,10 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     }
 
     void (async () => {
-      const authStatus = await checkProviderAuthStatus(loginProvider);
+      // T-1953: the login modal only ever opens for an active body — a
+      // retired id (cursor/hermes/qwen/kimi) has no login command and never
+      // reaches here — so this narrowing is safe, not a fail-open cast.
+      const authStatus = await checkProviderAuthStatus(loginProvider as ActiveBodyProvider);
 
       if (exitCode !== 0) {
         console.warn(`Login process exited with code ${exitCode}; refreshing auth status before setting save status.`);
@@ -260,13 +236,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         skipPermissions: claudePermissions.skipPermissions,
         allowVendorDelegation: claudePermissions.allowVendorDelegation,
         projectSortOrder,
-        lastUpdated: now,
-      }));
-
-      localStorage.setItem('cursor-tools-settings', JSON.stringify({
-        allowedCommands: cursorPermissions.allowedCommands,
-        disallowedCommands: cursorPermissions.disallowedCommands,
-        skipPermissions: cursorPermissions.skipPermissions,
         lastUpdated: now,
       }));
 
@@ -294,9 +263,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     claudePermissions.skipPermissions,
     claudePermissions.allowVendorDelegation,
     codexPermissionMode,
-    cursorPermissions.allowedCommands,
-    cursorPermissions.disallowedCommands,
-    cursorPermissions.skipPermissions,
     notificationPreferences,
     projectSortOrder,
   ]);
@@ -402,8 +368,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     updateCodeEditorSetting,
     claudePermissions,
     setClaudePermissions,
-    cursorPermissions,
-    setCursorPermissions,
     notificationPreferences,
     setNotificationPreferences,
     codexPermissionMode,

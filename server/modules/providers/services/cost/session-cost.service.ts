@@ -50,13 +50,10 @@ import {
 } from './cost-calculator.js';
 import { buildSessionTurns, type TurnMetricWindow } from './session-turns.js';
 import {
-  collectHermesCycleUsage,
   collectOpenCodeCycleUsage,
   databaseSignature,
   extractOpenCodeSessionUsage,
-  resolveHermesCostDatabasePath,
   resolveOpenCodeCostDatabasePath,
-  HERMES_SESSION_UNLINKABLE_REASON,
   type DbCycleUsageOutcome,
 } from './db-usage-extractors.js';
 import {
@@ -202,7 +199,7 @@ export type SessionCostDeps = SubscriptionDeps & {
  * من أوّله: لا `jsonl_path` (وهو `null` في صفوفها فعلاً) ولا بصمة ملف سجلّ —
  * القاعدة نفسها هي المصدر والبصمة.
  */
-const DB_BACKED_PROVIDERS = new Set(['opencode', 'hermes']);
+const DB_BACKED_PROVIDERS = new Set(['opencode']);
 
 /** المزوّدات التي لها مُستخرِج فعلي يقرأ استهلاكاً من القرص. */
 const MEASURABLE_PROVIDERS = new Set(['claude', 'codex', ...DB_BACKED_PROVIDERS]);
@@ -213,9 +210,10 @@ const MEASURABLE_PROVIDERS = new Set(['claude', 'codex', ...DB_BACKED_PROVIDERS]
  * لحظياً لكن نسّاج لا يحفظ مجموعاً لكل محادثة بعد — الأخير نقصٌ عندنا لا عندهم،
  * ويُقال كذلك.
  *
- * سقط من هذه القائمة `opencode` و`hermes`: صارا يُقاسان من قاعدتيهما
- * (‏`db-usage-extractors`)، وإبقاء سببٍ يقول «لا يُحفظ» بعد أن صار يُحفظ كذبٌ
- * في الاتجاه المعاكس.
+ * سقط من هذه القائمة `opencode`: صار يُقاس من قاعدته (‏`db-usage-extractors`)،
+ * وإبقاء سببٍ يقول «لا يُحفظ» بعد أن صار يُحفظ كذبٌ في الاتجاه المعاكس.
+ * و`hermes` عاد إليها (T-1953): حُذف جسمه وقارئ قاعدته، ومحادثاته القديمة تبقى
+ * مقروءةً بلا رقم كلفة.
  */
 const UNMEASURABLE_REASONS: Readonly<Record<string, string>> = Object.freeze({
   antigravity: 'Antigravity (agy) records no token counts in its transcripts, so cost cannot be measured.',
@@ -224,6 +222,7 @@ const UNMEASURABLE_REASONS: Readonly<Record<string, string>> = Object.freeze({
   kimi: 'Kimi reports usage per turn, but nassaj does not persist a per-conversation total yet.',
   glm: 'GLM reports usage per turn, but nassaj does not persist a per-conversation total yet.',
   deepseek: 'DeepSeek reports usage per turn, but nassaj does not persist a per-conversation total yet.',
+  hermes: 'Hermes was removed as an agent body; its past conversations carry no usage record nassaj can read.',
 });
 
 const unmeasurableReason = (provider: string): string =>
@@ -683,7 +682,7 @@ async function costForTranscript(
 }
 
 /**
- * مسار القواعد (opencode / hermes) بموازاة `costForTranscript`: نفس الكاش
+ * مسار القواعد (opencode) بموازاة `costForTranscript`: نفس الكاش
  * ونفس قاعدة الإبطال، والبصمة هنا بصمة ملف القاعدة ومعه `-wal` — إذ يكتب
  * opencode في WAL دقائق قبل أن يمسّ القاعدة نفسها، فبصمة الملف وحده تُجمّد
  * الرقم على قيمة قديمة.
@@ -1122,10 +1121,6 @@ type ProviderCycleTotals = {
  * النطاق هنا **هو مسار القاعدة نفسه** لا ترشيح المشاركين: المزوّد المعزول
  * تُحلّ له قاعدة تحت جذر مستخدمه فلا يرى غيرها، والمشترك يقرأ الجميع من قاعدة
  * المشغّل الواحدة — وهو المعنى نفسه الذي يصنعه `sessionScope` في مسار الملفات.
- *
- * ‏Hermes مشترك اليوم باعتماد واحد (‏`~/.hermes/auth.json`)، فمجموعه مجموع
- * الجهاز لا مجموع مستخدم — وهذا هو الرقم الوحيد ذو المعنى ما دام الاشتراك
- * واحداً.
  */
 async function sumDbProviderCycle(
   provider: string,
@@ -1133,13 +1128,7 @@ async function sumDbProviderCycle(
   cycle: BillingCycle,
 ): Promise<ProviderCycleTotals> {
   const window: UsageWindow = { since: cycle.start.getTime(), until: cycle.end.getTime() };
-  const databasePath =
-    provider === 'opencode' ? resolveOpenCodeCostDatabasePath(userId) : resolveHermesCostDatabasePath(userId);
-
-  const outcome: DbCycleUsageOutcome =
-    provider === 'opencode'
-      ? collectOpenCodeCycleUsage(databasePath, window)
-      : collectHermesCycleUsage(databasePath, window);
+  const outcome: DbCycleUsageOutcome = collectOpenCodeCycleUsage(resolveOpenCodeCostDatabasePath(userId), window);
 
   if (!outcome.available) {
     // قاعدة غائبة ليست «صفر إنفاق»: تُعرض جزئيةً بلا محادثات، والسبب يظهر في
@@ -1243,12 +1232,7 @@ async function collectHarnessCycleCosts(
   const window: UsageWindow = { since: cycle.start.getTime(), until: cycle.end.getTime() };
 
   if (DB_BACKED_PROVIDERS.has(harness)) {
-    const databasePath =
-      harness === 'opencode' ? resolveOpenCodeCostDatabasePath(userId) : resolveHermesCostDatabasePath(userId);
-    const outcome: DbCycleUsageOutcome =
-      harness === 'opencode'
-        ? collectOpenCodeCycleUsage(databasePath, window)
-        : collectHermesCycleUsage(databasePath, window);
+    const outcome: DbCycleUsageOutcome = collectOpenCodeCycleUsage(resolveOpenCodeCostDatabasePath(userId), window);
 
     if (!outcome.available) {
       // قاعدة غائبة ليست «صفر إنفاق» — تُعلَن نقصاً.
@@ -1467,10 +1451,6 @@ export const sessionCostService = {
     // مزوّدات القواعد أوّلاً: صفوفها بلا `jsonl_path` أصلاً، فتمريرها على
     // حلّال المسار يعيدها «لا سجلّ على القرص» وهو سببٌ خاطئ لغيابٍ سببه آخر.
     if (DB_BACKED_PROVIDERS.has(provider)) {
-      if (provider === 'hermes') {
-        return unavailableSessionCost(sessionId, provider, HERMES_SESSION_UNLINKABLE_REASON);
-      }
-
       const dbCost = await costForDbSession(provider, resolveOpenCodeCostDatabasePath(userId), sessionId);
       if ('unavailable' in dbCost) {
         return unavailableSessionCost(sessionId, provider, dbCost.unavailable);

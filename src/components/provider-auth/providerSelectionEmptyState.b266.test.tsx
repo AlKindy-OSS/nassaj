@@ -126,16 +126,12 @@ function renderPicker(props: {
       // list assertions match that card instead of the list.
       claudeModel="none-selected"
       setClaudeModel={noop}
-      cursorModel=""
-      setCursorModel={noop}
       codexModel=""
       setCodexModel={noop}
       antigravityModel=""
       setAntigravityModel={noop}
       opencodeModel=""
       setOpenCodeModel={noop}
-      hermesModel=""
-      setHermesModel={noop}
       kimiModel=""
       setKimiModel={noop}
       deepseekModel=""

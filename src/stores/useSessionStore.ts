@@ -833,16 +833,68 @@ export function useSessionStore() {
     notify(sessionId);
   }, [getSlot, notify]);
 
-  /** Apply a previously guarded snapshot, retaining unsynced optimistic/WS rows. */
-  const applyHistorySnapshot = useCallback((sessionId: string, snapshot: HistorySnapshot): SessionSlot => {
+  /**
+   * Apply a previously guarded snapshot, retaining unsynced optimistic/WS rows.
+   *
+   * B-1469: `opts.merge` (default off) merges the incoming tail into
+   * `slot.serverMessages` by id instead of replacing the array wholesale.
+   * Only `useChatSessionState`'s main load effect passes `merge: true` — the
+   * one call site the bug actually hit: the same slot (same session id) can
+   * already hold a wider window than THIS particular re-issued initial/light
+   * tail asks for (`fetchMore`'s older pages, or rows a previous merge-mode
+   * call already folded in), and shrinking that window back down just
+   * because this one request didn't reach back far enough drops a row —
+   * including an already-confirmed user bubble, whose optimistic twin then
+   * stays un-deduped next to the hole where the canonical row used to be.
+   *
+   * Every other caller (`fetchFromServer`, `retryHistory`'s revision/cursor
+   * recovery, `applyLightHistoryExpansion`'s own pre-merged snapshot) keeps
+   * the original hard replace: those calls are explicit "the previous window
+   * is not trustworthy, take this one as ground truth" reads (an explicit
+   * reload, or recovering from a revision/cursor error), not an incidental
+   * re-issue racing a live stream, so a stale/superseded row must NOT survive
+   * by surfacing from an unrelated older read.
+   *
+   * Reuses `mergeFullRowsIntoSlot` (not `mergeMessagesById`) for the merge
+   * path: a widened snapshot can legitimately carry a *fresher* row at an id
+   * this slot already holds, and `mergeMessagesById` keeps whichever copy
+   * came first — the stale one. `mergeFullRowsIntoSlot` keeps existing rows
+   * outside the snapshot's own range untouched but replaces a matching id
+   * with the snapshot's version, which is exactly this contract.
+   */
+  const applyHistorySnapshot = useCallback((
+    sessionId: string,
+    snapshot: HistorySnapshot,
+    opts: { merge?: boolean } = {},
+  ): SessionSlot => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = getSlot(resolvedSessionId);
     slot.historyGeneration += 1;
-    slot.serverMessages = snapshot.messages;
+    // The common first-load case (fresh slot, nothing to merge with) keeps
+    // exactly the old replace behavior: no prior pagination state to protect.
+    const hadExistingMessages = opts.merge === true && slot.serverMessages.length > 0;
+    const previousOffset = slot.offset;
+    const previousHasMore = slot.hasMore;
+    const previousCursor = slot.historyCursor;
+    if (hadExistingMessages) {
+      mergeFullRowsIntoSlot(slot, snapshot);
+    } else {
+      slot.serverMessages = snapshot.messages;
+    }
     slot.total = snapshot.total;
-    slot.hasMore = snapshot.hasMore;
-    slot.offset = snapshot.messages.length;
-    slot.historyCursor = snapshot.nextCursor;
+    if (hadExistingMessages) {
+      // "Take the larger" (review B) — but "larger reach" for `hasMore` means
+      // *less* remaining, not more: `false` (we've already reached the start
+      // once) must win over a narrower re-issued tail's own `true`, or a
+      // completed "load all" would look unfinished again. AND, not OR.
+      slot.hasMore = previousHasMore && snapshot.hasMore;
+      slot.offset = Math.max(previousOffset, slot.serverMessages.length);
+      slot.historyCursor = previousCursor ?? snapshot.nextCursor;
+    } else {
+      slot.hasMore = snapshot.hasMore;
+      slot.offset = snapshot.messages.length;
+      slot.historyCursor = snapshot.nextCursor;
+    }
     slot.responseTurnDurationTotalMs = snapshot.responseTurnDurationTotalMs;
     slot.historyRevision = snapshot.revision;
     slot.historyPayloadMode = snapshot.payloadMode;

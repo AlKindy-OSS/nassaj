@@ -40,7 +40,7 @@ export default function HarnessUpdateConfirmDialog({
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onCancel(); }}>
-      <DialogContent className="max-w-md p-4" aria-labelledby="harness-confirm-title">
+      <DialogContent layerClassName="z-[10000]" className="max-w-md p-4" aria-labelledby="harness-confirm-title">
         <DialogTitle id="harness-confirm-title" className="not-sr-only text-[15px] font-medium text-foreground">
           {t('harnessVersion.confirm.title', { defaultValue: 'تأكيد إجراء حسّاس' })}
         </DialogTitle>

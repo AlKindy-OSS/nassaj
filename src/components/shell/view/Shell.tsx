@@ -55,6 +55,7 @@ export default function Shell({
   isActive = true,
 }: ShellProps) {
   const { t } = useTranslation('chat');
+  const { t: tTerminals } = useTranslation('terminals');
   const [isRestarting, setIsRestarting] = useState(false);
   const [cliPromptOptions, setCliPromptOptions] = useState<CliPromptOption[] | null>(null);
   const promptCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,6 +71,7 @@ export default function Shell({
     isInitialized,
     isConnecting,
     isReconnecting,
+    closedForUpdate,
     authUrl,
     authUrlVersion,
     connectToShell,
@@ -304,10 +306,14 @@ export default function Shell({
         : !isConnected
           ? 'connect'
           : null;
+  // B-1448: after the owner closed this shell for an update, the connect card
+  // says why instead of the ordinary "start a session" line.
   const overlayDescription =
     overlayMode === 'connecting' || overlayMode === 'reconnecting'
       ? connectingDescription
-      : readyDescription;
+      : overlayMode === 'connect' && closedForUpdate
+        ? tTerminals('errors.closedForUpdate')
+        : readyDescription;
 
   return (
     <div className="flex h-full w-full flex-col bg-gray-900">

@@ -9,6 +9,7 @@ import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import { createConnectorOwnerOperationGate } from './connector-owner-operation-gate.js';
 import { createConnectorOwnerSetupRoutes } from './connector-owner-setup.routes.js';
 import type { ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
+import { ConnectorOriginBootstrapRefusedError } from './connector-origin-bootstrap-refusal.js';
 
 const NOW = 1_800_000_000_000; const ORIGIN = 'https://nassaj.example'; const CSRF = 'c'.repeat(64);
 const status = { schemaVersion: 1 as const, readyForAccountLinking: false,
@@ -16,9 +17,11 @@ const status = { schemaVersion: 1 as const, readyForAccountLinking: false,
     canonicalOrigin: ORIGIN, callbackUrl: `${ORIGIN}/connectors/oauth/callback`, originRevision: 1 },
   trustBundleRevision: 0, activePack: null, activationRecordRevision: 0 };
 
-const run = async (role: string, request: (base: string) => Promise<Response>, authTimeMs = NOW - 1) => {
+const run = async (role: string, request: (base: string) => Promise<Response>, authTimeMs = NOW - 1,
+  overrides: Readonly<{ status?: unknown; setOrigin?: () => unknown }> = {}) => {
   const calls: unknown[] = [];
-  const service = { status: () => status, setOrigin: (...args: unknown[]) => { calls.push(args); return { ok: true }; },
+  const service = { status: () => overrides.status ?? status,
+    setOrigin: (...args: unknown[]) => { calls.push(args); return overrides.setOrigin?.() ?? { ok: true }; },
     importTrust: () => ({ ok: true }), importPack: () => ({ ok: true }), setActivations: () => ({ ok: true }) };
   const app = express(); app.use(express.json()); app.use((req, _res, next) => {
     (req as express.Request & { fixtureRole?: string }).fixtureRole = role; next();
@@ -117,4 +120,53 @@ test('profile verify accepts exact DCR/BYO shapes and rejects API-key setup befo
     const malformed = await request('google-workspace', { method: 'byo_app', clientId: 'id' });
     assert.equal(malformed.status, 422); assert.equal(calls.length, 1);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+const unbound = { ...status, origin: null,
+  originProposal: { canonicalOrigin: ORIGIN, source: 'oidc_redirect_uri' as const } };
+const putFirstOrigin = (canonicalOrigin: string, overrides: Parameters<typeof run>[3]) => run('owner',
+  base => fetch(`${base}/api/connectors/v2/owner/setup/origin`, { method: 'PUT', headers: {
+    'content-type': 'application/json', 'if-match': '"0"', 'idempotency-key': 'request-123',
+    origin: canonicalOrigin, 'x-csrf-token': CSRF },
+  body: JSON.stringify({ canonicalOrigin, expectedOriginRevision: 0 }) }), NOW - 1, overrides);
+
+test('B-1461: the owner status carries the origin proposal; non-owners still get 404', async () => {
+  const owner = await run('owner', base => fetch(`${base}/api/connectors/v2/owner/setup`), NOW - 1,
+    { status: unbound });
+  assert.equal(owner.response.status, 200);
+  assert.deepEqual(((await owner.response.json()) as { originProposal: unknown }).originProposal,
+    { canonicalOrigin: ORIGIN, source: 'oidc_redirect_uri' });
+  for (const role of ['admin', 'user']) {
+    const other = await run(role, base => fetch(`${base}/api/connectors/v2/owner/setup`), NOW - 1,
+      { status: unbound });
+    assert.equal(other.response.status, 404);
+    assert.equal((await other.response.text()).includes(ORIGIN), false);
+  }
+});
+
+test('B-1461 H2: before the first bind PUT /origin must equal the trusted-config proposal', async () => {
+  const mismatch = await putFirstOrigin('https://other.example', { status: unbound });
+  assert.equal(mismatch.response.status, 403);
+  assert.deepEqual(await mismatch.response.json(), { code: 'CONNECTOR_ORIGIN_PROPOSAL_MISMATCH' });
+  assert.equal(mismatch.calls.length, 0);
+  for (const originProposal of [null, { canonicalOrigin: null, source: 'invalid_public_origin' }]) {
+    const refused = await putFirstOrigin(ORIGIN, { status: { ...unbound, originProposal } });
+    assert.equal(refused.response.status, 403);
+    assert.equal(refused.calls.length, 0);
+  }
+  const accepted = await putFirstOrigin(ORIGIN, { status: unbound });
+  assert.equal(accepted.response.status, 200); assert.equal(accepted.calls.length, 1);
+});
+
+test('B-1461 H3: a refused first bind is 409 CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED with its reason', async () => {
+  for (const reason of ['startup_profile', 'existing_installation_effects'] as const) {
+    const refused = await putFirstOrigin(ORIGIN, { status: unbound,
+      setOrigin: () => { throw new ConnectorOriginBootstrapRefusedError(reason); } });
+    assert.equal(refused.response.status, 409, reason);
+    assert.deepEqual(await refused.response.json(), { code: 'CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED', reason });
+  }
+  const other = await putFirstOrigin(ORIGIN, { status: unbound,
+    setOrigin: () => { throw new Error('private failure'); } });
+  assert.equal(other.response.status, 503);
+  assert.deepEqual(await other.response.json(), { code: 'CONNECTOR_SETUP_UNAVAILABLE' });
 });

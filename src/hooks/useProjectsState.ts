@@ -789,6 +789,22 @@ export function useProjectsState({
     }
   }, [sessionId]);
 
+  /**
+   * qa-critic round 1 (B-1469 follow-up): `handleProjectSelect`,
+   * `handleNewSession` and `selectProjectForTool` already clear
+   * `selectedSession` themselves before navigating away from a session (the
+   * "leaving path") — this effect is for every OTHER way the URL's session id
+   * can disappear, chiefly the browser's own Back/Forward buttons, which
+   * change `location` directly with no app handler in between. Without this,
+   * going back from `/session/X` to `/` (or `/scheduled`) left `selectedSession`
+   * still pointing at X: the URL said "no session" but the chat view kept
+   * showing X's history and would have routed the next message to it.
+   */
+  useEffect(() => {
+    if (sessionId) return;
+    setSelectedSession((current) => (current ? null : current));
+  }, [sessionId]);
+
   useEffect(() => {
     if (!sessionId) {
       resolvingDeepLinkSessionIdRef.current = null;

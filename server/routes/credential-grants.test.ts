@@ -158,15 +158,44 @@ describe('resolveCredentialPrincipal + resolveProviderEnv', () => {
     // Revocation: the link flips back to the grantee's own dir on the next spawn.
     credentialGrantsDb.revoke(owner.id, grantee.id, 'gemini');
     assert.equal(resolveProviderEnv(grantee.id, 'agy', {}).HOME, userConfigDir(grantee.id, ''));
-    // And a later grant of a different provider rebuilds the composite without gemini.
-    credentialGrantsDb.grant(owner.id, grantee.id, 'hermes');
-    const home2 = resolveProviderEnv(grantee.id, 'hermes', {}).HOME!;
-    assert.equal(fs.readlinkSync(path.join(home2, '.hermes')), userConfigDir(owner.id, '.hermes'));
-    assert.equal(fs.readlinkSync(path.join(home2, '.gemini')), userConfigDir(grantee.id, '.gemini'));
-    credentialGrantsDb.revoke(owner.id, grantee.id, 'hermes');
-    // With no grants left, the next own-credential spawn sweeps the grant home.
-    resolveProviderEnv(grantee.id, 'hermes', {});
-    assert.ok(!fs.existsSync(home2), 'orphaned grant home is swept');
+    // With no grants left, that own-credential spawn also swept the grant home.
+    assert.ok(!fs.existsSync(home), 'orphaned grant home is swept');
+  });
+
+  it('a link left by a hermes grant is pruned from the grant home (T-1953)', () => {
+    // hermes left OWNER_LINKED_PATHS with its body, while the operator's and the
+    // owner's ~/.hermes credentials stay on disk. A grant home built before that
+    // still points `.hermes` at the OWNER's tree; the next rebuild must take it back.
+    resolveProviderEnv(owner.id, 'agy', {});
+    resolveProviderEnv(grantee.id, 'agy', {});
+    const ownerHermes = userConfigDir(owner.id, '.hermes');
+    const granteeHermes = userConfigDir(grantee.id, '.hermes');
+    fs.mkdirSync(ownerHermes, { recursive: true });
+    fs.mkdirSync(granteeHermes, { recursive: true });
+    const grantHome = userConfigDir(grantee.id, path.join('.grants', String(owner.id)));
+    fs.mkdirSync(grantHome, { recursive: true });
+    const staleLink = path.join(grantHome, '.hermes');
+    fs.rmSync(staleLink, { force: true });
+    fs.symlinkSync(ownerHermes, staleLink);
+
+    credentialGrantsDb.grant(owner.id, grantee.id, 'gemini');
+    assert.equal(resolveProviderEnv(grantee.id, 'agy', {}).HOME, grantHome);
+    assert.equal(fs.readlinkSync(staleLink), granteeHermes, 'the owner link flips back to the grantee');
+
+    // A grantee with no hermes dir of their own keeps no link at all.
+    fs.rmSync(staleLink);
+    fs.symlinkSync(ownerHermes, staleLink);
+    fs.rmSync(granteeHermes, { recursive: true });
+    resolveProviderEnv(grantee.id, 'agy', {});
+    assert.equal(fs.lstatSync(staleLink, { throwIfNoEntry: false }), undefined, 'the stale owner link is removed');
+
+    // And hermes itself can no longer be granted or run on anyone's credential.
+    assert.throws(
+      () => resolveProviderEnv(grantee.id, 'hermes' as never, {}),
+      (error: unknown) => (error as { code?: string })?.code === 'PROVIDER_ISOLATION_UNAVAILABLE',
+    );
+    credentialGrantsDb.revoke(owner.id, grantee.id, 'gemini');
+    resolveProviderEnv(grantee.id, 'agy', {});
   });
 
   it('opencode: only the data home follows the owner; config/cache/state stay own', () => {

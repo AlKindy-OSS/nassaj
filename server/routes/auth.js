@@ -32,7 +32,7 @@ import {
   clearConnectorOwnerAuthentication,
   recordConnectorOwnerAuthentication,
 } from '../modules/connectors/connector-owner-auth-session.js';
-import { oidcEnabled } from '../services/oidc-config.js';
+import { ssoState } from '../services/sso-config.service.js';
 import { isUsernameAvailable } from '../services/username-policy.js';
 import {
   localAccountCreationClosed,
@@ -340,7 +340,7 @@ router.delete('/accounts/:slotId', walletAuth, walletCsrf('remove'), (req, res) 
 router.use('/webauthn', webauthnRouter);
 
 // OIDC Relying Party flow (P-IDP-3, ADR-046) — login/callback/exchange,
-// back-channel logout, and admin identity link/unlink. Self-gates on OIDC_ENABLED.
+// back-channel logout, and identity unlink. Self-gates on the SSO state (ADR-194 D1).
 router.use('/oidc', oidcRouter);
 
 // Brute-force protection on credential-checking endpoints (m-RATELIMIT):
@@ -361,10 +361,13 @@ const authLimiter = createRateLimiter({
 router.get('/status', async (req, res) => {
   try {
     const hasUsers = await userDb.hasUsers();
+    // ADR-194 D1: one evaluation feeds both fields so they never disagree.
+    const state = ssoState();
     res.json({
       needsSetup: !hasUsers,
       isAuthenticated: false,
-      oidcEnabled: oidcEnabled(),
+      ssoState: state,
+      ssoLoginAvailable: state === 'active',
       deviceAccountSessionsEnabled: multiAccountEnabled(),
     });
   } catch (error) {
@@ -832,12 +835,13 @@ router.patch('/users/:id/status', authenticateToken, requireRole('owner'), (req,
   }
 
   const affectedDeviceSessions = deviceAccountSessionsDb.deviceSessionIdsForUser(id);
-  userDb.setStatus(id, status);
+  // T-1946: disabling deletes the member's API keys (audited in the same transaction).
+  const apiKeysDeleted = userDb.setStatus(id, status);
   // B-1327: disabling stops every running turn, shell and terminal of the user.
   revokeLiveAccess(id, affectedDeviceSessions, revocationForStatusChange(status));
   auditLogDb.record(status === 'disabled' ? 'user_disabled' : 'user_enabled', {
     userId: req.user.id,
-    metadata: { targetUserId: id },
+    metadata: status === 'disabled' ? { targetUserId: id, apiKeysDeleted } : { targetUserId: id },
     ipAddress: clientIp(req),
   });
   res.json({ success: true });

@@ -7,8 +7,11 @@ import crypto from 'node:crypto';
  * job's bound safe-restart row, this loop executes THAT row through the command
  * board's own executor — the same durable claim, role, config and safe-restart
  * gates as the button — as the consenting owner. Nothing here can kill a
- * session: the in-process count is read first, and the safe-restart gate defers
- * on anything it sees (PTY shells, orphan CLIs), returning the row to pending.
+ * session: the in-process session count is read first, then the open-terminal
+ * count (B-1448: terminals and Shell tabs hold the update's activity lock), and
+ * the safe-restart gate defers on the live sessions and orphan CLIs it sees,
+ * returning the row to pending. It does NOT see PTY shells; the executor's own
+ * terminal check and the gate's lock contention do.
  * The loop retries until the node is idle or the deadline passes; after the
  * deadline the row is left for the manual button and the owner is told why.
  */
@@ -23,6 +26,20 @@ export const AUTO_ACTIVATE_DEADLINE_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULED_UPDATE_WINDOW_MS = 10 * 60 * 1000;
 export const SCHEDULED_DEFERRAL_CAP_MS = 60 * 60 * 1000;
 const MAX_SCHEDULED_WINDOW_MINUTES = 24 * 60;
+/**
+ * B-1448: backoff between attempts that keep contending on the update lock with
+ * a holder that is not a terminal. Each attempt spawns the gate, writes two
+ * audit rows and holds admission exclusively for the activity wait, so the
+ * delay doubles per consecutive contention (30 s, 60 s, 120 s …) up to 10 min.
+ */
+export const CONTENTION_BACKOFF_BASE_MS = 30_000;
+export const CONTENTION_BACKOFF_CAP_MS = 10 * 60 * 1000;
+
+/** Delay before the next attempt after `streak` consecutive lock contentions. */
+export function contentionBackoffMs(streak) {
+    if (!Number.isSafeInteger(streak) || streak < 1) return 0;
+    return Math.min(CONTENTION_BACKOFF_BASE_MS * 2 ** Math.min(streak - 1, 30), CONTENTION_BACKOFF_CAP_MS);
+}
 
 /**
  * The window from NASSAJ_UPDATE_SCHEDULED_WINDOW_MINUTES (0 disables); an
@@ -84,12 +101,46 @@ export function hasCurrentUpdateConsent(jobs, job, now = Date.now()) {
         && confirmed <= now && now < confirmed + AUTO_ACTIVATE_DEADLINE_MS);
 }
 
+/** Sanitize an open-terminal reading to {count, attached, detached, usernames, detachedClosesAt}. */
+export function normalizeOpenTerminals(value) {
+    const int = (field) => (Number.isSafeInteger(value?.[field]) && value[field] >= 0 ? value[field] : 0);
+    const count = int('count');
+    if (count === 0) return null;
+    const usernames = Array.isArray(value.usernames)
+        ? value.usernames.filter((name) => typeof name === 'string' && name).map((name) => name.slice(0, 64)).slice(0, 20)
+        : [];
+    const detachedClosesAt = Number.isSafeInteger(value.detachedClosesAt) ? value.detachedClosesAt : null;
+    // Slice 2: the digest the owner echoes to confirm closing exactly these terminals.
+    const snapshot = typeof value.snapshot === 'string' && /^[a-f0-9]{32}$/.test(value.snapshot) ? value.snapshot : null;
+    return { count, attached: int('attached'), detached: int('detached'), usernames, detachedClosesAt, snapshot };
+}
+
+/** The owner-facing line for a terminal wait: count, whose, and when detached ones auto-close. */
+function terminalWaitMessage(terminals) {
+    const who = terminals.usernames.length ? ` (${terminals.usernames.join(', ')})` : '';
+    const closesAt = new Date(terminals.detachedClosesAt ?? Number.NaN);
+    const when = Number.isFinite(closesAt.getTime()) ? ` by ${closesAt.toISOString()}` : '';
+    const detached = terminals.detached > 0
+        ? ` ${terminals.detached} of them detached, closing by themselves${when}.`
+        : '';
+    return `⏸ Waiting for ${terminals.count} open terminal(s)${who} to close; no terminal will be closed.${detached}`;
+}
+
 /** Map the executor's HTTP-shaped reply onto the activator's own status. */
 function outcomeOf(reply) {
     const body = reply?.body && typeof reply.body === 'object' ? reply.body : {};
+    const requeued = body.requeued === false ? { requeued: false } : {};
+    if (body.status === 'deferred' && body.reasonCode === 'open_terminals') {
+        // B-1448: the executor found open terminals before touching the gate.
+        const openTerminals = normalizeOpenTerminals({
+            count: body.openTerminals, attached: body.attachedTerminals, detached: body.detachedTerminals,
+            usernames: body.terminalUsers, detachedClosesAt: body.detachedClosesAt, snapshot: body.terminalSnapshot,
+        });
+        return { state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0, openTerminals, ...requeued };
+    }
     if (body.status === 'deferred') {
         return { state: 'waiting_sessions', code: body.reasonCode || 'deferred',
-            liveSessions: Number.isSafeInteger(body.sessionCount) ? body.sessionCount : null };
+            liveSessions: Number.isSafeInteger(body.sessionCount) ? body.sessionCount : null, ...requeued };
     }
     // qa note 5 (ADR-159): a `confirm_required` reply is the two-step force-restart
     // gate asking a human to confirm killing live work/sessions. It carries a 2xx
@@ -131,6 +182,9 @@ function isRowSettled(listQueuedRestarts, rowId) {
  * @param {{ listAutoActivatable: () => any[], listReceipts: (id: string) => any[] }} deps.jobs
  * @param {() => any[]} deps.listQueuedRestarts actionable safe-restart rows
  * @param {() => number} deps.countSessions the in-process governed session count
+ * @param {() => ({ count: number, attached: number, detached: number, usernames: string[],
+ *   detachedClosesAt: number | null })} [deps.openTerminals] B-1448: open terminals holding
+ *   the update's activity lock; absent disables the pre-check (the executor still checks)
  * @param {(input: { id: number, user: object }) => Promise<{ status: number, body: any }>} deps.executeAsOwner
  * @param {(id: number) => ({ id: number, role: string, username?: string } | undefined)} deps.getUser
  * @param {(action: string, details: object) => void} [deps.audit]
@@ -140,7 +194,7 @@ function isRowSettled(listQueuedRestarts, rowId) {
  * @param {number} [deps.scheduledCapMs] cumulative hold after which the scheduled condition is ignored
  */
 export function createUpdateAutoActivator({
-    jobs, listQueuedRestarts, countSessions, executeAsOwner, getUser,
+    jobs, listQueuedRestarts, countSessions, executeAsOwner, getUser, openTerminals = null,
     audit = () => undefined, jobLog = null, now = Date.now, prepareJob = async () => undefined,
     beforeTick = async () => true,
     intervalMs = AUTO_ACTIVATE_INTERVAL_MS, deadlineMs = AUTO_ACTIVATE_DEADLINE_MS,
@@ -159,7 +213,11 @@ export function createUpdateAutoActivator({
     const scheduledOverrides = new Set();
     // jobId → the consent time a terminal refusal belongs to; fresh consent clears it.
     const terminalFailures = new Map();
+    // B-1448: jobId → { streak, nextAttemptAt } for consecutive update_lock_contended deferrals.
+    const contentionBackoff = new Map();
     let running = false;
+    // B-1448 T2: an activateNow that lands during a running tick re-runs it once.
+    let rerunRequested = false;
     let timer = null;
 
     const say = (jobId, message) => { try { jobLog?.line(jobId, message); } catch { /* never fatal */ } };
@@ -170,7 +228,8 @@ export function createUpdateAutoActivator({
         const status = { ...next, deadlineAt, checkedAt: now() };
         statuses.set(job.id, status);
         if (message && (previous?.state !== status.state || previous?.liveSessions !== status.liveSessions
-            || previous?.code !== status.code)) say(job.id, message);
+            || previous?.code !== status.code || previous?.openTerminals?.count !== status.openTerminals?.count
+            || previous?.requeued !== status.requeued)) say(job.id, message);
         return status;
     };
 
@@ -233,6 +292,15 @@ export function createUpdateAutoActivator({
             return settle(job, deadlineAt, { state: 'waiting_sessions', code: 'live_sessions', liveSessions: sessions },
                 `⏸ Waiting for ${sessions ?? 'unknown'} live session(s) to finish; no session will be stopped.`);
         }
+        // B-1448: an open terminal would only make the attempt contend; wait
+        // here without spawning the gate. A failing reader never holds.
+        let terminals = null;
+        try { terminals = typeof openTerminals === 'function' ? normalizeOpenTerminals(openTerminals()) : null; } catch { terminals = null; }
+        if (terminals) {
+            return settle(job, deadlineAt, {
+                state: 'waiting_terminals', code: 'open_terminals', liveSessions: 0, openTerminals: terminals,
+            }, terminalWaitMessage(terminals));
+        }
         const dueSoon = scheduledHoldFor(job, hold, previousTickAt);
         if (dueSoon) {
             return settle(job, deadlineAt, {
@@ -244,11 +312,26 @@ export function createUpdateAutoActivator({
             return settle(job, deadlineAt, { state: 'refused', code: 'owner_unavailable', liveSessions: null },
                 '⚠ Activation authority changed while waiting; activation is blocked.');
         }
+        const backoff = contentionBackoff.get(job.id);
+        if (backoff && now() < backoff.nextAttemptAt) {
+            const { deadlineAt: _deadline, checkedAt: _checked, ...waiting } = statuses.get(job.id) ?? {
+                state: 'waiting_sessions', code: 'update_lock_contended', liveSessions: null,
+            };
+            return settle(job, deadlineAt, { ...waiting, retryAt: backoff.nextAttemptAt }, null);
+        }
         say(job.id, job.activationAuthority?.kind === 'policy'
             ? '▶ Node is idle; running the governed safe restart under the enabled development policy.'
             : '▶ Node is idle; running the governed safe restart (consented at update start).');
         audit('update_auto_activate_attempt', { sourceUpdateJobId: job.id, pendingActionId: row.id });
         const outcome = outcomeOf(await executeAsOwner({ id: row.id, user: currentOwner }));
+        if (outcome.code === 'update_lock_contended' && outcome.state === 'waiting_sessions') {
+            const streak = (backoff?.streak ?? 0) + 1;
+            const nextAttemptAt = now() + contentionBackoffMs(streak);
+            contentionBackoff.set(job.id, { streak, nextAttemptAt });
+            outcome.retryAt = nextAttemptAt;
+        } else {
+            contentionBackoff.delete(job.id);
+        }
         if (outcome.state === 'refused' && isRowSettled(listQueuedRestarts, row.id)) {
             terminalFailures.set(job.id, queuedAt);
             audit('update_auto_activate_failed', { sourceUpdateJobId: job.id, pendingActionId: row.id, code: outcome.code });
@@ -257,17 +340,26 @@ export function createUpdateAutoActivator({
                 `✖ Safe restart failed its safety check (${cause}); automatic activation stopped. `
                 + 'Fix the cause, then confirm activation again in the update dialog.');
         }
-        const message = outcome.state === 'restarting'
+        const base = outcome.state === 'restarting'
             ? '↻ Safe restart started; activation continues in the new process.'
-            : outcome.state === 'waiting_sessions'
-                ? `⏸ The restart gate deferred (${outcome.code}); retrying when the node is idle.`
-                : `⚠ Safe restart was refused (${outcome.code}); retrying.`;
+            : outcome.state === 'waiting_terminals' && outcome.openTerminals
+                ? terminalWaitMessage(outcome.openTerminals)
+                : outcome.state === 'waiting_sessions' || outcome.state === 'waiting_terminals'
+                    ? `⏸ The restart gate deferred (${outcome.code}); retrying when the node is idle.`
+                    : `⚠ Safe restart was refused (${outcome.code}); retrying.`;
+        // B-1448 (R3): a deferral whose row could not return to the queue would
+        // otherwise leave the job silently in waiting_row until the deadline.
+        const message = outcome.requeued === false
+            ? `${base} The queued restart could not be returned to the queue; confirm activation again if it does not resume.`
+            : base;
         return settle(job, deadlineAt, outcome, message);
     };
 
     const tick = async () => {
         if (running) return;
         running = true;
+        // This run sees every activateNow made before it started.
+        rerunRequested = false;
         try {
             if (await beforeTick() === false) return;
             const pending = jobs.listAutoActivatable();
@@ -275,6 +367,7 @@ export function createUpdateAutoActivator({
             for (const id of statuses.keys()) if (!live.has(id)) statuses.delete(id);
             for (const id of scheduledHolds.keys()) if (!live.has(id)) scheduledHolds.delete(id);
             for (const id of scheduledOverrides) if (!live.has(id)) scheduledOverrides.delete(id);
+            for (const id of contentionBackoff.keys()) if (!live.has(id)) contentionBackoff.delete(id);
             for (const id of terminalFailures.keys()) if (!live.has(id)) terminalFailures.delete(id);
             // One restart ends this process; never attempt a second in the same tick.
             for (const job of pending) {
@@ -285,6 +378,10 @@ export function createUpdateAutoActivator({
             console.error('[update-auto-activate] tick failed:', error?.message || 'unknown error');
         } finally {
             running = false;
+            if (rerunRequested) {
+                rerunRequested = false;
+                setImmediate(() => { void tick(); });
+            }
         }
     };
 
@@ -296,6 +393,43 @@ export function createUpdateAutoActivator({
             if (!status) return null;
             // Present only once the owner overrode, so the pre-T-1912 shape is unchanged.
             return scheduledOverrides.has(jobId) ? { ...status, scheduledOverride: true } : status;
+        },
+        /**
+         * B-1448 slice 2: why the owner may NOT close terminals for this job right
+         * now, or null when open terminals are the only thing holding it. Read
+         * synchronously, right before the close, so nothing is closed for an
+         * activation that would still wait on something else afterwards:
+         * activator_failed (terminal refusal or expired), sessions_active,
+         * scheduled_wait (use skip-scheduled-wait first; never overridden here)
+         * and not_waiting_terminals.
+         */
+        closeTerminalsRefusal(jobId) {
+            const status = statuses.get(jobId);
+            if (terminalFailures.has(jobId) || status?.terminal || ['refused', 'expired'].includes(status?.state)) {
+                return 'activator_failed';
+            }
+            let sessions;
+            try { sessions = countSessions(); } catch { sessions = null; }
+            if (!Number.isSafeInteger(sessions) || sessions > 0) return 'sessions_active';
+            // Checked even though terminals are evaluated first in considerJob:
+            // once they close, a due scheduled message would hold the restart.
+            const hold = scheduledHolds.get(jobId);
+            if (!scheduledOverrides.has(jobId) && !hold?.capped && readDueSoon()) return 'scheduled_wait';
+            return status?.state === 'waiting_terminals' ? null : 'not_waiting_terminals';
+        },
+        /**
+         * B-1448 slice 2: after the owner closed the terminals, try this job now:
+         * its lock-contention backoff is cleared and a tick is scheduled (never
+         * awaited: a successful tick restarts this process). The caller authorizes.
+         */
+        activateNow(jobId) {
+            if (typeof jobId !== 'string' || jobId.length === 0) return false;
+            contentionBackoff.delete(jobId);
+            // T2: if a tick is running it already read the old state; it re-runs
+            // in its finally. Otherwise the scheduled tick clears the flag.
+            rerunRequested = true;
+            setImmediate(() => { void tick(); });
+            return true;
         },
         /**
          * T-1912 owner "update now": skip ONLY the scheduled-message condition for

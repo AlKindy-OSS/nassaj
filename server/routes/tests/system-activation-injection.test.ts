@@ -290,6 +290,38 @@ test('ب.2 row 14 in-process: a partial exchange is undone from its durable rece
     assert.equal(generationsAt(fx), previousGenerations);
 });
 
+test('B-1448: an open terminal defers a real activation untouched; after it closes the next attempt hands off', async () => {
+    const fx = fixture();
+    const created = job(fx);
+    const terminal = await fx.gate.acquireWriterLease({ kind: 'standalone-pty', waitMs: 100 });
+    const journalBefore = readJournal(fx);
+    const receiptsBefore = (sourceUpdateJobsDb.listReceipts(created.id) as unknown[]).length;
+    // The production activation passes no wait; keep this test's activity wait short.
+    const gate = { ...fx.gate, beginUpdate: (identity: unknown, options: object = {}) =>
+        fx.gate.beginUpdate(identity, { ...options, activityWaitMs: 50 }) };
+    const row = {
+        sourceUpdateJobId: created.id, sourceUpdateTransactionId: created.transactionId,
+        activationIdentitySha256: created.activationIdentitySha256, releaseCommit: fx.targetCommit,
+    };
+    const resolved = {
+        action: {
+            transactionId: fx.transactionId, originalHead: fx.originalHead, targetCommit: fx.targetCommit,
+            version: VERSION, manifestSha256: fx.manifestSha256, candidateRoot: fx.candidateRoot, manifestPath: fx.manifestPath,
+        },
+        maintenance: gate,
+    };
+    await assert.rejects(executeSourceUpdateActivation(row, resolved), /update_lock_contended/);
+    assert.equal(jobState(created.id), 'restart_queued');
+    assert.deepEqual(readJournal(fx), journalBefore, 'the gate never closed: not one journal write');
+    assert.equal((sourceUpdateJobsDb.listReceipts(created.id) as unknown[]).length, receiptsBefore);
+    assert.equal(sourceState(fx).atOriginal, true, 'nothing was written');
+    terminal.release();
+    const context = await executeSourceUpdateActivation(row, resolved);
+    assert.equal(readJournal(fx).phase, 'RESTARTING_HANDOFF');
+    assert.equal(jobState(created.id), 'runtime_verifying');
+    context.update.release();
+});
+
 test('a real beginUpdate refusal fails the job and leaves the gate exactly as it was', async () => {
     const fx = fixture();
     const blocker = await fx.gate.beginUpdate({ ...fx.identity, transactionId: `${fx.transactionId}-other` }, { waitMs: 200 });

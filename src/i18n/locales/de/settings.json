@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "Berechtigungsaufforderungen überspringen (mit Vorsicht verwenden)",
       "claudeDescription": "Entspricht dem Flag --dangerously-skip-permissions",
-      "cursorDescription": "Entspricht dem Flag -f in der Cursor CLI",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "Keine gesperrten Werkzeuge konfiguriert",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "Erlaubte Shell-Befehle",
-      "description": "Shell-Befehle, die automatisch ohne Aufforderung erlaubt werden",
-      "placeholder": "z. B. \"Shell(ls)\" oder \"Shell(git status)\"",
-      "quickAdd": "Häufige Befehle schnell hinzufügen:",
-      "empty": "Keine erlaubten Befehle konfiguriert",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "Gesperrte Shell-Befehle",
-      "description": "Shell-Befehle, die automatisch gesperrt werden",
-      "placeholder": "z. B. \"Shell(rm -rf)\" oder \"Shell(sudo)\"",
-      "empty": "Keine gesperrten Befehle konfiguriert",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "Werkzeugmuster-Beispiele:",
       "bashGitLog": "- Alle git log-Befehle erlauben",
       "bashGitDiff": "- Alle git diff-Befehle erlauben",
       "write": "- Alle Write-Werkzeugnutzungen erlauben",
       "bashRm": "- Alle rm-Befehle sperren (gefährlich)"
-    },
-    "shellExamples": {
-      "title": "Shell-Befehl-Beispiele:",
-      "ls": "- ls-Befehl erlauben",
-      "gitStatus": "- git status erlauben",
-      "npmInstall": "- npm install erlauben",
-      "rmRf": "- Rekursives Löschen sperren"
     },
     "codex": {
       "permissionMode": "Berechtigungsmodus",

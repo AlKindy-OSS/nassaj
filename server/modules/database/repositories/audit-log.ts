@@ -204,9 +204,52 @@ export type AuditAction =
   // T-1939: a local-credential entry point refused because the account (or,
   // for invites, the install) signs in through SSO. Metadata { entry } only.
   | 'sso_required_denied'
+  // ADR-194 D1 (T-1962): SSO enforcement ended by the owner. Metadata
+  // { linkedRevoked, fromState, keptSessions } only.
+  | 'sso_disabled'
+  // ADR-194 D1: NASSAJ_SSO_FORCE_OFF applied once at boot (same revocation as
+  // an owner disable). Metadata { linkedRevoked, fromState } only.
+  | 'sso_force_off_applied'
+  // ADR-194 D1: boot found an enabled active row and a stale disabled record
+  // (inconsistent restore) and removed the record. No metadata.
+  | 'sso_disabled_record_cleared'
+  // ADR-194 D3: the owner pre-filled the SSO draft from legacy OIDC_* env.
+  // Metadata { warnings } (fixed codes) only.
+  | 'sso_legacy_env_imported'
+  // ADR-194 D2/D8 (T-1962 S3): an owner test sign-in against the draft ended.
+  // Metadata { passed, diagnostics } (fixed codes) only; never claim values.
+  | 'sso_test_sign_in'
+  // ADR-194 D8 (T-1962 S4): the owner saved the SSO draft. Metadata
+  // { draftVersion, secretChanged, privateNetwork, issuerPortSet } only.
+  | 'sso_draft_saved'
+  // ADR-194 D8: owner test-discovery on the draft. Metadata { passed, failure,
+  // warnings } (fixed codes) only; never the discovery body or an OAuth error.
+  | 'sso_discovery_tested'
+  // ADR-194 D9: the draft was applied to the active slot. Metadata counts and
+  // flags only ({ version, mappingChanged, reattestRequired, issuerChanged,
+  // orphaned, revoked, keysRevoked, jitForcedOff, enabled }).
+  | 'sso_config_applied'
+  // ADR-194 D1/D8: the owner enabled SSO (disabled record removed). Metadata
+  // { disabledRecordCleared } only.
+  | 'sso_enabled'
+  // ADR-194 D3: a runtime fault (e.g. discovery_endpoint_changed) was persisted
+  // on the active row, making SSO unavailable. Metadata { fault } only.
+  | 'sso_runtime_fault_recorded'
+  // ADR-194 I6: an IdP identity linked to an owner was refused for login or
+  // self-link (the owner signs in locally only). Metadata { purpose } only.
+  | 'oidc_owner_sign_in_refused'
+  // ADR-194 D3/ADR-193: the owner confirmed the installation origin on a node
+  // without the connector origin store. Metadata { replaced } only.
+  | 'installation_origin_confirmed'
   // T-1939 slice 3: every API key of a member was deleted because the IdP
   // withdrew their grant or signed them out. Metadata { trigger, count } only.
   | 'api_keys_revoked_sso'
+  // T-1946: every API key of a member was deleted because the owner suspended
+  // or deleted the account. Metadata { trigger, targetUserId, count } only.
+  | 'api_keys_revoked'
+  // T-1946: the owner changed the SSO attestation window (days) after which a
+  // linked member's API keys stop working. Metadata { from, to } only.
+  | 'api_key_sso_window_changed'
   // T-1939 slice 3: live connections of a linked member closed because their
   // SSO attestation aged out. Metadata { closedSockets, endedInteractiveSessions }.
   | 'sso_attestation_expired'
@@ -236,6 +279,9 @@ export type AuditAction =
   // T-1871 stage 3 snapshot/rollback. Metadata: provider, jobId, versions,
   // counts and bytes only — never a path or a member id.
   | 'harness_update_noop'
+  // B-1474: a manual run refused by the live-session gate. Metadata: provider,
+  // kind, leg, cause (short codes only).
+  | 'harness_update_skipped'
   | 'harness_update_rolled_back'
   | 'harness_update_rollback_failed'
   | 'harness_snapshot_pruned'

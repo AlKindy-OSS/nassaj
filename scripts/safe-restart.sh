@@ -115,7 +115,7 @@
 #              جلسة بادئته `SR-SESSION pid=… provider=… ageS=… sessionId=… cmd="…"`.
 #
 # ماذا تكشف الجلسات وكيف (B-168/T-880):
-#   كل عملية مزوّد حيّة (`claude`/`codex`/`agy`/`opencode`/`hermes`) هي ابن/حفيد OS
+#   كل عملية مزوّد حيّة (`claude`/`codex`/`agy`/`opencode`) هي ابن/حفيد OS
 #   لعملية PM2 `nassaj-dev`. نستنبط PID الخادم من `pm2 jlist` (لا من مسار مثبَّت —
 #   تفادياً لعطل B-863 على عقد الأسطول)، ثم نمشي شجرة /proc (PPid من
 #   /proc/<pid>/status، والهوية من /proc/<pid>/cmdline) لجمع كل الأحفاد ونطابق اسم
@@ -728,7 +728,7 @@ fi
 
 # ── الكشف عن جلسات المحادثة التفاعلية الحيّة (B-168/T-880) — قراءة فقط ──────────
 # الثغرة: البوّابة كانت تفحص journal الورشات فقط وتَعمى عن جلسات المحادثة الحيّة —
-# وهي عمليات مزوّد (claude/codex/agy/opencode/hermes) أبناءُ/أحفادُ OS مباشرون
+# وهي عمليات مزوّد (claude/codex/agy/opencode) أبناءُ/أحفادُ OS مباشرون
 # لعملية PM2 nassaj-dev. تصميم الـ drain (treekill:false + kill_timeout=24h) يعني
 # أن restart مع جلسة ابنة حيّة يُغلق المنفذ 3004 ويُبقي العملية `stopping` بلا موت
 # ⇒ انقطاع 502 ممتد (حادثتا B-95 ‏2026-06-27/30، وB-168 ‏2026-07-11، وnear-miss
@@ -823,7 +823,7 @@ try {
   }
 
   // مطابقة المزوّد بدقّة على argv[0] (أو مفسّر + سكربت باسم المزوّد، أو مسار حزمة).
-  const PROV = new Set(['claude', 'codex', 'agy', 'opencode', 'hermes']);
+  const PROV = new Set(['claude', 'codex', 'agy', 'opencode']);
   const INTERP = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3']); // لا bash/sh: المزوّدات لا تُطلَق `bash claude`، وتجنّب مسح سلاسل أوامر الصدفة
   // أعلام node لتشغيل كود سطري (ليست جلسة مزوّد): node -e 'code'. نتفاداها قبل رمز
   // السكربت كي لا نطابق كلمة عابرة في كود -e على أنها مسار حزمة (B-196/B-195).
@@ -845,7 +845,6 @@ try {
     [/(^|\/)codex(\/|$)/,                     'codex'],     // codex مجرَّد غير منسوب (qa) — لا يطابق '/opencode/' (مقطع مسار كامل)
     [/(^|\/)opencode(\/|$)/,                  'opencode'],
     [/(^|\/)agy(\/|$)/,                       'agy'],
-    [/(^|\/)hermes(\/|$)/,                    'hermes'],
   ];
   // B-327/T-1113: تحت قفص المزوّدات (NASSAJ_PROVIDER_CAGE) يصير argv[0]=bwrap
   // والمزوّد الحقيقي مدفون بعد عشرات وسائط التركيب. الكاشف كان يقرأ argv[0] وحده
@@ -877,7 +876,7 @@ try {
     depth = depth || 0;
     const a0 = base(argv[0]);
     if (WRAPPERS.has(a0)) return unwrap(argv, depth);  // B-327: اقرأ ما بعد القفص
-    if (PROV.has(a0)) return a0;               // الحالة الغالبة: claude/codex/agy/opencode/hermes مباشرة
+    if (PROV.has(a0)) return a0;               // الحالة الغالبة: claude/codex/agy/opencode مباشرة
     if (INTERP.has(a0)) {                        // غلاف مفسّر: node .../opencode.js أو bun run opencode.js
       const RUNNER_SUBCMD = new Set(['run', 'exec', 'x']); // bun/deno run <script>
       for (let i = 1; i < argv.length; i++) {
@@ -1182,7 +1181,7 @@ if [ -z "$MANAGED_OPERATION_ID" ] && command -v pm2 >/dev/null 2>&1; then
       # Conservative zero-live proof: recovery has no trustworthy server PID,
       # so ANY provider CLI owned by this uid blocks rather than guessing.
       if node -e '
-        const fs=require("fs"); const names=/(^|\/)(claude|codex|agy|opencode|hermes|kimi|deepseek|glm|qwen|antigravity|cursor)(\s|$)/i;
+        const fs=require("fs"); const names=/(^|\/)(claude|codex|agy|opencode|kimi|deepseek|glm|qwen|antigravity|cursor)(\s|$)/i;
         for(const d of fs.readdirSync("/proc")){if(!/^\d+$/.test(d)||Number(d)===process.pid)continue;try{const s=fs.statSync(`/proc/${d}`);if(s.uid!==process.getuid())continue;const c=fs.readFileSync(`/proc/${d}/cmdline`).toString().replace(/\0/g," ");if(names.test(c))process.exit(1)}catch{}}
       '; then :; else
         emit WARN "rollback recovery deferred: provider process exists and no safe ancestry proof is available."
@@ -1664,7 +1663,7 @@ if [ "$SESSION_COUNT" -gt 0 ] || [ "$LIVE_COUNT" -gt 0 ] || [ "$SESSION_DETECT_B
       emit WARN "تجاوز واعٍ (--force): تنفيذ restart رغم $SESSION_COUNT جلسة محادثة حيّة! خطر إغلاق 3004 ودخول drain ⇒ 502 ممتد إن بقيت جلسة عالقة. تأكّد أنك لست داخل إحداها."
     fi
     if [ "$SESSION_DETECT_BLOCK" -eq 1 ]; then
-      emit WARN "تجاوز واعٍ (--force): تنفيذ restart رغم فشل كشف الجلسات (detectError، ${SESSION_DETECT_REASON:-غير معروف}) — قد توجد جلسة ابنة حيّة غير مرئية ⇒ خطر إغلاق 3004 ودخول drain ⇒ 502 ممتد. تأكّد يدوياً أنه لا جلسة claude/codex/agy/opencode/hermes حيّة تحت العملية."
+      emit WARN "تجاوز واعٍ (--force): تنفيذ restart رغم فشل كشف الجلسات (detectError، ${SESSION_DETECT_REASON:-غير معروف}) — قد توجد جلسة ابنة حيّة غير مرئية ⇒ خطر إغلاق 3004 ودخول drain ⇒ 502 ممتد. تأكّد يدوياً أنه لا جلسة claude/codex/agy/opencode حيّة تحت العملية."
     fi
     if [ "$LIVE_COUNT" -gt 0 ]; then
       emit WARN "تجاوز واعٍ (--force): تنفيذ restart رغم وجود عمل حيّ. orphans ستُكمل (treekill:false) لكن انفصام الرؤية قد يتكرّر."

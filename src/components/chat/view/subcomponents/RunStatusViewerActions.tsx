@@ -15,6 +15,7 @@ import { Compass } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { cn } from '../../../../lib/utils';
+import { Tooltip } from '../../../../shared/view/ui';
 
 export interface RunStatusIdentityLabelProps {
   /** True when the CURRENT viewer is not this run's starter (name is known). */
@@ -122,4 +123,45 @@ export function RunStatusActions({
   }
 
   return null;
+}
+
+export interface RunStatusSteerHintProps {
+  /**
+   * T-1956 — true only for the viewer's OWN running turn (confirmed starter
+   * who can steer): the same condition under which the composer used to show
+   * the permanent `/steer` line. The line was noise on every turn, so the text
+   * now lives behind this indicator, on demand.
+   */
+  show: boolean;
+  t: TFunction;
+}
+
+/**
+ * Small compass indicator in the running-status bar whose tooltip explains
+ * that the starter steers his own turn with `/steer <text>`. Hover/focus opens
+ * it on desktop, a tap toggles it on touch (`tapToToggle`), Enter/Space
+ * toggles it from the keyboard. The wrapper stops click propagation so a tap
+ * never toggles MergedCard's collapsible header row. The icon carries a short
+ * name; the full sentence is the tooltip, exposed as its description
+ * (`aria-describedby`) so a screen reader does not read it twice.
+ */
+export function RunStatusSteerHint({ show, t }: RunStatusSteerHintProps) {
+  if (!show) return null;
+  const hint = t('steer.composerNoteSelf', {
+    defaultValue: 'Type /steer followed by your message to deliver it into your running turn.',
+  });
+  return (
+    <span className="flex shrink-0" onClick={(event) => event.stopPropagation()}>
+      <Tooltip content={hint} position="top" tapToToggle keyboard multiline wrapperClassName="flex rounded-full">
+        <span
+          role="img"
+          aria-label={t('steer.hintLabel', { defaultValue: 'Steering hint' })}
+          data-testid="run-status-steer-hint"
+          className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-[color:var(--session-steer-accent)]"
+        >
+          <Compass className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </Tooltip>
+    </span>
+  );
 }

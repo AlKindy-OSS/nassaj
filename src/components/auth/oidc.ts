@@ -127,38 +127,53 @@ export async function fetchOidcIdentity(token: string): Promise<OidcIdentityResu
   return { ok: true, user: payload.user, isMultiUser: Boolean(payload.isMultiUser) };
 }
 
-let availability: Promise<boolean> | null = null;
+/** Server SSO state (ADR-194 D1); `unavailable` and `paused` mean SSO cannot sign anyone in now. */
+export type SsoState = 'off' | 'active' | 'unavailable' | 'paused';
 
-async function probeOidcAvailability(): Promise<boolean> {
-  // Preferred signal, once the server advertises it on the public status route.
+export type SsoStatus = Readonly<{ loginAvailable: boolean; state: SsoState }>;
+
+const SSO_STATES: ReadonlySet<unknown> = new Set<SsoState>(['off', 'active', 'unavailable', 'paused']);
+const SSO_OFF: SsoStatus = Object.freeze({ loginAvailable: false, state: 'off' });
+
+let ssoStatus: Promise<SsoStatus> | null = null;
+
+async function probeSsoStatus(): Promise<SsoStatus> {
+  // Preferred signal: the public status route's ssoState + ssoLoginAvailable.
   const statusResponse = await api.auth.status();
-  const status = await parseJsonSafely<{ oidcEnabled?: unknown }>(statusResponse);
-  if (typeof status?.oidcEnabled === 'boolean') {
-    return status.oidcEnabled;
+  const status = await parseJsonSafely<{ ssoState?: unknown; ssoLoginAvailable?: unknown }>(statusResponse);
+  if (typeof status?.ssoLoginAvailable === 'boolean' && SSO_STATES.has(status.ssoState)) {
+    const state = status.ssoState as SsoState;
+    // The button is offered only when both fields agree.
+    return { loginAvailable: status.ssoLoginAvailable && state === 'active', state };
   }
-  // Fallback for the current server: see api.auth.oidc.probe.
+  // Fallback for a server without the fields: see api.auth.oidc.probe.
   const probe = await api.auth.oidc.probe();
-  return probe.status === 400;
+  return probe.status === 400 ? { loginAvailable: true, state: 'active' } : SSO_OFF;
 }
 
 /**
- * Whether this server has OIDC switched on (OIDC_ENABLED=true). Resolved once
- * per page load and shared by every caller; a failed probe reads as "off" and
- * is not cached, so a later mount retries.
+ * The server's SSO status, resolved once per page load and shared by every
+ * caller; a failed probe reads as "off" and is not cached, so a later mount
+ * retries.
  */
-export function detectOidcAvailability(): Promise<boolean> {
-  if (!availability) {
-    availability = probeOidcAvailability().catch(() => {
-      availability = null;
-      return false;
+export function detectSsoStatus(): Promise<SsoStatus> {
+  if (!ssoStatus) {
+    ssoStatus = probeSsoStatus().catch(() => {
+      ssoStatus = null;
+      return SSO_OFF;
     });
   }
-  return availability;
+  return ssoStatus;
 }
 
-/** Test seam: forget the cached availability. */
+/** Whether an SSO sign-in can start right now (the login button). */
+export function detectOidcAvailability(): Promise<boolean> {
+  return detectSsoStatus().then((status) => status.loginAvailable);
+}
+
+/** Test seam: forget the cached status. */
 export function resetOidcAvailabilityCache(): void {
-  availability = null;
+  ssoStatus = null;
 }
 
 /** Leaves the SPA for the server-driven authorization redirect. */

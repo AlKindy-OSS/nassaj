@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 
 import { getConnection } from '../connection.js';
 
+import { apiKeyCredentialState, parseApiKeyCredentialId } from './api-key-sso-window.js';
 import {
   isWorkspaceTopologyFenceCurrent,
   type WorkspaceTopologyFence,
@@ -92,10 +93,12 @@ function assertPrincipal(db: Database.Database, actor: EngineRestampIntent['acto
     if (!current) fail('ENGINE_RESTAMP_DEVICE_STALE');
   }
   if (actor.kind === 'ck') {
-    const match = /^api-key:(\d+)$/u.exec(actor.authenticationCredentialId);
-    const current = match && db.prepare(`SELECT 1 FROM api_keys
-      WHERE id = ? AND user_id = ? AND is_active = 1`).get(Number(match[1]), actor.userId);
-    if (!current) fail('ENGINE_RESTAMP_CREDENTIAL_STALE');
+    // T-1946: the same key predicate as authentication, SSO window included.
+    const apiKeyId = parseApiKeyCredentialId(actor.authenticationCredentialId);
+    if (apiKeyId === null
+        || apiKeyCredentialState(db, { apiKeyId, userId: actor.userId }) !== 'current') {
+      fail('ENGINE_RESTAMP_CREDENTIAL_STALE');
+    }
   }
 }
 

@@ -128,9 +128,29 @@ export interface ScheduledDueSoon {
   earliestAt: string | null;
 }
 
+/**
+ * Open terminals holding the update back (B-1448): how many, how many are
+ * detached Shell tabs that close by themselves at `detachedClosesAt`, and whose
+ * they are (usernames, owner-only endpoint).
+ */
+export interface OpenTerminals {
+  count: number;
+  attached: number;
+  detached: number;
+  usernames: string[];
+  detachedClosesAt: number | null;
+  /**
+   * Opaque digest of this exact terminal set (B-1448 slice 2). Echoed back to
+   * close-terminals so a set that changed since the owner saw it is never closed.
+   * Null when the server sent none or a malformed one.
+   */
+  snapshot: string | null;
+}
+
 /** Where the server's automatic activation stands (T-1751, T-1912). */
 export interface AutoActivationStatus {
-  state: 'waiting_row' | 'waiting_sessions' | 'waiting_scheduled' | 'restarting' | 'refused' | 'expired';
+  state: 'waiting_row' | 'waiting_sessions' | 'waiting_terminals' | 'waiting_scheduled' | 'restarting' | 'refused'
+    | 'expired';
   liveSessions: number | null;
   code: string | null;
   deadlineAt: number | null;
@@ -142,6 +162,8 @@ export interface AutoActivationStatus {
   terminal: boolean;
   /** Sanitized gate reason accompanying a refusal, when the server has one. */
   reason: string | null;
+  /** Present only while `state` is `waiting_terminals` (B-1448). */
+  openTerminals: OpenTerminals | null;
 }
 
 export interface UpdateJobSnapshot {
@@ -221,8 +243,86 @@ function normalizeDeferral(value: unknown): DeferralStatus | null {
 }
 
 const AUTO_ACTIVATION_STATES = new Set([
-  'waiting_row', 'waiting_sessions', 'waiting_scheduled', 'restarting', 'refused', 'expired',
+  'waiting_row', 'waiting_sessions', 'waiting_terminals', 'waiting_scheduled', 'restarting', 'refused', 'expired',
 ]);
+
+const TERMINAL_SNAPSHOT = /^[a-f0-9]{32}$/;
+
+/** Validate an open-terminal reading (B-1448); never trust the response body as-is. */
+function normalizeOpenTerminals(value: unknown): OpenTerminals | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const count = (field: string): number => {
+    const n = raw[field];
+    return Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : 0;
+  };
+  if (count('count') === 0) return null;
+  const usernames = Array.isArray(raw.usernames)
+    ? raw.usernames.filter((name): name is string => typeof name === 'string' && name.length > 0)
+      .map((name) => name.slice(0, 64)).slice(0, 20)
+    : [];
+  return {
+    count: count('count'),
+    attached: count('attached'),
+    detached: count('detached'),
+    usernames,
+    detachedClosesAt: Number.isSafeInteger(raw.detachedClosesAt) ? raw.detachedClosesAt as number : null,
+    snapshot: typeof raw.snapshot === 'string' && TERMINAL_SNAPSHOT.test(raw.snapshot) ? raw.snapshot : null,
+  };
+}
+
+/**
+ * Outcome of the owner's "close N terminals and update" (B-1448 slice 2):
+ * - `closed`: terminals closed and the activation triggered.
+ * - `changed`: the set differs from the one the owner confirmed; nothing was
+ *   closed and `openTerminals` is the fresh set to confirm again (null when the
+ *   fresh set is already empty or unreadable).
+ * - `error`: every other refusal, with the server code (or HTTP-derived code).
+ */
+export type CloseTerminalsResult =
+  | { kind: 'closed'; closed: number; remaining: number }
+  | { kind: 'changed'; openTerminals: OpenTerminals | null }
+  | { kind: 'error'; code: string; status: number; reason?: string | null };
+
+/**
+ * `POST /api/system/update/jobs/:jobId/close-terminals` (owner only). Sends the
+ * snapshot the owner confirmed; never throws — a network failure is
+ * `{ kind: 'error', code: 'network', status: 0 }`.
+ */
+export async function closeTerminals(
+  fetcher: (url: string, init?: RequestInit) => Promise<Response>,
+  jobId: string,
+  expectedSnapshot: string,
+): Promise<CloseTerminalsResult> {
+  let response: Response;
+  try {
+    response = await fetcher(`/api/system/update/jobs/${encodeURIComponent(jobId)}/close-terminals`, {
+      method: 'POST',
+      body: JSON.stringify({ expectedSnapshot }),
+    });
+  } catch {
+    return { kind: 'error', code: 'network', status: 0 };
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed = await response.json() as unknown;
+    if (parsed && typeof parsed === 'object') body = parsed as Record<string, unknown>;
+  } catch { /* an unreadable body falls through to the status-derived code */ }
+  if (response.ok && body.status === 'closed') {
+    const count = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? n as number : 0);
+    return { kind: 'closed', closed: count(body.closed), remaining: count(body.remaining) };
+  }
+  const code = typeof body.code === 'string' ? body.code : '';
+  if (response.status === 409 && code === 'terminals_changed') {
+    return { kind: 'changed', openTerminals: normalizeOpenTerminals(body.openTerminals) };
+  }
+  // `update_not_overridable` names why the job cannot be overridden (sessions_active, …).
+  const reason = typeof body.reason === 'string' && /^[a-z_]{1,64}$/.test(body.reason) ? body.reason : null;
+  if (code) return { kind: 'error', code, status: response.status, reason };
+  if (response.status === 429) return { kind: 'error', code: 'rate_limited', status: 429 };
+  if (response.status === 401 || response.status === 403) return { kind: 'error', code: 'forbidden', status: response.status };
+  return { kind: 'error', code: 'unknown', status: response.status };
+}
 
 /** Validate a `{count, earliestAt}` reading; never trust the response body as-is. */
 function normalizeScheduledDueSoon(value: unknown): ScheduledDueSoon | null {
@@ -248,6 +348,7 @@ function normalizeAutoActivation(value: unknown): AutoActivationStatus | null {
     scheduledOverride: raw.scheduledOverride === true,
     terminal: raw.terminal === true,
     reason: typeof raw.reason === 'string' && raw.reason ? raw.reason.slice(0, 200) : null,
+    openTerminals: normalizeOpenTerminals(raw.openTerminals),
   };
 }
 

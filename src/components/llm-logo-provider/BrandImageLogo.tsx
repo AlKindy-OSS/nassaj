@@ -1,26 +1,24 @@
 import antigravityMark from '../../assets/provider-logos/antigravity.png';
-import hermesMark from '../../assets/provider-logos/hermes.png';
 import kimiMark from '../../assets/provider-logos/kimi.png';
 
 /**
- * The three marks that are shipped as raster art rather than drawn as SVG.
+ * The marks that are shipped as raster art rather than drawn as SVG.
  *
- * WHY RASTER, AND WHY THESE THREE. Every other provider here has a mark simple
- * enough to redraw faithfully in paths (a wordmark, a glyph, a geometric
- * shape). These three do not: Antigravity's arch is a four-stop gradient,
- * Kimi's is a photographic-weight tile, and Hermes' is illustrated line art.
- * Tracing them by hand is how a brand mark becomes an "inspired by" — which is
- * exactly the state this replaces: a lightning bolt for Antigravity, and a
- * letter in a coloured square for the other two.
+ * WHY RASTER. Every other provider here has a mark simple enough to redraw
+ * faithfully in paths (a wordmark, a glyph, a geometric shape). These do not:
+ * Antigravity's arch is a four-stop gradient and Kimi's is a photographic-
+ * weight tile. Tracing them by hand is how a brand mark becomes an "inspired
+ * by" — which is exactly the state this replaces: a lightning bolt for
+ * Antigravity, and a letter in a coloured square for Kimi.
  *
  * WHERE THEY CAME FROM — the real artwork, not an approximation:
  *  - `antigravity.png` — antigravity.google/assets/image/antigravity-logo.png
  *  - `kimi.png`        — the favicon shipped inside the installed
  *                        `@moonshot-ai/kimi-code` CLI (dist-web/favicon.ico)
- *  - `hermes.png`      — the app icon inside the installed hermes-agent
- *                        (apps/desktop/assets/icon.png)
- * Two of the three are read off the vendor's own installed binary, so they are
- * the mark that vendor ships, not one found on a logo aggregator.
+ * Kimi's is read off the vendor's own installed binary, so it is the mark
+ * that vendor ships, not one found on a logo aggregator. Kept for the live
+ * Kimi ENGINE (T-1953); the Kimi agent BODY is retired and renders the grey
+ * retired tile instead (`SessionProviderLogo`).
  *
  * They are IDENTIFICATION, not endorsement: each names the provider whose CLI
  * this row actually launches — the same nominative use already made of the
@@ -33,7 +31,6 @@ import kimiMark from '../../assets/provider-logos/kimi.png';
 const BRAND_MARK = {
   antigravity: { src: antigravityMark, label: 'Antigravity' },
   kimi: { src: kimiMark, label: 'Kimi' },
-  hermes: { src: hermesMark, label: 'Hermes' },
 } as const;
 
 export type BrandImageProvider = keyof typeof BRAND_MARK;

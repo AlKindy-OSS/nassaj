@@ -18,7 +18,10 @@
  * every colour-survival test below runs against SVG files that actually ship in
  * this repo (public/*.svg, public/icons/*.svg), produced by Adobe Illustrator,
  * Inkscape and a web icon set. Two real files were failing before this fix:
- *   - public/icons/cursor-white.svg  — Illustrator, colour only in <style>.
+ *   - server/services/__fixtures__/illustrator-style-logo.svg — Illustrator,
+ *     colour only in <style> (this is the retired Cursor logo, preserved here
+ *     verbatim as a fixture after public/icons/cursor-white.svg was deleted
+ *     with the Cursor body, T-1953 — see that file's header comment).
  *   - public/nassaj-logo-on-dark.svg — Inkscape, colour only in style="", and
  *     was REJECTED OUTRIGHT (the old XML re-serialization emitted <svg:svg>
  *     because Inkscape declares xmlns:svg, so the root check failed).
@@ -88,8 +91,8 @@ async function withMutant(mutations: Mutation[], fn: (mod: Sanitizer) => void | 
 // Adobe Illustrator export: the only colour in the file is `.st0 { fill: #edecec }`
 // inside <defs><style>. Before the fix the sanitizer dropped the <style> and the
 // mark rendered solid black.
-test('real Illustrator logo (cursor-white.svg): <style> class colour survives', () => {
-  const out = sanitizeSvg(readAsset('public/icons/cursor-white.svg'));
+test('real Illustrator logo (illustrator-style-logo.svg): <style> class colour survives', () => {
+  const out = sanitizeSvg(readAsset('server/services/__fixtures__/illustrator-style-logo.svg'));
   assert.ok(out, 'the real logo must be accepted');
   assert.match(out!, /fill="#edecec"/, 'the .st0 fill must migrate onto the <path>');
   assert.doesNotMatch(out!, /<style/i, 'the <style> carrier itself must be gone');
@@ -159,7 +162,7 @@ test('every SVG shipped in public/ is accepted and keeps an <svg> root', () => {
 // class rule wins (presentation attributes are the lowest-priority source), so
 // once we delete the CSS we must carry its value over the attribute. Filling in
 // only the MISSING attributes leaves the old black behind.
-const ILLUSTRATOR_WITH_ATTR_FALLBACK = readAsset('public/icons/cursor-white.svg').replace(
+const ILLUSTRATOR_WITH_ATTR_FALLBACK = readAsset('server/services/__fixtures__/illustrator-style-logo.svg').replace(
   '<path class="st0"',
   '<path class="st0" fill="#000000"'
 );
@@ -435,7 +438,7 @@ test('mutation: carrier removal is genuinely defence-in-depth (both layers must 
 });
 
 test('script, event handlers and external <use> are stripped from a real-looking logo', () => {
-  const hostile = readAsset('public/icons/cursor-white.svg')
+  const hostile = readAsset('server/services/__fixtures__/illustrator-style-logo.svg')
     .replace('<defs>', '<defs><script>alert(1)</script>')
     .replace('<path class="st0"', '<use href="https://evil.example/x.svg#p"/><path class="st0" onload="alert(1)"');
   const out = String(sanitizeSvg(hostile));
@@ -477,7 +480,7 @@ test('a DOCTYPE carrying an internal entity subset is rejected outright', () => 
 });
 
 test('a plain DOCTYPE, XML prolog, BOM and leading comments are still accepted', () => {
-  const real = readAsset('public/icons/cursor-white.svg');
+  const real = readAsset('server/services/__fixtures__/illustrator-style-logo.svg');
   assert.equal(looksLikeSvgRoot('﻿' + real), true, 'BOM');
   assert.equal(
     looksLikeSvgRoot(real.replace('<svg', '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg')),

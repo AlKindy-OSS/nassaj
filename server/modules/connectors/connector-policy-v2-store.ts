@@ -6,6 +6,7 @@ import type { Database } from 'better-sqlite3';
 
 import { runLocalUpdateBackground } from '../../services/update-writer-lease.js';
 
+import { ConnectorOriginBootstrapRefusedError } from './connector-origin-bootstrap-refusal.js';
 import {
   connectorOperationKilled,
   ConnectorPolicyOperation,
@@ -242,7 +243,7 @@ export class SqliteConnectorPolicyV2Store implements ConnectorPolicyDurableStore
     const bind = this.#database.transaction(() => {
       const current = this.#read(input.installationId);
       if (current.originRevision !== 1 || this.#hasInstallationEffects(input.installationId)) {
-        throw new Error('connector_origin_bootstrap_unsafe');
+        throw new ConnectorOriginBootstrapRefusedError('existing_installation_effects');
       }
       input.persistOrigin(current.originRevision);
       return current;

@@ -1,9 +1,11 @@
 /**
- * Owner decision (2026-09-29): the project toolbar reads, in logical order,
- * [Project Board] → [member avatar stack] → [add-member circle] — the board
- * tool sits right next to the avatars it opens instead of being lumped with
- * the other (git/files) tool icons. This guards that DOM order directly, so
- * a future reshuffle of the toolbar trips a test instead of only a screenshot.
+ * Owner decision (2026-09-30): the project toolbar reads, in visual
+ * left→right order, [folder] [git] [Project Board] [member avatar stack]
+ * [add-member circle] [flexible gap] ["جلسة جديدة"]. Since the toolbar row is
+ * `dir="rtl"`, that visual order is the *reverse* of DOM order — so in DOM
+ * order the add-member circle comes first, then the avatar stack, then the
+ * board tool. This guards that DOM order directly, so a future reshuffle of
+ * the toolbar trips a test instead of only a screenshot.
  */
 import type { TFunction } from 'i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -87,7 +89,7 @@ function renderExpanded() {
 afterEach(() => cleanup());
 
 describe('SidebarProjectItem — ترتيب شريط أدوات المشروع', () => {
-  it('لوحة المشروع ثم صفّ الوجوه ثم زرّ الإضافة، بترتيب DOM واحد', () => {
+  it('زرّ الإضافة ثم صفّ الوجوه ثم لوحة المشروع، بترتيب DOM واحد (معكوس بصرياً بفعل RTL)', () => {
     renderExpanded();
     const board = document.querySelector('[data-project-tool="board"]');
     const avatarStack = screen.getByTestId('avatar-stack-stub');
@@ -97,14 +99,14 @@ describe('SidebarProjectItem — ترتيب شريط أدوات المشروع',
     // DOM_POSITION_FOLLOWING: each element is a later sibling than the last,
     // regardless of the `dir="rtl"` strip's visual left/right flip.
     // eslint-disable-next-line no-bitwise
-    expect(board!.compareDocumentPosition(avatarStack) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(addButton.compareDocumentPosition(avatarStack) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // eslint-disable-next-line no-bitwise
-    expect(avatarStack.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(avatarStack.compareDocumentPosition(board!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('زرّ الإضافة يعقب صفّ الوجوه داخل الحاوية نفسها المتراكبة (-ms-2)', () => {
+  it('صفّ الوجوه يعقب زرّ الإضافة داخل الحاوية نفسها المتراكبة (-ms-2)', () => {
     renderExpanded();
-    const addButton = screen.getByTestId('add-member-stub');
-    expect(addButton.parentElement?.className).toContain('[&>*+*]:-ms-2');
+    const avatarStack = screen.getByTestId('avatar-stack-stub');
+    expect(avatarStack.parentElement?.className).toContain('[&>*+*]:-ms-2');
   });
 });

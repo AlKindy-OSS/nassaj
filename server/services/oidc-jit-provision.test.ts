@@ -1,5 +1,5 @@
 /**
- * T-1939 slice 4: JIT decisions (username derivation, org allowlist, cap), the
+ * T-1939 slice 4: JIT decisions (username derivation, tenant restriction, cap), the
  * SSO-only password sentinel, and the one-transaction createSsoUser write on a
  * real, isolated SQLite database.
  */
@@ -12,23 +12,27 @@ import { stopReconcileScheduler } from '@/modules/database/project-reconcile.ser
 import { userIdentitiesDb } from '@/modules/database/repositories/user-identities.js';
 import { userDb } from '@/modules/database/repositories/users.js';
 
+import { clearSsoConfig, writeSsoRow } from './__tests__/sso-config-fixture.js';
 import {
-  allowedOrgIds,
+  fixtureRowFields,
+  FOREIGN_ROLES_CLAIM,
+  NESTED_ROLES_CLAIM,
+  PROVIDER_FIXTURES,
+} from './__tests__/sso-provider-claims.js';
+import {
   deriveUsername,
   planJitProvision,
   PROVISION_CAP_PER_HOUR,
   provisionCapReached,
   provisionSsoUser,
   resetProvisionCap,
-  ssoRoleNames,
 } from './oidc-jit-provision.js';
 import { hashPassword, needsRehash, verifyPassword } from './password.service.js';
+import { resetSsoConfigCacheForTests } from './sso-config.service.js';
 import { SSO_ONLY_PASSWORD_HASH } from './sso-only-password.js';
 import { isReservedUsername, isUsernameAvailable } from './username-policy.js';
 
 const ISSUER = 'https://issuer.example';
-const PROJECT = 'proj-synth';
-const ROLES_CLAIM = `urn:zitadel:iam:org:project:${PROJECT}:roles`;
 
 await initializeDatabase();
 stopReconcileScheduler();
@@ -66,56 +70,76 @@ test('deriveUsername: known sha256/base32 vector for the fallback', () => {
 // Configuration and plan
 // ---------------------------------------------------------------------------
 
-test('allowedOrgIds parses a trimmed comma list and drops malformed ids', () => {
-  process.env.OIDC_ALLOWED_ORG_IDS = ' 123 , abc-DEF_9,, bad id ,x'.concat('y'.repeat(70));
-  assert.deepEqual([...allowedOrgIds()], ['123', 'abc-DEF_9']);
-  delete process.env.OIDC_ALLOWED_ORG_IDS;
-  assert.equal(allowedOrgIds().size, 0);
-});
+type JitSetup = { sso?: 'on' | 'off'; jit?: boolean; fields?: Record<string, unknown> };
 
-function withJitEnv(env: Record<string, string | undefined>, body: () => void) {
-  const keys = ['OIDC_ENABLED', 'OIDC_ROLE_PROJECT_ID', 'OIDC_JIT_ENABLED', 'OIDC_ALLOWED_ORG_IDS'];
-  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-  Object.assign(process.env, { OIDC_ENABLED: 'true', OIDC_ROLE_PROJECT_ID: PROJECT,
-    OIDC_JIT_ENABLED: 'true', OIDC_ALLOWED_ORG_IDS: 'org-a' });
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
+const NESTED = PROVIDER_FIXTURES.nestedGrants;
+
+/**
+ * Runs `body` with a real active SSO row (ADR-194 D3) whose jit_enabled follows
+ * `jit` (default on) and whose mapping defaults to the nested-grant fixture
+ * (`role_grant_scope`, allowed scope `org-a`), or with no row (`sso: 'off'`).
+ */
+function withJitEnv(setup: JitSetup, body: () => void) {
+  resetSsoConfigCacheForTests();
+  if (setup.sso === 'off') clearSsoConfig(getConnection());
+  else {
+    writeSsoRow(getConnection(), fixtureRowFields(NESTED, {
+      jit_enabled: setup.jit === false ? 0 : 1, ...setup.fields,
+    }) as never);
   }
   try {
     body();
   } finally {
-    for (const key of keys) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
+    clearSsoConfig(getConnection());
+    resetSsoConfigCacheForTests();
   }
 }
 
-test('planJitProvision: every gate, in order', () => {
-  const plan = (claims: Record<string, unknown>) => planJitProvision({
-    claims: { preferred_username: 'lina', ...claims }, subject: 's', projectId: PROJECT, nowMs: Date.now(),
-  }).outcome;
-  const memberFromA = { [ROLES_CLAIM]: { member: { 'org-a': 'a' } } };
-  withJitEnv({ OIDC_JIT_ENABLED: undefined }, () => assert.equal(plan(memberFromA), 'disabled'));
-  withJitEnv({ OIDC_ENABLED: 'false' }, () => assert.equal(plan(memberFromA), 'disabled'));
-  withJitEnv({ OIDC_ALLOWED_ORG_IDS: '' }, () => assert.equal(plan(memberFromA), 'allowlist_missing'));
+const plan = (claims: Record<string, unknown>) => planJitProvision({
+  claims: { preferred_username: 'lina', ...claims }, subject: 's', nowMs: Date.now(),
+}).outcome;
+
+test('planJitProvision: every gate, in order (role_grant_scope)', () => {
+  const memberFromA = { [NESTED_ROLES_CLAIM]: { member: { 'org-a': 'a' } } };
+  withJitEnv({ jit: false }, () => assert.equal(plan(memberFromA), 'disabled'));
+  withJitEnv({ sso: 'off' }, () => assert.equal(plan(memberFromA), 'disabled'));
+  withJitEnv({ fields: { tenant_mode: 'none', tenant_values_json: '[]' } }, () => {
+    assert.equal(plan(memberFromA), 'disabled', 'JIT with no tenant restriction is an invalid row');
+  });
   withJitEnv({}, () => {
     assert.equal(plan({}), 'no_role');
-    assert.equal(plan({ [ROLES_CLAIM]: { owner: { 'org-a': 'a' } } }), 'no_role');
-    assert.equal(plan({ [ROLES_CLAIM]: { member: { 'org-b': 'b' } } }), 'org_not_allowed');
+    assert.equal(plan({ [NESTED_ROLES_CLAIM]: { owner: { 'org-a': 'a' } } }), 'no_role');
+    assert.equal(plan({ [FOREIGN_ROLES_CLAIM]: { member: { 'org-a': 'a' } } }), 'no_role');
+    assert.equal(plan({ [NESTED_ROLES_CLAIM]: { member: { 'org-b': 'b' } } }), 'tenant_not_allowed');
+    assert.equal(plan({ [NESTED_ROLES_CLAIM]: ['member'] }), 'tenant_not_allowed', 'unprovable scope grants nothing');
+    const huge = Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`o${i}`, 'd']));
+    assert.equal(plan({ [NESTED_ROLES_CLAIM]: { member: huge } }), 'claim_too_large');
     assert.deepEqual(planJitProvision({ claims: { preferred_username: 'lina', ...memberFromA },
-      subject: 's', projectId: PROJECT, nowMs: Date.now() }), { outcome: 'ready', role: 'user', username: 'lina' });
+      subject: 's', nowMs: Date.now() }), { outcome: 'ready', role: 'user', username: 'lina' });
   });
 });
 
-test('ssoRoleNames: an allowlist filters every sign-in by granting org; empty keeps all', () => {
-  const claims = { [ROLES_CLAIM]: { member: { 'org-a': 'a' }, admin: { 'org-b': 'b' } } };
-  withJitEnv({}, () => assert.deepEqual(ssoRoleNames(claims, PROJECT), ['member']));
-  withJitEnv({ OIDC_ALLOWED_ORG_IDS: 'org-b' }, () => assert.deepEqual(ssoRoleNames(claims, PROJECT), ['admin']));
-  withJitEnv({ OIDC_ALLOWED_ORG_IDS: 'org-z' }, () => assert.deepEqual(ssoRoleNames(claims, PROJECT), []));
-  withJitEnv({ OIDC_ALLOWED_ORG_IDS: undefined }, () => {
-    assert.deepEqual(ssoRoleNames(claims, PROJECT).sort(), ['admin', 'member']);
+test('planJitProvision: claim tenant mode across provider shapes', () => {
+  for (const name of ['realmRoles', 'appRoles', 'groups'] as const) {
+    const fixture = PROVIDER_FIXTURES[name];
+    withJitEnv({ fields: fixtureRowFields(fixture, { jit_enabled: 1 }) }, () => {
+      const outcome = planJitProvision({ claims: fixture.claims, subject: name, nowMs: Date.now() });
+      assert.equal(outcome.outcome, 'ready', name);
+      assert.equal((outcome as { role: string }).role, fixture.expectedRole, name);
+    });
+  }
+  const groups = PROVIDER_FIXTURES.groups;
+  withJitEnv({ fields: fixtureRowFields(groups, { jit_enabled: 1 }) }, () => {
+    assert.equal(plan({ ...groups.claims, org_id: 'o-other' }), 'tenant_not_allowed');
+  });
+  withJitEnv({ fields: fixtureRowFields(groups, {
+    jit_enabled: 1, tenant_claim_path: 'email', tenant_values_json: '["a@x.example"]',
+  }) }, () => {
+    assert.equal(plan({ groups: ['nassaj-users'], email: 'a@x.example' }), 'email_unverified');
+    assert.equal(plan({ groups: ['nassaj-users'], email: 'a@x.example', email_verified: true }), 'ready');
+  });
+  withJitEnv({ fields: fixtureRowFields(PROVIDER_FIXTURES.hostedDomainNoRoles, { jit_enabled: 1 }) }, () => {
+    assert.equal(plan(PROVIDER_FIXTURES.hostedDomainNoRoles.claims), 'no_role', 'no role claim, no account');
   });
 });
 

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 
 import { authenticatedFetch } from '../../../utils/api';
-import type { LLMProvider } from '../../../types/app';
+import type { ActiveBodyProvider } from '../../../types/app';
 import {
   CLI_PROVIDERS,
   PROVIDER_AUTH_STATUS_ENDPOINTS,
@@ -63,7 +63,7 @@ export function useProviderAuthStatus(
     createInitialProviderAuthStatusMap(initialLoading)
   ));
 
-  const setProviderLoading = useCallback((provider: LLMProvider) => {
+  const setProviderLoading = useCallback((provider: ActiveBodyProvider) => {
     setProviderAuthStatus((previous) => ({
       ...previous,
       [provider]: {
@@ -74,14 +74,14 @@ export function useProviderAuthStatus(
     }));
   }, []);
 
-  const setProviderStatus = useCallback((provider: LLMProvider, status: ProviderAuthStatus) => {
+  const setProviderStatus = useCallback((provider: ActiveBodyProvider, status: ProviderAuthStatus) => {
     setProviderAuthStatus((previous) => ({
       ...previous,
       [provider]: status,
     }));
   }, []);
 
-  const checkProviderAuthStatus = useCallback(async (provider: LLMProvider): Promise<ProviderAuthStatus> => {
+  const checkProviderAuthStatus = useCallback(async (provider: ActiveBodyProvider): Promise<ProviderAuthStatus> => {
     setProviderLoading(provider);
 
     try {
@@ -121,7 +121,7 @@ export function useProviderAuthStatus(
     }
   }, [setProviderLoading, setProviderStatus]);
 
-  const refreshProviderAuthStatuses = useCallback(async (providers: LLMProvider[] = CLI_PROVIDERS) => {
+  const refreshProviderAuthStatuses = useCallback(async (providers: ActiveBodyProvider[] = CLI_PROVIDERS) => {
     await Promise.all(providers.map((provider) => checkProviderAuthStatus(provider)));
   }, [checkProviderAuthStatus]);
 

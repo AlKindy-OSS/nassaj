@@ -1,187 +1,34 @@
 /**
- * Unified external-role mapper (ADR-064, ADR-069 — T-957/T-958, T-1939).
+ * Unified external-role mapper (ADR-064, ADR-069, ADR-194 D4 — T-957/T-958,
+ * T-1939, T-1962).
  *
- * An external identity source (OIDC today, LDAP later) only ATTESTS coarse role
- * names; nassaj decides the local role. Rules, in order:
- *   1. No recognized name (claim absent, malformed or only unknown names) → NO
- *      role: the caller must refuse the login (T-1939). There is no downgrade
- *      to a lowest role — this applies to owners too.
- *   2. A local `owner` with a recognized name keeps `owner` (never changed).
- *   3. `owner` is never derived externally — an attested "owner" is ignored.
- *   4. Recognized names map through EXTERNAL_ROLE_MAP; the highest rank wins.
- *
- * Source adapters (e.g. extractZitadelRoleNames) turn a raw assertion into a
- * bounded list of role-name strings; everything after that is source-neutral.
+ * An external identity source only ATTESTS a role; nassaj decides the local
+ * role. The attestation is first turned into a mapped role ('admin' | 'user'
+ * | null) by the active SSO config's claim path and rules
+ * (services/sso-role-mapping.ts: exact match, highest rank wins). From there:
+ *   1. No mapped role → NO role: the caller must refuse the login (T-1939).
+ *      There is no downgrade to a lowest role — this applies to owners too.
+ *   2. A local `owner` with a mapped role keeps `owner` (never changed).
+ *   3. `owner` is never derived externally — anything but admin/user is ignored.
  */
 
-/** Attested external role name → local role. `owner` is deliberately absent. */
-export const EXTERNAL_ROLE_MAP = Object.freeze({
-  admin: 'admin',
-  member: 'user',
-  // nassaj has no read-only role; `user` is the lowest existing local role.
-  viewer: 'user',
-});
-
-const LOCAL_ROLE_RANK = Object.freeze({ user: 1, admin: 2 });
-const MAX_ROLE_NAMES = 64;
-const MAX_ROLE_NAME_LENGTH = 128;
-const PROJECT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-/** Denial reason when the roles claim was absent entirely (diagnosable). */
-export const ROLES_CLAIM_ABSENT_REASON = 'roles_claim_absent';
-/** Denial reason when the claim was present but carried no recognized role. */
-export const NO_RECOGNIZED_ROLE_REASON = 'no_recognized_role';
+const MAPPABLE_ROLES = new Set(['admin', 'user']);
 
 /**
- * True only when `projectId` is a syntactically valid Zitadel project id. OIDC
- * role mapping is fail-closed: without a valid id there is no scoped claim to
- * read, so no role can be attested (see ADR-064/069 and finding T-* fail-closed).
- * @param {unknown} projectId
- * @returns {boolean}
- */
-export function isValidRoleProjectId(projectId) {
-  return typeof projectId === 'string' && PROJECT_ID_PATTERN.test(projectId);
-}
-
-/** The project-scoped Zitadel roles claim name, or null when the id is invalid. */
-function scopedRolesClaimName(projectId) {
-  return isValidRoleProjectId(projectId)
-    ? `urn:zitadel:iam:org:project:${projectId}:roles`
-    : null;
-}
-
-/**
- * Maps attested role names to a single local role (never `owner`).
- * Fail-closed (T-1939): null when no name is a known EXTERNAL_ROLE_MAP entry.
- * @param {unknown} externalRoles list of attested role names from any source
- * @returns {'admin' | 'user' | null}
- */
-export function mapExternalRoles(externalRoles) {
-  let best = null;
-  if (!Array.isArray(externalRoles)) {
-    return best;
-  }
-  for (const name of externalRoles.slice(0, MAX_ROLE_NAMES)) {
-    const mapped = typeof name === 'string' && Object.hasOwn(EXTERNAL_ROLE_MAP, name)
-      ? EXTERNAL_ROLE_MAP[name]
-      : null;
-    if (mapped && (best === null || LOCAL_ROLE_RANK[mapped] > LOCAL_ROLE_RANK[best])) {
-      best = mapped;
-    }
-  }
-  return best;
-}
-
-/**
- * Decides the local role for a user given an external attestation. `role` is
+ * Decides the local role for a user given a mapped external role. `role` is
  * null when the attestation carries no recognized role (login must be refused).
  * @param {string} currentRole the user's stored local role
- * @param {unknown} externalRoles attested role names (see mapExternalRoles)
+ * @param {unknown} mappedRole 'admin' | 'user' from the SSO mapping, or null
  * @returns {{ role: string | null, changed: boolean }}
  */
-export function reconcileLocalRole(currentRole, externalRoles) {
-  const mapped = mapExternalRoles(externalRoles);
-  if (mapped === null) {
+export function reconcileLocalRole(currentRole, mappedRole) {
+  if (typeof mappedRole !== 'string' || !MAPPABLE_ROLES.has(mappedRole)) {
     return { role: null, changed: false };
   }
   if (currentRole === 'owner') {
     return { role: 'owner', changed: false };
   }
-  return { role: mapped, changed: mapped !== currentRole };
-}
-
-function boundedRoleNames(value) {
-  let names = [];
-  if (Array.isArray(value)) {
-    names = value;
-  } else if (value && typeof value === 'object') {
-    // Zitadel's native shape: { "<role>": { "<orgId>": "<orgDomain>" } }.
-    names = Object.keys(value);
-  }
-  return names
-    .slice(0, MAX_ROLE_NAMES)
-    .filter((name) => typeof name === 'string' && name.length > 0 && name.length <= MAX_ROLE_NAME_LENGTH);
-}
-
-/**
- * OIDC source adapter: reads Zitadel project-role claims from VERIFIED id_token
- * claims. Fail-closed: it reads ONLY the project-scoped claim
- * `urn:zitadel:iam:org:project:<projectId>:roles`. The generic
- * `urn:zitadel:iam:org:project:roles` claim (which aggregates roles across every
- * project the user touches) is NEVER consulted, and an absent/invalid projectId
- * grants nothing — preventing a cross-project role leak.
- * @param {Record<string, unknown>} claims verified id_token claims
- * @param {string | undefined} projectId configured Zitadel project id
- * @returns {string[]} bounded role names ([] when absent, invalid or malformed)
- */
-export function extractZitadelRoleNames(claims, projectId) {
-  if (!claims || typeof claims !== 'object') {
-    return [];
-  }
-  const scopedClaim = scopedRolesClaimName(projectId);
-  if (!scopedClaim || !Object.hasOwn(claims, scopedClaim)) {
-    return [];
-  }
-  return boundedRoleNames(claims[scopedClaim]);
-}
-
-/**
- * Organization ids that granted `role` in Zitadel's native claim shape
- * `{ "<role>": { "<orgId>": "<orgDomain>" } }`. Any other shape (a bare array
- * of names, a string, a missing entry) carries no organization → [].
- */
-function grantingOrgIds(grants) {
-  if (!grants || typeof grants !== 'object' || Array.isArray(grants)) {
-    return [];
-  }
-  return Object.keys(grants)
-    .slice(0, MAX_ROLE_NAMES)
-    .filter((orgId) => orgId.length > 0 && orgId.length <= MAX_ROLE_NAME_LENGTH);
-}
-
-/**
- * JIT source adapter (T-1939 slice 4): the project-scoped role names whose
- * grant was issued by at least one organization in `allowedOrgIds`. Same
- * fail-closed rules as extractZitadelRoleNames (scoped claim only), and
- * stricter: a claim without per-role organization keys grants nothing here,
- * because the granting organization cannot be proven.
- * @param {Record<string, unknown>} claims verified id_token claims
- * @param {string | undefined} projectId configured Zitadel project id
- * @param {ReadonlySet<string>} allowedOrgIds organizations allowed to provision
- * @returns {string[]} bounded role names granted by an allowed organization
- */
-export function extractZitadelRoleNamesFromOrgs(claims, projectId, allowedOrgIds) {
-  if (!(allowedOrgIds instanceof Set) || allowedOrgIds.size === 0) {
-    return [];
-  }
-  const roleNames = extractZitadelRoleNames(claims, projectId);
-  if (roleNames.length === 0) {
-    return [];
-  }
-  const claim = claims[scopedRolesClaimName(projectId)];
-  if (!claim || typeof claim !== 'object' || Array.isArray(claim)) {
-    return [];
-  }
-  return roleNames.filter((name) => Object.hasOwn(claim, name)
-    && grantingOrgIds(claim[name]).some((orgId) => allowedOrgIds.has(orgId)));
-}
-
-/**
- * Whether the VERIFIED claims carry the project-scoped roles claim at all. Lets
- * the caller distinguish "claim absent entirely" (misconfigured IdP / user has
- * no grant on this project) from "claim present but no recognized role", so the
- * two are separately diagnosable in the audit log. A key present with an empty
- * or malformed value still counts as present.
- * @param {Record<string, unknown>} claims verified id_token claims
- * @param {string | undefined} projectId configured Zitadel project id
- * @returns {boolean}
- */
-export function hasZitadelRolesClaim(claims, projectId) {
-  if (!claims || typeof claims !== 'object') {
-    return false;
-  }
-  const scopedClaim = scopedRolesClaimName(projectId);
-  return scopedClaim !== null && Object.hasOwn(claims, scopedClaim);
+  return { role: mappedRole, changed: mappedRole !== currentRole };
 }
 
 /**
@@ -190,7 +37,7 @@ export function hasZitadelRolesClaim(claims, projectId) {
  * concurrent owner-side role change is not overwritten. An attestation with no
  * recognized role writes nothing and returns null: the caller refuses the login
  * (T-1939) and the stored role is left as is (re-granting in the IdP suffices).
- * @param {{ user: { id: number, role: string }, externalRoles: unknown,
+ * @param {{ user: { id: number, role: string }, mappedRole: unknown,
  *           provider: string }} input
  * `onRoleApplied` (optional) runs only when the compare-and-set actually changed
  * the stored role, so the caller can revoke live work on a downgrade (B-1327).
@@ -201,10 +48,10 @@ export function hasZitadelRolesClaim(claims, projectId) {
  *   role was attested; undefined if the row vanished
  */
 export function syncExternalRole(
-  { user, externalRoles, provider },
+  { user, mappedRole, provider },
   { userDb, auditLogDb, onRoleApplied },
 ) {
-  const { role, changed } = reconcileLocalRole(user.role, externalRoles);
+  const { role, changed } = reconcileLocalRole(user.role, mappedRole);
   if (role === null) {
     return null;
   }

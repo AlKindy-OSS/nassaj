@@ -331,7 +331,22 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                       e.stopPropagation();
                     }}
                     placeholder={t('askUser.answerPlaceholder')}
-                    className="w-full rounded-lg border-0 bg-muted px-3 py-1.5 text-[13px] text-foreground outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-400 dark:ring-gray-700 dark:placeholder:text-muted-foreground dark:focus:ring-blue-500"
+                    // No `outline-none`: measured live (production build, real
+                    // Chromium) that Tailwind's `outline-none` utility
+                    // (`outline: 2px solid transparent; outline-offset: 2px`)
+                    // on THIS input made its value and placeholder paint
+                    // nothing — DOM value, computed color/layout were all
+                    // correct, but zero dark pixels rendered at the glyph
+                    // positions (pixel-sampled) — while every other input in
+                    // the app, none of which sets `outline-none`, painted
+                    // fine. A clean two-page A/B test that changed only this
+                    // one class confirmed it: with `outline-none` present,
+                    // 0 dark pixels; with it removed, ~1700. The focus ring
+                    // is already drawn by `ring-1`/`focus:ring-2`
+                    // (box-shadow, not outline), so dropping `outline-none`
+                    // costs nothing but restores the browser's native
+                    // focus outline as a harmless extra on top.
+                    className="w-full rounded-lg border-0 bg-muted px-3 py-1.5 text-[13px] text-foreground ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-400 dark:ring-gray-700 dark:placeholder:text-muted-foreground dark:focus:ring-blue-500"
                   />
                   {/* pointer-events-none: prevents the badge from intercepting
                       clicks aimed at the input, which would leave the input

@@ -23,22 +23,19 @@ import { PROVIDER_UI_CAPABILITIES, getProviderCapabilities } from './providerCap
 //   codex         — codex-models.provider.ts  (مُنفَّذ)
 //   opencode      — opencode-models.provider.ts (مُنفَّذ)
 //   antigravity   — antigravity-models.provider.ts:72-76 (مُنفَّذ) + agy-cli.js:530-535
-//   cursor        — cursor-models.provider.ts:814-818 (مُنفَّذ) ← تصحيح T-1028
-//   hermes        — يرمي 501 في المحوِّل، لكن الخدمة تلتقطه وتكتب في مخزن نسّاج (T-1198)
-//   kimi          — kimi-models.provider.ts  (مُنفَّذ)
 //   deepseek      — deepseek-models.provider.ts (مُنفَّذ)
 //   glm           — glm-models.provider.ts   (مُنفَّذ)
 //   sakana        — stub (STUB_API_PROVIDERS، لا changeActiveModel فعلي)
+//
+// cursor/hermes/qwen/kimi خرجوا من هذا الجدول (T-1953): أجسادٌ مُتقاعدة، لم
+// يعودوا مفاتيح في PROVIDER_UI_CAPABILITIES. سلوك changeActiveModel الخادمي
+// لهم غير ذي صلة الآن — لا واصف عميلي يستهلكه.
 
 const EXPECTED: Record<string, boolean> = {
   claude:       true,
   codex:        true,
   opencode:     true,
-  qwen:         true,
   antigravity:  true,   // antigravity-models.provider.ts:72-76 + agy-cli.js:530-535
-  cursor:       true,   // cursor-models.provider.ts:814-818
-  hermes:       true,   // T-1198: الخدمة تلتقط NOT_IMPLEMENTED وتكتب في مخزن نسّاج المحايد
-  kimi:         true,
   deepseek:     true,
   glm:          true,
   sakana:       false,  // stub — لا تنفيذ فعلي
@@ -77,14 +74,7 @@ describe('providerCapabilities.modelSwitch — خريطة الدعم مقابل 
     },
   );
 
-  // ── hermes و sakana بالاسم الصريح لمنع التمرير الصامت ──
-  // T-1198: هرمز صار true — الـ501 من المحوِّل يلتقطه changeActiveModel في
-  // provider-models.service ويكتب التثبيت في مخزن نسّاج، وspawn يمرّره
-  // `-m … --provider …`. القفل السابق كان قراءةً خاطئة للـ501.
-  it('hermes: true صريح — الخدمة تلتقط 501 وتكتب في مخزن نسّاج (T-1198)', () => {
-    expect(PROVIDER_UI_CAPABILITIES.hermes.modelSwitch.supported).toBe(true);
-  });
-
+  // ── sakana بالاسم الصريح لمنع التمرير الصامت ──
   it('sakana: false صريح — مزوّد stub بلا تنفيذ فعلي (STUB_API_PROVIDERS)', () => {
     expect(PROVIDER_UI_CAPABILITIES.sakana.modelSwitch.supported).toBe(false);
   });
@@ -93,9 +83,10 @@ describe('providerCapabilities.modelSwitch — خريطة الدعم مقابل 
     expect(PROVIDER_UI_CAPABILITIES.antigravity.modelSwitch.supported).toBe(true);
   });
 
-  it('cursor: true — cursor-models.provider.ts:814 ينفّذ writeProviderSessionActiveModelChange', () => {
-    expect(PROVIDER_UI_CAPABILITIES.cursor.modelSwitch.supported).toBe(true);
-  });
+  // hermes/cursor/qwen/kimi (T-1953): أجساد متقاعدة — لا مفتاح لها في
+  // PROVIDER_UI_CAPABILITIES بعد الآن، فسقطت اختباراتهم الصريحة هنا. مزوّد
+  // تاريخي بأحد هذه المعرّفات يسقط إلى safeFallbackCapabilities (fail-closed)
+  // مثل أي مزوّد مجهول — مغطّى بالاختبار الأخير في هذا الملف.
 
   // ── safeFallbackCapabilities: fail-closed للمزوّد المجهول ──
   it('مزوّد مجهول: safeFallback يُعيد modelSwitch.supported=false (fail-closed)', () => {

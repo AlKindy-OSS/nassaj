@@ -3,7 +3,7 @@ import {
   type CoordinationEnforcement,
   type CoordinationLevel,
 } from '../../../../shared/coordinationDirectives';
-import type { LLMProvider } from '../../../types/app';
+import type { ActiveBodyProvider } from '../../../types/app';
 import type { PermissionMode } from '../types/types';
 
 // يُعاد التصدير من مصدره المشترك بدل إعادة تعريفه هنا: نفس الاتحاد يقرؤه الخادم
@@ -185,7 +185,7 @@ function safeFallbackCapabilities(id: string): ProviderUiCapabilities {
 
 // claude محايد حرفياً (بوابة الحياد AC-0.1 من PLAN-v1 §9/م0): القيم أدناه
 // تُعيد سلوك اليوم بلا أي انحراف بصري أو سلوكي.
-export const PROVIDER_UI_CAPABILITIES: Record<LLMProvider, ProviderUiCapabilities> = {
+export const PROVIDER_UI_CAPABILITIES: Record<ActiveBodyProvider, ProviderUiCapabilities> = {
   claude: {
     id: 'claude',
     displayName: 'Claude',
@@ -249,20 +249,6 @@ export const PROVIDER_UI_CAPABILITIES: Record<LLMProvider, ProviderUiCapabilitie
     // T-1028: مدعوم — المعرِّف المؤهَّل (glm/glm-5.2) يُمرَّر حرفياً (T-1021/6be3c7ab).
     modelSwitch: { supported: true },
   },
-  qwen: {
-    id: 'qwen',
-    displayName: 'Qwen Code',
-    effort: { supported: false },
-    tokenCounter: { supported: false },
-    command: { supportsImages: false },
-    permissions: { modes: DEFAULT_PERMISSION_MODES },
-    quota: { isClaudeAccount: false, surface: 'cycle' },
-    posture: { supported: false },
-    sideChannel: { supported: false },
-    agentMode: { supported: false },
-    coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.qwen },
-    modelSwitch: { supported: true },
-  },
   antigravity: {
     id: 'antigravity',
     displayName: 'Antigravity (agy)',
@@ -278,60 +264,6 @@ export const PROVIDER_UI_CAPABILITIES: Record<LLMProvider, ProviderUiCapabilitie
     // T-1028: مدعوم — changeActiveModel مُنفَّذ (antigravity-models.provider.ts:72-76).
     // agy يحذف --model عند الاستئناف العادي لكنه يقرأ التغيير الصريح عبر
     // getChangedActiveModel وinline switcher هذا تغييرٌ صريح (agy-cli.js:530-535).
-    modelSwitch: { supported: true },
-  },
-  cursor: {
-    id: 'cursor',
-    displayName: 'Cursor',
-    effort: { supported: false },
-    tokenCounter: { supported: false },
-    command: { supportsImages: false },
-    permissions: { modes: DEFAULT_PERMISSION_MODES },
-    quota: { isClaudeAccount: false, surface: 'cycle' },
-    posture: { supported: false },
-    sideChannel: { supported: false },
-    agentMode: { supported: false },
-    coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.cursor },
-    // T-1028: مدعوم — changeActiveModel مُنفَّذ خادمياً ويستدعي
-    // writeProviderSessionActiveModelChange (cursor-models.provider.ts:814-818).
-    modelSwitch: { supported: true },
-  },
-  hermes: {
-    id: 'hermes',
-    displayName: 'Hermes (Nous)',
-    effort: { supported: false },
-    tokenCounter: { supported: false },
-    command: { supportsImages: false },
-    // T-224 (م1): hermes -z يتجاوز الأذونات خادمياً (server/hermes-cli.js:179-181)
-    // فالدوّار يبقى أحادياً — المستخدم يرى زرّ أذونات واحداً ثابتاً لا يدور.
-    permissions: { modes: ['default'] },
-    quota: { isClaudeAccount: false, surface: 'cycle' },
-    posture: { supported: false },
-    sideChannel: { supported: false },
-    agentMode: { supported: false },
-    coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.hermes },
-    // T-1198: صار مدعوماً. المحوِّل الخادمي يلتقط NOT_IMPLEMENTED من محوِّل هرمز
-    // ويكتب التثبيت في مخزن نسّاج المحايد (provider-models.service)، وspawn
-    // يقرأه فيمرّره `-m` مع `--provider` — وهو المسار الذي يستعمله seedSessionModel
-    // أصلاً. القفل السابق كان قراءةً خاطئة للـ501: التثبيت لا يحتاج المزوّد.
-    modelSwitch: { supported: true },
-  },
-  kimi: {
-    id: 'kimi',
-    displayName: 'Kimi',
-    effort: { supported: false },
-    tokenCounter: { supported: true },
-    command: { supportsImages: false },
-    permissions: { modes: DEFAULT_PERMISSION_MODES },
-    quota: { isClaudeAccount: false, surface: 'cycle' },
-    posture: { supported: false },
-    sideChannel: { supported: false },
-    // KM-3 (ADR-062): kimi يملك مُشغّل وكيل أصيل محكوم (@moonshot-ai/kimi-code)
-    // بلا علم أسطول — يُعرَض مبدّل الوضع دائماً. الخادم يفرض الحوكمة/التنظيف
-    // fail-closed. (شارة الحوكمة تبقى `enforced:false` صدقاً — لا آلية native.)
-    agentMode: { supported: true },
-    coordinationLevel: { supported: true, enforcement: COORDINATION_ENFORCEMENT.kimi },
-    // T-1028: مدعوم — نقطة النهاية active-model تكتب المفتاح.
     modelSwitch: { supported: true },
   },
   deepseek: {
@@ -404,7 +336,7 @@ export function getProviderCapabilities(
   provider: string | null | undefined,
 ): ProviderUiCapabilities {
   const key = provider || 'claude';
-  return PROVIDER_UI_CAPABILITIES[key as LLMProvider] ?? safeFallbackCapabilities(key);
+  return PROVIDER_UI_CAPABILITIES[key as ActiveBodyProvider] ?? safeFallbackCapabilities(key);
 }
 
 /**

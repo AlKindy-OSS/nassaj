@@ -40,7 +40,7 @@ function harness(options: { enabled: boolean; supported: boolean }) {
   const spawn = async () => { calls.legacy += 1; };
   const dependencies = {
     queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
-    spawnAntigravity: spawn, spawnHermes: spawn, spawnOpenCode: spawn,
+    spawnAntigravity: spawn, spawnOpenCode: spawn,
     spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn,
     getSessionProvider: () => null,
     hostedTurnSupervisor: {
@@ -62,13 +62,16 @@ function harness(options: { enabled: boolean; supported: boolean }) {
   return { sent, calls, writer, dependencies };
 }
 
+// T-1953: the generic supervisor-wiring tests below ran on `kimi-command` until
+// the kimi body was retired (its refusal precedes every supervisor cell). They
+// now run on deepseek, a hosted id that is not retired in this step.
 test('delegate hosted turn routes exclusively through supervisor and emits only outer result', async () => {
   const ctx = harness({ enabled: true, supported: true });
-  await dispatchProviderCommand('kimi-command', {
+  await dispatchProviderCommand('deepseek-command', {
     command: 'outer user request',
     options: {
       clientMsgId: 'cmid-hosted-1', coordinationLevel: 'delegate',
-      model: 'kimi-k2.6', mode: 'chat',
+      model: 'deepseek-v4-pro', mode: 'chat',
     },
   } as never, ctx.writer as never, ctx.dependencies as never, 77);
 
@@ -84,7 +87,7 @@ test('delegate hosted turn routes exclusively through supervisor and emits only 
 
 test('unsupported delegated hosted turn fails closed with no textual or legacy fallback', async () => {
   const ctx = harness({ enabled: true, supported: false });
-  await dispatchProviderCommand('kimi-command', {
+  await dispatchProviderCommand('deepseek-command', {
     command: 'request',
     options: { clientMsgId: 'cmid-hosted-2', coordinationLevel: 'delegate_review' },
   } as never, ctx.writer as never, ctx.dependencies as never, 77);
@@ -96,7 +99,25 @@ test('unsupported delegated hosted turn fails closed with no textual or legacy f
   assert.equal(ctx.sent[0].notStarted, true);
 });
 
-for (const provider of ['kimi', 'deepseek', 'glm'] as const) {
+test('an armed kimi cell is unreachable: the retired-body refusal precedes the supervisor (T-1953)', async () => {
+  for (const mode of ['chat', 'agent']) {
+    const ctx = harness({ enabled: true, supported: true });
+    await dispatchProviderCommand('kimi-command', {
+      command: 'direct request',
+      options: { clientMsgId: `cmid-hosted-retired-kimi-${mode}`, coordinationLevel: 'direct', mode },
+    } as never, ctx.writer as never, ctx.dependencies as never, 77);
+
+    assert.equal(ctx.calls.enabled, 0, 'the cell is never consulted');
+    assert.equal(ctx.calls.supports, 0);
+    assert.equal(ctx.calls.execute, 0);
+    assert.equal(ctx.calls.legacy, 0);
+    assert.equal(ctx.sent.length, 1);
+    assert.equal(ctx.sent[0]?.code, 'provider_removed');
+    assert.equal(ctx.sent[0]?.notStarted, true);
+  }
+});
+
+for (const provider of ['deepseek', 'glm'] as const) {
   test(`armed ${provider} direct turn routes through the mechanical supervisor`, async () => {
     const ctx = harness({ enabled: true, supported: true });
     await dispatchProviderCommand(`${provider}-command` as never, {
@@ -126,19 +147,19 @@ for (const provider of ['kimi', 'deepseek', 'glm'] as const) {
     assert.equal(ctx.calls.enabled, 1);
     assert.equal(ctx.calls.supports, 0);
     assert.equal(ctx.calls.execute, 0);
-    // All three are globally disabled (kimi again since 2026-09-29): the legacy
-    // path is the disable wall, so nothing launches.
+    // Both are globally disabled: the legacy path is the disable wall, so
+    // nothing launches.
     assert.equal(ctx.calls.legacy, 0);
     assert.match(String(ctx.sent[0]?.error), /disabled on this deployment/);
     assert.notEqual(ctx.sent[0]?.code, 'hosted_turn_supervisor_unsupported');
   });
 }
 
-// kimi is disabled (2026-09-29) and this harness wires no native kimi launcher, so
-// the legacy path an inert supervisor preserves is the disable wall's refusal.
+// deepseek is disabled and has no agent launcher, so the legacy path an inert
+// supervisor preserves is the disable wall's refusal.
 test('hosted supervisor flag OFF in agent mode is inert and preserves legacy dispatch', async () => {
   const ctx = harness({ enabled: false, supported: false });
-  await dispatchProviderCommand('kimi-command', {
+  await dispatchProviderCommand('deepseek-command', {
     command: 'agent request',
     options: {
       clientMsgId: 'cmid-hosted-4', coordinationLevel: 'delegate', mode: 'agent',
@@ -171,7 +192,7 @@ test('ambiguous hosted ingress reaches durable supervisor replay instead of dyin
   ingressClaim = () => ({ action: 'ambiguous_started' });
   try {
     const ctx = harness({ enabled: true, supported: true });
-    await dispatchProviderCommand('kimi-command', {
+    await dispatchProviderCommand('deepseek-command', {
       command: 'replay me',
       options: {
         clientMsgId: 'cmid-hosted-replay', coordinationLevel: 'delegate', mode: 'chat',

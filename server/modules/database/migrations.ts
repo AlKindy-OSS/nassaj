@@ -70,6 +70,7 @@ import {
 } from '@/modules/database/internal-session-chat-flag.js';
 
 import { migrateLocalModelServers } from './local-model-servers.migration.js';
+import { migrateSsoOidc } from './sso-oidc-config.migration.js';
 import { migrateUserIdentities } from './user-identities.migration.js';
 import { migrateUsernameLowerUniqueIndex } from './users-username-lower.migration.js';
 import { migrateWebAuthnStepUpEligible } from './webauthn-step-up.migration.js';
@@ -3056,6 +3057,10 @@ export const runMigrations = (db: Database) => {
     // user_id FK resolves. Idempotent (IF NOT EXISTS + additive
     // last_attested_at, T-1939); no backfill (NULL = never attested).
     migrateUserIdentities(db);
+    // Provider-neutral SSO configuration, test display results and apply proofs
+    // (ADR-194 D3/D8, T-1962). No FK; next to the identity links whose presence
+    // keeps the SSO policy enforced (D1). The admitted boot path calls it too.
+    migrateSsoOidc(db);
 
     // Case-insensitive username uniqueness (T-1939 slice 4) — after users and
     // audit_log exist. Skipped with a WARN + audit row, never a rename, while

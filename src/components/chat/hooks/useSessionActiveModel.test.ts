@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useSessionActiveModel } from './useSessionActiveModel';
+import { writePendingModelStamp } from './pendingModelStamp';
 
 // ─── Mock ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ function notFoundResponse() {
 
 afterEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
 });
 
 // ─── (ج) بلا sessionId ───────────────────────────────────────────────────────
@@ -242,5 +244,65 @@ describe('إعادة الجلب عند تغيّر الجلسة', () => {
 
     await waitFor(() => expect(result.current.displayModel).toBe('claude-haiku-3-5'));
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── B-1483: pending model stamp closes the session_created display race ────
+
+describe('B-1483 — الطابع المعلَّق يمنع انقلاب العرض إلى default بعد session_created', () => {
+  it('جلسة وُلدت لتوّها بطابع معلَّق: تعرض الطابع فوراً ولا تُنادي authenticatedFetch', async () => {
+    // المستخدم اختار haiku قبل وجود جلسة (fallbackModel=haiku)، ثم أُرسلت
+    // الرسالة فكتب dispatchProviderCommand الطابع المعلَّق، ثم وصل
+    // session_created بمعرّف حقيقي — محاكاة الانتقال null → id.
+    writePendingModelStamp('claude-haiku-4-5-20251001');
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useSessionActiveModel('claude', sessionId, 'claude-haiku-4-5-20251001'),
+      { initialProps: { sessionId: null as string | null } },
+    );
+
+    expect(result.current.displayModel).toBe('claude-haiku-4-5-20251001');
+
+    rerender({ sessionId: 'session-new-1' });
+
+    // الطابع يُستهلك مباشرة — بلا جلب، وبلا عودةٍ إلى "default" الخادم.
+    expect(result.current.displayModel).toBe('claude-haiku-4-5-20251001');
+    expect(result.current.isLoading).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('بلا طابع معلَّق (فتح جلسة قائمة مباشرة): يسلك المسار الطبيعي بالجلب', async () => {
+    // لا شيء كُتب في sessionStorage لهذا التبويب — مطابقٌ لفتح جلسة قديمة من
+    // الرابط مباشرة لا لإرسال جديد من هذا التبويب.
+    mockFetch.mockReturnValue(okResponse('claude-opus-4-8'));
+
+    const { result } = renderHook(() =>
+      useSessionActiveModel('claude', 'session-existing', 'claude-haiku-4-5-20251001'),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.displayModel).toBe('claude-opus-4-8');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('الطابع يُستهلك مرّة واحدة: جلسة تالية بلا طابع تعود للجلب الطبيعي', async () => {
+    writePendingModelStamp('claude-haiku-4-5-20251001');
+    mockFetch.mockReturnValue(okResponse('claude-opus-4-8'));
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useSessionActiveModel('claude', sessionId, 'claude-haiku-4-5-20251001'),
+      { initialProps: { sessionId: null as string | null } },
+    );
+
+    rerender({ sessionId: 'session-new-1' });
+    expect(result.current.displayModel).toBe('claude-haiku-4-5-20251001');
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    // تبديل إلى جلسة أخرى قائمة بلا طابع جديد → يجب أن يُجلب من الخادم كالمعتاد.
+    rerender({ sessionId: 'session-existing-2' });
+    await waitFor(() => expect(result.current.displayModel).toBe('claude-opus-4-8'));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

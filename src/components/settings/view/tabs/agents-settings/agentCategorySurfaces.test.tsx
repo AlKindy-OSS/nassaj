@@ -107,8 +107,6 @@ describe('مزوّدات «قريباً» تعرض لوح coming-soon لا فر�
               allowedTools: [], disallowedTools: [], skipPermissions: false, allowVendorDelegation: false,
             }}
             onClaudePermissionsChange={() => {}}
-            cursorPermissions={{ allowedCommands: [], disallowedCommands: [], skipPermissions: false }}
-            onCursorPermissionsChange={() => {}}
             codexPermissionMode="default"
             onCodexPermissionModeChange={() => {}}
             projects={[]}
@@ -149,8 +147,6 @@ describe('لا فئةَ تفتح على فراغ (B-414)', () => {
           allowedTools: [], disallowedTools: [], skipPermissions: false, allowVendorDelegation: false,
         }}
         onClaudePermissionsChange={() => {}}
-        cursorPermissions={{ allowedCommands: [], disallowedCommands: [], skipPermissions: false }}
-        onCursorPermissionsChange={() => {}}
         codexPermissionMode="default"
         onCodexPermissionModeChange={() => {}}
         projects={[]}
@@ -179,8 +175,6 @@ describe('T-1866: HarnessAutoUpdateSection moved off agent pages into النظا
             allowedTools: [], disallowedTools: [], skipPermissions: false, allowVendorDelegation: false,
           }}
           onClaudePermissionsChange={() => {}}
-          cursorPermissions={{ allowedCommands: [], disallowedCommands: [], skipPermissions: false }}
-          onCursorPermissionsChange={() => {}}
           codexPermissionMode="default"
           onCodexPermissionModeChange={() => {}}
           projects={[]}

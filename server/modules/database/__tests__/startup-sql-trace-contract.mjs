@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 // Reviewed executed security effects: order, multiplicity, method and phase are contractual.
 // The device-wallet schema (15098dccc) is the one reviewed multi-statement exec: its
 // triggers need `;` inside BEGIN/END, so it is admitted only by exact reviewed text.
+// ADR-194 (T-1962): the four additive SSO DDL statements (one per exec) and the
+// two TTL sweeps of expired test evidence at boot are reviewed effects too.
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -66,6 +68,30 @@ const reviewedEffects = [
   },
   {
     "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_oidc_config (\n  slot TEXT PRIMARY KEY CHECK (slot IN ('active','draft')),\n  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),\n  issuer TEXT NOT NULL,\n  client_id TEXT NOT NULL,\n  client_auth TEXT NOT NULL\n    CHECK (client_auth IN ('none','client_secret_basic','client_secret_post')),\n  client_secret_enc TEXT,\n  secret_version INTEGER NOT NULL DEFAULT 0,\n  extra_scopes TEXT NOT NULL DEFAULT '',\n  redirect_uri TEXT,\n  role_claim_path TEXT NOT NULL,\n  role_rules_json TEXT NOT NULL,\n  tenant_mode TEXT NOT NULL CHECK (tenant_mode IN ('none','claim','role_grant_scope')),\n  tenant_claim_path TEXT,\n  tenant_values_json TEXT NOT NULL DEFAULT '[]',\n  jit_enabled INTEGER NOT NULL DEFAULT 0 CHECK (jit_enabled IN (0,1)),\n  attestation_max_age_hours INTEGER NOT NULL DEFAULT 12\n    CHECK (attestation_max_age_hours BETWEEN 1 AND 24),\n  allow_private_network INTEGER NOT NULL DEFAULT 0 CHECK (allow_private_network IN (0,1)),\n  issuer_port INTEGER CHECK (issuer_port IS NULL OR issuer_port BETWEEN 1 AND 65535),\n  pinned_endpoints_json TEXT,\n  discovery_flags_json TEXT,\n  runtime_fault TEXT,\n  config_hash TEXT NOT NULL,\n  draft_version INTEGER NOT NULL DEFAULT 0,\n  version INTEGER NOT NULL DEFAULT 0,\n  updated_at INTEGER,\n  updated_by INTEGER\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_test_results (\n  id TEXT PRIMARY KEY CHECK (length(id) = 43),\n  owner_user_id INTEGER NOT NULL,\n  config_hash TEXT NOT NULL,\n  result_json TEXT NOT NULL,\n  created_at INTEGER NOT NULL,\n  consumed_at INTEGER\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS sso_apply_proofs (\n  id INTEGER PRIMARY KEY,\n  owner_user_id INTEGER NOT NULL,\n  config_hash TEXT NOT NULL,\n  draft_version INTEGER NOT NULL,\n  kind TEXT NOT NULL CHECK (kind IN ('discovery','sign_in')),\n  passed INTEGER NOT NULL CHECK (passed IN (0,1)),\n  shape_flags TEXT,\n  created_at INTEGER NOT NULL\n)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_sso_apply_proofs_binding\n  ON sso_apply_proofs (owner_user_id, config_hash, draft_version, kind)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
     "method": "run",
     "sql": "UPDATE connector_runtime_anchor SET\n    maximum_fencing_token = ?, maximum_writer_epoch = ?, clock_high_water_ms = ?, authority_mac = ?\n    WHERE singleton = 1 AND authority_mac = ?",
     "shadow": null
@@ -80,6 +106,18 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "run",
     "sql": "INSERT INTO connector_runtime_writer_lease (\n    singleton, owner_token, acquisition_nonce, lease_generation, fencing_token,\n    writer_epoch, expires_at_ms, authority_mac\n  ) VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(singleton) DO UPDATE SET\n    owner_token = excluded.owner_token, acquisition_nonce = excluded.acquisition_nonce,\n    lease_generation = excluded.lease_generation, fencing_token = excluded.fencing_token,\n    writer_epoch = excluded.writer_epoch, expires_at_ms = excluded.expires_at_ms,\n    authority_mac = excluded.authority_mac",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "run",
+    "sql": "DELETE FROM sso_test_results WHERE created_at <= ?",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "run",
+    "sql": "DELETE FROM sso_apply_proofs WHERE created_at <= ?",
     "shadow": null
   },
   {

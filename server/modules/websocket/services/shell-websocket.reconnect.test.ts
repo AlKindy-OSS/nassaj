@@ -26,6 +26,7 @@ type FakePty = {
   resizes: [number, number][];
   kills: number;
   dataListener: ((chunk: string) => void) | null;
+  exitListener: ((e: { exitCode: number; signal?: number }) => void) | null;
   onData(cb: (chunk: string) => void): void;
   onExit(cb: unknown): void;
   write(d: string): void;
@@ -40,8 +41,9 @@ function makeFakePty(): FakePty {
     resizes: [],
     kills: 0,
     dataListener: null,
+    exitListener: null,
     onData(cb) { pty.dataListener = cb; },
-    onExit() {},
+    onExit(cb) { pty.exitListener = cb as FakePty['exitListener']; },
     write(d) { pty.writes.push(d); },
     resize(c, r) { pty.resizes.push([c, r]); },
     kill() { pty.kills += 1; },
@@ -65,7 +67,10 @@ mock.module('@/services/isolation/resolve-provider-env.js', {
   },
 });
 
-const { handleShellConnection } = await import('./shell-websocket.service.js');
+const { handleShellConnection, terminateAllShellSessionsForUpdate } = await import('./shell-websocket.service.js');
+// Same leaf seam the PTY service reserves launches through (it opts out of the barrel rule too).
+// eslint-disable-next-line boundaries/dependencies
+const { hasLiveHarnessLaunch, _resetHarnessLaunches } = await import('@/modules/providers/harness-update/spawn-admission.js');
 
 const PTY_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 const WS_OPEN_STATE = 1;
@@ -201,5 +206,124 @@ test('input and resize from a stale socket are ignored; the owner is still serve
 
     assert.deepEqual(pty.writes, ['owner']);
     assert.deepEqual(pty.resizes, [[120, 40]]);
+  });
+});
+
+test('B-1448: the PTY lease names its holder and marks the detached tail until reattach', async () => {
+  await withIsolatedDatabase(() => {
+    spawnedPtys.length = 0;
+    const holders: unknown[] = [];
+    const annotations: unknown[] = [];
+    const leaseDeps = {
+      ...deps,
+      acquireWriterLease: (_kind: string, holder: unknown) => {
+        holders.push(holder);
+        return { release() {}, annotate(patch: unknown) { annotations.push(patch); } };
+      },
+    } as unknown as Parameters<typeof handleShellConnection>[2];
+    const a = makeFakeWs();
+    handleShellConnection(a as never, { user: { id: 1805, role: 'user', username: 'sara' } } as never, leaseDeps);
+    a.emit('message', initMessage());
+    assert.deepEqual(holders, [{ username: 'sara' }]);
+
+    const before = Date.now();
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try { a.emit('close'); } finally { mock.timers.reset(); }
+    const detached = annotations.at(-1) as { detachedUntil: number };
+    assert.ok(detached.detachedUntil >= before + PTY_SESSION_TIMEOUT_MS, 'the 30-minute tail is recorded');
+
+    const b = makeFakeWs();
+    handleShellConnection(b as never, { user: { id: 1805, role: 'user', username: 'sara' } } as never, leaseDeps);
+    b.emit('message', initMessage());
+    assert.equal(spawnedPtys.length, 1, 'B reattached');
+    assert.deepEqual(annotations.at(-1), { detachedUntil: null }, 'reattached: attached again');
+  });
+});
+
+test('B-1448 slice 2: closing for an update ends attached and detached shells with a named reason', async () => {
+  await withIsolatedDatabase(() => {
+    terminateAllShellSessionsForUpdate(); // sessions earlier tests left in the module map
+    spawnedPtys.length = 0;
+    let released = 0;
+    const leaseDeps = {
+      ...deps,
+      acquireWriterLease: () => ({ release() { released += 1; } }),
+    } as unknown as Parameters<typeof handleShellConnection>[2];
+    const closes: unknown[] = [];
+    const attached = Object.assign(makeFakeWs(), { close(code: number, reason: string) { closes.push({ code, reason }); } });
+    handleShellConnection(attached as never, { user: { id: 1901, role: 'user' } } as never, leaseDeps);
+    attached.emit('message', initMessage());
+    const detached = makeFakeWs();
+    handleShellConnection(detached as never, { user: { id: 1902, role: 'user' } } as never, leaseDeps);
+    detached.emit('message', initMessage());
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      detached.emit('close');
+      assert.equal(terminateAllShellSessionsForUpdate(), 2);
+    } finally { mock.timers.reset(); }
+    assert.equal(released, 2);
+    assert.deepEqual(spawnedPtys.map((pty) => pty.kills), [1, 1]);
+    assert.equal(attached.sent.at(-1)?.type, 'error');
+    assert.equal((attached.sent.at(-1) as { code?: string }).code, 'update_terminals_closed');
+    assert.deepEqual(closes, [{ code: 4404, reason: 'update_terminals_closed' }]);
+    assert.equal(terminateAllShellSessionsForUpdate(), 0);
+  });
+});
+
+test('B-1448 T5: a socket that closed while its lease was awaited gets no orphan PTY', async () => {
+  await withIsolatedDatabase(async () => {
+    spawnedPtys.length = 0;
+    let releaseLease: () => void = () => {};
+    let released = 0;
+    const pending = new Promise<{ release(): void }>((resolve) => {
+      releaseLease = () => resolve({ release() { released += 1; } });
+    });
+    const leaseDeps = { ...deps, acquireWriterLease: () => pending } as unknown as Parameters<typeof handleShellConnection>[2];
+    const ws = makeFakeWs();
+    handleShellConnection(ws as never, { user: { id: 1903, role: 'user' } } as never, leaseDeps);
+    ws.emit('message', initMessage());
+    ws.readyState = 3; // CLOSED while the lease is still being acquired
+    ws.emit('close');
+    releaseLease();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(spawnedPtys.length, 0, 'no PTY spawned for a closed socket');
+    assert.equal(released, 1, 'the acquired lease was released');
+  });
+});
+
+test('B-1448 M2: a forced close releases the harness-launch reservation', async () => {
+  await withIsolatedDatabase(() => {
+    terminateAllShellSessionsForUpdate();
+    _resetHarnessLaunches();
+    spawnedPtys.length = 0;
+    connect(2001);
+    assert.equal(spawnedPtys.length, 1);
+    assert.equal(hasLiveHarnessLaunch(['claude']), true, 'the provider PTY reserved a launch');
+    assert.equal(terminateAllShellSessionsForUpdate(), 1);
+    assert.equal(hasLiveHarnessLaunch(['claude']), false, 'liveLaunches back to 0');
+  });
+});
+
+test('B-1448 M2: an older PTY exiting never ends the newer session under the same key', async () => {
+  await withIsolatedDatabase(() => {
+    terminateAllShellSessionsForUpdate();
+    spawnedPtys.length = 0;
+    let released = 0;
+    const leaseDeps = {
+      ...deps,
+      acquireWriterLease: () => ({ release() { released += 1; } }),
+    } as unknown as Parameters<typeof handleShellConnection>[2];
+    const ws = makeFakeWs();
+    handleShellConnection(ws as never, { user: { id: 2002, role: 'user' } } as never, leaseDeps);
+    ws.emit('message', initMessage());
+    ws.emit('message', initMessage({ forceRestart: true })); // same socket, fresh PTY
+    assert.equal(spawnedPtys.length, 2);
+    const [oldPty, newPty] = spawnedPtys as [FakePty, FakePty];
+    assert.equal(released, 1, 'the restart released the old lease');
+    oldPty.exitListener?.({ exitCode: 0 });
+    assert.equal(released, 1, 'the old exit did not release the new lease');
+    assert.deepEqual(outputReaches(newPty, ws), [true], 'the new session is still live');
+    assert.equal(terminateAllShellSessionsForUpdate(), 1, 'and still registered');
   });
 });

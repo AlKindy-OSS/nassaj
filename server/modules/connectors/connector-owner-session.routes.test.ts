@@ -4,6 +4,8 @@ import test from 'node:test';
 
 import express from 'express';
 
+import { connectorOriginProposalFromConfig } from './connector-installation-origin-resolver.js';
+import { createRecentAuthOriginSource } from './connector-owner-auth-session.js';
 import {
   createConnectorOwnerSessionRoutes,
   type ConnectorOwnerSessionDependencies,
@@ -232,4 +234,34 @@ test('the route limiter answers for itself (429) and the verifier is not reached
   assert.equal(result.response.status, 429);
   assert.equal(result.response.headers.get('retry-after'), '60');
   assert.deepEqual(result.verifierCalls, []);
+});
+
+/** The production origin chain (B-1461): nothing persisted, proposal from the given config only. */
+const configOrigin = (env: Readonly<Record<string, string | undefined>>) => createRecentAuthOriginSource({
+  readPersisted: () => null,
+  readProposal: () => connectorOriginProposalFromConfig(env,
+    { allowLoopback: false, legacyRedirectProposal: true })?.canonicalOrigin ?? null,
+});
+
+test('B-1461: step-up works on a node that has only OIDC_REDIRECT_URI configured', async () => {
+  const resolveOrigin = configOrigin({ OIDC_REDIRECT_URI: `${ORIGIN}/api/auth/oidc/callback` });
+  const ok = await serve({ resolveOrigin }, post({ method: 'password', password: 'example-hunter2' }));
+  assert.equal(ok.response.status, 204);
+  assert.equal(ok.records.length, 1);
+  const foreign = await serve({ resolveOrigin },
+    post({ method: 'password', password: 'example-hunter2' }, 'https://other.example'));
+  assert.equal(foreign.response.status, 403);
+  assert.deepEqual(foreign.body, { error: 'Request origin was rejected.', code: 'CONNECTOR_ORIGIN_REJECTED' });
+  assert.equal(foreign.verifierCalls.length, 0);
+});
+
+test('B-1461: step-up is 503 ORIGIN_UNCONFIGURED when no trusted config resolves an origin', async () => {
+  for (const env of [{}, { NASSAJ_PUBLIC_ORIGIN: 'http://bad.example', OIDC_REDIRECT_URI: `${ORIGIN}/cb` },
+    { WEBAUTHN_ORIGIN: `${ORIGIN},https://other.example` }]) {
+    const result = await serve({ resolveOrigin: configOrigin(env) },
+      post({ method: 'password', password: 'example-hunter2' }));
+    assert.equal(result.response.status, 503);
+    assert.equal((result.body as { code: string }).code, 'CONNECTOR_RECENT_AUTH_ORIGIN_UNCONFIGURED');
+    assert.equal(result.verifierCalls.length, 0);
+  }
 });

@@ -18,7 +18,6 @@ import {
   NPM_UPDATE_TMPDIR,
   parseVersionOutput,
   resolveHarnessId,
-  resolveHermesCheckoutDir,
 } from './descriptors.js';
 
 test('resolveHarnessId normalises ids and documented aliases', () => {
@@ -36,35 +35,12 @@ test('parseVersionOutput handles every measured CLI format', () => {
   assert.equal(parseVersionOutput('2026.07.23-e383d2b'), '2026.07.23-e383d2b');
   assert.equal(parseVersionOutput('0.42.0\n'), '0.42.0');
   assert.equal(
-    parseVersionOutput('Hermes Agent v0.17.0 (2026.6.19) · local 5ecf3bf0'),
+    parseVersionOutput('Some Agent v0.17.0 (2026.6.19) · local 5ecf3bf0'),
     '0.17.0',
   );
   assert.equal(parseVersionOutput(''), null);
   assert.equal(parseVersionOutput('no version here'), null);
   assert.equal(parseVersionOutput(undefined), null);
-});
-
-test('hermes IS updatable through the git-shallow path (Addendum 3 supersedes D4)', () => {
-  const hermes = getHarnessDescriptor('hermes');
-  assert.ok(hermes);
-  assert.equal(hermes.state, 'updatable');
-  assert.equal(hermes.updatable, true);
-  assert.equal(hermes.installMethod, 'git-shallow');
-  // Measured on-host: the shallow clone the updater rewrites.
-  assert.equal(hermes.gitCheckoutDir, resolveHermesCheckoutDir());
-
-  const argv = hermes.updateArgv();
-  assert.ok(argv);
-  // `hermes update` = git fetch + reset --hard + uv pip install -e; `--yes` only
-  // answers the interactive prompts so the run is headless.
-  assert.deepEqual(argv.args, ['update', '--yes']);
-  assert.equal(argv.cwd, resolveHermesCheckoutDir(), 'it runs inside the checkout');
-  assert.ok(argv.env?.HERMES_HOME, 'HERMES_HOME isolation travels with the argv');
-});
-
-test('the hermes checkout dir is overridable by env (host default otherwise)', () => {
-  assert.equal(resolveHermesCheckoutDir({ HERMES_CHECKOUT_DIR: '/srv/hermes' }), '/srv/hermes');
-  assert.ok(resolveHermesCheckoutDir({}).endsWith('/.hermes/hermes-agent'));
 });
 
 test('glm and deepseek are no-cli, not updatable', () => {

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useCredentialsSettings } from '../../../hooks/useCredentialsSettings';
 import { useExternalApiAccess } from '../../../hooks/useExternalApiAccess';
 
+import ApiKeySsoWindowSection from './sections/ApiKeySsoWindowSection';
 import ApiKeysSection from './sections/ApiKeysSection';
 import ExternalApiSection from './sections/ExternalApiSection';
 import NewApiKeyAlert from './sections/NewApiKeyAlert';
@@ -76,6 +77,11 @@ export default function CredentialsSettingsTab() {
           />
         </>
       )}
+
+      {/* ‏T-1946: مدة صلاحية مفاتيح أعضاء الدخول الموحّد — للمالك وحده، فالخادم يردّ 403
+          لغيره؛ `canManage` هو نفس حكم المالك في المفتاح الرئيسي. يبقى ظاهراً والسطح
+          مطفأ ليضبطه المالك قبل التشغيل، مع تنبيه بأنه لا يسري الآن. */}
+      {externalApi.canManage && <ApiKeySsoWindowSection externalApiEnabled={externalApi.enabled} />}
     </div>
   );
 }

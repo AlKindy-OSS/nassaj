@@ -17,6 +17,7 @@ vi.mock('../../utils/api', () => ({
 
 import {
   detectOidcAvailability,
+  detectSsoStatus,
   exchangeOidcCode,
   fetchOidcIdentity,
   reasonFromExchangeStatus,
@@ -108,10 +109,21 @@ describe('fetchOidcIdentity', () => {
 });
 
 describe('detectOidcAvailability', () => {
-  it('prefers an explicit oidcEnabled flag on /api/auth/status', async () => {
-    apiMock.status.mockResolvedValue(json({ needsSetup: false, oidcEnabled: true }));
+  it('reads ssoState and ssoLoginAvailable from /api/auth/status', async () => {
+    apiMock.status.mockResolvedValue(json({ needsSetup: false, ssoState: 'active', ssoLoginAvailable: true }));
     await expect(detectOidcAvailability()).resolves.toBe(true);
     expect(apiMock.probe).not.toHaveBeenCalled();
+  });
+
+  it.each(['unavailable', 'paused', 'off'])('hides the button when ssoState is %s', async (state) => {
+    apiMock.status.mockResolvedValue(json({ ssoState: state, ssoLoginAvailable: false }));
+    await expect(detectSsoStatus()).resolves.toEqual({ loginAvailable: false, state });
+    expect(apiMock.probe).not.toHaveBeenCalled();
+  });
+
+  it('never offers the button when the two fields disagree', async () => {
+    apiMock.status.mockResolvedValue(json({ ssoState: 'unavailable', ssoLoginAvailable: true }));
+    await expect(detectOidcAvailability()).resolves.toBe(false);
   });
 
   it('falls back to the exchange probe: 400 means enabled', async () => {
@@ -138,7 +150,7 @@ describe('detectOidcAvailability', () => {
     apiMock.status.mockRejectedValueOnce(new TypeError('offline'));
     await expect(detectOidcAvailability()).resolves.toBe(false);
 
-    apiMock.status.mockResolvedValue(json({ oidcEnabled: true }));
+    apiMock.status.mockResolvedValue(json({ ssoState: 'active', ssoLoginAvailable: true }));
     await expect(detectOidcAvailability()).resolves.toBe(true);
   });
 });

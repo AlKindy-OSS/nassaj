@@ -309,6 +309,29 @@ test('B-1327: terminateStandaloneTerminalsForUser ends only that user\'s termina
   }
 });
 
+test('B-1448 slice 2: closing for an update ends every user\'s running terminal with a named reason', () => {
+  resetAll();
+  const cwd = makeTempCwd('term-update-close-');
+  try {
+    let released = 0;
+    const lease = () => ({ release() { released += 1; } });
+    const a = registry.createStandaloneTerminal({ userId: 7, cwd, writerLease: lease() }) as { ok: true; terminal: { id: string } };
+    registry.createStandaloneTerminal({ userId: 8, cwd, writerLease: lease() });
+    const ws = makeFakeWs();
+    registry.attachStandaloneTerminalSocket(7, a.terminal.id, ws as never);
+    assert.equal(registry.terminateAllStandaloneTerminalsForUpdate(), 2);
+    assert.equal(released, 2, 'leases released synchronously');
+    assert.deepEqual(spawnCalls.map((call) => call.fake.killed), [1, 1]);
+    assert.deepEqual(registry.listStandaloneTerminals(7), []);
+    assert.deepEqual(registry.listStandaloneTerminals(8), []);
+    assert.equal(ws.sent.at(-1)?.code, 'update_terminals_closed');
+    assert.deepEqual(ws.closes, [{ code: 4404, reason: 'update_terminals_closed' }]);
+    assert.equal(registry.terminateAllStandaloneTerminalsForUpdate(), 0, 'a second call closes nothing');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 // --- 2: running limit ----------------------------------------------------------
 
 test('limit: 6th running terminal is 409; deleting one reopens; exited do not count', () => {

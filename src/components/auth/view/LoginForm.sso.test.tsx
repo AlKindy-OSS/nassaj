@@ -29,12 +29,13 @@ vi.mock('./AuthScreenLayout', () => ({
   default: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
 
+type MockSsoState = 'off' | 'active' | 'unavailable' | 'paused';
 const oidcMock = vi.hoisted(() => ({
-  detect: vi.fn<() => Promise<boolean>>(),
+  detect: vi.fn<() => Promise<{ loginAvailable: boolean; state: MockSsoState }>>(),
   start: vi.fn(),
 }));
 vi.mock('../oidc', () => ({
-  detectOidcAvailability: () => oidcMock.detect(),
+  detectSsoStatus: () => oidcMock.detect(),
   startOidcLogin: () => oidcMock.start(),
 }));
 
@@ -42,8 +43,8 @@ import LoginForm from './LoginForm';
 
 const ssoButton = () => screen.queryByRole('button', { name: enAuth.sso.loginButton });
 
-async function renderForm(isEnabled: boolean) {
-  oidcMock.detect.mockResolvedValue(isEnabled);
+async function renderForm(isEnabled: boolean, state: MockSsoState = isEnabled ? 'active' : 'off') {
+  oidcMock.detect.mockResolvedValue({ loginAvailable: isEnabled, state });
   render(<LoginForm />);
   await act(async () => {
     await Promise.resolve();
@@ -98,6 +99,30 @@ describe('LoginForm SSO entry', () => {
     });
 
     expect((ssoButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('LoginForm SSO unavailable state (ADR-194 D1)', () => {
+  const notice = () => screen.queryByText(enAuth.sso.unavailableNotice);
+
+  it.each(['unavailable', 'paused'] as const)(
+    'tells members SSO is temporarily unavailable (%s) and hides the SSO button', async (state) => {
+      await renderForm(false, state);
+      expect(notice()).toBeTruthy();
+      expect(ssoButton()).toBeNull();
+      expect(screen.getByRole('button', { name: enAuth.login.submit })).toBeTruthy();
+    },
+  );
+
+  it('shows no notice while SSO is off', async () => {
+    await renderForm(false, 'off');
+    expect(notice()).toBeNull();
+  });
+
+  it('shows the SSO button only when sign-in is available', async () => {
+    await renderForm(true, 'active');
+    expect(notice()).toBeNull();
+    expect(ssoButton()).toBeTruthy();
   });
 });
 

@@ -9,6 +9,7 @@ import { migrateConnectorPolicyV2Substrate } from '../database/connector-policy-
 import {
   ConnectorInstallationOriginResolver,
   connectorEnvironmentOriginProposal,
+  connectorOriginProposalFromConfig,
   type ConnectorOriginRotationFence,
 } from './connector-installation-origin-resolver.js';
 import { ConnectorSetupStore, type ConnectorSetupPrerequisites } from './connector-setup-store.js';
@@ -128,4 +129,52 @@ test('same origin is an idempotent no-op and does not advance policy epochs', ()
     assert.equal(result.originRevision, 1);
     assert.deepEqual(f.database.prepare(`SELECT state_json AS json FROM connector_policy_v2_state`).get(), before);
   } finally { f.database.close(); }
+});
+
+const PROD = { allowLoopback: false, legacyRedirectProposal: true } as const;
+
+test('B-1461 proposal order: NASSAJ_PUBLIC_ORIGIN, then OIDC redirect origin, then single WebAuthn origin', () => {
+  const all = { NASSAJ_PUBLIC_ORIGIN: 'https://public.example',
+    OIDC_REDIRECT_URI: 'https://sso.example/api/auth/oidc/callback', WEBAUTHN_ORIGIN: 'https://passkey.example' };
+  assert.deepEqual(connectorOriginProposalFromConfig(all, PROD),
+    { canonicalOrigin: 'https://public.example', source: 'public_origin' });
+  assert.deepEqual(connectorOriginProposalFromConfig({ ...all, NASSAJ_PUBLIC_ORIGIN: '' }, PROD),
+    { canonicalOrigin: 'https://sso.example', source: 'oidc_redirect_uri' });
+  assert.deepEqual(connectorOriginProposalFromConfig({ WEBAUTHN_ORIGIN: ' https://passkey.example ' }, PROD),
+    { canonicalOrigin: 'https://passkey.example', source: 'webauthn_origin' });
+  assert.equal(connectorOriginProposalFromConfig({}, PROD), null);
+});
+
+test('B-1461 H1: a set-but-invalid NASSAJ_PUBLIC_ORIGIN fails closed without falling through', () => {
+  for (const invalid of ['http://public.example', 'https://public.example/', 'not a url', ' https://p.example']) {
+    assert.deepEqual(connectorOriginProposalFromConfig({ NASSAJ_PUBLIC_ORIGIN: invalid,
+      OIDC_REDIRECT_URI: 'https://sso.example/cb', WEBAUTHN_ORIGIN: 'https://passkey.example' }, PROD),
+    { canonicalOrigin: null, source: 'invalid_public_origin' }, invalid);
+  }
+});
+
+test('B-1461 OIDC redirect: only an exact canonical https URI counts, and only while OIDC is enabled', () => {
+  for (const rejected of ['http://sso.example/cb', 'https://SSO.example/cb', 'https://sso.example:443/cb',
+    'https://user@sso.example/cb', 'https://sso.example/cb?x=1', 'https://sso.example/cb#f',
+    ' https://sso.example/cb', 'http://localhost:3001/cb']) {
+    assert.equal(connectorOriginProposalFromConfig({ OIDC_REDIRECT_URI: rejected },
+      { allowLoopback: true, legacyRedirectProposal: true }), null, rejected);
+  }
+  assert.equal(connectorOriginProposalFromConfig({ OIDC_REDIRECT_URI: 'https://sso.example/cb' },
+    { allowLoopback: false, legacyRedirectProposal: false }), null, 'OIDC off ignores OIDC_REDIRECT_URI');
+});
+
+test('B-1461 WebAuthn: several origins, http, or non-canonical values give no proposal', () => {
+  for (const rejected of ['https://a.example,https://b.example', 'http://passkey.example',
+    'https://passkey.example/', 'http://localhost:5173']) {
+    assert.equal(connectorOriginProposalFromConfig({ WEBAUTHN_ORIGIN: rejected },
+      { allowLoopback: true, legacyRedirectProposal: false }), null, rejected);
+  }
+});
+
+test('B-1461 loopback http is a proposal only for NASSAJ_PUBLIC_ORIGIN and only when allowed', () => {
+  assert.deepEqual(connectorOriginProposalFromConfig({ NASSAJ_PUBLIC_ORIGIN: 'http://localhost:3001' },
+    { allowLoopback: true, legacyRedirectProposal: false }), { canonicalOrigin: 'http://localhost:3001', source: 'public_origin' });
+  assert.deepEqual(connectorOriginProposalFromConfig({ NASSAJ_PUBLIC_ORIGIN: 'http://localhost:3001' }, PROD),
+    { canonicalOrigin: null, source: 'invalid_public_origin' });
 });

@@ -52,7 +52,8 @@ const configKeyFor = (userId: string | number | null | undefined): string => (
  * `providerRegistry`: التحقّق من صحّة مدخل واحد لا يستحق تحميل السجلّ كلّه
  * (وهو يُنشئ كل المزوّدات)، وهي نفس سابقة `KNOWN_PROVIDERS` في
  * provider-sharing.js. ‏`sakana` مستبعَد عمداً — مُعرِّف في نوع الاتحاد بلا
- * تنفيذ خلفه.
+ * تنفيذ خلفه. و`hermes` أُزيل مع جسمه (T-1953): لا مزوّد خلفه يُفحَص، ولا
+ * صفّ اشتراك له مخزَّن.
  */
 export const SUBSCRIPTION_PROVIDERS: readonly string[] = Object.freeze([
   'claude',
@@ -63,7 +64,6 @@ export const SUBSCRIPTION_PROVIDERS: readonly string[] = Object.freeze([
   'kimi',
   'deepseek',
   'glm',
-  'hermes',
   'qwen',
 ]);
 
@@ -77,7 +77,6 @@ const DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
   kimi: 'Kimi',
   deepseek: 'DeepSeek',
   glm: 'GLM',
-  hermes: 'Hermes',
   qwen: 'Qwen Coding Plan',
 });
 

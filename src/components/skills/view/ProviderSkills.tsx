@@ -637,6 +637,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
       {canWrite && (
         <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogOpenChange}>
           <DialogContent
+            layerClassName="z-[10000]"
             className="flex h-[calc(100vh-2rem)] max-h-[760px] w-[calc(100vw-2rem)] max-w-4xl flex-col overflow-hidden p-0 sm:h-[720px]"
           >
             <DialogTitle>

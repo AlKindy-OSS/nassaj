@@ -33,6 +33,11 @@ import {
 } from '../../scripts/session-commit-arbiter.mjs';
 import { dispatchCommittedPreview } from '../../scripts/preview-oid-dispatch.mjs';
 import { stampWriterEpoch } from '../shared/user-revocation-epoch.js';
+import {
+  PROVIDER_REMOVED_CODE,
+  PROVIDER_REMOVED_MESSAGE,
+  isRetiredProvider,
+} from '../../shared/retiredProviders.js';
 
 const router = express.Router();
 const COMMIT_DIFF_CHARACTER_LIMIT = 500_000;
@@ -1727,9 +1732,13 @@ router.post('/generate-commit-message', async (req, res) => {
     return res.status(400).json({ error: 'Project id and files are required' });
   }
 
-  // Validate provider
-  if (!['claude', 'cursor'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude" or "cursor"' });
+  // Validate provider. T-1953: cursor is retired as a body and gets the typed
+  // refusal; its branch in generateCommitMessageWithAI is unreachable until deleted.
+  if (isRetiredProvider(provider)) {
+    return res.status(400).json({ error: PROVIDER_REMOVED_MESSAGE, code: PROVIDER_REMOVED_CODE });
+  }
+  if (provider !== 'claude') {
+    return res.status(400).json({ error: 'provider must be "claude"' });
   }
 
   try {

@@ -14,6 +14,7 @@ import { after, before, test } from 'node:test';
 
 import { closeConnection, getConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
+import { deleteDisabledRecordOn, writeDisabledRecordOn } from '@/modules/database/repositories/sso-oidc-config.js';
 import { userIdentitiesDb } from '@/modules/database/repositories/user-identities.js';
 import { userDb } from '@/modules/database/repositories/users.js';
 import { webauthnCredentialsDb } from '@/modules/database/repositories/webauthn-credentials.js';
@@ -79,14 +80,11 @@ async function enroll(user: { id: number; username: string }) {
 }
 
 async function withOidc(run: () => Promise<void>) {
-  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
+  const saved = process.env.OIDC_ENABLED;
   process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
   try { await run(); } finally {
-    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    if (saved === undefined) delete process.env.OIDC_ENABLED;
+    else process.env.OIDC_ENABLED = saved;
   }
 }
 
@@ -116,7 +114,7 @@ test('an inactive user cannot step up', async () => {
   await rejectsCode(stepUp(user, { method: 'password', password: PASSWORD }), 'step_up_failed', 'user_inactive');
 });
 
-test('SSO: a linked member gets sso_step_up_required; linked owner and OIDC-off keep local step-up', async () => {
+test('SSO: a linked member gets sso_step_up_required; linked owner and owner-disabled SSO keep local step-up', async () => {
   const member = newUser('user');
   const owner = newUser('owner');
   userIdentitiesDb.link(member.id, 'https://idp.example', `sub-${member.id}`);
@@ -126,7 +124,14 @@ test('SSO: a linked member gets sso_step_up_required; linked owner and OIDC-off 
     await rejectsCode(stepUp(member, { method: 'passkey', response: {} }), 'sso_step_up_required');
     assert.equal((await stepUp(owner, { method: 'password', password: PASSWORD })).authMethod, 'password');
   });
-  assert.equal((await stepUp(member, { method: 'password', password: PASSWORD })).authMethod, 'password');
+  // ADR-194 D1: without any env the non-owner link alone keeps the policy enforced.
+  await rejectsCode(stepUp(member, { method: 'password', password: PASSWORD }), 'sso_step_up_required');
+  writeDisabledRecordOn(getConnection(), 'owner', Date.now());
+  try {
+    assert.equal((await stepUp(member, { method: 'password', password: PASSWORD })).authMethod, 'password');
+  } finally {
+    deleteDisabledRecordOn(getConnection());
+  }
 });
 
 test('registration requires UV, sets step_up_eligible=1 and a registration challenge is user-bound', async () => {
@@ -340,4 +345,79 @@ test('oidc_grant: refused for accounts that are not SSO-linked, and never counte
     assert.equal((await grantStep(member, issueGrant(member.id))).authMethod, 'oidc',
       'the IdP round trip was counted at /step-up/start, not here');
   });
+});
+
+test('sso_config (ADR-194 D8): password and passkey only; must_change_password refused up front', async () => {
+  const owner = newUser('owner');
+  assert.equal((await stepUp(owner, { method: 'password', password: PASSWORD }, 'sso_config')).authMethod, 'password');
+  const authenticator = await enroll(owner);
+  const options = await createStepUpOptions(owner, 'sso_config');
+  assert.equal((await stepUp(owner, { method: 'passkey', response: authenticator.assert(options.challenge) },
+    'sso_config')).authMethod, 'webauthn');
+
+  const grant = oidcStepUpGrantStore.issue({ userId: owner.id, audience: 'sso_config', browserTransaction: TXN }) as string;
+  await rejectsCode(grantStep(owner, grant, `__Host-oidc-txn=${TXN}`, 'sso_config'),
+    'step_up_invalid_request', 'oidc_grant_not_accepted');
+
+  getConnection().prepare('UPDATE users SET must_change_password = 1 WHERE id = ?').run(owner.id);
+  const again = await createStepUpOptions(owner, 'sso_config');
+  await rejectsCode(stepUp(owner, { method: 'passkey', response: authenticator.assert(again.challenge) }, 'sso_config'),
+    'password_change_required');
+  await rejectsCode(stepUp(owner, undefined, 'sso_config'), 'password_change_required');
+});
+
+test('sso_config: a linked member is refused an SSO grant even with OIDC on (never SSO-authorized)', async () => {
+  const member = newUser('user');
+  userIdentitiesDb.link(member.id, 'https://idp.example', `sub-${member.id}`);
+  await withOidc(async () => {
+    const grant = oidcStepUpGrantStore.issue({ userId: member.id, audience: 'sso_config', browserTransaction: TXN }) as string;
+    await rejectsCode(grantStep(member, grant, `__Host-oidc-txn=${TXN}`, 'sso_config'),
+      'step_up_invalid_request', 'oidc_grant_not_accepted');
+  });
+});
+
+test('ADR-194 D8 refund: six successful step-ups in a row are all allowed', async () => {
+  const user = newUser();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const audience = attempt % 2 === 0 ? 'connector_owner' : 'sso_config';
+    assert.equal((await stepUp(user, { method: 'password', password: PASSWORD }, audience)).authMethod, 'password');
+  }
+});
+
+test('ADR-194 D8 refund: five failures lock the bucket and a correct password cannot unlock it', async () => {
+  const user = newUser();
+  await stepUp(user, { method: 'password', password: PASSWORD });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await rejectsCode(stepUp(user, { method: 'password', password: 'wrong-wrong' }), 'step_up_failed');
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await rejectsCode(stepUp(user, { method: 'password', password: PASSWORD }), 'step_up_rate_limited');
+  }
+});
+
+test('ADR-194 D8 refund: concurrent attempts are still capped at five', async () => {
+  const user = newUser();
+  const outcomes = await Promise.allSettled(Array.from({ length: 8 },
+    () => stepUp(user, { method: 'password', password: PASSWORD })));
+  const allowed = outcomes.filter((outcome) => outcome.status === 'fulfilled').length;
+  const limited = outcomes.filter((outcome) => outcome.status === 'rejected'
+    && (outcome.reason as StepUpError).code === 'step_up_rate_limited').length;
+  assert.deepEqual([allowed, limited], [5, 3], 'reserved before argon2, so concurrency cannot exceed the cap');
+  assert.equal((await stepUp(user, { method: 'password', password: PASSWORD })).authMethod, 'password',
+    'the five successes were refunded afterwards');
+});
+
+test('ADR-194 D8 refund: a failed passkey consumes, a successful passkey refunds', async () => {
+  const user = newUser();
+  const authenticator = await enroll(user);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const options = await createStepUpOptions(user, 'sso_config');
+    assert.equal((await stepUp(user, { method: 'passkey', response: authenticator.assert(options.challenge) },
+      'sso_config')).authMethod, 'webauthn');
+  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await rejectsCode(stepUp(user, { method: 'passkey', response: { id: 'nope', response: {} } }, 'sso_config'),
+      'step_up_failed');
+  }
+  await rejectsCode(stepUp(user, { method: 'password', password: PASSWORD }), 'step_up_rate_limited');
 });

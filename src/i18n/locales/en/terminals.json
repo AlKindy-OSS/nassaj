@@ -43,7 +43,8 @@
     "createFailed": "Couldn't create the terminal. Please try again.",
     "renameFailed": "Couldn't rename the terminal. Please try again.",
     "deleteFailed": "Couldn't delete the terminal. Please try again.",
-    "loadFailed": "Couldn't load terminals."
+    "loadFailed": "Couldn't load terminals.",
+    "closedForUpdate": "The owner closed this terminal to install an update. You can open a new one after the update."
   },
   "deleteConfirm": {
     "title": "Delete terminal",

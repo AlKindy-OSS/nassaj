@@ -768,7 +768,6 @@
     "skipPermissions": {
       "label": "İzin istemlerini atla (dikkatli kullan)",
       "claudeDescription": "--dangerously-skip-permissions bayrağının eşdeğeri",
-      "cursorDescription": "Cursor CLI'daki -f bayrağının eşdeğeri",
       "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
     },
     "allowVendorDelegation": {
@@ -790,34 +789,12 @@
       "empty": "Engellenen araç yapılandırılmamış",
       "addLabel": "Add a blocked tool"
     },
-    "allowedCommands": {
-      "title": "İzin Verilen Shell Komutları",
-      "description": "İzin istemeden otomatik olarak izin verilen shell komutları",
-      "placeholder": "ör. \"Shell(ls)\" veya \"Shell(git status)\"",
-      "quickAdd": "Yaygın komutları hızlı ekle:",
-      "empty": "İzin verilen komut yapılandırılmamış",
-      "addLabel": "Add an allowed command"
-    },
-    "blockedCommands": {
-      "title": "Engellenen Shell Komutları",
-      "description": "Otomatik olarak engellenen shell komutları",
-      "placeholder": "ör. \"Shell(rm -rf)\" veya \"Shell(sudo)\"",
-      "empty": "Engellenen komut yapılandırılmamış",
-      "addLabel": "Add a blocked command"
-    },
     "toolExamples": {
       "title": "Araç Desen Örnekleri:",
       "bashGitLog": "- Tüm git log komutlarına izin ver",
       "bashGitDiff": "- Tüm git diff komutlarına izin ver",
       "write": "- Tüm Write aracı kullanımına izin ver",
       "bashRm": "- Tüm rm komutlarını engelle (tehlikeli)"
-    },
-    "shellExamples": {
-      "title": "Shell Komut Örnekleri:",
-      "ls": "- ls komutuna izin ver",
-      "gitStatus": "- git status'a izin ver",
-      "npmInstall": "- npm install'a izin ver",
-      "rmRf": "- Özyinelemeli silmeyi engelle"
     },
     "codex": {
       "permissionMode": "İzin Modu",

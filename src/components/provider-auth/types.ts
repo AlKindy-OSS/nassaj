@@ -1,5 +1,5 @@
 import { filterDisabledProviders } from '../../../shared/disabledProviders';
-import type { LLMProvider } from '../../types/app';
+import type { ActiveBodyProvider } from '../../types/app';
 
 export type ProviderAuthStatus = {
   authenticated: boolean;
@@ -28,41 +28,42 @@ export type ProviderAuthStatus = {
   linkExpiry?: { expiresAt: string; daysLeft: number } | null;
 };
 
-export type ProviderAuthStatusMap = Record<LLMProvider, ProviderAuthStatus>;
+export type ProviderAuthStatusMap = Record<ActiveBodyProvider, ProviderAuthStatus>;
 
 // Providers actively probed by the auth status refresher. Antigravity is
 // enabled again over the provider-models layer (live agy catalog with a
 // graceful fallback); its auth status endpoint reports the real agy auth state.
-// Hermes is a CLI agent with a real backend probe. The hosted vendor providers
-// (kimi/deepseek/glm) report authenticated=true via the same endpoint once their
-// API key is configured (ADR-036 / ADR-030), so they are probed too. Only
-// `sakana` stays excluded — a union-only placeholder with no real backend.
-// Globally disabled providers (T-864, shared/disabledProviders.ts) are filtered
-// out so no auth probe (and no login CTA) fires for them.
-export const CLI_PROVIDERS: LLMProvider[] = filterDisabledProviders([
+// The hosted vendor providers (deepseek/glm) report authenticated=true via the
+// same endpoint once their API key is configured (ADR-036 / ADR-030), so they
+// are probed too — `deepseek`/`glm` stay in this static list on purpose: their
+// exclusion is a DISABLED_PROVIDERS decision, not a retirement, and must keep
+// deriving from filterDisabledProviders below. `sakana` stays excluded — a
+// union-only placeholder with no real backend.
+//
+// `cursor`, `hermes`, `kimi` and `qwen` are retired BODIES (T-1953) and are
+// dropped from this static list permanently — not merely filtered by
+// DISABLED_PROVIDERS, whose list a later step (C4) also empties of these same
+// four ids. Leaving them here and relying only on the dynamic filter would have
+// silently re-exposed their auth probe and login CTA the moment C4 landed
+// (finding H6). `kimi`'s live ENGINE meaning is unaffected: the engine key
+// status goes through `/api/providers/kimi/api-key`, probed by
+// `useVendorKeyStatuses`, not this body auth-status fan-out.
+export const CLI_PROVIDERS: ActiveBodyProvider[] = filterDisabledProviders([
   'claude',
-  'cursor',
   'codex',
   'antigravity',
   'opencode',
-  'hermes',
-  'kimi',
   'deepseek',
   'glm',
-  'qwen',
 ]);
 
-export const PROVIDER_AUTH_STATUS_ENDPOINTS: Record<LLMProvider, string> = {
+export const PROVIDER_AUTH_STATUS_ENDPOINTS: Record<ActiveBodyProvider, string> = {
   claude: '/api/providers/claude/auth/status',
-  cursor: '/api/providers/cursor/auth/status',
   codex: '/api/providers/codex/auth/status',
   antigravity: '/api/providers/antigravity/auth/status',
   opencode: '/api/providers/opencode/auth/status',
-  kimi: '/api/providers/kimi/auth/status',
   deepseek: '/api/providers/deepseek/auth/status',
   glm: '/api/providers/glm/auth/status',
-  hermes: '/api/providers/hermes/auth/status',
-  qwen: '/api/providers/qwen/auth/status',
   // sakana: union-only placeholder (absent from CLI_PROVIDERS). Endpoint kept on
   // the same shape for when a real backend lands.
   sakana: '/api/providers/sakana/auth/status',
@@ -82,17 +83,13 @@ const initialStatus = (loading: boolean): ProviderAuthStatus => ({
 
 export const createInitialProviderAuthStatusMap = (loading = true): ProviderAuthStatusMap => ({
   claude: initialStatus(loading),
-  cursor: initialStatus(loading),
   codex: initialStatus(loading),
   antigravity: initialStatus(loading),
   opencode: initialStatus(loading),
-  // Hosted vendors (kimi/deepseek/glm) and Hermes are real probed providers
-  // (in CLI_PROVIDERS) — start in the loading state until their probe returns.
-  kimi: initialStatus(loading),
+  // Hosted vendors (deepseek/glm) are real probed providers (in
+  // CLI_PROVIDERS) — start in the loading state until their probe returns.
   deepseek: initialStatus(loading),
   glm: initialStatus(loading),
-  hermes: initialStatus(loading),
-  qwen: initialStatus(loading),
   // sakana is a union-only placeholder, never probed by CLI_PROVIDERS — start
   // not-loading and not-installed so its UI does not spin forever.
   sakana: { authenticated: false, installed: false, email: null, method: null, error: null, loading: false, checkFailed: false },

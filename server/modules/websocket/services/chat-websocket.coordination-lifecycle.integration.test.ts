@@ -51,7 +51,7 @@ test('not-started retry dispatches once more, terminal retry replays verdict, mi
         }
       },
       spawnCursor: async () => {}, queryCodex: async () => {},
-      spawnAntigravity: async () => {}, spawnHermes: async () => {}, spawnKimi: async () => {},
+      spawnAntigravity: async () => {}, spawnKimi: async () => {},
       spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
       getSessionProvider: () => 'claude', getActiveClaudeSDKSessions: () => [],
     } as never;

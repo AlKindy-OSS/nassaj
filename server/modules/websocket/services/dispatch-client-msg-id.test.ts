@@ -68,7 +68,7 @@ function fakeWriter() {
  * تبعيّات صوريّة: كل `spawn*` يبعث حمولات المزوّد الحقيقية **كما هي في شفرته**
  * — عاريةً من `clientMsgId` تماماً كالإنتاج (تُحقّق من `openai-codex.js:737`،
  * `cursor-cli.js:248`، `kimi-agent-cli.js:495`،
- * `hermes-cli.js:170`، `opencode-cli.js:343`، `agy-cli.js:1143`).
+ * `opencode-cli.js:343`، `agy-cli.js:1143`).
  */
 function fakeDependencies(emit: (writer: { send(p: unknown): void }) => void) {
   const spawn = async (_command: string, _options: unknown, writer: { send(p: unknown): void }) => {
@@ -77,7 +77,6 @@ function fakeDependencies(emit: (writer: { send(p: unknown): void }) => void) {
   return {
     spawnCursor: spawn,
     spawnAntigravity: spawn,
-    spawnHermes: spawn,
     spawnKimi: spawn,
     spawnKimiAgent: spawn,
     spawnDeepSeek: spawn,

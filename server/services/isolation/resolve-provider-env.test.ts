@@ -219,7 +219,6 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
       codex: 'isolated',
       agy: 'isolated',
       cursor: 'isolated',
-      hermes: 'isolated',
       opencode: 'isolated',
       kimi: 'isolated',
       deepseek: 'isolated',
@@ -286,7 +285,7 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
     assert.equal(glm.KIMI_CODE_HOME, undefined);
   });
 
-  // ADR-105 — cursor moved OUT of this group. It used to sit here beside hermes
+  // ADR-105 — cursor moved OUT of this group. It used to sit here
   // as "returns the base env unchanged", which read like a deliberate policy and
   // was really an absence: cursor had no case, so it inherited the operator's
   // environment in every mode. It now isolates through HOME, like agy.
@@ -309,22 +308,26 @@ describe('SL-5 — mode parameter is backward-compatible across ALL providers', 
     }
   });
 
-  // hermes now isolates like cursor/agy (ADR-105): HOME moves to the user tree so
-  // auth.json, sessions/ and state.db follow the member, while config.yaml and
-  // bin/ are linked back by provisionUserDirs.
-  it('hermes: HOME is redirected to the user tree in every mode', () => {
+  // T-1953: the hermes body is deleted, so the id left the isolation policy and
+  // is refused like any ungoverned name — it must never fall back to the
+  // operator environment, where the operator's hermes credential still sits.
+  it('hermes: a deleted body is refused in every mode', () => {
     isolateAll();
     for (const mode of [undefined, 'chat', 'agent'] as const) {
-      const env = mode
-        ? resolveProviderEnv(503, 'hermes', { ...BASE }, mode)
-        : resolveProviderEnv(503, 'hermes', { ...BASE });
-      assert.equal(env.HOME, userDir(503), `hermes HOME must point at the user tree (mode=${mode ?? 'default'})`);
+      assert.throws(
+        () =>
+          mode
+            ? resolveProviderEnv(503, 'hermes' as never, { ...BASE }, mode)
+            : resolveProviderEnv(503, 'hermes' as never, { ...BASE }),
+        (error: unknown) =>
+          (error as { code?: string })?.code === 'PROVIDER_ISOLATION_UNAVAILABLE',
+        `a deleted body must be refused (mode=${mode ?? 'default'})`
+      );
     }
   });
 
-  // A provider the policy has never heard of is still refused — the property the
-  // hermes case used to demonstrate, kept alive with a name that cannot silently
-  // become governed later.
+  // A provider the policy has never heard of is refused, shown with a name that
+  // cannot silently become governed later.
   it('an unknown provider is refused rather than run on the operator environment', () => {
     isolateAll();
     for (const mode of [undefined, 'chat', 'agent'] as const) {

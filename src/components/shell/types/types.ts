@@ -92,6 +92,8 @@ export type UseShellRuntimeResult = {
   isInitialized: boolean;
   isConnecting: boolean;
   isReconnecting: boolean;
+  /** True after the owner closed this shell to install an update (B-1448). */
+  closedForUpdate: boolean;
   authUrl: string;
   authUrlVersion: number;
   connectToShell: (options?: { forceRestart?: boolean }) => void;

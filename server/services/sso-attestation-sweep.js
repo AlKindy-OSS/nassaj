@@ -8,15 +8,15 @@
  * finds active linked NON-OWNER members past the window and revokes their live
  * access once per stale attestation: reconnecting is refused at the upgrade, so
  * repeating the revocation would only churn. Bounded per tick, never throws,
- * and a no-op while OIDC is off.
+ * and a no-op while the SSO policy is not enforced. Enforced but login
+ * unavailable (ADR-194 D1): every linked non-owner is stale and swept.
  */
 // Namespace import: tests replace the database module with partial mocks.
 import * as databaseModule from '../modules/database/index.js';
 import { revokeUserIdentity } from '../modules/account-wallet/user-identity-revocation.js';
 import { SSO_ATTESTATION_EXPIRED_REVOCATION } from '../modules/account-wallet/user-realtime-revocation.js';
 
-import { oidcEnabled } from './oidc-config.js';
-import { resolveAttestationMaxAgeMs } from './sso-attestation.js';
+import { ssoAttestationPolicy } from './sso-config.service.js';
 
 export const SWEEP_INTERVAL_MS = 5 * 60_000;
 /** Most revocations one tick performs; the rest wait for the next tick. */
@@ -60,8 +60,10 @@ export function runSsoAttestationSweep({
   revoke = revokeUserIdentity,
   maxRevocations = SWEEP_MAX_REVOCATIONS,
 } = {}) {
-  if (!oidcEnabled()) return 0;
-  const cutoffMs = nowMs - resolveAttestationMaxAgeMs();
+  const policy = ssoAttestationPolicy();
+  if (!policy.enforced) return 0;
+  // Nobody can re-attest while login is unavailable: every attestation is stale.
+  const cutoffMs = policy.loginAvailable ? nowMs - policy.maxAgeMs : Number.MAX_SAFE_INTEGER;
   let revoked = 0;
   let afterUserId = 0;
   try {

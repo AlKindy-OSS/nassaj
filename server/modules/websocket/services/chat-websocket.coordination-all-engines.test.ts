@@ -87,8 +87,6 @@ const ENGINES: Array<{ provider: string; messageType: string; dep: string }> = [
 const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: string }> = [
   { provider: 'deepseek', messageType: 'deepseek-command', dep: 'spawnDeepSeek' },
   { provider: 'glm', messageType: 'glm-command', dep: 'spawnGlm' },
-  // hermes: disabled 2026-09-28 (owner decision); its launcher stays dormant.
-  { provider: 'hermes', messageType: 'hermes-command', dep: 'spawnHermes' },
   // qwen: disabled 2026-09-28 (owner decision); its launcher stays dormant.
   { provider: 'qwen', messageType: 'qwen-command', dep: 'spawnQwen' },
   // cursor: disabled 2026-09-29 (owner decision); its launcher stays dormant.
@@ -97,7 +95,7 @@ const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: str
 
 const DEP_NAMES = [
   'queryClaudeSDK', 'queryCodex', 'spawnCursor', 'spawnAntigravity',
-  'spawnHermes', 'spawnOpenCode', 'spawnKimi', 'spawnKimiAgent', 'spawnDeepSeek',
+  'spawnOpenCode', 'spawnKimi', 'spawnKimiAgent', 'spawnDeepSeek',
   'spawnGlm', 'spawnQwen',
 ];
 

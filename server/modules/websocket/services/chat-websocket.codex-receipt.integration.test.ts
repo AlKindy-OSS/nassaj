@@ -32,7 +32,7 @@ test('actual dispatch persists private native proof, strips public live/replay f
         runWriter.send(attachCodexCompletionProof({ kind: 'complete', sessionId, provider: 'codex', clientMsgId: options.clientMsgId }, proof) as never);
       },
       queryClaudeSDK: async () => {}, spawnCursor: async () => {}, spawnAntigravity: async () => {},
-      spawnHermes: async () => {}, spawnKimi: async () => {}, spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
+      spawnKimi: async () => {}, spawnDeepSeek: async () => {}, spawnGlm: async () => {}, spawnOpenCode: async () => {},
       getSessionProvider: () => 'codex', getActiveClaudeSDKSessions: () => [],
     } as never;
     const message = { command: 'same request', options: { clientMsgId: 'native-client', coordinationLevel: 'direct' } } as never;
@@ -117,11 +117,11 @@ test('actual dispatch persists private native proof, strips public live/replay f
       ...dependencies, getSessionProvider: () => 'cursor',
       spawnCursor: async (command: string) => { cursorResumes++; assert.equal(command, ''); },
     } as never, owner);
-    // cursor is globally disabled (owner decision 2026-09-29): the empty-command resume
-    // control now hits the disable wall and never reaches spawnCursor (B-1426).
-    assert.equal(cursorResumes, 0, 'a disabled cursor resume control must never launch');
+    // cursor is retired as a body (T-1953): the empty-command resume control gets
+    // the typed provider_removed refusal and never reaches spawnCursor (B-1426).
+    assert.equal(cursorResumes, 0, 'a retired cursor resume control must never launch');
     assert.equal(frames.at(-1)?.notStarted, true);
-    assert.match(String(frames.at(-1)?.error), /disabled on this deployment/);
+    assert.equal(frames.at(-1)?.code, 'provider_removed');
     assert.equal(launches, 4, 'blank, malformed, oversized or unsupported attachments must never reach Codex');
   } finally { messageCoordinationDb.recordVerdict = original; closeConnection(); }
 });

@@ -680,7 +680,12 @@ describe('B-894 original payload eligibility', () => {
 });
 
 
-it.each(['kimi', 'glm'])('B-894 excludes the %s native agent path', async (provider) => {
+// kimi dropped from this table (T-1953): its native agent BODY is retired, so
+// `getProviderCapabilities('kimi')` falls to safeFallbackCapabilities
+// (agentMode.supported=false) and `options.mode` is never 'agent' for it
+// anymore — that is the intended effect, not a regression. glm keeps its
+// agent-mode path (OpenCode carrier, unaffected by this step).
+it.each(['glm'])('B-894 excludes the %s native agent path', async (provider) => {
   vi.stubEnv('VITE_NASSAJ_OPENCODE_CARRIER', 'true');
   const view = renderComposer(provider);
   try {

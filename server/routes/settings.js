@@ -14,6 +14,9 @@ import { sanitizeSvg } from '../services/svg-sanitizer.js';
 import { detectImageExt, IMAGE_MIME_TO_EXT } from '../services/image-signature.js';
 import { BRANDING_TITLE_KEY, BRANDING_SPLASH_HIDE_TITLE_KEY } from '../services/branding-config.js';
 import { isExternalApiEnabled, setExternalApiEnabled } from '../services/external-api-config.js';
+import { getApiKeySsoWindowSettings, updateApiKeySsoWindow } from '../services/api-key-sso-window-config.js';
+
+import ssoSettingsRouter from './settings-sso.js';
 
 const router = express.Router();
 
@@ -451,6 +454,51 @@ router.put('/external-api', requireRole('owner'), async (req, res) => {
     res.status(500).json({ error: 'Failed to update programmatic access state' });
   }
 });
+
+// ===============================
+// API key SSO attestation window (T-1946)
+// ===============================
+
+// Days an SSO-linked member's API keys keep working after their last SSO
+// sign-in. Owner only, both ways. The value is read on every key check, so a
+// change applies to the next request.
+//
+//   curl -H "Authorization: Bearer <owner-jwt>" \
+//        http://localhost:3004/api/settings/api-key-sso-window
+//   curl -X PUT -H "Authorization: Bearer <owner-jwt>" -H 'Content-Type: application/json' \
+//        -d '{"windowDays":14}' http://localhost:3004/api/settings/api-key-sso-window
+router.get('/api-key-sso-window', requireRole('owner'), (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store').json(getApiKeySsoWindowSettings());
+  } catch (error) {
+    console.error('Error reading API key SSO window:', error?.message);
+    res.status(500).json({ error: 'Failed to read the API key SSO window' });
+  }
+});
+
+router.put('/api-key-sso-window', requireRole('owner'), (req, res) => {
+  try {
+    if (!claimCurrentIdentity(req, res)) return;
+    const result = updateApiKeySsoWindow(req.body?.windowDays, {
+      userId: req.user.id,
+      ipAddress: req.ip ?? null,
+      userAgent: req.get('user-agent') ?? null,
+    });
+    if (!result.ok) {
+      return res.status(400).json({
+        error: 'windowDays must be a whole number of days from 1 to 365',
+        code: result.code,
+      });
+    }
+    res.set('Cache-Control', 'no-store').json({ success: true, ...result.settings });
+  } catch (error) {
+    console.error('Error updating API key SSO window:', error?.message);
+    res.status(500).json({ error: 'Failed to update the API key SSO window' });
+  }
+});
+
+// Owner SSO configuration (ADR-194 D8): its own router, owner-only on every route.
+router.use('/sso', ssoSettingsRouter);
 
 // ===============================
 // API Keys Management

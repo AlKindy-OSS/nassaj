@@ -161,6 +161,15 @@ test('skipped_live_session and refused_pinned are NOT "update failed"', () => {
   assert.equal(pinned.reason, 'pinned_refused');
 });
 
+test('an unverifiable live gate (B-1474) stays skipped-live and keeps its own reason', () => {
+  const state = mapUpdateJob(job({
+    status: 'skipped_live_session', phase: 'done', percent: 100,
+    error: { code: 'live_gate_unverifiable', message: 'unverifiable' },
+  }));
+  assert.equal(state.status, 'skipped-live');
+  assert.equal(state.reason, 'live_gate_unverifiable');
+});
+
 test('a failed job keeps the server error CODE for the message lookup', () => {
   const state = mapUpdateJob(job({
     status: 'failed', phase: 'done', percent: 100,

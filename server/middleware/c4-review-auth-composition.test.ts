@@ -51,6 +51,7 @@ async function fixture(t: TestContext, run: (value: Fixture) => Promise<void>): 
     authorization_generation INTEGER,password_changed_at INTEGER,must_change_password INTEGER,avatar_url TEXT);
     INSERT INTO users VALUES (1,'synthetic','user',1,'active',1,100,0,NULL);
     CREATE TABLE api_keys(id INTEGER PRIMARY KEY,user_id INTEGER,key_digest TEXT,is_active INTEGER,last_used TEXT);
+    CREATE TABLE user_identities(id INTEGER PRIMARY KEY,user_id INTEGER,issuer TEXT,subject TEXT,last_attested_at INTEGER);
     CREATE TABLE device_sessions(id TEXT PRIMARY KEY,secret_hash TEXT,active_slot_id TEXT,generation INTEGER,revoked_at INTEGER,expires_at INTEGER);
     CREATE TABLE device_account_slots(id TEXT PRIMARY KEY,device_session_id TEXT,user_id INTEGER,revoked_at INTEGER,password_stamp INTEGER,last_used_at INTEGER);
     CREATE TABLE session_participants(session_id TEXT,user_id INTEGER,role TEXT,attribution TEXT);

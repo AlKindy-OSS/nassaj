@@ -268,16 +268,216 @@ function denied(status = 403, error = 'Path not allowed') {
 
 function sameInode(a, b) { return a.dev === b.dev && a.ino === b.ino; }
 function trustedOwner(info) { return info.uid === 0 || info.uid === process.getuid?.(); }
-function trustedDirectory(info, sticky = false) {
-  return info.isDirectory() && trustedOwner(info) && ((info.mode & 0o022) === 0
-    || (sticky && info.uid === 0 && (info.mode & 0o1000) !== 0));
+
+/**
+ * Directory trust rule for ancestors of ephemeral/overlay roots and their derived
+ * suffix dirs. Owner must be root or the server uid. Other-writable is
+ * accepted only for a root-owned sticky dir (`/tmp`-style). Group-writable is
+ * accepted only when the group is the server's proven private group (umask 002
+ * hosts make `775` the norm); gid 0 never qualifies, so a root-owned `1775`
+ * group-0 dir is now rejected even when sticky.
+ *
+ * @internal Exported for unit tests.
+ * @param {import('node:fs').Stats} info fstat of the directory.
+ * @param {{ sticky?: boolean, privateGid?: number|null }} [options]
+ * @returns {boolean}
+ */
+export function trustedDirectory(info, { sticky = false, privateGid = null } = {}) {
+  if (!info.isDirectory() || !trustedOwner(info)) return false;
+  if (info.mode & 0o002) return sticky && info.uid === 0 && (info.mode & 0o1000) !== 0;
+  if (!(info.mode & 0o020)) return true;
+  return privateGid !== null && privateGid !== 0 && info.gid === privateGid;
+}
+
+/** Default identity databases; frozen so no caller can repoint the trust source. */
+const DEFAULT_IDENTITY_FILES = Object.freeze({
+  passwdPath: '/etc/passwd',
+  groupPath: '/etc/group',
+  nsswitchPath: '/etc/nsswitch.conf',
+  ownerUid: 0,
+});
+
+const MAX_IDENTITY_FILE_BYTES = 4 * 1024 * 1024;
+const NO_GROUP_PASSWORD = new Set(['x', '!', '*', '']);
+const DECIMAL_ID = /^\d{1,10}$/;
+const TRUSTED_NSS_SOURCES = new Set(['files', 'systemd']);
+// Linear-time: every repetition is anchored by a mandatory '=' and whitespace separator.
+const NSS_ACTION = /^\[\s*!?[A-Za-z]+=[A-Za-z]+(?:\s+!?[A-Za-z]+=[A-Za-z]+)*\s*\]$/;
+// `initgroups` is optional; when present it decides supplementary groups, so it is held to the same rule.
+const NSS_REQUIRED_DATABASES = ['passwd', 'group'];
+const NSS_CHECKED_DATABASES = new Set([...NSS_REQUIRED_DATABASES, 'initgroups']);
+
+/** Split colon files; null on any NIS compat line or any malformed non-empty line. */
+function parseColonRows(text, fieldCount, numericFields) {
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (line === '') continue;
+    if (line.startsWith('+') || line.startsWith('-')) return null;
+    const fields = line.split(':');
+    if (fields.length !== fieldCount || fields[0] === '') return null;
+    if (numericFields.some(index => !DECIMAL_ID.test(fields[index]))) return null;
+    rows.push(fields);
+  }
+  return rows;
+}
+
+/**
+ * Decide from passwd/group text whether `gid` is a private group of `uid`: no
+ * other account can hold it as primary or supplementary group, and it carries no
+ * group password. Fails closed on NIS lines, malformed lines, or a missing gid.
+ *
+ * @internal Exported for unit tests.
+ * @param {{ passwdText: string, groupText: string, uid: number, gid: number }} args
+ * @returns {boolean}
+ */
+export function isPrivateGroup({ passwdText, groupText, uid, gid }) {
+  if (typeof passwdText !== 'string' || typeof groupText !== 'string'
+    || !Number.isInteger(uid) || !Number.isInteger(gid)) return false;
+  const users = parseColonRows(passwdText, 7, [2, 3]);
+  const groups = parseColonRows(groupText, 4, [2]);
+  if (!users || !groups) return false;
+  const serverNames = new Set(users.filter(u => Number(u[2]) === uid).map(u => u[0]));
+  const matching = groups.filter(g => Number(g[2]) === gid);
+  if (serverNames.size === 0 || matching.length === 0) return false;
+  if (users.some(u => Number(u[3]) === gid && Number(u[2]) !== uid)) return false;
+  return matching.every(([, password, , members]) => NO_GROUP_PASSWORD.has(password)
+    && (members === '' || members.split(',').every(name => serverNames.has(name))));
+}
+
+/** True when an nsswitch source spec lists only files/systemd (bracket actions allowed). */
+function nssSourcesTrusted(spec) {
+  const actions = spec.match(/\[[^\]]*\]/g) ?? [];
+  if (!actions.every(action => NSS_ACTION.test(action))) return false;
+  const sources = spec.replace(/\[[^\]]*\]/g, ' ').split(/\s+/).filter(Boolean);
+  return sources.length > 0 && sources.every(source => TRUSTED_NSS_SOURCES.has(source));
+}
+
+/**
+ * True when nsswitch.conf resolves `passwd` and `group` (and `initgroups`, when
+ * present) only from `files` and/or `systemd`. Database names match
+ * case-insensitively. Well-formed `[STATUS=action]` tokens are tolerated (they only
+ * order the allowed sources); a missing required line or any duplicated checked
+ * line (including a case variant) fails closed.
+ *
+ * @internal Exported for unit tests.
+ * @param {string} text nsswitch.conf content.
+ * @returns {boolean}
+ */
+export function nsswitchTrustsLocalSources(text) {
+  if (typeof text !== 'string') return false;
+  const specs = new Map();
+  for (const raw of text.split('\n')) {
+    const match = /^([A-Za-z_]+)\s*:(.*)$/.exec(raw.replace(/#.*/, '').trim());
+    const database = match?.[1].toLowerCase();
+    if (!NSS_CHECKED_DATABASES.has(database)) continue;
+    if (specs.has(database)) return false;
+    specs.set(database, match[2]);
+  }
+  return NSS_REQUIRED_DATABASES.every(db => specs.has(db))
+    && [...specs.values()].every(nssSourcesTrusted);
+}
+
+// Keyed by the identity-file path tuple. Paths come only from construction-time seams
+// (frozen defaults in production, a few temp dirs in tests), never from requests, so the
+// map stays bounded by construction.
+const identityCache = new Map();
+function statKey(info) { return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.uid}:${info.mode}`; }
+
+/**
+ * True when an identity file can only have been written by its expected owner
+ * (B-1471): owned by `ownerUid` (root for the real /etc files) and not group- or
+ * other-writable. A file another account could rewrite proves nothing about who
+ * shares the server's group.
+ *
+ * @internal Exported for unit tests.
+ * @param {{ uid: number, mode: number }} info fstat result of the pinned fd.
+ * @param {number} [ownerUid] Expected owner; 0 in production.
+ * @returns {boolean}
+ */
+export function identityFileTrusted(info, ownerUid = 0) {
+  return Number.isInteger(info?.uid) && info.uid === ownerUid && (info.mode & 0o022) === 0;
+}
+
+/** Read exactly `info.size` bytes from a pinned fd; null on growth, shrink or cap. */
+async function readPinnedText(handle, info) {
+  if (!info.isFile() || info.size > MAX_IDENTITY_FILE_BYTES) return null;
+  const buffer = Buffer.alloc(info.size + 1);
+  let total = 0;
+  while (total < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return total === info.size ? buffer.toString('utf8', 0, total) : null;
+}
+
+/** Open each file once, fstat → read → fstat; cache only a stable snapshot. */
+async function loadIdentityVerdict(paths, { uid, gid, ownerUid, openFile }) {
+  const handles = [];
+  try {
+    for (const p of paths) handles.push(await openFile(p, flags.O_RDONLY | flags.O_NONBLOCK));
+    const before = await Promise.all(handles.map(handle => handle.stat()));
+    if (!before.every(info => identityFileTrusted(info, ownerUid))) return null;
+    const key = `${uid}:${gid}:${ownerUid}|${before.map(statKey).join('|')}`;
+    const cacheId = paths.join('\0');
+    if (identityCache.get(cacheId)?.key === key) return identityCache.get(cacheId).value;
+    const [passwdText, groupText, nsswitchText] = await Promise.all(
+      handles.map((handle, index) => readPinnedText(handle, before[index])));
+    const after = await Promise.all(handles.map(handle => handle.stat()));
+    if ([passwdText, groupText, nsswitchText].includes(null)
+      || after.some((info, index) => statKey(info) !== statKey(before[index]))) return null;
+    const value = nsswitchTrustsLocalSources(nsswitchText)
+      && isPrivateGroup({ passwdText, groupText, uid, gid }) ? gid : null;
+    identityCache.set(cacheId, { key, value });
+    return value;
+  } finally {
+    await Promise.all(handles.map(handle => handle.close().catch(() => {})));
+  }
+}
+
+/**
+ * The server's primary gid when it is provably private (see {@link isPrivateGroup})
+ * and name resolution is local-only; otherwise null. Never throws.
+ *
+ * Each file must pass {@link identityFileTrusted} against `files.ownerUid`
+ * (default 0, i.e. root-owned and not group/other-writable).
+ *
+ * @param {{ passwdPath: string, groupPath: string, nsswitchPath: string, ownerUid?: number }} [files]
+ *   `ownerUid` is a construction-time test seam (temp files are not root-owned).
+ * @param {{ openFile?: typeof open }} [internal] @internal Test-only fs seam.
+ * @returns {Promise<number|null>}
+ */
+export async function loadPrivateGid(files = DEFAULT_IDENTITY_FILES, { openFile = open } = {}) {
+  if (typeof process.getgid !== 'function' || typeof process.getuid !== 'function') return null;
+  const gid = process.getgid();
+  const paths = [files?.passwdPath, files?.groupPath, files?.nsswitchPath];
+  if (gid === 0 || !paths.every(p => typeof p === 'string' && path.isAbsolute(p))) return null;
+  const ownerUid = files.ownerUid ?? 0;
+  if (!Number.isInteger(ownerUid)) return null;
+  try {
+    return await loadIdentityVerdict(paths, { uid: process.getuid(), gid, ownerUid, openFile });
+  } catch { return null; }
+}
+
+/** Per-request lazy identity probe: loads at most once, only when a dir needs it. */
+function createIdentityProbe(identityFiles) {
+  let pending = null;
+  return () => (pending ??= loadPrivateGid(identityFiles));
+}
+
+/** Apply {@link trustedDirectory}, consulting identity only for group-writable dirs. */
+async function directoryIsTrusted(info, { sticky, probe }) {
+  const needsGroup = (info.mode & 0o020) !== 0 && (info.mode & 0o002) === 0;
+  const privateGid = needsGroup ? await probe() : null;
+  return trustedDirectory(info, { sticky, privateGid });
 }
 
 async function closeImageChain(chain) {
   await Promise.all(chain.map(entry => entry.handle.close().catch(() => {})));
 }
 
-async function appendImageHandle(chain, name, directory, privateDirectory = false) {
+/** Open `name` under the chain tip without following links; `trust` null skips the dir-trust check. */
+async function appendImageHandle(chain, name, directory, trust = null) {
   const parent = chain.at(-1).handle;
   const handle = await open(`/proc/self/fd/${parent.fd}/${name}`,
     flags.O_RDONLY | flags.O_NOFOLLOW | (directory ? flags.O_DIRECTORY : flags.O_NONBLOCK));
@@ -285,7 +485,7 @@ async function appendImageHandle(chain, name, directory, privateDirectory = fals
   chain.push(entry);
   entry.stat = await handle.stat();
   if (directory && !entry.stat.isDirectory()) throw denied();
-  if (privateDirectory && !trustedDirectory(entry.stat)) throw denied();
+  if (trust && !(await directoryIsTrusted(entry.stat, trust))) throw denied();
 }
 
 async function verifyImageChain(chain) {
@@ -296,29 +496,32 @@ async function verifyImageChain(chain) {
 }
 
 /** Pin the canonical trusted base and never follow a symlink in derived suffixes. */
-async function openImageRoot(root, chain) {
+async function openImageRoot(root, chain, probe) {
   const base = root.base ?? root.path;
+  const trusted = root.kind !== 'project';
   const canonicalBase = await realpath(base);
   const handle = await open('/', flags.O_RDONLY | flags.O_DIRECTORY | flags.O_NOFOLLOW);
   chain.push({ handle, stat: await handle.stat() });
+  const ancestorTrust = trusted ? { sticky: true, probe } : null;
   for (const part of canonicalBase.split('/').filter(Boolean)) {
-    await appendImageHandle(chain, part, true);
-    if (root.kind !== 'project' && !trustedDirectory(chain.at(-1).stat, true)) throw denied();
+    await appendImageHandle(chain, part, true, ancestorTrust);
   }
-  const sticky = ['/tmp', '/var/tmp'].includes(base);
-  if (root.kind !== 'project' && !trustedDirectory(chain.at(-1).stat, sticky)) throw denied();
+  const baseTrust = { sticky: ['/tmp', '/var/tmp'].includes(base), probe };
+  if (trusted && !(await directoryIsTrusted(chain.at(-1).stat, baseTrust))) throw denied();
   const suffix = path.relative(base, root.path);
   if (suffix.startsWith('..') || path.isAbsolute(suffix)) throw denied();
-  for (const part of suffix.split('/').filter(Boolean)) await appendImageHandle(chain, part, true, true);
+  for (const part of suffix.split('/').filter(Boolean)) {
+    await appendImageHandle(chain, part, true, { sticky: false, probe });
+  }
   return suffix ? path.join(canonicalBase, suffix) : canonicalBase;
 }
 
 /** Inspect and retain a single descriptor; no pathname is reopened for streaming. */
-async function openImageWithinRoot(root, requestedPath) {
+async function openImageWithinRoot(root, requestedPath, identityFiles) {
   const chain = [];
   try {
     if (process.platform !== 'linux') throw denied();
-    const canonicalRoot = await openImageRoot(root, chain);
+    const canonicalRoot = await openImageRoot(root, chain, createIdentityProbe(identityFiles));
     const canonicalTarget = await realpath(requestedPath);
     if (!canonicalTarget.startsWith(canonicalRoot + path.sep)
       || hasDotSegment(canonicalRoot, canonicalTarget)) throw denied();
@@ -345,8 +548,17 @@ async function openImageWithinRoot(root, requestedPath) {
   } catch (error) { await closeImageChain(chain); throw error; }
 }
 
-/** Resolve against the deepest typed root, with no broader-root fallback. */
-export async function resolveImageWithinRoots(allowedRoots, requestedPath, { retainHandle = false } = {}) {
+/**
+ * Resolve against the deepest typed root, with no broader-root fallback.
+ *
+ * @param {Array<string|object>} allowedRoots Server-derived typed roots.
+ * @param {string} requestedPath Absolute path to serve.
+ * @param {{ retainHandle?: boolean,
+ *   identityFiles?: { passwdPath: string, groupPath: string, nsswitchPath: string, ownerUid?: number } }} [options]
+ *   `identityFiles` is a server-side test seam only; it defaults to the frozen system files.
+ */
+export async function resolveImageWithinRoots(allowedRoots, requestedPath,
+  { retainHandle = false, identityFiles = DEFAULT_IDENTITY_FILES } = {}) {
   if (typeof requestedPath !== 'string' || !path.isAbsolute(requestedPath)
     || /[\\\x00-\x1f\x7f]/.test(requestedPath)) return { ok: false, status: 400, error: 'Invalid image path' };
   if (requestedPath.split('/').some(part => part === '.' || part === '..')) {
@@ -358,7 +570,7 @@ export async function resolveImageWithinRoots(allowedRoots, requestedPath, { ret
     .sort((a, b) => b.path.length - a.path.length)[0];
   if (!root || hasDotSegment(root.path, resolved)) return { ok: false, status: 403, error: 'Path not allowed' };
   try {
-    const result = await openImageWithinRoot(root, requestedPath);
+    const result = await openImageWithinRoot(root, requestedPath, identityFiles);
     if (!retainHandle) { await result.close(); return { ok: true, contentType: result.contentType,
       realResolved: result.realResolved, size: result.size }; }
     return result;
@@ -382,10 +594,12 @@ function setImageHeaders(res, contentType) {
  *   resolveAllowedRoots: (sessionId: string, userId: unknown) =>
  *     { roots: Array<string|object>, isCurrent: () => boolean } | null,
  *   limiter?: import('express').RequestHandler,
- * }} deps
+ *   identityFiles?: { passwdPath: string, groupPath: string, nsswitchPath: string, ownerUid?: number },
+ * }} deps `identityFiles` is a construction-time test seam; never taken from a request.
  * @returns {import('express').Router}
  */
-export function createAssistantImagesRouter({ authenticateToken, resolveAllowedRoots, limiter }) {
+export function createAssistantImagesRouter({ authenticateToken, resolveAllowedRoots, limiter,
+  identityFiles = DEFAULT_IDENTITY_FILES }) {
   const router = express.Router();
   const gate = limiter || createRateLimiter({
     windowMs: 60_000,
@@ -418,7 +632,8 @@ export function createAssistantImagesRouter({ authenticateToken, resolveAllowedR
 
     let opened;
     try {
-      const result = await resolveImageWithinRoots(allowedRoots, requestedPath, { retainHandle: true });
+      const result = await resolveImageWithinRoots(allowedRoots, requestedPath,
+        { retainHandle: true, identityFiles });
       if (!result.ok) {
         return res.status(result.status).json({ error: result.error });
       }

@@ -26,7 +26,7 @@ import {
   type TurnAdapterResult,
 } from './types.js';
 
-export type ExtendedCliProvider = Extract<CliTurnProvider, 'qwen' | 'opencode' | 'hermes'>;
+export type ExtendedCliProvider = Extract<CliTurnProvider, 'qwen' | 'opencode'>;
 
 const ROLE_SYSTEM = [
   'You are an internal capture-only role in the server Turn Supervisor.',
@@ -48,20 +48,18 @@ type AdapterOptions = Readonly<{
   qwenCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv }) => Promise<boolean>;
   /** opencode cell: the run flags exist and the zero-tools/deny config resolves (not a version pin). */
   opencodeCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv; cwd: string }) => Promise<boolean>;
-  /** Hermes enablement requires a pinned-runtime probe that observes zero tool definitions. */
-  hermesToolDefinitionProbe?: (input: { binary: string; env: NodeJS.ProcessEnv }) => Promise<number>;
   createRoleHome?: () => Promise<EphemeralRoleHome>;
   cleanupRoleHome?: (role: EphemeralRoleHome) => Promise<void>;
   spawnCapture?: (input: IsolatedCliProcessSpec & { role: EphemeralRoleHome; signal?: AbortSignal }) => Promise<IsolatedCliResult>;
 }>;
 
 /**
- * Exact release pins for the disabled qwen/hermes cells. opencode is not pinned
+ * Exact release pin for the disabled qwen cell. opencode is not pinned
  * (owner decision 2026-09-29): any release that runs and reports a version is
  * accepted, so the cell survives harness updates.
  */
 const EXACT_VERSIONS: Readonly<Partial<Record<ExtendedCliProvider, string>>> = Object.freeze({
-  qwen: '0.21.12', hermes: '0.17.0',
+  qwen: '0.21.12',
 });
 
 /** True when `version` was reported and satisfies this provider's pin, if any. */
@@ -93,21 +91,6 @@ async function defaultVersionProbe(binary: string): Promise<string> {
     if (result.code !== 0) return '';
     return `${result.stdout}\n${result.stderr}`.match(/\bv?(\d+\.\d+\.\d+)\b/u)?.[1] ?? '';
   } catch { return ''; }
-}
-
-async function defaultHermesToolDefinitionProbe(input: { binary: string; env: NodeJS.ProcessEnv }): Promise<number> {
-  const role = await createEphemeralRoleHome();
-  try {
-    const result = await spawnInIsolatedCliCage({
-      binary: input.binary,
-      args: ['--safe-mode', '--ignore-user-config', '--ignore-rules', '--toolsets', '', 'prompt-size', '--json'],
-      cwd: process.cwd(), env: input.env, role,
-    });
-    if (result.code !== 0) return Number.POSITIVE_INFINITY;
-    const parsed = JSON.parse(result.stdout) as { tools?: { count?: unknown } };
-    return Number.isSafeInteger(parsed.tools?.count) ? Number(parsed.tools?.count) : Number.POSITIVE_INFINITY;
-  } catch { return Number.POSITIVE_INFINITY; }
-  finally { await cleanupEphemeralRoleHome(role); }
 }
 
 async function defaultQwenCapabilityProbe(input: { binary: string; env: NodeJS.ProcessEnv }): Promise<boolean> {
@@ -211,17 +194,6 @@ function opencodeSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessE
   });
 }
 
-function hermesSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessEnv; model: string; prompt: string; system: string }): IsolatedCliProcessSpec {
-  return Object.freeze({
-    binary: input.binary, cwd: input.cwd,
-    env: Object.freeze({ ...input.env, HERMES_SYSTEM_PROMPT: input.system }),
-    args: Object.freeze([
-      '--safe-mode', '--ignore-user-config', '--ignore-rules', '--toolsets', '',
-      '--model', input.model, '--oneshot', input.prompt,
-    ]),
-  });
-}
-
 function parseJsonLines(provider: 'qwen' | 'opencode', stdout: string): string {
   let text = '';
   for (const line of stdout.split(/\r?\n/u)) {
@@ -243,7 +215,7 @@ function parseJsonLines(provider: 'qwen' | 'opencode', stdout: string): string {
 }
 
 function parseOutput(provider: ExtendedCliProvider, stdout: string): string {
-  return provider === 'hermes' ? stdout.trim() : parseJsonLines(provider, stdout);
+  return parseJsonLines(provider, stdout);
 }
 
 /** Registry-resolved binary; opencode goes through its (opt-in) digest-pin wrapper. Throws when unresolved. */
@@ -251,7 +223,7 @@ function resolveExtendedCliBinary(provider: ExtendedCliProvider): string {
   return provider === 'opencode' ? resolveOpenCodeBinaryPath() : resolveHarnessBinary(provider);
 }
 
-/** Strict, capture-only Qwen/OpenCode/Hermes registrations. There is no legacy passthrough path. */
+/** Strict, capture-only Qwen/OpenCode registrations. There is no legacy passthrough path. */
 export function createExtendedCliAdapter(provider: ExtendedCliProvider, options: AdapterOptions = {}): TurnAdapterRegistration {
   const cwd = options.cwd ?? process.cwd();
   const resolveEnv = options.resolveEnv ?? ((userId: string | number) => defaultResolvedEnv(userId, provider));
@@ -285,10 +257,6 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
         const capabilityProbe = options.opencodeCapabilityProbe ?? defaultOpencodeCapabilityProbe;
         if (!await capabilityProbe({ binary, env, cwd })) return false;
       }
-      if (provider === 'hermes') {
-        const toolProbe = options.hermesToolDefinitionProbe ?? defaultHermesToolDefinitionProbe;
-        if (await toolProbe({ binary, env }) !== 0) return false;
-      }
       pinnedAndSafe = true;
       return true;
     },
@@ -314,8 +282,7 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
           binary, cwd, env: resolveEnv(request.userId), model: request.model,
           prompt: request.prompt, system: hiddenSystem(request),
         };
-        const spec = provider === 'qwen' ? qwenSpec(common)
-          : provider === 'opencode' ? opencodeSpec(common) : hermesSpec(common);
+        const spec = provider === 'qwen' ? qwenSpec(common) : opencodeSpec(common);
         const result = await run({ ...spec, role, signal: request.signal });
         if (result.code !== 0) {
           throw new TurnAdapterError('remote_error', `${provider} CLI exited ${result.code}: ${result.stderr.slice(0, 500)}`);
@@ -337,7 +304,7 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
 }
 
 export const extendedCliAdapterInternals = Object.freeze({
-  EXACT_VERSIONS, ROLE_SYSTEM, qwenSpec, opencodeSpec, hermesSpec, parseOutput,
-  defaultVersionProbe, defaultHermesToolDefinitionProbe, opencodeAgentIsToolless, OPENCODE_RUN_FLAGS,
+  EXACT_VERSIONS, ROLE_SYSTEM, qwenSpec, opencodeSpec, parseOutput,
+  defaultVersionProbe, opencodeAgentIsToolless, OPENCODE_RUN_FLAGS,
   defaultQwenCapabilityProbe,
 });

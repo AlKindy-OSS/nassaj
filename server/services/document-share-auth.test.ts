@@ -7,12 +7,14 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import test, { after, beforeEach, mock } from 'node:test';
+import test, { beforeEach, mock } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import Database from 'better-sqlite3';
 import express from 'express';
 import jwt from 'jsonwebtoken';
+
+import { createSsoConfigDouble } from './__tests__/sso-config-double.js';
 
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const HOUR_MS = 60 * 60 * 1000;
@@ -20,6 +22,8 @@ const secret = 'synthetic-test-secret-document-share-attestation-0001';
 
 type Summary = { linkCount: number; latestAttestedAt: number | null };
 const summaries = new Map<number, Summary>();
+const sso = createSsoConfigDouble();
+mock.module(url('./sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userIdentitiesDb: {
@@ -33,21 +37,12 @@ const { createDocumentShareVerifier } = await import('./document-share-auth.js')
 const { createDocumentSharesRouter } = await import('../routes/document-shares.js');
 const { createDocumentSharesStore, migrateDocumentShares } = await import('../modules/database/document-shares.js');
 
-const KEYS = ['OIDC_ENABLED', 'OIDC_ROLE_PROJECT_ID', 'OIDC_ATTESTATION_MAX_AGE_HOURS'] as const;
-const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
-after(() => {
-  for (const key of KEYS) {
-    if (saved[key] === undefined) delete process.env[key];
-    else process.env[key] = saved[key];
-  }
-});
 
 type User = { id: number; role: string; status: string; password_changed_at: number; authorization_generation: number };
 const users = new Map<number, User>();
 beforeEach(() => {
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
-  delete process.env.OIDC_ATTESTATION_MAX_AGE_HOURS;
+  sso.setActive(true);
+  sso.state.maxAgeHours = 12;
   users.clear();
   for (const [id, role] of [[1, 'owner'], [2, 'user']] as const) {
     users.set(id, { id, role, status: 'active', password_changed_at: 0, authorization_generation: 1 });
@@ -125,8 +120,8 @@ test('a missing or mismatched auth_gen is refused', async (t) => {
   assert.equal((await f.get(bearer(2, 2))).status, 200, 'current generation');
 });
 
-test('OIDC disabled: attestation is not consulted, other checks unchanged', async (t) => {
-  delete process.env.OIDC_ENABLED;
+test('SSO policy off: attestation is not consulted, other checks unchanged', async (t) => {
+  sso.setActive(false);
   const f = await fixture(t);
   summaries.set(2, { linkCount: 1, latestAttestedAt: null });
   assert.equal((await f.get(bearer(2))).status, 200);

@@ -34,8 +34,8 @@ import { getConnection } from '@/modules/database/connection.js';
  *
  * A CLASS with a `code`, never a message match: participants.db.ts sniffs
  * /FOREIGN KEY/i on error messages today, and that fragility is not repeated
- * here. TypeScript callers use `instanceof`, the two .js call sites (agy-cli,
- * hermes-cli) check `err?.code === 'SESSION_TOMBSTONED'`.
+ * here. TypeScript callers use `instanceof`, the .js call site (agy-cli)
+ * checks `err?.code === 'SESSION_TOMBSTONED'`.
  *
  * A plain Error, not AppError: the repository layer imports no HTTP error shape
  * (zero matches across repositories/*.ts), and inverting that dependency to

@@ -30,6 +30,12 @@ const REVIEWED: Record<string, string | null> = {
   'modules/database/deletion-operation.repository.ts': 'modules/database/deletion-operation.service.ts',
   // Boot-time owner promotion only ever GRANTS access, before any run exists.
   'modules/database/migrations.ts': null,
+  // ADR-194 (T-1962): these only advance users.password_changed_at (session
+  // revocation, live runs cut after commit by revokeUserIdentity); `role`
+  // matches only their `WHERE role <> 'owner'` guard. No role, status,
+  // is_active or project membership changes, so no project access is reduced.
+  'modules/database/repositories/sso-apply.ts': null,
+  'modules/database/repositories/sso-oidc-config.ts': null,
 };
 
 function listSources(directory: string): string[] {

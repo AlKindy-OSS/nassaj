@@ -10,4 +10,5 @@
  */
 export { buildScopeLivenessResolver } from '@/modules/workflow-supervisor/scope-status.js';
 export type { ScopeLivenessResolver } from '@/modules/workflow-supervisor/scope-status.js';
-export { listAllActiveScopes } from '@/modules/workflow-supervisor/systemd.js';
+export { probeUserWorkflowUnits, UserUnitProbeError } from '@/modules/workflow-supervisor/systemd.js';
+export type { UserUnitProbe } from '@/modules/workflow-supervisor/systemd.js';

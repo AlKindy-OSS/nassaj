@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import type { Project } from '../../types/app';
@@ -46,6 +46,31 @@ import {
   type ProjectTool,
 } from './projectToolUrl';
 
+/**
+ * B-1469 round 4: `/`, `/session/:sessionId` and `/scheduled` are now ONE
+ * `<Route path="/*">` (see `App.tsx`) so switching between them never remounts
+ * `AppContent` — `useParams()` needed a dedicated `:sessionId` route segment,
+ * which is exactly the thing that fix removes. Parsed manually from the
+ * pathname instead; `undefined` (not matching `/session/<id>`) behaves
+ * identically to the old `useParams()` result on every other path.
+ *
+ * Anchored with `(?:\/)?$` (qa-critic round 1): an unanchored match let
+ * `/session/a/b` yield `a` — a sub-path is not a valid single-id route and
+ * must not resolve to one. A trailing slash alone is still accepted.
+ * `decodeURIComponent` can throw `URIError` on malformed escapes (e.g.
+ * `/session/%E0%A4%A`) — caught and falls back to the raw segment rather than
+ * crashing the whole render tree over an unparseable URL.
+ */
+export function routeSessionIdFromPathname(pathname: string): string | undefined {
+  const match = /^\/session\/([^/?#]+)(?:\/)?$/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 export default function AppContent() {
   return (
     <PaletteOpsProvider>
@@ -57,7 +82,7 @@ export default function AppContent() {
 function AppContentInner() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionId } = useParams<{ sessionId?: string }>();
+  const sessionId = useMemo(() => routeSessionIdFromPathname(location.pathname), [location.pathname]);
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { user } = useAuth();

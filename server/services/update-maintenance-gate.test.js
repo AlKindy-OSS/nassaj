@@ -36,13 +36,80 @@ test('writer holds shared activity while releasing admission for other writers',
     assert.equal(gate.readPublicStatus().state, 'OPEN');
 });
 
-test('updater closes admission and waits fail-closed for an existing writer', async (t) => {
+test('B-1448: a contended updater never closes the gate: the journal is not written at all', async (t) => {
     const root = fixture(t);
     const gate = createUpdateMaintenanceGate({ projectPath: root });
-    const writer = await gate.acquireWriterLease({ kind: 'watcher-write', waitMs: 100 });
+    const writer = await gate.acquireWriterLease({ kind: 'standalone-pty', waitMs: 100 });
+    const before = JSON.parse(fs.readFileSync(gate.paths.journal, 'utf8'));
     await assert.rejects(gate.beginUpdate(identity(), { waitMs: 30 }), /update_lock_contended/);
-    assert.equal(gate.readPublicStatus().state, 'OPEN');
+    const after = JSON.parse(fs.readFileSync(gate.paths.journal, 'utf8'));
+    // The old order wrote OPEN->DRAINING->OPEN (sequence +2); state OPEN alone could not tell.
+    assert.equal(after.sequence, before.sequence);
+    assert.deepEqual(after, before);
+    assert.equal(gate.readPublicStatus().gateClosed, false);
     writer.release();
+    const update = await gate.beginUpdate(identity(), { waitMs: 100 });
+    assert.equal(gate.readPublicStatus().state, 'UPDATING');
+    update.release();
+});
+
+test('B-1448: the activity wait is its own short parameter, capped by an explicit waitMs', async (t) => {
+    const root = fixture(t);
+    const gate = createUpdateMaintenanceGate({ projectPath: root });
+    const writer = await gate.acquireWriterLease({ kind: 'managed-pty', waitMs: 100 });
+    t.after(() => writer.release());
+    // A 20 s overall wait must not stretch the activity wait: 50 ms is asked for.
+    const started = Date.now();
+    await assert.rejects(gate.beginUpdate(identity(), { waitMs: 20_000, activityWaitMs: 50 }), /update_lock_contended/);
+    assert.ok(Date.now() - started < 10_000, 'the activity wait did not use the 20 s admission wait');
+    assert.equal(gate.readPublicStatus().gateClosed, false);
+});
+
+test('B-1448: the success path still writes OPEN -> DRAINING -> UPDATING (sequence +2, same fields)', async (t) => {
+    const root = fixture(t);
+    const gate = createUpdateMaintenanceGate({ projectPath: root });
+    const before = JSON.parse(fs.readFileSync(gate.paths.journal, 'utf8'));
+    const update = await gate.beginUpdate(identity(), { waitMs: 100 });
+    const after = JSON.parse(fs.readFileSync(gate.paths.journal, 'utf8'));
+    assert.equal(after.sequence, before.sequence + 2);
+    assert.equal(after.state, 'UPDATING');
+    assert.equal(after.gateClosed, true);
+    assert.equal(after.phase, 'PREPARED');
+    assert.equal(after.databaseState, 'PRE_CANDIDATE');
+    assert.equal(after.transactionId, identity().transactionId);
+    assert.equal(after.owner.pid, process.pid);
+    update.release();
+});
+
+test('B-1448: a writer in ANOTHER process makes the updater contend without closing the gate', async (t) => {
+    const root = fixture(t);
+    const gate = createUpdateMaintenanceGate({ projectPath: root });
+    const moduleUrl = new URL('./update-maintenance-gate.js', import.meta.url).href;
+    const code = `import { createUpdateMaintenanceGate } from ${JSON.stringify(moduleUrl)};
+        const gate = createUpdateMaintenanceGate({ projectPath: ${JSON.stringify(root)} });
+        await gate.acquireWriterLease({ kind: 'standalone-pty', waitMs: 5000 });
+        process.stdout.write('held\\n');
+        setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    t.after(async () => { child.kill('SIGKILL'); await exited; });
+    await new Promise((resolve, reject) => {
+        child.stdout.on('data', (chunk) => { if (String(chunk).includes('held')) resolve(); });
+        child.once('exit', (status) => reject(new Error(`holder exited early: ${status}`)));
+    });
+    const before = JSON.parse(fs.readFileSync(gate.paths.journal, 'utf8')).sequence;
+    const samples = [];
+    const sampler = setInterval(() => samples.push(gate.readPublicStatus().gateClosed), 10);
+    try {
+        await assert.rejects(gate.beginUpdate(identity(), { waitMs: 100 }), /update_lock_contended/);
+    } finally { clearInterval(sampler); }
+    assert.ok(samples.every((closed) => closed === false), 'the gate was never closed during the wait');
+    assert.equal(JSON.parse(fs.readFileSync(gate.paths.journal, 'utf8')).sequence, before);
+    child.kill('SIGKILL');
+    await exited;
+    const update = await gate.beginUpdate(identity(), { waitMs: 1000 });
+    assert.equal(gate.readPublicStatus().state, 'UPDATING');
+    update.release();
 });
 
 test('exclusive update blocks writers and journal transitions use monotonic CAS', async (t) => {

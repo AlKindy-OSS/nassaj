@@ -20,7 +20,7 @@ import { listUserOwnedRuns } from './user-run-revocation.service.js';
 import { transparentWriterWith, transparentWriterWithSend } from './writer-proxy.js';
 
 const PROVIDERS = [
-  'claude', 'cursor', 'codex', 'antigravity', 'opencode', 'hermes',
+  'claude', 'cursor', 'codex', 'antigravity', 'opencode',
   'kimi', 'deepseek', 'glm', 'qwen',
 ] as const;
 
@@ -40,7 +40,6 @@ function harness(current = true) {
     abortCodexSession: (id: string) => (calls.push(`codex:${id}`), true),
     abortAntigravitySession: (id: string) => (calls.push(`antigravity:${id}`), true),
     abortOpenCodeSession: (id: string) => (calls.push(`opencode:${id}`), true),
-    abortHermesSession: (id: string) => (calls.push(`hermes:${id}`), true),
     abortKimiSession: (id: string) => (calls.push(`kimi:${id}`), true),
     abortDeepSeekSession: (id: string) => (calls.push(`deepseek:${id}`), true),
     abortGlmSession: (id: string) => (calls.push(`glm:${id}`), true),

@@ -742,6 +742,26 @@ export const UPDATE_GATE_DEFERRABLE_REASON_CODES = Object.freeze([
     'update_maintenance_active',
 ]);
 
+/**
+ * B-1448: how long `beginUpdate` waits for the exclusive activity lock before it
+ * closes the gate. Short on purpose: while it waits the updater holds admission,
+ * so every new writer is refused. Owner decision: 1 s.
+ */
+export const UPDATE_ACTIVITY_LOCK_WAIT_MS = 1_000;
+
+/**
+ * The activity wait: `activityWaitMs` (default UPDATE_ACTIVITY_LOCK_WAIT_MS),
+ * never longer than an explicit `waitMs`, so a short test wait stays short.
+ * @param {number | undefined} waitMs the caller's overall lock wait
+ * @param {number | undefined} activityWaitMs the caller's activity-lock wait
+ * @returns {number} milliseconds to wait for the activity lock
+ */
+function resolveActivityWaitMs(waitMs, activityWaitMs) {
+    const requested = Number.isFinite(activityWaitMs) && activityWaitMs >= 0
+        ? activityWaitMs : UPDATE_ACTIVITY_LOCK_WAIT_MS;
+    return Number.isFinite(waitMs) && waitMs >= 0 ? Math.min(requested, waitMs) : requested;
+}
+
 export function createUpdateMaintenanceGate({
     projectPath,
     commandRunner = spawnSync,
@@ -822,7 +842,7 @@ export function createUpdateMaintenanceGate({
         }
     };
 
-    const beginUpdate = async (identity, { signal, waitMs } = {}) => {
+    const beginUpdate = async (identity, { signal, waitMs, activityWaitMs } = {}) => {
         assertLegacyTransitionAllowed();
         if (identity?.kind === 'oid-pair') throw new Error('oid_pair_source_path_refused');
         if (!identity || !TOKEN.test(identity.transactionId || '') || !SHA.test(identity.originalHead || '')
@@ -840,6 +860,14 @@ export function createUpdateMaintenanceGate({
             // until the source state is reconciled. Updating on top of an
             // unreconciled tree is what produces the CAS mismatch in ب.5.
             if (typeof current.degraded === 'string' && current.degraded) throw new Error('update_source_state_degraded');
+            // B-1448: lock, THEN close. Taking the activity lock only after the
+            // DRAINING write refused every request for the whole 30 s wait of a
+            // doomed attempt (an open terminal holds its shared side). Holding
+            // admission exclusively already fences new writers, so the holder set
+            // can only shrink; on contention the journal is never touched.
+            activity = await flockAsync(paths.activityLock, 'exclusive', {
+                signal, waitMs: resolveActivityWaitMs(waitMs, activityWaitMs),
+            });
             current = transition(current.sequence, ['OPEN'], {
                 state: 'DRAINING', gateClosed: true, phase: 'PREPARED', databaseState: 'PRE_CANDIDATE',
                 transactionId: identity.transactionId,
@@ -849,7 +877,6 @@ export function createUpdateMaintenanceGate({
                     epoch: crypto.randomBytes(18).toString('base64url'),
                 },
             });
-            activity = await flockAsync(paths.activityLock, 'exclusive', { signal, waitMs });
             current = transition(current.sequence, ['DRAINING'], { state: 'UPDATING' });
             let released = false;
             const ownershipLease = { held: true };

@@ -81,7 +81,7 @@ export function makeWorld(): World {
     },
     cleanEnv: () => ({ PATH: '/usr/bin:/bin', HOME: home }),
     hasLiveSession: () => false,
-    hasUnregisteredLaunch: async () => false,
+    hasUnregisteredLaunch: async () => null,
     assertNoHolders: () => {},
     audit: (action, metadata) => world.audits.push({ action, metadata }),
     pinArmed: () => false,

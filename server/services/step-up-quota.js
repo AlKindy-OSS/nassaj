@@ -20,3 +20,13 @@ const stepUpLimiter = createKeyedLimiter({ windowMs: 15 * 60_000, max: 5 });
 export function consumeStepUpAttempt(userId) {
   return stepUpLimiter.hit(`stepup:${userId}`);
 }
+
+/**
+ * Returns one attempt to `userId`'s bucket after a SUCCESSFUL password or
+ * passkey step-up (ADR-194 D8), so only failures consume the quota. Never
+ * called for OIDC step-up starts or oidc_grant redemption.
+ * @param {number} userId
+ */
+export function refundStepUpAttempt(userId) {
+  stepUpLimiter.refund(`stepup:${userId}`);
+}

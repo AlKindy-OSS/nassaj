@@ -24,17 +24,16 @@ import { describe, it, expect } from 'vitest';
 import { getProviderCapabilities, PROVIDER_UI_CAPABILITIES } from './providerCapabilities';
 
 // نفس القائمة الخادمية حرفياً (‏SUBSCRIPTION_PROVIDERS في
-// subscription-config.service.ts) — ما عدا claude الذي له سطحه الخاص.
+// subscription-config.service.ts) ما عدا claude الذي له سطحه الخاص — ومنقوصةً
+// من أجساد T-1953 المتقاعدة (cursor/hermes/qwen/kimi): لم يعد لها واصف قدرات
+// عميلي أصلاً، فتسقط على safeFallbackCapabilities (`none`) لا على سطحٍ حقيقي،
+// وذلك مُغطّى في اختبار «fail-closed» أدناه لا هنا.
 const SERVER_SUBSCRIPTION_PROVIDERS_MINUS_CLAUDE = [
   'codex',
-  'cursor',
   'antigravity',
   'opencode',
-  'kimi',
   'deepseek',
   'glm',
-  'hermes',
-  'qwen',
 ];
 
 describe('quota.surface', () => {
@@ -50,11 +49,7 @@ describe('quota.surface', () => {
       // العرض إلى الدورة — والسقوط في المكوّن لا في الواصف.
       codex: 'provider-windows',
       opencode: 'cycle',
-      qwen: 'cycle',
       antigravity: 'cycle',
-      cursor: 'cycle',
-      hermes: 'cycle',
-      kimi: 'cycle',
       deepseek: 'cycle',
       glm: 'provider-windows',
       sakana: 'none',
@@ -77,7 +72,12 @@ describe('quota.surface', () => {
     }
     expect(getProviderCapabilities('codex').quota.surface).toBe('provider-windows');
     expect(getProviderCapabilities('glm').quota.surface).toBe('provider-windows');
-    expect(getProviderCapabilities('hermes').quota.surface).toBe('cycle');
+  });
+
+  it('أجساد متقاعدة (T-1953) تسقط على fail-closed لا سطحاً حقيقياً', () => {
+    for (const retired of ['cursor', 'hermes', 'qwen', 'kimi']) {
+      expect(getProviderCapabilities(retired).quota.surface).toBe('none');
+    }
   });
 
   it('المزوّد المجهول fail-closed: none لا cycle', () => {

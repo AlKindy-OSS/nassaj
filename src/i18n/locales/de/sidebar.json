@@ -35,6 +35,8 @@
     "deleteSession": "Sitzung löschen",
     "renameSession": "Sitzung umbenennen",
     "noSessions": "Noch keine Sitzungen",
+    "surfacedHiddenHint_one": "+{{count}} weitere Unterhaltung mit Aktivität",
+    "surfacedHiddenHint_other": "+{{count}} weitere Unterhaltungen mit Aktivität",
     "loadingSessions": "Sitzungen werden geladen...",
     "unnamed": "Unbenannt",
     "loading": "Lädt...",

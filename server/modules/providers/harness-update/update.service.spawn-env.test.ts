@@ -31,7 +31,7 @@ import * as realChildProcess from 'node:child_process';
 import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
 
 // T-1873: the registry resolves only installed CLIs (test HOME = case dir).
-for (const id of ['qwen', 'hermes'] as const) installFakeHarnessBinary(SANDBOX_HOME, id);
+installFakeHarnessBinary(SANDBOX_HOME, 'qwen');
 
 interface SpawnCall {
   cmd: string;
@@ -76,7 +76,7 @@ const { _awaitHarnessJob, _resetHarnessJobs, getHarnessUpdateJob, startHarnessUp
 const { _resetHarnessLeases } = await import('./lease.js');
 const { _resetLatestCache } = await import('./version-status.service.js');
 const { clearHarnessRecoveryBlocked } = await import('./spawn-admission.js');
-const { resolveHermesCheckoutDir, HARNESS_UPDATE_DESCRIPTORS } = await import('./descriptors.js');
+const { HARNESS_UPDATE_DESCRIPTORS } = await import('./descriptors.js');
 
 beforeEach(() => {
   calls.length = 0;
@@ -86,17 +86,17 @@ beforeEach(() => {
   _resetHarnessLeases();
   _resetHarnessJobs();
   _resetLatestCache();
-  for (const id of ['kimi', 'qwen', 'hermes']) clearHarnessRecoveryBlocked(id);
+  for (const id of ['kimi', 'qwen']) clearHarnessRecoveryBlocked(id);
 });
 
 const deps = {
   hasLiveSession: () => false,
-  hasUnregisteredLaunch: async () => false,
+  hasUnregisteredLaunch: async () => null,
   pinEnabled: () => false,
   audit: () => {},
   // QWEN_PATH inside the (case-local) HOME prefix: never PATH-resolve a real install.
   cleanEnv: () => ({
-    PATH: '/usr/bin', HERMES_PATH: '/home/user/bin/hermes',
+    PATH: '/usr/bin',
     QWEN_PATH: path.join(SANDBOX_HOME, '.local', 'bin', 'qwen'),
   }),
 };
@@ -126,45 +126,4 @@ test('the npm RECOVERY reinstall keeps TMPDIR=/var/tmp too', async () => {
   assert.ok(npmCalls[1].args.includes('@qwen-code/qwen-code@0.42.0'), 'recovery pins the captured version');
   assert.equal(npmCalls[1].opts.env?.TMPDIR, '/var/tmp', 'recovery spawns under /var/tmp as well');
   assert.equal(getHarnessUpdateJob(job.jobId)!.error?.code, 'update_failed');
-});
-
-test('hermes: `hermes update` runs in the checkout with HERMES_HOME isolation', async () => {
-  const job = await startHarnessUpdate('hermes', { deps });
-  await _awaitHarnessJob(job.jobId);
-
-  const checkout = resolveHermesCheckoutDir();
-  const revParse = calls.find((c) => c.cmd === 'git' && c.args[0] === 'rev-parse');
-  assert.ok(revParse, 'the pre-update revision is captured before the update');
-  assert.equal(revParse!.opts.cwd, checkout);
-
-  const update = calls.find((c) => c.args[0] === 'update');
-  assert.ok(update, 'the hermes updater was spawned');
-  assert.deepEqual(update!.args, ['update', '--yes']);
-  assert.equal(update!.opts.cwd, checkout, 'it runs INSIDE the git checkout');
-  assert.ok(
-    typeof update!.opts.env?.HERMES_HOME === 'string' && update!.opts.env.HERMES_HOME.endsWith('/.hermes'),
-    'HERMES_HOME isolation reaches the spawned updater',
-  );
-});
-
-test('hermes failure rolls the checkout back to the captured revision', async () => {
-  {
-    const hermesBin = HARNESS_UPDATE_DESCRIPTORS.hermes.resolveBinary();
-    exitCodes.set(hermesBin, [1]); // `hermes update` fails
-
-    const job = await startHarnessUpdate('hermes', { deps });
-    await _awaitHarnessJob(job.jobId);
-
-    const checkout = resolveHermesCheckoutDir();
-    const reset = calls.find((c) => c.cmd === 'git' && c.args[0] === 'reset');
-    assert.ok(reset, 'recovery ran git reset --hard');
-    assert.deepEqual(reset!.args, ['reset', '--hard', 'd'.repeat(40)]);
-    assert.equal(reset!.opts.cwd, checkout);
-
-    const reinstall = calls.find((c) => c.args[0] === 'pip');
-    assert.ok(reinstall, 'recovery reinstalled the venv with uv');
-    assert.deepEqual(reinstall!.args.slice(0, 2), ['pip', 'install']);
-    assert.equal(reinstall!.opts.cwd, checkout);
-    assert.equal(getHarnessUpdateJob(job.jobId)!.status, 'failed');
-  }
 });

@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ListChecks } from 'lucide-react';
 
 import { formatObservedCount, ObservedSkillCount, ObservedSkillsList } from '../../../participants/ObservedSkills';
 import { cn } from '../../../../lib/utils';
@@ -35,7 +36,7 @@ import type { RunAgent, RunProgress } from '../../hooks/useRunProgress';
 import type { WorkflowUiDescriptor } from '../../../../stores/workflowStatus';
 
 import ClaudeStatus from './ClaudeStatus';
-import { RunStatusActions, RunStatusIdentityLabel } from './RunStatusViewerActions';
+import { RunStatusActions, RunStatusIdentityLabel, RunStatusSteerHint } from './RunStatusViewerActions';
 
 // ── ثوابت مشتركة مع ClaudeStatus ─────────────────────────────────────────────
 const ACTION_KEYS = [
@@ -350,6 +351,8 @@ type AgentStatusCardProps = {
   runActiveOverride?: boolean;
   /** T-1904 e2e (BLOCKER) — see ClaudeStatus.tsx. Fail-closed; defaults true (legacy solo). */
   isConfirmedStarter?: boolean;
+  /** T-1956 — see ClaudeStatus.tsx. Reaches both ClaudeStatus and MergedCard. */
+  showSteerHint?: boolean;
 };
 
 // ── البطاقة الموحّدة — تُعرض فقط حين agents.length > 0 ──────────────────────
@@ -368,6 +371,7 @@ function MergedCard({
   steerable = false,
   onSteerClick,
   isConfirmedStarter = true,
+  showSteerHint = false,
 }: AgentStatusCardProps) {
   const isViewer = viewerStarterName != null;
   const { t, i18n } = useTranslation('chat');
@@ -774,25 +778,25 @@ function MergedCard({
                 })}
           </span>
 
-          {/* زر الإجراء الوحيد — STOP للبادئ أو التوجيه لغير البادئ، مستقلّ لا
-              يُطلق toggle. قطعة مشتركة مع ClaudeStatus (RunStatusViewerActions.tsx):
-              لا مسار يُظهر STOP لغير البادئ، بصرف النظر عن canInterrupt. */}
-          <RunStatusActions
-            canStop={canInterrupt}
-            onAbort={onAbort}
-            steerable={steerable}
-            onSteerClick={onSteerClick}
-            t={t}
-            isArabic={Boolean(i18n.language?.startsWith('ar'))}
-          />
-
           {/* تبديل إخفاء/إظهار المكتمل — مستقلّ لا يُطلق toggle البطاقة.
-              يظهر فقط حين توجد صفوف مكتملة فعلاً؛ لا فائدة من زر بلا أثر. */}
+              يظهر فقط حين توجد صفوف مكتملة فعلاً؛ لا فائدة من زر بلا أثر.
+              أيقونة + شارة عدد بدل النصّ الطويل (كان يُزاحم الشريط)؛ نفس
+              نصوص aria/title المترجمة (ar/en) محفوظة لقارئ الشاشة والتلميح. */}
           {completedCount > 0 && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); toggleHideCompleted(); }}
               aria-pressed={hideCompleted}
+              title={
+                hideCompleted
+                  ? t('agentActivity.showCompleted', {
+                      count: completedCount,
+                      defaultValue: 'Show completed ({{count}})',
+                    })
+                  : t('agentActivity.hideCompleted', {
+                      defaultValue: 'Hide completed',
+                    })
+              }
               aria-label={
                 hideCompleted
                   ? t('agentActivity.showCompletedAria', {
@@ -802,21 +806,17 @@ function MergedCard({
                       defaultValue: 'Hide completed agents',
                     })
               }
-              className={[
-                'hidden shrink-0 items-center rounded-md bg-muted/50 px-2 py-0.5 sm:flex',
-                'text-[10px] font-medium text-muted-foreground',
-                'transition-colors hover:bg-muted/70',
+              className={cn(
+                'hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 sm:flex',
+                'text-[10px] font-medium tabular-nums transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-              ].join(' ')}
+                hideCompleted
+                  ? 'bg-muted/50 text-muted-foreground hover:bg-muted/70'
+                  : 'bg-primary/15 text-primary hover:bg-primary/25',
+              )}
             >
-              {hideCompleted
-                ? t('agentActivity.showCompleted', {
-                    count: completedCount,
-                    defaultValue: 'Show completed ({{count}})',
-                  })
-                : t('agentActivity.hideCompleted', {
-                    defaultValue: 'Hide completed',
-                  })}
+              <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>{localeNum(completedCount)}</span>
             </button>
           )}
 
@@ -859,6 +859,23 @@ function MergedCard({
               />
             </svg>
           </button>
+
+          {/* زر الإجراء الوحيد — STOP للبادئ أو التوجيه لغير البادئ، مستقلّ لا
+              يُطلق toggle. قطعة مشتركة مع ClaudeStatus (RunStatusViewerActions.tsx):
+              لا مسار يُظهر STOP لغير البادئ، بصرف النظر عن canInterrupt.
+              آخر عنصر في الصفّ عمداً (ms-auto) — أقصى اليسار في RTL، بعيداً عن
+              أزرار الطيّ/الإخفاء كي لا يُضغط بالخطأ (طلب المالك 2026-10-02). */}
+          <RunStatusSteerHint show={showSteerHint} t={t} />
+          <div className="ms-auto flex shrink-0 items-center gap-1.5">
+            <RunStatusActions
+              canStop={canInterrupt}
+              onAbort={onAbort}
+              steerable={steerable}
+              onSteerClick={onSteerClick}
+              t={t}
+              isArabic={Boolean(i18n.language?.startsWith('ar'))}
+            />
+          </div>
         </div>
 
         {/* ── صفوف الوكلاء (قابلة للطيّ) ───────────────────────────────────── */}
@@ -913,6 +930,7 @@ export default function AgentStatusCard(props: AgentStatusCardProps) {
         onSteerClick={props.onSteerClick}
         runActiveOverride={props.runActiveOverride}
         isConfirmedStarter={props.isConfirmedStarter}
+        showSteerHint={props.showSteerHint}
       />
     );
   }

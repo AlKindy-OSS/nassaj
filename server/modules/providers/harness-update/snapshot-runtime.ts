@@ -29,6 +29,7 @@ import {
   defaultRunVersion,
   runHarnessUpdateCommand,
   type RunCommandOptions,
+  type UnregisteredLaunch,
 } from './run-command.js';
 import { isUpdaterGroupAlive, killUpdaterGroup, type UpdaterGroup } from './harness-lock.js';
 import { snapshotError } from './snapshot/errors.js';
@@ -71,7 +72,7 @@ export interface SnapshotRuntime {
   runCommand: (cmd: string, args: string[], opts: RunCommandOptions) => Promise<RunResult>;
   cleanEnv: () => NodeJS.ProcessEnv;
   hasLiveSession: (providerIds: string[]) => boolean;
-  hasUnregisteredLaunch: (providerIds: string[]) => Promise<boolean>;
+  hasUnregisteredLaunch: (providerIds: string[]) => Promise<UnregisteredLaunch>;
   assertNoHolders: (paths: string[]) => void;
   statfs?: StatfsFn;
   deviceOf?: (p: string) => number;

@@ -60,6 +60,7 @@ import {
 import { OFFICIAL_ENGINE, PIN_SOURCE } from '@/services/isolation/engine-pin.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
+import { isVendorSecretProvider } from '@/services/isolation/provider-secrets-store.js';
 import { coerceUserId } from '@/modules/projects/index.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import type {
@@ -83,7 +84,13 @@ import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissi
 import {
   ELIGIBLE_ENGINE_PROVIDERS,
   type EligibleEngineProviderId,
+  isEngineProviderEligible,
 } from '../../../shared/engineProviders.js';
+import {
+  PROVIDER_REMOVED_CODE,
+  PROVIDER_REMOVED_MESSAGE,
+  isRetiredProvider,
+} from '../../../shared/retiredProviders.js';
 
 import localModelsRoutes from './local-models.routes.js';
 import { HistoryHttpSink } from './services/history-response.service.js';
@@ -873,6 +880,39 @@ const parseProvider = (value: unknown): LLMProvider => {
   });
 };
 
+/**
+ * T-1953: `/:provider/...` routes split by what the path id means there. An id
+ * retired AS A BODY (shared/retiredProviders.ts) gets the typed 400
+ * `provider_removed` on every route that configures or drives the body, and
+ * keeps answering on the two surfaces where the same id has a live non-body
+ * meaning. `parseProvider` itself is unchanged: history routes and the engine
+ * re-stamp route still accept every known id.
+ */
+const refuseRetiredBody = (provider: LLMProvider, stillLive: boolean): LLMProvider => {
+  if (isRetiredProvider(provider) && !stillLive) {
+    throw new AppError(PROVIDER_REMOVED_MESSAGE, {
+      code: PROVIDER_REMOVED_CODE,
+      statusCode: 400,
+    });
+  }
+  return provider;
+};
+
+/** Body-only routes (governance, session model pin, skills, MCP): every retired body is refused. */
+const parseBodyProvider = (value: unknown): LLMProvider => refuseRetiredBody(parseProvider(value), false);
+
+/** Catalog and key-status routes: a retired body stays live when it is an eligible engine (kimi). */
+const parseBodyOrEngineProvider = (value: unknown): LLMProvider => {
+  const provider = parseProvider(value);
+  return refuseRetiredBody(provider, isEngineProviderEligible(provider));
+};
+
+/** Key routes: a retired body stays live when it still owns a vendor key slot (kimi, qwen). */
+const parseBodyOrKeySlotProvider = (value: unknown): LLMProvider => {
+  const provider = parseProvider(value);
+  return refuseRetiredBody(provider, isVendorSecretProvider(provider));
+};
+
 const parseSessionRenameSummary = (payload: unknown): string => {
   if (!payload || typeof payload !== 'object') {
     throw new AppError('Request body must be an object.', {
@@ -1128,7 +1168,7 @@ const STUB_API_PROVIDERS = new Set<string>(['sakana']);
 router.get(
   '/:provider/auth/status',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyOrEngineProvider(req.params.provider);
     const userId = (req as Request & { user?: { id?: string | number } }).user?.id ?? null;
 
     // Stub API providers: no CLI to probe — always not-configured.
@@ -1315,7 +1355,7 @@ router.get(
 
 // POST and PUT are equivalent here: both upsert the key (set-or-replace).
 const setProviderApiKey = asyncHandler(async (req: Request, res: Response) => {
-  const provider = parseProvider(req.params.provider);
+  const provider = parseBodyOrKeySlotProvider(req.params.provider);
   if (providerCredentialsService.getCapability(provider).method === 'none') {
     throw new AppError(`Provider "${provider}" is configured from the terminal only.`, {
       code: 'TERMINAL_ONLY',
@@ -1347,7 +1387,7 @@ router.put('/:provider/api-key', setProviderApiKey);
 router.delete(
   '/:provider/api-key',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyOrKeySlotProvider(req.params.provider);
     if (providerCredentialsService.getCapability(provider).method === 'none') {
       throw new AppError(`Provider "${provider}" is configured from the terminal only.`, {
         code: 'TERMINAL_ONLY',
@@ -1371,7 +1411,7 @@ router.delete(
 router.get(
   '/:provider/api-key',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyOrKeySlotProvider(req.params.provider);
     const userId = readAuthenticatedUserId(req);
     const target = readOptionalTarget(req.query.target);
     const result = await providerCredentialsService.getStatus(userId, provider, target);
@@ -1386,7 +1426,7 @@ router.get(
 router.get(
   '/:provider/api-key/capability',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyOrKeySlotProvider(req.params.provider);
     const capability = providerCredentialsService.getCapability(provider);
     res.json(createApiSuccessResponse({ provider, ...capability }));
   }),
@@ -1408,7 +1448,7 @@ router.get(
 router.get(
   '/:provider/governance',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const userId = readAuthenticatedUserId(req);
     const governance = providerGovernanceService.getGovernance(provider, userId);
     // The link affordance is decided HERE and shipped as data, never re-derived in
@@ -1436,7 +1476,7 @@ router.get(
 router.post(
   '/:provider/governance/link',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const userId = readAuthenticatedUserId(req);
     assertGovernanceLinkAllowed(req, provider, userId);
 
@@ -1464,7 +1504,7 @@ router.post(
 router.get(
   '/:provider/models',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyOrEngineProvider(req.params.provider);
     const bypassCache = parseOptionalBooleanQuery(req.query.bypassCache, 'bypassCache') ?? false;
     // Forward the authenticated user so a credential-isolating provider (Claude)
     // probes its catalog under THIS user's subscription and caches it per user.
@@ -1502,7 +1542,7 @@ router.get(
 router.post(
   '/:provider/sessions/:sessionId/active-model',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const sessionId = parseSessionId(req.params.sessionId);
     const accessFence = captureSessionRequestFence(req, sessionId, 'write');
     const payload = parseChangeActiveModelPayload(req.body);
@@ -1714,7 +1754,7 @@ router.post(
 router.get(
   '/:provider/sessions/:sessionId/active-model',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const sessionId = parseSessionId(req.params.sessionId);
     const accessFence = captureSessionRequestFence(req, sessionId, 'read');
 
@@ -1786,7 +1826,7 @@ router.get(
 router.delete(
   '/:provider/sessions/:sessionId/active-model',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const sessionId = parseSessionId(req.params.sessionId);
     const accessFence = captureSessionRequestFence(req, sessionId, 'write');
 
@@ -1930,7 +1970,7 @@ const redactSkillHomePath = <T extends { sourcePath: string }>(skill: T): T => {
 router.get(
   '/:provider/skills',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const workspacePath = readOptionalQueryString(req.query.workspacePath);
     // ADR-172 (qa #8, found by the route probe): under enforcement a workspace
     // inside a project the caller cannot access must not list its skills.
@@ -1985,7 +2025,7 @@ router.post(
         statusCode: 403,
       });
     }
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const input = parseProviderSkillCreatePayload(req.body);
     const skills = await providerSkillsService.addProviderSkills(provider, {
       ...input,
@@ -2007,7 +2047,7 @@ router.delete(
         statusCode: 403,
       });
     }
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const name = readPathParam(req.params.name, 'name');
     const skill = await providerSkillsService.removeProviderSkill(provider, name, {
       userId: readAuthenticatedUserId(req),
@@ -2028,7 +2068,7 @@ router.delete(
 router.get(
   '/:provider/mcp/servers',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const scope = parseMcpScope(req.query.scope);
     const userId = readAuthenticatedUserId(req);
 
@@ -2096,7 +2136,7 @@ router.get(
 router.get(
   '/:provider/mcp/servers/inventory',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const role = readAuthenticatedUserRole(req);
     if (role !== 'owner' && role !== 'admin') {
       throw new AppError('Listing every member\'s MCP servers requires an admin or owner.', {
@@ -2124,7 +2164,7 @@ router.get(
 router.post(
   '/:provider/mcp/servers',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     const payload = parseMcpUpsertPayload(req.body);
     // Mirrors the service default (McpProvider.upsertServer: `input.scope ?? 'project'`).
     const scope = payload.scope ?? 'project';
@@ -2157,7 +2197,7 @@ router.post(
 router.delete(
   '/:provider/mcp/servers/:name',
   asyncHandler(async (req: Request, res: Response) => {
-    const provider = parseProvider(req.params.provider);
+    const provider = parseBodyProvider(req.params.provider);
     // Mirrors the service default (McpProvider.removeServer: `input.scope ?? 'project'`).
     const scope = parseMcpScope(req.query.scope) ?? 'project';
     // B-345: removal is a write too — silently deleting another member's server

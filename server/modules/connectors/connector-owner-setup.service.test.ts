@@ -93,3 +93,22 @@ test('status surfaces packExpiresAt and warns pack_expiring_soon within 7 days o
   assert.equal(soon.packExpiresAt, new Date(NOW + 3 * 86_400_000).toISOString());
   assert.deepEqual(build(NOW + 20 * 86_400_000).warnings, []);
 });
+
+test('B-1461: status exposes the origin proposal only while no origin is persisted', () => {
+  const database = new Database(':memory:'); const setup = new ConnectorSetupStore(database);
+  try {
+    database.exec(`CREATE TABLE connector_runtime_control (singleton INTEGER PRIMARY KEY,writer_epoch INTEGER);
+      INSERT INTO connector_runtime_control VALUES(1,1);`);
+    const proposal = { canonicalOrigin: 'https://nassaj.example', source: 'oidc_redirect_uri' as const };
+    let persisted: unknown = null;
+    const service = (readProposal: () => typeof proposal | null) => new ConnectorOwnerSetupService(database,
+      'install-1', ConnectorRuntimeAuthority.create(Buffer.alloc(32, 3)), setup,
+      { read: () => persisted } as never, (_advance, effect) => { effect(); return true; }, () => NOW,
+      undefined, readProposal);
+    assert.deepEqual(service(() => proposal).status().originProposal, proposal);
+    assert.equal(service(() => { throw new Error('private'); }).status().originProposal, null);
+    persisted = { installationId: 'install-1', canonicalOrigin: 'https://nassaj.example',
+      callbackUrl: 'https://nassaj.example/connectors/oauth/callback', originRevision: 1 };
+    assert.equal(service(() => proposal).status().originProposal, null);
+  } finally { database.close(); }
+});

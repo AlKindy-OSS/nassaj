@@ -64,7 +64,7 @@ export function classifyProcess(cmdline) {
   if (/\bvite build|next build|tsc\b|esbuild|rollup|webpack|npm run build/i.test(c)) return 'build';
   // وكيل فرعي: عملية CLI ابنة تحمل وسم مهمّة/وكيل. تُفحص بعد المتصفّح والاختبار
   // كي لا تبتلع متصفّحاً أطلقه وكيل.
-  if (/\b(claude|agy|codex|kimi|opencode|hermes)\b/i.test(c)) return 'agent';
+  if (/\b(claude|agy|codex|kimi|opencode)\b/i.test(c)) return 'agent';
   return 'other';
 }
 

@@ -535,12 +535,10 @@
     "providerInfo": {
       "anthropic": "by Anthropic",
       "openai": "by OpenAI",
-      "cursorEditor": "AI Code Editor",
       "google": "by Google"
     },
     "readyPrompt": {
       "claude": "Ready to use Claude with {{model}}. Start typing your message below.",
-      "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
       "antigravity": "Ready to use Antigravity (agy) with {{model}}. Start typing your message below.",
       "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
@@ -549,7 +547,6 @@
       "deepseek": "Ready to use DeepSeek with {{model}}. Start typing your message below.",
       "glm": "Ready to use GLM with {{model}}. Start typing your message below.",
       "claudeEngine": "Ready: the Claude engine runs on {{provider}} with {{model}}. Start typing your message below.",
-      "hermes": "Ready with Hermes {{model}}",
       "sakana": "Ready with Sakana"
     },
     "antigravity": {
@@ -780,6 +777,9 @@
     "harnessLine": "Harness: {{harness}}",
     "olderModels_one": "{{count}} earlier model",
     "olderModels_other": "{{count}} earlier models"
+  },
+  "composer": {
+    "replyInProgress": "The agent is working now — wait for the reply to finish or stop it to send your message."
   },
   "ws": {
     "statusConnected": "Connected",
@@ -1172,6 +1172,7 @@
     },
     "composerNote": "Counted against {{starter}}’s quota",
     "composerNoteSelf": "Type /steer followed by your message to deliver it into your running turn.",
+    "hintLabel": "Steering hint",
     "errors": {
       "invalid_request": "Couldn't send the steer — invalid request.",
       "not_writable": "You don't have write access to this session.",

@@ -4,7 +4,7 @@
  * an update / failed recovery / boot reconcile and notes it in the durable
  * spawn ledger. Three layers:
  *   1. an enumeration of the spawn sites PER HARNESS (GLM carrier, kimi,
- *      workflow/agent runs, qwen, hermes, …) and the guard each one calls;
+ *      workflow/agent runs, qwen, …) and the guard each one calls;
  *   2. a discovery sweep: any server file that resolves a harness binary and
  *      spawns must be enumerated or explicitly exempted — a new bypass fails;
  *   3. behaviour: each guard form notes the spawn in the ledger.
@@ -78,10 +78,6 @@ const SPAWN_SITES: Readonly<Record<string, ReadonlyArray<{ file: string; needle:
     { file: 'qwen-cli.js', needle: "beginHarnessLaunch('qwen')" },
     { file: 'modules/turn-supervisor/cli-capability.ts', needle: "beginHarnessLaunch('qwen')" },
   ],
-  hermes: [
-    { file: 'hermes-cli.js', needle: "beginHarnessLaunch('hermes')" },
-    { file: 'modules/turn-supervisor/cli-capability.ts', needle: "beginHarnessLaunch('hermes')" },
-  ],
   // Hosted vendor runtimes (glm/kimi chat, deepseek) register through beginProviderRun.
   vendor: [
     { file: 'modules/providers/shared/vendor/vendor-runtime.js', needle: 'beginProviderRun(' },
@@ -104,7 +100,7 @@ const EXEMPT: Readonly<Record<string, string>> = {
 };
 
 const ADMISSION = /beginHarnessLaunch\(|assertHarnessNotUpdating\(|refuseSpawnIfHarnessUpdating\(|isSpawnBlockedForRunProvider\(|beginProviderRun\(/;
-const RESOLVES_HARNESS = /resolveCliExecutablePath\(|resolveClaudeCodeExecutablePath|resolve(Kimi|Cursor|Qwen|OpenCode\w*|Agy\w*|Hermes\w*|Codex\w*)Binary\w*|claude-agent-sdk['"]/;
+const RESOLVES_HARNESS = /resolveCliExecutablePath\(|resolveClaudeCodeExecutablePath|resolve(Kimi|Cursor|Qwen|OpenCode\w*|Agy\w*|Codex\w*)Binary\w*|claude-agent-sdk['"]/;
 const SPAWNS = /\bspawn(Sync)?\(|execFile(Sync)?\(|pty\.spawn\(|\bquery\(|spawnFn\(|spawnFunction\(|crossSpawn\(/;
 
 function read(rel: string): string {

@@ -1,8 +1,8 @@
 /**
  * T-1854 (qa H1b): every provider launcher reads `runFenceRevoked` at its last
  * pre-spawn point — no `await` may sit between that guard and the spawn/fetch,
- * or a revocation could land in between. The four H1 providers are also swept
- * dynamically (agy/hermes/qwen/vendor *.run-fence.test.ts); this structural
+ * or a revocation could land in between. The H1 providers are also swept
+ * dynamically (agy/qwen/vendor *.run-fence.test.ts); this structural
  * check keeps cursor, opencode and kimi-agent consistent with them.
  */
 import assert from 'node:assert/strict';
@@ -14,7 +14,6 @@ const SERVER_ROOT = import.meta.dirname;
 
 const LAUNCHERS: Array<[file: string, spawnMarker: string]> = [
   ['agy-cli.js', 'agProcess = spawn(agyLaunch.cmd'],
-  ['hermes-cli.js', 'hermesProcess = spawnFunction(hermesLaunch.cmd'],
   ['qwen-cli.js', 'child = spawnFunction(launch.cmd'],
   ['modules/providers/shared/vendor/vendor-runtime.js', 'await fetch(config.messagesUrl'],
   ['cursor-cli.js', "runCursorProcess(baseArgs, 'initial')"],

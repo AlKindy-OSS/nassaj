@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
 
+import { probeUserWorkflowUnits, UserUnitProbeError, type UserUnitProbe } from '@/modules/workflow-supervisor/index.js';
 import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -17,6 +18,7 @@ import {
   isHarnessRecoveryBlocked,
 } from './spawn-admission.js';
 import { _resetHarnessLeases, isHarnessLeased } from './lease.js';
+import { defaultHasUnregisteredLaunch } from './run-command.js';
 import {
   _awaitHarnessJob,
   _resetHarnessJobs,
@@ -34,7 +36,7 @@ function reset(): void {
   _resetHarnessLeases();
   _resetHarnessJobs();
   _resetHarnessLaunches();
-  for (const id of ['kimi', 'qwen', 'hermes']) clearHarnessRecoveryBlocked(id);
+  for (const id of ['kimi', 'qwen']) clearHarnessRecoveryBlocked(id);
 }
 
 interface Recorder {
@@ -52,16 +54,16 @@ function recorder(): Recorder {
  * the case dir): qwen would otherwise resolve through PATH to a real install.
  */
 const QWEN_FIXTURE_PATH = path.join(SANDBOX_HOME, '.local', 'bin', 'qwen');
-// T-1873: the registry only resolves an installed CLI; lay the npm / git
-// harness launchers out under the test HOME exactly as measured.
-// kimi is a native snapshot harness (ADR-189); the legacy npm/git flows here
-// are exercised through qwen and hermes.
-for (const id of ['qwen', 'hermes'] as const) installFakeHarnessBinary(SANDBOX_HOME, id);
+// T-1873: the registry only resolves an installed CLI; lay the npm harness
+// launcher out under the test HOME exactly as measured.
+// kimi is a native snapshot harness (ADR-189); the legacy npm flow here is
+// exercised through qwen.
+installFakeHarnessBinary(SANDBOX_HOME, 'qwen');
 
 const depsFor = (rec: Recorder, over: Partial<UpdateServiceDeps> = {}): UpdateServiceDeps => ({
   cleanEnv: () => ({ PATH: '/usr/bin:/bin', QWEN_PATH: QWEN_FIXTURE_PATH }),
   hasLiveSession: () => false,
-  hasUnregisteredLaunch: async () => false,
+  hasUnregisteredLaunch: async () => null,
   pinEnabled: () => false,
   runCommand: async (cmd, args, opts) => {
     rec.commands.push({ cmd, args, env: opts.env });
@@ -248,7 +250,7 @@ test('an UNREGISTERED launch blocks the update admission atomically', async () =
   let versionCall = 0;
   const after = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, {
-      hasUnregisteredLaunch: async () => false,
+      hasUnregisteredLaunch: async () => null,
       runVersion: async () => (versionCall++ === 0 ? '1.0.0' : '1.1.0'),
     }),
   });
@@ -265,7 +267,92 @@ test('a gate that cannot answer fails CLOSED (never updates under a live turn)',
     }),
   });
   assert.equal(job.status, 'skipped_live_session');
+  assert.equal(job.error?.code, 'live_gate_unverifiable');
   assert.equal(rec.commands.length, 0);
+  assert.equal(isHarnessLeased('qwen'), false);
+});
+
+test('B-1474: a probe error names the unit_probe leg with a short cause only', async () => {
+  reset();
+  const rec = recorder();
+  const job = await startHarnessUpdate('qwen', {
+    userId: 3,
+    deps: depsFor(rec, {
+      hasUnregisteredLaunch: async () => { throw new UserUnitProbeError('systemctl_failed', 'Failed to connect to bus: secret-ish'); },
+    }),
+  });
+  assert.equal(job.error?.code, 'live_gate_unverifiable');
+  assert.doesNotMatch(JSON.stringify(job), /secret-ish/);
+  const skipped = rec.audits.filter((a) => a.action === 'harness_update_skipped');
+  assert.deepEqual(skipped.map((a) => a.metadata), [
+    { provider: 'qwen', kind: 'gate_unverifiable', leg: 'unit_probe', cause: 'systemctl_failed' },
+  ]);
+  assert.equal(rec.commands.length, 0);
+});
+
+test('B-1474: an unclassified fault inside the real probe is still attributed to unit_probe', async () => {
+  reset();
+  const rec = recorder();
+  const brokenProbe = () => probeUserWorkflowUnits({
+    platform: 'linux', systemdRoot: '/', getuid: () => { throw new TypeError('unexpected'); },
+  });
+  const job = await startHarnessUpdate('qwen', {
+    userId: 3,
+    deps: depsFor(rec, { hasUnregisteredLaunch: (ids) => defaultHasUnregisteredLaunch([...ids, 'claude'], brokenProbe) }),
+  });
+  assert.equal(job.error?.code, 'live_gate_unverifiable');
+  const skipped = rec.audits.filter((a) => a.action === 'harness_update_skipped');
+  assert.deepEqual(skipped.map((a) => a.metadata), [
+    { provider: 'qwen', kind: 'gate_unverifiable', leg: 'unit_probe', cause: 'probe_failed' },
+  ]);
+  assert.equal(rec.commands.length, 0);
+});
+
+test('B-1474: a scheduler-triggered skip writes no audit row', async () => {
+  reset();
+  const rec = recorder();
+  const job = await startHarnessUpdate('qwen', {
+    trigger: 'scheduler',
+    deps: depsFor(rec, { hasLiveSession: () => true }),
+  });
+  assert.equal(job.error?.code, 'live_session_active');
+  assert.equal(rec.audits.length, 0);
+});
+
+test('B-1474: no user manager for this uid (manager_absent) lets the update proceed', async () => {
+  reset();
+  const rec = recorder();
+  let versionCall = 0;
+  const job = await startHarnessUpdate('qwen', {
+    deps: depsFor(rec, {
+      // Force the claude leg so the injected probe is consulted.
+      hasUnregisteredLaunch: (ids) => defaultHasUnregisteredLaunch([...ids, 'claude'], async () => ({ state: 'manager_absent' })),
+      runVersion: async () => (versionCall++ === 0 ? '1.0.0' : '1.1.0'),
+    }),
+  });
+  assert.equal(job.status, 'running');
+  await _awaitHarnessJob(job.jobId);
+  assert.equal(getHarnessUpdateJob(job.jobId)!.status, 'succeeded');
+});
+
+test('B-1474: defaultHasUnregisteredLaunch maps each probe verdict', async () => {
+  reset();
+  const probe = (p: UserUnitProbe) => async () => p;
+  assert.equal(await defaultHasUnregisteredLaunch(['claude'], probe({ state: 'manager_absent' })), null);
+  assert.equal(await defaultHasUnregisteredLaunch(['claude'], probe({ state: 'no_systemd' })), null);
+  assert.equal(await defaultHasUnregisteredLaunch(['claude'], probe({ state: 'unsupported' })), null);
+  assert.equal(await defaultHasUnregisteredLaunch(['claude'], probe({ state: 'present', units: [] })), null);
+  assert.equal(await defaultHasUnregisteredLaunch(['claude'], probe({ state: 'present', units: ['wf-a.service'] })), 'live_unit');
+  let probed = false;
+  assert.equal(await defaultHasUnregisteredLaunch(['qwen'], async () => { probed = true; return { state: 'manager_absent' }; }), null);
+  assert.equal(probed, false, 'non-claude harnesses never probe systemd');
+  await assert.rejects(
+    () => defaultHasUnregisteredLaunch(['claude'], async () => { throw new UserUnitProbeError('timeout'); }),
+    UserUnitProbeError,
+  );
+  const release = beginHarnessLaunch('claude');
+  assert.equal(await defaultHasUnregisteredLaunch(['claude'], probe({ state: 'manager_absent' })), 'live_launch');
+  release();
 });
 
 test('single-flight: a second update while one runs throws 409 with activeJobId', async () => {
@@ -433,28 +520,6 @@ test('an installation without an exact prior version is refused before update', 
   assert.equal(rec.commands.length, 0);
 });
 
-test('a dirty git installation is refused without reset or update', async () => {
-  reset();
-  const rec = recorder();
-  const exactRevision = 'a'.repeat(40);
-  const job = await startHarnessUpdate('hermes', {
-    deps: depsFor(rec, {
-      cleanEnv: () => ({ PATH: '/usr/bin', HERMES_PATH: '/home/user/bin/hermes' }),
-      runVersion: async () => 'Hermes Agent v0.17.0',
-      runCommand: async (cmd, args, opts) => {
-        rec.commands.push({ cmd, args, env: opts.env });
-        if (args[0] === 'rev-parse') return ok({ stdout: `${exactRevision}\n` });
-        if (args[0] === 'status') return ok({ stdout: ' M local-file\n' });
-        return ok();
-      },
-    }),
-  });
-  await _awaitHarnessJob(job.jobId);
-  assert.equal(getHarnessUpdateJob(job.jobId)!.error?.code, 'dirty_installation');
-  assert.equal(rec.commands.some((command) => command.args[0] === 'update'), false);
-  assert.equal(rec.commands.some((command) => command.args[0] === 'reset'), false);
-});
-
 test('a lease blocks new spawns of the same harness', async () => {
   reset();
   const rec = recorder();
@@ -466,7 +531,7 @@ test('a lease blocks new spawns of the same harness', async () => {
     deps: depsFor(rec, { runCommand: async () => pending }),
   });
   assert.equal(isHarnessSpawnBlocked('qwen'), true);
-  assert.equal(isHarnessSpawnBlocked('hermes'), false);
+  assert.equal(isHarnessSpawnBlocked('kimi'), false);
   release();
   await _awaitHarnessJob(job.jobId);
   assert.equal(isHarnessSpawnBlocked('qwen'), false);
@@ -479,73 +544,12 @@ test('unknown harness → 404, non-updatable harness → 400', async () => {
     assert.equal(e.statusCode, 404);
     return true;
   });
-  // hermes is updatable now (Addendum 3); glm has no CLI at all.
+  // glm has no CLI at all.
   await assert.rejects(() => startHarnessUpdate('glm'), (e: unknown) => {
     assert.ok(e instanceof AppError);
     assert.equal(e.statusCode, 400);
     return true;
   });
-});
-
-test('hermes updates through the git-shallow path (Addendum 3)', async () => {
-  reset();
-  const rec = recorder();
-  const job = await startHarnessUpdate('hermes', {
-    deps: depsFor(rec, {
-      cleanEnv: () => ({ PATH: '/usr/bin', HERMES_PATH: '/home/user/bin/hermes' }),
-      runVersion: (() => {
-        let call = 0;
-        return async () => (call++ === 0 ? 'Hermes Agent v0.17.0' : 'Hermes Agent v0.18.0');
-      })(),
-      runCommand: async (cmd, args, opts) => {
-        rec.commands.push({ cmd, args, env: opts.env });
-        return ok({ stdout: args[0] === 'rev-parse' ? `${'b'.repeat(40)}\n` : '' });
-      },
-    }),
-  });
-  await _awaitHarnessJob(job.jobId);
-  assert.equal(getHarnessUpdateJob(job.jobId)!.status, 'succeeded');
-  assert.deepEqual(rec.commands[0].args, ['rev-parse', '--verify', 'HEAD']);
-  assert.deepEqual(rec.commands[1].args, ['status', '--porcelain', '--untracked-files=normal']);
-  assert.deepEqual(rec.commands[2].args, ['rev-parse', '--verify', '@{upstream}']);
-  assert.deepEqual(rec.commands[3].args, ['update', '--yes']);
-});
-
-test('hermes uses one captured checkout for preflight, update, verification and recovery', async () => {
-  reset();
-  const descriptor = HARNESS_UPDATE_DESCRIPTORS.hermes;
-  const originalCheckout = descriptor.gitCheckoutDir;
-  const checkout = '/var/tmp/nassaj-hermes-override';
-  descriptor.gitCheckoutDir = checkout;
-  const commands: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
-  const versionBinaries: string[] = [];
-  try {
-    const job = await startHarnessUpdate('hermes', {
-      deps: depsFor(recorder(), {
-        cleanEnv: () => ({ PATH: '/usr/bin' }),
-        runVersion: async (binary) => {
-          versionBinaries.push(binary);
-          return 'Hermes Agent v0.17.0';
-        },
-        runCommand: async (cmd, args, opts) => {
-          commands.push({ cmd, args, cwd: opts.cwd });
-          if (args[0] === 'update') return ok({ code: 1 });
-          if (args[0] === 'rev-parse') return ok({ stdout: `${'c'.repeat(40)}\n` });
-          return ok();
-        },
-      }),
-    });
-    await _awaitHarnessJob(job.jobId);
-    assert.equal(getHarnessUpdateJob(job.jobId)!.error?.code, 'update_failed');
-    assert.deepEqual(new Set(versionBinaries), new Set([`${checkout}/venv/bin/hermes`]));
-    assert.ok(commands.every(({ cwd }) => cwd === checkout));
-    const update = commands.find(({ args }) => args[0] === 'update');
-    assert.equal(update?.cmd, `${checkout}/venv/bin/hermes`);
-    const reinstall = commands.find(({ args }) => args[0] === 'pip');
-    assert.ok(reinstall?.args.includes(`${checkout}/venv/bin/python`));
-  } finally {
-    descriptor.gitCheckoutDir = originalCheckout;
-  }
 });
 
 test('finished jobs are pruned: the store never grows past its cap (item 10)', async () => {

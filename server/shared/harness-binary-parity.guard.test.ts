@@ -4,7 +4,7 @@
  * (server/shared/harness-binaries.ts) resolves:
  *   (1) registry keys == every non-`no-cli` HARNESS_UPDATE_DESCRIPTORS id;
  *   (2) descriptor.resolveBinary / updateArgv target == the registry resolver
- *       (npm-prefix: prefix/bin/<bin>; hermes: the checkout the launcher execs);
+ *       (npm-prefix: prefix/bin/<bin>);
  *   (3) static AST check over the launch inventory: each harness spawn / exec /
  *       SDK executable option traces to the registry or a named allowlist entry;
  *   (4) PTY command lines start with the quoted resolver path;
@@ -40,7 +40,7 @@ const scratch = fs.mkdtempSync(path.join(scratchParent, 't1873-guard-'));
 const FAKE_HOME = path.join(scratch, 'home');
 const OVERRIDE_ENVS = [
   'CLAUDE_CLI_PATH', 'CODEX_PATH', 'AGY_PATH', 'CURSOR_PATH', 'OPENCODE_PATH',
-  'QWEN_PATH', 'KIMI_PATH', 'HERMES_PATH',
+  'QWEN_PATH', 'KIMI_PATH',
 ] as const;
 const savedEnv = Object.fromEntries(
   [...OVERRIDE_ENVS, 'HOME', 'NASSAJ_PROVIDER_CAGE', 'NASSAJ_VENDOR_BINARY_PIN'].map((key) => [key, process.env[key]]),
@@ -79,12 +79,6 @@ function buildFakeInstalls(home: string): void {
   );
   // kimi: the vendor's native install script puts one binary in ~/.kimi-code/bin.
   writeExecutable(path.join(home, '.kimi-code', 'bin', 'kimi'));
-  // hermes: the official installer's bash shim execs the checkout's venv CLI.
-  const venvHermes = writeExecutable(path.join(home, '.hermes', 'hermes-agent', 'venv', 'bin', 'hermes'));
-  writeExecutable(
-    path.join(local, 'bin', 'hermes'),
-    `#!/usr/bin/env bash\nunset PYTHONPATH\nexec "${venvHermes}" "$@"\n`,
-  );
 }
 
 buildFakeInstalls(FAKE_HOME);
@@ -179,7 +173,6 @@ describe('harness registry resolution rule', () => {
       opencode: fakePath('.opencode', 'bin', 'opencode'),
       qwen: fakePath('.local', 'bin', 'qwen'),
       kimi: fakePath('.kimi-code', 'bin', 'kimi'),
-      hermes: fakePath('.local', 'bin', 'hermes'),
     };
     assert.deepEqual([...registry.HARNESS_BINARY_IDS].sort(), Object.keys(expected).sort());
     for (const [id, file] of Object.entries(expected)) {
@@ -218,9 +211,9 @@ describe('harness registry resolution rule', () => {
   });
 
   test('a missing override fails instead of falling back to the measured path', () => {
-    withEnv({ HERMES_PATH: path.join(scratch, 'nope', 'hermes') }, () => {
+    withEnv({ KIMI_PATH: path.join(scratch, 'nope', 'kimi') }, () => {
       assert.throws(
-        () => registry.resolveHarnessBinary('hermes'),
+        () => registry.resolveHarnessBinary('kimi'),
         (error: unknown) => error instanceof registry.HarnessBinaryUnresolvedError
           && error.reason === 'override-not-runnable',
       );
@@ -333,6 +326,37 @@ describe('harness registry resolution rule', () => {
       ['opencode'],
     );
   });
+
+  test('boot check never warns about a retired body missing its CLI (T-1953)', () => {
+    const warnings: Array<{ message: string; details: Record<string, unknown> }> = [];
+    const warn = (message: string, details: Record<string, unknown>) => warnings.push({ message, details });
+    withHiddenFile(fakePath('.local', 'bin', 'cursor-agent'), () => {
+      withHiddenFile(fakePath('.local', 'bin', 'qwen'), () => {
+        withHiddenFile(fakePath('.kimi-code', 'bin', 'kimi'), () => {
+          const statuses = registry.logUnresolvedHarnessBinaries(warn);
+          for (const id of ['cursor', 'qwen', 'kimi']) {
+            assert.equal(statuses.find((status) => status.id === id)!.resolved, false, id);
+          }
+        });
+      });
+    });
+    assert.equal(warnings.length, 0);
+  });
+
+  test('boot check names only the non-retired harness when a retired body is also missing', () => {
+    const warnings: Array<{ message: string; details: Record<string, unknown> }> = [];
+    const warn = (message: string, details: Record<string, unknown>) => warnings.push({ message, details });
+    withHiddenFile(fakePath('.local', 'bin', 'qwen'), () => {
+      withHiddenFile(fakePath('.opencode', 'bin', 'opencode'), () => {
+        registry.logUnresolvedHarnessBinaries(warn);
+      });
+    });
+    assert.equal(warnings.length, 1);
+    assert.deepEqual(
+      (warnings[0].details.unresolved as Array<{ id: string }>).map((row) => row.id),
+      ['opencode'],
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -417,15 +441,6 @@ function registryParityViolations(descriptors: Readonly<Record<string, Descripto
   ];
 }
 
-/** The file a launcher finally execs: a symlink's target, or a bash shim's `exec "<path>"`. */
-function launcherExecTarget(launcher: string): string {
-  const stat = fs.lstatSync(launcher);
-  if (stat.isSymbolicLink()) return realpath(launcher);
-  const head = fs.readFileSync(launcher, 'utf8').slice(0, 4096);
-  const shimTarget = head.match(/^exec\s+"([^"]+)"/m)?.[1];
-  return realpath(shimTarget ?? launcher);
-}
-
 describe('(1) registry keys == every CLI harness descriptor', () => {
   test('the live descriptor table and the registry agree exactly', () => {
     assert.deepEqual(registryParityViolations(HARNESS_UPDATE_DESCRIPTORS), []);
@@ -494,13 +509,6 @@ describe('(2) descriptor resolver and update target == registry', () => {
     }
   });
 
-  test('hermes updates the checkout its launcher execs', () => {
-    const hermes = HARNESS_UPDATE_DESCRIPTORS.hermes;
-    const argv = hermes.updateArgv(process.env, { gitCheckoutDir: hermes.gitCheckoutDir })!;
-    assert.equal(realpath(argv.cmd), launcherExecTarget(registry.resolveHarnessBinary('hermes')));
-    assert.equal(argv.cwd, hermes.gitCheckoutDir);
-  });
-
   test('a descriptor resolver ignores a member env handed to it', () => {
     for (const d of cliDescriptors) {
       const call = d.resolveBinary as unknown as (env: NodeJS.ProcessEnv) => string;
@@ -536,7 +544,7 @@ const SPAWN_NAMES = new Set([
   'spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'spawnFunction', 'spawnRaw',
   'crossSpawn', 'spawnImpl', 'spawnFn', 'execImpl', 'execFileAsync', 'rawSpawn',
 ]);
-const HARNESS_COMMANDS = new Set(['claude', 'codex', 'agy', 'cursor-agent', 'opencode', 'qwen', 'kimi', 'hermes']);
+const HARNESS_COMMANDS = new Set(['claude', 'codex', 'agy', 'cursor-agent', 'opencode', 'qwen', 'kimi']);
 
 /**
  * Named allowlist: `file#sink` → reason. A sink is the source text of the
@@ -809,7 +817,7 @@ describe('(3) every harness launch site resolves through the registry', () => {
   test('the launch set is derived from the inventory and admission users', () => {
     const relative = files.map((file) => path.relative(SERVER_ROOT, file));
     for (const expected of [
-      'claude-sdk.js', 'cursor-cli.js', 'qwen-cli.js', 'hermes-cli.js', 'agy-cli.js', 'kimi-agent-cli.js',
+      'claude-sdk.js', 'cursor-cli.js', 'qwen-cli.js', 'agy-cli.js', 'kimi-agent-cli.js',
       'opencode-cli.js', 'modules/turn-supervisor/cli-capability.ts',
       'modules/turn-supervisor/adapters/extended-cli-adapter.ts',
       'modules/workflow-supervisor/resume-turn-runner.ts', 'modules/workflow-supervisor/systemd.ts',
@@ -924,7 +932,6 @@ describe('(4) PTY command lines start with the quoted registry path', async () =
   test('provider login commands', () => {
     const cases: Array<[string, string, string]> = [
       ['kimi', 'kimi login', 'kimi'],
-      ['hermes', 'hermes setup --portal', 'hermes'],
       ['cursor', 'cursor-agent login', 'cursor'],
       ['opencode', 'opencode auth login', 'opencode'],
       ['agy', 'agy', 'antigravity'],
@@ -1008,7 +1015,7 @@ function unwrapLaunch(cmd: string, args: readonly string[]): string {
 const MEMBER_ENV: NodeJS.ProcessEnv = Object.freeze({
   PATH: '/usr/bin:/bin',
   CLAUDE_CLI_PATH: '/evil/claude', KIMI_PATH: '/evil/kimi', QWEN_PATH: '/evil/qwen',
-  HERMES_PATH: '/evil/hermes', AGY_PATH: '/evil/agy', CURSOR_PATH: '/evil/cursor-agent',
+  AGY_PATH: '/evil/agy', CURSOR_PATH: '/evil/cursor-agent',
   OPENCODE_PATH: '/evil/opencode',
 });
 
@@ -1018,13 +1025,9 @@ describe('(5)+(6) launchers spawn the registry binary; member *_PATH is ignored'
     spawnCalls.length = 0;
     spawnSyncStdout = '0.21.12\n';
     installedMechanicalCliProbe('qwen', MEMBER_ENV);
-    installedMechanicalCliProbe('hermes', MEMBER_ENV);
     const commands = new Set(spawnCalls.map((call) => call.cmd));
     assert.ok(spawnCalls.length > 0);
-    assert.deepEqual(
-      [...commands].sort(),
-      [registry.resolveHarnessBinary('hermes'), registry.resolveHarnessBinary('qwen')].sort(),
-    );
+    assert.deepEqual([...commands], [registry.resolveHarnessBinary('qwen')]);
   });
 
   test('resume-turn runner (spawn) runs the registry claude, whatever the turn env says', async () => {
@@ -1078,11 +1081,11 @@ describe('(5)+(6) launchers spawn the registry binary; member *_PATH is ignored'
   test('extended CLI adapter pins the registry binary at probe time', async () => {
     const { createExtendedCliAdapter } = await import('../modules/turn-supervisor/adapters/extended-cli-adapter.js');
     const seen: string[] = [];
-    const adapter = createExtendedCliAdapter('hermes', {
+    const adapter = createExtendedCliAdapter('qwen', {
       executableProbe: async (binary: string) => { seen.push(binary); return false; },
     });
     await adapter.probe({ userId: 1 } as never);
-    assert.deepEqual(seen, [registry.resolveHarnessBinary('hermes')]);
+    assert.deepEqual(seen, [registry.resolveHarnessBinary('qwen')]);
     const missing = createExtendedCliAdapter('qwen', {
       executableProbe: async () => { throw new Error('must not probe an unresolved binary'); },
     });

@@ -3,14 +3,14 @@ import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { DEFAULT_PROJECT_FOR_EMPTY_SHELL } from '../../../constants/config';
-import type { LLMProvider } from '../../../types/app';
+import type { ActiveBodyProvider } from '../../../types/app';
 
 import ProviderLoginTerminal from './ProviderLoginTerminal';
 
 type ProviderLoginModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  provider?: LLMProvider;
+  provider?: ActiveBodyProvider;
   onComplete?: (exitCode: number) => void;
   customCommand?: string;
   isAuthenticated?: boolean;
@@ -21,7 +21,7 @@ const getProviderCommand = ({
   customCommand,
   isAuthenticated: _isAuthenticated,
 }: {
-  provider: LLMProvider;
+  provider: ActiveBodyProvider;
   customCommand?: string;
   isAuthenticated: boolean;
 }) => {
@@ -43,10 +43,6 @@ const getProviderCommand = ({
     return 'claude auth login';
   }
 
-  if (provider === 'cursor') {
-    return 'cursor-agent login';
-  }
-
   if (provider === 'codex') {
     // nassaj always runs on a remote server — the standard localhost:1455 callback
     // flow can never complete. Use --device-auth unconditionally: it prints a
@@ -57,25 +53,6 @@ const getProviderCommand = ({
 
   if (provider === 'opencode') {
     return 'opencode auth login';
-  }
-
-  if (provider === 'kimi') {
-    // ADR-062: kimi is BOTH an API-key vendor and a native-CLI agent
-    // (@moonshot-ai/kimi-code). The CLI's own auth is `kimi login` — a
-    // device-code flow (its --help: "Authenticate with Kimi Code CLI via the
-    // device-code flow"), which is the only way to link a Kimi SUBSCRIPTION
-    // rather than a metered API key. Must match PROVIDER_LOGIN_COMMAND_ALLOWLIST
-    // in shell-websocket.service.ts exactly.
-    return 'kimi login';
-  }
-
-  if (provider === 'hermes') {
-    // Bare `hermes` opens the interactive chat REPL, not an auth flow.
-    // `hermes setup --portal` runs the one-shot Nous Portal onboarding
-    // (OAuth login + pick a model + set Nous as provider) and skips the rest
-    // of the wizard, so it does not reconfigure existing terminal/tools setup.
-    // `hermes login` is deprecated and intentionally avoided.
-    return 'hermes setup --portal';
   }
 
   if (provider === 'antigravity') {
@@ -89,13 +66,10 @@ const getProviderCommand = ({
  * English fallbacks for the per-agent modal title. Brand and CLI names stay
  * latin in every locale — only the surrounding wording is translated.
  */
-const PROVIDER_TITLE_DEFAULTS: Partial<Record<LLMProvider, string>> = {
+const PROVIDER_TITLE_DEFAULTS: Partial<Record<ActiveBodyProvider, string>> = {
   claude: 'Claude CLI Login',
-  cursor: 'Cursor CLI Login',
   codex: 'Codex CLI Login',
   opencode: 'OpenCode CLI Login',
-  kimi: 'Kimi Code CLI Login',
-  hermes: 'Hermes Agent',
   antigravity: 'Antigravity (agy) Configuration',
 };
 
@@ -139,7 +113,7 @@ function InlineCode({ children }: { children?: ReactNode }) {
  * Claude's authorize-and-paste-back one.
  */
 const DEVICE_AUTH_NOTICES: Partial<
-  Record<LLMProvider, { title?: ReactNode; body: ReactNode[] }>
+  Record<ActiveBodyProvider, { title?: ReactNode; body: ReactNode[] }>
 > = {
   claude: {
     title: (
@@ -180,24 +154,6 @@ const DEVICE_AUTH_NOTICES: Partial<
         i18nKey="providerLogin.deviceAuth.codex.retry"
         defaults="Enable device code authorization for Codex in ChatGPT Security Settings, then run <cmd>codex login --device-auth</cmd> again."
         components={{ cmd: <InlineCode /> }}
-      />,
-    ],
-  },
-  kimi: {
-    body: [
-      <Trans
-        key="intro"
-        ns="settings"
-        i18nKey="providerLogin.deviceAuth.kimi.intro"
-        defaults="The terminal below runs <cmd>kimi login</cmd>, which prints a link and a device code. Open the link in your browser and enter the code to link your Kimi account — no localhost required."
-        components={{ cmd: <InlineCode /> }}
-      />,
-      <Trans
-        key="subscription"
-        ns="settings"
-        i18nKey="providerLogin.deviceAuth.kimi.subscription"
-        defaults="This links a Kimi <b>subscription</b>. If you would rather use a metered API key, skip this and set the key in the API-key panel on the account card instead."
-        components={{ b: <strong /> }}
       />,
     ],
   },

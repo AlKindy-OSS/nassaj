@@ -1,9 +1,9 @@
+import type { ActiveBodyProvider } from '../../../../../types/app';
 import type {
   AgentProvider,
   AuthStatus,
   AgentCategory,
   ClaudePermissionsState,
-  CursorPermissionsState,
   CodexPermissionMode,
   SettingsProject,
 } from '../../../types/types';
@@ -13,18 +13,20 @@ export type AgentContext = {
   onLogin: () => void;
 };
 
-export type AgentContextByProvider = Record<AgentProvider, AgentContext>;
-export type ProviderAuthStatusByProvider = Record<AgentProvider, AuthStatus>;
+// T-1953: keyed by ActiveBodyProvider, not the wider AgentProvider — a retired
+// body (cursor/hermes/qwen/kimi) has no auth-status row and no login command
+// left to key by. `AgentProvider` stays the type used for a settings TILE
+// (SETTINGS_AGENT_ORDER already drops the four, so no tile ever asks for one).
+export type AgentContextByProvider = Record<ActiveBodyProvider, AgentContext>;
+export type ProviderAuthStatusByProvider = Record<ActiveBodyProvider, AuthStatus>;
 
 export type AgentsSettingsTabProps = {
   providerAuthStatus: ProviderAuthStatusByProvider;
-  onProviderLogin: (provider: AgentProvider) => void;
+  onProviderLogin: (provider: ActiveBodyProvider) => void;
   /** Re-probes a provider's `/auth/status` (used after a vendor key change). */
-  onRefreshAuthStatus: (provider: AgentProvider) => void;
+  onRefreshAuthStatus: (provider: ActiveBodyProvider) => void;
   claudePermissions: ClaudePermissionsState;
   onClaudePermissionsChange: (value: ClaudePermissionsState) => void;
-  cursorPermissions: CursorPermissionsState;
-  onCursorPermissionsChange: (value: CursorPermissionsState) => void;
   codexPermissionMode: CodexPermissionMode;
   onCodexPermissionModeChange: (value: CodexPermissionMode) => void;
   projects: SettingsProject[];
@@ -79,8 +81,6 @@ export type AgentCategoryContentSectionProps = {
   onRefreshAuthStatus?: () => void;
   claudePermissions: ClaudePermissionsState;
   onClaudePermissionsChange: (value: ClaudePermissionsState) => void;
-  cursorPermissions: CursorPermissionsState;
-  onCursorPermissionsChange: (value: CursorPermissionsState) => void;
   codexPermissionMode: CodexPermissionMode;
   onCodexPermissionModeChange: (value: CodexPermissionMode) => void;
   projects: SettingsProject[];

@@ -35,6 +35,8 @@
     "deleteSession": "セッションを削除",
     "renameSession": "セッション名を変更",
     "noSessions": "セッションはまだありません",
+    "surfacedHiddenHint_one": "+ほかにアクティビティのある会話が{{count}}件",
+    "surfacedHiddenHint_other": "+ほかにアクティビティのある会話が{{count}}件",
     "loadingSessions": "セッションを読み込んでいます...",
     "unnamed": "名称未設定",
     "loading": "読み込み中...",

@@ -102,6 +102,8 @@ export type TerminalIncomingMessage =
  * - `superseded` (WS 4409): a newer tab took the attachment.
  * - `serverRestart` (WS 1001): the server cleanly went away.
  * - `notFound` (WS 4404): the terminal id is unknown.
+ * - `closedForUpdate` (WS 4404, reason `update_terminals_closed`): the owner
+ *   closed every terminal to install an update (B-1448); final, no re-attach.
  * - `reconnecting`: an abnormal drop (WS 1006 / keepalive timeout / network)
  *   while attached; the PTY survives server-side, so the client re-attaches
  *   automatically with exponential backoff and replays the buffer on success.
@@ -113,6 +115,7 @@ export type TerminalConnectionState =
   | 'attached'
   | 'exited'
   | 'notFound'
+  | 'closedForUpdate'
   | 'superseded'
   | 'serverRestart'
   | 'error';

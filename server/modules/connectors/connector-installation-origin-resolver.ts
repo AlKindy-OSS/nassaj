@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { Database } from 'better-sqlite3';
 
+import { CONNECTOR_PUBLIC_ORIGIN_ENV } from './connector-auth-security.js';
 import type { ConnectorSetupStore } from './connector-setup-store.js';
 
 const CONNECTOR_OAUTH_CALLBACK_PATH = '/connectors/oauth/callback';
@@ -62,6 +63,14 @@ const parsePolicy = (row: PolicyRow | undefined): OriginPolicyState => {
   return policy;
 };
 
+/**
+ * The ADR-193 origin validator, shared with the SSO installation-origin record
+ * (ADR-194 D3): a bare https origin (loopback http only in development).
+ * Throws `connector_installation_origin_invalid`.
+ */
+export const canonicalInstallationOrigin = (raw: string, allowLoopbackDevelopment = false): string =>
+  canonicalizeOrigin(raw, allowLoopbackDevelopment);
+
 /** Parses an operator-supplied environment value as a proposal only; it is never runtime authority. */
 export const connectorEnvironmentOriginProposal = (
   raw: string | undefined,
@@ -71,6 +80,63 @@ export const connectorEnvironmentOriginProposal = (
   const canonicalOrigin = canonicalizeOrigin(raw, allowLoopbackDevelopment);
   return Object.freeze({ source: 'environment_proposal' as const, canonicalOrigin,
     callbackUrl: `${canonicalOrigin}${CONNECTOR_OAUTH_CALLBACK_PATH}` });
+};
+
+/** Trusted operator setting an origin proposal was derived from (B-1461, ADR-193). */
+export type ConnectorOriginProposalSource = 'public_origin' | 'oidc_redirect_uri' | 'webauthn_origin';
+
+/**
+ * A pre-bind origin proposal. `invalid_public_origin` means NASSAJ_PUBLIC_ORIGIN is
+ * set but unusable: it carries no origin and deliberately blocks every fallback.
+ */
+export type ConnectorOriginProposal =
+  | Readonly<{ canonicalOrigin: string; source: ConnectorOriginProposalSource }>
+  | Readonly<{ canonicalOrigin: null; source: 'invalid_public_origin' }>;
+
+type ProposalEnv = Readonly<Record<string, string | undefined>>;
+
+const tryCanonicalOrigin = (raw: string, allowLoopback: boolean): string | null => {
+  try { return canonicalizeOrigin(raw, allowLoopback); } catch { return null; }
+};
+
+/** Origin of an exact, canonical https OIDC redirect URI; anything else is null. */
+const oidcRedirectOrigin = (raw: string | undefined): string | null => {
+  if (!raw || raw.trim() !== raw) return null;
+  let parsed: URL;
+  try { parsed = new URL(raw); } catch { return null; }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.href !== raw) return null;
+  return tryCanonicalOrigin(parsed.origin, false);
+};
+
+/** The WebAuthn origin only when the list holds exactly one https origin. */
+const singleWebauthnOrigin = (raw: string | undefined): string | null => {
+  const entries = (raw ?? '').split(',').map(entry => entry.trim()).filter(Boolean);
+  return entries.length === 1 ? tryCanonicalOrigin(entries[0]!, false) : null;
+};
+
+const proposal = (canonicalOrigin: string, source: ConnectorOriginProposalSource): ConnectorOriginProposal =>
+  Object.freeze({ canonicalOrigin, source });
+
+/**
+ * Derives the pre-bind origin proposal from trusted operator configuration only
+ * (B-1461, ADR-193); request data (Host, X-Forwarded-*, Origin) is never a source.
+ * Order: NASSAJ_PUBLIC_ORIGIN; the OIDC_REDIRECT_URI origin only on a legacy
+ * env-configured node with no SSO row (`legacyRedirectProposal`, ADR-194 D1);
+ * a single https WEBAUTHN_ORIGIN. A set-but-invalid NASSAJ_PUBLIC_ORIGIN fails
+ * closed (no fallthrough). Loopback http is honoured only for NASSAJ_PUBLIC_ORIGIN.
+ */
+export const connectorOriginProposalFromConfig = (env: ProposalEnv,
+  options: Readonly<{ allowLoopback: boolean; legacyRedirectProposal: boolean }>): ConnectorOriginProposal | null => {
+  const publicOrigin = env[CONNECTOR_PUBLIC_ORIGIN_ENV];
+  if (publicOrigin !== undefined && publicOrigin !== '') {
+    const canonical = tryCanonicalOrigin(publicOrigin, options.allowLoopback);
+    return canonical ? proposal(canonical, 'public_origin')
+      : Object.freeze({ canonicalOrigin: null, source: 'invalid_public_origin' as const });
+  }
+  const oidcOrigin = options.legacyRedirectProposal ? oidcRedirectOrigin(env.OIDC_REDIRECT_URI) : null;
+  if (oidcOrigin) return proposal(oidcOrigin, 'oidc_redirect_uri');
+  const webauthnOrigin = singleWebauthnOrigin(env.WEBAUTHN_ORIGIN);
+  return webauthnOrigin ? proposal(webauthnOrigin, 'webauthn_origin') : null;
 };
 
 export type ConnectorOriginRotationFence = Readonly<{

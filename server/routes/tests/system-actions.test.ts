@@ -43,6 +43,8 @@ process.env.DATABASE_PATH = path.join(tmpDir, 'db.sqlite');
 type SpawnCall = { cmd: string; args: string[] };
 let spawnCalls: SpawnCall[] = [];
 let oidExitCode = 6;
+/** Exit code of the faked safe-restart gate: 3 defers (the default), 0 lets execution proceed. */
+let gateExitCode = 3;
 let beforeOidExit: (() => void) | null = null;
 
 function createSealedLocalPreviewRoot(fs: Pick<typeof import('node:fs'), 'mkdirSync' | 'statSync'>, root: string) {
@@ -64,11 +66,11 @@ function fakeDeferredGateChild(): EventEmitter & {
     unref: () => void;
   };
   child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
+  child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} });
   child.unref = () => {};
   process.nextTick(() => {
     child.stdout.emit('data', Buffer.from(JSON.stringify({ liveCount: 2 })));
-    child.emit('close', 3);
+    child.emit('close', gateExitCode);
   });
   return child;
 }
@@ -116,6 +118,7 @@ mock.module('../../services/update-maintenance-gate.js', { namedExports: { ...ac
 const {
   default: systemRouter, executeActionRowAs, runQueueMaintenance, setQueueMaintenanceClockForTests,
   setServerCandidateInspectorForTests, setOidReceiptReaderForTests, readOidTransactionReceipts,
+  setSourceUpdateActivationResolverForTests, setSourcePlannerForTests,
 } = await import('../system.js');
 
 closeConnection();
@@ -1177,3 +1180,135 @@ async function retryTripleTargetFixture(root: string, state: any, previousTarget
   fs.writeFileSync(path.join(evidenceParent, `${target.dependencyContractSha256}.json`), JSON.stringify(evidence), { mode: 0o600 });
   return target;
 }
+
+/* ---- B-1448: open terminals and a contended update lock defer a source activation ---- */
+
+const { sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint } =
+  await import('@/modules/database/repositories/source-update-jobs.db.js');
+const writerLease = await import('../../services/update-writer-lease.js');
+const { createHash } = await import('node:crypto');
+const { writeFileSync } = await import('node:fs');
+
+/** A consented job in restart_queued and its bound safe-restart row, plus a resolver for it. */
+function consentedSourceActivation(beginUpdate: () => Promise<unknown>) {
+  const jobId = crypto.randomUUID();
+  const strategy = 'git-checkout-v2' as const;
+  sourceUpdateJobsDb.createOrReuse({
+    id: jobId, ownerId: OWNER.id, expectedVersion: '1.47.0.16', strategy, autoActivate: true,
+    idempotencyKeyHash: hashSourceUpdateIdempotencyKey(jobId),
+    requestFingerprint: sourceUpdateRequestFingerprint(OWNER.id, '1.47.0.16', strategy),
+  });
+  const identity = { jobId, transactionId: `update-b1448-${jobId}`,
+    activationIdentitySha256: createHash('sha256').update(jobId).digest('hex') };
+  getConnection().prepare(`UPDATE source_update_jobs SET state = 'restart_queued', transaction_id = ?,
+    activation_identity_sha256 = ?, release_commit = ? WHERE id = ?`)
+    .run(identity.transactionId, identity.activationIdentitySha256, 'b'.repeat(40), jobId);
+  sourceUpdateJobsDb.appendActivationReceipt(identity, 'restart_queued', 'done', {});
+  const rowId = crypto.randomUUID();
+  pendingServerActionsDb.insert({ id: rowId, actionType: 'safe-restart', expectedServerBuildId: 'd'.repeat(64),
+    sourceUpdateJobId: jobId, sourceUpdateTransactionId: identity.transactionId,
+    activationIdentitySha256: identity.activationIdentitySha256, releaseCommit: 'b'.repeat(40) });
+  // A normal candidate manifest (no operationBinding) passes the process-binding check.
+  const manifestPath = path.join(tmpDir, `candidate-${jobId}.json`);
+  const manifestBytes = JSON.stringify({ txId: identity.transactionId });
+  writeFileSync(manifestPath, manifestBytes);
+  setSourcePlannerForTests(() => ({ paths: 0 }));
+  setSourceUpdateActivationResolverForTests(() => ({
+    action: { transactionId: identity.transactionId, originalHead: 'c'.repeat(40), targetCommit: 'b'.repeat(40),
+      version: '1.47.0.16', manifestSha256: createHash('sha256').update(manifestBytes).digest('hex'),
+      candidateRoot: tmpDir, manifestPath },
+    maintenance: { paths: { root: tmpDir }, beginUpdate },
+  }));
+  const receipts = () => (sourceUpdateJobsDb.listReceipts(jobId) as unknown[]).length;
+  const cleanup = () => {
+    setSourceUpdateActivationResolverForTests(null);
+    setSourcePlannerForTests(null);
+    pendingServerActionsDb.deleteById(rowId);
+    getConnection().prepare("UPDATE source_update_jobs SET state = 'failed' WHERE id = ?").run(jobId);
+  };
+  return { jobId, rowId, receipts, cleanup };
+}
+
+const lastRestartAudit = () => JSON.parse((getConnection().prepare(
+  "SELECT metadata FROM audit_log WHERE action = 'system_restart_triggered' ORDER BY id DESC LIMIT 1",
+).get() as { metadata: string }).metadata);
+
+test('B-1448: open terminals defer a source activation with the count and holders, before any gate runs', async () => {
+  let began = 0;
+  const fixture = consentedSourceActivation(async () => { began++; throw new Error('unreachable'); });
+  // The gate seam refuses outside NODE_ENV=test and the server runner does not set it.
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  writerLease.setApplicationWriterGateForTests({ async acquireWriterLease() { return { release() {} }; } });
+  const terminal = await writerLease.acquireApplicationWriterLease('standalone-pty', { holder: { username: 'sara' } });
+  spawnCalls = [];
+  try {
+    const reply = await executeActionRowAs({ id: fixture.rowId, user: OWNER, trigger: 'update-auto-activate' });
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.equal(reply.body.status, 'deferred');
+    assert.equal(reply.body.reasonCode, 'open_terminals');
+    assert.equal(reply.body.openTerminals, 1);
+    assert.deepEqual(reply.body.terminalUsers, ['sara']);
+    assert.equal(reply.body.requeued, true);
+    assert.equal(spawnCalls.length, 0, 'no safe-restart gate was spawned');
+    assert.equal(began, 0);
+    const row = pendingServerActionsDb.getById(fixture.rowId)!;
+    assert.deepEqual([row.status, row.error], ['pending', 'open_terminals']);
+    assert.equal(sourceUpdateJobsDb.getById(fixture.jobId)?.state, 'restart_queued');
+    const audit = lastRestartAudit();
+    assert.deepEqual([audit.result, audit.reason, audit.requeued], ['deferred', 'open_terminals', true]);
+  } finally {
+    terminal.release();
+    writerLease.setApplicationWriterGateForTests(null);
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    fixture.cleanup();
+  }
+});
+
+test('B-1448: a contended update lock defers: 200 deferred, row pending, job queued, no receipt', async () => {
+  const fixture = consentedSourceActivation(async () => { throw new Error('update_lock_contended'); });
+  const receiptsBefore = fixture.receipts();
+  gateExitCode = 0;
+  try {
+    const reply = await executeActionRowAs({ id: fixture.rowId, user: OWNER, trigger: 'update-auto-activate' });
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.deepEqual([reply.body.status, reply.body.reasonCode, reply.body.retryable], ['deferred', 'update_lock_contended', true]);
+    const row = pendingServerActionsDb.getById(fixture.rowId)!;
+    assert.deepEqual([row.status, row.error], ['pending', 'update_lock_contended']);
+    assert.equal(sourceUpdateJobsDb.getById(fixture.jobId)?.state, 'restart_queued');
+    assert.equal(fixture.receipts(), receiptsBefore);
+    assert.deepEqual([lastRestartAudit().result, lastRestartAudit().reason], ['deferred', 'update_lock_contended']);
+  } finally {
+    gateExitCode = 3;
+    fixture.cleanup();
+  }
+});
+
+test('B-1448: a non-deferrable activation failure still fails the row, and now names its bounded cause', async () => {
+  const fixture = consentedSourceActivation(async () => { throw new Error('update_maintenance_active'); });
+  gateExitCode = 0;
+  try {
+    const reply = await executeActionRowAs({ id: fixture.rowId, user: OWNER, trigger: 'update-auto-activate' });
+    assert.equal(reply.status, 500);
+    assert.deepEqual([reply.body.code, reply.body.reason], ['source_update_activation_failed', 'update_maintenance_active']);
+    assert.equal(pendingServerActionsDb.getById(fixture.rowId)?.status, 'failed');
+    assert.equal(sourceUpdateJobsDb.getById(fixture.jobId)?.state, 'failed');
+  } finally {
+    gateExitCode = 3;
+    fixture.cleanup();
+  }
+});
+
+test('B-1448: free text never rides along as the failure reason', async () => {
+  const fixture = consentedSourceActivation(async () => { throw new Error('boom at /home/operator/.secret/token'); });
+  gateExitCode = 0;
+  try {
+    const reply = await executeActionRowAs({ id: fixture.rowId, user: OWNER, trigger: 'update-auto-activate' });
+    assert.equal(reply.status, 500);
+    assert.equal(reply.body.code, 'source_update_activation_failed', 'the activation itself was reached');
+    assert.equal(reply.body.reason, undefined);
+  } finally {
+    gateExitCode = 3;
+    fixture.cleanup();
+  }
+});

@@ -83,6 +83,16 @@ export function createOidcStepUpGrantStore({ ttlMs, maxEntries, now } = {}) {
         && crypto.timingSafeEqual(entry.transactionHash, supplied);
     },
 
+    /**
+     * Revokes an unredeemed grant (ADR-194 D9: the config changed after it
+     * was issued). True when a grant was removed.
+     * @param {string} grant
+     * @returns {boolean}
+     */
+    revoke(grant) {
+      return typeof grant === 'string' && grants.delete(grant);
+    },
+
     /** Outstanding (possibly expired, not yet pruned) grants. */
     get size() {
       return grants.size;

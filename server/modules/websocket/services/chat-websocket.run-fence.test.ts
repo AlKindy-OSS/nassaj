@@ -156,18 +156,16 @@ const BRANCHES: Branch[] = [
   { name: 'codex', messageType: 'codex-command', launcher: launcher('queryCodex') },
   { name: 'antigravity', messageType: 'antigravity-command', launcher: launcher('spawnAntigravity') },
   { name: 'opencode', messageType: 'opencode-command', launcher: launcher('spawnOpenCode') },
-  // kimi chat and cursor are disabled (2026-09-29) and refused before admission,
-  // below. The kimi agent and hosted branches still bypass the disable wall.
-  {
-    name: 'kimi-agent', messageType: 'kimi-command', options: { mode: 'agent' },
-    launcher: launcher('spawnKimiAgent'),
-  },
+  // kimi and cursor are retired as bodies (T-1953) and refused before admission,
+  // below — the kimi agent branch that stood here included. The GLM carrier and
+  // hosted branches still bypass the disable wall; the hosted one runs on
+  // deepseek, a hosted id that is not retired.
   {
     name: 'glm-carrier', messageType: 'glm-command', options: { mode: 'agent' },
     env: { NASSAJ_OPENCODE_CARRIER: '1' }, launcher: launcher('spawnOpenCode'),
   },
   {
-    name: 'hosted', messageType: 'kimi-command', options: { clientMsgId: 'rf-hosted-1' },
+    name: 'hosted', messageType: 'deepseek-command', options: { clientMsgId: 'rf-hosted-1' },
     launcher: (launches) => ({
       hostedTurnSupervisor: {
         enabled: () => true, supports: () => true, cancel: () => true,
@@ -207,12 +205,13 @@ for (const branch of BRANCHES) {
   });
 }
 
-for (const [provider, key] of [
-  ['deepseek', 'spawnDeepSeek'], ['cursor', 'spawnCursor'], ['kimi', 'spawnKimi'],
+for (const [provider, key, mode] of [
+  ['deepseek', 'spawnDeepSeek', 'chat'], ['cursor', 'spawnCursor', 'chat'],
+  ['kimi', 'spawnKimi', 'chat'], ['kimi', 'spawnKimiAgent', 'agent'],
 ] as const) {
-  test(`test 5 [${provider}]: a disabled provider is refused before admission — no arm, no launch`, async () => {
+  test(`test 5 [${provider} ${mode}]: a disabled or retired provider is refused before admission — no arm, no launch`, async () => {
     const launches: string[] = [];
-    const primary = await dispatch(`${provider}-command`, {}, launcher(key)(launches));
+    const primary = await dispatch(`${provider}-command`, mode === 'agent' ? { mode } : {}, launcher(key)(launches));
     assert.deepEqual(launches, []);
     assert.equal(primary.received.at(-1)?.notStarted, true);
     assert.equal(__fencedRunCountForTests(), 0);

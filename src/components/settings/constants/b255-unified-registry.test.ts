@@ -41,7 +41,7 @@ describe('B-255 unified tab registry', () => {
     });
   });
 
-  it('contains exactly the expected 14 tab ids', () => {
+  it('contains exactly the expected 15 tab ids', () => {
     const ids = SETTINGS_MAIN_TABS.map((t) => t.id);
     expect(ids).toEqual([
       'profile',
@@ -63,12 +63,18 @@ describe('B-255 unified tab registry', () => {
       'connectors',
       'notifications',
       'users',
+      // ADR-194 — «الدخول الموحّد» بعد الأعضاء: كلاهما يقرّر من يدخل. للمالك وحده.
+      'sso',
       'command-board',
       // T-1866 — «النظام»: بعد لوحة الأوامر وقبل عن التطبيق، لا داخل لوحة
       // الأوامر (كانت تحمل مجموعاتٍ لا تخصّها: التخزين والصلاحيات والتحديث).
       'system',
       'about',
     ]);
+  });
+
+  it('ADR-194: the SSO tab is owner-only', () => {
+    expect(SETTINGS_MAIN_TABS.find((t) => t.id === 'sso')?.roles).toEqual(['owner']);
   });
 
   it('T-1866: system tab is restricted to owner role, same as command-board', () => {

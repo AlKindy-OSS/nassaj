@@ -6,7 +6,7 @@
  * guards that MergedCard actually wires it (not just ClaudeStatus).
  */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
@@ -115,5 +115,49 @@ describe('AgentStatusCard (MergedCard) — starter vs viewer', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: /STOP/i })).toBeNull();
+  });
+});
+
+describe('AgentStatusCard (MergedCard) — /steer hint indicator (T-1956)', () => {
+  it("shows the hint on the starter's own merged card; a tap opens it without toggling the card", () => {
+    render(
+      <AgentStatusCard
+        agents={[AGENT]}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={vi.fn()}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+        showSteerHint
+      />,
+    );
+    const indicator = screen.getByTestId('run-status-steer-hint');
+    const trigger = indicator.parentElement as HTMLElement;
+    const expandedBefore = document.querySelectorAll('[aria-expanded="true"]').length;
+    fireEvent.touchStart(trigger, { touches: [{ clientX: 5, clientY: 5 }] });
+    fireEvent.touchEnd(trigger, { changedTouches: [{ clientX: 5, clientY: 5 }] });
+    fireEvent.click(trigger);
+    expect(screen.getByRole('tooltip').textContent).toMatch(/\/steer/);
+    expect(document.querySelectorAll('[aria-expanded="true"]').length).toBe(expandedBefore);
+  });
+
+  it('renders no hint indicator for a viewer', () => {
+    render(
+      <AgentStatusCard
+        agents={[AGENT]}
+        status={{ text: 'Working', can_interrupt: true }}
+        onAbort={vi.fn()}
+        isLoading
+        provider="claude"
+        runStartedAt={null}
+        progress={null}
+        viewerStarterName="سارة"
+        isConfirmedStarter={false}
+        steerable
+        onSteerClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('run-status-steer-hint')).toBeNull();
   });
 });

@@ -1057,6 +1057,19 @@ export class CodexSessionsProvider implements IProviderSessions {
             kind: 'thinking',
             content: raw.message?.content || '',
           })];
+        // B-1482: `item.started`/`item.updated` are filtered out upstream
+        // (openai-codex.js) — only the terminal `item.completed` event ever
+        // reaches normalizeMessage(), so every tool-shaped row below is
+        // already settled the moment it's created. Unlike the Claude SDK,
+        // Codex's live stream never emits a companion `kind:'tool_result'`
+        // row for these, so the client's generic status derivation
+        // (ToolRenderer.deriveToolStatus / useChatMessages toolResultMap),
+        // which needs either a matching tool_result row or a pre-attached
+        // `toolResult`, never sees one and the "يعمل" (running) badge never
+        // clears — until a full history refetch re-derives it from the
+        // persisted tool_use/tool_result pair in the JSONL. Attaching
+        // `toolResult` inline here, matching what fetchHistory() already does
+        // for the history path below, settles the live card immediately.
         case 'command_execution':
           return [createNormalizedMessage({
             id: baseId,
@@ -1070,6 +1083,10 @@ export class CodexSessionsProvider implements IProviderSessions {
             output: raw.output,
             exitCode: raw.exitCode,
             status: raw.status,
+            toolResult: {
+              content: typeof raw.output === 'string' ? raw.output : '',
+              isError: raw.status === 'failed',
+            },
           })];
         case 'file_change':
           return [createNormalizedMessage({
@@ -1082,6 +1099,7 @@ export class CodexSessionsProvider implements IProviderSessions {
             toolInput: raw.changes,
             toolId: baseId,
             status: raw.status,
+            toolResult: { content: '', isError: raw.status === 'failed' },
           })];
         case 'mcp_tool_call':
           return [createNormalizedMessage({
@@ -1097,6 +1115,10 @@ export class CodexSessionsProvider implements IProviderSessions {
             result: raw.result,
             error: raw.error,
             status: raw.status,
+            toolResult: {
+              content: typeof raw.error === 'string' ? raw.error : '',
+              isError: raw.status === 'failed' || Boolean(raw.error),
+            },
           })];
         case 'web_search':
           return [createNormalizedMessage({
@@ -1108,6 +1130,9 @@ export class CodexSessionsProvider implements IProviderSessions {
             toolName: 'WebSearch',
             toolInput: { query: raw.query },
             toolId: baseId,
+            // No `status` on WebSearchItem (@openai/codex-sdk): item.completed
+            // is its only terminal event, so reaching here means it succeeded.
+            toolResult: { content: '', isError: false },
           })];
         case 'todo_list':
           return [createNormalizedMessage({
@@ -1119,6 +1144,8 @@ export class CodexSessionsProvider implements IProviderSessions {
             toolName: 'TodoList',
             toolInput: { items: raw.items },
             toolId: baseId,
+            // No `status` on TodoListItem either — same reasoning as above.
+            toolResult: { content: '', isError: false },
           })];
         case 'error':
           return [createNormalizedMessage({

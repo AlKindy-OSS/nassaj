@@ -99,6 +99,12 @@ mock.module(dbIndexUrl, {
   },
 });
 
+// The owner SSO sub-router (ADR-194) pulls in step-up and the SSO services,
+// which need repositories this stub does not provide; branding never uses it.
+mock.module(pathToFileURL(path.resolve(import.meta.dirname, '../settings-sso.js')).href, {
+  defaultExport: express.Router(),
+});
+
 // Import the router and the magic-byte helper once, after mocks are registered.
 const settingsModule = await import('../settings.js');
 const settingsRouter = settingsModule.default;
@@ -142,14 +148,19 @@ const MALICIOUS_SVG = Buffer.from(
     '</svg>',
   'utf8'
 );
-// Real logos shipped in this repo, used verbatim as upload fixtures (B-42).
-// Both are exporter output, not shapes invented for the test:
-//  - cursor-white.svg carries its only colour in a <style> class rule (Adobe
-//    Illustrator) — the case where sanitization used to leave the mark black.
-//  - nassaj-logo-on-dark.svg carries it in style="" and declares xmlns:svg
-//    (Inkscape) — the case that used to be REJECTED outright.
+// Real exporter output, used verbatim as upload fixtures (B-42), not shapes
+// invented for the test:
+//  - illustrator-style-logo.svg carries its only colour in a <style> class
+//    rule (Adobe Illustrator) — the case where sanitization used to leave the
+//    mark black. This is the retired Cursor logo (public/icons/cursor-white.svg,
+//    deleted with the Cursor body in T-1953), kept as a dedicated test fixture
+//    under server/services/__fixtures__ because it is no longer shipped.
+//  - nassaj-logo-on-dark.svg (still shipped) carries it in style="" and
+//    declares xmlns:svg (Inkscape) — the case that used to be REJECTED outright.
 const REPO_ROOT = path.resolve(import.meta.dirname, '../../..');
-const REAL_ILLUSTRATOR_SVG = fs.readFileSync(path.join(REPO_ROOT, 'public/icons/cursor-white.svg'));
+const REAL_ILLUSTRATOR_SVG = fs.readFileSync(
+  path.join(REPO_ROOT, 'server/services/__fixtures__/illustrator-style-logo.svg')
+);
 const REAL_INKSCAPE_SVG = fs.readFileSync(path.join(REPO_ROOT, 'public/nassaj-logo-on-dark.svg'));
 // Content that is NOT an svg-rooted document but is declared image/svg+xml.
 const FORGED_SVG = Buffer.from(

@@ -8,6 +8,9 @@ import express from 'express';
 
 // eslint-disable-next-line boundaries/no-unknown -- root-verified bootstrap context is a builtins-only authority leaf outside feature modules.
 import { requireStartupAdmission } from '../../bootstrap-startup-context.js';
+// eslint-disable-next-line boundaries/no-unknown -- B-1461: the shared OIDC enable flag gates the origin proposal.
+import { ssoLegacyRedirectProposalAllowed } from '../../services/sso-config.service.js';
+import { registerConnectorInstallationOriginReader } from '../../services/installation-origin.service.js';
 import { CONNECTOR_AUTH_CATALOG_REVISION, PROVIDER_AUTH_SPECS } from '../../../shared/connector-auth-registry.js';
 // eslint-disable-next-line boundaries/dependencies -- substrate composition validates the canonical migration marker.
 import { initialConnectorPolicyV2SubstrateState } from '../database/connector-policy-v2.migration.js';
@@ -19,8 +22,7 @@ import {
   createConnectorInstallationReadinessV2Routes,
   type ConnectorReadinessFact,
 } from './connector-installation-readiness-v2.js';
-import { CONNECTOR_PUBLIC_ORIGIN_ENV } from './connector-auth-security.js';
-import { connectorEnvironmentOriginProposal,
+import { connectorOriginProposalFromConfig,
   ConnectorInstallationOriginResolver } from './connector-installation-origin-resolver.js';
 import { connectorRecentAuthCookieValue,
   createConnectorOwnerOperationGate } from './connector-owner-operation-gate.js';
@@ -98,6 +100,9 @@ export const resolveConnectorRuntimeInstallationOrigin = () => runtime?.originRe
 export const connectorRuntimeLiveOrigin = (): string | null => {
   try { return resolveConnectorRuntimeInstallationOrigin()?.canonicalOrigin ?? null; } catch { return null; }
 };
+
+// ADR-194 D3: SSO reads the persisted origin through this database-only reader.
+registerConnectorInstallationOriginReader(connectorRuntimeLiveOrigin);
 
 /** True after schema-2 installation is observed, including fail-closed runtime states. */
 export const connectorPolicyV2ClaimsLegacyPaths = (): boolean => substrateInstalled;
@@ -341,18 +346,21 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
     };
     lifecycleWrite = effect => executeOriginWrite(false, effect);
     // Live, per-request origin (T-1939 6B): the persisted installation origin,
-    // else the NASSAJ_PUBLIC_ORIGIN proposal only while NO origin is persisted
-    // (pre-origin bootstrap). A persisted origin that cannot be read (e.g.
-    // tampered) is null, never the environment value. Read on every call, so
+    // else the trusted-config proposal (B-1461, ADR-193: NASSAJ_PUBLIC_ORIGIN,
+    // then OIDC_REDIRECT_URI on a legacy env node with no SSO row, then a single
+    // WEBAUTHN_ORIGIN) only while NO origin
+    // is persisted (pre-origin bootstrap). A persisted origin that cannot be read
+    // (e.g. tampered) is null, never a config value. Read on every call, so
     // PUT /origin takes effect without a restart.
     const readPersistedOrigin = (): string | null => originResolver.resolve(id)?.canonicalOrigin ?? null;
     const persistedOrigin = (): string | null => {
       try { return readPersistedOrigin(); } catch { return null; }
     };
+    const readOriginProposal = () => connectorOriginProposalFromConfig(process.env,
+      { allowLoopback: process.env.NODE_ENV !== 'production', legacyRedirectProposal: ssoLegacyRedirectProposalAllowed() });
+    const readProposedOrigin = (): string | null => readOriginProposal()?.canonicalOrigin ?? null;
     const recentAuthOrigin = createRecentAuthOriginSource({
-      readPersisted: readPersistedOrigin,
-      readProposal: () => connectorEnvironmentOriginProposal(process.env[CONNECTOR_PUBLIC_ORIGIN_ENV],
-        process.env.NODE_ENV !== 'production')?.canonicalOrigin ?? null,
+      readPersisted: readPersistedOrigin, readProposal: readProposedOrigin,
     });
     configureConnectorOwnerAuthSessionProduction({ repository, installationId: id,
       resolveOrigin: recentAuthOrigin, executeWrite: executeConnectorPolicyV2LifecycleWrite });
@@ -375,6 +383,7 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
     };
     const routes = createConnectorInstallationReadinessV2Routes({ installationId: id, store: originStore,
       now, readFacts: exactInstallation => facts(exactInstallation), executeOriginWrite,
+      readOriginProposal: readProposedOrigin,
       resolveInstallationMember: (_req, exactInstallation) => {
         if (exactInstallation !== id) return null;
         const user = resolveIdentity(_req);
@@ -401,7 +410,7 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
           clientId: body.clientId ?? '', clientSecret: body.clientSecret ?? '' });
     };
     const setupService = new ConnectorOwnerSetupService(database, id, authority, setupStore,
-      originStore, executeOriginWrite, now, verifyProfileEffect);
+      originStore, executeOriginWrite, now, verifyProfileEffect, readOriginProposal);
     // No production trust/proof/DCR channel is configured in this release. The
     // service therefore records manual_recovery and cannot activate a provider.
     const provisioningService = new ConnectorProvisioningService(database, id, originResolver,

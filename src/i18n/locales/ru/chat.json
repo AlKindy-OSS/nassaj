@@ -393,12 +393,10 @@
     "providerInfo": {
       "anthropic": "от Anthropic",
       "openai": "от OpenAI",
-      "cursorEditor": "AI редактор кода",
       "google": "от Google"
     },
     "readyPrompt": {
       "claude": "Готов использовать Claude с {{model}}. Начните вводить сообщение ниже.",
-      "cursor": "Готов использовать Cursor с {{model}}. Начните вводить сообщение ниже.",
       "codex": "Готов использовать Codex с {{model}}. Начните вводить сообщение ниже.",
       "antigravity": "Готово к работе с Antigravity (agy) на {{model}}. Введите сообщение ниже.",
       "opencode": "Готов использовать OpenCode с {{model}}. Начните вводить сообщение ниже.",
@@ -574,6 +572,9 @@
     "olderModels_few": "{{count}} прежние модели",
     "olderModels_many": "{{count}} прежних моделей",
     "olderModels_other": "{{count}} прежней модели"
+  },
+  "composer": {
+    "replyInProgress": "Агент сейчас работает — дождитесь завершения ответа или остановите его, чтобы отправить сообщение."
   },
   "ws": {
     "statusConnected": "Подключено",

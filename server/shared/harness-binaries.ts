@@ -22,6 +22,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { isRetiredProvider } from '../../shared/retiredProviders.js';
+
 import {
   isRunnableClaudeExecutable,
   resolveClaudeCodeExecutablePath,
@@ -41,8 +43,7 @@ export type HarnessBinaryId =
   | 'cursor'
   | 'opencode'
   | 'qwen'
-  | 'kimi'
-  | 'hermes';
+  | 'kimi';
 
 /** How one harness binary is located. */
 export interface HarnessBinarySpec {
@@ -63,7 +64,7 @@ const localBin = (command: string) => (home: string) => path.join(home, '.local'
 
 /**
  * The registry. Measured on the reference host (2026-09-27): claude, cursor,
- * agy, qwen and hermes in `~/.local/bin`, opencode and kimi in their official
+ * agy and qwen in `~/.local/bin`, opencode and kimi in their official
  * installers' `~/.opencode/bin` and `~/.kimi-code/bin` (kimi: the vendor's
  * native install script, owner decision ADR-189; KIMI_INSTALL_DIR is NOT
  * honoured — only the measured path or the KIMI_PATH server override), codex
@@ -97,7 +98,6 @@ export const HARNESS_BINARY_SPECS: Readonly<Record<HarnessBinaryId, HarnessBinar
     overrideEnv: 'KIMI_PATH',
     measured: (home) => path.join(home, '.kimi-code', 'bin', 'kimi'),
   },
-  hermes: { command: 'hermes', overrideEnv: 'HERMES_PATH', measured: localBin('hermes') },
 });
 
 /** Every harness id the registry resolves, in a stable order. */
@@ -284,6 +284,14 @@ export function inspectHarnessBinaries(): HarnessBinaryStatus[] {
  * CLAUDE_CLI_PATH=/usr/bin/claude). Never throws — a missing harness only
  * disables that harness; the service keeps running. codex is checked through
  * the same machine-release resolver its launches use.
+ *
+ * A retired BODY (cursor, qwen, kimi — `shared/retiredProviders.ts`) is never
+ * reported missing here: the product refuses it before any launch regardless
+ * of whether its CLI is installed, so an absent binary is not an operator
+ * action item. This is the body axis only — `kimi` stays a live ENGINE of the
+ * Claude body (dispatched via `claude-command` + an API key, not this binary),
+ * so its launch-time resolution above is untouched and still runs for that
+ * axis; only this warning's reporting is filtered.
  */
 export function logUnresolvedHarnessBinaries(
   warn: (message: string, details: Record<string, unknown>) => void = console.warn,
@@ -295,7 +303,7 @@ export function logUnresolvedHarnessBinaries(
     warn('[harness-binaries] boot check failed', { error: String(error) });
     return [];
   }
-  const unresolved = statuses.filter((status) => !status.resolved);
+  const unresolved = statuses.filter((status) => !status.resolved && !isRetiredProvider(status.id));
   if (unresolved.length > 0) {
     warn('[harness-binaries] harness CLIs not resolved; those harnesses cannot launch', {
       unresolved: unresolved.map(({ id, error, overrideEnv }) => ({

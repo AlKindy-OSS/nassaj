@@ -41,7 +41,7 @@ function harness(options: { enabled: boolean; supported: boolean }) {
   const spawn = async (command: string, options: Record<string, unknown>) => { calls.legacy += 1; calls.input = { prompt: command, ...options }; };
   const dependencies = {
     queryClaudeSDK: spawn, queryCodex: spawn, spawnCursor: spawn,
-    spawnAntigravity: spawn, spawnHermes: spawn, spawnQwen: spawn, spawnOpenCode: spawn,
+    spawnAntigravity: spawn, spawnQwen: spawn, spawnOpenCode: spawn,
     spawnKimi: spawn, spawnDeepSeek: spawn, spawnGlm: spawn,
     getSessionProvider: () => null,
     hostedTurnSupervisor: {
@@ -66,8 +66,9 @@ function harness(options: { enabled: boolean; supported: boolean }) {
 
 const { readVendorReceiptInvocation } = await import('@/modules/providers/index.js');
 const manifest = { version: 1, kind: 'text', imageCount: 0, fileCount: 0 };
-// hermes and qwen are globally disabled (owner decision 2026-09-28): refused before dispatch.
-for (const provider of ['kimi', 'deepseek', 'glm']) {
+// hermes, qwen and kimi are retired as bodies (T-1953): refused before dispatch,
+// so no receipt is ever minted for them.
+for (const provider of ['deepseek', 'glm']) {
   test(`${provider}: dispatch mints owner-bound text receipt and rejects raw capabilities/attachments`, async () => {
     for (const valid of [true, false]) {
       const ctx = harness({ enabled: true, supported: true });
@@ -93,5 +94,19 @@ for (const provider of ['kimi', 'deepseek', 'glm']) {
       assert.equal(readVendorReceiptInvocation(invocation, 'unchanged complete prompt', 999), undefined);
       assert.doesNotMatch(JSON.stringify(invocation) ?? '', /client-id|userId/);
     }
+  });
+}
+
+for (const provider of ['kimi', 'hermes', 'qwen']) {
+  test(`${provider}: a retired body is refused before any receipt is minted (T-1953)`, async () => {
+    const ctx = harness({ enabled: true, supported: true });
+    await dispatchProviderCommand(`${provider}-command`, {
+      command: 'unchanged complete prompt',
+      options: { clientMsgId: 'client-id', coordinationLevel: 'delegate', mode: 'chat', receiptPayload: manifest },
+    } as never, ctx.writer as never, ctx.dependencies as never, 77);
+    assert.equal(ctx.calls.execute + ctx.calls.legacy, 0);
+    assert.equal(ctx.calls.input, null, 'no invocation reaches a provider or the supervisor');
+    assert.deepEqual(ctx.sent.map(event => [event.kind, event.code, event.notStarted]),
+      [['complete', 'provider_removed', true]]);
   });
 }

@@ -118,16 +118,12 @@ function renderPicker(catalog: Partial<Record<LLMProvider, ProviderModelsDefinit
       textareaRef={{ current: null } as React.RefObject<HTMLTextAreaElement>}
       claudeModel="none-selected"
       setClaudeModel={noop}
-      cursorModel=""
-      setCursorModel={noop}
       codexModel=""
       setCodexModel={noop}
       antigravityModel=""
       setAntigravityModel={noop}
       opencodeModel=""
       setOpenCodeModel={noop}
-      hermesModel=""
-      setHermesModel={noop}
       kimiModel=""
       setKimiModel={noop}
       deepseekModel=""

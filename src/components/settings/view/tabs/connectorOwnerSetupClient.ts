@@ -20,6 +20,12 @@ export type ActivationCandidate = {
   profileRevision: number | null;
   blockerCodes: string[];
 };
+/** Where the server's pre-bind origin proposal came from (B-1461, ADR-193). */
+export type OriginProposalSource = 'public_origin' | 'oidc_redirect_uri' | 'webauthn_origin';
+/** Trusted-config origin proposal; `invalid_public_origin` carries no origin by design. */
+export type OriginProposal =
+  | { canonicalOrigin: string; source: OriginProposalSource }
+  | { canonicalOrigin: null; source: 'invalid_public_origin' };
 export type ConnectorOwnerSetupStatus = {
   schemaVersion: 1;
   readyForAccountLinking: boolean;
@@ -31,6 +37,8 @@ export type ConnectorOwnerSetupStatus = {
     callbackUrl: string;
     originRevision: number;
   };
+  /** Pre-fill only, never a bind; null once an origin is persisted. */
+  originProposal: OriginProposal | null;
   trustBundleRevision: number;
   activePack: null | {
     issuer: string; channel: string; sequence: number; digest: string; expiresAt: string | null;
@@ -44,7 +52,8 @@ export type ConnectorOwnerSetupStatus = {
 };
 
 export class ConnectorOwnerSetupRequestError extends Error {
-  constructor(readonly code: string, readonly status: number) { super(code); }
+  /** `reason` refines a code, e.g. CONNECTOR_ORIGIN_BOOTSTRAP_REFUSED (B-1461 H3). */
+  constructor(readonly code: string, readonly status: number, readonly reason?: string) { super(code); }
 }
 
 export type ConnectorOwnerProfileVerification = {
@@ -86,12 +95,25 @@ const canonicalOrigin = (value: unknown): value is ConnectorOwnerSetupStatus['or
 };
 
 const PACK_WARNINGS = new Set(['pack_expiring_soon', 'pack_expired']);
+const PROPOSAL_SOURCES = new Set(['public_origin', 'oidc_redirect_uri', 'webauthn_origin']);
+
+/** Accepts an exact https (or loopback http) origin proposal, or the origin-less invalid marker. */
+const originProposal = (value: unknown): value is OriginProposal => {
+  if (!record(value) || !exact(value, ['canonicalOrigin', 'source'])) return false;
+  if (value.source === 'invalid_public_origin') return value.canonicalOrigin === null;
+  if (typeof value.source !== 'string' || !PROPOSAL_SOURCES.has(value.source) || !text(value.canonicalOrigin)) return false;
+  return canonicalOrigin({ installationId: 'proposal', canonicalOrigin: value.canonicalOrigin,
+    callbackUrl: `${value.canonicalOrigin}/connectors/oauth/callback`, originRevision: 1 });
+};
+const STATUS_KEYS = ['schemaVersion', 'readyForAccountLinking', 'resumableStep', 'checks', 'origin',
+  'trustBundleRevision', 'activePack', 'packExpiresAt', 'warnings', 'activationRecordRevision',
+  'activationCandidates'];
 
 /** Strictly accepts only the secret-free owner status contract. */
 export const parseConnectorOwnerSetupStatus = (raw: unknown): ConnectorOwnerSetupStatus | null => {
-  if (!record(raw) || !exact(raw, ['schemaVersion', 'readyForAccountLinking', 'resumableStep',
-    'checks', 'origin', 'trustBundleRevision', 'activePack', 'packExpiresAt', 'warnings',
-    'activationRecordRevision', 'activationCandidates'])
+  // originProposal is optional so a server without B-1461 still parses.
+  if (!record(raw) || !(exact(raw, STATUS_KEYS) || exact(raw, [...STATUS_KEYS, 'originProposal']))
+    || (raw.originProposal !== undefined && raw.originProposal !== null && !originProposal(raw.originProposal))
     || raw.schemaVersion !== 1 || typeof raw.readyForAccountLinking !== 'boolean'
     || typeof raw.resumableStep !== 'string' || !STEPS.has(raw.resumableStep as OwnerSetupStep)
     || !Array.isArray(raw.checks) || (raw.origin !== null && !canonicalOrigin(raw.origin))
@@ -147,6 +169,7 @@ export const parseConnectorOwnerSetupStatus = (raw: unknown): ConnectorOwnerSetu
     schemaVersion: 1, readyForAccountLinking: raw.readyForAccountLinking,
     resumableStep: raw.resumableStep as OwnerSetupStep, checks,
     origin: raw.origin as ConnectorOwnerSetupStatus['origin'],
+    originProposal: raw.origin === null ? (raw.originProposal as OriginProposal | undefined) ?? null : null,
     trustBundleRevision: raw.trustBundleRevision,
     activePack: activePack as ConnectorOwnerSetupStatus['activePack'],
     packExpiresAt: raw.packExpiresAt as string | null,
@@ -184,7 +207,8 @@ export const mutateConnectorOwnerSetup = async (input: Readonly<{
   });
   const raw: unknown = await response.json().catch(() => null);
   if (!response.ok) throw new ConnectorOwnerSetupRequestError(
-    record(raw) && text(raw.code, 128) ? raw.code : 'CONNECTOR_SETUP_UNAVAILABLE', response.status);
+    record(raw) && text(raw.code, 128) ? raw.code : 'CONNECTOR_SETUP_UNAVAILABLE', response.status,
+    record(raw) && text(raw.reason, 64) && ID.test(raw.reason) ? raw.reason : undefined);
   return raw;
 };
 

@@ -393,12 +393,10 @@
     "providerInfo": {
       "anthropic": "Anthropic tarafından",
       "openai": "OpenAI tarafından",
-      "cursorEditor": "AI Kod Editörü",
       "google": "Google tarafından"
     },
     "readyPrompt": {
       "claude": "Claude'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
-      "cursor": "Cursor'ı {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "codex": "Codex'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "antigravity": "Antigravity (agy) {{model}} ile kullanıma hazır. Mesajınızı aşağıya yazın.",
       "opencode": "OpenCode'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
@@ -570,6 +568,9 @@
     "harnessLine": "Harness: {{harness}}",
     "olderModels_one": "{{count}} önceki model",
     "olderModels_other": "{{count}} önceki model"
+  },
+  "composer": {
+    "replyInProgress": "Aracı şu anda çalışıyor — yanıtın bitmesini bekleyin veya mesajınızı göndermek için durdurun."
   },
   "ws": {
     "statusConnected": "Bağlı",

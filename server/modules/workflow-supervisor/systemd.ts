@@ -10,12 +10,20 @@
  *   a unit name can never inject a command.
  * - This is the plain node server (NOT the Claude client), so the client-side
  *   pm2/systemctl guard does not apply; `systemctl --user` is permitted here.
- * - Read paths (`is-active`, `list-units`) never throw into callers: they map a
- *   non-zero exit to the state text or an empty list. `systemd-run` (the launch)
- *   surfaces failure so the supervisor can mark the intent failed.
+ * - `systemctlIsActive` / `systemctlShowState` never throw: they map a non-zero
+ *   exit to the state text. The enumerations (`listActiveUserScopes`,
+ *   `listAllActiveScopes`) re-throw so concurrency gates fail closed;
+ *   `probeUserWorkflowUnits` throws only UserUnitProbeError; `systemd-run`
+ *   (the launch) surfaces failure so the supervisor can mark the intent failed.
+ * - ONE USER MANAGER (B-1474): every `systemctl --user` / `systemd-run --user`
+ *   call here forces XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS to
+ *   `/run/user/<uid>` (userManagerEnv), so the launcher and the live-unit probe
+ *   always address the same manager whatever the inherited env says.
  */
 
 import { execFile } from 'node:child_process';
+import type { Stats } from 'node:fs';
+import fsp from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -29,6 +37,42 @@ import { scopeUnitName } from './config.js';
 import type { UnitState } from './result-capture.js';
 
 const execFileAsync = promisify(execFile);
+
+/** The two keys that select which systemd user manager `--user` talks to. */
+export interface UserManagerEnv {
+  XDG_RUNTIME_DIR: string;
+  DBUS_SESSION_BUS_ADDRESS: string;
+}
+
+/**
+ * Env keys addressing `uid`'s user manager under `runUserRoot` (default
+ * `/run/user`). Shared by the probe and every `--user` call in this file so
+ * they can never target different managers (see header, B-1474).
+ */
+export function userManagerEnv(uid: number, runUserRoot = '/run/user'): UserManagerEnv {
+  const dir = path.join(runUserRoot, String(uid));
+  return { XDG_RUNTIME_DIR: dir, DBUS_SESSION_BUS_ADDRESS: `unix:path=${dir}/bus` };
+}
+
+/**
+ * Inherited env (PATH etc.) with the user-manager keys forced to this uid's
+ * manager. Without getuid (non-POSIX) the inherited env is returned unchanged.
+ */
+function userCallEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const uid = process.getuid?.();
+  return typeof uid === 'number' ? { ...base, ...userManagerEnv(uid) } : base;
+}
+
+/** `systemctl --user …` against this uid's user manager (see userCallEnv). */
+function userSystemctl(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync('systemctl', ['--user', ...args], { env: userCallEnv() });
+}
+
+/** execFile-shaped runner for `systemd-run` (injectable for tests). */
+export type LaunchExec = (file: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => Promise<unknown>;
+
+/** Bound to the literal `systemd-run` (`file` is informational for the test seam). */
+const defaultLaunchExec: LaunchExec = (_file, args, opts) => execFileAsync('systemd-run', args, opts);
 
 /** Absolute path to the compiled in-unit result-capture wrapper (sibling file). */
 function taskRunnerPath(): string {
@@ -94,7 +138,7 @@ export function computeIsolationSetenv(
  */
 export async function systemctlIsActive(unit: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('systemctl', ['--user', 'is-active', unit]);
+    const { stdout } = await userSystemctl(['is-active', unit]);
     return stdout.trim() || 'unknown';
   } catch (error) {
     const stdout =
@@ -117,8 +161,7 @@ export async function systemctlShowState(unit: string): Promise<UnitState> {
   }
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync('systemctl', [
-      '--user',
+    ({ stdout } = await userSystemctl([
       'show',
       unit,
       '--property=ActiveState',
@@ -161,8 +204,7 @@ export async function systemctlShowState(unit: string): Promise<UnitState> {
 export async function listActiveUserScopes(userId: number): Promise<string[]> {
   // --plain/--no-legend for stable parsing; only running/active units. Transient
   // workflow units are SERVICES (not --scope; see config.scopeUnitName rationale).
-  const { stdout } = await execFileAsync('systemctl', [
-    '--user',
+  const { stdout } = await userSystemctl([
     'list-units',
     '--type=service',
     '--state=active',
@@ -184,8 +226,7 @@ export async function listActiveUserScopes(userId: number): Promise<string[]> {
   const owned: string[] = [];
   for (const unit of units) {
     try {
-      const { stdout: desc } = await execFileAsync('systemctl', [
-        '--user',
+      const { stdout: desc } = await userSystemctl([
         'show',
         '-p',
         'Description',
@@ -203,14 +244,14 @@ export async function listActiveUserScopes(userId: number): Promise<string[]> {
 }
 
 /**
- * List ALL active `wf-*.service` units host-wide (every user), for the global
+ * List ALL active `wf-*.service` units of THIS uid's user manager — i.e. every
+ * Nassaj member, since all members share the server's uid — for the global
  * concurrency gate (§ج-5, الشرط 7). Unlike listActiveUserScopes it does NOT
  * filter by owner — the total count is what bounds host memory. Re-throws on a
  * hard enumeration failure so the global gate fails CLOSED (treated as at-cap).
  */
 export async function listAllActiveScopes(): Promise<string[]> {
-  const { stdout } = await execFileAsync('systemctl', [
-    '--user',
+  const { stdout } = await userSystemctl([
     'list-units',
     '--type=service',
     '--state=active',
@@ -219,6 +260,11 @@ export async function listAllActiveScopes(): Promise<string[]> {
     'wf-*.service',
   ]);
 
+  return parseWfUnits(stdout);
+}
+
+/** Unit names of `wf-*.service` rows in `systemctl list-units --plain --no-legend` output. */
+function parseWfUnits(stdout: string): string[] {
   return stdout
     .split('\n')
     .map((line) => line.trim().split(/\s+/)[0])
@@ -226,6 +272,139 @@ export async function listAllActiveScopes(): Promise<string[]> {
       (u): u is string =>
         typeof u === 'string' && u.startsWith('wf-') && u.endsWith('.service'),
     );
+}
+
+/**
+ * Result of probing this uid's systemd user manager for live workflow units.
+ * Only `present` carries units; the other states mean no user manager can be
+ * running workflow units for this uid on this host.
+ */
+export type UserUnitProbe =
+  | { state: 'unsupported' | 'no_systemd' | 'manager_absent' }
+  | { state: 'present'; units: string[] };
+
+/** Why the user-unit probe could not reach a verdict (callers fail closed). */
+export type UserUnitProbeReason =
+  | 'systemctl_missing'
+  | 'systemctl_failed'
+  | 'timeout'
+  | 'bad_runtime_dir'
+  | 'stat_failed'
+  | 'probe_failed';
+
+/**
+ * The probe could not decide. `message` is a fixed, client-safe sentence;
+ * `detail` (bounded raw stderr / errno) is for server logs only.
+ */
+export class UserUnitProbeError extends Error {
+  readonly reason: UserUnitProbeReason;
+  readonly detail: string;
+
+  constructor(reason: UserUnitProbeReason, detail = '') {
+    super(`user unit probe failed: ${reason}`);
+    this.name = 'UserUnitProbeError';
+    this.reason = reason;
+    this.detail = detail.slice(0, 200);
+  }
+}
+
+/** execFile-shaped runner the probe uses (injectable for tests). */
+export type ProbeExec = (
+  file: string,
+  args: string[],
+  opts: { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number },
+) => Promise<{ stdout: string; stderr: string }>;
+
+/** Seams of {@link probeUserWorkflowUnits}; every field defaults to the real host. */
+export interface UserUnitProbeOptions {
+  platform?: NodeJS.Platform;
+  getuid?: (() => number) | undefined;
+  runUserRoot?: string;
+  systemdRoot?: string;
+  exec?: ProbeExec;
+  /** PATH handed to systemctl (defaults to process.env.PATH). */
+  basePath?: string;
+  /** systemctl time limit in ms (defaults to PROBE_TIMEOUT_MS). */
+  timeoutMs?: number;
+}
+
+const PROBE_TIMEOUT_MS = 5000;
+const PROBE_MAX_BUFFER = 256 * 1024;
+
+/** Bound to the literal `systemctl` (`file` is informational for the test seam). */
+const defaultProbeExec: ProbeExec = async (_file, args, opts) => {
+  const { stdout, stderr } = await execFileAsync('systemctl', args, opts);
+  return { stdout: String(stdout), stderr: String(stderr) };
+};
+
+/** lstat that maps ENOENT to null and any other failure to `stat_failed`. */
+async function lstatOrAbsent(p: string): Promise<Stats | null> {
+  try {
+    return await fsp.lstat(p);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT') return null;
+    throw new UserUnitProbeError('stat_failed', String(code ?? error));
+  }
+}
+
+function probeFailure(error: unknown): UserUnitProbeError {
+  const e = error as { code?: unknown; killed?: boolean; signal?: unknown; stderr?: unknown };
+  const detail = typeof e?.stderr === 'string' ? e.stderr : String(e?.code ?? '');
+  if (e?.code === 'ENOENT') return new UserUnitProbeError('systemctl_missing', detail);
+  // maxBuffer overflow also sets killed=true; it is an output failure, not a timeout.
+  if (e?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return new UserUnitProbeError('systemctl_failed', String(e.code));
+  if (e?.killed === true || e?.code === 'ETIMEDOUT') return new UserUnitProbeError('timeout', detail);
+  return new UserUnitProbeError('systemctl_failed', detail);
+}
+
+/**
+ * Probes THIS uid's systemd user manager for active `wf-*.service` units
+ * (B-1474). Absence is judged ONLY on root-owned paths (`/run/systemd/system`,
+ * `/run/user/<uid>` created by logind) — never on sockets inside the runtime
+ * dir, which a same-uid member process could delete to spoof "no manager".
+ * When the runtime dir exists, systemctl is asked with an explicit env
+ * (nothing inherited but PATH) and any failure throws UserUnitProbeError.
+ *
+ * @returns the probe verdict; throws ONLY UserUnitProbeError when undecidable
+ *   (an unclassified failure becomes `probe_failed`), so callers can attribute
+ *   the failing leg exactly.
+ */
+export async function probeUserWorkflowUnits(opts: UserUnitProbeOptions = {}): Promise<UserUnitProbe> {
+  try {
+    return await probeUserUnits(opts);
+  } catch (error) {
+    if (error instanceof UserUnitProbeError) throw error;
+    throw new UserUnitProbeError('probe_failed', error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function probeUserUnits(opts: UserUnitProbeOptions): Promise<UserUnitProbe> {
+  const platform = opts.platform ?? process.platform;
+  const getuid = 'getuid' in opts ? opts.getuid : process.getuid?.bind(process);
+  if (platform !== 'linux' || typeof getuid !== 'function') return { state: 'unsupported' };
+  if ((await lstatOrAbsent(opts.systemdRoot ?? '/run/systemd/system')) === null) return { state: 'no_systemd' };
+  const uid = getuid();
+  const dir = path.join(opts.runUserRoot ?? '/run/user', String(uid));
+  const st = await lstatOrAbsent(dir);
+  if (st === null) return { state: 'manager_absent' };
+  if (!st.isDirectory() || st.uid !== uid) throw new UserUnitProbeError('bad_runtime_dir');
+  const env: NodeJS.ProcessEnv = {
+    PATH: opts.basePath ?? process.env.PATH ?? '/usr/bin:/bin',
+    ...userManagerEnv(uid, opts.runUserRoot),
+    LC_ALL: 'C',
+  };
+  const args = ['--user', 'list-units', '--type=service', '--state=active', '--no-legend', '--plain', 'wf-*.service'];
+  let stdout: string;
+  try {
+    ({ stdout } = await (opts.exec ?? defaultProbeExec)('systemctl', args, {
+      env, timeout: opts.timeoutMs ?? PROBE_TIMEOUT_MS, maxBuffer: PROBE_MAX_BUFFER,
+    }));
+  } catch (error) {
+    throw probeFailure(error);
+  }
+  // Parsed outside the exec catch: a parse fault is probe_failed, not systemctl_failed.
+  return { state: 'present', units: parseWfUnits(stdout) };
 }
 
 /**
@@ -260,6 +439,8 @@ export async function launchScope(params: {
   nodeBin?: string;
   /** Env to read PATH / optional unit HOME from (defaults to process.env). */
   baseEnv?: NodeJS.ProcessEnv;
+  /** systemd-run runner (tests only; defaults to execFile). */
+  exec?: LaunchExec;
 }): Promise<string> {
   // T-1749/ADR-159: the unit runs `task-runner` → `claude -p`, i.e. a real claude
   // harness spawn out-of-process. Refuse to launch it while claude is updating;
@@ -339,7 +520,7 @@ export async function launchScope(params: {
 
   const releaseLaunch = beginHarnessLaunch('claude');
   try {
-    await execFileAsync('systemd-run', args);
+    await (params.exec ?? defaultLaunchExec)('systemd-run', args, { env: userCallEnv() });
   } catch (error) {
     releaseLaunch();
     throw error;
@@ -361,7 +542,7 @@ export async function launchScope(params: {
 /** Stop a unit: `systemctl --user stop <unit>`. Idempotent for already-stopped. */
 export async function stopScope(unit: string): Promise<boolean> {
   try {
-    await execFileAsync('systemctl', ['--user', 'stop', unit]);
+    await userSystemctl(['stop', unit]);
     return true;
   } catch (error) {
     const stderr =

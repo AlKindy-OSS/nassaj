@@ -76,7 +76,8 @@ test('created API key is revealed once and only its digest and prefix persist', 
     const listed = apiKeysDb.getApiKeys(user.id);
     assert.equal(listed[0]?.api_key, `${stored.key_prefix}...`);
     assert.ok(!JSON.stringify(listed).includes(stored.key_digest));
-    assert.equal(apiKeysDb.validateApiKey(created.apiKey)?.id, user.id);
+    const resolved = apiKeysDb.resolveApiKey(created.apiKey);
+    assert.equal(resolved.ok && resolved.user.id, user.id);
   });
 });
 
@@ -95,8 +96,8 @@ test('digest uniqueness and disabled-key validation fail closed', async () => {
     }, /UNIQUE/);
 
     assert.equal(apiKeysDb.toggleApiKey(user.id, Number(created.id), false), true);
-    assert.equal(apiKeysDb.validateApiKey(created.apiKey), undefined);
-    assert.equal(apiKeysDb.validateApiKey('malformed'), undefined);
+    assert.deepEqual(apiKeysDb.resolveApiKey(created.apiKey), { ok: false, reason: 'invalid' });
+    assert.deepEqual(apiKeysDb.resolveApiKey('malformed'), { ok: false, reason: 'invalid' });
   });
 });
 

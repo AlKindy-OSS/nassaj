@@ -12,9 +12,10 @@
  * The endpoint must reflect the model the NEXT resumed turn will actually use —
  * an explicit in-conversation re-pick when one is stored, otherwise the provider's
  * own per-session active model (which itself degrades to the catalog default) —
- * NOT the caller's global picker. Provider 'qwen' is used because its
+ * NOT the caller's global picker. Provider 'deepseek' is used because its
  * `getCurrentActiveModel` returns a STATIC fallback with no network / no transcript
- * read, so the "no override → default" branch is deterministic.
+ * read, so the "no override → default" branch is deterministic. (It was 'qwen'
+ * until T-1953 retired that body: its session routes now answer provider_removed.)
  *
  * Security: the route takes the session 'read' mandate and, like the sibling POST
  * (B-IDOR-SESSION), refuses with a 404 identical to a missing session so a probed
@@ -47,8 +48,8 @@ import providerRouter from '../provider.routes.js';
 
 type TestUser = { id: number; role: string };
 
-const PROVIDER = 'qwen';
-const OVERRIDE_MODEL = 'qwen-override';
+const PROVIDER = 'deepseek';
+const OVERRIDE_MODEL = 'deepseek-override';
 
 // uuid v4 ids — the shared session-id validator accepts them.
 const PUBLIC_PINNED_SID = randomUUID(); // has an explicit stored re-pick

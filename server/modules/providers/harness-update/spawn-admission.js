@@ -27,7 +27,7 @@
  *
  * A. Chat entry points — `refuseSpawnIfHarnessUpdating` (writer frame):
  *    claude-sdk.js queryClaudeSDK → claude · openai-codex.js queryCodex → codex
- *    cursor-cli.js → cursor · qwen-cli.js → qwen · hermes-cli.js → hermes
+ *    cursor-cli.js → cursor · qwen-cli.js → qwen
  *    kimi-agent-cli.js → kimi · opencode-cli.js → opencode · agy-cli.js → antigravity
  *
  * B. Writer-less spawns — `assertHarnessNotUpdating` / `isSpawnBlockedForRunProvider`:
@@ -41,11 +41,11 @@
  *    list/codex/codex-credentials.writer.ts (`codex login`) → codex
  *    turn-supervisor/adapters/claude-sdk-adapter.ts (probe+invoke) → claude
  *    turn-supervisor/adapters/codex-cli-adapter.ts (probe+invoke) → codex
- *    turn-supervisor/adapters/extended-cli-adapter.ts (probe+invoke) → qwen|opencode|hermes
+ *    turn-supervisor/adapters/extended-cli-adapter.ts (probe+invoke) → qwen|opencode
  *    list/cursor/cursor-models.provider.ts (`cursor-agent --list-models`) → cursor
  *    list/opencode/opencode-models.provider.ts (`opencode models`) → opencode
  *    list/antigravity/antigravity-models-cli.client.ts (`agy models`) → antigravity
- *    turn-supervisor/cli-capability.ts (`--version`/`--help`) → qwen|hermes
+ *    turn-supervisor/cli-capability.ts (`--version`/`--help`) → qwen
  *    websocket/shell-websocket.service.ts (provider PTY lifecycle) → selected harness
  *
  * C. Covered transitively (reach a guarded function, no own guard):
@@ -108,7 +108,6 @@ export const RUN_PROVIDER_TO_HARNESS = Object.freeze({
   glm: 'opencode',
   qwen: 'qwen',
   kimi: 'kimi',
-  hermes: 'hermes',
   deepseek: 'deepseek',
 });
 

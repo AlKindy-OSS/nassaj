@@ -19,7 +19,7 @@ export type IsolatedCliResult = Readonly<{ code: number | null; stdout: string; 
 
 export type EphemeralRoleHome = Readonly<{
   id: string; directory: string; home: string; xdgConfig: string; xdgData: string; xdgState: string; xdgCache: string;
-  hermesHome: string; manifestPath: string;
+  manifestPath: string;
 }>;
 
 type CleanupManifest = Readonly<{
@@ -40,7 +40,6 @@ export async function createEphemeralRoleHome(ownerPid = process.pid): Promise<E
   const xdgData = path.join(directory, 'xdg-data');
   const xdgState = path.join(directory, 'xdg-state');
   const xdgCache = path.join(directory, 'xdg-cache');
-  const hermesHome = path.join(directory, 'hermes-home');
   const manifestPath = path.join(MANIFESTS, `${id}.json`);
   await mkdir(MANIFESTS, { recursive: true, mode: 0o700 });
   const manifest: CleanupManifest = {
@@ -49,9 +48,9 @@ export async function createEphemeralRoleHome(ownerPid = process.pid): Promise<E
   await writeFile(`${manifestPath}.pending`, `${JSON.stringify(manifest)}\n`, { mode: 0o600, flag: 'wx' });
   await import('node:fs/promises').then(({ rename }) => rename(`${manifestPath}.pending`, manifestPath));
   await mkdir(directory, { recursive: false, mode: 0o700 });
-  await Promise.all([home, xdgConfig, xdgData, xdgState, xdgCache, hermesHome]
+  await Promise.all([home, xdgConfig, xdgData, xdgState, xdgCache]
     .map((entry) => mkdir(entry, { recursive: true, mode: 0o700 })));
-  return Object.freeze({ id, directory, home, xdgConfig, xdgData, xdgState, xdgCache, hermesHome, manifestPath });
+  return Object.freeze({ id, directory, home, xdgConfig, xdgData, xdgState, xdgCache, manifestPath });
 }
 
 /** Removes only a role directory whose durable manifest matches its identity. */
@@ -104,6 +103,8 @@ export function spawnInIsolatedCliCage(input: IsolatedCliProcessSpec & {
   const unit = `nassaj-turn-role-${input.role.id}`;
   const systemdRun = input.systemdRunBinary ?? '/usr/bin/systemd-run';
   const systemctl = input.systemctlBinary ?? '/usr/bin/systemctl';
+  // HERMES_HOME has no consumer left (T-1953); it stays on the strip list so an
+  // operator-level value is never inherited into a caged role.
   const isolatedNames = new Set(['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'HERMES_HOME']);
   const inheritedEnvironment = Object.keys(input.env)
     .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name) && !isolatedNames.has(name))
@@ -119,7 +120,6 @@ export function spawnInIsolatedCliCage(input: IsolatedCliProcessSpec & {
     '--setenv=HOME=' + input.role.home, '--setenv=XDG_CONFIG_HOME=' + input.role.xdgConfig,
     '--setenv=XDG_DATA_HOME=' + input.role.xdgData,
     '--setenv=XDG_STATE_HOME=' + input.role.xdgState, '--setenv=XDG_CACHE_HOME=' + input.role.xdgCache,
-    '--setenv=HERMES_HOME=' + input.role.hermesHome,
     ...inheritedEnvironment,
     input.binary, ...input.args,
   ];

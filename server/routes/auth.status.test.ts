@@ -7,15 +7,22 @@ import type { Server } from 'node:http';
 
 import express from 'express';
 
+import { createSsoConfigDouble } from '../services/__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const emptyRouter = express.Router();
 
 let hasUsersResult = true;
 let hasUsersError = false;
+const sso = createSsoConfigDouble({ enforced: false, loginAvailable: false });
+let ssoStateResult = 'off';
 
-// Mock only the heavy transitive deps of auth.js; oidc-config.js is the REAL
-// module so /status exercises the same oidcEnabled() predicate the OIDC routes use.
+// Mock only the heavy transitive deps of auth.js. The SSO state model has its
+// own matrix tests (sso-config.service.test.ts); here only the field wiring.
+mock.module(url('../services/sso-config.service.js'), {
+  namedExports: { ...sso.exports, ssoState: () => ssoStateResult },
+});
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: { hasUsers: async () => {
@@ -56,9 +63,6 @@ mock.module(url('../modules/connectors/connector-owner-auth-session.js'), {
 mock.module(url('./webauthn.js'), { defaultExport: emptyRouter });
 mock.module(url('./oidc.js'), { defaultExport: emptyRouter });
 
-// Neutral baseline; each test sets the OIDC env it needs.
-delete process.env.OIDC_ENABLED;
-delete process.env.OIDC_ROLE_PROJECT_ID;
 delete process.env.MULTI_ACCOUNT_SWITCHING;
 
 const { default: authRouter } = await import('./auth.js');
@@ -87,13 +91,13 @@ test('/status preserves its generic error response', async () => {
   hasUsersError = false;
 });
 
-test('/status exposes oidcEnabled=false when OIDC is disabled', async () => {
-  delete process.env.OIDC_ENABLED;
-  delete process.env.OIDC_ROLE_PROJECT_ID;
+test('/status reports SSO off with the login button hidden', async () => {
+  ssoStateResult = 'off';
   assert.deepEqual(await status(), {
     needsSetup: false,
     isAuthenticated: false,
-    oidcEnabled: false,
+    ssoState: 'off',
+    ssoLoginAvailable: false,
     deviceAccountSessionsEnabled: false,
   });
 });
@@ -110,36 +114,32 @@ test('/status exposes the exact device-account-session route gate', async () => 
   delete process.env.MULTI_ACCOUNT_SWITCHING;
 });
 
-test('/status reports oidcEnabled=false when enabled but role project id is missing/invalid (fail-closed)', async () => {
-  process.env.OIDC_ENABLED = 'true';
-  delete process.env.OIDC_ROLE_PROJECT_ID;
-  assert.equal((await status()).oidcEnabled, false, 'missing project id');
-
-  process.env.OIDC_ROLE_PROJECT_ID = 'has space';
-  assert.equal((await status()).oidcEnabled, false, 'invalid project id');
+test('/status offers SSO login only in the active state (ADR-194 D1)', async () => {
+  for (const [state, available] of [['active', true], ['unavailable', false], ['paused', false], ['off', false]] as const) {
+    ssoStateResult = state;
+    const body = await status();
+    assert.equal(body.ssoState, state);
+    assert.equal(body.ssoLoginAvailable, available, state);
+  }
+  ssoStateResult = 'off';
 });
 
-test('/status reports oidcEnabled=true only when enabled AND scoped to a valid project id', async () => {
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-1';
-  assert.equal((await status()).oidcEnabled, true);
-});
-
-test('/status still reflects needsSetup and leaks no other OIDC config', async () => {
+test('/status still reflects needsSetup and leaks no other SSO config', async () => {
   hasUsersResult = false;
-  process.env.OIDC_ENABLED = 'true';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-1';
+  ssoStateResult = 'active';
   process.env.MULTI_ACCOUNT_SWITCHING = 'true';
   const body = await status();
   assert.deepEqual(body, {
     needsSetup: true,
     isAuthenticated: false,
-    oidcEnabled: true,
+    ssoState: 'active',
+    ssoLoginAvailable: true,
     deviceAccountSessionsEnabled: true,
   });
   assert.deepEqual(Object.keys(body).sort(), [
-    'deviceAccountSessionsEnabled', 'isAuthenticated', 'needsSetup', 'oidcEnabled',
+    'deviceAccountSessionsEnabled', 'isAuthenticated', 'needsSetup', 'ssoLoginAvailable', 'ssoState',
   ]);
+  ssoStateResult = 'off';
   delete process.env.MULTI_ACCOUNT_SWITCHING;
   hasUsersResult = true;
 });

@@ -17,14 +17,31 @@ import i18n from './i18n/config.js';
 
 // The authenticated application shell. Everything here sits behind
 // ProtectedRoute (login gate + onboarding) and the realtime/data providers.
-function AuthenticatedApp() {
+// Exported (qa-critic round 1) so a MemoryRouter test can exercise the real
+// route table directly — see AuthenticatedApp.routeIdentity.test.tsx.
+export function AuthenticatedApp() {
   return (
     <WebSocketProvider>
       <ProtectedRoute>
         <Routes>
-          <Route path="/" element={<AppContent />} />
-          <Route path="/session/:sessionId" element={<AppContent />} />
-          <Route path="/scheduled" element={<AppContent />} />
+          {/* B-1469 round 4: "/", "/session/:sessionId" and "/scheduled" used to be
+              three separate <Route> entries all rendering <AppContent />. React
+              Router treats a switch between DIFFERENT route entries as a change of
+              matched element — even when they render the exact same component —
+              and unmounts/remounts the whole subtree across it. That remount wiped
+              AppContent's own React state AND, two levels down, ChatInterface's
+              `useSessionStore()` instance and `pendingViewSessionRef`: the very
+              first `navigate('/session/:id', {replace:true})` for a brand-new
+              conversation (right after `session_created`) fired this exact
+              remount a few dozen ms after the optimistic user bubble had already
+              been flushed into the (about-to-be-discarded) store, permanently
+              losing it until the session was reopened. One `/*` entry keeps the
+              same matched element across all of "/", "/session/:id" and
+              "/scheduled", so no remount happens; AppContent already derives
+              `isScheduledRoute` from `location.pathname` itself, and now derives
+              `sessionId` from it the same way (see `routeSessionIdFromPathname`)
+              instead of `useParams()`, which required the dedicated route entry
+              this fix removes. */}
           {/* The wiki panel is `h-full` and owns its own internal scrolling.
               `#root` only sets `min-height`, which does not give a percentage
               height anything to resolve against, so on this standalone route
@@ -45,12 +62,17 @@ function AuthenticatedApp() {
               </div>
             }
           />
-          {/* No route matched, yet the user IS authenticated — render the app
-              instead of nothing. `/login` is the case that bites: AuthContext
-              sends a 401 there, the login form renders on any path, and after
-              a successful sign-in the URL is still /login — which used to
-              match no route and paint a blank page (B-313). */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* `/login` is the one unmatched-looking path that bites: AuthContext
+              sends a 401 there, the login form renders on any path, and after a
+              successful sign-in the URL is still /login. B-313: redirect it to
+              "/" explicitly rather than letting it fall into the `/*` below,
+              which would render the app AT the "/login" URL instead of "/". */}
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          {/* Every other path (including ones no longer explicitly listed, e.g.
+              a stale deep link) renders the app instead of nothing — the same
+              intent the old trailing `path="*"` had, minus its extra redirect
+              hop now that this IS the catch-all. */}
+          <Route path="/*" element={<AppContent />} />
         </Routes>
       </ProtectedRoute>
     </WebSocketProvider>

@@ -5,15 +5,19 @@ import { pathToFileURL } from 'node:url';
 
 import express from 'express';
 
+import { createSsoConfigDouble } from '../services/__tests__/sso-config-double.js';
+
 const url = (spec: string) => pathToFileURL(path.resolve(import.meta.dirname, spec)).href;
 const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const records: Array<{ userId: number; method: string }> = [];
 const audits: Array<{ action: string; metadata?: unknown }> = [];
 const linkedUserIds = new Set<number>();
 let assertedUser = { id: 7, username: 'owner', role: 'owner' };
+const sso = createSsoConfigDouble({ enforced: false, loginAvailable: false });
 
 class MockWebAuthnError extends Error {}
 
+mock.module(url('../services/sso-config.service.js'), { namedExports: sso.exports });
 mock.module(url('../middleware/auth.js'), {
   namedExports: { authenticateToken: passThrough, generateToken: () => 'passkey-jwt' },
 });
@@ -101,24 +105,20 @@ async function verifyPasskey() {
   }
 }
 
-async function withOidc(enabled: boolean, run: () => Promise<void>) {
-  const saved = { enabled: process.env.OIDC_ENABLED, project: process.env.OIDC_ROLE_PROJECT_ID };
-  process.env.OIDC_ENABLED = enabled ? 'true' : 'false';
-  process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
+/** Runs with the SSO policy enforced (ADR-194 D1) or not. */
+async function withSsoPolicy(enforced: boolean, run: () => Promise<void>) {
+  sso.setActive(enforced);
   try { await run(); } finally {
-    for (const [key, value] of [['OIDC_ENABLED', saved.enabled], ['OIDC_ROLE_PROJECT_ID', saved.project]] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    sso.setActive(false);
   }
 }
 
-test('T-1939: with SSO live a linked member passkey is refused with sso_required, no session', async () => {
+test('T-1939: with the SSO policy enforced a linked member passkey is refused with sso_required, no session', async () => {
   records.length = 0;
   audits.length = 0;
   assertedUser = { id: 21, username: 'member', role: 'user' };
   linkedUserIds.add(21);
-  await withOidc(true, async () => {
+  await withSsoPolicy(true, async () => {
     const { status, body } = await verifyPasskey();
     assert.equal(status, 403);
     assert.equal(body.code, 'sso_required');
@@ -130,14 +130,14 @@ test('T-1939: with SSO live a linked member passkey is refused with sso_required
   });
 });
 
-test('T-1939: a linked owner and any user with OIDC off keep passkey login', async () => {
+test('T-1939: a linked owner and any user with the SSO policy off keep passkey login', async () => {
   linkedUserIds.add(7);
   linkedUserIds.add(21);
-  await withOidc(true, async () => {
+  await withSsoPolicy(true, async () => {
     assertedUser = { id: 7, username: 'owner', role: 'owner' };
     assert.equal((await verifyPasskey()).status, 200);
   });
-  await withOidc(false, async () => {
+  await withSsoPolicy(false, async () => {
     assertedUser = { id: 21, username: 'member', role: 'user' };
     const { status, body } = await verifyPasskey();
     assert.equal(status, 200);

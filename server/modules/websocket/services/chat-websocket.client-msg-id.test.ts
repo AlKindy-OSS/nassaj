@@ -65,7 +65,6 @@ function makeDependencies() {
       spawnCursor: spawn('cursor'),
       queryCodex: spawn('codex'),
       spawnAntigravity: spawn('antigravity'),
-      spawnHermes: spawn('hermes'),
       spawnKimi: spawn('kimi'),
       spawnDeepSeek: spawn('deepseek'),
       spawnGlm: spawn('glm'),
