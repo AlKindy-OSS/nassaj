@@ -1,0 +1,99 @@
+# CI — the only workflow in this repo that runs on ordinary pushes and PRs.
+#
+# Why it exists: before this file, .github/workflows/ held exactly three
+# workflows — discord-release.yml (release: published), docker.yml
+# (workflow_dispatch) and release.yml (workflow_dispatch). None of them is
+# triggered by `push` or `pull_request`, so every commit — including the weekly
+# batch of up to 5 dependabot PRs — could be merged with zero automated checks.
+#
+# Scope note: this workflow deliberately does NOT build. `npm run build` is the
+# deploy path and is driven by scripts/safe-restart.sh on the fleet nodes;
+# duplicating it here would only slow the gate down. typecheck already compiles
+# both tsconfigs with --noEmit, which is the signal a build would give us.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A force-push or a quick follow-up commit should cancel the older run instead
+# of queueing behind it. `github.head_ref || github.ref` keeps PR runs and
+# branch runs in separate concurrency groups.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: typecheck / lint / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # DATABASE_PATH is deliberately NOT set at job level any more.
+      #
+      # `npm run test:server` now isolates itself: it defaults DATABASE_PATH to a
+      # fresh `mktemp -d` per invocation (see package.json → nassajTestIsolation).
+      # Because that default is written as ${DATABASE_PATH:-...}, ANY value
+      # exported here would WIN and be shared by all ~142 server test files in
+      # the run — reintroducing exactly the cross-file coupling and parallel-run
+      # collision this was meant to remove. Letting the script pick its own
+      # unique directory is strictly safer and makes CI identical to a developer
+      # running `npm test` locally, which is the whole point.
+      #
+      # Nothing in CI should ever reach a real provider; make an accidental read
+      # of a credential fail loudly instead of silently picking up a runner env.
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          # Single source of truth: .nvmrc (v22), matching the `engines` field
+          # in package.json (">=22 <25") and the node-version: 22 pinned in
+          # docker.yml / release.yml.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` is reproducible and fails loudly when package-lock.json has
+        # drifted from package.json. --include=dev is explicit because NODE_ENV
+        # is `test` here and a production-flavoured NODE_ENV makes npm prune
+        # devDependencies — which would take eslint, tsc, tsx and vitest with it
+        # and break every step below.
+        run: npm ci --include=dev
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        # The `lint` script carries --max-warnings, so warning drift fails here.
+        # See package.json → nassajLintBudget for the ceiling and its ratchet plan.
+        run: npm run lint
+
+      - name: Server + src tests
+        # `npm test` fans out to test:server (server/**/*.test.ts + .js in ONE
+        # node:test run) and test:src (the node:test files under src/ that vitest
+        # cannot execute), and aggregates both exit codes so neither half can be
+        # hidden by the other's failure.
+        run: npm test
+
+      - name: Client tests (vitest)
+        # Belt-and-braces only. No vitest test opens a database today (354 pass
+        # with this unset), but NODE_ENV=test arms assertTestDatabaseIsIsolated,
+        # and without a value the resolver would fall back to the in-repo
+        # <repo>/database/auth.db and leave a stray file in the checkout. Scoped
+        # to THIS step so it cannot override test:server's per-run temp dir.
+        # Under /tmp, not ${{ runner.temp }}: the guard only trusts os.tmpdir(),
+        # $TMPDIR, /tmp and /var/tmp (connection.ts:176-186), and runner.temp
+        # (/home/runner/work/_temp) is none of those.
+        env:
+          DATABASE_PATH: /tmp/nassaj-ci-vitest/auth.db
+        run: npm run test:client

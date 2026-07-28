@@ -1,0 +1,256 @@
+/* ── Wiki Panel — injected styles ─────────────────────────────────────────── */
+
+/* ── متغيّرات محلية للويكي (البند 2: فواصل قوية بدون لمس --border العام) ─── */
+/* نطاق الحاوية الكاملة — light & dark (--foreground يتكيّف آلياً مع الوضعين) */
+[data-wiki-panel],
+[data-wiki-drawer],
+.wiki-article,
+[data-wiki-scroll] {
+  --wiki-border-strong: hsl(var(--foreground) / 0.18);
+  /*
+   * B-121 — WCAG 1.4.11 Non-text Contrast ≥3:1
+   * border-border (~1.23:1 light / ~1.37:1 dark) لا يجتاز المعيار.
+   * hsl(foreground / 0.50) محسوب: 3.76:1 ضوء / 5.12:1 داكن.
+   * قيمة واحدة تعمل في الوضعين لأن --foreground نفسه يتغير مع .dark.
+   */
+  --wiki-border-ui: hsl(var(--foreground) / 0.50);
+}
+/* dark mode — يُرفع تباين --wiki-border-strong قليلاً لأن الخلفيات داكنة */
+.dark [data-wiki-panel],
+.dark [data-wiki-drawer],
+.dark .wiki-article,
+.dark [data-wiki-scroll] {
+  --wiki-border-strong: hsl(var(--foreground) / 0.25);
+}
+
+/* ── WCAG 1.4.11 — حدود مكوّنات الويكي (B-121) ──────────────────────────── */
+/* تجاوز border-border (~1.2:1) بـ--wiki-border-ui (≥3:1) لجميع الحدود الوظيفية
+   التي تساعد المستخدم على إدراك البنية (جداول، شريط جانبي، شريط أدوات).    */
+
+/* حاوية الجدول الخارجية (border border-border) */
+.wiki-article .wiki-table-scroll { border-color: var(--wiki-border-ui); }
+
+/* الحد السفلي لخلايا الرأس (border-b border-border) */
+.wiki-article th { border-bottom-color: var(--wiki-border-ui); }
+
+/* الحد السفلي لخلايا البيانات (كان border-border/40 → ~1.1:1) */
+.wiki-article td { border-bottom-color: var(--wiki-border-ui); }
+
+/* حد الشريط الجانبي inline-end (border-e border-border/60) */
+[data-wiki-drawer] { border-inline-end-color: var(--wiki-border-ui); }
+
+/* حد شريط الأدوات السفلي (يفصل الشريط عن منطقة المحتوى) */
+[data-wiki-panel] main > div:first-child { border-bottom-color: var(--wiki-border-ui); }
+
+/* حد قسم التذييل في الشريط الجانبي (border-t border-border/30) */
+[data-wiki-footer] { border-top-color: var(--wiki-border-ui); }
+
+/* Search match highlight (T-136 B-2)
+   Applied by JS: element.classList.add('wiki-search-highlight')
+   Removed after 2 seconds.                                                   */
+.wiki-search-highlight {
+  outline: 2px solid hsl(var(--primary) / 0.6);
+  outline-offset: 2px;
+  border-radius: 4px;
+  background-color: hsl(var(--primary) / 0.12);
+  animation: wiki-highlight-fade 2s ease-out forwards;
+}
+
+@keyframes wiki-highlight-fade {
+  0%   { background-color: hsl(var(--primary) / 0.22); outline-color: hsl(var(--primary) / 0.8); }
+  100% { background-color: transparent; outline-color: transparent; }
+}
+
+/* Reduced-motion: replace the fade animation with a static, persistent
+   indicator. The global *-rule in index.css collapses the animation to its
+   transparent end-state, leaving no visible highlight; here we pin a steady
+   outline + background that stays until JS removes the class.               */
+@media (prefers-reduced-motion: reduce) {
+  .wiki-search-highlight {
+    animation: none;
+    outline: 2px solid hsl(var(--primary) / 0.8);
+    background-color: hsl(var(--primary) / 0.15);
+  }
+}
+
+/* Interface font inside the wiki. Reads the same `--font-ui` custom property as
+   the rest of the app (src/lib/ui-font.ts), so the user's font choice applies
+   here too; every family offered in the picker covers Arabic and Latin alike.
+   The declaration is kept (rather than relying on inheritance) because the wiki
+   article pins its own dir=rtl/lang=ar and must be immune to any ancestor that
+   sets a different family. */
+.wiki-article {
+  font-family: var(--font-ui);
+}
+
+/* Code blocks must always render LTR regardless of article dir=rtl (T-136 RTL)
+   The article carries dir=rtl, but code is inherently LTR — force isolation.
+   design-ok: `text-align: left` is physical on purpose and is NOT a logical-
+   property miss. The same rule pins `direction: ltr`, so `start` resolves to
+   `left` here anyway; spelling it physically documents that code alignment is
+   independent of the article's direction, and survives any future change to
+   the inherited direction.                                                   */
+.wiki-article pre,
+.wiki-article code,
+.wiki-article kbd,
+.wiki-article samp {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+}
+
+/* RTL alignment + theme-aware prose colours ─────────────────────────────────
+   The wiki panel root carries dir="rtl" (WikiPanel.tsx), so logical properties
+   resolve correctly within this boundary — text-align:start = right in RTL.
+   (2) Tailwind Typography's default bold/link/marker colours are near-black and
+   vanish on the dark background — map every prose colour token to the app's
+   theme variables so all text is legible in light AND dark.
+   Code/pre keep LTR + left via their own rule above.
+   Selector is doubled (.wiki-article.prose) so it outranks Tailwind's own
+   `.prose` var defaults (both specificity 0,1,0 — source-order wins).       */
+.wiki-article.prose {
+  text-align: start;
+  --tw-prose-body: hsl(var(--foreground));
+  --tw-prose-headings: hsl(var(--foreground));
+  --tw-prose-bold: hsl(var(--foreground));
+  --tw-prose-links: hsl(var(--primary));
+  --tw-prose-bullets: hsl(var(--muted-foreground));
+  --tw-prose-counters: hsl(var(--muted-foreground));
+  --tw-prose-quotes: hsl(var(--foreground));
+  --tw-prose-quote-borders: hsl(var(--border));
+  --tw-prose-hr: hsl(var(--border));
+  --tw-prose-captions: hsl(var(--muted-foreground));
+  --tw-prose-code: hsl(var(--foreground));
+  /* Tailwind Typography uses --tw-prose-pre-code for <code> inside <pre>.
+     Without this, prose defaults to a light-grey value designed for dark
+     backgrounds and the text becomes invisible on bg-muted/50 in light mode.
+     Pin it to --foreground so it stays legible in both themes.              */
+  --tw-prose-pre-code: hsl(var(--foreground));
+  --tw-prose-pre-bg: transparent;
+  --tw-prose-th-borders: hsl(var(--border));
+  --tw-prose-td-borders: hsl(var(--border));
+}
+
+/* Inline code — rendered as <code class="wiki-inline-code"> (not wrapped in
+   <pre>). Background uses bg-muted/60 equivalent; foreground from theme so
+   contrast ≥4.5:1 in both light and dark.                                   */
+.wiki-article .wiki-inline-code {
+  background-color: hsl(var(--muted) / 0.7);
+  color: hsl(var(--foreground));
+  padding-inline: 0.3em;
+  padding-block: 0.15em;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  /* Keep LTR direction inside RTL prose */
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Table cells: use logical start so RTL dir="rtl" on the wiki root applies. */
+.wiki-article.prose :is(th, td) {
+  text-align: start;
+}
+
+/* Mobile drawer RTL slide (T-136 B-1)
+   On mobile (<md) the nav is position:fixed and uses translateX to slide.
+   data-wiki-drawer attribute drives the open/closed state.
+   On desktop (md+) Tailwind's md:transform-none overrides these rules.       */
+[data-wiki-drawer="closed"] { transform: translateX(100%); }
+[data-wiki-drawer="open"]   { transform: translateX(0);    }
+
+/* البند 7 (طفيفة): إخفاء الدرج المغلق بالكامل عن لوحة الوصول والمؤشر على الجوال.
+   على الديسكتوب (md+) الـtransform-none يُلغي الإزاحة فيبقى الـsidebar مرئياً. */
+@media (max-width: 767px) {
+  [data-wiki-drawer="closed"] {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  [data-wiki-drawer="open"] {
+    visibility: visible;
+    pointer-events: auto;
+  }
+}
+
+/* البند 3: تجاوز [&_svg]:max-w-full الموروثة من MermaidDiagram على الجوال.
+   data-wiki-mermaid يرفع الخصوصية بدون لمس الملف المشترك.
+   على الجوال: الـSVG يُعرض بحجمه الطبيعي داخل حاوية overflow-x-auto.  */
+@media (max-width: 767px) {
+  [data-wiki-mermaid="true"] > div {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  [data-wiki-mermaid="true"] > div svg {
+    max-width: none !important;
+  }
+}
+
+/* البند 3: داخل overlay التكبير — تمرير سلس على الجوال */
+.wiki-mermaid-overlay {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Inline SVG diagrams (.wiki-diagram) ──────────────────────────────────────
+   SVGs embedded directly in wiki markdown (class="wiki-diagram").
+   They use CSS custom-property colours (hsl(var(--primary)) etc.) and a
+   viewBox without fixed dimensions, so they scale automatically.              */
+.wiki-article .wiki-diagram {
+  display: block;
+  width: 100%;
+  max-width: 760px;
+  height: auto;
+  margin-inline: auto;
+  margin-block: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  /* البند 1: card بدل background لإبراز المخطط عن سطح الصفحة في الوضعين */
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
+}
+
+/* Horizontal-scroll container wrapped around every .wiki-diagram at render time.
+   Keeps dense diagrams legible on narrow viewports (pinch-zoom is disabled
+   app-wide) by letting them pan instead of shrinking to an unreadable size. */
+.wiki-article .wiki-diagram-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  .wiki-article .wiki-diagram {
+    padding: 0.75rem;
+    margin-block: 1rem;
+  }
+  /* Below this width the diagram text would shrink below legibility; keep a
+     readable minimum and let .wiki-diagram-scroll pan horizontally instead. */
+  .wiki-article .wiki-diagram-scroll .wiki-diagram {
+    min-width: 720px;
+    max-width: none;
+    margin-inline: 0;
+  }
+}
+
+/* البند 5: مؤشر تمرير أفقي للجداول العريضة على الجوال.
+   scroll-shadow على الحافة اليسرى (في RTL = نهاية الجدول).
+   الظل يظهر فقط عند وجود overflow فعلي (via background-attachment: local). */
+@media (max-width: 767px) {
+  .wiki-table-scroll {
+    -webkit-overflow-scrolling: touch;
+    background:
+      /* ظل على الحافة اليمنى (بداية الجدول في RTL) */
+      linear-gradient(to left, hsl(var(--border) / 0.4) 0, transparent 24px) left center,
+      /* ظل على الحافة اليسرى (نهاية الجدول في RTL = overflow direction) */
+      linear-gradient(to right, hsl(var(--border) / 0.4) 0, transparent 24px) right center,
+      /* صورة سطح قابلة للتمرير لإلغاء الظل حين لا overflow */
+      linear-gradient(hsl(var(--card)), hsl(var(--card))) left center,
+      linear-gradient(hsl(var(--card)), hsl(var(--card))) right center;
+    background-size: 24px 100%, 24px 100%, 16px 100%, 16px 100%;
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+  }
+}

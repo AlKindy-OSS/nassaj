@@ -1,0 +1,68 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    // baseUrl is the project root (one level above this config file) so that tsc-alias
+    // resolves @/ imports relative to the compiled output structure in dist-server/server/.
+    // With rootDir ".." tsc emits server files under dist-server/server/, so paths must
+    // include the "server/" prefix to match that layout.
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["server/*"]
+    },
+    // The backend is still mostly JavaScript today, so allowJs lets us add a real
+    // TypeScript build without forcing a large rename before the tooling is usable.
+    "allowJs": true,
+    // Keep the migration incremental: existing JS keeps building, while any new TS files
+    // still go through the normal TypeScript pipeline and strict checks.
+    "checkJs": false,
+    "strict": true,
+    "noEmitOnError": true,
+    // The backend build emits both /server and /shared into dist-server, so rootDir must
+    // stay one level above this file even though the config itself now lives in /server.
+    "rootDir": "..",
+    "outDir": "../dist-server",
+    // Source maps are OFF for the production server build: they were 509 of the
+    // 1018 files emitted into dist-server (~50%), they are shipped by the
+    // package.json `files` list, and they expose the original TypeScript source
+    // of a closed backend for no runtime benefit — Node only consults them when
+    // --enable-source-maps is passed, which the PM2 entry never does.
+    // Turn back to true (temporarily) if you need mapped stack traces while
+    // debugging a compiled build.
+    "sourceMap": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["./**/*.js", "./**/*.ts", "../shared/**/*.js", "../shared/**/*.ts"],
+  "exclude": [
+    "../dist",
+    "../dist-server",
+    // Staging / rollback dirs of the atomic server build (see package.json
+    // build:server → build:server:promote). Never inputs to a compile.
+    "../dist-server.bak-staging",
+    "../dist-server.bak-previous",
+    "../node_modules",
+    "../src",
+    // Tests are NOT production code and must not be emitted into dist-server:
+    // before this exclusion the build shipped 199 compiled test files out of
+    // 1018 emitted files, all of them published through the package.json
+    // `files` list. They keep running from source under
+    // `tsx --test` (npm run test), which does not read this include/exclude set.
+    //
+    // TRADE-OFF (documented on purpose): `npm run typecheck` runs
+    // `tsc --noEmit -p server/tsconfig.json`, so excluding the tests here also
+    // removes them from strict type checking. tsx only strips types, it does
+    // not check them. The clean follow-up is a separate
+    // `server/tsconfig.test.json` that extends this file and re-includes the
+    // test globs, wired into the `typecheck` script.
+    "./**/*.test.ts",
+    "./**/*.test.tsx",
+    "./**/*.test.js",
+    "./**/__tests__/**"
+  ]
+}

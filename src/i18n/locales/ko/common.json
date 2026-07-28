@@ -1,0 +1,351 @@
+{
+  "buttons": {
+    "save": "저장",
+    "cancel": "취소",
+    "delete": "삭제",
+    "create": "생성",
+    "edit": "편집",
+    "close": "닫기",
+    "confirm": "확인",
+    "submit": "제출",
+    "retry": "재시도",
+    "refresh": "새로고침",
+    "search": "검색",
+    "clear": "지우기",
+    "copy": "복사",
+    "download": "다운로드",
+    "upload": "업로드",
+    "browse": "찾아보기"
+  },
+  "tabs": {
+    "chat": "채팅",
+    "shell": "셸",
+    "files": "파일",
+    "git": "소스 관리",
+    "tasks": "작업",
+    "board": "프로젝트 보드",
+    "wiki": "위키"
+  },
+  "wiki": {
+    "title": "Nassaj 위키",
+    "panelAriaLabel": "Nassaj 위키",
+    "sidebarAriaLabel": "위키 목차",
+    "closeSidebar": "목차 숨기기",
+    "openSidebar": "목차 표시",
+    "pageNotFound": "페이지를 찾을 수 없습니다",
+    "searchPlaceholder": "위키 검색…",
+    "searchAriaLabel": "위키 페이지 검색",
+    "searchClear": "검색 지우기",
+    "searchNoResults": "결과 없음",
+    "searchResultsCount": "{{count}}개 결과",
+    "searchResultsAriaLabel": "검색 결과"
+  },
+  "status": {
+    "loading": "로딩 중...",
+    "success": "성공",
+    "error": "오류",
+    "failed": "실패",
+    "pending": "대기 중",
+    "completed": "완료",
+    "inProgress": "진행 중"
+  },
+  "messages": {
+    "savedSuccessfully": "저장되었습니다",
+    "deletedSuccessfully": "삭제되었습니다",
+    "updatedSuccessfully": "업데이트되었습니다",
+    "operationFailed": "작업 실패",
+    "networkError": "네트워크 오류. 연결을 확인해주세요.",
+    "unauthorized": "인증되지 않았습니다. 로그인해주세요.",
+    "notFound": "찾을 수 없음",
+    "invalidInput": "잘못된 입력",
+    "requiredField": "필수 항목입니다",
+    "unknownError": "알 수 없는 오류가 발생했습니다"
+  },
+  "navigation": {
+    "settings": "설정",
+    "home": "홈",
+    "back": "뒤로",
+    "next": "다음",
+    "previous": "이전",
+    "logout": "로그아웃"
+  },
+  "common": {
+    "language": "언어",
+    "theme": "테마",
+    "darkMode": "다크 모드",
+    "lightMode": "라이트 모드",
+    "name": "이름",
+    "description": "설명",
+    "enabled": "활성화",
+    "disabled": "비활성화",
+    "optional": "선택사항",
+    "version": "버전",
+    "select": "선택",
+    "selectAll": "전체 선택",
+    "deselectAll": "전체 해제",
+    "done": "완료",
+    "failed": "실패"
+  },
+  "time": {
+    "justNow": "방금 전",
+    "minutesAgo": "{{count}}분 전",
+    "hoursAgo": "{{count}}시간 전",
+    "daysAgo": "{{count}}일 전",
+    "yesterday": "어제"
+  },
+  "fileOperations": {
+    "newFile": "새 파일",
+    "newFolder": "새 폴더",
+    "rename": "이름 변경",
+    "move": "이동",
+    "copyPath": "경로 복사",
+    "openInEditor": "에디터에서 열기"
+  },
+  "mainContent": {
+    "loading": "CloudCLI 로딩 중",
+    "settingUpWorkspace": "워크스페이스 설정 중...",
+    "chooseProject": "프로젝트 선택",
+    "selectProjectDescription": "사이드바에서 프로젝트를 선택하여 Claude와 코딩을 시작하세요. 각 프로젝트에는 채팅 세션과 파일 히스토리가 포함됩니다.",
+    "tip": "팁",
+    "createProjectMobile": "위의 메뉴 버튼을 눌러 프로젝트에 접근하세요",
+    "createProjectDesktop": "사이드바의 폴더 아이콘을 클릭하여 새 프로젝트를 생성하세요",
+    "newSession": "새 세션",
+    "untitledSession": "제목 없는 세션",
+    "projectFiles": "프로젝트 파일",
+    "sessionIdTooltip": "세션 ID: {{id}} — 클릭하여 복사",
+    "sessionIdCopy": "세션 ID {{id}} 복사"
+  },
+  "fileTree": {
+    "loading": "파일 로딩 중...",
+    "files": "파일",
+    "simpleView": "간단히 보기",
+    "compactView": "컴팩트 보기",
+    "detailedView": "상세히 보기",
+    "searchPlaceholder": "파일 및 폴더 검색...",
+    "clearSearch": "검색 지우기",
+    "name": "이름",
+    "size": "크기",
+    "modified": "수정일",
+    "permissions": "권한",
+    "noFilesFound": "파일을 찾을 수 없음",
+    "checkProjectPath": "프로젝트 경로가 접근 가능한지 확인하세요",
+    "noMatchesFound": "일치하는 항목 없음",
+    "tryDifferentSearch": "다른 검색어를 시도하거나 검색을 지우세요",
+    "justNow": "방금 전",
+    "minAgo": "{{count}}분 전",
+    "hoursAgo": "{{count}}시간 전",
+    "daysAgo": "{{count}}일 전",
+    "newFile": "새 파일 (Cmd+N)",
+    "newFolder": "새 폴더 (Cmd+Shift+N)",
+    "refresh": "새로고침",
+    "collapseAll": "모두 접기",
+    "uploadFiles": "파일 업로드 (최대 {{size}} 각)",
+    "uploadingFiles": "파일 업로드 중",
+    "uploadComplete": "업로드 완료",
+    "uploadFailed": "업로드 실패",
+    "uploadedCount": "{{total}} {{label}} 중 {{uploaded}} 업로드 완료",
+    "context": {
+      "rename": "이름 변경",
+      "delete": "삭제",
+      "copyPath": "경로 복사",
+      "download": "다운로드",
+      "newFile": "새 파일",
+      "newFolder": "새 폴더",
+      "refresh": "새로 고침",
+      "menuLabel": "파일 컨텍스트 메뉴",
+      "loading": "로딩 중..."
+    }
+  },
+  "projectWizard": {
+    "title": "새 프로젝트 생성",
+    "steps": {
+      "type": "유형",
+      "configure": "설정",
+      "confirm": "확인"
+    },
+    "step1": {
+      "question": "이미 워크스페이스가 있으신가요, 아니면 새로 생성하시겠습니까?",
+      "existing": {
+        "title": "기존 워크스페이스",
+        "description": "서버에 이미 워크스페이스가 있고 프로젝트 목록에 추가만 하면 됩니다"
+      },
+      "new": {
+        "title": "새 워크스페이스",
+        "description": "새 워크스페이스를 생성하고, 선택적으로 GitHub 저장소에서 clone합니다"
+      }
+    },
+    "step2": {
+      "existingPath": "워크스페이스 경로",
+      "newPath": "워크스페이스 경로",
+      "existingPlaceholder": "/path/to/existing/workspace",
+      "newPlaceholder": "/path/to/new/workspace",
+      "existingHelp": "기존 워크스페이스 디렉토리의 전체 경로",
+      "newHelp": "워크스페이스 디렉토리의 전체 경로",
+      "githubUrl": "GitHub URL (선택사항)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "선택사항: 저장소를 clone하려면 GitHub URL을 입력하세요",
+      "githubAuth": "GitHub 인증 (선택사항)",
+      "githubAuthHelp": "비공개 저장소에만 필요합니다. 공개 저장소는 인증 없이 clone할 수 있습니다.",
+      "loadingTokens": "저장된 토큰 로딩 중...",
+      "storedToken": "저장된 토큰",
+      "newToken": "새 토큰",
+      "nonePublic": "없음 (공개)",
+      "selectToken": "토큰 선택",
+      "selectTokenPlaceholder": "-- 토큰 선택 --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "이 토큰은 이 작업에만 사용됩니다",
+      "publicRepoInfo": "공개 저장소는 인증이 필요하지 않습니다. 공개 저장소를 clone하는 경우 토큰을 생략할 수 있습니다.",
+      "noTokensHelp": "저장된 토큰이 없습니다. 설정 → API Keys에서 토큰을 추가하면 재사용이 편리합니다.",
+      "optionalTokenPublic": "GitHub 토큰 (공개 저장소는 선택사항)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (공개 저장소는 비워두세요)",
+      "repos": {
+        "fromMyRepos": "내 저장소에서 선택",
+        "pasteUrl": "URL 붙여넣기",
+        "sourceToggleLabel": "GitHub 소스",
+        "help": "클론할 GitHub 계정의 저장소를 선택하세요",
+        "ariaLabel": "GitHub 저장소 선택",
+        "placeholder": "저장소 선택...",
+        "searchPlaceholder": "저장소 검색...",
+        "searchAriaLabel": "GitHub 저장소 검색",
+        "private": "비공개",
+        "loading": "저장소를 불러오는 중...",
+        "empty": "이 토큰에 대한 저장소가 없습니다.",
+        "noMatch": "검색과 일치하는 저장소가 없습니다.",
+        "loadError": "저장소를 불러오지 못했습니다. 다시 시도하세요.",
+        "invalidToken": "GitHub가 이 토큰을 거부했습니다. 취소되었거나 \"repo\" 범위가 없을 수 있습니다.",
+        "noToken": "이 계정에 구성된 GitHub 토큰이 없습니다.",
+        "forbidden": "GitHub가 접근을 거부했습니다. 토큰에 필요한 범위가 없거나 속도 제한에 도달했습니다.",
+        "retry": "다시 시도",
+        "manageTokens": "설정에서 토큰 관리"
+      }
+    },
+    "step3": {
+      "reviewConfig": "설정 검토",
+      "existingWorkspace": "기존 워크스페이스",
+      "newWorkspace": "새 워크스페이스",
+      "path": "경로:",
+      "cloneFrom": "Clone 소스:",
+      "authentication": "인증:",
+      "usingStoredToken": "저장된 토큰 사용:",
+      "usingProvidedToken": "제공된 토큰 사용",
+      "noAuthentication": "인증 없음",
+      "sshKey": "SSH 키",
+      "existingInfo": "워크스페이스가 프로젝트 목록에 추가되며 Claude/Cursor 세션에서 사용할 수 있습니다.",
+      "newWithClone": "이 폴더에 저장소가 clone됩니다.",
+      "newEmpty": "워크스페이스가 프로젝트 목록에 추가되며 Claude/Cursor 세션에서 사용할 수 있습니다.",
+      "cloningRepository": "저장소 clone 중..."
+    },
+    "buttons": {
+      "cancel": "취소",
+      "back": "뒤로",
+      "next": "다음",
+      "createProject": "프로젝트 생성",
+      "creating": "생성 중...",
+      "cloning": "Clone 중..."
+    },
+    "errors": {
+      "selectType": "기존 워크스페이스를 사용할지 새로 생성할지 선택해주세요",
+      "providePath": "워크스페이스 경로를 입력해주세요",
+      "failedToCreate": "워크스페이스 생성 실패",
+      "failedToCreateFolder": "폴더 생성 실패"
+    }
+  },
+  "notifications": {
+    "genericTool": "도구",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "알림"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "작업 필요",
+          "body": "{{toolName}} 에 대한 결정을 기다리고 있습니다."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "실행이 중지되었습니다",
+          "body": "사유: {{reason}}"
+        },
+        "failed": {
+          "title": "실행 실패"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "에이전트 알림"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "업데이트 가능",
+    "newVersionReady": "새 버전이 준비되었습니다",
+    "currentVersion": "현재 버전",
+    "latestVersion": "최신 버전",
+    "whatsNew": "새로운 기능:",
+    "viewFullRelease": "전체 릴리스 보기",
+    "updateProgress": "업데이트 진행 상황:",
+    "manualUpgrade": "수동 업그레이드:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "또는 \"지금 업데이트\"를 클릭하여 자동으로 업데이트합니다.",
+    "updateCompleted": "업데이트가 완료되었습니다!",
+    "restartServer": "변경사항을 적용하려면 서버를 재시작하세요.",
+    "updateFailed": "업데이트 실패",
+    "buttons": {
+      "close": "닫기",
+      "later": "나중에",
+      "copyCommand": "명령어 복사",
+      "updateNow": "지금 업데이트",
+      "updating": "업데이트 중..."
+    },
+    "ariaLabels": {
+      "closeModal": "버전 업그레이드 모달 닫기",
+      "showSidebar": "사이드바 표시",
+      "settings": "설정",
+      "updateAvailable": "업데이트 가능",
+      "closeSidebar": "사이드바 닫기"
+    }
+  },
+  "sessionProcessState": {
+    "running": "실행 중",
+    "frozen": "일시 중지됨 (동결)",
+    "runningHint": "세션 프로세스가 실행 중입니다",
+    "frozenHint": "세션 프로세스가 일시적으로 동결되었습니다 (kill -STOP)",
+    "projectBusyHint": "이 프로젝트의 세션이 처리 중입니다",
+    "done": "완료",
+    "doneHint": "세션이 완료되었으며 아직 열지 않았습니다",
+    "projectDoneHint": "이 프로젝트의 세션이 완료되었으며 아직 열지 않았습니다"
+  },
+  "workflowStatus": {
+    "running": "워크플로우 실행 중",
+    "runningHint": "백그라운드 워크플로우가 이 세션에서 실행 중입니다",
+    "orphanEmpty": "중지됨 — 출력 없음",
+    "orphanEmptyHint": "에이전트가 완료되기 전에 프로세스가 종료되었습니다 (0/N) — 수동으로 재시작 가능",
+    "orphanPartial": "중지됨 — 부분 완료",
+    "orphanPartialHint": "일부 에이전트 완료 후 프로세스가 종료되었습니다 — 부분 진행 상황 저장됨, 수동 재시작 가능",
+    "orphanIncomplete": "중지됨 — 불완전",
+    "orphanIncompleteHint": "프로세스가 완료되지 않고 종료되었습니다 (시작 > 완료) — 수동으로 재시작 가능",
+    "frozen": "동결됨 (일시 중지)",
+    "frozenHint": "프로세스가 일시 중단됨 (SIGSTOP), 종료 아님 — CONT 시 재개됩니다",
+    "unknown": "활성 상태 알 수 없음",
+    "unknownHint": "활성 상태를 확인할 수 없습니다 — 서버 재시작 후 생존 가능성; 생사를 단정하지 않습니다",
+    "projectRunningHint": "이 프로젝트에서 백그라운드 워크플로우가 실행 중입니다",
+    "projectOrphanHint": "이 프로젝트에 주의가 필요한 고아 백그라운드 워크플로우가 있습니다",
+    "projectUnknownHint": "이 프로젝트에 있는 백그라운드 워크플로우의 활성 상태를 알 수 없습니다 — 생사를 단정하지 않습니다"
+  },
+  "buildUpdate": {
+    "available": "새 빌드가 출시되었습니다",
+    "reload": "새로고침",
+    "ariaLabel": "새 빌드 업데이트 알림",
+    "dismiss": "닫기"
+  },
+  "governanceBadge": {
+    "ungoverned": "거버넌스 미적용",
+    "tooltip": {
+      "none": "이 세션은 Nassaj 거버넌스 밖에서 실행 중입니다 — 프로바이더 설정을 확인하세요"
+    }
+  }
+}

@@ -1,0 +1,351 @@
+{
+  "buttons": {
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "create": "Erstellen",
+    "edit": "Bearbeiten",
+    "close": "Schließen",
+    "confirm": "Bestätigen",
+    "submit": "Absenden",
+    "retry": "Erneut versuchen",
+    "refresh": "Aktualisieren",
+    "search": "Suchen",
+    "clear": "Leeren",
+    "copy": "Kopieren",
+    "download": "Herunterladen",
+    "upload": "Hochladen",
+    "browse": "Durchsuchen"
+  },
+  "tabs": {
+    "chat": "Chat",
+    "shell": "Terminal",
+    "files": "Dateien",
+    "git": "Quellcodeverwaltung",
+    "tasks": "Aufgaben",
+    "board": "Projektboard",
+    "wiki": "Wiki"
+  },
+  "wiki": {
+    "title": "Nassaj-Wiki",
+    "panelAriaLabel": "Nassaj-Wiki",
+    "sidebarAriaLabel": "Wiki-Index",
+    "closeSidebar": "Index ausblenden",
+    "openSidebar": "Index anzeigen",
+    "pageNotFound": "Seite nicht gefunden",
+    "searchPlaceholder": "Wiki durchsuchen…",
+    "searchAriaLabel": "Wiki-Seiten durchsuchen",
+    "searchClear": "Suche löschen",
+    "searchNoResults": "Keine Ergebnisse",
+    "searchResultsCount": "{{count}} Ergebnis(se)",
+    "searchResultsAriaLabel": "Suchergebnisse"
+  },
+  "status": {
+    "loading": "Lädt...",
+    "success": "Erfolgreich",
+    "error": "Fehler",
+    "failed": "Fehlgeschlagen",
+    "pending": "Ausstehend",
+    "completed": "Abgeschlossen",
+    "inProgress": "In Bearbeitung"
+  },
+  "messages": {
+    "savedSuccessfully": "Erfolgreich gespeichert",
+    "deletedSuccessfully": "Erfolgreich gelöscht",
+    "updatedSuccessfully": "Erfolgreich aktualisiert",
+    "operationFailed": "Vorgang fehlgeschlagen",
+    "networkError": "Netzwerkfehler. Bitte überprüf deine Verbindung.",
+    "unauthorized": "Nicht autorisiert. Bitte meld dich an.",
+    "notFound": "Nicht gefunden",
+    "invalidInput": "Ungültige Eingabe",
+    "requiredField": "Dieses Feld ist erforderlich",
+    "unknownError": "Ein unbekannter Fehler ist aufgetreten"
+  },
+  "navigation": {
+    "settings": "Einstellungen",
+    "home": "Startseite",
+    "back": "Zurück",
+    "next": "Weiter",
+    "previous": "Zurück",
+    "logout": "Abmelden"
+  },
+  "common": {
+    "language": "Sprache",
+    "theme": "Design",
+    "darkMode": "Darkmode",
+    "lightMode": "Hellmodus",
+    "name": "Name",
+    "description": "Beschreibung",
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert",
+    "optional": "Optional",
+    "version": "Version",
+    "select": "Auswählen",
+    "selectAll": "Alle auswählen",
+    "deselectAll": "Alle abwählen",
+    "done": "Fertig",
+    "failed": "Fehlgeschlagen"
+  },
+  "time": {
+    "justNow": "Gerade eben",
+    "minutesAgo": "vor {{count}} Min.",
+    "hoursAgo": "vor {{count}} Std.",
+    "daysAgo": "vor {{count}} Tagen",
+    "yesterday": "Gestern"
+  },
+  "fileOperations": {
+    "newFile": "Neue Datei",
+    "newFolder": "Neuer Ordner",
+    "rename": "Umbenennen",
+    "move": "Verschieben",
+    "copyPath": "Pfad kopieren",
+    "openInEditor": "Im Editor öffnen"
+  },
+  "mainContent": {
+    "loading": "CloudCLI wird geladen",
+    "settingUpWorkspace": "Arbeitsbereich wird eingerichtet...",
+    "chooseProject": "Projekt auswählen",
+    "selectProjectDescription": "Wähl ein Projekt aus der Seitenleiste, um mit Claude zu programmieren. Jedes Projekt enthält deine Chat-Sitzungen und den Dateiverlauf.",
+    "tip": "Tipp",
+    "createProjectMobile": "Tipp oben auf die Menüschaltfläche, um auf Projekte zuzugreifen",
+    "createProjectDesktop": "Erstell ein neues Projekt, indem du auf das Ordnersymbol in der Seitenleiste klickst",
+    "newSession": "Neue Sitzung",
+    "untitledSession": "Unbenannte Sitzung",
+    "projectFiles": "Projektdateien",
+    "sessionIdTooltip": "Sitzungs-ID: {{id}} — zum Kopieren klicken",
+    "sessionIdCopy": "Sitzungs-ID {{id}} kopieren"
+  },
+  "fileTree": {
+    "loading": "Dateien werden geladen...",
+    "files": "Dateien",
+    "simpleView": "Einfache Ansicht",
+    "compactView": "Kompakte Ansicht",
+    "detailedView": "Detailansicht",
+    "searchPlaceholder": "Dateien und Ordner durchsuchen...",
+    "clearSearch": "Suche leeren",
+    "name": "Name",
+    "size": "Größe",
+    "modified": "Geändert",
+    "permissions": "Berechtigungen",
+    "noFilesFound": "Keine Dateien gefunden",
+    "checkProjectPath": "Überprüf, ob der Projektpfad zugänglich ist",
+    "noMatchesFound": "Keine Treffer gefunden",
+    "tryDifferentSearch": "Versuch einen anderen Suchbegriff oder leere die Suche",
+    "justNow": "gerade eben",
+    "minAgo": "vor {{count}} Min.",
+    "hoursAgo": "vor {{count}} Std.",
+    "daysAgo": "vor {{count}} Tagen",
+    "newFile": "Neue Datei (Cmd+N)",
+    "newFolder": "Neuer Ordner (Cmd+Shift+N)",
+    "refresh": "Aktualisieren",
+    "collapseAll": "Alle einklappen",
+    "uploadFiles": "Dateien hochladen (max. {{size}} pro Datei)",
+    "uploadingFiles": "Dateien werden hochgeladen",
+    "uploadComplete": "Upload abgeschlossen",
+    "uploadFailed": "Upload fehlgeschlagen",
+    "uploadedCount": "{{uploaded}} von {{total}} {{label}} hochgeladen",
+    "context": {
+      "rename": "Umbenennen",
+      "delete": "Löschen",
+      "copyPath": "Pfad kopieren",
+      "download": "Herunterladen",
+      "newFile": "Neue Datei",
+      "newFolder": "Neuer Ordner",
+      "refresh": "Aktualisieren",
+      "menuLabel": "Datei-Kontextmenü",
+      "loading": "Lädt..."
+    }
+  },
+  "projectWizard": {
+    "title": "Neues Projekt erstellen",
+    "steps": {
+      "type": "Typ",
+      "configure": "Konfigurieren",
+      "confirm": "Bestätigen"
+    },
+    "step1": {
+      "question": "Hast du bereits einen Arbeitsbereich, oder möchtest du einen neuen erstellen?",
+      "existing": {
+        "title": "Vorhandener Arbeitsbereich",
+        "description": "Ich habe bereits einen Arbeitsbereich auf meinem Server und möchte ihn nur zur Projektliste hinzufügen"
+      },
+      "new": {
+        "title": "Neuer Arbeitsbereich",
+        "description": "Einen neuen Arbeitsbereich erstellen, optional aus einem GitHub-Repository klonen"
+      }
+    },
+    "step2": {
+      "existingPath": "Arbeitsbereichspfad",
+      "newPath": "Arbeitsbereichspfad",
+      "existingPlaceholder": "/Pfad/zum/vorhandenen/Arbeitsbereich",
+      "newPlaceholder": "/Pfad/zum/neuen/Arbeitsbereich",
+      "existingHelp": "Vollständiger Pfad zu deinem vorhandenen Arbeitsbereichsverzeichnis",
+      "newHelp": "Vollständiger Pfad zu deinem Arbeitsbereichsverzeichnis",
+      "githubUrl": "GitHub-URL (Optional)",
+      "githubPlaceholder": "https://github.com/benutzername/repository",
+      "githubHelp": "Optional: GitHub-URL angeben, um ein Repository zu klonen",
+      "githubAuth": "GitHub-Authentifizierung (Optional)",
+      "githubAuthHelp": "Nur für private Repositories erforderlich. Öffentliche Repos können ohne Authentifizierung geklont werden.",
+      "loadingTokens": "Gespeicherte Token werden geladen...",
+      "storedToken": "Gespeicherter Token",
+      "newToken": "Neuer Token",
+      "nonePublic": "Keiner (Öffentlich)",
+      "selectToken": "Token auswählen",
+      "selectTokenPlaceholder": "-- Token auswählen --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "Dieser Token wird nur für diesen Vorgang verwendet",
+      "publicRepoInfo": "Öffentliche Repositories benötigen keine Authentifizierung. Du kannst das Token beim Klonen eines öffentlichen Repos weglassen.",
+      "noTokensHelp": "Keine gespeicherten Token verfügbar. Du kannst Token unter Einstellungen → API-Schlüssel für einfachere Wiederverwendung hinzufügen.",
+      "optionalTokenPublic": "GitHub-Token (Optional für öffentliche Repos)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (leer lassen für öffentliche Repos)",
+      "repos": {
+        "fromMyRepos": "Aus meinen Repositories wählen",
+        "pasteUrl": "URL einfügen",
+        "sourceToggleLabel": "GitHub-Quelle",
+        "help": "Wähle ein Repository aus deinem GitHub-Konto zum Klonen",
+        "ariaLabel": "GitHub-Repository auswählen",
+        "placeholder": "Repository auswählen...",
+        "searchPlaceholder": "Repositories durchsuchen...",
+        "searchAriaLabel": "Deine GitHub-Repositories durchsuchen",
+        "private": "Privat",
+        "loading": "Repositories werden geladen...",
+        "empty": "Keine Repositories für dieses Token gefunden.",
+        "noMatch": "Keine Repositories entsprechen deiner Suche.",
+        "loadError": "Repositories konnten nicht geladen werden. Bitte erneut versuchen.",
+        "invalidToken": "GitHub hat dieses Token abgelehnt. Es ist möglicherweise widerrufen oder hat keinen \"repo\"-Scope.",
+        "noToken": "Für dieses Konto ist kein GitHub-Token konfiguriert.",
+        "forbidden": "GitHub hat den Zugriff verweigert. Dem Token fehlt der Scope oder das Rate-Limit wurde erreicht.",
+        "retry": "Erneut versuchen",
+        "manageTokens": "Tokens in den Einstellungen verwalten"
+      }
+    },
+    "step3": {
+      "reviewConfig": "Konfiguration überprüfen",
+      "existingWorkspace": "Vorhandener Arbeitsbereich",
+      "newWorkspace": "Neuer Arbeitsbereich",
+      "path": "Pfad:",
+      "cloneFrom": "Klonen von:",
+      "authentication": "Authentifizierung:",
+      "usingStoredToken": "Gespeicherter Token wird verwendet:",
+      "usingProvidedToken": "Angegebener Token wird verwendet",
+      "noAuthentication": "Keine Authentifizierung",
+      "sshKey": "SSH-Schlüssel",
+      "existingInfo": "Der Arbeitsbereich wird zur Projektliste hinzugefügt und steht für Claude/Cursor-Sitzungen zur Verfügung.",
+      "newWithClone": "Das Repository wird aus diesem Ordner geklont.",
+      "newEmpty": "Der Arbeitsbereich wird zur Projektliste hinzugefügt und steht für Claude/Cursor-Sitzungen zur Verfügung.",
+      "cloningRepository": "Repository wird geklont..."
+    },
+    "buttons": {
+      "cancel": "Abbrechen",
+      "back": "Zurück",
+      "next": "Weiter",
+      "createProject": "Projekt erstellen",
+      "creating": "Wird erstellt...",
+      "cloning": "Wird geklont..."
+    },
+    "errors": {
+      "selectType": "Bitte wähl aus, ob du einen vorhandenen Arbeitsbereich hast oder einen neuen erstellen möchtest",
+      "providePath": "Bitte gib einen Arbeitsbereichspfad an",
+      "failedToCreate": "Arbeitsbereich konnte nicht erstellt werden",
+      "failedToCreateFolder": "Ordner konnte nicht erstellt werden"
+    }
+  },
+  "notifications": {
+    "genericTool": "ein Werkzeug",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "Benachrichtigung"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "Aktion erforderlich",
+          "body": "{{toolName}} wartet auf deine Entscheidung."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "Lauf gestoppt",
+          "body": "Grund: {{reason}}"
+        },
+        "failed": {
+          "title": "Lauf fehlgeschlagen"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "Agenten-Benachrichtigung"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "Update verfügbar",
+    "newVersionReady": "Eine neue Version ist verfügbar",
+    "currentVersion": "Aktuelle Version",
+    "latestVersion": "Neueste Version",
+    "whatsNew": "Neuigkeiten:",
+    "viewFullRelease": "Vollständige Version anzeigen",
+    "updateProgress": "Update-Fortschritt:",
+    "manualUpgrade": "Manuelles Upgrade:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "Oder klick auf \"Jetzt aktualisieren\", um das Update automatisch durchzuführen.",
+    "updateCompleted": "Update erfolgreich abgeschlossen!",
+    "restartServer": "Bitte starte den Server neu, um die Änderungen anzuwenden.",
+    "updateFailed": "Update fehlgeschlagen",
+    "buttons": {
+      "close": "Schließen",
+      "later": "Später",
+      "copyCommand": "Befehl kopieren",
+      "updateNow": "Jetzt aktualisieren",
+      "updating": "Wird aktualisiert..."
+    },
+    "ariaLabels": {
+      "closeModal": "Versions-Update-Modal schließen",
+      "showSidebar": "Seitenleiste anzeigen",
+      "settings": "Einstellungen",
+      "updateAvailable": "Update verfügbar",
+      "closeSidebar": "Seitenleiste schließen"
+    }
+  },
+  "sessionProcessState": {
+    "running": "Läuft",
+    "frozen": "Pausiert (eingefroren)",
+    "runningHint": "Sitzungsprozess läuft",
+    "frozenHint": "Sitzungsprozess ist vorübergehend eingefroren (kill -STOP)",
+    "projectBusyHint": "Eine Sitzung in diesem Projekt wird gerade verarbeitet",
+    "done": "Fertig",
+    "doneHint": "Sitzung beendet und noch nicht geöffnet",
+    "projectDoneHint": "Eine Sitzung in diesem Projekt ist beendet und wurde noch nicht geöffnet"
+  },
+  "workflowStatus": {
+    "running": "Workflow läuft",
+    "runningHint": "Ein Hintergrundworkflow läuft aktiv in dieser Sitzung",
+    "orphanEmpty": "Gestoppt — keine Ausgabe",
+    "orphanEmptyHint": "Prozess beendet, bevor ein Agent abgeschlossen hat (0 von N) — manuell wiederaufnehmbar",
+    "orphanPartial": "Gestoppt — teilweise",
+    "orphanPartialHint": "Prozess beendet, nachdem einige Agenten abgeschlossen haben — Teilfortschritt gespeichert, manuell wiederaufnehmbar",
+    "orphanIncomplete": "Gestoppt — unvollständig",
+    "orphanIncompleteHint": "Prozess ohne Abschluss beendet; mehr gestartet als produziert — manuell wiederaufnehmbar",
+    "frozen": "Eingefroren (pausiert)",
+    "frozenHint": "Prozess ist angehalten (SIGSTOP), nicht tot — wird bei CONT fortgesetzt",
+    "unknown": "Unbekannte Lebendigkeit",
+    "unknownHint": "Lebendigkeit konnte nicht bestätigt werden — wahrscheinlich Serverneustart überlebt; weder lebendig noch tot bestätigt",
+    "projectRunningHint": "Ein Hintergrundworkflow läuft in diesem Projekt",
+    "projectOrphanHint": "Ein verwaister Hintergrundworkflow in diesem Projekt braucht Aufmerksamkeit",
+    "projectUnknownHint": "Die Lebendigkeit eines Hintergrundworkflows in diesem Projekt ist unbekannt — weder lebendig noch tot bestätigt"
+  },
+  "buildUpdate": {
+    "available": "Ein neuer Build ist verfügbar",
+    "reload": "Neu laden",
+    "ariaLabel": "Benachrichtigung über neuen Build",
+    "dismiss": "Schließen"
+  },
+  "governanceBadge": {
+    "ungoverned": "Ohne Governance",
+    "tooltip": {
+      "none": "Diese Sitzung läuft außerhalb der Nassaj-Governance — prüfe die Anbietereinstellungen"
+    }
+  }
+}

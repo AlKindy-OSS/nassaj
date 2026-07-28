@@ -1,0 +1,42 @@
+{
+  "toolbar": {
+    "changes": "تغييرات",
+    "previousChange": "التغيير السابق",
+    "nextChange": "التغيير التالي",
+    "hideDiff": "إخفاء تمييز الفروقات",
+    "showDiff": "إظهار تمييز الفروقات",
+    "settings": "إعدادات المحرر",
+    "collapse": "طيّ المحرر",
+    "expand": "توسيع المحرر إلى العرض الكامل"
+  },
+  "loading": "جارٍ تحميل {{fileName}}...",
+  "header": {
+    "showingChanges": "عرض التغييرات"
+  },
+  "actions": {
+    "download": "تنزيل الملف",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ...",
+    "saved": "تم الحفظ!",
+    "exitFullscreen": "الخروج من الشاشة الكاملة",
+    "fullscreen": "ملء الشاشة",
+    "close": "إغلاق",
+    "previewMarkdown": "معاينة Markdown",
+    "editMarkdown": "تحرير Markdown",
+    "previewHtml": "فتح معاينة HTML في تبويب جديد"
+  },
+  "footer": {
+    "lines": "الأسطر:",
+    "characters": "الأحرف:",
+    "shortcuts": "اضغط Ctrl+S للحفظ • Esc للإغلاق"
+  },
+  "binaryFile": {
+    "title": "ملف ثنائي",
+    "message": "لا يمكن عرض الملف \"{{fileName}}\" في محرر النصوص لأنه ملف ثنائي."
+  },
+  "filePreview": {
+    "loading": "جارٍ تحميل المعاينة...",
+    "error": "تعذّر عرض هذا الملف.",
+    "openInNewTab": "فتح في تبويب جديد"
+  }
+}

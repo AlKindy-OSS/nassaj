@@ -1,0 +1,550 @@
+{
+  "btw": {
+    "title": "Side question",
+    "close": "Close",
+    "questionLabel": "Question",
+    "answerLabel": "Answer",
+    "status": {
+      "pending": "Preparing…",
+      "streaming": "Typing…",
+      "complete": "Done",
+      "thinking": "Thinking…"
+    },
+    "errors": {
+      "unsupported_provider": "The /btw side channel is available for Claude sessions only.",
+      "session_not_found": "Session not found — open a session first, then ask your side question.",
+      "not_visible": "You don't have permission to view this session's context.",
+      "busy": "The session is busy — try again shortly.",
+      "sdk_error": "Couldn't complete the side question — an unexpected error occurred.",
+      "timeout": "This feature requires a server update.",
+      "disconnected": "Can't send — connection lost."
+    },
+    "hints": {
+      "quota": "Uses your Claude quota.",
+      "context": "Answered on the session context up to the last saved message."
+    },
+    "description": "Ask a side question on the current session context"
+  },
+  "contextRot": {
+    "label": "Context",
+    "barAria": "Context usage",
+    "empty": "No token usage yet",
+    "percentUsed": "{{percent}} of real window",
+    "tooltipUsed": "Used of real window: {{used}} / {{total}}",
+    "tooltipCacheRead": "Cache read: {{value}}",
+    "popoverTitle": "Context usage",
+    "close": "Close",
+    "levels": {
+      "safe": "Safe — context is healthy.",
+      "attention": "Pay attention — context is filling up.",
+      "warning": "Possible degradation — consider /compact or a subagent.",
+      "critical": "Severe degradation — consider starting a fresh session."
+    }
+  },
+  "codeBlock": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyCode": "Copy code",
+    "executeRaw": "Execute",
+    "executeRawTitle": "Execute this command on the Nassaj server (opens review dialog)",
+    "inserting": "Adding to queue…",
+    "insertError": {
+      "carriage_return_forbidden": "Command contains \\r (Windows line endings) — paste again using LF",
+      "too_many_lines": "Command exceeds limit (100 lines)",
+      "empty_command": "Command is empty",
+      "command_too_long": "Command too long (max 4096 characters)",
+      "too_many_commands": "Queue is full (max 20 commands)",
+      "raw_exec_disabled": "Raw execution is disabled",
+      "config_denied": "Not permitted — check Command Board settings",
+      "internal": "Failed to add command to queue",
+      "denied_command": "Blocked: this command disrupts a live service (rule: {{rule}}). The command board never runs lifecycle commands — run it in your own terminal.",
+      "forbidden_control_char": "Command contains a forbidden control or bidi character — it could display differently from what runs",
+      "invalid_command": "Invalid command",
+      "stamp": "From your click at {{time}} — not a live status",
+      "stampRepeat": "Attempt {{count}} at {{time}} — same result",
+      "dismiss": "Dismiss"
+    }
+  },
+  "copyMessage": {
+    "copy": "Copy message",
+    "copied": "Message copied",
+    "selectFormat": "Select copy format",
+    "copyAsMarkdown": "Copy as markdown",
+    "copyAsText": "Copy as text"
+  },
+  "messageTypes": {
+    "user": "U",
+    "error": "Error",
+    "tool": "Tool",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "Sub-agent",
+    "shortBadge": "Sub-agent",
+    "badgeLabel": "Sub-agent task"
+  },
+  "coordinator": {
+    "label": "Coordinator",
+    "withName": "Coordinator: {{username}}"
+  },
+  "userAuthor": {
+    "withName": "User: {{username}}"
+  },
+  "externalOrigin": {
+    "label": "Created outside the UI"
+  },
+  "coordinatorPrompt": {
+    "label": "Coordinator → Sub-agent",
+    "ariaLabel": "Coordinator prompt to sub-agent"
+  },
+  "systemMessage": {
+    "label": "System message",
+    "ariaLabel": "Automated system message"
+  },
+  "sessionNotResumable": {
+    "message": "This session could not be resumed — it no longer exists at the provider.",
+    "startNew": "Start a new session"
+  },
+  "tools": {
+    "settings": "Tool Settings",
+    "error": "Tool Error",
+    "result": "Tool Result",
+    "viewParams": "View input parameters",
+    "viewRawParams": "View raw parameters",
+    "viewDiff": "View edit diff for",
+    "creatingFile": "Creating new file:",
+    "updatingTodo": "Updating Todo List",
+    "read": "Read",
+    "readFile": "Read file",
+    "updateTodo": "Update todo list",
+    "readTodo": "Read todo list",
+    "searchResults": "results"
+  },
+  "search": {
+    "found": "Found {{count}} {{type}}",
+    "file": "file",
+    "files": "files",
+    "pattern": "pattern:",
+    "in": "in:"
+  },
+  "fileOperations": {
+    "updated": "File updated successfully",
+    "created": "File created successfully",
+    "written": "File written successfully",
+    "diff": "Diff",
+    "newFile": "New File",
+    "viewContent": "View file content",
+    "viewFullOutput": "View full output ({{count}} chars)",
+    "contentDisplayed": "The file content is displayed in the diff view above"
+  },
+  "interactive": {
+    "title": "Interactive Prompt",
+    "waiting": "Waiting for your response in the CLI",
+    "instruction": "Please select an option in your terminal where Claude is running.",
+    "selectedOption": "✓ Claude selected option {{number}}",
+    "instructionDetail": "In the CLI, you would select this option interactively using arrow keys or by typing the number."
+  },
+  "thinking": {
+    "title": "Thinking...",
+    "emoji": "💭 Thinking..."
+  },
+  "json": {
+    "response": "JSON Response"
+  },
+  "permissions": {
+    "grant": "Grant permission for {{tool}}",
+    "added": "Permission added",
+    "addTo": "Adds {{entry}} to Allowed Tools.",
+    "retry": "Permission saved. Retry the request to use the tool.",
+    "error": "Unable to update permissions. Please try again.",
+    "openSettings": "Open settings"
+  },
+  "todo": {
+    "updated": "Todo list has been updated successfully",
+    "current": "Current Todo List"
+  },
+  "plan": {
+    "viewPlan": "📋 View implementation plan",
+    "title": "Implementation Plan"
+  },
+  "usageLimit": {
+    "resetAt": "Claude usage limit reached. Your limit will reset at **{{time}} {{timezone}}** - {{date}}"
+  },
+  "codex": {
+    "permissionMode": "Permission Mode",
+    "modes": {
+      "default": "Default Mode",
+      "auto": "Auto Mode",
+      "acceptEdits": "Accept Edits",
+      "bypassPermissions": "Bypass Permissions",
+      "plan": "Plan Mode"
+    },
+    "descriptions": {
+      "default": "Only trusted commands (ls, cat, grep, git status, etc.) run automatically. Other commands are skipped. Can write to workspace.",
+      "auto": "A model classifier decides per tool call whether to approve or deny. Hands-off, but safer than Bypass — denials still happen.",
+      "acceptEdits": "All commands run automatically within the workspace. Full auto mode with sandboxed execution.",
+      "bypassPermissions": "All commands run automatically with no approval prompts. Capped to workspace-write with network OFF — same ceiling as Accept Edits — unless the operator has enabled full disk/network access for this deployment (off by default). Use with caution.",
+      "plan": "Planning mode - no commands are executed"
+    },
+    "technicalDetails": "Technical details",
+    "posture": {
+      "title": "Actual sandbox ceiling",
+      "default": "sandbox: workspace-write · approvals: untrusted · network: OFF",
+      "acceptEdits": "sandbox: workspace-write · approvals: never · network: OFF",
+      "bypassPermissions": "sandbox: workspace-write · approvals: never · network: OFF — same as Accept Edits. Full disk/network access only if the operator enabled it for this deployment (off by default)."
+    }
+  },
+  "gemini": {
+    "permissionMode": "Gemini Permission Mode",
+    "description": "Control how Gemini CLI handles operation approvals.",
+    "modes": {
+      "default": {
+        "title": "Standard (Ask for Approval)",
+        "description": "Gemini will prompt for approval before executing commands, writing files, and fetching web resources."
+      },
+      "autoEdit": {
+        "title": "Auto Edit (Skip File Approvals)",
+        "description": "Gemini will automatically approve file edits and web fetches, but will still prompt for shell commands."
+      },
+      "yolo": {
+        "title": "YOLO (Bypass All Permissions)",
+        "description": "Gemini will execute all operations without asking for approval. Exercise caution."
+      }
+    }
+  },
+  "input": {
+    "placeholder": "Type / for commands, @ for files, or ask {{provider}} anything...",
+    "placeholderDefault": "Type your message...",
+    "disabled": "Input disabled",
+    "attachFiles": "Attach files",
+    "attachFilesAndImages": "Attach files or images",
+    "attachImages": "Attach images",
+    "send": "Send",
+    "stop": "Stop",
+    "hintText": {
+      "ctrlEnter": "Ctrl+Enter to send • Shift+Enter for new line",
+      "enter": "Enter to send • Shift+Enter for new line"
+    },
+    "clickToChangeMode": "Click to change permission mode (or press Tab in input)",
+    "showAllCommands": "Show all commands",
+    "clearInput": "Clear input",
+    "scrollToBottom": "Scroll to bottom",
+    "dropFilesHere": "Drop files here",
+    "nonClaudeAttachmentHint": "Attachments are used with Claude only"
+  },
+  "fileAttachment": {
+    "removeFile": "Remove file",
+    "uploading": "Uploading…",
+    "errorType": "File type not allowed",
+    "errorSize": "File too large (max 50 MB)",
+    "errorCount": "Too many files attached (max {{max}})"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "Effort Level",
+      "description": "Controls how much compute Claude dedicates to your request",
+      "active": "Active",
+      "tip": "ultracode activates maximum depth with multi-agent formatting — ultracode and max add color cues"
+    },
+    "modes": {
+      "none": {
+        "name": "auto",
+        "description": "Use the default effort level for your model"
+      },
+      "low": {
+        "name": "low",
+        "description": "Fast, light — best for simple questions"
+      },
+      "medium": {
+        "name": "medium",
+        "description": "Balanced depth and speed"
+      },
+      "high": {
+        "name": "high",
+        "description": "Deeper reasoning for complex tasks"
+      },
+      "xhigh": {
+        "name": "xhigh",
+        "description": "Extra-high effort for demanding problems"
+      },
+      "max": {
+        "name": "max",
+        "description": "Maximum effort — full compute budget (this session only, not saved to settings)"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "Session mode: xhigh + dynamic workshop formatting — not a saved effort level"
+      }
+    },
+    "buttonTitle": "Effort: {{mode}}",
+    "ultracodeActive": "Ultracode effort active"
+  },
+  "providerSelection": {
+    "title": "Choose Your AI Assistant",
+    "description": "Select a provider to start a new conversation",
+    "selectModel": "Select Model",
+    "providerInfo": {
+      "anthropic": "by Anthropic",
+      "openai": "by OpenAI",
+      "cursorEditor": "AI Code Editor",
+      "google": "by Google"
+    },
+    "readyPrompt": {
+      "claude": "Ready to use Claude with {{model}}. Start typing your message below.",
+      "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
+      "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
+      "gemini": "Ready to use Gemini with {{model}}. Start typing your message below.",
+      "antigravity": "Ready to use Antigravity (agy). The model is chosen from agy's own settings.",
+      "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
+      "default": "Select a provider above to begin",
+      "kimi": "Ready to use Kimi with {{model}}. Start typing your message below.",
+      "deepseek": "Ready to use DeepSeek with {{model}}. Start typing your message below.",
+      "glm": "Ready to use GLM with {{model}}. Start typing your message below.",
+      "claudeEngine": "Ready: the Claude engine runs on {{provider}} with {{model}}. Start typing your message below."
+    },
+    "antigravity": {
+      "activeModel": "Active model",
+      "activeModelLabel": "Active model",
+      "loading": "Loading…",
+      "unknown": "Unknown"
+    },
+    "pressToSearch": "Press <kbd>{{shortcut}}</kbd> to search sessions, files, and commits",
+    "refresh": {
+      "button": "Refresh models and auth status",
+      "refreshing": "Refreshing…"
+    },
+    "providerUnavailable": "Provider not available",
+    "signIn": "Sign in",
+    "addApiKey": "Add {{provider}} API key to enable",
+    "engineOnVendor": "Claude engine on {{provider}}",
+    "engineLine": {
+      "subscription": "via {{engine}} · your subscription",
+      "native": "via {{engine}} · its own engine",
+      "yourKey": "via {{host}} · your key",
+      "zen": "via OpenCode Zen · needs a balance",
+      "needsKey": "via {{host}} · add a {{engine}} key",
+      "upstream": "via {{engine}}"
+    },
+    "favorites": {
+      "group": "Favourites",
+      "addAriaLabel": "Add {{model}} to favourites",
+      "removeAriaLabel": "Remove {{model}} from favourites"
+    }
+  },
+  "session": {
+    "continue": {
+      "title": "Continue your conversation",
+      "description": "Ask questions about your code, request changes, or get help with development tasks"
+    },
+    "loading": {
+      "olderMessages": "Loading older messages...",
+      "sessionMessages": "Loading session messages..."
+    },
+    "messages": {
+      "showingOf": "Showing {{shown}} of {{total}} messages",
+      "scrollToLoad": "Scroll up to load more",
+      "showingLast": "Showing last {{count}} messages ({{total}} total)",
+      "loadEarlier": "Load earlier messages",
+      "loadAll": "Load all messages",
+      "loadingAll": "Loading all messages...",
+      "allLoaded": "All messages loaded",
+      "perfWarning": "All messages loaded — scrolling may be slower. Click \"Scroll to bottom\" to restore performance."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "Select a Project",
+      "description": "Choose a project to open an interactive shell in that directory"
+    },
+    "status": {
+      "newSession": "New Session",
+      "initializing": "Initializing...",
+      "restarting": "Restarting..."
+    },
+    "actions": {
+      "disconnect": "Disconnect",
+      "disconnectTitle": "Disconnect from shell",
+      "restart": "Restart",
+      "restartTitle": "Restart Shell",
+      "connect": "Continue in Shell",
+      "connectTitle": "Connect to shell"
+    },
+    "loading": "Loading terminal...",
+    "connecting": "Connecting to shell...",
+    "reconnecting": "Reconnecting to shell...",
+    "startSession": "Start a new Claude session",
+    "resumeSession": "Resume session: {{displayName}}...",
+    "runCommand": "Run {{command}} in {{projectName}}",
+    "startCli": "Starting Claude CLI in {{projectName}}",
+    "defaultCommand": "command"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "Thinking",
+      "processing": "Processing",
+      "analyzing": "Analyzing",
+      "working": "Working",
+      "computing": "Computing",
+      "reasoning": "Reasoning"
+    },
+    "state": {
+      "live": "Live",
+      "paused": "Paused"
+    },
+    "elapsed": {
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}}m {{seconds}}s",
+      "label": "{{time}} elapsed",
+      "startingNow": "Starting now"
+    },
+    "controls": {
+      "stopGeneration": "Stop Generation",
+      "pressEscToStop": "Press Esc anytime to stop"
+    },
+    "providers": {
+      "assistant": "Assistant"
+    },
+    "frozen": "Paused (process frozen)"
+  },
+  "runProgress": {
+    "tasksLabel": "Tasks",
+    "barAria": "Task progress",
+    "tasksTooltip": "Tasks: {{done}} of {{total}} done",
+    "inProgressTooltip_one": "{{count}} in progress",
+    "inProgressTooltip_other": "{{count}} in progress",
+    "agentsTooltip": "Sub-agents: {{done}}/{{total}}",
+    "agentWorking": "Agent · {{calls}}",
+    "agentWorkingTooltip": "Sub-agent working: {{calls}} calls",
+    "estimateRemaining": "≈ {{time}} left",
+    "estimating": "estimating…",
+    "estimateTooltip": "Rough estimate — based on completed tasks so far."
+  },
+  "agentActivity": {
+    "title": "Agent activity",
+    "summary": "{{running}}/{{total}} running",
+    "running": "Running",
+    "done": "Done",
+    "currently": "now",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} tool calls",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "Tool history coming soon.",
+    "noTools": "No tool calls recorded yet.",
+    "toolSuccess": "Done",
+    "toolRunning": "Running",
+    "backgroundWorkflow": "Background workflow running"
+  },
+  "activityGap": {
+    "status": "Agent is working — last activity {{time}} ago",
+    "ariaLabel": "Agent is still working, last activity {{time}} ago"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "Select a project to start chatting with {{provider}}"
+  },
+  "tasks": {
+    "nextTaskPrompt": "Start the next task"
+  },
+  "participants": {
+    "hide": "Hide participants bar",
+    "show": "Show participants bar",
+    "lastSeen": "Last seen",
+    "invocations_one": "{{count}} invocation",
+    "invocations_other": "{{count}} invocations",
+    "usersAria_one": "{{count}} participant",
+    "usersAria_other": "{{count}} participants",
+    "barAria": "Conversation participants",
+    "openSessionsNow": "Active conversations",
+    "openSessionsNowCount": "{{count}} active conversations",
+    "andMore_one": "and {{count}} more",
+    "andMore_other": "and {{count}} more",
+    "projectSummary": "{{users}} users · {{agents}} agents",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "Member"
+    },
+    "agentKinds": {
+      "model": "Base model",
+      "subagent": "Subagent"
+    },
+    "agentSummary_one": "{{count}} agent",
+    "agentSummary_other": "{{count}} agents",
+    "totalInvocations_one": "{{count}} call",
+    "totalInvocations_other": "{{count}} calls",
+    "agentSummaryAria": "{{agents}} distinct agents · {{calls}} total calls",
+    "unknownAuthor": "Unknown author"
+  },
+  "ws": {
+    "statusConnected": "Connected",
+    "statusReconnecting": "Reconnecting…",
+    "statusDisconnected": "Disconnected",
+    "ariaConnected": "WebSocket connected",
+    "ariaReconnecting": "WebSocket reconnecting",
+    "ariaDisconnected": "WebSocket disconnected",
+    "sendFailed": "Message not sent — connection lost",
+    "sendDisabledTitle": "Cannot send — connection lost",
+    "abortFailed": "Could not stop — connection lost. Retrying may help."
+  },
+  "serverError": {
+    "project_dir_missing": "Project folder not found on disk",
+    "cli_not_installed": "CLI not installed — please install the required CLI tool",
+    "spawn_failed": "Failed to start the process — check server logs for details",
+    "session_create_failed": "Could not start a new session — please try again",
+    "unknown": "An unexpected server error occurred"
+  },
+  "refreshChat": {
+    "button": "Refresh chat",
+    "refreshing": "Refreshing…"
+  },
+  "composerMode": {
+    "chat": "Chat",
+    "agent": "Agent"
+  },
+  "customCommand": {
+    "confirmBashExecution": "This command contains bash commands that will be executed. Do you want to proceed?",
+    "executionCancelled": "Command execution cancelled",
+    "executeError": "Error executing command: {{message}}",
+    "unknownError": "Unknown error"
+  },
+  "inlineModelSwitcher": {
+    "label": "Model",
+    "tooltip": "Takes effect from the next reply",
+    "noModels": "No models available",
+    "switching": "Switching…",
+    "ariaLabel": "Switch model: {{model}}",
+    "scopeSession": "This conversation only",
+    "scopeDefault": "Default for all new conversations",
+    "confirmedSession": "Applied to this conversation: {{model}}",
+    "confirmedDefault": "Set as default: {{model}}",
+    "followDefault": "Follow current default",
+    "clearing": "Resetting…",
+    "clearedNotice": "Conversation returned to default: {{model}}",
+    "engineStamped": "Running on {{engine}} engine — model switching unavailable"
+  },
+  "conversationCost": {
+    "label": "Cost",
+    "tooltipTitle": "Conversation cost",
+    "unavailable": "Cost is not available for this provider",
+    "partial": "Partial — some models have no published price",
+    "apiEquivalent": "API-equivalent value of this usage on a subscription — not an amount billed",
+    "billed": "Billed usage",
+    "pricesAsOf": "Prices as of {{date}}",
+    "subagents": "Includes subagent activity ({{count}} requests)",
+    "perModel": "By model",
+    "loading": "Calculating…"
+  },
+  "closeConversation": {
+    "close": "Close conversation",
+    "reopen": "Reopen conversation",
+    "closedBadge": "Closed",
+    "failed": "Could not update the conversation state"
+  }
+}

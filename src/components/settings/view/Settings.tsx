@@ -1,0 +1,197 @@
+import { X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+
+import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
+import { Button } from '../../../shared/view/ui';
+import SettingsSidebar from '../view/SettingsSidebar';
+import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
+import AppearanceSettingsTab from '../view/tabs/AppearanceSettingsTab';
+import CredentialsSettingsTab from '../view/tabs/api-settings/CredentialsSettingsTab';
+import GitSettingsTab from '../view/tabs/git-settings/GitSettingsTab';
+import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
+import PluginSettingsTab from '../../plugins/view/PluginSettingsTab';
+import AboutTab from '../view/tabs/AboutTab';
+import ProfileSettingsTab from '../view/tabs/profile-settings/ProfileSettingsTab';
+import UsersSettingsTab from '../view/tabs/users-settings/UsersSettingsTab';
+import CommandBoardSettingsTab from '../view/tabs/CommandBoardSettingsTab';
+import { useSettingsController } from '../hooks/useSettingsController';
+import { useUiPreferences } from '../../../hooks/useUiPreferences';
+import { useWebPush } from '../../../hooks/useWebPush';
+import { useAuth } from '../../auth';
+import type { SettingsProps } from '../types/types';
+
+function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepLink }: SettingsProps) {
+  const { t } = useTranslation('settings');
+  const { user } = useAuth();
+  const canManageUsers = user?.role === 'owner' || user?.role === 'admin';
+  const { preferences: uiPreferences, setPreference: setUiPreference } = useUiPreferences();
+  const {
+    activeTab,
+    setActiveTab,
+    saveStatus,
+    projectSortOrder,
+    setProjectSortOrder,
+    codeEditorSettings,
+    updateCodeEditorSetting,
+    claudePermissions,
+    setClaudePermissions,
+    notificationPreferences,
+    setNotificationPreferences,
+    cursorPermissions,
+    setCursorPermissions,
+    codexPermissionMode,
+    setCodexPermissionMode,
+    providerAuthStatus,
+    checkProviderAuthStatus,
+    geminiPermissionMode,
+    setGeminiPermissionMode,
+    openLoginForProvider,
+    showLoginModal,
+    setShowLoginModal,
+    loginProvider,
+    handleLoginComplete,
+  } = useSettingsController({
+    isOpen,
+    initialTab
+  });
+
+  const {
+    permission: pushPermission,
+    isSubscribed: isPushSubscribed,
+    isLoading: isPushLoading,
+    subscribe: pushSubscribe,
+    unsubscribe: pushUnsubscribe,
+  } = useWebPush();
+
+  const handleEnablePush = async () => {
+    await pushSubscribe();
+    // Server sets webPush: true in preferences on subscribe; sync local state
+    setNotificationPreferences({
+      ...notificationPreferences,
+      channels: { ...notificationPreferences.channels, webPush: true },
+    });
+  };
+
+  const handleDisablePush = async () => {
+    await pushUnsubscribe();
+    // Server sets webPush: false in preferences on unsubscribe; sync local state
+    setNotificationPreferences({
+      ...notificationPreferences,
+      channels: { ...notificationPreferences.channels, webPush: false },
+    });
+  };
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const isAuthenticated = Boolean(loginProvider && providerAuthStatus[loginProvider].authenticated);
+
+  return (
+    <div className="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm md:p-4">
+      <div className="flex h-full w-full flex-col overflow-hidden border border-border bg-background shadow-2xl md:h-[90vh] md:max-w-4xl md:rounded-xl">
+        {/* Header */}
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-4 py-3 md:px-5">
+          <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
+          <div className="flex items-center gap-2">
+            {saveStatus === 'success' && (
+              <span className="animate-in fade-in text-xs text-muted-foreground">{t('saveStatus.success')}</span>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="h-10 w-10 touch-manipulation p-0 text-muted-foreground hover:text-foreground active:bg-accent/50"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Body: sidebar + content */}
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <SettingsSidebar activeTab={activeTab} onChange={setActiveTab} />
+
+          {/* Content */}
+          <main className="flex-1 overflow-y-auto">
+            <div key={activeTab} className="settings-content-enter space-y-6 p-4 pb-safe-area-inset-bottom md:space-y-8 md:p-6">
+              {activeTab === 'profile' && <ProfileSettingsTab />}
+
+              {activeTab === 'appearance' && (
+                <AppearanceSettingsTab
+                  projectSortOrder={projectSortOrder}
+                  onProjectSortOrderChange={setProjectSortOrder}
+                  codeEditorSettings={codeEditorSettings}
+                  onCodeEditorThemeChange={(value) => updateCodeEditorSetting('theme', value)}
+                  onCodeEditorWordWrapChange={(value) => updateCodeEditorSetting('wordWrap', value)}
+                  onCodeEditorShowMinimapChange={(value) => updateCodeEditorSetting('showMinimap', value)}
+                  onCodeEditorLineNumbersChange={(value) => updateCodeEditorSetting('lineNumbers', value)}
+                  onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
+                  showSidebarSearch={uiPreferences.showSidebarSearch}
+                  onShowSidebarSearchChange={(value) => setUiPreference('showSidebarSearch', value)}
+                  codeHighlightScope={uiPreferences.codeHighlightScope}
+                  onCodeHighlightScopeChange={(value) => setUiPreference('codeHighlightScope', value)}
+                />
+              )}
+
+              {activeTab === 'git' && <GitSettingsTab />}
+
+              {activeTab === 'agents' && (
+                <AgentsSettingsTab
+                  providerAuthStatus={providerAuthStatus}
+                  onProviderLogin={openLoginForProvider}
+                  onRefreshAuthStatus={(provider) => { void checkProviderAuthStatus(provider); }}
+                  claudePermissions={claudePermissions}
+                  onClaudePermissionsChange={setClaudePermissions}
+                  cursorPermissions={cursorPermissions}
+                  onCursorPermissionsChange={setCursorPermissions}
+                  codexPermissionMode={codexPermissionMode}
+                  onCodexPermissionModeChange={setCodexPermissionMode}
+                  geminiPermissionMode={geminiPermissionMode}
+                  onGeminiPermissionModeChange={setGeminiPermissionMode}
+                  projects={projects}
+                  initialAgent={deepLink?.tab === 'agents' ? deepLink.agent : undefined}
+                  initialCategory={deepLink?.tab === 'agents' ? deepLink.category : undefined}
+                />
+              )}
+
+            {activeTab === 'notifications' && (
+              <NotificationsSettingsTab
+                notificationPreferences={notificationPreferences}
+                onNotificationPreferencesChange={setNotificationPreferences}
+                pushPermission={pushPermission}
+                isPushSubscribed={isPushSubscribed}
+                isPushLoading={isPushLoading}
+                onEnablePush={handleEnablePush}
+                onDisablePush={handleDisablePush}
+              />
+            )}
+
+              {activeTab === 'api' && <CredentialsSettingsTab />}
+
+              {activeTab === 'plugins' && <PluginSettingsTab />}
+
+              {activeTab === 'users' && canManageUsers && <UsersSettingsTab />}
+
+              {activeTab === 'command-board' && user?.role === 'owner' && <CommandBoardSettingsTab />}
+
+              {activeTab === 'about' && <AboutTab />}
+            </div>
+          </main>
+        </div>
+      </div>
+
+      <ProviderLoginModal
+        key={loginProvider || 'claude'}
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        provider={loginProvider || 'claude'}
+        onComplete={handleLoginComplete}
+        isAuthenticated={isAuthenticated}
+      />
+
+    </div>
+  );
+}
+
+export default Settings;

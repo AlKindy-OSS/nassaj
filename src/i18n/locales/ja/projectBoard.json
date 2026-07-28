@@ -1,0 +1,281 @@
+{
+  "sections": {
+    "overview": "概要",
+    "objectives": "目標",
+    "schedule": "タイムライン",
+    "tasks": "タスク",
+    "issues": "課題",
+    "visual": "ビジュアル確認",
+    "decisions": "決定事項",
+    "architecture": "アーキテクチャ"
+  },
+  "updated": "更新日 {{date}}",
+  "overallProgress": "全体の進捗",
+  "error": "プロジェクトボードの読み込みに失敗しました。",
+  "stateError": "project-state.jsonが無効です — 最後に有効なバージョンを表示しています。",
+  "empty": {
+    "title": "プロジェクトボードはまだありません",
+    "description": "このプロジェクトにはプロジェクト状態ファイルがありません。フェーズ、タスク、課題のライブボードを取得するために作成してください。",
+    "hint": "ボードはファイルが変更されるたびに自動的に更新されます — 更新は不要です。",
+    "copyTemplate": "スターターテンプレートをコピー",
+    "copied": "コピーしました — ファイルに貼り付けてください"
+  },
+  "phases": {
+    "title": "フェーズ",
+    "current": "現在",
+    "planned": "予定",
+    "runnerHere": "al-Minwāl（ランナー）がここにいます",
+    "progressCount": "{{progress}}%（{{done}}/{{total}}）"
+  },
+  "sprint": {
+    "current": "現在のスプリント",
+    "started": "{{date}}に開始",
+    "ended": "{{date}}に終了",
+    "taskCount": "タスク {{done}}/{{total}}",
+    "others": "他のスプリント（{{count}}）",
+    "status": {
+      "planned": "予定",
+      "current": "現在",
+      "done": "完了"
+    }
+  },
+  "tasksSection": {
+    "title": "タスク",
+    "open": "未着手",
+    "in_progress": "進行中",
+    "done": "完了",
+    "empty": "タスクなし",
+    "kind": {
+      "feature": "機能",
+      "bug": "バグ",
+      "chore": "保守",
+      "spike": "調査"
+    },
+    "issueLink": "課題{{id}}を表示",
+    "cancelled": "中止 ({{count}})",
+    "status": {
+      "todo": "未着手",
+      "pending": "保留",
+      "blocked": "ブロック中",
+      "backlog": "バックログ",
+      "deferred": "延期",
+      "closed": "クローズ",
+      "fixed": "修正済み",
+      "resolved": "解決済み",
+      "accepted": "承認済み",
+      "cancelled": "中止",
+      "wontfix": "対応しない",
+      "unknown": "不明"
+    }
+  },
+  "issues": {
+    "title": "課題",
+    "severity": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "critical": "緊急"
+    },
+    "status": {
+      "open": "未解決",
+      "fixed": "修正済み",
+      "wontfix": "対応しない"
+    },
+    "empty": "記録された課題はありません。"
+  },
+  "decisions": {
+    "title": "決定事項",
+    "empty": "決定事項はまだありません",
+    "openLink": "決定文書{{id}}を開く"
+  },
+  "schedule": {
+    "title": "タイムライン（ガント）",
+    "critical": "クリティカル",
+    "legendScheduled": "予定済み",
+    "legendCritical": "クリティカルパス",
+    "legendMilestone": "マイルストーン",
+    "cpm": {
+      "cycle": "クリティカルパスをスキップ: 依存関係の循環を検出しました。",
+      "missingDeps": "一部の依存関係が存在しない項目を参照しており、クリティカルパスで無視されました。"
+    },
+    "noDates": "タイムラインを描画する有効な日付がありません。",
+    "progress": "進捗 {{value}}%",
+    "durationDays": "期間: {{days}}日",
+    "owner": "担当者: {{name}}",
+    "deliverable": "成果物: {{id}}",
+    "deliverableLink": "成果物{{id}}を表示",
+    "dependsOn": "依存: {{ids}}"
+  },
+  "deliverables": {
+    "title": "成果物",
+    "due": "期限 {{date}}",
+    "overdue": "期限超過",
+    "acceptance": "受け入れ基準",
+    "deliveredBy": "担当者: {{ids}}",
+    "statuses": {
+      "pending": "保留中",
+      "in_progress": "進行中",
+      "delivered": "納品済み",
+      "accepted": "承認済み",
+      "rejected": "却下"
+    }
+  },
+  "objectives": {
+    "title": "目標（OKR）",
+    "baseline": "ベースライン: {{value}}",
+    "statuses": {
+      "on_track": "順調",
+      "at_risk": "リスクあり",
+      "off_track": "遅延",
+      "done": "完了"
+    }
+  },
+  "kpis": {
+    "title": "KPI",
+    "target": "目標: {{value}}"
+  },
+  "visualChecks": {
+    "title": "ビジュアル確認",
+    "empty": "ビジュアル確認はまだありません。",
+    "step": "ステップ",
+    "expect": "期待値",
+    "result": "担当者メモ",
+    "counter": "{{verified}} / {{total}}件を確認済み",
+    "status": {
+      "pending": "確認待ち",
+      "verified": "確認済み",
+      "failed": "失敗"
+    }
+  },
+  "architecture": {
+    "technical": "技術的",
+    "simplified": "簡略版",
+    "missing": "アーキテクチャドキュメントが見つかりません（docs/ARCHITECTURE.md または docs/ARCHITECTURE_AR.md）。",
+    "variantMissing": "このバージョンのアーキテクチャドキュメントは存在しません。"
+  },
+  "approvals": {
+    "title": "承認待ち",
+    "awaitingReview": "レビュー待ちです",
+    "approve": "承認",
+    "reject": "却下",
+    "pending": "送信中…",
+    "error": "アクションに失敗しました。もう一度お試しください。",
+    "kind": {
+      "prod-migration": "本番マイグレーション",
+      "secret": "シークレット",
+      "restart": "再起動",
+      "push": "プッシュ",
+      "sensitive": "デリケートな操作"
+    }
+  },
+  "runner": {
+    "label": "al-Minwāl",
+    "description": "自律ランナー",
+    "fullName": "al-Minwāl（自律ランナー）",
+    "cycle": "サイクル{{n}}",
+    "stage": "ステージ",
+    "model": "モデル",
+    "quota": "クォータ",
+    "task": "タスク",
+    "phase": "フェーズ",
+    "verdict": "最終評価",
+    "clean": "クリーン",
+    "unclean": "未クリーン",
+    "pendingTick": "次のティックを待機中…",
+    "status": {
+      "idle": "アイドル",
+      "running": "実行中",
+      "building": "ビルド中",
+      "verifying": "検証中",
+      "interrupted": "中断（クォータ）",
+      "failed": "失敗",
+      "blocked": "ブロック中",
+      "paused": "一時停止",
+      "awaiting_approval": "承認待ち",
+      "disabled": "無効"
+    },
+    "statusLine": {
+      "running": "🟢 al-Minwāl 作業中",
+      "awaiting": "🔵 al-Minwāl 承認待ち",
+      "interrupted": "🟡 al-Minwāl 一時停止",
+      "failed": "🔴 al-Minwāl 失敗",
+      "idle": "⚪ al-Minwāl アイドル"
+    },
+    "stages": {
+      "review": "レビュー",
+      "fix": "修正",
+      "critique": "評価",
+      "phase": "ビルドフェーズ",
+      "awaiting_approval": "承認待ち"
+    },
+    "actions": {
+      "start": "開始",
+      "stop": "停止",
+      "pause": "一時停止",
+      "resume": "再開",
+      "approve": "フェーズを承認",
+      "enable": "有効化",
+      "enableHint": "このプロジェクトのal-Minwālを再有効化",
+      "disable": "無効化",
+      "disableHint": "al-Minwālのレジストリでプロジェクトを無効化（有効化されるまで新しいサイクルなし）— 実行中のサイクルは終了しません",
+      "forceStop": "強制停止",
+      "forceStopHint": "セッションを終了して実行中のサイクルを即座に終了し、再起動をブロック",
+      "forceStopConfirm": "セッションを終了して実行中のサイクルを即座に終了します。続けますか？",
+      "forceStopConfirmYes": "はい、今すぐ停止",
+      "forceStopCancel": "キャンセル"
+    },
+    "errors": {
+      "notAwaiting": "ランナーは現在フェーズ承認を待機していません。",
+      "forceStopFailed": "即座の停止に失敗しました（ユニットを停止できませんでした）。サイクルがまだ実行中の可能性があります — もう一度お試しください。",
+      "generic": "アクションを実行できませんでした。"
+    },
+    "journey": {
+      "title": "ランナーの記録",
+      "here": "ランナーがここにいます",
+      "cyclesCount": "サイクル（{{n}}）",
+      "noCycles": "ランナーはまだサイクルを開始していません",
+      "cycleN": "サイクル{{n}}",
+      "showAll": "すべて表示（{{n}}）",
+      "stale": "フリーズしている可能性があります",
+      "phasesLabel": "サイクルのステージ",
+      "stage": {
+        "build": "ビルド",
+        "verify": "検証",
+        "verdict": "評価",
+        "gate": "ゲート"
+      },
+      "cycleStatus": {
+        "succeeded": "成功",
+        "failed": "失敗",
+        "interrupted": "中断"
+      }
+    }
+  },
+  "stats": {
+    "tab": "統計",
+    "totalLabel": "総コスト（全期間）",
+    "headerTotal": "累計",
+    "headerTotalTitle": "このプロジェクトの累計コスト — 会話を削除しても保持されます",
+    "span": "期間",
+    "activeDays": "稼働日数",
+    "activeDaysOfSpan": "/ {{span}} 日",
+    "conversations": "会話数",
+    "agents": "エージェント",
+    "firstActivity": "最初の活動",
+    "lastActivity": "最後の活動",
+    "dailyTitle": "日次コスト",
+    "dailyPeak": "ピーク",
+    "byVendor": "プロバイダー別",
+    "byModel": "モデル別",
+    "partialShort": "一部",
+    "partialModels": "部分的な合計 — 公開価格がありません: {{models}}",
+    "apiEquivalent": "サブスクリプション利用のAPI換算額 — 請求額ではありません",
+    "pricesAsOf": "{{date}} 時点の価格",
+    "unavailable": "利用できません",
+    "empty": "このプロジェクトのコストはまだ計測されていません。"
+  },
+  "summary": {
+    "tasksDone": "{{done}} 件完了",
+    "issuesOpen": "{{open}} 件未解決"
+  }
+}

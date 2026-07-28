@@ -1,0 +1,568 @@
+{
+  "btw": {
+    "title": "سؤال جانبي",
+    "close": "إغلاق",
+    "questionLabel": "السؤال",
+    "answerLabel": "الإجابة",
+    "status": {
+      "pending": "جارٍ التحضير…",
+      "streaming": "يكتب…",
+      "complete": "اكتمل",
+      "thinking": "يفكّر…"
+    },
+    "errors": {
+      "unsupported_provider": "القناة الجانبية «/btw» متاحة لجلسات Claude فقط.",
+      "session_not_found": "تعذّر إيجاد الجلسة — افتح جلسة أولاً ثم اطرح سؤالك الجانبي.",
+      "not_visible": "لا تملك صلاحية رؤية سياق هذه الجلسة.",
+      "busy": "الجلسة مشغولة — أعد المحاولة بعد قليل.",
+      "sdk_error": "تعذّر إتمام السؤال الجانبي — حدث خطأ غير متوقع.",
+      "timeout": "الميزة تتطلب تحديث الخادم.",
+      "disconnected": "تعذّر الإرسال — الاتصال منقطع."
+    },
+    "hints": {
+      "quota": "يستهلك من حصة Claude.",
+      "context": "الإجابة على سياق الجلسة حتى آخر رسالة محفوظة."
+    },
+    "description": "سؤال جانبي على سياق الجلسة الجارية"
+  },
+  "contextRot": {
+    "label": "السياق",
+    "barAria": "استهلاك السياق",
+    "empty": "لا استهلاك توكنز بعد",
+    "percentUsed": "{{percent}} من النافذة الحقيقية",
+    "tooltipUsed": "المستخدَم من النافذة الحقيقية: {{used}} / {{total}}",
+    "tooltipCacheRead": "قراءة من الكاش: {{value}}",
+    "popoverTitle": "استهلاك السياق",
+    "close": "إغلاق",
+    "levels": {
+      "safe": "آمن — السياق سليم.",
+      "attention": "ابدأ الانتباه — السياق يمتلئ.",
+      "warning": "تدهور محتمل — يُنصح بـ /compact أو وكيل فرعي.",
+      "critical": "تدهور حاد — يُنصح بالبدء من جديد."
+    }
+  },
+  "codeBlock": {
+    "copy": "نسخ",
+    "copied": "تم النسخ",
+    "copyCode": "نسخ الكود",
+    "executeRaw": "تنفيذ",
+    "executeRawTitle": "تنفيذ الأمر على خادم نسّاج (يفتح حوار المراجعة)",
+    "inserting": "جارٍ الإدراج…",
+    "insertError": {
+      "carriage_return_forbidden": "الأمر يحوي محرف إرجاع (\\r) — أعد اللصق بأسطر LF",
+      "too_many_lines": "الأمر يتجاوز الحد (100 سطر)",
+      "empty_command": "الأمر فارغ",
+      "command_too_long": "الأمر طويل جداً (الحد 4096 محرف)",
+      "too_many_commands": "القائمة ممتلئة (الحد 20 أمر)",
+      "raw_exec_disabled": "ميزة التنفيذ الحر معطّلة",
+      "config_denied": "غير مصرَّح بالتنفيذ — تحقّق من إعدادات لوحة الأوامر",
+      "internal": "تعذّر إدراج الأمر في القائمة",
+      "denied_command": "محظور: هذا الأمر يعطّل خدمة حيّة (القاعدة: {{rule}}). لوحة الأوامر لا تُشغّل أوامر إيقاف أو إعادة تشغيل — نفّذه في طرفيتك الخاصة.",
+      "forbidden_control_char": "الأمر يحوي محرف تحكّم أو محرف اتجاه محظوراً — قد يُعرَض بخلاف ما يُنفَّذ",
+      "invalid_command": "أمر غير صالح",
+      "stamp": "من نقرتك الساعة {{time}} — ليست حالةً جارية",
+      "stampRepeat": "المحاولة {{count}} الساعة {{time}} — النتيجة نفسها",
+      "dismiss": "إخفاء"
+    }
+  },
+  "copyMessage": {
+    "copy": "نسخ الرسالة",
+    "copied": "تم نسخ الرسالة",
+    "selectFormat": "اختر صيغة النسخ",
+    "copyAsMarkdown": "نسخ كـ Markdown",
+    "copyAsText": "نسخ كنص"
+  },
+  "messageTypes": {
+    "user": "أ",
+    "error": "خطأ",
+    "tool": "أداة",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "وكيل فرعي",
+    "shortBadge": "وكيل",
+    "badgeLabel": "مهمة وكيل فرعي"
+  },
+  "coordinator": {
+    "label": "منسّق",
+    "withName": "منسّق {{username}}"
+  },
+  "userAuthor": {
+    "withName": "المستخدم: {{username}}"
+  },
+  "externalOrigin": {
+    "label": "أُنشئت خارج الواجهة"
+  },
+  "coordinatorPrompt": {
+    "label": "موجّه المنسّق ← وكيل فرعي",
+    "ariaLabel": "موجّه المنسّق إلى وكيل فرعي"
+  },
+  "systemMessage": {
+    "label": "رسالة نظام",
+    "ariaLabel": "رسالة آلية من النظام"
+  },
+  "sessionNotResumable": {
+    "message": "تعذّر استئناف هذه الجلسة — لم تعد موجودة لدى المزوّد.",
+    "startNew": "بدء جلسة جديدة"
+  },
+  "tools": {
+    "settings": "إعدادات الأدوات",
+    "error": "خطأ في الأداة",
+    "result": "نتيجة الأداة",
+    "viewParams": "عرض معاملات الإدخال",
+    "viewRawParams": "عرض المعاملات الخام",
+    "viewDiff": "عرض الفروقات لـ",
+    "creatingFile": "إنشاء ملف جديد:",
+    "updatingTodo": "تحديث قائمة المهام",
+    "read": "قراءة",
+    "readFile": "قراءة الملف",
+    "updateTodo": "تحديث قائمة المهام",
+    "readTodo": "قراءة قائمة المهام",
+    "searchResults": "نتائج"
+  },
+  "search": {
+    "found": "تم العثور على {{count}} {{type}}",
+    "file": "ملف",
+    "files": "ملفات",
+    "pattern": "النمط:",
+    "in": "في:"
+  },
+  "fileOperations": {
+    "updated": "تم تحديث الملف بنجاح",
+    "created": "تم إنشاء الملف بنجاح",
+    "written": "تمت كتابة الملف بنجاح",
+    "diff": "الفروقات",
+    "newFile": "ملف جديد",
+    "viewContent": "عرض محتوى الملف",
+    "viewFullOutput": "عرض الإخراج الكامل ({{count}} حرف)",
+    "contentDisplayed": "محتوى الملف معروض في عرض الفروقات أعلاه"
+  },
+  "interactive": {
+    "title": "موجّه تفاعلي",
+    "waiting": "بانتظار ردك في CLI",
+    "instruction": "يرجى اختيار خيار في الطرفية حيث يعمل Claude.",
+    "selectedOption": "✓ اختار Claude الخيار {{number}}",
+    "instructionDetail": "في CLI ستختار هذا الخيار تفاعلياً باستخدام أسهم لوحة المفاتيح أو بكتابة الرقم."
+  },
+  "thinking": {
+    "title": "يفكّر...",
+    "emoji": "💭 يفكّر..."
+  },
+  "json": {
+    "response": "استجابة JSON"
+  },
+  "permissions": {
+    "grant": "منح الإذن لـ {{tool}}",
+    "added": "تمت إضافة الإذن",
+    "addTo": "يضيف {{entry}} إلى الأدوات المسموح بها.",
+    "retry": "تم حفظ الإذن. أعد المحاولة لاستخدام الأداة.",
+    "error": "تعذّر تحديث الأذونات. يرجى المحاولة مجدداً.",
+    "openSettings": "فتح الإعدادات"
+  },
+  "todo": {
+    "updated": "تم تحديث قائمة المهام بنجاح",
+    "current": "قائمة المهام الحالية"
+  },
+  "plan": {
+    "viewPlan": "📋 عرض خطة التنفيذ",
+    "title": "خطة التنفيذ"
+  },
+  "usageLimit": {
+    "resetAt": "تم بلوغ حد استخدام Claude. سيُعاد ضبط الحد في **{{time}} {{timezone}}** - {{date}}"
+  },
+  "codex": {
+    "permissionMode": "وضع الأذونات",
+    "modes": {
+      "default": "الوضع الافتراضي",
+      "auto": "الوضع التلقائي",
+      "acceptEdits": "قبول التعديلات",
+      "bypassPermissions": "تجاوز الأذونات",
+      "plan": "وضع التخطيط"
+    },
+    "descriptions": {
+      "default": "تعمل الأوامر الموثوقة فقط (ls، cat، grep، git status، إلخ) تلقائياً. الأوامر الأخرى تُتخطّى. يمكنه الكتابة في مساحة العمل.",
+      "auto": "مصنّف بالنموذج يقرّر لكل استدعاء أداة الموافقة أو الرفض. أكثر أماناً من Bypass — الرفض ما يزال ممكناً.",
+      "acceptEdits": "تعمل جميع الأوامر تلقائياً داخل مساحة العمل. وضع تلقائي كامل بتنفيذ معزول.",
+      "bypassPermissions": "تعمل جميع الأوامر تلقائياً دون طلب موافقة. مقصور على workspace-write مع شبكة مطفأة — نفس سقف «قبول التعديلات» — ما لم يفعّل المشغّل الوصول الكامل للقرص/الشبكة لهذا النشر (مطفأ افتراضياً). استخدم بحذر.",
+      "plan": "وضع التخطيط - لا تُنفَّذ أي أوامر"
+    },
+    "technicalDetails": "تفاصيل تقنية",
+    "posture": {
+      "title": "السقف الفعلي للصندوق الرملي",
+      "default": "sandbox: workspace-write · الموافقات: untrusted · الشبكة: مطفأة",
+      "acceptEdits": "sandbox: workspace-write · الموافقات: never · الشبكة: مطفأة",
+      "bypassPermissions": "sandbox: workspace-write · الموافقات: never · الشبكة: مطفأة — نفس سقف «قبول التعديلات». الوصول الكامل للقرص/الشبكة فقط إذا فعّله المشغّل لهذا النشر (مطفأ افتراضياً)."
+    }
+  },
+  "gemini": {
+    "permissionMode": "وضع أذونات Gemini",
+    "description": "تحكّم في كيفية تعامل Gemini CLI مع الموافقات على العمليات.",
+    "modes": {
+      "default": {
+        "title": "قياسي (طلب الموافقة)",
+        "description": "سيطلب Gemini الموافقة قبل تنفيذ الأوامر وكتابة الملفات وجلب موارد الويب."
+      },
+      "autoEdit": {
+        "title": "تعديل تلقائي (تخطّي موافقات الملفات)",
+        "description": "سيوافق Gemini تلقائياً على تعديلات الملفات وجلب الويب، لكنه سيظل يطلب الموافقة لأوامر Shell."
+      },
+      "yolo": {
+        "title": "YOLO (تجاوز جميع الأذونات)",
+        "description": "سيُنفّذ Gemini جميع العمليات دون طلب الموافقة. توخَّ الحذر."
+      }
+    }
+  },
+  "input": {
+    "placeholder": "اكتب / للأوامر، @ للملفات، أو اسأل {{provider}} أي شيء...",
+    "placeholderDefault": "اكتب رسالتك...",
+    "disabled": "الإدخال معطّل",
+    "attachFiles": "إرفاق ملفات",
+    "attachFilesAndImages": "إرفاق ملفات أو صور",
+    "attachImages": "إرفاق صور",
+    "send": "إرسال",
+    "stop": "إيقاف",
+    "hintText": {
+      "ctrlEnter": "Ctrl+Enter للإرسال • Shift+Enter لسطر جديد",
+      "enter": "Enter للإرسال • Shift+Enter لسطر جديد"
+    },
+    "clickToChangeMode": "اضغط لتغيير وضع الأذونات (أو اضغط Tab في الإدخال)",
+    "showAllCommands": "عرض كل الأوامر",
+    "clearInput": "مسح الإدخال",
+    "scrollToBottom": "التمرير إلى الأسفل",
+    "dropFilesHere": "أفلِت الملفات هنا",
+    "nonClaudeAttachmentHint": "المرفقات تُستخدم مع Claude فقط"
+  },
+  "fileAttachment": {
+    "removeFile": "إزالة الملف",
+    "uploading": "جارٍ الرفع…",
+    "errorType": "نوع الملف غير مسموح",
+    "errorSize": "الملف كبير جداً (الحد الأقصى 50 ميجا)",
+    "errorCount": "عدد الملفات تجاوز الحد (الأقصى {{max}})"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "مستوى الجهد",
+      "description": "يتحكم في مقدار الحوسبة التي يخصصها Claude لطلبك",
+      "active": "نشط",
+      "tip": "ultracode يُفعّل أقصى عمق مع تنسيق متعدد الوكلاء — ultracode وmax يُضيفان إشارات لونية"
+    },
+    "modes": {
+      "none": {
+        "name": "تلقائي",
+        "description": "استخدم مستوى الجهد الافتراضي لنموذجك"
+      },
+      "low": {
+        "name": "low",
+        "description": "سريع وخفيف — للأسئلة البسيطة"
+      },
+      "medium": {
+        "name": "medium",
+        "description": "توازن بين العمق والسرعة"
+      },
+      "high": {
+        "name": "high",
+        "description": "تفكير أعمق للمهام المعقدة"
+      },
+      "xhigh": {
+        "name": "xhigh",
+        "description": "جهد عالٍ جداً للمشكلات الصعبة"
+      },
+      "max": {
+        "name": "max",
+        "description": "أقصى جهد — ميزانية حوسبة كاملة (لهذه الجلسة فقط، لا يُحفَظ في الإعدادات)"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "وضع جلسة: xhigh + تنسيق ورشات ديناميكي — ليس مستوى جهد يُحفَظ"
+      }
+    },
+    "buttonTitle": "الجهد: {{mode}}",
+    "ultracodeActive": "مستوى الجهد: Ultracode نشط"
+  },
+  "providerSelection": {
+    "title": "اختر مساعدك الذكي",
+    "description": "اختر provider لبدء محادثة جديدة",
+    "selectModel": "اختر النموذج",
+    "providerInfo": {
+      "anthropic": "من Anthropic",
+      "openai": "من OpenAI",
+      "cursorEditor": "محرر أكواد بالذكاء الاصطناعي",
+      "google": "من Google"
+    },
+    "readyPrompt": {
+      "claude": "جاهز لاستخدام Claude مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "cursor": "جاهز لاستخدام Cursor مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "codex": "جاهز لاستخدام Codex مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "gemini": "جاهز لاستخدام Gemini مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "antigravity": "جاهز لاستخدام Antigravity (agy). يُختار النموذج من إعدادات agy نفسها.",
+      "opencode": "جاهز لاستخدام OpenCode مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "default": "اختر provider أعلاه للبدء",
+      "kimi": "جاهز لاستخدام Kimi مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "deepseek": "جاهز لاستخدام DeepSeek مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "glm": "جاهز لاستخدام GLM مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
+      "claudeEngine": "جاهز: محرّك Claude يعمل على {{provider}} بنموذج {{model}}. ابدأ بكتابة رسالتك أدناه."
+    },
+    "antigravity": {
+      "activeModel": "النموذج النشط",
+      "activeModelLabel": "النموذج النشط",
+      "loading": "جارٍ التحميل…",
+      "unknown": "غير معروف"
+    },
+    "pressToSearch": "اضغط <kbd>{{shortcut}}</kbd> للبحث في الجلسات والملفات والـ commits",
+    "refresh": {
+      "button": "تحديث النماذج وحالة المصادقة",
+      "refreshing": "جارٍ التحديث…"
+    },
+    "providerUnavailable": "المزوّد غير متاح",
+    "signIn": "تسجيل الدخول",
+    "addApiKey": "أضف مفتاح {{provider}} API للتفعيل",
+    "engineOnVendor": "محرّك Claude على {{provider}}",
+    "engineLine": {
+      "subscription": "عبر {{engine}} · اشتراكك",
+      "native": "عبر {{engine}} · محرّكه الأصيل",
+      "yourKey": "عبر {{host}} · مفتاحك",
+      "zen": "عبر OpenCode Zen · يحتاج رصيداً",
+      "needsKey": "عبر {{host}} · أضف مفتاح {{engine}}",
+      "upstream": "عبر {{engine}}"
+    },
+    "favorites": {
+      "group": "المفضّلة",
+      "addAriaLabel": "إضافة {{model}} إلى المفضّلة",
+      "removeAriaLabel": "إزالة {{model}} من المفضّلة"
+    }
+  },
+  "session": {
+    "continue": {
+      "title": "أكمل محادثتك",
+      "description": "اطرح أسئلة عن كودك، اطلب تغييرات، أو احصل على مساعدة في مهام التطوير"
+    },
+    "loading": {
+      "olderMessages": "جارٍ تحميل الرسائل الأقدم...",
+      "sessionMessages": "جارٍ تحميل رسائل الجلسة..."
+    },
+    "messages": {
+      "showingOf": "عرض {{shown}} من {{total}} رسالة",
+      "scrollToLoad": "مرّر لأعلى لتحميل المزيد",
+      "showingLast": "عرض آخر {{count}} رسالة (المجموع {{total}})",
+      "loadEarlier": "تحميل الرسائل الأقدم",
+      "loadAll": "تحميل جميع الرسائل",
+      "loadingAll": "جارٍ تحميل جميع الرسائل...",
+      "allLoaded": "تم تحميل جميع الرسائل",
+      "perfWarning": "تم تحميل جميع الرسائل — قد يصبح التمرير أبطأ. اضغط \"التمرير إلى الأسفل\" لاستعادة الأداء."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "اختر مشروعاً",
+      "description": "اختر مشروعاً لفتح shell تفاعلي في مجلده"
+    },
+    "status": {
+      "newSession": "جلسة جديدة",
+      "initializing": "جارٍ التهيئة...",
+      "restarting": "جارٍ إعادة التشغيل..."
+    },
+    "actions": {
+      "disconnect": "قطع الاتصال",
+      "disconnectTitle": "قطع الاتصال من shell",
+      "restart": "إعادة تشغيل",
+      "restartTitle": "إعادة تشغيل Shell",
+      "connect": "المتابعة في Shell",
+      "connectTitle": "الاتصال بـ shell"
+    },
+    "loading": "جارٍ تحميل الطرفية...",
+    "connecting": "جارٍ الاتصال بـ shell...",
+    "reconnecting": "جارٍ إعادة الاتصال بـ shell...",
+    "startSession": "ابدأ جلسة Claude جديدة",
+    "resumeSession": "استئناف الجلسة: {{displayName}}...",
+    "runCommand": "تشغيل {{command}} في {{projectName}}",
+    "startCli": "بدء Claude CLI في {{projectName}}",
+    "defaultCommand": "command"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "يفكّر",
+      "processing": "يعالج",
+      "analyzing": "يحلّل",
+      "working": "يعمل",
+      "computing": "يحسب",
+      "reasoning": "يستنتج"
+    },
+    "state": {
+      "live": "مباشر",
+      "paused": "متوقّف"
+    },
+    "elapsed": {
+      "seconds": "{{count}}ث",
+      "minutesSeconds": "{{minutes}}د {{seconds}}ث",
+      "label": "انقضى {{time}}",
+      "startingNow": "يبدأ الآن"
+    },
+    "controls": {
+      "stopGeneration": "إيقاف التوليد",
+      "pressEscToStop": "اضغط Esc في أي وقت للإيقاف"
+    },
+    "providers": {
+      "assistant": "المساعد"
+    },
+    "frozen": "متوقفة مؤقتاً (العملية مجمّدة)"
+  },
+  "runProgress": {
+    "tasksLabel": "مهام",
+    "barAria": "تقدّم المهام",
+    "tasksTooltip": "المهام: أُنجز {{done}} من {{total}}",
+    "inProgressTooltip_one": "مهمة واحدة قيد التنفيذ",
+    "inProgressTooltip_two": "مهمتان قيد التنفيذ",
+    "inProgressTooltip_few": "{{count}} مهام قيد التنفيذ",
+    "inProgressTooltip_many": "{{count}} مهمةً قيد التنفيذ",
+    "inProgressTooltip_other": "{{count}} مهمة قيد التنفيذ",
+    "agentsTooltip": "الوكلاء الفرعيون: {{done}}/{{total}}",
+    "agentWorking": "وكيل · {{calls}}",
+    "agentWorkingTooltip": "وكيل فرعي يعمل: {{calls}} استدعاء",
+    "estimateRemaining": "≈ {{time}} متبقّي",
+    "estimating": "يُقدّر…",
+    "estimateTooltip": "تقدير تقريبي — مبني على المهام المكتملة حتى الآن."
+  },
+  "agentActivity": {
+    "title": "نشاط الوكلاء",
+    "summary": "{{running}}/{{total}} يعمل",
+    "running": "يعمل",
+    "done": "انتهى",
+    "currently": "الآن",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} استدعاء أداة",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "سجلّ الأدوات قريباً.",
+    "noTools": "لا استدعاءات أدوات مسجّلة بعد.",
+    "toolSuccess": "اكتمل",
+    "toolRunning": "يعمل",
+    "backgroundWorkflow": "ورشة تعمل في الخلفية"
+  },
+  "activityGap": {
+    "status": "الوكيل يعمل — آخر نشاط منذ {{time}}",
+    "ariaLabel": "الوكيل ما زال يعمل، آخر نشاط منذ {{time}}"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "اختر مشروعاً لبدء المحادثة مع {{provider}}"
+  },
+  "tasks": {
+    "nextTaskPrompt": "ابدأ المهمة التالية"
+  },
+  "participants": {
+    "hide": "إخفاء شريط المشاركين",
+    "show": "إظهار شريط المشاركين",
+    "lastSeen": "آخر ظهور",
+    "invocations_one": "استدعاء واحد",
+    "invocations_two": "استدعاءان",
+    "invocations_few": "{{count}} استدعاءات",
+    "invocations_many": "{{count}} استدعاءً",
+    "invocations_other": "{{count}} استدعاء",
+    "usersAria_one": "مشارك واحد",
+    "usersAria_two": "مشاركان",
+    "usersAria_few": "{{count}} مشاركين",
+    "usersAria_many": "{{count}} مشاركاً",
+    "usersAria_other": "{{count}} مشارك",
+    "barAria": "مشاركو المحادثة",
+    "openSessionsNow": "المحادثات النشطة",
+    "openSessionsNowCount": "{{count}} محادثة نشطة",
+    "andMore_one": "وآخر",
+    "andMore_two": "وآخران",
+    "andMore_few": "و{{count}} آخرين",
+    "andMore_many": "و{{count}} آخرين",
+    "andMore_other": "و{{count}} آخرين",
+    "projectSummary": "{{users}} مستخدمين · {{agents}} وكلاء",
+    "roles": {
+      "owner": "المالك",
+      "admin": "مشرف",
+      "user": "عضو"
+    },
+    "agentKinds": {
+      "model": "النموذج الأساسي",
+      "subagent": "وكيل فرعي"
+    },
+    "agentSummary_one": "وكيل واحد",
+    "agentSummary_two": "وكيلان",
+    "agentSummary_few": "{{count}} وكلاء",
+    "agentSummary_many": "{{count}} وكيلاً",
+    "agentSummary_other": "{{count}} وكيل",
+    "totalInvocations_one": "استدعاء واحد",
+    "totalInvocations_two": "استدعاءان",
+    "totalInvocations_few": "{{count}} استدعاءات",
+    "totalInvocations_many": "{{count}} استدعاءً",
+    "totalInvocations_other": "{{count}} استدعاء",
+    "agentSummaryAria": "{{agents}} وكيل متمايز · {{calls}} استدعاء إجمالي",
+    "unknownAuthor": "مؤلف غير معروف"
+  },
+  "ws": {
+    "statusConnected": "متصل",
+    "statusReconnecting": "جارٍ إعادة الاتصال…",
+    "statusDisconnected": "منقطع",
+    "ariaConnected": "WebSocket متصل",
+    "ariaReconnecting": "WebSocket يعيد الاتصال",
+    "ariaDisconnected": "WebSocket منقطع",
+    "sendFailed": "لم تُرسل الرسالة — الاتصال منقطع",
+    "sendDisabledTitle": "تعذّر الإرسال — الاتصال منقطع",
+    "abortFailed": "تعذّر الإيقاف — الاتصال منقطع. أعِد المحاولة."
+  },
+  "serverError": {
+    "project_dir_missing": "مجلد المشروع غير موجود على القرص",
+    "cli_not_installed": "الـ CLI غير مثبَّت — يرجى تثبيت أداة CLI المطلوبة",
+    "spawn_failed": "فشل تشغيل العملية — راجع سجلات الخادم للتفاصيل",
+    "session_create_failed": "تعذّر بدء جلسة جديدة — يرجى المحاولة مجدداً",
+    "unknown": "حدث خطأ غير متوقع في الخادم"
+  },
+  "refreshChat": {
+    "button": "تحديث المحادثة",
+    "refreshing": "جارٍ التحديث…"
+  },
+  "composerMode": {
+    "chat": "دردشة",
+    "agent": "وكيل"
+  },
+  "customCommand": {
+    "confirmBashExecution": "يحتوي هذا الأمر على أوامر Bash سيتم تنفيذها. هل تريد المتابعة؟",
+    "executionCancelled": "أُلغي تنفيذ الأمر",
+    "executeError": "خطأ في تنفيذ الأمر: {{message}}",
+    "unknownError": "خطأ غير معروف"
+  },
+  "inlineModelSwitcher": {
+    "label": "النموذج",
+    "tooltip": "يسري من الردّ التالي",
+    "noModels": "لا نماذج متاحة",
+    "switching": "جارٍ التبديل…",
+    "ariaLabel": "تبديل النموذج: {{model}}",
+    "scopeSession": "هذه المحادثة فقط",
+    "scopeDefault": "افتراضي لكل محادثة جديدة",
+    "confirmedSession": "سرى على هذه المحادثة: {{model}}",
+    "confirmedDefault": "عُيِّن افتراضياً: {{model}}",
+    "followDefault": "اتبع الافتراضي الحالي",
+    "clearing": "جارٍ الإعادة…",
+    "clearedNotice": "الجلسة عادت للافتراضي: {{model}}",
+    "engineStamped": "تعمل بمحرّك {{engine}} — التبديل غير متاح"
+  },
+  "conversationCost": {
+    "label": "التكلفة",
+    "tooltipTitle": "تكلفة المحادثة",
+    "unavailable": "التكلفة غير متاحة لهذا المزوّد",
+    "partial": "جزئية — بعض النماذج بلا سعر منشور",
+    "apiEquivalent": "قيمة الاستهلاك بأسعار API على اشتراك — لا مبلغاً محاسَباً",
+    "billed": "استهلاك محاسَب",
+    "pricesAsOf": "الأسعار بتاريخ {{date}}",
+    "subagents": "تشمل عمل الوكلاء الفرعيين ({{count}} طلباً)",
+    "perModel": "حسب النموذج",
+    "loading": "يُحسب…"
+  },
+  "closeConversation": {
+    "close": "إغلاق المحادثة",
+    "reopen": "إعادة فتح المحادثة",
+    "closedBadge": "مغلقة",
+    "failed": "تعذّر تحديث حالة المحادثة"
+  }
+}

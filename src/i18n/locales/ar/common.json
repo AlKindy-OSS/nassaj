@@ -1,0 +1,351 @@
+{
+  "buttons": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "create": "إنشاء",
+    "edit": "تعديل",
+    "close": "إغلاق",
+    "confirm": "تأكيد",
+    "submit": "إرسال",
+    "retry": "إعادة المحاولة",
+    "refresh": "تحديث",
+    "search": "بحث",
+    "clear": "مسح",
+    "copy": "نسخ",
+    "download": "تنزيل",
+    "upload": "رفع",
+    "browse": "تصفح"
+  },
+  "tabs": {
+    "chat": "المحادثة",
+    "shell": "Shell",
+    "files": "الملفات",
+    "git": "إدارة المصدر",
+    "tasks": "المهام",
+    "board": "لوحة المشروع",
+    "wiki": "الويكي"
+  },
+  "wiki": {
+    "title": "ويكي نسّاج",
+    "panelAriaLabel": "ويكي نسّاج",
+    "sidebarAriaLabel": "فهرس الويكي",
+    "closeSidebar": "إخفاء الفهرس",
+    "openSidebar": "إظهار الفهرس",
+    "pageNotFound": "الصفحة غير موجودة",
+    "searchPlaceholder": "ابحث في الويكي…",
+    "searchAriaLabel": "بحث في صفحات الويكي",
+    "searchClear": "مسح البحث",
+    "searchNoResults": "لا نتائج",
+    "searchResultsCount": "{{count}} نتيجة",
+    "searchResultsAriaLabel": "نتائج البحث"
+  },
+  "status": {
+    "loading": "جارٍ التحميل...",
+    "success": "نجح",
+    "error": "خطأ",
+    "failed": "فشل",
+    "pending": "قيد الانتظار",
+    "completed": "مكتمل",
+    "inProgress": "قيد التنفيذ"
+  },
+  "messages": {
+    "savedSuccessfully": "تم الحفظ بنجاح",
+    "deletedSuccessfully": "تم الحذف بنجاح",
+    "updatedSuccessfully": "تم التحديث بنجاح",
+    "operationFailed": "فشلت العملية",
+    "networkError": "خطأ في الشبكة. يرجى التحقق من الاتصال.",
+    "unauthorized": "غير مصرّح. يرجى تسجيل الدخول.",
+    "notFound": "غير موجود",
+    "invalidInput": "مدخل غير صالح",
+    "requiredField": "هذا الحقل مطلوب",
+    "unknownError": "حدث خطأ غير معروف"
+  },
+  "navigation": {
+    "settings": "الإعدادات",
+    "home": "الرئيسية",
+    "back": "السابق",
+    "next": "التالي",
+    "previous": "السابق",
+    "logout": "تسجيل الخروج"
+  },
+  "common": {
+    "language": "اللغة",
+    "theme": "السمة",
+    "darkMode": "الوضع الداكن",
+    "lightMode": "الوضع الفاتح",
+    "name": "الاسم",
+    "description": "الوصف",
+    "enabled": "مفعّل",
+    "disabled": "معطّل",
+    "optional": "اختياري",
+    "version": "الإصدار",
+    "select": "اختر",
+    "selectAll": "تحديد الكل",
+    "deselectAll": "إلغاء تحديد الكل",
+    "done": "تم",
+    "failed": "فشل"
+  },
+  "time": {
+    "justNow": "للتو",
+    "minutesAgo": "قبل {{count}} دقيقة",
+    "hoursAgo": "قبل {{count}} ساعة",
+    "daysAgo": "قبل {{count}} يوم",
+    "yesterday": "أمس"
+  },
+  "fileOperations": {
+    "newFile": "ملف جديد",
+    "newFolder": "مجلد جديد",
+    "rename": "إعادة تسمية",
+    "move": "نقل",
+    "copyPath": "نسخ المسار",
+    "openInEditor": "فتح في المحرر"
+  },
+  "mainContent": {
+    "loading": "جارٍ تحميل CloudCLI",
+    "settingUpWorkspace": "جارٍ إعداد مساحة العمل...",
+    "chooseProject": "اختر مشروعك",
+    "selectProjectDescription": "اختر مشروعاً من الشريط الجانبي لبدء البرمجة مع Claude. كل مشروع يحتوي على جلسات المحادثة وسجل الملفات.",
+    "tip": "تلميح",
+    "createProjectMobile": "اضغط زر القائمة أعلاه للوصول إلى المشاريع",
+    "createProjectDesktop": "أنشئ مشروعاً جديداً بالضغط على أيقونة المجلد في الشريط الجانبي",
+    "newSession": "جلسة جديدة",
+    "untitledSession": "جلسة بدون عنوان",
+    "projectFiles": "ملفات المشروع",
+    "sessionIdTooltip": "معرّف الجلسة: {{id}} — انقر للنسخ",
+    "sessionIdCopy": "نسخ معرّف الجلسة {{id}}"
+  },
+  "fileTree": {
+    "loading": "جارٍ تحميل الملفات...",
+    "files": "الملفات",
+    "simpleView": "عرض بسيط",
+    "compactView": "عرض مضغوط",
+    "detailedView": "عرض مفصّل",
+    "searchPlaceholder": "ابحث في الملفات والمجلدات...",
+    "clearSearch": "مسح البحث",
+    "name": "الاسم",
+    "size": "الحجم",
+    "modified": "آخر تعديل",
+    "permissions": "الصلاحيات",
+    "noFilesFound": "لا توجد ملفات",
+    "checkProjectPath": "تحقّق من إمكانية الوصول إلى مسار المشروع",
+    "noMatchesFound": "لا توجد نتائج مطابقة",
+    "tryDifferentSearch": "جرّب كلمة بحث مختلفة أو امسح البحث",
+    "justNow": "للتو",
+    "minAgo": "قبل {{count}} دقيقة",
+    "hoursAgo": "قبل {{count}} ساعة",
+    "daysAgo": "قبل {{count}} يوم",
+    "newFile": "ملف جديد (Cmd+N)",
+    "newFolder": "مجلد جديد (Cmd+Shift+N)",
+    "refresh": "تحديث",
+    "collapseAll": "طيّ الكل",
+    "uploadFiles": "رفع ملفات (بحد أقصى {{size}} لكل ملف)",
+    "uploadingFiles": "جارٍ رفع الملفات",
+    "uploadComplete": "اكتمل الرفع",
+    "uploadFailed": "فشل الرفع",
+    "uploadedCount": "رُفع {{uploaded}} من أصل {{total}} ملف",
+    "context": {
+      "rename": "إعادة تسمية",
+      "delete": "حذف",
+      "copyPath": "نسخ المسار",
+      "download": "تنزيل",
+      "newFile": "ملف جديد",
+      "newFolder": "مجلد جديد",
+      "refresh": "تحديث",
+      "menuLabel": "قائمة سياق الملف",
+      "loading": "جارٍ التحميل..."
+    }
+  },
+  "projectWizard": {
+    "title": "إنشاء مشروع جديد",
+    "steps": {
+      "type": "النوع",
+      "configure": "الإعداد",
+      "confirm": "التأكيد"
+    },
+    "step1": {
+      "question": "هل لديك مساحة عمل بالفعل، أم تريد إنشاء واحدة جديدة؟",
+      "existing": {
+        "title": "مساحة عمل قائمة",
+        "description": "لديّ مساحة عمل على الخادم وأحتاج فقط إلى إضافتها إلى قائمة المشاريع"
+      },
+      "new": {
+        "title": "مساحة عمل جديدة",
+        "description": "أنشئ مساحة عمل جديدة، مع إمكانية الاستنساخ من GitHub"
+      }
+    },
+    "step2": {
+      "existingPath": "مسار مساحة العمل",
+      "newPath": "مسار مساحة العمل",
+      "existingPlaceholder": "/path/to/existing/workspace",
+      "newPlaceholder": "/path/to/new/workspace",
+      "existingHelp": "المسار الكامل لمجلد مساحة العمل الحالية",
+      "newHelp": "المسار الكامل لمجلد مساحة العمل",
+      "githubUrl": "رابط GitHub (اختياري)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "اختياري: زوّد رابط GitHub لاستنساخ مستودع",
+      "githubAuth": "مصادقة GitHub (اختياري)",
+      "githubAuthHelp": "مطلوبة فقط للمستودعات الخاصة. المستودعات العامة يمكن استنساخها دون مصادقة.",
+      "loadingTokens": "جارٍ تحميل الرموز المحفوظة...",
+      "storedToken": "رمز محفوظ",
+      "newToken": "رمز جديد",
+      "nonePublic": "بدون (عام)",
+      "selectToken": "اختر رمزاً",
+      "selectTokenPlaceholder": "-- اختر رمزاً --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "سيُستخدم هذا الرمز لهذه العملية فقط",
+      "publicRepoInfo": "المستودعات العامة لا تتطلّب مصادقة. يمكنك تخطّي إدخال الرمز لاستنساخها.",
+      "noTokensHelp": "لا توجد رموز محفوظة. يمكنك إضافة رموز في الإعدادات ← API Keys لإعادة استخدامها.",
+      "optionalTokenPublic": "رمز GitHub (اختياري للمستودعات العامة)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (اتركه فارغاً للمستودعات العامة)",
+      "repos": {
+        "fromMyRepos": "اختر من مستودعاتي",
+        "pasteUrl": "لصق رابط",
+        "sourceToggleLabel": "مصدر GitHub",
+        "help": "اختر مستودعاً من حساب GitHub لاستنساخه",
+        "ariaLabel": "اختر مستودع GitHub",
+        "placeholder": "اختر مستودعاً...",
+        "searchPlaceholder": "ابحث في المستودعات...",
+        "searchAriaLabel": "ابحث في مستودعات GitHub الخاصة بك",
+        "private": "خاص",
+        "loading": "جارٍ تحميل مستودعاتك...",
+        "empty": "لا توجد مستودعات لهذا الرمز.",
+        "noMatch": "لا توجد مستودعات تطابق بحثك.",
+        "loadError": "تعذّر تحميل المستودعات. حاول مرة أخرى.",
+        "invalidToken": "رفض GitHub هذا الرمز. قد يكون مُلغى أو يفتقد صلاحية \"repo\".",
+        "noToken": "لا يوجد رمز GitHub مهيّأ لهذا الحساب.",
+        "forbidden": "رفض GitHub الوصول. قد يفتقد الرمز الصلاحية المطلوبة أو تجاوز حد الطلبات.",
+        "retry": "إعادة المحاولة",
+        "manageTokens": "إدارة الرموز في الإعدادات"
+      }
+    },
+    "step3": {
+      "reviewConfig": "مراجعة الإعدادات",
+      "existingWorkspace": "مساحة عمل قائمة",
+      "newWorkspace": "مساحة عمل جديدة",
+      "path": "المسار:",
+      "cloneFrom": "استنساخ من:",
+      "authentication": "المصادقة:",
+      "usingStoredToken": "باستخدام الرمز المحفوظ:",
+      "usingProvidedToken": "باستخدام الرمز المقدَّم",
+      "noAuthentication": "بدون مصادقة",
+      "sshKey": "مفتاح SSH",
+      "existingInfo": "ستُضاف مساحة العمل إلى قائمة المشاريع وستتوفّر لجلسات Claude/Cursor.",
+      "newWithClone": "سيُستنسخ المستودع إلى هذا المجلد.",
+      "newEmpty": "ستُضاف مساحة العمل إلى قائمة المشاريع وستتوفّر لجلسات Claude/Cursor.",
+      "cloningRepository": "جارٍ استنساخ المستودع..."
+    },
+    "buttons": {
+      "cancel": "إلغاء",
+      "back": "السابق",
+      "next": "التالي",
+      "createProject": "إنشاء المشروع",
+      "creating": "جارٍ الإنشاء...",
+      "cloning": "جارٍ الاستنساخ..."
+    },
+    "errors": {
+      "selectType": "يرجى تحديد ما إذا كان لديك مساحة عمل قائمة أم تريد إنشاء جديدة",
+      "providePath": "يرجى إدخال مسار مساحة العمل",
+      "failedToCreate": "فشل إنشاء مساحة العمل",
+      "failedToCreateFolder": "فشل إنشاء المجلد"
+    }
+  },
+  "notifications": {
+    "genericTool": "أداة",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "إشعار"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "إجراء مطلوب",
+          "body": "{{toolName}} ينتظر قرارك."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "تم إيقاف التشغيل",
+          "body": "السبب: {{reason}}"
+        },
+        "failed": {
+          "title": "فشل التشغيل"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "إشعار من الوكيل"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "تحديث متاح",
+    "newVersionReady": "إصدار جديد جاهز",
+    "currentVersion": "الإصدار الحالي",
+    "latestVersion": "أحدث إصدار",
+    "whatsNew": "الجديد:",
+    "viewFullRelease": "عرض الإصدار الكامل",
+    "updateProgress": "تقدّم التحديث:",
+    "manualUpgrade": "ترقية يدوية:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "أو اضغط \"تحديث الآن\" لتشغيل التحديث تلقائياً.",
+    "updateCompleted": "اكتمل التحديث بنجاح!",
+    "restartServer": "يرجى إعادة تشغيل الخادم لتطبيق التغييرات.",
+    "updateFailed": "فشل التحديث",
+    "buttons": {
+      "close": "إغلاق",
+      "later": "لاحقاً",
+      "copyCommand": "نسخ الأمر",
+      "updateNow": "تحديث الآن",
+      "updating": "جارٍ التحديث..."
+    },
+    "ariaLabels": {
+      "closeModal": "إغلاق نافذة الترقية",
+      "showSidebar": "إظهار الشريط الجانبي",
+      "settings": "الإعدادات",
+      "updateAvailable": "تحديث متاح",
+      "closeSidebar": "إغلاق الشريط الجانبي"
+    }
+  },
+  "sessionProcessState": {
+    "running": "تعمل",
+    "frozen": "مجمّدة مؤقتاً",
+    "runningHint": "عملية الجلسة تعمل الآن",
+    "frozenHint": "عملية الجلسة موقوفة مؤقتاً (kill -STOP)",
+    "projectBusyHint": "جلسة في هذا المشروع قيد العمل الآن",
+    "done": "انتهت",
+    "doneHint": "انتهت الجلسة ولم تُفتح بعد",
+    "projectDoneHint": "جلسة في هذا المشروع انتهت ولم تُفتح بعد"
+  },
+  "workflowStatus": {
+    "running": "ورشة تعمل",
+    "runningHint": "ورشة خلفية تعمل الآن في هذه الجلسة",
+    "orphanEmpty": "توقّفت — بلا مخرجات",
+    "orphanEmptyHint": "خرجت العملية قبل أن يُنهي أي وكيل عمله — يمكن الاستئناف يدوياً",
+    "orphanPartial": "توقّفت — جزئية",
+    "orphanPartialHint": "خرجت العملية وبعض الوكلاء أنهوا عملهم — تقدّم جزئي محفوظ، يمكن الاستئناف يدوياً",
+    "orphanIncomplete": "توقّفت — ناقصة",
+    "orphanIncompleteHint": "خرجت العملية دون اكتمال؛ بدأ أكثر مما أنتج — يمكن الاستئناف يدوياً",
+    "frozen": "مُجمَّدة مؤقتاً",
+    "frozenHint": "العملية موقوفة (SIGSTOP) وليست ميتة — ستستأنف تلقائياً عند CONT",
+    "unknown": "حيوية غير معروفة",
+    "unknownHint": "تعذّر إثبات الحياة — غالباً نجت من إعادة تشغيل السيرفر؛ لا تُدّعى ميتة ولا حيّة",
+    "projectRunningHint": "ورشة خلفية تعمل الآن في هذا المشروع",
+    "projectOrphanHint": "ورشة خلفية يتيمة في هذا المشروع تحتاج مراجعة",
+    "projectUnknownHint": "حيوية ورشة خلفية في هذا المشروع غير معروفة — لا تُدّعى ميتة ولا حيّة"
+  },
+  "buildUpdate": {
+    "available": "تحديث جديد للواجهة متاح",
+    "reload": "تحديث",
+    "ariaLabel": "إشعار بتحديث بناء الواجهة",
+    "dismiss": "تجاهل"
+  },
+  "governanceBadge": {
+    "ungoverned": "غير محكوم",
+    "tooltip": {
+      "none": "هذه الجلسة تعمل خارج معايير حوكمة نسّاج — تأكّد من إعدادات المزوّد"
+    }
+  }
+}

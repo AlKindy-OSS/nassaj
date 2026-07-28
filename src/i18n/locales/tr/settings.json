@@ -1,0 +1,1133 @@
+{
+  "title": "Ayarlar",
+  "tabs": {
+    "account": "Hesap",
+    "permissions": "İzinler",
+    "mcpServers": "MCP Sunucuları",
+    "skills": "Beceriler",
+    "appearance": "Görünüm"
+  },
+  "skills": {
+    "title": "Beceriler",
+    "description": ".md dosyalarından veya tam beceri klasörlerinden global {{provider}} becerilerini yükleyin.",
+    "descriptionReadOnly": "{{provider}} sağlayıcı konumlarından keşfedilen beceriler — bu arayüzden yükleme desteklenmiyor.",
+    "refresh": "Yenile",
+    "addSkill": "Beceri ekle",
+    "addSkillTitle": "{{provider}} Becerisi ekle",
+    "installPath": "Yükleme yolu",
+    "dropZoneTitle": ".md dosyalarını veya beceri klasörlerini buraya bırakın",
+    "dropZoneDescription": "Bağımsız bir SKILL.md veya komut dosyaları ve varlıkları içeren tam bir beceri klasörü yükleyin.",
+    "chooseFiles": "Dosyaları seç",
+    "chooseFolder": "Klasörü seç",
+    "queuedFiles": "Kuyruk",
+    "remove": "Kaldır",
+    "install": "Beceriyi yükle",
+    "installCount_one": "{{count}} beceri yükle",
+    "installCount_other": "{{count}} beceri yükle",
+    "cancel": "İptal",
+    "uploadHint": "Klasör yüklemeleri klasör adını kullanır; bağımsız dosyalar SKILL.md'de belirtilen adı kullanır.",
+    "visibleSkills": "Yüklü beceriler",
+    "visibleSkillsDescription": "Sağlayıcı API'si tarafından keşfedilen beceriler (global ve projeye özgü konumlar dahil).",
+    "search": "Beceri ara...",
+    "clearSearch": "Aramayı temizle",
+    "scanning": "Proje becerileri taranıyor…",
+    "loading": "{{provider}} becerileri yükleniyor…",
+    "empty": "Henüz beceri keşfedilmedi",
+    "emptyDescription": "Yukarıya global bir beceri ekleyin veya çalışma alanınızda projeye özgü beceri klasörleri oluşturun.",
+    "noMatch": "Eşleşen beceri yok",
+    "noMatchDescription": "Farklı bir komut, ad, kapsam, proje veya kaynak yolu deneyin.",
+    "source": "Kaynak",
+    "saved": "Beceriler başarıyla yüklendi.",
+    "delete": "Sil",
+    "confirmDelete": "«{{name}}» silinsin mi?",
+    "confirmYes": "Sil",
+    "plugin": "Eklenti",
+    "project": "Proje",
+    "scopes": {
+      "user": "Kullanıcı",
+      "plugin": "Eklenti",
+      "repo": "Repo",
+      "project": "Proje",
+      "admin": "Yönetici",
+      "system": "Sistem"
+    },
+    "errors": {
+      "deleteFailed": "Beceri silinemedi. Lütfen tekrar deneyin.",
+      "dropFailed": "Bir veya daha fazla .md dosyası veya SKILL.md içeren bir klasör bırakın.",
+      "saveFailed": "Beceriler yüklenemedi. Lütfen tekrar deneyin."
+    }
+  },
+  "account": {
+    "title": "Hesap",
+    "language": "Dil",
+    "languageLabel": "Görüntüleme Dili",
+    "languageDescription": "Arayüz için tercih ettiğin dili seç",
+    "username": "Kullanıcı Adı",
+    "email": "E-posta",
+    "profile": "Profil",
+    "changePassword": "Şifreyi Değiştir"
+  },
+  "mcp": {
+    "title": "MCP Sunucuları",
+    "addServer": "Sunucu Ekle",
+    "editServer": "Sunucuyu Düzenle",
+    "deleteServer": "Sunucuyu Sil",
+    "serverName": "Sunucu Adı",
+    "serverType": "Sunucu Türü",
+    "config": "Yapılandırma",
+    "testConnection": "Bağlantıyı Test Et",
+    "status": "Durum",
+    "connected": "Bağlı",
+    "disconnected": "Bağlantı kesildi",
+    "scope": {
+      "label": "Kapsam",
+      "user": "Kullanıcı",
+      "project": "Proje"
+    }
+  },
+  "appearance": {
+    "title": "Görünüm",
+    "theme": "Tema",
+    "codeEditor": "Kod Editörü",
+    "editorTheme": "Editör Teması",
+    "wordWrap": "Kelime Kaydırma",
+    "showMinimap": "Minimap'i Göster",
+    "lineNumbers": "Satır Numaraları",
+    "fontSize": "Yazı Tipi Boyutu"
+  },
+  "actions": {
+    "saveChanges": "Değişiklikleri Kaydet",
+    "resetToDefaults": "Varsayılanlara Döndür",
+    "cancelChanges": "Değişiklikleri İptal Et"
+  },
+  "quickSettings": {
+    "title": "Hızlı Ayarlar",
+    "sections": {
+      "appearance": "Görünüm",
+      "toolDisplay": "Araç Gösterimi",
+      "viewOptions": "Görünüm Seçenekleri",
+      "inputSettings": "Girdi Ayarları"
+    },
+    "darkMode": "Koyu Mod",
+    "autoExpandTools": "Araçları otomatik genişlet",
+    "showRawParameters": "Ham parametreleri göster",
+    "showThinking": "Düşünmeyi göster",
+    "hideToolCalls": "Araç çağrılarını gizle",
+    "autoScrollToBottom": "Otomatik en alta kaydır",
+    "tabsIconOnly": "Kompakt sekmeler (yalnızca simgeler)",
+    "sendByCtrlEnter": "Ctrl+Enter ile gönder",
+    "sendByCtrlEnterDescription": "Etkinleştirildiğinde, Ctrl+Enter'a basmak yalnız Enter yerine mesajı gönderir. IME (girdi metot düzenleyici) kullananlar için yanlışlıkla göndermeyi önler.",
+    "dragHandle": {
+      "dragging": "Tutamaç sürükleniyor",
+      "closePanel": "Ayarlar panelini kapat",
+      "openPanel": "Ayarlar panelini aç",
+      "draggingStatus": "Sürükleniyor...",
+      "toggleAndMove": "Açıp kapamak için tıkla, taşımak için sürükle"
+    }
+  },
+  "claudeUsage": {
+    "title": "Claude Kullanımı",
+    "loading": "Kullanım yükleniyor…",
+    "error": "Kullanım durumu yüklenemedi.",
+    "stale": "Önbellekteki veri",
+    "percentUsed": "%{{percent}} kullanıldı",
+    "resetsIn": "{{time}} sonra sıfırlanıyor",
+    "extraUsageDetail": "{{limit}} içinde {{used}} kullanıldı",
+    "crossProviderNote": "Claude hesabı kullanımı — bu oturum {{provider}} üzerinde çalışıyor",
+    "notApplicable": "Claude kotaları geçerli oturumun sağlayıcısı ({{provider}}) için geçerli değil",
+    "windows": {
+      "session": "Mevcut oturum",
+      "weeklyAllModels": "Tüm modeller (haftalık)",
+      "weeklySonnet": "Yalnızca Sonnet",
+      "weeklyOpus": "Yalnızca Opus",
+      "extraUsage": "Ekstra kullanım"
+    }
+  },
+  "terminalShortcuts": {
+    "title": "Terminal Kısayolları",
+    "sectionKeys": "Tuşlar",
+    "sectionNavigation": "Gezinme",
+    "escape": "Escape",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "arrowUp": "Yukarı Ok",
+    "arrowDown": "Aşağı Ok",
+    "scrollDown": "Aşağı Kaydır",
+    "handle": {
+      "closePanel": "Kısayol panelini kapat",
+      "openPanel": "Kısayol panelini aç"
+    }
+  },
+  "mainTabs": {
+    "label": "Ayarlar",
+    "profile": "Profil",
+    "agents": "Ajanlar",
+    "appearance": "Görünüm",
+    "git": "Git",
+    "apiTokens": "Nassaj API Anahtarları",
+    "notifications": "Bildirimler",
+    "plugins": "Eklentiler",
+    "users": "Kullanıcılar",
+    "about": "Hakkında",
+    "commandBoard": "Komut Panosu"
+  },
+  "profile": {
+    "title": "Profil",
+    "subtitle": "Hesap kullanıcı adını, şifreni ve geçiş anahtarlarını yönet",
+    "tabs": {
+      "identity": "Kimlik",
+      "security": "Güvenlik"
+    },
+    "saving": "Kaydediliyor...",
+    "avatar": {
+      "title": "Profil resmi",
+      "description": "Ekip arkadaşlarının seni tanıması için bir fotoğraf ekle.",
+      "change": "Resmi değiştir",
+      "uploading": "Yükleniyor...",
+      "hint": "Kare görseller en iyi sonucu verir. PNG veya JPG.",
+      "currentAlt": "Profil resmin",
+      "placeholderAlt": "Profil resmi ayarlanmamış",
+      "success": "Profil resmi başarıyla güncellendi",
+      "errors": {
+        "uploadFailed": "Resim yüklenemedi. Lütfen tekrar dene.",
+        "network": "Ağ hatası. Lütfen bağlantını kontrol et ve tekrar dene."
+      }
+    },
+    "username": {
+      "title": "Kullanıcı adını değiştir",
+      "description": "Giriş yapmak için kullandığın kullanıcı adını güncelle.",
+      "currentLabel": "Mevcut kullanıcı adı",
+      "newLabel": "Yeni kullanıcı adı",
+      "placeholder": "Yeni bir kullanıcı adı seç",
+      "hint": "3-32 karakter: harf, rakam veya alt çizgi.",
+      "save": "Kullanıcı adını kaydet",
+      "success": "Kullanıcı adı başarıyla güncellendi",
+      "errors": {
+        "required": "Lütfen yeni bir kullanıcı adı gir",
+        "unchanged": "Yeni kullanıcı adı mevcut kullanıcı adıyla aynı"
+      }
+    },
+    "password": {
+      "title": "Şifreyi değiştir",
+      "description": "Başka yerde kullanmadığın güçlü bir şifre kullan.",
+      "currentLabel": "Mevcut şifre",
+      "currentPlaceholder": "Mevcut şifreni gir",
+      "newLabel": "Yeni şifre",
+      "newPlaceholder": "Yeni bir şifre gir",
+      "confirmLabel": "Yeni şifreyi onayla",
+      "confirmPlaceholder": "Yeni şifreyi tekrar gir",
+      "hint": "En az {{min}} karakter.",
+      "save": "Şifreyi kaydet",
+      "success": "Şifre başarıyla değiştirildi",
+      "errors": {
+        "required": "Lütfen tüm şifre alanlarını doldur",
+        "short": "Şifre en az {{min}} karakter olmalı",
+        "mismatch": "Yeni şifreler eşleşmiyor"
+      }
+    },
+    "passkeys": {
+      "title": "Geçiş Anahtarları",
+      "description": "Parmak izi, yüz tanıma, cihaz PIN'i veya güvenlik anahtarı kullanarak şifresiz giriş yap.",
+      "add": "Geçiş anahtarı ekle",
+      "nameLabel": "Geçiş anahtarı adı (isteğe bağlı)",
+      "namePlaceholder": "ör. Dizüstü parmak izi",
+      "create": "Geçiş anahtarı oluştur",
+      "creating": "Cihazın bekleniyor...",
+      "cancel": "İptal",
+      "loading": "Geçiş anahtarları yükleniyor...",
+      "empty": "Henüz geçiş anahtarı yok. Bu çalışma alanına hızlı ve güvenli giriş yapmak için bir tane ekle — şifre gerekmiyor.",
+      "notSupported": "Bu tarayıcı geçiş anahtarlarını desteklemiyor, bu yüzden yeni anahtarlar buraya eklenemiyor.",
+      "unnamed": "Adsız geçiş anahtarı",
+      "createdAt": "{{date}} tarihinde eklendi",
+      "lastUsedAt": "Son kullanım {{date}}",
+      "neverUsed": "Hiç kullanılmadı",
+      "badges": {
+        "synced": "Eşitlenmiş",
+        "device": "Cihaza bağlı"
+      },
+      "rename": "Geçiş anahtarını yeniden adlandır",
+      "renamePlaceholder": "Yeni ad",
+      "renameSave": "Adı kaydet",
+      "delete": "Geçiş anahtarını sil",
+      "deleteConfirm": "Bu geçiş anahtarı silinsin mi?",
+      "deleteConfirmYes": "Sil",
+      "success": {
+        "added": "Geçiş anahtarı başarıyla eklendi",
+        "renamed": "Geçiş anahtarı yeniden adlandırıldı",
+        "deleted": "Geçiş anahtarı silindi"
+      },
+      "errors": {
+        "loadFailed": "Geçiş anahtarları yüklenemedi. Lütfen tekrar dene.",
+        "registerFailed": "Geçiş anahtarı oluşturulamadı. Lütfen tekrar dene.",
+        "duplicate": "Bu cihaz veya güvenlik anahtarı zaten geçiş anahtarı olarak kayıtlı.",
+        "renameFailed": "Geçiş anahtarı yeniden adlandırılamadı.",
+        "deleteFailed": "Geçiş anahtarı silinemedi.",
+        "network": "Ağ hatası. Lütfen bağlantını kontrol et ve tekrar dene."
+      }
+    },
+    "identity": {
+      "title": "Avatar stili",
+      "description": "Fotoğraf yüklemek yerine hazır bir avatar veya renk seç.",
+      "tabs": {
+        "upload": "Yükle",
+        "gallery": "Galeri",
+        "color": "Renk"
+      },
+      "gallery": {
+        "heading": "Bir avatar seç",
+        "selected": "Seçilen avatar"
+      },
+      "color": {
+        "heading": "Bir renk seç",
+        "hint": "Renk, baş harfinin arkasında kullanılır.",
+        "selected": "Seçilen renk"
+      },
+      "saving": "Kaydediliyor...",
+      "success": "Avatar başarıyla güncellendi",
+      "errors": {
+        "saveFailed": "Seçimin kaydedilemedi. Lütfen tekrar dene.",
+        "network": "Ağ hatası. Lütfen bağlantını kontrol et ve tekrar dene."
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "Oturumlarında kullanmak için kendi Claude aboneliğini bağla. Her kullanıcının kendi izole kimlik bilgileri vardır.",
+    "recheck": "Tekrar kontrol et",
+    "loadError": "Abonelik durumu kontrol edilemedi. Lütfen tekrar dene.",
+    "banner": "Claude aboneliğin henüz bağlanmamış. Oturumlarında Claude'u kullanmadan önce bağlaman gerekiyor.",
+    "bannerHint": "Terminali açmak ve şunu kullanarak giriş akışını tamamlamak için aşağıdaki düğmeye tıkla",
+    "linkButton": "Claude hesabını bağla",
+    "ownerNote": "Kimlik bilgileriniz sahip olarak otomatik bağlanır — herhangi bir işlem gerekmez."
+  },
+  "agyConnection": {
+    "description": "Oturumlarında kullanmak için kendi Antigravity aboneliğini bağla. Her kullanıcının kendi izole kimlik bilgileri vardır.",
+    "recheck": "Tekrar kontrol et",
+    "loadError": "Abonelik durumu kontrol edilemedi. Lütfen tekrar dene.",
+    "banner": "Antigravity aboneliğin henüz bağlanmamış. Oturumlarında agy'yi kullanmadan önce bağlaman gerekiyor.",
+    "bannerHint": "Terminali açmak ve şunu çalıştırmak için aşağıdaki düğmeye tıkla",
+    "linkButton": "Antigravity hesabını bağla",
+    "ownerNote": "Kimlik bilgileriniz sahip olarak otomatik bağlanır — herhangi bir işlem gerekmez.",
+    "modal": {
+      "title": "Antigravity hesabını bağla",
+      "close": "Bağlantı iletişim kutusunu kapat",
+      "instructions": "Aşağıdaki terminalde şunu çalıştır",
+      "afterComplete": "OAuth giriş akışını tamamla, ardından bu iletişim kutusunu kapat ve durumu yenilemek için \"Tekrar kontrol et\"e tıkla."
+    }
+  },
+  "users": {
+    "title": "Kullanıcılar",
+    "subtitle": "Çalışma alanı üyelerini ve davetleri yönet",
+    "inviteButton": "Kullanıcı Davet Et",
+    "listHeading": "Üyeler",
+    "loading": "Kullanıcılar yükleniyor...",
+    "empty": "Kullanıcı bulunamadı",
+    "you": "sen",
+    "changeRole": "Rolü değiştir",
+    "suspend": "Askıya al",
+    "activate": "Etkinleştir",
+    "resetPassword": "Şifreyi sıfırla",
+    "deleteUser": "Kullanıcıyı sil",
+    "deleteUserConfirm": "{{username}} kalıcı olarak silinsin mi? Bu işlem geri alınamaz.",
+    "reset": {
+      "title": "Şifreyi sıfırla",
+      "confirm": "{{username}} için şifre sıfırlansın mı?",
+      "warning": "Geçici bir şifre oluşturulacak ve yalnızca bir kez gösterilecek. Kullanıcı bir sonraki girişinde değiştirmek zorunda kalacak ve mevcut tüm oturumları sonlandırılacak.",
+      "submit": "Şifreyi sıfırla",
+      "resetting": "Sıfırlanıyor...",
+      "cancel": "İptal",
+      "close": "Kapat",
+      "done": "Bitti",
+      "copy": "Kopyala",
+      "copied": "Kopyalandı",
+      "successHint": "Bu geçici şifreyi güvenli şekilde paylaş. Yalnızca bir kez gösterilir.",
+      "tempPasswordLabel": "Geçici şifre"
+    },
+    "pendingInvites": "Bekleyen davetler",
+    "noPendingInvites": "Bekleyen davet yok",
+    "revoke": "İptal et",
+    "expiresAt": "{{date}} tarihinde sona eriyor",
+    "roles": {
+      "owner": "Sahip",
+      "admin": "Yönetici",
+      "user": "Kullanıcı"
+    },
+    "statuses": {
+      "active": "Aktif",
+      "disabled": "Askıya alındı"
+    },
+    "invite": {
+      "title": "Kullanıcı davet et",
+      "roleLabel": "Rol",
+      "roleHint": "Davet edilen kullanıcı bu rolle oluşturulacak.",
+      "submit": "Davet oluştur",
+      "creating": "Oluşturuluyor...",
+      "cancel": "İptal",
+      "close": "Kapat",
+      "done": "Bitti",
+      "copy": "Kopyala",
+      "copied": "Kopyalandı",
+      "successHint": "Bu tek kullanımlık bağlantıyı paylaş. Yalnızca bir kez gösterilir."
+    }
+  },
+  "providerSharing": {
+    "heading": "Sağlayıcı kimlik bilgisi paylaşımı",
+    "subtitle": "Her sağlayıcı için kimlik bilgilerinin tüm kullanıcılarda paylaşılıp paylaşılmayacağını veya kullanıcı başına izole edileceğini seç.",
+    "loading": "Paylaşım ayarları yükleniyor...",
+    "modeLabel": "{{provider}} için paylaşım modu",
+    "providers": {
+      "claude": "Claude",
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "agy": "Antigravity (agy)",
+      "cursor": "Cursor",
+      "kimi": "Kimi",
+      "deepseek": "DeepSeek",
+      "glm": "GLM"
+    },
+    "modes": {
+      "shared": "Paylaşımlı",
+      "isolated": "İzole"
+    },
+    "modeDescription": {
+      "shared": "Tüm kullanıcılar için aynı kimlik bilgileri",
+      "isolated": "Her kullanıcının kendi kimlik bilgileri var"
+    },
+    "agyWarning": {
+      "title": "Deneysel izolasyon",
+      "description": "Antigravity kimlik bilgilerini izole etmek deneyseldir ve etkili olması için etkin oturumların yeniden başlatılması gerekir."
+    },
+    "save": "Kaydet",
+    "saving": "Kaydediliyor...",
+    "saveStatus": {
+      "success": "Paylaşım ayarları başarıyla kaydedildi",
+      "error": "Paylaşım ayarları kaydedilemedi"
+    }
+  },
+  "notifications": {
+    "title": "Bildirimler",
+    "description": "Hangi bildirim etkinliklerini alacağını kontrol et.",
+    "webPush": {
+      "title": "Web Push Bildirimleri",
+      "enable": "Push Bildirimlerini Etkinleştir",
+      "disable": "Push Bildirimlerini Devre Dışı Bırak",
+      "enabled": "Push bildirimleri etkin",
+      "loading": "Güncelleniyor...",
+      "unsupported": "Bu tarayıcıda push bildirimleri desteklenmiyor.",
+      "denied": "Push bildirimleri engellendi. Lütfen tarayıcı ayarlarından izin ver."
+    },
+    "sound": {
+      "title": "Ses",
+      "description": "Sohbet çalışması tamamlandığında kısa bir ton çal.",
+      "enabled": "Etkin",
+      "test": "Sesi test et"
+    },
+    "events": {
+      "title": "Etkinlik Türleri",
+      "actionRequired": "Aksiyon gerekli",
+      "stop": "Çalıştırma durduruldu",
+      "error": "Çalıştırma başarısız"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "Koyu Mod",
+      "description": "Açık ve koyu temalar arasında geçiş yap"
+    },
+    "themeMode": {
+      "sectionTitle": "Görünüm",
+      "label": "Tema",
+      "description": "Açık, koyu ya da sistem ayarını otomatik izlemeyi seç",
+      "light": "Açık",
+      "dark": "Koyu",
+      "system": "Sistem"
+    },
+    "themePresets": {
+      "title": "Tema",
+      "description": "Açık ve koyu mod üzerine uygulanan marka renkli hazır şemalar",
+      "groupLabel": "Tema şeması",
+      "presets": {
+        "default": "Varsayılan",
+        "claude": "Claude",
+        "alkindy": "El-Kindi",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "Özel"
+      },
+      "custom": {
+        "title": "Özel renkler",
+        "accent": "Vurgu",
+        "background": "Arka plan",
+        "foreground": "Metin"
+      }
+    },
+    "projectSorting": {
+      "label": "Proje Sıralama",
+      "description": "Projelerin kenar çubuğunda nasıl sıralanacağı",
+      "alphabetical": "Alfabetik",
+      "recentActivity": "Son Etkinlik"
+    },
+    "codeEditor": {
+      "title": "Kod Editörü",
+      "theme": {
+        "label": "Editör Teması",
+        "description": "Kod editörü için varsayılan tema"
+      },
+      "wordWrap": {
+        "label": "Kelime Kaydırma",
+        "description": "Editörde kelime kaydırmayı varsayılan olarak etkinleştir"
+      },
+      "showMinimap": {
+        "label": "Minimap'i Göster",
+        "description": "Diff görünümünde kolay gezinme için minimap göster"
+      },
+      "lineNumbers": {
+        "label": "Satır Numaralarını Göster",
+        "description": "Editörde satır numaralarını göster"
+      },
+      "fontSize": {
+        "label": "Yazı Tipi Boyutu",
+        "description": "Editör yazı tipi boyutu (piksel)"
+      }
+    },
+    "branding": {
+      "title": "Sunucu kimliği",
+      "description": "Bu sunucuyu tüm kullanıcılara tanıtmak için kenar çubuğu logosunun yanına küçük bir simge ekle.",
+      "nodeIcon": {
+        "label": "Sunucu simgesi",
+        "description": "Logonun yanında gösterilen küçük bir rozet görseli (≤ 48 KB). PNG, JPG, WebP veya SVG.",
+        "upload": "Simge yükle",
+        "change": "Simgeyi değiştir",
+        "clear": "Kaldır",
+        "save": "Kaydet",
+        "saving": "Kaydediliyor…",
+        "preview": "Simge önizlemesi",
+        "success": "Sunucu simgesi kaydedildi",
+        "cleared": "Sunucu simgesi kaldırıldı",
+        "position": {
+          "label": "Simge konumu",
+          "description": "Simgenin logoya göre nerede gösterileceği",
+          "start": "Logodan önce",
+          "end": "Logodan sonra"
+        },
+        "errors": {
+          "tooBig": "Görsel 48 KB sınırını aşıyor",
+          "unsupported": "Desteklenmeyen dosya türü. PNG, JPG, WebP veya SVG kullan.",
+          "saveFailed": "Kaydedilemedi. Lütfen tekrar dene."
+        }
+      }
+    },
+    "sidebar": {
+      "title": "Kenar çubuğu",
+      "showSearchAndArchive": {
+        "label": "Arama ve arşiv anahtarını göster",
+        "description": "Projeler listesinin üstünde arama alanı ile arşiv anahtarı satırını göster"
+      }
+    },
+    "codeHighlighting": {
+      "title": "Kod vurgulama",
+      "label": "Dil kapsamı",
+      "description": "Vurgulayıcının bildiği dil sayısı. Sayfayla yalnızca varsayılan düzey yüklenir; üst düzeyler seçildiğinde indirilir ve sayfa yenilenmeden hemen uygulanır. Kapsam dışındaki diller düz metin olarak görünür.",
+      "core": "10 dil (en hızlı — varsayılan)",
+      "extended": "20 dil (küçük ek indirme)",
+      "full": "Tüm 300 dil (büyük ek indirme)"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "MCP Sunucusu Ekle",
+      "edit": "MCP Sunucusunu Düzenle"
+    },
+    "importMode": {
+      "form": "Form Girdisi",
+      "json": "JSON İçe Aktar"
+    },
+    "scope": {
+      "label": "Kapsam",
+      "userGlobal": "Kullanıcı (Genel)",
+      "projectLocal": "Proje (Yerel)",
+      "userDescription": "Kullanıcı kapsamı: Makinendeki tüm projelerde kullanılabilir",
+      "projectDescription": "Yerel kapsam: Yalnızca seçili projede kullanılabilir",
+      "cannotChange": "Mevcut bir sunucu düzenlenirken kapsam değiştirilemez"
+    },
+    "fields": {
+      "serverName": "Sunucu Adı",
+      "transportType": "Taşıma Türü",
+      "command": "Komut",
+      "arguments": "Argümanlar (satır başına bir tane)",
+      "jsonConfig": "JSON Yapılandırması",
+      "url": "URL",
+      "envVars": "Ortam Değişkenleri (KEY=değer, satır başına bir tane)",
+      "headers": "Başlıklar (KEY=değer, satır başına bir tane)",
+      "selectProject": "Bir proje seç..."
+    },
+    "placeholders": {
+      "serverName": "benim-sunucum"
+    },
+    "validation": {
+      "missingType": "Zorunlu alan eksik: type",
+      "stdioRequiresCommand": "stdio türü command alanı gerektirir",
+      "httpRequiresUrl": "{{type}} türü url alanı gerektirir",
+      "invalidJson": "Geçersiz JSON formatı",
+      "jsonHelp": "MCP sunucu yapılandırmanı JSON formatında yapıştır. Örnek formatlar:",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
+    },
+    "configDetails": "Yapılandırma Detayları ({{configFile}} dosyasından)",
+    "projectPath": "Yol: {{path}}",
+    "actions": {
+      "cancel": "İptal",
+      "saving": "Kaydediliyor...",
+      "addServer": "Sunucu Ekle",
+      "updateServer": "Sunucuyu Güncelle"
+    }
+  },
+  "saveStatus": {
+    "success": "Ayarlar başarıyla kaydedildi!",
+    "error": "Ayarlar kaydedilemedi",
+    "saving": "Kaydediliyor..."
+  },
+  "footerActions": {
+    "save": "Ayarları Kaydet",
+    "cancel": "İptal"
+  },
+  "git": {
+    "title": "Git Yapılandırması",
+    "description": "Commit'ler için git kimliğini yapılandır. Bu ayarlar git config --global ile genel olarak uygulanacak",
+    "name": {
+      "label": "Git Adı",
+      "help": "Git commit'leri için adın"
+    },
+    "email": {
+      "label": "Git E-postası",
+      "help": "Git commit'leri için e-postan"
+    },
+    "actions": {
+      "save": "Yapılandırmayı Kaydet",
+      "saving": "Kaydediliyor..."
+    },
+    "status": {
+      "success": "Başarıyla kaydedildi"
+    }
+  },
+  "apiKeys": {
+    "title": "Nassaj API Anahtarları",
+    "description": "Nassaj'ı tarayıcı dışından programatik olarak çalıştırmak için API anahtarları oluşturun — betikler, otomasyon, CI veya webhook — POST /api/agent üzerinden x-api-key başlığıyla anahtarı ileterek.",
+    "newKey": {
+      "alertTitle": "⚠️ API Anahtarını Kaydet",
+      "alertMessage": "Bu anahtarı yalnızca bu sefer göreceksin. Güvenli bir yerde sakla.",
+      "iveSavedIt": "Kaydettim"
+    },
+    "form": {
+      "placeholder": "API Anahtar Adı (ör. Production Sunucu)",
+      "createButton": "Oluştur",
+      "cancelButton": "İptal"
+    },
+    "newButton": "Yeni API Anahtarı",
+    "empty": "Henüz API anahtarı oluşturulmamış.",
+    "list": {
+      "created": "Oluşturuldu:",
+      "lastUsed": "Son kullanım:"
+    },
+    "confirmDelete": "Bu API anahtarını silmek istediğinden emin misin?",
+    "status": {
+      "active": "Aktif",
+      "inactive": "Pasif"
+    },
+    "github": {
+      "title": "GitHub Token'ları",
+      "description": "Harici API üzerinden özel depoları klonlamak için GitHub Kişisel Erişim Token'ları ekle.",
+      "descriptionAlt": "Özel depoları klonlamak için GitHub Kişisel Erişim Token'ları ekle. Token'ları saklamadan API isteklerinde doğrudan da geçebilirsin.",
+      "addButton": "Token Ekle",
+      "form": {
+        "namePlaceholder": "Token Adı (ör. Kişisel Depolar)",
+        "tokenPlaceholder": "GitHub Kişisel Erişim Token'ı (ghp_...)",
+        "descriptionPlaceholder": "Açıklama (isteğe bağlı)",
+        "addButton": "Token Ekle",
+        "cancelButton": "İptal",
+        "howToCreate": "GitHub Kişisel Erişim Token'ı nasıl oluşturulur →"
+      },
+      "empty": "Henüz GitHub token'ı eklenmemiş.",
+      "added": "Eklendi:",
+      "confirmDelete": "Bu GitHub token'ını silmek istediğinden emin misin?"
+    },
+    "apiDocsLink": "API Dokümantasyonu",
+    "documentation": {
+      "title": "Harici API Dokümantasyonu",
+      "description": "Uygulamalarından Claude/Cursor oturumları tetiklemek için harici API'nin nasıl kullanılacağını öğren.",
+      "viewLink": "API Dokümantasyonunu Görüntüle →"
+    },
+    "loading": "Yükleniyor...",
+    "version": {
+      "updateAvailable": "Güncelleme mevcut: v{{version}}"
+    }
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "Kontrol ediliyor...",
+      "connected": "Bağlı",
+      "notConnected": "Bağlı değil",
+      "disconnected": "Bağlantı kesildi",
+      "checkingAuth": "Kimlik doğrulama durumu kontrol ediliyor...",
+      "loggedInAs": "{{email}} olarak giriş yapıldı",
+      "authenticatedUser": "kimliği doğrulanmış kullanıcı"
+    },
+    "account": {
+      "claude": {
+        "description": "Anthropic Claude AI asistanı"
+      },
+      "cursor": {
+        "description": "Cursor AI destekli kod editörü"
+      },
+      "codex": {
+        "description": "OpenAI Codex AI asistanı"
+      },
+      "gemini": {
+        "description": "Google Gemini AI asistanı"
+      },
+      "antigravity": {
+        "description": "agy CLI üzerinden Google AI Pro"
+      },
+      "opencode": {
+        "description": "OpenCode CLI asistanı"
+      },
+      "kimi": {
+        "description": "API anahtarı üzerinden Moonshot Kimi"
+      },
+      "deepseek": {
+        "description": "API anahtarı üzerinden DeepSeek"
+      },
+      "glm": {
+        "description": "API anahtarı üzerinden Zhipu / Z.ai GLM"
+      }
+    },
+    "antigravity": {
+      "modelNote": "agy CLI (v1.x) üzerinden Google AI Pro kullanır. Etkin model bu arayüzden değil, agy ayarlarından seçilir."
+    },
+    "connectionStatus": "Bağlantı Durumu",
+    "login": {
+      "title": "Giriş Yap",
+      "reAuthenticate": "Yeniden Kimlik Doğrula",
+      "description": "AI özelliklerini etkinleştirmek için {{agent}} hesabına giriş yap",
+      "reAuthDescription": "Farklı bir hesapla giriş yap veya kimlik bilgilerini yenile",
+      "button": "Giriş Yap",
+      "reLoginButton": "Tekrar Giriş Yap"
+    },
+    "error": "Hata: {{error}}",
+    "apiKey": {
+      "title": "API anahtarı ekle",
+      "replaceTitle": "API anahtarını değiştir",
+      "description": "Bu sağlayıcıyı etkinleştirmek için {{provider}} API anahtarını yapıştır. Şifreli olarak saklanır ve bir daha gösterilmez.",
+      "getKey": "Anahtar al",
+      "inputLabel": "{{provider}} API anahtarı",
+      "placeholder": "API anahtarını yapıştır",
+      "placeholderConfigured": "•••••••• (yapılandırıldı)",
+      "save": "Kaydet",
+      "saved": "API anahtarı kaydedildi.",
+      "remove": "Kaldır",
+      "removed": "API anahtarı kaldırıldı.",
+      "configuredNote": "Bir API anahtarı yapılandırıldı.",
+      "checkingCapability": "Anahtar girişi desteği denetleniyor…",
+      "targetLabel": "Kimlik bilgisi hedefi",
+      "targets": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "glm": "GLM"
+      }
+    }
+  },
+  "permissions": {
+    "title": "İzin Ayarları",
+    "skipPermissions": {
+      "label": "İzin istemlerini atla (dikkatli kullan)",
+      "claudeDescription": "--dangerously-skip-permissions bayrağının eşdeğeri",
+      "cursorDescription": "Cursor CLI'daki -f bayrağının eşdeğeri"
+    },
+    "allowVendorDelegation": {
+      "label": "Alt görevleri diğer modellere devretmeye izin ver",
+      "description": "Claude'un bir çalışma sırasında tek bir alt görev için barındırılan bir satıcı modeline (Kimi, DeepSeek veya GLM) çağrı yapmasına izin verir; bu sağlayıcı için yapılandırılmış kendi API anahtarını kullanır. Claude motorunun kendisi değişmez. Varsayılan olarak kapalı."
+    },
+    "allowedTools": {
+      "title": "İzin Verilen Araçlar",
+      "description": "İzin istemeden otomatik olarak izin verilen araçlar",
+      "placeholder": "ör. \"Bash(git log:*)\" veya \"Write\"",
+      "quickAdd": "Yaygın araçları hızlı ekle:",
+      "empty": "İzin verilen araç yapılandırılmamış"
+    },
+    "blockedTools": {
+      "title": "Engellenen Araçlar",
+      "description": "İzin istemeden otomatik olarak engellenen araçlar",
+      "placeholder": "ör. \"Bash(rm:*)\"",
+      "empty": "Engellenen araç yapılandırılmamış"
+    },
+    "allowedCommands": {
+      "title": "İzin Verilen Shell Komutları",
+      "description": "İzin istemeden otomatik olarak izin verilen shell komutları",
+      "placeholder": "ör. \"Shell(ls)\" veya \"Shell(git status)\"",
+      "quickAdd": "Yaygın komutları hızlı ekle:",
+      "empty": "İzin verilen komut yapılandırılmamış"
+    },
+    "blockedCommands": {
+      "title": "Engellenen Shell Komutları",
+      "description": "Otomatik olarak engellenen shell komutları",
+      "placeholder": "ör. \"Shell(rm -rf)\" veya \"Shell(sudo)\"",
+      "empty": "Engellenen komut yapılandırılmamış"
+    },
+    "toolExamples": {
+      "title": "Araç Desen Örnekleri:",
+      "bashGitLog": "- Tüm git log komutlarına izin ver",
+      "bashGitDiff": "- Tüm git diff komutlarına izin ver",
+      "write": "- Tüm Write aracı kullanımına izin ver",
+      "bashRm": "- Tüm rm komutlarını engelle (tehlikeli)"
+    },
+    "shellExamples": {
+      "title": "Shell Komut Örnekleri:",
+      "ls": "- ls komutuna izin ver",
+      "gitStatus": "- git status'a izin ver",
+      "npmInstall": "- npm install'a izin ver",
+      "rmRf": "- Özyinelemeli silmeyi engelle"
+    },
+    "codex": {
+      "permissionMode": "İzin Modu",
+      "description": "Codex'in dosya değişiklikleri ve komut çalıştırmayı nasıl ele aldığını kontrol eder",
+      "modes": {
+        "default": {
+          "title": "Varsayılan",
+          "description": "Sadece güvenilir komutlar (ls, cat, grep, git status, vb.) otomatik çalışır. Diğer komutlar atlanır. Çalışma alanına yazabilir."
+        },
+        "acceptEdits": {
+          "title": "Düzenlemeleri Kabul Et",
+          "description": "Tüm komutlar çalışma alanı içinde otomatik çalışır. Sandbox'lu çalıştırma ile tam otomatik mod."
+        },
+        "bypassPermissions": {
+          "title": "İzinleri Atla",
+          "description": "Kısıtlama olmadan tam sistem erişimi. Tüm komutlar tam disk ve ağ erişimiyle otomatik çalışır. Dikkatli kullan."
+        }
+      },
+      "technicalDetails": "Teknik ayrıntılar",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted. Güvenilir komutlar: cat, cd, grep, head, ls, pwd, tail, git status/log/diff/show, find (-exec olmadan), vb.",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never. Tüm komutlar proje dizini içinde otomatik çalışır.",
+        "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never. Tam sistem erişimi, yalnızca güvenilir ortamlarda kullan.",
+        "overrideNote": "Sohbet arayüzündeki mod düğmesini kullanarak bunu oturum başına geçersiz kılabilirsin."
+      }
+    },
+    "antigravity": {
+      "title": "İzin Ayarları",
+      "description": "agy CLI kendi izin davranışını yönetir. Bu arayüzden yapılandırılacak izin verme veya engelleme listesi yoktur.",
+      "skipPermissions": {
+        "label": "İzin istemleri atlanıyor",
+        "description": "agy --dangerously-skip-permissions ile çalışır, bu nedenle oturum sırasında araç ve komut onayları istenmez."
+      },
+      "cliNote": {
+        "title": "İzinleri agy'de yapılandır",
+        "description": "İzin ve özerklik seçenekleri bu arayüzde değil, agy CLI ayarlarında bulunur."
+      }
+    },
+    "actions": {
+      "add": "Ekle"
+    }
+  },
+  "mcpServers": {
+    "title": "MCP Sunucuları",
+    "description": {
+      "claude": "Model Context Protocol sunucuları Claude'a ek araçlar ve veri kaynakları sağlar",
+      "cursor": "Model Context Protocol sunucuları Cursor'a ek araçlar ve veri kaynakları sağlar",
+      "codex": "Model Context Protocol sunucuları Codex'e ek araçlar ve veri kaynakları sağlar",
+      "opencode": "Model Context Protocol sunucuları OpenCode'a ek araçlar ve veri kaynakları sağlar"
+    },
+    "addButton": "MCP Sunucusu Ekle",
+    "empty": "Yapılandırılmış MCP sunucusu yok",
+    "serverType": "Tür",
+    "scope": {
+      "local": "yerel",
+      "user": "kullanıcı"
+    },
+    "config": {
+      "command": "Komut",
+      "url": "URL",
+      "args": "Argümanlar",
+      "environment": "Ortam"
+    },
+    "tools": {
+      "title": "Araçlar",
+      "count": "({{count}}):",
+      "more": "+{{count}} tane daha"
+    },
+    "actions": {
+      "edit": "Sunucuyu düzenle",
+      "delete": "Sunucuyu sil"
+    },
+    "help": {
+      "title": "Codex MCP Hakkında",
+      "description": "Codex stdio tabanlı MCP sunucularını destekler. Codex'in yeteneklerini ek araçlar ve kaynaklarla genişleten sunucular ekleyebilirsin."
+    }
+  },
+  "pluginSettings": {
+    "title": "Eklentiler",
+    "description": "Arayüzü özel eklentilerle genişlet. Git'ten yükle veya ~/.claude-code-ui/plugins/ klasörüne bir dizin bırak.",
+    "installPlaceholder": "https://github.com/kullanici/benim-eklentim",
+    "installButton": "Yükle",
+    "installing": "Yükleniyor…",
+    "securityWarning": "Yalnızca kaynak kodunu incelediğin veya güvendiğin geliştiricilerin eklentilerini yükle.",
+    "scanningPlugins": "Eklentiler taranıyor…",
+    "noPluginsInstalled": "Yüklü eklenti yok",
+    "pullLatest": "Git'ten en güncelini çek",
+    "noGitRemote": "Git uzak sunucusu yok — güncelleme kullanılamıyor",
+    "uninstallPlugin": "Eklentiyi kaldır",
+    "confirmUninstall": "Onaylamak için tekrar tıkla",
+    "confirmUninstallMessage": "{{name}} kaldırılsın mı? Bu işlem geri alınamaz.",
+    "cancel": "İptal",
+    "remove": "Kaldır",
+    "updateFailed": "Güncelleme başarısız",
+    "installFailed": "Yükleme başarısız",
+    "uninstallFailed": "Kaldırma başarısız",
+    "toggleFailed": "Açıp kapama başarısız",
+    "starterPluginLabel": "Başlangıç Eklentisi",
+    "starter": "Başlangıç",
+    "docs": "Dokümanlar",
+    "sections": {
+      "officialTitle": "Resmi Eklentiler",
+      "officialDescription": "CloudCLI ekibi tarafından bakımı yapılır ve doğrudan kuruluma hazırdır.",
+      "unofficialTitle": "Diğer Eklentiler",
+      "unofficialDescription": "Diğer kullanıcılardan resmi olmayan eklentiler ve entegrasyonlar. Kurmadan önce kaynağı incele."
+    },
+    "starterPlugin": {
+      "name": "Proje İstatistikleri",
+      "badge": "başlangıç",
+      "description": "Projen için dosya sayıları, kod satırları, dosya türü dağılımı ve son etkinlik.",
+      "install": "Yükle"
+    },
+    "terminalPlugin": {
+      "name": "Terminal",
+      "badge": "resmi",
+      "description": "Arayüzün içinde tam shell erişimiyle entegre terminal.",
+      "install": "Yükle"
+    },
+    "scheduledPromptPlugin": {
+      "name": "Zamanlanmış Komut İstemleri",
+      "badge": "resmi olmayan",
+      "description": "Çalışma alanı komut istemlerini zamanla, çalıştırma geçmişini incele ve tekrarlanan yerel görevleri yönet.",
+      "install": "Yükle"
+    },
+    "claudeWatchPlugin": {
+      "name": "Claude Watch",
+      "badge": "resmi olmayan",
+      "description": "Uzun süre çalışan Claude Code oturumlarını takılmalar için izle ve süreç kontrolleri sun.",
+      "install": "Yükle"
+    },
+    "morePlugins": "Daha Fazla",
+    "enable": "Etkinleştir",
+    "disable": "Devre Dışı Bırak",
+    "installAriaLabel": "Eklenti git deposu URL'si",
+    "tab": "sekme",
+    "runningStatus": "çalışıyor"
+  },
+  "commandBoardSettings": {
+    "title": "Command Board",
+    "description": "Control who can run Command Board actions and which actions are enabled. Actions run under the server owner's identity.",
+    "loading": "Loading…",
+    "loadError": "Failed to load settings",
+    "saved": "Settings saved",
+    "saveError": "Failed to save",
+    "save": "Save",
+    "saving": "Saving…",
+    "roles": {
+      "title": "Role access",
+      "description": "Who can run Command Board actions. The owner is always enabled.",
+      "ownerLocked": "Always enabled (cannot be locked out)",
+      "ownerSelectableHint": "Yukarıdaki dört kademeden birini seçin — sahip kendini kilitleyemez",
+      "ownerNoneDisabled": "Owner cannot lock themselves out",
+      "laterPhase": "Available in a later phase",
+      "generalHint": "\"Özel komutlar\" yalnızca aşağıda özel komutlar tanımladıysanız değer katar.",
+      "customHint": "\"Özel komutlar\" yalnızca aşağıda özel komutlar tanımladıysanız değer katar.",
+      "legendHint": "Kademeler kümülatiftir — her kademe altındaki tüm kademeleri kapsar"
+    },
+    "roleNames": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "modes": {
+      "none": "Disabled",
+      "noneDesc": "No Command Board access for this role.",
+      "safe": "Safe list",
+      "safeDesc": "Can run built-in safe-list actions only.",
+      "general": "Custom commands",
+      "generalDesc": "Safe list + custom commands you define (restricted to a frozen executable allowlist in code — no free shell).",
+      "custom": "Custom commands",
+      "customDesc": "Safe list + custom commands you define (restricted to a frozen executable allowlist in code — no free shell).",
+      "raw": "Run any command",
+      "rawDesc": "All tiers above + run any free shell text. Owner only. Requires arming the main switch.",
+      "rawDangerHint": "Dangerous tier — owner only",
+      "rawUnarmedNote": "Dangerous tier is unarmed — selecting it here has no effect until you arm the switch below"
+    },
+    "actions": {
+      "title": "Available actions",
+      "description": "Enable or disable each safe-list action.",
+      "empty": "No actions."
+    },
+    "customCommands": {
+      "title": "Custom Commands",
+      "description": "Define one-click commands. cmd is restricted to a frozen executable allowlist in code — cannot be widened from the UI.",
+      "allowlistNote": "Currently: npm run <existing-script> only. Widening requires a code change and review.",
+      "counter": "{{count}} / {{max}} commands",
+      "empty": "No custom commands yet.",
+      "addCommand": "Add command",
+      "loadError": "Failed to load custom commands",
+      "invalidRow": "Command is currently invalid",
+      "invalidRowReason": "Reason: {{error}}",
+      "form": {
+        "title": "Define custom command",
+        "editTitle": "Edit custom command",
+        "key": "Key",
+        "keyHint": "Starts with lowercase letter — letters/digits/-/_ only",
+        "label": "Display name",
+        "labelHint": "What appears in the Command Board",
+        "cmd": "Executable",
+        "cmdHint": "Currently: npm only (frozen allowlist in code)",
+        "args": "Arguments",
+        "argsHint": "For npm: first field 'run', second field script name",
+        "addArg": "+ arg",
+        "removeArg": "Remove",
+        "minRole": "Minimum role",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saving": "Saving…"
+      },
+      "deleteConfirm": "Delete command «{{key}}»?",
+      "deleteConfirmYes": "Delete",
+      "deleteConfirmNo": "Cancel",
+      "errors": {
+        "invalid_key": "Invalid key",
+        "key_reserved": "Key is reserved by a static action",
+        "key_exists": "Key already exists",
+        "invalid_label": "Invalid label",
+        "invalid_min_role": "Invalid role",
+        "interpreter_forbidden": "Executable is a forbidden interpreter/shell — rejected in code",
+        "cmd_not_allowlisted": "Executable not in the permitted allowlist",
+        "npm_script_missing": "Script not found in package.json",
+        "denylisted": "Script is denylisted (build/dev/release…)",
+        "flag_arg_forbidden": "Arguments must not start with «-»",
+        "invalid_arg": "Invalid argument",
+        "too_many_commands": "Maximum reached (20 commands)",
+        "not_found": "Command not found",
+        "internal": "Internal server error"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "Dangerous tier — Run any command",
+        "description": "Selecting this tier in the matrix above is not enough — you must arm the main switch here. Turning it off immediately drops «Run any command» from all roles.",
+        "warningTitle": "Security warning — read before arming",
+        "warning": "This feature allows running any shell command on the server with the service user's privileges. There is no allowlist — the only safeguard is your personal, character-by-character review of each command before pressing Execute. A single wrong or unauthorized command can corrupt data or take the server down.",
+        "ackLabel": "I understand this grants full shell access to the server and I accept full responsibility",
+        "confirmEnable": "Confirm arming",
+        "cancelEnable": "Cancel",
+        "enableButton": "Arm",
+        "disableButton": "Main switch off (drops tier from all roles)",
+        "statusEnabled": "Armed",
+        "statusDisabled": "Unarmed",
+        "notGeneralMode": "Requires the owner's role to be set to «Run any command» in the matrix above.",
+        "blocked_is_platform": "Arming unavailable in platform mode — the environment voids the human-review guarantee."
+      },
+      "queue": {
+        "title": "Komut kuyruğa ekle",
+        "description": "Buraya eklenen komut kenar çubuğundaki komut panosunda bekler ve orada incelenir. Hiçbir şey otomatik çalışmaz.",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "Add",
+        "counter": "{{count}} / {{max}} commands",
+        "addError": {
+          "empty_command": "Command cannot be empty",
+          "command_too_long": "Command too long (max 4096 characters)",
+          "forbidden_control_char": "Command contains a forbidden control character at position {{position}}",
+          "too_many_commands": "Queue is full (max 20 commands)",
+          "raw_exec_disabled": "Run-any-command feature is disabled",
+          "config_denied": "Owner role tier does not permit this — set tier to «Run any command» and arm the main switch.",
+          "invalid_command": "Invalid command",
+          "internal": "Internal server error",
+          "carriage_return_forbidden": "Komut \\r (Windows satır sonu) içeriyor — LF ile yeniden yapıştırın",
+          "too_many_lines": "Komut 100 satırı aşıyor",
+          "denied_command": "Engellendi: bu komut çalışan bir hizmeti kesintiye uğratır (kural: {{rule}}). Komut panosu yaşam döngüsü komutlarını çalıştırmaz — kendi terminalinizde çalıştırın."
+        },
+        "waitingElsewhere": "Kenar çubuğundaki komut panosunda {{count}} komut bekliyor.",
+        "reviewedElsewhere": "Kuyruğa eklenen komutlar kenar çubuğundaki komut panosunda görünür; inceleme ve çalıştırma orada yapılır."
+      },
+      "dialog": {
+        "title": "Review command before executing",
+        "subtitle": "These bytes will be executed verbatim on the server. This cannot be undone.",
+        "commandLabel": "Command that will be executed",
+        "lengthInfo": "Length: {{len}} characters",
+        "clientDigestMismatch": "Digest mismatch — the displayed command does not match what is stored. Execution blocked.",
+        "ackLabel": "I have reviewed this command character by character and accept full responsibility for its execution",
+        "execute": "Execute",
+        "cancel": "Cancel",
+        "executing": "Executing…",
+        "digestMismatch": "Command changed after it was displayed — execution cancelled. Reloading queue.",
+        "notFound": "Command no longer exists — it may have been executed or dismissed in another session.",
+        "actionInFlight": "Another command is already running. Wait for it to finish.",
+        "execFailed": "Failed to launch the command on the server.",
+        "timeout": "Command timed out (120 seconds).",
+        "forbidden_control_char": "A forbidden control character was detected in the stored command — execution cancelled.",
+        "internal": "Internal server error.",
+        "result": {
+          "title": "Execution result",
+          "exitCode": "Exit code: {{code}}",
+          "stdout": "Output (stdout)",
+          "stderr": "Errors (stderr)",
+          "truncated": "Output truncated — limit: 64 KB",
+          "noOutput": "(no output)",
+          "close": "Close"
+        },
+        "lineInfo": "{{count}} satır",
+        "executionTarget": "Yürütme hedefi: yerel Nassaj sunucusu — hizmet kullanıcısı «nassaj»",
+        "executionTargetWarn": "Başka bir makine (VM veya uzak sunucu) için yazılan komutlar burada çalıştırılmamalıdır.",
+        "digest_mismatch": "The command changed after it was displayed — execution cancelled. Reloading the list.",
+        "not_found": "The command no longer exists — it may have been run or dismissed elsewhere.",
+        "action_in_flight": "Another command is running. Wait for it to finish.",
+        "exec_failed": "Failed to launch the command on the server.",
+        "raw_exec_disabled": "The master switch for the dangerous tier is off — arm it in Command Board settings.",
+        "raw_exec_blocked": "The dangerous tier is blocked in this environment and cannot be armed.",
+        "config_denied": "Your role does not hold the \"Run any command\" tier.",
+        "unauthenticated": "Your session expired — sign in again.",
+        "clientDigestUnavailable": "The local integrity check could not run in this context (insecure origin). The server still binds the digest — read the command carefully.",
+        "restarting": "Komut çalıştı ve sunucuyu yeniden başlatıyor, bu yüzden yanıt dönemedi. Geri gelmesi bekleniyor…",
+        "restartSuccess": "Sunucu geri döndü. Komut tamamlandı.",
+        "audit_unavailable": "Reddedildi: denetim kaydı yazılamadı, bu yüzden hiçbir şey çalıştırılmadı. Ham çalıştırma asla kayıtsız bırakılmaz.",
+        "denied_command": "Engellendi: bu komut çalışan bir hizmeti kesintiye uğratır (kural: {{rule}}). Komut panosu yaşam döngüsü komutlarını çalıştırmaz — kendi terminalinizde çalıştırın.",
+        "requestedBy": "Kuyruğa ekleyen: {{name}}",
+        "unattributed": "Kaynak kaydedilmemiş — bu komut için istekte bulunan kaydedilmedi"
+      }
+    }
+  },
+  "subscriptions": {
+    "title": "Etkin abonelikler",
+    "empty": "Kimliği doğrulanmış abonelik yok",
+    "loading": "Yükleniyor…",
+    "error": "Abonelikler yüklenemedi",
+    "monthToDate": "Bu dönem",
+    "cycleSince": "{{date}} tarihinden beri",
+    "anchorLabel": "Dönem başlangıç günü",
+    "anchorHint": "Hiçbir sağlayıcı faturalama tarihini paylaşmıyor — kendiniz belirleyin",
+    "apiEquivalent": "Abonelikte API eşdeğeri değer — faturalanan tutar değil",
+    "billed": "Faturalanan",
+    "unavailable": "Mevcut değil",
+    "partial": "Kısmi",
+    "pricesAsOf": "{{date}} tarihli fiyatlar",
+    "byModel": "Modele göre",
+    "harnessTotal": "Harness toplamı",
+    "showBreakdown": "Model dökümünü göster",
+    "hideBreakdown": "Model dökümünü gizle",
+    "unpricedModel": "Resmî fiyat yok",
+    "anchorSource": {
+      "detected": "Abonelik verilerinizden",
+      "derived": "En eski kullanımdan tahmin edildi",
+      "manual": "Sizin belirlediğiniz",
+      "unknown": "Takvim ayı — abonelik tarihi bulunamadı"
+    },
+    "viaHarness": "{{harness}} üzerinden",
+    "subscriptionTotal": "Abonelik toplamı",
+    "assumedPrice": "Tahmini fiyat — {{models}} için yayımlanmış tarife yok"
+  }
+}
