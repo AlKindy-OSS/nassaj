@@ -164,7 +164,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.6.0",
     "auto-changelog": "^2.5.0",
-    "autoprefixer": "^10.4.16",
+    "autoprefixer": "^10.5.4",
     "concurrently": "^8.2.2",
     "eslint": "^9.39.3",
     "eslint-import-resolver-typescript": "^4.4.4",
