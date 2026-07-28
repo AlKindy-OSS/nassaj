@@ -1,0 +1,536 @@
+{
+  "btw": {
+    "title": "顺带一问",
+    "close": "关闭",
+    "questionLabel": "问题",
+    "answerLabel": "回答",
+    "status": {
+      "pending": "准备中…",
+      "streaming": "输入中…",
+      "complete": "已完成",
+      "thinking": "思考中…"
+    },
+    "errors": {
+      "unsupported_provider": "“/btw”旁路仅适用于 Claude 会话。",
+      "session_not_found": "找不到会话 — 请先打开一个会话，再提出你的旁问。",
+      "not_visible": "你没有权限查看此会话的上下文。",
+      "busy": "会话正忙 — 请稍后重试。",
+      "sdk_error": "无法完成旁问 — 发生意外错误。",
+      "timeout": "此功能需要更新服务器。",
+      "disconnected": "无法发送 — 连接已断开。"
+    },
+    "hints": {
+      "quota": "会消耗你的 Claude 配额。",
+      "context": "基于截至最后一条已保存消息的会话上下文作答。"
+    },
+    "description": "就当前会话上下文提出顺带一问"
+  },
+  "contextRot": {
+    "label": "上下文",
+    "barAria": "上下文用量",
+    "empty": "暂无令牌用量",
+    "percentUsed": "已用 {{percent}} 真实窗口",
+    "tooltipUsed": "已用真实窗口：{{used}} / {{total}}",
+    "tooltipCacheRead": "缓存读取：{{value}}",
+    "popoverTitle": "上下文用量",
+    "close": "关闭",
+    "levels": {
+      "safe": "健康 — 上下文状态良好。",
+      "attention": "注意 — 上下文即将填满。",
+      "warning": "可能降级 — 考虑 /compact 或子智能体。",
+      "critical": "严重降级 — 建议开启新会话。"
+    }
+  },
+  "codeBlock": {
+    "copy": "复制",
+    "copied": "已复制",
+    "copyCode": "复制代码",
+    "executeRaw": "执行",
+    "executeRawTitle": "在Nassaj服务器上执行此命令（打开审核对话框）",
+    "inserting": "正在添加到队列…",
+    "insertError": {
+      "carriage_return_forbidden": "命令包含\\r（Windows换行）— 请用LF重新粘贴",
+      "too_many_lines": "命令超过限制（100行）",
+      "empty_command": "命令为空",
+      "command_too_long": "命令太长（最多4096个字符）",
+      "too_many_commands": "队列已满（最多20个命令）",
+      "raw_exec_disabled": "直接执行已禁用",
+      "config_denied": "不允许 — 请检查命令面板设置",
+      "internal": "无法将命令添加到队列",
+      "denied_command": "已阻止：此命令会中断正在运行的服务（规则：{{rule}}）。命令板从不执行生命周期命令——请在你自己的终端中运行。",
+      "forbidden_control_char": "命令包含被禁止的控制字符或双向字符——显示内容可能与实际执行的不同",
+      "invalid_command": "无效命令",
+      "stamp": "这是你在 {{time}} 点击的结果——不是实时状态",
+      "stampRepeat": "{{time}} 第 {{count}} 次尝试——结果相同",
+      "dismiss": "关闭"
+    }
+  },
+  "copyMessage": {
+    "copy": "复制消息",
+    "copied": "消息已复制",
+    "selectFormat": "选择复制格式",
+    "copyAsMarkdown": "复制为 Markdown",
+    "copyAsText": "复制为纯文本"
+  },
+  "messageTypes": {
+    "user": "U",
+    "error": "错误",
+    "tool": "工具",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "子智能体",
+    "shortBadge": "子智能体",
+    "badgeLabel": "子智能体任务"
+  },
+  "coordinator": {
+    "label": "协调器",
+    "withName": "协调器：{{username}}"
+  },
+  "userAuthor": {
+    "withName": "用户：{{username}}"
+  },
+  "externalOrigin": {
+    "label": "在界面外创建"
+  },
+  "coordinatorPrompt": {
+    "label": "协调器 → 子智能体",
+    "ariaLabel": "协调器发送给子智能体的提示"
+  },
+  "systemMessage": {
+    "label": "系统消息",
+    "ariaLabel": "自动系统消息"
+  },
+  "sessionNotResumable": {
+    "message": "此会话无法恢复 — 它在提供商端已不存在。",
+    "startNew": "开始新会话"
+  },
+  "tools": {
+    "settings": "工具设置",
+    "error": "工具错误",
+    "result": "工具结果",
+    "viewParams": "查看输入参数",
+    "viewRawParams": "查看原始参数",
+    "viewDiff": "查看编辑差异",
+    "creatingFile": "创建新文件：",
+    "updatingTodo": "更新待办事项",
+    "read": "读取",
+    "readFile": "读取文件",
+    "updateTodo": "更新待办列表",
+    "readTodo": "读取待办列表",
+    "searchResults": "结果"
+  },
+  "search": {
+    "found": "找到 {{count}} 个{{type}}",
+    "file": "文件",
+    "files": "文件",
+    "pattern": "模式：",
+    "in": "在："
+  },
+  "fileOperations": {
+    "updated": "文件更新成功",
+    "created": "文件创建成功",
+    "written": "文件写入成功",
+    "diff": "差异",
+    "newFile": "新文件",
+    "viewContent": "查看文件内容",
+    "viewFullOutput": "查看完整输出（{{count}} 个字符）",
+    "contentDisplayed": "文件内容显示在上面的差异视图中"
+  },
+  "interactive": {
+    "title": "交互式提示",
+    "waiting": "等待您在 CLI 中响应",
+    "instruction": "请在 Claude 运行的终端中选择一个选项。",
+    "selectedOption": "✓ Claude 选择了选项 {{number}}",
+    "instructionDetail": "在 CLI 中，您可以使用方向键或输入数字来交互式地选择此选项。"
+  },
+  "thinking": {
+    "title": "思考中...",
+    "emoji": "💭 思考中..."
+  },
+  "json": {
+    "response": "JSON 响应"
+  },
+  "permissions": {
+    "grant": "授予 {{tool}} 权限",
+    "added": "权限已添加",
+    "addTo": "将 {{entry}} 添加到允许的工具。",
+    "retry": "权限已保存。重试请求以使用该工具。",
+    "error": "无法更新权限。请重试。",
+    "openSettings": "打开设置"
+  },
+  "todo": {
+    "updated": "待办列表已成功更新",
+    "current": "当前待办列表"
+  },
+  "plan": {
+    "viewPlan": "📋 查看实施计划",
+    "title": "实施计划"
+  },
+  "usageLimit": {
+    "resetAt": "Claude 使用限制已达到。您的限制将在 **{{time}} {{timezone}}** - {{date}} 重置"
+  },
+  "codex": {
+    "permissionMode": "权限模式",
+    "modes": {
+      "default": "默认模式",
+      "auto": "自动模式",
+      "acceptEdits": "编辑模式",
+      "bypassPermissions": "无限制模式",
+      "plan": "计划模式"
+    },
+    "descriptions": {
+      "default": "只有受信任的命令（ls、cat、grep、git status 等）自动运行。其他命令将被跳过。可以写入工作区。",
+      "auto": "模型分类器针对每次工具调用决定是否批准或拒绝。无需干预，但比绕过模式更安全——仍会发生拒绝。",
+      "acceptEdits": "工作区内的所有命令自动运行。完全自动模式，具有沙盒执行功能。",
+      "bypassPermissions": "完全的系统访问，无限制。所有命令自动运行，具有完整的磁盘和网络访问权限。请谨慎使用。",
+      "plan": "计划模式 - 不执行任何命令"
+    },
+    "technicalDetails": "技术细节",
+    "posture": {
+      "title": "实际沙箱上限",
+      "default": "沙箱：workspace-write · 审批：untrusted · 网络：关闭",
+      "acceptEdits": "沙箱：workspace-write · 审批：never · 网络：关闭",
+      "bypassPermissions": "沙箱：workspace-write · 审批：never · 网络：关闭 —— 与「编辑模式」相同。只有在运维方为本次部署开启后，才会有完整的磁盘/网络访问权限（默认关闭）。"
+    }
+  },
+  "gemini": {
+    "permissionMode": "Gemini 权限模式",
+    "description": "控制 Gemini CLI 如何处理操作审批。",
+    "modes": {
+      "default": {
+        "title": "标准（请求审批）",
+        "description": "Gemini 在执行命令、写入文件和获取网络资源前将提示审批。"
+      },
+      "autoEdit": {
+        "title": "自动编辑（跳过文件审批）",
+        "description": "Gemini 将自动批准文件编辑和网络获取，但仍会提示 Shell 命令审批。"
+      },
+      "yolo": {
+        "title": "YOLO（绕过所有权限）",
+        "description": "Gemini 将不请求审批直接执行所有操作。请谨慎使用。"
+      }
+    }
+  },
+  "input": {
+    "placeholder": "输入 / 调用命令，@ 选择文件，或向 {{provider}} 提问...",
+    "placeholderDefault": "输入您的消息...",
+    "disabled": "输入已禁用",
+    "attachFiles": "附加文件",
+    "attachFilesAndImages": "附加文件或图片",
+    "attachImages": "附加图片",
+    "send": "发送",
+    "stop": "停止",
+    "hintText": {
+      "ctrlEnter": "Ctrl+Enter 发送 • Shift+Enter 换行",
+      "enter": "Enter 发送 • Shift+Enter 换行"
+    },
+    "clickToChangeMode": "点击更改权限模式（或在输入框中按 Tab）",
+    "showAllCommands": "显示所有命令",
+    "clearInput": "清空输入",
+    "scrollToBottom": "滚动到底部",
+    "dropFilesHere": "将文件拖放至此",
+    "nonClaudeAttachmentHint": "附件仅适用于 Claude"
+  },
+  "fileAttachment": {
+    "removeFile": "移除文件",
+    "uploading": "上传中…",
+    "errorType": "不支持此文件类型",
+    "errorSize": "文件过大（最大 50 MB）",
+    "errorCount": "附加文件过多（最多 {{max}} 个）"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "努力级别",
+      "description": "控制 Claude 为您的请求投入的计算量",
+      "active": "已激活",
+      "tip": "ultracode 以多智能体格式激活最大深度 — ultracode 和 max 添加颜色提示"
+    },
+    "modes": {
+      "none": {
+        "name": "自动",
+        "description": "使用你的模型的默认努力级别"
+      },
+      "low": {
+        "name": "low",
+        "description": "快速轻量的响应 — 适合简单问题"
+      },
+      "medium": {
+        "name": "medium",
+        "description": "深度与速度的平衡"
+      },
+      "high": {
+        "name": "high",
+        "description": "针对复杂任务的更深层推理"
+      },
+      "xhigh": {
+        "name": "xhigh",
+        "description": "针对高难度问题的极高努力"
+      },
+      "max": {
+        "name": "max",
+        "description": "最大努力 — 完整计算预算（仅限本次会话，不保存到设置）"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "会话模式：xhigh + 动态工作坊格式 — 非已保存的努力级别"
+      }
+    },
+    "buttonTitle": "努力：{{mode}}",
+    "ultracodeActive": "Ultracode 努力级别已激活"
+  },
+  "providerSelection": {
+    "title": "选择您的 AI 助手",
+    "description": "选择一个供应商以开始新对话",
+    "selectModel": "选择模型",
+    "providerInfo": {
+      "anthropic": "由 Anthropic 提供",
+      "openai": "由 OpenAI 提供",
+      "cursorEditor": "AI 代码编辑器",
+      "google": "由 Google 提供"
+    },
+    "readyPrompt": {
+      "claude": "准备好使用带有 {{model}} 的 Claude。请在下方开始输入您的消息。",
+      "cursor": "准备好使用带有 {{model}} 的 Cursor。请在下方开始输入您的消息。",
+      "codex": "准备好使用带有 {{model}} 的 Codex。请在下方开始输入您的消息。",
+      "gemini": "准备好使用带有 {{model}} 的 Gemini。请在下方开始输入您的消息。",
+      "antigravity": "准备好使用 Antigravity (agy)。模型在 agy 自身的设置中选择。",
+      "opencode": "准备好使用带有 {{model}} 的 OpenCode。请在下方开始输入您的消息。",
+      "default": "请在上方选择一个提供者以开始",
+      "kimi": "准备好使用带有 {{model}} 的 Kimi。请在下方开始输入您的消息。",
+      "deepseek": "准备好使用带有 {{model}} 的 DeepSeek。请在下方开始输入您的消息。",
+      "glm": "准备好使用带有 {{model}} 的 GLM。请在下方开始输入您的消息。",
+      "claudeEngine": "已就绪：Claude 引擎在 {{provider}} 上使用 {{model}} 运行。请在下方开始输入您的消息。"
+    },
+    "antigravity": {
+      "activeModel": "当前模型",
+      "activeModelLabel": "当前模型",
+      "loading": "加载中…",
+      "unknown": "未知"
+    },
+    "pressToSearch": "按 <kbd>{{shortcut}}</kbd> 搜索会话、文件和提交",
+    "refresh": {
+      "button": "刷新模型和认证状态",
+      "refreshing": "刷新中…"
+    },
+    "providerUnavailable": "提供商不可用",
+    "signIn": "登录",
+    "addApiKey": "添加 {{provider}} API 密钥以启用",
+    "engineOnVendor": "Claude 引擎在 {{provider}} 上"
+  },
+  "session": {
+    "continue": {
+      "title": "继续您的对话",
+      "description": "询问有关代码的问题、请求更改或获取开发任务的帮助"
+    },
+    "loading": {
+      "olderMessages": "正在加载更早的消息...",
+      "sessionMessages": "正在加载会话消息..."
+    },
+    "messages": {
+      "showingOf": "显示 {{shown}} / {{total}} 条消息",
+      "scrollToLoad": "向上滚动以加载更多",
+      "showingLast": "显示最近 {{count}} 条消息（共 {{total}} 条）",
+      "loadEarlier": "加载更早的消息",
+      "loadAll": "加载全部消息",
+      "loadingAll": "正在加载全部消息...",
+      "allLoaded": "全部消息已加载",
+      "perfWarning": "已加载全部消息 - 滚动可能变慢。点击「滚动到底部」恢复性能。"
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "选择项目",
+      "description": "选择一个项目以在该目录中打开交互式 Shell"
+    },
+    "status": {
+      "newSession": "新会话",
+      "initializing": "初始化中...",
+      "restarting": "重启中..."
+    },
+    "actions": {
+      "disconnect": "断开连接",
+      "disconnectTitle": "断开 Shell 连接",
+      "restart": "重启",
+      "restartTitle": "重启 Shell",
+      "connect": "在 Shell 中继续",
+      "connectTitle": "连接到 Shell"
+    },
+    "loading": "正在加载终端...",
+    "connecting": "正在连接到 Shell...",
+    "reconnecting": "正在重新连接到终端…",
+    "startSession": "启动新的 Claude 会话",
+    "resumeSession": "恢复会话：{{displayName}}...",
+    "runCommand": "在 {{projectName}} 中运行 {{command}}",
+    "startCli": "在 {{projectName}} 中启动 Claude CLI",
+    "defaultCommand": "命令"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "思考中",
+      "processing": "处理中",
+      "analyzing": "分析中",
+      "working": "工作中",
+      "computing": "计算中",
+      "reasoning": "推理中"
+    },
+    "state": {
+      "live": "实时",
+      "paused": "已暂停"
+    },
+    "elapsed": {
+      "seconds": "{{count}} 秒",
+      "minutesSeconds": "{{minutes}} 分 {{seconds}} 秒",
+      "label": "已用 {{time}}",
+      "startingNow": "正在启动"
+    },
+    "controls": {
+      "stopGeneration": "停止生成",
+      "pressEscToStop": "随时按 Esc 停止"
+    },
+    "providers": {
+      "assistant": "助手"
+    },
+    "frozen": "已暂停（进程冻结）"
+  },
+  "runProgress": {
+    "tasksLabel": "任务",
+    "barAria": "任务进度",
+    "tasksTooltip": "任务：已完成 {{done}} / {{total}}",
+    "inProgressTooltip_one": "{{count}} 个进行中",
+    "inProgressTooltip_other": "{{count}} 个进行中",
+    "agentsTooltip": "子智能体：{{done}}/{{total}}",
+    "agentWorking": "智能体 · {{calls}}",
+    "agentWorkingTooltip": "子智能体工作中：{{calls}} 次调用",
+    "estimateRemaining": "≈ 剩余 {{time}}",
+    "estimating": "估算中…",
+    "estimateTooltip": "粗略估计 — 基于已完成的任务。"
+  },
+  "agentActivity": {
+    "title": "智能体活动",
+    "summary": "{{running}}/{{total}} 运行中",
+    "running": "运行中",
+    "done": "已完成",
+    "currently": "现在",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} 次工具调用",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "工具历史即将推出。",
+    "noTools": "暂无工具调用记录。",
+    "toolSuccess": "已完成",
+    "toolRunning": "运行中"
+  },
+  "activityGap": {
+    "status": "智能体正在工作 — 最近一次活动在 {{time}} 前",
+    "ariaLabel": "智能体仍在工作，最近一次活动在 {{time}} 前"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "选择一个项目以开始与 {{provider}} 聊天"
+  },
+  "tasks": {
+    "nextTaskPrompt": "开始下一个任务"
+  },
+  "participants": {
+    "hide": "隐藏参与者栏",
+    "show": "显示参与者栏",
+    "lastSeen": "最后在线",
+    "invocations_one": "{{count}} 次调用",
+    "invocations_other": "{{count}} 次调用",
+    "usersAria_one": "{{count}} 名参与者",
+    "usersAria_other": "{{count}} 名参与者",
+    "barAria": "对话参与者",
+    "openSessionsNow": "活跃对话",
+    "openSessionsNowCount": "{{count}} 个活跃对话",
+    "andMore_one": "还有 {{count}} 个",
+    "andMore_other": "还有 {{count}} 个",
+    "projectSummary": "{{users}} 名用户 · {{agents}} 个智能体",
+    "roles": {
+      "owner": "所有者",
+      "admin": "管理员",
+      "user": "成员"
+    },
+    "agentKinds": {
+      "model": "基础模型",
+      "subagent": "子智能体"
+    },
+    "agentSummary_one": "{{count}} 个智能体",
+    "agentSummary_other": "{{count}} 个智能体",
+    "totalInvocations_one": "{{count}} 次调用",
+    "totalInvocations_other": "{{count}} 次调用",
+    "agentSummaryAria": "{{agents}} 个不同智能体 · 共 {{calls}} 次调用",
+    "unknownAuthor": "未知作者"
+  },
+  "ws": {
+    "statusConnected": "已连接",
+    "statusReconnecting": "重新连接中…",
+    "statusDisconnected": "已断开",
+    "ariaConnected": "WebSocket 已连接",
+    "ariaReconnecting": "WebSocket 重新连接中",
+    "ariaDisconnected": "WebSocket 已断开",
+    "sendFailed": "消息未发送 — 连接已断开",
+    "sendDisabledTitle": "无法发送 — 连接已断开",
+    "abortFailed": "无法停止 — 连接已断开。重试或许有效。"
+  },
+  "serverError": {
+    "project_dir_missing": "磁盘上未找到项目文件夹",
+    "cli_not_installed": "未安装 CLI — 请安装所需的 CLI 工具",
+    "spawn_failed": "启动进程失败 — 请查看服务器日志了解详情",
+    "session_create_failed": "无法启动新会话 — 请重试",
+    "unknown": "发生意外服务器错误"
+  },
+  "refreshChat": {
+    "button": "刷新聊天",
+    "refreshing": "刷新中…"
+  },
+  "composerMode": {
+    "chat": "对话",
+    "agent": "智能体"
+  },
+  "customCommand": {
+    "confirmBashExecution": "此命令包含将要执行的 bash 命令。是否继续？",
+    "executionCancelled": "命令执行已取消",
+    "executeError": "执行命令时出错：{{message}}",
+    "unknownError": "未知错误"
+  },
+  "inlineModelSwitcher": {
+    "label": "模型",
+    "tooltip": "从下一个回复起生效",
+    "noModels": "无可用模型",
+    "switching": "切换中…",
+    "ariaLabel": "切换模型：{{model}}",
+    "scopeSession": "仅限本次对话",
+    "scopeDefault": "所有新对话的默认",
+    "confirmedSession": "已应用于本次对话：{{model}}",
+    "confirmedDefault": "已设为默认：{{model}}",
+    "followDefault": "跟随当前默认",
+    "clearing": "正在重置…",
+    "clearedNotice": "对话已恢复默认：{{model}}",
+    "engineStamped": "正在使用{{engine}}引擎 — 无法切换模型"
+  },
+  "conversationCost": {
+    "label": "费用",
+    "tooltipTitle": "对话费用",
+    "unavailable": "该提供方不提供费用数据",
+    "partial": "部分 — 部分模型没有公开价格",
+    "apiEquivalent": "订阅用量按 API 价格折算的价值 — 并非实际账单金额",
+    "billed": "计费用量",
+    "pricesAsOf": "价格截至 {{date}}",
+    "subagents": "包含子代理活动（{{count}} 次请求）",
+    "perModel": "按模型",
+    "loading": "正在计算…"
+  },
+  "closeConversation": {
+    "close": "关闭对话",
+    "reopen": "重新打开对话",
+    "closedBadge": "已关闭",
+    "failed": "无法更新对话状态"
+  }
+}

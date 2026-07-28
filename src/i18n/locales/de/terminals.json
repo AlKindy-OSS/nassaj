@@ -1,0 +1,59 @@
+{
+  "title": "Terminals",
+  "newTerminal": "Neues Terminal",
+  "defaults": {
+    "title": "Terminal {{number}}"
+  },
+  "list": {
+    "loading": "Terminals werden geladen...",
+    "empty": "Noch keine Terminals",
+    "emptyHint": "Erstelle ein Terminal, um Befehle unabhängig von einem Projekt auszuführen.",
+    "running": "Läuft",
+    "exited": "Beendet"
+  },
+  "panel": {
+    "empty": "Kein Terminal geöffnet",
+    "emptyHint": "Wähle ein Terminal aus der Liste oder erstelle ein neues.",
+    "renameLabel": "Terminal umbenennen",
+    "titlePlaceholder": "Terminalname",
+    "close": "Schließen",
+    "closeHint": "Diese Ansicht schließen (das Terminal läuft weiter)",
+    "delete": "Terminal löschen",
+    "deleteHint": "Dieses Terminal stoppen und entfernen",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "status": {
+    "connecting": "Connecting...",
+    "reconnecting": "Reconnecting...",
+    "exited": "Beendet (Code {{code}})",
+    "exitedSignal": "Beendet (Signal {{signal}})",
+    "truncated": "Ältere Ausgabe wurde gekürzt...",
+    "openedElsewhere": "Dieses Terminal wurde in einem anderen Tab geöffnet.",
+    "openedElsewhereAction": "Hier erneut öffnen",
+    "serverRestart": "Durch einen Serverneustart beendet.",
+    "notFound": "Dieses Terminal existiert nicht mehr.",
+    "error": "Verbindungsfehler."
+  },
+  "errors": {
+    "limitReached": "Du hast das Maximum von 5 laufenden Terminals erreicht. Schließe eines, um ein weiteres zu erstellen.",
+    "invalidTitle": "Ungültiger Terminalname.",
+    "invalidCwd": "Ungültiges Arbeitsverzeichnis.",
+    "invalidInitialCommand": "Ungültiger Startbefehl.",
+    "createFailed": "Das Terminal konnte nicht erstellt werden. Bitte erneut versuchen.",
+    "renameFailed": "Das Terminal konnte nicht umbenannt werden. Bitte erneut versuchen.",
+    "deleteFailed": "Das Terminal konnte nicht gelöscht werden. Bitte erneut versuchen.",
+    "loadFailed": "Terminals konnten nicht geladen werden."
+  },
+  "deleteConfirm": {
+    "title": "Terminal löschen",
+    "message": "Stoppen und entfernen",
+    "warning": "Damit wird der laufende Prozess gestoppt und seine Ausgabe verworfen. Das lässt sich nicht rückgängig machen.",
+    "confirm": "Terminal löschen",
+    "cancel": "Abbrechen"
+  },
+  "uptime": {
+    "label": "Laufzeit",
+    "ranFor": "Gesamtlaufzeit"
+  }
+}

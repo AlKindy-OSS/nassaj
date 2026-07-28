@@ -1,0 +1,59 @@
+{
+  "title": "Terminals",
+  "newTerminal": "New terminal",
+  "defaults": {
+    "title": "Terminal {{number}}"
+  },
+  "list": {
+    "loading": "Loading terminals...",
+    "empty": "No terminals yet",
+    "emptyHint": "Create a terminal to run commands independently of any project.",
+    "running": "Running",
+    "exited": "Exited"
+  },
+  "panel": {
+    "empty": "No terminal open",
+    "emptyHint": "Pick a terminal from the list, or create a new one.",
+    "renameLabel": "Rename terminal",
+    "titlePlaceholder": "Terminal name",
+    "close": "Close",
+    "closeHint": "Close this view (the terminal keeps running)",
+    "delete": "Delete terminal",
+    "deleteHint": "Stop and remove this terminal",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "status": {
+    "connecting": "Connecting...",
+    "reconnecting": "Reconnecting...",
+    "exited": "Exited (code {{code}})",
+    "exitedSignal": "Exited (signal {{signal}})",
+    "truncated": "Older output was trimmed...",
+    "openedElsewhere": "This terminal was opened in another tab.",
+    "openedElsewhereAction": "Reopen here",
+    "serverRestart": "Ended by a server restart.",
+    "notFound": "This terminal no longer exists.",
+    "error": "Connection error."
+  },
+  "errors": {
+    "limitReached": "You've reached the maximum of 5 running terminals. Close one to create another.",
+    "invalidTitle": "Invalid terminal name.",
+    "invalidCwd": "Invalid working directory.",
+    "invalidInitialCommand": "Invalid initial command.",
+    "createFailed": "Couldn't create the terminal. Please try again.",
+    "renameFailed": "Couldn't rename the terminal. Please try again.",
+    "deleteFailed": "Couldn't delete the terminal. Please try again.",
+    "loadFailed": "Couldn't load terminals."
+  },
+  "deleteConfirm": {
+    "title": "Delete terminal",
+    "message": "Stop and remove",
+    "warning": "This stops the running process and clears its output. This can't be undone.",
+    "confirm": "Delete terminal",
+    "cancel": "Cancel"
+  },
+  "uptime": {
+    "label": "Uptime",
+    "ranFor": "Total runtime"
+  }
+}

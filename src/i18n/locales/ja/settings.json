@@ -1,0 +1,1133 @@
+{
+  "title": "設定",
+  "tabs": {
+    "account": "アカウント",
+    "permissions": "権限",
+    "mcpServers": "MCPサーバー",
+    "skills": "スキル",
+    "appearance": "外観"
+  },
+  "skills": {
+    "title": "スキル",
+    "description": "{{provider}}のグローバルスキルを.mdファイルまたはスキルフォルダからインストールします。",
+    "descriptionReadOnly": "{{provider}}プロバイダーの場所から検出されたスキル — このインターフェースからのインストールはサポートされていません。",
+    "refresh": "更新",
+    "addSkill": "スキルを追加",
+    "addSkillTitle": "{{provider}}スキルを追加",
+    "installPath": "インストールパス",
+    "dropZoneTitle": ".mdファイルまたはスキルフォルダをここにドロップ",
+    "dropZoneDescription": "スタンドアロンのSKILL.mdまたはスクリプトやアセットを含む完全なスキルフォルダをアップロードします。",
+    "chooseFiles": "ファイルを選択",
+    "chooseFolder": "フォルダを選択",
+    "queuedFiles": "キュー",
+    "remove": "削除",
+    "install": "スキルをインストール",
+    "installCount_one": "{{count}}個のスキルをインストール",
+    "installCount_other": "{{count}}個のスキルをインストール",
+    "cancel": "キャンセル",
+    "uploadHint": "フォルダのアップロードはフォルダ名を使用します。スタンドアロンファイルはSKILL.mdで宣言された名前を使用します。",
+    "visibleSkills": "インストール済みスキル",
+    "visibleSkillsDescription": "プロバイダーAPIが検出したスキル（グローバルおよびプロジェクト対応の場所を含む）。",
+    "search": "スキルを検索...",
+    "clearSearch": "検索をクリア",
+    "scanning": "プロジェクトスキルをスキャン中…",
+    "loading": "{{provider}}スキルを読み込み中…",
+    "empty": "スキルがまだ見つかりません",
+    "emptyDescription": "上にグローバルスキルを追加するか、ワークスペースにプロジェクト固有のスキルフォルダを作成してください。",
+    "noMatch": "一致するスキルなし",
+    "noMatchDescription": "別のコマンド、名前、スコープ、プロジェクト、またはソースパスを試してください。",
+    "source": "ソース",
+    "saved": "スキルが正常にインストールされました。",
+    "delete": "削除",
+    "confirmDelete": "「{{name}}」を削除しますか？",
+    "confirmYes": "削除",
+    "plugin": "プラグイン",
+    "project": "プロジェクト",
+    "scopes": {
+      "user": "ユーザー",
+      "plugin": "プラグイン",
+      "repo": "リポジトリ",
+      "project": "プロジェクト",
+      "admin": "管理者",
+      "system": "システム"
+    },
+    "errors": {
+      "deleteFailed": "スキルを削除できませんでした。もう一度お試しください。",
+      "dropFailed": "1つ以上の.mdファイルまたはSKILL.mdを含むフォルダをドロップしてください。",
+      "saveFailed": "スキルをインストールできませんでした。もう一度お試しください。"
+    }
+  },
+  "account": {
+    "title": "アカウント",
+    "language": "言語",
+    "languageLabel": "表示言語",
+    "languageDescription": "インターフェースの表示言語を選択してください",
+    "username": "ユーザー名",
+    "email": "メールアドレス",
+    "profile": "プロフィール",
+    "changePassword": "パスワードを変更"
+  },
+  "mcp": {
+    "title": "MCPサーバー",
+    "addServer": "サーバーを追加",
+    "editServer": "サーバーを編集",
+    "deleteServer": "サーバーを削除",
+    "serverName": "サーバー名",
+    "serverType": "サーバーの種類",
+    "config": "設定",
+    "testConnection": "接続テスト",
+    "status": "状態",
+    "connected": "接続済み",
+    "disconnected": "未接続",
+    "scope": {
+      "label": "スコープ",
+      "user": "ユーザー",
+      "project": "プロジェクト"
+    }
+  },
+  "appearance": {
+    "title": "外観",
+    "theme": "テーマ",
+    "codeEditor": "コードエディタ",
+    "editorTheme": "エディタのテーマ",
+    "wordWrap": "折り返し",
+    "showMinimap": "ミニマップを表示",
+    "lineNumbers": "行番号",
+    "fontSize": "フォントサイズ"
+  },
+  "actions": {
+    "saveChanges": "変更を保存",
+    "resetToDefaults": "デフォルトに戻す",
+    "cancelChanges": "変更をキャンセル"
+  },
+  "quickSettings": {
+    "title": "クイック設定",
+    "sections": {
+      "appearance": "外観",
+      "toolDisplay": "ツール表示",
+      "viewOptions": "表示オプション",
+      "inputSettings": "入力設定"
+    },
+    "darkMode": "ダークモード",
+    "autoExpandTools": "ツールを自動展開",
+    "showRawParameters": "生パラメータを表示",
+    "showThinking": "思考を表示",
+    "hideToolCalls": "ツール呼び出しを非表示",
+    "autoScrollToBottom": "自動スクロール",
+    "tabsIconOnly": "コンパクトタブ（アイコンのみ）",
+    "sendByCtrlEnter": "Ctrl+Enterで送信",
+    "sendByCtrlEnterDescription": "有効にすると、Enterではなく Ctrl+Enter でメッセージを送信します。IMEユーザーの誤送信防止に便利です。",
+    "dragHandle": {
+      "dragging": "ドラッグ中",
+      "closePanel": "設定パネルを閉じる",
+      "openPanel": "設定パネルを開く",
+      "draggingStatus": "ドラッグ中...",
+      "toggleAndMove": "クリックで切替、ドラッグで移動"
+    }
+  },
+  "claudeUsage": {
+    "title": "Claude使用状況",
+    "loading": "使用状況を読み込んでいます…",
+    "error": "使用状況を読み込めませんでした。",
+    "stale": "キャッシュデータ",
+    "percentUsed": "{{percent}} 使用済み",
+    "resetsIn": "{{time}}にリセット",
+    "extraUsageDetail": "{{limit}}のうち{{used}}使用済み",
+    "crossProviderNote": "Claude アカウントの使用量 — このセッションは {{provider}} で実行されています",
+    "notApplicable": "Claude のクォータは、現在のセッションのプロバイダー（{{provider}}）には適用されません",
+    "windows": {
+      "session": "現在のセッション",
+      "weeklyAllModels": "全モデル（週次）",
+      "weeklySonnet": "Sonnetのみ",
+      "weeklyOpus": "Opusのみ",
+      "extraUsage": "追加使用量"
+    }
+  },
+  "terminalShortcuts": {
+    "title": "ターミナルショートカット",
+    "sectionKeys": "キー",
+    "sectionNavigation": "ナビゲーション",
+    "escape": "Escape",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "arrowUp": "上矢印",
+    "arrowDown": "下矢印",
+    "scrollDown": "下にスクロール",
+    "handle": {
+      "closePanel": "ショートカットパネルを閉じる",
+      "openPanel": "ショートカットパネルを開く"
+    }
+  },
+  "mainTabs": {
+    "label": "設定",
+    "profile": "プロフィール",
+    "agents": "エージェント",
+    "appearance": "外観",
+    "git": "Git",
+    "apiTokens": "Nassaj APIキー",
+    "notifications": "通知",
+    "plugins": "プラグイン",
+    "users": "ユーザー",
+    "about": "概要",
+    "commandBoard": "コマンドボード"
+  },
+  "profile": {
+    "title": "プロフィール",
+    "subtitle": "アカウントのユーザー名、パスワード、パスキーを管理します",
+    "tabs": {
+      "identity": "基本情報",
+      "security": "セキュリティ"
+    },
+    "saving": "保存中...",
+    "avatar": {
+      "title": "プロフィール写真",
+      "description": "チームメンバーがあなたを認識できるように写真を追加してください。",
+      "change": "写真を変更",
+      "uploading": "アップロード中...",
+      "hint": "正方形の画像が最適です。PNGまたはJPG。",
+      "currentAlt": "あなたのプロフィール写真",
+      "placeholderAlt": "プロフィール写真が設定されていません",
+      "success": "プロフィール写真を更新しました",
+      "errors": {
+        "uploadFailed": "写真をアップロードできませんでした。もう一度お試しください。",
+        "network": "ネットワークエラー。接続を確認してもう一度お試しください。"
+      }
+    },
+    "username": {
+      "title": "ユーザー名を変更",
+      "description": "サインインに使用するユーザー名を更新します。",
+      "currentLabel": "現在のユーザー名",
+      "newLabel": "新しいユーザー名",
+      "placeholder": "新しいユーザー名を選択",
+      "hint": "3〜32文字: 英数字またはアンダースコア。",
+      "save": "ユーザー名を保存",
+      "success": "ユーザー名を更新しました",
+      "errors": {
+        "required": "新しいユーザー名を入力してください",
+        "unchanged": "新しいユーザー名が現在のユーザー名と同じです"
+      }
+    },
+    "password": {
+      "title": "パスワードを変更",
+      "description": "他では使用していない強力なパスワードを使用してください。",
+      "currentLabel": "現在のパスワード",
+      "currentPlaceholder": "現在のパスワードを入力",
+      "newLabel": "新しいパスワード",
+      "newPlaceholder": "新しいパスワードを入力",
+      "confirmLabel": "新しいパスワードの確認",
+      "confirmPlaceholder": "新しいパスワードを再入力",
+      "hint": "{{min}}文字以上。",
+      "save": "パスワードを保存",
+      "success": "パスワードを変更しました",
+      "errors": {
+        "required": "すべてのパスワード項目を入力してください",
+        "short": "パスワードは{{min}}文字以上にしてください",
+        "mismatch": "新しいパスワードが一致しません"
+      }
+    },
+    "passkeys": {
+      "title": "パスキー",
+      "description": "指紋、顔認証、デバイスPIN、またはセキュリティキーを使ってパスワードなしでサインインできます。",
+      "add": "パスキーを追加",
+      "nameLabel": "パスキー名（任意）",
+      "namePlaceholder": "例: ノートPC指紋認証",
+      "create": "パスキーを作成",
+      "creating": "デバイスを待機中...",
+      "cancel": "キャンセル",
+      "loading": "パスキーを読み込んでいます...",
+      "empty": "パスキーはまだありません。パスワード不要でこのワークスペースに素早く安全にサインインするために追加してください。",
+      "notSupported": "このブラウザはパスキーをサポートしていないため、新しいパスキーをここで追加できません。",
+      "unnamed": "名前なしのパスキー",
+      "createdAt": "{{date}}に追加",
+      "lastUsedAt": "最終使用: {{date}}",
+      "neverUsed": "未使用",
+      "badges": {
+        "synced": "同期済み",
+        "device": "デバイス固有"
+      },
+      "rename": "パスキーの名前を変更",
+      "renamePlaceholder": "新しい名前",
+      "renameSave": "名前を保存",
+      "delete": "パスキーを削除",
+      "deleteConfirm": "このパスキーを削除しますか？",
+      "deleteConfirmYes": "削除",
+      "success": {
+        "added": "パスキーを追加しました",
+        "renamed": "パスキーの名前を変更しました",
+        "deleted": "パスキーを削除しました"
+      },
+      "errors": {
+        "loadFailed": "パスキーを読み込めませんでした。もう一度お試しください。",
+        "registerFailed": "パスキーを作成できませんでした。もう一度お試しください。",
+        "duplicate": "このデバイスまたはセキュリティキーは既にパスキーとして登録されています。",
+        "renameFailed": "パスキーの名前を変更できませんでした。",
+        "deleteFailed": "パスキーを削除できませんでした。",
+        "network": "ネットワークエラー。接続を確認してもう一度お試しください。"
+      }
+    },
+    "identity": {
+      "title": "アバタースタイル",
+      "description": "写真をアップロードする代わりに、既製のアバターまたは色を選択してください。",
+      "tabs": {
+        "upload": "アップロード",
+        "gallery": "ギャラリー",
+        "color": "カラー"
+      },
+      "gallery": {
+        "heading": "アバターを選択",
+        "selected": "選択済みのアバター"
+      },
+      "color": {
+        "heading": "色を選択",
+        "hint": "イニシャルの背景色として使用されます。",
+        "selected": "選択済みの色"
+      },
+      "saving": "保存中...",
+      "success": "アバターを更新しました",
+      "errors": {
+        "saveFailed": "選択を保存できませんでした。もう一度お試しください。",
+        "network": "ネットワークエラー。接続を確認してもう一度お試しください。"
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "自分のClaudeサブスクリプションをセッションで使用するためにリンクしてください。各ユーザーは独自の認証情報を持ちます。",
+    "recheck": "再確認",
+    "loadError": "サブスクリプション状態を確認できませんでした。もう一度お試しください。",
+    "banner": "Claudeサブスクリプションがまだリンクされていません。セッションでClaudeを使用する前にリンクが必要です。",
+    "bannerHint": "下のボタンをクリックしてターミナルを開き、ログインフローを完了してください",
+    "linkButton": "Claudeアカウントをリンク",
+    "ownerNote": "オーナーとして認証情報は自動的にリンクされます — 操作不要です。"
+  },
+  "agyConnection": {
+    "description": "自分のAntigravityサブスクリプションをセッションで使用するためにリンクしてください。各ユーザーは独自の認証情報を持ちます。",
+    "recheck": "再確認",
+    "loadError": "サブスクリプション状態を確認できませんでした。もう一度お試しください。",
+    "banner": "Antigravityサブスクリプションがまだリンクされていません。セッションでagyを使用する前にリンクが必要です。",
+    "bannerHint": "下のボタンをクリックしてターミナルを開き、実行してください",
+    "linkButton": "Antigravityアカウントをリンク",
+    "ownerNote": "オーナーとして認証情報は自動的にリンクされます — 操作不要です。",
+    "modal": {
+      "title": "Antigravityアカウントをリンク",
+      "close": "リンクダイアログを閉じる",
+      "instructions": "下のターミナルで実行してください",
+      "afterComplete": "OAuthログインフローを完了したら、このダイアログを閉じて「再確認」をクリックして状態を更新してください。"
+    }
+  },
+  "users": {
+    "title": "ユーザー",
+    "subtitle": "ワークスペースのメンバーと招待を管理します",
+    "inviteButton": "ユーザーを招待",
+    "listHeading": "メンバー",
+    "loading": "ユーザーを読み込んでいます...",
+    "empty": "ユーザーが見つかりません",
+    "you": "あなた",
+    "changeRole": "役割を変更",
+    "suspend": "停止",
+    "activate": "有効化",
+    "resetPassword": "パスワードをリセット",
+    "deleteUser": "ユーザーを削除",
+    "deleteUserConfirm": "{{username}}を完全に削除しますか？この操作は取り消せません。",
+    "reset": {
+      "title": "パスワードをリセット",
+      "confirm": "{{username}}のパスワードをリセットしますか？",
+      "warning": "仮パスワードが生成され、一度だけ表示されます。ユーザーは次回サインイン時に変更する必要があり、既存のセッションはすべてサインアウトされます。",
+      "submit": "パスワードをリセット",
+      "resetting": "リセット中...",
+      "cancel": "キャンセル",
+      "close": "閉じる",
+      "done": "完了",
+      "copy": "コピー",
+      "copied": "コピーしました",
+      "successHint": "この仮パスワードを安全に共有してください。一度しか表示されません。",
+      "tempPasswordLabel": "仮パスワード"
+    },
+    "pendingInvites": "保留中の招待",
+    "noPendingInvites": "保留中の招待はありません",
+    "revoke": "取り消し",
+    "expiresAt": "{{date}}に期限切れ",
+    "roles": {
+      "owner": "オーナー",
+      "admin": "管理者",
+      "user": "ユーザー"
+    },
+    "statuses": {
+      "active": "アクティブ",
+      "disabled": "停止中"
+    },
+    "invite": {
+      "title": "ユーザーを招待",
+      "roleLabel": "役割",
+      "roleHint": "招待されたユーザーはこの役割で作成されます。",
+      "submit": "招待を作成",
+      "creating": "作成中...",
+      "cancel": "キャンセル",
+      "close": "閉じる",
+      "done": "完了",
+      "copy": "コピー",
+      "copied": "コピーしました",
+      "successHint": "この一回限りのリンクを共有してください。一度しか表示されません。"
+    }
+  },
+  "providerSharing": {
+    "heading": "プロバイダー認証情報の共有",
+    "subtitle": "プロバイダーごとに、認証情報をすべてのユーザーで共有するか、ユーザーごとに分離するかを選択します。",
+    "loading": "共有設定を読み込んでいます...",
+    "modeLabel": "{{provider}}の共有モード",
+    "providers": {
+      "claude": "Claude",
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "agy": "Antigravity（agy）",
+      "cursor": "Cursor",
+      "kimi": "Kimi",
+      "deepseek": "DeepSeek",
+      "glm": "GLM"
+    },
+    "modes": {
+      "shared": "共有",
+      "isolated": "分離"
+    },
+    "modeDescription": {
+      "shared": "すべてのユーザーが同じ認証情報を使用",
+      "isolated": "各ユーザーが独自の認証情報を持つ"
+    },
+    "agyWarning": {
+      "title": "実験的な分離",
+      "description": "Antigravity認証情報の分離は実験的です。有効にするにはアクティブなセッションを再起動する必要があります。"
+    },
+    "save": "保存",
+    "saving": "保存中...",
+    "saveStatus": {
+      "success": "共有設定を保存しました",
+      "error": "共有設定の保存に失敗しました"
+    }
+  },
+  "notifications": {
+    "title": "通知",
+    "description": "受信する通知イベントを設定します。",
+    "webPush": {
+      "title": "Webプッシュ通知",
+      "enable": "プッシュ通知を有効にする",
+      "disable": "プッシュ通知を無効にする",
+      "enabled": "プッシュ通知は有効です",
+      "loading": "更新中...",
+      "unsupported": "このブラウザではプッシュ通知がサポートされていません。",
+      "denied": "プッシュ通知がブロックされています。ブラウザの設定で許可してください。"
+    },
+    "sound": {
+      "title": "サウンド",
+      "description": "チャット実行が完了したときに短い音を再生します。",
+      "enabled": "有効",
+      "test": "サウンドをテスト"
+    },
+    "events": {
+      "title": "イベント種別",
+      "actionRequired": "対応が必要",
+      "stop": "実行停止",
+      "error": "実行失敗"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "ダークモード",
+      "description": "ライトテーマとダークテーマを切り替えます"
+    },
+    "themeMode": {
+      "sectionTitle": "外観",
+      "label": "テーマ",
+      "description": "ライト、ダーク、またはシステム設定への自動追従から選択します",
+      "light": "ライト",
+      "dark": "ダーク",
+      "system": "システム"
+    },
+    "themePresets": {
+      "title": "テーマ",
+      "description": "ライト・ダークモードの上に適用するブランドカラープリセット",
+      "groupLabel": "テーマプリセット",
+      "presets": {
+        "default": "デフォルト",
+        "claude": "Claude",
+        "alkindy": "Al-Kindy",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "カスタム"
+      },
+      "custom": {
+        "title": "カスタムカラー",
+        "accent": "アクセント",
+        "background": "背景",
+        "foreground": "テキスト"
+      }
+    },
+    "projectSorting": {
+      "label": "プロジェクトの並び順",
+      "description": "サイドバーでのプロジェクトの並び順を設定します",
+      "alphabetical": "アルファベット順",
+      "recentActivity": "最近のアクティビティ順"
+    },
+    "codeEditor": {
+      "title": "コードエディタ",
+      "theme": {
+        "label": "エディタのテーマ",
+        "description": "コードエディタのデフォルトテーマ"
+      },
+      "wordWrap": {
+        "label": "折り返し",
+        "description": "エディタでデフォルトで折り返しを有効にします"
+      },
+      "showMinimap": {
+        "label": "ミニマップを表示",
+        "description": "差分ビューでナビゲーション用のミニマップを表示します"
+      },
+      "lineNumbers": {
+        "label": "行番号を表示",
+        "description": "エディタに行番号を表示します"
+      },
+      "fontSize": {
+        "label": "フォントサイズ",
+        "description": "エディタのフォントサイズ（ピクセル）"
+      }
+    },
+    "branding": {
+      "title": "サーバーの識別",
+      "description": "サイドバーのロゴの横に小さなアイコンを追加し、このサーバーをすべてのユーザーに識別できるようにします。",
+      "nodeIcon": {
+        "label": "サーバーアイコン",
+        "description": "ロゴの横に表示される小さなバッジ画像（48 KB 以下）。PNG、JPG、WebP、SVG に対応。",
+        "upload": "アイコンをアップロード",
+        "change": "アイコンを変更",
+        "clear": "削除",
+        "save": "保存",
+        "saving": "保存中…",
+        "preview": "アイコンのプレビュー",
+        "success": "サーバーアイコンを保存しました",
+        "cleared": "サーバーアイコンを削除しました",
+        "position": {
+          "label": "アイコンの位置",
+          "description": "ロゴに対してアイコンを表示する位置",
+          "start": "ロゴの前",
+          "end": "ロゴの後"
+        },
+        "errors": {
+          "tooBig": "画像が 48 KB の上限を超えています",
+          "unsupported": "サポートされていないファイル形式です。PNG、JPG、WebP、SVG をご利用ください。",
+          "saveFailed": "保存できませんでした。もう一度お試しください。"
+        }
+      }
+    },
+    "sidebar": {
+      "title": "サイドバー",
+      "showSearchAndArchive": {
+        "label": "検索とアーカイブ切替を表示",
+        "description": "プロジェクト一覧の上部に検索欄とアーカイブ切替の行を表示します"
+      }
+    },
+    "codeHighlighting": {
+      "title": "コードのハイライト",
+      "label": "言語の範囲",
+      "description": "ハイライターが認識する言語の数です。既定のレベルのみがページと一緒に読み込まれ、上位レベルは選択時にダウンロードされ、再読み込みなしで即座に適用されます。範囲外の言語はプレーンテキストとして表示されます。",
+      "core": "10 言語（最速・既定）",
+      "extended": "20 言語（小さな追加ダウンロード）",
+      "full": "全 300 言語（大きな追加ダウンロード）"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "MCPサーバーを追加",
+      "edit": "MCPサーバーを編集"
+    },
+    "importMode": {
+      "form": "フォーム入力",
+      "json": "JSONインポート"
+    },
+    "scope": {
+      "label": "スコープ",
+      "userGlobal": "ユーザー（グローバル）",
+      "projectLocal": "プロジェクト（ローカル）",
+      "userDescription": "ユーザースコープ: すべてのプロジェクトで利用可能",
+      "projectDescription": "ローカルスコープ: 選択したプロジェクトでのみ利用可能",
+      "cannotChange": "既存のサーバーを編集する場合、スコープは変更できません"
+    },
+    "fields": {
+      "serverName": "サーバー名",
+      "transportType": "トランスポートの種類",
+      "command": "コマンド",
+      "arguments": "引数（1行に1つ）",
+      "jsonConfig": "JSON設定",
+      "url": "URL",
+      "envVars": "環境変数（KEY=value、1行に1つ）",
+      "headers": "ヘッダー（KEY=value、1行に1つ）",
+      "selectProject": "プロジェクトを選択..."
+    },
+    "placeholders": {
+      "serverName": "my-server"
+    },
+    "validation": {
+      "missingType": "必須フィールドがありません: type",
+      "stdioRequiresCommand": "stdioタイプにはcommandフィールドが必要です",
+      "httpRequiresUrl": "{{type}}タイプにはurlフィールドが必要です",
+      "invalidJson": "無効なJSON形式です",
+      "jsonHelp": "MCPサーバー設定をJSON形式で貼り付けてください。例:",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
+    },
+    "configDetails": "設定の詳細（{{configFile}}より）",
+    "projectPath": "パス: {{path}}",
+    "actions": {
+      "cancel": "キャンセル",
+      "saving": "保存中...",
+      "addServer": "サーバーを追加",
+      "updateServer": "サーバーを更新"
+    }
+  },
+  "saveStatus": {
+    "success": "設定を保存しました！",
+    "error": "設定の保存に失敗しました",
+    "saving": "保存中..."
+  },
+  "footerActions": {
+    "save": "設定を保存",
+    "cancel": "キャンセル"
+  },
+  "git": {
+    "title": "Git設定",
+    "description": "コミット用のGit IDを設定します。この設定は git config --global で適用されます",
+    "name": {
+      "label": "Git名前",
+      "help": "コミットに使用する名前"
+    },
+    "email": {
+      "label": "Gitメールアドレス",
+      "help": "コミットに使用するメールアドレス"
+    },
+    "actions": {
+      "save": "設定を保存",
+      "saving": "保存中..."
+    },
+    "status": {
+      "success": "保存しました"
+    }
+  },
+  "apiKeys": {
+    "title": "Nassaj APIキー",
+    "description": "ブラウザ外からNassajをプログラム的に起動するAPIキーを生成します — スクリプト、自動化、CI、Webhookなど — POST /api/agent に x-api-key ヘッダーでキーを渡します。",
+    "newKey": {
+      "alertTitle": "⚠️ APIキーを保存してください",
+      "alertMessage": "このキーが表示されるのは今回限りです。安全な場所に保管してください。",
+      "iveSavedIt": "保存しました"
+    },
+    "form": {
+      "placeholder": "APIキーの名前（例: 本番サーバー）",
+      "createButton": "作成",
+      "cancelButton": "キャンセル"
+    },
+    "newButton": "新しいAPIキー",
+    "empty": "APIキーはまだ作成されていません。",
+    "list": {
+      "created": "作成日:",
+      "lastUsed": "最終使用日:"
+    },
+    "confirmDelete": "このAPIキーを削除してもよろしいですか？",
+    "status": {
+      "active": "有効",
+      "inactive": "無効"
+    },
+    "github": {
+      "title": "GitHubトークン",
+      "description": "外部APIからプライベートリポジトリをクローンするためのGitHubパーソナルアクセストークンを追加します。",
+      "descriptionAlt": "プライベートリポジトリをクローンするためのGitHubパーソナルアクセストークンを追加します。保存せずにAPIリクエストで直接トークンを渡すこともできます。",
+      "addButton": "トークンを追加",
+      "form": {
+        "namePlaceholder": "トークンの名前（例: 個人リポジトリ）",
+        "tokenPlaceholder": "GitHubパーソナルアクセストークン（ghp_...）",
+        "descriptionPlaceholder": "説明（任意）",
+        "addButton": "トークンを追加",
+        "cancelButton": "キャンセル",
+        "howToCreate": "GitHubパーソナルアクセストークンの作成方法 →"
+      },
+      "empty": "GitHubトークンはまだ追加されていません。",
+      "added": "追加日:",
+      "confirmDelete": "このGitHubトークンを削除してもよろしいですか？"
+    },
+    "apiDocsLink": "APIドキュメント",
+    "documentation": {
+      "title": "外部APIドキュメント",
+      "description": "外部APIを使用してアプリケーションからClaude/Cursorセッションを起動する方法を学びます。",
+      "viewLink": "APIドキュメントを見る →"
+    },
+    "loading": "読み込み中...",
+    "version": {
+      "updateAvailable": "アップデートあり: v{{version}}"
+    }
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "確認中...",
+      "connected": "接続済み",
+      "notConnected": "未接続",
+      "disconnected": "切断",
+      "checkingAuth": "認証状態を確認しています...",
+      "loggedInAs": "{{email}}でログイン中",
+      "authenticatedUser": "認証済みユーザー"
+    },
+    "account": {
+      "claude": {
+        "description": "Anthropic Claude AIアシスタント"
+      },
+      "cursor": {
+        "description": "Cursor AI搭載コードエディタ"
+      },
+      "codex": {
+        "description": "OpenAI Codex AIアシスタント"
+      },
+      "gemini": {
+        "description": "Google Gemini AIアシスタント"
+      },
+      "antigravity": {
+        "description": "agy CLI経由のGoogle AI Pro"
+      },
+      "opencode": {
+        "description": "OpenCode CLIアシスタント"
+      },
+      "kimi": {
+        "description": "APIキー経由のMoonshot Kimi"
+      },
+      "deepseek": {
+        "description": "APIキー経由のDeepSeek"
+      },
+      "glm": {
+        "description": "APIキー経由のZhipu / Z.ai GLM"
+      }
+    },
+    "antigravity": {
+      "modelNote": "agy CLI（v1.x）経由でGoogle AI Proを使用します。アクティブなモデルはagyの設定内で選択され、このUIからは選択できません。"
+    },
+    "connectionStatus": "接続状態",
+    "login": {
+      "title": "ログイン",
+      "reAuthenticate": "再認証",
+      "description": "{{agent}}アカウントにサインインしてAI機能を有効にします",
+      "reAuthDescription": "別のアカウントでサインインするか、認証情報を更新します",
+      "button": "ログイン",
+      "reLoginButton": "再ログイン"
+    },
+    "error": "エラー: {{error}}",
+    "apiKey": {
+      "title": "APIキーを追加",
+      "replaceTitle": "APIキーを置換",
+      "description": "{{provider}} APIキーを貼り付けてこのプロバイダーを有効にします。暗号化して保存され、再表示されません。",
+      "getKey": "キーを取得",
+      "inputLabel": "{{provider}} APIキー",
+      "placeholder": "APIキーを貼り付け",
+      "placeholderConfigured": "•••••••• （設定済み）",
+      "save": "保存",
+      "saved": "APIキーを保存しました。",
+      "remove": "削除",
+      "removed": "APIキーを削除しました。",
+      "configuredNote": "APIキーが設定されています。",
+      "checkingCapability": "キー入力のサポートを確認しています…",
+      "targetLabel": "認証情報の適用先",
+      "targets": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "glm": "GLM"
+      }
+    }
+  },
+  "permissions": {
+    "title": "権限設定",
+    "skipPermissions": {
+      "label": "権限プロンプトをスキップ（注意して使用）",
+      "claudeDescription": "--dangerously-skip-permissions フラグに相当",
+      "cursorDescription": "Cursor CLIの -f フラグに相当"
+    },
+    "allowVendorDelegation": {
+      "label": "他のモデルへのサブタスク委譲を許可",
+      "description": "Claudeが実行中に単一のサブタスクに対してホストされたベンダーモデル（Kimi、DeepSeek、またはGLM）を呼び出せるようにします。そのプロバイダー向けに設定したAPIキーを使用します。Claudeエンジン自体は変更されません。デフォルトはオフです。"
+    },
+    "allowedTools": {
+      "title": "許可されたツール",
+      "description": "権限の確認なしに自動的に許可されるツール",
+      "placeholder": "例: \"Bash(git log:*)\" または \"Write\"",
+      "quickAdd": "よく使うツールを追加:",
+      "empty": "許可されたツールはありません"
+    },
+    "blockedTools": {
+      "title": "ブロックされたツール",
+      "description": "権限の確認なしに自動的にブロックされるツール",
+      "placeholder": "例: \"Bash(rm:*)\"",
+      "empty": "ブロックされたツールはありません"
+    },
+    "allowedCommands": {
+      "title": "許可されたシェルコマンド",
+      "description": "権限の確認なしに自動的に許可されるシェルコマンド",
+      "placeholder": "例: \"Shell(ls)\" または \"Shell(git status)\"",
+      "quickAdd": "よく使うコマンドを追加:",
+      "empty": "許可されたコマンドはありません"
+    },
+    "blockedCommands": {
+      "title": "ブロックされたシェルコマンド",
+      "description": "自動的にブロックされるシェルコマンド",
+      "placeholder": "例: \"Shell(rm -rf)\" または \"Shell(sudo)\"",
+      "empty": "ブロックされたコマンドはありません"
+    },
+    "toolExamples": {
+      "title": "ツールパターンの例:",
+      "bashGitLog": "- すべてのgit logコマンドを許可",
+      "bashGitDiff": "- すべてのgit diffコマンドを許可",
+      "write": "- すべてのWriteツールの使用を許可",
+      "bashRm": "- すべてのrmコマンドをブロック（危険）"
+    },
+    "shellExamples": {
+      "title": "シェルコマンドの例:",
+      "ls": "- lsコマンドを許可",
+      "gitStatus": "- git statusを許可",
+      "npmInstall": "- npm installを許可",
+      "rmRf": "- 再帰的削除をブロック"
+    },
+    "codex": {
+      "permissionMode": "権限モード",
+      "description": "Codexがファイルの変更やコマンドの実行を処理する方法を制御します",
+      "modes": {
+        "default": {
+          "title": "デフォルト",
+          "description": "信頼されたコマンド（ls、cat、grep、git statusなど）のみ自動実行。その他のコマンドはスキップ。ワークスペースへの書き込みは可能。"
+        },
+        "acceptEdits": {
+          "title": "編集を許可",
+          "description": "ワークスペース内ですべてのコマンドを自動実行。サンドボックス環境での完全自動モード。"
+        },
+        "bypassPermissions": {
+          "title": "権限をバイパス",
+          "description": "制限なしの完全なシステムアクセス。すべてのコマンドがディスクとネットワークへの完全なアクセスで自動実行されます。注意して使用してください。"
+        }
+      },
+      "technicalDetails": "技術的な詳細",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted。信頼されたコマンド: cat, cd, grep, head, ls, pwd, tail, git status/log/diff/show, find（-execなし）など。",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never。すべてのコマンドがプロジェクトディレクトリ内で自動実行。",
+        "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never。完全なシステムアクセス。信頼された環境でのみ使用してください。",
+        "overrideNote": "チャットインターフェースのモードボタンを使用してセッションごとに上書きできます。"
+      }
+    },
+    "antigravity": {
+      "title": "権限設定",
+      "description": "agy CLIは独自の権限動作を管理します。このインターフェースから設定できる許可リストやブロックリストはありません。",
+      "skipPermissions": {
+        "label": "権限プロンプトはスキップされます",
+        "description": "agyは--dangerously-skip-permissionsで実行されるため、セッション中にツールやコマンドの承認は求められません。"
+      },
+      "cliNote": {
+        "title": "agyで権限を設定",
+        "description": "権限と自律性のオプションはagyのCLI設定に含まれており、このUIにはありません。"
+      }
+    },
+    "actions": {
+      "add": "追加"
+    }
+  },
+  "mcpServers": {
+    "title": "MCPサーバー",
+    "description": {
+      "claude": "Model Context Protocolサーバーは、Claudeに追加のツールやデータソースを提供します",
+      "cursor": "Model Context Protocolサーバーは、Cursorに追加のツールやデータソースを提供します",
+      "codex": "Model Context Protocolサーバーは、Codexに追加のツールやデータソースを提供します",
+      "opencode": "Model Context Protocolサーバーは、OpenCodeに追加のツールやデータソースを提供します"
+    },
+    "addButton": "MCPサーバーを追加",
+    "empty": "MCPサーバーは設定されていません",
+    "serverType": "種類",
+    "scope": {
+      "local": "ローカル",
+      "user": "ユーザー"
+    },
+    "config": {
+      "command": "コマンド",
+      "url": "URL",
+      "args": "引数",
+      "environment": "環境変数"
+    },
+    "tools": {
+      "title": "ツール",
+      "count": "（{{count}}）:",
+      "more": "他{{count}}件"
+    },
+    "actions": {
+      "edit": "サーバーを編集",
+      "delete": "サーバーを削除"
+    },
+    "help": {
+      "title": "Codex MCPについて",
+      "description": "Codexはstdioベースのツールサーバーをサポートしています。追加のツールやリソースでCodexの機能を拡張するサーバーを追加できます。"
+    }
+  },
+  "pluginSettings": {
+    "title": "プラグイン",
+    "description": "カスタムプラグインでインターフェースを拡張します。gitからインストールするか、~/.claude-code-ui/plugins/ にフォルダを配置してください。",
+    "installPlaceholder": "https://github.com/user/my-plugin",
+    "installButton": "インストール",
+    "installing": "インストール中…",
+    "securityWarning": "信頼できる作成者のプラグイン、またはソースコードを確認済みのプラグインのみをインストールしてください。",
+    "scanningPlugins": "プラグインをスキャン中…",
+    "noPluginsInstalled": "プラグインがインストールされていません",
+    "pullLatest": "gitから最新を取得",
+    "noGitRemote": "リモートgitリポジトリがありません — アップデート不可",
+    "uninstallPlugin": "プラグインを削除",
+    "confirmUninstall": "クリックして確定",
+    "confirmUninstallMessage": "{{name}} を削除しますか？この操作は取り消せません。",
+    "cancel": "キャンセル",
+    "remove": "削除",
+    "updateFailed": "アップデートに失敗しました",
+    "installFailed": "インストールに失敗しました",
+    "uninstallFailed": "削除に失敗しました",
+    "toggleFailed": "切り替えに失敗しました",
+    "starterPluginLabel": "スターター プラグイン",
+    "starter": "スターター",
+    "docs": "ドキュメント",
+    "sections": {
+      "officialTitle": "公式プラグイン",
+      "officialDescription": "CloudCLIチームが管理し、すぐにインストールできます。",
+      "unofficialTitle": "その他のプラグイン",
+      "unofficialDescription": "他のユーザーによる非公式プラグインと統合。インストール前にソースを確認してください。"
+    },
+    "starterPlugin": {
+      "name": "プロジェクト統計",
+      "badge": "スターター",
+      "description": "プロジェクトのファイル数、コード行数、ファイルタイプの内訳、最近のアクティビティを表示します。",
+      "install": "インストール"
+    },
+    "terminalPlugin": {
+      "name": "ターミナル",
+      "badge": "公式",
+      "description": "インターフェース内で直接フルシェルアクセスができる統合ターミナル。",
+      "install": "インストール"
+    },
+    "scheduledPromptPlugin": {
+      "name": "スケジュールプロンプト",
+      "badge": "非公式",
+      "description": "ワークスペースのプロンプトをスケジュールし、実行履歴を確認し、定期的なローカルタスクを管理します。",
+      "install": "インストール"
+    },
+    "claudeWatchPlugin": {
+      "name": "Claude Watch",
+      "badge": "非公式",
+      "description": "長時間実行するClaude Codeセッションのハングを監視し、プロセスコントロールを提供します。",
+      "install": "インストール"
+    },
+    "morePlugins": "詳細",
+    "enable": "有効にする",
+    "disable": "無効にする",
+    "installAriaLabel": "プラグインのgitリポジトリURL",
+    "tab": "タブ",
+    "runningStatus": "実行中"
+  },
+  "commandBoardSettings": {
+    "title": "コマンドボード",
+    "description": "コマンドボードのアクションを実行できる対象と、有効にするアクションを管理します。アクションはサーバーオーナーの権限で実行されます。",
+    "loading": "読み込んでいます…",
+    "loadError": "設定を読み込めませんでした",
+    "saved": "設定を保存しました",
+    "saveError": "保存に失敗しました",
+    "save": "保存",
+    "saving": "保存中…",
+    "roles": {
+      "title": "ロール別のアクセス",
+      "description": "コマンドボードのアクションを実行できる対象です。オーナーは常に有効です。",
+      "ownerLocked": "常に有効（無効にはできません）",
+      "ownerSelectableHint": "上の4つの階層から1つ選択してください — オーナーは自分自身をロックアウトできません",
+      "ownerNoneDisabled": "オーナーは自分自身を締め出せません",
+      "laterPhase": "今後のフェーズで利用可能になります",
+      "generalHint": "「カスタムコマンド」は下でカスタムコマンドを定義している場合にのみ意味があります。",
+      "customHint": "「カスタムコマンド」は下でカスタムコマンドを定義している場合にのみ意味があります。",
+      "legendHint": "階層は累積的です — 各階層はそれ以下のすべての階層を含みます"
+    },
+    "roleNames": {
+      "owner": "オーナー",
+      "admin": "管理者",
+      "user": "ユーザー"
+    },
+    "modes": {
+      "none": "無効",
+      "noneDesc": "このロールはコマンドボードを利用できません。",
+      "safe": "安全リスト",
+      "safeDesc": "組み込みの安全リストのアクションのみ実行できます。",
+      "general": "カスタムコマンド",
+      "generalDesc": "安全リスト＋自分で定義したカスタムコマンド（コード内で固定された実行ファイルの許可リストに限定され、自由なシェルは使えません）。",
+      "custom": "カスタムコマンド",
+      "customDesc": "安全リスト＋自分で定義したカスタムコマンド（コード内で固定された実行ファイルの許可リストに限定され、自由なシェルは使えません）。",
+      "raw": "任意のコマンドを実行",
+      "rawDesc": "上のすべての階層＋自由なシェルテキストの実行。オーナー専用。メインスイッチの武装が必要。",
+      "rawDangerHint": "危険な階層 — オーナー専用",
+      "rawUnarmedNote": "危険な階層は非武装状態です — 以下のスイッチを武装するまでここでの選択は効果がありません"
+    },
+    "actions": {
+      "title": "利用できるアクション",
+      "description": "安全リストの各アクションを有効／無効にします。",
+      "empty": "アクションはありません。"
+    },
+    "customCommands": {
+      "title": "カスタムコマンド",
+      "description": "ワンクリックで実行するコマンドを定義します。cmd はコード内で固定された実行ファイルの許可リストに限定され、UI から拡張することはできません。",
+      "allowlistNote": "現在は npm run <既存スクリプト> のみ対応。拡張にはコードの変更とレビューが必要です。",
+      "counter": "{{count}} / {{max}} 件のコマンド",
+      "empty": "カスタムコマンドはまだありません。",
+      "addCommand": "コマンドを追加",
+      "loadError": "カスタムコマンドを読み込めませんでした",
+      "invalidRow": "このコマンドは現在無効です",
+      "invalidRowReason": "理由: {{error}}",
+      "form": {
+        "title": "カスタムコマンドを定義",
+        "editTitle": "カスタムコマンドを編集",
+        "key": "キー",
+        "keyHint": "英小文字で始め、英数字・ハイフン・アンダースコアのみ使用できます",
+        "label": "表示名",
+        "labelHint": "コマンドボードに表示される名称です",
+        "cmd": "実行ファイル",
+        "cmdHint": "現在は npm のみ（コード内の固定許可リスト）",
+        "args": "引数",
+        "argsHint": "npm の場合: 1つ目に「run」、2つ目にスクリプト名を指定します",
+        "addArg": "+ 引数",
+        "removeArg": "削除",
+        "minRole": "最小ロール",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "saving": "保存中…"
+      },
+      "deleteConfirm": "コマンド «{{key}}» を削除しますか？",
+      "deleteConfirmYes": "削除",
+      "deleteConfirmNo": "キャンセル",
+      "errors": {
+        "invalid_key": "キーが正しくありません",
+        "key_reserved": "このキーは静的アクションで予約されています",
+        "key_exists": "このキーは既に存在します",
+        "invalid_label": "表示名が正しくありません",
+        "invalid_min_role": "ロールが正しくありません",
+        "interpreter_forbidden": "指定された実行ファイルは禁止されたインタープリタ／シェルです — コード側で拒否されました",
+        "cmd_not_allowlisted": "実行ファイルが許可リストに含まれていません",
+        "npm_script_missing": "package.json にスクリプトが見つかりません",
+        "denylisted": "このスクリプトは禁止リストに含まれています（build／dev／release など）",
+        "flag_arg_forbidden": "引数を «-» で始めることはできません",
+        "invalid_arg": "引数が正しくありません",
+        "too_many_commands": "上限に達しました（20 件まで）",
+        "not_found": "コマンドが見つかりません",
+        "internal": "サーバー内部エラー"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "危険な階層 — 任意のコマンドを実行",
+        "description": "上のマトリックスでこの階層を選択するだけでは不十分です — ここでメインスイッチを武装する必要があります。オフにすると、「任意のコマンドを実行」がすべてのロールから即座に削除されます。",
+        "warningTitle": "セキュリティ警告 — 武装する前に読んでください",
+        "warning": "この機能を使うと、サービスユーザーの権限で任意のシェルコマンドをサーバー上で実行できます。許可リストは一切なく、唯一の安全策は「実行」を押す前にあなた自身が各コマンドを一文字ずつ確認することだけです。誤ったコマンドや許可されていないコマンドが1つあるだけで、データの破損やサーバーの停止につながります。",
+        "ackLabel": "これによりサーバーへの完全なシェルアクセスが許可されることを理解し、完全な責任を負います",
+        "confirmEnable": "武装を確認",
+        "cancelEnable": "キャンセル",
+        "enableButton": "武装する",
+        "disableButton": "メインスイッチをオフ（全ロールから階層を削除）",
+        "statusEnabled": "武装済み",
+        "statusDisabled": "非武装",
+        "notGeneralMode": "上のマトリックスでオーナーのロールを「任意のコマンドを実行」に設定する必要があります。",
+        "blocked_is_platform": "プラットフォームモードでは武装できません — 環境が人間によるレビューの保証を無効にします。"
+      },
+      "queue": {
+        "title": "コマンドを登録",
+        "description": "ここで追加したコマンドはサイドバーのコマンドボードで待機し、そこで確認されます。自動実行は一切ありません。",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "追加",
+        "counter": "{{count}} / {{max}} 件のコマンド",
+        "addError": {
+          "empty_command": "コマンドを空にはできません",
+          "command_too_long": "コマンドが長すぎます（最大 4096 文字）",
+          "forbidden_control_char": "コマンドの {{position}} 文字目に禁止された制御文字が含まれています",
+          "too_many_commands": "キューが満杯です（最大 20 件）",
+          "raw_exec_disabled": "「任意のコマンドを実行」機能は無効です",
+          "config_denied": "オーナーのロール階層がこれを許可していません — 階層を「任意のコマンドを実行」に設定し、メインスイッチを武装してください。",
+          "invalid_command": "コマンドが正しくありません",
+          "internal": "サーバー内部エラー",
+          "carriage_return_forbidden": "コマンドに\\r（Windows改行）が含まれています — LFで貼り直してください",
+          "too_many_lines": "コマンドが100行を超えています",
+          "denied_command": "ブロックされました: このコマンドは稼働中のサービスを停止させます (ルール: {{rule}})。コマンドボードはライフサイクル系コマンドを実行しません — ご自身のターミナルで実行してください。"
+        },
+        "waitingElsewhere": "サイドバーのコマンドボードで {{count}} 件が待機中です。",
+        "reviewedElsewhere": "登録したコマンドはサイドバーのコマンドボードに表示され、そこで確認・実行されます。"
+      },
+      "dialog": {
+        "title": "実行前にコマンドを確認",
+        "subtitle": "以下のバイト列がそのままサーバー上で実行されます。この操作は元に戻せません。",
+        "commandLabel": "実行されるコマンド",
+        "lengthInfo": "長さ: {{len}} 文字",
+        "clientDigestMismatch": "ダイジェストが一致しません — 表示中のコマンドが保存内容と異なります。実行はブロックされました。",
+        "ackLabel": "このコマンドを一文字ずつ確認し、その実行について全責任を負います",
+        "execute": "実行",
+        "cancel": "キャンセル",
+        "executing": "実行中…",
+        "digestMismatch": "表示後にコマンドが変更されました — 実行を中止しました。キューを再読み込みします。",
+        "notFound": "コマンドは既に存在しません — 別のセッションで実行または却下された可能性があります。",
+        "actionInFlight": "別のコマンドが実行中です。完了までお待ちください。",
+        "execFailed": "サーバー上でコマンドを起動できませんでした。",
+        "timeout": "コマンドがタイムアウトしました（120 秒）。",
+        "forbidden_control_char": "保存されたコマンドに禁止された制御文字が検出されました — 実行を中止しました。",
+        "internal": "サーバー内部エラーです。",
+        "result": {
+          "title": "実行結果",
+          "exitCode": "終了コード: {{code}}",
+          "stdout": "出力 (stdout)",
+          "stderr": "エラー (stderr)",
+          "truncated": "出力は切り詰められました — 上限: 64 KB",
+          "noOutput": "(出力なし)",
+          "close": "閉じる"
+        },
+        "lineInfo": "{{count}} 行",
+        "executionTarget": "実行先: ローカルNassajサーバー — サービスユーザー「nassaj」",
+        "executionTargetWarn": "別のマシン（VMやリモートサーバーなど）向けのコマンドはここで実行しないでください。",
+        "digest_mismatch": "The command changed after it was displayed — execution cancelled. Reloading the list.",
+        "not_found": "The command no longer exists — it may have been run or dismissed elsewhere.",
+        "action_in_flight": "Another command is running. Wait for it to finish.",
+        "exec_failed": "Failed to launch the command on the server.",
+        "raw_exec_disabled": "The master switch for the dangerous tier is off — arm it in Command Board settings.",
+        "raw_exec_blocked": "The dangerous tier is blocked in this environment and cannot be armed.",
+        "config_denied": "Your role does not hold the \"Run any command\" tier.",
+        "unauthenticated": "Your session expired — sign in again.",
+        "clientDigestUnavailable": "The local integrity check could not run in this context (insecure origin). The server still binds the digest — read the command carefully.",
+        "restarting": "コマンドは実行され、サーバーを再起動しています。そのため応答は返せませんでした。復帰を待っています…",
+        "restartSuccess": "サーバーが復帰しました。コマンドは完了しました。",
+        "audit_unavailable": "拒否されました: 監査記録を書き込めなかったため、何も実行されていません。生の実行が記録なしで行われることはありません。",
+        "denied_command": "ブロックされました: このコマンドは稼働中のサービスを停止させます (ルール: {{rule}})。コマンドボードはライフサイクル系コマンドを実行しません — ご自身のターミナルで実行してください。",
+        "requestedBy": "登録者: {{name}}",
+        "unattributed": "要求者の記録なし — このコマンドを登録した人は記録されていません"
+      }
+    }
+  },
+  "subscriptions": {
+    "title": "有効なサブスクリプション",
+    "empty": "認証済みのサブスクリプションはありません",
+    "loading": "読み込み中…",
+    "error": "サブスクリプションを読み込めませんでした",
+    "monthToDate": "今回のサイクル",
+    "cycleSince": "{{date}} から",
+    "anchorLabel": "サイクル開始日",
+    "anchorHint": "請求日を公開しているプロバイダーはありません — ご自身で設定してください",
+    "apiEquivalent": "サブスクリプションのAPI換算額 — 請求額ではありません",
+    "billed": "課金対象",
+    "unavailable": "利用できません",
+    "partial": "一部のみ",
+    "pricesAsOf": "{{date}} 時点の価格",
+    "byModel": "モデル別",
+    "harnessTotal": "ハーネス合計",
+    "showBreakdown": "モデル内訳を表示",
+    "hideBreakdown": "モデル内訳を隠す",
+    "unpricedModel": "公開価格なし",
+    "anchorSource": {
+      "detected": "サブスクリプション情報から取得",
+      "derived": "最も古い使用状況からの推定",
+      "manual": "手動で設定",
+      "unknown": "暦月 — サブスクリプション日付が見つかりません"
+    },
+    "viaHarness": "{{harness}} 経由",
+    "subscriptionTotal": "サブスクリプション合計",
+    "assumedPrice": "推定価格 — {{models}} は公開レートがありません"
+  }
+}

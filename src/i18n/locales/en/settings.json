@@ -1,0 +1,1206 @@
+{
+  "title": "Settings",
+  "tabs": {
+    "account": "Account",
+    "permissions": "Permissions",
+    "mcpServers": "MCP Servers",
+    "skills": "Skills",
+    "appearance": "Appearance"
+  },
+  "skills": {
+    "title": "Skills",
+    "description": "Install global {{provider}} skills from .md files or complete skill folders.",
+    "descriptionReadOnly": "Skills discovered from {{provider}} provider locations — installation is not supported from this interface.",
+    "refresh": "Refresh",
+    "addSkill": "Add Skill",
+    "addSkillTitle": "Add {{provider}} Skill",
+    "installPath": "Install Path",
+    "dropZoneTitle": "Drop .md files or skill folders here",
+    "dropZoneDescription": "Upload a standalone SKILL.md or a full skill folder including scripts and assets.",
+    "chooseFiles": "Choose Files",
+    "chooseFolder": "Choose Folder",
+    "queuedFiles": "Queued",
+    "remove": "Remove",
+    "install": "Install Skill",
+    "installCount_one": "Install {{count}} Skill",
+    "installCount_other": "Install {{count}} Skills",
+    "cancel": "Cancel",
+    "uploadHint": "Folder uploads use the folder name; standalone files use the name declared in SKILL.md.",
+    "visibleSkills": "Installed Skills",
+    "visibleSkillsDescription": "Skills discovered by the provider API, including global and project-aware locations.",
+    "search": "Search skills...",
+    "clearSearch": "Clear search",
+    "scanning": "Scanning project skills…",
+    "loading": "Loading {{provider}} skills…",
+    "empty": "No skills discovered yet",
+    "emptyDescription": "Add a global skill above, or create project-specific skill folders in your workspace.",
+    "noMatch": "No matching skills",
+    "noMatchDescription": "Try a different command, name, scope, project, or source path.",
+    "source": "Source",
+    "saved": "Skills installed successfully.",
+    "delete": "Delete",
+    "confirmDelete": "Delete «{{name}}»?",
+    "confirmYes": "Delete",
+    "plugin": "Plugin",
+    "project": "Project",
+    "scopes": {
+      "user": "User",
+      "plugin": "Plugin",
+      "repo": "Repo",
+      "project": "Project",
+      "admin": "Admin",
+      "system": "System"
+    },
+    "errors": {
+      "deleteFailed": "Could not delete the skill. Please try again.",
+      "dropFailed": "Drop one or more .md files or a folder containing SKILL.md.",
+      "saveFailed": "Could not install the skills. Please try again."
+    }
+  },
+  "account": {
+    "title": "Account",
+    "language": "Language",
+    "languageLabel": "Display Language",
+    "languageDescription": "Choose your preferred language for the interface",
+    "username": "Username",
+    "email": "Email",
+    "profile": "Profile",
+    "changePassword": "Change Password"
+  },
+  "mcp": {
+    "title": "MCP Servers",
+    "addServer": "Add Server",
+    "editServer": "Edit Server",
+    "deleteServer": "Delete Server",
+    "serverName": "Server Name",
+    "serverType": "Server Type",
+    "config": "Configuration",
+    "testConnection": "Test Connection",
+    "status": "Status",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "scope": {
+      "label": "Scope",
+      "user": "User",
+      "project": "Project"
+    }
+  },
+  "appearance": {
+    "title": "Appearance",
+    "theme": "Theme",
+    "codeEditor": "Code Editor",
+    "editorTheme": "Editor Theme",
+    "wordWrap": "Word Wrap",
+    "showMinimap": "Show Minimap",
+    "lineNumbers": "Line Numbers",
+    "fontSize": "Font Size"
+  },
+  "actions": {
+    "saveChanges": "Save Changes",
+    "resetToDefaults": "Reset to Defaults",
+    "cancelChanges": "Cancel Changes"
+  },
+  "quickSettings": {
+    "title": "Quick Settings",
+    "sections": {
+      "appearance": "Appearance",
+      "toolDisplay": "Tool Display",
+      "viewOptions": "View Options",
+      "inputSettings": "Input Settings"
+    },
+    "darkMode": "Dark Mode",
+    "autoExpandTools": "Auto-expand tools",
+    "showRawParameters": "Show raw parameters",
+    "showThinking": "Show thinking",
+    "hideToolCalls": "Hide tool calls",
+    "autoScrollToBottom": "Auto-scroll to bottom",
+    "tabsIconOnly": "Compact tabs (icons only)",
+    "sendByCtrlEnter": "Send by Ctrl+Enter",
+    "sendByCtrlEnterDescription": "When enabled, pressing Ctrl+Enter will send the message instead of just Enter. This is useful for IME users to avoid accidental sends.",
+    "dragHandle": {
+      "dragging": "Dragging handle",
+      "closePanel": "Close settings panel",
+      "openPanel": "Open settings panel",
+      "draggingStatus": "Dragging...",
+      "toggleAndMove": "Click to toggle, drag to move"
+    }
+  },
+  "claudeUsage": {
+    "title": "Claude Usage",
+    "loading": "Loading usage…",
+    "error": "Could not load usage status.",
+    "stale": "Cached data",
+    "percentUsed": "{{percent}} used",
+    "resetsIn": "Resets {{time}}",
+    "extraUsageDetail": "{{used}} of {{limit}} used",
+    "crossProviderNote": "Claude account usage — this session runs on {{provider}}",
+    "notApplicable": "Claude quotas don't apply to the current session's provider ({{provider}})",
+    "windows": {
+      "session": "Current session",
+      "weeklyAllModels": "All models (weekly)",
+      "weeklySonnet": "Sonnet only",
+      "weeklyOpus": "Opus only",
+      "extraUsage": "Extra usage"
+    }
+  },
+  "terminalShortcuts": {
+    "title": "Terminal Shortcuts",
+    "sectionKeys": "Keys",
+    "sectionNavigation": "Navigation",
+    "escape": "Escape",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "arrowUp": "Arrow Up",
+    "arrowDown": "Arrow Down",
+    "scrollDown": "Scroll Down",
+    "handle": {
+      "closePanel": "Close shortcuts panel",
+      "openPanel": "Open shortcuts panel"
+    }
+  },
+  "mainTabs": {
+    "label": "Settings",
+    "profile": "Profile",
+    "agents": "Agents",
+    "engines": "Engines",
+    "appearance": "Appearance",
+    "git": "Git",
+    "apiTokens": "Nassaj API Keys",
+    "notifications": "Notifications",
+    "plugins": "Plugins",
+    "users": "Users",
+    "about": "About",
+    "commandBoard": "Command Board"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "Manage your account username, password, and passkeys",
+    "tabs": {
+      "identity": "Identity",
+      "security": "Security"
+    },
+    "saving": "Saving...",
+    "avatar": {
+      "title": "Profile picture",
+      "description": "Add a photo so teammates can recognise you.",
+      "change": "Change picture",
+      "uploading": "Uploading...",
+      "hint": "Square images work best. PNG or JPG.",
+      "currentAlt": "Your profile picture",
+      "placeholderAlt": "No profile picture set",
+      "success": "Profile picture updated successfully",
+      "errors": {
+        "uploadFailed": "Could not upload the picture. Please try again.",
+        "network": "Network error. Please check your connection and try again."
+      }
+    },
+    "username": {
+      "title": "Change username",
+      "description": "Update the username you use to sign in.",
+      "currentLabel": "Current username",
+      "newLabel": "New username",
+      "placeholder": "Choose a new username",
+      "hint": "3-32 characters: letters, numbers, or underscore.",
+      "save": "Save username",
+      "success": "Username updated successfully",
+      "errors": {
+        "required": "Please enter a new username",
+        "unchanged": "The new username is the same as the current one"
+      }
+    },
+    "password": {
+      "title": "Change password",
+      "description": "Use a strong password you do not use elsewhere.",
+      "currentLabel": "Current password",
+      "currentPlaceholder": "Enter your current password",
+      "newLabel": "New password",
+      "newPlaceholder": "Enter a new password",
+      "confirmLabel": "Confirm new password",
+      "confirmPlaceholder": "Re-enter the new password",
+      "hint": "At least {{min}} characters.",
+      "save": "Save password",
+      "success": "Password changed successfully",
+      "errors": {
+        "required": "Please fill in all password fields",
+        "short": "Password must be at least {{min}} characters",
+        "mismatch": "New passwords do not match"
+      }
+    },
+    "passkeys": {
+      "title": "Passkeys",
+      "description": "Sign in without a password using your fingerprint, face, device PIN, or a security key.",
+      "add": "Add passkey",
+      "nameLabel": "Passkey name (optional)",
+      "namePlaceholder": "e.g. Laptop fingerprint",
+      "create": "Create passkey",
+      "creating": "Waiting for your device...",
+      "cancel": "Cancel",
+      "loading": "Loading passkeys...",
+      "empty": "No passkeys yet. Add one to sign in to this workspace quickly and securely — no password needed.",
+      "notSupported": "This browser does not support passkeys, so new ones cannot be added here.",
+      "unnamed": "Unnamed passkey",
+      "createdAt": "Added {{date}}",
+      "lastUsedAt": "Last used {{date}}",
+      "neverUsed": "Never used",
+      "badges": {
+        "synced": "Synced",
+        "device": "Device-bound"
+      },
+      "rename": "Rename passkey",
+      "renamePlaceholder": "New name",
+      "renameSave": "Save name",
+      "delete": "Delete passkey",
+      "deleteConfirm": "Delete this passkey?",
+      "deleteConfirmYes": "Delete",
+      "success": {
+        "added": "Passkey added successfully",
+        "renamed": "Passkey renamed",
+        "deleted": "Passkey deleted"
+      },
+      "errors": {
+        "loadFailed": "Could not load your passkeys. Please try again.",
+        "registerFailed": "Could not create the passkey. Please try again.",
+        "duplicate": "This device or security key is already registered as a passkey.",
+        "renameFailed": "Could not rename the passkey.",
+        "deleteFailed": "Could not delete the passkey.",
+        "network": "Network error. Please check your connection and try again."
+      }
+    },
+    "identity": {
+      "title": "Avatar style",
+      "description": "Pick a ready-made avatar or a colour instead of uploading a photo.",
+      "tabs": {
+        "upload": "Upload",
+        "gallery": "Gallery",
+        "color": "Colour"
+      },
+      "gallery": {
+        "heading": "Choose an avatar",
+        "selected": "Selected avatar"
+      },
+      "color": {
+        "heading": "Choose a colour",
+        "hint": "The colour is used behind your initial.",
+        "selected": "Selected colour"
+      },
+      "saving": "Saving...",
+      "success": "Avatar updated successfully",
+      "errors": {
+        "saveFailed": "Could not save your choice. Please try again.",
+        "network": "Network error. Please check your connection and try again."
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "Link your own Claude subscription to use it in your sessions. Each user has their own isolated credential.",
+    "recheck": "Re-check",
+    "loadError": "Could not check subscription status. Please try again.",
+    "banner": "Your Claude subscription is not linked yet. You need to link it before using Claude in your sessions.",
+    "bannerHint": "Click the button below to open the terminal and complete the login flow using",
+    "linkButton": "Link Claude account",
+    "ownerNote": "Your credential is linked automatically as the owner — no action required."
+  },
+  "agyConnection": {
+    "description": "Link your own Antigravity subscription to use it in your sessions. Each user has their own isolated credential.",
+    "recheck": "Re-check",
+    "loadError": "Could not check subscription status. Please try again.",
+    "banner": "Your Antigravity subscription is not linked yet. You need to link it before using agy in your sessions.",
+    "bannerHint": "Click the button below to open the terminal and run",
+    "linkButton": "Link Antigravity account",
+    "ownerNote": "Your credential is linked automatically as the owner — no action required.",
+    "modal": {
+      "title": "Link Antigravity account",
+      "close": "Close link dialog",
+      "instructions": "In the terminal below, run",
+      "afterComplete": "Complete the OAuth login flow, then close this dialog and click \"Re-check\" to refresh the status."
+    }
+  },
+  "users": {
+    "title": "Users",
+    "subtitle": "Manage workspace members and invitations",
+    "inviteButton": "Invite User",
+    "listHeading": "Members",
+    "loading": "Loading users...",
+    "empty": "No users found",
+    "you": "you",
+    "changeRole": "Change role",
+    "suspend": "Suspend",
+    "activate": "Activate",
+    "resetPassword": "Reset password",
+    "deleteUser": "Delete user",
+    "deleteUserConfirm": "Permanently delete {{username}}? This cannot be undone.",
+    "reset": {
+      "title": "Reset password",
+      "confirm": "Reset the password for {{username}}?",
+      "warning": "A temporary password will be generated and shown once. The user must change it on their next sign-in, and all their existing sessions will be signed out.",
+      "submit": "Reset password",
+      "resetting": "Resetting...",
+      "cancel": "Cancel",
+      "close": "Close",
+      "done": "Done",
+      "copy": "Copy",
+      "copied": "Copied",
+      "successHint": "Share this temporary password securely. It is shown only once.",
+      "tempPasswordLabel": "Temporary password"
+    },
+    "pendingInvites": "Pending invitations",
+    "noPendingInvites": "No pending invitations",
+    "revoke": "Revoke",
+    "expiresAt": "Expires {{date}}",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "statuses": {
+      "active": "Active",
+      "disabled": "Suspended"
+    },
+    "invite": {
+      "title": "Invite a user",
+      "roleLabel": "Role",
+      "roleHint": "The invited user will be created with this role.",
+      "submit": "Create invite",
+      "creating": "Creating...",
+      "cancel": "Cancel",
+      "close": "Close",
+      "done": "Done",
+      "copy": "Copy",
+      "copied": "Copied",
+      "successHint": "Share this single-use link. It is shown only once."
+    }
+  },
+  "providerSharing": {
+    "heading": "Provider credential sharing",
+    "subtitle": "Choose, per provider, whether credentials are shared across all users or isolated per user.",
+    "loading": "Loading sharing settings...",
+    "modeLabel": "Sharing mode for {{provider}}",
+    "providers": {
+      "claude": "Claude",
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "agy": "Antigravity (agy)",
+      "cursor": "Cursor",
+      "kimi": "Kimi",
+      "deepseek": "DeepSeek",
+      "glm": "GLM"
+    },
+    "modes": {
+      "shared": "Shared",
+      "isolated": "Isolated"
+    },
+    "modeDescription": {
+      "shared": "Same credentials for all users",
+      "isolated": "Each user has their own credentials"
+    },
+    "agyWarning": {
+      "title": "Experimental isolation",
+      "description": "Isolating Antigravity credentials is experimental and requires restarting active sessions to take effect."
+    },
+    "save": "Save",
+    "saving": "Saving...",
+    "saveStatus": {
+      "success": "Sharing settings saved successfully",
+      "error": "Failed to save sharing settings"
+    }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "description": "Control which notification events you receive.",
+    "webPush": {
+      "title": "Web Push Notifications",
+      "enable": "Enable Push Notifications",
+      "disable": "Disable Push Notifications",
+      "enabled": "Push notifications are enabled",
+      "loading": "Updating...",
+      "unsupported": "Push notifications are not supported in this browser.",
+      "denied": "Push notifications are blocked. Please allow them in your browser settings."
+    },
+    "sound": {
+      "title": "Sound",
+      "description": "Play a short tone when a chat run finishes.",
+      "enabled": "Enabled",
+      "test": "Test sound"
+    },
+    "events": {
+      "title": "Event Types",
+      "actionRequired": "Action required",
+      "stop": "Run stopped",
+      "error": "Run failed"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "Dark Mode",
+      "description": "Toggle between light and dark themes"
+    },
+    "themeMode": {
+      "sectionTitle": "Appearance",
+      "label": "Theme",
+      "description": "Choose light, dark, or follow your system setting automatically",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "themePresets": {
+      "title": "Theme",
+      "description": "Brand-tinted color presets applied on top of light and dark mode",
+      "groupLabel": "Theme preset",
+      "presets": {
+        "default": "Default",
+        "claude": "Claude",
+        "alkindy": "Al-Kindy",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "Custom"
+      },
+      "custom": {
+        "title": "Custom colors",
+        "accent": "Accent",
+        "background": "Background",
+        "foreground": "Text"
+      }
+    },
+    "uiFont": {
+      "title": "Interface font",
+      "description": "Applies to every language — Arabic and Latin alike. All fonts are self-hosted and downloaded only when selected.",
+      "label": "Font",
+      "hint": "The default is the system font: nothing is downloaded, and it matches your device.",
+      "options": {
+        "system": "System font (automatic)",
+        "ibmPlexSansArabic": "IBM Plex Sans Arabic",
+        "notoSansArabic": "Noto Sans Arabic",
+        "readexPro": "Readex Pro",
+        "vazirmatn": "Vazirmatn",
+        "tajawal": "Tajawal"
+      }
+    },
+    "projectSorting": {
+      "label": "Project Sorting",
+      "description": "How projects are ordered in the sidebar",
+      "alphabetical": "Alphabetical",
+      "recentActivity": "Recent Activity"
+    },
+    "codeEditor": {
+      "title": "Code Editor",
+      "theme": {
+        "label": "Editor Theme",
+        "description": "Default theme for the code editor"
+      },
+      "wordWrap": {
+        "label": "Word Wrap",
+        "description": "Enable word wrapping by default in the editor"
+      },
+      "showMinimap": {
+        "label": "Show Minimap",
+        "description": "Display a minimap for easier navigation in diff view"
+      },
+      "lineNumbers": {
+        "label": "Show Line Numbers",
+        "description": "Display line numbers in the editor"
+      },
+      "fontSize": {
+        "label": "Font Size",
+        "description": "Editor font size in pixels"
+      }
+    },
+    "branding": {
+      "title": "Server identity",
+      "description": "Add a small icon next to the sidebar logo to identify this server to all users.",
+      "nodeIcon": {
+        "label": "Server icon",
+        "description": "A small badge image shown next to the logo (≤ 48 KB). PNG, JPG, WebP, or SVG.",
+        "upload": "Upload icon",
+        "change": "Change icon",
+        "clear": "Remove",
+        "save": "Save",
+        "saving": "Saving…",
+        "preview": "Icon preview",
+        "success": "Server icon saved",
+        "cleared": "Server icon removed",
+        "position": {
+          "label": "Icon position",
+          "description": "Where to show the icon relative to the logo",
+          "start": "Before logo",
+          "end": "After logo"
+        },
+        "errors": {
+          "tooBig": "Image exceeds the 48 KB limit",
+          "unsupported": "Unsupported file type. Use PNG, JPG, WebP, or SVG.",
+          "saveFailed": "Could not save. Please try again."
+        }
+      }
+    },
+    "sidebar": {
+      "title": "Sidebar",
+      "showSearchAndArchive": {
+        "label": "Show search & archive toggle",
+        "description": "Display the search field and archive toggle row at the top of the projects list"
+      }
+    },
+    "codeHighlighting": {
+      "title": "Code highlighting",
+      "label": "Language scope",
+      "description": "How many languages the highlighter knows. Only the default level ships with the page; higher levels are downloaded when selected and apply immediately without a reload. Languages outside the scope render as plain, selectable text.",
+      "core": "10 languages (fastest — default)",
+      "extended": "20 languages (small extra download)",
+      "full": "All 300 languages (large extra download)"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "Add MCP Server",
+      "edit": "Edit MCP Server"
+    },
+    "importMode": {
+      "form": "Form Input",
+      "json": "JSON Import"
+    },
+    "scope": {
+      "label": "Scope",
+      "userGlobal": "User (Global)",
+      "projectLocal": "Project (Local)",
+      "userDescription": "User scope: Available across all projects on your machine",
+      "projectDescription": "Local scope: Only available in the selected project",
+      "cannotChange": "Scope cannot be changed when editing an existing server"
+    },
+    "fields": {
+      "serverName": "Server Name",
+      "transportType": "Transport Type",
+      "command": "Command",
+      "arguments": "Arguments (one per line)",
+      "jsonConfig": "JSON Configuration",
+      "url": "URL",
+      "envVars": "Environment Variables (KEY=value, one per line)",
+      "headers": "Headers (KEY=value, one per line)",
+      "selectProject": "Select a project..."
+    },
+    "placeholders": {
+      "serverName": "my-server"
+    },
+    "validation": {
+      "missingType": "Missing required field: type",
+      "stdioRequiresCommand": "stdio type requires a command field",
+      "httpRequiresUrl": "{{type}} type requires a url field",
+      "invalidJson": "Invalid JSON format",
+      "jsonHelp": "Paste your MCP server configuration in JSON format. Example formats:",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
+    },
+    "configDetails": "Configuration Details (from {{configFile}})",
+    "projectPath": "Path: {{path}}",
+    "actions": {
+      "cancel": "Cancel",
+      "saving": "Saving...",
+      "addServer": "Add Server",
+      "updateServer": "Update Server"
+    }
+  },
+  "saveStatus": {
+    "success": "Settings saved successfully!",
+    "error": "Failed to save settings",
+    "saving": "Saving..."
+  },
+  "footerActions": {
+    "save": "Save Settings",
+    "cancel": "Cancel"
+  },
+  "git": {
+    "title": "Git Configuration",
+    "description": "Configure your git identity for commits. These settings will be applied globally via git config --global",
+    "name": {
+      "label": "Git Name",
+      "help": "Your name for git commits"
+    },
+    "email": {
+      "label": "Git Email",
+      "help": "Your email for git commits"
+    },
+    "actions": {
+      "save": "Save Configuration",
+      "saving": "Saving..."
+    },
+    "status": {
+      "success": "Saved successfully"
+    }
+  },
+  "apiKeys": {
+    "title": "Nassaj API Keys",
+    "description": "Generate API keys to trigger Nassaj programmatically from outside the browser — scripts, automation, CI, or webhooks — via POST /api/agent, passing the key in the x-api-key header.",
+    "newKey": {
+      "alertTitle": "⚠️ Save Your API Key",
+      "alertMessage": "This is the only time you'll see this key. Store it securely.",
+      "iveSavedIt": "I've saved it"
+    },
+    "form": {
+      "placeholder": "API Key Name (e.g., Production Server)",
+      "createButton": "Create",
+      "cancelButton": "Cancel"
+    },
+    "newButton": "New API Key",
+    "empty": "No API keys created yet.",
+    "list": {
+      "created": "Created:",
+      "lastUsed": "Last used:"
+    },
+    "confirmDelete": "Are you sure you want to delete this API key?",
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "github": {
+      "title": "GitHub Tokens",
+      "description": "Add GitHub Personal Access Tokens to clone private repositories via the external API.",
+      "descriptionAlt": "Add GitHub Personal Access Tokens to clone private repositories. You can also pass tokens directly in API requests without storing them.",
+      "addButton": "Add Token",
+      "form": {
+        "namePlaceholder": "Token Name (e.g., Personal Repos)",
+        "tokenPlaceholder": "GitHub Personal Access Token (ghp_...)",
+        "descriptionPlaceholder": "Description (optional)",
+        "addButton": "Add Token",
+        "cancelButton": "Cancel",
+        "howToCreate": "How to create a GitHub Personal Access Token →"
+      },
+      "empty": "No GitHub tokens added yet.",
+      "added": "Added:",
+      "confirmDelete": "Are you sure you want to delete this GitHub token?"
+    },
+    "apiDocsLink": "API Documentation",
+    "documentation": {
+      "title": "External API Documentation",
+      "description": "Learn how to use the external API to trigger Claude/Cursor sessions from your applications.",
+      "viewLink": "View API Documentation →"
+    },
+    "loading": "Loading...",
+    "version": {
+      "updateAvailable": "Update available: v{{version}}"
+    }
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "Checking...",
+      "connected": "Connected",
+      "notConnected": "Not connected",
+      "disconnected": "Disconnected",
+      "checkingAuth": "Checking authentication status...",
+      "loggedInAs": "Logged in as {{email}}",
+      "authenticatedUser": "authenticated user"
+    },
+    "account": {
+      "claude": {
+        "description": "Anthropic Claude AI assistant"
+      },
+      "cursor": {
+        "description": "Cursor AI-powered code editor"
+      },
+      "codex": {
+        "description": "OpenAI Codex AI assistant"
+      },
+      "gemini": {
+        "description": "Google Gemini AI assistant"
+      },
+      "antigravity": {
+        "description": "Google AI Pro via the agy CLI"
+      },
+      "opencode": {
+        "description": "OpenCode CLI assistant"
+      },
+      "kimi": {
+        "description": "Moonshot Kimi — native CLI (device-code login) or API key"
+      },
+      "deepseek": {
+        "description": "DeepSeek via API key"
+      },
+      "glm": {
+        "description": "Zhipu / Z.ai GLM via API key"
+      }
+    },
+    "antigravity": {
+      "modelNote": "Uses Google AI Pro via agy CLI (v1.x). The active model is selected inside agy settings, not from this UI."
+    },
+    "connectionStatus": "Connection Status",
+    "login": {
+      "title": "Login",
+      "reAuthenticate": "Re-authenticate",
+      "description": "Sign in to your {{agent}} account to enable AI features",
+      "reAuthDescription": "Sign in with a different account or refresh credentials",
+      "button": "Login",
+      "reLoginButton": "Re-login"
+    },
+    "error": "Error: {{error}}",
+    "apiKey": {
+      "title": "Add API key",
+      "replaceTitle": "Replace API key",
+      "description": "Paste a {{provider}} API key to enable this provider. It is stored encrypted and never shown again.",
+      "getKey": "Get a key",
+      "inputLabel": "{{provider}} API key",
+      "placeholder": "Paste API key",
+      "placeholderConfigured": "•••••••• (configured)",
+      "save": "Save",
+      "saved": "API key saved.",
+      "remove": "Remove",
+      "removed": "API key removed.",
+      "configuredNote": "An API key is configured.",
+      "checkingCapability": "Checking key entry support…",
+      "targetLabel": "Credential target",
+      "targets": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "glm": "GLM"
+      }
+    }
+  },
+  "engines": {
+    "title": "Engines",
+    "description": "An engine is the endpoint that generates the tokens. The agent system (body) — its tools, permissions and sessions — stays exactly the same; only the model provider behind it changes.",
+    "usageHint": "Once a key is stored, pick \"Claude engine on <engine>\" from the model picker in a chat. The chat always shows which engine it is running on.",
+    "endpointLabel": "Endpoint this engine is called on",
+    "getKey": "Get a key",
+    "inputLabel": "{{provider}} API key",
+    "placeholder": "Paste API key",
+    "placeholderConfigured": "•••••••• (a key is stored)",
+    "save": "Save {{provider}} key",
+    "saveShort": "Save",
+    "remove": "Remove {{provider}} key",
+    "removeShort": "Remove",
+    "saved": "Engine key saved.",
+    "removed": "Engine key removed.",
+    "storedNote": "Stored encrypted for your account only. Replace it by saving a new one.",
+    "status": {
+      "checking": "Checking…",
+      "stored": "A key is stored",
+      "missing": "No key stored",
+      "native": "Its own engine",
+      "available": "Runs today",
+      "blocked_by_owner": "Needs a key",
+      "blocked_by_us": "Not landed yet",
+      "closed_at_vendor": "Not offered by the vendor",
+      "unverified": "Unverified"
+    },
+    "usageHintOpenCode": "Once a key is stored, pick the engine's model (for example a \"glm/…\" entry) from the model picker in a chat.",
+    "evidence": {
+      "measured": "measured",
+      "inferred": "inferred"
+    },
+    "cell": {
+      "claudeNative": "The engine Claude Code ships with, on the account already signed in here.",
+      "claudeGlm": "Runs today: verified end to end on this machine, and the chat picker switches to it.",
+      "claudeKimi": "The endpoint is wired and the code path is live — all that is missing is a Moonshot key.",
+      "claudeDeepseek": "Deliberately not enabled as an engine. Widening the axis to it is an owner decision, not a repair.",
+      "claudeZen": "Zen exposes no Anthropic-compatible endpoint, so the Claude body cannot be pointed at it.",
+      "opencodeZen": "OpenCode's own engine. The path works; it bills against a Zen balance.",
+      "opencodeGlm": "Runs today: the carrier returns real tokens through our governed provider block.",
+      "opencodeAnthropic": "API key only. Passing a personal Claude subscription through OpenCode is forbidden outright.",
+      "opencodeKimi": "Catalogued upstream; needs a Moonshot key.",
+      "opencodeDeepseek": "Catalogued upstream; needs a DeepSeek key.",
+      "codexAnthropic": "Codex speaks only the Responses protocol, and Anthropic does not serve it.",
+      "codexGlm": "z.ai serves no Responses endpoint, and upstream closed the integration request as not planned.",
+      "codexKimi": "Moonshot answers 404 on /v1/responses — measured. Closed at the vendor, not pending.",
+      "codexDeepseek": "Same reason: no Responses endpoint to point Codex at.",
+      "codexZen": "Zen does expose /responses, but this pair has never been run end to end.",
+      "kimiNative": "Its own engine. A 402 here is the engine billing, not the body — the body runs without it.",
+      "kimiGlm": "Proven on the terminal, environment only. Inside nassaj it waits on its config guard — no launch before the guard.",
+      "kimiAnthropic": "Technically established; needs a key.",
+      "kimiDeepseek": "Catalogued; needs a DeepSeek key.",
+      "kimiZen": "Catalogued; bills against a Zen balance.",
+      "agyClosed": "Antigravity resolves its own model inside its CLI and accepts no external engine.",
+      "cursorClosed": "Cursor resolves its own model server-side and accepts no external engine.",
+      "hermesUnverified": "Hermes has its own model layer; no engine pair has been examined."
+    }
+  },
+  "permissions": {
+    "title": "Permission Settings",
+    "skipPermissions": {
+      "label": "Skip permission prompts (use with caution)",
+      "claudeDescription": "Equivalent to --dangerously-skip-permissions flag",
+      "cursorDescription": "Equivalent to -f flag in Cursor CLI"
+    },
+    "allowVendorDelegation": {
+      "label": "Allow delegating subtasks to other models",
+      "description": "Lets Claude call a hosted vendor model (Kimi, DeepSeek, or GLM) for a single subtask during a run, using your own configured API key for that provider. The Claude engine itself is unchanged. Off by default."
+    },
+    "allowedTools": {
+      "title": "Allowed Tools",
+      "description": "Tools that are automatically allowed without prompting for permission",
+      "placeholder": "e.g., \"Bash(git log:*)\" or \"Write\"",
+      "quickAdd": "Quick add common tools:",
+      "empty": "No allowed tools configured"
+    },
+    "blockedTools": {
+      "title": "Blocked Tools",
+      "description": "Tools that are automatically blocked without prompting for permission",
+      "placeholder": "e.g., \"Bash(rm:*)\"",
+      "empty": "No blocked tools configured"
+    },
+    "allowedCommands": {
+      "title": "Allowed Shell Commands",
+      "description": "Shell commands that are automatically allowed without prompting",
+      "placeholder": "e.g., \"Shell(ls)\" or \"Shell(git status)\"",
+      "quickAdd": "Quick add common commands:",
+      "empty": "No allowed commands configured"
+    },
+    "blockedCommands": {
+      "title": "Blocked Shell Commands",
+      "description": "Shell commands that are automatically blocked",
+      "placeholder": "e.g., \"Shell(rm -rf)\" or \"Shell(sudo)\"",
+      "empty": "No blocked commands configured"
+    },
+    "toolExamples": {
+      "title": "Tool Pattern Examples:",
+      "bashGitLog": "- Allow all git log commands",
+      "bashGitDiff": "- Allow all git diff commands",
+      "write": "- Allow all Write tool usage",
+      "bashRm": "- Block all rm commands (dangerous)"
+    },
+    "shellExamples": {
+      "title": "Shell Command Examples:",
+      "ls": "- Allow ls command",
+      "gitStatus": "- Allow git status",
+      "npmInstall": "- Allow npm install",
+      "rmRf": "- Block recursive delete"
+    },
+    "codex": {
+      "permissionMode": "Permission Mode",
+      "description": "Controls how Codex handles file modifications and command execution",
+      "modes": {
+        "default": {
+          "title": "Default",
+          "description": "Only trusted commands (ls, cat, grep, git status, etc.) run automatically. Other commands are skipped. Can write to workspace."
+        },
+        "acceptEdits": {
+          "title": "Accept Edits",
+          "description": "All commands run automatically within the workspace. Full auto mode with sandboxed execution."
+        },
+        "bypassPermissions": {
+          "title": "Bypass Permissions",
+          "description": "All commands run automatically with no approval prompts. Capped to workspace-write with network access OFF, same ceiling as Accept Edits — full disk/network access is available only if the operator has explicitly enabled it for this deployment (off by default). Use with caution."
+        }
+      },
+      "technicalDetails": "Technical details",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted, network access OFF. Trusted commands: cat, cd, grep, head, ls, pwd, tail, git status/log/diff/show, find (without -exec), etc.",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never, network access OFF. All commands auto-execute within project directory.",
+        "bypassPermissions": "sandboxMode=workspace-write, approvalPolicy=never, network access OFF — the SAME ceiling as Accept Edits on this deployment. sandboxMode=danger-full-access (real full disk/network access) is reachable only when the operator has explicitly set the CODEX_ALLOW_FULL_ACCESS flag for the whole deployment; it is off by default on the fleet.",
+        "overrideNote": "You can override this per-session using the mode button in the chat interface."
+      }
+    },
+    "antigravity": {
+      "title": "Permission Settings",
+      "description": "The agy CLI manages its own permission behaviour. There are no allow or block lists to configure from this interface.",
+      "skipPermissions": {
+        "label": "Permission prompts are skipped",
+        "description": "agy runs with --dangerously-skip-permissions, so tool and command approvals are not requested during a session."
+      },
+      "cliNote": {
+        "title": "Configure permissions in agy",
+        "description": "Permission and autonomy options live inside the agy CLI settings, not in this UI."
+      }
+    },
+    "actions": {
+      "add": "Add"
+    }
+  },
+  "mcpServers": {
+    "title": "MCP Servers",
+    "description": {
+      "claude": "Model Context Protocol servers provide additional tools and data sources to Claude",
+      "cursor": "Model Context Protocol servers provide additional tools and data sources to Cursor",
+      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
+      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode"
+    },
+    "addButton": "Add MCP Server",
+    "empty": "No MCP servers configured",
+    "serverType": "Type",
+    "scope": {
+      "local": "local",
+      "user": "user"
+    },
+    "config": {
+      "command": "Command",
+      "url": "URL",
+      "args": "Args",
+      "environment": "Environment"
+    },
+    "tools": {
+      "title": "Tools",
+      "count": "({{count}}):",
+      "more": "+{{count}} more"
+    },
+    "actions": {
+      "edit": "Edit server",
+      "delete": "Delete server"
+    },
+    "help": {
+      "title": "About Codex MCP",
+      "description": "Codex supports stdio-based MCP servers. You can add servers that extend Codex's capabilities with additional tools and resources."
+    }
+  },
+  "pluginSettings": {
+    "title": "Plugins",
+    "description": "Extend the interface with custom plugins. Install from git or drop a folder in ~/.claude-code-ui/plugins/",
+    "installPlaceholder": "https://github.com/user/my-plugin",
+    "installButton": "Install",
+    "installing": "Installing…",
+    "securityWarning": "Only install plugins whose source code you have reviewed or from authors you trust.",
+    "scanningPlugins": "Scanning plugins…",
+    "noPluginsInstalled": "No plugins installed",
+    "pullLatest": "Pull latest from git",
+    "noGitRemote": "No git remote — update not available",
+    "uninstallPlugin": "Uninstall plugin",
+    "confirmUninstall": "Click again to confirm",
+    "confirmUninstallMessage": "Remove {{name}}? This cannot be undone.",
+    "cancel": "Cancel",
+    "remove": "Remove",
+    "updateFailed": "Update failed",
+    "installFailed": "Installation failed",
+    "uninstallFailed": "Uninstall failed",
+    "toggleFailed": "Toggle failed",
+    "starterPluginLabel": "Starter Plugin",
+    "starter": "Starter",
+    "docs": "Docs",
+    "sections": {
+      "officialTitle": "Official Plugins",
+      "officialDescription": "Maintained by the CloudCLI team and ready for direct install.",
+      "unofficialTitle": "Other Plugins",
+      "unofficialDescription": "Unofficial plugins and integrations from other users. Review the source before installing."
+    },
+    "starterPlugin": {
+      "name": "Project Stats",
+      "badge": "starter",
+      "description": "File counts, lines of code, file-type breakdown, and recent activity for your project.",
+      "install": "Install"
+    },
+    "terminalPlugin": {
+      "name": "Terminal",
+      "badge": "official",
+      "description": "Integrated terminal with full shell access directly within the interface.",
+      "install": "Install"
+    },
+    "scheduledPromptPlugin": {
+      "name": "Scheduled Prompts",
+      "badge": "unofficial",
+      "description": "Schedule workspace prompts, review run history, and manage recurring local tasks.",
+      "install": "Install"
+    },
+    "claudeWatchPlugin": {
+      "name": "Claude Watch",
+      "badge": "unofficial",
+      "description": "Watch long-running Claude Code sessions for hangs and expose process controls.",
+      "install": "Install"
+    },
+    "morePlugins": "More",
+    "enable": "Enable",
+    "disable": "Disable",
+    "installAriaLabel": "Plugin git repository URL",
+    "tab": "tab",
+    "runningStatus": "running"
+  },
+  "commandBoardSettings": {
+    "title": "Command Board",
+    "description": "Control who can run Command Board actions and which actions are enabled. Actions run under the server owner's identity.",
+    "loading": "Loading…",
+    "loadError": "Failed to load settings",
+    "saved": "Settings saved",
+    "saveError": "Failed to save",
+    "save": "Save",
+    "saving": "Saving…",
+    "roles": {
+      "title": "Role access",
+      "description": "Who can run Command Board actions. The owner is always enabled.",
+      "ownerLocked": "Always enabled (cannot be locked out)",
+      "ownerSelectableHint": "Choose a tier from the four above — owner cannot lock themselves out",
+      "ownerNoneDisabled": "Owner cannot lock themselves out",
+      "laterPhase": "Available in a later phase",
+      "generalHint": "\"Custom commands\" only adds value if you have custom commands defined below.",
+      "customHint": "\"Custom commands\" only adds value if you have custom commands defined below.",
+      "legendHint": "Tiers are cumulative — each includes all tiers below it"
+    },
+    "roleNames": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "modes": {
+      "none": "Disabled",
+      "noneDesc": "No Command Board access for this role.",
+      "safe": "Safe list",
+      "safeDesc": "Can run built-in safe-list actions only.",
+      "custom": "Custom commands",
+      "customDesc": "Safe list + custom commands you define (restricted to a frozen executable allowlist in code — no free shell).",
+      "raw": "Run any command",
+      "rawDesc": "All tiers above + run any free shell text. Owner only. Requires arming the main switch.",
+      "rawDangerHint": "Dangerous tier — owner only",
+      "rawUnarmedNote": "Dangerous tier is unarmed — selecting it here has no effect until you arm the switch below",
+      "general": "Custom commands",
+      "generalDesc": "Safe list + custom commands you define (restricted to a frozen executable allowlist in code — no free shell)."
+    },
+    "actions": {
+      "title": "Available actions",
+      "description": "Enable or disable each safe-list action.",
+      "empty": "No actions."
+    },
+    "customCommands": {
+      "title": "Custom Commands",
+      "description": "Define one-click commands. cmd is restricted to a frozen executable allowlist in code — cannot be widened from the UI.",
+      "allowlistNote": "Currently: npm run <existing-script> only. Widening requires a code change and review.",
+      "counter": "{{count}} / {{max}} commands",
+      "empty": "No custom commands yet.",
+      "addCommand": "Add command",
+      "loadError": "Failed to load custom commands",
+      "invalidRow": "Command is currently invalid",
+      "invalidRowReason": "Reason: {{error}}",
+      "form": {
+        "title": "Define custom command",
+        "editTitle": "Edit custom command",
+        "key": "Key",
+        "keyHint": "Starts with lowercase letter — letters/digits/-/_ only",
+        "label": "Display name",
+        "labelHint": "What appears in the Command Board",
+        "cmd": "Executable",
+        "cmdHint": "Currently: npm only (frozen allowlist in code)",
+        "args": "Arguments",
+        "argsHint": "For npm: first field 'run', second field script name",
+        "addArg": "+ arg",
+        "removeArg": "Remove",
+        "minRole": "Minimum role",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saving": "Saving…"
+      },
+      "deleteConfirm": "Delete command «{{key}}»?",
+      "deleteConfirmYes": "Delete",
+      "deleteConfirmNo": "Cancel",
+      "errors": {
+        "invalid_key": "Invalid key",
+        "key_reserved": "Key is reserved by a static action",
+        "key_exists": "Key already exists",
+        "invalid_label": "Invalid label",
+        "invalid_min_role": "Invalid role",
+        "interpreter_forbidden": "Executable is a forbidden interpreter/shell — rejected in code",
+        "cmd_not_allowlisted": "Executable not in the permitted allowlist",
+        "npm_script_missing": "Script not found in package.json",
+        "denylisted": "Script is denylisted (build/dev/release…)",
+        "flag_arg_forbidden": "Arguments must not start with «-»",
+        "invalid_arg": "Invalid argument",
+        "too_many_commands": "Maximum reached (20 commands)",
+        "not_found": "Command not found",
+        "internal": "Internal server error"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "Dangerous tier — Run any command",
+        "description": "Selecting this tier in the matrix above is not enough — you must arm the main switch here. Turning it off immediately drops «Run any command» from all roles.",
+        "warningTitle": "Security warning — read before arming",
+        "warning": "This feature allows running any shell command on the server with the service user's privileges. There is no allowlist — the only safeguard is your personal, character-by-character review of each command before pressing Execute. A single wrong or unauthorized command can corrupt data or take the server down.",
+        "ackLabel": "I understand this grants full shell access to the server and I accept full responsibility",
+        "confirmEnable": "Confirm arming",
+        "cancelEnable": "Cancel",
+        "enableButton": "Arm",
+        "disableButton": "Main switch off (drops tier from all roles)",
+        "statusEnabled": "Armed",
+        "statusDisabled": "Unarmed",
+        "notGeneralMode": "Requires the owner's role to be set to «Run any command» in the matrix above.",
+        "blocked_is_platform": "Arming is unavailable in platform mode — the environment voids the human-review guarantee."
+      },
+      "queue": {
+        "title": "Queue a command",
+        "description": "A command added here waits in the sidebar command board and is reviewed there. Nothing runs automatically.",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "Add",
+        "counter": "{{count}} / {{max}} commands",
+        "addError": {
+          "empty_command": "Command cannot be empty",
+          "command_too_long": "Command too long (max 4096 characters)",
+          "forbidden_control_char": "Command contains a forbidden control character at position {{position}}",
+          "too_many_commands": "Queue is full (max 20 commands)",
+          "raw_exec_disabled": "Run-any-command feature is disabled",
+          "config_denied": "Owner's role tier does not permit this — set tier to «Run any command» and arm the main switch.",
+          "invalid_command": "Invalid command",
+          "internal": "Internal server error",
+          "carriage_return_forbidden": "Command contains \\r (Windows line endings) — paste again using LF",
+          "too_many_lines": "Command exceeds 100 lines",
+          "denied_command": "Blocked: this command disrupts a live service (rule: {{rule}}). The command board never runs lifecycle commands — run it in your own terminal."
+        },
+        "waitingElsewhere": "{{count}} command(s) waiting in the sidebar command board.",
+        "reviewedElsewhere": "Queued commands appear in the sidebar command board, where they are reviewed and run."
+      },
+      "dialog": {
+        "title": "Review command before executing",
+        "subtitle": "These bytes will be executed verbatim on the server. This cannot be undone.",
+        "commandLabel": "Command that will be executed",
+        "lengthInfo": "Length: {{len}} characters",
+        "clientDigestMismatch": "Digest mismatch — the displayed command does not match what is stored. Execution blocked.",
+        "ackLabel": "I have reviewed this command character by character and accept full responsibility for its execution",
+        "execute": "Execute",
+        "cancel": "Cancel",
+        "executing": "Executing…",
+        "digestMismatch": "Command changed after it was displayed — execution cancelled. Reloading queue.",
+        "notFound": "Command no longer exists — it may have been executed or dismissed in another session.",
+        "actionInFlight": "Another command is already running. Wait for it to finish.",
+        "execFailed": "Failed to launch the command on the server.",
+        "timeout": "Command timed out (120 seconds).",
+        "forbidden_control_char": "A forbidden control character was detected in the stored command — execution cancelled.",
+        "internal": "Internal server error.",
+        "result": {
+          "title": "Execution result",
+          "exitCode": "Exit code: {{code}}",
+          "stdout": "Output (stdout)",
+          "stderr": "Errors (stderr)",
+          "truncated": "Output truncated — limit: 64 KB",
+          "noOutput": "(no output)",
+          "close": "Close"
+        },
+        "lineInfo": "{{count}} line(s)",
+        "executionTarget": "Execution target: local Nassaj server — service user «nassaj»",
+        "executionTargetWarn": "Commands written for another machine (e.g. a VM or remote server) must not be executed here.",
+        "digest_mismatch": "The command changed after it was displayed — execution cancelled. Reloading the list.",
+        "not_found": "The command no longer exists — it may have been run or dismissed elsewhere.",
+        "action_in_flight": "Another command is running. Wait for it to finish.",
+        "exec_failed": "Failed to launch the command on the server.",
+        "raw_exec_disabled": "The master switch for the dangerous tier is off — arm it in Command Board settings.",
+        "raw_exec_blocked": "The dangerous tier is blocked in this environment and cannot be armed.",
+        "config_denied": "Your role does not hold the \"Run any command\" tier.",
+        "unauthenticated": "Your session expired — sign in again.",
+        "clientDigestUnavailable": "The local integrity check could not run in this context (insecure origin). The server still binds the digest — read the command carefully.",
+        "restarting": "The command ran and is restarting the server, so no reply could return. Waiting for it to come back…",
+        "restartSuccess": "The server is back. The command completed.",
+        "audit_unavailable": "Refused: the audit record could not be written, so nothing was run. Raw execution is never left unlogged.",
+        "denied_command": "Blocked: this command disrupts a live service (rule: {{rule}}). The command board never runs lifecycle commands — run it in your own terminal.",
+        "requestedBy": "Queued by: {{name}}",
+        "unattributed": "Origin not recorded — no requester was logged for this command"
+      }
+    }
+  },
+  "subscriptions": {
+    "title": "Active subscriptions",
+    "empty": "No authenticated subscriptions",
+    "loading": "Loading…",
+    "error": "Could not load subscriptions",
+    "monthToDate": "This cycle",
+    "cycleSince": "Since {{date}}",
+    "anchorLabel": "Cycle start day",
+    "anchorHint": "No provider exposes the billing date — set it yourself",
+    "apiEquivalent": "API-equivalent value on a subscription — not an amount billed",
+    "billed": "Billed",
+    "unavailable": "Not available",
+    "partial": "Partial",
+    "pricesAsOf": "Prices as of {{date}}",
+    "byModel": "By model",
+    "harnessTotal": "Harness total",
+    "showBreakdown": "Show model breakdown",
+    "hideBreakdown": "Hide model breakdown",
+    "unpricedModel": "No official price",
+    "anchorSource": {
+      "detected": "From your subscription data",
+      "derived": "Estimated from earliest usage",
+      "manual": "Set by you",
+      "unknown": "Calendar month — no subscription date found"
+    },
+    "viaHarness": "via {{harness}}",
+    "subscriptionTotal": "Subscription total",
+    "assumedPrice": "Estimated price — {{models}} has no published rate"
+  }
+}

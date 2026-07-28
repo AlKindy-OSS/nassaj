@@ -1,0 +1,281 @@
+{
+  "sections": {
+    "overview": "Übersicht",
+    "objectives": "Ziele",
+    "schedule": "Zeitplan",
+    "tasks": "Aufgaben",
+    "issues": "Probleme",
+    "visual": "Visuelle Prüfungen",
+    "decisions": "Entscheidungen",
+    "architecture": "Architektur"
+  },
+  "updated": "Aktualisiert {{date}}",
+  "overallProgress": "Gesamtfortschritt",
+  "error": "Projektboard konnte nicht geladen werden.",
+  "stateError": "project-state.json ist ungültig — letzte gültige Version wird angezeigt.",
+  "empty": {
+    "title": "Noch kein Projektboard",
+    "description": "Dieses Projekt hat keine Projektstatusdatei. Erstelle sie, um ein Live-Board mit Phasen, Aufgaben und Problemen zu erhalten.",
+    "hint": "Das Board aktualisiert sich automatisch, wenn sich die Datei ändert — kein Neuladen nötig.",
+    "copyTemplate": "Starter-Vorlage kopieren",
+    "copied": "Kopiert — in die Datei einfügen"
+  },
+  "phases": {
+    "title": "Phasen",
+    "current": "Aktuelle Phase",
+    "planned": "Geplant",
+    "runnerHere": "al-Minwāl hier",
+    "progressCount": "{{progress}}% ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "Aktueller Sprint",
+    "started": "Gestartet {{date}}",
+    "ended": "Beendet {{date}}",
+    "taskCount": "Aufgaben {{done}}/{{total}}",
+    "others": "Andere Sprints ({{count}})",
+    "status": {
+      "planned": "Geplant",
+      "current": "Aktuell",
+      "done": "Erledigt"
+    }
+  },
+  "tasksSection": {
+    "title": "Aufgaben",
+    "open": "Offen",
+    "in_progress": "In Bearbeitung",
+    "done": "Erledigt",
+    "empty": "Keine Aufgaben",
+    "kind": {
+      "feature": "Feature",
+      "bug": "Fehler",
+      "chore": "Wartung",
+      "spike": "Spike"
+    },
+    "issueLink": "Problem {{id}} anzeigen",
+    "cancelled": "Abgebrochen ({{count}})",
+    "status": {
+      "todo": "offen",
+      "pending": "ausstehend",
+      "blocked": "blockiert",
+      "backlog": "Backlog",
+      "deferred": "zurückgestellt",
+      "closed": "geschlossen",
+      "fixed": "behoben",
+      "resolved": "gelöst",
+      "accepted": "angenommen",
+      "cancelled": "abgebrochen",
+      "wontfix": "wird nicht behoben",
+      "unknown": "unbekannt"
+    }
+  },
+  "issues": {
+    "title": "Probleme",
+    "severity": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "status": {
+      "open": "Offen",
+      "fixed": "Behoben",
+      "wontfix": "Wird nicht behoben"
+    },
+    "empty": "Keine Probleme erfasst."
+  },
+  "decisions": {
+    "title": "Entscheidungen",
+    "empty": "Noch keine Entscheidungen",
+    "openLink": "Entscheidungsdokument {{id}} öffnen"
+  },
+  "schedule": {
+    "title": "Zeitplan (Gantt)",
+    "critical": "Kritisch",
+    "legendScheduled": "Geplant",
+    "legendCritical": "Kritischer Pfad",
+    "legendMilestone": "Meilenstein",
+    "cpm": {
+      "cycle": "Kritischer Pfad übersprungen: Abhängigkeitszyklus erkannt.",
+      "missingDeps": "Einige Abhängigkeiten verweisen auf fehlende Elemente und wurden im kritischen Pfad ignoriert."
+    },
+    "noDates": "Keine gültigen Datumsangaben zum Zeichnen des Zeitplans.",
+    "progress": "Fortschritt {{value}}%",
+    "durationDays": "Dauer: {{days}} Tage",
+    "owner": "Verantwortlich: {{name}}",
+    "deliverable": "Lieferergebnis: {{id}}",
+    "deliverableLink": "Lieferergebnis {{id}} anzeigen",
+    "dependsOn": "Abhängig von: {{ids}}"
+  },
+  "deliverables": {
+    "title": "Lieferergebnisse",
+    "due": "Fällig {{date}}",
+    "overdue": "Überfällig",
+    "acceptance": "Abnahmekriterium",
+    "deliveredBy": "Geliefert von: {{ids}}",
+    "statuses": {
+      "pending": "Ausstehend",
+      "in_progress": "In Bearbeitung",
+      "delivered": "Geliefert",
+      "accepted": "Akzeptiert",
+      "rejected": "Abgelehnt"
+    }
+  },
+  "objectives": {
+    "title": "Ziele (OKR)",
+    "baseline": "Ausgangswert: {{value}}",
+    "statuses": {
+      "on_track": "Im Plan",
+      "at_risk": "Gefährdet",
+      "off_track": "Nicht im Plan",
+      "done": "Erledigt"
+    }
+  },
+  "kpis": {
+    "title": "KPIs",
+    "target": "Zielwert: {{value}}"
+  },
+  "visualChecks": {
+    "title": "Visuelle Prüfungen",
+    "empty": "Noch keine visuellen Prüfungen.",
+    "step": "Schritt",
+    "expect": "Erwartet",
+    "result": "Hinweis des Eigentümers",
+    "counter": "Überprüft {{verified}} / {{total}}",
+    "status": {
+      "pending": "Ausstehende Prüfung",
+      "verified": "Überprüft",
+      "failed": "Fehlgeschlagen"
+    }
+  },
+  "architecture": {
+    "technical": "Technisch",
+    "simplified": "Vereinfacht",
+    "missing": "Keine Architekturdokumente gefunden (docs/ARCHITECTURE.md oder docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "Diese Version des Architekturdokuments existiert nicht."
+  },
+  "approvals": {
+    "title": "Ausstehende Genehmigungen",
+    "awaitingReview": "Wartet auf deine Überprüfung",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "pending": "Wird gesendet…",
+    "error": "Aktion fehlgeschlagen. Erneut versuchen.",
+    "kind": {
+      "prod-migration": "Produktionsmigration",
+      "secret": "Geheimnis",
+      "restart": "Neustart",
+      "push": "Push",
+      "sensitive": "Sensible Aktion"
+    }
+  },
+  "runner": {
+    "label": "al-Minwāl",
+    "description": "Autonomer Runner",
+    "fullName": "al-Minwāl (Autonomer Runner)",
+    "cycle": "Zyklus {{n}}",
+    "stage": "Stufe",
+    "model": "Modell",
+    "quota": "Kontingent",
+    "task": "Aufgabe",
+    "phase": "Phase",
+    "verdict": "Letztes Urteil",
+    "clean": "sauber",
+    "unclean": "unsauber",
+    "pendingTick": "Wartet auf nächsten Takt…",
+    "status": {
+      "idle": "Inaktiv",
+      "running": "Läuft",
+      "building": "Wird gebaut",
+      "verifying": "Wird überprüft",
+      "interrupted": "Unterbrochen (Kontingent)",
+      "failed": "Fehlgeschlagen",
+      "blocked": "Blockiert",
+      "paused": "Pausiert",
+      "awaiting_approval": "Wartet auf Genehmigung",
+      "disabled": "Deaktiviert"
+    },
+    "statusLine": {
+      "running": "🟢 al-Minwāl arbeitet",
+      "awaiting": "🔵 al-Minwāl wartet auf Genehmigung",
+      "interrupted": "🟡 al-Minwāl pausiert",
+      "failed": "🔴 al-Minwāl fehlgeschlagen",
+      "idle": "⚪ al-Minwāl inaktiv"
+    },
+    "stages": {
+      "review": "Überprüfung",
+      "fix": "Korrektur",
+      "critique": "Kritik",
+      "phase": "Buildphase",
+      "awaiting_approval": "Wartet auf Genehmigung"
+    },
+    "actions": {
+      "start": "Starten",
+      "stop": "Stoppen",
+      "pause": "Pausieren",
+      "resume": "Fortsetzen",
+      "approve": "Phase genehmigen",
+      "enable": "Aktivieren",
+      "enableHint": "al-Minwāl für dieses Projekt wieder aktivieren",
+      "disable": "Deaktivieren",
+      "disableHint": "Das Projekt in der Registrierung von al-Minwāl deaktivieren (keine neuen Zyklen bis zur Aktivierung) — beendet keinen laufenden Zyklus",
+      "forceStop": "Erzwungener Stopp",
+      "forceStopHint": "Laufenden Zyklus sofort durch Beenden der Sitzung stoppen, dann Neustart blockieren",
+      "forceStopConfirm": "Dadurch wird der laufende Zyklus sofort durch Beenden der Sitzung gestoppt. Fortfahren?",
+      "forceStopConfirmYes": "Ja, jetzt stoppen",
+      "forceStopCancel": "Abbrechen"
+    },
+    "errors": {
+      "notAwaiting": "Der Runner wartet gerade nicht auf die Genehmigung einer Phase.",
+      "forceStopFailed": "Sofortiger Stopp fehlgeschlagen (Einheit konnte nicht gestoppt werden). Der Zyklus läuft möglicherweise noch — erneut versuchen.",
+      "generic": "Die Aktion konnte nicht ausgeführt werden."
+    },
+    "journey": {
+      "title": "Runner-Verlauf",
+      "here": "Runner hier",
+      "cyclesCount": "Zyklen ({{n}})",
+      "noCycles": "Der Runner hat noch keine Zyklen gestartet",
+      "cycleN": "Zyklus {{n}}",
+      "showAll": "Alle anzeigen ({{n}})",
+      "stale": "Möglicherweise eingefroren",
+      "phasesLabel": "Zyklusstufen",
+      "stage": {
+        "build": "Build",
+        "verify": "Überprüfung",
+        "verdict": "Urteil",
+        "gate": "Gate"
+      },
+      "cycleStatus": {
+        "succeeded": "Erfolgreich",
+        "failed": "Fehlgeschlagen",
+        "interrupted": "Unterbrochen"
+      }
+    }
+  },
+  "stats": {
+    "tab": "Statistik",
+    "totalLabel": "Gesamtkosten (gesamter Zeitraum)",
+    "headerTotal": "Gesamt",
+    "headerTotalTitle": "Kumulierte Kosten dieses Projekts — bleiben auch nach dem Löschen von Unterhaltungen erhalten",
+    "span": "Zeitraum",
+    "activeDays": "Aktive Tage",
+    "activeDaysOfSpan": "von {{span}} Tagen",
+    "conversations": "Unterhaltungen",
+    "agents": "Agenten",
+    "firstActivity": "Erste Aktivität",
+    "lastActivity": "Letzte Aktivität",
+    "dailyTitle": "Tageskosten",
+    "dailyPeak": "Spitze",
+    "byVendor": "Nach Anbieter",
+    "byModel": "Nach Modell",
+    "partialShort": "Teilweise",
+    "partialModels": "Teilsumme — kein offizieller Preis für: {{models}}",
+    "apiEquivalent": "API-äquivalenter Wert der Nutzung im Abo — kein berechneter Betrag",
+    "pricesAsOf": "Preise vom {{date}}",
+    "unavailable": "Nicht verfügbar",
+    "empty": "Für dieses Projekt wurden noch keine Kosten erfasst."
+  },
+  "summary": {
+    "tasksDone": "{{done}} erledigt",
+    "issuesOpen": "{{open}} offen"
+  }
+}

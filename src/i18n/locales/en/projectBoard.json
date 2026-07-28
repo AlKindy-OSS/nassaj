@@ -1,0 +1,281 @@
+{
+  "sections": {
+    "overview": "Overview",
+    "objectives": "Objectives",
+    "schedule": "Timeline",
+    "tasks": "Tasks",
+    "issues": "Issues",
+    "visual": "Visual Checks",
+    "decisions": "Decisions",
+    "architecture": "Architecture"
+  },
+  "updated": "Updated {{date}}",
+  "overallProgress": "Overall progress",
+  "error": "Failed to load the project board.",
+  "stateError": "project-state.json is invalid — showing the last valid version.",
+  "empty": {
+    "title": "No project board yet",
+    "description": "This project has no project state file. Create it to get a live board of phases, tasks and issues.",
+    "hint": "The board updates automatically whenever the file changes — no refresh needed.",
+    "copyTemplate": "Copy starter template",
+    "copied": "Copied — paste it into the file"
+  },
+  "phases": {
+    "title": "Phases",
+    "current": "Current",
+    "planned": "Planned",
+    "runnerHere": "al-Minwāl here",
+    "progressCount": "{{progress}}% ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "Current sprint",
+    "started": "Started {{date}}",
+    "ended": "Ended {{date}}",
+    "taskCount": "Tasks {{done}}/{{total}}",
+    "others": "Other sprints ({{count}})",
+    "status": {
+      "planned": "Planned",
+      "current": "Current",
+      "done": "Done"
+    }
+  },
+  "tasksSection": {
+    "title": "Tasks",
+    "open": "Open",
+    "in_progress": "In progress",
+    "done": "Done",
+    "empty": "No tasks",
+    "kind": {
+      "feature": "Feature",
+      "bug": "Bug",
+      "chore": "Chore",
+      "spike": "Spike"
+    },
+    "issueLink": "View issue {{id}}",
+    "cancelled": "Cancelled ({{count}})",
+    "status": {
+      "todo": "todo",
+      "pending": "pending",
+      "blocked": "blocked",
+      "backlog": "backlog",
+      "deferred": "deferred",
+      "closed": "closed",
+      "fixed": "fixed",
+      "resolved": "resolved",
+      "accepted": "accepted",
+      "cancelled": "cancelled",
+      "wontfix": "wont fix",
+      "unknown": "unknown"
+    }
+  },
+  "issues": {
+    "title": "Issues",
+    "severity": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "status": {
+      "open": "Open",
+      "fixed": "Fixed",
+      "wontfix": "Won't fix"
+    },
+    "empty": "No issues logged."
+  },
+  "decisions": {
+    "title": "Decisions",
+    "empty": "No decisions yet",
+    "openLink": "Open decision document {{id}}"
+  },
+  "schedule": {
+    "title": "Timeline (Gantt)",
+    "critical": "Critical",
+    "legendScheduled": "Scheduled",
+    "legendCritical": "Critical path",
+    "legendMilestone": "Milestone",
+    "cpm": {
+      "cycle": "Critical path skipped: dependency cycle detected.",
+      "missingDeps": "Some dependencies reference missing items and were ignored in the critical path."
+    },
+    "noDates": "No valid dates to draw the timeline.",
+    "progress": "Progress {{value}}%",
+    "durationDays": "Duration: {{days}} days",
+    "owner": "Owner: {{name}}",
+    "deliverable": "Deliverable: {{id}}",
+    "deliverableLink": "View deliverable {{id}}",
+    "dependsOn": "Depends on: {{ids}}"
+  },
+  "deliverables": {
+    "title": "Deliverables",
+    "due": "Due {{date}}",
+    "overdue": "Overdue",
+    "acceptance": "Acceptance criterion",
+    "deliveredBy": "Delivered by: {{ids}}",
+    "statuses": {
+      "pending": "Pending",
+      "in_progress": "In progress",
+      "delivered": "Delivered",
+      "accepted": "Accepted",
+      "rejected": "Rejected"
+    }
+  },
+  "objectives": {
+    "title": "Objectives (OKR)",
+    "baseline": "Baseline: {{value}}",
+    "statuses": {
+      "on_track": "On track",
+      "at_risk": "At risk",
+      "off_track": "Off track",
+      "done": "Done"
+    }
+  },
+  "kpis": {
+    "title": "KPIs",
+    "target": "Target: {{value}}"
+  },
+  "visualChecks": {
+    "title": "Visual Checks",
+    "empty": "No visual checks yet.",
+    "step": "Step",
+    "expect": "Expected",
+    "result": "Owner note",
+    "counter": "Verified {{verified}} / {{total}}",
+    "status": {
+      "pending": "Awaiting check",
+      "verified": "Verified",
+      "failed": "Failed"
+    }
+  },
+  "architecture": {
+    "technical": "Technical",
+    "simplified": "Simplified",
+    "missing": "No architecture documents found (docs/ARCHITECTURE.md or docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "This version of the architecture document does not exist."
+  },
+  "approvals": {
+    "title": "Pending approvals",
+    "awaitingReview": "Awaiting your review",
+    "approve": "Approve",
+    "reject": "Reject",
+    "pending": "Submitting…",
+    "error": "Action failed. Try again.",
+    "kind": {
+      "prod-migration": "Production migration",
+      "secret": "Secret",
+      "restart": "Restart",
+      "push": "Push",
+      "sensitive": "Sensitive action"
+    }
+  },
+  "runner": {
+    "label": "al-Minwāl",
+    "description": "Autonomous Runner",
+    "fullName": "al-Minwāl (Autonomous Runner)",
+    "cycle": "Cycle {{n}}",
+    "stage": "Stage",
+    "model": "Model",
+    "quota": "Quota",
+    "task": "Task",
+    "phase": "Phase",
+    "verdict": "Last verdict",
+    "clean": "clean",
+    "unclean": "unclean",
+    "pendingTick": "Pending next tick…",
+    "status": {
+      "idle": "Idle",
+      "running": "Running",
+      "building": "Building",
+      "verifying": "Verifying",
+      "interrupted": "Interrupted (quota)",
+      "failed": "Failed",
+      "blocked": "Blocked",
+      "paused": "Paused",
+      "awaiting_approval": "Awaiting approval",
+      "disabled": "Disabled"
+    },
+    "statusLine": {
+      "running": "🟢 al-Minwāl working",
+      "awaiting": "🔵 al-Minwāl awaiting approval",
+      "interrupted": "🟡 al-Minwāl paused",
+      "failed": "🔴 al-Minwāl failed",
+      "idle": "⚪ al-Minwāl idle"
+    },
+    "stages": {
+      "review": "Review",
+      "fix": "Fix",
+      "critique": "Critique",
+      "phase": "Build phase",
+      "awaiting_approval": "Awaiting approval"
+    },
+    "actions": {
+      "start": "Start",
+      "stop": "Stop",
+      "pause": "Pause",
+      "resume": "Resume",
+      "approve": "Approve phase",
+      "enable": "Enable",
+      "enableHint": "Re-enable al-Minwāl for this project",
+      "disable": "Disable",
+      "disableHint": "Disable the project in al-Minwāl's registry (no new cycles until enabled) — does not end a running cycle",
+      "forceStop": "Force stop",
+      "forceStopHint": "End the running cycle immediately by terminating its session, then block relaunch",
+      "forceStopConfirm": "This will end the running cycle immediately by terminating its session. Continue?",
+      "forceStopConfirmYes": "Yes, stop now",
+      "forceStopCancel": "Cancel"
+    },
+    "errors": {
+      "notAwaiting": "The runner is not awaiting phase approval right now.",
+      "forceStopFailed": "Immediate stop failed (could not stop the unit). The cycle may still be running — try again.",
+      "generic": "Could not perform the action."
+    },
+    "journey": {
+      "title": "Runner Journey",
+      "here": "Runner here",
+      "cyclesCount": "Cycles ({{n}})",
+      "noCycles": "The runner has not started any cycles yet",
+      "cycleN": "Cycle {{n}}",
+      "showAll": "Show all ({{n}})",
+      "stale": "May be frozen",
+      "phasesLabel": "Cycle stages",
+      "stage": {
+        "build": "Build",
+        "verify": "Verify",
+        "verdict": "Verdict",
+        "gate": "Gate"
+      },
+      "cycleStatus": {
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "interrupted": "Interrupted"
+      }
+    }
+  },
+  "stats": {
+    "tab": "Statistics",
+    "totalLabel": "Total cost (all time)",
+    "headerTotal": "All time",
+    "headerTotalTitle": "Cumulative cost for this project — kept even after conversations are deleted",
+    "span": "Time span",
+    "activeDays": "Active days",
+    "activeDaysOfSpan": "of {{span}} days",
+    "conversations": "Conversations",
+    "agents": "Agents",
+    "firstActivity": "First activity",
+    "lastActivity": "Last activity",
+    "dailyTitle": "Daily cost",
+    "dailyPeak": "Peak",
+    "byVendor": "By vendor",
+    "byModel": "By model",
+    "partialShort": "Partial",
+    "partialModels": "Partial total — no official price for: {{models}}",
+    "apiEquivalent": "API-equivalent value of usage on a subscription — not an amount billed",
+    "pricesAsOf": "Prices as of {{date}}",
+    "unavailable": "Not available",
+    "empty": "No cost data has been measured for this project yet."
+  },
+  "summary": {
+    "tasksDone": "{{done}} done",
+    "issuesOpen": "{{open}} open"
+  }
+}

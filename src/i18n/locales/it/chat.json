@@ -1,0 +1,536 @@
+{
+  "btw": {
+    "title": "Domanda a margine",
+    "close": "Chiudi",
+    "questionLabel": "Domanda",
+    "answerLabel": "Risposta",
+    "status": {
+      "pending": "Preparazione…",
+      "streaming": "Sta scrivendo…",
+      "complete": "Completato",
+      "thinking": "Sta pensando…"
+    },
+    "errors": {
+      "unsupported_provider": "Il canale laterale «/btw» è disponibile solo per le sessioni Claude.",
+      "session_not_found": "Sessione non trovata — apri prima una sessione, poi poni la tua domanda a margine.",
+      "not_visible": "Non hai i permessi per vedere il contesto di questa sessione.",
+      "busy": "La sessione è occupata — riprova tra poco.",
+      "sdk_error": "Impossibile completare la domanda a margine — si è verificato un errore imprevisto.",
+      "timeout": "Questa funzione richiede un aggiornamento del server.",
+      "disconnected": "Impossibile inviare — connessione persa."
+    },
+    "hints": {
+      "quota": "Consuma la tua quota Claude.",
+      "context": "Risponde in base al contesto della sessione fino all'ultimo messaggio salvato."
+    },
+    "description": "Poni una domanda a margine sul contesto della sessione corrente"
+  },
+  "contextRot": {
+    "label": "Contesto",
+    "barAria": "Utilizzo del contesto",
+    "empty": "Nessun utilizzo di token ancora",
+    "percentUsed": "{{percent}} della finestra reale",
+    "tooltipUsed": "Usato della finestra reale: {{used}} / {{total}}",
+    "tooltipCacheRead": "Lettura cache: {{value}}",
+    "popoverTitle": "Utilizzo del contesto",
+    "close": "Chiudi",
+    "levels": {
+      "safe": "Sicuro — il contesto è in buona salute.",
+      "attention": "Attenzione — il contesto si sta riempiendo.",
+      "warning": "Possibile degrado — considera /compact o un sottoagente.",
+      "critical": "Degrado severo — considera di avviare una nuova sessione."
+    }
+  },
+  "codeBlock": {
+    "copy": "Copia",
+    "copied": "Copiato",
+    "copyCode": "Copia codice",
+    "executeRaw": "Esegui",
+    "executeRawTitle": "Esegui questo comando sul server Nassaj (apre il dialogo di revisione)",
+    "inserting": "Aggiunta alla coda…",
+    "insertError": {
+      "carriage_return_forbidden": "Il comando contiene \\r (Windows) — incollare di nuovo con LF",
+      "too_many_lines": "Il comando supera il limite (100 righe)",
+      "empty_command": "Il comando è vuoto",
+      "command_too_long": "Comando troppo lungo (max 4096 caratteri)",
+      "too_many_commands": "La coda è piena (max 20 comandi)",
+      "raw_exec_disabled": "Esecuzione diretta disabilitata",
+      "config_denied": "Non consentito — controllare le impostazioni della lavagna",
+      "internal": "Impossibile aggiungere il comando alla coda",
+      "denied_command": "Bloccato: questo comando interrompe un servizio attivo (regola: {{rule}}). La bacheca comandi non esegue mai comandi di ciclo di vita — eseguilo nel tuo terminale.",
+      "forbidden_control_char": "Il comando contiene un carattere di controllo o bidi vietato — potrebbe apparire diverso da ciò che viene eseguito",
+      "invalid_command": "Comando non valido",
+      "stamp": "Dal tuo clic alle {{time}} — non è uno stato in tempo reale",
+      "stampRepeat": "Tentativo {{count}} alle {{time}} — stesso risultato",
+      "dismiss": "Chiudi"
+    }
+  },
+  "copyMessage": {
+    "copy": "Copia messaggio",
+    "copied": "Messaggio copiato",
+    "selectFormat": "Seleziona formato copia",
+    "copyAsMarkdown": "Copia come markdown",
+    "copyAsText": "Copia come testo"
+  },
+  "messageTypes": {
+    "user": "U",
+    "error": "Errore",
+    "tool": "Strumento",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "Sottoagente",
+    "shortBadge": "Sottoagente",
+    "badgeLabel": "Attività sottoagente"
+  },
+  "coordinator": {
+    "label": "Coordinatore",
+    "withName": "Coordinatore: {{username}}"
+  },
+  "userAuthor": {
+    "withName": "Utente: {{username}}"
+  },
+  "externalOrigin": {
+    "label": "Creato al di fuori dell'interfaccia"
+  },
+  "coordinatorPrompt": {
+    "label": "Coordinatore → Sottoagente",
+    "ariaLabel": "Prompt del coordinatore al sottoagente"
+  },
+  "systemMessage": {
+    "label": "Messaggio di sistema",
+    "ariaLabel": "Messaggio di sistema automatico"
+  },
+  "sessionNotResumable": {
+    "message": "Questa sessione non può essere ripresa — non esiste più presso il provider.",
+    "startNew": "Avvia una nuova sessione"
+  },
+  "tools": {
+    "settings": "Impostazioni strumento",
+    "error": "Errore strumento",
+    "result": "Risultato strumento",
+    "viewParams": "Vedi parametri input",
+    "viewRawParams": "Vedi parametri grezzi",
+    "viewDiff": "Vedi differenze per",
+    "creatingFile": "Creazione nuovo file:",
+    "updatingTodo": "Aggiornamento lista attività",
+    "read": "Leggi",
+    "readFile": "Leggi file",
+    "updateTodo": "Aggiorna lista attività",
+    "readTodo": "Leggi lista attività",
+    "searchResults": "risultati"
+  },
+  "search": {
+    "found": "Trovati {{count}} {{type}}",
+    "file": "file",
+    "files": "file",
+    "pattern": "pattern:",
+    "in": "in:"
+  },
+  "fileOperations": {
+    "updated": "File aggiornato con successo",
+    "created": "File creato con successo",
+    "written": "File scritto con successo",
+    "diff": "Differenze",
+    "newFile": "Nuovo file",
+    "viewContent": "Vedi contenuto file",
+    "viewFullOutput": "Vedi output completo ({{count}} caratteri)",
+    "contentDisplayed": "Il contenuto del file è visualizzato nella vista differenze sopra"
+  },
+  "interactive": {
+    "title": "Prompt interattivo",
+    "waiting": "In attesa della tua risposta nella CLI",
+    "instruction": "Seleziona un'opzione nel terminale dove Claude è in esecuzione.",
+    "selectedOption": "✓ Claude ha selezionato l'opzione {{number}}",
+    "instructionDetail": "Nella CLI, selezioneresti questa opzione interattivamente usando i tasti freccia o digitando il numero."
+  },
+  "thinking": {
+    "title": "Sto pensando...",
+    "emoji": "💭 Sto pensando..."
+  },
+  "json": {
+    "response": "Risposta JSON"
+  },
+  "permissions": {
+    "grant": "Concedi permesso per {{tool}}",
+    "added": "Permesso aggiunto",
+    "addTo": "Aggiunge {{entry}} agli strumenti consentiti.",
+    "retry": "Permesso salvato. Riprova la richiesta per usare lo strumento.",
+    "error": "Impossibile aggiornare i permessi. Riprova.",
+    "openSettings": "Apri impostazioni"
+  },
+  "todo": {
+    "updated": "Lista attività aggiornata con successo",
+    "current": "Lista attività corrente"
+  },
+  "plan": {
+    "viewPlan": "📋 Vedi piano di implementazione",
+    "title": "Piano di implementazione"
+  },
+  "usageLimit": {
+    "resetAt": "Limite di utilizzo Claude raggiunto. Il tuo limite verrà ripristinato alle **{{time}} {{timezone}}** - {{date}}"
+  },
+  "codex": {
+    "permissionMode": "Modalità permessi",
+    "modes": {
+      "default": "Modalità predefinita",
+      "auto": "Modalità automatica",
+      "acceptEdits": "Accetta modifiche",
+      "bypassPermissions": "Ignora permessi",
+      "plan": "Modalità piano"
+    },
+    "descriptions": {
+      "default": "Solo i comandi attendibili (ls, cat, grep, git status, ecc.) vengono eseguiti automaticamente. Gli altri comandi vengono saltati. Può scrivere nell'area di lavoro.",
+      "auto": "Un classificatore del modello decide per ogni chiamata strumento se approvare o rifiutare. Non richiede intervento, ma è più sicuro di Bypass — i rifiuti avvengono comunque.",
+      "acceptEdits": "Tutti i comandi vengono eseguiti automaticamente nell'area di lavoro. Modalità completamente automatica con esecuzione sandboxed.",
+      "bypassPermissions": "Accesso completo al sistema senza restrizioni. Tutti i comandi vengono eseguiti automaticamente con accesso completo a disco e rete. Usa con cautela.",
+      "plan": "Modalità pianificazione - nessun comando viene eseguito"
+    },
+    "technicalDetails": "Dettagli tecnici",
+    "posture": {
+      "title": "Limite effettivo della sandbox",
+      "default": "sandbox: workspace-write · approvazioni: untrusted · rete: OFF",
+      "acceptEdits": "sandbox: workspace-write · approvazioni: never · rete: OFF",
+      "bypassPermissions": "sandbox: workspace-write · approvazioni: never · rete: OFF — identico ad \"Accetta modifiche\". L’accesso completo a disco e rete è possibile solo se l’operatore lo ha abilitato per questa installazione (disattivato per impostazione predefinita)."
+    }
+  },
+  "gemini": {
+    "permissionMode": "Modalità permessi Gemini",
+    "description": "Controlla come Gemini CLI gestisce le approvazioni delle operazioni.",
+    "modes": {
+      "default": {
+        "title": "Standard (chiedi approvazione)",
+        "description": "Gemini chiederà l'approvazione prima di eseguire comandi, scrivere file e recuperare risorse web."
+      },
+      "autoEdit": {
+        "title": "Modifica automatica (salta approvazioni file)",
+        "description": "Gemini approverà automaticamente modifiche ai file e recupero web, ma chiederà conferma per i comandi shell."
+      },
+      "yolo": {
+        "title": "YOLO (ignora tutti i permessi)",
+        "description": "Gemini eseguirà tutte le operazioni senza chiedere approvazione. Usa con cautela."
+      }
+    }
+  },
+  "input": {
+    "placeholder": "Digita / per i comandi, @ per i file, o chiedi qualcosa a {{provider}}...",
+    "placeholderDefault": "Scrivi il tuo messaggio...",
+    "disabled": "Input disabilitato",
+    "attachFiles": "Allega file",
+    "attachFilesAndImages": "Allega file o immagini",
+    "attachImages": "Allega immagini",
+    "send": "Invia",
+    "stop": "Ferma",
+    "hintText": {
+      "ctrlEnter": "Ctrl+Invio per inviare • Shift+Invio per nuova riga",
+      "enter": "Invio per inviare • Shift+Invio per nuova riga"
+    },
+    "clickToChangeMode": "Clicca per cambiare modalità permessi (o premi Tab nell'input)",
+    "showAllCommands": "Mostra tutti i comandi",
+    "clearInput": "Cancella input",
+    "scrollToBottom": "Scorri in basso",
+    "dropFilesHere": "Trascina i file qui",
+    "nonClaudeAttachmentHint": "Gli allegati vengono utilizzati solo con Claude"
+  },
+  "fileAttachment": {
+    "removeFile": "Rimuovi file",
+    "uploading": "Caricamento…",
+    "errorType": "Tipo di file non consentito",
+    "errorSize": "File troppo grande (max 50 MB)",
+    "errorCount": "Troppi file allegati (max {{max}})"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "Livello di impegno",
+      "description": "Controlla quante risorse Claude dedica alla tua richiesta",
+      "active": "Attivo",
+      "tip": "ultracode attiva la massima profondità con formattazione multi-agente — ultracode e max aggiungono indicatori cromatici"
+    },
+    "modes": {
+      "none": {
+        "name": "auto",
+        "description": "Usa il livello di effort predefinito del tuo modello"
+      },
+      "low": {
+        "name": "low",
+        "description": "Risposte rapide e leggere — ideale per domande semplici"
+      },
+      "medium": {
+        "name": "medium",
+        "description": "Equilibrio tra profondità e velocità"
+      },
+      "high": {
+        "name": "high",
+        "description": "Ragionamento più profondo per compiti complessi"
+      },
+      "xhigh": {
+        "name": "xhigh",
+        "description": "Impegno molto elevato per problemi impegnativi"
+      },
+      "max": {
+        "name": "max",
+        "description": "Impegno massimo — budget di calcolo completo (solo questa sessione, non salvato nelle impostazioni)"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "Modalità sessione: xhigh + formattazione workshop dinamica — non un livello di impegno salvato"
+      }
+    },
+    "buttonTitle": "Impegno: {{mode}}",
+    "ultracodeActive": "Sforzo Ultracode attivo"
+  },
+  "providerSelection": {
+    "title": "Scegli il tuo assistente AI",
+    "description": "Seleziona un provider per iniziare una nuova conversazione",
+    "selectModel": "Seleziona modello",
+    "providerInfo": {
+      "anthropic": "di Anthropic",
+      "openai": "di OpenAI",
+      "cursorEditor": "Editor codice AI",
+      "google": "di Google"
+    },
+    "readyPrompt": {
+      "claude": "Pronto a usare Claude con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "cursor": "Pronto a usare Cursor con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "codex": "Pronto a usare Codex con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "gemini": "Pronto a usare Gemini con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "antigravity": "Pronto a usare Antigravity (agy). Il modello viene scelto dalle impostazioni di agy.",
+      "opencode": "Pronto a usare OpenCode con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "default": "Seleziona un provider sopra per iniziare",
+      "kimi": "Pronto a usare Kimi con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "deepseek": "Pronto a usare DeepSeek con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "glm": "Pronto a usare GLM con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "claudeEngine": "Pronto: il motore Claude gira su {{provider}} con {{model}}. Inizia a digitare il tuo messaggio qui sotto."
+    },
+    "antigravity": {
+      "activeModel": "Modello attivo",
+      "activeModelLabel": "Modello attivo",
+      "loading": "Caricamento…",
+      "unknown": "Sconosciuto"
+    },
+    "pressToSearch": "Premi <kbd>{{shortcut}}</kbd> per cercare sessioni, file e commit",
+    "refresh": {
+      "button": "Aggiorna modelli e stato autenticazione",
+      "refreshing": "Aggiornamento…"
+    },
+    "providerUnavailable": "Provider non disponibile",
+    "signIn": "Accedi",
+    "addApiKey": "Aggiungi la chiave API {{provider}} per abilitarlo",
+    "engineOnVendor": "Motore Claude su {{provider}}"
+  },
+  "session": {
+    "continue": {
+      "title": "Continua la tua conversazione",
+      "description": "Fai domande sul tuo codice, richiedi modifiche o chiedi aiuto con le attività di sviluppo"
+    },
+    "loading": {
+      "olderMessages": "Caricamento messaggi precedenti...",
+      "sessionMessages": "Caricamento messaggi della sessione..."
+    },
+    "messages": {
+      "showingOf": "Visualizzati {{shown}} di {{total}} messaggi",
+      "scrollToLoad": "Scorri in alto per caricare altri",
+      "showingLast": "Visualizzati ultimi {{count}} messaggi ({{total}} totali)",
+      "loadEarlier": "Carica messaggi precedenti",
+      "loadAll": "Carica tutti i messaggi",
+      "loadingAll": "Caricamento di tutti i messaggi...",
+      "allLoaded": "Tutti i messaggi caricati",
+      "perfWarning": "Tutti i messaggi caricati — lo scorrimento potrebbe essere più lento. Clicca \"Scorri in basso\" per ripristinare le prestazioni."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "Seleziona un progetto",
+      "description": "Scegli un progetto per aprire una shell interattiva in quella directory"
+    },
+    "status": {
+      "newSession": "Nuova sessione",
+      "initializing": "Inizializzazione...",
+      "restarting": "Riavvio..."
+    },
+    "actions": {
+      "disconnect": "Disconnetti",
+      "disconnectTitle": "Disconnetti dalla shell",
+      "restart": "Riavvia",
+      "restartTitle": "Riavvia shell (disconnetti prima)",
+      "connect": "Continua nella shell",
+      "connectTitle": "Connetti alla shell"
+    },
+    "loading": "Caricamento terminale...",
+    "connecting": "Connessione alla shell...",
+    "reconnecting": "Reconnecting to shell...",
+    "startSession": "Avvia una nuova sessione Claude",
+    "resumeSession": "Riprendi sessione: {{displayName}}...",
+    "runCommand": "Esegui {{command}} in {{projectName}}",
+    "startCli": "Avvio Claude CLI in {{projectName}}",
+    "defaultCommand": "comando"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "Ragionamento",
+      "processing": "Elaborazione",
+      "analyzing": "Analisi",
+      "working": "In lavorazione",
+      "computing": "Calcolo",
+      "reasoning": "Ragionamento"
+    },
+    "state": {
+      "live": "Attivo",
+      "paused": "In pausa"
+    },
+    "elapsed": {
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}}m {{seconds}}s",
+      "label": "{{time}} trascorsi",
+      "startingNow": "Avvio in corso"
+    },
+    "controls": {
+      "stopGeneration": "Interrompi generazione",
+      "pressEscToStop": "Premi Esc in qualsiasi momento per interrompere"
+    },
+    "providers": {
+      "assistant": "Assistente"
+    },
+    "frozen": "In pausa (processo bloccato)"
+  },
+  "runProgress": {
+    "tasksLabel": "Attività",
+    "barAria": "Avanzamento attività",
+    "tasksTooltip": "Attività: {{done}} di {{total}} completate",
+    "inProgressTooltip_one": "{{count}} in corso",
+    "inProgressTooltip_other": "{{count}} in corso",
+    "agentsTooltip": "Sottoagenti: {{done}}/{{total}}",
+    "agentWorking": "Agente · {{calls}}",
+    "agentWorkingTooltip": "Sottoagente in lavorazione: {{calls}} chiamate",
+    "estimateRemaining": "≈ {{time}} rimasti",
+    "estimating": "stima in corso…",
+    "estimateTooltip": "Stima approssimativa — basata sulle attività completate finora."
+  },
+  "agentActivity": {
+    "title": "Attività agente",
+    "summary": "{{running}}/{{total}} in esecuzione",
+    "running": "In esecuzione",
+    "done": "Completato",
+    "currently": "ora",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} chiamate strumento",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "Cronologia strumenti in arrivo.",
+    "noTools": "Nessuna chiamata strumento registrata.",
+    "toolSuccess": "Completato",
+    "toolRunning": "In esecuzione"
+  },
+  "activityGap": {
+    "status": "L’agente sta lavorando — ultima attività {{time}} fa",
+    "ariaLabel": "L’agente sta ancora lavorando, ultima attività {{time}} fa"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "Seleziona un progetto per iniziare a chattare con {{provider}}"
+  },
+  "tasks": {
+    "nextTaskPrompt": "Inizia l'attività successiva"
+  },
+  "participants": {
+    "hide": "Nascondi barra partecipanti",
+    "show": "Mostra barra partecipanti",
+    "lastSeen": "Visto l'ultima volta",
+    "invocations_one": "{{count}} invocazione",
+    "invocations_other": "{{count}} invocazioni",
+    "usersAria_one": "{{count}} partecipante",
+    "usersAria_other": "{{count}} partecipanti",
+    "barAria": "Partecipanti alla conversazione",
+    "openSessionsNow": "Conversazioni attive",
+    "openSessionsNowCount": "{{count}} conversazioni attive",
+    "andMore_one": "e {{count}} altro",
+    "andMore_other": "e {{count}} altri",
+    "projectSummary": "{{users}} utenti · {{agents}} agenti",
+    "roles": {
+      "owner": "Proprietario",
+      "admin": "Amministratore",
+      "user": "Membro"
+    },
+    "agentKinds": {
+      "model": "Modello base",
+      "subagent": "Sottoagente"
+    },
+    "agentSummary_one": "{{count}} agente",
+    "agentSummary_other": "{{count}} agenti",
+    "totalInvocations_one": "{{count}} chiamata",
+    "totalInvocations_other": "{{count}} chiamate",
+    "agentSummaryAria": "{{agents}} agenti distinti · {{calls}} chiamate totali",
+    "unknownAuthor": "Autore sconosciuto"
+  },
+  "ws": {
+    "statusConnected": "Connesso",
+    "statusReconnecting": "Riconnessione…",
+    "statusDisconnected": "Disconnesso",
+    "ariaConnected": "WebSocket connesso",
+    "ariaReconnecting": "WebSocket in riconnessione",
+    "ariaDisconnected": "WebSocket disconnesso",
+    "sendFailed": "Messaggio non inviato — connessione persa",
+    "sendDisabledTitle": "Impossibile inviare — connessione persa",
+    "abortFailed": "Impossibile interrompere — connessione persa. Riprovare potrebbe risolvere."
+  },
+  "serverError": {
+    "project_dir_missing": "Cartella del progetto non trovata sul disco",
+    "cli_not_installed": "CLI non installata — installa lo strumento CLI richiesto",
+    "spawn_failed": "Impossibile avviare il processo — controlla i log del server per i dettagli",
+    "session_create_failed": "Impossibile avviare una nuova sessione — riprova",
+    "unknown": "Si è verificato un errore imprevisto del server"
+  },
+  "refreshChat": {
+    "button": "Aggiorna chat",
+    "refreshing": "Aggiornamento…"
+  },
+  "composerMode": {
+    "chat": "Chat",
+    "agent": "Agente"
+  },
+  "customCommand": {
+    "confirmBashExecution": "Questo comando contiene comandi bash che verranno eseguiti. Vuoi procedere?",
+    "executionCancelled": "Esecuzione del comando annullata",
+    "executeError": "Errore durante l'esecuzione del comando: {{message}}",
+    "unknownError": "Errore sconosciuto"
+  },
+  "inlineModelSwitcher": {
+    "label": "Modello",
+    "tooltip": "Efficace dalla prossima risposta",
+    "noModels": "Nessun modello disponibile",
+    "switching": "Cambio in corso…",
+    "ariaLabel": "Cambia modello: {{model}}",
+    "scopeSession": "Solo questa conversazione",
+    "scopeDefault": "Predefinito per tutte le nuove conversazioni",
+    "confirmedSession": "Applicato a questa conversazione: {{model}}",
+    "confirmedDefault": "Impostato come predefinito: {{model}}",
+    "followDefault": "Segui il predefinito corrente",
+    "clearing": "Ripristino…",
+    "clearedNotice": "Conversazione tornata al predefinito: {{model}}",
+    "engineStamped": "In esecuzione con motore {{engine}} — cambio modello non disponibile"
+  },
+  "conversationCost": {
+    "label": "Costo",
+    "tooltipTitle": "Costo della conversazione",
+    "unavailable": "Costo non disponibile per questo provider",
+    "partial": "Parziale — alcuni modelli non hanno un prezzo pubblicato",
+    "apiEquivalent": "Valore equivalente API di questo utilizzo in abbonamento — non un importo fatturato",
+    "billed": "Utilizzo fatturato",
+    "pricesAsOf": "Prezzi al {{date}}",
+    "subagents": "Include l'attività dei subagenti ({{count}} richieste)",
+    "perModel": "Per modello",
+    "loading": "Calcolo in corso…"
+  },
+  "closeConversation": {
+    "close": "Chiudi conversazione",
+    "reopen": "Riapri conversazione",
+    "closedBadge": "Chiusa",
+    "failed": "Impossibile aggiornare lo stato della conversazione"
+  }
+}

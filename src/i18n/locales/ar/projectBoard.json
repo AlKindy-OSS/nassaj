@@ -1,0 +1,281 @@
+{
+  "sections": {
+    "overview": "نظرة عامة",
+    "objectives": "الأهداف",
+    "schedule": "الجدول الزمني",
+    "tasks": "المهام",
+    "issues": "الأخطاء",
+    "visual": "التحقق البصري",
+    "decisions": "القرارات",
+    "architecture": "الهيكلة"
+  },
+  "updated": "آخر تحديث {{date}}",
+  "overallProgress": "الإنجاز الكلي",
+  "error": "تعذّر تحميل لوحة المشروع.",
+  "stateError": "ملف project-state.json غير صالح — تُعرض آخر نسخة سليمة.",
+  "empty": {
+    "title": "لا توجد لوحة مشروع بعد",
+    "description": "لا يملك هذا المشروع ملف حالة. أنشئه لتحصل على لوحة حيّة بالمراحل والمهام والأخطاء.",
+    "hint": "تتحدّث اللوحة تلقائياً عند أي تغيير في الملف — دون حاجة لإعادة التحميل.",
+    "copyTemplate": "انسخ القالب الأوّلي",
+    "copied": "نُسخ — ألصقه في الملف"
+  },
+  "phases": {
+    "title": "المراحل",
+    "current": "الحالية",
+    "planned": "مخطّط",
+    "runnerHere": "المِنوال هنا",
+    "progressCount": "{{progress}}٪ ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "السبرنت الحالي",
+    "started": "بدأ {{date}}",
+    "ended": "انتهى {{date}}",
+    "taskCount": "المهام {{done}}/{{total}}",
+    "others": "سبرنتات أخرى ({{count}})",
+    "status": {
+      "planned": "مخطط",
+      "current": "جارٍ",
+      "done": "منجز"
+    }
+  },
+  "tasksSection": {
+    "title": "المهام",
+    "open": "مفتوحة",
+    "in_progress": "جارية",
+    "done": "منجزة",
+    "empty": "لا مهام",
+    "kind": {
+      "feature": "ميزة",
+      "bug": "خطأ",
+      "chore": "صيانة",
+      "spike": "استكشاف"
+    },
+    "issueLink": "عرض الخطأ {{id}}",
+    "cancelled": "ملغاة ({{count}})",
+    "status": {
+      "todo": "قيد الانتظار",
+      "pending": "معلّقة",
+      "blocked": "محجوبة",
+      "backlog": "قائمة مؤجَّلة",
+      "deferred": "مؤجَّلة",
+      "closed": "مغلقة",
+      "fixed": "مُصلَحة",
+      "resolved": "محلولة",
+      "accepted": "مقبولة",
+      "cancelled": "ملغاة",
+      "wontfix": "لن تُصلَح",
+      "unknown": "غير معروفة"
+    }
+  },
+  "issues": {
+    "title": "الأخطاء",
+    "severity": {
+      "low": "منخفضة",
+      "medium": "متوسطة",
+      "high": "عالية",
+      "critical": "حرجة"
+    },
+    "status": {
+      "open": "مفتوح",
+      "fixed": "أُصلح",
+      "wontfix": "لن يُصلح"
+    },
+    "empty": "لا أخطاء مسجَّلة."
+  },
+  "decisions": {
+    "title": "القرارات",
+    "empty": "لا قرارات بعد",
+    "openLink": "فتح وثيقة القرار {{id}}"
+  },
+  "schedule": {
+    "title": "الجدول الزمني (Gantt)",
+    "critical": "حرج",
+    "legendScheduled": "مجدول",
+    "legendCritical": "المسار الحرج",
+    "legendMilestone": "معلَم",
+    "cpm": {
+      "cycle": "تعذّر حساب المسار الحرج: دورة في التبعيات.",
+      "missingDeps": "بعض التبعيات تشير إلى بنود غير موجودة وجرى تجاهلها في حساب المسار الحرج."
+    },
+    "noDates": "لا تواريخ صالحة لرسم المخطط الزمني.",
+    "progress": "الإنجاز {{value}}%",
+    "durationDays": "المدة: {{days}} يوم",
+    "owner": "المسؤول: {{name}}",
+    "deliverable": "التسليم: {{id}}",
+    "deliverableLink": "عرض التسليم {{id}}",
+    "dependsOn": "يعتمد على: {{ids}}"
+  },
+  "deliverables": {
+    "title": "التسليمات",
+    "due": "الاستحقاق {{date}}",
+    "overdue": "متأخر",
+    "acceptance": "معيار القبول",
+    "deliveredBy": "يُسلَّم عبر: {{ids}}",
+    "statuses": {
+      "pending": "قيد الانتظار",
+      "in_progress": "جارٍ",
+      "delivered": "سُلِّم",
+      "accepted": "مقبول",
+      "rejected": "مرفوض"
+    }
+  },
+  "objectives": {
+    "title": "الأهداف (OKR)",
+    "baseline": "خط الأساس: {{value}}",
+    "statuses": {
+      "on_track": "على المسار",
+      "at_risk": "في خطر",
+      "off_track": "خارج المسار",
+      "done": "منجز"
+    }
+  },
+  "kpis": {
+    "title": "مؤشرات الأداء (KPIs)",
+    "target": "الهدف: {{value}}"
+  },
+  "visualChecks": {
+    "title": "التحقق البصري",
+    "empty": "لا توجد بنود تحقق بصري بعد.",
+    "step": "الخطوة",
+    "expect": "المتوقَّع",
+    "result": "ملاحظة المالك",
+    "counter": "متحقَّق {{verified}} / {{total}}",
+    "status": {
+      "pending": "بانتظار التحقق",
+      "verified": "متحقَّق",
+      "failed": "فشل"
+    }
+  },
+  "architecture": {
+    "technical": "تقني",
+    "simplified": "مبسّط",
+    "missing": "لا توجد وثائق هيكلة (docs/ARCHITECTURE.md أو docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "هذه النسخة من وثيقة الهيكلة غير موجودة."
+  },
+  "approvals": {
+    "title": "موافقات معلّقة",
+    "awaitingReview": "بانتظار مراجعتك",
+    "approve": "موافقة",
+    "reject": "رفض",
+    "pending": "جارٍ الإرسال…",
+    "error": "تعذّر تنفيذ الإجراء. حاول مجدداً.",
+    "kind": {
+      "prod-migration": "ترحيل إنتاج",
+      "secret": "سرّ",
+      "restart": "إعادة تشغيل",
+      "push": "دفع",
+      "sensitive": "إجراء حسّاس"
+    }
+  },
+  "runner": {
+    "label": "المِنوال",
+    "description": "المُنفِّذ الذاتي",
+    "fullName": "المِنوال (المُنفِّذ الذاتي)",
+    "cycle": "الدورة {{n}}",
+    "stage": "الطور",
+    "model": "النموذج",
+    "quota": "الحصة",
+    "task": "المهمة",
+    "phase": "المرحلة",
+    "verdict": "آخر حكم",
+    "clean": "نظيف",
+    "unclean": "غير نظيف",
+    "pendingTick": "بانتظار الدورة التالية…",
+    "status": {
+      "idle": "خامل",
+      "running": "قيد التشغيل",
+      "building": "بناء",
+      "verifying": "تحقّق",
+      "interrupted": "متوقّف (حصة)",
+      "failed": "فشل",
+      "blocked": "محجوب",
+      "paused": "متوقّف",
+      "awaiting_approval": "بانتظار الاعتماد",
+      "disabled": "معطّل"
+    },
+    "statusLine": {
+      "running": "🟢 المِنوال يعمل",
+      "awaiting": "🔵 المِنوال بانتظار الاعتماد",
+      "interrupted": "🟡 المِنوال متوقّف مؤقتاً",
+      "failed": "🔴 المِنوال أخفق",
+      "idle": "⚪ المِنوال خامل"
+    },
+    "stages": {
+      "review": "مراجعة",
+      "fix": "إصلاح",
+      "critique": "تدقيق",
+      "phase": "بناء المرحلة",
+      "awaiting_approval": "بانتظار الاعتماد"
+    },
+    "actions": {
+      "start": "ابدأ",
+      "stop": "إيقاف",
+      "pause": "إيقاف",
+      "resume": "استئناف",
+      "approve": "اعتمد المرحلة",
+      "enable": "تفعيل",
+      "enableHint": "إعادة تفعيل المِنوال لهذا المشروع",
+      "disable": "تعطيل",
+      "disableHint": "تعطيل المشروع في سجلّ المِنوال (لا دورات جديدة حتى التفعيل) — لا يُنهي دورة جارية",
+      "forceStop": "إيقاف فوري",
+      "forceStopHint": "إنهاء الدورة الجارية فوراً بإنهاء جلستها، ثم منع إعادة الإطلاق",
+      "forceStopConfirm": "سيُنهي الدورة الجارية فوراً عبر إنهاء جلستها. متابعة؟",
+      "forceStopConfirmYes": "نعم، أوقف فوراً",
+      "forceStopCancel": "إلغاء"
+    },
+    "errors": {
+      "notAwaiting": "المشغّل ليس بانتظار اعتماد المرحلة الآن.",
+      "forceStopFailed": "تعذّر الإنهاء الفوري (فشل إيقاف الوحدة). قد تكون الدورة ما زالت تعمل — حاول مجدداً.",
+      "generic": "تعذّر تنفيذ الإجراء."
+    },
+    "journey": {
+      "title": "مسار المِنوال",
+      "here": "المِنوال هنا",
+      "cyclesCount": "الدورات ({{n}})",
+      "noCycles": "لم يبدأ المِنوال أي دورة بعد",
+      "cycleN": "دورة {{n}}",
+      "showAll": "عرض الكل ({{n}})",
+      "stale": "قد يكون متجمّداً",
+      "phasesLabel": "أطوار الدورة",
+      "stage": {
+        "build": "بناء",
+        "verify": "تحقّق",
+        "verdict": "حكم",
+        "gate": "عبور المرحلة"
+      },
+      "cycleStatus": {
+        "succeeded": "ناجحة",
+        "failed": "فشلت",
+        "interrupted": "متوقّفة"
+      }
+    }
+  },
+  "stats": {
+    "tab": "الإحصاءات",
+    "totalLabel": "إجمالي التكلفة (منذ البداية)",
+    "headerTotal": "الإجمالي التراكمي",
+    "headerTotalTitle": "تكلفة هذا المشروع متراكمة — تبقى حتى بعد حذف المحادثات",
+    "span": "المدى الزمني",
+    "activeDays": "أيام العمل",
+    "activeDaysOfSpan": "من {{span}} يوماً",
+    "conversations": "المحادثات",
+    "agents": "الوكلاء",
+    "firstActivity": "أول نشاط",
+    "lastActivity": "آخر نشاط",
+    "dailyTitle": "التكلفة اليومية",
+    "dailyPeak": "الذروة",
+    "byVendor": "حسب المورّد",
+    "byModel": "حسب النموذج",
+    "partialShort": "جزئي",
+    "partialModels": "إجمالي جزئي — لا سعر رسمي لـ: {{models}}",
+    "apiEquivalent": "قيمة الاستهلاك بأسعار API على اشتراك — لا مبلغاً محاسَباً",
+    "pricesAsOf": "الأسعار بتاريخ {{date}}",
+    "unavailable": "غير متاح",
+    "empty": "لم تُقَس بعدُ أي تكلفة لهذا المشروع."
+  },
+  "summary": {
+    "tasksDone": "{{done}} منجزة",
+    "issuesOpen": "{{open}} مفتوحة"
+  }
+}

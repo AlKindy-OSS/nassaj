@@ -1,0 +1,536 @@
+{
+  "btw": {
+    "title": "Yan soru",
+    "close": "Kapat",
+    "questionLabel": "Soru",
+    "answerLabel": "Yanıt",
+    "status": {
+      "pending": "Hazırlanıyor…",
+      "streaming": "Yazıyor…",
+      "complete": "Tamamlandı",
+      "thinking": "Düşünüyor…"
+    },
+    "errors": {
+      "unsupported_provider": "“/btw” yan kanalı yalnızca Claude oturumlarında kullanılabilir.",
+      "session_not_found": "Oturum bulunamadı — önce bir oturum açın, ardından yan sorunuzu sorun.",
+      "not_visible": "Bu oturumun bağlamını görüntüleme izniniz yok.",
+      "busy": "Oturum meşgul — birazdan tekrar deneyin.",
+      "sdk_error": "Yan soru tamamlanamadı — beklenmeyen bir hata oluştu.",
+      "timeout": "Bu özellik bir sunucu güncellemesi gerektiriyor.",
+      "disconnected": "Gönderilemiyor — bağlantı koptu."
+    },
+    "hints": {
+      "quota": "Claude kotanızdan harcar.",
+      "context": "Son kaydedilen mesaja kadar olan oturum bağlamına göre yanıtlar."
+    },
+    "description": "Geçerli oturum bağlamında bir yan soru sorun"
+  },
+  "contextRot": {
+    "label": "Bağlam",
+    "barAria": "Bağlam kullanımı",
+    "empty": "Henüz token kullanımı yok",
+    "percentUsed": "Gerçek pencerenin %{{percent}}'i",
+    "tooltipUsed": "Gerçek pencereden kullanılan: {{used}} / {{total}}",
+    "tooltipCacheRead": "Önbellek okuması: {{value}}",
+    "popoverTitle": "Bağlam kullanımı",
+    "close": "Kapat",
+    "levels": {
+      "safe": "Güvenli — bağlam sağlıklı.",
+      "attention": "Dikkat et — bağlam dolmaya başlıyor.",
+      "warning": "Olası bozulma — /compact veya bir alt ajan kullanmayı dene.",
+      "critical": "Ciddi bozulma — yeni bir oturum başlatmayı dene."
+    }
+  },
+  "codeBlock": {
+    "copy": "Kopyala",
+    "copied": "Kopyalandı",
+    "copyCode": "Kodu kopyala",
+    "executeRaw": "Çalıştır",
+    "executeRawTitle": "Bu komutu Nassaj sunucusunda çalıştır (inceleme iletişim kutusu açılır)",
+    "inserting": "Kuyruğa ekleniyor…",
+    "insertError": {
+      "carriage_return_forbidden": "Komut \\r (Windows) içeriyor — LF ile yeniden yapıştırın",
+      "too_many_lines": "Komut sınırı (100 satır) aşıyor",
+      "empty_command": "Komut boş",
+      "command_too_long": "Komut çok uzun (maks. 4096 karakter)",
+      "too_many_commands": "Kuyruk dolu (maks. 20 komut)",
+      "raw_exec_disabled": "Doğrudan yürütme devre dışı",
+      "config_denied": "İzin verilmiyor — Komut Panosu ayarlarını kontrol edin",
+      "internal": "Komut kuyruğa eklenemedi",
+      "denied_command": "Engellendi: bu komut çalışan bir hizmeti kesintiye uğratır (kural: {{rule}}). Komut panosu yaşam döngüsü komutlarını çalıştırmaz — kendi terminalinizde çalıştırın.",
+      "forbidden_control_char": "Komut yasaklı bir kontrol veya bidi karakteri içeriyor — göründüğünden farklı çalışabilir",
+      "invalid_command": "Geçersiz komut",
+      "stamp": "{{time}} tıklamanızın sonucu — anlık durum değil",
+      "stampRepeat": "{{time}} saatinde {{count}}. deneme — aynı sonuç",
+      "dismiss": "Kapat"
+    }
+  },
+  "copyMessage": {
+    "copy": "Mesajı kopyala",
+    "copied": "Mesaj kopyalandı",
+    "selectFormat": "Kopyalama biçimini seç",
+    "copyAsMarkdown": "Markdown olarak kopyala",
+    "copyAsText": "Metin olarak kopyala"
+  },
+  "messageTypes": {
+    "user": "S",
+    "error": "Hata",
+    "tool": "Araç",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "Alt ajan",
+    "shortBadge": "Alt ajan",
+    "badgeLabel": "Alt ajan görevi"
+  },
+  "coordinator": {
+    "label": "Koordinatör",
+    "withName": "Koordinatör: {{username}}"
+  },
+  "userAuthor": {
+    "withName": "Kullanıcı: {{username}}"
+  },
+  "externalOrigin": {
+    "label": "Arayüz dışında oluşturuldu"
+  },
+  "coordinatorPrompt": {
+    "label": "Koordinatör → Alt ajan",
+    "ariaLabel": "Koordinatörün alt ajana yönlendirmesi"
+  },
+  "systemMessage": {
+    "label": "Sistem mesajı",
+    "ariaLabel": "Otomatik sistem mesajı"
+  },
+  "sessionNotResumable": {
+    "message": "Bu oturum sürdürülemedi — sağlayıcıda artık mevcut değil.",
+    "startNew": "Yeni bir oturum başlat"
+  },
+  "tools": {
+    "settings": "Araç Ayarları",
+    "error": "Araç Hatası",
+    "result": "Araç Sonucu",
+    "viewParams": "Girdi parametrelerini göster",
+    "viewRawParams": "Ham parametreleri göster",
+    "viewDiff": "Düzenleme diff'ini göster:",
+    "creatingFile": "Yeni dosya oluşturuluyor:",
+    "updatingTodo": "Yapılacaklar Listesi güncelleniyor",
+    "read": "Okundu",
+    "readFile": "Dosyayı oku",
+    "updateTodo": "Yapılacaklar listesini güncelle",
+    "readTodo": "Yapılacaklar listesini oku",
+    "searchResults": "sonuç"
+  },
+  "search": {
+    "found": "{{count}} {{type}} bulundu",
+    "file": "dosya",
+    "files": "dosya",
+    "pattern": "desen:",
+    "in": "şurada:"
+  },
+  "fileOperations": {
+    "updated": "Dosya başarıyla güncellendi",
+    "created": "Dosya başarıyla oluşturuldu",
+    "written": "Dosya başarıyla yazıldı",
+    "diff": "Diff",
+    "newFile": "Yeni Dosya",
+    "viewContent": "Dosya içeriğini göster",
+    "viewFullOutput": "Tam çıktıyı göster ({{count}} karakter)",
+    "contentDisplayed": "Dosya içeriği yukarıdaki diff görünümünde gösteriliyor"
+  },
+  "interactive": {
+    "title": "Etkileşimli Prompt",
+    "waiting": "CLI'da yanıtın bekleniyor",
+    "instruction": "Lütfen Claude'un çalıştığı terminalde bir seçenek seç.",
+    "selectedOption": "✓ Claude {{number}} numaralı seçeneği seçti",
+    "instructionDetail": "CLI'da bu seçeneği ok tuşları veya numara girerek interaktif olarak seçebilirsin."
+  },
+  "thinking": {
+    "title": "Düşünüyor...",
+    "emoji": "💭 Düşünüyor..."
+  },
+  "json": {
+    "response": "JSON Yanıtı"
+  },
+  "permissions": {
+    "grant": "{{tool}} için izin ver",
+    "added": "İzin eklendi",
+    "addTo": "{{entry}} İzin Verilen Araçlar listesine ekleniyor.",
+    "retry": "İzin kaydedildi. Aracı kullanmak için isteği tekrar dene.",
+    "error": "İzinler güncellenemedi. Lütfen tekrar dene.",
+    "openSettings": "Ayarları aç"
+  },
+  "todo": {
+    "updated": "Yapılacaklar listesi başarıyla güncellendi",
+    "current": "Mevcut Yapılacaklar Listesi"
+  },
+  "plan": {
+    "viewPlan": "📋 Uygulama planını göster",
+    "title": "Uygulama Planı"
+  },
+  "usageLimit": {
+    "resetAt": "Claude kullanım limitin doldu. Limitin **{{time}} {{timezone}}** — {{date}} tarihinde sıfırlanacak"
+  },
+  "codex": {
+    "permissionMode": "İzin Modu",
+    "modes": {
+      "default": "Varsayılan Mod",
+      "auto": "Otomatik Mod",
+      "acceptEdits": "Düzenlemeleri Kabul Et",
+      "bypassPermissions": "İzinleri Atla",
+      "plan": "Plan Modu"
+    },
+    "descriptions": {
+      "default": "Sadece güvenilir komutlar (ls, cat, grep, git status, vb.) otomatik çalışır. Diğer komutlar atlanır. Çalışma alanına yazabilir.",
+      "auto": "Model sınıflandırıcı, her araç çağrısı için onaylayıp onaylamamaya karar verir. Elleri serbest, ancak Atla'dan daha güvenli — reddetmeler yine de gerçekleşir.",
+      "acceptEdits": "Tüm komutlar çalışma alanı içinde otomatik çalışır. Sandbox'lu çalıştırma ile tam otomatik mod.",
+      "bypassPermissions": "Kısıtlama olmadan tam sistem erişimi. Tüm komutlar tam disk ve ağ erişimiyle otomatik çalışır. Dikkatli kullan.",
+      "plan": "Planlama modu — hiçbir komut çalıştırılmaz"
+    },
+    "technicalDetails": "Teknik ayrıntılar",
+    "posture": {
+      "title": "Gerçek sandbox tavanı",
+      "default": "sandbox: workspace-write · onaylar: güvenilmeyen · ağ: KAPALI",
+      "acceptEdits": "sandbox: workspace-write · onaylar: asla · ağ: KAPALI",
+      "bypassPermissions": "sandbox: workspace-write · onaylar: asla · ağ: KAPALI — Düzenlemeleri Kabul Et ile aynı. Tam disk/ağ erişimi yalnızca operatör bu kurulum için etkinleştirdiyse mümkündür (varsayılan olarak kapalı)."
+    }
+  },
+  "gemini": {
+    "permissionMode": "Gemini İzin Modu",
+    "description": "Gemini CLI'ın işlem onaylarını nasıl yönettiğini kontrol et.",
+    "modes": {
+      "default": {
+        "title": "Standart (Onay İste)",
+        "description": "Gemini, komut çalıştırmadan, dosya yazmadan ve web kaynağı getirmeden önce onay ister."
+      },
+      "autoEdit": {
+        "title": "Otomatik Düzenleme (Dosya Onaylarını Atla)",
+        "description": "Gemini dosya düzenlemelerini ve web getirmelerini otomatik onaylar, ama shell komutları için yine de onay ister."
+      },
+      "yolo": {
+        "title": "YOLO (Tüm İzinleri Atla)",
+        "description": "Gemini tüm işlemleri onay almadan çalıştırır. Dikkatli kullan."
+      }
+    }
+  },
+  "input": {
+    "placeholder": "Komutlar için /, dosyalar için @ yaz ya da {{provider}}'a her şeyi sor...",
+    "placeholderDefault": "Mesajını yaz...",
+    "disabled": "Girdi devre dışı",
+    "attachFiles": "Dosya ekle",
+    "attachFilesAndImages": "Dosya veya resim ekle",
+    "attachImages": "Resim ekle",
+    "send": "Gönder",
+    "stop": "Durdur",
+    "hintText": {
+      "ctrlEnter": "Göndermek için Ctrl+Enter • Yeni satır için Shift+Enter",
+      "enter": "Göndermek için Enter • Yeni satır için Shift+Enter"
+    },
+    "clickToChangeMode": "İzin modunu değiştirmek için tıkla (veya girdide Tab tuşuna bas)",
+    "showAllCommands": "Tüm komutları göster",
+    "clearInput": "Girdiyi temizle",
+    "scrollToBottom": "En alta git",
+    "dropFilesHere": "Dosyaları buraya bırak",
+    "nonClaudeAttachmentHint": "Ekler yalnızca Claude ile kullanılır"
+  },
+  "fileAttachment": {
+    "removeFile": "Dosyayı kaldır",
+    "uploading": "Yükleniyor…",
+    "errorType": "Dosya türüne izin verilmiyor",
+    "errorSize": "Dosya çok büyük (maks. 50 MB)",
+    "errorCount": "Çok fazla dosya eklendi (maks. {{max}})"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "Çaba Seviyesi",
+      "description": "Claude'un isteğiniz için ayırdığı hesaplama miktarını kontrol eder",
+      "active": "Aktif",
+      "tip": "ultracode, çok ajanlı biçimlendirme ile maksimum derinliği etkinleştirir"
+    },
+    "modes": {
+      "none": {
+        "name": "otomatik",
+        "description": "Modelinizin varsayılan çaba düzeyini kullan"
+      },
+      "low": {
+        "name": "düşük",
+        "description": "Hızlı, hafif yanıtlar — basit sorular için ideal"
+      },
+      "medium": {
+        "name": "orta",
+        "description": "Derinlik ve hız arasında denge"
+      },
+      "high": {
+        "name": "yüksek",
+        "description": "Karmaşık görevler için daha derin akıl yürütme"
+      },
+      "xhigh": {
+        "name": "çok yüksek",
+        "description": "Zorlu problemler için çok yüksek çaba"
+      },
+      "max": {
+        "name": "maksimum",
+        "description": "Maksimum çaba — tam hesaplama bütçesi (yalnızca bu oturum, ayarlara kaydedilmez)"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "Oturum modu: xhigh + dinamik atölye biçimlendirmesi — kaydedilen bir çaba düzeyi değil"
+      }
+    },
+    "buttonTitle": "Çaba: {{mode}}",
+    "ultracodeActive": "Ultracode çabası etkin"
+  },
+  "providerSelection": {
+    "title": "AI Asistanını Seç",
+    "description": "Yeni bir konuşma başlatmak için bir sağlayıcı seç",
+    "selectModel": "Model Seç",
+    "providerInfo": {
+      "anthropic": "Anthropic tarafından",
+      "openai": "OpenAI tarafından",
+      "cursorEditor": "AI Kod Editörü",
+      "google": "Google tarafından"
+    },
+    "readyPrompt": {
+      "claude": "Claude'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "cursor": "Cursor'ı {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "codex": "Codex'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "gemini": "Gemini'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "antigravity": "Antigravity (agy) kullanmaya hazır. Model, agy'nin kendi ayarlarından seçilir.",
+      "opencode": "OpenCode'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "default": "Başlamak için yukarıdan bir sağlayıcı seç",
+      "kimi": "Kimi'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "deepseek": "DeepSeek'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "glm": "GLM'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "claudeEngine": "Hazır: Claude motoru {{provider}} üzerinde {{model}} ile çalışıyor. Mesajını aşağıya yazmaya başla."
+    },
+    "antigravity": {
+      "activeModel": "Etkin model",
+      "activeModelLabel": "Etkin model",
+      "loading": "Yükleniyor…",
+      "unknown": "Bilinmiyor"
+    },
+    "pressToSearch": "Oturumlarda, dosyalarda ve commit'lerde arama yapmak için <kbd>{{shortcut}}</kbd> tuşlarına bas",
+    "refresh": {
+      "button": "Modelleri ve kimlik doğrulama durumunu yenile",
+      "refreshing": "Yenileniyor…"
+    },
+    "providerUnavailable": "Sağlayıcı mevcut değil",
+    "signIn": "Giriş yap",
+    "addApiKey": "Etkinleştirmek için {{provider}} API anahtarı ekle",
+    "engineOnVendor": "{{provider}} üzerinde Claude motoru"
+  },
+  "session": {
+    "continue": {
+      "title": "Konuşmana devam et",
+      "description": "Kodun hakkında soru sor, değişiklik iste veya geliştirme görevlerinde yardım al"
+    },
+    "loading": {
+      "olderMessages": "Eski mesajlar yükleniyor...",
+      "sessionMessages": "Oturum mesajları yükleniyor..."
+    },
+    "messages": {
+      "showingOf": "{{total}} mesajdan {{shown}} tanesi gösteriliyor",
+      "scrollToLoad": "Daha fazlasını yüklemek için yukarı kaydır",
+      "showingLast": "Son {{count}} mesaj gösteriliyor ({{total}} toplam)",
+      "loadEarlier": "Önceki mesajları yükle",
+      "loadAll": "Tüm mesajları yükle",
+      "loadingAll": "Tüm mesajlar yükleniyor...",
+      "allLoaded": "Tüm mesajlar yüklendi",
+      "perfWarning": "Tüm mesajlar yüklendi — kaydırma yavaşlayabilir. Performansı geri getirmek için \"En alta git\"e tıkla."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "Proje Seç",
+      "description": "O dizinde etkileşimli shell açmak için bir proje seç"
+    },
+    "status": {
+      "newSession": "Yeni Oturum",
+      "initializing": "Başlatılıyor...",
+      "restarting": "Yeniden başlatılıyor..."
+    },
+    "actions": {
+      "disconnect": "Bağlantıyı Kes",
+      "disconnectTitle": "Shell bağlantısını kes",
+      "restart": "Yeniden Başlat",
+      "restartTitle": "Shell'i yeniden başlat (önce bağlantıyı kes)",
+      "connect": "Shell'de Devam Et",
+      "connectTitle": "Shell'e bağlan"
+    },
+    "loading": "Terminal yükleniyor...",
+    "connecting": "Shell'e bağlanılıyor...",
+    "reconnecting": "Reconnecting to shell...",
+    "startSession": "Yeni bir Claude oturumu başlat",
+    "resumeSession": "Oturuma devam et: {{displayName}}...",
+    "runCommand": "{{projectName}} içinde {{command}} çalıştır",
+    "startCli": "{{projectName}} içinde Claude CLI başlatılıyor",
+    "defaultCommand": "komut"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "Düşünüyor",
+      "processing": "İşliyor",
+      "analyzing": "Analiz ediyor",
+      "working": "Çalışıyor",
+      "computing": "Hesaplıyor",
+      "reasoning": "Mantık yürütüyor"
+    },
+    "state": {
+      "live": "Canlı",
+      "paused": "Duraklatıldı"
+    },
+    "elapsed": {
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}}d {{seconds}}s",
+      "label": "{{time}} geçti",
+      "startingNow": "Şimdi başlıyor"
+    },
+    "controls": {
+      "stopGeneration": "Üretmeyi Durdur",
+      "pressEscToStop": "Durdurmak için istediğin zaman Esc'ye bas"
+    },
+    "providers": {
+      "assistant": "Asistan"
+    },
+    "frozen": "Duraklatıldı (süreç donduruldu)"
+  },
+  "runProgress": {
+    "tasksLabel": "Görevler",
+    "barAria": "Görev ilerlemesi",
+    "tasksTooltip": "Görevler: {{total}} içinde {{done}} tamamlandı",
+    "inProgressTooltip_one": "{{count}} devam ediyor",
+    "inProgressTooltip_other": "{{count}} devam ediyor",
+    "agentsTooltip": "Alt ajanlar: {{done}}/{{total}}",
+    "agentWorking": "Ajan · {{calls}}",
+    "agentWorkingTooltip": "Alt ajan çalışıyor: {{calls}} çağrı",
+    "estimateRemaining": "≈ {{time}} kaldı",
+    "estimating": "tahmin ediliyor…",
+    "estimateTooltip": "Kaba tahmin — şimdiye kadar tamamlanan görevlere göre."
+  },
+  "agentActivity": {
+    "title": "Ajan etkinliği",
+    "summary": "{{total}} içinde {{running}} çalışıyor",
+    "running": "Çalışıyor",
+    "done": "Bitti",
+    "currently": "şu an",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} araç çağrısı",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "Araç geçmişi yakında.",
+    "noTools": "Henüz araç çağrısı kaydedilmedi.",
+    "toolSuccess": "Bitti",
+    "toolRunning": "Çalışıyor"
+  },
+  "activityGap": {
+    "status": "Ajan çalışıyor — son etkinlik {{time}} önce",
+    "ariaLabel": "Ajan hâlâ çalışıyor, son etkinlik {{time}} önce"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "{{provider}} ile sohbet etmeye başlamak için bir proje seç"
+  },
+  "tasks": {
+    "nextTaskPrompt": "Sonraki görevi başlat"
+  },
+  "participants": {
+    "hide": "Katılımcı çubuğunu gizle",
+    "show": "Katılımcı çubuğunu göster",
+    "lastSeen": "Son görülme",
+    "invocations_one": "{{count}} çağrı",
+    "invocations_other": "{{count}} çağrı",
+    "usersAria_one": "{{count}} katılımcı",
+    "usersAria_other": "{{count}} katılımcı",
+    "barAria": "Konuşma katılımcıları",
+    "openSessionsNow": "Aktif konuşmalar",
+    "openSessionsNowCount": "{{count}} aktif konuşma",
+    "andMore_one": "ve {{count}} daha",
+    "andMore_other": "ve {{count}} daha",
+    "projectSummary": "{{users}} kullanıcı · {{agents}} ajan",
+    "roles": {
+      "owner": "Sahip",
+      "admin": "Yönetici",
+      "user": "Üye"
+    },
+    "agentKinds": {
+      "model": "Temel model",
+      "subagent": "Alt ajan"
+    },
+    "agentSummary_one": "{{count}} ajan",
+    "agentSummary_other": "{{count}} ajan",
+    "totalInvocations_one": "{{count}} çağrı",
+    "totalInvocations_other": "{{count}} çağrı",
+    "agentSummaryAria": "{{agents}} farklı ajan · {{calls}} toplam çağrı",
+    "unknownAuthor": "Bilinmeyen yazar"
+  },
+  "ws": {
+    "statusConnected": "Bağlı",
+    "statusReconnecting": "Yeniden bağlanıyor…",
+    "statusDisconnected": "Bağlantı kesildi",
+    "ariaConnected": "WebSocket bağlı",
+    "ariaReconnecting": "WebSocket yeniden bağlanıyor",
+    "ariaDisconnected": "WebSocket bağlantısı kesildi",
+    "sendFailed": "Mesaj gönderilmedi — bağlantı kesildi",
+    "sendDisabledTitle": "Gönderilemez — bağlantı kesildi",
+    "abortFailed": "Durdurulamadı — bağlantı koptu. Yeniden denemek işe yarayabilir."
+  },
+  "serverError": {
+    "project_dir_missing": "Proje klasörü diskte bulunamadı",
+    "cli_not_installed": "CLI yüklü değil — lütfen gerekli CLI aracını yükle",
+    "spawn_failed": "Süreç başlatılamadı — ayrıntılar için sunucu günlüklerini kontrol et",
+    "session_create_failed": "Yeni oturum başlatılamadı — lütfen tekrar dene",
+    "unknown": "Beklenmeyen bir sunucu hatası oluştu"
+  },
+  "refreshChat": {
+    "button": "Sohbeti yenile",
+    "refreshing": "Yenileniyor…"
+  },
+  "composerMode": {
+    "chat": "Sohbet",
+    "agent": "Ajan"
+  },
+  "customCommand": {
+    "confirmBashExecution": "Bu komut çalıştırılacak bash komutları içeriyor. Devam etmek istiyor musunuz?",
+    "executionCancelled": "Komut çalıştırma iptal edildi",
+    "executeError": "Komut çalıştırma hatası: {{message}}",
+    "unknownError": "Bilinmeyen hata"
+  },
+  "inlineModelSwitcher": {
+    "label": "Model",
+    "tooltip": "Sonraki yanıttan itibaren geçerli olur",
+    "noModels": "Kullanılabilir model yok",
+    "switching": "Değiştiriliyor…",
+    "ariaLabel": "Model değiştir: {{model}}",
+    "scopeSession": "Yalnızca bu konuşma",
+    "scopeDefault": "Tüm yeni konuşmalar için varsayılan",
+    "confirmedSession": "Bu konuşmaya uygulandı: {{model}}",
+    "confirmedDefault": "Varsayılan olarak ayarlandı: {{model}}",
+    "followDefault": "Mevcut varsayılanı takip et",
+    "clearing": "Sıfırlanıyor…",
+    "clearedNotice": "Konuşma varsayılana döndü: {{model}}",
+    "engineStamped": "{{engine}} motoru ile çalışıyor — model değiştirme kullanılamıyor"
+  },
+  "conversationCost": {
+    "label": "Maliyet",
+    "tooltipTitle": "Konuşma maliyeti",
+    "unavailable": "Bu sağlayıcı için maliyet mevcut değil",
+    "partial": "Kısmi — bazı modellerin yayımlanmış fiyatı yok",
+    "apiEquivalent": "Abonelikteki bu kullanımın API eşdeğeri — faturalanan tutar değil",
+    "billed": "Faturalanan kullanım",
+    "pricesAsOf": "{{date}} tarihli fiyatlar",
+    "subagents": "Alt aracı etkinliğini içerir ({{count}} istek)",
+    "perModel": "Modele göre",
+    "loading": "Hesaplanıyor…"
+  },
+  "closeConversation": {
+    "close": "Konuşmayı kapat",
+    "reopen": "Konuşmayı yeniden aç",
+    "closedBadge": "Kapalı",
+    "failed": "Konuşma durumu güncellenemedi"
+  }
+}

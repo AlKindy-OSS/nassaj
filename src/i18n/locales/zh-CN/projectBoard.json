@@ -1,0 +1,281 @@
+{
+  "sections": {
+    "overview": "概览",
+    "objectives": "目标",
+    "schedule": "时间线",
+    "tasks": "任务",
+    "issues": "问题",
+    "visual": "视觉检查",
+    "decisions": "决策",
+    "architecture": "架构"
+  },
+  "updated": "更新于 {{date}}",
+  "overallProgress": "整体进度",
+  "error": "加载项目看板失败。",
+  "stateError": "project-state.json 无效 — 显示最后有效版本。",
+  "empty": {
+    "title": "暂无项目看板",
+    "description": "此项目没有项目状态文件。创建后即可获得包含阶段、任务和问题的实时看板。",
+    "hint": "文件更改时看板会自动更新 — 无需手动刷新。",
+    "copyTemplate": "复制入门模板",
+    "copied": "已复制 — 将其粘贴到文件中"
+  },
+  "phases": {
+    "title": "阶段",
+    "current": "当前",
+    "planned": "已计划",
+    "runnerHere": "al-Minwāl 在此",
+    "progressCount": "{{progress}}%（{{done}}/{{total}}）"
+  },
+  "sprint": {
+    "current": "当前冲刺",
+    "started": "开始于 {{date}}",
+    "ended": "结束于 {{date}}",
+    "taskCount": "任务 {{done}}/{{total}}",
+    "others": "其他冲刺 ({{count}})",
+    "status": {
+      "planned": "已计划",
+      "current": "当前",
+      "done": "已完成"
+    }
+  },
+  "tasksSection": {
+    "title": "任务",
+    "open": "待办",
+    "in_progress": "进行中",
+    "done": "已完成",
+    "empty": "暂无任务",
+    "kind": {
+      "feature": "功能",
+      "bug": "缺陷",
+      "chore": "维护",
+      "spike": "探索"
+    },
+    "issueLink": "查看问题 {{id}}",
+    "cancelled": "已取消 ({{count}})",
+    "status": {
+      "todo": "待办",
+      "pending": "待处理",
+      "blocked": "受阻",
+      "backlog": "待办清单",
+      "deferred": "已推迟",
+      "closed": "已关闭",
+      "fixed": "已修复",
+      "resolved": "已解决",
+      "accepted": "已接受",
+      "cancelled": "已取消",
+      "wontfix": "不予修复",
+      "unknown": "未知"
+    }
+  },
+  "issues": {
+    "title": "问题",
+    "severity": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "critical": "严重"
+    },
+    "status": {
+      "open": "待处理",
+      "fixed": "已修复",
+      "wontfix": "不予修复"
+    },
+    "empty": "暂无记录的问题。"
+  },
+  "decisions": {
+    "title": "决策",
+    "empty": "暂无决策",
+    "openLink": "打开决策文档 {{id}}"
+  },
+  "schedule": {
+    "title": "时间线（甘特图）",
+    "critical": "关键路径",
+    "legendScheduled": "已安排",
+    "legendCritical": "关键路径",
+    "legendMilestone": "里程碑",
+    "cpm": {
+      "cycle": "关键路径已跳过：检测到依赖循环。",
+      "missingDeps": "部分依赖引用了缺失项，已在关键路径中忽略。"
+    },
+    "noDates": "没有有效日期可绘制时间线。",
+    "progress": "进度 {{value}}%",
+    "durationDays": "工期：{{days}} 天",
+    "owner": "负责人：{{name}}",
+    "deliverable": "交付物：{{id}}",
+    "deliverableLink": "查看交付物 {{id}}",
+    "dependsOn": "依赖：{{ids}}"
+  },
+  "deliverables": {
+    "title": "交付物",
+    "due": "截止 {{date}}",
+    "overdue": "已逾期",
+    "acceptance": "验收标准",
+    "deliveredBy": "交付人：{{ids}}",
+    "statuses": {
+      "pending": "待处理",
+      "in_progress": "进行中",
+      "delivered": "已交付",
+      "accepted": "已验收",
+      "rejected": "已拒绝"
+    }
+  },
+  "objectives": {
+    "title": "目标（OKR）",
+    "baseline": "基准：{{value}}",
+    "statuses": {
+      "on_track": "正常",
+      "at_risk": "存在风险",
+      "off_track": "偏离",
+      "done": "已完成"
+    }
+  },
+  "kpis": {
+    "title": "KPI 指标",
+    "target": "目标：{{value}}"
+  },
+  "visualChecks": {
+    "title": "视觉检查",
+    "empty": "暂无视觉检查。",
+    "step": "步骤",
+    "expect": "预期",
+    "result": "所有者备注",
+    "counter": "已验证 {{verified}} / {{total}}",
+    "status": {
+      "pending": "等待检查",
+      "verified": "已验证",
+      "failed": "未通过"
+    }
+  },
+  "architecture": {
+    "technical": "技术版",
+    "simplified": "简化版",
+    "missing": "未找到架构文档（docs/ARCHITECTURE.md 或 docs/ARCHITECTURE_AR.md）。",
+    "variantMissing": "此版本的架构文档不存在。"
+  },
+  "approvals": {
+    "title": "待审批",
+    "awaitingReview": "等待您的审批",
+    "approve": "批准",
+    "reject": "拒绝",
+    "pending": "提交中…",
+    "error": "操作失败，请重试。",
+    "kind": {
+      "prod-migration": "生产迁移",
+      "secret": "密钥",
+      "restart": "重启",
+      "push": "推送",
+      "sensitive": "敏感操作"
+    }
+  },
+  "runner": {
+    "label": "al-Minwāl",
+    "description": "自主运行器",
+    "fullName": "al-Minwāl（自主运行器）",
+    "cycle": "第 {{n}} 轮",
+    "stage": "阶段",
+    "model": "模型",
+    "quota": "配额",
+    "task": "任务",
+    "phase": "阶段",
+    "verdict": "上次结论",
+    "clean": "通过",
+    "unclean": "未通过",
+    "pendingTick": "等待下次触发…",
+    "status": {
+      "idle": "空闲",
+      "running": "运行中",
+      "building": "构建中",
+      "verifying": "验证中",
+      "interrupted": "已中断（配额）",
+      "failed": "失败",
+      "blocked": "已阻止",
+      "paused": "已暂停",
+      "awaiting_approval": "等待审批",
+      "disabled": "已禁用"
+    },
+    "statusLine": {
+      "running": "🟢 al-Minwāl 工作中",
+      "awaiting": "🔵 al-Minwāl 等待审批",
+      "interrupted": "🟡 al-Minwāl 已暂停",
+      "failed": "🔴 al-Minwāl 失败",
+      "idle": "⚪ al-Minwāl 空闲"
+    },
+    "stages": {
+      "review": "审查",
+      "fix": "修复",
+      "critique": "评审",
+      "phase": "构建阶段",
+      "awaiting_approval": "等待审批"
+    },
+    "actions": {
+      "start": "启动",
+      "stop": "停止",
+      "pause": "暂停",
+      "resume": "恢复",
+      "approve": "批准阶段",
+      "enable": "启用",
+      "enableHint": "为此项目重新启用 al-Minwāl",
+      "disable": "禁用",
+      "disableHint": "在 al-Minwāl 注册表中禁用此项目（启用前不开启新轮次）— 不会终止正在运行的轮次",
+      "forceStop": "强制停止",
+      "forceStopHint": "通过终止其会话立即结束当前运行轮次，然后阻止重新启动",
+      "forceStopConfirm": "这将通过终止会话立即结束当前运行轮次。是否继续？",
+      "forceStopConfirmYes": "是，立即停止",
+      "forceStopCancel": "取消"
+    },
+    "errors": {
+      "notAwaiting": "运行器当前未在等待阶段审批。",
+      "forceStopFailed": "立即停止失败（无法停止单元）。轮次可能仍在运行 — 请重试。",
+      "generic": "无法执行该操作。"
+    },
+    "journey": {
+      "title": "运行器历程",
+      "here": "运行器在此",
+      "cyclesCount": "轮次 ({{n}})",
+      "noCycles": "运行器尚未开始任何轮次",
+      "cycleN": "第 {{n}} 轮",
+      "showAll": "显示全部 ({{n}})",
+      "stale": "可能已冻结",
+      "phasesLabel": "轮次阶段",
+      "stage": {
+        "build": "构建",
+        "verify": "验证",
+        "verdict": "结论",
+        "gate": "关卡"
+      },
+      "cycleStatus": {
+        "succeeded": "成功",
+        "failed": "失败",
+        "interrupted": "已中断"
+      }
+    }
+  },
+  "stats": {
+    "tab": "统计",
+    "totalLabel": "总费用（全部时间）",
+    "headerTotal": "累计",
+    "headerTotalTitle": "该项目的累计费用 — 即使删除对话也会保留",
+    "span": "时间跨度",
+    "activeDays": "活跃天数",
+    "activeDaysOfSpan": "/ 共 {{span}} 天",
+    "conversations": "对话数",
+    "agents": "代理",
+    "firstActivity": "首次活动",
+    "lastActivity": "最近活动",
+    "dailyTitle": "每日费用",
+    "dailyPeak": "峰值",
+    "byVendor": "按提供方",
+    "byModel": "按模型",
+    "partialShort": "部分",
+    "partialModels": "部分合计 — 没有官方价格：{{models}}",
+    "apiEquivalent": "订阅用量按 API 价格折算的价值 — 并非实际账单金额",
+    "pricesAsOf": "价格截至 {{date}}",
+    "unavailable": "不可用",
+    "empty": "尚未测算该项目的费用。"
+  },
+  "summary": {
+    "tasksDone": "{{done}} 已完成",
+    "issuesOpen": "{{open}} 未解决"
+  }
+}

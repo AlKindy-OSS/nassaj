@@ -1,0 +1,1133 @@
+{
+  "title": "Einstellungen",
+  "tabs": {
+    "account": "Konto",
+    "permissions": "Berechtigungen",
+    "mcpServers": "MCP-Server",
+    "skills": "Fähigkeiten",
+    "appearance": "Darstellung"
+  },
+  "skills": {
+    "title": "Fähigkeiten",
+    "description": "Globale {{provider}}-Fähigkeiten aus .md-Dateien oder Fähigkeitsordnern installieren.",
+    "descriptionReadOnly": "Entdeckte Fähigkeiten aus {{provider}}-Speicherorten — Installation von dieser Oberfläche nicht unterstützt.",
+    "refresh": "Aktualisieren",
+    "addSkill": "Fähigkeit hinzufügen",
+    "addSkillTitle": "{{provider}}-Fähigkeit hinzufügen",
+    "installPath": "Installationspfad",
+    "dropZoneTitle": ".md-Dateien oder Fähigkeitsordner hier ablegen",
+    "dropZoneDescription": "Eigenständige SKILL.md oder vollständigen Fähigkeitsordner mit Skripten und Assets hochladen.",
+    "chooseFiles": "Dateien auswählen",
+    "chooseFolder": "Ordner auswählen",
+    "queuedFiles": "Warteschlange",
+    "remove": "Entfernen",
+    "install": "Fähigkeit installieren",
+    "installCount_one": "{{count}} Fähigkeit installieren",
+    "installCount_other": "{{count}} Fähigkeiten installieren",
+    "cancel": "Abbrechen",
+    "uploadHint": "Ordner-Uploads verwenden den Ordnernamen; Einzeldateien verwenden den in SKILL.md deklarierten Namen.",
+    "visibleSkills": "Installierte Fähigkeiten",
+    "visibleSkillsDescription": "Von der Provider-API entdeckte Fähigkeiten, einschließlich globaler und projektbewusster Speicherorte.",
+    "search": "Fähigkeiten suchen...",
+    "clearSearch": "Suche löschen",
+    "scanning": "Projektfähigkeiten werden gescannt…",
+    "loading": "{{provider}}-Fähigkeiten werden geladen…",
+    "empty": "Noch keine Fähigkeiten entdeckt",
+    "emptyDescription": "Globale Fähigkeit oben hinzufügen oder projektspezifische Fähigkeitsordner erstellen.",
+    "noMatch": "Keine passenden Fähigkeiten",
+    "noMatchDescription": "Anderen Befehl, Namen, Gültigkeitsbereich, Projekt oder Quellpfad versuchen.",
+    "source": "Quelle",
+    "saved": "Fähigkeiten erfolgreich installiert.",
+    "delete": "Löschen",
+    "confirmDelete": "«{{name}}» löschen?",
+    "confirmYes": "Löschen",
+    "plugin": "Plugin",
+    "project": "Projekt",
+    "scopes": {
+      "user": "Benutzer",
+      "plugin": "Plugin",
+      "repo": "Repo",
+      "project": "Projekt",
+      "admin": "Admin",
+      "system": "System"
+    },
+    "errors": {
+      "deleteFailed": "Fähigkeit konnte nicht gelöscht werden. Erneut versuchen.",
+      "dropFailed": "Eine oder mehrere .md-Dateien oder Ordner mit SKILL.md ablegen.",
+      "saveFailed": "Fähigkeiten konnten nicht installiert werden. Erneut versuchen."
+    }
+  },
+  "account": {
+    "title": "Konto",
+    "language": "Sprache",
+    "languageLabel": "Anzeigesprache",
+    "languageDescription": "Wähl deine bevorzugte Sprache für die Oberfläche",
+    "username": "Benutzername",
+    "email": "E-Mail",
+    "profile": "Profil",
+    "changePassword": "Passwort ändern"
+  },
+  "mcp": {
+    "title": "MCP-Server",
+    "addServer": "Server hinzufügen",
+    "editServer": "Server bearbeiten",
+    "deleteServer": "Server löschen",
+    "serverName": "Servername",
+    "serverType": "Servertyp",
+    "config": "Konfiguration",
+    "testConnection": "Verbindung testen",
+    "status": "Status",
+    "connected": "Verbunden",
+    "disconnected": "Getrennt",
+    "scope": {
+      "label": "Geltungsbereich",
+      "user": "Benutzer:in",
+      "project": "Projekt"
+    }
+  },
+  "appearance": {
+    "title": "Darstellung",
+    "theme": "Design",
+    "codeEditor": "Code-Editor",
+    "editorTheme": "Editor-Design",
+    "wordWrap": "Zeilenumbruch",
+    "showMinimap": "Minimap anzeigen",
+    "lineNumbers": "Zeilennummern",
+    "fontSize": "Schriftgröße"
+  },
+  "actions": {
+    "saveChanges": "Änderungen speichern",
+    "resetToDefaults": "Auf Standardwerte zurücksetzen",
+    "cancelChanges": "Änderungen abbrechen"
+  },
+  "quickSettings": {
+    "title": "Schnelleinstellungen",
+    "sections": {
+      "appearance": "Darstellung",
+      "toolDisplay": "Werkzeuganzeige",
+      "viewOptions": "Anzeigeoptionen",
+      "inputSettings": "Eingabeeinstellungen"
+    },
+    "darkMode": "Darkmode",
+    "autoExpandTools": "Werkzeuge automatisch erweitern",
+    "showRawParameters": "Rohe Parameter anzeigen",
+    "showThinking": "Denken anzeigen",
+    "hideToolCalls": "Tool-Aufrufe ausblenden",
+    "autoScrollToBottom": "Automatisch nach unten scrollen",
+    "tabsIconOnly": "Kompakte Tabs (nur Symbole)",
+    "sendByCtrlEnter": "Mit Strg+Enter senden",
+    "sendByCtrlEnterDescription": "Wenn aktiviert, sendet Strg+Enter die Nachricht anstelle von Enter. Dies ist nützlich für IME-Benutzer:innen, um versehentliches Senden zu vermeiden.",
+    "dragHandle": {
+      "dragging": "Handle wird gezogen",
+      "closePanel": "Einstellungspanel schließen",
+      "openPanel": "Einstellungspanel öffnen",
+      "draggingStatus": "Wird gezogen...",
+      "toggleAndMove": "Klicken zum Umschalten, ziehen zum Verschieben"
+    }
+  },
+  "claudeUsage": {
+    "title": "Claude-Nutzung",
+    "loading": "Nutzung wird geladen…",
+    "error": "Nutzungsstatus konnte nicht geladen werden.",
+    "stale": "Gecachte Daten",
+    "percentUsed": "{{percent}} verwendet",
+    "resetsIn": "Zurückgesetzt {{time}}",
+    "extraUsageDetail": "{{used}} von {{limit}} verwendet",
+    "crossProviderNote": "Nutzung des Claude-Kontos — diese Sitzung läuft auf {{provider}}",
+    "notApplicable": "Claude-Kontingente gelten nicht für den Anbieter der aktuellen Sitzung ({{provider}})",
+    "windows": {
+      "session": "Aktuelle Sitzung",
+      "weeklyAllModels": "Alle Modelle (wöchentlich)",
+      "weeklySonnet": "Nur Sonnet",
+      "weeklyOpus": "Nur Opus",
+      "extraUsage": "Zusätzliche Nutzung"
+    }
+  },
+  "terminalShortcuts": {
+    "title": "Terminal-Tastenkürzel",
+    "sectionKeys": "Tasten",
+    "sectionNavigation": "Navigation",
+    "escape": "Escape",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "arrowUp": "Pfeil oben",
+    "arrowDown": "Pfeil unten",
+    "scrollDown": "Nach unten scrollen",
+    "handle": {
+      "closePanel": "Tastenkürzel-Panel schließen",
+      "openPanel": "Tastenkürzel-Panel öffnen"
+    }
+  },
+  "mainTabs": {
+    "label": "Einstellungen",
+    "profile": "Profil",
+    "agents": "Agenten",
+    "appearance": "Darstellung",
+    "git": "Git",
+    "apiTokens": "Nassaj API-Schlüssel",
+    "notifications": "Benachrichtigungen",
+    "plugins": "Plugins",
+    "users": "Benutzer:innen",
+    "about": "Info",
+    "commandBoard": "Befehlstafel"
+  },
+  "profile": {
+    "title": "Profil",
+    "subtitle": "Benutzername, Passwort und Passkeys deines Kontos verwalten",
+    "tabs": {
+      "identity": "Identität",
+      "security": "Sicherheit"
+    },
+    "saving": "Wird gespeichert...",
+    "avatar": {
+      "title": "Profilbild",
+      "description": "Füge ein Foto hinzu, damit Teammitglieder dich erkennen.",
+      "change": "Bild ändern",
+      "uploading": "Wird hochgeladen...",
+      "hint": "Quadratische Bilder eignen sich am besten. PNG oder JPG.",
+      "currentAlt": "Dein Profilbild",
+      "placeholderAlt": "Kein Profilbild festgelegt",
+      "success": "Profilbild erfolgreich aktualisiert",
+      "errors": {
+        "uploadFailed": "Bild konnte nicht hochgeladen werden. Bitte erneut versuchen.",
+        "network": "Netzwerkfehler. Bitte Verbindung prüfen und erneut versuchen."
+      }
+    },
+    "username": {
+      "title": "Benutzername ändern",
+      "description": "Benutzernamen aktualisieren, den du zum Anmelden verwendest.",
+      "currentLabel": "Aktueller Benutzername",
+      "newLabel": "Neuer Benutzername",
+      "placeholder": "Neuen Benutzernamen wählen",
+      "hint": "3–32 Zeichen: Buchstaben, Zahlen oder Unterstrich.",
+      "save": "Benutzername speichern",
+      "success": "Benutzername erfolgreich aktualisiert",
+      "errors": {
+        "required": "Bitte gib einen neuen Benutzernamen ein",
+        "unchanged": "Der neue Benutzername ist derselbe wie der aktuelle"
+      }
+    },
+    "password": {
+      "title": "Passwort ändern",
+      "description": "Verwende ein starkes Passwort, das du nirgendwo sonst verwendest.",
+      "currentLabel": "Aktuelles Passwort",
+      "currentPlaceholder": "Aktuelles Passwort eingeben",
+      "newLabel": "Neues Passwort",
+      "newPlaceholder": "Neues Passwort eingeben",
+      "confirmLabel": "Neues Passwort bestätigen",
+      "confirmPlaceholder": "Neues Passwort erneut eingeben",
+      "hint": "Mindestens {{min}} Zeichen.",
+      "save": "Passwort speichern",
+      "success": "Passwort erfolgreich geändert",
+      "errors": {
+        "required": "Bitte alle Passwortfelder ausfüllen",
+        "short": "Passwort muss mindestens {{min}} Zeichen haben",
+        "mismatch": "Neue Passwörter stimmen nicht überein"
+      }
+    },
+    "passkeys": {
+      "title": "Passkeys",
+      "description": "Meld dich ohne Passwort an — mit Fingerabdruck, Gesichtserkennung, Geräte-PIN oder einem Sicherheitsschlüssel.",
+      "add": "Passkey hinzufügen",
+      "nameLabel": "Passkey-Name (optional)",
+      "namePlaceholder": "z. B. Laptop-Fingerabdruck",
+      "create": "Passkey erstellen",
+      "creating": "Warte auf dein Gerät...",
+      "cancel": "Abbrechen",
+      "loading": "Passkeys werden geladen...",
+      "empty": "Noch keine Passkeys. Füge einen hinzu, um dich schnell und sicher anzumelden — ohne Passwort.",
+      "notSupported": "Dieser Browser unterstützt keine Passkeys, daher können hier keine neuen hinzugefügt werden.",
+      "unnamed": "Unbenannter Passkey",
+      "createdAt": "Hinzugefügt {{date}}",
+      "lastUsedAt": "Zuletzt verwendet {{date}}",
+      "neverUsed": "Nie verwendet",
+      "badges": {
+        "synced": "Synchronisiert",
+        "device": "Gerätegebunden"
+      },
+      "rename": "Passkey umbenennen",
+      "renamePlaceholder": "Neuer Name",
+      "renameSave": "Namen speichern",
+      "delete": "Passkey löschen",
+      "deleteConfirm": "Diesen Passkey löschen?",
+      "deleteConfirmYes": "Löschen",
+      "success": {
+        "added": "Passkey erfolgreich hinzugefügt",
+        "renamed": "Passkey umbenannt",
+        "deleted": "Passkey gelöscht"
+      },
+      "errors": {
+        "loadFailed": "Passkeys konnten nicht geladen werden. Bitte erneut versuchen.",
+        "registerFailed": "Passkey konnte nicht erstellt werden. Bitte erneut versuchen.",
+        "duplicate": "Dieses Gerät oder dieser Sicherheitsschlüssel ist bereits als Passkey registriert.",
+        "renameFailed": "Passkey konnte nicht umbenannt werden.",
+        "deleteFailed": "Passkey konnte nicht gelöscht werden.",
+        "network": "Netzwerkfehler. Bitte Verbindung prüfen und erneut versuchen."
+      }
+    },
+    "identity": {
+      "title": "Avatar-Stil",
+      "description": "Wähl einen fertigen Avatar oder eine Farbe, anstatt ein Foto hochzuladen.",
+      "tabs": {
+        "upload": "Hochladen",
+        "gallery": "Galerie",
+        "color": "Farbe"
+      },
+      "gallery": {
+        "heading": "Avatar wählen",
+        "selected": "Ausgewählter Avatar"
+      },
+      "color": {
+        "heading": "Farbe wählen",
+        "hint": "Die Farbe wird hinter deinem Initial verwendet.",
+        "selected": "Ausgewählte Farbe"
+      },
+      "saving": "Wird gespeichert...",
+      "success": "Avatar erfolgreich aktualisiert",
+      "errors": {
+        "saveFailed": "Auswahl konnte nicht gespeichert werden. Bitte erneut versuchen.",
+        "network": "Netzwerkfehler. Bitte Verbindung prüfen und erneut versuchen."
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "Verknüpfe dein eigenes Claude-Abonnement zur Nutzung in deinen Sitzungen. Jeder Benutzer hat sein eigenes isoliertes Anmeldedaten.",
+    "recheck": "Erneut prüfen",
+    "loadError": "Abonnementstatus konnte nicht geprüft werden. Bitte erneut versuchen.",
+    "banner": "Dein Claude-Abonnement ist noch nicht verknüpft. Du musst es verknüpfen, bevor du Claude in deinen Sitzungen verwenden kannst.",
+    "bannerHint": "Klick auf die Schaltfläche unten, um das Terminal zu öffnen und den Anmeldevorgang abzuschließen.",
+    "linkButton": "Claude-Konto verknüpfen",
+    "ownerNote": "Deine Anmeldedaten werden als Eigentümer:in automatisch verknüpft — keine Aktion erforderlich."
+  },
+  "agyConnection": {
+    "description": "Verknüpfe dein eigenes Antigravity-Abonnement zur Nutzung in deinen Sitzungen. Jeder Benutzer hat sein eigenes isoliertes Anmeldedaten.",
+    "recheck": "Erneut prüfen",
+    "loadError": "Abonnementstatus konnte nicht geprüft werden. Bitte erneut versuchen.",
+    "banner": "Dein Antigravity-Abonnement ist noch nicht verknüpft. Du musst es verknüpfen, bevor du agy in deinen Sitzungen verwenden kannst.",
+    "bannerHint": "Klick auf die Schaltfläche unten, um das Terminal zu öffnen und folgenden Befehl auszuführen:",
+    "linkButton": "Antigravity-Konto verknüpfen",
+    "ownerNote": "Deine Anmeldedaten werden als Eigentümer:in automatisch verknüpft — keine Aktion erforderlich.",
+    "modal": {
+      "title": "Antigravity-Konto verknüpfen",
+      "close": "Verknüpfungsdialog schließen",
+      "instructions": "Führe im Terminal unten folgenden Befehl aus:",
+      "afterComplete": "Schließe den OAuth-Anmeldevorgang ab, dann schließe diesen Dialog und klick auf \"Erneut prüfen\", um den Status zu aktualisieren."
+    }
+  },
+  "users": {
+    "title": "Benutzer:innen",
+    "subtitle": "Workspace-Mitglieder und Einladungen verwalten",
+    "inviteButton": "Benutzer:in einladen",
+    "listHeading": "Mitglieder",
+    "loading": "Benutzer:innen werden geladen...",
+    "empty": "Keine Benutzer:innen gefunden",
+    "you": "du",
+    "changeRole": "Rolle ändern",
+    "suspend": "Sperren",
+    "activate": "Aktivieren",
+    "resetPassword": "Passwort zurücksetzen",
+    "deleteUser": "Benutzer:in löschen",
+    "deleteUserConfirm": "{{username}} dauerhaft löschen? Das kann nicht rückgängig gemacht werden.",
+    "reset": {
+      "title": "Passwort zurücksetzen",
+      "confirm": "Passwort für {{username}} zurücksetzen?",
+      "warning": "Ein temporäres Passwort wird generiert und einmal angezeigt. Die Benutzer:in muss es bei der nächsten Anmeldung ändern, und alle bestehenden Sitzungen werden abgemeldet.",
+      "submit": "Passwort zurücksetzen",
+      "resetting": "Wird zurückgesetzt...",
+      "cancel": "Abbrechen",
+      "close": "Schließen",
+      "done": "Fertig",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "successHint": "Teile dieses temporäre Passwort sicher. Es wird nur einmal angezeigt.",
+      "tempPasswordLabel": "Temporäres Passwort"
+    },
+    "pendingInvites": "Ausstehende Einladungen",
+    "noPendingInvites": "Keine ausstehenden Einladungen",
+    "revoke": "Widerrufen",
+    "expiresAt": "Läuft ab {{date}}",
+    "roles": {
+      "owner": "Eigentümer:in",
+      "admin": "Admin",
+      "user": "Benutzer:in"
+    },
+    "statuses": {
+      "active": "Aktiv",
+      "disabled": "Gesperrt"
+    },
+    "invite": {
+      "title": "Benutzer:in einladen",
+      "roleLabel": "Rolle",
+      "roleHint": "Die eingeladene Person wird mit dieser Rolle erstellt.",
+      "submit": "Einladung erstellen",
+      "creating": "Wird erstellt...",
+      "cancel": "Abbrechen",
+      "close": "Schließen",
+      "done": "Fertig",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "successHint": "Teile diesen Einmallink. Er wird nur einmal angezeigt."
+    }
+  },
+  "providerSharing": {
+    "heading": "Anbieter-Anmeldedaten-Freigabe",
+    "subtitle": "Wähle pro Anbieter, ob Anmeldedaten für alle Benutzer:innen geteilt oder pro Benutzer:in isoliert werden.",
+    "loading": "Freigabeeinstellungen werden geladen...",
+    "modeLabel": "Freigabemodus für {{provider}}",
+    "providers": {
+      "claude": "Claude",
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "agy": "Antigravity (agy)",
+      "cursor": "Cursor",
+      "kimi": "Kimi",
+      "deepseek": "DeepSeek",
+      "glm": "GLM"
+    },
+    "modes": {
+      "shared": "Geteilt",
+      "isolated": "Isoliert"
+    },
+    "modeDescription": {
+      "shared": "Gleiche Anmeldedaten für alle Benutzer:innen",
+      "isolated": "Jede Person hat eigene Anmeldedaten"
+    },
+    "agyWarning": {
+      "title": "Experimentelle Isolation",
+      "description": "Die Isolation von Antigravity-Anmeldedaten ist experimentell und erfordert einen Neustart aktiver Sitzungen."
+    },
+    "save": "Speichern",
+    "saving": "Wird gespeichert...",
+    "saveStatus": {
+      "success": "Freigabeeinstellungen erfolgreich gespeichert",
+      "error": "Freigabeeinstellungen konnten nicht gespeichert werden"
+    }
+  },
+  "notifications": {
+    "title": "Benachrichtigungen",
+    "description": "Lege fest, welche Benachrichtigungen du erhältst.",
+    "webPush": {
+      "title": "Web-Push-Benachrichtigungen",
+      "enable": "Push-Benachrichtigungen aktivieren",
+      "disable": "Push-Benachrichtigungen deaktivieren",
+      "enabled": "Push-Benachrichtigungen sind aktiviert",
+      "loading": "Wird aktualisiert...",
+      "unsupported": "Push-Benachrichtigungen werden in diesem Browser nicht unterstützt.",
+      "denied": "Push-Benachrichtigungen sind blockiert. Bitte erlaube sie in den Browsereinstellungen."
+    },
+    "sound": {
+      "title": "Ton",
+      "description": "Spielt einen kurzen Ton ab, wenn ein Chat-Lauf abgeschlossen ist.",
+      "enabled": "Aktiviert",
+      "test": "Ton testen"
+    },
+    "events": {
+      "title": "Ereignistypen",
+      "actionRequired": "Aktion erforderlich",
+      "stop": "Lauf gestoppt",
+      "error": "Lauf fehlgeschlagen"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "Darkmode",
+      "description": "Zwischen hellem und dunklem Design wechseln"
+    },
+    "themeMode": {
+      "sectionTitle": "Erscheinungsbild",
+      "label": "Design",
+      "description": "Wähle hell, dunkel oder automatisch die Systemeinstellung",
+      "light": "Hell",
+      "dark": "Dunkel",
+      "system": "System"
+    },
+    "themePresets": {
+      "title": "Design",
+      "description": "Markenfarbige Farbschemata, die auf Hell- und Dunkeldesign aufgesetzt werden",
+      "groupLabel": "Design-Voreinstellung",
+      "presets": {
+        "default": "Standard",
+        "claude": "Claude",
+        "alkindy": "Al-Kindy",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "Benutzerdefiniert"
+      },
+      "custom": {
+        "title": "Benutzerdefinierte Farben",
+        "accent": "Akzentfarbe",
+        "background": "Hintergrund",
+        "foreground": "Text"
+      }
+    },
+    "projectSorting": {
+      "label": "Projektsortierung",
+      "description": "Wie Projekte in der Seitenleiste angeordnet werden",
+      "alphabetical": "Alphabetisch",
+      "recentActivity": "Letzte Aktivität"
+    },
+    "codeEditor": {
+      "title": "Code-Editor",
+      "theme": {
+        "label": "Editor-Design",
+        "description": "Standarddesign für den Code-Editor"
+      },
+      "wordWrap": {
+        "label": "Zeilenumbruch",
+        "description": "Zeilenumbruch standardmäßig im Editor aktivieren"
+      },
+      "showMinimap": {
+        "label": "Minimap anzeigen",
+        "description": "Minimap zur einfacheren Navigation in der Diff-Ansicht anzeigen"
+      },
+      "lineNumbers": {
+        "label": "Zeilennummern anzeigen",
+        "description": "Zeilennummern im Editor anzeigen"
+      },
+      "fontSize": {
+        "label": "Schriftgröße",
+        "description": "Editor-Schriftgröße in Pixeln"
+      }
+    },
+    "branding": {
+      "title": "Serveridentität",
+      "description": "Füge neben dem Logo in der Seitenleiste ein kleines Symbol hinzu, um diesen Server für alle Nutzer kenntlich zu machen.",
+      "nodeIcon": {
+        "label": "Serversymbol",
+        "description": "Ein kleines Abzeichen, das neben dem Logo angezeigt wird (≤ 48 KB). PNG, JPG, WebP oder SVG.",
+        "upload": "Symbol hochladen",
+        "change": "Symbol ändern",
+        "clear": "Entfernen",
+        "save": "Speichern",
+        "saving": "Wird gespeichert…",
+        "preview": "Symbolvorschau",
+        "success": "Serversymbol gespeichert",
+        "cleared": "Serversymbol entfernt",
+        "position": {
+          "label": "Symbolposition",
+          "description": "Wo das Symbol relativ zum Logo angezeigt wird",
+          "start": "Vor dem Logo",
+          "end": "Nach dem Logo"
+        },
+        "errors": {
+          "tooBig": "Das Bild überschreitet das Limit von 48 KB",
+          "unsupported": "Nicht unterstützter Dateityp. Verwende PNG, JPG, WebP oder SVG.",
+          "saveFailed": "Speichern fehlgeschlagen. Bitte erneut versuchen."
+        }
+      }
+    },
+    "sidebar": {
+      "title": "Seitenleiste",
+      "showSearchAndArchive": {
+        "label": "Suche & Archiv-Umschalter anzeigen",
+        "description": "Zeigt das Suchfeld und die Archiv-Umschaltzeile oben in der Projektliste an"
+      }
+    },
+    "codeHighlighting": {
+      "title": "Code-Hervorhebung",
+      "label": "Sprachumfang",
+      "description": "Wie viele Sprachen die Hervorhebung kennt. Nur die Standardstufe wird mit der Seite geladen; höhere Stufen werden bei Auswahl nachgeladen und gelten sofort ohne Neuladen. Sprachen außerhalb des Umfangs erscheinen als einfacher Text.",
+      "core": "10 Sprachen (am schnellsten – Standard)",
+      "extended": "20 Sprachen (kleiner zusätzlicher Download)",
+      "full": "Alle 300 Sprachen (großer zusätzlicher Download)"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "MCP-Server hinzufügen",
+      "edit": "MCP-Server bearbeiten"
+    },
+    "importMode": {
+      "form": "Formulareingabe",
+      "json": "JSON-Import"
+    },
+    "scope": {
+      "label": "Geltungsbereich",
+      "userGlobal": "Benutzer:in (Global)",
+      "projectLocal": "Projekt (Lokal)",
+      "userDescription": "Benutzerbereich: Auf allen Projekten deines Computers verfügbar",
+      "projectDescription": "Lokaler Bereich: Nur im ausgewählten Projekt verfügbar",
+      "cannotChange": "Der Geltungsbereich kann beim Bearbeiten eines vorhandenen Servers nicht geändert werden"
+    },
+    "fields": {
+      "serverName": "Servername",
+      "transportType": "Transporttyp",
+      "command": "Befehl",
+      "arguments": "Argumente (eines pro Zeile)",
+      "jsonConfig": "JSON-Konfiguration",
+      "url": "URL",
+      "envVars": "Umgebungsvariablen (SCHLÜSSEL=Wert, eine pro Zeile)",
+      "headers": "Header (SCHLÜSSEL=Wert, eine pro Zeile)",
+      "selectProject": "Projekt auswählen..."
+    },
+    "placeholders": {
+      "serverName": "mein-server"
+    },
+    "validation": {
+      "missingType": "Pflichtfeld fehlt: type",
+      "stdioRequiresCommand": "stdio-Typ erfordert ein Befehlsfeld",
+      "httpRequiresUrl": "{{type}}-Typ erfordert ein URL-Feld",
+      "invalidJson": "Ungültiges JSON-Format",
+      "jsonHelp": "Füge deine MCP-Server-Konfiguration im JSON-Format ein. Beispielformate:",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
+    },
+    "configDetails": "Konfigurationsdetails (aus {{configFile}})",
+    "projectPath": "Pfad: {{path}}",
+    "actions": {
+      "cancel": "Abbrechen",
+      "saving": "Wird gespeichert...",
+      "addServer": "Server hinzufügen",
+      "updateServer": "Server aktualisieren"
+    }
+  },
+  "saveStatus": {
+    "success": "Einstellungen erfolgreich gespeichert!",
+    "error": "Einstellungen konnten nicht gespeichert werden",
+    "saving": "Wird gespeichert..."
+  },
+  "footerActions": {
+    "save": "Einstellungen speichern",
+    "cancel": "Abbrechen"
+  },
+  "git": {
+    "title": "Git-Konfiguration",
+    "description": "Konfiguriere deine Git-Identität für Commits. Diese Einstellungen werden global über git config --global angewendet",
+    "name": {
+      "label": "Git-Name",
+      "help": "Dein Name für Git-Commits"
+    },
+    "email": {
+      "label": "Git-E-Mail",
+      "help": "Deine E-Mail-Adresse für Git-Commits"
+    },
+    "actions": {
+      "save": "Konfiguration speichern",
+      "saving": "Wird gespeichert..."
+    },
+    "status": {
+      "success": "Erfolgreich gespeichert"
+    }
+  },
+  "apiKeys": {
+    "title": "Nassaj API-Schlüssel",
+    "description": "API-Schlüssel generieren, um Nassaj von außerhalb des Browsers programmgesteuert aufzurufen — Skripte, Automatisierung, CI oder Webhooks — über POST /api/agent mit dem Schlüssel im x-api-key-Header.",
+    "newKey": {
+      "alertTitle": "⚠️ API-Schlüssel speichern",
+      "alertMessage": "Dies ist das einzige Mal, dass du diesen Schlüssel siehst. Speichere ihn sicher.",
+      "iveSavedIt": "Ich habe ihn gespeichert"
+    },
+    "form": {
+      "placeholder": "API-Schlüsselname (z. B. Produktionsserver)",
+      "createButton": "Erstellen",
+      "cancelButton": "Abbrechen"
+    },
+    "newButton": "Neuer API-Schlüssel",
+    "empty": "Noch keine API-Schlüssel erstellt.",
+    "list": {
+      "created": "Erstellt:",
+      "lastUsed": "Zuletzt verwendet:"
+    },
+    "confirmDelete": "Möchtest du diesen API-Schlüssel wirklich löschen?",
+    "status": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv"
+    },
+    "github": {
+      "title": "GitHub-Token",
+      "description": "Füge GitHub Personal Access Tokens hinzu, um private Repositories über die externe API zu klonen.",
+      "descriptionAlt": "Füge GitHub Personal Access Tokens hinzu, um private Repositories zu klonen. Du kannst Token auch direkt in API-Anfragen übergeben, ohne sie zu speichern.",
+      "addButton": "Token hinzufügen",
+      "form": {
+        "namePlaceholder": "Token-Name (z. B. Persönliche Repos)",
+        "tokenPlaceholder": "GitHub Personal Access Token (ghp_...)",
+        "descriptionPlaceholder": "Beschreibung (optional)",
+        "addButton": "Token hinzufügen",
+        "cancelButton": "Abbrechen",
+        "howToCreate": "Wie man einen GitHub Personal Access Token erstellt →"
+      },
+      "empty": "Noch keine GitHub-Token hinzugefügt.",
+      "added": "Hinzugefügt:",
+      "confirmDelete": "Möchtest du diesen GitHub-Token wirklich löschen?"
+    },
+    "apiDocsLink": "API-Dokumentation",
+    "documentation": {
+      "title": "Externe API-Dokumentation",
+      "description": "Erfahre, wie du die externe API nutzen kannst, um Claude/Cursor-Sitzungen aus deinen Anwendungen heraus zu starten.",
+      "viewLink": "API-Dokumentation anzeigen →"
+    },
+    "loading": "Lädt...",
+    "version": {
+      "updateAvailable": "Update verfügbar: v{{version}}"
+    }
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "Wird überprüft...",
+      "connected": "Verbunden",
+      "notConnected": "Nicht verbunden",
+      "disconnected": "Getrennt",
+      "checkingAuth": "Authentifizierungsstatus wird überprüft...",
+      "loggedInAs": "Angemeldet als {{email}}",
+      "authenticatedUser": "authentifizierte:r Benutzer:in"
+    },
+    "account": {
+      "claude": {
+        "description": "Anthropic Claude KI-Assistent"
+      },
+      "cursor": {
+        "description": "Cursor KI-gestützter Code-Editor"
+      },
+      "codex": {
+        "description": "OpenAI Codex KI-Assistent"
+      },
+      "gemini": {
+        "description": "Google Gemini KI-Assistent"
+      },
+      "antigravity": {
+        "description": "Google AI Pro über das agy-CLI"
+      },
+      "opencode": {
+        "description": "OpenCode-CLI-Assistent"
+      },
+      "kimi": {
+        "description": "Moonshot Kimi über API-Schlüssel"
+      },
+      "deepseek": {
+        "description": "DeepSeek über API-Schlüssel"
+      },
+      "glm": {
+        "description": "Zhipu / Z.ai GLM über API-Schlüssel"
+      }
+    },
+    "antigravity": {
+      "modelNote": "Verwendet Google AI Pro über das agy-CLI (v1.x). Das aktive Modell wird in den agy-Einstellungen ausgewählt, nicht über diese Oberfläche."
+    },
+    "connectionStatus": "Verbindungsstatus",
+    "login": {
+      "title": "Anmelden",
+      "reAuthenticate": "Erneut authentifizieren",
+      "description": "Meld dich bei deinem {{agent}}-Konto an, um KI-Funktionen zu aktivieren",
+      "reAuthDescription": "Mit einem anderen Konto anmelden oder Anmeldedaten aktualisieren",
+      "button": "Anmelden",
+      "reLoginButton": "Erneut anmelden"
+    },
+    "error": "Fehler: {{error}}",
+    "apiKey": {
+      "title": "API-Schlüssel hinzufügen",
+      "replaceTitle": "API-Schlüssel ersetzen",
+      "description": "Füge einen {{provider}}-API-Schlüssel ein, um diesen Anbieter zu aktivieren. Er wird verschlüsselt gespeichert und nie wieder angezeigt.",
+      "getKey": "Schlüssel erhalten",
+      "inputLabel": "{{provider}}-API-Schlüssel",
+      "placeholder": "API-Schlüssel einfügen",
+      "placeholderConfigured": "•••••••• (konfiguriert)",
+      "save": "Speichern",
+      "saved": "API-Schlüssel gespeichert.",
+      "remove": "Entfernen",
+      "removed": "API-Schlüssel entfernt.",
+      "configuredNote": "Ein API-Schlüssel ist konfiguriert.",
+      "checkingCapability": "Unterstützung für Schlüsseleingabe wird geprüft…",
+      "targetLabel": "Ziel der Zugangsdaten",
+      "targets": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "glm": "GLM"
+      }
+    }
+  },
+  "permissions": {
+    "title": "Berechtigungseinstellungen",
+    "skipPermissions": {
+      "label": "Berechtigungsaufforderungen überspringen (mit Vorsicht verwenden)",
+      "claudeDescription": "Entspricht dem Flag --dangerously-skip-permissions",
+      "cursorDescription": "Entspricht dem Flag -f in der Cursor CLI"
+    },
+    "allowVendorDelegation": {
+      "label": "Delegierung von Unteraufgaben an andere Modelle erlauben",
+      "description": "Ermöglicht Claude, ein gehostetes Anbietermodell (Kimi, DeepSeek oder GLM) für eine einzelne Unteraufgabe während eines Laufs aufzurufen — mit deinem eigenen konfigurierten API-Schlüssel für diesen Anbieter. Das Claude-Modell selbst bleibt unverändert. Standardmäßig deaktiviert."
+    },
+    "allowedTools": {
+      "title": "Erlaubte Werkzeuge",
+      "description": "Werkzeuge, die automatisch ohne Berechtigungsaufforderung erlaubt werden",
+      "placeholder": "z. B. \"Bash(git log:*)\" oder \"Write\"",
+      "quickAdd": "Häufige Werkzeuge schnell hinzufügen:",
+      "empty": "Keine erlaubten Werkzeuge konfiguriert"
+    },
+    "blockedTools": {
+      "title": "Gesperrte Werkzeuge",
+      "description": "Werkzeuge, die automatisch ohne Berechtigungsaufforderung gesperrt werden",
+      "placeholder": "z. B. \"Bash(rm:*)\"",
+      "empty": "Keine gesperrten Werkzeuge konfiguriert"
+    },
+    "allowedCommands": {
+      "title": "Erlaubte Shell-Befehle",
+      "description": "Shell-Befehle, die automatisch ohne Aufforderung erlaubt werden",
+      "placeholder": "z. B. \"Shell(ls)\" oder \"Shell(git status)\"",
+      "quickAdd": "Häufige Befehle schnell hinzufügen:",
+      "empty": "Keine erlaubten Befehle konfiguriert"
+    },
+    "blockedCommands": {
+      "title": "Gesperrte Shell-Befehle",
+      "description": "Shell-Befehle, die automatisch gesperrt werden",
+      "placeholder": "z. B. \"Shell(rm -rf)\" oder \"Shell(sudo)\"",
+      "empty": "Keine gesperrten Befehle konfiguriert"
+    },
+    "toolExamples": {
+      "title": "Werkzeugmuster-Beispiele:",
+      "bashGitLog": "- Alle git log-Befehle erlauben",
+      "bashGitDiff": "- Alle git diff-Befehle erlauben",
+      "write": "- Alle Write-Werkzeugnutzungen erlauben",
+      "bashRm": "- Alle rm-Befehle sperren (gefährlich)"
+    },
+    "shellExamples": {
+      "title": "Shell-Befehl-Beispiele:",
+      "ls": "- ls-Befehl erlauben",
+      "gitStatus": "- git status erlauben",
+      "npmInstall": "- npm install erlauben",
+      "rmRf": "- Rekursives Löschen sperren"
+    },
+    "codex": {
+      "permissionMode": "Berechtigungsmodus",
+      "description": "Steuert, wie Codex Dateiänderungen und Befehlsausführung handhabt",
+      "modes": {
+        "default": {
+          "title": "Standard",
+          "description": "Nur vertrauenswürdige Befehle (ls, cat, grep, git status usw.) werden automatisch ausgeführt. Andere Befehle werden übersprungen. Kann in den Arbeitsbereich schreiben."
+        },
+        "acceptEdits": {
+          "title": "Bearbeitungen akzeptieren",
+          "description": "Alle Befehle werden automatisch innerhalb des Arbeitsbereichs ausgeführt. Vollautomatischer Modus mit isolierter Ausführung."
+        },
+        "bypassPermissions": {
+          "title": "Berechtigungen umgehen",
+          "description": "Vollständiger Systemzugriff ohne Einschränkungen. Alle Befehle werden automatisch mit vollem Festplatten- und Netzwerkzugriff ausgeführt. Mit Vorsicht verwenden."
+        }
+      },
+      "technicalDetails": "Technische Details",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted. Vertrauenswürdige Befehle: cat, cd, grep, head, ls, pwd, tail, git status/log/diff/show, find (ohne -exec) usw.",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never. Alle Befehle werden automatisch innerhalb des Projektverzeichnisses ausgeführt.",
+        "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never. Vollständiger Systemzugriff, nur in vertrauenswürdigen Umgebungen verwenden.",
+        "overrideNote": "Du kannst dies pro Sitzung über die Modusschaltfläche in der Chat-Oberfläche überschreiben."
+      }
+    },
+    "antigravity": {
+      "title": "Berechtigungseinstellungen",
+      "description": "Das agy-CLI verwaltet sein eigenes Berechtigungsverhalten. Über diese Oberfläche gibt es keine Erlaubnis- oder Sperrlisten zu konfigurieren.",
+      "skipPermissions": {
+        "label": "Berechtigungsaufforderungen werden übersprungen",
+        "description": "agy läuft mit --dangerously-skip-permissions, daher werden keine Werkzeug- und Befehlsgenehmigungen während einer Sitzung angefordert."
+      },
+      "cliNote": {
+        "title": "Berechtigungen in agy konfigurieren",
+        "description": "Berechtigungs- und Autonomieoptionen befinden sich in den agy-CLI-Einstellungen, nicht in dieser Oberfläche."
+      }
+    },
+    "actions": {
+      "add": "Hinzufügen"
+    }
+  },
+  "mcpServers": {
+    "title": "MCP-Server",
+    "description": {
+      "claude": "Model Context Protocol-Server stellen Claude zusätzliche Werkzeuge und Datenquellen zur Verfügung",
+      "cursor": "Model Context Protocol-Server stellen Cursor zusätzliche Werkzeuge und Datenquellen zur Verfügung",
+      "codex": "Model Context Protocol-Server stellen Codex zusätzliche Werkzeuge und Datenquellen zur Verfügung",
+      "opencode": "Model Context Protocol-Server stellen OpenCode zusätzliche Werkzeuge und Datenquellen zur Verfügung"
+    },
+    "addButton": "MCP-Server hinzufügen",
+    "empty": "Keine MCP-Server konfiguriert",
+    "serverType": "Typ",
+    "scope": {
+      "local": "lokal",
+      "user": "benutzer"
+    },
+    "config": {
+      "command": "Befehl",
+      "url": "URL",
+      "args": "Argumente",
+      "environment": "Umgebung"
+    },
+    "tools": {
+      "title": "Werkzeuge",
+      "count": "({{count}}):",
+      "more": "+{{count}} weitere"
+    },
+    "actions": {
+      "edit": "Server bearbeiten",
+      "delete": "Server löschen"
+    },
+    "help": {
+      "title": "Über Codex MCP",
+      "description": "Codex unterstützt stdio-basierte MCP-Server. Du kannst Server hinzufügen, die die Fähigkeiten von Codex mit zusätzlichen Werkzeugen und Ressourcen erweitern."
+    }
+  },
+  "pluginSettings": {
+    "title": "Plugins",
+    "description": "Erweitere die Oberfläche mit eigenen Plugins. Installiere sie von Git oder lege einen Ordner in ~/.claude-code-ui/plugins/ ab.",
+    "installPlaceholder": "https://github.com/benutzer/mein-plugin",
+    "installButton": "Installieren",
+    "installing": "Wird installiert…",
+    "securityWarning": "Installiere nur Plugins, deren Quellcode du geprüft hast oder die von Autoren stammen, denen du vertraust.",
+    "scanningPlugins": "Plugins werden durchsucht…",
+    "noPluginsInstalled": "Keine Plugins installiert",
+    "pullLatest": "Neueste Version von Git laden",
+    "noGitRemote": "Kein Git-Remote — Update nicht verfügbar",
+    "uninstallPlugin": "Plugin deinstallieren",
+    "confirmUninstall": "Zum Bestätigen erneut klicken",
+    "confirmUninstallMessage": "{{name}} entfernen? Das kann nicht rückgängig gemacht werden.",
+    "cancel": "Abbrechen",
+    "remove": "Entfernen",
+    "updateFailed": "Update fehlgeschlagen",
+    "installFailed": "Installation fehlgeschlagen",
+    "uninstallFailed": "Deinstallation fehlgeschlagen",
+    "toggleFailed": "Umschalten fehlgeschlagen",
+    "starterPluginLabel": "Starter-Plugin",
+    "starter": "Starter",
+    "docs": "Dokumentation",
+    "sections": {
+      "officialTitle": "Offizielle Plugins",
+      "officialDescription": "Vom CloudCLI-Team gepflegt und zur direkten Installation bereit.",
+      "unofficialTitle": "Weitere Plugins",
+      "unofficialDescription": "Inoffizielle Plugins und Integrationen von anderen Benutzer:innen. Quellcode vor der Installation prüfen."
+    },
+    "starterPlugin": {
+      "name": "Projektstatistiken",
+      "badge": "starter",
+      "description": "Dateianzahl, Codezeilen, Dateityp-Aufschlüsselung und aktuelle Aktivitäten für dein Projekt.",
+      "install": "Installieren"
+    },
+    "terminalPlugin": {
+      "name": "Terminal",
+      "badge": "offiziell",
+      "description": "Integriertes Terminal mit vollständigem Shell-Zugriff direkt in der Oberfläche.",
+      "install": "Installieren"
+    },
+    "scheduledPromptPlugin": {
+      "name": "Geplante Prompts",
+      "badge": "inoffiziell",
+      "description": "Workspace-Prompts planen, Ausführungsverlauf einsehen und wiederkehrende lokale Aufgaben verwalten.",
+      "install": "Installieren"
+    },
+    "claudeWatchPlugin": {
+      "name": "Claude Watch",
+      "badge": "inoffiziell",
+      "description": "Langwierige Claude Code-Sitzungen auf Hänger überwachen und Prozesskontrollen bereitstellen.",
+      "install": "Installieren"
+    },
+    "morePlugins": "Mehr",
+    "enable": "Aktivieren",
+    "disable": "Deaktivieren",
+    "installAriaLabel": "Git-Repository-URL des Plugins",
+    "tab": "Tab",
+    "runningStatus": "läuft"
+  },
+  "commandBoardSettings": {
+    "title": "Befehlstafel",
+    "description": "Lege fest, wer Aktionen der Befehlstafel ausführen darf und welche Aktionen aktiv sind. Aktionen laufen unter der Identität des Server-Eigentümers.",
+    "loading": "Loading…",
+    "loadError": "Einstellungen konnten nicht geladen werden",
+    "saved": "Einstellungen gespeichert",
+    "saveError": "Speichern fehlgeschlagen",
+    "save": "Save",
+    "saving": "Saving…",
+    "roles": {
+      "title": "Rollenzugriff",
+      "description": "Wer Aktionen der Befehlstafel ausführen darf. Der Eigentümer ist immer aktiviert.",
+      "ownerLocked": "Immer aktiv (kann nicht ausgesperrt werden)",
+      "ownerSelectableHint": "Wähle eine der vier Stufen oben — der Eigentümer kann sich nicht selbst aussperren",
+      "ownerNoneDisabled": "Der Eigentümer kann sich nicht selbst aussperren",
+      "laterPhase": "In einer späteren Phase verfügbar",
+      "generalHint": "„Benutzerdefinierte Befehle\" bringt nur dann einen Mehrwert, wenn unten eigene Befehle definiert sind.",
+      "customHint": "„Benutzerdefinierte Befehle\" bringt nur dann einen Mehrwert, wenn unten eigene Befehle definiert sind.",
+      "legendHint": "Stufen sind kumulativ — jede schließt alle darunter liegenden ein"
+    },
+    "roleNames": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "modes": {
+      "none": "Disabled",
+      "noneDesc": "Kein Zugriff auf die Befehlstafel für diese Rolle.",
+      "safe": "Sichere Liste",
+      "safeDesc": "Darf nur die integrierten Aktionen der sicheren Liste ausführen.",
+      "general": "Benutzerdefinierte Befehle",
+      "generalDesc": "Sichere Liste + eigene Befehle, die du definierst (beschränkt auf eine im Code eingefrorene Programm-Allowlist — keine freie Shell).",
+      "custom": "Benutzerdefinierte Befehle",
+      "customDesc": "Sichere Liste + eigene Befehle, die du definierst (beschränkt auf eine im Code eingefrorene Programm-Allowlist — keine freie Shell).",
+      "raw": "Beliebigen Befehl ausführen",
+      "rawDesc": "Alle Stufen oben + freie Shell-Textausführung. Nur für den Eigentümer. Erfordert das Schärfen des Hauptschalters.",
+      "rawDangerHint": "Gefährliche Stufe — nur für den Eigentümer",
+      "rawUnarmedNote": "Gefährliche Stufe ist unscharf — Auswahl hier hat keinen Effekt, bis der Schalter unten geschärft wird"
+    },
+    "actions": {
+      "title": "Verfügbare Aktionen",
+      "description": "Aktiviere oder deaktiviere jede Aktion der sicheren Liste.",
+      "empty": "Keine Aktionen."
+    },
+    "customCommands": {
+      "title": "Eigene Befehle",
+      "description": "Definiere Befehle für den Ein-Klick-Aufruf. cmd ist auf eine im Code eingefrorene Programm-Allowlist beschränkt und lässt sich nicht über die Oberfläche erweitern.",
+      "allowlistNote": "Derzeit: nur npm run <vorhandenes-Skript>. Eine Erweiterung erfordert eine Codeänderung samt Review.",
+      "counter": "{{count}} / {{max}} Befehle",
+      "empty": "Noch keine eigenen Befehle.",
+      "addCommand": "Befehl hinzufügen",
+      "loadError": "Eigene Befehle konnten nicht geladen werden",
+      "invalidRow": "Befehl ist derzeit ungültig",
+      "invalidRowReason": "Grund: {{error}}",
+      "form": {
+        "title": "Eigenen Befehl definieren",
+        "editTitle": "Eigenen Befehl bearbeiten",
+        "key": "Key",
+        "keyHint": "Beginnt mit einem Kleinbuchstaben — nur Buchstaben/Ziffern/-/_",
+        "label": "Anzeigename",
+        "labelHint": "Was in der Befehlstafel erscheint",
+        "cmd": "Executable",
+        "cmdHint": "Derzeit: nur npm (im Code eingefrorene Allowlist)",
+        "args": "Arguments",
+        "argsHint": "Für npm: erstes Feld „run“, zweites Feld der Skriptname",
+        "addArg": "+ arg",
+        "removeArg": "Remove",
+        "minRole": "Mindestrolle",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saving": "Saving…"
+      },
+      "deleteConfirm": "Befehl «{{key}}» löschen?",
+      "deleteConfirmYes": "Delete",
+      "deleteConfirmNo": "Cancel",
+      "errors": {
+        "invalid_key": "Ungültiger Schlüssel",
+        "key_reserved": "Der Schlüssel ist durch eine statische Aktion belegt",
+        "key_exists": "Der Schlüssel existiert bereits",
+        "invalid_label": "Ungültige Bezeichnung",
+        "invalid_min_role": "Ungültige Rolle",
+        "interpreter_forbidden": "Das Programm ist ein verbotener Interpreter bzw. eine Shell — im Code abgelehnt",
+        "cmd_not_allowlisted": "Das Programm steht nicht auf der erlaubten Allowlist",
+        "npm_script_missing": "Skript in package.json nicht gefunden",
+        "denylisted": "Das Skript steht auf der Sperrliste (build/dev/release…)",
+        "flag_arg_forbidden": "Argumente dürfen nicht mit «-» beginnen",
+        "invalid_arg": "Ungültiges Argument",
+        "too_many_commands": "Maximum erreicht (20 Befehle)",
+        "not_found": "Befehl nicht gefunden",
+        "internal": "Interner Serverfehler"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "Gefährliche Stufe — Beliebigen Befehl ausführen",
+        "description": "Die Auswahl dieser Stufe in der Matrix oben reicht nicht aus — der Hauptschalter muss hier geschärft werden. Ihn auszuschalten entfernt «Beliebigen Befehl ausführen» sofort von allen Rollen.",
+        "warningTitle": "Sicherheitswarnung — vor dem Schärfen lesen",
+        "warning": "Diese Funktion erlaubt es, jeden Shell-Befehl auf dem Server mit den Rechten des Dienstbenutzers auszuführen. Es gibt keine Allowlist — der einzige Schutz ist deine persönliche, Zeichen für Zeichen durchgeführte Prüfung jedes Befehls vor dem Klick auf „Ausführen“. Ein einziger falscher oder unbefugter Befehl kann Daten beschädigen oder den Server lahmlegen.",
+        "ackLabel": "Ich verstehe, dass dies vollen Shell-Zugriff auf den Server gewährt, und übernehme die volle Verantwortung",
+        "confirmEnable": "Schärfen bestätigen",
+        "cancelEnable": "Cancel",
+        "enableButton": "Schärfen",
+        "disableButton": "Hauptschalter aus (entfernt Stufe von allen Rollen)",
+        "statusEnabled": "Geschärft",
+        "statusDisabled": "Ungeschärft",
+        "notGeneralMode": "Erfordert, dass die Rolle des Eigentümers in der Matrix oben auf «Beliebigen Befehl ausführen» gesetzt ist.",
+        "blocked_is_platform": "Schärfen ist im Plattformmodus nicht verfügbar — die Umgebung hebt die Garantie der menschlichen Überprüfung auf."
+      },
+      "queue": {
+        "title": "Befehl einreihen",
+        "description": "Ein hier hinzugefügter Befehl wartet in der Befehlstafel der Seitenleiste und wird dort geprüft. Nichts läuft automatisch.",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "Add",
+        "counter": "{{count}} / {{max}} Befehle",
+        "addError": {
+          "empty_command": "Der Befehl darf nicht leer sein",
+          "command_too_long": "Befehl zu lang (max. 4096 Zeichen)",
+          "forbidden_control_char": "Der Befehl enthält ein verbotenes Steuerzeichen an Position {{position}}",
+          "too_many_commands": "Die Warteschlange ist voll (max. 20 Befehle)",
+          "raw_exec_disabled": "Die Funktion „Beliebigen Befehl ausführen“ ist deaktiviert",
+          "config_denied": "Die Rollenstufe des Eigentümers erlaubt dies nicht — Stufe auf «Beliebigen Befehl ausführen» setzen und Hauptschalter schärfen.",
+          "invalid_command": "Ungültiger Befehl",
+          "internal": "Interner Serverfehler",
+          "carriage_return_forbidden": "Befehl enthält \\r (Windows-Zeilenende) — mit LF erneut einfügen",
+          "too_many_lines": "Befehl überschreitet 100 Zeilen",
+          "denied_command": "Blockiert: Dieser Befehl stört einen laufenden Dienst (Regel: {{rule}}). Die Befehlstafel führt keine Lifecycle-Befehle aus — führen Sie ihn in Ihrem eigenen Terminal aus."
+        },
+        "waitingElsewhere": "{{count}} Befehl(e) warten in der Befehlstafel der Seitenleiste.",
+        "reviewedElsewhere": "Eingereihte Befehle erscheinen in der Befehlstafel der Seitenleiste, wo sie geprüft und ausgeführt werden."
+      },
+      "dialog": {
+        "title": "Befehl vor der Ausführung prüfen",
+        "subtitle": "Diese Bytes werden wortgetreu auf dem Server ausgeführt. Das lässt sich nicht rückgängig machen.",
+        "commandLabel": "Befehl, der ausgeführt wird",
+        "lengthInfo": "Länge: {{len}} Zeichen",
+        "clientDigestMismatch": "Prüfsumme stimmt nicht überein — der angezeigte Befehl entspricht nicht dem gespeicherten. Ausführung blockiert.",
+        "ackLabel": "Ich habe diesen Befehl Zeichen für Zeichen geprüft und übernehme die volle Verantwortung für seine Ausführung",
+        "execute": "Execute",
+        "cancel": "Cancel",
+        "executing": "Executing…",
+        "digestMismatch": "Der Befehl wurde nach der Anzeige geändert — Ausführung abgebrochen. Die Warteschlange wird neu geladen.",
+        "notFound": "Der Befehl existiert nicht mehr — möglicherweise wurde er in einer anderen Sitzung ausgeführt oder verworfen.",
+        "actionInFlight": "Es läuft bereits ein anderer Befehl. Warte, bis er abgeschlossen ist.",
+        "execFailed": "Der Befehl konnte auf dem Server nicht gestartet werden.",
+        "timeout": "Zeitüberschreitung beim Befehl (120 Sekunden).",
+        "forbidden_control_char": "Im gespeicherten Befehl wurde ein verbotenes Steuerzeichen entdeckt — Ausführung abgebrochen.",
+        "internal": "Interner Serverfehler.",
+        "result": {
+          "title": "Ausführungsergebnis",
+          "exitCode": "Exit-Code: {{code}}",
+          "stdout": "Ausgabe (stdout)",
+          "stderr": "Fehler (stderr)",
+          "truncated": "Ausgabe gekürzt — Limit: 64 KB",
+          "noOutput": "(keine Ausgabe)",
+          "close": "Close"
+        },
+        "lineInfo": "{{count}} Zeile(n)",
+        "executionTarget": "Ausführungsziel: lokaler Nassaj-Server — Dienstbenutzer «nassaj»",
+        "executionTargetWarn": "Befehle für eine andere Maschine (z. B. VM oder Remote-Server) dürfen hier nicht ausgeführt werden.",
+        "digest_mismatch": "The command changed after it was displayed — execution cancelled. Reloading the list.",
+        "not_found": "The command no longer exists — it may have been run or dismissed elsewhere.",
+        "action_in_flight": "Another command is running. Wait for it to finish.",
+        "exec_failed": "Failed to launch the command on the server.",
+        "raw_exec_disabled": "The master switch for the dangerous tier is off — arm it in Command Board settings.",
+        "raw_exec_blocked": "The dangerous tier is blocked in this environment and cannot be armed.",
+        "config_denied": "Your role does not hold the \"Run any command\" tier.",
+        "unauthenticated": "Your session expired — sign in again.",
+        "clientDigestUnavailable": "The local integrity check could not run in this context (insecure origin). The server still binds the digest — read the command carefully.",
+        "restarting": "Der Befehl lief und startet den Server neu, daher konnte keine Antwort zurückkommen. Warten auf die Rückkehr…",
+        "restartSuccess": "Der Server ist zurück. Der Befehl wurde abgeschlossen.",
+        "audit_unavailable": "Abgelehnt: Der Audit-Eintrag konnte nicht geschrieben werden, es wurde nichts ausgeführt. Rohausführung bleibt nie unprotokolliert.",
+        "denied_command": "Blockiert: Dieser Befehl stört einen laufenden Dienst (Regel: {{rule}}). Die Befehlstafel führt keine Lifecycle-Befehle aus — führen Sie ihn in Ihrem eigenen Terminal aus.",
+        "requestedBy": "Eingereiht von: {{name}}",
+        "unattributed": "Herkunft nicht erfasst — für diesen Befehl wurde kein Anforderer protokolliert"
+      }
+    }
+  },
+  "subscriptions": {
+    "title": "Aktive Abonnements",
+    "empty": "Keine authentifizierten Abonnements",
+    "loading": "Wird geladen…",
+    "error": "Abonnements konnten nicht geladen werden",
+    "monthToDate": "Dieser Zyklus",
+    "cycleSince": "Seit {{date}}",
+    "anchorLabel": "Starttag des Zyklus",
+    "anchorHint": "Kein Anbieter gibt das Abrechnungsdatum preis — bitte selbst festlegen",
+    "apiEquivalent": "API-äquivalenter Wert im Abo — kein berechneter Betrag",
+    "billed": "Berechnet",
+    "unavailable": "Nicht verfügbar",
+    "partial": "Teilweise",
+    "pricesAsOf": "Preise vom {{date}}",
+    "byModel": "Nach Modell",
+    "harnessTotal": "Gesamt (Harness)",
+    "showBreakdown": "Modellaufschlüsselung anzeigen",
+    "hideBreakdown": "Modellaufschlüsselung ausblenden",
+    "unpricedModel": "Kein offizieller Preis",
+    "anchorSource": {
+      "detected": "Aus deinen Abodaten",
+      "derived": "Geschätzt aus der ältesten Nutzung",
+      "manual": "Von dir festgelegt",
+      "unknown": "Kalendermonat — kein Abodatum gefunden"
+    },
+    "viaHarness": "über {{harness}}",
+    "subscriptionTotal": "Abo-Gesamtsumme",
+    "assumedPrice": "Geschätzter Preis — für {{models}} ist kein Tarif veröffentlicht"
+  }
+}

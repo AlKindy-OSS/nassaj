@@ -1,0 +1,1206 @@
+{
+  "title": "الإعدادات",
+  "tabs": {
+    "account": "الحساب",
+    "permissions": "الأذونات",
+    "mcpServers": "خوادم MCP",
+    "skills": "المهارات",
+    "appearance": "المظهر"
+  },
+  "skills": {
+    "title": "المهارات",
+    "description": "ثبّت مهارات {{provider}} العامة من ملفات .md أو مجلدات مهارات كاملة.",
+    "descriptionReadOnly": "المهارات المكتشفة من مواقع مزوّد {{provider}} — التثبيت غير مدعوم من هذه الواجهة.",
+    "refresh": "تحديث",
+    "addSkill": "إضافة مهارة",
+    "addSkillTitle": "إضافة مهارة {{provider}}",
+    "installPath": "مسار التثبيت",
+    "dropZoneTitle": "أفلت ملفات .md أو مجلدات المهارات هنا",
+    "dropZoneDescription": "ارفع ملف SKILL.md مستقلاً أو مجلد مهارة كاملاً يشمل السكربتات والموارد.",
+    "chooseFiles": "اختيار ملفات",
+    "chooseFolder": "اختيار مجلد",
+    "queuedFiles": "في الانتظار",
+    "remove": "إزالة",
+    "install": "تثبيت مهارة",
+    "installCount_one": "تثبيت مهارة واحدة",
+    "installCount_other": "تثبيت {{count}} مهارات",
+    "cancel": "إلغاء",
+    "uploadHint": "مجلدات المهارات تستخدم اسم المجلد؛ الملفات المستقلة تستخدم الاسم المُعلَن في SKILL.md.",
+    "visibleSkills": "المهارات المثبّتة",
+    "visibleSkillsDescription": "المهارات التي اكتشفها API المزوّد، شاملةً المواقع العامة والمدركة للمشروع.",
+    "search": "البحث في المهارات...",
+    "clearSearch": "مسح البحث",
+    "scanning": "جارٍ فحص مهارات المشروع…",
+    "loading": "جارٍ تحميل مهارات {{provider}}…",
+    "empty": "لا توجد مهارات بعد",
+    "emptyDescription": "أضف مهارة عامة أعلاه، أو أنشئ مجلدات مهارات خاصة بالمشروع في مساحة العمل.",
+    "noMatch": "لا توجد مهارات مطابقة",
+    "noMatchDescription": "جرّب أمراً أو اسماً أو نطاقاً أو مشروعاً أو مساراً مختلفاً.",
+    "source": "المصدر",
+    "saved": "تم تثبيت المهارات بنجاح.",
+    "delete": "حذف",
+    "confirmDelete": "حذف «{{name}}»؟",
+    "confirmYes": "حذف",
+    "plugin": "إضافة",
+    "project": "مشروع",
+    "scopes": {
+      "user": "المستخدم",
+      "plugin": "الإضافة",
+      "repo": "المستودع",
+      "project": "المشروع",
+      "admin": "المشرف",
+      "system": "النظام"
+    },
+    "errors": {
+      "deleteFailed": "تعذّر حذف المهارة. حاول مرة أخرى.",
+      "dropFailed": "أفلت ملفات .md واحدة أو أكثر، أو مجلداً يحوي SKILL.md.",
+      "saveFailed": "تعذّر تثبيت المهارات. حاول مرة أخرى."
+    }
+  },
+  "account": {
+    "title": "الحساب",
+    "language": "اللغة",
+    "languageLabel": "لغة العرض",
+    "languageDescription": "اختر اللغة المفضّلة للواجهة",
+    "username": "اسم المستخدم",
+    "email": "البريد الإلكتروني",
+    "profile": "الملف الشخصي",
+    "changePassword": "تغيير كلمة المرور"
+  },
+  "mcp": {
+    "title": "خوادم MCP",
+    "addServer": "إضافة خادم",
+    "editServer": "تعديل خادم",
+    "deleteServer": "حذف خادم",
+    "serverName": "اسم الخادم",
+    "serverType": "نوع الخادم",
+    "config": "الإعداد",
+    "testConnection": "اختبار الاتصال",
+    "status": "الحالة",
+    "connected": "متصل",
+    "disconnected": "غير متصل",
+    "scope": {
+      "label": "النطاق",
+      "user": "المستخدم",
+      "project": "المشروع"
+    }
+  },
+  "appearance": {
+    "title": "المظهر",
+    "theme": "السمة",
+    "codeEditor": "محرر الكود",
+    "editorTheme": "سمة المحرر",
+    "wordWrap": "التفاف الكلمات",
+    "showMinimap": "إظهار الخريطة المصغّرة",
+    "lineNumbers": "أرقام الأسطر",
+    "fontSize": "حجم الخط"
+  },
+  "actions": {
+    "saveChanges": "حفظ التغييرات",
+    "resetToDefaults": "استعادة الافتراضي",
+    "cancelChanges": "إلغاء التغييرات"
+  },
+  "quickSettings": {
+    "title": "إعدادات سريعة",
+    "sections": {
+      "appearance": "المظهر",
+      "toolDisplay": "عرض الأدوات",
+      "viewOptions": "خيارات العرض",
+      "inputSettings": "إعدادات الإدخال"
+    },
+    "darkMode": "الوضع الداكن",
+    "autoExpandTools": "توسيع الأدوات تلقائياً",
+    "showRawParameters": "إظهار المعاملات الخام",
+    "showThinking": "إظهار التفكير",
+    "hideToolCalls": "إخفاء استدعاءات الأدوات",
+    "autoScrollToBottom": "التمرير التلقائي إلى الأسفل",
+    "tabsIconOnly": "أيقونات فقط (تبويبات مضغوطة)",
+    "sendByCtrlEnter": "الإرسال بـ Ctrl+Enter",
+    "sendByCtrlEnterDescription": "عند التفعيل، يؤدّي الضغط على Ctrl+Enter إلى إرسال الرسالة بدلاً من Enter فقط. مفيد لمستخدمي IME لتجنّب الإرسال غير المقصود.",
+    "dragHandle": {
+      "dragging": "سحب المقبض",
+      "closePanel": "إغلاق لوحة الإعدادات",
+      "openPanel": "فتح لوحة الإعدادات",
+      "draggingStatus": "جارٍ السحب...",
+      "toggleAndMove": "اضغط للتبديل، اسحب للتحريك"
+    }
+  },
+  "claudeUsage": {
+    "title": "استخدام Claude",
+    "loading": "جارٍ تحميل الاستخدام…",
+    "error": "تعذّر جلب حالة الاستخدام.",
+    "stale": "بيانات مخزّنة",
+    "percentUsed": "{{percent}} مُستخدَم",
+    "resetsIn": "يُعاد التعيين {{time}}",
+    "extraUsageDetail": "{{used}} من {{limit}} مُستخدَم",
+    "crossProviderNote": "استخدام حساب Claude — هذه الجلسة تعمل على {{provider}}",
+    "notApplicable": "حصص Claude لا تنطبق على مزوّد الجلسة الحالية ({{provider}})",
+    "windows": {
+      "session": "الجلسة الحالية",
+      "weeklyAllModels": "كل النماذج (أسبوعي)",
+      "weeklySonnet": "Sonnet فقط",
+      "weeklyOpus": "Opus فقط",
+      "extraUsage": "الاستخدام الإضافي"
+    }
+  },
+  "terminalShortcuts": {
+    "title": "اختصارات الطرفية",
+    "sectionKeys": "المفاتيح",
+    "sectionNavigation": "التنقّل",
+    "escape": "Escape",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "arrowUp": "السهم لأعلى",
+    "arrowDown": "السهم لأسفل",
+    "scrollDown": "التمرير لأسفل",
+    "handle": {
+      "closePanel": "إغلاق لوحة الاختصارات",
+      "openPanel": "فتح لوحة الاختصارات"
+    }
+  },
+  "mainTabs": {
+    "label": "الإعدادات",
+    "profile": "الملف الشخصي",
+    "agents": "الوكلاء",
+    "engines": "المحرّكات",
+    "appearance": "المظهر",
+    "git": "Git",
+    "apiTokens": "مفاتيح واجهة نسّاج",
+    "notifications": "الإشعارات",
+    "plugins": "الإضافات",
+    "users": "المستخدمون",
+    "about": "حول",
+    "commandBoard": "لوحة الأوامر"
+  },
+  "profile": {
+    "title": "الملف الشخصي",
+    "subtitle": "أدر اسم المستخدم وكلمة المرور ومفاتيح المرور لحسابك",
+    "tabs": {
+      "identity": "الهوية",
+      "security": "الأمان"
+    },
+    "saving": "جارٍ الحفظ...",
+    "avatar": {
+      "title": "صورة الملف الشخصي",
+      "description": "أضف صورة ليتعرّف عليك زملاؤك بسهولة.",
+      "change": "تغيير الصورة",
+      "uploading": "جارٍ الرفع...",
+      "hint": "الصور المربعة هي الأفضل. صيغة PNG أو JPG.",
+      "currentAlt": "صورة ملفك الشخصي",
+      "placeholderAlt": "لا توجد صورة للملف الشخصي",
+      "success": "تم تحديث صورة الملف الشخصي بنجاح",
+      "errors": {
+        "uploadFailed": "تعذّر رفع الصورة. حاول مرة أخرى.",
+        "network": "خطأ في الشبكة. تحقّق من الاتصال وحاول مجدداً."
+      }
+    },
+    "username": {
+      "title": "تغيير اسم المستخدم",
+      "description": "حدّث اسم المستخدم الذي تسجّل به الدخول.",
+      "currentLabel": "اسم المستخدم الحالي",
+      "newLabel": "اسم المستخدم الجديد",
+      "placeholder": "اختر اسم مستخدم جديداً",
+      "hint": "من ٣ إلى ٣٢ حرفاً: أحرف أو أرقام أو شرطة سفلية.",
+      "save": "حفظ اسم المستخدم",
+      "success": "تم تحديث اسم المستخدم بنجاح",
+      "errors": {
+        "required": "يرجى إدخال اسم مستخدم جديد",
+        "unchanged": "اسم المستخدم الجديد مطابق للحالي"
+      }
+    },
+    "password": {
+      "title": "تغيير كلمة المرور",
+      "description": "استخدم كلمة مرور قوية لا تستعملها في مكان آخر.",
+      "currentLabel": "كلمة المرور الحالية",
+      "currentPlaceholder": "أدخل كلمة المرور الحالية",
+      "newLabel": "كلمة المرور الجديدة",
+      "newPlaceholder": "أدخل كلمة مرور جديدة",
+      "confirmLabel": "تأكيد كلمة المرور الجديدة",
+      "confirmPlaceholder": "أعد إدخال كلمة المرور الجديدة",
+      "hint": "بطول {{min}} أحرف على الأقل.",
+      "save": "حفظ كلمة المرور",
+      "success": "تم تغيير كلمة المرور بنجاح",
+      "errors": {
+        "required": "يرجى تعبئة جميع حقول كلمة المرور",
+        "short": "يجب أن تكون كلمة المرور {{min}} أحرف على الأقل",
+        "mismatch": "كلمتا المرور الجديدتان غير متطابقتين"
+      }
+    },
+    "passkeys": {
+      "title": "مفاتيح المرور",
+      "description": "سجّل الدخول دون كلمة مرور باستخدام بصمتك أو وجهك أو رمز الجهاز أو مفتاح أمان.",
+      "add": "إضافة مفتاح",
+      "nameLabel": "اسم المفتاح (اختياري)",
+      "namePlaceholder": "مثال: بصمة الحاسوب المحمول",
+      "create": "إنشاء المفتاح",
+      "creating": "بانتظار جهازك...",
+      "cancel": "إلغاء",
+      "loading": "جارٍ تحميل مفاتيح المرور...",
+      "empty": "لا توجد مفاتيح مرور بعد. أضف واحداً لتسجيل الدخول إلى مساحة العمل بسرعة وأمان — دون كلمة مرور.",
+      "notSupported": "هذا المتصفح لا يدعم مفاتيح المرور، لذا لا يمكن إضافة مفاتيح جديدة من هنا.",
+      "unnamed": "مفتاح بلا اسم",
+      "createdAt": "أُضيف في {{date}}",
+      "lastUsedAt": "آخر استخدام {{date}}",
+      "neverUsed": "لم يُستخدم بعد",
+      "badges": {
+        "synced": "مُزامَن",
+        "device": "مرتبط بالجهاز"
+      },
+      "rename": "إعادة تسمية المفتاح",
+      "renamePlaceholder": "الاسم الجديد",
+      "renameSave": "حفظ الاسم",
+      "delete": "حذف المفتاح",
+      "deleteConfirm": "أتريد حذف هذا المفتاح؟",
+      "deleteConfirmYes": "حذف",
+      "success": {
+        "added": "أُضيف مفتاح المرور بنجاح",
+        "renamed": "أُعيدت تسمية المفتاح",
+        "deleted": "حُذف مفتاح المرور"
+      },
+      "errors": {
+        "loadFailed": "تعذّر تحميل مفاتيح المرور. حاول مجدداً.",
+        "registerFailed": "تعذّر إنشاء مفتاح المرور. حاول مجدداً.",
+        "duplicate": "هذا الجهاز أو مفتاح الأمان مسجَّل مسبقاً كمفتاح مرور.",
+        "renameFailed": "تعذّرت إعادة تسمية المفتاح.",
+        "deleteFailed": "تعذّر حذف المفتاح.",
+        "network": "خطأ في الشبكة. تحقق من اتصالك وحاول مجدداً."
+      }
+    },
+    "identity": {
+      "title": "نمط الأفاتار",
+      "description": "اختر أفاتاراً جاهزاً أو لوناً بدل رفع صورة.",
+      "tabs": {
+        "upload": "رفع صورة",
+        "gallery": "المجموعة",
+        "color": "لون"
+      },
+      "gallery": {
+        "heading": "اختر أفاتاراً",
+        "selected": "الأفاتار المختار"
+      },
+      "color": {
+        "heading": "اختر لوناً",
+        "hint": "يُستخدم اللون خلف الحرف الأول من اسمك.",
+        "selected": "اللون المختار"
+      },
+      "saving": "جارٍ الحفظ...",
+      "success": "تم تحديث الأفاتار بنجاح",
+      "errors": {
+        "saveFailed": "تعذّر حفظ اختيارك. حاول مرة أخرى.",
+        "network": "خطأ في الشبكة. تحقق من اتصالك وحاول مجدداً."
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "اربط اشتراك Claude الخاص بك لاستخدامه في جلساتك. لكل مستخدم اعتماده المعزول.",
+    "recheck": "إعادة الفحص",
+    "loadError": "تعذّر التحقّق من حالة الاشتراك. حاول مرة أخرى.",
+    "banner": "اشتراكك بـ Claude غير مرتبط بعد. يلزم ربطه قبل استخدام Claude في جلساتك.",
+    "bannerHint": "اضغط الزر أدناه لفتح الطرفية وإكمال تدفّق تسجيل الدخول عبر",
+    "linkButton": "ربط حساب Claude",
+    "ownerNote": "اعتمادك مربوط تلقائياً بصفتك المالك — لا حاجة لأي إجراء."
+  },
+  "agyConnection": {
+    "description": "اربط اشتراك Antigravity الخاص بك لاستخدامه في جلساتك. لكل مستخدم اعتماده المعزول.",
+    "recheck": "إعادة الفحص",
+    "loadError": "تعذّر التحقّق من حالة الاشتراك. حاول مرة أخرى.",
+    "banner": "اشتراكك بـ Antigravity غير مرتبط بعد. يلزم ربطه قبل استخدام agy في جلساتك.",
+    "bannerHint": "اضغط الزر أدناه لفتح الطرفية وشغّل الأمر",
+    "linkButton": "ربط حساب Antigravity",
+    "ownerNote": "اعتمادك مربوط تلقائياً بصفتك المالك — لا حاجة لأي إجراء.",
+    "modal": {
+      "title": "ربط حساب Antigravity",
+      "close": "إغلاق نافذة الربط",
+      "instructions": "في الطرفية أدناه، شغّل الأمر",
+      "afterComplete": "أكمل تدفّق تسجيل الدخول (OAuth)، ثم أغلق هذه النافذة واضغط «إعادة الفحص» لتحديث الحالة."
+    }
+  },
+  "users": {
+    "title": "المستخدمون",
+    "subtitle": "إدارة أعضاء مساحة العمل والدعوات",
+    "inviteButton": "دعوة مستخدم",
+    "listHeading": "الأعضاء",
+    "loading": "جارٍ تحميل المستخدمين...",
+    "empty": "لا يوجد مستخدمون",
+    "you": "أنت",
+    "changeRole": "تغيير الدور",
+    "suspend": "تعليق",
+    "activate": "تفعيل",
+    "resetPassword": "إعادة تعيين كلمة المرور",
+    "deleteUser": "حذف المستخدم",
+    "deleteUserConfirm": "حذف {{username}} نهائياً؟ لا يمكن التراجع عن هذا الإجراء.",
+    "reset": {
+      "title": "إعادة تعيين كلمة المرور",
+      "confirm": "إعادة تعيين كلمة مرور {{username}}؟",
+      "warning": "ستُولَّد كلمة مرور مؤقتة وتُعرض مرة واحدة. يجب على المستخدم تغييرها عند تسجيل الدخول التالي، وستُنهى جميع جلساته الحالية.",
+      "submit": "إعادة التعيين",
+      "resetting": "جارٍ إعادة التعيين...",
+      "cancel": "إلغاء",
+      "close": "إغلاق",
+      "done": "تم",
+      "copy": "نسخ",
+      "copied": "تم النسخ",
+      "successHint": "شارك كلمة المرور المؤقتة بأمان؛ تُعرض مرة واحدة فقط.",
+      "tempPasswordLabel": "كلمة المرور المؤقتة"
+    },
+    "pendingInvites": "الدعوات المعلّقة",
+    "noPendingInvites": "لا توجد دعوات معلّقة",
+    "revoke": "إلغاء",
+    "expiresAt": "تنتهي {{date}}",
+    "roles": {
+      "owner": "مالك",
+      "admin": "مشرف",
+      "user": "مستخدم"
+    },
+    "statuses": {
+      "active": "نشط",
+      "disabled": "معلّق"
+    },
+    "invite": {
+      "title": "دعوة مستخدم",
+      "roleLabel": "الدور",
+      "roleHint": "سيُنشأ المستخدم المدعو بهذا الدور.",
+      "submit": "إنشاء دعوة",
+      "creating": "جارٍ الإنشاء...",
+      "cancel": "إلغاء",
+      "close": "إغلاق",
+      "done": "تم",
+      "copy": "نسخ",
+      "copied": "تم النسخ",
+      "successHint": "شارك هذا الرابط؛ يُستخدم مرة واحدة ويظهر مرة واحدة فقط."
+    }
+  },
+  "providerSharing": {
+    "heading": "مشاركة اعتمادات المزوّدين",
+    "subtitle": "حدّد لكل مزوّد ما إذا كانت الاعتمادات مشتركة بين جميع المستخدمين أم معزولة لكل مستخدم على حدة.",
+    "loading": "جارٍ تحميل إعدادات المشاركة...",
+    "modeLabel": "وضع المشاركة لمزوّد {{provider}}",
+    "providers": {
+      "claude": "Claude",
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "agy": "Antigravity (agy)",
+      "cursor": "Cursor",
+      "kimi": "Kimi",
+      "deepseek": "DeepSeek",
+      "glm": "GLM"
+    },
+    "modes": {
+      "shared": "مشترك",
+      "isolated": "معزول"
+    },
+    "modeDescription": {
+      "shared": "نفس الاعتمادات لجميع المستخدمين",
+      "isolated": "كل مستخدم باعتماداته الخاصة"
+    },
+    "agyWarning": {
+      "title": "عزل تجريبي",
+      "description": "عزل اعتمادات Antigravity ميزة تجريبية، ويتطلّب تفعيلها إعادة تشغيل الجلسات النشطة."
+    },
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ...",
+    "saveStatus": {
+      "success": "تم حفظ إعدادات المشاركة بنجاح",
+      "error": "فشل حفظ إعدادات المشاركة"
+    }
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "description": "تحكّم في أحداث الإشعارات التي تستقبلها.",
+    "webPush": {
+      "title": "إشعارات Web Push",
+      "enable": "تفعيل إشعارات الدفع",
+      "disable": "تعطيل إشعارات الدفع",
+      "enabled": "إشعارات الدفع مفعّلة",
+      "loading": "جارٍ التحديث...",
+      "unsupported": "إشعارات الدفع غير مدعومة في هذا المتصفّح.",
+      "denied": "إشعارات الدفع محجوبة. يرجى السماح بها في إعدادات المتصفّح."
+    },
+    "sound": {
+      "title": "الصوت",
+      "description": "تشغيل نغمة قصيرة عند اكتمال تشغيل المحادثة.",
+      "enabled": "مفعّل",
+      "test": "تجربة الصوت"
+    },
+    "events": {
+      "title": "أنواع الأحداث",
+      "actionRequired": "إجراء مطلوب",
+      "stop": "تم إيقاف التشغيل",
+      "error": "فشل التشغيل"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "الوضع الداكن",
+      "description": "التبديل بين السمتين الفاتحة والداكنة"
+    },
+    "themeMode": {
+      "sectionTitle": "المظهر",
+      "label": "السمة",
+      "description": "اختر الوضع الفاتح أو الداكن، أو اتبع إعداد نظامك تلقائياً",
+      "light": "نهاري",
+      "dark": "ليلي",
+      "system": "حسب النظام"
+    },
+    "themePresets": {
+      "title": "سمة الألوان",
+      "description": "أطقم ألوان بطابع العلامات تُطبَّق فوق الوضعين الفاتح والداكن",
+      "groupLabel": "اختيار سمة الألوان",
+      "presets": {
+        "default": "الافتراضية",
+        "claude": "Claude",
+        "alkindy": "الكندي",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "مخصصة"
+      },
+      "custom": {
+        "title": "ألوان مخصصة",
+        "accent": "اللون المميز",
+        "background": "الخلفية",
+        "foreground": "النص"
+      }
+    },
+    "uiFont": {
+      "title": "خط الواجهة",
+      "description": "يُطبَّق على كل اللغات — عربية ولاتينية معاً. كل الخطوط مستضافة محلياً ولا تُنزَّل إلا عند اختيارها.",
+      "label": "الخط",
+      "hint": "الافتراضي خط النظام: بلا أي تنزيل، ويطابق مظهر جهازك.",
+      "options": {
+        "system": "خط النظام (تلقائي)",
+        "ibmPlexSansArabic": "IBM Plex Sans Arabic",
+        "notoSansArabic": "Noto Sans Arabic",
+        "readexPro": "Readex Pro",
+        "vazirmatn": "Vazirmatn",
+        "tajawal": "Tajawal — تجوال"
+      }
+    },
+    "projectSorting": {
+      "label": "ترتيب المشاريع",
+      "description": "كيفية ترتيب المشاريع في الشريط الجانبي",
+      "alphabetical": "أبجدياً",
+      "recentActivity": "النشاط الأخير"
+    },
+    "codeEditor": {
+      "title": "محرر الكود",
+      "theme": {
+        "label": "سمة المحرر",
+        "description": "السمة الافتراضية لمحرر الكود"
+      },
+      "wordWrap": {
+        "label": "التفاف الكلمات",
+        "description": "تفعيل التفاف الكلمات افتراضياً في المحرر"
+      },
+      "showMinimap": {
+        "label": "إظهار الخريطة المصغّرة",
+        "description": "عرض خريطة مصغّرة لتسهيل التنقّل في عرض الفروقات"
+      },
+      "lineNumbers": {
+        "label": "إظهار أرقام الأسطر",
+        "description": "عرض أرقام الأسطر في المحرر"
+      },
+      "fontSize": {
+        "label": "حجم الخط",
+        "description": "حجم خط المحرر بالبكسل"
+      }
+    },
+    "branding": {
+      "title": "هوية الخادم",
+      "description": "أضِف أيقونة صغيرة بجانب شعار الشريط الجانبي لتمييز هذا الخادم بصرياً لكل المستخدمين.",
+      "nodeIcon": {
+        "label": "أيقونة الخادم",
+        "description": "صورة صغيرة تُعرَض بجانب الشعار (≤ 48 كيلوبايت). PNG أو JPG أو WebP أو SVG.",
+        "upload": "رفع أيقونة",
+        "change": "تغيير الأيقونة",
+        "clear": "إزالة",
+        "save": "حفظ",
+        "saving": "جارٍ الحفظ...",
+        "preview": "معاينة الأيقونة",
+        "success": "تم حفظ أيقونة الخادم",
+        "cleared": "تمت إزالة أيقونة الخادم",
+        "position": {
+          "label": "موضع الأيقونة",
+          "description": "مكان ظهور الأيقونة بالنسبة للشعار",
+          "start": "قبل الشعار",
+          "end": "بعد الشعار"
+        },
+        "errors": {
+          "tooBig": "حجم الصورة يتجاوز 48 كيلوبايت",
+          "unsupported": "نوع الملف غير مدعوم. استخدم PNG أو JPG أو WebP أو SVG.",
+          "saveFailed": "تعذّر الحفظ. يرجى المحاولة مجدداً."
+        }
+      }
+    },
+    "sidebar": {
+      "title": "الشريط الجانبي",
+      "showSearchAndArchive": {
+        "label": "إظهار البحث ومبدّل الأرشيف",
+        "description": "عرض حقل البحث وزر تصفية الأرشيف في أعلى قائمة المشاريع"
+      }
+    },
+    "codeHighlighting": {
+      "title": "تلوين الشيفرة",
+      "label": "نطاق اللغات",
+      "description": "كم لغةً يعرفها مُلوِّن الشيفرة. المستوى الافتراضي وحده يُحمَّل مع الصفحة؛ ما فوقه يُنزَّل عند اختياره ويسري فوراً بلا إعادة تحميل. اللغة خارج النطاق تُعرَض نصّاً عادياً سليماً.",
+      "core": "١٠ لغات (الأسرع — الافتراضي)",
+      "extended": "٢٠ لغة (تنزيل إضافي خفيف)",
+      "full": "كل اللغات ٣٠٠ (تنزيل إضافي كبير)"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "إضافة خادم MCP",
+      "edit": "تعديل خادم MCP"
+    },
+    "importMode": {
+      "form": "إدخال نموذجي",
+      "json": "استيراد JSON"
+    },
+    "scope": {
+      "label": "النطاق",
+      "userGlobal": "المستخدم (عام)",
+      "projectLocal": "المشروع (محلي)",
+      "userDescription": "نطاق المستخدم: متاح في جميع المشاريع على جهازك",
+      "projectDescription": "نطاق محلي: متاح فقط في المشروع المحدّد",
+      "cannotChange": "لا يمكن تغيير النطاق عند تعديل خادم قائم"
+    },
+    "fields": {
+      "serverName": "اسم الخادم",
+      "transportType": "نوع النقل",
+      "command": "الأمر",
+      "arguments": "المعاملات (واحد لكل سطر)",
+      "jsonConfig": "إعداد JSON",
+      "url": "URL",
+      "envVars": "متغيّرات البيئة (KEY=value، واحد لكل سطر)",
+      "headers": "الرؤوس (KEY=value، واحد لكل سطر)",
+      "selectProject": "اختر مشروعاً..."
+    },
+    "placeholders": {
+      "serverName": "my-server"
+    },
+    "validation": {
+      "missingType": "حقل مطلوب مفقود: type",
+      "stdioRequiresCommand": "نوع stdio يتطلّب حقل command",
+      "httpRequiresUrl": "نوع {{type}} يتطلّب حقل url",
+      "invalidJson": "صيغة JSON غير صالحة",
+      "jsonHelp": "ألصق إعداد خادم MCP بصيغة JSON. أمثلة:",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
+    },
+    "configDetails": "تفاصيل الإعداد (من {{configFile}})",
+    "projectPath": "المسار: {{path}}",
+    "actions": {
+      "cancel": "إلغاء",
+      "saving": "جارٍ الحفظ...",
+      "addServer": "إضافة خادم",
+      "updateServer": "تحديث الخادم"
+    }
+  },
+  "saveStatus": {
+    "success": "تم حفظ الإعدادات بنجاح!",
+    "error": "فشل حفظ الإعدادات",
+    "saving": "جارٍ الحفظ..."
+  },
+  "footerActions": {
+    "save": "حفظ الإعدادات",
+    "cancel": "إلغاء"
+  },
+  "git": {
+    "title": "إعداد Git",
+    "description": "اضبط هويّة git لـ commits. ستُطبَّق هذه الإعدادات عالمياً عبر git config --global",
+    "name": {
+      "label": "اسم Git",
+      "help": "اسمك في git commits"
+    },
+    "email": {
+      "label": "بريد Git الإلكتروني",
+      "help": "بريدك الإلكتروني في git commits"
+    },
+    "actions": {
+      "save": "حفظ الإعداد",
+      "saving": "جارٍ الحفظ..."
+    },
+    "status": {
+      "success": "تم الحفظ بنجاح"
+    }
+  },
+  "apiKeys": {
+    "title": "مفاتيح واجهة نسّاج",
+    "description": "أنشئ مفاتيح API لتشغيل نسّاج برمجياً من خارج المتصفح — سكربت أو أتمتة أو CI أو webhook — عبر POST /api/agent مع تمرير المفتاح في ترويسة x-api-key.",
+    "newKey": {
+      "alertTitle": "⚠️ احفظ مفتاح API",
+      "alertMessage": "هذه المرة الوحيدة التي سترى فيها هذا المفتاح. خزّنه بأمان.",
+      "iveSavedIt": "حفظته"
+    },
+    "form": {
+      "placeholder": "اسم مفتاح API (مثل: خادم الإنتاج)",
+      "createButton": "إنشاء",
+      "cancelButton": "إلغاء"
+    },
+    "newButton": "مفتاح API جديد",
+    "empty": "لم تُنشأ مفاتيح API بعد.",
+    "list": {
+      "created": "أُنشئ:",
+      "lastUsed": "آخر استخدام:"
+    },
+    "confirmDelete": "هل أنت متأكد من حذف مفتاح API هذا؟",
+    "status": {
+      "active": "نشط",
+      "inactive": "غير نشط"
+    },
+    "github": {
+      "title": "رموز GitHub",
+      "description": "أضف رموز Personal Access الخاصة بـ GitHub لاستنساخ المستودعات الخاصة عبر API الخارجي.",
+      "descriptionAlt": "أضف رموز Personal Access الخاصة بـ GitHub لاستنساخ المستودعات الخاصة. يمكنك أيضاً تمرير الرموز مباشرة في طلبات API دون تخزينها.",
+      "addButton": "إضافة رمز",
+      "form": {
+        "namePlaceholder": "اسم الرمز (مثل: المستودعات الشخصية)",
+        "tokenPlaceholder": "رمز GitHub Personal Access (ghp_...)",
+        "descriptionPlaceholder": "الوصف (اختياري)",
+        "addButton": "إضافة رمز",
+        "cancelButton": "إلغاء",
+        "howToCreate": "كيفية إنشاء رمز GitHub Personal Access ←"
+      },
+      "empty": "لم تُضف رموز GitHub بعد.",
+      "added": "أُضيف:",
+      "confirmDelete": "هل أنت متأكد من حذف رمز GitHub هذا؟"
+    },
+    "apiDocsLink": "وثائق API",
+    "documentation": {
+      "title": "وثائق API الخارجي",
+      "description": "تعلّم كيفية استخدام API الخارجي لتشغيل جلسات Claude/Cursor من تطبيقاتك.",
+      "viewLink": "عرض وثائق API ←"
+    },
+    "loading": "جارٍ التحميل...",
+    "version": {
+      "updateAvailable": "تحديث متاح: v{{version}}"
+    }
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "جارٍ التحقق...",
+      "connected": "متصل",
+      "notConnected": "غير متصل",
+      "disconnected": "تم قطع الاتصال",
+      "checkingAuth": "جارٍ التحقق من حالة المصادقة...",
+      "loggedInAs": "تم تسجيل الدخول كـ {{email}}",
+      "authenticatedUser": "مستخدم مصادَق"
+    },
+    "account": {
+      "claude": {
+        "description": "مساعد Anthropic Claude الذكي"
+      },
+      "cursor": {
+        "description": "محرر أكواد Cursor المدعوم بالذكاء الاصطناعي"
+      },
+      "codex": {
+        "description": "مساعد OpenAI Codex الذكي"
+      },
+      "gemini": {
+        "description": "مساعد Google Gemini الذكي"
+      },
+      "antigravity": {
+        "description": "Google AI Pro عبر أداة agy CLI"
+      },
+      "opencode": {
+        "description": "مساعد OpenCode عبر سطر الأوامر"
+      },
+      "kimi": {
+        "description": "Moonshot Kimi — عبر واجهة سطر الأوامر الأصيلة (دخول برمز جهاز) أو مفتاح API"
+      },
+      "deepseek": {
+        "description": "DeepSeek عبر مفتاح API"
+      },
+      "glm": {
+        "description": "GLM من Zhipu / Z.ai عبر مفتاح API"
+      }
+    },
+    "antigravity": {
+      "modelNote": "يستخدم Google AI Pro عبر agy CLI (v1.x). يُختار النموذج النشط من داخل إعدادات agy، وليس من هذه الواجهة."
+    },
+    "connectionStatus": "حالة الاتصال",
+    "login": {
+      "title": "تسجيل الدخول",
+      "reAuthenticate": "إعادة المصادقة",
+      "description": "سجّل الدخول إلى حساب {{agent}} لتفعيل ميزات الذكاء الاصطناعي",
+      "reAuthDescription": "سجّل بحساب مختلف أو حدّث بيانات الاعتماد",
+      "button": "تسجيل الدخول",
+      "reLoginButton": "إعادة تسجيل الدخول"
+    },
+    "error": "خطأ: {{error}}",
+    "apiKey": {
+      "title": "إضافة مفتاح API",
+      "replaceTitle": "استبدال مفتاح API",
+      "description": "ألصق مفتاح {{provider}} API لتفعيل هذا المزوّد. يُخزَّن مشفّراً ولا يُعرض مجدداً.",
+      "getKey": "الحصول على مفتاح",
+      "inputLabel": "مفتاح {{provider}} API",
+      "placeholder": "ألصق مفتاح API",
+      "placeholderConfigured": "•••••••• (مُعدّ)",
+      "save": "حفظ",
+      "saved": "تم حفظ مفتاح API.",
+      "remove": "إزالة",
+      "removed": "تمت إزالة مفتاح API.",
+      "configuredNote": "يوجد مفتاح API مُعدّ.",
+      "checkingCapability": "جارٍ التحقق من دعم إدخال المفتاح…",
+      "targetLabel": "وجهة الاعتماد",
+      "targets": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "glm": "GLM"
+      }
+    }
+  },
+  "engines": {
+    "title": "المحرّكات",
+    "description": "المحرّك هو نقطة النهاية التي تولّد التوكنز. نظام الوكيل (الجسد) — أدواته وأذوناته وجلساته — يبقى كما هو تماماً؛ يتغيّر مزوّد النموذج خلفه فقط.",
+    "usageHint": "بعد تخزين المفتاح، اختر «محرّك Claude على <المحرّك>» من منتقي النماذج داخل المحادثة. والمحادثة تُظهر دائماً المحرّك الذي تعمل عليه.",
+    "endpointLabel": "نقطة النهاية التي يُستدعى عليها هذا المحرّك",
+    "getKey": "احصل على مفتاح",
+    "inputLabel": "مفتاح {{provider}}",
+    "placeholder": "الصق المفتاح",
+    "placeholderConfigured": "•••••••• (يوجد مفتاح مخزَّن)",
+    "save": "حفظ مفتاح {{provider}}",
+    "saveShort": "حفظ",
+    "remove": "حذف مفتاح {{provider}}",
+    "removeShort": "حذف",
+    "saved": "حُفِظ مفتاح المحرّك.",
+    "removed": "حُذِف مفتاح المحرّك.",
+    "storedNote": "مخزَّن مشفَّراً لحسابك وحدك. استبدله بحفظ مفتاح جديد.",
+    "status": {
+      "checking": "جارٍ الفحص…",
+      "stored": "يوجد مفتاح مخزَّن",
+      "missing": "لا مفتاح مخزَّن",
+      "native": "محرّكه الأصيل",
+      "available": "يعمل اليوم",
+      "blocked_by_owner": "يحتاج مفتاحاً",
+      "blocked_by_us": "لم يُنزَل بعد",
+      "closed_at_vendor": "غير متاح عند المورّد",
+      "unverified": "غير متحقَّق"
+    },
+    "usageHintOpenCode": "بعد تخزين المفتاح، اختر نموذج المحرّك (مثل مدخلة «‎glm/…‎») من منتقي النماذج داخل المحادثة.",
+    "evidence": {
+      "measured": "مقيس",
+      "inferred": "مستنتَج"
+    },
+    "cell": {
+      "claudeNative": "المحرّك الذي يأتي به Claude Code، على الحساب المسجَّل دخوله هنا أصلاً.",
+      "claudeGlm": "يعمل اليوم: تحقُّق طرفاً لطرف على هذا الجهاز، ومنتقي النماذج في المحادثة يبدّل إليه.",
+      "claudeKimi": "الطرف موصول ومسار الكود حيّ — لم يبقَ إلا مفتاح Moonshot.",
+      "claudeDeepseek": "غير مُفعَّل محرّكاً عمداً. توسيع المحور إليه قرار مالك لا إصلاح عطل.",
+      "claudeZen": "لا يُتيح Zen طرفاً متوافقاً مع Anthropic، فلا يمكن توجيه جسد Claude إليه.",
+      "opencodeZen": "محرّك OpenCode نفسه. المسار عامل، ويُحاسَب على رصيد Zen.",
+      "opencodeGlm": "يعمل اليوم: الحامل يردّ بتوكنز حقيقية عبر كتلة المزوّد المحكومة لدينا.",
+      "opencodeAnthropic": "مفتاح API حصراً. تمرير اشتراك Claude الشخصي عبر OpenCode ممنوع منعاً باتّاً.",
+      "opencodeKimi": "مُفهرَس عند المنبع؛ يحتاج مفتاح Moonshot.",
+      "opencodeDeepseek": "مُفهرَس عند المنبع؛ يحتاج مفتاح DeepSeek.",
+      "codexAnthropic": "لا يتكلّم Codex إلا بروتوكول Responses، وAnthropic لا تخدمه.",
+      "codexGlm": "لا تخدم z.ai طرف Responses، وأُغلق طلب التكامل عند المنبع بـ«غير مخطَّط له».",
+      "codexKimi": "ترد Moonshot بـ404 على /v1/responses — مقيس. مغلقة عند المورّد لا مؤجَّلة.",
+      "codexDeepseek": "السبب نفسه: لا طرف Responses يُوجَّه إليه Codex.",
+      "codexZen": "يُتيح Zen طرف /responses فعلاً، لكن هذه الخليّة لم تُشغَّل طرفاً لطرف قط.",
+      "kimiNative": "محرّكه الأصيل. و402 هنا تخصّ فوترة المحرّك لا الجسد — والجسد يعمل بدونه.",
+      "kimiGlm": "مُثبَت على الطرفية ببيئة فقط. وداخل نسّاج ينتظر حارس إعداده — لا إطلاق قبل الحارس.",
+      "kimiAnthropic": "مُثبَت تقنياً؛ يحتاج مفتاحاً.",
+      "kimiDeepseek": "مُفهرَس؛ يحتاج مفتاح DeepSeek.",
+      "kimiZen": "مُفهرَس؛ يُحاسَب على رصيد Zen.",
+      "agyClosed": "يحسم Antigravity نموذجه داخل CLI الخاص به ولا يقبل محرّكاً خارجياً.",
+      "cursorClosed": "يحسم Cursor نموذجه على خادمه ولا يقبل محرّكاً خارجياً.",
+      "hermesUnverified": "لدى Hermes طبقة نماذج خاصة به؛ لم تُفحص أي خليّة محرّك."
+    }
+  },
+  "permissions": {
+    "title": "إعدادات الأذونات",
+    "skipPermissions": {
+      "label": "تخطّي طلبات الإذن (استخدم بحذر)",
+      "claudeDescription": "مكافئ لخيار --dangerously-skip-permissions",
+      "cursorDescription": "مكافئ لخيار -f في Cursor CLI"
+    },
+    "allowVendorDelegation": {
+      "label": "السماح بتفويض مهام للنماذج",
+      "description": "يتيح لكلود استدعاء نموذج مزوّد مستضاف (Kimi أو DeepSeek أو GLM) لمهمة فرعية واحدة أثناء التشغيل، باستخدام مفتاح API الخاص بك لذلك المزوّد. محرّك كلود نفسه لا يتغيّر. معطّل افتراضياً."
+    },
+    "allowedTools": {
+      "title": "الأدوات المسموح بها",
+      "description": "الأدوات التي يُسمح بها تلقائياً دون طلب إذن",
+      "placeholder": "مثال: \"Bash(git log:*)\" أو \"Write\"",
+      "quickAdd": "إضافة سريعة لأدوات شائعة:",
+      "empty": "لا توجد أدوات مسموح بها معدّة"
+    },
+    "blockedTools": {
+      "title": "الأدوات المحجوبة",
+      "description": "الأدوات التي تُحجب تلقائياً دون طلب إذن",
+      "placeholder": "مثال: \"Bash(rm:*)\"",
+      "empty": "لا توجد أدوات محجوبة معدّة"
+    },
+    "allowedCommands": {
+      "title": "أوامر Shell المسموح بها",
+      "description": "أوامر Shell التي يُسمح بها تلقائياً دون طلب إذن",
+      "placeholder": "مثال: \"Shell(ls)\" أو \"Shell(git status)\"",
+      "quickAdd": "إضافة سريعة لأوامر شائعة:",
+      "empty": "لا توجد أوامر مسموح بها معدّة"
+    },
+    "blockedCommands": {
+      "title": "أوامر Shell المحجوبة",
+      "description": "أوامر Shell التي تُحجب تلقائياً",
+      "placeholder": "مثال: \"Shell(rm -rf)\" أو \"Shell(sudo)\"",
+      "empty": "لا توجد أوامر محجوبة معدّة"
+    },
+    "toolExamples": {
+      "title": "أمثلة أنماط الأدوات:",
+      "bashGitLog": "- السماح بكل أوامر git log",
+      "bashGitDiff": "- السماح بكل أوامر git diff",
+      "write": "- السماح باستخدام أداة Write كاملاً",
+      "bashRm": "- حجب كل أوامر rm (خطير)"
+    },
+    "shellExamples": {
+      "title": "أمثلة أوامر Shell:",
+      "ls": "- السماح بأمر ls",
+      "gitStatus": "- السماح بـ git status",
+      "npmInstall": "- السماح بـ npm install",
+      "rmRf": "- حجب الحذف العودي"
+    },
+    "codex": {
+      "permissionMode": "وضع الأذونات",
+      "description": "يتحكّم في كيفية تعامل Codex مع تعديلات الملفات وتنفيذ الأوامر",
+      "modes": {
+        "default": {
+          "title": "افتراضي",
+          "description": "تعمل الأوامر الموثوقة فقط (ls، cat، grep، git status، إلخ) تلقائياً. الأوامر الأخرى تُتخطّى. يمكن الكتابة في مساحة العمل."
+        },
+        "acceptEdits": {
+          "title": "قبول التعديلات",
+          "description": "تعمل جميع الأوامر تلقائياً داخل مساحة العمل. وضع تلقائي كامل بتنفيذ معزول."
+        },
+        "bypassPermissions": {
+          "title": "تجاوز الأذونات",
+          "description": "تعمل جميع الأوامر تلقائياً دون طلب موافقة. مقصور على workspace-write مع شبكة مطفأة — نفس سقف «قبول التعديلات» — والوصول الكامل للقرص/الشبكة متاح فقط إذا فعّله المشغّل صراحة لهذا النشر (مطفأ افتراضياً). استخدم بحذر."
+        }
+      },
+      "technicalDetails": "تفاصيل تقنية",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write، approvalPolicy=untrusted، الشبكة مطفأة. أوامر موثوقة: cat، cd، grep، head، ls، pwd، tail، git status/log/diff/show، find (بدون -exec)، إلخ.",
+        "acceptEdits": "sandboxMode=workspace-write، approvalPolicy=never، الشبكة مطفأة. جميع الأوامر تنفّذ تلقائياً داخل مجلد المشروع.",
+        "bypassPermissions": "sandboxMode=workspace-write، approvalPolicy=never، الشبكة مطفأة — نفس سقف «قبول التعديلات» على هذا النشر. sandboxMode=danger-full-access (وصول كامل فعلي للقرص/الشبكة) لا يتحقق إلا إذا فعّل المشغّل علم CODEX_ALLOW_FULL_ACCESS لكامل النشر — وهو مطفأ افتراضياً على الأسطول.",
+        "overrideNote": "يمكنك تجاوز ذلك لكل جلسة باستخدام زر الوضع في واجهة المحادثة."
+      }
+    },
+    "antigravity": {
+      "title": "إعدادات الصلاحيات",
+      "description": "يدير واجهة سطر الأوامر agy سلوك الصلاحيات الخاص به. لا توجد قوائم سماح أو حظر لضبطها من هذه الواجهة.",
+      "skipPermissions": {
+        "label": "يتم تخطّي طلبات الصلاحيات",
+        "description": "يعمل agy مع الخيار --dangerously-skip-permissions، لذا لا تُطلب موافقات الأدوات والأوامر أثناء الجلسة."
+      },
+      "cliNote": {
+        "title": "اضبط الصلاحيات داخل agy",
+        "description": "تُضبط خيارات الصلاحيات والاستقلالية داخل إعدادات واجهة سطر الأوامر agy، وليس من هذه الواجهة."
+      }
+    },
+    "actions": {
+      "add": "إضافة"
+    }
+  },
+  "mcpServers": {
+    "title": "خوادم MCP",
+    "description": {
+      "claude": "خوادم Model Context Protocol توفّر لـ Claude أدوات ومصادر بيانات إضافية",
+      "cursor": "خوادم Model Context Protocol توفّر لـ Cursor أدوات ومصادر بيانات إضافية",
+      "codex": "خوادم Model Context Protocol توفّر لـ Codex أدوات ومصادر بيانات إضافية",
+      "opencode": "خوادم Model Context Protocol توفّر لـ OpenCode أدوات ومصادر بيانات إضافية"
+    },
+    "addButton": "إضافة خادم MCP",
+    "empty": "لا توجد خوادم MCP معدّة",
+    "serverType": "النوع",
+    "scope": {
+      "local": "محلي",
+      "user": "المستخدم"
+    },
+    "config": {
+      "command": "الأمر",
+      "url": "URL",
+      "args": "Args",
+      "environment": "البيئة"
+    },
+    "tools": {
+      "title": "الأدوات",
+      "count": "({{count}}):",
+      "more": "+{{count}} المزيد"
+    },
+    "actions": {
+      "edit": "تعديل الخادم",
+      "delete": "حذف الخادم"
+    },
+    "help": {
+      "title": "حول Codex MCP",
+      "description": "يدعم Codex خوادم MCP من نوع stdio. يمكنك إضافة خوادم توسّع قدرات Codex بأدوات وموارد إضافية."
+    }
+  },
+  "pluginSettings": {
+    "title": "الإضافات",
+    "description": "وسّع الواجهة بإضافات مخصّصة. ثبّت من git أو ضع مجلداً في ~/.claude-code-ui/plugins/",
+    "installPlaceholder": "https://github.com/user/my-plugin",
+    "installButton": "تثبيت",
+    "installing": "جارٍ التثبيت…",
+    "securityWarning": "ثبّت فقط الإضافات التي راجعت كودها أو من مؤلّفين تثق بهم.",
+    "scanningPlugins": "جارٍ فحص الإضافات…",
+    "noPluginsInstalled": "لا توجد إضافات مثبّتة",
+    "pullLatest": "جلب أحدث إصدار من git",
+    "noGitRemote": "لا يوجد git remote — التحديث غير متاح",
+    "uninstallPlugin": "إزالة الإضافة",
+    "confirmUninstall": "اضغط مجدداً للتأكيد",
+    "confirmUninstallMessage": "إزالة {{name}}؟ لا يمكن التراجع.",
+    "cancel": "إلغاء",
+    "remove": "إزالة",
+    "updateFailed": "فشل التحديث",
+    "installFailed": "فشل التثبيت",
+    "uninstallFailed": "فشل الإزالة",
+    "toggleFailed": "فشل التبديل",
+    "starterPluginLabel": "إضافة البداية",
+    "starter": "بداية",
+    "docs": "وثائق",
+    "sections": {
+      "officialTitle": "الإضافات الرسمية",
+      "officialDescription": "تُصان من فريق CloudCLI وجاهزة للتثبيت المباشر.",
+      "unofficialTitle": "إضافات أخرى",
+      "unofficialDescription": "إضافات وتكاملات غير رسمية من مستخدمين آخرين. راجع المصدر قبل التثبيت."
+    },
+    "starterPlugin": {
+      "name": "إحصائيات المشروع",
+      "badge": "بداية",
+      "description": "عدد الملفات، أسطر الكود، تقسيم أنواع الملفات، والنشاط الأخير لمشروعك.",
+      "install": "تثبيت"
+    },
+    "terminalPlugin": {
+      "name": "Terminal",
+      "badge": "official",
+      "description": "طرفية مدمجة مع وصول كامل لـ shell مباشرة داخل الواجهة.",
+      "install": "تثبيت"
+    },
+    "scheduledPromptPlugin": {
+      "name": "المطالبات المجدوَلة",
+      "badge": "unofficial",
+      "description": "جدولة مطالبات مساحة العمل، ومراجعة سجل التشغيل، وإدارة المهام المحلية المتكررة.",
+      "install": "تثبيت"
+    },
+    "claudeWatchPlugin": {
+      "name": "مراقبة Claude",
+      "badge": "unofficial",
+      "description": "مراقبة جلسات Claude Code الطويلة لاكتشاف التعليق وإتاحة التحكم في العملية.",
+      "install": "تثبيت"
+    },
+    "morePlugins": "المزيد",
+    "enable": "تفعيل",
+    "disable": "تعطيل",
+    "installAriaLabel": "رابط مستودع git للإضافة",
+    "tab": "تبويب",
+    "runningStatus": "يعمل"
+  },
+  "commandBoardSettings": {
+    "title": "لوحة الأوامر",
+    "description": "تحكّم بمن يستطيع تشغيل أوامر «لوحة الأوامر» وأيّ الأوامر مفعّلة. التنفيذ يتمّ بهوية مالك السيرفر.",
+    "loading": "جارٍ التحميل…",
+    "loadError": "تعذّر تحميل الإعدادات",
+    "saved": "حُفِظت الإعدادات",
+    "saveError": "تعذّر الحفظ",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ…",
+    "roles": {
+      "title": "صلاحية الأدوار",
+      "description": "من يستطيع تشغيل أوامر لوحة الأوامر. المالك دائماً مفعّل.",
+      "ownerLocked": "دائماً مفعّل (لا يمكن قفله)",
+      "ownerSelectableHint": "اختر طبقةً من الأربع أعلاه — تعطيل الوصول الذاتي غير مسموح",
+      "ownerNoneDisabled": "لا يمكن للمالك تعطيل نفسه",
+      "laterPhase": "يتوفّر في مرحلة لاحقة",
+      "generalHint": "«الأوامر المخصّصة» لا يُضيف أثراً فعلياً ما لم تُعرِّف أوامر مخصّصة في قسم «الأوامر المخصّصة» أدناه.",
+      "customHint": "«الأوامر المخصّصة» لا يُضيف أثراً فعلياً ما لم تُعرِّف أوامر مخصّصة في قسم «الأوامر المخصّصة» أدناه.",
+      "legendHint": "الطبقات تراكمية — كلٌّ منها يشمل ما قبلها"
+    },
+    "roleNames": {
+      "owner": "المالك",
+      "admin": "الآدمن",
+      "user": "مستخدم"
+    },
+    "modes": {
+      "none": "معطّل",
+      "noneDesc": "لا وصول للوحة الأوامر لهذا الدور.",
+      "safe": "القائمة الآمنة",
+      "safeDesc": "تشغيل أوامر القائمة الآمنة المدرجة مع التطبيق فقط.",
+      "custom": "الأوامر المخصّصة",
+      "customDesc": "القائمة الآمنة + الأوامر المخصّصة التي عرّفتَها (محصورة بتنفيذيات مجمّدة بالكود، لا تنفيذ نصّ حرّ).",
+      "raw": "تنفيذ أي أمر",
+      "rawDesc": "جميع الطبقات أعلاه + تنفيذ أي نصّ shell حرّ. للمالك فقط. يستلزم تسليح المفتاح الرئيسي.",
+      "rawDangerHint": "الطبقة الخطرة متاحة للمالك فقط",
+      "rawUnarmedNote": "الطبقة الخطرة غير مسلَّحة — اختيارها هنا لا يسري حتى تُسلَّح من القسم أدناه",
+      "general": "الأوامر المخصّصة",
+      "generalDesc": "القائمة الآمنة + الأوامر المخصّصة التي عرّفتَها (محصورة بتنفيذيات مجمّدة بالكود، لا تنفيذ نصّ حرّ)."
+    },
+    "actions": {
+      "title": "الأوامر المتاحة",
+      "description": "فعّل أو عطّل كل أمر في القائمة الآمنة.",
+      "empty": "لا أوامر."
+    },
+    "customCommands": {
+      "title": "الأوامر المخصّصة",
+      "description": "عرِّف أوامر بزر واحد. cmd محصور بقائمة تنفيذيات مجمّدة في الكود — لا تُعدَّل من الواجهة.",
+      "allowlistNote": "حالياً: npm run <سكربت> فقط. التوسيع يستلزم تعديل الكود ومراجعة.",
+      "counter": "{{count}} / {{max}} أوامر",
+      "empty": "لا أوامر مخصّصة بعد.",
+      "addCommand": "إضافة أمر",
+      "loadError": "تعذّر تحميل الأوامر المخصّصة",
+      "invalidRow": "الأمر غير صالح",
+      "invalidRowReason": "السبب: {{error}}",
+      "form": {
+        "title": "تعريف أمر مخصّص",
+        "editTitle": "تعديل أمر مخصّص",
+        "key": "المفتاح",
+        "keyHint": "يبدأ بحرف صغير — حروف/أرقام/-/_",
+        "label": "الاسم المعروض",
+        "labelHint": "ما يظهر في لوحة الأوامر",
+        "cmd": "التنفيذي",
+        "cmdHint": "حالياً: npm فقط (قائمة مجمّدة بالكود)",
+        "args": "المعطيات",
+        "argsHint": "لـ npm: الأول run والثاني اسم السكربت",
+        "addArg": "+ معطى",
+        "removeArg": "حذف",
+        "minRole": "أدنى صلاحية",
+        "save": "حفظ",
+        "cancel": "إلغاء",
+        "saving": "جارٍ الحفظ…"
+      },
+      "deleteConfirm": "حذف الأمر «{{key}}»؟",
+      "deleteConfirmYes": "حذف",
+      "deleteConfirmNo": "إلغاء",
+      "errors": {
+        "invalid_key": "المفتاح غير صالح",
+        "key_reserved": "المفتاح محجوز بأمر ثابت",
+        "key_exists": "المفتاح موجود مسبقاً",
+        "invalid_label": "الاسم غير صالح",
+        "invalid_min_role": "الصلاحية غير صالحة",
+        "interpreter_forbidden": "التنفيذي مفسِّر/shell — محظور بالكود",
+        "cmd_not_allowlisted": "التنفيذي غير مسموح به",
+        "npm_script_missing": "السكربت غير موجود في package.json",
+        "denylisted": "السكربت محظور (build/dev/release…)",
+        "flag_arg_forbidden": "المعطيات لا تبدأ بـ «-»",
+        "invalid_arg": "معطى غير صالح",
+        "too_many_commands": "الحدّ الأقصى (20 أمر)",
+        "not_found": "الأمر غير موجود",
+        "internal": "خطأ داخلي"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "الطبقة الخطرة — تنفيذ أي أمر",
+        "description": "تفعيل هذه الطبقة في المصفوفة أعلاه لا يكفي — يجب تسليح المفتاح الرئيسي هنا. إطفاؤه يُسقط «تنفيذ أي أمر» عن كل الأدوار فوراً.",
+        "warningTitle": "تحذير أمني — اقرأ هذا قبل التسليح",
+        "warning": "هذه الميزة تسمح بتشغيل أي أمر shell على الخادم بصلاحية مستخدم الخدمة. لا توجد قائمة سماح تحدّ منها — الضمانة الوحيدة هي مراجعتك الشخصية لكل أمر حرفاً بحرف قبل الضغط على «تنفيذ». أمر واحد خاطئ أو غير مأذون قد يُتلف البيانات أو يُوقف الخادم.",
+        "ackLabel": "أفهم أن هذا يمنح وصولاً كاملاً لـ shell على الخادم وأتحمّل المسؤولية كاملةً",
+        "confirmEnable": "تأكيد التسليح",
+        "cancelEnable": "إلغاء",
+        "enableButton": "تسليح",
+        "disableButton": "إطفاء رئيسي (يُسقط الطبقة عن الجميع)",
+        "statusEnabled": "مسلَّح",
+        "statusDisabled": "غير مسلَّح",
+        "notGeneralMode": "يتطلّب تعيين طبقة «تنفيذ أي أمر» في المصفوفة أعلاه.",
+        "blocked_is_platform": "التسليح غير متاح في وضع المنصة — البيئة تُلغي ضمانة المراجعة البشرية."
+      },
+      "queue": {
+        "title": "إدراج أمر",
+        "description": "الأمر المُدرَج هنا ينتظر في لوحة الأوامر بالشريط الجانبي ويُراجَع هناك. لا شيء يُنفَّذ تلقائياً.",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "إضافة",
+        "counter": "{{count}} / {{max}} أوامر",
+        "addError": {
+          "empty_command": "الأمر لا يمكن أن يكون فارغاً",
+          "command_too_long": "الأمر طويل جداً (الحد 4096 محرف)",
+          "forbidden_control_char": "يحتوي الأمر على محرف محظور في الموضع {{position}}",
+          "too_many_commands": "وصلت القائمة للحد الأقصى (20 أمر)",
+          "raw_exec_disabled": "ميزة «تنفيذ أي أمر» معطّلة",
+          "config_denied": "طبقة دور المالك لا تسمح بذلك — فعِّل طبقة «تنفيذ أي أمر» وسلِّح المفتاح الرئيسي.",
+          "invalid_command": "أمر غير صالح",
+          "internal": "خطأ داخلي",
+          "carriage_return_forbidden": "الأمر يحوي محرف إرجاع (\\r — من Windows) — أعد اللصق بأسطر LF",
+          "too_many_lines": "الأمر يتجاوز 100 سطر",
+          "denied_command": "محظور: هذا الأمر يعطّل خدمة حيّة (القاعدة: {{rule}}). لوحة الأوامر لا تُشغّل أوامر إيقاف أو إعادة تشغيل — نفّذه في طرفيتك الخاصة."
+        },
+        "waitingElsewhere": "{{count}} أمر بانتظار المراجعة في لوحة الأوامر بالشريط الجانبي.",
+        "reviewedElsewhere": "الأوامر المُدرَجة تظهر في لوحة الأوامر بالشريط الجانبي، وهناك تُراجَع وتُنفَّذ."
+      },
+      "dialog": {
+        "title": "مراجعة الأمر قبل التنفيذ",
+        "subtitle": "ستُنفَّذ هذه البايتات حرفياً على الخادم. لا إمكانية تراجع.",
+        "commandLabel": "الأمر الذي سيُنفَّذ",
+        "lengthInfo": "الطول: {{len}} محرف",
+        "clientDigestMismatch": "عدم تطابق البصمة — النصّ المعروض لا يطابق المخزَّن على الخادم. التنفيذ محظور.",
+        "ackLabel": "راجعتُ هذا الأمر حرفاً بحرف وأتحمّل مسؤولية تنفيذه كاملةً",
+        "execute": "تنفيذ",
+        "cancel": "إلغاء",
+        "executing": "جارٍ التنفيذ…",
+        "digestMismatch": "تغيّر الأمر بعد عرضه — أُلغي التنفيذ. يُعاد تحميل القائمة.",
+        "notFound": "الأمر لم يُعد موجوداً — ربما نُفِّذ أو حُذف من جلسة أخرى.",
+        "actionInFlight": "يعمل أمر آخر حالياً. انتظر حتى ينتهي.",
+        "execFailed": "فشل إطلاق الأمر على الخادم.",
+        "timeout": "انتهت مهلة الأمر (120 ثانية).",
+        "forbidden_control_char": "اكتُشف محرف محظور في الأمر المخزَّن — أُلغي التنفيذ.",
+        "internal": "خطأ داخلي.",
+        "result": {
+          "title": "نتيجة التنفيذ",
+          "exitCode": "كود الخروج: {{code}}",
+          "stdout": "المخرج (stdout)",
+          "stderr": "الأخطاء (stderr)",
+          "truncated": "الناتج مقتطع — الحد 64 كيلوبايت",
+          "noOutput": "(لا مخرج)",
+          "close": "إغلاق"
+        },
+        "lineInfo": "{{count}} سطر",
+        "executionTarget": "وجهة التنفيذ: الخادم المحلي لتطبيق نسّاج — مستخدم الخدمة «nassaj»",
+        "executionTargetWarn": "الأوامر المكتوبة لجهاز آخر (مثل VM أو خادم بعيد) يجب ألّا تُنفَّذ هنا.",
+        "digest_mismatch": "تغيّر الأمر بعد عرضه — أُلغي التنفيذ. يُعاد تحميل القائمة.",
+        "not_found": "الأمر لم يُعد موجوداً — ربما نُفِّذ أو حُذف من جلسة أخرى.",
+        "action_in_flight": "يعمل أمر آخر حالياً. انتظر حتى ينتهي.",
+        "exec_failed": "فشل إطلاق الأمر على الخادم.",
+        "raw_exec_disabled": "المفتاح الرئيسي للطبقة الخطرة مطفأ — سلّحه من إعدادات لوحة الأوامر.",
+        "raw_exec_blocked": "الطبقة الخطرة محجوبة في هذه البيئة ولا يمكن تسليحها.",
+        "config_denied": "دورك لا يملك طبقة «تنفيذ أي أمر».",
+        "unauthenticated": "انتهت الجلسة — أعد تسجيل الدخول.",
+        "clientDigestUnavailable": "تعذّر التحقّق المحلي من البصمة في هذا السياق (أصل غير آمن). الخادم ما زال يربط البصمة بالنصّ المخزَّن — اقرأ الأمر بتمعّن.",
+        "restarting": "الأمر نُفِّذ ويُعيد تشغيل الخادم، فتعذّر عودة الردّ. بانتظار عودته…",
+        "restartSuccess": "عاد الخادم. اكتمل تنفيذ الأمر.",
+        "audit_unavailable": "رُفض: تعذّرت كتابة سجلّ التدقيق فلم يُنفَّذ شيء. التنفيذ الخام لا يجري بلا سجلّ أبداً.",
+        "denied_command": "محظور: هذا الأمر يعطّل خدمة حيّة (القاعدة: {{rule}}). لوحة الأوامر لا تُشغّل أوامر إيقاف أو إعادة تشغيل — نفّذه في طرفيتك الخاصة.",
+        "requestedBy": "أدرجه: {{name}}",
+        "unattributed": "مصدر غير موثّق — لم يُسجَّل مَن أدرج هذا الأمر"
+      }
+    }
+  },
+  "subscriptions": {
+    "title": "الاشتراكات المفعّلة",
+    "empty": "لا اشتراكات مُصادَقاً عليها",
+    "loading": "جارٍ التحميل…",
+    "error": "تعذّر تحميل الاشتراكات",
+    "monthToDate": "هذه الدورة",
+    "cycleSince": "منذ {{date}}",
+    "anchorLabel": "يوم بداية الدورة",
+    "anchorHint": "لا مزوّد يكشف تاريخ الفوترة — اضبطه بنفسك",
+    "apiEquivalent": "قيمة بأسعار API على اشتراك — لا مبلغاً محاسَباً",
+    "billed": "محاسَب",
+    "unavailable": "غير متاحة",
+    "partial": "جزئية",
+    "pricesAsOf": "الأسعار بتاريخ {{date}}",
+    "byModel": "حسب النموذج",
+    "harnessTotal": "مجموع الجسم",
+    "showBreakdown": "إظهار تفصيل النماذج",
+    "hideBreakdown": "إخفاء تفصيل النماذج",
+    "unpricedModel": "لا سعر رسمي",
+    "anchorSource": {
+      "detected": "من بيانات اشتراكك",
+      "derived": "تقدير من أقدم استهلاك",
+      "manual": "ضبطتَه بنفسك",
+      "unknown": "شهر تقويمي — لم يُعثر على تاريخ اشتراك"
+    },
+    "viaHarness": "عبر {{harness}}",
+    "subscriptionTotal": "مجموع الاشتراك",
+    "assumedPrice": "سعر مُقدَّر — {{models}} بلا سعر منشور"
+  }
+}

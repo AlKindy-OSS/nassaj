@@ -1,0 +1,1133 @@
+{
+  "title": "设置",
+  "tabs": {
+    "account": "账户",
+    "permissions": "权限",
+    "mcpServers": "MCP 服务器",
+    "skills": "技能",
+    "appearance": "外观"
+  },
+  "skills": {
+    "title": "技能",
+    "description": "从 .md 文件或完整技能文件夹安装全局 {{provider}} 技能。",
+    "descriptionReadOnly": "从 {{provider}} 提供商位置发现的技能——此界面不支持安装。",
+    "refresh": "刷新",
+    "addSkill": "添加技能",
+    "addSkillTitle": "添加 {{provider}} 技能",
+    "installPath": "安装路径",
+    "dropZoneTitle": "将 .md 文件或技能文件夹拖放到此处",
+    "dropZoneDescription": "上传独立的 SKILL.md 或包含脚本和资源的完整技能文件夹。",
+    "chooseFiles": "选择文件",
+    "chooseFolder": "选择文件夹",
+    "queuedFiles": "队列",
+    "remove": "移除",
+    "install": "安装技能",
+    "installCount_one": "安装 {{count}} 个技能",
+    "installCount_other": "安装 {{count}} 个技能",
+    "cancel": "取消",
+    "uploadHint": "文件夹上传使用文件夹名称；独立文件使用 SKILL.md 中指定的名称。",
+    "visibleSkills": "已安装的技能",
+    "visibleSkillsDescription": "由提供商 API 发现的技能（包括全局和项目特定位置）。",
+    "search": "搜索技能…",
+    "clearSearch": "清除搜索",
+    "scanning": "正在扫描项目技能…",
+    "loading": "正在加载 {{provider}} 技能…",
+    "empty": "尚未发现任何技能",
+    "emptyDescription": "在上方添加全局技能，或在您的工作区中创建项目特定的技能文件夹。",
+    "noMatch": "没有匹配的技能",
+    "noMatchDescription": "请尝试不同的命令、名称、范围、项目或源路径。",
+    "source": "来源",
+    "saved": "技能安装成功。",
+    "delete": "删除",
+    "confirmDelete": "删除《{{name}}》？",
+    "confirmYes": "删除",
+    "plugin": "插件",
+    "project": "项目",
+    "scopes": {
+      "user": "用户",
+      "plugin": "插件",
+      "repo": "仓库",
+      "project": "项目",
+      "admin": "管理员",
+      "system": "系统"
+    },
+    "errors": {
+      "deleteFailed": "删除技能失败，请重试。",
+      "dropFailed": "请拖放一个或多个 .md 文件，或拖放包含 SKILL.md 的文件夹。",
+      "saveFailed": "安装技能失败，请重试。"
+    }
+  },
+  "account": {
+    "title": "账户",
+    "language": "语言",
+    "languageLabel": "显示语言",
+    "languageDescription": "选择您偏好的界面语言",
+    "username": "用户名",
+    "email": "邮箱",
+    "profile": "个人资料",
+    "changePassword": "修改密码"
+  },
+  "mcp": {
+    "title": "MCP 服务器",
+    "addServer": "添加服务器",
+    "editServer": "编辑服务器",
+    "deleteServer": "删除服务器",
+    "serverName": "服务器名称",
+    "serverType": "服务器类型",
+    "config": "配置",
+    "testConnection": "测试连接",
+    "status": "状态",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "scope": {
+      "label": "范围",
+      "user": "用户",
+      "project": "项目"
+    }
+  },
+  "appearance": {
+    "title": "外观",
+    "theme": "主题",
+    "codeEditor": "代码编辑器",
+    "editorTheme": "编辑器主题",
+    "wordWrap": "自动换行",
+    "showMinimap": "显示缩略图",
+    "lineNumbers": "行号",
+    "fontSize": "字体大小"
+  },
+  "actions": {
+    "saveChanges": "保存更改",
+    "resetToDefaults": "重置为默认值",
+    "cancelChanges": "取消更改"
+  },
+  "quickSettings": {
+    "title": "快速设置",
+    "sections": {
+      "appearance": "外观",
+      "toolDisplay": "工具显示",
+      "viewOptions": "视图选项",
+      "inputSettings": "输入设置"
+    },
+    "darkMode": "深色模式",
+    "autoExpandTools": "自动展开工具",
+    "showRawParameters": "显示原始参数",
+    "showThinking": "显示思考过程",
+    "hideToolCalls": "隐藏工具调用",
+    "autoScrollToBottom": "自动滚动到底部",
+    "tabsIconOnly": "紧凑标签（仅图标）",
+    "sendByCtrlEnter": "使用 Ctrl+Enter 发送",
+    "sendByCtrlEnterDescription": "启用后，按 Ctrl+Enter 发送消息，而不是仅按 Enter。这对于使用输入法的用户可以避免意外发送。",
+    "dragHandle": {
+      "dragging": "正在拖拽手柄",
+      "closePanel": "关闭设置面板",
+      "openPanel": "打开设置面板",
+      "draggingStatus": "正在拖拽...",
+      "toggleAndMove": "点击切换，拖拽移动"
+    }
+  },
+  "claudeUsage": {
+    "title": "Claude 用量",
+    "loading": "正在加载用量…",
+    "error": "无法加载用量状态。",
+    "stale": "缓存数据",
+    "percentUsed": "已使用 {{percent}}",
+    "resetsIn": "{{time}} 后重置",
+    "extraUsageDetail": "已使用 {{used}} / {{limit}}",
+    "crossProviderNote": "Claude 账户用量 — 当前会话运行在 {{provider}} 上",
+    "notApplicable": "Claude 配额不适用于当前会话的提供商（{{provider}}）",
+    "windows": {
+      "session": "当前会话",
+      "weeklyAllModels": "全部模型（本周）",
+      "weeklySonnet": "仅 Sonnet",
+      "weeklyOpus": "仅 Opus",
+      "extraUsage": "额外用量"
+    }
+  },
+  "terminalShortcuts": {
+    "title": "终端快捷键",
+    "sectionKeys": "按键",
+    "sectionNavigation": "导航",
+    "escape": "Escape（退出）",
+    "tab": "Tab（制表符）",
+    "shiftTab": "Shift+Tab（反向制表符）",
+    "arrowUp": "上箭头",
+    "arrowDown": "下箭头",
+    "scrollDown": "滚动到底部",
+    "handle": {
+      "closePanel": "关闭快捷键面板",
+      "openPanel": "打开快捷键面板"
+    }
+  },
+  "mainTabs": {
+    "label": "设置",
+    "profile": "个人资料",
+    "agents": "智能体",
+    "appearance": "外观",
+    "git": "Git",
+    "apiTokens": "Nassaj API 密钥",
+    "notifications": "通知",
+    "plugins": "插件",
+    "users": "用户",
+    "about": "关于",
+    "commandBoard": "命令面板"
+  },
+  "profile": {
+    "title": "个人资料",
+    "subtitle": "管理您的账户用户名、密码和通行密钥",
+    "tabs": {
+      "identity": "基本信息",
+      "security": "安全"
+    },
+    "saving": "保存中...",
+    "avatar": {
+      "title": "头像",
+      "description": "添加照片，让团队成员认识您。",
+      "change": "更换图片",
+      "uploading": "上传中...",
+      "hint": "正方形图片效果最佳。支持 PNG 或 JPG。",
+      "currentAlt": "您的头像",
+      "placeholderAlt": "未设置头像",
+      "success": "头像更新成功",
+      "errors": {
+        "uploadFailed": "无法上传图片，请重试。",
+        "network": "网络错误，请检查您的连接并重试。"
+      }
+    },
+    "username": {
+      "title": "修改用户名",
+      "description": "更新您用于登录的用户名。",
+      "currentLabel": "当前用户名",
+      "newLabel": "新用户名",
+      "placeholder": "选择新用户名",
+      "hint": "3-32 个字符：字母、数字或下划线。",
+      "save": "保存用户名",
+      "success": "用户名更新成功",
+      "errors": {
+        "required": "请输入新用户名",
+        "unchanged": "新用户名与当前用户名相同"
+      }
+    },
+    "password": {
+      "title": "修改密码",
+      "description": "请使用一个您未在其他地方使用过的强密码。",
+      "currentLabel": "当前密码",
+      "currentPlaceholder": "输入当前密码",
+      "newLabel": "新密码",
+      "newPlaceholder": "输入新密码",
+      "confirmLabel": "确认新密码",
+      "confirmPlaceholder": "再次输入新密码",
+      "hint": "至少 {{min}} 个字符。",
+      "save": "保存密码",
+      "success": "密码修改成功",
+      "errors": {
+        "required": "请填写所有密码字段",
+        "short": "密码至少需要 {{min}} 个字符",
+        "mismatch": "两次输入的新密码不一致"
+      }
+    },
+    "passkeys": {
+      "title": "通行密钥",
+      "description": "使用指纹、面部识别、设备 PIN 或安全密钥无需密码即可登录。",
+      "add": "添加通行密钥",
+      "nameLabel": "通行密钥名称（可选）",
+      "namePlaceholder": "例如：笔记本电脑指纹",
+      "create": "创建通行密钥",
+      "creating": "等待您的设备...",
+      "cancel": "取消",
+      "loading": "正在加载通行密钥...",
+      "empty": "尚无通行密钥。添加一个即可快速安全地登录此工作区，无需密码。",
+      "notSupported": "此浏览器不支持通行密钥，无法在此添加新密钥。",
+      "unnamed": "未命名通行密钥",
+      "createdAt": "添加于 {{date}}",
+      "lastUsedAt": "上次使用于 {{date}}",
+      "neverUsed": "从未使用",
+      "badges": {
+        "synced": "已同步",
+        "device": "设备绑定"
+      },
+      "rename": "重命名通行密钥",
+      "renamePlaceholder": "新名称",
+      "renameSave": "保存名称",
+      "delete": "删除通行密钥",
+      "deleteConfirm": "删除此通行密钥？",
+      "deleteConfirmYes": "删除",
+      "success": {
+        "added": "通行密钥添加成功",
+        "renamed": "通行密钥已重命名",
+        "deleted": "通行密钥已删除"
+      },
+      "errors": {
+        "loadFailed": "无法加载您的通行密钥，请重试。",
+        "registerFailed": "无法创建通行密钥，请重试。",
+        "duplicate": "此设备或安全密钥已注册为通行密钥。",
+        "renameFailed": "无法重命名通行密钥。",
+        "deleteFailed": "无法删除通行密钥。",
+        "network": "网络错误，请检查您的连接并重试。"
+      }
+    },
+    "identity": {
+      "title": "头像样式",
+      "description": "选择预设头像或颜色，而无需上传照片。",
+      "tabs": {
+        "upload": "上传",
+        "gallery": "图库",
+        "color": "颜色"
+      },
+      "gallery": {
+        "heading": "选择头像",
+        "selected": "已选头像"
+      },
+      "color": {
+        "heading": "选择颜色",
+        "hint": "该颜色将显示在您的首字母后面。",
+        "selected": "已选颜色"
+      },
+      "saving": "保存中...",
+      "success": "头像更新成功",
+      "errors": {
+        "saveFailed": "无法保存您的选择，请重试。",
+        "network": "网络错误，请检查您的连接并重试。"
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "关联您自己的 Claude 订阅以在会话中使用。每个用户拥有独立的凭据。",
+    "recheck": "重新检查",
+    "loadError": "无法检查订阅状态，请重试。",
+    "banner": "您的 Claude 订阅尚未关联。在会话中使用 Claude 前需要先关联。",
+    "bannerHint": "点击下方按钮打开终端并使用以下命令完成登录流程",
+    "linkButton": "关联 Claude 账户",
+    "ownerNote": "作为所有者，您的凭据已自动关联，无需任何操作。"
+  },
+  "agyConnection": {
+    "description": "关联您自己的 Antigravity 订阅以在会话中使用。每个用户拥有独立的凭据。",
+    "recheck": "重新检查",
+    "loadError": "无法检查订阅状态，请重试。",
+    "banner": "您的 Antigravity 订阅尚未关联。在会话中使用 agy 前需要先关联。",
+    "bannerHint": "点击下方按钮打开终端并运行",
+    "linkButton": "关联 Antigravity 账户",
+    "ownerNote": "作为所有者，您的凭据已自动关联，无需任何操作。",
+    "modal": {
+      "title": "关联 Antigravity 账户",
+      "close": "关闭对话框",
+      "instructions": "在下方终端中运行",
+      "afterComplete": "完成 OAuth 登录流程后，关闭此对话框并点击「重新检查」刷新状态。"
+    }
+  },
+  "users": {
+    "title": "用户",
+    "subtitle": "管理工作区成员和邀请",
+    "inviteButton": "邀请用户",
+    "listHeading": "成员",
+    "loading": "正在加载用户...",
+    "empty": "未找到用户",
+    "you": "您",
+    "changeRole": "更改角色",
+    "suspend": "停用",
+    "activate": "激活",
+    "resetPassword": "重置密码",
+    "deleteUser": "删除用户",
+    "deleteUserConfirm": "永久删除 {{username}}？此操作无法撤销。",
+    "reset": {
+      "title": "重置密码",
+      "confirm": "重置 {{username}} 的密码？",
+      "warning": "将生成一个临时密码并只显示一次。用户下次登录时必须更改密码，其所有现有会话将被登出。",
+      "submit": "重置密码",
+      "resetting": "重置中...",
+      "cancel": "取消",
+      "close": "关闭",
+      "done": "完成",
+      "copy": "复制",
+      "copied": "已复制",
+      "successHint": "请安全地共享此临时密码，它只显示一次。",
+      "tempPasswordLabel": "临时密码"
+    },
+    "pendingInvites": "待处理邀请",
+    "noPendingInvites": "无待处理邀请",
+    "revoke": "撤销",
+    "expiresAt": "过期时间 {{date}}",
+    "roles": {
+      "owner": "所有者",
+      "admin": "管理员",
+      "user": "用户"
+    },
+    "statuses": {
+      "active": "活跃",
+      "disabled": "已停用"
+    },
+    "invite": {
+      "title": "邀请用户",
+      "roleLabel": "角色",
+      "roleHint": "被邀请的用户将以此角色创建。",
+      "submit": "创建邀请",
+      "creating": "创建中...",
+      "cancel": "取消",
+      "close": "关闭",
+      "done": "完成",
+      "copy": "复制",
+      "copied": "已复制",
+      "successHint": "请共享此一次性链接，它只显示一次。"
+    }
+  },
+  "providerSharing": {
+    "heading": "提供商凭据共享",
+    "subtitle": "逐个提供商选择凭据是在所有用户间共享还是按用户隔离。",
+    "loading": "正在加载共享设置...",
+    "modeLabel": "{{provider}} 的共享模式",
+    "providers": {
+      "claude": "Claude",
+      "gemini": "Gemini",
+      "codex": "Codex",
+      "agy": "Antigravity (agy)",
+      "cursor": "Cursor",
+      "kimi": "Kimi",
+      "deepseek": "DeepSeek",
+      "glm": "GLM"
+    },
+    "modes": {
+      "shared": "共享",
+      "isolated": "隔离"
+    },
+    "modeDescription": {
+      "shared": "所有用户使用相同凭据",
+      "isolated": "每个用户拥有独立凭据"
+    },
+    "agyWarning": {
+      "title": "实验性隔离",
+      "description": "隔离 Antigravity 凭据为实验性功能，需要重启活跃会话才能生效。"
+    },
+    "save": "保存",
+    "saving": "保存中...",
+    "saveStatus": {
+      "success": "共享设置保存成功",
+      "error": "保存共享设置失败"
+    }
+  },
+  "notifications": {
+    "title": "通知",
+    "description": "控制你希望接收的通知事件。",
+    "webPush": {
+      "title": "Web 推送通知",
+      "enable": "启用推送通知",
+      "disable": "关闭推送通知",
+      "enabled": "推送通知已启用",
+      "loading": "更新中...",
+      "unsupported": "此浏览器不支持推送通知。",
+      "denied": "推送通知已被阻止，请在浏览器设置中允许。"
+    },
+    "sound": {
+      "title": "声音",
+      "description": "聊天运行完成时播放短提示音。",
+      "enabled": "已启用",
+      "test": "测试声音"
+    },
+    "events": {
+      "title": "事件类型",
+      "actionRequired": "需要处理",
+      "stop": "运行已停止",
+      "error": "运行失败"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "深色模式",
+      "description": "切换浅色和深色主题"
+    },
+    "themeMode": {
+      "sectionTitle": "外观",
+      "label": "主题模式",
+      "description": "选择浅色、深色，或自动跟随系统设置",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "themePresets": {
+      "title": "主题",
+      "description": "叠加在浅色和深色模式之上的品牌色彩预设",
+      "groupLabel": "主题预设",
+      "presets": {
+        "default": "默认",
+        "claude": "Claude",
+        "alkindy": "Al-Kindy",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "自定义"
+      },
+      "custom": {
+        "title": "自定义颜色",
+        "accent": "强调色",
+        "background": "背景",
+        "foreground": "文字"
+      }
+    },
+    "projectSorting": {
+      "label": "项目排序",
+      "description": "项目在侧边栏中的排列方式",
+      "alphabetical": "按字母顺序",
+      "recentActivity": "最近活动"
+    },
+    "codeEditor": {
+      "title": "代码编辑器",
+      "theme": {
+        "label": "编辑器主题",
+        "description": "代码编辑器的默认主题"
+      },
+      "wordWrap": {
+        "label": "自动换行",
+        "description": "在编辑器中默认启用自动换行"
+      },
+      "showMinimap": {
+        "label": "显示缩略图",
+        "description": "在差异视图中显示缩略图以便于导航"
+      },
+      "lineNumbers": {
+        "label": "显示行号",
+        "description": "在编辑器中显示行号"
+      },
+      "fontSize": {
+        "label": "字体大小",
+        "description": "编辑器字体大小（px）"
+      }
+    },
+    "branding": {
+      "title": "服务器标识",
+      "description": "在侧边栏徽标旁添加一个小图标，向所有用户标识此服务器。",
+      "nodeIcon": {
+        "label": "服务器图标",
+        "description": "显示在徽标旁的小徽章图片（≤ 48 KB）。支持 PNG、JPG、WebP 或 SVG。",
+        "upload": "上传图标",
+        "change": "更换图标",
+        "clear": "移除",
+        "save": "保存",
+        "saving": "保存中…",
+        "preview": "图标预览",
+        "success": "服务器图标已保存",
+        "cleared": "服务器图标已移除",
+        "position": {
+          "label": "图标位置",
+          "description": "图标相对于徽标的显示位置",
+          "start": "徽标之前",
+          "end": "徽标之后"
+        },
+        "errors": {
+          "tooBig": "图片超过 48 KB 的限制",
+          "unsupported": "不支持的文件类型。请使用 PNG、JPG、WebP 或 SVG。",
+          "saveFailed": "保存失败，请重试。"
+        }
+      }
+    },
+    "sidebar": {
+      "title": "侧边栏",
+      "showSearchAndArchive": {
+        "label": "显示搜索与归档开关",
+        "description": "在项目列表顶部显示搜索框和归档切换行"
+      }
+    },
+    "codeHighlighting": {
+      "title": "代码高亮",
+      "label": "语言范围",
+      "description": "高亮器识别的语言数量。仅默认级别随页面加载；更高级别在选择时下载，无需刷新即刻生效。范围外的语言以纯文本显示。",
+      "core": "10 种语言（最快 — 默认）",
+      "extended": "20 种语言（少量额外下载）",
+      "full": "全部 300 种语言（较大额外下载）"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "添加 MCP 服务器",
+      "edit": "编辑 MCP 服务器"
+    },
+    "importMode": {
+      "form": "表单输入",
+      "json": "JSON 导入"
+    },
+    "scope": {
+      "label": "范围",
+      "userGlobal": "用户（全局）",
+      "projectLocal": "项目（本地）",
+      "userDescription": "用户范围：在您机器上的所有项目中可用",
+      "projectDescription": "本地范围：仅在选定项目中可用",
+      "cannotChange": "编辑现有服务器时无法更改范围"
+    },
+    "fields": {
+      "serverName": "服务器名称",
+      "transportType": "传输类型",
+      "command": "命令",
+      "arguments": "参数（每行一个）",
+      "jsonConfig": "JSON 配置",
+      "url": "URL 地址",
+      "envVars": "环境变量（KEY=值，每行一个）",
+      "headers": "请求头（KEY=值，每行一个）",
+      "selectProject": "选择项目..."
+    },
+    "placeholders": {
+      "serverName": "我的服务"
+    },
+    "validation": {
+      "missingType": "缺少必填字段：type",
+      "stdioRequiresCommand": "stdio 类型需要 command 字段",
+      "httpRequiresUrl": "{{type}} 类型需要 url 字段",
+      "invalidJson": "无效的 JSON 格式",
+      "jsonHelp": "粘贴您的 MCP 服务器配置（JSON 格式）。示例格式：",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}"
+    },
+    "configDetails": "配置详细信息（来自 {{configFile}}）",
+    "projectPath": "路径：{{path}}",
+    "actions": {
+      "cancel": "取消",
+      "saving": "保存中...",
+      "addServer": "添加服务器",
+      "updateServer": "更新服务器"
+    }
+  },
+  "saveStatus": {
+    "success": "设置保存成功！",
+    "error": "保存设置失败",
+    "saving": "保存中..."
+  },
+  "footerActions": {
+    "save": "保存设置",
+    "cancel": "取消"
+  },
+  "git": {
+    "title": "Git 配置",
+    "description": "配置您的 git 提交身份。这些设置将通过 git config --global 全局应用",
+    "name": {
+      "label": "Git 名称",
+      "help": "您的 git 提交名称"
+    },
+    "email": {
+      "label": "Git 邮箱",
+      "help": "您的 git 提交邮箱"
+    },
+    "actions": {
+      "save": "保存配置",
+      "saving": "保存中..."
+    },
+    "status": {
+      "success": "保存成功"
+    }
+  },
+  "apiKeys": {
+    "title": "Nassaj API 密钥",
+    "description": "生成 API 密钥，用于在浏览器外以编程方式触发 Nassaj — 脚本、自动化、CI 或 Webhook — 通过 POST /api/agent，在 x-api-key 请求头中传递密钥。",
+    "newKey": {
+      "alertTitle": "⚠️ 保存您的 API 密钥",
+      "alertMessage": "这是您唯一一次看到此密钥。请妥善保存。",
+      "iveSavedIt": "我已保存"
+    },
+    "form": {
+      "placeholder": "API 密钥名称（例如：生产服务器）",
+      "createButton": "创建",
+      "cancelButton": "取消"
+    },
+    "newButton": "新建 API 密钥",
+    "empty": "尚未创建 API 密钥。",
+    "list": {
+      "created": "创建时间：",
+      "lastUsed": "最后使用："
+    },
+    "confirmDelete": "确定要删除此 API 密钥吗？",
+    "status": {
+      "active": "激活",
+      "inactive": "未激活"
+    },
+    "github": {
+      "title": "GitHub 令牌",
+      "description": "添加 GitHub 个人访问令牌以通过外部 API 克隆私有仓库。",
+      "descriptionAlt": "添加 GitHub 个人访问令牌以克隆私有仓库。您也可以直接在 API 请求中传递令牌而无需存储。",
+      "addButton": "添加令牌",
+      "form": {
+        "namePlaceholder": "令牌名称（例如：个人仓库）",
+        "tokenPlaceholder": "GitHub 个人访问令牌（ghp_...）",
+        "descriptionPlaceholder": "描述（可选）",
+        "addButton": "添加令牌",
+        "cancelButton": "取消",
+        "howToCreate": "如何创建 GitHub 个人访问令牌 →"
+      },
+      "empty": "尚未添加 GitHub 令牌。",
+      "added": "添加时间：",
+      "confirmDelete": "确定要删除此 GitHub 令牌吗？"
+    },
+    "apiDocsLink": "API 文档",
+    "documentation": {
+      "title": "外部 API 文档",
+      "description": "了解如何使用外部 API 从您的应用程序触发 Claude/Cursor 会话。",
+      "viewLink": "查看 API 文档 →"
+    },
+    "loading": "加载中...",
+    "version": {
+      "updateAvailable": "有可用更新：v{{version}}"
+    }
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "检查中...",
+      "connected": "已连接",
+      "notConnected": "未连接",
+      "disconnected": "已断开",
+      "checkingAuth": "正在检查认证状态...",
+      "loggedInAs": "登录为 {{email}}",
+      "authenticatedUser": "已认证用户"
+    },
+    "account": {
+      "claude": {
+        "description": "Anthropic Claude AI 助手"
+      },
+      "cursor": {
+        "description": "Cursor AI 驱动的代码编辑器"
+      },
+      "codex": {
+        "description": "OpenAI Codex AI 助手"
+      },
+      "gemini": {
+        "description": "Google Gemini AI 助手"
+      },
+      "antigravity": {
+        "description": "通过 agy CLI 使用 Google AI Pro"
+      },
+      "opencode": {
+        "description": "OpenCode CLI 助手"
+      },
+      "kimi": {
+        "description": "通过 API 密钥使用 Moonshot Kimi"
+      },
+      "deepseek": {
+        "description": "通过 API 密钥使用 DeepSeek"
+      },
+      "glm": {
+        "description": "通过 API 密钥使用 Zhipu / Z.ai GLM"
+      }
+    },
+    "antigravity": {
+      "modelNote": "通过 agy CLI（v1.x）使用 Google AI Pro。活跃模型在 agy 设置中选择，而非在此界面。"
+    },
+    "connectionStatus": "连接状态",
+    "login": {
+      "title": "登录",
+      "reAuthenticate": "重新认证",
+      "description": "登录您的 {{agent}} 账户以启用 AI 功能",
+      "reAuthDescription": "使用其他账户登录或刷新凭据",
+      "button": "登录",
+      "reLoginButton": "重新登录"
+    },
+    "error": "错误：{{error}}",
+    "apiKey": {
+      "title": "添加 API 密钥",
+      "replaceTitle": "替换 API 密钥",
+      "description": "粘贴 {{provider}} API 密钥以启用此提供商。密钥将加密存储，不再显示。",
+      "getKey": "获取密钥",
+      "inputLabel": "{{provider}} API 密钥",
+      "placeholder": "粘贴 API 密钥",
+      "placeholderConfigured": "•••••••• (已配置)",
+      "save": "保存",
+      "saved": "API 密钥已保存。",
+      "remove": "移除",
+      "removed": "API 密钥已移除。",
+      "configuredNote": "已配置 API 密钥。",
+      "checkingCapability": "正在检查密钥录入支持…",
+      "targetLabel": "凭据目标",
+      "targets": {
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "glm": "GLM"
+      }
+    }
+  },
+  "permissions": {
+    "title": "权限设置",
+    "skipPermissions": {
+      "label": "跳过权限提示（请谨慎使用）",
+      "claudeDescription": "等同于 --dangerously-skip-permissions 标志",
+      "cursorDescription": "等同于 Cursor CLI 中的 -f 标志"
+    },
+    "allowVendorDelegation": {
+      "label": "允许将子任务委托给其他模型",
+      "description": "允许 Claude 在运行期间调用托管供应商模型（Kimi、DeepSeek 或 GLM）处理单个子任务，使用您为该提供商配置的 API 密钥。Claude 引擎本身不变。默认关闭。"
+    },
+    "allowedTools": {
+      "title": "允许的工具",
+      "description": "无需权限提示即可自动使用的工具",
+      "placeholder": "例如：\"Bash(git log:*)\" 或 \"Write\"",
+      "quickAdd": "快速添加常用工具：",
+      "empty": "未配置允许的工具"
+    },
+    "blockedTools": {
+      "title": "禁用的工具",
+      "description": "无需权限提示即可自动禁用的工具",
+      "placeholder": "例如：\"Bash(rm:*)\"",
+      "empty": "未配置禁用的工具"
+    },
+    "allowedCommands": {
+      "title": "允许的 Shell 命令",
+      "description": "无需权限提示即可自动执行的 Shell 命令",
+      "placeholder": "例如：\"Shell(ls)\" 或 \"Shell(git status)\"",
+      "quickAdd": "快速添加常用命令：",
+      "empty": "未配置允许的命令"
+    },
+    "blockedCommands": {
+      "title": "阻止的 Shell 命令",
+      "description": "自动阻止的 Shell 命令",
+      "placeholder": "例如：\"Shell(rm -rf)\" 或 \"Shell(sudo)\"",
+      "empty": "未配置阻止的命令"
+    },
+    "toolExamples": {
+      "title": "工具模式示例：",
+      "bashGitLog": "- 允许所有 git log 命令",
+      "bashGitDiff": "- 允许所有 git diff 命令",
+      "write": "- 允许所有 Write 工具使用",
+      "bashRm": "- 阻止所有 rm 命令（危险）"
+    },
+    "shellExamples": {
+      "title": "Shell 命令示例：",
+      "ls": "- 允许 ls 命令",
+      "gitStatus": "- 允许 git status",
+      "npmInstall": "- 允许 npm install",
+      "rmRf": "- 阻止递归删除"
+    },
+    "codex": {
+      "permissionMode": "权限模式",
+      "description": "控制 Codex 如何处理文件修改和命令执行",
+      "modes": {
+        "default": {
+          "title": "默认",
+          "description": "只有受信任的命令（ls、cat、grep、git status 等）会自动运行。其他命令将被跳过。可以写入工作区。"
+        },
+        "acceptEdits": {
+          "title": "接受编辑",
+          "description": "所有命令在工作区内自动运行。具有沙箱执行的全自动模式。"
+        },
+        "bypassPermissions": {
+          "title": "绕过权限",
+          "description": "完全系统访问，无任何限制。所有命令自动运行，具有完整的磁盘和网络访问权限。请谨慎使用。"
+        }
+      },
+      "technicalDetails": "技术详情",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted。受信任的命令：cat、cd、grep、head、ls、pwd、tail、git status/log/diff/show、find（不带 -exec）等。",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never。所有命令在项目目录内自动执行。",
+        "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never。完全系统访问权限，仅在可信环境中使用。",
+        "overrideNote": "您可以使用聊天界面中的模式按钮按会话覆盖此设置。"
+      }
+    },
+    "antigravity": {
+      "title": "权限设置",
+      "description": "agy CLI 自行管理其权限行为。此界面无需配置允许或阻止列表。",
+      "skipPermissions": {
+        "label": "已跳过权限提示",
+        "description": "agy 以 --dangerously-skip-permissions 运行，因此会话期间不会请求工具和命令审批。"
+      },
+      "cliNote": {
+        "title": "在 agy 中配置权限",
+        "description": "权限和自主性选项位于 agy CLI 设置中，而非此界面。"
+      }
+    },
+    "actions": {
+      "add": "添加"
+    }
+  },
+  "mcpServers": {
+    "title": "MCP 服务器",
+    "description": {
+      "claude": "Model Context Protocol 服务器为 Claude 提供额外的工具和数据源",
+      "cursor": "Model Context Protocol 服务器为 Cursor 提供额外的工具和数据源",
+      "codex": "Model Context Protocol 服务器为 Codex 提供额外的工具和数据源",
+      "opencode": "Model Context Protocol 服务器为 OpenCode 提供额外的工具和数据源"
+    },
+    "addButton": "添加 MCP 服务器",
+    "empty": "未配置 MCP 服务器",
+    "serverType": "类型",
+    "scope": {
+      "local": "本地",
+      "user": "用户"
+    },
+    "config": {
+      "command": "命令",
+      "url": "URL",
+      "args": "参数",
+      "environment": "环境变量"
+    },
+    "tools": {
+      "title": "工具",
+      "count": "（{{count}}）：",
+      "more": "还有 {{count}} 个"
+    },
+    "actions": {
+      "edit": "编辑服务器",
+      "delete": "删除服务器"
+    },
+    "help": {
+      "title": "关于 Codex MCP",
+      "description": "Codex 支持基于 stdio 的 MCP 服务器。您可以添加服务器，通过额外的工具和资源来扩展 Codex 的功能。"
+    }
+  },
+  "pluginSettings": {
+    "title": "插件",
+    "description": "通过自定义插件扩展界面。从 git 安装或直接将文件夹放入 ~/.claude-code-ui/plugins/",
+    "installPlaceholder": "https://github.com/user/my-plugin",
+    "installButton": "安装",
+    "installing": "安装中…",
+    "securityWarning": "仅安装您已审查过源代码或信任作者的插件。",
+    "scanningPlugins": "正在扫描插件…",
+    "noPluginsInstalled": "未安装插件",
+    "pullLatest": "从 git 拉取最新内容",
+    "noGitRemote": "无 git 远程仓库 — 无法更新",
+    "uninstallPlugin": "卸载插件",
+    "confirmUninstall": "再次点击确认",
+    "confirmUninstallMessage": "移除 {{name}}？此操作无法撤销。",
+    "cancel": "取消",
+    "remove": "移除",
+    "updateFailed": "更新失败",
+    "installFailed": "安装失败",
+    "uninstallFailed": "卸载失败",
+    "toggleFailed": "切换失败",
+    "starterPluginLabel": "入门插件",
+    "starter": "入门模板",
+    "docs": "文档",
+    "sections": {
+      "officialTitle": "官方插件",
+      "officialDescription": "由 CloudCLI 团队维护，可直接安装。",
+      "unofficialTitle": "其他插件",
+      "unofficialDescription": "来自其他用户的非官方插件和集成。安装前请审查源代码。"
+    },
+    "starterPlugin": {
+      "name": "项目统计",
+      "badge": "入门",
+      "description": "查看项目的文件数、代码行数、文件类型分布以及最近活动。",
+      "install": "安装"
+    },
+    "terminalPlugin": {
+      "name": "终端",
+      "badge": "官方",
+      "description": "集成终端，可在界面内直接访问完整 Shell。",
+      "install": "安装"
+    },
+    "scheduledPromptPlugin": {
+      "name": "定时提示",
+      "badge": "非官方",
+      "description": "安排工作区提示、查看运行历史并管理周期性本地任务。",
+      "install": "安装"
+    },
+    "claudeWatchPlugin": {
+      "name": "Claude Watch",
+      "badge": "非官方",
+      "description": "监控长时间运行的 Claude Code 会话是否卡死，并提供进程控制。",
+      "install": "安装"
+    },
+    "morePlugins": "更多",
+    "enable": "启用",
+    "disable": "禁用",
+    "installAriaLabel": "插件 git 仓库 URL",
+    "tab": "标签",
+    "runningStatus": "运行中"
+  },
+  "commandBoardSettings": {
+    "title": "Command Board",
+    "description": "控制谁可以运行命令面板的操作，以及启用哪些操作。操作以服务器所有者的身份运行。",
+    "loading": "Loading…",
+    "loadError": "加载设置失败",
+    "saved": "Settings saved",
+    "saveError": "保存失败",
+    "save": "Save",
+    "saving": "Saving…",
+    "roles": {
+      "title": "Role access",
+      "description": "谁可以运行命令面板的操作。所有者始终启用。",
+      "ownerLocked": "始终启用（无法被锁定在外）",
+      "ownerSelectableHint": "从上方四个层级中选择一个 — 所有者无法把自己锁在外面",
+      "ownerNoneDisabled": "所有者无法把自己锁在外面",
+      "laterPhase": "将在后续阶段提供",
+      "generalHint": "只有在下方定义了自定义命令时，「自定义命令」才有意义。",
+      "customHint": "只有在下方定义了自定义命令时，「自定义命令」才有意义。",
+      "legendHint": "层级是累积的 — 每个层级包含其下所有层级"
+    },
+    "roleNames": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "modes": {
+      "none": "Disabled",
+      "noneDesc": "此角色无权访问命令面板。",
+      "safe": "Safe list",
+      "safeDesc": "仅可运行内置的安全清单操作。",
+      "general": "自定义命令",
+      "generalDesc": "安全清单 + 你定义的自定义命令（受代码中冻结的可执行文件白名单限制 — 不提供自由 shell）。",
+      "custom": "自定义命令",
+      "customDesc": "安全清单 + 你定义的自定义命令（受代码中冻结的可执行文件白名单限制 — 不提供自由 shell）。",
+      "raw": "运行任意命令",
+      "rawDesc": "以上所有层级 + 运行任意自由 shell 文本。仅限所有者。需要激活主开关。",
+      "rawDangerHint": "危险层级 — 仅限所有者",
+      "rawUnarmedNote": "危险层级未激活 — 在此选择它在下方激活开关之前不会生效"
+    },
+    "actions": {
+      "title": "Available actions",
+      "description": "逐项启用或停用安全清单中的操作。",
+      "empty": "No actions."
+    },
+    "customCommands": {
+      "title": "Custom Commands",
+      "description": "定义一键命令。cmd 受代码中冻结的可执行文件白名单限制 — 无法从界面放宽。",
+      "allowlistNote": "目前仅支持：npm run <已存在的脚本>。放宽范围需要修改代码并经过审核。",
+      "counter": "{{count}} / {{max}} 条命令",
+      "empty": "尚无自定义命令。",
+      "addCommand": "Add command",
+      "loadError": "加载自定义命令失败",
+      "invalidRow": "该命令当前无效",
+      "invalidRowReason": "Reason: {{error}}",
+      "form": {
+        "title": "定义自定义命令",
+        "editTitle": "编辑自定义命令",
+        "key": "Key",
+        "keyHint": "以小写字母开头 — 仅允许字母、数字、- 和 _",
+        "label": "Display name",
+        "labelHint": "显示在命令面板中的名称",
+        "cmd": "Executable",
+        "cmdHint": "目前仅支持：npm（代码中冻结的白名单）",
+        "args": "Arguments",
+        "argsHint": "对于 npm：第一个字段填 run，第二个字段填脚本名",
+        "addArg": "+ arg",
+        "removeArg": "Remove",
+        "minRole": "Minimum role",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saving": "Saving…"
+      },
+      "deleteConfirm": "确定删除命令「{{key}}」吗？",
+      "deleteConfirmYes": "Delete",
+      "deleteConfirmNo": "Cancel",
+      "errors": {
+        "invalid_key": "Invalid key",
+        "key_reserved": "该键名已被内置操作占用",
+        "key_exists": "该键名已存在",
+        "invalid_label": "Invalid label",
+        "invalid_min_role": "Invalid role",
+        "interpreter_forbidden": "该可执行文件是被禁止的解释器/shell — 已在代码层拒绝",
+        "cmd_not_allowlisted": "该可执行文件不在允许的白名单中",
+        "npm_script_missing": "在 package.json 中找不到该脚本",
+        "denylisted": "该脚本在黑名单中（build/dev/release…）",
+        "flag_arg_forbidden": "参数不能以「-」开头",
+        "invalid_arg": "Invalid argument",
+        "too_many_commands": "已达上限（20 条命令）",
+        "not_found": "找不到该命令",
+        "internal": "服务器内部错误"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "危险层级 — 运行任意命令",
+        "description": "在上方矩阵中选择此层级还不够 — 必须在此处激活主开关。关闭主开关会立即从所有角色中移除「运行任意命令」。",
+        "warningTitle": "安全警告 — 激活前请阅读",
+        "warning": "此功能允许以服务账户的权限在服务器上运行任意 shell 命令。没有任何白名单 — 唯一的防线是你在点击「执行」前逐字审阅每条命令。一条错误或未经授权的命令就可能损坏数据或使服务器宕机。",
+        "ackLabel": "我了解这将授予对服务器的完整 shell 访问权限，并承担全部责任",
+        "confirmEnable": "确认激活",
+        "cancelEnable": "Cancel",
+        "enableButton": "激活",
+        "disableButton": "主开关关闭（从所有角色移除该层级）",
+        "statusEnabled": "已激活",
+        "statusDisabled": "未激活",
+        "notGeneralMode": "需要在上方矩阵中将所有者角色设置为「运行任意命令」。",
+        "blocked_is_platform": "平台模式下无法激活 — 该环境使人工审核保证失效。"
+      },
+      "queue": {
+        "title": "加入命令队列",
+        "description": "在此添加的命令会在侧边栏命令板中等待并在那里审阅。没有任何内容会自动执行。",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "Add",
+        "counter": "{{count}} / {{max}} 条命令",
+        "addError": {
+          "empty_command": "命令不能为空",
+          "command_too_long": "命令过长（最多 4096 个字符）",
+          "forbidden_control_char": "命令在位置 {{position}} 含有被禁止的控制字符",
+          "too_many_commands": "队列已满（最多 20 条命令）",
+          "raw_exec_disabled": "「运行任意命令」功能已停用",
+          "config_denied": "所有者角色层级不允许此操作 — 将层级设为「运行任意命令」并激活主开关。",
+          "invalid_command": "Invalid command",
+          "internal": "服务器内部错误",
+          "carriage_return_forbidden": "命令包含\\r（Windows换行）— 请用LF重新粘贴",
+          "too_many_lines": "命令超过100行",
+          "denied_command": "已阻止：此命令会中断正在运行的服务（规则：{{rule}}）。命令板从不执行生命周期命令——请在你自己的终端中运行。"
+        },
+        "waitingElsewhere": "侧边栏命令板中有 {{count}} 条命令等待。",
+        "reviewedElsewhere": "加入队列的命令会显示在侧边栏命令板中，并在那里审阅和执行。"
+      },
+      "dialog": {
+        "title": "执行前审阅命令",
+        "subtitle": "以下内容将在服务器上原样执行，且无法撤销。",
+        "commandLabel": "将要执行的命令",
+        "lengthInfo": "长度：{{len}} 个字符",
+        "clientDigestMismatch": "摘要不匹配 — 显示的命令与存储的内容不一致。已阻止执行。",
+        "ackLabel": "我已逐字审阅此命令，并对其执行承担全部责任",
+        "execute": "Execute",
+        "cancel": "Cancel",
+        "executing": "Executing…",
+        "digestMismatch": "命令在显示后被更改 — 已取消执行。正在重新加载队列。",
+        "notFound": "该命令已不存在 — 可能已在另一个会话中被执行或忽略。",
+        "actionInFlight": "已有另一条命令正在运行，请等待其完成。",
+        "execFailed": "无法在服务器上启动该命令。",
+        "timeout": "命令已超时（120 秒）。",
+        "forbidden_control_char": "在存储的命令中检测到被禁止的控制字符 — 已取消执行。",
+        "internal": "服务器内部错误。",
+        "result": {
+          "title": "Execution result",
+          "exitCode": "退出代码：{{code}}",
+          "stdout": "Output (stdout)",
+          "stderr": "Errors (stderr)",
+          "truncated": "输出已截断 — 上限：64 KB",
+          "noOutput": "(no output)",
+          "close": "Close"
+        },
+        "lineInfo": "{{count}} 行",
+        "executionTarget": "执行目标：本地Nassaj服务器 — 服务用户«nassaj»",
+        "executionTargetWarn": "为其他机器（如VM或远程服务器）编写的命令不得在此处执行。",
+        "digest_mismatch": "The command changed after it was displayed — execution cancelled. Reloading the list.",
+        "not_found": "The command no longer exists — it may have been run or dismissed elsewhere.",
+        "action_in_flight": "Another command is running. Wait for it to finish.",
+        "exec_failed": "Failed to launch the command on the server.",
+        "raw_exec_disabled": "The master switch for the dangerous tier is off — arm it in Command Board settings.",
+        "raw_exec_blocked": "The dangerous tier is blocked in this environment and cannot be armed.",
+        "config_denied": "Your role does not hold the \"Run any command\" tier.",
+        "unauthenticated": "Your session expired — sign in again.",
+        "clientDigestUnavailable": "The local integrity check could not run in this context (insecure origin). The server still binds the digest — read the command carefully.",
+        "restarting": "命令已执行并正在重启服务器，因此无法返回响应。正在等待其恢复…",
+        "restartSuccess": "服务器已恢复。命令已完成。",
+        "audit_unavailable": "已拒绝：无法写入审计记录，因此未执行任何内容。原始执行绝不会不留记录。",
+        "denied_command": "已阻止：此命令会中断正在运行的服务（规则：{{rule}}）。命令板从不执行生命周期命令——请在你自己的终端中运行。",
+        "requestedBy": "加入队列者：{{name}}",
+        "unattributed": "未记录来源——没有记录是谁把这条命令加入队列的"
+      }
+    }
+  },
+  "subscriptions": {
+    "title": "已启用的订阅",
+    "empty": "没有已认证的订阅",
+    "loading": "加载中…",
+    "error": "无法加载订阅",
+    "monthToDate": "本周期",
+    "cycleSince": "自 {{date}} 起",
+    "anchorLabel": "周期起始日",
+    "anchorHint": "没有提供方公开账单日期 — 请自行设置",
+    "apiEquivalent": "订阅的 API 折算价值 — 并非实际账单金额",
+    "billed": "计费",
+    "unavailable": "不可用",
+    "partial": "部分",
+    "pricesAsOf": "价格截至 {{date}}",
+    "byModel": "按模型",
+    "harnessTotal": "载体合计",
+    "showBreakdown": "显示模型明细",
+    "hideBreakdown": "隐藏模型明细",
+    "unpricedModel": "无官方价格",
+    "anchorSource": {
+      "detected": "来自你的订阅数据",
+      "derived": "根据最早用量推算",
+      "manual": "由你设置",
+      "unknown": "自然月 — 未找到订阅日期"
+    },
+    "viaHarness": "经由 {{harness}}",
+    "subscriptionTotal": "订阅合计",
+    "assumedPrice": "估算价格 — {{models}} 没有公开费率"
+  }
+}
