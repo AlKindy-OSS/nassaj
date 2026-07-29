@@ -122,7 +122,7 @@
     "jsdom": "^25.0.1",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
-    "katex": "^0.16.25",
+    "katex": "^0.18.1",
     "lucide-react": "^0.515.0",
     "mermaid": "^11.15.0",
     "mime-types": "^3.0.1",
