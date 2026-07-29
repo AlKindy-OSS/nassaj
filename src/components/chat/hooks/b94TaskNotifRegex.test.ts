@@ -74,7 +74,7 @@ const STOPPED_REAL = `<task-notification>
 const COMPLETED_REAL = `<task-notification>
 <task-id>a04941ec28f89d30e</task-id>
 <tool-use-id>toolu_0145kVfDRzaEo951b4e1t3ZN</tool-use-id>
-<output-file>/tmp/claude-1000/-home-nassaj-Project-claudecodeui-dev/ee1d0c66-f8af-4293-b5ee-9ae71b19f2de/tasks/a04941ec28f89d30e.output</output-file>
+<output-file>/tmp/claude-1000/-home-dev-Project-claudecodeui-dev/ee1d0c66-f8af-4293-b5ee-9ae71b19f2de/tasks/a04941ec28f89d30e.output</output-file>
 <status>completed</status>
 <summary>Agent "إكمال إصلاح antigravity synchronizer + utils + اختبارات" completed</summary>
 <result>تم التحقق من الملفات الثلاثة. لم أُجرِ أي تعديل — الكود الذي تركته الجلسة الموازية سليم ومكتمل.

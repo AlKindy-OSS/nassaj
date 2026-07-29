@@ -59,7 +59,8 @@
 #                    المالك باسم ملف عقدته الفعلي؛ مرّره صراحةً لرسالة دقيقة.
 #   WF_BASE          جذر جلسات المشروع (transcripts)
 #                    (افتراضي: المسار المحلول لـ
-#                     ~/the governance repo/projects/-home-nassaj-Project-nassaj-dev)
+#                     <claude-root>/projects/<مسار-المستودع-وقد-استُبدل-'/'-بـ'-'>،
+#                     حيث <claude-root> = $CLAUDE_CONFIG_DIR أو $HOME/.claude)
 #   FRESH_WINDOW_S   نافذة الحداثة (ثوانٍ) على agent-*.jsonl لاعتبار workflow
 #                    حيّاً فعلاً (افتراضي: 180). لماذا: عدّ started>result وحده
 #                    يُنتج false-positive من وكيل مات دون إصدار "result" (يبقى
