@@ -44,7 +44,7 @@ process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
 // Reproduce the governance topology: ~/.claude -> the governance repo's AGENTS.md.
-const NASSAJ_CORE = path.join(sandboxHome, 'the governance repo');
+const NASSAJ_CORE = path.join(sandboxHome, 'governance-repo');
 fs.mkdirSync(NASSAJ_CORE, { recursive: true });
 fs.writeFileSync(path.join(NASSAJ_CORE, 'AGENTS.md'), neutralContent);
 fs.symlinkSync(NASSAJ_CORE, path.join(sandboxHome, '.claude'));

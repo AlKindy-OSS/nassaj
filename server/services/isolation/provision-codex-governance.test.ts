@@ -65,7 +65,7 @@ assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $
 // Reproduce the production governance topology faithfully:
 //   sandboxHome/.claude  ->  sandboxHome/the governance repo   (whole-dir symlink, as bootstrap wires it)
 //   sandboxHome/the governance repo's AGENTS.md                  (build-agents neutral output)
-const NASSAJ_CORE = path.join(sandboxHome, 'the governance repo');
+const NASSAJ_CORE = path.join(sandboxHome, 'governance-repo');
 fs.mkdirSync(NASSAJ_CORE, { recursive: true });
 const NEUTRAL_AGENTS = path.join(NASSAJ_CORE, 'AGENTS.md');
 fs.writeFileSync(NEUTRAL_AGENTS, neutralContent);

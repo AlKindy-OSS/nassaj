@@ -38,7 +38,7 @@ const OPERATOR_SETTINGS = {
         hooks: [
           {
             type: 'command',
-            command: 'node /home/dev/the governance repo/hooks/zero-rule-guard.js',
+            command: 'node /home/dev/governance-repo/hooks/zero-rule-guard.js',
           },
         ],
       },
@@ -49,7 +49,7 @@ const OPERATOR_SETTINGS = {
         hooks: [
           {
             type: 'command',
-            command: 'node /home/dev/the governance repo/hooks/suggest-compact.js',
+            command: 'node /home/dev/governance-repo/hooks/suggest-compact.js',
           },
         ],
       },
