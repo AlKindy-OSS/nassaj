@@ -1,6 +1,6 @@
 {
   "name": "nassaj-dev",
-  "version": "1.36.0.1",
+  "version": "1.36.1",
   "description": "nassaj-dev — claudecodeui fork with AntigravityProvider and RTL Arabic support",
   "type": "module",
   "private": true,

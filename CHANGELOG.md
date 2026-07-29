@@ -3,6 +3,17 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.36.1] — Small feature (2026-07-29)
+
+### Added
+
+- Fork a side query into a real conversation. The semantics mirror "f to fork"
+  in the CLI: the on-disk session transcript is branched under fresh
+  identifiers, progress entries are dropped and children re-parented, sidechain
+  entries are excluded, the origin is recorded as `forkedFrom`, and the question
+  with its already-rendered answer is appended along with a "btw: ..." title
+  line. No inference and no quota spend — the existing answer is reused.
+
 ## [1.36.0.1] — Fix (2026-07-29)
 
 ### Fixed
