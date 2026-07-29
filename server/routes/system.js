@@ -77,6 +77,7 @@ import {
     deleteCustomCommand,
 } from '../services/command-board-custom.js';
 import { clientIp } from '../utils/client-ip.js';
+import { getBootSecurityWarnings } from '../services/isolation/boot-security-status.js';
 
 const router = express.Router();
 
@@ -470,6 +471,21 @@ router.get('/pending', statsLimiter, (req, res) => {
     } catch (error) {
         console.error('[system] list pending actions failed:', error.message);
         return res.status(500).json({ status: 'error', code: 'internal', detail: 'Failed to list actions' });
+    }
+});
+
+// GET /api/system/security-posture — boot-time security findings that DEGRADED
+// to a warning instead of refusing to boot (T-1085; today only the docker-socket
+// guard on a single-user host). OWNER/ADMIN only and deliberately NOT part of
+// the public /health payload: "this server can reach the Docker socket" is a
+// map of the host's attack surface, useful to an attacker probing an exposed
+// instance. Empty array = nothing degraded on this boot.
+router.get('/security-posture', statsLimiter, requireRole('owner', 'admin'), (req, res) => {
+    try {
+        return res.json({ warnings: getBootSecurityWarnings() });
+    } catch (error) {
+        console.error('[system] security posture read failed:', error.message);
+        return res.status(500).json({ status: 'error', code: 'internal', detail: 'Failed to read posture' });
     }
 });
 

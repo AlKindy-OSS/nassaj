@@ -143,6 +143,7 @@ import { getBrandingTitle } from './services/branding-config.js';
 import { ensureOwnerBootstrapped } from './services/bootstrap-owner.service.js';
 import { enforcePlatformIsolationGuard } from './services/platform-isolation-guard.service.js';
 import { enforceDockerSockBootGuard } from './services/isolation/docker-sock-boot-guard.js';
+import { resolveSecurityPosture } from './services/isolation/security-posture.js';
 import { userConfigDir } from './services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from './services/provider-sharing.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
@@ -2903,16 +2904,23 @@ const VITE_PORT = process.env.VITE_PORT || 5173;
 // Initialize database and start server
 async function startServer() {
     try {
-        // T-896 / B-170 fail-closed gate — FIRST, before the DB and long before
-        // the listener opens: if this process can reach /var/run/docker.sock
-        // via its numeric gids, docker escape to host root is one provider turn
-        // away and every isolation layer below is moot. Throws with the exact
-        // degroup remediation (the catch below exits 1). Silent no-op when no
-        // docker socket exists. No disable flag by design (committee 2026-07-14).
-        enforceDockerSockBootGuard();
-
         // Initialize authentication database
         await initializeDatabase();
+
+        // T-896 / B-170 docker-socket gate, long before the listener opens: if
+        // this process can reach /var/run/docker.sock via its numeric gids,
+        // docker escape to host root is one provider turn away and every
+        // isolation layer below is moot.
+        //
+        // T-1085: the gate now runs AFTER initializeDatabase (nothing is served
+        // yet, no provider can spawn) because its ACTION depends on the
+        // deployment posture, and the posture needs the account count. Shared
+        // host → unchanged hard refusal with the degroup remediation (the catch
+        // below exits 1, still no disable flag). Single-user host → the same
+        // finding is logged and recorded for the UI, and boot continues: the
+        // only human who can drive an agent here already owns the login shell.
+        const posture = resolveSecurityPosture();
+        enforceDockerSockBootGuard({ shared: posture.shared, postureReason: posture.reason });
 
         // B-5 fail-closed guard: in platform mode every WS session resolves to
         // the first active user, so an isolated Claude provider + >1 active user

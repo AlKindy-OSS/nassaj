@@ -29,18 +29,25 @@ import {
 /** Builds injectable deps with quiet logging and simple fakes. */
 function makeDeps(overrides: Record<string, unknown> = {}) {
   const errors: string[] = [];
+  const warns: string[] = [];
   const infos: string[] = [];
+  const recorded: Record<string, unknown>[] = [];
   return {
     errors,
+    warns,
     infos,
+    recorded,
     deps: {
       sockPath: '/var/run/docker.sock',
       statSync: () => ({ gid: 989 }) as fs.Stats,
       getgroups: () => [24, 27, 100, 1000],
       getgid: () => 1000,
       getegid: () => 1000,
+      shared: true,
       logError: (m: string) => errors.push(m),
+      logWarn: (m: string) => warns.push(m),
       logInfo: (m: string) => infos.push(m),
+      recordWarning: (w: Record<string, unknown>) => recorded.push(w),
       ...overrides,
     },
   };
@@ -56,7 +63,7 @@ describe('enforceDockerSockBootGuard — pass paths', () => {
   it('passes SILENTLY when the socket is absent (ENOENT)', () => {
     const { deps, errors, infos } = makeDeps({ statSync: enoent });
     const res = enforceDockerSockBootGuard(deps);
-    assert.deepEqual(res, { checked: false, exposed: false, sockGid: null });
+    assert.deepEqual(res, { checked: false, exposed: false, verified: true, enforced: true, sockGid: null });
     assert.equal(errors.length, 0);
     assert.equal(infos.length, 0, 'absence must not even log (silent pass per spec)');
   });
@@ -64,7 +71,7 @@ describe('enforceDockerSockBootGuard — pass paths', () => {
   it('passes when the socket exists but no process gid matches its owner', () => {
     const { deps, errors } = makeDeps();
     const res = enforceDockerSockBootGuard(deps);
-    assert.deepEqual(res, { checked: true, exposed: false, sockGid: 989 });
+    assert.deepEqual(res, { checked: true, exposed: false, verified: true, enforced: true, sockGid: 989 });
     assert.equal(errors.length, 0);
   });
 });
@@ -170,7 +177,7 @@ describe('enforceDockerSockBootGuard — unverifiable message is DISTINCT (qa-cr
       assert.doesNotMatch(msg, /gpasswd/, 'degroup steps are the wrong medicine for a stat failure');
       assert.doesNotMatch(msg, /pm2 kill/);
       // the documented trade-off + the no-flag invariant stay explicit
-      assert.match(msg, /fail-closed BY DESIGN/i);
+      assert.match(msg, /fail-closed BY DESIGN on shared hosts/i);
       assert.match(msg, /no disable flag/i);
       assert.equal(errors.length, 1);
     }
@@ -221,5 +228,87 @@ describe('enforceDockerSockBootGuard — LIVE host integration', () => {
         assert.equal(res.sockGid, sockGid);
       }
     }
+  });
+});
+
+describe('enforceDockerSockBootGuard — single-user posture degrades to a warning (T-1085)', () => {
+  // Scope narrowing, owner decision 2026-07-29: on a host whose only account is
+  // the OS user running the process, refusing to boot protects nobody — that
+  // human can run `docker run -v /:/host` from their own shell already. The
+  // FINDING is unchanged; only the ACTION is.
+
+  it('boots (no throw) on a proven exposure and reports enforced:false', () => {
+    const { deps, errors, warns } = makeDeps({
+      shared: false,
+      postureReason: '1 active account',
+      getgroups: () => [24, 989, 1000],
+    });
+    const res = enforceDockerSockBootGuard(deps);
+    assert.deepEqual(res, {
+      checked: true,
+      exposed: true,
+      verified: true,
+      enforced: false,
+      sockGid: 989,
+    });
+    assert.equal(errors.length, 0, 'a degraded verdict must not log as a fatal error');
+    assert.equal(warns.length, 1);
+    assert.match(warns[0], /BOOTING ANYWAY \(single-user host\)/);
+    // the full diagnosis + remediation still reach the operator verbatim
+    assert.match(warns[0], /REFUSING TO BOOT/);
+    assert.match(warns[0], /gpasswd -d \S+ docker/);
+    assert.match(warns[0], /NASSAJ_SECURITY_POSTURE=strict/);
+  });
+
+  it('records the finding for the UI with a stable id and remediation', () => {
+    const { deps, recorded } = makeDeps({ shared: false, getgroups: () => [989] });
+    enforceDockerSockBootGuard(deps);
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0].id, 'docker-sock-exposed');
+    assert.equal(recorded[0].severity, 'warning');
+    assert.match(String(recorded[0].detail), /docker\.sock is owned by gid 989/);
+    assert.ok(Array.isArray(recorded[0].remediation) && recorded[0].remediation.length > 0);
+  });
+
+  it('degrades the UNVERIFIABLE path too, under its own id', () => {
+    const { deps, recorded, warns, errors } = makeDeps({
+      shared: false,
+      statSync: () => {
+        const err = new Error('EACCES') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      },
+    });
+    const res = enforceDockerSockBootGuard(deps);
+    assert.equal(res.enforced, false);
+    assert.equal(res.verified, false, 'an unverifiable boot must never claim it was verified');
+    assert.equal(errors.length, 0);
+    assert.equal(warns.length, 1);
+    assert.equal(recorded[0].id, 'docker-sock-unverifiable');
+  });
+
+  it('still passes SILENTLY when the socket is absent — no warning to record', () => {
+    const { deps, warns, recorded } = makeDeps({ shared: false, statSync: enoent });
+    const res = enforceDockerSockBootGuard(deps);
+    assert.equal(res.exposed, false);
+    assert.equal(warns.length, 0);
+    assert.equal(recorded.length, 0);
+  });
+});
+
+describe('enforceDockerSockBootGuard — the SHARED default cannot be lost by omission', () => {
+  // The 2026-07-14 veto still stands for shared hosts: no env flag disables the
+  // refusal, and a caller that forgets to pass a posture gets the strict one.
+
+  it('omitting `shared` entirely keeps the hard refusal', () => {
+    const { deps } = makeDeps({ getgroups: () => [989] });
+    delete (deps as Record<string, unknown>).shared;
+    assert.throws(() => enforceDockerSockBootGuard(deps), DockerSockExposedError);
+  });
+
+  it('a non-boolean falsy-ish posture value does not silently downgrade', () => {
+    // Only an explicit `false` degrades; anything else (undefined) is shared.
+    const { deps } = makeDeps({ shared: undefined, getgroups: () => [989] });
+    assert.throws(() => enforceDockerSockBootGuard(deps), DockerSockExposedError);
   });
 });

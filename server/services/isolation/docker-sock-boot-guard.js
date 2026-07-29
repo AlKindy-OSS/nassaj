@@ -1,6 +1,19 @@
 /**
- * Docker-socket boot guard (T-896 / B-170) — fail-closed, NO disable flag
- * (committee decision 2026-07-14, qa-critic veto on any escape hatch).
+ * Docker-socket boot guard (T-896 / B-170) — fail-closed on SHARED hosts, NO
+ * disable flag (committee decision 2026-07-14, qa-critic veto on any escape
+ * hatch; scope narrowed by owner decision 2026-07-29, T-1085).
+ *
+ * SCOPE (T-1085): the escalation this guard prevents is the server reaching
+ * privilege its USERS do not already hold. On a shared host (>1 account, or
+ * platform mode, or an operator-declared strict posture) that is real and the
+ * refusal below is unchanged. On a single-user install it is vacuous: the one
+ * person who can drive the agents is the same person who owns the login shell
+ * and can run `docker run -v /:/host` themselves. Bricking that boot protected
+ * nothing and made every ordinary install (a deployed node hit this on
+ * 2026-07-29) require sudo surgery before nassaj would start. So the posture
+ * decides the ACTION, never the DETECTION: an exposed single-user node boots
+ * with a loud warning recorded in boot-security-status and surfaced in the UI.
+ * There is still NO env flag that turns the shared-host refusal off.
  *
  * Threat: the shared `nassaj` uid holding the docker group makes every AI
  * provider one `docker run -v /:/host` away from host root — a cage/sandbox
@@ -19,21 +32,23 @@
  * Outcomes:
  *   - socket absent (ENOENT/ENOTDIR)      → silent pass (nothing to escape to);
  *   - socket present, gid NOT held        → pass (logs one info line);
- *   - socket present, gid held            → operational fatal error with the
- *     exact degroup remediation steps, then DockerSockExposedError
- *     (startServer's catch exits 1 before the listener ever opens);
+ *   - socket present, gid held            → SHARED posture: operational fatal
+ *     error with the exact degroup remediation steps, then
+ *     DockerSockExposedError (startServer's catch exits 1 before the listener
+ *     ever opens). SINGLE-USER posture: the same message is logged as a
+ *     warning and recorded for the UI; boot continues;
  *   - cannot determine (stat error other than absence, or a platform without
- *     getgroups while the socket exists) → FAIL CLOSED: same fatal path, but
- *     with its OWN diagnostic message (qa-critic 2026-07-14: the degroup
- *     steps are wrong medicine for a stat failure and would mislead the
- *     operator). An unverifiable boot is treated as an exposed boot, never
- *     waved through.
+ *     getgroups while the socket exists) → SHARED posture: FAIL CLOSED on the
+ *     same fatal path, but with its OWN diagnostic message (qa-critic
+ *     2026-07-14: the degroup steps are wrong medicine for a stat failure and
+ *     would mislead the operator); an unverifiable boot is treated as an
+ *     exposed boot, never waved through. SINGLE-USER posture: warn and boot.
  *
  * DELIBERATE fail-closed trade-off on unexpected errno (documented per the
  * 2026-07-14 review): a host-filesystem fault that makes the socket
  * unstat-able (EACCES on /var/run, EIO, ELOOP from a tampered symlink chain…)
- * refuses boot on a node that might factually be safe — including production
- * traventure. That cost is accepted BY DESIGN: this guard protects against
+ * refuses boot on a node that might factually be safe — including a
+ * production node. That cost is accepted BY DESIGN: this guard protects against
  * root escape, and "cannot verify" is indistinguishable at boot time from
  * "exposed and hidden". Availability is recoverable by an operator fixing the
  * host FS; a silent waved-through root escape is not. The unverifiable
@@ -48,6 +63,8 @@
 
 import fs from 'node:fs';
 import os from 'node:os';
+
+import { recordBootSecurityWarning } from './boot-security-status.js';
 
 /** Canonical Docker control-socket path (Debian/Ubuntu fleet nodes). */
 export const DOCKER_SOCK_PATH = '/var/run/docker.sock';
@@ -94,7 +111,8 @@ function buildExposedFatalMessage(detail) {
     '  3. pm2 kill && pm2 resurrect            # regenerate the pm2 daemon WITHOUT the group',
     '     (a plain `pm2 restart` is NOT enough: the old daemon re-inherits the stale group)',
     `  4. verify: cat /proc/$(pm2 pid nassaj-dev)/status | grep Groups   # no docker gid`,
-    'This guard is fail-closed BY DESIGN and has no disable flag (committee 2026-07-14).',
+    'This guard is fail-closed BY DESIGN on shared hosts and has no disable flag',
+    '(committee 2026-07-14; single-user scope narrowing 2026-07-29, T-1085).',
   ].join('\n');
 }
 
@@ -121,7 +139,26 @@ function buildUnverifiableFatalMessage(detail) {
     '  2. inspect the path chain (ls -ld /var /var/run /run) for permissions/symlink damage',
     '  3. if Docker is not meant to run on this node, remove the socket/daemon entirely —',
     '     an ABSENT socket passes this guard silently',
-    'This guard is fail-closed BY DESIGN and has no disable flag (committee 2026-07-14).',
+    'This guard is fail-closed BY DESIGN on shared hosts and has no disable flag',
+    '(committee 2026-07-14; single-user scope narrowing 2026-07-29, T-1085).',
+  ].join('\n');
+}
+
+/**
+ * Header prepended when a SINGLE-USER node boots despite an exposed or
+ * unverifiable socket. It states plainly that detection did NOT change and why
+ * enforcement did, so nobody reads the surviving boot as "the guard passed".
+ * @param {string} reason  posture reason from resolveSecurityPosture
+ * @returns {string}
+ */
+function buildDegradedWarningHeader(reason) {
+  return [
+    '[docker-sock-guard] BOOTING ANYWAY (single-user host) — the finding below stands.',
+    `Posture: single-user (${reason}). The one account able to drive an agent here is the`,
+    'same human who owns this login session and can already reach the Docker socket from',
+    'their own shell, so refusing to boot would cost availability and buy no security.',
+    'Add a second account (or set NASSAJ_SECURITY_POSTURE=strict) and this becomes a',
+    'HARD boot refusal again — the remediation below is what to run before you do.',
   ].join('\n');
 }
 
@@ -151,12 +188,17 @@ function collectProcessGids(proc) {
 
 /**
  * Enforces the docker-socket invariant at boot. Call BEFORE any listener /
- * request handling (see server/index.js startServer). Throws
- * DockerSockExposedError on exposure or on any state it cannot verify;
- * returns a small result object on pass (useful for tests/telemetry).
+ * request handling (see server/index.js startServer). On exposure — or on any
+ * state it cannot verify — it throws DockerSockExposedError when the host is
+ * SHARED, and degrades to a recorded warning when the host is SINGLE-USER.
+ * Returns a small result object whenever it does not throw.
  *
  * Dependencies are injectable for tests; production callers use the defaults
  * (the real fs.statSync and the live process group functions).
+ *
+ * `shared` defaults to TRUE — omitting it keeps the original fail-closed
+ * behavior, so a caller that never learned about postures cannot accidentally
+ * weaken the guard. server/index.js passes the resolved posture explicitly.
  *
  * @param {object} [deps]
  * @param {string} [deps.sockPath]
@@ -164,17 +206,57 @@ function collectProcessGids(proc) {
  * @param {() => number[]} [deps.getgroups]
  * @param {() => number} [deps.getgid]
  * @param {() => number} [deps.getegid]
+ * @param {boolean} [deps.shared]        shared-host posture (default: true)
+ * @param {string} [deps.postureReason]  why that posture was chosen (for logs)
  * @param {(msg: string) => void} [deps.logError]
+ * @param {(msg: string) => void} [deps.logWarn]
  * @param {(msg: string) => void} [deps.logInfo]
- * @returns {{ checked: boolean, exposed: false, sockGid: number|null }}
+ * @param {(w: object) => void} [deps.recordWarning]
+ * @returns {{ checked: boolean, exposed: boolean, verified: boolean,
+ *             enforced: boolean, sockGid: number|null }}
  */
 export function enforceDockerSockBootGuard(deps = {}) {
   const {
     sockPath = DOCKER_SOCK_PATH,
     statSync = fs.statSync,
+    shared = true,
+    postureReason = 'posture not supplied — defaulting to shared (fail-closed)',
     logError = console.error,
+    logWarn = console.warn,
     logInfo = console.log,
+    recordWarning = recordBootSecurityWarning,
   } = deps;
+
+  /**
+   * Single exit for both bad outcomes: refuse on a shared host, warn on a
+   * single-user one. Detection is identical either way — only the action
+   * differs, and the degraded path still logs the FULL fatal text so the
+   * operator sees the same diagnosis and remediation.
+   * @param {string} message   built fatal message (exposed or unverifiable)
+   * @param {'exposed'|'unverifiable'} kind
+   * @param {{ checked: boolean, exposed: boolean, verified: boolean, sockGid: number|null }} result
+   */
+  const refuseOrWarn = (message, kind, result) => {
+    if (shared) {
+      logError(message);
+      throw new DockerSockExposedError(message);
+    }
+    logWarn(`${buildDegradedWarningHeader(postureReason)}\n${message}`);
+    recordWarning({
+      id: `docker-sock-${kind}`,
+      severity: 'warning',
+      title:
+        kind === 'exposed'
+          ? 'This server can reach the Docker control socket'
+          : 'Docker-socket exposure could not be verified',
+      detail: message,
+      remediation: [
+        'sudo gpasswd -d $(whoami) docker',
+        'log out and back in (or: pm2 kill && pm2 resurrect) so the daemon drops the stale group',
+      ],
+    });
+    return { ...result, enforced: false };
+  };
   // Group-introspection functions resolve to the LIVE process functions ONLY when
   // the caller OMITS the key. An explicitly-passed value is honored verbatim —
   // including `undefined` — so a test can model a platform WITHOUT getgroups by
@@ -194,14 +276,18 @@ export function enforceDockerSockBootGuard(deps = {}) {
     const code = err?.code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       // No docker socket on this node — nothing to escape to. Silent pass.
-      return { checked: false, exposed: false, sockGid: null };
+      return { checked: false, exposed: false, verified: true, enforced: true, sockGid: null };
     }
     // Present-but-unverifiable is indistinguishable from exposed: fail closed.
     const message = buildUnverifiableFatalMessage(
       `cannot stat ${sockPath} (${code || err?.message || 'unknown error'}) — unverifiable state is treated as exposed`,
     );
-    logError(message);
-    throw new DockerSockExposedError(message);
+    return refuseOrWarn(message, 'unverifiable', {
+      checked: true,
+      exposed: true,
+      verified: false,
+      sockGid: null,
+    });
   }
 
   // NUMERIC owning gid of the socket (e.g. 989). Never resolve it to a name.
@@ -212,8 +298,12 @@ export function enforceDockerSockBootGuard(deps = {}) {
     const message = buildUnverifiableFatalMessage(
       `${sockPath} exists but this platform cannot report process groups — unverifiable state is treated as exposed`,
     );
-    logError(message);
-    throw new DockerSockExposedError(message);
+    return refuseOrWarn(message, 'unverifiable', {
+      checked: true,
+      exposed: true,
+      verified: false,
+      sockGid,
+    });
   }
 
   if (gids.has(sockGid)) {
@@ -221,12 +311,16 @@ export function enforceDockerSockBootGuard(deps = {}) {
       `${sockPath} is owned by gid ${sockGid} and this process HOLDS gid ${sockGid} ` +
         `(process gids: ${[...gids].sort((a, b) => a - b).join(', ')})`,
     );
-    logError(message);
-    throw new DockerSockExposedError(message);
+    return refuseOrWarn(message, 'exposed', {
+      checked: true,
+      exposed: true,
+      verified: true,
+      sockGid,
+    });
   }
 
   logInfo(
     `[docker-sock-guard] pass: ${sockPath} owned by gid ${sockGid}; process does not hold it`,
   );
-  return { checked: true, exposed: false, sockGid };
+  return { checked: true, exposed: false, verified: true, enforced: true, sockGid };
 }
