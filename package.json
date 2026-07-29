@@ -188,7 +188,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^7.0.4",
+    "vite": "^8.1.5",
     "vitest": "^4.1.8"
   },
   "overrides": {
