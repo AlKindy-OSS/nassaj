@@ -2,7 +2,7 @@
  * provider-governance.service.test.ts — the honest engine-governance descriptor for
  * the T-900 badge. Real-filesystem test (no fs mocks — lesson: synthetic fixtures give
  * false confidence): every case builds an actual temp tree and reproduces the
- * production governance topology (~/.claude -> nassaj-core -> AGENTS.md), seeding the
+ * production governance topology (~/.claude -> governance repo -> AGENTS.md), seeding the
  * neutral source from the REAL operator governance when present.
  *
  * Proves the two invariants the badge stands on:
@@ -57,9 +57,9 @@ delete process.env.XDG_CONFIG_HOME;
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
 // Reproduce the production governance topology faithfully:
-//   sandboxHome/.claude -> sandboxHome/nassaj-core  (whole-dir symlink, as bootstrap wires it)
-//   sandboxHome/nassaj-core/AGENTS.md               (the build-agents neutral output)
-const NASSAJ_CORE = path.join(sandboxHome, 'nassaj-core');
+//   sandboxHome/.claude -> sandboxHome/the governance repo  (whole-dir symlink, as bootstrap wires it)
+//   sandboxHome/the governance repo's AGENTS.md               (the build-agents neutral output)
+const NASSAJ_CORE = path.join(sandboxHome, 'the governance repo');
 fs.mkdirSync(NASSAJ_CORE, { recursive: true });
 fs.writeFileSync(path.join(NASSAJ_CORE, 'AGENTS.md'), neutralContent);
 fs.symlinkSync(NASSAJ_CORE, path.join(sandboxHome, '.claude'));

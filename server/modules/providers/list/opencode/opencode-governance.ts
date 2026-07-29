@@ -27,8 +27,8 @@
  * per-user copy is what actually lands on disk.)
  *
  * The neutral source is the SAME operator-home base the Claude/Codex governance uses —
- * ~/.claude/AGENTS.md — which bootstrap-node.sh points at nassaj-core/AGENTS.md (the
- * build-agents neutral output). Using the operator-home base (not a hardcoded nassaj-core
+ * ~/.claude/AGENTS.md — which bootstrap-node.sh points at the governance repo's AGENTS.md (the
+ * build-agents neutral output). Using the operator-home base (not a hardcoded the governance repo
  * path) keeps this portable across fleet nodes. This module is a THIN opencode facade
  * over the vendor-neutral SL-1/SL-2 primitives; it hardcodes only opencode's config-home
  * shape and governance filename.
@@ -65,7 +65,7 @@ export const OPENCODE_GOVERNANCE_MISSING_MESSAGE = 'جلسة OpenCode (حامل 
 /**
  * The neutral governance source: ~/.claude/AGENTS.md — the same operator-home base the
  * Claude CLAUDE.md/NASSAJ.md and Codex governance use. Resolves (via the ~/.claude ->
- * nassaj-core bootstrap symlink) to nassaj-core/AGENTS.md, the build-agents neutral
+ * the governance repo bootstrap symlink) to the governance repo's AGENTS.md, the build-agents neutral
  * output. Reads follow the symlink chain (safe); only writes-through are the risk.
  */
 export function neutralOpenCodeGovernanceSource(): string {

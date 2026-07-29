@@ -10,12 +10,12 @@
  * A COPY (never a symlink) is the security invariant: a Codex turn runs
  * danger-full-access, and a symlink to the shared fleet-wide source could be written
  * THROUGH and corrupt governance for every user on the node. The source itself is
- * ~/.claude/AGENTS.md, which bootstrap-node.sh points at nassaj-core/AGENTS.md — the
+ * ~/.claude/AGENTS.md, which bootstrap-node.sh points at the governance repo's AGENTS.md — the
  * build-agents neutral output a spawned Codex reads from $CODEX_HOME/AGENTS.md.
  *
  * Real path, not a synthetic fixture: the sandbox reproduces the production topology
- * (the double hop ~/.claude -> nassaj-core -> AGENTS.md), the neutral source is
- * seeded from the REAL operator nassaj-core/AGENTS.md content when present (so "the
+ * (the double hop ~/.claude -> governance repo -> AGENTS.md), the neutral source is
+ * seeded from the REAL operator the governance repo's AGENTS.md content when present (so "the
  * neutral source" is genuine governance, not a stub), and every assertion exercises
  * real fs materialization through the real provisionUserDirs code.
  *
@@ -38,7 +38,7 @@ fs.mkdirSync(sandboxHome, { recursive: true });
 
 // Seed the neutral source from the REAL operator governance BEFORE overriding HOME,
 // so "the neutral source" under test is the genuine build-agents output. Falls back
-// to a representative neutral marker on a bare CI node without nassaj-core.
+// to a representative neutral marker on a bare CI node without the governance repo.
 let neutralContent: string;
 // True when seeded from the REAL operator build-agents output (a fleet node); false on
 // the bare-CI fallback stub. The stub carries no standards body (so no safe-restart
@@ -63,9 +63,9 @@ process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
 // Reproduce the production governance topology faithfully:
-//   sandboxHome/.claude  ->  sandboxHome/nassaj-core   (whole-dir symlink, as bootstrap wires it)
-//   sandboxHome/nassaj-core/AGENTS.md                  (build-agents neutral output)
-const NASSAJ_CORE = path.join(sandboxHome, 'nassaj-core');
+//   sandboxHome/.claude  ->  sandboxHome/the governance repo   (whole-dir symlink, as bootstrap wires it)
+//   sandboxHome/the governance repo's AGENTS.md                  (build-agents neutral output)
+const NASSAJ_CORE = path.join(sandboxHome, 'the governance repo');
 fs.mkdirSync(NASSAJ_CORE, { recursive: true });
 const NEUTRAL_AGENTS = path.join(NASSAJ_CORE, 'AGENTS.md');
 fs.writeFileSync(NEUTRAL_AGENTS, neutralContent);

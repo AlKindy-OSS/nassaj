@@ -338,7 +338,7 @@ const CAGE_TOOLCHAIN_CACHES = Object.freeze(['.npm', '.cache']);
  * Resolves a mount path to its REAL path, falling back to the input when
  * resolution fails. bwrap cannot use a bind/tmpfs DEST that traverses a
  * symlink ("Can't mkdir …: No such file or directory" — proven on disk
- * 2026-07-15: ~/.claude is itself a symlink to ~/nassaj-core on fleet nodes),
+ * 2026-07-15: ~/.claude is itself a symlink to ~/the governance repo on fleet nodes),
  * while mounting on the resolved real path works AND is reached by runtime
  * lookups through any symlinked alias (the kernel resolves the alias onto the
  * mounted target). Masking/binding the real path also closes the aliasing
@@ -391,7 +391,7 @@ function toRealMountPath(p, realpathSync) {
  * Both lists are existsSync-filtered (bwrap fails on a missing --bind source and
  * cannot mask a dest inside the read-only root) and realpath-normalized + deduped
  * (two logical paths may collapse to one real file — e.g. anything under the
- * ~/.claude → ~/nassaj-core symlink on fleet nodes).
+ * ~/.claude → ~/the governance repo symlink on fleet nodes).
  *
  * @param {{ provider: string, userId?: string|number|null }} spec
  * @param {{ homedir?: () => string, existsSync?: (p: string) => boolean,

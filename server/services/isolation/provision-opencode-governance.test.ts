@@ -15,7 +15,7 @@
  * the same primitive the fail-closed spawn gate uses) rejects it.
  *
  * Real path, not a synthetic fixture (lesson 2026-06-28): the sandbox reproduces the
- * production topology (~/.claude -> nassaj-core -> AGENTS.md), the neutral source is
+ * production topology (~/.claude -> governance repo -> AGENTS.md), the neutral source is
  * seeded from the REAL operator governance when present, and every assertion exercises
  * real fs materialization through the real provisionUserDirs code.
  *
@@ -54,8 +54,8 @@ process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
 
-// Production governance topology: sandboxHome/.claude -> nassaj-core -> AGENTS.md.
-const NASSAJ_CORE = path.join(sandboxHome, 'nassaj-core');
+// Production governance topology: sandboxHome/.claude -> governance repo -> AGENTS.md.
+const NASSAJ_CORE = path.join(sandboxHome, 'the governance repo');
 fs.mkdirSync(NASSAJ_CORE, { recursive: true });
 fs.writeFileSync(path.join(NASSAJ_CORE, 'AGENTS.md'), neutralContent);
 fs.symlinkSync(NASSAJ_CORE, path.join(sandboxHome, '.claude'));

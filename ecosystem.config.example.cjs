@@ -12,7 +12,7 @@
 //
 // ── النموذج الأسطولي الصحيح للتشغيل ──────────────────────────────────────────
 // كل عقدة تشغّل nassaj-dev من **ملف ecosystem خاص بها** `ecosystem.<node>.config.cjs`
-// (يولّده `bootstrap-node.sh` في nassaj-core بكل القيم inline: cwd/المنفذ/DB/الأسرار/
+// (يولّده سكربت تهيئة العقدة بكل القيم inline: cwd/المنفذ/DB/الأسرار/
 // أصول WebAuthn)، **لا من هذا القالب ولا من ملف باسم `ecosystem.config.cjs`**. ملفات
 // العقد (`ecosystem.config.cjs` و`ecosystem.*.config.cjs`) غير متعقَّبة في Git (راجع
 // .gitignore) كي لا تنجرف القيم السرّية إلى المستودع. هذا القالب `.example` هو

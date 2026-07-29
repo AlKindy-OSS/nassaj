@@ -1,6 +1,6 @@
 {
   "name": "nassaj-dev",
-  "version": "1.35.0",
+  "version": "1.36.0",
   "description": "nassaj-dev — claudecodeui fork with AntigravityProvider and RTL Arabic support",
   "type": "module",
   "private": true,
@@ -209,7 +209,7 @@
     "maxWarnings": 460,
     "note": "JSON forbids comments, so the ratchet plan for the --max-warnings ceiling in the `lint` script lives here. 441 warnings measured on src/+server/+shared/+scripts/+root configs (0 errors). The 460 ceiling is ~4% headroom so today's tree passes while genuine growth is blocked. Plan: lower the ceiling to the freshly measured count after each cleanup wave; never raise it without an ADR. 379 of the 441 are eslint --fix-able (import-x/order + tailwindcss/classnames-order) but a bulk --fix is deliberately NOT run while parallel sessions hold uncommitted work.",
     "unusedDisableDirectives": "11 stale eslint-disable directives exist; the CLI flag is pinned to --report-unused-disable-directives-severity=warn because the plain --report-unused-disable-directives form raises them to errors and would fail the build today. Flip it to error once those 11 are removed.",
-    "blocked": "Expanding eslint.config.js with an actual rules block for shared/, scripts/ and root files is blocked by the config-protection hook (nassaj-core/hooks/config-protection.js). Until that is lifted those paths are in argv but match no config block, so they are effectively rule-free."
+    "blocked": "Expanding eslint.config.js with an actual rules block for shared/, scripts/ and root files is blocked by the operator's config-protection hook. Until that is lifted those paths are in argv but match no config block, so they are effectively rule-free."
   },
   "lint-staged": {
     "src/**/*.{ts,tsx,js,jsx}": "eslint",

@@ -21,9 +21,9 @@
  * and can never write THROUGH a link into the shared fleet-wide neutral source.
  *
  * The neutral source is the SAME base the Claude CLAUDE.md/NASSAJ.md links use —
- * ~/.claude/AGENTS.md — which bootstrap-node.sh points at nassaj-core/AGENTS.md
+ * ~/.claude/AGENTS.md — which bootstrap-node.sh points at the governance repo's AGENTS.md
  * (the build-agents neutral output). Using the operator-home base (not a hardcoded
- * nassaj-core path) keeps this portable across fleet nodes.
+ * the governance repo path) keeps this portable across fleet nodes.
  */
 
 import path from 'node:path';

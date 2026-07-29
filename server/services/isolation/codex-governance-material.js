@@ -7,8 +7,9 @@
  *
  *   A Codex turn runs danger-full-access (routes/agent.js bypassPermissions ->
  *   sandboxMode 'danger-full-access'). If $CODEX_HOME/AGENTS.md were a SYMLINK to
- *   the shared fleet-wide neutral source (~/.claude/AGENTS.md -> nassaj-core), a
- *   turn could write THROUGH the link and corrupt governance for EVERY user on the
+ *   the shared fleet-wide neutral source (~/.claude/AGENTS.md, itself a link into
+ *   the operator's governance repo), a turn could write THROUGH the link and
+ *   corrupt governance for EVERY user on the
  *   node. So governance is materialized as a real, read-only (0444) per-user COPY:
  *   the worst a hostile/compromised turn can do is damage its OWN copy — which the
  *   next spawn's fail-closed guard detects by content fingerprint and rewrites — and
@@ -111,9 +112,9 @@ export function neutralGovernanceSource() {
 }
 
 /**
- * Reads the neutral governance source content (following the ~/.claude ->
- * nassaj-core symlink chain — READS are safe, only writes-through are the risk).
- * Thin binding of the neutral primitive to Codex's source path.
+ * Reads the neutral governance source content, following any symlink chain out of
+ * ~/.claude — READS are safe, only writes-through are the risk. Thin binding of the
+ * neutral primitive to Codex's source path.
  *
  * @returns {{ content: Buffer, fingerprint: string } | null} null when the source
  *   is absent or empty (cannot govern).
@@ -195,7 +196,7 @@ const PERSONA_FILE_MODE = 0o444;
 
 /**
  * The neutral persona source: ~/.claude/.agents/agents.md — the merged, full-persona
- * document build-agents renders for Antigravity (see nassaj-core/scripts/build-agents).
+ * document build-agents renders for Antigravity (see the governance repo/scripts/build-agents).
  *
  * @returns {string}
  */

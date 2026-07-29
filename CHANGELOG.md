@@ -3,6 +3,33 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.36.0] — First public release (2026-07-29)
+
+First release published from the public repository. The tree is now the tool
+alone: operator-specific content lives outside it, and everything a deployment
+needs is configuration rather than a shipped constant.
+
+### New Features
+- **Bundled neutral governance.** Governed CLI providers (Codex, Kimi, the
+  OpenCode carrier) require a governance document at launch. A neutral default
+  now ships at `server/governance/default-AGENTS.md` and is used when the
+  operator has installed none, so a fresh checkout works out of the box.
+  Install `~/.claude/AGENTS.md` to override it.
+
+### Changed
+- **Deployment values moved to configuration.** Public origins come from
+  `ALLOWED_ORIGINS` (built-in defaults are localhost only); the source-repository
+  link used for the AGPL-3.0 §13 notice comes from `VITE_SOURCE_URL`; the
+  coordinator ground-truth root comes from `NASSAJ_COORDINATOR_REPO_ROOT`; the
+  agent response-language rule comes from `NASSAJ_RESPONSE_LANGUAGE` and is
+  omitted entirely when unset.
+
+### Fixed
+- Governed CLI launches no longer fail on a checkout that has no operator
+  governance file. The gate remains fail-closed for a genuine materialization
+  failure.
+
+
 ## [Unreleased] — B-80 WebSocket Session Resilience + Hide Fable (2026-06-23)
 
 > توحيد خط تطوير نسّاج إلى `main` (ADR-043). التفاصيل: `docs/decisions/041-claude-live-replay-b80.md`، `docs/decisions/042-claude-ghost-session-detach-b80c.md`، `docs/decisions/043-git-topology-consolidation.md`.

@@ -424,7 +424,7 @@ export function provisionUserDirs(userId) {
     // spawned Codex session reads nassaj's governance on launch — Codex (and opencode)
     // ingest $CODEX_HOME/AGENTS.md. The source is the SAME base the Claude
     // CLAUDE.md/NASSAJ.md links above use — ~/.claude/AGENTS.md, which bootstrap-node.sh
-    // points at nassaj-core/AGENTS.md on every fleet node: the build-agents NEUTRAL
+    // points at the governance repo's AGENTS.md on every fleet node: the build-agents NEUTRAL
     // output (no Claude-only mechanics — no /compact, session quotas, fable/opus model
     // maps, hooks or ultracode). A COPY, NOT a symlink: a Codex turn runs
     // danger-full-access, and a symlink to the shared fleet-wide source could be

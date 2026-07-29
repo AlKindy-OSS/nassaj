@@ -660,7 +660,7 @@ async function spawnAntigravity(command, options = {}, ws) {
     // agy in --print mode ignores the OS process cwd and defaults to its internal
     // scratch directory (~/.gemini/antigravity-cli/scratch). Without an explicit
     // workspace it wanders the home tree and latches onto unrelated projects
-    // (e.g. it reads ~/nassaj-core/NASSAJ.md while the user is in diwan). Pin the
+    // (e.g. it reads ~/the governance repo/NASSAJ.md while the user is in diwan). Pin the
     // workspace to the selected project with --add-dir so agy stays scoped to it.
     const args = ['-p', commandToSend, '--dangerously-skip-permissions'];
     if (cleanCwd) {
