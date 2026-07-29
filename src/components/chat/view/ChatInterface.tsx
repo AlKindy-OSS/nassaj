@@ -406,15 +406,31 @@ function ChatInterface({
   // من نفس فتحة latestMessage وتعرضها في overlay مستقل — بلا مساس بسجلّ المحادثة
   // (useChatRealtimeHandlers يتجاهل إطارات btw-* لأنها بلا حقل kind). تُستدعى قبل
   // useChatComposerState كي يُمرَّر startBtwQuery إليه كمُعترِض التوجيه.
+  const closeBtwRef = useRef<(() => void) | null>(null);
+  //
+  // T-1090: نجاح الفرك ← نغلق الـoverlay وننتقل إلى المحادثة الجديدة، فيتابع
+  // المستخدم الحوار الجانبي فيها بدل بقائه سؤالاً معزولاً.
+  const handleBtwForked = useCallback(
+    (forkedSessionId: string) => {
+      closeBtwRef.current?.();
+      onNavigateToSession?.(forkedSessionId);
+    },
+    [onNavigateToSession],
+  );
+
   const {
     activeBtw,
     startBtwQuery,
     closeBtw,
+    forkBtw,
   } = useBtwSideChannel({
     sessionId: currentSessionId ?? selectedSession?.id ?? null,
     latestMessage,
     sendMessage,
+    onForked: handleBtwForked,
   });
+  // closeBtw يُعرَّف بعد handleBtwForked، فنمرّره عبر ref لكسر الدورة.
+  closeBtwRef.current = closeBtw;
 
   const {
     input,
@@ -973,7 +989,7 @@ function ChatInterface({
         onSelectProviderModel={selectProviderModel}
       />
 
-      <BtwOverlay state={activeBtw} onClose={closeBtw} />
+      <BtwOverlay state={activeBtw} onClose={closeBtw} onFork={forkBtw} />
     </PermissionContext.Provider>
   );
 }

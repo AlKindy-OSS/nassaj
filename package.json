@@ -38,6 +38,7 @@
     "test:src": "node -e 'const{globSync,readFileSync}=require(\"node:fs\");const f=globSync(\"src/**/*.test.{ts,tsx}\").filter(p=>/from .node:test./.test(readFileSync(p,\"utf8\")));if(!f.length){console.log(\"test:src: no node:test files under src/\");process.exit(0)}const r=require(\"node:child_process\").spawnSync(\"npx\",[\"tsx\",\"--experimental-test-module-mocks\",\"--test\",...f],{stdio:\"inherit\"});process.exit(r.status===null?1:r.status)'",
     "test:client": "NODE_ENV=test vitest run",
     "test:smoke:btw-hook": "DATABASE_PATH=\"${DATABASE_PATH:-$(mktemp -d)/auth.db}\" tsx --tsconfig server/tsconfig.json scripts/smoke/btw-hook-precedence.smoke.mjs",
+    "test:smoke:btw-fork": "DATABASE_PATH=\"${DATABASE_PATH:-$(mktemp -d)/auth.db}\" tsx --tsconfig server/tsconfig.json scripts/smoke/btw-fork-resume.smoke.mjs",
     "doctor": "node scripts/doctor.mjs",
     "client": "vite",
     "build": "npm run build:client && npm run build:server",

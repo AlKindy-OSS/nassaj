@@ -23,6 +23,25 @@
       "quota": "会消耗你的 Claude 配额。",
       "context": "基于截至最后一条已保存消息的会话上下文作答。"
     },
+    "fork": {
+      "action": "作为对话继续",
+      "pending": "正在分支…",
+      "hint": "Fork：从该会话创建一个包含此侧边问题及其回答的新对话——不消耗配额。快捷键：f",
+      "errors": {
+        "busy": "已有一个分支在进行中——请稍后再试。",
+        "session_not_found": "未找到源会话。",
+        "not_writable": "你没有在此项目中创建对话的权限。",
+        "unsupported_provider": "分支仅适用于 Claude 会话。",
+        "invalid_request": "分支需要问题及其回答。",
+        "transcript_not_found": "该会话没有可分支的已保存记录。",
+        "source_empty": "该会话没有可分支的消息。",
+        "source_too_large": "该对话过大，无法分支。",
+        "message_not_found": "固定的消息已不在该会话中。",
+        "fork_failed": "分支失败——发生了意外错误。",
+        "timeout": "分支超时——请查看对话列表，它可能已被创建。",
+        "disconnected": "无法分支——连接已断开。"
+      }
+    },
     "description": "就当前会话上下文提出顺带一问"
   },
   "contextRot": {

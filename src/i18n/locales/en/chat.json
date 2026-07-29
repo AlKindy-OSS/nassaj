@@ -23,6 +23,25 @@
       "quota": "Uses your Claude quota.",
       "context": "Answered on the session context up to the last saved message."
     },
+    "fork": {
+      "action": "Continue as chat",
+      "pending": "Forking…",
+      "hint": "Fork: creates a new conversation from this session carrying the side question and its answer — no quota spent. Shortcut: f",
+      "errors": {
+        "busy": "A fork is already running — try again shortly.",
+        "session_not_found": "The source session was not found.",
+        "not_writable": "You don't have permission to create a conversation in this project.",
+        "unsupported_provider": "Forking is available for Claude sessions only.",
+        "invalid_request": "A fork needs both the question and its answer.",
+        "transcript_not_found": "This session has no saved transcript to fork.",
+        "source_empty": "This session has no messages to fork.",
+        "source_too_large": "This conversation is too large to fork.",
+        "message_not_found": "The pinned message is no longer in this session.",
+        "fork_failed": "Couldn't fork — an unexpected error occurred.",
+        "timeout": "The fork timed out — check your conversation list, it may have been created.",
+        "disconnected": "Can't fork — connection lost."
+      }
+    },
     "description": "Ask a side question on the current session context"
   },
   "contextRot": {

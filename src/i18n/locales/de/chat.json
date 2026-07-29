@@ -23,6 +23,25 @@
       "quota": "Verbraucht dein Claude-Kontingent.",
       "context": "Antwort basierend auf dem Sitzungskontext bis zur zuletzt gespeicherten Nachricht."
     },
+    "fork": {
+      "action": "Als Chat fortsetzen",
+      "pending": "Wird geforkt…",
+      "hint": "Fork: erstellt eine neue Unterhaltung aus dieser Sitzung mit der Nebenfrage und ihrer Antwort — ohne Kontingentverbrauch. Kürzel: f",
+      "errors": {
+        "busy": "Ein Fork läuft bereits — bitte kurz warten.",
+        "session_not_found": "Die Ausgangssitzung wurde nicht gefunden.",
+        "not_writable": "Du darfst in diesem Projekt keine Unterhaltung anlegen.",
+        "unsupported_provider": "Forken ist nur für Claude-Sitzungen verfügbar.",
+        "invalid_request": "Ein Fork braucht die Frage und ihre Antwort.",
+        "transcript_not_found": "Für diese Sitzung gibt es kein gespeichertes Transkript zum Forken.",
+        "source_empty": "Diese Sitzung enthält keine Nachrichten zum Forken.",
+        "source_too_large": "Diese Unterhaltung ist zu groß zum Forken.",
+        "message_not_found": "Die angeheftete Nachricht ist nicht mehr in dieser Sitzung.",
+        "fork_failed": "Forken fehlgeschlagen — unerwarteter Fehler.",
+        "timeout": "Zeitüberschreitung beim Forken — prüfe deine Unterhaltungsliste, sie wurde eventuell angelegt.",
+        "disconnected": "Forken nicht möglich — Verbindung getrennt."
+      }
+    },
     "description": "Eine Nebenfrage zum aktuellen Sitzungskontext stellen"
   },
   "contextRot": {

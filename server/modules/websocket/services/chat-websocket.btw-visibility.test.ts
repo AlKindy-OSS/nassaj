@@ -64,6 +64,15 @@ mock.module('@/modules/database/index.js', {
         projectId === PUBLIC_PROJECT_ID ||
         (projectId === PRIVATE_PROJECT_ID && userId === OWNER_USER_ID),
       getVisibleProjectPaths: () => [],
+      // T-1090 write gate: the outsider can SEE the public project but is a member
+      // of neither, so they may ask /btw there and may NOT fork into it.
+      isProjectWritableByUser: (_projectId: string, userId: number | null) =>
+        userId === OWNER_USER_ID,
+    },
+    // Same gate's first membership probe. No one is a session participant here, so
+    // the project-level predicate above is what decides.
+    participantsDb: {
+      isParticipant: () => false,
     },
     userDb: {
       getUserById: () => null,
@@ -144,8 +153,20 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
   const state: { sideQueryImpl: (c: SideQueryCall) => Promise<void> } = {
     sideQueryImpl: () => new Promise<void>(() => {}),
   };
+  const forkCalls: Array<Record<string, unknown>> = [];
+  const forkState: { impl: (params: Record<string, unknown>) => Promise<unknown> } = {
+    impl: async (params: Record<string, unknown>) => ({
+      sessionId: `forked-of-${String(params.sessionId)}`,
+      title: 'btw: q',
+      projectPath: PUBLIC_PATH,
+    }),
+  };
   const deps = {
     queryClaudeSDK: async () => {},
+    forkSessionFromSideQuery: async (params: Record<string, unknown>) => {
+      forkCalls.push(params);
+      return forkState.impl(params);
+    },
     spawnClaudeSideQuery: async (
       params: Record<string, unknown>,
       callbacks: SideQueryCall['callbacks']
@@ -205,14 +226,16 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     deps: deps as unknown as Parameters<typeof handleChatConnection>[2],
     sideQueryCalls,
     state,
+    forkCalls,
+    forkState,
   };
 }
 
 function connect(userId: number, overrides?: Record<string, unknown>) {
   const ws = makeFakeWs();
-  const { deps, sideQueryCalls, state } = makeDeps(overrides);
+  const { deps, sideQueryCalls, state, forkCalls, forkState } = makeDeps(overrides);
   handleChatConnection(ws as never, { user: { id: userId } } as never, deps);
-  return { ws, sideQueryCalls, state };
+  return { ws, sideQueryCalls, state, forkCalls, forkState };
 }
 
 function emitBtw(
@@ -424,5 +447,195 @@ describe('T-881 /btw WS gate', () => {
     assert.equal(p.sideQueryCalls.length, 1, 'the first post-close fork ran');
     assert.equal(q.sideQueryCalls.length, 1, 'A-1: the second slot is free again — close released the in-flight one');
     assert.equal(findSent(q.ws, 'btw-error'), undefined, 'no busy — close freed the user slot');
+  });
+});
+
+/**
+ * T-1090 — the `/btw` FORK gate. Asking a side question is a READ of a session;
+ * forking CREATES a session inside that session's project, so this path takes the
+ * WRITE gate (visibility, then B-105/B-138 membership) rather than the read gate.
+ * These tests pin that difference, the reply contract, and the flood guards.
+ */
+describe('T-1090 /btw fork WS gate', () => {
+  beforeEach(() => {
+    __resetBtwFloodStateForTests();
+  });
+
+  const FORK_PAYLOAD = {
+    sessionId: 'sess-public-claude',
+    question: 'why is it slow?',
+    answer: 'because the docs symlink is re-bundled',
+  };
+
+  function emitFork(
+    ws: ReturnType<typeof makeFakeWs>,
+    payload: {
+      btwId: string;
+      sessionId?: string;
+      question?: string;
+      answer?: string;
+      upToMessageId?: string;
+    }
+  ) {
+    ws.emit('message', JSON.stringify({ type: 'btw-fork', ...payload }));
+  }
+
+  test('a VIEWER of a public project may ask /btw but may NOT fork it', () => {
+    // The very asymmetry this gate exists for: same session, same user, same
+    // socket — the read passes and the write is refused.
+    const { ws, sideQueryCalls, forkCalls } = connect(OUTSIDER_USER_ID);
+    emitBtw(ws, { btwId: 'read', sessionId: 'sess-public-claude', question: 'q' });
+    assert.equal(sideQueryCalls.length, 1, 'the READ (side query) is allowed');
+
+    emitFork(ws, { btwId: 'write', ...FORK_PAYLOAD });
+    const err = findSent(ws, 'btw-fork-error');
+    assert.ok(err, 'a btw-fork-error is returned');
+    assert.equal(err.btwId, 'write', 'the error echoes the client btwId');
+    assert.equal(err.code, 'not_writable', 'a non-member cannot create a session in the project');
+    assert.equal(forkCalls.length, 0, 'the fork service is NEVER reached');
+  });
+
+  test('a member forks: the service gets the exchange and the reply carries the new id', () => {
+    const { ws, forkCalls } = connect(OWNER_USER_ID);
+    emitFork(ws, { btwId: 'f-ok', ...FORK_PAYLOAD, upToMessageId: 'msg-7' });
+
+    assert.equal(forkCalls.length, 1, 'exactly one fork');
+    assert.equal(forkCalls[0].sessionId, 'sess-public-claude');
+    assert.equal(forkCalls[0].question, 'why is it slow?');
+    assert.equal(forkCalls[0].answer, 'because the docs symlink is re-bundled');
+    assert.equal(forkCalls[0].userId, OWNER_USER_ID, 'the REQUESTER owns the branch');
+    assert.equal(forkCalls[0].upToMessageId, 'msg-7', 'the context pin is forwarded');
+  });
+
+  test('the btw-forked reply carries forkedSessionId and NO sessionId key (C2)', async () => {
+    const { ws } = connect(OWNER_USER_ID);
+    emitFork(ws, { btwId: 'f-reply', ...FORK_PAYLOAD });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const done = findSent(ws, 'btw-forked');
+    assert.ok(done, 'a btw-forked frame is relayed');
+    assert.equal(done.btwId, 'f-reply');
+    assert.equal(done.forkedSessionId, 'forked-of-sess-public-claude');
+    assert.equal(done.title, 'btw: q');
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(done, 'sessionId'),
+      false,
+      'C2: no btw frame may carry a sessionId key (never a fan-out target)'
+    );
+    assert.equal(findSent(ws, 'btw-fork-error'), undefined, 'no error on the happy path');
+  });
+
+  test('a non-claude session is refused, and the service is never called', () => {
+    const { ws, forkCalls } = connect(OWNER_USER_ID);
+    emitFork(ws, { btwId: 'f-codex', ...FORK_PAYLOAD, sessionId: 'sess-public-codex' });
+
+    const err = findSent(ws, 'btw-fork-error');
+    assert.ok(err);
+    assert.equal(err.code, 'unsupported_provider');
+    assert.equal(forkCalls.length, 0);
+  });
+
+  test('an unknown session is refused session_not_found', () => {
+    const { ws, forkCalls } = connect(OWNER_USER_ID);
+    emitFork(ws, { btwId: 'f-unknown', ...FORK_PAYLOAD, sessionId: 'sess-does-not-exist' });
+
+    const err = findSent(ws, 'btw-fork-error');
+    assert.ok(err);
+    assert.equal(err.code, 'session_not_found');
+    assert.equal(forkCalls.length, 0);
+  });
+
+  test('a half exchange (no answer) is refused invalid_request', () => {
+    const { ws, forkCalls } = connect(OWNER_USER_ID);
+    emitFork(ws, { btwId: 'f-half', sessionId: 'sess-public-claude', question: 'q', answer: '   ' });
+
+    const err = findSent(ws, 'btw-fork-error');
+    assert.ok(err);
+    assert.equal(err.code, 'invalid_request', 'a branch tip must not be a dangling question');
+    assert.equal(forkCalls.length, 0);
+  });
+
+  test('a fork with no btwId is dropped silently (no reply, no fork)', () => {
+    const { ws, forkCalls } = connect(OWNER_USER_ID);
+    const before = ws.sent.length;
+    ws.emit('message', JSON.stringify({ type: 'btw-fork', ...FORK_PAYLOAD }));
+
+    assert.equal(ws.sent.length, before, 'no reply without a correlation id');
+    assert.equal(forkCalls.length, 0);
+  });
+
+  test('a service failure is relayed with ITS code, not a generic one', async () => {
+    const { ws, forkState } = connect(OWNER_USER_ID);
+    forkState.impl = async () => {
+      const error = new Error('This conversation is too large to fork.') as Error & { code: string };
+      error.code = 'source_too_large';
+      throw error;
+    };
+    emitFork(ws, { btwId: 'f-err', ...FORK_PAYLOAD });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const err = findSent(ws, 'btw-fork-error');
+    assert.ok(err);
+    assert.equal(err.code, 'source_too_large');
+    assert.equal(err.message, 'This conversation is too large to fork.');
+    assert.equal(findSent(ws, 'btw-forked'), undefined, 'no success frame after a failure');
+  });
+
+  test('a second concurrent fork on the same socket is refused busy, and the slot frees', async () => {
+    const { ws, forkState, forkCalls } = connect(OWNER_USER_ID);
+    let release: (() => void) | null = null;
+    forkState.impl = () =>
+      new Promise((resolve) => {
+        release = () => resolve({ sessionId: 'forked-slow', title: 'btw: q', projectPath: PUBLIC_PATH });
+      });
+
+    emitFork(ws, { btwId: 'f-1', ...FORK_PAYLOAD });
+    assert.equal(forkCalls.length, 1, 'the first fork started');
+    emitFork(ws, { btwId: 'f-2', ...FORK_PAYLOAD });
+
+    const err = findSent(ws, 'btw-fork-error');
+    assert.ok(err);
+    assert.equal(err.btwId, 'f-2', 'the SECOND request is the one refused');
+    assert.equal(err.code, 'busy');
+    assert.equal(forkCalls.length, 1, 'the second fork never reached the service');
+
+    // Finish the first; the socket must accept a fork again.
+    release?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    forkState.impl = async () => ({ sessionId: 'forked-after', title: 'btw: q', projectPath: PUBLIC_PATH });
+    emitFork(ws, { btwId: 'f-3', ...FORK_PAYLOAD });
+    assert.equal(forkCalls.length, 2, 'the slot was freed when the first fork settled');
+  });
+
+  test('forks and side queries do not consume each other\'s slots', () => {
+    // A fork is disk work and a side query is model work; one must never block the
+    // other (they are separate counters by design).
+    const { ws, forkState, forkCalls, sideQueryCalls } = connect(OWNER_USER_ID);
+    forkState.impl = () => new Promise(() => {}); // stays in flight
+    emitFork(ws, { btwId: 'f-hold', ...FORK_PAYLOAD });
+    assert.equal(forkCalls.length, 1);
+
+    emitBtw(ws, { btwId: 'q-while-forking', sessionId: 'sess-public-claude', question: 'q' });
+    assert.equal(sideQueryCalls.length, 1, 'a side query still runs while a fork is in flight');
+    assert.equal(findSent(ws, 'btw-error'), undefined, 'the side query was not refused busy');
+  });
+
+  test('a third concurrent fork for the SAME user (across sockets) is refused busy', () => {
+    const a = connect(OWNER_USER_ID);
+    a.forkState.impl = () => new Promise(() => {});
+    emitFork(a.ws, { btwId: 'uf1', ...FORK_PAYLOAD });
+    assert.equal(a.forkCalls.length, 1);
+
+    const b = connect(OWNER_USER_ID);
+    b.forkState.impl = () => new Promise(() => {});
+    emitFork(b.ws, { btwId: 'uf2', ...FORK_PAYLOAD });
+    assert.equal(b.forkCalls.length, 1, 'at the per-user cap of 2');
+
+    const c = connect(OWNER_USER_ID);
+    emitFork(c.ws, { btwId: 'uf3', ...FORK_PAYLOAD });
+    const err = findSent(c.ws, 'btw-fork-error');
+    assert.ok(err);
+    assert.equal(err.code, 'busy');
+    assert.equal(c.forkCalls.length, 0, 'no fork over the per-user cap');
   });
 });

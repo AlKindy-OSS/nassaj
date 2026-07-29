@@ -23,6 +23,25 @@
       "quota": "Claude kotanızdan harcar.",
       "context": "Son kaydedilen mesaja kadar olan oturum bağlamına göre yanıtlar."
     },
+    "fork": {
+      "action": "Sohbet olarak sürdür",
+      "pending": "Çatallanıyor…",
+      "hint": "Fork: bu oturumdan, yan soruyu ve yanıtını taşıyan yeni bir sohbet oluşturur — kota harcamaz. Kısayol: f",
+      "errors": {
+        "busy": "Zaten bir fork çalışıyor — birazdan tekrar deneyin.",
+        "session_not_found": "Kaynak oturum bulunamadı.",
+        "not_writable": "Bu projede sohbet oluşturma izniniz yok.",
+        "unsupported_provider": "Fork yalnızca Claude oturumlarında kullanılabilir.",
+        "invalid_request": "Fork için hem soru hem de yanıt gerekir.",
+        "transcript_not_found": "Bu oturumun forklanacak kayıtlı dökümü yok.",
+        "source_empty": "Bu oturumda forklanacak mesaj yok.",
+        "source_too_large": "Bu konuşma forklanamayacak kadar büyük.",
+        "message_not_found": "Sabitlenen mesaj artık bu oturumda değil.",
+        "fork_failed": "Fork başarısız — beklenmeyen bir hata oluştu.",
+        "timeout": "Fork zaman aşımına uğradı — sohbet listenizi kontrol edin, oluşturulmuş olabilir.",
+        "disconnected": "Fork yapılamıyor — bağlantı koptu."
+      }
+    },
     "description": "Geçerli oturum bağlamında bir yan soru sorun"
   },
   "contextRot": {

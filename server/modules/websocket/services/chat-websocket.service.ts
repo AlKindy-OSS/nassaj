@@ -79,6 +79,31 @@ function releaseBtwUserSlot(userId: string | number | null): void {
   }
 }
 
+// T-1090: the SAME shape of cap for `/btw` FORKS, kept on its own counter rather
+// than sharing the side-query one. A fork spends no model quota — it copies a
+// transcript — so it must not consume a query slot (nor be blocked by one), but
+// it does write a file as large as the source (41 MB is a real transcript size
+// here), so a user with many tabs still cannot pile up unbounded copies.
+const BTW_MAX_FORKS_PER_USER = 2;
+const btwForksByUser = new Map<string, number>();
+
+function btwUserForks(userId: string | number | null): number {
+  return btwForksByUser.get(btwUserKey(userId)) ?? 0;
+}
+function acquireBtwForkSlot(userId: string | number | null): void {
+  const key = btwUserKey(userId);
+  btwForksByUser.set(key, (btwForksByUser.get(key) ?? 0) + 1);
+}
+function releaseBtwForkSlot(userId: string | number | null): void {
+  const key = btwUserKey(userId);
+  const next = (btwForksByUser.get(key) ?? 0) - 1;
+  if (next <= 0) {
+    btwForksByUser.delete(key);
+  } else {
+    btwForksByUser.set(key, next);
+  }
+}
+
 /**
  * Test-only: clears the module-level per-user /btw in-flight counters between
  * unit tests. A unit test that leaves a fork "in flight" (a never-resolving spy)
@@ -86,6 +111,7 @@ function releaseBtwUserSlot(userId: string | number | null): void {
  */
 export function __resetBtwFloodStateForTests(): void {
   btwInFlightByUser.clear();
+  btwForksByUser.clear();
 }
 
 type ChatWebSocketDependencies = {
@@ -142,6 +168,21 @@ type ChatWebSocketDependencies = {
       onComplete: (fullAnswer: string) => void;
     }
   ) => Promise<void>;
+  /**
+   * T-1090: promotes a finished `/btw` exchange into a REAL session by branching
+   * the source transcript on disk and appending the question + the answer the
+   * user already read. Injected (not imported) so this module's import graph
+   * stays free of the sessions watcher/synchronizer, which several WS unit tests
+   * would otherwise load for real. Rejects with a `SessionForkError`-shaped
+   * error carrying `.code`; the handler maps it to a `btw-fork-error` frame.
+   */
+  forkSessionFromSideQuery: (params: {
+    sessionId: string;
+    question: string;
+    answer: string;
+    userId: number | null;
+    upToMessageId: string | null;
+  }) => Promise<{ sessionId: string; title: string; projectPath: string | null }>;
   abortClaudeSDKSession: (
     sessionId: string,
     rawWs?: unknown,
@@ -774,6 +815,9 @@ export function handleChatConnection(
   let btwSocketClosed = false;
   let btwActiveInterrupt: (() => void) | null = null;
   let btwActiveRelease: (() => void) | null = null;
+  // T-1090: one in-flight `/btw` FORK per socket (its own guard, so a fork and a
+  // side query never block each other — they cost different resources).
+  let btwForkInFlight = false;
   // /btw replies go to THIS requesting socket ALONE (contract C2): a raw send
   // that bypasses WebSocketWriter entirely, so there is no sessionId-keyed
   // fan-out to mirrors. btw payloads carry `btwId`, never `sessionId`.
@@ -1087,6 +1131,137 @@ export function handleChatConnection(
           // spawnClaudeSideQuery is contracted never to reject; this is a pure
           // safety net that only frees the slots (no double error emission).
           .catch(() => releaseBtw());
+        return;
+      }
+
+      // T-1090: promote a FINISHED /btw exchange into a real, continuable
+      // session. `/btw` deliberately persists nothing (ADR-077 / C1), so once the
+      // answer turns out to be worth following up on there is no thread to reply
+      // into — this creates one: the source transcript is branched on disk (new
+      // ids, new sessionId, `forkedFrom` provenance) and the question plus the
+      // answer already shown are appended. No model call, no quota: the answer is
+      // reused, never re-asked.
+      //
+      // The gate posture DIFFERS from `btw-query` on purpose. Asking is a READ of
+      // a session, so it takes the visibility gate; forking CREATES a session
+      // inside that session's project, so it takes the same WRITE gate
+      // `abort-session` uses (visibility first, then B-105/B-138 membership) — a
+      // read-only viewer of a public project must not be able to write new
+      // conversations into it.
+      if (messageType === 'btw-fork') {
+        const btwId = typeof data.btwId === 'string' ? data.btwId : '';
+        // Without a correlation id the client cannot match the reply — drop it.
+        if (!btwId) {
+          return;
+        }
+        const forkSessionId = typeof data.sessionId === 'string' ? data.sessionId.trim() : '';
+        const forkQuestion = typeof data.question === 'string' ? data.question.trim() : '';
+        const forkAnswer = typeof data.answer === 'string' ? data.answer : '';
+        const forkUpToMessageId =
+          typeof data.upToMessageId === 'string' && data.upToMessageId.trim() !== ''
+            ? data.upToMessageId.trim()
+            : null;
+
+        // Same discipline as the /btw diagnostics: code + session + userId only,
+        // never the question, the answer, or any conversation content.
+        const emitForkError = (code: string, message: string): void => {
+          console.warn(
+            `[BTW] ws fork-error session=${forkSessionId || '<none>'} code=${code} `
+            + `userIdType=${typeof presenceUserId} userIdValue=${String(presenceUserId)} `
+            + `msg=${message}`
+          );
+          sendBtwRaw({ type: 'btw-fork-error', btwId, code, message });
+        };
+
+        if (btwForkInFlight) {
+          emitForkError('busy', 'A fork is already running on this connection.');
+          return;
+        }
+        if (!forkSessionId) {
+          emitForkError('session_not_found', 'No session was specified for the fork.');
+          return;
+        }
+        // The branch is only worth creating with BOTH halves of the exchange; an
+        // empty answer would leave a dangling question at the tip of the branch.
+        if (!forkQuestion || forkAnswer.trim() === '') {
+          emitForkError('invalid_request', 'A fork needs both the side question and its answer.');
+          return;
+        }
+        if (!isSessionWritableByUser(forkSessionId, presenceUserId)) {
+          emitForkError('not_writable', 'You cannot create a session in this project.');
+          return;
+        }
+        const forkProvider = dependencies.getSessionProvider(forkSessionId);
+        if (forkProvider === null) {
+          emitForkError('session_not_found', 'Session not found.');
+          return;
+        }
+        if (forkProvider !== 'claude') {
+          emitForkError(
+            'unsupported_provider',
+            `Forking a side question supports Claude sessions only (this session runs on "${forkProvider}").`
+          );
+          return;
+        }
+        if (btwUserForks(presenceUserId) >= BTW_MAX_FORKS_PER_USER) {
+          emitForkError('busy', 'You have too many forks running. Try again shortly.');
+          return;
+        }
+        // A composition root that never wired the fork service must say so
+        // instead of throwing an opaque TypeError into the socket handler.
+        if (typeof dependencies.forkSessionFromSideQuery !== 'function') {
+          emitForkError('fork_failed', 'Forking is not available on this server.');
+          return;
+        }
+
+        btwForkInFlight = true;
+        acquireBtwForkSlot(presenceUserId);
+        let forkReleased = false;
+        const releaseFork = (): void => {
+          if (forkReleased) {
+            return;
+          }
+          forkReleased = true;
+          btwForkInFlight = false;
+          releaseBtwForkSlot(presenceUserId);
+        };
+
+        void dependencies
+          .forkSessionFromSideQuery({
+            sessionId: forkSessionId,
+            question: forkQuestion,
+            answer: forkAnswer,
+            userId: toNumericUserId(presenceUserId),
+            upToMessageId: forkUpToMessageId,
+          })
+          .then((result) => {
+            releaseFork();
+            console.log(
+              `[BTW] ws forked source=${forkSessionId} forked=${result.sessionId} `
+              + `userIdType=${typeof presenceUserId} userIdValue=${String(presenceUserId)}`
+            );
+            // C2 unicast, and the id is deliberately NOT on a `sessionId` key:
+            // every btw frame stays free of that field so no present or future
+            // writer path can mistake it for a fan-out target.
+            sendBtwRaw({
+              type: 'btw-forked',
+              btwId,
+              forkedSessionId: result.sessionId,
+              title: result.title,
+            });
+          })
+          .catch((error: unknown) => {
+            releaseFork();
+            // Duck-typed on purpose: the service is INJECTED, so an `instanceof`
+            // against this module's class would depend on module identity.
+            const rawCode = (error as { code?: unknown })?.code;
+            const code = typeof rawCode === 'string' && rawCode ? rawCode : 'fork_failed';
+            const message =
+              error instanceof Error && error.message
+                ? error.message
+                : 'The conversation could not be forked.';
+            emitForkError(code, message);
+          });
         return;
       }
 

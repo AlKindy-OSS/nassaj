@@ -23,6 +23,25 @@
       "quota": "Consuma la tua quota Claude.",
       "context": "Risponde in base al contesto della sessione fino all'ultimo messaggio salvato."
     },
+    "fork": {
+      "action": "Continua come chat",
+      "pending": "Fork in corso…",
+      "hint": "Fork: crea una nuova conversazione da questa sessione con la domanda laterale e la sua risposta — senza consumare quota. Scorciatoia: f",
+      "errors": {
+        "busy": "Un fork è già in corso — riprova tra poco.",
+        "session_not_found": "Sessione di origine non trovata.",
+        "not_writable": "Non hai i permessi per creare una conversazione in questo progetto.",
+        "unsupported_provider": "Il fork è disponibile solo per le sessioni Claude.",
+        "invalid_request": "Il fork richiede sia la domanda sia la risposta.",
+        "transcript_not_found": "Questa sessione non ha una trascrizione salvata da forkare.",
+        "source_empty": "Questa sessione non ha messaggi da forkare.",
+        "source_too_large": "Questa conversazione è troppo grande per essere forkata.",
+        "message_not_found": "Il messaggio fissato non è più in questa sessione.",
+        "fork_failed": "Fork non riuscito — errore imprevisto.",
+        "timeout": "Fork scaduto — controlla l’elenco delle conversazioni, potrebbe essere stata creata.",
+        "disconnected": "Impossibile forkare — connessione persa."
+      }
+    },
     "description": "Poni una domanda a margine sul contesto della sessione corrente"
   },
   "contextRot": {

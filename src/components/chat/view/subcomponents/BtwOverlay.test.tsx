@@ -33,7 +33,7 @@ describe('BtwOverlay', () => {
 
   it('يعرض السؤال والإجابة المتدفّقة والتلميحين', () => {
     const state: BtwState = {
-      btwId: 'b1',
+      btwId: 'b1', forkStatus: 'idle',
       question: 'لماذا السماء زرقاء؟',
       answer: 'بسبب تشتّت رايلي',
       status: 'streaming',
@@ -51,7 +51,7 @@ describe('BtwOverlay', () => {
 
   it('يعرض تنبيه خطأ (role=alert) بنصّ مترجَم لكود معروف', () => {
     const state: BtwState = {
-      btwId: 'b1',
+      btwId: 'b1', forkStatus: 'idle',
       question: 'سؤال',
       answer: '',
       status: 'error',
@@ -64,7 +64,7 @@ describe('BtwOverlay', () => {
 
   it('يسقط لرسالة الخادم الخام عند كود خطأ غير معروف', () => {
     const state: BtwState = {
-      btwId: 'b1',
+      btwId: 'b1', forkStatus: 'idle',
       question: 'سؤال',
       answer: '',
       status: 'error',
@@ -77,7 +77,7 @@ describe('BtwOverlay', () => {
 
   it('sdk_error: يعرض رسالة الخادم الحقيقية بدل النصّ العام حين تتوفّر', () => {
     const state: BtwState = {
-      btwId: 'b1',
+      btwId: 'b1', forkStatus: 'idle',
       question: 'سؤال',
       answer: '',
       status: 'error',
@@ -93,7 +93,7 @@ describe('BtwOverlay', () => {
 
   it('sdk_error: يسقط للنصّ العام حين لا رسالة خادم', () => {
     const state: BtwState = {
-      btwId: 'b1',
+      btwId: 'b1', forkStatus: 'idle',
       question: 'سؤال',
       answer: '',
       status: 'error',
@@ -106,7 +106,7 @@ describe('BtwOverlay', () => {
   it('sdk_error: يقتطع رسالة الخادم الطويلة بـ«…» كي لا تكسر التخطيط', () => {
     const long = 'ط'.repeat(400);
     const state: BtwState = {
-      btwId: 'b1',
+      btwId: 'b1', forkStatus: 'idle',
       question: 'سؤال',
       answer: '',
       status: 'error',
@@ -123,14 +123,14 @@ describe('BtwOverlay', () => {
 
   it('يستدعي onClose عند الضغط على زرّ الإغلاق', () => {
     const onClose = vi.fn();
-    const state: BtwState = { btwId: 'b1', question: 'س', answer: 'ج', status: 'complete' };
+    const state: BtwState = { btwId: 'b1', forkStatus: 'idle', question: 'س', answer: 'ج', status: 'complete' };
     render(<BtwOverlay state={state} onClose={onClose} />);
     fireEvent.click(screen.getByLabelText('btw.close'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('حوار مُتاح: role=dialog + aria-modal + aria-labelledby', () => {
-    const state: BtwState = { btwId: 'b1', question: 'س', answer: '', status: 'pending' };
+    const state: BtwState = { btwId: 'b1', forkStatus: 'idle', question: 'س', answer: '', status: 'pending' };
     render(<BtwOverlay state={state} onClose={() => {}} />);
     const dialog = screen.getByRole('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
@@ -140,14 +140,14 @@ describe('BtwOverlay', () => {
   });
 
   it('يعرض مؤشّر «مكتمل» عند اكتمال الإجابة', () => {
-    const state: BtwState = { btwId: 'b1', question: 'س', answer: 'الجواب', status: 'complete' };
+    const state: BtwState = { btwId: 'b1', forkStatus: 'idle', question: 'س', answer: 'الجواب', status: 'complete' };
     render(<BtwOverlay state={state} onClose={() => {}} />);
     expect(screen.getByText('btw.status.complete')).toBeDefined();
     expect(screen.getByText('الجواب')).toBeDefined();
   });
 
   it('زرّ الإغلاق يحمل كلاسات focus-visible:ring مطابقة لعرف المشروع', () => {
-    const state: BtwState = { btwId: 'b1', question: 'س', answer: '', status: 'pending' };
+    const state: BtwState = { btwId: 'b1', forkStatus: 'idle', question: 'س', answer: '', status: 'pending' };
     render(<BtwOverlay state={state} onClose={() => {}} />);
     const btn = screen.getByLabelText('btw.close');
     // يجب أن يتضمّن نمط focus-visible:ring-2 وfocus-visible:ring-ring
@@ -159,12 +159,124 @@ describe('BtwOverlay', () => {
   });
 
   it('حاوية الحوار قابلة للتركيز البرمجي (tabIndex=-1) دون حلقة مرئية', () => {
-    const state: BtwState = { btwId: 'b1', question: 'س', answer: '', status: 'pending' };
+    const state: BtwState = { btwId: 'b1', forkStatus: 'idle', question: 'س', answer: '', status: 'pending' };
     render(<BtwOverlay state={state} onClose={() => {}} />);
     const dialog = screen.getByRole('dialog');
     // tabIndex={-1}: قابل للتركيز البرمجي فقط (لا يُدرَج في تسلسل Tab)
     expect(dialog.getAttribute('tabindex')).toBe('-1');
     // outline-none على الحاوية كي لا تظهر حلقة بلا سبب للمستخدم
     expect(dialog.className).toContain('outline-none');
+  });
+
+  // ── T-1090: الفرك ────────────────────────────────────────────────────────
+  describe('الفرك', () => {
+    const completeState: BtwState = {
+      btwId: 'b1',
+      question: 'س',
+      answer: 'الجواب',
+      status: 'complete',
+      forkStatus: 'idle',
+    };
+
+    it('يعرض زرّ الفرك على إجابة مكتملة حين يُمرَّر onFork', () => {
+      render(<BtwOverlay state={completeState} onClose={() => {}} onFork={() => {}} />);
+      expect(screen.getByText('btw.fork.action')).toBeDefined();
+    });
+
+    it('لا زرّ فرك بلا onFork (لا زرّ معطّل بلا سبب)', () => {
+      render(<BtwOverlay state={completeState} onClose={() => {}} />);
+      expect(screen.queryByText('btw.fork.action')).toBeNull();
+    });
+
+    it('لا زرّ فرك أثناء البثّ ولا على إجابة فارغة', () => {
+      const { unmount } = render(
+        <BtwOverlay
+          state={{ ...completeState, status: 'streaming' }}
+          onClose={() => {}}
+          onFork={() => {}}
+        />,
+      );
+      expect(screen.queryByText('btw.fork.action')).toBeNull();
+      unmount();
+
+      render(
+        <BtwOverlay state={{ ...completeState, answer: '   ' }} onClose={() => {}} onFork={() => {}} />,
+      );
+      expect(screen.queryByText('btw.fork.action')).toBeNull();
+    });
+
+    it('النقر يستدعي onFork مرة واحدة', () => {
+      const onFork = vi.fn();
+      render(<BtwOverlay state={completeState} onClose={() => {}} onFork={onFork} />);
+      fireEvent.click(screen.getByText('btw.fork.action'));
+      expect(onFork).toHaveBeenCalledTimes(1);
+    });
+
+    it('اختصار «f» يفرع كما في الـCLI', () => {
+      const onFork = vi.fn();
+      render(<BtwOverlay state={completeState} onClose={() => {}} onFork={onFork} />);
+      fireEvent.keyDown(document, { key: 'f' });
+      expect(onFork).toHaveBeenCalledTimes(1);
+    });
+
+    it('اختصار «f» لا يعمل مع مُعدِّل ولا من داخل حقل كتابة', () => {
+      const onFork = vi.fn();
+      render(<BtwOverlay state={completeState} onClose={() => {}} onFork={onFork} />);
+      fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
+      fireEvent.keyDown(document, { key: 'f', metaKey: true });
+
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      fireEvent.keyDown(input, { key: 'f' });
+      input.remove();
+
+      expect(onFork).not.toHaveBeenCalled();
+    });
+
+    it('أثناء الفرك: الزرّ معطّل ولا يُستدعى onFork بالاختصار', () => {
+      const onFork = vi.fn();
+      render(
+        <BtwOverlay
+          state={{ ...completeState, forkStatus: 'forking' }}
+          onClose={() => {}}
+          onFork={onFork}
+        />,
+      );
+      const button = screen.getByText('btw.fork.pending').closest('button');
+      expect(button?.hasAttribute('disabled')).toBe(true);
+      fireEvent.keyDown(document, { key: 'f' });
+      expect(onFork).not.toHaveBeenCalled();
+    });
+
+    it('خطأ الفرك يظهر في تنبيهه المستقلّ والإجابة تبقى معروضة', () => {
+      render(
+        <BtwOverlay
+          state={{ ...completeState, forkStatus: 'error', forkErrorCode: 'not_writable' }}
+          onClose={() => {}}
+          onFork={() => {}}
+        />,
+      );
+      expect(screen.getByRole('alert').textContent).toContain('btw.fork.errors.not_writable');
+      // الإجابة نفسها لم تتأثّر
+      expect(screen.getByText('الجواب')).toBeDefined();
+      // ويبقى الفرك قابلاً لإعادة المحاولة
+      expect(screen.getByText('btw.fork.action')).toBeDefined();
+    });
+
+    it('كود فرك غير معروف يسقط لرسالة الخادم الخام', () => {
+      render(
+        <BtwOverlay
+          state={{
+            ...completeState,
+            forkStatus: 'error',
+            forkErrorCode: 'weird_code',
+            forkErrorMessage: 'رسالة فرك خام',
+          }}
+          onClose={() => {}}
+          onFork={() => {}}
+        />,
+      );
+      expect(screen.getByRole('alert').textContent).toContain('رسالة فرك خام');
+    });
   });
 });

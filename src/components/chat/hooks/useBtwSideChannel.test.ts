@@ -16,13 +16,21 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 
-import { useBtwSideChannel, BTW_FALLBACK_TIMEOUT_MS } from './useBtwSideChannel';
+import { useBtwSideChannel, BTW_FALLBACK_TIMEOUT_MS, BTW_FORK_TIMEOUT_MS } from './useBtwSideChannel';
 
-type Frame = { type?: string; btwId?: string; text?: string; code?: string; message?: string } | null;
+type Frame = {
+  type?: string;
+  btwId?: string;
+  text?: string;
+  code?: string;
+  message?: string;
+  forkedSessionId?: string;
+} | null;
 interface Props {
   sessionId: string | null;
   latestMessage: Frame;
   sendMessage: (message: unknown) => { ok: boolean; reason?: string } | void;
+  onForked?: (forkedSessionId: string) => void;
 }
 
 afterEach(() => {
@@ -284,5 +292,221 @@ describe('useBtwSideChannel', () => {
     });
     expect(result.current.activeBtw?.status).toBe('error');
     expect(result.current.activeBtw?.errorCode).toBe('timeout');
+  });
+
+  // ── T-1090: الفرك (btw-fork ← btw-forked | btw-fork-error) ───────────────
+  describe('الفرك', () => {
+    /** يصل بالهوك إلى سؤال مكتمل بإجابة، وهو الشرط الوحيد لإتاحة الفرك. */
+    function mountCompleted(answer = 'الجواب') {
+      const view = mountHook();
+      act(() => view.result.current.startBtwQuery('س'));
+      const btwId = sentBtwId(view.sendMessage);
+      act(() =>
+        view.rerender({
+          sessionId: 's1',
+          latestMessage: { type: 'btw-complete', btwId, text: answer },
+          sendMessage: view.sendMessage,
+        }),
+      );
+      return { ...view, btwId };
+    }
+
+    it('forkBtw يرسل btw-fork بالسؤال والإجابة ونفس btwId، والحالة forking', () => {
+      const { result, sendMessage, btwId } = mountCompleted();
+      act(() => result.current.forkBtw());
+
+      const frame = sendMessage.mock.calls[1][0] as Record<string, unknown>;
+      expect(frame.type).toBe('btw-fork');
+      expect(frame.btwId).toBe(btwId);
+      expect(frame.sessionId).toBe('s1');
+      expect(frame.question).toBe('س');
+      expect(frame.answer).toBe('الجواب');
+      expect(result.current.activeBtw?.forkStatus).toBe('forking');
+      // حالة الإجابة نفسها لم تتغيّر
+      expect(result.current.activeBtw?.status).toBe('complete');
+    });
+
+    it('btw-forked يستدعي onForked بمعرّف الجلسة الجديدة', () => {
+      const onForked = vi.fn();
+      const sendMessage = vi.fn(() => ({ ok: true }));
+      const initialProps: Props = { sessionId: 's1', latestMessage: null, sendMessage, onForked };
+      const { result, rerender } = renderHook((p: Props) => useBtwSideChannel(p), { initialProps });
+      act(() => result.current.startBtwQuery('س'));
+      const btwId = sentBtwId(sendMessage);
+      act(() =>
+        rerender({ sessionId: 's1', latestMessage: { type: 'btw-complete', btwId, text: 'ج' }, sendMessage, onForked }),
+      );
+      act(() => result.current.forkBtw());
+      act(() =>
+        rerender({
+          sessionId: 's1',
+          latestMessage: { type: 'btw-forked', btwId, forkedSessionId: 'new-session-id' },
+          sendMessage,
+          onForked,
+        }),
+      );
+
+      expect(onForked).toHaveBeenCalledTimes(1);
+      expect(onForked).toHaveBeenCalledWith('new-session-id');
+      expect(result.current.activeBtw?.forkStatus).toBe('idle');
+    });
+
+    it('btw-fork-error يضع خطأ الفرك وحده ولا يمسّ الإجابة', () => {
+      const { result, rerender, sendMessage, btwId } = mountCompleted();
+      act(() => result.current.forkBtw());
+      act(() =>
+        rerender({
+          sessionId: 's1',
+          latestMessage: { type: 'btw-fork-error', btwId, code: 'not_writable', message: 'no' },
+          sendMessage,
+        }),
+      );
+
+      expect(result.current.activeBtw?.forkStatus).toBe('error');
+      expect(result.current.activeBtw?.forkErrorCode).toBe('not_writable');
+      expect(result.current.activeBtw?.forkErrorMessage).toBe('no');
+      expect(result.current.activeBtw?.status).toBe('complete');
+      expect(result.current.activeBtw?.answer).toBe('الجواب');
+    });
+
+    it('btw-forked بلا معرّف جلسة → خطأ ولا انتقال', () => {
+      const onForked = vi.fn();
+      const sendMessage = vi.fn(() => ({ ok: true }));
+      const initialProps: Props = { sessionId: 's1', latestMessage: null, sendMessage, onForked };
+      const { result, rerender } = renderHook((p: Props) => useBtwSideChannel(p), { initialProps });
+      act(() => result.current.startBtwQuery('س'));
+      const btwId = sentBtwId(sendMessage);
+      act(() =>
+        rerender({ sessionId: 's1', latestMessage: { type: 'btw-complete', btwId, text: 'ج' }, sendMessage, onForked }),
+      );
+      act(() => result.current.forkBtw());
+      act(() =>
+        rerender({ sessionId: 's1', latestMessage: { type: 'btw-forked', btwId }, sendMessage, onForked }),
+      );
+
+      expect(onForked).not.toHaveBeenCalled();
+      expect(result.current.activeBtw?.forkStatus).toBe('error');
+      expect(result.current.activeBtw?.forkErrorCode).toBe('fork_failed');
+    });
+
+    it('لا فرك قبل الاكتمال ولا على إجابة فارغة ولا مرّتين معاً', () => {
+      // (أ) أثناء البثّ
+      const streaming = mountHook();
+      act(() => streaming.result.current.startBtwQuery('س'));
+      act(() => streaming.result.current.forkBtw());
+      expect(streaming.sendMessage).toHaveBeenCalledTimes(1); // btw-query وحده
+      cleanup();
+
+      // (ب) مكتمل بإجابة فارغة
+      const empty = mountCompleted('   ');
+      act(() => empty.result.current.forkBtw());
+      expect(empty.sendMessage).toHaveBeenCalledTimes(1);
+      cleanup();
+
+      // (ج) فرك ثانٍ أثناء فرك جارٍ
+      const busy = mountCompleted();
+      act(() => busy.result.current.forkBtw());
+      act(() => busy.result.current.forkBtw());
+      expect(busy.sendMessage).toHaveBeenCalledTimes(2); // query + fork واحد
+    });
+
+    it('العزل: btw-forked بـbtwId مختلف يُتجاهَل', () => {
+      const onForked = vi.fn();
+      const sendMessage = vi.fn(() => ({ ok: true }));
+      const initialProps: Props = { sessionId: 's1', latestMessage: null, sendMessage, onForked };
+      const { result, rerender } = renderHook((p: Props) => useBtwSideChannel(p), { initialProps });
+      act(() => result.current.startBtwQuery('س'));
+      const btwId = sentBtwId(sendMessage);
+      act(() =>
+        rerender({ sessionId: 's1', latestMessage: { type: 'btw-complete', btwId, text: 'ج' }, sendMessage, onForked }),
+      );
+      act(() => result.current.forkBtw());
+      act(() =>
+        rerender({
+          sessionId: 's1',
+          latestMessage: { type: 'btw-forked', btwId: 'other-id', forkedSessionId: 'x' },
+          sendMessage,
+          onForked,
+        }),
+      );
+
+      expect(onForked).not.toHaveBeenCalled();
+      expect(result.current.activeBtw?.forkStatus).toBe('forking');
+    });
+
+    it('WS مغلق (ok:false) → خطأ فرك disconnected بلا مهلة', () => {
+      const sendMessage = vi
+        .fn()
+        .mockReturnValueOnce({ ok: true })
+        .mockReturnValueOnce({ ok: false, reason: 'closed' });
+      const initialProps: Props = { sessionId: 's1', latestMessage: null, sendMessage };
+      const { result, rerender } = renderHook((p: Props) => useBtwSideChannel(p), { initialProps });
+      act(() => result.current.startBtwQuery('س'));
+      const btwId = sentBtwId(sendMessage);
+      act(() =>
+        rerender({ sessionId: 's1', latestMessage: { type: 'btw-complete', btwId, text: 'ج' }, sendMessage }),
+      );
+      act(() => result.current.forkBtw());
+
+      expect(result.current.activeBtw?.forkStatus).toBe('error');
+      expect(result.current.activeBtw?.forkErrorCode).toBe('disconnected');
+    });
+
+    it('خادم لا يعرف btw-fork: لا ردّ → مهلة الفرك تُنهيها بخطأ timeout', () => {
+      vi.useFakeTimers();
+      const { result } = mountCompleted();
+      act(() => result.current.forkBtw());
+      expect(result.current.activeBtw?.forkStatus).toBe('forking');
+
+      act(() => {
+        vi.advanceTimersByTime(BTW_FORK_TIMEOUT_MS);
+      });
+      expect(result.current.activeBtw?.forkStatus).toBe('error');
+      expect(result.current.activeBtw?.forkErrorCode).toBe('timeout');
+    });
+
+    it('btw-forked يُبطل مهلة الفرك (لا خطأ لاحق)', () => {
+      vi.useFakeTimers();
+      const onForked = vi.fn();
+      const sendMessage = vi.fn(() => ({ ok: true }));
+      const initialProps: Props = { sessionId: 's1', latestMessage: null, sendMessage, onForked };
+      const { result, rerender } = renderHook((p: Props) => useBtwSideChannel(p), { initialProps });
+      act(() => result.current.startBtwQuery('س'));
+      const btwId = sentBtwId(sendMessage);
+      act(() =>
+        rerender({ sessionId: 's1', latestMessage: { type: 'btw-complete', btwId, text: 'ج' }, sendMessage, onForked }),
+      );
+      act(() => result.current.forkBtw());
+      act(() =>
+        rerender({
+          sessionId: 's1',
+          latestMessage: { type: 'btw-forked', btwId, forkedSessionId: 'sid' },
+          sendMessage,
+          onForked,
+        }),
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(BTW_FORK_TIMEOUT_MS * 2);
+      });
+      expect(result.current.activeBtw?.forkStatus).toBe('idle');
+      expect(onForked).toHaveBeenCalledTimes(1);
+    });
+
+    it('استعلام جديد يُصفّر حالة الفرك ومهلته', () => {
+      vi.useFakeTimers();
+      const { result } = mountCompleted();
+      act(() => result.current.forkBtw());
+      expect(result.current.activeBtw?.forkStatus).toBe('forking');
+
+      act(() => result.current.startBtwQuery('سؤال آخر'));
+      expect(result.current.activeBtw?.forkStatus).toBe('idle');
+
+      // مهلة الفرك القديمة لا تُلوّث السؤال الجديد.
+      act(() => {
+        vi.advanceTimersByTime(BTW_FORK_TIMEOUT_MS);
+      });
+      expect(result.current.activeBtw?.forkStatus).toBe('idle');
+    });
   });
 });

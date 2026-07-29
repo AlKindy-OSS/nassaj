@@ -10,6 +10,15 @@ export { setSessionLivenessProbes } from './services/session-activity.service.js
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';
 
+// T-1090: branches a session (plus the `/btw` exchange) into a new one. Exported
+// through the barrel so the composition root can inject it into the WS layer
+// without the chat handler importing the watcher/synchronizer graph directly.
+export {
+  forkSessionFromSideQuery,
+  SessionForkError,
+  type ForkSessionResult,
+} from './services/session-fork.service.js';
+
 // ADR-037: per-spawn vendor-delegate MCP builder. Re-exported from the module
 // barrel so cross-module consumers (e.g. the isolation seam tests) depend on the
 // public entry point rather than reaching into module internals.

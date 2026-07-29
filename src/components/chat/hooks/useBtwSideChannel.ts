@@ -12,17 +12,42 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * يدعم استعلامات متتابعة: بدء استعلام جديد يستبدل النشط (الأحدث يظهر) ويُبطل
  * أي إطارات متأخّرة من سابقه (لأن activeBtwIdRef تغيّر).
  *
+ * T-1090 (الفرك): مسارٌ ثانٍ فوق نفس القناة والـbtwId — «btw-fork» ← «btw-forked»
+ * أو «btw-fork-error». يحوّل السؤال المكتمل إلى محادثة حقيقية (الخادم يفرع نصّ
+ * الجلسة ويُلحق به السؤال والإجابة)، ولذلك يملك حالته ومهلته المستقلّتين: نجاحه
+ * أو فشله لا يغيّران status الإجابة المعروضة.
+ *
  * fallback: الخادم الحيّ قد يسبق «/btw» فلا يردّ إطلاقاً — بعد مهلة سماح بلا أي
  * إطار btw-* نعرض خطأ «الميزة تتطلب تحديث الخادم» بدل تعليق المؤشّر للأبد.
  */
 
 export type BtwStatus = 'pending' | 'streaming' | 'complete' | 'error';
 
+/**
+ * T-1090 — حالة «فرك» السؤال الجانبي إلى محادثة حقيقية:
+ *   idle    — لا فرك جارٍ (وهي حالة ما بعد النجاح أيضاً، إذ يُغلق الـoverlay)
+ *   forking — أُرسل btw-fork وننتظر btw-forked
+ *   error   — رُفض الفرك أو انقضت مهلته
+ */
+export type BtwForkStatus = 'idle' | 'forking' | 'error';
+
 export interface BtwState {
   btwId: string;
   question: string;
   answer: string;
   status: BtwStatus;
+  /** حالة زرّ الفرك لهذا السؤال بعينه (تُصفَّر مع كل استعلام جديد). */
+  forkStatus: BtwForkStatus;
+  /**
+   * كود خطأ الفرك حين forkStatus==='error'. من عقد الخادم:
+   *   busy | session_not_found | not_writable | unsupported_provider |
+   *   invalid_request | transcript_not_found | source_empty | source_too_large |
+   *   message_not_found | fork_failed
+   * أو مُصطنَع عميلياً: timeout | disconnected
+   */
+  forkErrorCode?: string;
+  /** رسالة الخادم الخام لخطأ الفرك (تُعرض حين لا مفتاح i18n مطابق). */
+  forkErrorMessage?: string;
   /**
    * كود الخطأ حين status==='error'. من عقد الخادم:
    *   unsupported_provider | session_not_found | not_visible | busy | sdk_error
@@ -38,6 +63,13 @@ export interface BtwState {
 /** نافذة السماح قبل إعلان «يتطلّب تحديث الخادم» (لا ردّ btw-* إطلاقاً). */
 export const BTW_FALLBACK_TIMEOUT_MS = 20_000;
 
+/**
+ * مهلة الفرك: نسخ نصّ محادثة (حتى عشرات الميغابايت) عملية قرصية لا استدلالية،
+ * فثوانٍ قليلة تكفيها. المهلة هنا تحمي من خادم أقدم لا يعرف «btw-fork» (لا يردّ
+ * إطلاقاً) ومن ضياع الإطار الطرفي في فتحة latestMessage المشتركة.
+ */
+export const BTW_FORK_TIMEOUT_MS = 30_000;
+
 type SendResult = { ok: boolean; reason?: string } | void;
 
 interface BtwFrame {
@@ -46,6 +78,8 @@ interface BtwFrame {
   text?: string;
   code?: string;
   message?: string;
+  /** T-1090: معرّف الجلسة المفروعة في إطار «btw-forked». */
+  forkedSessionId?: string;
   [key: string]: unknown;
 }
 
@@ -57,6 +91,11 @@ interface UseBtwSideChannelArgs {
   sendMessage: (message: unknown) => SendResult;
   /** اختياري: id آخر رسالة معروضة، يُرسَل upToMessageId لتثبيت حدّ السياق. */
   upToMessageId?: string | null;
+  /**
+   * T-1090: نجح الفرك ← معرّف الجلسة الجديدة. المستهلك ينتقل إليها (ويغلق
+   * الـoverlay). يُقرأ من ref فلا يُعيد تشغيل مستقبِل الإطارات عند تغيّره.
+   */
+  onForked?: (forkedSessionId: string) => void;
 }
 
 /** مولّد btwId — crypto.randomUUID متى توفّر، وإلا بديل كافٍ للتوسيم. */
@@ -76,13 +115,19 @@ export function useBtwSideChannel({
   latestMessage,
   sendMessage,
   upToMessageId,
+  onForked,
 }: UseBtwSideChannelArgs) {
   const [activeBtw, setActiveBtw] = useState<BtwState | null>(null);
   // مرآة لـbtwId النشط تُقرأ في مستقبِل latestMessage دون إعادة تشغيل تأثيره على
   // كل تحديث حالة (كتراكم الإجابة).
   const activeBtwIdRef = useRef<string | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const forkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastProcessedRef = useRef<BtwFrame | null>(null);
+  // مرآة للـcallback: المستهلك يمرّرها inline غالباً، فقراءتها من ref تُبقي
+  // تأثير الإطارات مستقرّاً بدل إعادة تشغيله على كل render.
+  const onForkedRef = useRef(onForked);
+  onForkedRef.current = onForked;
 
   const clearFallbackTimer = useCallback(() => {
     if (fallbackTimerRef.current) {
@@ -91,11 +136,19 @@ export function useBtwSideChannel({
     }
   }, []);
 
+  const clearForkTimer = useCallback(() => {
+    if (forkTimerRef.current) {
+      clearTimeout(forkTimerRef.current);
+      forkTimerRef.current = null;
+    }
+  }, []);
+
   const closeBtw = useCallback(() => {
     clearFallbackTimer();
+    clearForkTimer();
     activeBtwIdRef.current = null;
     setActiveBtw(null);
-  }, [clearFallbackTimer]);
+  }, [clearFallbackTimer, clearForkTimer]);
 
   const startBtwQuery = useCallback(
     (question: string) => {
@@ -104,6 +157,8 @@ export function useBtwSideChannel({
         return;
       }
       clearFallbackTimer();
+      // استعلام جديد يُلغي أي فرك معلّق من سابقه (الفرك مرتبط بسؤال بعينه).
+      clearForkTimer();
       const btwId = generateBtwId();
       activeBtwIdRef.current = btwId;
 
@@ -116,11 +171,12 @@ export function useBtwSideChannel({
           answer: '',
           status: 'error',
           errorCode: 'session_not_found',
+          forkStatus: 'idle',
         });
         return;
       }
 
-      setActiveBtw({ btwId, question: trimmed, answer: '', status: 'pending' });
+      setActiveBtw({ btwId, question: trimmed, answer: '', status: 'pending', forkStatus: 'idle' });
 
       const result = sendMessage({
         type: 'btw-query',
@@ -151,8 +207,70 @@ export function useBtwSideChannel({
         );
       }, BTW_FALLBACK_TIMEOUT_MS);
     },
-    [sessionId, sendMessage, upToMessageId, clearFallbackTimer],
+    [sessionId, sendMessage, upToMessageId, clearFallbackTimer, clearForkTimer],
   );
+
+  /**
+   * T-1090 — يحوّل السؤال الجانبي المكتمل إلى محادثة حقيقية: يُرسل «btw-fork»
+   * فيفرع الخادمُ نصَّ الجلسة على القرص ويُلحق به السؤال والإجابة المعروضة الآن.
+   * بلا استدلال جديد ولا استهلاك حصة — الإجابة تُعاد استعمالاً لا سؤالاً.
+   *
+   * لا يُرسَل إلا على سؤال مكتمل بإجابة غير فارغة (نفس شرط «f» في الـCLI)، وفركٌ
+   * واحد في الطيران لكل سؤال.
+   */
+  const forkBtw = useCallback(() => {
+    // نقرأ الحالة الظاهرة مباشرةً (لا داخل updater): الـupdater يجب أن يبقى نقيّاً
+    // لأن React قد يستدعيه أكثر من مرة.
+    if (
+      !activeBtw
+      || activeBtw.status !== 'complete'
+      || activeBtw.answer.trim() === ''
+      || activeBtw.forkStatus === 'forking'
+    ) {
+      return;
+    }
+    const { btwId, question, answer } = activeBtw;
+
+    setActiveBtw((prev) =>
+      prev && prev.btwId === btwId
+        ? { ...prev, forkStatus: 'forking', forkErrorCode: undefined, forkErrorMessage: undefined }
+        : prev,
+    );
+
+    const failFork = (code: string) => {
+      setActiveBtw((prev) =>
+        prev && prev.btwId === btwId && prev.forkStatus === 'forking'
+          ? { ...prev, forkStatus: 'error', forkErrorCode: code }
+          : prev,
+      );
+    };
+
+    // لا جلسة ⇒ لا نصّ نفرعه؛ نفشل فوراً بدل انتظار المهلة.
+    if (!sessionId) {
+      failFork('session_not_found');
+      return;
+    }
+
+    const result = sendMessage({
+      type: 'btw-fork',
+      btwId,
+      sessionId,
+      question,
+      answer,
+      ...(upToMessageId ? { upToMessageId } : {}),
+    });
+
+    if (result && result.ok === false) {
+      failFork('disconnected');
+      return;
+    }
+
+    clearForkTimer();
+    forkTimerRef.current = setTimeout(() => {
+      forkTimerRef.current = null;
+      failFork('timeout');
+    }, BTW_FORK_TIMEOUT_MS);
+  }, [activeBtw, sessionId, sendMessage, upToMessageId, clearForkTimer]);
 
   // استقبال إطارات btw-* من فتحة latestMessage المشتركة. نستهلك فقط ما يحمل
   // btwId النشط؛ أي شيء آخر (حركة الدردشة العادية، أو btwId من استعلام تجاوزناه)
@@ -171,13 +289,50 @@ export function useBtwSideChannel({
       type !== 'btw-chunk' &&
       type !== 'btw-complete' &&
       type !== 'btw-error' &&
-      type !== 'btw-accepted'
+      type !== 'btw-accepted' &&
+      type !== 'btw-forked' &&
+      type !== 'btw-fork-error'
     ) {
       return;
     }
 
     const { btwId } = latestMessage;
     if (!btwId || btwId !== activeBtwIdRef.current) {
+      return;
+    }
+
+    // T-1090: إطارا الفرك طرفيّان لمسارٍ مستقلّ عن مسار الإجابة — يُبطلان مهلة
+    // الفرك وحدها ولا يمسّان حالة الاستعلام (status تبقى complete).
+    if (type === 'btw-forked') {
+      clearForkTimer();
+      const forkedSessionId =
+        typeof latestMessage.forkedSessionId === 'string' ? latestMessage.forkedSessionId : '';
+      if (!forkedSessionId) {
+        setActiveBtw((prev) =>
+          prev && prev.btwId === btwId
+            ? { ...prev, forkStatus: 'error', forkErrorCode: 'fork_failed' }
+            : prev,
+        );
+        return;
+      }
+      setActiveBtw((prev) => (prev && prev.btwId === btwId ? { ...prev, forkStatus: 'idle' } : prev));
+      onForkedRef.current?.(forkedSessionId);
+      return;
+    }
+
+    if (type === 'btw-fork-error') {
+      clearForkTimer();
+      const forkErrorCode =
+        typeof latestMessage.code === 'string' && latestMessage.code
+          ? latestMessage.code
+          : 'fork_failed';
+      const forkErrorMessage =
+        typeof latestMessage.message === 'string' ? latestMessage.message : undefined;
+      setActiveBtw((prev) =>
+        prev && prev.btwId === btwId
+          ? { ...prev, forkStatus: 'error', forkErrorCode, forkErrorMessage }
+          : prev,
+      );
       return;
     }
 
@@ -227,10 +382,16 @@ export function useBtwSideChannel({
           : prev,
       );
     }
-  }, [latestMessage, clearFallbackTimer]);
+  }, [latestMessage, clearFallbackTimer, clearForkTimer]);
 
-  // تنظيف المؤقّت عند التفكيك.
-  useEffect(() => () => clearFallbackTimer(), [clearFallbackTimer]);
+  // تنظيف المؤقّتات عند التفكيك.
+  useEffect(
+    () => () => {
+      clearFallbackTimer();
+      clearForkTimer();
+    },
+    [clearFallbackTimer, clearForkTimer],
+  );
 
-  return { activeBtw, startBtwQuery, closeBtw };
+  return { activeBtw, startBtwQuery, closeBtw, forkBtw };
 }
