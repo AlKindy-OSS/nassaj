@@ -3,6 +3,17 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.36.1.2] — Fix (2026-07-29)
+
+### Fixed
+
+- `npm run build` failed on any checkout without the optional team-wiki content:
+  the wiki module imports `docs/team-wiki/index.json` statically, so vite could
+  not resolve the module at all and the error read like a code fault rather than
+  a missing optional file. A deployed node sat on a half-built tree because of
+  it. The build now seeds an empty, valid index when none is present (and never
+  touches an existing one), so a fresh clone builds standalone.
+
 ## [1.36.1.1] — Fix (2026-07-29)
 
 ### Fixed
