@@ -3,6 +3,22 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.36.1.1] — Fix (2026-07-29)
+
+### Fixed
+
+- The restart pre-flight gate failed with a configuration error whenever it ran
+  from the server rather than from an operator's shell, so every "Server built —
+  restart required" request in the command board came back as "An unexpected
+  error occurred". The transcript-root fallback had been rewritten into a path
+  that cannot exist; it is now derived from `$CLAUDE_CONFIG_DIR` when set and
+  `$HOME/.claude` otherwise, with the first existing candidate winning and an
+  explicit `WF_BASE` still overriding both. A regression test runs the gate under
+  an isolated environment and asserts the derived path is a real one.
+- A failing gate now reports its exit code, so an environmental failure is
+  distinguishable from a genuine safety refusal instead of both reading as
+  "unexpected error".
+
 ## [1.36.1] — Small feature (2026-07-29)
 
 ### Added

@@ -1426,7 +1426,15 @@ async function executeActionRow(req, res, { id }) {
                 return res.status(500).json({
                     status: 'error',
                     code: 'gate_failed',
-                    detail: 'Pre-action safety check failed',
+                    // B-302: carry the exit code. A gate that fails for an
+                    // ENVIRONMENTAL reason (2 = read/config error, e.g. an
+                    // unresolvable transcript root) used to reach the operator as
+                    // a bare "unexpected error", indistinguishable from a real
+                    // safety refusal — four retries and a wrong diagnosis later,
+                    // the number was the only thing that identified it. It is an
+                    // integer, not a command or a path: nothing executable leaks.
+                    detail: `Pre-action safety check failed (exit ${gate.code})`,
+                    exitCode: gate.code,
                 });
             }
         }

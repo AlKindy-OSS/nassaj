@@ -136,14 +136,31 @@ FRESH_WINDOW_S="${FRESH_WINDOW_S:-180}"
 # جذر الـ workflows (transcripts): يُشتقّ ديناميكياً ليَحمِل عبر عقد الأسطول
 # (مستخدمون/جذور HOME مختلفة لكل عقدة) بدل تثبيت مسار مطلق واحد الذي
 # يُفشِل traventure/mujtana. البنية: <claude-root>/projects/<مسار-المشروع-مهروباً>
-# حيث المهروب = REPO_DIR (مشتقّ من موقع السكربت) مع استبدال '/' بـ '-'. جذر claude:
-# $CLAUDE_CONFIG_DIR إن وُجد (يحوي projects/)، وإلا $HOME/the governance repo. نحلّ الـ
-# symlink لاحقاً (readlink أدناه) لأن المسار الفعلي عبر projects رمزيٌّ نحو
-# ~/the governance repo (راجع reference_nassaj_core_symlink في memory). التجاوز عبر WF_BASE.
+# حيث المهروب = REPO_DIR (مشتقّ من موقع السكربت) مع استبدال '/' بـ '-'.
+#
+# جذر claude: $CLAUDE_CONFIG_DIR إن وُجد (يحوي projects/)، وإلا $HOME/.claude —
+# الجذر القياسي على أي تثبيت. لا يُذكر هنا اسم أي مستودع خاص: المسار قد يكون
+# رابطاً رمزياً إلى مكان آخر، وذلك يُحَلّ بـreadlink أدناه لا بتثبيت وجهته.
+#
+# B-302 (2026-07-29): كان الاحتياطي مساراً مثبَّتاً باسم مستودع خاص، فاستبدله التنظيف قبل
+# النشر بعبارة وصفية داخل **سطر تنفيذي** لا تعليق، فصار المسار غير موجود وخرج
+# الحارس بـ2 عند كل تشغيل من الخادم (بيئة pm2 بلا CLAUDE_CONFIG_DIR) — بينما نجح
+# من صدفة المشغّل التي تحمل المتغيّر. لذلك: مرشّحان يُجرَّبان بالترتيب، وأول
+# موجود يفوز، ولا يعتمد أيّهما على تسمية خاصة. التجاوز الصريح عبر WF_BASE.
 ESCAPED_PROJECT_PATH="${REPO_DIR//\//-}"
-CLAUDE_ROOT="${CLAUDE_CONFIG_DIR:-$HOME/the governance repo}"
-DEFAULT_WF_BASE="$CLAUDE_ROOT/projects/$ESCAPED_PROJECT_PATH"
-WF_BASE="${WF_BASE:-$DEFAULT_WF_BASE}"
+if [ -n "${WF_BASE:-}" ]; then
+  :                                    # تجاوز صريح من المشغّل — يُحترم كما هو
+else
+  for _root in ${CLAUDE_CONFIG_DIR:+"$CLAUDE_CONFIG_DIR"} "$HOME/.claude"; do
+    _candidate="$_root/projects/$ESCAPED_PROJECT_PATH"
+    WF_BASE="${WF_BASE:-$_candidate}"  # أول مرشّح يبقى قيمةَ الرسالة عند الفشل
+    if [ -e "$_candidate" ]; then
+      WF_BASE="$_candidate"
+      break
+    fi
+  done
+  unset _root _candidate
+fi
 if [ -e "$WF_BASE" ]; then
   WF_BASE="$(readlink -f "$WF_BASE")"
 fi

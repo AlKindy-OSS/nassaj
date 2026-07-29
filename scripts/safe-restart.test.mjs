@@ -156,6 +156,57 @@ eq('B-198: scan ok = true محفوظ', obj && obj.ok, true);
 eq('B-198: sessionCount = 0 محفوظ', obj && obj.sessionCount, 0);
 eq('B-198: sessionServerPid = null (pid غير محلول)', obj && obj.sessionServerPid, null);
 
+// ── الجزء C: اشتقاق WF_BASE بلا مسار مثبَّت (B-302) ───────────────────────────
+// الانحدار الذي يحرسه هذا الجزء: تنظيفُ اسم مستودع الحوكمة قبل النشر استبدل
+// الاحتياطيَّ المثبَّت بعبارة وصفية فيها مسافات داخل سطر تنفيذي، فصار
+// المسار غير موجود وخرج الحارس بـ2 (خطأ إعداد) عند كل تشغيل من الخادم — بيئة pm2
+// لا تحمل CLAUDE_CONFIG_DIR — بينما نجح من صدفة المشغّل التي تحمله. النتيجة في
+// الواجهة: «An unexpected error occurred» بدل «أُجِّل: جلسات حيّة».
+//
+// يُشغَّل السكربت ببيئة معزولة تماماً (env -i فعلياً: كائن env مبنيّ من الصفر) مع
+// HOME مؤقّت، فيتوقّف عند بوابة WF_BASE قبل أي تفاعل مع pm2 — لا يلمس النظام.
+console.log('\n# الجزء C: اشتقاق WF_BASE بلا مسار مثبَّت (B-302)');
+function runWithHome(home, { withProjects }) {
+  const escaped = __dirname.replace(/\/scripts$/, '').replace(/\//g, '-');
+  if (withProjects) {
+    mkdirSync(join(home, '.claude', 'projects', escaped), { recursive: true });
+  }
+  const env = {
+    PATH: process.env.PATH,     // node مطلوب للتحليل؛ لا CLAUDE_CONFIG_DIR ولا WF_BASE
+    HOME: home,
+    HEALTH_URL: 'http://127.0.0.1:1/health',
+    WORKFLOW_SUPERVISOR: '',
+  };
+  let stdout = '', code = 0;
+  try {
+    stdout = execFileSync('bash', [SCRIPT, '--json'],
+      { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch (e) {
+    stdout = (e.stdout || '').toString();
+    code = e.status;
+  }
+  const line = stdout.split('\n').map(l => l.trim()).filter(l => l.startsWith('{')).pop();
+  let parsed = null;
+  try { parsed = JSON.parse(line); } catch (_) {}
+  return { code, parsed };
+}
+
+// (1) بلا جذر claude على الإطلاق: يفشل بـwf_base_missing — وهو صحيح — لكن المسار
+//     المذكور يجب أن يكون مشتقاً حقيقياً تحت $HOME/.claude، لا عبارةً بشرية.
+const missing = runWithHome(mkdtempSync(join(tmpdir(), 'sr-wfbase-none-')), { withProjects: false });
+eq('B-302: بلا جذر ⇒ الخطأ wf_base_missing', missing.parsed && missing.parsed.error, 'wf_base_missing');
+eq('B-302: الاحتياطي تحت $HOME/.claude/projects',
+   Boolean(missing.parsed && /\/\.claude\/projects\//.test(missing.parsed.wfBase)), true);
+eq('B-302: لا مسافات في المسار المشتقّ (لا عبارة وصفية في سطر تنفيذي)',
+   Boolean(missing.parsed && !/\s/.test(missing.parsed.wfBase)), true);
+
+// (2) جذر claude قياسي موجود بلا CLAUDE_CONFIG_DIR: يجب تجاوز بوابة WF_BASE —
+//     أي ألّا يكون سبب الخروج wf_base_missing (يخرج لاحقاً على pm2، وهذا مقبول).
+const found = runWithHome(mkdtempSync(join(tmpdir(), 'sr-wfbase-std-')), { withProjects: true });
+eq('B-302: $HOME/.claude موجود ⇒ لا wf_base_missing',
+   Boolean(found.parsed && found.parsed.error === 'wf_base_missing'), false);
+eq('B-302: ولا يخرج بـ2 (خطأ إعداد)', found.code === 2, false);
+
 // ── الحصيلة ───────────────────────────────────────────────────────────────────
 console.log(`\nالمجموع: ${pass} ناجحة / ${fail} فاشلة (من ${pass + fail}).`);
 if (fail > 0) { console.log('الفواشل:'); for (const f of failures) console.log('  - ' + f); process.exit(1); }
