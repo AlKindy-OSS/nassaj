@@ -144,7 +144,7 @@ describe('enforceDockerSockBootGuard — refusal paths (fail-closed)', () => {
       assert.match(msg, /su - \S+/);
       assert.match(msg, /pm2 kill && pm2 resurrect/);
       assert.match(msg, /pm2 restart.*NOT enough/i);
-      assert.match(msg, /no disable flag/i);
+      assert.match(msg, /NASSAJ_SECURITY_POSTURE=strict selects it/);
       // a PROVEN exposure is not the unverifiable case — no mixed message
       assert.doesNotMatch(msg, /UNVERIFIABLE/);
     }
@@ -177,8 +177,8 @@ describe('enforceDockerSockBootGuard — unverifiable message is DISTINCT (qa-cr
       assert.doesNotMatch(msg, /gpasswd/, 'degroup steps are the wrong medicine for a stat failure');
       assert.doesNotMatch(msg, /pm2 kill/);
       // the documented trade-off + the no-flag invariant stay explicit
-      assert.match(msg, /fail-closed BY DESIGN on shared hosts/i);
-      assert.match(msg, /no disable flag/i);
+      assert.match(msg, /fail-closed BY DESIGN on untrusted-user instances/i);
+      assert.match(msg, /NASSAJ_SECURITY_POSTURE=strict selects it/);
       assert.equal(errors.length, 1);
     }
   });
@@ -231,16 +231,16 @@ describe('enforceDockerSockBootGuard — LIVE host integration', () => {
   });
 });
 
-describe('enforceDockerSockBootGuard — single-user posture degrades to a warning (T-1085)', () => {
-  // Scope narrowing, owner decision 2026-07-29: on a host whose only account is
-  // the OS user running the process, refusing to boot protects nobody — that
-  // human can run `docker run -v /:/host` from their own shell already. The
-  // FINDING is unchanged; only the ACTION is.
+describe('enforceDockerSockBootGuard — trusted posture degrades to a warning (T-1085)', () => {
+  // Scope narrowing, owner decision 2026-07-29: when the accounts on an instance
+  // are operators of the host, refusing to boot protects nobody — they can run
+  // `docker run -v /:/host` from their own shell already. The FINDING is
+  // unchanged; only the ACTION is.
 
   it('boots (no throw) on a proven exposure and reports enforced:false', () => {
     const { deps, errors, warns } = makeDeps({
       shared: false,
-      postureReason: '1 active account',
+      postureReason: 'default posture: accounts are operators of this host',
       getgroups: () => [24, 989, 1000],
     });
     const res = enforceDockerSockBootGuard(deps);
@@ -253,7 +253,7 @@ describe('enforceDockerSockBootGuard — single-user posture degrades to a warni
     });
     assert.equal(errors.length, 0, 'a degraded verdict must not log as a fatal error');
     assert.equal(warns.length, 1);
-    assert.match(warns[0], /BOOTING ANYWAY \(single-user host\)/);
+    assert.match(warns[0], /BOOTING ANYWAY \(trusted-operator posture\)/);
     // the full diagnosis + remediation still reach the operator verbatim
     assert.match(warns[0], /REFUSING TO BOOT/);
     assert.match(warns[0], /gpasswd -d \S+ docker/);

@@ -3,6 +3,37 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.36.0.1] — Fix (2026-07-29)
+
+### Fixed
+
+- The Docker-socket boot guard no longer refuses to start an ordinary install.
+  The guard exists to stop an agent escaping to host root through
+  `/var/run/docker.sock`, but it refused on ANY host whose service user is in
+  the `docker` group — which is the normal state of a machine its owner also
+  uses for Docker, and left deployed nodes dead until someone ran `sudo`.
+  Detection is unchanged; the ACTION now follows a declared posture. By default
+  the accounts on an instance are treated as operators of the host (they can
+  reach the socket from their own shell anyway), so the finding is logged loudly
+  and surfaced in the UI while the server boots. On an instance that serves
+  untrusted users, set `NASSAJ_SECURITY_POSTURE=strict` and the original
+  fail-closed refusal returns unchanged. Platform mode — where authentication is
+  disabled — is always strict and no environment value can downgrade it.
+
+### Added
+
+- `npm run doctor`: a read-only preflight that checks the Node version, docker
+  group membership, `.env` and its permissions, `JWT_SECRET` length, port
+  availability, the database path, pruned devDependencies, build output and the
+  `node-pty` binding — printing a ready-to-run fix for each finding.
+- `GET /api/system/security-posture` (owner/admin): boot-time security findings
+  that degraded to a warning instead of refusing to boot.
+
+### Versioning
+
+- The version scheme is now documented in CONTRIBUTING.md: `X.n` for a large
+  batch of changes, `X.x.n` for a small feature, `X.x.0.n` for a bug fix.
+
 ## [1.36.0] — First public release (2026-07-29)
 
 First release published from the public repository. The tree is now the tool

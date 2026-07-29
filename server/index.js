@@ -13,7 +13,7 @@ import mime from 'mime-types';
 import Database from 'better-sqlite3';
 
 import { AppError, WORKSPACES_ROOT, getOpenCodeDatabasePath, validateWorkspacePath } from '@/shared/utils.js';
-import { closeSessionsWatcher, initializeSessionsWatcher, setSessionLivenessProbes, startCostLedgerScheduler, stopCostLedgerScheduler } from '@/modules/providers/index.js';
+import { closeSessionsWatcher, forkSessionFromSideQuery, initializeSessionsWatcher, setSessionLivenessProbes, startCostLedgerScheduler, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 import { createShutdownDrain, resolveDrainTimeoutMs } from '@/services/shutdown-drain.service.js';
 import { listenWithGuard, resolveBindWindowMs } from '@/services/listen-with-guard.service.js';
@@ -319,6 +319,9 @@ const wss = createWebSocketServer(server, {
         },
         // T-881: read-only /btw side query (SDK fork of the live session).
         spawnClaudeSideQuery,
+        // T-1090: promote a finished /btw exchange into a real session by
+        // branching the transcript on disk (no model call, no quota).
+        forkSessionFromSideQuery,
         abortClaudeSDKSession,
         abortCursorSession,
         abortCodexSession,
@@ -2904,23 +2907,24 @@ const VITE_PORT = process.env.VITE_PORT || 5173;
 // Initialize database and start server
 async function startServer() {
     try {
-        // Initialize authentication database
-        await initializeDatabase();
-
-        // T-896 / B-170 docker-socket gate, long before the listener opens: if
-        // this process can reach /var/run/docker.sock via its numeric gids,
-        // docker escape to host root is one provider turn away and every
-        // isolation layer below is moot.
+        // T-896 / B-170 docker-socket gate — FIRST, before the DB and long
+        // before the listener opens: if this process can reach
+        // /var/run/docker.sock via its numeric gids, docker escape to host root
+        // is one provider turn away and every isolation layer below is moot.
         //
-        // T-1085: the gate now runs AFTER initializeDatabase (nothing is served
-        // yet, no provider can spawn) because its ACTION depends on the
-        // deployment posture, and the posture needs the account count. Shared
-        // host → unchanged hard refusal with the degroup remediation (the catch
-        // below exits 1, still no disable flag). Single-user host → the same
-        // finding is logged and recorded for the UI, and boot continues: the
-        // only human who can drive an agent here already owns the login shell.
+        // T-1085: the DETECTION always runs; the posture decides the ACTION.
+        // Untrusted-user instance (NASSAJ_SECURITY_POSTURE=strict, or platform
+        // mode where auth is disabled) → unchanged hard refusal with the
+        // degroup remediation (the catch below exits 1). Default trusted
+        // posture → the finding is logged loudly and recorded for the UI, and
+        // boot continues: everyone with an account here can already reach the
+        // socket from their own shell. The posture reads env only, so this
+        // stays ahead of the database exactly as it was before.
         const posture = resolveSecurityPosture();
         enforceDockerSockBootGuard({ shared: posture.shared, postureReason: posture.reason });
+
+        // Initialize authentication database
+        await initializeDatabase();
 
         // B-5 fail-closed guard: in platform mode every WS session resolves to
         // the first active user, so an isolated Claude provider + >1 active user

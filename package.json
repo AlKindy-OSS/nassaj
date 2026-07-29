@@ -1,6 +1,6 @@
 {
   "name": "nassaj-dev",
-  "version": "1.36.0",
+  "version": "1.36.0.1",
   "description": "nassaj-dev — claudecodeui fork with AntigravityProvider and RTL Arabic support",
   "type": "module",
   "private": true,
@@ -21,7 +21,7 @@
     "scripts/",
     "README.md"
   ],
-    "repository": {
+  "repository": {
     "type": "git",
     "url": "git+https://github.com/siteboon/claudecodeui.git"
   },

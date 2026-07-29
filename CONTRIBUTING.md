@@ -134,6 +134,32 @@ feat!: redesign settings page layout
 - Make sure the build passes (`npm run build`)
 - Keep PRs focused — avoid unrelated changes
 
+## Versioning
+
+Four levels, from the largest change to the smallest. The version in
+`package.json` is the single source of truth; the UI, `/status` and the git tag
+all read it.
+
+| Level | Shape | When |
+|---|---|---|
+| Major batch of changes | `X.n` → e.g. `1.36` → `1.37` | many changes at once, a reworked area, anything an operator should read release notes before taking |
+| Small feature | `X.x.n` → e.g. `1.36.0` → `1.36.1` | one new capability that does not change how anything existing behaves |
+| Bug fix | `X.x.0.n` → e.g. `1.36.0` → `1.36.0.1` | a fix to already-released behavior, with no new capability |
+
+The fourth segment exists so a fix is never mistaken for a feature. It resets
+whenever any segment to its left moves: `1.36.0.3` + a small feature → `1.36.1`,
+and the next fix on top of that is `1.36.1.1`.
+
+Two consequences worth knowing before you reach for tooling:
+
+- **`release-it` and `npm publish` assume three-segment SemVer.** A four-segment
+  version is accepted by `npm install` for this (private, unpublished) package
+  and compares correctly in the client's version check, which walks the dot
+  segments numerically. If this package is ever published to a registry, drop
+  the fourth segment for that publish rather than renaming the scheme.
+- **Bump the version in the same commit as the change it describes**, so a
+  deployed node's `/status` names exactly the code it is running.
+
 ## Releases
 
 Releases are managed by maintainers using [release-it](https://github.com/release-it/release-it) with the [conventional changelog plugin](https://github.com/release-it/conventional-changelog).

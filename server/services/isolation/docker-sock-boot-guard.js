@@ -1,19 +1,20 @@
 /**
- * Docker-socket boot guard (T-896 / B-170) — fail-closed on SHARED hosts, NO
- * disable flag (committee decision 2026-07-14, qa-critic veto on any escape
- * hatch; scope narrowed by owner decision 2026-07-29, T-1085).
+ * Docker-socket boot guard (T-896 / B-170) — fail-closed on instances that
+ * serve UNTRUSTED users (committee decision 2026-07-14, qa-critic veto on any
+ * escape hatch; scope narrowed by owner decision 2026-07-29, T-1085).
  *
  * SCOPE (T-1085): the escalation this guard prevents is the server reaching
- * privilege its USERS do not already hold. On a shared host (>1 account, or
- * platform mode, or an operator-declared strict posture) that is real and the
- * refusal below is unchanged. On a single-user install it is vacuous: the one
- * person who can drive the agents is the same person who owns the login shell
- * and can run `docker run -v /:/host` themselves. Bricking that boot protected
- * nothing and made every ordinary install (a deployed node hit this on
- * 2026-07-29) require sudo surgery before nassaj would start. So the posture
- * decides the ACTION, never the DETECTION: an exposed single-user node boots
- * with a loud warning recorded in boot-security-status and surfaced in the UI.
- * There is still NO env flag that turns the shared-host refusal off.
+ * privilege its USERS do not already hold. On an instance serving UNTRUSTED
+ * users — operator-declared `NASSAJ_SECURITY_POSTURE=strict`, or platform mode
+ * where authentication is disabled outright — that is real and the refusal
+ * below is unchanged. On an ordinary install it is vacuous: the people with
+ * accounts are operators of the machine and can run `docker run -v /:/host`
+ * from their own shell. Bricking that boot protected nothing and left deployed
+ * nodes dead until someone ran sudo (twice on 2026-07-29 — the first fix keyed
+ * the strict posture on the ACCOUNT COUNT, which measures the wrong thing and
+ * still refused on a two-colleague node). So the posture decides the ACTION,
+ * never the DETECTION: an exposed trusted-posture node boots with a loud
+ * warning recorded in boot-security-status and surfaced in the UI.
  *
  * Threat: the shared `nassaj` uid holding the docker group makes every AI
  * provider one `docker run -v /:/host` away from host root — a cage/sandbox
@@ -35,14 +36,14 @@
  *   - socket present, gid held            → SHARED posture: operational fatal
  *     error with the exact degroup remediation steps, then
  *     DockerSockExposedError (startServer's catch exits 1 before the listener
- *     ever opens). SINGLE-USER posture: the same message is logged as a
- *     warning and recorded for the UI; boot continues;
+ *     ever opens). TRUSTED posture: the same message is logged as a warning
+ *     and recorded for the UI; boot continues;
  *   - cannot determine (stat error other than absence, or a platform without
  *     getgroups while the socket exists) → SHARED posture: FAIL CLOSED on the
  *     same fatal path, but with its OWN diagnostic message (qa-critic
  *     2026-07-14: the degroup steps are wrong medicine for a stat failure and
  *     would mislead the operator); an unverifiable boot is treated as an
- *     exposed boot, never waved through. SINGLE-USER posture: warn and boot.
+ *     exposed boot, never waved through. TRUSTED posture: warn and boot.
  *
  * DELIBERATE fail-closed trade-off on unexpected errno (documented per the
  * 2026-07-14 review): a host-filesystem fault that makes the socket
@@ -111,8 +112,8 @@ function buildExposedFatalMessage(detail) {
     '  3. pm2 kill && pm2 resurrect            # regenerate the pm2 daemon WITHOUT the group',
     '     (a plain `pm2 restart` is NOT enough: the old daemon re-inherits the stale group)',
     `  4. verify: cat /proc/$(pm2 pid nassaj-dev)/status | grep Groups   # no docker gid`,
-    'This guard is fail-closed BY DESIGN on shared hosts and has no disable flag',
-    '(committee 2026-07-14; single-user scope narrowing 2026-07-29, T-1085).',
+    'This guard is fail-closed BY DESIGN on untrusted-user instances (committee 2026-07-14;',
+    'posture scoping 2026-07-29, T-1085). NASSAJ_SECURITY_POSTURE=strict selects it.',
   ].join('\n');
 }
 
@@ -139,13 +140,13 @@ function buildUnverifiableFatalMessage(detail) {
     '  2. inspect the path chain (ls -ld /var /var/run /run) for permissions/symlink damage',
     '  3. if Docker is not meant to run on this node, remove the socket/daemon entirely —',
     '     an ABSENT socket passes this guard silently',
-    'This guard is fail-closed BY DESIGN on shared hosts and has no disable flag',
-    '(committee 2026-07-14; single-user scope narrowing 2026-07-29, T-1085).',
+    'This guard is fail-closed BY DESIGN on untrusted-user instances (committee 2026-07-14;',
+    'posture scoping 2026-07-29, T-1085). NASSAJ_SECURITY_POSTURE=strict selects it.',
   ].join('\n');
 }
 
 /**
- * Header prepended when a SINGLE-USER node boots despite an exposed or
+ * Header prepended when a TRUSTED-posture node boots despite an exposed or
  * unverifiable socket. It states plainly that detection did NOT change and why
  * enforcement did, so nobody reads the surviving boot as "the guard passed".
  * @param {string} reason  posture reason from resolveSecurityPosture
@@ -153,12 +154,13 @@ function buildUnverifiableFatalMessage(detail) {
  */
 function buildDegradedWarningHeader(reason) {
   return [
-    '[docker-sock-guard] BOOTING ANYWAY (single-user host) — the finding below stands.',
-    `Posture: single-user (${reason}). The one account able to drive an agent here is the`,
-    'same human who owns this login session and can already reach the Docker socket from',
-    'their own shell, so refusing to boot would cost availability and buy no security.',
-    'Add a second account (or set NASSAJ_SECURITY_POSTURE=strict) and this becomes a',
-    'HARD boot refusal again — the remediation below is what to run before you do.',
+    '[docker-sock-guard] BOOTING ANYWAY (trusted-operator posture) — the finding below stands.',
+    `Posture: trusted (${reason}). Everyone with an account on this instance is treated as an`,
+    'operator of this host, and an operator can already reach the Docker socket from their own',
+    'shell — so refusing to boot would cost availability and buy no security. Fix it anyway:',
+    'an agent reaching docker.sock defeats every provider isolation layer (B-170).',
+    'On an instance that serves UNTRUSTED users, set NASSAJ_SECURITY_POSTURE=strict and this',
+    'becomes a HARD boot refusal again — the remediation below is what to run before you do.',
   ].join('\n');
 }
 
@@ -190,7 +192,7 @@ function collectProcessGids(proc) {
  * Enforces the docker-socket invariant at boot. Call BEFORE any listener /
  * request handling (see server/index.js startServer). On exposure — or on any
  * state it cannot verify — it throws DockerSockExposedError when the host is
- * SHARED, and degrades to a recorded warning when the host is SINGLE-USER.
+ * SHARED, and degrades to a recorded warning when the posture is TRUSTED.
  * Returns a small result object whenever it does not throw.
  *
  * Dependencies are injectable for tests; production callers use the defaults
@@ -228,8 +230,8 @@ export function enforceDockerSockBootGuard(deps = {}) {
   } = deps;
 
   /**
-   * Single exit for both bad outcomes: refuse on a shared host, warn on a
-   * single-user one. Detection is identical either way — only the action
+   * Single exit for both bad outcomes: refuse on an untrusted-user instance,
+   * warn on a trusted-operator one. Detection is identical either way — only the action
    * differs, and the degraded path still logs the FULL fatal text so the
    * operator sees the same diagnosis and remediation.
    * @param {string} message   built fatal message (exposed or unverifiable)

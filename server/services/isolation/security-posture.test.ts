@@ -1,10 +1,12 @@
 /**
  * security-posture.test.ts — T-1085 deployment posture resolver.
  *
- * The invariant under test is asymmetric ON PURPOSE: env may ESCALATE a
- * single-user node to shared, but nothing may DOWNGRADE a genuinely shared node
- * to single-user. That asymmetry is what keeps the 2026-07-14 "no disable flag"
- * committee decision intact while letting an ordinary install boot.
+ * The rule under test, after the 2026-07-29 correction: the strict posture is a
+ * DECLARATION, not an inference. Counting accounts (the first attempt) measured
+ * how many people log in, not whether they are already trusted on the host, and
+ * left a two-colleague fleet node unbootable. Only two things select strict now:
+ * an explicit env declaration, and platform mode — where authentication is off,
+ * so no trust claim about "accounts" can be true.
  *
  * Runner:
  *   npx tsx --experimental-test-module-mocks --tsconfig server/tsconfig.json \
@@ -16,100 +18,98 @@ import { describe, it } from 'node:test';
 
 import { SECURITY_POSTURE_ENV, resolveSecurityPosture } from './security-posture.js';
 
-/** Single-user baseline: no env override, no platform mode, one account. */
+/** Ordinary install: no declaration, no platform mode. */
 function base(overrides: Record<string, unknown> = {}) {
   return {
     env: {} as NodeJS.ProcessEnv,
     isPlatform: false,
-    activeUserCount: () => 1,
     ...overrides,
   };
 }
 
-describe('resolveSecurityPosture — single-user', () => {
-  it('one active account on a non-platform node is single-user', () => {
+describe('resolveSecurityPosture — the default is trusted (an install must boot)', () => {
+  it('an undeclared install is trusted', () => {
     const res = resolveSecurityPosture(base());
-    assert.equal(res.posture, 'single-user');
+    assert.equal(res.posture, 'trusted');
+    assert.equal(res.shared, false);
+    assert.match(res.reason, new RegExp(`${SECURITY_POSTURE_ENV}=strict`), 'must name the opt-in');
+  });
+
+  it('an ABSENT env object still resolves (no crash, still trusted)', () => {
+    const res = resolveSecurityPosture({ env: undefined, isPlatform: false });
     assert.equal(res.shared, false);
   });
 
-  it('a fresh install with ZERO accounts is still single-user (nobody to protect yet)', () => {
-    const res = resolveSecurityPosture(base({ activeUserCount: () => 0 }));
+  it('the number of accounts is IRRELEVANT — this is the 2026-07-29 regression', () => {
+    // The first fix refused to boot here (2 accounts ⇒ "shared"), which is
+    // exactly what left a live node dead. The resolver must not accept an
+    // account count as an input at all any more.
+    const res = resolveSecurityPosture(
+      base({ activeUserCount: () => 12 } as unknown as Record<string, unknown>),
+    );
+    assert.equal(res.shared, false, 'account count must never select the strict posture');
+  });
+
+  it('an explicit "trusted" declaration is honored and named in the reason', () => {
+    const res = resolveSecurityPosture(
+      base({ env: { [SECURITY_POSTURE_ENV]: 'trusted' } as NodeJS.ProcessEnv }),
+    );
     assert.equal(res.shared, false);
+    assert.match(res.reason, /operator-declared/);
   });
 });
 
-describe('resolveSecurityPosture — shared', () => {
-  it('more than one active account is shared', () => {
-    const res = resolveSecurityPosture(base({ activeUserCount: () => 2 }));
-    assert.equal(res.posture, 'shared');
-    assert.match(res.reason, /2 active accounts/);
-  });
-
-  it('platform mode is shared regardless of the account count', () => {
-    const res = resolveSecurityPosture(base({ isPlatform: true }));
-    assert.equal(res.shared, true);
-    assert.match(res.reason, /platform mode/i);
-  });
-
-  it(`${SECURITY_POSTURE_ENV}=strict escalates a single-user node`, () => {
+describe('resolveSecurityPosture — strict is a declaration', () => {
+  it(`${SECURITY_POSTURE_ENV}=strict selects the fail-closed posture`, () => {
     const res = resolveSecurityPosture(
       base({ env: { [SECURITY_POSTURE_ENV]: 'strict' } as NodeJS.ProcessEnv }),
     );
+    assert.equal(res.posture, 'shared');
     assert.equal(res.shared, true);
-    assert.match(res.reason, /operator-declared/);
   });
 
-  it('accepts the "shared" spelling and is case/whitespace tolerant', () => {
+  it('accepts the "shared" spelling, case-insensitively and trimmed', () => {
     const res = resolveSecurityPosture(
       base({ env: { [SECURITY_POSTURE_ENV]: '  SHARED ' } as NodeJS.ProcessEnv }),
     );
     assert.equal(res.shared, true);
   });
+
+  it('an unrecognized value does NOT silently select strict (it falls back to trusted)', () => {
+    const res = resolveSecurityPosture(
+      base({ env: { [SECURITY_POSTURE_ENV]: 'yes-please' } as NodeJS.ProcessEnv }),
+    );
+    assert.equal(res.shared, false);
+  });
 });
 
-describe('resolveSecurityPosture — no env value can DOWNGRADE a shared node', () => {
-  // This is the whole safety argument for narrowing the docker guard's scope.
-  for (const value of ['permissive', 'single-user', 'off', 'false', '0', 'none', 'disabled']) {
-    it(`${SECURITY_POSTURE_ENV}=${value} does NOT make a 3-account host single-user`, () => {
+describe('resolveSecurityPosture — platform mode cannot be downgraded', () => {
+  // Platform mode DISABLES authentication (every request resolves to the first
+  // user, see middleware/auth.js), so "the accounts here are operators" is not a
+  // claim the operator is in a position to make. Checked before the env read.
+
+  it('platform mode alone selects strict', () => {
+    const res = resolveSecurityPosture(base({ isPlatform: true }));
+    assert.equal(res.shared, true);
+    assert.match(res.reason, /authentication is disabled/i);
+  });
+
+  for (const value of ['trusted', 'permissive', 'off', 'false', '0', 'none']) {
+    it(`${SECURITY_POSTURE_ENV}=${value} does NOT downgrade platform mode`, () => {
       const res = resolveSecurityPosture(
-        base({
-          env: { [SECURITY_POSTURE_ENV]: value } as NodeJS.ProcessEnv,
-          activeUserCount: () => 3,
-        }),
+        base({ env: { [SECURITY_POSTURE_ENV]: value } as NodeJS.ProcessEnv, isPlatform: true }),
       );
-      assert.equal(res.shared, true, 'a shared host must stay shared whatever the env says');
+      assert.equal(res.shared, true);
     });
   }
 
-  it(`${SECURITY_POSTURE_ENV}=permissive does not disable platform-mode strictness either`, () => {
-    const res = resolveSecurityPosture(
-      base({ env: { [SECURITY_POSTURE_ENV]: 'permissive' } as NodeJS.ProcessEnv, isPlatform: true }),
-    );
-    assert.equal(res.shared, true);
-  });
-});
-
-describe('resolveSecurityPosture — unreadable state fails toward shared', () => {
-  it('a throwing user count is treated as shared, not as single-user', () => {
-    const res = resolveSecurityPosture(
-      base({
-        activeUserCount: () => {
-          throw new Error('database is locked');
-        },
-      }),
-    );
-    assert.equal(res.shared, true);
-    assert.match(res.reason, /database is locked/);
-  });
-
-  it('a non-numeric user count is treated as shared', () => {
-    const res = resolveSecurityPosture(base({ activeUserCount: () => undefined as unknown as number }));
+  it('reads VITE_IS_PLATFORM from env when isPlatform is not injected', () => {
+    const res = resolveSecurityPosture({ env: { VITE_IS_PLATFORM: 'true' } as NodeJS.ProcessEnv });
     assert.equal(res.shared, true);
   });
 
-  it('a missing env object does not crash the resolver', () => {
-    const res = resolveSecurityPosture(base({ env: undefined }));
+  it('any VITE_IS_PLATFORM value other than the exact string "true" is off', () => {
+    const res = resolveSecurityPosture({ env: { VITE_IS_PLATFORM: '1' } as NodeJS.ProcessEnv });
     assert.equal(res.shared, false);
   });
 });

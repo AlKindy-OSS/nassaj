@@ -126,8 +126,8 @@ function checkDockerSocket() {
   warn(
     'docker socket',
     `this user holds gid ${sockGid}, which owns ${sock}: nassaj can reach Docker and therefore host root. ` +
-      'Single-user install: boots with a warning. Shared host (>1 account, platform mode, or ' +
-      'NASSAJ_SECURITY_POSTURE=strict): REFUSES to boot.',
+      'Default (trusted) posture: boots with a warning. NASSAJ_SECURITY_POSTURE=strict or ' +
+      'platform mode: REFUSES to boot until this is fixed.',
     `sudo gpasswd -d ${os.userInfo().username} docker`,
     'log out and back in, then: pm2 kill && pm2 resurrect   # a plain restart keeps the stale group',
   );
