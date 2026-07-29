@@ -24,9 +24,11 @@
       "context": "Antwort basierend auf dem Sitzungskontext bis zur zuletzt gespeicherten Nachricht."
     },
     "fork": {
-      "action": "Als Chat fortsetzen",
+      "actionFull": "Mit vollem Kontext fortsetzen",
+      "actionFresh": "Neue Unterhaltung",
       "pending": "Wird geforkt…",
-      "hint": "Fork: erstellt eine neue Unterhaltung aus dieser Sitzung mit der Nebenfrage und ihrer Antwort — ohne Kontingentverbrauch. Kürzel: f",
+      "hintFull": "Fork: eine neue Unterhaltung mit dieser gesamten Sitzung, dann Frage und Antwort — wie in Claude Code. Kürzel: f",
+      "hintFresh": "Eine neue Unterhaltung nur mit Frage und Antwort, im selben Projekt — ohne Sitzungskontext. Kürzel: n",
       "errors": {
         "busy": "Ein Fork läuft bereits — bitte kurz warten.",
         "session_not_found": "Die Ausgangssitzung wurde nicht gefunden.",

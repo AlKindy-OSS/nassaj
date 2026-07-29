@@ -28,9 +28,11 @@
  * Last verified against Claude Code CLI: 2.1.219 (2026-07-29).
  *
  * ── WHAT IT GUARDS / WHAT IT DOES NOT ────────────────────────────────────────
- * GUARDS: a forked transcript is resumable by the real CLI; the inherited history
- *   survives the uuid/sessionId rewrite; the appended /btw pair is visible to the
- *   resumed model; and the SOURCE transcript is left byte-identical.
+ * GUARDS: BOTH branch modes are resumable by the real CLI — the full branch keeps
+ *   its inherited history through the uuid/sessionId rewrite, the fresh thread
+ *   carries the exchange and provably NOT the history — the appended /btw pair is
+ *   visible to the resumed model in both, and the SOURCE transcript is left
+ *   byte-identical.
  * DOES NOT GUARD: the WS gates, the DB indexing/participant wiring (unit-tested
  *   in session-fork.service.test.ts), or how the branch renders in the UI.
  *
@@ -245,12 +247,69 @@ async function main() {
 
     if (!resumed.sessionId) {
       log('FAIL: the CLI would not resume the forked transcript at all.');
+      process.exit(1);
+    }
+    if (!sawSeed || !sawSide) {
+      log('FAIL: the fork resumed but its content did not survive.');
+      process.exit(1);
+    }
+    log('PASS (full): the branch resumed with BOTH the inherited history and the side exchange.');
+
+    // ── Step 4: the FRESH mode — a branch with NO inherited history. ──────────
+    // Structurally a different transcript (three lines, a user entry as the root
+    // and no ancestry at all), so "the full branch resumes" proves nothing about
+    // it. Assert both directions: the side exchange IS there, and the seed marker
+    // is NOT — a fresh thread that silently inherited context would be a leak of
+    // exactly the context the user chose not to carry.
+    const fresh = await forkClaudeTranscript({
+      sourceFilePath: sourceTranscript,
+      sourceSessionId: seed.sessionId,
+      includeHistory: false,
+      extraMessages: [
+        { role: 'user', content: 'What is the side code for this task?' },
+        { role: 'assistant', content: `The side code for this task is ${sideMarker}.` },
+      ],
+      title: 'btw: What is the side code for this task?',
+    });
+    log('fresh thread:', fresh.forkedSessionId, `(${fresh.entryCount} entries)`);
+    if (fresh.entryCount !== 2) {
+      log('FAIL: a fresh thread must hold exactly the exchange, got', fresh.entryCount);
+      process.exit(1);
+    }
+
+    const resumedFresh = await runQuery(
+      {
+        prompt:
+          'Reply with exactly one line and nothing else: the side code for this task, '
+          + 'then the project code you were told to remember if you know it, or the word NONE if you do not.',
+        options: {
+          cwd: tmpProject,
+          env: { ...process.env },
+          model: 'haiku',
+          maxTurns: 1,
+          resume: fresh.forkedSessionId,
+          pathToClaudeCodeExecutable: executable,
+          systemPrompt: { type: 'preset', preset: 'claude_code' },
+        },
+      },
+      RESUME_TIMEOUT_MS,
+    );
+
+    const freshAnswer = resumedFresh.text || '';
+    const freshSawSide = freshAnswer.includes(sideMarker);
+    const freshSawSeed = freshAnswer.includes(seedMarker);
+    log('fresh resumed answer:', JSON.stringify(freshAnswer.slice(0, 200)));
+    log('side exchange visible:', freshSawSide ? 'YES ✔' : 'NO ✘');
+    log('history correctly ABSENT:', freshSawSeed ? 'NO ✘ (leaked!)' : 'YES ✔');
+
+    if (!resumedFresh.sessionId) {
+      log('FAIL: the CLI would not resume the fresh thread.');
       exitCode = 1;
-    } else if (sawSeed && sawSide) {
-      log('PASS: the forked transcript resumed with BOTH the inherited history and the side exchange.');
+    } else if (freshSawSide && !freshSawSeed) {
+      log('PASS: both branch modes resume correctly, each carrying exactly what it should.');
       exitCode = 0;
     } else {
-      log('FAIL: the fork resumed but its content did not survive.');
+      log('FAIL: the fresh thread resumed with the wrong content.');
       exitCode = 1;
     }
   } catch (error) {

@@ -3,6 +3,14 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.36.1.3] — Fix (2026-07-29)
+
+### Fixed
+
+- The previous fix seeded the empty wiki index for `build` and the client tests
+  but not for `typecheck`, so CI stayed red on every push with the same
+  unresolvable import. `typecheck` now seeds it too.
+
 ## [1.36.1.2] — Fix (2026-07-29)
 
 ### Fixed

@@ -31,6 +31,13 @@ export type BtwStatus = 'pending' | 'streaming' | 'complete' | 'error';
  */
 export type BtwForkStatus = 'idle' | 'forking' | 'error';
 
+/**
+ * T-1091 — شكل الفرع الذي يختاره المستخدم:
+ *   full  — يسحب المحادثة كاملة ثم الزوج (سلوك الـCLI نفسه؛ سياق كامل بثمنه)
+ *   fresh — محادثة جديدة تحوي السؤال وإجابته وحدهما في نفس المشروع
+ */
+export type BtwForkMode = 'full' | 'fresh';
+
 export interface BtwState {
   btwId: string;
   question: string;
@@ -38,6 +45,8 @@ export interface BtwState {
   status: BtwStatus;
   /** حالة زرّ الفرك لهذا السؤال بعينه (تُصفَّر مع كل استعلام جديد). */
   forkStatus: BtwForkStatus;
+  /** الوضع الجاري/الذي فشل — كي يظهر المؤشّر على الزرّ المضغوط وحده. */
+  forkMode?: BtwForkMode;
   /**
    * كود خطأ الفرك حين forkStatus==='error'. من عقد الخادم:
    *   busy | session_not_found | not_writable | unsupported_provider |
@@ -218,7 +227,7 @@ export function useBtwSideChannel({
    * لا يُرسَل إلا على سؤال مكتمل بإجابة غير فارغة (نفس شرط «f» في الـCLI)، وفركٌ
    * واحد في الطيران لكل سؤال.
    */
-  const forkBtw = useCallback(() => {
+  const forkBtw = useCallback((mode: BtwForkMode = 'full') => {
     // نقرأ الحالة الظاهرة مباشرةً (لا داخل updater): الـupdater يجب أن يبقى نقيّاً
     // لأن React قد يستدعيه أكثر من مرة.
     if (
@@ -233,7 +242,13 @@ export function useBtwSideChannel({
 
     setActiveBtw((prev) =>
       prev && prev.btwId === btwId
-        ? { ...prev, forkStatus: 'forking', forkErrorCode: undefined, forkErrorMessage: undefined }
+        ? {
+            ...prev,
+            forkStatus: 'forking',
+            forkMode: mode,
+            forkErrorCode: undefined,
+            forkErrorMessage: undefined,
+          }
         : prev,
     );
 
@@ -257,6 +272,7 @@ export function useBtwSideChannel({
       sessionId,
       question,
       answer,
+      mode,
       ...(upToMessageId ? { upToMessageId } : {}),
     });
 

@@ -321,7 +321,10 @@ describe('useBtwSideChannel', () => {
       expect(frame.sessionId).toBe('s1');
       expect(frame.question).toBe('س');
       expect(frame.answer).toBe('الجواب');
+      // الوضع الافتراضي = الفرع الكامل (سلوك الـCLI)
+      expect(frame.mode).toBe('full');
       expect(result.current.activeBtw?.forkStatus).toBe('forking');
+      expect(result.current.activeBtw?.forkMode).toBe('full');
       // حالة الإجابة نفسها لم تتغيّر
       expect(result.current.activeBtw?.status).toBe('complete');
     });
@@ -408,6 +411,19 @@ describe('useBtwSideChannel', () => {
       act(() => busy.result.current.forkBtw());
       act(() => busy.result.current.forkBtw());
       expect(busy.sendMessage).toHaveBeenCalledTimes(2); // query + fork واحد
+    });
+
+    it('forkBtw(\'fresh\') يرسل وضع المحادثة الجديدة ويسجّله في الحالة', () => {
+      const { result, sendMessage } = mountCompleted();
+      act(() => result.current.forkBtw('fresh'));
+
+      const frame = sendMessage.mock.calls[1][0] as Record<string, unknown>;
+      expect(frame.type).toBe('btw-fork');
+      expect(frame.mode).toBe('fresh');
+      // السؤال والإجابة يُرسلان في الوضعين — الفرق في السياق المسحوب لا في الزوج.
+      expect(frame.question).toBe('س');
+      expect(frame.answer).toBe('الجواب');
+      expect(result.current.activeBtw?.forkMode).toBe('fresh');
     });
 
     it('العزل: btw-forked بـbtwId مختلف يُتجاهَل', () => {

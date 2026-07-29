@@ -79,6 +79,21 @@ export class SessionForkError extends Error {
   }
 }
 
+/**
+ * T-1091 — how much of the source conversation the branch carries:
+ *   full  — the whole conversation, then the exchange (the CLI's own behaviour;
+ *           the follow-up keeps every bit of context, and pays for it)
+ *   fresh — ONLY the exchange, in the same project (a clean thread for a side
+ *           question that stands on its own)
+ */
+export type SessionForkMode = 'full' | 'fresh';
+
+export const SESSION_FORK_MODES: readonly SessionForkMode[] = ['full', 'fresh'];
+
+export function isSessionForkMode(value: unknown): value is SessionForkMode {
+  return value === 'full' || value === 'fresh';
+}
+
 export interface ForkSessionParams {
   /** The live session being branched. */
   sessionId: string;
@@ -90,12 +105,15 @@ export interface ForkSessionParams {
   userId: number | null;
   /** Optional context pin (the same id `/btw` answered against). */
   upToMessageId?: string | null;
+  /** Defaults to 'full' — the upstream-faithful branch. */
+  mode?: SessionForkMode;
 }
 
 export interface ForkSessionResult {
   sessionId: string;
   title: string;
   projectPath: string | null;
+  mode: SessionForkMode;
 }
 
 /** `btw: <question>` clipped to the upstream title budget. */
@@ -130,7 +148,7 @@ function clip(text: string): string {
 export async function forkSessionFromSideQuery(
   params: ForkSessionParams,
 ): Promise<ForkSessionResult> {
-  const { sessionId, question, answer, userId, upToMessageId = null } = params;
+  const { sessionId, question, answer, userId, upToMessageId = null, mode = 'full' } = params;
 
   let row: { provider: string; project_path: string | null; jsonl_path: string | null } | null =
     null;
@@ -176,6 +194,9 @@ export async function forkSessionFromSideQuery(
       sourceFilePath,
       sourceSessionId: sessionId,
       upToMessageId,
+      // 'fresh' carries no history: the branch is the exchange alone, seeded
+      // with the source's cwd/version so it still belongs to this project.
+      includeHistory: mode !== 'fresh',
       extraMessages,
       title,
     });
@@ -229,12 +250,13 @@ export async function forkSessionFromSideQuery(
 
   console.log(
     `[BTW] fork created source=${sessionId} forked=${forked.forkedSessionId} `
-    + `entries=${forked.entryCount} userIdValue=${String(userId)}`,
+    + `mode=${mode} entries=${forked.entryCount} userIdValue=${String(userId)}`,
   );
 
   return {
     sessionId: forked.forkedSessionId,
     title,
     projectPath: projectPath ?? forked.cwd,
+    mode,
   };
 }

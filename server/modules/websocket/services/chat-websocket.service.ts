@@ -182,7 +182,15 @@ type ChatWebSocketDependencies = {
     answer: string;
     userId: number | null;
     upToMessageId: string | null;
-  }) => Promise<{ sessionId: string; title: string; projectPath: string | null }>;
+    // T-1091: 'full' carries the whole conversation (the CLI's behaviour),
+    // 'fresh' carries only the exchange. Always sent explicitly by this layer.
+    mode: 'full' | 'fresh';
+  }) => Promise<{
+    sessionId: string;
+    title: string;
+    projectPath: string | null;
+    mode?: 'full' | 'fresh';
+  }>;
   abortClaudeSDKSession: (
     sessionId: string,
     rawWs?: unknown,
@@ -1161,6 +1169,10 @@ export function handleChatConnection(
           typeof data.upToMessageId === 'string' && data.upToMessageId.trim() !== ''
             ? data.upToMessageId.trim()
             : null;
+        // T-1091: the branch shape the user picked. Anything unrecognised (an
+        // older or hand-rolled client) falls back to 'full' — the behaviour that
+        // shipped first and the one the CLI itself has.
+        const forkMode: 'full' | 'fresh' = data.mode === 'fresh' ? 'fresh' : 'full';
 
         // Same discipline as the /btw diagnostics: code + session + userId only,
         // never the question, the answer, or any conversation content.
@@ -1233,11 +1245,13 @@ export function handleChatConnection(
             answer: forkAnswer,
             userId: toNumericUserId(presenceUserId),
             upToMessageId: forkUpToMessageId,
+            mode: forkMode,
           })
           .then((result) => {
             releaseFork();
             console.log(
               `[BTW] ws forked source=${forkSessionId} forked=${result.sessionId} `
+              + `mode=${forkMode} `
               + `userIdType=${typeof presenceUserId} userIdValue=${String(presenceUserId)}`
             );
             // C2 unicast, and the id is deliberately NOT on a `sessionId` key:
@@ -1248,6 +1262,7 @@ export function handleChatConnection(
               btwId,
               forkedSessionId: result.sessionId,
               title: result.title,
+              mode: forkMode,
             });
           })
           .catch((error: unknown) => {

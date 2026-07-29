@@ -24,9 +24,11 @@
       "context": "Son kaydedilen mesaja kadar olan oturum bağlamına göre yanıtlar."
     },
     "fork": {
-      "action": "Sohbet olarak sürdür",
+      "actionFull": "Tam bağlamla sürdür",
+      "actionFresh": "Yeni sohbet",
       "pending": "Çatallanıyor…",
-      "hint": "Fork: bu oturumdan, yan soruyu ve yanıtını taşıyan yeni bir sohbet oluşturur — kota harcamaz. Kısayol: f",
+      "hintFull": "Fork: bu oturumun tamamını, ardından soruyu ve yanıtını taşıyan yeni bir sohbet — Claude Code’daki gibi. Kısayol: f",
+      "hintFresh": "Yalnızca soruyu ve yanıtını içeren, aynı projede yeni bir sohbet — oturum bağlamı taşınmaz. Kısayol: n",
       "errors": {
         "busy": "Zaten bir fork çalışıyor — birazdan tekrar deneyin.",
         "session_not_found": "Kaynak oturum bulunamadı.",

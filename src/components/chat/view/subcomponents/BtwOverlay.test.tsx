@@ -180,12 +180,12 @@ describe('BtwOverlay', () => {
 
     it('يعرض زرّ الفرك على إجابة مكتملة حين يُمرَّر onFork', () => {
       render(<BtwOverlay state={completeState} onClose={() => {}} onFork={() => {}} />);
-      expect(screen.getByText('btw.fork.action')).toBeDefined();
+      expect(screen.getByText('btw.fork.actionFull')).toBeDefined();
     });
 
     it('لا زرّ فرك بلا onFork (لا زرّ معطّل بلا سبب)', () => {
       render(<BtwOverlay state={completeState} onClose={() => {}} />);
-      expect(screen.queryByText('btw.fork.action')).toBeNull();
+      expect(screen.queryByText('btw.fork.actionFull')).toBeNull();
     });
 
     it('لا زرّ فرك أثناء البثّ ولا على إجابة فارغة', () => {
@@ -196,27 +196,41 @@ describe('BtwOverlay', () => {
           onFork={() => {}}
         />,
       );
-      expect(screen.queryByText('btw.fork.action')).toBeNull();
+      expect(screen.queryByText('btw.fork.actionFull')).toBeNull();
       unmount();
 
       render(
         <BtwOverlay state={{ ...completeState, answer: '   ' }} onClose={() => {}} onFork={() => {}} />,
       );
-      expect(screen.queryByText('btw.fork.action')).toBeNull();
+      expect(screen.queryByText('btw.fork.actionFull')).toBeNull();
     });
 
-    it('النقر يستدعي onFork مرة واحدة', () => {
+    it('يعرض الوضعين معاً: السياق الكامل والمحادثة الجديدة', () => {
+      render(<BtwOverlay state={completeState} onClose={() => {}} onFork={() => {}} />);
+      expect(screen.getByText('btw.fork.actionFull')).toBeDefined();
+      expect(screen.getByText('btw.fork.actionFresh')).toBeDefined();
+    });
+
+    it('كل زرّ يمرّر وضعه: full للسياق الكامل وfresh للمحادثة الجديدة', () => {
       const onFork = vi.fn();
       render(<BtwOverlay state={completeState} onClose={() => {}} onFork={onFork} />);
-      fireEvent.click(screen.getByText('btw.fork.action'));
-      expect(onFork).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByText('btw.fork.actionFull'));
+      expect(onFork).toHaveBeenLastCalledWith('full');
+
+      fireEvent.click(screen.getByText('btw.fork.actionFresh'));
+      expect(onFork).toHaveBeenLastCalledWith('fresh');
+      expect(onFork).toHaveBeenCalledTimes(2);
     });
 
-    it('اختصار «f» يفرع كما في الـCLI', () => {
+    it('اختصار «f» = الكامل (كما في الـCLI) و«n» = محادثة جديدة', () => {
       const onFork = vi.fn();
       render(<BtwOverlay state={completeState} onClose={() => {}} onFork={onFork} />);
       fireEvent.keyDown(document, { key: 'f' });
-      expect(onFork).toHaveBeenCalledTimes(1);
+      expect(onFork).toHaveBeenLastCalledWith('full');
+      fireEvent.keyDown(document, { key: 'n' });
+      expect(onFork).toHaveBeenLastCalledWith('fresh');
+      expect(onFork).toHaveBeenCalledTimes(2);
     });
 
     it('اختصار «f» لا يعمل مع مُعدِّل ولا من داخل حقل كتابة', () => {
@@ -233,18 +247,24 @@ describe('BtwOverlay', () => {
       expect(onFork).not.toHaveBeenCalled();
     });
 
-    it('أثناء الفرك: الزرّ معطّل ولا يُستدعى onFork بالاختصار', () => {
+    it('أثناء الفرك: الزرّان معطّلان، والمؤشّر على الوضع المضغوط وحده', () => {
       const onFork = vi.fn();
       render(
         <BtwOverlay
-          state={{ ...completeState, forkStatus: 'forking' }}
+          state={{ ...completeState, forkStatus: 'forking', forkMode: 'fresh' }}
           onClose={() => {}}
           onFork={onFork}
         />,
       );
-      const button = screen.getByText('btw.fork.pending').closest('button');
-      expect(button?.hasAttribute('disabled')).toBe(true);
+      // الوضع الجاري يعرض «يُفرِّع…»، والآخر يبقى بعنوانه لكنه معطّل.
+      const running = screen.getByText('btw.fork.pending').closest('button');
+      const other = screen.getByText('btw.fork.actionFull').closest('button');
+      expect(running?.hasAttribute('disabled')).toBe(true);
+      expect(other?.hasAttribute('disabled')).toBe(true);
+      expect(screen.queryByText('btw.fork.actionFresh')).toBeNull();
+
       fireEvent.keyDown(document, { key: 'f' });
+      fireEvent.keyDown(document, { key: 'n' });
       expect(onFork).not.toHaveBeenCalled();
     });
 
@@ -260,7 +280,7 @@ describe('BtwOverlay', () => {
       // الإجابة نفسها لم تتأثّر
       expect(screen.getByText('الجواب')).toBeDefined();
       // ويبقى الفرك قابلاً لإعادة المحاولة
-      expect(screen.getByText('btw.fork.action')).toBeDefined();
+      expect(screen.getByText('btw.fork.actionFull')).toBeDefined();
     });
 
     it('كود فرك غير معروف يسقط لرسالة الخادم الخام', () => {

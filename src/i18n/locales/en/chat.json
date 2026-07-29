@@ -24,9 +24,11 @@
       "context": "Answered on the session context up to the last saved message."
     },
     "fork": {
-      "action": "Continue as chat",
+      "actionFull": "Continue with full context",
+      "actionFresh": "New conversation",
       "pending": "Forking…",
-      "hint": "Fork: creates a new conversation from this session carrying the side question and its answer — no quota spent. Shortcut: f",
+      "hintFull": "Fork: a new conversation carrying this whole session, then the question and its answer — as Claude Code does. Shortcut: f",
+      "hintFresh": "A new conversation with only the question and its answer, in the same project — no session context pulled in. Shortcut: n",
       "errors": {
         "busy": "A fork is already running — try again shortly.",
         "session_not_found": "The source session was not found.",

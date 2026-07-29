@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, GitFork, Loader2, MessageCircleQuestion, X } from 'lucide-react';
+import { AlertTriangle, Check, GitFork, Loader2, MessageCircleQuestion, MessageSquarePlus, X } from 'lucide-react';
 
 import { Dialog, DialogContent } from '../../../../shared/view/ui';
-import type { BtwState } from '../../hooks/useBtwSideChannel';
+import type { BtwForkMode, BtwState } from '../../hooks/useBtwSideChannel';
 
 /**
  * T-849 — overlay القناة الجانبية «/btw».
@@ -55,14 +55,35 @@ const BTW_FORK_ERROR_CODE_KEYS: Record<string, string> = {
  */
 const BTW_SERVER_ERROR_MAX_LEN = 300;
 
+/**
+ * T-1091 — الوضعان المعروضان في التذييل. الترتيب مقصود: «الكامل» أولاً لأنه
+ * سلوك الـCLI ولأنه الخيار الآمن حين يعتمد السؤال على سياق المحادثة، و«الجديدة»
+ * تحته لسؤال قائم بذاته لا يستحق سحب المحادثة كلها.
+ */
+const FORK_ACTIONS: ReadonlyArray<{
+  mode: BtwForkMode;
+  Icon: typeof GitFork;
+  labelKey: string;
+  hintKey: string;
+}> = [
+  { mode: 'full', Icon: GitFork, labelKey: 'btw.fork.actionFull', hintKey: 'btw.fork.hintFull' },
+  {
+    mode: 'fresh',
+    Icon: MessageSquarePlus,
+    labelKey: 'btw.fork.actionFresh',
+    hintKey: 'btw.fork.hintFresh',
+  },
+];
+
 interface BtwOverlayProps {
   state: BtwState | null;
   onClose: () => void;
   /**
-   * T-1090: يفرع السؤال المكتمل إلى محادثة حقيقية. غيابه يُخفي الزرّ تماماً
-   * (لا زرّ معطّل بلا سبب مفهوم).
+   * T-1090/T-1091: يفرع السؤال المكتمل إلى محادثة حقيقية بالشكل المطلوب —
+   * 'full' يسحب المحادثة كاملة، و'fresh' يبدأ محادثة بالسؤال وإجابته وحدهما.
+   * غيابه يُخفي الزرّين تماماً (لا زرّ معطّل بلا سبب مفهوم).
    */
-  onFork?: () => void;
+  onFork?: (mode: BtwForkMode) => void;
 }
 
 const TITLE_ID = 'btw-overlay-title';
@@ -122,21 +143,26 @@ export default function BtwOverlay({ state, onClose, onFork }: BtwOverlayProps) 
   );
   const isForking = state?.forkStatus === 'forking';
 
-  const handleFork = useCallback(() => {
-    if (!canFork || isForking) {
-      return;
-    }
-    onFork?.();
-  }, [canFork, isForking, onFork]);
+  const handleFork = useCallback(
+    (mode: BtwForkMode) => {
+      if (!canFork || isForking) {
+        return;
+      }
+      onFork?.(mode);
+    },
+    [canFork, isForking, onFork],
+  );
 
-  // اختصار «f» — نفس اختصار الـCLI. الـoverlay بلا حقول إدخال، ومع ذلك نتجاهل
-  // الحدث القادم من عنصر كتابة (أو مع مُعدِّل) كي لا نخطف كتابةً مشروعة.
+  // اختصارا لوحة المفاتيح: «f» للفرع الكامل (نفس اختصار الـCLI) و«n» للمحادثة
+  // الجديدة. الـoverlay بلا حقول إدخال، ومع ذلك نتجاهل الحدث القادم من عنصر
+  // كتابة (أو مع مُعدِّل) كي لا نخطف كتابةً مشروعة.
   useEffect(() => {
     if (!canFork || isForking) {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'f' && event.key !== 'F') {
+      const key = event.key.toLowerCase();
+      if (key !== 'f' && key !== 'n') {
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) {
@@ -148,7 +174,7 @@ export default function BtwOverlay({ state, onClose, onFork }: BtwOverlayProps) 
         return;
       }
       event.preventDefault();
-      onFork?.();
+      onFork?.(key === 'f' ? 'full' : 'fresh');
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -275,28 +301,36 @@ export default function BtwOverlay({ state, onClose, onFork }: BtwOverlayProps) 
           </div>
 
           {canFork && (
-            <button
-              type="button"
-              onClick={handleFork}
-              disabled={isForking}
-              title={t('btw.fork.hint')}
-              className={[
-                'inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60',
-                'px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors',
-                'hover:bg-accent hover:text-accent-foreground',
-                'disabled:cursor-not-allowed disabled:opacity-60',
-                'focus-visible:outline-none focus-visible:ring-2',
-                'focus-visible:ring-ring focus-visible:ring-offset-2',
-                'focus-visible:ring-offset-background',
-              ].join(' ')}
-            >
-              {isForking ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <GitFork className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              <span>{isForking ? t('btw.fork.pending') : t('btw.fork.action')}</span>
-            </button>
+            <div className="flex shrink-0 flex-col items-stretch gap-1">
+              {FORK_ACTIONS.map(({ mode, Icon, labelKey, hintKey }) => {
+                const isThisRunning = isForking && state.forkMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => handleFork(mode)}
+                    disabled={isForking}
+                    title={t(hintKey)}
+                    className={[
+                      'inline-flex items-center gap-1.5 rounded-md border border-border/60',
+                      'px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors',
+                      'hover:bg-accent hover:text-accent-foreground',
+                      'disabled:cursor-not-allowed disabled:opacity-60',
+                      'focus-visible:outline-none focus-visible:ring-2',
+                      'focus-visible:ring-ring focus-visible:ring-offset-2',
+                      'focus-visible:ring-offset-background',
+                    ].join(' ')}
+                  >
+                    {isThisRunning ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    <span>{isThisRunning ? t('btw.fork.pending') : t(labelKey)}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
       </DialogContent>

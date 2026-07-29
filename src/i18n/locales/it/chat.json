@@ -24,9 +24,11 @@
       "context": "Risponde in base al contesto della sessione fino all'ultimo messaggio salvato."
     },
     "fork": {
-      "action": "Continua come chat",
+      "actionFull": "Continua con il contesto completo",
+      "actionFresh": "Nuova conversazione",
       "pending": "Fork in corso…",
-      "hint": "Fork: crea una nuova conversazione da questa sessione con la domanda laterale e la sua risposta — senza consumare quota. Scorciatoia: f",
+      "hintFull": "Fork: una nuova conversazione che porta con sé l’intera sessione, poi la domanda e la risposta — come fa Claude Code. Scorciatoia: f",
+      "hintFresh": "Una nuova conversazione con solo la domanda e la risposta, nello stesso progetto — senza il contesto della sessione. Scorciatoia: n",
       "errors": {
         "busy": "Un fork è già in corso — riprova tra poco.",
         "session_not_found": "Sessione di origine non trovata.",

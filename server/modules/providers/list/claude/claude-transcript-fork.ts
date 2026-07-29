@@ -96,6 +96,16 @@ export interface ForkClaudeTranscriptOptions {
   sourceSessionId: string;
   /** Branch only up to (and including) this message uuid. */
   upToMessageId?: string | null;
+  /**
+   * false ⇒ carry NO history: the branch holds only `extraMessages`, seeded with
+   * the source session's cwd/version/gitBranch so it is still a valid, resumable
+   * transcript in the same project. This is the "fresh thread" mode (T-1091) —
+   * beyond what the CLI's own fork does, and deliberately so: a side question is
+   * often self-contained, and inheriting a 6 MB conversation to follow up on one
+   * answer costs context the user did not ask to spend. Defaults to true (the
+   * upstream-faithful full branch).
+   */
+  includeHistory?: boolean;
   /** Appended after the branch, in order. */
   extraMessages?: ForkExtraMessage[];
   /** Session title written as the trailing `custom-title` row. */
@@ -281,6 +291,50 @@ type EntryTemplate = {
   model: string | null;
 };
 
+/**
+ * Reads ONLY the head of a transcript, far enough to learn the fields a seeded
+ * entry must carry (cwd above all — the synchronizer reads it to place the
+ * session in its project, and a branch without it is unusable).
+ *
+ * This is the fresh-thread path's whole read: it must not walk a 41 MB file to
+ * write three lines, so it stops at the first entry that supplies cwd + version,
+ * and gives up on `model` after a small budget rather than scanning on for it.
+ */
+async function readTranscriptTemplate(
+  sourceFilePath: string,
+  maxLines = 400,
+): Promise<EntryTemplate> {
+  const template: EntryTemplate = { cwd: null, version: null, gitBranch: null, model: null };
+  const stream = createReadStream(sourceFilePath, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let seen = 0;
+
+  try {
+    for await (const line of rl) {
+      const entry = parseLine(line);
+      if (!entry || !isBranchableEntry(entry)) {
+        continue;
+      }
+      seen += 1;
+      template.cwd = template.cwd ?? asString(entry.cwd);
+      template.version = template.version ?? asString(entry.version);
+      template.gitBranch = template.gitBranch ?? asString(entry.gitBranch);
+      const message = entry.message;
+      if (!template.model && message && typeof message === 'object') {
+        template.model = asString((message as MessageWithModel).model);
+      }
+      if ((template.cwd && template.version && template.model) || seen >= maxLines) {
+        break;
+      }
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+
+  return template;
+}
+
 function buildExtraEntry(
   message: ForkExtraMessage,
   template: EntryTemplate,
@@ -335,11 +389,16 @@ export async function forkClaudeTranscript(
     sourceFilePath,
     sourceSessionId,
     upToMessageId = null,
+    includeHistory = true,
     extraMessages = [],
     title = null,
     generateId = randomUUID,
     now = () => new Date().toISOString(),
   } = options;
+  // The two modes differ ONLY in whether the source conversation is carried
+  // over; everything after (the appended pair, the title row, the atomic write)
+  // is shared, so a fresh thread is as valid a transcript as a full branch.
+  const carryHistory = includeHistory !== false;
 
   let sourceSize = 0;
   try {
@@ -358,18 +417,42 @@ export async function forkClaudeTranscript(
     throw new TranscriptForkError('source_too_large', 'This conversation is too large to fork.');
   }
 
-  const { entries, order, foundCutoff } = await scanSource(
-    sourceFilePath,
-    upToMessageId,
-    generateId,
-  );
+  // Fresh thread: the source is read only for its head (cwd/version/model), and
+  // the scan + copy below are skipped entirely — a 41 MB transcript costs three
+  // written lines, not a full walk.
+  let entries = new Map<string, ScannedEntry>();
+  let order: string[] = [];
+  let carriedUuids: string[] = [];
+  let seededTemplate: EntryTemplate | null = null;
 
-  if (upToMessageId && !foundCutoff) {
-    throw new TranscriptForkError('message_not_found', 'The pinned message is not in this session.');
-  }
-  const carriedUuids = order.filter((uuid) => !entries.get(uuid)?.isProgress);
-  if (carriedUuids.length === 0) {
-    throw new TranscriptForkError('source_empty', 'This conversation has no messages to fork.');
+  if (carryHistory) {
+    const scanned = await scanSource(sourceFilePath, upToMessageId, generateId);
+    entries = scanned.entries;
+    order = scanned.order;
+
+    if (upToMessageId && !scanned.foundCutoff) {
+      throw new TranscriptForkError(
+        'message_not_found',
+        'The pinned message is not in this session.',
+      );
+    }
+    carriedUuids = order.filter((uuid) => !entries.get(uuid)?.isProgress);
+    if (carriedUuids.length === 0) {
+      throw new TranscriptForkError('source_empty', 'This conversation has no messages to fork.');
+    }
+  } else {
+    seededTemplate = await readTranscriptTemplate(sourceFilePath);
+    // Without a cwd the synchronizer cannot place the session in a project, so
+    // the branch would exist on disk and belong nowhere.
+    if (!seededTemplate.cwd) {
+      throw new TranscriptForkError(
+        'source_empty',
+        'This session has no usable transcript to start a thread from.',
+      );
+    }
+    if (extraMessages.length === 0) {
+      throw new TranscriptForkError('source_empty', 'A new thread needs at least one message.');
+    }
   }
 
   const forkedSessionId = generateId();
@@ -381,7 +464,12 @@ export async function forkClaudeTranscript(
   const lastCarriedUuid = carriedUuids[carriedUuids.length - 1];
   const windowEndUuid = order[order.length - 1];
 
-  const template: EntryTemplate = { cwd: null, version: null, gitBranch: null, model: null };
+  const template: EntryTemplate = seededTemplate ?? {
+    cwd: null,
+    version: null,
+    gitBranch: null,
+    model: null,
+  };
   let lastCarriedNewUuid: string | null = null;
   let entryCount = 0;
 
@@ -416,7 +504,8 @@ export async function forkClaudeTranscript(
     }
   };
 
-  try {
+  /** Pass 2 (full-branch mode only): stream the source into the branch. */
+  const copySourceEntries = async (): Promise<void> => {
     const stream = createReadStream(sourceFilePath, { encoding: 'utf8' });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     const seen = new Set<string>();
@@ -471,9 +560,15 @@ export async function forkClaudeTranscript(
       rl.close();
       stream.destroy();
     }
+  };
 
-    // The /btw question + the answer already shown, so the branch opens ON the
-    // side thread rather than at the point it was asked.
+  try {
+    if (carryHistory) {
+      await copySourceEntries();
+    }
+
+    // The /btw question + the answer already shown. In a full branch this
+    // CONTINUES the conversation; in a fresh thread it IS the conversation.
     for (const message of extraMessages) {
       if (typeof message?.content !== 'string' || message.content === '') {
         continue;

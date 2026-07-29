@@ -335,6 +335,100 @@ describe('forkClaudeTranscript', () => {
     assert.equal(written.filter((row) => row.type !== 'custom-title').length, 2);
   });
 
+  // ── T-1091: fresh-thread mode (includeHistory:false) ──────────────────────
+
+  test('fresh mode writes ONLY the exchange, seeded from the source head', async () => {
+    const dir = await tempDir();
+    const source = await writeTranscript(dir, SOURCE_SESSION, [
+      userEntry('u1', null, 'a long prior conversation'),
+      assistantEntry('a1', 'u1', 'with plenty of history'),
+      userEntry('u2', 'a1', 'and more'),
+      assistantEntry('a2', 'u2', 'and more still'),
+    ]);
+
+    const result = await forkClaudeTranscript({
+      sourceFilePath: source,
+      sourceSessionId: SOURCE_SESSION,
+      includeHistory: false,
+      extraMessages: [
+        { role: 'user', content: 'side question' },
+        { role: 'assistant', content: 'side answer' },
+      ],
+      title: 'btw: side question',
+      generateId: makeIdGen(),
+      now: () => '2026-07-29T12:00:00.000Z',
+    });
+
+    const written = await readEntries(result.filePath);
+    assert.equal(written.length, 3, 'the pair plus the title row — nothing inherited');
+    assert.equal(result.entryCount, 2);
+
+    // Nothing from the source conversation came along.
+    assert.equal(
+      written.some((row) => 'forkedFrom' in row),
+      false,
+      'a fresh thread carries no inherited entry',
+    );
+    const [question, answer, title] = written;
+    assert.equal(question.type, 'user');
+    assert.equal(question.parentUuid, null, 'the question is the thread root');
+    assert.equal(answer.parentUuid, question.uuid);
+    assert.equal(title.type, 'custom-title');
+    assert.equal(title.customTitle, 'btw: side question');
+
+    // Still a valid transcript IN THIS PROJECT: cwd is what the synchronizer
+    // reads to place the session, so it must be inherited from the source head.
+    assert.equal(question.cwd, '/workspace/demo');
+    assert.equal(question.version, '2.1.219');
+    assert.equal(result.cwd, '/workspace/demo');
+    for (const row of written) {
+      assert.equal(row.sessionId, result.forkedSessionId);
+    }
+  });
+
+  test('fresh mode refuses a source with no usable cwd (the branch would belong nowhere)', async () => {
+    const dir = await tempDir();
+    const source = await writeTranscript(dir, SOURCE_SESSION, [
+      { type: 'ai-title', sessionId: SOURCE_SESSION, aiTitle: 'metadata only' },
+    ]);
+
+    await assert.rejects(
+      () =>
+        forkClaudeTranscript({
+          sourceFilePath: source,
+          sourceSessionId: SOURCE_SESSION,
+          includeHistory: false,
+          extraMessages: [{ role: 'user', content: 'q' }],
+          generateId: makeIdGen(),
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof TranscriptForkError);
+        assert.equal(error.code, 'source_empty');
+        return true;
+      },
+    );
+  });
+
+  test('fresh mode refuses an empty exchange (there would be no thread at all)', async () => {
+    const dir = await tempDir();
+    const source = await writeTranscript(dir, SOURCE_SESSION, [userEntry('u1', null, 'hi')]);
+
+    await assert.rejects(
+      () =>
+        forkClaudeTranscript({
+          sourceFilePath: source,
+          sourceSessionId: SOURCE_SESSION,
+          includeHistory: false,
+          extraMessages: [],
+          generateId: makeIdGen(),
+        }),
+      (error: unknown) => {
+        assert.equal((error as { code: string }).code, 'source_empty');
+        return true;
+      },
+    );
+  });
+
   // Real production data (2026-06-28 lesson). Structure only — no content is read
   // into assertions, printed, or copied outside the temp dir.
   test('forks a REAL transcript from this host into a well-formed branch', async (t) => {

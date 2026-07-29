@@ -475,6 +475,7 @@ describe('T-1090 /btw fork WS gate', () => {
       question?: string;
       answer?: string;
       upToMessageId?: string;
+      mode?: string;
     }
   ) {
     ws.emit('message', JSON.stringify({ type: 'btw-fork', ...payload }));
@@ -505,6 +506,28 @@ describe('T-1090 /btw fork WS gate', () => {
     assert.equal(forkCalls[0].answer, 'because the docs symlink is re-bundled');
     assert.equal(forkCalls[0].userId, OWNER_USER_ID, 'the REQUESTER owns the branch');
     assert.equal(forkCalls[0].upToMessageId, 'msg-7', 'the context pin is forwarded');
+  });
+
+  test('the chosen branch mode is forwarded, and anything unrecognised falls back to full', async () => {
+    // Each fork is awaited to settle before the next: three back-to-back forks by
+    // ONE user would otherwise hit the per-user cap of 2 (which is the intended
+    // behaviour, asserted in its own test below — not what this one is about).
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    const a = connect(OWNER_USER_ID);
+    emitFork(a.ws, { btwId: 'm-fresh', ...FORK_PAYLOAD, mode: 'fresh' });
+    await settle();
+    assert.equal(a.forkCalls[0].mode, 'fresh');
+
+    const b = connect(OWNER_USER_ID);
+    emitFork(b.ws, { btwId: 'm-default', ...FORK_PAYLOAD });
+    await settle();
+    assert.equal(b.forkCalls[0].mode, 'full', 'no mode ⇒ the CLI-faithful full branch');
+
+    const c = connect(OWNER_USER_ID);
+    emitFork(c.ws, { btwId: 'm-bogus', ...FORK_PAYLOAD, mode: 'shallow' });
+    await settle();
+    assert.equal(c.forkCalls[0].mode, 'full', 'an unknown mode is never passed through');
   });
 
   test('the btw-forked reply carries forkedSessionId and NO sessionId key (C2)', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "nassaj-dev",
-  "version": "1.36.1.2",
+  "version": "1.36.1.3",
   "description": "nassaj-dev — claudecodeui fork with AntigravityProvider and RTL Arabic support",
   "type": "module",
   "private": true,
@@ -56,7 +56,8 @@
     "prepare": "husky",
     "update:platform": "./update-platform.sh",
     "prebuild:client": "node scripts/ensure-wiki-index.mjs",
-    "pretest:client": "node scripts/ensure-wiki-index.mjs"
+    "pretest:client": "node scripts/ensure-wiki-index.mjs",
+    "pretypecheck": "node scripts/ensure-wiki-index.mjs"
   },
   "keywords": [
     "claude code",

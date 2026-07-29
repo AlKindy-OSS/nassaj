@@ -174,6 +174,23 @@ describe('forkSessionFromSideQuery', () => {
     assert.deepEqual(notified, [{ provider: 'claude', sessionId: 'forked-1' }]);
   });
 
+  test('mode fresh asks for a history-less branch; mode full (the default) does not', async () => {
+    const fresh = await forkSessionFromSideQuery({ ...PARAMS, mode: 'fresh' });
+    assert.equal(forkCalls[0].includeHistory, false, 'fresh ⇒ carry no history');
+    assert.equal(fresh.mode, 'fresh', 'the caller is told which shape it got');
+    // The exchange is identical in both modes — only the inherited context differs.
+    assert.deepEqual(forkCalls[0].extraMessages, [
+      { role: 'user', content: PARAMS.question },
+      { role: 'assistant', content: PARAMS.answer },
+    ]);
+    assert.equal(forkCalls[0].title, 'btw: why is the build slow?');
+
+    forkCalls.length = 0;
+    const full = await forkSessionFromSideQuery(PARAMS);
+    assert.equal(forkCalls[0].includeHistory, true, 'default ⇒ the CLI-faithful full branch');
+    assert.equal(full.mode, 'full');
+  });
+
   test('derives the transcript path when the session row has no jsonl_path yet', async () => {
     sessionRows.set(SESSION_ID, {
       session_id: SESSION_ID,
