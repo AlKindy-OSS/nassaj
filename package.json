@@ -184,7 +184,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.3.2",
     "node-gyp": "^10.0.0",
-    "postcss": "^8.4.32",
+    "postcss": "^8.5.25",
     "release-it": "^19.0.5",
     "sharp": "^0.34.2",
     "tailwindcss": "^3.4.0",
