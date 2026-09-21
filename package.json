@@ -121,7 +121,7 @@
     "@tailwindcss/typography": "^0.5.16",
     "@uiw/react-codemirror": "^4.23.13",
     "@vitejs/plugin-react": "^4.6.0",
-    "@vscode/ripgrep": "^1.17.1",
+    "@vscode/ripgrep": "^1.18.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
