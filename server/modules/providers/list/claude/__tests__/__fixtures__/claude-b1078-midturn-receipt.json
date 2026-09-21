@@ -1,0 +1,43 @@
+{
+  "cli": "2.1.268",
+  "provenance": "B-1078. Record = shape of a native transcript user row captured 2026-09-11 (CLI 2.1.268); session id, uuid, parentUuid, promptId and clientMsgId replaced with synthetic uuid v4 values, cwd replaced with /fixture/project, slug dropped, text kept verbatim (trailing space is load-bearing for the payload hash). terminalReceipt = the matching message_coordination_ingress row (read-only), ids synthesized consistently with the record, verdict_json reduced to the fields the projector reads. Timestamps are real: the transcript row was written at 09:41:47.920Z, the receipt accepted at 09:41:57.418Z and made terminal at 09:42:43.368Z, so claimedReceipt and startedReceipt are the two states the same row passed through while the turn ran.",
+  "record": {
+    "parentUuid": "b1078000-0000-4000-8000-000000000003",
+    "isSidechain": false,
+    "promptId": "b1078000-0000-4000-8000-000000000004",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "سوي تجربة أبغا اشوف "
+    },
+    "uuid": "b1078000-0000-4000-8000-000000000002",
+    "timestamp": "2026-09-11T09:41:47.920Z",
+    "permissionMode": "bypassPermissions",
+    "promptSource": "sdk",
+    "userType": "external",
+    "entrypoint": "sdk-ts",
+    "cwd": "/fixture/project",
+    "sessionId": "b1078000-0000-4000-8000-000000000001",
+    "version": "2.1.268",
+    "gitBranch": "HEAD"
+  },
+  "requesterUserId": 1,
+  "terminalReceipt": {
+    "clientMsgId": "cmid_b1078000-0000-4000-8000-000000000005",
+    "uuid": "b1078000-0000-4000-8000-000000000002",
+    "payloadSha256": "3b3293a729359f7a300445faa2ad9437e42761e0e7d932fd1ee951fdbb9e0120",
+    "acceptedAt": "2026-09-11T09:41:57.418Z",
+    "lifecycleStatus": "terminal",
+    "verdictJson": "{\"kind\":\"complete\",\"exitCode\":0,\"sessionId\":\"b1078000-0000-4000-8000-000000000001\",\"provider\":\"claude\",\"clientMsgId\":\"cmid_b1078000-0000-4000-8000-000000000005\"}"
+  },
+  "claimedReceipt": {
+    "acceptedAt": null,
+    "lifecycleStatus": "claimed",
+    "verdictJson": null
+  },
+  "startedReceipt": {
+    "acceptedAt": "2026-09-11T09:41:57.418Z",
+    "lifecycleStatus": "started",
+    "verdictJson": null
+  }
+}

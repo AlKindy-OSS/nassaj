@@ -1,0 +1,15 @@
+name: Discord release notification (disabled)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notification-disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain fail-closed notification boundary
+        run: echo "Discord release notification remains disabled until its action has a reviewed immutable commit."

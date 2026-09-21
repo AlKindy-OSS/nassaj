@@ -1,0 +1,66 @@
+name: Docker
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra_tag:
+        description: 'Additional tag to push alongside the template tag (e.g. v1.2.3, leave empty for none)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [claude-code, codex, gemini]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Quality gate
+        run: |
+          npm run typecheck
+          npm test
+          npm run test:client
+
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Compute tags
+        id: tags
+        run: |
+          TAGS="docker.io/cloudcliai/sandbox:${{ matrix.template }}"
+          if [ -n "${{ inputs.extra_tag }}" ]; then
+            TAGS="$TAGS,docker.io/cloudcliai/sandbox:${{ matrix.template }}-${{ inputs.extra_tag }}"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push reviewed native architecture
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+          TEMPLATE: ${{ matrix.template }}
+        run: |
+          tag_args=()
+          IFS=',' read -ra tag_values <<< "$TAGS"
+          for tag in "${tag_values[@]}"; do tag_args+=(--tag "$tag"); done
+          # arm64 remains fail-closed until setup-qemu has a locally reviewed immutable SHA.
+          docker buildx build \
+            --platform linux/amd64 \
+            --file "./docker/${TEMPLATE}/Dockerfile" \
+            --push \
+            --cache-from "type=gha,scope=${TEMPLATE}" \
+            --cache-to "type=gha,mode=max,scope=${TEMPLATE}" \
+            "${tag_args[@]}" \
+            ./docker

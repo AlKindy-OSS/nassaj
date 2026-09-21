@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>مختبر تخطيط نسّاج — ثلاثة اتجاهات</title>
+<style>
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2') format('woff2');font-weight:400;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2') format('woff2');font-weight:600;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-latin-400-normal.woff2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-latin-600-normal.woff2') format('woff2');font-weight:600;font-display:swap}
+:root{--bg:#F7F7F6;--fg:#1A1A1A;--muted:#6B6B6B;--card:#fff;--line:#E2E2DF;--accent:#2F5D50}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#EDEDED;--muted:#A3A3A3;--card:#1E1E1E;--line:#2E2E2E;--accent:#7FB3A3}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:'IBM Plex Sans Arabic','IBM Plex Sans',sans-serif;line-height:1.8}
+.wrap{max-width:60rem;margin-inline:auto;padding:clamp(1.5rem,5vw,3.5rem) clamp(1rem,5vw,2rem) 5rem}
+h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:600;margin:0 0 .4rem}
+.rule{width:7rem;height:1px;background:var(--accent);margin-block:1rem 1.5rem}
+.lede{color:var(--muted);margin:0 0 2rem;font-size:1.05rem}
+.grid{display:grid;gap:1.25rem;grid-template-columns:1fr}
+@media(min-width:820px){.grid{grid-template-columns:repeat(3,1fr)}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:.6rem;transition:border-color .12s cubic-bezier(.2,.6,.3,1),transform .12s}
+.card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.tag{font-size:.8125rem;color:var(--accent);font-weight:600}
+.card h2{margin:0;font-size:1.15rem;font-weight:600}
+.card p{margin:0;color:var(--muted);font-size:.95rem;flex:1}
+.card a{display:inline-block;margin-block-start:.6rem;padding:.5rem 1rem;min-height:44px;line-height:34px;background:var(--accent);color:#fff;text-decoration:none;border-radius:.5rem;font-size:.9rem;text-align:center}
+@media (prefers-color-scheme:dark){.card a{color:#111}}
+.note{margin-block-start:2.5rem;padding-block-start:1.2rem;border-block-start:1px solid var(--line);color:var(--muted);font-size:.9rem}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>مختبر تخطيط نسّاج</h1>
+  <div class="rule"></div>
+  <p class="lede">ثلاثة توزيعات مختلفة جذرياً لشاشة نسّاج الرئيسية. الألوان محايدة عمداً — الحكم هنا على البنية وتوزيع العناصر وحدهما، لا على اللون.</p>
+  <div class="grid">
+    <div class="card">
+      <span class="tag">المفهوم أ</span>
+      <h2>منصّة القيادة</h2>
+      <p>لا شريط جانبي إطلاقاً. الجلسات سكّة بطاقات أفقية علوية تراها كلها بنظرة واحدة، والمحادثة تأخذ عرض الشاشة كاملاً، والأدوات في لوح سفلي ينزلق ثم يختفي.</p>
+      <a href="concept-a/">افتح المفهوم أ</a>
+    </div>
+    <div class="card">
+      <span class="tag">المفهوم ب</span>
+      <h2>مساحة العمل متعدّدة الألواح</h2>
+      <p>ألواح متجاورة قابلة لتغيير المقاس بالسحب كبيئة تطوير: محادثة وسياق وطرفية معاً، وسكّة أيقونات نحيلة على الحافة بدل الشريط العريض.</p>
+      <a href="concept-b/">افتح المفهوم ب</a>
+    </div>
+    <div class="card">
+      <span class="tag">المفهوم ج</span>
+      <h2>التركيز الكامل</h2>
+      <p>عمود واحد مركزي بلا زخرفة حوله. لوحة الأوامر (Ctrl K) هي بوابة كل تنقّل، ورقائق صغيرة تحت المؤلِّف تقول أين أنت، والحالة شارة عائمة.</p>
+      <a href="concept-c/">افتح المفهوم ج</a>
+    </div>
+  </div>
+  <p class="note">نماذج بصرية ثابتة ببيانات وهمية — ليست التطبيق الفعلي، ولم يُمَسّ كود نسّاج. اختر واحداً أو امزج بين اثنين، ثم نطوّره تفصيلاً.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+compiled="$root/dist-server/server/services/isolation/managed-claude-launcher.js"
+
+if [[ "${NODE_ENV:-development}" == "production" && -f "$compiled" ]]; then
+  exec node "$compiled" "$@"
+fi
+
+# Development always executes source so an old dist-server tree cannot shadow
+# the current launcher. Production prefers compiled output, with this explicit
+# source fallback for packaging failures and source-only recovery environments.
+exec "$root/node_modules/.bin/tsx" \
+  --tsconfig "$root/server/tsconfig.json" \
+  "$root/server/services/isolation/managed-claude-launcher.ts" "$@"

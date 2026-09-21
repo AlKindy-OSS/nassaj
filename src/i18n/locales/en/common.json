@@ -1,0 +1,939 @@
+{
+  "buttons": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "create": "Create",
+    "edit": "Edit",
+    "close": "Close",
+    "confirm": "Confirm",
+    "submit": "Submit",
+    "retry": "Retry",
+    "refresh": "Refresh",
+    "search": "Search",
+    "clear": "Clear",
+    "copy": "Copy",
+    "download": "Download",
+    "upload": "Upload",
+    "browse": "Browse"
+  },
+  "tabs": {
+    "chat": "Chat",
+    "shell": "Shell",
+    "files": "Files",
+    "git": "Source Control",
+    "tasks": "Tasks",
+    "board": "Project Board",
+    "wiki": "Wiki"
+  },
+  "wiki": {
+    "title": "Nassaj Wiki"
+  },
+  "status": {
+    "loading": "Loading...",
+    "success": "Success",
+    "error": "Error",
+    "failed": "Failed",
+    "pending": "Pending",
+    "completed": "Completed",
+    "inProgress": "In Progress"
+  },
+  "messages": {
+    "savedSuccessfully": "Saved successfully",
+    "deletedSuccessfully": "Deleted successfully",
+    "updatedSuccessfully": "Updated successfully",
+    "operationFailed": "Operation failed",
+    "networkError": "Network error. Please check your connection.",
+    "unauthorized": "Unauthorized. Please log in.",
+    "notFound": "Not found",
+    "invalidInput": "Invalid input",
+    "requiredField": "This field is required",
+    "unknownError": "An unknown error occurred"
+  },
+  "navigation": {
+    "settings": "Settings",
+    "home": "Home",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "logout": "Logout"
+  },
+  "common": {
+    "language": "Language",
+    "theme": "Theme",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
+    "name": "Name",
+    "description": "Description",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "optional": "Optional",
+    "version": "Version",
+    "select": "Select",
+    "selectAll": "Select All",
+    "deselectAll": "Deselect All",
+    "done": "Done",
+    "failed": "Failed"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} mins ago",
+    "hoursAgo": "{{count}} hours ago",
+    "daysAgo": "{{count}} days ago",
+    "yesterday": "Yesterday"
+  },
+  "fileOperations": {
+    "newFile": "New File",
+    "newFolder": "New Folder",
+    "rename": "Rename",
+    "move": "Move",
+    "copyPath": "Copy Path",
+    "openInEditor": "Open in Editor"
+  },
+  "mainContent": {
+    "loading": "Loading Nassaj",
+    "settingUpWorkspace": "Setting up your workspace...",
+    "chooseProject": "Choose Your Project",
+    "selectProjectDescription": "Select a project from the sidebar to start coding with Claude. Each project contains your chat sessions and file history.",
+    "tip": "Tip",
+    "createProjectMobile": "Tap the menu button above to access projects",
+    "createProjectDesktop": "Create a new project by clicking the folder icon in the sidebar",
+    "newSession": "New Session",
+    "untitledSession": "Untitled Session",
+    "projectFiles": "Project Files",
+    "sessionIdTooltip": "Session ID: {{id}} — click to copy",
+    "sessionIdCopy": "Copy session ID {{id}}",
+    "sessionResolving": "Opening conversation",
+    "sessionResolvingDescription": "Checking that this conversation is available to you...",
+    "sessionDeepLink": {
+      "unauthorized": {
+        "title": "Sign-in required",
+        "description": "Your session could not be verified. Sign in again, then reopen this link."
+      },
+      "forbidden": {
+        "title": "Conversation unavailable",
+        "description": "You do not have permission to view this conversation."
+      },
+      "not_found": {
+        "title": "Conversation not found",
+        "description": "This conversation may have been deleted, archived, or the link may be incorrect."
+      },
+      "error": {
+        "title": "Could not open conversation",
+        "description": "A temporary server or network error prevented this conversation from loading."
+      },
+      "retry": "Try again"
+    }
+  },
+  "fileTree": {
+    "loading": "Loading files...",
+    "files": "Files",
+    "simpleView": "Simple view",
+    "compactView": "Compact view",
+    "detailedView": "Detailed view",
+    "searchPlaceholder": "Search files and folders...",
+    "clearSearch": "Clear search",
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "permissions": "Permissions",
+    "noFilesFound": "No files found",
+    "checkProjectPath": "Check if the project path is accessible",
+    "noMatchesFound": "No matches found",
+    "tryDifferentSearch": "Try a different search term or clear the search",
+    "justNow": "just now",
+    "minAgo": "{{count}} min ago",
+    "hoursAgo": "{{count}} hours ago",
+    "daysAgo": "{{count}} days ago",
+    "newFile": "New File (Cmd+N)",
+    "newFolder": "New Folder (Cmd+Shift+N)",
+    "refresh": "Refresh",
+    "collapseAll": "Collapse All",
+    "uploadFiles": "Upload files (max {{size}} each)",
+    "uploadingFiles": "Uploading files",
+    "uploadComplete": "Upload complete",
+    "uploadFailed": "Upload failed",
+    "uploadedCount": "Uploaded {{uploaded}} of {{total}} {{label}}",
+    "context": {
+      "rename": "Rename",
+      "delete": "Delete",
+      "copyPath": "Copy Path",
+      "download": "Download",
+      "newFile": "New File",
+      "newFolder": "New Folder",
+      "refresh": "Refresh",
+      "menuLabel": "File context menu",
+      "loading": "Loading..."
+    }
+  },
+  "projectWizard": {
+    "title": "Create New Project",
+    "steps": {
+      "type": "Type",
+      "configure": "Configure",
+      "confirm": "Confirm"
+    },
+    "step1": {
+      "question": "Do you already have a workspace, or would you like to create a new one?",
+      "existing": {
+        "title": "Existing Workspace",
+        "description": "I already have a workspace on my server and just need to add it to the project list"
+      },
+      "new": {
+        "title": "New Workspace",
+        "description": "Create a new workspace, optionally clone from a GitHub repository"
+      }
+    },
+    "step2": {
+      "existingPath": "Workspace Path",
+      "newPath": "Workspace Path",
+      "existingPlaceholder": "/path/to/existing/workspace",
+      "newPlaceholder": "/path/to/new/workspace",
+      "existingHelp": "Full path to your existing workspace directory",
+      "newHelp": "Full path to your workspace directory",
+      "githubUrl": "GitHub URL (Optional)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "Optional: provide a GitHub URL to clone a repository",
+      "githubAuth": "GitHub Authentication (Optional)",
+      "githubAuthHelp": "Only required for private repositories. Public repos can be cloned without authentication.",
+      "loadingTokens": "Loading stored tokens...",
+      "storedToken": "Stored Token",
+      "newToken": "New Token",
+      "nonePublic": "None (Public)",
+      "selectToken": "Select Token",
+      "selectTokenPlaceholder": "-- Select a token --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "This token will be used only for this operation",
+      "publicRepoInfo": "Public repositories don't require authentication. You can skip providing a token if cloning a public repo.",
+      "noTokensHelp": "No stored tokens available. You can add tokens in Settings → API Keys for easier reuse.",
+      "optionalTokenPublic": "GitHub Token (Optional for Public Repos)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (leave empty for public repos)",
+      "repos": {
+        "fromMyRepos": "Choose from my repositories",
+        "pasteUrl": "Paste URL",
+        "sourceToggleLabel": "GitHub source",
+        "help": "Pick a repository from your GitHub account to clone",
+        "ariaLabel": "Select a GitHub repository",
+        "placeholder": "Select a repository...",
+        "searchPlaceholder": "Search repositories...",
+        "searchAriaLabel": "Search your GitHub repositories",
+        "private": "Private",
+        "loading": "Loading your repositories...",
+        "empty": "No repositories found for this token.",
+        "noMatch": "No repositories match your search.",
+        "loadError": "Failed to load repositories. Please try again.",
+        "invalidToken": "GitHub rejected this token. It may be revoked or missing the \"repo\" scope.",
+        "noToken": "No GitHub token configured for this account.",
+        "forbidden": "GitHub denied access. The token may lack the required scope or hit a rate limit.",
+        "retry": "Retry",
+        "manageTokens": "Manage tokens in Settings"
+      }
+    },
+    "step3": {
+      "reviewConfig": "Review Your Configuration",
+      "existingWorkspace": "Existing Workspace",
+      "newWorkspace": "New Workspace",
+      "path": "Path:",
+      "cloneFrom": "Clone From:",
+      "authentication": "Authentication:",
+      "usingStoredToken": "Using stored token:",
+      "usingProvidedToken": "Using provided token",
+      "noAuthentication": "No authentication",
+      "sshKey": "SSH Key",
+      "existingInfo": "The workspace will be added to your project list and will be available for Claude/Cursor sessions.",
+      "newWithClone": "The repository will be cloned from this folder.",
+      "newEmpty": "The workspace will be added to your project list and will be available for Claude/Cursor sessions.",
+      "cloningRepository": "Cloning repository..."
+    },
+    "buttons": {
+      "cancel": "Cancel",
+      "back": "Back",
+      "next": "Next",
+      "createProject": "Create Project",
+      "creating": "Creating...",
+      "cloning": "Cloning..."
+    },
+    "errors": {
+      "selectType": "Please select whether you have an existing workspace or want to create a new one",
+      "providePath": "Please provide a workspace path",
+      "failedToCreate": "Failed to create workspace",
+      "failedToCreateFolder": "Failed to create folder"
+    }
+  },
+  "notifications": {
+    "genericTool": "a tool",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "Notification"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "Action Required",
+          "body": "{{toolName}} is waiting for your decision."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "Run Stopped",
+          "body": "Reason: {{reason}}"
+        },
+        "failed": {
+          "title": "Run Failed"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "Agent Notification"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "Update Available",
+    "newVersionReady": "A new version is ready",
+    "currentVersion": "Current Version",
+    "latestVersion": "Latest Version",
+    "whatsNew": "What's New:",
+    "viewFullRelease": "View full release",
+    "updateProgress": "Update Progress:",
+    "manualUpgrade": "Manual upgrade:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "Or click \"Update Now\" to run the update automatically.",
+    "updateCompleted": "Update completed successfully!",
+    "restartServer": "Please restart the server to apply changes.",
+    "updateFailed": "Update failed",
+    "strategy": "Update strategy: {{strategy}}",
+    "strategyUnknown": "governed automatic update",
+    "reusedAttempt": "Resumed the existing update attempt; no duplicate update was started.",
+    "reason": "Reason: {{reason}}",
+    "jobStatus": {
+      "preparing": "Preparing and verifying the governed release. It is not installed yet.",
+      "staged": "Version {{version}} is staged. It has not been activated yet.",
+      "restartQueued": "Version {{version}} is staged and safe activation is queued. It is not active yet.",
+      "activating": "Activating version {{version}} and verifying the running service…",
+      "verified": "Version {{version}} is active and the running service has been verified.",
+      "rollback": "Activation did not verify; the system is rolling back or has restored the previous release.",
+      "manual": "Automatic recovery could not finish. Operator intervention is required; do not retry or restart blindly.",
+      "failed": "The update stopped before a verified activation. The current installed version has not been reported as changed.",
+      "superseded": "This attempt was superseded by a newer governed update attempt."
+    },
+    "status": {
+      "running": "Downloading, verifying, and staging the governed release…",
+      "staged": "Version {{version}} was staged; activation has not been verified yet.",
+      "stagedAndQueued": "Version {{version}} was staged and a safe activation request was added to the command board.",
+      "restartPending": "A server restart is required to activate the release.",
+      "failed": "❌ The update did not complete."
+    },
+    "errors": {
+      "releaseUnavailable": "No governed release is currently available for update.",
+      "activeSessions": "Finish all active agent sessions, then try again.",
+      "dirtyWorktree": "The update cannot run because the source tree has uncommitted local changes.",
+      "inProgress": "Another update is already running. Wait for it to finish, then try again.",
+      "credentialsUnavailable": "The private release channel could not be reached. Check the server update credential.",
+      "nonFastForward": "The new release does not follow the installed revision, so the update was stopped to protect the source tree.",
+      "sourceChanged": "The source changed during preparation. Nothing was applied; try again after the tree is stable.",
+      "externalRunnerNotGated": "Stop or disable the external Nassaj runner, then try again. The server did not disable it automatically.",
+      "dependencyInstallFailed": "Release dependency installation failed, so the update was stopped.",
+      "clientBuildFailed": "The release client build failed, so the update was stopped.",
+      "serverBuildFailed": "The release server build failed, so the update was stopped.",
+      "postUpdateDirty": "Installation changed the source tree after the update, so the server rejected the result.",
+      "postUpdateMismatch": "The installed source does not match the requested release, so the server rejected the result.",
+      "rollbackFailed": "The update failed and the previous revision could not be restored safely. Operator intervention is required.",
+      "unsupportedInstallMode": "Automatic updates are available only for a Nassaj source installation.",
+      "platformManaged": "Updates for this environment are handled by its managed deployment workflow.",
+      "invalidRelease": "The server rejected the requested release version as invalid.",
+      "releaseMismatch": "The published release does not match its governed content, so the update was stopped.",
+      "connection": "The server connection was lost during the update request. Check its status before trying again.",
+      "authorization": "Your session is not authorized to manage system updates. Sign in as the owner.",
+      "rateLimited": "Too many update requests were made. Wait, then try again.",
+      "idempotencyMismatch": "This attempt key was already used for another version. Start a new attempt.",
+      "invalidStatusUrl": "The server returned an unsafe update status address, so polling was stopped.",
+      "capabilityBlocked": "Automatic updating is not ready on this node. No update was started.",
+      "failed": "The update failed without additional details.",
+      "consentMismatch": "The consent version did not match the target version. Try again.",
+      "cancelNotAllowed": "This update cannot be cancelled in its current state."
+    },
+    "phases": {
+      "accepted": {
+        "name": "Queued",
+        "description": "Update request received and recorded."
+      },
+      "resolving": {
+        "name": "Finding release",
+        "description": "Matching the requested release against the release source."
+      },
+      "resolved": {
+        "name": "Release locked",
+        "description": "Recording the identity of the approved release."
+      },
+      "downloading": {
+        "name": "Downloading",
+        "description": "Fetching the release archive from the release source."
+      },
+      "archive_verified": {
+        "name": "Archive verified",
+        "description": "The release archive checksum matched the governed manifest."
+      },
+      "extracting": {
+        "name": "Extracting",
+        "description": "Unpacking the release archive to the staging area."
+      },
+      "staging": {
+        "name": "Building candidate",
+        "description": "Fetching the release, checking tree and branch cleanliness, installing packages, building, and verifying the manifest."
+      },
+      "candidate_sealed": {
+        "name": "Sealed, ready",
+        "description": "Sealing the candidate and preparing the activation action."
+      },
+      "restart_queued": {
+        "name": "Awaiting your safe restart",
+        "description": "The update will not advance until you press the safe restart button in the command board."
+      },
+      "restart_queued_auto": {
+        "name": "Activating when the node is idle",
+        "description": "A safe restart runs automatically as soon as no session is live. No session will be stopped."
+      },
+      "activating": {
+        "name": "Activating",
+        "description": "Verifying the candidate, snapshotting the database, and replacing the running copy."
+      },
+      "runtime_verifying": {
+        "name": "Verifying runtime",
+        "description": "Booting the new process and verifying its build identity."
+      },
+      "activated": {
+        "name": "Done",
+        "description": "New release is active and verified."
+      }
+    },
+    "stepperProgress": "Step {{current}} of {{total}} · {{percent}}%",
+    "stepperAriaLabel": "Update phases",
+    "ownerActionRequired": "The update is ready. Confirm activation in this dialog.",
+    "autoActivate": {
+      "consentNote": "Pressing Update now also approves the safe restart: it runs by itself once no session is live, and it never stops a session.",
+      "pending": "Activating automatically with a safe restart as soon as the node is idle. No session will be stopped.",
+      "waiting": "Waiting for {{count}} live session(s) to finish, then the safe restart runs by itself. No session will be stopped.",
+      "restarting": "Safe restart in progress. This window reconnects when the new version is up.",
+      "expired": "Consent expired. Confirm activation again in this dialog.",
+      "refused": "The safe restart was refused ({{code}}) and will be retried. You can also press safe restart in the command board."
+    },
+    "terminal": {
+      "show": "Show terminal output",
+      "hide": "Hide terminal output",
+      "copy": "Copy log",
+      "label": "Update terminal output",
+      "empty": "Waiting for output…",
+      "truncatedView": "Showing the last {{count}} lines. Copy the log for all of it."
+    },
+    "errorCodes": {
+      "update_source_state_degraded": {
+        "title": "Source state not reconciled",
+        "hint": "The node reopened on the previous version while the source tree stayed at the target. Complete the source rollback on the server with `npm run doctor -- --reopen-gate --complete-source-rollback --yes`, then retry."
+      },
+      "dirty_worktree": {
+        "title": "Uncommitted local changes",
+        "hint": "Commit or stash all local changes in the source tree, then retry."
+      },
+      "wrong_branch": {
+        "title": "Wrong branch",
+        "hint": "The updater requires the configured release branch. Switch to it and retry."
+      },
+      "detached_head": {
+        "title": "Detached HEAD",
+        "hint": "Check out the release branch (not a detached commit), then retry."
+      },
+      "non_fast_forward": {
+        "title": "Not a fast-forward update",
+        "hint": "The new release does not follow the installed revision. Contact support if this is unexpected."
+      },
+      "remote_mismatch": {
+        "title": "Remote URL mismatch",
+        "hint": "The runtime Git remote does not match the configured release source. Check the server configuration."
+      },
+      "remote_unavailable": {
+        "title": "Remote unavailable",
+        "hint": "The configured Git remote could not be reached. Check network access and retry."
+      },
+      "ambiguous_remote": {
+        "title": "Ambiguous remote",
+        "hint": "The update remote must have exactly one URL. Remove duplicate remote URLs and retry."
+      },
+      "unsafe_remote": {
+        "title": "Unsafe remote URL",
+        "hint": "The update remote must be a credential-free GitHub HTTPS or SSH URL."
+      },
+      "release_fetch_failed": {
+        "title": "Release fetch failed",
+        "hint": "The release tag or branch could not be fetched from the remote. Check connectivity and retry."
+      },
+      "release_identity_mismatch": {
+        "title": "Release identity mismatch",
+        "hint": "The fetched release does not match the requested version. Retry; contact support if this persists."
+      },
+      "gitlink_change_unsupported": {
+        "title": "Submodule change detected",
+        "hint": "This release changes a Git submodule link, which is not supported by the updater."
+      },
+      "activation_gitlink_unsupported": {
+        "title": "Submodule in activation path",
+        "hint": "The activation path contains a Git submodule, which is not supported."
+      },
+      "exchange_capability": {
+        "title": "Capability exchange conflict",
+        "hint": "Another governed update is active. Wait for it to finish, then retry."
+      },
+      "activation_filesystem_mismatch": {
+        "title": "Filesystem layout mismatch",
+        "hint": "The candidate filesystem layout does not match the running installation. Contact support."
+      },
+      "candidate_build_failed": {
+        "title": "Build failed",
+        "hint": "The release candidate build failed. Check server logs for details."
+      },
+      "candidate_manifest_invalid": {
+        "title": "Invalid candidate manifest",
+        "hint": "The staged candidate manifest is invalid. Retry; contact support if this persists."
+      },
+      "restart_queue_failed": {
+        "title": "Restart queue failed",
+        "hint": "The governed restart action could not be persisted. Retry or contact support."
+      },
+      "tmpfs_candidate_root": {
+        "title": "Candidate root is on tmpfs",
+        "hint": "The candidate staging directory must reside on disk, not tmpfs. Contact the operator."
+      },
+      "tmpfs_build_tmpdir": {
+        "title": "Build temp directory is on tmpfs",
+        "hint": "The build temp directory must reside on disk, not tmpfs. Set TMPDIR to a disk path and retry."
+      },
+      "tmpfs_database_root": {
+        "title": "Database directory is on tmpfs",
+        "hint": "The database snapshot path must reside on disk, not tmpfs. Contact the operator."
+      },
+      "insufficient_disk": {
+        "title": "Insufficient disk space",
+        "hint": "Free up disk space on the server and retry."
+      },
+      "storage_probe_failed": {
+        "title": "Storage probe failed",
+        "hint": "Disk space could not be measured. Check server storage and retry."
+      },
+      "update_database_state_unknown": {
+        "title": "Database state unknown",
+        "hint": "The update database is in an inconsistent state. Operator intervention is required."
+      },
+      "runtime_verification_failed": {
+        "title": "Runtime verification failed",
+        "hint": "The new process did not report the expected build identity. The previous release has been restored."
+      },
+      "release_layout_retired": {
+        "title": "Release layout strategy retired",
+        "hint": "The release-layout-v2 strategy is no longer supported. Contact the operator to reconfigure."
+      },
+      "sealed_release_identity_mismatch": {
+        "title": "Sealed release identity mismatch",
+        "hint": "The candidate identity does not match the sealed release. Retry; contact support if this persists."
+      },
+      "unsupported_install_mode": {
+        "title": "Unsupported installation mode",
+        "hint": "Automatic updates are available only for a Nassaj source installation."
+      },
+      "deferral_expired": {
+        "title": "Deferral window expired",
+        "hint": "The update waited 24 hours for active sessions to end but the node never became idle. Press the safe-restart button on the command board to activate the staged build manually."
+      },
+      "unknown": {
+        "title": "Update failed",
+        "hint": "An unexpected error occurred. Check server logs or contact support."
+      }
+    },
+    "sourceVersionLabel": "Source tree (not the running build)",
+    "preflight": {
+      "checking": "Checking whether this node is ready to update…",
+      "checkingButton": "Checking…",
+      "clear": "Readiness check passed: nothing blocks this update.",
+      "blockedTitle": "This update cannot start yet",
+      "actionLabel": "What to do:",
+      "fallbackReason": "The server reported a blocker without a description.",
+      "fallbackAction": "Resolve the reported condition on the server, then check again.",
+      "copied": "Copied",
+      "copyCommandAria": "Copy the operator command",
+      "recheck": "Check again",
+      "rateLimited": "Too many readiness checks in a short time. Wait a minute, then check again.",
+      "rateLimitedSeconds": "Too many readiness checks in a short time. Wait {{seconds}} seconds, then check again.",
+      "errors": {
+        "authorization": "Only the owner can check update readiness. No update was started.",
+        "unavailable": "Update readiness could not be checked on the server. No update was started.",
+        "connection": "The server could not be reached to check update readiness. No update was started."
+      }
+    },
+    "blockedReasons": {
+      "update_source_state_degraded": "The source tree is not reconciled after an earlier rollback. No update was started. Complete the source rollback on the server with `npm run doctor -- --reopen-gate --complete-source-rollback --yes`, then retry.",
+      "protocol_unavailable": "This node does not expose the asynchronous update protocol yet. No update was started.",
+      "capability_unavailable": "Update readiness could not be verified. No update was started.",
+      "release_layout_required": "This node must complete its governed release-layout setup before button updates can run.",
+      "release_layout_configuration_absent": "This node must complete its governed release-layout setup before button updates can run.",
+      "release_layout_retired": "The release-layout-v2 strategy is retired on this node. Contact the operator.",
+      "release_layout_not_ready": "The release layout configuration is not yet ready on this node.",
+      "unsupported_deployment": "This deployment type does not support button-driven updates.",
+      "update_job_active": "Another governed update is active; its status will be resumed when available.",
+      "verified_update_runtime_absent": "The update runtime is not available on this node. No update was started.",
+      "release_source_lock_mismatch": "The release source lock does not match this node's configuration. Contact the operator.",
+      "unsupported_install_mode": "Automatic updates are available only for a Nassaj source installation."
+    },
+    "buttons": {
+      "close": "Close",
+      "later": "Later",
+      "copyCommand": "Copy Command",
+      "updateNow": "Update Now",
+      "updating": "Updating...",
+      "retry": "Start a New Attempt",
+      "reload": "Reload",
+      "prepareUpdate": "Prepare update when sessions end",
+      "cancelDeferred": "Cancel deferred update"
+    },
+    "consent": {
+      "title": "Confirm starting the update",
+      "targetVersionLabel": "Target version:",
+      "noReleaseNotes": "No release notes are available for this update.",
+      "termsAriaLabel": "Update consent terms",
+      "term": {
+        "safeRestart": "A safe restart runs automatically once the node has no live sessions.",
+        "noSessionsKilled": "No session or running work will be stopped.",
+        "timeout24h": "Maximum restart window: 24 hours from now."
+      },
+      "confirmButton": "I agree — start the update",
+      "confirmAriaLabel": "Agree to update to version {{version}} and start",
+      "highlights": {
+        "sectionTitle": "Release highlights:",
+        "viewFullLabel": "View full release notes"
+      }
+    },
+    "deferral": {
+      "panelAriaLabel": "Deferred update waiting panel",
+      "waitingTitle": "Waiting for sessions to end…",
+      "sessionCount": "{{count}} live session(s)",
+      "sessionCount_one": "1 live session",
+      "sessionCount_other": "{{count}} live sessions",
+      "gateReason": "Gate reason: {{reason}}",
+      "gateReasonLabels": {
+        "live_sessions": "Live sessions are active",
+        "live_work": "Live work is in progress",
+        "not_in_pm2": "Process is not managed by PM2",
+        "gate_error": "Error reading node state",
+        "gate_unavailable": "Gate check is unavailable",
+        "gate_timeout": "State read timed out",
+        "unknown": "Unknown reason"
+      },
+      "deadline": "Max deadline: {{time}}",
+      "noSessionsKilled": "No session will be stopped — the update begins once the node is idle.",
+      "rearmCount": "Worker rearmed {{count}} time(s)",
+      "cancelledMessage": "The deferred update was cancelled. No new version was installed.",
+      "awaitingConfirmation": "Awaiting your confirmation — press the safe restart button in the command board."
+    },
+    "ariaLabels": {
+      "closeModal": "Close version upgrade modal",
+      "showSidebar": "Show sidebar",
+      "settings": "Settings",
+      "updateAvailable": "Update available",
+      "closeSidebar": "Close sidebar",
+      "updateInProgress": "Update in progress",
+      "updateProgress": "Update progress: {{percent}}%"
+    },
+    "preparedAwaitingActivation": "The release is prepared on this node but not activated yet. One safe-restart confirmation remains before it becomes active.",
+    "local": {
+      "description": "This host updates from the committed local main branch. Uncommitted changes are excluded.",
+      "target": "Selected revision:",
+      "reconnecting": "Waiting for the connection and verifying the update…",
+      "inProgress": "Update in progress…",
+      "activationUnavailable": "Local activation is not ready. The current version will remain active.",
+      "consent": "Confirm updating the application and all its components to the selected version after sessions finish. The connection may briefly pause.",
+      "confirm": "Confirm update",
+      "activate": "Activate update",
+      "cancel": "Cancel preparation",
+      "failed": "The request could not be completed. Check the update status before retrying.",
+      "phases": {
+        "idle": "Prepare the update here.",
+        "preparing": "Preparing the client and server…",
+        "prepared": "Ready for confirmation.",
+        "awaiting_sessions": "Waiting for sessions to finish before activation.",
+        "activation_claimed": "Activating the update…",
+        "activated": "Update completed and verified.",
+        "cancelled": "Preparation cancelled.",
+        "superseded": "Local main changed. Prepare the new revision.",
+        "failed": "Update preparation failed.",
+        "manual_recovery_required": "The update could not complete. Recovery is required before continuing."
+      },
+      "loaded": "Actually running commit:",
+      "pending": "Latest commit awaiting preparation:",
+      "policyEnabled": "Development tracking is enabled",
+      "policyDisabled": "Development tracking is disabled",
+      "policyDescription": "When enabled, merged main changes are prepared automatically and activated when the node has no live sessions. Unmerged session changes are excluded.",
+      "enablePolicy": "Enable automatic main updates",
+      "disablePolicy": "Disable automatic updates",
+      "buildRecovery": "A previous build was interrupted. New attempts are blocked until its processes and build state have been reconciled.",
+      "waitReasons": {
+        "local_update_build_recovery_required": "A previous build was interrupted. New attempts await verification that its processes have ended.",
+        "local_update_build_capacity_wait": "Waiting for enough disk space to build the update. The current version remains running.",
+        "local_update_build_capacity_unknown": "Waiting for a verified storage estimate for this update.",
+        "local_update_build_cache_missing": "Waiting for required dependencies to be prepared. The current version remains running.",
+        "local_update_build_inputs_unqualified": "The update changes dependencies; prepare and verify them before building.",
+        "local_update_build_profile_required": "Waiting for this node’s build environment to be prepared.",
+        "local_update_build_headers_missing": "Waiting for required native build inputs."
+      },
+      "buildWaiting": "Waiting for build readiness. The current version remains running."
+    },
+    "manifestDrift": {
+      "unexpected": "{{count}} file(s) on disk are not in the sealed manifest:",
+      "missing": "{{count}} manifest file(s) are missing from disk:",
+      "changed": "{{count}} file(s) changed after sealing:",
+      "more": "… and {{count}} more",
+      "recoveryAvailable": "Move any hand-placed file out of the Nassaj tree, then publish it with the Nassaj public page publisher and retry the update.",
+      "recoveryUnavailable": "Move any hand-placed file out of the Nassaj tree and retry the update."
+    }
+  },
+  "sessionProcessState": {
+    "running": "Running",
+    "frozen": "Paused (frozen)",
+    "runningHint": "Session process is running",
+    "orphan": "Workflow stopped",
+    "orphanHint": "A background workflow stopped before producing a complete result",
+    "frozenHint": "Session process is temporarily frozen (kill -STOP)",
+    "projectFrozenHint": "A session in this project is frozen (kill -STOP)",
+    "projectBusyHint": "A session in this project is processing right now",
+    "done": "Done",
+    "doneHint": "Session finished and has not been opened yet",
+    "projectDoneHint": "A session in this project finished and has not been opened yet",
+    "question": "Question",
+    "questionHint": "This conversation is waiting for your answer",
+    "projectQuestionHint": "A conversation in this project is waiting for your answer",
+    "error": "Error",
+    "errorHint": "Session ended with an error or stopped without replying, and has not been opened yet",
+    "projectErrorHint": "A session in this project ended with an error and has not been opened yet"
+  },
+  "workflowStatus": {
+    "running": "Workflow running",
+    "runningHint": "A background workflow is actively running in this session",
+    "orphanEmpty": "Stopped — no output",
+    "orphanEmptyHint": "Process exited before any agent completed (0 of N) — can be resumed manually",
+    "orphanPartial": "Stopped — partial",
+    "orphanPartialHint": "Process exited after some agents completed — partial progress saved, resumable manually",
+    "orphanIncomplete": "Stopped — incomplete",
+    "orphanIncompleteHint": "Process exited without completing; more started than produced — resumable manually",
+    "frozen": "Frozen (paused)",
+    "frozenHint": "Process is suspended (SIGSTOP), not dead — will resume on CONT",
+    "unknown": "Unknown liveness",
+    "unknownHint": "Could not verify liveness — likely survived a server restart; neither confirmed alive nor dead",
+    "projectRunningHint": "A background workflow is running in this project",
+    "projectOrphanHint": "An orphaned background workflow in this project needs attention",
+    "projectUnknownHint": "A background workflow's liveness in this project is unknown — neither confirmed alive nor dead"
+  },
+  "buildUpdate": {
+    "available": "A new build is available",
+    "reload": "Reload",
+    "ariaLabel": "New build update notification",
+    "dismiss": "Dismiss"
+  },
+  "governanceBadge": {
+    "ungoverned": "Ungoverned",
+    "tooltip": {
+      "none": "This session is running outside Nassaj governance — check provider settings"
+    }
+  },
+  "onboarding": {
+    "agents": {
+      "title": "Connect Your AI Agents",
+      "subtitle": "Login to one or more AI coding assistants. All are optional.",
+      "footerNote": "You can configure these later in Settings."
+    },
+    "buttons": {
+      "previous": "Previous",
+      "next": "Next",
+      "saving": "Saving...",
+      "completing": "Completing...",
+      "complete": "Complete Setup"
+    },
+    "errors": {
+      "gitFieldsRequired": "Both git name and email are required.",
+      "invalidEmail": "Please enter a valid email address.",
+      "saveGitConfigFailed": "Failed to save git configuration",
+      "completeFailed": "Failed to complete onboarding"
+    },
+    "login": "Login",
+    "required": "Required",
+    "steps": {
+      "git": "Git configuration",
+      "agents": "Connect agents"
+    },
+    "git": {
+      "title": "Git configuration",
+      "description": "Configure your git identity to ensure proper attribution for commits.",
+      "nameLabel": "Git name",
+      "emailLabel": "Git email",
+      "nameHint": "Saved as `git config --global user.name`.",
+      "emailHint": "Saved as `git config --global user.email`."
+    }
+  },
+  "brand": {
+    "name": "Nassaj",
+    "logoAlt": "Nassaj",
+    "openSourceVersion": "Nassaj v{{version}} — open source",
+    "openSourceLicense": "Nassaj — open source (AGPL-3.0)"
+  },
+  "commandPalette": {
+    "title": "Command palette",
+    "backToAll": "Back to all",
+    "backspaceHint": "Backspace to go back",
+    "searchPlaceholder": "Type to search anything…",
+    "searchIn": "Search {{page}}…",
+    "empty": "No results.",
+    "switchTo": "Switch to: {{name}}",
+    "settingsItem": "Settings: {{label}}",
+    "pages": {
+      "actions": "Actions",
+      "files": "Files",
+      "sessions": "Sessions",
+      "commits": "Commits",
+      "branches": "Branches"
+    },
+    "groups": {
+      "actions": "Actions",
+      "navigate": "Navigate",
+      "git": "Git",
+      "settings": "Settings",
+      "sessions": "Sessions",
+      "files": "Files",
+      "commits": "Commits",
+      "branches": "Branches"
+    },
+    "actions": {
+      "startNewChat": "Start new chat",
+      "selectProjectFirst": "Select a project first",
+      "openSettings": "Open settings",
+      "toggleTheme": "Toggle theme",
+      "toggleThemeKeywords": "dark light mode"
+    },
+    "nav": {
+      "chat": "Go to Chat",
+      "files": "Go to Files",
+      "shell": "Go to Shell",
+      "git": "Go to Git",
+      "board": "Go to Project Board"
+    },
+    "navKeywords": {
+      "chat": "chat messages conversation",
+      "files": "files file tree explorer",
+      "shell": "shell terminal console",
+      "git": "git diff branches",
+      "board": "board project state phases issues architecture"
+    },
+    "git": {
+      "fetch": "Git: Fetch",
+      "fetchKeywords": "fetch remote",
+      "pull": "Git: Pull",
+      "pullKeywords": "pull merge upstream",
+      "push": "Git: Push",
+      "pushKeywords": "push origin remote"
+    },
+    "browseAll": {
+      "sessions": "Browse all sessions ({{count}})",
+      "files": "Browse all files ({{count}})",
+      "commits": "Browse all commits ({{count}})",
+      "branches": "Browse all branches ({{count}})"
+    }
+  },
+  "git": {
+    "common": {
+      "cancel": "Cancel"
+    },
+    "panel": {
+      "selectProject": "Select a project to view source control"
+    },
+    "errorState": {
+      "tipLabel": "Tip:",
+      "tip": "Run <code>git init</code> in your project directory to initialize git source control."
+    },
+    "changes": {
+      "noCommitsTitle": "No commits yet",
+      "noCommitsBody": "This repository doesn’t have any commits yet. Create your first commit to start tracking changes.",
+      "creatingInitialCommit": "Creating initial commit…",
+      "createInitialCommit": "Create initial commit",
+      "noChanges": "No changes detected",
+      "staged": "Staged ({{count}})",
+      "changed": "Changes ({{count}})",
+      "unstageAll": "Unstage all",
+      "stageAll": "Stage all",
+      "noStagedFiles": "No staged files",
+      "allStaged": "All changes staged",
+      "clickToOpen": "Click to open file"
+    },
+    "legend": {
+      "title": "File status guide"
+    },
+    "commit": {
+      "title": "Commit changes",
+      "commitFiles_one": "Commit {{count}} file",
+      "commitFiles_other": "Commit {{count}} files",
+      "messagePlaceholder": "Message (Ctrl+Enter to commit)",
+      "generateMessage": "Generate commit message"
+    },
+    "history": {
+      "noCommits": "No commits found",
+      "author": "Author",
+      "date": "Date",
+      "files": "Files",
+      "added": "Added",
+      "removed": "Removed",
+      "changedFiles": "Changed files"
+    },
+    "branches": {
+      "none": "No branches found",
+      "new": "New branch",
+      "local": "Local",
+      "remote": "Remote",
+      "switch": "Switch"
+    },
+    "header": {
+      "upToDate": "Up to date",
+      "createBranch": "Create new branch",
+      "revertLatest": "Revert latest local commit",
+      "refresh": "Refresh git status",
+      "dismissError": "Dismiss error"
+    },
+    "diff": {
+      "none": "No diff available",
+      "largePreview": "Large diff preview: rendering is limited to keep the tab responsive."
+    },
+    "newBranch": {
+      "title": "Create new branch",
+      "nameLabel": "Branch name",
+      "namePlaceholder": "feature/new-feature",
+      "fromCurrent": "This will create a new branch from the current branch ({{branch}})",
+      "creating": "Creating…",
+      "submit": "Create branch"
+    }
+  },
+  "folderBrowser": {
+    "title": "Select folder",
+    "createFolder": "Create new folder",
+    "newFolderName": "New folder name",
+    "noSubfolders": "No subfolders found",
+    "select": "Select",
+    "path": "Path:",
+    "cancel": "Cancel",
+    "useThisFolder": "Use this folder",
+    "browse": "Browse folders"
+  },
+  "errorBoundary": {
+    "details": "Error details"
+  },
+  "nav": {
+    "openMenu": "Open menu"
+  },
+  "githubStar": {
+    "star": "Star"
+  }
+}

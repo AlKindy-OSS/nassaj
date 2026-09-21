@@ -1,0 +1,182 @@
+{
+  "sections": {
+    "overview": "Обзор",
+    "objectives": "Цели",
+    "schedule": "Расписание",
+    "tasks": "Задачи",
+    "issues": "Проблемы",
+    "visual": "Визуальные проверки",
+    "decisions": "Решения",
+    "architecture": "Архитектура"
+  },
+  "updated": "Обновлено {{date}}",
+  "overallProgress": "Общий прогресс",
+  "error": "Не удалось загрузить доску проекта.",
+  "stateError": "Файл project-state.json недействителен — показывается последняя рабочая версия.",
+  "empty": {
+    "title": "Доска проекта пока пуста",
+    "description": "У этого проекта нет файла состояния. Создайте его для получения живой доски с фазами, задачами и проблемами.",
+    "hint": "Доска обновляется автоматически при изменении файла — обновление не требуется.",
+    "copyTemplate": "Копировать стартовый шаблон",
+    "copied": "Скопировано — вставьте в файл"
+  },
+  "phases": {
+    "title": "Фазы",
+    "current": "Текущая",
+    "planned": "Запланировано",
+    "progressCount": "{{progress}}% ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "Текущий спринт",
+    "started": "Начат {{date}}",
+    "ended": "Завершён {{date}}",
+    "taskCount": "Задачи {{done}}/{{total}}",
+    "others": "Другие спринты ({{count}})",
+    "status": {
+      "planned": "Запланировано",
+      "current": "Текущий",
+      "done": "Выполнено"
+    }
+  },
+  "tasksSection": {
+    "title": "Задачи",
+    "open": "Открытые",
+    "in_progress": "В процессе",
+    "done": "Выполнено",
+    "empty": "Задач нет",
+    "kind": {
+      "feature": "Функция",
+      "bug": "Ошибка",
+      "chore": "Техзадача",
+      "spike": "Исследование"
+    },
+    "issueLink": "Открыть проблему {{id}}",
+    "cancelled": "Отменённые ({{count}})",
+    "status": {
+      "todo": "к выполнению",
+      "pending": "ожидает",
+      "blocked": "заблокирована",
+      "backlog": "бэклог",
+      "deferred": "отложена",
+      "closed": "закрыта",
+      "fixed": "исправлена",
+      "resolved": "решена",
+      "accepted": "принята",
+      "cancelled": "отменена",
+      "wontfix": "не будет исправлено",
+      "unknown": "неизвестно"
+    }
+  },
+  "issues": {
+    "title": "Проблемы",
+    "severity": {
+      "low": "Низкая",
+      "medium": "Средняя",
+      "high": "Высокая",
+      "critical": "Критическая"
+    },
+    "status": {
+      "open": "Открытая",
+      "fixed": "Исправлена",
+      "wontfix": "Не будет исправлена"
+    },
+    "empty": "Проблем не зафиксировано."
+  },
+  "decisions": {
+    "title": "Решения",
+    "empty": "Решений пока нет",
+    "openLink": "Открыть документ решения {{id}}"
+  },
+  "schedule": {
+    "title": "Расписание (Gantt)",
+    "critical": "Критический",
+    "legendScheduled": "Запланировано",
+    "legendCritical": "Критический путь",
+    "legendMilestone": "Веха",
+    "cpm": {
+      "cycle": "Критический путь пропущен: обнаружен цикл зависимостей.",
+      "missingDeps": "Некоторые зависимости ссылаются на отсутствующие элементы и были проигнорированы в критическом пути."
+    },
+    "noDates": "Нет корректных дат для отрисовки расписания.",
+    "progress": "Прогресс {{value}}%",
+    "durationDays": "Длительность: {{days}} дн.",
+    "owner": "Ответственный: {{name}}",
+    "deliverable": "Результат: {{id}}",
+    "deliverableLink": "Открыть результат {{id}}",
+    "dependsOn": "Зависит от: {{ids}}"
+  },
+  "deliverables": {
+    "title": "Результаты",
+    "due": "Срок {{date}}",
+    "overdue": "Просрочено",
+    "acceptance": "Критерий приёмки",
+    "deliveredBy": "Выполнено: {{ids}}",
+    "statuses": {
+      "pending": "Ожидается",
+      "in_progress": "В процессе",
+      "delivered": "Сдано",
+      "accepted": "Принято",
+      "rejected": "Отклонено"
+    }
+  },
+  "objectives": {
+    "title": "Цели (OKR)",
+    "baseline": "Базовое значение: {{value}}",
+    "statuses": {
+      "on_track": "В графике",
+      "at_risk": "Под угрозой",
+      "off_track": "Не в графике",
+      "done": "Выполнено"
+    }
+  },
+  "kpis": {
+    "title": "KPI",
+    "target": "Цель: {{value}}"
+  },
+  "visualChecks": {
+    "title": "Визуальные проверки",
+    "empty": "Визуальных проверок пока нет.",
+    "step": "Шаг",
+    "expect": "Ожидаемое",
+    "result": "Примечание владельца",
+    "counter": "Проверено {{verified}} / {{total}}",
+    "status": {
+      "pending": "Ожидает проверки",
+      "verified": "Подтверждено",
+      "failed": "Не прошло"
+    }
+  },
+  "architecture": {
+    "technical": "Техническая",
+    "simplified": "Упрощённая",
+    "missing": "Документы архитектуры не найдены (docs/ARCHITECTURE.md или docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "Эта версия документа архитектуры не существует."
+  },
+  "stats": {
+    "tab": "Статистика",
+    "totalLabel": "Общая стоимость (за всё время)",
+    "headerTotal": "За всё время",
+    "headerTotalTitle": "Накопленная стоимость проекта — сохраняется даже после удаления бесед",
+    "span": "Период",
+    "activeDays": "Активных дней",
+    "activeDaysOfSpan": "из {{span}} дней",
+    "conversations": "Беседы",
+    "agents": "Агенты",
+    "firstActivity": "Первая активность",
+    "lastActivity": "Последняя активность",
+    "dailyTitle": "Стоимость по дням",
+    "dailyPeak": "Пик",
+    "byVendor": "По провайдерам",
+    "byModel": "По моделям",
+    "partialShort": "Частично",
+    "partialModels": "Частичный итог — нет официальной цены для: {{models}}",
+    "apiEquivalent": "Эквивалент по ценам API для подписки — не сумма к оплате",
+    "pricesAsOf": "Цены на {{date}}",
+    "unavailable": "Недоступно",
+    "empty": "Стоимость этого проекта ещё не измерялась."
+  },
+  "summary": {
+    "tasksDone": "{{done}} выполнено",
+    "issuesOpen": "{{open}} открыто"
+  }
+}

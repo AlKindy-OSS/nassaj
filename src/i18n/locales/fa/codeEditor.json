@@ -1,0 +1,42 @@
+{
+  "toolbar": {
+    "changes": "تغییر",
+    "previousChange": "تغییر پیشین",
+    "nextChange": "تغییر بعدی",
+    "hideDiff": "پنهان‌کردن برجسته‌سازی تفاوت‌ها",
+    "showDiff": "نمایش برجسته‌سازی تفاوت‌ها",
+    "settings": "تنظیمات ویرایشگر",
+    "collapse": "جمع‌کردن ویرایشگر",
+    "expand": "گستردن ویرایشگر به تمام عرض"
+  },
+  "loading": "در حال بارگذاری {{fileName}}...",
+  "header": {
+    "showingChanges": "نمایش تغییرها"
+  },
+  "actions": {
+    "download": "دریافت پرونده",
+    "save": "ذخیره",
+    "saving": "در حال ذخیره...",
+    "saved": "ذخیره شد!",
+    "exitFullscreen": "خروج از تمام‌صفحه",
+    "fullscreen": "تمام‌صفحه",
+    "close": "بستن",
+    "previewMarkdown": "پیش‌نمایش مارک‌داون",
+    "editMarkdown": "ویرایش مارک‌داون",
+    "previewHtml": "گشودن پیش‌نمایش HTML در زبانهٔ تازه"
+  },
+  "filePreview": {
+    "loading": "در حال بارگذاری پیش‌نمایش...",
+    "error": "نمایش این پرونده ممکن نیست.",
+    "openInNewTab": "گشودن در زبانهٔ تازه"
+  },
+  "footer": {
+    "lines": "خط‌ها:",
+    "characters": "نویسه‌ها:",
+    "shortcuts": "برای ذخیره Ctrl+S • برای بستن Esc"
+  },
+  "binaryFile": {
+    "title": "پروندهٔ دودویی",
+    "message": "پروندهٔ «{{fileName}}» دودویی است و در ویرایشگر متن نمایش داده نمی‌شود."
+  }
+}

@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<!--
+  نموذج بصري — نسّاج مينيمال
+  Nassaj Minimal Visual Mockup
+  Target: /opt/example/project/public/ui-lab/minimal/index.html
+  dir + lang on <html> per arabic-rtl-excellence
+-->
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>نسّاج — نموذج مينيمال</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ████ Lab banner ████ -->
+<div class="lab-banner" role="status" aria-label="ملاحظة: هذا نموذج بصري فقط">
+  نموذج بصري — نسخة مينيمال من الواجهة الحالية
+</div>
+
+<!-- ████ App shell ████ -->
+<div class="app-shell">
+
+  <!-- ═══════════════════════════════════════════════
+       SIDEBAR
+       ═══════════════════════════════════════════════ -->
+  <aside class="sidebar" aria-label="الشريط الجانبي">
+
+    <!-- ── Header: logo row + tabs row ── -->
+    <div class="sidebar-header">
+
+      <!-- Logo row -->
+      <div class="logo-row">
+        <div class="logo-area">
+          <!-- nassaj logo: dark/light via <picture> -->
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="../../nassaj-logo-on-dark.svg" />
+            <img
+              src="../../nassaj-logo-on-light.svg"
+              alt="نسّاج"
+              class="logo-img"
+              width="80"
+              height="24"
+            />
+          </picture>
+        </div>
+
+        <!-- Header icon actions -->
+        <div class="header-actions" role="toolbar" aria-label="إجراءات الرأس">
+          <!-- Create project -->
+          <button
+            class="icon-btn create-btn"
+            type="button"
+            title="إنشاء مشروع جديد"
+            aria-label="إنشاء مشروع جديد"
+          >
+            <!-- FolderPlus icon -->
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              <line x1="12" y1="11" x2="12" y2="17"/>
+              <line x1="9" y1="14" x2="15" y2="14"/>
+            </svg>
+          </button>
+
+          <!-- Wiki -->
+          <button
+            class="icon-btn"
+            type="button"
+            title="فتح الويكي"
+            aria-label="فتح الويكي"
+          >
+            <!-- BookOpen icon -->
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+          </button>
+
+          <!-- Collapse sidebar (desktop only) -->
+          <button
+            class="icon-btn"
+            type="button"
+            title="إخفاء الشريط الجانبي"
+            aria-label="إخفاء الشريط الجانبي"
+            style="display:none"
+          >
+            <!-- PanelLeftClose: RTL mirrored -->
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:scaleX(-1)">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <line x1="9" y1="3" x2="9" y2="21"/>
+              <path d="m16 15-3-3 3-3"/>
+            </svg>
+          </button>
+        </div>
+      </div><!-- /logo-row -->
+
+      <!-- Tabs row -->
+      <nav class="tabs-row" aria-label="أقسام الشريط الجانبي">
+        <button class="tab-btn active" type="button" aria-current="page">
+          <!-- Folder icon -->
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          المشاريع
+        </button>
+
+        <button class="tab-btn" type="button">
+          <!-- Terminal icon -->
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+          الطرفيات
+          <span class="tab-badge" aria-label="2 نشطة">2</span>
+        </button>
+
+        <button class="tab-btn" type="button">
+          <!-- CalendarClock icon -->
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+            <circle cx="16" cy="16" r="3"/>
+            <path d="M16 14.5V16l1 1"/>
+          </svg>
+          مجدولة
+        </button>
+      </nav>
+
+    </div><!-- /sidebar-header -->
+
+    <!-- ── Presence strip: "متاح الآن" merged slim row ── -->
+    <div class="presence-strip" role="status" aria-label="الحضور الحالي">
+      <span class="presence-label" aria-hidden="true">متاح الآن</span>
+
+      <!-- Avatars (2 active members) -->
+      <div class="presence-avatars" aria-label="الأعضاء الحاضرون">
+        <div class="presence-avatar" title="Nawras">
+          <!-- Person photo placeholder — real app loads from /api/members/avatar -->
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+      </div>
+
+      <span class="presence-count">2 نشط</span>
+
+      <!-- Trailing actions (filter / archive toggles) -->
+      <div class="presence-actions">
+        <!-- Hide-closed sessions filter -->
+        <button class="icon-btn" type="button" style="width:24px;height:24px;" title="إخفاء المحادثات المنتهية" aria-label="إخفاء المحادثات المنتهية">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/>
+            <line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/>
+            <line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/>
+            <circle cx="12" cy="4" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="14" cy="20" r="2"/>
+          </svg>
+        </button>
+        <!-- Archive toggle -->
+        <button class="icon-btn" type="button" style="width:24px;height:24px;" title="عرض المؤرشفة" aria-label="عرض المؤرشفة">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="21 8 21 21 3 21 3 8"/>
+            <rect x="1" y="3" width="22" height="5"/>
+            <line x1="10" y1="12" x2="14" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </div><!-- /presence-strip -->
+
+    <!-- ── Search row ── -->
+    <div class="search-row" role="search">
+      <label for="sidebar-search" class="sr-only">بحث في العناوين</label>
+      <div class="search-input-wrap">
+        <!-- Search icon -->
+        <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <span class="search-input-text" id="sidebar-search" aria-label="بحث في العناوين، اضغط Ctrl K للتفعيل">
+          البحث في العناوين…
+        </span>
+        <kbd class="search-kbd" aria-label="اختصار لوحة المفاتيح">Ctrl K</kbd>
+      </div>
+    </div><!-- /search-row -->
+
+    <!-- ── Project group: nassaj-dev ── -->
+    <div class="project-group">
+
+      <!-- Project header row -->
+      <div class="project-header" role="button" aria-expanded="true" aria-label="مشروع nassaj-dev، 215 محادثة، موسّع">
+
+        <!-- Expand chevron -->
+        <span class="project-chevron expanded" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </span>
+
+        <!-- Project folder icon -->
+        <span class="project-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </span>
+
+        <!-- Project name -->
+        <span class="project-name" dir="ltr" style="unicode-bidi:isolate;">nassaj-dev</span>
+
+        <!-- Online dot -->
+        <span class="project-online-dot" aria-label="متصل" title="مشروع نشط"></span>
+
+        <!-- Session count -->
+        <span class="project-count" aria-label="215 محادثة">215</span>
+
+        <!-- New session button (outline, not filled) -->
+        <button
+          class="new-session-btn"
+          type="button"
+          aria-label="جلسة جديدة في nassaj-dev"
+          title="جلسة جديدة"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          جلسة جديدة
+        </button>
+      </div><!-- /project-header -->
+
+      <!-- Project path (sub-row, slim) -->
+      <div class="project-path-row">
+        <span class="project-path" title="/opt/example/project">/opt/example/project</span>
+      </div>
+
+      <!-- ── Session list ── -->
+      <div class="session-list" role="list" aria-label="قائمة محادثات nassaj-dev">
+
+        <!-- Row 1: الإصدارات — codex engine, idle -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="الإصدارات">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon" title="Codex">Cx</div>
+            <!-- No status dot = idle -->
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">الإصدارات</span>
+          <div class="member-avatar" aria-label="عضو: J" title="Jalal">J</div>
+        </div>
+
+        <!-- Row 2: إصلاح التفويض — codex, error -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="إصلاح التفويض، حالة: خطأ">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cx</div>
+            <span class="status-dot error" role="img" aria-label="حالة: خطأ"></span>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">إصلاح التفويض</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 3: استكمال المحادثة السابقة — claude, done -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="استكمال المحادثة السابقة، حالة: مكتملة">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cl</div>
+            <span class="status-dot done" role="img" aria-label="حالة: مكتملة"></span>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">استكمال المحادثة السابقة</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 4: واجهة جديدة لنسّاج والإعدادات — claude, RUNNING, ACTIVE, PINNED -->
+        <div class="session-row active pinned" role="listitem" tabindex="0" aria-current="true" aria-label="واجهة جديدة لنسّاج والإعدادات، قيد التشغيل، المحادثة الحالية">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cl</div>
+            <span class="status-dot running" role="img" aria-label="حالة: قيد التشغيل"></span>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">واجهة جديدة لنسّاج وال…</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 5: مراجعة لوحة الأوامر — codex, idle -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="مراجعة لوحة الأوامر">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cx</div>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">مراجعة لوحة الأوامر</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 6: تمت إضافة تحديد جماعي — claude, done -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="تمت إضافة تحديد جماعي، حالة: مكتملة">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cl</div>
+            <span class="status-dot done" role="img" aria-label="حالة: مكتملة"></span>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">تمت إضافة تحديد جماع…</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 7: المشروع الأصلي هو `أنا`... — agy, idle -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="المشروع الأصلي هو أنا...">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon" style="font-size:8px;">agy</div>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">المشروع الأصلي هو `أنا`…</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 8: أصلحت الطرفية مع الإيب... — claude, idle -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="أصلحت الطرفية مع الإيبي">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cl</div>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">أصلحت الطرفية مع الإيب…</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+        <!-- Row 9: آلية عمل الموصلات — codex, idle -->
+        <div class="session-row" role="listitem" tabindex="0" aria-label="آلية عمل الموصلات">
+          <div class="provider-icon-wrap" aria-hidden="true">
+            <div class="provider-icon">Cx</div>
+          </div>
+          <span class="pin-icon" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+          </span>
+          <span class="session-title">آلية عمل الموصلات</span>
+          <div class="member-avatar" aria-label="عضو: J">J</div>
+        </div>
+
+      </div><!-- /session-list -->
+
+      <!-- Load more sessions -->
+      <div class="load-more-row">
+        <button class="load-more-btn" type="button" aria-label="تحميل المزيد من المحادثات">
+          تحميل المزيد من المحادثات
+        </button>
+      </div>
+
+    </div><!-- /project-group -->
+
+    <!-- ── Sidebar footer ── -->
+    <footer class="sidebar-footer">
+      <span class="footer-version" aria-label="الإصدار الحالي" dir="ltr" style="unicode-bidi:isolate;">v1.36.3</span>
+      <button class="icon-btn" type="button" title="الإعدادات" aria-label="الإعدادات">
+        <!-- Settings icon -->
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </footer>
+
+  </aside><!-- /sidebar -->
+
+  <!-- ═══════════════════════════════════════════════
+       MAIN CONTENT (desktop)
+       ═══════════════════════════════════════════════ -->
+  <main class="main-content" aria-label="منطقة المحادثة">
+
+    <!-- Chat header: single 46px row, 2-line text stack -->
+    <header class="chat-header">
+      <h1 class="chat-title">واجهة جديدة لنسّاج والإعدادات</h1>
+      <div class="chat-meta" aria-label="معلومات الجلسة">
+        <span class="chat-meta-code" title="مسار المشروع" dir="ltr" style="unicode-bidi:isolate;">nassaj-dev</span>
+        <span class="chat-meta-sep" aria-hidden="true">·</span>
+        <span class="chat-meta-code" title="commit" dir="ltr" style="unicode-bidi:isolate;">6fb444ec</span>
+        <span class="chat-meta-sep" aria-hidden="true">·</span>
+        <span dir="ltr" style="unicode-bidi:isolate;">Nawras</span>
+        <span class="chat-meta-sep" aria-hidden="true">·</span>
+        <span class="chat-meta-code" title="النموذج" dir="ltr" style="unicode-bidi:isolate;">claude-opus-5</span>
+      </div>
+    </header>
+
+    <!-- Main content tabs row (simplified — 3 tabs) -->
+    <nav class="main-tabs-row" aria-label="تبويبات المحادثة">
+      <button class="main-tab active" type="button" aria-current="page">
+        <!-- MessageSquare icon -->
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        المحادثة
+      </button>
+      <button class="main-tab" type="button">
+        <!-- FileText icon -->
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        الملفات
+      </button>
+      <button class="main-tab" type="button">
+        <!-- Activity icon -->
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        السجل
+      </button>
+    </nav>
+
+    <!-- Messages area -->
+    <div class="messages-area" aria-label="الرسائل" aria-live="polite">
+
+      <!-- Tool output: cd command -->
+      <div class="terminal-block">
+        <div class="terminal-header" aria-hidden="true">
+          <div class="terminal-header-dot"></div>
+          <div class="terminal-header-dot"></div>
+          <div class="terminal-header-dot"></div>
+        </div>
+        <div class="terminal-body" dir="ltr" aria-label="أمر طرفية">
+          <span class="terminal-prompt">$&nbsp;</span><span class="terminal-cmd">cd /opt/example/project</span>
+        </div>
+      </div>
+
+      <!-- System message -->
+      <p style="font-size:13px;color:var(--c-text-muted);padding-inline:4px;" dir="ltr">Republish and re-screenshot concept A header</p>
+
+      <!-- Error message (minimal: icon + text, no colored card) -->
+      <div class="error-message" role="alert" aria-label="رسالة خطأ">
+        <span class="error-icon" aria-hidden="true">
+          <!-- AlertCircle icon -->
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </span>
+        <div class="error-text" dir="ltr">
+          <strong>Error — Exit code 1 [client-build]</strong>
+          Error [ERR_MODULE_NOT_FOUND]: Cannot find package<br/>
+          'defaultResolve' (node:internal/modules/esm/resolve)<br/>
+          #resolve (node:internal/modules/esm/load)<br/>
+          Node.js v24.18.1
+        </div>
+      </div>
+
+      <!-- Link message -->
+      <div>
+        <a
+          href="https://nassaj.example.com/ui-lab"
+          class="message-link"
+          dir="ltr"
+          style="unicode-bidi:isolate;"
+          target="_blank"
+          rel="noopener noreferrer"
+        >https://nassaj.example.com/ui-lab</a>
+        <p class="message-time">4 Sep 2026, 02:50 PM</p>
+      </div>
+
+    </div><!-- /messages-area -->
+
+  </main><!-- /main-content -->
+
+</div><!-- /app-shell -->
+
+</body>
+</html>

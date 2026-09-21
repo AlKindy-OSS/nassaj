@@ -1,0 +1,182 @@
+{
+  "sections": {
+    "overview": "جائزہ",
+    "objectives": "مقاصد",
+    "schedule": "ٹائم لائن",
+    "tasks": "کام",
+    "issues": "مسائل",
+    "visual": "بصری جانچ",
+    "decisions": "فیصلے",
+    "architecture": "فنی ڈھانچہ"
+  },
+  "updated": "اپ ڈیٹ {{date}}",
+  "overallProgress": "مجموعی پیش رفت",
+  "error": "پروجیکٹ بورڈ لوڈ نہ ہو سکا۔",
+  "stateError": "project-state.json درست نہیں — آخری درست نسخہ دکھایا جا رہا ہے۔",
+  "empty": {
+    "title": "ابھی کوئی پروجیکٹ بورڈ نہیں",
+    "description": "اس پروجیکٹ کی حالت کی فائل موجود نہیں۔ مراحل، کاموں اور مسائل کا زندہ بورڈ پانے کے لیے یہ فائل بنائیں۔",
+    "hint": "فائل بدلتے ہی بورڈ خودبخود تازہ ہو جاتا ہے — دوبارہ لوڈ کرنے کی ضرورت نہیں۔",
+    "copyTemplate": "ابتدائی سانچہ نقل کریں",
+    "copied": "نقل ہو گیا — فائل میں چسپاں کریں"
+  },
+  "phases": {
+    "title": "مراحل",
+    "current": "موجودہ",
+    "planned": "منصوبہ بند",
+    "progressCount": "{{progress}}٪ ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "موجودہ اسپرنٹ",
+    "started": "آغاز {{date}}",
+    "ended": "اختتام {{date}}",
+    "taskCount": "کام {{done}}/{{total}}",
+    "others": "دیگر اسپرنٹ ({{count}})",
+    "status": {
+      "planned": "منصوبہ بند",
+      "current": "موجودہ",
+      "done": "مکمل"
+    }
+  },
+  "tasksSection": {
+    "title": "کام",
+    "open": "کھلے",
+    "in_progress": "جاری",
+    "done": "مکمل",
+    "empty": "کوئی کام نہیں",
+    "kind": {
+      "feature": "خصوصیت",
+      "bug": "خرابی",
+      "chore": "معمول کا کام",
+      "spike": "کھوج"
+    },
+    "issueLink": "مسئلہ {{id}} دیکھیں",
+    "cancelled": "منسوخ ({{count}})",
+    "status": {
+      "todo": "باقی",
+      "pending": "زیرِ التوا",
+      "blocked": "رکا ہوا",
+      "backlog": "بیک لاگ",
+      "deferred": "مؤخر",
+      "closed": "بند",
+      "fixed": "درست شدہ",
+      "resolved": "حل شدہ",
+      "accepted": "منظور",
+      "cancelled": "منسوخ",
+      "wontfix": "درست نہیں کیا جائے گا",
+      "unknown": "نامعلوم"
+    }
+  },
+  "issues": {
+    "title": "مسائل",
+    "severity": {
+      "low": "کم",
+      "medium": "درمیانہ",
+      "high": "زیادہ",
+      "critical": "نازک"
+    },
+    "status": {
+      "open": "کھلا",
+      "fixed": "درست شدہ",
+      "wontfix": "درست نہیں کیا جائے گا"
+    },
+    "empty": "کوئی مسئلہ درج نہیں۔"
+  },
+  "decisions": {
+    "title": "فیصلے",
+    "empty": "ابھی کوئی فیصلہ نہیں",
+    "openLink": "فیصلے کی دستاویز {{id}} کھولیں"
+  },
+  "schedule": {
+    "title": "ٹائم لائن (گانٹ)",
+    "critical": "نازک",
+    "legendScheduled": "شیڈول شدہ",
+    "legendCritical": "نازک راستہ",
+    "legendMilestone": "سنگِ میل",
+    "cpm": {
+      "cycle": "نازک راستہ چھوڑ دیا گیا: انحصار کا چکر پایا گیا۔",
+      "missingDeps": "بعض انحصارات غائب اشیاء کی طرف اشارہ کرتے تھے، انہیں نازک راستے میں نظرانداز کیا گیا۔"
+    },
+    "noDates": "ٹائم لائن بنانے کے لیے کوئی درست تاریخ نہیں۔",
+    "progress": "پیش رفت {{value}}٪",
+    "durationDays": "دورانیہ: {{days}} دن",
+    "owner": "ذمہ دار: {{name}}",
+    "deliverable": "قابلِ تسلیم: {{id}}",
+    "deliverableLink": "قابلِ تسلیم {{id}} دیکھیں",
+    "dependsOn": "منحصر بر: {{ids}}"
+  },
+  "deliverables": {
+    "title": "قابلِ تسلیم اشیاء",
+    "due": "آخری تاریخ {{date}}",
+    "overdue": "تاخیر شدہ",
+    "acceptance": "قبولیت کا معیار",
+    "deliveredBy": "پیش کیا گیا بذریعہ: {{ids}}",
+    "statuses": {
+      "pending": "زیرِ التوا",
+      "in_progress": "جاری",
+      "delivered": "پیش کر دیا گیا",
+      "accepted": "منظور",
+      "rejected": "مسترد"
+    }
+  },
+  "objectives": {
+    "title": "مقاصد (OKR)",
+    "baseline": "بنیادی سطح: {{value}}",
+    "statuses": {
+      "on_track": "درست سمت میں",
+      "at_risk": "خطرے میں",
+      "off_track": "راہ سے ہٹا ہوا",
+      "done": "مکمل"
+    }
+  },
+  "kpis": {
+    "title": "کلیدی اشاریے",
+    "target": "ہدف: {{value}}"
+  },
+  "visualChecks": {
+    "title": "بصری جانچ",
+    "empty": "ابھی کوئی بصری جانچ نہیں۔",
+    "step": "مرحلہ",
+    "expect": "متوقع",
+    "result": "مالک کا نوٹ",
+    "counter": "تصدیق شدہ {{verified}} / {{total}}",
+    "status": {
+      "pending": "جانچ کا منتظر",
+      "verified": "تصدیق شدہ",
+      "failed": "ناکام"
+    }
+  },
+  "architecture": {
+    "technical": "تکنیکی",
+    "simplified": "سادہ",
+    "missing": "فنی ڈھانچے کی دستاویز نہیں ملی (docs/ARCHITECTURE.md یا docs/ARCHITECTURE_AR.md)۔",
+    "variantMissing": "فنی ڈھانچے کی دستاویز کا یہ نسخہ موجود نہیں۔"
+  },
+  "stats": {
+    "tab": "اعداد و شمار",
+    "totalLabel": "کل لاگت (شروع سے اب تک)",
+    "headerTotal": "شروع سے اب تک",
+    "headerTotalTitle": "اس پروجیکٹ کی مجموعی لاگت — گفتگوئیں حذف ہونے کے بعد بھی محفوظ رہتی ہے",
+    "span": "دورانیہ",
+    "activeDays": "فعال دن",
+    "activeDaysOfSpan": "{{span}} دنوں میں سے",
+    "conversations": "گفتگوئیں",
+    "agents": "ایجنٹ",
+    "firstActivity": "پہلی سرگرمی",
+    "lastActivity": "آخری سرگرمی",
+    "dailyTitle": "روزانہ لاگت",
+    "dailyPeak": "بلند ترین",
+    "byVendor": "بلحاظ فراہم کنندہ",
+    "byModel": "بلحاظ ماڈل",
+    "partialShort": "جزوی",
+    "partialModels": "جزوی میزان — ان ماڈلز کی سرکاری قیمت نہیں: {{models}}",
+    "apiEquivalent": "سبسکرپشن پر استعمال کی API کے برابر قدر — یہ وصول کی گئی رقم نہیں",
+    "pricesAsOf": "قیمتیں بتاریخ {{date}}",
+    "unavailable": "دستیاب نہیں",
+    "empty": "اس پروجیکٹ کے لیے ابھی کوئی لاگت ماپی نہیں گئی۔"
+  },
+  "summary": {
+    "tasksDone": "{{done}} مکمل",
+    "issuesOpen": "{{open}} کھلے"
+  }
+}

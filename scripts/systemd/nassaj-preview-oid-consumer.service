@@ -1,0 +1,61 @@
+[Unit]
+Description=Nassaj commit-addressed preview consumer
+After=network.target
+Conflicts=nassaj-client-build-watch.service
+Before=nassaj-client-build-watch.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Project/nassaj-dev
+ExecStart=/usr/bin/env node scripts/client-publication-consumer-launcher.mjs
+Restart=on-failure
+RestartSec=5s
+KillMode=control-group
+TimeoutStopSec=30s
+CPUQuota=150%
+MemoryHigh=2G
+MemoryMax=3G
+TasksMax=256
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+Environment=NODE_ENV=production
+Environment=TMPDIR=/var/tmp
+# Deliberately absent in source. The reviewed installer supplies a 0600 drop-in
+# with NASSAJ_PREVIEW_OID_ENFORCEMENT=1. Without it the process exits closed.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+IPAddressAllow=localhost
+IPAddressDeny=any
+LockPersonality=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=%h/Project/nassaj-dev
+ReadOnlyPaths=-%h/Project/nassaj-dev/src
+ReadOnlyPaths=-%h/Project/nassaj-dev/public
+ReadOnlyPaths=-%h/Project/nassaj-dev/docs
+ReadOnlyPaths=-%h/Project/nassaj-dev/shared
+ReadOnlyPaths=-%h/Project/nassaj-dev/server
+ReadOnlyPaths=-%h/Project/nassaj-dev/scripts
+ReadOnlyPaths=-%h/Project/nassaj-dev/node_modules
+ReadOnlyPaths=-%h/Project/nassaj-dev/package.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/package-lock.json
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=user mnt pid net ipc uts cgroup
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallFilter=~@obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=default.target

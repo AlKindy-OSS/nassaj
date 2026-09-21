@@ -1,0 +1,361 @@
+{
+  "buttons": {
+    "save": "ذخیره",
+    "cancel": "انصراف",
+    "delete": "حذف",
+    "create": "ایجاد",
+    "edit": "ویرایش",
+    "close": "بستن",
+    "confirm": "تأیید",
+    "submit": "ارسال",
+    "retry": "تلاش دوباره",
+    "refresh": "تازه‌سازی",
+    "search": "جست‌وجو",
+    "clear": "پاک کردن",
+    "copy": "رونوشت",
+    "download": "دریافت",
+    "upload": "بارگذاری",
+    "browse": "مرور"
+  },
+  "tabs": {
+    "chat": "گفت‌وگو",
+    "shell": "پوسته",
+    "files": "پرونده‌ها",
+    "git": "کنترل نسخه",
+    "tasks": "وظیفه‌ها",
+    "board": "تختهٔ پروژه",
+    "wiki": "ویکی"
+  },
+  "wiki": {
+    "title": "ویکی نسّاج"
+  },
+  "status": {
+    "loading": "در حال بارگذاری...",
+    "success": "موفق",
+    "error": "خطا",
+    "failed": "ناموفق",
+    "pending": "در انتظار",
+    "completed": "انجام‌شده",
+    "inProgress": "در حال انجام"
+  },
+  "messages": {
+    "savedSuccessfully": "با موفقیت ذخیره شد",
+    "deletedSuccessfully": "با موفقیت حذف شد",
+    "updatedSuccessfully": "با موفقیت به‌روزرسانی شد",
+    "operationFailed": "عملیات ناموفق بود",
+    "networkError": "خطای شبکه. اتصال خود را بررسی کنید.",
+    "unauthorized": "دسترسی مجاز نیست. لطفاً وارد شوید.",
+    "notFound": "یافت نشد",
+    "invalidInput": "ورودی نامعتبر",
+    "requiredField": "این فیلد الزامی است",
+    "unknownError": "خطای ناشناخته‌ای رخ داد"
+  },
+  "navigation": {
+    "settings": "تنظیمات",
+    "home": "خانه",
+    "back": "بازگشت",
+    "next": "بعدی",
+    "previous": "قبلی",
+    "logout": "خروج"
+  },
+  "common": {
+    "language": "زبان",
+    "theme": "پوسته",
+    "darkMode": "حالت تیره",
+    "lightMode": "حالت روشن",
+    "name": "نام",
+    "description": "توضیح",
+    "enabled": "فعال",
+    "disabled": "غیرفعال",
+    "optional": "اختیاری",
+    "version": "نسخه",
+    "select": "انتخاب",
+    "selectAll": "انتخاب همه",
+    "deselectAll": "لغو انتخاب همه",
+    "done": "انجام شد",
+    "failed": "ناموفق"
+  },
+  "time": {
+    "justNow": "همین حالا",
+    "minutesAgo": "{{count}} دقیقه پیش",
+    "hoursAgo": "{{count}} ساعت پیش",
+    "daysAgo": "{{count}} روز پیش",
+    "yesterday": "دیروز"
+  },
+  "fileOperations": {
+    "newFile": "پروندهٔ تازه",
+    "newFolder": "پوشهٔ تازه",
+    "rename": "تغییر نام",
+    "move": "انتقال",
+    "copyPath": "رونوشت مسیر",
+    "openInEditor": "گشودن در ویرایشگر"
+  },
+  "mainContent": {
+    "loading": "در حال بارگذاری Nassaj",
+    "settingUpWorkspace": "در حال آماده‌سازی فضای کاری شما...",
+    "chooseProject": "پروژهٔ خود را برگزینید",
+    "selectProjectDescription": "برای شروع کدنویسی با Claude، پروژه‌ای را از نوار کناری انتخاب کنید. هر پروژه شامل گفت‌وگوها و تاریخچهٔ پرونده‌های شماست.",
+    "tip": "نکته",
+    "createProjectMobile": "برای دسترسی به پروژه‌ها، دکمهٔ منوی بالا را بزنید",
+    "createProjectDesktop": "با کلیک روی نشان پوشه در نوار کناری، پروژهٔ تازه بسازید",
+    "newSession": "نشست تازه",
+    "untitledSession": "نشست بی‌عنوان",
+    "projectFiles": "پرونده‌های پروژه",
+    "sessionIdTooltip": "شناسهٔ نشست: {{id}} — برای رونوشت کلیک کنید",
+    "sessionIdCopy": "رونوشت شناسهٔ نشست {{id}}"
+  },
+  "fileTree": {
+    "loading": "در حال بارگذاری پرونده‌ها...",
+    "files": "پرونده‌ها",
+    "simpleView": "نمای ساده",
+    "compactView": "نمای فشرده",
+    "detailedView": "نمای کامل",
+    "searchPlaceholder": "جست‌وجوی پرونده‌ها و پوشه‌ها...",
+    "clearSearch": "پاک کردن جست‌وجو",
+    "name": "نام",
+    "size": "اندازه",
+    "modified": "آخرین تغییر",
+    "permissions": "دسترسی‌ها",
+    "noFilesFound": "پرونده‌ای یافت نشد",
+    "checkProjectPath": "بررسی کنید که مسیر پروژه در دسترس باشد",
+    "noMatchesFound": "نتیجه‌ای یافت نشد",
+    "tryDifferentSearch": "عبارت دیگری بیازمایید یا جست‌وجو را پاک کنید",
+    "justNow": "همین حالا",
+    "minAgo": "{{count}} دقیقه پیش",
+    "hoursAgo": "{{count}} ساعت پیش",
+    "daysAgo": "{{count}} روز پیش",
+    "newFile": "پروندهٔ تازه (Cmd+N)",
+    "newFolder": "پوشهٔ تازه (Cmd+Shift+N)",
+    "refresh": "تازه‌سازی",
+    "collapseAll": "بستن همه",
+    "uploadFiles": "بارگذاری پرونده‌ها (حداکثر {{size}} برای هر کدام)",
+    "uploadingFiles": "در حال بارگذاری پرونده‌ها",
+    "uploadComplete": "بارگذاری کامل شد",
+    "uploadFailed": "بارگذاری ناموفق بود",
+    "uploadedCount": "{{uploaded}} از {{total}} {{label}} بارگذاری شد",
+    "context": {
+      "rename": "تغییر نام",
+      "delete": "حذف",
+      "copyPath": "رونوشت مسیر",
+      "download": "دریافت",
+      "newFile": "پروندهٔ تازه",
+      "newFolder": "پوشهٔ تازه",
+      "refresh": "تازه‌سازی",
+      "menuLabel": "منوی زمینهٔ پرونده",
+      "loading": "در حال بارگذاری..."
+    }
+  },
+  "projectWizard": {
+    "title": "ایجاد پروژهٔ تازه",
+    "steps": {
+      "type": "نوع",
+      "configure": "پیکربندی",
+      "confirm": "تأیید"
+    },
+    "step1": {
+      "question": "آیا از پیش فضای کاری دارید یا می‌خواهید تازه بسازید؟",
+      "existing": {
+        "title": "فضای کاری موجود",
+        "description": "روی سرورم فضای کاری دارم و فقط می‌خواهم آن را به فهرست پروژه‌ها بیفزایم"
+      },
+      "new": {
+        "title": "فضای کاری تازه",
+        "description": "فضای کاری تازه بسازید و در صورت نیاز از یک مخزن GitHub رونوشت بگیرید"
+      }
+    },
+    "step2": {
+      "existingPath": "مسیر فضای کاری",
+      "newPath": "مسیر فضای کاری",
+      "existingPlaceholder": "/path/to/existing/workspace",
+      "newPlaceholder": "/path/to/new/workspace",
+      "existingHelp": "مسیر کامل پوشهٔ فضای کاری موجود شما",
+      "newHelp": "مسیر کامل پوشهٔ فضای کاری شما",
+      "githubUrl": "نشانی GitHub (اختیاری)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "اختیاری: نشانی GitHub را برای رونوشت‌گیری از مخزن بدهید",
+      "githubAuth": "احراز هویت GitHub (اختیاری)",
+      "githubAuthHelp": "تنها برای مخزن‌های خصوصی لازم است. مخزن‌های عمومی بدون احراز هویت رونوشت می‌شوند.",
+      "loadingTokens": "در حال بارگذاری نشانه‌های ذخیره‌شده...",
+      "storedToken": "نشانهٔ ذخیره‌شده",
+      "newToken": "نشانهٔ تازه",
+      "nonePublic": "هیچ‌کدام (عمومی)",
+      "selectToken": "گزینش نشانه",
+      "selectTokenPlaceholder": "-- یک نشانه برگزینید --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "این نشانه تنها برای همین عملیات به کار می‌رود",
+      "publicRepoInfo": "مخزن‌های عمومی به احراز هویت نیاز ندارند. برای رونوشت از مخزن عمومی می‌توانید نشانه ندهید.",
+      "noTokensHelp": "نشانهٔ ذخیره‌شده‌ای موجود نیست. برای استفادهٔ آسان‌تر می‌توانید در تنظیمات ← کلیدهای API نشانه بیفزایید.",
+      "optionalTokenPublic": "نشانهٔ GitHub (برای مخزن‌های عمومی اختیاری)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (برای مخزن عمومی خالی بگذارید)",
+      "repos": {
+        "fromMyRepos": "از میان مخزن‌های من برگزینید",
+        "pasteUrl": "چسباندن نشانی",
+        "sourceToggleLabel": "منبع GitHub",
+        "help": "مخزنی از حساب GitHub خود را برای رونوشت‌گیری برگزینید",
+        "ariaLabel": "گزینش مخزن GitHub",
+        "placeholder": "یک مخزن برگزینید...",
+        "searchPlaceholder": "جست‌وجوی مخزن‌ها...",
+        "searchAriaLabel": "جست‌وجو در مخزن‌های GitHub شما",
+        "private": "خصوصی",
+        "loading": "در حال بارگذاری مخزن‌های شما...",
+        "empty": "برای این نشانه مخزنی یافت نشد.",
+        "noMatch": "مخزنی با جست‌وجوی شما همخوان نیست.",
+        "loadError": "بارگذاری مخزن‌ها ناموفق بود. دوباره تلاش کنید.",
+        "invalidToken": "GitHub این نشانه را نپذیرفت. شاید باطل شده یا دامنهٔ «repo» ندارد.",
+        "noToken": "برای این حساب نشانهٔ GitHub پیکربندی نشده است.",
+        "forbidden": "GitHub دسترسی را رد کرد. شاید نشانه دامنهٔ لازم را ندارد یا به سقف نرخ خورده است.",
+        "retry": "تلاش دوباره",
+        "manageTokens": "مدیریت نشانه‌ها در تنظیمات"
+      }
+    },
+    "step3": {
+      "reviewConfig": "پیکربندی خود را مرور کنید",
+      "existingWorkspace": "فضای کاری موجود",
+      "newWorkspace": "فضای کاری تازه",
+      "path": "مسیر:",
+      "cloneFrom": "رونوشت از:",
+      "authentication": "احراز هویت:",
+      "usingStoredToken": "با نشانهٔ ذخیره‌شده:",
+      "usingProvidedToken": "با نشانهٔ واردشده",
+      "noAuthentication": "بدون احراز هویت",
+      "sshKey": "کلید SSH",
+      "existingInfo": "فضای کاری به فهرست پروژه‌های شما افزوده و برای نشست‌های Claude/Cursor در دسترس خواهد بود.",
+      "newWithClone": "مخزن از همین پوشه رونوشت خواهد شد.",
+      "newEmpty": "فضای کاری به فهرست پروژه‌های شما افزوده و برای نشست‌های Claude/Cursor در دسترس خواهد بود.",
+      "cloningRepository": "در حال رونوشت‌گیری از مخزن..."
+    },
+    "buttons": {
+      "cancel": "انصراف",
+      "back": "بازگشت",
+      "next": "بعدی",
+      "createProject": "ایجاد پروژه",
+      "creating": "در حال ایجاد...",
+      "cloning": "در حال رونوشت‌گیری..."
+    },
+    "errors": {
+      "selectType": "روشن کنید که فضای کاری دارید یا می‌خواهید تازه بسازید",
+      "providePath": "لطفاً مسیر فضای کاری را وارد کنید",
+      "failedToCreate": "ایجاد فضای کاری ناموفق بود",
+      "failedToCreateFolder": "ایجاد پوشه ناموفق بود"
+    }
+  },
+  "notifications": {
+    "genericTool": "یک ابزار",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "اعلان"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "نیازمند اقدام",
+          "body": "{{toolName}} در انتظار تصمیم شماست."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "اجرا متوقف شد",
+          "body": "دلیل: {{reason}}"
+        },
+        "failed": {
+          "title": "اجرا ناموفق بود"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "اعلان عامل"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "به‌روزرسانی در دسترس",
+    "newVersionReady": "نسخهٔ تازه آماده است",
+    "currentVersion": "نسخهٔ کنونی",
+    "latestVersion": "تازه‌ترین نسخه",
+    "whatsNew": "تازه‌ها:",
+    "viewFullRelease": "دیدن یادداشت کامل انتشار",
+    "updateProgress": "پیشرفت به‌روزرسانی:",
+    "manualUpgrade": "به‌روزرسانی دستی:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "یا روی «هم‌اکنون به‌روزرسانی کن» بزنید تا خودکار انجام شود.",
+    "updateCompleted": "به‌روزرسانی با موفقیت انجام شد!",
+    "restartServer": "برای اعمال تغییرها سرور را دوباره راه‌اندازی کنید.",
+    "updateFailed": "به‌روزرسانی ناموفق بود",
+    "buttons": {
+      "close": "بستن",
+      "later": "بعداً",
+      "copyCommand": "رونوشت فرمان",
+      "updateNow": "هم‌اکنون به‌روزرسانی کن",
+      "updating": "در حال به‌روزرسانی..."
+    },
+    "ariaLabels": {
+      "closeModal": "بستن پنجرهٔ ارتقای نسخه",
+      "showSidebar": "نمایش نوار کناری",
+      "settings": "تنظیمات",
+      "updateAvailable": "به‌روزرسانی در دسترس",
+      "closeSidebar": "بستن نوار کناری",
+      "updateInProgress": "به‌روزرسانی در حال انجام"
+    }
+  },
+  "sessionProcessState": {
+    "running": "در حال اجرا",
+    "frozen": "متوقف‌شده (منجمد)",
+    "runningHint": "فرایند نشست در حال اجراست",
+    "frozenHint": "فرایند نشست موقتاً منجمد است (kill -STOP)",
+    "projectBusyHint": "نشستی در این پروژه هم‌اکنون در حال پردازش است",
+    "done": "پایان‌یافته",
+    "doneHint": "نشست به پایان رسیده و هنوز گشوده نشده است",
+    "projectDoneHint": "نشستی در این پروژه به پایان رسیده و هنوز گشوده نشده است"
+  },
+  "workflowStatus": {
+    "running": "کارگردش در حال اجرا",
+    "runningHint": "کارگردشی در پس‌زمینهٔ این نشست فعالانه در حال اجراست",
+    "orphanEmpty": "متوقف — بدون خروجی",
+    "orphanEmptyHint": "فرایند پیش از پایان هیچ عاملی خارج شد (۰ از N) — دستی قابل ازسرگیری است",
+    "orphanPartial": "متوقف — ناتمام جزئی",
+    "orphanPartialHint": "فرایند پس از پایان بخشی از عامل‌ها خارج شد — پیشرفت جزئی ذخیره شد و دستی قابل ازسرگیری است",
+    "orphanIncomplete": "متوقف — ناقص",
+    "orphanIncompleteHint": "فرایند بدون تکمیل خارج شد؛ آغازشده‌ها بیش از تولیدشده‌هاست — دستی قابل ازسرگیری است",
+    "frozen": "منجمد (متوقف)",
+    "frozenHint": "فرایند معلق است (SIGSTOP) نه مرده — با CONT ادامه می‌یابد",
+    "unknown": "زنده‌بودن نامعلوم",
+    "unknownHint": "زنده‌بودن را نمی‌توان تأیید کرد — احتمالاً از راه‌اندازی دوبارهٔ سرور جان سالم برده؛ نه زنده تأیید شده نه مرده",
+    "projectRunningHint": "کارگردشی در پس‌زمینهٔ این پروژه در حال اجراست",
+    "projectOrphanHint": "کارگردش یتیمی در این پروژه نیازمند رسیدگی است",
+    "projectUnknownHint": "زنده‌بودن یک کارگردش پس‌زمینه در این پروژه نامعلوم است — نه زنده تأیید شده نه مرده"
+  },
+  "buildUpdate": {
+    "available": "ساخت تازه‌ای در دسترس است",
+    "reload": "بارگذاری دوباره",
+    "ariaLabel": "اعلان به‌روزرسانی ساخت تازه",
+    "dismiss": "بستن"
+  },
+  "governanceBadge": {
+    "ungoverned": "بدون حاکمیت",
+    "tooltip": {
+      "none": "این نشست بیرون از حاکمیت نسّاج اجرا می‌شود — تنظیمات تأمین‌کننده را بررسی کنید"
+    }
+  },
+  "onboarding": {
+    "agents": {
+      "title": "عامل‌های هوش مصنوعی خود را وصل کنید",
+      "subtitle": "به یک یا چند دستیار کدنویسی وارد شوید. همه اختیاری‌اند.",
+      "footerNote": "این‌ها را بعداً هم می‌توانید در تنظیمات پیکربندی کنید."
+    },
+    "buttons": {
+      "previous": "قبلی",
+      "next": "بعدی",
+      "saving": "در حال ذخیره...",
+      "completing": "در حال تکمیل...",
+      "complete": "تکمیل راه‌اندازی"
+    },
+    "errors": {
+      "gitFieldsRequired": "نام و رایانامهٔ git هر دو الزامی‌اند.",
+      "invalidEmail": "نشانی رایانامهٔ معتبری وارد کنید.",
+      "saveGitConfigFailed": "ذخیرهٔ پیکربندی git ناموفق بود",
+      "completeFailed": "تکمیل راه‌اندازی ناموفق بود"
+    }
+  }
+}

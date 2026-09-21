@@ -1,0 +1,182 @@
+{
+  "sections": {
+    "overview": "概览",
+    "objectives": "目标",
+    "schedule": "时间线",
+    "tasks": "任务",
+    "issues": "问题",
+    "visual": "视觉检查",
+    "decisions": "决策",
+    "architecture": "架构"
+  },
+  "updated": "更新于 {{date}}",
+  "overallProgress": "整体进度",
+  "error": "加载项目看板失败。",
+  "stateError": "project-state.json 无效 — 显示最后有效版本。",
+  "empty": {
+    "title": "暂无项目看板",
+    "description": "此项目没有项目状态文件。创建后即可获得包含阶段、任务和问题的实时看板。",
+    "hint": "文件更改时看板会自动更新 — 无需手动刷新。",
+    "copyTemplate": "复制入门模板",
+    "copied": "已复制 — 将其粘贴到文件中"
+  },
+  "phases": {
+    "title": "阶段",
+    "current": "当前",
+    "planned": "已计划",
+    "progressCount": "{{progress}}%（{{done}}/{{total}}）"
+  },
+  "sprint": {
+    "current": "当前冲刺",
+    "started": "开始于 {{date}}",
+    "ended": "结束于 {{date}}",
+    "taskCount": "任务 {{done}}/{{total}}",
+    "others": "其他冲刺 ({{count}})",
+    "status": {
+      "planned": "已计划",
+      "current": "当前",
+      "done": "已完成"
+    }
+  },
+  "tasksSection": {
+    "title": "任务",
+    "open": "待办",
+    "in_progress": "进行中",
+    "done": "已完成",
+    "empty": "暂无任务",
+    "kind": {
+      "feature": "功能",
+      "bug": "缺陷",
+      "chore": "维护",
+      "spike": "探索"
+    },
+    "issueLink": "查看问题 {{id}}",
+    "cancelled": "已取消 ({{count}})",
+    "status": {
+      "todo": "待办",
+      "pending": "待处理",
+      "blocked": "受阻",
+      "backlog": "待办清单",
+      "deferred": "已推迟",
+      "closed": "已关闭",
+      "fixed": "已修复",
+      "resolved": "已解决",
+      "accepted": "已接受",
+      "cancelled": "已取消",
+      "wontfix": "不予修复",
+      "unknown": "未知"
+    }
+  },
+  "issues": {
+    "title": "问题",
+    "severity": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "critical": "严重"
+    },
+    "status": {
+      "open": "待处理",
+      "fixed": "已修复",
+      "wontfix": "不予修复"
+    },
+    "empty": "暂无记录的问题。"
+  },
+  "decisions": {
+    "title": "决策",
+    "empty": "暂无决策",
+    "openLink": "打开决策文档 {{id}}"
+  },
+  "schedule": {
+    "title": "时间线（甘特图）",
+    "critical": "关键路径",
+    "legendScheduled": "已安排",
+    "legendCritical": "关键路径",
+    "legendMilestone": "里程碑",
+    "cpm": {
+      "cycle": "关键路径已跳过：检测到依赖循环。",
+      "missingDeps": "部分依赖引用了缺失项，已在关键路径中忽略。"
+    },
+    "noDates": "没有有效日期可绘制时间线。",
+    "progress": "进度 {{value}}%",
+    "durationDays": "工期：{{days}} 天",
+    "owner": "负责人：{{name}}",
+    "deliverable": "交付物：{{id}}",
+    "deliverableLink": "查看交付物 {{id}}",
+    "dependsOn": "依赖：{{ids}}"
+  },
+  "deliverables": {
+    "title": "交付物",
+    "due": "截止 {{date}}",
+    "overdue": "已逾期",
+    "acceptance": "验收标准",
+    "deliveredBy": "交付人：{{ids}}",
+    "statuses": {
+      "pending": "待处理",
+      "in_progress": "进行中",
+      "delivered": "已交付",
+      "accepted": "已验收",
+      "rejected": "已拒绝"
+    }
+  },
+  "objectives": {
+    "title": "目标（OKR）",
+    "baseline": "基准：{{value}}",
+    "statuses": {
+      "on_track": "正常",
+      "at_risk": "存在风险",
+      "off_track": "偏离",
+      "done": "已完成"
+    }
+  },
+  "kpis": {
+    "title": "KPI 指标",
+    "target": "目标：{{value}}"
+  },
+  "visualChecks": {
+    "title": "视觉检查",
+    "empty": "暂无视觉检查。",
+    "step": "步骤",
+    "expect": "预期",
+    "result": "所有者备注",
+    "counter": "已验证 {{verified}} / {{total}}",
+    "status": {
+      "pending": "等待检查",
+      "verified": "已验证",
+      "failed": "未通过"
+    }
+  },
+  "architecture": {
+    "technical": "技术版",
+    "simplified": "简化版",
+    "missing": "未找到架构文档（docs/ARCHITECTURE.md 或 docs/ARCHITECTURE_AR.md）。",
+    "variantMissing": "此版本的架构文档不存在。"
+  },
+  "stats": {
+    "tab": "统计",
+    "totalLabel": "总费用（全部时间）",
+    "headerTotal": "累计",
+    "headerTotalTitle": "该项目的累计费用 — 即使删除对话也会保留",
+    "span": "时间跨度",
+    "activeDays": "活跃天数",
+    "activeDaysOfSpan": "/ 共 {{span}} 天",
+    "conversations": "对话数",
+    "agents": "代理",
+    "firstActivity": "首次活动",
+    "lastActivity": "最近活动",
+    "dailyTitle": "每日费用",
+    "dailyPeak": "峰值",
+    "byVendor": "按提供方",
+    "byModel": "按模型",
+    "partialShort": "部分",
+    "partialModels": "部分合计 — 没有官方价格：{{models}}",
+    "apiEquivalent": "订阅用量按 API 价格折算的价值 — 并非实际账单金额",
+    "pricesAsOf": "价格截至 {{date}}",
+    "unavailable": "不可用",
+    "empty": "尚未测算该项目的费用。"
+  },
+  "summary": {
+    "tasksDone": "{{done}} 已完成",
+    "issuesOpen": "{{open}} 未解决"
+  }
+}

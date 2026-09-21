@@ -1,0 +1,182 @@
+{
+  "sections": {
+    "overview": "نمای کلی",
+    "objectives": "هدف‌ها",
+    "schedule": "خط زمانی",
+    "tasks": "وظیفه‌ها",
+    "issues": "اشکال‌ها",
+    "visual": "بازبینی‌های دیداری",
+    "decisions": "تصمیم‌ها",
+    "architecture": "معماری"
+  },
+  "updated": "به‌روزرسانی {{date}}",
+  "overallProgress": "پیشرفت کلی",
+  "error": "بارگذاری تختهٔ پروژه ناموفق بود.",
+  "stateError": "پروندهٔ project-state.json نامعتبر است — آخرین نسخهٔ معتبر نمایش داده می‌شود.",
+  "empty": {
+    "title": "هنوز تختهٔ پروژه‌ای نیست",
+    "description": "این پروژه پروندهٔ وضعیت ندارد. آن را بسازید تا تخته‌ای زنده از مرحله‌ها، وظیفه‌ها و اشکال‌ها داشته باشید.",
+    "hint": "تخته با هر تغییر پرونده خودکار به‌روز می‌شود — نیازی به بارگذاری دوباره نیست.",
+    "copyTemplate": "رونوشت الگوی آغازین",
+    "copied": "رونوشت شد — در پرونده بچسبانید"
+  },
+  "phases": {
+    "title": "مرحله‌ها",
+    "current": "جاری",
+    "planned": "برنامه‌ریزی‌شده",
+    "progressCount": "{{progress}}٪ ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "اسپرینت جاری",
+    "started": "آغاز {{date}}",
+    "ended": "پایان {{date}}",
+    "taskCount": "وظیفه‌ها {{done}}/{{total}}",
+    "others": "اسپرینت‌های دیگر ({{count}})",
+    "status": {
+      "planned": "برنامه‌ریزی‌شده",
+      "current": "جاری",
+      "done": "انجام‌شده"
+    }
+  },
+  "tasksSection": {
+    "title": "وظیفه‌ها",
+    "open": "باز",
+    "in_progress": "در حال انجام",
+    "done": "انجام‌شده",
+    "empty": "وظیفه‌ای نیست",
+    "kind": {
+      "feature": "ویژگی",
+      "bug": "اشکال",
+      "chore": "کار روزمره",
+      "spike": "بررسی اکتشافی"
+    },
+    "issueLink": "دیدن اشکال {{id}}",
+    "cancelled": "لغوشده ({{count}})",
+    "status": {
+      "todo": "انجام‌نشده",
+      "pending": "در انتظار",
+      "blocked": "مسدود",
+      "backlog": "فهرست انتظار",
+      "deferred": "به تعویق افتاده",
+      "closed": "بسته",
+      "fixed": "رفع‌شده",
+      "resolved": "حل‌شده",
+      "accepted": "پذیرفته",
+      "cancelled": "لغوشده",
+      "wontfix": "رفع نخواهد شد",
+      "unknown": "نامعلوم"
+    }
+  },
+  "issues": {
+    "title": "اشکال‌ها",
+    "severity": {
+      "low": "کم",
+      "medium": "متوسط",
+      "high": "زیاد",
+      "critical": "بحرانی"
+    },
+    "status": {
+      "open": "باز",
+      "fixed": "رفع‌شده",
+      "wontfix": "رفع نخواهد شد"
+    },
+    "empty": "اشکالی ثبت نشده است."
+  },
+  "decisions": {
+    "title": "تصمیم‌ها",
+    "empty": "هنوز تصمیمی نیست",
+    "openLink": "گشودن سند تصمیم {{id}}"
+  },
+  "schedule": {
+    "title": "خط زمانی (گانت)",
+    "critical": "بحرانی",
+    "legendScheduled": "زمان‌بندی‌شده",
+    "legendCritical": "مسیر بحرانی",
+    "legendMilestone": "نقطهٔ عطف",
+    "cpm": {
+      "cycle": "مسیر بحرانی رد شد: چرخهٔ وابستگی شناسایی شد.",
+      "missingDeps": "برخی وابستگی‌ها به موردهای ناموجود اشاره داشتند و در مسیر بحرانی نادیده گرفته شدند."
+    },
+    "noDates": "تاریخ معتبری برای رسم خط زمانی نیست.",
+    "progress": "پیشرفت {{value}}٪",
+    "durationDays": "مدت: {{days}} روز",
+    "owner": "مسئول: {{name}}",
+    "deliverable": "تحویل‌دادنی: {{id}}",
+    "deliverableLink": "دیدن تحویل‌دادنی {{id}}",
+    "dependsOn": "وابسته به: {{ids}}"
+  },
+  "deliverables": {
+    "title": "تحویل‌دادنی‌ها",
+    "due": "سررسید {{date}}",
+    "overdue": "گذشته از موعد",
+    "acceptance": "معیار پذیرش",
+    "deliveredBy": "تحویل‌شده با: {{ids}}",
+    "statuses": {
+      "pending": "در انتظار",
+      "in_progress": "در حال انجام",
+      "delivered": "تحویل‌شده",
+      "accepted": "پذیرفته",
+      "rejected": "ردشده"
+    }
+  },
+  "objectives": {
+    "title": "هدف‌ها (OKR)",
+    "baseline": "خط پایه: {{value}}",
+    "statuses": {
+      "on_track": "در مسیر",
+      "at_risk": "در معرض خطر",
+      "off_track": "خارج از مسیر",
+      "done": "انجام‌شده"
+    }
+  },
+  "kpis": {
+    "title": "شاخص‌های کلیدی",
+    "target": "هدف: {{value}}"
+  },
+  "visualChecks": {
+    "title": "بازبینی‌های دیداری",
+    "empty": "هنوز بازبینی دیداری نیست.",
+    "step": "گام",
+    "expect": "انتظار",
+    "result": "یادداشت مالک",
+    "counter": "تأییدشده {{verified}} / {{total}}",
+    "status": {
+      "pending": "در انتظار بازبینی",
+      "verified": "تأییدشده",
+      "failed": "ناموفق"
+    }
+  },
+  "architecture": {
+    "technical": "فنی",
+    "simplified": "ساده‌شده",
+    "missing": "سند معماری یافت نشد (docs/ARCHITECTURE.md یا docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "این نسخه از سند معماری وجود ندارد."
+  },
+  "stats": {
+    "tab": "آمار",
+    "totalLabel": "هزینهٔ کل (از آغاز)",
+    "headerTotal": "از آغاز",
+    "headerTotalTitle": "هزینهٔ انباشتهٔ این پروژه — حتی پس از حذف گفت‌وگوها نگه داشته می‌شود",
+    "span": "بازهٔ زمانی",
+    "activeDays": "روزهای فعال",
+    "activeDaysOfSpan": "از {{span}} روز",
+    "conversations": "گفت‌وگوها",
+    "agents": "عامل‌ها",
+    "firstActivity": "نخستین فعالیت",
+    "lastActivity": "آخرین فعالیت",
+    "dailyTitle": "هزینهٔ روزانه",
+    "dailyPeak": "اوج",
+    "byVendor": "بر پایهٔ تأمین‌کننده",
+    "byModel": "بر پایهٔ مدل",
+    "partialShort": "ناقص",
+    "partialModels": "جمع ناقص — برای این مدل‌ها قیمت رسمی نیست: {{models}}",
+    "apiEquivalent": "ارزش معادل API برای مصرف روی اشتراک — نه مبلغی که صورتحساب شده باشد",
+    "pricesAsOf": "قیمت‌ها تا {{date}}",
+    "unavailable": "در دسترس نیست",
+    "empty": "هنوز داده‌ای از هزینهٔ این پروژه اندازه‌گیری نشده است."
+  },
+  "summary": {
+    "tasksDone": "{{done}} انجام‌شده",
+    "issuesOpen": "{{open}} باز"
+  }
+}

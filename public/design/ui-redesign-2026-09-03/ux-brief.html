@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>مسوّدة تجربة الاستخدام — نسّاج</title>
+<style>
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2') format('woff2');font-weight:400;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2') format('woff2');font-weight:600;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-latin-400-normal.woff2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-latin-600-normal.woff2') format('woff2');font-weight:600;font-display:swap}
+:root{
+  --navy:#1B2A4A;--navy-900:#10192C;--navy-800:#16223B;--navy-500:#49556E;--navy-300:#767F92;--navy-100:#BBBFC9;--navy-50:#E8EAED;
+  --gold:#C4A265;--gold-800:#76613D;--gold-700:#9D8251;--gold-300:#D6BE94;--gold-100:#EDE3D1;--cream:#F9F6F0;
+  --gray:#6B6B6B;--err:#A33B38;--ok:#2E6B4E;
+  --bg:var(--cream);--fg:var(--navy-900);--muted:var(--gray);--card:#fff;--line:var(--navy-100);
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:var(--navy-900);--fg:#E7EAEE;--muted:#B0B7C4;--card:var(--navy-800);--line:#2B3550}
+}
+*{box-sizing:border-box}
+html{color-scheme:light dark}
+html,body{overflow-x:hidden;max-width:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:'IBM Plex Sans Arabic','IBM Plex Sans',sans-serif;font-size:17px;line-height:1.85;letter-spacing:normal;-webkit-text-size-adjust:100%}
+.wrap{max-width:53rem;margin-inline:auto;padding:clamp(1rem,4vw,3rem) clamp(1rem,5vw,2.5rem) 6rem}
+.masthead{border-block-end:1px solid var(--line);padding-block-end:1.25rem;margin-block-end:2.5rem}
+.masthead .kicker{color:var(--gold-800);font-weight:600;font-size:.875rem}
+.masthead h1{margin:.4rem 0 .5rem;font-size:clamp(1.7rem,4.5vw,2.4rem);line-height:1.35;font-weight:600}
+.masthead .rule{width:8rem;height:1px;background:var(--gold);margin-block:.9rem}
+.masthead .meta{color:var(--muted);font-size:.8125rem}
+.nav{display:flex;flex-wrap:wrap;gap:.5rem;margin-block-start:1.1rem}
+.nav a{display:inline-block;padding:.35rem .8rem;border:1px solid var(--line);border-radius:.5rem;color:var(--fg);text-decoration:none;font-size:.875rem;transition:background .12s cubic-bezier(.2,.6,.3,1),border-color .12s}
+.nav a:hover{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.nav a[aria-current]{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 16%,transparent);font-weight:600}
+article h1,article h2,article h3,article h4{line-height:1.35;font-weight:600;margin-block:2.2rem .7rem}
+article h1{font-size:1.9rem}
+article h2{font-size:1.5rem;padding-block-end:.4rem;border-block-end:1px solid var(--line)}
+article h3{font-size:1.2rem}
+article h4{font-size:1.02rem;color:var(--navy-500)}
+@media (prefers-color-scheme: dark){article h4{color:var(--navy-100)}}
+article p,article li{font-size:1rem}
+article a{color:var(--gold-800);text-underline-offset:3px}
+@media (prefers-color-scheme: dark){article a{color:var(--gold-300)}}
+blockquote{margin-inline:0;padding:1rem 1.15rem;border-inline-start:2px solid var(--gold);background:var(--card);border-radius:.5rem;color:var(--muted)}
+blockquote p{margin:.4rem 0}
+article>*{max-width:100%}
+code{overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;background:color-mix(in srgb,var(--navy) 8%,transparent);padding:.12em .4em;border-radius:.3rem;direction:ltr;unicode-bidi:isolate;display:inline-block}
+pre{background:var(--navy-900);color:#E7EAEE;padding:1rem 1.1rem;border-radius:.5rem;overflow-x:auto;direction:ltr;text-align:left;font-size:.82rem;line-height:1.6}
+pre code{background:none;padding:0;color:inherit;display:inline}
+table{width:100%;border-collapse:collapse;margin-block:1.2rem;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.55rem .7rem;text-align:start;vertical-align:top}
+th{background:color-mix(in srgb,var(--navy) 7%,transparent);font-weight:600}
+img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:.5rem}
+hr{border:0;border-block-start:1px solid var(--line);margin-block:2.2rem}
+.footer{margin-block-start:3rem;padding-block-start:1.2rem;border-block-start:1px solid var(--line);color:var(--muted);font-size:.8125rem}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">معمارية المعلومات والتدفّقات</div>
+    <h1>مسوّدة تجربة الاستخدام</h1>
+    <div class="rule"></div>
+    <div class="meta">2026-09-03 · مسوّدة للمراجعة</div>
+    <nav class="nav">
+      <a href="index.html">دليل التصميم البصري</a>
+      <a href="ux-brief.html" aria-current="page">مسوّدة تجربة الاستخدام</a>
+      <a href="palette-preview.png">معاينة اللوحة</a>
+    </nav>
+  </header>
+  <article>
+<blockquote>
+<p><strong>التاريخ:</strong> 2026-09-03 · <strong>النطاق:</strong> الصدفة الرئيسية، الويكي، صفحة الإعدادات ·
+<strong>الحالة:</strong> مسوّدة تجربة (UX brief) تُمرَّر لمصمّم الواجهة البصرية بعد اعتماد المالك.
+<strong>الطبيعة:</strong> بنية تجربة وتدفّقات وأولويات محتوى — <strong>لا ألوان ولا خطوط ولا رموز تصميم ولا كود</strong>.
+القرارات البصرية بوابة <code>ui-designer</code>، وهذا الملف يقف قبلها.</p>
+</blockquote>
+<p>كل ما هو موجود في الكود اليوم موسوم بوصفه «راهن». كل اقتراح لم يُنفَّذ بعدُ موسوم صراحةً
+بـ**«مقترح جديد»**. الافتراضات غير المؤكَّدة في قسم «افتراضات تُختبر» لا تُمرَّر كحقائق.</p>
+<hr>
+<h2>1) جرد الحالة الراهنة</h2>
+<h3>1.1 الصدفة الرئيسية (App shell)</h3>
+<p><strong>البنية الراهنة</strong> (‏<code>Sidebar</code> + <code>MainContent</code>):</p>
+<ul>
+<li><strong>الشريط الجانبي</strong> (يبدأ من حافة القراءة = يمين في RTL): رأسٌ فيه العلامة ومبدّل قسمَين
+(المشاريع | الطرفيات — الطرفيات لأصحاب دور owner/admin فقط)، وزرّ مشروع جديد، وبحثٌ بنطاق
+(عناوين / داخل المحادثات / الكل) مع مبدّل الأرشيف ومرشّح المغلقة. تحته لوحة الحضور
+(<code>PresencePanel</code>)، ثم قائمة المشاريع القابلة للطيّ وكلٌّ منها يفتح جلساته، ثم تذييلٌ فيه إحصاءات
+النظام، وزرّ الإعدادات، وإشعار التحديث، والخروج.</li>
+<li><strong>المحتوى الرئيسي</strong>: رأسٌ فيه عنوان/مسار الموضع، ومبدّل تبويبات (محادثة، طرفية، ملفات، إدارة
+مصدر git، لوحة المشروع، + إضافات)، ومؤشّر الحصص، وزرٌّ دوريّ لعرض التبويبات بأربع حالات
+(فرد → ضمّ → مصغَّر → إخفاء). الجسم يعرض التبويب النشط، وإلى جانبه محرّر ملفات منزلق.</li>
+<li><strong>الجوّال</strong>: الشريط الجانبي يصير دُرجاً يفتحه زرّ قائمة في رأس المحتوى.</li>
+</ul>
+<p><strong>نقاط الاحتكاك المستنتَجة:</strong></p>
+<ul>
+<li><strong>ازدحام رأس المحتوى</strong>: العنوان + مؤشّر الحصص + شريط التبويبات + الزرّ الدوري تتنافس على صفّ
+واحد؛ على العرض المتوسط يُفعَّل تمرير أفقي متدرّج للتبويبات.</li>
+<li><strong>الزرّ الدوري ذو الأربع حالات</strong> يحمل عبئاً إدراكياً: المستخدم يضغط ليكتشف، ولا يرى الحالات
+الأربع دفعةً. التعليق في الكود يوثّق عطباً سابقاً (ضغطة بلا أثر مرئي) عولج لكن النموذج نفسه
+يبقى غامضاً.</li>
+<li><strong>مبدّل القسمَين (مشاريع | طرفيات)</strong> يخلط محورين: الطرفيات سطح إداري نادر، والمشاريع السطح
+اليومي — وجودهما نظيرَين متساويَين يضخّم النادر.</li>
+<li><strong>الحالات الفارغة</strong>: «اختر مشروعاً» عبر <code>MainContentStateView</code> موجودة؛ لكن الويكي وحده يظهر بلا
+مشروع، ما يُنتج سلوكاً استثنائياً يصعب توقّعه.</li>
+</ul>
+<h3>1.2 الويكي (<code>src/components/wiki/view</code>)</h3>
+<p><strong>البنية الراهنة:</strong> لوحة عربية RTL بالكامل دائماً (<code>dir=&quot;rtl&quot; lang=&quot;ar&quot;</code>) بصرف النظر عن لغة الواجهة،
+لأن كل الصفحات عربية مجمّعة وقت البناء.</p>
+<ul>
+<li><strong>الشريط الجانبي (<code>WikiSidebar</code>)</strong>: تنقّل مجموَّع — <strong>6 أقسام و22 صفحة</strong> (المستجدات، ابدأ من
+هنا، دليل الواجهة، كيف يعمل نسّاج، حلّ المشاكل، مرجع). على سطح المكتب ثابت، وعلى الجوّال دُرج
+مشروط (modal) مع <code>FocusTrap</code>.</li>
+<li><strong>شريط الأدوات (<code>WikiToolbar</code>)</strong>: زرّ فتح/طيّ الفهرس، ومسار تنقّل (قسم › صفحة)، وزرّ بحث.</li>
+<li><strong>الجسم</strong>: صفحة الهبوط (<code>WikiHome</code>) حين لا صفحة مختارة (بطل + بحث + «ابدأ من هنا» + بطاقات)،
+أو المقال مع عنوانٍ من الفهرس وملخّص، وجدول محتويات (<code>TableOfContents</code>) مضمَّن أسفل <code>xl</code> وسكّة
+جانبية من <code>xl</code>.</li>
+<li><strong>بحثٌ حواري (<code>WikiSearchOverlay</code>)</strong> يُفتح بـ<code>Ctrl K</code> أو أيقونة البحث، على فهرس الصفحات المسطّح.</li>
+<li><strong>تنقّل السابق/التالي (<code>PrevNextNav</code>)</strong> أسفل المقال.</li>
+</ul>
+<p><strong>نقاط الاحتكاك المستنتَجة:</strong></p>
+<ul>
+<li><strong>جدول المحتويات يظهر مرّتين</strong> (مضمَّن + سكّة) بحسب العرض — سلوك سليم لكنه يضاعف صيانة النبرة.</li>
+<li><strong>موضع القارئ يُحمَل في مسار التنقّل فقط</strong>: لا مؤشّر تقدّم داخل القسم ولا «أين أنا من 22 صفحة».</li>
+<li><strong>البحث ثلاثة مداخل</strong> (حقل الهبوط + أيقونة الشريط + <code>Ctrl K</code>) تصبّ في حوار واحد — جيّد، لكن
+اكتشاف الاختصار ضعيف.</li>
+<li>الهبوط كان يكرّر الفهرس (٣ مرّات نفس العناوين) وعولج بقصر التكرار على قسم «ابدأ من هنا».</li>
+</ul>
+<h3>1.3 صفحة الإعدادات (<code>src/components/settings/view</code>)</h3>
+<p><strong>البنية الراهنة:</strong> حوار مركزي (modal، ‏<code>max-w-4xl</code>، <code>h-[90vh]</code>). على سطح المكتب: شريط جانبي
+عرضه <code>w-56</code> فيه تنقّل عمودي، وإلى جانبه لوح المحتوى. على الجوّال: شريط أقراص أفقي علوي.</p>
+<ul>
+<li><strong>13 تبويباً رئيسياً</strong> (بلا تجميع): الملف الشخصي، الوكلاء، المرجعيّات، المورّدون والاعتمادات،
+المظهر، Git، الوصول البرمجي، الموصلات، التنبيهات، الإضافات، المستخدمون (owner/admin)، لوحة
+الأوامر (owner)، حول.</li>
+<li><strong>تنقّل فرعي داخل التبويب</strong> عبر <code>SettingsSubNav</code> (شريط بخطٍّ سفلي، شكلٌ واحد موحَّد): الوكلاء له
+ستة (حساب/محرّكات/أذونات/MCP/مهارات)، والملف الشخصي له اثنان (هوية/أمان).</li>
+</ul>
+<p><strong>نقاط الاحتكاك المستنتَجة:</strong></p>
+<ul>
+<li><strong>13 تبويباً مسطّحاً بلا هرمية</strong>: على الجوّال شريط أقراص يفيض أفقياً، وعلى سطح المكتب قائمة طويلة
+بلا تجميع دلالي — كلفة مسح بصري عالية.</li>
+<li><strong>تداخل مفاهيمي بين ثلاثة تبويبات «مفاتيح»</strong>: «المورّدون والاعتمادات» (مفاتيح تخرج لمزوّدي
+الذكاء)، و«الوصول البرمجي» (توكنات تدخل إلى نسّاج)، و«الموصلات» (مفتاح نسّاج واحد يخرج لمنصّات).
+الكود يوثّق أن التمييز مقصود، لكن التسميات المتجاورة تُبقي الالتباس قائماً بلا تجميع يشرح العلاقة.</li>
+<li><strong>قيد عرض الحوار (<code>max-w-4xl</code>)</strong> يخنق التبويبات ذات الجداول العريضة (المستخدمون، مصفوفة
+المورّدين) — قابلية القراءة تتأثّر.</li>
+<li><strong>عمق التنقّل يصل ثلاث طبقات</strong> في بعض التبويبات (تبويب رئيسي ← تنقّل فرعي ← منتقي قيمة مجزّأ).</li>
+</ul>
+<hr>
+<h2>2) الشخصيات وسياقات الاستخدام</h2>
+<table>
+<thead>
+<tr>
+<th>الشخصية</th>
+<th>الوظيفة الأساسية (JTBD)</th>
+<th>السطح الأغلب</th>
+<th>التبويبات/الأقسام الحرجة</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>المالك/المنسّق</strong></td>
+<td>«حين أدير جلسات وكلاء متعدّدة، أريد أن أرى حالة كلٍّ منها وأتنقّل بينها بسرعة وأتحكّم في الحصة والأوامر المعلّقة، كي لا أفقد خيطاً ولا أحرق حصة.»</td>
+<td>سطح المكتب أساساً، الهاتف للمتابعة العاجلة</td>
+<td>الصدفة كلها + لوحة الأوامر + المورّدون + الحصص</td>
+</tr>
+<tr>
+<td><strong>عضو الفريق (قارئ)</strong></td>
+<td>«حين لا أعرف كيف يعمل نسّاج أو أواجه عطلاً، أريد إجابة موثوقة بالعربية دون سؤال أحد.»</td>
+<td>الهاتف وسطح المكتب بالتساوي</td>
+<td>الويكي: ابدأ من هنا، حلّ المشاكل، الأسئلة الشائعة</td>
+</tr>
+<tr>
+<td><strong>المشغّل/الضابط</strong></td>
+<td>«حين أهيّئ الأداة، أريد ضبط المفاتيح والمظهر والوكلاء والمستخدمين في مكان واحد دون أن أضيع بين تبويبات متشابهة.»</td>
+<td>سطح المكتب أساساً</td>
+<td>الإعدادات: المفاتيح، الوكلاء، المستخدمون، المظهر</td>
+</tr>
+</tbody></table>
+<p><strong>سياقان عرضيان مؤثّران:</strong> (أ) <strong>جلسة مشتركة</strong> يتناوب عليها أكثر من عضو — الحضور والخصوصية مرئيان
+دائماً؛ (ب) <strong>متابعة من الهاتف</strong> أثناء تشغيل طويل — الأولوية للحالة (تعمل/توقّفت/تنتظر إذناً)
+والحصة، لا للتحرير.</p>
+<hr>
+<h2>3) معمارية المعلومات المقترحة</h2>
+<h3>3.1 الصدفة الرئيسية</h3>
+<p><strong>ترتيب المناطق وأولوياتها</strong> (من الأهمّ يومياً):</p>
+<ol>
+<li><strong>قائمة المشاريع/الجلسات</strong> — السطح الأول؛ تبقى دائمة على سطح المكتب.</li>
+<li><strong>منطقة المحادثة</strong> — قلب العمل؛ تأخذ أوسع مساحة.</li>
+<li><strong>حالة الجلسة والحصة</strong> — مرئية دائماً بلا منافسة على صفّ العنوان.</li>
+<li><strong>الأدوات الجانبية</strong> (ملفات/طرفية/git/لوحة) — ثانوية، خلف تبويبات.</li>
+<li><strong>الطرفيات والإدارة</strong> — نادرة؛ تُزاح من مرتبة النظير.</li>
+</ol>
+<p><strong>مقترحات جديدة (لا تُنفَّذ قبل قرار المالك):</strong></p>
+<ul>
+<li><strong>فصل مؤشّر الحصص عن صفّ التبويبات</strong> كي لا يتنافسا؛ تثبيته في التذييل أو طرف الرأس المستقلّ.</li>
+<li><strong>تبسيط الزرّ الدوري ذي الأربع حالات</strong> إلى حالتين واضحتين (تبويبات ظاهرة/مطويّة) مع تذكّر
+التفضيل، بدل دورة رباعية غامضة. (يُختبر مع مستخدمين — انظر §6.)</li>
+<li><strong>إنزال «الطرفيات» من مبدّل النظير</strong> إلى مدخل ثانوي داخل قسم المشاريع أو التذييل الإداري.</li>
+</ul>
+<p><strong>سلوك الطيّ على الهاتف</strong> (راهن + مقترح): الشريط الجانبي دُرج يفتحه زرّ القائمة؛ <strong>مقترح جديد</strong>:
+شريط تنقّل سفلي مختصر (محادثة/مشاريع/ويكي/إعدادات) لتقليل الرجوع إلى الدُرج في كل تنقّل.</p>
+<h3>3.2 الويكي</h3>
+<ul>
+<li><strong>بنية التصفّح</strong>: تُبقى المجموعات الست كما هي (تطابق النموذج الذهني للمستخدم) مع إبراز موضع
+القارئ داخل القسم — <strong>مقترح جديد</strong>: مؤشّر «صفحة N من M في هذا القسم» بجانب السابق/التالي.</li>
+<li><strong>البحث</strong>: يُوحَّد على مدخل واحد بارز مع إظهار اختصار <code>Ctrl K</code> نصّياً في الحقل (اكتشاف)، وإبقاء
+الحوار كما هو.</li>
+<li><strong>جدول المحتويات</strong>: يبقى مضمَّناً على الضيّق وسكّة على الواسع (سلوك راهن سليم)؛ <strong>مقترح جديد</strong>:
+إبراز العنوان النشط أثناء التمرير في السكّة.</li>
+</ul>
+<h3>3.3 الإعدادات — تجميع الـ13 تبويباً</h3>
+<p><strong>مقترح جديد</strong>: تُجمَّع في <strong>خمس مجموعات</strong> ذات عناوين، فيقلّ المسح ويُشرَح التداخل:</p>
+<table>
+<thead>
+<tr>
+<th>المجموعة</th>
+<th>التبويبات</th>
+<th>المبرّر</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>الحساب والفريق</strong></td>
+<td>الملف الشخصي، المستخدمون</td>
+<td>«أنا ومن معي»: هوية العضو وإدارة الأعضاء متجاورة منطقياً.</td>
+</tr>
+<tr>
+<td><strong>الذكاء والمعرفة</strong></td>
+<td>الوكلاء، المرجعيّات</td>
+<td>«الأجسام وما تقرؤه»: ترتيب مقصود في الكود (agents ثم references).</td>
+</tr>
+<tr>
+<td><strong>المفاتيح والتكامل</strong></td>
+<td>المورّدون والاعتمادات، الوصول البرمجي، الموصلات، الإضافات</td>
+<td>يجمع كل ما يتعلّق بالمفاتيح والربط الخارجي في مكان واحد، فيُشرَح التداخل الثلاثي بالسياق بدل التجاور المربك؛ عناوين فرعية توضّح اتجاه كل نوع (يدخل/يخرج).</td>
+</tr>
+<tr>
+<td><strong>المظهر والتنبيهات</strong></td>
+<td>المظهر، التنبيهات، Git</td>
+<td>تفضيلات العرض والإشعارات وتكامل git الشخصي.</td>
+</tr>
+<tr>
+<td><strong>النظام (للمالك)</strong></td>
+<td>لوحة الأوامر، حول</td>
+<td>أفعال إدارية ومعلومات النسخة؛ محكومة بالدور أصلاً.</td>
+</tr>
+</tbody></table>
+<p><strong>مقترحات جديدة إضافية:</strong></p>
+<ul>
+<li><strong>توسيع عرض الحوار</strong> للتبويبات ذات الجداول (المستخدمون، مصفوفة المورّدين) أو نقلها لعرض صفحة
+كاملة بدل الحوار المحدود.</li>
+<li><strong>إبقاء <code>SettingsSubNav</code> شكلاً واحداً</strong> (خطّ سفلي) كما وُحِّد — لا تُعاد الأقراص المملوءة.</li>
+<li>سقف <code>SegmentedControl</code> أربع خيارات ملزم (§2.4)؛ أي تنقّل فرعي &gt; 4 يبقى على الخطّ السفلي.</li>
+</ul>
+<hr>
+<h2>4) تدفّقات المستخدم الأساسية</h2>
+<p><strong>ت1 — المنسّق يتنقّل بين جلسات نشطة:</strong> يفتح الشريط الجانبي ← يمسح المشاريع ← يرى مؤشّر حالة كل
+جلسة (تعمل/تنتظر/توقّفت) ← ينقر جلسة ← تُحمَّل المحادثة ← يتابع أو يتدخّل.
+<em>مسار خطأ:</em> الجلسة تعذّر تحميلها ← رسالة «تعذّر فتح الجلسة» + إعادة محاولة، لا شاشة فارغة.</p>
+<p><strong>ت2 — بدء جلسة/مشروع جديد:</strong> زرّ مشروع جديد ← معالج الإنشاء ← اختيار مسار/مزوّد ← أول رسالة.
+<em>مسار فارغ:</em> لا مشاريع بعدُ ← حالة فارغة إرشادية تشرح الخطوة الأولى بدل قائمة خاوية.</p>
+<p><strong>ت3 — ضبط إذن معلّق أو إعادة تشغيل:</strong> إشعار في التذييل/الصندوق الأصفر ← مراجعة الطلب ← تنفيذ أو
+تجاهل. <em>مسار انتظار:</em> أثناء التنفيذ حالة «قيد التنفيذ» بمهلة، ثم نتيجة صريحة.</p>
+<p><strong>ت4 — عضو يبحث عن حلّ في الويكي:</strong> يفتح الويكي (بلا مشروع مطلوب) ← يبحث بكلمة أو يتصفّح «حلّ
+المشاكل» ← يفتح الصفحة ← جدول المحتويات يقفز للعنوان ← السابق/التالي يكمل القراءة.
+<em>مسار لا نتيجة:</em> بحثٌ بلا مطابقة ← رسالة «لا نتائج» + اقتراحات روابط سريعة (راهن).</p>
+<p><strong>ت5 — قراءة على الهاتف:</strong> يفتح الدُرج ← يختار صفحة ← يُغلق الدُرج تلقائياً ← يقرأ ← يخرج بزرّ
+واضح لا بزرّ المتصفح الخلفي وحده (راهن: مدخل خروج في الدُرج والهبوط).</p>
+<p><strong>ت6 — المشغّل يضيف مفتاح مزوّد:</strong> يفتح الإعدادات ← مجموعة «المفاتيح والتكامل» ← «المورّدون» ←
+يدخل المفتاح ← حفظ ← تأكيد نجاح. <em>مسار خطأ:</em> مفتاح غير صالح ← رسالة تقول ما الخطأ وكيف يُصحَّح،
+عند الحقل لا في أعلى الصفحة.</p>
+<p><strong>ت7 — المشغّل يبدّل المظهر أو اللغة:</strong> الإعدادات ← «المظهر والتنبيهات» ← المظهر ← اختيار البريست
+واللغة ← تطبيق فوري مرئي. <em>ملاحظة:</em> البريست الافتراضي <code>alkindy</code> مقفول (§6).</p>
+<hr>
+<h2>5) إطارات سلكية نصّية (RTL — يُقرأ من اليمين)</h2>
+<h3>5.1 الصدفة الرئيسية — سطح المكتب</h3>
+<pre><code>│  [عنوان الجلسة › المشروع]   [حصة▮]  [تبويبات ▸] │  🔍 بحث   [+ مشروع]
+├───────────────────────────────────────────────┤  ────────────────────
+│                                                 │  [المشاريع | الطرفيات]
+│                                                 │  ── الحضور ──────────
+│           منطقة المحادثة (التبويب النشط)          │  ▸ مشروع أ
+│                                                 │     • جلسة ●تعمل
+│                                                 │     • جلسة ○توقّفت
+│                                    [محرّر ملفات →]│  ▸ مشروع ب
+│                                                 │  إحصاءات · ⚙ إعدادات
+        (المحتوى يسار)                                (الشريط الجانبي يمين)
+</code></pre>
+<h3>5.1ب الصدفة — الهاتف</h3>
+<pre><code>│ [☰]  عنوان الجلسة       [حصة▮]
+│
+│       منطقة المحادثة
+│
+│  محادثة · مشاريع · ويكي · ⚙   │  ← مقترح جديد: شريط سفلي
+  ☰ يفتح الشريط الجانبي كدُرج من اليمين
+</code></pre>
+<h3>5.2 الويكي — سطح المكتب</h3>
+<pre><code>│ [⌂] القسم › الصفحة            🔍 بحث   │  🔍 ابحث (Ctrl K)
+├──────────────────────────────────────┤  ── ابدأ من هنا ──────
+│  # عنوان الصفحة                        │  • ما هو نسّاج؟
+│  ملخّص الصفحة (lede)                    │  • أول يوم
+│                                       │  ── دليل الواجهة ────
+│  نصّ المقال ...                    ┌────┤  • جولة في الشاشة
+│                                   │TOC│  • المحادثة
+│                                   │سكّة│  ── حلّ المشاكل ──────
+│  [→ السابق]        [التالي ←]      └────┤  • عندي مشكلة
+     (المقال + سكّة المحتويات يسار)          (فهرس الأقسام يمين)
+</code></pre>
+<h3>5.2ب الويكي — الهاتف</h3>
+<pre><code>│ [☰] القسم › الصفحة      🔍
+│  # عنوان الصفحة
+│  ▾ جدول المحتويات (مطويّ)
+│  نصّ المقال ...
+│  [→ السابق]     [التالي ←]
+  ☰ يفتح فهرس الأقسام كدُرج معياري (modal)
+</code></pre>
+<h3>5.3 الإعدادات — سطح المكتب (حوار)</h3>
+<pre><code>│  الإعدادات                                          [✕]
+│  محتوى التبويب النشط               │  الحساب والفريق
+│  ┌ تنقّل فرعي (خطّ سفلي) ─────────┐ │   • الملف الشخصي
+│  │ حساب · محرّكات · أذونات · MCP  │ │   • المستخدمون
+│  └──────────────────────────────┘ │  الذكاء والمعرفة
+│  [صفوف الإعداد ...]                │   • الوكلاء
+│                                   │   • المرجعيّات
+│                                   │  المفاتيح والتكامل
+│                                   │   • المورّدون · الوصول
+│                                   │   • الموصلات · الإضافات
+│                                   │  المظهر والتنبيهات
+│                                   │  النظام (للمالك)
+     (لوح المحتوى يسار)                (تنقّل مجمَّع يمين)
+</code></pre>
+<h3>5.3ب الإعدادات — الهاتف</h3>
+<pre><code>│  الإعدادات              [✕]
+│ [حساب][ذكاء][مفاتيح][مظهر]▸    │ ← أقراص مجمَّعة قابلة للتمرير
+│  تنقّل فرعي (خطّ سفلي) ▸
+│  [صفوف الإعداد ...]
+</code></pre>
+<hr>
+<h2>6) قرارات مفتوحة تحتاج المالك + قيود STYLE_LOCK</h2>
+<h3>قرارات مفتوحة</h3>
+<ol>
+<li><strong>تجميع الإعدادات في خمس مجموعات</strong> — يغيّر بنية التنقّل؛ يحتاج موافقة قبل التنفيذ.</li>
+<li><strong>تبسيط الزرّ الدوري الرباعي</strong> إلى حالتين — قد يفقد المستخدمون المعتادون حالتَي «مصغَّر/إخفاء».</li>
+<li><strong>شريط تنقّل سفلي على الهاتف</strong> (مقترح جديد) — إضافة سطح جديد، لا مجرّد إعادة ترتيب.</li>
+<li><strong>توسيع/نقل تبويبات الجداول خارج حدّ <code>max-w-4xl</code></strong> — قرار تخطيط بأثر على بقية الحوار.</li>
+<li><strong>إنزال «الطرفيات» من مبدّل النظير</strong> — يمسّ سطحاً إدارياً محكوماً بالدور.</li>
+</ol>
+<h3>قيود STYLE_LOCK (ما لا يجوز كسره — القفل مسوّدة تنتظر اعتماد المالك، فهو استئناسي حتى يُعتمد)</h3>
+<ul>
+<li><strong>خطٌّ واحد</strong>: IBM Plex Sans Arabic للواجهة والعناوين معاً (طبقة واحدة، انحراف معلن). ممنوع
+Inter/Roboto/Open Sans جسماً.</li>
+<li><strong><code>letter-spacing</code> صفر</strong> على العربي المتصل، وممنوع ALL-CAPS ونمط eyebrow اللاتيني.</li>
+<li><strong>أرقام غربية فقط</strong> على الشاشة الواحدة (الكود والإصدارات مستثناة داخل <code>code</code>).</li>
+<li><strong>رموز دلالية حصراً</strong> لا ألوان خام؛ الحدود من <code>--border</code>، الظلال سوداء، حلقة التركيز <code>--ring</code>.</li>
+<li><strong>استدارة <code>0.5rem</code> (soft)، كثافة <code>compact</code>، شبكة 4px</strong> — أداة تشغيلية يومية لا صفحة هبوط.</li>
+<li><strong>الحركة بذرة Snap</strong> (120ms لون/نص، 220ms تخطيط) مع احترام <code>prefers-reduced-motion</code>.</li>
+<li><strong><code>dir</code> على <code>&lt;html&gt;</code></strong>، أساس اتجاه واحد لكل رسالة، خصائص منطقية (<code>ps/pe/ms/me/start/end</code>).</li>
+<li><strong>البريست الافتراضي <code>alkindy</code></strong> (ذهبي/كحلي) — لا يُبدَّل الافتراضي بلا قرار مالك.</li>
+<li><strong>القياس تفاضلي وبصري بالمتصفح</strong> قبل أي إعلان إنجاز، على كل الأسطح والبريستات لا الافتراضي وحده.</li>
+</ul>
+<h3>قيود من <code>docs/UI_STANDARDS_AR.md</code></h3>
+<ul>
+<li>مقياس عناصر التحكم أربعة مستويات (<code>compact28/toolbar32/standard40/comfortable44</code>)؛ ‏<code>legacy36</code>
+ممنوع في الجديد. هدف اللمس ≥ 44×44 على المؤشّر الخشن.</li>
+<li>إدخال الجوّال ≥ 16px، إبقاء تكبير الإصبع مفعَّلاً، إعادة تدفّق بلا تمرير أفقي عند 320px/200%.</li>
+<li><code>SegmentedControl</code> مسقوف بأربعة خيارات؛ التنقّل الأوسع على شريط الخطّ السفلي.</li>
+</ul>
+<hr>
+<h2>7) افتراضات تُختبر (لا تُمرَّر كحقائق)</h2>
+<ul>
+<li><strong>أ:</strong> المستخدمون يجدون الزرّ الدوري الرباعي غامضاً — يُختبر بمهمة «أخفِ التبويبات».</li>
+<li><strong>ب:</strong> التداخل الثلاثي للمفاتيح يُربك المشغّل — يُختبر بمهمة «أضِف مفتاح مزوّد» وقياس التبويب
+الذي يفتحه أولاً.</li>
+<li><strong>ج:</strong> غياب مؤشّر الموضع في الويكي يُفقد القارئ إحساس التقدّم — يُختبر بمهمة قراءة قسم كامل.</li>
+</ul>
+<h3>خطة اختبار قابلية استخدام مقترحة (لا تُنفَّذ هنا)</h3>
+<p>خمس مهام، 5 مشاركين لكل شخصية: (1) التنقّل بين جلستين نشطتين؛ (2) إخفاء التبويبات ثم إعادتها؛
+(3) إيجاد حلّ عطل في الويكي؛ (4) إضافة مفتاح مزوّد؛ (5) تبديل المظهر واللغة. معيار النجاح لكل
+مهمة: الإكمال دون مساعدة وضمن مسار متوقَّع. المقاييس: زمن الإنجاز، معدّل الإكمال، نقطة الهجر.</p>
+
+  </article>
+  <footer class="footer">نسّاج — من دار الكِندِي · مسوّدة داخلية للمراجعة، غير معتمدة.</footer>
+</div>
+</body>
+</html>

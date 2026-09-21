@@ -1,0 +1,182 @@
+{
+  "sections": {
+    "overview": "Genel Bakış",
+    "objectives": "Hedefler",
+    "schedule": "Zaman Çizelgesi",
+    "tasks": "Görevler",
+    "issues": "Sorunlar",
+    "visual": "Görsel Kontroller",
+    "decisions": "Kararlar",
+    "architecture": "Mimari"
+  },
+  "updated": "{{date}} tarihinde güncellendi",
+  "overallProgress": "Genel ilerleme",
+  "error": "Proje panosu yüklenemedi.",
+  "stateError": "project-state.json geçersiz — son geçerli sürüm gösteriliyor.",
+  "empty": {
+    "title": "Henüz proje panosu yok",
+    "description": "Bu projenin proje durumu dosyası yok. Aşamalar, görevler ve sorunların canlı panosunu görmek için oluştur.",
+    "hint": "Pano, dosya değiştiğinde otomatik güncellenir — yenilemeye gerek yok.",
+    "copyTemplate": "Başlangıç şablonunu kopyala",
+    "copied": "Kopyalandı — dosyaya yapıştır"
+  },
+  "phases": {
+    "title": "Aşamalar",
+    "current": "Mevcut",
+    "planned": "Planlandı",
+    "progressCount": "%{{progress}} ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "Mevcut sprint",
+    "started": "{{date}} tarihinde başladı",
+    "ended": "{{date}} tarihinde bitti",
+    "taskCount": "Görevler {{done}}/{{total}}",
+    "others": "Diğer sprintler ({{count}})",
+    "status": {
+      "planned": "Planlandı",
+      "current": "Mevcut",
+      "done": "Bitti"
+    }
+  },
+  "tasksSection": {
+    "title": "Görevler",
+    "open": "Açık",
+    "in_progress": "Devam ediyor",
+    "done": "Bitti",
+    "empty": "Görev yok",
+    "kind": {
+      "feature": "Özellik",
+      "bug": "Hata",
+      "chore": "Bakım",
+      "spike": "Araştırma"
+    },
+    "issueLink": "{{id}} sorununu görüntüle",
+    "cancelled": "İptal edilenler ({{count}})",
+    "status": {
+      "todo": "yapılacak",
+      "pending": "beklemede",
+      "blocked": "engellendi",
+      "backlog": "birikmiş iş",
+      "deferred": "ertelendi",
+      "closed": "kapatıldı",
+      "fixed": "düzeltildi",
+      "resolved": "çözüldü",
+      "accepted": "kabul edildi",
+      "cancelled": "iptal edildi",
+      "wontfix": "düzeltilmeyecek",
+      "unknown": "bilinmiyor"
+    }
+  },
+  "issues": {
+    "title": "Sorunlar",
+    "severity": {
+      "low": "Düşük",
+      "medium": "Orta",
+      "high": "Yüksek",
+      "critical": "Kritik"
+    },
+    "status": {
+      "open": "Açık",
+      "fixed": "Düzeltildi",
+      "wontfix": "Düzeltilmeyecek"
+    },
+    "empty": "Kayıtlı sorun yok."
+  },
+  "decisions": {
+    "title": "Kararlar",
+    "empty": "Henüz karar yok",
+    "openLink": "{{id}} karar belgesini aç"
+  },
+  "schedule": {
+    "title": "Zaman Çizelgesi (Gantt)",
+    "critical": "Kritik",
+    "legendScheduled": "Planlandı",
+    "legendCritical": "Kritik yol",
+    "legendMilestone": "Dönüm noktası",
+    "cpm": {
+      "cycle": "Kritik yol atlandı: bağımlılık döngüsü tespit edildi.",
+      "missingDeps": "Bazı bağımlılıklar eksik öğelere referans veriyor ve kritik yolda yok sayıldı."
+    },
+    "noDates": "Zaman çizelgesini çizmek için geçerli tarih yok.",
+    "progress": "İlerleme %{{value}}",
+    "durationDays": "Süre: {{days}} gün",
+    "owner": "Sorumlu: {{name}}",
+    "deliverable": "Teslimat: {{id}}",
+    "deliverableLink": "{{id}} teslimatını görüntüle",
+    "dependsOn": "Bağımlı olduğu: {{ids}}"
+  },
+  "deliverables": {
+    "title": "Teslimatlar",
+    "due": "{{date}} tarihine kadar",
+    "overdue": "Gecikmiş",
+    "acceptance": "Kabul kriteri",
+    "deliveredBy": "Teslim eden: {{ids}}",
+    "statuses": {
+      "pending": "Beklemede",
+      "in_progress": "Devam ediyor",
+      "delivered": "Teslim edildi",
+      "accepted": "Kabul edildi",
+      "rejected": "Reddedildi"
+    }
+  },
+  "objectives": {
+    "title": "Hedefler (OKR)",
+    "baseline": "Temel: {{value}}",
+    "statuses": {
+      "on_track": "Yolunda",
+      "at_risk": "Riskli",
+      "off_track": "Yoldan çıktı",
+      "done": "Bitti"
+    }
+  },
+  "kpis": {
+    "title": "KPI'lar",
+    "target": "Hedef: {{value}}"
+  },
+  "visualChecks": {
+    "title": "Görsel Kontroller",
+    "empty": "Henüz görsel kontrol yok.",
+    "step": "Adım",
+    "expect": "Beklenen",
+    "result": "Sahip notu",
+    "counter": "Doğrulandı {{verified}} / {{total}}",
+    "status": {
+      "pending": "Kontrol bekleniyor",
+      "verified": "Doğrulandı",
+      "failed": "Başarısız"
+    }
+  },
+  "architecture": {
+    "technical": "Teknik",
+    "simplified": "Basitleştirilmiş",
+    "missing": "Mimari belge bulunamadı (docs/ARCHITECTURE.md veya docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "Bu mimari belgenin bu sürümü mevcut değil."
+  },
+  "stats": {
+    "tab": "İstatistikler",
+    "totalLabel": "Toplam maliyet (tüm zamanlar)",
+    "headerTotal": "Tüm zamanlar",
+    "headerTotalTitle": "Bu projenin birikimli maliyeti — konuşmalar silinse de korunur",
+    "span": "Zaman aralığı",
+    "activeDays": "Etkin gün",
+    "activeDaysOfSpan": "/ {{span}} gün",
+    "conversations": "Konuşmalar",
+    "agents": "Aracılar",
+    "firstActivity": "İlk etkinlik",
+    "lastActivity": "Son etkinlik",
+    "dailyTitle": "Günlük maliyet",
+    "dailyPeak": "Zirve",
+    "byVendor": "Sağlayıcıya göre",
+    "byModel": "Modele göre",
+    "partialShort": "Kısmi",
+    "partialModels": "Kısmi toplam — resmî fiyatı yok: {{models}}",
+    "apiEquivalent": "Abonelikte API eşdeğeri değer — faturalanan tutar değil",
+    "pricesAsOf": "{{date}} tarihli fiyatlar",
+    "unavailable": "Mevcut değil",
+    "empty": "Bu proje için henüz maliyet ölçülmedi."
+  },
+  "summary": {
+    "tasksDone": "{{done}} tamamlandı",
+    "issuesOpen": "{{open}} açık"
+  }
+}

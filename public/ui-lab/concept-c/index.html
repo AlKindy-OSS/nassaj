@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>نسّاج — المفهوم ج: التركيز الكامل</title>
+  <link rel="stylesheet" href="style.css?v=2" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       شريط الإشعار البصري
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="demo-strip" role="banner" aria-label="إشعار النموذج البصري">
+    نموذج بصري — المفهوم ج: التركيز الكامل
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       شارة الوكيل العائمة
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="agent-badge" role="status" aria-live="polite" aria-label="حالة الوكيل">
+    <span class="badge-dot running" aria-hidden="true"></span>
+    <span>وكيل يعمل</span>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       التخطيط الرئيسي
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="layout">
+
+    <!-- المحادثة -->
+    <main class="conversation" role="main" aria-label="المحادثة">
+      <div class="messages">
+
+        <!-- رسالة المساعد: نثر نظيف بلا فقاعة -->
+        <article class="msg msg-assistant" dir="rtl" lang="ar">
+          <header class="msg-meta">
+            <span class="msg-model" aria-label="النموذج">claude-sonnet-4-5</span>
+          </header>
+          <div class="msg-body">
+            <p>مرحباً، كيف يمكنني مساعدتك في مشروع نسّاج اليوم؟ يمكنني مراجعة الكود، تتبّع المهام، أو الإجابة على أسئلة تقنية متعلقة بالمشروع.</p>
+          </div>
+        </article>
+
+        <!-- رسالة المستخدم: لا فقاعة — حاشية توثيقية -->
+        <article class="msg msg-user" dir="rtl" lang="ar">
+          <div class="msg-body">
+            <p>أريد مراجعة شاشة إعدادات الوكلاء — هل يمكنك إظهار ما تغيّر في الإصدار الأخير؟</p>
+          </div>
+        </article>
+
+        <!-- رسالة المساعد مع كتلة أداة -->
+        <article class="msg msg-assistant" dir="rtl" lang="ar">
+          <header class="msg-meta">
+            <span class="msg-model" aria-label="النموذج">claude-sonnet-4-5</span>
+          </header>
+          <div class="msg-body">
+            <p>بالطبع، سأستعرض التغييرات في ملف إعدادات الوكلاء.</p>
+          </div>
+
+          <!-- كتلة نتيجة أداة -->
+          <div class="tool-block" role="region" aria-label="نتيجة أداة: read_file">
+            <div class="tool-block-header">
+              <svg class="tool-icon-char" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="3" y="1" width="10" height="14" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <span class="tool-name">read_file</span>
+              <span class="tool-status done" aria-label="الحالة: مكتمل">مكتمل</span>
+            </div>
+            <div class="tool-block-body" lang="en" dir="ltr">src/server/agents/config.ts — lines 124–156</div>
+          </div>
+
+          <div class="msg-body">
+            <p>وجدت ثلاثة تغييرات رئيسية في الإصدار الأخير:</p>
+            <ol>
+              <li>تحديث حقل <code>effortLevel</code> — لم يعد ينطبق على مسار <code>claude -p</code> ولا يُستخدم كأرضية فيه</li>
+              <li>إضافة <code>engine_provider</code> كحكم رمزي للوتد الخادمي (<code>ADR-088</code>)، يُفعَّل برفع <code>NASSAJ_ENGINE_PIN_ENFORCE</code></li>
+              <li>حارس <code>quota-gate</code> يطابق الآن <code>Agent</code> و<code>Task</code> معاً — كان يطابق <code>Task</code> وحده فبقي الحارس نائماً</li>
+            </ol>
+          </div>
+        </article>
+
+        <!-- رسالة مستخدم ثانية -->
+        <article class="msg msg-user" dir="rtl" lang="ar">
+          <div class="msg-body">
+            <p>ممتاز. الآن أحتاج إلى مراجعة حارس القاعدة الصفرية — هل هو مفعَّل الآن أم إرشادي فقط؟</p>
+          </div>
+        </article>
+
+        <!-- رسالة مساعد مع أداة أخرى -->
+        <article class="msg msg-assistant" dir="rtl" lang="ar">
+          <header class="msg-meta">
+            <span class="msg-model" aria-label="النموذج">claude-sonnet-4-5</span>
+          </header>
+
+          <div class="tool-block" role="region" aria-label="نتيجة أداة: bash">
+            <div class="tool-block-header">
+              <svg class="tool-icon-char" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="1" y="2.5" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M4 6l2.5 2L4 10M8 10h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span class="tool-name">bash</span>
+              <span class="tool-status done" aria-label="الحالة: مكتمل">مكتمل</span>
+            </div>
+            <div class="tool-block-body" lang="en" dir="ltr">grep -n "NASSAJ_ZERO_RULE_ENFORCE\|irshadi\|advisory" hooks/zero-rule-guard.js</div>
+          </div>
+
+          <div class="msg-body">
+            <p>الحارس في الوقت الحالي <strong>إرشادي لا حاجب</strong> — يُذكِّر ثم يُمرِّر. هذا قرار اتُّخذ في 2026-07-27 (commit <code>ca3680e</code>) لأن النصّ الذي كان يرفضه كان يظهر كـ«رفض بشري» وهو ليس كذلك.</p>
+            <p>لاستعادة الحجب الصارم: <code>NASSAJ_ZERO_RULE_ENFORCE=1</code> في ملف <code>.env</code> ثم إعادة تشغيل الخادم.</p>
+          </div>
+        </article>
+
+        <!-- مؤشر الكتابة -->
+        <article class="msg msg-assistant msg-typing" dir="rtl" lang="ar" aria-label="كلود يكتب...">
+          <header class="msg-meta">
+            <span class="msg-model" aria-label="النموذج">claude-sonnet-4-5</span>
+          </header>
+          <div class="typing-indicator" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </article>
+
+      </div>
+    </main>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         منطقة المؤلِّف
+    ════════════════════════════════════════════════════════════════ -->
+    <footer class="composer-area" role="contentinfo">
+
+      <!-- قائمة الجلسات السريعة — تنزلق من رقاقة الجلسة -->
+      <div
+        class="session-list"
+        id="session-list"
+        role="listbox"
+        aria-label="الجلسات الأخيرة"
+        aria-hidden="true"
+      >
+        <div class="session-list-header">
+          <div class="session-list-header-inner">
+            <span>جلسات نسّاج-dev</span>
+            <button
+              class="session-list-close"
+              id="session-list-close"
+              aria-label="إغلاق قائمة الجلسات"
+            >✕</button>
+          </div>
+        </div>
+        <div class="session-list-items">
+          <button class="session-item active" role="option" aria-selected="true">
+            <span class="chip-dot running" aria-hidden="true"></span>
+            <span class="session-item-name">مراجعة إعدادات الوكلاء</span>
+            <span class="session-item-time">منذ ١٢ دقيقة</span>
+          </button>
+          <button class="session-item" role="option" aria-selected="false">
+            <span class="chip-dot stopped" aria-hidden="true"></span>
+            <span class="session-item-name">تحسين واجهة لوحة الأوامر</span>
+            <span class="session-item-time">أمس، ١٨:٢٤</span>
+          </button>
+          <button class="session-item" role="option" aria-selected="false">
+            <span class="chip-dot warning" aria-hidden="true"></span>
+            <span class="session-item-name">مراجعة ثغرات المرفقات</span>
+            <span class="session-item-time">٣ سبتمبر</span>
+          </button>
+          <button class="session-item" role="option" aria-selected="false">
+            <span class="chip-dot stopped" aria-hidden="true"></span>
+            <span class="session-item-name">إصلاح خلل عاصفة التوكن B-163</span>
+            <span class="session-item-time">٢٩ أغسطس</span>
+          </button>
+          <button class="session-item new-session" role="option" aria-selected="false">
+            <span class="chip-dot new" aria-hidden="true">+</span>
+            <span class="session-item-name">جلسة جديدة</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <!-- حقل الكتابة -->
+        <div class="composer-box">
+          <textarea
+            class="composer-input"
+            id="composer-input"
+            placeholder="اكتب رسالةً أو اسئل كلود..."
+            rows="1"
+            aria-label="رسالة جديدة"
+            dir="rtl"
+          ></textarea>
+          <button class="composer-send" aria-label="إرسال الرسالة">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 13V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M3.5 7L8 2.5 12.5 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- صفّ الرقائق (context chips) -->
+        <div class="chips-row" role="toolbar" aria-label="سياق الجلسة الحالية">
+
+          <!-- رقاقة المشروع -->
+          <button
+            class="chip chip-project"
+            aria-label="المشروع: نسّاج-dev"
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M1 3h10M1 3c0-.6.4-1 1-1h8c.6 0 1 .4 1 1v7a1 1 0 01-1 1H2a1 1 0 01-1-1V3z" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M4 6h4M4 8h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+            <span>نسّاج-dev</span>
+          </button>
+
+          <!-- رقاقة الجلسة (تفتح القائمة) -->
+          <button
+            class="chip chip-session"
+            id="session-chip"
+            aria-label="الجلسة الحالية — انقر لتغيير الجلسة"
+            aria-expanded="false"
+            aria-haspopup="listbox"
+            aria-controls="session-list"
+          >
+            <span class="chip-dot running" aria-hidden="true"></span>
+            <span>مراجعة إعدادات الوكلاء</span>
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true" style="margin-inline-start:1px;color:var(--ink-3)">
+              <path d="M2 4l3-3 3 3M2 7l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+
+          <!-- رقاقة النموذج -->
+          <button
+            class="chip chip-model"
+            aria-label="النموذج: claude-sonnet-4-5"
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M6 3.5v2.5l1.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>claude-sonnet-4-5</span>
+          </button>
+
+          <!-- رقاقة السياق -->
+          <div
+            class="chip chip-context"
+            role="meter"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="32"
+            aria-label="السياق المستهلك: 32 بالمئة. يتجدّد بعد 3 ساعات."
+          >
+            <span class="context-bar-wrap" aria-hidden="true">
+              <span class="context-bar-fill" style="width:32%"></span>
+            </span>
+            <span aria-hidden="true">32%</span>
+          </div>
+
+          <!-- رقاقة Ctrl K -->
+          <button
+            class="chip chip-cmdkey"
+            id="cmdkey-chip"
+            aria-label="فتح لوحة الأوامر — Ctrl K"
+          >
+            <kbd>Ctrl K</kbd>
+          </button>
+
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       لوحة الأوامر (Ctrl K)
+  ════════════════════════════════════════════════════════════════ -->
+  <div
+    class="palette-overlay"
+    id="palette-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="لوحة الأوامر"
+    aria-hidden="true"
+  >
+    <div class="palette-backdrop" id="palette-backdrop" aria-hidden="true"></div>
+
+    <div class="palette-panel" role="document">
+
+      <!-- حقل البحث -->
+      <div class="palette-search">
+        <span class="palette-search-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <input
+          type="text"
+          class="palette-input"
+          id="palette-input"
+          placeholder="ابحث في المشاريع والجلسات والأوامر..."
+          aria-label="البحث في لوحة الأوامر"
+          autocomplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="palette-results"
+          aria-expanded="true"
+        />
+        <kbd class="palette-esc" aria-hidden="true">Esc</kbd>
+      </div>
+
+      <!-- النتائج -->
+      <div class="palette-results" id="palette-results" role="listbox" aria-label="نتائج البحث">
+
+        <!-- المشاريع الأخيرة -->
+        <div class="palette-group" role="group" aria-labelledby="pg-projects">
+          <div class="palette-group-label" id="pg-projects" role="presentation">المشاريع الأخيرة</div>
+
+          <button class="palette-item selected" role="option" aria-selected="true">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><path d="M1 3.5h12M1 3.5C1 2.7 1.7 2 2.5 2h9c.8 0 1.5.7 1.5 1.5v8c0 .8-.7 1.5-1.5 1.5h-9C1.7 13 1 12.3 1 11.5V3.5z" stroke="currentColor" stroke-width="1.2"/><path d="M4 7h6M4 9.5h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">نسّاج-dev</span>
+            <span class="palette-item-meta">٣ جلسات نشطة</span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><path d="M1 3.5h12M1 3.5C1 2.7 1.7 2 2.5 2h9c.8 0 1.5.7 1.5 1.5v8c0 .8-.7 1.5-1.5 1.5h-9C1.7 13 1 12.3 1 11.5V3.5z" stroke="currentColor" stroke-width="1.2"/><path d="M4 7h6M4 9.5h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">مشروع-ب</span>
+            <span class="palette-item-meta">١ جلسة نشطة</span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><path d="M1 3.5h12M1 3.5C1 2.7 1.7 2 2.5 2h9c.8 0 1.5.7 1.5 1.5v8c0 .8-.7 1.5-1.5 1.5h-9C1.7 13 1 12.3 1 11.5V3.5z" stroke="currentColor" stroke-width="1.2"/><path d="M4 7h6M4 9.5h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">مشروع-أ</span>
+            <span class="palette-item-meta">٠ جلسات</span>
+          </button>
+        </div>
+
+        <!-- الجلسات الأخيرة -->
+        <div class="palette-group" role="group" aria-labelledby="pg-sessions">
+          <div class="palette-group-label" id="pg-sessions" role="presentation">الجلسات — نسّاج-dev</div>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon running-dot" aria-hidden="true">●</span>
+            <span class="palette-item-name">مراجعة إعدادات الوكلاء</span>
+            <span class="palette-item-meta">الجلسة الحالية</span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon stopped-dot" aria-hidden="true">○</span>
+            <span class="palette-item-name">تحسين واجهة لوحة الأوامر</span>
+            <span class="palette-item-meta">أمس، ١٨:٢٤</span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon stopped-dot" aria-hidden="true">○</span>
+            <span class="palette-item-name">إصلاح خلل عاصفة التوكن</span>
+            <span class="palette-item-meta">٢٩ أغسطس</span>
+          </button>
+        </div>
+
+        <!-- الأوامر -->
+        <div class="palette-group" role="group" aria-labelledby="pg-commands">
+          <div class="palette-group-label" id="pg-commands" role="presentation">أوامر</div>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">جلسة جديدة</span>
+            <span class="palette-item-meta">في نسّاج-dev</span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M4.5 7a2.5 2.5 0 005 0 2.5 2.5 0 00-5 0z" stroke="currentColor" stroke-width="1.2"/><path d="M7 1.5v1M7 11.5v1M1.5 7h1M11.5 7h1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">الإعدادات</span>
+            <span class="palette-item-meta"></span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><path d="M2 2h10a1 1 0 011 1v8a1 1 0 01-1 1H2a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h6M4 7.5h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">الويكي</span>
+            <span class="palette-item-meta">notes.example.com</span>
+          </button>
+
+          <button class="palette-item" role="option" aria-selected="false">
+            <span class="palette-item-icon" aria-hidden="true">
+              <svg viewBox="0 0 14 14" fill="none"><path d="M7 2a5 5 0 100 10A5 5 0 007 2z" stroke="currentColor" stroke-width="1.2"/><path d="M7 5v4M5 7h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </span>
+            <span class="palette-item-name">مشروع جديد</span>
+            <span class="palette-item-meta"></span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- تذييل اختصارات لوحة المفاتيح -->
+      <div class="palette-footer" aria-label="اختصارات لوحة المفاتيح">
+        <span><kbd>↑</kbd> <kbd>↓</kbd> تنقّل</span>
+        <span><kbd>Enter</kbd> فتح</span>
+        <span><kbd>Esc</kbd> إغلاق</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       JavaScript بسيط: لوحة الأوامر + قائمة الجلسات
+  ════════════════════════════════════════════════════════════════ -->
+  <script>
+    // ── Elements
+    const paletteOverlay  = document.getElementById('palette-overlay');
+    const paletteInput    = document.getElementById('palette-input');
+    const paletteBackdrop = document.getElementById('palette-backdrop');
+    const sessionChip     = document.getElementById('session-chip');
+    const sessionList     = document.getElementById('session-list');
+    const sessionClose    = document.getElementById('session-list-close');
+    const cmdkeyChip      = document.getElementById('cmdkey-chip');
+    const composerInput   = document.getElementById('composer-input');
+
+    // ── Command palette
+    function openPalette() {
+      paletteOverlay.classList.add('is-open');
+      paletteOverlay.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('palette-open');
+      setTimeout(() => paletteInput.focus(), 60);
+    }
+
+    function closePalette() {
+      paletteOverlay.classList.remove('is-open');
+      paletteOverlay.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('palette-open');
+    }
+
+    // ── Session list
+    function openSessionList() {
+      document.body.classList.add('session-list-open');
+      sessionChip.setAttribute('aria-expanded', 'true');
+      sessionList.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeSessionList() {
+      document.body.classList.remove('session-list-open');
+      sessionChip.setAttribute('aria-expanded', 'false');
+      sessionList.setAttribute('aria-hidden', 'true');
+    }
+
+    function toggleSessionList() {
+      if (document.body.classList.contains('session-list-open')) {
+        closeSessionList();
+      } else {
+        openSessionList();
+      }
+    }
+
+    // ── Events
+    document.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        openPalette();
+      }
+      if (e.key === 'Escape') {
+        if (document.body.classList.contains('palette-open')) {
+          closePalette();
+        } else if (document.body.classList.contains('session-list-open')) {
+          closeSessionList();
+          sessionChip.focus();
+        }
+      }
+    });
+
+    paletteBackdrop.addEventListener('click', closePalette);
+    sessionChip.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleSessionList();
+    });
+    sessionClose && sessionClose.addEventListener('click', closeSessionList);
+    cmdkeyChip && cmdkeyChip.addEventListener('click', openPalette);
+
+    // Close session list when clicking outside
+    document.addEventListener('click', function(e) {
+      if (
+        document.body.classList.contains('session-list-open') &&
+        !sessionList.contains(e.target) &&
+        !sessionChip.contains(e.target)
+      ) {
+        closeSessionList();
+      }
+    });
+
+    // ── Auto-resize textarea
+    composerInput && composerInput.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 180) + 'px';
+    });
+
+    // ── Scroll conversation to bottom
+    const conv = document.querySelector('.conversation');
+    if (conv) conv.scrollTop = conv.scrollHeight;
+  </script>
+
+</body>
+</html>

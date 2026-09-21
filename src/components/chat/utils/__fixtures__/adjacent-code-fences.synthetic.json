@@ -1,0 +1,13 @@
+{
+  "_source": "Synthetic regression cases preserving fence adjacency and inert execution examples.",
+  "cases": [
+    {
+      "name": "two-adjacent-fenced-js-blocks",
+      "text": "**First block:**\n\n```js\nconst first = normalize(input);\n```\n\nThe prose between both blocks must remain visible.\n\n```js\nconst second = render(first);\n```"
+    },
+    {
+      "name": "quad-backtick-wrapper-around-exec-fence",
+      "text": "**Example syntax:**\n\n````\n```nassaj-exec:safe-restart\n```\n````"
+    }
+  ]
+}

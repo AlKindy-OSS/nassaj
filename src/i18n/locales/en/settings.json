@@ -1,0 +1,2184 @@
+{
+  "permissionFences": {
+    "title": "Permission fences",
+    "description": "When a run ends and its effect is unknown, Nassaj pauses launches as a precaution until the owner reviews it.",
+    "warning": "Lifting a fence does not prove the old run ended safely. It may have had an effect outside this machine. Lift only if you verified this or accept the risk.",
+    "none": "No active fences",
+    "kindGeneration": "All launches paused (generation {{generation}})",
+    "kindScoped": "Paused scope: {{scope}}",
+    "source": "Source: {{source}}",
+    "unknownSource": "unknown",
+    "since": "Since {{when}} · {{reason}}",
+    "openLeases_one": "One run is still open, so this fence cannot be lifted here.",
+    "openLeases_other": "{{count}} runs are still open, so this fence cannot be lifted here.",
+    "liftButton": "Lift fence…",
+    "reasonLabel": "Reason (kept in the audit log)",
+    "reasonPlaceholder": "e.g. verified the connect terminal had ended",
+    "acknowledge": "I acknowledge the old run's outcome stays unknown and lifting is not proof it was safe.",
+    "confirmLift": "Lift fence",
+    "cancel": "Cancel",
+    "lifted": "Fence lifted. Audit operation: {{operationId}}",
+    "loadFailed": "Could not load fences.",
+    "liftFailed": "Could not lift the fence; it is unchanged.",
+    "forbidden": "Only the owner can lift fences.",
+    "openLeasesRefused": "A run opened before the lift, so the fence stays.",
+    "alreadyLifted": "The fence no longer exists."
+  },
+  "storagePolicy": {
+    "title": "Storage & retention",
+    "description": "How long a conversation is kept before it is deleted for good, and the limits on images attached to its messages.",
+    "warning": "Shortening the period makes conversations older than the new one eligible for deletion right away. Deletion is final: the transcript and its images together, with no trash bin.",
+    "retentionLabel": "Delete a conversation after",
+    "retentionHint": "Measured from the last activity in the conversation, not from when it was created, and carried out by the engine itself.",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "imageMbLabel": "Largest single image",
+    "imageCountLabel": "Most images per message",
+    "imagesCount_one": "{{count}} image",
+    "imagesCount_other": "{{count}} images",
+    "imageCountHint": "Anything over the limit is refused with its reason shown to the sender, and the rest of their images still go through.",
+    "loadFailed": "Could not read the storage policy. Do not change a value before the current one appears.",
+    "saveFailed": "Could not save. The previous value is still in force.",
+    "saveForbidden": "Only the owner or an admin can set the storage policy.",
+    "purgeLabel": "Run deletion now",
+    "purgeHint": "Saves the period, then immediately deletes every conversation whose last activity is older than it. Starred conversations are kept.",
+    "purgeButton": "Save and run now",
+    "purgeConfirm": "Everything older than the retention period will be deleted for good. There is no trash bin. Continue?",
+    "purgeResult": "Deleted {{deleted}} conversations; kept {{skippedStarred}} starred.",
+    "purgeFailed": "The deletion could not run. Check the server log."
+  },
+  "title": "Settings",
+  "common": {
+    "close": "Close"
+  },
+  "tabs": {
+    "account": "Account",
+    "permissions": "Permissions",
+    "instructions": "Instructions",
+    "mcpServers": "MCP Servers",
+    "skills": "Skills",
+    "appearance": "Appearance"
+  },
+  "skills": {
+    "title": "Skills",
+    "description": "Install global {{provider}} skills from .md files or complete skill folders.",
+    "descriptionReadOnly": "Skills discovered from {{provider}} locations — no installing from here.",
+    "refresh": "Refresh",
+    "addSkill": "Add Skill",
+    "addSkillTitle": "Add {{provider}} Skill",
+    "installPath": "Install Path",
+    "dropZoneTitle": "Drop .md files or skill folders here",
+    "dropZoneDescription": "",
+    "chooseFiles": "Choose Files",
+    "chooseFolder": "Choose Folder",
+    "queuedFiles": "Queued",
+    "queuedFolder_one": "{{count}} file · {{size}}",
+    "queuedFolder_other": "{{count}} files · {{size}}",
+    "queuedMarkdown": "Markdown file · {{size}}",
+    "noDescription": "No description provided in the skill front matter.",
+    "remove": "Remove",
+    "install": "Install Skill",
+    "installCount_one": "Install {{count}} Skill",
+    "installCount_other": "Install {{count}} Skills",
+    "cancel": "Cancel",
+    "uploadHint": "A folder takes its own name; a standalone file takes the name from SKILL.md.",
+    "visibleSkills": "Installed Skills",
+    "visibleSkillsDescription": "",
+    "search": "Search skills...",
+    "clearSearch": "Clear search",
+    "scanning": "Scanning project skills…",
+    "loading": "Loading {{provider}} skills…",
+    "empty": "No skills discovered yet",
+    "emptyDescription": "Add a global skill above, or create project-specific skill folders in your workspace.",
+    "noMatch": "No matching skills",
+    "noMatchDescription": "Try a different command, name, scope, project, or source path.",
+    "source": "Source",
+    "saved": "Skills installed successfully.",
+    "delete": "Delete",
+    "confirmDelete": "Delete «{{name}}»?",
+    "confirmYes": "Delete",
+    "plugin": "Plugin",
+    "project": "Project",
+    "scopes": {
+      "user": "User",
+      "plugin": "Plugin",
+      "repo": "Repo",
+      "project": "Project",
+      "admin": "Admin",
+      "system": "System"
+    },
+    "errors": {
+      "deleteFailed": "Could not delete the skill. Please try again.",
+      "dropFailed": "Drop one or more .md files or a folder containing SKILL.md.",
+      "saveFailed": "Could not install the skills. Please try again.",
+      "missingSkillFile": "The selected folder does not contain a SKILL.md file.",
+      "tooLarge": "Selected skill folders must be smaller than 30 MB in total.",
+      "tooManyFiles_one": "A skill folder can contain only one file.",
+      "tooManyFiles_other": "A skill folder can contain up to {{count}} files.",
+      "unreadableSkillFile": "Could not read SKILL.md from {{name}}."
+    }
+  },
+  "account": {
+    "title": "Account",
+    "language": "Language",
+    "languageLabel": "Display Language",
+    "languageDescription": "Choose your preferred language for the interface",
+    "username": "Username",
+    "email": "Email",
+    "profile": "Profile",
+    "changePassword": "Change Password"
+  },
+  "mcp": {
+    "title": "MCP Servers",
+    "addServer": "Add Server",
+    "editServer": "Edit Server",
+    "deleteServer": "Delete Server",
+    "serverName": "Server Name",
+    "serverType": "Server Type",
+    "config": "Configuration",
+    "testConnection": "Test Connection",
+    "status": "Status",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "scope": {
+      "label": "Scope",
+      "user": "User",
+      "project": "Project"
+    }
+  },
+  "appearance": {
+    "title": "Appearance",
+    "theme": "Theme",
+    "codeEditor": "Code Editor",
+    "editorTheme": "Editor Theme",
+    "wordWrap": "Word Wrap",
+    "showMinimap": "Show Minimap",
+    "lineNumbers": "Line Numbers",
+    "fontSize": "Font Size"
+  },
+  "actions": {
+    "saveChanges": "Save Changes",
+    "resetToDefaults": "Reset to Defaults",
+    "cancelChanges": "Cancel Changes"
+  },
+  "quickSettings": {
+    "title": "Quick Settings",
+    "sections": {
+      "appearance": "Appearance",
+      "toolDisplay": "Tool Display",
+      "viewOptions": "View Options",
+      "inputSettings": "Input Settings"
+    },
+    "darkMode": "Dark Mode",
+    "autoExpandTools": "Auto-expand tools",
+    "showRawParameters": "Show raw parameters",
+    "showThinking": "Show thinking",
+    "showToolCalls": "Show tool calls",
+    "autoScrollToBottom": "Auto-scroll to bottom",
+    "tabsIconOnly": "Compact tabs (icons only)",
+    "sendByCtrlEnter": "Send by Ctrl+Enter",
+    "sendByCtrlEnterDescription": "When enabled, pressing Ctrl+Enter will send the message instead of just Enter. This is useful for IME users to avoid accidental sends.",
+    "dragHandle": {
+      "dragging": "Dragging handle",
+      "closePanel": "Close settings panel",
+      "openPanel": "Open settings panel",
+      "draggingStatus": "Dragging...",
+      "toggleAndMove": "Click to toggle, drag to move"
+    }
+  },
+  "claudeUsage": {
+    "title": "Claude Usage",
+    "loading": "Loading usage…",
+    "error": "Could not load usage status.",
+    "stale": "Cached data",
+    "percentUsed": "{{percent}} used",
+    "resetsIn": "Resets {{time}}",
+    "extraUsageDetail": "{{used}} of {{limit}} used",
+    "crossProviderNote": "Claude account usage — this session runs on {{provider}}",
+    "notApplicable": "Claude quotas don't apply to the current session's provider ({{provider}})",
+    "windows": {
+      "session": "Current session",
+      "weeklyAllModels": "All models (weekly)",
+      "weeklySonnet": "Sonnet only",
+      "weeklyOpus": "Opus only",
+      "extraUsage": "Extra usage credits"
+    }
+  },
+  "providerCycle": {
+    "title": "Billing cycle",
+    "compact": "{{days}}d",
+    "renewsIn": "Renews in {{days}} days",
+    "renewsOn": "Renews on {{date}}",
+    "plan": "Plan: {{plan}}",
+    "anchorDetected": "Renewal day read from the subscription itself",
+    "anchorManual": "Renewal day set by the owner"
+  },
+  "providerQuotaBlock": {
+    "title": "Quota exhausted",
+    "compactDays": "{{value}}d",
+    "compactHours": "{{value}}h",
+    "compactMinutes": "{{value}}m",
+    "resetsInDays": "Resets in {{value}} days",
+    "resetsInHours": "Resets in {{value}} hours",
+    "resetsInMinutes": "Resets in {{value}} minutes",
+    "resetsOn": "Resets at {{datetime}}",
+    "providerSaid": "Provider said: {{reason}}"
+  },
+  "providerQuota": {
+    "title": "Provider quota",
+    "signInRequired": "Sign in to view usage limits.",
+    "unavailable": "This provider does not expose usage limits for this account.",
+    "error": "Could not update usage limits.",
+    "retry": "Retry",
+    "windowLabel": "Quota window ({{key}})",
+    "used": "{{percent}} used",
+    "resetsIn": "Resets in {{horizon}}",
+    "plan": "Plan: {{plan}}",
+    "horizon": {
+      "minute": "{{value}}m",
+      "hour": "{{value}}h",
+      "day": "{{value}}d"
+    },
+    "length": {
+      "session": "{{value}}h window",
+      "week": "Weekly",
+      "month": "Monthly",
+      "days": "{{value}}d window"
+    },
+    "windowGeneric": "Quota window",
+    "letter": {
+      "session": "C",
+      "week": "W",
+      "month": "M"
+    },
+    "readErrorLabel": "Quota unavailable",
+    "readErrorTooltip": "{{provider}} quota could not be read — will retry automatically"
+  },
+  "terminalShortcuts": {
+    "title": "Terminal Shortcuts",
+    "sectionKeys": "Keys",
+    "sectionNavigation": "Navigation",
+    "escape": "Escape",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "arrowUp": "Arrow Up",
+    "arrowDown": "Arrow Down",
+    "scrollDown": "Scroll Down",
+    "paste": "Paste",
+    "handle": {
+      "closePanel": "Close shortcuts panel",
+      "openPanel": "Open shortcuts panel"
+    }
+  },
+  "mainTabs": {
+    "localModels": "Local models",
+    "label": "Settings",
+    "profile": "Profile",
+    "agents": "Agents",
+    "references": "References",
+    "engines": "Engines",
+    "appearance": "Appearance",
+    "git": "Git",
+    "apiTokens": "Programmatic access",
+    "connectors": "Connectors",
+    "notifications": "Notifications",
+    "users": "Users",
+    "about": "About",
+    "commandBoard": "Command Board",
+    "vendors": "Vendors & credentials"
+  },
+  "references": {
+    "title": "References",
+    "pageDescription": "Everything an agent reads before it starts.",
+    "materialsLabel": "Reference materials",
+    "noReadChannel": "This server exposes no read channel for this material, so its content is not shown here today.",
+    "materials": {
+      "instructions": "Instructions",
+      "memory": "Memory",
+      "agents": "Agent cards",
+      "skills": "Skills"
+    },
+    "scope": {
+      "filter": "Scope",
+      "filterHint": "Who is affected when the file changes — not where it lives.",
+      "all": "All",
+      "global": "Shared — all members",
+      "mine": "Mine",
+      "project": "Project",
+      "projectNamed": "Project: {{name}}",
+      "allMembers": "Every user on this node",
+      "unknown": "Scope not declared",
+      "short": {
+        "global": "Shared",
+        "mine": "Mine",
+        "project": "Project",
+        "unknown": "Undeclared",
+        "no-channel": "No channel"
+      },
+      "banner": {
+        "global": "A shared file — editing it affects every member of this nassaj at the same moment.",
+        "project": "Belongs to project “{{name}}” — affects everyone working on it.",
+        "unknown": "The server did not declare this file's scope. Treat it as one that may affect others until its scope is known.",
+        "projectUnnamed": "Belongs to a project — affects everyone working on it.",
+        "operatorHome": "This material lives in the operator home; saving it affects every user."
+      },
+      "no-channel": "No instruction channel on this engine"
+    },
+    "fields": {
+      "engine": "Engine",
+      "status": "Status",
+      "mechanism": "Mechanism",
+      "name": "Name",
+      "description": "Description",
+      "origin": "Where it lives",
+      "updatedAt": "Last updated",
+      "size": "Size in bytes",
+      "affectedScope": "Who is affected"
+    },
+    "origin": {
+      "user": "Shared engine home",
+      "admin": "Admin directory",
+      "system": "System directory",
+      "plugin": "Plugin",
+      "repo": "nassaj repository",
+      "project": "Project folder"
+    },
+    "content": {
+      "title": "Content",
+      "unavailable": "File content is not available yet — this server has no read channel for it. The path below says where to look.",
+      "unreadable": "The file exists, but the server could not read it safely.",
+      "noFile": "There is no file for this channel — this engine reads no instruction file at all.",
+      "selectToLoad": "Content is loaded when you select the item."
+    },
+    "status": {
+      "governed": "Governed",
+      "ungoverned": "Not governed"
+    },
+    "reason": {
+      "no_mechanism": "This engine has no nassaj instruction channel.",
+      "source_absent": "The canonical instruction source is absent.",
+      "copy_missing": "The required instruction copy is missing.",
+      "copy_empty": "The instruction file exists but is empty.",
+      "symlink_rejected": "This channel rejects a symbolic link by design.",
+      "drifted": "The instruction copy differs from the canonical source.",
+      "project_unresolved": "No project is selected, so the project instruction path cannot be resolved."
+    },
+    "empty": {
+      "none": "No {{material}} are readable from here under this filter.",
+      "selectItem": "Select an item from the list.",
+      "noMatch": "Nothing matches your search."
+    },
+    "error": {
+      "list": "Could not read {{material}}.",
+      "rootUnavailable": "The material source is unavailable on the server. Nothing was hidden as an empty list.",
+      "providerUnavailable": "The engine could not report its materials. Nothing was hidden as an empty list.",
+      "retry": "Retry"
+    },
+    "actions": {
+      "add": "Add",
+      "edit": "Edit",
+      "save": "Save",
+      "saving": "Saving…",
+      "create": "Create",
+      "cancel": "Cancel",
+      "name": "Symbolic identifier",
+      "namePlaceholder": "Symbolic name, not a path",
+      "saveFailed": "The material could not be saved. The displayed content was not changed."
+    },
+    "instructions": {
+      "title": "Instruction channels",
+      "description": "One channel per engine and scope. The verdict comes from reading the disk at that moment, not from UI memory."
+    },
+    "memory": {
+      "description": "The memory files an agent reads — shared by every member."
+    },
+    "agentCards": {
+      "description": "Each agent's card: its model, effort, tools and role text. Independent of the engine — one card whoever runs it."
+    },
+    "skills": {
+      "description": "The skills each engine can reach. Writing to them affects every member, which is why writes are limited to the owner and admins."
+    },
+    "governance": {
+      "title": "Follows nassaj instructions",
+      "description": "Each engine is either governed — nassaj instructions reach it — or exempt, running with its own defaults.",
+      "toggleLabel": "Follows nassaj instructions: {{provider}}",
+      "modeGoverned": "Governed",
+      "modeExempt": "Exempt",
+      "stateGoverned": "Governed — nassaj instructions reach it.",
+      "stateExempt": "Exempt — runs with its own defaults; nassaj instructions do not reach it.",
+      "ownerOnly": "Only the owner and admins can exempt an engine from nassaj instructions.",
+      "writeFailed": "The change could not be applied — what is shown is what the server attests.",
+      "reason": {
+        "shared_tree": "Shared tree: one file for every member on this node, so exempting a single member is not possible.",
+        "material_present": "Exempt, but the instruction files are still on disk from an earlier setup."
+      }
+    },
+    "search": {
+      "placeholder": "Search…",
+      "label": "Search {{material}}"
+    }
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "Manage your account username, password, and passkeys",
+    "tabs": {
+      "identity": "Identity",
+      "security": "Security"
+    },
+    "saving": "Saving...",
+    "avatar": {
+      "title": "Profile picture",
+      "description": "Add a photo so teammates can recognise you.",
+      "change": "Change picture",
+      "uploading": "Uploading...",
+      "hint": "Square images work best. PNG or JPG.",
+      "currentAlt": "Your profile picture",
+      "placeholderAlt": "No profile picture set",
+      "success": "Profile picture updated successfully",
+      "errors": {
+        "uploadFailed": "Could not upload the picture. Please try again.",
+        "network": "Network error. Please check your connection and try again."
+      }
+    },
+    "username": {
+      "title": "Change username",
+      "description": "Update the username you use to sign in.",
+      "currentLabel": "Current username",
+      "newLabel": "New username",
+      "placeholder": "Choose a new username",
+      "hint": "3-32 characters: letters, numbers, or underscore.",
+      "save": "Save username",
+      "success": "Username updated successfully",
+      "errors": {
+        "required": "Please enter a new username",
+        "unchanged": "The new username is the same as the current one"
+      }
+    },
+    "password": {
+      "title": "Change password",
+      "description": "Use a strong password you do not use elsewhere.",
+      "currentLabel": "Current password",
+      "currentPlaceholder": "Enter your current password",
+      "newLabel": "New password",
+      "newPlaceholder": "Enter a new password",
+      "confirmLabel": "Confirm new password",
+      "confirmPlaceholder": "Re-enter the new password",
+      "hint": "At least {{min}} characters.",
+      "save": "Save password",
+      "success": "Password changed successfully",
+      "errors": {
+        "required": "Please fill in all password fields",
+        "short": "Password must be at least {{min}} characters",
+        "mismatch": "New passwords do not match"
+      }
+    },
+    "passkeys": {
+      "title": "Passkeys",
+      "description": "Sign in without a password using your fingerprint, face, device PIN, or a security key.",
+      "add": "Add passkey",
+      "nameLabel": "Passkey name (optional)",
+      "namePlaceholder": "e.g. Laptop fingerprint",
+      "create": "Create passkey",
+      "creating": "Waiting for your device...",
+      "cancel": "Cancel",
+      "loading": "Loading passkeys...",
+      "empty": "No passkeys yet. Add one to sign in to this workspace quickly and securely — no password needed.",
+      "notSupported": "This browser does not support passkeys, so new ones cannot be added here.",
+      "unnamed": "Unnamed passkey",
+      "createdAt": "Added {{date}}",
+      "lastUsedAt": "Last used {{date}}",
+      "neverUsed": "Never used",
+      "badges": {
+        "synced": "Synced",
+        "device": "Device-bound"
+      },
+      "rename": "Rename passkey",
+      "renamePlaceholder": "New name",
+      "renameSave": "Save name",
+      "delete": "Delete passkey",
+      "deleteConfirm": "Delete this passkey?",
+      "deleteConfirmYes": "Delete",
+      "success": {
+        "added": "Passkey added successfully",
+        "renamed": "Passkey renamed",
+        "deleted": "Passkey deleted"
+      },
+      "errors": {
+        "loadFailed": "Could not load your passkeys. Please try again.",
+        "registerFailed": "Could not create the passkey. Please try again.",
+        "duplicate": "This device or security key is already registered as a passkey.",
+        "renameFailed": "Could not rename the passkey.",
+        "deleteFailed": "Could not delete the passkey.",
+        "network": "Network error. Please check your connection and try again."
+      }
+    },
+    "identity": {
+      "title": "Avatar style",
+      "description": "Pick a ready-made avatar or a colour instead of uploading a photo.",
+      "tabs": {
+        "upload": "Upload",
+        "gallery": "Gallery",
+        "color": "Colour"
+      },
+      "gallery": {
+        "heading": "Choose an avatar",
+        "selected": "Selected avatar"
+      },
+      "color": {
+        "heading": "Choose a colour",
+        "hint": "The colour is used behind your initial.",
+        "selected": "Selected colour"
+      },
+      "saving": "Saving...",
+      "success": "Avatar updated successfully",
+      "errors": {
+        "saveFailed": "Could not save your choice. Please try again.",
+        "network": "Network error. Please check your connection and try again."
+      }
+    }
+  },
+  "claudeConnection": {
+    "description": "Link your Claude subscription to use it in your sessions.",
+    "recheck": "Re-check",
+    "loadError": "Could not check subscription status. Please try again.",
+    "banner": "Your Claude subscription is not linked yet. You need to link it before using Claude in your sessions.",
+    "bannerHint": "Click the button below to open the terminal and complete the login flow using",
+    "linkButton": "Link Claude account",
+    "tokenInput": {
+      "stepHint": "Press \u201c{{button}}\u201d on this card to run <cmd>claude setup-token</cmd>, then paste the token it prints here — it is shown once only.",
+      "notWritable": "The Claude credential is shared on this server, so only an owner or admin can set it. Do not run claude setup-token: the token is shown once and will not be accepted here.",
+      "placeholder": "sk-ant-oat01-…",
+      "ariaLabel": "Setup token",
+      "save": "Save token",
+      "saving": "Saving…",
+      "saved": "Token saved",
+      "emptyError": "Token is required",
+      "saveError": "Failed to save token. Please try again."
+    }
+  },
+  "agyConnection": {
+    "description": "Link your own Antigravity subscription to use it in your sessions. Each user has their own isolated credential.",
+    "recheck": "Re-check",
+    "loadError": "Could not check subscription status. Please try again.",
+    "banner": "Your Antigravity subscription is not linked yet. You need to link it before using agy in your sessions.",
+    "bannerHint": "Click the button below to open the terminal and run",
+    "linkButton": "Link Antigravity account",
+    "modal": {
+      "title": "Link Antigravity account",
+      "close": "Close link dialog",
+      "instructions": "In the terminal below, run",
+      "afterComplete": "Complete the OAuth login flow, then close this dialog and click \"Re-check\" to refresh the status."
+    }
+  },
+  "users": {
+    "title": "Users",
+    "subtitle": "Manage workspace members and invitations",
+    "inviteButton": "Invite User",
+    "listHeading": "Members",
+    "loading": "Loading users...",
+    "empty": "No users found",
+    "you": "you",
+    "changeRole": "Change role",
+    "suspend": "Suspend",
+    "activate": "Activate",
+    "resetPassword": "Reset password",
+    "deleteUser": "Delete user",
+    "deleteUserConfirm": "Permanently delete {{username}}? This cannot be undone.",
+    "reset": {
+      "title": "Reset password",
+      "confirm": "Reset the password for {{username}}?",
+      "warning": "A temporary password will be generated and shown once. The user must change it on their next sign-in, and all their existing sessions will be signed out.",
+      "submit": "Reset password",
+      "resetting": "Resetting...",
+      "cancel": "Cancel",
+      "close": "Close",
+      "done": "Done",
+      "copy": "Copy",
+      "copied": "Copied",
+      "successHint": "Share this temporary password securely. It is shown only once.",
+      "tempPasswordLabel": "Temporary password"
+    },
+    "pendingInvites": "Pending invitations",
+    "noPendingInvites": "No pending invitations",
+    "revoke": "Revoke",
+    "expiresAt": "Expires {{date}}",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "statuses": {
+      "active": "Active",
+      "disabled": "Suspended"
+    },
+    "invite": {
+      "title": "Invite a user",
+      "roleLabel": "Role",
+      "roleHint": "The invited user will be created with this role.",
+      "submit": "Create invite",
+      "creating": "Creating...",
+      "cancel": "Cancel",
+      "close": "Close",
+      "done": "Done",
+      "copy": "Copy",
+      "copied": "Copied",
+      "successHint": "Share this single-use link. It is shown only once."
+    },
+    "rowActions": "Actions for {{username}}",
+    "lastLogin": "Last login",
+    "neverLoggedIn": "Never logged in"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "description": "Control which notification events you receive.",
+    "channels": {
+      "title": "Notification channels"
+    },
+    "webPush": {
+      "title": "Web Push Notifications",
+      "enable": "Enable Push Notifications",
+      "disable": "Disable Push Notifications",
+      "enabled": "Push notifications are enabled",
+      "loading": "Updating...",
+      "unsupported": "Push notifications are not supported in this browser.",
+      "denied": "Push notifications are blocked. Please allow them in your browser settings."
+    },
+    "sound": {
+      "title": "Sound",
+      "description": "When a run finishes",
+      "enabled": "Enabled",
+      "test": "Test sound"
+    },
+    "events": {
+      "title": "Event Types",
+      "actionRequired": "Action required",
+      "stop": "Run stopped",
+      "error": "Run failed"
+    }
+  },
+  "appearanceSettings": {
+    "darkMode": {
+      "label": "Dark Mode",
+      "description": "Toggle between light and dark themes"
+    },
+    "themeMode": {
+      "sectionTitle": "Appearance",
+      "label": "Theme",
+      "description": "Choose light, dark, or follow your system setting automatically",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "themePresets": {
+      "title": "Theme",
+      "description": "Applied on top of light and dark mode",
+      "groupLabel": "Theme preset",
+      "presets": {
+        "default": "Default",
+        "claude": "Claude",
+        "alkindy": "Al-Kindy",
+        "nawras": "Nawras",
+        "irukhaimi": "Al-Rukhaimi",
+        "cursor": "Cursor",
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "custom": "Custom"
+      },
+      "custom": {
+        "title": "Custom colors",
+        "accent": "Accent",
+        "background": "Background",
+        "foreground": "Text"
+      }
+    },
+    "uiFont": {
+      "title": "Interface font",
+      "description": "Applies to every language — Arabic and Latin alike. All fonts are self-hosted and downloaded only when selected.",
+      "label": "Font",
+      "hint": "The default is the system font: nothing is downloaded, and it matches your device.",
+      "options": {
+        "system": "System font (automatic)",
+        "ibmPlexSansArabic": "IBM Plex Sans Arabic",
+        "notoSansArabic": "Noto Sans Arabic",
+        "readexPro": "Readex Pro",
+        "vazirmatn": "Vazirmatn",
+        "tajawal": "Tajawal",
+        "notoNastaliqUrdu": "Noto Nastaliq Urdu (for Urdu)"
+      }
+    },
+    "projectSorting": {
+      "label": "Project Sorting",
+      "description": "In the sidebar",
+      "alphabetical": "Alphabetical",
+      "recentActivity": "Recent Activity"
+    },
+    "codeEditor": {
+      "title": "Code Editor",
+      "theme": {
+        "label": "Editor Theme",
+        "description": "Default theme for the code editor"
+      },
+      "wordWrap": {
+        "label": "Word Wrap",
+        "description": "Enable word wrapping by default in the editor"
+      },
+      "showMinimap": {
+        "label": "Show Minimap",
+        "description": "In the diff view"
+      },
+      "lineNumbers": {
+        "label": "Show Line Numbers",
+        "description": "Display line numbers in the editor"
+      },
+      "fontSize": {
+        "label": "Font Size",
+        "description": "In pixels"
+      }
+    },
+    "branding": {
+      "title": "Server identity",
+      "description": "The brand name appears in the browser tab title and the sidebar header for every user; the small icon identifies this server visually.",
+      "appTitle": {
+        "label": "Brand name",
+        "description": "Shown in the browser tab title, the sidebar header and notifications (max 60 characters). Leave empty to fall back to the default name."
+      },
+      "nodeIcon": {
+        "label": "Server icon",
+        "description": "A small badge image shown next to the logo (≤ 48 KB). PNG, JPG, WebP, or SVG.",
+        "upload": "Upload icon",
+        "change": "Change icon",
+        "clear": "Remove",
+        "save": "Save",
+        "saving": "Saving…",
+        "preview": "Icon preview",
+        "success": "Server icon saved",
+        "cleared": "Server icon removed",
+        "position": {
+          "label": "Icon position",
+          "description": "Where to show the icon relative to the logo",
+          "start": "Before logo",
+          "end": "After logo"
+        },
+        "link": {
+          "label": "Icon link (optional)",
+          "description": "Clicking the icon opens this address in a new tab. Leave empty to make it non-clickable.",
+          "placeholder": "https://example.com"
+        },
+        "errors": {
+          "tooBig": "Image exceeds the 48 KB limit",
+          "unsupported": "Unsupported file type. Use PNG, JPG, WebP, or SVG.",
+          "saveFailed": "Could not save. Please try again."
+        }
+      },
+      "saved": "Server identity saved"
+    },
+    "sidebar": {
+      "title": "Sidebar",
+      "showSearchAndArchive": {
+        "label": "Show search & archive toggle",
+        "description": "At the top of the projects list"
+      }
+    },
+    "codeHighlighting": {
+      "title": "Code highlighting",
+      "label": "Language scope",
+      "description": "How many languages the highlighter knows. Only the default level ships with the page; higher levels are downloaded when selected and apply immediately without a reload. Languages outside the scope render as plain, selectable text.",
+      "core": "10 languages (fastest — default)",
+      "extended": "20 languages (small extra download)",
+      "full": "All 300 languages (large extra download)",
+      "coreShort": "10 languages · default",
+      "extendedShort": "20 languages",
+      "fullShort": "300 languages"
+    },
+    "pageDescription": "Theme, colours, fonts, and how the interface is laid out.",
+    "basics": {
+      "title": "Theme & language"
+    },
+    "colorPreset": {
+      "title": "Color preset"
+    }
+  },
+  "mcpForm": {
+    "title": {
+      "add": "Add MCP Server",
+      "edit": "Edit MCP Server"
+    },
+    "importMode": {
+      "label": "Input mode",
+      "form": "Form Input",
+      "json": "JSON Import"
+    },
+    "scope": {
+      "label": "Scope",
+      "option": {
+        "local": "Claude local",
+        "project": "Project",
+        "projectAll": "Project (compatible providers)",
+        "user": "User (global)",
+        "userAll": "User (compatible providers)"
+      },
+      "hint": {
+        "local": "Stored in Claude user settings for the selected project.",
+        "project": "Stored in the selected project workspace.",
+        "projectAll": "Writes only to compatible provider configs in the selected project workspace: {{providers}}.",
+        "user": "Available across all projects on your machine.",
+        "userAll": "Writes only to compatible provider user configs ({{providers}}) and is available across projects on this machine."
+      },
+      "userGlobal": "User (Global)",
+      "projectLocal": "Project (Local)",
+      "userDescription": "Your account's servers — across all your projects, invisible to other members.",
+      "projectDescription": "Local scope: only in the selected project, within your account",
+      "cannotChange": "Scope cannot be changed when editing an existing server"
+    },
+    "fields": {
+      "serverName": "Server Name",
+      "transportType": "Transport Type",
+      "command": "Command",
+      "arguments": "Arguments (one per line)",
+      "jsonConfig": "JSON Configuration",
+      "url": "URL",
+      "envVars": "Environment Variables (KEY=value, one per line)",
+      "headers": "Headers (KEY=value, one per line)",
+      "selectProject": "Select a project...",
+      "bearerTokenEnvVar": "Bearer token environment variable",
+      "envVarNames": "Environment variable names",
+      "workingDirectory": "Working directory"
+    },
+    "placeholders": {
+      "serverName": "my-server"
+    },
+    "validation": {
+      "missingType": "Missing required field: type",
+      "stdioRequiresCommand": "stdio type requires a command field",
+      "httpRequiresUrl": "{{type}} type requires a url field",
+      "invalidJson": "Invalid JSON format",
+      "jsonHelp": "Paste your MCP server configuration in JSON format. Example formats:",
+      "jsonExampleStdio": "• stdio: {\"type\":\"stdio\",\"command\":\"npx\",\"args\":[\"@upstash/context7-mcp\"]}",
+      "jsonExampleHttp": "• http/sse: {\"type\":\"http\",\"url\":\"https://api.example.com/mcp\"}",
+      "unsupportedTransport": "A global MCP server supports only stdio and http for compatible providers, not {{transport}}."
+    },
+    "configDetails": "Configuration Details (from {{configFile}})",
+    "projectPath": "Path: {{path}}",
+    "actions": {
+      "cancel": "Cancel",
+      "saving": "Saving...",
+      "addServer": "Add Server",
+      "updateServer": "Update Server",
+      "addTo": "Add server to {{provider}}"
+    }
+  },
+  "saveStatus": {
+    "success": "Settings saved successfully!",
+    "error": "Failed to save settings",
+    "saving": "Saving..."
+  },
+  "footerActions": {
+    "save": "Save Settings",
+    "cancel": "Cancel"
+  },
+  "git": {
+    "identity": {
+      "title": "Commit identity"
+    },
+    "title": "Git Configuration",
+    "description": "Configure your git identity for commits. These settings will be applied globally via git config --global",
+    "name": {
+      "label": "Git Name",
+      "help": "Your name for git commits"
+    },
+    "email": {
+      "label": "Git Email",
+      "help": "Your email for git commits"
+    },
+    "actions": {
+      "save": "Save Configuration",
+      "saving": "Saving..."
+    },
+    "status": {
+      "success": "Saved successfully"
+    }
+  },
+  "externalApi": {
+    "title": "Programmatic access",
+    "description": "Lets automation outside the browser — scripts, CI, webhooks — start an agent run in Nassaj over POST /api/agent. Disabled by default.",
+    "toggleLabel": "Enable programmatic access",
+    "stateOn": "POST /api/agent accepts requests authenticated with an API key.",
+    "stateOff": "POST /api/agent is closed and answers 404. No API key works.",
+    "ownerOnly": "Only the owner can change this setting.",
+    "warning": {
+      "title": "This surface runs an agent with permissions bypassed",
+      "description": "A request carrying a valid key can run an agent inside a workspace, clone repositories, and push branches or open pull requests. The keys never expire and have no scopes — treat one like a full credential and turn this off when no automation needs it."
+    }
+  },
+  "apiKeys": {
+    "title": "Nassaj API Keys",
+    "description": "Generate API keys to trigger Nassaj programmatically from outside the browser — scripts, automation, CI, or webhooks — via POST /api/agent, passing the key in the x-api-key header.",
+    "newKey": {
+      "alertTitle": "⚠️ Save Your API Key",
+      "alertMessage": "This is the only time you'll see this key. Store it securely.",
+      "iveSavedIt": "I've saved it",
+      "copyAria": "Copy key"
+    },
+    "form": {
+      "placeholder": "API Key Name (e.g., Production Server)",
+      "createButton": "Create",
+      "cancelButton": "Cancel"
+    },
+    "newButton": "New API Key",
+    "empty": "No API keys created yet.",
+    "list": {
+      "created": "Created:",
+      "lastUsed": "Last used:"
+    },
+    "confirmDelete": "Are you sure you want to delete this API key?",
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "github": {
+      "title": "GitHub Tokens",
+      "description": "Add GitHub Personal Access Tokens to clone private repositories via the external API.",
+      "descriptionAlt": "Add GitHub Personal Access Tokens to clone private repositories. You can also pass tokens directly in API requests without storing them.",
+      "addButton": "Add Token",
+      "form": {
+        "namePlaceholder": "Token Name (e.g., Personal Repos)",
+        "tokenPlaceholder": "GitHub Personal Access Token (ghp_...)",
+        "descriptionPlaceholder": "Description (optional)",
+        "addButton": "Add Token",
+        "cancelButton": "Cancel",
+        "howToCreate": "How to create a GitHub Personal Access Token →",
+        "hideToken": "Hide token",
+        "showToken": "Show token"
+      },
+      "empty": "No GitHub tokens added yet.",
+      "added": "Added:",
+      "confirmDelete": "Are you sure you want to delete this GitHub token?",
+      "deleteAria": "Delete credential {{name}}"
+    },
+    "apiDocsLink": "API Documentation",
+    "documentation": {
+      "title": "External API Documentation",
+      "description": "Learn how to use the external API to trigger Claude/Cursor sessions from your applications.",
+      "viewLink": "View API Documentation →"
+    },
+    "loading": "Loading...",
+    "version": {
+      "updateAvailable": "Update available: v{{version}}"
+    },
+    "deleteAria": "Delete key {{name}}"
+  },
+  "agents": {
+    "authStatus": {
+      "checking": "Checking...",
+      "connected": "Connected",
+      "notConnected": "Not connected",
+      "disconnected": "Disconnected",
+      "checkingAuth": "Checking authentication status...",
+      "loggedInAs": "Logged in as {{email}}",
+      "authenticatedUser": "authenticated user",
+      "linkExpirySource": "Source: {{when}} — shown above in your device time",
+      "linkExpired": "Sign-in expired {{when}} — renew it before this session runs out",
+      "linkExpiresOn": "Sign-in expires {{when}}",
+      "linkExpiryToday": "Sign-in expires today at {{when}}",
+      "linkExpiry_one": "Sign-in expires in {{count}} day — {{when}}",
+      "linkExpiry_other": "Sign-in expires in {{count}} days — {{when}}",
+      "cycleRenews": "Subscription renews {{date}}",
+      "billingPage": "Billing page",
+      "billingPageNewTab": "opens in new tab"
+    },
+    "account": {
+      "claude": {
+        "description": ""
+      },
+      "cursor": {
+        "description": "Cursor AI-powered code editor"
+      },
+      "codex": {
+        "description": "OpenAI Codex AI assistant"
+      },
+      "gemini": {
+        "description": "Google Gemini AI assistant"
+      },
+      "antigravity": {
+        "description": "Google AI Pro via the agy CLI"
+      },
+      "opencode": {
+        "description": "OpenCode CLI assistant"
+      },
+      "qwen": {
+        "description": "Alibaba ModelStudio via Coding Plan or Token Plan"
+      },
+      "kimi": {
+        "description": "Moonshot Kimi — native CLI (device-code login) or API key"
+      },
+      "deepseek": {
+        "description": "DeepSeek via API key"
+      },
+      "glm": {
+        "description": "Zhipu / Z.ai GLM via API key"
+      }
+    },
+    "antigravity": {
+      "modelPickerNote": "Pick the model in the model picker; \"agy default\" leaves the choice to agy."
+    },
+    "authPaths": {
+      "subscription": {
+        "title": "Subscription sign-in",
+        "description": "Sign in with the provider's own account over OAuth; no key is stored. This is one of two paths — the other is the API key below."
+      },
+      "apiKey": {
+        "title": "API key — {{company}}"
+      },
+      "apiKeyPath": {
+        "title": "API key"
+      }
+    },
+    "apiCredential": {
+      "title": "API key",
+      "description": "Every API key is entered once, in Vendors & credentials. This is its state here."
+    },
+    "connectionStatus": "Connection Status",
+    "login": {
+      "title": "Login",
+      "reAuthenticate": "Re-authenticate",
+      "description": "Sign in to your {{agent}} account to enable AI features",
+      "reAuthDescription": "",
+      "button": "Login",
+      "reLoginButton": "Re-login"
+    },
+    "error": "Error: {{error}}",
+    "selector": {
+      "label": "Agents",
+      "notConfigured": "Not set up"
+    },
+    "deepseek": {
+      "comingSoon": "Coming soon — we will connect it later."
+    },
+    "sakana": {
+      "comingSoon": "This provider is coming soon — no API key is available yet."
+    },
+    "pageDescription": "",
+    "instructionSources": {
+      "title": "Instruction source",
+      "description": "Where this agent takes its instructions from, as read from disk right now.",
+      "noChannelTitle": "No instruction channel",
+      "channel": {
+        "user": "User-home channel",
+        "project": "Project channel"
+      },
+      "field": {
+        "verdict": "Verdict",
+        "path": "Effective path",
+        "noPath": "No path — nothing was read",
+        "link": "Link target",
+        "linkNote": "The file is a symlink; a write through it reaches this target.",
+        "verification": "Verification",
+        "enforcement": "Enforcement"
+      },
+      "verdict": {
+        "governed": "Governed",
+        "presentUnverified": "Present, identity unverified",
+        "ungoverned": "Ungoverned"
+      },
+      "mechanism": {
+        "codex-fingerprint": "The neutral AGENTS.md copy inside CODEX_HOME, matched by sha256.",
+        "kimi-agents": "The neutral AGENTS.md copy inside KIMI_CODE_HOME, matched by sha256.",
+        "opencode-agents": "The neutral AGENTS.md copy inside the OpenCode config home, matched by sha256.",
+        "claude-md": "CLAUDE.md in the Claude config dir — normally a symlink into the governance source.",
+        "gemini-md": "GEMINI.md in agy's home — the file it actually ingests.",
+        "nassaj-project-md": "Project instructions (NASSAJ.md, else CLAUDE.md) injected by nassaj into the first message of each new conversation.",
+        "none": "No mechanism."
+      },
+      "verification": {
+        "fingerprint": "sha256 identical to the source — an identity check",
+        "presence": "Presence only — any non-empty text passes",
+        "none": "No check"
+      },
+      "enforcement": {
+        "fail-closed": "Blocking: the launch is refused unless governance is attested",
+        "best-effort": "Best effort: materialized and verified, but never blocks a launch",
+        "informational": "Informational: read, never verified, never blocking",
+        "none": "Not enforced"
+      },
+      "reason": {
+        "no_mechanism": "This engine reads no instruction file — its governance is the permission ceiling.",
+        "source_absent": "No usable governance source on this node, so nothing can be verified.",
+        "copy_missing": "The source exists; the file the engine reads does not — it is established on the first governed launch.",
+        "copy_empty": "The file exists but is empty, so the engine ingests nothing.",
+        "symlink_rejected": "The file is a symlink — rejected, because a write through it reaches the governance source.",
+        "drifted": "A stale or tampered copy — it differs from the source.",
+        "project_unresolved": "No project selected, so no file was read."
+      },
+      "link": {
+        "label": "Link to nassaj instructions",
+        "button": "Link this agent to nassaj instructions",
+        "pending": "Linking…",
+        "userNote": "A read-only copy lands in your own tree; it applies to your NEXT session.",
+        "operatorNote": "The copy lands in the operator home and affects every user on this node — owner only.",
+        "rechecked": "Disk was re-read; the verdict above is what it found.",
+        "failed": "Linking failed. Nothing on disk changed, and the verdict above still stands."
+      },
+      "linkRefusal": {
+        "symlink_by_design": "No button here, by design: this channel is a symlink to the live source; making it a copy would cut off instant updates.",
+        "shared_source_is_the_file": "No button here: in shared mode agy reads the source itself.",
+        "project_scoped": "Project instructions belong to the project — create NASSAJ.md at its root.",
+        "owner_required": "Linking here writes into the operator home and affects every user on this node, so it is owner-only."
+      }
+    }
+  },
+  "engines": {
+    "noAlternative": "This agent runs on its own engine only — there is nothing to switch.",
+    "title": "Engines",
+    "description": "Swap the model that answers behind this agent. Its tools, permissions and sessions are unchanged.",
+    "usageHint": "Pick \"Claude engine on <engine>\" from the model picker in a chat.",
+    "endpointLabel": "Endpoint this engine is called on",
+    "getKey": "Get a key",
+    "inputLabel": "{{provider}} API key",
+    "placeholder": "Paste API key",
+    "placeholderConfigured": "•••••••• (a key is stored)",
+    "save": "Save {{provider}} key",
+    "saveShort": "Save",
+    "remove": "Remove {{provider}} key",
+    "removeShort": "Remove",
+    "saved": "Engine key saved.",
+    "removed": "Engine key removed.",
+    "storedNote": "Stored encrypted for your account only. Replace it by saving a new one.",
+    "status": {
+      "checking": "Checking…",
+      "stored": "A key is stored",
+      "missing": "No key stored",
+      "native": "Its own engine",
+      "available": "Runs today",
+      "blocked_by_owner": "Needs a key",
+      "blockedUnplaced": "Needs a key — no field for it here yet",
+      "blocked_by_us": "Not landed yet",
+      "closed_at_vendor": "Not offered by the vendor",
+      "unverified": "Unverified",
+      "ready": "Ready — not measured here",
+      "needsCredential": "Needs a {{vendor}} credential"
+    },
+    "usageHintOpenCode": "Pick the engine's model (e.g. \"glm/…\") from the model picker in a chat.",
+    "evidence": {
+      "measured": "measured",
+      "inferred": "inferred"
+    },
+    "cell": {
+      "claudeNative": "The engine Claude Code ships with, on the account already signed in here.",
+      "claudeGlm": "Runs today: verified end to end on this machine.",
+      "claudeKimi": "Runs today: kimi-k3 answered inside a Claude session here.",
+      "claudeDeepseek": "The wire and the key are verified; only the DeepSeek account balance is missing. Topping it up is the sole remaining step.",
+      "claudeZen": "Zen exposes no Anthropic-compatible endpoint, so the Claude body cannot be pointed at it.",
+      "opencodeZen": "OpenCode's own engine. The path works; it bills against a Zen balance.",
+      "opencodeGlm": "Runs today: returns real tokens through OpenCode.",
+      "opencodeAnthropic": "API key only. Passing a personal Claude subscription through OpenCode is forbidden outright.",
+      "opencodeKimi": "Catalogued upstream; needs a Moonshot key.",
+      "opencodeDeepseek": "Catalogued upstream; needs a DeepSeek key.",
+      "codexAnthropic": "Codex speaks only the Responses protocol, and Anthropic does not serve it.",
+      "codexGlm": "z.ai serves no Responses endpoint, which Codex requires.",
+      "codexKimi": "Moonshot answers 404 on /v1/responses — measured. Closed at the vendor, not pending.",
+      "codexDeepseek": "Same reason: no Responses endpoint to point Codex at.",
+      "codexZen": "Zen does expose /responses, but this pair has never been run.",
+      "kimiNative": "Its own engine. A 402 here is engine billing only.",
+      "kimiGlm": "Works on the terminal. Inside nassaj it waits on its config guard.",
+      "kimiAnthropic": "Technically established, but nassaj has no field for its key yet.",
+      "kimiDeepseek": "Catalogued; no field for a DeepSeek key here yet.",
+      "kimiZen": "Catalogued and bills against a Zen balance; no field for its key here yet.",
+      "agyClosed": "Antigravity resolves its own model inside its CLI and accepts no external engine.",
+      "cursorClosed": "Cursor resolves its own model server-side and accepts no external engine.",
+      "hermesUnverified": "Hermes has its own model layer; no engine pair has been examined."
+    },
+    "managedInVendors": "Managed in Settings → Vendors & credentials",
+    "managedInAccount": "Managed in this agent’s Account tab",
+    "openVendorAccount": "Open {{agent}}’s Account tab",
+    "delegateTool": "The delegate_to_vendor tool hands a subtask to {{vendors}} using their stored keys. Switch it off in the MCP Servers tab.",
+    "readyNote": "Credential stored, nothing blocking — just not run from nassaj yet."
+  },
+  "permissions": {
+    "title": "Permission Settings",
+    "skipPermissions": {
+      "label": "Skip permission prompts (use with caution)",
+      "claudeDescription": "Equivalent to --dangerously-skip-permissions flag",
+      "cursorDescription": "Equivalent to -f flag in Cursor CLI",
+      "activeWarning": "The permission prompt is disabled: tools and commands run without asking you."
+    },
+    "allowVendorDelegation": {
+      "label": "Allow delegating subtasks to other models",
+      "description": "Lets Claude hand a subtask to Kimi, DeepSeek, or GLM using your key. The Claude engine is unchanged. Off by default."
+    },
+    "allowedTools": {
+      "title": "Allowed Tools",
+      "description": "Tools that are automatically allowed without prompting for permission",
+      "placeholder": "e.g., \"Bash(git log:*)\" or \"Write\"",
+      "quickAdd": "Quick add common tools:",
+      "empty": "No allowed tools configured",
+      "addLabel": "Add an allowed tool"
+    },
+    "blockedTools": {
+      "title": "Blocked Tools",
+      "description": "Tools that are automatically blocked without prompting for permission",
+      "placeholder": "e.g., \"Bash(rm:*)\"",
+      "empty": "No blocked tools configured",
+      "addLabel": "Add a blocked tool"
+    },
+    "allowedCommands": {
+      "title": "Allowed Shell Commands",
+      "description": "Shell commands that are automatically allowed without prompting",
+      "placeholder": "e.g., \"Shell(ls)\" or \"Shell(git status)\"",
+      "quickAdd": "Quick add common commands:",
+      "empty": "No allowed commands configured",
+      "addLabel": "Add an allowed command"
+    },
+    "blockedCommands": {
+      "title": "Blocked Shell Commands",
+      "description": "Shell commands that are automatically blocked",
+      "placeholder": "e.g., \"Shell(rm -rf)\" or \"Shell(sudo)\"",
+      "empty": "No blocked commands configured",
+      "addLabel": "Add a blocked command"
+    },
+    "toolExamples": {
+      "title": "Tool Pattern Examples:",
+      "bashGitLog": "- Allow all git log commands",
+      "bashGitDiff": "- Allow all git diff commands",
+      "write": "- Allow all Write tool usage",
+      "bashRm": "- Block all rm commands (dangerous)"
+    },
+    "shellExamples": {
+      "title": "Shell Command Examples:",
+      "ls": "- Allow ls command",
+      "gitStatus": "- Allow git status",
+      "npmInstall": "- Allow npm install",
+      "rmRf": "- Block recursive delete"
+    },
+    "codex": {
+      "permissionMode": "Permission Mode",
+      "description": "Controls how Codex handles file modifications and command execution",
+      "modes": {
+        "default": {
+          "title": "Default",
+          "description": "Only trusted commands run automatically; others are skipped. Writing to the workspace is allowed."
+        },
+        "acceptEdits": {
+          "title": "Accept Edits",
+          "description": "All commands run automatically within the workspace. Full auto mode with sandboxed execution."
+        },
+        "bypassPermissions": {
+          "title": "Bypass Permissions",
+          "description": "All commands run with no approval prompt, inside the workspace, network off."
+        }
+      },
+      "technicalDetails": "Technical details",
+      "technicalInfo": {
+        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted, network access OFF. Trusted commands: cat, cd, grep, head, ls, pwd, tail, git status/log/diff/show, find (without -exec), etc.",
+        "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never, network access OFF. All commands auto-execute within project directory.",
+        "bypassPermissions": "sandboxMode=workspace-write, approvalPolicy=never, network OFF. Full disk/network access requires the CODEX_ALLOW_FULL_ACCESS flag, which is off.",
+        "overrideNote": "Override per session from the mode button in the chat."
+      },
+      "modesShort": {
+        "default": "Trusted",
+        "acceptEdits": "Workspace",
+        "bypassPermissions": "Bypass"
+      }
+    },
+    "antigravity": {
+      "title": "Permission Settings",
+      "description": "agy permissions are configured inside the CLI itself, not here.",
+      "skipPermissions": {
+        "label": "Permission prompts are skipped",
+        "description": "agy runs with --dangerously-skip-permissions, so no approvals are requested."
+      },
+      "cliNote": {
+        "title": "Configure permissions in agy",
+        "description": ""
+      }
+    },
+    "actions": {
+      "add": "Add",
+      "remove": "Remove"
+    },
+    "modeRowLabel": "Mode",
+    "modesExplainer": "What each mode allows"
+  },
+  "mcpServers": {
+    "title": "MCP Servers",
+    "description": {
+      "claude": "Model Context Protocol servers provide additional tools and data sources to Claude",
+      "cursor": "Model Context Protocol servers provide additional tools and data sources to Cursor",
+      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
+      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode",
+      "gemini": "Model Context Protocol servers provide additional tools and data sources to Gemini"
+    },
+    "addButton": "Add MCP Server",
+    "empty": "No MCP servers configured",
+    "serverType": "Type",
+    "loading": "Loading MCP servers…",
+    "refreshingScopes": "Refreshing project scopes…",
+    "list": {
+      "title": "Configured servers"
+    },
+    "addGlobal": {
+      "label": "Global MCP server",
+      "description": "One common stdio or HTTP server, written only to providers compatible with the selected scope and transport.",
+      "action": "Add global server",
+      "modalTitle": "Add global MCP server",
+      "modalDescription": "Adds this MCP server to compatible provider configs for the selected scope and transport. Only stdio and HTTP transports are supported."
+    },
+    "addProvider": {
+      "label": "{{provider}} MCP server",
+      "description": "Changes {{provider}} only.",
+      "action": "Add {{provider}} server"
+    },
+    "teamConfigs": {
+      "title": "Team MCP configs",
+      "description": "Share MCP server configurations across your team. Everyone stays in sync automatically."
+    },
+    "scope": {
+      "local": "local",
+      "user": "user"
+    },
+    "config": {
+      "command": "Command",
+      "url": "URL",
+      "args": "Args",
+      "environment": "Environment",
+      "cwd": "Working directory",
+      "envVars": "Environment variables"
+    },
+    "tools": {
+      "title": "Tools",
+      "count": "({{count}}):",
+      "more": "+{{count}} more"
+    },
+    "actions": {
+      "edit": "Edit server",
+      "delete": "Delete server"
+    },
+    "help": {
+      "title": "About Codex MCP",
+      "description": ""
+    }
+  },
+  "commandBoardSettings": {
+    "title": "Command Board",
+    "description": "Control who can run Command Board actions and which actions are enabled. Actions run under the server owner's identity.",
+    "loading": "Loading…",
+    "loadError": "Failed to load settings",
+    "saved": "Settings saved",
+    "saveError": "Failed to save",
+    "save": "Save",
+    "saving": "Saving…",
+    "roles": {
+      "title": "Role access",
+      "description": "Who can run Command Board actions. The owner is always enabled.",
+      "ownerLocked": "Always enabled (cannot be locked out)",
+      "ownerSelectableHint": "Choose a tier from the four above — owner cannot lock themselves out",
+      "ownerNoneDisabled": "Owner cannot lock themselves out",
+      "laterPhase": "Available in a later phase",
+      "generalHint": "\"Custom commands\" only adds value if you have custom commands defined below.",
+      "customHint": "\"Custom commands\" only adds value if you have custom commands defined below.",
+      "legendHint": "Tiers are cumulative — each includes all tiers below it"
+    },
+    "roleNames": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "User"
+    },
+    "modes": {
+      "none": "Disabled",
+      "noneDesc": "No Command Board access for this role.",
+      "safe": "Safe list",
+      "safeDesc": "Can run built-in safe-list actions only.",
+      "custom": "Custom commands",
+      "customDesc": "Safe list + custom commands you define (restricted to a frozen executable allowlist in code — no free shell).",
+      "raw": "Run any command",
+      "rawDesc": "All tiers above + run any free shell text. Owner only. Requires arming the main switch.",
+      "rawDangerHint": "Dangerous tier — owner only",
+      "rawUnarmedNote": "Dangerous tier is unarmed — selecting it here has no effect until you arm the switch below",
+      "general": "Custom commands",
+      "generalDesc": "Safe list + custom commands you define (restricted to a frozen executable allowlist in code — no free shell)."
+    },
+    "actions": {
+      "title": "Available actions",
+      "description": "Enable or disable each safe-list action.",
+      "empty": "No actions."
+    },
+    "customCommands": {
+      "title": "Custom Commands",
+      "description": "Define one-click commands. cmd is restricted to a frozen executable allowlist in code — cannot be widened from the UI.",
+      "allowlistNote": "Currently: npm run <existing-script> only. Widening requires a code change and review.",
+      "counter": "{{count}} / {{max}} commands",
+      "empty": "No custom commands yet.",
+      "addCommand": "Add command",
+      "loadError": "Failed to load custom commands",
+      "invalidRow": "Command is currently invalid",
+      "invalidRowReason": "Reason: {{error}}",
+      "form": {
+        "title": "Define custom command",
+        "editTitle": "Edit custom command",
+        "key": "Key",
+        "keyHint": "Starts with lowercase letter — letters/digits/-/_ only",
+        "label": "Display name",
+        "labelHint": "What appears in the Command Board",
+        "cmd": "Executable",
+        "cmdHint": "Currently: npm only (frozen allowlist in code)",
+        "args": "Arguments",
+        "argsHint": "For npm: first field 'run', second field script name",
+        "addArg": "+ arg",
+        "removeArg": "Remove",
+        "minRole": "Minimum role",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saving": "Saving…"
+      },
+      "deleteConfirm": "Delete command «{{key}}»?",
+      "deleteConfirmYes": "Delete",
+      "deleteConfirmNo": "Cancel",
+      "errors": {
+        "invalid_key": "Invalid key",
+        "key_reserved": "Key is reserved by a static action",
+        "key_exists": "Key already exists",
+        "invalid_label": "Invalid label",
+        "invalid_min_role": "Invalid role",
+        "interpreter_forbidden": "Executable is a forbidden interpreter/shell — rejected in code",
+        "cmd_not_allowlisted": "Executable not in the permitted allowlist",
+        "npm_script_missing": "Script not found in package.json",
+        "denylisted": "Script is denylisted (build/dev/release…)",
+        "flag_arg_forbidden": "Arguments must not start with «-»",
+        "invalid_arg": "Invalid argument",
+        "too_many_commands": "Maximum reached (20 commands)",
+        "not_found": "Command not found",
+        "internal": "Internal server error"
+      }
+    },
+    "rawExec": {
+      "toggle": {
+        "title": "Dangerous tier — Run any command",
+        "description": "Selecting this tier in the matrix above is not enough — you must arm the main switch here. Turning it off immediately drops «Run any command» from all roles.",
+        "warningTitle": "Security warning — read before arming",
+        "warning": "This feature allows running any shell command on the server with the service user's privileges. There is no allowlist — the only safeguard is your personal, character-by-character review of each command before pressing Execute. A single wrong or unauthorized command can corrupt data or take the server down.",
+        "ackLabel": "I understand this grants full shell access to the server and I accept full responsibility",
+        "confirmEnable": "Confirm arming",
+        "cancelEnable": "Cancel",
+        "enableButton": "Arm",
+        "disableButton": "Main switch off (drops tier from all roles)",
+        "statusEnabled": "Armed",
+        "statusDisabled": "Unarmed",
+        "notGeneralMode": "Requires the owner's role to be set to «Run any command» in the matrix above.",
+        "blocked_is_platform": "Arming is unavailable in platform mode — the environment voids the human-review guarantee."
+      },
+      "queue": {
+        "title": "Queue a command",
+        "description": "A command added here waits in the sidebar command board and is reviewed there. Nothing runs automatically.",
+        "addPlaceholder": "ls -la /tmp",
+        "addButton": "Add",
+        "counter": "{{count}} / {{max}} commands",
+        "addError": {
+          "empty_command": "Command cannot be empty",
+          "command_too_long": "Command too long (max 4096 characters)",
+          "forbidden_control_char": "Command contains a forbidden control character at position {{position}}",
+          "too_many_commands": "Queue is full (max 20 commands)",
+          "raw_exec_disabled": "Run-any-command feature is disabled",
+          "config_denied": "Owner's role tier does not permit this — set tier to «Run any command» and arm the main switch.",
+          "invalid_command": "Invalid command",
+          "internal": "Internal server error",
+          "carriage_return_forbidden": "Command contains \\r (Windows line endings) — paste again using LF",
+          "too_many_lines": "Command exceeds 100 lines",
+          "denied_command": "Blocked by a governance rule ({{rule}}): in this form the guard cannot tell a safe target from the server the board runs on or its gateway. If you have verified the target is something else, run it in your own terminal.",
+          "denied_command_fatal": "Blocked ({{rule}}): this form takes down the server the board runs on, or does not spare it. To restart it use bash scripts/safe-restart.sh --exec; for anything else, run it deliberately from your own terminal."
+        },
+        "waitingElsewhere": "{{count}} command(s) waiting in the sidebar command board.",
+        "reviewedElsewhere": "Queued commands appear in the sidebar command board, where they are reviewed and run.",
+        "addLabel": "Command"
+      },
+      "dialog": {
+        "outcomeUnverified": "Execution outcome could not be verified. Review the request status before retrying.",
+        "title": "Review command before executing",
+        "subtitle": "These bytes will be executed verbatim on the server. This cannot be undone.",
+        "commandLabel": "Command that will be executed",
+        "lengthInfo": "Length: {{len}} characters",
+        "clientDigestMismatch": "Digest mismatch — the displayed command does not match what is stored. Execution blocked.",
+        "ackLabel": "I have reviewed this command character by character and accept full responsibility for its execution",
+        "execute": "Execute",
+        "cancel": "Cancel",
+        "executing": "Executing…",
+        "digestMismatch": "Command changed after it was displayed — execution cancelled. Reloading queue.",
+        "notFound": "Command no longer exists — it may have been executed or dismissed in another session.",
+        "actionInFlight": "Another command is already running. Wait for it to finish.",
+        "execFailed": "Failed to launch the command on the server.",
+        "timeout": "Command timed out (120 seconds).",
+        "forbidden_control_char": "A forbidden control character was detected in the stored command — execution cancelled.",
+        "internal": "Internal server error.",
+        "result": {
+          "title": "Execution result",
+          "exitCode": "Exit code: {{code}}",
+          "stdout": "Output (stdout)",
+          "stderrChannel": "Diagnostic output (stderr)",
+          "stderrChannelHint": "Many command-line tools write their normal progress and result reports to this channel. Judge the run by the exit code above, not by the presence of text here.",
+          "partialExit": "This ran several commands, and the exit code covers only the last of them — an earlier one may have failed. Read the output below.",
+          "signalKilled": "The command was terminated by a signal and returned no status — a timeout or an external kill.",
+          "truncated": "Output truncated — limit: 64 KB",
+          "noOutput": "(no output)",
+          "close": "Close"
+        },
+        "lineInfo": "{{count}} line(s)",
+        "executionTarget": "Execution target: local Nassaj server — service user «nassaj»",
+        "executionTargetWarn": "Commands written for another machine (e.g. a VM or remote server) must not be executed here.",
+        "digest_mismatch": "The command changed after it was displayed — execution cancelled. Reloading the list.",
+        "not_found": "The command no longer exists — it may have been run or dismissed elsewhere.",
+        "action_in_flight": "Another command is running. Wait for it to finish.",
+        "exec_failed": "Failed to launch the command on the server.",
+        "raw_exec_disabled": "The master switch for the dangerous tier is off — arm it in Command Board settings.",
+        "raw_exec_blocked": "The dangerous tier is blocked in this environment and cannot be armed.",
+        "config_denied": "Your role does not hold the \"Run any command\" tier.",
+        "unauthenticated": "Your session expired — sign in again.",
+        "clientDigestUnavailable": "The local integrity check could not run in this context (insecure origin). The server still binds the digest — read the command carefully.",
+        "restarting": "The command ran and is restarting the server, so no reply could return. Waiting for it to come back…",
+        "restartSuccess": "The server is back. The command completed.",
+        "audit_unavailable": "Refused: the audit record could not be written, so nothing was run. Raw execution is never left unlogged.",
+        "denied_command": "Blocked by a governance rule ({{rule}}): in this form the guard cannot tell a safe target from the server the board runs on or its gateway. If you have verified the target is something else, run it in your own terminal.",
+        "denied_command_fatal": "Blocked ({{rule}}): this form takes down the server the board runs on, or does not spare it. To restart it use bash scripts/safe-restart.sh --exec; for anything else, run it deliberately from your own terminal.",
+        "requestedBy": "Queued by: {{name}}",
+        "unattributed": "Origin not recorded — no requester was logged for this command",
+        "sudoNeedsStdinFlag": "This command calls sudo without -S, so sudo will not read the password and will fail with «a terminal is required». Re-queue it as «sudo -S …» (for several sudo calls, start with «sudo -S -v»).",
+        "invalid_password": "Invalid password value.",
+        "empty_password": "The password is empty.",
+        "password_too_long": "The password exceeds the 256-character limit.",
+        "password_control_char": "The password contains a control character (a newline, for example) — retype it on one line.",
+        "password_not_applicable": "Password refused: this command does not invoke sudo."
+      }
+    },
+    "modesShort": {
+      "none": "Off",
+      "safe": "Safe",
+      "custom": "Custom",
+      "raw": "Any"
+    },
+    "savesImmediately": "Saves immediately",
+    "saveScope": "Saves \"Role access\" and \"Available actions\" only",
+    "saveScopeDirty": "Unsaved changes in \"Role access\" or \"Available actions\""
+  },
+  "subscriptions": {
+    "title": "Active subscriptions",
+    "empty": "No authenticated subscriptions",
+    "loading": "Loading…",
+    "error": "Could not load subscriptions",
+    "monthToDate": "This cycle",
+    "cycleSince": "Since {{date}}",
+    "anchorLabel": "Cycle start day",
+    "anchorHint": "No provider exposes the billing date — set it yourself",
+    "apiEquivalent": "API-equivalent value on a subscription — not an amount billed",
+    "billed": "Billed",
+    "unavailable": "Not available",
+    "partial": "Partial",
+    "pricesAsOf": "Prices as of {{date}}",
+    "byModel": "By model",
+    "harnessTotal": "Harness total",
+    "showBreakdown": "Show model breakdown",
+    "hideBreakdown": "Hide model breakdown",
+    "unpricedModel": "No official price",
+    "anchorSource": {
+      "detected": "From your subscription data",
+      "derived": "Estimated from earliest usage",
+      "manual": "Set by you",
+      "unknown": "Calendar month — no subscription date found"
+    },
+    "viaHarness": "via {{harness}}",
+    "subscriptionTotal": "Subscription total",
+    "assumedPrice": "Estimated price — {{models}} has no published rate",
+    "balanceRemaining": "Remaining balance",
+    "balanceDepleted": "Balance exhausted — the provider will refuse new requests"
+  },
+  "vendors": {
+    "qwenManaged": "Coding Plan or Token Plan · stored in the encrypted nassaj vault",
+    "connectQwen": "Connect Qwen",
+    "title": "Vendors & credentials",
+    "description": "Enter each company's key once; nassaj delivers it everywhere it is read.",
+    "tabDescription": "Every credential nassaj holds, in one list.",
+    "checking": "Checking…",
+    "managedInAgentAccount": "Managed in {{agent}}’s Account tab",
+    "managedInVendorsTab": "Managed in Vendors & credentials",
+    "tabDescriptionHome": "Every API key nassaj holds, entered here and only here. Each company takes one key; the places it is written to are the boxes you tick inside its card.",
+    "usedBy": "Used by",
+    "listSeparator": " · ",
+    "kind": {
+      "apiKey": "API key",
+      "subscription": "Subscription"
+    },
+    "subscriptionNote": "Signed in through {{vendor}}'s own CLI; nassaj never holds the token.",
+    "status": {
+      "checking": "Checking…",
+      "stored": "A key is stored",
+      "missing": "No key stored"
+    },
+    "getKey": "Get a key",
+    "inputLabel": "{{vendor}} API key",
+    "placeholder": "Paste API key",
+    "storedInLine": "Stored in: {{places}}",
+    "placeholderConfigured": "•••••••• (a key is stored)",
+    "save": "Save {{vendor}} key",
+    "saveShort": "Save",
+    "remove": "Remove {{vendor}} key",
+    "removeShort": "Remove",
+    "saved": "Credential saved.",
+    "removed": "Credential removed.",
+    "storedNote": "Stored encrypted for your account only. Replace it by saving a new one.",
+    "delivery": {
+      "aes": "Stored encrypted under your account only; applies to your next message, not a run in flight.",
+      "cliFile": "Written as-is into that agent's own settings file — nassaj does not encrypt it — and applies to your next message, not a run in flight.",
+      "mixed": "Delivered to each place in the form it reads; applies to your next message, not a run in flight."
+    },
+    "consumer": {
+      "claudeBody": "the Claude agent",
+      "codexBody": "the Codex agent",
+      "kimiBody": "the Kimi agent",
+      "kimiEngineOnClaude": "the Kimi engine under Claude",
+      "glmEngineOnClaude": "the GLM engine under Claude",
+      "glmCarrierInOpenCode": "the GLM carrier inside OpenCode",
+      "deepseekBody": "the DeepSeek agent",
+      "deepseekEngineOnClaude": "the DeepSeek engine under Claude",
+      "anthropicInOpenCode": "Anthropic models inside OpenCode",
+      "openaiInOpenCode": "OpenAI models inside OpenCode",
+      "openrouterInOpenCode": "OpenRouter models inside OpenCode",
+      "delegateTool": "the delegate_to_vendor tool under Claude"
+    },
+    "notWritable": {
+      "sharedRequiresAdmin": "Shared credential — an owner or admin sets it.",
+      "generic": "You do not have permission to change this credential."
+    },
+    "context": {
+      "claudeAgent": "the Claude agent",
+      "codexAgent": "the Codex agent",
+      "claudeEngine": "the Claude engine",
+      "inOpenCode": "inside OpenCode"
+    },
+    "company": {
+      "label": "{{company}} API key",
+      "description": "Enter it once; written to all {{count}} places in the form each expects.",
+      "showSlots": "Set each of the {{count}} places separately",
+      "hideSlots": "Hide per-slot setup",
+      "detailToggle": "Per-place setup",
+      "subscriptionNotice": "{{slots}} is signed in by subscription and will keep it — the key goes to the other places only.",
+      "outcome": {
+        "written": "saved",
+        "subscription": "left on its subscription — a key here would switch it to paid API billing",
+        "subscriptionToken": "left on its subscription — it is already signed in",
+        "forbidden": "shared across the team — an owner or admin must set this one",
+        "failed": "could not be saved"
+      },
+      "notWritable": "Shared credential — an owner or admin sets it.",
+      "subscriptionOverride": "You ticked {{slots}}, which is signed in by subscription right now. Saving writes an API key there, and that agent reads the key before the subscription — so the plan stops being used and billing moves to metered API usage. Untick it to keep the subscription.",
+      "subscriptionTokenOverride": "The value in the field is a subscription token, not an API key. Saving it to {{slots}} stores the subscription itself — it does not move billing to metered API usage.",
+      "subscriptionTokenIntoKeySlot": "You ticked {{slots}}, which only ever holds an API key. Saving writes the subscription token there as if it were a key — routing a personal subscription through that place is not allowed. Untick it."
+    },
+    "slots": {
+      "legend": "Where should this key go? Untick a place to leave it untouched.",
+      "legendShort": "Written to",
+      "stored": "Key stored",
+      "missing": "No key",
+      "subscriptionHint": "Signed in by subscription right now. Left unticked it keeps that plan — ticking it writes an API key here and switches this place to metered billing.",
+      "none": "Tick at least one place for the key to be saved into.",
+      "otherAgent": "Another agent’s place",
+      "writtenIn": "Written inside {{place}}",
+      "writtenInNote": "The same {{company}} key, in the file {{place}} reads.",
+      "writtenInNoteAes": "The same {{company}} key, kept in nassaj’s encrypted store that {{place}} reads."
+    },
+    "agentSection": {
+      "title": "{{company}} credential",
+      "description": "One {{company}} key, entered once. It is written to the places you tick below.",
+      "descriptionShared": "One {{company}} key, written to the places ticked below — one of which is a file another agent reads."
+    },
+    "removeFrom": "Remove the stored key from {{slot}}"
+  },
+  "providerLogin": {
+    "title": {
+      "claude": "Claude CLI Login",
+      "cursor": "Cursor CLI Login",
+      "codex": "Codex CLI Login",
+      "opencode": "OpenCode CLI Login",
+      "kimi": "Kimi Code CLI Login",
+      "hermes": "Hermes Agent",
+      "antigravity": "Antigravity (agy) Configuration",
+      "gemini": "Gemini CLI Configuration",
+      "qwen": "Connect Qwen",
+      "generic": "{{provider}} CLI Configuration"
+    },
+    "close": "Close login modal",
+    "action": {
+      "close": "Close",
+      "retry": "Run it again"
+    },
+    "shield": {
+      "action": "Take the keyboard and start typing in the terminal",
+      "chip": "Click here when the prompt appears, then type"
+    },
+    "status": {
+      "preparing": "Starting the sign-in command. The keyboard is on hold until you click the terminal, so early keystrokes cannot reach it as stray characters.",
+      "live": "The terminal has your keyboard. Follow the prompts above.",
+      "succeeded": "Sign-in finished.",
+      "succeededDetail": "The process exited normally. Close this window; the account card will show the new state.",
+      "failed": "Sign-in did not complete.",
+      "failedDetail": "The process exited with code {{code}}. Read the terminal output above for the reason — a rejected login and a plan that does not cover this CLI both end here. You can run it again, or close and set an API key instead.",
+      "blocked": "The terminal session could not start.",
+      "blockedUpdateGate": "A source-update maintenance window is holding the writer lock, so no new terminal can start right now. Try again once it clears.",
+      "blockedForbidden": "Your role may not run this command in a terminal. Ask an administrator, or close and set an API key instead.",
+      "blockedGeneric": "The server refused to open this terminal.",
+      "blockedServerText": "The server said:",
+      "blockedCode": "Reason code:"
+    },
+    "deviceAuth": {
+      "title": "Device Authorization",
+      "claude": {
+        "title": "Two steps: authorize, then paste the token",
+        "intro": "The terminal below runs <cmd>claude setup-token</cmd>. Follow it to authorize in your own browser — no localhost required. When it finishes it prints a token starting with <cmd>sk-ant-oat01-</cmd>.",
+        "paste": "That token is shown <b>once only</b> and nassaj does not capture it from the terminal. Copy it before closing this dialog, then paste it into the <b>Setup token</b> field on the Claude card behind this dialog (Settings → Agents → Claude → Account) and press Save token."
+      },
+      "codex": {
+        "intro": "The terminal below will display a link and a device code. Open the link in your browser and enter the code to authorize Codex — no localhost required.",
+        "retry": "Enable device code authorization for Codex in ChatGPT Security Settings, then run <cmd>codex login --device-auth</cmd> again."
+      },
+      "kimi": {
+        "intro": "The terminal below runs <cmd>kimi login</cmd>, which prints a link and a device code. Open the link in your browser and enter the code to link your Kimi account — no localhost required.",
+        "subscription": "This links a Kimi <b>subscription</b>. If you would rather use a metered API key, skip this and set the key in Settings → Vendors & credentials instead."
+      }
+    },
+    "qwen": {
+      "intro": "Enter the Alibaba Cloud key issued for your Coding Plan or Token Plan. nassaj stores it encrypted for your account.",
+      "planLabel": "Plan type",
+      "regionLabel": "Service region",
+      "international": "International",
+      "internationalHint": "For most accounts outside mainland China",
+      "china": "Beijing",
+      "chinaHint": "For mainland China ModelStudio accounts",
+      "keyLabel": "Access key",
+      "encrypted": "Stored in the encrypted nassaj vault; never written to Qwen settings.",
+      "save": "Save and connect",
+      "saving": "Saving securely…",
+      "cancel": "Cancel",
+      "done": "Done",
+      "error": "The credential could not be saved. Check the plan, region, and key, then try again.",
+      "successTitle": "Qwen is connected",
+      "successDescription": "The encrypted credential will be used on the next Qwen message."
+    },
+    "gemini": {
+      "title": "Setup Gemini API Access",
+      "description": "The Gemini CLI requires an API key to function. Configure it in your terminal first.",
+      "step1": "Get your API key",
+      "step2": "Run configuration",
+      "step2Hint": "Open your terminal and run:",
+      "done": "Done"
+    }
+  },
+  "actionRequired": "Action required",
+  "error": "Error",
+  "stop": "Stop",
+  "gemini": {
+    "modesShort": {
+      "default": "Ask",
+      "autoEdit": "Auto-edit",
+      "yolo": "YOLO"
+    }
+  },
+  "tmpfsCap": {
+    "title": "Shared memory cap (/tmp)",
+    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "desiredLabel": "Desired cap",
+    "capped": "Capped",
+    "uncapped": "No cap",
+    "drift": "Applied cap differs from the saved one",
+    "manualNote": "Applying the cap is a command you run yourself in your terminal.",
+    "fstabNote": "Add it to /etc/fstab to survive reboot",
+    "copy": "Copy",
+    "copied": "Copied",
+    "loadFailed": "Could not load the current cap",
+    "saveFailed": "Could not save the cap",
+    "saveForbidden": "Owner only"
+  },
+  "about": {
+    "tagline": "Agent workspace",
+    "githubLink": "{{repo}} on GitHub",
+    "attribution": {
+      "title": "Upstream attribution",
+      "forkOf": "nassaj is a fork of <upstream>claudecodeui</upstream> by siteboon, licensed under <license>AGPL-3.0</license>.",
+      "networkSource": "Per AGPL-3.0 section 13, the source code served over the network is available at:"
+    },
+    "license": "Licensed under AGPL-3.0 — source available at:"
+  },
+  "voiceTranscription": {
+    "title": "Accurate voice transcription",
+    "description": "Turns your recording into text through an OpenAI-compatible endpoint instead of the browser’s own speech recognition. Off by default, and inert without a key.",
+    "loading": "Reading the setting…",
+    "loadFailed": "The transcription settings could not be read, so every control here is disabled. That does not mean the feature is off — its state is unknown.",
+    "toggleLabel": "Enable accurate transcription",
+    "stateOn": "The microphone sends the recording to the endpoint set below and returns its text.",
+    "stateOff": "The microphone stays on the browser’s recognition, and the transcription routes answer 404.",
+    "ownerOnly": "Only the owner can change this switch and the endpoint. You can still store a key for your own account.",
+    "saveFailed": "The setting could not be saved. The previous value still applies.",
+    "scope": {
+      "label": "Where the key is stored",
+      "system": "The whole installation (every member)",
+      "user": "My account only",
+      "systemBlocked": "Only an owner or an admin can manage the installation key.",
+      "systemNotice": "Every member will spend this key, on one bill. Pick “My account only” if it is meant for you alone."
+    },
+    "key": {
+      "label": "Transcription service key",
+      "hint": "Stored and never shown again. Replacing it is the only way to revoke it.",
+      "placeholder": "Paste the key",
+      "placeholderStored": "•••••••• (a key is stored)",
+      "save": "Save",
+      "saveAria": "Save the transcription key",
+      "saveFailed": "The key could not be saved, and nothing was stored.",
+      "saved": "Key saved in scope: {{scope}}.",
+      "delete": "Remove",
+      "deleteAria": "Remove the transcription key from the {{scope}} scope",
+      "deleteFailed": "The removal failed, and the key is still stored.",
+      "stored": "A key is stored",
+      "missing": "No key",
+      "noneNotice": "No scope holds a key, so accurate transcription does not work yet."
+    },
+    "endpoint": {
+      "label": "Endpoint, model and size cap",
+      "hint": "Any OpenAI-compatible endpoint works — Groq at https://api.groq.com/openai/v1, for example. https is required, except for a loopback address (127.0.0.1), which lets you point at an engine running on this machine.",
+      "readOnly": "Set by the owner. Your key is sent to this endpoint.",
+      "save": "Save",
+      "saveAria": "Save the endpoint, model and size cap"
+    },
+    "model": {
+      "label": "Model"
+    },
+    "maxMb": {
+      "label": "Largest recording (MB)",
+      "hint": "The server enforces a hard {{max}} MB cap whatever you type — the recording is held whole in memory."
+    },
+    "languageNote": "Choosing an engine is a language decision. A self-hosted Whisper on CPU transcribes English very well and Arabic poorly — for Arabic, a hosted endpoint is markedly more accurate."
+  },
+  "connectorsSettings": {
+    "title": "Connectors",
+    "m5": {
+      "title": "Installation checklist",
+      "description": "One setup path for this installation. API-key services do not depend on the public OAuth address.",
+      "originInvalid": "Enter one exact HTTPS origin, without a path, query, or trailing slash.",
+      "originSaveFailed": "The public address could not be saved. Refresh the checklist and try again.",
+      "originTitle": "1. Canonical public address",
+      "originDescription": "Used only for OAuth callbacks. It never controls API-key availability.",
+      "configured": "Configured",
+      "requiredForOauth": "Required for OAuth",
+      "notRequiredYet": "Not required yet",
+      "publicOrigin": "Public origin",
+      "updateOrigin": "Update public address",
+      "saveOrigin": "Save public address",
+      "providersTitle": "2. Provider applications",
+      "providersDescription": "Configure an OAuth application only for a provider you choose to enable.",
+      "noProviderSetup": "No provider setup needed",
+      "configureProvider": "Configure provider",
+      "readinessTitle": "3. Service readiness",
+      "readinessDescription": "These states come from the installation catalog and active production manifest.",
+      "inactiveTitle": "Waiting, paused, or inactive services",
+      "states": {
+        "connect_now": { "label": "Ready to connect", "detail": "The certified production path is ready." },
+        "connected": { "label": "Connected", "detail": "An account is connected and available." },
+        "owner_setup_required": { "label": "Provider setup required", "detail": "Complete provider setup once for this installation." },
+        "installation_origin_required": { "label": "Public address required", "detail": "OAuth needs one canonical public address." },
+        "coming_soon_uncertified": { "label": "Awaiting certification", "detail": "No certified production manifest is active yet." },
+        "temporarily_disabled": { "label": "Temporarily disabled", "detail": "The certified path is paused; no owner action is required." },
+        "migration_required": { "label": "Migration review required", "detail": "Review legacy material before this service can be used." },
+        "saved_inactive": { "label": "Saved — inactive", "detail": "Stored material remains isolated from every model body." }
+      }
+    },
+    "description": "Configure a platform once for eligible model bodies. Availability applies to the next session unless a runtime probe says otherwise.",
+    "loading": "Loading…",
+    "connected": "Linked accounts",
+    "addPlatform": "Add a platform",
+    "addAccount": "Add account",
+    "accountLabel": "Account name",
+    "accountLabelHint": "Optional for the first account; use a short name such as Work or Personal.",
+    "accountLabelRequired": "Give this additional account a unique name so it stays distinguishable.",
+    "defaultAccount": "Main account",
+    "emptyHint": "No platform linked yet — pick one to start.",
+    "alreadyConnected": "Configured",
+    "noKey": "No key",
+    "modeQuestion": "This key is…",
+    "modePersonal": "Mine only",
+    "modePersonalDetail": "Used only in my sessions; nobody else receives it.",
+    "modeShared": "The team",
+    "modeSharedDetail": "Every nassaj member uses it. Revoking means rotating the key at the platform.",
+    "modeSharedForbidden": "This platform requires individual sign-in, so it cannot be shared.",
+    "sharedUnavailableIsolation": "Team sharing is unavailable until account isolation is complete.",
+    "legacySharedReadOnly": "This legacy team connector is shown for visibility only. Editing and re-linking stay unavailable until account isolation is complete.",
+    "sharingIsManager": "Sharing with the team is set by an owner or admin.",
+    "keyLabel": "Key",
+    "keyStoredNote": "Stored encrypted; never shown again.",
+    "whereToGetKey": "Where do I get the key?",
+    "connect": "Connect",
+    "continue": "Continue",
+    "cancel": "Cancel",
+    "rotate": "Rotate key",
+    "addKey": "Add key",
+    "rotatePlaceholder": "New key (rotate)",
+    "whereTheyWork": "Where these keys work",
+    "personalWorksWith": "A personal key works with: {{list}}.",
+    "sharedOnlyWorksWith": "And with {{list}} only when the key is shared, since their config is one file everyone reads.",
+    "unsupportedNote": "Providers that cannot run external tools are omitted — they cannot use connectors at all.",
+    "unofficial": "Unofficial",
+    "platformInfo": "About {{name}}",
+    "unofficialNote": "A third party publishes this server and receives your key.",
+    "whoPublishes": "Who publishes this server?",
+    "none": "No platforms connected yet.",
+    "loadFailed": "Could not load connectors ({{status}})",
+    "requestFailed": "Request failed ({{status}})",
+    "timedOut": "The server did not respond. Check that it is running, then retry.",
+    "retry": "Retry",
+    "oauthTitle": "This platform links by sign-in, not a key",
+    "oauthHowTo": "Add it now, then press Link account: you approve once on the platform and come straight back.",
+    "oauthUnavailable": "Sign-in is temporarily unavailable. Ask the operator to finish server setup.",
+    "setupNeededOwnerTitle": "{{count}} sign-in provider groups need setup",
+    "setupNeededOwnerHint": "Set these provider applications up once for this installation. No account or secret is requested on this page yet.",
+    "setupNeededMemberTitle": "{{count}} sign-in provider groups are not available yet",
+    "setupNeededMemberHint": "The installation owner is preparing these services. Ready platforms remain available above.",
+    "reviewSetupNeeded": "Review",
+    "setupNeededSection": "Needs setup",
+    "googleProvider": "Google",
+    "oauthLinked": "The OAuth account is linked. Tool availability is reported above for each engine.",
+    "accountLinked": "Account linked",
+    "toolsByEngine": "Tools by engine",
+    "retryPlacement": "Retry tool setup",
+    "reconcileRequested": "Tool setup retried for {{name}}",
+    "placement": {
+      "available": "Tools ready for the next session",
+      "notConfigured": "Account not linked",
+      "paused": "Tool setup paused",
+      "untracked": "Tool setup not tracked",
+      "pending": "Tool setup pending",
+      "reconciling": "Setting up tools…",
+      "partial": "Tools ready on some engines",
+      "degraded": "Tool setup needs attention",
+      "blocked": "Tool setup blocked"
+    },
+    "placementNote": {
+      "available": "The tools are configured for new sessions.",
+      "notConfigured": "Link the account before tools can be configured.",
+      "paused": "This connector is paused, so its tools are not being configured.",
+      "untracked": "The account is linked, but no tool-placement record exists yet.",
+      "pending": "The account is linked. Tool setup is waiting for its first verified pass.",
+      "reconciling": "The account is linked and tool setup is in progress.",
+      "partial": "The account is linked, but only some required engines have the tools.",
+      "degraded": "The account is linked, but tool setup did not verify successfully.",
+      "blocked": "The account is linked, but the server blocked tool setup until its reported cause is cleared."
+    },
+    "target": {
+      "claude": "Claude",
+      "codex": "Codex"
+    },
+    "targetState": {
+      "healthy": "Ready",
+      "blocked": "Blocked",
+      "degraded": "Needs attention",
+      "working": "In progress",
+      "untracked": "Not tracked",
+      "pending": "Pending"
+    },
+    "availableNextSession": "Available next session",
+    "availableNextSessionNote": "The configuration is written for new sessions. End or restart a live model session before expecting its tool list to change.",
+    "degraded": "Configured, unavailable",
+    "degradedNote": "The credential is retained, but placement or cleanup is incomplete. Retry the action; live sessions may still hold the previous tool until they end or restart.",
+    "oauthNotLinked": "Not linked yet — press Link account.",
+    "sharingTeamPossible": "One key serves the whole team",
+    "sharingKeyPerMember": "Each member needs their own key",
+    "sharingSignInPerMember": "Each member signs in themselves",
+    "credentialFromOperator": "Operator key (.env)",
+    "modeSharedForbiddenOauth": "The grant is your own sign-in and refreshes in your name, so it cannot be shared.",
+    "platforms": {
+      "tamara": {
+        "summary": "Order status and payment details from Tamara.",
+        "keyLabel": "Merchant API token",
+        "displayName": "Tamara"
+      },
+      "geidea": {
+        "summary": "Transactions, orders and payment links from Geidea.",
+        "keyLabel": "API password",
+        "displayName": "Geidea"
+      },
+      "google-calendar": {
+        "summary": "Read calendars, events and availability."
+      },
+      "google-drive": {
+        "summary": "Search files and read document content."
+      },
+      "gmail": {
+        "summary": "Search messages and read threads."
+      },
+      "notion": {
+        "summary": "Read and write Notion pages and databases."
+      },
+      "github": {
+        "summary": "Repositories, issues and pull requests.",
+        "keyLabel": "Personal Access Token"
+      },
+      "slack": {
+        "summary": "Read channels and send messages.",
+        "keyLabel": "Bot User OAuth Token"
+      },
+      "figma": {
+        "summary": "Read files, frames and components.",
+        "keyLabel": "Personal access token"
+      },
+      "canva": {
+        "summary": "Designs, folders and brand templates."
+      },
+      "wafeq": {
+        "summary": "Invoices, journal entries and accounting reports.",
+        "keyLabel": "Wafeq API key",
+        "displayName": "Wafeq"
+      },
+      "stripe": {
+        "summary": "Customers, subscriptions and payments.",
+        "keyLabel": "Restricted key (rk_…)"
+      },
+      "sentry": {
+        "summary": "Errors, releases and incident tracking."
+      },
+      "linear": {
+        "summary": "Issues, cycles and projects in Linear."
+      },
+      "atlassian": {
+        "summary": "Jira issues and Confluence pages.",
+        "displayName": "Atlassian"
+      },
+      "salla": {
+        "summary": "Products, orders and customers in a Salla store.",
+        "keyLabel": "OAuth access token",
+        "displayName": "Salla"
+      },
+      "infomaniak-mail": {
+        "summary": "Read and send mail, and manage mailboxes.",
+        "keyLabel": "API token",
+        "displayName": "Infomaniak Mail"
+      },
+      "infomaniak-contacts": {
+        "summary": "Address book and contacts.",
+        "keyLabel": "API token",
+        "displayName": "Infomaniak Contacts"
+      },
+      "viator": {
+        "summary": "Tours and activities through the Viator partner API.",
+        "keyLabel": "Partner API key"
+      },
+      "getyourguide": {
+        "summary": "Tours and activities through the GetYourGuide partner API.",
+        "keyLabel": "Partner API key"
+      }
+    },
+    "sharedKeyWarning": "Every nassaj member uses this key, without exception. Anything any member does on this platform is attributed to the account owner, and access cannot be withdrawn from one member — revoking means changing the key at the platform.",
+    "operatorKeyWarning": "This key comes from the server’s .env, so it serves every member automatically with nobody pasting anything. Everything they do on this platform is attributed to the account owner; to undo it, remove the line from .env and restart.",
+    "notVendorsHint": "These are outside platforms the models use as tools on your behalf. Keys for the model vendors that power nassaj itself live in “Vendors & credentials”.",
+    "oauthAppTitle": "This platform needs an app the nassaj operator registers once",
+    "oauthAppNeeded": "Operator app needed",
+    "oauthAppStepRegister": "Create an app in the platform’s developer portal",
+    "oauthAppStepRedirect": "Set its redirect URL to:",
+    "oauthAppStepEnv": "Put both values in nassaj’s .env:",
+    "oauthAppStepRestart": "Restart nassaj, then press Link account.",
+    "oauthAppReady": "Operator app configured — Link account is all that is left.",
+    "oauthAppSteps": "Setup steps",
+    "oauthAddAndLink": "Add and start linking",
+    "oauthLink": "Link account",
+    "oauthRelink": "Re-link",
+    "pendingLink": "Not linked yet",
+    "added": "Added platforms",
+    "remove": "Remove {{name}}",
+    "removeConfirm": "Remove {{name}} from future sessions and erase its credential? A live session may keep the old tool until it ends or restarts.",
+    "removeConfirmShared": "Remove {{name}} from every member's future sessions and erase its credential? Live sessions may keep the old tool until they end or restart.",
+    "removeConfirmAction": "Yes, remove",
+    "announceConnected": "{{name}} account linked; tool setup status refreshed",
+    "announceRemoved": "{{name}} removed",
+    "unfinished": "Unfinished attempts",
+    "scopeGroupLabel": "Key scope",
+    "scopeNotePersonal": "Used only in my sessions.",
+    "scopeNoteShared": "Every member uses it; access cannot be pulled from one — revoking means changing the key at the platform."
+  },
+  "agentUsage": {
+    "title": "Usage limits",
+    "claudeDescription": "Usage windows and extra usage credits for this Claude account",
+    "providerDescription": "Usage windows reported by the provider",
+    "noData": "This provider does not expose usage data for this account.",
+    "codexExtraCredits": "Extra Codex credits",
+    "unlimited": "Unlimited",
+    "creditUnits": "{{formattedCount}} credit units"
+  },
+  "credentialGrants": {
+    "heading": "Credential sharing",
+    "given": {
+      "title": "Your credential",
+      "placeholder": "Add a member…",
+      "noMembers": "No other members yet",
+      "noMatch": "No matching member",
+      "pairedNote": "Gemini and Antigravity are one login; sharing either shares both.",
+      "declined": "on their own",
+      "remove": "Stop sharing with {{member}}"
+    },
+    "received": {
+      "title": "Shared with you",
+      "ownOption": "My own credential",
+      "grantOption": "{{owner}}'s credential",
+      "inUse": "Running on {{owner}}'s credential: usage and limits are theirs, conversations are stored with theirs, terminals stay on your own."
+    }
+  },
+  "localModels": {
+    "title": "Local models",
+    "description": "Connect a model server running on Nassaj’s machine or another device.",
+    "activation": "Feature activation",
+    "enable": "Enable local models",
+    "disclosure": "This feature is experimental. Compatibility and capability verification have not been completed.",
+    "consent": "I acknowledge this disclosure and agree to enable the feature.",
+    "enabled": "Local models are enabled.",
+    "disabled": "Local models are disabled. An administrator can enable them.",
+    "servers": "Servers",
+    "add": "Add server",
+    "edit": "Edit server",
+    "name": "Server name",
+    "runtime": "Server software",
+    "baseUrl": "Server API URL",
+    "urlHint": "Use the OpenAI-compatible API URL, such as http://localhost:11434/v1. localhost refers to the machine running Nassaj.",
+    "apiKey": "API key — optional",
+    "optionalKey": "Leave blank if the server does not require a key.",
+    "keepKey": "Leave blank to keep the saved key.",
+    "removeKey": "Remove saved key",
+    "models": "Models",
+    "manualHint": "Add models manually without checking the connection. Context and output limits are optional model settings, not verification of actual server capacity.",
+    "modelId": "Model ID",
+    "modelName": "Display name — optional",
+    "contextWindow": "Context window (tokens)",
+    "maxOutput": "Maximum output (tokens)",
+    "unknown": "Unknown",
+    "addModel": "Add model manually",
+    "removeModel": "Remove model",
+    "save": "Save server",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "test": "Check connection and fetch models",
+    "delete": "Delete server",
+    "deleteConfirm": "Delete “{{name}}”? Its models will be unavailable for future sessions, and linked sessions may no longer resume. Running execution will not be stopped.",
+    "unchecked": "Connection not checked",
+    "connected": "Connected and fetched models; execution capabilities have not been tested.",
+    "keySaved": "Key saved",
+    "noKey": "No key",
+    "sharedBy": "Shared by user {{owner}}",
+    "noSharedModels": "No saved models. Ask the server owner to add or refresh them.",
+    "noModels": "No saved models. Edit the server to add them manually, or check the connection to fetch them.",
+    "empty": "No servers added yet.",
+    "loading": "Loading servers…",
+    "working": "Working…",
+    "saved": "Server saved without checking its connection.",
+    "removed": "Server deleted.",
+    "settingsSaved": "Activation setting saved.",
+    "loadFailed": "Could not load local-model settings. Try again.",
+    "saveFailed": "Could not save the server. Check the fields and try again.",
+    "removeFailed": "Could not delete the server. Try again.",
+    "connectionFailed": "Could not connect. Check the URL, key and running service, then try again.",
+    "settingsFailed": "Could not save the activation setting. Try again.",
+    "retry": "Retry",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "{{from}}–{{to}} of {{total}}",
+    "sharingDisclosure": "Sharing follows OpenCode grants. Running local models through a grant is currently deferred. Hiding a key in this interface does not isolate it from execution tools.",
+    "sharing": "Manage OpenCode sharing"
+  }
+}

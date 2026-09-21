@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    { "id": "runtime#ws.cursor", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'cursor')", "primitive": "runtime.provider_call", "expression": "spawnCursor" },
+    { "id": "runtime#ws.gemini", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'gemini')", "primitive": "runtime.provider_call", "expression": "spawnGemini" },
+    { "id": "runtime#ws.antigravity", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'antigravity')", "primitive": "runtime.provider_call", "expression": "spawnAntigravity" },
+    { "id": "runtime#ws.hermes", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'hermes')", "primitive": "runtime.provider_call", "expression": "spawnHermes" },
+    { "id": "runtime#ws.opencode", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'opencode')", "primitive": "runtime.provider_call", "expression": "spawnOpenCode" },
+    { "id": "runtime#ws.kimi", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'kimi')", "primitive": "runtime.provider_call", "expression": "spawnKimi" },
+    { "id": "runtime#ws.deepseek", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'deepseek')", "primitive": "runtime.provider_call", "expression": "spawnDeepSeek" },
+    { "id": "runtime#ws.glm", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'glm')", "primitive": "runtime.provider_call", "expression": "spawnGlm" },
+    { "id": "runtime#ws.cursor-resume", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (messageType === 'cursor-resume') {\n        let lease", "primitive": "runtime.provider_call", "expression": "dispatchProviderCommand cursor resume" },
+    { "id": "runtime#ws.btw", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "const spawnSideQuery = sessionProvider === 'codex'", "primitive": "runtime.provider_call", "expression": "spawnSideQuery" },
+    { "id": "runtime#rest.agent-provider", "file": "server/routes/agent.js", "anchor": "router.post('/', agentLimiter", "primitive": "runtime.provider_call", "expression": "REST provider dispatch" },
+    { "id": "runtime#rest.git-commit-message", "file": "server/routes/git.js", "anchor": "router.post('/generate-commit-message'", "primitive": "runtime.provider_call", "expression": "commit-message provider dispatch" },
+    { "id": "runtime#codex.app-server-side-query", "file": "server/services/codex-app-server.js", "anchor": "export async function spawnCodexSideQuery", "primitive": "injected_spawn", "expression": "codex app-server side query" },
+    { "id": "runtime#codex.app-server-rpc", "file": "server/services/codex-app-server.js", "anchor": "async function executeCodexAppServerRpc", "primitive": "injected_spawn", "expression": "codex app-server RPC" },
+    { "id": "runtime#codex.app-server-models", "file": "server/services/codex-app-server.js", "anchor": "export async function startCodexCompaction", "primitive": "injected_spawn", "expression": "codex app-server compaction" },
+    { "id": "runtime#claude.managed-launcher", "file": "server/services/isolation/managed-claude-launcher.ts", "anchor": "export async function runManagedClaudeLauncher", "primitive": "injected_spawn", "expression": "managed claude launcher" },
+    { "id": "runtime#provider.cage", "file": "server/services/isolation/provider-cage-wiring.js", "anchor": "export function buildCagedSdkSpawn", "primitive": "injected_spawn", "expression": "provider cage spawn" },
+    { "id": "runtime#vendor.cli", "file": "server/modules/providers/shared/vendor/vendor-runtime.js", "anchor": "return async function spawnVendor", "primitive": "runtime.provider_call", "expression": "spawnVendor" },
+    { "id": "runtime#cursor.cli", "file": "server/cursor-cli.js", "anchor": "async function spawnCursor", "primitive": "injected_spawn", "expression": "cursor CLI" },
+    { "id": "runtime#gemini.cli", "file": "server/gemini-cli.js", "anchor": "async function spawnGemini", "primitive": "injected_spawn", "expression": "gemini CLI" },
+    { "id": "runtime#opencode.cli", "file": "server/opencode-cli.js", "anchor": "async function spawnOpenCode", "primitive": "injected_spawn", "expression": "opencode CLI" },
+    { "id": "runtime#qwen.cli", "file": "server/qwen-cli.js", "anchor": "async function spawnQwen", "primitive": "injected_spawn", "expression": "qwen CLI" },
+    { "id": "runtime#hermes.cli", "file": "server/hermes-cli.js", "anchor": "async function spawnHermes", "primitive": "injected_spawn", "expression": "hermes CLI" },
+    { "id": "runtime#kimi.agent-cli", "file": "server/kimi-agent-cli.js", "anchor": "export async function spawnKimiAgent", "primitive": "aliased_spawn", "expression": "kimi native agent" },
+    { "id": "runtime#cursor.catalog", "file": "server/modules/providers/list/cursor/cursor-models.provider.ts", "anchor": "const runCursorListModels", "primitive": "injected_spawn", "expression": "cursor-agent --list-models" },
+    { "id": "runtime#opencode.catalog", "file": "server/modules/providers/list/opencode/opencode-models.provider.ts", "anchor": "const runOpenCodeModelsCommand", "primitive": "injected_spawn", "expression": "opencode models" },
+    { "id": "runtime#codex.login", "file": "server/modules/providers/list/codex/codex-credentials.writer.ts", "anchor": "async setApiKey(", "primitive": "injected_spawn", "expression": "codex login" }
+    ,{ "id": "runtime#provider.quota", "file": "server/modules/providers/services/usage/provider-quota.service.ts", "anchor": "const liveRead = () => reader(userId, deps);", "primitive": "injected_http", "expression": "provider quota HTTP client" }
+    ,{ "id": "runtime#provider.balance", "file": "server/modules/providers/services/usage/provider-balance.service.ts", "anchor": "const liveRead = () => reader(userId, deps);", "primitive": "injected_http", "expression": "provider balance HTTP client" }
+    ,{ "id": "runtime#provider.catalog", "file": "server/modules/providers/services/provider-models.service.ts", "anchor": ": runCatalogProbe(provider, userId, authenticatedPrincipal, loadCatalog))", "primitive": "runtime.provider_call", "expression": "provider live catalog adapter" }
+    ,{ "id": "runtime#permission.release-identity", "file": "server/modules/execution-permissions/runtime-release-identity.ts", "anchor": "export const resolveRuntimePermissionIdentity", "primitive": "permission_env.read", "expression": "sealed child permission identity" }
+  ]
+}

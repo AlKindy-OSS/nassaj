@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Blocking first-paint bootstrap. ES modules execute only after their
+         dependency graph loads, which is too late to prevent a white canvas
+         for the default dark preset. Keep this tiny resolver in parity with
+         resolveIsDark(); the preset engine still owns tokens and theme-color. -->
+    <script id="theme-mode-bootstrap">
+      let mode = null;
+      try { mode = localStorage.getItem('theme'); } catch {}
+        const followsSystemDark = typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const isDark = mode === 'dark' || (mode !== 'light' && followsSystemDark);
+      document.documentElement.classList.toggle('dark', isDark);
+    </script>
+    <link rel="icon" href="/favicon.ico?v=20260616" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=20260616" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260616" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=20260616" />
+    <!-- `interactive-widget=resizes-content` makes the virtual keyboard shrink the
+         layout viewport itself, so `position: fixed` chrome lands above it with no
+         JavaScript at all. Without it Chromium defaults to `resizes-visual`: the
+         layout viewport keeps its full height and the browser scrolls the VISUAL
+         viewport to keep the focused field in sight. Tracking that from script
+         (AppContent) works, but it feeds back on itself — moving the shell moves
+         the composer, which makes the browser re-run scroll-into-view — and the
+         shell visibly oscillates until it settles (measured, B-510). Letting the
+         engine resize the viewport atomically removes the loop. Chrome 108+ and
+         Firefox 133+ on Android honour this; WebKit ignores it, so iOS still needs
+         the script path. The key is inert unless a virtual keyboard is on screen. -->
+    <!-- B-560: maximum-scale / minimum-scale / user-scalable=no حُذفت لأنها تمنع
+         تكبير المستخدم على الجوال وتسقط WCAG 1.4.4. تكبير iOS التلقائي عند
+         تركيز حقل بخطّ <16px مُعالَج بـ CSS (src/index.css) لا بقفل viewport. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- Initial static title; replaced at runtime by the custom branding title
+         (BrandingContext) as soon as it is fetched from the server. -->
+    <title>ـنسَّاجـ</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />
+    
+    <!-- iOS Safari PWA Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ـنسَّاجـ" />
+    
+    <!-- iOS Safari Icons -->
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png?v=20260616" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260616" />
+    
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="msapplication-TileColor" content="#ffffff" />
+
+    <!-- No web-font <link> here on purpose. The interface font is a user setting
+         (Settings → Appearance); the default is the system stack, which costs
+         nothing, and any other choice is self-hosted via @fontsource and loaded
+         lazily by src/lib/ui-font.ts. The app must work with no internet, so it
+         never talks to fonts.googleapis.com. -->
+
+    <!-- Prevent zoom on iOS -->
+    <meta name="format-detection" content="telephone=no" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
+            .then(registration => {
+              console.log('SW registered: ', registration);
+            })
+            .catch(registrationError => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>

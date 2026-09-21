@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<!--
+  صفحة المقارنة — الحالي vs المينيمال
+  Compare page: current (right) vs minimal proposed (left)
+  Layout: LTR comparison grid, explicit labels in Arabic/English
+-->
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مقارنة — نسّاج: الحالي مقابل المينيمال</title>
+  <style>
+    /* --- Base reset --- */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* --- Font stack (same as index.html — arabic-rtl-excellence) --- */
+    @font-face {
+      font-family: 'IBM Plex Sans Arabic';
+      font-weight: 400;
+      font-display: swap;
+      src: url('../../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2') format('woff2');
+      unicode-range: U+0600-06FF, U+0750-077F, U+FB50-FDFF, U+FE70-FEFF;
+    }
+    @font-face {
+      font-family: 'IBM Plex Sans Arabic';
+      font-weight: 400;
+      font-display: swap;
+      src: url('../../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-latin-400-normal.woff2') format('woff2');
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC;
+    }
+    @font-face {
+      font-family: 'IBM Plex Sans Arabic';
+      font-weight: 600;
+      font-display: swap;
+      src: url('../../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2') format('woff2');
+      unicode-range: U+0600-06FF, U+0750-077F, U+FB50-FDFF, U+FE70-FEFF;
+    }
+    @font-face {
+      font-family: 'IBM Plex Sans Arabic';
+      font-weight: 600;
+      font-display: swap;
+      src: url('../../design/ui-redesign-2026-09-03/fonts/ibm-plex-sans-arabic-latin-600-normal.woff2') format('woff2');
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC;
+    }
+
+    :root {
+      --c-bg: #f3f4f6;
+      --c-surface: #ffffff;
+      --c-border: rgba(0,0,0,.10);
+      --c-accent: #1e3a5c;
+      --c-accent-light: rgba(30,58,92,.08);
+      --c-text: #0f172a;
+      --c-text-sec: #4b5563;
+      --c-text-muted: #9ca3af;
+      --c-tag-current: rgba(239,68,68,.10);
+      --c-tag-current-text: #b91c1c;
+      --c-tag-new: rgba(30,58,92,.10);
+      --c-tag-new-text: #1e3a5c;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --c-bg: #0f172a;
+        --c-surface: #1e2a3a;
+        --c-border: rgba(255,255,255,.08);
+        --c-accent: #60a5fa;
+        --c-accent-light: rgba(96,165,250,.10);
+        --c-text: #f1f5f9;
+        --c-text-sec: #94a3b8;
+        --c-text-muted: #4b5563;
+        --c-tag-current: rgba(239,68,68,.15);
+        --c-tag-current-text: #f87171;
+        --c-tag-new: rgba(96,165,250,.12);
+        --c-tag-new-text: #60a5fa;
+      }
+    }
+
+    html {
+      font-family: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: normal;
+      background: var(--c-bg);
+      color: var(--c-text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+      gap: 20px;
+    }
+
+    /* --- Top header bar --- */
+    .compare-header {
+      width: 100%;
+      max-width: 1200px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .compare-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--c-text);
+    }
+
+    .compare-subtitle {
+      font-size: 12px;
+      color: var(--c-text-muted);
+      margin-block-start: 2px;
+    }
+
+    .compare-meta {
+      font-size: 12px;
+      color: var(--c-text-muted);
+      direction: ltr;
+      text-align: end;
+    }
+
+    /* --- Comparison grid: LTR layout (right=current, left=proposed) --- */
+    /*
+       Note: compare layout uses explicit flex-direction: row-reverse
+       to match Arabic reading order (right to left) while keeping clear labeling.
+       Right column = الحالي (current), Left column = المقترح (minimal).
+    */
+    .compare-grid {
+      display: flex;
+      flex-direction: row;  /* columns: right side = proposed (start in RTL), left = current */
+      gap: 16px;
+      width: 100%;
+      max-width: 1200px;
+      align-items: flex-start;
+    }
+
+    .compare-panel {
+      flex: 0 0 575px;
+      width: 575px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* Panel header */
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 10px 10px 0 0;
+    }
+
+    .panel-label {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .panel-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .tag-current {
+      background: var(--c-tag-current);
+      color: var(--c-tag-current-text);
+    }
+
+    .tag-new {
+      background: var(--c-tag-new);
+      color: var(--c-tag-new-text);
+    }
+
+    /* Panel content frame */
+    .panel-frame {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-block-start: none;
+      border-radius: 0 0 10px 10px;
+      overflow: hidden;
+      width: 575px;
+    }
+
+    /* Reference image */
+    .ref-img {
+      display: block;
+      width: 575px;
+      height: auto;
+      object-fit: contain;
+      object-position: top;
+    }
+
+    /* Proposed iframe */
+    .proposed-iframe {
+      display: block;
+      width: 575px;
+      height: 728px;
+      border: none;
+    }
+
+    /* --- Change log table --- */
+    .changes-section {
+      width: 100%;
+      max-width: 1200px;
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 10px;
+      padding: 16px 20px;
+    }
+
+    .changes-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--c-text);
+      margin-block-end: 12px;
+      padding-block-end: 8px;
+      border-block-end: 1px solid var(--c-border);
+    }
+
+    .changes-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .changes-col-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--c-text-sec);
+      margin-block-end: 8px;
+    }
+
+    .changes-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .changes-list li {
+      font-size: 12px;
+      color: var(--c-text-sec);
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      line-height: 1.5;
+    }
+
+    .changes-list li::before {
+      content: '·';
+      color: var(--c-text-muted);
+      flex-shrink: 0;
+      line-height: inherit;
+    }
+
+    .changes-list.green li::before { content: '✓'; color: #16a34a; }
+    .changes-list.orange li::before { content: '→'; color: #d97706; }
+
+    /* Responsive: stack on narrow viewports */
+    @media (max-width: 1199px) {
+      .compare-grid { flex-direction: column; align-items: center; }
+      .changes-cols { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="compare-header">
+    <div>
+      <div class="compare-title">مقارنة مرئية — الشريط الجانبي: الحالي مقابل المينيمال</div>
+      <div class="compare-subtitle">عرض 575px (هاتف محمول / نافذة ضيّقة)</div>
+    </div>
+    <div class="compare-meta" dir="ltr">
+      nassaj-dev · ui-lab/minimal<br/>
+      2026-09-05
+    </div>
+  </div>
+
+  <!--
+    Comparison grid
+    RTL reading order: start=right side
+    Right column (reading start): المينيمال المقترح
+    Left column (reading end):   الحالي
+  -->
+  <div class="compare-grid">
+
+    <!-- ── Panel A: الحالي (current) — right side in RTL ── -->
+    <div class="compare-panel">
+      <div class="panel-header">
+        <span class="panel-label">الحالي</span>
+        <span class="panel-tag tag-current">النسخة الحالية</span>
+      </div>
+      <div class="panel-frame">
+        <img
+          src="reference-current.png"
+          alt="لقطة الواجهة الحالية — شريط جانبي في عرض 575px"
+          class="ref-img"
+          width="575"
+        />
+      </div>
+    </div>
+
+    <!-- ── Panel B: المينيمال المقترح — left side in RTL ── -->
+    <div class="compare-panel">
+      <div class="panel-header">
+        <span class="panel-label">المينيمال المقترح</span>
+        <span class="panel-tag tag-new">نموذج بصري جديد</span>
+      </div>
+      <div class="panel-frame">
+        <img src="proposed-minimal-575.png" alt="المينيمال المقترح — لقطة على عرض 575px" style="display:block;width:575px;max-width:100%;height:auto" />
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Change log -->
+  <div class="changes-section">
+    <div class="changes-title">ما تغيّر بصرياً (مع الإبقاء على كل المعلومات والوظائف)</div>
+    <div class="changes-cols">
+      <div>
+        <div class="changes-col-title">تغييرات بصرية</div>
+        <ul class="changes-list orange">
+          <li>التبويبات العلوية (Projects/Terminals/Scheduled): من حبوب مملوءة إلى خط سفلي 2px للنشط فقط</li>
+          <li>أيقونات المحرّكات (Claude/Codex/agy): من أشكال ملوّنة ببراويز إلى رموز أحادية اللون (رمادي)</li>
+          <li>بطاقة المشروع: من كتلة بحدود وشعار وعدّاد ومسار وزرّ عريض إلى رأس مجموعة نظيف</li>
+          <li>زرّ "New Session": من كتلة كحلية عريضة إلى زرّ نصّي بحدود رفيعة بجانب رأس المشروع</li>
+          <li>صفوف الجلسات: من بطاقات فردية ببراويز إلى قائمة مسطّحة بفواصل خفيفة</li>
+          <li>شريط الحضور: من شريط "ONLINE NOW" منفصل ومميّز إلى شريط رقيق 32px مدمج</li>
+          <li>رأس المحادثة: من ثلاثة صفوف (عنوان + مشروع/commit + مشارك/نموذج) إلى صفّين مضغوطين</li>
+          <li>رسائل الخطأ: من بطاقة حمراء كاملة إلى أيقونة حمراء صغيرة + نصّ بخلفية خفيفة</li>
+          <li>الأيقونات: خطّية موحّدة stroke-width 1.5px بدل مزيج أنماط</li>
+          <li>المسافات: شبكة 4px صارمة، حشو جانبي 12px موحّد، ارتفاع صفّ 40px ثابت</li>
+        </ul>
+      </div>
+      <div>
+        <div class="changes-col-title">ما بقي كما هو (لا حذف وظيفة)</div>
+        <ul class="changes-list green">
+          <li>شعار نسّاج في الرأس</li>
+          <li>أيقونات الإجراءات: إنشاء مشروع + ويكي + طيّ الشريط</li>
+          <li>التبويبات الثلاثة: مشاريع + طرفيات (مع عدّاد 2) + مجدولة</li>
+          <li>شريط الحضور: المتاح الآن + الأفاتارات + عدد النشطين</li>
+          <li>أدوات البحث: حقل بحث + Ctrl K + فلتر + أرشيف</li>
+          <li>معلومات المشروع: الاسم + نقطة الحالة + عدّاد الجلسات + المسار</li>
+          <li>زرّ الجلسة الجديدة (موقع مختلف، وظيفة كاملة)</li>
+          <li>كل صفوف الجلسات التسعة بنفس ترتيب المرجع</li>
+          <li>نقطة حالة الجلسة: running/done/error/warn/idle (الألوان محفوظة)</li>
+          <li>أيقونة الدبّوس في كل صفّ (تظهر عند التحويم)</li>
+          <li>أفاتار العضو في كل صفّ</li>
+          <li>زرّ "تحميل المزيد من المحادثات"</li>
+          <li>رأس المحادثة: العنوان + المشروع + commit + المشارك + النموذج</li>
+          <li>أدوات الرسائل: كتلة طرفية + رسالة خطأ + رابط</li>
+          <li>ذيل الشريط: الإصدار + زرّ الإعدادات</li>
+          <li>الخط العربي: IBM Plex Sans Arabic</li>
+          <li>الوضع الداكن + prefers-reduced-motion</li>
+          <li>RTL بخصائص منطقية (logical properties)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

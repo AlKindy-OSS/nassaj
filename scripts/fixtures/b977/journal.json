@@ -1,0 +1,23 @@
+{
+  "schema": "nassaj-oid-control-transaction/v1",
+  "sequence": 54,
+  "group": "event-0000000000000054",
+  "eventGroup": "event-0000000000000054",
+  "oid": "a3c40fd6fec74b108fb0da42415f6d2088ed99b8",
+  "buildId": "124c8e340ac58dc1ec925d0148938fa876abaa32c5fc29fa5c0f65d2bccb668a",
+  "previousOid": "432a3e249d9be9676e302413970e06d375b02c2b",
+  "previousBuildId": "87b603545c212adce51853b20a80ad8a69c2a6e323cfe88b65eed3477637dc68",
+  "candidatePath": "/home/operator/Project/nassaj-dev/.nassaj-local-preview/server-candidates/124c8e340ac58dc1ec925d0148938fa876abaa32c5fc29fa5c0f65d2bccb668a",
+  "livePath": "/home/operator/Project/nassaj-dev/dist-server",
+  "transactionNonce": "08aec835ed5c76280d937785bae3976a8c35599c75dde28ae2a1351443668496",
+  "controlManifestSha256": "1345080efd5f671cc6d8e9d71a32526bbd42b7ad53d8a92f0251b55316e44bd4",
+  "lockIdentity": {
+    "dev": "65024",
+    "ino": "1224439"
+  },
+  "oldPid": 381521,
+  "oldStartTicks": "1263759",
+  "actionId": "d339423f-96c2-4184-b12b-1e70660fdc16",
+  "state": "restart_deferred_restored",
+  "gate": 6
+}

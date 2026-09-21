@@ -1,0 +1,8 @@
+{
+  "schema": "nassaj-oid-control-event/v1",
+  "sequence": 54,
+  "oid": "a3c40fd6fec74b108fb0da42415f6d2088ed99b8",
+  "buildId": "124c8e340ac58dc1ec925d0148938fa876abaa32c5fc29fa5c0f65d2bccb668a",
+  "snapshotOid": "a3c40fd6fec74b108fb0da42415f6d2088ed99b8",
+  "controlManifestSha256": "1345080efd5f671cc6d8e9d71a32526bbd42b7ad53d8a92f0251b55316e44bd4"
+}

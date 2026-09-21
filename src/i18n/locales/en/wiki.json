@@ -1,0 +1,87 @@
+{
+  "panel": {
+    "ariaLabel": "Nassaj wiki",
+    "home": "Home",
+    "notFound": "Page not found"
+  },
+  "sidebar": {
+    "ariaLabel": "Wiki index",
+    "logoAlt": "Nassaj",
+    "close": "Close index",
+    "home": "Home"
+  },
+  "toolbar": {
+    "showIndex": "Show index",
+    "hideIndex": "Hide index",
+    "escapeHint": "Press Escape to close the index",
+    "breadcrumbAria": "Breadcrumb",
+    "home": "Home",
+    "search": "Search the wiki",
+    "backToApp": "Back to Nassaj"
+  },
+  "toc": {
+    "title": "On this page"
+  },
+  "prevNext": {
+    "navAria": "Page navigation",
+    "prev": "Previous page",
+    "next": "Next page"
+  },
+  "home": {
+    "title": "Nassaj wiki",
+    "blurb": "Everything you need to know about Nassaj, in one place.",
+    "searchPlaceholder": "Search for anything…",
+    "empty": "There is no wiki content on this server yet.",
+    "symptomsTitle": "Something is not working",
+    "symptomsSummary": "Start from the symptom you see on screen.",
+    "symptomsTail": "All symptoms",
+    "questionsTitle": "Questions every newcomer asks",
+    "questionsSummary": "A quick route to frequently asked questions.",
+    "questionsTail": "All questions",
+    "mark": "A mark of Dar Al-Kindy"
+  },
+  "search": {
+    "dialogAria": "Wiki search",
+    "close": "Close",
+    "placeholder": "Search for anything… e.g. “the session is stuck”",
+    "inputAria": "Search the wiki",
+    "popular": "Most searched",
+    "noResults": "No results. Try a shorter or different term.",
+    "navigate": "Navigate",
+    "open": "Open",
+    "dismiss": "Close"
+  },
+  "callout": {
+    "note": "Note",
+    "tip": "Tip",
+    "important": "Important",
+    "warning": "Warning",
+    "caution": "Caution"
+  },
+  "code": {
+    "copy": "Copy code",
+    "copied": "Copied"
+  },
+  "heading": {
+    "anchor": "Link to section: {{text}}"
+  },
+  "diagram": {
+    "zoom": "Enlarge diagram",
+    "zoomedAria": "Enlarged Mermaid diagram",
+    "close": "Close"
+  },
+  "a11y": {
+    "indexClosed": "Index closed"
+  },
+  "notice": {
+    "text": "The wiki pages are written in Arabic and are not translated. Only the interface labels follow your language setting.",
+    "dismiss": "Dismiss this notice"
+  },
+  "settings": {
+    "label": "Wiki interface language",
+    "description": "Wiki pages are always in Arabic. This option changes the interface labels only.",
+    "follow": "Match the app language",
+    "ar": "العربية",
+    "en": "English"
+  }
+}

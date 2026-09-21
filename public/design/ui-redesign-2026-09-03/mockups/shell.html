@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="نموذج بصري — الصدفة الرئيسية لنسّاج">
+  <title>نسّاج · الصدفة الرئيسية — نموذج بصري</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* تخصيصات الصدفة */
+    .overlay-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1199;
+      background: hsl(0 0% 0% / .4);
+    }
+    .overlay-backdrop.visible { display: block; }
+
+    .tool-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 0.8125rem;
+    }
+    .tool-block-body {
+      padding: 0 12px 10px;
+      font-family: monospace;
+      font-size: 0.8125rem;
+      color: var(--muted-foreground);
+      line-height: 1.6;
+    }
+
+    .sidebar-footer {
+      padding: 10px 16px;
+      border-block-start: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-block-start: auto;
+    }
+    .sidebar-footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.8125rem;
+      color: var(--muted-foreground);
+    }
+
+    .chevron {
+      display: inline-block;
+      font-style: normal;
+      font-size: 0.75rem;
+      transition: transform var(--dur-fast) var(--ease);
+    }
+    .collapsed .chevron { transform: rotate(90deg); }
+    [dir="rtl"] .collapsed .chevron { transform: rotate(-90deg); }
+
+    .session-group-content {
+      overflow: hidden;
+    }
+    .session-group.collapsed .session-group-content {
+      display: none;
+    }
+
+    .header-tabs-row {
+      display: flex;
+      align-items: center;
+      padding-inline: 20px;
+      border-block-end: 1px solid var(--border);
+    }
+    @media (max-width: 767px) {
+      .header-tabs-row { padding-inline: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- شريط التنبيه: نموذج بصري -->
+  <div class="preview-banner" role="banner">
+    نموذج بصري مقترح — ليس التطبيق الفعلي · <a href="index.html" style="color:inherit;text-decoration:underline;">العودة للمعرض</a>
+  </div>
+
+  <!-- الصدفة -->
+  <div class="app-shell">
+
+    <!-- الشريط الجانبي -->
+    <aside class="sidebar" id="sidebar" aria-label="قائمة الجلسات">
+
+      <!-- رأس الشريط: بحث -->
+      <div style="padding:12px 16px;border-block-end:1px solid var(--border);">
+        <div class="search-field">
+          <span class="search-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </span>
+          <input class="input ui-body" type="search" placeholder="بحث..." aria-label="بحث في المشاريع والجلسات" style="height:36px;font-size:0.875rem;">
+          <span class="search-kbd">Ctrl K</span>
+        </div>
+      </div>
+
+      <!-- زرّ مشروع جديد -->
+      <div style="padding:8px 16px;border-block-end:1px solid var(--border);">
+        <button class="btn btn-outline" style="width:100%;height:36px;font-size:0.875rem;gap:6px;" aria-label="إنشاء مشروع جديد">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          مشروع جديد
+        </button>
+      </div>
+
+      <!-- قائمة المشاريع -->
+      <nav aria-label="المشاريع" style="flex:1;overflow-y:auto;">
+
+        <!-- مجموعة مشروع 1 -->
+        <div class="session-group" id="group-1">
+          <div class="sidebar-section-header" role="button" aria-expanded="true" onclick="toggleGroup('group-1')" aria-controls="group-1-content">
+            <span class="ui-body-strong">نسّاج · تطوير الواجهة</span>
+            <span style="display:flex;align-items:center;gap:6px;">
+              <span class="ui-label muted">4</span>
+              <span class="chevron" aria-hidden="true">‹</span>
+            </span>
+          </div>
+          <div class="session-group-content" id="group-1-content">
+            <div class="session-item active" role="button" tabindex="0" aria-current="true">
+              <span class="status-dot status-running ui-label" aria-label="تعمل">تعمل</span>
+              <span class="session-item-name ui-body">جلسة إعادة التصميم</span>
+              <span class="session-item-time">14:22</span>
+            </div>
+            <div class="session-item" role="button" tabindex="0">
+              <span class="status-dot status-waiting ui-label" aria-label="بانتظار إذن">بانتظار</span>
+              <span class="session-item-name ui-body">إصلاح مؤشّر السياق</span>
+              <span class="session-item-time">12:05</span>
+            </div>
+            <div class="session-item" role="button" tabindex="0">
+              <span class="status-dot status-stopped ui-label" aria-label="متوقّفة">متوقّفة</span>
+              <span class="session-item-name ui-body">مراجعة واجهة الإعدادات</span>
+              <span class="session-item-time">أمس</span>
+            </div>
+            <div class="session-item" role="button" tabindex="0">
+              <span class="status-dot status-error ui-label" aria-label="تعذّرت">تعذّرت</span>
+              <span class="session-item-name ui-body">تحديث الاعتمادات</span>
+              <span class="session-item-time">أمس</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- مجموعة مشروع 2 -->
+        <div class="session-group" id="group-2">
+          <div class="sidebar-section-header" role="button" aria-expanded="true" onclick="toggleGroup('group-2')" aria-controls="group-2-content">
+            <span class="ui-body-strong">مشروع-أ · المنصّة</span>
+            <span style="display:flex;align-items:center;gap:6px;">
+              <span class="ui-label muted">2</span>
+              <span class="chevron" aria-hidden="true">‹</span>
+            </span>
+          </div>
+          <div class="session-group-content" id="group-2-content">
+            <div class="session-item" role="button" tabindex="0">
+              <span class="status-dot status-running ui-label" aria-label="تعمل">تعمل</span>
+              <span class="session-item-name ui-body">تحسين واجهة الحجز</span>
+              <span class="session-item-time">13:44</span>
+            </div>
+            <div class="session-item" role="button" tabindex="0">
+              <span class="status-dot status-stopped ui-label" aria-label="متوقّفة">متوقّفة</span>
+              <span class="session-item-name ui-body">نظام الفواتير</span>
+              <span class="session-item-time">2 سبت</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- مجموعة مشروع 3 مطويّة -->
+        <div class="session-group collapsed" id="group-3">
+          <div class="sidebar-section-header" role="button" aria-expanded="false" onclick="toggleGroup('group-3')" aria-controls="group-3-content">
+            <span class="ui-body-strong">مشروع-ب · المحتوى</span>
+            <span style="display:flex;align-items:center;gap:6px;">
+              <span class="ui-label muted">5</span>
+              <span class="chevron" aria-hidden="true">‹</span>
+            </span>
+          </div>
+          <div class="session-group-content" id="group-3-content">
+            <div class="session-item" role="button" tabindex="0">
+              <span class="status-dot status-stopped ui-label">متوقّفة</span>
+              <span class="session-item-name ui-body">تحليل المحتوى العربي</span>
+              <span class="session-item-time">5 أيام</span>
+            </div>
+          </div>
+        </div>
+
+      </nav>
+
+      <!-- تذييل الشريط الجانبي -->
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-row">
+          <span>عضو الفريق</span>
+          <button class="btn-ghost btn-sm btn" aria-label="الإعدادات">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 1.41 14.14M4.93 4.93A10 10 0 0 0 3.52 19.07"/><path d="M10 4a7.63 7.63 0 0 1 4 0M10 20a7.63 7.63 0 0 0 4 0M4 10a7.63 7.63 0 0 0 0 4M20 10a7.63 7.63 0 0 1 0 4"/></svg>
+          </button>
+        </div>
+        <div class="sidebar-footer-row muted">
+          <span>4 جلسات نشطة</span>
+          <span>خروج</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- المنطقة الرئيسية -->
+    <main class="app-main" role="main">
+
+      <!-- الرأس -->
+      <header>
+        <!-- صفّ العنوان -->
+        <div class="page-header">
+          <!-- زرّ القائمة (جوّال فقط) -->
+          <button class="btn-ghost btn-icon" id="sidebar-toggle" aria-label="فتح القائمة" aria-expanded="false" aria-controls="sidebar"
+            style="display:none;" onclick="toggleSidebar()">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+
+          <div>
+            <div class="page-header-breadcrumb" aria-label="المسار">نسّاج · تطوير الواجهة</div>
+            <h1 class="ui-title">جلسة إعادة التصميم</h1>
+          </div>
+
+          <div class="page-header-end">
+            <button class="btn btn-ghost btn-icon" aria-label="مشاركة">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16,6 12,2 8,6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            </button>
+            <button class="btn btn-outline btn-tb" aria-label="خيارات الجلسة">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- مسطرة الذهب — اللحظة المميّزة (مرّة واحدة لكل سطح) -->
+        <hr class="gold-rule" aria-hidden="true">
+
+        <!-- صفّ التبويبات -->
+        <div class="header-tabs-row" role="tablist">
+          <button class="tab active" role="tab" aria-selected="true">المحادثة</button>
+          <button class="tab" role="tab" aria-selected="false">الملفات</button>
+          <button class="tab" role="tab" aria-selected="false">الطرفية</button>
+        </div>
+
+        <!-- مؤشّر الحصة والسياق — مفصول عن التبويبات -->
+        <div class="quota-bar-wrap" role="status" aria-label="مؤشّر الاستخدام">
+          <span class="quota-label">الجلسة</span>
+          <div class="quota-bar-track" aria-hidden="true">
+            <div class="quota-bar-fill" style="width:72%;" aria-hidden="true"></div>
+          </div>
+          <span class="quota-label">72%</span>
+          <span class="quota-label muted" style="margin-inline-start:4px;">· يتجدّد بعد 3س</span>
+          <span class="quota-label" style="margin-inline-start:16px;color:var(--muted-foreground);">|</span>
+          <span class="quota-label">السياق</span>
+          <div class="quota-bar-track" aria-hidden="true" style="max-width:80px;">
+            <div class="quota-bar-fill" style="width:38%;" aria-hidden="true"></div>
+          </div>
+          <span class="quota-label">38%</span>
+        </div>
+      </header>
+
+      <!-- قائمة الرسائل -->
+      <div class="message-list" role="log" aria-live="polite" aria-label="المحادثة">
+
+        <!-- رسالة مساعد -->
+        <div class="message-row">
+          <div class="avatar assistant-avatar" aria-hidden="true">ن</div>
+          <div class="message-bubble assistant" dir="rtl">
+            <p>مرحباً بك. بدأت بمراجعة دليل التصميم الجديد. الطباعة العربية باستخدام IBM Plex Sans Arabic تبدو منسجمة مع لوحة دار الكِندِي — الكحلي والكريم والذهبي النادر.</p>
+            <p>ما الذي تودّ العمل عليه أولاً؟ المكوّنات الأساسية، أم التخطيطات الثلاثة؟</p>
+          </div>
+        </div>
+
+        <!-- رسالة مستخدم -->
+        <div class="message-row user">
+          <div class="avatar" aria-hidden="true">إ</div>
+          <div class="message-bubble user" dir="rtl">
+            ابدأ بمسطرة الذهب التحريرية — أريد أن أرى كيف تظهر مرّة واحدة فقط في كل سطح.
+          </div>
+        </div>
+
+        <!-- رسالة مساعد + أداة -->
+        <div class="message-row">
+          <div class="avatar assistant-avatar" aria-hidden="true">ن</div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:12px;max-width:min(70ch,100%);">
+            <div class="message-bubble assistant" dir="rtl">
+              حسناً. سأقرأ ملف التصميم أولاً للتحقّق من المواصفة الدقيقة.
+            </div>
+            <!-- بطاقة أداة -->
+            <div class="message-bubble tool" dir="ltr">
+              <div class="tool-block-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none'?'block':'none'">
+                <span>📄 read_file</span>
+                <span style="color:var(--success);">✓ مكتملة</span>
+              </div>
+              <div class="tool-block-body">
+                docs/design/NASSAJ-UI-REDESIGN-2026-09-03.md<br>
+                → 531 lines read
+              </div>
+            </div>
+            <div class="message-bubble assistant" dir="rtl">
+              <p>وجدت المواصفة في §1 و§3.7:</p>
+              <p>مسطرة ذهبية 1px بلون <code style="font-family:monospace;font-size:0.875em;background:var(--muted);padding:1px 4px;border-radius:3px;">--brand-accent</code> تحت عنوان الصفحة الرئيسي — <strong>مرّة واحدة لكل سطح</strong>، في رأس المحادثة (الصدفة)، وعنوان المقال في الويكي، وعنوان الحوار في الإعدادات. لا تتكرّر على كل بطاقة أو زرّ.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- رسالة مستخدم -->
+        <div class="message-row user">
+          <div class="avatar" aria-hidden="true">إ</div>
+          <div class="message-bubble user" dir="rtl">
+            ممتاز. الآن أنشئ النموذج البصري للصدفة كاملاً.
+          </div>
+        </div>
+
+        <!-- رسالة مساعد — تحميل -->
+        <div class="message-row">
+          <div class="avatar assistant-avatar" aria-hidden="true">ن</div>
+          <div style="flex:1;">
+            <div class="message-bubble assistant" dir="rtl">
+              <span class="status-dot status-running ui-label">جارٍ الإنشاء</span>
+              <span style="margin-inline-start:8px;color:var(--muted-foreground);">يكتب ملفات HTML/CSS…</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- المؤلَّف -->
+      <div class="composer">
+        <textarea class="composer-input" placeholder="اكتب رسالتك…" aria-label="محتوى الرسالة" rows="1"></textarea>
+        <button class="btn btn-primary btn-lg btn-icon btn-icon-lg" aria-label="إرسال">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="icon-directional"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- شريط التنقّل السفلي (جوّال) -->
+  <nav class="bottom-nav" aria-label="التنقّل الرئيسي">
+    <div class="bottom-nav-inner">
+      <button class="bottom-nav-item active" aria-label="المحادثة" aria-current="page">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>محادثة</span>
+      </button>
+      <button class="bottom-nav-item" aria-label="المشاريع">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="6" height="6" rx="1"/><rect x="9" y="3" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="9" y="10" width="6" height="6" rx="1"/><rect x="16" y="10" width="6" height="6" rx="1"/></svg>
+        <span>المشاريع</span>
+      </button>
+      <button class="bottom-nav-item" aria-label="الويكي">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <span>الويكي</span>
+      </button>
+      <button class="bottom-nav-item" aria-label="الإعدادات">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 1.41 14.14M4.93 4.93A10 10 0 0 0 3.52 19.07"/></svg>
+        <span>إعدادات</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- الغطاء الشفّاف (جوّال — خلف الشريط الجانبي) -->
+  <div class="overlay-backdrop" id="overlay" onclick="closeSidebar()"></div>
+
+  <!-- التنبيه اللحظي (نموذجي) -->
+  <div class="toast" role="alert" aria-live="assertive">
+    <div class="toast-accent" style="background-color:var(--success);" aria-hidden="true"></div>
+    <div class="toast-body">
+      <div class="ui-body-strong">تمّ الحفظ</div>
+      <div class="ui-label muted">تمّت مزامنة التفضيلات</div>
+    </div>
+  </div>
+
+  <script>
+    // الجوّال: إظهار زرّ القائمة
+    function checkMobile() {
+      const btn = document.getElementById('sidebar-toggle');
+      const isMobile = window.innerWidth < 768;
+      btn.style.display = isMobile ? 'inline-flex' : 'none';
+    }
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+
+    // فتح/إغلاق الشريط الجانبي
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('overlay');
+      const btn = document.getElementById('sidebar-toggle');
+      const isOpen = sidebar.classList.contains('open');
+      if (isOpen) {
+        closeSidebar();
+      } else {
+        sidebar.classList.add('open');
+        overlay.classList.add('visible');
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    }
+    function closeSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('overlay');
+      const btn = document.getElementById('sidebar-toggle');
+      sidebar.classList.remove('open');
+      overlay.classList.remove('visible');
+      btn.setAttribute('aria-expanded', 'false');
+    }
+
+    // طيّ/فتح مجموعة مشروع
+    function toggleGroup(id) {
+      const group = document.getElementById(id);
+      const header = group.querySelector('.sidebar-section-header');
+      const isCollapsed = group.classList.contains('collapsed');
+      group.classList.toggle('collapsed');
+      header.setAttribute('aria-expanded', isCollapsed ? 'true' : 'false');
+    }
+
+    // إغلاق التنبيه اللحظي بعد 4 ثوانٍ
+    const toast = document.querySelector('.toast');
+    if (toast) {
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
+    }
+
+    // مؤلَّف: تمديد عمودي تلقائي
+    const ta = document.querySelector('.composer-input');
+    if (ta) {
+      ta.addEventListener('input', () => {
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+      });
+    }
+  </script>
+</body>
+</html>

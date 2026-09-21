@@ -1,0 +1,1151 @@
+{
+  "codexImageInput": {
+    "unsupported": "Codex could not accept this attachment. Use valid PNG, JPEG, GIF or WebP images, and reduce the number of images if needed. Your text and images remain in the draft.",
+    "tooLarge": "The message and its images exceed the Codex size limit. Resize or reduce the images, or shorten the text, then try again. Your draft has been kept."
+  },
+  "skillObservations": {
+    "loadMore": "Load more evidence",
+    "manualOnly": "Manual invocation only",
+    "title": "Observed skills",
+    "panelTitle": "Participants and skills",
+    "count": "{{value}} observed skills",
+    "partial": "Partial observation",
+    "complete": "Available sources scanned",
+    "unsupported": "Observation data is not supported by this server or provider",
+    "unavailable": "Observation data unavailable",
+    "limited": "Reads and invocations are evidence only; they do not prove application or quality. Unobserved execution remains possible.",
+    "updated": "Updated: {{value}}",
+    "pageLimited": "Only part of the evidence is shown. Refreshing, including automatic updates during active work, returns to the first page of the new snapshot.",
+    "reads": "Successful instruction reads: {{value}}",
+    "attempts": "Invocation attempts: {{value}}",
+    "outcomes": "Succeeded: {{succeeded}} · Failed: {{failed}} · Pending: {{pending}} · Unknown: {{unknown}}",
+    "otherReads": "Other reads — Failed: {{failed}} · Pending: {{pending}} · Unknown: {{unknown}}",
+    "unresolved": "Unresolved skill",
+    "outcome": {
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "unknown": "Unknown result"
+    },
+    "scope": "This conversation — all turns",
+    "loading": "Loading skill observations…",
+    "empty": "No skills observed yet",
+    "stale": "Refresh failed; retained observations may be out of date.",
+    "refresh": "Refresh observations",
+    "projectTitle": "Skill observations",
+    "projectScope": "Available authorized conversation evidence — all recorded dates",
+    "sessions": "Fully scanned: {{scanned}} of {{eligible}} conversations · Partial: {{partial}} · Unavailable: {{unavailable}}",
+    "scopeLine_one": "{{value}} skill · this conversation",
+    "scopeLine_other": "{{value}} skills · this conversation"
+  },
+  "streamRecoveryGap": "The displayed session may be incomplete. Reload the session to recover its saved history.",
+  "btw": {
+    "title": "Side question",
+    "close": "Close",
+    "questionLabel": "Question",
+    "answerLabel": "Answer",
+    "status": {
+      "pending": "Preparing…",
+      "streaming": "Typing…",
+      "complete": "Done",
+      "thinking": "Thinking…"
+    },
+    "errors": {
+      "unsupported_provider": "The side channel is available for Claude and Codex sessions only.",
+      "session_not_found": "Session not found — open a session first, then ask your side question.",
+      "question_required": "Type a question after the side command, then send it.",
+      "not_visible": "You don't have permission to view this session's context.",
+      "busy": "The session is busy — try again shortly.",
+      "sdk_error": "Couldn't complete the side question — an unexpected error occurred.",
+      "empty_response": "The model produced no visible answer — try rephrasing the question.",
+      "timeout": "This feature requires a server update.",
+      "disconnected": "Can't send — connection lost."
+    },
+    "hints": {
+      "quota": "Uses your provider account quota.",
+      "context": "Answered on the session context up to the last saved message."
+    },
+    "fork": {
+      "actionFull": "Continue with full context",
+      "actionFresh": "New conversation",
+      "pending": "Forking…",
+      "hintFull": "Fork: a new conversation carrying this whole session, then the question and its answer. Shortcut: f",
+      "hintFresh": "A new conversation with only the question and its answer, in the same project — no session context pulled in. Shortcut: n",
+      "errors": {
+        "busy": "A fork is already running — try again shortly.",
+        "session_not_found": "The source session was not found.",
+        "not_writable": "You don't have permission to create a conversation in this project.",
+        "unsupported_provider": "Forking is available for Claude and Codex sessions only.",
+        "invalid_request": "A fork needs both the question and its answer.",
+        "transcript_not_found": "This session has no saved transcript to fork.",
+        "source_empty": "This session has no messages to fork.",
+        "source_too_large": "This conversation is too large to fork.",
+        "message_not_found": "The pinned message is no longer in this session.",
+        "fork_failed": "Couldn't fork — an unexpected error occurred.",
+        "timeout": "The fork timed out — check your conversation list, it may have been created.",
+        "disconnected": "Can't fork — connection lost."
+      }
+    },
+    "description": "Ask a side question on the current session context",
+    "sideDescription": "Ask a side question on the current Codex thread"
+  },
+  "messageFork": {
+    "action": "Continue in new chat",
+    "pending": "Forking…",
+    "hint": "Start a new conversation from this reply",
+    "awaitingCompletion": "Wait until this reply is complete and saved before continuing from it.",
+    "errors": {
+      "disconnected": "Can't fork — connection lost.",
+      "invalid_request": "This reply is not available for forking.",
+      "timeout": "The result was not confirmed; the conversation may already exist. Check your conversations before creating another. We will not resend automatically.",
+      "unsupported_provider": "Continuing from a specific reply is not supported by this harness yet.",
+      "unsupported_cutoff": "This reply does not yet have a verified, saved continuation point.",
+      "runtime_not_ready": "The running server version does not support continuing from this reply yet.",
+      "outcome_unknown": "The conversation may already exist, but the result was not confirmed. Check your conversations before creating another. We will not resend automatically.",
+      "registration_failed": "The conversation was created but could not be registered. Click Continue on the same reply to retry registration of that known conversation only.",
+      "registration_evidence_expired": "The server no longer has evidence of the created conversation, so registration was stopped. Check your conversations before creating another.",
+      "busy": "Conversation requests are still running. Wait a moment, then try again.",
+      "fork_failed": "Couldn't fork this reply — please try again."
+    }
+  },
+  "messageMetadata": {
+    "modelUnknown": "Model unavailable",
+    "modelUnknownHint": "Verified model data for this reply is not available to the interface. The current session selection does not establish an earlier reply's model.",
+    "turnDurationTook": "Took"
+  },
+  "contextRot": {
+    "label": "Context",
+    "barAria": "Context usage",
+    "empty": "No token usage yet",
+    "percentUsed": "{{percent}} of real window",
+    "tooltipUsed": "Used of real window: {{used}} / {{total}}",
+    "coordinatorTotal": "Coordinator total: {{value}} tokens",
+    "tooltipCacheRead": "Cache read: {{value}}",
+    "popoverTitle": "Context usage",
+    "close": "Close",
+    "levels": {
+      "safe": "Below proposed compaction threshold",
+      "attention": "Compaction threshold unavailable",
+      "warning": "Proposed compaction threshold reached",
+      "critical": "Proposed compaction threshold reached"
+    },
+    "alerts": {
+      "compact": "At 150K tokens — consider running /compact.",
+      "close": "At 250K tokens — consider continuing in a new conversation.",
+      "hour": "This session is over an hour old — consider saving a continuation summary.",
+      "pressure": "Proposed compaction threshold reached"
+    },
+    "nativeThreshold": "Native compaction threshold: {{value}} tokens",
+    "proposedThreshold": "Proposed compaction threshold: {{value}} tokens",
+    "thresholdUnknown": "Compaction threshold unavailable",
+    "lastInput": "Last request input: {{value}} tokens (not current occupancy)",
+    "pressureReached": "Proposed compaction threshold reached",
+    "pressureBelow": "Below proposed compaction threshold",
+    "unavailable": "Context usage unavailable",
+    "cache": {
+      "title": "Cache reuse",
+      "ratio": "Reuse: {{percent}}",
+      "empty": "No percentage: input is zero",
+      "unknown": "Unavailable — awaiting a coherent harness observation",
+      "scope": {
+        "last_request": "Last measured request",
+        "turn": "Measured turn usage",
+        "session": "Measured session aggregate"
+      },
+      "history": "Historical observation",
+      "counts": "Cached reads: {{read}} / total input: {{input}} tokens",
+      "source": "Source: {{source}}",
+      "observed": "Original observation time: {{time}}",
+      "disclaimer": "Cache reuse percentage is not financial savings.",
+      "ownerThreshold": "Owner compaction policy: {{value}} tokens",
+      "experimentalThreshold": "Experimental compaction proposal: {{value}} tokens",
+      "newSessionThreshold": "Policy suggestion for a new conversation: {{value}} tokens",
+      "sources": {
+        "claude": "Native Claude observation",
+        "codex": "Native Codex observation",
+        "harness": "Native harness observation"
+      }
+    }
+  },
+  "sessionIdleWarning": {
+    "message_tokens": "It has been {{duration}} — resuming will cost re-reading the full context ({{tokens}} tokens). Prefer to start a <link>new conversation</link>.",
+    "message_no_tokens": "It has been {{duration}} — resuming this session costs re-reading the full context. Prefer to start a <link>new conversation</link>.",
+    "duration_hour": "an hour",
+    "duration_minutes_one": "{{count}} minute",
+    "duration_minutes_other": "{{count}} minutes"
+  },
+  "codeBlock": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyCode": "Copy code",
+    "executeRaw": "Execute",
+    "executeRawTitle": "Execute this command on the Nassaj server (opens review dialog)",
+    "inserting": "Adding to queue…",
+    "insertError": {
+      "carriage_return_forbidden": "Command contains \\r (Windows line endings) — paste again using LF",
+      "too_many_lines": "Command exceeds limit (100 lines)",
+      "empty_command": "Command is empty",
+      "command_too_long": "Command too long (max 4096 characters)",
+      "too_many_commands": "Queue is full (max 20 commands)",
+      "raw_exec_disabled": "Raw execution is disabled",
+      "config_denied": "Not permitted — check Command Board settings",
+      "internal": "Failed to add command to queue",
+      "denied_command": "Blocked by a governance rule ({{rule}}): in this form the guard cannot tell a safe target from the server the board runs on or its gateway. If you have verified the target is something else, run it in your own terminal.",
+      "denied_command_fatal": "Blocked ({{rule}}): this form takes down the server the board runs on, or does not spare it. To restart it use bash scripts/safe-restart.sh --exec; for anything else, run it deliberately from your own terminal.",
+      "forbidden_control_char": "Command contains a forbidden control or bidi character — it could display differently from what runs",
+      "invalid_command": "Invalid command",
+      "stamp": "From your click at {{time}} — not a live status",
+      "stampRepeat": "Attempt {{count}} at {{time}} — same result",
+      "dismiss": "Dismiss"
+    }
+  },
+  "copyMessage": {
+    "copy": "Copy message",
+    "copied": "Message copied",
+    "selectFormat": "Select copy format",
+    "copyAsMarkdown": "Copy as markdown",
+    "copyAsText": "Copy as text",
+    "markdownShort": "MD",
+    "textShort": "TXT"
+  },
+  "messageTypes": {
+    "user": "U",
+    "error": "Error",
+    "tool": "Tool",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "Sub-agent",
+    "shortBadge": "Sub-agent",
+    "badgeLabel": "Sub-agent task",
+    "currently": "Currently:",
+    "completed_one": "Completed ({{count}} tool)",
+    "completed_other": "Completed ({{count}} tools)",
+    "viewToolHistory": "View tool history ({{count}})",
+    "error": "(error)"
+  },
+  "coordinator": {
+    "label": "Coordinator",
+    "withName": "Coordinator: {{username}}"
+  },
+  "userAuthor": {
+    "withName": "User: {{username}}"
+  },
+  "externalOrigin": {
+    "label": "Created outside the UI"
+  },
+  "coordinatorPrompt": {
+    "label": "Coordinator → Sub-agent",
+    "ariaLabel": "Coordinator prompt to sub-agent"
+  },
+  "systemMessage": {
+    "label": "System message",
+    "ariaLabel": "Automated system message"
+  },
+  "sessionNotResumable": {
+    "message": "This session could not be resumed — it no longer exists at the provider.",
+    "startNew": "Start a new session"
+  },
+  "tools": {
+    "settings": "Tool Settings",
+    "error": "Tool Error",
+    "result": "Tool Result",
+    "viewParams": "View input parameters",
+    "viewRawParams": "View raw parameters",
+    "viewDiff": "View edit diff for",
+    "creatingFile": "Creating new file:",
+    "updatingTodo": "Updating Todo List",
+    "read": "Read",
+    "readFile": "Read file",
+    "updateTodo": "Update todo list",
+    "readTodo": "Read todo list",
+    "searchResults": "results"
+  },
+  "search": {
+    "found": "Found {{count}} {{type}}",
+    "file": "file",
+    "files": "files",
+    "pattern": "pattern:",
+    "in": "in:"
+  },
+  "fileOperations": {
+    "updated": "File updated successfully",
+    "created": "File created successfully",
+    "written": "File written successfully",
+    "diff": "Diff",
+    "newFile": "New File",
+    "viewContent": "View file content",
+    "viewFullOutput": "View full output ({{count}} chars)",
+    "contentDisplayed": "The file content is displayed in the diff view above"
+  },
+  "interactive": {
+    "title": "Interactive Prompt",
+    "waiting": "Waiting for your response in the CLI",
+    "instruction": "Please select an option in your terminal where Claude is running.",
+    "selectedOption": "✓ Claude selected option {{number}}",
+    "instructionDetail": "In the CLI, you would select this option interactively using arrow keys or by typing the number."
+  },
+  "thinking": {
+    "title": "Thinking...",
+    "emoji": "💭 Thinking..."
+  },
+  "json": {
+    "response": "JSON Response"
+  },
+  "permissions": {
+    "grant": "Grant permission for {{tool}}",
+    "added": "Permission added",
+    "addTo": "Adds {{entry}} to Allowed Tools.",
+    "retry": "Permission saved. Retry the request to use the tool.",
+    "error": "Unable to update permissions. Please try again.",
+    "openSettings": "Open settings",
+    "required": "Permission required",
+    "tool": "Tool:",
+    "allowRule": "Allow rule:",
+    "viewInput": "View tool input",
+    "deny": "Deny",
+    "allowOnce": "Allow once",
+    "allowAndRemember": "Allow & remember",
+    "allowSaved": "Allow (saved)"
+  },
+  "todo": {
+    "updated": "Todo list has been updated successfully",
+    "current": "Current Todo List"
+  },
+  "plan": {
+    "viewPlan": "📋 View implementation plan",
+    "title": "Implementation Plan",
+    "toggle": "Toggle plan",
+    "generating": "Generating plan…",
+    "rawParams": "raw params",
+    "revise": "Revise",
+    "build": "Build"
+  },
+  "usageLimit": {
+    "resetAt": "Claude usage limit reached. Your limit will reset at **{{time}} {{timezone}}** - {{date}}"
+  },
+  "codex": {
+    "permissionMode": "Permission Mode",
+    "modes": {
+      "default": "Default Mode",
+      "auto": "Auto Mode",
+      "acceptEdits": "Accept Edits",
+      "bypassPermissions": "Bypass Permissions",
+      "plan": "Plan Mode"
+    },
+    "descriptions": {
+      "default": "Only trusted commands (ls, cat, grep, git status, etc.) run automatically. Other commands are skipped. Can write to workspace.",
+      "auto": "A model classifier decides per tool call whether to approve or deny. Hands-off, but safer than Bypass — denials still happen.",
+      "acceptEdits": "All commands run automatically within the workspace. Full auto mode with sandboxed execution.",
+      "bypassPermissions": "All commands run automatically with no approval prompts. Capped to workspace-write with network OFF — same ceiling as Accept Edits — unless the operator has enabled full disk/network access for this deployment (off by default). Use with caution.",
+      "plan": "Planning mode - no commands are executed"
+    },
+    "technicalDetails": "Technical details",
+    "posture": {
+      "title": "Actual sandbox ceiling",
+      "default": "sandbox: workspace-write · approvals: untrusted · network: OFF",
+      "acceptEdits": "sandbox: workspace-write · approvals: never · network: OFF",
+      "bypassPermissions": "sandbox: workspace-write · approvals: never · network: OFF — same as Accept Edits. Full disk/network access only if the operator enabled it for this deployment (off by default)."
+    }
+  },
+  "gemini": {
+    "permissionMode": "Gemini Permission Mode",
+    "description": "Control how Gemini CLI handles operation approvals.",
+    "modes": {
+      "default": {
+        "title": "Standard (Ask for Approval)",
+        "description": "Gemini will prompt for approval before executing commands, writing files, and fetching web resources."
+      },
+      "autoEdit": {
+        "title": "Auto Edit (Skip File Approvals)",
+        "description": "Gemini will automatically approve file edits and web fetches, but will still prompt for shell commands."
+      },
+      "yolo": {
+        "title": "YOLO (Bypass All Permissions)",
+        "description": "Gemini will execute all operations without asking for approval. Exercise caution."
+      }
+    }
+  },
+  "input": {
+    "placeholder": "Type / for commands, @ for files, or ask {{provider}} anything...",
+    "placeholderDefault": "Type your message...",
+    "disabled": "Input disabled",
+    "attachFiles": "Attach files",
+    "attachFilesAndImages": "Attach files or images",
+    "attachImages": "Attach images",
+    "send": "Send",
+    "stop": "Stop",
+    "hintText": {
+      "ctrlEnter": "Ctrl+Enter to send • Shift+Enter for new line",
+      "enter": "Enter to send • Shift+Enter for new line"
+    },
+    "clickToChangeMode": "Click to change permission mode (or press Tab in input)",
+    "showAllCommands": "Show all commands",
+    "showAllCommandsCount": "Show all commands ({{count}})",
+    "clearInput": "Clear input",
+    "scrollToBottom": "Scroll to bottom",
+    "dropFilesHere": "Drop files here",
+    "nonClaudeAttachmentHint": "Attachments are used with Claude only",
+    "voice": {
+      "start": "Voice dictation",
+      "stop": "Stop voice dictation",
+      "language": "Dictation language",
+      "languageHint": "Right-click or long-press to pick the dictation language",
+      "listening": "Listening…",
+      "startedAnnouncement": "Voice dictation started",
+      "stoppedAnnouncement": "Voice dictation stopped",
+      "consentTitle": "Voice dictation and privacy",
+      "consent": "Audio is processed by your browser's speech engine during dictation (Chrome sends it to Google servers). Continue?",
+      "consentAccept": "Continue",
+      "consentCancel": "Cancel",
+      "errors": {
+        "notAllowed": "Microphone permission denied. Allow it in your browser settings and try again.",
+        "network": "The speech recognition service is unreachable. Check your connection.",
+        "audioCapture": "No microphone available. Check your device and try again.",
+        "languageNotSupported": "The selected language is not supported by this browser.",
+        "startFailed": "Could not start voice dictation.",
+        "restartExhausted": "Dictation stopped after repeated retries. Press the button to start again.",
+        "unsupported": "Voice dictation is unavailable in this browser or outside a secure (HTTPS) connection.",
+        "generic": "Voice dictation could not continue.",
+        "noKey": "No transcription key is configured. Add one in Settings and try again.",
+        "invalidKey": "The provider rejected the transcription key. Check it in Settings.",
+        "rateLimited": "The provider hit its rate limit. Wait a moment and try again.",
+        "timeout": "Transcription timed out. Try a shorter recording.",
+        "unreachable": "The transcription provider is unreachable. Check your connection or the provider URL.",
+        "transcriptionFailed": "The provider could not complete the transcription.",
+        "tooLarge": "The recording is larger than the {{maxMb}} MB limit. Record a shorter clip.",
+        "unsupportedAudio": "This recording format is not supported.",
+        "emptyAudio": "No audio was captured. Check your microphone and try again.",
+        "captureFailed": "Could not open the microphone.",
+        "recorderFailed": "Audio recording is not available in this browser.",
+        "uploadFailed": "Could not upload the recording. Check your connection and try again."
+      },
+      "mode": "Transcription mode",
+      "modeFast": "Fast (browser)",
+      "modeFastHint": "Instant and free, no punctuation, language picked in advance",
+      "modeAccurate": "Accurate (Whisper)",
+      "modeAccurateHint": "Automatic language detection and punctuation, text arrives after a second or two",
+      "modeAccurateNeedsKey": "Needs a key in Settings",
+      "modeAccurateUnsupported": "Recording is unsupported in this browser or outside a secure (HTTPS) connection",
+      "languageAutoNote": "Accurate mode detects the language from the audio, so there is no language to pick here.",
+      "startAccurate": "Record, then transcribe accurately",
+      "stopAccurate": "Stop recording and transcribe",
+      "recording": "Recording…",
+      "transcribing": "Transcribing…",
+      "recordingAnnouncement": "Recording started",
+      "transcribingAnnouncement": "Transcribing the recording",
+      "transcribedAnnouncement": "Transcribed text inserted",
+      "maxDurationNotice": "The recording hit its two-minute limit and stopped; what was captured is being transcribed.",
+      "accurateConsentTitle": "Accurate transcription and privacy",
+      "accurateConsent": "In accurate mode your voice is recorded, uploaded to the Nassaj server, and passed to the external transcription provider using the operator key. The recording is never written to disk or to logs. Continue?",
+      "modeAccurateUnknown": "Could not reach the server — reload the page"
+    }
+  },
+  "scheduled": {
+    "open": "Schedule this message",
+    "title": "Schedule message",
+    "editTitle": "Edit scheduled message",
+    "description": "Nassaj will send it in this conversation at the local time you choose.",
+    "message": "Message",
+    "quickTime": "Quick time",
+    "date": "Date",
+    "time": "Time",
+    "summary": "Scheduled for {{value}}",
+    "schedule": "Schedule",
+    "saveChanges": "Save changes",
+    "close": "Close",
+    "panelTitle": "Scheduled messages",
+    "refresh": "Refresh scheduled messages",
+    "edit": "Edit scheduled message",
+    "retry": "Retry scheduled message",
+    "cancel": "Cancel scheduled message",
+    "failureCode": "Could not send ({{code}})",
+    "failureMessage": "Could not send",
+    "center": {
+      "title": "Scheduled messages",
+      "description": "Review and manage upcoming messages across all conversations.",
+      "openWithCount": "Open scheduled messages ({{count}})",
+      "searchKeywords": "schedule upcoming delayed messages",
+      "filtersLabel": "Filter scheduled messages",
+      "filters": {
+        "all": "All",
+        "upcoming": "Upcoming",
+        "failed": "Failed"
+      },
+      "groups": {
+        "failed": "Needs attention",
+        "today": "Today",
+        "tomorrow": "Tomorrow",
+        "later": "Later"
+      },
+      "loading": "Loading scheduled messages",
+      "resultCount": "{{count}} scheduled messages shown",
+      "showingOf": "Showing {{shown}} of {{total}} messages",
+      "loadMore": "Load more scheduled messages",
+      "rowLabel": "{{project}}, {{session}}, {{status}}, {{time}}",
+      "emptyTitle": "No scheduled messages here",
+      "emptyDescription": "Messages you schedule from a conversation will appear here.",
+      "stale": "Could not refresh. Showing the last available snapshot.",
+      "unknownSession": "Conversation",
+      "unknownProject": "Unknown project",
+      "contentHidden": "Message content is hidden",
+      "showContent": "Show message content",
+      "hideContent": "Hide message content",
+      "reschedule": "Reschedule failed message",
+      "cancelledSuccess": "Scheduled message cancelled",
+      "rescheduledSuccess": "Scheduled message rescheduled"
+    },
+    "presets": {
+      "15m": "In 15 min",
+      "1h": "In 1 hour",
+      "evening": "This evening",
+      "tomorrow": "Tomorrow"
+    },
+    "status": {
+      "pending": "Scheduled",
+      "running": "Sending",
+      "sent": "Sent",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "errors": {
+      "empty": "Write a message first.",
+      "invalid": "Choose a valid date and time.",
+      "tooSoon": "Choose a time at least one minute from now.",
+      "tooLate": "Messages can be scheduled up to 30 days ahead.",
+      "save": "Could not save the scheduled message. Try again.",
+      "load": "Could not load scheduled messages."
+    }
+  },
+  "fileAttachment": {
+    "removeFile": "Remove file",
+    "uploading": "Uploading…",
+    "errorType": "File type not allowed",
+    "errorSize": "File too large (max 50 MB)",
+    "errorCount": "Too many files attached (max {{max}})"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "Effort Level",
+      "description": "Controls how much compute Claude dedicates to your request",
+      "active": "Active",
+      "tip": "ultracode activates maximum depth with multi-agent formatting — ultracode and max add color cues"
+    },
+    "modes": {
+      "none": {
+        "name": "auto",
+        "description": "Use the default effort level for your model"
+      },
+      "low": {
+        "name": "low",
+        "description": "Fast, light — best for simple questions"
+      },
+      "medium": {
+        "name": "medium",
+        "description": "Balanced depth and speed"
+      },
+      "high": {
+        "name": "high",
+        "description": "Deeper reasoning for complex tasks"
+      },
+      "xhigh": {
+        "name": "xhigh",
+        "description": "Extra-high effort for demanding problems"
+      },
+      "max": {
+        "name": "max",
+        "description": "Maximum effort — full compute budget (this session only, not saved to settings)"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "Session mode: xhigh + dynamic workshop formatting — not a saved effort level"
+      }
+    },
+    "buttonTitle": "Effort: {{mode}}",
+    "ultracodeActive": "Ultracode effort active"
+  },
+  "providerSelection": {
+    "title": "Choose Your AI Assistant",
+    "description": "Select a provider to start a new conversation",
+    "selectModel": "Select Model",
+    "providerInfo": {
+      "anthropic": "by Anthropic",
+      "openai": "by OpenAI",
+      "cursorEditor": "AI Code Editor",
+      "google": "by Google"
+    },
+    "readyPrompt": {
+      "claude": "Ready to use Claude with {{model}}. Start typing your message below.",
+      "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
+      "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
+      "gemini": "Ready to use Gemini with {{model}}. Start typing your message below.",
+      "antigravity": "Ready to use Antigravity (agy) with {{model}}. Start typing your message below.",
+      "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
+      "default": "Select a provider above to begin",
+      "kimi": "Ready to use Kimi with {{model}}. Start typing your message below.",
+      "deepseek": "Ready to use DeepSeek with {{model}}. Start typing your message below.",
+      "glm": "Ready to use GLM with {{model}}. Start typing your message below.",
+      "claudeEngine": "Ready: the Claude engine runs on {{provider}} with {{model}}. Start typing your message below.",
+      "hermes": "Ready with Hermes {{model}}",
+      "sakana": "Ready with Sakana"
+    },
+    "antigravity": {
+      "activeModel": "Active model",
+      "activeModelLabel": "Active model",
+      "loading": "Loading…",
+      "unknown": "Unknown"
+    },
+    "pressToSearch": "Press <kbd>{{shortcut}}</kbd> to search sessions, files, and commits",
+    "refresh": {
+      "button": "Refresh models and auth status",
+      "refreshing": "Refreshing…"
+    },
+    "providerUnavailable": "Provider not available",
+    "clickToChange": "Click to change model",
+    "loadingModels": "Loading models…",
+    "noModelsFound": "No models found.",
+    "searchModels": "Search models…",
+    "signIn": "Sign in",
+    "addApiKey": "Add {{provider}} API key to enable",
+    "engineOnVendor": "Claude engine on {{provider}}",
+    "engineLine": {
+      "subscription": "via {{engine}} · your subscription",
+      "native": "via {{engine}} · its own engine",
+      "apiKey": "via {{engine}} · API key",
+      "local": "Local model · no monetary cost in Nassaj",
+      "yourKey": "via {{host}} · your key",
+      "zen": "via OpenCode Zen · needs a balance",
+      "needsKey": "via {{host}} · add a {{engine}} key",
+      "upstream": "via {{engine}}"
+    },
+    "authMode": {
+      "apiKey": "API key",
+      "both": "Subscription + API"
+    },
+    "favorites": {
+      "group": "Favourites",
+      "addAriaLabel": "Add {{model}} to favourites",
+      "removeAriaLabel": "Remove {{model}} from favourites"
+    },
+    "modelSelectorTitle": "Model selector",
+    "chooseModel": "Choose a model"
+  },
+  "session": {
+    "historyError": {
+      "budget": "This conversation exceeds the current history loading limit.",
+      "incomplete": "Conversation history is currently incomplete. Try again later.",
+      "revision": "Conversation history changed. Refresh recent messages before continuing.",
+      "busy": "The service is busy. Please wait before trying again.",
+      "timeout": "Loading conversation history timed out.",
+      "unavailable": "Conversation history could not be loaded.",
+      "retained": "Displayed and pending messages have been kept.",
+      "retry": "Try again",
+      "refresh": "Refresh recent messages",
+      "wait": "Please wait before trying again"
+    },
+    "continue": {
+      "title": "Continue your conversation",
+      "description": "Ask questions about your code, request changes, or get help with development tasks"
+    },
+    "loading": {
+      "olderMessages": "Loading older messages...",
+      "sessionMessages": "Loading session messages..."
+    },
+    "messages": {
+      "showingOf": "Showing {{shown}} of {{total}} messages",
+      "scrollToLoad": "Scroll up to load more",
+      "showingLast": "Showing last {{count}} messages ({{total}} total)",
+      "loadEarlier": "Load earlier messages",
+      "loadAll": "Load all messages",
+      "loadingAll": "Loading all messages...",
+      "allLoaded": "All messages loaded",
+      "perfWarning": "All messages loaded — scrolling may be slower. Click \"Scroll to bottom\" to restore performance."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "Select a Project",
+      "description": "Choose a project to open an interactive shell in that directory"
+    },
+    "status": {
+      "newSession": "New Session",
+      "initializing": "Initializing...",
+      "restarting": "Restarting..."
+    },
+    "actions": {
+      "disconnect": "Disconnect",
+      "disconnectTitle": "Disconnect from shell",
+      "restart": "Restart",
+      "restartTitle": "Restart Shell",
+      "connect": "Continue in Shell",
+      "connectTitle": "Connect to shell"
+    },
+    "loading": "Loading terminal...",
+    "connecting": "Connecting to shell...",
+    "reconnecting": "Reconnecting to shell...",
+    "startSession": "Start a new Claude session",
+    "resumeSession": "Resume session: {{displayName}}...",
+    "runCommand": "Run {{command}} in {{projectName}}",
+    "startCli": "Starting Claude CLI in {{projectName}}",
+    "defaultCommand": "command"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "Thinking",
+      "processing": "Processing",
+      "analyzing": "Analyzing",
+      "working": "Working",
+      "computing": "Computing",
+      "reasoning": "Reasoning"
+    },
+    "state": {
+      "live": "Live",
+      "paused": "Paused"
+    },
+    "elapsed": {
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}}m {{seconds}}s",
+      "label": "{{time}} elapsed",
+      "startingNow": "Starting now"
+    },
+    "controls": {
+      "stopGeneration": "Stop Generation",
+      "pressEscToStop": "Press Esc anytime to stop"
+    },
+    "providers": {
+      "assistant": "Assistant"
+    },
+    "frozen": "Paused (process frozen)"
+  },
+  "runProgress": {
+    "tasksLabel": "Tasks",
+    "barAria": "Task progress",
+    "tasksTooltip": "Tasks: {{done}} of {{total}} done",
+    "inProgressTooltip_one": "{{count}} in progress",
+    "inProgressTooltip_other": "{{count}} in progress",
+    "agentsTooltip": "Sub-agents: {{done}}/{{total}}",
+    "agentWorking": "Agent · {{calls}}",
+    "agentWorkingTooltip": "Sub-agent working: {{calls}} calls",
+    "estimateRemaining": "≈ {{time}} left",
+    "estimating": "estimating…",
+    "estimateTooltip": "Rough estimate — based on completed tasks so far."
+  },
+  "agentActivity": {
+    "title": "Agent activity",
+    "summary": "{{running}}/{{total}} running",
+    "summaryIdle": "{{done}}/{{total}} done",
+    "approvalSummary": "{{approved}}/{{total}} approved · {{percent}}%",
+    "running": "Running",
+    "done": "Done",
+    "reviewing": "Coordinator reviewing",
+    "rejected": "Rejected",
+    "reviewActions": "Coordinator review actions",
+    "startReview": "Start review",
+    "approve": "Approve",
+    "reject": "Reject",
+    "currently": "now",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} tool calls",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "Tool history coming soon.",
+    "noTools": "No tool calls recorded yet.",
+    "toolSuccess": "Done",
+    "toolRunning": "Running",
+    "backgroundWorkflow": "Background workflow running",
+    "stale": "No signal",
+    "staleTooltip": "Started, never returned a result, and its transcript stopped growing — neither running nor confirmed dead.",
+    "collapseAria": "Collapse agent activity",
+    "expandAria": "Expand agent activity"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "Select a project to start chatting with {{provider}}"
+  },
+  "tasks": {
+    "nextTaskPrompt": "Start the next task"
+  },
+  "participants": {
+    "sessionId": "Session ID",
+    "copySessionId": "Copy session ID",
+    "sessionIdCopied": "Session ID copied",
+    "sessionIdCopyFailed": "Copy failed. Select the session ID to copy it manually.",
+    "loading": "Loading participants",
+    "lastSeen": "Last seen",
+    "invocations_one": "{{count}} invocation",
+    "invocations_other": "{{count}} invocations",
+    "usersAria_one": "{{count}} participant",
+    "usersAria_other": "{{count}} participants",
+    "barAria": "Conversation participants",
+    "openSessionsNow": "Active conversations",
+    "openSessionsNowCount": "{{count}} active conversations",
+    "andMore_one": "and {{count}} more",
+    "andMore_other": "and {{count}} more",
+    "projectSummary": "{{users}} users · {{agents}} agents",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "user": "Member"
+    },
+    "agentKinds": {
+      "model": "Base model",
+      "subagent": "Subagent"
+    },
+    "agentSummary_one": "{{count}} agent",
+    "agentSummary_other": "{{count}} agents",
+    "totalInvocations_one": "{{count}} call",
+    "totalInvocations_other": "{{count}} calls",
+    "agentSummaryAria": "{{agents}} distinct agents · {{calls}} total calls",
+    "unknownAuthor": "Unknown author",
+    "actorsFallback": "Actors",
+    "agentsPanelTitle": "Conversation actors",
+    "openAgentsDetails": "Open conversation actor details",
+    "modelsSection": "Models",
+    "currentModel": "Current",
+    "earlierModel": "Earlier",
+    "subagentsSection": "Subagents",
+    "turns_one": "{{count}} turn",
+    "turns_other": "{{count}} turns",
+    "harnessLine": "Harness: {{harness}}",
+    "olderModels_one": "{{count}} earlier model",
+    "olderModels_other": "{{count}} earlier models"
+  },
+  "ws": {
+    "statusConnected": "Connected",
+    "statusReconnecting": "Reconnecting…",
+    "statusDisconnected": "Disconnected",
+    "ariaConnected": "WebSocket connected",
+    "ariaReconnecting": "WebSocket reconnecting",
+    "ariaDisconnected": "WebSocket disconnected",
+    "sendFailed": "Message not sent — connection lost",
+    "sendDisabledTitle": "Cannot send — connection lost",
+    "abortFailed": "Could not stop — connection lost. Retrying may help."
+  },
+  "serverError": {
+    "project_dir_missing": "Project folder not found on disk",
+    "cli_not_installed": "CLI not installed — please install the required CLI tool",
+    "spawn_failed": "Failed to start the process — check server logs for details",
+    "session_create_failed": "Could not start a new session — please try again",
+    "session_busy": "Your message was not sent: this conversation has a run in progress. Wait for it to finish or stop it, then send again",
+    "authentication_required": "Provider authentication is missing or expired. Check its connection in Settings",
+    "model_not_supported": "The selected model is not supported by this provider",
+    "codex_cache_incompatible": "The Codex model cache is incompatible with the installed runtime",
+    "usage_limit": "The provider reported that a usage limit was reached",
+    "codex_turn_failed": "The Codex run could not be completed",
+    "abort_failed": "Could not confirm that the run stopped",
+    "codeLabel": "Code",
+    "unknown": "A server error occurred; its cause could not be determined from the available information"
+  },
+  "outbox": {
+    "cardLabel": "Unsent message",
+    "titleFailed": "This message was not sent",
+    "titleDelivered": "Message received",
+    "dismissDelivered": "Remove local copy",
+    "dismissAllDelivered": "Remove received copies from this browser",
+    "dismissAllDeliveredDescription": "For your account across all conversations. Remove after checking they are in history; history and unconfirmed messages are kept.",
+    "storageFull": "Your message could not be saved safely. Remove an unneeded local copy and try again. Nothing was sent.",
+    "titleUnconfirmed": "Delivery of this message was never confirmed",
+    "retry": "Resend",
+    "tryAgain": "Try again",
+    "edit": "Edit",
+    "delete": "Delete",
+    "verify": "Check",
+    "showMore": "Show full text",
+    "showLess": "Collapse text",
+    "reason": {
+      "delivered": "Kept here until it appears in conversation history",
+      "message_dispatch_not_started": "This attempt did not start. You can retry.",
+      "transport": "Connection lost — the message never left the browser",
+      "unconfirmed": "Sent, never confirmed — check before resending",
+      "unverified": "Could not verify whether it arrived",
+      "run_failed": "The server refused to run this message",
+      "attachment_provider_unsupported": "This message cannot be resent with its images through this path. The original was kept; use Edit to reattach them. [ATTACHMENT_PROVIDER_UNSUPPORTED]",
+      "attachment_copy_failed": "The images could not be saved for the new attempt. Nothing was resent; the original copy was kept. [ATTACHMENT_COPY_FAILED]",
+      "attachment_payload_unknown": "Original attachment details are unavailable. Reattach the files before sending; the local copy was kept. [ATTACHMENT_PAYLOAD_UNKNOWN]",
+      "attachment_files_unavailable": "Original files cannot be restored. Reattach them before sending; the local copy was kept. [ATTACHMENT_FILES_UNAVAILABLE]",
+      "attachment_images_missing": "Saved images are missing. Reattach them before sending; the local copy was kept. [ATTACHMENT_IMAGES_MISSING]",
+      "attachment_images_incomplete": "Some saved images are missing or differ. Reattach all images before sending. [ATTACHMENT_IMAGES_INCOMPLETE]",
+      "attachment_images_unreadable": "Saved images could not be read. Nothing was resent; try again or reattach them. [ATTACHMENT_IMAGES_UNREADABLE]",
+      "attachment_upload_failed": "The attached images could not be uploaded",
+      "image_rejected": "The attached images were rejected",
+      "conversation_not_found": "The previous conversation can no longer be resumed",
+      "client_msg_id_already_started": "This turn may already have started — check before trying again",
+      "client_msg_id_fingerprint_mismatch": "This message identity belongs to a different payload and cannot be resent automatically",
+      "unknown": "Unknown reason"
+    }
+  },
+  "refreshChat": {
+    "button": "Refresh chat",
+    "refreshing": "Refreshing…"
+  },
+  "composerMode": {
+    "chat": "Chat",
+    "agent": "Agent"
+  },
+  "coordinationLevel": {
+    "selectorTitle": "Coordination level",
+    "appliesNextReply": "Takes effect from the next reply",
+    "lockedDuringRun": "Coordination level cannot be changed during an active turn",
+    "messageBadge": "Coordination level: {{name}}",
+    "enforcement": {
+      "mechanical": "This engine enforces the limit itself, plus the injected directive.",
+      "textual": "Directive only: injected into the prompt, with no limit enforced by the engine.",
+      "none": "No channel: this engine has no runtime on this deployment."
+    },
+    "ariaLabel": "Coordination level {{level}}: {{name}}",
+    "levels": {
+      "direct": {
+        "short": "Direct",
+        "full": "Direct execution",
+        "description": "Default mode: no extra constraint; nassaj rules still apply."
+      },
+      "delegate": {
+        "short": "Delegate",
+        "full": "Delegate to agents",
+        "description": "The coordinator delegates execution to agents."
+      },
+      "delegate_review": {
+        "short": "Delegate + review",
+        "full": "Delegated with review",
+        "description": "Requests up to 10 delegation levels where supported, with reviews passed upward; engine limits apply."
+      }
+    }
+  },
+  "customCommand": {
+    "confirmBashExecution": "This command contains bash commands that will be executed. Do you want to proceed?",
+    "executionCancelled": "Command execution cancelled",
+    "executeError": "Error executing command: {{message}}",
+    "emptyResult": "Could not display the command result: no content was returned.",
+    "invalidResult": "The command returned an unsupported result.",
+    "unknownError": "Unknown error"
+  },
+  "inlineModelSwitcher": {
+    "label": "Model",
+    "tooltip": "Takes effect from the next reply",
+    "noModels": "No models available",
+    "switching": "Switching…",
+    "ariaLabel": "Switch model: {{model}}",
+    "scopeSession": "This conversation only",
+    "scopeDefault": "Default for all new conversations",
+    "confirmedSession": "Applied to this conversation: {{model}}",
+    "confirmedDefault": "Set as default: {{model}}",
+    "followDefault": "Follow current default",
+    "clearing": "Resetting…",
+    "clearedNotice": "Conversation returned to default: {{model}}",
+    "engineRunning": "Running on {{engine}} — pick another model or engine",
+    "engineRunningShort": "On {{engine}}",
+    "officialEngine": "Anthropic"
+  },
+  "conversationCost": {
+    "baseRateEstimate": "Astra estimate uses Standard base rates verified on 2026-09-06; Fast and long-context adjustments are not included. Actual charges may differ.",
+    "pricingUnavailable": "Price unavailable — usage is recorded, but pricing is incomplete in the calculator",
+    "partialAmount": "Partial",
+    "label": "Estimated value",
+    "tooltipTitle": "Conversation summary",
+    "unavailable": "Estimated value is not available for this provider",
+    "partial": "Partial — some models have no published price",
+    "apiEquivalent": "API-equivalent value of this usage on a subscription — not an amount billed",
+    "billed": "Billed usage",
+    "pricesAsOf": "Prices as of {{date}}",
+    "subagents": "Includes subagent activity ({{count}} requests)",
+    "perModel": "By model",
+    "codexModelUsage": "{{count}} threads · {{tokens}} processing units",
+    "requestModelUsage": "{{count}} requests · {{tokens}} processing units",
+    "totalTokens": "processing units",
+    "tokensUnavailable": "Processing-unit total is not available",
+    "workDuration": "Work time",
+    "loading": "Calculating…",
+    "refreshing": "Refreshing saved summary…",
+    "stale": "Showing the last saved summary",
+    "incompleteSnapshot": "Summary is still being completed",
+    "turnTokens": "tokens",
+    "turnCostUnavailable": "Turn cost unavailable"
+  },
+  "closeConversation": {
+    "close": "Close conversation",
+    "reopen": "Reopen conversation",
+    "closedBadge": "Closed",
+    "failed": "Could not update the conversation state"
+  },
+  "resources": {
+    "title": "Conversation resources",
+    "close": "Close",
+    "unavailable": "Unavailable",
+    "idle": "No live process",
+    "cpu": "CPU",
+    "summary": "Memory {{mem}} · {{count}} processes",
+    "pssNote": "PSS measurement — shared pages split across readers, never double-counted.",
+    "rssNote": "RSS measurement (PSS unavailable) — shared pages may be counted more than once.",
+    "unattributed": "No live process attributed to this conversation — idle, or it survived a server restart.",
+    "kind": {
+      "session": "Conversation",
+      "agent": "Agents",
+      "browser": "Browser",
+      "test": "Tests",
+      "build": "Build",
+      "other": "Other"
+    }
+  },
+  "engineSwitch": {
+    "exportWarning": "Switching engines replays this whole conversation ({{turns}} turns) to the new provider, including what the previous engine wrote. Continue?"
+  },
+  "commandResult": {
+    "closeAria": "Close command result modal",
+    "escHint": "Esc closes the modal.",
+    "close": "Close",
+    "help": {
+      "filterPlaceholder": "Filter commands…",
+      "noMatch": "No commands match that filter.",
+      "noDescription": "No description available.",
+      "syntax": "Syntax",
+      "quickTip": "Quick tip",
+      "allArgs": "<code>$ARGUMENTS</code> passes all args.",
+      "positionalArgs": "<code>$1</code>, <code>$2</code> pass positional args.",
+      "fileRef": "<code>@file</code> includes file contents.",
+      "quickTipBody": "Type <code>/</code> in the composer to open the command palette, then use arrows and Enter to run a command."
+    },
+    "models": {
+      "engineLocked": "This conversation runs on the <strong>{{engine}}</strong> engine, so its replies are generated by that endpoint — not by Anthropic. The list below is {{engine}}’s own catalog, shown for reference; pinning from this panel is disabled because it can only move one axis, and a {{provider}} model id sent to {{engine}} would fail. To change model or engine mid-conversation, use the model switcher in the composer toolbar — it moves both together.",
+      "fallbackCatalog": "Could not load the live model list for {{provider}}. Showing a built-in fallback list; selecting a model still works. Try “Refresh from providers”.",
+      "countBadge": "{{count}} models",
+      "activeModel": "Active model",
+      "nextResponse": "Next response: {{model}}",
+      "default": "Default",
+      "updated": "Updated",
+      "catalogRefresh": "Catalog refresh",
+      "allProviders": "All providers",
+      "cacheNote": "Model lists are cached for 3 days. Refresh after CLI, auth, or config changes, or when a new model is missing.",
+      "currentSelection": "Current selection",
+      "nextResponseSelection": "Next response selection",
+      "applying": "Applying…",
+      "copyModelId": "Copy model id {{model}}",
+      "noMatch": "No models match that search."
+    },
+    "cost": {
+      "provider": "Provider",
+      "model": "Model",
+      "totalTokens": "Total tokens used",
+      "inputTokens": "Input tokens",
+      "outputTokens": "Output tokens",
+      "breakdown": "Breakdown",
+      "unavailable": "Unavailable"
+    },
+    "status": {
+      "runtimeOnline": "Runtime online",
+      "processResponding": "Process {{pid}} is responding.",
+      "statusWord": "status",
+      "healthy": "Healthy",
+      "unknown": "Unknown",
+      "rows": {
+        "package": "Package",
+        "version": "Version",
+        "uptime": "Uptime",
+        "provider": "Provider",
+        "model": "Model",
+        "node": "Node.js",
+        "platform": "Platform",
+        "memory": "Memory"
+      }
+    },
+    "meta": {
+      "help": {
+        "eyebrow": "Command center",
+        "title": "Help & shortcuts",
+        "subtitle": "Search built-ins, syntax patterns, and command usage without leaving the chat."
+      },
+      "models": {
+        "eyebrow": "Model inventory",
+        "title": "Available models",
+        "subtitle": "Browse, search, and copy model IDs for the active provider."
+      },
+      "cost": {
+        "eyebrow": "Session telemetry",
+        "title": "Token usage",
+        "subtitle": "Input, output, and total token counts for this session."
+      },
+      "status": {
+        "eyebrow": "Runtime health",
+        "title": "System status",
+        "subtitle": "Version, provider, runtime, and environment details in one place."
+      }
+    }
+  },
+  "commandMenu": {
+    "none": "No commands available",
+    "ariaLabel": "Available commands",
+    "groups": {
+      "frequent": "Frequently Used",
+      "builtin": "Built-in Commands",
+      "skill": "Skills",
+      "opencode": "OpenCode Commands",
+      "project": "Project Commands",
+      "user": "User Commands",
+      "other": "Other Commands"
+    }
+  },
+  "commandExecution": {
+    "running": "Running command"
+  },
+  "images": {
+    "remove": "Remove image",
+    "closePreview": "Close preview",
+    "omitted": "{{count}} attached image(s) were not loaded to protect memory."
+  },
+  "questionAnswer": {
+    "custom": "(custom)",
+    "skipped": "Skipped",
+    "noAnswer": "No answer provided"
+  },
+  "askUser": {
+    "title": "Claude needs your input",
+    "selectAll": "Select all that apply",
+    "other": "Other…",
+    "answerPlaceholder": "Type your answer…",
+    "skip": "Skip",
+    "skipAll": "Skip all",
+    "back": "Back",
+    "submit": "Submit",
+    "next": "Next"
+  },
+  "reasoning": {
+    "thinking": "Thinking…",
+    "thoughtBrief": "Thought for a few seconds",
+    "thoughtFor_one": "Thought for {{count}} second",
+    "thoughtFor_other": "Thought for {{count}} seconds"
+  },
+  "common": {
+    "copyToClipboard": "Copy to clipboard"
+  },
+  "todoList": {
+    "title_one": "Todo list ({{count}} item)",
+    "title_other": "Todo list ({{count}} items)"
+  },
+  "toolStatus": {
+    "running": "Running",
+    "completed": "Completed",
+    "error": "Error",
+    "denied": "Denied"
+  },
+  "imageCrop": {
+    "title": "Crop image",
+    "cropButton": "Crop {{name}}",
+    "confirm": "Apply crop",
+    "cancel": "Cancel",
+    "zoom": "Zoom",
+    "rotate": "Rotate 90°",
+    "aspectLabel": "Aspect ratio",
+    "aspectFree": "Free",
+    "aspect1to1": "1:1",
+    "aspect4to3": "4:3",
+    "aspect16to9": "16:9",
+    "processing": "Processing…",
+    "error": "Could not crop the image. Please try again.",
+    "cropArea": "Crop area",
+    "cropHint": "Use arrow keys to move or resize the crop area"
+  }
+}

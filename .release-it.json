@@ -1,0 +1,14 @@
+{
+  "_notice": "Disabled compatibility guard. Nassaj uses an exact four-part version that release-it cannot preserve. Use release.sh or the governed GitHub workflow.",
+  "git": {
+    "commit": false,
+    "tag": false,
+    "push": false
+  },
+  "npm": {
+    "publish": false
+  },
+  "github": {
+    "release": false
+  }
+}

@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>دليل إعادة التصميم البصري — نسّاج</title>
+<style>
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2') format('woff2');font-weight:400;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2') format('woff2');font-weight:600;font-display:swap;unicode-range:U+0600-06FF,U+0750-077F,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-latin-400-normal.woff2') format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'IBM Plex Sans Arabic';src:url('fonts/ibm-plex-sans-arabic-latin-600-normal.woff2') format('woff2');font-weight:600;font-display:swap}
+:root{
+  --navy:#1B2A4A;--navy-900:#10192C;--navy-800:#16223B;--navy-500:#49556E;--navy-300:#767F92;--navy-100:#BBBFC9;--navy-50:#E8EAED;
+  --gold:#C4A265;--gold-800:#76613D;--gold-700:#9D8251;--gold-300:#D6BE94;--gold-100:#EDE3D1;--cream:#F9F6F0;
+  --gray:#6B6B6B;--err:#A33B38;--ok:#2E6B4E;
+  --bg:var(--cream);--fg:var(--navy-900);--muted:var(--gray);--card:#fff;--line:var(--navy-100);
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:var(--navy-900);--fg:#E7EAEE;--muted:#B0B7C4;--card:var(--navy-800);--line:#2B3550}
+}
+*{box-sizing:border-box}
+html{color-scheme:light dark}
+html,body{overflow-x:hidden;max-width:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:'IBM Plex Sans Arabic','IBM Plex Sans',sans-serif;font-size:17px;line-height:1.85;letter-spacing:normal;-webkit-text-size-adjust:100%}
+.wrap{max-width:53rem;margin-inline:auto;padding:clamp(1rem,4vw,3rem) clamp(1rem,5vw,2.5rem) 6rem}
+.masthead{border-block-end:1px solid var(--line);padding-block-end:1.25rem;margin-block-end:2.5rem}
+.masthead .kicker{color:var(--gold-800);font-weight:600;font-size:.875rem}
+.masthead h1{margin:.4rem 0 .5rem;font-size:clamp(1.7rem,4.5vw,2.4rem);line-height:1.35;font-weight:600}
+.masthead .rule{width:8rem;height:1px;background:var(--gold);margin-block:.9rem}
+.masthead .meta{color:var(--muted);font-size:.8125rem}
+.nav{display:flex;flex-wrap:wrap;gap:.5rem;margin-block-start:1.1rem}
+.nav a{display:inline-block;padding:.35rem .8rem;border:1px solid var(--line);border-radius:.5rem;color:var(--fg);text-decoration:none;font-size:.875rem;transition:background .12s cubic-bezier(.2,.6,.3,1),border-color .12s}
+.nav a:hover{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.nav a[aria-current]{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 16%,transparent);font-weight:600}
+article h1,article h2,article h3,article h4{line-height:1.35;font-weight:600;margin-block:2.2rem .7rem}
+article h1{font-size:1.9rem}
+article h2{font-size:1.5rem;padding-block-end:.4rem;border-block-end:1px solid var(--line)}
+article h3{font-size:1.2rem}
+article h4{font-size:1.02rem;color:var(--navy-500)}
+@media (prefers-color-scheme: dark){article h4{color:var(--navy-100)}}
+article p,article li{font-size:1rem}
+article a{color:var(--gold-800);text-underline-offset:3px}
+@media (prefers-color-scheme: dark){article a{color:var(--gold-300)}}
+blockquote{margin-inline:0;padding:1rem 1.15rem;border-inline-start:2px solid var(--gold);background:var(--card);border-radius:.5rem;color:var(--muted)}
+blockquote p{margin:.4rem 0}
+article>*{max-width:100%}
+code{overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;background:color-mix(in srgb,var(--navy) 8%,transparent);padding:.12em .4em;border-radius:.3rem;direction:ltr;unicode-bidi:isolate;display:inline-block}
+pre{background:var(--navy-900);color:#E7EAEE;padding:1rem 1.1rem;border-radius:.5rem;overflow-x:auto;direction:ltr;text-align:left;font-size:.82rem;line-height:1.6}
+pre code{background:none;padding:0;color:inherit;display:inline}
+table{width:100%;border-collapse:collapse;margin-block:1.2rem;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.55rem .7rem;text-align:start;vertical-align:top}
+th{background:color-mix(in srgb,var(--navy) 7%,transparent);font-weight:600}
+img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:.5rem}
+hr{border:0;border-block-start:1px solid var(--line);margin-block:2.2rem}
+.footer{margin-block-start:3rem;padding-block-start:1.2rem;border-block-start:1px solid var(--line);color:var(--muted);font-size:.8125rem}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">الصدفة · الويكي · الإعدادات</div>
+    <h1>دليل إعادة التصميم البصري</h1>
+    <div class="rule"></div>
+    <div class="meta">2026-09-03 · مسوّدة للمراجعة — بانتظار اعتماد المالك</div>
+    <nav class="nav">
+      <a href="index.html" aria-current="page">دليل التصميم البصري</a>
+      <a href="ux-brief.html">مسوّدة تجربة الاستخدام</a>
+      <a href="palette-preview.png">معاينة اللوحة</a>
+    </nav>
+  </header>
+  <article>
+<blockquote>
+<p><strong>الحالة:</strong> مسوّدة للمراجعة — بانتظار اعتماد المالك
+<strong>التاريخ:</strong> 2026-09-03  ·  <strong>المصمّم:</strong> ui-designer  ·  <strong>الإصدار:</strong> د0.1
+<strong>النطاق:</strong> الصدفة الرئيسية (App shell)، الويكي، صفحة الإعدادات
+<strong>البناء عليه:</strong> <code>docs/design/ux-brief-2026-09-03.md</code> + <code>STYLE_LOCK.md</code></p>
+<p><strong>ما يُقفَل عند الاعتماد:</strong> سلّم الطباعة للواجهة الكثيفة (§2.2)، أسماء الرموز
+الدلالية الجديدة إن وُجدت، مواصفات المكوّنات في §3، تخطيطات الشاشات الثلاث في
+§4، واللحظة المميّزة الواحدة (§1). <strong>ما لا يُقفَل هنا:</strong> قيم لوحة الألوان — فهي
+<strong>مُشتقّة آلياً</strong> من <code>deriveTokens</code> لكل بريست، ومقفولة في <code>STYLE_LOCK.md</code> (بريست
+<code>alkindy</code> مرجعنا). هذا الدليل يوثّق القيم المشتقّة ويحسب تباينها، ولا يعيد تعريفها.</p>
+<p><strong>حدود هذا الدليل:</strong> لا كود تنفيذي، لا تعديل مكوّنات، لا بناء. كل رقم تباين هنا
+<strong>محسوب فعلاً</strong> بسكربت WCAG 2.2 يطابق منطق <code>theme-presets.ts</code> (§2.1). كل اقتراح لم
+يُنفَّذ بعدُ موسوم <strong>«مقترح جديد»</strong>؛ وكل تحسين على قائم موسوم <strong>«تحسين»</strong>.</p>
+</blockquote>
+<hr>
+<h2>1) الاتجاه الفني</h2>
+<p>نسّاج <strong>صحيفةٌ مطبوعة تحوّلت أداةَ عمل</strong>: شخصيةٌ تحريرية مطبوعة (كحلي دار الكِندِي على كريم
+دافئ، ذهبٌ نادر، طباعة عربية بإيقاع واحد) تلتقي بكثافة أداةٍ تشغيلية يومية (شبكة 4px، استدارة
+<code>soft</code> 8px، حركة <code>Snap</code> سريعة، صفوف مضغوطة). ما يميّزه عن أصل claudecodeui — الذي يعيش على
+لوحة بنفسجية/زرقاء عامة وطباعة <code>system-ui</code> بلا هوية — أمران: (أ) <strong>الهوية قبل الذوق</strong>، فاللون
+والحدّ والحلقة كلها مشتقّة من لون علامة واحد لا من درجات القالب؛ (ب) <strong>الطباعة العربية أصلاً
+لا لاحقةً</strong>، بخطّ <code>IBM Plex Sans Arabic</code> الحكومي يخدم الواجهة والعناوين معاً بإيقاع واحد. وما
+يميّزه عن «مظهر القالب» (template slop) أن الذهبي <strong>عملة نادرة</strong> بقاعدة 60/30/10 (كريم/كحلي/ذهبي)
+لا لونَ زينةٍ مرشوش، وأن لا <code>Inter</code>/<code>Roboto</code>، ولا ALL-CAPS، ولا eyebrow لاتيني، ولا <code>letter-spacing</code>.</p>
+<p><strong>اللحظة المميّزة الواحدة (مقصودة، غير مكرَّرة):</strong> <strong>مسطرة الذهب التحريرية</strong> — خطّ ذهبي رفيع
+(1px، <code>--ring</code>/<code>--brand-accent</code>) يظهر <strong>مرّةً واحدة لكل سطح</strong> تحت عنوان الصفحة الرئيسي (masthead):
+رأس المحادثة في الصدفة، وعنوان المقال + الـlede في الويكي، وعنوان الحوار في الإعدادات. هو التوقيع
+البصري لدار الكِندِي، ويبقى نادراً: لا يتكرّر على كل بطاقة ولا زرّ. كل ما عداه يلتزم الحياد
+الأداتي — الذهب في بقية الشاشة لا يظهر إلا في حالةٍ نشطة واحدة (تبويب مختار / حلقة تركيز).</p>
+<hr>
+<h2>2) رموز التصميم (Design Tokens)</h2>
+<h3>2.1 اللوحة — الوضعان الفاتح والداكن (بريست <code>alkindy</code>)</h3>
+<p>اللوحة <strong>ليست قيماً حرفية في المكوّنات</strong>: كل مكوّن يستهلك <code>hsl(var(--token))</code> والقيم تُشتقّ من لون
+علامة واحد (<code>base: 221 47% 20%</code> كحلي، <code>secondary: 39 38% 50%</code> ذهبي) عبر <code>deriveTokens</code> +
+<code>enforceRingContrast</code> + <code>enforcePrimaryTextContrast</code>. الجدول أدناه هو <strong>الناتج المشتقّ</strong> لبريست
+<code>alkindy</code>، وكل نسبة تباين <strong>محسوبة فعلاً</strong> بسكربت يطابق <code>theme-presets.ts</code> (صيغة WCAG 2.2 §1.4.3).
+الـHEX تقريبيّ للعرض فقط؛ المصدر هو ثلاثية HSL.</p>
+<p><strong>الوضع الفاتح:</strong></p>
+<table>
+<thead>
+<tr>
+<th>الرمز</th>
+<th>HSL</th>
+<th>HEX≈</th>
+<th>مطابقة الهوية</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--background</code></td>
+<td><code>39 24% 92%</code></td>
+<td><code>#efece6</code></td>
+<td>كريم مغبَّر (60%)</td>
+</tr>
+<tr>
+<td><code>--card</code> / <code>--popover</code></td>
+<td><code>40 34% 97%</code></td>
+<td><code>#faf8f5</code></td>
+<td>≈ كريم <code>#F9F6F0</code></td>
+</tr>
+<tr>
+<td><code>--foreground</code></td>
+<td><code>221 45% 14%</code></td>
+<td><code>#141e34</code></td>
+<td>≈ navy-900 <code>#10192C</code></td>
+</tr>
+<tr>
+<td><code>--secondary</code> / <code>--muted</code></td>
+<td><code>38 19% 89%</code></td>
+<td><code>#e8e4de</code></td>
+<td>كريم أعمق</td>
+</tr>
+<tr>
+<td><code>--muted-foreground</code></td>
+<td><code>28 12% 35%</code></td>
+<td><code>#64594f</code></td>
+<td>رمادي دافئ</td>
+</tr>
+<tr>
+<td><code>--accent</code></td>
+<td><code>37 17% 85%</code></td>
+<td><code>#dfdad2</code></td>
+<td>سطح تمييز</td>
+</tr>
+<tr>
+<td><code>--border</code> / <code>--input</code></td>
+<td><code>36 20% 75%</code></td>
+<td><code>#ccc2b3</code></td>
+<td>حدّ ناعم</td>
+</tr>
+<tr>
+<td><code>--primary</code></td>
+<td><code>221 47% 30%</code></td>
+<td><code>#293f70</code></td>
+<td>كحلي التعبئة (30%)</td>
+</tr>
+<tr>
+<td><code>--ring</code> / <code>--brand-accent</code></td>
+<td><code>39 38% 43.5%</code></td>
+<td><code>#997c45</code></td>
+<td>≈ gold-700 <code>#9D8251</code></td>
+</tr>
+<tr>
+<td><code>--success</code></td>
+<td><code>152 42% 28%</code></td>
+<td><code>#296549</code></td>
+<td>≈ نجاح <code>#2E6B4E</code></td>
+</tr>
+<tr>
+<td><code>--warning</code></td>
+<td><code>23 83% 31%</code></td>
+<td><code>#91400d</code></td>
+<td>برتقالي محروق</td>
+</tr>
+<tr>
+<td><code>--danger</code> (نصّي)</td>
+<td><code>0 72% 42%</code></td>
+<td><code>#b81e1e</code></td>
+<td>≈ خطأ <code>#A33B38</code></td>
+</tr>
+<tr>
+<td><code>--destructive</code> (سطح)</td>
+<td><code>2 49% 43%</code></td>
+<td>—</td>
+<td>زرّ حذف؛ الأمامي كريم</td>
+</tr>
+</tbody></table>
+<p><strong>الوضع الداكن</strong> (مطابق لدليل الهوية حرفياً — الخلفية navy-900، الأسطح navy-800، النص <code>#E8EAED</code>):</p>
+<table>
+<thead>
+<tr>
+<th>الرمز</th>
+<th>HSL</th>
+<th>HEX≈</th>
+<th>ملاحظة</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--background</code></td>
+<td><code>221 47% 11%</code></td>
+<td><code>#0f1729</code></td>
+<td>≈ navy-900 <code>#10192C</code></td>
+</tr>
+<tr>
+<td><code>--card</code> / <code>--popover</code></td>
+<td><code>221 44% 15%</code></td>
+<td><code>#152037</code></td>
+<td>≈ navy-800 <code>#16223B</code> (ارتفاع واضح)</td>
+</tr>
+<tr>
+<td><code>--foreground</code></td>
+<td><code>218 16% 92%</code></td>
+<td><code>#e7eaee</code></td>
+<td>≈ <code>#E8EAED</code></td>
+</tr>
+<tr>
+<td><code>--secondary</code></td>
+<td><code>221 33% 21%</code></td>
+<td><code>#242f47</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>--muted</code></td>
+<td><code>221 33% 18%</code></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>--muted-foreground</code></td>
+<td><code>219 15% 73%</code></td>
+<td><code>#b0b7c4</code></td>
+<td>≈ إنجليزية على الكحلي <code>#A8B0C0</code> (رمادية لا ذهبية)</td>
+</tr>
+<tr>
+<td><code>--accent</code></td>
+<td><code>221 27% 25%</code></td>
+<td><code>#2f3951</code></td>
+<td>أفتح سطح</td>
+</tr>
+<tr>
+<td><code>--border</code></td>
+<td><code>221 26% 27%</code></td>
+<td><code>#333e57</code></td>
+<td>حدّ لا هالة (B-331)</td>
+</tr>
+<tr>
+<td><code>--input</code></td>
+<td><code>221 18% 40%</code></td>
+<td>—</td>
+<td>حدّ تحكّم أوضح</td>
+</tr>
+<tr>
+<td><code>--primary</code></td>
+<td><code>221 47% 65.2%</code></td>
+<td><code>#7d97d0</code></td>
+<td>كحلي مُنصَّع للتباين</td>
+</tr>
+<tr>
+<td><code>--ring</code></td>
+<td><code>39 38% 56%</code></td>
+<td><code>#b99c64</code></td>
+<td>ذهبي مُنصَّع</td>
+</tr>
+<tr>
+<td><code>--success</code></td>
+<td><code>158 64% 52%</code></td>
+<td><code>#36d399</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>--warning</code></td>
+<td><code>46 96% 65%</code></td>
+<td><code>#fbd350</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>--danger</code></td>
+<td><code>0 91% 71%</code></td>
+<td><code>#f87272</code></td>
+<td>—</td>
+</tr>
+</tbody></table>
+<p><strong>نِسَب التباين المحسوبة (WCAG 2.2 AA؛ نصّ ≥ 4.5:1، حلقة ≥ 3:1):</strong></p>
+<table>
+<thead>
+<tr>
+<th>الزوج</th>
+<th>فاتح</th>
+<th>داكن</th>
+<th>الحدّ</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>foreground</code> / <code>background</code></td>
+<td><strong>14.13</strong></td>
+<td><strong>14.77</strong></td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>foreground</code> / <code>card</code></td>
+<td>15.72</td>
+<td>13.42</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>muted-foreground</code> / <code>background</code></td>
+<td><strong>5.82</strong></td>
+<td><strong>8.86</strong></td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>muted-foreground</code> / <code>muted</code></td>
+<td>5.42</td>
+<td>7.27</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>primary-foreground</code> / <code>primary</code></td>
+<td><strong>10.26</strong></td>
+<td><strong>6.14</strong></td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>destructive-fg</code> / <code>destructive</code></td>
+<td>6.09</td>
+<td>5.13</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>success</code> / <code>background</code></td>
+<td>5.81</td>
+<td>9.29</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>warning</code> / <code>background</code></td>
+<td>6.08</td>
+<td>12.40</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>danger</code> / <code>background</code></td>
+<td>5.49</td>
+<td>6.49</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><code>accent-fg</code> / <code>accent</code></td>
+<td>11.99</td>
+<td>9.49</td>
+<td>4.5 ✅</td>
+</tr>
+<tr>
+<td><strong><code>ring</code> / <code>background</code></strong></td>
+<td>3.36</td>
+<td>6.79</td>
+<td>3.0 ✅</td>
+</tr>
+<tr>
+<td><strong><code>ring</code> / <code>card</code>+<code>popover</code></strong></td>
+<td>3.74</td>
+<td>6.16</td>
+<td>3.0 ✅</td>
+</tr>
+<tr>
+<td><strong><code>ring</code> / <code>muted</code></strong></td>
+<td>3.14</td>
+<td>5.57</td>
+<td>3.0 ✅</td>
+</tr>
+<tr>
+<td><strong><code>ring</code> / <code>secondary</code></strong></td>
+<td>3.14</td>
+<td>5.07</td>
+<td>3.0 ✅</td>
+</tr>
+</tbody></table>
+<p><strong>لا نسبة فشلت.</strong> ملاحظة تنفيذية: <code>--ring</code> الخام (الذهبي <code>50%</code>) يفشل على أسطح الفاتح
+(‏2.44–2.90) ويُصلحه <code>enforceRingContrast</code> بتغميقه إلى <code>43.5%</code> — فلا تُثبّت حلقة يدوياً.</p>
+<p><strong>كتلة متغيّرات مرجعية</strong> (مطابقة لما يحقنه <code>deriveTokens</code> على <code>&lt;html&gt;</code> لبريست <code>alkindy</code>؛ للتوثيق
+لا للنسخ في مكوّن — المكوّنات تقرأ الرمز لا القيمة):</p>
+<pre><code class="language-css">/* :root (alkindy · light) — مُشتقّ آلياً، لا يُحرَّر يدوياً */
+--background:39 24% 92%; --foreground:221 45% 14%;
+--card:40 34% 97%; --card-foreground:221 45% 14%;
+--popover:40 34% 97%; --popover-foreground:221 45% 14%;
+--primary:221 47% 30%; --primary-foreground:0 0% 100%;
+--secondary:38 19% 89%; --secondary-foreground:221 45% 14%;
+--muted:38 19% 89%; --muted-foreground:28 12% 35%;
+--accent:37 17% 85%; --accent-foreground:221 45% 14%;
+--destructive:2 49% 43%; --destructive-foreground:40 34% 97%;
+--success:152 42% 28%; --warning:23 83% 31%; --danger:0 72% 42%;
+--border:36 20% 75%; --input:36 20% 75%;
+--ring:39 38% 43.5%; --brand-accent:39 38% 50%; --radius:0.5rem;
+
+/* .dark (alkindy) */
+--background:221 47% 11%; --foreground:218 16% 92%;
+--card:221 44% 15%; --popover:221 44% 15%;
+--primary:221 47% 65%; --primary-foreground:222 47% 11%;
+--secondary:221 33% 21%; --muted:221 33% 18%; --muted-foreground:219 15% 73%;
+--accent:221 27% 25%; --border:221 26% 27%; --input:221 18% 40%;
+--ring:39 38% 56%; --success:158 64% 52%; --warning:46 96% 65%; --danger:0 91% 71%;
+</code></pre>
+<h3>2.2 الطباعة</h3>
+<p>خطّ واحد لكل اللغات: <code>IBM Plex Sans Arabic, &quot;IBM Plex Sans&quot;, sans-serif</code> (انحراف معلن عن قاعدة
+الطبقات الثلاث — موثّق في <code>STYLE_LOCK</code> §1). <strong>ممنوع</strong> <code>Inter</code>/<code>Roboto</code>/<code>system-ui</code> جسماً.
+الأسطح التقنية (CodeMirror/xterm/diff/<code>code</code>) تبقى <code>monospace</code> ولا تقرأ <code>--font-ui</code>.</p>
+<p><strong>سلّم الواجهة الكثيفة (compact UI scale)</strong> — مكيَّف من سلّم الطباعة (H1 44 / متن 18) إلى كثافة
+أداة يومية. القيم بـrem على أساس 16px:</p>
+<table>
+<thead>
+<tr>
+<th>الدرجة</th>
+<th>rem</th>
+<th>px</th>
+<th>line-height</th>
+<th>weight</th>
+<th>الاستعمال</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ui-title</code> (H1 صفحة)</td>
+<td>1.5</td>
+<td>24</td>
+<td>1.3</td>
+<td>600</td>
+<td>عنوان رأس الصفحة/الحوار</td>
+</tr>
+<tr>
+<td><code>ui-h2</code></td>
+<td>1.25</td>
+<td>20</td>
+<td>1.35</td>
+<td>600</td>
+<td>عنوان قسم</td>
+</tr>
+<tr>
+<td><code>ui-h3</code></td>
+<td>1.0625</td>
+<td>17</td>
+<td>1.4</td>
+<td>600</td>
+<td>عنوان مجموعة/بطاقة</td>
+</tr>
+<tr>
+<td><code>ui-body</code></td>
+<td>0.9375</td>
+<td>15</td>
+<td>1.6</td>
+<td>400</td>
+<td>متن الواجهة، صفوف القوائم</td>
+</tr>
+<tr>
+<td><code>ui-body-strong</code></td>
+<td>0.9375</td>
+<td>15</td>
+<td>1.6</td>
+<td>600</td>
+<td>اسم جلسة/مشروع</td>
+</tr>
+<tr>
+<td><code>ui-label</code></td>
+<td>0.8125</td>
+<td>13</td>
+<td>1.5</td>
+<td>500</td>
+<td>لصيقة، caption، شارة (الأدنى 13px)</td>
+</tr>
+<tr>
+<td><code>ui-input-mobile</code></td>
+<td>1.0</td>
+<td>16</td>
+<td>1.5</td>
+<td>400</td>
+<td>إدخال الجوّال (منع التكبير)</td>
+</tr>
+</tbody></table>
+<p><strong>سلّم القراءة (الويكي — قائم، يُبقى):</strong> متن 17px/1.8 · H1 28/1.35/700 · H2 22/1.4/600 ·
+H3 19/1.45/600 · H4 17/1.5/600. الويكي وحده يستعمل هذا السلّم الأوسع (سطح قراءة لا سطح تشغيل).</p>
+<p><strong>قواعد حتمية:</strong> <code>letter-spacing: 0</code> على العربي المتصل · لا ALL-CAPS ولا eyebrow · <strong>الأدنى
+لأي لصيقة نصّية 13px</strong> (<code>ui-label</code>) — 12px محجوز داخل <code>code</code> فقط · أرقام غربية على الشاشة الواحدة.</p>
+<h3>2.3 المسافات (شبكة 4px)</h3>
+<p>مقياس مضاعفات 4: <code>1=4px · 2=8 · 3=12 · 4=16 · 5=20 · 6=24 · 8=32 · 10=40 · 12=48 · 16=64</code>.
+كثافة <code>compact</code>: حشو الصفوف 8–12px، فجوة البطاقات 12–16px، هوامش الأقسام 24–32px.</p>
+<h3>2.4 الاستدارة</h3>
+<table>
+<thead>
+<tr>
+<th>الرمز</th>
+<th>القيمة</th>
+<th>الاستعمال</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>sm</code> = <code>calc(--radius - 2px)</code></td>
+<td>6px</td>
+<td>شارات، حقول صغيرة</td>
+</tr>
+<tr>
+<td>base = <code>--radius</code></td>
+<td>8px</td>
+<td>أزرار، حقول، بطاقات</td>
+</tr>
+<tr>
+<td><code>lg</code> = <code>calc(--radius + 4px)</code></td>
+<td>12px</td>
+<td>حوارات، ألواح</td>
+</tr>
+<tr>
+<td><code>xl</code> = <code>calc(--radius + 8px)</code></td>
+<td>16px</td>
+<td>أدراج، طبقات علوية</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td>9999px</td>
+<td>نقاط الحالة، أزرار أيقونة دائرية</td>
+</tr>
+</tbody></table>
+<h3>2.5 الظلال (سوداء بشفافية — لا مشتقّة من <code>--foreground</code>، B-331)</h3>
+<table>
+<thead>
+<tr>
+<th>الرمز</th>
+<th>فاتح</th>
+<th>داكن</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>rest</code></td>
+<td><code>0 1px 2px hsl(0 0% 0% / .06)</code></td>
+<td><code>/.30</code></td>
+</tr>
+<tr>
+<td><code>raised</code></td>
+<td><code>0 2px 8px hsl(0 0% 0% / .10)</code></td>
+<td><code>/.40</code></td>
+</tr>
+<tr>
+<td><code>overlay</code></td>
+<td><code>0 16px 48px hsl(0 0% 0% / .18)</code></td>
+<td><code>/.55</code></td>
+</tr>
+</tbody></table>
+<h3>2.6 الحركة (بذرة Snap)</h3>
+<p><code>fast = 120ms</code> (لون/نص/ظهور) · <code>normal = 220ms</code> (تخطيط/عرض/إزاحة) ·
+<code>easing = cubic-bezier(0.2, 0.6, 0.3, 1)</code>. <code>prefers-reduced-motion: reduce</code> <strong>يُلغي</strong> انتقالات
+الأدراج والطبقات تماماً (لا يُبطئها). لا حركة على تحميل الصفحة كاملةً.</p>
+<h3>2.7 z-index</h3>
+<p><code>base 0 · dropdown 1000 · sticky/header 1100 · drawer 1200 · modal 1300 · toast 1400 · tooltip 1500</code>.</p>
+<h3>2.8 نقاط الكسر (Tailwind افتراضي)</h3>
+<p><code>sm 640 · md 768 · lg 1024 · xl 1280 · 2xl 1536</code>. <strong>الحدّ الفاصل للجوّال:</strong> <code>&lt; md (768px)</code> يُفعّل
+الدُرج والشريط السفلي. إعادة تدفّق بلا تمرير أفقي عند 320px و200% تكبير. TOC الويكي مضمَّن <code>&lt; xl</code>
+وسكّة <code>≥ xl</code>.</p>
+<hr>
+<h2>3) مكتبة المكوّنات</h2>
+<p>مقياس عناصر التحكّم أربعة (من <code>UI_STANDARDS_AR.md</code>): <code>compact28 · toolbar32 · standard40 · comfortable44</code>؛ <code>legacy36</code> ممنوع في الجديد. هدف اللمس ≥ 44×44 على المؤشّر الخشن (منطقة نقر
+تُوسَّع بـpadding أو <code>::before</code> حتى لو كان المرئي أصغر).</p>
+<h3>3.1 الزرّ (Button)</h3>
+<ul>
+<li><strong>القياسات:</strong> ارتفاع 40px (<code>standard</code>)، 32px (<code>toolbar</code>)، 44px (<code>comfortable</code>، الجوّال/اللمس)؛
+حشو أفقي 16px؛ استدارة 8px؛ فجوة أيقونة/نص 8px.</li>
+<li><strong>الأنماط:</strong> <code>primary</code> (تعبئة <code>--primary</code>، نصّ <code>--primary-foreground</code>) · <code>secondary</code> (تعبئة
+<code>--secondary</code>) · <code>outline</code> (حدّ <code>--border</code>، خلفية شفّافة) · <code>ghost</code> (خلفية عند hover فقط) ·
+<code>destructive</code> (تعبئة <code>--destructive</code>).</li>
+<li><strong>الحالات:</strong> rest · hover (تعتيم/تفتيح ‏4% عبر <code>--accent</code> أو تعبئة أغمق) · active (إزاحة
+بصرية طفيفة) · focus-visible (حلقة <code>--ring</code> 2px + إزاحة 2px) · disabled (شفافية 50%، بلا
+مؤشّر) · loading (سبينر يحلّ محلّ النص، العرض ثابت).</li>
+<li><strong>RTL:</strong> الأيقونة القيادية على <code>inset-inline-start</code>؛ أيقونات الاتجاه (سابق/تالي) تنعكس؛
+فجوة بـ<code>gap</code> لا هوامش فيزيائية.</li>
+</ul>
+<h3>3.2 الحقل (Input / Textarea / Select)</h3>
+<ul>
+<li>ارتفاع 40px (44px جوّال)؛ حدّ <code>--input</code> 1px؛ خلفية <code>--card</code>؛ حشو 12px؛ استدارة 8px؛ نصّ
+15px (16px جوّال لمنع التكبير)؛ placeholder بـ<code>--muted-foreground</code>.</li>
+<li><strong>الحالات:</strong> rest · focus (حدّ <code>--ring</code> + حلقة 2px) · error (حدّ <code>--danger</code> + رسالة أسفل الحقل
+بـ<code>--danger</code> نصّاً) · disabled (خلفية <code>--muted</code>) · مع أيقونة قيادية/لاحقة (<code>inset-inline</code>).</li>
+<li><strong>RTL:</strong> المحاذاة تتبع اتجاه النصّ؛ لصيقة فوق الحقل بلا <code>dir</code> (تأخذه من نصّها)؛ أيقونة البحث
+على <code>inset-inline-start</code>.</li>
+</ul>
+<h3>3.3 البطاقة (Card)</h3>
+<p>خلفية <code>--card</code>؛ حدّ <code>--border</code> 1px؛ استدارة 12px؛ ظلّ <code>rest</code>؛ حشو 16px. عند التفاعل ترتفع إلى
+ظلّ <code>raised</code> بحركة <code>normal</code>. العنوان <code>ui-h3</code>، الوصف <code>ui-body</code> بـ<code>--muted-foreground</code>.</p>
+<h3>3.4 شارة حالة الجلسة/الوكيل (StatusBadge)</h3>
+<ul>
+<li><strong>نقطة حالة 8px</strong> + لصيقة <code>ui-label</code>. الحالات والرموز:<ul>
+<li>تعمل (running): نقطة <code>--success</code> + نبضة خفيفة (تُلغى مع reduced-motion) · «تعمل».</li>
+<li>تنتظر إذناً (awaiting): نقطة <code>--warning</code> ثابتة · «بانتظار إذن».</li>
+<li>توقّفت (idle/stopped): نقطة <code>--muted-foreground</code> مفرَّغة · «متوقّفة».</li>
+<li>خطأ (error): نقطة <code>--danger</code> · «تعذّرت».</li>
+</ul>
+</li>
+<li><strong>اللون ليس الحامل الوحيد</strong> للدلالة (a11y): شكل النقطة (ممتلئة/مفرَّغة/نابضة) + النصّ يميّزان
+الحالة لعمى الألوان. استدارة <code>full</code>؛ حشو أفقي 8px حين تحمل خلفية.</li>
+</ul>
+<h3>3.5 التبويب (Tab / SegmentedControl)</h3>
+<ul>
+<li><strong><code>SegmentedControl</code> مسقوف بأربعة خيارات</strong> (STYLE_LOCK)؛ الأوسع ينتقل لشريط الخطّ السفلي.</li>
+<li>شريط الخطّ السفلي: التبويب النشط يحمل <strong>مسطرة <code>--primary</code> 2px</strong> أسفله ونصّاً <code>--foreground</code>؛
+غير النشط <code>--muted-foreground</code>. ارتفاع 40px؛ فجوة 24px بين التبويبات.</li>
+<li><strong>RTL:</strong> الترتيب من اليمين؛ المسطرة السفلية تتبع التبويب لا الاتجاه.</li>
+</ul>
+<h3>3.6 القائمة الجانبية وعنصر الجلسة (Sidebar / SessionItem)</h3>
+<ul>
+<li><strong>الشريط:</strong> عرض <code>w-72</code> (288px) سطح مكتب؛ خلفية <code>--gradient-sidebar</code> (من <code>--secondary</code> إلى
+<code>--background</code>)؛ حدّ <code>inset-inline-end</code> بـ<code>--border</code>.</li>
+<li><strong>مجموعة مشروع (قابلة للطيّ):</strong> رأس بـ<code>ui-body-strong</code> + سهم طيّ (ينعكس عند الطيّ، لا بالاتجاه)<ul>
+<li>عدّاد جلسات بـ<code>--muted-foreground</code>.</li>
+</ul>
+</li>
+<li><strong>عنصر جلسة:</strong> ارتفاع 44px؛ حشو <code>inset-inline-start</code> 24px (تعشيق)؛ يحمل: نقطة حالة (§3.4) +
+اسم الجلسة (<code>ui-body</code>، سطر واحد بـtruncate) + وقت آخر رسالة (<code>ui-label</code>). النشط: خلفية
+<code>--accent</code> + مسطرة <code>--primary</code> 2px على <code>inset-inline-start</code>. hover: خلفية <code>--accent/50%</code>.</li>
+</ul>
+<h3>3.7 رأس الصفحة (PageHeader / Masthead)</h3>
+<ul>
+<li>صفّ 56px يحمل: عنوان الموضع (<code>ui-title</code>، مسار «الجلسة › المشروع») على <code>inset-inline-start</code> +
+أدوات ثانوية على <code>inset-inline-end</code>. <strong>مؤشّر الحصة يُفصَل عن صفّ التبويبات</strong> (مقترح UX §3.1):
+ينتقل لطرف الرأس المستقلّ أو التذييل.</li>
+<li><strong>اللحظة المميّزة:</strong> مسطرة ذهبية 1px (<code>--brand-accent</code>) تحت العنوان — مرّة واحدة، لا تتكرّر.</li>
+</ul>
+<h3>3.8 شريط بحث Ctrl K (CommandSearch)</h3>
+<ul>
+<li>حقل بحث ظاهر يحمل نصّ الاختصار <code>Ctrl K</code> (تحسين اكتشاف — UX §3.2) بـ<code>--muted-foreground</code> على
+<code>inset-inline-end</code> داخل الحقل. عند الفتح: حوار مركزي (<code>overlay</code>) بحقل + نتائج مسطّحة + تنقّل
+بالسهم/Enter. عرض ≤ 640px؛ استدارة 12px.</li>
+</ul>
+<h3>3.9 فقاعة الرسالة (MessageBubble)</h3>
+<ul>
+<li><strong>رسالة المستخدم:</strong> خلفية <code>--secondary</code>؛ محاذاة <code>inset-inline-end</code>؛ استدارة 12px مع زاوية
+مدبَّبة على جهة المرسِل.</li>
+<li><strong>رسالة المساعد:</strong> بلا خلفية (تندمج مع الصفحة)؛ محاذاة <code>inset-inline-start</code>؛ عرض قراءة ≤ 70ch.</li>
+<li><strong>كتلة أداة (tool):</strong> بطاقة <code>--muted</code> مطويّة افتراضياً برأس (اسم الأداة + حالة)؛ محتوى <code>monospace</code>.</li>
+<li><strong>RTL حرج:</strong> <code>dir</code> أساس <strong>واحد لكل رسالة</strong> يُشتقّ من لغة نصّها — لا <code>dir=auto</code> لكل كتلة (B-207).
+<code>unicode-bidi: isolate</code> يعزل الأجزاء المختلطة بلا منح أساس.</li>
+</ul>
+<h3>3.10 مؤشّر الحصة/السياق (QuotaMeter / ContextMeter)</h3>
+<ul>
+<li>شريط أفقي 4px بخلفية <code>--muted</code> وتعبئة تتدرّج: <code>--success</code> (&lt; 70%) → <code>--warning</code> (70–90%) →
+<code>--danger</code> (≥ 90%). لصيقة نسبة <code>ui-label</code> + وقت التجدد. <strong>اللون + الرقم + النصّ</strong> معاً (a11y).
+في الرأس المستقلّ لا في صفّ التبويبات.</li>
+</ul>
+<h3>3.11 الحوار (Dialog / Modal)</h3>
+<ul>
+<li>خلفية <code>--card</code>؛ استدارة 16px (<code>xl</code>)؛ ظلّ <code>overlay</code>؛ backdrop أسود <code>/.40</code>؛ عرض متجاوب.
+رأس (عنوان <code>ui-title</code> + زرّ إغلاق <code>comfortable44</code>) + جسم قابل للتمرير + تذييل أفعال.
+<code>FocusTrap</code> + إغلاق بـEsc + استعادة التركيز. z-index 1300.</li>
+</ul>
+<h3>3.12 التنبيه اللحظي (Toast)</h3>
+<ul>
+<li>بطاقة <code>--card</code> + حدّ <code>--border</code> + ظلّ <code>raised</code>؛ شريط حالة <code>inset-inline-start</code> 3px بلون النبرة
+(<code>--success</code>/<code>--danger</code>/<code>--warning</code>)؛ أيقونة + نصّ <code>ui-body</code> + زرّ إغلاق. يظهر من الأسفل؛
+z-index 1400؛ اختفاء تلقائي 5s (أطول للأخطاء)؛ قابل للإيقاف بالتحويم.</li>
+</ul>
+<h3>3.13 شريط التنقّل السفلي للجوّال (BottomNav — <strong>مقترح جديد</strong>)</h3>
+<ul>
+<li>4 مداخل: محادثة · مشاريع · ويكي · إعدادات. ارتفاع 52px + <code>env(safe-area-inset-bottom)</code>؛
+خلفية <code>--nav-glass-bg</code> (زجاجية) + <code>backdrop-blur</code>؛ أيقونة 24px + لصيقة <code>ui-label</code>. النشط
+بـ<code>--primary</code>. منطقة لمس ≥ 44px لكل مدخل. يظهر <code>&lt; md</code> فقط.</li>
+</ul>
+<hr>
+<h2>4) الشاشات الثلاث</h2>
+<blockquote>
+<p>الإطارات السلكية النصّية أدناه ترفع wireframes الـUX (§5) إلى مواصفة بصرية بأبعاد؛ لا تكرّرها
+حرفياً. تُقرأ من اليمين (RTL). كل بُعد px تقديري للنسبة لا التزام بكسل.</p>
+</blockquote>
+<h3>4.1 الصدفة الرئيسية</h3>
+<p><strong>سطح المكتب</strong> (<code>≥ md</code>): شبكة عمودين — شريط جانبي <code>288px</code> على اليمين (سطح <code>--gradient-sidebar</code>)،
+ومحتوى مرن على اليسار. التسلسل البصري: قائمة الجلسات (الأهمّ يومياً) → المحادثة (أوسع مساحة) →
+الحالة والحصة (دائمة، بلا منافسة على صفّ العنوان) → الأدوات الجانبية (خلف تبويبات) → الإدارة (نادرة).</p>
+<pre><code>│ رأس 56px: [الجلسة › المشروع]    [تبويبات ▸]    │  🔍 بحث (Ctrl K)  [+ مشروع] │ ← مسطرة ذهب 1px
+│ ─── مسطرة ذهبية 1px (اللحظة المميّزة) ───────  │ ───────────────────────────
+├──────────────────────────────────────────────┤  المشاريع   ⋯ الطرفيات(ثانوي)│ ← «الطرفيات» تنزل
+│                                                │  ── الحضور ────────────────│    من النظير (UX§3.1)
+│                                                │  ▾ مشروع أ            (3)
+│         منطقة المحادثة (≤70ch للمساعد)          │    ● تعمل · جلسة ١   4:12   │ ← عنصر 44px
+│         فقاعات §3.9                             │    ○ متوقّفة · جلسة ٢
+│                                    [ملفات →]   │    ⚠ بانتظار إذن · جلسة ٣
+│ تذييل الرأس المستقلّ: [حصة ▮▮▯ ٧٢٪ · يتجدّد ٣س] │  إحصاءات · ⚙ إعدادات · خروج  │ ← الحصة مفصولة
+</code></pre>
+<p><strong>الجوّال</strong> (<code>&lt; md</code>): عمود واحد؛ الشريط الجانبي دُرج من اليمين يفتحه <code>☰</code>؛ <strong>شريط سفلي جديد</strong>
+(§3.13). رأس مبسّط: <code>☰</code> + عنوان الجلسة + مؤشّر حصة مصغّر.</p>
+<ul>
+<li><strong>حالة فارغة (لا مشروع):</strong> بطاقة مركزية «ابدأ مشروعك الأول» + زرّ <code>[+ مشروع]</code> + سطر إرشادي —
+لا قائمة خاوية (ت2).</li>
+<li><strong>تحميل:</strong> هياكل عظمية (skeleton) لصفوف الجلسات (3–5 صفوف نابضة) بدل سبينر مفرد.</li>
+<li><strong>خطأ تحميل جلسة:</strong> بطاقة «تعذّر فتح الجلسة» + زرّ «إعادة محاولة» في منطقة المحتوى، لا شاشة
+بيضاء (ت1، مسار خطأ).</li>
+</ul>
+<h3>4.2 الويكي</h3>
+<p><strong>سطح المكتب</strong> (<code>≥ xl</code>): ثلاثة أعمدة بصرياً — فهرس الأقسام (يمين) + المقال (وسط، ≤ 72ch) + سكّة
+TOC (يسار). RTL كامل دائماً (<code>dir=rtl lang=ar</code>) بصرف النظر عن لغة الواجهة.</p>
+<pre><code>│ شريط أدوات: [⌂] القسم › الصفحة   🔍 Ctrl K │  🔍 ابحث (Ctrl K)
+├──────────────────────────────────────────┤  ── ابدأ من هنا ──────────
+│  # عنوان الصفحة (28px/700)                 │  • ما هو نسّاج؟            │ ← فهرس 6 أقسام
+│  lede الملخّص (17px، muted-foreground)      │  • أول يوم                 │    (يُبقى — UX§3.2)
+│  ─── مسطرة ذهبية 1px (اللحظة المميّزة) ──── │  ── دليل الواجهة ─────────
+│                                            │  • جولة في الشاشة
+│  متن المقال 17px/1.8 ...            ┌──────┤  ── حلّ المشاكل ──────────
+│                                     │ TOC  │  • عندي مشكلة
+│                                     │ سكّة │
+│  ─────────────────────────────────  └──────┤
+│  [→ السابق: كذا]  صفحة ٣ من ٧  [التالي ←]   │                           │ ← مؤشّر موضع جديد
+</code></pre>
+<p><strong>تحسينات (UX §3.2):</strong> مؤشّر «صفحة N من M في هذا القسم» بجانب السابق/التالي (<strong>مقترح جديد</strong>)؛
+إبراز العنوان النشط في سكّة TOC أثناء التمرير (<strong>مقترح جديد</strong>)؛ إظهار <code>Ctrl K</code> نصّاً في الحقل.</p>
+<p><strong>الجوّال</strong> (<code>&lt; md</code>): عمود واحد؛ فهرس الأقسام دُرج معياري (<code>modal</code> + <code>FocusTrap</code>)؛ TOC مطويّ فوق
+المقال (<code>▾ جدول المحتويات</code>)؛ السابق/التالي أسفل المقال.</p>
+<ul>
+<li><strong>الهبوط (بلا صفحة):</strong> بطل + بحث + «ابدأ من هنا» + بطاقات (لا تكرار الفهرس ثلاثاً — عولج).</li>
+<li><strong>لا نتائج بحث:</strong> «لا نتائج» + روابط سريعة مقترحة (قائم).</li>
+<li><strong>تحميل مقال:</strong> هيكل عظمي لعنوان + 3 فقرات.</li>
+</ul>
+<h3>4.3 الإعدادات</h3>
+<p><strong>سطح المكتب:</strong> حوار (<code>modal</code>)؛ شريط تنقّل مجمَّع (يمين) + لوح محتوى (يسار). <strong>التجميع في خمس
+مجموعات</strong> (مقترح UX §3.3 — يقلّل مسح 13 تبويباً مسطّحاً):</p>
+<table>
+<thead>
+<tr>
+<th>المجموعة</th>
+<th>التبويبات</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>الحساب والفريق</strong></td>
+<td>الملف الشخصي · المستخدمون</td>
+</tr>
+<tr>
+<td><strong>الذكاء والمعرفة</strong></td>
+<td>الوكلاء · المرجعيّات</td>
+</tr>
+<tr>
+<td><strong>المفاتيح والتكامل</strong></td>
+<td>المورّدون والاعتمادات · الوصول البرمجي · الموصلات · الإضافات</td>
+</tr>
+<tr>
+<td><strong>المظهر والتنبيهات</strong></td>
+<td>المظهر · التنبيهات · Git</td>
+</tr>
+<tr>
+<td><strong>النظام (للمالك)</strong></td>
+<td>لوحة الأوامر · حول</td>
+</tr>
+</tbody></table>
+<pre><code>│  الإعدادات                                          [✕ 44px]
+│  ─── مسطرة ذهبية 1px ─────────────────────────────────────
+│  ┌ تنقّل فرعي (خطّ سفلي، ≤4 أقراص)┐│  الحساب والفريق          │ ← عناوين مجموعات
+│  │ حساب · محرّكات · أذونات · MCP  ││   • الملف الشخصي
+│  └──────────────────────────────┘│   • المستخدمون
+│  [صفوف الإعداد ...]               │  الذكاء والمعرفة
+│  خطأ عند الحقل لا أعلى الصفحة (ت6)│   • الوكلاء · المرجعيّات
+│                                  │  المفاتيح والتكامل
+│  جداول عريضة: عرض موسَّع أو صفحة   │   يدخل↓ الوصول · يخرج↑ المورّدون│ ← اتجاه المفتاح
+│  كاملة خارج max-w-4xl (UX§3.3)   │  المظهر والتنبيهات        │    يُشرح التداخل
+│                                  │  النظام (للمالك)
+</code></pre>
+<p><strong>الجوّال:</strong> أقراص المجموعات الخمس أفقية قابلة للتمرير؛ تحته التنقّل الفرعي (خطّ سفلي)؛ ثم الصفوف.</p>
+<ul>
+<li><strong>تحسينات:</strong> توسيع/نقل تبويبات الجداول (المستخدمون، مصفوفة المورّدين) خارج <code>max-w-4xl</code> (UX §3.3)؛
+<code>SettingsSubNav</code> شكل واحد (خطّ سفلي) لا أقراص مملوءة؛ عناوين فرعية «يدخل/يخرج» تشرح التداخل الثلاثي.</li>
+<li><strong>حالات:</strong> حفظ ناجح → toast + تأكيد عند الحقل · مفتاح غير صالح → رسالة عند الحقل (ت6) · تحميل →
+هيكل عظمي للصفوف.</li>
+</ul>
+<hr>
+<h2>5) الفروق عن الحالي (اليوم → المقترح → لماذا)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>اليوم</th>
+<th>المقترح</th>
+<th>لماذا</th>
+<th>الوسم</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>مؤشّر الحصة يزاحم صفّ التبويبات</td>
+<td>فصله لطرف الرأس/التذييل + تدرّج لوني</td>
+<td>إزالة تنافس بصري على صفّ واحد</td>
+<td>تحسين</td>
+</tr>
+<tr>
+<td>2</td>
+<td>زرّ دوري رباعي (فرد→ضمّ→مصغّر→إخفاء)</td>
+<td>حالتان (ظاهرة/مطويّة) + تذكّر التفضيل</td>
+<td>خفض العبء الإدراكي؛ الرباعي غامض</td>
+<td>تحسين</td>
+</tr>
+<tr>
+<td>3</td>
+<td>«مشاريع</td>
+<td>طرفيات» نظيران</td>
+<td>الطرفيات مدخل ثانوي داخل المشاريع</td>
+<td>النادر لا يساوي اليومي</td>
+</tr>
+<tr>
+<td>4</td>
+<td>13 تبويب إعدادات مسطّح</td>
+<td>5 مجموعات معنونة</td>
+<td>خفض كلفة المسح؛ شرح التداخل</td>
+<td>مقترح جديد</td>
+</tr>
+<tr>
+<td>5</td>
+<td>لا شريط سفلي للجوّال</td>
+<td>شريط 4 مداخل (§3.13)</td>
+<td>تقليل الرجوع للدُرج كل تنقّل</td>
+<td>مقترح جديد</td>
+</tr>
+<tr>
+<td>6</td>
+<td>موضع القارئ في مسار التنقّل فقط</td>
+<td>«صفحة N من M» + إبراز TOC نشط</td>
+<td>إحساس تقدّم داخل القسم</td>
+<td>مقترح جديد</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>Ctrl K</code> غير مكتشَف</td>
+<td>إظهاره نصّاً في حقل البحث</td>
+<td>رفع اكتشاف الاختصار</td>
+<td>تحسين</td>
+</tr>
+<tr>
+<td>8</td>
+<td>خطّ افتراضي <code>system-ui</code></td>
+<td><code>IBM Plex Sans Arabic</code> طبقة واحدة</td>
+<td>هوية عربية أصيلة لا بصمة قالب</td>
+<td>تحسين</td>
+</tr>
+<tr>
+<td>9</td>
+<td>حدود/ظلال متفاوتة يدوياً</td>
+<td>كلها من <code>--border</code> وأسود شفّاف</td>
+<td>لا هالة بيضاء داكنة (B-331)</td>
+<td>تحسين</td>
+</tr>
+<tr>
+<td>10</td>
+<td>نبرات حالة منسوخة يدوياً (16 موضعاً)</td>
+<td><code>--success/--warning/--danger</code> دلالية</td>
+<td>اتساق + AA مضمون (B-399)</td>
+<td>تحسين</td>
+</tr>
+<tr>
+<td>11</td>
+<td>جداول الإعدادات تختنق في <code>max-w-4xl</code></td>
+<td>عرض موسَّع/صفحة كاملة للجداول</td>
+<td>قابلية قراءة الجداول العريضة</td>
+<td>مقترح جديد</td>
+</tr>
+<tr>
+<td>12</td>
+<td>مسطرة ذهبية غائبة/متفرّقة</td>
+<td>مرّة واحدة لكل سطح (masthead)</td>
+<td>توقيع هوية نادر لا مرشوش</td>
+<td>مقترح جديد</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>6) قائمة الالتزام (Compliance Checklist)</h2>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>RTL بالخصائص المنطقية</strong> (<code>ps/pe/ms/me/inset-inline/start/end</code>) — لا <code>left</code>/<code>right</code> (استثناء
+geometry الجهاز <code>safe-area</code>، موسوم <code>design-ok</code>).</li>
+<li><input disabled="" type="checkbox"> <strong><code>dir</code> على <code>&lt;html&gt;</code></strong> عبر <code>RtlContext</code> — أساس اتجاه واحد لكل رسالة، لا <code>dir=auto</code> لكل كتلة.</li>
+<li><input disabled="" type="checkbox"> <strong><code>letter-spacing: 0</code></strong> على العربي المتصل؛ لا ALL-CAPS ولا eyebrow لاتيني.</li>
+<li><input disabled="" type="checkbox"> <strong>أرقام غربية فقط</strong> على الشاشة الواحدة (12px داخل <code>code</code> مستثنى).</li>
+<li><input disabled="" type="checkbox"> <strong>الحدود من <code>--border</code></strong> حصراً (لا مشتقّة من <code>--foreground</code>) — يحرسه <code>wikiThemeAlignment</code>.</li>
+<li><input disabled="" type="checkbox"> <strong>الظلال سوداء</strong> برفع الشفافية — لا من <code>--foreground</code>.</li>
+<li><input disabled="" type="checkbox"> <strong>حلقة <code>--ring</code> على 5 أسطح</strong> ≥ 3:1 (<code>background/card/popover/muted/secondary</code>) — يحرسه
+<code>themeRingContrast</code>؛ محسوب هنا 3.14–6.79 ✅.</li>
+<li><input disabled="" type="checkbox"> <strong><code>prefers-reduced-motion</code></strong> يُلغي انتقالات الأدراج/الطبقات ونبض الحالة.</li>
+<li><input disabled="" type="checkbox"> <strong>حجم لمس ≥ 44×44</strong> على المؤشّر الخشن؛ إدخال جوّال ≥ 16px.</li>
+<li><input disabled="" type="checkbox"> <strong>لصيقة نصّية ≥ 13px</strong> (<code>ui-label</code>) — لا 12px لنصّ خارج <code>code</code>.</li>
+<li><input disabled="" type="checkbox"> <strong>تباين AA</strong> لكل نصّ (≥ 4.5:1) — محسوب هنا لكل الأزواج، أدناها 4.65 ✅.</li>
+<li><input disabled="" type="checkbox"> <strong>رموز دلالية حصراً</strong> — لا لون خام (<code>text-white</code>/<code>bg-black</code>/hex) في مكوّن جديد.</li>
+<li><input disabled="" type="checkbox"> <strong>القياس بصرياً بالمتصفّح</strong> على كل الأسطح والبريستات قبل أي إعلان إنجاز (STYLE_LOCK §6).</li>
+</ul>
+<hr>
+<h2>7) قرارات مطلوبة من المالك</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>القرار</th>
+<th>الخيارات</th>
+<th>التوصية والسبب</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>تجميع الإعدادات في 5 مجموعات (UX)</td>
+<td>(أ) 5 مجموعات · (ب) إبقاء 13 مسطّحاً</td>
+<td><strong>(أ)</strong> — يقلّ المسح ويُشرَح التداخل الثلاثي للمفاتيح؛ بلا فقد وظيفة.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>الزرّ الدوري الرباعي (UX)</td>
+<td>(أ) حالتان · (ب) إبقاء أربع</td>
+<td><strong>(أ)</strong> حالتان + تذكّر التفضيل؛ «مصغّر/إخفاء» يندران ويربكان. اختبار قابلية أولاً إن أمكن.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>شريط تنقّل سفلي للجوّال (UX)</td>
+<td>(أ) إضافته · (ب) الاكتفاء بالدُرج</td>
+<td><strong>(أ)</strong> — يقلّل الاحتكاك على الهاتف؛ سطح جديد لكن قياسي ومنخفض الكلفة.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>جداول الإعدادات خارج <code>max-w-4xl</code> (UX)</td>
+<td>(أ) توسيع الحوار · (ب) صفحة كاملة · (ج) إبقاء</td>
+<td><strong>(ب)</strong> صفحة كاملة للجداول العريضة (المستخدمون/المورّدون)، وإبقاء الحوار لبقية التبويبات.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>إنزال «الطرفيات» من النظير (UX)</td>
+<td>(أ) مدخل ثانوي · (ب) إبقاء نظيراً</td>
+<td><strong>(أ)</strong> — سطح إداري نادر لا يستحق مرتبة النظير؛ محكوم بالدور أصلاً.</td>
+</tr>
+<tr>
+<td>6</td>
+<td>سلّم الطباعة للواجهة الكثيفة (§2.2)</td>
+<td>(أ) المقترح 15px متن · (ب) 16px متن أوسع</td>
+<td><strong>(أ)</strong> 15px متن + 13px لصيقة — كثافة أداة يومية؛ الويكي وحده يبقى 17px قراءةً.</td>
+</tr>
+<tr>
+<td>7</td>
+<td>اللحظة المميّزة = مسطرة الذهب (§1)</td>
+<td>(أ) مسطرة masthead · (ب) توقيع آخر · (ج) بلا</td>
+<td><strong>(أ)</strong> — نادرة، هويّة، بلا كلفة أداء؛ تحترم قاعدة 60/30/10.</td>
+</tr>
+<tr>
+<td>8</td>
+<td>خطّ العناوين</td>
+<td>(أ) نفس <code>IBM Plex Sans Arabic</code> (طبقة واحدة) · (ب) طبقة عناوين منفصلة</td>
+<td><strong>(أ)</strong> — يطابق المنفَّذ و<code>STYLE_LOCK</code>؛ الطبقة الثانية دَين لاحق لا شرط إطلاق.</td>
+</tr>
+<tr>
+<td>9</td>
+<td>اعتماد <code>STYLE_LOCK</code> نفسه</td>
+<td>(أ) اعتماده مرجعاً مُلزِماً · (ب) إبقاؤه استئناسياً</td>
+<td><strong>(أ)</strong> — اعتماده يجعل القفل حاجباً فيثبّت الهوية عبر الجلسات.</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>8) خطة التنفيذ على مراحل (بعد الاعتماد — تقديرية بلا التزام زمني)</h2>
+<p><strong>م0 — أساس الرموز (لا يعتمد على شيء):</strong> تثبيت سلّم الطباعة <code>ui-*</code> كأصناف/رموز، وتوثيق z-index
+والحركة. لا تغيير لوحة (اللوحة مشتقّة وقائمة). <strong>يجب أن تبقى خضراء:</strong> <code>themeRingContrast</code>،
+<code>wikiThemeAlignment</code>، <code>wikiHeadingHierarchy</code>، <code>wikiNumerals</code>، <code>themePrimaryContrast</code>،
+<code>themeStatusContrast</code>.</p>
+<p><strong>م1 — مكتبة المكوّنات (يعتمد على م0):</strong> Button/Input/Card/StatusBadge/Tab/Toast/Dialog
+وفق §3، كلها على رموز دلالية. تحقّق بصري بالمتصفّح على <code>alkindy</code> فاتح/داكن + بريست ثانٍ على الأقل.</p>
+<p><strong>م2 — الويكي (يعتمد على م1):</strong> أدنى مخاطرة (سطح مقروء مستقلّ) — مؤشّر «صفحة N من M»، إبراز TOC
+النشط، إظهار <code>Ctrl K</code>. يبقى <code>wikiHeadingHierarchy</code> + <code>wikiNumerals</code> أخضر.</p>
+<p><strong>م3 — الإعدادات (يعتمد على م1):</strong> تجميع الخمس، فصل الجداول العريضة، توحيد <code>SettingsSubNav</code>.</p>
+<p><strong>م4 — الصدفة (يعتمد على م1، الأعلى مخاطرة):</strong> فصل مؤشّر الحصة، تبسيط الزرّ الدوري، إنزال الطرفيات،
+شريط الجوّال السفلي. تحقّق تدفّقات ت1–ت5 بصرياً.</p>
+<p><strong>م5 — تدقيق a11y وRTL شامل (يعتمد على الكل):</strong> فحص قائمة §6 آلياً + بصرياً على 320px/200% وكل
+البريستات؛ لا إعلان إنجاز قبل لقطات المتصفّح.</p>
+<p><strong>الحُرّاس القائمة التي تبقى خضراء طوال المراحل:</strong> <code>wikiThemeAlignment</code> · <code>themeRingContrast</code> ·
+<code>wikiHeadingHierarchy</code> · <code>wikiNumerals</code> (+ <code>themePrimaryContrast</code> · <code>themeStatusContrast</code> ·
+<code>ui-font.test</code>). أي طفرة تُسقط حارساً = وقفة قبل المتابعة.</p>
+<hr>
+<h2>ملحق أ — تحقّق اللوحة وطريقة القياس</h2>
+<p><strong>كيف حُسِب التباين:</strong> بسكربت Node مستقلّ يُعيد إنتاج منطق <code>theme-presets.ts</code> حرفياً — <code>parseHsl</code>،
+<code>relativeLuminance</code> (تحويل sRGB + تصحيح gamma 2.4)، <code>contrastRatio</code> (WCAG 2.2 §1.4.3)،
+و<code>enforceRingContrast</code>/<code>enforcePrimaryTextContrast</code>. القيم في §2.1 مأخوذة من ناتجه لا مقدَّرة، بعد
+تطبيق التنصيع التلقائي (الحلقة الفاتحة <code>50% → 43.5%</code>، والأساسي الداكن <code>58.7% → 65.2%</code>). <strong>لا نسبة
+واحدة فشلت</strong> في الوضعين على الأزواج الأساسية والأسطح الخمسة.</p>
+<p><strong>معاينة بصرية:</strong> <code>docs/design/palette-preview-2026-09-03.html</code> (+ لقطة <code>…-2026-09-03.png</code>) تُظهر
+الوضعين جنباً إلى جنب: أزرار (أساسي/ثانوي/محدَّد)، شارات الحالة الثلاث، وعيّنات الأسطح بنِسَبها.
+تؤكّد اللقطة أن اللوحة تُقرأ <strong>كحلياً/ذهبياً على كريم</strong> (لا بنفسجي قالب)، وأن مسطرة الذهب تظهر مرّةً
+واحدة تحت العنوان.</p>
+<p><strong>مطابقة الهوية (دليل دار الكِندِي → الرمز المشتقّ):</strong></p>
+<table>
+<thead>
+<tr>
+<th>الهوية</th>
+<th>HEX الرسمي</th>
+<th>الرمز المشتقّ</th>
+<th>HEX المشتقّ</th>
+<th>ملاحظة</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>كحلي 900</td>
+<td><code>#10192C</code></td>
+<td><code>--background</code> (داكن)</td>
+<td><code>#0f1729</code></td>
+<td>تطابق شبه تام</td>
+</tr>
+<tr>
+<td>كحلي 800</td>
+<td><code>#16223B</code></td>
+<td><code>--card</code> (داكن)</td>
+<td><code>#152037</code></td>
+<td>ارتفاع سطح واضح</td>
+</tr>
+<tr>
+<td>نصّ على الكحلي</td>
+<td><code>#E8EAED</code></td>
+<td><code>--foreground</code> (داكن)</td>
+<td><code>#e7eaee</code></td>
+<td>تطابق</td>
+</tr>
+<tr>
+<td>إنجليزية على الكحلي</td>
+<td><code>#A8B0C0</code></td>
+<td><code>--muted-foreground</code> (داكن)</td>
+<td><code>#b0b7c4</code></td>
+<td>رمادية لا ذهبية (مقصود)</td>
+</tr>
+<tr>
+<td>كريم</td>
+<td><code>#F9F6F0</code></td>
+<td><code>--card</code> (فاتح)</td>
+<td><code>#faf8f5</code></td>
+<td>تطابق</td>
+</tr>
+<tr>
+<td>ذهبي 700</td>
+<td><code>#9D8251</code></td>
+<td><code>--ring</code> (فاتح)</td>
+<td><code>#997c45</code></td>
+<td>مغمَّق للتباين 3.36:1</td>
+</tr>
+<tr>
+<td>نجاح</td>
+<td><code>#2E6B4E</code></td>
+<td><code>--success</code> (فاتح)</td>
+<td><code>#296549</code></td>
+<td>تطابق دلالي</td>
+</tr>
+<tr>
+<td>خطأ</td>
+<td><code>#A33B38</code></td>
+<td><code>--danger</code> (فاتح)</td>
+<td><code>#b81e1e</code></td>
+<td>مغمَّق قليلاً لعبور AA</td>
+</tr>
+</tbody></table>
+<p><strong>قاعدة 60/30/10 مطبَّقة:</strong> الكريم سطح 60% (خلفية/بطاقة)، الكحلي 30% (نصّ/أساسي/رأس داكن)، الذهبي
+10% (حلقة تركيز + مسطرة masthead + حالة نشطة واحدة) — <strong>لا</strong> يُفرَش الذهب على الأسطح (درسٌ مقيس في
+<code>theme-presets.ts</code>: فرشُه كسطحٍ أفشل ثلاث محاولات لأنه أرخص الهوية).</p>
+<hr>
+<p><em>انتهى. هذا الدليل مسوّدة للمراجعة؛ لا يُمرَّر إلى <code>frontend-dev</code> قبل اعتماد المالك المكتوب (بوابة
+STYLE_LOCK وبوابة الـBrief).</em></p>
+
+  </article>
+  <footer class="footer">نسّاج — من دار الكِندِي · مسوّدة داخلية للمراجعة، غير معتمدة.</footer>
+</div>
+</body>
+</html>

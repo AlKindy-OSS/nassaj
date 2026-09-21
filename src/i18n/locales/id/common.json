@@ -1,0 +1,361 @@
+{
+  "buttons": {
+    "save": "Simpan",
+    "cancel": "Batal",
+    "delete": "Hapus",
+    "create": "Buat",
+    "edit": "Ubah",
+    "close": "Tutup",
+    "confirm": "Konfirmasi",
+    "submit": "Kirim",
+    "retry": "Coba lagi",
+    "refresh": "Muat ulang",
+    "search": "Cari",
+    "clear": "Bersihkan",
+    "copy": "Salin",
+    "download": "Unduh",
+    "upload": "Unggah",
+    "browse": "Telusuri"
+  },
+  "tabs": {
+    "chat": "Obrolan",
+    "shell": "Shell",
+    "files": "Berkas",
+    "git": "Kontrol Sumber",
+    "tasks": "Tugas",
+    "board": "Papan Proyek",
+    "wiki": "Wiki"
+  },
+  "wiki": {
+    "title": "Wiki Nassaj"
+  },
+  "status": {
+    "loading": "Memuat...",
+    "success": "Berhasil",
+    "error": "Kesalahan",
+    "failed": "Gagal",
+    "pending": "Menunggu",
+    "completed": "Selesai",
+    "inProgress": "Sedang berjalan"
+  },
+  "messages": {
+    "savedSuccessfully": "Berhasil disimpan",
+    "deletedSuccessfully": "Berhasil dihapus",
+    "updatedSuccessfully": "Berhasil diperbarui",
+    "operationFailed": "Operasi gagal",
+    "networkError": "Kesalahan jaringan. Periksa koneksi Anda.",
+    "unauthorized": "Tidak diizinkan. Silakan masuk.",
+    "notFound": "Tidak ditemukan",
+    "invalidInput": "Masukan tidak valid",
+    "requiredField": "Kolom ini wajib diisi",
+    "unknownError": "Terjadi kesalahan yang tidak diketahui"
+  },
+  "navigation": {
+    "settings": "Pengaturan",
+    "home": "Beranda",
+    "back": "Kembali",
+    "next": "Berikutnya",
+    "previous": "Sebelumnya",
+    "logout": "Keluar"
+  },
+  "common": {
+    "language": "Bahasa",
+    "theme": "Tema",
+    "darkMode": "Mode gelap",
+    "lightMode": "Mode terang",
+    "name": "Nama",
+    "description": "Deskripsi",
+    "enabled": "Aktif",
+    "disabled": "Nonaktif",
+    "optional": "Opsional",
+    "version": "Versi",
+    "select": "Pilih",
+    "selectAll": "Pilih semua",
+    "deselectAll": "Batalkan semua pilihan",
+    "done": "Selesai",
+    "failed": "Gagal"
+  },
+  "time": {
+    "justNow": "Baru saja",
+    "minutesAgo": "{{count}} menit lalu",
+    "hoursAgo": "{{count}} jam lalu",
+    "daysAgo": "{{count}} hari lalu",
+    "yesterday": "Kemarin"
+  },
+  "fileOperations": {
+    "newFile": "Berkas Baru",
+    "newFolder": "Folder Baru",
+    "rename": "Ganti nama",
+    "move": "Pindahkan",
+    "copyPath": "Salin jalur",
+    "openInEditor": "Buka di editor"
+  },
+  "mainContent": {
+    "loading": "Memuat Nassaj",
+    "settingUpWorkspace": "Menyiapkan ruang kerja Anda...",
+    "chooseProject": "Pilih Proyek Anda",
+    "selectProjectDescription": "Pilih proyek dari bilah samping untuk mulai membuat kode bersama Claude. Setiap proyek berisi sesi obrolan dan riwayat berkas Anda.",
+    "tip": "Tips",
+    "createProjectMobile": "Ketuk tombol menu di atas untuk membuka proyek",
+    "createProjectDesktop": "Buat proyek baru dengan mengeklik ikon folder di bilah samping",
+    "newSession": "Sesi Baru",
+    "untitledSession": "Sesi Tanpa Judul",
+    "projectFiles": "Berkas Proyek",
+    "sessionIdTooltip": "ID sesi: {{id}} — klik untuk menyalin",
+    "sessionIdCopy": "Salin ID sesi {{id}}"
+  },
+  "fileTree": {
+    "loading": "Memuat berkas...",
+    "files": "Berkas",
+    "simpleView": "Tampilan sederhana",
+    "compactView": "Tampilan ringkas",
+    "detailedView": "Tampilan rinci",
+    "searchPlaceholder": "Cari berkas dan folder...",
+    "clearSearch": "Bersihkan pencarian",
+    "name": "Nama",
+    "size": "Ukuran",
+    "modified": "Diubah",
+    "permissions": "Izin",
+    "noFilesFound": "Tidak ada berkas ditemukan",
+    "checkProjectPath": "Periksa apakah jalur proyek dapat diakses",
+    "noMatchesFound": "Tidak ada hasil yang cocok",
+    "tryDifferentSearch": "Coba kata kunci lain atau bersihkan pencarian",
+    "justNow": "baru saja",
+    "minAgo": "{{count}} menit lalu",
+    "hoursAgo": "{{count}} jam lalu",
+    "daysAgo": "{{count}} hari lalu",
+    "newFile": "Berkas Baru (Cmd+N)",
+    "newFolder": "Folder Baru (Cmd+Shift+N)",
+    "refresh": "Muat ulang",
+    "collapseAll": "Tutup semua",
+    "uploadFiles": "Unggah berkas (maks. {{size}} per berkas)",
+    "uploadingFiles": "Mengunggah berkas",
+    "uploadComplete": "Unggahan selesai",
+    "uploadFailed": "Unggahan gagal",
+    "uploadedCount": "Terunggah {{uploaded}} dari {{total}} {{label}}",
+    "context": {
+      "rename": "Ganti nama",
+      "delete": "Hapus",
+      "copyPath": "Salin jalur",
+      "download": "Unduh",
+      "newFile": "Berkas Baru",
+      "newFolder": "Folder Baru",
+      "refresh": "Muat ulang",
+      "menuLabel": "Menu konteks berkas",
+      "loading": "Memuat..."
+    }
+  },
+  "projectWizard": {
+    "title": "Buat Proyek Baru",
+    "steps": {
+      "type": "Jenis",
+      "configure": "Konfigurasi",
+      "confirm": "Konfirmasi"
+    },
+    "step1": {
+      "question": "Apakah Anda sudah punya ruang kerja, atau ingin membuat yang baru?",
+      "existing": {
+        "title": "Ruang Kerja yang Ada",
+        "description": "Saya sudah punya ruang kerja di server dan hanya perlu menambahkannya ke daftar proyek"
+      },
+      "new": {
+        "title": "Ruang Kerja Baru",
+        "description": "Buat ruang kerja baru, dan jika mau, klon dari repositori GitHub"
+      }
+    },
+    "step2": {
+      "existingPath": "Jalur Ruang Kerja",
+      "newPath": "Jalur Ruang Kerja",
+      "existingPlaceholder": "/jalur/ke/ruang-kerja/yang-ada",
+      "newPlaceholder": "/jalur/ke/ruang-kerja/baru",
+      "existingHelp": "Jalur lengkap ke direktori ruang kerja Anda yang sudah ada",
+      "newHelp": "Jalur lengkap ke direktori ruang kerja Anda",
+      "githubUrl": "URL GitHub (Opsional)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "Opsional: berikan URL GitHub untuk mengklon repositori",
+      "githubAuth": "Autentikasi GitHub (Opsional)",
+      "githubAuthHelp": "Hanya diperlukan untuk repositori privat. Repositori publik dapat diklon tanpa autentikasi.",
+      "loadingTokens": "Memuat token tersimpan...",
+      "storedToken": "Token Tersimpan",
+      "newToken": "Token Baru",
+      "nonePublic": "Tidak ada (Publik)",
+      "selectToken": "Pilih Token",
+      "selectTokenPlaceholder": "-- Pilih token --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "Token ini hanya dipakai untuk operasi ini",
+      "publicRepoInfo": "Repositori publik tidak memerlukan autentikasi. Anda boleh melewati token jika mengklon repositori publik.",
+      "noTokensHelp": "Tidak ada token tersimpan. Anda dapat menambahkannya di Pengaturan → Kunci API agar mudah dipakai ulang.",
+      "optionalTokenPublic": "Token GitHub (Opsional untuk Repositori Publik)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (kosongkan untuk repositori publik)",
+      "repos": {
+        "fromMyRepos": "Pilih dari repositori saya",
+        "pasteUrl": "Tempel URL",
+        "sourceToggleLabel": "Sumber GitHub",
+        "help": "Pilih repositori dari akun GitHub Anda untuk diklon",
+        "ariaLabel": "Pilih repositori GitHub",
+        "placeholder": "Pilih repositori...",
+        "searchPlaceholder": "Cari repositori...",
+        "searchAriaLabel": "Cari repositori GitHub Anda",
+        "private": "Privat",
+        "loading": "Memuat repositori Anda...",
+        "empty": "Tidak ada repositori untuk token ini.",
+        "noMatch": "Tidak ada repositori yang cocok dengan pencarian Anda.",
+        "loadError": "Gagal memuat repositori. Silakan coba lagi.",
+        "invalidToken": "GitHub menolak token ini. Mungkin sudah dicabut atau tidak punya cakupan \"repo\".",
+        "noToken": "Tidak ada token GitHub yang dikonfigurasi untuk akun ini.",
+        "forbidden": "GitHub menolak akses. Token mungkin kurang cakupan atau kena batas laju.",
+        "retry": "Coba lagi",
+        "manageTokens": "Kelola token di Pengaturan"
+      }
+    },
+    "step3": {
+      "reviewConfig": "Tinjau Konfigurasi Anda",
+      "existingWorkspace": "Ruang Kerja yang Ada",
+      "newWorkspace": "Ruang Kerja Baru",
+      "path": "Jalur:",
+      "cloneFrom": "Klon dari:",
+      "authentication": "Autentikasi:",
+      "usingStoredToken": "Memakai token tersimpan:",
+      "usingProvidedToken": "Memakai token yang diberikan",
+      "noAuthentication": "Tanpa autentikasi",
+      "sshKey": "Kunci SSH",
+      "existingInfo": "Ruang kerja akan ditambahkan ke daftar proyek Anda dan tersedia untuk sesi Claude/Cursor.",
+      "newWithClone": "Repositori akan diklon dari folder ini.",
+      "newEmpty": "Ruang kerja akan ditambahkan ke daftar proyek Anda dan tersedia untuk sesi Claude/Cursor.",
+      "cloningRepository": "Mengklon repositori..."
+    },
+    "buttons": {
+      "cancel": "Batal",
+      "back": "Kembali",
+      "next": "Berikutnya",
+      "createProject": "Buat Proyek",
+      "creating": "Membuat...",
+      "cloning": "Mengklon..."
+    },
+    "errors": {
+      "selectType": "Pilih apakah Anda sudah punya ruang kerja atau ingin membuat yang baru",
+      "providePath": "Harap masukkan jalur ruang kerja",
+      "failedToCreate": "Gagal membuat ruang kerja",
+      "failedToCreateFolder": "Gagal membuat folder"
+    }
+  },
+  "notifications": {
+    "genericTool": "sebuah alat",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "Notifikasi"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "Perlu Tindakan",
+          "body": "{{toolName}} menunggu keputusan Anda."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "Proses Dihentikan",
+          "body": "Alasan: {{reason}}"
+        },
+        "failed": {
+          "title": "Proses Gagal"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "Notifikasi Agen"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "Pembaruan Tersedia",
+    "newVersionReady": "Versi baru sudah siap",
+    "currentVersion": "Versi Saat Ini",
+    "latestVersion": "Versi Terbaru",
+    "whatsNew": "Yang baru:",
+    "viewFullRelease": "Lihat rilis lengkap",
+    "updateProgress": "Kemajuan pembaruan:",
+    "manualUpgrade": "Pembaruan manual:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "Atau klik \"Perbarui Sekarang\" untuk menjalankannya otomatis.",
+    "updateCompleted": "Pembaruan berhasil diselesaikan!",
+    "restartServer": "Mulai ulang server untuk menerapkan perubahan.",
+    "updateFailed": "Pembaruan gagal",
+    "buttons": {
+      "close": "Tutup",
+      "later": "Nanti",
+      "copyCommand": "Salin Perintah",
+      "updateNow": "Perbarui Sekarang",
+      "updating": "Memperbarui..."
+    },
+    "ariaLabels": {
+      "closeModal": "Tutup dialog pembaruan versi",
+      "showSidebar": "Tampilkan bilah samping",
+      "settings": "Pengaturan",
+      "updateAvailable": "Pembaruan tersedia",
+      "closeSidebar": "Tutup bilah samping",
+      "updateInProgress": "Pembaruan sedang berlangsung"
+    }
+  },
+  "sessionProcessState": {
+    "running": "Berjalan",
+    "frozen": "Dijeda (dibekukan)",
+    "runningHint": "Proses sesi sedang berjalan",
+    "frozenHint": "Proses sesi dibekukan sementara (kill -STOP)",
+    "projectBusyHint": "Ada sesi di proyek ini yang sedang memproses",
+    "done": "Selesai",
+    "doneHint": "Sesi selesai dan belum dibuka",
+    "projectDoneHint": "Ada sesi di proyek ini yang selesai dan belum dibuka"
+  },
+  "workflowStatus": {
+    "running": "Alur kerja berjalan",
+    "runningHint": "Sebuah alur kerja latar sedang berjalan di sesi ini",
+    "orphanEmpty": "Berhenti — tanpa keluaran",
+    "orphanEmptyHint": "Proses keluar sebelum ada agen yang selesai (0 dari N) — dapat dilanjutkan manual",
+    "orphanPartial": "Berhenti — sebagian",
+    "orphanPartialHint": "Proses keluar setelah sebagian agen selesai — kemajuan sebagian tersimpan, dapat dilanjutkan manual",
+    "orphanIncomplete": "Berhenti — tidak lengkap",
+    "orphanIncompleteHint": "Proses keluar tanpa selesai; lebih banyak yang dimulai daripada yang dihasilkan — dapat dilanjutkan manual",
+    "frozen": "Dibekukan (dijeda)",
+    "frozenHint": "Proses ditangguhkan (SIGSTOP), bukan mati — akan lanjut saat CONT",
+    "unknown": "Status hidup tidak diketahui",
+    "unknownHint": "Tidak dapat memastikan status hidup — kemungkinan selamat dari mulai ulang server; tidak terkonfirmasi hidup maupun mati",
+    "projectRunningHint": "Sebuah alur kerja latar sedang berjalan di proyek ini",
+    "projectOrphanHint": "Ada alur kerja latar yatim di proyek ini yang perlu perhatian",
+    "projectUnknownHint": "Status hidup sebuah alur kerja latar di proyek ini tidak diketahui — tidak terkonfirmasi hidup maupun mati"
+  },
+  "buildUpdate": {
+    "available": "Build baru tersedia",
+    "reload": "Muat ulang",
+    "ariaLabel": "Notifikasi pembaruan build baru",
+    "dismiss": "Tutup"
+  },
+  "governanceBadge": {
+    "ungoverned": "Tanpa tata kelola",
+    "tooltip": {
+      "none": "Sesi ini berjalan di luar tata kelola Nassaj — periksa pengaturan penyedia"
+    }
+  },
+  "onboarding": {
+    "agents": {
+      "title": "Hubungkan Agen AI Anda",
+      "subtitle": "Masuk ke satu atau beberapa asisten koding AI. Semuanya opsional.",
+      "footerNote": "Anda dapat mengaturnya nanti di Pengaturan."
+    },
+    "buttons": {
+      "previous": "Sebelumnya",
+      "next": "Berikutnya",
+      "saving": "Menyimpan...",
+      "completing": "Menyelesaikan...",
+      "complete": "Selesaikan Penyiapan"
+    },
+    "errors": {
+      "gitFieldsRequired": "Nama dan email git keduanya wajib diisi.",
+      "invalidEmail": "Masukkan alamat email yang valid.",
+      "saveGitConfigFailed": "Gagal menyimpan konfigurasi git",
+      "completeFailed": "Gagal menyelesaikan penyiapan awal"
+    }
+  }
+}

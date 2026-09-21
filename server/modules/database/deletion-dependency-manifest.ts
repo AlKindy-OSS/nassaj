@@ -1,0 +1,84 @@
+import type Database from 'better-sqlite3';
+export type DeletionDisposition = 'root' | 'cascade' | 'transactional_delete' | 'retained_ledger' | 'logical_retirement' | 'unrelated_identity';
+export type DeletionDependency = Readonly<{ table: string; column: string; disposition: DeletionDisposition }>;
+
+/** Exhaustive fixed inventory. A new dependency is rejected until explicitly classified/reviewed. */
+export const DELETION_DEPENDENCIES: readonly DeletionDependency[] = Object.freeze([
+  { table: 'closed_sessions', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'connector_owner_auth_sessions', column: 'session_id', disposition: 'unrelated_identity' },
+  { table: 'connector_owner_operation_nonces', column: 'session_id', disposition: 'unrelated_identity' },
+  { table: 'conversation_shadow_authorizations', column: 'project_id', disposition: 'logical_retirement' },
+  { table: 'conversation_usage_snapshots', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'conversation_usage_snapshots', column: 'project_path', disposition: 'retained_ledger' },
+  { table: 'conversation_usage_snapshots', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'conversations', column: 'project_id', disposition: 'logical_retirement' },
+  { table: 'deletion_source_manifest_members', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'deletion_source_manifests', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'message_authors', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'message_coordination_ingress', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'pending_server_actions', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'permission_launch_decisions', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'permission_launch_decisions', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'project_cost_daily', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'project_cost_daily', column: 'project_path', disposition: 'retained_ledger' },
+  { table: 'project_delete_intents', column: 'project_id', disposition: 'transactional_delete' },
+  { table: 'project_deletion_records', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'project_generations', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'project_lifecycle_transitions', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'project_members', column: 'project_id', disposition: 'cascade' },
+  { table: 'project_tombstones', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'projects', column: 'project_id', disposition: 'root' },
+  { table: 'projects', column: 'project_path', disposition: 'root' },
+  { table: 'projects__new', column: 'project_id', disposition: 'root' },
+  { table: 'projects__new', column: 'project_path', disposition: 'root' },
+  { table: 'provider_run_failures', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'reconcile_archived_projects', column: 'project_id', disposition: 'transactional_delete' },
+  { table: 'response_turn_metrics', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'response_turn_metrics_v2', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'scheduled_messages', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_agents_cache', column: 'session_id', disposition: 'cascade' },
+  { table: 'session_agents_cache__new', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_agents_meta', column: 'session_id', disposition: 'cascade' },
+  { table: 'session_agents_meta__new', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_artifact_cleanup_outbox', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'session_artifact_cleanup_outbox', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'session_delete_batch_members', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'session_delete_batch_members', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'session_delete_intents', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_generation_bindings', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'session_generation_bindings', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'session_outcome_reads', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_participants', column: 'session_id', disposition: 'cascade' },
+  { table: 'session_run_outcomes', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'session_tombstones', column: 'project_path', disposition: 'retained_ledger' },
+  { table: 'session_tombstones', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'session_workspace_modes', column: 'project_path', disposition: 'transactional_delete' },
+  { table: 'session_workspace_modes', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'sessions', column: 'project_path', disposition: 'root' },
+  { table: 'sessions', column: 'session_id', disposition: 'root' },
+  { table: 'sessions__new', column: 'project_path', disposition: 'root' },
+  { table: 'sessions__new', column: 'session_id', disposition: 'root' },
+  { table: 'starred_sessions', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'turn_supervisor_hosted_context', column: 'project_path', disposition: 'transactional_delete' },
+  { table: 'turn_supervisor_hosted_context', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'turn_supervisor_hosted_results', column: 'project_path', disposition: 'transactional_delete' },
+  { table: 'turn_supervisor_hosted_results', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'turn_supervisor_turns', column: 'session_id', disposition: 'transactional_delete' },
+  { table: 'usage_duration_events', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'usage_duration_events', column: 'project_path', disposition: 'retained_ledger' },
+  { table: 'usage_duration_events', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'usage_request_events', column: 'project_id', disposition: 'retained_ledger' },
+  { table: 'usage_request_events', column: 'project_path', disposition: 'retained_ledger' },
+  { table: 'usage_request_events', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'usage_request_occurrences', column: 'session_id', disposition: 'retained_ledger' },
+  { table: 'usage_source_links', column: 'session_id', disposition: 'retained_ledger' },
+]);
+
+/** Inspect actual SQLite columns, including optional tables, using parameterized table-valued PRAGMA. */
+export function assertDeletionDependencies(db: Database.Database): void {
+  const found = db.prepare(`SELECT m.name AS table_name, p.name AS column_name
+    FROM sqlite_master m JOIN pragma_table_info(m.name) p
+    WHERE m.type='table' AND p.name IN ('session_id','project_id','project_path')`).all() as Array<{ table_name: string; column_name: string }>;
+  const known = new Set(DELETION_DEPENDENCIES.map(row => `${row.table}.${row.column}`));
+  if (found.some(row => !known.has(`${row.table_name}.${row.column_name}`))) throw new Error('DELETION_DEPENDENCY_UNCLASSIFIED');
+}

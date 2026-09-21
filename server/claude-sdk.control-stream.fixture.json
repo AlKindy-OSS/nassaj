@@ -1,0 +1,431 @@
+{
+ "cli": "2.1.269",
+ "captured": "2026-09-12",
+ "board": "B-1120",
+ "note": "Redacted raw SDK stream (model haiku, cwd /var/tmp). ids/paths/texts/tool results replaced; message order and field shapes kept.",
+ "scenarios": {
+  "bgBash": [
+   {
+    "type": "rate_limit_event",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.269",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_redacted_1",
+       "name": "Bash",
+       "input": {
+        "command": "sleep 6; echo hi",
+        "description": "Sleep for 6 seconds then echo hi",
+        "run_in_background": true
+       }
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "bqzam4idf",
+    "tool_use_id": "toolu_redacted_1",
+    "is_backgrounded": true,
+    "task_type": "local_bash",
+    "description": "Sleep for 6 seconds then echo hi",
+    "session_id": "<session>"
+   },
+   {
+    "type": "user",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_redacted_1",
+       "content": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "WAITING"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_updated",
+    "task_id": "bqzam4idf",
+    "patch": {
+     "status": "completed",
+     "end_time": 0
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "bqzam4idf",
+    "tool_use_id": "toolu_redacted_1",
+    "status": "completed",
+    "output_file": "<redacted-path>",
+    "summary": "Background command \"Sleep for 6 seconds then echo hi\" comple",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.269",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "DONE"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "<session>"
+   }
+  ],
+  "bgAgent": [
+   {
+    "type": "rate_limit_event",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.269",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_redacted_2",
+       "name": "Agent",
+       "input": {
+        "subagent_type": "general-purpose",
+        "run_in_background": true,
+        "description": "say ok",
+        "prompt": "Reply with the single word OK. Use no tools."
+       }
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "a7fa8257812a0f566",
+    "tool_use_id": "toolu_redacted_2",
+    "is_backgrounded": true,
+    "task_type": "local_agent",
+    "subagent_type": "general-purpose",
+    "spawn_depth": 1,
+    "description": "say ok",
+    "session_id": "<session>"
+   },
+   {
+    "type": "user",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_redacted_2",
+       "content": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": "toolu_redacted_2",
+    "subagent_type": "general-purpose",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": "toolu_redacted_2",
+    "subagent_type": "general-purpose",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "OK"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "background_tasks_changed",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_updated",
+    "task_id": "a7fa8257812a0f566",
+    "patch": {
+     "status": "completed",
+     "end_time": 0
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "a7fa8257812a0f566",
+    "tool_use_id": "toolu_redacted_2",
+    "status": "completed",
+    "output_file": "<redacted-path>",
+    "summary": "OK",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "WAITING"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "init",
+    "claude_code_version": "2.1.269",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "system",
+    "subtype": "thinking_tokens",
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "<redacted>"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "assistant",
+    "parent_tool_use_id": null,
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "text",
+       "text": "DONE"
+      }
+     ]
+    },
+    "session_id": "<session>"
+   },
+   {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "session_id": "<session>"
+   }
+  ]
+ }
+}

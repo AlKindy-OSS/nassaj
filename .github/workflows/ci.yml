@@ -1,0 +1,51 @@
+# Public CI for self-hosted Nassaj. Runs the portable, environment-free suite on
+# the supported Node range: typecheck and the src unit tests. The upstream
+# operator's release validation and the environment-bound update/release-
+# infrastructure tests are intentionally not part of this workflow — they require
+# host facilities (systemd/cgroup, git release tags, a private-permission working
+# tree) a generic CI runner does not provide. `npm run lint` and
+# `npm run test:client` are also omitted: lint reports unresolved-import errors
+# because shipped src test files reference the excluded tests/ helper tree, and
+# test:client needs a jsdom canvas backend a bare runner lacks. Run those two
+# locally in your fork once you have provisioned their prerequisites.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: typecheck / src tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      NODE_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --include=dev
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests (src)
+        run: npm run test:src

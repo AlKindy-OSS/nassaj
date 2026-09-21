@@ -1,0 +1,7 @@
+{"timestamp":"2026-08-10T06:00:00.000Z","type":"session_meta","payload":{"session_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","thread_source":"user"}}
+{"timestamp":"2026-08-10T06:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
+{"timestamp":"2026-08-10T06:00:02.000Z","type":"response_item","payload":{"type":"function_call","name":"spawn_agent","namespace":"collaboration","arguments":"{\"task_name\":\"ui_designer\"}","call_id":"call-ui"}}
+{"timestamp":"2026-08-10T06:00:03.000Z","type":"event_msg","payload":{"type":"sub_agent_activity","kind":"started","event_id":"call-ui","agent_thread_id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","agent_path":"/root/ui_designer"}}
+{"timestamp":"2026-08-10T06:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"spawn_agent","namespace":"collaboration","arguments":"{\"task_name\":\"frontend_dev\"}","call_id":"call-front"}}
+{"timestamp":"2026-08-10T06:00:05.000Z","type":"event_msg","payload":{"type":"sub_agent_activity","kind":"started","event_id":"call-front","agent_thread_id":"cccccccc-cccc-cccc-cccc-cccccccccccc","agent_path":"/root/frontend_dev"}}
+{"timestamp":"2026-08-10T06:00:06.000Z","type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":258400,"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"total_tokens":110}}}}

@@ -1,0 +1,943 @@
+{
+  "buttons": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "create": "إنشاء",
+    "edit": "تعديل",
+    "close": "إغلاق",
+    "confirm": "تأكيد",
+    "submit": "إرسال",
+    "retry": "إعادة المحاولة",
+    "refresh": "تحديث",
+    "search": "بحث",
+    "clear": "مسح",
+    "copy": "نسخ",
+    "download": "تنزيل",
+    "upload": "رفع",
+    "browse": "تصفح"
+  },
+  "tabs": {
+    "chat": "المحادثة",
+    "shell": "Shell",
+    "files": "الملفات",
+    "git": "إدارة المصدر",
+    "tasks": "المهام",
+    "board": "لوحة المشروع",
+    "wiki": "الويكي"
+  },
+  "wiki": {
+    "title": "ويكي نسّاج"
+  },
+  "status": {
+    "loading": "جارٍ التحميل...",
+    "success": "نجح",
+    "error": "خطأ",
+    "failed": "فشل",
+    "pending": "قيد الانتظار",
+    "completed": "مكتمل",
+    "inProgress": "قيد التنفيذ"
+  },
+  "messages": {
+    "savedSuccessfully": "تم الحفظ بنجاح",
+    "deletedSuccessfully": "تم الحذف بنجاح",
+    "updatedSuccessfully": "تم التحديث بنجاح",
+    "operationFailed": "فشلت العملية",
+    "networkError": "خطأ في الشبكة. يرجى التحقق من الاتصال.",
+    "unauthorized": "غير مصرّح. يرجى تسجيل الدخول.",
+    "notFound": "غير موجود",
+    "invalidInput": "مدخل غير صالح",
+    "requiredField": "هذا الحقل مطلوب",
+    "unknownError": "حدث خطأ غير معروف"
+  },
+  "navigation": {
+    "settings": "الإعدادات",
+    "home": "الرئيسية",
+    "back": "السابق",
+    "next": "التالي",
+    "previous": "السابق",
+    "logout": "تسجيل الخروج"
+  },
+  "common": {
+    "language": "اللغة",
+    "theme": "السمة",
+    "darkMode": "الوضع الداكن",
+    "lightMode": "الوضع الفاتح",
+    "name": "الاسم",
+    "description": "الوصف",
+    "enabled": "مفعّل",
+    "disabled": "معطّل",
+    "optional": "اختياري",
+    "version": "الإصدار",
+    "select": "اختر",
+    "selectAll": "تحديد الكل",
+    "deselectAll": "إلغاء تحديد الكل",
+    "done": "تم",
+    "failed": "فشل"
+  },
+  "time": {
+    "justNow": "للتو",
+    "minutesAgo": "قبل {{count}} دقيقة",
+    "hoursAgo": "قبل {{count}} ساعة",
+    "daysAgo": "قبل {{count}} يوم",
+    "yesterday": "أمس"
+  },
+  "fileOperations": {
+    "newFile": "ملف جديد",
+    "newFolder": "مجلد جديد",
+    "rename": "إعادة تسمية",
+    "move": "نقل",
+    "copyPath": "نسخ المسار",
+    "openInEditor": "فتح في المحرر"
+  },
+  "mainContent": {
+    "loading": "جارٍ تحميل Nassaj",
+    "settingUpWorkspace": "جارٍ إعداد مساحة العمل...",
+    "chooseProject": "اختر مشروعك",
+    "selectProjectDescription": "اختر مشروعاً من الشريط الجانبي لبدء البرمجة مع Claude. كل مشروع يحتوي على جلسات المحادثة وسجل الملفات.",
+    "tip": "تلميح",
+    "createProjectMobile": "اضغط زر القائمة أعلاه للوصول إلى المشاريع",
+    "createProjectDesktop": "أنشئ مشروعاً جديداً بالضغط على أيقونة المجلد في الشريط الجانبي",
+    "newSession": "جلسة جديدة",
+    "untitledSession": "جلسة بدون عنوان",
+    "projectFiles": "ملفات المشروع",
+    "sessionIdTooltip": "معرّف الجلسة: {{id}} — انقر للنسخ",
+    "sessionIdCopy": "نسخ معرّف الجلسة {{id}}",
+    "sessionResolving": "جارٍ فتح المحادثة",
+    "sessionResolvingDescription": "جارٍ التحقق من إتاحة هذه المحادثة لك...",
+    "sessionDeepLink": {
+      "unauthorized": {
+        "title": "يلزم تسجيل الدخول",
+        "description": "تعذّر التحقق من جلستك. سجّل الدخول مجدداً ثم افتح الرابط مرة أخرى."
+      },
+      "forbidden": {
+        "title": "المحادثة غير متاحة",
+        "description": "ليست لديك صلاحية عرض هذه المحادثة."
+      },
+      "not_found": {
+        "title": "المحادثة غير موجودة",
+        "description": "ربما حُذفت المحادثة أو أُرشفت، أو أن الرابط غير صحيح."
+      },
+      "error": {
+        "title": "تعذّر فتح المحادثة",
+        "description": "منع خطأ مؤقت في الخادم أو الشبكة تحميل هذه المحادثة."
+      },
+      "retry": "إعادة المحاولة"
+    }
+  },
+  "fileTree": {
+    "loading": "جارٍ تحميل الملفات...",
+    "files": "الملفات",
+    "simpleView": "عرض بسيط",
+    "compactView": "عرض مضغوط",
+    "detailedView": "عرض مفصّل",
+    "searchPlaceholder": "ابحث في الملفات والمجلدات...",
+    "clearSearch": "مسح البحث",
+    "name": "الاسم",
+    "size": "الحجم",
+    "modified": "آخر تعديل",
+    "permissions": "الصلاحيات",
+    "noFilesFound": "لا توجد ملفات",
+    "checkProjectPath": "تحقّق من إمكانية الوصول إلى مسار المشروع",
+    "noMatchesFound": "لا توجد نتائج مطابقة",
+    "tryDifferentSearch": "جرّب كلمة بحث مختلفة أو امسح البحث",
+    "justNow": "للتو",
+    "minAgo": "قبل {{count}} دقيقة",
+    "hoursAgo": "قبل {{count}} ساعة",
+    "daysAgo": "قبل {{count}} يوم",
+    "newFile": "ملف جديد (Cmd+N)",
+    "newFolder": "مجلد جديد (Cmd+Shift+N)",
+    "refresh": "تحديث",
+    "collapseAll": "طيّ الكل",
+    "uploadFiles": "رفع ملفات (بحد أقصى {{size}} لكل ملف)",
+    "uploadingFiles": "جارٍ رفع الملفات",
+    "uploadComplete": "اكتمل الرفع",
+    "uploadFailed": "فشل الرفع",
+    "uploadedCount": "رُفع {{uploaded}} من أصل {{total}} ملف",
+    "context": {
+      "rename": "إعادة تسمية",
+      "delete": "حذف",
+      "copyPath": "نسخ المسار",
+      "download": "تنزيل",
+      "newFile": "ملف جديد",
+      "newFolder": "مجلد جديد",
+      "refresh": "تحديث",
+      "menuLabel": "قائمة سياق الملف",
+      "loading": "جارٍ التحميل..."
+    }
+  },
+  "projectWizard": {
+    "title": "إنشاء مشروع جديد",
+    "steps": {
+      "type": "النوع",
+      "configure": "الإعداد",
+      "confirm": "التأكيد"
+    },
+    "step1": {
+      "question": "هل لديك مساحة عمل بالفعل، أم تريد إنشاء واحدة جديدة؟",
+      "existing": {
+        "title": "مساحة عمل قائمة",
+        "description": "لديّ مساحة عمل على الخادم وأحتاج فقط إلى إضافتها إلى قائمة المشاريع"
+      },
+      "new": {
+        "title": "مساحة عمل جديدة",
+        "description": "أنشئ مساحة عمل جديدة، مع إمكانية الاستنساخ من GitHub"
+      }
+    },
+    "step2": {
+      "existingPath": "مسار مساحة العمل",
+      "newPath": "مسار مساحة العمل",
+      "existingPlaceholder": "/path/to/existing/workspace",
+      "newPlaceholder": "/path/to/new/workspace",
+      "existingHelp": "المسار الكامل لمجلد مساحة العمل الحالية",
+      "newHelp": "المسار الكامل لمجلد مساحة العمل",
+      "githubUrl": "رابط GitHub (اختياري)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "اختياري: زوّد رابط GitHub لاستنساخ مستودع",
+      "githubAuth": "مصادقة GitHub (اختياري)",
+      "githubAuthHelp": "مطلوبة فقط للمستودعات الخاصة. المستودعات العامة يمكن استنساخها دون مصادقة.",
+      "loadingTokens": "جارٍ تحميل الرموز المحفوظة...",
+      "storedToken": "رمز محفوظ",
+      "newToken": "رمز جديد",
+      "nonePublic": "بدون (عام)",
+      "selectToken": "اختر رمزاً",
+      "selectTokenPlaceholder": "-- اختر رمزاً --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "سيُستخدم هذا الرمز لهذه العملية فقط",
+      "publicRepoInfo": "المستودعات العامة لا تتطلّب مصادقة. يمكنك تخطّي إدخال الرمز لاستنساخها.",
+      "noTokensHelp": "لا توجد رموز محفوظة. يمكنك إضافة رموز في الإعدادات ← API Keys لإعادة استخدامها.",
+      "optionalTokenPublic": "رمز GitHub (اختياري للمستودعات العامة)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (اتركه فارغاً للمستودعات العامة)",
+      "repos": {
+        "fromMyRepos": "اختر من مستودعاتي",
+        "pasteUrl": "لصق رابط",
+        "sourceToggleLabel": "مصدر GitHub",
+        "help": "اختر مستودعاً من حساب GitHub لاستنساخه",
+        "ariaLabel": "اختر مستودع GitHub",
+        "placeholder": "اختر مستودعاً...",
+        "searchPlaceholder": "ابحث في المستودعات...",
+        "searchAriaLabel": "ابحث في مستودعات GitHub الخاصة بك",
+        "private": "خاص",
+        "loading": "جارٍ تحميل مستودعاتك...",
+        "empty": "لا توجد مستودعات لهذا الرمز.",
+        "noMatch": "لا توجد مستودعات تطابق بحثك.",
+        "loadError": "تعذّر تحميل المستودعات. حاول مرة أخرى.",
+        "invalidToken": "رفض GitHub هذا الرمز. قد يكون مُلغى أو يفتقد صلاحية \"repo\".",
+        "noToken": "لا يوجد رمز GitHub مهيّأ لهذا الحساب.",
+        "forbidden": "رفض GitHub الوصول. قد يفتقد الرمز الصلاحية المطلوبة أو تجاوز حد الطلبات.",
+        "retry": "إعادة المحاولة",
+        "manageTokens": "إدارة الرموز في الإعدادات"
+      }
+    },
+    "step3": {
+      "reviewConfig": "مراجعة الإعدادات",
+      "existingWorkspace": "مساحة عمل قائمة",
+      "newWorkspace": "مساحة عمل جديدة",
+      "path": "المسار:",
+      "cloneFrom": "استنساخ من:",
+      "authentication": "المصادقة:",
+      "usingStoredToken": "باستخدام الرمز المحفوظ:",
+      "usingProvidedToken": "باستخدام الرمز المقدَّم",
+      "noAuthentication": "بدون مصادقة",
+      "sshKey": "مفتاح SSH",
+      "existingInfo": "ستُضاف مساحة العمل إلى قائمة المشاريع وستتوفّر لجلسات Claude/Cursor.",
+      "newWithClone": "سيُستنسخ المستودع إلى هذا المجلد.",
+      "newEmpty": "ستُضاف مساحة العمل إلى قائمة المشاريع وستتوفّر لجلسات Claude/Cursor.",
+      "cloningRepository": "جارٍ استنساخ المستودع..."
+    },
+    "buttons": {
+      "cancel": "إلغاء",
+      "back": "السابق",
+      "next": "التالي",
+      "createProject": "إنشاء المشروع",
+      "creating": "جارٍ الإنشاء...",
+      "cloning": "جارٍ الاستنساخ..."
+    },
+    "errors": {
+      "selectType": "يرجى تحديد ما إذا كان لديك مساحة عمل قائمة أم تريد إنشاء جديدة",
+      "providePath": "يرجى إدخال مسار مساحة العمل",
+      "failedToCreate": "فشل إنشاء مساحة العمل",
+      "failedToCreateFolder": "فشل إنشاء المجلد"
+    }
+  },
+  "notifications": {
+    "genericTool": "أداة",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "إشعار"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "إجراء مطلوب",
+          "body": "{{toolName}} ينتظر قرارك."
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "تم إيقاف التشغيل",
+          "body": "السبب: {{reason}}"
+        },
+        "failed": {
+          "title": "فشل التشغيل"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "إشعار من الوكيل"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "تحديث متاح",
+    "newVersionReady": "إصدار جديد جاهز",
+    "currentVersion": "الإصدار الحالي",
+    "latestVersion": "أحدث إصدار",
+    "whatsNew": "الجديد:",
+    "viewFullRelease": "عرض الإصدار الكامل",
+    "updateProgress": "تقدّم التحديث:",
+    "manualUpgrade": "ترقية يدوية:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "أو اضغط \"تحديث الآن\" لتشغيل التحديث تلقائياً.",
+    "updateCompleted": "اكتمل التحديث بنجاح!",
+    "restartServer": "يرجى إعادة تشغيل الخادم لتطبيق التغييرات.",
+    "updateFailed": "فشل التحديث",
+    "strategy": "استراتيجية التحديث: {{strategy}}",
+    "strategyUnknown": "تحديث تلقائي محكوم",
+    "reusedAttempt": "استُؤنفت محاولة التحديث القائمة ولم يبدأ تحديث مكرر.",
+    "reason": "السبب: {{reason}}",
+    "jobStatus": {
+      "preparing": "جارٍ تحضير الإصدار المحكوم والتحقق منه. لم يُثبّت بعد.",
+      "staged": "جُهّز الإصدار {{version}}، لكنه لم يُفعّل بعد.",
+      "restartQueued": "جُهّز الإصدار {{version}} ووُضع التفعيل الآمن في الطابور. الإصدار ليس نشطاً بعد.",
+      "activating": "جارٍ تفعيل الإصدار {{version}} والتحقق من الخدمة العاملة…",
+      "verified": "الإصدار {{version}} نشط، وتم التحقق من الخدمة العاملة.",
+      "rollback": "لم ينجح التحقق من التفعيل؛ يجري التراجع أو تمت استعادة الإصدار السابق.",
+      "manual": "تعذّر إكمال الاسترداد التلقائي. يلزم تدخل المشغّل؛ لا تُعد المحاولة أو التشغيل عشوائياً.",
+      "failed": "توقف التحديث قبل تفعيل متحقق منه. لم يُبلّغ عن تغيير الإصدار المثبّت الحالي.",
+      "superseded": "حلّت محاولة تحديث محكومة أحدث محل هذه المحاولة."
+    },
+    "status": {
+      "running": "جارٍ تنزيل الإصدار الموثوق والتحقق منه وتجهيزه…",
+      "staged": "جُهّز الإصدار {{version}}، ولم يُتحقق من تفعيله بعد.",
+      "stagedAndQueued": "جُهّز الإصدار {{version}} وأُضيف طلب التفعيل الآمن إلى لوحة الأوامر.",
+      "restartPending": "إعادة تشغيل الخادم مطلوبة لتفعيل الإصدار.",
+      "failed": "❌ لم يكتمل التحديث."
+    },
+    "errors": {
+      "releaseUnavailable": "لا يتوفر إصدار موثوق للتحديث حالياً.",
+      "activeSessions": "أنهِ جلسات الوكلاء النشطة ثم أعد المحاولة.",
+      "dirtyWorktree": "تعذّر التحديث لأن شجرة المصدر تحتوي تغييرات محلية غير محفوظة.",
+      "inProgress": "يوجد تحديث آخر قيد التنفيذ. انتظر اكتماله ثم أعد المحاولة.",
+      "credentialsUnavailable": "تعذّر الوصول إلى قناة الإصدارات الخاصة. تحقّق من بيانات اعتماد التحديث في الخادم.",
+      "nonFastForward": "الإصدار الجديد لا يتبع تاريخ النسخة المثبتة، لذلك أُوقف التحديث حمايةً للمصدر.",
+      "sourceChanged": "تغيّر المصدر أثناء التحضير. لم يُطبّق التحديث؛ أعد المحاولة بعد استقرار الشجرة.",
+      "externalRunnerNotGated": "أوقف أو عطّل مشغّل نسّاج الخارجي، ثم أعد المحاولة. لم يُجرِ الخادم أي تعطيل تلقائي.",
+      "dependencyInstallFailed": "فشل تثبيت اعتماديات الإصدار، وأُوقفت عملية التحديث.",
+      "clientBuildFailed": "فشل بناء واجهة الإصدار، وأُوقفت عملية التحديث.",
+      "serverBuildFailed": "فشل بناء خادم الإصدار، وأُوقفت عملية التحديث.",
+      "postUpdateDirty": "غيّر التثبيت شجرة المصدر بعد التحديث، لذلك رفض الخادم اعتماد النتيجة.",
+      "postUpdateMismatch": "لا يطابق المصدر المثبّت الإصدار المطلوب، لذلك رفض الخادم اعتماد النتيجة.",
+      "rollbackFailed": "فشل التحديث وتعذّرت استعادة النسخة السابقة بأمان. يلزم تدخل المشغّل.",
+      "unsupportedInstallMode": "التحديث التلقائي متاح فقط لتثبيت نسّاج من المصدر.",
+      "platformManaged": "تحديث هذه البيئة مُدار عبر مسار النشر الخاص بالمنصة.",
+      "invalidRelease": "رفض الخادم رقم الإصدار المطلوب لأنه غير صالح.",
+      "releaseMismatch": "لا يطابق الإصدار المنشور محتواه الموثوق، لذلك أُوقف التحديث.",
+      "connection": "انقطع الاتصال بالخادم أثناء طلب التحديث. تحقّق من حالته قبل إعادة المحاولة.",
+      "authorization": "جلستك غير مخوّلة لإدارة تحديثات النظام. سجّل الدخول بصفة المالك.",
+      "rateLimited": "أُرسلت طلبات تحديث كثيرة. انتظر ثم أعد المحاولة.",
+      "idempotencyMismatch": "استُخدم مفتاح هذه المحاولة لإصدار آخر. ابدأ محاولة جديدة.",
+      "invalidStatusUrl": "أعاد الخادم عنوان حالة غير آمن، لذلك أُوقف الاستطلاع.",
+      "capabilityBlocked": "التحديث التلقائي غير جاهز على هذه العقدة. لم يبدأ أي تحديث.",
+      "failed": "فشل التحديث دون تفاصيل إضافية.",
+      "consentMismatch": "لم يتطابق إصدار الموافقة مع الإصدار الهدف. أعد المحاولة.",
+      "cancelNotAllowed": "لا يمكن إلغاء هذا التحديث في وضعه الحالي."
+    },
+    "phases": {
+      "accepted": {
+        "name": "في الطابور",
+        "description": "استُلم طلب التحديث وسُجّل."
+      },
+      "resolving": {
+        "name": "البحث عن الإصدار",
+        "description": "مطابقة الإصدار المطلوب مع مصدر الإصدارات."
+      },
+      "resolved": {
+        "name": "تثبيت الإصدار",
+        "description": "تسجيل هوية الإصدار المعتمد."
+      },
+      "downloading": {
+        "name": "التنزيل",
+        "description": "جلب أرشيف الإصدار من مصدر الإصدارات."
+      },
+      "archive_verified": {
+        "name": "تحقّق من الأرشيف",
+        "description": "تطابقت بصمة أرشيف الإصدار مع البيان المحكوم."
+      },
+      "extracting": {
+        "name": "الاستخراج",
+        "description": "فك ضغط أرشيف الإصدار إلى منطقة التجهيز."
+      },
+      "staging": {
+        "name": "تحضير النسخة",
+        "description": "جلب الإصدار، فحص نظافة الشجرة والفرع، تثبيت الحزم والبناء والتحقق من البيان."
+      },
+      "candidate_sealed": {
+        "name": "جاهز للتفعيل",
+        "description": "ختم النسخة المرشحة وتجهيز إجراء التفعيل."
+      },
+      "restart_queued": {
+        "name": "بانتظار تفعيلك الآمن",
+        "description": "لن يتقدّم التحديث حتى تضغط زر إعادة التشغيل الآمن في لوحة الأوامر."
+      },
+      "restart_queued_auto": {
+        "name": "يُفعَّل عند خلوّ العقدة",
+        "description": "تجري إعادة تشغيل آمنة تلقائياً فور خلوّ العقدة من الجلسات الحيّة، ولن تُنهى أي جلسة."
+      },
+      "activating": {
+        "name": "التفعيل",
+        "description": "التحقق من النسخة، لقطة لقاعدة البيانات، واستبدال النسخة العاملة."
+      },
+      "runtime_verifying": {
+        "name": "التحقق من التشغيل",
+        "description": "إقلاع العملية الجديدة والتحقق من هوية بنائها."
+      },
+      "activated": {
+        "name": "اكتمل",
+        "description": "الإصدار الجديد نشط ومتحقَّق منه."
+      }
+    },
+    "stepperProgress": "المرحلة {{current}} من {{total}} · {{percent}}%",
+    "stepperAriaLabel": "مراحل التحديث",
+    "ownerActionRequired": "التحديث جاهز. أكّد تفعيله من هذه النافذة.",
+    "autoActivate": {
+      "consentNote": "الضغط على «حدّث الآن» موافقة على إعادة التشغيل الآمنة أيضاً: تجري وحدها عند خلوّ العقدة من الجلسات، ولا تُنهي أي جلسة.",
+      "pending": "سيُفعَّل الإصدار تلقائياً بإعادة تشغيل آمنة فور خلوّ العقدة، ولن تُنهى أي جلسة.",
+      "waiting": "بانتظار انتهاء {{count}} جلسة حيّة، ثم تجري إعادة التشغيل الآمنة وحدها. لن تُنهى أي جلسة.",
+      "restarting": "إعادة التشغيل الآمنة جارية، وستعود هذه النافذة للاتصال حين يعمل الإصدار الجديد.",
+      "expired": "انتهت مهلة الموافقة. أكّد التفعيل مجددًا من هذه النافذة.",
+      "refused": "رُفضت إعادة التشغيل الآمنة ({{code}}) وستُعاد المحاولة. يمكنك أيضاً الضغط على زرّها في لوحة الأوامر."
+    },
+    "terminal": {
+      "show": "إظهار مخرجات الطرفية",
+      "hide": "إخفاء مخرجات الطرفية",
+      "copy": "نسخ السجل",
+      "label": "مخرجات طرفية التحديث",
+      "empty": "بانتظار المخرجات…",
+      "truncatedView": "تُعرض آخر {{count}} سطر. انسخ السجل لتحصل عليه كاملاً."
+    },
+    "errorCodes": {
+      "update_source_state_degraded": {
+        "title": "حالة المصدر غير مُسوّاة",
+        "hint": "أُعيد فتح العقدة على الإصدار السابق بينما بقيت شجرة المصدر عند الهدف. أكمِل التراجع في المصدر على الخادم بالأمر `npm run doctor -- --reopen-gate --complete-source-rollback --yes` ثم أعد المحاولة."
+      },
+      "dirty_worktree": {
+        "title": "تغييرات محلية غير محفوظة",
+        "hint": "احفظ جميع التغييرات المحلية في شجرة المصدر أو ضعها في stash، ثم أعد المحاولة."
+      },
+      "wrong_branch": {
+        "title": "فرع خاطئ",
+        "hint": "يتطلّب المحدِّث الفرع المُعيَّن للإصدار. انتقل إليه وأعد المحاولة."
+      },
+      "detached_head": {
+        "title": "رأس منفصل (Detached HEAD)",
+        "hint": "أعد الاتصال بفرع الإصدار (لا commit منفصل)، ثم أعد المحاولة."
+      },
+      "non_fast_forward": {
+        "title": "ليس تحديثاً متتابعاً",
+        "hint": "الإصدار الجديد لا يتبع الإصدار المثبَّت. تواصل مع الدعم إن كان هذا غير متوقَّع."
+      },
+      "remote_mismatch": {
+        "title": "عنوان المستودع البعيد لا يتطابق",
+        "hint": "المستودع البعيد لـgit لا يطابق مصدر الإصدارات المُعدَّ. تحقّق من إعداد الخادم."
+      },
+      "remote_unavailable": {
+        "title": "المستودع البعيد غير متاح",
+        "hint": "تعذّر الوصول إلى المستودع البعيد. تحقّق من الاتصال بالشبكة وأعد المحاولة."
+      },
+      "ambiguous_remote": {
+        "title": "مستودع بعيد غامض",
+        "hint": "يجب أن يكون للمستودع البعيد عنوان URL واحد فقط. أزل العناوين المكررة وأعد المحاولة."
+      },
+      "unsafe_remote": {
+        "title": "عنوان مستودع غير آمن",
+        "hint": "يجب أن يكون عنوان المستودع رابط GitHub بـHTTPS أو SSH بلا بيانات اعتماد."
+      },
+      "release_fetch_failed": {
+        "title": "فشل جلب الإصدار",
+        "hint": "تعذّر جلب الوسم أو الفرع من المستودع البعيد. تحقّق من الاتصال وأعد المحاولة."
+      },
+      "release_identity_mismatch": {
+        "title": "هوية الإصدار لا تتطابق",
+        "hint": "الإصدار المُجلَب لا يطابق الإصدار المطلوب. أعد المحاولة؛ تواصل مع الدعم إن تكرّر."
+      },
+      "gitlink_change_unsupported": {
+        "title": "تغيير وحدة فرعية (submodule) غير مدعوم",
+        "hint": "هذا الإصدار يغيّر رابط وحدة فرعية في git، وهو غير مدعوم من المحدِّث."
+      },
+      "activation_gitlink_unsupported": {
+        "title": "وحدة فرعية في مسار التفعيل",
+        "hint": "مسار التفعيل يحتوي وحدة فرعية في git، وهو غير مدعوم."
+      },
+      "exchange_capability": {
+        "title": "تعارض قدرة التبادل",
+        "hint": "يوجد تحديث محكوم نشط. انتظر اكتماله وأعد المحاولة."
+      },
+      "activation_filesystem_mismatch": {
+        "title": "عدم تطابق تخطيط نظام الملفات",
+        "hint": "تخطيط نظام الملفات للنسخة المرشحة لا يطابق التثبيت الجاري. تواصل مع الدعم."
+      },
+      "candidate_build_failed": {
+        "title": "فشل البناء",
+        "hint": "فشل بناء نسخة الإصدار المرشحة. راجع سجلات الخادم للتفاصيل."
+      },
+      "candidate_manifest_invalid": {
+        "title": "بيان النسخة غير صالح",
+        "hint": "بيان النسخة المجهَّزة غير صالح. أعد المحاولة؛ تواصل مع الدعم إن تكرّر."
+      },
+      "restart_queue_failed": {
+        "title": "فشل إدراج إعادة التشغيل في الطابور",
+        "hint": "تعذّر حفظ إجراء إعادة التشغيل المحكومة. أعد المحاولة أو تواصل مع الدعم."
+      },
+      "tmpfs_candidate_root": {
+        "title": "جذر النسخة المرشحة على tmpfs",
+        "hint": "يجب أن يكون مجلد تجهيز النسخة على القرص لا على tmpfs. تواصل مع المشغّل."
+      },
+      "tmpfs_build_tmpdir": {
+        "title": "مجلد البناء المؤقت على tmpfs",
+        "hint": "يجب أن يكون TMPDIR على القرص لا على tmpfs. غيّر متغيّر البيئة وأعد المحاولة."
+      },
+      "tmpfs_database_root": {
+        "title": "مجلد قاعدة البيانات على tmpfs",
+        "hint": "يجب أن يكون مسار لقطة قاعدة البيانات على القرص لا على tmpfs. تواصل مع المشغّل."
+      },
+      "insufficient_disk": {
+        "title": "مساحة قرص غير كافية",
+        "hint": "أتلِف بيانات غير ضرورية على الخادم وأعد المحاولة."
+      },
+      "storage_probe_failed": {
+        "title": "فشل فحص التخزين",
+        "hint": "تعذّر قياس مساحة القرص. تحقّق من تخزين الخادم وأعد المحاولة."
+      },
+      "update_database_state_unknown": {
+        "title": "حالة قاعدة البيانات مجهولة",
+        "hint": "قاعدة بيانات التحديث في حالة غير متسقة. يلزم تدخّل المشغّل."
+      },
+      "runtime_verification_failed": {
+        "title": "فشل التحقق من التشغيل",
+        "hint": "لم تُبلِّغ العملية الجديدة عن هوية البناء المتوقعة. جرى استعادة الإصدار السابق."
+      },
+      "release_layout_retired": {
+        "title": "استراتيجية مخطط الإصدار متقاعدة",
+        "hint": "استراتيجية release-layout-v2 لم تعد مدعومة. تواصل مع المشغّل لإعادة الضبط."
+      },
+      "sealed_release_identity_mismatch": {
+        "title": "هوية الإصدار المختوم لا تتطابق",
+        "hint": "هوية النسخة المرشحة لا تتطابق مع الإصدار المختوم. أعد المحاولة؛ تواصل مع الدعم إن تكرّر."
+      },
+      "unsupported_install_mode": {
+        "title": "وضع تثبيت غير مدعوم",
+        "hint": "التحديث التلقائي متاح فقط لتثبيت نسّاج من المصدر."
+      },
+      "deferral_expired": {
+        "title": "انتهت مهلة التأجيل",
+        "hint": "انتظر التحديث 24 ساعة لتنتهي الجلسات النشطة لكن العقدة لم تخلُ أبداً. اضغط زر إعادة التشغيل الآمن في لوحة الأوامر لتفعيل النسخة المُجهَّزة يدوياً."
+      },
+      "unknown": {
+        "title": "فشل التحديث",
+        "hint": "حدث خطأ غير متوقَّع. راجع سجلات الخادم أو تواصل مع الدعم."
+      }
+    },
+    "sourceVersionLabel": "شجرة المصدر (ليست النسخة المُشغَّلة)",
+    "preflight": {
+      "checking": "جارٍ التحقق من جاهزية هذه العقدة للتحديث…",
+      "checkingButton": "جارٍ التحقق…",
+      "clear": "اجتاز فحص الجاهزية: لا شيء يمنع هذا التحديث.",
+      "blockedTitle": "لا يمكن بدء هذا التحديث بعد",
+      "actionLabel": "المطلوب:",
+      "fallbackReason": "أبلغ الخادم عن مانع دون وصف له.",
+      "fallbackAction": "عالج الحالة المُبلَّغ عنها على الخادم ثم أعد الفحص.",
+      "copied": "نُسخ",
+      "copyCommandAria": "نسخ أمر المشغّل",
+      "recheck": "أعد الفحص",
+      "rateLimited": "طلبات فحص كثيرة في وقت قصير. انتظر دقيقة ثم أعد الفحص.",
+      "rateLimitedSeconds": "طلبات فحص كثيرة في وقت قصير. انتظر {{seconds}} ثانية ثم أعد الفحص.",
+      "errors": {
+        "authorization": "فحص جاهزية التحديث للمالك وحده. لم يبدأ أي تحديث.",
+        "unavailable": "تعذّر فحص جاهزية التحديث على الخادم. لم يبدأ أي تحديث.",
+        "connection": "تعذّر الوصول إلى الخادم لفحص جاهزية التحديث. لم يبدأ أي تحديث."
+      }
+    },
+    "blockedReasons": {
+      "update_source_state_degraded": "شجرة المصدر غير مُسوّاة بعد تراجع سابق. لم يبدأ أي تحديث. أكمِل التراجع في المصدر على الخادم بالأمر `npm run doctor -- --reopen-gate --complete-source-rollback --yes` ثم أعد المحاولة.",
+      "protocol_unavailable": "هذه العقدة لا توفر بروتوكول التحديث غير المتزامن بعد. لم يبدأ أي تحديث.",
+      "capability_unavailable": "تعذّر التحقق من جاهزية التحديث. لم يبدأ أي تحديث.",
+      "release_layout_required": "يجب إكمال تهيئة مخطط الإصدارات المحكوم على هذه العقدة قبل استخدام زر التحديث.",
+      "release_layout_configuration_absent": "يجب إكمال تهيئة مخطط الإصدارات المحكوم على هذه العقدة قبل استخدام زر التحديث.",
+      "release_layout_retired": "استراتيجية release-layout-v2 متقاعدة على هذه العقدة. تواصل مع المشغّل.",
+      "release_layout_not_ready": "تهيئة مخطط الإصدار لم تكتمل بعد على هذه العقدة.",
+      "unsupported_deployment": "نوع هذا النشر لا يدعم التحديث عبر الزر.",
+      "update_job_active": "يوجد تحديث محكوم نشط؛ ستُستأنف حالته عند توفرها.",
+      "verified_update_runtime_absent": "بيئة تشغيل التحديث غير متاحة على هذه العقدة. لم يبدأ أي تحديث.",
+      "release_source_lock_mismatch": "قفل مصدر الإصدار لا يطابق إعداد هذه العقدة. تواصل مع المشغّل.",
+      "unsupported_install_mode": "التحديث التلقائي متاح فقط لتثبيت نسّاج من المصدر."
+    },
+    "buttons": {
+      "close": "إغلاق",
+      "later": "لاحقاً",
+      "copyCommand": "نسخ الأمر",
+      "updateNow": "تحديث الآن",
+      "updating": "جارٍ التحديث...",
+      "retry": "بدء محاولة جديدة",
+      "reload": "إعادة تحميل",
+      "prepareUpdate": "جهّز التحديث تلقائياً عند خلوّ الجلسات",
+      "cancelDeferred": "إلغاء التحديث المؤجَّل"
+    },
+    "consent": {
+      "title": "تأكيد بدء التحديث",
+      "targetVersionLabel": "الإصدار الهدف:",
+      "noReleaseNotes": "لا تتوفر ملاحظات إصدار لهذا التحديث.",
+      "termsAriaLabel": "شروط الموافقة على التحديث",
+      "term": {
+        "safeRestart": "ستجري إعادة التشغيل الآمنة تلقائياً فور خلوّ العقدة من الجلسات الحيّة.",
+        "noSessionsKilled": "لن تُنهى أي جلسة أو يُقاطَع أي عمل جارٍ.",
+        "timeout24h": "المهلة القصوى لإعادة التشغيل: 24 ساعة من الآن."
+      },
+      "confirmButton": "أوافق وابدأ التحديث",
+      "confirmAriaLabel": "أوافق على التحديث إلى الإصدار {{version}} وأبدأه",
+      "highlights": {
+        "sectionTitle": "أبرز التغييرات:",
+        "viewFullLabel": "عرض ملاحظات الإصدار كاملة"
+      }
+    },
+    "deferral": {
+      "panelAriaLabel": "لوحة انتظار التحديث المؤجَّل",
+      "waitingTitle": "بانتظار انتهاء الجلسات…",
+      "sessionCount": "{{count}} جلسة حيّة",
+      "sessionCount_one": "جلسة حيّة واحدة",
+      "sessionCount_other": "{{count}} جلسات حيّة",
+      "gateReason": "سبب التوقف: {{reason}}",
+      "gateReasonLabels": {
+        "live_sessions": "ثمة جلسات حيّة",
+        "live_work": "ثمة عمل جارٍ",
+        "not_in_pm2": "العملية خارج نطاق PM2",
+        "gate_error": "خطأ في قراءة حالة العقدة",
+        "gate_unavailable": "حارس التحقّق غير متاح",
+        "gate_timeout": "انتهت مهلة قراءة الحالة",
+        "unknown": "سبب غير معروف"
+      },
+      "deadline": "المهلة القصوى: {{time}}",
+      "noSessionsKilled": "لن تُنهى أي جلسة — يبدأ التحديث عند خلوّ العقدة.",
+      "rearmCount": "أُعيد تسليح المحدّث {{count}} مرة",
+      "cancelledMessage": "أُلغي التحديث المؤجَّل. لم يُثبَّت أي إصدار جديد.",
+      "awaitingConfirmation": "بانتظار تأكيدك — اضغط زر إعادة التشغيل الآمن في لوحة الأوامر."
+    },
+    "ariaLabels": {
+      "closeModal": "إغلاق نافذة الترقية",
+      "showSidebar": "إظهار الشريط الجانبي",
+      "settings": "الإعدادات",
+      "updateAvailable": "تحديث متاح",
+      "closeSidebar": "إغلاق الشريط الجانبي",
+      "updateInProgress": "جارٍ التحديث",
+      "updateProgress": "تقدّم التحديث: {{percent}}%"
+    },
+    "preparedAwaitingActivation": "الإصدار مُحضَّر على هذه العقدة ولم يُفعَّل بعد. يبقى تأكيد واحد لإعادة التشغيل الآمنة حتى يصير نشطاً.",
+    "local": {
+      "description": "يُحدّث هذا المضيف من النسخة المحفوظة في الفرع المحلي main. التغييرات غير المحفوظة في Git لا تدخل التحديث.",
+      "target": "النسخة المحددة:",
+      "reconnecting": "جارٍ انتظار عودة الاتصال والتحقق من التحديث…",
+      "inProgress": "التحديث قيد التنفيذ…",
+      "activationUnavailable": "التفعيل المحلي غير جاهز بعد. لن تُبدَّل النسخة الحالية.",
+      "consent": "أؤكد تحديث التطبيق بكامل مكوناته إلى النسخة المحددة بعد انتهاء الجلسات. قد ينقطع الاتصال مؤقتًا.",
+      "confirm": "تأكيد التحديث",
+      "activate": "تفعيل التحديث",
+      "cancel": "إلغاء التحضير",
+      "failed": "تعذّر تنفيذ الطلب. أعد التحقق من حالة التحديث قبل المحاولة.",
+      "phases": {
+        "idle": "يمكنك تحضير التحديث من هنا.",
+        "preparing": "جارٍ تحضير الواجهة والخادم…",
+        "prepared": "التحديث جاهز للتأكيد.",
+        "awaiting_sessions": "بانتظار انتهاء الجلسات قبل التفعيل.",
+        "activation_claimed": "جارٍ تفعيل التحديث…",
+        "activated": "اكتمل التحديث وتم التحقق من تشغيله.",
+        "cancelled": "أُلغي التحضير.",
+        "superseded": "تغيّرت النسخة المحلية؛ حضّر النسخة الجديدة.",
+        "failed": "تعذّر تحضير التحديث.",
+        "manual_recovery_required": "تعذّر استكمال التحديث؛ يلزم إصلاح الحالة قبل المتابعة."
+      },
+      "loaded": "الالتزام المشغّل فعليًا:",
+      "pending": "أحدث التزام بانتظار التحضير:",
+      "policyEnabled": "متابعة التطوير مفعّلة",
+      "policyDisabled": "متابعة التطوير متوقفة",
+      "policyDescription": "عند التمكين، تُحضّر تعديلات main المدمجة تلقائيًا، وتُفعّل بعد خلو الجهاز من الجلسات. لا يشمل ذلك تعديلات الجلسات غير المدمجة.",
+      "enablePolicy": "تمكين متابعة main تلقائيًا",
+      "disablePolicy": "إيقاف المتابعة التلقائية",
+      "buildRecovery": "انقطع بناء سابق. أوقفت المحاولات الجديدة حتى التحقق من انتهاء عملياته واستعادة مسار البناء.",
+      "waitReasons": {
+        "local_update_build_recovery_required": "انقطع بناء سابق. تنتظر المحاولات الجديدة التحقق من انتهاء عملياته.",
+        "local_update_build_capacity_wait": "بانتظار مساحة كافية لبناء التحديث. النسخة الحالية مستمرة في العمل.",
+        "local_update_build_capacity_unknown": "بانتظار التحقق من المساحة المطلوبة لهذا التحديث.",
+        "local_update_build_cache_missing": "بانتظار تجهيز اعتماديات لازمة لهذا التحديث. النسخة الحالية مستمرة في العمل.",
+        "local_update_build_inputs_unqualified": "تغيّرت اعتماديات التحديث؛ يلزم تجهيزها والتحقق منها قبل البناء.",
+        "local_update_build_profile_required": "بانتظار تجهيز بيئة البناء على هذا الجهاز.",
+        "local_update_build_headers_missing": "بانتظار تجهيز ملفات البناء اللازمة."
+      },
+      "buildWaiting": "بانتظار جاهزية البناء. النسخة الحالية مستمرة في العمل."
+    },
+    "manifestDrift": {
+      "unexpected": "على القرص {{count}} ملفّاً ليست في المانيفست المختوم:",
+      "missing": "يغيب عن القرص {{count}} ملفّاً من المانيفست:",
+      "changed": "تغيّر {{count}} ملفّاً بعد الختم:",
+      "more": "… و{{count}} غيرها",
+      "recoveryAvailable": "انقل أي ملفّ وُضع يدوياً خارج شجرة نسّاج، ثمّ انشره بناشر الصفحات العامّة وأعد المحاولة.",
+      "recoveryUnavailable": "انقل أي ملفّ وُضع يدوياً خارج شجرة نسّاج ثمّ أعد المحاولة."
+    }
+  },
+  "sessionProcessState": {
+    "running": "تعمل",
+    "frozen": "مجمّدة مؤقتاً",
+    "runningHint": "عملية الجلسة تعمل الآن",
+    "orphan": "ورشة متوقفة",
+    "orphanHint": "توقفت ورشة خلفية قبل إنتاج نتيجة مكتملة",
+    "frozenHint": "عملية الجلسة موقوفة مؤقتاً (kill -STOP)",
+    "projectFrozenHint": "جلسة في هذا المشروع مجمَّدة مؤقتاً (kill -STOP)",
+    "projectBusyHint": "جلسة في هذا المشروع قيد العمل الآن",
+    "done": "انتهت",
+    "doneHint": "انتهت الجلسة ولم تُفتح بعد",
+    "projectDoneHint": "جلسة في هذا المشروع انتهت ولم تُفتح بعد",
+    "question": "سؤال",
+    "questionHint": "المحادثة تنتظر جوابك",
+    "projectQuestionHint": "محادثة في هذا المشروع تنتظر جوابك",
+    "error": "خطأ",
+    "errorHint": "انتهت الجلسة بخطأ أو توقّفت دون ردّ، ولم تُفتح بعد",
+    "projectErrorHint": "جلسة في هذا المشروع انتهت بخطأ ولم تُفتح بعد"
+  },
+  "workflowStatus": {
+    "running": "ورشة تعمل",
+    "runningHint": "ورشة خلفية تعمل الآن في هذه الجلسة",
+    "orphanEmpty": "توقّفت — بلا مخرجات",
+    "orphanEmptyHint": "خرجت العملية قبل أن يُنهي أي وكيل عمله — يمكن الاستئناف يدوياً",
+    "orphanPartial": "توقّفت — جزئية",
+    "orphanPartialHint": "خرجت العملية وبعض الوكلاء أنهوا عملهم — تقدّم جزئي محفوظ، يمكن الاستئناف يدوياً",
+    "orphanIncomplete": "توقّفت — ناقصة",
+    "orphanIncompleteHint": "خرجت العملية دون اكتمال؛ بدأ أكثر مما أنتج — يمكن الاستئناف يدوياً",
+    "frozen": "مُجمَّدة مؤقتاً",
+    "frozenHint": "العملية موقوفة (SIGSTOP) وليست ميتة — ستستأنف تلقائياً عند CONT",
+    "unknown": "حيوية غير معروفة",
+    "unknownHint": "تعذّر إثبات الحياة — غالباً نجت من إعادة تشغيل السيرفر؛ لا تُدّعى ميتة ولا حيّة",
+    "projectRunningHint": "ورشة خلفية تعمل الآن في هذا المشروع",
+    "projectOrphanHint": "ورشة خلفية يتيمة في هذا المشروع تحتاج مراجعة",
+    "projectUnknownHint": "حيوية ورشة خلفية في هذا المشروع غير معروفة — لا تُدّعى ميتة ولا حيّة"
+  },
+  "buildUpdate": {
+    "available": "تحديث جديد للواجهة متاح",
+    "reload": "تحديث",
+    "ariaLabel": "إشعار بتحديث بناء الواجهة",
+    "dismiss": "تجاهل"
+  },
+  "governanceBadge": {
+    "ungoverned": "غير محكوم",
+    "tooltip": {
+      "none": "هذه الجلسة تعمل خارج معايير حوكمة نسّاج — تأكّد من إعدادات الوكيل"
+    }
+  },
+  "onboarding": {
+    "agents": {
+      "title": "وصّل وكلاء الذكاء الاصطناعي",
+      "subtitle": "سجّل الدخول إلى وكيل برمجة واحد أو أكثر. وكلها اختيارية.",
+      "footerNote": "يمكنك ضبط هذه لاحقاً من الإعدادات."
+    },
+    "buttons": {
+      "previous": "السابق",
+      "next": "التالي",
+      "saving": "جارٍ الحفظ…",
+      "completing": "جارٍ الإنهاء…",
+      "complete": "إنهاء الإعداد"
+    },
+    "errors": {
+      "gitFieldsRequired": "الاسم والبريد في git كلاهما مطلوب.",
+      "invalidEmail": "أدخل بريداً إلكترونياً صالحاً.",
+      "saveGitConfigFailed": "تعذّر حفظ إعدادات git",
+      "completeFailed": "تعذّر إنهاء الإعداد الأولي"
+    },
+    "login": "تسجيل الدخول",
+    "required": "مطلوب",
+    "steps": {
+      "git": "إعداد Git",
+      "agents": "وصْل الوكلاء"
+    },
+    "git": {
+      "title": "إعداد Git",
+      "description": "اضبط هويتك في Git لتُنسَب الإيداعات إليك على وجهها.",
+      "nameLabel": "اسم Git",
+      "emailLabel": "بريد Git",
+      "nameHint": "يُحفَظ في `git config --global user.name`.",
+      "emailHint": "يُحفَظ في `git config --global user.email`."
+    }
+  },
+  "brand": {
+    "name": "نسّاج",
+    "logoAlt": "نسّاج",
+    "openSourceVersion": "نسّاج v{{version}} — مفتوح المصدر",
+    "openSourceLicense": "نسّاج — مفتوح المصدر (AGPL-3.0)"
+  },
+  "commandPalette": {
+    "title": "لوحة الأوامر",
+    "backToAll": "العودة إلى الكل",
+    "backspaceHint": "‏Backspace للرجوع",
+    "searchPlaceholder": "اكتب للبحث في أي شيء…",
+    "searchIn": "ابحث في {{page}}…",
+    "empty": "لا نتائج.",
+    "switchTo": "التبديل إلى: {{name}}",
+    "settingsItem": "الإعدادات: {{label}}",
+    "pages": {
+      "actions": "إجراءات",
+      "files": "ملفات",
+      "sessions": "محادثات",
+      "commits": "إيداعات",
+      "branches": "فروع"
+    },
+    "groups": {
+      "actions": "إجراءات",
+      "navigate": "تنقّل",
+      "git": "Git",
+      "settings": "الإعدادات",
+      "sessions": "المحادثات",
+      "files": "الملفات",
+      "commits": "الإيداعات",
+      "branches": "الفروع"
+    },
+    "actions": {
+      "startNewChat": "محادثة جديدة",
+      "selectProjectFirst": "اختر مشروعاً أولاً",
+      "openSettings": "فتح الإعدادات",
+      "toggleTheme": "تبديل الثيم",
+      "toggleThemeKeywords": "داكن فاتح مظهر سمة"
+    },
+    "nav": {
+      "chat": "الذهاب إلى المحادثة",
+      "files": "الذهاب إلى الملفات",
+      "shell": "الذهاب إلى الطرفية",
+      "git": "الذهاب إلى Git",
+      "board": "الذهاب إلى لوحة المشروع"
+    },
+    "navKeywords": {
+      "chat": "محادثة رسائل دردشة chat",
+      "files": "ملفات شجرة مستعرض files",
+      "shell": "طرفية شل كونسول shell terminal",
+      "git": "git فروق فروع",
+      "board": "لوحة مشروع حالة مراحل مشكلات معمارية board"
+    },
+    "git": {
+      "fetch": "Git: جلب",
+      "fetchKeywords": "جلب بعيد fetch",
+      "pull": "Git: سحب",
+      "pullKeywords": "سحب دمج pull",
+      "push": "Git: دفع",
+      "pushKeywords": "دفع أصل push"
+    },
+    "browseAll": {
+      "sessions": "تصفّح كل المحادثات ({{count}})",
+      "files": "تصفّح كل الملفات ({{count}})",
+      "commits": "تصفّح كل الإيداعات ({{count}})",
+      "branches": "تصفّح كل الفروع ({{count}})"
+    }
+  },
+  "git": {
+    "common": {
+      "cancel": "إلغاء"
+    },
+    "panel": {
+      "selectProject": "اختر مشروعاً لعرض إدارة المصدر"
+    },
+    "errorState": {
+      "tipLabel": "تلميح:",
+      "tip": "شغّل <code>git init</code> في مجلد مشروعك لتهيئة إدارة المصدر."
+    },
+    "changes": {
+      "noCommitsTitle": "لا إيداعات بعد",
+      "noCommitsBody": "لا يحمل هذا المستودع أي إيداع بعد. أنشئ أول إيداع لتبدأ تتبّع التغييرات.",
+      "creatingInitialCommit": "جارٍ إنشاء الإيداع الأول…",
+      "createInitialCommit": "أنشئ الإيداع الأول",
+      "noChanges": "لا تغييرات",
+      "staged": "مُجهَّز ({{count}})",
+      "changed": "تغييرات ({{count}})",
+      "unstageAll": "أخرِج الكل",
+      "stageAll": "جهّز الكل",
+      "noStagedFiles": "لا ملفات مُجهَّزة",
+      "allStaged": "كل التغييرات مُجهَّزة",
+      "clickToOpen": "اضغط لفتح الملف"
+    },
+    "legend": {
+      "title": "دليل حالات الملفات"
+    },
+    "commit": {
+      "title": "إيداع التغييرات",
+      "commitFiles_zero": "إيداع {{count}} ملف",
+      "commitFiles_one": "إيداع ملف واحد",
+      "commitFiles_two": "إيداع ملفين",
+      "commitFiles_few": "إيداع {{count}} ملفات",
+      "commitFiles_many": "إيداع {{count}} ملفاً",
+      "commitFiles_other": "إيداع {{count}} ملف",
+      "messagePlaceholder": "الرسالة (‏Ctrl+Enter للإيداع)",
+      "generateMessage": "ولّد رسالة الإيداع"
+    },
+    "history": {
+      "noCommits": "لا إيداعات",
+      "author": "المؤلِّف",
+      "date": "التاريخ",
+      "files": "ملفات",
+      "added": "مُضاف",
+      "removed": "محذوف",
+      "changedFiles": "الملفات المتغيّرة"
+    },
+    "branches": {
+      "none": "لا فروع",
+      "new": "فرع جديد",
+      "local": "محلي",
+      "remote": "بعيد",
+      "switch": "تبديل"
+    },
+    "header": {
+      "upToDate": "محدَّث",
+      "createBranch": "أنشئ فرعاً جديداً",
+      "revertLatest": "تراجَع عن آخر إيداع محلي",
+      "refresh": "حدّث حالة Git",
+      "dismissError": "أخفِ الخطأ"
+    },
+    "diff": {
+      "none": "لا فروق متاحة",
+      "largePreview": "معاينة فروق كبيرة: العرض محدود لإبقاء التبويب سلساً."
+    },
+    "newBranch": {
+      "title": "إنشاء فرع جديد",
+      "nameLabel": "اسم الفرع",
+      "namePlaceholder": "feature/new-feature",
+      "fromCurrent": "سيُنشأ فرع جديد من الفرع الحالي ({{branch}})",
+      "creating": "جارٍ الإنشاء…",
+      "submit": "أنشئ الفرع"
+    }
+  },
+  "folderBrowser": {
+    "title": "اختر مجلداً",
+    "createFolder": "أنشئ مجلداً جديداً",
+    "newFolderName": "اسم المجلد الجديد",
+    "noSubfolders": "لا مجلدات فرعية",
+    "select": "اختر",
+    "path": "المسار:",
+    "cancel": "إلغاء",
+    "useThisFolder": "استخدم هذا المجلد",
+    "browse": "تصفّح المجلدات"
+  },
+  "errorBoundary": {
+    "details": "تفاصيل الخطأ"
+  },
+  "nav": {
+    "openMenu": "افتح القائمة"
+  },
+  "githubStar": {
+    "star": "نجمة"
+  }
+}

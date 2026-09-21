@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="معرض النماذج البصرية المقترحة لنسّاج — إعادة التصميم 2026-09-03">
+  <title>نسّاج · معرض النماذج البصرية</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    .gallery-page {
+      min-height: 100dvh;
+      padding-block: 40px;
+      padding-inline: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .gallery-inner {
+      width: 100%;
+      max-width: 900px;
+    }
+
+    .gallery-header {
+      margin-block-end: 12px;
+    }
+
+    .gallery-desc {
+      font-size: 1.0625rem;
+      color: var(--muted-foreground);
+      line-height: 1.7;
+      margin-block-end: 32px;
+      max-width: 60ch;
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 20px;
+      margin-block-end: 40px;
+    }
+
+    .mockup-card {
+      display: flex;
+      flex-direction: column;
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-rest);
+      transition: box-shadow var(--dur-normal) var(--ease), transform var(--dur-normal) var(--ease);
+      text-decoration: none;
+      color: inherit;
+    }
+    .mockup-card:hover {
+      box-shadow: var(--shadow-raised);
+      transform: translateY(-2px);
+      text-decoration: none;
+    }
+
+    .mockup-preview {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background-color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3.5rem;
+      border-block-end: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* معاينة مصغّرة للصدفة */
+    .preview-shell {
+      background: var(--background);
+      width: 100%;
+      height: 100%;
+      display: flex;
+    }
+    .preview-shell-sidebar {
+      width: 38%;
+      background: var(--sidebar-gradient);
+      border-inline-end: 1px solid var(--border);
+      padding: 8px 0;
+    }
+    .preview-shell-item {
+      height: 14px;
+      margin: 3px 8px;
+      border-radius: 3px;
+      background: var(--muted);
+    }
+    .preview-shell-item.active {
+      background: var(--accent);
+      border-inline-start: 2px solid var(--primary);
+    }
+    .preview-shell-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview-shell-header {
+      height: 16px;
+      background: var(--card);
+      border-block-end: 1px solid var(--border);
+    }
+    .preview-gold-line {
+      height: 1px;
+      background: var(--brand-accent);
+    }
+    .preview-shell-chat {
+      flex: 1;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .preview-bubble-user {
+      align-self: flex-start;
+      height: 10px;
+      width: 55%;
+      border-radius: 3px;
+      background: var(--secondary);
+    }
+    .preview-bubble-ai {
+      align-self: flex-end;
+      height: 10px;
+      width: 70%;
+      border-radius: 3px;
+      background: var(--muted);
+    }
+
+    /* معاينة مصغّرة للويكي */
+    .preview-wiki {
+      background: var(--background);
+      width: 100%;
+      height: 100%;
+      display: flex;
+    }
+    .preview-wiki-sections {
+      width: 32%;
+      border-inline-end: 1px solid var(--border);
+      padding: 6px 0;
+    }
+    .preview-wiki-section-item {
+      height: 9px;
+      margin: 4px 6px;
+      border-radius: 2px;
+      background: var(--muted);
+    }
+    .preview-wiki-section-item.active {
+      background: var(--accent);
+      border-inline-start: 2px solid var(--primary);
+    }
+    .preview-wiki-article {
+      flex: 1;
+      padding: 8px 10px;
+    }
+    .preview-wiki-h1 {
+      height: 12px;
+      width: 70%;
+      border-radius: 2px;
+      background: var(--foreground);
+      opacity: 0.7;
+      margin-block-end: 3px;
+    }
+    .preview-wiki-lede {
+      height: 7px;
+      width: 90%;
+      border-radius: 2px;
+      background: var(--muted-foreground);
+      opacity: 0.5;
+      margin-block-end: 4px;
+    }
+    .preview-wiki-body-line {
+      height: 6px;
+      border-radius: 2px;
+      background: var(--muted);
+      margin-block: 3px;
+    }
+    .preview-wiki-toc {
+      width: 28%;
+      border-inline-start: 1px solid var(--border);
+      padding: 8px 6px;
+    }
+
+    /* معاينة مصغّرة للإعدادات */
+    .preview-settings {
+      background: var(--background);
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .preview-settings-dialog {
+      width: 88%;
+      height: 80%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: var(--shadow-overlay);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .preview-settings-header {
+      height: 18px;
+      background: var(--card);
+      border-block-end: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding-inline: 8px;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .preview-settings-title {
+      height: 8px;
+      width: 40px;
+      border-radius: 2px;
+      background: var(--foreground);
+      opacity: 0.6;
+    }
+    .preview-settings-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .preview-settings-nav {
+      width: 34%;
+      border-inline-end: 1px solid var(--border);
+      padding: 4px 0;
+    }
+    .preview-settings-nav-item {
+      height: 8px;
+      margin: 4px 6px;
+      border-radius: 2px;
+      background: var(--muted);
+    }
+    .preview-settings-nav-item.active {
+      background: var(--accent);
+      border-inline-start: 2px solid var(--primary);
+    }
+    .preview-settings-content {
+      flex: 1;
+      padding: 6px 8px;
+    }
+    .preview-settings-row {
+      height: 7px;
+      border-radius: 2px;
+      background: var(--muted);
+      margin-block: 5px;
+    }
+
+    .mockup-info {
+      padding: 16px 20px;
+    }
+
+    .mockup-tag {
+      display: inline-flex;
+      align-items: center;
+      height: 20px;
+      padding-inline: 8px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--muted);
+      color: var(--muted-foreground);
+      margin-block-end: 8px;
+    }
+
+    .mockup-title {
+      font-size: 1.0625rem;
+      font-weight: 600;
+      margin-block-end: 6px;
+    }
+
+    .mockup-desc {
+      font-size: 0.875rem;
+      color: var(--muted-foreground);
+      line-height: 1.6;
+    }
+
+    .open-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-block-start: 12px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .tokens-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 24px;
+      margin-block-end: 32px;
+    }
+    .token-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-block-start: 16px;
+    }
+    .token-swatch {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .token-color {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    .token-label {
+      font-size: 0.6875rem;
+      color: var(--muted-foreground);
+      text-align: center;
+      font-family: monospace;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.875rem;
+      color: var(--muted-foreground);
+      margin-block-end: 24px;
+    }
+    .back-link:hover { color: var(--foreground); text-decoration: none; }
+
+    @media (max-width: 640px) {
+      .gallery-page { padding-inline: 16px; padding-block: 24px; }
+      .gallery-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- شريط التنبيه -->
+  <div class="preview-banner" role="banner">
+    نماذج بصرية مقترحة لإعادة تصميم نسّاج — ليست التطبيق الفعلي
+  </div>
+
+  <div class="gallery-page">
+    <div class="gallery-inner">
+
+      <!-- رابط العودة -->
+      <a href="../index.html" class="back-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><polyline points="9 18 15 12 9 6"/></svg>
+        العودة إلى معرض التصميم
+      </a>
+
+      <!-- رأس المعرض -->
+      <header class="gallery-header">
+        <h1 class="ui-title" style="font-size:1.75rem;margin-block-end:8px;">معرض النماذج البصرية</h1>
+        <hr class="gold-rule" aria-hidden="true" style="margin-block: 12px 0;">
+      </header>
+
+      <p class="gallery-desc">
+        نماذج بصرية ثابتة للشاشات الثلاث المقترحة في دليل إعادة التصميم 2026-09-03.
+        كل نموذج يطبّق هوية دار الكِندِي (كحلي · كريم · ذهب نادر)، خطّ IBM Plex Sans Arabic،
+        وتخطيطات RTL-first بالخصائص المنطقية. قرارات مطلوبة من المالك موثّقة في §7 من الدليل.
+      </p>
+
+      <!-- بطاقات النماذج -->
+      <section aria-label="النماذج البصرية">
+        <div class="gallery-grid">
+
+          <!-- بطاقة الصدفة -->
+          <a class="mockup-card" href="shell.html" aria-label="فتح نموذج الصدفة الرئيسية">
+            <!-- معاينة مصغّرة -->
+            <div class="mockup-preview" aria-hidden="true">
+              <div class="preview-shell">
+                <div class="preview-shell-sidebar">
+                  <div class="preview-shell-item" style="width:80%;background:var(--foreground);opacity:.3;"></div>
+                  <div class="preview-shell-item active" style="width:85%;"></div>
+                  <div class="preview-shell-item" style="width:70%;"></div>
+                  <div class="preview-shell-item" style="width:75%;"></div>
+                  <div style="height:6px;"></div>
+                  <div class="preview-shell-item" style="width:80%;background:var(--foreground);opacity:.2;"></div>
+                  <div class="preview-shell-item" style="width:75%;"></div>
+                  <div class="preview-shell-item" style="width:65%;"></div>
+                </div>
+                <div class="preview-shell-main">
+                  <div class="preview-shell-header"></div>
+                  <div class="preview-gold-line"></div>
+                  <div style="height:6px;background:var(--card);border-block-end:1px solid var(--border);"></div>
+                  <div style="height:4px;background:var(--background);display:flex;align-items:center;padding-inline:4px;">
+                    <div style="height:2px;width:40%;background:var(--success);border-radius:1px;"></div>
+                  </div>
+                  <div class="preview-shell-chat">
+                    <div class="preview-bubble-ai"></div>
+                    <div class="preview-bubble-user"></div>
+                    <div class="preview-bubble-ai" style="width:50%;"></div>
+                    <div class="preview-bubble-user" style="width:40%;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mockup-info">
+              <span class="mockup-tag">الصدفة الرئيسية</span>
+              <div class="mockup-title">App Shell</div>
+              <p class="mockup-desc">شريط جانبي بمشاريع وجلسات مع شارات حالة، محادثة بفقاعات مُتمايزة، مؤشّر حصة مفصول عن التبويبات، ومؤلَّف رسائل أسفل الشاشة.</p>
+              <span class="open-link" aria-hidden="true">
+                افتح النموذج
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </span>
+            </div>
+          </a>
+
+          <!-- بطاقة الويكي -->
+          <a class="mockup-card" href="wiki.html" aria-label="فتح نموذج الويكي">
+            <div class="mockup-preview" aria-hidden="true">
+              <div class="preview-wiki">
+                <div class="preview-wiki-sections">
+                  <div class="preview-wiki-section-item" style="width:70%;"></div>
+                  <div class="preview-wiki-section-item" style="width:80%;"></div>
+                  <div style="height:4px;"></div>
+                  <div class="preview-wiki-section-item" style="width:60%;background:var(--foreground);opacity:.2;"></div>
+                  <div class="preview-wiki-section-item active" style="width:80%;"></div>
+                  <div class="preview-wiki-section-item" style="width:75%;"></div>
+                  <div style="height:4px;"></div>
+                  <div class="preview-wiki-section-item" style="width:60%;background:var(--foreground);opacity:.2;"></div>
+                  <div class="preview-wiki-section-item" style="width:65%;"></div>
+                </div>
+                <div class="preview-wiki-article">
+                  <div class="preview-wiki-h1"></div>
+                  <div class="preview-wiki-lede"></div>
+                  <!-- مسطرة ذهب مصغّرة -->
+                  <div style="height:1px;background:var(--brand-accent);margin-block:4px;"></div>
+                  <div class="preview-wiki-body-line" style="width:100%;"></div>
+                  <div class="preview-wiki-body-line" style="width:92%;"></div>
+                  <div class="preview-wiki-body-line" style="width:97%;"></div>
+                  <div style="height:4px;"></div>
+                  <div class="preview-wiki-body-line" style="width:85%;height:8px;background:var(--foreground);opacity:.3;"></div>
+                  <div class="preview-wiki-body-line" style="width:100%;"></div>
+                  <div class="preview-wiki-body-line" style="width:88%;"></div>
+                </div>
+                <div class="preview-wiki-toc">
+                  <div style="height:5px;width:50%;border-radius:2px;background:var(--muted-foreground);opacity:.4;margin-block-end:6px;"></div>
+                  <div class="preview-wiki-body-line" style="width:80%;height:5px;"></div>
+                  <div class="preview-wiki-body-line" style="width:90%;height:5px;background:var(--primary);opacity:.6;"></div>
+                  <div class="preview-wiki-body-line" style="width:70%;height:5px;"></div>
+                  <div class="preview-wiki-body-line" style="width:75%;height:5px;"></div>
+                </div>
+              </div>
+            </div>
+            <div class="mockup-info">
+              <span class="mockup-tag">الويكي</span>
+              <div class="mockup-title">Wiki</div>
+              <p class="mockup-desc">تخطيط ثلاثي الأعمدة: فهرس أقسام + مقال بعرض قراءة 72ch + سكّة TOC. مؤشّر «صفحة N من M»، إبراز TOC النشط، وبحث Ctrl K ظاهر نصّاً.</p>
+              <span class="open-link" aria-hidden="true">
+                افتح النموذج
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </span>
+            </div>
+          </a>
+
+          <!-- بطاقة الإعدادات -->
+          <a class="mockup-card" href="settings.html" aria-label="فتح نموذج الإعدادات">
+            <div class="mockup-preview" aria-hidden="true">
+              <div class="preview-settings">
+                <div class="preview-settings-dialog">
+                  <div class="preview-settings-header">
+                    <div class="preview-settings-title"></div>
+                    <div style="flex:1;"></div>
+                    <div style="width:8px;height:8px;border:1px solid var(--border);border-radius:1px;"></div>
+                  </div>
+                  <!-- مسطرة ذهب مصغّرة -->
+                  <div style="height:1px;background:var(--brand-accent);"></div>
+                  <div class="preview-settings-body">
+                    <div class="preview-settings-nav">
+                      <div class="preview-settings-nav-item" style="width:70%;"></div>
+                      <div class="preview-settings-nav-item" style="width:80%;"></div>
+                      <div style="height:4px;"></div>
+                      <div class="preview-settings-nav-item" style="width:60%;background:var(--foreground);opacity:.15;"></div>
+                      <div class="preview-settings-nav-item" style="width:75%;"></div>
+                      <div class="preview-settings-nav-item active" style="width:85%;"></div>
+                      <div style="height:4px;"></div>
+                      <div class="preview-settings-nav-item" style="width:60%;background:var(--foreground);opacity:.15;"></div>
+                      <div class="preview-settings-nav-item" style="width:70%;"></div>
+                      <div class="preview-settings-nav-item" style="width:65%;"></div>
+                      <div class="preview-settings-nav-item" style="width:80%;"></div>
+                    </div>
+                    <div class="preview-settings-content">
+                      <div style="height:5px;width:50%;border-radius:2px;background:var(--foreground);opacity:.3;margin-block-end:8px;"></div>
+                      <!-- صفوف -->
+                      <div style="display:flex;align-items:center;gap:4px;padding-block:4px;border-block-end:1px solid var(--border);">
+                        <div class="preview-settings-row" style="flex:1;margin:0;"></div>
+                        <div style="width:20px;height:10px;border-radius:5px;background:var(--primary);"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:4px;padding-block:4px;border-block-end:1px solid var(--border);">
+                        <div class="preview-settings-row" style="flex:1;margin:0;"></div>
+                        <div style="width:20px;height:10px;border-radius:5px;background:var(--muted);"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:4px;padding-block:4px;border-block-end:1px solid var(--border);">
+                        <div class="preview-settings-row" style="flex:1;margin:0;"></div>
+                        <div style="width:30px;height:10px;border-radius:3px;background:var(--secondary);border:1px solid var(--border);"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:4px;padding-block:4px;">
+                        <div class="preview-settings-row" style="flex:1;margin:0;"></div>
+                        <div style="width:20px;height:10px;border-radius:5px;background:var(--primary);"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mockup-info">
+              <span class="mockup-tag">الإعدادات</span>
+              <div class="mockup-title">Settings</div>
+              <p class="mockup-desc">حوار بخمس مجموعات معنونة (الحساب والفريق / الذكاء والمعرفة / المفاتيح / المظهر / النظام)، جدول مستخدمين، صفوف تبديلات، وأخطاء عند الحقل.</p>
+              <span class="open-link" aria-hidden="true">
+                افتح النموذج
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </span>
+            </div>
+          </a>
+
+        </div>
+      </section>
+
+      <!-- لوحة الرموز -->
+      <section class="tokens-section" aria-labelledby="tokens-heading">
+        <h2 class="ui-h3" id="tokens-heading">لوحة الألوان — بريست الكِندِي</h2>
+        <p style="font-size:0.875rem;color:var(--muted-foreground);margin-block-start:4px;">قاعدة 60/30/10: كريم (60%) · كحلي (30%) · ذهبي نادر (10%). كل نسبة تباين تعبر AA ✅</p>
+        <div class="token-grid">
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(39 24% 92%);" title="--background فاتح"></div>
+            <span class="token-label">--background</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(40 34% 97%);" title="--card فاتح"></div>
+            <span class="token-label">--card</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(221 45% 14%);" title="--foreground فاتح"></div>
+            <span class="token-label">--foreground</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(221 47% 30%);" title="--primary"></div>
+            <span class="token-label">--primary</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(39 38% 43.5%);" title="--ring / ذهبي"></div>
+            <span class="token-label">--ring (ذهبي)</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(38 19% 89%);" title="--muted"></div>
+            <span class="token-label">--muted</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(152 42% 28%);" title="--success"></div>
+            <span class="token-label">--success</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(23 83% 31%);" title="--warning"></div>
+            <span class="token-label">--warning</span>
+          </div>
+          <div class="token-swatch">
+            <div class="token-color" style="background:hsl(0 72% 42%);" title="--danger"></div>
+            <span class="token-label">--danger</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ملاحظة -->
+      <p class="ui-label muted" style="text-align:center;">
+        هذه نماذج بصرية ثابتة · لا تُعدَّل ملفات التطبيق (src/ أو server/) ·
+        الاعتماد يتطلب موافقة مكتوبة من المالك (§7)
+      </p>
+
+    </div>
+  </div>
+</body>
+</html>

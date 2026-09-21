@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>نسّاج — المفهوم أ: منصّة القيادة</title>
+  <link rel="stylesheet" href="style.css?v=2" />
+</head>
+<body>
+
+<!-- شريط التمييز (نموذج بصري) -->
+<div class="lab-banner" role="banner" aria-label="شريط تمييز النموذج">
+  نموذج بصري — المفهوم أ: منصّة القيادة
+</div>
+
+<!-- الصدفة الرئيسية -->
+<div class="app-shell">
+
+  <!-- ① شريط الأوامر العلوي -->
+  <header class="topbar" role="banner">
+    <div class="topbar-logo">
+      <span class="topbar-logo-dot" aria-hidden="true"></span>
+      نسّاج
+    </div>
+
+    <div class="topbar-search" role="search">
+      <label for="global-search" class="sr-only">بحث شامل</label>
+      <input
+        id="global-search"
+        type="search"
+        placeholder="ابحث في الجلسات والمشاريع..."
+        aria-label="بحث شامل (Ctrl K)"
+      />
+      <span class="topbar-search-hint" aria-hidden="true">Ctrl K</span>
+    </div>
+
+    <div class="topbar-actions">
+      <!-- زرّ الإشعارات -->
+      <button class="btn-icon" aria-label="الإشعارات" title="الإشعارات">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M10 2a6 6 0 0 1 6 6c0 2.5.8 4.5 2 6H2c1.2-1.5 2-3.5 2-6a6 6 0 0 1 6-6z"/>
+          <path d="M10 18a2 2 0 0 0 2-2H8a2 2 0 0 0 2 2z"/>
+        </svg>
+      </button>
+
+      <!-- زرّ الإعدادات -->
+      <button class="btn-icon" aria-label="الإعدادات" title="الإعدادات">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <circle cx="10" cy="10" r="3"/>
+          <path d="M10 2v2m0 12v2M2 10h2m12 0h2m-3.2-4.8-1.4 1.4M4.6 15.4l1.4-1.4M4.6 4.6l1.4 1.4M15.4 15.4l-1.4-1.4"/>
+        </svg>
+      </button>
+
+      <button class="btn-primary" aria-label="إنشاء جلسة جديدة">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M8 3v10M3 8h10"/>
+        </svg>
+        جلسة جديدة
+      </button>
+    </div>
+  </header>
+
+  <!-- ② السكة الأفقية للجلسات (Command Deck) -->
+  <nav class="session-deck" role="navigation" aria-label="الجلسات النشطة">
+    <span class="deck-label" aria-hidden="true">الجلسات</span>
+
+    <!-- بطاقة ١ — نشطة تعمل -->
+    <button
+      class="session-card active"
+      aria-label="جلسة: مراجعة كود الواجهة — مشروع نسّاج — تعمل الآن"
+      aria-current="true"
+      onclick="selectCard(this)"
+    >
+      <span class="status-dot running" aria-label="تعمل"></span>
+      <span class="session-card-name">مراجعة كود الواجهة</span>
+      <span class="session-card-time">الآن</span>
+      <span class="session-card-project">نسّاج</span>
+      <div class="session-card-progress" style="width: 68%" aria-hidden="true"></div>
+    </button>
+
+    <!-- بطاقة ٢ — تنتظر إذن -->
+    <button
+      class="session-card"
+      aria-label="جلسة: تحليل قاعدة البيانات — مشروع مشروع-ب — بانتظار إذن — منذ 4 دقائق"
+      onclick="selectCard(this)"
+    >
+      <span class="status-dot waiting" aria-label="بانتظار إذن"></span>
+      <span class="session-card-name">تحليل قاعدة البيانات</span>
+      <span class="session-card-time">4 د</span>
+      <span class="session-card-project">مشروع-ب</span>
+      <div class="session-card-progress" style="width: 35%; background: var(--warn);" aria-hidden="true"></div>
+    </button>
+
+    <!-- بطاقة ٣ — متوقفة -->
+    <button
+      class="session-card"
+      aria-label="جلسة: إعداد خطة الإصدار — مشروع مشروع-أ — متوقفة — منذ 23 دقيقة"
+      onclick="selectCard(this)"
+    >
+      <span class="status-dot idle" aria-label="متوقفة"></span>
+      <span class="session-card-name">إعداد خطة الإصدار</span>
+      <span class="session-card-time">23 د</span>
+      <span class="session-card-project">مشروع-أ</span>
+      <div class="session-card-progress" style="width: 91%; background: var(--err);" aria-hidden="true"></div>
+    </button>
+
+    <!-- بطاقة ٤ — خطأ -->
+    <button
+      class="session-card"
+      aria-label="جلسة: اختبار مزامنة الأسطول — مشروع نسّاج — تعذّرت — منذ 1 ساعة"
+      onclick="selectCard(this)"
+    >
+      <span class="status-dot error" aria-label="تعذّرت"></span>
+      <span class="session-card-name">اختبار مزامنة الأسطول</span>
+      <span class="session-card-time">1 س</span>
+      <span class="session-card-project">نسّاج</span>
+      <div class="session-card-progress" style="width: 55%;" aria-hidden="true"></div>
+    </button>
+
+    <!-- بطاقة ٥ — تعمل -->
+    <button
+      class="session-card"
+      aria-label="جلسة: صياغة محتوى التوثيق — مشروع نسّاج — تعمل — منذ دقيقتين"
+      onclick="selectCard(this)"
+    >
+      <span class="status-dot running" aria-label="تعمل"></span>
+      <span class="session-card-name">صياغة محتوى التوثيق</span>
+      <span class="session-card-time">2 د</span>
+      <span class="session-card-project">نسّاج</span>
+      <div class="session-card-progress" style="width: 22%;" aria-hidden="true"></div>
+    </button>
+
+    <!-- زرّ إضافة جلسة -->
+    <button class="deck-add-btn" aria-label="إضافة جلسة جديدة">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M10 4v12M4 10h12"/>
+      </svg>
+    </button>
+  </nav>
+
+  <!-- ③ المنطقة الرئيسية — بعرض كامل -->
+  <main class="main-area" id="main-content" tabindex="-1">
+
+    <!-- رأس المحادثة -->
+    <div class="chat-header">
+      <div class="chat-header-inner">
+        <div class="chat-title-group">
+          <nav class="chat-breadcrumb" aria-label="مسار التنقل">
+            <span>نسّاج</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" style="transform: scaleX(-1);">
+              <path d="M4.5 9 7.5 6 4.5 3"/>
+            </svg>
+            <span>مراجعة كود الواجهة</span>
+          </nav>
+          <h1 class="chat-title">مراجعة كود الواجهة</h1>
+        </div>
+
+        <div class="chat-header-actions">
+          <!-- زرّ الطرفية -->
+          <button class="btn-icon" aria-label="فتح الطرفية" title="طرفية">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <rect x="2" y="4" width="16" height="12" rx="2"/>
+              <path d="m6 8 3 3-3 3M12 14h2"/>
+            </svg>
+          </button>
+
+          <!-- زرّ مشاركة -->
+          <button class="btn-icon" aria-label="مشاركة الجلسة" title="مشاركة">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M6 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/>
+              <path d="M16 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM16 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/>
+              <path d="m7.8 8.6 4.4 2.8M7.8 11.4l4.4-2.8"/>
+            </svg>
+          </button>
+
+          <!-- زرّ إغلاق الجلسة -->
+          <button class="btn-icon" aria-label="إغلاق الجلسة" title="إغلاق">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M15 5 5 15M5 5l10 10"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <!-- مسطرة التمييز -->
+      <div class="gold-rule" aria-hidden="true"></div>
+    </div>
+
+    <!-- منطقة الرسائل -->
+    <div
+      class="messages-area"
+      role="log"
+      aria-live="polite"
+      aria-label="محادثة نسّاج"
+    >
+
+      <!-- رسالة المستخدم ١ -->
+      <div class="msg-user">
+        <div class="msg-user-bubble" lang="ar">
+          راجع ملف <bdi>src/components/SessionCard.tsx</bdi> وأخبرني إن كان هناك خطأ في منطق حالة الجلسة.
+        </div>
+      </div>
+
+      <!-- رسالة المساعد ١ -->
+      <div class="msg-assistant">
+        <div class="msg-assistant-avatar" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 1a5 5 0 0 1 5 5c0 1.7.5 3 1.5 4H1.5C2.5 9 3 7.7 3 6a5 5 0 0 1 5-5Z"/>
+            <path d="M6 14h4a2 2 0 0 1-4 0Z"/>
+          </svg>
+        </div>
+        <div class="msg-assistant-body" lang="ar">
+          <p>قرأت الملف. وجدت مشكلة في المنطق: الشرط يتحقق من <bdi>status === 'running'</bdi> لكنه لا يتعامل مع حالة <bdi>'awaiting_permission'</bdi> بشكل صحيح.</p>
+
+          <!-- كتلة أداة — قراءة ملف -->
+          <div class="tool-block" role="region" aria-label="أداة: قراءة ملف">
+            <div class="tool-block-header" onclick="toggleTool(this)" aria-expanded="true">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M3 2h7l3 3v9H3z"/>
+                <path d="M10 2v3h3"/>
+              </svg>
+              <span class="tool-name">قراءة ملف: SessionCard.tsx</span>
+              <span class="tool-status-chip" aria-label="تمّت بنجاح">منجزة</span>
+            </div>
+            <div class="tool-block-body">
+              const getStatusColor = (status: SessionStatus) =&gt; {<br>
+              &nbsp;&nbsp;if (status === 'running') return 'green';<br>
+              &nbsp;&nbsp;// ⚠ 'awaiting_permission' غير مُعالَجة هنا<br>
+              &nbsp;&nbsp;return 'gray';<br>
+              }
+            </div>
+          </div>
+
+          <p style="margin-block-start: 12px;">الإصلاح المقترح: إضافة حالة <bdi>'awaiting_permission'</bdi> صراحةً وإرجاع <bdi>'warning'</bdi> لها، ثم تحديث اختبارات الوحدة لتغطيتها.</p>
+        </div>
+      </div>
+
+      <!-- رسالة المستخدم ٢ -->
+      <div class="msg-user">
+        <div class="msg-user-bubble" lang="ar">
+          طبّق الإصلاح وأضف الاختبارات.
+        </div>
+      </div>
+
+      <!-- رسالة المساعد ٢ — قيد التنفيذ -->
+      <div class="msg-assistant">
+        <div class="msg-assistant-avatar" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 1a5 5 0 0 1 5 5c0 1.7.5 3 1.5 4H1.5C2.5 9 3 7.7 3 6a5 5 0 0 1 5-5Z"/>
+            <path d="M6 14h4a2 2 0 0 1-4 0Z"/>
+          </svg>
+        </div>
+        <div class="msg-assistant-body" lang="ar">
+          <!-- أداة — تعديل ملف (قيد التنفيذ) -->
+          <div class="tool-block" role="region" aria-label="أداة: تعديل ملف — قيد التنفيذ">
+            <div class="tool-block-header" onclick="toggleTool(this)" aria-expanded="false">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M11 2 14 5 5 14H2v-3Z"/>
+              </svg>
+              <span class="tool-name">تعديل ملف: SessionCard.tsx</span>
+              <span class="tool-status-chip pending" aria-label="جارٍ التنفيذ">يعمل...</span>
+            </div>
+          </div>
+
+          <!-- مؤشر الكتابة -->
+          <div class="typing-indicator" aria-label="نسّاج يكتب..." aria-live="polite" style="margin-block-start: 8px;">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /messages-area -->
+
+    <!-- شريط الإدخال -->
+    <div class="input-bar">
+      <div class="input-row" role="group" aria-label="منطقة كتابة الرسالة">
+        <textarea
+          class="input-textarea"
+          id="chat-input"
+          rows="1"
+          placeholder="اكتب رسالتك..."
+          aria-label="اكتب رسالة"
+          dir="rtl"
+        ></textarea>
+
+        <div class="input-actions">
+          <!-- زرّ فتح اللوح السفلي -->
+          <button
+            class="btn-sheet-toggle"
+            id="sheet-toggle"
+            aria-label="فتح الأدوات والملفات"
+            title="الأدوات"
+            onclick="toggleSheet()"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M3 2h7l3 3v9H3z"/>
+              <path d="M10 2v3h3M5 8h6M5 11h4"/>
+            </svg>
+          </button>
+
+          <!-- زرّ الإرسال -->
+          <button class="btn-send" aria-label="إرسال الرسالة">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="transform: rotate(var(--dir, -1) * -45deg) scaleX(calc(var(--dir, -1)));
+">
+              <path d="M14 2 2 8l4 2 2 4 6-12Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </main><!-- /main-area -->
+
+  <!-- شريط الحصة والتذييل -->
+  <footer class="quota-bar-row" role="contentinfo">
+    <div class="quota-meter" role="meter" aria-label="استهلاك الحصة" aria-valuenow="68" aria-valuemin="0" aria-valuemax="100">
+      <div class="quota-label">
+        <span>حصة الجلسة</span>
+        <span>68٪</span>
+      </div>
+      <div class="quota-track">
+        <div class="quota-fill" style="width: 68%" aria-hidden="true"></div>
+      </div>
+    </div>
+    <span class="quota-meta">يتجدّد بعد 3 ساعات و22 دقيقة</span>
+
+    <div class="tray-actions">
+      <a href="#" class="tray-link">إحصاءات</a>
+      <a href="#" class="tray-link">الويكي</a>
+      <a href="#" class="tray-link">الإعدادات</a>
+    </div>
+  </footer>
+
+</div><!-- /app-shell -->
+
+<!-- ================================================================
+     اللوح السفلي المنزلق (Bottom Sheet)
+     ================================================================ -->
+<aside
+  class="bottom-sheet"
+  id="bottom-sheet"
+  role="dialog"
+  aria-label="الأدوات والملفات"
+  aria-modal="false"
+  aria-hidden="true"
+>
+  <div class="sheet-handle-bar" aria-hidden="true"></div>
+
+  <div class="sheet-tabs" role="tablist" aria-label="تبويبات اللوح">
+    <button class="sheet-tab active" role="tab" aria-selected="true" id="tab-files" onclick="switchTab(this, 'panel-files')">الملفات</button>
+    <button class="sheet-tab" role="tab" aria-selected="false" id="tab-terminal" onclick="switchTab(this, 'panel-terminal')">الطرفية</button>
+    <button class="sheet-tab" role="tab" aria-selected="false" id="tab-tools" onclick="switchTab(this, 'panel-tools')">الأدوات</button>
+
+    <button class="sheet-close" onclick="toggleSheet()" aria-label="إغلاق اللوح">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M12 4 4 12M4 4l8 8"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- محتوى: الملفات -->
+  <div class="sheet-content" id="panel-files" role="tabpanel" aria-labelledby="tab-files">
+    <div class="file-list" role="list">
+      <div class="file-item" role="listitem">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+        <span class="file-item-name">SessionCard.tsx</span>
+        <span class="file-item-size">4.2 KB</span>
+      </div>
+      <div class="file-item" role="listitem">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+        <span class="file-item-name">SessionCard.test.tsx</span>
+        <span class="file-item-size">1.8 KB</span>
+      </div>
+      <div class="file-item" role="listitem">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+        <span class="file-item-name">types/session.ts</span>
+        <span class="file-item-size">2.1 KB</span>
+      </div>
+      <div class="file-item" role="listitem">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+        <span class="file-item-name">hooks/useSession.ts</span>
+        <span class="file-item-size">3.6 KB</span>
+      </div>
+      <div class="file-item" role="listitem">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/></svg>
+        <span class="file-item-name">style.css</span>
+        <span class="file-item-size">11.3 KB</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- محتوى: الطرفية (مخفي) -->
+  <div class="sheet-content" id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden>
+    <div style="font-family: monospace; font-size: 0.8125rem; color: var(--ok); line-height: 1.8; direction: ltr; text-align: start;">
+      <div>$ npm test -- SessionCard</div>
+      <div style="color: var(--fg-muted);">PASS src/components/SessionCard.test.tsx</div>
+      <div style="color: var(--fg-muted);">  ✓ renders running state (12ms)</div>
+      <div style="color: var(--fg-muted);">  ✓ renders idle state (8ms)</div>
+      <div style="color: var(--fg-faint);">  ○ renders awaiting_permission state</div>
+    </div>
+  </div>
+
+  <!-- محتوى: الأدوات (مخفي) -->
+  <div class="sheet-content" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" hidden>
+    <div style="font-size: 0.8125rem; color: var(--fg-muted); line-height: 1.8;">
+      <p>الأدوات المتاحة للجلسة الحالية:</p>
+      <ul style="margin-block-start: 8px; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 4px;">
+        <li>قراءة الملفات</li>
+        <li>كتابة الملفات وتعديلها</li>
+        <li>تشغيل الأوامر في الطرفية</li>
+        <li>البحث في الكود</li>
+        <li>مراجعة Git</li>
+      </ul>
+    </div>
+  </div>
+
+</aside>
+
+<!-- شريط تنقل الجوّال -->
+<nav class="mobile-nav" aria-label="التنقل الرئيسي">
+  <div class="mobile-nav-inner">
+    <button class="mobile-nav-item active" aria-label="المحادثة" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      <span class="mobile-nav-label">المحادثة</span>
+    </button>
+    <button class="mobile-nav-item" aria-label="المشاريع">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+        <path d="M3 7h18M3 12h18M3 17h18"/>
+      </svg>
+      <span class="mobile-nav-label">المشاريع</span>
+    </button>
+    <button class="mobile-nav-item" aria-label="الويكي">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+      </svg>
+      <span class="mobile-nav-label">الويكي</span>
+    </button>
+    <button class="mobile-nav-item" aria-label="الإعدادات">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span class="mobile-nav-label">الإعدادات</span>
+    </button>
+  </div>
+</nav>
+
+<!-- فئة sr-only للإتاحة -->
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+</style>
+
+<script>
+  // --- اختيار بطاقة جلسة ---
+  function selectCard(el) {
+    document.querySelectorAll('.session-card').forEach(c => {
+      c.classList.remove('active');
+      c.removeAttribute('aria-current');
+    });
+    el.classList.add('active');
+    el.setAttribute('aria-current', 'true');
+  }
+
+  // --- فتح/طي اللوح السفلي ---
+  function toggleSheet() {
+    const sheet = document.getElementById('bottom-sheet');
+    const isOpen = sheet.classList.toggle('open');
+    sheet.setAttribute('aria-hidden', String(!isOpen));
+    if (isOpen) {
+      // التركيز على أول عنصر في اللوح
+      sheet.querySelector('button')?.focus();
+    }
+  }
+
+  // --- تبديل تبويب اللوح ---
+  function switchTab(btn, panelId) {
+    const tabs = btn.closest('[role="tablist"]').querySelectorAll('[role="tab"]');
+    tabs.forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+
+    const sheet = btn.closest('.bottom-sheet');
+    sheet.querySelectorAll('[role="tabpanel"]').forEach(p => {
+      p.hidden = (p.id !== panelId);
+    });
+  }
+
+  // --- طي/توسيع كتلة الأداة ---
+  function toggleTool(header) {
+    const body = header.nextElementSibling;
+    if (!body) return;
+    const expanded = header.getAttribute('aria-expanded') === 'true';
+    header.setAttribute('aria-expanded', String(!expanded));
+    body.hidden = expanded;
+  }
+
+  // --- إعادة حجم حقل الإدخال تلقائياً ---
+  const textarea = document.getElementById('chat-input');
+  if (textarea) {
+    textarea.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+    });
+  }
+
+  // --- دعم Ctrl+K ---
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      document.getElementById('global-search')?.focus();
+    }
+    if (e.key === 'Escape') {
+      const sheet = document.getElementById('bottom-sheet');
+      if (sheet?.classList.contains('open')) toggleSheet();
+    }
+  });
+</script>
+
+</body>
+</html>
