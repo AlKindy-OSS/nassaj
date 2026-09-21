@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>نسّاج — المفهوم ب: مساحة العمل متعدّدة الألواح</title>
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+
+<!-- شريط الإعلان -->
+<div class="demo-banner" role="note" aria-label="شريط الإعلان">
+  نموذج بصري &mdash; <strong>المفهوم ب: مساحة العمل متعدّدة الألواح</strong>
+</div>
+
+<!-- شريط الحالة العلوي -->
+<header class="statusbar" role="banner" aria-label="شريط الحالة">
+  <div class="statusbar-brand">
+    <div class="statusbar-brand-dot" aria-hidden="true"></div>
+    نسّاج
+  </div>
+
+  <div class="statusbar-sep" aria-hidden="true"></div>
+
+  <div class="statusbar-item" aria-label="جلستان نشطتان">
+    <span class="dot running" aria-hidden="true"></span>
+    جلستان نشطتان
+  </div>
+
+  <div class="statusbar-sep" aria-hidden="true"></div>
+
+  <div class="statusbar-item" aria-label="جلسة بانتظار إذن">
+    <span class="dot warning" aria-hidden="true"></span>
+    بانتظار إذن
+  </div>
+
+  <div class="statusbar-sep" aria-hidden="true"></div>
+
+  <div class="statusbar-item" aria-label="سياق المحادثة">
+    <span>سياق</span>
+    <span style="color:var(--text-muted)">41%</span>
+  </div>
+
+  <div class="statusbar-quota" aria-label="حصة الاستخدام 27%">
+    <span style="font-size:11px;color:var(--text-muted)">الحصة</span>
+    <div class="quota-bar" role="progressbar" aria-valuenow="27" aria-valuemin="0" aria-valuemax="100" aria-label="27% مستهلكة">
+      <div class="quota-fill" style="width:27%"></div>
+    </div>
+    <span style="font-size:11px;color:var(--text-muted)">27%</span>
+    <div class="statusbar-sep" aria-hidden="true"></div>
+    <span style="font-size:11px;color:var(--text-muted)">يتجدّد 03:15</span>
+  </div>
+</header>
+
+<!-- مساحة العمل الرئيسية -->
+<div class="workspace">
+
+  <!-- سكّة الأيقونات الجانبية -->
+  <nav class="icon-rail" role="navigation" aria-label="التنقّل الرئيسي">
+    <button class="rail-btn active" data-tip="المشاريع" aria-label="المشاريع" aria-current="page" data-section="projects">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <rect x="2" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="11" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="2" y="12" width="7" height="7" rx="1.5"/>
+        <rect x="11" y="12" width="7" height="7" rx="1.5"/>
+      </svg>
+    </button>
+
+    <button class="rail-btn" data-tip="الجلسات" aria-label="الجلسات" data-section="sessions">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M3 5h14M3 10h14M3 15h8"/>
+      </svg>
+      <span class="rail-badge" aria-label="3 جلسات نشطة"></span>
+    </button>
+
+    <button class="rail-btn" data-tip="الملفات" aria-label="الملفات" data-section="files">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M4 4a2 2 0 012-2h5l5 5v9a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
+        <path d="M11 2v5h5"/>
+      </svg>
+    </button>
+
+    <button class="rail-btn" data-tip="الويكي" aria-label="الويكي" data-section="wiki">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M4 2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"/>
+        <path d="M7 7h6M7 10h6M7 13h4"/>
+      </svg>
+    </button>
+
+    <div class="rail-spacer" aria-hidden="true"></div>
+
+    <button class="rail-btn" data-tip="البحث" aria-label="البحث الموحَّد (Ctrl K)" data-section="search">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <circle cx="9" cy="9" r="5.5"/>
+        <path d="M16 16l-3-3"/>
+      </svg>
+    </button>
+
+    <button class="rail-btn" data-tip="الإعدادات" aria-label="الإعدادات" data-section="settings">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <circle cx="10" cy="10" r="2.5"/>
+        <path d="M10 3v1.5M10 15.5V17M3 10h1.5M15.5 10H17M4.93 4.93l1.06 1.06M14.01 14.01l1.06 1.06M4.93 15.07l1.06-1.06M14.01 5.99l1.06-1.06"/>
+      </svg>
+    </button>
+  </nav>
+
+  <!-- تبويبات الألواح للجوّال -->
+  <div class="mobile-pane-tabs" role="tablist" aria-label="تبديل الألواح">
+    <button class="mobile-pane-tab active" role="tab" aria-selected="true" data-pane="0">
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M3 5h14M3 10h14M3 15h8"/>
+      </svg>
+      المحادثة
+    </button>
+    <button class="mobile-pane-tab" role="tab" aria-selected="false" data-pane="1">
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <rect x="2" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="11" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="2" y="12" width="7" height="7" rx="1.5"/>
+        <rect x="11" y="12" width="7" height="7" rx="1.5"/>
+      </svg>
+      الجلسات
+    </button>
+    <button class="mobile-pane-tab" role="tab" aria-selected="false" data-pane="2">
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <rect x="2" y="4" width="16" height="12" rx="2"/>
+        <path d="M6 9l2 2 4-4"/>
+      </svg>
+      الطرفية
+    </button>
+  </div>
+
+  <!-- منطقة الألواح -->
+  <main class="pane-area" role="main" aria-label="منطقة العمل">
+
+    <!-- اللوح الأول: المحادثة (الأساسي) -->
+    <article class="pane pane-resizable mobile-active" id="pane-conversation"
+             style="--pane-flex: 1.4"
+             role="region" aria-label="لوح المحادثة">
+
+      <!-- رأس اللوح -->
+      <div class="pane-header" role="toolbar" aria-label="أدوات لوح المحادثة">
+        <div class="pane-tabs" role="tablist">
+          <button class="pane-tab active" role="tab" aria-selected="true">
+            <div class="status-dot running" aria-hidden="true"></div>
+            مشروع نسّاج · تصميم UI
+          </button>
+          <button class="pane-tab" role="tab" aria-selected="false">
+            مشروع-أ · حادثة 502
+          </button>
+        </div>
+        <div class="pane-actions" aria-label="أدوات اللوح">
+          <button class="pane-btn" aria-label="تقسيم اللوح">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <rect x="2" y="4" width="7" height="12" rx="1"/>
+              <rect x="11" y="4" width="7" height="12" rx="1"/>
+            </svg>
+          </button>
+          <button class="pane-btn" aria-label="تكبير اللوح">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M3 8V3h5M17 12v5h-5M3 12v5h5M17 8V3h-5"/>
+            </svg>
+          </button>
+          <button class="pane-btn" aria-label="إغلاق اللوح">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M5 5l10 10M15 5L5 15"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- لقطة رأس المحادثة -->
+      <div class="conv-header">
+        <div class="conv-status-badge" aria-label="الجلسة تعمل">
+          <div class="status-dot running" aria-hidden="true"></div>
+          تعمل
+        </div>
+        <div class="conv-session-name">إعادة تصميم واجهة الصدفة الرئيسية</div>
+        <div class="conv-project-tag" aria-label="المشروع: نسّاج">نسّاج</div>
+        <div class="pane-actions">
+          <button class="pane-btn" aria-label="مشاركة الجلسة">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M15 8a3 3 0 100-6 3 3 0 000 6zM5 13a3 3 0 100-6 3 3 0 000 6zM15 18a3 3 0 100-6 3 3 0 000 6z"/>
+              <path d="M7.6 11.4l4.8 2.2M12.4 6.4L7.6 8.6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- محتوى المحادثة -->
+      <div class="pane-body" role="log" aria-label="سجل المحادثة" aria-live="polite">
+
+        <!-- رسالة مستخدم -->
+        <div class="msg-user" dir="rtl">
+          <div class="msg-user-bubble" role="article" aria-label="رسالة المستخدم">
+            راجع تصميم الشريط الجانبي الحالي، وأعطني رأيك في تحسين توزيع الجلسات المتزامنة بحيث يتمكّن المستخدم من المقارنة بسهولة.
+          </div>
+        </div>
+
+        <!-- رسالة مساعد -->
+        <div class="msg-assistant" dir="rtl">
+          <div class="msg-assistant-meta">
+            <div class="msg-assistant-avatar" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M10 3C6.13 3 3 6.13 3 10s3.13 7 7 7 7-3.13 7-7-3.13-7-7-7z"/>
+                <path d="M7 10h6M10 7v6"/>
+              </svg>
+            </div>
+            <span>نسّاج</span>
+            <time style="color:var(--text-muted);font-size:11px" datetime="2026-09-04T14:30">14:30</time>
+          </div>
+          <div class="msg-assistant-body">
+            <p>بعد مراجعة التصميم القائم، أرى ثلاث فرص تحسين رئيسية:</p>
+            <p>أوّلاً: نموذج الشريط الجانبي التقليدي يُخفق في إظهار الجلستين بشكل متزامن — الانتقال بينهما يُفقد السياق. نموذج الألواح الجانبية يُعالج هذا مباشرةً بإبقاء كلتيهما مرئيتين.</p>
+            <p>ثانياً: الحالة الحالية (نشطة/متوقّفة) تظهر كنقطة صغيرة فقط — يمكن تعزيزها بمعلومات اللمحة السريعة (آخر رسالة، نسبة السياق) في رأس اللوح مباشرةً.</p>
+            <p>هل تريدني أن أبدأ بتحليل <code>SessionList.tsx</code> أو بوضع wireframe للمقارنة أولاً؟</p>
+          </div>
+        </div>
+
+        <!-- أداة: قراءة ملف -->
+        <div class="msg-assistant" dir="rtl">
+          <div class="msg-assistant-meta">
+            <div class="msg-assistant-avatar" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M10 3C6.13 3 3 6.13 3 10s3.13 7 7 7 7-3.13 7-7-3.13-7-7-7z"/>
+              </svg>
+            </div>
+            <span>قراءة الملف</span>
+          </div>
+          <div class="tool-block" role="region" aria-label="نتيجة قراءة الملف">
+            <button class="tool-header" aria-expanded="true" aria-controls="tool-body-1">
+              <svg class="tool-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M4 4a2 2 0 012-2h5l5 5v9a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
+              </svg>
+              <span class="tool-name" dir="ltr">src/components/sessions/SessionList.tsx</span>
+              <span class="tool-status" aria-label="اكتملت">اكتملت</span>
+            </button>
+            <div class="tool-body" id="tool-body-1" dir="ltr" aria-label="محتوى الملف">export function SessionList({ sessions, activeId, onSelect }: SessionListProps) {
+  return (
+    &lt;div className="session-list"&gt;
+      {sessions.map(s =&gt; (
+        &lt;SessionItem
+          key={s.id}
+          session={s}
+          isActive={s.id === activeId}
+          onSelect={onSelect}
+        /&gt;
+      ))}
+    &lt;/div&gt;
+  );
+}</div>
+          </div>
+        </div>
+
+        <!-- رسالة مستخدم ثانية -->
+        <div class="msg-user" dir="rtl">
+          <div class="msg-user-bubble" role="article">
+            ابدأ بالـwireframe، وأرني كيف سيبدو اللوح الثاني بجانب المحادثة.
+          </div>
+        </div>
+
+        <!-- مؤشّر الكتابة -->
+        <div class="msg-assistant" dir="rtl">
+          <div class="msg-assistant-meta">
+            <div class="msg-assistant-avatar" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M10 3C6.13 3 3 6.13 3 10s3.13 7 7 7 7-3.13 7-7-3.13-7-7-7z"/>
+              </svg>
+            </div>
+            <span>نسّاج يكتب…</span>
+          </div>
+          <div class="typing-indicator" aria-label="المساعد يكتب" aria-live="polite">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+      </div><!-- /pane-body -->
+
+      <!-- شريط الإدخال -->
+      <div class="compose-bar" role="form" aria-label="إرسال رسالة">
+        <div class="compose-inner">
+          <textarea
+            class="compose-textarea"
+            placeholder="اكتب رسالتك أو / لأمر سريع…"
+            rows="1"
+            aria-label="نص الرسالة"
+            dir="rtl"></textarea>
+          <button class="compose-send" aria-label="إرسال الرسالة">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <!-- سهم إرسال RTL-aware (يتجه للأعلى) -->
+              <path d="M10 16V4M4 10l6-6 6 6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </article>
+
+    <!-- فاصل تغيير الحجم 1 -->
+    <div class="resize-handle" role="separator" aria-label="اسحب لتغيير حجم الألواح"
+         aria-orientation="vertical" tabindex="0" id="handle-1"></div>
+
+    <!-- اللوح الثاني: الجلسات والسياق -->
+    <article class="pane pane-resizable" id="pane-context"
+             style="--pane-flex: 1"
+             role="region" aria-label="لوح الجلسات والسياق">
+
+      <!-- رأس اللوح -->
+      <div class="pane-header" role="toolbar" aria-label="أدوات لوح السياق">
+        <div class="pane-tabs" role="tablist">
+          <button class="pane-tab active" role="tab" aria-selected="true" id="ctx-tab-sessions">الجلسات</button>
+          <button class="pane-tab" role="tab" aria-selected="false" id="ctx-tab-files">الملفات</button>
+          <button class="pane-tab" role="tab" aria-selected="false" id="ctx-tab-git">Git</button>
+        </div>
+        <div class="pane-actions">
+          <button class="pane-btn" aria-label="تكبير لوح السياق">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M3 8V3h5M17 12v5h-5M3 12v5h5M17 8V3h-5"/>
+            </svg>
+          </button>
+          <button class="pane-btn" aria-label="إغلاق لوح السياق">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M5 5l10 10M15 5L5 15"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- محتوى: الجلسات -->
+      <div class="sessions-panel" id="ctx-panel-sessions" role="region" aria-labelledby="ctx-tab-sessions">
+
+        <!-- مشروع 1 -->
+        <div class="project-group">
+          <button class="project-head" aria-expanded="true" aria-controls="proj-1-sessions">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M5 8l5 5 5-5"/>
+            </svg>
+            نسّاج — نظام التصميم
+            <span class="project-count" aria-label="3 جلسات">3</span>
+          </button>
+          <ul class="session-list" id="proj-1-sessions" role="list">
+            <li>
+              <button class="session-item active" aria-label="جلسة تصميم UI — تعمل — آخر رسالة 14:30">
+                <span class="status-dot running" aria-hidden="true"></span>
+                <div class="session-info">
+                  <div class="session-name">إعادة تصميم واجهة الصدفة</div>
+                  <div class="session-meta">
+                    <span>تعمل</span>
+                    <span class="session-time">14:30</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+            <li>
+              <button class="session-item" aria-label="جلسة مكوّنات RTL — بانتظار إذن">
+                <span class="status-dot waiting" aria-hidden="true"></span>
+                <div class="session-info">
+                  <div class="session-name">مكوّنات RTL وتحقيق التباين</div>
+                  <div class="session-meta">
+                    <span>بانتظار إذن</span>
+                    <span class="session-time">13:58</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+            <li>
+              <button class="session-item" aria-label="جلسة اختبارات E2E — متوقّفة">
+                <span class="status-dot idle" aria-hidden="true"></span>
+                <div class="session-info">
+                  <div class="session-name">اختبارات E2E — شاشة الإعدادات</div>
+                  <div class="session-meta">
+                    <span>متوقّفة</span>
+                    <span class="session-time">أمس</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- مشروع 2 -->
+        <div class="project-group">
+          <button class="project-head" aria-expanded="true" aria-controls="proj-2-sessions">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M5 8l5 5 5-5"/>
+            </svg>
+            مشروع-أ — الإنتاج
+            <span class="project-count" aria-label="2 جلسات">2</span>
+          </button>
+          <ul class="session-list" id="proj-2-sessions" role="list">
+            <li>
+              <button class="session-item" aria-label="جلسة إصلاح حادثة 502 — تعمل">
+                <span class="status-dot running" aria-hidden="true"></span>
+                <div class="session-info">
+                  <div class="session-name">إصلاح حادثة 502 · drain</div>
+                  <div class="session-meta">
+                    <span>تعمل</span>
+                    <span class="session-time">14:25</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+            <li>
+              <button class="session-item" aria-label="جلسة مراجعة سجلات — تعذّرت">
+                <span class="status-dot error" aria-hidden="true"></span>
+                <div class="session-info">
+                  <div class="session-name">مراجعة سجلات pm2</div>
+                  <div class="session-meta">
+                    <span style="color:var(--danger)">تعذّرت</span>
+                    <span class="session-time">14:10</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- مشروع 3 -->
+        <div class="project-group">
+          <button class="project-head" aria-expanded="false" aria-controls="proj-3-sessions">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" style="transform:rotate(-90deg)" aria-hidden="true">
+              <path d="M5 8l5 5 5-5"/>
+            </svg>
+            مشروع-ب — المحتوى
+            <span class="project-count" aria-label="جلسة واحدة">1</span>
+          </button>
+        </div>
+
+        <!-- زرّ جلسة جديدة -->
+        <div style="padding:12px 16px;border-block-start:1px solid var(--border-subtle);margin-block-start:auto">
+          <button style="
+            width:100%;
+            height:36px;
+            border-radius:8px;
+            border:1px dashed var(--border-default);
+            background:transparent;
+            color:var(--text-muted);
+            font-size:13px;
+            cursor:pointer;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:6px;
+            font-family:'IBM Plex Sans Arabic',sans-serif;
+            transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease);
+          "
+          onmouseenter="this.style.background='var(--bg-hover)';this.style.color='var(--text-primary)'"
+          onmouseleave="this.style.background='transparent';this.style.color='var(--text-muted)'"
+          aria-label="بدء جلسة جديدة">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M10 4v12M4 10h12"/>
+            </svg>
+            جلسة جديدة
+          </button>
+        </div>
+
+      </div><!-- /sessions-panel -->
+
+    </article>
+
+    <!-- فاصل تغيير الحجم 2 -->
+    <div class="resize-handle" role="separator" aria-label="اسحب لتغيير حجم الألواح"
+         aria-orientation="vertical" tabindex="0" id="handle-2"></div>
+
+    <!-- اللوح الثالث: الطرفية -->
+    <article class="pane pane-resizable" id="pane-terminal"
+             style="--pane-flex: 0.7"
+             role="region" aria-label="لوح الطرفية">
+
+      <!-- رأس اللوح -->
+      <div class="pane-header" role="toolbar" aria-label="أدوات لوح الطرفية">
+        <div class="pane-tabs" role="tablist">
+          <button class="pane-tab active" role="tab" aria-selected="true">الطرفية</button>
+          <button class="pane-tab" role="tab" aria-selected="false">المعاينة</button>
+        </div>
+        <div class="pane-actions">
+          <button class="pane-btn" aria-label="تكبير لوح الطرفية">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M3 8V3h5M17 12v5h-5M3 12v5h5M17 8V3h-5"/>
+            </svg>
+          </button>
+          <button class="pane-btn" aria-label="إغلاق لوح الطرفية">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M5 5l10 10M15 5L5 15"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- محتوى الطرفية -->
+      <div class="terminal-body" role="log" aria-label="مخرجات الطرفية" aria-live="off">
+        <span class="term-line"><span class="term-prompt">nassaj@dev</span>:<span class="term-cmd">~/Project/nassaj-dev</span>$ npm run build:client</span>
+        <span class="term-line"><span class="term-out">&gt; nassaj-dev@1.36.4 build:client</span></span>
+        <span class="term-line"><span class="term-out">&gt; vite build --config vite.config.client.ts</span></span>
+        <span class="term-line"> </span>
+        <span class="term-line"><span class="term-out">vite v5.4.8 building for production...</span></span>
+        <span class="term-line"><span class="term-out">✓ 1,847 modules transformed.</span></span>
+        <span class="term-line"><span class="term-out">dist/assets/index-BxK2mNvP.css   82.41 kB │ gzip: 14.22 kB</span></span>
+        <span class="term-line"><span class="term-out">dist/assets/index-DqLmWcJ8.js   483.19 kB │ gzip: 152.68 kB</span></span>
+        <span class="term-line"><span class="term-prompt">nassaj@dev</span>:<span class="term-cmd">~/Project/nassaj-dev</span>$<span class="term-cursor" aria-hidden="true"></span></span>
+      </div>
+
+    </article>
+
+  </main><!-- /pane-area -->
+
+</div><!-- /workspace -->
+
+<!-- شريط الجلسات السفلي -->
+<div class="session-tabbar" role="tablist" aria-label="الجلسات المفتوحة">
+
+  <button class="session-tab active" role="tab" aria-selected="true"
+          aria-label="جلسة تصميم UI — تعمل">
+    <div class="dot running" aria-hidden="true"></div>
+    تصميم UI
+  </button>
+
+  <button class="session-tab" role="tab" aria-selected="false"
+          aria-label="جلسة مكوّنات RTL — بانتظار إذن">
+    <div class="dot" style="background:var(--waiting-dot)" aria-hidden="true"></div>
+    مكوّنات RTL
+  </button>
+
+  <button class="session-tab" role="tab" aria-selected="false"
+          aria-label="جلسة إصلاح 502 — تعمل">
+    <div class="dot running" aria-hidden="true"></div>
+    <bdi>مشروع-أ · 502</bdi>
+  </button>
+
+  <button class="session-tab-add" aria-label="إضافة جلسة مقارنة">
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path d="M10 4v12M4 10h12"/>
+    </svg>
+  </button>
+
+</div>
+
+<script>
+/* ================================================================
+   JavaScript — بسيط جداً: resize handles + تبديل الألواح
+   ================================================================ */
+
+/* --- سحب الفواصل لتغيير حجم الألواح --- */
+function setupResizeHandle(handleEl, paneA, paneB) {
+  let dragging = false;
+  let startX = 0;
+  let startFlexA = 0;
+  let startFlexB = 0;
+
+  function getFlexValue(pane) {
+    return parseFloat(getComputedStyle(pane).getPropertyValue('--pane-flex') || '1');
+  }
+
+  handleEl.addEventListener('mousedown', function(e) {
+    dragging = true;
+    startX = e.clientX;
+    startFlexA = getFlexValue(paneA);
+    startFlexB = getFlexValue(paneB);
+    handleEl.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  handleEl.addEventListener('keydown', function(e) {
+    const step = 0.1;
+    const curA = getFlexValue(paneA);
+    const curB = getFlexValue(paneB);
+    if (e.key === 'ArrowRight') {
+      /* RTL: ArrowRight = تصغير اللوح الأيمن */
+      const newA = Math.max(0.2, curA - step);
+      const newB = curB + (curA - newA);
+      paneA.style.setProperty('--pane-flex', newA);
+      paneB.style.setProperty('--pane-flex', newB);
+      e.preventDefault();
+    } else if (e.key === 'ArrowLeft') {
+      const newA = Math.min(3, curA + step);
+      const newB = Math.max(0.2, curB - (newA - curA));
+      paneA.style.setProperty('--pane-flex', newA);
+      paneB.style.setProperty('--pane-flex', newB);
+      e.preventDefault();
+    }
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    const dx = startX - e.clientX; /* RTL: الحركة معكوسة */
+    const areaW = paneA.parentElement.offsetWidth;
+    const ratio = dx / areaW;
+    const totalFlex = startFlexA + startFlexB;
+    const newA = Math.max(0.2, startFlexA + ratio * totalFlex);
+    const newB = Math.max(0.2, totalFlex - newA);
+    paneA.style.setProperty('--pane-flex', newA.toFixed(3));
+    paneB.style.setProperty('--pane-flex', newB.toFixed(3));
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    handleEl.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}
+
+const paneConv = document.getElementById('pane-conversation');
+const paneCtx  = document.getElementById('pane-context');
+const paneTerm = document.getElementById('pane-terminal');
+const handle1  = document.getElementById('handle-1');
+const handle2  = document.getElementById('handle-2');
+
+if (handle1) setupResizeHandle(handle1, paneConv, paneCtx);
+if (handle2) setupResizeHandle(handle2, paneCtx, paneTerm);
+
+/* --- تبديل الألواح على الجوّال --- */
+const mobileTabs = document.querySelectorAll('.mobile-pane-tab');
+const panes = [paneConv, paneCtx, paneTerm];
+
+mobileTabs.forEach(function(tab, i) {
+  tab.addEventListener('click', function() {
+    mobileTabs.forEach(function(t, j) {
+      t.classList.toggle('active', j === i);
+      t.setAttribute('aria-selected', j === i ? 'true' : 'false');
+    });
+    panes.forEach(function(pane, j) {
+      if (pane) pane.classList.toggle('mobile-active', j === i);
+    });
+  });
+});
+
+/* --- textarea auto-resize --- */
+const textarea = document.querySelector('.compose-textarea');
+if (textarea) {
+  textarea.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
+}
+
+/* --- تبديل تبويبات السياق (بسيط) --- */
+const ctxTabs = document.querySelectorAll('#pane-context .pane-tab');
+ctxTabs.forEach(function(tab) {
+  tab.addEventListener('click', function() {
+    ctxTabs.forEach(function(t) {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+  });
+});
+
+/* --- أزرار السكّة (تبديل active) --- */
+const railBtns = document.querySelectorAll('.rail-btn[data-section]');
+railBtns.forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    railBtns.forEach(function(b) {
+      b.classList.remove('active');
+      b.removeAttribute('aria-current');
+    });
+    btn.classList.add('active');
+    btn.setAttribute('aria-current', 'page');
+  });
+});
+
+/* --- طيّ/فتح مجموعات المشاريع --- */
+const projectHeads = document.querySelectorAll('.project-head');
+projectHeads.forEach(function(head) {
+  head.addEventListener('click', function() {
+    const expanded = head.getAttribute('aria-expanded') === 'true';
+    head.setAttribute('aria-expanded', !expanded);
+    const svg = head.querySelector('svg');
+    if (svg) {
+      svg.style.transform = expanded ? 'rotate(-90deg)' : 'rotate(0deg)';
+      svg.style.transition = 'transform 0.15s ease';
+    }
+    const targetId = head.getAttribute('aria-controls');
+    if (targetId) {
+      const target = document.getElementById(targetId);
+      if (target) target.style.display = expanded ? 'none' : 'block';
+    }
+  });
+});
+</script>
+
+</body>
+</html>

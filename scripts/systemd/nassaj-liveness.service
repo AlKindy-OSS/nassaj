@@ -1,0 +1,11 @@
+# B-323 — مرصاد حياة نسّاج (إشعاري بحت، لا يرسل إشارات ولا يعيد تشغيل شيئاً).
+# التثبيت (وحدة مستخدم — يتطلب Linger=yes للمستخدم):
+#   cp scripts/systemd/nassaj-liveness.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now nassaj-liveness.timer
+[Unit]
+Description=nassaj liveness probe (notify-only, B-323)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash %h/.local/share/nassaj/current/scripts/liveness-watch.sh
+# قراءة فقط بطبيعته؛ لا حاجة لصلاحيات ولا لأي Kill*.

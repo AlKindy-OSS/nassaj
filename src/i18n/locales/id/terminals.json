@@ -1,0 +1,59 @@
+{
+  "title": "Terminal",
+  "newTerminal": "Terminal baru",
+  "defaults": {
+    "title": "Terminal {{number}}"
+  },
+  "list": {
+    "loading": "Memuat terminal...",
+    "empty": "Belum ada terminal",
+    "emptyHint": "Buat terminal untuk menjalankan perintah lepas dari proyek mana pun.",
+    "running": "Berjalan",
+    "exited": "Berakhir"
+  },
+  "panel": {
+    "empty": "Tidak ada terminal terbuka",
+    "emptyHint": "Pilih terminal dari daftar, atau buat yang baru.",
+    "renameLabel": "Ganti nama terminal",
+    "titlePlaceholder": "Nama terminal",
+    "close": "Tutup",
+    "closeHint": "Tutup tampilan ini (terminal tetap berjalan)",
+    "delete": "Hapus terminal",
+    "deleteHint": "Hentikan dan hapus terminal ini",
+    "save": "Simpan",
+    "cancel": "Batal"
+  },
+  "status": {
+    "connecting": "Menyambungkan...",
+    "reconnecting": "Menyambungkan ulang...",
+    "exited": "Berakhir (kode {{code}})",
+    "exitedSignal": "Berakhir (sinyal {{signal}})",
+    "truncated": "Keluaran lama dipangkas...",
+    "openedElsewhere": "Terminal ini dibuka di tab lain.",
+    "openedElsewhereAction": "Buka kembali di sini",
+    "serverRestart": "Berakhir karena server dimulai ulang.",
+    "notFound": "Terminal ini sudah tidak ada.",
+    "error": "Kesalahan koneksi."
+  },
+  "errors": {
+    "limitReached": "Anda mencapai batas 5 terminal berjalan. Tutup salah satu untuk membuat yang baru.",
+    "invalidTitle": "Nama terminal tidak valid.",
+    "invalidCwd": "Direktori kerja tidak valid.",
+    "invalidInitialCommand": "Perintah awal tidak valid.",
+    "createFailed": "Terminal tidak dapat dibuat. Silakan coba lagi.",
+    "renameFailed": "Nama terminal tidak dapat diganti. Silakan coba lagi.",
+    "deleteFailed": "Terminal tidak dapat dihapus. Silakan coba lagi.",
+    "loadFailed": "Terminal tidak dapat dimuat."
+  },
+  "deleteConfirm": {
+    "title": "Hapus terminal",
+    "message": "Hentikan dan hapus",
+    "warning": "Ini menghentikan proses yang berjalan dan menghapus keluarannya. Tindakan ini tidak dapat dibatalkan.",
+    "confirm": "Hapus terminal",
+    "cancel": "Batal"
+  },
+  "uptime": {
+    "label": "Waktu aktif",
+    "ranFor": "Total waktu berjalan"
+  }
+}

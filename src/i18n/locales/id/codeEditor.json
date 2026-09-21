@@ -1,0 +1,42 @@
+{
+  "toolbar": {
+    "changes": "perubahan",
+    "previousChange": "Perubahan sebelumnya",
+    "nextChange": "Perubahan berikutnya",
+    "hideDiff": "Sembunyikan sorotan perbedaan",
+    "showDiff": "Tampilkan sorotan perbedaan",
+    "settings": "Pengaturan Editor",
+    "collapse": "Ciutkan editor",
+    "expand": "Bentangkan editor selebar layar"
+  },
+  "loading": "Memuat {{fileName}}...",
+  "header": {
+    "showingChanges": "Menampilkan perubahan"
+  },
+  "actions": {
+    "download": "Unduh berkas",
+    "save": "Simpan",
+    "saving": "Menyimpan...",
+    "saved": "Tersimpan!",
+    "exitFullscreen": "Keluar dari layar penuh",
+    "fullscreen": "Layar penuh",
+    "close": "Tutup",
+    "previewMarkdown": "Pratinjau markdown",
+    "editMarkdown": "Ubah markdown",
+    "previewHtml": "Buka pratinjau HTML di tab baru"
+  },
+  "filePreview": {
+    "loading": "Memuat pratinjau...",
+    "error": "Berkas ini tidak dapat ditampilkan.",
+    "openInNewTab": "Buka di tab baru"
+  },
+  "footer": {
+    "lines": "Baris:",
+    "characters": "Karakter:",
+    "shortcuts": "Tekan Ctrl+S untuk menyimpan • Esc untuk menutup"
+  },
+  "binaryFile": {
+    "title": "Berkas Biner",
+    "message": "Berkas \"{{fileName}}\" tidak dapat ditampilkan di editor teks karena merupakan berkas biner."
+  }
+}

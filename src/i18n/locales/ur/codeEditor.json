@@ -1,0 +1,42 @@
+{
+  "toolbar": {
+    "changes": "تبدیلیاں",
+    "previousChange": "پچھلی تبدیلی",
+    "nextChange": "اگلی تبدیلی",
+    "hideDiff": "فرق کی نمایاں کاری چھپائیں",
+    "showDiff": "فرق کی نمایاں کاری دکھائیں",
+    "settings": "ایڈیٹر کی ترتیبات",
+    "collapse": "ایڈیٹر سمیٹیں",
+    "expand": "ایڈیٹر پوری چوڑائی میں پھیلائیں"
+  },
+  "loading": "{{fileName}} لوڈ ہو رہی ہے...",
+  "header": {
+    "showingChanges": "تبدیلیاں دکھائی جا رہی ہیں"
+  },
+  "actions": {
+    "download": "فائل ڈاؤن لوڈ کریں",
+    "save": "محفوظ کریں",
+    "saving": "محفوظ ہو رہا ہے...",
+    "saved": "محفوظ ہو گیا!",
+    "exitFullscreen": "پوری اسکرین سے نکلیں",
+    "fullscreen": "پوری اسکرین",
+    "close": "بند کریں",
+    "previewMarkdown": "مارک ڈاؤن کا پیش منظر",
+    "editMarkdown": "مارک ڈاؤن میں ترمیم",
+    "previewHtml": "HTML پیش منظر نئے ٹیب میں کھولیں"
+  },
+  "filePreview": {
+    "loading": "پیش منظر لوڈ ہو رہا ہے...",
+    "error": "یہ فائل دکھائی نہیں جا سکتی۔",
+    "openInNewTab": "نئے ٹیب میں کھولیں"
+  },
+  "footer": {
+    "lines": "سطریں:",
+    "characters": "حروف:",
+    "shortcuts": "محفوظ کرنے کے لیے Ctrl+S • بند کرنے کے لیے Esc"
+  },
+  "binaryFile": {
+    "title": "بائنری فائل",
+    "message": "فائل \"{{fileName}}\" بائنری ہے، اس لیے متن کے ایڈیٹر میں نہیں دکھائی جا سکتی۔"
+  }
+}

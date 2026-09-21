@@ -1,0 +1,59 @@
+{
+  "title": "터미널",
+  "newTerminal": "새 터미널",
+  "defaults": {
+    "title": "터미널 {{number}}"
+  },
+  "list": {
+    "loading": "터미널 불러오는 중...",
+    "empty": "아직 터미널이 없습니다",
+    "emptyHint": "프로젝트와 상관없이 명령을 실행할 터미널을 만들어 보세요.",
+    "running": "실행 중",
+    "exited": "종료됨"
+  },
+  "panel": {
+    "empty": "열린 터미널이 없습니다",
+    "emptyHint": "목록에서 터미널을 선택하거나 새로 만드세요.",
+    "renameLabel": "터미널 이름 변경",
+    "titlePlaceholder": "터미널 이름",
+    "close": "닫기",
+    "closeHint": "이 화면만 닫습니다 (터미널은 계속 실행됩니다)",
+    "delete": "터미널 삭제",
+    "deleteHint": "이 터미널을 중지하고 삭제합니다",
+    "save": "저장",
+    "cancel": "취소"
+  },
+  "status": {
+    "connecting": "연결 중...",
+    "reconnecting": "재연결 중...",
+    "exited": "종료됨 (코드 {{code}})",
+    "exitedSignal": "종료됨 (시그널 {{signal}})",
+    "truncated": "이전 출력은 잘렸습니다...",
+    "openedElsewhere": "이 터미널은 다른 탭에서 열려 있습니다.",
+    "openedElsewhereAction": "여기서 다시 열기",
+    "serverRestart": "서버 재시작으로 종료되었습니다.",
+    "notFound": "이 터미널은 더 이상 존재하지 않습니다.",
+    "error": "연결 오류."
+  },
+  "errors": {
+    "limitReached": "실행 중인 터미널이 최대 5개에 도달했습니다. 새로 만들려면 하나를 닫으세요.",
+    "invalidTitle": "터미널 이름이 올바르지 않습니다.",
+    "invalidCwd": "작업 디렉터리가 올바르지 않습니다.",
+    "invalidInitialCommand": "초기 명령이 올바르지 않습니다.",
+    "createFailed": "터미널을 만들지 못했습니다. 다시 시도해 주세요.",
+    "renameFailed": "터미널 이름을 변경하지 못했습니다. 다시 시도해 주세요.",
+    "deleteFailed": "터미널을 삭제하지 못했습니다. 다시 시도해 주세요.",
+    "loadFailed": "터미널을 불러오지 못했습니다."
+  },
+  "deleteConfirm": {
+    "title": "터미널 삭제",
+    "message": "중지하고 삭제",
+    "warning": "실행 중인 프로세스를 중지하고 출력을 지웁니다. 되돌릴 수 없습니다.",
+    "confirm": "터미널 삭제",
+    "cancel": "취소"
+  },
+  "uptime": {
+    "label": "실행 시간",
+    "ranFor": "총 실행 시간"
+  }
+}

@@ -1,0 +1,67 @@
+[Unit]
+Description=Nassaj atomic local-server preview build watcher
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Project/nassaj-dev
+ExecStart=/usr/bin/env node scripts/server-build-watch.mjs
+Restart=on-failure
+RestartSec=15s
+KillMode=control-group
+TimeoutStopSec=30s
+CPUQuota=150%
+MemoryHigh=2G
+MemoryMax=3G
+TasksMax=256
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+Environment=NODE_ENV=production
+Environment=TMPDIR=/var/tmp
+NoNewPrivileges=true
+CapabilityBoundingSet=
+IPAddressDeny=any
+LockPersonality=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+# The content-addressed candidate store and fixed staging path need the repository
+# parent writable. Inputs are rebound read-only. This service never writes
+# dist-server, restarts, or signals the server process.
+ReadWritePaths=%h/Project/nassaj-dev
+ReadOnlyPaths=-%h/Project/nassaj-dev/src
+ReadOnlyPaths=-%h/Project/nassaj-dev/public
+ReadOnlyPaths=-%h/Project/nassaj-dev/docs
+ReadOnlyPaths=-%h/Project/nassaj-dev/shared
+ReadOnlyPaths=-%h/Project/nassaj-dev/server
+ReadOnlyPaths=-%h/Project/nassaj-dev/scripts
+ReadOnlyPaths=-%h/Project/nassaj-dev/node_modules
+ReadOnlyPaths=-%h/Project/nassaj-dev/index.html
+ReadOnlyPaths=-%h/Project/nassaj-dev/package.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/package-lock.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/vite.config.js
+ReadOnlyPaths=-%h/Project/nassaj-dev/server/tsconfig.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/tsconfig.json
+# Runtime and rollback generations are activation-transaction owned, never watcher-owned.
+ReadOnlyPaths=-%h/Project/nassaj-dev/dist-server
+ReadOnlyPaths=-%h/Project/nassaj-dev/dist-server.bak-previous
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallFilter=~@mount @obsolete @privileged @raw-io @reboot @swap
+# Mitigation only: a real-unit build and denied-write probe remain mandatory.
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,23 @@
+{
+  "_source": "Synthetic shape-preserving AskUserQuestion regression fixture.",
+  "_shape": "{ questions: [{ question, header, multiSelect, options: [{ label, description }] }] }",
+  "input": {
+    "questions": [
+      {
+        "question": "كيف نتابع نشر النسخة التجريبية؟",
+        "header": "مسار تجريبي",
+        "multiSelect": false,
+        "options": [
+          {
+            "label": "نشر العينة",
+            "description": "يشغّل مساراً تمثيلياً بعد اجتياز الاختبارات."
+          },
+          {
+            "label": "التوقف الآن",
+            "description": "يبقي العينة محفوظة للمراجعة اللاحقة."
+          }
+        ]
+      }
+    ]
+  }
+}

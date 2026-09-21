@@ -1,0 +1,44 @@
+{
+  "cli": "2.1.268",
+  "provenance": "B-1078 (image path). Record = shape of a native transcript user row for an IMAGE-BEARING message captured 2026-09-11 10:45 (CLI 2.1.268, session 130f3566, ingress row 1083). The server folds attachments into a text path annotation (handleImages appends \"[Images provided at the following paths:]\"), so the transcript row's message.content is a single string and carries NO images/files/attachments key — that is why the raw collector accepts it and the payload hash correlates. session id, uuid, parentUuid, promptId and clientMsgId replaced with synthetic uuid v4 values; cwd and the chat-image path rebased under /fixture/project; slug dropped; the user text (including the trailing space before the annotation) kept verbatim because it is load-bearing for the payload hash. terminalReceipt = the matching message_coordination_ingress row whose claude_user_uuid was NULL before this fix; ids synthesized consistently, verdict_json reduced to the fields the projector reads.",
+  "record": {
+    "parentUuid": "b1078a00-0000-4000-8000-000000000003",
+    "isSidechain": false,
+    "promptId": "b1078a00-0000-4000-8000-000000000004",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "قلل الهدر هنا برضو، وفين المهارات المرصودة؟ اذا مافي مهارات مرصورة ما يحتاج تظهر الجملة دي، خليها تظهر بس لما يكون فيه مهارات مرصودة \n\n[Images provided at the following paths:]\n1. /fixture/project/.local/share/nassaj-dev/chat-images/e05e4797b2845bcfb56ac40efba2ba59/image_0.png"
+    },
+    "uuid": "b1078a00-0000-4000-8000-000000000002",
+    "timestamp": "2026-09-11T10:45:07.467Z",
+    "permissionMode": "bypassPermissions",
+    "promptSource": "sdk",
+    "userType": "external",
+    "entrypoint": "sdk-ts",
+    "cwd": "/fixture/project",
+    "sessionId": "b1078a00-0000-4000-8000-000000000001",
+    "version": "2.1.268",
+    "gitBranch": "HEAD"
+  },
+  "requesterUserId": 1,
+  "receiptPayloadManifest": { "version": 1, "kind": "text", "imageCount": 1, "fileCount": 0 },
+  "terminalReceipt": {
+    "clientMsgId": "cmid_b1078a00-0000-4000-8000-000000000005",
+    "uuid": "b1078a00-0000-4000-8000-000000000002",
+    "payloadSha256": "8fb913df360e032b3b96835ac26cdf390ac140f84e50132cc7208628befb0bfc",
+    "acceptedAt": "2026-09-11T10:45:12.000Z",
+    "lifecycleStatus": "terminal",
+    "verdictJson": "{\"kind\":\"complete\",\"exitCode\":0,\"sessionId\":\"b1078a00-0000-4000-8000-000000000001\",\"provider\":\"claude\",\"clientMsgId\":\"cmid_b1078a00-0000-4000-8000-000000000005\"}"
+  },
+  "claimedReceipt": {
+    "acceptedAt": null,
+    "lifecycleStatus": "claimed",
+    "verdictJson": null
+  },
+  "startedReceipt": {
+    "acceptedAt": "2026-09-11T10:45:09.000Z",
+    "lifecycleStatus": "started",
+    "verdictJson": null
+  }
+}

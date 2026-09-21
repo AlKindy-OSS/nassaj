@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+
+import type { NormalizedMessage } from '../../../../stores/useSessionStore';
+import { normalizedToChatMessages } from '../../hooks/useChatMessages';
+
+import ChatMessageImage from './ChatMessageImage';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
+afterEach(cleanup);
+
+describe('ChatMessageImage', () => {
+  it('يعرض معاينة قابلة للنقر ويفتح الصورة المكبّرة ثم يغلقها', () => {
+    render(<ChatMessageImage src="data:image/png;base64,AA==" alt="shot.png" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview shot.png' }));
+    expect(screen.getByRole('dialog', { name: 'shot.png' })).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'images.closePreview' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('يمرّر صورة تاريخ Codex من NormalizedMessage إلى المعاينة والـlightbox', () => {
+    const dataUrl = 'data:image/png;base64,AA==';
+    const historyMessage: NormalizedMessage = {
+      id: 'history-user-1',
+      sessionId: 'codex-session-1',
+      timestamp: '2026-08-17T10:03:18.025Z',
+      provider: 'codex',
+      kind: 'text',
+      role: 'user',
+      content: '',
+      images: [dataUrl],
+    };
+
+    const [chatMessage] = normalizedToChatMessages([historyMessage]);
+    expect(chatMessage.images).toEqual([{ data: dataUrl, name: 'image_1' }]);
+
+    const [image] = chatMessage.images!;
+    render(<ChatMessageImage src={image.data} alt={image.name} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview image_1' }));
+    expect(screen.getByRole('dialog', { name: 'image_1' })).toBeDefined();
+  });
+});

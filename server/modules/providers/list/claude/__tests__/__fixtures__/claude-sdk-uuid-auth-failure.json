@@ -1,0 +1,227 @@
+{
+  "sdk": "0.3.152",
+  "cli": "2.1.152",
+  "provenance": "Captured isolated SDK native JSONL, 2026-09-06. Only cwd replaced with /fixture/project. No network/model success.",
+  "records": [
+    {
+      "parentUuid": null,
+      "isSidechain": false,
+      "promptId": "8934ae03-58eb-47f5-99bd-dbd465a5e548",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "B894 native ordinary query UUID"
+      },
+      "uuid": "21111111-2222-4333-8444-555555555555",
+      "timestamp": "2026-09-06T12:46:25.317Z",
+      "permissionMode": "default",
+      "userType": "external",
+      "entrypoint": "sdk-ts",
+      "cwd": "/fixture/project",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "version": "2.1.152",
+      "gitBranch": "main"
+    },
+    {
+      "parentUuid": "099f0c56-458c-481e-a42e-59091fbed917",
+      "isSidechain": false,
+      "type": "assistant",
+      "uuid": "f986411f-d049-4f3f-8232-9477dede5349",
+      "timestamp": "2026-09-06T12:46:25.348Z",
+      "message": {
+        "id": "1e04dff9-566e-4aa9-9bf5-c9ba91668f7a",
+        "container": null,
+        "model": "<synthetic>",
+        "role": "assistant",
+        "stop_details": null,
+        "stop_reason": "stop_sequence",
+        "stop_sequence": "",
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": null,
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": null,
+          "iterations": null,
+          "speed": null
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Not logged in · Please run /login"
+          }
+        ],
+        "context_management": null
+      },
+      "error": "authentication_failed",
+      "isApiErrorMessage": true,
+      "userType": "external",
+      "entrypoint": "sdk-ts",
+      "cwd": "/fixture/project",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "version": "2.1.152",
+      "gitBranch": "main"
+    },
+    {
+      "parentUuid": "89b2cfd5-4a86-4826-90f4-6aba90fde3f1",
+      "isSidechain": false,
+      "promptId": "f3bdc320-9381-403d-83ae-e0f0b938de6c",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "B894 native resumed query UUID"
+      },
+      "uuid": "31111111-2222-4333-8444-555555555555",
+      "timestamp": "2026-09-06T12:46:25.867Z",
+      "permissionMode": "default",
+      "userType": "external",
+      "entrypoint": "sdk-ts",
+      "cwd": "/fixture/project",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "version": "2.1.152",
+      "gitBranch": "main"
+    },
+    {
+      "parentUuid": "b4cf6da7-9f7c-486e-a31e-c66d8a36cb49",
+      "isSidechain": false,
+      "type": "assistant",
+      "uuid": "fbff9d6d-9a05-41c8-8452-0756dbcafb6d",
+      "timestamp": "2026-09-06T12:46:25.896Z",
+      "message": {
+        "id": "45a4145c-11a8-48da-9980-4ffd6478f54f",
+        "container": null,
+        "model": "<synthetic>",
+        "role": "assistant",
+        "stop_details": null,
+        "stop_reason": "stop_sequence",
+        "stop_sequence": "",
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": null,
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": null,
+          "iterations": null,
+          "speed": null
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Not logged in · Please run /login"
+          }
+        ],
+        "context_management": null
+      },
+      "error": "authentication_failed",
+      "isApiErrorMessage": true,
+      "userType": "external",
+      "entrypoint": "sdk-ts",
+      "cwd": "/fixture/project",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "version": "2.1.152",
+      "gitBranch": "main"
+    },
+    {
+      "parentUuid": "ec648fa6-65d7-4d64-a4e9-ca25d8ea6916",
+      "isSidechain": false,
+      "promptId": "f1b0ef14-6a0c-4949-81cc-ff58789d7ecc",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "B894 fixture image"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCYQAAAAASUVORK5CYII="
+            }
+          }
+        ]
+      },
+      "uuid": "41111111-2222-4333-8444-555555555555",
+      "timestamp": "2026-09-06T12:46:26.406Z",
+      "permissionMode": "default",
+      "userType": "external",
+      "entrypoint": "sdk-ts",
+      "cwd": "/fixture/project",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "version": "2.1.152",
+      "gitBranch": "main"
+    },
+    {
+      "parentUuid": "78e9a59f-de4c-4507-b8a0-781e3cfa1778",
+      "isSidechain": false,
+      "type": "assistant",
+      "uuid": "abd44f84-0d20-4841-98a8-81399b57900f",
+      "timestamp": "2026-09-06T12:46:26.432Z",
+      "message": {
+        "id": "d067fb0d-d147-49eb-a9c5-b277450806a9",
+        "container": null,
+        "model": "<synthetic>",
+        "role": "assistant",
+        "stop_details": null,
+        "stop_reason": "stop_sequence",
+        "stop_sequence": "",
+        "type": "message",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": null,
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": null,
+          "iterations": null,
+          "speed": null
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Not logged in · Please run /login"
+          }
+        ],
+        "context_management": null
+      },
+      "error": "authentication_failed",
+      "isApiErrorMessage": true,
+      "userType": "external",
+      "entrypoint": "sdk-ts",
+      "cwd": "/fixture/project",
+      "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "version": "2.1.152",
+      "gitBranch": "main"
+    }
+  ]
+}

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="نموذج بصري — ويكي نسّاج">
+  <title>نسّاج · الويكي — نموذج بصري</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* تخصيصات الويكي */
+    .wiki-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      overflow: hidden;
+    }
+    .wiki-topbar {
+      display: flex;
+      align-items: center;
+      height: 52px;
+      padding-inline: 20px;
+      gap: 12px;
+      flex-shrink: 0;
+      border-block-end: 1px solid var(--border);
+      background-color: var(--background);
+    }
+    .wiki-topbar-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.9375rem;
+      color: var(--muted-foreground);
+      flex: 1;
+    }
+    .wiki-topbar-breadcrumb a {
+      color: var(--muted-foreground);
+    }
+    .wiki-topbar-breadcrumb a:hover {
+      color: var(--foreground);
+    }
+    .bc-sep { color: var(--border); }
+
+    .wiki-mobile-header {
+      display: none;
+    }
+    .wiki-toc-toggle {
+      display: none;
+    }
+    .wiki-toc-mobile {
+      display: none;
+      padding: 12px 16px;
+      border-block-end: 1px solid var(--border);
+    }
+    .wiki-toc-mobile.open {
+      display: block;
+    }
+
+    .article-h2 {
+      font-size: 1.375rem;
+      line-height: 1.4;
+      font-weight: 600;
+      margin-block: 28px 12px;
+    }
+    .article-h3 {
+      font-size: 1.0625rem;
+      line-height: 1.45;
+      font-weight: 600;
+      margin-block: 20px 8px;
+    }
+
+    /* Highlight على الـ TOC النشط */
+    .wiki-toc-item.active {
+      color: var(--primary);
+      border-inline-start-color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* الشريط السفلي للجوّال */
+    @media (max-width: 767px) {
+      .wiki-topbar { display: none; }
+      .wiki-mobile-header {
+        display: flex;
+        align-items: center;
+        height: 48px;
+        padding-inline: 12px;
+        gap: 10px;
+        border-block-end: 1px solid var(--border);
+        background-color: var(--background);
+        flex-shrink: 0;
+      }
+      .wiki-toc-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-block-end: 1px solid var(--border);
+        font-size: 0.875rem;
+        color: var(--muted-foreground);
+        cursor: pointer;
+        background: none;
+        border-inline: none;
+        border-block-start: none;
+        width: 100%;
+        text-align: start;
+        font-family: inherit;
+        flex-shrink: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- شريط التنبيه -->
+  <div class="preview-banner" role="banner">
+    نموذج بصري مقترح — ليس التطبيق الفعلي · <a href="index.html" style="color:inherit;text-decoration:underline;">العودة للمعرض</a>
+  </div>
+
+  <div class="wiki-shell">
+
+    <!-- شريط أعلى — سطح المكتب -->
+    <div class="wiki-topbar">
+      <div class="wiki-topbar-breadcrumb" aria-label="مسار التنقّل">
+        <a href="#" aria-label="الرئيسية">⌂</a>
+        <span class="bc-sep" aria-hidden="true">‹</span>
+        <a href="#">دليل الواجهة</a>
+        <span class="bc-sep" aria-hidden="true">‹</span>
+        <span style="color:var(--foreground);">جولة في الشاشة</span>
+      </div>
+      <div class="search-field" style="width:220px;">
+        <span class="search-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </span>
+        <input class="input" type="search" placeholder="ابحث (Ctrl K)" aria-label="بحث في الويكي" style="height:36px;font-size:0.875rem;">
+        <span class="search-kbd">Ctrl K</span>
+      </div>
+    </div>
+
+    <!-- رأس الجوّال -->
+    <div class="wiki-mobile-header">
+      <button class="btn-ghost btn-icon" aria-label="القائمة" onclick="toggleMobileSections()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div style="flex:1;font-weight:600;font-size:0.9375rem;">الويكي</div>
+      <div class="search-field" style="width:160px;">
+        <span class="search-icon" aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </span>
+        <input class="input" type="search" placeholder="بحث…" aria-label="بحث" style="height:34px;font-size:0.875rem;">
+      </div>
+    </div>
+
+    <!-- زرّ جدول المحتويات (جوّال) -->
+    <button class="wiki-toc-toggle" onclick="toggleTocMobile()" aria-expanded="false" aria-controls="toc-mobile">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      جدول المحتويات
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+
+    <!-- جدول محتويات مطويّ (جوّال) -->
+    <div class="wiki-toc-mobile" id="toc-mobile">
+      <nav aria-label="جدول المحتويات">
+        <a class="wiki-toc-item" href="#intro">مقدّمة</a>
+        <a class="wiki-toc-item active" href="#shell">الصدفة الرئيسية</a>
+        <a class="wiki-toc-item" href="#sidebar">الشريط الجانبي</a>
+        <a class="wiki-toc-item" href="#chat">منطقة المحادثة</a>
+        <a class="wiki-toc-item" href="#quota">مؤشّر الحصة</a>
+      </nav>
+    </div>
+
+    <!-- تخطيط ثلاثي الأعمدة -->
+    <div class="wiki-layout" style="flex:1;min-height:0;">
+
+      <!-- العمود الأيمن: فهرس الأقسام -->
+      <aside class="wiki-sidebar-sections" aria-label="الأقسام">
+        <div class="wiki-section-group-label">ابدأ من هنا</div>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+          ما هو نسّاج؟
+        </a>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          أول يوم
+        </a>
+
+        <div class="wiki-section-group-label">دليل الواجهة</div>
+        <a class="wiki-section-link active" href="#" aria-current="page">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          جولة في الشاشة
+        </a>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/></svg>
+          إدارة الجلسات
+        </a>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          الوكلاء والمهام
+        </a>
+
+        <div class="wiki-section-group-label">حلّ المشاكل</div>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          عندي مشكلة
+        </a>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          الأخطاء الشائعة
+        </a>
+
+        <div class="wiki-section-group-label">للمطوّرين</div>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          واجهة API
+        </a>
+        <a class="wiki-section-link" href="#">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          مستودع الكود
+        </a>
+      </aside>
+
+      <!-- العمود الأوسط: المقال -->
+      <article class="wiki-article" aria-label="محتوى المقال">
+
+        <!-- رأس المقال -->
+        <header>
+          <h1 class="read-h1" id="page-title">جولة في الشاشة</h1>
+          <p class="lede" style="margin-block-start:8px;">استعراض مرئي لمكوّنات نسّاج الرئيسية — الصدفة والويكي والإعدادات — مع شرح دور كل عنصر في سير عملك اليومي.</p>
+          <!-- مسطرة الذهب — اللحظة المميّزة (مرّة واحدة لكل سطح) -->
+          <hr class="gold-rule" aria-hidden="true" style="margin-block: 16px 24px;">
+        </header>
+
+        <!-- محتوى المقال -->
+        <section aria-labelledby="intro">
+          <h2 class="article-h2" id="intro">مقدّمة</h2>
+          <p class="read-body">نسّاج واجهةٌ عمل مكثّفة تجمع محادثات الذكاء الاصطناعي، وإدارة المشاريع، والويكي في مكان واحد. هذه الجولة تُعرّفك بالمناطق الثلاث الرئيسية وكيفية التنقّل بينها بكفاءة.</p>
+          <p class="read-body">تصميم نسّاج مستلهَم من <strong>الصحيفة المطبوعة</strong>: طباعة عربية بإيقاع واحد، ألوان دار الكِندِي (كحلي + كريم + ذهب نادر)، وكثافة أداة يومية.</p>
+        </section>
+
+        <section aria-labelledby="shell">
+          <h2 class="article-h2" id="shell">الصدفة الرئيسية</h2>
+          <p class="read-body">الصدفة هي الشاشة الأساسية التي تقضي فيها معظم وقتك. تتكوّن من ثلاثة أقسام:</p>
+
+          <h3 class="article-h3" id="sidebar">الشريط الجانبي</h3>
+          <p class="read-body">يقع على يمين الشاشة ويحمل قائمة مشاريعك وجلساتك. كل مشروع قابل للطيّ، وتُظهر كل جلسة شارة حالة ووقت آخر رسالة. على الجوّال يتحوّل إلى دُرج منزلق.</p>
+
+          <h3 class="article-h3" id="chat">منطقة المحادثة</h3>
+          <p class="read-body">تحتلّ الجزء الأكبر من الشاشة. رسائل المساعد بلا خلفية (تندمج مع الصفحة)، ورسائل المستخدم بخلفية كريم أعمق من الجهة المعاكسة. كتل الأدوات تظهر مطويّةً افتراضياً لتقليل الضوضاء.</p>
+
+          <h3 class="article-h3" id="quota">مؤشّر الحصة والسياق</h3>
+          <p class="read-body">شريط أفقي 4px يعكس نسبة استخدام الجلسة والسياق. يتحوّل من أخضر إلى برتقالي عند 70% ثم أحمر عند 90%. <strong>مُفصَل عن صفّ التبويبات</strong> للتقليل من تنافس البصري.</p>
+        </section>
+
+        <!-- تذييل التنقّل (السابق / صفحة N من M / التالي) -->
+        <div class="wiki-nav-bottom">
+          <button class="btn btn-outline" aria-label="الصفحة السابقة">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><polyline points="15 18 9 12 15 6"/></svg>
+            إدارة الجلسات
+          </button>
+          <span class="wiki-page-indicator" aria-label="صفحة 3 من 7">صفحة 3 من 7</span>
+          <button class="btn btn-outline" aria-label="الصفحة التالية">
+            الوكلاء والمهام
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-directional"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+
+      </article>
+
+      <!-- العمود الأيسر: سكّة جدول المحتويات -->
+      <aside class="wiki-toc" aria-label="جدول المحتويات">
+        <div class="wiki-toc-title">في هذه الصفحة</div>
+        <nav>
+          <a class="wiki-toc-item" href="#intro">مقدّمة</a>
+          <a class="wiki-toc-item active" href="#shell">الصدفة الرئيسية</a>
+          <a class="wiki-toc-item" href="#sidebar" style="padding-inline-start:20px;">الشريط الجانبي</a>
+          <a class="wiki-toc-item" href="#chat" style="padding-inline-start:20px;">منطقة المحادثة</a>
+          <a class="wiki-toc-item" href="#quota" style="padding-inline-start:20px;">مؤشّر الحصة</a>
+        </nav>
+      </aside>
+
+    </div>
+  </div>
+
+  <script>
+    // جدول المحتويات على الجوّال
+    function toggleTocMobile() {
+      const toc = document.getElementById('toc-mobile');
+      const btn = document.querySelector('.wiki-toc-toggle');
+      const isOpen = toc.classList.contains('open');
+      toc.classList.toggle('open');
+      btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    }
+
+    // إبراز TOC النشط عند التمرير
+    const sections = document.querySelectorAll('section[aria-labelledby], h2[id], h3[id]');
+    const tocItems = document.querySelectorAll('.wiki-toc-item');
+
+    function updateActiveToc() {
+      const scrollY = document.querySelector('.wiki-article').scrollTop;
+      let activeId = null;
+      document.querySelectorAll('.article-h2[id], .article-h3[id]').forEach(el => {
+        if (el.offsetTop - 80 <= scrollY) {
+          activeId = el.id;
+        }
+      });
+      tocItems.forEach(item => {
+        const href = item.getAttribute('href').slice(1);
+        item.classList.toggle('active', href === activeId);
+      });
+    }
+
+    const article = document.querySelector('.wiki-article');
+    if (article) {
+      article.addEventListener('scroll', updateActiveToc, { passive: true });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+{
+  "title": "ターミナル",
+  "newTerminal": "新しいターミナル",
+  "defaults": {
+    "title": "ターミナル {{number}}"
+  },
+  "list": {
+    "loading": "ターミナルを読み込んでいます...",
+    "empty": "ターミナルはまだありません",
+    "emptyHint": "ターミナルを作成すると、プロジェクトとは独立してコマンドを実行できます。",
+    "running": "実行中",
+    "exited": "終了済み"
+  },
+  "panel": {
+    "empty": "開いているターミナルはありません",
+    "emptyHint": "一覧からターミナルを選ぶか、新しく作成してください。",
+    "renameLabel": "ターミナル名を変更",
+    "titlePlaceholder": "ターミナル名",
+    "close": "閉じる",
+    "closeHint": "この表示を閉じます（ターミナルは実行され続けます）",
+    "delete": "ターミナルを削除",
+    "deleteHint": "このターミナルを停止して削除します",
+    "save": "保存",
+    "cancel": "キャンセル"
+  },
+  "status": {
+    "connecting": "接続しています...",
+    "reconnecting": "再接続しています...",
+    "exited": "終了しました（コード {{code}}）",
+    "exitedSignal": "終了しました（シグナル {{signal}}）",
+    "truncated": "古い出力は切り詰められました...",
+    "openedElsewhere": "このターミナルは別のタブで開かれています。",
+    "openedElsewhereAction": "ここで開き直す",
+    "serverRestart": "サーバーの再起動により終了しました。",
+    "notFound": "このターミナルは存在しません。",
+    "error": "接続エラーです。"
+  },
+  "errors": {
+    "limitReached": "実行中のターミナルが上限の5つに達しました。新しく作成するには、いずれかを閉じてください。",
+    "invalidTitle": "ターミナル名が正しくありません。",
+    "invalidCwd": "作業ディレクトリが正しくありません。",
+    "invalidInitialCommand": "初期コマンドが正しくありません。",
+    "createFailed": "ターミナルを作成できませんでした。もう一度お試しください。",
+    "renameFailed": "ターミナル名を変更できませんでした。もう一度お試しください。",
+    "deleteFailed": "ターミナルを削除できませんでした。もう一度お試しください。",
+    "loadFailed": "ターミナルを読み込めませんでした。"
+  },
+  "deleteConfirm": {
+    "title": "ターミナルを削除",
+    "message": "停止して削除します",
+    "warning": "実行中のプロセスを停止し、出力を消去します。この操作は元に戻せません。",
+    "confirm": "ターミナルを削除",
+    "cancel": "キャンセル"
+  },
+  "uptime": {
+    "label": "稼働時間",
+    "ranFor": "総稼働時間"
+  }
+}

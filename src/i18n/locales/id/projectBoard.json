@@ -1,0 +1,182 @@
+{
+  "sections": {
+    "overview": "Ikhtisar",
+    "objectives": "Sasaran",
+    "schedule": "Lini Masa",
+    "tasks": "Tugas",
+    "issues": "Masalah",
+    "visual": "Pemeriksaan Visual",
+    "decisions": "Keputusan",
+    "architecture": "Arsitektur"
+  },
+  "updated": "Diperbarui {{date}}",
+  "overallProgress": "Kemajuan keseluruhan",
+  "error": "Gagal memuat papan proyek.",
+  "stateError": "project-state.json tidak valid — menampilkan versi valid terakhir.",
+  "empty": {
+    "title": "Belum ada papan proyek",
+    "description": "Proyek ini belum punya berkas status proyek. Buat berkasnya untuk mendapatkan papan langsung berisi fase, tugas, dan masalah.",
+    "hint": "Papan diperbarui otomatis setiap kali berkas berubah — tanpa perlu muat ulang.",
+    "copyTemplate": "Salin templat awal",
+    "copied": "Tersalin — tempelkan ke dalam berkas"
+  },
+  "phases": {
+    "title": "Fase",
+    "current": "Saat ini",
+    "planned": "Direncanakan",
+    "progressCount": "{{progress}}% ({{done}}/{{total}})"
+  },
+  "sprint": {
+    "current": "Sprint saat ini",
+    "started": "Dimulai {{date}}",
+    "ended": "Berakhir {{date}}",
+    "taskCount": "Tugas {{done}}/{{total}}",
+    "others": "Sprint lain ({{count}})",
+    "status": {
+      "planned": "Direncanakan",
+      "current": "Saat ini",
+      "done": "Selesai"
+    }
+  },
+  "tasksSection": {
+    "title": "Tugas",
+    "open": "Terbuka",
+    "in_progress": "Sedang berjalan",
+    "done": "Selesai",
+    "empty": "Tidak ada tugas",
+    "kind": {
+      "feature": "Fitur",
+      "bug": "Bug",
+      "chore": "Pekerjaan rutin",
+      "spike": "Penjajakan"
+    },
+    "issueLink": "Lihat masalah {{id}}",
+    "cancelled": "Dibatalkan ({{count}})",
+    "status": {
+      "todo": "belum dikerjakan",
+      "pending": "menunggu",
+      "blocked": "terhalang",
+      "backlog": "backlog",
+      "deferred": "ditunda",
+      "closed": "ditutup",
+      "fixed": "diperbaiki",
+      "resolved": "terselesaikan",
+      "accepted": "diterima",
+      "cancelled": "dibatalkan",
+      "wontfix": "tidak akan diperbaiki",
+      "unknown": "tidak diketahui"
+    }
+  },
+  "issues": {
+    "title": "Masalah",
+    "severity": {
+      "low": "Rendah",
+      "medium": "Sedang",
+      "high": "Tinggi",
+      "critical": "Kritis"
+    },
+    "status": {
+      "open": "Terbuka",
+      "fixed": "Diperbaiki",
+      "wontfix": "Tidak akan diperbaiki"
+    },
+    "empty": "Tidak ada masalah tercatat."
+  },
+  "decisions": {
+    "title": "Keputusan",
+    "empty": "Belum ada keputusan",
+    "openLink": "Buka dokumen keputusan {{id}}"
+  },
+  "schedule": {
+    "title": "Lini masa (Gantt)",
+    "critical": "Kritis",
+    "legendScheduled": "Terjadwal",
+    "legendCritical": "Jalur kritis",
+    "legendMilestone": "Tonggak",
+    "cpm": {
+      "cycle": "Jalur kritis dilewati: terdeteksi siklus ketergantungan.",
+      "missingDeps": "Sebagian ketergantungan merujuk item yang hilang dan diabaikan pada jalur kritis."
+    },
+    "noDates": "Tidak ada tanggal valid untuk menggambar lini masa.",
+    "progress": "Kemajuan {{value}}%",
+    "durationDays": "Durasi: {{days}} hari",
+    "owner": "Penanggung jawab: {{name}}",
+    "deliverable": "Hasil kerja: {{id}}",
+    "deliverableLink": "Lihat hasil kerja {{id}}",
+    "dependsOn": "Bergantung pada: {{ids}}"
+  },
+  "deliverables": {
+    "title": "Hasil kerja",
+    "due": "Tenggat {{date}}",
+    "overdue": "Lewat tenggat",
+    "acceptance": "Kriteria penerimaan",
+    "deliveredBy": "Diserahkan oleh: {{ids}}",
+    "statuses": {
+      "pending": "Menunggu",
+      "in_progress": "Sedang berjalan",
+      "delivered": "Diserahkan",
+      "accepted": "Diterima",
+      "rejected": "Ditolak"
+    }
+  },
+  "objectives": {
+    "title": "Sasaran (OKR)",
+    "baseline": "Garis dasar: {{value}}",
+    "statuses": {
+      "on_track": "Sesuai rencana",
+      "at_risk": "Berisiko",
+      "off_track": "Menyimpang",
+      "done": "Selesai"
+    }
+  },
+  "kpis": {
+    "title": "KPI",
+    "target": "Target: {{value}}"
+  },
+  "visualChecks": {
+    "title": "Pemeriksaan Visual",
+    "empty": "Belum ada pemeriksaan visual.",
+    "step": "Langkah",
+    "expect": "Diharapkan",
+    "result": "Catatan pemilik",
+    "counter": "Terverifikasi {{verified}} / {{total}}",
+    "status": {
+      "pending": "Menunggu pemeriksaan",
+      "verified": "Terverifikasi",
+      "failed": "Gagal"
+    }
+  },
+  "architecture": {
+    "technical": "Teknis",
+    "simplified": "Ringkas",
+    "missing": "Tidak ditemukan dokumen arsitektur (docs/ARCHITECTURE.md atau docs/ARCHITECTURE_AR.md).",
+    "variantMissing": "Versi dokumen arsitektur ini tidak ada."
+  },
+  "stats": {
+    "tab": "Statistik",
+    "totalLabel": "Total biaya (sepanjang waktu)",
+    "headerTotal": "Sepanjang waktu",
+    "headerTotalTitle": "Biaya kumulatif proyek ini — tetap tersimpan meski percakapan dihapus",
+    "span": "Rentang waktu",
+    "activeDays": "Hari aktif",
+    "activeDaysOfSpan": "dari {{span}} hari",
+    "conversations": "Percakapan",
+    "agents": "Agen",
+    "firstActivity": "Aktivitas pertama",
+    "lastActivity": "Aktivitas terakhir",
+    "dailyTitle": "Biaya harian",
+    "dailyPeak": "Puncak",
+    "byVendor": "Menurut vendor",
+    "byModel": "Menurut model",
+    "partialShort": "Sebagian",
+    "partialModels": "Total sebagian — tidak ada harga resmi untuk: {{models}}",
+    "apiEquivalent": "Nilai setara API dari pemakaian berlangganan — bukan jumlah yang ditagihkan",
+    "pricesAsOf": "Harga per {{date}}",
+    "unavailable": "Tidak tersedia",
+    "empty": "Belum ada data biaya yang terukur untuk proyek ini."
+  },
+  "summary": {
+    "tasksDone": "{{done}} selesai",
+    "issuesOpen": "{{open}} terbuka"
+  }
+}

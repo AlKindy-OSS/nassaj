@@ -1,0 +1,25 @@
+[Unit]
+Description=Nassaj early-boot cutover maintenance gate restore
+DefaultDependencies=no
+After=local-fs.target nassaj-maintenance.service
+Requires=nassaj-maintenance.service
+Before=cloudflared.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=HOME=/root
+Environment=PATH=/usr/bin:/bin
+ExecStart=/usr/bin/node /usr/local/lib/nassaj-release-operator/scripts/release-runtime-gate-restore.mjs
+RemainAfterExit=yes
+TimeoutStartSec=60s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nassaj-release-operator
+
+[Install]
+WantedBy=multi-user.target

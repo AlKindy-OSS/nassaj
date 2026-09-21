@@ -1,0 +1,1627 @@
+/* ── Wiki Panel — injected styles ─────────────────────────────────────────── */
+/*
+ * WHY SO MUCH OF THE WIKI'S LOOK LIVES HERE RATHER THAN IN UTILITIES
+ * ------------------------------------------------------------------
+ * Two hazards documented in this repository push state-driven and
+ * direction-driven declarations into this file:
+ *
+ * 1. Conditional-utility collision. An unconditional Tailwind class and a
+ *    conditional one that set the same property have identical specificity, so
+ *    the cascade picks whichever the generated stylesheet emits last — not the
+ *    one the component "chose". That is what made the desktop index toggle a
+ *    dead control (see WikiSidebar.width.regression.test.ts). Every property
+ *    driven by a state flag — drawer width, active row, active TOC entry,
+ *    selected search row — is therefore declared once here, with an
+ *    element-qualified selector (0,1,1) that outranks any single utility.
+ *
+ * 2. tailwindcss-rtl writes BOTH `left` and `right` for a logical inset such as
+ *    `end-0`. Inside a `dir="ltr"` island that stretches the element and drops
+ *    it on the wrong edge. Where an inset must be pinned, it is written
+ *    physically here and marked `design-ok:`.
+ *
+ * design-ok: this file deliberately uses physical `left`/`right`/`text-align:
+ * left` in exactly three places, each commented at the point of use: the LTR
+ * code-block island, the mobile drawer edge, and the drawer's off-screen
+ * transform. Everything else is logical.
+ */
+
+/* ── Island tokens ─────────────────────────────────────────────────────────
+   Scoped to the panel and to the portalled search dialog, which is rendered
+   into <body> and inherits nothing from the panel.                         */
+[data-wiki-panel],
+[data-wiki-overlay],
+[data-wiki-drawer],
+.wiki-article,
+[data-wiki-scroll] {
+  /*
+   * ONE border token for the whole island — the app's own --border.
+   *
+   * B-121 replaced this with a 3:1 border (hsl(foreground / 0.50)) on eight
+   * places. Six of them are neither UI components nor states — table cell
+   * rules, the table frame, the sidebar edge, the toolbar rule, the search
+   * dialog box, <kbd>, and the home panels. WCAG 1.4.11 covers "visual
+   * information required to identify user interface components and their
+   * states"; it does not require drawing a border around anything. The three
+   * genuine state indicators keep their high-contrast 2px edge (see
+   * "STATE INDICATORS" below); everything else reads --border, exactly like
+   * every other surface in Nassaj.
+   *
+   * Measured contrast of --border against --background/--card across the six
+   * presets x two modes: 1.23–1.63:1. That is deliberately quiet, and is the
+   * same quiet the chat and sidebar screens already have.
+   */
+  --wiki-border: hsl(var(--border));
+
+  /* Radii — derived from --radius so a theme that changes it stays coherent. */
+  --wiki-radius-sm: calc(var(--radius) - 2px);
+  --wiki-radius: var(--radius);
+  --wiki-radius-lg: calc(var(--radius) + 4px);
+  --wiki-radius-xl: calc(var(--radius) + 8px);
+
+  /*
+   * Elevation — BLACK, opacity raised in dark mode. These were derived from
+   * --foreground, which is near-white in every dark theme, so every "shadow"
+   * in the island was a white halo. No other surface in Nassaj does that:
+   * index.css:91,152 writes 0 0% 0% / 0.06 light and / 0.35 dark, and the
+   * composer writes rgba(0,0,0,…). Black + more opacity is the app's language.
+   */
+  --wiki-shadow-rest: 0 1px 2px hsl(0 0% 0% / 0.06);
+  --wiki-shadow-raised: 0 2px 8px hsl(0 0% 0% / 0.10);
+  --wiki-shadow-overlay: 0 16px 48px hsl(0 0% 0% / 0.18);
+
+  /*
+   * Focus ring colour = the app's own ring. --ring is not --primary: it is
+   * derived per mode (theme-presets.ts), so it stays a brand-coloured ring in
+   * dark mode where --primary sinks. Using --foreground here produced a solid
+   * black/white 14–20:1 ring found nowhere else in the product.
+   */
+  --wiki-focus: hsl(var(--ring));
+
+  /*
+   * Reading family. Tracks the user's own setting (src/lib/ui-font.ts) — the
+   * island does not override an explicit choice. The default that setting hands
+   * out is now IBM Plex Sans Arabic, so the untouched case is a real Arabic
+   * face with a drawn 600 rather than a synthesised one.
+   */
+  --wiki-font-reading: var(--font-ui);
+
+  /*
+   * TEXT colours for stateful affordances and for diagram labels.
+   *
+   * The app palette exposes --primary and --destructive as SURFACE tokens: they
+   * are chosen to be sat *on*, with --primary-foreground / --destructive-
+   * foreground written over them. Using either one as a text colour on a page
+   * background is a category error that happens to pass in one mode and fail in
+   * the other — the dark --destructive (0 62.8% 30.6%) reaches 1.71:1 as text on
+   * a dark card, and the navy --primary sinks into the dark sidebar.
+   *
+   * These four are text tokens: each is chosen against the surface it actually
+   * lands on (card / panel background / a 6–14% tint of itself over either) and
+   * measured ≥4.5:1 in BOTH modes. They are island-scoped on purpose — the
+   * fix belongs to the wiki, not to the app-wide palette.
+   */
+  --wiki-active-fg: hsl(var(--primary));
+
+  /*
+   * Field surface. The app's own recipe, character for character
+   * (--nav-input-bg, index.css:94) — reuse, not invention. A field is read as
+   * a field by its surface, not by a loud outline.
+   */
+  --wiki-field-bg: hsl(var(--secondary) / 0.5);
+  --wiki-diagram-ok: hsl(150 80% 24%);
+  --wiki-diagram-info: hsl(205 85% 30%);
+  --wiki-diagram-danger: hsl(0 70% 36%);
+}
+
+/* dark mode — الظلال تُرفع شفافيةً لا تُقلب لوناً، كما يفعل التطبيق */
+.dark [data-wiki-panel],
+.dark [data-wiki-overlay],
+.dark [data-wiki-drawer],
+.dark .wiki-article,
+.dark [data-wiki-scroll] {
+  --wiki-shadow-rest: 0 1px 2px hsl(0 0% 0% / 0.30);
+  --wiki-shadow-raised: 0 2px 8px hsl(0 0% 0% / 0.40);
+  --wiki-shadow-overlay: 0 16px 48px hsl(0 0% 0% / 0.55);
+
+  /* Fixed light values rather than tints of the palette: every dark theme here
+     puts these on a near-black surface, so one measured value serves all nine
+     and none of them inherits a token that was designed to be a background. */
+  --wiki-active-fg: hsl(221 70% 78%);
+  --wiki-diagram-ok: hsl(150 55% 70%);
+  --wiki-diagram-info: hsl(205 75% 70%);
+  --wiki-diagram-danger: hsl(0 80% 76%);
+}
+
+/* Horizontal-motion sign. Defined on the island itself, not :root: <html>
+   follows the interface language and may be LTR while the panel is RTL. */
+[data-wiki-panel],
+[data-wiki-overlay] {
+  --dir: 1;
+}
+[dir="rtl"][data-wiki-panel],
+[dir="rtl"][data-wiki-overlay],
+[dir="rtl"] [data-wiki-panel],
+[dir="rtl"] [data-wiki-overlay] {
+  --dir: -1;
+}
+
+/* ── Island-wide type defaults ─────────────────────────────────────────────
+   Arabic is cursive: letter-spacing breaks the joins, and uppercase has no
+   meaning. Both are pinned off so no inherited utility can reintroduce them. */
+[data-wiki-panel],
+[data-wiki-overlay] {
+  font-family: var(--wiki-font-reading);
+  letter-spacing: normal;
+  text-transform: none;
+  font-variant-numeric: lining-nums;
+  hyphens: none;
+}
+
+/* Latin digits stay aligned in anything tabular. */
+[data-wiki-panel] :is(kbd, th, td),
+[data-wiki-overlay] kbd,
+[data-wiki-panel] [data-wiki-step-number] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Focus — one rule for the whole island ────────────────────────────────
+   :focus-visible only, so a mouse click never paints a ring.                */
+[data-wiki-panel] :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+[data-wiki-overlay] :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--wiki-focus);
+  outline-offset: 2px;
+}
+
+/* ── حدود الإطار — رمز واحد، هو رمز التطبيق ──────────────────────────────
+   كانت هذه المواضع تحمل حدّاً بتباين ≥3:1 (B-121). راجعت مواءمةُ 2026-07-30
+   نطاقَ 1.4.11 فوجدته لا يشملها: لا واحد منها مكوّنُ واجهة ولا حالةُ مكوّن.
+   فتُقرأ كلها الآن var(--wiki-border) = hsl(var(--border))، والتباين المقيس
+   1.23–1.63:1 عبر ست بريستات × وضعين — أي تباين بقية شاشات نسّاج حرفاً.
+   ما عوّض الفقدَ: خلفية thead + tr:hover في الجداول، وفرقُ سطحٍ للفهرس،
+   وضبابُ شريط الأدوات — لا خطوطٌ صارخة.                                   */
+
+/* حاوية الجدول الخارجية */
+.wiki-article .wiki-table-scroll { border-color: var(--wiki-border); }
+
+/* الحد السفلي لخلايا الرأس */
+.wiki-article th { border-bottom-color: var(--wiki-border); }
+
+/* الحد السفلي لخلايا البيانات */
+.wiki-article td { border-bottom-color: var(--wiki-border); }
+
+/* حد الشريط الجانبي inline-end */
+[data-wiki-drawer] { border-inline-end-color: var(--wiki-border); }
+
+/* حد شريط الأدوات السفلي (يفصل الشريط عن منطقة المحتوى) */
+[data-wiki-toolbar] { border-block-end-color: var(--wiki-border); }
+
+/* Search match highlight (T-136 B-2)
+   Applied by JS: element.classList.add('wiki-search-highlight')
+   Removed after 2 seconds.                                                   */
+.wiki-search-highlight {
+  outline: 2px solid hsl(var(--primary) / 0.6);
+  outline-offset: 2px;
+  border-radius: var(--wiki-radius-sm, 6px);
+  background-color: hsl(var(--primary) / 0.12);
+  animation: wiki-highlight-fade 2s ease-out forwards;
+}
+
+@keyframes wiki-highlight-fade {
+  0%   { background-color: hsl(var(--primary) / 0.22); outline-color: hsl(var(--primary) / 0.8); }
+  100% { background-color: transparent; outline-color: transparent; }
+}
+
+/* Reduced-motion: replace the fade animation with a static, persistent
+   indicator. The global *-rule in index.css collapses the animation to its
+   transparent end-state, leaving no visible highlight; here we pin a steady
+   outline + background that stays until JS removes the class.               */
+@media (prefers-reduced-motion: reduce) {
+  .wiki-search-highlight {
+    animation: none;
+    outline: 2px solid hsl(var(--primary) / 0.8);
+    background-color: hsl(var(--primary) / 0.15);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ARTICLE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Code blocks must always render LTR regardless of article dir=rtl (T-136 RTL)
+   The article carries dir=rtl, but code is inherently LTR — force isolation.
+   design-ok: `text-align: left` is physical on purpose and is NOT a logical-
+   property miss. The same rule pins `direction: ltr`, so `start` resolves to
+   `left` here anyway; spelling it physically documents that code alignment is
+   independent of the article's direction, and survives any future change to
+   the inherited direction.                                                   */
+.wiki-article pre,
+.wiki-article code,
+.wiki-article kbd,
+.wiki-article samp {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-variant-ligatures: none;
+}
+
+/* RTL alignment + theme-aware prose colours ─────────────────────────────────
+   The wiki panel root carries dir="rtl" (WikiPanel.tsx), so logical properties
+   resolve correctly within this boundary — text-align:start = right in RTL.
+   (2) Tailwind Typography's default bold/link/marker colours are near-black and
+   vanish on the dark background — map every prose colour token to the app's
+   theme variables so all text is legible in light AND dark.
+   Code/pre keep LTR + left via their own rule above.
+   Selector is doubled (.wiki-article.prose) so it outranks Tailwind's own
+   `.prose` var defaults (both specificity 0,1,0 — source-order wins).       */
+.wiki-article.prose {
+  text-align: start;
+  --tw-prose-body: hsl(var(--foreground));
+  --tw-prose-headings: hsl(var(--foreground));
+  --tw-prose-bold: hsl(var(--foreground));
+  --tw-prose-links: hsl(var(--primary));
+  --tw-prose-bullets: hsl(var(--muted-foreground));
+  --tw-prose-counters: hsl(var(--muted-foreground));
+  --tw-prose-quotes: hsl(var(--foreground));
+  --tw-prose-quote-borders: hsl(var(--border));
+  --tw-prose-hr: hsl(var(--border));
+  --tw-prose-captions: hsl(var(--muted-foreground));
+  --tw-prose-code: hsl(var(--foreground));
+  /* Tailwind Typography uses --tw-prose-pre-code for <code> inside <pre>.
+     Without this, prose defaults to a light-grey value designed for dark
+     backgrounds and the text becomes invisible on bg-muted/50 in light mode.
+     Pin it to --foreground so it stays legible in both themes.              */
+  --tw-prose-pre-code: hsl(var(--foreground));
+  --tw-prose-pre-bg: transparent;
+  --tw-prose-th-borders: hsl(var(--border));
+  --tw-prose-td-borders: hsl(var(--border));
+
+  /*
+   * Reading measure. The article used to run the full 768px of its container,
+   * which at the old 15px body size was 92 characters per line — a third wider
+   * than the span an eye tracks without losing its place on return. 68ch at
+   * 17px IBM Plex Sans Arabic is ~625px.
+   */
+  max-inline-size: min(68ch, 100%);
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+}
+
+/* Body copy. 17px, not the 15px `prose-sm` used to impose: Arabic needs a step
+   more than its Latin equivalent for the same perceived clarity, and this is a
+   wiki of long Arabic pages rather than a dense dashboard. */
+.wiki-article p,
+.wiki-article li {
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  text-wrap: pretty;
+}
+
+.wiki-article p { margin-block: 0 1.25rem; }
+
+.wiki-article :is(ul, ol) { margin-block: 1.25rem; padding-inline-start: 1.5rem; }
+.wiki-article :is(ul, ol) > li + li { margin-block-start: 0.5rem; }
+.wiki-article li > :is(ul, ol) { margin-block: 0.5rem; }
+
+/* Headings. The old scale put h3 at 16px against a 15px body — a hierarchy the
+   eye cannot see. Each level now clears the one below it by a visible step. */
+.wiki-article :is(h1, h2, h3) { text-wrap: balance; }
+
+.wiki-article h1 {
+  font-size: 1.75rem;
+  line-height: 1.35;
+  font-weight: 700;
+  margin-block: 0 0.75rem;
+  color: hsl(var(--foreground));
+}
+
+.wiki-article h2 {
+  font-size: 1.375rem;
+  line-height: 1.4;
+  font-weight: 600;
+  margin-block: 2.5rem 0.75rem;
+  padding-block-end: 0.5rem;
+  border-block-end: 1px solid var(--wiki-border);
+  color: hsl(var(--foreground));
+}
+
+.wiki-article h3 {
+  font-size: 1.1875rem;
+  line-height: 1.45;
+  font-weight: 600;
+  margin-block: 2rem 0.75rem;
+  color: hsl(var(--foreground));
+}
+
+.wiki-article h4 {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  font-weight: 600;
+  /* Same size as body, so colour is what separates it. */
+  color: hsl(var(--muted-foreground));
+  margin-block: 1.5rem 0.75rem;
+}
+
+/* A heading is followed immediately by its content — no double gap. */
+.wiki-article :is(h1, h2, h3, h4) + * { margin-block-start: 0; }
+
+/* Links must not be distinguished by colour alone (WCAG 1.4.1). */
+.wiki-article .wiki-link {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-thickness 120ms ease-out, color 120ms ease-out;
+}
+.wiki-article .wiki-link:hover { text-decoration-thickness: 2px; }
+
+/* A heading's own self-link is not prose — it must not be underlined by the
+   rule above, or every heading grows a permanent underline. */
+.wiki-article :is(h1, h2, h3) .wiki-heading-anchor {
+  color: inherit;
+  text-decoration: none;
+}
+.wiki-article :is(h1, h2, h3) .wiki-heading-anchor:hover {
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--primary) / 0.4);
+  text-underline-offset: 0.2em;
+}
+
+/* No italic on Arabic: there is no true italic face, so the browser slants the
+   upright one and the joins distort. */
+.wiki-article blockquote {
+  font-style: normal;
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  margin-block: 1.5rem;
+  padding-inline-start: 1rem;
+  border-inline-start: 3px solid hsl(var(--primary) / 0.4);
+  color: hsl(var(--muted-foreground));
+}
+
+.wiki-article hr {
+  margin-block: 3rem;
+  border: 0;
+  border-block-start: 1px solid var(--wiki-border);
+}
+
+/* Inline code — rendered as <code class="wiki-inline-code"> (not wrapped in
+   <pre>). Background uses bg-muted/60 equivalent; foreground from theme so
+   contrast ≥4.5:1 in both light and dark.                                   */
+.wiki-article .wiki-inline-code {
+  background-color: hsl(var(--muted) / 0.7);
+  color: hsl(var(--foreground));
+  padding-inline: 0.3em;
+  padding-block: 0.15em;
+  border-radius: var(--wiki-radius-sm);
+  font-size: 0.9375em;
+  /* Keep LTR direction inside RTL prose */
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.wiki-article .wiki-code-block {
+  margin-block: 1.5rem;
+  border-radius: var(--wiki-radius);
+  border: 1px solid var(--wiki-border);
+  background-color: hsl(var(--muted) / 0.5);
+  padding: 1rem;
+  /* Room for the copy button, on the code's own end edge (see below). */
+  padding-inline-end: 2.5rem;
+  font-size: 0.875rem;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+
+/*
+ * design-ok: `right` is physical on purpose, and it is the correct edge.
+ *
+ * The button floats over a `direction: ltr` code island that sits inside a
+ * `direction: rtl` article. A logical inset would be resolved against whichever
+ * of the two the button happens to inherit — the RTL wrapper — and drop it onto
+ * the first character of the code. The code's own end edge is the physical
+ * right, in this direction and in any other, so that is what is written.
+ */
+.wiki-article [data-wiki-copy] {
+  position: absolute;
+  /* design-ok: physical, inside the dir="ltr" code island — see the file header. */
+  top: 0.5rem;
+  right: 0.5rem;
+  /* Measured 22 × 22 on 390×844: under §3.6 (44) and under WCAG 2.5.8's own
+     24px floor. Found by sweeping every button in the panel rather than the
+     ones the review named — the toolbar crumb failed the same way. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+}
+@media (min-width: 768px) {
+  .wiki-article [data-wiki-copy] {
+    min-inline-size: 2rem;
+    min-block-size: 2rem;
+  }
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────
+   The prose margins used to land on the <table> *inside* the bordered scroll
+   container, painting two empty 28px bands between the border and the first
+   row. The container owns the outer spacing; the table owns none.           */
+.wiki-article .wiki-table-scroll {
+  margin-block: 1.5rem;
+  border-radius: var(--wiki-radius);
+}
+.wiki-article .wiki-table-scroll > table {
+  margin-block: 0;
+  width: 100%;
+}
+/* Structure by SURFACE, not by rules. With the cell borders back down to
+   --border, the header band and a row-level hover carry the row separation —
+   the quiet way, and the same way the app's own lists read.                 */
+.wiki-article thead { background-color: hsl(var(--muted) / 0.5); }
+.wiki-article tbody tr:hover { background-color: hsl(var(--accent) / 0.35); }
+@media (prefers-reduced-motion: no-preference) {
+  .wiki-article tbody tr { transition: background-color 120ms ease-out; }
+}
+
+/* Cells mix Arabic with file names, ports and versions. Without isolation the
+   surrounding punctuation migrates to the wrong end of the cell. */
+.wiki-article.prose :is(th, td) {
+  text-align: start;
+  unicode-bidi: isolate;
+}
+.wiki-article th {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  padding-block: 0.625rem;
+  padding-inline: 0.75rem;
+}
+.wiki-article td {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  padding-block: 0.625rem;
+  padding-inline: 0.75rem;
+  vertical-align: top;
+}
+@media (min-width: 768px) {
+  .wiki-article :is(th, td) { padding-inline: 1rem; }
+}
+
+/* ── Lede ──────────────────────────────────────────────────────────────────
+   The page summary from index.json, rendered under the page title so the
+   reader can confirm they opened the right page before reading it.          */
+.wiki-article .wiki-lede {
+  margin-block: 0 2rem;
+  padding-inline-start: 0.875rem;
+  border-inline-start: 3px solid hsl(var(--primary) / 0.45);
+  color: hsl(var(--muted-foreground));
+  font-size: 1.125rem;
+  line-height: 1.75;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CALLOUTS
+   ══════════════════════════════════════════════════════════════════════════
+   A deliberate, declared extension to the theme tokens, confined to this
+   island. Semantic state (warning / danger) needs hues the Al-Kindy navy+gold
+   identity does not own, and deriving them from --primary would render every
+   warning navy. Five local tokens, each with a dark-mode value, replace the raw
+   Tailwind palette classes that were here before.                            */
+.wiki-callout {
+  --wiki-callout: 214 84% 34%;
+  border: 1px solid hsl(var(--wiki-callout) / 0.35);
+  /* The thick start bar makes the kind perceivable by shape, not colour alone
+     (WCAG 1.4.1) — it survives greyscale and colour-blindness. */
+  border-inline-start: 3px solid hsl(var(--wiki-callout));
+  background-color: hsl(var(--wiki-callout) / 0.07);
+  border-radius: var(--wiki-radius);
+  padding: 1rem;
+  padding-inline-start: 0.875rem;
+  margin-block: 1.5rem;
+}
+.wiki-callout[data-kind="note"]      { --wiki-callout: 214 84% 34%; }
+.wiki-callout[data-kind="tip"]       { --wiki-callout: 160 84% 26%; }
+.wiki-callout[data-kind="important"] { --wiki-callout: 265 70% 40%; }
+.wiki-callout[data-kind="warning"]   { --wiki-callout: 32 95% 30%; }
+.wiki-callout[data-kind="caution"]   { --wiki-callout: 0 74% 38%; }
+
+.dark .wiki-callout { background-color: hsl(var(--wiki-callout) / 0.13); }
+.dark .wiki-callout[data-kind="note"]      { --wiki-callout: 214 90% 74%; }
+.dark .wiki-callout[data-kind="tip"]       { --wiki-callout: 160 70% 66%; }
+.dark .wiki-callout[data-kind="important"] { --wiki-callout: 265 85% 78%; }
+.dark .wiki-callout[data-kind="warning"]   { --wiki-callout: 38 95% 66%; }
+.dark .wiki-callout[data-kind="caution"]   { --wiki-callout: 0 85% 72%; }
+
+.wiki-callout-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0 0.5rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  font-weight: 600;
+  color: hsl(var(--wiki-callout));
+}
+
+/* Body text at full --foreground, not --muted-foreground: a warning nobody can
+   read comfortably is not a warning. */
+.wiki-callout-body {
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+}
+
+/* Callout.tsx wraps arbitrary markdown, so the first/last child would
+   otherwise add prose margins inside a box that already has padding.        */
+.wiki-callout-body > :first-child { margin-top: 0; }
+.wiki-callout-body > :last-child  { margin-bottom: 0; }
+
+/* ── Language disclosure ──────────────────────────────────────────────────
+   The `note` callout, laid out as one row with a dismiss control. It reuses
+   the kind, the token and the hue — nothing new is introduced for it.       */
+[data-wiki-language-notice] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-block: 0 1.5rem;
+  max-inline-size: min(68ch, 100%);
+}
+[data-wiki-language-notice] .wiki-callout-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex: 1;
+  min-inline-size: 0;
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+[data-wiki-language-notice] .wiki-callout-body svg {
+  margin-block-start: 0.25rem;
+  color: hsl(var(--wiki-callout));
+}
+[data-wiki-notice-dismiss] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* 44px on touch, a compact square on the desktop toolbar scale. */
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+  border-radius: var(--wiki-radius-sm);
+  color: hsl(var(--muted-foreground));
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+[data-wiki-notice-dismiss]:hover {
+  background-color: hsl(var(--accent) / 0.6);
+  color: hsl(var(--foreground));
+}
+@media (min-width: 768px) {
+  [data-wiki-notice-dismiss] {
+    min-inline-size: 2rem;
+    min-block-size: 2rem;
+  }
+}
+
+/* ── Latin labels inside an Arabic line ───────────────────────────────────
+   A label that follows the shell language carries `lang` and no `dir`: Latin
+   is strongly typed in the bidi algorithm and orders itself. What it does
+   need is isolation, or the punctuation of the surrounding Arabic row hops to
+   the wrong end of the line. Uppercase stays off, as it is island-wide.     */
+[data-wiki-panel] [lang="en"],
+[data-wiki-overlay] [lang="en"] {
+  unicode-bidi: isolate;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INDEX DRAWER / COLUMN
+   ══════════════════════════════════════════════════════════════════════════
+   `data-wiki-drawer="open|closed"` is the single switch for both presentations.
+
+   Mobile (<md): position:fixed, pinned to the start edge, slides off-screen.
+   Desktop (md+): in-flow column whose width collapses to zero when closed.
+
+   The desktop width lives HERE rather than in Tailwind width utilities on the
+   element. The previous version composed `md:w-56` / `md:w-0` conditionally next
+   to an unconditional `md:w-auto`; all three have equal specificity, so the
+   cascade picked whichever Tailwind emitted last — and that is `w-auto`, which
+   comes after the numeric scale. The toolbar toggle therefore changed nothing
+   but `overflow` on desktop: a control that looked live and did nothing.
+   One rule, one property, no ordering hazard.                               */
+
+/*
+ * design-ok: the mobile drawer edge is pinned PHYSICALLY on purpose.
+ *
+ * The logical form (`end-0`) is what tailwindcss-rtl compiles to `left: 0;
+ * right: 0` — both edges at once — which stretches the drawer across the
+ * viewport and settles it on the left, opposite the button that opens it. This
+ * was measured live at 390px, not inferred. Writing the physical edge per
+ * direction is the fix, and it is why `end-0` no longer appears on the <nav>.
+ */
+nav[data-wiki-drawer] { left: 0; right: auto; }
+[dir="rtl"] nav[data-wiki-drawer] { right: 0; left: auto; }
+
+/*
+ * design-ok: translateX is physical by definition — it has no logical twin.
+ * The sign therefore has to come from the direction: --dir is -1 inside the
+ * RTL island, so a drawer written as "slide out towards the start" (-100%)
+ * leaves through the right edge here and through the left edge in an LTR
+ * context, without a second rule.
+ */
+[data-wiki-drawer="closed"] { transform: translateX(calc(var(--dir, 1) * -100%)); }
+[data-wiki-drawer="open"]   { transform: translateX(0); }
+
+[data-wiki-drawer] {
+  transition: transform 220ms cubic-bezier(0.2, 0.6, 0.3, 1);
+}
+
+@media (max-width: 767px) {
+  /* البند 7: إخفاء الدرج المغلق بالكامل عن لوحة الوصول والمؤشر على الجوال. */
+  [data-wiki-drawer="closed"] {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  [data-wiki-drawer="open"] {
+    visibility: visible;
+    pointer-events: auto;
+    box-shadow: var(--wiki-shadow-overlay);
+  }
+}
+
+/* `nav[...]` (0,1,1) deliberately outranks the element's own `w-[min(300px,85vw)]`
+   utility (0,1,0), which is the mobile drawer width. Matching specificity would
+   put us right back into "whichever rule the bundler emitted last wins" — the
+   exact failure this block replaces.                                         */
+@media (min-width: 768px) {
+  nav[data-wiki-drawer] {
+    /* The index is told apart from the article by a surface step, not by a
+       loud edge — the edge is now --border like everywhere else. */
+    background-color: hsl(var(--muted) / 0.2);
+    /* The mobile slide must not leak into the desktop column. */
+    transform: none;
+    width: 15rem;
+    /* Transitioning `visibility` keeps the contents on screen for the whole
+       collapse, then flips them hidden at the end (and back instantly on
+       open) — the standard discrete-property behaviour.                     */
+    transition: width 220ms cubic-bezier(0.2, 0.6, 0.3, 1), visibility 220ms;
+  }
+  nav[data-wiki-drawer="closed"] {
+    width: 0;
+    overflow: hidden;
+    /* Zero width alone still leaves children reachable by Tab and to screen
+       readers; a collapsed index must be gone for every input method.       */
+    visibility: hidden;
+  }
+}
+
+@media (min-width: 1024px) {
+  nav[data-wiki-drawer="open"] { width: 16rem; }
+}
+
+/* A collapsing width is decorative motion; honour the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  nav[data-wiki-drawer],
+  [data-wiki-drawer] { transition: none; }
+}
+
+/* ── Index rows ───────────────────────────────────────────────────────────
+   Colour, background and the active bar are declared here, keyed off
+   aria-current, rather than as a conditional class list. Same collision
+   hazard as the width above: the active and inactive variants set the same
+   properties, so utilities would resolve by emit order, not by state.      */
+[data-wiki-drawer] [data-wiki-nav-row] {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+[data-wiki-drawer] [data-wiki-nav-row] > .nassaj-control__surface {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  inline-size: 100%;
+  justify-content: flex-start;
+  min-block-size: 2.75rem;
+  padding-inline: 0.75rem;
+  padding-block: 0.375rem;
+  border-radius: var(--wiki-radius-sm);
+  border-inline-start: 2px solid transparent;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  text-align: start;
+  white-space: normal;
+  color: hsl(var(--muted-foreground));
+  transition: color 120ms ease-out, background-color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+@media (min-width: 768px) {
+  [data-wiki-drawer] [data-wiki-nav-row],
+  [data-wiki-drawer] [data-wiki-nav-row] > .nassaj-control__surface {
+    min-block-size: 2.5rem;
+  }
+}
+[data-wiki-drawer] [data-wiki-nav-row]:hover > .nassaj-control__surface {
+  background-color: hsl(var(--accent) / 0.6);
+  color: hsl(var(--foreground));
+}
+/* --wiki-active-fg, not --primary: the row's own background is a 10% tint of
+   --primary, so in dark mode the solid navy stands only 4.05:1 above it — below
+   the 4.5:1 floor for 15px text. The bar takes the same token: a navy rule on a
+   near-black sidebar is an indicator nobody can find either. */
+[data-wiki-drawer] [data-wiki-nav-row][aria-current="page"] {
+  font-weight: 500;
+}
+[data-wiki-drawer] [data-wiki-nav-row][aria-current="page"] > .nassaj-control__surface {
+  background-color: hsl(var(--primary) / 0.1);
+  color: var(--wiki-active-fg);
+  border-inline-start-color: var(--wiki-active-fg);
+}
+
+/* Page titles carry Latin fragments (ADR, pm2, Ctrl K) — isolate each so the
+   punctuation around them does not hop to the wrong end of the row. */
+[data-wiki-nav-row] > .nassaj-control__surface > span {
+  unicode-bidi: isolate;
+  min-inline-size: 0;
+  flex: 1;
+  text-align: start;
+}
+
+/* A heading, not an eyebrow.
+   The eyebrow pattern this was copied from earns its quietness from uppercase
+   plus letter-spacing; Arabic has neither (§2.2 bans both), so what survived the
+   copy was a label that is smaller than the rows it introduces and painted the
+   identical --muted-foreground — the hierarchy read upside down. The section
+   title now differs from its rows on two independent axes (weight 700 vs 400,
+   --foreground vs --muted-foreground) and is never the smaller of the two.
+   Enforced by wikiHeadingHierarchy.test.ts. */
+[data-wiki-drawer] [data-wiki-section-title] {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline: 0.75rem;
+  margin-block: 2rem 0.5rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TOOLBAR
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-wiki-toolbar] {
+  min-block-size: 3rem;
+  padding-inline: 0.75rem;
+  border-block-end: 1px solid var(--wiki-border);
+  background-color: hsl(var(--background) / 0.85);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 10;
+}
+@media (min-width: 768px) {
+  [data-wiki-toolbar] { padding-inline: 1rem; }
+}
+
+/* Every crumb is its own bidi island: a page name that ends in Latin would
+   otherwise drag the separator that follows it to the other end of the line. */
+[data-wiki-toolbar] [data-wiki-crumb] {
+  unicode-bidi: isolate;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* The one crumb that is a control. Its text box measured 49.8 × 21px on a
+   390px viewport — wide enough, but 21px tall against the 44px of §3.6 and the
+   24px floor of WCAG 2.5.8, while every other toolbar button was already 44².
+   Height only: the label is past 44px wide on its own, and a min-inline-size
+   here would push the page title out of a toolbar that is already tight.
+   Qualified by the element so it cannot collide with the utility classes on the
+   same node — none of them set block-size, and this keeps it that way. */
+[data-wiki-toolbar] button[data-wiki-crumb] {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+}
+@media (min-width: 768px) {
+  [data-wiki-toolbar] button[data-wiki-crumb] { min-block-size: 2rem; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HOME — a front desk, not a second index
+   ══════════════════════════════════════════════════════════════════════════
+   Four blocks, in descending order of "the reader does not know the page's
+   name": search, the numbered path, and then two equal panels — symptoms and
+   questions — that link to headings INSIDE pages.
+
+   There is no size-tiering left. The old layout sorted the five index sections
+   into three shapes because a uniform grid put a 3-page card beside an 8-page
+   one and left ~180px of dead space. That whole problem belonged to a page that
+   listed sections; this one does not list them, and the two desk panels hold
+   five rows each by construction, so no size can differ.
+
+   These live in CSS with element-qualified selectors, not as Tailwind grid
+   utilities, for the collision reason at the top of this file.               */
+
+[data-wiki-home] {
+  display: grid;
+  gap: 1.5rem;
+  max-inline-size: 64rem;
+  margin-inline: auto;
+  inline-size: 100%;
+  container-name: wiki-home;
+  container-type: inline-size;
+}
+
+/* Opening block. Aligned to the START, not centred: a centred title and blurb
+   over a full-width search field is the shape of a marketing hero, and every
+   other screen in this panel — index, article, search results — begins on the
+   start axis. One reading axis for the whole panel means the eye does not shift
+   sideways on each entry to and from this page. */
+[data-wiki-home-intro] {
+  display: grid;
+  justify-items: start;
+  gap: 0;
+  text-align: start;
+  margin-block-end: 0.5rem;
+}
+[data-wiki-home-intro] h1 {
+  font-size: 1.625rem;
+  line-height: 1.35;
+  font-weight: 700;
+  text-wrap: balance;
+  color: hsl(var(--foreground));
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-home-intro] h1 { font-size: 2rem; }
+}
+[data-wiki-home-intro] p {
+  margin-block-start: 0.5rem;
+  max-inline-size: 42rem;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  text-wrap: pretty;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Block 1 — search. Full width and 4rem tall: for a reader who knows the word
+   but not the page this is the shortest route in the panel, and it used to be a
+   28rem afterthought under the blurb. */
+[data-wiki-home-search] {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 3.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+[data-wiki-home-search] > .nassaj-control__surface {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  inline-size: 100%;
+  min-block-size: 3.5rem;
+  padding-inline: 1.25rem;
+  border-radius: var(--wiki-radius-lg);
+  border: 1px solid var(--wiki-border);
+  /* A field reads as a field by its surface — the app's own field recipe. */
+  background-color: var(--wiki-field-bg);
+  color: hsl(var(--muted-foreground));
+  font-size: 1rem;
+  text-align: start;
+  white-space: normal;
+  transition: border-color 120ms ease-out, color 120ms ease-out,
+    box-shadow 120ms ease-out, transform 180ms cubic-bezier(0.2, 0.6, 0.3, 1);
+}
+[data-wiki-home-search]:hover > .nassaj-control__surface {
+  border-color: hsl(var(--primary) / 0.55);
+  color: hsl(var(--foreground));
+  box-shadow: var(--wiki-shadow-rest);
+}
+[data-wiki-home-search]:active > .nassaj-control__surface { transform: translateY(1px); }
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-home-search],
+  [data-wiki-home-search] > .nassaj-control__surface { min-block-size: 4rem; }
+}
+/* The shortcut hint is Latin inside an Arabic row: isolate it or the row's
+   punctuation reorders around it. */
+[data-wiki-home-search] kbd {
+  unicode-bidi: isolate;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+/* Panels: the two desk panels and the path block share this shell. */
+[data-wiki-home-panel],
+[data-wiki-home-path] {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--wiki-radius-lg);
+  border: 1px solid var(--wiki-border);
+  background-color: hsl(var(--card));
+  box-shadow: var(--wiki-shadow-rest);
+  padding: 1.25rem;
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-home-panel],
+  [data-wiki-home-path] { padding: 1.5rem; }
+}
+:is([data-wiki-home-panel], [data-wiki-home-path]) > header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+:is([data-wiki-home-panel], [data-wiki-home-path]) > header h2 {
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+:is([data-wiki-home-panel], [data-wiki-home-path]) [data-wiki-panel-icon] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  border-radius: var(--wiki-radius-sm);
+  background-color: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+:is([data-wiki-home-panel], [data-wiki-home-path]) [data-wiki-panel-summary] {
+  margin-block-start: 0.5rem;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: hsl(var(--muted-foreground));
+  text-wrap: pretty;
+}
+[data-wiki-home-panel] [data-wiki-panel-list] {
+  flex: 1;
+  margin-block-start: 1rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--wiki-border);
+}
+
+/* An entry row — a symptom, a question, or the tail that opens the whole page.
+   It is the only thing in a panel meant to be clicked, so it carries the
+   foreground colour rather than the muted one the summary above it uses. The
+   chevron sits at the END of the row and always occupies its space (opacity,
+   never display) so the label does not jump sideways when the pointer arrives. */
+[data-wiki-entry-row] {
+  display: block;
+  inline-size: 100%;
+  /* 2.75rem = 44px, the pointer-target minimum (WCAG 2.5.8). On a phone the
+     landing page IS the navigation — the index is collapsed there — so these
+     rows must not be the smallest touch target in the panel. Desktop keeps the
+     tighter 2.25rem, where the pointer is precise. */
+  min-block-size: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+[data-wiki-entry-row] > .nassaj-control__surface {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+  padding-inline: 0.5rem;
+  padding-block: 0.375rem;
+  border-radius: var(--wiki-radius-sm);
+  text-align: start;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  white-space: normal;
+  color: hsl(var(--muted-foreground));
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-entry-row],
+  [data-wiki-entry-row] > .nassaj-control__surface { min-block-size: 2.25rem; }
+}
+/* Several symptoms end in a Latin fragment inside Arabic quotation marks
+   («no final response»); without isolation the closing mark hops to the far end
+   of the row. */
+[data-wiki-entry-row] [data-wiki-entry-label] {
+  unicode-bidi: isolate;
+  min-inline-size: 0;
+  flex: 1;
+  text-wrap: pretty;
+}
+/* The tail row leads out of the list to the whole page, so it is coloured as
+   the action it is rather than as one more sibling. */
+[data-wiki-entry-row][data-wiki-entry-tail] {
+  margin-block-start: 0.5rem;
+}
+[data-wiki-entry-row][data-wiki-entry-tail] > .nassaj-control__surface {
+  color: hsl(var(--primary));
+  font-weight: 500;
+}
+/* Measured: the Al-Kindy navy on the dark card is 4.27:1 — under the 4.5:1 a
+   text colour needs. Mixed toward --foreground it clears the bar (5.9:1) and
+   keeps the hue, so the row still reads as the one action in the panel. */
+.dark [data-wiki-entry-row][data-wiki-entry-tail] > .nassaj-control__surface {
+  color: color-mix(in srgb, hsl(var(--primary)) 55%, hsl(var(--foreground)));
+}
+[data-wiki-entry-row] [data-wiki-row-chevron] {
+  flex: none;
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.2, 0.6, 0.3, 1);
+}
+[data-wiki-entry-row]:hover > .nassaj-control__surface,
+[data-wiki-entry-row]:focus-visible > .nassaj-control__surface {
+  background-color: hsl(var(--accent) / 0.6);
+  color: hsl(var(--foreground));
+}
+[data-wiki-entry-row]:hover [data-wiki-row-chevron],
+[data-wiki-entry-row]:focus-visible [data-wiki-row-chevron] { opacity: 0.7; }
+
+/* Block 2 — the path. Its three pages are a sequence, not a list, so they are
+   numbered steps in a row rather than bullets in a column: the numbering is the
+   one thing this block says that the index cannot. */
+[data-wiki-home-path] {
+  background-color: hsl(var(--accent) / 0.45);
+  /*
+   * The tint carries the "start here" emphasis. In the dark themes --accent
+   * sits very close to --card, so the tint alone measured ~1.13:1 against the
+   * page while a plain card measured 1.11 — present in code, absent to the
+   * eye. A primary-tinted edge is what makes the block readable as one.
+   *
+   * The ALPHA is measured, not chosen. At 0.45/0.55 this edge came out at
+   * 2.33:1 light and 2.22:1 dark — louder than any other static edge in the
+   * panel (1.30–1.63) and louder than anything on the chat screen, which is
+   * the very complaint the 2026-07-30 alignment answers. Reduced until it sits
+   * at the top of the app's own band rather than above it: measured 1.63:1
+   * light and 1.68:1 dark on the Al-Kindy preset. Still the most emphasised
+   * block on the landing page, no longer the only loud edge in the island.
+   */
+  border-color: hsl(var(--primary) / 0.30);
+  box-shadow: none;
+}
+.dark [data-wiki-home-path] {
+  background-color: hsl(var(--primary) / 0.10);
+  border-color: hsl(var(--primary) / 0.36);
+}
+/* Its header holds the summary too: one clause, on the title's line from md up
+   so the block stays three cards tall, wrapping underneath it on a phone. */
+[data-wiki-home-path] > header { flex-wrap: wrap; }
+[data-wiki-home-path] > header [data-wiki-panel-summary] { flex-basis: 100%; }
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-home-path] > header [data-wiki-panel-summary] {
+    flex-basis: auto;
+    margin-block-start: 0;
+    margin-inline-start: auto;
+    text-align: end;
+  }
+}
+[data-wiki-home-path] [data-wiki-step-grid] {
+  display: grid;
+  gap: 0.5rem;
+  margin-block-start: 1rem;
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-home-path] [data-wiki-step-grid] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+}
+/* On a phone a step is one horizontal row — number, then title — because three
+   stacked 5.5rem cards push everything below them off the first screen. From md
+   the three sit side by side and the card shape returns. */
+[data-wiki-step] {
+  display: block;
+  min-block-size: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+[data-wiki-step] > .nassaj-control__surface {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.625rem;
+  min-block-size: 2.75rem;
+  padding: 0.75rem;
+  border-radius: var(--wiki-radius);
+  border: 1px solid var(--wiki-border);
+  background-color: hsl(var(--card));
+  text-align: start;
+  white-space: normal;
+  transition: border-color 120ms ease-out, box-shadow 180ms cubic-bezier(0.2, 0.6, 0.3, 1),
+    transform 180ms cubic-bezier(0.2, 0.6, 0.3, 1);
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-step],
+  [data-wiki-step] > .nassaj-control__surface { min-block-size: 5.5rem; }
+  [data-wiki-step] > .nassaj-control__surface {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+}
+[data-wiki-step]:hover > .nassaj-control__surface {
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: var(--wiki-shadow-raised);
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-step]:hover > .nassaj-control__surface { transform: translateY(-1px); }
+}
+[data-wiki-step-number] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  border-radius: 50%;
+  background-color: hsl(var(--primary) / 0.12);
+  /* Same pairing as the active index row, same reason for the same token: 14px
+     at 600 is not "large text", so it owes 4.5:1 against a 12% tint of the very
+     colour it is painted in — which the solid --primary does not clear in dark. */
+  color: var(--wiki-active-fg);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+[data-wiki-step] [data-wiki-step-title] {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  unicode-bidi: isolate;
+}
+
+/* Blocks 3 and 4 — the desk. Two columns, five rows and a tail each, so they
+   cannot differ in length: the dead band the old size-tiering existed to manage
+   is designed out rather than tuned away. `start`, not `stretch`, so a one-line
+   difference in a summary's wrap does not open a gap under the shorter list. */
+[data-wiki-home-desk] {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+}
+@container wiki-home (min-width: 44rem) {
+  [data-wiki-home-desk] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* The empty-content state: no sections means no path and no desk, so the page
+   is the opening, the search field and this. */
+[data-wiki-home-empty] {
+  border: 1px dashed var(--wiki-border);
+  border-radius: var(--wiki-radius-lg);
+  padding: 2rem;
+  text-align: center;
+  font-size: 0.9375rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Footer: the mark, then the caption naming it. The old order put the caption
+   above the thing it captions. This is the ONLY Al-Kindy mark in the panel —
+   the index no longer carries a second copy. */
+[data-wiki-home-footer] {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
+  padding-block-start: 1.5rem;
+  border-block-start: 1px solid var(--wiki-border);
+  font-size: 0.8125rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   IN THIS PAGE (table of contents)
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-wiki-toc-rail] {
+  inline-size: 13rem;
+  flex: none;
+  position: sticky;
+  inset-block-start: 1rem;
+  align-self: flex-start;
+  max-block-size: calc(100vh - 9rem);
+  overflow-y: auto;
+}
+/* Same correction as the index section title: the rail heading was 13px/600 in
+   --muted-foreground over 14px/400 rows in the *same* colour — smaller than what
+   it introduces, and separated from it on one axis only. */
+[data-wiki-toc-rail] [data-wiki-toc-heading] {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+  margin-block-end: 0.75rem;
+  padding-inline-start: 0.75rem;
+}
+[data-wiki-toc-rail] ul { border-inline-start: 1px solid var(--wiki-border); }
+
+/* ── Diagram labels ───────────────────────────────────────────────────────
+   The inline SVGs used to name a third family (Tajawal) on all 58 of their
+   text nodes — a family the brief does not load and §2.3 decided against — so
+   the diagrams rendered in whatever the browser substituted while the prose
+   beside them used the reading face. The nodes carry no font-family now; this
+   rule states the inheritance rather than leaving it to the cascade, and gives
+   the labels the same lining/tabular figures as the rest of the island. */
+.wiki-article .wiki-diagram-scroll svg text {
+  font-family: var(--wiki-font-reading);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* Two levels that differ by 8px of indent alone are two levels nobody can see.
+   Size, indent and weight all carry the distinction now. */
+[data-wiki-toc] [data-wiki-toc-row] {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 2.5rem;
+  block-size: 2.5rem;
+  padding-block: 0;
+  padding-inline: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+  unicode-bidi: isolate;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+}
+[data-wiki-toc] [data-wiki-toc-row] > .nassaj-control__surface {
+  display: flex;
+  align-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  border-inline-start: 2px solid transparent;
+  transition: color 120ms ease-out, border-color 120ms ease-out,
+    background-color 120ms ease-out;
+}
+@media (any-pointer: coarse) {
+  [data-wiki-toc] [data-wiki-toc-row] { block-size: 2.75rem; }
+}
+[data-wiki-toc] [data-wiki-toc-row][data-level="2"] { font-size: 0.875rem; }
+[data-wiki-toc] [data-wiki-toc-row][data-level="3"] { font-size: 0.8125rem; }
+[data-wiki-toc] [data-wiki-toc-row]:hover > .nassaj-control__surface {
+  color: hsl(var(--foreground));
+}
+
+[data-wiki-toc-rail] [data-wiki-toc-row] {
+  margin-inline-start: -1px;
+}
+[data-wiki-toc-rail] [data-wiki-toc-row][data-level="2"] > .nassaj-control__surface {
+  padding-inline-start: 0.75rem;
+}
+[data-wiki-toc-rail] [data-wiki-toc-row][data-level="3"] > .nassaj-control__surface {
+  padding-inline-start: 1.5rem;
+}
+
+/* State in CSS, keyed off a data attribute — not a conditional class list. */
+[data-wiki-toc] [data-wiki-toc-row][data-active="true"] {
+  color: var(--wiki-active-fg);
+  font-weight: 500;
+}
+[data-wiki-toc-rail] [data-wiki-toc-row][data-active="true"] {
+  color: var(--wiki-active-fg);
+}
+[data-wiki-toc-rail] [data-wiki-toc-row][data-active="true"] > .nassaj-control__surface {
+  border-inline-start-color: var(--wiki-active-fg);
+}
+
+[data-wiki-toc-text] {
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inline (collapsible) variant, below xl. */
+[data-wiki-toc-inline] {
+  margin-block-end: 1.5rem;
+  border-radius: var(--wiki-radius);
+  border: 1px solid var(--wiki-border);
+  background-color: hsl(var(--muted) / 0.2);
+}
+[data-wiki-toc-inline] > button {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+  block-size: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+[data-wiki-toc-inline] > button > .nassaj-control__surface {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  inline-size: 100%;
+  block-size: 2.75rem;
+  padding-inline: 1rem;
+  border-radius: var(--wiki-radius);
+  text-align: start;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+[data-wiki-toc-inline] [data-wiki-toc-list] {
+  padding-block: 0.25rem 0.75rem;
+  padding-inline: 0.5rem;
+  /* The rail is capped by the viewport; the inline box has to cap itself or a
+     42-entry page pushes the article a screen and a half down. */
+  max-block-size: 18rem;
+  overflow-y: auto;
+}
+[data-wiki-toc-inline] [data-wiki-toc-row] {
+  border-radius: var(--wiki-radius-sm);
+}
+[data-wiki-toc-inline] [data-wiki-toc-row] > .nassaj-control__surface {
+  padding-inline-start: 0.75rem;
+}
+[data-wiki-toc-inline] [data-wiki-toc-row][data-level="3"] > .nassaj-control__surface {
+  padding-inline-start: 1.5rem;
+}
+[data-wiki-toc-inline] [data-wiki-toc-row]:hover > .nassaj-control__surface {
+  background-color: hsl(var(--accent) / 0.4);
+}
+
+/* The chevron turns on a vertical axis, so it needs no --dir. */
+[data-wiki-toc-chevron] { transition: transform 180ms cubic-bezier(0.2, 0.6, 0.3, 1); }
+[data-wiki-toc-inline] > button[aria-expanded="true"] [data-wiki-toc-chevron] {
+  transform: rotate(180deg);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREV / NEXT
+   ══════════════════════════════════════════════════════════════════════════
+   A grid, not `justify-between`: with only one neighbour (first or last page)
+   the lone card used to stretch to an arbitrary width and hug one edge. Two
+   fixed halves keep the empty slot empty.                                    */
+[data-wiki-prevnext] {
+  margin-block-start: 4rem;
+  padding-block-start: 1.5rem;
+  border-block-start: 1px solid var(--wiki-border);
+  display: grid;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  [data-wiki-prevnext] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+[data-wiki-prevnext-card] {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-block-size: 4rem;
+  padding-block: 0.875rem;
+  padding-inline: 1rem;
+  border-radius: var(--wiki-radius);
+  border: 1px solid var(--wiki-border);
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
+}
+[data-wiki-prevnext-card]:hover {
+  border-color: hsl(var(--primary) / 0.5);
+  background-color: hsl(var(--accent) / 0.4);
+}
+[data-wiki-prevnext-card][data-direction="next"] { text-align: end; }
+[data-wiki-prevnext-card][data-direction="prev"] { text-align: start; }
+/* The direction label heads the pair (direction › section › page). It was byte
+   for byte identical to the section under it — 13px/400 --muted-foreground both
+   — so the card opened with two lines that looked like one wrapped line. Weight
+   and colour separate them; the size stays equal, which the hierarchy guard
+   allows (a heading may match its subordinate, never fall below it). */
+[data-wiki-prevnext-card] [data-wiki-prevnext-label] {
+  display: block;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+[data-wiki-prevnext-card] [data-wiki-prevnext-section] {
+  display: block;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+[data-wiki-prevnext-card] [data-wiki-prevnext-title] {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.5;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  unicode-bidi: isolate;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SEARCH DIALOG (portalled to <body>)
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-wiki-overlay-backdrop] { backdrop-filter: blur(4px); }
+
+[data-wiki-overlay-box] {
+  inline-size: min(40rem, 100%);
+  max-block-size: 70vh;
+  border-radius: var(--wiki-radius-xl);
+  border: 1px solid var(--wiki-border);
+  background-color: hsl(var(--card));
+  box-shadow: var(--wiki-shadow-overlay);
+  animation: wiki-overlay-in 160ms ease-out;
+}
+@keyframes wiki-overlay-in {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-wiki-overlay-box] { animation: none; }
+}
+
+/*
+ * 16px exactly. Anything smaller makes iOS Safari zoom the viewport the moment
+ * the field takes focus, and it never zooms back out.
+ */
+[data-wiki-overlay] input[type="text"] {
+  min-block-size: 3.5rem;
+  font-size: 1rem;
+  line-height: 1.6;
+  direction: rtl;
+  text-align: start;
+}
+
+[data-wiki-overlay] [data-wiki-result] {
+  inline-size: 100%;
+  padding-block: 0.625rem;
+  padding-inline: 1rem;
+  text-align: start;
+  border-inline-start: 2px solid transparent;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+[data-wiki-overlay] [data-wiki-result]:hover { background-color: hsl(var(--accent) / 0.5); }
+/* Background alone is too faint a difference in the light theme to show which
+   row Enter will open; the start bar makes it unambiguous. */
+[data-wiki-overlay] [data-wiki-result][aria-selected="true"] {
+  background-color: hsl(var(--accent));
+  border-inline-start-color: hsl(var(--primary));
+}
+[data-wiki-overlay] [data-wiki-result-title] {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  unicode-bidi: isolate;
+}
+[data-wiki-overlay] [data-wiki-result-section] {
+  font-size: 0.8125rem;
+  color: hsl(var(--muted-foreground));
+  unicode-bidi: isolate;
+}
+/* A snippet is cut out of the middle of mixed text, so it can begin or end in
+   Latin — isolate it or the ellipsis lands on the wrong side. */
+[data-wiki-overlay] [data-wiki-result-snippet] {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: hsl(var(--muted-foreground));
+  unicode-bidi: isolate;
+}
+[data-wiki-overlay] mark {
+  background-color: hsl(var(--primary) / 0.22);
+  color: hsl(var(--foreground));
+  border-radius: var(--wiki-radius-sm);
+  padding-inline: 0.15em;
+}
+[data-wiki-overlay] [data-wiki-key-legend] { font-size: 0.8125rem; }
+
+[data-wiki-panel] kbd,
+[data-wiki-overlay] kbd {
+  font-size: 0.75rem;
+  line-height: 1;
+  font-weight: 500;
+  border: 1px solid var(--wiki-border);
+  border-radius: var(--wiki-radius-sm);
+  padding-inline: 0.375rem;
+  padding-block: 0.25rem;
+  unicode-bidi: isolate;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DIAGRAMS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* البند 3: تجاوز [&_svg]:max-w-full الموروثة من MermaidDiagram على الجوال.
+   data-wiki-mermaid يرفع الخصوصية بدون لمس الملف المشترك.
+   على الجوال: الـSVG يُعرض بحجمه الطبيعي داخل حاوية overflow-x-auto.  */
+@media (max-width: 767px) {
+  [data-wiki-mermaid="true"] > div {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  [data-wiki-mermaid="true"] > div svg {
+    max-width: none !important;
+  }
+}
+
+/* البند 3: داخل overlay التكبير — تمرير سلس على الجوال */
+.wiki-mermaid-overlay {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Inline SVG diagrams (.wiki-diagram) ──────────────────────────────────────
+   SVGs embedded directly in wiki markdown (class="wiki-diagram").
+   They use CSS custom-property colours (hsl(var(--primary)) etc.) and a
+   viewBox without fixed dimensions, so they scale automatically.              */
+.wiki-article .wiki-diagram {
+  display: block;
+  width: 100%;
+  max-width: 760px;
+  height: auto;
+  margin-inline: auto;
+  margin-block: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--wiki-border);
+  border-radius: var(--wiki-radius);
+  /* البند 1: card بدل background لإبراز المخطط عن سطح الصفحة في الوضعين */
+  background: hsl(var(--card));
+  box-shadow: var(--wiki-shadow-rest);
+}
+
+/* Horizontal-scroll container wrapped around every .wiki-diagram at render time.
+   Keeps dense diagrams legible on narrow viewports (pinch-zoom is disabled
+   app-wide) by letting them pan instead of shrinking to an unreadable size. */
+.wiki-article .wiki-diagram-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  .wiki-article .wiki-diagram {
+    padding: 0.75rem;
+    margin-block: 1rem;
+  }
+  /* Below this width the diagram text would shrink below legibility; keep a
+     readable minimum and let .wiki-diagram-scroll pan horizontally instead. */
+  .wiki-article .wiki-diagram-scroll .wiki-diagram {
+    min-width: 720px;
+    max-width: none;
+    margin-inline: 0;
+  }
+}
+
+/* البند 5: مؤشر تمرير أفقي للجداول العريضة على الجوال.
+   scroll-shadow على الحافة اليسرى (في RTL = نهاية الجدول).
+   الظل يظهر فقط عند وجود overflow فعلي (via background-attachment: local). */
+@media (max-width: 767px) {
+  .wiki-table-scroll {
+    -webkit-overflow-scrolling: touch;
+    background:
+      /* ظل على الحافة اليمنى (بداية الجدول في RTL) */
+      linear-gradient(to left, hsl(var(--border) / 0.4) 0, transparent 24px) left center,
+      /* ظل على الحافة اليسرى (نهاية الجدول في RTL = overflow direction) */
+      linear-gradient(to right, hsl(var(--border) / 0.4) 0, transparent 24px) right center,
+      /* صورة سطح قابلة للتمرير لإلغاء الظل حين لا overflow */
+      linear-gradient(hsl(var(--card)), hsl(var(--card))) left center,
+      linear-gradient(hsl(var(--card)), hsl(var(--card))) right center;
+    background-size: 24px 100%, 24px 100%, 16px 100%, 16px 100%;
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+  }
+}
+
+/* ── Standalone /wiki shell ────────────────────────────────────────────────
+   Gives the panel a definite height to resolve `h-full` against. `#root` sets
+   only `min-height: 100vh`, and a percentage height cannot resolve against a
+   minimum — see the comment on the route in App.tsx for the two bugs this
+   caused. `dvh` where supported so mobile browser chrome does not clip the
+   panel; `vh` first as the fallback for engines without it.                 */
+.wiki-standalone-shell {
+  height: 100vh;
+  height: 100dvh;
+}

@@ -1,0 +1,59 @@
+{
+  "title": "Terminals",
+  "newTerminal": "New terminal",
+  "defaults": {
+    "title": "Terminal {{number}}"
+  },
+  "list": {
+    "loading": "Loading terminals...",
+    "empty": "暂无终端",
+    "emptyHint": "创建一个终端，可独立于任何项目运行命令。",
+    "running": "Running",
+    "exited": "Exited"
+  },
+  "panel": {
+    "empty": "未打开终端",
+    "emptyHint": "从列表中选择一个终端，或新建一个。",
+    "renameLabel": "Rename terminal",
+    "titlePlaceholder": "Terminal name",
+    "close": "Close",
+    "closeHint": "关闭此视图（终端会继续运行）",
+    "delete": "Delete terminal",
+    "deleteHint": "停止并移除此终端",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "status": {
+    "connecting": "Connecting...",
+    "reconnecting": "Reconnecting...",
+    "exited": "已退出（代码 {{code}}）",
+    "exitedSignal": "已退出（信号 {{signal}}）",
+    "truncated": "较早的输出已被裁剪…",
+    "openedElsewhere": "此终端已在另一个标签页中打开。",
+    "openedElsewhereAction": "Reopen here",
+    "serverRestart": "因服务器重启而结束。",
+    "notFound": "此终端已不存在。",
+    "error": "Connection error."
+  },
+  "errors": {
+    "limitReached": "已达到最多 5 个运行中终端的上限。请关闭一个后再创建。",
+    "invalidTitle": "终端名称无效。",
+    "invalidCwd": "工作目录无效。",
+    "invalidInitialCommand": "初始命令无效。",
+    "createFailed": "无法创建终端，请重试。",
+    "renameFailed": "无法重命名终端，请重试。",
+    "deleteFailed": "无法删除终端，请重试。",
+    "loadFailed": "无法加载终端列表。"
+  },
+  "deleteConfirm": {
+    "title": "Delete terminal",
+    "message": "停止并移除",
+    "warning": "这会停止正在运行的进程并清空其输出，且无法撤销。",
+    "confirm": "Delete terminal",
+    "cancel": "Cancel"
+  },
+  "uptime": {
+    "label": "运行时长",
+    "ranFor": "总运行时长"
+  }
+}

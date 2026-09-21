@@ -1,0 +1,691 @@
+{
+  "btw": {
+    "title": "Nebenfrage",
+    "close": "Schließen",
+    "questionLabel": "Frage",
+    "answerLabel": "Antwort",
+    "status": {
+      "pending": "Wird vorbereitet…",
+      "streaming": "Schreibt…",
+      "complete": "Fertig",
+      "thinking": "Denkt nach…"
+    },
+    "errors": {
+      "unsupported_provider": "Der „/btw“-Seitenkanal ist nur für Claude-Sitzungen verfügbar.",
+      "session_not_found": "Sitzung nicht gefunden — öffne zuerst eine Sitzung und stelle dann deine Nebenfrage.",
+      "not_visible": "Du hast keine Berechtigung, den Kontext dieser Sitzung zu sehen.",
+      "busy": "Die Sitzung ist beschäftigt — versuche es gleich noch einmal.",
+      "sdk_error": "Nebenfrage konnte nicht abgeschlossen werden — ein unerwarteter Fehler ist aufgetreten.",
+      "empty_response": "The model produced no visible answer — try rephrasing the question.",
+      "timeout": "Diese Funktion erfordert ein Server-Update.",
+      "disconnected": "Senden nicht möglich — Verbindung unterbrochen."
+    },
+    "hints": {
+      "quota": "Verbraucht dein Claude-Kontingent.",
+      "context": "Antwort basierend auf dem Sitzungskontext bis zur zuletzt gespeicherten Nachricht."
+    },
+    "fork": {
+      "actionFull": "Mit vollem Kontext fortsetzen",
+      "actionFresh": "Neue Unterhaltung",
+      "pending": "Wird geforkt…",
+      "hintFull": "Fork: eine neue Unterhaltung mit dieser gesamten Sitzung, dann Frage und Antwort — wie in Claude Code. Kürzel: f",
+      "hintFresh": "Eine neue Unterhaltung nur mit Frage und Antwort, im selben Projekt — ohne Sitzungskontext. Kürzel: n",
+      "errors": {
+        "busy": "Ein Fork läuft bereits — bitte kurz warten.",
+        "session_not_found": "Die Ausgangssitzung wurde nicht gefunden.",
+        "not_writable": "Du darfst in diesem Projekt keine Unterhaltung anlegen.",
+        "unsupported_provider": "Forken ist nur für Claude-Sitzungen verfügbar.",
+        "invalid_request": "Ein Fork braucht die Frage und ihre Antwort.",
+        "transcript_not_found": "Für diese Sitzung gibt es kein gespeichertes Transkript zum Forken.",
+        "source_empty": "Diese Sitzung enthält keine Nachrichten zum Forken.",
+        "source_too_large": "Diese Unterhaltung ist zu groß zum Forken.",
+        "message_not_found": "Die angeheftete Nachricht ist nicht mehr in dieser Sitzung.",
+        "fork_failed": "Forken fehlgeschlagen — unerwarteter Fehler.",
+        "timeout": "Zeitüberschreitung beim Forken — prüfe deine Unterhaltungsliste, sie wurde eventuell angelegt.",
+        "disconnected": "Forken nicht möglich — Verbindung getrennt."
+      }
+    },
+    "description": "Eine Nebenfrage zum aktuellen Sitzungskontext stellen"
+  },
+  "contextRot": {
+    "label": "Kontext",
+    "barAria": "Kontextauslastung",
+    "empty": "Noch keine Token-Nutzung",
+    "percentUsed": "{{percent}} des realen Fensters",
+    "tooltipUsed": "Genutzt vom realen Fenster: {{used}} / {{total}}",
+    "tooltipCacheRead": "Cache gelesen: {{value}}",
+    "popoverTitle": "Kontextauslastung",
+    "close": "Schließen",
+    "levels": {
+      "safe": "Unter der vorgeschlagenen Komprimierungsschwelle",
+      "attention": "Komprimierungsschwelle nicht verfügbar",
+      "warning": "Vorgeschlagene Komprimierungsschwelle erreicht",
+      "critical": "Vorgeschlagene Komprimierungsschwelle erreicht"
+    },
+    "nativeThreshold": "Ursprüngliche Komprimierungsschwelle: {{value}} Tokens",
+    "proposedThreshold": "Vorgeschlagene Komprimierungsschwelle: {{value}} Tokens",
+    "thresholdUnknown": "Komprimierungsschwelle nicht verfügbar",
+    "lastInput": "Eingabe der letzten Anfrage: {{value}} Tokens (keine aktuelle Belegung)",
+    "pressureReached": "Vorgeschlagene Komprimierungsschwelle erreicht",
+    "pressureBelow": "Unter der vorgeschlagenen Komprimierungsschwelle",
+    "alerts": {
+      "pressure": "Vorgeschlagene Komprimierungsschwelle erreicht",
+      "close": "250.000 Tokens erreicht — erwäge eine neue Unterhaltung.",
+      "hour": "Die Sitzung ist über eine Stunde alt — erwäge eine Zusammenfassung zum Fortsetzen.",
+      "compact": "150.000 Tokens erreicht — erwäge /compact."
+    },
+    "unavailable": "Aktuelle Kontextnutzung nicht verfügbar"
+  },
+  "codeBlock": {
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "copyCode": "Code kopieren",
+    "executeRaw": "Ausführen",
+    "executeRawTitle": "Diesen Befehl auf dem Nassaj-Server ausführen (Überprüfungsdialog)",
+    "inserting": "Zur Warteschlange hinzufügen…",
+    "insertError": {
+      "carriage_return_forbidden": "Befehl enthält \\r (Windows) — mit LF erneut einfügen",
+      "too_many_lines": "Befehl überschreitet das Limit (100 Zeilen)",
+      "empty_command": "Befehl ist leer",
+      "command_too_long": "Befehl zu lang (max. 4096 Zeichen)",
+      "too_many_commands": "Warteschlange ist voll (max. 20 Befehle)",
+      "raw_exec_disabled": "Direkte Ausführung ist deaktiviert",
+      "config_denied": "Nicht erlaubt — Befehlsbrett-Einstellungen prüfen",
+      "internal": "Befehl konnte nicht zur Warteschlange hinzugefügt werden",
+      "denied_command": "Durch eine Governance-Regel blockiert ({{rule}}): In dieser Form kann der Wächter ein sicheres Ziel nicht vom Server, auf dem die Befehlstafel läuft, oder dessen Gateway unterscheiden. Wenn Sie geprüft haben, dass das Ziel ein anderes ist, führen Sie ihn in Ihrem eigenen Terminal aus.",
+      "denied_command_fatal": "Blockiert ({{rule}}): Diese Form legt den Server, auf dem die Befehlstafel läuft, lahm oder nimmt ihn nicht aus. Für einen Neustart verwenden Sie bash scripts/safe-restart.sh --exec; alles andere führen Sie bewusst in Ihrem eigenen Terminal aus.",
+      "forbidden_control_char": "Der Befehl enthält ein verbotenes Steuer- oder Bidi-Zeichen — er könnte anders angezeigt werden als er ausgeführt wird",
+      "invalid_command": "Ungültiger Befehl",
+      "stamp": "Von Ihrem Klick um {{time}} — kein Live-Status",
+      "stampRepeat": "Versuch {{count}} um {{time}} — gleiches Ergebnis",
+      "dismiss": "Ausblenden"
+    }
+  },
+  "copyMessage": {
+    "copy": "Nachricht kopieren",
+    "copied": "Nachricht kopiert",
+    "selectFormat": "Kopierformat auswählen",
+    "copyAsMarkdown": "Als Markdown kopieren",
+    "copyAsText": "Als Text kopieren"
+  },
+  "messageTypes": {
+    "user": "Benutzer:in",
+    "error": "Fehler",
+    "tool": "Werkzeug",
+    "claude": "Claude",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "antigravity": "Antigravity",
+    "opencode": "OpenCode",
+    "kimi": "Kimi",
+    "deepseek": "DeepSeek",
+    "glm": "GLM"
+  },
+  "subagent": {
+    "badge": "Unteragent",
+    "shortBadge": "Unteragent",
+    "badgeLabel": "Unteragent-Aufgabe"
+  },
+  "coordinator": {
+    "label": "Koordinator",
+    "withName": "Koordinator: {{username}}"
+  },
+  "userAuthor": {
+    "withName": "Benutzer:in: {{username}}"
+  },
+  "externalOrigin": {
+    "label": "Außerhalb der Benutzeroberfläche erstellt"
+  },
+  "coordinatorPrompt": {
+    "label": "Koordinator → Unteragent",
+    "ariaLabel": "Koordinator-Prompt an Unteragent"
+  },
+  "systemMessage": {
+    "label": "Systemnachricht",
+    "ariaLabel": "Automatisierte Systemnachricht"
+  },
+  "sessionNotResumable": {
+    "message": "Diese Sitzung konnte nicht fortgesetzt werden — sie existiert beim Anbieter nicht mehr.",
+    "startNew": "Neue Sitzung starten"
+  },
+  "tools": {
+    "settings": "Werkzeugeinstellungen",
+    "error": "Werkzeugfehler",
+    "result": "Werkzeugergebnis",
+    "viewParams": "Eingabeparameter anzeigen",
+    "viewRawParams": "Rohe Parameter anzeigen",
+    "viewDiff": "Bearbeitungs-Diff anzeigen für",
+    "creatingFile": "Neue Datei wird erstellt:",
+    "updatingTodo": "Aufgabenliste wird aktualisiert",
+    "read": "Gelesen",
+    "readFile": "Datei lesen",
+    "updateTodo": "Aufgabenliste aktualisieren",
+    "readTodo": "Aufgabenliste lesen",
+    "searchResults": "Ergebnisse"
+  },
+  "search": {
+    "found": "{{count}} {{type}} gefunden",
+    "file": "Datei",
+    "files": "Dateien",
+    "pattern": "Muster:",
+    "in": "in:"
+  },
+  "fileOperations": {
+    "updated": "Datei erfolgreich aktualisiert",
+    "created": "Datei erfolgreich erstellt",
+    "written": "Datei erfolgreich geschrieben",
+    "diff": "Diff",
+    "newFile": "Neue Datei",
+    "viewContent": "Dateiinhalt anzeigen",
+    "viewFullOutput": "Vollständige Ausgabe anzeigen ({{count}} Zeichen)",
+    "contentDisplayed": "Der Dateiinhalt wird in der Diff-Ansicht oben angezeigt"
+  },
+  "interactive": {
+    "title": "Interaktive Eingabeaufforderung",
+    "waiting": "Warte auf deine Antwort in der CLI",
+    "instruction": "Bitte wähl eine Option in deinem Terminal, in dem Claude läuft.",
+    "selectedOption": "✓ Claude hat Option {{number}} ausgewählt",
+    "instructionDetail": "In der CLI würdest du diese Option interaktiv mit den Pfeiltasten oder durch Eingabe der Nummer auswählen."
+  },
+  "thinking": {
+    "title": "Denkt nach...",
+    "emoji": "💭 Denkt nach..."
+  },
+  "json": {
+    "response": "JSON-Antwort"
+  },
+  "permissions": {
+    "grant": "Berechtigung für {{tool}} erteilen",
+    "added": "Berechtigung hinzugefügt",
+    "addTo": "Fügt {{entry}} zu erlaubten Werkzeugen hinzu.",
+    "retry": "Berechtigung gespeichert. Wiederhole die Anfrage, um das Werkzeug zu verwenden.",
+    "error": "Berechtigungen konnten nicht aktualisiert werden. Bitte erneut versuchen.",
+    "openSettings": "Einstellungen öffnen"
+  },
+  "todo": {
+    "updated": "Aufgabenliste wurde erfolgreich aktualisiert",
+    "current": "Aktuelle Aufgabenliste"
+  },
+  "plan": {
+    "viewPlan": "📋 Implementierungsplan anzeigen",
+    "title": "Implementierungsplan"
+  },
+  "usageLimit": {
+    "resetAt": "Claude-Nutzungslimit erreicht. Dein Limit wird um **{{time}} {{timezone}}** zurückgesetzt - {{date}}"
+  },
+  "codex": {
+    "permissionMode": "Berechtigungsmodus",
+    "modes": {
+      "default": "Standardmodus",
+      "auto": "Auto-Modus",
+      "acceptEdits": "Bearbeitungen akzeptieren",
+      "bypassPermissions": "Berechtigungen umgehen",
+      "plan": "Planungsmodus"
+    },
+    "descriptions": {
+      "default": "Nur vertrauenswürdige Befehle (ls, cat, grep, git status usw.) werden automatisch ausgeführt. Andere Befehle werden übersprungen. Kann in den Arbeitsbereich schreiben.",
+      "auto": "Ein Modell-Klassifizierer entscheidet pro Werkzeugaufruf, ob er genehmigt oder abgelehnt wird. Freihändig, aber sicherer als Bypass — Ablehnungen kommen trotzdem vor.",
+      "acceptEdits": "Alle Befehle werden automatisch innerhalb des Arbeitsbereichs ausgeführt. Vollautomatischer Modus mit isolierter Ausführung.",
+      "bypassPermissions": "Vollständiger Systemzugriff ohne Einschränkungen. Alle Befehle werden automatisch mit vollem Festplatten- und Netzwerkzugriff ausgeführt. Mit Vorsicht verwenden.",
+      "plan": "Planungsmodus – keine Befehle werden ausgeführt"
+    },
+    "technicalDetails": "Technische Details",
+    "posture": {
+      "title": "Tatsächliche Sandbox-Obergrenze",
+      "default": "sandbox: workspace-write · approvals: untrusted · network: OFF",
+      "acceptEdits": "sandbox: workspace-write · approvals: never · network: OFF",
+      "bypassPermissions": "sandbox: workspace-write · approvals: never · network: OFF — identisch mit „Bearbeitungen akzeptieren“. Voller Festplatten- und Netzwerkzugriff nur, wenn der Betreiber ihn für diese Installation aktiviert hat (standardmäßig aus)."
+    }
+  },
+  "gemini": {
+    "permissionMode": "Gemini-Berechtigungsmodus",
+    "description": "Steuert, wie Gemini CLI Vorgangsgenehmigungen handhabt.",
+    "modes": {
+      "default": {
+        "title": "Standard (Genehmigung erforderlich)",
+        "description": "Gemini fordert vor der Ausführung von Befehlen, dem Schreiben von Dateien und dem Abrufen von Web-Ressourcen eine Genehmigung an."
+      },
+      "autoEdit": {
+        "title": "Auto-Bearbeitung (Dateigenehmigungen überspringen)",
+        "description": "Gemini genehmigt automatisch Dateibearbeitungen und Web-Abrufe, fragt aber weiterhin bei Shell-Befehlen nach."
+      },
+      "yolo": {
+        "title": "YOLO (Alle Berechtigungen umgehen)",
+        "description": "Gemini führt alle Vorgänge ohne Rückfrage aus. Vorsicht ist geboten."
+      }
+    }
+  },
+  "input": {
+    "placeholder": "/ für Befehle, @ für Dateien eingeben oder {{provider}} etwas fragen...",
+    "placeholderDefault": "Nachricht eingeben...",
+    "disabled": "Eingabe deaktiviert",
+    "attachFiles": "Dateien anhängen",
+    "attachFilesAndImages": "Dateien oder Bilder anhängen",
+    "attachImages": "Bilder anhängen",
+    "send": "Senden",
+    "stop": "Stoppen",
+    "hintText": {
+      "ctrlEnter": "Strg+Enter zum Senden • Shift+Enter für neue Zeile",
+      "enter": "Enter zum Senden • Shift+Enter für neue Zeile"
+    },
+    "clickToChangeMode": "Klicken, um den Berechtigungsmodus zu ändern (oder Tab in der Eingabe drücken)",
+    "showAllCommands": "Alle Befehle anzeigen",
+    "clearInput": "Eingabe leeren",
+    "scrollToBottom": "Nach unten scrollen",
+    "dropFilesHere": "Dateien hier ablegen",
+    "nonClaudeAttachmentHint": "Anhänge werden nur mit Claude verwendet",
+    "voice": {
+      "start": "Spracheingabe",
+      "stop": "Spracheingabe beenden",
+      "language": "Diktatsprache",
+      "languageHint": "Rechtsklick oder langes Drücken öffnet die Sprachauswahl",
+      "listening": "Hört zu…",
+      "startedAnnouncement": "Spracheingabe gestartet",
+      "stoppedAnnouncement": "Spracheingabe beendet",
+      "consentTitle": "Spracheingabe und Datenschutz",
+      "consent": "Beim Diktieren wird das Audio von der Spracherkennung des Browsers verarbeitet (Chrome sendet es an Google-Server). Fortfahren?",
+      "consentAccept": "Fortfahren",
+      "consentCancel": "Abbrechen",
+      "errors": {
+        "notAllowed": "Mikrofonzugriff verweigert. Erlaube ihn in den Browsereinstellungen und versuche es erneut.",
+        "network": "Der Spracherkennungsdienst ist nicht erreichbar. Prüfe deine Verbindung.",
+        "audioCapture": "Kein Mikrofon verfügbar. Prüfe dein Gerät und versuche es erneut.",
+        "languageNotSupported": "Die gewählte Sprache wird von diesem Browser nicht unterstützt.",
+        "startFailed": "Spracheingabe konnte nicht gestartet werden.",
+        "restartExhausted": "Diktat nach mehreren Versuchen beendet. Zum Neustart die Taste drücken.",
+        "unsupported": "Spracheingabe ist in diesem Browser oder ohne sichere (HTTPS-)Verbindung nicht verfügbar.",
+        "generic": "Die Spracheingabe konnte nicht fortgesetzt werden.",
+        "noKey": "Es ist kein Transkriptionsschlüssel hinterlegt. Fügen Sie einen in den Einstellungen hinzu und versuchen Sie es erneut.",
+        "invalidKey": "Der Anbieter hat den Transkriptionsschlüssel abgelehnt. Prüfen Sie ihn in den Einstellungen.",
+        "rateLimited": "Das Anfragelimit des Anbieters ist erreicht. Warten Sie einen Moment und versuchen Sie es erneut.",
+        "timeout": "Zeitüberschreitung bei der Transkription. Versuchen Sie eine kürzere Aufnahme.",
+        "unreachable": "Der Transkriptionsanbieter ist nicht erreichbar. Prüfen Sie Ihre Verbindung oder die Anbieter-URL.",
+        "transcriptionFailed": "Der Anbieter konnte die Transkription nicht abschließen.",
+        "tooLarge": "Die Aufnahme überschreitet das Limit von {{maxMb}} MB. Nehmen Sie einen kürzeren Abschnitt auf.",
+        "unsupportedAudio": "Dieses Aufnahmeformat wird nicht unterstützt.",
+        "emptyAudio": "Es wurde kein Ton aufgenommen. Prüfen Sie Ihr Mikrofon und versuchen Sie es erneut.",
+        "captureFailed": "Das Mikrofon konnte nicht geöffnet werden.",
+        "recorderFailed": "Tonaufnahme ist in diesem Browser nicht verfügbar.",
+        "uploadFailed": "Die Aufnahme konnte nicht hochgeladen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut."
+      },
+      "mode": "Transkriptionsmodus",
+      "modeFast": "Schnell (Browser)",
+      "modeFastHint": "Sofort und kostenlos, ohne Zeichensetzung, Sprache vorab gewählt",
+      "modeAccurate": "Genau (Whisper)",
+      "modeAccurateHint": "Automatische Spracherkennung und Zeichensetzung, Text nach ein bis zwei Sekunden",
+      "modeAccurateNeedsKey": "Benötigt einen Schlüssel in den Einstellungen",
+      "modeAccurateUnsupported": "Aufnahme wird in diesem Browser oder außerhalb einer sicheren (HTTPS-)Verbindung nicht unterstützt",
+      "languageAutoNote": "Der genaue Modus erkennt die Sprache automatisch aus der Aufnahme, daher gibt es hier keine Sprachauswahl.",
+      "startAccurate": "Aufnehmen und genau transkribieren",
+      "stopAccurate": "Aufnahme beenden und transkribieren",
+      "recording": "Nimmt auf …",
+      "transcribing": "Transkribiert …",
+      "recordingAnnouncement": "Aufnahme gestartet",
+      "transcribingAnnouncement": "Aufnahme wird transkribiert",
+      "transcribedAnnouncement": "Transkribierter Text eingefügt",
+      "maxDurationNotice": "Die Aufnahme hat ihr Limit von zwei Minuten erreicht und wurde beendet; das Aufgenommene wird transkribiert.",
+      "accurateConsentTitle": "Genaue Transkription und Datenschutz",
+      "accurateConsent": "Im genauen Modus wird Ihre Stimme aufgenommen, an den Nassaj-Server hochgeladen und mit dem Betreiberschlüssel an den externen Transkriptionsanbieter weitergegeben. Die Aufnahme wird weder auf die Festplatte noch in Protokolle geschrieben. Fortfahren?"
+    }
+  },
+  "scheduled": {
+    "open": "Nachricht planen",
+    "title": "Nachricht planen",
+    "editTitle": "Geplante Nachricht bearbeiten",
+    "description": "Nassaj sendet sie zur gewählten Ortszeit in dieser Unterhaltung.",
+    "message": "Nachricht",
+    "quickTime": "Schnellauswahl",
+    "date": "Datum",
+    "time": "Uhrzeit",
+    "summary": "Geplant für {{value}}",
+    "schedule": "Planen",
+    "saveChanges": "Änderungen speichern",
+    "close": "Schließen",
+    "panelTitle": "Geplante Nachrichten",
+    "refresh": "Geplante Nachrichten aktualisieren",
+    "edit": "Geplante Nachricht bearbeiten",
+    "retry": "Erneut versuchen",
+    "cancel": "Geplante Nachricht abbrechen",
+    "failureCode": "Senden fehlgeschlagen ({{code}})",
+    "presets": {
+      "15m": "In 15 Min.",
+      "1h": "In 1 Stunde",
+      "evening": "Heute Abend",
+      "tomorrow": "Morgen"
+    },
+    "status": {
+      "pending": "Geplant",
+      "running": "Wird gesendet",
+      "sent": "Gesendet",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "errors": {
+      "empty": "Schreiben Sie zuerst eine Nachricht.",
+      "invalid": "Wählen Sie ein gültiges Datum und eine Uhrzeit.",
+      "tooSoon": "Wählen Sie einen Zeitpunkt mindestens eine Minute ab jetzt.",
+      "tooLate": "Nachrichten können bis zu 30 Tage im Voraus geplant werden.",
+      "save": "Die geplante Nachricht konnte nicht gespeichert werden.",
+      "load": "Geplante Nachrichten konnten nicht geladen werden."
+    }
+  },
+  "fileAttachment": {
+    "removeFile": "Datei entfernen",
+    "uploading": "Wird hochgeladen…",
+    "errorType": "Dateityp nicht erlaubt",
+    "errorSize": "Datei zu groß (max. 50 MB)",
+    "errorCount": "Zu viele Dateien angehängt (max. {{max}})"
+  },
+  "effortMode": {
+    "selector": {
+      "title": "Aufwandsstufe",
+      "description": "Steuert, wie viel Rechenleistung Claude für Ihre Anfrage einsetzt",
+      "active": "Aktiv",
+      "tip": "ultracode aktiviert maximale Tiefe mit Multi-Agenten-Formatierung — ultracode und max fügen Farbhinweise hinzu"
+    },
+    "modes": {
+      "none": {
+        "name": "auto",
+        "description": "Standard-Effort-Level deines Modells verwenden"
+      },
+      "low": {
+        "name": "niedrig",
+        "description": "Schnelle, leichte Antworten — am besten für einfache Fragen"
+      },
+      "medium": {
+        "name": "mittel",
+        "description": "Ausgewogenes Verhältnis von Tiefe und Geschwindigkeit"
+      },
+      "high": {
+        "name": "hoch",
+        "description": "Tieferes Nachdenken für komplexe Aufgaben"
+      },
+      "xhigh": {
+        "name": "sehr hoch",
+        "description": "Sehr hoher Aufwand für anspruchsvolle Probleme"
+      },
+      "max": {
+        "name": "maximal",
+        "description": "Maximaler Aufwand — volles Rechenbudget (nur diese Sitzung, nicht in Einstellungen gespeichert)"
+      },
+      "ultracode": {
+        "name": "ultracode",
+        "description": "Sitzungsmodus: xhigh + dynamische Workshop-Formatierung — kein gespeicherter Aufwandslevel"
+      }
+    },
+    "buttonTitle": "Aufwand: {{mode}}",
+    "ultracodeActive": "Ultracode-Aufwand aktiv"
+  },
+  "providerSelection": {
+    "title": "KI-Assistent wählen",
+    "description": "Anbieter auswählen, um eine neue Unterhaltung zu starten",
+    "selectModel": "Modell auswählen",
+    "providerInfo": {
+      "anthropic": "von Anthropic",
+      "openai": "von OpenAI",
+      "cursorEditor": "KI-Code-Editor",
+      "google": "von Google"
+    },
+    "readyPrompt": {
+      "claude": "Bereit, Claude mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "cursor": "Bereit, Cursor mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "codex": "Bereit, Codex mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "gemini": "Bereit, Gemini mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "antigravity": "Bereit für Antigravity (agy) mit {{model}}. Schreiben Sie Ihre Nachricht unten.",
+      "opencode": "Bereit, OpenCode mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "default": "Wähl oben einen Anbieter, um zu beginnen",
+      "kimi": "Bereit, Kimi mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "deepseek": "Bereit, DeepSeek mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "glm": "Bereit, GLM mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
+      "claudeEngine": "Bereit: die Claude-Engine läuft auf {{provider}} mit {{model}}. Gib unten deine Nachricht ein."
+    },
+    "antigravity": {
+      "activeModel": "Aktives Modell",
+      "activeModelLabel": "Aktives Modell",
+      "loading": "Lädt…",
+      "unknown": "Unbekannt"
+    },
+    "pressToSearch": "Drücke <kbd>{{shortcut}}</kbd>, um Sitzungen, Dateien und Commits zu durchsuchen",
+    "refresh": {
+      "button": "Modelle und Authentifizierungsstatus aktualisieren",
+      "refreshing": "Wird aktualisiert…"
+    },
+    "providerUnavailable": "Anbieter nicht verfügbar",
+    "signIn": "Anmelden",
+    "addApiKey": "{{provider}}-API-Schlüssel hinzufügen, um zu aktivieren",
+    "engineOnVendor": "Claude-Engine auf {{provider}}"
+  },
+  "session": {
+    "continue": {
+      "title": "Unterhaltung fortsetzen",
+      "description": "Stell Fragen zu deinem Code, fordere Änderungen an oder hol Hilfe bei Entwicklungsaufgaben"
+    },
+    "loading": {
+      "olderMessages": "Ältere Nachrichten werden geladen...",
+      "sessionMessages": "Sitzungsnachrichten werden geladen..."
+    },
+    "messages": {
+      "showingOf": "{{shown}} von {{total}} Nachrichten werden angezeigt",
+      "scrollToLoad": "Nach oben scrollen, um mehr zu laden",
+      "showingLast": "Letzte {{count}} Nachrichten werden angezeigt ({{total}} gesamt)",
+      "loadEarlier": "Frühere Nachrichten laden",
+      "loadAll": "Alle Nachrichten laden",
+      "loadingAll": "Alle Nachrichten werden geladen...",
+      "allLoaded": "Alle Nachrichten geladen",
+      "perfWarning": "Alle Nachrichten geladen – Scrollen kann langsamer sein. Klick auf 'Nach unten scrollen', um die Leistung wiederherzustellen."
+    }
+  },
+  "shell": {
+    "selectProject": {
+      "title": "Projekt auswählen",
+      "description": "Wähl ein Projekt, um ein interaktives Terminal in diesem Verzeichnis zu öffnen"
+    },
+    "status": {
+      "newSession": "Neue Sitzung",
+      "initializing": "Wird initialisiert...",
+      "restarting": "Wird neu gestartet..."
+    },
+    "actions": {
+      "disconnect": "Trennen",
+      "disconnectTitle": "Vom Terminal trennen",
+      "restart": "Neu starten",
+      "restartTitle": "Terminal neu starten",
+      "connect": "Im Terminal fortfahren",
+      "connectTitle": "Mit Terminal verbinden"
+    },
+    "loading": "Terminal wird geladen...",
+    "connecting": "Verbindung zum Terminal wird hergestellt...",
+    "reconnecting": "Verbindung zur Shell wird wiederhergestellt...",
+    "startSession": "Neue Claude-Sitzung starten",
+    "resumeSession": "Sitzung fortsetzen: {{displayName}}...",
+    "runCommand": "{{command}} in {{projectName}} ausführen",
+    "startCli": "Claude CLI wird in {{projectName}} gestartet",
+    "defaultCommand": "Befehl"
+  },
+  "claudeStatus": {
+    "actions": {
+      "thinking": "Denkt nach",
+      "processing": "Verarbeitet",
+      "analyzing": "Analysiert",
+      "working": "Arbeitet",
+      "computing": "Berechnet",
+      "reasoning": "Schlussfolgert"
+    },
+    "state": {
+      "live": "Live",
+      "paused": "Pausiert"
+    },
+    "elapsed": {
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}}m {{seconds}}s",
+      "label": "{{time}} vergangen",
+      "startingNow": "Startet jetzt"
+    },
+    "controls": {
+      "stopGeneration": "Generierung stoppen",
+      "pressEscToStop": "Jederzeit Esc drücken, um zu stoppen"
+    },
+    "providers": {
+      "assistant": "Assistent"
+    },
+    "frozen": "Pausiert (Prozess eingefroren)"
+  },
+  "runProgress": {
+    "tasksLabel": "Aufgaben",
+    "barAria": "Aufgabenfortschritt",
+    "tasksTooltip": "Aufgaben: {{done}} von {{total}} erledigt",
+    "inProgressTooltip_one": "{{count}} in Bearbeitung",
+    "inProgressTooltip_other": "{{count}} in Bearbeitung",
+    "agentsTooltip": "Unteragenten: {{done}}/{{total}}",
+    "agentWorking": "Agent · {{calls}}",
+    "agentWorkingTooltip": "Unteragent arbeitet: {{calls}} Aufrufe",
+    "estimateRemaining": "≈ {{time}} verbleibend",
+    "estimating": "wird geschätzt…",
+    "estimateTooltip": "Grobe Schätzung — basierend auf bisher abgeschlossenen Aufgaben."
+  },
+  "agentActivity": {
+    "title": "Agenten-Aktivität",
+    "summary": "{{running}}/{{total}} laufen",
+    "running": "Läuft",
+    "done": "Erledigt",
+    "currently": "jetzt",
+    "calls": "{{calls}}",
+    "callsTooltip": "{{calls}} Werkzeugaufrufe",
+    "rowAria": "{{type}} — {{status}}",
+    "detailsPlaceholder": "Werkzeugverlauf kommt bald.",
+    "noTools": "Noch keine Werkzeugaufrufe aufgezeichnet.",
+    "toolSuccess": "Erledigt",
+    "toolRunning": "Läuft"
+  },
+  "projectSelection": {
+    "startChatWithProvider": "Wähl ein Projekt, um mit {{provider}} zu chatten"
+  },
+  "tasks": {
+    "nextTaskPrompt": "Nächste Aufgabe starten"
+  },
+  "participants": {
+    "hide": "Teilnehmerleiste ausblenden",
+    "show": "Teilnehmerleiste anzeigen",
+    "lastSeen": "Zuletzt gesehen",
+    "invocations_one": "{{count}} Aufruf",
+    "invocations_other": "{{count}} Aufrufe",
+    "usersAria_one": "{{count}} Teilnehmende:r",
+    "usersAria_other": "{{count}} Teilnehmende",
+    "barAria": "Unterhaltungsteilnehmende",
+    "openSessionsNow": "Aktive Unterhaltungen",
+    "openSessionsNowCount": "{{count}} aktive Unterhaltungen",
+    "andMore_one": "und {{count}} weiterer",
+    "andMore_other": "und {{count}} weitere",
+    "projectSummary": "{{users}} Benutzer:innen · {{agents}} Agenten",
+    "roles": {
+      "owner": "Eigentümer:in",
+      "admin": "Admin",
+      "user": "Mitglied"
+    },
+    "agentKinds": {
+      "model": "Basismodell",
+      "subagent": "Unteragent"
+    },
+    "agentSummary_one": "{{count}} Agent",
+    "agentSummary_other": "{{count}} Agenten",
+    "totalInvocations_one": "{{count}} Aufruf",
+    "totalInvocations_other": "{{count}} Aufrufe",
+    "agentSummaryAria": "{{agents}} verschiedene Agenten · {{calls}} Aufrufe insgesamt",
+    "unknownAuthor": "Unbekannte:r Autor:in",
+    "agentsPanelTitle": "Beteiligte der Unterhaltung",
+    "modelsSection": "Modelle",
+    "subagentsSection": "Subagenten",
+    "turns_one": "{{count}} Runde",
+    "turns_other": "{{count}} Runden",
+    "harnessLine": "Harness: {{harness}}",
+    "olderModels_one": "{{count}} früheres Modell",
+    "olderModels_other": "{{count}} frühere Modelle"
+  },
+  "ws": {
+    "statusConnected": "Verbunden",
+    "statusReconnecting": "Verbindung wird wiederhergestellt…",
+    "statusDisconnected": "Getrennt",
+    "ariaConnected": "WebSocket verbunden",
+    "ariaReconnecting": "WebSocket verbindet erneut",
+    "ariaDisconnected": "WebSocket getrennt",
+    "sendFailed": "Nachricht nicht gesendet — Verbindung unterbrochen",
+    "sendDisabledTitle": "Senden nicht möglich — Verbindung unterbrochen",
+    "abortFailed": "Stoppen fehlgeschlagen — Verbindung unterbrochen. Ein erneuter Versuch kann helfen."
+  },
+  "serverError": {
+    "project_dir_missing": "Projektordner nicht auf Festplatte gefunden",
+    "cli_not_installed": "CLI nicht installiert — bitte das erforderliche CLI-Werkzeug installieren",
+    "spawn_failed": "Prozess konnte nicht gestartet werden — Serverprotokoll auf Details prüfen",
+    "session_create_failed": "Neue Sitzung konnte nicht gestartet werden — bitte erneut versuchen",
+    "unknown": "Ein unerwarteter Serverfehler ist aufgetreten"
+  },
+  "refreshChat": {
+    "button": "Chat aktualisieren",
+    "refreshing": "Wird aktualisiert…"
+  },
+  "composerMode": {
+    "chat": "Chat",
+    "agent": "Agent"
+  },
+  "customCommand": {
+    "confirmBashExecution": "Dieser Befehl enthält Bash-Befehle, die ausgeführt werden. Möchten Sie fortfahren?",
+    "executionCancelled": "Befehlsausführung abgebrochen",
+    "executeError": "Fehler beim Ausführen des Befehls: {{message}}",
+    "unknownError": "Unbekannter Fehler"
+  },
+  "inlineModelSwitcher": {
+    "label": "Modell",
+    "tooltip": "Gilt ab der nächsten Antwort",
+    "noModels": "Keine Modelle verfügbar",
+    "switching": "Wechsle…",
+    "ariaLabel": "Modell wechseln: {{model}}",
+    "scopeSession": "Nur diese Unterhaltung",
+    "scopeDefault": "Standard für alle neuen Unterhaltungen",
+    "confirmedSession": "Auf diese Unterhaltung angewendet: {{model}}",
+    "confirmedDefault": "Als Standard gesetzt: {{model}}",
+    "followDefault": "Aktuellem Standard folgen",
+    "clearing": "Wird zurückgesetzt…",
+    "clearedNotice": "Unterhaltung zum Standard zurückgekehrt: {{model}}",
+    "engineRunning": "Läuft auf {{engine}} — anderes Modell oder Engine wählen",
+    "engineRunningShort": "Auf {{engine}}",
+    "officialEngine": "Anthropic"
+  },
+  "conversationCost": {
+    "label": "Kosten",
+    "tooltipTitle": "Kosten der Unterhaltung",
+    "unavailable": "Kosten für diesen Anbieter nicht verfügbar",
+    "partial": "Teilweise — für einige Modelle ist kein Preis veröffentlicht",
+    "apiEquivalent": "API-äquivalenter Wert dieser Nutzung im Abo — kein berechneter Betrag",
+    "billed": "Berechnete Nutzung",
+    "pricesAsOf": "Preise vom {{date}}",
+    "subagents": "Enthält Subagenten-Aktivität ({{count}} Anfragen)",
+    "perModel": "Nach Modell",
+    "loading": "Wird berechnet…",
+    "turnTokens": "tokens",
+    "turnCostUnavailable": "Turn cost unavailable"
+  },
+  "closeConversation": {
+    "close": "Unterhaltung schließen",
+    "reopen": "Unterhaltung wieder öffnen",
+    "closedBadge": "Geschlossen",
+    "failed": "Status konnte nicht aktualisiert werden"
+  },
+  "imageCrop": {
+    "title": "Bild zuschneiden",
+    "cropButton": "{{name}} zuschneiden",
+    "confirm": "Zuschnitt anwenden",
+    "cancel": "Abbrechen",
+    "zoom": "Zoom",
+    "rotate": "90° drehen",
+    "aspectLabel": "Seitenverhältnis",
+    "aspectFree": "Frei",
+    "aspect1to1": "1:1",
+    "aspect4to3": "4:3",
+    "aspect16to9": "16:9",
+    "processing": "Wird verarbeitet…",
+    "error": "Bild konnte nicht zugeschnitten werden. Bitte erneut versuchen.",
+    "cropArea": "Zuschneidebereich",
+    "cropHint": "Pfeiltasten verwenden, um den Zuschneidebereich zu verschieben oder anzupassen"
+  }
+}

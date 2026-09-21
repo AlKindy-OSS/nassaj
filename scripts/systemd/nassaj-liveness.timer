@@ -1,0 +1,11 @@
+# B-323 — مؤقّت مرصاد الحياة: كل ٦٠ ثانية.
+[Unit]
+Description=Run nassaj liveness probe every 60s (B-323)
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=10
+
+[Install]
+WantedBy=timers.target

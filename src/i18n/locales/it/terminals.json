@@ -1,0 +1,59 @@
+{
+  "title": "Terminali",
+  "newTerminal": "Nuovo terminale",
+  "defaults": {
+    "title": "Terminale {{number}}"
+  },
+  "list": {
+    "loading": "Caricamento terminali...",
+    "empty": "Nessun terminale",
+    "emptyHint": "Crea un terminale per eseguire comandi indipendentemente da qualsiasi progetto.",
+    "running": "In esecuzione",
+    "exited": "Terminato"
+  },
+  "panel": {
+    "empty": "Nessun terminale aperto",
+    "emptyHint": "Scegli un terminale dall'elenco oppure creane uno nuovo.",
+    "renameLabel": "Rinomina terminale",
+    "titlePlaceholder": "Nome del terminale",
+    "close": "Chiudi",
+    "closeHint": "Chiudi questa vista (il terminale resta in esecuzione)",
+    "delete": "Elimina terminale",
+    "deleteHint": "Arresta e rimuovi questo terminale",
+    "save": "Salva",
+    "cancel": "Annulla"
+  },
+  "status": {
+    "connecting": "Connessione in corso...",
+    "reconnecting": "Riconnessione in corso...",
+    "exited": "Terminato (codice {{code}})",
+    "exitedSignal": "Terminato (segnale {{signal}})",
+    "truncated": "L'output meno recente è stato troncato...",
+    "openedElsewhere": "Questo terminale è stato aperto in un'altra scheda.",
+    "openedElsewhereAction": "Riapri qui",
+    "serverRestart": "Interrotto da un riavvio del server.",
+    "notFound": "Questo terminale non esiste più.",
+    "error": "Errore di connessione."
+  },
+  "errors": {
+    "limitReached": "Hai raggiunto il massimo di 5 terminali in esecuzione. Chiudine uno per crearne un altro.",
+    "invalidTitle": "Nome del terminale non valido.",
+    "invalidCwd": "Directory di lavoro non valida.",
+    "invalidInitialCommand": "Comando iniziale non valido.",
+    "createFailed": "Impossibile creare il terminale. Riprova.",
+    "renameFailed": "Impossibile rinominare il terminale. Riprova.",
+    "deleteFailed": "Impossibile eliminare il terminale. Riprova.",
+    "loadFailed": "Impossibile caricare i terminali."
+  },
+  "deleteConfirm": {
+    "title": "Elimina terminale",
+    "message": "Arresta e rimuovi",
+    "warning": "Questa operazione arresta il processo in esecuzione e ne cancella l'output. Non può essere annullata.",
+    "confirm": "Elimina terminale",
+    "cancel": "Annulla"
+  },
+  "uptime": {
+    "label": "Tempo di attività",
+    "ranFor": "Durata totale"
+  }
+}

@@ -1,0 +1,43 @@
+# workflow-supervisor.service — systemd USER unit template (ADR-053 §ج, decision ب)
+# ==================================================================================
+# The standalone durable workflow supervisor (M-BG-2-CODE). It runs as its OWN
+# user unit — independent of the nassaj-dev PM2 process — so a workflow it
+# launches (as a transient wf-*.scope) survives the exit of any coordinator
+# (terminal / ssh / the nassaj-dev app itself), which is the whole point of B-103.
+#
+# INSTALL (owner, on the node — NOT executed by an agent):
+#   1) Set the flag ON for BOTH the supervisor and nassaj-dev (the bridge):
+#        WORKFLOW_SUPERVISOR=1
+#      For nassaj-dev, add it to ecosystem env and restart via safe-restart.sh.
+#   2) Copy this file to ~/.config/systemd/user/workflow-supervisor.service
+#      (substitute the two @@ placeholders below).
+#   3) systemctl --user daemon-reload
+#      systemctl --user enable --now workflow-supervisor.service
+#
+# The unit is DORMANT if WORKFLOW_SUPERVISOR is not set: runSupervisor() logs and
+# exits immediately (master no-op), so enabling the unit without the flag is safe.
+#
+# Placeholders:
+#   @@WORKDIR@@   = /home/dev/workspace/nassaj
+#   @@NODE@@      = absolute path to node (e.g. /usr/bin/node or an nvm path)
+
+[Unit]
+Description=Nassaj durable workflow supervisor (ADR-053, B-103)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=@@WORKDIR@@
+Environment=WORKFLOW_SUPERVISOR=1
+# Optional tuning (defaults shown):
+#   Environment=WORKFLOW_SUPERVISOR_MAX_PER_USER=3
+#   Environment=WORKFLOW_SUPERVISOR_POLL_MS=2000
+#   Environment=WORKFLOW_SUPERVISOR_CLAUDE_BIN=claude
+ExecStart=@@NODE@@ @@WORKDIR@@/dist-server/server/modules/workflow-supervisor/supervisor.js
+Restart=on-failure
+RestartSec=5
+# The supervisor itself is light; scopes it launches carry their OWN MemoryMax.
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

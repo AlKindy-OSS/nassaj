@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "reference": {
+    "contractVersion": "permission-parity/v1",
+    "profileId": "full_delegation",
+    "referenceBody": "claude",
+    "referenceBuildFingerprint": "sha256:c0857d25088463339acb2ddab0d1e5fac6aaf644b6c931ab651a44bc9e775fee",
+    "referenceSdkFingerprint": "anthropic-claude-agent-sdk@0.3.152",
+    "referenceCliFingerprint": "claude-code@2.1.258",
+    "dimensions": {
+      "filesystem_read": {
+        "decision": "allow",
+        "scope": "host"
+      },
+      "filesystem_write": {
+        "decision": "allow",
+        "scope": "host"
+      },
+      "process_execution": {
+        "decision": "allow",
+        "scope": "host"
+      },
+      "network_access": {
+        "decision": "allow",
+        "scope": "external"
+      },
+      "approval": {
+        "decision": "deny",
+        "scope": "none"
+      },
+      "tools": {
+        "decision": "allow",
+        "scope": "host"
+      },
+      "delegation": {
+        "decision": "deny",
+        "scope": "none"
+      },
+      "mcp": {
+        "decision": "deny",
+        "scope": "none"
+      },
+      "connectors": {
+        "decision": "deny",
+        "scope": "none"
+      }
+    },
+    "minimumEnforcement": {
+      "filesystem_read": "boundary",
+      "filesystem_write": "boundary",
+      "process_execution": "boundary",
+      "network_access": "boundary",
+      "approval": "boundary",
+      "tools": "boundary",
+      "delegation": "boundary",
+      "mcp": "boundary",
+      "connectors": "boundary"
+    },
+    "deniedSurfaces": [
+      "mcp",
+      "connectors",
+      "external_delegation"
+    ],
+    "evidence": {
+      "status": "measured",
+      "measuredAt": "2026-09-02T12:48:20.343Z",
+      "validUntil": "2026-10-02T12:48:20.343Z",
+      "evaluatedAt": "2026-09-02T12:48:20.343Z",
+      "suiteId": "claude-production-sdk-full-delegation-v1",
+      "measuredBuildFingerprint": "sha256:c0857d25088463339acb2ddab0d1e5fac6aaf644b6c931ab651a44bc9e775fee"
+    },
+    "evidenceDigest": "sha256:499b4ca4ae0bb1d615c733ede907a8ad889d5edb7a23401b07f6ff30f2f45ea6"
+  },
+  "candidates": [
+    {
+      "contractVersion": "permission-parity/v1",
+      "profileId": "full_delegation",
+      "body": "claude",
+      "installedBuildFingerprint": "sha256:c0857d25088463339acb2ddab0d1e5fac6aaf644b6c931ab651a44bc9e775fee",
+      "dimensions": {
+        "filesystem_read": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "filesystem_write": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "process_execution": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "network_access": {
+          "decision": "allow",
+          "scope": "external"
+        },
+        "approval": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "tools": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "delegation": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "mcp": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "connectors": {
+          "decision": "deny",
+          "scope": "none"
+        }
+      },
+      "enforcement": {
+        "filesystem_read": "boundary",
+        "filesystem_write": "boundary",
+        "process_execution": "boundary",
+        "network_access": "boundary",
+        "approval": "boundary",
+        "tools": "boundary",
+        "delegation": "boundary",
+        "mcp": "boundary",
+        "connectors": "boundary"
+      },
+      "deniedSurfaces": [
+        "mcp",
+        "connectors",
+        "external_delegation"
+      ],
+      "evidence": {
+        "status": "measured",
+        "measuredAt": "2026-09-02T12:48:20.343Z",
+        "validUntil": "2026-10-02T12:48:20.343Z",
+        "evaluatedAt": "2026-09-02T12:48:20.343Z",
+        "suiteId": "claude-production-sdk-full-delegation-v1",
+        "measuredBuildFingerprint": "sha256:c0857d25088463339acb2ddab0d1e5fac6aaf644b6c931ab651a44bc9e775fee"
+      },
+      "evidenceDigest": "sha256:c37db9fce5dda7b7f18dfd628f0c3c3c88a1075a98e1e0580f535a94b053a9cc"
+    },
+    {
+      "contractVersion": "permission-parity/v1",
+      "profileId": "full_delegation",
+      "body": "codex",
+      "installedBuildFingerprint": "sha256:7eaba783c06b0d6c49836b83e39c57aa480a5ccfdb7e32f99818cc88484c1518",
+      "dimensions": {
+        "filesystem_read": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "filesystem_write": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "process_execution": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "network_access": {
+          "decision": "allow",
+          "scope": "external"
+        },
+        "approval": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "tools": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "delegation": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "mcp": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "connectors": {
+          "decision": "deny",
+          "scope": "none"
+        }
+      },
+      "enforcement": {
+        "filesystem_read": "boundary",
+        "filesystem_write": "boundary",
+        "process_execution": "boundary",
+        "network_access": "boundary",
+        "approval": "boundary",
+        "tools": "boundary",
+        "delegation": "boundary",
+        "mcp": "boundary",
+        "connectors": "boundary"
+      },
+      "deniedSurfaces": [
+        "mcp",
+        "connectors",
+        "external_delegation"
+      ],
+      "evidence": {
+        "status": "measured",
+        "measuredAt": "2026-09-05T06:28:16.285Z",
+        "validUntil": "2026-10-05T06:28:16.285Z",
+        "evaluatedAt": "2026-09-05T06:28:16.285Z",
+        "suiteId": "codex-production-sdk-full-delegation-v1",
+        "measuredBuildFingerprint": "sha256:7eaba783c06b0d6c49836b83e39c57aa480a5ccfdb7e32f99818cc88484c1518"
+      },
+      "evidenceDigest": "sha256:6f8a2089c2106f0829257224419b639000238dd9bbf669b4dd3b4bd17aa1dd68"
+    },
+    {
+      "contractVersion": "permission-parity/v1",
+      "profileId": "full_delegation",
+      "body": "antigravity",
+      "installedBuildFingerprint": "sha256:c43bb8627a164ffcb60138a530d011760e4ac1ad7cf652d979ddca964e90ef12",
+      "dimensions": {
+        "filesystem_read": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "filesystem_write": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "process_execution": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "network_access": {
+          "decision": "allow",
+          "scope": "external"
+        },
+        "approval": {
+          "decision": "deny",
+          "scope": "none"
+        },
+        "tools": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "delegation": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "mcp": {
+          "decision": "allow",
+          "scope": "host"
+        },
+        "connectors": {
+          "decision": "allow",
+          "scope": "external"
+        }
+      },
+      "enforcement": {
+        "filesystem_read": "boundary",
+        "filesystem_write": "boundary",
+        "process_execution": "boundary",
+        "network_access": "boundary",
+        "approval": "boundary",
+        "tools": "boundary",
+        "delegation": "boundary",
+        "mcp": "boundary",
+        "connectors": "boundary"
+      },
+      "deniedSurfaces": [],
+      "evidence": {
+        "status": "measured",
+        "measuredAt": "2026-09-02T12:52:32.353Z",
+        "validUntil": "2026-10-02T12:52:32.353Z",
+        "evaluatedAt": "2026-09-02T12:52:32.353Z",
+        "suiteId": "agy-production-cli-full-delegation-v1",
+        "measuredBuildFingerprint": "sha256:c43bb8627a164ffcb60138a530d011760e4ac1ad7cf652d979ddca964e90ef12"
+      },
+      "evidenceDigest": "sha256:ca569865c2fb45865b2ed501b4d0d9d0003371798e870fd935b985eb571e85b7"
+    }
+  ],
+  "unavailableBodies": [
+    {
+      "body": "cursor",
+      "reasonCode": "AUTHENTICATION_UNAVAILABLE",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "gemini",
+      "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "opencode",
+      "reasonCode": "BINARY_UNAVAILABLE",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "kimi",
+      "reasonCode": "PRODUCTION_PROJECTION_UNVERIFIED",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "deepseek",
+      "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "glm",
+      "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "hermes",
+      "reasonCode": "ACCOUNT_CREDITS_UNAVAILABLE",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "qwen",
+      "reasonCode": "AUTHENTICATION_UNAVAILABLE",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    },
+    {
+      "body": "sakana",
+      "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
+      "observedAt": "2026-09-01T05:19:00.000Z"
+    }
+  ],
+  "artifactDigest": "sha256:cf3e5bfe81e622fc0905b72a604a55b19e521e8752610c158becfcb7e1f05430"
+}

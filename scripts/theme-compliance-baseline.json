@@ -1,0 +1,32 @@
+{
+  "files": {
+    "src/components/chat/view/subcomponents/Markdown.tsx": {
+      "allowed": 2,
+      "reason": "كتلتا كود داكنتان في الوضعين — تتبعان ثيم إبراز الصياغة."
+    },
+    "src/components/chat/view/subcomponents/MessageComponent.tsx": {
+      "allowed": 1,
+      "reason": "كتلة استجابة JSON داكنة في الوضعين — تحاكي المحرّر."
+    },
+    "src/components/code-editor/view/subcomponents/CodeEditorSurface.tsx": {
+      "allowed": 1,
+      "reason": "prose-pre: كتلة كود داكنة في الوضعين."
+    },
+    "src/components/code-editor/view/subcomponents/markdown/MarkdownCodeBlock.tsx": {
+      "allowed": 1,
+      "reason": "كتلة كود داكنة في الوضعين."
+    },
+    "src/components/file-tree/view/ImageViewer.tsx": {
+      "allowed": 1,
+      "reason": "خلفية عارض الصور سوداء عمداً: أي سطح ملوّن يزيح إدراك ألوان الصورة."
+    },
+    "src/components/onboarding/view/subcomponents/AgentConnectionsStep.tsx": {
+      "allowed": 2,
+      "reason": "لونا علامتَي المزوّدين على زرَّي الدخول — بدليل العلامة لا بالثيم."
+    },
+    "src/components/version-upgrade/view/VersionUpgradeModal.tsx": {
+      "allowed": 1,
+      "reason": "لوحة مخرجات التحديث تحاكي الطرفية في الوضعين."
+    }
+  }
+}

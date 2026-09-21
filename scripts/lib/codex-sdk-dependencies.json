@@ -1,0 +1,130 @@
+{
+  "schema": "b890-isolated-measurement-dependencies/v1",
+  "records": [
+    {
+      "path": "@openai/codex-sdk/LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 10926
+    },
+    {
+      "path": "@openai/codex-sdk/README.md",
+      "sha256": "bc454b26a6920efb1826912be6b6ba96348ab39d9f4e70078465deb586dbbfe7",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 5147
+    },
+    {
+      "path": "@openai/codex-sdk/dist/index.d.ts",
+      "sha256": "954d28bec3db17316c2f6acbbd157210ded9f75143c50827215739110327c7ac",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 10369
+    },
+    {
+      "path": "@openai/codex-sdk/dist/index.js",
+      "sha256": "f0741050088c636aef4ee970fd25e582ab1c961c18499702c26ae7962fe025d2",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 17265
+    },
+    {
+      "path": "@openai/codex-sdk/dist/index.js.map",
+      "sha256": "830f7fb2b7f1e3ff4aed4bfc48344159136a4050918676ddef77f5cf6c5af4b5",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 33926
+    },
+    {
+      "path": "@openai/codex-sdk/package.json",
+      "sha256": "77300beec12fa5523905e30ae85ca4747e68d4fab42ceccc6a752f84c18ba02a",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 1955
+    },
+    {
+      "path": "@openai/codex/README.md",
+      "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 3334
+    },
+    {
+      "path": "@openai/codex/bin/codex.js",
+      "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 8790
+    },
+    {
+      "path": "@openai/codex/package.json",
+      "sha256": "4ecf4eae28684c5fcba8b9a63b946ce22b8cc2e451750f23c04e5088cf4c7a05",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 1082
+    },
+    {
+      "path": "@openai/codex-linux-x64/README.md",
+      "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 3334
+    },
+    {
+      "path": "@openai/codex-linux-x64/package.json",
+      "sha256": "162f05ebda40624afb12d6967f89af4d480f4254d1fd5eb15532d4f02dc6964a",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 511
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "sha256": "f8786262ebc0fa1337448a2977332beadec66c8d0cda0ce973c7849766d7943c",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 258597984
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+      "sha256": "f9dc99ef253919b4b48b53a346b1ebec76589eb854a1ab1a64afb4ff51cfbb61",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 69427264
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
+      "sha256": "360d40dd3fab0cfb4342519e7ccb7aafa72ae9d1c3c15f78b0a0a002860fc98c",
+      "sourceMode": 420,
+      "mode": 292,
+      "size": 205
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+      "sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 5408904
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+      "sha256": "01fb705f067bd5365b63d8ad2323a61c8d007733ca5e649437e086f3fb9935d8",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 529776
+    },
+    {
+      "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+      "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+      "sourceMode": 493,
+      "mode": 365,
+      "size": 898480
+    }
+  ],
+  "patch": {
+    "issue": "B-990",
+    "sdkVersion": "0.153.2",
+    "upstreamIntegrity": "sha512-If4CYvo+Zpf6CCKxhuoyhgNbaS93UI9pYfscWr529CxCQK5fhlLQA29efutQVwuj8w9EcMhNM4rjn7zu67S+/w==",
+    "patchedEntrySha256": "f0741050088c636aef4ee970fd25e582ab1c961c18499702c26ae7962fe025d2"
+  }
+}

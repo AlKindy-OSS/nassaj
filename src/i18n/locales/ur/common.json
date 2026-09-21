@@ -1,0 +1,361 @@
+{
+  "buttons": {
+    "save": "محفوظ کریں",
+    "cancel": "منسوخ",
+    "delete": "حذف",
+    "create": "بنائیں",
+    "edit": "ترمیم",
+    "close": "بند کریں",
+    "confirm": "تصدیق",
+    "submit": "جمع کرائیں",
+    "retry": "دوبارہ کوشش",
+    "refresh": "تازہ کریں",
+    "search": "تلاش",
+    "clear": "صاف کریں",
+    "copy": "نقل",
+    "download": "ڈاؤن لوڈ",
+    "upload": "اپ لوڈ",
+    "browse": "براؤز کریں"
+  },
+  "tabs": {
+    "chat": "گفتگو",
+    "shell": "شیل",
+    "files": "فائلیں",
+    "git": "سورس کنٹرول",
+    "tasks": "کام",
+    "board": "پروجیکٹ بورڈ",
+    "wiki": "وکی"
+  },
+  "wiki": {
+    "title": "نسّاج وکی"
+  },
+  "status": {
+    "loading": "لوڈ ہو رہا ہے...",
+    "success": "کامیاب",
+    "error": "خرابی",
+    "failed": "ناکام",
+    "pending": "زیرِ التوا",
+    "completed": "مکمل",
+    "inProgress": "جاری"
+  },
+  "messages": {
+    "savedSuccessfully": "کامیابی سے محفوظ ہو گیا",
+    "deletedSuccessfully": "کامیابی سے حذف ہو گیا",
+    "updatedSuccessfully": "کامیابی سے اپ ڈیٹ ہو گیا",
+    "operationFailed": "عمل ناکام رہا",
+    "networkError": "نیٹ ورک کی خرابی۔ اپنا کنکشن دیکھیں۔",
+    "unauthorized": "اجازت نہیں۔ براہِ کرم لاگ اِن کریں۔",
+    "notFound": "نہیں ملا",
+    "invalidInput": "غلط اندراج",
+    "requiredField": "یہ خانہ لازمی ہے",
+    "unknownError": "نامعلوم خرابی پیش آئی"
+  },
+  "navigation": {
+    "settings": "ترتیبات",
+    "home": "ہوم",
+    "back": "واپس",
+    "next": "اگلا",
+    "previous": "پچھلا",
+    "logout": "لاگ آؤٹ"
+  },
+  "common": {
+    "language": "زبان",
+    "theme": "تھیم",
+    "darkMode": "تاریک وضع",
+    "lightMode": "روشن وضع",
+    "name": "نام",
+    "description": "تفصیل",
+    "enabled": "فعال",
+    "disabled": "غیر فعال",
+    "optional": "اختیاری",
+    "version": "ورژن",
+    "select": "منتخب کریں",
+    "selectAll": "سب منتخب کریں",
+    "deselectAll": "سب کی منتخبی ہٹائیں",
+    "done": "ہو گیا",
+    "failed": "ناکام"
+  },
+  "time": {
+    "justNow": "ابھی ابھی",
+    "minutesAgo": "{{count}} منٹ پہلے",
+    "hoursAgo": "{{count}} گھنٹے پہلے",
+    "daysAgo": "{{count}} دن پہلے",
+    "yesterday": "کل"
+  },
+  "fileOperations": {
+    "newFile": "نئی فائل",
+    "newFolder": "نیا فولڈر",
+    "rename": "نام بدلیں",
+    "move": "منتقل کریں",
+    "copyPath": "راستہ نقل کریں",
+    "openInEditor": "ایڈیٹر میں کھولیں"
+  },
+  "mainContent": {
+    "loading": "Nassaj لوڈ ہو رہا ہے",
+    "settingUpWorkspace": "آپ کا ورک اسپیس تیار کیا جا رہا ہے...",
+    "chooseProject": "اپنا پروجیکٹ منتخب کریں",
+    "selectProjectDescription": "Claude کے ساتھ کوڈنگ شروع کرنے کے لیے سائیڈ بار سے پروجیکٹ منتخب کریں۔ ہر پروجیکٹ میں آپ کی گفتگو کے سیشن اور فائلوں کی تاریخ ہوتی ہے۔",
+    "tip": "مشورہ",
+    "createProjectMobile": "پروجیکٹس تک پہنچنے کے لیے اوپر مینو کا بٹن دبائیں",
+    "createProjectDesktop": "سائیڈ بار میں فولڈر کے نشان پر کلک کر کے نیا پروجیکٹ بنائیں",
+    "newSession": "نیا سیشن",
+    "untitledSession": "بلا عنوان سیشن",
+    "projectFiles": "پروجیکٹ کی فائلیں",
+    "sessionIdTooltip": "سیشن آئی ڈی: {{id}} — نقل کے لیے کلک کریں",
+    "sessionIdCopy": "سیشن آئی ڈی {{id}} نقل کریں"
+  },
+  "fileTree": {
+    "loading": "فائلیں لوڈ ہو رہی ہیں...",
+    "files": "فائلیں",
+    "simpleView": "سادہ منظر",
+    "compactView": "مختصر منظر",
+    "detailedView": "تفصیلی منظر",
+    "searchPlaceholder": "فائلیں اور فولڈر تلاش کریں...",
+    "clearSearch": "تلاش صاف کریں",
+    "name": "نام",
+    "size": "حجم",
+    "modified": "ترمیم شدہ",
+    "permissions": "اجازتیں",
+    "noFilesFound": "کوئی فائل نہیں ملی",
+    "checkProjectPath": "دیکھیں کہ پروجیکٹ کا راستہ قابلِ رسائی ہے یا نہیں",
+    "noMatchesFound": "کوئی نتیجہ نہیں ملا",
+    "tryDifferentSearch": "کوئی دوسری اصطلاح آزمائیں یا تلاش صاف کریں",
+    "justNow": "ابھی ابھی",
+    "minAgo": "{{count}} منٹ پہلے",
+    "hoursAgo": "{{count}} گھنٹے پہلے",
+    "daysAgo": "{{count}} دن پہلے",
+    "newFile": "نئی فائل (Cmd+N)",
+    "newFolder": "نیا فولڈر (Cmd+Shift+N)",
+    "refresh": "تازہ کریں",
+    "collapseAll": "سب سمیٹیں",
+    "uploadFiles": "فائلیں اپ لوڈ کریں (ہر ایک زیادہ سے زیادہ {{size}})",
+    "uploadingFiles": "فائلیں اپ لوڈ ہو رہی ہیں",
+    "uploadComplete": "اپ لوڈ مکمل",
+    "uploadFailed": "اپ لوڈ ناکام",
+    "uploadedCount": "{{total}} میں سے {{uploaded}} {{label}} اپ لوڈ ہوئیں",
+    "context": {
+      "rename": "نام بدلیں",
+      "delete": "حذف",
+      "copyPath": "راستہ نقل کریں",
+      "download": "ڈاؤن لوڈ",
+      "newFile": "نئی فائل",
+      "newFolder": "نیا فولڈر",
+      "refresh": "تازہ کریں",
+      "menuLabel": "فائل کا سیاق مینو",
+      "loading": "لوڈ ہو رہا ہے..."
+    }
+  },
+  "projectWizard": {
+    "title": "نیا پروجیکٹ بنائیں",
+    "steps": {
+      "type": "قسم",
+      "configure": "ترتیب",
+      "confirm": "تصدیق"
+    },
+    "step1": {
+      "question": "کیا آپ کے پاس پہلے سے ورک اسپیس ہے، یا نیا بنانا چاہتے ہیں؟",
+      "existing": {
+        "title": "موجودہ ورک اسپیس",
+        "description": "میرے سرور پر ورک اسپیس موجود ہے، مجھے صرف اسے پروجیکٹ فہرست میں شامل کرنا ہے"
+      },
+      "new": {
+        "title": "نیا ورک اسپیس",
+        "description": "نیا ورک اسپیس بنائیں، اور چاہیں تو کسی GitHub ریپوزٹری سے کلون کریں"
+      }
+    },
+    "step2": {
+      "existingPath": "ورک اسپیس کا راستہ",
+      "newPath": "ورک اسپیس کا راستہ",
+      "existingPlaceholder": "/path/to/existing/workspace",
+      "newPlaceholder": "/path/to/new/workspace",
+      "existingHelp": "آپ کے موجودہ ورک اسپیس ڈائریکٹری کا مکمل راستہ",
+      "newHelp": "آپ کے ورک اسپیس ڈائریکٹری کا مکمل راستہ",
+      "githubUrl": "GitHub یو آر ایل (اختیاری)",
+      "githubPlaceholder": "https://github.com/username/repository",
+      "githubHelp": "اختیاری: ریپوزٹری کلون کرنے کے لیے GitHub یو آر ایل دیں",
+      "githubAuth": "GitHub توثیق (اختیاری)",
+      "githubAuthHelp": "صرف نجی ریپوزٹریوں کے لیے ضروری ہے۔ عوامی ریپوزٹریاں بغیر توثیق کلون ہو جاتی ہیں۔",
+      "loadingTokens": "محفوظ ٹوکن لوڈ ہو رہے ہیں...",
+      "storedToken": "محفوظ ٹوکن",
+      "newToken": "نیا ٹوکن",
+      "nonePublic": "کوئی نہیں (عوامی)",
+      "selectToken": "ٹوکن منتخب کریں",
+      "selectTokenPlaceholder": "-- ایک ٹوکن منتخب کریں --",
+      "tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "tokenHelp": "یہ ٹوکن صرف اسی عمل کے لیے استعمال ہوگا",
+      "publicRepoInfo": "عوامی ریپوزٹریوں کو توثیق درکار نہیں۔ عوامی ریپو کلون کرتے وقت ٹوکن چھوڑ سکتے ہیں۔",
+      "noTokensHelp": "کوئی محفوظ ٹوکن موجود نہیں۔ آسانی کے لیے ترتیبات ← API کلیدیں میں ٹوکن شامل کر سکتے ہیں۔",
+      "optionalTokenPublic": "GitHub ٹوکن (عوامی ریپو کے لیے اختیاری)",
+      "tokenPublicPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (عوامی ریپو کے لیے خالی چھوڑیں)",
+      "repos": {
+        "fromMyRepos": "میری ریپوزٹریوں میں سے چنیں",
+        "pasteUrl": "یو آر ایل چسپاں کریں",
+        "sourceToggleLabel": "GitHub ماخذ",
+        "help": "کلون کرنے کے لیے اپنے GitHub اکاؤنٹ سے ریپوزٹری چنیں",
+        "ariaLabel": "GitHub ریپوزٹری منتخب کریں",
+        "placeholder": "ایک ریپوزٹری منتخب کریں...",
+        "searchPlaceholder": "ریپوزٹریاں تلاش کریں...",
+        "searchAriaLabel": "اپنی GitHub ریپوزٹریاں تلاش کریں",
+        "private": "نجی",
+        "loading": "آپ کی ریپوزٹریاں لوڈ ہو رہی ہیں...",
+        "empty": "اس ٹوکن کے لیے کوئی ریپوزٹری نہیں ملی۔",
+        "noMatch": "آپ کی تلاش سے کوئی ریپوزٹری نہیں ملی۔",
+        "loadError": "ریپوزٹریاں لوڈ نہ ہو سکیں۔ دوبارہ کوشش کریں۔",
+        "invalidToken": "GitHub نے یہ ٹوکن مسترد کر دیا۔ شاید منسوخ ہو چکا ہے یا اس میں \"repo\" دائرہ نہیں۔",
+        "noToken": "اس اکاؤنٹ کے لیے کوئی GitHub ٹوکن ترتیب نہیں دیا گیا۔",
+        "forbidden": "GitHub نے رسائی سے انکار کیا۔ ٹوکن میں مطلوبہ دائرہ نہ ہو یا حد سے تجاوز ہوا ہو۔",
+        "retry": "دوبارہ کوشش",
+        "manageTokens": "ترتیبات میں ٹوکن سنبھالیں"
+      }
+    },
+    "step3": {
+      "reviewConfig": "اپنی ترتیب کا جائزہ لیں",
+      "existingWorkspace": "موجودہ ورک اسپیس",
+      "newWorkspace": "نیا ورک اسپیس",
+      "path": "راستہ:",
+      "cloneFrom": "کلون بمقام:",
+      "authentication": "توثیق:",
+      "usingStoredToken": "محفوظ ٹوکن سے:",
+      "usingProvidedToken": "دیے گئے ٹوکن سے",
+      "noAuthentication": "بغیر توثیق",
+      "sshKey": "SSH کلید",
+      "existingInfo": "ورک اسپیس آپ کی پروجیکٹ فہرست میں شامل ہو جائے گا اور Claude/Cursor سیشنوں کے لیے دستیاب ہوگا۔",
+      "newWithClone": "ریپوزٹری اسی فولڈر سے کلون ہوگی۔",
+      "newEmpty": "ورک اسپیس آپ کی پروجیکٹ فہرست میں شامل ہو جائے گا اور Claude/Cursor سیشنوں کے لیے دستیاب ہوگا۔",
+      "cloningRepository": "ریپوزٹری کلون ہو رہی ہے..."
+    },
+    "buttons": {
+      "cancel": "منسوخ",
+      "back": "واپس",
+      "next": "اگلا",
+      "createProject": "پروجیکٹ بنائیں",
+      "creating": "بن رہا ہے...",
+      "cloning": "کلون ہو رہا ہے..."
+    },
+    "errors": {
+      "selectType": "منتخب کریں کہ آپ کے پاس ورک اسپیس ہے یا نیا بنانا ہے",
+      "providePath": "براہِ کرم ورک اسپیس کا راستہ دیں",
+      "failedToCreate": "ورک اسپیس نہ بن سکا",
+      "failedToCreateFolder": "فولڈر نہ بن سکا"
+    }
+  },
+  "notifications": {
+    "genericTool": "ایک آلہ",
+    "codes": {
+      "generic": {
+        "info": {
+          "title": "اطلاع"
+        }
+      },
+      "permission": {
+        "required": {
+          "title": "کارروائی درکار",
+          "body": "{{toolName}} آپ کے فیصلے کا منتظر ہے۔"
+        }
+      },
+      "run": {
+        "stopped": {
+          "title": "عمل روک دیا گیا",
+          "body": "وجہ: {{reason}}"
+        },
+        "failed": {
+          "title": "عمل ناکام"
+        }
+      },
+      "agent": {
+        "notification": {
+          "title": "ایجنٹ کی اطلاع"
+        }
+      }
+    }
+  },
+  "versionUpdate": {
+    "title": "اپ ڈیٹ دستیاب",
+    "newVersionReady": "نیا ورژن تیار ہے",
+    "currentVersion": "موجودہ ورژن",
+    "latestVersion": "تازہ ترین ورژن",
+    "whatsNew": "کیا نیا ہے:",
+    "viewFullRelease": "مکمل ریلیز دیکھیں",
+    "updateProgress": "اپ ڈیٹ کی پیش رفت:",
+    "manualUpgrade": "دستی اپ گریڈ:",
+    "npmUpgradeCommand": "npm install -g @cloudcli-ai/cloudcli@latest",
+    "manualUpgradeHint": "یا خودکار اپ ڈیٹ کے لیے \"ابھی اپ ڈیٹ کریں\" دبائیں۔",
+    "updateCompleted": "اپ ڈیٹ کامیابی سے مکمل ہوا!",
+    "restartServer": "تبدیلیاں لاگو کرنے کے لیے سرور دوبارہ چلائیں۔",
+    "updateFailed": "اپ ڈیٹ ناکام",
+    "buttons": {
+      "close": "بند کریں",
+      "later": "بعد میں",
+      "copyCommand": "کمانڈ نقل کریں",
+      "updateNow": "ابھی اپ ڈیٹ کریں",
+      "updating": "اپ ڈیٹ ہو رہا ہے..."
+    },
+    "ariaLabels": {
+      "closeModal": "ورژن اپ گریڈ ونڈو بند کریں",
+      "showSidebar": "سائیڈ بار دکھائیں",
+      "settings": "ترتیبات",
+      "updateAvailable": "اپ ڈیٹ دستیاب",
+      "closeSidebar": "سائیڈ بار بند کریں",
+      "updateInProgress": "اپ ڈیٹ جاری ہے"
+    }
+  },
+  "sessionProcessState": {
+    "running": "چل رہا ہے",
+    "frozen": "روکا ہوا (منجمد)",
+    "runningHint": "سیشن کا عمل چل رہا ہے",
+    "frozenHint": "سیشن کا عمل عارضی طور پر منجمد ہے (kill -STOP)",
+    "projectBusyHint": "اس پروجیکٹ کا ایک سیشن ابھی کارروائی کر رہا ہے",
+    "done": "مکمل",
+    "doneHint": "سیشن ختم ہو چکا ہے اور ابھی کھولا نہیں گیا",
+    "projectDoneHint": "اس پروجیکٹ کا ایک سیشن ختم ہو چکا ہے اور ابھی کھولا نہیں گیا"
+  },
+  "workflowStatus": {
+    "running": "ورک فلو چل رہا ہے",
+    "runningHint": "اس سیشن میں پس منظر کا ورک فلو فعال طور پر چل رہا ہے",
+    "orphanEmpty": "رک گیا — کوئی نتیجہ نہیں",
+    "orphanEmptyHint": "کسی ایجنٹ کے مکمل ہونے سے پہلے عمل ختم ہو گیا (N میں سے ۰) — دستی طور پر جاری کیا جا سکتا ہے",
+    "orphanPartial": "رک گیا — جزوی",
+    "orphanPartialHint": "کچھ ایجنٹوں کے مکمل ہونے کے بعد عمل ختم ہوا — جزوی پیش رفت محفوظ ہے، دستی طور پر جاری کی جا سکتی ہے",
+    "orphanIncomplete": "رک گیا — نامکمل",
+    "orphanIncompleteHint": "عمل مکمل ہوئے بغیر ختم ہوا؛ شروع ہونے والے نتائج سے زیادہ تھے — دستی طور پر جاری کیا جا سکتا ہے",
+    "frozen": "منجمد (روکا ہوا)",
+    "frozenHint": "عمل معطل ہے (SIGSTOP)، مردہ نہیں — CONT پر دوبارہ چلے گا",
+    "unknown": "زندگی کی حالت نامعلوم",
+    "unknownHint": "زندگی کی تصدیق نہ ہو سکی — غالباً سرور کے دوبارہ چلنے سے بچ گیا؛ نہ زندہ کی تصدیق نہ مردہ کی",
+    "projectRunningHint": "اس پروجیکٹ میں پس منظر کا ورک فلو چل رہا ہے",
+    "projectOrphanHint": "اس پروجیکٹ میں ایک یتیم پس منظر ورک فلو توجہ چاہتا ہے",
+    "projectUnknownHint": "اس پروجیکٹ میں ایک پس منظر ورک فلو کی حالت نامعلوم ہے — نہ زندہ کی تصدیق نہ مردہ کی"
+  },
+  "buildUpdate": {
+    "available": "نیا بلڈ دستیاب ہے",
+    "reload": "دوبارہ لوڈ کریں",
+    "ariaLabel": "نئے بلڈ کی اطلاع",
+    "dismiss": "برخاست کریں"
+  },
+  "governanceBadge": {
+    "ungoverned": "بلا نظم",
+    "tooltip": {
+      "none": "یہ سیشن نسّاج کے نظم سے باہر چل رہا ہے — فراہم کنندہ کی ترتیبات دیکھیں"
+    }
+  },
+  "onboarding": {
+    "agents": {
+      "title": "اپنے AI ایجنٹ جوڑیں",
+      "subtitle": "ایک یا زیادہ AI کوڈنگ معاونین میں لاگ اِن کریں۔ سب اختیاری ہیں۔",
+      "footerNote": "آپ انہیں بعد میں ترتیبات میں بھی مرتب کر سکتے ہیں۔"
+    },
+    "buttons": {
+      "previous": "پچھلا",
+      "next": "اگلا",
+      "saving": "محفوظ ہو رہا ہے...",
+      "completing": "مکمل ہو رہا ہے...",
+      "complete": "سیٹ اپ مکمل کریں"
+    },
+    "errors": {
+      "gitFieldsRequired": "git کا نام اور ای میل دونوں لازمی ہیں۔",
+      "invalidEmail": "درست ای میل پتہ درج کریں۔",
+      "saveGitConfigFailed": "git ترتیب محفوظ نہ ہو سکی",
+      "completeFailed": "ابتدائی سیٹ اپ مکمل نہ ہو سکا"
+    }
+  }
+}

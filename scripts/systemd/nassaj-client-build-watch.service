@@ -1,0 +1,76 @@
+[Unit]
+Description=Nassaj atomic local-client build watcher
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Project/nassaj-dev
+ExecStart=/usr/bin/env node scripts/client-build-watch.mjs
+Restart=on-failure
+RestartSec=15s
+RestartPreventExitStatus=78
+KillMode=control-group
+TimeoutStopSec=30s
+CPUQuota=150%
+MemoryHigh=2G
+MemoryMax=3G
+TasksMax=256
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+Environment=NODE_ENV=production
+Environment=TMPDIR=/var/tmp
+Environment=SERVER_PORT=3004
+Environment=NASSAJ_CLIENT_BUILD_SMOKE_URL=http://127.0.0.1:3004
+NoNewPrivileges=true
+CapabilityBoundingSet=
+IPAddressAllow=localhost
+IPAddressDeny=any
+LockPersonality=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectHome=read-only
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+# Exchanging the fixed dist directory requires write access to its parent. Keep
+# that narrow kernel requirement explicit, then bind every production source,
+# configuration and dependency input read-only beneath it. Runtime candidates
+# live only under .nassaj-local-preview/client; ledger/locks live under .git.
+ReadWritePaths=%h/Project/nassaj-dev
+ReadOnlyPaths=-%h/Project/nassaj-dev/src
+ReadOnlyPaths=-%h/Project/nassaj-dev/public
+ReadOnlyPaths=-%h/Project/nassaj-dev/docs
+ReadOnlyPaths=-%h/Project/nassaj-dev/shared
+ReadOnlyPaths=-%h/Project/nassaj-dev/server
+ReadOnlyPaths=-%h/Project/nassaj-dev/scripts
+ReadOnlyPaths=-%h/Project/nassaj-dev/node_modules
+ReadOnlyPaths=-%h/Project/nassaj-dev/index.html
+ReadOnlyPaths=-%h/Project/nassaj-dev/package.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/package-lock.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/vite.config.js
+ReadOnlyPaths=-%h/Project/nassaj-dev/postcss.config.js
+ReadOnlyPaths=-%h/Project/nassaj-dev/tailwind.config.js
+ReadOnlyPaths=-%h/Project/nassaj-dev/tsconfig.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/tsconfig.preview.json
+ReadOnlyPaths=-%h/Project/nassaj-dev/.env
+ReadOnlyPaths=-%h/Project/nassaj-dev/.env.local
+ReadOnlyPaths=-%h/Project/nassaj-dev/.env.production
+ReadOnlyPaths=-%h/Project/nassaj-dev/.env.production.local
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallFilter=~@mount @obsolete @privileged @raw-io @reboot @swap
+# Mitigation only: keep every syscall above denied but return EPERM instead of
+# SIGSYS. A real-unit build and denied-write probe remain mandatory before enablement.
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=default.target

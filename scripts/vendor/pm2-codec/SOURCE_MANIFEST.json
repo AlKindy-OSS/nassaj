@@ -1,0 +1,64 @@
+{
+  "schema": "nassaj-pm2-codec-source/v1",
+  "packages": [
+    {
+      "name": "amp",
+      "version": "0.3.1",
+      "url": "https://registry.npmjs.org/amp/-/amp-0.3.1.tgz",
+      "integrity": "sha512-OwIuC4yZaRogHKiuU5WlMR5Xk/jAcpPtawWL05Gj8Lvm2F6mwoJt4O/bHI+DHwG79vWd+8OFYM4/BzYqyRd3qw=="
+    },
+    {
+      "name": "amp-message",
+      "version": "0.1.2",
+      "url": "https://registry.npmjs.org/amp-message/-/amp-message-0.1.2.tgz",
+      "integrity": "sha512-JqutcFwoU1+jhv7ArgW38bqrE+LQdcRv4NxNw0mp0JHQyB6tXesWRjtYKlDgHRY2o3JE5UTaBGUK8kSWUdxWUg=="
+    }
+  ],
+  "files": [
+    {
+      "path": "amp-message/Readme.md",
+      "size": 1459,
+      "sha256": "84239427f571f76b8a8e51ece65f28b8a0b0059788d01f5fef270afd1940f536"
+    },
+    {
+      "path": "amp-message/index.js",
+      "size": 2424,
+      "sha256": "7215025169eb555640d6de3e0b99a600d7af04d6fabf65389bec65afbc47142e"
+    },
+    {
+      "path": "amp-message/package.json",
+      "size": 453,
+      "sha256": "96ff6642f0cf1f9355bc0d0314b6f304f85f570640c04f06595a4ff9d33e3b47"
+    },
+    {
+      "path": "amp/Readme.md",
+      "size": 1058,
+      "sha256": "85d18b6f44d8d0e93ddaeb792b15a7fc41f7fb80e28eb3f62eb0758ccdab992e"
+    },
+    {
+      "path": "amp/index.js",
+      "size": 128,
+      "sha256": "e976e5f23fc1772674bd32d1a8541b3b4122675134474688366ec179fe8b3274"
+    },
+    {
+      "path": "amp/lib/decode.js",
+      "size": 458,
+      "sha256": "53070d736cdc23c16e46e91ba2b78aa45d8d60131b52af2e25ee9525c30f76fa"
+    },
+    {
+      "path": "amp/lib/encode.js",
+      "size": 616,
+      "sha256": "6b3be5fd8f6ed5af1fb56f8cdf0b5d91eec515e6a9cca2ef117812753fb9aaf1"
+    },
+    {
+      "path": "amp/lib/stream.js",
+      "size": 2219,
+      "sha256": "151e262054bb7435af73a0049190ed9e53d5055acbc336921089c5b5817474d5"
+    },
+    {
+      "path": "amp/package.json",
+      "size": 370,
+      "sha256": "e7f86738e989dab385a911729409603938cf3e087d82f0e03239d3e62c2bf302"
+    }
+  ]
+}

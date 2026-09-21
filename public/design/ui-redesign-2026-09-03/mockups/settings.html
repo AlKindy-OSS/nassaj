@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="نموذج بصري — إعدادات نسّاج">
+  <title>نسّاج · الإعدادات — نموذج بصري</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* خلفية الشاشة (محاكاة التطبيق وراء الحوار) */
+    .page-bg {
+      min-height: 100dvh;
+      background-color: var(--background);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    /* مجموعات التبويب على الجوّال */
+    .settings-groups-scroll {
+      display: none;
+      overflow-x: auto;
+      padding: 12px 16px;
+      gap: 8px;
+      border-block-end: 1px solid var(--border);
+      flex-shrink: 0;
+      scrollbar-width: none;
+    }
+    .settings-groups-scroll::-webkit-scrollbar { display: none; }
+
+    .group-chip {
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      padding-inline: 14px;
+      border-radius: 9999px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      color: var(--foreground);
+      background-color: var(--card);
+      transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+    }
+    .group-chip.active {
+      background-color: var(--primary);
+      color: var(--primary-foreground);
+      border-color: var(--primary);
+    }
+
+    @media (max-width: 767px) {
+      .page-bg { padding: 0; justify-content: flex-start; }
+      .settings-modal { position: relative; padding: 0; background: none; align-items: stretch; }
+      .settings-dialog {
+        max-width: 100%;
+        max-height: none;
+        border-radius: 0;
+        height: 100dvh;
+      }
+      .settings-nav { display: none; }
+      .settings-groups-scroll { display: flex; }
+    }
+
+    /* قائمة المستخدمين */
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 9999px;
+      background-color: var(--primary);
+      color: var(--primary-foreground);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 20px;
+      padding-inline: 8px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-primary { background-color: var(--primary); color: var(--primary-foreground); }
+    .badge-muted   { background-color: var(--muted); color: var(--muted-foreground); }
+    .badge-success { background-color: hsl(152 42% 28% / .15); color: var(--success); }
+
+    /* بطاقة مزوّد API */
+    .provider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-block: 10px;
+      border-block-end: 1px solid var(--border);
+    }
+    .provider-row:last-child { border-block-end: none; }
+    .provider-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius);
+      background-color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    /* التبديل السريع بين التبويبات */
+    .content-panel {
+      display: none;
+    }
+    .content-panel.active {
+      display: block;
+    }
+
+    /* رسالة خطأ عند الحقل */
+    .field-error {
+      font-size: 0.8125rem;
+      color: var(--danger);
+      margin-block-start: 4px;
+    }
+
+    .settings-section-title {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--muted-foreground);
+      margin-block-end: 12px;
+      padding-block-end: 6px;
+      border-block-end: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <!-- شريط التنبيه -->
+  <div class="preview-banner" role="banner">
+    نموذج بصري مقترح — ليس التطبيق الفعلي · <a href="index.html" style="color:inherit;text-decoration:underline;">العودة للمعرض</a>
+  </div>
+
+  <!-- خلفية الصفحة (محاكاة) -->
+  <div class="page-bg">
+
+    <!-- حوار الإعدادات -->
+    <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-dialog">
+
+        <!-- رأس الحوار -->
+        <div class="settings-header">
+          <h1 class="ui-title" id="settings-title">الإعدادات</h1>
+          <a href="index.html" class="btn btn-ghost btn-icon btn-icon-lg" aria-label="إغلاق الإعدادات والعودة للمعرض">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </a>
+        </div>
+
+        <!-- مسطرة الذهب — اللحظة المميّزة -->
+        <hr class="gold-rule" aria-hidden="true" style="margin-block: 12px 0;">
+
+        <!-- مجموعات الجوّال (أقراص أفقية) -->
+        <div class="settings-groups-scroll" role="tablist" aria-label="مجموعات الإعدادات">
+          <button class="group-chip" role="tab" onclick="activateGroup('account')">الحساب والفريق</button>
+          <button class="group-chip active" role="tab" aria-selected="true" onclick="activateGroup('intelligence')">الذكاء والمعرفة</button>
+          <button class="group-chip" role="tab" onclick="activateGroup('keys')">المفاتيح والتكامل</button>
+          <button class="group-chip" role="tab" onclick="activateGroup('appearance')">المظهر والتنبيهات</button>
+          <button class="group-chip" role="tab" onclick="activateGroup('system')">النظام</button>
+        </div>
+
+        <!-- جسم الحوار -->
+        <div class="settings-body">
+
+          <!-- الشريط الجانبي للإعدادات (سطح المكتب) -->
+          <nav class="settings-nav" aria-label="تنقّل الإعدادات">
+
+            <!-- مجموعة 1: الحساب والفريق -->
+            <div class="settings-nav-group-label">الحساب والفريق</div>
+            <button class="settings-nav-item" onclick="switchTab('profile')" id="nav-profile">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              الملف الشخصي
+            </button>
+            <button class="settings-nav-item active" onclick="switchTab('users')" id="nav-users" aria-current="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              المستخدمون
+            </button>
+
+            <!-- مجموعة 2: الذكاء والمعرفة -->
+            <div class="settings-nav-group-label">الذكاء والمعرفة</div>
+            <button class="settings-nav-item" onclick="switchTab('agents')" id="nav-agents">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+              الوكلاء
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('memory')" id="nav-memory">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              المرجعيّات
+            </button>
+
+            <!-- مجموعة 3: المفاتيح والتكامل -->
+            <div class="settings-nav-group-label">المفاتيح والتكامل</div>
+            <button class="settings-nav-item" onclick="switchTab('providers')" id="nav-providers">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              المورّدون والاعتمادات
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('api')" id="nav-api">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              الوصول البرمجي
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('connectors')" id="nav-connectors">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              الموصلات
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('plugins')" id="nav-plugins">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22V12m0 0L2 7m10 5 10-5M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+              الإضافات
+            </button>
+
+            <!-- مجموعة 4: المظهر والتنبيهات -->
+            <div class="settings-nav-group-label">المظهر والتنبيهات</div>
+            <button class="settings-nav-item" onclick="switchTab('appearance')" id="nav-appearance">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+              المظهر
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('notifications')" id="nav-notifications">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              التنبيهات
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('git')" id="nav-git">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
+              Git
+            </button>
+
+            <!-- مجموعة 5: النظام -->
+            <div class="settings-nav-group-label">النظام (للمالك)</div>
+            <button class="settings-nav-item" onclick="switchTab('commands')" id="nav-commands">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              لوحة الأوامر
+            </button>
+            <button class="settings-nav-item" onclick="switchTab('about')" id="nav-about">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              حول نسّاج
+            </button>
+          </nav>
+
+          <!-- لوح المحتوى -->
+          <div class="settings-content" role="tabpanel" aria-labelledby="nav-users" id="settings-content">
+
+            <!-- لوح المستخدمين (النشط) -->
+            <div class="content-panel active" id="panel-users">
+              <div class="settings-section-title">أعضاء الفريق</div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-block-end:16px;">
+                <div class="search-field" style="width:220px;">
+                  <span class="search-icon" aria-hidden="true">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                  </span>
+                  <input class="input" type="search" placeholder="بحث عن عضو…" style="height:36px;font-size:0.875rem;">
+                </div>
+                <button class="btn btn-primary btn-tb">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                  دعوة عضو
+                </button>
+              </div>
+
+              <!-- جدول المستخدمين -->
+              <div style="overflow-x:auto;">
+                <table class="settings-table" role="grid" aria-label="قائمة أعضاء الفريق">
+                  <thead>
+                    <tr>
+                      <th scope="col">العضو</th>
+                      <th scope="col">البريد الإلكتروني</th>
+                      <th scope="col">الدور</th>
+                      <th scope="col">الحالة</th>
+                      <th scope="col"><span class="visually-hidden">إجراءات</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                          <span class="user-avatar" aria-hidden="true">إ</span>
+                          <div>
+                            <div class="ui-body-strong">عضو الفريق</div>
+                            <div class="ui-label muted">المالك</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td dir="ltr" style="unicode-bidi:isolate;"><span class="ui-body">you@example.com</span></td>
+                      <td><span class="badge badge-primary">مالك</span></td>
+                      <td><span class="status-dot status-running ui-label">نشط</span></td>
+                      <td><button class="btn-ghost btn btn-sm" disabled>—</button></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                          <span class="user-avatar" style="background-color:var(--success);" aria-hidden="true">س</span>
+                          <div>
+                            <div class="ui-body-strong">سارة الأحمد</div>
+                            <div class="ui-label muted">مطوّرة</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td dir="ltr" style="unicode-bidi:isolate;"><span class="ui-body">sarah.a@example.com</span></td>
+                      <td><span class="badge badge-muted">محرّر</span></td>
+                      <td><span class="status-dot status-running ui-label">نشطة</span></td>
+                      <td>
+                        <button class="btn btn-ghost btn-sm" aria-label="خيارات سارة">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                        </button>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                          <span class="user-avatar" style="background-color:var(--muted-foreground);" aria-hidden="true">م</span>
+                          <div>
+                            <div class="ui-body-strong">عضو الفريق ٢</div>
+                            <div class="ui-label muted">مصمّم</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td dir="ltr" style="unicode-bidi:isolate;"><span class="ui-body">m.zahrani@example.com</span></td>
+                      <td><span class="badge badge-muted">مُشاهِد</span></td>
+                      <td><span class="status-dot status-stopped ui-label">غير نشط</span></td>
+                      <td>
+                        <button class="btn btn-ghost btn-sm" aria-label="خيارات محمد">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                        </button>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                          <span class="user-avatar" style="background-color:var(--warning);" aria-hidden="true">ن</span>
+                          <div>
+                            <div class="ui-body-strong">عضو الفريق ٣</div>
+                            <div class="ui-label muted">محلّلة بيانات</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td dir="ltr" style="unicode-bidi:isolate;"><span class="ui-body">n.otaibi@example.com</span></td>
+                      <td><span class="badge badge-muted">محرّر</span></td>
+                      <td><span class="status-dot status-waiting ui-label">دعوة معلّقة</span></td>
+                      <td>
+                        <button class="btn btn-ghost btn-sm" aria-label="خيارات نورة">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- لوح المورّدين -->
+            <div class="content-panel" id="panel-providers">
+              <div class="settings-section-title">المورّدون والاعتمادات</div>
+
+              <div class="provider-row">
+                <div class="provider-icon" aria-hidden="true">🤖</div>
+                <div style="flex:1;">
+                  <div class="ui-body-strong">Anthropic Claude</div>
+                  <div class="ui-label muted">Claude Sonnet 4.6 — النموذج الافتراضي</div>
+                </div>
+                <span class="badge badge-success">متّصل</span>
+              </div>
+
+              <div class="provider-row">
+                <div class="provider-icon" aria-hidden="true">⚡</div>
+                <div style="flex:1;">
+                  <div class="ui-body-strong">Codex (OpenAI)</div>
+                  <div class="ui-label muted">مفتاح API مضبوط</div>
+                </div>
+                <span class="badge badge-success">متّصل</span>
+              </div>
+
+              <div class="provider-row">
+                <div class="provider-icon" aria-hidden="true">🌊</div>
+                <div style="flex:1;">
+                  <div class="ui-body-strong">Hermes (Nous)</div>
+                  <div class="ui-label muted">مجاني — حصة محدودة</div>
+                </div>
+                <span class="badge badge-muted">متاح</span>
+              </div>
+
+              <div class="provider-row">
+                <div class="provider-icon" aria-hidden="true">✨</div>
+                <div style="flex:1;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="ui-body-strong">مزوّد جديد</span>
+                  </div>
+                  <div class="ui-label muted">أضف مفتاح API مخصّص</div>
+                </div>
+                <button class="btn btn-outline btn-sm">إضافة</button>
+              </div>
+
+              <!-- مثال: حقل مع خطأ عند الحقل (لا أعلى الصفحة) -->
+              <div style="margin-block-start:24px;">
+                <label class="ui-body-strong" for="api-key-input" style="display:block;margin-block-end:6px;">مفتاح API</label>
+                <input
+                  class="input"
+                  id="api-key-input"
+                  type="password"
+                  value="sk-••••••••••••••••"
+                  aria-invalid="true"
+                  aria-describedby="api-key-error"
+                  style="border-color:var(--danger);"
+                >
+                <div class="field-error" id="api-key-error" role="alert">
+                  المفتاح غير صالح — تحقّق من الصلاحيات أو أنشئ مفتاحاً جديداً
+                </div>
+              </div>
+            </div>
+
+            <!-- لوح المظهر -->
+            <div class="content-panel" id="panel-appearance">
+              <div class="settings-section-title">المظهر والألوان</div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">سمة الألوان</div>
+                  <div class="settings-row-desc">هوية دار الكِندِي — كحلي وكريم وذهبي</div>
+                </div>
+                <select class="input" style="width:160px;height:36px;" aria-label="اختيار سمة الألوان">
+                  <option selected>الكِندِي (افتراضي)</option>
+                  <option>داكن محايد</option>
+                  <option>فاتح محايد</option>
+                </select>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">الوضع الداكن</div>
+                  <div class="settings-row-desc">يتبع إعداد النظام تلقائياً</div>
+                </div>
+                <label class="toggle" aria-label="تفعيل الوضع الداكن">
+                  <input type="checkbox" checked aria-checked="true">
+                  <span class="toggle-track"></span>
+                  <span class="toggle-thumb"></span>
+                </label>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">تقليل الحركة</div>
+                  <div class="settings-row-desc">يتبع إعداد النظام — يُلغي انتقالات الأدراج</div>
+                </div>
+                <label class="toggle" aria-label="تقليل الحركة">
+                  <input type="checkbox" aria-checked="false">
+                  <span class="toggle-track"></span>
+                  <span class="toggle-thumb"></span>
+                </label>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">حجم الخط</div>
+                  <div class="settings-row-desc">الافتراضي 15px — الواجهة الكثيفة</div>
+                </div>
+                <select class="input" style="width:140px;height:36px;" aria-label="حجم الخط">
+                  <option>صغير (13px)</option>
+                  <option selected>متوسط (15px)</option>
+                  <option>كبير (17px)</option>
+                </select>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">اتجاه الواجهة</div>
+                  <div class="settings-row-desc">RTL (يمين لليسار) — العربية افتراضياً</div>
+                </div>
+                <select class="input" style="width:140px;height:36px;" aria-label="اتجاه الواجهة">
+                  <option selected>يمين لليسار (RTL)</option>
+                  <option>يسار لليمين (LTR)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- لوح الوكلاء -->
+            <div class="content-panel" id="panel-agents">
+              <div class="settings-section-title">الوكلاء والمهام</div>
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">الوكيل الافتراضي</div>
+                  <div class="settings-row-desc">يُستخدم عند بدء محادثة جديدة</div>
+                </div>
+                <select class="input" style="width:180px;height:36px;" aria-label="الوكيل الافتراضي">
+                  <option selected>Claude Sonnet 4.6</option>
+                  <option>Claude Opus 5</option>
+                  <option>Codex GPT-4o</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">مستوى الجهد الافتراضي</div>
+                  <div class="settings-row-desc">medium لمعظم المهام — xhigh للقرارات المعمارية</div>
+                </div>
+                <select class="input" style="width:140px;height:36px;" aria-label="مستوى الجهد">
+                  <option>low</option>
+                  <option selected>medium</option>
+                  <option>high</option>
+                  <option>xhigh</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-label">تحديثات التقدّم التلقائية</div>
+                  <div class="settings-row-desc">إشعار كل دقيقة في المهام الطويلة (> 3 دقائق)</div>
+                </div>
+                <label class="toggle" aria-label="تفعيل تحديثات التقدّم التلقائية">
+                  <input type="checkbox" checked aria-checked="true">
+                  <span class="toggle-track"></span>
+                  <span class="toggle-thumb"></span>
+                </label>
+              </div>
+            </div>
+
+          </div><!-- /settings-content -->
+        </div><!-- /settings-body -->
+
+      </div><!-- /settings-dialog -->
+    </div><!-- /settings-modal -->
+
+  </div><!-- /page-bg -->
+
+  <script>
+    // تبديل التبويبات (سطح المكتب)
+    function switchTab(id) {
+      // أزِل active من كل العناصر
+      document.querySelectorAll('.settings-nav-item').forEach(el => {
+        el.classList.remove('active');
+        el.removeAttribute('aria-current');
+      });
+      document.querySelectorAll('.content-panel').forEach(el => el.classList.remove('active'));
+
+      // فعِّل المحدَّد
+      const navItem = document.getElementById('nav-' + id);
+      if (navItem) {
+        navItem.classList.add('active');
+        navItem.setAttribute('aria-current', 'true');
+      }
+
+      // أظهر لوح المحتوى المقابل
+      // تحويل المُعرِّفات الموجودة
+      const panelMap = {
+        profile: 'users', users: 'users',
+        agents: 'agents', memory: 'agents',
+        providers: 'providers', api: 'providers',
+        connectors: 'providers', plugins: 'providers',
+        appearance: 'appearance', notifications: 'appearance',
+        git: 'appearance',
+        commands: 'users', about: 'users'
+      };
+      const panelId = panelMap[id] || id;
+      const panel = document.getElementById('panel-' + panelId);
+      if (panel) {
+        panel.classList.add('active');
+      } else {
+        // fallback: أظهر لوح المستخدمين
+        document.getElementById('panel-users').classList.add('active');
+      }
+    }
+
+    // تبديل المجموعات (الجوّال)
+    function activateGroup(group) {
+      document.querySelectorAll('.group-chip').forEach(el => {
+        el.classList.remove('active');
+        el.removeAttribute('aria-selected');
+      });
+      event.target.classList.add('active');
+      event.target.setAttribute('aria-selected', 'true');
+
+      // خريطة المجموعة → التبويب الأول فيها
+      const groupFirstTab = {
+        account: 'profile',
+        intelligence: 'agents',
+        keys: 'providers',
+        appearance: 'appearance',
+        system: 'commands'
+      };
+      switchTab(groupFirstTab[group] || 'users');
+    }
+
+    // تفعيل Toggle switches
+    document.querySelectorAll('.toggle input').forEach(cb => {
+      cb.addEventListener('change', () => {
+        cb.setAttribute('aria-checked', cb.checked ? 'true' : 'false');
+        // إظهار toast تأكيد
+        showToast(cb.checked ? 'تمّ التفعيل' : 'تمّ التعطيل');
+      });
+    });
+
+    function showToast(msg) {
+      const existing = document.querySelector('.settings-toast');
+      if (existing) existing.remove();
+      const t = document.createElement('div');
+      t.className = 'toast settings-toast';
+      t.setAttribute('role', 'status');
+      t.innerHTML = `
+        <div class="toast-accent" style="background-color:var(--primary);" aria-hidden="true"></div>
+        <div class="toast-body ui-body">${msg}</div>
+      `;
+      document.body.appendChild(t);
+      setTimeout(() => {
+        t.style.opacity = '0';
+        t.style.transition = 'opacity 0.3s';
+        setTimeout(() => t.remove(), 300);
+      }, 2500);
+    }
+  </script>
+</body>
+</html>
