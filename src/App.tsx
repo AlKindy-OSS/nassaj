@@ -7,6 +7,8 @@ import { AuthProvider, ProtectedRoute } from './components/auth';
 import JoinPage from './components/auth/view/JoinPage';
 import SharedDocumentPage from './components/document-sharing/SharedDocumentPage';
 import ShareLoginPage from './components/document-sharing/ShareLoginPage';
+import OidcReturnPage from './components/auth/view/OidcReturnPage';
+import { OIDC_RETURN_PATH } from './components/auth/oidc';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { BrandingProvider } from './contexts/BrandingContext';
 import AppContent from './components/app/AppContent';
@@ -166,6 +168,9 @@ export default function App() {
                     <Route path="/share/:id" element={<SharedDocumentPage />} />
                     <Route path="/share/*" element={<SharedDocumentPage />} />
                     <Route path="/login" element={<ShareLoginPage />} />
+                    {/* Public SSO return — the server callback redirects here
+                        with a one-time code; it must bypass the auth gate. */}
+                    <Route path={OIDC_RETURN_PATH} element={<OidcReturnPage />} />
                     {/* Everything else is gated behind authentication. */}
                     <Route path="/*" element={<AuthenticatedApp />} />
                   </Routes>

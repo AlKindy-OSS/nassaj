@@ -149,6 +149,7 @@ function renderPicker(props: {
       providerModelsLoading={false}
       providerModelsRefreshing={false}
       providerAuthStatus={props.authStatus}
+      onRefreshProviderModels={vi.fn().mockResolvedValue(undefined)}
       onHardRefreshProviderModels={noop}
       onRefreshAuthStatus={vi.fn().mockResolvedValue(undefined)}
       setInput={noop as unknown as React.Dispatch<React.SetStateAction<string>>}

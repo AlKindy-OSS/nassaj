@@ -10,7 +10,6 @@ import {
   Link2,
   Palette,
   SlidersHorizontal,
-  Server,
   User,
   Users,
 } from 'lucide-react';
@@ -66,19 +65,15 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   },
   // Engines are NOT a peer of Agents (ADR-073): every agent carries its own
   // engines tab, so the axis is read where the body it belongs to is read.
+  // «النماذج المحلية» was a peer tab here; it is now the last card in the
+  // Agents grid (AgentSelectorSection). Deep links (?settings=local-models)
+  // are redirected by settingsUrl.ts.
   {
     id: 'agents',
     label: 'Agents',
     labelKey: 'mainTabs.agents',
-    keywords: 'agents subagents claude code',
+    keywords: 'agents subagents claude code local models servers ollama lm studio llama vllm نماذج محلية خوادم',
     icon: Bot,
-  },
-  {
-    id: 'local-models',
-    label: 'Local models',
-    labelKey: 'mainTabs.localModels',
-    keywords: 'local models servers ollama lm studio llama vllm نماذج محلية خوادم',
-    icon: Server,
   },
   // «الأجسام» ثم «ما تقرؤه الأجسام» ثم «مَن يزوّدها» — فموضعُ المرجعيّات بعد
   // `agents` مباشرةً وقبل `vendors`. وبلا حقل `roles`: القراءة مفتوحةٌ لكل عضو،

@@ -52,22 +52,9 @@
     "barAria": "コンテキスト使用量",
     "empty": "トークン使用量はまだありません",
     "percentUsed": "実際のウィンドウの{{percent}}",
-    "tooltipUsed": "実際のウィンドウの使用量: {{used}} / {{total}}",
     "tooltipCacheRead": "キャッシュ読み取り: {{value}}",
     "popoverTitle": "コンテキスト使用量",
     "close": "閉じる",
-    "levels": {
-      "safe": "推奨圧縮しきい値未満",
-      "attention": "圧縮しきい値は不明",
-      "warning": "推奨圧縮しきい値に達しました",
-      "critical": "推奨圧縮しきい値に達しました"
-    },
-    "nativeThreshold": "元の圧縮しきい値: {{value}} トークン",
-    "proposedThreshold": "推奨圧縮しきい値: {{value}} トークン",
-    "thresholdUnknown": "圧縮しきい値は不明",
-    "lastInput": "直近リクエストの入力: {{value}} トークン（現在の使用量ではありません）",
-    "pressureReached": "推奨圧縮しきい値に達しました",
-    "pressureBelow": "推奨圧縮しきい値未満",
     "alerts": {
       "pressure": "推奨圧縮しきい値に達しました",
       "close": "25万トークンに達しました。新しい会話での継続を検討してください。",

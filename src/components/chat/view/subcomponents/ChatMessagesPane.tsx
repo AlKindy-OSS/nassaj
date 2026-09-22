@@ -73,6 +73,8 @@ interface ChatMessagesPaneProps {
   providerModelsLoading: boolean;
   providerModelsRefreshing: boolean;
   providerAuthStatus: ProviderAuthStatusMap;
+  /** إعادة تحميل كتالوج النماذج بدون bypassCache — يُستدعى عند فتح المنتقي. */
+  onRefreshProviderModels: () => Promise<void>;
   onHardRefreshProviderModels: () => void;
   onRefreshAuthStatus: (force?: boolean) => Promise<void>;
   setInput: Dispatch<SetStateAction<string>>;
@@ -159,6 +161,7 @@ export default function ChatMessagesPane({
   providerModelsLoading,
   providerModelsRefreshing,
   providerAuthStatus,
+  onRefreshProviderModels,
   onHardRefreshProviderModels,
   onRefreshAuthStatus,
   setInput,
@@ -336,6 +339,7 @@ export default function ChatMessagesPane({
           providerModelsLoading={providerModelsLoading}
           providerModelsRefreshing={providerModelsRefreshing}
           providerAuthStatus={providerAuthStatus}
+          onRefreshProviderModels={onRefreshProviderModels}
           onHardRefreshProviderModels={onHardRefreshProviderModels}
           onRefreshAuthStatus={onRefreshAuthStatus}
           setInput={setInput}

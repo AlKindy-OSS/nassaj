@@ -35,8 +35,16 @@ export type AgentsSettingsTabProps = {
   initialAgent?: AgentProvider;
   /** B-256: deep-link initial category selection. */
   initialCategory?: AgentCategory;
+  /**
+   * When true, open with the «النماذج المحلية» grid card selected instead of a
+   * harness card. Set from a legacy ?settings=local-models deep link or from
+   * ?settings=agents&settingsLocalModels=true.
+   */
+  initialLocalModels?: boolean;
   /** Mirrors the active agent surface into the shareable settings URL. */
   onDestinationChange?: (agent: AgentProvider, category: AgentCategory, options?: { replace?: boolean }) => void;
+  /** Called when the «النماذج المحلية» grid card is selected; parent writes the URL. */
+  onLocalModelsSelect?: (options?: { replace?: boolean }) => void;
 };
 
 export type AgentCategoryTabsSectionProps = {
@@ -52,6 +60,12 @@ export type AgentSelectorSectionProps = {
   selectedAgent: AgentProvider;
   onSelectAgent: (agent: AgentProvider) => void;
   agentContextById: AgentContextByProvider;
+  /** Whether the «النماذج المحلية» card at the end of the grid is active. */
+  localModelsSelected?: boolean;
+  /** Label for the local-models card (from i18n). When omitted the card is not rendered. */
+  localModelsLabel?: string;
+  /** Called when the local-models card is clicked. */
+  onSelectLocalModels?: () => void;
 };
 
 export type AgentCategoryContentSectionProps = {

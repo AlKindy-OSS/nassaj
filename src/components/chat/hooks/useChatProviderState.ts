@@ -65,6 +65,11 @@ type ProviderModelsApiResponse = {
   data?: {
     models?: ProviderModelsDefinition;
     cache?: ProviderModelsCacheInfo;
+    // Sent by the server when it served a stale cache entry and launched a
+    // background refresh (stale-while-revalidate). The client re-fetches this
+    // provider once after REVALIDATING_REFETCH_DELAY_MS so it picks up the
+    // refreshed catalog without the user pressing the manual refresh button.
+    revalidating?: boolean;
   };
 };
 
@@ -170,6 +175,20 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
 
   const lastProviderRef = useRef(provider);
   const providerModelsRequestIdRef = useRef(0);
+
+  // SWR re-fetch delay: after this many ms the server's background refresh has
+  // almost certainly written a fresh cache entry, so a normal (no bypassCache)
+  // re-fetch will return the updated catalog without triggering another SWR cycle.
+  // Declared as a module-level constant-by-convention kept close to its usage site
+  // so it is readable in tests (fake timers advance by this exact value).
+  const REVALIDATING_REFETCH_DELAY_MS = 3_000;
+
+  // Tracks providers already scheduled for a SWR re-fetch in this load cycle
+  // (reset on every full load, NOT on individual SWR re-fetches).
+  const revalidatingScheduledRef = useRef<Set<LLMProvider>>(new Set());
+  // Stores the live timer handles so we can cancel them on new load or unmount.
+  const revalidatingTimersRef = useRef<Map<LLMProvider, ReturnType<typeof setTimeout>>>(new Map());
+
   // Live mirror of `engineProvider` for the once-registered ([] deps) server
   // preference subscription below, which must not close over a stale engine.
   const engineProviderRef = useRef(engineProvider);
@@ -261,6 +280,36 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     localStorage.setItem('opencode-model', model);
   }, []);
 
+  // Re-fetches a single provider's catalog (normal, no bypassCache) after the
+  // server has had time to complete its background revalidation. Called only from
+  // the SWR timer inside loadProviderModels — never schedules another re-fetch
+  // even if the response again carries revalidating:true (the guard in
+  // revalidatingScheduledRef prevents looping). Uses functional setState so it
+  // patches the catalog in place; the current selection is untouched.
+  const fetchSingleProviderSWR = useCallback(
+    async (p: LLMProvider, callerRequestId: number) => {
+      // Drop if a new full load superseded this cycle.
+      if (providerModelsRequestIdRef.current !== callerRequestId) return;
+      try {
+        const response = await authenticatedFetch(`/api/providers/${p}/models`);
+        // Guard again after the async gap.
+        if (providerModelsRequestIdRef.current !== callerRequestId) return;
+        const body = (await response.json()) as ProviderModelsApiResponse;
+        if (!response.ok || !body.success || !body.data?.models || !body.data?.cache) return;
+        // Intentionally ignore body.data.revalidating here — the guard in
+        // revalidatingScheduledRef already contains this provider, so a second
+        // SWR cycle would be a no-op anyway.
+        setProviderModelCatalog((prev) => ({ ...prev, [p]: body.data!.models! }));
+        setProviderModelCacheCatalog((prev) => ({ ...prev, [p]: body.data!.cache! }));
+        // If the live fetch recovered a provider that was in fallback, remove it.
+        setProviderModelsFallbackProviders((prev) => prev.filter((fp) => fp !== p));
+      } catch (error) {
+        console.warn(`SWR re-fetch failed for provider "${p}".`, error);
+      }
+    },
+    [],
+  );
+
   const loadProviderModels = useCallback(async (options: { bypassCache?: boolean } = {}) => {
     // Globally disabled providers (T-864) are dropped from the catalog fan-out:
     // no /models request is made for them at all — EXCEPT where the id is still
@@ -277,6 +326,15 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     ]));
     const requestId = providerModelsRequestIdRef.current + 1;
     providerModelsRequestIdRef.current = requestId;
+
+    // New full load cycle — cancel any pending SWR timers from the previous
+    // cycle (new session open, refresh button, local-models-changed event) and
+    // reset the "already scheduled" guard so providers can be re-scheduled if
+    // they are still stale in the new cycle.
+    revalidatingTimersRef.current.forEach((timer) => clearTimeout(timer));
+    revalidatingTimersRef.current.clear();
+    revalidatingScheduledRef.current.clear();
+
     const isHardRefresh = options.bypassCache === true;
 
     if (isHardRefresh) {
@@ -347,15 +405,50 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     setProviderModelCacheCatalog(nextCacheCatalog);
     setProviderModelsFallbackProviders(fallbackProviders);
 
+    // Schedule a single SWR re-fetch for each provider the server marked as
+    // stale-while-revalidating. We serve the old catalog immediately (above) so
+    // there is no blank flash. After REVALIDATING_REFETCH_DELAY_MS the server's
+    // background refresh has almost certainly completed, and a normal (no
+    // bypassCache) re-fetch will return the updated models.
+    //
+    // Invariants upheld here:
+    //  • One timer per provider per load cycle (revalidatingScheduledRef guards).
+    //  • We do NOT re-schedule on `degraded` alone — a degraded-but-non-expired
+    //    fallback is intentionally valid for 5 min; re-fetching it changes nothing.
+    //  • The timer self-removes from revalidatingTimersRef before calling the
+    //    fetcher, so the map stays clean if the fetcher itself errors.
+    results.forEach(({ provider: p, data }) => {
+      if (data?.revalidating && !revalidatingScheduledRef.current.has(p)) {
+        revalidatingScheduledRef.current.add(p);
+        const timer = setTimeout(() => {
+          revalidatingTimersRef.current.delete(p);
+          void fetchSingleProviderSWR(p, requestId);
+        }, REVALIDATING_REFETCH_DELAY_MS);
+        revalidatingTimersRef.current.set(p, timer);
+      }
+    });
+
     if (providerModelsRequestIdRef.current === requestId) {
       setProviderModelsLoading(false);
       setProviderModelsRefreshing(false);
     }
-  }, []);
+  }, [fetchSingleProviderSWR]);
 
   useEffect(() => {
     void loadProviderModels();
   }, [loadProviderModels]);
+
+  // Cancel any pending SWR re-fetch timers on unmount to prevent setState after
+  // unmount warnings and orphaned network requests. Capture the Map object (not
+  // .current) so the cleanup function references the same stable Map instance
+  // while avoiding the react-hooks/exhaustive-deps ref-in-cleanup lint warning.
+  useEffect(() => {
+    const timerMap = revalidatingTimersRef.current;
+    return () => {
+      timerMap.forEach((timer) => clearTimeout(timer));
+      timerMap.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const refreshLocalModels = () => { void loadProviderModels(); };
@@ -776,6 +869,10 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     providerModelsRefreshing,
     providerModelsFallbackProviders,
     providerModelsHasError: providerModelsFallbackProviders.length > 0,
+    // عادي (بلا bypassCache): يرجع من الكاش إن كان صالحاً، وإلا خدم الخادم
+    // المدخل القديم فوراً وأعاد تحميله خلفياً (stale-while-revalidate).
+    // يُستدعى عند فتح منتقي النماذج لضمان عرض قائمة محدَّثة بلا ثمن باهظ.
+    refreshProviderModels: () => loadProviderModels(),
     hardRefreshProviderModels: () => loadProviderModels({ bypassCache: true }),
     selectProviderModel,
     restampSessionEngine,

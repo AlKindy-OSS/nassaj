@@ -117,53 +117,25 @@
     "barAria": "Context usage",
     "empty": "No token usage yet",
     "percentUsed": "{{percent}} of real window",
-    "tooltipUsed": "Used of real window: {{used}} / {{total}}",
     "coordinatorTotal": "Coordinator total: {{value}} tokens",
     "tooltipCacheRead": "Cache read: {{value}}",
     "popoverTitle": "Context usage",
     "close": "Close",
-    "levels": {
-      "safe": "Below proposed compaction threshold",
-      "attention": "Compaction threshold unavailable",
-      "warning": "Proposed compaction threshold reached",
-      "critical": "Proposed compaction threshold reached"
-    },
     "alerts": {
       "compact": "At 150K tokens — consider running /compact.",
       "close": "At 250K tokens — consider continuing in a new conversation.",
       "hour": "This session is over an hour old — consider saving a continuation summary.",
       "pressure": "Proposed compaction threshold reached"
     },
-    "nativeThreshold": "Native compaction threshold: {{value}} tokens",
-    "proposedThreshold": "Proposed compaction threshold: {{value}} tokens",
-    "thresholdUnknown": "Compaction threshold unavailable",
-    "lastInput": "Last request input: {{value}} tokens (not current occupancy)",
-    "pressureReached": "Proposed compaction threshold reached",
-    "pressureBelow": "Below proposed compaction threshold",
     "unavailable": "Context usage unavailable",
     "cache": {
       "title": "Cache reuse",
       "ratio": "Reuse: {{percent}}",
       "empty": "No percentage: input is zero",
       "unknown": "Unavailable — awaiting a coherent harness observation",
-      "scope": {
-        "last_request": "Last measured request",
-        "turn": "Measured turn usage",
-        "session": "Measured session aggregate"
-      },
-      "history": "Historical observation",
       "counts": "Cached reads: {{read}} / total input: {{input}} tokens",
-      "source": "Source: {{source}}",
-      "observed": "Original observation time: {{time}}",
-      "disclaimer": "Cache reuse percentage is not financial savings.",
       "ownerThreshold": "Owner compaction policy: {{value}} tokens",
-      "experimentalThreshold": "Experimental compaction proposal: {{value}} tokens",
-      "newSessionThreshold": "Policy suggestion for a new conversation: {{value}} tokens",
-      "sources": {
-        "claude": "Native Claude observation",
-        "codex": "Native Codex observation",
-        "harness": "Native harness observation"
-      }
+      "experimentalThreshold": "Experimental compaction proposal: {{value}} tokens"
     }
   },
   "sessionIdleWarning": {

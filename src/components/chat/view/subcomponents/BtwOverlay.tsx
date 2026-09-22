@@ -148,7 +148,7 @@ export default function BtwOverlay({
 
   // شرط الفرك مطابق لشرط «f» في الـCLI: إجابة مكتملة وغير فارغة.
   const canFork = Boolean(
-    supportsFork && onFork && state?.status === 'complete' && state.answer.trim() !== '',
+    supportsFork && onFork && state?.status === 'complete' && (state.answer ?? '').trim() !== '',
   );
   const isForking = state?.forkStatus === 'forking';
 

@@ -4,6 +4,7 @@ import {
   KeyRound,
   MailPlus,
   MoreHorizontal,
+  ShieldCheck,
   Trash2,
   UserMinus,
   UserCheck,
@@ -15,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { ActionMenu, Alert, AlertDescription, Button } from '../../../../../shared/view/ui';
 import type { ActionMenuItem } from '../../../../../shared/view/ui';
 import { useAuth } from '../../../../auth';
+import { useOidcAvailability } from '../../../../auth/hooks/useOidcAvailability';
 import { useUsersAdmin } from '../../../hooks/useUsersAdmin';
 import type { ManagedUser, ManagedUserRole } from '../../../hooks/useUsersAdmin';
 import ParticipantAvatar from '../../../../participants/ParticipantAvatar';
@@ -33,6 +35,7 @@ const EMPTY_STATE_CLASS = 'py-6 text-center text-[13px] leading-relaxed text-mut
 
 import InviteUserModal from './InviteUserModal';
 import ResetPasswordModal from './ResetPasswordModal';
+import SsoIdentityModal from './SsoIdentityModal';
 
 const ROLE_OPTIONS: ManagedUserRole[] = ['user', 'admin', 'owner'];
 
@@ -63,11 +66,15 @@ export default function UsersSettingsTab() {
     revokeInvite,
     resetPassword,
     deleteUser,
+    linkSsoIdentity,
+    unlinkSsoIdentity,
   } = useUsersAdmin(true);
+  const isSsoAvailable = useOidcAvailability();
 
   const [actionError, setActionError] = useState('');
   const [isInviteOpen, setInviteOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<ManagedUser | null>(null);
+  const [ssoTarget, setSsoTarget] = useState<ManagedUser | null>(null);
   // Two-click confirmation: store the id of the user pending deletion.
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
@@ -87,6 +94,14 @@ export default function UsersSettingsTab() {
       return false;
     },
     [currentUserId, isAdmin, isOwner],
+  );
+
+  // SSO link visibility: owner may manage anyone's link (their own included);
+  // admin may not touch an owner's — linking an owner to a subject the admin
+  // controls would hand the admin an owner session.
+  const canManageSso = useCallback(
+    (target: ManagedUser) => isSsoAvailable && (isOwner || (isAdmin && target.role !== 'owner')),
+    [isAdmin, isOwner, isSsoAvailable],
   );
 
   const pendingInvites = useMemo(
@@ -222,6 +237,14 @@ export default function UsersSettingsTab() {
                   label: t('users.resetPassword'),
                   icon: KeyRound,
                   onSelect: () => setResetTarget(managedUser),
+                });
+              }
+              if (canManageSso(managedUser)) {
+                actions.push({
+                  key: 'sso',
+                  label: t('users.sso.menu'),
+                  icon: ShieldCheck,
+                  onSelect: () => setSsoTarget(managedUser),
                 });
               }
               if (isOwner && !isSelf) {
@@ -454,6 +477,15 @@ export default function UsersSettingsTab() {
           username={resetTarget.username}
           onClose={() => setResetTarget(null)}
           onReset={() => resetPassword(resetTarget.id)}
+        />
+      )}
+
+      {ssoTarget && (
+        <SsoIdentityModal
+          username={ssoTarget.username}
+          onClose={() => setSsoTarget(null)}
+          onLink={(subject) => linkSsoIdentity(ssoTarget.id, subject)}
+          onUnlink={() => unlinkSsoIdentity(ssoTarget.id)}
         />
       )}
     </div>

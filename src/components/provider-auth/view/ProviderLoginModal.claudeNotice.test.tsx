@@ -43,28 +43,33 @@ afterEach(cleanup);
 const open = (provider: 'claude' | 'codex' | 'kimi') =>
   render(<ProviderLoginModal isOpen provider={provider} onClose={vi.fn()} />);
 
-describe('ProviderLoginModal — the claude notice (setup-token is two steps)', () => {
-  it('renders a notice for claude at all — it used to have none', () => {
+describe('ProviderLoginModal — the claude notice (B-1260: full OAuth login)', () => {
+  it('renders a notice for claude naming the two steps (authorize, then paste code)', () => {
     open('claude');
     expect(screen.getByTestId('terminal'), 'the terminal still renders below').toBeTruthy();
-    expect(screen.getByText(/Two steps: authorize, then paste the token/i)).toBeTruthy();
-  });
-
-  it('says the token is printed once and is not captured by nassaj', () => {
-    open('claude');
-    expect(screen.getByText(/sk-ant-oat01-/)).toBeTruthy();
     expect(
-      screen.getByText(/shown once only/i),
-      'the operator must know the terminal holds the only copy',
+      screen.getByText(/Two steps: authorize, then paste the code into the terminal/i),
     ).toBeTruthy();
-    expect(screen.getByText(/does not capture it from the terminal/i)).toBeTruthy();
   });
 
-  it('names the destination field precisely, not just "settings"', () => {
+  it('B-1260: runs claude auth login for a FULL subscription link, not setup-token', () => {
     open('claude');
-    const paste = screen.getByText(/Setup token/);
-    expect(paste.textContent).toMatch(/Settings → Agents → Claude → Account/);
-    expect(paste.textContent).toMatch(/Save token/);
+    expect(screen.getByText(/claude auth login/)).toBeTruthy();
+    expect(
+      screen.getByText(/full Claude subscription, not an inference-only token/i),
+    ).toBeTruthy();
+    // The inference-only setup-token copy must be gone.
+    expect(screen.queryByText(/sk-ant-oat01-/)).toBeNull();
+  });
+
+  it('B-1260: tells the operator to paste the code BACK INTO THE TERMINAL', () => {
+    open('claude');
+    const paste = screen.getByText(/paste it back/i);
+    expect(paste.textContent).toMatch(/into this terminal/i);
+    expect(paste.textContent).toMatch(/Paste code here/);
+    // nassaj captures nothing; the CLI saves the credential — no card field step.
+    expect(paste.textContent).toMatch(/nassaj stores nothing itself/i);
+    expect(screen.queryByText(/Save token/)).toBeNull();
   });
 
   it('leaves the codex notice and its generic heading untouched', () => {

@@ -151,6 +151,9 @@ export type AuditAction =
   | 'oidc_backchannel_logout'
   | 'oidc_identity_linked'
   | 'oidc_identity_unlinked'
+  // Local role changed by an external attestation (ADR-069 mapper). Metadata is
+  // { provider, from, to } only — never the subject or the raw claim.
+  | 'external_role_synced'
   | 'scheduled_message_created'
   | 'scheduled_message_updated'
   | 'scheduled_message_cancelled'

@@ -226,6 +226,22 @@ export const userDb = {
   },
 
   /**
+   * Compare-and-set role change for externally attested roles (ADR-069). Only
+   * applies when the stored role still equals `expectedRole`; never promotes to
+   * and never modifies an owner row. Returns true when a row changed.
+   */
+  setRoleIfUnchanged(userId: number, expectedRole: UserRole, nextRole: Exclude<UserRole, 'owner'>): boolean {
+    if ((nextRole as UserRole) === 'owner' || expectedRole === 'owner') {
+      return false;
+    }
+    const db = getConnection();
+    const result = db
+      .prepare("UPDATE users SET role = ? WHERE id = ? AND role = ? AND role <> 'owner'")
+      .run(nextRole, userId, expectedRole);
+    return result.changes === 1;
+  },
+
+  /**
    * Returns the full row (incl. role/status) for any user by id regardless of
    * status. Used by management routes that must act on disabled users too.
    */

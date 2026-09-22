@@ -231,6 +231,7 @@ function ChatInterface({
     providerModelsLoading,
     providerModelsRefreshing,
     providerModelsFallbackProviders,
+    refreshProviderModels,
     hardRefreshProviderModels,
     selectProviderModel,
     restampSessionEngine,
@@ -1128,6 +1129,7 @@ function ChatInterface({
           providerModelsLoading={providerModelsLoading}
           providerModelsRefreshing={providerModelsRefreshing}
           providerAuthStatus={providerAuthStatus}
+          onRefreshProviderModels={refreshProviderModels}
           onHardRefreshProviderModels={hardRefreshProviderModels}
           onRefreshAuthStatus={refreshAuthStatus}
           setInput={setInput}

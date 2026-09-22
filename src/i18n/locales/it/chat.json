@@ -52,22 +52,9 @@
     "barAria": "Utilizzo del contesto",
     "empty": "Nessun utilizzo di token ancora",
     "percentUsed": "{{percent}} della finestra reale",
-    "tooltipUsed": "Usato della finestra reale: {{used}} / {{total}}",
     "tooltipCacheRead": "Lettura cache: {{value}}",
     "popoverTitle": "Utilizzo del contesto",
     "close": "Chiudi",
-    "levels": {
-      "safe": "Sotto la soglia di compressione proposta",
-      "attention": "Soglia di compressione non disponibile",
-      "warning": "Soglia di compressione proposta raggiunta",
-      "critical": "Soglia di compressione proposta raggiunta"
-    },
-    "nativeThreshold": "Soglia di compressione originale: {{value}} token",
-    "proposedThreshold": "Soglia di compressione proposta: {{value}} token",
-    "thresholdUnknown": "Soglia di compressione non disponibile",
-    "lastInput": "Input dell’ultima richiesta: {{value}} token (non occupazione attuale)",
-    "pressureReached": "Soglia di compressione proposta raggiunta",
-    "pressureBelow": "Sotto la soglia di compressione proposta",
     "alerts": {
       "pressure": "Soglia di compressione proposta raggiunta",
       "close": "Raggiunti 250.000 token — valuta una nuova conversazione.",

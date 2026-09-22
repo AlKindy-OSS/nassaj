@@ -45,12 +45,17 @@ export async function buildHermesModelCatalog(): Promise<ProviderModelsDefinitio
   const { provider, defaultModel } = await readHermesRuntimeConfig();
   const cached = await readHermesCachedModels(provider);
 
-  const ids = [...new Set([...(defaultModel ? [defaultModel] : []), ...cached])];
+  const ids = [...new Set([...(defaultModel ? [defaultModel] : []), ...cached.models])];
   if (ids.length === 0) {
-    return HERMES_EMPTY_MODELS;
+    // B-1283: an empty catalog is the fallback served when hermes' own files are
+    // unreadable — the config-read failure in hermes-runtime.ts (readHermesRuntimeConfig
+    // catch) collapses here (provider null ⇒ no cached models ⇒ no ids). A fresh
+    // object flagged degraded keeps the cache TTL short so a later live read is
+    // re-attempted; the shared HERMES_EMPTY_MODELS constant is never mutated.
+    return { ...HERMES_EMPTY_MODELS, degraded: true };
   }
 
-  return {
+  const catalog: ProviderModelsDefinition = {
     OPTIONS: ids.map((value) => ({
       value,
       label: value,
@@ -58,6 +63,19 @@ export async function buildHermesModelCatalog(): Promise<ProviderModelsDefinitio
     })),
     DEFAULT: defaultModel ?? ids[0],
   };
+
+  // B-1283 gap 2: a catalog built from the live config default ALONE because the
+  // cache read genuinely FAILED (missing/unreadable/corrupt file) is incomplete —
+  // hermes' own model list never reached it — so it is flagged degraded and cached
+  // on the short TTL, to be re-attempted soon. A default alone over a LEGITIMATE
+  // empty cache (a valid file that simply does not list this provider yet) is a
+  // real result and stays unflagged. `degraded` is set on this fresh object only;
+  // the constant above is never mutated.
+  if (cached.failed) {
+    return { ...catalog, degraded: true };
+  }
+
+  return catalog;
 }
 
 class HermesModels implements IProviderModels {

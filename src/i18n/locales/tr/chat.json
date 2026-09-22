@@ -52,22 +52,9 @@
     "barAria": "Bağlam kullanımı",
     "empty": "Henüz token kullanımı yok",
     "percentUsed": "Gerçek pencerenin %{{percent}}'i",
-    "tooltipUsed": "Gerçek pencereden kullanılan: {{used}} / {{total}}",
     "tooltipCacheRead": "Önbellek okuması: {{value}}",
     "popoverTitle": "Bağlam kullanımı",
     "close": "Kapat",
-    "levels": {
-      "safe": "Önerilen sıkıştırma eşiğinin altında",
-      "attention": "Sıkıştırma eşiği bilinmiyor",
-      "warning": "Önerilen sıkıştırma eşiğine ulaşıldı",
-      "critical": "Önerilen sıkıştırma eşiğine ulaşıldı"
-    },
-    "nativeThreshold": "Asıl sıkıştırma eşiği: {{value}} token",
-    "proposedThreshold": "Önerilen sıkıştırma eşiği: {{value}} token",
-    "thresholdUnknown": "Sıkıştırma eşiği bilinmiyor",
-    "lastInput": "Son isteğin girdisi: {{value}} token (güncel doluluk değil)",
-    "pressureReached": "Önerilen sıkıştırma eşiğine ulaşıldı",
-    "pressureBelow": "Önerilen sıkıştırma eşiğinin altında",
     "alerts": {
       "pressure": "Önerilen sıkıştırma eşiğine ulaşıldı",
       "close": "250 bin tokena ulaşıldı — yeni bir sohbette devam etmeyi değerlendirin.",

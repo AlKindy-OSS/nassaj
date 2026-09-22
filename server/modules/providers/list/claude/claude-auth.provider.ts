@@ -14,7 +14,70 @@ type ClaudeCredentialsStatus = {
   method: string | null;
   error?: string;
   linkExpiry?: ProviderLinkExpiry | null;
+  /** B-1260: credential present but a PARTIAL link (see ProviderAuthStatus.incompleteLink). */
+  incompleteLink?: boolean;
 };
+
+/**
+ * B-1260 — the scopes a FULL Claude subscription link carries. `claude auth
+ * login` mints access + refresh with the profile+inference set below; `claude
+ * setup-token` mints an inference-only token (`inferenceOnly:true` in the
+ * bundled CLI). A credentials file whose stored `scopes` array is present but
+ * omits the profile scope is therefore an inference-only link — usable for a
+ * turn but unable to read usage/profile — so it is reported as incomplete, not
+ * fully linked. Both the short (`profile`) and namespaced (`user:profile`)
+ * spellings are accepted, since the on-disk array uses the short form.
+ */
+const FULL_LINK_PROFILE_SCOPES = ['profile', 'user:profile'] as const;
+
+/**
+ * Classifies a `.credentials.json` claudeAiOauth block into a link quality,
+ * shared in spirit with claude-onboarding.service.js (kept in parity by
+ * claude-auth.provider.test.ts + claude-onboarding.test.ts). Pure over `now`.
+ *
+ *   - 'none'       no access token at all;
+ *   - 'expired'    both the access token AND the refresh token are dead;
+ *   - 'incomplete' usable-looking but not a FULL link: no refresh token (cannot
+ *                  renew — the B-1260 false-"linked" case), or a scopes array
+ *                  that omits the profile scope (inference-only);
+ *   - 'linked'     access token present, a refresh token exists, at least one of
+ *                  the two is alive, and scopes (when present) include profile.
+ */
+function classifyOauthLink(
+  oauth: Record<string, unknown> | null | undefined,
+  now: number,
+): 'none' | 'expired' | 'incomplete' | 'linked' {
+  const accessToken = readOptionalString(oauth?.accessToken);
+  if (!accessToken) return 'none';
+
+  const expiresAt = typeof oauth?.expiresAt === 'number' ? oauth.expiresAt : undefined;
+  const linkExpiresAt = typeof oauth?.refreshTokenExpiresAt === 'number'
+    ? oauth.refreshTokenExpiresAt
+    : undefined;
+  const refreshToken = readOptionalString(oauth?.refreshToken);
+
+  const accessAlive = expiresAt === undefined || now < expiresAt;
+  const refreshAlive = Boolean(refreshToken)
+    && (linkExpiresAt === undefined || now < linkExpiresAt);
+
+  if (!accessAlive && !refreshAlive) return 'expired';
+
+  // A full link MUST be renewable. Without a refresh token the access token dies
+  // (silently, at ~8h) with no way back — and the reported B-1260 credential had
+  // exactly this shape (accessToken, no refreshToken, no expiresAt) yet showed
+  // "linked". Treat it as incomplete: the honest "re-link" state, not "connected".
+  if (!refreshToken) return 'incomplete';
+
+  const scopes = Array.isArray(oauth?.scopes) ? oauth.scopes : null;
+  if (scopes) {
+    const hasProfile = scopes.some(
+      (s) => typeof s === 'string' && FULL_LINK_PROFILE_SCOPES.includes(s as never),
+    );
+    if (!hasProfile) return 'incomplete';
+  }
+
+  return 'linked';
+}
 
 const hasErrorCode = (error: unknown, code: string): boolean => (
   error instanceof Error && 'code' in error && error.code === code
@@ -166,6 +229,9 @@ export class ClaudeProviderAuth implements IProviderAuth {
       // يُملأ في فرع ملفّ الاعتماد وحده، فمسارُ مفتاح API لا يحمله أصلاً — وهو
       // الشرط الذي يمنع عرض «ينتهي ربطك» على من لا ربطَ اشتراكٍ له.
       linkExpiry: credentials.linkExpiry ?? null,
+      // B-1260: اعتمادٌ جزئيٌّ (setup-token inference-only أو ملفٌّ بلا refresh)
+      // يُعلَّم ناقصاً كي لا تعرضه الواجهة «متصلاً» كاملاً.
+      incompleteLink: credentials.incompleteLink ?? false,
     };
   }
 
@@ -249,9 +315,15 @@ export class ClaudeProviderAuth implements IProviderAuth {
 
     // `claude setup-token` mints a long-lived OAuth token (sk-ant-oat01...) and
     // instructs the user to export it as CLAUDE_CODE_OAUTH_TOKEN — the CLI honors
-    // that variable, so the status check must too (T-115).
+    // that variable, so the status check must too (T-115). B-1260: this token is
+    // inference-only (`inferenceOnly:true` in the CLI), so it runs a turn but
+    // cannot read usage/profile — a PARTIAL link. It stays authenticated (the
+    // agent works) but is flagged incomplete so the card nudges a full re-link
+    // instead of claiming a complete subscription link.
     if (readOptionalString(env.CLAUDE_CODE_OAUTH_TOKEN)) {
-      return { authenticated: true, email: 'OAuth Token', method: 'oauth_token' };
+      return {
+        authenticated: true, email: 'OAuth Token', method: 'oauth_token', incompleteLink: true,
+      };
     }
 
     const configDir = this.resolveConfigDir(env);
@@ -266,7 +338,13 @@ export class ClaudeProviderAuth implements IProviderAuth {
     }
 
     if (readOptionalString(settingsEnv.CLAUDE_CODE_OAUTH_TOKEN)) {
-      return { authenticated: true, email: 'Configured via settings.json', method: 'oauth_token' };
+      // B-1260: inference-only setup-token stored in settings.json — partial link.
+      return {
+        authenticated: true,
+        email: 'Configured via settings.json',
+        method: 'oauth_token',
+        incompleteLink: true,
+      };
     }
 
     try {
@@ -277,38 +355,25 @@ export class ClaudeProviderAuth implements IProviderAuth {
       const accessToken = readOptionalString(oauth?.accessToken);
 
       if (accessToken) {
-        // B-586: الحكم على الربط لا على توكن الوصول. كان هذا الفرع يُعلن
-        // `authenticated: false` بمجرّد مُضيّ `expiresAt` — وهو ثماني ساعاتٍ
-        // يجدّدها الـCLI صامتاً بتوكن التحديث، فكانت البطاقة تقول «انتهى تسجيل
-        // دخولك» لعضوٍ أمامه أسبوعان (قِيس: عضوٌ عند +13.35 يوماً يرى بطاقةً
-        // حمراء). والموعدُ الذي ينكسر عنده الربط فعلاً هو `refreshTokenExpiresAt`.
-        //
-        // ويُقرأ `expiresAt` بفحص نوعٍ صريح لا بـ`!expiresAt`: الصيغة الأخيرة
-        // كانت تقرأ الختم الصفري «بلا انتهاء» فتُعلن اعتماداً ميتاً موصولاً.
+        // B-586: الحكم على الربط لا على توكن الوصول. `expiresAt` عمرُ توكن الوصول
+        // (ثماني ساعاتٍ متدحرجة)، و`refreshTokenExpiresAt` موعدُ انقطاع الربط.
+        // ويُقرأ كلاهما بفحص نوعٍ صريح لا بـ`!x` كي لا يُقرأ الختمُ الصفريُّ «بلا
+        // انتهاء». المنطقُ كلُّه في `classifyOauthLink` كي تتطابق ساقُه مع
+        // claude-onboarding.service.js حرفاً بحرف (حارس التطابق).
         const expiresAt = typeof oauth?.expiresAt === 'number' ? oauth.expiresAt : undefined;
         const linkExpiresAt = typeof oauth?.refreshTokenExpiresAt === 'number'
           ? oauth.refreshTokenExpiresAt
           : undefined;
-        const refreshToken = readOptionalString(oauth?.refreshToken);
         const now = Date.now();
         const email = readOptionalString(creds.email)
           ?? readOptionalString(creds.user)
           ?? await this.readOauthAccountEmail(env);
 
-        // طريقان يُبقيان الاعتماد صالحاً، والموتُ انقطاعُهما معاً: إمّا توكنُ وصولٍ
-        // لم ينتهِ بعد (يعمل الآن)، أو توكنُ تحديثٍ لم يمضِ ميقاتُه (يُنعشه عند
-        // اللزوم). وغيابُ `refreshTokenExpiresAt` (اعتمادٌ كتبه إصدارٌ أقدم) ليس
-        // موتاً — تُترك الحياةُ لتوكن التحديث حينئذٍ.
-        //
-        // والميقاتُ المُنقضي وحدَه **لا يقتل**: الـCLI نفسه لا يستعمله بوّابةً — في
-        // ثنائيّته موضعٌ واحدٌ يقارنه بالساعة وهو دالّةُ عرض التحذير لا أيُّ مسار
-        // تنفيذ. فلو حكمنا بالإنقضاء وحده لحُجب عضوٌ عن اختيار نماذج كلود
-        // (`isProviderDisabled = installed && !authenticated`) بينما طرفيّتُه تعمل.
-        const accessAlive = expiresAt === undefined || now < expiresAt;
-        const refreshAlive = Boolean(refreshToken)
-          && (linkExpiresAt === undefined || now < linkExpiresAt);
+        const link = classifyOauthLink(oauth, now);
 
-        if (!accessAlive && !refreshAlive) {
+        // ميت: انقطع توكنا الوصول والتحديث معاً. الميقاتُ المُنقضي وحدَه لا يقتل —
+        // الـCLI لا يستعمله بوّابةً — فلا يُحجب عضوٌ طرفيّتُه تعمل.
+        if (link === 'expired') {
           const reason = linkExpiresAt !== undefined && now >= linkExpiresAt
             ? `link-expired(refreshTokenExpiresAt=${stampForLog(linkExpiresAt)})`
             : `access-expired-no-refresh(expiresAt=${stampForLog(expiresAt)})`;
@@ -317,7 +382,22 @@ export class ClaudeProviderAuth implements IProviderAuth {
             authenticated: false,
             email: null,
             method: null,
-            error: 'Claude login has expired. Run claude setup-token again.',
+            error: 'Claude login has expired. Run claude auth login again.',
+          };
+        }
+
+        // B-1260: ربطٌ ناقص — ملفٌّ بلا `refreshToken` (لا يُنعَش فينكسر، وهو شكلُ
+        // العطل المُبلَّغ) أو نطاقاتٌ بلا profile (inference-only). لا يُقدَّم على
+        // أنه متصلٌ كامل: `authenticated: false` مع `incompleteLink` ورسالةُ
+        // «أعِد الربط الكامل»، فلا يبقى المستخدم على اعتمادٍ لا يعمل ويظنّه موصولاً.
+        if (link === 'incomplete') {
+          this.logCredentialsFailure(configDir, 'credentials-file-incomplete-link-no-refresh-or-scope');
+          return {
+            authenticated: false,
+            email: null,
+            method: null,
+            incompleteLink: true,
+            error: 'Claude link is incomplete. Run claude auth login for full access.',
           };
         }
 

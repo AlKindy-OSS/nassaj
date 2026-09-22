@@ -251,6 +251,69 @@ test('stale-while-revalidate: an expired entry is served instantly while refresh
   }
 });
 
+test('stale-while-revalidate marks the result revalidating; fresh and cached hits do not', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'provider-model-cache-revalidating-'));
+  let currentTime = 1_000;
+  let loadCount = 0;
+
+  try {
+    const service = createProviderModelsService({
+      cachePath: path.join(tempRoot, 'models-cache.json'),
+      now: () => currentTime,
+      resolveProvider: (provider) => ({
+        models: {
+          getSupportedModels: async () => {
+            loadCount += 1;
+            return createModels(`${provider}-${loadCount}`);
+          },
+          getCurrentActiveModel: async () => createCurrentActiveModel(`${provider}-active`),
+          changeActiveModel: async (input) => createSessionActiveModelChange(provider, input),
+        },
+      }),
+    });
+
+    // Fresh live fetch: no revalidating flag.
+    const fresh = await service.getProviderModels('codex');
+    assert.equal(fresh.revalidating, undefined, 'a fresh live fetch is not revalidating');
+
+    // Still-valid cache hit: no revalidating flag.
+    const cached = await service.getProviderModels('codex');
+    assert.equal(cached.cache.source, 'memory');
+    assert.equal(cached.revalidating, undefined, 'a still-valid cache hit is not revalidating');
+
+    // Just past the TTL: the stale entry is served with revalidating: true while
+    // the refresh runs in the background.
+    currentTime += PROVIDER_MODELS_CACHE_TTL_MS + 1;
+    const stale = await service.getProviderModels('codex');
+    assert.equal(stale.models.DEFAULT, 'codex-1', 'stale snapshot served instantly');
+    assert.equal(stale.revalidating, true, 'the stale-while-revalidate path flags revalidating');
+
+    // After the background refresh settles, the next read is a plain cache hit.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const refreshed = await service.getProviderModels('codex');
+    assert.equal(refreshed.models.DEFAULT, 'codex-2');
+    assert.equal(refreshed.revalidating, undefined, 'the refreshed cache hit is not revalidating');
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('bypassCache never marks the result revalidating', async () => {
+  const service = createProviderModelsService({
+    cachePath: createEphemeralCachePath(),
+    resolveProvider: (provider) => ({
+      models: {
+        getSupportedModels: async () => createModels(`${provider}-models`),
+        getCurrentActiveModel: async () => createCurrentActiveModel(`${provider}-active`),
+        changeActiveModel: async (input) => createSessionActiveModelChange(provider, input),
+      },
+    }),
+  });
+
+  const result = await service.getProviderModels('codex', { bypassCache: true });
+  assert.equal(result.revalidating, undefined);
+});
+
 test('degraded provider catalog is cached under the short TTL, not the 24-hour TTL', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'provider-model-cache-degraded-'));
   let currentTime = 1_000;

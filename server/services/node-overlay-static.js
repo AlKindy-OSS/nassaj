@@ -1,7 +1,7 @@
 /**
  * ADR-156 / T-1730 W3 — E1: the owner-sealed static overlay service.
  *
- * Serves a node operator's static files (e.g. Rukhaimi's `/hub` links page)
+ * Serves a node operator's static files (e.g. its `/hub` links page)
  * WITHOUT ever writing a byte to a tracked path or a generation. It is mounted
  * right before `express.static(dist)` and after every `/api` route (contract
  * §3.1 C1), so it runs before `authenticateToken`, under the same service

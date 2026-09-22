@@ -4,6 +4,7 @@ import { IS_PLATFORM } from '../../../constants/config';
 import { shareLoginPath } from '../../document-sharing/share-navigation';
 import { api } from '../../../utils/api';
 import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
+import { exchangeOidcCode, fetchOidcIdentity } from '../oidc';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -489,6 +490,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
     [checkOnboardingStatus, hydratePreferences, hydrateUserIdentity, setSession],
   );
 
+  // SSO sign-in (B-728). The exchange answers only `{ token, userId }`, so the
+  // identity is loaded with that token BEFORE anything is persisted; then the
+  // same session steps as `login` run so the mustChangePassword and onboarding
+  // gates engage identically.
+  const loginWithOidcCode = useCallback<AuthContextValue['loginWithOidcCode']>(
+    async (code) => {
+      setError(null);
+      const exchange = await exchangeOidcCode(code);
+      if (!exchange.ok) {
+        return { success: false, reason: exchange.reason };
+      }
+      const identity = await fetchOidcIdentity(exchange.token);
+      if (!identity.ok) {
+        return { success: false, reason: identity.reason };
+      }
+
+      skipNextAuthCheck.current = true;
+      setSession(identity.user, exchange.token);
+      setIsMultiUser(identity.isMultiUser);
+      setNeedsSetup(false);
+      await checkOnboardingStatus();
+      hydratePreferences();
+      return { success: true };
+    },
+    [checkOnboardingStatus, hydratePreferences, setSession],
+  );
+
   const register = useCallback<AuthContextValue['register']>(
     async (username, password) => {
       try {
@@ -645,6 +673,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       error,
       login,
       loginWithPasskey,
+      loginWithOidcCode,
       register,
       acceptInvite,
       changePassword,
@@ -664,6 +693,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isMultiUser,
       login,
       loginWithPasskey,
+      loginWithOidcCode,
       logout,
       mustChangePassword,
       needsSetup,

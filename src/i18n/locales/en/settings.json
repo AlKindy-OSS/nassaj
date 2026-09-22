@@ -545,7 +545,7 @@
     "bannerHint": "Click the button below to open the terminal and complete the login flow using",
     "linkButton": "Link Claude account",
     "tokenInput": {
-      "stepHint": "Press \u201c{{button}}\u201d on this card to run <cmd>claude setup-token</cmd>, then paste the token it prints here — it is shown once only.",
+      "stepHint": "Press “{{button}}” on this card to run <cmd>claude setup-token</cmd>, then paste the token it prints here — it is shown once only.",
       "notWritable": "The Claude credential is shared on this server, so only an owner or admin can set it. Do not run claude setup-token: the token is shown once and will not be accepted here.",
       "placeholder": "sk-ant-oat01-…",
       "ariaLabel": "Setup token",
@@ -554,7 +554,9 @@
       "saved": "Token saved",
       "emptyError": "Token is required",
       "saveError": "Failed to save token. Please try again."
-    }
+    },
+    "incompleteLink": "Your Claude link is incomplete — it cannot read usage and may stop working. Re-link with a full sign-in to finish.",
+    "relinkButton": "Re-link"
   },
   "agyConnection": {
     "description": "Link your own Antigravity subscription to use it in your sessions. Each user has their own isolated credential.",
@@ -568,7 +570,9 @@
       "close": "Close link dialog",
       "instructions": "In the terminal below, run",
       "afterComplete": "Complete the OAuth login flow, then close this dialog and click \"Re-check\" to refresh the status."
-    }
+    },
+    "incompleteLink": "Your Antigravity link is incomplete — it may stop working. Re-link with a full sign-in to finish.",
+    "relinkButton": "Re-link"
   },
   "users": {
     "title": "Users",
@@ -623,6 +627,32 @@
       "copy": "Copy",
       "copied": "Copied",
       "successHint": "Share this single-use link. It is shown only once."
+    },
+    "sso": {
+      "menu": "SSO identity",
+      "title": "SSO identity",
+      "description": "Link {{username}} to a user from the identity provider. Once linked, they can sign in with SSO; password sign-in stays available.",
+      "subjectLabel": "Identity provider subject (sub)",
+      "subjectHint": "The provider's stable user ID, not the email address.",
+      "link": "Link identity",
+      "linking": "Linking...",
+      "linked": "Identity linked. {{username}} can now sign in with SSO.",
+      "unlinkDescription": "Remove every SSO identity linked to {{username}}. This also signs them out on all devices.",
+      "unlinkConfirm": "Remove all SSO links for {{username}} and sign them out everywhere?",
+      "unlink": "Remove SSO links",
+      "unlinking": "Removing...",
+      "unlinked": "SSO links removed and all sessions of {{username}} signed out.",
+      "cancel": "Cancel",
+      "close": "Close",
+      "errors": {
+        "required": "Enter the identity provider subject.",
+        "invalid": "The subject is empty or longer than 255 characters.",
+        "conflict": "This identity is already linked to an account.",
+        "notFound": "This account no longer exists.",
+        "notConfigured": "The identity provider issuer is not configured on the server.",
+        "failed": "Could not update the SSO link. Try again.",
+        "network": "Network error. Try again."
+      }
     },
     "rowActions": "Actions for {{username}}",
     "lastLogin": "Last login",
@@ -1722,14 +1752,15 @@
       "blockedForbidden": "Your role may not run this command in a terminal. Ask an administrator, or close and set an API key instead.",
       "blockedGeneric": "The server refused to open this terminal.",
       "blockedServerText": "The server said:",
-      "blockedCode": "Reason code:"
+      "blockedCode": "Reason code:",
+      "blockedSharedLinkAdminOnly": "On this shared server, linking Claude is limited to an owner or admin. Ask an owner or admin to link the account, or close and set your own API key instead."
     },
     "deviceAuth": {
       "title": "Device Authorization",
       "claude": {
-        "title": "Two steps: authorize, then paste the token",
-        "intro": "The terminal below runs <cmd>claude setup-token</cmd>. Follow it to authorize in your own browser — no localhost required. When it finishes it prints a token starting with <cmd>sk-ant-oat01-</cmd>.",
-        "paste": "That token is shown <b>once only</b> and nassaj does not capture it from the terminal. Copy it before closing this dialog, then paste it into the <b>Setup token</b> field on the Claude card behind this dialog (Settings → Agents → Claude → Account) and press Save token."
+        "title": "Two steps: authorize, then paste the code into the terminal",
+        "intro": "The terminal below runs <cmd>claude auth login</cmd>. It prints a sign-in link — open it in your own browser and authorize (no localhost required). This links your full Claude subscription, not an inference-only token.",
+        "paste": "After you authorize, the browser shows a code. Copy it and paste it back <b>into this terminal</b> at the <cmd>Paste code here</cmd> prompt, then press Enter. nassaj stores nothing itself — the Claude CLI saves the credential. When it finishes, the account card behind this dialog shows the new state."
       },
       "codex": {
         "intro": "The terminal below will display a link and a device code. Open the link in your browser and enter the code to authorize Codex — no localhost required.",
@@ -1874,14 +1905,38 @@
       "readinessDescription": "These states come from the installation catalog and active production manifest.",
       "inactiveTitle": "Waiting, paused, or inactive services",
       "states": {
-        "connect_now": { "label": "Ready to connect", "detail": "The certified production path is ready." },
-        "connected": { "label": "Connected", "detail": "An account is connected and available." },
-        "owner_setup_required": { "label": "Provider setup required", "detail": "Complete provider setup once for this installation." },
-        "installation_origin_required": { "label": "Public address required", "detail": "OAuth needs one canonical public address." },
-        "coming_soon_uncertified": { "label": "Awaiting certification", "detail": "No certified production manifest is active yet." },
-        "temporarily_disabled": { "label": "Temporarily disabled", "detail": "The certified path is paused; no owner action is required." },
-        "migration_required": { "label": "Migration review required", "detail": "Review legacy material before this service can be used." },
-        "saved_inactive": { "label": "Saved — inactive", "detail": "Stored material remains isolated from every model body." }
+        "connect_now": {
+          "label": "Ready to connect",
+          "detail": "The certified production path is ready."
+        },
+        "connected": {
+          "label": "Connected",
+          "detail": "An account is connected and available."
+        },
+        "owner_setup_required": {
+          "label": "Provider setup required",
+          "detail": "Complete provider setup once for this installation."
+        },
+        "installation_origin_required": {
+          "label": "Public address required",
+          "detail": "OAuth needs one canonical public address."
+        },
+        "coming_soon_uncertified": {
+          "label": "Awaiting certification",
+          "detail": "No certified production manifest is active yet."
+        },
+        "temporarily_disabled": {
+          "label": "Temporarily disabled",
+          "detail": "The certified path is paused; no owner action is required."
+        },
+        "migration_required": {
+          "label": "Migration review required",
+          "detail": "Review legacy material before this service can be used."
+        },
+        "saved_inactive": {
+          "label": "Saved — inactive",
+          "detail": "Stored material remains isolated from every model body."
+        }
       }
     },
     "description": "Configure a platform once for eligible model bodies. Availability applies to the next session unless a runtime probe says otherwise.",

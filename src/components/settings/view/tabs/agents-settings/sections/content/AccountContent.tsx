@@ -38,6 +38,12 @@ export type UserCredentialLink = {
   isOwner: boolean;
   /** i18n prefix of the subscription-link texts in the settings namespace. */
   i18nPrefix: 'claudeConnection' | 'agyConnection';
+  /**
+   * B-1260 — الاعتماد موجودٌ لكنّه ربطٌ **ناقص** لا كامل (توكن inference-only،
+   * أو ملفُّ اعتمادٍ بلا `refreshToken`). حالةٌ متمايزة عن «غير مربوط»: تُعرض
+   * دعوةٌ صريحة لإعادة الربط الكامل بدل أن يُقدَّم الناقص «متصلاً».
+   */
+  incompleteLink?: boolean;
   /** CLI command shown in the onboarding hint (runs inside the link modal). */
   command: string;
   /** Opens the link modal (terminal running the onboarding command). */
@@ -297,8 +303,14 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
 
   // قرب انتهاء الربط — من الخادم مباشرةً (commit b4ff85ca).
   const linkExpiryDisplay = resolveLinkExpiryDisplay(authStatus.linkExpiry, Date.now());
+  // B-1260: ربطٌ ناقص — حالةٌ متمايزة تسبق لافتة «غير مربوط» وتحجبها، فلا يجتمع
+  // على العضو نداءان متناقضان («اربط» و«أعِد الربط الناقص»).
+  const showIncompleteLink = Boolean(
+    userLink && !userLink.loading && userLink.incompleteLink,
+  );
   const showLinkBanner = Boolean(
-    userLink && !userLink.loading && !userLink.connected && !userLink.isOwner,
+    userLink && !userLink.loading && !userLink.connected && !userLink.isOwner
+      && !userLink.incompleteLink,
   );
   /**
    * **حقلُ لصق الرمز ليس ابناً للافتة الدعوة** (‏B-1075 ← هذا الإصلاح).
@@ -616,10 +628,34 @@ export default function AccountContent({ agent, authStatus, onLogin, userLink }:
               والوصف دعوةٌ بطبيعته («اربط…»)، فلا معنى له إلا لمن **لم يُربَط
               بعد**. فصار مشروطاً بذلك، ولا يجتمع مع ملاحظة المالك أبداً.
           */}
-          {!userLink.loading && !userLink.connected && (
+          {!userLink.loading && !userLink.connected && !userLink.incompleteLink && (
             <p className="text-[13px] leading-relaxed text-muted-foreground">
               {t(`${userLink.i18nPrefix}.description`)}
             </p>
+          )}
+
+          {/* B-1260: ربطٌ ناقص — دعوةٌ صريحة لإعادة الربط الكامل. صندوق نبرة
+              تحذير لأنّه حائلٌ فعليٌّ دون عمل الوكيل كاملاً (لا يقرأ الاستخدام،
+              وقد ينكسر بلا refresh)، ويحمل زرّ الفعل نفسه. */}
+          {showIncompleteLink && (
+            <SettingsCard tone="warning">
+              <div role="alert" className="space-y-2">
+                <p className="flex items-start gap-2 text-[13px] leading-relaxed text-warning">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                  {t(`${userLink.i18nPrefix}.incompleteLink`, {
+                    defaultValue:
+                      'Your Claude link is incomplete — it cannot read usage and may stop working. '
+                      + 'Re-link with a full sign-in to finish.',
+                  })}
+                </p>
+                <Button type="button" size="sm" onClick={userLink.onLink}>
+                  <Link2 className="h-4 w-4" aria-hidden />
+                  <span className="ms-1.5">
+                    {t(`${userLink.i18nPrefix}.relinkButton`, { defaultValue: 'Re-link' })}
+                  </span>
+                </Button>
+              </div>
+            </SettingsCard>
           )}
 
           {userLink.error && (

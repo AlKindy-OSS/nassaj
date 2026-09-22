@@ -1,12 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { IS_PLATFORM } from '../../../constants/config';
 import { useBranding } from '../../../contexts/BrandingContext';
 import { useAuth } from '../context/AuthContext';
+import { useOidcAvailability } from '../hooks/useOidcAvailability';
 import { useWebAuthn } from '../hooks/useWebAuthn';
+import { startOidcLogin } from '../oidc';
 
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthInputField from './AuthInputField';
@@ -41,11 +43,17 @@ const initialState: LoginFormState = {
  *  - Secure context + WebAuthn not supported (rare): button is hidden entirely,
  *    as there is nothing actionable the user can do.
  *  - Secure context + WebAuthn supported: button is shown and active.
+ *
+ * The "sign in with SSO" button (B-728) appears only once the server is known
+ * to have OIDC enabled; it hands the whole page to the server-driven redirect.
+ * Password sign-in stays on screen regardless — it is the break-glass path when
+ * the identity provider is down or an account is not linked.
  */
 export default function LoginForm() {
   const { t } = useTranslation('auth');
   const { login } = useAuth();
   const { isSupported: isPasskeySupported, loginWithPasskey } = useWebAuthn();
+  const isSsoAvailable = useOidcAvailability();
   // Custom branding title (if configured) is interpolated into the description
   // copy (`{{appName}}`) so the login screen never names the stock product.
   const { title: brandingTitle } = useBranding();
@@ -55,6 +63,7 @@ export default function LoginForm() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false);
+  const [isSsoRedirecting, setIsSsoRedirecting] = useState(false);
 
   // isSecureContext is a stable browser property — no state needed.
   const isSecureContext = window.isSecureContext;
@@ -63,7 +72,8 @@ export default function LoginForm() {
   // browser that genuinely does not implement WebAuthn (where hiding is correct).
   const showPasskeyDisabled = !IS_PLATFORM && !isSecureContext;
   const showPasskeyButton = !IS_PLATFORM && (isPasskeySupported || showPasskeyDisabled);
-  const isBusy = isSubmitting || isPasskeySubmitting;
+  const isBusy = isSubmitting || isPasskeySubmitting || isSsoRedirecting;
+  const showAlternatives = showPasskeyButton || isSsoAvailable;
 
   const updateField = useCallback((field: keyof LoginFormState, value: string) => {
     setFormState((previous) => ({ ...previous, [field]: value }));
@@ -104,6 +114,24 @@ export default function LoginForm() {
     }
   }, [loginWithPasskey, t]);
 
+  // Back from the IdP can restore this page from the back/forward cache with
+  // the "redirecting" state still set, which would leave every button disabled.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        setIsSsoRedirecting(false);
+      }
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
+  const handleSsoLogin = useCallback(() => {
+    setErrorMessage('');
+    setIsSsoRedirecting(true);
+    startOidcLogin();
+  }, []);
+
   return (
     <AuthScreenLayout
       title={t('login.title')}
@@ -142,14 +170,29 @@ export default function LoginForm() {
           {isSubmitting ? t('login.loading') : t('login.submit')}
         </button>
 
+        {showAlternatives && (
+          <div className="flex items-center gap-3" aria-hidden>
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs uppercase text-muted-foreground">{t('passkey.divider')}</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        )}
+
+        {isSsoAvailable && (
+          <button
+            type="button"
+            onClick={handleSsoLogin}
+            disabled={isBusy}
+            aria-busy={isSsoRedirecting || undefined}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2 font-medium text-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ShieldCheck className="h-4 w-4" aria-hidden />
+            {isSsoRedirecting ? t('sso.redirecting') : t('sso.loginButton')}
+          </button>
+        )}
+
         {showPasskeyButton && (
           <>
-            <div className="flex items-center gap-3" aria-hidden>
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-xs uppercase text-muted-foreground">{t('passkey.divider')}</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-
             <button
               type="button"
               onClick={showPasskeyDisabled ? undefined : handlePasskeyLogin}

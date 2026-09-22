@@ -1,6 +1,8 @@
 import type { AuthenticationResponseJSON } from '@simplewebauthn/browser';
 import type { ReactNode } from 'react';
 
+import type { OidcFailureReason } from './oidc';
+
 export type UserRole = 'owner' | 'admin' | 'user';
 export type UserStatus = 'active' | 'disabled';
 
@@ -18,6 +20,10 @@ export type AuthUser = {
 };
 
 export type AuthActionResult = { success: true } | { success: false; error: string };
+
+// SSO results carry a reason code, not server text: the return page owns the
+// translated message for each failure.
+export type OidcLoginResult = { success: true } | { success: false; reason: OidcFailureReason };
 
 export type AuthSessionPayload = {
   token?: string;
@@ -85,6 +91,9 @@ export type AuthContextValue = {
   // setSession, identity hydration, onboarding check) so the forced
   // password-change and onboarding gates behave identically.
   loginWithPasskey: (assertionResponse: AuthenticationResponseJSON) => Promise<AuthActionResult>;
+  // Completes an SSO sign-in from /auth/oidc/return: redeems the one-time code,
+  // then runs the same session steps as `login` so every gate engages alike.
+  loginWithOidcCode: (code: string) => Promise<OidcLoginResult>;
   register: (username: string, password: string) => Promise<AuthActionResult>;
   acceptInvite: (token: string, username: string, password: string) => Promise<AuthActionResult>;
   // Self-service mutations. On password change the fresh token is persisted so

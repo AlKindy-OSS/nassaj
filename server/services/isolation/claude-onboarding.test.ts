@@ -51,7 +51,8 @@ after(() => {
 describe('getClaudeConnectionStatus', () => {
   it('reports not connected when the user dir does not exist', async () => {
     const status = await getClaudeConnectionStatus(1001);
-    assert.deepEqual(status, { connected: false, provider: 'claude' });
+    // B-1260: the shape now carries incompleteLink alongside connected.
+    assert.deepEqual(status, { connected: false, incompleteLink: false, provider: 'claude' });
   });
 
   it('reports not connected for an empty .claude dir', async () => {
@@ -61,16 +62,24 @@ describe('getClaudeConnectionStatus', () => {
     assert.equal(status.provider, 'claude');
   });
 
-  it('reports connected for a non-expired OAuth credentials.json', async () => {
+  it('reports connected for a full non-expired OAuth credentials.json', async () => {
     const dir = makeClaudeDir(1003);
+    // B-1260: a FULL link carries a refresh token; a bare access token is now a
+    // partial link (see the dedicated B-1260 cases below), not "connected".
     fs.writeFileSync(
       path.join(dir, '.credentials.json'),
       JSON.stringify({
-        claudeAiOauth: { accessToken: 'sk-secret-xyz', expiresAt: Date.now() + 3_600_000 },
+        claudeAiOauth: {
+          accessToken: 'sk-secret-xyz',
+          refreshToken: 'rt-secret',
+          expiresAt: Date.now() + 3_600_000,
+          refreshTokenExpiresAt: Date.now() + 13 * 86_400_000,
+        },
       })
     );
     const status = await getClaudeConnectionStatus(1003);
     assert.equal(status.connected, true);
+    assert.equal(status.incompleteLink, false);
     // The token value must never appear in the response.
     assert.equal(JSON.stringify(status).includes('sk-secret-xyz'), false);
   });
@@ -95,13 +104,84 @@ describe('getClaudeConnectionStatus', () => {
     assert.equal((await getClaudeConnectionStatus(1005)).connected, true);
   });
 
-  it('reports connected when settings.json declares a CLAUDE_CODE_OAUTH_TOKEN (B-1075)', async () => {
+  it('B-1260: settings CLAUDE_CODE_OAUTH_TOKEN alone is an INCOMPLETE link, not connected', async () => {
+    // B-1075 stored the inference-only setup-token here and called it connected.
+    // B-1260: that token cannot read usage/profile, so it is a partial link — the
+    // card shows "incomplete, re-link" rather than a false "connected".
     const dir = makeClaudeDir(1013);
     fs.writeFileSync(
       path.join(dir, 'settings.json'),
       JSON.stringify({ env: { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-123' } })
     );
-    assert.equal((await getClaudeConnectionStatus(1013)).connected, true);
+    const status = await getClaudeConnectionStatus(1013);
+    assert.equal(status.connected, false);
+    assert.equal(status.incompleteLink, true);
+  });
+
+  it('B-1260: an access token with NO refresh token is an incomplete link, not connected', async () => {
+    // The exact shape reported on a fleet node: accessToken + scopes present, but no
+    // refreshToken and no expiresAt — previously read as "connected" though it
+    // could not renew and did not work.
+    const dir = makeClaudeDir(1014);
+    fs.writeFileSync(
+      path.join(dir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'sk-fixture',
+          scopes: ['file_upload', 'inference', 'mcp_servers', 'profile', 'sessions:claude_code'],
+          subscriptionType: 'max',
+        },
+      })
+    );
+    const status = await getClaudeConnectionStatus(1014);
+    assert.equal(status.connected, false);
+    assert.equal(status.incompleteLink, true);
+  });
+
+  it('B-1260: the REAL measured full-OAuth scope array + refresh → connected', async () => {
+    // qa-critic live measurement (two fleet nodes): the exact scopes a
+    // working full sign-in carries, alongside a refresh token.
+    const dir = makeClaudeDir(1016);
+    fs.writeFileSync(
+      path.join(dir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'sk-fixture',
+          refreshToken: 'rt-fixture',
+          expiresAt: Date.now() + 3_600_000,
+          refreshTokenExpiresAt: Date.now() + 13 * 86_400_000,
+          scopes: [
+            'user:file_upload',
+            'user:inference',
+            'user:mcp_servers',
+            'user:plugins',
+            'user:profile',
+            'user:sessions:claude_code',
+          ],
+        },
+      })
+    );
+    const status = await getClaudeConnectionStatus(1016);
+    assert.equal(status.connected, true);
+    assert.equal(status.incompleteLink, false);
+  });
+
+  it('B-1260: inference-only scopes (no profile) are an incomplete link', async () => {
+    const dir = makeClaudeDir(1015);
+    fs.writeFileSync(
+      path.join(dir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'sk-fixture',
+          refreshToken: 'rt-fixture',
+          expiresAt: Date.now() + 3_600_000,
+          scopes: ['inference'],
+        },
+      })
+    );
+    const status = await getClaudeConnectionStatus(1015);
+    assert.equal(status.connected, false);
+    assert.equal(status.incompleteLink, true);
   });
 
   it('reports not connected when settings.json env is empty', async () => {

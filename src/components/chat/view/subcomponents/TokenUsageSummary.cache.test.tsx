@@ -14,10 +14,7 @@ describe('cache section', () => {
    const initial = screen.getByRole('progressbar').innerHTML;
    fireEvent.click(screen.getByRole('button'));
    expect(screen.getByTestId('cache-reuse').textContent).toContain('0%');
-   expect(screen.getByRole('dialog').textContent).toContain('contextRot.cache.scope.turn');
-   expect(screen.getByRole('dialog').textContent).toContain('contextRot.cache.sources.codex');
    expect(screen.getByRole('dialog').textContent).not.toContain('codex.turn.completed');
-   expect(screen.getByRole('dialog').textContent).not.toContain('contextRot.cache.observed');
    rerender(<TokenUsageSummary {...props} usage={{ contextSnapshot: nativeSnapshot({ usedTokens: 20_000 }), cacheSnapshot: { ...cache, cacheReadTokens: 1000 } }} />);
    expect(screen.getByRole('progressbar').innerHTML).toBe(initial);
    expect(screen.getByTestId('cache-reuse').textContent).toContain('100%');

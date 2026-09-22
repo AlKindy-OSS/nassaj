@@ -34,6 +34,20 @@ describe('context usage presentation provenance', () => {
 });
 
 
+describe('picker alias identity (B-1295)', () => {
+  it('accepts a picker alias when snapshot carries the same alias', () => {
+    const snapshot = nativeSnapshot({ modelId: 'opus[1m]', windowTokens: 1_048_576 });
+    expect(contextUsagePresentation({ contextSnapshot: snapshot }, 'codex', 's1', 'opus[1m]'))
+      .toMatchObject({ window: 1_048_576, used: 120_000 });
+  });
+  it('still rejects when alias does not match native id', () => {
+    // snapshot carries 'opus[1m]' but prop carries 'claude-opus-5' → mismatch
+    const snapshot = nativeSnapshot({ modelId: 'opus[1m]', windowTokens: 1_048_576 });
+    expect(contextUsagePresentation({ contextSnapshot: snapshot }, 'codex', 's1', 'claude-opus-5'))
+      .toMatchObject({ window: null, used: null });
+  });
+});
+
 describe('native snapshot ordering', () => {
   const current = { contextSnapshot: nativeSnapshot() };
   it('ignores an older event for the same identity after compaction', () => {

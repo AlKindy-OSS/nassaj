@@ -2,6 +2,64 @@
 
 All notable changes to Nassaj will be documented in this file.
 
+## [2.3.0.1] — Claude full-login and fresh-install fixes; SSO groundwork (2026-09-22)
+
+إصدار لاحق للإصدار المنشور `2.3.0.0`، يرفع مقطع البناء وحده تحت
+`architecture.feature.fix.build`. يجمع إصلاحين ظاهرين للمستخدم، وأساس دخول موحّد
+معطَّلاً افتراضياً، ووثائق قرار. / Release following the published `2.3.0.0`,
+advancing the build segment only under `architecture.feature.fix.build`. It
+bundles user-visible fixes and UI refinements, a single-sign-on groundwork
+disabled by default, and decision records.
+
+### أُصلح / Fixed
+
+- ربط Claude صار تسجيل دخول OAuth كاملاً افتراضياً بدل ربط جزئي لا يقرأ الحصة؛
+  والاعتماد الجزئي أو الفارغ يظهر الآن تنبيه «الربط غير مكتمل — أعد الربط» مع زرّ
+  إعادة ربط صريح (B-1260، B-1261، B-586). / The default Claude link is now a full
+  OAuth sign-in instead of a partial link that cannot read usage; a partial or
+  empty credential now shows an "incomplete link — re-link" notice with an
+  explicit re-link button (B-1260, B-1261, B-586).
+- التثبيت الجديد يختم أرشيف النسخة المولَّدة المخدومة فلا يبقى غير مكتمل على عقدة
+  جديدة، مع فحوص تمهيدية إضافية قبل التحديث (B-1293). / Fresh install seals the
+  served generated archive so it is not left incomplete on a new node, with
+  additional preflight checks before an update (B-1293).
+- منتقي النماذج لم يعد يقدّم كتالوج مزوّد قديماً بعد تغيّر الحالة، فتظهر النماذج
+  المتاحة فعلاً فقط (B-1283). / The model picker no longer serves a provider's
+  stale catalog after state changes, so only the actually available models are
+  shown (B-1283).
+- مُعرّف لقطة السياق يحافظ على الاسم المستعار المختار في المنتقي فلا يضيع عند
+  التقاط السياق (B-1295). / The context-snapshot identity preserves the alias
+  chosen in the picker, so it is not lost when the context is captured (B-1295).
+- حُصِّن `answer.trim()` في `BtwOverlay` و`forkBtw` ضدّ القيمة غير المعرّفة فلا
+  تنهار الواجهة. / `answer.trim()` in `BtwOverlay` and `forkBtw` is guarded
+  against an undefined value, so the UI does not crash.
+- سجلّ المحادثة يتحمّل نتائج الأدوات منزوعة المحتوى فلا ينكسر عرضها. / Chat
+  history tolerates tool results with stripped content, so rendering no longer
+  breaks.
+
+### غُيّر / Changed
+
+- منبثقة استهلاك السياق أصغر وأقل ضجيجاً بعد إعادة تنسيقها. / The context-usage
+  popover is smaller and less noisy after a recompose.
+- نُقلت إدارة النماذج المحلية إلى شبكة عدّة الوكلاء في الإعدادات دون تغيير في
+  وظيفتها. / Local-models management moved into the agents harness grid in
+  Settings, with no change to its function.
+
+### أُضيف (معطَّل افتراضياً) / Added (disabled by default)
+
+- أساس دخول موحّد يربط أدوار المشروع من مزوّد الهوية ويتحقّق من `id_token` عبر
+  JWKS. الحارس فاشل-الإغلاق: كل مسارات OIDC تُعيد 501 ما لم يُضبط `OIDC_ENABLED=true`
+  ويكن `OIDC_ROLE_PROJECT_ID` صحيحاً، فالميزة خاملة في الإعداد الافتراضي. / A
+  single-sign-on groundwork that maps identity-provider project roles and
+  verifies the `id_token` via JWKS. The guard is fail-closed: every OIDC route
+  returns 501 unless `OIDC_ENABLED=true` and a valid `OIDC_ROLE_PROJECT_ID` is
+  set, so the feature is dormant in the default configuration.
+
+### توثيق / Documentation
+
+- وثيقتا قرار ADR-158 وADR-166 وترقيم مصحَّح لسلسلة ADR. / Decision records
+  ADR-158 and ADR-166, and a corrected ADR series numbering.
+
 ## [2.3.0.0] — Local model servers; hardened in-app updates (2026-09-21)
 
 إصدار لاحق للإصدار المنشور `2.2.0.0`، يضمّ تغييرات دورة `2.2.0.1` المحلية التي

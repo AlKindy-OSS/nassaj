@@ -93,6 +93,8 @@ npm run server
 
 ثم افتح `http://localhost:3001` (أو `SERVER_PORT` الذي ضبطتَه). أول حساب يُنشأ هو المالك.
 
+> **تثبيت عقدة `git clone` قابلة للتحديث** يختلف عن هذا المسار التطويري: البناء في المكان (`npm run build`) مرفوض على عقدة محكومة بـ`node_update_button_required`. تُبنى نسخة مرشّحة مُراجَعة بـ`scripts/build-release-candidate.mjs` ويوضع مخرجها مكان `dist/` و`dist-server/`، ثم يُشغَّل `scripts/install-node.mjs` الذي يهيّئ أيضاً أرشيف الجيل المخدوم (B-1293). التفاصيل في `docs/update-runtime-v2-bridge.md`.
+
 ### `npm run doctor`
 
 فحص **قراءة فقط** لا يعدّل شيئاً؛ يطبع الأمر الذي تنفّذه أنت. يغطّي: إصدار Node مقابل `engines`، وعضوية مجموعة docker وأثرها، ووجود `.env` وصلاحياته، وطول `JWT_SECRET`، وإشغال المنفذ، وقابلية الكتابة على مسار القاعدة، وتقليم `devDependencies`، ووجود البناء، وتحميل `node-pty`. يخرج بـ1 عند عائق يمنع التشغيل فعلاً.
@@ -173,6 +175,8 @@ cp .env.example .env && chmod 600 .env
 npm run doctor                 # read-only preflight; prints a ready-to-run fix per finding
 npm run build && npm run server
 ```
+
+> **An updatable `git clone` node install** differs from this developer path: an in-place `npm run build` is refused on a governed node with `node_update_button_required`. Build a reviewed candidate with `scripts/build-release-candidate.mjs`, place its output as `dist/` and `dist-server/`, then run `scripts/install-node.mjs`, which also prepares the served-generation archive (B-1293). See `docs/update-runtime-v2-bridge.md`.
 
 **Security posture.** Host-level guards follow one question: are the accounts on this
 instance operators of the host? By default they are assumed to be, so a finding — say the

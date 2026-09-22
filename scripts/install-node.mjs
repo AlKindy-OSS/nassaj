@@ -54,6 +54,8 @@ import { fileURLToPath } from 'node:url';
 import { normalizeGitHubRepositoryIdentity, RELEASE_SOURCE_LOCK_SCHEMA } from '../server/services/release-source-config.js';
 import { releaseGitEnvironment } from '../server/services/source-updater.js';
 
+import { prepareClientPublicationAssets } from './lib/client-publication-archive.mjs';
+import { verifyAssetClosure } from './lib/client-publication-artifacts.mjs';
 import pm2InstallLayout from './lib/pm2-install-layout.cjs';
 
 const { GIT_CHECKOUT_LAYOUT, RELEASE_LAYOUT, expectedPm2Entry, resolveInstallLayout } = pm2InstallLayout;
@@ -611,6 +613,39 @@ export function seedFirstBuildDirectories({ appRoot = ROOT } = {}) {
 }
 
 /**
+ * Seal the served-generation archive a freshly built dist requires (B-1293).
+ *
+ * The candidate build rewrites `dist/index.html` to load
+ * `/assets/generations/<generationId>/…`, and those URLs are served ONLY from
+ * `.nassaj-local-preview/client-assets/generations/<generationId>` by
+ * `server/services/client-publication-static.js`. The update button prepares
+ * that archive through `prepareClientPublicationAssets`; a fresh `git clone`
+ * install that merely drops a candidate-built dist never did, so the very first
+ * page load was a white page — every generation-scoped asset returned 404 — until
+ * an operator copied dist into the archive by hand on each node (measured
+ * 2026-09-22 on two fleet nodes).
+ *
+ * This runs the SAME contract the update path runs (`server/index.js`
+ * `completeBootstrappedSourceUpdate`): validate the sealed dist manifest, verify
+ * its asset closure with `verifyAssetClosure`, and atomically publish the served
+ * copy. It is idempotent — `prepareClientPublicationAssets` revalidates and
+ * returns an already-present generation without copying — and a no-op when dist
+ * carries no sealed manifest (a genuinely empty fresh tree, or a dev build with
+ * no generation URLs), so it never invents an archive. The archive lives under
+ * `.nassaj-local-preview/`, which is gitignored, so it leaves no trace in the
+ * install root (asserted alongside the other writes by `assertNoUntrackedTrace`).
+ */
+export function prepareServedClientGeneration({ appRoot = ROOT } = {}) {
+    const dist = path.join(appRoot, 'dist');
+    if (!existsSync(path.join(dist, 'CLIENT_ASSET_MANIFEST.json'))) {
+        return { prepared: false, reason: 'no_sealed_dist' };
+    }
+    const destination = prepareClientPublicationAssets(appRoot, dist, {}, verifyAssetClosure,
+        { reserveBytes: 2 * 1024 ** 3 });
+    return { prepared: true, generationId: path.basename(destination), destination };
+}
+
+/**
  * Close the report with the read-only pre-flight (WI-8). The installer never
  * interprets it: the pre-flight codes belong to `doctor.mjs`, and a second opinion
  * written here would be a second contract to keep in step.
@@ -759,10 +794,12 @@ export async function installNode({
         appRoot, configDir, layout: resolvedLayout, deployRoot, node, port, databasePath, processName,
     }));
     record('first-build-seed', seedFirstBuildDirectories({ appRoot }));
+    const archive = record('client-archive', prepareServedClientGeneration({ appRoot }));
 
     record('install-root', assertNoUntrackedTrace({
         appRoot, spawn,
-        paths: [nodeEnv.path, lock.path, ecosystem.path, path.join(appRoot, 'dist'), path.join(appRoot, 'dist-server')],
+        paths: [nodeEnv.path, lock.path, ecosystem.path, path.join(appRoot, 'dist'), path.join(appRoot, 'dist-server'),
+            ...(archive.destination ? [archive.destination] : [])],
     }));
 
     const preflight = record('update-preflight', runUpdatePreflight({ appRoot, spawn }));

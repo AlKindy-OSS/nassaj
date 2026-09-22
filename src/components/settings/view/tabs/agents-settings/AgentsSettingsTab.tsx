@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { AgentCategory, AgentProvider } from '../../../types/types';
 import SettingsSection from '../../SettingsSection';
+import LocalModelsSettingsTab from '../local-models/LocalModelsSettingsTab';
 
 import type { AgentContext, AgentsSettingsTabProps } from './types';
 import AgentCategoryContentSection from './sections/AgentCategoryContentSection';
@@ -27,7 +28,9 @@ export default function AgentsSettingsTab({
   projects,
   initialAgent,
   initialCategory,
+  initialLocalModels,
   onDestinationChange,
+  onLocalModelsSelect,
 }: AgentsSettingsTabProps) {
   const { t } = useTranslation('settings');
   // B-256: honour deep-link destination from ProviderSelectionEmptyState CTA.
@@ -37,6 +40,9 @@ export default function AgentsSettingsTab({
   // وحجبُه كان سيحوّل زرّ «أضِف مفتاحاً» في منتقي النماذج إلى طريق مسدود.
   const [selectedAgent, setSelectedAgent] = useState<AgentProvider>(initialAgent ?? 'claude');
   const [selectedCategory, setSelectedCategory] = useState<AgentCategory>(initialCategory ?? 'account');
+  // بطاقة «النماذج المحلية» منفصلة عن selectedAgent: اختيارها يُخفي الفئات
+  // ويعرض LocalModelsSettingsTab بدلاً من لوح الوكيل.
+  const [localModelsSelected, setLocalModelsSelected] = useState<boolean>(Boolean(initialLocalModels));
   const appliedInitialDestinationRef = useRef<string | null>(null);
 
   // ‏B-414 — الحساب انتقل إلى `agentCategories.ts`: الفئة تظهر ⟺ لها لوحٌ يُصيَّر،
@@ -75,10 +81,15 @@ export default function AgentsSettingsTab({
   // example after following an in-app account link). Keep the visible panels
   // aligned with that explicit destination.
   useEffect(() => {
-    if (!initialAgent && !initialCategory) return;
-    const destinationKey = `${initialAgent ?? ''}:${initialCategory ?? ''}`;
+    if (!initialAgent && !initialCategory && initialLocalModels === undefined) return;
+    const destinationKey = `${initialAgent ?? ''}:${initialCategory ?? ''}:${initialLocalModels ? 'lm' : ''}`;
     if (appliedInitialDestinationRef.current === destinationKey) return;
     appliedInitialDestinationRef.current = destinationKey;
+    if (initialLocalModels) {
+      setLocalModelsSelected(true);
+      return;
+    }
+    setLocalModelsSelected(false);
     const agent = initialAgent ?? selectedAgent;
     const categories = visibleCategoriesFor(agent);
     const requested = initialCategory ?? selectedCategory;
@@ -86,9 +97,10 @@ export default function AgentsSettingsTab({
     setSelectedAgent(agent);
     setSelectedCategory(category);
     if (requested !== category) onDestinationChange?.(agent, category, { replace: true });
-  }, [initialAgent, initialCategory, onDestinationChange, selectedAgent, selectedCategory]);
+  }, [initialAgent, initialCategory, initialLocalModels, onDestinationChange, selectedAgent, selectedCategory]);
 
   const selectAgent = (agent: AgentProvider) => {
+    setLocalModelsSelected(false);
     setSelectedAgent(agent);
     const category = visibleCategoriesFor(agent).includes(selectedCategory)
       ? selectedCategory
@@ -100,6 +112,11 @@ export default function AgentsSettingsTab({
   const selectCategory = (category: AgentCategory) => {
     setSelectedCategory(category);
     onDestinationChange?.(selectedAgent, category);
+  };
+
+  const selectLocalModels = () => {
+    setLocalModelsSelected(true);
+    onLocalModelsSelect?.();
   };
 
   // القائمة ومبرّرات ترتيبها انتقلت إلى `visibleAgents.ts` (T-1205): الحارس
@@ -205,38 +222,50 @@ export default function AgentsSettingsTab({
             selectedAgent={selectedAgent}
             onSelectAgent={selectAgent}
             agentContextById={agentContextById}
+            localModelsSelected={localModelsSelected}
+            localModelsLabel={t('mainTabs.localModels')}
+            onSelectLocalModels={selectLocalModels}
           />
         </SettingsSection>
       </div>
 
-      <div className="flex min-w-0 flex-col">
-        <AgentCategoryTabsSection
-          categories={visibleCategories}
-          selectedCategory={selectedCategory}
-          onSelectCategory={selectCategory}
-          selectedAgent={selectedAgent}
+      {localModelsSelected ? (
+        /* بطاقة «النماذج المحلية» محدَّدة: أظهر لوحها مباشرة دون تبويبات الفئة. */
+        <LocalModelsSettingsTab
+          onOpenSharing={() => {
+            selectAgent('opencode');
+          }}
         />
+      ) : (
+        <div className="flex min-w-0 flex-col">
+          <AgentCategoryTabsSection
+            categories={visibleCategories}
+            selectedCategory={selectedCategory}
+            onSelectCategory={selectCategory}
+            selectedAgent={selectedAgent}
+          />
 
-        {/* T-1219 — لا `onOpenCredentials` بعد اليوم: لوحُ المحرّكات كان يقفز
-            إلى حساب الوكيل المالك للمفتاح، ولم يعد للمفتاح حسابٌ يُقفز إليه —
-            منزلُه تبويب «المورّدون والاعتمادات»، وتبديلُ تبويبٍ رئيسي ليس ملكَ
-            هذه الشاشة. فاللوح يسمّي المكان نصّاً بلا زرٍّ لا يصل. */}
-        <AgentCategoryContentSection
-          selectedAgent={selectedAgent}
-          selectedCategory={selectedCategory}
-          agentContextById={agentContextById}
-          onRefreshAuthStatus={() => onRefreshAuthStatus(selectedAgent)}
-          claudePermissions={claudePermissions}
-          onClaudePermissionsChange={onClaudePermissionsChange}
-          cursorPermissions={cursorPermissions}
-          onCursorPermissionsChange={onCursorPermissionsChange}
-          codexPermissionMode={codexPermissionMode}
-          onCodexPermissionModeChange={onCodexPermissionModeChange}
-          geminiPermissionMode={geminiPermissionMode}
-          onGeminiPermissionModeChange={onGeminiPermissionModeChange}
-          projects={projects}
-        />
-      </div>
+          {/* T-1219 — لا `onOpenCredentials` بعد اليوم: لوحُ المحرّكات كان يقفز
+              إلى حساب الوكيل المالك للمفتاح، ولم يعد للمفتاح حسابٌ يُقفز إليه —
+              منزلُه تبويب «المورّدون والاعتمادات»، وتبديلُ تبويبٍ رئيسي ليس ملكَ
+              هذه الشاشة. فاللوح يسمّي المكان نصّاً بلا زرٍّ لا يصل. */}
+          <AgentCategoryContentSection
+            selectedAgent={selectedAgent}
+            selectedCategory={selectedCategory}
+            agentContextById={agentContextById}
+            onRefreshAuthStatus={() => onRefreshAuthStatus(selectedAgent)}
+            claudePermissions={claudePermissions}
+            onClaudePermissionsChange={onClaudePermissionsChange}
+            cursorPermissions={cursorPermissions}
+            onCursorPermissionsChange={onCursorPermissionsChange}
+            codexPermissionMode={codexPermissionMode}
+            onCodexPermissionModeChange={onCodexPermissionModeChange}
+            geminiPermissionMode={geminiPermissionMode}
+            onGeminiPermissionModeChange={onGeminiPermissionModeChange}
+            projects={projects}
+          />
+        </div>
+      )}
     </div>
   );
 }
