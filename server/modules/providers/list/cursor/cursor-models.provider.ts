@@ -719,7 +719,11 @@ const buildCursorModelsDefinition = (models: CursorModelRow[]): ProviderModelsDe
   }
 
   if (options.length === 0) {
-    return CURSOR_FALLBACK_MODELS;
+    // B-1283: empty/unparsable CLI output → a fresh fallback object flagged
+    // degraded so the cache layer keeps a short TTL and re-probes soon. A new
+    // object at the return site (never a mutation of the shared constant, which
+    // other consumers read) leaves the live-success path below unflagged.
+    return { ...CURSOR_FALLBACK_MODELS, degraded: true };
   }
 
   const defaultValue = models.find((model) => model.default)?.name
@@ -765,7 +769,9 @@ export class CursorProviderModels implements IProviderModels {
       const models = parseModelsOutput(stdout);
       return buildCursorModelsDefinition(models);
     } catch {
-      return CURSOR_FALLBACK_MODELS;
+      // B-1283: spawn/exit/timeout failure → degraded fallback (new object, not
+      // a mutation of CURSOR_FALLBACK_MODELS).
+      return { ...CURSOR_FALLBACK_MODELS, degraded: true };
     }
   }
 

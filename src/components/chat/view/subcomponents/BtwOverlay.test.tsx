@@ -146,6 +146,33 @@ describe('BtwOverlay', () => {
     expect(screen.getByText('الجواب')).toBeDefined();
   });
 
+  // B-ALNUMAN-TRIM: regression — حين تكون answer غير معرَّفة بسبب حالة قديمة
+  // أو بيانات مُستعادة، يجب ألّا يُطلق canFork خطأ TypeError.
+  //
+  // يُمرَّر supportsFork=true وonFork لإجبار المسار الكامل لشرط canFork:
+  //   supportsFork && onFork && state?.status==='complete' && state.answer.trim()
+  //   ^^^^^^true    ^^^^^fn   ^^^^^^^^^^^true              ← هنا الانهيار في الكود القديم
+  it('لا يُطلق خطأ حين state.answer غير معرَّفة (شرط canFork)', () => {
+    const stateWithUndefinedAnswer = {
+      btwId: 'b-undef',
+      forkStatus: 'idle' as const,
+      question: 'سؤال اختبار',
+      answer: undefined as unknown as string,
+      status: 'complete' as const,
+    };
+    // يجب ألّا يُطلق خطأ عند الرسم — canFork يجب أن يُعامل answer المجهولة كفارغة
+    expect(() => render(
+      <BtwOverlay
+        state={stateWithUndefinedAnswer}
+        onClose={() => {}}
+        supportsFork={true}
+        onFork={() => {}}
+      />,
+    )).not.toThrow();
+    // canFork يجب أن يكون false (الإجابة «فارغة» بشكل فعلي)
+    expect(screen.queryByText('btw.fork.actionFull')).toBeNull();
+  });
+
   it('زرّ الإغلاق يحمل كلاسات focus-visible:ring مطابقة لعرف المشروع', () => {
     const state: BtwState = { btwId: 'b1', forkStatus: 'idle', question: 'س', answer: '', status: 'pending' };
     render(<BtwOverlay state={state} onClose={() => {}} />);

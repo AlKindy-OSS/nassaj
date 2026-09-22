@@ -83,25 +83,71 @@ export async function readHermesRuntimeConfig(home?: string): Promise<HermesRunt
 }
 
 /**
- * The model ids hermes itself last saw for `provider`, from its own cache.
- * Bare ids exactly as they must be passed to `-m`. Empty when the provider has
- * never been listed (the caller then keeps the configured default only).
+ * Outcome of reading hermes' own model cache for one provider.
+ *
+ * `failed` separates a REAL read failure (the file is missing, unreadable, or
+ * holds corrupt JSON) from a LEGITIMATE empty (a valid file that simply does not
+ * list this provider yet). The catalog builder needs the distinction: an empty
+ * built on top of a read failure is an incomplete catalog and must be flagged
+ * `degraded` so it is re-fetched on a short TTL, whereas a legitimate empty over
+ * a live config default is a genuine result that keeps the normal long TTL.
  */
-export async function readHermesCachedModels(provider: string | null, home?: string): Promise<string[]> {
+export type HermesCachedModelsResult = {
+  /** Bare model ids, exactly as they must be passed to `-m`. */
+  models: string[];
+  /** true when the cache file could not be read/parsed (missing, I/O error, or corrupt JSON). */
+  failed: boolean;
+};
+
+/**
+ * The model ids hermes itself last saw for `provider`, from its own cache.
+ * Bare ids exactly as they must be passed to `-m`.
+ *
+ * Returns `failed: true` when the cache file is missing, unreadable, or corrupt;
+ * `failed: false` with an empty list when the file is valid but never listed this
+ * provider (or when no provider is supplied — there is nothing to look up). Never
+ * throws: the caller decides what an unreadable cache means for the catalog.
+ */
+export async function readHermesCachedModels(
+  provider: string | null,
+  home?: string,
+): Promise<HermesCachedModelsResult> {
   if (!provider) {
-    return [];
+    // No provider to look up. This is not a cache read failure — the config-read
+    // failure that produced a null provider is judged by the catalog builder.
+    return { models: [], failed: false };
   }
+
+  let raw: string;
   try {
-    const raw = await readFile(path.join(hermesHome(home), 'provider_models_cache.json'), 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, { models?: unknown } | undefined>;
-    const models = parsed?.[provider]?.models;
-    if (!Array.isArray(models)) {
-      return [];
-    }
-    return models.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    raw = await readFile(path.join(hermesHome(home), 'provider_models_cache.json'), 'utf8');
   } catch {
-    return [];
+    // Missing file or I/O error: a real read failure. On a machine where the
+    // operator never ran `hermes model --refresh` the file is legitimately
+    // absent, but the catalog it would have contributed is still missing, so the
+    // result is incomplete and treated as a failure (short-TTL degraded).
+    return { models: [], failed: true };
   }
+
+  let parsed: Record<string, { models?: unknown } | undefined>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, { models?: unknown } | undefined>;
+  } catch {
+    // The file exists but its contents cannot be trusted — a real failure, not a
+    // legitimate empty.
+    return { models: [], failed: true };
+  }
+
+  const models = parsed?.[provider]?.models;
+  if (!Array.isArray(models)) {
+    // Valid file that simply does not list this provider yet: a legitimate empty.
+    return { models: [], failed: false };
+  }
+
+  return {
+    models: models.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0),
+    failed: false,
+  };
 }
 
 export type HermesCredentialVerdict = {

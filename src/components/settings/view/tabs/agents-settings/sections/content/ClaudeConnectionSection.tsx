@@ -66,7 +66,7 @@ export default function ClaudeConnectionSection({
   const { user } = useAuth();
   const isOwner = user?.role === 'owner';
 
-  const { connected, loading, error, refresh } = useClaudeConnection(true);
+  const { connected, incompleteLink, loading, error, refresh } = useClaudeConnection(true);
   const { saveKey, writable: tokenWritable } = useProviderApiKey('claude');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -99,19 +99,19 @@ export default function ClaudeConnectionSection({
 
   const userLink: UserCredentialLink = {
     connected,
+    incompleteLink,
     loading,
     error,
     isOwner,
     i18nPrefix: 'claudeConnection',
     /**
-     * **الأمر المعروض هو الأمر المُشغَّل.** كان هنا
-     * `claude --dangerously-skip-permissions /login` بعد أن تحوّل المودال إلى
-     * `claude setup-token` (‏b1de1d0e7) ولم يُحدَّث معه، فكانت اللافتة تَعِد
-     * القارئ بأمرٍ لا يراه في الطرفية — وهو الأمر الذي حذفه Claude Code أصلاً.
-     * المصدر الوحيد للحقيقة `getProviderCommand` في `ProviderLoginModal`،
-     * وهو بدوره مقيَّد بـ`PROVIDER_LOGIN_COMMAND_ALLOWLIST` خادميّاً.
+     * **الأمر المعروض هو الأمر المُشغَّل.** B-1260: صار `claude auth login`
+     * (‏OAuth كامل) بدل `claude setup-token` (‏inference-only) كي يطابق
+     * `getProviderCommand` في `ProviderLoginModal` — المصدر الوحيد للحقيقة،
+     * والمقيَّد بـ`PROVIDER_LOGIN_COMMAND_ALLOWLIST` خادميّاً. تركُ القديم هنا
+     * كان يَعِد القارئ بأمرٍ لا يراه في الطرفية.
      */
-    command: 'claude setup-token',
+    command: 'claude auth login',
     onLink: openModal,
     onRecheck: handleRecheck,
     onSaveToken: handleSaveToken,

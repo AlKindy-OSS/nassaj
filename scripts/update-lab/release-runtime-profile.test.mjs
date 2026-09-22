@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {hashDependencyTreeV2} from '../lib/dependency-tree-identity-v2.mjs';
 import {prepareBridgeWorkspace,runBridgeIsolated} from './bridge-rehearsal.mjs';
 
-test('public Rukhaimi runtime profile preserves private paths and read-only interpreter mounts',()=>{
+test('public node runtime profile preserves private paths and read-only interpreter mounts',()=>{
     const lab=prepareBridgeWorkspace(),entry=path.join(lab,'harness/release-profile.mjs');
     const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
     const hostNode=sha('/usr/bin/node'),hostMounts=fs.readFileSync('/proc/self/mountinfo','utf8');

@@ -84,16 +84,44 @@ test('readHermesRuntimeConfig: غياب الملف لا يرمي — يعود ب
   });
 });
 
-test('readHermesCachedModels: يعيد معرّفات هرمز المجرّدة للمزوّد المطلوب', async () => {
+// B-1283 gap 2: the return contract changed from `string[]` to
+// `{ models, failed }` so the catalog builder can tell a real cache read failure
+// (missing/unreadable/corrupt file) apart from a valid file that simply never
+// listed the provider. Only a failure flags the built catalog `degraded`.
+test('readHermesCachedModels: يعيد معرّفات هرمز المجرّدة للمزوّد المطلوب (ملف صالح)', async () => {
   await withHome(async (home) => {
     await writeFile(
       path.join(home, '.hermes', 'provider_models_cache.json'),
       JSON.stringify({ copilot: { models: ['gpt-4o', 'gpt-5.5'] }, anthropic: { models: ['x'] } }),
       'utf8',
     );
-    assert.deepEqual(await readHermesCachedModels('copilot', home), ['gpt-4o', 'gpt-5.5']);
-    assert.deepEqual(await readHermesCachedModels('nous', home), []);
-    assert.deepEqual(await readHermesCachedModels(null, home), []);
+    // Provider present with models: live ids, no failure.
+    assert.deepEqual(await readHermesCachedModels('copilot', home), {
+      models: ['gpt-4o', 'gpt-5.5'],
+      failed: false,
+    });
+    // Valid file that does not list this provider: legitimate empty, no failure.
+    assert.deepEqual(await readHermesCachedModels('nous', home), { models: [], failed: false });
+    // No provider to look up: nothing read, not a failure.
+    assert.deepEqual(await readHermesCachedModels(null, home), { models: [], failed: false });
+  });
+});
+
+test('readHermesCachedModels: غياب ملف الكاش يُعدّ فشل قراءة (failed)', async () => {
+  await withHome(async (home) => {
+    // No provider_models_cache.json written at all.
+    assert.deepEqual(await readHermesCachedModels('copilot', home), { models: [], failed: true });
+  });
+});
+
+test('readHermesCachedModels: JSON تالف يُعدّ فشل قراءة (failed) لا فراغاً مشروعاً', async () => {
+  await withHome(async (home) => {
+    await writeFile(
+      path.join(home, '.hermes', 'provider_models_cache.json'),
+      '{ this is not valid json',
+      'utf8',
+    );
+    assert.deepEqual(await readHermesCachedModels('copilot', home), { models: [], failed: true });
   });
 });
 

@@ -52,22 +52,9 @@
     "barAria": "Kontextauslastung",
     "empty": "Noch keine Token-Nutzung",
     "percentUsed": "{{percent}} des realen Fensters",
-    "tooltipUsed": "Genutzt vom realen Fenster: {{used}} / {{total}}",
     "tooltipCacheRead": "Cache gelesen: {{value}}",
     "popoverTitle": "Kontextauslastung",
     "close": "Schließen",
-    "levels": {
-      "safe": "Unter der vorgeschlagenen Komprimierungsschwelle",
-      "attention": "Komprimierungsschwelle nicht verfügbar",
-      "warning": "Vorgeschlagene Komprimierungsschwelle erreicht",
-      "critical": "Vorgeschlagene Komprimierungsschwelle erreicht"
-    },
-    "nativeThreshold": "Ursprüngliche Komprimierungsschwelle: {{value}} Tokens",
-    "proposedThreshold": "Vorgeschlagene Komprimierungsschwelle: {{value}} Tokens",
-    "thresholdUnknown": "Komprimierungsschwelle nicht verfügbar",
-    "lastInput": "Eingabe der letzten Anfrage: {{value}} Tokens (keine aktuelle Belegung)",
-    "pressureReached": "Vorgeschlagene Komprimierungsschwelle erreicht",
-    "pressureBelow": "Unter der vorgeschlagenen Komprimierungsschwelle",
     "alerts": {
       "pressure": "Vorgeschlagene Komprimierungsschwelle erreicht",
       "close": "250.000 Tokens erreicht — erwäge eine neue Unterhaltung.",

@@ -287,6 +287,40 @@ export const api = {
       }),
     },
 
+    // OIDC single sign-on (B-728, server/routes/oidc.js). The browser leg
+    // (`/login` → IdP → `/callback`) is a full-page navigation, never fetch.
+    oidc: {
+      // Public: trade the one-time code from /auth/oidc/return for a JWT. POST
+      // only (GET is 404); the same-origin fetch carries the HttpOnly
+      // `__Host-oidc-txn` cookie that binds the code to this browser.
+      exchange: (code) => fetch('/api/auth/oidc/exchange', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      }),
+      // Public, side-effect free: an empty exchange answers 400 when OIDC is
+      // enabled and 501 when it is off. No code, so nothing is consumed and the
+      // transaction cookie is left alone.
+      probe: () => fetch('/api/auth/oidc/exchange', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }),
+      // Owner/admin: link an existing account to an IdP subject (`sub`).
+      link: (targetUserId, subject) =>
+        authenticatedFetch('/api/auth/oidc/link', {
+          method: 'POST',
+          body: JSON.stringify({ targetUserId, subject }),
+        }),
+      // Owner/admin: remove every IdP link of a user and revoke their sessions.
+      unlink: (userId) =>
+        authenticatedFetch(`/api/auth/oidc/link/${encodeURIComponent(userId)}`, {
+          method: 'DELETE',
+        }),
+    },
+
     // Invite acceptance (public): creates a `user` account from an invite token.
     acceptInvite: (token, username, password) => fetch('/api/auth/invite/accept', {
       method: 'POST',

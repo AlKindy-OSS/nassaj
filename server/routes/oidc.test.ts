@@ -15,6 +15,10 @@ const revocations: number[] = [];
 const refreshInvalidations: number[] = [];
 let unlinkedUserId: number | null = null;
 let storedCode: Record<string, unknown> | null = null;
+const mintedRoles: string[] = [];
+let verifiedClaims: Record<string, unknown> = { sub: 'subject-synthetic' };
+let verifyFailure: Error | null = null;
+const storedUser = { id: 12, username: 'linked', role: 'user', password_changed_at: 1 };
 
 const pkceStore = {
   store: (_state: string, value: Record<string, unknown>) => {
@@ -42,7 +46,10 @@ const codeStore = {
 mock.module(url('../middleware/auth.js'), {
   namedExports: {
     authenticateToken: passThrough,
-    generateToken: () => 'jwt-synthetic',
+    generateToken: (user: { role: string }) => {
+      mintedRoles.push(user.role);
+      return 'jwt-synthetic';
+    },
     invalidateRefreshCache: (userId: number) => refreshInvalidations.push(userId),
     requireRole: () => passThrough,
   },
@@ -53,7 +60,12 @@ mock.module(url('../modules/database/index.js'), {
     auditLogDb: { record: (event: string, data: Record<string, unknown>) => audits.push({ event, ...data }) },
     getConnection: () => ({ prepare: () => ({ run: (_stamp: number, userId: number) => revocations.push(userId) }) }),
     userDb: {
-      getUserById: () => ({ id: 12, username: 'linked', role: 'user', password_changed_at: 1 }),
+      getUserById: () => ({ ...storedUser }),
+      setRoleIfUnchanged: (_id: number, from: string, to: string) => {
+        if (storedUser.role !== from || from === 'owner' || to === 'owner') return false;
+        storedUser.role = to;
+        return true;
+      },
       getRawById: () => ({ id: 12 }),
       updateLastLogin: () => {},
     },
@@ -73,7 +85,10 @@ mock.module(url('../services/oidc-verifier.service.js'), {
     createOidcVerifier: () => ({
       getDiscovery: async () => ({ authorization_endpoint: 'https://issuer.example/authorize' }),
       exchangeAuthorizationCode: async () => ({ id_token: 'id-token-synthetic' }),
-      verifyIdToken: async () => ({ sub: 'subject-synthetic' }),
+      verifyIdToken: async () => {
+        if (verifyFailure) throw verifyFailure;
+        return verifiedClaims;
+      },
       verifyLogoutToken: async () => ({ sub: 'subject-synthetic' }),
     }),
   },
@@ -83,6 +98,8 @@ process.env.OIDC_ENABLED = 'true';
 process.env.OIDC_ISSUER_URL = 'https://issuer.example';
 process.env.OIDC_CLIENT_ID = 'client-synthetic';
 process.env.OIDC_REDIRECT_URI = 'https://app.example/api/auth/oidc/callback';
+// Required for OIDC to be live (fail-closed): role mapping must be project-scoped.
+process.env.OIDC_ROLE_PROJECT_ID = 'proj-synth';
 
 const { default: oidcRouter } = await import('./oidc.js');
 const app = express();
@@ -156,4 +173,104 @@ test('OIDC unlink revokes active sessions and subject input is bounded', async (
     body: JSON.stringify({ targetUserId: 12, subject: oversizedSubject }),
   });
   assert.equal(link.status, 400);
+});
+
+// Roles are read ONLY from the project-scoped claim (fail-closed).
+const ROLES_CLAIM = `urn:zitadel:iam:org:project:${process.env.OIDC_ROLE_PROJECT_ID}:roles`;
+const GENERIC_ROLES_CLAIM = 'urn:zitadel:iam:org:project:roles';
+
+async function runCallback() {
+  const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+  const cookiePair = (login.headers.get('set-cookie') ?? '').split(';', 1)[0] ?? '';
+  return fetch(`${baseUrl}/api/auth/oidc/callback?state=state-synthetic&code=provider-code`, {
+    headers: { cookie: cookiePair },
+    redirect: 'manual',
+  });
+}
+
+function resetLoginState(role: string, claims: Record<string, unknown>) {
+  storedUser.role = role;
+  verifiedClaims = { sub: 'subject-synthetic', ...claims };
+  verifyFailure = null;
+  storedCode = null;
+  mintedRoles.length = 0;
+  audits.length = 0;
+}
+
+test('T-961: a rejected id_token never reaches session creation', async () => {
+  resetLoginState('user', {});
+  verifyFailure = new Error('signature_or_registered_claim_invalid');
+  const callback = await runCallback();
+  assert.equal(callback.status, 502);
+  assert.equal(storedCode, null, 'no one-time code is issued');
+  assert.deepEqual(mintedRoles, [], 'generateToken is never called');
+  assert.ok(!audits.some((record) => record.event === 'oidc_login'));
+});
+
+test('T-958: the verified roles claim sets the minted role and is audited without PII', async () => {
+  resetLoginState('user', { [ROLES_CLAIM]: { admin: { '1': 'org.example' } } });
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(mintedRoles, ['admin']);
+  const synced = audits.find((record) => record.event === 'external_role_synced');
+  assert.deepEqual(synced?.metadata, { provider: 'oidc', from: 'user', to: 'admin' });
+  assert.ok(audits.every((record) => !JSON.stringify(record).includes('subject-synthetic')));
+});
+
+test('T-958: an owner is never demoted and an absent claim lowers an admin to user', async () => {
+  resetLoginState('owner', { [ROLES_CLAIM]: ['viewer'] });
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(mintedRoles, ['owner']);
+  assert.equal(storedUser.role, 'owner');
+  assert.ok(!audits.some((record) => record.event === 'external_role_synced'));
+
+  resetLoginState('admin', {});
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(mintedRoles, ['user']);
+  // Finding 3: an absent roles claim is audited with a distinct, diagnosable reason.
+  const absentSync = audits.find((record) => record.event === 'external_role_synced');
+  assert.deepEqual(absentSync?.metadata, {
+    provider: 'oidc', from: 'admin', to: 'user', reason: 'roles_claim_absent',
+  });
+
+  resetLoginState('user', { [ROLES_CLAIM]: ['owner'] });
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(mintedRoles, ['user'], 'an attested owner is ignored');
+});
+
+test('cross-project leak: a present-but-unrecognized scoped claim demotes WITHOUT the absent reason', async () => {
+  resetLoginState('admin', { [ROLES_CLAIM]: { superuser: {} } });
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(mintedRoles, ['user']);
+  const sync = audits.find((record) => record.event === 'external_role_synced');
+  assert.deepEqual(sync?.metadata, { provider: 'oidc', from: 'admin', to: 'user' },
+    'present-but-unrecognized is distinct from claim-absent');
+});
+
+test('cross-project leak: the generic roles claim alone never grants a role', async () => {
+  // A user who is admin on ANOTHER project (generic claim) but has no grant on
+  // the configured project must be demoted, not elevated.
+  resetLoginState('admin', { [GENERIC_ROLES_CLAIM]: { admin: { '1': 'org.example' } } });
+  assert.equal((await runCallback()).status, 302);
+  assert.deepEqual(mintedRoles, ['user'], 'generic cross-project admin is ignored');
+  const sync = audits.find((record) => record.event === 'external_role_synced');
+  assert.deepEqual(sync?.metadata, {
+    provider: 'oidc', from: 'admin', to: 'user', reason: 'roles_claim_absent',
+  }, 'the scoped claim is absent, so the distinct reason is recorded');
+});
+
+test('fail-closed: a missing/invalid OIDC_ROLE_PROJECT_ID disables OIDC (routes 501)', async () => {
+  const saved = process.env.OIDC_ROLE_PROJECT_ID;
+  try {
+    delete process.env.OIDC_ROLE_PROJECT_ID;
+    const login = await fetch(`${baseUrl}/api/auth/oidc/login`, { redirect: 'manual' });
+    assert.equal(login.status, 501, 'missing project id disables OIDC');
+
+    process.env.OIDC_ROLE_PROJECT_ID = 'bad id with spaces';
+    const exchange = await fetch(`${baseUrl}/api/auth/oidc/exchange`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: 'x' }),
+    });
+    assert.equal(exchange.status, 501, 'invalid project id disables OIDC');
+  } finally {
+    process.env.OIDC_ROLE_PROJECT_ID = saved;
+  }
 });

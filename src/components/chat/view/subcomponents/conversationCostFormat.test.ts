@@ -300,3 +300,19 @@ test('formatTurnFooter: لا يُعرض توكنز الصفر', () => {
   assert.ok(!result.includes('$'), 'null cost should be hidden');
   assert.equal(result, 'Took 1s', 'only duration should appear');
 });
+
+// B-ALNUMAN-TRIM: regression — buildCostSummaryLines must not throw when a
+// perModel entry has model: undefined (undefined JSON field omitted by server).
+test('buildCostSummaryLines: لا يُطلق خطأ حين model غير معرَّف في أحد الإدخالات', () => {
+  const entryWithUndefinedModel = {
+    model: undefined as unknown as string,
+    costUsd: 1.5,
+    requests: 3,
+    tokens: { input: 100, output: 50, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 },
+  };
+  const c = cost({ perModel: [entryWithUndefinedModel] });
+  // Must not throw — the undefined model must be treated as non-Astra.
+  assert.doesNotThrow(() => buildCostSummaryLines(c));
+  const lines = buildCostSummaryLines(c);
+  assert.ok(!lines.some((l) => l.key === 'baseRateEstimate'), 'undefined model is not Astra');
+});

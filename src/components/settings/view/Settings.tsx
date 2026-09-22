@@ -25,7 +25,6 @@ import type { AgentCategory, AgentProvider, SettingsProps, SettingsMainTab } fro
 import { canOpenSettingsTab, writeSettingsDestination } from '../settingsUrl';
 
 import ConnectorsSettingsTab from './tabs/ConnectorsSettingsTab';
-import LocalModelsSettingsTab from './tabs/local-models/LocalModelsSettingsTab';
 import SettingsCloseButton from './SettingsCloseButton';
 import { hasActiveNestedDialog, resolveEscapeTarget } from './settingsDialogHelpers';
 
@@ -49,6 +48,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     agent: deepLink?.tab === 'agents' && deepLink.agent ? deepLink.agent : 'claude',
     category: deepLink?.tab === 'agents' && deepLink.category ? deepLink.category : 'account',
   });
+  // Whether the «النماذج المحلية» grid card is active inside the Agents tab.
+  const [localModelsActiveInAgents, setLocalModelsActiveInAgents] = useState<boolean>(
+    Boolean(deepLink?.tab === 'agents' && deepLink.localModels),
+  );
   const { preferences: uiPreferences, setPreference: setUiPreference } = useUiPreferences();
   const {
     activeTab,
@@ -84,10 +87,13 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     if (!isOpen) return;
     setFocusCompanyId(deepLink?.tab === 'vendors' ? deepLink.companyId : undefined);
     if (deepLink?.tab === 'agents') {
-      setAgentDestination({
-        agent: deepLink.agent ?? 'claude',
-        category: deepLink.category ?? 'account',
-      });
+      setLocalModelsActiveInAgents(Boolean(deepLink.localModels));
+      if (!deepLink.localModels) {
+        setAgentDestination({
+          agent: deepLink.agent ?? 'claude',
+          category: deepLink.category ?? 'account',
+        });
+      }
     }
   }, [deepLink, isOpen]);
 
@@ -206,7 +212,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
 
   const handleMainTabChange = (tab: SettingsMainTab) => {
     setActiveTab(tab);
-    writeSettingsDestination(tab === 'agents' ? { tab, ...agentDestination } : { tab });
+    if (tab !== 'agents') setLocalModelsActiveInAgents(false);
+    writeSettingsDestination(tab === 'agents'
+      ? (localModelsActiveInAgents ? { tab, localModels: true } : { tab, ...agentDestination })
+      : { tab });
   };
 
   const handleAgentDestinationChange = (
@@ -214,8 +223,14 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     category: AgentCategory,
     options?: { replace?: boolean },
   ) => {
+    setLocalModelsActiveInAgents(false);
     setAgentDestination({ agent, category });
     writeSettingsDestination({ tab: 'agents', agent, category }, options);
+  };
+
+  const handleLocalModelsSelect = (options?: { replace?: boolean }) => {
+    setLocalModelsActiveInAgents(true);
+    writeSettingsDestination({ tab: 'agents', localModels: true }, options);
   };
 
   if (!isOpen) {
@@ -292,18 +307,15 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   projects={projects}
                   initialAgent={agentDestination.agent}
                   initialCategory={agentDestination.category}
+                  initialLocalModels={localModelsActiveInAgents}
                   onDestinationChange={handleAgentDestinationChange}
+                  onLocalModelsSelect={handleLocalModelsSelect}
                 />
               )}
 
               {/* «ماذا يصل الوكيل قبل أن يبدأ؟» — بلا قيد دور: القراءة لكل عضو،
                   والتمييز على التحرير وحده (`canManage` من الخادم). */}
               {activeTab === 'references' && <ReferencesSettingsTab />}
-              {activeTab === 'local-models' && <LocalModelsSettingsTab onOpenSharing={() => {
-                setAgentDestination({ agent: 'opencode', category: 'account' });
-                setActiveTab('agents');
-                writeSettingsDestination({ tab: 'agents', agent: 'opencode', category: 'account' });
-              }} />}
 
             {activeTab === 'notifications' && (
               <NotificationsSettingsTab

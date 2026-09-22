@@ -78,6 +78,7 @@ export const PREFLIGHT_CODES = Object.freeze([
     'node_env_not_loaded',
     'node_overlay_invalid',
     'stale_restart_row',
+    'client_generation_archive',
 ]);
 
 /**
@@ -712,6 +713,48 @@ function checkStaleRestartRow({ rows, isJobLive }) {
         true);
 }
 
+/**
+ * `client_generation_archive` (B-1293): a served-generation archive missing under
+ * a dist that references one.
+ *
+ * The candidate build rewrites `dist/index.html` to load
+ * `/assets/generations/<id>/…`, and `server/services/client-publication-static.js`
+ * serves those URLs ONLY from `.nassaj-local-preview/client-assets/generations/<id>`.
+ * A fresh install that dropped a candidate dist without preparing that archive
+ * rendered a white page — every generation-scoped asset 404s (measured on
+ * two fleet nodes). This is READ-ONLY: it stats the archive directory,
+ * never writes.
+ *
+ * It is a WARNING, not a blocker: the git update mechanics are unaffected, and
+ * both `scripts/install-node.mjs` (now, via `prepareServedClientGeneration`) and
+ * the update button rebuild the archive from dist, so blocking the very update
+ * that repairs it would be a false red. The generation id comes from
+ * `index.html` itself — the exact URLs the browser requests — so a manifest that
+ * disagrees with the served HTML cannot hide the failure.
+ */
+function checkClientGenerationArchive({ readFile, exists, appRoot }) {
+    const code = 'client_generation_archive';
+    let indexHtml;
+    try { indexHtml = readFile(path.join(appRoot, 'dist', 'index.html')); }
+    catch { indexHtml = null; }
+    if (indexHtml === null || indexHtml === undefined) {
+        return clear(code, { ar: 'لا dist/index.html مبنيّ على هذه العقدة بعد.', en: 'No built dist/index.html on this node yet.' });
+    }
+    const referenced = new Set();
+    for (const match of indexHtml.matchAll(/\/assets\/generations\/([a-f0-9]{64})\//g)) referenced.add(match[1]);
+    if (referenced.size === 0) {
+        return clear(code, { ar: 'dist/index.html لا يشير إلى أي جيل أصول مخدوم.', en: 'dist/index.html references no served generation.' });
+    }
+    const missing = [...referenced].filter((id) => !exists(
+        path.join(appRoot, '.nassaj-local-preview', 'client-assets', 'generations', id)));
+    if (missing.length === 0) {
+        return clear(code, { ar: `أرشيف الجيل المخدوم موجود لكل جيل يشير إليه dist/index.html (${referenced.size}).`, en: `The served archive exists for every generation dist/index.html references (${referenced.size}).` });
+    }
+    return warning(code,
+        { ar: `dist/index.html يشير إلى ${missing.length} جيل أصول بلا أرشيف مخدوم تحت .nassaj-local-preview/client-assets/generations، فتُرَدّ أصوله 404 وتظهر صفحة بيضاء.`, en: `dist/index.html references ${missing.length} generation(s) with no served archive under .nassaj-local-preview/client-assets/generations, so their assets 404 and the page renders blank.` },
+        { ar: 'هيّئ الأرشيف المخدوم بإعادة تشغيل المثبّت أو بزرّ التحديث؛ كلاهما يبنيه من dist.', en: 'Prepare the served archive by re-running the installer or the update button; both build it from dist.', command: 'node scripts/install-node.mjs --node <name> --yes' });
+}
+
 /** Parse a `KEY=value` env file's text into a plain object (no process.env mutation). */
 export function parseEnvText(text) {
     const out = {};
@@ -835,7 +878,7 @@ async function checkNodeOverlayMountConflict({ git, readFile, appRoot, target, t
 /**
  * `node_env_not_loaded` (contract §3.4, M12): "loaded" means the LIVE process's
  * ACTUAL environment, NOT the merged serviceEnv (that green is the false green
- * that hid the Rukhaimi TMPDIR puzzle). An allowlisted key declared in
+ * that hid the fleet-node TMPDIR puzzle). An allowlisted key declared in
  * `config/node.env` that is absent or different in the live env is a blocker:
  * The in-process API supplies its effective environment after node.env loads.
  * External diagnosis can observe only exec-time values through /proc or PM2.
@@ -1049,6 +1092,8 @@ export async function runUpdatePreflightChecks({
     checks.set('stale_restart_row', checkStaleRestartRow({
         rows: listQueuedSafeRestarts(), isJobLive: isSourceUpdateJobLive,
     }));
+
+    checks.set('client_generation_archive', checkClientGenerationArchive({ readFile, exists, appRoot }));
 
     const ordered = PREFLIGHT_CODES.map((code) => checks.get(code));
     const first = ordered.find((check) => check.severity === 'blocker') || null;

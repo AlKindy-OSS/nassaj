@@ -14,7 +14,10 @@ import type { ProviderAuthStatus } from '../../provider-auth/types';
 // وبطاقاتُ الوكلاء مستقلّتان عن المحرّك تماماً (بطاقةُ `qa-critic` واحدةٌ أياً كان
 // مَن يشغّلها). والأربع (تعليمات · ذاكرة · بطاقات · مهارات) يتشاركن سؤالاً واحداً
 // لا يتشاركه أيُّ تبويبٍ قائم: «ماذا يصل الوكيل قبل أن يبدأ؟».
-export type SettingsMainTab = 'profile' | 'agents' | 'local-models' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'command-board' | 'about';
+// 'local-models' was a standalone sidebar tab; removed as a top-level tab and
+// merged into the Agents tab as a grid card. Deep links (?settings=local-models)
+// are redirected to ?settings=agents&settingsLocalModels=true by settingsUrl.ts.
+export type SettingsMainTab = 'profile' | 'agents' | 'references' | 'vendors' | 'appearance' | 'git' | 'api' | 'connectors' | 'notifications' | 'users' | 'command-board' | 'about';
 export type AgentProvider = LLMProvider;
 // `engines` (ADR-073) is a category of a BODY, not a peer tab: an agent's engines
 // belong to the agent the way its permissions do. It replaced the top-level
@@ -96,6 +99,13 @@ export type SettingsDeepLink = {
   category?: AgentCategory;
   /** Company row to focus when opening the sole credential-entry surface. */
   companyId?: string;
+  /**
+   * When true and tab === 'agents', the agents grid opens with the
+   * «النماذج المحلية» card selected instead of a harness card.
+   * Produced by settingsUrl.ts when reading ?settings=local-models (legacy)
+   * or ?settings=agents&settingsLocalModels=true.
+   */
+  localModels?: true;
 };
 
 export type SettingsProps = {

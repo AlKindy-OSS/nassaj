@@ -167,7 +167,14 @@ export function claudeContextSnapshot(
   const used = count(control.totalTokens);
   const window = count(control.maxTokens);
   const measured = used !== null && window !== null && window > 0 && nativeContextId(control.model) !== null;
-  if (measured) identity.modelId = nativeContextId(control.model);
+  // B-1295: do NOT override a caller-supplied identity with the control's
+  // reported model. The caller carries the authoritative picker alias
+  // (e.g. 'opus[1m]') which must survive so that client validation can match
+  // it against sessionCurrentModel (same source: resolveResumeModel).
+  // control.model is still required for measured=true — it confirms the SDK
+  // produced a valid native reading — but it does not own the identity.
+  // Only populate modelId from control when the caller left it empty.
+  if (measured && !identity.modelId) identity.modelId = nativeContextId(control.model);
   return {
     version: 1, provider: 'claude', ...identity,
     usedTokens: measured ? used : inputTokens,

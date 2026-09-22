@@ -1385,7 +1385,16 @@ router.get(
       userId,
       (req as Request & { user?: unknown }).user,
     );
-    res.json(createApiSuccessResponse({ provider, models: result.models, cache: result.cache }));
+    // `revalidating` rides on the response body at the same level as `models`
+    // and `cache` (JSON path `body.data.revalidating`). It is `true` only when a
+    // stale catalog was served while a background refresh runs; every other path
+    // reports `false` so the client always sees a stable boolean.
+    res.json(createApiSuccessResponse({
+      provider,
+      models: result.models,
+      cache: result.cache,
+      revalidating: result.revalidating === true,
+    }));
   }),
 );
 

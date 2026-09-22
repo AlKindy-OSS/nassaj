@@ -493,12 +493,16 @@ export class OpenCodeProviderModels implements IProviderModels {
       const stdout = await runOpenCodeModelsCommand();
       const ids = parseOpenCodeModelsStdout(stdout);
       if (ids.length === 0) {
-        return withGlmCarrierModels(OPENCODE_FALLBACK_MODELS);
+        // B-1283: no ids parsed → degraded fallback. The degraded flag is added
+        // AFTER the carrier merge, on a fresh object, so it survives whichever
+        // branch withGlmCarrierModels takes and never mutates the shared constant.
+        return { ...withGlmCarrierModels(OPENCODE_FALLBACK_MODELS), degraded: true };
       }
 
       return withGlmCarrierModels(buildOpenCodeDefinitionFromIds(ids));
     } catch {
-      return withGlmCarrierModels(OPENCODE_FALLBACK_MODELS);
+      // B-1283: spawn/exit/timeout failure → degraded fallback (see above).
+      return { ...withGlmCarrierModels(OPENCODE_FALLBACK_MODELS), degraded: true };
     }
   }
 

@@ -10,6 +10,7 @@ import {
   readRequestUserId,
 } from '@/modules/websocket/services/chat-websocket.service.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { installManagedClaudeTerminalEnv } from '@/services/isolation/managed-claude-terminal-env.js';
 import {
   bindManagedClaudeTerminal,
@@ -125,7 +126,94 @@ const PROVIDER_LOGIN_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
   // hence a fixed, exactly-matched terminal command, available to every role like
   // the other provider logins.
   'kimi login',
+  // B-1260: FULL OAuth is now the default Claude link (access + refresh + full
+  // scopes), replacing the inference-only `claude setup-token`. `claude auth
+  // login` prints an authorize URL and a "Paste code here if prompted >" prompt
+  // (verified in the bundled CLI 2.1.273), so it completes headless with no
+  // localhost callback. `claude setup-token` stays allowlisted as the API-panel
+  // fallback (B-1075). Must match ProviderLoginModal.getProviderCommand exactly.
+  'claude auth login',
 ]);
+
+/**
+ * B-1260 — SERVER-SIDE COMMAND↔PROVIDER BINDING. The client declares BOTH a
+ * `provider` and an `initialCommand`; nothing before this map stopped a payload
+ * from pairing `provider: 'claude'` with `initialCommand: 'codex login
+ * --device-auth'`. Both strings are individually allowlisted, so the free-shell
+ * role gate passes them, and buildShellCommand's claude branch would then run
+ * the codex login INSIDE the claude-isolated env (CLAUDE_CONFIG_DIR) — a login
+ * whose token lands in the wrong provider's tree. This map pins each provider to
+ * the exact login command(s) it may issue, so a mismatched pair is refused
+ * before any spawn. A provider may legitimately have more than one (claude keeps
+ * `setup-token` as the API-panel fallback; codex the bare and --device-auth
+ * forms). Providers absent here issue no fixed login command.
+ */
+const PROVIDER_CANONICAL_LOGIN_COMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['claude', new Set(['claude auth login', 'claude setup-token'])],
+  ['cursor', new Set(['cursor-agent login'])],
+  ['codex', new Set(['codex login', 'codex login --device-auth'])],
+  ['opencode', new Set(['opencode auth login'])],
+  ['hermes', new Set(['hermes setup --portal'])],
+  ['kimi', new Set(['kimi login'])],
+  ['agy', new Set(['agy'])],
+  ['antigravity', new Set(['agy'])],
+]);
+
+/** Every fixed provider-login command, across all providers. */
+const ALL_PROVIDER_LOGIN_COMMANDS: ReadonlySet<string> = new Set(
+  [...PROVIDER_CANONICAL_LOGIN_COMMANDS.values()].flatMap((set) => [...set]),
+);
+
+/**
+ * B-1260 — true when a caller-declared (provider, initialCommand) pair is a
+ * provider-login command bound to the WRONG provider. An empty command, or a
+ * command that is not a provider-login command at all (a resume template, the
+ * echo fallback, a free-form admin command already gated elsewhere), is NOT a
+ * mismatch here — this guard speaks only to login-command↔provider binding.
+ *
+ * Exported for the SEC-SHELL-ROLE / B-1260 regression suite.
+ */
+export function isProviderLoginCommandMismatch(
+  provider: string,
+  initialCommand: string,
+): boolean {
+  const command = initialCommand.trim();
+  if (command.length === 0 || !ALL_PROVIDER_LOGIN_COMMANDS.has(command)) {
+    return false;
+  }
+  const allowedForProvider = PROVIDER_CANONICAL_LOGIN_COMMANDS.get(provider);
+  return !allowedForProvider || !allowedForProvider.has(command);
+}
+
+/** Roles permitted to write a credential into a SHARED (operator) Claude tree. */
+const SHARED_CLAUDE_WRITE_ROLES: readonly string[] = ['owner', 'admin'];
+
+/**
+ * B-1260 — PRE-SPAWN CREDENTIAL-WRITE PERMISSION. `claude auth login` writes a
+ * full OAuth credential (`.credentials.json`) into the config dir the spawn
+ * resolves to. Under the ISOLATED policy that is the caller's OWN tree, so any
+ * role may link their own account. Under the SHARED policy every claude spawn
+ * runs on the OPERATOR's `~/.claude`, so a member's login would OVERWRITE the
+ * operator credential every other user depends on — a member must be refused
+ * BEFORE the CLI runs and destroys the shown code. `setup-token` prints to
+ * stdout and persists nothing to the tree, so it is not gated here; only the
+ * tree-writing `claude auth login` is.
+ *
+ * Exported for the regression suite.
+ */
+export function isClaudeLoginCredentialWriteAllowed(
+  initialCommand: string,
+  role: string | null | undefined,
+  isClaudeShared: boolean,
+): boolean {
+  if (initialCommand.trim() !== 'claude auth login') {
+    return true;
+  }
+  if (!isClaudeShared) {
+    return true;
+  }
+  return typeof role === 'string' && SHARED_CLAUDE_WRITE_ROLES.includes(role);
+}
 
 /**
  * The UI's fallback for a provider with no configured login command:
@@ -669,6 +757,57 @@ export function handleShellConnection(
                 type: 'error',
                 message: 'Running arbitrary shell commands is restricted to administrators',
                 code: 'forbidden',
+              })
+            );
+          }
+          ws.close(4403, 'Forbidden');
+          return;
+        }
+
+        // B-1260 — command↔provider binding: a fixed provider-login command
+        // paired with the wrong provider is refused before any spawn, so a
+        // login can never run in a different provider's isolated tree.
+        if (isProviderLoginCommandMismatch(provider, initialCommand)) {
+          console.error(
+            `[ERROR] Shell WebSocket rejected: login command does not match declared `
+            + `provider '${provider}'`
+          );
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'error',
+                message: 'This login command does not match the selected provider.',
+                code: 'provider_mismatch',
+              })
+            );
+          }
+          ws.close(4403, 'Forbidden');
+          return;
+        }
+
+        // B-1260 — credential-write permission: under the SHARED claude policy a
+        // full `claude auth login` overwrites the operator credential, so only
+        // owner/admin may run it; members are refused BEFORE the CLI prints (and
+        // then destroys) the one-time code. Isolated users write their own tree
+        // and pass. isProviderIsolated resolves the same policy resolveProviderEnv
+        // consults for the spawn env, so the gate and the write can never drift.
+        const isClaudeShared =
+          readIsolationProvider(provider) === 'claude' && !isProviderIsolated('claude');
+        if (!isClaudeLoginCredentialWriteAllowed(initialCommand, userRole, isClaudeShared)) {
+          console.error(
+            `[ERROR] Shell WebSocket rejected: role '${userRole ?? 'none'}' may not run `
+            + 'claude auth login against the shared operator credential'
+          );
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'error',
+                message:
+                  'Linking Claude on this shared server is limited to administrators. '
+                  + 'Ask an owner or admin to link the account, or set a personal API key instead.',
+                // Dedicated code so the modal renders a tailored, localized "ask an
+                // owner/admin to link" message rather than the generic role refusal.
+                code: 'shared_link_admin_only',
               })
             );
           }

@@ -133,10 +133,17 @@ export type ProviderModelsCacheInfo = {
  *
  * Use this shape when a caller needs both the selectable model catalog and the
  * cache metadata that explains how current the catalog is.
+ *
+ * `revalidating` is set to `true` only on the stale-while-revalidate path: an
+ * expired entry was served instantly while a fresh fetch runs in the background.
+ * Every other path (fresh live fetch, still-valid cache hit, or `bypassCache`)
+ * leaves it unset. It mirrors the optional `degraded` flag on the catalog itself
+ * so callers can tell "this list may change momentarily" apart from a final one.
  */
 export type ProviderModelsResult = {
   models: ProviderModelsDefinition;
   cache: ProviderModelsCacheInfo;
+  revalidating?: boolean;
 };
 
 // ---------------------------
@@ -705,6 +712,14 @@ export type ProviderAuthStatus = {
    * تعميمٍ لهذا الحقل سيكون مختلَقاً في سبعة مواضع من ثمانية.
    */
   linkExpiry?: ProviderLinkExpiry | null;
+  /**
+   * B-1260 — الاعتماد موجودٌ لكنّه ربطٌ **ناقص** لا كامل: توكن `setup-token`
+   * inference-only (لا يقرأ الاستخدام/الملف الشخصي)، أو ملفُّ اعتمادٍ بلا
+   * `refreshToken` (لا يُنعَش فينكسر ولا يُقاس عمرُه). عندئذٍ تعرض الواجهة حالةَ
+   * «ربطٌ ناقص — أعِد الربط» بدل «متصل»، فلا يُقدَّم اعتمادٌ جزئيٌّ على أنه كامل.
+   * غيابُه/‏`false` = لا نقصَ على هذا الاعتماد.
+   */
+  incompleteLink?: boolean;
 };
 
 /**

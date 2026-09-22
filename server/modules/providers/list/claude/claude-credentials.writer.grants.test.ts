@@ -85,6 +85,19 @@ describe('B-1251 — a credential write never follows a grant', () => {
     );
   });
 
+  it('B-1260: an interactive `claude auth login` for B (honorGrants:false) resolves B own tree', () => {
+    // The PTY login path in shell-websocket.service passes honorGrants:false, so
+    // the CLI that writes .credentials.json runs against B's OWN config dir — a
+    // full OAuth login typed by the grantee can never land in the grantor tree.
+    const loginEnv = resolveProviderEnv(grantee.id, 'claude', {}, 'chat', { honorGrants: false });
+    assert.equal(
+      loginEnv.CLAUDE_CONFIG_DIR,
+      userConfigDir(grantee.id, '.claude'),
+      'a terminal login must resolve the caller own tree, never the grantor',
+    );
+    assert.notEqual(loginEnv.CLAUDE_CONFIG_DIR, userConfigDir(grantor.id, '.claude'));
+  });
+
   it('B setApiKey writes into B own tree and leaves A file byte-identical', async () => {
     const before = fs.readFileSync(settingsOf(grantor.id));
 

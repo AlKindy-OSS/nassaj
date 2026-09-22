@@ -77,7 +77,7 @@ test('a healthy node reports every code clear, in blocker priority order', async
     assert.equal(result.ok, true);
     assert.equal(result.blocker, null);
     assert.deepEqual(result.checks.map((check) => check.code), [...PREFLIGHT_CODES]);
-    assert.equal(result.checks.length, 15); // 15 codes post-ADR-156 T-1730: +node_overlay_mount_conflict, +node_env_not_loaded, +node_overlay_invalid
+    assert.equal(result.checks.length, 16); // 16 codes: +client_generation_archive (B-1293) atop the 15 post-ADR-156 T-1730
     for (const check of result.checks) {
         assert.equal(check.ok, true, `${check.code} should be clear`);
         assert.ok(check.reason_ar && check.reason_en, `${check.code} needs both languages`);
@@ -607,4 +607,39 @@ test('a real clean tree clears the cleanliness check on any installed version', 
         const result = await againstRealRepo(root, { installedVersion });
         assert.equal(byCode(result, 'dirty_worktree').ok, true, `installed ${installedVersion}`);
     }
+});
+
+const GENERATION = 'c'.repeat(64);
+const INDEX_HTML = `<!doctype html><script type="module" src="/assets/generations/${GENERATION}/assets/app.js"></script>`;
+
+test('a dist that references a generation with no served archive is a warning, never a blocker (B-1293)', async () => {
+    const result = await baseline({}, {
+        readFile: (target) => (target.endsWith(path.join('dist', 'index.html')) ? INDEX_HTML : null),
+        exists: (target) => !target.includes(path.join('client-assets', 'generations')),
+    });
+    const check = byCode(result, 'client_generation_archive');
+    assert.equal(check.severity, 'warn');
+    assert.equal(check.ok, false);
+    assert.equal(result.blocker, null, 'a missing served archive never blocks the git update');
+    assert.match(check.reason_en, /404|blank/);
+    assert.match(check.reason_ar, /صفحة بيضاء/);
+});
+
+test('a dist whose referenced generation archive exists clears the check (B-1293)', async () => {
+    const result = await baseline({}, {
+        readFile: (target) => (target.endsWith(path.join('dist', 'index.html')) ? INDEX_HTML : null),
+        exists: () => true,
+    });
+    assert.equal(byCode(result, 'client_generation_archive').ok, true);
+});
+
+test('a dist that references no generation clears the check, and an absent dist is clear too (B-1293)', async () => {
+    const noRef = await baseline({}, {
+        readFile: (target) => (target.endsWith(path.join('dist', 'index.html')) ? '<!doctype html><body>ok</body>' : null),
+        exists: (target) => !target.includes(path.join('client-assets', 'generations')),
+    });
+    assert.equal(byCode(noRef, 'client_generation_archive').ok, true);
+
+    const absent = await baseline(); // readFile: () => null → no built dist
+    assert.equal(byCode(absent, 'client_generation_archive').ok, true);
 });

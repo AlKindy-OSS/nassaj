@@ -1,7 +1,7 @@
 import type { AgentCategory, AgentProvider, SettingsDeepLink, SettingsMainTab } from './types/types';
 
 const MAIN_TABS = new Set<SettingsMainTab>([
-  'profile', 'agents', 'local-models', 'references', 'vendors', 'appearance', 'git', 'api',
+  'profile', 'agents', 'references', 'vendors', 'appearance', 'git', 'api',
   'connectors', 'notifications', 'users', 'command-board', 'about',
 ]);
 
@@ -22,7 +22,12 @@ const writeSearch = (url: URL, replace: boolean) => {
 export function readSettingsDestination(search = window.location.search): SettingsDeepLink | undefined {
   const params = new URLSearchParams(search);
   const tab = params.get('settings');
-  if (!tab || !MAIN_TABS.has(tab as SettingsMainTab)) return undefined;
+  if (!tab) return undefined;
+
+  // Legacy redirect: ?settings=local-models → agents tab with local-models card selected.
+  if (tab === 'local-models') return { tab: 'agents', localModels: true };
+
+  if (!MAIN_TABS.has(tab as SettingsMainTab)) return undefined;
 
   const destination: SettingsDeepLink = { tab: tab as SettingsMainTab };
   const agent = params.get('settingsAgent');
@@ -33,6 +38,10 @@ export function readSettingsDestination(search = window.location.search): Settin
   if (destination.tab === 'agents' && category && CATEGORIES.has(category as AgentCategory)) {
     destination.category = category as AgentCategory;
   }
+  // ?settingsLocalModels=true selects the local-models card in the agents grid.
+  if (destination.tab === 'agents' && params.get('settingsLocalModels') === 'true') {
+    destination.localModels = true;
+  }
   return destination;
 }
 
@@ -42,9 +51,14 @@ export function writeSettingsDestination(destination: SettingsDeepLink, options:
   url.searchParams.set('settings', destination.tab);
   url.searchParams.delete('settingsAgent');
   url.searchParams.delete('settingsCategory');
+  url.searchParams.delete('settingsLocalModels');
   if (destination.tab === 'agents') {
-    if (destination.agent) url.searchParams.set('settingsAgent', destination.agent);
-    if (destination.category) url.searchParams.set('settingsCategory', destination.category);
+    if (destination.localModels) {
+      url.searchParams.set('settingsLocalModels', 'true');
+    } else {
+      if (destination.agent) url.searchParams.set('settingsAgent', destination.agent);
+      if (destination.category) url.searchParams.set('settingsCategory', destination.category);
+    }
   }
   writeSearch(url, Boolean(options.replace));
 }
@@ -55,6 +69,7 @@ export function clearSettingsDestination(): void {
   url.searchParams.delete('settings');
   url.searchParams.delete('settingsAgent');
   url.searchParams.delete('settingsCategory');
+  url.searchParams.delete('settingsLocalModels');
   writeSearch(url, false);
 }
 

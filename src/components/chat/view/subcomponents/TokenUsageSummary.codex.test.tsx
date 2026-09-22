@@ -4,9 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) => {
-      if (key === 'contextRot.tooltipUsed') return `${options?.used} / ${options?.total}`;
       if (key === 'contextRot.coordinatorTotal') return `coordinator:${options?.value}`;
-      if (key === 'contextRot.lastInput') return `last input:${options?.value}`;
       if (key === 'contextRot.unavailable') return 'Context usage unavailable';
       if (key === 'contextRot.percentUsed') return String(options?.percent);
       return key;
@@ -23,12 +21,11 @@ import TokenUsageSummary from './TokenUsageSummary';
 afterEach(cleanup);
 
 describe('Codex context-window usage', () => {
-  it('shows last-request input and cumulative usage without inventing occupancy or alerting', () => {
+  it('shows cumulative usage without inventing occupancy or alerting', () => {
     render(<TokenUsageSummary provider="codex" sessionId="s1" modelId="m1" usage={{ contextSnapshot: nativeSnapshot({ usageKind: 'last_request_input', usedTokens: 220_000 }), cumulativeUsed: 20_000_000 }} />);
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Context usage unavailable' }));
-    expect(screen.getByRole('dialog').textContent).toContain('last input:220,000');
     expect(screen.getByRole('dialog').textContent).toContain('coordinator:20,000,000');
   });
   it('removes occupancy and alerts when a native compact boundary invalidates the snapshot', () => {

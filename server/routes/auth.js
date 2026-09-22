@@ -27,6 +27,7 @@ import {
 
 import webauthnRouter from './webauthn.js';
 import oidcRouter from './oidc.js';
+import { oidcEnabled } from '../services/oidc-config.js';
 
 const MIN_PASSWORD_LENGTH = 8;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,32}$/;
@@ -137,10 +138,13 @@ const authLimiter = createRateLimiter({
 // ---------------------------------------------------------------------------
 
 // Check auth status. needsSetup is true only until the bootstrap owner exists.
+// oidcEnabled mirrors the same predicate the OIDC routes gate on, so the SPA can
+// decide whether to offer the SSO button without probing the rate-limited
+// /oidc/exchange. No configuration detail beyond the boolean is exposed.
 router.get('/status', async (req, res) => {
   try {
     const hasUsers = await userDb.hasUsers();
-    res.json({ needsSetup: !hasUsers, isAuthenticated: false });
+    res.json({ needsSetup: !hasUsers, isAuthenticated: false, oidcEnabled: oidcEnabled() });
   } catch (error) {
     console.error('Auth status error:', error);
     res.status(500).json({ error: 'Internal server error' });

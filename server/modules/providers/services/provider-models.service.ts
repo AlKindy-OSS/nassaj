@@ -68,8 +68,13 @@ export const PROVIDER_MODELS_DEGRADED_CACHE_TTL_MS = 5 * 60 * 1000;
  * 5 — T-1575: retires entries written with the former three-day TTL. Expiry is
  *     stored per entry, so changing the TTL alone would leave those snapshots
  *     eligible for up to three more days.
+ * 6 — B-1283: cursor/opencode/hermes now flag their fallback catalogs `degraded`,
+ *     so entries written before this fix were stored as long-TTL non-degraded
+ *     snapshots of what were really fallbacks. Bumping retires them so the fixed
+ *     short-TTL degraded behavior takes effect on first open instead of waiting
+ *     out the old deadline.
  */
-export const PROVIDER_MODELS_CACHE_VERSION = 5;
+export const PROVIDER_MODELS_CACHE_VERSION = 6;
 
 // Qwen's catalog is selected from immutable in-process constants plus the
 // caller's already-decrypted plan profile. It starts no process and performs no
@@ -423,9 +428,13 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     const staleEntry = peekMemoryEntry(cacheKey);
     if (staleEntry) {
       triggerBackgroundRefresh(provider, cacheKey, userId, authenticatedPrincipal);
+      // `revalidating: true` tells the caller this is a stale snapshot served
+      // while a fresh fetch runs in the background, so the list it renders may be
+      // replaced on the next read. Every other return path leaves the flag unset.
       return {
         models: staleEntry.models,
         cache: toProviderModelsCacheInfo(staleEntry, 'memory'),
+        revalidating: true,
       };
     }
 

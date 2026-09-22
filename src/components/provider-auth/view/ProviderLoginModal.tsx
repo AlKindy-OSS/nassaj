@@ -31,13 +31,17 @@ const getProviderCommand = ({
   }
 
   if (provider === 'claude') {
-    // Claude Code removed the interactive `/login` command (unavailable under a
-    // PTY with no localhost callback; it drops into onboarding and exits 64).
-    // `claude setup-token` is the official replacement: it prints an OAuth link
-    // + code in the terminal for the user to complete in their own browser,
-    // mirroring the codex --device-auth flow. Must match the allowlist in
-    // shell-websocket.service.ts exactly.
-    return 'claude setup-token';
+    // B-1260: FULL OAuth is the default link. `claude setup-token` mints an
+    // INFERENCE-ONLY token (consent shows two lines; no usage/profile), so it
+    // linked an account that never fully worked. `claude auth login` mints
+    // access + refresh with full scopes and, when no localhost callback exists
+    // (nassaj is remote), prints an authorize URL and a "Paste code here if
+    // prompted >" prompt — verified in the bundled CLI 2.1.273 — so it completes
+    // headless. The CLI writes .credentials.json itself; no token is pasted into
+    // nassaj. Must match PROVIDER_LOGIN_COMMAND_ALLOWLIST in
+    // shell-websocket.service.ts exactly. (setup-token stays as the API-panel
+    // fallback there, not here.)
+    return 'claude auth login';
   }
 
   if (provider === 'cursor') {
@@ -124,20 +128,18 @@ function InlineCode({ children }: { children?: ReactNode }) {
  * rendered above the embedded terminal so the flow is explained before the codes
  * scroll past.
  *
- * `claude` belongs here and its absence was an OVERSIGHT, not an exemption: this
- * map was born in `efa5a0b5e` (2026-07-26) when the Claude command was still the
- * interactive `/login`, and `b1de1d0e7` (2026-09-06) switched it to
- * `claude setup-token` without touching this file. The gap matters more for
- * Claude than for the other two, because `setup-token` does NOT end the flow: it
- * PRINTS a token, shown once, and stores nothing. Nothing in nassaj reads that
- * token out of the PTY — deliberately, since scraping it would turn a passing
- * secret into a retained one, kept in the session buffer and the terminal
- * scrollback. So the notice must name the second step and where to perform it,
- * or the operator closes a terminal that has already destroyed the only copy.
+ * `claude` belongs here. B-1260: the command is now `claude auth login` (FULL
+ * OAuth), not `claude setup-token` (inference-only). auth login prints an
+ * authorize URL and, when no localhost callback exists (nassaj is remote), a
+ * "Paste code here if prompted >" prompt: the operator authorizes in their own
+ * browser, copies the code, and pastes it straight BACK INTO THIS TERMINAL. The
+ * CLI then writes the credential itself — there is no separate "copy the token
+ * into a card" step anymore, so the notice names the in-terminal paste, not a
+ * second field.
  *
  * An entry may override the banner heading; `title` defaults to
  * "Device Authorization", which is right for a device-code flow and wrong for
- * Claude's print-and-paste one.
+ * Claude's authorize-and-paste-back one.
  */
 const DEVICE_AUTH_NOTICES: Partial<
   Record<LLMProvider, { title?: ReactNode; body: ReactNode[] }>
@@ -147,7 +149,7 @@ const DEVICE_AUTH_NOTICES: Partial<
       <Trans
         ns="settings"
         i18nKey="providerLogin.deviceAuth.claude.title"
-        defaults="Two steps: authorize, then paste the token"
+        defaults="Two steps: authorize, then paste the code into the terminal"
       />
     ),
     body: [
@@ -155,15 +157,15 @@ const DEVICE_AUTH_NOTICES: Partial<
         key="intro"
         ns="settings"
         i18nKey="providerLogin.deviceAuth.claude.intro"
-        defaults="The terminal below runs <cmd>claude setup-token</cmd>. Follow it to authorize in your own browser — no localhost required. When it finishes it prints a token starting with <cmd>sk-ant-oat01-</cmd>."
+        defaults="The terminal below runs <cmd>claude auth login</cmd>. It prints a sign-in link — open it in your own browser and authorize (no localhost required). This links your full Claude subscription, not an inference-only token."
         components={{ cmd: <InlineCode /> }}
       />,
       <Trans
         key="paste"
         ns="settings"
         i18nKey="providerLogin.deviceAuth.claude.paste"
-        defaults="That token is shown <b>once only</b> and nassaj does not capture it from the terminal. Copy it before closing this dialog, then paste it into the <b>Setup token</b> field on the Claude card behind this dialog (Settings → Agents → Claude → Account) and press Save token."
-        components={{ b: <strong /> }}
+        defaults="After you authorize, the browser shows a code. Copy it and paste it back <b>into this terminal</b> at the <cmd>Paste code here</cmd> prompt, then press Enter. nassaj stores nothing itself — the Claude CLI saves the credential. When it finishes, the account card behind this dialog shows the new state."
+        components={{ b: <strong />, cmd: <InlineCode /> }}
       />,
     ],
   },

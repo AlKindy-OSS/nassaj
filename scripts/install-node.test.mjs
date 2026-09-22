@@ -6,11 +6,12 @@ import { createRequire } from 'node:module';
 
 import {
     assertNoUntrackedTrace, deriveReleaseSource, fetchGitHubHostKeys, generateEcosystem, installNode,
-    installPm2Entry, probeEnvironment, probeGitHubSsh, readRemoteUrl, seedFirstBuildDirectories,
-    setRemoteSsh, sshConfigBlock, verifyReleaseFetch, writeKnownHosts, writeNodeEnv, writeReleaseSourceLock,
-    writeSshConfig,
+    installPm2Entry, prepareServedClientGeneration, probeEnvironment, probeGitHubSsh, readRemoteUrl,
+    seedFirstBuildDirectories, setRemoteSsh, sshConfigBlock, verifyReleaseFetch, writeKnownHosts,
+    writeNodeEnv, writeReleaseSourceLock, writeSshConfig,
 } from './install-node.mjs';
 import { resolveReleaseSource } from '../server/services/release-source-config.js';
+import { createClientAssetManifest, validateClientAssetManifest, verifyAssetClosure } from './lib/client-publication-artifacts.mjs';
 
 const TEMP = process.env.NASSAJ_TEST_TMP || process.env.TMPDIR || '/var/tmp';
 const SOURCE_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
@@ -398,6 +399,40 @@ test('the first build on a fresh install finds the directories it refuses to cre
     assert.deepEqual(seedFirstBuildDirectories({ appRoot }).created, []);
 });
 
+/** A candidate-built dist: index.html referencing a generation, sealed by the shared manifest contract. */
+function sealDist(appRoot, build = 'c'.repeat(64), source = 'a'.repeat(40)) {
+    const dist = path.join(appRoot, 'dist');
+    mkdirSync(path.join(dist, 'assets'), { recursive: true });
+    writeFileSync(path.join(dist, 'BUILD_PROVENANCE.json'), JSON.stringify({ commit: source, buildId: build, generationId: build }));
+    writeFileSync(path.join(dist, 'index.html'), `<script src="/assets/generations/${build}/assets/app.js"></script>`);
+    writeFileSync(path.join(dist, 'assets', 'app.js'), `console.log('${build}')`);
+    createClientAssetManifest(dist, { generationId: build, sourceOid: source, buildId: build }, verifyAssetClosure);
+    return build;
+}
+
+test('the installer prepares the served-generation archive a candidate dist requires (B-1293)', (t) => {
+    const appRoot = fixtureAppRoot(t);
+    const generationId = sealDist(appRoot);
+    const served = path.join(appRoot, '.nassaj-local-preview', 'client-assets', 'generations', generationId);
+
+    const first = prepareServedClientGeneration({ appRoot });
+    assert.equal(first.prepared, true);
+    assert.equal(first.generationId, generationId);
+    assert.equal(first.destination, served);
+    // The served copy is a valid sealed generation the static middleware can serve.
+    assert.equal(validateClientAssetManifest(served, {}, verifyAssetClosure).manifest.generationId, generationId);
+
+    // Idempotent: a second run revalidates and returns the same path without throwing or recopying.
+    assert.deepEqual(prepareServedClientGeneration({ appRoot }), first);
+});
+
+test('preparing the served archive is a no-op when dist carries no sealed manifest (B-1293)', (t) => {
+    const appRoot = fixtureAppRoot(t);
+    mkdirSync(path.join(appRoot, 'dist'), { recursive: true });
+    writeFileSync(path.join(appRoot, 'dist', 'index.html'), '<!doctype html>');
+    assert.deepEqual(prepareServedClientGeneration({ appRoot }), { prepared: false, reason: 'no_sealed_dist' });
+});
+
 test('the installer refuses to leave an untracked file in the install root (B-1050)', () => {
     const spawn = fakeSpawn([{ match: (c, a) => a.includes('check-ignore'), stdout: 'config/node.env\n' }]);
     assert.throws(() => assertNoUntrackedTrace({
@@ -417,14 +452,14 @@ test('a full install runs every step in order and never derives the source silen
         { match: (c, a) => c === 'git' && gitArgs(a, 'remote', 'get-url'), stdout: 'https://github.com/your-org/nassaj-dev' },
         { match: (c, a) => c === 'git' && gitArgs(a, 'remote', 'set-url') },
         { match: (c, a) => c === 'git' && gitArgs(a, 'ls-remote'), stdout: 'abc\tHEAD' },
-        { match: (c, a) => c === 'git' && a.includes('check-ignore'), stdout: ['config/node.env', 'config/release-source.lock.json', 'config/ecosystem.rukhaimi.config.cjs', 'dist', 'dist-server'].join('\n') },
+        { match: (c, a) => c === 'git' && a.includes('check-ignore'), stdout: ['config/node.env', 'config/release-source.lock.json', 'config/ecosystem.edge.config.cjs', 'dist', 'dist-server'].join('\n') },
         { match: (c) => c === 'ssh', status: 1, stderr: "Hi node! You've successfully authenticated" },
         { match: (c) => c === process.execPath, stdout: 'update pre-flight: 10 checks, 0 blockers' },
     ]);
 
     const confirmed = [];
     const result = await installNode({
-        appRoot, homeDir, node: 'rukhaimi', port: '3004', processName: 'nassaj-dev',
+        appRoot, homeDir, node: 'edge', port: '3004', processName: 'nassaj-dev',
         databasePath: path.join(dataRoot, 'store.db'),
         env: { USER: 'svc' }, spawn, fetch: fakeFetch({ ssh_keys: META_KEYS }),
         now: () => '2026-09-11T00:00:00.000Z',
@@ -435,7 +470,7 @@ test('a full install runs every step in order and never derives the source silen
     assert.deepEqual(confirmed.map((entry) => entry.identity), ['github.com/your-org/nassaj-dev']);
     assert.deepEqual(result.steps.map((entry) => entry.step), [
         'derive-release-source', 'host-keys', 'ssh-probe', 'remote', 'release-fetch',
-        'node-env', 'release-source-lock', 'ecosystem', 'first-build-seed',
+        'node-env', 'release-source-lock', 'ecosystem', 'first-build-seed', 'client-archive',
         'install-root', 'update-preflight',
     ]);
     assert.match(result.preflight.stdout, /update pre-flight/);

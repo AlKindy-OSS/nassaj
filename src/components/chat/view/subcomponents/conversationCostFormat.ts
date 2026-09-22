@@ -196,7 +196,8 @@ export function sumConversationCostTokens(cost: ConversationCost | null): number
 }
 
 /** Match the routing prefixes and case aliases accepted by server pricing. */
-function isAstraModel(model: string): boolean {
+function isAstraModel(model: string | null | undefined): boolean {
+  if (!model) return false;
   const normalized = model.trim().toLowerCase()
     .replace(/^(?:us|eu|apac)\./, '')
     .replace(/^[a-z0-9-]+\//, '');

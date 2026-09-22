@@ -160,6 +160,67 @@ test('rejects signature, kid, issuer, audience, azp, time and nonce claim attack
   }
 });
 
+function unsignedToken(header: Record<string, unknown>, payload: Record<string, unknown>) {
+  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${part(header)}.${part(payload)}.`;
+}
+
+test('T-961 negative matrix: each attack fails with its specific stable code', async () => {
+  const verifier = verifierWith([rsa]);
+  const now = Math.floor(Date.now() / 1000);
+  const basePayload = {
+    iss: ISSUER, aud: CLIENT_ID, sub: 'subject-synthetic', iat: now, exp: now + 300, nonce: 'nonce-synthetic',
+  };
+  const rsaPublicPem = crypto.createPublicKey(rsa.privateKey).export({ format: 'pem', type: 'spki' });
+  const cases: Array<[string, string, RegExp]> = [
+    ['forged signature (attacker key, trusted kid)', sign(keyFixture('RS256', rsa.kid)), /signature_or_registered_claim_invalid/],
+    ['alg=none', unsignedToken({ alg: 'none', kid: rsa.kid }, basePayload), /invalid_algorithm/],
+    ['HS256 keyed with the public key', jwt.sign(basePayload, rsaPublicPem, { algorithm: 'HS256', keyid: rsa.kid }), /invalid_algorithm/],
+    ['missing kid', jwt.sign(basePayload, rsa.privateKey, { algorithm: 'RS256' }), /invalid_kid/],
+    ['wrong audience', sign(rsa, { aud: 'other-client' }), /signature_or_registered_claim_invalid/],
+    ['wrong issuer', sign(rsa, { iss: 'https://attacker.example' }), /signature_or_registered_claim_invalid/],
+    ['expired', sign(rsa, { iat: now - 600, exp: now - 60 }), /signature_or_registered_claim_invalid/],
+    ['not yet valid (nbf)', sign(rsa, { nbf: now + 120 }), /signature_or_registered_claim_invalid/],
+    ['missing exp', jwt.sign({ iss: ISSUER, aud: CLIENT_ID, sub: 'subject-synthetic', iat: now, nonce: 'nonce-synthetic' }, rsa.privateKey, { algorithm: 'RS256', keyid: rsa.kid }), /invalid_time_claims/],
+    ['foreign azp', sign(rsa, { azp: 'other-client' }), /invalid_authorized_party/],
+    ['different nonce', sign(rsa, { nonce: 'replayed-nonce' }), /invalid_nonce/],
+  ];
+  for (const [name, token, code] of cases) {
+    await assert.rejects(verifier.verifyIdToken(token, 'nonce-synthetic'), code, name);
+  }
+  await assert.rejects(verifier.verifyIdToken(sign(rsa), undefined), /invalid_nonce/, 'nonce is mandatory');
+});
+
+test('JWKS rotation: an unseen kid refreshes the key set, rate-capped by the cooldown', async () => {
+  const rotated = keyFixture('RS256', 'rotated-key');
+  let published = [rsa];
+  let jwksFetches = 0;
+  const fetchImpl = (async (url: string | URL | Request) => {
+    if (String(url) === DISCOVERY_URL) return jsonResponse(discovery());
+    jwksFetches += 1;
+    return jsonResponse({ keys: published.map((key) => key.jwk) });
+  }) as typeof fetch;
+
+  const rotating = createOidcVerifier({ issuer: ISSUER, clientId: CLIENT_ID, fetchImpl, jwksRefreshCooldownMs: 0 });
+  await rotating.verifyIdToken(sign(rsa), 'nonce-synthetic');
+  published = [rsa, rotated];
+  const claims = await rotating.verifyIdToken(sign(rotated), 'nonce-synthetic');
+  assert.equal(claims.sub, 'subject-synthetic');
+  assert.equal(jwksFetches, 2, 'the rotated kid forced exactly one refresh inside the cache TTL');
+
+  jwksFetches = 0;
+  published = [rsa];
+  const capped = createOidcVerifier({ issuer: ISSUER, clientId: CLIENT_ID, fetchImpl });
+  await capped.verifyIdToken(sign(rsa), 'nonce-synthetic');
+  for (let i = 0; i < 5; i += 1) {
+    await assert.rejects(
+      capped.verifyIdToken(sign(keyFixture('RS256', `forged-kid-${i}`)), 'nonce-synthetic'),
+      /unknown_or_ambiguous_kid/,
+    );
+  }
+  assert.equal(jwksFetches, 1, 'unknown kids inside the cooldown never re-fetch the JWKS');
+});
+
 test('rejects redirects and oversized discovery, JWKS and tokens', async () => {
   const redirecting = verifierWith([rsa], {
     fetchImpl: (async () => new Response('', {

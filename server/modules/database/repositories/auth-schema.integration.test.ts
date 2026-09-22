@@ -114,6 +114,29 @@ test('userDb: createUser with role and getOwnerCount', async () => {
   });
 });
 
+test('userDb.setRoleIfUnchanged: compare-and-set that never touches an owner row', async () => {
+  await withIsolatedDatabase(() => {
+    const owner = userDb.createUser('owner-cas', 'hash', 'owner');
+    const member = userDb.createUser('member-cas', 'hash', 'user', owner.id);
+    const generationBefore = userDb.getRawById(member.id)?.authorization_generation;
+
+    assert.equal(userDb.setRoleIfUnchanged(member.id, 'user', 'admin'), true);
+    assert.equal(userDb.getRawById(member.id)?.role, 'admin');
+    assert.ok(
+      (userDb.getRawById(member.id)?.authorization_generation ?? 0) > (generationBefore ?? 0),
+      'a synced role bumps authorization_generation',
+    );
+    assert.equal(userDb.setRoleIfUnchanged(member.id, 'user', 'user'), false, 'stale expected role is refused');
+    assert.equal(userDb.getRawById(member.id)?.role, 'admin');
+
+    assert.equal(userDb.setRoleIfUnchanged(owner.id, 'owner', 'user'), false);
+    assert.equal(userDb.setRoleIfUnchanged(owner.id, 'admin', 'user'), false);
+    assert.equal(userDb.setRoleIfUnchanged(member.id, 'admin', 'owner' as never), false);
+    assert.equal(userDb.getRawById(owner.id)?.role, 'owner');
+    assert.equal(userDb.getRawById(member.id)?.role, 'admin');
+  });
+});
+
 test('userDb: disabled user is not returned by id/username lookups', async () => {
   await withIsolatedDatabase(() => {
     const u = userDb.createUser('temp', 'hash', 'user');

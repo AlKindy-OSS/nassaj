@@ -52,22 +52,9 @@
     "barAria": "上下文用量",
     "empty": "暂无令牌用量",
     "percentUsed": "已用 {{percent}} 真实窗口",
-    "tooltipUsed": "已用真实窗口：{{used}} / {{total}}",
     "tooltipCacheRead": "缓存读取：{{value}}",
     "popoverTitle": "上下文用量",
     "close": "关闭",
-    "levels": {
-      "safe": "低于建议压缩阈值",
-      "attention": "压缩阈值未知",
-      "warning": "已达到建议压缩阈值",
-      "critical": "已达到建议压缩阈值"
-    },
-    "nativeThreshold": "原生压缩阈值：{{value}} token",
-    "proposedThreshold": "建议压缩阈值：{{value}} token",
-    "thresholdUnknown": "压缩阈值未知",
-    "lastInput": "上次请求输入：{{value}} token（不是当前占用量）",
-    "pressureReached": "已达到建议压缩阈值",
-    "pressureBelow": "低于建议压缩阈值",
     "alerts": {
       "pressure": "已达到建议压缩阈值",
       "close": "已达到25万 token，建议考虑在新对话中继续。",

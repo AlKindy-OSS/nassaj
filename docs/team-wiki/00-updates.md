@@ -4,6 +4,61 @@
 
 ---
 
+## الإصدار 2.3.0.1 — إصلاح ربط Claude والتثبيت الجديد، وأساس دخول موحّد
+
+إصدار 2026-09-22 لاحق لإصدار 2.3.0.0 المنشور، يرفع مقطع البناء وحده. يجمع إصلاحين
+تلمسهما مباشرةً، وأساس دخول موحّد معطَّل افتراضياً.
+
+ما الذي ستلاحظه:
+
+- ربط حساب Claude صار تسجيل دخول كاملاً افتراضياً، فيقرأ الحصة ولا يتوقّف لاحقاً.
+  وإن كان ربطك جزئياً أو فارغاً فسترى الآن تنبيهاً صريحاً: «الربط غير مكتمل — أعد
+  الربط» مع زرّ لإعادة الربط، بدل ربط صامت قد يتعطّل دون إشعار.
+
+- التثبيت الجديد على عقدة صار يختم أرشيف النسخة المخدومة فلا يبقى ناقصاً، مع فحوص
+  تمهيدية إضافية قبل التحديث.
+
+- منتقي النماذج صار يعرض النماذج المتاحة فعلاً فقط ولا يقدّم كتالوجاً قديماً بعد
+  تغيّر الحالة، مع حفظ الاسم المستعار الذي اخترته عند التقاط السياق.
+
+- منبثقة استهلاك السياق صارت أصغر وأهدأ بصرياً، وانتقلت إدارة النماذج المحلية إلى
+  شبكة عدّة الوكلاء في الإعدادات لتناسق أوضح.
+
+- أساس دخول موحّد (SSO) دخل الكود لكنه **معطَّل افتراضياً**: لا يتغيّر شيء في شاشة
+  الدخول ما لم يُفعِّله المشغّل بإعداد صريح؛ وحتى حينها يبقى محكوماً بحارس
+  فاشل-الإغلاق. تفعيله قرار منفصل لكل عقدة.
+
+### English
+
+Release dated 2026-09-22, following the published 2.3.0.0 and advancing the build
+segment only. It bundles two directly visible fixes plus a single-sign-on
+groundwork that is disabled by default.
+
+What you will notice:
+
+- The Claude account link is now a full sign-in by default, so it reads usage and
+  does not silently stop working. If your link is partial or empty, you now see
+  an explicit "your link is incomplete — re-link" notice with a re-link button,
+  instead of a silent link that could fail without warning.
+
+- A fresh install on a node now seals the served archive so it is not left
+  incomplete, with extra preflight checks before an update.
+
+- The model picker now shows only the actually available models and no longer
+  serves a stale catalog after state changes, and it preserves the alias you
+  chose when the context is captured.
+
+- The context-usage popover is now smaller and visually quieter, and local-models
+  management has moved into the agents harness grid in Settings for clearer
+  consistency.
+
+- Single-sign-on (SSO) groundwork has landed but is **disabled by default**:
+  nothing changes on the login screen unless an operator enables it with explicit
+  configuration, and even then it stays behind a fail-closed guard. Enabling it
+  is a separate per-node decision.
+
+---
+
 ## الإصدار 2.3.0.0 — خوادم النماذج المحلية، ومسار تحديث أمتن
 
 إصدار 2026-09-21 لاحق لإصدار 2.2.0.0 المنشور، ويضمّ أيضاً تغييرات دورة 2.2.0.1
@@ -176,7 +231,7 @@ What you will notice:
   no longer preselected into any slot, and ticking one raises a warning that
   names it.
   What this **still does not** address: the black terminal itself on the
-  Rukhaimi node; the gate improvements above are diagnostic in their own
+  operator node; the gate improvements above are diagnostic in their own
   right and are not credited with fixing that failure.
 
 - Security fixes found in pre-release review:

@@ -1805,7 +1805,7 @@ app.use('/assets', (req, res, next) => {
 });
 // ADR-156 §3.1 (E1): the sealed node static overlay is mounted BEFORE
 // express.static(dist) and after every /api route, so a node-owned static site
-// (e.g. Rukhaimi's /hub) is served from config/overlay/ without a tracked-path
+// (e.g. a node operator's /hub) is served from config/overlay/ without a tracked-path
 // write. It serves only files in the owner-sealed manifest, opened O_NOFOLLOW
 // with a per-request digest check, under an enforced strict CSP; a corrupt
 // manifest disables the overlay and logs node_overlay_invalid without crashing.

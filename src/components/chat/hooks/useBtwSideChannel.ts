@@ -233,7 +233,7 @@ export function useBtwSideChannel({
     if (
       !activeBtw
       || activeBtw.status !== 'complete'
-      || activeBtw.answer.trim() === ''
+      || (activeBtw.answer ?? '').trim() === ''
       || activeBtw.forkStatus === 'forking'
     ) {
       return;

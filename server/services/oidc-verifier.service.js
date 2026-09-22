@@ -9,6 +9,9 @@ const TOKEN_RESPONSE_MAX_BYTES = 64 * 1024;
 const TOKEN_MAX_BYTES = 16 * 1024;
 const FETCH_TIMEOUT_MS = 5_000;
 const CACHE_TTL_MS = 5 * 60_000;
+// Minimum spacing between JWKS fetches triggered by an unseen kid, so key
+// rotation is picked up without letting forged kids flood the IdP.
+const JWKS_REFRESH_COOLDOWN_MS = 30_000;
 const MAX_JWKS_KEYS = 32;
 const MAX_REPLAY_ENTRIES = 10_000;
 const LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
@@ -266,6 +269,7 @@ export function createOidcVerifier({
   clientId,
   fetchImpl = globalThis.fetch,
   cacheTtlMs = CACHE_TTL_MS,
+  jwksRefreshCooldownMs = JWKS_REFRESH_COOLDOWN_MS,
 } = {}) {
   const trustedIssuer = parseExactHttpsIssuer(issuer);
   if (typeof clientId !== 'string' || clientId.length === 0 || clientId.length > 512) {
@@ -277,6 +281,7 @@ export function createOidcVerifier({
 
   let discoveryCache = null;
   let jwksCache = null;
+  let lastForcedJwksRefreshAt = 0;
   const replay = new Map();
 
   async function getDiscovery() {
@@ -297,9 +302,9 @@ export function createOidcVerifier({
     return value;
   }
 
-  async function getJwks(discovery) {
+  async function getJwks(discovery, { force = false } = {}) {
     const now = Date.now();
-    if (jwksCache && jwksCache.uri === discovery.jwks_uri && jwksCache.expiresAt > now) {
+    if (!force && jwksCache && jwksCache.uri === discovery.jwks_uri && jwksCache.expiresAt > now) {
       return jwksCache.keys;
     }
     const raw = await boundedFetchJson(
@@ -310,14 +315,29 @@ export function createOidcVerifier({
       'jwks_unavailable',
     );
     const keys = validateJwks(raw);
-    jwksCache = { uri: discovery.jwks_uri, keys, expiresAt: now + cacheTtlMs };
+    jwksCache = { uri: discovery.jwks_uri, keys, fetchedAt: now, expiresAt: now + cacheTtlMs };
     return keys;
+  }
+
+  /** Cached keys, refreshed once per cooldown when the kid is unseen (key rotation). */
+  async function keysForKid(discovery, kid) {
+    const keys = await getJwks(discovery);
+    if (keys.some((key) => key.kid === kid)) {
+      return keys;
+    }
+    const now = Date.now();
+    // Stamped before the await so concurrent and failing refreshes share one slot.
+    if (Math.max(jwksCache.fetchedAt, lastForcedJwksRefreshAt) + jwksRefreshCooldownMs > now) {
+      return keys;
+    }
+    lastForcedJwksRefreshAt = now;
+    return getJwks(discovery, { force: true });
   }
 
   async function verify(token, options) {
     const discovery = await getDiscovery();
     const header = decodeProtectedHeader(token);
-    const keys = await getJwks(discovery);
+    const keys = await keysForKid(discovery, header.kid);
     const key = selectVerificationKey(keys, header);
     let claims;
     try {

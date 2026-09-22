@@ -200,7 +200,6 @@ type PopoverProps = {
   closeLabel: string;
   dir: 'rtl' | 'ltr';
   level: RotLevel;
-  percentLabel: string;
   anchor: HTMLElement | null;
   onClose: () => void;
 };
@@ -213,7 +212,6 @@ function UsagePopover({
   closeLabel,
   dir,
   level,
-  percentLabel,
   anchor,
   onClose,
 }: PopoverProps) {
@@ -242,7 +240,7 @@ function UsagePopover({
     );
     const top = a.top - height - 8 >= 8 ? a.top - height - 8 : a.bottom + 8;
     setPos({ top: Math.max(8, Math.min(top, window.innerHeight - height - 8)), left });
-  }, [anchor, lines.length, cache.state, cache.scope, trailingLines.length]);
+  }, [anchor, lines.length, cache.state, trailingLines.length]);
 
   // Close on Escape key.
   useEffect(() => {
@@ -299,15 +297,15 @@ function UsagePopover({
         // نفس سطح القوائم المنبثقة في المُؤلِّف (مبدّل النموذج): rounded-xl و
         // border-border و bg-popover و shadow-xl — النبرة الملوّنة في النصّ لا
         // في الإطار، فلا يظهر صندوق أحمر/أخضر غريب عن بقية الطبقات.
-        className="fixed max-h-[calc(100dvh-1rem)] w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="fixed max-h-[calc(100dvh-1rem)] w-[min(15rem,calc(100vw-1rem))] overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
         // Stop pointer events from bubbling to overlay so the card itself doesn't close.
         onPointerDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
           {/* نقطة الحالة ثم العنوان بلون النصّ العادي — نفس عرف زرّ الوضع
               (chat⇄agent) في الصفّ نفسه: اللون إشارة صغيرة لا صبغة للعنوان. */}
-          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <span
               aria-hidden="true"
               className={`h-1.5 w-1.5 shrink-0 rounded-full bg-current ${LEVEL_ACCENT_CLASS[level]}`}
@@ -325,7 +323,7 @@ function UsagePopover({
         </div>
 
         {/* Body — one line per entry */}
-        <ul className="space-y-1.5 px-4 py-3 text-sm text-foreground" role="list">
+        <ul className="space-y-1 px-3 py-2 text-xs text-foreground" role="list">
           {lines.map((line, i) => (
             <li
               key={i}
@@ -340,25 +338,16 @@ function UsagePopover({
           ))}
         </ul>
 
-        <section aria-label={t('contextRot.cache.title')} className="border-t border-border/60 px-4 py-3 text-sm">
+        <section aria-label={t('contextRot.cache.title')} className="border-t border-border/60 px-3 py-2 text-xs">
           <h3 className="font-semibold text-foreground">{t('contextRot.cache.title')}</h3>
           <p className="mt-1 text-foreground" data-testid="cache-reuse">
             {cache.ratio !== null
               ? t('contextRot.cache.ratio', { percent: new Intl.NumberFormat(i18n.language, { style: 'percent', maximumFractionDigits: 0 }).format(cache.ratio) })
               : t(cache.state === 'empty' ? 'contextRot.cache.empty' : 'contextRot.cache.unknown')}
           </p>
-          {cache.scope && <p className="mt-1 text-muted-foreground">{t(`contextRot.cache.scope.${cache.scope}`)}{cache.historical ? ` — ${t('contextRot.cache.history')}` : ''}</p>}
           {cache.ratio !== null && <p className="mt-1 tabular-nums text-muted-foreground">{t('contextRot.cache.counts', { read: cache.read?.toLocaleString(i18n.language), input: cache.input?.toLocaleString(i18n.language) })}</p>}
-          {cache.source && <p className="mt-1 break-words text-muted-foreground">{t('contextRot.cache.source', { source: t(`contextRot.cache.sources.${cache.provider === 'claude' || cache.provider === 'codex' ? cache.provider : 'harness'}`) })}</p>}
-          {cache.observedAt && <p className="mt-1 text-muted-foreground">{t('contextRot.cache.observed', { time: new Date(cache.observedAt).toLocaleString(i18n.language) })}</p>}
-          <p className="mt-2 text-muted-foreground">{t('contextRot.cache.disclaimer')}</p>
         </section>
-        {trailingLines.length > 0 && <ul className="space-y-1.5 border-t border-border/60 px-4 py-3 text-sm text-muted-foreground">{trailingLines.map(line => <li key={line}>{line}</li>)}</ul>}
-
-        {/* Footer percentage bar */}
-        <div className="border-t border-border/40 px-4 pb-4 pt-2">
-          <p className="mb-1.5 text-xs text-muted-foreground">{percentLabel}</p>
-        </div>
+        {trailingLines.length > 0 && <ul className="space-y-1 border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">{trailingLines.map(line => <li key={line}>{line}</li>)}</ul>}
       </div>
     </div>,
     document.body,
@@ -383,13 +372,11 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
   const totalTokens = reading.window;
   const cumulativeUsed = reading.cumulative;
   const hasWindow = usedTokens !== null && totalTokens !== null;
-  const policyLines = [
-    reading.newSession !== null ? t('contextRot.cache.newSessionThreshold', { value: reading.newSession.toLocaleString(locale) }) : null,
-    reading.native !== null ? t('contextRot.nativeThreshold', { value: reading.native.toLocaleString(locale) }) : null,
-    reading.proposed !== null ? t(provider === 'claude' ? 'contextRot.cache.ownerThreshold' : 'contextRot.cache.experimentalThreshold', { value: reading.proposed.toLocaleString(locale) }) : t('contextRot.thresholdUnknown'),
-  ].filter(Boolean) as string[];
+  const thresholdLine = reading.proposed !== null
+    ? t(provider === 'claude' ? 'contextRot.cache.ownerThreshold' : 'contextRot.cache.experimentalThreshold',
+        { value: formatTokenCount(reading.proposed) })
+    : null;
   const trailingLines = [
-    reading.lastInput !== null ? t('contextRot.lastInput', { value: reading.lastInput.toLocaleString(locale) }) : null,
     cumulativeUsed !== null ? t('contextRot.coordinatorTotal', { value: cumulativeUsed.toLocaleString(locale) }) : null,
   ].filter(Boolean) as string[];
 
@@ -445,7 +432,6 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
 
     const emptyLines = [
       ...alertLines,
-      ...policyLines,
       usedTokens !== null
         ? `${usedTokens.toLocaleString(locale)} ${t('contextRot.label')}`
         : emptyLabel,
@@ -478,7 +464,6 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
             closeLabel={t('contextRot.close')}
             dir={dir}
             level={emptyLevel}
-            percentLabel={emptyLabel}
             anchor={triggerRef.current}
             onClose={handleClose}
           />
@@ -502,13 +487,9 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
 
   // Multi-line content — same data used in both native tooltip and popover.
   const tooltipLines = [
-    t('contextRot.tooltipUsed', {
-      used: usedTokens.toLocaleString(locale),
-      total: totalTokens.toLocaleString(locale),
-    }),
+    `${formatTokenCount(usedTokens)} / ${formatTokenCount(totalTokens)} · ${percentLabel}`,
     ...alertLines,
-    t(reading.proposed === null ? 'contextRot.thresholdUnknown' : alerts.includes('pressure') || alerts.includes('compact') || alerts.includes('close') ? 'contextRot.pressureReached' : 'contextRot.pressureBelow'),
-    ...policyLines,
+    thresholdLine,
   ].filter(Boolean) as string[];
 
   return (
@@ -554,7 +535,6 @@ export default function TokenUsageSummary({ usage, provider = '', modelId = null
           closeLabel={t('contextRot.close')}
           dir={dir}
           level={level}
-          percentLabel={t('contextRot.percentUsed', { percent: percentLabel })}
           anchor={triggerRef.current}
           onClose={handleClose}
         />

@@ -28,9 +28,13 @@
  *     no-redirect requests and short process-local caches.
  *   - id_token and logout_token signatures and registered OIDC claims are
  *     verified before any identity lookup or revocation side effect.
+ *   - Roles (ADR-064/069): the verified Zitadel PROJECT-SCOPED roles claim is
+ *     mapped by the shared external-role mapper on every login; owner is
+ *     local-only. The generic cross-project roles claim is never trusted.
  *
- * Gated by OIDC_ENABLED: every browser/IdP route returns 501 when the flag is
- * not exactly 'true'.
+ * Gated by oidcEnabled() (services/oidc-config.js): every browser/IdP route
+ * returns 501 unless OIDC_ENABLED is exactly 'true' AND OIDC_ROLE_PROJECT_ID is a
+ * valid project id (fail-closed — an unscoped role config disables OIDC).
  */
 
 import crypto from 'crypto';
@@ -53,6 +57,12 @@ import {
 import { clientIp } from '../utils/client-ip.js';
 import { oidcPkceStore } from '../services/oidc-pkce.store.js';
 import { oidcCodeStore } from '../services/oidc-code.store.js';
+import {
+  extractZitadelRoleNames,
+  hasZitadelRolesClaim,
+  syncExternalRole,
+} from '../services/external-role-mapper.js';
+import { oidcEnabled, roleProjectId } from '../services/oidc-config.js';
 import {
   createOidcVerifier,
   parseExactHttpsIssuer,
@@ -93,11 +103,6 @@ let verifierCache = null;
 // ---------------------------------------------------------------------------
 // Config helpers
 // ---------------------------------------------------------------------------
-
-/** Feature flag — every IdP/browser route is dark unless this is exactly 'true'. */
-function oidcEnabled() {
-  return process.env.OIDC_ENABLED === 'true';
-}
 
 /** The trusted issuer this RP accepts identities from (must equal id_token.iss). */
 function issuerUrl() {
@@ -300,7 +305,18 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
     }
 
     // getUserById returns only active (is_active=1, status='active') users.
-    const user = userDb.getUserById(identity.user_id);
+    const linkedUser = userDb.getUserById(identity.user_id);
+    // ADR-064/069: the verified role claim is an attestation; the shared mapper
+    // decides the local role (never owner, never demotes an owner). Roles are read
+    // ONLY from the project-scoped claim; claimPresent lets a demotion caused by a
+    // missing claim be audited distinctly from an unrecognized-role demotion.
+    const configuredProjectId = roleProjectId();
+    const user = linkedUser && syncExternalRole({
+      user: linkedUser,
+      externalRoles: extractZitadelRoleNames(claims, configuredProjectId),
+      provider: 'oidc',
+      claimPresent: hasZitadelRolesClaim(claims, configuredProjectId),
+    }, { userDb, auditLogDb });
     if (!user) {
       return res.status(401).json({ error: 'Linked account is unavailable' });
     }

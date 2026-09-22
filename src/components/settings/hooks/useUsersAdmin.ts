@@ -32,6 +32,28 @@ export type CreatedInvite = {
 
 type MutationResult = { success: true } | { success: false; error: string };
 
+export type SsoLinkFailure = 'invalid' | 'conflict' | 'not_found' | 'not_configured' | 'failed' | 'network';
+export type SsoLinkResult = { success: true } | { success: false; reason: SsoLinkFailure };
+
+// Mirrors MAX_SUBJECT_LENGTH in server/routes/oidc.js.
+export const SSO_SUBJECT_MAX_LENGTH = 255;
+
+/** Classifies a failed /api/auth/oidc/link call (server text is English-only). */
+function ssoLinkFailure(status: number): SsoLinkFailure {
+  switch (status) {
+    case 400:
+      return 'invalid';
+    case 404:
+      return 'not_found';
+    case 409:
+      return 'conflict';
+    case 500:
+      return 'not_configured';
+    default:
+      return 'failed';
+  }
+}
+
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
     const payload = (await response.json()) as { error?: string; message?: string };
@@ -193,6 +215,29 @@ export function useUsersAdmin(enabled: boolean) {
     [refresh],
   );
 
+  // SSO identity links (B-728). No list endpoint exists, so the tab cannot
+  // show who is linked; these only write.
+  const linkSsoIdentity = useCallback(
+    async (id: number, subject: string): Promise<SsoLinkResult> => {
+      try {
+        const res = await api.auth.oidc.link(id, subject);
+        return res.ok ? { success: true } : { success: false, reason: ssoLinkFailure(res.status) };
+      } catch {
+        return { success: false, reason: 'network' };
+      }
+    },
+    [],
+  );
+
+  const unlinkSsoIdentity = useCallback(async (id: number): Promise<SsoLinkResult> => {
+    try {
+      const res = await api.auth.oidc.unlink(id);
+      return res.ok ? { success: true } : { success: false, reason: 'failed' };
+    } catch {
+      return { success: false, reason: 'network' };
+    }
+  }, []);
+
   return {
     users,
     invites,
@@ -205,5 +250,7 @@ export function useUsersAdmin(enabled: boolean) {
     revokeInvite,
     resetPassword,
     deleteUser,
+    linkSsoIdentity,
+    unlinkSsoIdentity,
   };
 }

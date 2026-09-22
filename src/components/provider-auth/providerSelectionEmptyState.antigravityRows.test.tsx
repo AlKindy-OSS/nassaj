@@ -140,6 +140,7 @@ function renderPicker(catalog: Partial<Record<LLMProvider, ProviderModelsDefinit
       providerModelsLoading={false}
       providerModelsRefreshing={false}
       providerAuthStatus={authMap()}
+      onRefreshProviderModels={vi.fn().mockResolvedValue(undefined)}
       onHardRefreshProviderModels={noop}
       onRefreshAuthStatus={vi.fn().mockResolvedValue(undefined)}
       setInput={noop as unknown as React.Dispatch<React.SetStateAction<string>>}

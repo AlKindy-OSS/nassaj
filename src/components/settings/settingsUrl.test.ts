@@ -27,6 +27,20 @@ describe('settings URL destination', () => {
     });
   });
 
+  it('redirects the legacy ?settings=local-models deep link to agents + localModels', () => {
+    expect(readSettingsDestination('?settings=local-models')).toEqual({
+      tab: 'agents',
+      localModels: true,
+    });
+  });
+
+  it('reads ?settingsLocalModels=true on the agents tab', () => {
+    expect(readSettingsDestination('?settings=agents&settingsLocalModels=true')).toEqual({
+      tab: 'agents',
+      localModels: true,
+    });
+  });
+
   it('writes and clears only settings parameters', () => {
     window.history.replaceState(null, '', '/session/one?projectId=p1');
 
@@ -34,6 +48,16 @@ describe('settings URL destination', () => {
     expect(window.location.search).toBe(
       '?projectId=p1&settings=agents&settingsAgent=claude&settingsCategory=account',
     );
+
+    clearSettingsDestination();
+    expect(window.location.search).toBe('?projectId=p1');
+  });
+
+  it('writes settingsLocalModels and omits agent/category for the local-models card', () => {
+    window.history.replaceState(null, '', '/session/one?projectId=p1');
+
+    writeSettingsDestination({ tab: 'agents', localModels: true });
+    expect(window.location.search).toBe('?projectId=p1&settings=agents&settingsLocalModels=true');
 
     clearSettingsDestination();
     expect(window.location.search).toBe('?projectId=p1');

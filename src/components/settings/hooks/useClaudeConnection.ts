@@ -12,11 +12,14 @@ import { api } from '../../../utils/api';
  */
 export type ClaudeConnectionStatus = {
   connected: boolean;
+  /** B-1260: credential present but a partial link (see server incompleteLink). */
+  incompleteLink?: boolean;
   provider: 'claude';
 };
 
 type UseClaudeConnectionResult = {
   connected: boolean;
+  incompleteLink: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -33,6 +36,7 @@ type UseClaudeConnectionResult = {
  */
 export function useClaudeConnection(enabled = true): UseClaudeConnectionResult {
   const [connected, setConnected] = useState(false);
+  const [incompleteLink, setIncompleteLink] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +51,7 @@ export function useClaudeConnection(enabled = true): UseClaudeConnectionResult {
       }
       const payload = (await res.json()) as Partial<ClaudeConnectionStatus> | null;
       setConnected(payload?.connected === true);
+      setIncompleteLink(payload?.incompleteLink === true);
     } catch {
       setError('network');
     } finally {
@@ -60,5 +65,5 @@ export function useClaudeConnection(enabled = true): UseClaudeConnectionResult {
     }
   }, [enabled, refresh]);
 
-  return { connected, loading, error, refresh };
+  return { connected, incompleteLink, loading, error, refresh };
 }

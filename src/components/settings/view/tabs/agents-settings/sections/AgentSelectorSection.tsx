@@ -1,3 +1,5 @@
+import { Server } from 'lucide-react';
+
 import { cn } from '../../../../../../lib/utils';
 import SessionProviderLogo from '../../../../../llm-logo-provider/SessionProviderLogo';
 import type { AgentProvider } from '../../../../types/types';
@@ -84,6 +86,9 @@ export default function AgentSelectorSection({
   selectedAgent,
   onSelectAgent,
   agentContextById,
+  localModelsSelected,
+  localModelsLabel,
+  onSelectLocalModels,
 }: AgentSelectorSectionProps) {
   return (
     <div className="flex-shrink-0">
@@ -92,11 +97,12 @@ export default function AgentSelectorSection({
           panel tree below it, not one labelled region. A pressed toggle button
           states the same thing honestly — and keeps each tile a plain button
           for anything (assistive tech, tests) querying by role and name. */}
-      {/* تسعة وكلاء ظاهرون حالياً. الأعمدة الخمسة في العرض المتوسط تقسمهم
-          5+4 بدلاً من 8+1، وعند اتساع المساحة تظهر المجموعة في صف واحد. */}
+      {/* تسعة وكلاء ظاهرون حالياً + بطاقة «النماذج المحلية» في الأخير.
+          الأعمدة الخمسة في العرض المتوسط تقسمهم 5+5 عند عشرة، وعند اتساع
+          المساحة تظهر المجموعة في صف واحد. */}
       <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 xl:grid-cols-9">
         {agents.map((agent) => {
-          const isActive = selectedAgent === agent;
+          const isActive = !localModelsSelected && selectedAgent === agent;
           const isConnected = agentContextById[agent].authStatus.authenticated;
           // Coming-soon providers (T-1760): no status dot — they have no
           // connection state to report; the dot would always show "not connected"
@@ -173,6 +179,40 @@ export default function AgentSelectorSection({
             </button>
           );
         })}
+
+        {/* بطاقة «النماذج المحلية» — آخر عنصر في الشبكة. بلا نقطة حالة:
+            لا توصيل بمزوّد خارجي وحالتها (مُفعَّلة/معطَّلة) لا تُشتقّ هنا
+            بتكلفة منخفضة، فنقطة مضلِّلة أسوأ من غيابها. */}
+        {localModelsLabel && onSelectLocalModels && (
+          <button
+            type="button"
+            aria-pressed={Boolean(localModelsSelected)}
+            onClick={onSelectLocalModels}
+            aria-label={localModelsLabel}
+            title={localModelsLabel}
+            className={cn(
+              'relative flex min-w-0 touch-manipulation flex-col items-center justify-center gap-1.5',
+              'min-h-16 w-full rounded-md px-1.5 py-1.5 transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              localModelsSelected
+                ? 'bg-muted text-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )}
+          >
+            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center" aria-hidden="true">
+              <Server className="h-7 w-7" />
+            </span>
+            {/* اسم عربي — لا يحتاج dir=ltr لأنه نص عربي خالص لا علامة لاتينية. */}
+            <span
+              className={cn(
+                'w-full truncate text-center text-[13px] leading-tight',
+                localModelsSelected ? 'font-semibold' : 'font-medium',
+              )}
+            >
+              {localModelsLabel}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );

@@ -30,9 +30,10 @@ import { GLM_CARRIER_MODELS } from '@/modules/providers/shared/vendor/vendor-con
  * PROVIDER_MODELS_CACHE_VERSION, then update the two pinned values below.
  */
 const PINNED = {
-  // T-1575: prior entries carried a three-day expiresAt, so lowering the policy
-  // to one day must retire the file rather than waiting out the old deadline.
-  cacheVersion: 5,
+  // B-1283: bumped to 6 alongside the degraded-fallback flagging in the
+  // cursor/opencode/hermes catalog adapters (the carrier fingerprint is
+  // unchanged, so this pin tracks the version-only bump).
+  cacheVersion: 6,
   cacheTtlMs: 24 * 60 * 60 * 1000,
   // sha256 of the canonical JSON of GLM_CARRIER_MODELS at version 2 ({'glm-5.2'}).
   carrierFingerprint: crypto

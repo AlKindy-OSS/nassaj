@@ -41,8 +41,28 @@ test('hung native control request is bounded and leaves unavailable telemetry', 
   assert.equal(snapshot.usedTokens, null);
 });
 
-test('control model identity supersedes a preceding response and missing native identity disables occupancy', () => {
+test('caller-supplied identity is preserved; control model does not override it; missing control model still blocks occupancy', () => {
+  // B-1295: control.model ('model-b') must not overwrite a provided identity.
   const next = claudeContextSnapshot({ model: 'model-b', totalTokens: 50, maxTokens: 200000 }, identity);
-  assert.equal(next.modelId, 'model-b');
+  assert.equal(next.modelId, 'claude-model-a');  // identity wins, not control.model
+  assert.equal(next.windowTokens, 200000);         // window still read from control
+  assert.equal(next.usageKind, 'native_reported_context');
+  // When no identity is provided, control.model may populate it.
+  const noId = claudeContextSnapshot({ model: 'model-b', totalTokens: 50, maxTokens: 200000 }, { ...identity, modelId: null });
+  assert.equal(noId.modelId, 'model-b');
   assert.equal(claudeContextSnapshot({ totalTokens: 50, maxTokens: 200000 }, identity).usageKind, 'unknown');
+});
+
+test('picker alias identity survives getContextUsage round-trip (B-1295)', async () => {
+  // The SDK returns the native model id ('claude-opus-5') but the caller passes
+  // the picker alias ('opus[1m]').  The snapshot must carry the alias so that
+  // contextUsagePresentation can match it against sessionCurrentModel.
+  const aliasIdentity = { sessionId: 'session-x', modelId: 'opus[1m]' };
+  const snapshot = await readClaudeContextSnapshot(
+    { getContextUsage: async () => ({ model: 'claude-opus-5', totalTokens: 150_000, maxTokens: 1_048_576 }) },
+    aliasIdentity,
+  );
+  assert.equal(snapshot.modelId, 'opus[1m]');
+  assert.equal(snapshot.windowTokens, 1_048_576);
+  assert.equal(snapshot.usageKind, 'native_reported_context');
 });

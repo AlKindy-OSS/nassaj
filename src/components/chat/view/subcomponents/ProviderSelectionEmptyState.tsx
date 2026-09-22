@@ -152,6 +152,8 @@ type ProviderSelectionEmptyStateProps = {
   providerModelsLoading: boolean;
   providerModelsRefreshing: boolean;
   providerAuthStatus: ProviderAuthStatusMap;
+  /** إعادة تحميل كتالوج النماذج بدون bypassCache — يُستدعى عند فتح المنتقي. */
+  onRefreshProviderModels: () => Promise<void>;
   onHardRefreshProviderModels: () => void;
   /** @param force When true, bypasses the 30-second TTL on the caller side. */
   onRefreshAuthStatus: (force?: boolean) => Promise<void>;
@@ -272,6 +274,7 @@ export default function ProviderSelectionEmptyState({
   providerModelsLoading,
   providerModelsRefreshing,
   providerAuthStatus,
+  onRefreshProviderModels,
   onHardRefreshProviderModels,
   onRefreshAuthStatus,
   setInput,
@@ -322,15 +325,26 @@ export default function ProviderSelectionEmptyState({
     });
   }, []);
 
-  // Trigger a refresh of auth status when the dialog opens (non-forced: TTL
-  // applies here because opening the picker is not an explicit user refresh).
+  // Trigger a refresh when the dialog opens (non-forced: TTL applies because
+  // opening the picker is not an explicit user refresh). Auth status and vendor
+  // keys are refreshed as before; the model catalog is also refreshed so the
+  // user sees an up-to-date list without pressing the manual refresh button.
+  // The catalog call is ordinary (no bypassCache): if the server cache is warm
+  // it returns instantly; if it is stale it serves the old entry and reloads in
+  // the background (stale-while-revalidate). `refreshInFlightRef` blocks
+  // concurrent calls — e.g. rapid open/close — without duplicating that guard.
   useEffect(() => {
     if (!dialogOpen) return;
     if (refreshInFlightRef.current) return;
     refreshInFlightRef.current = true;
-    Promise.all([onRefreshAuthStatus(), refreshVendorKeys()]).finally(() => {
-      refreshInFlightRef.current = false;
-    });
+    Promise.all([onRefreshProviderModels(), onRefreshAuthStatus(), refreshVendorKeys()])
+      .catch(() => {
+        // Each individual refresh handles its own errors internally; swallow here
+        // to keep the in-flight guard reset even when one function rejects.
+      })
+      .finally(() => {
+        refreshInFlightRef.current = false;
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialogOpen]);
 

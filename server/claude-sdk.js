@@ -3962,9 +3962,15 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       }
       // A single native control request at the result boundary; no model inference or polling.
       if (message.type === 'result' && !message.parent_tool_use_id) {
+        // B-1295: use the picker alias (sdkOptions.model) as the snapshot identity
+        // so it matches sessionCurrentModel on the client (both come from the same
+        // resolveResumeModel source). Fall back to the native contextModelId only
+        // when sdkOptions.model is the 'default' sentinel (no resolved model).
+        const snapshotModelId = (sdkOptions.model && sdkOptions.model !== CLAUDE_FALLBACK_MODELS.DEFAULT
+          ? sdkOptions.model : contextModelId) || null;
         const contextSnapshot = await readClaudeContextSnapshot(queryInstance, {
           sessionId: capturedSessionId || sessionId || null,
-          modelId: contextModelId,
+          modelId: snapshotModelId,
         });
         sendAndBuffer(createNormalizedMessage({ kind: 'status', text: 'token_budget',
           tokenBudget: { used: contextSnapshot.usageKind === 'native_reported_context' ? contextSnapshot.usedTokens : null,

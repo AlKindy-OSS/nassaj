@@ -11,7 +11,8 @@ import { readServerErrorCode } from '../utils/serverErrorMessage';
 import { userMessageImages } from '../utils/userMessageImages';
 
 function formatToolResultContent(content: unknown): string {
-  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  const text =
+    content == null ? '' : typeof content === 'string' ? content : (JSON.stringify(content) ?? '');
   const toolUseErrorMatch = /^<tool_use_error>([\s\S]*)<\/tool_use_error>$/.exec(text.trim());
   return toolUseErrorMatch ? toolUseErrorMatch[1] : text;
 }

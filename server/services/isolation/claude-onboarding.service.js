@@ -45,12 +45,14 @@ function asObject(value) {
 }
 
 /**
- * True if the user's isolated settings.json declares an Anthropic key/token in
- * its `env` block. Missing/unreadable settings → false (not connected).
+ * True if the user's isolated settings.json declares a FULL Anthropic API
+ * key/token in its `env` block. Missing/unreadable settings → false.
  *
- * Mirrors claude-auth.provider.ts: any of `ANTHROPIC_API_KEY`,
- * `ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` (the key a
- * `claude setup-token` result is stored under, B-1075) counts as connected.
+ * B-1260: a real `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` is a complete
+ * credential and counts as connected. The inference-only `CLAUDE_CODE_OAUTH_TOKEN`
+ * (a `claude setup-token` result, B-1075) is DELIBERATELY excluded here — it is a
+ * partial link, reported through `hasSettingsSetupTokenOnly` as "incomplete"
+ * rather than folded into "connected".
  */
 async function hasSettingsCredential(claudeDir) {
   try {
@@ -62,8 +64,7 @@ async function hasSettingsCredential(claudeDir) {
     }
     return Boolean(
       nonEmptyString(env.ANTHROPIC_API_KEY)
-      || nonEmptyString(env.ANTHROPIC_AUTH_TOKEN)
-      || nonEmptyString(env.CLAUDE_CODE_OAUTH_TOKEN),
+      || nonEmptyString(env.ANTHROPIC_AUTH_TOKEN),
     );
   } catch {
     return false;
@@ -83,28 +84,85 @@ async function hasSettingsCredential(claudeDir) {
  * توكنُ تحديثٍ لم يمضِ ميقاتُه — والموتُ انقطاعُهما معاً. والميقاتُ المنقضي
  * وحده لا يقتل: الـCLI لا يستعمله بوّابةً، ودورُ العضو يعمل حتى ينفد الوصول.
  */
-async function hasOauthCredential(claudeDir) {
+/**
+ * B-1260 — the scopes a FULL Claude subscription link carries. A stored `scopes`
+ * array that is present but omits the profile scope is an inference-only link.
+ * Mirror of FULL_LINK_PROFILE_SCOPES in claude-auth.provider.ts.
+ */
+const FULL_LINK_PROFILE_SCOPES = ['profile', 'user:profile'];
+
+/**
+ * Classifies a `.credentials.json` claudeAiOauth block into a link quality —
+ * the JS mirror of `classifyOauthLink` in claude-auth.provider.ts, kept in
+ * parity by claude-onboarding.test.ts + claude-auth.provider.test.ts.
+ *
+ * @param {Record<string, unknown>|null} oauth
+ * @param {number} now
+ * @returns {'none'|'expired'|'incomplete'|'linked'}
+ */
+function classifyOauthLink(oauth, now) {
+  const accessToken = nonEmptyString(oauth?.accessToken);
+  if (!accessToken) return 'none';
+
+  // الفحصُ الصريح للنوع مقصود: `!expiresAt` كان يقرأ الختم الصفري «بلا انتهاء».
+  const expiresAt = typeof oauth?.expiresAt === 'number' ? oauth.expiresAt : undefined;
+  const linkExpiresAt = typeof oauth?.refreshTokenExpiresAt === 'number'
+    ? oauth.refreshTokenExpiresAt
+    : undefined;
+  const refreshToken = nonEmptyString(oauth?.refreshToken);
+
+  const accessAlive = expiresAt === undefined || now < expiresAt;
+  const refreshAlive = Boolean(refreshToken)
+    && (linkExpiresAt === undefined || now < linkExpiresAt);
+
+  if (!accessAlive && !refreshAlive) return 'expired';
+  // B-1260: بلا توكن تحديث لا يُنعَش الاعتماد فينكسر — ربطٌ ناقص لا كامل.
+  if (!refreshToken) return 'incomplete';
+
+  const scopes = Array.isArray(oauth?.scopes) ? oauth.scopes : null;
+  if (scopes) {
+    const hasProfile = scopes.some(
+      (s) => typeof s === 'string' && FULL_LINK_PROFILE_SCOPES.includes(s),
+    );
+    if (!hasProfile) return 'incomplete';
+  }
+
+  return 'linked';
+}
+
+/**
+ * The OAuth link quality inside the user's isolated `.credentials.json`
+ * ('none' when missing/unreadable). See classifyOauthLink.
+ *
+ * @param {string} claudeDir
+ * @returns {Promise<'none'|'expired'|'incomplete'|'linked'>}
+ */
+async function oauthLinkQuality(claudeDir) {
   try {
     const content = await readFile(path.join(claudeDir, '.credentials.json'), 'utf8');
     const creds = asObject(JSON.parse(content));
     const oauth = asObject(creds?.claudeAiOauth);
-    const accessToken = nonEmptyString(oauth?.accessToken);
-    if (!accessToken) {
-      return false;
-    }
-    // الفحصُ الصريح للنوع مقصود: `!expiresAt` كان يقرأ الختم الصفري «بلا انتهاء».
-    const expiresAt = typeof oauth?.expiresAt === 'number' ? oauth.expiresAt : undefined;
-    const linkExpiresAt = typeof oauth?.refreshTokenExpiresAt === 'number'
-      ? oauth.refreshTokenExpiresAt
-      : undefined;
-    const refreshToken = nonEmptyString(oauth?.refreshToken);
-    const now = Date.now();
+    return classifyOauthLink(oauth, Date.now());
+  } catch {
+    return 'none';
+  }
+}
 
-    const accessAlive = expiresAt === undefined || now < expiresAt;
-    const refreshAlive = Boolean(refreshToken)
-      && (linkExpiresAt === undefined || now < linkExpiresAt);
-
-    return accessAlive || refreshAlive;
+/**
+ * True if the user's isolated settings.json carries the inference-only
+ * `CLAUDE_CODE_OAUTH_TOKEN` (setup-token) and NO full API key. B-1260: this
+ * works for a turn but is a PARTIAL link (no usage/profile), so the card shows
+ * "incomplete link" rather than plain "connected".
+ */
+async function hasSettingsSetupTokenOnly(claudeDir) {
+  try {
+    const content = await readFile(path.join(claudeDir, 'settings.json'), 'utf8');
+    const settings = asObject(JSON.parse(content));
+    const env = asObject(settings?.env);
+    if (!env) return false;
+    const hasApiKey = nonEmptyString(env.ANTHROPIC_API_KEY)
+      || nonEmptyString(env.ANTHROPIC_AUTH_TOKEN);
+    return !hasApiKey && Boolean(nonEmptyString(env.CLAUDE_CODE_OAUTH_TOKEN));
   } catch {
     return false;
   }
@@ -134,14 +192,29 @@ export function resolveClaudeStatusDir(userId, isolated) {
  * Reports whether `userId` has registered a Claude credential in the config dir
  * their spawns resolve to (isolated dir, or the operator's under 'shared').
  *
+ * B-1260: distinguishes a FULL link (`connected: true`) from a PARTIAL one
+ * (`connected: false, incompleteLink: true`) — an inference-only setup-token, or
+ * a `.credentials.json` with no refresh token (or inference-only scopes). The
+ * card then shows "incomplete link — re-link" instead of a false "connected".
+ *
  * @param {string|number} userId authenticated user id
  * @param {{ isolated?: boolean }} [options] test seam for the sharing policy
- * @returns {Promise<{ connected: boolean, provider: 'claude' }>}
+ * @returns {Promise<{ connected: boolean, incompleteLink: boolean, provider: 'claude' }>}
  */
 export async function getClaudeConnectionStatus(userId, options = {}) {
   const isolated = options.isolated ?? isProviderIsolated('claude');
   const claudeDir = resolveClaudeStatusDir(userId, isolated);
-  const connected =
-    (await hasSettingsCredential(claudeDir)) || (await hasOauthCredential(claudeDir));
-  return { connected, provider: 'claude' };
+
+  const fullApiKey = await hasSettingsCredential(claudeDir);
+  const oauthQuality = await oauthLinkQuality(claudeDir);
+  if (fullApiKey || oauthQuality === 'linked') {
+    return { connected: true, incompleteLink: false, provider: 'claude' };
+  }
+
+  const setupTokenOnly = await hasSettingsSetupTokenOnly(claudeDir);
+  if (oauthQuality === 'incomplete' || setupTokenOnly) {
+    return { connected: false, incompleteLink: true, provider: 'claude' };
+  }
+
+  return { connected: false, incompleteLink: false, provider: 'claude' };
 }
