@@ -89,7 +89,9 @@ describe('SidebarProjectItem — زر قائمة المشروع', () => {
     const toggle = container.querySelector('[aria-expanded]')!;
     const pathDescription = document.getElementById(toggle.getAttribute('aria-describedby')!);
     expect(pathDescription?.textContent).toBe(project.fullPath);
-    expect(toggle.getAttribute('title')).toContain(project.fullPath);
+    // اسم المشروع والشعار يعرضان الآن Tooltip مخصَّصاً بدل title الأصلي على
+    // زر التوسيع، فلا تظهر فقاعتان متراكبتان عند التحويم (نفس نمط b449ad002).
+    expect(toggle.getAttribute('title')).toBeNull();
     fireEvent.contextMenu(toggle, {
       clientX: window.innerWidth - 1,
       clientY: window.innerHeight - 1,

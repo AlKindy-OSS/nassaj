@@ -534,6 +534,10 @@
       "showSearchAndArchive": {
         "label": "検索とアーカイブ切替を表示",
         "description": "プロジェクト一覧の上部に検索欄とアーカイブ切替の行を表示します"
+      },
+      "showHardwareUsage": {
+        "label": "ハードウェア使用状況を表示",
+        "description": "サイドバーにCPU・メモリ・ディスク使用率を表示"
       }
     },
     "codeHighlighting": {

@@ -498,7 +498,8 @@
       "analyzing": "分析中",
       "working": "工作中",
       "computing": "计算中",
-      "reasoning": "推理中"
+      "reasoning": "推理中",
+      "waitingPermission": "等待授权"
     },
     "state": {
       "live": "实时",

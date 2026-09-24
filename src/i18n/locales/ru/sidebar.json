@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "Загрузка ЦП",
-    "memoryUsage": "Использование памяти"
+    "memoryUsage": "Использование памяти",
+    "hardwareToggleCollapsed": "Показать/скрыть использование оборудования"
   },
   "branding": {
     "openSource": "Открытый исходный код"

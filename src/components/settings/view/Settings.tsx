@@ -284,6 +284,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
                   showSidebarSearch={uiPreferences.showSidebarSearch}
                   onShowSidebarSearchChange={(value) => setUiPreference('showSidebarSearch', value)}
+                  showHardwareUsage={uiPreferences.showHardwareUsage}
+                  onShowHardwareUsageChange={(value) => setUiPreference('showHardwareUsage', value)}
                   codeHighlightScope={uiPreferences.codeHighlightScope}
                   onCodeHighlightScopeChange={(value) => setUiPreference('codeHighlightScope', value)}
                 />

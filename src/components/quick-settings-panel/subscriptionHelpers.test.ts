@@ -62,6 +62,13 @@ describe('resolveRowState — an unpriceable card never becomes a number', () =>
     assert.deepEqual(resolveRowState(row({ metered: true })), { kind: 'amount', metered: true, partial: false });
   });
 
+  it('does not infer a subscription when authentication metering is unknown', () => {
+    assert.deepEqual(
+      resolveRowState(row({ metered: null, reason: 'authentication check unavailable' })),
+      { kind: 'unavailable', reason: 'authentication check unavailable' },
+    );
+  });
+
   it('marks complete=false as partial', () => {
     const state = resolveRowState(row({ complete: false, unpricedModels: ['some-new-model'] }));
     assert.deepEqual(state, { kind: 'amount', metered: false, partial: true });

@@ -22,6 +22,7 @@ import {
 import type { TFunction } from 'i18next';
 
 import ProjectBusyDot from '../../../../shared/view/ProjectBusyDot';
+import { Tooltip } from '../../../../shared/view/ui';
 import { prefersReducedMotion } from '../../../../lib/motion';
 import { cn } from '../../../../lib/utils';
 import { api } from '../../../../utils/api';
@@ -213,6 +214,23 @@ export default function SidebarProjectItem({
 
   const toggleProject = () => onToggleProject(project.projectId);
   const toggleStarProject = () => onToggleStarProject(project.projectId);
+
+  /* اسم المشروع وشعاره يعرضان الآن Tooltip المخصَّص بدل title الأصلي (نفس نمط
+     b449ad002)، فلا تظهر فقاعتان معاً. الاسم/الشعار يقعان داخل صفّ
+     `pointer-events-none` (زر التوسيع المطلق تحته يستقبل الأحداث فعلياً)، لذا
+     يفعّلان `pointer-events-auto` صراحةً ليصل التحويم إليهما، وبالتبعية
+     يلتقطان النقر بدل تمريره للزرّ أسفلهما — فيُعاد تنفيذ toggleProject هنا
+     كي لا يفقد النقر على الاسم أثر توسيع/طيّ البطاقة. في وضع التحديد الجماعي
+     النقر يُترك يصعد إلى صفّ البطاقة الذي يتولّى التبديل بدلاً منه. */
+  const projectPathTooltip = (
+    <div className="flex flex-col gap-0.5">
+      <span className="font-semibold">{project.displayName}</span>
+      <span dir="ltr" className="block text-start opacity-80">{project.fullPath}</span>
+    </div>
+  );
+  const handleProjectIdentityClick = () => {
+    if (!isBulkProjectSelection) toggleProject();
+  };
 
   /* أفعال المشروع (تسمية/مفضّلة/حذف) انتقلت من أيقونات على الصفّ إلى قائمة
      تُفتح بزرّ الفأرة الأيمن على اسم المشروع — وبزرّ ⋮ على اللمس، إذ لا زرّ
@@ -460,7 +478,6 @@ export default function SidebarProjectItem({
           {!isEditing && !bulkSelectionKind && (
             <button
               type="button"
-              title={`${project.displayName}\n${project.fullPath}`}
               aria-describedby={`project-path-${project.projectId}`}
               aria-expanded={isExpanded}
               aria-controls={projectSessionsId}
@@ -499,12 +516,20 @@ export default function SidebarProjectItem({
                   الصفّ. الحرف الأول بديلٌ ضمني — لا نرسم مربّعاً فارغاً
                   للمشاريع بلا شعار كي لا يدفع كل صفّ عرضاً لا يحمل معلومة. */}
               {logoUrl && (
-                <img
-                  src={logoUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="h-6 w-6 flex-shrink-0 object-contain"
-                />
+                <Tooltip
+                  content={projectPathTooltip}
+                  position="bottom"
+                  multiline
+                  wrapperClassName="pointer-events-auto flex-shrink-0"
+                >
+                  <img
+                    src={logoUrl}
+                    alt=""
+                    aria-hidden="true"
+                    className="h-6 w-6 flex-shrink-0 cursor-pointer object-contain"
+                    onClick={handleProjectIdentityClick}
+                  />
+                </Tooltip>
               )}
 
               <div className="min-w-0 flex-1">
@@ -539,12 +564,19 @@ export default function SidebarProjectItem({
                     <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
                       {/* يسبق الزر الاسم في اتجاه RTL، فيظهر مباشرةً على يمين
                           العنوان. يبقى في هذا السطر كي لا يهبط إلى المسار. */}
-                      <div
-                        className="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-[color:var(--project-foreground,hsl(var(--foreground)))]"
-                        title={project.displayName}
+                      <Tooltip
+                        content={projectPathTooltip}
+                        position="bottom"
+                        multiline
+                        wrapperClassName="min-w-0 pointer-events-auto"
                       >
-                        {project.displayName}
-                      </div>
+                        <div
+                          className="min-w-0 cursor-pointer truncate whitespace-nowrap text-sm font-semibold text-[color:var(--project-foreground,hsl(var(--foreground)))]"
+                          onClick={handleProjectIdentityClick}
+                        >
+                          {project.displayName}
+                        </div>
+                      </Tooltip>
                       <ProjectBusyDot sessionIds={sessionIds} className="ms-1 flex-shrink-0" />
                       {/* الرقم وحده: العبارة الكاملة في `title` وفي نصّ مخفيّ
                           لقارئ الشاشة، فلا يفقد أحدٌ المعنى ولا يدفع السطر ثمن
@@ -556,23 +588,32 @@ export default function SidebarProjectItem({
                         {totalSessionCount}
                         <span className="sr-only"> {sessionCountLabel}</span>
                       </span>
-                      {commitsAhead !== null && (
-                        <span
-                          data-project-push-reminder
-                          role="img"
-                          aria-label={t('projects.pushReminder', {
-                            count: commitsAhead,
-                            defaultValue: '{{count}} commits ready to push',
-                          })}
-                          title={t('projects.pushReminder', {
-                            count: commitsAhead,
-                            defaultValue: '{{count}} commits ready to push',
-                          })}
-                          className="flex flex-shrink-0 items-center text-[color:var(--success)] [@media(max-width:259px)]:hidden"
-                        >
-                          <GitCommitHorizontal aria-hidden="true" className="h-3 w-3" />
-                        </span>
-                      )}
+                      {commitsAhead !== null && (() => {
+                        const pushReminderLabel = t('projects.pushReminder', {
+                          count: commitsAhead,
+                          defaultValue: '{{count}} commits ready to push',
+                        });
+                        return (
+                          <Tooltip
+                            content={pushReminderLabel}
+                            position="bottom"
+                            tapToToggle
+                            keyboard
+                            wrapperClassName="pointer-events-auto flex-shrink-0 [@media(max-width:259px)]:hidden"
+                          >
+                            <span
+                              data-project-push-reminder
+                              role="img"
+                              aria-label={pushReminderLabel}
+                              className="flex items-center text-[color:var(--success)]"
+                              onClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                            >
+                              <GitCommitHorizontal aria-hidden="true" className="h-3 w-3" />
+                            </span>
+                          </Tooltip>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

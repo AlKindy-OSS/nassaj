@@ -114,7 +114,8 @@
   },
   "systemStats": {
     "cpuUsage": "CPU-Auslastung",
-    "memoryUsage": "Speicherauslastung"
+    "memoryUsage": "Speicherauslastung",
+    "hardwareToggleCollapsed": "Hardware-Auslastung ein-/ausblenden"
   },
   "branding": {
     "openSource": "Open Source"

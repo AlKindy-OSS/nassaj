@@ -534,6 +534,10 @@
       "showSearchAndArchive": {
         "label": "Arama ve arşiv anahtarını göster",
         "description": "Projeler listesinin üstünde arama alanı ile arşiv anahtarı satırını göster"
+      },
+      "showHardwareUsage": {
+        "label": "Donanım kullanımını göster",
+        "description": "Kenar çubuğunda CPU, bellek ve disk kullanımı"
       }
     },
     "codeHighlighting": {

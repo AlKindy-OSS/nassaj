@@ -1,14 +1,19 @@
-/** Validated display values; last-request input is never treated as current occupancy. */
+/** Validated display values; transcript input is surfaced as a ring estimate when no live
+ *  observation is available, but is never presented as current native-context occupancy. */
 export function contextUsagePresentation(usage: Record<string, unknown> | null, provider: string, sessionId: string | null, modelId: string | null) {
   const candidate = usage?.contextSnapshot;
   const snapshot = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : null;
-  const valid = snapshot?.version === 1 && snapshot.provider === provider
+  const identityValid = snapshot?.version === 1 && snapshot.provider === provider
     && Boolean(sessionId && modelId) && snapshot.sessionId === sessionId && snapshot.modelId === modelId
-    && typeof snapshot.source === 'string' && snapshot.source.length > 0
-    && typeof snapshot.observedAt === 'string' && Number.isFinite(Date.parse(snapshot.observedAt));
+    && typeof snapshot.source === 'string' && snapshot.source.length > 0;
+  const valid = identityValid
+    && typeof snapshot?.observedAt === 'string' && Number.isFinite(Date.parse(snapshot?.observedAt as string));
   const current = valid && snapshot?.usageKind === 'native_reported_context';
-  const used = current ? finiteCount(snapshot?.usedTokens) : null;
-  const window = valid ? positiveCount(snapshot?.windowTokens) : null;
+  // A transcript snapshot (observedAt absent) whose usageKind is last_request_input carries
+  // the last request's input tokens — the best available context-size estimate for past sessions.
+  const transcriptEstimate = identityValid && !valid && snapshot?.usageKind === 'last_request_input';
+  const used = current || transcriptEstimate ? finiteCount(snapshot?.usedTokens) : null;
+  const window = valid || transcriptEstimate ? positiveCount(snapshot?.windowTokens) : null;
   const native = valid ? positiveCount(snapshot?.nativeCompactTokens) : null;
   const suppliedProposed = valid ? positiveCount(snapshot?.proposedCompactTokens) : null;
   const proposed = provider === 'claude' && valid ? 150_000

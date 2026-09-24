@@ -1,3 +1,8 @@
+## 2.3.0.4 — 2026-09-24
+
+تحسين حالات المزوّد وخيار عرض استهلاك العتاد والصور والقوائم.
+Improve provider status localization, optional hardware usage, images and menus.
+
 # Changelog
 
 All notable changes to Nassaj will be documented in this file.

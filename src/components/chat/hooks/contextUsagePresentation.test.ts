@@ -12,6 +12,14 @@ describe('context usage presentation provenance', () => {
   it('does not treat last-request input as current occupancy', () => {
     expect(read(nativeSnapshot({ usageKind: 'last_request_input' }))).toMatchObject({ used: null, lastInput: 120_000 });
   });
+  it('surfaces transcript input tokens as a ring estimate when observedAt is absent', () => {
+    // server/index.js sets observedAt=null for Claude sessions restored from transcript
+    // (commit 7855652d5). The ring must show a percentage rather than '?' for past sessions.
+    const transcript = nativeSnapshot({ usageKind: 'last_request_input', observedAt: null });
+    expect(read(transcript)).toMatchObject({ used: 120_000, window: 240_000 });
+    // A null observedAt on a live kind (native_reported_context) stays fully invalid.
+    expect(read(nativeSnapshot({ observedAt: null }))).toMatchObject({ used: null, window: null });
+  });
   it('never trusts a legacy or cumulative-only counter', () => {
     expect(contextUsagePresentation({ used: 160_000, total: 258_400, cumulativeUsed: 20_000_000 }, 'codex', 's1', 'm1')).toMatchObject({ used: null, window: null, cumulative: 20_000_000 });
   });

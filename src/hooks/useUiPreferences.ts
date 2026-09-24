@@ -57,6 +57,10 @@ type UiPreferences = {
   // Whether to show the search field and archive toggle row in the sidebar.
   // Default: true (visible). Can be hidden via Appearance settings.
   showSidebarSearch: boolean;
+  // Whether to show the hardware usage widget (CPU/RAM/DISK/SWAP/tmp) in both
+  // the expanded sidebar footer and the collapsed sidebar rail. When false,
+  // polling stops entirely. Default: true (visible, unchanged behaviour).
+  showHardwareUsage: boolean;
   // How many languages the code highlighter knows: 'core' (10, statically
   // bundled), 'extended' (+10, fetched on demand) or 'full' (~300, fetched on
   // demand). Only 'core' ships in the startup bundle — see src/syntax/.
@@ -105,6 +109,7 @@ const DEFAULTS: UiPreferences = {
   tabsDisplayMode: 'full',
   tabsIconOnly: false,
   showSidebarSearch: true,
+  showHardwareUsage: true,
   codeHighlightScope: DEFAULT_CODE_HIGHLIGHT_SCOPE,
 };
 

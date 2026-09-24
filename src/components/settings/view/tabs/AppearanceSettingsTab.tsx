@@ -42,6 +42,8 @@ type AppearanceSettingsTabProps = {
   onCodeEditorFontSizeChange: (value: string) => void;
   showSidebarSearch: boolean;
   onShowSidebarSearchChange: (value: boolean) => void;
+  showHardwareUsage: boolean;
+  onShowHardwareUsageChange: (value: boolean) => void;
   codeHighlightScope: CodeHighlightScope;
   onCodeHighlightScopeChange: (value: CodeHighlightScope) => void;
 };
@@ -57,6 +59,8 @@ export default function AppearanceSettingsTab({
   onCodeEditorFontSizeChange,
   showSidebarSearch,
   onShowSidebarSearchChange,
+  showHardwareUsage,
+  onShowHardwareUsageChange,
   codeHighlightScope,
   onCodeHighlightScopeChange,
 }: AppearanceSettingsTabProps) {
@@ -176,6 +180,17 @@ export default function AppearanceSettingsTab({
                 checked={showSidebarSearch}
                 onChange={onShowSidebarSearchChange}
                 ariaLabel={t('appearanceSettings.sidebar.showSearchAndArchive.label')}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label={t('appearanceSettings.sidebar.showHardwareUsage.label')}
+              description={t('appearanceSettings.sidebar.showHardwareUsage.description')}
+            >
+              <SettingsToggle
+                checked={showHardwareUsage}
+                onChange={onShowHardwareUsageChange}
+                ariaLabel={t('appearanceSettings.sidebar.showHardwareUsage.label')}
               />
             </SettingsRow>
 

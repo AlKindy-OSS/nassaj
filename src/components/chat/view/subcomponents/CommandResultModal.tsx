@@ -47,9 +47,14 @@ type CommandResultModalProps = {
     sessionId?: string | null,
   ) => Promise<{
     scope: 'default' | 'session';
-    changed: boolean;
     model: string;
   }>;
+  /**
+   * المصدر الحيّ لنموذج الجلسة من ChatInterface. بيانات أمر `/models` لقطة
+   * وقت التنفيذ فقط؛ تمرير هذه القيمة يبقي اللوحة والمنتقي المدمج متزامنين
+   * بعد اختيارٍ متفائل أو مصالحةٍ لاحقة مع الخادم.
+   */
+  activeSessionModel?: string;
   /**
    * B-312: engine stamp of the OPEN session (ADR-037), or null on the official
    * Anthropic path. Non-null (or an engine inferred from the active model —
@@ -271,6 +276,7 @@ function ModelsContent({
   onHardRefreshProviderModels,
   currentSessionId,
   onSelectProviderModel,
+  activeSessionModel,
   sessionEngineProvider,
 }: {
   data: ModelCommandData;
@@ -281,6 +287,7 @@ function ModelsContent({
   onHardRefreshProviderModels: () => void;
   currentSessionId: string | null;
   onSelectProviderModel: CommandResultModalProps['onSelectProviderModel'];
+  activeSessionModel?: string;
   sessionEngineProvider?: string | null;
 }) {
   const { t } = useTranslation('chat');
@@ -290,7 +297,7 @@ function ModelsContent({
   const [pendingSessionModel, setPendingSessionModel] = useState<string | null>(null);
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const currentProvider = (data?.current?.provider || 'claude') as LLMProvider;
-  const currentModel = data?.current?.model || t('commandResult.status.unknown');
+  const currentModel = activeSessionModel || data?.current?.model || t('commandResult.status.unknown');
   const providerLabel = data?.current?.providerLabel || getProviderLabel(currentProvider);
   // B-312: is this session answered by a vendor engine (ADR-037)? Either it
   // carries a stamp, or its active model betrays one (engineGuard.ts). If so the
@@ -706,6 +713,7 @@ export default function CommandResultModal({
   onHardRefreshProviderModels,
   currentSessionId,
   onSelectProviderModel,
+  activeSessionModel,
   sessionEngineProvider = null,
 }: CommandResultModalProps) {
   const { t } = useTranslation('chat');
@@ -803,6 +811,7 @@ export default function CommandResultModal({
               onHardRefreshProviderModels={onHardRefreshProviderModels}
               currentSessionId={currentSessionId}
               onSelectProviderModel={onSelectProviderModel}
+              activeSessionModel={activeSessionModel}
               sessionEngineProvider={sessionEngineProvider}
             />
           )}

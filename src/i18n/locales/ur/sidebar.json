@@ -126,7 +126,8 @@
       "low": "محفوظ",
       "medium": "درمیانہ",
       "high": "زیادہ"
-    }
+    },
+    "hardwareToggleCollapsed": "ہارڈویئر استعمال ویجٹ ٹوگل کریں"
   },
   "branding": {
     "openSource": "اوپن سورس"

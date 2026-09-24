@@ -66,6 +66,7 @@ type SelectModel = (
 
 const renderPanel = (opts: {
   model: string;
+  activeSessionModel?: string;
   stamp?: string | null;
   onSelect: SelectModel;
 }) =>
@@ -80,6 +81,7 @@ const renderPanel = (opts: {
       onHardRefreshProviderModels={vi.fn()}
       currentSessionId="session-eng"
       onSelectProviderModel={opts.onSelect}
+      activeSessionModel={opts.activeSessionModel}
       sessionEngineProvider={opts.stamp ?? null}
     />,
   );
@@ -145,6 +147,18 @@ describe('(ب) ختم مفقود — الاستنباط من النموذج وح
 });
 
 describe('(ج) جلسة رسمية — لا انحدار', () => {
+  it('يعتمد نموذج الجلسة الحي بدل لقطة أمر /models القديمة', () => {
+    renderPanel({
+      model: 'opus[1m]',
+      activeSessionModel: 'sonnet',
+      stamp: null,
+      onSelect: vi.fn() as unknown as SelectModel,
+    });
+
+    expect(screen.getByRole('button', { name: 'Use model sonnet' }).textContent).toContain('Current selection');
+    expect(screen.getByRole('button', { name: 'Use model opus[1m]' }).textContent).not.toContain('Current selection');
+  });
+
   it('الاختيار يعمل ويُستدعى onSelectProviderModel بمعرّف الصفّ', async () => {
     const onSelect = vi
       .fn()

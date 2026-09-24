@@ -45,7 +45,6 @@ export default function SidebarClosedFilterToggle({
         onClick={() => onHideClosedChange(!hideClosed)}
         aria-pressed={hideClosed}
         aria-label={label}
-        title={label}
         className={cn(
           'flex flex-shrink-0 items-center justify-center rounded-xl border border-transparent text-xs font-medium transition-all',
           sizeClass,

@@ -498,7 +498,8 @@
       "analyzing": "Analiz ediyor",
       "working": "Çalışıyor",
       "computing": "Hesaplıyor",
-      "reasoning": "Mantık yürütüyor"
+      "reasoning": "Mantık yürütüyor",
+      "waitingPermission": "İzin bekleniyor"
     },
     "state": {
       "live": "Canlı",

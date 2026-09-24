@@ -534,6 +534,10 @@
       "showSearchAndArchive": {
         "label": "Suche & Archiv-Umschalter anzeigen",
         "description": "Zeigt das Suchfeld und die Archiv-Umschaltzeile oben in der Projektliste an"
+      },
+      "showHardwareUsage": {
+        "label": "Hardware-Auslastung anzeigen",
+        "description": "CPU, Arbeitsspeicher und Datenträger in der Seitenleiste"
       }
     },
     "codeHighlighting": {

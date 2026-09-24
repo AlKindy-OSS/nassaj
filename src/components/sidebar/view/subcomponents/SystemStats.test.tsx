@@ -27,6 +27,24 @@ vi.mock('../../../../utils/api', () => ({
   authenticatedFetch: vi.fn(),
 }));
 
+// Mock useUiPreferences so tests control showHardwareUsage without a real
+// store (which is module-level and cached across describe blocks).
+import { useUiPreferences } from '../../../../hooks/useUiPreferences';
+vi.mock('../../../../hooks/useUiPreferences', () => ({
+  useUiPreferences: vi.fn(),
+}));
+
+const mockUiPreferences = vi.mocked(useUiPreferences);
+/** Return default prefs (widget ON) — overridden in off-state tests. */
+const defaultUiPrefs = () =>
+  mockUiPreferences.mockReturnValue({
+    preferences: { showHardwareUsage: true } as ReturnType<typeof useUiPreferences>['preferences'],
+    setPreference: vi.fn(),
+    setPreferences: vi.fn(),
+    resetPreferences: vi.fn(),
+    dispatch: vi.fn(),
+  } as unknown as ReturnType<typeof useUiPreferences>);
+
 import { useSystemStats, SystemStatsFooter, SystemStatsCollapsed } from './SystemStats';
 import { heaviestTmpfs, resolveLoadLevel, swapPercentOfTotal, tmpfsPercentOfRam } from './systemStatsFormat';
 
@@ -93,6 +111,8 @@ beforeEach(() => {
   let n = 0;
   fetchMock.mockImplementation(async () => okResponse(statsPayload(10 + n++)));
   setHidden(false, false);
+  // Widget ON by default; individual tests may override.
+  defaultUiPrefs();
 });
 
 afterEach(() => {
@@ -573,5 +593,106 @@ describe('SystemStats resource percentage colors (T-1781)', () => {
     expect(swapPercentOfTotal(2662, 4198)?.toFixed(1)).toBe('63.4');
     expect(swapPercentOfTotal(0, 4198)).toBe(0);
     expect(swapPercentOfTotal(Number.MAX_VALUE, Number.MIN_VALUE)).toBeNull();
+  });
+});
+
+/**
+ * showHardwareUsage=false: widget hidden, polling stops (feature gate).
+ *
+ * Contract:
+ *   • useSystemStats(false) → null, no fetch ever.
+ *   • SystemStatsFooter renders null and makes no fetch when preference is off.
+ *   • SystemStatsCollapsed renders null and makes no fetch when preference is off.
+ *   • Toggling back to true re-starts polling in useSystemStats.
+ */
+describe('useSystemStats — enabled=false stops polling', () => {
+  it('returns null immediately and never fetches when enabled=false', async () => {
+    const { result } = renderHook(() => useSystemStats(false));
+    await flushMicrotasks();
+    expect(result.current).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never polls across multiple intervals when disabled', async () => {
+    const { result } = renderHook(() => useSystemStats(false));
+    await advanceIntervals(5);
+    expect(result.current).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('resumes polling when re-enabled', async () => {
+    const { result, rerender } = renderHook(({ en }: { en: boolean }) => useSystemStats(en), {
+      initialProps: { en: false },
+    });
+    await flushMicrotasks();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender({ en: true });
+    await flushMicrotasks();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current).not.toBeNull();
+  });
+});
+
+/** Helper: return off-state mock value (widget disabled). */
+const offUiPrefs = () =>
+  mockUiPreferences.mockReturnValue({
+    preferences: { showHardwareUsage: false } as ReturnType<typeof useUiPreferences>['preferences'],
+    setPreference: vi.fn(),
+    setPreferences: vi.fn(),
+    resetPreferences: vi.fn(),
+    dispatch: vi.fn(),
+  } as unknown as ReturnType<typeof useUiPreferences>);
+
+describe('SystemStatsFooter — showHardwareUsage=false', () => {
+  beforeEach(() => {
+    localStorage.setItem('nassaj.systemStats.collapsed', '0');
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => okResponse(statsPayload(20)));
+    offUiPrefs();
+  });
+
+  it('renders nothing when showHardwareUsage is false', async () => {
+    const { container } = render(<SystemStatsFooter t={tStub} />);
+    await flushMicrotasks();
+    expect(container.firstChild).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('SystemStatsFooter — visibility changes', () => {
+  it('survives on/off/on changes and suspends polling while hidden', async () => {
+    const { container, rerender } = render(<SystemStatsFooter t={tStub} />);
+    await flushMicrotasks();
+    expect(container.firstChild).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    offUiPrefs();
+    rerender(<SystemStatsFooter t={tStub} />);
+    await flushMicrotasks();
+    expect(container.firstChild).toBeNull();
+    await advanceIntervals(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    defaultUiPrefs();
+    rerender(<SystemStatsFooter t={tStub} />);
+    await flushMicrotasks();
+    expect(container.firstChild).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('SystemStatsCollapsed — showHardwareUsage=false', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => okResponse(statsPayload(20)));
+    offUiPrefs();
+  });
+
+  it('renders nothing when showHardwareUsage is false', async () => {
+    const { container } = render(<SystemStatsCollapsed t={tStub} />);
+    await flushMicrotasks();
+    expect(container.firstChild).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

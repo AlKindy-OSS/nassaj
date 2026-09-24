@@ -1,5 +1,6 @@
 import {
-  CalendarClock, Settings, ArrowUpCircle, PanelLeftOpen, RefreshCw, ServerCrash, TerminalSquare,
+  CalendarClock, Settings, ArrowUpCircle, PanelLeftOpen, RefreshCw, ServerCrash,
+  TerminalSquare, Cpu,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import type { Project } from '../../../../types/app';
 import { useAuth } from '../../../auth/context/AuthContext';
 import { useRawExecQueue } from '../../../../hooks/useRawExecConfig';
+import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 
 import { SystemStatsCollapsed } from './SystemStats';
 import { ClaudeUsageCollapsed } from './ClaudeUsageCollapsed';
@@ -70,6 +72,8 @@ export default function SidebarCollapsed({
   // Same two queues as the expanded badge, so the two never disagree.
   const { user } = useAuth();
   const { commands: rawCommands } = useRawExecQueue(!!user);
+  const { preferences, setPreference } = useUiPreferences();
+  const showHardwareUsage = preferences.showHardwareUsage;
   const rawCount = rawCommands.length;
   const boardCount = (restartRequired ? 1 : 0) + pendingActionsCount + rawCount;
   // Red the moment free shell text is queued; amber for declared actions alone.
@@ -150,7 +154,23 @@ export default function SidebarCollapsed({
         <Settings className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
       </button>
 
-      {/* Live CPU/RAM stats */}
+      {/* Hardware usage toggle — always visible so the user can re-enable the
+          widget after hiding it. aria-pressed conveys the current on/off state.
+          The icon mirrors in RTL (Cpu is directionally neutral, no flip needed). */}
+      <button
+        type="button"
+        onClick={() => setPreference('showHardwareUsage', !showHardwareUsage)}
+        className={`group flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          showHardwareUsage ? 'bg-accent/50' : ''
+        }`}
+        aria-label={t('systemStats.hardwareToggleCollapsed')}
+        aria-pressed={showHardwareUsage}
+        title={t('systemStats.hardwareToggleCollapsed')}
+      >
+        <Cpu className="h-4 w-4 transition-colors" />
+      </button>
+
+      {/* Live CPU/RAM stats — renders null when showHardwareUsage is false */}
       <SystemStatsCollapsed t={t} />
 
       {/* Claude usage windows — divider rendered inside component */}

@@ -498,7 +498,8 @@
       "analyzing": "분석 중",
       "working": "작업 중",
       "computing": "계산 중",
-      "reasoning": "추론 중"
+      "reasoning": "추론 중",
+      "waitingPermission": "권한 대기 중"
     },
     "state": {
       "live": "실시간",

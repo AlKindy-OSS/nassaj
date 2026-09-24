@@ -142,12 +142,12 @@ const ChatMessageImage = ({
         type="button"
         onClick={() => setIsZoomed(true)}
         aria-label={alt ? `Preview ${alt}` : 'Preview image'}
-        className="block max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-black/10 focus:outline-none focus:ring-2 focus:ring-white/60"
+        className="block max-w-full cursor-zoom-in rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <img
           src={resolvedSrc}
           alt={alt || ''}
-          className={`transition-opacity hover:opacity-90 ${fitClass}`}
+          className={`h-auto max-w-full transition-opacity hover:opacity-90 ${fitClass}`}
         />
       </button>
       {isZoomed && (

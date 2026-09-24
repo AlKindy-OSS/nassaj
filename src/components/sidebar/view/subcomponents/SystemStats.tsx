@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 
 import { authenticatedFetch } from '../../../../utils/api';
 import { useOptionalAuth } from '../../../auth';
+import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 
 import { SwapHoldersPanel } from './SwapHoldersPanel';
 import { useSwapHolders } from './swapHoldersData';
@@ -87,11 +88,22 @@ function formatGb(bytes: number): string {
  * hidden (document.hidden) and resumes with an immediate fetch on return.
  * A 404 (live server predates the route) stops polling permanently and the
  * widgets render a graceful em-dash / nothing — no console noise.
+ *
+ * `enabled` defaults to `true`. When `false` polling is suspended entirely
+ * and `null` is returned — callers observing `showHardwareUsage` pass this
+ * flag so no requests are made while the widget is hidden.
  */
-export function useSystemStats(): SystemStats | null {
+export function useSystemStats(enabled: boolean = true): SystemStats | null {
   const [stats, setStats] = useState<SystemStats | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      // Clear stale data when the widget is disabled so re-enabling shows
+      // fresh values on the first poll, not a cached snapshot.
+      setStats(null);
+      return;
+    }
+
     // Effect-scoped state (NOT refs): every mount — including a StrictMode
     // remount — gets its own isolated closure, so a previous mount's in-flight
     // poll can never re-arm THIS mount's timer (the bug the old cancelledRef
@@ -146,15 +158,18 @@ export function useSystemStats(): SystemStats | null {
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, []);
+  }, [enabled]);
 
   return stats;
 }
 
 /** Expanded-footer variant: optional resource rows inside one compact card. */
 export function SystemStatsFooter({ t }: { t: TFunction }) {
-  const stats = useSystemStats();
+  const { preferences } = useUiPreferences();
+  const enabled = preferences.showHardwareUsage;
+  const stats = useSystemStats(enabled);
   const [collapsed, setCollapsed] = useState(readCollapsed);
+
   /**
    * لوحة «مَن يحمل الـswap؟» (T-1204) — **للمالك وحده**.
    *
@@ -165,7 +180,10 @@ export function SystemStatsFooter({ t }: { t: TFunction }) {
   const auth = useOptionalAuth();
   const isOwner = auth?.user?.role === 'owner';
   const [swapOpen, setSwapOpen] = useState(false);
-  const swapHolders = useSwapHolders(isOwner && swapOpen);
+  const swapHolders = useSwapHolders(enabled && isOwner && swapOpen);
+
+  // Keep every hook mounted when the visibility preference changes.
+  if (!enabled) return null;
 
   const cpuText = stats ? `${stats.cpu.percent.toFixed(2)}%` : '—';
   const ramText = stats
@@ -411,9 +429,11 @@ export function SystemStatsFooter({ t }: { t: TFunction }) {
 
 /** Collapsed-rail variant: tiny icon+percent stacks; hidden until data. */
 export function SystemStatsCollapsed({ t }: { t: TFunction }) {
-  const stats = useSystemStats();
+  const { preferences } = useUiPreferences();
+  const enabled = preferences.showHardwareUsage;
+  const stats = useSystemStats(enabled);
 
-  if (!stats) return null;
+  if (!enabled || !stats) return null;
 
   return (
     <>

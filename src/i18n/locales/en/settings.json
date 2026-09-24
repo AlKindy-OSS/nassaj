@@ -807,6 +807,10 @@
       "showSearchAndArchive": {
         "label": "Show search & archive toggle",
         "description": "At the top of the projects list"
+      },
+      "showHardwareUsage": {
+        "label": "Show hardware usage",
+        "description": "CPU, memory, and disk in the sidebar footer and collapsed rail"
       }
     },
     "codeHighlighting": {
