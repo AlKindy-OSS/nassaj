@@ -194,12 +194,10 @@ describe('Codex spawn path — per-user credential isolation (B-136)', () => {
       opts.env.PATH === process.env.PATH || opts.env.PATH.endsWith(`${path.delimiter}${process.env.PATH}`),
       'spawn env PATH must preserve the full base PATH',
     );
-    // Governance-bypass block (ADR-057 §5, 2026-07-12): every spawn disables project-
-    // level AGENTS.md ingestion so a local AGENTS.md cannot override nassaj governance.
     assert.equal(
-      (opts as { config?: { project_doc_max_bytes?: number } }).config?.project_doc_max_bytes,
-      0,
-      'spawn must pass project_doc_max_bytes=0 to block local AGENTS.md governance bypass',
+      'project_doc_max_bytes' in ((opts as { config?: Record<string, unknown> }).config ?? {}),
+      false,
+      'spawn must leave project AGENTS.md ingestion at the Codex default',
     );
   });
 

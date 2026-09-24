@@ -11,12 +11,16 @@ import {
   getProviderKey,
   hasProviderKey,
   deleteNamespacedSecret,
+  deleteLocalModelSecret,
   getNamespacedSecret,
+  getLocalModelSecret,
   hasNamespacedSecret,
+  hasLocalModelSecret,
   isVendorSecretProvider,
   listConnectorSecrets,
   listProviderKeys,
   setNamespacedSecret,
+  setLocalModelSecret,
   setProviderKey,
   setSharedVendorKey,
   getSharedVendorKey,
@@ -253,6 +257,47 @@ test('namespaced secrets: connector secrets are per-scope and never bleed across
     assert.equal(hasNamespacedSecret(2, 'connector', 'wafeq'), false);
     assert.deepEqual(listConnectorSecrets(2), []);
     assert.equal(getNamespacedSecret(SYSTEM_SECRET_SCOPE, 'connector', 'wafeq'), null);
+  } finally {
+    sandbox.restore();
+  }
+});
+
+test('local-model capability: CRUD is member-isolated and cannot read connector secrets', () => {
+  const sandbox = withSandbox();
+  try {
+    setNamespacedSecret(1, 'connector', 'server-a', 'connector-member-one');
+    assert.deepEqual(setLocalModelSecret(1, 'server-a', 'local-member-one'), {
+      namespace: 'local-model', id: 'server-a', stored: true,
+    });
+    setLocalModelSecret(2, 'server-a', 'local-member-two');
+
+    assert.equal(getLocalModelSecret(1, 'server-a'), 'local-member-one');
+    assert.equal(getLocalModelSecret(2, 'server-a'), 'local-member-two');
+    assert.equal(hasLocalModelSecret(1, 'server-a'), true);
+    assert.equal(getNamespacedSecret(1, 'connector', 'server-a'), 'connector-member-one');
+
+    assert.deepEqual(deleteLocalModelSecret(1, 'server-a'), {
+      namespace: 'local-model', id: 'server-a', removed: true,
+    });
+    assert.equal(getLocalModelSecret(1, 'server-a'), null);
+    assert.equal(hasLocalModelSecret(1, 'server-a'), false);
+    assert.equal(getLocalModelSecret(2, 'server-a'), 'local-member-two');
+    assert.equal(getNamespacedSecret(1, 'connector', 'server-a'), 'connector-member-one');
+    assert.equal(deleteLocalModelSecret(1, 'server-a').removed, false);
+  } finally {
+    sandbox.restore();
+  }
+});
+
+test('local-model capability: shared and implicit scopes are rejected', () => {
+  const sandbox = withSandbox();
+  try {
+    assert.throws(() => getLocalModelSecret(SYSTEM_SECRET_SCOPE, 'server-a'), /member-scoped/);
+    for (const implicit of [null, undefined, '']) {
+      assert.throws(() => getLocalModelSecret(implicit as never, 'server-a'), /userId is required/);
+      assert.throws(() => setLocalModelSecret(implicit as never, 'server-a', 'secret'), /userId is required/);
+      assert.throws(() => deleteLocalModelSecret(implicit as never, 'server-a'), /userId is required/);
+    }
   } finally {
     sandbox.restore();
   }

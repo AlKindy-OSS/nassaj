@@ -530,7 +530,7 @@
     {
       "id": "server/claude-sdk.js#claude_sdk.query#3",
       "file": "server/claude-sdk.js",
-      "line": 3624,
+      "line": 3633,
       "primitive": "claude_sdk.query",
       "expression": "query",
       "classification": "provider_effect_enclosed",
@@ -544,7 +544,7 @@
     {
       "id": "server/claude-sdk.js#claude_sdk.query#4",
       "file": "server/claude-sdk.js",
-      "line": 3636,
+      "line": 3645,
       "primitive": "claude_sdk.query",
       "expression": "query",
       "classification": "provider_effect_enclosed",
@@ -1370,7 +1370,7 @@
     {
       "id": "server/openai-codex.js#codex_sdk.runStreamed#1",
       "file": "server/openai-codex.js",
-      "line": 916,
+      "line": 866,
       "primitive": "codex_sdk.runStreamed",
       "expression": "thread.runStreamed",
       "classification": "provider_effect_enclosed",
@@ -1384,7 +1384,7 @@
     {
       "id": "server/openai-codex.js#codex_sdk.startThread#1",
       "file": "server/openai-codex.js",
-      "line": 855,
+      "line": 805,
       "primitive": "codex_sdk.startThread",
       "expression": "codex.startThread",
       "classification": "provider_effect_enclosed",

@@ -14,7 +14,7 @@
  * `additionalContext` and fires on `source: 'compact'` right after compaction.
  *
  * REUSE: this composes the ground-truth module's LOAD-BEARING fail-safe readers
- * (`readRecentCommits` + `readOpenTasks`) rather than its top-level
+ * (`readRecentCommits` + `readGovernanceOpenTasks`) rather than its top-level
  * `buildGroundTruthContext`, because that function's rendered block carries a
  * DELEGATION-specific closing note ("if your delegation prompt matches …") that is
  * meaningless at session start (there is no delegation here). The valuable,
@@ -32,9 +32,7 @@
  *    total-line cap here.
  */
 
-import path from 'path';
-
-import { readRecentCommits, readOpenTasks, resolveSessionRepoRoot } from './coordinator-ground-truth.js';
+import { readRecentCommits, readGovernanceOpenTasks, resolveSessionRepoRoot } from './coordinator-ground-truth.js';
 
 const MAX_TOTAL_LINES = 40;
 
@@ -69,7 +67,9 @@ export function isRelevantSource(source) {
  * @param {unknown} [args.source] SDK SessionStart `source`.
  * @param {string} [args.repoRoot] the session's own project root — the only
  *   accepted source (shared rule: `resolveSessionRepoRoot`).
- * @param {string} [args.projectStatePath]
+ * @param {string} [args.projectId] logical governance project id
+ * @param {string|number} [args.actorId] authenticated actor id
+ * @param {Function} [args.governanceResolver] injected resolver (test seam)
  * @returns {Promise<string|null>} null when the session's project root is
  *   unknown — never an env override, never the shared server process's
  *   `process.cwd()` (T-1810, B-1250).
@@ -77,24 +77,26 @@ export function isRelevantSource(source) {
 export async function buildSessionStartContext({
   source,
   repoRoot,
-  projectStatePath,
+  projectId,
+  actorId,
+  governanceResolver,
 } = {}) {
   try {
     if (!isRelevantSource(source)) return null;
 
     const root = resolveSessionRepoRoot(repoRoot);
     if (!root) return null;
-    const statePath =
-      typeof projectStatePath === 'string' && projectStatePath.trim()
-        ? projectStatePath.trim()
-        : path.join(root, 'docs', 'project-state.json');
-
-    // No delegation prompt at session start ⇒ no keywords ⇒ readOpenTasks falls
+    // No delegation prompt at session start ⇒ no keywords ⇒ task filtering falls
     // back to in_progress-only (the highest-signal set), which is exactly what a
     // "what am I mid-way through" snapshot should show.
     const [commits, tasks] = await Promise.all([
       readRecentCommits(root),
-      readOpenTasks(statePath, []),
+      readGovernanceOpenTasks({
+        projectId,
+        actorId,
+        keywords: [],
+        resolver: governanceResolver,
+      }),
     ]);
 
     if (commits.length === 0 && tasks.length === 0) return null;

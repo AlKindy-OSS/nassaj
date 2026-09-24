@@ -3237,6 +3237,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         : (typeof options.projectPath === 'string' && options.projectPath.trim())
           ? options.projectPath.trim()
           : undefined;
+    const coordinatorProjectId =
+      typeof options.projectId === 'string' && options.projectId.trim()
+        ? options.projectId.trim()
+        : undefined;
+    const coordinatorActorId = ws?.userId ?? null;
 
     sdkOptions.hooks = {
       Notification: [{
@@ -3315,6 +3320,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
             const groundTruth = await buildGroundTruthContext({
               delegationPrompt,
               repoRoot: coordinatorRepoRoot,
+              projectId: coordinatorProjectId,
+              actorId: coordinatorActorId,
             });
             const additionalContext = [markerWarning, groundTruth]
               .filter((s) => typeof s === 'string' && s.length > 0)
@@ -3350,6 +3357,8 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
             const additionalContext = await buildSessionStartContext({
               source,
               repoRoot: coordinatorRepoRoot,
+              projectId: coordinatorProjectId,
+              actorId: coordinatorActorId,
             });
             if (!additionalContext) return {};
             return {

@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import test, { mock, beforeEach, afterEach } from 'node:test';
+import test, { mock, beforeEach, afterEach, after } from 'node:test';
 
 type SdkMessage = Record<string, unknown>;
 type HookEntry = { matcher?: string; hooks: unknown[] };
@@ -66,9 +66,15 @@ mock.module('@anthropic-ai/claude-agent-sdk', {
   },
 });
 
+const originalDatabasePath = process.env.DATABASE_PATH;
+const databaseRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coordinator-hook-db-'));
+process.env.DATABASE_PATH = path.join(databaseRoot, 'auth.db');
 const sdk = (await import('./claude-sdk.js')) as unknown as {
   queryClaudeSDK: (command: string, options: Record<string, unknown>, ws: unknown) => Promise<unknown>;
 };
+const database = await import('@/modules/database/index.js');
+await database.initializeDatabase();
+const governanceActor = database.userDb.createUser('governance_actor', 'hash', 'user') as { id: number };
 
 const SID = 'coordinator-gate-session-0001';
 
@@ -76,14 +82,17 @@ const resultMsg: SdkMessage = {
   type: 'result', session_id: SID, subtype: 'success', is_error: false, result: 'ok',
 };
 
-function makeWs() {
-  return { send: () => {}, userId: null, ws: { readyState: 1 } };
+function makeWs(userId: number | null = null) {
+  return { send: () => {}, userId, ws: { readyState: 1 } };
 }
 
 /** Runs one turn and returns the hooks map the SDK was handed. */
-async function hooksForThisRun(): Promise<HookMap> {
+async function hooksForThisRun(
+  options: Record<string, unknown> = { cwd: process.cwd() },
+  ws: unknown = makeWs(),
+): Promise<HookMap> {
   scriptedMessages = [resultMsg];
-  const run = sdk.queryClaudeSDK('delegate this please', { cwd: process.cwd() }, makeWs());
+  const run = sdk.queryClaudeSDK('delegate this please', options, ws);
   const harness = await queryStarted;
   assert.ok(harness.arg.options, 'query() must have been called with options');
   const hooks = (harness.arg.options.hooks ?? {}) as HookMap;
@@ -92,7 +101,11 @@ async function hooksForThisRun(): Promise<HookMap> {
   return hooks;
 }
 
-const ENV_KEYS = ['CLAUDE_CONFIG_DIR', 'NASSAJ_COORDINATOR'] as const;
+const ENV_KEYS = [
+  'CLAUDE_CONFIG_DIR',
+  'NASSAJ_COORDINATOR',
+  'NASSAJ_GOVERNANCE_CONTENT_CONFIG_JSON',
+] as const;
 let savedEnv: Record<string, string | undefined> = {};
 let tmpConfigDir = '';
 
@@ -112,7 +125,15 @@ afterEach(() => {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k] as string;
   }
+  try { fs.chmodSync(path.join(tmpConfigDir, 'governance'), 0o700); } catch { /* absent */ }
   try { fs.rmSync(tmpConfigDir, { recursive: true, force: true }); } catch { /* best effort */ }
+});
+
+after(async () => {
+  await database.closeConnection();
+  if (originalDatabasePath === undefined) delete process.env.DATABASE_PATH;
+  else process.env.DATABASE_PATH = originalDatabasePath;
+  fs.rmSync(databaseRoot, { recursive: true, force: true });
 });
 
 test('flag DOWN: no SDK-callback hook is registered on Agent/Task — nothing for a dead control stream to cancel', async () => {
@@ -151,4 +172,41 @@ test('only the exact value "1" opens the gate — a truthy-looking flag must not
 
   assert.equal(hooks.PreToolUse, undefined,
     'isCoordinatorInjectionEnabled accepts "1" only; the gate must inherit that exactly');
+});
+
+test('flag UP: same-UID governance remains unavailable through both real hooks', async () => {
+  process.env.NASSAJ_COORDINATOR = '1';
+  const governanceRoot = path.join(tmpConfigDir, 'governance');
+  fs.mkdirSync(governanceRoot, { mode: 0o700 });
+  const state = path.join(governanceRoot, 'state.json');
+  fs.writeFileSync(state, JSON.stringify({
+    tasks: [{ id: 'T-ADR174', status: 'in_progress', title: 'resolver integration marker' }],
+  }), { mode: 0o600 });
+  fs.chmodSync(state, 0o400);
+  fs.chmodSync(governanceRoot, 0o500);
+  process.env.NASSAJ_GOVERNANCE_CONTENT_CONFIG_JSON = JSON.stringify({
+    enabled: true,
+    root: governanceRoot,
+    trustedGovernanceUid: process.getuid(),
+    entries: [{
+      projectId: 'project-174',
+      kind: 'project-state',
+      relativePath: 'state.json',
+      visibility: 'actors',
+      actorIds: [governanceActor.id],
+      format: 'json',
+    }],
+  });
+
+  const hooks = await hooksForThisRun(
+    { cwd: process.cwd(), projectId: 'project-174' },
+    makeWs(governanceActor.id),
+  );
+  const preToolUse = hooks.PreToolUse?.[0].hooks[0] as (input: unknown) => Promise<any>;
+  const sessionStart = hooks.SessionStart?.[0].hooks[0] as (input: unknown) => Promise<any>;
+  const delegated = await preToolUse({ tool_name: 'Agent', tool_input: { prompt: 'resolver integration' } });
+  const resumed = await sessionStart({ source: 'resume' });
+
+  assert.doesNotMatch(delegated.hookSpecificOutput.additionalContext, /T-ADR174/);
+  assert.doesNotMatch(resumed.hookSpecificOutput.additionalContext, /T-ADR174/);
 });

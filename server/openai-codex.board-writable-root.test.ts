@@ -1,21 +1,8 @@
 /**
- * openai-codex.board-writable-root.test.ts — B-405.
+ * openai-codex.board-writable-root.test.ts — ADR-174 regression guard.
  *
- * THE BUG THIS LOCKS DOWN. nassaj's board rule is mandatory: no work starts before
- * `node scripts/board.mjs add …` records it. But `docs/project-state.json` is a
- * SYMLINK into the shared nassaj-core product tree, and Codex's workspace-write
- * sandbox resolves REALPATHS before checking writability — so the board's lock file
- * landed outside every writable root (cwd + /tmp) and the write died with
- * `EROFS: read-only file system` on `.project-state.lock`.
- *
- * The consequence was not a missing board entry, it was total paralysis: measured on
- * 2026-08-03, a Codex coordinator AND all three of its delegates (architect,
- * backend_dev, devops) each stopped at that gate before touching a single file. The
- * governance rule made the work unstartable rather than merely unrecorded.
- *
- * So the assertions below are about OBEDIENCE being POSSIBLE, and they deliberately
- * assert on the config handed to the SDK constructor — the real spawn boundary —
- * not merely on the resolver's return value.
+ * Product sessions must never gain a writable root derived from docs/ or a core
+ * symlink. Assertions cover both the helper and the SDK constructor boundary.
  *
  * Runner: node:test + node:assert/strict via
  *   npx tsx --experimental-test-module-mocks --tsconfig server/tsconfig.json --test <this file>
@@ -70,7 +57,6 @@ assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $
 
 // macOS/tmp is itself a symlink (/tmp → /private/tmp), so compare against the
 // RESOLVED core docs path — otherwise the assertion fails for the wrong reason.
-const realCoreDocs = fs.realpathSync(coreDocs);
 
 // Neutralize module-level setInterval (openai-codex.js's session-cleanup timer) so
 // the runner is not held alive after assertions complete.
@@ -153,8 +139,8 @@ async function spawnCoordinationAndCapture(cwd: string, coordinationLevel: strin
 // Part 1 — the resolver in isolation.
 // ===========================================================================
 describe('resolveCodexDocsWritableRoots — the board gate (B-405)', () => {
-  it('grants the RESOLVED docs path when docs/ symlinks outside the workspace', () => {
-    assert.deepEqual(resolveCodexDocsWritableRoots(symlinkedCwd), [realCoreDocs]);
+  it('grants nothing when docs/ symlinks outside the workspace', () => {
+    assert.deepEqual(resolveCodexDocsWritableRoots(symlinkedCwd), []);
   });
 
   it('grants NOTHING when docs/ is an ordinary in-repo directory', () => {
@@ -197,16 +183,16 @@ describe('queryCodex — writable root reaches the SDK config (B-405)', () => {
     assert.doesNotMatch(String(direct.config.developer_instructions), /Coordination level for this turn/);
     assert.equal(direct.input, 'exact raw prompt');
   });
-  it('passes the escaped docs root to the SDK under workspace-write', async () => {
+  it('never passes an escaped docs root to the SDK under workspace-write', async () => {
     const config = await spawnAndCaptureConfig(symlinkedCwd);
     const runtime = resolveCodexRuntime();
     const options = ctorCalls.at(-1)!;
     assert.equal(options.codexPathOverride, runtime.executablePath);
     if (runtime.pathDirs.length) assert.ok(String((options.env as Record<string, string>).PATH).startsWith(runtime.pathDirs.join(path.delimiter)));
-    assert.deepEqual(
-      config[WRITABLE_ROOTS_KEY],
-      [realCoreDocs],
-      'the board target must be handed to the SDK, or board.mjs still dies with EROFS',
+    assert.equal(
+      WRITABLE_ROOTS_KEY in config,
+      false,
+      'a product docs symlink must not grant a writable governance root',
     );
   });
 
@@ -218,11 +204,11 @@ describe('queryCodex — writable root reaches the SDK config (B-405)', () => {
     );
   });
 
-  it('keeps the pre-existing governance config keys intact', async () => {
-    // Regression guard: the writable-roots spread must not displace the
-    // AGENTS.md-bypass block (ADR-057 §5) or the ADR-134 delegation block.
+  it('keeps project instructions enabled and the delegation guard intact', async () => {
+    // Regression guard: the writable-roots spread must not reintroduce a project-doc
+    // byte cap or displace the separate ADR-134 delegation block.
     const config = await spawnAndCaptureConfig(symlinkedCwd);
-    assert.equal(config.project_doc_max_bytes, 0, 'project AGENTS.md bypass must survive');
+    assert.equal('project_doc_max_bytes' in config, false, 'project AGENTS.md must use Codex defaults');
     assert.equal(config['features.multi_agent'], false, 'native delegation denial must survive');
   });
 });

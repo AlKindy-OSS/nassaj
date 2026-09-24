@@ -61,6 +61,7 @@ mock.module('chokidar', {
 });
 
 const { default: projectBoardRouter } = await import('./project-board.js');
+const { createGovernanceTestFixture } = await import('../services/governance-content-test-fixture.js');
 
 type TestUser = { id: number; role: string };
 
@@ -75,6 +76,7 @@ let privateProjectId = '';
 let publicProjectId = '';
 let privateProjectPath = '';
 let publicProjectPath = '';
+let app: express.Express;
 
 /** How many watchers the route attached to files under `projectPath`. */
 function watchersFor(projectPath: string): number {
@@ -132,12 +134,18 @@ before(async () => {
   );
   publicProjectId = publicCreated.project?.project_id as string;
 
-  const app = express();
+  const publication = createGovernanceTestFixture([
+    { projectId: privateProjectId, filename: 'private-state.json', content: JSON.stringify({ phases: [{ id: 'P0', name: SECRET_MARKER }] }) },
+    { projectId: publicProjectId, filename: 'public-state.json', content: JSON.stringify({ phases: [{ id: 'P0', name: 'PUBLIC-MARKER' }] }) },
+  ]);
+
+  app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: TestUser | null }).user = currentUser;
     next();
   });
+  app.locals.governanceContentResolver = publication.resolver;
   app.use('/api/project-board', projectBoardRouter);
 
   server = app.listen(0);
@@ -193,4 +201,20 @@ test('a public project\'s board stays readable for the whole team', async () => 
   assert.equal(status, 200, 'public ⇒ readable (B-PRIV by design)');
   assert.ok(body.includes('PUBLIC-MARKER'));
   assert.equal(watchersFor(publicProjectPath), 1, 'the public board is watched for live updates');
+});
+
+test('an absent governance provider is explicit and never falls back to product docs', async () => {
+  const configured = app.locals.governanceContentResolver;
+  delete app.locals.governanceContentResolver;
+  try {
+    const { status, body } = await getBoard(privateProjectId, ownerUser);
+    assert.equal(status, 200);
+    const parsed = JSON.parse(body);
+    assert.equal(parsed.available, false);
+    assert.equal(parsed.state, null);
+    assert.equal(parsed.governance.reason, 'path_unavailable');
+    assert.match(parsed.architecture.technical, new RegExp(SECRET_MARKER));
+  } finally {
+    app.locals.governanceContentResolver = configured;
+  }
 });

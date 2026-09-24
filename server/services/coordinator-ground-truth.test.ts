@@ -24,11 +24,12 @@ import {
   isCoordinatorInjectionEnabled,
   extractKeywords,
   readRecentCommits,
-  readOpenTasks,
+  filterOpenTasks,
   renderGroundTruthContext,
   buildGroundTruthContext,
   resolveSessionRepoRoot,
 } from './coordinator-ground-truth.js';
+import { createGovernanceTestFixture } from './governance-content-test-fixture.js';
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -53,6 +54,18 @@ function writeState(dir: string, tasks: unknown): string {
   const p = path.join(docs, 'project-state.json');
   fs.writeFileSync(p, JSON.stringify({ tasks }, null, 2));
   return p;
+}
+
+function governanceArgs(root: string) {
+  const publication = createGovernanceTestFixture([{
+    projectId: 'test-project', filename: 'project-state.json',
+    content: fs.readFileSync(path.join(root, 'docs', 'project-state.json'), 'utf8'), actorIds: [7],
+  }]);
+  return {
+    projectId: 'test-project',
+    actorId: 7,
+    governanceResolver: publication.resolver,
+  };
 }
 
 const SAMPLE_TASKS = [
@@ -89,29 +102,22 @@ test('extractKeywords: drops short tokens, de-dupes, handles junk safely', () =>
 
 // --- task reading -----------------------------------------------------------
 
-test('readOpenTasks: keyword match wins, excludes done', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cgt-state-'));
-  const p = writeState(dir, SAMPLE_TASKS);
-  const matched = await readOpenTasks(p, ['terminals']);
+test('filterOpenTasks: keyword match wins, excludes done', () => {
+  const matched = filterOpenTasks({ tasks: SAMPLE_TASKS }, ['terminals']);
   assert.equal(matched.length, 1);
   assert.equal(matched[0].id, 'T-300');
   assert.ok(matched.every((t) => t.status !== 'done'));
 });
 
-test('readOpenTasks: no keyword match falls back to in_progress only', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cgt-state-'));
-  const p = writeState(dir, SAMPLE_TASKS);
-  const fallback = await readOpenTasks(p, ['nonexistentkeyword']);
+test('filterOpenTasks: no keyword match falls back to in_progress only', () => {
+  const fallback = filterOpenTasks({ tasks: SAMPLE_TASKS }, ['nonexistentkeyword']);
   assert.ok(fallback.length >= 1);
   assert.ok(fallback.every((t) => t.status === 'in_progress'));
 });
 
-test('readOpenTasks: missing file / corrupt JSON ⇒ [] (no throw)', async () => {
-  assert.deepEqual(await readOpenTasks('/nope/does/not/exist.json', []), []);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cgt-bad-'));
-  const bad = path.join(dir, 'bad.json');
-  fs.writeFileSync(bad, '{ this is not json ');
-  assert.deepEqual(await readOpenTasks(bad, []), []);
+test('filterOpenTasks: malformed state ⇒ [] (no throw)', () => {
+  assert.deepEqual(filterOpenTasks(null, []), []);
+  assert.deepEqual(filterOpenTasks({ tasks: 'not-an-array' }, []), []);
 });
 
 // --- git reading ------------------------------------------------------------
@@ -163,6 +169,7 @@ test('buildGroundTruthContext: real repo + state ⇒ facts present', async () =>
   const ctx = await buildGroundTruthContext({
     delegationPrompt: 'work on terminals',
     repoRoot: repo,
+    ...governanceArgs(repo),
   });
   assert.ok(ctx);
   const c = ctx as string;
@@ -319,6 +326,7 @@ test('buildGroundTruthContext: session root from another project ⇒ block carri
     const ctx = await buildGroundTruthContext({
       delegationPrompt: 'x',
       repoRoot: otherProjectRepo, // the session's own, known, project root
+      ...governanceArgs(otherProjectRepo),
     });
     assert.ok(ctx);
     const c = ctx as string;
@@ -341,7 +349,9 @@ test('buildGroundTruthContext: session root from another project ⇒ block carri
 test('buildGroundTruthContext: nassaj-dev\'s own root behaviour is unchanged when explicitly passed', async () => {
   const repo = makeTempRepo(['feat: standalone terminals', 'fix: something']);
   writeState(repo, SAMPLE_TASKS);
-  const ctx = await buildGroundTruthContext({ delegationPrompt: 'work on terminals', repoRoot: repo });
+  const ctx = await buildGroundTruthContext({
+    delegationPrompt: 'work on terminals', repoRoot: repo, ...governanceArgs(repo),
+  });
   assert.ok(ctx);
   const c = ctx as string;
   assert.ok(c.includes('standalone terminals'));
