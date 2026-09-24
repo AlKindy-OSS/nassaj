@@ -689,7 +689,15 @@
     },
     "loading": "Caricamento...",
     "version": {
-      "updateAvailable": "Aggiornamento disponibile: v{{version}}"
+      "updateAvailable": "Aggiornamento disponibile: v{{version}}",
+      "upToDate": "Stai usando la versione più recente",
+      "upToDateAt": "Aggiornato — verificato alle {{time}}",
+      "lastChecked": "Ultima verifica alle {{time}}",
+      "checked": "Verifica aggiornamenti completata",
+      "checkFailed": "Verifica aggiornamenti non riuscita",
+      "checkFailedCode": "Verifica aggiornamenti non riuscita (HTTP {{code}})",
+      "noReleases": "Nessuna versione disponibile dalla fonte degli aggiornamenti",
+      "retry": "Riprova"
     },
     "deleteAria": "Delete key {{name}}"
   },

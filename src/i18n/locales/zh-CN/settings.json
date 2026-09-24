@@ -689,7 +689,15 @@
     },
     "loading": "加载中...",
     "version": {
-      "updateAvailable": "有可用更新：v{{version}}"
+      "updateAvailable": "有可用更新：v{{version}}",
+      "upToDate": "当前已是最新版本",
+      "upToDateAt": "已是最新版本 — {{time}} 检查",
+      "lastChecked": "上次检查 {{time}}",
+      "checked": "更新检查已完成",
+      "checkFailed": "更新检查失败",
+      "checkFailedCode": "更新检查失败（HTTP {{code}}）",
+      "noReleases": "更新源没有可用版本",
+      "retry": "重试"
     },
     "deleteAria": "Delete key {{name}}"
   },

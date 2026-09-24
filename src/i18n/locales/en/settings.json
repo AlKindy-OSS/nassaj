@@ -997,7 +997,15 @@
     },
     "loading": "Loading...",
     "version": {
-      "updateAvailable": "Update available: v{{version}}"
+      "updateAvailable": "Update available: v{{version}}",
+      "upToDate": "You are on the latest version",
+      "upToDateAt": "Up to date — checked {{time}}",
+      "lastChecked": "Last checked {{time}}",
+      "checked": "Update check completed",
+      "checkFailed": "Update check failed",
+      "checkFailedCode": "Update check failed (HTTP {{code}})",
+      "noReleases": "No release is available from the update source",
+      "retry": "Retry"
     },
     "deleteAria": "Delete key {{name}}"
   },

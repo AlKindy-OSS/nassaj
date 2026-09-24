@@ -3,6 +3,7 @@ import { createCipheriv } from 'node:crypto';
 import test from 'node:test';
 
 import {
+  assertConnectorGrantSubjectIdentity,
   createConnectorGrantDualReader,
   createAuthorizedOAuthGrantMaterialReference,
   consumeAuthorizedConnectorGrantMaterial,
@@ -147,6 +148,15 @@ const ready = (secret: string) => {
     }, keyring),
   };
 };
+
+test('the real subject verifier accepts bound ciphertext and rejects HMAC or installation tampering', () => {
+  const material = ready('synthetic-key');
+  assert.doesNotThrow(() => assertConnectorGrantSubjectIdentity(material, INSTALLATION_ID, keyring));
+  assert.throws(() => assertConnectorGrantSubjectIdentity({
+    ...material, providerSubjectHmac: '00'.repeat(32),
+  }, INSTALLATION_ID, keyring), /connector_grant_subject_corrupt/);
+  assert.throws(() => assertConnectorGrantSubjectIdentity(material, 'another-installation', keyring));
+});
 
 const repositoryMethods = {
   runCredentialWrite: <T>(operation: () => T) => operation(),

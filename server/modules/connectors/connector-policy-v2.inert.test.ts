@@ -19,6 +19,20 @@ const POLICY_TARGETS = [
 ] as const;
 const POLICY_IMPORT_PATTERN = /connector-(?:policy-v2|certification-manifest|runtime-fence|migration-v2|installation-readiness-v2)/u;
 const SOURCE_EXTENSION_PATTERN = /\.(?:[cm]?[jt]sx?)$/u;
+const PRIVILEGED_BOOT_AUTHORITY_EDGES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'server/modules/connectors/connector-auto-setup.ts': Object.freeze([
+    './connector-installation-origin-resolver.js', './connector-owner-setup.service.js',
+    './connector-runtime-fence.js', './connector-local-activation.js',
+    './connector-setup-doctor.js', './connector-setup-store.js',
+  ]),
+  'server/modules/connectors/connector-signing-core.ts': Object.freeze([
+    './connector-global-certification-pack.js', './connector-jcs.js',
+    './connector-policy-v2.js', './connector-runtime-fence.js', './connector-trust-bundle.js',
+  ]),
+});
+
+const isPrivilegedBootAuthorityEdge = (importerName: string, specifier: string): boolean =>
+  PRIVILEGED_BOOT_AUTHORITY_EDGES[importerName]?.includes(specifier) ?? false;
 
 const moduleSpecifiers = (source: string, filename: string): string[] => {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true,
@@ -79,6 +93,22 @@ test('AST scanner detects aliases, reexports, dynamic imports, require, and doub
   ]);
 });
 
+test('privileged boot and signing authority leaves are an exact 6+5 edge allowlist', () => {
+  assert.deepEqual(Object.keys(PRIVILEGED_BOOT_AUTHORITY_EDGES), [
+    'server/modules/connectors/connector-auto-setup.ts',
+    'server/modules/connectors/connector-signing-core.ts',
+  ]);
+  assert.equal(PRIVILEGED_BOOT_AUTHORITY_EDGES['server/modules/connectors/connector-auto-setup.ts'].length, 6);
+  assert.equal(PRIVILEGED_BOOT_AUTHORITY_EDGES['server/modules/connectors/connector-signing-core.ts'].length, 5);
+});
+
+test('privileged boot and signing authority allowlist refuses a new edge', () => {
+  assert.equal(isPrivilegedBootAuthorityEdge(
+    'server/modules/connectors/connector-auto-setup.ts', './connector-policy-v2.js'), false);
+  assert.equal(isPrivilegedBootAuthorityEdge(
+    'server/modules/connectors/connector-signing-core.ts', './connector-setup-store.js'), false);
+});
+
 test('repo-wide Policy V2 graph permits only the reviewed production cutover edges', () => {
   const violations: string[] = [];
   for (const importer of candidateSourceFiles()) {
@@ -118,8 +148,9 @@ test('repo-wide Policy V2 graph permits only the reviewed production cutover edg
       };
       const allowedCutoverEdge = reviewedCutoverEdges[importerName]?.some(target =>
         specifier.includes(target)) ?? false;
+      const allowedPrivilegedBootAuthorityEdge = isPrivilegedBootAuthorityEdge(importerName, specifier);
       if (!allowedInternalEdge && !allowedSubstrateLifecycle && !allowedAuthorityLifecycle
-        && !allowedSubstrateMigration && !allowedCutoverEdge) {
+        && !allowedSubstrateMigration && !allowedCutoverEdge && !allowedPrivilegedBootAuthorityEdge) {
         violations.push(`${importerName} -> ${specifier}`);
       }
     }

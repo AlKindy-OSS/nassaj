@@ -1014,7 +1014,15 @@
     },
     "loading": "جارٍ التحميل...",
     "version": {
-      "updateAvailable": "تحديث متاح: v{{version}}"
+      "updateAvailable": "تحديث متاح: v{{version}}",
+      "upToDate": "أنت على أحدث نسخة",
+      "upToDateAt": "أحدث نسخة — فُحص {{time}}",
+      "lastChecked": "آخر فحص {{time}}",
+      "checked": "اكتمل فحص التحديثات",
+      "checkFailed": "تعذّر فحص التحديثات",
+      "checkFailedCode": "تعذّر فحص التحديثات (رمز {{code}})",
+      "noReleases": "لا يتوفر إصدار في مصدر التحديث",
+      "retry": "إعادة المحاولة"
     },
     "deleteAria": "حذف المفتاح {{name}}"
   },

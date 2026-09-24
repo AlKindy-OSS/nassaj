@@ -137,6 +137,26 @@ export function calculateSessionCost(usage: SessionUsage): SessionCost {
   };
 }
 
+/**
+ * Reconciles a full-conversation aggregate against its displayed turn floor.
+ *
+ * A Codex aggregate comes from the final cumulative counter, while turns come
+ * from per-turn counters. A malformed or lagging cumulative counter must not
+ * make the conversation total smaller than costs already shown on its turns.
+ * This is deliberately a maximum, never an addition: summing both would count
+ * the same usage twice. Callers must use it only when aggregate and turns cover
+ * the exact same full conversation; billing windows and attributed scopes are
+ * separate measurements and must not be reconciled here.
+ */
+export function reconcileSessionCostTurnFloor(
+  cost: SessionCost,
+  turns: readonly SessionCostTurn[],
+): SessionCost {
+  if (cost.provider !== 'codex') return cost;
+  const turnFloorUsd = turns.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0);
+  return turnFloorUsd > cost.totalUsd ? { ...cost, totalUsd: turnFloorUsd } : cost;
+}
+
 /** يجمع كلفات محادثات عدّة (لقسم الاشتراكات في الإعدادات السريعة). */
 export function sumSessionCosts(costs: SessionCost[]): {
   totalUsd: number;

@@ -272,6 +272,35 @@ test('unwritable authority root keeps schema one and performs no provider effect
   }
 });
 
+test('a throwing opt-in auto-setup never drops a ready substrate to unavailable', () => {
+  const f = databaseFixture();
+  const directory = mkdtempSync('/var/tmp/nassaj-auto-setup-contain-');
+  const authorityPath = join(directory, 'authority.json');
+  // A regular file where the key directory's parent should be: the auto-setup lock's
+  // mkdirSync throws ENOTDIR. The substrate must stay ready regardless.
+  const blockerFile = join(directory, 'blocker');
+  writeFileSync(blockerFile, 'x');
+  const priorFlag = process.env.NASSAJ_CONNECTOR_AUTO_SETUP;
+  const priorOrigin = process.env.NASSAJ_PUBLIC_ORIGIN;
+  const priorKeyDir = process.env.NASSAJ_CONNECTOR_SIGNING_KEY_DIR;
+  process.env.NASSAJ_CONNECTOR_AUTO_SETUP = '1';
+  process.env.NASSAJ_PUBLIC_ORIGIN = 'https://substrate-auto.example';
+  process.env.NASSAJ_CONNECTOR_SIGNING_KEY_DIR = join(blockerFile, 'keys');
+  try {
+    assert.deepEqual(initializeConnectorPolicyV2SubstrateOnly(f.database, authorityPath, () => NOW),
+      { ready: true, reason: 'ready' });
+  } finally {
+    if (priorFlag === undefined) delete process.env.NASSAJ_CONNECTOR_AUTO_SETUP;
+    else process.env.NASSAJ_CONNECTOR_AUTO_SETUP = priorFlag;
+    if (priorOrigin === undefined) delete process.env.NASSAJ_PUBLIC_ORIGIN;
+    else process.env.NASSAJ_PUBLIC_ORIGIN = priorOrigin;
+    if (priorKeyDir === undefined) delete process.env.NASSAJ_CONNECTOR_SIGNING_KEY_DIR;
+    else process.env.NASSAJ_CONNECTOR_SIGNING_KEY_DIR = priorKeyDir;
+    initializeConnectorPolicyV2SubstrateOnly(f.database, '/proc/nassaj-connector-runtime-authority.json', () => NOW);
+    f.database.close(); rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('ready substrate serves schema two and fenced origin write advances policy and M2 epochs together', async () => {
   const f = databaseFixture();
   const directory = mkdtempSync('/var/tmp/nassaj-substrate-');

@@ -1,33 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 import { ReleaseInfo } from '../types/sharedTypes';
 import { authenticatedFetch } from '../utils/api';
 import { subscribeRestartSignal } from '../utils/restartSignal';
+import { compareVersions, parseVersion } from '../utils/versionCompare';
 import {
   publishServerCapabilities,
   resolveServerCapabilitiesUnavailable,
 } from '../stores/serverCapabilitiesStore';
 
-/**
- * Compare two semantic version strings
- * Works only with numeric versions separated by dots (e.g. "1.2.3")
- * @param {string} v1
- * @param {string} v2
- * @returns positive if v1 > v2, negative if v1 < v2, 0 if equal
- */
-export const compareVersions = (v1: string, v2: string) => {
-  const parts1 = v1.split('.').map(Number);
-  const parts2 = v2.split('.').map(Number);
-
-  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-    const p1 = parts1[i] || 0;
-    const p2 = parts2[i] || 0;
-    if (p1 !== p2) return p1 - p2;
-  }
-  return 0;
-};
+export { compareVersions, parseVersion };
 
 export type InstallMode = 'git' | 'npm';
+export type VersionCheckStatus = 'idle' | 'checking' | 'ok' | 'error' | 'unavailable';
 
 const SOURCE_VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/;
 const UNKNOWN_VERSION = '—';
@@ -215,6 +200,10 @@ export const useVersionCheck = () => {
   );
   // ADR-156 WI-6: the maintenance gate is not healthy; the banner stays up.
   const [degradedReason, setDegradedReason] = useState<DegradedReason | null>(null);
+  const [checkStatus, setCheckStatus] = useState<VersionCheckStatus>('idle');
+  const [checkHttpStatus, setCheckHttpStatus] = useState<number | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
+  const versionCheckSequenceRef = useRef(0);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -317,60 +306,89 @@ export const useVersionCheck = () => {
     };
   }, [fetchHealth]);
 
-  useEffect(() => {
+  const checkVersion = useCallback(async () => {
     if (!updateMode) return;
-    const checkVersion = async () => {
-      const clearRelease = () => {
-        setLatestVersion(null);
-        setReleaseInfo(null);
-      };
+    const sequence = versionCheckSequenceRef.current + 1;
+    versionCheckSequenceRef.current = sequence;
+    setCheckStatus((current) => current === 'idle' ? 'checking' : current);
 
-      try {
-        if (updateMode === 'local-main') {
-          clearRelease();
-          const response = await authenticatedFetch('/api/system/update/local');
-          if (response.ok) {
-            const data = await response.json();
-            setLocalUpdateAvailable(data.mode === 'local-main' && data.available === true);
-          }
-          return;
-        }
-        setLocalUpdateAvailable(false);
-        // Release discovery is server-side so private repository credentials are
-        // never exposed to the browser. The endpoint is authenticated just like
-        // the governed updater that consumes the advertised version.
-        const response = await authenticatedFetch('/api/system/release/latest');
-        // Express may honor a conditional request even with a private no-store
-        // response. A 304 means the current release state remains authoritative.
-        if (response.status === 304) return;
+    const currentRequest = () => versionCheckSequenceRef.current === sequence;
+    const clearRelease = () => {
+      setLatestVersion(null);
+      setReleaseInfo(null);
+    };
+    const recordResult = (status: VersionCheckStatus, httpStatus: number | null) => {
+      if (!currentRequest()) return;
+      setCheckStatus(status);
+      setCheckHttpStatus(httpStatus);
+      setLastCheckedAt(Date.now());
+    };
+
+    try {
+      if (updateMode === 'local-main') {
+        clearRelease();
+        const response = await authenticatedFetch('/api/system/update/local');
+        if (!currentRequest()) return;
         if (!response.ok) {
-          clearRelease();
+          setLocalUpdateAvailable(false);
+          recordResult('error', response.status);
           return;
         }
         const data = await response.json();
-
-        if (data.success === true && typeof data.version === 'string') {
-          const latest = data.version;
-          setLatestVersion(latest);
-          setReleaseInfo({
-            title: data.title || data.tagName || latest,
-            body: data.notes || '',
-            // The private repository coordinate never crosses into the browser.
-            htmlUrl: '',
-            publishedAt: data.publishedAt || ''
-          });
-        } else {
-          clearRelease();
-        }
-      } catch {
-        clearRelease();
+        if (!currentRequest()) return;
+        setLocalUpdateAvailable(data.mode === 'local-main' && data.available === true);
+        recordResult('ok', response.status);
+        return;
       }
-    };
 
-    checkVersion();
-    const interval = setInterval(checkVersion, 5 * 60 * 1000); // Check every 5 minutes
-    return () => clearInterval(interval);
+      setLocalUpdateAvailable(false);
+      // Release discovery is server-side so private repository credentials are
+      // never exposed to the browser. The endpoint is authenticated just like
+      // the governed updater that consumes the advertised version.
+      const response = await authenticatedFetch('/api/system/release/latest');
+      if (!currentRequest()) return;
+      // A conditional 304 keeps the previous release authoritative.
+      if (response.status === 304) {
+        recordResult('ok', response.status);
+        return;
+      }
+      if (!response.ok) {
+        clearRelease();
+        recordResult(response.status === 404 ? 'unavailable' : 'error', response.status);
+        return;
+      }
+      const data = await response.json();
+      if (!currentRequest()) return;
+
+      if (data.success === true && typeof data.version === 'string') {
+        const latest = data.version;
+        setLatestVersion(latest);
+        setReleaseInfo({
+          title: data.title || data.tagName || latest,
+          body: data.notes || '',
+          // The private repository coordinate never crosses into the browser.
+          htmlUrl: '',
+          publishedAt: data.publishedAt || '',
+        });
+        recordResult('ok', response.status);
+      } else {
+        clearRelease();
+        recordResult('unavailable', response.status);
+      }
+    } catch {
+      if (!currentRequest()) return;
+      clearRelease();
+      setLocalUpdateAvailable(false);
+      recordResult('error', null);
+    }
   }, [updateMode]);
+
+  useEffect(() => {
+    if (!updateMode) return;
+    void checkVersion();
+    const interval = setInterval(() => void checkVersion(), 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [checkVersion, updateMode]);
 
   const runningVersion = resolveRunningVersion(runtimeVersion, sourceVersion);
   const newerReleaseOffered = Boolean(
@@ -414,5 +432,9 @@ export const useVersionCheck = () => {
     bulkLifecycleActions,
     /** ADR-156 WI-6: null when healthy, otherwise the published reason code. */
     degradedReason,
+    checkStatus,
+    checkHttpStatus,
+    lastCheckedAt,
+    recheck: checkVersion,
   };
 };

@@ -689,7 +689,15 @@
     },
     "loading": "Загрузка...",
     "version": {
-      "updateAvailable": "Доступно обновление: v{{version}}"
+      "updateAvailable": "Доступно обновление: v{{version}}",
+      "upToDate": "Установлена последняя версия",
+      "upToDateAt": "Версия актуальна — проверено в {{time}}",
+      "lastChecked": "Последняя проверка в {{time}}",
+      "checked": "Проверка обновлений завершена",
+      "checkFailed": "Не удалось проверить обновления",
+      "checkFailedCode": "Не удалось проверить обновления (HTTP {{code}})",
+      "noReleases": "Источник обновлений не предоставляет доступный выпуск",
+      "retry": "Повторить"
     },
     "deleteAria": "Delete key {{name}}"
   },

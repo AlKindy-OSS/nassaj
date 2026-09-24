@@ -1,8 +1,8 @@
-import { Info, Scale } from 'lucide-react';
+import { AlertTriangle, Info, RefreshCw, Scale } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { useTheme } from '../../../../contexts/ThemeContext';
-import { useVersionCheck } from '../../../../hooks/useVersionCheck';
+import { useVersionCheck, type VersionCheckStatus } from '../../../../hooks/useVersionCheck';
 import { IS_PLATFORM } from '../../../../constants/config';
 import {
   SOURCE_REPO_URL,
@@ -28,6 +28,74 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
+type VersionCheckStatusLineProps = {
+  status: VersionCheckStatus;
+  httpStatus: number | null;
+  lastCheckedAt: number | null;
+  updateAvailable: boolean;
+  onRetry: () => void;
+};
+
+/** Quiet, accessible evidence of the latest update check result. */
+export function VersionCheckStatusLine({
+  status,
+  httpStatus,
+  lastCheckedAt,
+  updateAvailable,
+  onRetry,
+}: VersionCheckStatusLineProps) {
+  const { t, i18n } = useTranslation('settings');
+  const checkedTime = lastCheckedAt === null
+    ? null
+    : new Date(lastCheckedAt).toLocaleTimeString(i18n.language, {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+  let message: string | null = null;
+  if (status === 'error') {
+    message = httpStatus === null
+      ? t('apiKeys.version.checkFailed')
+      : t('apiKeys.version.checkFailedCode', { code: httpStatus });
+  } else if (status === 'unavailable') {
+    message = t('apiKeys.version.noReleases');
+  } else if (status === 'ok' && updateAvailable) {
+    message = checkedTime
+      ? t('apiKeys.version.lastChecked', { time: checkedTime })
+      : t('apiKeys.version.checked');
+  } else if (status === 'ok') {
+    message = checkedTime
+      ? t('apiKeys.version.upToDateAt', { time: checkedTime })
+      : t('apiKeys.version.upToDate');
+  }
+
+  if (!message) return null;
+  const failed = status === 'error';
+
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className={failed
+        ? 'mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-warning'
+        : 'mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground'}
+    >
+      {failed && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+      <span>{message}</span>
+      {failed && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex min-h-7 items-center gap-1 rounded px-1.5 font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+          {t('apiKeys.version.retry')}
+        </button>
+      )}
+    </p>
+  );
+}
+
 /**
  * تبويب «عن».
  *
@@ -44,7 +112,15 @@ export default function AboutTab() {
   const { isDarkMode } = useTheme();
   // The source link remains public and independent; release discovery uses the
   // authenticated server endpoint backed by the configured private channel.
-  const { updateAvailable, latestVersion, currentVersion } = useVersionCheck();
+  const {
+    updateAvailable,
+    latestVersion,
+    currentVersion,
+    checkStatus,
+    checkHttpStatus,
+    lastCheckedAt,
+    recheck,
+  } = useVersionCheck();
   const repoName = SOURCE_LABEL.split('/').pop() ?? SOURCE_LABEL;
 
   return (
@@ -88,6 +164,13 @@ export default function AboutTab() {
               </span>
             )}
           </div>
+          <VersionCheckStatusLine
+            status={checkStatus}
+            httpStatus={checkHttpStatus}
+            lastCheckedAt={lastCheckedAt}
+            updateAvailable={updateAvailable}
+            onRetry={() => void recheck()}
+          />
         </div>
       </div>
 

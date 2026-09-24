@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "generatedBy": "scripts/permission-launch-inventory.mjs",
-  "siteDigest": "sha256:abed286aa3cfe890012193caa60139d2c0a2ac6649fc997faddb8b4b6a12693e",
-  "digest": "sha256:760eb11a383b05a23137e438c0193b8b20f73da2b72a8fb1a279226f0ba3c602",
+  "siteDigest": "sha256:cbb2b504647a05f1359e557fb2e87f2d7dee8b23eca183c1deaf042fd20825f6",
+  "digest": "sha256:1fe638840fb76c9735cfe47d5b347b15dbd53d950f1898b870689e4d12286c25",
   "entries": [
     {
       "id": "runtime#claude.managed-launcher",
@@ -904,6 +904,20 @@
       "gate": "connector URL/ownership and SSRF policy",
       "adapter": "connector safe fetch",
       "test": "connector auth security tests"
+    },
+    {
+      "id": "server/modules/connectors/connector-auto-setup.ts#child_process.spawnSync#1",
+      "file": "server/modules/connectors/connector-auto-setup.ts",
+      "line": 346,
+      "primitive": "child_process.spawnSync",
+      "expression": "spawnSync",
+      "classification": "infrastructure_effect",
+      "owner": "connector first-boot auto-setup",
+      "purpose": "kernel_auto_setup_lock",
+      "actorSource": "trusted server boot configuration; no request value, command, identity, credential, or model argument reaches the child",
+      "gate": "fixed /usr/bin/flock argv, private non-symlink 0700-equivalent lock directory, O_NOFOLLOW descriptor inherited as fd 3, shell false, status zero only, and fail-closed unavailable/contended handling",
+      "adapter": "acquireLock",
+      "test": "connector-auto-setup.test.ts"
     },
     {
       "id": "server/modules/connectors/connector-oauth-flow.ts#http.fetch#1",

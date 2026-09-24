@@ -34,8 +34,11 @@ let cleanupReturnsEmpty = false;
 let targetsReturnEmpty = false;
 let connectorRow: Record<string, unknown> | null = null;
 
+// Preserve the real grant identity verifier for transitive OAuth imports.
+const actualGrantService = await import('./connector-user-grant.service.js');
 mock.module('@/modules/connectors/connector-user-grant.service.js', {
   namedExports: {
+    ...actualGrantService,
     isAuthorizedConnectorGrantMaterialReference: () => true,
   },
 });

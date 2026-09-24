@@ -689,7 +689,15 @@
     },
     "loading": "Yükleniyor...",
     "version": {
-      "updateAvailable": "Güncelleme mevcut: v{{version}}"
+      "updateAvailable": "Güncelleme mevcut: v{{version}}",
+      "upToDate": "En son sürümü kullanıyorsunuz",
+      "upToDateAt": "Güncel — {{time}} tarihinde kontrol edildi",
+      "lastChecked": "Son kontrol {{time}}",
+      "checked": "Güncelleme kontrolü tamamlandı",
+      "checkFailed": "Güncelleme kontrolü başarısız",
+      "checkFailedCode": "Güncelleme kontrolü başarısız (HTTP {{code}})",
+      "noReleases": "Güncelleme kaynağında kullanılabilir sürüm yok",
+      "retry": "Yeniden dene"
     },
     "deleteAria": "Delete key {{name}}"
   },

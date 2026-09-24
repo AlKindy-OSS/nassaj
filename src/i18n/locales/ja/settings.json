@@ -689,7 +689,15 @@
     },
     "loading": "読み込み中...",
     "version": {
-      "updateAvailable": "アップデートあり: v{{version}}"
+      "updateAvailable": "アップデートあり: v{{version}}",
+      "upToDate": "最新バージョンです",
+      "upToDateAt": "最新です — {{time}} に確認",
+      "lastChecked": "最終確認 {{time}}",
+      "checked": "アップデート確認が完了しました",
+      "checkFailed": "アップデートを確認できませんでした",
+      "checkFailedCode": "アップデートを確認できませんでした（HTTP {{code}}）",
+      "noReleases": "アップデート元に利用可能なリリースがありません",
+      "retry": "再試行"
     },
     "deleteAria": "Delete key {{name}}"
   },

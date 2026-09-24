@@ -18,7 +18,9 @@ import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import DateSeparator from './DateSeparator';
+import RunningActivityGapCard from './RunningActivityGapCard';
 import SessionIdleWarning from './SessionIdleWarning';
+import { getRunningActivityGap } from './runningActivityGap';
 
 // Parse a ChatMessage timestamp (string | number | Date) into a valid Date, or null.
 function toValidDate(timestamp: string | number | Date | undefined): Date | null {
@@ -272,6 +274,11 @@ export default function ChatMessagesPane({
     return null;
   }, [chatMessages]);
 
+  const activityGap = useMemo(
+    () => getRunningActivityGap(chatMessages, isStreaming, showToolCalls === true),
+    [chatMessages, isStreaming, showToolCalls],
+  );
+
   return (
     <div
       ref={scrollContainerRef}
@@ -465,6 +472,10 @@ export default function ChatMessagesPane({
               </Fragment>
             );
           })}
+
+          {activityGap.visible && activityGap.lastActivityAt !== null && (
+            <RunningActivityGapCard lastActivityAt={activityGap.lastActivityAt} />
+          )}
 
           {/* تنبيه الخمول — يظهر بعد مدة كاش الهارنس على آخر رسالة خارج البثّ.
               يُعرض داخل منطقة التمرير لأنه يتبع آخر رسالة بصرياً، لا بعدها. */}

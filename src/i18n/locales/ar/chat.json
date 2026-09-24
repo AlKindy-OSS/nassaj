@@ -976,6 +976,10 @@
     "turnTokens": "توكن",
     "turnCostUnavailable": "كلفة الدور غير متاحة"
   },
+  "activityGap": {
+    "status": "الوكيل يعمل — آخر نشاط منذ {{time}}",
+    "ariaLabel": "الوكيل ما زال يعمل، آخر نشاط منذ {{time}}"
+  },
   "closeConversation": {
     "close": "إغلاق المحادثة",
     "reopen": "إعادة فتح المحادثة",

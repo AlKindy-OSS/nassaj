@@ -653,6 +653,10 @@
     "turnTokens": "tokens",
     "turnCostUnavailable": "Turn cost unavailable"
   },
+  "activityGap": {
+    "status": "Ajan çalışıyor — son etkinlik {{time}} önce",
+    "ariaLabel": "Ajan hâlâ çalışıyor, son etkinlik {{time}} önce"
+  },
   "closeConversation": {
     "close": "Konuşmayı kapat",
     "reopen": "Konuşmayı yeniden aç",

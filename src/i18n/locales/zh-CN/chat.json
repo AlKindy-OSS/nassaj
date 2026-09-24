@@ -651,6 +651,10 @@
     "turnTokens": "tokens",
     "turnCostUnavailable": "Turn cost unavailable"
   },
+  "activityGap": {
+    "status": "智能体正在工作 — 最近一次活动在 {{time}} 前",
+    "ariaLabel": "智能体仍在工作，最近一次活动在 {{time}} 前"
+  },
   "closeConversation": {
     "close": "关闭对话",
     "reopen": "重新打开对话",

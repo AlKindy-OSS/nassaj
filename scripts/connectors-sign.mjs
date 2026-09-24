@@ -12,12 +12,17 @@
  *
  * Commands: keygen | trust | pack | renew   (run with --help for usage).
  *
+ * The minting/crypto/key-custody logic lives in the shared, server-side module
+ * `connector-signing-core` (compiled to dist-server) so the boot auto-setup
+ * (ADR-162, T-1831) reuses one implementation instead of duplicating it. This
+ * script is the CLI adapter: argument parsing, file I/O, and human output only.
+ *
  * Note: the headless owner-auth refusal in connectors-trust.mjs / connectors-setup.mjs
  * is intentional and untouched. This tool only PRODUCES artifacts on disk; importing
  * them into a live installation still goes through the browser owner Setup handlers.
  */
 
-import { generateKeyPairSync, sign, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +32,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 const DIST = path.join(REPO_ROOT, 'dist-server');
 
-// Runs at import time, outside main()'s SignExit handler, so it refuses with exit 2 directly.
+// Runs at import time, outside main()'s catch, so it refuses with exit 2 directly.
 const need = rel => {
   const abs = path.join(DIST, rel);
   if (!fs.existsSync(abs)) {
@@ -66,106 +71,33 @@ function warnIfDistStale() {
 }
 warnIfDistStale();
 
-const packMod = await import(need('server/modules/connectors/connector-global-certification-pack.js'));
-const trustMod = await import(need('server/modules/connectors/connector-trust-bundle.js'));
-const manifestMod = await import(need('server/modules/connectors/connector-runtime-manifest.js'));
-const policyMod = await import(need('server/modules/connectors/connector-policy-v2.js'));
-const fenceMod = await import(need('server/modules/connectors/connector-runtime-fence.js'));
-const jcsMod = await import(need('server/modules/connectors/connector-jcs.js'));
-const registryMod = await import(need('shared/connector-auth-registry.js'));
+const core = await import(need('server/modules/connectors/connector-signing-core.js'));
 
 const {
-  connectorGlobalPackSignedBytes, connectorGlobalPackDigest, verifyConnectorGlobalCertificationPack,
-  CONNECTOR_GLOBAL_PACK_DOMAIN, CONNECTOR_GLOBAL_PACK_STANDARD_TTL_MS, CONNECTOR_GLOBAL_PACK_MAX_TTL_MS,
-} = packMod;
-const { parseConnectorTrustBundle, connectorTrustBundleDigest } = trustMod;
-const { CONNECTOR_RUNTIME_MANIFEST, CONNECTOR_RUNTIME_PACK_EXPECTATIONS } = manifestMod;
-const { KILLABLE_CONNECTOR_OPERATIONS } = policyMod;
-const { CONNECTOR_RUNTIME_FLOOR, CONNECTOR_POLICY_SCHEMA_VERSION } = fenceMod;
-const { connectorJcs } = jcsMod;
-const { PROVIDER_AUTH_SPECS } = registryMod;
+  ConnectorSigningError, CONNECTOR_SIGNING_DEFAULT_CERTIFY,
+  assertSafeConnectorKeyDir, validateConnectorSigningId,
+  connectorPrivateKeyPath, connectorPublicKeyPath, connectorPublicKeyFingerprint,
+  writeConnectorSigningFile, readConnectorPrivateKey, generateConnectorEd25519KeyPair,
+  parseConnectorCertifySpec, buildConnectorTrustBundle, buildConnectorGlobalPack,
+  signAndVerifyConnectorGlobalPack, loadConnectorTrustBundle, connectorTrustBundleDigestB64u,
+} = core;
 
-const KILLABLE = new Set(KILLABLE_CONNECTOR_OPERATIONS);
-
+class SignExit extends Error {}
 function fail(code, detail) {
   process.stdout.write(`FAIL ${code}: ${detail}\n`);
   process.exitCode = 2;
   throw new SignExit(code);
 }
-class SignExit extends Error {}
 
+const GIT_DIR = path.join(REPO_ROOT, '.git');
 const DEFAULT_KEY_DIR = path.join(os.homedir(), '.config', 'nassaj', 'connector-signing');
-const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 const arg = (args, flag, fallback = null) => {
   const at = args.indexOf(flag);
   return at >= 0 && at + 1 < args.length ? args[at + 1] : fallback;
 };
 const has = (args, flag) => args.includes(flag);
-
-/** Reject key directories inside the repo/.git or on tmpfs (RAM-backed, per NASSAJ rules). */
-function assertSafeKeyDir(dir) {
-  const resolved = path.resolve(dir);
-  const gitDir = path.join(REPO_ROOT, '.git');
-  if (resolved === gitDir || resolved.startsWith(gitDir + path.sep)) {
-    fail('CONNECTOR_SIGN_KEYDIR_FORBIDDEN', `Refusing to place private keys under .git (${resolved}).`);
-  }
-  for (const bad of ['/tmp', '/dev/shm']) {
-    if (resolved === bad || resolved.startsWith(bad + path.sep)) {
-      fail('CONNECTOR_SIGN_KEYDIR_FORBIDDEN',
-        `Refusing tmpfs path ${resolved}; RAM-backed dirs never release memory. Use /var/tmp or a disk path.`);
-    }
-  }
-  // T-1540: name lists miss tmpfs mounted elsewhere (e.g. a bind mount). Detect RAM-backed
-  // filesystems by their statfs magic on the nearest existing ancestor of the target.
-  if (typeof fs.statfsSync === 'function') {
-    const TMPFS_MAGIC = 0x01021994;
-    const RAMFS_MAGIC = 0x858458f6;
-    let probe = resolved;
-    while (!fs.existsSync(probe)) {
-      const parent = path.dirname(probe);
-      if (parent === probe) { probe = null; break; }
-      probe = parent;
-    }
-    if (probe) {
-      try {
-        const fsType = Number(fs.statfsSync(probe).type);
-        if (fsType === TMPFS_MAGIC || fsType === RAMFS_MAGIC) {
-          fail('CONNECTOR_SIGN_KEYDIR_FORBIDDEN',
-            `Refusing RAM-backed (tmpfs/ramfs) path ${resolved}; such dirs never release memory. `
-            + 'Use /var/tmp or a disk path.');
-        }
-      } catch (error) {
-        if (error instanceof SignExit) throw error; // propagate our own refusal
-        // statfs unavailable/unsupported: fall back to the name checks above.
-      }
-    }
-  }
-  return resolved;
-}
-
-const privatePath = (dir, keyId) => path.join(dir, `${keyId}.private.pem`);
-const publicPath = (dir, keyId) => path.join(dir, `${keyId}.public.pem`);
-const fingerprint = pubPem =>
-  createHash('sha256').update(pubPem, 'utf8').digest('hex').replace(/(.{2})/g, '$1:').slice(0, 47);
-const sha256b64u = value => createHash('sha256').update(connectorJcs(value), 'utf8').digest('base64url');
-const nowIso = () => new Date().toISOString();
-const plusDaysIso = (fromMs, days) => new Date(fromMs + days * 86_400_000).toISOString();
-
-function validId(value, label) {
-  if (!ID_RE.test(value)) fail('CONNECTOR_SIGN_ID_INVALID', `${label} "${value}" is not a valid connector id.`);
-  return value;
-}
-
-function readPrivateKey(dir, keyId) {
-  const p = privatePath(dir, keyId);
-  const stat = fs.lstatSync(p, { throwIfNoEntry: false });
-  if (!stat || !stat.isFile()) fail('CONNECTOR_SIGN_KEY_MISSING', `No private key at ${p}. Run keygen first.`);
-  if ((stat.mode & 0o077) !== 0) {
-    fail('CONNECTOR_SIGN_KEY_PERMISSIONS', `Private key ${p} is group/other readable; expected mode 0600.`);
-  }
-  return fs.readFileSync(p, 'utf8');
-}
+const safeDir = raw => assertSafeConnectorKeyDir(arg(raw, '--dir', DEFAULT_KEY_DIR), GIT_DIR);
 
 function readJsonFile(p, label) {
   const stat = fs.lstatSync(p, { throwIfNoEntry: false });
@@ -174,160 +106,43 @@ function readJsonFile(p, label) {
   catch { fail('CONNECTOR_SIGN_INPUT_JSON_INVALID', `${label} at ${p} is not valid JSON.`); }
 }
 
-function writeFileStrict(p, contents, mode) {
-  fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(p, contents, { mode });
-  fs.chmodSync(p, mode);
-}
-
-// --- certify spec: provider:service:op1,op2:authMethod ------------------------
-const DEFAULT_CERTIFY = 'github:github:profile.configure,credential.verify,credential.use,placement.write:api_key';
-const AUTH_METHODS = new Set(['dcr_pkce', 'byo_app', 'api_key']);
-
-function parseCertify(spec) {
-  const parts = spec.split(':');
-  if (parts.length !== 4) {
-    fail('CONNECTOR_SIGN_CERTIFY_INVALID',
-      `--certify "${spec}" must be provider:service:op1,op2,...:authMethod`);
-  }
-  const [providerId, serviceId, opsRaw, authMethod] = parts;
-  validId(providerId, 'providerId');
-  validId(serviceId, 'serviceId');
-  if (!AUTH_METHODS.has(authMethod)) fail('CONNECTOR_SIGN_AUTH_METHOD_INVALID', `authMethod "${authMethod}" unknown.`);
-  const operations = opsRaw.split(',').map(o => o.trim()).filter(Boolean);
-  if (operations.length === 0) fail('CONNECTOR_SIGN_CERTIFY_INVALID', `--certify "${spec}" lists no operations.`);
-  for (const op of operations) {
-    if (!KILLABLE.has(op)) fail('CONNECTOR_SIGN_OPERATION_INVALID', `operation "${op}" is not a killable connector op.`);
-  }
-  const provider = PROVIDER_AUTH_SPECS.find(s => s.profileId === providerId && s.services.includes(serviceId));
-  if (!provider) {
-    fail('CONNECTOR_SIGN_PROVIDER_UNKNOWN',
-      `provider/service ${providerId}/${serviceId} is not in this build's connector auth registry.`);
-  }
-  // Per-certification shape/contract digests are deterministic, build-derived documentary
-  // bindings (verifier checks format only; the runtime binding is registry/operations/capability).
-  const shapeDigest = sha256b64u({ providerId, serviceId, method: provider.method, services: provider.services });
-  const contractDigest = sha256b64u({
-    providerId, serviceId, authMethod,
-    probe: provider.serviceProbe ?? null, expectedIssuer: provider.expectedIssuer ?? null,
-  });
-  return operations.map(operation => ({
-    providerId, serviceId, operation, authMethod,
-    shapeRevision: 1, shapeDigest, contractRevision: 1, contractDigest, status: 'certified',
-  }));
-}
-
-function buildPack({ issuer, keyId, channel, sequence, issuedAtMs, ttlDays, certifications }) {
-  const maxDays = channel === 'stable'
-    ? CONNECTOR_GLOBAL_PACK_STANDARD_TTL_MS / 86_400_000
-    : CONNECTOR_GLOBAL_PACK_MAX_TTL_MS / 86_400_000;
-  if (ttlDays <= 0 || ttlDays > maxDays) {
-    fail('CONNECTOR_SIGN_TTL_INVALID', `--ttl-days must be in 1..${maxDays} for channel ${channel}.`);
-  }
-  return {
-    schemaVersion: 1,
-    domain: CONNECTOR_GLOBAL_PACK_DOMAIN,
-    issuerId: issuer,
-    channel,
-    sequence,
-    issuedAt: new Date(issuedAtMs).toISOString(),
-    expiresAt: plusDaysIso(issuedAtMs, ttlDays),
-    minimumRuntimeFloor: CONNECTOR_RUNTIME_FLOOR,
-    maximumPolicySchemaVersion: CONNECTOR_POLICY_SCHEMA_VERSION,
-    registryRevision: CONNECTOR_RUNTIME_MANIFEST.registryRevision,
-    registryDigest: CONNECTOR_RUNTIME_MANIFEST.registryDigest,
-    operationsRevision: CONNECTOR_RUNTIME_MANIFEST.operationsRevision,
-    operationsDigest: CONNECTOR_RUNTIME_MANIFEST.operationsDigest,
-    capabilityRevision: CONNECTOR_RUNTIME_MANIFEST.capabilityRevision,
-    capabilityDigest: CONNECTOR_RUNTIME_MANIFEST.capabilityDigest,
-    certifications,
-    signingKeyId: keyId,
-  };
-}
-
-function signAndVerify({ pack, privateKeyPem, trustBundle, sequence }) {
-  const signature = sign(null, connectorGlobalPackSignedBytes(pack), privateKeyPem).toString('base64url');
-  const envelope = { pack, signature };
-  const result = verifyConnectorGlobalCertificationPack(envelope, {
-    now: new Date(),
-    wallClockHighWaterMs: 0,
-    priorSequence: sequence - 1,
-    minimumTrustBundleRevision: trustBundle.revision,
-    runtimeFloor: CONNECTOR_RUNTIME_FLOOR,
-    policySchemaVersion: CONNECTOR_POLICY_SCHEMA_VERSION,
-    trustBundle,
-    ...CONNECTOR_RUNTIME_PACK_EXPECTATIONS,
-  });
-  if (!result.verified) {
-    fail('CONNECTOR_SIGN_SELF_VERIFY_FAILED',
-      `Production verifier rejected the freshly signed pack: ${result.reason}.`);
-  }
-  return { envelope, digest: result.digest };
-}
-
-function loadTrust(p) {
-  const bundle = parseConnectorTrustBundle(readJsonFile(p, 'trust bundle'));
-  if (!bundle) fail('CONNECTOR_SIGN_TRUST_INVALID', `Trust bundle at ${p} failed the production parser.`);
-  return bundle;
-}
-
 // --- commands -----------------------------------------------------------------
 
 function cmdKeygen(args) {
-  const dir = assertSafeKeyDir(arg(args, '--dir', DEFAULT_KEY_DIR));
-  const keyId = validId(arg(args, '--key-id', `owner-${createHash('sha256')
+  const dir = safeDir(args);
+  const keyId = validateConnectorSigningId(arg(args, '--key-id', `owner-${createHash('sha256')
     .update(String(Date.now()) + Math.random()).digest('hex').slice(0, 12)}`), 'key-id');
-  const issuer = validId(arg(args, '--issuer', 'nassaj-oss-owner'), 'issuer');
-  const priv = privatePath(dir, keyId);
-  const pub = publicPath(dir, keyId);
+  const issuer = validateConnectorSigningId(arg(args, '--issuer', 'nassaj-oss-owner'), 'issuer');
+  const priv = connectorPrivateKeyPath(dir, keyId);
+  const pub = connectorPublicKeyPath(dir, keyId);
   if (!has(args, '--force') && (fs.existsSync(priv) || fs.existsSync(pub))) {
     fail('CONNECTOR_SIGN_KEY_EXISTS', `Key ${keyId} already exists in ${dir}; pass --force to overwrite.`);
   }
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  writeFileStrict(priv, privateKeyPem, 0o600);
-  writeFileStrict(pub, publicKeyPem, 0o644);
+  const { privateKeyPem, publicKeyPem } = generateConnectorEd25519KeyPair();
+  writeConnectorSigningFile(priv, privateKeyPem, 0o600);
+  writeConnectorSigningFile(pub, publicKeyPem, 0o644);
   process.stdout.write(JSON.stringify({
     ok: true, command: 'keygen', keyId, issuer,
-    fingerprintSha256: fingerprint(publicKeyPem),
-    privateKeyPath: priv, publicKeyPath: pub,
+    fingerprintSha256: connectorPublicKeyFingerprint(publicKeyPem), privateKeyPath: priv, publicKeyPath: pub,
   }, null, 2) + '\n');
 }
 
 function cmdTrust(args) {
-  const dir = assertSafeKeyDir(arg(args, '--dir', DEFAULT_KEY_DIR));
-  const keyId = validId(arg(args, '--key-id'), 'key-id');
-  const issuer = validId(arg(args, '--issuer', 'nassaj-oss-owner'), 'issuer');
+  const dir = safeDir(args);
+  const keyId = validateConnectorSigningId(arg(args, '--key-id'), 'key-id');
+  const issuer = validateConnectorSigningId(arg(args, '--issuer', 'nassaj-oss-owner'), 'issuer');
   const out = arg(args, '--out');
   if (!out) fail('CONNECTOR_SIGN_ARGUMENT_INVALID', '--out <trust-bundle.json> is required.');
   const revision = Number(arg(args, '--revision', '1'));
-  if (!Number.isSafeInteger(revision) || revision < 1) {
-    fail('CONNECTOR_SIGN_REVISION_INVALID', '--revision must be a positive integer (1 for first import).');
-  }
   const validDays = Number(arg(args, '--valid-days', '400'));
-  if (!Number.isSafeInteger(validDays) || validDays < 1) fail('CONNECTOR_SIGN_ARGUMENT_INVALID', '--valid-days invalid.');
   const revokedRaw = arg(args, '--revoked', '');
   const revokedKeyIds = revokedRaw ? revokedRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  for (const rk of revokedKeyIds) validId(rk, 'revoked keyId');
-  const pubStat = fs.lstatSync(publicPath(dir, keyId), { throwIfNoEntry: false });
+  const pubStat = fs.lstatSync(connectorPublicKeyPath(dir, keyId), { throwIfNoEntry: false });
   if (!pubStat) fail('CONNECTOR_SIGN_KEY_MISSING', `No public key for ${keyId} in ${dir}. Run keygen first.`);
-  const publicKeyPem = fs.readFileSync(publicPath(dir, keyId), 'utf8');
-  const nowMs = Date.now();
-  const bundle = {
-    schemaVersion: 1,
-    revision,
-    distributionIssuerId: issuer,
-    roots: [{
-      issuerId: issuer, keyId, algorithm: 'Ed25519', publicKeyPem,
-      validFrom: new Date(nowMs).toISOString(), validUntil: plusDaysIso(nowMs, validDays),
-      source: 'owner_import',
-    }],
-    revokedKeyIds,
-  };
-  const parsed = parseConnectorTrustBundle(bundle);
-  if (!parsed) fail('CONNECTOR_SIGN_TRUST_INVALID', 'Assembled trust bundle failed the production parser.');
-  writeFileStrict(path.resolve(out), JSON.stringify(bundle, null, 2) + '\n', 0o644);
+  const publicKeyPem = fs.readFileSync(connectorPublicKeyPath(dir, keyId), 'utf8');
+  const bundle = buildConnectorTrustBundle({ issuer, keyId, publicKeyPem, revision, validDays,
+    revokedKeyIds, nowMs: Date.now() });
+  writeConnectorSigningFile(path.resolve(out), JSON.stringify(bundle, null, 2) + '\n', 0o644);
   // Key rotation is NOT importable today: owner Setup rejects any trust bundle at
   // revision > 1 with CONNECTOR_TRUST_ROTATION_REQUIRES_RECOVERY (409) because the
   // recovery flow is not wired (see connector-owner-setup.service.ts importTrust). Do
@@ -342,7 +157,7 @@ function cmdTrust(args) {
   }
   process.stdout.write(JSON.stringify({
     ok: true, command: 'trust', out: path.resolve(out), revision, issuer, keyId,
-    revokedKeyIds, digest: connectorTrustBundleDigest(parsed).toString('base64url'),
+    revokedKeyIds, digest: connectorTrustBundleDigestB64u(bundle),
     note: revision === 1
       ? 'First import: owner Setup requires revision 1 (rotation needs the recovery flow).'
       : 'NOT IMPORTABLE: owner Setup rejects revision > 1 with CONNECTOR_TRUST_ROTATION_REQUIRES_RECOVERY '
@@ -351,27 +166,23 @@ function cmdTrust(args) {
 }
 
 function cmdPack(args, { renew = false } = {}) {
-  const dir = assertSafeKeyDir(arg(args, '--dir', DEFAULT_KEY_DIR));
+  const dir = safeDir(args);
   const trustFile = arg(args, '--trust');
   if (!trustFile) fail('CONNECTOR_SIGN_ARGUMENT_INVALID', '--trust <trust-bundle.json> is required.');
   const out = arg(args, '--out');
   if (!out) fail('CONNECTOR_SIGN_ARGUMENT_INVALID', '--out <pack.json> is required.');
-  const trustBundle = loadTrust(trustFile);
+  const trustBundle = loadConnectorTrustBundle(readJsonFile(path.resolve(trustFile), 'trust bundle'));
   const ttlDays = Number(arg(args, '--ttl-days', '30'));
 
-  let issuer;
-  let keyId;
-  let channel;
-  let certifications;
-  let sequence;
+  let issuer; let keyId; let channel; let certifications; let sequence;
   if (renew) {
     // Re-mint the current pack: inherit issuer/key/channel/certifications, refresh expiry (T-1527).
     const prior = readJsonFile(path.resolve(arg(args, '--in')), 'existing pack');
     if (!prior || typeof prior !== 'object' || !prior.pack) {
       fail('CONNECTOR_SIGN_INPUT_JSON_INVALID', '--in must be a signed pack envelope {pack, signature}.');
     }
-    issuer = validId(prior.pack.issuerId, 'issuer');
-    keyId = validId(prior.pack.signingKeyId, 'key-id');
+    issuer = validateConnectorSigningId(prior.pack.issuerId, 'issuer');
+    keyId = validateConnectorSigningId(prior.pack.signingKeyId, 'key-id');
     channel = prior.pack.channel;
     certifications = prior.pack.certifications;
     const priorSeq = Number(prior.pack.sequence);
@@ -380,23 +191,20 @@ function cmdPack(args, { renew = false } = {}) {
       fail('CONNECTOR_SIGN_SEQUENCE_INVALID', `renew sequence ${sequence} must exceed prior ${priorSeq}.`);
     }
   } else {
-    keyId = validId(arg(args, '--key-id'), 'key-id');
-    issuer = validId(arg(args, '--issuer', 'nassaj-oss-owner'), 'issuer');
+    keyId = validateConnectorSigningId(arg(args, '--key-id'), 'key-id');
+    issuer = validateConnectorSigningId(arg(args, '--issuer', 'nassaj-oss-owner'), 'issuer');
     channel = arg(args, '--channel', 'stable');
     const specs = [];
     for (let i = 0; i < args.length; i++) if (args[i] === '--certify') specs.push(args[i + 1]);
-    if (specs.length === 0) specs.push(DEFAULT_CERTIFY);
-    certifications = specs.flatMap(parseCertify);
+    if (specs.length === 0) specs.push(CONNECTOR_SIGNING_DEFAULT_CERTIFY);
+    certifications = specs.flatMap(parseConnectorCertifySpec);
     sequence = Number(arg(args, '--sequence', '1'));
   }
-  const privateKeyPem = readPrivateKey(dir, keyId);
-  if (!Number.isSafeInteger(sequence) || sequence < 1) fail('CONNECTOR_SIGN_SEQUENCE_INVALID', '--sequence invalid.');
-
-  const pack = buildPack({
-    issuer, keyId, channel, sequence, issuedAtMs: Date.now(), ttlDays, certifications,
-  });
-  const { envelope, digest } = signAndVerify({ pack, privateKeyPem, trustBundle, sequence });
-  writeFileStrict(path.resolve(out), JSON.stringify(envelope, null, 2) + '\n', 0o644);
+  const privateKeyPem = readConnectorPrivateKey(dir, keyId);
+  const pack = buildConnectorGlobalPack({ issuer, keyId, channel, sequence,
+    issuedAtMs: Date.now(), ttlDays, certifications });
+  const { envelope, digest } = signAndVerifyConnectorGlobalPack({ pack, privateKeyPem, trustBundle, sequence });
+  writeConnectorSigningFile(path.resolve(out), JSON.stringify(envelope, null, 2) + '\n', 0o644);
   process.stdout.write(JSON.stringify({
     ok: true, command: renew ? 'renew' : 'pack', out: path.resolve(out),
     issuer, keyId, channel, sequence, issuedAt: pack.issuedAt, expiresAt: pack.expiresAt, digest,
@@ -442,6 +250,11 @@ function main() {
     else fail('CONNECTOR_SIGN_COMMAND_UNKNOWN', `Unknown command "${command}". Run --help.`);
   } catch (error) {
     if (error instanceof SignExit) return;
+    if (error instanceof ConnectorSigningError) {
+      process.stdout.write(`FAIL ${error.code}: ${error.detail}\n`);
+      process.exitCode = 2;
+      return;
+    }
     process.stdout.write(`FAIL CONNECTOR_SIGN_UNEXPECTED: ${error instanceof Error ? error.message : error}\n`);
     process.exitCode = 2;
   }

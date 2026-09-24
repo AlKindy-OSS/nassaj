@@ -11,9 +11,8 @@ import { migrateConnectorAuthSchema } from '../database/connector-auth.migration
 import { migrateConnectorPolicyV2Substrate } from '../database/connector-policy-v2.migration.js';
 import { createConnectorAuthDb } from '../database/repositories/connector-auth.db.js';
 /* eslint-enable boundaries/dependencies */
-
-// eslint-disable-next-line boundaries/no-unknown -- test derives the certified api_key spec.
 import { providerAuthSpecFor } from '../../../shared/connector-auth-registry.js';
+
 import { createConnectorProfileManagementService } from './connector-auth-profile-management.js';
 import { CONNECTOR_GLOBAL_PACK_DOMAIN, connectorGlobalPackDigest,
   connectorGlobalPackSignedBytes } from './connector-global-certification-pack.js';
@@ -106,6 +105,7 @@ test('B-848: real provider-effect gate denies shared api-key CredentialVerify be
   Object.assign(process.env, {
     NASSAJ_CONNECTOR_AUTH_REGISTRY_V1: '1', NASSAJ_CONNECTOR_AUTH_CERT_GITHUB: '1',
     NASSAJ_CONNECTOR_GRANT_CERT_GITHUB: '1',
+    NASSAJ_CONNECTOR_AUTO_SETUP: '0',
   });
   const directory = mkdtempSync(join(process.cwd(), '.artifacts', 'nassaj-auth-profile-gate-integration-'));
   const database = new Database(':memory:');

@@ -25,6 +25,7 @@ import { connectorEnvironmentOriginProposal,
 import { connectorRecentAuthCookieName,
   createConnectorOwnerOperationGate } from './connector-owner-operation-gate.js';
 import { configureConnectorOwnerAuthSessionProduction } from './connector-owner-auth-session.js';
+import { runConnectorAutoSetupOnBoot } from './connector-auto-setup.js';
 import { createConnectorOwnerSetupRoutes } from './connector-owner-setup.routes.js';
 import { ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
 import { ConnectorProvisioningService } from './connector-provisioning.service.js';
@@ -414,6 +415,22 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
     runtime = Object.freeze({ installationId: id, routes, ownerSetupRoutes, provisioningRoutes, originResolver,
       database, authority, setupStore });
     unavailableReason = 'ready';
+    // ADR-162 / T-1831: opt-in first-boot operator auto-setup. Runs only after the
+    // substrate is ready, is a no-op unless NASSAJ_CONNECTOR_AUTO_SETUP=1 with a valid
+    // origin, and is fail-closed. It returns a result rather than throwing; the extra
+    // try/catch here is defense-in-depth so this OPTIONAL step can never turn a ready
+    // substrate into substrate_unavailable (which the outer catch below would do).
+    try {
+      const autoSetup = runConnectorAutoSetupOnBoot({ database, installationId: id, authority,
+        service: setupService, setupStore, env: process.env, now, repoRoot: process.cwd() });
+      if (autoSetup.blocker) {
+        console.warn(`[connector-substrate] first-boot auto-setup did not complete: ${autoSetup.blocker}.`);
+      }
+    } catch (autoSetupError) {
+      const code = autoSetupError instanceof Error
+        ? (autoSetupError as { code?: string }).code ?? autoSetupError.name : 'unknown';
+      console.warn(`[connector-substrate] first-boot auto-setup threw unexpectedly and was contained: ${code}.`);
+    }
     return Object.freeze({ ready: true, reason: 'ready' });
   } catch { runtime = null; lifecycleWrite = null; unavailableReason = 'substrate_unavailable';
     return Object.freeze({ ready: false, reason: unavailableReason }); }
