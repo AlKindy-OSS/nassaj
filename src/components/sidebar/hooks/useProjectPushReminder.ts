@@ -5,12 +5,18 @@ import { authenticatedFetch } from '../../../utils/api';
 type RemoteStatus = {
   hasUpstream?: unknown;
   ahead?: unknown;
+  isRepositoryRoot?: unknown;
 };
 
 /**
  * Loads the push reminder only when its project row approaches the viewport.
  * A failed or malformed response is intentionally indistinguishable from an
  * ineligible project, so the sidebar never exposes Git state it cannot prove.
+ *
+ * The reminder shows only when the folder is the repository root
+ * (`isRepositoryRoot === true`). A nested project folder whose git repo lives
+ * in an ancestor directory would otherwise inherit that repo's ahead count and
+ * falsely advertise unpushed commits; a missing field stays hidden (fail-closed).
  */
 export function useProjectPushReminder(projectId: string): {
   visibilityRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -47,7 +53,8 @@ export function useProjectPushReminder(projectId: string): {
         if (!response.ok) return;
         const status = (await response.json()) as RemoteStatus;
         const aheadCount = status.ahead;
-        const isAhead = status.hasUpstream === true
+        const isAhead = status.isRepositoryRoot === true
+          && status.hasUpstream === true
           && typeof aheadCount === 'number'
           && Number.isSafeInteger(aheadCount)
           && aheadCount > 0;

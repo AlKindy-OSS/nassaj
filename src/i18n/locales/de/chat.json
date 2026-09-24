@@ -260,6 +260,7 @@
     "showAllCommands": "Alle Befehle anzeigen",
     "clearInput": "Eingabe leeren",
     "scrollToBottom": "Nach unten scrollen",
+    "scrollToBottomAndSync": "Nach unten & aktualisieren",
     "dropFilesHere": "Dateien hier ablegen",
     "nonClaudeAttachmentHint": "Anhänge werden nur mit Claude verwendet",
     "voice": {
@@ -608,7 +609,6 @@
     "unknown": "Ein unerwarteter Serverfehler ist aufgetreten"
   },
   "refreshChat": {
-    "button": "Chat aktualisieren",
     "refreshing": "Wird aktualisiert…"
   },
   "composerMode": {

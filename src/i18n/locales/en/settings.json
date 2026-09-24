@@ -2228,6 +2228,7 @@
     "saveFailed": "Could not save the server. Check the fields and try again.",
     "removeFailed": "Could not delete the server. Try again.",
     "connectionFailed": "Could not connect. Check the URL, key and running service, then try again.",
+    "authFailed": "The model server key is incorrect. Check the API key in the server settings.",
     "settingsFailed": "Could not save the activation setting. Try again.",
     "retry": "Retry",
     "previous": "Previous",

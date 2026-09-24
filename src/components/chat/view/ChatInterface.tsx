@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw } from 'lucide-react';
 
 import { useConversationCost } from '../hooks/useConversationCost';
 import { ConversationCostContext } from '../context/ConversationCostContext';
@@ -14,6 +13,7 @@ import type { LLMProvider } from '../../../types/app';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import {
   bumpSessionActivityEpoch,
+  resolveScrollResyncRoute,
   shouldClearLoadingAfterRecovery,
   shouldShowManualRefresh,
 } from '../hooks/sessionActivity';
@@ -57,6 +57,8 @@ import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuth
 import { resolveIdleThresholdMs } from '../utils/idleThreshold';
 import { resolveFallbackProvider, shouldResetProvider } from '../../provider-auth/providerAuthFilter';
 import { useServerErrorBanner } from '../hooks/useServerErrorBanner';
+// T-1822: إخطار مخزن الاستخدام المشترك عند انتهاء كل دور.
+import { notifyClaudeUsageTurnEnd } from '../../quick-settings-panel/hooks/useClaudeUsageShared';
 
 import { buildTurnsMap } from './subcomponents/conversationCostFormat';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
@@ -324,6 +326,7 @@ function ChatInterface({
     isLoadingAllMessages,
     loadAllJustFinished,
     requestDeferredHistory,
+    requestStreamGapRecovery,
     showLoadAllOverlay,
     claudeStatus,
     setClaudeStatus,
@@ -859,7 +862,7 @@ function ChatInterface({
     setInput((current) => (current.trim() ? current : text));
   }, [setInput]);
 
-  useChatRealtimeHandlers({
+  const { requestStreamGapRecovery: resumeStreamRecovery } = useChatRealtimeHandlers({
     latestMessage,
     reconnectEpoch,
     controlFrames,
@@ -885,6 +888,7 @@ function ChatInterface({
     onWebSocketReconnect: handleWebSocketReconnect,
     onServerError: handleServerError,
     onRejectedSendRestore: handleRejectedSendRestore,
+    onRequestExpandedHistory: requestStreamGapRecovery,
     sessionStore,
   });
 
@@ -1013,6 +1017,76 @@ function ChatInterface({
     activitySourceAvailable,
   });
 
+  // T-1821: زرّ موحَّد — يُظهَر حين المستخدم مرَّ للأعلى أو حين showManualRefresh أو historyError.
+  // للحد الأدنى من السطور: يُحتسب showResync هنا لتمريره إلى ChatComposer.
+  const showResync = showManualRefresh || Boolean(historyError);
+
+  // T-1821: المعالج الموحَّد — يستخدم resolveScrollResyncRoute (دالة صرفة مُصدَّرة ومختبَرة).
+  const handleScrollToBottomWithResync = useCallback(async () => {
+    scrollToBottomAndReset();
+    const route = resolveScrollResyncRoute({
+      historyError: Boolean(historyError),
+      showManualRefresh,
+    });
+    if (route === 'retryHistory') {
+      // retryAt يُحترم داخل retryHistory/useHistoryAutoRetry — نستدعي دائماً
+      retryHistory?.();
+      return;
+    }
+    if (route === 'manualRefresh') {
+      await handleManualRefreshWithCost();
+    }
+    // scrollOnly: تشغيل حيّ قبل /activity → انزل فقط (B-208).
+  }, [scrollToBottomAndReset, historyError, retryHistory, showManualRefresh, handleManualRefreshWithCost]);
+
+  // T-1821: مزامنة تلقائية عند العودة للتبويب/الإنترنت/التركيز (خارج historyError —
+  // useHistoryAutoRetry يتولّى حالة historyError). الشرط: showManualRefresh = لا تشغيل
+  // حيّ قبل /activity (بوّابة B-208). reconnectInFlightRef يضمن عدم التوازي.
+  useEffect(() => {
+    const trigger = () => {
+      if (historyError || !selectedSession || !selectedProject) return;
+      if (!showManualRefresh || isRefreshing) return;
+      void handleManualRefreshWithCost();
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') trigger(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', trigger);
+    window.addEventListener('online', trigger);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', trigger);
+      window.removeEventListener('online', trigger);
+    };
+  }, [historyError, selectedSession, selectedProject, showManualRefresh, isRefreshing, handleManualRefreshWithCost]);
+
+  // T-1821: فحص مؤشّر عالق — يُطلق handleWebSocketReconnect إذا بقي isLoading صحيحاً
+  // 45 ثانية. يُعاد التسليح ما دام العالق قائماً (حدّ أقصى 3 محاولات لمنع العقد اللانهائية).
+  // chatMessages.length كوكيل رخيص لإطارات WS: كل رسالة جديدة تُعيد صفر العدّاد.
+  // ⚠ قيد معروف: خلال بثّ رسالة واحدة طويلة لا يتغيّر الطول ولا يُعاد الضبط،
+  //   فقد يُطلق مسباراً واحداً قبل انتهاء الرد. بما أنّ handleWebSocketReconnect
+  //   يُعيد الاتصال فقط (لا يقطع الجلسة)، المخاطرة مقبولة مقابل بساطة التنفيذ.
+  const [stuckProbeCount, setStuckProbeCount] = useState(0);
+  useEffect(() => {
+    if (!isLoading || !selectedSession) { setStuckProbeCount(0); return; }
+    if (stuckProbeCount >= 3) return;
+    const timer = window.setTimeout(() => {
+      setStuckProbeCount((c) => c + 1);
+      void handleWebSocketReconnect();
+    }, 45_000);
+    return () => window.clearTimeout(timer);
+  // chatMessages.length يُعيد الضبط حين تصل رسالة جديدة (وكيل إطار WS).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, selectedSession, stuckProbeCount, handleWebSocketReconnect, chatMessages.length]);
+
+  // T-1822: إخطار مخزن الاستخدام المشترك عند انتهاء الدور (isLoading: true→false).
+  // isLoading يصبح false فقط حين ينتهي الرد فعلاً — مؤشّر آمن لانتهاء الدور.
+  const prevIsLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    const prev = prevIsLoadingRef.current;
+    prevIsLoadingRef.current = isLoading;
+    if (prev && !isLoading) notifyClaudeUsageTurnEnd();
+  }, [isLoading]);
+
   if (!selectedProject) {
     // T-224 (م0): getProviderDisplayName من الواصف — hermes/kimi/deepseek/glm تظهر
     // بأسمائها الصحيحة بدل «Claude» (المزوّدات المعروفة غير متأثرة بصرياً).
@@ -1053,36 +1127,12 @@ function ChatInterface({
           />,
           sessionHeaderTarget,
         )}
-        {/* Top floating column: WsConnectionBadge (when disconnected) + manual-refresh button.
-            h-0 keeps it out of the flex-column flow so the messages scroll area can extend up
-            to the top divider. Anchored to the messages pane's *full width* (the real window
-            inline-end edge), NOT the composer's centered max-w-4xl column — the 7fc0307 wrapper
-            made `end-10` land at the centred column's edge (≈ page middle on wide screens).
-            The controls remain anchored beside the reading pane scrollbar. */}
-        {/* B-208 (بند 10 + حرج 3): زرّ التحديث اليدوي مخرج الطوارئ الوحيد من
-            مؤشّر عالق، لكن إظهاره أثناء تشغيل حيّ قبل توفّر مصدر حتمي يعيد رفع
-            المؤشّر يقلبه إلى فخّ. القرار في `shouldShowManualRefresh` (دالّة
-            صرفة مختبَرة): يظهر دائماً حين لا تشغيل، وأثناء التشغيل فقط بعد أن
-            تُجيب `/activity` إجابة قاطعة — بوّابة ذاتية الشفاء بلا علم يدوي. */}
-        {(wsStatus !== 'connected' || showManualRefresh) && (
+        {/* Top floating column: WsConnectionBadge فقط (T-1821: زرّ التحديث الدائري
+            حُذف وأُدمج في زرّ jump-down في ChatComposer). */}
+        {wsStatus !== 'connected' && (
           <div className="relative z-10 h-0">
             <div className="absolute end-[14px] top-2 flex flex-col items-center gap-1 sm:end-[18px]">
-              {wsStatus !== 'connected' && <WsConnectionBadge status={wsStatus} />}
-              {showManualRefresh && (
-                <button
-                  type="button"
-                  onClick={handleManualRefreshWithCost}
-                  disabled={isRefreshing}
-                  className="flex h-6 w-6 items-center justify-center rounded-full border border-border/50 bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                  aria-label={isRefreshing ? t('refreshChat.refreshing', { defaultValue: 'Refreshing…' }) : t('refreshChat.button', { defaultValue: 'Refresh chat' })}
-                  title={isRefreshing ? t('refreshChat.refreshing', { defaultValue: 'Refreshing…' }) : t('refreshChat.button', { defaultValue: 'Refresh chat' })}
-                >
-                  <RefreshCw
-                    className={['h-3 w-3', isRefreshing ? 'animate-spin' : ''].join(' ').trim()}
-                    aria-hidden="true"
-                  />
-                </button>
-              )}
+              <WsConnectionBadge status={wsStatus} />
             </div>
           </div>
         )}
@@ -1091,7 +1141,6 @@ function ChatInterface({
           onWheel={handleUserScrollIntent}
           onTouchMove={handleUserScrollIntent}
           historyError={historyError}
-          retryHistory={retryHistory}
           isLoadingSessionMessages={isLoadingSessionMessages}
           chatMessages={chatMessages}
           selectedSession={selectedSession}
@@ -1146,6 +1195,7 @@ function ChatInterface({
           isLoadingAllMessages={isLoadingAllMessages}
           loadAllJustFinished={loadAllJustFinished}
           onRequestDeferredHistory={requestDeferredHistory}
+          onResumeStreamRecovery={resumeStreamRecovery}
           showLoadAllOverlay={showLoadAllOverlay}
           createDiff={createDiff}
           onFileOpen={onFileOpen}
@@ -1197,7 +1247,10 @@ function ChatInterface({
           onClearInput={handleClearInput}
           isUserScrolledUp={isUserScrolledUp}
           hasMessages={chatMessages.length > 0}
-          onScrollToBottom={scrollToBottomAndReset}
+          showResync={showResync}
+          isResyncing={isRefreshing || (Boolean(historyError) && isLoadingSessionMessages)}
+          retryUntil={historyError?.retryAt ?? null}
+          onScrollToBottom={handleScrollToBottomWithResync}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
           attachedImages={attachedImages}

@@ -129,6 +129,8 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024;
 type PendingViewSession = {
   sessionId: string | null;
   startedAt: number;
+  /** Correlates a new-session view with its originating composer submission. */
+  clientMsgId?: string | null;
 };
 
 /**
@@ -1832,9 +1834,15 @@ export function useChatComposerState({
       setTimeout(() => scrollToBottom(), 100);
 
       if (!effectiveSessionId && !selectedSession?.id) {
-        // This tracks only that a request is in flight before the provider has
+        // This tracks that a request is in flight before the provider has
         // emitted its real session id; routing still waits for session_created.
-        pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now() };
+        // B-1297: carry clientMsgId so the realtime handler can match a late
+        // session_created to this specific send (cross-tab safety).
+        pendingViewSessionRef.current = {
+          sessionId: null,
+          startedAt: Date.now(),
+          clientMsgId,
+        };
       }
       if (effectiveSessionId) {
         onSessionActive?.(effectiveSessionId);

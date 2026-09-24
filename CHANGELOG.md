@@ -2,6 +2,37 @@
 
 All notable changes to Nassaj will be documented in this file.
 
+## [2.3.0.2] — Resumable release, chat, local-model, and SSO documentation updates (2026-09-22)
+
+مرشح بناء لاحق للإصدار المنشور `2.3.0.1`؛ يرفع مقطع البناء وحده تحت
+`architecture.feature.fix.build`. لا يدل هذا السجل على وسم أو نشر أو تفعيل عقدة.
+/ Build candidate following the published `2.3.0.1`, advancing the build segment
+only under `architecture.feature.fix.build`. This entry does not claim a tag,
+publication, or node activation.
+
+### أُضيف / Added
+
+- تشغيل إصدار قابل للاستئناف (T-1832) يسجل المراحل، ويستأنف بأمان بعد الفشل،
+  ويحرس تصدير المحتوى العام. / Resumable release execution (T-1832) records
+  phases, recovers safely after failure, and guards public-content export.
+
+### تغيّر / Changed
+
+- أصبحت استعادة ردود OpenCode الحية وسجل المحادثة أكثر موثوقية، بما في ذلك
+  إنشاء الجلسة المتأخر وفجوات العرض في الأدوار الطويلة. / OpenCode live-reply
+  recovery and chat history are more reliable, including late session creation
+  and display gaps during long turns.
+- وثائق SSO ومسارات OIDC/PKCE وZitadel تشير الآن إلى المرجع المعتمد. / SSO
+  documentation and the OIDC/PKCE and Zitadel paths now point to the approved
+  canonical reference.
+
+### أُصلح / Fixed
+
+- رفض مفتاح نموذج محلي لا يسجّل المستخدم خروجه، وتعالج استجابة المصادقة `422`
+  والرسائل الجزئية بوضوح أكبر. / A rejected local-model key no longer signs
+  the user out; `422` authentication responses and partial messages are handled
+  more clearly.
+
 ## [2.3.0.1] — Claude full-login and fresh-install fixes; SSO groundwork (2026-09-22)
 
 إصدار لاحق للإصدار المنشور `2.3.0.0`، يرفع مقطع البناء وحده تحت

@@ -950,18 +950,16 @@ describe('portable connectors M1 surface', () => {
 
   // ── Diagnostic panel: five structural error codes ────────────────────────
 
-  it('shows a not-enabled panel for CONNECTOR_GRANTS_DISABLED and offers operator setup to owner', async () => {
+  it('shows a not-enabled panel for CONNECTOR_GRANTS_DISABLED and hints at the installation tab', async () => {
     failGrantFetch = true;
     grantsFailureCode = 'CONNECTOR_GRANTS_DISABLED';
     render(<ConnectorsSettingsTabM1 />);
 
-    expect(await screen.findByText('Connectors are not enabled on this installation.')).toBeTruthy();
+    expect(await screen.findByText(/Connectors are not enabled on this installation/u)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
-    // Owner gets a navigation action; no raw flag names or env vars shown
-    const goBtn = screen.getByRole('button', { name: 'Go to operator setup' });
-    expect(goBtn).toBeTruthy();
-    fireEvent.click(goBtn);
-    expect(await screen.findByRole('heading', { name: 'Owner installation setup' })).toBeTruthy();
+    // Owner sees the installation tab (not a redundant inline button)
+    expect(screen.queryByRole('button', { name: 'Go to operator setup' })).toBeNull();
+    expect(screen.getByRole('tab', { name: /installation setup/iu })).toBeTruthy();
   });
 
   it('shows CONNECTOR_GRANTS_DISABLED as a read-only status to members', async () => {
@@ -975,14 +973,15 @@ describe('portable connectors M1 surface', () => {
     expect(screen.queryByRole('button', { name: 'Go to operator setup' })).toBeNull();
   });
 
-  it('shows CONNECTOR_AUTH_NOT_CONFIGURED without a sign-in CTA', async () => {
+  it('shows CONNECTOR_AUTH_NOT_CONFIGURED without a sign-in CTA and hints at the installation tab', async () => {
     readinessAvailable = false;
     readinessFailureCode = 'CONNECTOR_AUTH_NOT_CONFIGURED';
     render(<ConnectorsSettingsTabM1 />);
 
-    expect(await screen.findByText("Connector authentication isn't configured on the server yet.")).toBeTruthy();
+    expect(await screen.findByText(/Connector authentication isn't configured on the server yet/u)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Go to operator setup' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Go to operator setup' })).toBeNull();
+    expect(screen.getByRole('tab', { name: /installation setup/iu })).toBeTruthy();
   });
 
   it('shows CONNECTOR_ORIGIN_REJECTED as a danger alert without a sign-in CTA', async () => {

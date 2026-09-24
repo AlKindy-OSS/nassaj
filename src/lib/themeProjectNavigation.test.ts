@@ -76,8 +76,8 @@ describe('Alkindy project navigation after the theme guards run', () => {
   });
 });
 
-// irukhaimi has its own derived project tokens but must not use Alkindy's navy/gold.
-describe('irukhaimi brand isolation', () => {
+// The irukhaimi preset has its own derived project tokens but must not use Alkindy's navy/gold.
+describe('irukhaimi preset brand isolation', () => {
   it.each([false, true])('keeps its own brand accents without Alkindy colour overrides (dark=%s)', (dark) => {
     applyThemePreset({ preset: 'irukhaimi', custom: DEFAULT_CUSTOM_COLORS }, dark);
     // T-1705: irukhaimi now carries derived project tokens (9 keys).

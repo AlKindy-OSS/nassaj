@@ -41,8 +41,12 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../../../quick-settings-panel/hooks/useClaudeUsage', () => ({
-  useClaudeUsage: (enabled: boolean) =>
+vi.mock('../../../auth/context/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
+  useClaudeUsageShared: (enabled: boolean) =>
     enabled
       ? {
           status: 'success',

@@ -183,3 +183,25 @@ export function shouldShowManualRefresh({
   if (!isLoading) return true;
   return activitySourceAvailable;
 }
+
+/**
+ * T-1821: توجيه handleScrollToBottomWithResync — دالة صرفة مُصدَّرة قابلة للاختبار.
+ *
+ * الأولويات:
+ *   historyError  → retryHistory (يحترم retryAt داخلياً)
+ *   showManualRefresh → manualRefresh (بوّابة B-208 مدمجة)
+ *   غير ذلك        → scrollOnly (تشغيل حيّ قبل /activity)
+ */
+export type ScrollResyncRoute = 'retryHistory' | 'manualRefresh' | 'scrollOnly';
+
+export function resolveScrollResyncRoute({
+  historyError,
+  showManualRefresh,
+}: {
+  historyError: boolean;
+  showManualRefresh: boolean;
+}): ScrollResyncRoute {
+  if (historyError) return 'retryHistory';
+  if (showManualRefresh) return 'manualRefresh';
+  return 'scrollOnly';
+}

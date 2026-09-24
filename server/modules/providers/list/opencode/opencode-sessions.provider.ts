@@ -95,6 +95,52 @@ const hasUserRole = (value: unknown): boolean => {
   return readOptionalString(record?.role) === 'user';
 };
 
+/**
+ * B-1298(b): non-secret error codes surfaced to the client so it can show a specific
+ * message (auth vs context overflow) instead of the generic dispatch fallback. The
+ * codes are fixed strings — no provider text, URL or key is ever placed in them.
+ */
+export const OPENCODE_AUTH_ERROR_CODE = 'provider_auth_failed';
+export const OPENCODE_CONTEXT_OVERFLOW_CODE = 'provider_context_overflow';
+
+/** Reads an HTTP status from an error event or its nested error/data object. */
+const readErrorStatus = (value: unknown): number | undefined => {
+  const record = readObjectRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const candidate = record.statusCode ?? record.status;
+  if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+    return candidate;
+  }
+  if (typeof candidate === 'string' && /^\d{3}$/u.test(candidate)) {
+    return Number(candidate);
+  }
+  return undefined;
+};
+
+/**
+ * Classifies an OpenCode `type:'error'` event into a specific non-secret code, or
+ * undefined when it is an ordinary error. Auth is detected from a 401/403 status
+ * (nested or top-level) or an unmistakable auth phrase; context overflow from the
+ * usual "context length/window exceeded" wording. Matching runs on the message text
+ * only for classification — the emitted code never carries that text.
+ */
+const classifyOpenCodeError = (raw: AnyRecord, message: string): string | undefined => {
+  const status = readErrorStatus(raw) ?? readErrorStatus(raw.error) ?? readErrorStatus(raw.data);
+  if (status === 401 || status === 403) {
+    return OPENCODE_AUTH_ERROR_CODE;
+  }
+  const text = message.toLowerCase();
+  if (/context[\s_-]*(?:length|window|limit|size)|maximum context|exceeds?[^.]*context|context[^.]*(?:exceed|overflow)|too many tokens|reduce the length of the messages/u.test(text)) {
+    return OPENCODE_CONTEXT_OVERFLOW_CODE;
+  }
+  if (status === undefined && /\b(?:401|403|unauthori[sz]ed|forbidden|invalid api key|authentication failed|missing api key)\b/u.test(text)) {
+    return OPENCODE_AUTH_ERROR_CODE;
+  }
+  return undefined;
+};
+
 const isUserTextEcho = (raw: AnyRecord): boolean => {
   return readOptionalString(raw.role) === 'user'
     || hasUserRole(raw.message)
@@ -239,7 +285,15 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
         return [];
       }
 
-      const content = extractText(raw.text ?? raw.delta ?? raw.message);
+      // Real `opencode run --format json` text lines nest the content under
+      // `part` (`{type:'text', part:{type:'text', text:'…'}}`), so `raw.part`
+      // must be read first — reading `raw.text` alone left content empty and the
+      // whole live reply was dropped (B-1296). Kept consistent with the history
+      // path below, which normalizes the same `{type,text}` part shape.
+      // Fall through on an EMPTY part, not merely an absent one: a present part
+      // that carries no text (`part:{type:'text'}` beside a top-level `text`)
+      // would otherwise re-introduce the same dropped-reply defect.
+      const content = extractText(raw.part) || extractText(raw.text ?? raw.delta ?? raw.message);
       if (!content.trim()) {
         return [];
       }
@@ -256,7 +310,9 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
 
     if (type === 'reasoning') {
-      const content = extractText(raw.text ?? raw.delta ?? raw.message);
+      // B-1296: reasoning parts nest identically under `part`; read it first and
+      // fall through on an empty one for the same reason as the text branch.
+      const content = extractText(raw.part) || extractText(raw.text ?? raw.delta ?? raw.message);
       if (!content.trim()) {
         return [];
       }
@@ -296,13 +352,24 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
 
     if (type === 'error') {
+      const errorRecord = readObjectRecord(raw.error) ?? readObjectRecord(raw.data);
+      const content = readOptionalString(raw.error)
+        ?? readOptionalString(raw.message)
+        ?? readOptionalString(errorRecord?.message)
+        ?? readOptionalString(errorRecord?.name)
+        ?? 'Unknown OpenCode error';
+      // B-1298(b): attach a fixed non-secret code (auth / context-overflow) when the
+      // event is one of those, so the client can show a specific message. `content`
+      // keeps the provider's own error text; only the code is added.
+      const code = classifyOpenCodeError(raw, content);
       return [createNormalizedMessage({
         id: baseId,
         sessionId: eventSessionId,
         timestamp,
         provider: PROVIDER,
         kind: 'error',
-        content: readOptionalString(raw.error) ?? readOptionalString(raw.message) ?? 'Unknown OpenCode error',
+        content,
+        ...(code ? { code } : {}),
       })];
     }
 

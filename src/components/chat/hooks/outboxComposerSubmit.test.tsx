@@ -200,7 +200,7 @@ function harness(
   };
 
   const rendered = renderHook(() => useChatComposerState(props as any));
-  return { state, ...rendered, updateHistory: (rows: any[]) => { props.outboxHistory = rows; rendered.rerender(); } };
+  return { state, props, ...rendered, updateHistory: (rows: any[]) => { props.outboxHistory = rows; rendered.rerender(); } };
 }
 
 const fakeEvent = { preventDefault: () => {} } as any;
@@ -471,6 +471,19 @@ describe('الإرسال الناجح', () => {
     expect(entries[0].intent.coordinationLevel).toBe('delegate');
     // معلَّق ⇒ لا بطاقة على الشاشة.
     expect(result.current.outboxEntries).toHaveLength(0);
+  });
+
+  it('يربط إنشاء جلسة جديدة بمعرّف الرسالة ذاته', async () => {
+    const { result, state, props } = harness({ sessionId: null });
+
+    act(() => { result.current.setInput('رسالة لمحادثة جديدة'); });
+    await act(async () => { await result.current.handleSubmit(fakeEvent); });
+
+    expect(state.sent).toHaveLength(1);
+    expect(props.pendingViewSessionRef.current).toMatchObject({
+      sessionId: null,
+      clientMsgId: state.sent[0].options.clientMsgId,
+    });
   });
 });
 

@@ -108,7 +108,7 @@ test('classifyDivergence: a file directly under public/ is code', () => {
     assert.equal(r.code[0].path, 'public/sw.js');
 });
 
-test('classifyDivergence: dependency manifests are dependency (hub allowScripts)', () => {
+test('classifyDivergence: dependency manifests are dependency (node allowScripts)', () => {
     const r = classifyDivergence({
         nameStatusZ: 'M\0package.json\0M\0package-lock.json\0',
         packages: [], // allowScripts is a config block, not a version change
@@ -145,7 +145,7 @@ test('classifyDivergence: freshly added .gitignore counts as overlayable', () =>
 // --- classifyDivergence: precedence --------------------------------------
 
 test('classifyDivergence: precedence code > dependency > overlayable', () => {
-    // A hub-shaped mix: overlayable hub, added .gitignore, dependency bump,
+    // A node-shaped mix: overlayable hub, added .gitignore, dependency bump,
     // and one modified tracked file -> the dominant category is code.
     const r = classifyDivergence({
         nameStatusZ: [

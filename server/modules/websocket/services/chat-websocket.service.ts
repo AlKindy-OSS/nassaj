@@ -981,6 +981,23 @@ function clientMsgIdEcho(data: ChatIncomingMessage): Record<string, string> {
 }
 
 /** Capture only bounded command identifiers, never the socket's mutable writer identity. */
+/**
+ * B-1298(b): the only provider error codes allowed to reach the client from a
+ * rejected run. An allowlist guarantees no provider message, URL or key can ever be
+ * echoed through this field — an unknown value is dropped rather than forwarded.
+ */
+const CLIENT_SAFE_PROVIDER_ERROR_CODES: ReadonlySet<string> = new Set([
+  'provider_auth_failed',
+  'provider_context_overflow',
+]);
+
+/** Extracts a client-safe provider error code from a rejected run, else null. */
+function readProviderErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('providerErrorCode' in error)) return null;
+  const code = (error as { providerErrorCode?: unknown }).providerErrorCode;
+  return typeof code === 'string' && CLIENT_SAFE_PROVIDER_ERROR_CODES.has(code) ? code : null;
+}
+
 function readFailedCommandIdentity(data: ChatIncomingMessage): Record<string, string> | null {
   const type = data.type;
   if (typeof type !== 'string' || !(Object.hasOwn(COMMAND_TYPE_TO_PROVIDER, type)
@@ -3358,9 +3375,14 @@ export function handleChatConnection(
       const code = failedCommandIdentity
         ? (providerDispatchEntered ? 'message_dispatch_unconfirmed' : 'message_dispatch_not_started')
         : 'websocket_request_failed';
-      console.error('[ERROR] Chat WebSocket request failed', { code });
+      // B-1298(b): a provider run may reject carrying a fixed, non-secret code
+      // (auth failure / context overflow). Surface it as a SEPARATE field the
+      // client can display, leaving `code` and the delivery disposition intact.
+      const providerErrorCode = readProviderErrorCode(error);
+      console.error('[ERROR] Chat WebSocket request failed', { code, providerErrorCode });
       sendRawToThisSocket({
         type: 'error', kind: 'error', code,
+        ...(providerErrorCode ? { providerErrorCode } : {}),
         error: 'The request could not be completed.',
         ...(failedCommandIdentity ? {
           ...failedCommandIdentity,

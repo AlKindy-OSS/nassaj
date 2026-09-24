@@ -23,7 +23,20 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   const response = await authenticatedFetch(`${ROOT}${path}`, {
     method, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (!response.ok) throw new Error('localModels.requestFailed');
+  // B-1298 (qa-critic correction, commit 169dc8bfd): `authenticatedFetch` itself
+  // intercepts a genuine 401 for session recovery/logout — branching on
+  // `response.status === 401` here never sees a wrong-key failure (it was
+  // already consumed) and can misfire on a real session expiry. The server
+  // reports a wrong local-model API key as HTTP 422 with a structured body
+  // (`{ success:false, error:{ code: 'LOCAL_MODELS_AUTH_FAILED' } }`), so parse
+  // the body and branch on that code, not on the transport status.
+  if (!response.ok) {
+    if (response.status !== 401) {
+      const result = await response.json().catch(() => null);
+      if (result?.error?.code === 'LOCAL_MODELS_AUTH_FAILED') throw new Error('localModels.authFailed');
+    }
+    throw new Error('localModels.requestFailed');
+  }
   const result = await response.json();
   if (result.success !== true || !result.data) throw new Error('localModels.requestFailed');
   return result.data as T;
@@ -48,7 +61,10 @@ export function useLocalModels() {
     finally { if (current === generation.current) setLoading(false); }
   }, [offset]);
   useEffect(() => { void refresh(); return () => { generation.current += 1; }; }, [refresh]);
-  const act = async (operation: () => Promise<unknown>, success: string, failure: string) => {
+  const act = async (
+    operation: () => Promise<unknown>, success: string, failure: string,
+    authFailure?: string,
+  ) => {
     setBusy(true); setError(''); setMessage('');
     try {
       await operation();
@@ -56,13 +72,26 @@ export function useLocalModels() {
       setMessage(success);
       window.dispatchEvent(new CustomEvent('local-models-changed'));
       return true;
-    } catch { setError(failure); return false; }
-    finally { setBusy(false); }
+    } catch (err) {
+      // B-1298: propagate auth failures with a distinct i18n key so the user
+      // sees a specific message ("wrong key") instead of a generic failure.
+      const isAuthError = err instanceof Error && err.message === 'localModels.authFailed';
+      setError(isAuthError && authFailure ? authFailure : failure);
+      return false;
+    } finally { setBusy(false); }
   };
   return { overview, loading, busy, message, error, offset, setOffset, refresh,
-    save: (input: LocalServerInput, id?: string) => act(() => request(id ? `/servers/${encodeURIComponent(id)}` : '/servers', id ? 'PATCH' : 'POST', input), 'saved', 'saveFailed'),
-    remove: (id: string) => act(() => request(`/servers/${encodeURIComponent(id)}`, 'DELETE'), 'removed', 'removeFailed'),
-    connect: (id: string) => act(() => request(`/servers/${encodeURIComponent(id)}/catalog`, 'POST'), 'connected', 'connectionFailed'),
-    setEnabled: (enabled: boolean) => act(() => request('/settings', 'PUT', { enabled, consentVersion: overview?.feature.requiredConsentVersion }), 'settingsSaved', 'settingsFailed'),
+    save: (input: LocalServerInput, id?: string) => act(
+      () => request(id ? `/servers/${encodeURIComponent(id)}` : '/servers',
+        id ? 'PATCH' : 'POST', input), 'saved', 'saveFailed'),
+    remove: (id: string) => act(
+      () => request(`/servers/${encodeURIComponent(id)}`, 'DELETE'), 'removed', 'removeFailed'),
+    connect: (id: string) => act(
+      () => request(`/servers/${encodeURIComponent(id)}/catalog`, 'POST'),
+      'connected', 'connectionFailed', 'authFailed'),
+    setEnabled: (enabled: boolean) => act(
+      () => request('/settings', 'PUT',
+        { enabled, consentVersion: overview?.feature.requiredConsentVersion }),
+      'settingsSaved', 'settingsFailed'),
   };
 }

@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '../../../../shared/view/ui';
-import { useClaudeUsage } from '../../../quick-settings-panel/hooks/useClaudeUsage';
+// T-1822: استبدال useClaudeUsage بالمخزن المشترك لتجنّب مضاعفة الطلبات.
+import { useClaudeUsageShared as useClaudeUsage } from '../../../quick-settings-panel/hooks/useClaudeUsageShared';
+import { useAuth } from '../../../auth/context/AuthContext';
 import {
   clampUtilization,
   formatPercent,
@@ -115,6 +117,7 @@ interface HeaderUsageIndicatorProps {
 
 export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: HeaderUsageIndicatorProps) {
   const { i18n, t } = useTranslation('settings');
+  const { user } = useAuth();
   // النمط الكانوني في التطبيق: مزوّد الجلسة المفتوحة أولاً، وإلا المنتقي العام
   // (ChatInterface.tsx / useChatProviderState). بلا هذا الاحتياط كانت القيمة
   // تسقط على 'claude' افتراضياً داخل getProviderCapabilities عند غياب الجلسة،
@@ -171,6 +174,7 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
   // **و**لم يُثبِت الخادم أن النموذج الفعّال يُفوتَر على مورّد آخر. وحين يكون
   // النموذج معروفاً ننتظر حكم الخادم بدل عرض رقمٍ قد يكون لحسابٍ آخر —
   // الصمت لحظةً أصدق من نسبة تخصّ اشتراكاً لا يُستهلك منه شيء.
+  // (B-fix4: لا تفاؤل خلال loading/idle لنماذج مُحدَّدة غير Anthropic — glm وما شابه).
   const claudeWindowsAllowed =
     quota.isClaudeAccount &&
     engineProvider === null &&
@@ -180,7 +184,7 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
   // so it stops polling when Claude windows don't apply, instead of gating the
   // call site. **يجب أن يأتي بعد `claudeWindowsAllowed`**: النسخة الأولى نادته
   // قبل تعريفه فسقط typecheck — والترتيب هنا شرطُ صحّة لا ذوقاً.
-  const usageState = useClaudeUsage(isWide && claudeWindowsAllowed);
+  const usageState = useClaudeUsage(isWide && claudeWindowsAllowed, user?.id);
   const cyclesState = useProviderCycles(isWide && cycleFallbackResolved);
   const cycle = useCycleCountdown(
     cyclesState.status === 'success' ? cyclesState.rows : null,

@@ -260,6 +260,7 @@
     "showAllCommands": "Tüm komutları göster",
     "clearInput": "Girdiyi temizle",
     "scrollToBottom": "En alta git",
+    "scrollToBottomAndSync": "En alta git & yenile",
     "dropFilesHere": "Dosyaları buraya bırak",
     "nonClaudeAttachmentHint": "Ekler yalnızca Claude ile kullanılır",
     "voice": {
@@ -608,7 +609,6 @@
     "unknown": "Beklenmeyen bir sunucu hatası oluştu"
   },
   "refreshChat": {
-    "button": "Sohbeti yenile",
     "refreshing": "Yenileniyor…"
   },
   "composerMode": {

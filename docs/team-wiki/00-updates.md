@@ -4,6 +4,45 @@
 
 ---
 
+## الإصدار 2.3.0.2 — إصدار قابل للاستئناف، ومحادثة ونماذج محلية أكثر ثباتاً
+
+مرشح بناء بتاريخ 2026-09-22 لاحق للإصدار المنشور `2.3.0.1`. لا يعني هذا الإعلان
+أن الإصدار وُسم أو نُشر أو فُعِّل على عقدة.
+
+ما الذي ستلاحظه عند نشره وتحديث العقدة:
+
+- تحديث المحادثة والانتقال إلى آخرها صار أكثر اتساقاً.
+- تستعاد ردود OpenCode الحية التي انقطعت، ويظهر خطأ المزوّد المحدد بدلاً من
+  رسالة عامة.
+- سجل المحادثة يتحمل إنشاء الجلسة المتأخر وفجوات العرض في الأدوار الطويلة.
+- رفض مفتاح نموذج محلي لا يسجّلك خروجاً، وتظهر أخطاء المصادقة `422` بوضوح أكبر.
+- توثيق SSO ومسارات OIDC/PKCE وZitadel يشير إلى المرجع المعتمد.
+- أصبح تنفيذ الإصدار نفسه قابلاً للاستئناف بعد فشل آمن، مع حارس لتصدير المحتوى
+  العام (T-1832).
+
+[ملاحظات الإصدار الكاملة / Full release notes](../releases/2.3.0.2.md)
+
+### English
+
+Build candidate dated 2026-09-22, following the published 2.3.0.1. This update
+does not claim that the release has been tagged, published, or activated on a
+node.
+
+What you will notice once it is published and a node is updated:
+
+- Chat refresh and moving to the newest message are more consistent.
+- Dropped OpenCode live replies are recovered, and provider-specific errors are
+  shown instead of generic failures.
+- Chat history tolerates late session creation and display gaps during long turns.
+- A rejected local-model key no longer signs you out, and `422` authentication
+  errors are clearer.
+- SSO documentation and the OIDC/PKCE and Zitadel paths point to the approved
+  canonical reference.
+- The release process itself can safely resume after failure and guards public
+  content export (T-1832).
+
+---
+
 ## الإصدار 2.3.0.1 — إصلاح ربط Claude والتثبيت الجديد، وأساس دخول موحّد
 
 إصدار 2026-09-22 لاحق لإصدار 2.3.0.0 المنشور، يرفع مقطع البناء وحده. يجمع إصلاحين

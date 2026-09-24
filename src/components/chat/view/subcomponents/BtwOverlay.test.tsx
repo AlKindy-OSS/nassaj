@@ -154,7 +154,7 @@ describe('BtwOverlay', () => {
   //   ^^^^^^true    ^^^^^fn   ^^^^^^^^^^^true              ← هنا الانهيار في الكود القديم
   it('لا يُطلق خطأ حين state.answer غير معرَّفة (شرط canFork)', () => {
     const stateWithUndefinedAnswer = {
-      btwId: 'b-undef',
+      btwId: 'b-test',
       forkStatus: 'idle' as const,
       question: 'سؤال اختبار',
       answer: undefined as unknown as string,

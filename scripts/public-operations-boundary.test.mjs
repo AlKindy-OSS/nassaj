@@ -8,6 +8,17 @@ import { TextDecoder } from 'node:util';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
+// The generic-home-user allow-list is the single source in
+// scripts/operator-gate/export-allow.mjs — a LEAK-CLEAN module (no forbidden
+// operator token) that ships in the public tree via a narrow allow exception, so
+// this SHIPPED test imports it directly instead of copying the set. The forbidden
+// half stays in the excluded leak-rules.mjs and is not needed here.
+import { genericHomeUsers } from './operator-gate/export-allow.mjs';
+// The SINGLE SOURCE of which tracked paths the public export ships (shared with
+// scripts/export-public.sh). This gate scans only those paths, so it matches what
+// actually publishes instead of the whole private tree (qa finding 3a).
+import { isPublicExportPath } from './operator-gate/export-allow-paths.mjs';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const selfPath = 'scripts/public-operations-boundary.test.mjs';
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -19,14 +30,9 @@ const execFileAsync = promisify(execFile);
 
 const joined = (...parts) => parts.join('');
 
-const genericHomeUsers = new Set(['agent', 'demo', 'dev', 'example', 'op', 'operator', 'owner', 'runner', 'service', 'user', 'x']);
-
-// Single source of truth for the home-path rule is scripts/operator-gate/leak-rules.mjs
-// (the export leak gate). That module carries the forbidden operator tokens and is
-// excluded from the public export, so this SHIPPED test cannot import it; the regex is
-// copied verbatim. The first captured char is non-dot ([A-Za-z0-9_-]) so a temp-root
-// subdir literally named `home` (e.g. `<tmproot>/home/.pm2`) is not read as an operator
-// home directory, while a real `/home/<user>` still is. Keep these two in sync.
+// The home regex first char is non-dot ([A-Za-z0-9_-]) so a temp-root subdir
+// literally named `home` (e.g. `<tmproot>/home/.pm2`) is not read as an operator
+// home directory, while a real `/home/<user>` still is.
 const homePattern = new RegExp(joined('\\/ho', 'me\\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)'), 'g');
 const workflowIdPattern = new RegExp(joined('\\bwf_', '[0-9a-f]{8,}(?:[-:][A-Za-z0-9-]+)?\\b'), 'gi');
 const providerIdPattern = /\b(?:ses|msg|req)_[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/gi;
@@ -282,7 +288,11 @@ async function publicTreeFiles() {
   const tracked = await gitPaths('--cached');
   const deleted = new Set(await gitPaths('--deleted'));
   const untracked = await gitPaths('--others', '--exclude-standard');
-  const candidates = classifyPublicPaths(tracked.filter(relative => !deleted.has(relative)), untracked);
+  // Scan ONLY the paths the export actually ships. Everything else (alkindy/*,
+  // docs/plans, the operator-gate rules, the release orchestrator, …) is excluded
+  // from the public tree, so a marker there never publishes and must not fail here.
+  const candidates = classifyPublicPaths(tracked.filter(relative => !deleted.has(relative)), untracked)
+    .filter(({ relative }) => isPublicExportPath(relative));
   for (const { relative, tracked: isTracked } of candidates) {
     validateRepositoryPath(relative);
     const absolute = path.join(root, relative);
@@ -401,6 +411,22 @@ test('tracked generated and scratch paths are scanned while ephemeral untracked 
     { relative: '.release-test-scratch-evidence/tracked.txt', tracked: true },
     { relative: 'src/new-file.ts', tracked: false },
   ]);
+});
+
+test('the gate scans only paths the public export ships', () => {
+  // Shipped product paths are scanned.
+  for (const shipped of [
+    'src/app.tsx', 'server/index.js', 'shared/util.ts', 'scripts/build.mjs',
+    'scripts/operator-gate/export-allow.mjs', 'scripts/operator-gate/export-allow-paths.mjs',
+    'docs/team-wiki/guide.md', 'README.md', 'package.json',
+  ]) assert.equal(isPublicExportPath(shipped), true, shipped);
+  // Never-exported operator paths are excluded, so a marker there cannot fail here.
+  for (const excluded of [
+    'scripts/operator-gate/leak-rules.mjs', 'scripts/release.mjs',
+    'scripts/release-orchestrator-phases.test.mjs', 'docs/plans/roadmap.md',
+    'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
+    'server/modules/database/deletion-writer-inventory.test.ts',
+  ]) assert.equal(isPublicExportPath(excluded), false, excluded);
 });
 
 test('only explicit synthetic values are admitted', () => {

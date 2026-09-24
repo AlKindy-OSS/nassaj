@@ -203,8 +203,19 @@ const collectBindings = sourceFile => {
   return { direct, namespaces, ptyNamespaces, codexInstances, codexThreads };
 };
 
-const classifyCall = (node, bindings) => {
-  const expression = node.expression;
+const classifyCallable = (expression, bindings) => {
+  if (ts.isParenthesizedExpression(expression)) {
+    return classifyCallable(expression.expression, bindings);
+  }
+  if (ts.isConditionalExpression(expression)) {
+    const whenTrue = classifyCallable(expression.whenTrue, bindings);
+    const whenFalse = classifyCallable(expression.whenFalse, bindings);
+    if (whenTrue === whenFalse) return whenTrue;
+    if (whenTrue !== null || whenFalse !== null) {
+      throw new Error('PERMISSION_LAUNCH_CONDITIONAL_DIVERGENCE');
+    }
+    return null;
+  }
   if (ts.isIdentifier(expression)) {
     if (expression.text === 'fetch') return 'http.fetch';
     return bindings.direct.get(expression.text) ?? null;
@@ -232,6 +243,8 @@ const classifyCall = (node, bindings) => {
   }
   return null;
 };
+
+const classifyCall = (node, bindings) => classifyCallable(node.expression, bindings);
 
 const sitesForSource = (relative, source, kind) => {
   const sourceFile = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, kind);
@@ -485,6 +498,36 @@ if (process.argv.includes('--mutation-test')) {
     "import axios from 'axios';\nvoid axios.get('https://provider.invalid');\n",
     ts.ScriptKind.TS,
   );
+  const conditionalHttpClientMutation = sitesForSource(
+    'server/__permission_inventory_conditional_http_client_mutation__.ts',
+    "import { request as httpRequest } from 'node:http';\nimport { request as httpsRequest } from 'node:https';\n(input.secure ? httpsRequest : httpRequest)(input.url);\n",
+    ts.ScriptKind.TS,
+  );
+  const parenthesizedConditionalMutation = sitesForSource(
+    'server/__permission_inventory_parenthesized_conditional_mutation__.ts',
+    "import { request as httpRequest } from 'node:http';\nimport { request as httpsRequest } from 'node:https';\n((input.secure ? httpsRequest : httpRequest))(input.url);\n",
+    ts.ScriptKind.TS,
+  );
+  const divergentConditionalSources = [
+    "import { request as httpRequest } from 'node:http';\nimport { spawn } from 'node:child_process';\n(input.remote ? httpRequest : spawn)(input.target);\n",
+    "import { request as httpRequest } from 'node:http';\nconst unknownRequest = input.request;\n(input.remote ? httpRequest : unknownRequest)(input.target);\n",
+    "import { request as httpRequest } from 'node:http';\nimport { spawn } from 'node:child_process';\n(input.remote ? (input.http ? httpRequest : spawn) : httpRequest)(input.target);\n",
+  ];
+  for (const source of divergentConditionalSources) {
+    let rejected = false;
+    try {
+      sitesForSource(
+        'server/__permission_inventory_divergent_conditional_mutation__.ts',
+        source,
+        ts.ScriptKind.TS,
+      );
+    } catch (error) {
+      rejected = error.message === 'PERMISSION_LAUNCH_CONDITIONAL_DIVERGENCE';
+    }
+    if (!rejected) {
+      throw new Error('PERMISSION_LAUNCH_CONDITIONAL_DIVERGENCE_MUTATION_BYPASSED');
+    }
+  }
   const codexMutation = sitesForSource(
     'server/__permission_inventory_codex_mutation__.ts',
     "import { Codex } from '@openai/codex-sdk';\nconst codex = new Codex();\nconst thread = codex.startThread();\nvoid thread.run('prompt');\nvoid thread.runStreamed('prompt');\n",
@@ -509,6 +552,10 @@ if (process.argv.includes('--mutation-test')) {
     || dynamicSpawnMutation.length !== 1
     || dynamicSpawnMutation[0].primitive !== 'child_process.spawn'
     || httpClientMutation.length !== 1 || httpClientMutation[0].primitive !== 'http_client.get'
+    || conditionalHttpClientMutation.length !== 1
+    || conditionalHttpClientMutation[0].primitive !== 'http_client.request'
+    || parenthesizedConditionalMutation.length !== 1
+    || parenthesizedConditionalMutation[0].primitive !== 'http_client.request'
     || codexMutation.length !== 3
     || codexMutation.map(site => site.primitive).join(',')
       !== 'codex_sdk.startThread,codex_sdk.run,codex_sdk.runStreamed'
@@ -652,7 +699,8 @@ if (process.argv.includes('--mutation-test')) {
   }
   const mutatedSites = [
     mutation[0], httpMutation[0], envMutation[0], launcherMutation[0], ptyMutation[0],
-    ptyCommonJsMutation[0], dynamicSpawnMutation[0], httpClientMutation[0], ...codexMutation,
+    ptyCommonJsMutation[0], dynamicSpawnMutation[0], httpClientMutation[0],
+    conditionalHttpClientMutation[0], parenthesizedConditionalMutation[0], ...codexMutation,
     ...staticCatalogMutation,
   ];
   const mutatedIds = mutatedSites.map(site => site.id);

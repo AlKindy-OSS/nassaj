@@ -1105,6 +1105,14 @@ export function useSessionStore() {
       projectId?: string;
       projectPath?: string;
       signal?: AbortSignal;
+      /**
+       * حجم نافذة الذيل. الافتراضي 20 (إعادة اتصال عادية). الاسترداد بعد
+       * فجوة بثّ يمرّر نافذةً أوسع (bounded fallback حين تتعذّر سباكة طابور
+       * التاريخ الموسَّع في `useChatSessionState`؛ لا حدّ خادمي جديد).
+       */
+      limit?: number;
+      /** `light` يوفّر الحمولة حين تُطلَب نافذة أوسع من الافتراضي. */
+      payload?: 'light' | 'full';
     } = {},
   ): Promise<boolean> => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
@@ -1115,7 +1123,9 @@ export function useSessionStore() {
     const capturedStream = slot.realtimeMessages.find(m => m.id === streamId);
 
     try {
-      const result = await requestHistorySnapshot(resolvedSessionId, { limit: 20, offset: 0, signal: _opts.signal });
+      const result = await requestHistorySnapshot(resolvedSessionId, {
+        limit: _opts.limit ?? 20, offset: 0, payload: _opts.payload, signal: _opts.signal,
+      });
       if (_opts.signal?.aborted || !isHistoryRequestCurrent(resolvedSessionId, generation)) return false;
       if (!result.ok) { setHistoryError(resolvedSessionId, result, 'reconnect'); return false; }
       const data = result.snapshot;

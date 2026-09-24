@@ -3,12 +3,32 @@ import crypto from 'node:crypto';
 import { appConfigDb, auditLogDb, getConnection, localModelServersDb, type LocalModel, type LocalModelServer } from '@/modules/database/index.js';
 import { getNamespacedSecret, setNamespacedSecret, deleteNamespacedSecret, hasNamespacedSecret } from '@/services/isolation/provider-secrets-store.js';
 import { AppError } from '@/shared/utils.js';
-import { safeFetchLocalModelJson, validateLocalModelUrl } from '@/modules/connectors/index.js';
+import { safeFetchLocalModelJson, safeProbeLocalModelAuth, validateLocalModelUrl } from '@/modules/connectors/index.js';
 
 export const LOCAL_MODELS_CONSENT_VERSION = '1';
 export const LOCAL_PROVIDER_PREFIX = 'nassaj_local_';
+/**
+ * A rejected LOCAL-MODEL key must never be reported as 401.
+ *
+ * The global error middleware emits `{success:false,error:{code}}` with no root-level
+ * `code`, and the client's `isSessionRejection` reads `body.code` only — so ANY 401
+ * from this API reads as a Nassaj session rejection and triggers silent token refresh,
+ * a replayed request and finally `auth:unauthorized` (logout/redirect loop, the Helium
+ * incident pattern). 422 keeps the failure machine-readable through `code` while
+ * staying outside the client's session-rejection path, and is unused elsewhere in this
+ * service (400 invalid input, 403 disabled, 404 missing, 409 conflict, 429 throttle,
+ * 502 unreachable), so it stays unambiguous.
+ */
+export const LOCAL_MODELS_AUTH_FAILED_STATUS = 422;
+/** Joins a saved base URL with an API path, tolerating a stored trailing slash. */
+const endpoint = (baseUrl: string, path: string): string => `${baseUrl.replace(/\/+$/u, '')}${path}`;
+const failureMessage = (code: string): string => {
+  if (code === 'LOCAL_MODELS_CONNECTION_FAILED') return 'تعذّر الاتصال بخادم النماذج. تحقق من العنوان والإعدادات ثم أعد المحاولة.';
+  if (code === 'LOCAL_MODELS_AUTH_FAILED') return 'رفض خادم النماذج مفتاح الـ API. تحقق من المفتاح ثم أعد المحاولة.';
+  return 'تعذّر تنفيذ طلب النماذج المحلية. تحقق من الإعدادات والصلاحيات.';
+};
 const failure = (code = 'LOCAL_MODELS_INVALID_INPUT', statusCode = 400) => new AppError(
-  code === 'LOCAL_MODELS_CONNECTION_FAILED' ? 'تعذّر الاتصال بخادم النماذج. تحقق من العنوان والإعدادات ثم أعد المحاولة.' : 'تعذّر تنفيذ طلب النماذج المحلية. تحقق من الإعدادات والصلاحيات.', { code, statusCode });
+  failureMessage(code), { code, statusCode });
 const object = (input: unknown): Record<string, unknown> => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw failure();
   return input as Record<string, unknown>;
@@ -44,6 +64,7 @@ export const localProviderId = (id: string): string => `${LOCAL_PROVIDER_PREFIX}
 const defaultDependencies = {
   repository: localModelServersDb, config: appConfigDb, audit: auditLogDb,
   fetchJson: safeFetchLocalModelJson,
+  probeAuth: safeProbeLocalModelAuth,
   transaction: <T>(work: () => T): T => getConnection().transaction(work)(),
   secrets: { get: getNamespacedSecret, set: setNamespacedSecret, remove: deleteNamespacedSecret, has: hasNamespacedSecret },
 };
@@ -91,13 +112,37 @@ class LocalModelsService {
     const apiKey = body.apiKey ? text(body.apiKey, 4096) : undefined;
     return { name, baseUrl, runtime: runtime as LocalModelServer['runtime'], models, apiKey, removeApiKey: body.removeApiKey === true };
   };
+  /**
+   * B-1298(a): a wrong API key must not pass. `/models` is served unauthenticated by
+   * llama.cpp, so a bad key would go unnoticed there; probe an authenticated endpoint
+   * that gates before loading a model and refuse a 401 with a distinct auth code.
+   * Only runs when a key is configured — a keyless server has nothing to authenticate.
+   *
+   * Only 401 counts as an authentication failure. A 403 is NOT treated as one: a
+   * reverse proxy, WAF or IP allowlist in front of the endpoint answers 403 for
+   * reasons unrelated to the key, and blocking a user who holds a VALID key is the
+   * worse failure. A 403 therefore falls through to the ordinary catalogue request,
+   * which reports a connection failure if the endpoint really is unreachable.
+   */
+  private probeAuth = async (server: LocalModelServer, apiKey: string | null) => {
+    if (!apiKey) return;
+    let status: number;
+    try {
+      ({ status } = await this.deps.probeAuth(endpoint(server.baseUrl, '/chat/completions'), apiKey));
+    } catch {
+      throw failure('LOCAL_MODELS_CONNECTION_FAILED', 502);
+    }
+    if (status === 401) throw failure('LOCAL_MODELS_AUTH_FAILED', LOCAL_MODELS_AUTH_FAILED_STATUS);
+  };
   /** Probes the saved endpoint explicitly; only catalogue refresh persists models. */
   catalog = async (callerId: number, id: string, persist: boolean) => {
     this.requireEnabled(); this.throttle(callerId);
     const server = this.own(callerId, id);
+    const apiKey = this.deps.secrets.get(server.ownerId, 'local-model', server.id);
+    await this.probeAuth(server, apiKey);
     let models: LocalModel[];
     try {
-      const raw = await this.deps.fetchJson(`${server.baseUrl}/models`, this.deps.secrets.get(server.ownerId, 'local-model', server.id));
+      const raw = await this.deps.fetchJson(endpoint(server.baseUrl, '/models'), apiKey);
       if (!Array.isArray(raw.data) || raw.data.length > 200) throw failure();
       models = validateLocalModels(raw.data.map(item => {
         const row = object(item);

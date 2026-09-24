@@ -53,8 +53,12 @@ const usageFixture = {
 // نلتقط وسيط `enabled` لإثبات أن الجلب يتوقّف لغير كلود (لا مجرّد إخفاء بصري).
 const enabledCalls: boolean[] = [];
 
-vi.mock('../../../quick-settings-panel/hooks/useClaudeUsage', () => ({
-  useClaudeUsage: (enabled: boolean) => {
+vi.mock('../../../auth/context/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
+  useClaudeUsageShared: (enabled: boolean) => {
     enabledCalls.push(enabled);
     return enabled
       ? { status: 'success', data: usageFixture, refetch: () => {} }

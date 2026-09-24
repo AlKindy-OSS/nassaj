@@ -30,8 +30,12 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../../../../../../quick-settings-panel/hooks/useClaudeUsage', () => ({
-  useClaudeUsage: () => ({ status: 'idle' }),
+vi.mock('../../../../../../auth/context/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+vi.mock('../../../../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
+  useClaudeUsageShared: () => ({ status: 'idle' }),
 }));
 
 vi.mock('../../../../../../quick-settings-panel/hooks/useProviderQuota', () => ({
