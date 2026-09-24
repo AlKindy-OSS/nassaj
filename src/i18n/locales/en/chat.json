@@ -38,6 +38,7 @@
     "scopeLine_other": "{{value}} skills · this conversation"
   },
   "streamRecoveryGap": "The displayed session may be incomplete. Reload the session to recover its saved history.",
+  "streamRecoveryGapResume": "Resume now",
   "btw": {
     "title": "Side question",
     "close": "Close",
@@ -363,6 +364,7 @@
     "showAllCommandsCount": "Show all commands ({{count}})",
     "clearInput": "Clear input",
     "scrollToBottom": "Scroll to bottom",
+    "scrollToBottomAndSync": "Go to latest & refresh",
     "dropFilesHere": "Drop files here",
     "nonClaudeAttachmentHint": "Attachments are used with Claude only",
     "voice": {
@@ -618,8 +620,6 @@
       "timeout": "Loading conversation history timed out.",
       "unavailable": "Conversation history could not be loaded.",
       "retained": "Displayed and pending messages have been kept.",
-      "retry": "Try again",
-      "refresh": "Refresh recent messages",
       "wait": "Please wait before trying again"
     },
     "continue": {
@@ -810,6 +810,9 @@
     "usage_limit": "The provider reported that a usage limit was reached",
     "codex_turn_failed": "The Codex run could not be completed",
     "abort_failed": "Could not confirm that the run stopped",
+    "provider_auth_failed": "The model server key is incorrect or missing.",
+    "provider_context_overflow": "Your message exceeds the model context limit; raise the context size in the server.",
+    "local_models_auth_failed": "The local model server key is incorrect. Check the server settings.",
     "codeLabel": "Code",
     "unknown": "A server error occurred; its cause could not be determined from the available information"
   },
@@ -852,7 +855,6 @@
     }
   },
   "refreshChat": {
-    "button": "Refresh chat",
     "refreshing": "Refreshing…"
   },
   "composerMode": {

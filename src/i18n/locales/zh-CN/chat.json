@@ -260,6 +260,7 @@
     "showAllCommands": "显示所有命令",
     "clearInput": "清空输入",
     "scrollToBottom": "滚动到底部",
+    "scrollToBottomAndSync": "跳至底部并刷新",
     "dropFilesHere": "将文件拖放至此",
     "nonClaudeAttachmentHint": "附件仅适用于 Claude",
     "voice": {
@@ -606,7 +607,6 @@
     "unknown": "发生意外服务器错误"
   },
   "refreshChat": {
-    "button": "刷新聊天",
     "refreshing": "刷新中…"
   },
   "composerMode": {

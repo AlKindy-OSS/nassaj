@@ -260,6 +260,7 @@
     "showAllCommands": "Показать все команды",
     "clearInput": "Очистить ввод",
     "scrollToBottom": "Прокрутить вниз",
+    "scrollToBottomAndSync": "К последнему и обновить",
     "dropFilesHere": "Перетащите файлы сюда",
     "nonClaudeAttachmentHint": "Вложения используются только с Claude",
     "voice": {
@@ -612,7 +613,6 @@
     "unknown": "Произошла непредвиденная ошибка сервера"
   },
   "refreshChat": {
-    "button": "Обновить чат",
     "refreshing": "Обновление…"
   },
   "composerMode": {

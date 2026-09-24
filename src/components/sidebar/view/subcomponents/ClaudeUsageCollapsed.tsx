@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useClaudeUsage } from '../../../quick-settings-panel/hooks/useClaudeUsage';
+// T-1822: استبدال useClaudeUsage بالمخزن المشترك لتجنّب مضاعفة الطلبات.
+import { useClaudeUsageShared as useClaudeUsage } from '../../../quick-settings-panel/hooks/useClaudeUsageShared';
+import { useAuth } from '../../../auth/context/AuthContext';
 import {
   clampUtilization,
   formatPercent,
@@ -105,6 +107,7 @@ type ClaudeUsageCollapsedProps = {
 export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedProps) {
   // All hooks must be called unconditionally before any conditional return.
   const { t, i18n } = useTranslation('settings');
+  const { user } = useAuth();
   const globalProvider = useSelectedProvider();
   // نفس أسبقية الهيدر: المحرّك قبل الجسم (‏ADR-037) — الفوترة تتبع المحرّك.
   const engineProvider = useSelectedEngineProvider();
@@ -133,11 +136,12 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
         providerQuota.status === 'anthropic' ||
         (providerQuota.status === 'success' && quotaWindows.length === 0)));
   // نفس قاعدة الهيدر حرفياً (سطحان من مصدر واحد).
+  // (B-fix4: لا تفاؤل خلال loading/idle لنماذج مُحدَّدة غير Anthropic).
   const claudeWindowsAllowed =
     quota.isClaudeAccount &&
     engineProvider === null &&
     (!activeModel || providerQuota.isAnthropic || looksLikeAnthropicModel(activeModel));
-  const usage = useClaudeUsage(claudeWindowsAllowed);
+  const usage = useClaudeUsage(claudeWindowsAllowed, user?.id);
   const cyclesState = useProviderCycles(isNarrow && cycleFallbackResolved);
   const cycle = useCycleCountdown(
     cyclesState.status === 'success' ? cyclesState.rows : null,

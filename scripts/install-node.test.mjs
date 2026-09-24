@@ -452,14 +452,14 @@ test('a full install runs every step in order and never derives the source silen
         { match: (c, a) => c === 'git' && gitArgs(a, 'remote', 'get-url'), stdout: 'https://github.com/your-org/nassaj-dev' },
         { match: (c, a) => c === 'git' && gitArgs(a, 'remote', 'set-url') },
         { match: (c, a) => c === 'git' && gitArgs(a, 'ls-remote'), stdout: 'abc\tHEAD' },
-        { match: (c, a) => c === 'git' && a.includes('check-ignore'), stdout: ['config/node.env', 'config/release-source.lock.json', 'config/ecosystem.edge.config.cjs', 'dist', 'dist-server'].join('\n') },
+        { match: (c, a) => c === 'git' && a.includes('check-ignore'), stdout: ['config/node.env', 'config/release-source.lock.json', 'config/ecosystem.demo.config.cjs', 'dist', 'dist-server'].join('\n') },
         { match: (c) => c === 'ssh', status: 1, stderr: "Hi node! You've successfully authenticated" },
         { match: (c) => c === process.execPath, stdout: 'update pre-flight: 10 checks, 0 blockers' },
     ]);
 
     const confirmed = [];
     const result = await installNode({
-        appRoot, homeDir, node: 'edge', port: '3004', processName: 'nassaj-dev',
+        appRoot, homeDir, node: 'demo', port: '3004', processName: 'nassaj-dev',
         databasePath: path.join(dataRoot, 'store.db'),
         env: { USER: 'svc' }, spawn, fetch: fakeFetch({ ssh_keys: META_KEYS }),
         now: () => '2026-09-11T00:00:00.000Z',

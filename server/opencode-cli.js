@@ -283,6 +283,11 @@ async function spawnOpenCode(command, options = {}, ws) {
     let participantRecorded = false;
     let resolvedLocalRun = false;
     let localProgressWatch = null;
+    // B-1298(b): the most recent specific provider error code (auth / context
+    // overflow) seen on this run. Carried onto the terminal rejection so the WS
+    // layer can surface it instead of only the generic dispatch fallback. It is a
+    // fixed non-secret string — never the provider's raw message.
+    let lastProviderErrorCode = null;
 
     // B-395: feed the process monitor so this run gets the same "Running" badge,
     // project busy dot and active-conversations entry a Claude run gets. A new
@@ -416,6 +421,11 @@ async function spawnOpenCode(command, options = {}, ws) {
           if (msg.kind === 'stream_delta' && msg.content?.trim()) {
             lastAssistantMessageId = msg.id;
             localProgressWatch?.touch();
+          }
+          // B-1298(b): remember a specific error code so the terminal rejection
+          // can carry it to the client (auth failure / context overflow).
+          if (msg.kind === 'error' && typeof msg.code === 'string' && msg.code) {
+            lastProviderErrorCode = msg.code;
           }
           // Coordinator attribution (B-MU-UX-FIX-ASSISTANT-AUTHOR): tag assistant
           // output with the JWT-sourced spawner so viewers attribute it correctly.
@@ -666,7 +676,11 @@ async function spawnOpenCode(command, options = {}, ws) {
         }
 
         notifyTerminalState({ code });
-        reject(new Error(code === null ? 'OpenCode CLI process was terminated' : `OpenCode CLI exited with code ${code}`));
+        const closeError = new Error(code === null ? 'OpenCode CLI process was terminated' : `OpenCode CLI exited with code ${code}`);
+        // B-1298(b): attach the fixed non-secret provider code so the WS catch can
+        // surface a specific, displayable reason (no raw message travels with it).
+        if (lastProviderErrorCode) closeError.providerErrorCode = lastProviderErrorCode;
+        reject(closeError);
       });
 
       opencodeProcess.on('error', async (error) => {

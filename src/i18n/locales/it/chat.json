@@ -260,6 +260,7 @@
     "showAllCommands": "Mostra tutti i comandi",
     "clearInput": "Cancella input",
     "scrollToBottom": "Scorri in basso",
+    "scrollToBottomAndSync": "Vai in fondo e aggiorna",
     "dropFilesHere": "Trascina i file qui",
     "nonClaudeAttachmentHint": "Gli allegati vengono utilizzati solo con Claude",
     "voice": {
@@ -608,7 +609,6 @@
     "unknown": "Si è verificato un errore imprevisto del server"
   },
   "refreshChat": {
-    "button": "Aggiorna chat",
     "refreshing": "Aggiornamento…"
   },
   "composerMode": {

@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useMemo, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 
 import { useSessionParticipants } from '../../../participants';
@@ -32,7 +32,7 @@ interface ChatMessagesPaneProps {
   onWheel: () => void;
   onTouchMove: () => void;
   historyError?: HistoryError | null;
-  retryHistory?: () => void;
+  // T-1821: retryHistory حُذف من الواجهة — المعالج انتقل إلى ChatComposer (jump-down).
   isLoadingSessionMessages: boolean;
   chatMessages: ChatMessage[];
   selectedSession: ProjectSession | null;
@@ -92,6 +92,8 @@ interface ChatMessagesPaneProps {
   isLoadingAllMessages: boolean;
   loadAllJustFinished: boolean;
   onRequestDeferredHistory: () => void;
+  /** زرّ «استكمِل الآن» على صفّ فجوة البثّ (bypass صريح، بلا إخفاء تلقائي). */
+  onResumeStreamRecovery?: (sessionId: string) => void;
   showLoadAllOverlay: boolean;
   createDiff: any;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
@@ -123,7 +125,6 @@ export default function ChatMessagesPane({
   onWheel,
   onTouchMove,
   historyError,
-  retryHistory,
   isLoadingSessionMessages,
   chatMessages,
   selectedSession,
@@ -178,6 +179,7 @@ export default function ChatMessagesPane({
   isLoadingAllMessages,
   loadAllJustFinished,
   onRequestDeferredHistory,
+  onResumeStreamRecovery,
   showLoadAllOverlay,
   createDiff,
   onFileOpen,
@@ -242,14 +244,7 @@ export default function ChatMessagesPane({
     return candidateKey;
   }, []);
 
-  const [retryWaiting, setRetryWaiting] = useState(false);
-  useEffect(() => {
-    const delay = Math.max(0, (historyError?.retryAt ?? 0) - Date.now());
-    setRetryWaiting(delay > 0);
-    if (!delay) return;
-    const timer = window.setTimeout(() => setRetryWaiting(false), delay);
-    return () => window.clearTimeout(timer);
-  }, [historyError]);
+  // T-1821: retryWaiting حُذف — الزرّ انتقل إلى ChatComposer (jump-down الموحَّد).
   const historyFailureKey = classifyHistoryFailure(historyError);
 
   // Collisions must only be judged against keys allocated THIS render pass.
@@ -284,16 +279,12 @@ export default function ChatMessagesPane({
       onTouchMove={onTouchMove}
       className="relative flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-0 py-1 sm:space-y-3 sm:px-4"
     >
+      {/* T-1821: حُذف زرّ التحديث من هنا — الزرّ الموحَّد (jump-down) في ChatComposer
+            يتولّى دور retryHistory عند وجود historyError. النصّ يبقى للإعلام. */}
       {historyError && (
         <div role="alert" className="sticky top-0 z-10 mx-3 rounded-lg border border-border bg-muted p-3 text-sm sm:mx-0">
           <p>{t(`session.historyError.${historyFailureKey}`)}</p>
           {chatMessages.length > 0 && <p className="mt-1 text-muted-foreground">{t('session.historyError.retained')}</p>}
-          <button type="button" onClick={retryHistory}
-            disabled={retryWaiting || isLoadingSessionMessages || isLoadingMoreMessages || isLoadingAllMessages}
-            className="mt-2 rounded-md border border-border bg-background px-3 py-2 font-medium hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
-            {retryWaiting ? t('session.historyError.wait')
-              : historyFailureKey === 'revision' ? t('session.historyError.refresh') : t('session.historyError.retry')}
-          </button>
         </div>
       )}
       {isLoadingSessionMessages && chatMessages.length === 0 ? (
@@ -468,6 +459,7 @@ export default function ChatMessagesPane({
                   participantsById={participantsById}
                   provider={displayProvider}
                   onRequestDeferredHistory={onRequestDeferredHistory}
+                  onResumeStreamRecovery={onResumeStreamRecovery}
                   sessionId={currentSessionId ?? selectedSession?.id ?? null}
                 />
               </Fragment>

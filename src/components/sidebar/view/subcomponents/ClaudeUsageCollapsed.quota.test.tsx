@@ -23,8 +23,12 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../../../quick-settings-panel/hooks/useClaudeUsage', () => ({
-  useClaudeUsage: () => ({ status: 'idle', refetch: () => {} }),
+vi.mock('../../../auth/context/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
+  useClaudeUsageShared: () => ({ status: 'idle', refetch: () => {} }),
 }));
 
 // دورة التجديد — قابلة للتهيئة بين الاختبارات (إصلاح B-1290 follow-up item 4).

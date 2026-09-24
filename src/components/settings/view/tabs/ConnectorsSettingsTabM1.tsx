@@ -787,14 +787,9 @@ export default function ConnectorsSettingsTabM1() {
             <div role="status" className="rounded-lg border border-border bg-muted p-4 text-sm">
               <p className="font-medium text-foreground">
                 {isOwner
-                  ? copy('grantDisabledOwner', 'Connectors are not enabled on this installation.', 'ميزة الموصلات غير مُفعَّلة على هذا التثبيت.')
+                  ? copy('grantDisabledOwner', 'Connectors are not enabled on this installation. Use the "Installation setup" tab below to configure.', 'ميزة الموصلات غير مُفعَّلة على هذا التثبيت. استخدم تبويب «تهيئة المشغّل» أدناه للإعداد.')
                   : copy('grantDisabledMember', 'Connectors are not available — contact your platform operator.', 'الموصلات غير متاحة على هذا التثبيت — تواصل مع مشغّل المنصّة.')}
               </p>
-              {isOwner && (
-                <Button variant="outline" className="mt-3" onClick={() => setView('installation')}>
-                  {copy('goToOperatorSetup', 'Go to operator setup', 'انتقل إلى تهيئة المشغّل')}
-                </Button>
-              )}
             </div>
           );
         }
@@ -805,14 +800,9 @@ export default function ConnectorsSettingsTabM1() {
             <div role="status" className="rounded-lg border border-border bg-muted p-4 text-sm">
               <p className="font-medium text-foreground">
                 {isOwner
-                  ? copy('notConfiguredOwner', "Connector authentication isn't configured on the server yet.", 'لم تُضبط مصادقة الموصلات بعد على الخادم.')
+                  ? copy('notConfiguredOwner', 'Connector authentication isn\'t configured on the server yet. Use the "Installation setup" tab below to configure.', 'لم تُضبط مصادقة الموصلات بعد على الخادم. استخدم تبويب «تهيئة المشغّل» أدناه للإعداد.')
                   : copy('notConfiguredMember', 'Connectors are not available yet — awaiting operator setup.', 'الموصلات غير متاحة بعد — بانتظار تهيئة المشغّل.')}
               </p>
-              {isOwner && (
-                <Button variant="outline" className="mt-3" onClick={() => setView('installation')}>
-                  {copy('goToOperatorSetup', 'Go to operator setup', 'انتقل إلى تهيئة المشغّل')}
-                </Button>
-              )}
             </div>
           );
         }

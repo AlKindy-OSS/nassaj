@@ -12,7 +12,9 @@ import { AlertCircle, Gauge, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { AgentProvider } from '../../../../../types/types';
-import { useClaudeUsage } from '../../../../../../quick-settings-panel/hooks/useClaudeUsage';
+// T-1822: نفس نقطة النهاية ونفس الاعتماد — آمن للدمج في المخزن المشترك.
+import { useClaudeUsageShared as useClaudeUsage } from '../../../../../../quick-settings-panel/hooks/useClaudeUsageShared';
+import { useAuth } from '../../../../../../auth/context/AuthContext';
 import { useProviderQuota } from '../../../../../../quick-settings-panel/hooks/useProviderQuota';
 import {
   clampUtilization,
@@ -60,12 +62,13 @@ export function hasDisplayableCodexCredits(
  */
 export default function AgentUsageSection({ agent }: AgentUsageSectionProps) {
   const { t, i18n } = useTranslation('settings');
+  const { user } = useAuth();
 
   const isClaudeAgent = agent === 'claude';
   const isQuotaProvider = QUOTA_WINDOW_PROVIDERS.has(agent);
 
   /* كلا الـhook يُستدعيان غير مشروطَين — الـenabled يوقف الجلب فقط */
-  const claudeUsage = useClaudeUsage(isClaudeAgent);
+  const claudeUsage = useClaudeUsage(isClaudeAgent, user?.id);
   const providerQuota = useProviderQuota(agent, null, isQuotaProvider);
   const codexCredits =
     agent === 'codex' && providerQuota.status === 'success'

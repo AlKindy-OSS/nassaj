@@ -36,6 +36,11 @@ vi.mock('../../../../auth', () => ({
   useAuth: () => ({ user: { id: 1, username: 'owner', role: 'owner' } }),
 }));
 
+// AgentUsageSection imports directly from the context path (not the barrel).
+vi.mock('../../../../auth/context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 1, username: 'owner', role: 'owner' } }),
+}));
+
 vi.mock('../../../../../utils/api', () => ({
   authenticatedFetch: vi.fn(async () => ({
     ok: true,

@@ -1502,6 +1502,17 @@ export function useChatSessionState({
   }, [activeSessionId, isLoadingSessionMessages, isLoadingAllMessages, sessionStore, loadOlderMessages,
     loadAllMessages, lightHistoryCapability.enabled, scheduleHistoryEnrichment]);
 
+  /**
+   * استرجاع فجوة بثّ للجلسة **المعروضة فقط** عبر طابور التاريخ الموسَّع
+   * الموجود (`queueHistoryWork('light400')`): single-flight، إلغاء نظيف،
+   * حارس الرؤية وحارس `revision`. جلسة غير معروضة = لا شيء؛ الفجوة تُعاد
+   * تقييمها عند فتحها (مراجعة qa-critic — بند 2).
+   */
+  const requestStreamGapRecovery = useCallback((sessionId: string) => {
+    if (selectedSessionIdRef.current !== sessionId) return;
+    queueHistoryWork('light400');
+  }, [queueHistoryWork]);
+
   const loadEarlierMessages = useCallback(() => {
     setVisibleMessageCount((prev) => prev + 100);
   }, []);
@@ -1551,6 +1562,7 @@ export function useChatSessionState({
     isLoadingAllMessages,
     loadAllJustFinished,
     requestDeferredHistory: () => queueHistoryWork('full', true),
+    requestStreamGapRecovery,
     showLoadAllOverlay,
     claudeStatus,
     setClaudeStatus,

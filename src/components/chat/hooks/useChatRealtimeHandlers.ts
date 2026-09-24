@@ -17,7 +17,7 @@ import { playChatCompletionSound, playChatErrorSound } from '../../../utils/noti
 import type { PendingPermissionRequest, SessionNavigationOptions } from '../types/types';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import { canAutomaticallyReadHistory, type SessionStore, type NormalizedMessage } from '../../../stores/useSessionStore';
-import { removeOutboxEntry } from '../utils/messageOutbox';
+import { confirmOutboxEntry, getOutboxSnapshot, removeOutboxEntry } from '../utils/messageOutbox';
 
 import {
   consumePendingEngineStamp,
@@ -34,6 +34,17 @@ import {
 // A remounted consumer must not report an already applied evicted head as lost.
 const consumedStreamHeads = new WeakMap<object, { seq: number; gap?: number }>();
 
+/**
+ * حارس الجلب منفصل عمداً عن وجود صفّ `stream_gap_<sessionId>` (مراجعة
+ * qa-critic، فيتو): إخفاء/حذف الصفّ لا يجوز أن يُعيد فتح الجلب. مفتاحه
+ * **كائن الـslot** لا الـsessionId — كـ`consumedStreamHeads` أعلاه — لأن
+ * الحارس يجب أن ينجو من إعادة تركيب المستهلك (remount) طالما بقي المتجر
+ * مالكاً للـslot نفسه؛ ref محلّي داخل الخطّاف كان سيُصفَّر بكل remount
+ * ويُعيد الجلب. القيمة هي آخر فجوة (`droppedBeforeSeq` أو `evictionSeq`)
+ * طُلب استرجاعها فعلاً.
+ */
+const streamGapFetchedHeads = new WeakMap<object, number>();
+
 export { SERVER_ERROR_CODE_KEYS, readServerErrorCode, readServerErrorDetail, resolveServerErrorMessage } from '../utils/serverErrorMessage';
 
 /** Record applied content without treating a later response as proof of an older gap. */
@@ -46,6 +57,12 @@ function recordConsumedStreamHead(slot: object, seq: number, gap?: number): void
 type PendingViewSession = {
   sessionId: string | null;
   startedAt: number;
+  /**
+   * B-1297: معرّف رسالة العميل التي أطلقت هذه الجلسة الجديدة.
+   * يُستخدم لمطابقة `session_created` المتأخر برسالتنا تحديداً، فلا
+   * يُسرق التنقّل لجلسات جلبات أخرى أو تبويبات أخرى.
+   */
+  clientMsgId?: string | null;
 };
 
 type LatestChatMessage = {
@@ -198,6 +215,13 @@ interface UseChatRealtimeHandlersArgs {
    * فقاعتها المتفائلة — إعادةُ ملكية الكلام لصاحبه لا إعادةُ إرسال.
    */
   onRejectedSendRestore?: (text: string) => void;
+  /**
+   * استرجاع موسَّع لفجوة بثّ في الجلسة المعروضة (طابور التاريخ المُجمِّع
+   * `queueHistoryWork('light400')` في `useChatSessionState`). غيابه يفعّل
+   * بديلاً محلياً بتوسيع نافذة `mergeTailFromServer` (انظر
+   * `requestStreamGapRecovery` أدناه).
+   */
+  onRequestExpandedHistory?: (sessionId: string) => void;
   sessionStore: SessionStore;
 }
 
@@ -232,6 +256,7 @@ export function useChatRealtimeHandlers({
   onWebSocketReconnect,
   onServerError,
   onRejectedSendRestore,
+  onRequestExpandedHistory,
   sessionStore,
 }: UseChatRealtimeHandlersArgs) {
   const paletteOps = usePaletteOps();
@@ -248,6 +273,27 @@ export function useChatRealtimeHandlers({
 
   const processedStreamSeqRef = useRef<Map<string, number>>(new Map());
   const recoveredEvictionRef = useRef<{ sessionId: string; seq: number } | null>(null);
+
+  /**
+   * مسار الاسترجاع الموسَّع لفجوة بثّ. `queueHistoryWork('light400')` (طابور
+   * التاريخ المُجمِّع في `useChatSessionState`) هو المسار الأصلي — single-flight
+   * وحارس رؤية وحارس `revision`. حين لا يتوفّر (لم يُمرَّر من المستدعي)، البديل
+   * المقبول (مراجعة qa-critic): توسيع نافذة `mergeTailFromServer` نفسها إلى
+   * `min(200, total - المحتفَظ به + هامش)` بحمولة خفيفة — بلا مساس بميزانية
+   * لقطات البثّ ولا بعقد خادمي جديد.
+   */
+  const requestStreamGapRecovery = useCallback((sessionId: string) => {
+    if (onRequestExpandedHistory) {
+      onRequestExpandedHistory(sessionId);
+      return;
+    }
+    const slot = sessionStore.getSessionSlot?.(sessionId);
+    const held = slot?.serverMessages?.length ?? 0;
+    const total = slot?.total ?? held;
+    const margin = 20;
+    const limit = Math.min(200, Math.max(20, total - held + margin));
+    void sessionStore.mergeTailFromServer?.(sessionId, { limit, payload: 'light' });
+  }, [onRequestExpandedHistory, sessionStore]);
   /** أعلى `seq` عولج لكل جلسة من شريحة إطارات التحكّم. */
   const processedControlSeqRef = useRef<Map<string, number>>(new Map());
   /**
@@ -384,6 +430,49 @@ export function useChatRealtimeHandlers({
             onServerError?.(message);
           }
           break;
+        }
+
+        // B-1297: correlate session_created to this tab's pending send by clientMsgId,
+        // but ONLY on the brand-new-conversation path (`!currentSessionId`). Forked
+        // sends and stale-resume mints (branches below) already have their own
+        // parentSessionId-based guard (B-426) and must not be filtered here — those
+        // paths never populate `pendingViewSessionRef.current.clientMsgId` (it is only
+        // written by useChatComposerState when sending WITHOUT a session), so applying
+        // this guard there would reject every healthy fork/resume with no error.
+        // Two sub-cases when starting a brand-new conversation:
+        //  (a) pendingViewSessionRef is set with a clientMsgId  — must match exactly.
+        //  (b) pendingViewSessionRef was cleared by a message_dispatch_unconfirmed
+        //      error while the provider was still starting (slow local model) — accept
+        //      a late session_created only when the clientMsgId belongs to an
+        //      unconfirmed outbox entry. NOTE: the outbox is keyed by userId in
+        //      localStorage and shared across all tabs of the same user, so this can
+        //      accept a session_created that belongs to another tab of the same user
+        //      (not a cross-user leak) and navigate this tab with it.
+        //  (c) no clientMsgId from the server (older provider) — allow for compat.
+        if (!currentSessionId) {
+          const incomingCmid = typeof msg.clientMsgId === 'string' && msg.clientMsgId
+            ? msg.clientMsgId : null;
+          if (incomingCmid) {
+            const pendingCmid = pendingViewSessionRef.current?.clientMsgId ?? null;
+            if (pendingCmid) {
+              // (a) active pending send: require exact match.
+              if (pendingCmid !== incomingCmid) break;
+            } else if (!pendingViewSessionRef.current) {
+              // (b) pending view was cleared (e.g. by earlier error); accept only
+              // when the clientMsgId maps to an unconfirmed outbox entry (this
+              // user's outbox, possibly written by another tab — see note above).
+              const lateMatch = getOutboxSnapshot().some(
+                (e) => e.id === incomingCmid
+                  && e.status === 'unconfirmed'
+                  && e.reasonCode === 'message_dispatch_unconfirmed',
+              );
+              if (!lateMatch) break;
+              // Mark accepted: the session was created, so the message was delivered.
+              confirmOutboxEntry(incomingCmid);
+            }
+            // else: pendingViewSessionRef is set but has no clientMsgId (older
+            // provider that does not echo clientMsgId) — allow for backward compat.
+          }
         }
 
         // We no longer synthesize client-side placeholder IDs. Until the provider
@@ -900,9 +989,13 @@ export function useChatRealtimeHandlers({
             id, sessionId: viewedSessionId, kind: 'error', provider,
             code: 'stream_recovery_gap', content: t('streamRecoveryGap'), timestamp: new Date().toISOString(),
           });
-          if (canAutomaticallyReadHistory(slot?.historyError)) {
-            void sessionStore.mergeTailFromServer?.(viewedSessionId);
-          }
+        }
+        // الحارس على قيمة الفجوة لا على وجود الصفّ: صفّ محذوف بلا فجوة جديدة
+        // لا يعيد الجلب (فيتو qa-critic ضدّ حلقة طلبات لا نهائية).
+        if (canAutomaticallyReadHistory(slot?.historyError)
+          && (!slot || streamGapFetchedHeads.get(slot) !== eviction.seq)) {
+          if (slot) streamGapFetchedHeads.set(slot, eviction.seq);
+          requestStreamGapRecovery(viewedSessionId);
         }
       }
     }
@@ -919,8 +1012,9 @@ export function useChatRealtimeHandlers({
         unresolvedEvictions.set(sessionId, evictionGap);
         if (slot) recordConsumedStreamHead(slot, consumed, evictionGap);
       }
-      if (entry.droppedBeforeSeq
-        && (!entry.evictionGap || sessionId === viewedSessionId)
+      // جلسة غير معروضة: لا صفّ خطأ ولا جلب. تُعاد التقييم عند فتحها لاحقاً
+      // (تبقى الفجوة في streamFrames، وunresolvedEvictions أعلاه محفوظة).
+      if (entry.droppedBeforeSeq && sessionId === viewedSessionId
         && (entry.incomplete || evictionGap || entry.droppedBeforeSeq > consumed)) {
         // A tail is only a bounded recovery attempt, not proof of completeness.
         const id = `stream_gap_${sessionId}`;
@@ -929,9 +1023,15 @@ export function useChatRealtimeHandlers({
             id, sessionId, kind: 'error', provider,
             code: 'stream_recovery_gap', content: t('streamRecoveryGap'), timestamp: new Date().toISOString(),
           });
-          if (canAutomaticallyReadHistory(slot?.historyError)) {
-            void sessionStore.mergeTailFromServer?.(sessionId);
-          }
+        }
+        // الحارس على قيمة الفجوة لا على وجود الصفّ (فيتو qa-critic): إخفاء
+        // الصفّ لا يفتح الجلب ثانيةً، وفجوة تالية بقيمة أعلى تفتحه فعلاً حتى
+        // إن بقي الصفّ القديم ظاهراً.
+        const gapKey = evictionGap ?? entry.droppedBeforeSeq;
+        if (canAutomaticallyReadHistory(slot?.historyError)
+          && (!slot || streamGapFetchedHeads.get(slot) !== gapKey)) {
+          if (slot) streamGapFetchedHeads.set(slot, gapKey);
+          requestStreamGapRecovery(sessionId);
         }
       }
     }
@@ -980,7 +1080,7 @@ export function useChatRealtimeHandlers({
       if (appliedSlot) recordConsumedStreamHead(appliedSlot, entry.seq, unresolvedEvictions.get(sessionId));
     }
     pruneProcessedStreamSeqs(processed, streamFrames);
-  }, [currentSessionId, selectedSession?.id, provider, sessionStore, streamFrames, t]);
+  }, [currentSessionId, selectedSession?.id, provider, requestStreamGapRecovery, sessionStore, streamFrames, t]);
 
   useEffect(() => {
     if (!latestMessage) return;
@@ -1269,4 +1369,9 @@ export function useChatRealtimeHandlers({
     onWebSocketReconnect,
     sessionStore,
   ]);
+
+  // زرّ «استكمِل الآن» على صفّ `stream_recovery_gap` (بلا إخفاء تلقائي
+  // للتنبيه): استدعاء صريح لنفس مسار الاسترجاع الموسَّع، خارج حارس الجلب
+  // التلقائي — إجراء مستخدم متعمَّد لا يخضع لتقييد إعادة المحاولة.
+  return { requestStreamGapRecovery };
 }

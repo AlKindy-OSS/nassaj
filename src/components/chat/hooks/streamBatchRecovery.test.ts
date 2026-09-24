@@ -325,3 +325,84 @@ describe('durable reconnect recovery consumption', () => {
     expect(recover).not.toHaveBeenCalled();
   });
 });
+
+describe('C-XM-GAP fetch guard decoupled from the gap error row (qa-critic veto)', () => {
+  function overflowedFinals(count: number, offset = 0): any[] {
+    return Array.from({ length: count }, (_, i) => final(`reply-${offset + i}`, `نص ${offset + i}`));
+  }
+
+  it('two consecutive gaps in the same session fetch twice but keep one error row', () => {
+    authenticatedFetch.mockClear();
+    let frames = batch(overflowedFinals(MAX_STREAM_FRAMES + 5));
+    const view = mount(frames);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    const gap1 = frames.get(sessionId)?.droppedBeforeSeq;
+    expect(gap1).toBeGreaterThan(0);
+
+    // Keep advancing the same reducer chain so the session overflows its
+    // completed-snapshot budget a second time, raising droppedBeforeSeq past
+    // the seq already consumed by the first render (not just past gap1).
+    let seq = MAX_STREAM_FRAMES + 5;
+    for (let i = 0; i < 100; i++) {
+      seq += 1;
+      frames = applyStreamFrame(frames, { sessionId, ...final(`later-${i}`, `later ${i}`) }, seq);
+    }
+    const gap2 = frames.get(sessionId)?.droppedBeforeSeq;
+    expect(gap2).toBeGreaterThan(gap1!);
+
+    view.rerender({ streamFrames: frames });
+    expect(authenticatedFetch).toHaveBeenCalledTimes(2);
+    expect(view.result.current.getMessages(sessionId).filter(row => row.id === `stream_gap_${sessionId}`)).toHaveLength(1);
+  });
+
+  it('removing the gap error row and re-rendering the same streamFrames triggers zero additional fetches', () => {
+    authenticatedFetch.mockClear();
+    const frames = batch(overflowedFinals(MAX_STREAM_FRAMES + 5));
+    const view = mount(frames);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+
+    // Simulate the row disappearing (e.g. a UI/store bug) without the
+    // underlying gap value changing.
+    const slot = view.result.current.getSessionSlot!(sessionId)!;
+    slot.realtimeMessages = slot.realtimeMessages.filter(row => row.id !== `stream_gap_${sessionId}`);
+
+    view.rerender({ streamFrames: new Map(frames) });
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fetch or show an error row for a session that is not the one being viewed', () => {
+    authenticatedFetch.mockClear();
+    const bystander = 'bystander-session';
+    let frames: StreamFrameMap = new Map();
+    for (let i = 0; i < MAX_STREAM_FRAMES + 5; i++) {
+      frames = applyStreamFrame(frames, { sessionId: bystander, ...final(`b-${i}`, `نص ${i}`) }, i + 1);
+    }
+    expect(frames.get(bystander)?.droppedBeforeSeq).toBeGreaterThan(0);
+
+    // `base.selectedSession.id` / `base.currentSessionId` are `sessionId`,
+    // not `bystander` — the bystander session is never the viewed one.
+    const view = mount(frames);
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+    expect(view.result.current.getMessages(bystander).some(row => row.kind === 'error')).toBe(false);
+  });
+
+  it('bounds automatic fetches per flush to the viewed session even when several sessions carry a gap', () => {
+    authenticatedFetch.mockClear();
+    let frames: StreamFrameMap = new Map();
+    let seq = 0;
+    for (const sid of [sessionId, 'other-b1', 'other-b2', 'other-b3']) {
+      for (let i = 0; i < 30; i++) {
+        seq += 1;
+        frames = applyStreamFrame(frames, { sessionId: sid, ...final(`${sid}-${i}`, `n${i}`) }, seq);
+      }
+    }
+    // At least one bystander also carries a gap in the same flush — the bound
+    // must hold regardless of how many sessions are affected.
+    const gapSessions = [...frames.entries()].filter(([, entry]) => Boolean(entry.droppedBeforeSeq));
+    expect(gapSessions.length).toBeGreaterThan(1);
+    expect(gapSessions.some(([sid]) => sid === sessionId)).toBe(true);
+
+    mount(frames);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+  });
+});

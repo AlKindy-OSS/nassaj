@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:786106e9da7db4b2bc202d4480b7c9639bff2fc291ca22f612f67e10500fcaa1",
+  "reviewedSiteDigest": "sha256:abed286aa3cfe890012193caa60139d2c0a2ac6649fc997faddb8b4b6a12693e",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",

@@ -65,6 +65,8 @@ type MessageComponentProps = {
   participantsById?: Map<string, SessionParticipant>;
   provider: Provider | string;
   onRequestDeferredHistory?: () => void;
+  /** زرّ «استكمِل الآن» على صفّ `stream_recovery_gap` (bypass صريح، بلا إخفاء تلقائي للتنبيه). */
+  onResumeStreamRecovery?: (sessionId: string) => void;
   /**
    * T-1737 — مُعرِّف الجلسة الحالية.
    * يُمرَّر إلى ChatActionsContext ليصل CodeBlock دون prop-drilling.
@@ -81,7 +83,7 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onStartNewSession, onForkFromMessage, isForkingMessage, autoExpandTools, showRawParameters, showThinking, showToolCalls, selectedProject, owner, participantsById, provider, onRequestDeferredHistory, sessionId = null }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onStartNewSession, onForkFromMessage, isForkingMessage, autoExpandTools, showRawParameters, showThinking, showToolCalls, selectedProject, owner, participantsById, provider, onRequestDeferredHistory, onResumeStreamRecovery, sessionId = null }: MessageComponentProps) => {
   const { t, i18n } = useTranslation('chat');
   // خريطة الأدوار (turns) من TurnCostContext — بلا جلب إضافي (البيانات يجلبها
   // ChatInterface مرّة واحدة وتُشارَك عبر السياق).
@@ -386,6 +388,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   // instead of silently restarting. Surface an explicit retry action.
   const isSessionNotResumable =
     message.type === 'error' && message.errorCode === 'conversation_not_found';
+  // فجوة استرداد البثّ: التنبيه لا يُخفى تلقائياً (فيتو qa-critic)؛ الزرّ هو
+  // المسار الصريح الوحيد لاستئناف الاسترجاع الموسَّع لنفس الجلسة.
+  const isStreamRecoveryGap =
+    message.type === 'error' && message.errorCode === 'stream_recovery_gap';
+  const streamRecoveryGapSessionId = message.sessionId || sessionId || null;
 
   if (shouldHideThinkingMessage) {
     return null;
@@ -702,6 +709,21 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                   className="mt-3 inline-flex items-center rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-red-500 dark:hover:bg-red-600"
                 >
                   {t('sessionNotResumable.startNew')}
+                </button>
+              </div>
+            ) : isStreamRecoveryGap ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
+                <p className="text-sm text-red-800 [overflow-wrap:anywhere] dark:text-red-200" dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}>
+                  {formattedMessageContent}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => streamRecoveryGapSessionId && onResumeStreamRecovery?.(streamRecoveryGapSessionId)}
+                  disabled={!streamRecoveryGapSessionId || !onResumeStreamRecovery}
+                  aria-label={t('streamRecoveryGapResume')}
+                  className="mt-3 inline-flex items-center rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-red-500 dark:hover:bg-red-600"
+                >
+                  {t('streamRecoveryGapResume')}
                 </button>
               </div>
             ) : message.isToolUse ? (

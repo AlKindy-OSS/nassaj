@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { computeMerged, resolveTailBookmark, selectTrulyOlder } from './useSessionStore';
+import { computeMerged, compareMessagesByTimestamp, resolveTailBookmark, selectTrulyOlder } from './useSessionStore';
 import type { NormalizedMessage } from './useSessionStore';
 
 function msg(
@@ -141,5 +141,87 @@ describe('pagination bookmark & prepend guard (B-432)', () => {
     // والنتيجة المعروضة تبقى مرتّبة: لا ردٌّ من 17:06 فوق مطالبة 10:00.
     const merged = [...trulyOlder, ...held];
     expect(merged.map((m) => m.id)).toStrictEqual(['older1', 'old', 'new1', 'new2']);
+  });
+});
+
+/**
+ * استرجاع فجوة بثّ (مراجعة qa-critic، بند 2) — الاسترجاع الموسَّع (البديل
+ * المحلي في `mergeTailFromServer`، أو نتيجة طابور `light400`) يمرّ عبر نفس
+ * `computeMerged`/`resolveTailBookmark` المستخدَمين في المسار العادي، فلا
+ * حاجة لعقد جديد؛ هذه الاختبارات تثبت أن التوسيع لا يكسر الضمانات القائمة.
+ */
+describe('نافذة استرجاع موسَّعة تُدمَج مع صفوف حيّة (بلا فقاعات مكرّرة)', () => {
+  it('لا فقاعات مكرّرة حين تحمل النافذة الموسَّعة نفس الردّ المتدفّق حياً', () => {
+    // نافذة موسَّعة (200 صفّاً مثلاً) عادت من الخادم وتحمل الردّ المُثبَّت،
+    // بينما لا يزال الصفّ الحيّ (`stream_delta`) في الذاكرة قبل أن يُنظَّف.
+    const server = Array.from({ length: 199 }, (_, i) =>
+      msg(`old-${i}`, `2026-01-01T09:${String(i % 60).padStart(2, '0')}:00.000Z`));
+    server.push({
+      ...msg('persisted-reply', '2026-01-01T10:00:00.000Z', 'assistant', 'الجواب النهائي'),
+      responseToMessageId: 'turn-1',
+    });
+    const realtime = [{
+      ...msg('__streaming_sess-1', '2026-01-01T09:59:59.000Z', 'assistant', 'الجواب النهائي'),
+      kind: 'stream_delta' as const,
+      responseToMessageId: 'turn-1',
+    }];
+    const merged = computeMerged(server, realtime);
+    const assistantEchoes = merged.filter((m) => m.role === 'assistant' && m.content === 'الجواب النهائي');
+    expect(assistantEchoes).toHaveLength(1);
+  });
+
+  it('لا تُدمِج التكرار غير المتجاور (dedupeAdjacentAssistantEchoes تشترط التجاور)', () => {
+    // Two identical assistant replies for different turns, separated by an
+    // unrelated row — adjacency-only dedup must not collapse these, and must
+    // not reorder them either.
+    const server = [
+      msg('a1', '2026-01-01T10:00:00.000Z', 'assistant', 'نفس النص'),
+      msg('mid', '2026-01-01T10:01:00.000Z', 'user', 'سؤال آخر'),
+      msg('a2', '2026-01-01T10:02:00.000Z', 'assistant', 'نفس النص'),
+    ];
+    const merged = computeMerged(server, [msg('extra', '2026-01-01T10:00:30.000Z', 'user', 'ignored-branch')]);
+    // extra هنا مجرّد صفّ حقيقي جديد (id غير موجود بالخادم) ليُفعِّل مسار الدمج.
+    expect(merged.map((m) => m.id)).toStrictEqual(['a1', 'extra', 'mid', 'a2']);
+    expect(merged.filter((m) => m.content === 'نفس النص')).toHaveLength(2);
+  });
+
+  it('طوابع زمنية متطابقة/فاسدة تحافظ على الترتيب الأصلي (فرز مستقرّ، لا انعكاس)', () => {
+    const rows = [
+      msg('first', 'not-a-timestamp'),
+      msg('second', 'also-not-a-timestamp'),
+      msg('third', '2026-01-01T10:00:00.000Z'),
+      msg('fourth', '2026-01-01T10:00:00.000Z'),
+    ];
+    const sortedOnce = [...rows].sort(compareMessagesByTimestamp);
+    // Corrupted/tied timestamps compare as 0 (never negative/positive), so a
+    // stable sort must leave their relative order exactly as inserted.
+    expect(sortedOnce.map((m) => m.id)).toStrictEqual(['first', 'second', 'third', 'fourth']);
+    // Sorting twice must not slowly reverse the run (a common stability bug).
+    const sortedTwice = [...sortedOnce].sort(compareMessagesByTimestamp);
+    expect(sortedTwice.map((m) => m.id)).toStrictEqual(['first', 'second', 'third', 'fourth']);
+  });
+
+  it('علامة الذيل بعد استرجاع موسَّع + fetchMore لا تُسقِط صفحة ولا تُكرِّرها', () => {
+    // الاسترجاع الموسَّع يكبّر `slot.serverMessages` (كما تفعل
+    // mergeTailFromServer اليوم) بلا لمس `slot.offset` — والعلامة تُشتقّ من
+    // طول الصفوف المحتفَظ بها فعلاً (B-432)، فتتبع التوسيع تلقائياً.
+    const widenedServerMessages = Array.from({ length: 150 }, (_, i) =>
+      msg(`w${i}`, `2026-01-01T09:${String(i % 60).padStart(2, '0')}:00.000Z`));
+    const staleOffset = 20; // لم يُحدَّث بعد التوسيع، كما توثّق mergeTailFromServer عمداً.
+    const bookmark = resolveTailBookmark({ offset: staleOffset, serverMessages: widenedServerMessages });
+    expect(bookmark).toBe(150);
+
+    // صفحة «الأقدم» التالية (fetchMore) تستخدم هذه العلامة كنقطة انطلاقها.
+    // نافذة متداخلة جزئياً تحاكي استجابة خادم حقيقية حول نفس نقطة القطع.
+    const olderPage = [
+      ...Array.from({ length: 5 }, (_, i) => msg(`older${i}`, `2026-01-01T08:${String(i).padStart(2, '0')}:00.000Z`)),
+      widenedServerMessages[0],
+      widenedServerMessages[1],
+    ];
+    const trulyOlder = selectTrulyOlder(widenedServerMessages, olderPage);
+    expect(trulyOlder).toHaveLength(5);
+    expect(trulyOlder.map((m) => m.id)).toStrictEqual(['older0', 'older1', 'older2', 'older3', 'older4']);
+    // لا فقدان: كل صفوف الصفحة الأقدم الحقيقية ظهرت؛ لا تكرار: الصفّان
+    // المتداخلان (w0, w1) لم يُعادا.
   });
 });

@@ -18,6 +18,11 @@ export const SERVER_ERROR_CODE_KEYS: Record<string, string> = {
   // `unknown` («حدث خطأ غير متوقع») فلا يفهم المستخدم أن رسالته لم تُرسل
   // أصلاً ولا ما يفعله، فيعيد الإرسال ويُرفض ثانيةً.
   session_busy: 'serverError.session_busy',
+  // B-1298: رموز أخطاء المزوّد المحلي — تصل مباشرةً على إطار kind:'error' أو
+  // في حقل providerErrorCode على إطار message_dispatch_unconfirmed.
+  provider_auth_failed: 'serverError.provider_auth_failed',
+  provider_context_overflow: 'serverError.provider_context_overflow',
+  LOCAL_MODELS_AUTH_FAILED: 'serverError.local_models_auth_failed',
 };
 
 /**
@@ -60,9 +65,14 @@ function safeDisplayErrorCode(value: unknown): string | null {
  * Translate trusted error classifications without exposing raw server details.
  * SERVER_ERROR_UNCLASSIFIED is a UI category, not a unique incident identifier.
  * Display validation must not change the codes used by delivery state handling.
+ *
+ * B-1298: when the frame is a message_dispatch_unconfirmed dispatch failure and
+ * carries a `providerErrorCode` sibling field (e.g. provider_auth_failed), use
+ * the provider code for both the headline and the displayed code label. The
+ * delivery semantics (unconfirmed outbox state) are unaffected.
  */
 export function resolveServerErrorMessage(
-  msg: { code?: unknown; error?: unknown; reason?: unknown },
+  msg: { code?: unknown; error?: unknown; reason?: unknown; providerErrorCode?: unknown },
   t: (key: string, opts?: Record<string, unknown>) => string,
   fallbackCode: 'SERVER_ERROR_UNCLASSIFIED' | 'session_create_failed' | 'abort_failed'
     = 'SERVER_ERROR_UNCLASSIFIED',
@@ -70,7 +80,12 @@ export function resolveServerErrorMessage(
   const fallback = t('serverError.unknown');
   const structured =
     msg.error && typeof msg.error === 'object' ? (msg.error as Record<string, unknown>) : null;
-  const code = safeDisplayErrorCode(structured?.code) || safeDisplayErrorCode(msg.code);
+  const rawCode = safeDisplayErrorCode(structured?.code) || safeDisplayErrorCode(msg.code);
+  // Prefer providerErrorCode when the delivery frame is unconfirmed and the
+  // provider reported a specific cause (e.g. wrong key, context overflow).
+  const providerCode = rawCode === 'message_dispatch_unconfirmed'
+    ? safeDisplayErrorCode(msg.providerErrorCode) : null;
+  const code = providerCode ?? rawCode;
   const displayCode = code || fallbackCode;
   const mappedKey = Object.prototype.hasOwnProperty.call(SERVER_ERROR_CODE_KEYS, displayCode)
     ? SERVER_ERROR_CODE_KEYS[displayCode] : null;

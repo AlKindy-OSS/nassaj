@@ -260,6 +260,7 @@
     "showAllCommands": "모든 명령어 보기",
     "clearInput": "입력 지우기",
     "scrollToBottom": "맨 아래로 스크롤",
+    "scrollToBottomAndSync": "아래로 이동 및 새로고침",
     "dropFilesHere": "파일을 여기에 놓으세요",
     "nonClaudeAttachmentHint": "첨부 파일은 Claude에서만 사용됩니다",
     "voice": {
@@ -606,7 +607,6 @@
     "unknown": "예상치 못한 서버 오류가 발생했습니다"
   },
   "refreshChat": {
-    "button": "채팅 새로고침",
     "refreshing": "새로고침 중…"
   },
   "composerMode": {

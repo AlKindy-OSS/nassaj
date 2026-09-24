@@ -2,7 +2,9 @@ import { AlertCircle, Database, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { ClaudeUsage } from '../claudeUsageTypes';
-import { useClaudeUsage } from '../hooks/useClaudeUsage';
+// T-1822: استبدال useClaudeUsage بالمخزن المشترك لتجنّب مضاعفة الطلبات.
+import { useClaudeUsageShared as useClaudeUsage } from '../hooks/useClaudeUsageShared';
+import { useAuth } from '../../auth/context/AuthContext';
 import { formatCredits, hasDisplayableExtraUsageCredits } from '../claudeUsageHelpers';
 import { getProviderCapabilities } from '../../chat/constants/providerCapabilities';
 
@@ -80,12 +82,13 @@ function UsageContent({ data }: { data: ClaudeUsage }) {
  */
 export default function ClaudeUsageSection({ isOpen, sessionProvider }: ClaudeUsageSectionProps) {
   const { t } = useTranslation('settings');
+  const { user } = useAuth();
 
   // Claude account usage doesn't apply to a non-claude session (T-5/T-904
   // superseded) — skip fetching it and show a note instead of the bars.
   const capabilities = getProviderCapabilities(sessionProvider);
   const isClaudeSession = capabilities.quota.isClaudeAccount;
-  const usage = useClaudeUsage(isOpen && isClaudeSession);
+  const usage = useClaudeUsage(isOpen && isClaudeSession, user?.id);
 
   // Title row carries the plan badge once data is available.
   const plan = isClaudeSession && usage.status === 'success' ? usage.data.plan : null;

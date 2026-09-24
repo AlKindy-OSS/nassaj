@@ -260,6 +260,7 @@
     "showAllCommands": "すべてのコマンドを表示",
     "clearInput": "入力をクリア",
     "scrollToBottom": "一番下へスクロール",
+    "scrollToBottomAndSync": "最新へ移動して更新",
     "dropFilesHere": "ここにファイルをドロップ",
     "nonClaudeAttachmentHint": "添付ファイルはClaudeでのみ使用されます",
     "voice": {
@@ -606,7 +607,6 @@
     "unknown": "予期しないサーバーエラーが発生しました"
   },
   "refreshChat": {
-    "button": "チャットを更新",
     "refreshing": "更新中…"
   },
   "composerMode": {

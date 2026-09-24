@@ -618,34 +618,86 @@ const localAddressForbidden = (address: string): boolean => {
     && words[0] !== 0x2002 && !(words[0] === 0x2001 && words[1] < 0x0200)));
 };
 
-/** Pinned DNS + shared bounded transport/parser; redirects are never followed. */
-export async function safeFetchLocalModelJson(rawUrl: string, apiKey?: string | null,
-  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport'> = {}): Promise<Record<string, unknown>> {
-  const url = validateLocalModelUrl(rawUrl);
-  if (apiKey && /[\r\n]/u.test(apiKey)) throw new ConnectorSafeFetchError('local_model_key_invalid');
-  const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
+/**
+ * Pins DNS and re-applies the ADR-163/B-1268 address rules to the RESOLVED address,
+ * so a DNS name pointing at loopback (or at the public internet over http) is refused
+ * too. Shared by the local-model GET fetch and the POST auth probe.
+ */
+const resolveLocalModelAddress = async (
+  url: URL,
+  resolver: SafeFetchResolver,
+): Promise<Readonly<{ address: string; family: 4 | 6 }>> => {
   const hostname = url.hostname.replace(/^\[|\]$/gu, '');
-  const answers = await withTimeout((dependencies.resolver ?? defaultResolver)(hostname), DEFAULT_TIMEOUT_MS);
+  const answers = await withTimeout(resolver(hostname), DEFAULT_TIMEOUT_MS);
   const port = localModelPort(url);
-  // B-1268: re-apply the port and plaintext rules to the RESOLVED address, so a DNS
-  // name pointing at loopback (or at the public internet over http) is refused too.
   const forbidden = (address: string): boolean => localAddressForbidden(address)
     || (port < PRIVILEGED_PORT_CEILING && isLoopbackAddress(address))
     || (url.protocol === 'http:' && !isPrivateInferenceAddress(address));
   if (!answers.length || answers.some(answer => forbidden(answer.address) || isIP(answer.address) !== answer.family)) {
     throw new ConnectorSafeFetchError('local_model_address_forbidden');
   }
+  return answers[0];
+};
+
+/** Pinned DNS + shared bounded transport/parser; redirects are never followed. */
+export async function safeFetchLocalModelJson(rawUrl: string, apiKey?: string | null,
+  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport'> = {}): Promise<Record<string, unknown>> {
+  const url = validateLocalModelUrl(rawUrl);
+  if (apiKey && /[\r\n]/u.test(apiKey)) throw new ConnectorSafeFetchError('local_model_key_invalid');
+  const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
+  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver);
   const abort = new AbortController();
   let response: SafeFetchResponse | undefined;
   try {
     const remaining = Math.max(1, deadline - Date.now());
     response = await withTimeout((dependencies.transport ?? defaultTransport)({
-      url, ...answers[0], method: 'GET', headers: { accept: 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+      url, ...target, method: 'GET', headers: { accept: 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
       body: null, timeoutMs: remaining, signal: abort.signal,
     }), remaining, () => abort.abort());
     if (response.status < 200 || response.status >= 300) throw new ConnectorSafeFetchError('local_model_status_rejected');
     if (deadline <= Date.now()) throw new ConnectorSafeFetchError('local_model_timeout');
     return await withTimeout(readJsonBody(response, DEFAULT_MAX_RESPONSE_BYTES), deadline - Date.now(), () => abort.abort());
+  } finally {
+    abort.abort();
+    if (response) closeResponseBody(response);
+  }
+}
+
+/**
+ * B-1298(a): authenticated auth probe. POSTs a minimal body to a local-model endpoint
+ * (e.g. `/chat/completions`) with the configured key and returns ONLY the HTTP status,
+ * without loading a model or reading the body. A wrong/missing key yields 401 on servers
+ * that gate auth before model load (llama.cpp / llama-swap); a valid key yields a 4xx
+ * validation error instead — never a 401. The GET `/models` endpoint is served
+ * unauthenticated by llama.cpp, so a wrong key would otherwise pass silently.
+ *
+ * The body is `{}` deliberately: with no `model` field there is nothing to resolve or
+ * load, and with no `messages` field every runtime fails validation before generating.
+ * Naming a sentinel model instead would add a model-resolution step for no extra safety.
+ *
+ * Reuses the same pinned DNS, address validation and bounded transport as the GET fetch,
+ * so SSRF protections are not bypassed. The caller decides which statuses mean "bad key"
+ * and never surfaces the provider's raw response.
+ */
+export async function safeProbeLocalModelAuth(rawUrl: string, apiKey?: string | null,
+  dependencies: Pick<SafeProviderFetchDependencies, 'resolver' | 'transport'> = {}): Promise<{ status: number }> {
+  const url = validateLocalModelUrl(rawUrl);
+  if (apiKey && /[\r\n]/u.test(apiKey)) throw new ConnectorSafeFetchError('local_model_key_invalid');
+  const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
+  const target = await resolveLocalModelAddress(url, dependencies.resolver ?? defaultResolver);
+  const abort = new AbortController();
+  let response: SafeFetchResponse | undefined;
+  try {
+    const remaining = Math.max(1, deadline - Date.now());
+    response = await withTimeout((dependencies.transport ?? defaultTransport)({
+      url, ...target, method: 'POST',
+      headers: {
+        accept: 'application/json', 'content-type': 'application/json',
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: Buffer.from('{}'), timeoutMs: remaining, signal: abort.signal,
+    }), remaining, () => abort.abort());
+    return { status: response.status };
   } finally {
     abort.abort();
     if (response) closeResponseBody(response);

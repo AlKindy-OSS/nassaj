@@ -665,6 +665,32 @@ async function getRepositoryRootPath(projectPath) {
   return stdout.trim();
 }
 
+/**
+ * Reports whether `projectPath` is itself the root of its git repository, as
+ * opposed to a nested subfolder that git resolves upward to an ancestor repo.
+ *
+ * A project folder that is not a repo of its own (e.g. `~/projects/App` under a
+ * home directory that happens to be a git repo) would otherwise inherit the
+ * ancestor's ahead/behind counts and falsely advertise unpushed commits. Both
+ * sides are canonicalised with fs.realpath so symlinked or non-normalised paths
+ * compare correctly. Returns false on any failure so callers fail closed and
+ * treat the folder as a non-root. `validateGitRepository` intentionally still
+ * accepts nested folders for the git panel; this is a separate, narrower check.
+ */
+export async function isProjectRepositoryRoot(projectPath) {
+  try {
+    const toplevel = await getRepositoryRootPath(projectPath);
+    if (!toplevel) return false;
+    const [realToplevel, realProject] = await Promise.all([
+      fs.realpath(toplevel),
+      fs.realpath(projectPath),
+    ]);
+    return realToplevel === realProject;
+  } catch {
+    return false;
+  }
+}
+
 function normalizeRepositoryRelativeFilePath(filePath) {
   return String(filePath)
     .replace(/\\/g, '/')
@@ -1948,6 +1974,11 @@ router.get('/remote-status', async (req, res) => {
     const projectPath = await getActualProjectPath(project, req);
     await validateGitRepository(projectPath);
 
+    // Whether this folder is the repo root, not a nested subfolder that git
+    // resolves upward to an ancestor repository. The push reminder relies on
+    // this so it never inherits an ancestor repo's ahead count.
+    const isRepositoryRoot = await isProjectRepositoryRoot(projectPath);
+
     const branch = await getCurrentBranchName(projectPath);
     const hasCommits = await repositoryHasCommits(projectPath);
 
@@ -1964,6 +1995,7 @@ router.get('/remote-status', async (req, res) => {
       return res.json({
         hasRemote,
         hasUpstream: false,
+        isRepositoryRoot,
         branch,
         remoteName: fallbackRemoteName,
         ahead: 0,
@@ -1984,6 +2016,7 @@ router.get('/remote-status', async (req, res) => {
       return res.json({
         hasRemote,
         hasUpstream: false,
+        isRepositoryRoot,
         branch,
         remoteName: fallbackRemoteName,
         message: 'No remote tracking branch configured'
@@ -2001,6 +2034,7 @@ router.get('/remote-status', async (req, res) => {
     res.json({
       hasRemote: true,
       hasUpstream: true,
+      isRepositoryRoot,
       branch,
       remoteBranch: trackingBranch,
       remoteName,
@@ -2010,7 +2044,7 @@ router.get('/remote-status', async (req, res) => {
     });
   } catch (error) {
     console.error('Git remote status error:', error);
-    res.json({ error: toSafeGitFailureDetails(error, 'Git operation failed') });
+    res.json({ isRepositoryRoot: false, error: toSafeGitFailureDetails(error, 'Git operation failed') });
   }
 });
 

@@ -61,7 +61,7 @@ afterEach(() => {
 describe('SidebarProjectItem — تذكير الدفْع', () => {
   it('يظهر عدد الالتزامات الجاهزة للدفع بعد دخول صف المشروع نطاق الرؤية', async () => {
     globalThis.IntersectionObserver = ProjectRowObserver as unknown as typeof IntersectionObserver;
-    authenticatedFetch.mockResolvedValue({ ok: true, json: async () => ({ hasUpstream: true, ahead: 3 }) });
+    authenticatedFetch.mockResolvedValue({ ok: true, json: async () => ({ isRepositoryRoot: true, hasUpstream: true, ahead: 3 }) });
     const { rerender } = render(projectItem());
 
     observers.forEach((notify) => notify());
@@ -75,9 +75,11 @@ describe('SidebarProjectItem — تذكير الدفْع', () => {
   });
 
   it.each([
-    [{ hasUpstream: false, ahead: 3 }],
-    [{ hasUpstream: true, ahead: 0 }],
-    [{ hasUpstream: true, ahead: '3' }],
+    [{ isRepositoryRoot: true, hasUpstream: false, ahead: 3 }],
+    [{ isRepositoryRoot: true, hasUpstream: true, ahead: 0 }],
+    [{ isRepositoryRoot: true, hasUpstream: true, ahead: '3' }],
+    [{ isRepositoryRoot: false, hasUpstream: true, ahead: 3 }],
+    [{ hasUpstream: true, ahead: 3 }],
   ])('يخفي الشارة إن لم تستوفِ الاستجابة الشرط: %o', async (status) => {
     globalThis.IntersectionObserver = ProjectRowObserver as unknown as typeof IntersectionObserver;
     authenticatedFetch.mockResolvedValue({ ok: true, json: async () => status });
