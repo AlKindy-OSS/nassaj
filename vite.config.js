@@ -226,6 +226,11 @@ export default defineConfig(({ command, mode }) => {
         '/shell': {
           target: `ws://${proxyHost}:${serverPort}`,
           ws: true
+        },
+        // ADR-187: internal team-chat room socket (its own path, never /ws).
+        '/internal-session-chat': {
+          target: `ws://${proxyHost}:${serverPort}`,
+          ws: true
         }
       }
     },

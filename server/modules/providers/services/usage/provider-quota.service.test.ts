@@ -146,6 +146,42 @@ test('codex: رصيد إضافي صالح يمرّ، والرصيد الناقص
   assert.equal(invalid?.extraUsageCredits, undefined);
 });
 
+test('codex: balance يقبل الرقم finite غير السالب مع بقاء السلسلة العشرية', async () => {
+  for (const balance of [17.25, '17.25']) {
+    providerQuotaService.__resetCache();
+    const { impl } = countingFetch({
+      ...CODEX_LIVE_BODY,
+      credits: { has_credits: true, unlimited: false, balance },
+    });
+    const result = await providerQuotaService.getWindows('codex', 'u1', {
+      fetchImpl: impl,
+      credential: 'fake-access-token',
+    });
+    assert.deepEqual(result?.extraUsageCredits, { balance: 17.25, unlimited: false });
+  }
+});
+
+test('codex: balance رقمياً يُقرَّب لأقرب سنت لا يُرفَض لذيل فاصلة عائمة', async () => {
+  // 0.1 + 0.2 نفسه ينتج 0.30000000000000004 في IEEE-754 — هذا ذيلٌ حسابي لا
+  // رقماً حقيقياً من Codex، والتقريب لسنتَين يُصحّحه بدل رفضه «كثير الأرقام».
+  for (const [balance, expected] of [
+    [0.1 + 0.2, 0.3],
+    [17.999999999999996, 18],
+    [0.30000000000000004, 0.3],
+  ] as const) {
+    providerQuotaService.__resetCache();
+    const { impl } = countingFetch({
+      ...CODEX_LIVE_BODY,
+      credits: { has_credits: true, unlimited: false, balance },
+    });
+    const result = await providerQuotaService.getWindows('codex', 'u1', {
+      fetchImpl: impl,
+      credential: 'fake-access-token',
+    });
+    assert.deepEqual(result?.extraUsageCredits, { balance: expected, unlimited: false });
+  }
+});
+
 test('codex: يمرّر الرصيد حتى عند غياب نافذة حصّة صالحة', async () => {
   providerQuotaService.__resetCache();
   const { impl } = countingFetch({

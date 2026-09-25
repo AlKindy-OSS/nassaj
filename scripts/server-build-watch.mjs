@@ -21,9 +21,10 @@ import {
     reconcileServerPreviewLedger,
     recordPreviewLedgerEvent,
 } from './local-preview-ledger.mjs';
+import { gitControlPath } from './git-control-root.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const GENERATION_FILE = path.join(ROOT, '.git', 'nassaj-server-source-generation');
+const GENERATION_FILE = gitControlPath(ROOT, 'nassaj-server-source-generation');
 const DEBOUNCE_MS = Number.parseInt(process.env.NASSAJ_SERVER_BUILD_DEBOUNCE_MS || '2000', 10);
 const BACKOFF_MS = Number.parseInt(process.env.NASSAJ_SERVER_BUILD_BACKOFF_MS || '15000', 10);
 const maintenanceGate = createUpdateMaintenanceGate({ projectPath: ROOT });

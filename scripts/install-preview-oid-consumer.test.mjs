@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 import { enforcementPlan, executeEnforcementTransition, installEnforcementFiles, executeServerDomainTransition, assertTransitionStorageCapacity, verifyLoadedTransitionArtifact } from './install-preview-oid-consumer.mjs';
 
@@ -25,6 +26,7 @@ test('enforcement reinstall atomically narrows an existing drop-in to 0600', () 
 
 test('enforcement installs first then uses one conflict transaction and verifies legacy stopped', () => {
     const root = mkdtempSync(path.join(process.env.TMPDIR || '/var/tmp', 'oid-enforcement-'));
+    execFileSync('git', ['init', '--quiet', root]); // audit lives in the common Git dir
     const calls = [];
     let installed = false;
     try {
@@ -55,6 +57,7 @@ test('enforcement installs first then uses one conflict transaction and verifies
 
 test('enforcement accepts an already absent legacy unit', () => {
     const root = mkdtempSync(path.join(process.env.TMPDIR || '/var/tmp', 'oid-enforcement-'));
+    execFileSync('git', ['init', '--quiet', root]); // audit lives in the common Git dir
     try {
         const result = executeEnforcementTransition({ root, approvalId: 'owner-action-absent' }, {
             install: () => {},

@@ -237,7 +237,7 @@
       "anchor": "const liveRead = () => reader(userId, deps);",
       "primitive": "injected_http",
       "expression": "provider quota HTTP client",
-      "line": 536,
+      "line": 550,
       "classification": "provider_effect_enclosed",
       "owner": "provider quota refresh",
       "purpose": "quota",
@@ -626,7 +626,7 @@
     {
       "id": "server/index.js#child_process.spawn#1",
       "file": "server/index.js",
-      "line": 616,
+      "line": 626,
       "primitive": "child_process.spawn",
       "expression": "spawnChildProcess",
       "classification": "read_only_process_query",
@@ -640,7 +640,7 @@
     {
       "id": "server/index.js#provider_launcher.import#1",
       "file": "server/index.js",
-      "line": 64,
+      "line": 66,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    queryClaudeSDK,\n    spawnClaudeSideQuery,\n    abortClaudeSDKSession,\n    isClaudeSDKSessionActive,\n    isSessionEngineSwitchBlocked,\n    getActiveC",
       "classification": "composition_binding",
@@ -654,7 +654,7 @@
     {
       "id": "server/index.js#provider_launcher.import#2",
       "file": "server/index.js",
-      "line": 80,
+      "line": 82,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnCursor,\n    abortCursorSession,\n    isCursorSessionActive,\n    getActiveCursorSessions,\n} from './cursor-cli.js';",
       "classification": "composition_binding",
@@ -668,7 +668,7 @@
     {
       "id": "server/index.js#provider_launcher.import#3",
       "file": "server/index.js",
-      "line": 86,
+      "line": 88,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    queryCodex,\n    abortCodexSession,\n    isCodexSessionActive,\n    getActiveCodexSessions,\n} from './openai-codex.js';",
       "classification": "composition_binding",
@@ -682,7 +682,7 @@
     {
       "id": "server/index.js#provider_launcher.import#4",
       "file": "server/index.js",
-      "line": 93,
+      "line": 95,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnAntigravity,\n    abortAntigravitySession,\n    isAntigravitySessionActive,\n    getActiveAntigravitySessions,\n    attachAntigravitySession,\n} fr",
       "classification": "composition_binding",
@@ -696,7 +696,7 @@
     {
       "id": "server/index.js#provider_launcher.import#5",
       "file": "server/index.js",
-      "line": 100,
+      "line": 102,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnOpenCode,\n    abortOpenCodeSession,\n    isOpenCodeSessionActive,\n    getActiveOpenCodeSessions,\n} from './opencode-cli.js';",
       "classification": "composition_binding",
@@ -710,7 +710,7 @@
     {
       "id": "server/index.js#provider_launcher.import#6",
       "file": "server/index.js",
-      "line": 106,
+      "line": 108,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnHermes,\n    abortHermesSession,\n    isHermesSessionActive,\n    getActiveHermesSessions,\n} from './hermes-cli.js';",
       "classification": "composition_binding",
@@ -724,7 +724,7 @@
     {
       "id": "server/index.js#provider_launcher.import#7",
       "file": "server/index.js",
-      "line": 122,
+      "line": 124,
       "primitive": "provider_launcher.import",
       "expression": "import { spawnKimiAgent } from './kimi-agent-cli.js';",
       "classification": "composition_binding",
@@ -738,7 +738,7 @@
     {
       "id": "server/index.js#provider_launcher.import#8",
       "file": "server/index.js",
-      "line": 142,
+      "line": 144,
       "primitive": "provider_launcher.import",
       "expression": "import {\n    spawnQwen,\n    abortQwenSession,\n    isQwenSessionActive,\n    getActiveQwenSessions,\n} from './qwen-cli.js';",
       "classification": "composition_binding",
@@ -1662,7 +1662,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#1",
       "file": "server/routes/system.js",
-      "line": 830,
+      "line": 831,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1676,7 +1676,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#2",
       "file": "server/routes/system.js",
-      "line": 881,
+      "line": 882,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1690,7 +1690,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#3",
       "file": "server/routes/system.js",
-      "line": 2755,
+      "line": 2762,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",
@@ -1704,7 +1704,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#4",
       "file": "server/routes/system.js",
-      "line": 3445,
+      "line": 3452,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1718,7 +1718,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#5",
       "file": "server/routes/system.js",
-      "line": 3621,
+      "line": 3628,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "release_infrastructure_effect",
@@ -1732,7 +1732,7 @@
     {
       "id": "server/routes/system.js#child_process.spawn#6",
       "file": "server/routes/system.js",
-      "line": 3935,
+      "line": 3942,
       "primitive": "child_process.spawn",
       "expression": "spawn",
       "classification": "operator_infrastructure",

@@ -514,5 +514,8 @@
     "copyCommand": "نسخ",
     "copied": "نُسخ",
     "copyCommandAria": "نسخ أمر المشغّل"
+  },
+  "internalChat": {
+    "unreadMention": "منشن فريق غير مقروء"
   }
 }

@@ -47,6 +47,7 @@ import express from 'express';
 import { assertLegacyTransitionAllowed } from '../bootstrap-startup-context.js';
 import { readOidPairServingReceipt, reconcileOidPairServingReceipt, validateOidPairTerminal } from '../../scripts/oid-control-capsule.mjs';
 import { computeOidTripleTargetDigest } from '../../scripts/lib/oid-triple-target.mjs';
+import { tryCommonGitDir } from '../../scripts/git-control-root.mjs';
 import { hasCurrentUpdateConsent } from '../services/update-auto-activator.js';
 import { withLocalUpdateWriterLease } from '../services/update-writer-lease.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
@@ -1680,7 +1681,13 @@ export function setQueueMaintenanceClockForTests(clock) {
     lastQueueMaintenanceAt = Number.NEGATIVE_INFINITY;
 }
 /** Read each receipt independently: a torn unrelated file cannot hide valid evidence. */
-export function readOidTransactionReceipts(gitDirectory = path.join(APP_ROOT, '.git')) {
+// The common Git dir is fixed for the process; resolve once, retry only while absent.
+let appCommonGitDirectory = null;
+function appCommonGitDir() {
+    appCommonGitDirectory ??= tryCommonGitDir(APP_ROOT);
+    return appCommonGitDirectory;
+}
+export function readOidTransactionReceipts(gitDirectory = appCommonGitDir()) {
     let names;
     try { names = fs.readdirSync(gitDirectory); } catch { return []; }
     return names.filter((name) => name.startsWith('nassaj-oid-control-transaction-') && name.endsWith('.json'))

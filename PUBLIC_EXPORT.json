@@ -1,8 +1,8 @@
 {
   "schema": "nassaj-public-export/v1",
-  "sourceCommit": "f0b80ab4279b298585f0b38a9b7205a85bb842ae",
+  "sourceCommit": "cf59e394f6ef8b2b29a37bbf4ef7fd0b509ad9f8",
   "sourceKind": "ref",
-  "ref": "f0b80ab4279b298585f0b38a9b7205a85bb842ae",
-  "packageVersion": "2.3.0.7",
-  "generatedAt": "2026-09-25T20:16:06+03:00"
+  "ref": "cf59e394f6ef8b2b29a37bbf4ef7fd0b509ad9f8",
+  "packageVersion": "2.3.0.8",
+  "generatedAt": "2026-09-26T02:47:15+03:00"
 }

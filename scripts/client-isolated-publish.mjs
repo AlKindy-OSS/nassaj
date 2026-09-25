@@ -31,6 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PREVIEW_BUILD_LOCK_NAME, recordPublishBaseGuardDecision } from './local-preview-ledger.mjs';
+import { gitControlPath } from './git-control-root.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OID = /^[a-f0-9]{40}$/;
@@ -61,7 +62,7 @@ export function mutableWatcherInhibitPath(root = ROOT) {
 export function sharedClientPublishLockPath(root = ROOT) {
     // The watcher owns this established preview-control lock.  Do not create a
     // second "isolated" lock: two locks turn the promotion check into a race.
-    return path.join(path.resolve(root), '.git', PREVIEW_BUILD_LOCK_NAME);
+    return gitControlPath(root, PREVIEW_BUILD_LOCK_NAME);
 }
 
 export function readMutableWatcherInhibit(root = ROOT) {

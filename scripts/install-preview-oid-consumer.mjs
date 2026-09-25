@@ -15,8 +15,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONSUMER = 'nassaj-preview-oid-consumer.service';
 const LEGACY = ['nassaj-client-build-watch.service'];
 
+/** Enforcement audit record in the common Git dir; a linked worktree's `.git` is a file. */
+export function previewOidEnforcementAuditPath(root) {
+    return gitControlPath(root, 'nassaj-preview-oid-enforcement-v1.json');
+}
+
 function durableAudit(root, record) {
-    const file = path.join(root, '.git', 'nassaj-preview-oid-enforcement-v1.json');
+    const file = previewOidEnforcementAuditPath(root);
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     const temporary = `${file}.tmp-${process.pid}`;
     writeFileSync(temporary, `${JSON.stringify({ schemaVersion: 1, ...record }, null, 2)}\n`, { mode: 0o600, flag: 'wx' });

@@ -19,6 +19,7 @@ import { canonicalTripleJson, validateOidTripleTargetDescriptor } from '../../sc
 import { DEV_FULL_CAPABILITY, readLocalUpdatePolicy, publicLocalUpdatePolicy,
   inspectLocalUpdatePolicyGrant } from '../../scripts/lib/local-update-policy.mjs';
 import { writeLocalUpdatePolicy } from '../../scripts/lib/local-update-policy-write.mjs';
+import { gitControlPath, tryCommonGitDir } from '../../scripts/git-control-root.mjs';
 
 import { APP_ROOT, SAFE_SERVER_BUILD_ID } from './server-actions.js';
 
@@ -369,7 +370,7 @@ export function inspectServerCandidate(expectedServerBuildId, root = APP_ROOT) {
     return { allowed: false, code: 'invalid_expected_server_build_id' };
   }
   try {
-    const ledger = readRegularJson(path.join(root, '.git', 'nassaj-local-preview-ledger-v1.json'));
+    const ledger = readRegularJson(gitControlPath(root, 'nassaj-local-preview-ledger-v1.json'));
     const loadedBuildId = ledger.serverLoadedBuildId;
     const generation = ledger.serverSourceGeneration;
     const identityMatches = ledger.serverSourceBuildId === expectedServerBuildId
@@ -420,12 +421,14 @@ export function inspectServerActivationCandidate(expectedServerBuildId, root = A
   if (!SAFE_SERVER_BUILD_ID.test(expectedServerBuildId || '')) {
     return { allowed: false, code: 'invalid_expected_server_build_id', activationKind: null };
   }
-  const oidControl = path.join(root, '.git', 'nassaj-preview-oid-control-request-v1.json');
+  // Without a resolvable common Git dir no OID request can exist; fall through.
+  const gitDirectory = tryCommonGitDir(root);
+  const oidControl = gitDirectory && path.join(gitDirectory, 'nassaj-preview-oid-control-request-v1.json');
   // lstat observes the directory entry itself. A broken or substituted symlink
   // is still a present OID request and must fail closed, never fall through to
   // the legacy classifier merely because existsSync followed it to nowhere.
   try {
-    if (fs.lstatSync(oidControl, { throwIfNoEntry: false })) {
+    if (oidControl && fs.lstatSync(oidControl, { throwIfNoEntry: false })) {
       const request = inspectOwnerControlRequest(root);
       if (request.buildId !== expectedServerBuildId) {
         return { allowed: false, code: 'superseded', activationKind: 'oid' };
@@ -466,7 +469,7 @@ export function inspectLegacyRestartDisposition(expectedServerBuildId, requestId
 }
 
 export const activationTransactionPath = (root = APP_ROOT) =>
-  path.join(root, '.git', ACTIVATION_TRANSACTION_NAME);
+  gitControlPath(root, ACTIVATION_TRANSACTION_NAME);
 
 function fsyncDirectory(directory) {
   const fd = fs.openSync(directory, fs.constants.O_RDONLY);
@@ -489,7 +492,7 @@ function writeTransactionUnlocked(root, transaction) {
 }
 
 function withTransactionLock(root, operation) {
-  const lock = path.join(root, '.git', ACTIVATION_TRANSACTION_LOCK);
+  const lock = gitControlPath(root, ACTIVATION_TRANSACTION_LOCK);
   let fd;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -515,7 +518,10 @@ function withTransactionLock(root, operation) {
 }
 
 export function readActivationTransaction(root = APP_ROOT) {
-  const target = activationTransactionPath(root);
+  // Release layouts have no `.git`: no common dir means no transaction to resume.
+  const gitDirectory = tryCommonGitDir(root);
+  if (!gitDirectory) return null;
+  const target = path.join(gitDirectory, ACTIVATION_TRANSACTION_NAME);
   if (!fs.existsSync(target)) return null;
   const transaction = readRegularJson(target);
   const expectedActivatingPath = transaction

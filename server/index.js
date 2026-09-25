@@ -37,6 +37,7 @@ import {
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 import { exchangeGenerations, validateCandidate, verifyRuntimeIdentities } from '../scripts/lib/source-update-activation.mjs';
+import { tryCommonGitDir } from '../scripts/git-control-root.mjs';
 import { createUpdateRuntimeOrchestrator } from '../scripts/lib/update-runtime-orchestrator.mjs';
 import { bootstrapLegacy144HostCapability } from '../scripts/lib/update-runtime-capability.mjs';
 import { readReleaseActivationAction } from '../scripts/lib/update-release-layout-activation.mjs';
@@ -57,6 +58,7 @@ import { resolveReadPathInProject, isResolvedPathInsideRootReal } from './utils/
 import { sanitizeSvg } from './services/svg-sanitizer.js';
 import { createChatImagesRouter } from './routes/chat-images.js';
 import { createDocumentSharesRouter } from './routes/document-shares.js';
+import { configureInternalChatSessionAccess, createInternalSessionChatRouter, isInternalChatReady } from './modules/internal-session-chat/index.js';
 import { createDocumentSharesStore } from './modules/database/document-shares.js';
 import { createDocumentShareVerifier } from './services/document-share-auth.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
@@ -314,7 +316,15 @@ try {
             + `Set it to a credential-free GitHub repository URL, then run the governed safe restart: ${error.message}`);
 }
 const sourceVersionHealthMiddleware = createSourceVersionHealthMiddleware(path.join(APP_ROOT, 'package.json'));
-const PREVIEW_LEDGER_PATH = path.join(APP_ROOT, '.git', 'nassaj-local-preview-ledger-v1.json');
+const PREVIEW_LEDGER_NAME = 'nassaj-local-preview-ledger-v1.json';
+// Resolved lazily through the common Git dir: in a linked worktree `.git` is a file.
+let previewLedgerPath = null;
+const resolvePreviewLedgerPath = () => {
+    if (previewLedgerPath) return previewLedgerPath;
+    const directory = tryCommonGitDir(APP_ROOT);
+    if (directory) previewLedgerPath = path.join(directory, PREVIEW_LEDGER_NAME);
+    return previewLedgerPath;
+};
 const readBuildIdFile = (file, field = 'buildId') => {
     try {
         const value = JSON.parse(fs.readFileSync(file, 'utf8'))?.[field];
@@ -325,7 +335,7 @@ const readBuildIdFile = (file, field = 'buildId') => {
 };
 const readPreviewLedger = () => {
     try {
-        const value = JSON.parse(fs.readFileSync(PREVIEW_LEDGER_PATH, 'utf8'));
+        const value = JSON.parse(fs.readFileSync(resolvePreviewLedgerPath(), 'utf8'));
         return value?.schemaVersion === 1 ? value : null;
     } catch {
         return null;
@@ -1414,6 +1424,7 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         // sidebar from offering destructive bulk actions to an older server.
         bulkLifecycleActions: true,
         capabilities: {
+            internalSessionChat: { supported: true, enabled: isInternalChatReady(), schema: 1 },
             lightHistory: {
                 supported: true,
                 codeReady: true,
@@ -1526,6 +1537,19 @@ app.use('/api/voice', authenticateToken, voiceRoutes);
 
 // Session participant/agent tracking (protected)
 app.use('/api/sessions', authenticateToken, participantsRoutes);
+// Internal team chat (ADR-187): room membership narrows, never widens, the
+// platform session gate. The same predicate as every session route is injected
+// here so the chat module never imports the provider layer.
+configureInternalChatSessionAccess(isSessionAccessibleByUser);
+app.use('/api/sessions', authenticateToken, createInternalSessionChatRouter({
+    // Per-user write budget for room/member/message mutations.
+    writeLimiter: createRateLimiter({
+        windowMs: 60_000,
+        max: 60,
+        key: (req) => `user:${req.user?.id ?? 'anonymous'}`,
+        message: 'Too many requests, please slow down',
+    }),
+}));
 
 // Durable send-later queue. Every mutation and due-time dispatch is scoped to
 // the authenticated user and rechecks current session write access.

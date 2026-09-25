@@ -45,9 +45,14 @@ vi.mock('../../../auth/context/AuthContext', () => ({
   useAuth: () => ({ user: null }),
 }));
 
+// qa-critic (T-1858، جولة 2): يتتبّع كل استدعاء لإثبات أن حصّة Claude لا تُشغَّل
+// إطلاقاً على جلسة Codex — كانت مُفعَّلة أيضاً حين effectiveProvider==='codex'
+// فتُظهر رصيد هارنس Claude بجانب رصيد Codex بشارة «+» غير موسومة (عطلٌ مُصلَح).
+const claudeUsageEnabledCalls: boolean[] = [];
 vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
-  useClaudeUsageShared: (enabled: boolean) =>
-    enabled
+  useClaudeUsageShared: (enabled: boolean) => {
+    claudeUsageEnabledCalls.push(enabled);
+    return enabled
       ? {
           status: 'success',
           data: {
@@ -62,7 +67,8 @@ vi.mock('../../../quick-settings-panel/hooks/useClaudeUsageShared', () => ({
           },
           refetch: () => {},
         }
-      : { status: 'idle', refetch: () => {} },
+      : { status: 'idle', refetch: () => {} };
+  },
 }));
 
 // دورة التجديد — قابل للتهيئة لاختبار «خطأ + لا دورة» (البند الحدّي).
@@ -113,6 +119,7 @@ type MockQuotaResult = {
   }>;
   plan: string | null;
   isAnthropic: boolean;
+  data?: { extraUsageCredits?: { balance: number; unlimited: boolean } };
   refetch: () => void;
 };
 let codexQuotaResult: MockQuotaResult;
@@ -143,6 +150,7 @@ vi.mock('../../../quick-settings-panel/hooks/useProviderQuota', () => ({
       status: 'success',
       plan: 'lite',
       isAnthropic: false,
+      data: { extraUsageCredits: undefined },
       refetch: () => {},
       windows: [
         // الأطوال كما يرسلها الخادم من unit/number: خمس ساعات، أسبوع، شهر.
@@ -188,6 +196,7 @@ beforeEach(() => {
   __resetSelectedProviderStore();
   quotaEnabledFor.length = 0;
   cycleEnabledCalls.length = 0;
+  claudeUsageEnabledCalls.length = 0;
   _lastCyclesSuccess = null;
   codexQuotaResult = {
     status: 'none',
@@ -301,6 +310,70 @@ describe('HeaderUsageIndicator — نوافذ حصّة المزوّد', () => {
     assert.equal(cycleEnabledCalls.includes(true), false);
   });
 
+  it('codex يعرض الرصيد الإضافي بجانب نوافذ الحصة', () => {
+    setSelectedProvider('codex');
+    codexQuotaResult = {
+      ...codexQuotaResult,
+      status: 'success',
+      data: { extraUsageCredits: { balance: 42, unlimited: false } },
+      windows: [
+        {
+          key: 'primary',
+          usedPercent: 12,
+          resetsAt: '2026-07-30T05:00:00.000Z',
+          windowSeconds: 18_000,
+          horizon: { value: 5, unit: 'hour' },
+        },
+      ],
+    };
+
+    const { text, badges } = renderHeader(null);
+    assert.equal(badges, 2);
+    assert.equal(text.includes('12%'), true);
+    assert.equal(text.includes('+42'), true);
+    // qa-critic (T-1858، جولة 2): جلسة Codex لا تُشغّل حصّة Claude إطلاقاً —
+    // بشارة واحدة فقط لرصيد Codex الإضافي، لا شارة "+" ثانية مبهمة بجانبها.
+    assert.equal(claudeUsageEnabledCalls.includes(true), false);
+    assert.equal((text.match(/\+/g) ?? []).length, 1);
+  });
+
+  it('لا يعرض رصيداً إضافياً عند غياب بياناته', () => {
+    setSelectedProvider('codex');
+    codexQuotaResult = {
+      ...codexQuotaResult,
+      status: 'success',
+      data: { extraUsageCredits: undefined },
+      windows: [
+        {
+          key: 'primary',
+          usedPercent: 12,
+          resetsAt: '2026-07-30T05:00:00.000Z',
+          windowSeconds: 18_000,
+          horizon: { value: 5, unit: 'hour' },
+        },
+      ],
+    };
+
+    const { text, badges } = renderHeader(null);
+    assert.equal(badges, 1);
+    assert.equal(text.includes('+'), false);
+  });
+
+  it('يعرض الرصيد غير المحدود كشارة لا نهائية حتى دون نوافذ حصة', () => {
+    setSelectedProvider('codex');
+    codexQuotaResult = {
+      ...codexQuotaResult,
+      status: 'success',
+      data: { extraUsageCredits: { balance: 0, unlimited: true } },
+      windows: [],
+    };
+
+    const { text, badges } = renderHeader(null);
+    assert.equal(badges, 1);
+    assert.equal(text.includes('∞'), true);
+    assert.equal(text.includes('42'), false);
+  });
+
   it('200 بنوافذ منتهية/غير صالحة يسقط إلى الدورة بعد حسم success', () => {
     setSelectedProvider('codex');
     codexQuotaResult = { ...codexQuotaResult, status: 'success', windows: [] };
@@ -314,6 +387,26 @@ describe('HeaderUsageIndicator — نوافذ حصّة المزوّد', () => {
   it('kimi بلا مصدر ولا مرساة ⇒ صمت', () => {
     setSelectedProvider('kimi');
     assert.equal(renderHeader(null).badges, 0);
+  });
+
+  it('codex: حصّة Claude لا تُشغَّل إطلاقاً — حتى بلا رصيد إضافي (qa-critic T-1858 ج2)', () => {
+    setSelectedProvider('codex');
+    codexQuotaResult = {
+      ...codexQuotaResult,
+      status: 'success',
+      windows: [
+        {
+          key: 'primary',
+          usedPercent: 12,
+          resetsAt: '2026-07-30T05:00:00.000Z',
+          windowSeconds: 18_000,
+          horizon: { value: 5, unit: 'hour' },
+        },
+      ],
+    };
+    renderHeader(null);
+    assert.equal(claudeUsageEnabledCalls.length > 0, true, 'الهوك يُستدعى دوماً (rules-of-hooks)');
+    assert.equal(claudeUsageEnabledCalls.includes(true), false, 'لكن مُعطَّلاً على جلسة Codex');
   });
 
   it('claude يبقى على نوافذه ولا يُشغّل مسار حصّة المزوّد', () => {

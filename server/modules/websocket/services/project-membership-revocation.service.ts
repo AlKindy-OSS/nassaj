@@ -16,6 +16,9 @@
  *    stopped by stopLaunchedTurns below, as secondary coverage.
  *  - /shell PTYs (shell-websocket.service) inside the project: socket closed,
  *    PTY killed, lease released.
+ *  - internal team-chat rooms (ADR-187): their own registry — the user's room
+ *    subscriptions in the project's sessions are dropped with a personal
+ *    `internal-chat.membership_revoked` frame; delivery also re-checks access.
  *  - standalone terminals: an owner/admin-only surface (ADR-063 amend), and those
  *    roles keep access under canSeeAllProjects — nothing can be revoked there.
  *
@@ -24,6 +27,7 @@
  */
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { internalChatRealtime } from '@/modules/internal-session-chat/index.js';
 import { listRunningSessionIdsForUser, presenceRefresh } from '@/modules/websocket/services/presence.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import { terminateShellSessionsForUserInProject } from '@/modules/websocket/services/shell-websocket.service.js';
@@ -48,6 +52,8 @@ type RevocationDependencies = {
   listRunningSessionIds?: (userId: number) => string[];
   /** Stops one in-flight turn; wired in server/index.js to abortSessionTurn. */
   abortTurn?: (sessionId: string, userId: number) => Promise<unknown> | unknown;
+  /** Drops the user's internal team-chat subscriptions (default: ADR-187 registry). */
+  revokeInternalChat?: (userId: number, sessionIds: string[]) => number;
 };
 
 function defaultListSessionIds(projectPath: string): string[] {
@@ -81,6 +87,7 @@ export function revokeProjectLiveAccess(
     mirrorsRemoved = removeSessionMirrorsForUser(revocation.userId, projectSessionIds);
     shellsEnded = terminateShells(revocation.userId, revocation.projectPath, revocation.projectId);
     turnsStopped = stopLaunchedTurns(revocation.userId, projectSessionIds, dependencies);
+    (dependencies.revokeInternalChat ?? internalChatRealtime.revokeUserSessions)(revocation.userId, projectSessionIds);
     refreshPresence();
   }
 
