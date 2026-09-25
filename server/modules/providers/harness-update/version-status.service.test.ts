@@ -250,7 +250,6 @@ test('getAll returns one row per harness in the contract shape', async () => {
   assert.ok(ids.includes('claude'));
   assert.ok(ids.includes('hermes'));
   assert.ok(ids.includes('glm'));
-  assert.ok(!ids.includes('gemini')); // removed provider is not a harness
   for (const row of all) {
     assert.ok(typeof row.checkedAt === 'string');
     assert.ok('activeJobId' in row);

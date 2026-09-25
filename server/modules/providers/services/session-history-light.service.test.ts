@@ -81,7 +81,7 @@ test('light projector keeps the B-1078 displayClientMsgId render pairing next to
 
 test('light projector never returns standalone data URIs or oversized unknown nested payloads', () => {
   const projected = projectLightHistory(baseResult([{
-    id: 'm', sessionId: 's', timestamp: 'now', provider: 'gemini', kind: 'text', role: 'assistant',
+    id: 'm', sessionId: 's', timestamp: 'now', provider: 'cursor', kind: 'text', role: 'assistant',
     content: 'data:image/png;base64,AAAA', providerPayload: { blob: 'x'.repeat(100_000) },
   }]));
   assert.equal(projected.messages[0].content, undefined);
@@ -93,7 +93,7 @@ test('light projector never returns standalone data URIs or oversized unknown ne
 
 test('projector contract is provider-neutral across the registered history matrix', () => {
   const providers: LLMProvider[] = [
-    'claude', 'codex', 'cursor', 'gemini', 'antigravity', 'opencode', 'hermes',
+    'claude', 'codex', 'cursor', 'antigravity', 'opencode', 'hermes',
     'kimi', 'deepseek', 'glm', 'qwen',
   ];
   for (const provider of providers) {

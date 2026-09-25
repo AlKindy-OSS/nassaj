@@ -58,7 +58,7 @@ describe('btwCommand — كشف أمر /btw', () => {
     expect(isReservedSideChannelCommandForProvider('/side سؤال', 'claude')).toBe(false);
     expect(isReservedSideChannelCommandForProvider('/btw', 'claude')).toBe(true);
     expect(isReservedSideChannelCommandForProvider('/btw سؤال', 'codex')).toBe(true);
-    expect(isReservedSideChannelCommandForProvider('/btw سؤال', 'gemini')).toBe(false);
+    expect(isReservedSideChannelCommandForProvider('/btw سؤال', 'sakana')).toBe(false);
     expect(isReservedSideChannelCommandForProvider('/btwx سؤال', 'codex')).toBe(false);
   });
 

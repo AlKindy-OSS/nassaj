@@ -56,7 +56,7 @@ export function shouldResetProvider(status: ProviderAuthStatus): boolean {
  * filtered through the global disabled seam FIRST: an auto-reset must never
  * hand the user a provider that is not selectable in the picker and that the
  * dispatch seam refuses — that combination is a dead-end chat, not a fallback.
- * Concretely, the unfiltered order reached `gemini`, `deepseek` and (since the
+ * Concretely, the unfiltered order reached `deepseek` and (since the
  * 2026-07-26 GLM fold) `glm`.
  *
  * Fail-open on the status itself: only a confirmed `installed === false`

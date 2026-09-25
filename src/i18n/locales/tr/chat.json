@@ -102,7 +102,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -223,24 +222,6 @@
       "default": "sandbox: workspace-write · onaylar: güvenilmeyen · ağ: KAPALI",
       "acceptEdits": "sandbox: workspace-write · onaylar: asla · ağ: KAPALI",
       "bypassPermissions": "sandbox: workspace-write · onaylar: asla · ağ: KAPALI — Düzenlemeleri Kabul Et ile aynı. Tam disk/ağ erişimi yalnızca operatör bu kurulum için etkinleştirdiyse mümkündür (varsayılan olarak kapalı)."
-    }
-  },
-  "gemini": {
-    "permissionMode": "Gemini İzin Modu",
-    "description": "Gemini CLI'ın işlem onaylarını nasıl yönettiğini kontrol et.",
-    "modes": {
-      "default": {
-        "title": "Standart (Onay İste)",
-        "description": "Gemini, komut çalıştırmadan, dosya yazmadan ve web kaynağı getirmeden önce onay ister."
-      },
-      "autoEdit": {
-        "title": "Otomatik Düzenleme (Dosya Onaylarını Atla)",
-        "description": "Gemini dosya düzenlemelerini ve web getirmelerini otomatik onaylar, ama shell komutları için yine de onay ister."
-      },
-      "yolo": {
-        "title": "YOLO (Tüm İzinleri Atla)",
-        "description": "Gemini tüm işlemleri onay almadan çalıştırır. Dikkatli kullan."
-      }
     }
   },
   "input": {
@@ -419,7 +400,6 @@
       "claude": "Claude'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "cursor": "Cursor'ı {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "codex": "Codex'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
-      "gemini": "Gemini'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "antigravity": "Antigravity (agy) {{model}} ile kullanıma hazır. Mesajınızı aşağıya yazın.",
       "opencode": "OpenCode'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "default": "Başlamak için yukarıdan bir sağlayıcı seç",
@@ -664,14 +644,6 @@
     "subagentModelCalls": "Alt ajan model çağrıları: {{count}}",
     "responseTurnDurationLabel": "Yanıt süresi",
     "totalWorkDuration": "Toplam çalışma süresi (süreler çakışabilir): {{duration}}"
-  },
-  "activityGap": {
-    "status": "Ajan çalışıyor — son etkinlik {{time}} önce",
-    "ariaLabel": "Ajan hâlâ çalışıyor, son etkinlik {{time}} önce"
-  },
-  "activityGap": {
-    "status": "Ajan çalışıyor — son etkinlik {{time}} önce",
-    "ariaLabel": "Ajan hâlâ çalışıyor, son etkinlik {{time}} önce"
   },
   "closeConversation": {
     "close": "Konuşmayı kapat",

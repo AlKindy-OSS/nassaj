@@ -28,6 +28,11 @@ import { resolveCagedLaunch } from '@/services/isolation/provider-cage-wiring.js
 import { buildShellErrorFrame, sanitizeTerminalText } from '@/modules/websocket/services/shell-error-frame.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { parseIncomingJsonObject } from '@/shared/utils.js';
+import {
+  PROVIDER_REMOVED_CODE,
+  PROVIDER_REMOVED_MESSAGE,
+  isRetiredProvider,
+} from '../../../../shared/retiredProviders.js';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
@@ -93,7 +98,7 @@ export function isProviderLoginCommand(
 // ---------------------------------------------------------------------------
 //
 // `buildShellCommand` returns `initialCommand` VERBATIM on several branches
-// (isPlainShell, and the agy/opencode/gemini/claude branches when the payload
+// (isPlainShell, and the agy/opencode/claude branches when the payload
 // carries one), and the caller runs it as `bash -c <command>` on the HOST as the
 // `nassaj` user. This file contained ZERO references to `role`, so a member with
 // the plain `user` role could open ws://…/shell and execute anything.
@@ -314,15 +319,37 @@ export function terminateShellSessionsForUserInProject(
     if (!key.startsWith(prefix) || !inside) {
       continue;
     }
-    ptySessionsMap.delete(key);
-    if (entry.timeoutId) clearTimeout(entry.timeoutId);
-    try { entry.ws?.close(4404, 'Project access revoked'); } catch { /* already closed */ }
-    try { entry.pty.kill(); } catch { /* already exited */ }
-    revokeManagedClaudeTerminal(entry.managedClaudeSelector);
-    entry.writerLease.release();
+    endShellSession(key, entry, 4404, 'Project access revoked');
     ended += 1;
   }
   return ended;
+}
+
+/**
+ * B-1327: ends EVERY /shell PTY a user holds, in any project — used when an
+ * account is disabled, deleted or loses the free-shell role. Same teardown as
+ * the per-project path; the socket closes with 4401 so the client reconciles
+ * its identity instead of reconnecting. Returns PTYs ended.
+ */
+export function terminateShellSessionsForUser(userId: string | number): number {
+  const prefix = `${String(userId)}_`;
+  let ended = 0;
+  for (const [key, entry] of ptySessionsMap) {
+    if (!key.startsWith(prefix)) continue;
+    endShellSession(key, entry, 4401, 'identity_revoked');
+    ended += 1;
+  }
+  return ended;
+}
+
+/** Closes the socket, kills the PTY and releases everything it held. */
+function endShellSession(key: string, entry: PtySessionEntry, code: number, reason: string): void {
+  ptySessionsMap.delete(key);
+  if (entry.timeoutId) clearTimeout(entry.timeoutId);
+  try { entry.ws?.close(code, reason); } catch { /* already closed */ }
+  try { entry.pty.kill(); } catch { /* already exited */ }
+  revokeManagedClaudeTerminal(entry.managedClaudeSelector);
+  entry.writerLease.release();
 }
 
 /** Test seam: registers a PTY entry under `key` (never used by production code). */
@@ -736,13 +763,12 @@ export function handleShellConnection(
           (!!initialCommand && !hasSession) ||
           provider === 'plain-shell';
 
-        // Gemini history remains readable through its history routes, but the
-        // removed provider must never reach command construction or pty.spawn.
-        if (provider === 'gemini') {
+        // T-1853: a deleted provider must never reach command construction or pty.spawn.
+        if (isRetiredProvider(provider)) {
           ws.send(JSON.stringify({
             type: 'error',
-            code: 'provider_removed',
-            message: 'This provider is no longer available for new terminal sessions.',
+            code: PROVIDER_REMOVED_CODE,
+            message: PROVIDER_REMOVED_MESSAGE,
           }));
           return;
         }

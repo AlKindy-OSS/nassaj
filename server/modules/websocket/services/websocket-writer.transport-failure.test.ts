@@ -49,50 +49,36 @@ test('a failing mirror cannot prevent delivery to other viewers or duplicate the
   }
 });
 
-test('identity revocation suppresses late primary, mirror and outcome persistence', () => {
+test('T-1854 (I7, qa M6): primary suppression mutes only the primary for one scoped send', () => {
   outcomes.length = 0;
-  const primaryFrames: string[] = [];
-  const mirrorFrames: string[] = [];
-  const primary = { readyState: 1, send: (frame: string) => primaryFrames.push(frame) };
-  const mirror = { readyState: 1, send: (frame: string) => mirrorFrames.push(frame) };
-  const replacement = { readyState: 1, send: () => {} };
-  const writer = new WebSocketWriter(primary);
-  writer.setSessionId('revoked-run');
-  addSessionMirror('revoked-run', mirror);
+  const primary = { readyState: 1, sent: [] as string[], send(frame: string) { this.sent.push(frame); } };
+  const mirror = { readyState: 1, sent: [] as string[], send(frame: string) { this.sent.push(frame); } };
+  const writer = new WebSocketWriter(primary, 42);
+  addSessionMirror('foreign-socket-run', mirror);
   try {
-    assert.equal(writer.revokeRunOutput(replacement), false, 'stale socket cannot revoke replacement');
-    assert.equal(writer.revokeRunOutput(primary), true);
-    writer.send({ kind: 'complete', sessionId: 'revoked-run', success: true });
-    assert.deepEqual(primaryFrames, []);
-    assert.deepEqual(mirrorFrames, []);
-    assert.deepEqual(outcomes, [], 'terminal outcome is not persisted after revocation');
+    writer.sendWithPrimarySuppressed(() => writer.send({ kind: 'complete', sessionId: 'foreign-socket-run' }));
+    assert.equal(primary.sent.length, 0, 'the foreign primary socket receives nothing');
+    assert.equal(mirror.sent.length, 1, 'authorized mirrors keep the stream');
+    assert.equal(outcomes.length, 1, 'the terminal outcome is still recorded');
+    assert.equal(writer.ws, primary, 'the socket is never swapped');
+    assert.equal(writer.isPrimarySocketAlive(), true,
+      'B-SEC-DUP-RUN: a muted socket still counts as a live listener, so no second run is admitted');
+
+    writer.send({ kind: 'chunk', sessionId: 'another-run' });
+    assert.equal(primary.sent.length, 1, 'suppression is scoped to the fenced send only');
   } finally {
     removeSessionMirrorsForSocket(mirror);
   }
 });
 
-test('project revocation fences the affected session before a close handshake', () => {
-  outcomes.length = 0;
+test('T-1854: the connection writer holds no per-session membership detach', () => {
   const primary = { readyState: 1, sent: [] as string[], send(frame: string) { this.sent.push(frame); } };
-  const mirror = { readyState: 1, sent: [] as string[], send(frame: string) { this.sent.push(frame); } };
   const writer = new WebSocketWriter(primary, 42);
-  writer.setSessionId('project-session');
-  addSessionMirror('project-session', mirror);
-  writer.bindRevocableRun('project-session', 'opencode');
-
-  try {
-    assert.equal(writer.revokeProjectSessions(['project-session'], primary), 1);
-    writer.send({ kind: 'complete', sessionId: 'project-session' });
-    assert.equal(primary.sent.length, 0);
-    assert.equal(mirror.sent.length, 0);
-    assert.equal(outcomes.length, 0, 'late terminal outcome is not persisted');
-
-    writer.setSessionId('other-project-session');
-    writer.send({ kind: 'chunk', sessionId: 'other-project-session' });
-    assert.equal(primary.sent.length, 1, 'unrelated project output remains live');
-  } finally {
-    removeSessionMirrorsForSocket(mirror);
-  }
+  writer.setSessionId('re-added-member-session');
+  writer.send({ kind: 'chunk', sessionId: 're-added-member-session' });
+  assert.equal(primary.sent.length, 1);
+  assert.equal(writer.isRunOutputRevoked('re-added-member-session'), false);
+  assert.equal('detachedSessionIds' in writer, false);
 });
 
 test('supervised run tokens reject reconnects and stale release generations', () => {

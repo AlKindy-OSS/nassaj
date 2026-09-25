@@ -16,7 +16,6 @@ const EXPECTED = new Set([
   'server/modules/providers/list/claude/claude-models.provider.ts',
   'server/modules/providers/list/codex/codex-models.provider.ts',
   'server/modules/providers/list/opencode/opencode-models.provider.ts',
-  'server/modules/providers/list/gemini/gemini-models.provider.ts',
   'server/modules/providers/list/qwen/qwen.provider.ts',
 ]);
 const APP_CONFIG_WRITERS = new Set([

@@ -8,6 +8,11 @@ import multer from 'multer';
 
 import { AccountWalletService } from '../modules/account-wallet/index.js';
 import {
+  ACCOUNT_DELETED_REVOCATION,
+  revocationForRoleChange,
+  revocationForStatusChange,
+} from '../modules/account-wallet/user-realtime-revocation.js';
+import {
   canonicalMutationPath,
   mintMutationCsrfToken,
   mutationIdentityBinding,
@@ -674,6 +679,22 @@ const RESETTABLE_TARGET_ROLES = Object.freeze({
   admin: new Set(['user']),
 });
 
+/**
+ * B-1327: applies an administrative identity change to the user's live work.
+ * The database change already committed, so a failure here is logged and must
+ * never skip the caller's audit record or turn the response into an error.
+ */
+function revokeLiveAccess(userId, deviceSessionIds, revocation) {
+  try {
+    accountWalletService.revokeUser(userId, deviceSessionIds, revocation);
+  } catch (error) {
+    console.error('[ERROR] Live access revocation failed', {
+      targetUserId: userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 // Change a user's role (owner only). An owner may not demote themselves, and the
 // last remaining owner may not be demoted (avoids locking out administration).
 router.patch('/users/:id/role', authenticateToken, requireRole('owner'), (req, res) => {
@@ -704,7 +725,9 @@ router.patch('/users/:id/role', authenticateToken, requireRole('owner'), (req, r
 
   const affectedDeviceSessions = deviceAccountSessionsDb.deviceSessionIdsForUser(id);
   userDb.setRole(id, role);
-  accountWalletService.revokeDevices(affectedDeviceSessions);
+  // B-1327: turns launched under a higher role stop on a downgrade; a promotion
+  // or same-rank change only refreshes the user's connections.
+  revokeLiveAccess(id, affectedDeviceSessions, revocationForRoleChange(target.role, role));
   auditLogDb.record('role_changed', {
     userId: req.user.id,
     metadata: { targetUserId: id, from: target.role, to: role },
@@ -742,7 +765,8 @@ router.patch('/users/:id/status', authenticateToken, requireRole('owner'), (req,
 
   const affectedDeviceSessions = deviceAccountSessionsDb.deviceSessionIdsForUser(id);
   userDb.setStatus(id, status);
-  accountWalletService.revokeDevices(affectedDeviceSessions);
+  // B-1327: disabling stops every running turn, shell and terminal of the user.
+  revokeLiveAccess(id, affectedDeviceSessions, revocationForStatusChange(status));
   auditLogDb.record(status === 'disabled' ? 'user_disabled' : 'user_enabled', {
     userId: req.user.id,
     metadata: { targetUserId: id },
@@ -803,7 +827,8 @@ router.delete('/users/:id', authenticateToken, requireRole('owner'), async (req,
     if (!deleted) {
       return res.status(404).json({ error: 'User not found' });
     }
-    accountWalletService.revokeDevices(affectedDeviceSessions);
+    // B-1327: a deleted account keeps no running turn, shell or terminal.
+    revokeLiveAccess(id, affectedDeviceSessions, ACCOUNT_DELETED_REVOCATION);
 
     // Sidecar cleanup (best-effort, non-fatal): the per-user directory holds
     // the uploaded avatar and the isolated provider credential dirs. `id` is a

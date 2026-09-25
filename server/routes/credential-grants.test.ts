@@ -45,7 +45,7 @@ const { default: grantsRouter } = await import('./credential-grants.js');
 
 await initializeDatabase();
 _resetProviderSharingCache();
-setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', kimi: 'isolated', gemini: 'isolated', opencode: 'isolated' });
+setProviderSharingConfig({ claude: 'isolated', codex: 'isolated', kimi: 'isolated', agy: 'isolated', opencode: 'isolated' });
 
 const owner = userDb.createUser('owner-a', 'hash', 'user');
 const grantee = userDb.createUser('grantee-b', 'hash', 'user');
@@ -131,15 +131,15 @@ describe('resolveCredentialPrincipal + resolveProviderEnv', () => {
   });
 
   it('HOME-steered provider: a grant home links ONLY the granted dir to the owner', () => {
-    // Give both trees a full shape and the owner a gemini credential dir.
-    resolveProviderEnv(owner.id, 'gemini', {});
-    resolveProviderEnv(grantee.id, 'gemini', {});
+    // Give both trees a full shape and the owner an agy credential dir.
+    resolveProviderEnv(owner.id, 'agy', {});
+    resolveProviderEnv(grantee.id, 'agy', {});
     fs.mkdirSync(path.join(userConfigDir(owner.id, '.gemini')), { recursive: true });
     fs.mkdirSync(path.join(userConfigDir(owner.id, '.hermes')), { recursive: true });
     fs.mkdirSync(path.join(userConfigDir(grantee.id, '.hermes')), { recursive: true });
 
     credentialGrantsDb.grant(owner.id, grantee.id, 'gemini');
-    const home = resolveProviderEnv(grantee.id, 'gemini', {}).HOME!;
+    const home = resolveProviderEnv(grantee.id, 'agy', {}).HOME!;
     assert.notEqual(home, userConfigDir(owner.id, ''), 'never the owner root');
     assert.equal(home, userConfigDir(grantee.id, path.join('.grants', String(owner.id))));
     // The granted dir goes to the owner…
@@ -150,15 +150,13 @@ describe('resolveCredentialPrincipal + resolveProviderEnv', () => {
     assert.equal(fs.readlinkSync(path.join(home, '.hermes')), userConfigDir(grantee.id, '.hermes'));
     assert.equal(fs.readlinkSync(path.join(home, '.qwen')), userConfigDir(grantee.id, '.qwen'));
     assert.ok(!fs.existsSync(path.join(home, '.grants')), 'the grant dir is not mirrored into itself');
-    // agy is the same credential (one grant unit), so it resolves to the same grant home.
-    assert.equal(resolveProviderEnv(grantee.id, 'agy', {}).HOME, home);
     assert.equal(resolveCredentialPrincipal(grantee.id, 'agy').grantedBy, owner.id);
     // The owner's own spawn is unaffected.
-    assert.equal(resolveProviderEnv(owner.id, 'gemini', {}).HOME, userConfigDir(owner.id, ''));
+    assert.equal(resolveProviderEnv(owner.id, 'agy', {}).HOME, userConfigDir(owner.id, ''));
 
     // Revocation: the link flips back to the grantee's own dir on the next spawn.
     credentialGrantsDb.revoke(owner.id, grantee.id, 'gemini');
-    assert.equal(resolveProviderEnv(grantee.id, 'gemini', {}).HOME, userConfigDir(grantee.id, ''));
+    assert.equal(resolveProviderEnv(grantee.id, 'agy', {}).HOME, userConfigDir(grantee.id, ''));
     // And a later grant of a different provider rebuilds the composite without gemini.
     credentialGrantsDb.grant(owner.id, grantee.id, 'hermes');
     const home2 = resolveProviderEnv(grantee.id, 'hermes', {}).HOME!;
@@ -270,6 +268,24 @@ describe('routes /api/credential-grants — self-scoped wire contract', () => {
     assert.deepEqual(r.json.data.given.map((g: { userId: number }) => g.userId), [third.id]);
     assert.equal(resolveProviderEnv(grantee.id, 'codex', {}).CODEX_HOME, userConfigDir(grantee.id, '.codex'));
     r = await call('DELETE', `/codex/grantees/${third.id}`, asOwner);
+    assert.deepEqual(r.json.data.given, []);
+  });
+
+  it('an agy grant addressed by its storage unit is in use for the grantee', async () => {
+    let r = await call('PUT', '/gemini/grantees', asOwner, { userIds: [grantee.id] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json.data.given.map((g: { provider: string }) => g.provider), ['gemini']);
+
+    r = await call('GET', '/', asGrantee);
+    const received = r.json.data.received.find((g: { provider: string }) => g.provider === 'gemini');
+    assert.equal(received.ownerUserId, owner.id);
+    // inUse comes from resolveCredentialPrincipal(caller, 'gemini'): it only holds
+    // because isGrantableKey accepts the unit key as well as the provider key.
+    assert.equal(received.inUse, true);
+    assert.equal(resolveProviderEnv(grantee.id, 'agy', {}).HOME,
+      userConfigDir(grantee.id, path.join('.grants', String(owner.id))));
+
+    r = await call('DELETE', `/gemini/grantees/${grantee.id}`, asOwner);
     assert.deepEqual(r.json.data.given, []);
   });
 

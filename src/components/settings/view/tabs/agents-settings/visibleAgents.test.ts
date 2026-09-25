@@ -16,7 +16,6 @@ describe('visibleSettingsAgents (T-1760 order)', () => {
 
   it('hides globally disabled providers that are not coming-soon', () => {
     const agents = visibleSettingsAgents();
-    expect(agents).not.toContain('gemini');
     expect(agents).not.toContain('glm');
   });
 });

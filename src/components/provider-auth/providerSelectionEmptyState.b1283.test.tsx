@@ -59,7 +59,7 @@ import ProviderSelectionEmptyState from '../chat/view/subcomponents/ProviderSele
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const ALL_PROVIDERS: LLMProvider[] = [
-  'claude', 'cursor', 'codex', 'gemini', 'antigravity',
+  'claude', 'cursor', 'codex', 'antigravity',
   'opencode', 'hermes', 'kimi', 'deepseek', 'glm', 'sakana',
 ];
 
@@ -131,8 +131,6 @@ describe('B-1283 — فتح منتقي النماذج يُعيد تحميل ال
         setCursorModel={vi.fn()}
         codexModel=""
         setCodexModel={vi.fn()}
-        geminiModel=""
-        setGeminiModel={vi.fn()}
         antigravityModel=""
         setAntigravityModel={vi.fn()}
         opencodeModel=""
@@ -185,8 +183,6 @@ describe('B-1283 — فتح منتقي النماذج يُعيد تحميل ال
         setCursorModel={vi.fn()}
         codexModel=""
         setCodexModel={vi.fn()}
-        geminiModel=""
-        setGeminiModel={vi.fn()}
         antigravityModel=""
         setAntigravityModel={vi.fn()}
         opencodeModel=""

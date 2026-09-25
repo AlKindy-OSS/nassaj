@@ -2,7 +2,7 @@
  * auth-status-isolation.test.ts — B-587.
  *
  * بطاقةُ الحساب تسأل «هل أنا موصول؟»، والجواب يجب أن يخصّ **صاحب السؤال**. وكان
- * مزوّدان يجيبان عن المشغّل: `gemini` يقرأ `os.homedir()` مباشرةً، و`cursor`
+ * مزوّدٌ يجيب عن المشغّل: `cursor`
  * يُطلق `cursor-agent status` بلا بيئةٍ فيرث بيئة الخادم. فكان كلُّ عضوٍ يرى
  * اعتماد المشغّل في منتجٍ متعدّد المستخدمين.
  *
@@ -49,13 +49,10 @@ mock.module('cross-spawn', {
 const { initializeDatabase, closeConnection } = await import('@/modules/database/index.js');
 initializeDatabase();
 
-const { GeminiProviderAuth } = await import('./gemini/gemini-auth.provider.js');
 const { CursorProviderAuth } = await import('./cursor/cursor-auth.provider.js');
 
-type HomeReader = { getGeminiCliHome(userId?: string | number | null): string };
 type LoginProbe = { checkCursorLogin(userId?: string | number | null): Promise<unknown> };
 
-const gemini = new GeminiProviderAuth() as unknown as HomeReader;
 const cursor = new CursorProviderAuth() as unknown as LoginProbe;
 
 after(() => {
@@ -63,24 +60,6 @@ after(() => {
   if (ORIGINAL_DB === undefined) delete process.env.DATABASE_PATH;
   else process.env.DATABASE_PATH = ORIGINAL_DB;
   fs.rmSync(sandbox, { recursive: true, force: true });
-});
-
-test('B-587: gemini status reads each member own tree', () => {
-  const first = gemini.getGeminiCliHome(1);
-  const second = gemini.getGeminiCliHome(2);
-
-  assert.notEqual(first, second, 'two members must not share one credential tree');
-  assert.match(first, /nassaj-users[/\\]1$/, 'member 1 must resolve under their own root');
-  assert.match(second, /nassaj-users[/\\]2$/, 'member 2 must resolve under their own root');
-});
-
-test('B-587: gemini keeps the operator home for an anonymous probe', () => {
-  assert.equal(
-    gemini.getGeminiCliHome(null),
-    os.homedir(),
-    'a null userId is the shared/anonymous contract, not a silent fallback',
-  );
-  assert.equal(gemini.getGeminiCliHome(), os.homedir(), 'omitted userId behaves as null');
 });
 
 test('B-587: cursor probes each member under their own HOME', async () => {

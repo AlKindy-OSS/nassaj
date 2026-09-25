@@ -220,7 +220,6 @@ const UNMEASURABLE_REASONS: Readonly<Record<string, string>> = Object.freeze({
   antigravity: 'Antigravity (agy) records no token counts in its transcripts, so cost cannot be measured.',
   agy: 'Antigravity (agy) records no token counts in its transcripts, so cost cannot be measured.',
   cursor: 'Cursor does not expose token usage in its CLI transcripts.',
-  gemini: 'Gemini reports usage per turn, but nassaj does not persist a per-conversation total yet.',
   kimi: 'Kimi reports usage per turn, but nassaj does not persist a per-conversation total yet.',
   glm: 'GLM reports usage per turn, but nassaj does not persist a per-conversation total yet.',
   deepseek: 'DeepSeek reports usage per turn, but nassaj does not persist a per-conversation total yet.',
@@ -1405,7 +1404,6 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = Object.freeze({
   kimi: 'Kimi CLI',
   hermes: 'Hermes',
   antigravity: 'Antigravity',
-  gemini: 'Gemini CLI',
 });
 
 const harnessDisplayName = (harness: string): string => HARNESS_LABELS[harness] ?? harness;

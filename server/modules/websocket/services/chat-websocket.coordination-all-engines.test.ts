@@ -86,16 +86,14 @@ const ENGINES: Array<{ provider: string; messageType: string; dep: string }> = [
  * مُشعِلٌ أصلاً. توصيلُ المستوى إليهما مبنيٌّ وكامل في `vendor-runtime`، لكن
  * ادّعاءَ أنه «يصل اليوم» كذبٌ يكشفه أول تشغيل — فيُثبَّت الواقع اختباراً بدل
  * أن يُطمَس. رفعُ التعطيل وحده يُحيي المسار، بلا سطر كودٍ إضافي.
- * ‏gemini معطَّل مؤقتاً (‏T-1760، قرار المالك 2026-09-12) حتى يُدمَج حذفه الكامل (‏T-1749).
  */
 const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: string }> = [
   { provider: 'deepseek', messageType: 'deepseek-command', dep: 'spawnDeepSeek' },
-  { provider: 'gemini', messageType: 'gemini-command', dep: 'spawnGemini' },
   { provider: 'glm', messageType: 'glm-command', dep: 'spawnGlm' },
 ];
 
 const DEP_NAMES = [
-  'queryClaudeSDK', 'queryCodex', 'spawnCursor', 'spawnGemini', 'spawnAntigravity',
+  'queryClaudeSDK', 'queryCodex', 'spawnCursor', 'spawnAntigravity',
   'spawnHermes', 'spawnOpenCode', 'spawnKimi', 'spawnKimiAgent', 'spawnDeepSeek',
   'spawnGlm', 'spawnQwen',
 ];

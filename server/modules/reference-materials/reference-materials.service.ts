@@ -55,14 +55,12 @@ const PROVIDERS: readonly LLMProvider[] = Object.freeze([
   'claude',
   'codex',
   'cursor',
-  'gemini',
   'antigravity',
   'opencode',
   'hermes',
   'kimi',
   'deepseek',
   'glm',
-  'sakana',
 ]);
 
 const shaId = (parts: readonly string[]): string =>
@@ -341,6 +339,26 @@ const listAgentCards = (options: ListOptions): ResolvedReference[] => (
   })
 );
 
+const warnedUnsupportedSkillProviders = new Set<string>();
+
+/** True when the provider registry rejected the id as not registered (B-1323). */
+const isUnsupportedProviderError = (error: unknown): boolean => (
+  error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER'
+);
+
+/**
+ * Records, once per process and provider, that a listed provider is not
+ * registered. Only the provider id is logged; no paths or user data.
+ */
+const warnUnsupportedSkillProviderOnce = (provider: string): void => {
+  if (warnedUnsupportedSkillProviders.has(provider)) return;
+  warnedUnsupportedSkillProviders.add(provider);
+  console.warn('[reference-materials] skipping unregistered skills provider', {
+    provider,
+    code: 'UNSUPPORTED_PROVIDER',
+  });
+};
+
 const listSkillsForProvider = async (
   provider: LLMProvider,
   options: Omit<ListOptions, 'material'>,
@@ -351,7 +369,11 @@ const listSkillsForProvider = async (
         workspacePath: options.workspacePath,
         userId: options.userId,
       });
-    } catch {
+    } catch (error) {
+      if (isUnsupportedProviderError(error)) {
+        warnUnsupportedSkillProviderOnce(provider);
+        return [];
+      }
       throw new AppError(`Skills for ${provider} are unavailable.`, {
         code: 'REFERENCE_MATERIAL_PROVIDER_UNAVAILABLE',
         statusCode: 503,

@@ -19,8 +19,6 @@ import {
   Check,
   ImageIcon,
   XIcon,
-  ArrowDownIcon,
-  RefreshCw,
   MicIcon,
   Loader2Icon,
   Terminal,
@@ -152,18 +150,6 @@ interface ChatComposerProps {
   onToggleCommandMenu: () => void;
   hasInput: boolean;
   onClearInput: () => void;
-  isUserScrolledUp: boolean;
-  hasMessages: boolean;
-  /** T-1821: يُظهر الزرّ حتى حين المستخدم في الأسفل (جلسة عالقة / historyError / انقطاع تعافى). */
-  showResync?: boolean;
-  /** T-1821: دوّامة أثناء إعادة المزامنة (refresh أو retry تاريخ). */
-  isResyncing?: boolean;
-  /**
-   * T-1821: طابع Unix بالميلي ثانية لوقت انتهاء تأجيل المحاولة (retryAt من historyError).
-   * حين `retryUntil > Date.now()` يُعطَّل الزرّ ويُعرض تلميح «يرجى الانتظار».
-   */
-  retryUntil?: number | null;
-  onScrollToBottom: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   attachedImages: File[];
@@ -1041,12 +1027,6 @@ export default function ChatComposer({
   onToggleCommandMenu,
   hasInput,
   onClearInput,
-  isUserScrolledUp,
-  hasMessages,
-  showResync = false,
-  isResyncing = false,
-  retryUntil = null,
-  onScrollToBottom,
   onSubmit,
   isDragActive,
   attachedImages,
@@ -1123,17 +1103,6 @@ export default function ChatComposer({
     setScheduledEdit(null);
   }, [sessionId]);
 
-  // T-1821 fix-6: isRetryWaiting is computed from Date.now() at render time, so
-  // the button stays disabled after retryAt expires unless we force a re-render.
-  // Schedule one re-render at the exact expiry time so the button re-enables promptly.
-  const [, setRetryTick] = useState(0);
-  useEffect(() => {
-    if (retryUntil == null) return;
-    const delay = retryUntil - Date.now();
-    if (delay <= 0) return; // already past — no timer needed
-    const id = window.setTimeout(() => setRetryTick((n) => n + 1), delay + 50);
-    return () => window.clearTimeout(id);
-  }, [retryUntil]);
 
   const openNewSchedule = useCallback(() => {
     setScheduledEdit(null);
@@ -1720,46 +1689,10 @@ export default function ChatComposer({
         />
       ))}
 
+      {/* B-1044: زرّ scroll-to-bottom انتقل إلى ChatMessagesPane (sticky داخل
+            منطقة التمرير) كي لا يتموضع فوق شريط الحالة (AgentStatusCard)
+            باستخدام إزاحة سالبة هشّة تتوقّف على ما يسبقه في DOM. */}
       {!hasQuestionPanel && <div className="relative mx-auto max-w-4xl">
-
-        {/* B-999: الشريط يمتدّ بعرض المُؤلِّف كاملاً فوقه (‏-top-10) وهو شفاف،
-              فكان يبتلع نقرات كل ما يقع تحته: أزرار طلب الصلاحية وأزرار آخر
-              رسالة. ويظهر حصراً حين لا يكون المستخدم في آخر المحادثة، فيبدو
-              العطل كأنّ «الأزرار لا تعمل إلا بعد النزول لآخر المحادثة».
-              الحلّ: الغلاف لا يستقبل اللمس، والزرّ وحده يستقبله. */}
-        {/* T-1821: زرّ موحَّد — ينزل ويُعيد المزامنة.
-              يظهر حين:
-                (أ) المستخدم تمرَّر للأعلى ويوجد رسائل، أو
-                (ب) showResync=true (historyError / جلسة عالقة / انقطاع تعافى)
-                    بصرف النظر عن وجود رسائل (fix-1: لا بديل مرئي عند الخطأ الابتدائي).
-              أثناء المزامنة أو انتظار retryAt تظهر دوّامة وتُعطَّل النقرة. */}
-        {((isUserScrolledUp && hasMessages) || showResync) && (() => {
-          const isRetryWaiting = retryUntil != null && retryUntil > Date.now();
-          const isDisabled = isResyncing || isRetryWaiting;
-          const label = isResyncing
-            ? t('refreshChat.refreshing', { defaultValue: 'Refreshing…' })
-            : isRetryWaiting
-              ? t('session.historyError.wait', { defaultValue: 'Please wait before trying again' })
-              : showResync
-                ? t('input.scrollToBottomAndSync', { defaultValue: 'Go to latest & refresh' })
-                : t('input.scrollToBottom', { defaultValue: 'Scroll to bottom' });
-          return (
-            <div className="pointer-events-none absolute -top-10 start-0 end-0 z-10 flex justify-center">
-              <button
-                type="button"
-                onClick={onScrollToBottom}
-                disabled={isDisabled}
-                className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-border/50 bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                title={label}
-                aria-label={label}
-              >
-                {isDisabled
-                  ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  : <ArrowDownIcon className="h-4 w-4" aria-hidden="true" />}
-              </button>
-            </div>
-          );
-        })()}
 
         {showFileDropdown && filteredFiles.length > 0 && (
           <div className="absolute bottom-full start-0 end-0 z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border/50 bg-card/95 shadow-lg backdrop-blur-md">

@@ -151,6 +151,7 @@ export type {
 } from '@/modules/database/repositories/conversation-usage-snapshots.db.js';
 export { projectMembersDb } from '@/modules/database/repositories/project-members.db.js';
 export {
+  armFencedRun,
   canAccessProject,
   canAccessProjectPath,
   canAccessRegisteredProjectPath,
@@ -164,15 +165,19 @@ export {
   isWorkspaceTopologyFenceCurrent,
   isProjectMembershipEnforced,
   listAccessibleProjectPaths,
+  releaseFencedRun,
   retireProjectStructure,
   retireProjectSubjectAccess,
   rotateProjectStructure,
   rotateProjectStructureForPath,
   rotateProjectSubjectAccess,
   rotateWorkspaceTopology,
+  revalidateUserProjectAccess,
   userCanSeeAllProjects,
 } from '@/modules/database/repositories/project-access.js';
 export type {
+  FencedRun,
+  FencedRunRevokeReason,
   ProjectAccessFence,
   ProjectlessTopologyFence,
   WorkspaceTopologyFence,

@@ -76,7 +76,7 @@ test('measured Antigravity is classified but remains non-parity on forbidden sur
   );
   assert.ok(candidate);
   assert.equal(evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, candidate).kind, 'deny');
-  assert.equal(PERMISSION_UNAVAILABLE_BODIES.length, 9);
+  assert.equal(PERMISSION_UNAVAILABLE_BODIES.length, 8);
   assert.ok(PERMISSION_UNAVAILABLE_BODIES.some(item => item.body === 'cursor'));
 });
 

@@ -135,7 +135,6 @@ describe('resolveProviderEnv isolation logic', () => {
     _resetProviderSharingCache();
     setProviderSharingConfig({
       claude: 'isolated',
-      gemini: 'isolated',
       codex: 'isolated',
       agy: 'shared',
       cursor: 'shared',
@@ -148,11 +147,10 @@ describe('resolveProviderEnv isolation logic', () => {
     setPolicy({ claude: 'isolated', agy: 'isolated' });
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin', EXISTING: '1' };
 
-    for (const provider of ['claude', 'gemini', 'codex', 'agy', 'cursor'] as const) {
+    for (const provider of ['claude', 'codex', 'agy', 'cursor'] as const) {
       const env = resolveProviderEnv(null, provider, { ...base });
       assert.deepEqual(env, withUpdaterKillSwitch(provider, base), `${provider}: anonymous env must be unchanged`);
       assert.equal(env.CLAUDE_CONFIG_DIR, undefined);
-      assert.equal(env.GEMINI_CLI_HOME, undefined);
       assert.equal(env.CODEX_HOME, undefined);
       // HOME must not be rewritten for an anonymous agy spawn.
       assert.equal(env.HOME, undefined);
@@ -180,7 +178,6 @@ describe('resolveProviderEnv isolation logic', () => {
       'per-user claude dir must live under the user root'
     );
     // Other providers' knobs must NOT be set on a claude spawn.
-    assert.equal(env.GEMINI_CLI_HOME, undefined);
     assert.equal(env.CODEX_HOME, undefined);
   });
 
@@ -194,14 +191,8 @@ describe('resolveProviderEnv isolation logic', () => {
     assert.equal(env.CLAUDE_CONFIG_DIR, '/operator/.claude');
   });
 
-  it('sets HOME (gemini) / CODEX_HOME to per-user paths when isolated', () => {
-    setPolicy({ gemini: 'isolated', codex: 'isolated' });
-
-    // B-548: gemini's knob is HOME, not GEMINI_CLI_HOME — the CLI behind this
-    // provider reads no such variable, so the old assertion pinned a no-op.
-    const gEnv = resolveProviderEnv(42, 'gemini', { PATH: '/usr/bin', HOME: '/operator/home' });
-    assert.equal(gEnv.HOME, userConfigDir(42, ''));
-    assert.equal(gEnv.GEMINI_CLI_HOME, undefined);
+  it('sets CODEX_HOME to the per-user path when isolated', () => {
+    setPolicy({ codex: 'isolated' });
 
     const cEnv = resolveProviderEnv(42, 'codex', { PATH: '/usr/bin' });
     assert.equal(cEnv.CODEX_HOME, userConfigDir(42, '.codex'));
@@ -241,7 +232,6 @@ describe('provider-sharing config round-trip', () => {
     _resetProviderSharingCache();
     setProviderSharingConfig({
       claude: 'isolated',
-      gemini: 'isolated',
       codex: 'isolated',
     });
   });
@@ -254,7 +244,6 @@ describe('provider-sharing config round-trip', () => {
   it('returns the documented default policy after a fresh default write', () => {
     assert.deepEqual(getProviderSharingConfig(), {
       claude: 'isolated',
-      gemini: 'isolated',
       codex: 'isolated',
       agy: 'isolated',
       cursor: 'isolated',
@@ -274,14 +263,14 @@ describe('provider-sharing config round-trip', () => {
     // providers fall back to the documented default, not to the prior value.
     assert.equal(stored.claude, 'shared');
     assert.equal(getProviderSharingConfig().claude, 'shared');
-    assert.equal(getProviderSharingConfig().gemini, 'isolated');
+    assert.equal(getProviderSharingConfig().codex, 'isolated');
   });
 
   it('reflects the write through the isProviderIsolated hot path', () => {
     setProviderSharingConfig({ claude: 'shared' } as Record<string, 'shared'>);
 
     assert.equal(isProviderIsolated('claude'), false, 'claude was just marked shared');
-    assert.equal(isProviderIsolated('gemini'), true, 'gemini is unchanged → still isolated');
+    assert.equal(isProviderIsolated('codex'), true, 'codex is unchanged → still isolated');
     // An unknown provider is treated as not isolated (shared) by contract.
     assert.equal(isProviderIsolated('totally-unknown'), false);
   });
@@ -303,7 +292,6 @@ describe('provider-sharing config round-trip', () => {
     assert.deepEqual(afterReset, beforeReset, 'reload must reproduce the persisted policy');
     assert.equal(afterReset.claude, 'shared');
     assert.equal(afterReset.codex, 'shared');
-    assert.equal(afterReset.gemini, 'isolated');
   });
 });
 

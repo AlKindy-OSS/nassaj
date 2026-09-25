@@ -57,7 +57,6 @@ const configKeyFor = (userId: string | number | null | undefined): string => (
 export const SUBSCRIPTION_PROVIDERS: readonly string[] = Object.freeze([
   'claude',
   'codex',
-  'gemini',
   'cursor',
   'antigravity',
   'opencode',
@@ -72,7 +71,6 @@ export const SUBSCRIPTION_PROVIDERS: readonly string[] = Object.freeze([
 const DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
   cursor: 'Cursor',
   antigravity: 'Antigravity',
   opencode: 'OpenCode',

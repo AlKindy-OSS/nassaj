@@ -185,7 +185,7 @@ test('بلا مصدر: يُشتقّ يوم أقدم استهلاك ويُوسَ�
     await utimes(oldest, oldestDate, oldestDate);
     await utimes(newer, newerDate, newerDate);
 
-    const anchor = await billingAnchorService.discover('gemini', 3, {
+    const anchor = await billingAnchorService.discover('antigravity', 3, {
       historyRoot: () => path.join(root, 'history'),
     });
 

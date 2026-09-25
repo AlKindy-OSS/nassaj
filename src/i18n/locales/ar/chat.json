@@ -194,7 +194,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -337,24 +336,6 @@
       "default": "sandbox: workspace-write · الموافقات: untrusted · الشبكة: مطفأة",
       "acceptEdits": "sandbox: workspace-write · الموافقات: never · الشبكة: مطفأة",
       "bypassPermissions": "sandbox: workspace-write · الموافقات: never · الشبكة: مطفأة — نفس سقف «قبول التعديلات». الوصول الكامل للقرص/الشبكة فقط إذا فعّله المشغّل لهذا النشر (مطفأ افتراضياً)."
-    }
-  },
-  "gemini": {
-    "permissionMode": "وضع أذونات Gemini",
-    "description": "تحكّم في كيفية تعامل Gemini CLI مع الموافقات على العمليات.",
-    "modes": {
-      "default": {
-        "title": "قياسي (طلب الموافقة)",
-        "description": "سيطلب Gemini الموافقة قبل تنفيذ الأوامر وكتابة الملفات وجلب موارد الويب."
-      },
-      "autoEdit": {
-        "title": "تعديل تلقائي (تخطّي موافقات الملفات)",
-        "description": "سيوافق Gemini تلقائياً على تعديلات الملفات وجلب الويب، لكنه سيظل يطلب الموافقة لأوامر Shell."
-      },
-      "yolo": {
-        "title": "YOLO (تجاوز جميع الأذونات)",
-        "description": "سيُنفّذ Gemini جميع العمليات دون طلب الموافقة. توخَّ الحذر."
-      }
     }
   },
   "input": {
@@ -570,7 +551,6 @@
       "claude": "جاهز لاستخدام Claude مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "cursor": "جاهز لاستخدام Cursor مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "codex": "جاهز لاستخدام Codex مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
-      "gemini": "جاهز لاستخدام Gemini مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "antigravity": "جاهز لاستخدام Antigravity ‏(agy) بنموذج {{model}}. اكتب رسالتك بالأسفل.",
       "opencode": "جاهز لاستخدام OpenCode مع {{model}}. ابدأ بكتابة رسالتك أدناه.",
       "default": "اختر provider أعلاه للبدء",
@@ -987,14 +967,6 @@
     "subagentModelCalls": "نداءات نموذج الوكلاء الفرعيين: {{count}}",
     "responseTurnDurationLabel": "زمن الاستجابة",
     "totalWorkDuration": "إجمالي مدة العمل (قد تتداخل المدد): {{duration}}"
-  },
-  "activityGap": {
-    "status": "الوكيل يعمل — آخر نشاط منذ {{time}}",
-    "ariaLabel": "الوكيل ما زال يعمل، آخر نشاط منذ {{time}}"
-  },
-  "activityGap": {
-    "status": "الوكيل يعمل — آخر نشاط منذ {{time}}",
-    "ariaLabel": "الوكيل ما زال يعمل، آخر نشاط منذ {{time}}"
   },
   "closeConversation": {
     "close": "إغلاق المحادثة",

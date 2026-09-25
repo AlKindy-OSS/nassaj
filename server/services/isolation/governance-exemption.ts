@@ -56,7 +56,6 @@ export const GOVERNANCE_EXEMPTION_PROVIDERS = Object.freeze([
  */
 const CHANNEL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   agy: 'antigravity',
-  gemini: 'antigravity',
 });
 
 /** Resolves a caller's engine id to its channel id, or null when it has none. */

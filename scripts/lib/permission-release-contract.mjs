@@ -10,7 +10,7 @@ export const PERMISSION_RELEASE_FIELDS = Object.freeze([
 
 const PROFILE_ID = 'full_delegation';
 const CONTRACT_VERSION = 'permission-parity/v1';
-const CAPABILITY_ARTIFACT_DIGEST = 'sha256:cf3e5bfe81e622fc0905b72a604a55b19e521e8752610c158becfcb7e1f05430';
+const CAPABILITY_ARTIFACT_DIGEST = 'sha256:e4f42ebffc340adb7beb51a389206fc8cac11a20df81839bdd3914dfa50bf230';
 
 function digest(value) {
     return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;

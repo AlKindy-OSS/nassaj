@@ -102,7 +102,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -223,24 +222,6 @@
       "default": "sandbox: workspace-write · approvals: untrusted · network: OFF",
       "acceptEdits": "sandbox: workspace-write · approvals: never · network: OFF",
       "bypassPermissions": "sandbox: workspace-write · approvals: never · network: OFF — Accept Edits と同じです。ディスクやネットワークへの完全アクセスは、運用者がこの環境で明示的に有効にした場合にのみ許可されます（既定では無効）。"
-    }
-  },
-  "gemini": {
-    "permissionMode": "Geminiの権限モード",
-    "description": "Gemini CLIが操作の承認をどのように処理するかを制御します。",
-    "modes": {
-      "default": {
-        "title": "標準（承認を要求）",
-        "description": "Geminiはコマンドの実行、ファイルの書き込み、Webリソースの取得前に承認を求めます。"
-      },
-      "autoEdit": {
-        "title": "自動編集（ファイル承認をスキップ）",
-        "description": "Geminiはファイル編集とWebの取得を自動承認しますが、シェルコマンドは引き続き確認します。"
-      },
-      "yolo": {
-        "title": "YOLO（すべての権限をバイパス）",
-        "description": "Geminiは承認なしにすべての操作を実行します。注意して使用してください。"
-      }
     }
   },
   "input": {
@@ -419,7 +400,6 @@
       "claude": "{{model}}でClaudeを使用する準備ができました。下にメッセージを入力してください。",
       "cursor": "{{model}}でCursorを使用する準備ができました。下にメッセージを入力してください。",
       "codex": "{{model}}でCodexを使用する準備ができました。下にメッセージを入力してください。",
-      "gemini": "{{model}}でGeminiを使用する準備ができました。下にメッセージを入力してください。",
       "antigravity": "Antigravity (agy) を {{model}} で使用する準備ができました。下にメッセージを入力してください。",
       "opencode": "{{model}}でOpenCodeを使用する準備ができました。下にメッセージを入力してください。",
       "default": "上からプロバイダーを選択して開始してください",
@@ -662,14 +642,6 @@
     "subagentModelCalls": "サブエージェントのモデル呼び出し: {{count}}",
     "responseTurnDurationLabel": "応答時間",
     "totalWorkDuration": "合計作業時間（時間は重複する場合があります）: {{duration}}"
-  },
-  "activityGap": {
-    "status": "エージェントが作業中です — 最後のアクティビティから {{time}} 経過",
-    "ariaLabel": "エージェントは作業を継続中です。最後のアクティビティから {{time}} 経過しています"
-  },
-  "activityGap": {
-    "status": "エージェントが作業中です — 最後のアクティビティから {{time}} 経過",
-    "ariaLabel": "エージェントは作業を継続中です。最後のアクティビティから {{time}} 経過しています"
   },
   "closeConversation": {
     "close": "会話を閉じる",

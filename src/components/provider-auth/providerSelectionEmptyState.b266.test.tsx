@@ -87,7 +87,6 @@ const ALL_PROVIDERS: LLMProvider[] = [
   'claude',
   'cursor',
   'codex',
-  'gemini',
   'antigravity',
   'opencode',
   'hermes',
@@ -131,8 +130,6 @@ function renderPicker(props: {
       setCursorModel={noop}
       codexModel=""
       setCodexModel={noop}
-      geminiModel=""
-      setGeminiModel={noop}
       antigravityModel=""
       setAntigravityModel={noop}
       opencodeModel=""

@@ -15,7 +15,6 @@ mock.module('@/modules/database/repositories/sessions.db.js', { namedExports: { 
 mock.module('@/modules/providers/shared/vendor/vendor-transcript.js', { namedExports: {
   resolveVendorTranscriptForRead: async () => transcript,
 } });
-const { GeminiSessionsProvider } = await import('../list/gemini/gemini-sessions.provider.js');
 const { CursorSessionsProvider } = await import('../list/cursor/cursor-sessions.provider.js');
 const { OpenCodeSessionsProvider } = await import('../list/opencode/opencode-sessions.provider.js');
 const { AntigravitySessionsProvider } = await import('../list/antigravity/antigravity-sessions.provider.js');
@@ -32,25 +31,6 @@ it('bounds model identifiers and rejects invalid values', () => {
   }
   assert.equal(readResponseModel(' model-a '), 'model-a');
 });
-
-for (const format of ['jsonl', 'json']) {
-  it(`Gemini ${format} keeps each assistant model and stable native id without labeling users`, async () => {
-    transcript = path.join(scratch, `gemini.${format}`);
-    const rows = models.map((model, index) => ({
-      id: `msg-${index}`, type: 'gemini', model, content: `reply-${index}`,
-    }));
-    const user = { id: 'user', type: 'user', model: 'not-an-assistant', content: 'prompt' };
-    fs.writeFileSync(transcript, format === 'jsonl'
-      ? [user, ...rows].map((row) => JSON.stringify(row)).join('\n')
-      : JSON.stringify({ model: 'future-session-selection', messages: [user, ...rows] }));
-    const provider = new GeminiSessionsProvider();
-    const first = await provider.fetchHistory('gemini-model-test');
-    const second = await provider.fetchHistory('gemini-model-test');
-    assert.deepEqual(assistants(first.messages).map((m) => m.model), models);
-    assert.deepEqual(first.messages.map((m) => m.id), second.messages.map((m) => m.id));
-    assert.equal(first.messages[0].model, undefined);
-  });
-}
 
 it('Cursor keeps models for nested, flat-array and flat-text blobs and leaves absent models unknown', () => {
   const provider = new CursorSessionsProvider() as unknown as {

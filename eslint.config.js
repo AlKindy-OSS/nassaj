@@ -99,7 +99,7 @@ export default tseslint.config(
       ],
       "boundaries/elements": [
         { type: "backend-shared-type-contract", pattern: ["server/shared/types.{js,ts}","server/shared/interfaces.{js,ts}"], mode: "file" },
-        { type: "backend-shared-utils", pattern: ["server/shared/utils.{js,ts}","server/shared/frontmatter.ts","server/shared/r3-evidence-lexical.ts","server/shared/claude-cli-path.ts","server/shared/cli-executable-path.ts","server/shared/codex-executable.js","server/services/image-signature.js","server/services/svg-sanitizer.js"], mode: "file" },
+        { type: "backend-shared-utils", pattern: ["server/shared/utils.{js,ts}","server/shared/frontmatter.ts","server/shared/r3-evidence-lexical.ts","server/shared/claude-cli-path.ts","server/shared/cli-executable-path.ts","server/shared/codex-executable.js","server/shared/writer-target.js","server/shared/user-revocation-epoch.js","server/services/image-signature.js","server/services/svg-sanitizer.js"], mode: "file" },
         { type: "backend-isolation-service", pattern: "server/services/isolation/*", mode: "file" },
         { type: "backend-service-shared", pattern: ["server/services/provider-sharing.js","server/services/agent-sse-ticket.service.js","server/services/system-resource-sampler.service.ts","server/services/update-maintenance-gate.js","server/services/update-writer-lease.js"], mode: "file" },
         { type: "backend-legacy-runtime", pattern: ["server/projects.js","server/sessionManager.js","server/utils/runtime-paths.js"], mode: "file" },

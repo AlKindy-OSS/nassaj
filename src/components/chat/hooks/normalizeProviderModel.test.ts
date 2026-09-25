@@ -64,7 +64,6 @@ describe('sanitizeStoredModel (synchronous initial read)', () => {
     assert.equal(sanitizeStoredModel('claude', 'sonnet'), 'sonnet');
     assert.equal(sanitizeStoredModel('cursor', 'composer-2.5-fast'), 'composer-2.5-fast');
     assert.equal(sanitizeStoredModel('codex', 'gpt-5.4'), 'gpt-5.4');
-    assert.equal(sanitizeStoredModel('gemini', 'gemini-2.5-pro'), 'gemini-2.5-pro');
     assert.equal(sanitizeStoredModel('antigravity', 'auto'), 'auto');
     assert.equal(
       sanitizeStoredModel('opencode', 'anthropic/claude-sonnet-4-5'),
@@ -80,7 +79,7 @@ describe('sanitizeStoredModel (synchronous initial read)', () => {
 
 describe('FALLBACK_DEFAULT_MODEL is internally consistent', () => {
   it('every provider default is a valid option in its own fallback catalog', () => {
-    const providers = ['claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode'] as const;
+    const providers = ['claude', 'cursor', 'codex', 'antigravity', 'opencode'] as const;
     for (const provider of providers) {
       const def = FALLBACK_DEFAULT_MODEL[provider];
       // sanitizeStoredModel returns the default unchanged only when it is a

@@ -82,7 +82,6 @@ function setCodexPolicy(state: 'isolated' | 'shared'): void {
   _resetProviderSharingCache();
   setProviderSharingConfig({
     claude: 'isolated',
-    gemini: 'isolated',
     codex: state,
     agy: 'shared',
     cursor: 'shared',

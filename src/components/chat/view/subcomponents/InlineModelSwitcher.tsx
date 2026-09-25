@@ -36,7 +36,7 @@
  * — محور المحرّك يبقى حكراً على جسد claude (ADR-073 §4، مفروض في
  *   modelPickerRows).
  * — معرّف opencode المؤهَّل (glm/glm-5.2) يُمرَّر حرفياً بلا تشذيب (T-1021).
- * — المزوّدات التي لا تدعم التبديل (hermes/gemini/sakana/…) تُخفى عبر
+ * — المزوّدات التي لا تدعم التبديل (hermes/sakana/…) تُخفى عبر
  *   capabilities.modelSwitch.supported في ChatComposer — هذا المكوّن لا يُرى.
  * — RTL: positions are viewport-pixel coordinates (not CSS logical), same
  *   pattern as ThinkingModeSelector. Tailwind classes use logical utilities.

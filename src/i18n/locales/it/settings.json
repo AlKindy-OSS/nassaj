@@ -723,9 +723,6 @@
       "codex": {
         "description": "Assistente AI OpenAI Codex"
       },
-      "gemini": {
-        "description": "Assistente AI Google Gemini"
-      },
       "antigravity": {
         "description": "Google AI Pro tramite la CLI agy"
       },
@@ -1121,13 +1118,6 @@
   "actionRequired": "Action required",
   "error": "Error",
   "stop": "Stop",
-  "gemini": {
-    "modesShort": {
-      "default": "Ask",
-      "autoEdit": "Auto-edit",
-      "yolo": "YOLO"
-    }
-  },
   "tmpfsCap": {
     "title": "Shared memory cap (/tmp)",
     "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",

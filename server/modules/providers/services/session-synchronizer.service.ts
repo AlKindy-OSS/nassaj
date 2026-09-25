@@ -79,7 +79,6 @@ export const sessionSynchronizerService = {
       claude: 0,
       codex: 0,
       cursor: 0,
-      gemini: 0,
       antigravity: 0,
       opencode: 0,
       // Hosted vendors have real synchronizers; seeded to 0 here and overwritten

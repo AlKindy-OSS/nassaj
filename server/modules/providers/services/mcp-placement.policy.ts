@@ -16,9 +16,16 @@ export type ResidueAbsenceProof = {
   kind: 'same-storage-readback';
 };
 
+/**
+ * Who owns a legacy MCP file. `'gemini'` is NOT a provider (its runtime was
+ * deleted, T-1853): it names the owner of the orphaned `~/.gemini/settings.json`
+ * that the cleanup-only port still scrubs, so it lives here and not in LLMProvider.
+ */
+export type LegacyMcpCleanupOwner = LLMProvider | 'gemini';
+
 export type LegacyCleanupPlacement = {
   id: string;
-  provider: LLMProvider;
+  provider: LegacyMcpCleanupOwner;
   scope: 'user';
   storagePathAlias: string;
   adapter: 'contained-json-cleanup' | 'contained-toml-cleanup' | 'gemini-cleanup-only' | 'opencode-cleanup-only';
@@ -42,8 +49,10 @@ export const globalManualTargets = [
 
 /**
  * Every user-scoped file that an older generic fan-out could have touched.
- * Storage aliases are contract identifiers: Gemini's pseudo path and agy's
- * installed-runtime path intentionally remain separate despite sharing .gemini.
+ * Storage aliases are contract identifiers. `gemini-pseudo-user-json` is a
+ * CLEANUP-ONLY port for connector entries left in `~/.gemini/settings.json` by
+ * the deleted Gemini CLI provider (T-1853): nothing writes there any more, and it
+ * stays separate from agy's installed-runtime path despite sharing `.gemini`.
  */
 export const legacyCleanupPlacements = [
   {

@@ -20,15 +20,6 @@
  * agent environment with its own native `kimi-agent-cli` launcher, so it is
  * selectable and accepts an API key.
  *
- * `gemini` remains listed as a history-only compatibility fence while the
- * remaining client pickers/settings still consume this shared filter. Its new
- * shell launches are rejected server-side; historical rows remain readable.
- * agy (Antigravity) is a SEPARATE
- * provider that merely shares the `~/.gemini` HOME prefix and is untouched —
- * it authenticates by Google OAuth (`~/.gemini/antigravity-cli/...`) and is not
- * a substitute relationship either way. Historical `provider='gemini'` rows stay
- * readable; no new spawn or sync can fire for them.
- *
  * `glm` is disabled AS A STANDALONE AGENT SYSTEM (owner decision 2026-07-26).
  * The settings screen lists agent SYSTEMS — bodies with a CLI, tools and
  * sessions — and models live INSIDE them. GLM has no body of its own: its
@@ -48,7 +39,6 @@
  */
 export const DISABLED_PROVIDERS = [
   'deepseek',
-  'gemini',
   'glm',
 ] as const;
 

@@ -24,9 +24,13 @@ import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/a
 // whereas a static named import would fail ESM linking against such a mock.
 import * as databaseModule from '@/modules/database/index.js';
 import {
+  armFencedRun,
   canAccessProjectPath,
   isProjectMembershipEnforced,
+  releaseFencedRun,
 } from '@/modules/database/repositories/project-access.js';
+import { createRunFence, type FencedWriter, type RunFence } from '@/modules/websocket/services/run-fence.js';
+import { toNumericUserId, transparentWriterWithSend } from '@/modules/websocket/services/writer-proxy.js';
 import { sendOpenSessionsCount } from '@/modules/websocket/services/open-sessions.service.js';
 import {
   presenceConnect,
@@ -65,6 +69,12 @@ import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../s
 // truth for globally disabled providers (T-864). Relative on purpose: the `@/`
 // alias maps to server/* only.
 import { isProviderGloballyDisabled } from '../../../../shared/disabledProviders.js';
+import {
+  PROVIDER_REMOVED_CODE,
+  PROVIDER_REMOVED_MESSAGE,
+  isRetiredProvider,
+  retiredProviderOfCommandType,
+} from '../../../../shared/retiredProviders.js';
 import {
   normalizeCoordinationLevel,
   type CoordinationLevel,
@@ -190,7 +200,7 @@ export function __resetBtwFloodStateForTests(): void {
   btwForksByUser.clear();
 }
 
-type ChatWebSocketDependencies = {
+export type ChatWebSocketDependencies = {
   /** Source-update reader lease retained for the full provider process lifetime. */
   acquireWriterLease?: (kind: string) => Promise<{ release(): void }>;
   /** Server-authoritative permission admission. Production composition supplies this. */
@@ -383,10 +393,20 @@ type ChatWebSocketDependencies = {
     writer: WebSocketWriter,
     rawWs: RealtimeClientConnection,
   ) => Array<{ sessionId: string; provider: string; token: unknown }>;
+  /** T-1854: the writer currently holding a session's process registration. */
+  getProviderRunWriter?: (sessionId: string) => unknown;
   isProviderRunOwnershipCurrent?: (
     run: { sessionId: string; provider: string; token: unknown },
     writer: WebSocketWriter,
     rawWs: RealtimeClientConnection,
+  ) => boolean;
+  /** B-1327: every live monitor registration launched by one user. */
+  getProviderRunsOwnedByUser?: (
+    userId: number,
+  ) => Array<{ sessionId: string; provider: string; token: unknown; writer: unknown }>;
+  /** B-1327: true while a user-scoped token is still the live registration. */
+  isProviderRunRegistrationCurrent?: (
+    run: { sessionId: string; provider: string; token: unknown },
   ) => boolean;
   resolveToolApproval: (
     requestId: string,
@@ -471,7 +491,6 @@ function readProvider(value: unknown): LLMProvider | null {
     value === 'claude'
     || value === 'cursor'
     || value === 'codex'
-    || value === 'gemini'
     || value === 'antigravity'
     || value === 'opencode'
     || value === 'hermes'
@@ -515,6 +534,23 @@ export function resolveSessionControlProvider(
 }
 
 /**
+ * Typed pre-start refusal for a provider whose runtime was deleted (T-1853).
+ * Nothing is spawned and no session state is written (`notStarted`).
+ */
+function retiredProviderRefusal(provider: LLMProvider, data: ChatIncomingMessage) {
+  return createNormalizedMessage({
+    kind: 'complete',
+    provider,
+    exitCode: 1,
+    success: false,
+    code: PROVIDER_REMOVED_CODE,
+    error: PROVIDER_REMOVED_MESSAGE,
+    notStarted: true,
+    ...clientMsgIdEcho(data),
+  });
+}
+
+/**
  * Maps each chat command message type to the provider its payload was authored
  * for by the client. Used as the *default* routing target before the database
  * provider (the source of truth for resumed sessions) is consulted.
@@ -523,7 +559,6 @@ const COMMAND_TYPE_TO_PROVIDER: Record<string, LLMProvider> = {
   'claude-command': 'claude',
   'cursor-command': 'cursor',
   'codex-command': 'codex',
-  'gemini-command': 'gemini',
   'antigravity-command': 'antigravity',
   'hermes-command': 'hermes',
   'kimi-command': 'kimi',
@@ -603,23 +638,6 @@ export function isProjectPathVisibleToUser(
     projectRow.project_id,
     toNumericUserId(userId)
   );
-}
-
-/**
- * Normalizes the JWT-derived socket identity to the integer the database
- * predicates expect, or null when it cannot be resolved (anonymous socket /
- * non-numeric id). Extracted verbatim from the visibility gate so the read and
- * write gates below coerce identically — a divergence here would silently make
- * one gate stricter than the other.
- */
-function toNumericUserId(userId: string | number | null): number | null {
-  const parsed =
-    typeof userId === 'number'
-      ? userId
-      : typeof userId === 'string' && userId.trim() !== ''
-        ? Number.parseInt(userId, 10)
-        : null;
-  return Number.isInteger(parsed) ? parsed : null;
 }
 
 type SharedWorkspaceAttestationInput = {
@@ -916,97 +934,101 @@ export function abortHostedSupervisedTurn(
   );
 }
 
-type OwnedProviderRun = { sessionId: string; provider: string; token: unknown };
+export type OwnedProviderRun = { sessionId: string; provider: string; token: unknown };
 
-/** Authorization close frames are the only transport exits that revoke work. */
+/**
+ * Authorization close frames. B-1327: such a close no longer cancels provider
+ * work by itself — logout, account switch and token expiry leave runs alive for
+ * reattachment; only administrative revocation (user-run-revocation.service)
+ * stops them. The flag still exempts these closes from Qwen's foreground-only
+ * transport policy, exactly as before.
+ */
 export function isIdentityRevocationClose(code: number, reason: Buffer): boolean {
   return code === 4401 && reason?.toString() === 'identity_revoked';
 }
 
-/**
- * Cancels only provider runs still owned by the device-revoked writer/socket.
- * The opaque registry token is checked immediately before every cancellation,
- * so an old close event cannot kill a replacement registration with the same
- * session id. Output is fenced before any asynchronous provider abort begins.
- */
-export function abortRunsForRevokedWriter(
+/** Registrations (process monitor + supervised runs) this writer/socket owns. */
+function listOwnedProviderRuns(
   writer: WebSocketWriter,
   rawWs: RealtimeClientConnection,
   dependencies: ChatWebSocketDependencies,
-): void {
-  abortOwnedRunsForWriter(writer, rawWs, dependencies, null, true);
-}
-
-/** Fences and aborts only writer-owned runs belonging to the removed project. */
-export function abortProjectRunsForRevokedWriter(
-  writer: WebSocketWriter,
-  rawWs: RealtimeClientConnection,
-  dependencies: ChatWebSocketDependencies,
-  projectSessionIds: Iterable<string>,
-): number {
-  const selected = new Set(projectSessionIds);
-  writer.revokeProjectSessions(selected, rawWs);
-  return abortOwnedRunsForWriter(writer, rawWs, dependencies, selected, false);
-}
-
-function abortOwnedRunsForWriter(
-  writer: WebSocketWriter,
-  rawWs: RealtimeClientConnection,
-  dependencies: ChatWebSocketDependencies,
-  selectedSessionIds: Set<string> | null,
-  revokeAllOutput: boolean,
-): number {
-  const listOwned = dependencies.getProviderRunsOwnedByWriter;
-  const isCurrent = dependencies.isProviderRunOwnershipCurrent;
-  const ownedRuns = [
-    ...(listOwned?.(writer, rawWs) ?? []),
+): OwnedProviderRun[] {
+  return [
+    ...(dependencies.getProviderRunsOwnedByWriter?.(writer, rawWs) ?? []),
     ...(writer.getRevocableRuns?.(rawWs) ?? []),
   ];
-  const runIsCurrent = (run: OwnedProviderRun): boolean => (
-    writer.isRevocableRunCurrent?.(run, rawWs) === true
-    || isCurrent?.(run, writer, rawWs) === true
-  );
-  const currentRuns = ownedRuns.filter((run) => runIsCurrent(run)
-    && (selectedSessionIds === null || selectedSessionIds.has(run.sessionId)));
-  if (currentRuns.length === 0) return 0;
-  if (revokeAllOutput && !writer.revokeRunOutput(rawWs)) return 0;
+}
 
-  for (const run of currentRuns) {
-    const userId = toNumericUserId(writer.userId);
-    if (abortHostedSupervisedTurn(
-      dependencies.hostedTurnSupervisor, run.provider, run.sessionId, userId,
-    )) continue;
-    if (abortCliSupervisedTurn(
-      dependencies.cliTurnSupervisor, run.provider, run.sessionId, userId,
-    )) continue;
+/** Rechecks an opaque ownership token immediately before an abort side effect. */
+function isOwnedProviderRunCurrent(
+  writer: WebSocketWriter,
+  rawWs: RealtimeClientConnection,
+  dependencies: ChatWebSocketDependencies,
+  run: OwnedProviderRun,
+): boolean {
+  return writer.isRevocableRunCurrent?.(run, rawWs) === true
+    || dependencies.isProviderRunOwnershipCurrent?.(run, writer, rawWs) === true;
+}
 
-    switch (run.provider) {
-      case 'claude':
-        void dependencies.abortClaudeSDKSession(run.sessionId, rawWs).catch((error) => {
-          console.error('[ERROR] Failed to abort identity-revoked Claude run', {
+/**
+ * Hands one owned run to its provider's abort bridge. The result is the
+ * bridge's own verdict (true = a live run was signalled), never assumed.
+ */
+export function requestProviderAbort(
+  dependencies: ChatWebSocketDependencies,
+  run: OwnedProviderRun,
+  userId: number | null,
+  rawWs: RealtimeClientConnection,
+): boolean | Promise<boolean> {
+  if (abortHostedSupervisedTurn(dependencies.hostedTurnSupervisor, run.provider, run.sessionId, userId)) return true;
+  if (abortCliSupervisedTurn(dependencies.cliTurnSupervisor, run.provider, run.sessionId, userId)) return true;
+  switch (run.provider) {
+    case 'claude':
+      return Promise.resolve()
+        .then(() => dependencies.abortClaudeSDKSession(run.sessionId, rawWs))
+        .then((result) => (typeof result === 'boolean' ? result : result?.aborted === true))
+        .catch((error: unknown) => {
+          console.error('[ERROR] Failed to abort Claude run', {
             sessionId: run.sessionId,
             error: error instanceof Error ? error.message : String(error),
           });
+          return false;
         });
-        break;
-      case 'cursor': dependencies.abortCursorSession(run.sessionId); break;
-      case 'codex': dependencies.abortCodexSession(run.sessionId); break;
-      case 'agy':
-      case 'antigravity': dependencies.abortAntigravitySession(run.sessionId); break;
-      case 'opencode': dependencies.abortOpenCodeSession(run.sessionId); break;
-      case 'hermes': dependencies.abortHermesSession(run.sessionId); break;
-      case 'kimi': dependencies.abortKimiSession(run.sessionId); break;
-      case 'deepseek': dependencies.abortDeepSeekSession(run.sessionId); break;
-      case 'glm': dependencies.abortGlmSession(run.sessionId); break;
-      case 'qwen': dependencies.abortQwenSession?.(run.sessionId); break;
-      default:
-        console.warn('[WARN] No abort bridge for identity-revoked provider run', {
-          provider: run.provider,
-          sessionId: run.sessionId,
-        });
-    }
+    case 'cursor': return dependencies.abortCursorSession(run.sessionId) === true;
+    case 'codex': return dependencies.abortCodexSession(run.sessionId) === true;
+    case 'agy':
+    case 'antigravity': return dependencies.abortAntigravitySession(run.sessionId) === true;
+    case 'opencode': return dependencies.abortOpenCodeSession(run.sessionId) === true;
+    case 'hermes': return dependencies.abortHermesSession(run.sessionId) === true;
+    case 'kimi': return dependencies.abortKimiSession(run.sessionId) === true;
+    case 'deepseek': return dependencies.abortDeepSeekSession(run.sessionId) === true;
+    case 'glm': return dependencies.abortGlmSession(run.sessionId) === true;
+    case 'qwen': return dependencies.abortQwenSession?.(run.sessionId) === true;
+    default:
+      console.warn('[WARN] No abort bridge for provider run', {
+        provider: run.provider,
+        sessionId: run.sessionId,
+      });
+      return false;
   }
-  return currentRuns.length;
+}
+
+/**
+ * T-1854 (qa M4): aborts the provider run registered under `sessionId` only
+ * when THIS writer (the run fence) owns that registration. false = nothing
+ * owned yet (the provider has not registered) — the fence retries later.
+ */
+export function abortProviderRun(
+  writer: WebSocketWriter,
+  dependencies: ChatWebSocketDependencies,
+  sessionId: string,
+): boolean | Promise<boolean> {
+  const rawWs = writer.ws;
+  const run = listOwnedProviderRuns(writer, rawWs, dependencies).find((candidate) => (
+    candidate.sessionId === sessionId && isOwnedProviderRunCurrent(writer, rawWs, dependencies, candidate)
+  ));
+  if (!run) return false;
+  return requestProviderAbort(dependencies, run, toNumericUserId(writer.userId), rawWs);
 }
 
 /**
@@ -1187,50 +1209,8 @@ function isModelActivityFrame(payload: { kind?: unknown; role?: unknown }): bool
   return kind === 'agent_message' || kind === 'commentary' || kind === 'reasoning' || kind === 'tool';
 }
 
-/**
- * ‏B-553/م1 — يُلبس الكاتبَ هويةَ الجولة، فيصدي بها كلُّ مزوّد بلا أن يعلم.
- *
- * العلّة المقيسة (مراجعة qa-critic 2026-08-07): `clientMsgId` كان يُصدَّى في
- * `claude-sdk.js` وحده. وتسعة مزوّدات — codex وgemini وcursor وkimi وhermes
- * وopencode وagy وdeepseek والحامل — تبعث أحداثها عاريةً،
- * فإدخالُ صندوق الصادر عندها **لا يُقبل ولا يفشل أبداً**: يبقى معلَّقاً حتى
- * تنقضي اثنتا عشرة ساعة، وإن كان أُرسل من محادثة جديدة بقي يتيماً (‏`sessionId:
- * null`) فظهر على **كل** شاشة محادثة جديدة — وهو ما رآه المالك.
- *
- * والعلاج هنا لا في تسعة ملفات: كلّها تُرسل عبر هذا الكاتب، فلفّةٌ واحدة حول
- * ‏`send` تكفي. ولفّةٌ **لكل جولة** لا خريطةٌ على المقبس: المقبس الواحد قد
- * يشغّل جولتين على محادثتين، فمعرّفٌ واحد مخزَّن عليه كان سيُذيّل حكمَ هذه
- * بهوية تلك — فيُحذف إدخالُ رسالةٍ لم تصل. اللفّة تحمل هوية جولتها وحدها،
- * فالخلط ممتنعٌ بنيوياً لا بالحذر.
- *
- * ولا تدهس ما وضعه المزوّد بنفسه (claude يضعه): الموجود أدقّ من المفروض.
- * بهذا يملك كل `stream_delta` رابط الجولة الدقيق نفسه الذي استلمه المشغّل؛
- * لا ننشئ علاقة محفوظة في التاريخ ولا نستنتجها من رسالة سابقة.
- */
-function transparentWriterWithSend(
-  writer: WebSocketWriter,
-  send: (payload: unknown) => void,
-): WebSocketWriter {
-  return new Proxy(writer, {
-    get(target, property): unknown {
-      if (property === 'send') return send;
-      const value = Reflect.get(target, property, target) as unknown;
-      return typeof value === 'function'
-        ? (value as (...args: unknown[]) => unknown).bind(target)
-        : value;
-    },
-    set(target, property, value): boolean {
-      return Reflect.set(target, property, value, target);
-    },
-    defineProperty(target, property, descriptor): boolean {
-      return Reflect.defineProperty(target, property, descriptor);
-    },
-    deleteProperty(target, property): boolean {
-      return Reflect.deleteProperty(target, property);
-    },
-  }) as WebSocketWriter;
-}
-
+// B-553/م1: per-run writer wrappers (clientMsgId echo and friends) use
+// transparentWriterWithSend from writer-proxy.ts — one Proxy definition.
 function withClientMsgIdEcho(writer: WebSocketWriter, data: ChatIncomingMessage): WebSocketWriter {
   const echo = clientMsgIdEcho(data);
   if (!echo.clientMsgId) {
@@ -1335,6 +1315,9 @@ async function runLegacyProviderCallWithShadow(
   writer: WebSocketWriter,
   call: () => Promise<unknown>,
 ): Promise<void> {
+  // T-1854 (I4): last check before the provider owns the turn. The revoked
+  // fence already sent its single terminal frame, so nothing more is emitted.
+  if ((writer as FencedWriter).runFenceRevoked === true) return;
   const active = activeShadowByWriter.get(writer);
   if (active?.markLegacyDispatchStarted) {
     try {
@@ -1564,6 +1547,27 @@ export async function dispatchProviderCommand(
   principalId: string | number | null = null,
   authenticatedPrincipal: unknown = null,
 ): Promise<void> {
+  // T-1854 (qa M4): the run fence, once armed, is released on every exit —
+  // return, refusal, provider throw or falsy result — never left registered.
+  const fenceSlot: { fence: RunFence | null } = { fence: null };
+  try {
+    await dispatchFencedProviderCommand(
+      messageType, data, writer, dependencies, principalId, authenticatedPrincipal, fenceSlot,
+    );
+  } finally {
+    fenceSlot.fence?.finish();
+  }
+}
+
+async function dispatchFencedProviderCommand(
+  messageType: string,
+  data: ChatIncomingMessage,
+  writer: WebSocketWriter,
+  dependencies: ChatWebSocketDependencies,
+  principalId: string | number | null,
+  authenticatedPrincipal: unknown,
+  fenceSlot: { fence: RunFence | null },
+): Promise<void> {
   const command = typeof data.command === 'string' ? data.command : '';
   const invalidCommand = data.command !== undefined && typeof data.command !== 'string';
   const requestedProvider = COMMAND_TYPE_TO_PROVIDER[messageType]
@@ -1580,6 +1584,15 @@ export async function dispatchProviderCommand(
     ? dependencies.getSessionProvider(resumeSessionId)
     : null;
   const targetProvider = persistedProvider ?? requestedProvider;
+
+  // T-1853: a stale client type or a persisted row may still name a provider
+  // whose runtime was deleted — refuse with a typed frame, never spawn.
+  const retiredProvider = retiredProviderOfCommandType(messageType)
+    ?? (isRetiredProvider(persistedProvider) ? persistedProvider : null);
+  if (retiredProvider) {
+    writer.send(retiredProviderRefusal(retiredProvider as LLMProvider, data));
+    return;
+  }
 
   if (!targetProvider) {
     writer.send({
@@ -1991,6 +2004,28 @@ export async function dispatchProviderCommand(
     principalId,
     dependencies,
   );
+  // T-1854 (qa M1): the run fence is the OUTERMOST wrapper, so a dropped frame
+  // leaves no trace in any inner layer (shadow, workspace bind, coordination,
+  // clientMsgId echo). Created only under enforcement: flag off = today (I6).
+  if (isProjectMembershipEnforced()) {
+    const innerWriter = writer;
+    const fence = createRunFence({
+      inner: innerWriter,
+      provider: targetProvider,
+      knownSessionId: resumeSessionId,
+      echo: clientMsgIdEcho(data),
+      abortRun: (fencedWriter, sessionId) => abortProviderRun(fencedWriter, dependencies, sessionId),
+      sessionOwnedElsewhere: (fencedWriter, sessionId) => {
+        const owner = dependencies.getProviderRunWriter?.(sessionId) ?? null;
+        return owner !== null && owner !== fencedWriter;
+      },
+    });
+    fenceSlot.fence = fence;
+    writer = fence.writer;
+    const shadow = activeShadowByWriter.get(innerWriter);
+    if (shadow) activeShadowByWriter.set(writer, shadow);
+  }
+  const runFence = fenceSlot.fence;
 
   // T-1315 (الموجة الثانية، قرار المالك 2026-08-17): مستوى التنسيق يصل **كل**
   // المحرّكات لا Claude وحده. يُضيَّق مرّةً واحدة هنا fail-closed ثم يُمرَّر على
@@ -2031,6 +2066,17 @@ export async function dispatchProviderCommand(
         kind: 'complete', provider, exitCode: 1, success: false,
         code: 'permission_launch_context_invalid', notStarted: true,
         error: 'The provider launch context could not be authenticated.',
+        ...clientMsgIdEcho(data),
+      }));
+      return null;
+    }
+    // T-1854 (C2): every launch branch (hosted, cli, legacy, claude, codex)
+    // crosses this point, and the fence uses the SAME projectId as the gate.
+    if (runFence && !runFence.arm(projectId, ingressUserId)) {
+      writer.send(createNormalizedMessage({
+        kind: 'complete', provider, exitCode: 1, success: false,
+        code: 'project_access_changed', notStarted: true,
+        error: 'Project access changed before the run could start.',
         ...clientMsgIdEcho(data),
       }));
       return null;
@@ -2085,6 +2131,11 @@ export async function dispatchProviderCommand(
     const options = permissionOptionsFor(provider, body, engine, purpose);
     if (!options) return { admitted: false };
     const execution = options.permissionExecution as PermissionExecutionHandle | undefined;
+    // T-1854 (I4): revoked between admission and hand-off — never start it.
+    if ((writer as FencedWriter).runFenceRevoked === true) {
+      try { execution?.notStarted?.(); } catch { /* the gateway reconciles an unused lease */ }
+      return { admitted: false };
+    }
     if (!execution) return { admitted: true, value: await adapter(options) };
     const value = await runPermissionExecutionAdapter(execution, () => adapter(options));
     return { admitted: true, value };
@@ -2273,18 +2324,6 @@ export async function dispatchProviderCommand(
     if (!codexOptions) return;
     await runLegacyProviderCallWithShadow(writer, () =>
       dependencies.queryCodex(command, codexOptions, writer));
-    return;
-  }
-  if (targetProvider === 'gemini') {
-    writer.send(createNormalizedMessage({
-      kind: 'complete',
-      provider: 'gemini',
-      exitCode: 1,
-      success: false,
-      code: 'provider_removed',
-      error: 'The Gemini provider has been removed. Existing history stays visible but read-only.',
-      ...clientMsgIdEcho(data),
-    }));
     return;
   }
   if (targetProvider === 'antigravity') {
@@ -2525,13 +2564,6 @@ export function handleChatConnection(
   sendOpenSessionsCount(ws as RealtimeClientConnection);
 
   const writer: WebSocketWriter = new websocketWriterService.WebSocketWriter(ws, presenceUserId);
-  (ws as RealtimeClientConnection & { abortIdentityRevokedRuns?: () => void })
-    .abortIdentityRevokedRuns = () => abortRunsForRevokedWriter(writer, ws, dependencies);
-  (ws as RealtimeClientConnection & {
-    abortProjectMembershipRuns?: (sessionIds: Iterable<string>) => number;
-  }).abortProjectMembershipRuns = (sessionIds) => (
-    abortProjectRunsForRevokedWriter(writer, ws, dependencies, sessionIds)
-  );
 
   /**
    * Raw, UNICAST send to THIS socket: bypasses WebSocketWriter entirely, so a
@@ -2584,6 +2616,12 @@ export function handleChatConnection(
       const messageType = data.type;
       if (!messageType) {
         throw new Error('Message type is required');
+      }
+
+      const retiredCommandProvider = retiredProviderOfCommandType(messageType);
+      if (retiredCommandProvider) {
+        writer.send(retiredProviderRefusal(retiredCommandProvider as LLMProvider, data));
+        return;
       }
 
       const isProviderEffectMessage = messageType in COMMAND_TYPE_TO_PROVIDER
@@ -2897,6 +2935,29 @@ export function handleChatConnection(
           return;
         }
 
+        // T-1854 (qa M3/M7): a /btw fork is a run too. Under enforcement it is
+        // admitted into the fenced-run registry BEFORE its first await, and a
+        // revocation interrupts it. An unregistered project is refused below.
+        const btwProject = databaseModule.projectsDb?.getProjectPath?.(btwProjectPath);
+        const btwProjectId = typeof btwProject?.project_id === 'string' ? btwProject.project_id : '';
+        let btwRevoked = false;
+        let btwOnRevoked: (() => void) | null = null;
+        let btwFencedRun: ReturnType<typeof armFencedRun> = null;
+        if (isProjectMembershipEnforced() && btwProjectId) {
+          btwFencedRun = armFencedRun({
+            projectId: btwProjectId,
+            userId: toNumericUserId(presenceUserId),
+            onRevoke: () => {
+              btwRevoked = true;
+              btwOnRevoked?.();
+            },
+          });
+          if (!btwFencedRun) {
+            emitBtwError('project_access_changed', 'Project access changed.');
+            return;
+          }
+        }
+
         // A-3: every gate has passed — ACK acceptance to the requester BEFORE the
         // fork spawns, so the client can cancel its fallback timeout. Then reserve
         // both flood slots (per-socket + per-user).
@@ -2904,15 +2965,23 @@ export function handleChatConnection(
         try {
           btwWriterLease = await dependencies.acquireWriterLease?.('provider-side-query') ?? null;
         } catch {
+          releaseFencedRun(btwFencedRun);
           emitBtwError('update_maintenance_active', 'Source update maintenance is active.');
+          return;
+        }
+        // qa M7: re-check after every await, before anything is accepted.
+        if (btwRevoked) {
+          btwWriterLease?.release();
+          releaseFencedRun(btwFencedRun);
+          emitBtwError('project_access_changed', 'Project access changed.');
           return;
         }
         let btwPermissionExecution: PermissionExecutionHandle | null = null;
         {
-          const project = databaseModule.projectsDb?.getProjectPath?.(btwProjectPath);
-          const projectId = typeof project?.project_id === 'string' ? project.project_id : '';
+          const projectId = btwProjectId;
           if (presenceUserId == null || !projectId) {
             btwWriterLease?.release();
+            releaseFencedRun(btwFencedRun);
             emitBtwError('permission_launch_context_invalid', 'Permission context is unavailable.');
             return;
           }
@@ -2932,12 +3001,14 @@ export function handleChatConnection(
             });
             if (permission.kind === 'denied') {
               btwWriterLease?.release();
+              releaseFencedRun(btwFencedRun);
               emitBtwError('permission_denied', 'The side-query permission is unavailable.');
               return;
             }
             btwPermissionExecution = permission.execution;
           } catch {
             btwWriterLease?.release();
+            releaseFencedRun(btwFencedRun);
             emitBtwError('permission_admission_unavailable', 'Permission admission failed closed.');
             return;
           }
@@ -2962,6 +3033,7 @@ export function handleChatConnection(
           releaseBtwUserSlot(presenceUserId);
           btwWriterLease?.release();
           btwWriterLease = null;
+          releaseFencedRun(btwFencedRun);
           btwActiveInterrupt = null;
           btwActiveRelease = null;
         };
@@ -2982,6 +3054,16 @@ export function handleChatConnection(
           } catch {
             // The gateway durably blocks the generation on terminal ambiguity.
           }
+        };
+        btwOnRevoked = () => {
+          try {
+            btwActiveInterrupt?.();
+          } catch {
+            /* best-effort teardown */
+          }
+          settleBtwPermission(btwPermissionStarted ? 'failed' : 'reconciled_unknown');
+          releaseBtw();
+          emitBtwError('project_access_changed', 'Project access changed.');
         };
         try {
           btwPermissionExecution?.consume();
@@ -3016,7 +3098,8 @@ export function handleChatConnection(
                     return;
                   }
                 }
-                if (btwSocketClosed) {
+                // T-1854: a revocation that landed before the handle existed.
+                if (btwSocketClosed || btwRevoked) {
                   try {
                     handle.interrupt();
                   } catch {
@@ -3026,15 +3109,19 @@ export function handleChatConnection(
                 }
                 btwActiveInterrupt = handle.interrupt;
               },
-              onChunk: (text: string) => sendBtwRaw({ type: 'btw-chunk', btwId, text }),
+              onChunk: (text: string) => {
+                if (!btwRevoked) sendBtwRaw({ type: 'btw-chunk', btwId, text });
+              },
               onError: (code: string, message: string) => {
                 settleBtwPermission(btwPermissionStarted ? 'failed' : 'reconciled_unknown');
                 releaseBtw();
-                emitBtwError(code, message);
+                if (!btwRevoked) emitBtwError(code, message);
               },
               onComplete: (fullAnswer: string) => {
                 settleBtwPermission('succeeded');
                 releaseBtw();
+                // T-1854 (I1): no content after revocation, not even the final answer.
+                if (btwRevoked) return;
                 // B-270: attach the full answer to the terminal frame. The client
                 // adopts it as the source of truth, so the reply is correct even
                 // if every intermediate `btw-chunk` frame was lost in transit.
@@ -3662,15 +3749,12 @@ export function handleChatConnection(
       + `activeClaudeSessions=${JSON.stringify(wsDiagActiveClaude)} `
       + `hadActiveStreamAtClose=${Array.isArray(wsDiagActiveClaude) && wsDiagActiveClaude.length > 0}`
     );
-    // Identity revocation is an authorization event, unlike an ordinary tab or
-    // network close. Cancel every run still owned by this exact writer/socket;
-    // viewer sockets own no registry entry and therefore cannot cancel a run.
+    // B-1327: no transport close cancels provider work — not even a 4401
+    // identity close (logout, account switch, token expiry). Administrative
+    // revocation stops runs explicitly before closing (user-run-revocation).
     const identityRevoked = isIdentityRevocationClose(code, reason);
-    if (identityRevoked) {
-      abortRunsForRevokedWriter(writer, ws, dependencies);
-    }
-    // Preserve the foreground-only Qwen policy: any transport loss ends Qwen.
-    // Other providers are cancelled only by identity revocation.
+    // Preserve the foreground-only Qwen policy: any transport loss ends Qwen,
+    // except an identity close, which is not a transport loss.
     if (!identityRevoked && writerSessionId && dependencies.isQwenSessionActive?.(writerSessionId)) {
       dependencies.abortQwenSession?.(writerSessionId);
     }

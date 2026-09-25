@@ -71,8 +71,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
     setCodexPermissionMode,
     providerAuthStatus,
     checkProviderAuthStatus,
-    geminiPermissionMode,
-    setGeminiPermissionMode,
     openLoginForProvider,
     showLoginModal,
     setShowLoginModal,
@@ -304,8 +302,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   onCursorPermissionsChange={setCursorPermissions}
                   codexPermissionMode={codexPermissionMode}
                   onCodexPermissionModeChange={setCodexPermissionMode}
-                  geminiPermissionMode={geminiPermissionMode}
-                  onGeminiPermissionModeChange={setGeminiPermissionMode}
                   projects={projects}
                   initialAgent={agentDestination.agent}
                   initialCategory={agentDestination.category}

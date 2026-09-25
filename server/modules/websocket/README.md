@@ -114,7 +114,7 @@ flowchart TD
   D -->|claude-command| E[queryClaudeSDK]
   D -->|cursor-command| F[spawnCursor]
   D -->|codex-command| G[queryCodex]
-  D -->|gemini-command| H[spawnGemini]
+  D -->|retired provider command| H[provider_removed refusal]
   D -->|cursor-resume| I[spawnCursor resume]
   D -->|abort-session| J[abort by provider]
   D -->|claude-permission-response| K[resolveToolApproval]

@@ -129,9 +129,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   const [codexModel, setCodexModel] = useState<string>(() => {
     return sanitizeStoredModel('codex', localStorage.getItem('codex-model'));
   });
-  const [geminiModel, setGeminiModel] = useState<string>(() => {
-    return sanitizeStoredModel('gemini', localStorage.getItem('gemini-model'));
-  });
   const [opencodeModel, setOpenCodeModel] = useState<string>(() => {
     return sanitizeStoredModel('opencode', localStorage.getItem('opencode-model'));
   });
@@ -240,12 +237,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       return;
     }
 
-    if (targetProvider === 'gemini') {
-      setGeminiModel(model);
-      localStorage.setItem('gemini-model', model);
-      return;
-    }
-
     if (targetProvider === 'hermes') {
       setHermesModel(model);
       localStorage.setItem('hermes-model', model);
@@ -319,7 +310,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     // model at all. Body axis and engine axis, unioned once, here.
     const providers: LLMProvider[] = Array.from(new Set<LLMProvider>([
       ...filterDisabledProviders<LLMProvider>([
-        'claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode', 'hermes',
+        'claude', 'cursor', 'codex', 'antigravity', 'opencode', 'hermes',
         'kimi', 'deepseek', 'glm', 'qwen',
       ]),
       ...ENGINE_VENDOR_PROVIDERS,
@@ -476,9 +467,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     const offCodex = onApplyServerPreference('codex-model', (raw) => {
       setCodexModel(sanitizeStoredModel('codex', raw));
     });
-    const offGemini = onApplyServerPreference('gemini-model', (raw) => {
-      setGeminiModel(sanitizeStoredModel('gemini', raw));
-    });
     const offOpencode = onApplyServerPreference('opencode-model', (raw) => {
       setOpenCodeModel(sanitizeStoredModel('opencode', raw));
     });
@@ -493,7 +481,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
       offClaude();
       offCursor();
       offCodex();
-      offGemini();
       offOpencode();
       offAntigravity();
       offHermes();
@@ -559,10 +546,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
   useEffect(() => {
     reconcileProviderModel('codex-model', providerModelCatalog.codex, codexModel, setCodexModel);
   }, [providerModelCatalog.codex, codexModel, reconcileProviderModel]);
-
-  useEffect(() => {
-    reconcileProviderModel('gemini-model', providerModelCatalog.gemini, geminiModel, setGeminiModel);
-  }, [providerModelCatalog.gemini, geminiModel, reconcileProviderModel]);
 
   useEffect(() => {
     reconcileProviderModel(
@@ -664,7 +647,7 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     setPendingPermissionRequests([]);
     // Engine-on-vendor only applies to the Claude path; selecting any other
     // provider clears it so we never send a stale engineProvider with, e.g.,
-    // a Gemini run. (Switching back to Claude does NOT auto-restore it.)
+    // a non-Claude run. (Switching back to Claude does NOT auto-restore it.)
     if (provider !== 'claude') {
       persistEngineProvider(null);
     }
@@ -842,8 +825,6 @@ export function useChatProviderState({ selectedSession, selectedProject }: UseCh
     setClaudeModel,
     codexModel,
     setCodexModel,
-    geminiModel,
-    setGeminiModel,
     antigravityModel,
     setAntigravityModel,
     opencodeModel,

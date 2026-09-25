@@ -129,6 +129,8 @@ function createVendorSpawn(provider) {
       .catch(() => model || config.fallbackModels.DEFAULT);
     const chosenModel = resolvedModel || config.fallbackModels.DEFAULT;
 
+    // T-1854 (qa #5): no session announcement or transcript meta for a revoked run.
+    if (ws?.runFenceRevoked) return;
     if (!isResume) {
       if (ws && typeof ws.setSessionId === 'function') {
         ws.setSessionId(effectiveSessionId);
@@ -148,12 +150,17 @@ function createVendorSpawn(provider) {
     }
 
     // Record the user's own turn in the transcript so history shows both sides.
+    // T-1854 (qa #5): content is never written for a revoked run.
+    if (ws?.runFenceRevoked) return;
     if (command && command.trim()) {
       await appendTranscript(provider, effectiveSessionId, workspacePath, {
         type: 'message',
         message: { role: 'user', content: command },
       });
     }
+
+    // T-1854 (qa H1b): no await between here and fetch + active.set.
+    if (ws?.runFenceRevoked) return;
 
     const controller = new AbortController();
     active.set(effectiveSessionId, controller);

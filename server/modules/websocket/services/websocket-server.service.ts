@@ -3,12 +3,25 @@ import type { Server as HttpServer } from 'node:http';
 import { WebSocket, WebSocketServer, type VerifyClientCallbackSync } from 'ws';
 
 import {
+  bindUserRealtimeRevocation,
   connectionRevocationRegistry,
   devicePrincipalFromUser,
 } from '@/modules/account-wallet/index.js';
-import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
+import {
+  handleChatConnection,
+  readRequestUserId,
+} from '@/modules/websocket/services/chat-websocket.service.js';
+import {
+  abortLateRevokedRun,
+  revokeUserRunsAndSockets,
+} from '@/modules/websocket/services/user-run-revocation.service.js';
+import { trackUserSocket } from '@/modules/websocket/services/websocket-state.service.js';
+import { bindLateRevokedRunHandler } from '@/shared/user-revocation-epoch.js';
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
-import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
+import {
+  handleShellConnection,
+  terminateShellSessionsForUser,
+} from '@/modules/websocket/services/shell-websocket.service.js';
 import { handleTerminalConnection } from '@/modules/websocket/services/terminal-websocket.service.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 
@@ -25,12 +38,14 @@ type WebSocketServerDependencies = {
 type AliveWebSocket = WebSocket & {
   isAlive: boolean;
   missedPongs?: number;
-  abortIdentityRevokedRuns?: () => void;
 };
 
-/** Trusted registry callback: fence owned work before starting the close handshake. */
+/**
+ * Trusted registry callback for a stale device identity. B-1327: closing never
+ * cancels provider work (logout/switch/expiry keep runs alive); administrative
+ * revocation stops runs itself before any close (user-run-revocation).
+ */
 export function closeWebSocketForIdentityRevocation(ws: AliveWebSocket): void {
-  ws.abortIdentityRevokedRuns?.();
   ws.close(4401, 'identity_revoked');
 }
 
@@ -112,8 +127,23 @@ export function createWebSocketServer(
     });
   }, PING_INTERVAL_MS);
 
+  // B-1327: account administration (disable/delete/role change) reaches live
+  // runs and sockets through this binding; the auth routes never import us.
+  const unbindUserRevocation = bindUserRealtimeRevocation(
+    (userId, revocation) => revokeUserRunsAndSockets(userId, revocation, dependencies.chat, {
+      terminateShells: terminateShellSessionsForUser,
+      terminateTerminals: dependencies.terminal.terminateForUser,
+    }),
+  );
+  // A run that registers after its user was revoked is aborted on sight.
+  const unbindLateRuns = bindLateRevokedRunHandler(
+    (run) => abortLateRevokedRun(run, dependencies.chat),
+  );
+
   wss.on('close', () => {
     clearInterval(pingInterval);
+    unbindUserRevocation();
+    unbindLateRuns();
   });
 
   wss.on('connection', (ws, request) => {
@@ -128,6 +158,11 @@ export function createWebSocketServer(
     });
 
     const incomingRequest = request as AuthenticatedWebSocketRequest;
+    // B-1327: every authenticated transport is closable by user revocation.
+    const socketUserId = readRequestUserId(incomingRequest);
+    if (socketUserId !== null && socketUserId !== undefined && socketUserId !== '') {
+      ws.once('close', trackUserSocket(socketUserId, aliveWs as never));
+    }
     const url = incomingRequest.url ?? '/';
     const pathname = new URL(url, 'http://localhost').pathname;
     const devicePrincipal = devicePrincipalFromUser(incomingRequest.user);

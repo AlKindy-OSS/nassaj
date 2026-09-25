@@ -12,6 +12,7 @@ import { WebSocket } from 'ws';
 import {
   AccountWalletService,
   connectionRevocationRegistry,
+  revokeUserRealtimeAccess,
 } from '@/modules/account-wallet/index.js';
 import {
   closeConnection,
@@ -125,6 +126,8 @@ test('real chat, shell and terminal upgrades close immediately after device logo
       getActiveClaudeSDKSessions: () => [],
       getProviderRunsOwnedByWriter: () => [ownedRun],
       isProviderRunOwnershipCurrent: (candidate: unknown) => candidate === ownedRun,
+      getProviderRunsOwnedByUser: (userId: number) => (userId === user.id ? [ownedRun] : []),
+      isProviderRunRegistrationCurrent: (candidate: unknown) => candidate === ownedRun,
       abortClaudeSDKSession: async () => { revokedWriterAborts += 1; return true; },
     } as never,
     shell: {} as never, terminal: {} as never,
@@ -149,8 +152,13 @@ test('real chat, shell and terminal upgrades close immediately after device logo
       assert.equal(reason.toString(), 'identity_revoked');
     }
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(revokedWriterAborts, 1, 'wallet revocation aborts the chat writer run once');
+    // B-1327: logout closes every transport but leaves agent runs alive.
+    assert.equal(revokedWriterAborts, 0, 'device logout never aborts a run');
     assert.equal(deviceAccountSessionsDb.resolve(device.secret), null);
+    // The gateway bound administrative revocation: disabling stops the run.
+    assert.equal(revokeUserRealtimeAccess(user.id, { abortReason: 'account_disabled', endInteractiveSessions: true }).abortedRuns, 1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(revokedWriterAborts, 1, 'administrative revocation aborts the run once');
   } finally {
     for (const socket of sockets) socket.terminate();
     await new Promise<void>((resolve) => gateway.close(() => resolve()));

@@ -916,7 +916,7 @@ export const connectorsService = {
    * TWO SHAPES, NOT ONE. A proven target whose MCP writer follows the caller is
    * written once per member. A future proven operator-homed target would be
    * written once with no member attached. Today the audited connector target
-   * set is deliberately Claude + Codex; Gemini/OpenCode/Cursor remain excluded
+   * set is deliberately Claude + Codex; OpenCode/Cursor remain excluded
    * until their writer→launched-reader contracts are demonstrated (B-740).
    *
    * The generic split remains here so reinstating a target after proof does not

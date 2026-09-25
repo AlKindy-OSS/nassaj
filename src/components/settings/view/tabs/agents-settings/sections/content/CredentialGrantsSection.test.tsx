@@ -119,11 +119,11 @@ describe('CredentialGrantsSection', () => {
     assert.deepEqual(selectGrant.mock.calls[0], ['claude', null]);
   });
 
-  it('antigravity يُخاطَب بوحدة gemini، وsakana لا يعرض شيئاً', () => {
+  it('antigravity يعرض قسم المشاركة، وsakana لا يعرض شيئاً', () => {
     const { container } = render(<CredentialGrantsSection agent="sakana" />);
     assert.equal(container.textContent, '');
     cleanup();
     render(<CredentialGrantsSection agent="antigravity" />);
-    assert.ok(screen.getByText('credentialGrants.given.pairedNote'));
+    assert.ok(screen.getByText('credentialGrants.given.title'));
   });
 });

@@ -283,11 +283,6 @@
       "observedAt": "2026-09-01T05:19:00.000Z"
     },
     {
-      "body": "gemini",
-      "reasonCode": "NO_V1_MEASUREMENT_CONTRACT",
-      "observedAt": "2026-09-01T05:19:00.000Z"
-    },
-    {
       "body": "opencode",
       "reasonCode": "BINARY_UNAVAILABLE",
       "observedAt": "2026-09-01T05:19:00.000Z"
@@ -323,5 +318,5 @@
       "observedAt": "2026-09-01T05:19:00.000Z"
     }
   ],
-  "artifactDigest": "sha256:cf3e5bfe81e622fc0905b72a604a55b19e521e8752610c158becfcb7e1f05430"
+  "artifactDigest": "sha256:e4f42ebffc340adb7beb51a389206fc8cac11a20df81839bdd3914dfa50bf230"
 }

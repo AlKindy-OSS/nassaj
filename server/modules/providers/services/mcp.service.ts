@@ -10,6 +10,7 @@ import {
   connectorRolloutTargets,
   globalManualTargets,
   legacyCleanupPlacements,
+  type LegacyMcpCleanupOwner,
 } from '@/modules/providers/services/mcp-placement.policy.js';
 import type { LLMProvider, McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import type {
@@ -24,7 +25,7 @@ import { AppError } from '@/shared/utils.js';
  * This allowlist is an explicit rollout decision, not a capability-derived list.
  * Antigravity/agy and Cursor now have writer→installed-real-reader contract
  * tests, but remain intentionally unarmed until a separate rollout decision or
- * feature flag covers lifecycle/reconciliation behavior. Gemini, OpenCode, Kimi
+ * feature flag covers lifecycle/reconciliation behavior. OpenCode, Kimi
  * chat and Hermes are also unarmed for the blockers documented in B-740.
  */
 export const CONNECTOR_MCP_TARGETS = new Set<LLMProvider>(
@@ -32,7 +33,7 @@ export const CONNECTOR_MCP_TARGETS = new Set<LLMProvider>(
 );
 
 export type ConnectorCleanupResult = {
-  provider: LLMProvider;
+  provider: LegacyMcpCleanupOwner;
   removed: boolean;
   /** A remove return value is not proof; this is set only after a read-back. */
   verified: boolean;

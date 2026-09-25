@@ -971,10 +971,8 @@ export function useProjectsState({
         ? 'cursor'
         : providerFromStorage === 'codex'
           ? 'codex'
-          : providerFromStorage === 'gemini'
-            ? 'gemini'
-            : providerFromStorage === 'antigravity'
-              ? 'antigravity'
+          : providerFromStorage === 'antigravity'
+            ? 'antigravity'
             : providerFromStorage === 'opencode'
               ? 'opencode'
             : 'claude';

@@ -171,3 +171,20 @@ test('a lost compare-and-set race is not audited and yields the stored role', ()
   assert.equal(fresh?.role, 'owner');
   assert.equal(audits.length, 0);
 });
+
+test('B-1327: onRoleApplied fires only when the compare-and-set changed the role', () => {
+  const applied: unknown[] = [];
+  const onRoleApplied = (change: unknown) => applied.push(change);
+  const demoted = fakeDeps({ id: 11, role: 'admin' });
+  syncExternalRole({ user: { id: 11, role: 'admin' }, externalRoles: [], provider: 'oidc' },
+    { ...demoted.deps, onRoleApplied });
+  assert.deepEqual(applied, [{ userId: 11, from: 'admin', to: 'user' }]);
+
+  const lost = fakeDeps({ id: 12, role: 'owner' }, false);
+  syncExternalRole({ user: { id: 12, role: 'admin' }, externalRoles: [], provider: 'oidc' },
+    { ...lost.deps, onRoleApplied });
+  const unchanged = fakeDeps({ id: 13, role: 'admin' });
+  syncExternalRole({ user: { id: 13, role: 'admin' }, externalRoles: ['admin'], provider: 'oidc' },
+    { ...unchanged.deps, onRoleApplied });
+  assert.equal(applied.length, 1, 'a lost race or no change never revokes');
+});

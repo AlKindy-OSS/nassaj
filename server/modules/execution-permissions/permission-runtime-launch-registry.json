@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "entries": [
     { "id": "runtime#ws.cursor", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'cursor')", "primitive": "runtime.provider_call", "expression": "spawnCursor" },
-    { "id": "runtime#ws.gemini", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'gemini')", "primitive": "runtime.provider_call", "expression": "spawnGemini" },
     { "id": "runtime#ws.antigravity", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'antigravity')", "primitive": "runtime.provider_call", "expression": "spawnAntigravity" },
     { "id": "runtime#ws.hermes", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'hermes')", "primitive": "runtime.provider_call", "expression": "spawnHermes" },
     { "id": "runtime#ws.opencode", "file": "server/modules/websocket/services/chat-websocket.service.ts", "anchor": "if (targetProvider === 'opencode')", "primitive": "runtime.provider_call", "expression": "spawnOpenCode" },
@@ -20,7 +19,6 @@
     { "id": "runtime#provider.cage", "file": "server/services/isolation/provider-cage-wiring.js", "anchor": "export function buildCagedSdkSpawn", "primitive": "injected_spawn", "expression": "provider cage spawn" },
     { "id": "runtime#vendor.cli", "file": "server/modules/providers/shared/vendor/vendor-runtime.js", "anchor": "return async function spawnVendor", "primitive": "runtime.provider_call", "expression": "spawnVendor" },
     { "id": "runtime#cursor.cli", "file": "server/cursor-cli.js", "anchor": "async function spawnCursor", "primitive": "injected_spawn", "expression": "cursor CLI" },
-    { "id": "runtime#gemini.cli", "file": "server/gemini-cli.js", "anchor": "async function spawnGemini", "primitive": "injected_spawn", "expression": "gemini CLI" },
     { "id": "runtime#opencode.cli", "file": "server/opencode-cli.js", "anchor": "async function spawnOpenCode", "primitive": "injected_spawn", "expression": "opencode CLI" },
     { "id": "runtime#qwen.cli", "file": "server/qwen-cli.js", "anchor": "async function spawnQwen", "primitive": "injected_spawn", "expression": "qwen CLI" },
     { "id": "runtime#hermes.cli", "file": "server/hermes-cli.js", "anchor": "async function spawnHermes", "primitive": "injected_spawn", "expression": "hermes CLI" },

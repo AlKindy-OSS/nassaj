@@ -85,7 +85,6 @@ function makeDeps() {
     queryClaudeSDK: spawn('claude'),
     spawnCursor: spawn('cursor'),
     queryCodex: spawn('codex'),
-    spawnGemini: spawn('gemini'),
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
     spawnHermes: spawn('hermes'),

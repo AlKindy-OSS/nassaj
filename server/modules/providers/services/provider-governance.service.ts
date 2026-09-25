@@ -640,7 +640,7 @@ export function resolveGovernanceMaterialPlan(
       );
     }
     default:
-      // cursor / gemini / hermes / deepseek / glm / sakana: no governance
+      // cursor / hermes / deepseek / glm / sakana: no governance
       // channel exists, so these engines are already running in their vendor
       // default and there is nothing an exemption could remove.
       return unexemptibleMaterial('no_mechanism', 'none');
@@ -973,7 +973,7 @@ export const providerGovernanceService = {
         };
       }
       default:
-        // cursor / gemini / hermes / deepseek / glm / sakana:
+        // cursor / hermes / deepseek / glm / sakana:
         // no governance mechanism in the code ⇒ always honestly ungoverned. This is
         // the total default, so a provider added to the union later is ungoverned
         // (never accidentally inherits another engine's badge) until wired here.

@@ -70,8 +70,8 @@ const AMOUNT_PRIVILEGED_ROLES = new Set(['owner', 'admin']);
  * Claude and Kimi spend from them. The synthetic fixtures could not catch it
  * because they were written in harness keys, which is not what the route emits.
  *
- * And the relation is many-to-one: the `google` row aggregates `gemini`
- * (isolated) together with `antigravity`/`agy` (shared). So the question is not
+ * And the relation is many-to-one: the `google` row aggregates `antigravity`
+ * and `agy`, which may carry different sharing modes. So the question is not
  * "is this provider isolated" but "is EVERY harness feeding this row isolated" —
  * one shared contributor is enough to put other members' spend into the total.
  */

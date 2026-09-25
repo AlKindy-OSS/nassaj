@@ -1,3 +1,25 @@
+## 2.3.0.7 — 2026-09-25
+
+يحذف مزوّد Gemini CLI كاملاً (طلبات HTTP باسمه تعيد الآن 400 UNSUPPORTED_PROVIDER)، ويُصلح فشل
+تبويب «المراجع ← المهارات» بخطأ 503. تعطيل الحساب أو حذفه يوقف أدوار وكلائه ويغلق اتصالاته، وخفض
+الدور يوقف الدور الجاري، والخروج وانقطاع الشبكة لا يوقفان الوكلاء. سياج العضوية لكل دور وكيل حين
+يُفعَّل PROJECT_MEMBERSHIP_ENFORCE (مطفأ افتراضياً). وفي الواجهة زر استهلاك العتاد على الجوال وإزالة
+شارة الوكيل المكرّرة.
+Removes the Gemini CLI provider (HTTP requests naming it now return 400 UNSUPPORTED_PROVIDER) and
+fixes the References → Skills 503. Disabling or deleting an account stops its agent turns and closes
+its connections; a role downgrade stops running turns; logout and network loss never stop agents.
+Per-run membership fence when PROJECT_MEMBERSHIP_ENFORCE is on (off by default). UI: mobile
+hardware-usage toggle, redundant agent pill removed, jump-to-bottom no longer covers the status bar.
+
+قيد معروف: ما زال Qwen يوقف دوره عند انقطاع الشبكة (مُتابَع).
+Known limitation: Qwen still stops its turn on network loss (tracked).
+
+التحقق / Verification: مجموعة مواقع جرد الصلاحيات = v2.3.0.6 − {runtime#gemini.cli,
+runtime#ws.gemini, موقع جلب مصادقة Gemini}. / Permission inventory site set = v2.3.0.6
+minus {runtime#gemini.cli, runtime#ws.gemini, the Gemini auth fetch site}; launch inventory
+digest sha256:f70e451187709ac33c55dc096a29f55c10c9481da4bd337ef3a08ad60d0ba737 (143 sites);
+permission capability artifact digest sha256:e4f42ebffc340adb7beb51a389206fc8cac11a20df81839bdd3914dfa50bf230.
+
 ## 2.3.0.6 — 2026-09-25
 
 يعيد محفظة حسابات الجهاز، ويضيف إدارة أعضاء المشروع مع فرض حدود العضوية، ويستعيد نموذج

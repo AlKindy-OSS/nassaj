@@ -22,7 +22,6 @@ import { PROVIDER_UI_CAPABILITIES, getProviderCapabilities } from './providerCap
 //   claude        — claude-models.provider.ts (مُنفَّذ)
 //   codex         — codex-models.provider.ts  (مُنفَّذ)
 //   opencode      — opencode-models.provider.ts (مُنفَّذ)
-//   gemini        — gemini-models.provider.ts:37-41  (مُنفَّذ) ← تصحيح T-1028
 //   antigravity   — antigravity-models.provider.ts:72-76 (مُنفَّذ) + agy-cli.js:530-535
 //   cursor        — cursor-models.provider.ts:814-818 (مُنفَّذ) ← تصحيح T-1028
 //   hermes        — يرمي 501 في المحوِّل، لكن الخدمة تلتقطه وتكتب في مخزن نسّاج (T-1198)
@@ -36,7 +35,6 @@ const EXPECTED: Record<string, boolean> = {
   codex:        true,
   opencode:     true,
   qwen:         true,
-  gemini:       true,   // gemini-models.provider.ts:37-41
   antigravity:  true,   // antigravity-models.provider.ts:72-76 + agy-cli.js:530-535
   cursor:       true,   // cursor-models.provider.ts:814-818
   hermes:       true,   // T-1198: الخدمة تلتقط NOT_IMPLEMENTED وتكتب في مخزن نسّاج المحايد
@@ -89,11 +87,6 @@ describe('providerCapabilities.modelSwitch — خريطة الدعم مقابل 
 
   it('sakana: false صريح — مزوّد stub بلا تنفيذ فعلي (STUB_API_PROVIDERS)', () => {
     expect(PROVIDER_UI_CAPABILITIES.sakana.modelSwitch.supported).toBe(false);
-  });
-
-  // ── gemini/antigravity/cursor: true صريح — كانت false خطأً ──
-  it('gemini: true — gemini-models.provider.ts:37 ينفّذ writeProviderSessionActiveModelChange', () => {
-    expect(PROVIDER_UI_CAPABILITIES.gemini.modelSwitch.supported).toBe(true);
   });
 
   it('antigravity: true — agy-cli.js:530-535 يقرأ التغيير الصريح عبر getChangedActiveModel', () => {

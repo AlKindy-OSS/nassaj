@@ -79,12 +79,6 @@ export type AuthenticatedWebSocketRequest = IncomingMessage & {
 export type LLMProvider =
   | 'claude'
   | 'codex'
-  // T-1749/ADR-159 D1: 'gemini' is NOT a dispatchable provider any more. It is
-  // retained here ONLY as agy's on-disk CREDENTIAL UNIT id (~/.gemini —
-  // credential-principal.js maps agy→gemini, grant-home.js links `.gemini`), so
-  // the isolation/grant layer can keep typing that unit. No registry entry, no
-  // spawn path, no session bucket.
-  | 'gemini'
   | 'cursor'
   | 'antigravity'
   | 'opencode'
@@ -1014,7 +1008,7 @@ export type SessionCostTurn = {
  *  • `available:false` + `reason` — the provider persists no usage for this
  *    conversation, so there is no number at all (as opposed to a number of 0).
  *  • `metered:false` — usage rides a subscription plan (Claude Max/Pro, ChatGPT,
- *    GLM coding plan, consumer Gemini). The amount is then the API-EQUIVALENT
+ *    GLM coding plan). The amount is then the API-EQUIVALENT
  *    VALUE of the usage, NOT money billed.
  *  • `complete:false` + `unpricedModels` — part of the conversation ran on
  *    models with no published price, so the total is a floor, not the whole.
@@ -1128,7 +1122,7 @@ export type ProviderQuotaWindows = {
  * flag must survive the wire.
  */
 export type ProviderBillingCycle = {
-  /** Harness provider id: claude, codex, gemini, opencode, kimi, glm, hermes… */
+  /** Harness provider id: claude, codex, opencode, kimi, glm, hermes… */
   provider: string;
   displayName: string;
   plan: string | null;

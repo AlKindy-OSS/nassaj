@@ -70,7 +70,7 @@ function assertContainsSeq(arr: string[], sub: string[]): void {
 // ---------------------------------------------------------------------------
 
 describe('cageEnabled — flag gate and exemptions', () => {
-  const WRAPPED = ['claude', 'gemini', 'agy', 'opencode', 'cursor', 'hermes'];
+  const WRAPPED = ['claude', 'agy', 'opencode', 'cursor', 'hermes'];
 
   it('returns false for every provider when the flag is off', () => {
     setCage(false);
@@ -120,7 +120,7 @@ describe('cageEnabled — flag gate and exemptions', () => {
     setCage(true);
     assert.equal(cageEnabled('Claude'), true);
     assert.equal(cageEnabled('CODEX'), false);
-    assert.equal(cageEnabled('  Gemini  '), true);
+    assert.equal(cageEnabled('  Hermes  '), true);
   });
 });
 
@@ -129,7 +129,7 @@ describe('cageEnabled — flag gate and exemptions', () => {
 // ---------------------------------------------------------------------------
 
 describe('cageEnabled — per-mode chat/agent distinction (SL-6)', () => {
-  const ALWAYS_CAGED = ['claude', 'gemini', 'agy', 'opencode', 'cursor', 'hermes'];
+  const ALWAYS_CAGED = ['claude', 'agy', 'opencode', 'cursor', 'hermes'];
 
   it('cages the vendors that ship an agent CLI ONLY in agent mode', () => {
     setCage(true);
@@ -311,11 +311,11 @@ describe('buildCagedLaunch — wrapped argv shape', () => {
   it('rebinds the correct (distinct) userId per call — no cross-user path', () => {
     setCage(true);
     const a = buildCagedLaunch(
-      { userId: '1001', provider: 'gemini', cmd: 'gemini', cwd, usersRoot },
+      { userId: '1001', provider: 'agy', cmd: 'agy', cwd, usersRoot },
       FAKE,
     );
     const b = buildCagedLaunch(
-      { userId: '1002', provider: 'gemini', cmd: 'gemini', cwd, usersRoot },
+      { userId: '1002', provider: 'agy', cmd: 'agy', cwd, usersRoot },
       FAKE,
     );
     const dirA = path.join(usersRoot, '1001');
@@ -655,7 +655,6 @@ describe('M-3 — cage never bakes env into argv (static guard)', () => {
   /** Every caged provider/mode the seam can produce — the guard must hold for all. */
   const CASES: Array<{ provider: string; mode?: string }> = [
     { provider: 'claude' },
-    { provider: 'gemini' },
     { provider: 'agy' },
     { provider: 'opencode' },
     { provider: 'hermes' },

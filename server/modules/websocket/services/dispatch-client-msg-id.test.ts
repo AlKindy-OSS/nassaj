@@ -67,7 +67,7 @@ function fakeWriter() {
 /**
  * تبعيّات صوريّة: كل `spawn*` يبعث حمولات المزوّد الحقيقية **كما هي في شفرته**
  * — عاريةً من `clientMsgId` تماماً كالإنتاج (تُحقّق من `openai-codex.js:737`،
- * `gemini-cli.js:508`، `cursor-cli.js:248`، `kimi-agent-cli.js:495`،
+ * `cursor-cli.js:248`، `kimi-agent-cli.js:495`،
  * `hermes-cli.js:170`، `opencode-cli.js:343`، `agy-cli.js:1143`).
  */
 function fakeDependencies(emit: (writer: { send(p: unknown): void }) => void) {
@@ -76,7 +76,6 @@ function fakeDependencies(emit: (writer: { send(p: unknown): void }) => void) {
   };
   return {
     spawnCursor: spawn,
-    spawnGemini: spawn,
     spawnAntigravity: spawn,
     spawnHermes: spawn,
     spawnKimi: spawn,
@@ -108,7 +107,6 @@ const MESSAGE_TYPES: ReadonlyArray<[string, string]> = [
 /** معطَّلان عالمياً (`shared/disabledProviders.ts`): مسارهما الرفضُ قبل الإقلاع. */
 const DISABLED_MESSAGE_TYPES: ReadonlyArray<[string, string]> = [
   ['deepseek-command', 'deepseek'],
-  ['gemini-command', 'gemini'],
 ];
 
 test('كل مسار بثّ يُصدي هوية الجولة على أول stream delta وعلى حكمه النهائي', async () => {

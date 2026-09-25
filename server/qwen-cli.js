@@ -246,6 +246,8 @@ async function spawnQwen(command, options = {}, ws) {
     return;
   }
 
+  // T-1854 (qa #5): no session row or transcript meta for a revoked run.
+  if (ws?.runFenceRevoked) return;
   if (isNewSession) {
     const transcriptPath = vendorTranscriptPath('qwen', sessionId, workingDir);
     sessionsDb.createSession(sessionId, 'qwen', workingDir, undefined, undefined, undefined, transcriptPath);
@@ -281,6 +283,8 @@ async function spawnQwen(command, options = {}, ws) {
     return;
   }
 
+  // T-1854 (qa #5): the user message is content — never written after revocation.
+  if (ws?.runFenceRevoked) return;
   participantsDb.recordSpawn(sessionId, actorUserId, { provider: 'qwen', projectPath: workingDir });
   if (command) {
     messageAuthorsDb.recordUserMessage(sessionId, actorUserId, command);
@@ -329,6 +333,9 @@ async function spawnQwen(command, options = {}, ws) {
     args,
     cwd: workingDir,
   });
+
+  // T-1854 (qa H1b): no await between here and spawn + activeQwenProcesses.set.
+  if (ws?.runFenceRevoked) return;
 
   return new Promise((resolve) => {
     const releaseHarnessLaunch = beginHarnessLaunch('qwen');

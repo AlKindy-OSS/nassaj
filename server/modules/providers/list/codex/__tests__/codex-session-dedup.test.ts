@@ -54,7 +54,6 @@ await initializeDatabase();
 _resetProviderSharingCache();
 setProviderSharingConfig({
   claude: 'isolated',
-  gemini: 'isolated',
   codex: 'shared',
   agy: 'shared',
   cursor: 'shared',

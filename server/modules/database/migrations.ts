@@ -1889,7 +1889,7 @@ const PARTICIPANTS_REPAIR_MARKER = 'participants_ownership_repaired_at';
  *        seconds. The `<= 1` bound keeps a long-running co-participant out.
  *
  * Both are conservative by construction: a provider that never writes
- * message_authors (codex, cursor, gemini, kimi, hermes) can only ever match S1,
+ * message_authors (codex, cursor, kimi, hermes) can only ever match S1,
  * whose zero counter is unambiguous. Measured on this install: 158 rows.
  */
 const PROVENANCE_ROW_PREDICATE_SQL = `(

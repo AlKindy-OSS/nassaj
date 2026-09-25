@@ -23,7 +23,6 @@ import type { AgentProvider } from '../../../types/types';
  * agent-CLI seniority order). Same-company tiles sit together.
  *
  *   antigravity  Google         Smart Reply (Inbox)    2015-11-04
- *   gemini       Google         (hidden, same company)
  *   codex        OpenAI         GPT-1                  2018-06
  *   cursor       Anysphere      Cursor code editor     2023-01-20
  *   claude       Anthropic      Claude 1               2023-03-14

@@ -10,7 +10,6 @@ import TOML from '@iarna/toml';
 
 import { ClaudeMcpProvider } from '@/modules/providers/list/claude/claude-mcp.provider.js';
 import { CodexMcpProvider } from '@/modules/providers/list/codex/codex-mcp.provider.js';
-import { GeminiMcpProvider } from '@/modules/providers/list/gemini/gemini-mcp.provider.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import {
   connectorRolloutTargets,
@@ -1381,9 +1380,10 @@ test('OpenCode MCP stays dormant in the registry while its direct adapter contra
 });
 
 /**
- * Gemini's pseudo adapter is cleanup-only; Cursor retains its generic manual API.
+ * The legacy ~/.gemini/settings.json port is cleanup-only (T-1853): no service
+ * path writes it. Cursor retains its generic manual API.
  */
-test('providerMcpService blocks generic Gemini MCP while retaining Cursor manual config', { concurrency: false }, async () => {
+test('providerMcpService never writes the legacy Gemini settings path; Cursor keeps manual config', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-gc-'));
   const workspacePath = path.join(tempRoot, 'workspace');
   await fs.mkdir(workspacePath, { recursive: true });
@@ -1392,12 +1392,8 @@ test('providerMcpService blocks generic Gemini MCP while retaining Cursor manual
   try {
     assert.equal(providerMcpService.providerSupportsMcp('gemini'), false);
     assert.equal(providerMcpService.providerWritesPerUserMcpConfig('gemini'), false);
-    const cleanupOnly = new GeminiMcpProvider({ cleanupOnly: true });
-    assert.equal(cleanupOnly.supportsMcp, true);
-    assert.equal(cleanupOnly.writesPerUserConfig, true);
-    assert.deepEqual(await cleanupOnly.listServersForScope('project'), []);
-    // 035fe5fb1 (T-1749/ADR-159 D1) unregistered gemini: the service refuses it as an
-    // unsupported provider; the HTTP routes keep their 403 GEMINI_GENERIC_MCP_DISABLED.
+    // The provider runtime is deleted: the service refuses it as an unsupported
+    // provider, and the HTTP routes refuse it at parseProvider (400).
     await assert.rejects(
       providerMcpService.upsertProviderMcpServer('gemini', {
         name: 'gemini-stdio', scope: 'user', transport: 'stdio', command: 'node',
@@ -1414,6 +1410,7 @@ test('providerMcpService blocks generic Gemini MCP while retaining Cursor manual
       }),
       (error: unknown) => error instanceof AppError && error.code === 'UNSUPPORTED_PROVIDER',
     );
+    await assert.rejects(fs.stat(path.join(tempRoot, '.gemini', 'settings.json')), { code: 'ENOENT' });
 
     await providerMcpService.upsertProviderMcpServer('cursor', {
       name: 'cursor-stdio',

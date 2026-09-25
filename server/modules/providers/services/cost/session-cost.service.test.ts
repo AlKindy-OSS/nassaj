@@ -1223,21 +1223,21 @@ test('مزوّد مُكتشَف بلا قياس يظهر في اللوحة بس�
   await withEnvironment(async (environment) => {
     const subscriptions = await sessionCostService.getSubscriptionCosts(environment.userId, {
       probeAuth: async (provider) =>
-        provider === 'gemini'
+        provider === 'antigravity'
           ? { installed: true, authenticated: true, method: 'credentials_file' }
           : { installed: false, authenticated: false, method: null },
       now: NOW_IN_CYCLE,
     });
 
     assert.equal(subscriptions.length, 1);
-    const [gemini] = subscriptions;
-    assert.equal(gemini.provider, 'google');
-    assert.equal(gemini.available, false);
-    assert.ok((gemini.reason ?? '').length > 0);
-    assert.equal(gemini.sessions, 0);
-    assert.equal(gemini.complete, false);
+    const [google] = subscriptions;
+    assert.equal(google.provider, 'google');
+    assert.equal(google.available, false);
+    assert.ok((google.reason ?? '').length > 0);
+    assert.equal(google.sessions, 0);
+    assert.equal(google.complete, false);
     // ومع ذلك تبقى دورته معروضة كي تُضبط من الإعدادات.
-    assert.ok(gemini.cycleStart < gemini.cycleEnd);
+    assert.ok(google.cycleStart < google.cycleEnd);
   });
 });
 

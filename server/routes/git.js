@@ -31,6 +31,7 @@ import {
   resumeRequest,
 } from '../../scripts/session-commit-arbiter.mjs';
 import { dispatchCommittedPreview } from '../../scripts/preview-oid-dispatch.mjs';
+import { stampWriterEpoch } from '../shared/user-revocation-epoch.js';
 
 const router = express.Router();
 const COMMIT_DIFF_CHARACTER_LIMIT = 500_000;
@@ -1825,6 +1826,7 @@ router.post('/generate-commit-message', async (req, res) => {
       provider,
       projectPath,
       permissionExecution,
+      req.user?.id ?? null,
     );
 
     res.json({ message });
@@ -1840,6 +1842,9 @@ router.post('/generate-commit-message', async (req, res) => {
  * @param {string} diffContext - Git diff content
  * @param {string} provider - 'claude' or 'cursor'
  * @param {string} projectPath - Project directory path
+ * @param {object} permissionExecution - Admitted permission execution handle
+ * @param {number|null} userId - Authenticated user (req.user.id); lets
+ *   administrative revocation (B-1327) find and stop this run.
  * @returns {Promise<string>} Generated commit message
  */
 async function generateCommitMessageWithAI(
@@ -1848,6 +1853,7 @@ async function generateCommitMessageWithAI(
   provider,
   projectPath,
   permissionExecution,
+  userId,
 ) {
   // Create the prompt
   const prompt = `Generate a conventional commit message for these changes.
@@ -1872,7 +1878,8 @@ Generate the commit message:`;
   try {
     // Create a simple writer that collects the response
     let responseText = '';
-    const writer = {
+    const writer = stampWriterEpoch({
+      userId,
       send: (data) => {
         try {
           const parsed = typeof data === 'string' ? JSON.parse(data) : data;
@@ -1909,7 +1916,7 @@ Generate the commit message:`;
         }
       },
       setSessionId: () => {}, // No-op for this use case
-    };
+    });
 
     console.log('🚀 Calling AI agent with provider:', provider);
     console.log('📝 Prompt length:', prompt.length);

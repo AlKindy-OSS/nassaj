@@ -8,7 +8,6 @@ export const MCP_PROVIDER_NAMES: Record<McpProvider, string> = {
   claude: 'Claude',
   cursor: 'Cursor',
   codex: 'Codex',
-  gemini: 'Gemini',
   antigravity: 'Antigravity',
   opencode: 'OpenCode',
   qwen: 'Qwen Code',
@@ -26,10 +25,6 @@ export const MCP_SUPPORTED_SCOPES: Record<McpProvider, McpScope[]> = {
   claude: ['user', 'project', 'local'],
   cursor: ['user', 'project'],
   codex: ['user'],
-  // Gemini's generic writer has not passed the installed-reader/containment
-  // contract yet (B-740). Keep the provider and model surfaces intact while
-  // withholding MCP actions until that contract is proven.
-  gemini: [],
   antigravity: [],
   // Backend adapter is contract-tested but rollout-disabled by default.
   opencode: [],
@@ -45,7 +40,6 @@ export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
   claude: ['stdio', 'http', 'sse'],
   cursor: ['stdio', 'http'],
   codex: ['stdio', 'http'],
-  gemini: [],
   antigravity: [],
   opencode: [],
   qwen: [],
@@ -65,7 +59,7 @@ export const MCP_GLOBAL_SUPPORTED_TRANSPORTS: McpTransport[] = ['stdio', 'http']
  *
  * This is derived from the same capability registry that gates each provider's
  * MCP panel. It deliberately does not promise "all providers": Codex is
- * user-only, Gemini is dormant, and Cursor remains available for both user and
+ * user-only and Cursor remains available for both user and
  * project manual MCP configuration.
  */
 export function globalManualTargets(scope: McpScope, transport: McpTransport): McpProvider[] {
@@ -94,7 +88,6 @@ export const MCP_SUPPORTS_WORKING_DIRECTORY: Record<McpProvider, boolean> = {
   claude: false,
   cursor: false,
   codex: true,
-  gemini: true,
   antigravity: false,
   opencode: false,
   qwen: false,

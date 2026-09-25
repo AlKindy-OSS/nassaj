@@ -79,7 +79,7 @@ const status = (over: Partial<ProviderAuthStatus> = {}): ProviderAuthStatus => (
 });
 
 const ALL_PROVIDERS: LLMProvider[] = [
-  'claude', 'cursor', 'codex', 'gemini', 'antigravity', 'opencode',
+  'claude', 'cursor', 'codex', 'antigravity', 'opencode',
   'hermes', 'kimi', 'deepseek', 'glm', 'sakana',
 ];
 
@@ -122,8 +122,6 @@ function renderPicker(catalog: Partial<Record<LLMProvider, ProviderModelsDefinit
       setCursorModel={noop}
       codexModel=""
       setCodexModel={noop}
-      geminiModel=""
-      setGeminiModel={noop}
       antigravityModel=""
       setAntigravityModel={noop}
       opencodeModel=""

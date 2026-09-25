@@ -33,6 +33,7 @@ import test, { mock } from 'node:test';
 // imports of connection.js / init-db.js are only legal for tests that live
 // inside server/modules/database/ itself.
 import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
+import { RETIRED_PROVIDER_IDS } from '../../../../shared/retiredProviders.js';
 
 // The PTY itself is mocked; point the managed launcher preflight at a real,
 // inert executable so this suite is hermetic on CI hosts without Claude.
@@ -231,13 +232,13 @@ function asRequest(id: unknown, role: string | undefined = 'user') {
 // Use the real cwd as projectPath: the handler statSyncs it and requires a dir.
 const PROJECT_PATH = process.cwd();
 
-test('removed Gemini provider is refused before env resolution or PTY spawn', async () => {
+test('a retired provider is refused before env resolution or PTY spawn', async () => {
   await withIsolatedDatabase(() => {
     spawnCalls.length = 0;
     resolveCalls.length = 0;
     const ws = makeFakeWs();
     handleShellConnection(ws as never, asRequest(7), deps);
-    ws.emit('message', initMessage(PROJECT_PATH, { provider: 'gemini' }));
+    ws.emit('message', initMessage(PROJECT_PATH, { provider: [...RETIRED_PROVIDER_IDS][0] }));
     assert.equal(resolveCalls.length, 0);
     assert.equal(spawnCalls.length, 0);
     const error = ws.sent.find((frame) => (frame as { code?: string })?.code === 'provider_removed');

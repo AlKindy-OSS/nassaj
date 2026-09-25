@@ -623,6 +623,33 @@ export function deleteStandaloneTerminal(userId: string | number, terminalId: st
   return true;
 }
 
+/**
+ * B-1327: deletes every terminal a user owns (kills live PTYs, closes attached
+ * sockets with 4401 identity_revoked). Used when an account is disabled,
+ * deleted or loses the administrator role that terminals require. Returns the
+ * number of terminals removed.
+ */
+export function terminateStandaloneTerminalsForUser(userId: string | number): number {
+  let removed = 0;
+  for (const entry of entriesForUser(userId)) {
+    if (entry.pty) {
+      try {
+        entry.pty.kill();
+      } catch {
+        // already dead — removal proceeds regardless
+      }
+      entry.pty = null;
+      entry.writerLease.release();
+    }
+    revokeManagedClaudeTerminal(entry.managedClaudeSelector);
+    closeSocket(entry.ws, 4401, 'identity_revoked');
+    entry.ws = null;
+    terminals.delete(entry.id);
+    removed += 1;
+  }
+  return removed;
+}
+
 // ── WS-facing API (injected into terminal-websocket.service.ts) ─────────────
 
 /**

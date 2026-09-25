@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  ArrowUpCircle, ChevronUp, LogOut, Palette, RefreshCw, Settings, UserRound,
+  ArrowUpCircle, ChevronUp, Cpu, LogOut, Palette, RefreshCw, Settings, UserRound,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -9,6 +9,7 @@ import type { ReleaseInfo } from '../../../../types/sharedTypes';
 import { countPendingServerActions, type PublicAction, type ExecuteOutcome, type DismissOutcome, type HistoryEntry } from '../../../../hooks/useServerActions';
 import { useAuth } from '../../../auth/context/AuthContext';
 import { useRawExecQueue } from '../../../../hooks/useRawExecConfig';
+import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 import { SOURCE_REPO_URL } from '../../../../constants/sourceRepo';
 import { ActionMenu, Button, Dialog, DialogContent, DialogTitle } from '../../../../shared/view/ui';
 import type { SettingsDeepLink } from '../../../settings/types/types';
@@ -67,6 +68,12 @@ export default function SidebarFooter({
   const { deviceAccountSessionsEnabled, logout, user } = useAuth();
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
+  // B-1044 follow-up: SidebarCollapsed (desktop icon rail) already had this
+  // toggle; the expanded sidebar — the only path reachable on mobile via the
+  // drawer — had none, so mobile owners could never re-enable a hidden widget.
+  // Stays visible even when the widget itself is hidden (enabled === false).
+  const { preferences, setPreference } = useUiPreferences();
+  const showHardwareUsage = preferences.showHardwareUsage;
   const userName = user?.username || t('account.fallbackName');
   const initials = Array.from(userName.trim()).slice(0, 2).join('').toLocaleUpperCase();
   const [showPanel, setShowPanel] = useState(false);
@@ -155,6 +162,27 @@ export default function SidebarFooter({
 
       {/* العتاد بنفس بطاقة الإحصاءات الأصلية. */}
       <SystemStatsFooter t={t} />
+
+      {/* B-1044 follow-up: زرّ تشغيل/إيقاف العتاد نفسه — يبقى ظاهراً دائماً
+          (حتى حين showHardwareUsage=false وSystemStatsFooter لا يُصيَّر) كي
+          يستطيع المستخدم عبر الجوّال إعادة تفعيله؛ نظير زرّ Cpu في
+          SidebarCollapsed لكن بنمط صفّ التذييل الموسَّع. */}
+      <div className="px-3 pb-0.5">
+        <button
+          type="button"
+          onClick={() => setPreference('showHardwareUsage', !showHardwareUsage)}
+          className={`flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-start text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+            showHardwareUsage ? 'bg-accent/40 text-foreground' : ''
+          }`}
+          aria-pressed={showHardwareUsage}
+          aria-label={t('systemStats.hardwareToggleFooter')}
+          title={t('systemStats.hardwareToggleFooter')}
+        >
+          <Cpu className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{t('systemStats.hardwareToggleFooter')}</span>
+        </button>
+      </div>
+
       <div className="px-3 pb-0 pt-0.5">
         {deviceAccountSessionsEnabled ? <AccountSwitcher
             current={{ displayName: userName, avatarUrl: user?.avatarUrl, secondary: t(`account.roles.${user?.role || 'user'}`) }}

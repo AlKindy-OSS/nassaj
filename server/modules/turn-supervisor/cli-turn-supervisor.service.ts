@@ -54,7 +54,7 @@ export const CLI_HARNESS_MATRIX = Object.freeze([
     provider, mode: 'chat', runtime: 'ephemeral_cli', supported: false,
     levels: Object.freeze([]), reason: 'installed_binary_capability_probe_failed' as const,
   })),
-  ...(['cursor', 'gemini', 'antigravity', 'kimi'] as const).map((provider) =>
+  ...(['cursor', 'antigravity', 'kimi'] as const).map((provider) =>
     Object.freeze({ provider, mode: provider === 'kimi' ? 'agent' : 'chat', runtime: 'legacy_cli',
       supported: false, levels: Object.freeze([]),
       reason: 'runtime_persists_state_or_exposes_effectful_tools_without_supervisor_role_cage' as const })),

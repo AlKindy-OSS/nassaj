@@ -6,8 +6,7 @@
  * source of truth: shared/disabledProviders.ts):
  *
  *   - a new run for a disabled provider (deepseek/glm — kimi re-enabled per
- *     ADR-062; glm folded into the OpenCode carrier 2026-07-26; gemini
- *     re-enabled per T-1211) is refused with a normalized error `complete`
+ *     ADR-062; glm folded into the OpenCode carrier 2026-07-26) is refused with a normalized error `complete`
  *     message and NO spawn call;
  *   - the guard runs on the RESOLVED provider, so resuming a historical
  *     session persisted under a disabled provider is refused too — even when
@@ -26,6 +25,7 @@ import test, { mock } from 'node:test';
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
 import { DISABLED_PROVIDERS } from '../../../../shared/disabledProviders.js';
+import { PROVIDER_REMOVED_CODE, RETIRED_PROVIDER_IDS } from '../../../../shared/retiredProviders.js';
 import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
 
 import { createPermissionTestWorkspaceModule, dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
@@ -98,7 +98,6 @@ function makeDependencies(sessionProviderById: Record<string, string> = {}) {
     queryClaudeSDK: spawn('claude'),
     spawnCursor: spawn('cursor'),
     queryCodex: spawn('codex'),
-    spawnGemini: spawn('gemini'),
     spawnAntigravity: spawn('antigravity'),
     spawnOpenCode: spawn('opencode'),
     spawnHermes: spawn('hermes'),
@@ -123,7 +122,8 @@ function readError(sent: SentPayload[]): SentPayload {
 // --- Tests ----------------------------------------------------------------------
 
 test('every disabled provider command is refused with a clear error and no spawn', async () => {
-  for (const provider of DISABLED_PROVIDERS) {
+  // Retired ids (runtime deleted) get their own typed refusal, asserted below.
+  for (const provider of DISABLED_PROVIDERS.filter((id) => !RETIRED_PROVIDER_IDS.has(id))) {
     const { writer, sent } = makeWriter();
     const { dependencies, calls } = makeDependencies();
 
@@ -189,11 +189,6 @@ test('resume of a session persisted under a disabled provider is refused', async
 test('resumed session persisted under an enabled provider dispatches despite a stale disabled type', async () => {
   // Stale client selection sends glm-command, but the session belongs to claude
   // in the DB — re-routing lands on an enabled provider and proceeds.
-  //
-  // T-1211: this case used `gemini-command`, which stopped exercising the
-  // guarantee the moment gemini was re-enabled — both the message type AND the
-  // resolved provider would have been enabled, so the test would have passed
-  // without the DB ever winning. It now names a still-disabled provider.
   const { writer, sent } = makeWriter();
   const { dependencies, calls } = makeDependencies({ 's-claude-1': 'claude' });
 
@@ -228,4 +223,43 @@ test('enabled providers dispatch exactly as before', async () => {
     assert.deepEqual(calls, [handler], `${messageType} → ${handler}`);
     assert.deepEqual(sent, []);
   }
+});
+
+// --- T-1853: providers whose runtime was deleted ------------------------------
+
+const [RETIRED_PROVIDER] = [...RETIRED_PROVIDER_IDS];
+
+test('a retired provider command type gets a typed provider_removed refusal and no spawn', async () => {
+  const { writer, sent } = makeWriter();
+  const { dependencies, calls } = makeDependencies();
+
+  await dispatchProviderCommand(
+    `${RETIRED_PROVIDER}-command`,
+    { command: 'hi', options: {} },
+    writer,
+    dependencies,
+    1,
+  );
+
+  assert.deepEqual(calls, []);
+  const payload = readError(sent) as SentPayload & { code?: string; notStarted?: boolean };
+  assert.equal(payload.code, PROVIDER_REMOVED_CODE);
+  assert.equal(payload.notStarted, true);
+});
+
+test('resuming a session persisted under a retired provider is refused before any spawn', async () => {
+  const { writer, sent } = makeWriter();
+  const { dependencies, calls } = makeDependencies({ 's-retired-1': RETIRED_PROVIDER });
+
+  await dispatchProviderCommand(
+    'claude-command',
+    { command: 'hi', options: { sessionId: 's-retired-1' } },
+    writer,
+    dependencies,
+    1,
+  );
+
+  assert.deepEqual(calls, []);
+  const payload = readError(sent) as SentPayload & { code?: string };
+  assert.equal(payload.code, PROVIDER_REMOVED_CODE);
 });

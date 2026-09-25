@@ -24,7 +24,7 @@ import {
 /** The live policy at the time of the decision: 4 shared, the rest isolated. */
 const LIVE_POLICY: Record<string, 'shared' | 'isolated'> = {
   claude: 'isolated',
-  gemini: 'isolated',
+  antigravity: 'isolated',
   kimi: 'isolated',
   deepseek: 'isolated',
   glm: 'isolated',
@@ -72,7 +72,7 @@ describe('applySubscriptionAmountVisibility — owner/admin see everything', () 
 
 describe('applySubscriptionAmountVisibility — a member cannot read the team total', () => {
   it('redacts every vendor fed by a SHARED harness', () => {
-    // openai←codex, opencode-zen←opencode, google←gemini+antigravity+agy.
+    // openai←codex, opencode-zen←opencode, google←antigravity+agy.
     for (const vendor of ['openai', 'opencode-zen', 'google']) {
       const [out] = applySubscriptionAmountVisibility([row(vendor)], 'user', deps);
       assert.equal(out.available, false, `${vendor} must not be marked available`);
@@ -97,10 +97,10 @@ describe('applySubscriptionAmountVisibility — a member cannot read the team to
     }
   });
 
-  it('redacts `google` because one of its harnesses is shared, though gemini is isolated', () => {
+  it('redacts `google` because one of its harnesses is shared, though antigravity is isolated', () => {
     // The many-to-one case stated explicitly: a mixed row must follow its most
     // permissive contributor, not its most restrictive.
-    assert.ok(vendorHarnesses('google').includes('gemini'), 'gemini feeds the google row');
+    assert.ok(vendorHarnesses('google').includes('antigravity'), 'antigravity feeds the google row');
     assert.ok(vendorHarnesses('google').includes('agy'), 'agy feeds it too');
     const [out] = applySubscriptionAmountVisibility([row('google')], 'user', deps);
     assert.equal(out.available, false, 'one shared contributor must redact the whole row');

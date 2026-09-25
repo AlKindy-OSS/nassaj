@@ -57,7 +57,7 @@ const artifactPayload = {
 };
 
 const expectedBodies = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'antigravity', 'opencode', 'kimi',
+  'claude', 'codex', 'cursor', 'antigravity', 'opencode', 'kimi',
   'deepseek', 'glm', 'hermes', 'qwen', 'sakana',
 ]);
 const classifiedBodies = [

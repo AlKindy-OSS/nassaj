@@ -10,14 +10,14 @@
  * and never emits tool_use / session events. The native agent CLI streams an
  * agentic NDJSON transcript (session init, assistant text deltas, tool calls +
  * results, usage, terminal result) — a different shape that needs its own
- * line-buffered parser, modeled on GeminiResponseHandler.
+ * line-buffered parser.
  *
  * SCHEMA ASSUMPTION (flagged for G-KIMI-LIVE, §4.5): kimi is NOT installed on
  * this node, so the exact stream-json field names are taken from the KG-1
- * research gate and the gemini/claude stream-json precedent. The normalizer is
+ * research gate and the claude stream-json precedent. The normalizer is
  * therefore DEFENSIVE — it recognizes several plausible field spellings for each
  * event and silently ignores anything it cannot classify (never throws on a line
- * it does not understand, exactly like GeminiResponseHandler). When the live CLI
+ * it does not understand). When the live CLI
  * output is captured at G-KIMI-LIVE, the recognized-shape tables below are the
  * single place to refine; the launcher contract does not change.
  *
@@ -233,8 +233,7 @@ export function buildKimiTokenBudget(tokens) {
 }
 
 /**
- * Line-buffered NDJSON parser + emitter for a kimi agent stream. Mirrors
- * GeminiResponseHandler: buffer raw stdout chunks, split on newlines, keep the
+ * Line-buffered NDJSON parser + emitter for a kimi agent stream. Buffers raw stdout chunks, split on newlines, keep the
  * trailing partial line, JSON.parse each complete line and dispatch. A line that
  * is not valid JSON (CLI banner / debug noise) is ignored, never fatal.
  */
@@ -279,7 +278,7 @@ export class KimiAgentResponseHandler {
       try {
         event = JSON.parse(line);
       } catch {
-        // Not JSON — CLI banner / debug output. Ignore (GeminiResponseHandler parity).
+        // Not JSON — CLI banner / debug output. Ignore (never fatal).
         continue;
       }
       this.dispatch(event);

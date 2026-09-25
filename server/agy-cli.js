@@ -1,6 +1,6 @@
 // Antigravity (agy) CLI adapter.
-// Mirrors the lifecycle contract of gemini-cli.js so the chat WebSocket layer
-// can dispatch antigravity-command identically to gemini-command, but:
+// Follows the shared CLI lifecycle contract so the chat WebSocket layer can
+// dispatch antigravity-command like the other CLI providers, but:
 //   * the binary is `agy` and accepts the prompt as a positional argument (-p)
 //   * conversations are addressed by a `brain` UUID stored under
 //     ~/.gemini/antigravity-cli/brain/<UUID>/ rather than a CLI-reported session id
@@ -167,8 +167,8 @@ async function buildInstructionsPrefix(projectPath) {
     return `<instructions>\n${parts.join('\n\n')}\n</instructions>`;
 }
 
-// Map agy CLI exit codes to actionable messages. Mirrors mapGeminiExitCodeToMessage
-// in gemini-cli.js so the chat surface stays consistent across providers.
+// Map agy CLI exit codes to actionable messages so the chat surface stays
+// consistent across providers.
 function getAgyExitMessage(code) {
     const messages = {
         1: 'agy CLI general error. Check if agy is installed: ~/.local/bin/agy --version',
@@ -585,7 +585,7 @@ async function spawnAntigravity(command, options = {}, ws) {
     const userId = ws?.userId ?? null;
 
     // Resolve the brain UUID for resume. Primary source is the in-memory
-    // sessionManager (`cliSessionId`, matching the gemini adapter naming). It is
+    // sessionManager (`cliSessionId`, the shared CLI adapter naming). It is
     // populated only during the run that created the conversation, so it is
     // empty after a server restart or when the chat was resumed from history.
     // Fall back to the persisted session row in that case: for antigravity
@@ -709,6 +709,9 @@ async function spawnAntigravity(command, options = {}, ws) {
     const agyModelLabel = await resolveAgyModelLabel(
         spawnModel, userId, options?.authenticatedPrincipal
     );
+    // T-1854 (qa H1b): last await before spawn — everything below through
+    // spawn + activeSessions.set is synchronous, so a revoked run fence stops here.
+    if (ws?.runFenceRevoked) { freeDiscoveryLock(); return { code: 1, sessionId }; }
     if (agyModelLabel) {
         args.push('--model', agyModelLabel);
     }
@@ -830,7 +833,8 @@ async function spawnAntigravity(command, options = {}, ws) {
         // brought up to date via differential replay even if the original ws has
         // gone away. No-op when SESSION_REGISTRY_agy is off; buffering does not
         // depend on `ws` being present (the live stream may outlive the socket).
-        agySessionRegistry.record(registryKey, normalized);
+        // T-1854 (qa M2): a revoked run fence also stops replay buffering.
+        if (ws?.runFenceRevoked !== true) agySessionRegistry.record(registryKey, normalized);
         if (!ws) return;
         try {
             ws.send(normalized);
@@ -1300,7 +1304,7 @@ function isAntigravitySessionActive(sessionId) {
 }
 
 function getActiveAntigravitySessions() {
-    // Match the gemini adapter shape (array of session ids) so the
+    // Match the shared CLI adapter shape (array of session ids) so the
     // get-active-sessions endpoint stays uniform across providers.
     return Array.from(activeSessions.keys());
 }

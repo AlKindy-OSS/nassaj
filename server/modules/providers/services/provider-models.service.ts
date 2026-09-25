@@ -544,7 +544,7 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
 
   /**
    * Seeds the per-session model store at session CREATION so a provider WITHOUT
-   * a per-session model memory of its own (gemini / codex / hermes / hosted
+   * a per-session model memory of its own (codex / hermes / hosted
    * vendors) is pinned to the model it was created with — a later model pick in a
    * DIFFERENT conversation can then never bleed onto this session's next turn
    * (B-167 / T-874 requirement 2). It writes through the SAME change store that

@@ -561,7 +561,7 @@ describe('shadow content integrity accumulator', () => {
     const fixtures = [
       { toolName: 'Read', toolInput: { file_path: '/safe/claude.txt' } },
       { toolName: 'shell', toolInput: JSON.stringify({ command: 'pwd' }) },
-      { toolName: 'search', toolInput: { query: 'gemini fixture' } },
+      { toolName: 'search', toolInput: { query: 'search fixture' } },
     ];
     for (const [index, fixture] of fixtures.entries()) {
       const first = accumulator();

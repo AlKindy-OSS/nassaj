@@ -1,8 +1,7 @@
 /**
  * kimi-agent-cli — KM-1 (ADR-062 §4.2, wave W3-A): the SOLE, governed launch
  * seam for the Kimi NATIVE agent CLI (`@moonshot-ai/kimi-code`, KG-1). Woven on
- * `server/gemini-cli.js` (the raw-spawn CLI precedent) + the codex governance
- * gate, this is a NEW file (not `server/kimi-cli.js`, the toolless chat path) so
+ * the raw-spawn CLI precedent + the codex governance gate, this is a NEW file (not `server/kimi-cli.js`, the toolless chat path) so
  * the two Kimi surfaces never collide.
  *
  * THE MANDATORY SEAM ORDER (ADR-062 §4.2 KM-1 — do not reorder):
@@ -79,7 +78,7 @@ import { beginProviderRun } from './services/provider-run-presence.js';
 import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { KimiAgentResponseHandler, KIMI_RATE_LIMIT_MESSAGE } from './kimi-agent-response-handler.js';
 
-// Use cross-spawn on Windows for correct .cmd resolution (parity with gemini/cursor).
+// Use cross-spawn on Windows for correct .cmd resolution (parity with cursor).
 // Bound to the name `spawn` deliberately: this is the ONE governed kimi spawn site,
 // and the single-launcher grep-gate (SL-3) matches a literal `spawn(` primitive — so
 // the launcher is DISCOVERED and its registry entry (sanitized:true) stays honest.
@@ -179,7 +178,7 @@ export function buildKimiAgentArgs({ command, cliSessionId, model, permissionFla
 
 /**
  * Wraps the binary in `sh -c exec` on POSIX so a shebang-less script does not
- * ENOEXEC and signals reach the CLI directly (gemini precedent). On Windows the
+ * ENOEXEC and signals reach the CLI directly (raw-spawn CLI precedent). On Windows the
  * command is spawned directly (cross-spawn handles .cmd). The wrapper is caged as
  * a unit by resolveCagedLaunch.
  *
@@ -401,6 +400,9 @@ export async function spawnKimiAgent(command, options = {}, ws) {
     participantsDb.recordSpawn(sid, ws.userId, { provider: 'kimi', projectPath: workingDir });
   };
 
+  // T-1854 (qa H1b): no await between here and spawn + activeKimiAgentProcesses.set.
+  if (ws?.runFenceRevoked) return;
+
   return new Promise((resolve, reject) => {
     const releaseHarnessLaunch = beginHarnessLaunch('kimi');
     let kimiProcess;
@@ -561,7 +563,7 @@ export async function spawnKimiAgent(command, options = {}, ws) {
         })
       : null;
 
-    // 120s inactivity timeout, re-armed on each chunk (gemini parity).
+    // 120s inactivity timeout, re-armed on each chunk (CLI parity).
     const timeoutMs = 120000;
     let timeout;
     const startTimeout = () => {

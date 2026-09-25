@@ -102,7 +102,6 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini",
     "antigravity": "Antigravity",
     "opencode": "OpenCode",
     "kimi": "Kimi",
@@ -223,24 +222,6 @@
       "default": "sandbox: workspace-write · approvals: untrusted · network: OFF",
       "acceptEdits": "sandbox: workspace-write · approvals: never · network: OFF",
       "bypassPermissions": "sandbox: workspace-write · approvals: never · network: OFF — identisch mit „Bearbeitungen akzeptieren“. Voller Festplatten- und Netzwerkzugriff nur, wenn der Betreiber ihn für diese Installation aktiviert hat (standardmäßig aus)."
-    }
-  },
-  "gemini": {
-    "permissionMode": "Gemini-Berechtigungsmodus",
-    "description": "Steuert, wie Gemini CLI Vorgangsgenehmigungen handhabt.",
-    "modes": {
-      "default": {
-        "title": "Standard (Genehmigung erforderlich)",
-        "description": "Gemini fordert vor der Ausführung von Befehlen, dem Schreiben von Dateien und dem Abrufen von Web-Ressourcen eine Genehmigung an."
-      },
-      "autoEdit": {
-        "title": "Auto-Bearbeitung (Dateigenehmigungen überspringen)",
-        "description": "Gemini genehmigt automatisch Dateibearbeitungen und Web-Abrufe, fragt aber weiterhin bei Shell-Befehlen nach."
-      },
-      "yolo": {
-        "title": "YOLO (Alle Berechtigungen umgehen)",
-        "description": "Gemini führt alle Vorgänge ohne Rückfrage aus. Vorsicht ist geboten."
-      }
     }
   },
   "input": {
@@ -419,7 +400,6 @@
       "claude": "Bereit, Claude mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "cursor": "Bereit, Cursor mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "codex": "Bereit, Codex mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
-      "gemini": "Bereit, Gemini mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "antigravity": "Bereit für Antigravity (agy) mit {{model}}. Schreiben Sie Ihre Nachricht unten.",
       "opencode": "Bereit, OpenCode mit {{model}} zu verwenden. Gib unten deine Nachricht ein.",
       "default": "Wähl oben einen Anbieter, um zu beginnen",
@@ -664,14 +644,6 @@
     "subagentModelCalls": "Subagent-Modellaufrufe: {{count}}",
     "responseTurnDurationLabel": "Antwortzeit",
     "totalWorkDuration": "Gesamte Arbeitszeit (Dauern können überlappen): {{duration}}"
-  },
-  "activityGap": {
-    "status": "Agent arbeitet — letzte Aktivität vor {{time}}",
-    "ariaLabel": "Agent arbeitet noch, letzte Aktivität vor {{time}}"
-  },
-  "activityGap": {
-    "status": "Agent arbeitet — letzte Aktivität vor {{time}}",
-    "ariaLabel": "Agent arbeitet noch, letzte Aktivität vor {{time}}"
   },
   "closeConversation": {
     "close": "Unterhaltung schließen",

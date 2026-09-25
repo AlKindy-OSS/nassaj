@@ -48,6 +48,11 @@ import {
   requireRole,
 } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
+import { revokeUserIdentity } from '../modules/account-wallet/user-identity-revocation.js';
+import {
+  isRoleDowngrade,
+  revocationForRoleChange,
+} from '../modules/account-wallet/user-realtime-revocation.js';
 import {
   auditLogDb,
   getConnection,
@@ -67,6 +72,22 @@ import {
   createOidcVerifier,
   parseExactHttpsIssuer,
 } from '../services/oidc-verifier.service.js';
+
+/**
+ * B-1327 (qa M1): an SSO attestation that demotes a user (e.g. admin → user)
+ * stops the turns launched under the old role and refreshes the user's live
+ * connections, exactly like an owner-side downgrade. A promotion changes
+ * nothing live. A failure is logged and never blocks the login.
+ */
+function revokeLiveAccessOnSsoRoleChange({ userId, from, to }) {
+  if (!isRoleDowngrade(from, to)) return;
+  try {
+    revokeUserIdentity(userId, revocationForRoleChange(from, to));
+  } catch {
+    // Stable code only: this route never logs raw provider or error detail.
+    logOidcFailure('role_change_revocation_failed');
+  }
+}
 
 const router = express.Router();
 
@@ -316,7 +337,7 @@ router.get('/callback', oidcLoginLimiter, async (req, res) => {
       externalRoles: extractZitadelRoleNames(claims, configuredProjectId),
       provider: 'oidc',
       claimPresent: hasZitadelRolesClaim(claims, configuredProjectId),
-    }, { userDb, auditLogDb });
+    }, { userDb, auditLogDb, onRoleApplied: revokeLiveAccessOnSsoRoleChange });
     if (!user) {
       return res.status(401).json({ error: 'Linked account is unavailable' });
     }

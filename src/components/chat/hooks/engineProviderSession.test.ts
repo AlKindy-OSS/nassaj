@@ -62,9 +62,9 @@ beforeEach(() => {
 describe('readSessionEngineProvider', () => {
   it('returns null for an unstamped session — no fallback to the global key', () => {
     // Simulate: a value sits on the global key.
-    // (We use a still-disabled id — gemini — so the sanitiser drops it, and we
+    // (We use a non-engine id — cursor — so the sanitiser drops it, and we
     //  write raw to test the STORAGE ISOLATION mechanism directly.)
-    rawLS('claude-engine-provider', 'gemini');
+    rawLS('claude-engine-provider', 'cursor');
     // Session S1 has no per-session stamp.
     assert.strictEqual(
       readSessionEngineProvider('sess-no-stamp'),
@@ -74,7 +74,7 @@ describe('readSessionEngineProvider', () => {
   });
 
   it('reads only the session-scoped key, not the global', () => {
-    rawLS('claude-engine-provider', 'gemini');                  // global = gemini (disabled)
+    rawLS('claude-engine-provider', 'cursor');                  // global = cursor (not an engine)
     rawLS('claude-engine-provider-sess-002', 'deepseek');       // session stamp = deepseek (enabled)
     // The disabled global value sanitises to null while the eligible,
     // session-scoped DeepSeek stamp survives. This proves both key isolation
@@ -186,7 +186,7 @@ describe('B-218: engine eligibility is independent of the disabled-BODY list', (
   });
 
   it('a non-engine provider id is still rejected', () => {
-    for (const id of ['gemini', 'claude', 'opencode', 'codex', 'nonsense', '']) {
+    for (const id of ['claude', 'opencode', 'codex', 'nonsense', '']) {
       rawLS('claude-engine-provider-sess-x', id);
       assert.strictEqual(readSessionEngineProvider('sess-x'), null, `${id} is not an engine`);
     }

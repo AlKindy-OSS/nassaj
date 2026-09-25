@@ -2,7 +2,7 @@
  * provisionUserDirs(userId) — per-user credential directory provisioning.
  *
  * Implements B-ISO-PROVISION (ADR-014): each user gets an isolated config tree
- * under ~/.nassaj-users/<userId>/ for Claude/Gemini/Codex credentials, while
+ * under ~/.nassaj-users/<userId>/ for Claude/agy/Codex credentials, while
  * conversations and instructions stay SHARED via symlinks back to the operator
  * root (~/.claude, ~/.gemini, ~/.codex).
  *
@@ -23,7 +23,6 @@
  *                  owner never has to re-login. Non-owner users get no link and
  *                  must `claude login` separately.)
  *     .gemini/
- *       projects   -> ~/.gemini/projects         (shared, if present)
  *       antigravity-cli/                          (agy isolated credentials)
  *         brain            -> ~/.gemini/antigravity-cli/brain
  *                  (SHARED for ALL users — every user sees the same agy
@@ -509,10 +508,9 @@ export function provisionUserDirs(userId) {
     // owner-convenience behaviour is reaped.
     unlinkForeignCredential(path.join(claudeDir, '.credentials.json'));
 
-    // --- Gemini (isolated; shared conversations if the root has them) ---
+    // --- agy home (.gemini): isolated credentials + governance ---
     const geminiDir = path.join(userRoot, '.gemini');
     ensureDir(geminiDir);
-    ensureSymlink(path.join(home, '.gemini', 'projects'), path.join(geminiDir, 'projects'));
 
     // Neutral agy governance (T-1185/B-390): materialize GEMINI.md into the user's
     // isolated .gemini as a real, read-only (0444) COPY of ~/.gemini/GEMINI.md — the
@@ -545,8 +543,7 @@ export function provisionUserDirs(userId) {
     // agy resolves its store under ~/.gemini/antigravity-cli relative to HOME;
     // under isolation resolveProviderEnv sets HOME to userRoot, so this dir is
     // exactly where agy reads/writes its token (and getBrainDir(userId) resolves
-    // its brain — agy-cli.js:99-104). It lives alongside gemini's projects/ under
-    // the shared .gemini dir without collision (different subdir).
+    // its brain — agy-cli.js:99-104).
     const operatorAgyDir = path.join(home, AGY_DIR);
     const userAgyDir = path.join(userRoot, AGY_DIR);
     ensureDir(userAgyDir);

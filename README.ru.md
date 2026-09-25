@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/logo.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI (aka Claude Code UI)</h1>
-  <p>Десктопный и мобильный UI для <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a> и <a href="https://geminicli.com/">Gemini-CLI</a>.<br>Используйте локально или удалённо, чтобы просматривать активные проекты и сессии отовсюду.</p>
+  <p>Десктопный и мобильный UI для <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a>.<br>Используйте локально или удалённо, чтобы просматривать активные проекты и сессии отовсюду.</p>
 </div>
 
 <p align="center">
@@ -43,7 +43,7 @@
 <h3>Выбор CLI</h3>
 <img src="public/screenshots/cli-selection.png" alt="CLI Selection" width="400">
 <br>
-<em>Выбирайте между Claude Code, Gemini, Cursor CLI и Codex</em>
+<em>Выбирайте между Claude Code, Cursor CLI и Codex</em>
 </td>
 </tr>
 </table>
@@ -103,7 +103,7 @@ cloudcli
 npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
 ```
 
-Поддерживаются Claude Code, Codex и Gemini CLI. Подробнее в [документации sandbox](docker/).
+Поддерживаются Claude Code и Codex. Подробнее в [документации sandbox](docker/).
 
 ---
 
@@ -119,7 +119,7 @@ CloudCLI UI — это open source UI-слой, на котором постро
 | **Машина должна оставаться включённой** | Да | Нет |
 | **Доступ с мобильных устройств** | Любой браузер в вашей сети | Любое устройство, нативное приложение в разработке |
 | **Доступные сессии** | Все сессии автоматически обнаруживаются из `~/.claude` | Все сессии внутри вашей облачной среды |
-| **Поддерживаемые агенты** | Claude Code, Cursor CLI, Codex, Gemini CLI | Claude Code, Cursor CLI, Codex, Gemini CLI |
+| **Поддерживаемые агенты** | Claude Code, Cursor CLI, Codex | Claude Code, Cursor CLI, Codex |
 | **Проводник файлов и Git** | Да, встроены в UI | Да, встроены в UI |
 | **Конфигурация MCP** | Управляется через UI, синхронизируется с вашим локальным конфигом `~/.claude` | Управляется через UI |
 | **Доступ из IDE** | Ваша локальная IDE | Любая IDE, подключенная к вашей облачной среде |
@@ -185,7 +185,7 @@ CloudCLI UI и CloudCLI Cloud расширяют Claude Code, а не работ
 
 - **Все ваши сессии, а не одна** — CloudCLI UI автоматически находит каждую сессию из папки `~/.claude`. Remote Control предоставляет только одну активную сессию, чтобы сделать её доступной в мобильном приложении Claude.
 - **Ваши настройки — это ваши настройки** — MCP-серверы, права инструментов и конфигурация проекта, изменённые в CloudCLI UI, записываются напрямую в конфиг Claude Code и вступают в силу сразу же, и наоборот.
-- **Работает с большим числом агентов** — Claude Code, Cursor CLI, Codex и Gemini CLI, а не только Claude Code.
+- **Работает с большим числом агентов** — Claude Code, Cursor CLI и Codex, а не только Claude Code.
 - **Полноценный UI, а не просто окно чата** — проводник файлов, Git-интеграция, управление MCP и shell-терминал — всё встроено.
 - **CloudCLI Cloud работает в облаке** — закройте ноутбук, и агент продолжит работать. Не нужно следить за терминалом и держать машину постоянно активной.
 
@@ -194,7 +194,7 @@ CloudCLI UI и CloudCLI Cloud расширяют Claude Code, а не работ
 <details>
 <summary>Нужно ли отдельно платить за AI-подписку?</summary>
 
-Да. CloudCLI предоставляет среду, а не сам AI. Вы приносите свою подписку Claude, Cursor, Codex или Gemini. CloudCLI Cloud начинается от $7/месяц за хостируемую среду поверх этого.
+Да. CloudCLI предоставляет среду, а не сам AI. Вы приносите свою подписку Claude, Cursor или Codex. CloudCLI Cloud начинается от $7/месяц за хостируемую среду поверх этого.
 
 </details>
 
@@ -233,7 +233,6 @@ GNU General Public License v3.0 - подробности в файле [LICENSE]
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** - официальный CLI от Anthropic
 - **[Cursor CLI](https://docs.cursor.com/en/cli/overview)** - официальный CLI от Cursor
 - **[Codex](https://developers.openai.com/codex)** - OpenAI Codex
-- **[Gemini-CLI](https://geminicli.com/)** - Google Gemini CLI
 - **[React](https://react.dev/)** - библиотека пользовательских интерфейсов
 - **[Vite](https://vitejs.dev/)** - быстрый инструмент сборки и dev-сервер
 - **[Tailwind CSS](https://tailwindcss.com/)** - utility-first CSS framework

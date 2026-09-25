@@ -10,7 +10,7 @@
  *   3. Only the exact string 'true' unlocks; '1'/'yes'/'TRUE'/'' do not.
  *   4. plan mode maps to each vendor's read-only surface.
  *   5. Unknown vendor fails closed (no flags, everything OFF).
- *   6. Mode aliases (gemini/native vocab) normalize; junk never escalates.
+ *   6. Mode aliases (vendor/native vocab) normalize; junk never escalates.
  *
  * Pure unit test — no DB, no SDK, no subprocess. Runner (package.json "test"):
  *   tsx --tsconfig server/tsconfig.json --test "server/(glob)/*.test.ts"
@@ -37,7 +37,7 @@ describe('normalizePermissionMode', () => {
     assert.equal(normalizePermissionMode('bypassPermissions'), 'bypass');
   });
 
-  it('folds the gemini/vendor aliases (case-insensitive, trimmed)', () => {
+  it('folds the vendor aliases (case-insensitive, trimmed)', () => {
     assert.equal(normalizePermissionMode('  YOLO '), 'bypass');
     assert.equal(normalizePermissionMode('auto_edit'), 'acceptEdits');
     assert.equal(normalizePermissionMode('AcceptEdits'), 'acceptEdits');
@@ -219,7 +219,7 @@ describe('mapPermissionModeToVendorFlags — opencode', () => {
 // ===========================================================================
 describe('mapPermissionModeToVendorFlags — fail-closed & robustness', () => {
   it('unknown vendor -> locked default (no flags, no access, no network)', () => {
-    for (const v of ['claude', 'gemini', 'cursor', '', 'KIMI2', undefined as unknown as string]) {
+    for (const v of ['claude', 'agy', 'cursor', '', 'KIMI2', undefined as unknown as string]) {
       const r = mapPermissionModeToVendorFlags(v, 'bypassPermissions', {
         KIMI_ALLOW_FULL_ACCESS: 'true',
         OPENCODE_ALLOW_FULL_ACCESS: 'true',

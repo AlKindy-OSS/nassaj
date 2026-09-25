@@ -5,9 +5,8 @@
  * - the disabled set is exactly deepseek/glm (Qwen is enabled only after its
  *   foreground runtime adapters landed in T-1376; kimi stays re-enabled as a
  *   governed agent environment per ADR-062; glm is folded into the OpenCode
- *   carrier and is no longer a standalone agent system; gemini re-enabled per
- *   T-1211 — it is a BYOK body, not a duplicate of agy's OAuth-only one);
- * - the enabled set (claude/opencode/antigravity/cursor/codex/hermes/gemini) is
+ *   carrier and is no longer a standalone agent system);
+ * - the enabled set (claude/opencode/antigravity/cursor/codex/hermes) is
  *   intact;
  * - CLI_PROVIDERS (auth-status probe fan-out) contains no disabled provider;
  * - ENABLED_VENDOR_PROVIDERS is exactly [kimi] (deepseek and glm stay
@@ -38,22 +37,15 @@ import {
 } from './vendorProviders';
 
 describe('shared/disabledProviders — single source of truth', () => {
-  it('disabled set is deepseek/gemini/glm (T-1760: gemini interim-disabled pending T-1749)', () => {
-    // gemini: interim-disabled 2026-09-12 (T-1760) — branch fe4bfe4fb (T-1749)
-    // removes it entirely; this entry disappears on merge.
+  it('disabled set is deepseek/glm', () => {
     // deepseek: comes-soon tile in the strip (T-1760), but globally disabled for
     // spawn-blocking — its tile shows a coming-soon panel, not real category content.
     // glm: folded into OpenCode carrier (ADR-062).
-    expect([...DISABLED_PROVIDERS].sort()).toEqual(['deepseek', 'gemini', 'glm']);
+    expect([...DISABLED_PROVIDERS].sort()).toEqual(['deepseek', 'glm']);
   });
 
-  it('keeps antigravity enabled — it is the Google OAuth agent, distinct from gemini BYOK', () => {
-    // agy authenticates by Google OAuth alone (the account IS the credential, and
-    // it accepts no external engine), while gemini accepted a plain API key — a
-    // BYOK path. They differed on the auth axis; disabling gemini (T-1760) is not
-    // a verdict on agy.
+  it('keeps antigravity enabled — it is the Google OAuth agent', () => {
     expect(isProviderGloballyDisabled('antigravity')).toBe(false);
-    expect(isProviderGloballyDisabled('gemini')).toBe(true);
   });
 
   it('keeps opencode enabled — it is the body that carries GLM', () => {
@@ -70,10 +62,10 @@ describe('shared/disabledProviders — single source of truth', () => {
   });
 
   it('filterDisabledProviders preserves order and does not mutate its input', () => {
-    const input = ['claude', 'glm', 'cursor', 'deepseek', 'gemini', 'hermes'];
+    const input = ['claude', 'glm', 'cursor', 'deepseek', 'hermes'];
     const output = filterDisabledProviders(input);
     expect(output).toEqual(['claude', 'cursor', 'hermes']);
-    expect(input).toHaveLength(6);
+    expect(input).toHaveLength(5);
   });
 });
 
@@ -84,12 +76,11 @@ describe('CLI_PROVIDERS — auth-status probe fan-out', () => {
     }
   });
 
-  it('still probes the enabled providers (incl. re-enabled kimi, without glm/gemini)', () => {
+  it('still probes the enabled providers (incl. re-enabled kimi, without glm)', () => {
     // kimi re-enabled per ADR-062 → probed so the key-entry UI reflects its
     // connection state; deepseek and glm stay filtered. Probing glm is what
     // produced the misleading standalone "Connected" badge fed by a key store
     // the OpenCode carrier never reads.
-    // gemini: interim-disabled (T-1760) — no probe until T-1749 resolves.
     expect(CLI_PROVIDERS).toEqual([
       'claude',
       'cursor',

@@ -30,7 +30,7 @@ mock.module(url('../modules/database/index.js'), {
   },
 });
 mock.module(url('../modules/account-wallet/index.js'), {
-  namedExports: { AccountWalletService: class { revokeDevices(): void {} } },
+  namedExports: { AccountWalletService: class { revokeDevices(): void {} revokeUser(): void {} } },
 });
 mock.module(url('../modules/connectors/index.js'), {
   namedExports: {

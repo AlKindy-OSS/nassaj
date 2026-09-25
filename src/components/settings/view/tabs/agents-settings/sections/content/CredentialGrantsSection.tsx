@@ -64,7 +64,6 @@ export default function CredentialGrantsSection({ agent }: CredentialGrantsSecti
   const grantedIds = new Set(given.map((g) => g.userId));
   const inUse = received.find((g) => g.inUse) ?? null;
   const busy = loading || saving;
-  const pairedNote = provider === 'gemini';
 
   const candidates = overview.members.filter(
     (m) => !grantedIds.has(m.id) && m.username.toLowerCase().includes(query.trim().toLowerCase()),
@@ -164,9 +163,6 @@ export default function CredentialGrantsSection({ agent }: CredentialGrantsSecti
             </p>
             {saving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />}
           </div>
-          {pairedNote && (
-            <p className="text-[13px] leading-relaxed text-muted-foreground">{t('credentialGrants.given.pairedNote')}</p>
-          )}
 
           <div className="relative">
             <input

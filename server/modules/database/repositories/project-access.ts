@@ -110,6 +110,196 @@ const rotateNoThrow = (effect: () => void): boolean => {
   }
 };
 
+/**
+ * T-1854 / ADR-172 amendment: rotation, THEN the post-commit sweep. The sweep
+ * never runs inside the rotation effect, so a sweep fault cannot mark the token
+ * registry unready; a failed rotation widens the sweep to every fenced run.
+ */
+const rotateThenSweep = (effect: () => void, filter: () => FencedRunSweepFilter): boolean => {
+  const rotated = rotateNoThrow(effect);
+  sweepFencedRuns(rotated ? filter() : 'all');
+  return rotated;
+};
+
+export type FencedRunRevokeReason = 'project_access_changed' | 'project_access_unverifiable';
+
+/**
+ * One admitted provider run (T-1854). Authority belongs to the run, not to the
+ * socket: `revoked` is set synchronously by a post-commit sweep that proved
+ * `!canAccessProject`, and it never flips back (I3) — a re-added member gets a
+ * NEW run, never this one back.
+ */
+export type FencedRun = Readonly<{ projectId: string; userId: number; revoked: boolean }>;
+
+export type ArmFencedRunInput = {
+  projectId: string;
+  userId: number | null;
+  /** Called once, from a microtask, after `revoked` became true. */
+  onRevoke: (reason: FencedRunRevokeReason) => void;
+  /** JWT user id stamped on the run's current primary socket (null = none). */
+  primarySocketUserId?: () => number | null;
+  /** The primary socket now belongs to a user who lost this project (I7). */
+  onForeignSocketRevoked?: () => void;
+};
+
+type FencedRunEntry = {
+  projectId: string;
+  userId: number;
+  revoked: boolean;
+  released: boolean;
+  onRevoke: ArmFencedRunInput['onRevoke'];
+  primarySocketUserId: () => number | null;
+  onForeignSocketRevoked: () => void;
+};
+
+type FencedRunSweepFilter = { projectIds?: Iterable<string>; userId?: number } | 'all';
+
+const fencedRunsByProject = new Map<string, Set<FencedRunEntry>>();
+const fencedRunsByUser = new Map<number, Set<FencedRunEntry>>();
+
+const indexFencedRun = <K>(index: Map<K, Set<FencedRunEntry>>, key: K, entry: FencedRunEntry): void => {
+  let bucket = index.get(key);
+  if (!bucket) {
+    bucket = new Set();
+    index.set(key, bucket);
+  }
+  bucket.add(entry);
+};
+
+const unindexFencedRun = <K>(index: Map<K, Set<FencedRunEntry>>, key: K, entry: FencedRunEntry): void => {
+  const bucket = index.get(key);
+  bucket?.delete(entry);
+  if (bucket?.size === 0) index.delete(key);
+};
+
+const canAccessProjectSafe = (projectId: string, userId: number): boolean => {
+  try {
+    return canAccessProject(projectId, userId);
+  } catch {
+    return false;
+  }
+};
+
+const readPrimarySocketUserId = (entry: FencedRunEntry): number | null => {
+  try {
+    const value = entry.primarySocketUserId();
+    return Number.isInteger(value) ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Registers an admitted run, or returns null when the user may not reach the
+ * project now (or fencing is unprovable). Registration is synchronous with the
+ * access check, so no commit can fall between them within this process.
+ */
+export function armFencedRun(input: ArmFencedRunInput): FencedRun | null {
+  const { projectId, userId } = input;
+  if (!projectFenceRuntimeReady || !projectId || !Number.isInteger(userId)) return null;
+  if (!canAccessProjectSafe(projectId, userId as number)) return null;
+  const entry: FencedRunEntry = {
+    projectId,
+    userId: userId as number,
+    revoked: false,
+    released: false,
+    onRevoke: input.onRevoke,
+    primarySocketUserId: input.primarySocketUserId ?? (() => null),
+    onForeignSocketRevoked: input.onForeignSocketRevoked ?? (() => undefined),
+  };
+  indexFencedRun(fencedRunsByProject, entry.projectId, entry);
+  indexFencedRun(fencedRunsByUser, entry.userId, entry);
+  return entry;
+}
+
+/** Forgets a finished (or aborted) run so the registry stays bounded. Idempotent. */
+export function releaseFencedRun(run: FencedRun | null | undefined): void {
+  const entry = run as FencedRunEntry | null | undefined;
+  if (!entry || entry.released) return;
+  entry.released = true;
+  unindexFencedRun(fencedRunsByProject, entry.projectId, entry);
+  unindexFencedRun(fencedRunsByUser, entry.userId, entry);
+}
+
+function selectSweepCandidates(filter: FencedRunSweepFilter): FencedRunEntry[] {
+  const selected = new Set<FencedRunEntry>();
+  if (filter === 'all') {
+    for (const bucket of fencedRunsByProject.values()) for (const entry of bucket) selected.add(entry);
+    return [...selected];
+  }
+  for (const projectId of filter.projectIds ?? []) {
+    for (const entry of fencedRunsByProject.get(projectId) ?? []) selected.add(entry);
+  }
+  if (filter.userId !== undefined) {
+    for (const entry of fencedRunsByUser.get(filter.userId) ?? []) selected.add(entry);
+    // Another member's run whose primary socket is this user's (I7).
+    for (const bucket of fencedRunsByProject.values()) {
+      for (const entry of bucket) {
+        if (readPrimarySocketUserId(entry) === filter.userId) selected.add(entry);
+      }
+    }
+  }
+  return [...selected];
+}
+
+function sweepFencedRun(entry: FencedRunEntry): void {
+  if (entry.revoked || entry.released) return;
+  if (!projectFenceRuntimeReady || !canAccessProjectSafe(entry.projectId, entry.userId)) {
+    entry.revoked = true;
+    const reason: FencedRunRevokeReason = projectFenceRuntimeReady
+      ? 'project_access_changed'
+      : 'project_access_unverifiable';
+    // The sweep may run inside a caller's synchronous flow; provider I/O waits
+    // for a microtask while `revoked` already drops every frame (I1).
+    queueMicrotask(() => {
+      try {
+        entry.onRevoke(reason);
+      } catch (error) {
+        console.error('[ADR-172] fenced run revocation handler failed', {
+          projectId: entry.projectId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+    return;
+  }
+  const socketUserId = readPrimarySocketUserId(entry);
+  if (socketUserId !== null && socketUserId !== entry.userId
+      && !canAccessProjectSafe(entry.projectId, socketUserId)) {
+    entry.onForeignSocketRevoked();
+  }
+}
+
+/** The only revocation generation: post-commit, per entry, fail-closed. */
+function sweepFencedRuns(filter: FencedRunSweepFilter): void {
+  for (const entry of selectSweepCandidates(filter)) {
+    try {
+      sweepFencedRun(entry);
+    } catch (error) {
+      console.error('[ADR-172] fenced run sweep failed for one entry', {
+        projectId: entry.projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+/**
+ * Re-checks every fenced run of a user whose platform role/status changed
+ * without rotating project tokens (setRole, setStatus, deleteUser).
+ */
+export function revalidateUserProjectAccess(userId: number): void {
+  if (!Number.isInteger(userId)) return;
+  sweepFencedRuns({ userId });
+}
+
+/** Test-only registry cardinality proof. */
+export function __fencedRunCountForTests(): number {
+  let count = 0;
+  for (const bucket of fencedRunsByProject.values()) count += bucket.size;
+  return count;
+}
+
 /** Whether post-commit project fencing remains provable for this process. */
 export function isProjectFenceRuntimeReady(): boolean {
   return projectFenceRuntimeReady;
@@ -118,53 +308,54 @@ export function isProjectFenceRuntimeReady(): boolean {
 /** Rotates one user's authority in one project without disturbing other subjects/projects. */
 export function rotateProjectSubjectAccess(projectId: string, userId: number): boolean {
   if (!projectId || !Number.isInteger(userId)) return false;
-  return rotateNoThrow(() => {
+  return rotateThenSweep(() => {
     let byUser = subjectTokens.get(projectId);
     if (!byUser) {
       byUser = new Map();
       subjectTokens.set(projectId, byUser);
     }
     byUser.set(userId, mintFenceToken());
-  });
+  }, () => ({ projectIds: [projectId] }));
 }
 
 /** Invalidates and forgets a removed subject so the boot-local registry stays bounded. */
 export function retireProjectSubjectAccess(projectId: string, userId: number): boolean {
   if (!projectId || !Number.isInteger(userId)) return false;
-  return rotateNoThrow(() => {
+  return rotateThenSweep(() => {
     const byUser = subjectTokens.get(projectId);
     byUser?.delete(userId);
     if (byUser?.size === 0) subjectTokens.delete(projectId);
-  });
+  }, () => ({ projectIds: [projectId] }));
 }
 
 /** Rotates project-wide structure and the projectless workspace topology. */
 export function rotateProjectStructure(projectId: string): boolean {
   if (!projectId) return false;
-  return rotateNoThrow(() => {
+  return rotateThenSweep(() => {
     structureTokens.set(projectId, mintFenceToken());
     workspaceTopologyToken = mintFenceToken();
     invalidateProjectFormsCache();
-  });
+  }, () => ({ projectIds: [projectId] }));
 }
 
 /** Invalidates and forgets all tokens for a deleted project. */
 export function retireProjectStructure(projectId: string): boolean {
   if (!projectId) return false;
-  return rotateNoThrow(() => {
+  return rotateThenSweep(() => {
     subjectTokens.delete(projectId);
     structureTokens.delete(projectId);
     workspaceTopologyToken = mintFenceToken();
     invalidateProjectFormsCache();
-  });
+  }, () => ({ projectIds: [projectId] }));
 }
 
 /** Rotates topology when a write has ambiguous/projectless reach. */
 export function rotateWorkspaceTopology(): boolean {
-  return rotateNoThrow(() => {
+  // Projectless/ambiguous reach: any registered project may be affected.
+  return rotateThenSweep(() => {
     workspaceTopologyToken = mintFenceToken();
     invalidateProjectFormsCache();
-  });
+  }, () => 'all');
 }
 
 /** Project ids registered through lexical aliases of the same canonical directory. */
@@ -187,9 +378,11 @@ export function rotateProjectStructureForPath(
   options: { retireProjectId?: boolean } = {},
 ): boolean {
   if (!projectId || !projectPath) return false;
-  return rotateNoThrow(() => {
+  let rotatedIds: string[] = [projectId];
+  return rotateThenSweep(() => {
     if (injectAliasEnumerationFailureForTests) throw new Error('injected_alias_enumeration_failure');
     const ids = new Set([...listCanonicalProjectAliasIds(projectPath), projectId]);
+    rotatedIds = [...ids];
     for (const id of ids) {
       if (options.retireProjectId && id === projectId) {
         subjectTokens.delete(id);
@@ -200,7 +393,7 @@ export function rotateProjectStructureForPath(
     }
     workspaceTopologyToken = mintFenceToken();
     invalidateProjectFormsCache();
-  });
+  }, () => ({ projectIds: rotatedIds }));
 }
 
 /** Captures current access for one registered project, or null on any denial/uncertainty. */
@@ -304,6 +497,8 @@ export function __resetProjectFenceStateForTests(): void {
   projectFenceRuntimeReady = true;
   injectRotationFailureForTests = false;
   injectAliasEnumerationFailureForTests = false;
+  fencedRunsByProject.clear();
+  fencedRunsByUser.clear();
   invalidateProjectFormsCache();
 }
 

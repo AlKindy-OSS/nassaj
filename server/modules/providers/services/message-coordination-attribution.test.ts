@@ -69,7 +69,7 @@ test('Codex wrapper is replaced only by exact server-canonical reconstruction', 
 });
 
 test('current sharing wrapper restores exact canonical text, not user-authored lookalikes', () => {
-  for (const provider of ['claude', 'codex', 'qwen', 'kimi', 'gemini', 'cursor', 'hermes', 'opencode', 'antigravity'] as const) {
+  for (const provider of ['claude', 'codex', 'qwen', 'kimi', 'cursor', 'hermes', 'opencode', 'antigravity'] as const) {
     const prompt = '  الأصل\n<nassaj_document_sharing>literal</nassaj_document_sharing>\n';
     const wrapped = withRuntimeInstructions(prompt, 'delegate_review');
     const messages: NormalizedMessage[] = [wrapped, `${wrapped}\nextra`].map((content, index) => ({

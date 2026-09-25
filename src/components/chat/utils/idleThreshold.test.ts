@@ -58,7 +58,7 @@ describe('resolveIdleThresholdMs — Codex', () => {
 });
 
 describe('resolveIdleThresholdMs — بقية الهارنسات', () => {
-  it.each(['deepseek', 'gemini', 'kimi', 'opencode', 'glm', 'hermes', 'qwen', 'cursor', 'antigravity', 'sakana'])(
+  it.each(['deepseek', 'kimi', 'opencode', 'glm', 'hermes', 'qwen', 'cursor', 'antigravity', 'sakana'])(
     '%s → لا تنبيه',
     (provider) => {
       expect(resolveIdleThresholdMs({ provider, model: 'gpt-5.6', engine: null, claudeCacheTtlMinutes: 60 })).toBeNull();

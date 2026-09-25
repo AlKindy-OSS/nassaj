@@ -288,6 +288,27 @@ test('ownership: foreign user cannot list/rename/delete; wire carries NO userId'
   }
 });
 
+test('B-1327: terminateStandaloneTerminalsForUser ends only that user\'s terminals', () => {
+  resetAll();
+  const cwd = makeTempCwd('term-revoke-');
+  try {
+    const mine = createTerminal({ userId: 7, cwd }) as { ok: true; terminal: { id: string } };
+    createTerminal({ userId: 7, cwd });
+    createTerminal({ userId: 8, cwd });
+    const ws = makeFakeWs();
+    registry.attachStandaloneTerminalSocket(7, mine.terminal.id, ws as never);
+    assert.equal(registry.terminateStandaloneTerminalsForUser(7), 2);
+    assert.deepEqual(registry.listStandaloneTerminals(7), []);
+    assert.equal(spawnCalls[0].fake.killed, 1);
+    assert.equal(spawnCalls[1].fake.killed, 1);
+    assert.equal(spawnCalls[2].fake.killed, 0, 'another user keeps their terminal');
+    assert.deepEqual(ws.closes, [{ code: 4401, reason: 'identity_revoked' }]);
+    assert.equal(registry.listStandaloneTerminals(8).length, 1);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 // --- 2: running limit ----------------------------------------------------------
 
 test('limit: 6th running terminal is 409; deleting one reopens; exited do not count', () => {

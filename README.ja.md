@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/logo.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI（別名 Claude Code UI）</h1>
-  <p><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>、<a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>、<a href="https://developers.openai.com/codex">Codex</a>、<a href="https://geminicli.com/">Gemini-CLI</a> のためのデスクトップ／モバイル UI。<br>ローカルでもリモートでも使え、アクティブなプロジェクトとセッションをどこからでも閲覧できます。</p>
+  <p><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>、<a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>、<a href="https://developers.openai.com/codex">Codex</a> のためのデスクトップ／モバイル UI。<br>ローカルでもリモートでも使え、アクティブなプロジェクトとセッションをどこからでも閲覧できます。</p>
 </div>
 
 <p align="center">
@@ -43,7 +43,7 @@
 <h3>CLI 選択</h3>
 <img src="public/screenshots/cli-selection.png" alt="CLI 選択" width="400">
 <br>
-<em>Claude Code、Gemini、Cursor CLI、Codex から選択</em>
+<em>Claude Code、Cursor CLI、Codex から選択</em>
 </td>
 </tr>
 </table>
@@ -99,7 +99,7 @@ cloudcli
 npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
 ```
 
-Claude Code、Codex、Gemini CLI に対応。詳細は[サンドボックスのドキュメント](docker/)をご覧ください。
+Claude Code、Codex に対応。詳細は[サンドボックスのドキュメント](docker/)をご覧ください。
 
 ---
 
@@ -115,7 +115,7 @@ CloudCLI UI は、CloudCLI Cloud を支えるオープンソースの UI レイ�
 | **マシンの稼働継続** | はい | いいえ |
 | **モバイルアクセス** | 同一ネットワーク内の任意のブラウザ | 任意のデバイス（ネイティブアプリも準備中） |
 | **利用可能なセッション** | `~/.claude` から全セッションを自動検出 | クラウド環境内の全セッション |
-| **対応エージェント** | Claude Code、Cursor CLI、Codex、Gemini CLI | Claude Code、Cursor CLI、Codex、Gemini CLI |
+| **対応エージェント** | Claude Code、Cursor CLI、Codex | Claude Code、Cursor CLI、Codex |
 | **ファイルエクスプローラとGit** | はい（UI に内蔵） | はい（UI に内蔵） |
 | **MCP設定** | UI で管理し、ローカルの `~/.claude` 設定と同期 | UI で管理 |
 | **IDEアクセス** | ローカル IDE | クラウド環境に接続された任意の IDE |
@@ -177,7 +177,7 @@ CloudCLI UI と CloudCLI Cloud は、Claude Code の横に別物として存在�
 
 - **すべてのセッションにアクセス** — CloudCLI UI は `~/.claude` フォルダのすべてのセッションを自動検出します。Remote Control は、Claude モバイルアプリで利用可能にするため、1つのアクティブセッションだけを公開します。
 - **設定はあなたの設定** — CloudCLI UI で変更した MCP サーバー、ツール権限、プロジェクト構成は、Claude Code の設定に直接書き込まれて即座に反映され、その逆（Claude Code での変更が UI に反映）も同様です。
-- **対応エージェントがさらに充実** — Claude Code に加えて Cursor CLI、Codex、Gemini CLI にも対応しています。
+- **対応エージェントがさらに充実** — Claude Code に加えて Cursor CLI、Codex にも対応しています。
 - **チャット窓だけではない完全な UI** — ファイルエクスプローラー、Git 統合、MCP 管理、シェル端末などがすべて組み込まれています。
 - **CloudCLI Cloud はクラウド上で稼働** — ノートパソコンを閉じてもエージェントは動き続けます。監視が要る端末も、スリープ防止も不要です。
 
@@ -186,7 +186,7 @@ CloudCLI UI と CloudCLI Cloud は、Claude Code の横に別物として存在�
 <details>
 <summary>AI のサブスクリプションは別途支払いが必要ですか？</summary>
 
-はい。CloudCLI は環境を提供するものであり、AI は含まれません。Claude、Cursor、Codex、または Gemini のサブスクリプションはご自身でご用意ください。CloudCLI Cloud のホスティング環境はそれに加えて月額 $7 から提供されます。
+はい。CloudCLI は環境を提供するものであり、AI は含まれません。Claude、Cursor、または Codex のサブスクリプションはご自身でご用意ください。CloudCLI Cloud のホスティング環境はそれに加えて月額 $7 から提供されます。
 
 </details>
 
@@ -226,7 +226,6 @@ GNU General Public License v3.0 - 詳細は [LICENSE](LICENSE) ファイルを�
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** - Anthropic の公式 CLI
 - **[Cursor CLI](https://docs.cursor.com/en/cli/overview)** - Cursor の公式 CLI
 - **[Codex](https://developers.openai.com/codex)** - OpenAI Codex
-- **[Gemini-CLI](https://geminicli.com/)** - Google Gemini CLI
 - **[React](https://react.dev/)** - ユーザーインターフェースライブラリ
 - **[Vite](https://vitejs.dev/)** - 高速ビルドツールと開発サーバー
 - **[Tailwind CSS](https://tailwindcss.com/)** - ユーティリティファーストの CSS フレームワーク

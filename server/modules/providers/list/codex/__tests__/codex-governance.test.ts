@@ -169,7 +169,6 @@ function setCodexIsolated(): void {
   _resetProviderSharingCache();
   setProviderSharingConfig({
     claude: 'isolated',
-    gemini: 'isolated',
     codex: 'isolated',
     agy: 'shared',
     cursor: 'shared',

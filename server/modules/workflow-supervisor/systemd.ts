@@ -44,12 +44,9 @@ function taskRunnerPath(): string {
 export const ISOLATION_ENV_KEYS = [
   'CLAUDE_CONFIG_DIR', // claude (the ToS-critical one)
   'CODEX_HOME', // codex
-  // B-548: this slot used to hold GEMINI_CLI_HOME "// gemini". That was a
-  // guard over a name nothing reads — the CLI honors no such variable — so
-  // gemini's REAL knob was covered only by the weaker rule-2 diff below, while
-  // the strong unconditional rule protected a no-op. HOME is the actual
-  // credential-bearing knob for gemini AND agy AND hermes AND cursor (four
-  // providers, one mechanism), so it belongs in the unconditional list. When
+  // B-548: HOME is the actual credential-bearing knob for agy AND hermes AND
+  // cursor (several providers, one mechanism), so it belongs in the
+  // unconditional list rather than behind the weaker rule-2 diff below. When
   // the provider is not isolated, resolvedEnv.HOME simply equals the operator's
   // and forwarding it is a no-op with an upside: a transient user unit inherits
   // NOTHING, so naming HOME explicitly removes a silent dependency on systemd

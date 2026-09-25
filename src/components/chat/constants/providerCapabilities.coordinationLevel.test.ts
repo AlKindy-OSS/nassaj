@@ -25,9 +25,9 @@ import { PROVIDER_UI_CAPABILITIES, getProviderCapabilities } from './providerCap
 
 const ALL_PROVIDERS = Object.keys(PROVIDER_UI_CAPABILITIES);
 
-describe('coordinationLevel — كل الأجساد الاثنا عشر', () => {
-  it('الواصف يغطّي اثني عشر مزوّداً بلا نقصان', () => {
-    expect(ALL_PROVIDERS).toHaveLength(12);
+describe('coordinationLevel — كل الأجساد الأحد عشر', () => {
+  it('الواصف يغطّي أحد عشر مزوّداً بلا نقصان', () => {
+    expect(ALL_PROVIDERS).toHaveLength(11);
   });
 
   it('كل مزوّد يحمل درجة إنفاذ صريحة من الاتحاد المعرَّف', () => {
@@ -37,9 +37,9 @@ describe('coordinationLevel — كل الأجساد الاثنا عشر', () => 
     }
   });
 
-  it('المقود يظهر لكل مزوّد له مُشعِل تشغيل — أي الأحد عشر ما عدا sakana', () => {
+  it('المقود يظهر لكل مزوّد له مُشعِل تشغيل — أي العشرة ما عدا sakana', () => {
     const shown = ALL_PROVIDERS.filter((id) => getProviderCapabilities(id).coordinationLevel.supported);
-    expect(shown).toHaveLength(11);
+    expect(shown).toHaveLength(10);
     expect(shown).not.toContain('sakana');
   });
 

@@ -103,7 +103,7 @@ describe('(٤) مساعدو الكتالوج', () => {
   it('catalogHasModel يطابق القيمة لا اللصيقة', () => {
     expect(catalogHasModel(CATALOG, 'claude', 'sonnet')).toBe(true);
     expect(catalogHasModel(CATALOG, 'claude', 'glm-5.2')).toBe(false);
-    expect(catalogHasModel(CATALOG, 'gemini', 'sonnet')).toBe(false);
+    expect(catalogHasModel(CATALOG, 'sakana', 'sonnet')).toBe(false);
   });
 
   it('engineModelLabel يقرأ اللصيقة من كتالوج المحرّك، وundefined عند غيابها', () => {

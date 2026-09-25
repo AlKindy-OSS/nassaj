@@ -10,7 +10,7 @@
  *   2. vendor   — kimi/deepseek/glm/qwen: keep the encrypted-secrets-store
  *                 path (providerSecretsService) — these hosted HTTP APIs read no
  *                 provider config file.
- *   3. none     — no facet, not a vendor (hermes/cursor/antigravity/gemini):
+ *   3. none     — no facet, not a vendor (hermes/cursor/antigravity):
  *                 400 TERMINAL_ONLY (configure by logging in from the terminal).
  *
  * The service owns the business rules; the route stays a thin transport +

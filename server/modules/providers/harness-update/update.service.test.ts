@@ -422,7 +422,7 @@ test('a lease blocks new spawns of the same harness', async () => {
 
 test('unknown harness → 404, non-updatable harness → 400', async () => {
   reset();
-  await assert.rejects(() => startHarnessUpdate('gemini'), (e: unknown) => {
+  await assert.rejects(() => startHarnessUpdate('no-such-harness'), (e: unknown) => {
     assert.ok(e instanceof AppError);
     assert.equal(e.statusCode, 404);
     return true;

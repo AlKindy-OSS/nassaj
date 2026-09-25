@@ -95,7 +95,6 @@ async function mountRouters(target: express.Express): Promise<void> {
   target.use('/api/project-board', await load('../../../routes/project-board.js'));
   target.use('/api/commands', await load('../../../routes/commands.js'));
   target.use('/api/cursor', await load('../../../routes/cursor.js'));
-  target.use('/api/gemini', await load('../../../routes/gemini.js'));
   target.use('/api/workflow-supervisor', await load('../../workflow-supervisor/launch.route.js'));
   target.use('/api/providers', await load('../../providers/provider.routes.js'));
   target.use('/api/references', await load('../../reference-materials/index.js'));
