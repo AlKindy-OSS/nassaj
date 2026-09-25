@@ -42,11 +42,12 @@ test('catalog uses a dedicated one-shot permission lifecycle', async () => {
     return ['model-a'];
   });
   assert.deepEqual(result, ['model-a']);
+  // b72b50449: the durable start (final current-actor check) precedes the provider probe.
   assert.deepEqual(events, [
     'authorize:7:catalog',
     'consume',
-    'probe',
     'started',
+    'probe',
     'settle:succeeded',
   ]);
 });

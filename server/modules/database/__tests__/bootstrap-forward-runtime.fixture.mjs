@@ -279,7 +279,8 @@ for(const failCleanup of [false,true]) test(`cold compiled bootstrap ${failClean
   const claim=f.read('startup-admission.json').lastClaim;
   assert.equal(health.generationEpoch,claim.generationEpoch);
   assert.equal(health.startTicks,claim.startTicks); assert.equal(health.bootId,claim.bootId);
-  const token=jwt.sign({userId:7},'fixture-only-'.repeat(5),{expiresIn:'1m',algorithm:'HS256'});
+  // ecfdc7db5: session tokens carry the user's authorization generation (fresh users start at 1).
+  const token=jwt.sign({userId:7,auth_gen:1},'fixture-only-'.repeat(5),{expiresIn:'1m',algorithm:'HS256'});
   const closed=await fetch(`http://127.0.0.1:${port}/api/auth/status`); assert.equal(closed.status,503);
   await new Promise((resolve,reject)=>{
     const ws=new WebSocket(`ws://127.0.0.1:${port}/ws`,{headers:{Authorization:`Bearer ${token}`}});

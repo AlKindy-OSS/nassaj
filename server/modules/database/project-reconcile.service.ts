@@ -193,11 +193,6 @@ export async function reconcileProjects(deps: ReconcileDeps = {}): Promise<Recon
     )
     .all() as ProjectRow[];
 
-  const archiveStmt = db.prepare(
-    `UPDATE projects
-     SET isArchived = 1
-     WHERE project_id = ? AND isArchived = 0`
-  );
   const rememberStmt = db.prepare(
     `INSERT INTO reconcile_archived_projects (project_id)
      VALUES (?)
@@ -233,8 +228,7 @@ export async function reconcileProjects(deps: ReconcileDeps = {}): Promise<Recon
     // probe === 'missing' (confirmed ENOENT): archive + remember so it can be
     // auto-recovered if the folder ever reappears.
     projectsDb.updateProjectDirectoryState(row.project_id, false);
-    const changes = archiveStmt.run(row.project_id).changes;
-    if (changes > 0) {
+    if (projectsDb.updateProjectIsArchivedById(row.project_id, true)) {
       rememberStmt.run(row.project_id);
       console.log('[reconcile] Project folder missing — archived:', {
         project_id: row.project_id,

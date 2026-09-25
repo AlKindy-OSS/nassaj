@@ -30,6 +30,8 @@ const transcript = (id: string, later = false) => [
 const file = (id: string) => path.join(codexHome, 'sessions', `${id}.jsonl`);
 const row = (id: string) => ({ session_id: id, provider: 'codex', project_path: projectPath, jsonl_path: file(id) });
 mock.module('@/modules/database/index.js', { namedExports: {
+  // Link-only: execution-permissions/actor.ts imports these since ecfdc7db5; forks never call them.
+  apiKeysDb: {}, deviceAccountSessionsDb: {}, userDb: {},
   sessionsDb: { getSessionById: (id: string) => rows.get(id), updateSessionCustomName() {} },
   participantsDb: { isParticipant: (_id: string, user: number) => authorized && user === 7,
     recordSpawn() { spawnCalls++; } },

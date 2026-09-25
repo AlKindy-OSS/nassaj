@@ -54,6 +54,7 @@ type Row = {
   password_hash: string;
   password_changed_at: number | null;
   must_change_password: number;
+  authorization_generation: number;
 };
 
 const T0 = Date.now() - 10 * DAY_S * 1000;
@@ -67,6 +68,7 @@ let row: Row = {
   password_hash: '$argon2id$stub',
   password_changed_at: T0,
   must_change_password: 0,
+  authorization_generation: 1,
 };
 
 // null → getUserById resolves nothing (deleted / disabled account).
@@ -88,6 +90,8 @@ mock.module(url('../modules/database/index.js'), {
       getUserById: () => (userResolvable ? row : undefined),
       getRawById: () => row,
       getUserByUsername: () => undefined,
+      isAuthorizationPrincipalCurrent: (userId: number, generation: number) =>
+        userResolvable && row.id === userId && row.authorization_generation === generation,
       updateLastLogin: () => {},
       changePassword: (_id: number, hash: string, changedAt: number) => {
         row = {
@@ -95,10 +99,12 @@ mock.module(url('../modules/database/index.js'), {
           password_hash: hash,
           password_changed_at: changedAt,
           must_change_password: 0,
+          authorization_generation: row.authorization_generation + 1,
         };
       },
     },
     appConfigDb: { getOrCreateJwtSecret: () => FIXED_SECRET },
+    localModelServersDb: {},
     auditLogDb: {
       record: (event: string, payload: Record<string, unknown>) => {
         auditCalls.push({ event, payload });
@@ -106,6 +112,9 @@ mock.module(url('../modules/database/index.js'), {
     },
     invitesDb: {},
   },
+});
+mock.module(url('../modules/account-wallet/index.js'), {
+  namedExports: { AccountWalletService: class {} },
 });
 mock.module(url('../services/password.service.js'), {
   namedExports: {
@@ -162,7 +171,10 @@ async function call(method: string, urlPath: string, token?: string, body?: unkn
 function tokenIssuedAgo(issuedAgoSeconds: number, pwdIat = row.password_changed_at ?? 0) {
   const iat = Math.floor(Date.now() / 1000) - issuedAgoSeconds;
   return jwt.sign(
-    { userId: row.id, username: row.username, role: row.role, pwd_iat: pwdIat, iat },
+    {
+      userId: row.id, username: row.username, role: row.role,
+      pwd_iat: pwdIat, auth_gen: row.authorization_generation, iat,
+    },
     JWT_SECRET,
     { expiresIn: 7 * DAY_S }
   );

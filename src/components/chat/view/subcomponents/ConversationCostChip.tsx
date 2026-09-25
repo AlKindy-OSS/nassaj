@@ -14,6 +14,7 @@ import {
   formatCostCount,
   formatCostUsd,
   formatWorkDuration,
+  resolveConversationMeasurement,
   resolveCostDisplay,
   resolveCostSnapshotStatus,
   sumConversationCostTokens,
@@ -127,6 +128,7 @@ function CostPopover({
   );
 
   const perModel = cost?.available ? cost.perModel : [];
+  const measurement = resolveConversationMeasurement(cost);
 
   return createPortal(
     // الغطاء يلتقط النقر خارجها فقط؛ لم يعد يتوسّط شيئاً.
@@ -217,12 +219,18 @@ function CostPopover({
                     dir={dir}
                     className="col-span-2 min-w-0 whitespace-normal break-words tabular-nums text-muted-foreground"
                   >
-                    {cost?.provider.toLowerCase() === 'codex'
-                      ? t('conversationCost.codexModelUsage', {
+                    {measurement.version === 'v2'
+                      ? t('conversationCost.modelCallUsage', {
                           count: entry.requests,
                           tokens: formatCompactTokens(sumCostTokens(entry.tokens)),
-                          defaultValue: '{{count}} threads · {{tokens}} processing units',
+                          defaultValue: '{{count}} model calls · {{tokens}} processing units',
                         })
+                      : cost?.provider.toLowerCase() === 'codex'
+                        ? t('conversationCost.legacyCodexModelUsage', {
+                            count: entry.requests,
+                            tokens: formatCompactTokens(sumCostTokens(entry.tokens)),
+                            defaultValue: 'Legacy summary: {{count}} recorded requests · {{tokens}} processing units',
+                          })
                       : t('conversationCost.requestModelUsage', {
                           count: entry.requests,
                           tokens: formatCompactTokens(sumCostTokens(entry.tokens)),
@@ -280,6 +288,62 @@ export default function ConversationCostChip({
   const tokensUnavailableText = t('conversationCost.tokensUnavailable', {
     defaultValue: 'Processing-unit total is not available',
   });
+  const measurement = resolveConversationMeasurement(cost);
+  const measurementStateText = measurement.version === 'v1'
+    ? cost
+      ? t('conversationCost.measurementV1', {
+          defaultValue: 'Legacy summary — counts may not cover the full conversation',
+        })
+      : null
+    : measurement.status === 'complete'
+      ? null
+      : t(
+          measurement.status === 'quarantined'
+            ? 'conversationCost.measurementQuarantined'
+            : 'conversationCost.measurementIncomplete',
+          {
+            defaultValue: measurement.status === 'quarantined'
+              ? 'Measurement is under verification — totals are not confirmed'
+              : 'Figures may not cover the full conversation',
+          },
+        );
+  const measurementLines = measurement.version === 'v1'
+    ? [measurementStateText]
+    : [
+        t('conversationCost.modelCalls', {
+          count: measurement.requestCount,
+          defaultValue: 'Model calls: {{count}}',
+        }),
+        measurement.rolloutCount !== null
+          ? t('conversationCost.rolloutChains', {
+              count: measurement.rolloutCount,
+              defaultValue: 'Contributing rollout chains: {{count}}',
+            })
+          : null,
+        measurement.subagentSpawnCount !== null
+          ? t('conversationCost.subagentSpawnAttempts', {
+              count: measurement.subagentSpawnCount,
+              defaultValue: 'Subagent creation attempts: {{count}}',
+            })
+          : null,
+        measurement.subagentRolloutCount !== null
+          ? t('conversationCost.resolvedSubagentRollouts', {
+              count: measurement.subagentRolloutCount,
+              defaultValue: 'Resolved subagent rollout chains: {{count}}',
+            })
+          : null,
+        t('conversationCost.subagentModelCalls', {
+          count: measurement.subagentRequestCount,
+          defaultValue: 'Subagent model calls: {{count}}',
+        }),
+        measurement.workDurationMs !== null
+          ? t('conversationCost.totalWorkDuration', {
+              duration: formatWorkDuration(measurement.workDurationMs),
+              defaultValue: 'Total work time (durations may overlap): {{duration}}',
+            })
+          : null,
+        measurementStateText,
+      ].filter((line): line is string => Boolean(line));
 
   const renderLine = useCallback(
     (line: CostSummaryLine): string => {
@@ -332,18 +396,22 @@ export default function ConversationCostChip({
 
   const titleText = t('conversationCost.tooltipTitle', { defaultValue: 'Conversation summary' });
   const totalTokens = sumConversationCostTokens(cost);
-  // Response duration has one source: the persisted response_turn_metrics
-  // aggregate passed by the session store. cost.workDurationMs belongs to
-  // usage accounting and must never affect response-time UI.
-  const validWorkDurationMs = typeof workDurationMs === 'number'
-    && Number.isSafeInteger(workDurationMs)
-    && workDurationMs >= 0
-    ? workDurationMs
+  // v2 explicitly supplies the response aggregate. v1 retains the established
+  // response_turn_metrics prop; usage workMs is never presented as wall time.
+  const responseTurnDurationMs = measurement.version === 'v2'
+    ? measurement.responseTurnDurationMs
+    : workDurationMs;
+  const validWorkDurationMs = typeof responseTurnDurationMs === 'number'
+    && Number.isSafeInteger(responseTurnDurationMs)
+    && responseTurnDurationMs >= 0
+    ? responseTurnDurationMs
     : null;
   const workDurationText = validWorkDurationMs === null
     ? null
     : formatWorkDuration(validWorkDurationMs);
-  const workDurationLabel = t('conversationCost.workDuration', { defaultValue: 'Work time' });
+  const workDurationLabel = t('conversationCost.responseTurnDurationLabel', {
+    defaultValue: 'Response time',
+  });
   const snapshotStatus = resolveCostSnapshotStatus(cost, status);
   const snapshotStateText =
     snapshotStatus === 'refreshing'
@@ -377,10 +445,10 @@ export default function ConversationCostChip({
       : display.kind === 'unavailable'
         ? lines.join('\n')
         : [stateText, ...lines].join('\n');
-  const tooltip = [snapshotStateText, costTooltip, workDurationText && `${workDurationLabel}: ${workDurationText}`, tokenStateText]
+  const tooltip = [snapshotStateText, measurementStateText, costTooltip, workDurationText && `${workDurationLabel}: ${workDurationText}`, tokenStateText]
     .filter(Boolean)
     .join('\n');
-  const popoverLines = [snapshotStateText, tokenStateText, ...(lines.length > 0 ? lines : [stateText])].filter(
+  const popoverLines = [snapshotStateText, ...measurementLines, tokenStateText, ...(lines.length > 0 ? lines : [stateText])].filter(
     (line): line is string => Boolean(line),
   );
 
@@ -400,7 +468,7 @@ export default function ConversationCostChip({
         title={tooltip}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={[titleText, snapshotStateText, stateText, workDurationText && `${workDurationLabel}: ${workDurationText}`, tokenStateText]
+        aria-label={[titleText, snapshotStateText, measurementStateText, stateText, workDurationText && `${workDurationLabel}: ${workDurationText}`, tokenStateText]
           .filter(Boolean)
           .join('; ')}
         className={cn(
@@ -417,7 +485,7 @@ export default function ConversationCostChip({
           aria-hidden
         />
 
-        {(snapshotStatus === 'stale' || snapshotStatus === 'incomplete') && (
+        {(snapshotStatus === 'stale' || snapshotStatus === 'incomplete' || measurementStateText) && (
           <AlertTriangle
             data-testid="conversation-snapshot-warning"
             className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400"

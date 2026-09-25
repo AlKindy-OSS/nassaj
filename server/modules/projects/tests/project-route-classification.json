@@ -1,0 +1,602 @@
+{
+ "DELETE /api/connectors/:id": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "DELETE /api/connectors/auth-profiles/:providerId": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "DELETE /api/connectors/grants/:grantId": {
+  "class": "global",
+  "reason": "connector mutation, no project context; 503 = connector substrate not provisioned in tests"
+ },
+ "DELETE /api/connectors/oauth-v2/:serviceId": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "DELETE /api/gemini/sessions/:sessionId": {
+  "class": "project",
+  "creatorDenied": "deletes a Gemini transcript that the probe session (claude) does not have → 404 for everyone [inferred from handler code, not individually probed]"
+ },
+ "DELETE /api/projects/:projectId": {
+  "class": "project"
+ },
+ "DELETE /api/projects/:projectId/logo": {
+  "class": "project"
+ },
+ "DELETE /api/projects/:projectId/members/:userId": {
+  "class": "project",
+  "allow400": "probe sends userId 'probe' (not an integer) → 400 INVALID_USER_ID before access; valid-id refusal is 404 in project-membership.adr172.test.ts"
+ },
+ "DELETE /api/projects/:projectId/recover": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "DELETE /api/providers/:provider/api-key": {
+  "class": "global",
+  "reason": "per-user provider key"
+ },
+ "DELETE /api/providers/:provider/mcp/servers/:name": {
+  "class": "project"
+ },
+ "DELETE /api/providers/:provider/sessions/:sessionId/active-model": {
+  "class": "project"
+ },
+ "DELETE /api/providers/:provider/skills/:name": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "DELETE /api/providers/company/:companyId/key": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "DELETE /api/providers/local/servers/:id": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "DELETE /api/providers/sessions/:sessionId": {
+  "class": "project"
+ },
+ "DELETE /api/scheduled-messages/:id": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "DELETE /api/sessions/:sessionId/close": {
+  "class": "project"
+ },
+ "DELETE /api/sessions/:sessionId/outcome-seen": {
+  "class": "global",
+  "reason": "guarded by assertSessionAccessible; uniform null body by design"
+ },
+ "GET /api/chat-images/:bucket/:name": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "GET /api/connectors/": {
+  "class": "global",
+  "reason": "per-user connector list"
+ },
+ "GET /api/connectors/auth-profiles/": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "GET /api/connectors/auth-readiness/": {
+  "class": "global",
+  "reason": "per-user connector auth readiness"
+ },
+ "GET /api/connectors/catalog": {
+  "class": "global",
+  "reason": "connector catalog (global)"
+ },
+ "GET /api/connectors/grants/": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "GET /api/connectors/targets": {
+  "class": "global",
+  "reason": "connector target catalog (global)"
+ },
+ "GET /api/cursor/config": {
+  "class": "global",
+  "reason": "global cursor config"
+ },
+ "GET /api/document-shares/:id": {
+  "class": "project",
+  "creatorDenied": "share id 'probe' matches no share row → uniform SHARE_UNAVAILABLE 404"
+ },
+ "GET /api/document-shares/:id/content": {
+  "class": "project",
+  "creatorDenied": "share id 'probe' matches no share row → uniform 404 before any file read"
+ },
+ "GET /api/document-shares/:id/preview": {
+  "class": "project",
+  "creatorDenied": "share id 'probe' matches no share row → uniform 404 before preview assembly"
+ },
+ "GET /api/git/branches": {
+  "class": "project"
+ },
+ "GET /api/git/commit-diff": {
+  "class": "project"
+ },
+ "GET /api/git/commits": {
+  "class": "project"
+ },
+ "GET /api/git/diff": {
+  "class": "project"
+ },
+ "GET /api/git/file-with-diff": {
+  "class": "project"
+ },
+ "GET /api/git/remote-status": {
+  "class": "project"
+ },
+ "GET /api/git/status": {
+  "class": "project"
+ },
+ "GET /api/project-board/:projectId": {
+  "class": "project"
+ },
+ "GET /api/projects/": {
+  "class": "global",
+  "reason": "project list; filtered by getVisibleProjectPaths (list gate)"
+ },
+ "GET /api/projects/:projectId/code-stats": {
+  "class": "project"
+ },
+ "GET /api/projects/:projectId/cost": {
+  "class": "project"
+ },
+ "GET /api/projects/:projectId/document-shares": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "GET /api/projects/:projectId/member-candidates": {
+  "class": "project",
+  "allow400": "probe omits q → 400 INVALID_QUERY (length < 2) before access; with a valid q a non-member gets 404 in project-membership.adr172.test.ts"
+ },
+ "GET /api/projects/:projectId/members": {
+  "class": "project"
+ },
+ "GET /api/projects/:projectId/orphan-status": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "GET /api/projects/:projectId/participants": {
+  "class": "project"
+ },
+ "GET /api/projects/:projectId/sessions": {
+  "class": "project"
+ },
+ "GET /api/projects/:projectId/stats": {
+  "class": "project"
+ },
+ "GET /api/projects/archived": {
+  "class": "global",
+  "reason": "archived list; filtered by the list gate"
+ },
+ "GET /api/projects/clone-progress": {
+  "class": "global",
+  "reason": "per-user clone ticket, no project id"
+ },
+ "GET /api/projects/session-context/:sessionId": {
+  "class": "project"
+ },
+ "GET /api/providers/:provider/api-key": {
+  "class": "global",
+  "reason": "per-user provider key"
+ },
+ "GET /api/providers/:provider/api-key/capability": {
+  "class": "global",
+  "reason": "per-user provider key capability"
+ },
+ "GET /api/providers/:provider/auth/status": {
+  "class": "global",
+  "reason": "per-user provider auth status"
+ },
+ "GET /api/providers/:provider/governance": {
+  "class": "global",
+  "reason": "per-user provider governance"
+ },
+ "GET /api/providers/:provider/mcp/servers": {
+  "class": "project"
+ },
+ "GET /api/providers/:provider/mcp/servers/inventory": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "GET /api/providers/:provider/models": {
+  "class": "global",
+  "reason": "provider model catalog; 500 = provider CLI absent in tests"
+ },
+ "GET /api/providers/:provider/quota": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "GET /api/providers/:provider/sessions/:sessionId/active-model": {
+  "class": "project",
+  "creatorDenied": "probe session has no active-model pin for provider 'claude' → 404 [inferred from handler code, not individually probed]"
+ },
+ "GET /api/providers/:provider/sessions/:sessionId/skills": {
+  "class": "project",
+  "creatorDenied": "session skills need a live provider session; the probe session has none → 404 [inferred from handler code, not individually probed]"
+ },
+ "GET /api/providers/:provider/skills": {
+  "class": "project"
+ },
+ "GET /api/providers/agents/:agentId/report": {
+  "class": "project",
+  "creatorDenied": "agent id 'probe' matches no session_agents row → 404 [inferred from handler code, not individually probed]"
+ },
+ "GET /api/providers/agents/orphans": {
+  "class": "global",
+  "reason": "per-user orphan agents"
+ },
+ "GET /api/providers/antigravity/active-model": {
+  "class": "global",
+  "reason": "global model state"
+ },
+ "GET /api/providers/claude/usage": {
+  "class": "global",
+  "reason": "per-user usage (upstream 502 in tests)"
+ },
+ "GET /api/providers/company/:companyId/key": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "GET /api/providers/costs/cycle": {
+  "class": "global",
+  "reason": "per-user billing cycle"
+ },
+ "GET /api/providers/costs/session/:sessionId": {
+  "class": "project",
+  "creatorDenied": "cost lookup needs usage rows the probe session does not have → 404 [inferred from handler code, not individually probed]"
+ },
+ "GET /api/providers/costs/subscriptions": {
+  "class": "global",
+  "reason": "per-user subscription costs"
+ },
+ "GET /api/providers/local/servers": {
+  "class": "global",
+  "reason": "global local-model servers"
+ },
+ "GET /api/providers/local/settings": {
+  "class": "global",
+  "reason": "global local-model settings"
+ },
+ "GET /api/providers/resources/session/:sessionId": {
+  "class": "project",
+  "creatorDenied": "resource lookup needs a running process for the probe session → 404 [inferred from handler code, not individually probed]"
+ },
+ "GET /api/providers/search/sessions": {
+  "class": "project",
+  "allow400": "probe sends no q → 400 before search; valid-term search: creator/member see the project, stranger and a launcher without membership see nothing ('qa ن2' test)"
+ },
+ "GET /api/providers/sessions/:sessionId/activity": {
+  "class": "global",
+  "reason": "guarded by isSessionVisibleToUser; uniform {isProcessing:false} by design"
+ },
+ "GET /api/providers/sessions/:sessionId/message-delivery/:clientMsgId": {
+  "class": "project",
+  "allow400": "requires a ?provider query matching /^[a-z]/ and a clientMsgId; the probe's values fail that regex first (400 INVALID_DELIVERY_IDENTITY)"
+ },
+ "GET /api/providers/sessions/:sessionId/messages": {
+  "class": "project",
+  "creatorDenied": "generic probe session has no transcript; with a persisted transcript creator/member get 200 and strangers 404 ('creator and member ... read a real session')"
+ },
+ "GET /api/providers/sessions/archived": {
+  "class": "global",
+  "reason": "archived sessions list; filtered per user"
+ },
+ "GET /api/providers/workflows/active": {
+  "class": "global",
+  "reason": "per-user active workflows"
+ },
+ "GET /api/references/:material": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "GET /api/references/:material/:id": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "GET /api/scheduled-messages/": {
+  "class": "global",
+  "reason": "per-user scheduled-message list"
+ },
+ "GET /api/scheduled-messages/summary": {
+  "class": "global",
+  "reason": "per-user scheduled-message summary"
+ },
+ "GET /api/sessions/:sessionId/agents": {
+  "class": "project",
+  "creatorDenied": "probe session has no agent rows; uses the same assertSessionAccessible gate proven with a real session [inferred from handler code, not individually probed]"
+ },
+ "GET /api/sessions/:sessionId/participants": {
+  "class": "project",
+  "creatorDenied": "generic probe session is archived by the probe's own DELETE; real-session read by creator/member proven in 'read a real session'"
+ },
+ "GET /api/sessions/outcomes/unseen": {
+  "class": "global",
+  "reason": "per-user unseen outcomes list"
+ },
+ "GET /api/sessions/starred": {
+  "class": "global",
+  "reason": "per-user starred list"
+ },
+ "GET /api/workflow-supervisor/background-tasks/count": {
+  "class": "global",
+  "reason": "per-user count"
+ },
+ "PATCH /api/connectors/:id": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PATCH /api/projects/:projectId/document-shares/:id": {
+  "class": "project",
+  "creatorDenied": "share id 'probe' does not exist → 404 for the creator; non-member is refused 403 at assertManager first"
+ },
+ "PATCH /api/projects/:projectId/visibility": {
+  "class": "global",
+  "reason": "retired by ADR-089: 410 Gone for every caller"
+ },
+ "PATCH /api/providers/local/servers/:id": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "PATCH /api/scheduled-messages/:id": {
+  "class": "project",
+  "allow400": "probe id 'probe' is not a scheduled-message id → 400; valid-payload PATCH by a non-member is refused in 'bulk, scheduled PATCH and workflow launch'"
+ },
+ "POST /api/commands/execute": {
+  "class": "project",
+  "allow400": "probe body lacks commandPath → 400; valid payload: creator 200, non-member 403 in 'allow400 routes with VALID payloads'"
+ },
+ "POST /api/commands/list": {
+  "class": "global",
+  "reason": "global commands; project commands only when isProjectPathVisibleToUser"
+ },
+ "POST /api/connectors/": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "POST /api/connectors/:id/oauth/start": {
+  "class": "global",
+  "reason": "connector mutation, no project context; 503 = connector substrate not provisioned in tests"
+ },
+ "POST /api/connectors/:id/reconcile": {
+  "class": "global",
+  "reason": "connector mutation, no project context; 503 = connector substrate not provisioned in tests"
+ },
+ "POST /api/connectors/auth-profiles/:providerId/dcr": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/connectors/grants/:grantId/reverify": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/connectors/oauth-v2/:serviceId/refresh": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/connectors/oauth-v2/:serviceId/start": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/connectors/oauth/start": {
+  "class": "global",
+  "reason": "connector mutation, no project context; 503 = connector substrate not provisioned in tests"
+ },
+ "POST /api/git/checkout": {
+  "class": "project"
+ },
+ "POST /api/git/commit": {
+  "class": "project"
+ },
+ "POST /api/git/commit-session-overlay": {
+  "class": "project"
+ },
+ "POST /api/git/create-branch": {
+  "class": "project"
+ },
+ "POST /api/git/delete-branch": {
+  "class": "project"
+ },
+ "POST /api/git/delete-untracked": {
+  "class": "project"
+ },
+ "POST /api/git/discard": {
+  "class": "project"
+ },
+ "POST /api/git/fetch": {
+  "class": "project"
+ },
+ "POST /api/git/generate-commit-message": {
+  "class": "project"
+ },
+ "POST /api/git/initial-commit": {
+  "class": "project"
+ },
+ "POST /api/git/publish": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/git/pull": {
+  "class": "project"
+ },
+ "POST /api/git/push": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/git/resolve-commit-conflict": {
+  "class": "project"
+ },
+ "POST /api/git/resolve-session-overlay-conflict": {
+  "class": "project"
+ },
+ "POST /api/git/revert-local-commit": {
+  "class": "project"
+ },
+ "POST /api/projects/:projectId/document-shares": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "POST /api/projects/:projectId/document-shares/:id/revoke": {
+  "class": "project",
+  "creatorDenied": "share id 'probe' does not exist → 404 for the creator; non-member refused 403 at assertManager"
+ },
+ "POST /api/projects/:projectId/logo": {
+  "class": "project"
+ },
+ "POST /api/projects/:projectId/members": {
+  "class": "project",
+  "allow400": "probe body userId 'probe' fails the integer check → 400 INVALID_USER_ID; role/access matrix in project-membership.adr172.test.ts"
+ },
+ "POST /api/projects/:projectId/recover": {
+  "class": "project",
+  "allow400": "platform-owner orphan recovery; probe newOwnerUserId is not an integer → 400; admin/owner split tested in project-membership.adr172.test.ts [inferred from handler code, not individually probed]"
+ },
+ "POST /api/projects/:projectId/restore": {
+  "class": "project"
+ },
+ "POST /api/projects/:projectId/toggle-star": {
+  "class": "project"
+ },
+ "POST /api/projects/bulk": {
+  "class": "project",
+  "allow400": "takes projectIds[] in the body, no path id; probe shape invalid → 400; each id re-checked with the write gate [inferred from handler code, not individually probed]"
+ },
+ "POST /api/projects/clone-ticket": {
+  "class": "project",
+  "allow400": "creation flow (new project from a GitHub URL); no existing project id; probe URL invalid → 400 [inferred from handler code, not individually probed]"
+ },
+ "POST /api/projects/cost-ledger/scan": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "POST /api/projects/create-project": {
+  "class": "project",
+  "allow400": "creation flow for a NEW path; no existing project context to gate; probe body invalid → 400 [inferred from handler code, not individually probed]"
+ },
+ "POST /api/projects/migrate-legacy-stars": {
+  "class": "global",
+  "reason": "per-user star migration; ids re-checked per project"
+ },
+ "POST /api/providers/:provider/api-key": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "POST /api/providers/:provider/governance/link": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "POST /api/providers/:provider/mcp/servers": {
+  "class": "project",
+  "allow400": "workspace-scoped write validates name/transport first (400); workspacePath then goes through resolveAuthorizedWorkspacePath('write') [inferred from handler code, not individually probed]"
+ },
+ "POST /api/providers/:provider/sessions/:sessionId/active-model": {
+  "class": "project"
+ },
+ "POST /api/providers/:provider/sessions/:sessionId/engine": {
+  "class": "project",
+  "creatorDenied": "engine pin requires an engine-capable provider session the probe does not have → 404 [inferred from handler code, not individually probed]"
+ },
+ "POST /api/providers/:provider/skills": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "POST /api/providers/company/:companyId/key": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "POST /api/providers/local/servers": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "POST /api/providers/local/servers/:id/catalog": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "POST /api/providers/local/servers/:id/test": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "POST /api/providers/mcp/servers/global": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "POST /api/providers/sessions/:sessionId/restore": {
+  "class": "project"
+ },
+ "POST /api/providers/sessions/bulk": {
+  "class": "project",
+  "allow400": "body needs ids[] + action; valid payload: 200 with per-item SESSION_NOT_FOUND for a non-member (see 'bulk, scheduled PATCH and workflow launch')"
+ },
+ "POST /api/references/:material": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "POST /api/scheduled-messages/": {
+  "class": "project",
+  "allow400": "probe lacks scheduledFor → 400; valid payload: creator 201, non-member 404 in 'allow400 routes with VALID payloads'"
+ },
+ "POST /api/sessions/:sessionId/close": {
+  "class": "project"
+ },
+ "POST /api/sessions/:sessionId/outcome-seen": {
+  "class": "global",
+  "reason": "guarded by assertSessionAccessible; uniform 204 by design (no disclosure)"
+ },
+ "POST /api/sessions/star": {
+  "class": "project",
+  "allow400": "probe sends no sessionIds array → 400; starring is per-user state, each id checked with the read gate [inferred from handler code, not individually probed]"
+ },
+ "POST /api/workflow-supervisor/launch": {
+  "class": "project",
+  "allow400": "probe conversationId fails ID_PATTERN → 400; valid payload by a non-member → 404 (creator launch would spawn a real run)"
+ },
+ "PUT /api/connectors/:id/key": {
+  "class": "global",
+  "reason": "connector mutation, no project context; 503 = connector substrate not provisioned in tests"
+ },
+ "PUT /api/connectors/auth-profiles/:providerId/api-key": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PUT /api/connectors/auth-profiles/:providerId/byo": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PUT /api/connectors/grants/:serviceId/api-key": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PUT /api/projects/:projectId/rename": {
+  "class": "project"
+ },
+ "PUT /api/providers/:provider/api-key": {
+  "class": "global",
+  "reason": "no project context; generic probe payload rejected by validation (400)"
+ },
+ "PUT /api/providers/company/:companyId/key": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (404)"
+ },
+ "PUT /api/providers/costs/subscriptions/:provider": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "PUT /api/providers/local/settings": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ },
+ "PUT /api/providers/sessions/:sessionId": {
+  "class": "project",
+  "allow400": "probe body has no summary → 400; valid payload: creator 200, non-member 404 in 'allow400 routes with VALID payloads'"
+ },
+ "PUT /api/references/:material/:id": {
+  "class": "global",
+  "reason": "no project context: refused to every plain user by role or missing resource (403)"
+ }
+}

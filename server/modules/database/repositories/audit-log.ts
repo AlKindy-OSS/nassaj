@@ -18,6 +18,9 @@ export type AuditAction =
   | 'document_share_created'
   | 'document_share_updated'
   | 'document_share_revoked'
+  // ADR-172: project membership changes. Metadata carries ids only.
+  | 'project.member.add'
+  | 'project.member.remove'
   | 'session_permanently_deleted'
   | 'project_permanently_deleted'
   | 'project_manually_readded'
@@ -158,7 +161,10 @@ export type AuditAction =
   | 'scheduled_message_updated'
   | 'scheduled_message_cancelled'
   | 'scheduled_message_dispatched'
-  | 'scheduled_message_failed';
+  | 'scheduled_message_failed'
+  | 'harness_update_started'
+  | 'harness_update_succeeded'
+  | 'harness_update_failed';
 
 /**
  * Hard cap on the stored User-Agent string (T-182). UA headers can be long and

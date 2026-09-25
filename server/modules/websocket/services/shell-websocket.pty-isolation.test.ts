@@ -231,6 +231,20 @@ function asRequest(id: unknown, role: string | undefined = 'user') {
 // Use the real cwd as projectPath: the handler statSyncs it and requires a dir.
 const PROJECT_PATH = process.cwd();
 
+test('removed Gemini provider is refused before env resolution or PTY spawn', async () => {
+  await withIsolatedDatabase(() => {
+    spawnCalls.length = 0;
+    resolveCalls.length = 0;
+    const ws = makeFakeWs();
+    handleShellConnection(ws as never, asRequest(7), deps);
+    ws.emit('message', initMessage(PROJECT_PATH, { provider: 'gemini' }));
+    assert.equal(resolveCalls.length, 0);
+    assert.equal(spawnCalls.length, 0);
+    const error = ws.sent.find((frame) => (frame as { code?: string })?.code === 'provider_removed');
+    assert.ok(error, 'a stable provider_removed frame is emitted');
+  });
+});
+
 test('B-MU-PTY-ENV: PTY env comes from resolveProviderEnv(userId, provider) — not raw process.env', async () => {
   await withIsolatedDatabase(() => {
     spawnCalls.length = 0;

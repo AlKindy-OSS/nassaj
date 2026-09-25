@@ -1,6 +1,9 @@
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
+// eslint-disable-next-line boundaries/dependencies -- capability probes execute provider binaries and share the updater's atomic admission seam.
+import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
+
 export type MechanicalCliHarnessProvider = 'codex' | 'qwen' | 'opencode' | 'hermes';
 export type MechanicalCliCapabilityProbe = (
   provider: MechanicalCliHarnessProvider, env: NodeJS.ProcessEnv,
@@ -8,34 +11,55 @@ export type MechanicalCliCapabilityProbe = (
 
 const probeCache = new Map<string, boolean>();
 
-function output(binary: string, args: readonly string[], env: NodeJS.ProcessEnv): string | null {
-  const result = spawnSync(binary, args, {
-    env, shell: false, encoding: 'utf8', timeout: 10_000, windowsHide: true,
-  });
-  if (result.error || result.status !== 0) return null;
-  return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+function output(
+  provider: MechanicalCliHarnessProvider,
+  binary: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): string | null {
+  const releaseHarnessLaunch = beginHarnessLaunch(provider);
+  try {
+    const result = spawnSync(binary, args, {
+      env, shell: false, encoding: 'utf8', timeout: 10_000, windowsHide: true,
+    });
+    if (result.error || result.status !== 0) return null;
+    return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  } finally {
+    releaseHarnessLaunch();
+  }
 }
 
-function exactVersion(binary: string, expected: string, env: NodeJS.ProcessEnv): boolean {
-  const value = output(binary, ['--version'], env);
+function exactVersion(
+  provider: MechanicalCliHarnessProvider,
+  binary: string,
+  expected: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  const value = output(provider, binary, ['--version'], env);
   return value?.match(/\bv?(\d+\.\d+\.\d+)\b/u)?.[1] === expected;
 }
 
 function qwenProbe(env: NodeJS.ProcessEnv): boolean {
-  const binary = env.QWEN_PATH?.trim() || 'qwen';
-  const help = output(binary, ['--help'], env);
-  if (!help || !exactVersion(binary, '0.21.12', env)) return false;
-  return [
-    '--system-prompt', '--safe-mode', '--sandbox', '--approval-mode',
-    '--max-tool-calls', '--exclude-tools', '--disabled-slash-commands',
-  ].every((option) => help.includes(option));
+  const releaseHarnessLaunch = beginHarnessLaunch('qwen');
+  try {
+    const binary = env.QWEN_PATH?.trim() || 'qwen';
+    const help = output('qwen', binary, ['--help'], env);
+    if (!help || !exactVersion('qwen', binary, '0.21.12', env)) return false;
+    return [
+      '--system-prompt', '--safe-mode', '--sandbox', '--approval-mode',
+      '--max-tool-calls', '--exclude-tools', '--disabled-slash-commands',
+    ].every((option) => help.includes(option));
+  } finally {
+    releaseHarnessLaunch();
+  }
 }
 
 function hermesProbe(env: NodeJS.ProcessEnv): boolean {
-  const binary = env.HERMES_PATH?.trim() || 'hermes';
-  if (!exactVersion(binary, '0.17.0', env)) return false;
-  const directory = mkdtempSync('/var/tmp/nassaj-hermes-capability-probe-');
+  const releaseHarnessLaunch = beginHarnessLaunch('hermes');
   try {
+    const binary = env.HERMES_PATH?.trim() || 'hermes';
+    if (!exactVersion('hermes', binary, '0.17.0', env)) return false;
+    const directory = mkdtempSync('/var/tmp/nassaj-hermes-capability-probe-');
     const isolated = {
       ...env, HOME: `${directory}/home`, HERMES_HOME: `${directory}/hermes`,
       XDG_CONFIG_HOME: `${directory}/config`, XDG_DATA_HOME: `${directory}/data`,
@@ -43,15 +67,19 @@ function hermesProbe(env: NodeJS.ProcessEnv): boolean {
     };
     Object.values(isolated).filter((value) => typeof value === 'string' && value.startsWith(directory))
       .forEach((entry) => mkdirSync(entry!, { recursive: true, mode: 0o700 }));
-    const raw = output(binary, [
-      '--safe-mode', '--ignore-user-config', '--ignore-rules', '--toolsets', '',
-      'prompt-size', '--json',
-    ], isolated);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as { tools?: { count?: unknown } };
-    return parsed.tools?.count === 0;
-  } catch { return false; }
-  finally { rmSync(directory, { recursive: true, force: true }); }
+    try {
+      const raw = output('hermes', binary, [
+        '--safe-mode', '--ignore-user-config', '--ignore-rules', '--toolsets', '',
+        'prompt-size', '--json',
+      ], isolated);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as { tools?: { count?: unknown } };
+      return parsed.tools?.count === 0;
+    } catch { return false; }
+    finally { rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    releaseHarnessLaunch();
+  }
 }
 
 /** Installed-binary proof. Browser and environment claims cannot replace it. */
@@ -97,4 +125,10 @@ export function isCliTurnSupervisorEnabled(
     && probe(provider as MechanicalCliHarnessProvider, env);
 }
 
-export const cliCapabilityInternals = Object.freeze({ qwenProbe, hermesProbe, exactVersion });
+export const cliCapabilityInternals = Object.freeze({
+  qwenProbe,
+  hermesProbe,
+  exactVersion,
+  hasCachedProbe: (key: string) => probeCache.has(key),
+  clearProbeCache: () => probeCache.clear(),
+});

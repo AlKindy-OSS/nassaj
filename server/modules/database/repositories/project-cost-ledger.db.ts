@@ -186,7 +186,7 @@ const dayRangeSql = (since?: string, until?: string): { sql: string; params: str
     params.push(since);
   }
   if (until) {
-    clauses.push('day <= ?');
+    clauses.push('day < ?');
     params.push(until);
   }
   return { sql: clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '', params };

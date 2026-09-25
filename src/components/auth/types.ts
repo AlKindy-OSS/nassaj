@@ -26,14 +26,18 @@ export type AuthActionResult = { success: true } | { success: false; error: stri
 export type OidcLoginResult = { success: true } | { success: false; reason: OidcFailureReason };
 
 export type AuthSessionPayload = {
+  success?: boolean;
   token?: string;
   user?: AuthUser;
+  wallet?: { generation: number; activeSlotId: string | null };
+  passwordChangeRequired?: boolean;
   error?: string;
   message?: string;
 };
 
 export type AuthStatusPayload = {
   needsSetup?: boolean;
+  deviceAccountSessionsEnabled?: boolean;
 };
 
 export type AuthUserPayload = {
@@ -84,6 +88,8 @@ export type AuthContextValue = {
   // Gates every "who did this" affordance: on a single-account install there is
   // nothing to attribute, so the UI shows no participant avatars at all.
   isMultiUser: boolean;
+  /** Server-authoritative gate for the cookie-backed device account wallet. */
+  deviceAccountSessionsEnabled: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<AuthActionResult>;
   // Completes a passkey sign-in: verifies the WebAuthn assertion on the server

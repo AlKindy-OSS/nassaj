@@ -196,6 +196,7 @@ export const companyCredentialsService = {
     options: {
       isElevated: boolean;
       includeSubscription?: boolean;
+      authenticatedPrincipal?: unknown;
       /** Slots the caller ticked. Absent = every slot (pre-checkbox clients). */
       vendorIds?: readonly string[];
     } = { isElevated: false },
@@ -231,7 +232,9 @@ export const companyCredentialsService = {
       }
 
       try {
-        await providerCredentialsService.setKey(userId, slot.provider, key, slot.target);
+        await providerCredentialsService.setKey(
+          userId, slot.provider, key, slot.target, undefined, options.authenticatedPrincipal,
+        );
         slots.push({ ...base, outcome: 'written' });
       } catch (error) {
         slots.push({

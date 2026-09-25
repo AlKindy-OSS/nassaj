@@ -24,6 +24,8 @@ let owner: TestUser;
 let stranger: TestUser;
 let ownProjectId = '';
 let otherProjectId = '';
+let ownProjectPath = '';
+let identityChecksRemaining: number | null = null;
 
 function makeTestDirectory(prefix: string): string {
   return fs.mkdtempSync(path.join('/var/tmp', prefix));
@@ -31,6 +33,7 @@ function makeTestDirectory(prefix: string): string {
 
 function seed(): void {
   const ownPath = fs.mkdtempSync(path.join(workspaceRoot, 'own-'));
+  ownProjectPath = ownPath;
   const otherPath = fs.mkdtempSync(path.join(workspaceRoot, 'other-'));
   ownProjectId = projectsDb.createProjectPath(ownPath, 'Own', owner.id).project?.project_id ?? '';
   otherProjectId = projectsDb.createProjectPath(otherPath, 'Other', stranger.id).project?.project_id ?? '';
@@ -63,13 +66,25 @@ before(async () => {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: TestUser | null }).user = currentUser;
+    (req as unknown as { assertCurrentIdentity: () => boolean }).assertCurrentIdentity = () => {
+      if (identityChecksRemaining === null) return true;
+      if (identityChecksRemaining <= 0) return false;
+      identityChecksRemaining -= 1;
+      return true;
+    };
     next();
   });
   app.use('/api/projects', projectRoutes);
   app.use('/api/providers', providerRoutes);
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof AppError) {
-      res.status(error.statusCode).json({ success: false, error: { code: error.code } });
+      res.status(error.statusCode).json({
+        success: false,
+        error: {
+          code: error.code,
+          ...(error.details && typeof error.details === 'object' ? error.details : {}),
+        },
+      });
       return;
     }
     res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR' } });
@@ -79,7 +94,10 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
-beforeEach(seed);
+beforeEach(() => {
+  identityChecksRemaining = null;
+  seed();
+});
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
@@ -135,4 +153,53 @@ test('bulk close and reopen use the same session write entitlement', async () =>
   assert.equal(reopened.status, 200);
   assert.equal(reopened.json.data.results[0].result.closed, false);
   assert.equal(closedSessionsDb.getClosedSession('bulk-owned-session'), null);
+});
+
+test('bulk fence reports outcome unknown after any earlier item effect', async () => {
+  const secondId = `bulk-second-${Date.now()}`;
+  sessionsDb.createSession(secondId, 'claude', ownProjectPath);
+  participantsDb.recordSpawn(secondId, owner.id);
+  identityChecksRemaining = 3;
+
+  const response = await call('/api/providers/sessions/bulk', {
+    action: 'close', ids: ['bulk-owned-session', secondId],
+  }, owner);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.json.error.code, 'identity_changed');
+  assert.equal(response.json.error.notStarted, false);
+  assert.equal(response.json.error.effectState, 'outcome_unknown');
+  assert.notEqual(closedSessionsDb.getClosedSession('bulk-owned-session'), null);
+  assert.equal(closedSessionsDb.getClosedSession(secondId), null);
+});
+
+test('bulk remembers transcript unlink when row settlement fails before the next item', async (context) => {
+  const firstId = `bulk-unlink-${Date.now()}`;
+  const secondId = `${firstId}-next`;
+  const transcript = path.join(workspaceRoot, `${firstId}.jsonl`);
+  fs.writeFileSync(transcript, '{"type":"user"}\n');
+  sessionsDb.createSession(firstId, 'claude', ownProjectPath, undefined, undefined, undefined, transcript);
+  sessionsDb.createSession(secondId, 'claude', ownProjectPath);
+  participantsDb.recordSpawn(firstId, owner.id);
+  participantsDb.recordSpawn(secondId, owner.id);
+  const deleteSessionById = sessionsDb.deleteSessionById.bind(sessionsDb);
+  context.mock.method(sessionsDb, 'deleteSessionById', (sessionId: string) => {
+    if (sessionId === firstId) {
+      identityChecksRemaining = 0;
+      throw new Error('synthetic database settlement failure');
+    }
+    return deleteSessionById(sessionId);
+  });
+
+  const response = await call('/api/providers/sessions/bulk', {
+    action: 'delete_permanently', ids: [firstId, secondId],
+  }, owner);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.json.error.code, 'identity_changed');
+  assert.equal(response.json.error.notStarted, false);
+  assert.equal(response.json.error.effectState, 'outcome_unknown');
+  assert.equal(fs.existsSync(transcript), false);
+  assert.notEqual(sessionsDb.getSessionById(firstId), null);
+  assert.notEqual(sessionsDb.getSessionById(secondId), null);
 });

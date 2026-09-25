@@ -8,6 +8,8 @@ import test, { mock } from 'node:test';
 import { resolveSessionWorkspace } from '@/modules/session-workspaces/index.js';
 import type { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 import { dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
 let failLedgerMark = false;
@@ -21,6 +23,7 @@ const sharedMarks: Array<{ sessionId: string; projectPath: string; provider: str
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: (projectPath: string) => resumedRow?.project_path === projectPath
         || registeredPaths.has(projectPath)

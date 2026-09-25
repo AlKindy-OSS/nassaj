@@ -97,6 +97,7 @@ export const providerCredentialsService = {
     apiKey: unknown,
     target?: string,
     qwenOptions?: { plan?: unknown; region?: unknown },
+    authenticatedPrincipal?: unknown,
   ): Promise<ProviderCredentialStatus> {
     const writer = resolveWriter(provider);
     if (writer) {
@@ -106,7 +107,7 @@ export const providerCredentialsService = {
           statusCode: 400,
         });
       }
-      return writer.setApiKey(userId, apiKey.trim(), target);
+      return writer.setApiKey(userId, apiKey.trim(), target, authenticatedPrincipal);
     }
     if (isVendorSecretProvider(provider)) {
       const result = providerSecretsService.setKey(userId, provider, apiKey, qwenOptions);

@@ -9,6 +9,7 @@
 import crypto from 'crypto';
 
 import { getConnection } from '@/modules/database/connection.js';
+import { assertGenericAppConfigKey } from '@/modules/database/repositories/app-config-reserved.js';
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -29,12 +30,28 @@ export const appConfigDb = {
     }
   },
 
+  /** Returns a stored value while preserving database failures for fail-closed callers. */
+  getStrict(key: string): string | null {
+    const db = getConnection();
+    const row = db
+      .prepare('SELECT value FROM app_config WHERE key = ?')
+      .get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  },
+
   /** Inserts or updates a config key (upsert). */
   set(key: string, value: string): void {
+    assertGenericAppConfigKey(key);
     const db = getConnection();
     db.prepare(
       'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
     ).run(key, value);
+  },
+
+  /** Deletes an ordinary config key; repository-owned namespaces are immutable here. */
+  delete(key: string): boolean {
+    assertGenericAppConfigKey(key);
+    return getConnection().prepare('DELETE FROM app_config WHERE key = ?').run(key).changes === 1;
   },
 
   /**

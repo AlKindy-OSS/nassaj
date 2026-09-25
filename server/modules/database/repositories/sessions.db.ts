@@ -1,5 +1,6 @@
 import { getConnection } from '@/modules/database/connection.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
+import { rotateProjectStructureForPath } from '@/modules/database/repositories/project-access.js';
 import { parseStoredTimestampMs } from '@/modules/database/utils/timestamps.js';
 import { logicalProjectPathForWorkspace } from '@/modules/session-workspaces/index.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
@@ -103,12 +104,15 @@ export const sessionsDb = {
     // Wrap the project-upsert + session-upsert in a single transaction so a
     // concurrent UNIQUE violation or mid-flight crash never leaves the sessions
     // table with a dangling project_path reference or a partial row.  (B-38.)
+    let createdProjectId: string | null = null;
     const run = db.transaction(() => {
       // Ensure the project path exists in the projects table before writing the
       // session row that carries the FK reference.
       // Discovery must not undo a user's project archival (B-963). Explicit
       // project creation/restoration retains its separate reactivation path.
-      projectsDb.ensureProjectPathForSession(normalizedProjectPath);
+      createdProjectId = projectsDb.ensureProjectPathForSession(normalizedProjectPath, {
+        deferFenceRotation: true,
+      });
 
       // Archival is a USER decision, never overwritten by an upsert (B-161/T-857):
       // a new row starts active (isArchived 0 in VALUES), but on conflict the
@@ -138,6 +142,9 @@ export const sessionsDb = {
     });
 
     run.immediate();
+    // The new row may be a lexical alias of an already-registered physical root.
+    // Rotate through the committed path so every canonical alias is fenced.
+    if (createdProjectId) rotateProjectStructureForPath(createdProjectId, normalizedProjectPath);
     return sessionId;
   },
 

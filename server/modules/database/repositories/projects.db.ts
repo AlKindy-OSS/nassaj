@@ -2,6 +2,14 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { getConnection } from '@/modules/database/connection.js';
+import {
+    canAccessProject,
+    invalidateProjectFormsCache,
+    isProjectMembershipEnforced,
+    listAccessibleProjectPaths,
+    rotateProjectStructureForPath,
+    rotateProjectSubjectAccess,
+} from '@/modules/database/repositories/project-access.js';
 import type { CreateProjectPathResult, ProjectRepositoryRow, ProjectVisibility } from '@/shared/types.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
@@ -17,16 +25,23 @@ function normalizeProjectDisplayName(projectPath: string, customProjectName: str
 
 export const projectsDb = {
     /** Ensures a discovered session's project exists without restoring or modifying an existing project. */
-    ensureProjectPathForSession(projectPath: string): void {
+    ensureProjectPathForSession(
+        projectPath: string,
+        options: { deferFenceRotation?: boolean } = {},
+    ): string | null {
         const normalizedProjectPath = normalizeProjectPath(projectPath);
         const db = getConnection();
         // Discovery of an existing project must not enter BEFORE INSERT guards.
-        if (db.prepare('SELECT 1 FROM projects WHERE project_path = ?').get(normalizedProjectPath)) return;
-        db.prepare(`
+        if (db.prepare('SELECT 1 FROM projects WHERE project_path = ?').get(normalizedProjectPath)) return null;
+        const projectId = randomUUID();
+        const inserted = db.prepare(`
             INSERT INTO projects (project_id, project_path, detected_name, isArchived)
             VALUES (?, ?, ?, 0)
             ON CONFLICT(project_path) DO NOTHING
-        `).run(randomUUID(), normalizedProjectPath, normalizeProjectDisplayName(normalizedProjectPath, null));
+        `).run(projectId, normalizedProjectPath, normalizeProjectDisplayName(normalizedProjectPath, null));
+        if (inserted.changes === 0) return null;
+        if (!options.deferFenceRotation) rotateProjectStructureForPath(projectId, normalizedProjectPath);
+        return projectId;
     },
 
     /**
@@ -49,6 +64,7 @@ export const projectsDb = {
         createdBy: number | null = null,
         options: { preserveArchived?: boolean } = {},
     ): CreateProjectPathResult {
+        invalidateProjectFormsCache(); // ADR-172 qa ن1: owning-project cache
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
         const explicitProjectName = typeof customProjectName === 'string' && customProjectName.trim()
@@ -73,6 +89,7 @@ export const projectsDb = {
                 RETURNING project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
             `).get(attemptedId, normalizedProjectPath, explicitProjectName, detectedName, normalizedCreatedBy) as ProjectRepositoryRow | undefined;
             if (insertedRow) {
+                rotateProjectStructureForPath(insertedRow.project_id, insertedRow.project_path);
                 return { outcome: 'created', project: insertedRow };
             }
             // Lost an insert race: a concurrent writer created the row first.
@@ -89,6 +106,7 @@ export const projectsDb = {
         `).get(attemptedId, normalizedProjectPath, explicitProjectName, detectedName, normalizedCreatedBy) as ProjectRepositoryRow | undefined;
 
         if (row) {
+            rotateProjectStructureForPath(row.project_id, row.project_path);
             return {
                 outcome: row.project_id === attemptedId ? 'created' : 'reactivated_archived',
                 project: row,
@@ -181,11 +199,15 @@ export const projectsDb = {
     updateCustomProjectName(projectPath: string, customProjectName: string | null): void {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
+        const existing = db.prepare('SELECT project_id FROM projects WHERE project_path = ?')
+            .get(normalizedProjectPath) as { project_id: string } | undefined;
+        const projectId = randomUUID();
         db.prepare(`
             INSERT INTO projects (project_id, project_path, custom_project_name)
             VALUES (?, ?, ?)
             ON CONFLICT(project_path) DO UPDATE SET custom_project_name = excluded.custom_project_name
-        `).run(randomUUID(), normalizedProjectPath, customProjectName);
+        `).run(projectId, normalizedProjectPath, customProjectName);
+        if (!existing) rotateProjectStructureForPath(projectId, normalizedProjectPath);
     },
 
     updateCustomProjectNameById(projectId: string, customProjectName: string | null): void {
@@ -238,23 +260,33 @@ export const projectsDb = {
         `).run(normalized, projectId);
     },
 
-    updateProjectIsArchived(projectPath: string, isArchived: boolean): void {
+    updateProjectIsArchived(projectPath: string, isArchived: boolean): boolean {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
-        db.prepare(`
+        const target = isArchived ? 1 : 0;
+        const row = db.prepare('SELECT project_id, project_path FROM projects WHERE project_path = ?')
+            .get(normalizedProjectPath) as { project_id: string; project_path: string } | undefined;
+        const changed = db.prepare(`
             UPDATE projects
             SET isArchived = ?
-            WHERE project_path = ?
-        `).run(isArchived ? 1 : 0, normalizedProjectPath);
+            WHERE project_path = ? AND isArchived <> ?
+        `).run(target, normalizedProjectPath, target);
+        if (row && changed.changes > 0) rotateProjectStructureForPath(row.project_id, row.project_path);
+        return changed.changes > 0;
     },
 
-    updateProjectIsArchivedById(projectId: string, isArchived: boolean): void {
+    updateProjectIsArchivedById(projectId: string, isArchived: boolean): boolean {
         const db = getConnection();
-        db.prepare(`
+        const target = isArchived ? 1 : 0;
+        const row = db.prepare('SELECT project_path FROM projects WHERE project_id = ?')
+            .get(projectId) as { project_path: string } | undefined;
+        const changed = db.prepare(`
             UPDATE projects
             SET isArchived = ?
-            WHERE project_id = ?
-        `).run(isArchived ? 1 : 0, projectId);
+            WHERE project_id = ? AND isArchived <> ?
+        `).run(target, projectId, target);
+        if (row && changed.changes > 0) rotateProjectStructureForPath(projectId, row.project_path);
+        return changed.changes > 0;
     },
 
     /** Persists a conclusive or unknown filesystem probe without doing I/O. */
@@ -269,21 +301,33 @@ export const projectsDb = {
         `).run(persistedExists, persistedExists, projectId);
     },
 
-    deleteProjectPath(projectPath: string): void {
+    deleteProjectPath(projectPath: string): boolean {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
-        db.prepare(`
+        const row = db.prepare('SELECT project_id, project_path FROM projects WHERE project_path = ?')
+            .get(normalizedProjectPath) as { project_id: string; project_path: string } | undefined;
+        const deleted = db.prepare(`
             DELETE FROM projects
             WHERE project_path = ?
         `).run(normalizedProjectPath);
+        if (row && deleted.changes > 0) {
+            rotateProjectStructureForPath(row.project_id, row.project_path, { retireProjectId: true });
+        }
+        return deleted.changes > 0;
     },
 
-    deleteProjectById(projectId: string): void {
+    deleteProjectById(projectId: string, options: { deferFenceRotation?: boolean } = {}): boolean {
         const db = getConnection();
-        db.prepare(`
+        const row = db.prepare('SELECT project_path FROM projects WHERE project_id = ?')
+            .get(projectId) as { project_path: string } | undefined;
+        const deleted = db.prepare(`
             DELETE FROM projects
             WHERE project_id = ?
         `).run(projectId);
+        if (row && deleted.changes > 0 && !options.deferFenceRotation) {
+            rotateProjectStructureForPath(projectId, row.project_path, { retireProjectId: true });
+        }
+        return deleted.changes > 0;
     },
 
     /** Sets a project's visibility ('public' | 'private') by project id. */
@@ -311,11 +355,46 @@ export const projectsDb = {
     /** Sets a project's creator (created_by) by id. Used by orphan-recovery. */
     setProjectCreatedBy(projectId: string, userId: number | null): void {
         const db = getConnection();
-        db.prepare(`
+        const current = db.prepare('SELECT created_by FROM projects WHERE project_id = ?')
+            .get(projectId) as { created_by: number | null } | undefined;
+        if (!current || current.created_by === userId) return;
+        const changed = db.prepare(`
             UPDATE projects
             SET created_by = ?
             WHERE project_id = ?
         `).run(Number.isInteger(userId) ? userId : null, projectId);
+        if (changed.changes === 0) return;
+        if (Number.isInteger(current.created_by)) {
+            rotateProjectSubjectAccess(projectId, current.created_by as number);
+        }
+        if (Number.isInteger(userId)) rotateProjectSubjectAccess(projectId, userId as number);
+    },
+
+    /** Atomically transfers creator projection and its required owner membership. */
+    transferProjectCreator(projectId: string, userId: number): boolean {
+        if (!projectId || !Number.isInteger(userId)) return false;
+        const db = getConnection();
+        const change = db.transaction(() => {
+            const current = db.prepare('SELECT created_by FROM projects WHERE project_id = ?')
+                .get(projectId) as { created_by: number | null } | undefined;
+            if (!current) return null;
+            const member = db.prepare(
+                'SELECT role FROM project_members WHERE project_id = ? AND user_id = ?',
+            ).get(projectId, userId) as { role: string } | undefined;
+            if (current.created_by === userId && member?.role === 'owner') return null;
+            db.prepare('UPDATE projects SET created_by = ? WHERE project_id = ?').run(userId, projectId);
+            db.prepare(`INSERT INTO project_members (project_id, user_id, role, added_by)
+                VALUES (?, ?, 'owner', NULL)
+                ON CONFLICT(project_id, user_id) DO UPDATE SET role='owner', added_by=NULL`)
+                .run(projectId, userId);
+            return { oldCreator: current.created_by };
+        })();
+        if (!change) return false;
+        if (Number.isInteger(change.oldCreator)) {
+            rotateProjectSubjectAccess(projectId, change.oldCreator as number);
+        }
+        rotateProjectSubjectAccess(projectId, userId);
+        return true;
     },
 
     /**
@@ -331,7 +410,12 @@ export const projectsDb = {
      * deliberately unused. The WRITE gate (isProjectWritableByUser) is orthogonal
      * and untouched — session ownership still restricts mutation.
      */
-    getVisibleProjectPaths(_userId: number | null): string[] {
+    getVisibleProjectPaths(userId: number | null): string[] {
+        // ADR-172: behind PROJECT_MEMBERSHIP_ENFORCE the list is membership-based
+        // (role owner/admin, member, or creator). Flag off = ADR-089 unchanged.
+        if (isProjectMembershipEnforced()) {
+            return listAccessibleProjectPaths(userId);
+        }
         const db = getConnection();
 
         const rows = db.prepare(`
@@ -357,6 +441,10 @@ export const projectsDb = {
      * operate on archived rows by id.
      */
     isProjectVisibleToUser(projectId: string, userId: number | null): boolean {
+        // ADR-172: delegate to the membership predicate when enforced.
+        if (isProjectMembershipEnforced()) {
+            return canAccessProject(projectId, userId);
+        }
         const db = getConnection();
         const row = db.prepare(`
             SELECT project_id
@@ -410,6 +498,11 @@ export const projectsDb = {
     isProjectWritableByUser(projectId: string, userId: number | null): boolean {
         if (!Number.isInteger(userId)) {
             return false;
+        }
+        // ADR-172: every member may act in the project, so write == access, and
+        // the session-participant arm is dropped (replaced by initial seeding).
+        if (isProjectMembershipEnforced()) {
+            return canAccessProject(projectId, userId);
         }
 
         const db = getConnection();
@@ -478,6 +571,10 @@ export const projectsDb = {
 
         if (!row) {
             return false;
+        }
+        // ADR-172: the content gate must stay aligned with the list gate.
+        if (isProjectMembershipEnforced()) {
+            return canAccessProject(row.project_id, userId);
         }
         // Fail-closed defense-in-depth: an anonymous / unresolved caller is never
         // reported as seeing a project through this primitive.

@@ -1,10 +1,16 @@
 import jwt from 'jsonwebtoken';
 
-import { userDb, appConfigDb, auditLogDb } from '../modules/database/index.js';
+import * as databaseModule from '../modules/database/index.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { clientIp } from '../utils/client-ip.js';
+import { enforceCookieMutationGuard } from '../modules/account-wallet/request-csrf.js';
 
 import { recordAuthRejection } from './auth-rejection-audit.js';
+
+const { userDb, appConfigDb, auditLogDb } = databaseModule;
+const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
+const DEVICE_COOKIE = databaseModule.DEVICE_COOKIE ?? '__Host-nassaj_device';
+const PASSWORD_CHANGE_COOKIE = '__Host-nassaj_password_change';
 
 /**
  * Best-effort UNVERIFIED decode of a JWT for diagnostics only (T-182). Used on
@@ -41,6 +47,62 @@ function resolveJwtSecret() {
 
 const JWT_SECRET = resolveJwtSecret();
 const TOKEN_TTL = '7d';
+
+/** Attaches a current-identity fence and guards late HTTP disclosures. */
+function installIdentityFence(req, res) {
+  const principalKind = req.devicePrincipal
+    ? 'device_session'
+    : (req.user?.authenticationKind === 'session' ? 'jwt' : req.user?.authenticationKind);
+  const principal = req.passwordChangeSession ? null : Object.freeze({
+    kind: principalKind,
+    userId: req.user?.id,
+    authorizationGeneration: req.user?.authorizationGeneration,
+    ...(req.devicePrincipal ? {
+      deviceSessionId: req.devicePrincipal.deviceSessionId,
+      slotId: req.devicePrincipal.slotId,
+      deviceGeneration: req.devicePrincipal.generation,
+    } : {}),
+  });
+  req.authenticatedPrincipal = principal;
+  req.assertCurrentIdentity = () => {
+    if (principal?.kind === 'device_session') {
+      return deviceAccountSessionsDb.isPrincipalCurrent({
+        deviceSessionId: principal.deviceSessionId,
+        slotId: principal.slotId,
+        generation: principal.deviceGeneration,
+        userId: principal.userId,
+        authorizationGeneration: principal.authorizationGeneration,
+      }) === true;
+    }
+    if (principal?.kind === 'jwt') {
+      return userDb.isAuthorizationPrincipalCurrent(
+        principal.userId, principal.authorizationGeneration,
+      ) === true;
+    }
+    if (principal?.kind === 'platform_unverified') return false;
+    if (req.passwordChangeSession) {
+      const current = userDb.getRawById(req.user?.id);
+      return Boolean(current && current.must_change_password === 1
+        && current.password_changed_at === req.user?.password_changed_at);
+    }
+    return true;
+  };
+  req.allowIdentityTransitionResponse = () => { req.identityTransitionCommitted = true; };
+  if (typeof res.json !== 'function' || typeof res.send !== 'function') return;
+  const originalJson = res.json.bind(res);
+  const originalSend = res.send.bind(res);
+  const currentOrTransitioned = () => req.identityTransitionCommitted
+    || req.identityDisclosureRejected || req.assertCurrentIdentity();
+  const reject = () => {
+    req.identityDisclosureRejected = true;
+    return res.status(409).set('Cache-Control', 'no-store').json({
+      error: 'Identity changed during request', code: 'identity_changed',
+      notStarted: false, effectState: 'outcome_unknown',
+    });
+  };
+  res.json = (body) => currentOrTransitioned() ? originalJson(body) : reject();
+  res.send = (body) => currentOrTransitioned() ? originalSend(body) : reject();
+}
 
 // ---------------------------------------------------------------------------
 // SEC-PLATFORM-AUTH — platform-mode boot guard (B-186, sibling of B-5/T-50)
@@ -146,18 +208,14 @@ const JWT_VERIFY_OPTIONS = Object.freeze({ algorithms: ['HS256'] });
 
 // SEC-PWD-ROTATE: the endpoints a user under FORCED password rotation may still
 // reach. Everything else is refused until they actually rotate.
-// - me/password : the rotation itself (the only way out of this state)
-// - logout      : must always be possible
-// - me / user   : identity reads the client needs to render the rotation screen
+// Only me/password is authorized; identity reads and logout cannot turn the
+// temporary credential into a broader authenticated session.
 // Exact, lowercased, query-free paths compared against req.originalUrl. Express
 // matches routes case-insensitively by default, so we lowercase before
 // comparing; a traversal-style path (`/api/auth/me/password/../../users`) is a
 // different STRING and therefore fails this exact match — fail-closed.
 const MUST_CHANGE_PASSWORD_ALLOWED_PATHS = new Set([
   '/api/auth/me/password',
-  '/api/auth/logout',
-  '/api/auth/me',
-  '/api/auth/user',
 ]);
 
 /** Normalizes a request path for the forced-rotation allowlist comparison. */
@@ -179,11 +237,18 @@ const refreshedTokenCache = new Map();
 function getCoalescedRefreshToken(user) {
   const nowMs = Date.now();
   const cached = refreshedTokenCache.get(user.id);
-  if (cached && nowMs - cached.mintedAtMs < REFRESH_COALESCE_WINDOW_MS) {
+  if (cached && cached.authorizationGeneration === user.authorization_generation
+      && cached.passwordStamp === user.password_changed_at
+      && nowMs - cached.mintedAtMs < REFRESH_COALESCE_WINDOW_MS) {
     return { token: cached.token, minted: false };
   }
   const token = generateToken(user);
-  refreshedTokenCache.set(user.id, { token, mintedAtMs: nowMs });
+  refreshedTokenCache.set(user.id, {
+    token,
+    mintedAtMs: nowMs,
+    authorizationGeneration: user.authorization_generation,
+    passwordStamp: user.password_changed_at,
+  });
   if (refreshedTokenCache.size > 256) {
     for (const [id, entry] of refreshedTokenCache) {
       if (nowMs - entry.mintedAtMs >= REFRESH_COALESCE_WINDOW_MS) refreshedTokenCache.delete(id);
@@ -284,7 +349,8 @@ function verifyTokenAllowingRecentExpiry(
   } catch {
     return { ok: false, reason: 'invalid' };
   }
-  if (!decoded || typeof decoded !== 'object' || typeof decoded.exp !== 'number') {
+  if (!decoded || typeof decoded !== 'object' || typeof decoded.exp !== 'number'
+      || Object.hasOwn(decoded, 'purpose')) {
     return { ok: false, reason: 'no_exp' };
   }
   const expMs = decoded.exp * 1000;
@@ -336,6 +402,39 @@ const authenticateToken = async (req, res, next) => {
 
   // Normal OSS JWT validation
   const authHeader = req.headers['authorization'];
+  const accept = req.headers['accept'] || '';
+  const queryToken = req.query.token && accept.includes('text/event-stream')
+    ? req.query.token
+    : null;
+  const deviceMatch = String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${DEVICE_COOKIE}=([^;]+)`));
+  let deviceSecret = null;
+  try {
+    deviceSecret = process.env.MULTI_ACCOUNT_SWITCHING === 'true' && deviceMatch
+      ? decodeURIComponent(deviceMatch[1])
+      : null;
+  } catch {
+    return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
+  }
+  if (deviceSecret && (authHeader || queryToken)) {
+    return res.status(400).json({ error: 'Ambiguous authentication', code: 'ambiguous_authentication' });
+  }
+  if (deviceSecret) {
+    const resolved = deviceAccountSessionsDb.resolve(deviceSecret);
+    if (!resolved || !resolved.wallet.activeSlotId) return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
+    const user = userDb.getUserById(resolved.principal.userId);
+    if (!user) return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
+    req.user = user;
+    req.user.userId = user.id;
+    req.user.authenticationKind = 'device_session';
+    req.user.authorizationGeneration = user.authorization_generation;
+    req.user.deviceSessionId = resolved.principal.deviceSessionId;
+    req.user.slotId = resolved.principal.slotId;
+    req.user.deviceGeneration = resolved.principal.generation;
+    req.devicePrincipal = resolved.principal;
+    if (!enforceCookieMutationGuard(req, res, JWT_SECRET)) return;
+    installIdentityFence(req, res);
+    return next();
+  }
   let token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
   // Also accept the token via query param, but ONLY for EventSource/SSE requests
@@ -349,12 +448,7 @@ const authenticateToken = async (req, res, next) => {
   // CodeEditorMediaPreview send the token in the Authorization header (XHR+blob),
   // not the query string. The WebSocket path authenticates separately and is
   // unaffected.
-  if (!token && req.query.token) {
-    const accept = req.headers['accept'] || '';
-    if (accept.includes('text/event-stream')) {
-      token = req.query.token;
-    }
-  }
+  if (!token && queryToken) token = queryToken;
 
   const ip = clientIp(req);
   const ua = req.headers['user-agent'] ?? null;
@@ -367,6 +461,9 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS);
+    if (decoded && typeof decoded === 'object' && Object.hasOwn(decoded, 'purpose')) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
 
     // Verify user still exists, is active, and is not disabled (stateless: a
     // single id lookup, not a server-side session record).
@@ -394,6 +491,14 @@ const authenticateToken = async (req, res, next) => {
         userId: user.id,
         ipAddress: ip,
         userAgent: ua,
+      });
+      return res.status(401).json({ error: 'Token invalidated' });
+    }
+    if (!Number.isSafeInteger(decoded.auth_gen)
+        || decoded.auth_gen !== user.authorization_generation) {
+      recordAuthRejection({
+        reason: 'authorization_generation_stale', transport: 'rest', userId: user.id,
+        ipAddress: ip, userAgent: ua,
       });
       return res.status(401).json({ error: 'Token invalidated' });
     }
@@ -461,6 +566,7 @@ const authenticateToken = async (req, res, next) => {
         });
       }
     }
+    installIdentityFence(req, res);
     next();
   } catch (err) {
     // Do not log token contents. Classify the failure from err.name and recover
@@ -481,6 +587,43 @@ const authenticateToken = async (req, res, next) => {
     });
     // Generic message; 401 for expired/forged.
     return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+};
+
+/** Accepts a single-purpose forced-rotation cookie, otherwise uses normal auth. */
+const authenticatePasswordChange = async (req, res, next) => {
+  const cookieMatch = String(req.headers.cookie || '')
+    .match(new RegExp(`(?:^|;\\s*)${PASSWORD_CHANGE_COOKIE}=([^;]+)`));
+  if (!cookieMatch) return authenticateToken(req, res, next);
+  if (req.headers.authorization) {
+    return res.status(400).json({
+      error: 'Ambiguous authentication', code: 'ambiguous_authentication',
+    });
+  }
+  try {
+    const token = decodeURIComponent(cookieMatch[1]);
+    const decoded = jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS);
+    if (decoded.purpose !== 'password_change'
+        || !Number.isSafeInteger(decoded.userId)
+        || !Number.isSafeInteger(decoded.pwd_iat)) {
+      return res.status(401).json({ error: 'Invalid password change session' });
+    }
+    const user = userDb.getUserById(decoded.userId);
+    if (!user || user.must_change_password !== 1
+        || user.password_changed_at !== decoded.pwd_iat) {
+      return res.status(401).json({ error: 'Invalid password change session' });
+    }
+    req.user = user;
+    req.user.userId = user.id;
+    req.user.mustChangePassword = true;
+    req.user.authenticationKind = 'password_change';
+    req.user.authorizationGeneration = user.authorization_generation;
+    req.passwordChangeSession = true;
+    if (!enforceCookieMutationGuard(req, res, JWT_SECRET)) return;
+    installIdentityFence(req, res);
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid password change session' });
   }
 };
 
@@ -547,11 +690,24 @@ const generateToken = (user) => {
       username: user.username,
       role: user.role,
       pwd_iat: user.password_changed_at ?? 0,
+      auth_gen: Number.isSafeInteger(user.authorization_generation)
+        ? user.authorization_generation : 1,
     },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL }
   );
 };
+
+/** Mints a short-lived credential that authorizes password rotation only. */
+const generatePasswordChangeToken = (user) => jwt.sign(
+  {
+    userId: user.id,
+    pwd_iat: user.password_changed_at ?? 0,
+    purpose: 'password_change',
+  },
+  JWT_SECRET,
+  { expiresIn: '10m' },
+);
 
 // WebSocket authentication function
 const authenticateWebSocket = (token) => {
@@ -584,6 +740,9 @@ const authenticateWebSocket = (token) => {
   try {
     // SEC-JWT-ALG: same algorithm pin as the REST verifier.
     const decoded = jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS);
+    if (decoded && typeof decoded === 'object' && Object.hasOwn(decoded, 'purpose')) {
+      return null;
+    }
     // Verify user actually exists/active in DB (matches REST authenticateToken).
     const user = userDb.getUserById(decoded.userId);
     if (!user) {
@@ -593,6 +752,10 @@ const authenticateWebSocket = (token) => {
     // password change / admin reset) — matches REST authenticateToken so a live
     // WebSocket cannot outlive a password change to its TTL.
     if (user.password_changed_at && decoded.pwd_iat < user.password_changed_at) {
+      return null;
+    }
+    if (!Number.isSafeInteger(decoded.auth_gen)
+        || decoded.auth_gen !== user.authorization_generation) {
       return null;
     }
     return {
@@ -608,13 +771,37 @@ const authenticateWebSocket = (token) => {
   }
 };
 
+// Device-session websocket authentication. Cookie parsing and ambiguity checks
+// stay in the upgrade verifier; this function only resolves a server principal.
+const authenticateDeviceWebSocket = (secret) => {
+  if (IS_PLATFORM || process.env.MULTI_ACCOUNT_SWITCHING !== 'true' || !secret) return null;
+  const resolved = deviceAccountSessionsDb.resolve(secret);
+  if (!resolved) return null;
+  const user = userDb.getUserById(resolved.principal.userId);
+  if (!user) return null;
+  return {
+    id: user.id,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    authenticationKind: 'device_session',
+    authorizationGeneration: user.authorization_generation,
+    deviceSessionId: resolved.principal.deviceSessionId,
+    slotId: resolved.principal.slotId,
+    deviceGeneration: resolved.principal.generation,
+  };
+};
+
 export {
   validateApiKey,
   authenticateToken,
+  authenticatePasswordChange,
   requireRole,
   roleSatisfies,
   generateToken,
+  generatePasswordChangeToken,
   authenticateWebSocket,
+  authenticateDeviceWebSocket,
   invalidateRefreshCache,
   verifyTokenAllowingRecentExpiry,
   resolveRefreshGraceMs,
@@ -625,4 +812,5 @@ export {
   REFRESH_GRACE_MS,
   REFRESH_GRACE_MAX_HOURS,
   JWT_SECRET,
+  PASSWORD_CHANGE_COOKIE,
 };

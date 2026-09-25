@@ -8,17 +8,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildTurnsMap,
   buildCostSummaryLines,
   COST_DASH,
   formatCompactTokens,
   formatCostCount,
   formatCostUsd,
   formatWorkDuration,
+  formatTurnFooter,
+  resolveConversationMeasurement,
   resolveCostDisplay,
   resolveCostSnapshotStatus,
   sumConversationCostTokens,
   sumCostTokens,
   type ConversationCost,
+  type ConversationMeasurementV2,
+  type SessionCostTurn,
 } from './conversationCostFormat';
 
 const cost = (overrides: Partial<ConversationCost> = {}): ConversationCost => ({
@@ -32,6 +37,35 @@ const cost = (overrides: Partial<ConversationCost> = {}): ConversationCost => ({
   subagentRequests: 0,
   pricesAsOf: '2026-07-28',
   perModel: [],
+  ...overrides,
+});
+
+const measurement = (
+  overrides: Partial<ConversationMeasurementV2> = {},
+): ConversationMeasurementV2 => ({
+  version: 2,
+  status: 'complete',
+  source: 'v3',
+  window: { since: null, until: null },
+  attribution: { scopeFingerprint: 'scope-1', attributionFingerprint: 'attribution-1' },
+  counts: {
+    facts: 11,
+    requests: 11,
+    rollouts: 3,
+    subagentSpawns: 4,
+    subagentRollouts: 2,
+    subagentRequests: 4,
+  },
+  durations: { responseTurnsMs: 0, workMs: 114_400 },
+  reconciliation: {
+    totalUsd: 'matched',
+    perModel: 'matched',
+    turns: 'matched',
+    counts: 'matched',
+    durations: 'matched',
+    eventSets: 'matched',
+    tokens: 'matched',
+  },
   ...overrides,
 });
 
@@ -205,6 +239,66 @@ test('بلا وكلاء فرعيين لا يظهر سطرهم', () => {
   assert.ok(!lines.some((line) => line.key === 'subagents'));
 });
 
+test('قياس v2 يحفظ الصفر المثبت ويفصل العدادات والمدد', () => {
+  assert.deepEqual(resolveConversationMeasurement(cost({ measurement: measurement() })), {
+    version: 'v2',
+    status: 'complete',
+    requestCount: 11,
+    rolloutCount: 3,
+    subagentSpawnCount: 4,
+    subagentRolloutCount: 2,
+    subagentRequestCount: 4,
+    responseTurnDurationMs: 0,
+    workDurationMs: 114_400,
+  });
+});
+
+test('v2 يمنع تكرار عداد الوكلاء القديم', () => {
+  const lines = buildCostSummaryLines(cost({
+    subagentRequests: 99,
+    measurement: measurement(),
+  }));
+  assert.ok(!lines.some((line) => line.key === 'subagents'));
+});
+
+test('العقد المشوه أو المستقبلي يفشل مغلقاً إلى v1 بلا استنتاج', () => {
+  const malformed = [
+    null,
+    { version: 3 },
+    measurement({ counts: { ...measurement().counts, requests: -1 } }),
+    measurement({ counts: { ...measurement().counts, rollouts: 1.5 } }),
+    measurement({ durations: { ...measurement().durations, workMs: Number.NaN } }),
+    measurement({ status: 'complete', reconciliation: {
+      ...measurement().reconciliation,
+      counts: 'mismatch',
+    } }),
+  ];
+  for (const value of malformed) {
+    assert.deepEqual(resolveConversationMeasurement(cost({ measurement: value })), { version: 'v1' });
+  }
+});
+
+test('incomplete وquarantined يبقيان v2 ولا يحولان null إلى صفر', () => {
+  for (const status of ['incomplete', 'quarantined'] as const) {
+    const resolved = resolveConversationMeasurement(cost({
+      measurement: measurement({
+        status,
+        counts: { ...measurement().counts, rollouts: null, subagentSpawns: null },
+        durations: { responseTurnsMs: null, workMs: null },
+        reconciliation: { ...measurement().reconciliation, counts: 'unavailable' },
+      }),
+    }));
+    assert.equal(resolved.version, 'v2');
+    if (resolved.version === 'v2') {
+      assert.equal(resolved.status, status);
+      assert.equal(resolved.rolloutCount, null);
+      assert.equal(resolved.subagentSpawnCount, null);
+      assert.equal(resolved.responseTurnDurationMs, null);
+      assert.equal(resolved.workDurationMs, null);
+    }
+  }
+});
+
 test('غير المتاح لا يُذيَّل بسعرٍ ولا بتاريخ — لا رقم أصلاً ليُؤرَّخ', () => {
   const lines = buildCostSummaryLines(cost({ available: false, reason: '  ' }));
   assert.deepEqual(lines, [{ key: 'unavailable', reason: null }]);
@@ -244,12 +338,6 @@ test('a zero subtotal for an unpriced token component remains unavailable', () =
 });
 
 // ─────────── اختبارات الأدوار (turns) — T-1676 / B-1021 ─────────────────────
-
-import {
-  buildTurnsMap,
-  formatTurnFooter,
-  type SessionCostTurn,
-} from './conversationCostFormat';
 
 const TURN_TOKENS = { input: 10_000, output: 3_000, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 5_000 };
 

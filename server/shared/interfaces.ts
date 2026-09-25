@@ -172,6 +172,7 @@ export interface IProviderCredentialWriter {
     userId: string | number | null | undefined,
     apiKey: string,
     target?: string,
+    authenticatedPrincipal?: unknown,
   ): Promise<ProviderCredentialStatus>;
 
   /**

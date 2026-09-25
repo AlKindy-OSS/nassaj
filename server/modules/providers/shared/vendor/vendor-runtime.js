@@ -28,6 +28,8 @@ import crypto from 'node:crypto';
 // eslint-disable-next-line boundaries/no-unknown
 import { beginProviderRun } from '@/services/provider-run-presence.js';
 
+// Existing cross-tree runtime policy seam, kept explicit for the boundary checker.
+// eslint-disable-next-line boundaries/no-unknown
 import { getRuntimeInstructions } from '../../../../services/runtime-instructions.js';
 import { resolveProviderEnv } from '../../../../services/isolation/resolve-provider-env.js';
 import { sessionsService } from '../../services/sessions.service.js';
@@ -252,7 +254,9 @@ async function streamResponse({ provider, sessionId, projectPath, body, ws }) {
   const readModel = createVendorResponseModelReader();
 
   const handleEvent = async (event) => {
+    if (ws?.isRunOutputRevoked?.()) return;
     await appendTranscript(provider, sessionId, projectPath, event);
+    if (ws?.isRunOutputRevoked?.()) return;
     let normalized = [];
     try {
       normalized = sessionsService.normalizeMessage(provider, readModel(event), sessionId);

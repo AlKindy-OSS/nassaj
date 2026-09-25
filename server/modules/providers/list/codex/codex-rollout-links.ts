@@ -432,6 +432,8 @@ export async function readCodexRolloutMetadata(
 export type CodexLinkedRollout = {
   rolloutPath: string;
   model: string | null;
+  /** Parent declared by this child's own immutable session metadata. */
+  parentThreadId: string;
   spawn: CodexSpawn;
 };
 
@@ -451,8 +453,10 @@ async function buildCodexRolloutManifest(
   // These are safeguards against a malformed/cyclic transcript consuming the
   // server indefinitely. They deliberately exceed normal fan-out; hitting one
   // is returned to callers, never converted into a silently partial tree.
-  const MAX_DEPTH = 64;
-  const MAX_NODES = 4_096;
+  const MAX_DEPTH = 8;
+  // The root is a source too, so 255 descendants preserve the 256-source cap.
+  const MAX_NODES = 255;
+  const MAX_EDGES = 512;
   let limitReason: string | null = null;
   let unresolved = 0;
   let unstable = root.snapshotStable ? 0 : 1;
@@ -503,6 +507,10 @@ async function buildCodexRolloutManifest(
       spawns.push(spawn);
     };
     for (const spawn of candidates) {
+      if (spawns.length >= MAX_EDGES) {
+        limitReason ??= `Codex linked-rollout edge count exceeded the safety limit (${MAX_EDGES}).`;
+        continue;
+      }
       const trustedActor = spawn.linkKind !== 'custom';
       if (trustedActor) admit(spawn);
       if (!spawn.agentThreadId) continue;
@@ -550,7 +558,7 @@ async function buildCodexRolloutManifest(
       visitedPaths.add(childPath);
       metadataByPath.set(childPath, child);
       spawn.childRolloutPath = childPath;
-      linked.push({ rolloutPath: childPath, model: child.model, spawn });
+      linked.push({ rolloutPath: childPath, model: child.model, parentThreadId: child.parentThreadId!, spawn });
       await visit(childPath, child, depth + 1, new Set([...ancestors, childPath]));
     }
   };

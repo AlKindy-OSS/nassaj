@@ -19,6 +19,9 @@ let lastPutBody: unknown;
 
 mock.module('../utils/api', {
   namedExports: {
+    authenticatedFetch: (endpoint: string, options: unknown) =>
+      (globalThis.fetch as (url: string, init: unknown) => Promise<FetchResponse>)(endpoint, options),
+    hasAuthenticatedSession: () => Boolean(globalThis.localStorage?.getItem('auth-token')),
     api: {
       get: (_endpoint: string) => getResponse(),
       put: (_endpoint: string, body: unknown) => {
@@ -328,6 +331,31 @@ describe('write mirror', () => {
     sync.__resetPreferenceSyncForTests();
   });
 
+  it('does not requeue a late account A write after account B becomes active', async () => {
+    let rejectA!: (reason?: unknown) => void;
+    const sent: unknown[] = [];
+    (globalThis as Record<string, unknown>).fetch = (_url: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body));
+      if (sent.length === 1) return new Promise((_resolve, reject) => { rejectA = reject; });
+      return Promise.resolve({ ok: true, status: 200 });
+    };
+    sync.setPreferenceIdentityAuthenticated(true);
+    sync.installPreferenceWriteMirror();
+
+    localStorage.setItem('theme', 'dark');
+    sync.flushPendingWritesNow();
+    sync.setPreferenceIdentityAuthenticated(false);
+    sync.setPreferenceIdentityAuthenticated(true);
+    getResponse = () => ok({ preferences: {} });
+    await sync.hydratePreferencesFromServer();
+    rejectA(new Error('late A failure'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    localStorage.setItem('theme', 'light');
+    sync.flushPendingWritesNow();
+    assert.deepEqual(sent, [{ theme: 'dark' }, { theme: 'light' }]);
+  });
+
   it('a transient GET failure does not disable the write mirror for the session', async () => {
     const sent = armMirror();
     getResponse = () => Promise.reject(new Error('server restarting'));
@@ -342,6 +370,62 @@ describe('write mirror', () => {
 });
 
 describe('hydratePreferencesFromServer', () => {
+  it('removes account A values before delayed account B hydration can paint', async () => {
+    localStorage.setItem('theme', 'dark');
+    sync.setPreferenceIdentityAuthenticated(true);
+    let releaseB!: (value: FetchResponse) => void;
+    getResponse = () => new Promise((resolve) => { releaseB = resolve; });
+
+    sync.setPreferenceIdentityAuthenticated(false);
+    assert.equal(localStorage.getItem('theme'), null);
+    assert.ok(dispatched.some((event) => event.type === sync.PREFERENCE_APPLY_EVENT
+      && (event.detail as { storageKey?: string; rawValue?: string | null })?.storageKey === 'theme'
+      && (event.detail as { rawValue?: string | null })?.rawValue === null));
+    // A mounted owner may persist its neutral default in response to the clear
+    // event. It must not become a user write that blocks B's server value.
+    localStorage.setItem('theme', 'neutral-default');
+
+    sync.setPreferenceIdentityAuthenticated(true);
+    const hydrationB = sync.hydratePreferencesFromServer();
+    assert.equal(localStorage.getItem('theme'), 'neutral-default', 'A must stay absent while B is pending');
+    releaseB({ ok: true, status: 200, json: async () => ({ preferences: { theme: 'light' } }) });
+    assert.equal((await hydrationB).status, 'applied');
+    assert.equal(localStorage.getItem('theme'), 'light');
+  });
+
+  it('keeps neutral defaults when account B preference hydration fails', async () => {
+    localStorage.setItem('theme', 'dark');
+    sync.setPreferenceIdentityAuthenticated(true);
+    sync.setPreferenceIdentityAuthenticated(false);
+    sync.setPreferenceIdentityAuthenticated(true);
+    getResponse = () => Promise.reject(new Error('B unavailable'));
+    assert.equal((await sync.hydratePreferencesFromServer()).status, 'unavailable');
+    assert.equal(localStorage.getItem('theme'), null);
+  });
+
+  it('device sessions hydrate without a Bearer token', async () => {
+    sync.setPreferenceIdentityAuthenticated(true);
+    getResponse = () => ok({ preferences: { theme: 'dark' } });
+    const result = await sync.hydratePreferencesFromServer();
+    assert.equal(result.status, 'applied');
+    assert.equal(localStorage.getItem('theme'), 'dark');
+  });
+
+  it('a late account A read cannot overwrite account B preferences', async () => {
+    sync.setPreferenceIdentityAuthenticated(true);
+    let releaseA!: (value: FetchResponse) => void;
+    getResponse = () => new Promise((resolve) => { releaseA = resolve; });
+    const hydrationA = sync.hydratePreferencesFromServer();
+
+    sync.setPreferenceIdentityAuthenticated(false);
+    sync.setPreferenceIdentityAuthenticated(true);
+    getResponse = () => ok({ preferences: { theme: 'light' } });
+    assert.equal((await sync.hydratePreferencesFromServer()).status, 'applied');
+    releaseA({ ok: true, status: 200, json: async () => ({ preferences: { theme: 'dark' } }) });
+    assert.equal((await hydrationA).status, 'skipped');
+    assert.equal(localStorage.getItem('theme'), 'light');
+  });
+
   it('applies a non-empty server payload (server is authoritative)', async () => {
     localStorage.setItem('auth-token', 't');
     localStorage.setItem('theme', 'light'); // local differs

@@ -651,7 +651,23 @@
     "perModel": "Modele göre",
     "loading": "Hesaplanıyor…",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "Eski özet — kaydedilen istekler konuşmanın tamamını kapsamıyor olabilir",
+    "measurementIncomplete": "Rakamlar konuşmanın tamamını kapsamıyor olabilir",
+    "measurementQuarantined": "Ölçüm doğrulanıyor — toplamlar onaylanmadı",
+    "modelCalls": "Model çağrıları: {{count}}",
+    "modelCallUsage": "{{count}} model çağrısı · {{tokens}} işlem birimi",
+    "legacyCodexModelUsage": "Eski özet: {{count}} kaydedilmiş istek · {{tokens}} işlem birimi",
+    "rolloutChains": "Katkı sağlayan yürütme zincirleri: {{count}}",
+    "subagentSpawnAttempts": "Alt ajan oluşturma denemeleri: {{count}}",
+    "resolvedSubagentRollouts": "Sayılan alt ajan yürütme zincirleri: {{count}}",
+    "subagentModelCalls": "Alt ajan model çağrıları: {{count}}",
+    "responseTurnDurationLabel": "Yanıt süresi",
+    "totalWorkDuration": "Toplam çalışma süresi (süreler çakışabilir): {{duration}}"
+  },
+  "activityGap": {
+    "status": "Ajan çalışıyor — son etkinlik {{time}} önce",
+    "ariaLabel": "Ajan hâlâ çalışıyor, son etkinlik {{time}} önce"
   },
   "activityGap": {
     "status": "Ajan çalışıyor — son etkinlik {{time}} önce",

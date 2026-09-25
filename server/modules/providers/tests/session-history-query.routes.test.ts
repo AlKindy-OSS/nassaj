@@ -5,6 +5,13 @@ import test, { after, before } from 'node:test';
 
 import express from 'express';
 
+import {
+  closeConnection,
+  initializeDatabase,
+  participantsDb,
+  sessionsDb,
+  userDb,
+} from '@/modules/database/index.js';
 import { AppError } from '@/shared/utils.js';
 
 import providerRouter from '../provider.routes.js';
@@ -12,11 +19,21 @@ import providerRouter from '../provider.routes.js';
 let server: Server;
 let baseUrl = '';
 const sessionId = '00000001-0000-4000-8000-000000000001';
+let requesterId = 0;
 
 before(async () => {
+  // The route authorizes the session before parsing the query (request fence, ecfdc7db5),
+  // so the requester is a real participant of a real session row.
+  closeConnection();
+  await initializeDatabase();
+  requesterId = userDb.createUser('history-query-owner', 'hash', 'user').id;
+  sessionsDb.createSession(sessionId, 'claude', '/workspace/history-query', 'History query');
+  participantsDb.recordSpawn(sessionId, requesterId);
+
   const app = express();
   app.use((req, _res, next) => {
-    (req as express.Request & { user?: { id: number } }).user = { id: 1 };
+    (req as express.Request & { user?: { id: number } }).user = { id: requesterId };
+    (req as unknown as { assertCurrentIdentity: () => boolean }).assertCurrentIdentity = () => true;
     next();
   });
   app.use('/api/providers', providerRouter);
@@ -34,6 +51,7 @@ before(async () => {
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
+  closeConnection();
 });
 
 for (const query of ['payload=small', 'payload=', 'limit=1junk', 'limit=-1', 'limit=501', 'offset=2.5']) {

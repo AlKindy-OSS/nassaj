@@ -54,10 +54,9 @@ import { useFavoriteModels } from "../../../../hooks/useFavoriteModels";
 // Globally disabled providers (T-864, shared/disabledProviders.ts) never make
 // it into the picker: the full list stays here for upstream-sync friendliness
 // and the filter below drops the disabled ids.
-const ALL_PROVIDER_META: { id: LLMProvider; name: string }[] = [
+export const ALL_PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
   { id: "codex", name: "Codex" },
-  { id: "gemini", name: "Google" },
   { id: "antigravity", name: "Antigravity (agy)" },
   { id: "cursor", name: "Cursor" },
   { id: "opencode", name: "OpenCode" },

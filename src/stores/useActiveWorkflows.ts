@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 
 import { api } from '../utils/api';
+
 import { normalizeWorkflowsEnvelope } from './workflowStatus';
-import { setActiveWorkflows } from './workflowStatusStore';
+import { getWorkflowStatusGeneration, setActiveWorkflows } from './workflowStatusStore';
 
 /**
  * Driver hook for the honest background-workflow surface (B-103). Mounted ONCE
@@ -51,6 +52,7 @@ export function useActiveWorkflows(enabled: boolean): { scheduleRefetch: () => v
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const controller = new AbortController();
+    const identityGeneration = getWorkflowStatusGeneration();
 
     const clearPollTimer = () => {
       if (pollTimer) {
@@ -88,7 +90,7 @@ export function useActiveWorkflows(enabled: boolean): { scheduleRefetch: () => v
           if (stopped) {
             return;
           }
-          setActiveWorkflows(safe);
+          setActiveWorkflows(safe, identityGeneration);
           // Quiesce only when there is genuinely nothing to watch AND the scan
           // was complete. If capped, an unscanned orphan might exist → keep polling.
           quiet = safe.workflows.length === 0 && !safe.capped;

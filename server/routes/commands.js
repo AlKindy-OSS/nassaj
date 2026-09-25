@@ -119,7 +119,7 @@ async function readContainedCommandFile(commandPath, allowedRoots) {
 // excluded: it has no model state in useChatComposerState/useChatProviderState
 // yet, so context.provider never carries it.
 const MODEL_PROVIDERS = [
-  "claude", "cursor", "codex", "gemini", "antigravity", "opencode", "hermes",
+  "claude", "cursor", "codex", "antigravity", "opencode", "hermes",
   "kimi", "deepseek", "glm",
 ];
 
@@ -127,7 +127,6 @@ const MODEL_PROVIDER_LABELS = {
   claude: "Claude",
   cursor: "Cursor",
   codex: "Codex",
-  gemini: "Gemini",
   antigravity: "Antigravity",
   opencode: "OpenCode",
   hermes: "Hermes",
@@ -514,7 +513,7 @@ const CODEX_APP_SERVER_COMMANDS = [
 
 // Providers whose sessions must NOT be shown the Claude-only built-ins above
 // (OC-19). Scoped to opencode per the OpenCode-compat plan; other non-Claude
-// providers (cursor/codex/gemini/…) keep the full static list unchanged — their
+// providers (cursor/codex/…) keep the full static list unchanged — their
 // command UX is outside this task's scope. Add a provider here to extend the filter.
 const BUILTIN_FILTER_PROVIDERS = new Set(["opencode"]);
 

@@ -153,3 +153,29 @@ test('a live pid is never reaped', (t) => {
   assert.deepEqual(presenceStops, [], 'a live process is never reaped');
   assert.equal(writer.sent.at(-1)?.processState, 'running');
 });
+
+test('ownership token rejects a reconnected socket and replacement run', (t) => {
+  const sessionId = 'ownership-run';
+  const oldSocket = { id: 'old' };
+  const newSocket = { id: 'new' };
+  const writer = { ...fakeWriter(), ws: oldSocket };
+  t.after(() => monitor.unregisterSessionProcess(sessionId));
+
+  monitor.registerSessionProcess(sessionId, { provider: 'claude', writer });
+  const [owned] = monitor.getProviderRunsOwnedByWriter(writer, oldSocket);
+  assert.ok(owned?.token);
+  assert.equal(monitor.isProviderRunOwnershipCurrent(owned, writer, oldSocket), true);
+
+  writer.ws = newSocket;
+  assert.equal(monitor.isProviderRunOwnershipCurrent(owned, writer, oldSocket), false);
+  assert.deepEqual(monitor.getProviderRunsOwnedByWriter(writer, oldSocket), []);
+
+  monitor.unregisterSessionProcess(sessionId);
+  writer.ws = oldSocket;
+  monitor.registerSessionProcess(sessionId, { provider: 'claude', writer });
+  assert.equal(
+    monitor.isProviderRunOwnershipCurrent(owned, writer, oldSocket),
+    false,
+    'same id re-registration has a new opaque run token',
+  );
+});

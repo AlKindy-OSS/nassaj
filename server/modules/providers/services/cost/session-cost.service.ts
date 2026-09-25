@@ -11,7 +11,7 @@
  *  • **`metered` ليس تفصيلاً تجميلياً.** اشتراك (Claude Max / ChatGPT) لا
  *    يُحاسَب بالتوكن، فما نحسبه له هو **القيمة المكافئة لسعر الـAPI** لا مالٌ
  *    دُفع. يُقرأ من طريقة المصادقة الفعلية (مفتاح API ⇒ مقيس)، وعند أي شكّ
- *    يبقى `false` — ادّعاء «فاتورة» على اشتراك أسوأ الخطأين.
+ *    يبقى `null` — ادّعاء «فاتورة» أو «اشتراك» بلا دليل كلاهما مضلل.
  *
  *  • **لا تُقرأ محادثة مرّتين بلا سبب.** الكاش مفتاحه (المسار + بصمة التعديل +
  *    النافذة)، فملف لم يتغيّر لا يُقرأ ثانية، وملف نما يسقط مفتاحه تلقائياً.
@@ -22,7 +22,7 @@
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import { participantsDb, responseTurnMetricsDb, sessionsDb } from '@/modules/database/index.js';
+import { participantsDb, responseTurnMetricsDb, sessionsDb, usageStatisticsV3ReaderMode } from '@/modules/database/index.js';
 import {
   claudeProjectRoots,
   encodeClaudeProjectDir,
@@ -32,7 +32,11 @@ import {
   type CodexRolloutManifest,
 } from '@/modules/providers/list/codex/codex-rollout-links.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
-import type { BillingAnchorSource, LLMProvider, SessionCostTurn } from '@/shared/types.js';
+import type {
+  BillingAnchorSource,
+  SessionCostMeasurement,
+  SessionCostTurn,
+} from '@/shared/types.js';
 
 import { providerBalanceService } from '../usage/provider-balance.service.js';
 
@@ -81,7 +85,10 @@ import {
   logSnapshotComparison,
   readConversationUsageSnapshot,
 } from './usage-ingestion.service.js';
-import { usageIngestionScheduler } from './usage-ingestion.scheduler.js';
+import {
+  readReadyUsageV3,
+  type ReadyUsageV3,
+} from './usage-statistics-v3.service.js';
 
 // ---------------------------------------------------------------------------
 // أنواع العقد (نفس شكل الاستجابة حرفياً — المسارات تمرّرها كما هي)
@@ -101,8 +108,8 @@ export type SessionCostView = {
   /** false ⇒ لا قياس ممكن لهذا المزوّد/المحادثة، والسبب في `reason`. */
   available: boolean;
   reason?: string;
-  /** true = مالٌ يُحاسَب بالتوكن فعلاً؛ false = قيمة مكافئة لسعر الـAPI. */
-  metered: boolean;
+  /** true = مقيس؛ false = قيمة مكافئة؛ null = تعذر إثبات طريقة المصادقة. */
+  metered: boolean | null;
   totalUsd: number;
   snapshotStatus: 'fresh' | 'stale' | 'refreshing' | 'incomplete' | 'unavailable';
   snapshotAsOf: string | null;
@@ -112,6 +119,8 @@ export type SessionCostView = {
   subagentRequests: number;
   /** مجموع مدد العمل المبلّغ عنها في نتائج الوكلاء/الأدوات، أو null إن غابت. */
   workDurationMs: number | null;
+  /** عقدة القياس المنشورة؛ تجمع العدّادات والزمن ودليل اتساق الإجماليات. */
+  measurement: import('@/shared/types.js').SessionCostMeasurement;
   pricesAsOf: string;
   perModel: SessionModelCostView[];
   /** تفصيل الكلفة لكل دور ردّ (اختياري)؛ الشرح في `SessionCostTurn`. */
@@ -129,7 +138,7 @@ export type SubscriptionCostView = {
   cycleEnd: string;
   available: boolean;
   reason?: string;
-  metered: boolean;
+  metered: boolean | null;
   totalUsd: number;
   /** عدد المحادثات التي ساهمت فعلاً داخل الدورة. */
   sessions: number;
@@ -179,6 +188,8 @@ export type SessionCostDeps = SubscriptionDeps & {
   signal?: AbortSignal;
   /** Deterministic race seam for manifest/signature tests; production omits it. */
   afterCodexManifest?: () => Promise<void> | void;
+  /** Deterministic race seam; production omits it. */
+  afterV3Ready?: () => Promise<void> | void;
 };
 
 // ---------------------------------------------------------------------------
@@ -313,6 +324,29 @@ const windowKey = (window?: UsageWindow): string =>
   window && (window.since !== undefined || window.until !== undefined)
     ? `${window.since ?? ''}:${window.until ?? ''}`
     : 'all';
+
+const manifestFingerprint = (manifest?: CodexRolloutManifest): string => {
+  if (!manifest) return 'none';
+  return JSON.stringify({
+    complete: manifest.complete,
+    reason: manifest.limitReason,
+    files: manifest.files.map((file) => [file.rolloutPath, file.size, file.mtimeMs, file.model]),
+    links: manifest.linked.map((link) => [link.rolloutPath, link.spawn.callId, link.spawn.agentThreadId]),
+  });
+};
+
+const metricsFingerprint = (sessionId: string | undefined, enabled: boolean): string => {
+  if (!enabled || !sessionId) return 'none';
+  try {
+    return JSON.stringify(responseTurnMetricsDb.listSessionWindows(sessionId).map((row) => [
+      row.assistantMessageId, row.startedAt, row.completedAt, row.durationMs,
+    ]));
+  } catch {
+    // Metrics are display-only; a failed fingerprint must disable caching, not
+    // reuse a potentially stale turn assignment.
+    return `unavailable:${Date.now()}`;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // بصمة الملف
@@ -535,14 +569,20 @@ export function turnsForSession(
   userBoundariesMs: readonly number[],
 ): SessionCostTurn[] | undefined {
   try {
-    const windows: TurnMetricWindow[] = responseTurnMetricsDb
-      .listSessionWindows(sessionId)
+    const metricRows = responseTurnMetricsDb.listSessionWindows(sessionId);
+    const durationsByMessageId = new Map(metricRows.map((row) => [
+      bareTranscriptMessageId(row.assistantMessageId), row.durationMs,
+    ]));
+    const windows: TurnMetricWindow[] = metricRows
       .map((row) => ({
         assistantMessageId: bareTranscriptMessageId(row.assistantMessageId),
         startedAt: row.startedAt,
         completedAt: row.completedAt,
       }));
-    const turns = buildSessionTurns(requests, windows, userBoundariesMs);
+    const turns = buildSessionTurns(requests, windows, userBoundariesMs).map((turn) => ({
+      ...turn,
+      responseTurnDurationMs: durationsByMessageId.get(turn.assistantMessageId) ?? null,
+    }));
     return turns.length > 0 ? turns : undefined;
   } catch (error) {
     console.warn('[session-cost-turns]', {
@@ -567,7 +607,19 @@ async function costForTranscript(
   // تراكميّاً، لكن المستخرج يفكّه إلى `last_token_usage` لكل دور هنا.
   const captureTurns = !window && !attribution && Boolean(options.sessionId);
   const canonicalPath = await realpath(transcriptPath).catch(() => transcriptPath);
-  const key = `${provider}|${canonicalPath}|${signature.newestMs}|${signature.size}|${windowKey(window)}|${scopeKey}`;
+  const metricsBefore = metricsFingerprint(options.sessionId, captureTurns);
+  const key = [
+    provider,
+    options.sessionId ?? canonicalPath,
+    manifestFingerprint(options.manifest),
+    windowKey(window),
+    scopeKey,
+    captureTurns ? 'turns' : 'summary',
+    metricsBefore,
+    PRICES_AS_OF,
+    signature.newestMs,
+    signature.size,
+  ].join('|');
   const cached = cacheGet(key);
   // An incomplete manifest must never inherit a formerly complete snapshot
   // whose child disappeared without changing the root rollout fingerprint.
@@ -594,6 +646,9 @@ async function costForTranscript(
         // This path is intentionally full-conversation only: captureTurns is
         // false for billing windows and user-attributed reads, so their
         // independent counters are never mixed with displayed turn costs.
+        // Legacy remains authoritative while v3 is dormant. Reconcile the
+        // same full-conversation aggregate and turn set by taking the floor,
+        // never by summing the two views of the same usage.
         cost = reconcileSessionCostTurnFloor(cost, turns);
         cost.turns = turns;
       }
@@ -603,10 +658,15 @@ async function costForTranscript(
       signal: flightSignal,
       ...(provider === 'codex' && options.manifest ? { codexManifest: options.manifest } : {}),
     });
-    const stable = signature.stable && post?.stable === true &&
+    const metricsStable = metricsFingerprint(options.sessionId, captureTurns) === metricsBefore;
+    const stable = signature.stable && post?.stable === true && metricsStable &&
       post.newestMs === signature.newestMs && post.size === signature.size;
     const snapshotStatus = usage.snapshotStatus === 'incomplete' || !stable ? 'incomplete' : 'fresh';
-    const snapshotReason = usage.snapshotReason ?? (!stable ? 'The transcript changed while its snapshot was being read.' : undefined);
+    const snapshotReason = usage.snapshotReason ?? (!stable
+      ? metricsStable
+        ? 'The transcript changed while its snapshot was being read.'
+        : 'Response-turn metrics changed while their snapshot was being read.'
+      : undefined);
     if (stable && snapshotStatus === 'fresh') cacheSet(key, cost);
     return {
       cost,
@@ -650,38 +710,163 @@ async function costForDbSession(
   return cost;
 }
 
+const totalsEqual = (left: number, right: number): boolean => Math.abs(left - right) < 1e-9;
+
+const tokensEqual = (
+  left: TokenTotals,
+  right: TokenTotals,
+): boolean => left.input === right.input && left.output === right.output
+  && left.cacheWrite5m === right.cacheWrite5m && left.cacheWrite1h === right.cacheWrite1h
+  && left.cacheRead === right.cacheRead;
+
+const emptyTokenTotals = (): TokenTotals => ({
+  input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0,
+});
+
+const addTokens = (target: TokenTotals, source: TokenTotals): void => {
+  target.input += source.input;
+  target.output += source.output;
+  target.cacheWrite5m += source.cacheWrite5m;
+  target.cacheWrite1h += source.cacheWrite1h;
+  target.cacheRead += source.cacheRead;
+};
+
+type MeasurementSource = Pick<ReadyUsageV3, 'facts' | 'window' | 'attribution' | 'counts' | 'durations'>;
+
+const matched = (value: boolean): SessionCostMeasurement['reconciliation']['totalUsd'] =>
+  value ? 'matched' : 'mismatch';
+
+const sourceRolloutCount = (source: MeasurementSource, subagentOnly = false): number => new Set(source.facts
+  .filter((fact) => !subagentOnly || fact.isSubagent)
+  .map((fact) => fact.evidence.sourceKey)).size;
+
+const withMeasurementStatus = (
+  measurement: Omit<SessionCostMeasurement, 'status'>,
+): SessionCostMeasurement => ({
+  ...measurement,
+  status: Object.values(measurement.reconciliation).every((value) => value === 'matched')
+    ? 'complete'
+    : 'incomplete',
+});
+
+/** Builds the v2 wire envelope from the exact cost rows being returned. */
+const measurementFor = (
+  cost: SessionCost,
+  turns: readonly SessionCostTurn[] | undefined,
+  source?: MeasurementSource,
+): SessionCostMeasurement => {
+  const perModelUsd = cost.perModel.reduce((sum, row) => sum + (row.costUsd ?? 0), 0);
+  const requestCount = cost.perModel.reduce((sum, row) => sum + row.requests, 0);
+  const rollouts = source?.counts.rolloutCount ?? null;
+  const responseTurnsMs = turns && turns.length > 0
+    ? turns.reduce<number | null>((sum, turn) => sum === null || turn.responseTurnDurationMs === null || turn.responseTurnDurationMs === undefined
+      ? null : sum + turn.responseTurnDurationMs, 0)
+    : null;
+  const base = {
+    version: 2 as const,
+    source: source ? 'v3' as const : 'legacy' as const,
+    window: source ? { ...source.window } : { since: null, until: null },
+    attribution: source ? { ...source.attribution } : null,
+    counts: {
+      facts: source?.counts.facts ?? null,
+      requests: source?.counts.requests ?? requestCount,
+      rollouts,
+      subagentSpawns: source?.counts.subagentSpawnCount ?? null,
+      subagentRollouts: source?.counts.subagentRolloutCount ?? null,
+      subagentRequests: source?.counts.subagentRequestCount ?? cost.subagentRequests,
+    },
+    durations: {
+      workMs: source?.durations.workDurationMs ?? cost.workDurationMs,
+      responseTurnsMs,
+    },
+  };
+  if (!turns || turns.length === 0) {
+    return withMeasurementStatus({
+      ...base,
+      reconciliation: {
+        totalUsd: totalsEqual(cost.totalUsd, perModelUsd) ? 'matched' : 'mismatch',
+        perModel: totalsEqual(cost.totalUsd, perModelUsd) ? 'matched' : 'mismatch',
+        turns: 'unavailable',
+        counts: source
+          ? matched(requestCount === source.counts.requests
+            && cost.subagentRequests === source.counts.subagentRequestCount
+            && source.counts.subagentRequests === source.counts.subagentRequestCount
+            && sourceRolloutCount(source) === source.counts.rolloutCount
+            && sourceRolloutCount(source, true) === source.counts.subagentRolloutCount)
+          : 'matched',
+        durations: source && source.durations.workDurationMs !== cost.workDurationMs ? 'mismatch' : 'unavailable',
+        eventSets: source
+          ? matched(new Set(source.facts.map((fact) => fact.eventKey)).size === source.counts.facts)
+          : 'unavailable',
+        tokens: 'unavailable',
+      },
+    });
+  }
+  const modelTokens = emptyTokenTotals();
+  const turnTokens = emptyTokenTotals();
+  for (const row of cost.perModel) addTokens(modelTokens, row.tokens);
+  for (const turn of turns) addTokens(turnTokens, turn.tokens);
+  const turnUsd = turns.reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0);
+  return withMeasurementStatus({
+    ...base,
+    reconciliation: {
+      totalUsd: totalsEqual(cost.totalUsd, perModelUsd) && totalsEqual(cost.totalUsd, turnUsd) ? 'matched' : 'mismatch',
+      perModel: totalsEqual(cost.totalUsd, perModelUsd) ? 'matched' : 'mismatch',
+      turns: totalsEqual(cost.totalUsd, turnUsd) ? 'matched' : 'mismatch',
+      counts: source
+        ? matched(requestCount === source.counts.requests
+          && cost.subagentRequests === source.counts.subagentRequestCount
+          && source.counts.subagentRequests === source.counts.subagentRequestCount
+          && sourceRolloutCount(source) === source.counts.rolloutCount
+          && sourceRolloutCount(source, true) === source.counts.subagentRolloutCount)
+        : 'matched',
+      durations: source && source.durations.workDurationMs !== cost.workDurationMs ? 'mismatch' : 'matched',
+      eventSets: source
+        ? matched(new Set(source.facts.map((fact) => fact.eventKey)).size === source.counts.facts)
+        : 'unavailable',
+      tokens: tokensEqual(modelTokens, turnTokens) ? 'matched' : 'mismatch',
+    },
+  });
+};
+
 /** نسخة خارجية من الكلفة المخبَّأة — لا يُسلَّم مرجع داخلي قابل للتعديل. */
 const toSessionCostView = (
   sessionId: string,
   provider: string,
   cost: SessionCost,
-  metered: boolean,
+  metered: boolean | null,
   snapshot: Pick<TranscriptCostOutcome, 'snapshotStatus' | 'snapshotAsOf' | 'snapshotReason'> = {
     snapshotStatus: 'fresh',
     snapshotAsOf: null,
   },
-): SessionCostView => ({
-  sessionId,
-  provider,
-  available: true,
-  metered,
-  totalUsd: cost.totalUsd,
-  snapshotStatus: snapshot.snapshotStatus,
-  snapshotAsOf: snapshot.snapshotAsOf,
-  ...(snapshot.snapshotReason ? { snapshotReason: snapshot.snapshotReason } : {}),
-  complete: cost.complete,
-  unpricedModels: [...cost.unpricedModels],
-  subagentRequests: cost.subagentRequests,
-  workDurationMs: cost.workDurationMs,
-  pricesAsOf: cost.pricesAsOf,
-  perModel: cost.perModel.map((entry) => ({
-    model: entry.model,
-    costUsd: entry.costUsd,
-    requests: entry.requests,
-    tokens: { ...entry.tokens },
-  })),
-  ...(cost.turns ? { turns: cost.turns.map((turn) => ({ ...turn, models: [...turn.models], tokens: { ...turn.tokens } })) } : {}),
-});
+  measurementSource?: MeasurementSource,
+  comparison?: SessionCostMeasurement['comparison'],
+): SessionCostView => {
+  const measurement = measurementFor(cost, cost.turns, measurementSource);
+  return {
+    sessionId,
+    provider,
+    available: true,
+    metered,
+    totalUsd: cost.totalUsd,
+    snapshotStatus: snapshot.snapshotStatus,
+    snapshotAsOf: snapshot.snapshotAsOf,
+    ...(snapshot.snapshotReason ? { snapshotReason: snapshot.snapshotReason } : {}),
+    complete: cost.complete,
+    unpricedModels: [...cost.unpricedModels],
+    subagentRequests: cost.subagentRequests,
+    workDurationMs: cost.workDurationMs,
+    measurement: comparison ? { ...measurement, comparison } : measurement,
+    pricesAsOf: cost.pricesAsOf,
+    perModel: cost.perModel.map((entry) => ({
+      model: entry.model,
+      costUsd: entry.costUsd,
+      requests: entry.requests,
+      tokens: { ...entry.tokens },
+    })),
+    ...(cost.turns ? { turns: cost.turns.map((turn) => ({ ...turn, models: [...turn.models], tokens: { ...turn.tokens } })) } : {}),
+  };
+};
 
 const unavailableSessionCost = (sessionId: string, provider: string, reason: string): SessionCostView => ({
   sessionId,
@@ -697,12 +882,139 @@ const unavailableSessionCost = (sessionId: string, provider: string, reason: str
   unpricedModels: [],
   subagentRequests: 0,
   workDurationMs: null,
+  measurement: {
+    version: 2,
+    status: 'incomplete',
+    source: 'legacy',
+    window: { since: null, until: null },
+    attribution: null,
+    counts: {
+      facts: null, requests: 0, rollouts: null, subagentSpawns: null,
+      subagentRollouts: null, subagentRequests: 0,
+    },
+    durations: { workMs: null, responseTurnsMs: null },
+    reconciliation: {
+      totalUsd: 'unavailable', perModel: 'unavailable', turns: 'unavailable', counts: 'unavailable',
+      durations: 'unavailable', eventSets: 'unavailable', tokens: 'unavailable',
+    },
+  },
   pricesAsOf: PRICES_AS_OF,
   perModel: [],
 });
 
-const meteredCache = new Map<string, { value: boolean; expiresAt: number }>();
-const meteredInflight = new Map<string, Promise<boolean>>();
+type V3TurnProjection = { turns: SessionCostTurn[]; responseTurnsMs: number };
+
+/**
+ * v3 facts have no display message id.  Their timestamps are therefore joined
+ * only to exactly one durable response window; a missing or ambiguous window
+ * makes the projection unavailable rather than inventing a turn boundary.
+ */
+const turnsForReadyV3 = (sessionId: string, ready: ReadyUsageV3): V3TurnProjection | null => {
+  const metrics = responseTurnMetricsDb.listSessionWindows(sessionId);
+  if (metrics.length === 0) return null;
+  const normalized = metrics.map((metric) => ({
+    ...metric,
+    assistantMessageId: bareTranscriptMessageId(metric.assistantMessageId),
+    startMs: Date.parse(metric.startedAt),
+    endMs: Date.parse(metric.completedAt),
+  }));
+  if (normalized.some((metric) => !Number.isFinite(metric.startMs) || !Number.isFinite(metric.endMs)
+    || metric.endMs < metric.startMs)
+    || new Set(normalized.map((metric) => metric.assistantMessageId)).size !== normalized.length) return null;
+
+  const subagentsByTurn = new Map<string, number>();
+  const requests: RequestUsageRecord[] = [];
+  for (const fact of ready.facts) {
+    const timestampMs = Date.parse(fact.occurredAt);
+    if (!Number.isFinite(timestampMs)) return null;
+    const matches = normalized.filter((metric) => timestampMs >= metric.startMs && timestampMs <= metric.endMs);
+    if (matches.length !== 1) return null;
+    const metric = matches[0];
+    if (fact.isSubagent) {
+      subagentsByTurn.set(metric.assistantMessageId, (subagentsByTurn.get(metric.assistantMessageId) ?? 0) + fact.requestCount);
+    }
+    requests.push({
+      uuid: fact.eventKey,
+      model: fact.model,
+      timestampMs,
+      firstTimestampMs: timestampMs,
+      isSubagent: fact.isSubagent,
+      totals: {
+        input: fact.inputTokens - fact.cachedInputTokens,
+        cacheRead: fact.cachedInputTokens,
+        output: fact.outputTokens,
+        cacheWrite5m: 0,
+        cacheWrite1h: 0,
+      },
+    });
+  }
+  const durationsByTurn = new Map(normalized.map((metric) => [metric.assistantMessageId, metric.durationMs]));
+  const turns = buildSessionTurns(requests, normalized, []).map((turn) => ({
+    ...turn,
+    responseTurnDurationMs: durationsByTurn.get(turn.assistantMessageId) ?? null,
+    subagentRequests: subagentsByTurn.get(turn.assistantMessageId) ?? 0,
+  }));
+  const trustedIds = new Set(normalized.map((metric) => metric.assistantMessageId));
+  if (turns.length !== normalized.length || turns.some((turn) => !trustedIds.has(turn.assistantMessageId)
+    || turn.responseTurnDurationMs === null)) return null;
+  return { turns, responseTurnsMs: turns.reduce((sum, turn) => sum + (turn.responseTurnDurationMs ?? 0), 0) };
+};
+
+const v3CostFor = (sessionId: string, ready: ReadyUsageV3): { cost: SessionCost; projection: V3TurnProjection | null } => {
+  const cost = calculateSessionCost(ready.usage);
+  const projection = turnsForReadyV3(sessionId, ready);
+  if (projection) cost.turns = projection.turns;
+  return { cost, projection };
+};
+
+const isCompleteV3Measurement = (measurement: SessionCostMeasurement): boolean =>
+  Object.values(measurement.reconciliation).every((status) => status === 'matched');
+
+/**
+ * Compare mode is diagnostic only: it never replaces the legacy response.
+ * The v1 extractor has no durable event-key domain, so event-set parity is
+ * explicitly unavailable until both sides share one, rather than guessed from
+ * timestamps or model labels.
+ */
+type V3Parity = NonNullable<SessionCostMeasurement['comparison']>;
+
+const v3Parity = (sessionId: string, legacy: SessionCost, ready: ReadyUsageV3): V3Parity => {
+  const legacyMeasurement = measurementFor(legacy, legacy.turns);
+  const { cost: v3Cost } = v3CostFor(sessionId, ready);
+  const v3Measurement = measurementFor(v3Cost, v3Cost.turns, ready);
+  const sameModels = JSON.stringify([...legacy.perModel].sort((left, right) => left.model.localeCompare(right.model)))
+    === JSON.stringify([...v3Cost.perModel].sort((left, right) => left.model.localeCompare(right.model)));
+  const sameTurns = JSON.stringify(legacy.turns ?? []) === JSON.stringify(v3Cost.turns ?? []);
+  const sameCounts = legacyMeasurement.counts.requests === v3Measurement.counts.requests
+    && legacyMeasurement.counts.subagentRequests === v3Measurement.counts.subagentRequests;
+  const sameDurations = (legacyMeasurement.durations.workMs === null
+    || legacyMeasurement.durations.workMs === v3Measurement.durations.workMs)
+    && (legacyMeasurement.durations.responseTurnsMs === null
+      || legacyMeasurement.durations.responseTurnsMs === v3Measurement.durations.responseTurnsMs);
+  const sameFlags = legacy.complete === v3Cost.complete
+    && JSON.stringify([...legacy.unpricedModels].sort()) === JSON.stringify([...v3Cost.unpricedModels].sort())
+    && JSON.stringify([...legacy.assumedModels].sort()) === JSON.stringify([...v3Cost.assumedModels].sort())
+    && legacy.pricesAsOf === v3Cost.pricesAsOf;
+  if (!totalsEqual(legacy.totalUsd, v3Cost.totalUsd)) return { status: 'mismatch', reason: 'total_usd' };
+  if (!sameModels) return { status: 'mismatch', reason: 'per_model_or_tokens' };
+  if (!sameTurns) return { status: 'mismatch', reason: 'turns' };
+  if (!sameCounts) return { status: 'mismatch', reason: 'shared_counts' };
+  if (!sameDurations) return { status: 'mismatch', reason: 'shared_durations' };
+  if (!sameFlags) return { status: 'mismatch', reason: 'pricing_coverage_or_prices_as_of' };
+  if (!isCompleteV3Measurement(v3Measurement)) return { status: 'mismatch', reason: 'v3_internal_reconciliation' };
+  return { status: 'matched' };
+};
+
+const meteredCache = new Map<string, { value: boolean | null; expiresAt: number }>();
+const meteredInflight = new Map<string, Promise<boolean | null>>();
+const VERIFIED_SUBSCRIPTION_AUTH_METHODS = new Set([
+  'credentials_file',
+  'oauth',
+  'oauth_token',
+  'google-oauth',
+  'cli',
+  'coding_plan',
+]);
 
 /**
  * هل يُحاسَب هذا المزوّد بالتوكن فعلاً لهذا المستخدم؟ الإشارة الوحيدة الصادقة
@@ -714,7 +1026,7 @@ async function isMetered(
   provider: string,
   userId: string | number | null,
   deps: SessionCostDeps,
-): Promise<boolean> {
+): Promise<boolean | null> {
   const cacheable = deps.probeAuth === undefined;
   const key = `${provider}|${userId ?? 'anonymous'}`;
   if (cacheable) {
@@ -726,9 +1038,11 @@ async function isMetered(
   const probe = (async () => {
   try {
     const status = await probeProviderAuth(provider, userId, deps);
-    return status.authenticated && status.method === 'api_key';
+    if (!status.available || !status.authenticated || status.method === null) return null;
+    if (status.method === 'api_key') return true;
+    return VERIFIED_SUBSCRIPTION_AUTH_METHODS.has(status.method) ? false : null;
   } catch {
-    return false;
+    return null;
   }
   })();
   if (!cacheable) return probe;
@@ -1173,16 +1487,33 @@ export const sessionCostService = {
       return unavailableSessionCost(sessionId, provider, 'The transcript file for this conversation is no longer on disk.');
     }
 
+    const v3ReaderMode = provider === 'codex' ? usageStatisticsV3ReaderMode() : 'off';
+    const readsV3 = v3ReaderMode === 'on' || v3ReaderMode === 'compare';
+    const v3MetricsBefore = readsV3 ? metricsFingerprint(sessionId, true) : 'none';
+    const v3Ready = !readsV3 ? null : readReadyUsageV3({
+      sessionId, scopeFingerprint: 'all', attributionFingerprint: 'none', metricsFingerprint: v3MetricsBefore,
+    } as Parameters<typeof readReadyUsageV3>[0] & { metricsFingerprint: string });
+    if (readsV3) await deps.afterV3Ready?.();
+    const v3MetricsStable = (): boolean => !readsV3 || metricsFingerprint(sessionId, true) === v3MetricsBefore;
+    if (v3ReaderMode === 'on') {
+      if (!v3Ready || !v3MetricsStable()) {
+        return unavailableSessionCost(sessionId, provider, 'Codex v3 statistics are not ready for this exact metrics snapshot.');
+      }
+      const { cost: v3Cost, projection } = v3CostFor(sessionId, v3Ready);
+      if (v3Cost.perModel.length === 0) return unavailableSessionCost(sessionId, provider, 'Codex v3 records no token facts.');
+      if (!projection) return unavailableSessionCost(sessionId, provider, 'Codex v3 facts cannot be joined to complete response-turn metrics.');
+      const measurement = measurementFor(v3Cost, v3Cost.turns, v3Ready);
+      if (!isCompleteV3Measurement(measurement) || !v3MetricsStable()) {
+        return unavailableSessionCost(sessionId, provider, 'Codex v3 does not attest a complete reconciled measurement.');
+      }
+      return toSessionCostView(sessionId, provider, v3Cost, await isMetered(provider, userId, deps), {
+        snapshotStatus: 'fresh', snapshotAsOf: v3Ready.window.until,
+      }, v3Ready);
+    }
+
     const readerMode = conversationSnapshotReaderMode();
     const ledger = readerMode === 'legacy' ? null : readConversationUsageSnapshot(sessionId);
     if (readerMode === 'ledger' && ledger) {
-      if (ledger.snapshot.snapshotStatus !== 'ready' || !ledger.snapshot.ingestComplete) {
-        void usageIngestionScheduler.schedule({
-          provider: provider as LLMProvider, filePath: transcriptPath, sessionId,
-        }).catch((error) => console.warn('[usage-ingestion-schedule]', {
-          sessionId, error: error instanceof Error ? error.message : String(error),
-        }));
-      }
       const snapshotStatus = ledger.snapshot.snapshotStatus === 'ready' && ledger.snapshot.ingestComplete
         ? 'fresh' as const
         : ledger.snapshot.snapshotStatus === 'stale' ? 'stale' as const : 'incomplete' as const;
@@ -1199,18 +1530,10 @@ export const sessionCostService = {
       );
     }
     if (readerMode === 'ledger' && !ledger) {
-      // Never parse or write on the summary request. The watcher/background
-      // owns ingestion; this only coalesces a best-effort refresh request.
-      void usageIngestionScheduler.schedule({ provider: provider as LLMProvider, filePath: transcriptPath, sessionId }).catch((error) => {
-        console.warn('[usage-ingestion-schedule]', {
-          sessionId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
       return unavailableSessionCost(
         sessionId,
         provider,
-        'The usage snapshot is unavailable or invalid and is queued for background refresh.',
+        'The usage snapshot is unavailable or invalid; background ingestion will refresh it independently.',
       );
     }
 
@@ -1253,8 +1576,14 @@ export const sessionCostService = {
     }
 
     const metered = await isMetered(provider, userId, deps);
+    let comparison: V3Parity | undefined;
+    if (v3ReaderMode === 'compare' && v3Ready && v3MetricsStable()) {
+      const { cost: v3Cost } = v3CostFor(sessionId, v3Ready);
+      comparison = v3Parity(sessionId, cost, v3Ready);
+      if (comparison.status !== 'matched') logSnapshotComparison(sessionId, cost, v3Cost);
+    }
     if (readerMode === 'compare' && ledger) logSnapshotComparison(sessionId, cost, ledger.cost);
-    return toSessionCostView(sessionId, provider, cost, metered, outcome);
+    return toSessionCostView(sessionId, provider, cost, metered, outcome, undefined, comparison);
   },
 
   /**

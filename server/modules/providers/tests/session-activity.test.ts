@@ -72,11 +72,13 @@ const OPENCODE_SID = 'ses_synthetic_06214044dffemD26QTiayDywHC'; // public proje
 const CODEX_SID = '00000002-0000-4000-8000-000000000002'; // private project (fixture)
 const PRIVATE_CLAUDE_SID = '00000003-0000-4000-8000-000000000003'; // private project (fixture)
 const UNKNOWN_SID = '00000006-0000-4000-8000-000000000006'; // in no table
+const NO_PROVIDER_SID = '00000007-0000-4000-8000-000000000007'; // public project, provider unset
 
 const SESSION_ROWS: Record<string, { session_id: string; provider: string; project_path: string }> = {
   [CLAUDE_SID]: { session_id: CLAUDE_SID, provider: 'claude', project_path: NASSAJ_DEV_PATH },
   [OPENCODE_SID]: { session_id: OPENCODE_SID, provider: 'opencode', project_path: NASSAJ_DEV_PATH },
   [CODEX_SID]: { session_id: CODEX_SID, provider: 'codex', project_path: SAMPLE_ONE_PATH },
+  [NO_PROVIDER_SID]: { session_id: NO_PROVIDER_SID, provider: '', project_path: NASSAJ_DEV_PATH },
   [PRIVATE_CLAUDE_SID]: {
     session_id: PRIVATE_CLAUDE_SID,
     provider: 'claude',
@@ -226,10 +228,13 @@ test('no probes injected → fail-closed false, never a throw', () => {
 });
 
 test('a session row with no provider falls back to the claude probe', () => {
-  // Mirrors the websocket dispatcher, whose `else` branch is claude.
+  // Mirrors the websocket dispatcher, whose `else` branch is claude. The row must
+  // exist: since 5ec5556c5 an unknown id fails visibility closed and is never probed.
   setSessionLivenessProbes({ claude: makeProbe('claude') });
   readSessionActivity(UNKNOWN_SID, MEMBER_USER_ID);
-  assert.deepStrictEqual(probeCalls, [{ provider: 'claude', sessionId: UNKNOWN_SID }]);
+  assert.deepStrictEqual(probeCalls, []);
+  readSessionActivity(NO_PROVIDER_SID, MEMBER_USER_ID);
+  assert.deepStrictEqual(probeCalls, [{ provider: 'claude', sessionId: NO_PROVIDER_SID }]);
 });
 
 test('a provider with no injected probe answers false instead of throwing', () => {

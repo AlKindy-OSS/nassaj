@@ -41,6 +41,20 @@ export function hashMessageAuthorContent(content: string): string {
 }
 
 export const messageAuthorsDb = {
+  /** True when the user has explicitly authored at least one prompt in the session. */
+  isAuthor(sessionId: string, userId: number): boolean {
+    if (!sessionId || !Number.isInteger(userId)) {
+      return false;
+    }
+    const row = getConnection().prepare(
+      `SELECT 1
+       FROM message_authors
+       WHERE session_id = ? AND user_id = ?
+       LIMIT 1`,
+    ).get(sessionId, userId);
+    return row !== undefined;
+  },
+
   /**
    * Records the authenticated sender of one user prompt at spawn time.
    *

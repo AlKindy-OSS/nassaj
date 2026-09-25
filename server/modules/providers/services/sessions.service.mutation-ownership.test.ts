@@ -195,6 +195,27 @@ test('the owner still archives, restores, renames and force-deletes their own se
   assert.equal(fs.existsSync(publicTranscript), false, 'transcript removed');
 });
 
+test('force delete settles the row after unlink, then suppresses the stale response', async () => {
+  const phases: boolean[] = [];
+  await assert.rejects(
+    () => sessionsService.deleteOrArchiveSessionById(PUBLIC_SESSION, ownerId, {
+      force: true,
+      deletedFromDisk: true,
+      assertCurrent: (notStarted) => {
+        phases.push(notStarted);
+        if (!notStarted) throw new AppError('Project access changed.', {
+          code: 'project_access_changed', statusCode: 409,
+        });
+      },
+    }),
+    (error: unknown) => error instanceof AppError && error.code === 'project_access_changed',
+  );
+
+  assert.deepEqual(phases, [true, false]);
+  assert.equal(fs.existsSync(publicTranscript), false, 'the first filesystem effect is truthful');
+  assert.equal(sessionsDb.getSessionById(PUBLIC_SESSION), null, 'bounded delete settlement stays consistent');
+});
+
 test('B-IDOR-ARCHIVED / ADR-089: the archived listing is shared, but still needs an identity', () => {
   sessionsDb.updateSessionIsArchived(PRIVATE_SESSION, true);
   sessionsDb.updateSessionIsArchived(PUBLIC_SESSION, true);

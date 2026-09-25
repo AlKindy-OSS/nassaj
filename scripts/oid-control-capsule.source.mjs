@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import * as fs from 'node:fs';
+import { hostname } from 'node:os';
 import { getBuiltinModule } from 'node:process';
 import { inspectLocalUpdatePolicyGrant } from './lib/local-update-policy.mjs';
 import { hashDependencyTreeV2 } from './lib/dependency-tree-identity-v2.mjs';
@@ -18,7 +19,11 @@ import { captureServiceOwnerObserver, observeServiceOwnerPm2, executeServiceOwne
 import { validateOidTripleTargetDescriptor, computeOidTripleTargetDigest } from './lib/oid-triple-target.mjs';
 import { UPDATE_GENERATION_NAMES, reconcileUpdateGenerations } from './lib/update-generation-reconciliation.mjs';
 import { verifyOidDependencyCandidate, computeDependencyContractV2 } from './lib/oid-dependency-candidate.mjs';
-export { inspectBootstrapQualification } from './lib/local-source-bootstrap-ticket.mjs';
+import {
+    bootstrapClock, bootstrapJournalBinding, consumeBootstrapTicket, inspectBootstrapQualification,
+    readBootstrapPinnedFile, readBootstrapPrivateFile, validateBootstrapApprovalChain, verifyBootstrapJournalBinding, verifyBootstrapTicket,
+} from './lib/local-source-bootstrap-ticket.mjs';
+export { inspectBootstrapQualification };
 
 import { validateClientPublicationJournal, CLIENT_PUBLICATION_JOURNAL_SCHEMA } from './lib/client-publication-journal.mjs';
 import { advanceClientServingLineageRecord } from './lib/client-publication-lineage.mjs';
@@ -37,7 +42,7 @@ const HEX64 = /^[a-f0-9]{64}$/;
 // `loaded` remains readable for journals emitted by the previous capsule.
 // A new transaction is terminal only once its exact runtime proof has been
 // durably handed off as `served`.
-const TERMINAL = new Set(['pair_rolled_back', 'pair_served', 'loaded', 'served', 'rolled_back', 'restart_deferred_restored', 'reconciled_adopted_live']);
+const TERMINAL = new Set(['pair_rolled_back', 'pair_served', 'loaded', 'served', 'rolled_back', 'restart_deferred_restored', 'reconciled_adopted_live', 'aborted_pre_effect']);
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 function readFd(fd, max = 4 * 1024 * 1024) {
@@ -70,6 +75,22 @@ function durableCreate(file, value) {
     try { writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`); fsyncSync(fd); } finally { closeSync(fd); }
     try { linkSync(temp, file); } finally { unlinkSync(temp); }
     fsyncDir(path.dirname(file));
+}
+
+function bootstrapAbortReceipt(claimSha256, transactionNonce, recordedAt = Date.now()) {
+    return { schema: 'nassaj-local-main-bootstrap-abort/v1', state: 'aborted_pre_effect', claimSha256,
+        transactionNonce, recordedAt, reason: 'claim_without_transaction_journal' };
+}
+
+function validateBootstrapAbortReceipt(file, claimSha256, transactionNonce) {
+    const bytes = readBootstrapPrivateFile(file), receipt = JSON.parse(bytes);
+    const expected = bootstrapAbortReceipt(claimSha256, transactionNonce, receipt.recordedAt);
+    if (!Number.isSafeInteger(receipt.recordedAt) || receipt.recordedAt <= 0
+        || pairCanonical(receipt) !== pairCanonical(expected)
+        || !bytes.equals(Buffer.from(`${JSON.stringify(expected, null, 2)}\n`))) {
+        throw new Error('oid_bootstrap_abort_receipt_invalid');
+    }
+    return receipt;
 }
 
 /** Test-only crash seam.  It is intentionally unavailable to a real capsule. */
@@ -1113,6 +1134,47 @@ export async function beginOidPairAdmission(root, identity, { waitMs = 30000, in
     }
 }
 
+/** Bootstrap-only lock composition: all fences and the one-shot claim precede the first maintenance write. */
+async function beginBootstrapOidAdmission(root, identity, intent, claimOperation, waitMs = 30000) {
+    if (process.env.NASSAJ_UPDATE_MODE !== 'release' || typeof claimOperation !== 'function') throw new Error('oid_bootstrap_admission_context_invalid');
+    const paths = pairPaths(root), held = [], publisherNames = ['nassaj-local-preview-build.lock','nassaj-client-build.lock','nassaj-preview-event-mutation.lock'];
+    let current, original, consumed, claimedTransaction, maintenanceWritten = false, released = false;
+    try {
+        held.push(await pairLock(paths.admission, waitMs));
+        held.push(await pairLock(paths.activity, waitMs));
+        for (const name of publisherNames) held.push(await pairLock(path.join(paths.gitRoot, name), waitMs));
+        current = pairReadMaintenance(paths); original = current;
+        if (current.state !== 'OPEN' || current.gateClosed || current.degraded || current.oidAdmissionIntent) throw new Error('oid_pair_maintenance_busy');
+        validateOidPairMaintenance(root, current);
+        consumed = await claimOperation();
+        if (!consumed?.claim || !consumed.ticket || !HEX64.test(consumed.sha256 || '')) throw new Error('oid_bootstrap_claim_invalid');
+        claimedTransaction = { ...intent, bootstrapPending: false, bootstrap: bootstrapJournalBinding(consumed.ticket, consumed) };
+        durableCreate(path.join(paths.gitRoot, identity.journalBasename), claimedTransaction);
+        current = pairWriteMaintenance(paths, current, { oidAdmissionIntent: { schema: 'nassaj-oid-admission-intent/v1',
+            identity, owner: pairProcessIdentity(), previousMaintenance: original, transaction: claimedTransaction } }); maintenanceWritten = true;
+        injectFailure('bootstrap_after_admission_intent');
+        current = pairWriteMaintenance(paths, current, { state: 'DRAINING', gateClosed: true, phase: 'OID_DRAINING',
+            transactionId: identity.transactionNonce, identity: { kind: 'oid-pair', oid: identity },
+            owner: { ...pairProcessIdentity(), epoch: identity.transactionNonce, tokenDigest: current.tokenDigest },
+            databaseState: 'PRE_CANDIDATE', oidCompletion: null });
+        injectFailure('bootstrap_after_draining');
+        current = pairWriteMaintenance(paths, current, { state: 'UPDATING', phase: 'OID_QUIESCENT' });
+        return { paths, original, consumed, claimedTransaction, get journal() { return current; },
+            transition(patch) { if (released) throw new Error('oid_pair_ownership_released'); current = pairWriteMaintenance(paths, current, patch); return current; },
+            async lockPublishers() {},
+            release() { if (released) return; released = true; for (const lock of held.reverse()) lock.release(); } };
+    } catch (error) {
+        if (consumed && !maintenanceWritten) {
+            const file = path.join(path.dirname(consumed.file), 'bootstrap-aborted-pre-effect.json');
+            durableCreate(file, bootstrapAbortReceipt(consumed.sha256, identity.transactionNonce));
+            const journal = path.join(paths.gitRoot, identity.journalBasename);
+            if (fs.existsSync(journal)) durable(journal, { ...claimedTransaction, state: 'aborted_pre_effect' });
+        }
+        for (const lock of held.reverse()) lock.release();
+        throw error;
+    }
+}
+
 /** Publish OPEN only after a durable terminal pair receipt; repeated completion is idempotent. */
 export function completeOidPairAdmission(root, handle) {
     const current = pairReadMaintenance(handle.paths);
@@ -1352,10 +1414,141 @@ export function validateOidTriplePm2Slot(rows, expected, status = 'online') {
     return slot;
 }
 
-function tripleStableEnvironment(environment) {
+function tripleStableEnvironment(environment, { allowMode = false } = {}) {
     const result = { ...environment };
+    if (allowMode) delete result.NASSAJ_UPDATE_MODE;
     delete result.NASSAJ_PREVIEW_TRANSACTION_NONCE; delete result.NASSAJ_PREVIEW_BOOT_NONCE;
     return sha(pairCanonical(result));
+}
+
+/** The bootstrap is allowed to alter exactly one dotenv assignment. */
+export function validateBootstrapModeProposal(original, proposal) {
+    if (!Buffer.isBuffer(original) || !Buffer.isBuffer(proposal) || original.length > 4 * 1024 * 1024
+        || proposal.length > 4 * 1024 * 1024) throw new Error('oid_bootstrap_mode_bytes_invalid');
+    const line = /^\s*(?:export\s+)?NASSAJ_UPDATE_MODE\s*=.*$/gm;
+    const before = original.toString('utf8'), after = proposal.toString('utf8');
+    const oldLines = before.match(line) || [], newLines = after.match(line) || [];
+    if (oldLines.length > 1 || (oldLines.length === 1
+        && !/^\s*(?:export\s+)?NASSAJ_UPDATE_MODE\s*=\s*(?:release|"release"|'release')\s*$/.test(oldLines[0]))
+        || newLines.length !== 1 || newLines[0] !== 'NASSAJ_UPDATE_MODE=local-main'
+        || before.replace(line, '').trimEnd() !== after.replace(line, '').trimEnd()) {
+        throw new Error('oid_bootstrap_mode_scope_invalid');
+    }
+    return { originalSha256: sha(original), proposalSha256: sha(proposal) };
+}
+
+function bootstrapProposalBytes(record) {
+    const encoded = record.bootstrap?.proposalEnvBase64;
+    if (typeof encoded !== 'string' || Buffer.from(encoded, 'base64').toString('base64') !== encoded) throw new Error('oid_bootstrap_mode_proposal_invalid');
+    return Buffer.from(encoded, 'base64');
+}
+
+function bootstrapModeBackupFile(root, transaction) {
+    return path.join(gitControlRoot(root), 'nassaj-oid-recovery', transaction.transactionNonce, 'bootstrap-mode-original.env');
+}
+
+function exchangeBootstrapModeFile(envFile, bytes, beforeSha256, afterSha256, staged) {
+    const read = (file, label) => pinnedFile(file, label, { mode: 0o600 }).bytes;
+    const current = read(envFile, 'bootstrap_mode_exchange_current');
+    if (sha(current) === afterSha256) return;
+    if (sha(current) !== beforeSha256) throw new Error('oid_bootstrap_mode_cas_changed');
+    if (!fs.existsSync(staged)) {
+        const fd = openSync(staged, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
+        fsyncDir(path.dirname(staged));
+    }
+    if (sha(read(staged, 'bootstrap_mode_exchange_proposal')) !== afterSha256) throw new Error('oid_bootstrap_mode_cas_changed');
+    const result = spawnSync('/usr/bin/mv', ['--exchange','--no-copy','-T',staged,envFile],
+        { env: { PATH: '/usr/bin:/bin', LANG: 'C' }, encoding: 'utf8', timeout: 5000 });
+    fsyncDir(path.dirname(envFile));
+    if (result.status !== 0 || result.error || sha(read(envFile, 'bootstrap_mode_exchange_after')) !== afterSha256
+        || sha(read(staged, 'bootstrap_mode_exchange_previous')) !== beforeSha256) throw new Error('oid_bootstrap_mode_cas_unknown');
+}
+
+/** Journal, apply and verify the release -> local-main configuration CAS after proven stop. */
+export function applyBootstrapModeCAS(root, file, transaction, record) {
+    if (!transaction.bootstrap || !['triple_old_stopped','bootstrap_mode_intent','bootstrap_mode_verified'].includes(transaction.state) || !transaction.oldStoppedAt
+        || transaction.pair.databaseState !== 'PRE_CANDIDATE') throw new Error('oid_bootstrap_mode_boundary_invalid');
+    const mode = record.bootstrap.ticket.material.mode, envFile = path.join(root, '.env'), proposal = bootstrapProposalBytes(record);
+    const current = pinnedFile(envFile, 'bootstrap_mode_current', { mode: 0o600 }).bytes;
+    const identities = validateBootstrapModeProposal(
+        transaction.bootstrapMode?.originalBytesBase64 ? Buffer.from(transaction.bootstrapMode.originalBytesBase64, 'base64') : current,
+        proposal);
+    if (identities.originalSha256 !== mode.originalEnvSha256 || identities.proposalSha256 !== mode.proposalEnvSha256
+        || ![mode.originalEnvSha256, mode.proposalEnvSha256].includes(sha(current))) throw new Error('oid_bootstrap_mode_binding_changed');
+    const backupFile = bootstrapModeBackupFile(root, transaction);
+    let next = transaction;
+    if (!next.bootstrapMode) {
+        const intent = { state: 'intent', originalSha256: mode.originalEnvSha256, proposalSha256: mode.proposalEnvSha256,
+            originalBytesBase64: current.toString('base64'), backupBasename: path.basename(backupFile),
+            proposalStageBasename: `bootstrap-mode-proposal-${transaction.transactionNonce}.env` };
+        next = { ...next, state: 'bootstrap_mode_intent', bootstrapMode: intent }; durable(file, next);
+    }
+    if (!fs.existsSync(backupFile)) {
+        const original = Buffer.from(next.bootstrapMode.originalBytesBase64, 'base64');
+        if (sha(original) !== mode.originalEnvSha256) throw new Error('oid_bootstrap_mode_original_changed');
+        const fd = openSync(backupFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        try { writeFileSync(fd, original); fsyncSync(fd); } finally { closeSync(fd); }
+        fsyncDir(path.dirname(backupFile));
+    }
+    const backup = pinnedFile(backupFile, 'bootstrap_mode_backup', { sha256: mode.originalEnvSha256, mode: 0o600 }).bytes;
+    validateBootstrapModeProposal(backup, proposal);
+    const proposalStage = path.join(path.dirname(backupFile), next.bootstrapMode.proposalStageBasename);
+    exchangeBootstrapModeFile(envFile, proposal, mode.originalEnvSha256, mode.proposalEnvSha256, proposalStage);
+    if (sha(pinnedFile(envFile, 'bootstrap_mode_after_apply', { mode: 0o600 }).bytes) !== mode.proposalEnvSha256) throw new Error('oid_bootstrap_mode_cas_unknown');
+    next = { ...next, state: 'bootstrap_mode_verified', bootstrapMode: { ...next.bootstrapMode, state: 'verified', verifiedAt: Date.now() } };
+    durable(file, next); return next;
+}
+
+/** Restore release configuration only while target start is still provably impossible. */
+export function restoreBootstrapModeCAS(root, file, transaction, record) {
+    if (!transaction.bootstrap || transaction.pair.databaseState !== 'PRE_CANDIDATE' || transaction.bootDirection
+        || transaction.pm2Operations && Object.keys(transaction.pm2Operations).some(key => key.startsWith('start-'))) {
+        throw new Error('oid_bootstrap_mode_restore_forbidden');
+    }
+    const mode = record.bootstrap.ticket.material.mode, envFile = path.join(root, '.env');
+    const backupFile = bootstrapModeBackupFile(root, transaction), proposal = bootstrapProposalBytes(record);
+    let backup;
+    try { backup = pinnedFile(backupFile, 'bootstrap_mode_restore_backup', { sha256: mode.originalEnvSha256, mode: 0o600 }).bytes; }
+    catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        const encoded = transaction.bootstrapMode?.originalBytesBase64;
+        if (typeof encoded !== 'string' || Buffer.from(encoded, 'base64').toString('base64') !== encoded) throw new Error('oid_bootstrap_mode_original_changed');
+        const original = Buffer.from(encoded, 'base64'), current = pinnedFile(envFile, 'bootstrap_mode_restore_current', { mode: 0o600 }).bytes;
+        const identities = validateBootstrapModeProposal(original, proposal);
+        if (identities.originalSha256 !== mode.originalEnvSha256 || identities.proposalSha256 !== mode.proposalEnvSha256
+            || ![mode.originalEnvSha256, mode.proposalEnvSha256].includes(sha(current))) throw new Error('oid_bootstrap_mode_cas_unknown');
+        const fd = openSync(backupFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        try { writeFileSync(fd, original); fsyncSync(fd); } finally { closeSync(fd); }
+        fsyncDir(path.dirname(backupFile));
+        backup = pinnedFile(backupFile, 'bootstrap_mode_recreated_backup', { sha256: mode.originalEnvSha256, mode: 0o600 }).bytes;
+    }
+    validateBootstrapModeProposal(backup, proposal);
+    const proposalStage = path.join(path.dirname(bootstrapModeBackupFile(root, transaction)), transaction.bootstrapMode.proposalStageBasename);
+    const current = pinnedFile(envFile, 'bootstrap_mode_restore_current', { mode: 0o600 }).bytes;
+    const currentSha256 = sha(current);
+    let proposalStagePresent;
+    try { lstatSync(proposalStage); proposalStagePresent = true; }
+    catch (error) { if (error.code === 'ENOENT') proposalStagePresent = false; else throw error; }
+    if (proposalStagePresent) {
+        const stagedSha256 = sha(pinnedFile(proposalStage, 'bootstrap_mode_restore_stage', { mode: 0o600 }).bytes);
+        if (currentSha256 === mode.originalEnvSha256 && stagedSha256 === mode.proposalEnvSha256) {
+            unlinkSync(proposalStage); fsyncDir(path.dirname(proposalStage));
+            try { lstatSync(proposalStage); throw new Error('oid_bootstrap_mode_cas_unknown'); }
+            catch (error) { if (error.code !== 'ENOENT') throw error; }
+        } else if (currentSha256 === mode.proposalEnvSha256 && stagedSha256 === mode.originalEnvSha256) {
+            exchangeBootstrapModeFile(envFile, backup, mode.proposalEnvSha256, mode.originalEnvSha256, proposalStage);
+            if (sha(pinnedFile(proposalStage, 'bootstrap_mode_restore_proposal', { mode: 0o600 }).bytes) !== mode.proposalEnvSha256) {
+                throw new Error('oid_bootstrap_mode_cas_unknown');
+            }
+            unlinkSync(proposalStage); fsyncDir(path.dirname(proposalStage));
+            try { lstatSync(proposalStage); throw new Error('oid_bootstrap_mode_cas_unknown'); }
+            catch (error) { if (error.code !== 'ENOENT') throw error; }
+        } else throw new Error('oid_bootstrap_mode_cas_unknown');
+    } else if (currentSha256 !== mode.originalEnvSha256) throw new Error('oid_bootstrap_mode_cas_unknown');
+    if (sha(pinnedFile(envFile, 'bootstrap_mode_restored', { mode: 0o600 }).bytes) !== mode.originalEnvSha256) throw new Error('oid_bootstrap_mode_restore_unknown');
+    const next = { ...transaction, bootstrapMode: { ...transaction.bootstrapMode, state: 'restored', restoredAt: Date.now() } };
+    durable(file, next); return next;
 }
 
 /** PM2 removes pm_id from dump; bind its unique saved definition to the separately attested live slot. */
@@ -1445,9 +1638,11 @@ export async function persistOidTriplePm2Slot(root, file, transaction, status, c
         if (!child || !pairOwnerAlive(child) || processStartTicks(slot.pid) !== child.startTime
             || environment.NASSAJ_PREVIEW_TRANSACTION_NONCE !== transaction.transactionNonce
             || environment.NASSAJ_PREVIEW_BOOT_NONCE !== transaction.bootNonce
-            || tripleStableEnvironment(environment) !== supervisor.stableEnvironmentSha256) throw new Error('oid_triple_persistence_child_changed');
+            || tripleStableEnvironment(environment, { allowMode: Boolean(transaction.bootstrap) })
+                !== (transaction.bootstrap ? supervisor.bootstrapStableEnvironmentSha256 : supervisor.stableEnvironmentSha256)) throw new Error('oid_triple_persistence_child_changed');
     } else if (sha(pairCanonical(environment)) !== supervisor.environmentSha256 || !pairOwnerProvablyDead(transaction.pair.previous.runtime)) throw new Error('oid_triple_persistence_stop_changed');
-    assertOidTripleEffectiveMode(root, environment);
+    const expectedMode = transaction.bootstrap && (status === 'stopped' || transaction.bootDirection === 'previous') ? 'release' : 'local-main';
+    assertOidTripleEffectiveMode(root, environment, expectedMode);
     const intent = { state: 'intent', status, pmId: supervisor.pmId, name: supervisor.name,
         environmentSha256: sha(pairCanonical(environment)), dumpCAS: prepareTripleDumpCAS(transaction, slot, status), ...(child ? { pid: child.pid, startTime: child.startTime, bootNonce: transaction.bootNonce } : {}) };
     let current = { ...transaction, persistence: { ...transaction.persistence, [status]: intent } }; durable(file, current);
@@ -1540,7 +1735,8 @@ async function triplePm2Read(supervisor) {
 }
 
 /** Check the child's trusted service/.env mode; a running parent's dotenv cache is not sufficient. */
-export function assertOidTripleEffectiveMode(root, environment) {
+export function assertOidTripleEffectiveMode(root, environment, expected = 'local-main') {
+    if (!['release','local-main'].includes(expected)) throw new Error('oid_triple_child_mode_changed');
     let mode = environment?.NASSAJ_UPDATE_MODE;
     if (mode === undefined) {
         const text = pinnedFile(path.join(root, '.env'), 'triple_mode_file').bytes.toString('utf8');
@@ -1549,7 +1745,7 @@ export function assertOidTripleEffectiveMode(root, environment) {
         mode = lines[0].slice(lines[0].indexOf('=') + 1).trim();
         if (mode && ['"', "'"].includes(mode[0]) && mode.at(-1) === mode[0]) mode = mode.slice(1,-1);
     }
-    if (mode !== 'local-main') throw new Error('oid_triple_child_mode_changed');
+    if (mode !== expected) throw new Error('oid_triple_child_mode_changed');
     return true;
 }
 
@@ -1578,7 +1774,8 @@ export async function captureOidTripleSupervisor(root, record) {
     return { ...supervisor, name, pmId: slot.pm_id, root, pid: slot.pid,
         startTime: record.oldStartTicks, controlsSha256: sha(pairCanonical(serviceOwnerSlotControls(slot))),
         dumpSha256: sha(pinnedFile(path.join(pm2Home, 'dump.pm2'), 'triple_initial_dump').bytes), environmentSha256: sha(pairCanonical(slot.pm2_env.env || {})),
-        stableEnvironmentSha256: tripleStableEnvironment(slot.pm2_env.env || {}) };
+        stableEnvironmentSha256: tripleStableEnvironment(slot.pm2_env.env || {}),
+        bootstrapStableEnvironmentSha256: tripleStableEnvironment(slot.pm2_env.env || {}, { allowMode: true }) };
 }
 
 function tripleOwnedTransaction(root, expected) {
@@ -1670,7 +1867,7 @@ export async function runOidTripleSafePhase(root, expected, phase) {
         if (transaction.state !== 'triple_old_stop_intent' || transaction.pair.databaseState !== 'PRE_CANDIDATE') throw new Error('oid_triple_stop_not_intended');
         pairVerifyLive(root, { targetClientBuildId: transaction.pair.previous.clientBuildId, targetServerBuildId: transaction.pair.previous.serverBuildId }, transaction.pair.previous);
         const slot = validateOidTriplePm2Slot(await triplePm2Read(supervisor), supervisor);
-        assertOidTripleEffectiveMode(root, slot.pm2_env.env || {});
+        assertOidTripleEffectiveMode(root, slot.pm2_env.env || {}, transaction.bootstrap ? 'release' : 'local-main');
         if (processStartTicks(slot.pid) !== supervisor.startTime || sha(pairCanonical(slot.pm2_env.env || {})) !== supervisor.environmentSha256) throw new Error('oid_triple_pm2_environment_changed');
         tripleRefuseWriterDescendants(supervisor.pid, owned.ancestry);
         if (phase === 'validate-stop') return { state: 'stop_ready', transactionNonce: transaction.transactionNonce };
@@ -1693,22 +1890,31 @@ async function startOidTripleStoppedSlot(root, owned, phase) {
     const plan = inspectOidTripleGenerationPlan(root, transaction, rollback ? 'rollback' : 'forward');
     if (plan.state !== 'verified' || plan.steps.some(step => step.operation !== 'attest')) throw new Error('oid_triple_start_generations_unverified');
     const slot = validateOidTriplePm2Slot(await triplePm2Read(supervisor), supervisor, 'stopped');
-    assertOidTripleEffectiveMode(root, slot.pm2_env.env || {});
+    const stoppedEnvironment = slot.pm2_env.env || {};
+    const stoppedMode = transaction.bootstrap && (rollback || Object.hasOwn(stoppedEnvironment, 'NASSAJ_UPDATE_MODE')) ? 'release' : 'local-main';
+    assertOidTripleEffectiveMode(root, stoppedEnvironment, stoppedMode);
     if (!pairOwnerProvablyDead(transaction.pair.previous.runtime)
         || sha(pairCanonical(slot.pm2_env.env || {})) !== supervisor.environmentSha256) throw new Error('oid_triple_stopped_slot_changed');
     const saved = slot.pm2_env.env || {};
-    const environment = { ...saved, NASSAJ_PREVIEW_TRANSACTION_NONCE: transaction.transactionNonce,
-        NASSAJ_PREVIEW_BOOT_NONCE: transaction.bootNonce };
+    const environment = buildOidTripleStartEnvironment(saved, transaction, rollback);
     await triplePm2Command(supervisor, 'start-stopped', owned, environment);
     const rows = await triplePm2Read(supervisor), candidate = rows.find(row => row.pm_id === supervisor.pmId);
     const started = validateOidTriplePm2Slot(rows, { ...supervisor, pid: candidate?.pid });
     const actual = started.pm2_env.env || {};
     for (const key of new Set([...Object.keys(saved), ...Object.keys(actual)])) {
-        if (['NASSAJ_PREVIEW_TRANSACTION_NONCE','NASSAJ_PREVIEW_BOOT_NONCE'].includes(key)) continue;
+        if (['NASSAJ_UPDATE_MODE','NASSAJ_PREVIEW_TRANSACTION_NONCE','NASSAJ_PREVIEW_BOOT_NONCE'].includes(key)) continue;
         if (pairCanonical(saved[key]) !== pairCanonical(actual[key])) throw new Error('oid_triple_saved_environment_drift');
     }
     if (actual.NASSAJ_PREVIEW_TRANSACTION_NONCE !== transaction.transactionNonce || actual.NASSAJ_PREVIEW_BOOT_NONCE !== transaction.bootNonce) throw new Error('oid_triple_boot_environment_not_applied');
     return { state: rollback ? 'previous_start_requested' : 'candidate_start_requested', transactionNonce: transaction.transactionNonce };
+}
+
+/** Construct the sole permitted start-time environment delta. */
+export function buildOidTripleStartEnvironment(saved, transaction, rollback = false) {
+    if (!saved || Object.getPrototypeOf(saved) !== Object.prototype || !HEX64.test(transaction?.transactionNonce || '')
+        || !HEX64.test(transaction?.bootNonce || '')) throw new Error('oid_triple_start_environment_invalid');
+    return { ...saved, ...(transaction.bootstrap ? { NASSAJ_UPDATE_MODE: rollback ? 'release' : 'local-main' } : {}),
+        NASSAJ_PREVIEW_TRANSACTION_NONCE: transaction.transactionNonce, NASSAJ_PREVIEW_BOOT_NONCE: transaction.bootNonce };
 }
 
 function verifyTripleRetainedRecord(root, record) {
@@ -1753,8 +1959,8 @@ function tripleCurrentRuntime() {
 }
 
 /** Capture the actual independently served client and loaded server before full-update preparation. */
-export async function captureOidTriplePreviousGeneration(root, liveManifest) {
-    if (hashOidPairDependencyTree(path.join(root, 'node_modules')) !== liveManifest.runtimeDependenciesSha256) throw new Error('oid_triple_previous_dependencies_unverified');
+export async function captureOidTriplePreviousGeneration(root, liveManifest, { allowQualifiedMismatch = false } = {}) {
+    if (!allowQualifiedMismatch && hashOidPairDependencyTree(path.join(root, 'node_modules')) !== liveManifest.runtimeDependenciesSha256) throw new Error('oid_triple_previous_dependencies_unverified');
     const server = provenance(path.join(root, 'dist-server')), client = provenance(path.join(root, 'dist'));
     const previous = { schema: 'nassaj-oid-triple-previous/v2', clientBuildId: client.buildId, serverBuildId: server.buildId, clientOid: client.commit,
         clientTreeSha256: hashOidPairTree(path.join(root, 'dist')), serverTreeSha256: hashOidPairTree(path.join(root, 'dist-server')),
@@ -1764,6 +1970,100 @@ export async function captureOidTriplePreviousGeneration(root, liveManifest) {
     if (!previous.runtime || sha(readFileSync(`/proc/${previous.runtime.pid}/exe`)) !== previous.installRuntime.nodeBinarySha256) throw new Error('oid_triple_previous_interpreter_unverified');
     previous.clientPublication = captureClientPublicationBaseline(root, previous);
     return previous;
+}
+
+function bootstrapReferenceJson(reference, label) {
+    if (!reference || Object.keys(reference).sort().join(',') !== 'file,sha256' || !path.isAbsolute(reference.file)
+        || !HEX64.test(reference.sha256 || '')) throw new Error(`oid_bootstrap_${label}_reference_invalid`);
+    return JSON.parse(readBootstrapPinnedFile(reference.file, reference.sha256));
+}
+
+function bootstrapRetainedCodeClosure(root, record) {
+    verifyTripleRetainedRecord(root, record);
+    const file = path.join(gitControlRoot(root), 'nassaj-oid-recovery', record.transactionNonce, 'executor', 'executor-manifest.json');
+    const descriptor = pinnedJson(file, 'bootstrap_executor_manifest', { sha256: record.recoveryReference.executorManifestSha256, mode: 0o600 });
+    if (descriptor.codeClosure?.descriptor?.schema !== 'nassaj-bootstrap-executable-closure/v1'
+        || !HEX64.test(descriptor.codeClosure.sha256 || '')) throw new Error('oid_bootstrap_executor_closure_invalid');
+    return descriptor.codeClosure.sha256;
+}
+
+function verifyBootstrapPreviousMaterialLive(root, previousMaterial, previous, supervisor, controlManifest) {
+    const digest = relative => sha(pinnedFile(path.join(root, relative), `bootstrap_previous_${relative.replaceAll('/','_')}`, { maxSize: Number.MAX_SAFE_INTEGER }).bytes);
+    const expected = {
+        oid: previous.runtime.oid, clientOid: previous.clientOid, serverBuildId: previous.serverBuildId, clientBuildId: previous.clientBuildId,
+        controlManifestSha256: previous.controlManifestSha256,
+        serverInputManifestSha256: digest('dist-server/SERVER_INPUT_MANIFEST.json'),
+        serverProvenanceSha256: digest('dist-server/BUILD_PROVENANCE.json'), clientProvenanceSha256: digest('dist/BUILD_PROVENANCE.json'),
+        clientTreeSha256: previous.clientTreeSha256, serverTreeSha256: previous.serverTreeSha256,
+        nodeModulesTreeSha256: previous.nodeModulesTreeSha256, dependencyLegacyActualSha256: hashOidPairDependencyTree(path.join(root, 'node_modules')),
+        nodeBinarySha256: sha(pinnedFile(realpathSync(process.execPath), 'bootstrap_previous_node', { maxSize: Number.MAX_SAFE_INTEGER }).bytes),
+        nodeVersion: process.version, nodeModuleAbi: process.versions.modules, pm2PackageTreeSha256: supervisor.pm2TreeSha256,
+        safeRestartSha256: digest('dist-server/scripts/safe-restart.sh'),
+        admissionImplementationSha256: digest('dist-server/OID_CONTROL_CAPSULE.mjs'), mode: 'release',
+    };
+    if (controlManifest.safeRestartSha256 !== expected.safeRestartSha256
+        || controlManifest.capsuleSha256 !== expected.admissionImplementationSha256) throw new Error('oid_bootstrap_previous_control_changed');
+    for (const [key, value] of Object.entries(expected)) {
+        if (previousMaterial[key] !== value) throw new Error(`oid_bootstrap_previous_${key}_changed`);
+    }
+    return expected;
+}
+
+/** Recompute every available live binding before consuming the one-shot ticket. */
+async function verifyBootstrapExecutionBindings(root, record, state, previous, supervisor, { clock = bootstrapClock() } = {}) {
+    const bootstrap = record.bootstrap, ticket = bootstrap?.ticket, material = ticket?.material;
+    if (!ticket || bootstrap.proposalEnvBase64 === undefined || !bootstrap.previousMaterial
+        || typeof bootstrap.previousControlManifestBase64 !== 'string' || !bootstrap.qualificationReference) {
+        throw new Error('oid_bootstrap_record_invalid');
+    }
+    const codeClosureSha256 = bootstrapRetainedCodeClosure(root, record);
+    if (material.installation.root !== root || material.installation.commonGit !== gitControlRoot(root)
+        || material.installation.hostname !== hostname() || material.installation.serviceUid !== process.getuid()
+        || material.event.sequence !== state.sequence || material.event.group !== state.group || material.event.oid !== state.oid
+        || material.event.targetDigest !== state.targetDigest || material.approval.ownerId !== String(record.pair.ownerId)
+        || material.executor.transactionNonce !== record.transactionNonce || material.executor.codeClosureSha256 !== codeClosureSha256) {
+        throw new Error('oid_bootstrap_live_binding_changed');
+    }
+    const candidateManifest = bootstrapReferenceJson(bootstrap.candidateManifestReference, 'candidate_manifest');
+    if (bootstrap.candidateManifestReference.sha256 !== material.event.manifestSha256
+        || candidateManifest.releaseCommit !== material.event.oid
+        || candidateManifest.serverBuildId !== state.target.serverBuildId
+        || candidateManifest.clientBuildId !== state.target.clientBuildId) throw new Error('oid_bootstrap_candidate_manifest_changed');
+    for (const key of ['clientBuildId','serverBuildId','controlManifestSha256','clientTreeSha256','serverTreeSha256','nodeModulesTreeSha256']) {
+        if (material.previous[key] !== previous[key] || bootstrap.previousMaterial[key] !== previous[key]) throw new Error('oid_bootstrap_previous_changed');
+    }
+    const previousStatus = readFileSync(`/proc/${previous.runtime.pid}/status`, 'utf8').match(/^PPid:\s+(\d+)/m);
+    if (material.previous.pid !== previous.runtime.pid || !previousStatus || material.previous.ppid !== Number(previousStatus[1])
+        || material.previous.startTicks !== previous.runtime.startTime || material.supervisor.pid !== supervisor.daemon.pid
+        || material.supervisor.startTicks !== supervisor.daemon.startTime
+        || material.supervisor.observerSha256 !== sha(pairCanonical(supervisor.observer))
+        || material.supervisor.slotSha256 !== supervisor.controlsSha256
+        || material.supervisor.environmentSha256 !== supervisor.environmentSha256
+        || material.supervisor.dumpSha256 !== supervisor.dumpSha256) throw new Error('oid_bootstrap_runtime_changed');
+    const database = lstatSync(material.database.path);
+    if (!database.isFile() || database.isSymbolicLink() || String(database.dev) !== material.database.dev
+        || String(database.ino) !== material.database.ino || (database.mode & 0o777) !== 0o600) throw new Error('oid_bootstrap_database_changed');
+    const currentEnv = pinnedFile(path.join(root, '.env'), 'bootstrap_original_mode', { mode: 0o600 }).bytes;
+    const proposal = bootstrapProposalBytes(record), mode = validateBootstrapModeProposal(currentEnv, proposal);
+    if (mode.originalSha256 !== material.mode.originalEnvSha256 || mode.proposalSha256 !== material.mode.proposalEnvSha256) throw new Error('oid_bootstrap_mode_changed');
+    const previousManifest = Buffer.from(bootstrap.previousControlManifestBase64, 'base64');
+    if (previousManifest.toString('base64') !== bootstrap.previousControlManifestBase64
+        || sha(previousManifest) !== bootstrap.previousMaterial.controlManifestSha256) throw new Error('oid_bootstrap_previous_manifest_changed');
+    const liveManifest = JSON.parse(previousManifest);
+    verifyBootstrapPreviousMaterialLive(root, bootstrap.previousMaterial, previous, supervisor, liveManifest);
+    const qualified = inspectBootstrapQualification({ installation: material.installation, actualPrevious: bootstrap.previousMaterial,
+        liveManifest, executorCodeClosureSha256: codeClosureSha256,
+        verifierClosureSha256: sha(verifyTripleRetainedRecord(root, record)['capsule.mjs']), qualificationReference: bootstrap.qualificationReference });
+    if (qualified.qualificationSha256 !== material.baseline.attestationSha256
+        || qualified.reportSha256 !== material.baseline.rehearsalSha256 || qualified.databasePath !== material.database.path) {
+        throw new Error('oid_bootstrap_qualification_changed');
+    }
+    const review = bootstrapReferenceJson(bootstrap.reviewReference, 'review');
+    const receipt = bootstrapReferenceJson(bootstrap.approvalReference, 'approval');
+    if (bootstrap.approvalReference.sha256 !== material.approval.receiptSha256) throw new Error('oid_bootstrap_approval_changed');
+    validateBootstrapApprovalChain(ticket, review, receipt, bootstrap.ownerPrincipal, clock);
+    verifyBootstrapTicket(ticket, material, clock);
+    return { material, codeClosureSha256, qualified };
 }
 
 function tripleReadClaim(root, transaction, record, { requireFresh = true } = {}) {
@@ -1978,7 +2278,9 @@ export function recordOidTripleSafeStartFailure(file, expected, phase, result) {
 
 async function startAndAttestOidTriple(root, record, safeBytes, handle, file, transaction, rollback = false) {
     const slot = validateOidTriplePm2Slot(await triplePm2Read(transaction.supervisor), transaction.supervisor, 'stopped');
-    assertOidTripleEffectiveMode(root, slot.pm2_env.env || {});
+    const stoppedEnvironment = slot.pm2_env.env || {};
+    const stoppedMode = transaction.bootstrap && (rollback || Object.hasOwn(stoppedEnvironment, 'NASSAJ_UPDATE_MODE')) ? 'release' : 'local-main';
+    assertOidTripleEffectiveMode(root, stoppedEnvironment, stoppedMode);
     let current = { ...transaction, state: rollback ? 'triple_previous_start_intent' : 'triple_candidate_start_intent',
         bootDirection: rollback ? 'previous' : 'target', bootNonce: randomBytes(32).toString('hex'),
         pair: { ...transaction.pair, databaseState: rollback ? 'PRE_CANDIDATE' : 'UNKNOWN' } };
@@ -2146,6 +2448,7 @@ async function recoverOidTripleOwnedFailure(root, record, safeBytes, handle, fil
             transaction = refreshPre();
             transaction = await exchangeOidTripleGenerations(root, file, transaction, 'rollback', record);
             transaction = refreshPre();
+            if (transaction.bootstrapMode) transaction = restoreBootstrapModeCAS(root, file, transaction, record);
             return await startAndAttestOidTriple(root, record, safeBytes, handle, file, transaction, true);
         } catch (failure) { if (failure.message === 'oid_triple_recovery_binding_changed') throw failure; /* Preserve PRE_CANDIDATE evidence; a failed proof is never an implicit OPEN. */ }
     }
@@ -2183,21 +2486,88 @@ async function attestOidTripleExistingChild(root, record, handle, file, transact
     return current.pair.receipt;
 }
 
+async function abortBootstrapClaimWithoutJournal(root, record, paths) {
+    const ticket = record.bootstrap.ticket, nonce = record.transactionNonce;
+    const claimFile = path.join(paths.gitRoot, 'nassaj-oid-recovery', nonce, `bootstrap-claim-${ticket.nonce}.json`);
+    const claimBytes = readBootstrapPrivateFile(claimFile), claim = JSON.parse(claimBytes);
+    const binding = bootstrapJournalBinding(ticket, { claim, sha256: sha(claimBytes) });
+    if (!pairOwnerProvablyDead(claim.owner)) throw new Error('oid_triple_resume_owner_alive_or_unknown');
+    const qualified = record.bootstrap.previousMaterial;
+    for (const key of ['clientBuildId','serverBuildId','controlManifestSha256','clientTreeSha256','serverTreeSha256','nodeModulesTreeSha256']) {
+        if (qualified[key] !== ticket.material.previous[key]) throw new Error('oid_bootstrap_previous_changed');
+    }
+    const previous = { schema: 'nassaj-oid-triple-previous/v2', clientBuildId: qualified.clientBuildId, serverBuildId: qualified.serverBuildId,
+        clientOid: qualified.clientOid, clientTreeSha256: qualified.clientTreeSha256, serverTreeSha256: qualified.serverTreeSha256,
+        nodeModulesTreeSha256: qualified.nodeModulesTreeSha256, controlManifestSha256: qualified.controlManifestSha256,
+        runtime: { pid: ticket.material.previous.pid, startTime: ticket.material.previous.startTicks, bootId: ticket.bootId,
+            oid: qualified.oid, serverBuildId: qualified.serverBuildId, clientBuildId: qualified.clientBuildId } };
+    pairVerifyLive(root, { targetClientBuildId: previous.clientBuildId, targetServerBuildId: previous.serverBuildId }, previous);
+    await assertOidPairPreviousRuntime(root, previous);
+    const database = lstatSync(ticket.material.database.path), maintenance = pairReadMaintenance(paths);
+    if (maintenance.state !== 'OPEN' || maintenance.gateClosed || maintenance.oidAdmissionIntent
+        || git(root, ['rev-parse','--verify','refs/heads/main^{commit}']) !== ticket.material.event.oid
+        || sha(pinnedFile(path.join(root, '.env'), 'bootstrap_claim_only_mode', { mode: 0o600 }).bytes) !== ticket.material.mode.originalEnvSha256
+        || String(database.dev) !== ticket.material.database.dev || String(database.ino) !== ticket.material.database.ino) {
+        throw new Error('oid_bootstrap_pre_effect_state_changed');
+    }
+    const abortFile = path.join(path.dirname(claimFile), 'bootstrap-aborted-pre-effect.json');
+    const receipt = bootstrapAbortReceipt(binding.claimSha256, nonce);
+    if (fs.existsSync(abortFile)) {
+        validateBootstrapAbortReceipt(abortFile, binding.claimSha256, nonce);
+    } else durableCreate(abortFile, receipt);
+    return { state: 'aborted_pre_effect', transactionNonce: nonce };
+}
+
 /** Explicit re-entry of the retained executor; a stopped app never supplies an automatic recovery daemon. */
 async function resumeOidTripleTransaction(record, safeBytes) {
     const root = record.repoRoot;
     if (record.resume.operatorUid !== process.getuid() || !/^[A-Za-z0-9:_-]{1,120}$/.test(record.resume.permissionRef || '')) throw new Error('oid_triple_resume_permission_invalid');
     verifyTripleRetainedRecord(root, record);
-    const paths = pairPaths(root), locks = [], file = path.join(paths.gitRoot, `nassaj-oid-control-transaction-${record.pair.sequence}-${record.transactionNonce}.json`);
+    const sequence = record.bootstrap?.ticket?.material?.event?.sequence ?? record.pair.sequence;
+    const paths = pairPaths(root), locks = [], file = path.join(paths.gitRoot, `nassaj-oid-control-transaction-${sequence}-${record.transactionNonce}.json`);
     const attempt = randomBytes(16).toString('hex');
     const receiptFile = path.join(paths.gitRoot, 'nassaj-oid-recovery', record.transactionNonce, `resume-${attempt}.json`);
     let current, transaction, handle;
     try {
         for (const lock of [paths.admission, paths.activity, ...['nassaj-local-preview-build.lock','nassaj-client-build.lock','nassaj-preview-event-mutation.lock'].map(name => path.join(paths.gitRoot, name))]) locks.push(await pairLock(lock));
-        current = pairReadMaintenance(paths); transaction = pairJournal(paths, current.identity?.oid).value;
+        current = pairReadMaintenance(paths);
+        if (record.bootstrap && current.state === 'OPEN' && !current.gateClosed && !current.oidAdmissionIntent) {
+            const sequence = record.bootstrap.ticket.material.event.sequence;
+            const preEffectFile = path.join(paths.gitRoot, `nassaj-oid-control-transaction-${sequence}-${record.transactionNonce}.json`);
+            let preEffect;
+            try { preEffect = pinnedJson(preEffectFile, 'bootstrap_pre_effect_recovery'); }
+            catch (error) { if (error.code === 'ENOENT') return abortBootstrapClaimWithoutJournal(root, record, paths); throw error; }
+            if (preEffect.state === 'pair_admission_intent' && preEffect.bootstrap && !preEffect.oldStopIntentAt && !preEffect.oldStoppedAt
+                && !preEffect.bootDirection && preEffect.pair?.activationNotClaimed === true && preEffect.pair.databaseState === 'PRE_CANDIDATE') {
+                if (!pairOwnerProvablyDead(preEffect.owner)) throw new Error('oid_triple_resume_owner_alive_or_unknown');
+                const codeClosureSha256 = bootstrapRetainedCodeClosure(root, record);
+                verifyBootstrapJournalBinding(preEffect, record, bootstrapClaimBytes(root, record, preEffect), codeClosureSha256);
+                pairVerifyLive(root, { targetClientBuildId: preEffect.pair.previous.clientBuildId,
+                    targetServerBuildId: preEffect.pair.previous.serverBuildId }, preEffect.pair.previous);
+                await assertOidPairPreviousRuntime(root, preEffect.pair.previous);
+                const ticket = record.bootstrap.ticket, database = lstatSync(ticket.material.database.path);
+                if (git(root, ['rev-parse','--verify','refs/heads/main^{commit}']) !== ticket.material.event.oid
+                    || sha(pinnedFile(path.join(root, '.env'), 'bootstrap_abort_mode', { mode: 0o600 }).bytes) !== ticket.material.mode.originalEnvSha256
+                    || String(database.dev) !== ticket.material.database.dev || String(database.ino) !== ticket.material.database.ino) {
+                    throw new Error('oid_bootstrap_pre_effect_state_changed');
+                }
+                const aborted = { ...preEffect, state: 'aborted_pre_effect', abortedAt: Date.now() }; durable(preEffectFile, aborted);
+                const abortFile = path.join(paths.gitRoot, 'nassaj-oid-recovery', record.transactionNonce, 'bootstrap-aborted-pre-effect.json');
+                if (fs.existsSync(abortFile)) validateBootstrapAbortReceipt(abortFile,
+                    preEffect.bootstrap.claimSha256, record.transactionNonce);
+                else durableCreate(abortFile, bootstrapAbortReceipt(preEffect.bootstrap.claimSha256,
+                    record.transactionNonce, aborted.abortedAt));
+                return { state: 'aborted_pre_effect', transactionNonce: record.transactionNonce };
+            }
+        }
+        transaction = pairJournal(paths, current.identity?.oid).value;
         if (transaction.schema !== 'nassaj-oid-control-transaction/v2' || transaction.transactionNonce !== record.transactionNonce
             || transaction.actionId !== record.actionId || transaction.pair.targetDigest !== record.pair.targetDigest
             || pairCanonical(transaction.recoveryReference) !== pairCanonical(record.recoveryReference)) throw new Error('oid_triple_resume_binding_changed');
+        if (record.bootstrap) {
+            const codeClosureSha256 = bootstrapRetainedCodeClosure(root, record);
+            verifyBootstrapJournalBinding(transaction, record, bootstrapClaimBytes(root, record, transaction), codeClosureSha256);
+        } else if (transaction.bootstrap) throw new Error('oid_triple_resume_binding_changed');
         if (current.state === 'OPEN') {
             validateOidPairMaintenance(root, current);
             durableCreate(receiptFile, { ...record.resume, attempt, state: 'already_completed', transactionNonce: record.transactionNonce });
@@ -2329,21 +2699,24 @@ export function inspectConfirmedOidPair(root, expected, { now = Date.now() } = {
 /** Claim the already-persisted full waiter before admission locks; no nested event acquisition. */
 async function claimFullClientPublicationWaiter(root, sequence, transactionNonce) {
     const lease = await pairLock(path.join(gitControlRoot(root), 'nassaj-preview-event-mutation.lock'));
-    try {
-        const file = path.join(gitControlRoot(root), `nassaj-preview-oid-event-control-${String(sequence).padStart(16, '0')}.json`);
-        const record = pinnedJson(file, 'full_waiter_event'), waiter = record.fullUpdateWaiter;
-        if (!waiter) {
-            const loaded = pinnedJson(path.join(root, 'dist-server/OID_CONTROL_MANIFEST.json'), 'full_waiter_manifest');
-            if (loaded.capabilities?.clientPublicationV1) throw new Error('full_update_waiter_required');
-            return null;
-        }
-        if (waiter.schema !== 'nassaj-full-update-waiter/v1' || waiter.requestId !== `local-update:${sequence}`
-            || waiter.sequence !== sequence || !Number.isSafeInteger(waiter.revision) || waiter.revision < 1
-            || waiter.phase !== 'waiting' || waiter.effect !== 'none') throw new Error('full_update_waiter_conflict');
-        const next = { ...waiter, revision: waiter.revision + 1, phase: 'effects_started', effect: 'started', transactionNonce };
-        durable(file, { ...record, fullUpdateWaiter: next });
-        return next;
-    } finally { lease.release(); }
+    try { return claimFullClientPublicationWaiterHeld(root, sequence, transactionNonce); }
+    finally { lease.release(); }
+}
+
+function claimFullClientPublicationWaiterHeld(root, sequence, transactionNonce) {
+    const file = path.join(gitControlRoot(root), `nassaj-preview-oid-event-control-${String(sequence).padStart(16, '0')}.json`);
+    const record = pinnedJson(file, 'full_waiter_event'), waiter = record.fullUpdateWaiter;
+    if (!waiter) {
+        const loaded = pinnedJson(path.join(root, 'dist-server/OID_CONTROL_MANIFEST.json'), 'full_waiter_manifest');
+        if (loaded.capabilities?.clientPublicationV1) throw new Error('full_update_waiter_required');
+        return null;
+    }
+    if (waiter.schema !== 'nassaj-full-update-waiter/v1' || waiter.requestId !== `local-update:${sequence}`
+        || waiter.sequence !== sequence || !Number.isSafeInteger(waiter.revision) || waiter.revision < 1
+        || waiter.phase !== 'waiting' || waiter.effect !== 'none') throw new Error('full_update_waiter_conflict');
+    const next = { ...waiter, revision: waiter.revision + 1, phase: 'effects_started', effect: 'started', transactionNonce };
+    durable(file, { ...record, fullUpdateWaiter: next });
+    return next;
 }
 
 /** Close a full waiter only after the capsule proves no stop/DB effect and the actual previous pair. Caller holds event EX. */
@@ -2422,15 +2795,88 @@ function pairRequireCapabilities(root, state) {
     return { live, target };
 }
 
+function bootstrapClaimBytes(root, record, transaction) {
+    const ticket = record.bootstrap.ticket;
+    const file = path.join(gitControlRoot(root), 'nassaj-oid-recovery', record.transactionNonce, `bootstrap-claim-${ticket.nonce}.json`);
+    if (!HEX64.test(transaction.bootstrap?.claimSha256 || '')) throw new Error('oid_bootstrap_claim_binding_missing');
+    return readBootstrapPinnedFile(file, transaction.bootstrap.claimSha256);
+}
+
+/** Execute the accepted one-shot release -> local-main bootstrap inside the retained triple chain. */
+async function runBootstrapOidTripleTransaction(record, safeBytes, initial) {
+    const root = record.repoRoot, ticket = record.bootstrap.ticket;
+    if (initial.target?.schema !== 'nassaj-oid-triple-target/v2' || record.resume) throw new Error('oid_bootstrap_record_invalid');
+    verifyTripleRetainedRecord(root, record);
+    if (activeTransactions(root).length) throw new Error('oid_triple_recovery_required');
+    const manifests = pairRequireCapabilities(root, initial);
+    const previous = await captureOidTriplePreviousGeneration(root, manifests.live, { allowQualifiedMismatch: true });
+    const supervisor = await captureOidTripleSupervisor(root, record);
+    const identity = { sequence: initial.sequence, group: initial.group, oid: initial.oid, targetDigest: initial.targetDigest,
+        transactionNonce: record.transactionNonce, journalBasename: `nassaj-oid-control-transaction-${initial.sequence}-${record.transactionNonce}.json`,
+        previousClientBuildId: previous.clientBuildId, previousServerBuildId: previous.serverBuildId,
+        targetClientBuildId: initial.target.clientBuildId, targetServerBuildId: initial.target.serverBuildId };
+    let transaction = { schema: 'nassaj-oid-control-transaction/v2', generationNames: UPDATE_GENERATION_NAMES, ...identity,
+        buildId: initial.target.serverBuildId, actionId: record.actionId, owner: pairProcessIdentity(), supervisor,
+        recoveryReference: record.recoveryReference, state: 'pair_admission_intent', bootstrapPending: true,
+        pair: { targetDigest: initial.targetDigest, target: initial.target, previous, databaseState: 'PRE_CANDIDATE', activationNotClaimed: true } };
+    let verified = await verifyBootstrapExecutionBindings(root, record, initial, previous, supervisor);
+    const handle = await beginBootstrapOidAdmission(root, identity, transaction, async () => {
+        const state = inspectConfirmedOidPair(root, { ...record.pair, actionId: record.actionId, transactionNonce: record.transactionNonce });
+        pairVerifyLive(root, { targetClientBuildId: previous.clientBuildId, targetServerBuildId: previous.serverBuildId }, previous);
+        await assertOidPairPreviousRuntime(root, previous);
+        verified = await verifyBootstrapExecutionBindings(root, record, state, previous, supervisor);
+        return { ...consumeBootstrapTicket(ticket, verified.material, pairProcessIdentity(), bootstrapClock()), ticket };
+    });
+    const file = path.join(handle.paths.gitRoot, identity.journalBasename);
+    transaction = handle.claimedTransaction;
+    try {
+        transaction.fullUpdateWaiter = claimFullClientPublicationWaiterHeld(root, initial.sequence, record.transactionNonce);
+        const snapshot = await prepareOidTriplePublicationSnapshot(root, initial.target, previous, record.pair.databasePath, { ...identity,
+            ownerId: record.pair.ownerId, actionId: record.actionId });
+        let state = inspectConfirmedOidPair(root, { ...record.pair, actionId: record.actionId, transactionNonce: record.transactionNonce });
+        state = pairRecordEvent(root, state, { phase: 'activation_claimed', activation: {
+            actionId: record.actionId, transactionNonce: record.transactionNonce, claimedAt: Date.now() } });
+        transaction = { ...transaction, state: 'triple_prepared',
+            pair: { ...transaction.pair, snapshot, previousMaintenance: handle.original, activationNotClaimed: false,
+                consent: state.consent, authority: inspectOidPairAuthority(root, state, record.pair.ownerId),
+                authoritySourceSha256: sha(pairCanonical(state.policyAuthorization || state.consent)) } };
+        durable(file, transaction);
+        transaction = prepareOidTripleClaimedDependencyExchange(root, file, transaction, record);
+        const freshState = tripleReadClaim(root, transaction, record);
+        verified = await verifyBootstrapExecutionBindings(root, record, freshState, previous, supervisor);
+        verifyBootstrapTicket(ticket, verified.material, bootstrapClock());
+        transaction = { ...transaction, state: 'triple_old_stop_intent', oldStopIntentAt: Date.now() }; durable(file, transaction);
+        handle.transition({ phase: 'OID_EXCHANGING' });
+        injectFailure('bootstrap_before_old_stop');
+        const stopped = await runSafe(safeBytes, ['--oid-triple-phase','stop','--exec'], { ...record, artifactRoot: path.join(root, 'dist-server') });
+        transaction = pinnedJson(file, 'bootstrap_stopped_journal');
+        if (stopped.status !== 0 || transaction.state !== 'triple_old_stopped') throw new Error('oid_triple_stop_unverified');
+        injectFailure('bootstrap_after_old_stop');
+        transaction = applyBootstrapModeCAS(root, file, transaction, record);
+        injectFailure('bootstrap_after_mode');
+        transaction = await exchangeOidTripleGenerations(root, file, transaction, 'forward', record);
+        transaction = { ...transaction, state: 'triple_exchanged' }; durable(file, transaction);
+        injectFailure('bootstrap_after_exchange');
+        const nativeProbe = runOidTripleNativeProbe(root, path.join(root, 'node_modules'), { ...transaction.pair.target, transactionNonce: record.transactionNonce });
+        transaction = { ...transaction, nativeProbe }; durable(file, transaction);
+        verifyBootstrapJournalBinding(transaction, record, bootstrapClaimBytes(root, record, transaction), verified.codeClosureSha256);
+        return await startAndAttestOidTriple(root, record, safeBytes, handle, file, transaction);
+    } catch (error) {
+        try { recordOidTripleOriginFailure(file, transaction, error); }
+        finally { await recoverOidTripleOwnedFailure(root, record, safeBytes, handle, file, transaction, error); }
+        throw error;
+    } finally { handle.release(); }
+}
+
 /** Execute the paired extension of the existing capsule; UNKNOWN never rolls binaries or DB back. */
 export async function runOidPairTransaction(record, safeBytes) {
-    // A bootstrap marker must never silently enter the ordinary local-main path.
-    // Qualification verification and the reviewed MODE recovery sequence are not wired yet.
-    if (record.bootstrap !== undefined) throw new Error('oid_bootstrap_integration_unavailable');
     const root = record.repoRoot, expected = { ...record.pair, actionId: record.actionId, transactionNonce: record.transactionNonce };
     if (!/^[a-f0-9-]{36}$/.test(record.actionId || '') || !HEX64.test(record.transactionNonce || '')) throw new Error('oid_pair_action_required');
     if (record.resume) return resumeOidTripleTransaction(record, safeBytes);
     let state = inspectConfirmedOidPair(root, expected);
+    if (record.bootstrap !== undefined) {
+        return runBootstrapOidTripleTransaction(record, safeBytes, state);
+    }
     pairRequireCapabilities(root, state);
     if (state.target?.schema === 'nassaj-oid-triple-target/v2') return runOidTripleTransaction(record, safeBytes, state);
     if (activeTransactions(root).length) throw new Error('oid_pair_recovery_required');

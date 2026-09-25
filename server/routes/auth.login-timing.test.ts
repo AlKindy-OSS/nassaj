@@ -54,9 +54,14 @@ class MockInviteError extends Error {
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: { getUserByUsername: () => userRow, updateLastLogin: () => {} },
+    appConfigDb: {},
+    localModelServersDb: {},
     auditLogDb: { record: () => {} },
     invitesDb: {},
   },
+});
+mock.module(url('../modules/account-wallet/index.js'), {
+  namedExports: { AccountWalletService: class {} },
 });
 // The mock must cover the WHOLE import surface routes/auth.js pulls from this
 // module (auth.js:10-17). A mocked module that omits even one name makes the

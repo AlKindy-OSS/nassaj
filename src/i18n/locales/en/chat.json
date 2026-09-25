@@ -939,7 +939,23 @@
     "stale": "Showing the last saved summary",
     "incompleteSnapshot": "Summary is still being completed",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "Legacy summary — recorded requests may not cover the full conversation",
+    "measurementIncomplete": "Figures may not cover the full conversation",
+    "measurementQuarantined": "Measurement is under verification — totals are not confirmed",
+    "modelCalls": "Model calls: {{count}}",
+    "modelCallUsage": "{{count}} model calls · {{tokens}} processing units",
+    "legacyCodexModelUsage": "Legacy summary: {{count}} recorded requests · {{tokens}} processing units",
+    "rolloutChains": "Contributing rollout chains: {{count}}",
+    "subagentSpawnAttempts": "Subagent creation attempts: {{count}}",
+    "resolvedSubagentRollouts": "Resolved subagent rollout chains: {{count}}",
+    "subagentModelCalls": "Subagent model calls: {{count}}",
+    "responseTurnDurationLabel": "Response time",
+    "totalWorkDuration": "Total work time (durations may overlap): {{duration}}"
+  },
+  "activityGap": {
+    "status": "Agent is working — last activity {{time}} ago",
+    "ariaLabel": "Agent is still working, last activity {{time}} ago"
   },
   "activityGap": {
     "status": "Agent is working — last activity {{time}} ago",

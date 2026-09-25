@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { initializeDatabase } from '@/modules/database/index.js';
+
 import { handleChatConnection } from './chat-websocket.service.js';
+
+// 2bfb92f01: a command without cwd is now spawn-gated on process.cwd(), which reads the
+// projects table; an empty initialized database keeps that path unregistered (visible).
+await initializeDatabase();
 
 function fixture(overrides: Record<string, unknown> = {}) {
   const sent: Record<string, unknown>[] = [];

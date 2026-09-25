@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { conversationUsageSnapshotsDb, sessionsDb, usageIngestionDb } from '@/modules/database/index.js';
+import { conversationUsageSnapshotsDb, participantsDb, sessionsDb, usageIngestionDb } from '@/modules/database/index.js';
 import {
   readCodexRolloutMetadata,
   resolveCodexLinkedRollouts,
@@ -15,6 +15,7 @@ import {
   type ConversationIngestOutcome,
   type IngestContext,
 } from './usage-ingestion.service.js';
+import { runUsageV3CleanupMaintenance } from './usage-statistics-v3.service.js';
 
 const BACKFILL_PARSER_VERSION = 1;
 const DEFAULT_CONCURRENCY = 2;
@@ -50,6 +51,7 @@ type SchedulerDeps = {
   resolveContext?: (request: UsageIngestionScheduleRequest) => Promise<IngestContext | null>;
   ingest?: (context: IngestContext) => Promise<ConversationIngestOutcome>;
   recordFailure?: (sessionId: string | null, key: string, error: unknown) => void;
+  maintenance?: () => void;
 };
 
 type PendingJob = {
@@ -88,6 +90,9 @@ async function resolveDefaultContext(request: UsageIngestionScheduleRequest): Pr
   if (!row?.jsonl_path || !measurable(row.provider)) return null;
   const context: IngestContext = {
     sessionId: row.session_id,
+    // The DB helper accepts only the sole owner+spawn row; null deliberately
+    // reaches the v3 writer as absent context and fails closed without fallback.
+    ownerUserId: participantsDb.resolveStrictSpawnOwnerUserId(row.session_id) ?? undefined,
     provider: row.provider,
     transcriptPath: row.jsonl_path,
     projectPath: row.project_path,
@@ -107,6 +112,7 @@ export class UsageIngestionScheduler {
   private readonly resolveContext: NonNullable<SchedulerDeps['resolveContext']>;
   private readonly ingest: NonNullable<SchedulerDeps['ingest']>;
   private readonly recordFailure: NonNullable<SchedulerDeps['recordFailure']>;
+  private readonly maintenance: NonNullable<SchedulerDeps['maintenance']>;
   private readonly jobs = new Map<string, PendingJob>();
   private readonly canonicalJobs = new Map<string, PendingJob>();
   private readonly queue: PendingJob[] = [];
@@ -126,6 +132,7 @@ export class UsageIngestionScheduler {
     this.writerMode = deps.writerMode ?? usageIngestWriterMode;
     this.resolveContext = deps.resolveContext ?? resolveDefaultContext;
     this.ingest = deps.ingest ?? ingestConversationUsage;
+    this.maintenance = deps.maintenance ?? runUsageV3CleanupMaintenance;
     this.recordFailure = deps.recordFailure ?? ((sessionId, key, error) => {
       if (sessionId) conversationUsageSnapshotsDb.markSessionError(
         sessionId, 'background_ingestion_failed', error instanceof Error ? error.message : String(error),
@@ -138,6 +145,10 @@ export class UsageIngestionScheduler {
 
   schedule(request: UsageIngestionScheduleRequest): Promise<ConversationIngestOutcome | null> {
     if (this.closed || this.writerMode() === 'off' || !measurable(request.provider)) return Promise.resolve(null);
+    try { this.maintenance(); } catch {
+      // Cleanup is bounded maintenance, never a reason to drop ingestion.
+      // The next scheduler activity retries after the service's lazy window.
+    }
     const key = request.sessionId
       ? `${request.provider}:session:${request.sessionId}`
       : `${request.provider}:file:${path.resolve(request.filePath)}`;

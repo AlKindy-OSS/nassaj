@@ -974,7 +974,23 @@
     "stale": "يُعرض آخر ملخص محفوظ",
     "incompleteSnapshot": "لا يزال الملخص قيد الاستكمال",
     "turnTokens": "توكن",
-    "turnCostUnavailable": "كلفة الدور غير متاحة"
+    "turnCostUnavailable": "كلفة الدور غير متاحة",
+    "measurementV1": "ملخص قديم — الطلبات المسجلة قد لا تغطي المحادثة كاملة",
+    "measurementIncomplete": "قد لا تغطي الأرقام المحادثة كاملة",
+    "measurementQuarantined": "القياس قيد التحقق — الإجماليات غير معتمدة",
+    "modelCalls": "نداءات النموذج: {{count}}",
+    "modelCallUsage": "{{count}} نداءات نموذج · {{tokens}} وحدة معالجة",
+    "legacyCodexModelUsage": "ملخص قديم: {{count}} طلباً مسجلاً · {{tokens}} وحدة معالجة",
+    "rolloutChains": "سلاسل التنفيذ المحتسبة: {{count}}",
+    "subagentSpawnAttempts": "محاولات إنشاء وكلاء فرعيين: {{count}}",
+    "resolvedSubagentRollouts": "سلاسل تنفيذ الوكلاء الفرعيين المحتسبة: {{count}}",
+    "subagentModelCalls": "نداءات نموذج الوكلاء الفرعيين: {{count}}",
+    "responseTurnDurationLabel": "زمن الاستجابة",
+    "totalWorkDuration": "إجمالي مدة العمل (قد تتداخل المدد): {{duration}}"
+  },
+  "activityGap": {
+    "status": "الوكيل يعمل — آخر نشاط منذ {{time}}",
+    "ariaLabel": "الوكيل ما زال يعمل، آخر نشاط منذ {{time}}"
   },
   "activityGap": {
     "status": "الوكيل يعمل — آخر نشاط منذ {{time}}",

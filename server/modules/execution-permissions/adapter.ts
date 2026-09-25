@@ -36,18 +36,29 @@ export const runPermissionExecutionAdapter = async <T>(
 ): Promise<T> => {
   if (!execution) return adapter();
   execution.consume();
-  let pending: Promise<T>;
-  try { pending = adapter(); }
+  // The durable start record is also the final current-actor check. It must be
+  // committed before entering an adapter that may spawn or call a provider;
+  // doing it afterwards leaves an untracked effect when the device identity
+  // changes between admission and invocation.
+  try { execution.markStarted(resolveEffectIdentity?.() ?? undefined); }
   catch (error) {
     settleAfterFailure(execution, 'reconciled_unknown');
     throw error;
   }
-  try { execution.markStarted(resolveEffectIdentity?.() ?? undefined); }
+  let pending: Promise<T>;
+  try { pending = adapter(); }
   catch (error) {
-    // Observe a later rejection without asserting that the still-running effect drained.
-    void Promise.resolve(pending).catch(() => {});
-    settleAfterFailure(execution, 'reconciled_unknown');
+    settleAfterFailure(execution, 'failed');
     throw error;
+  }
+  const child = resolveEffectIdentity?.() ?? null;
+  if (child) {
+    try { execution.attachChildIdentity(child); }
+    catch (error) {
+      void Promise.resolve(pending).catch(() => {});
+      settleAfterFailure(execution, 'reconciled_unknown');
+      throw error;
+    }
   }
   let value: T;
   try { value = await pending; }

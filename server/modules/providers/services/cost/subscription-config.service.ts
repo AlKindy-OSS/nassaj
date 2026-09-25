@@ -237,13 +237,21 @@ function loadCache(userId: string | number | null | undefined): Record<string, S
  * سُجِّل دخوله للتوّ يظهر خلال دقيقة على أبعد تقدير.
  */
 const AUTH_CACHE_TTL_MS = 60_000;
-const authCache = new Map<string, { at: number; status: { installed: boolean; authenticated: boolean; method: string | null } }>();
+export type ProviderAuthStatus = {
+  installed: boolean;
+  authenticated: boolean;
+  method: string | null;
+  /** False means the probe failed; it is not evidence of subscription auth. */
+  available: boolean;
+};
+
+const authCache = new Map<string, { at: number; status: ProviderAuthStatus }>();
 
 const defaultProbe: ProviderAuthProbe = async (provider, userId) =>
   providerAuthService.getProviderAuthStatus(provider, userId ?? null);
 
 /** مزوّد لم يُقطَع بحاله — لا يُدّعى اشتراكاً. */
-const UNKNOWN_AUTH = Object.freeze({ installed: false, authenticated: false, method: null });
+const UNKNOWN_AUTH = Object.freeze({ installed: false, authenticated: false, method: null, available: false });
 
 /**
  * حالة مزوّد لمستخدم بعينه. الكاش يُتخطّى كلّياً حين يُحقن فحص مخصَّص: اختبارٌ
@@ -256,7 +264,7 @@ export async function probeProviderAuth(
   provider: string,
   userId?: string | number | null,
   deps: SubscriptionDeps = {},
-): Promise<{ installed: boolean; authenticated: boolean; method: string | null }> {
+): Promise<ProviderAuthStatus> {
   if (deps.probeAuth) {
     try {
       const status = await deps.probeAuth(provider, userId ?? null);
@@ -264,6 +272,7 @@ export async function probeProviderAuth(
         installed: status.installed === true,
         authenticated: status.authenticated === true,
         method: status.method ?? null,
+        available: true,
       };
     } catch {
       return { ...UNKNOWN_AUTH };
@@ -282,6 +291,7 @@ export async function probeProviderAuth(
       installed: status.installed === true,
       authenticated: status.authenticated === true,
       method: status.method ?? null,
+      available: true,
     };
     authCache.set(key, { at: Date.now(), status: value });
     return value;

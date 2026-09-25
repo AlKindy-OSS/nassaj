@@ -20,32 +20,14 @@
  * agent environment with its own native `kimi-agent-cli` launcher, so it is
  * selectable and accepts an API key.
  *
- * `gemini` was RE-ENABLED (T-1211). Its old rationale here read "superseded by
- * Antigravity", and that conflated two things that only LOOK alike because both
- * say Google and both keep state under `~/.gemini/`:
- *
- *   • **agy (Antigravity)** authenticates by GOOGLE OAUTH and nothing else
- *     (`antigravity-auth.provider.ts` reports `method: 'google-oauth'`; its
- *     credential is `~/.gemini/antigravity-cli/antigravity-oauth-token`). It
- *     resolves its model INSIDE its own CLI and accepts no external engine
- *     (`bodyEngineMatrix`: `antigravity × anthropic = closed_at_vendor`). There
- *     is no key to bring: the account IS the credential.
- *   • **gemini** accepts a plain API key (`gemini-auth.provider.ts` knows
- *     `gemini-api-key` alongside `oauth-personal` and `vertex-ai`). That is a
- *     BYOK path — metered, per-key, and revocable without touching an account.
- *
- * So one is not a substitute for the other; they differ on the axis that
- * matters here — how we pay and what we hand over. "Superseded" was never a
- * technical finding either: the body is complete and maintained (`gemini-cli.js`
- * plus auth/sessions/models/mcp/skills providers, `gemini` 1.1.10 installed on
- * this host), and only this one line kept it hidden.
- *
- * TWO THINGS THIS RE-ENABLE DOES **NOT** DECIDE, both owner policy:
- *  1. WHICH credential gemini runs on. The free AI Studio tier and the paid tier
- *     differ in how Google may use the content sent to them, so "which key" is a
- *     data-governance choice (T-1212), not a default this file may set.
- *  2. That agy is redundant. It stays enabled and untouched; the two are
- *     alternatives, and the reason to keep both is exactly the difference above.
+ * `gemini` remains listed as a history-only compatibility fence while the
+ * remaining client pickers/settings still consume this shared filter. Its new
+ * shell launches are rejected server-side; historical rows remain readable.
+ * agy (Antigravity) is a SEPARATE
+ * provider that merely shares the `~/.gemini` HOME prefix and is untouched —
+ * it authenticates by Google OAuth (`~/.gemini/antigravity-cli/...`) and is not
+ * a substitute relationship either way. Historical `provider='gemini'` rows stay
+ * readable; no new spawn or sync can fire for them.
  *
  * `glm` is disabled AS A STANDALONE AGENT SYSTEM (owner decision 2026-07-26).
  * The settings screen lists agent SYSTEMS — bodies with a CLI, tools and
@@ -58,12 +40,6 @@
  * OpenCode → a `glm/*` model. The carrier itself is NOT affected (it dispatches
  * under provider `opencode`), and the ADR-062 agent-mode bypass in
  * chat-websocket.service keeps historical GLM agent sessions runnable.
- *
- * `gemini` is INTERIM-DISABLED (T-1760, owner decision 2026-09-12). The branch
- * fe4bfe4fb (T-1749) removes the provider entirely; once that lands this entry
- * disappears with it. Keep the diff here minimal so T-1749 wins cleanly on
- * merge. Historical gemini sessions remain readable; the spawn-block prevents
- * new ones until the full removal is merged.
  *
  * NOTE: the provider registry itself is NOT filtered — `resolveProvider` must
  * keep returning disabled providers so historical sessions stay listable and

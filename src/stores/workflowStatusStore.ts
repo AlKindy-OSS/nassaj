@@ -47,6 +47,7 @@ const EMPTY_LIST: readonly ActiveWorkflow[] = Object.freeze([]);
 const bySession = new Map<string, readonly ActiveWorkflow[]>();
 let envelope: WorkflowEnvelope = { eligible: 0, scanned: 0, capped: false, dormant: 0 };
 let snapshotSig = '';
+let identityGeneration = 0;
 
 const listeners = new Set<() => void>();
 
@@ -95,7 +96,11 @@ function computeSnapshotSig(next: Map<string, readonly ActiveWorkflow[]>, env: W
  * referential stability, and only notifies subscribers when the overall snapshot
  * actually changed (so a repeat poll of identical data is a no-op).
  */
-export function setActiveWorkflows(result: ActiveWorkflowsEnvelope): void {
+export function setActiveWorkflows(
+  result: ActiveWorkflowsEnvelope,
+  generation = identityGeneration,
+): void {
+  if (generation !== identityGeneration) return;
   const grouped = new Map<string, ActiveWorkflow[]>();
   let dormantSeen = 0;
   for (const w of result.workflows) {
@@ -162,11 +167,24 @@ export function setActiveWorkflows(result: ActiveWorkflowsEnvelope): void {
 }
 
 /** Test seam: clears the store back to empty. */
-export function __resetWorkflowStatusStore(): void {
+export function resetWorkflowStatusStore(): void {
+  identityGeneration += 1;
   bySession.clear();
   envelope = { eligible: 0, scanned: 0, capped: false, dormant: 0 };
   snapshotSig = '';
   emitChange();
+}
+
+/** Capture the identity epoch before starting an asynchronous workflow read. */
+export function getWorkflowStatusGeneration(): number {
+  return identityGeneration;
+}
+
+/** Backwards-compatible test seam. */
+export const __resetWorkflowStatusStore = resetWorkflowStatusStore;
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:identity-changing', resetWorkflowStatusStore);
 }
 
 /**

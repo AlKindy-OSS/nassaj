@@ -17,7 +17,7 @@ import Database from 'better-sqlite3';
 import { AppError, WORKSPACES_ROOT, getOpenCodeDatabasePath, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
-import { dispatchProviderCommand, isSessionWritableByUser } from '@/modules/websocket/services/chat-websocket.service.js';
+import { abortSessionTurn, dispatchProviderCommand, isSessionWritableByUser } from '@/modules/websocket/services/chat-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 import { createScheduledMessagesRouter, createScheduledMessagesService } from '@/modules/scheduled-messages/index.js';
 import {
@@ -60,7 +60,7 @@ import { createDocumentSharesRouter } from './routes/document-shares.js';
 import { createDocumentSharesStore } from './modules/database/document-shares.js';
 import { createDocumentShareVerifier } from './services/document-share-auth.js';
 import { isShareableDocument, saveSharedDocumentAtomically } from './services/document-share-files.js';
-import { createAssistantImagesRouter, deriveAllowedRoots, defaultScratchpadBase } from './routes/assistant-images.js';
+import { createAssistantImagesRouter, deriveAllowedRoots, defaultScratchpadBases, defaultTmpBases, deriveOverlayWorkspace } from './routes/assistant-images.js';
 import {
     queryClaudeSDK,
     spawnClaudeSideQuery,
@@ -91,12 +91,6 @@ import {
 } from './openai-codex.js';
 import { spawnCodexSideQuery } from './services/codex-app-server.js';
 import {
-    spawnGemini,
-    abortGeminiSession,
-    isGeminiSessionActive,
-    getActiveGeminiSessions,
-} from './gemini-cli.js';
-import {
     spawnAntigravity,
     abortAntigravitySession,
     isAntigravitySessionActive,
@@ -126,6 +120,10 @@ import {
 // so a kimi `mode==='agent'` WS turn routes to the governed native CLI; its absence
 // would leave that path inert (chat behavior unchanged).
 import { spawnKimiAgent } from './kimi-agent-cli.js';
+import {
+    getProviderRunsOwnedByWriter,
+    isProviderRunOwnershipCurrent,
+} from './services/session-process-monitor.js';
 import {
     spawnDeepSeek,
     abortDeepSeekSession,
@@ -166,7 +164,6 @@ import projectStatsRoutes from './modules/projects/project-stats.routes.js';
 import { connectorsOAuthCallbackRoutes, connectorsRoutes } from './modules/connectors/index.js';
 import { voiceRoutes } from './modules/voice/index.js';
 import userRoutes from './routes/user.js';
-import geminiRoutes from './routes/gemini.js';
 import githubRoutes from './routes/github.js';
 import systemRoutes, { executeActionRowAs, findSourceUpdateActivation, reconcileStrandedActivationJobs } from './routes/system.js';
 import { createUpdateAutoActivator } from './services/update-auto-activator.js';
@@ -179,6 +176,11 @@ import {
     detachStandaloneTerminalSocket,
 } from './services/standalone-terminals/standalone-terminal-registry.js';
 import providerRoutes from './modules/providers/provider.routes.js';
+import harnessUpdateRoutes from './modules/providers/harness-update/harness-update.routes.js';
+import {
+    startHarnessAutoUpdateScheduler,
+    stopHarnessAutoUpdateScheduler,
+} from './modules/providers/harness-update/scheduler.js';
 import governancePreferencesRoutes from './modules/providers/governance-preferences.routes.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
 import {
@@ -197,9 +199,11 @@ import {
     cliTurnSupervisor, CLI_TURN_SUPERVISOR_OWNER_ID,
 } from './modules/turn-supervisor/cli-turn-supervisor.service.js';
 import { createTurnSupervisorLifecycle } from './modules/turn-supervisor/lifecycle.js';
-import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, scheduledMessagesDb, userDb, auditLogDb } from './modules/database/index.js';
+import { initializeDatabase, closeConnection, getConnection, projectsDb, sessionsDb, participantsDb, appConfigDb, pendingServerActionsDb, sessionOutcomesDb, sourceUpdateJobsDb, hashSourceUpdateIdempotencyKey, sourceUpdateRequestFingerprint, scheduledMessagesDb, userDb, auditLogDb, canAccessProject, canAccessRegisteredProjectPath, captureWorkspaceTopologyFence, isWorkspaceTopologyFenceCurrent, describePlatformModeVisibilityRisk, isProjectMembershipEnforced } from './modules/database/index.js';
 import { onSessionOutcomeChange } from './modules/websocket/services/session-outcome.service.js';
 import { broadcastSessionOutcome } from './modules/websocket/services/presence.service.js';
+import { revokeProjectLiveAccess } from './modules/websocket/services/project-membership-revocation.service.js';
+import { onMemberRemoved } from './modules/projects/services/project-visibility-management.service.js';
 import { isProjectVisible, coerceUserId } from './modules/projects/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { createSourceUpdater, evaluateUpdateStorage, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
@@ -236,7 +240,7 @@ import { resolveSecurityPosture } from './services/isolation/security-posture.js
 import { credentialPrincipalId } from './services/isolation/credential-principal.js';
 import { userConfigDir } from './services/isolation/provision-user-dirs.js';
 import { isProviderIsolated } from './services/provider-sharing.js';
-import { validateApiKey, authenticateToken, authenticateWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
+import { validateApiKey, authenticateToken, authenticateWebSocket, authenticateDeviceWebSocket, requireRole, JWT_SECRET } from './middleware/auth.js';
 import { recordAuthRejection } from './middleware/auth-rejection-audit.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
@@ -327,7 +331,6 @@ const countGovernedActiveSessions = () => [
     getActiveClaudeSDKSessions,
     getActiveCursorSessions,
     getActiveCodexSessions,
-    getActiveGeminiSessions,
     getActiveAntigravitySessions,
     getActiveOpenCodeSessions,
     getActiveHermesSessions,
@@ -881,12 +884,22 @@ const wss = createWebSocketServer(server, {
         isPlatform: IS_PLATFORM,
         canAcceptApplications: () => normalAdmissionReady && !requestMaintenanceGate.readPublicStatus().gateClosed,
         authenticateWebSocket,
+        authenticateDeviceWebSocket,
+        deviceSessionsEnabled: () => process.env.MULTI_ACCOUNT_SWITCHING === 'true',
         // Cross-boundary collaborators injected from the composition root so the
         // websocket module never imports middleware/utils across the boundary
         // (eslint-plugin-boundaries). T-182 auth_rejected auditing on the WS path.
         jwtSecret: JWT_SECRET,
         recordRejection: recordAuthRejection,
         clientIp,
+        isTrustedOrigin: (request) => {
+            const origin = request.headers.origin;
+            const forwardedProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+            const protocol = forwardedProto === 'https' ? 'https' : 'http';
+            const expected = String(process.env.APP_ORIGIN || `${protocol}://${request.headers.host || ''}`)
+                .replace(/\/$/u, '');
+            return typeof origin === 'string' && origin.replace(/\/$/u, '') === expected;
+        },
     },
     chat: (chatDependencies = {
         acquireWriterLease: (kind) => acquireApplicationWriterLease(kind, { waitMs: 100 }),
@@ -897,7 +910,6 @@ const wss = createWebSocketServer(server, {
         queryClaudeSDK,
         spawnCursor,
         queryCodex,
-        spawnGemini,
         spawnAntigravity,
         spawnOpenCode,
         spawnHermes,
@@ -934,19 +946,21 @@ const wss = createWebSocketServer(server, {
         abortClaudeSDKSession,
         abortCursorSession,
         abortCodexSession,
-        abortGeminiSession,
         abortAntigravitySession,
         abortOpenCodeSession,
         abortHermesSession,
-        abortKimiSession,
+        abortKimiSession: (sessionId) => (
+            spawnKimiAgent.abortSession(sessionId) || abortKimiSession(sessionId)
+        ),
         abortDeepSeekSession,
         abortGlmSession,
         abortQwenSession,
+        getProviderRunsOwnedByWriter,
+        isProviderRunOwnershipCurrent,
         resolveToolApproval,
         isClaudeSDKSessionActive,
         isCursorSessionActive,
         isCodexSessionActive,
-        isGeminiSessionActive,
         isAntigravitySessionActive,
         isOpenCodeSessionActive,
         isHermesSessionActive,
@@ -962,7 +976,6 @@ const wss = createWebSocketServer(server, {
         getActiveClaudeSDKSessions,
         getActiveCursorSessions,
         getActiveCodexSessions,
-        getActiveGeminiSessions,
         getActiveAntigravitySessions,
         getActiveOpenCodeSessions,
         getActiveHermesSessions,
@@ -1222,7 +1235,6 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         claude: safeCount(getActiveClaudeSDKSessions),
         cursor: safeCount(getActiveCursorSessions),
         codex: safeCount(getActiveCodexSessions),
-        gemini: safeCount(getActiveGeminiSessions),
         antigravity: safeCount(getActiveAntigravitySessions),
         opencode: safeCount(getActiveOpenCodeSessions),
         hermes: safeCount(getActiveHermesSessions),
@@ -1417,17 +1429,39 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
     });
 });
 
+// ADR-172 (P1-2): a removed member loses their live chat mirrors on the
+// project and is notified over their open sockets.
+// Owner decision 2026-09-23 (م1): also stop in-flight turns the removed member
+// launched in the project (abortSessionTurn = the abort-session dispatch).
+onMemberRemoved((event) => revokeProjectLiveAccess(event, {
+    abortTurn: (sessionId, userId) => abortSessionTurn(chatDependencies, sessionId, null, userId),
+}));
+// ADR-172 (P1-3): platform mode authenticates everyone as the first user, so
+// per-user project visibility is meaningless there. Warn, never crash.
+const platformVisibilityWarning = describePlatformModeVisibilityRisk(IS_PLATFORM, isProjectMembershipEnforced());
+if (platformVisibilityWarning) console.warn(platformVisibilityWarning);
+
 // Shares have their own explicit JWT/capability gate, including on platform installs.
+// ADR-172 (P1-3), owner decision 2026-09-23 (qa #7): once enforcement is on, any
+// project member (canAccessProject — admin/owner included) may create and manage
+// share links, and 'members' share reads follow the SAME predicate. Public
+// share-token reads stay OUTSIDE canAccessProject by design. Flag off: unchanged.
 const documentSharesRouter = createDocumentSharesRouter({
     getStore: () => createDocumentSharesStore(getConnection()),
     verifyUser: createDocumentShareVerifier(userDb, JWT_SECRET),
-    isMember: (root, id) => projectsDb.isProjectPathOwnedOrMemberedBy(root, id),
+    isMember: (root, id) => (isProjectMembershipEnforced()
+        ? canAccessRegisteredProjectPath(root, id)
+        : projectsDb.isProjectPathOwnedOrMemberedBy(root, id)),
+    canManageProject: (projectId, id) => isProjectMembershipEnforced() && canAccessProject(projectId, id),
     publicOrigin: process.env.NASSAJ_PUBLIC_ORIGIN,
     writer: applicationWriterLeaseMiddleware('document-share-write'),
     audit: (action, userId, shareId) => auditLogDb.record(action, { userId, metadata: { shareId } }),
 });
 app.use('/api', (req, res, next) => {
-    if (/^\/(?:document-shares(?:\/|$)|projects\/[^/]+\/document-shares(?:\/|$))/.test(req.path)) {
+    if (/^\/projects\/[^/]+\/document-shares(?:\/|$)/.test(req.path)) {
+        return authenticateToken(req, res, () => documentSharesRouter(req, res, next));
+    }
+    if (/^\/document-shares(?:\/|$)/.test(req.path)) {
         return documentSharesRouter(req, res, next);
     }
     next();
@@ -1520,9 +1554,6 @@ app.use('/api/settings', authenticateToken, settingsRoutes);
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
 
-// Gemini API Routes (protected)
-app.use('/api/gemini', authenticateToken, geminiRoutes);
-
 // GitHub API Routes (protected) — repository listing for the project wizard.
 app.use('/api/github', authenticateToken, githubRoutes);
 
@@ -1595,7 +1626,6 @@ setSessionLivenessProbes({
     claude: isClaudeSDKSessionActive,
     cursor: isCursorSessionActive,
     codex: isCodexSessionActive,
-    gemini: isGeminiSessionActive,
     antigravity: isAntigravitySessionActive,
     opencode: isOpenCodeSessionActive,
     hermes: isHermesSessionActive,
@@ -1614,6 +1644,7 @@ setEngineSwitchLivenessProbe(isSessionEngineSwitchBlocked);
 // Unified provider MCP routes (protected). The owner/admin gate on skill writes
 // (B-26) is enforced in-handler inside provider.routes.ts, immune to Express's
 // case-insensitive path matching.
+app.use('/api/providers', authenticateToken, harnessUpdateRoutes);
 app.use('/api/providers', authenticateToken, providerRoutes);
 
 // Per-engine governance switch (owner decision 2026-08-08). Reads are open to
@@ -3103,25 +3134,41 @@ app.post('/api/projects/:projectId/files/upload', authenticateToken,
 app.use('/api/chat-images', createChatImagesRouter({ authenticateToken }));
 
 // ADR-157 — assistant-referenced inline images. Roots are derived SERVER-SIDE
-// from the session (project root + session scratchpad only; NEVER /home/operator)
+// from the session (project/overlay + session-only scratchpad/drop roots; never bare home/tmp)
 // after a read-ownership check, so the client can never widen the allow-list.
-const assistantImagesScratchpadBase = defaultScratchpadBase();
+const assistantImagesScratchpadBases = defaultScratchpadBases();
+const assistantImagesTmpBases = defaultTmpBases();
 app.use('/api/assistant-images', createAssistantImagesRouter({
     authenticateToken,
     resolveAllowedRoots: (sessionId, rawUserId) => {
         const userId = coerceUserId(rawUserId);
         const session = sessionsDb.getSessionById(sessionId);
-        if (!session || !session.project_path) {
+        if (!session || !session.project_path || session.session_id !== sessionId) {
             return null;
         }
         if (!isSessionAccessibleByUser(sessionId, session.project_path, userId, 'read')) {
             return null;
         }
-        return deriveAllowedRoots({
+        const accessFence = isProjectMembershipEnforced()
+            ? captureWorkspaceTopologyFence(session.project_path, userId, {
+                sessionId,
+                consent: 'read',
+            })
+            : null;
+        if (isProjectMembershipEnforced() && !accessFence) return null;
+        const encoding = session.jsonl_path ? path.basename(path.dirname(session.jsonl_path)) : null;
+        const roots = deriveAllowedRoots({
             projectRoot: session.project_path,
-            sessionId,
-            scratchpadBase: assistantImagesScratchpadBase,
+            sessionId: session.session_id,
+            overlayWorkspace: deriveOverlayWorkspace(session.project_path, encoding),
+            encodings: encoding ? [encoding] : [],
+            scratchpadBases: assistantImagesScratchpadBases,
+            tmpBases: assistantImagesTmpBases,
         });
+        return {
+            roots,
+            isCurrent: () => accessFence ? isWorkspaceTopologyFenceCurrent(accessFence) : true,
+        };
     },
 }));
 
@@ -3739,6 +3786,7 @@ app.use((err, req, res, next) => {
     return res.status(err.statusCode).json({
       success: false,
       error: {
+        ...(err.details && typeof err.details === 'object' ? err.details : {}),
         code: err.code,
         message: err.message,
         details: err.details,
@@ -4309,6 +4357,7 @@ async function startServer() {
         startupBackground = backgroundLifecycle;
         await backgroundLifecycle.prepare();
         privateSecurityReady = true;
+        startHarnessAutoUpdateScheduler();
 
         // Bootstrap owns EX/EX and admission remains closed until the exact
         // candidate runtime is verified and its client is promoted. Failure
@@ -4394,7 +4443,6 @@ async function startServer() {
                     : getActiveClaudeSDKSessions()).length,
                 cursor: getActiveCursorSessions().length,
                 codex: getActiveCodexSessions().length,
-                gemini: getActiveGeminiSessions().length,
                 antigravity: getActiveAntigravitySessions().length,
                 opencode: getActiveOpenCodeSessions().length,
                 hermes: getActiveHermesSessions().length,
@@ -4407,6 +4455,7 @@ async function startServer() {
                 qwen: getActiveQwenSessions().length,
             }),
             finalCleanup: async () => {
+                stopHarnessAutoUpdateScheduler();
                 await backgroundLifecycle.stop();
             },
             // Resolve every waiting approval BEFORE the sockets close, so a
@@ -4442,6 +4491,7 @@ async function startServer() {
     } catch (error) {
         normalAdmissionReady = false; privateSecurityReady = false;
         server.close(); server.closeAllConnections?.(); wss.close();
+        stopHarnessAutoUpdateScheduler();
         try { await startupBackground?.stop(); } catch { /* process exit remains mandatory */ }
         console.error('[ERROR] Failed to start server:', error);
         process.exit(1);

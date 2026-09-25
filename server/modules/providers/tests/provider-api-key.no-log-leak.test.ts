@@ -1,3 +1,7 @@
+// Fixture must initialize an empty DB before the router module graph can open a connection.
+// eslint-disable-next-line import-x/order
+import { principal } from './codex-credential-principal.fixture.js';
+
 /**
  * provider-api-key.no-log-leak.test.ts — T-866/B6.
  *
@@ -148,7 +152,7 @@ test('codex writer CLI-failure log line omits the key', async () => {
 
   const cap = captureConsole();
   try {
-    await assert.rejects(() => writer.setApiKey(null, KEY));
+    await assert.rejects(() => writer.setApiKey(1, KEY, undefined, principal));
   } finally {
     cap.restore();
   }
@@ -187,7 +191,7 @@ test('every credential writer keeps the key out of logs across a set + delete li
   const cap = captureConsole();
   try {
     for (const writer of writers) {
-      const set = await writer.setApiKey(null, KEY);
+      const set = await writer.setApiKey(1, KEY, undefined, principal);
       // The status object the service returns to the route must be key-free too.
       assert.ok(!JSON.stringify(set).includes(KEY), 'a writer echoed the key in its status');
       const del = await writer.deleteApiKey(null);

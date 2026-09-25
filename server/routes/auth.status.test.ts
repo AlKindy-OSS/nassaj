@@ -12,15 +12,22 @@ const passThrough = (_req: unknown, _res: unknown, next: () => void) => next();
 const emptyRouter = express.Router();
 
 let hasUsersResult = true;
+let hasUsersError = false;
 
 // Mock only the heavy transitive deps of auth.js; oidc-config.js is the REAL
 // module so /status exercises the same oidcEnabled() predicate the OIDC routes use.
 mock.module(url('../modules/database/index.js'), {
   namedExports: {
-    userDb: { hasUsers: async () => hasUsersResult },
+    userDb: { hasUsers: async () => {
+      if (hasUsersError) throw new Error('status fixture failure');
+      return hasUsersResult;
+    } },
     auditLogDb: { record: () => {} },
     invitesDb: {},
   },
+});
+mock.module(url('../modules/account-wallet/index.js'), {
+  namedExports: { AccountWalletService: class {} },
 });
 mock.module(url('../middleware/auth.js'), {
   namedExports: {
@@ -52,6 +59,7 @@ mock.module(url('./oidc.js'), { defaultExport: emptyRouter });
 // Neutral baseline; each test sets the OIDC env it needs.
 delete process.env.OIDC_ENABLED;
 delete process.env.OIDC_ROLE_PROJECT_ID;
+delete process.env.MULTI_ACCOUNT_SWITCHING;
 
 const { default: authRouter } = await import('./auth.js');
 const app = express();
@@ -71,10 +79,35 @@ async function status() {
   return res.json() as Promise<Record<string, unknown>>;
 }
 
+test('/status preserves its generic error response', async () => {
+  hasUsersError = true;
+  const res = await fetch(`${baseUrl}/api/auth/status`);
+  assert.equal(res.status, 500);
+  assert.deepEqual(await res.json(), { error: 'Internal server error' });
+  hasUsersError = false;
+});
+
 test('/status exposes oidcEnabled=false when OIDC is disabled', async () => {
   delete process.env.OIDC_ENABLED;
   delete process.env.OIDC_ROLE_PROJECT_ID;
-  assert.deepEqual(await status(), { needsSetup: false, isAuthenticated: false, oidcEnabled: false });
+  assert.deepEqual(await status(), {
+    needsSetup: false,
+    isAuthenticated: false,
+    oidcEnabled: false,
+    deviceAccountSessionsEnabled: false,
+  });
+});
+
+test('/status exposes the exact device-account-session route gate', async () => {
+  process.env.MULTI_ACCOUNT_SWITCHING = 'true';
+  assert.equal((await status()).deviceAccountSessionsEnabled, true);
+
+  process.env.MULTI_ACCOUNT_SWITCHING = 'false';
+  assert.equal((await status()).deviceAccountSessionsEnabled, false);
+
+  process.env.MULTI_ACCOUNT_SWITCHING = '1';
+  assert.equal((await status()).deviceAccountSessionsEnabled, false);
+  delete process.env.MULTI_ACCOUNT_SWITCHING;
 });
 
 test('/status reports oidcEnabled=false when enabled but role project id is missing/invalid (fail-closed)', async () => {
@@ -96,8 +129,17 @@ test('/status still reflects needsSetup and leaks no other OIDC config', async (
   hasUsersResult = false;
   process.env.OIDC_ENABLED = 'true';
   process.env.OIDC_ROLE_PROJECT_ID = 'proj-1';
+  process.env.MULTI_ACCOUNT_SWITCHING = 'true';
   const body = await status();
-  assert.deepEqual(body, { needsSetup: true, isAuthenticated: false, oidcEnabled: true });
-  assert.deepEqual(Object.keys(body).sort(), ['isAuthenticated', 'needsSetup', 'oidcEnabled']);
+  assert.deepEqual(body, {
+    needsSetup: true,
+    isAuthenticated: false,
+    oidcEnabled: true,
+    deviceAccountSessionsEnabled: true,
+  });
+  assert.deepEqual(Object.keys(body).sort(), [
+    'deviceAccountSessionsEnabled', 'isAuthenticated', 'needsSetup', 'oidcEnabled',
+  ]);
+  delete process.env.MULTI_ACCOUNT_SWITCHING;
   hasUsersResult = true;
 });

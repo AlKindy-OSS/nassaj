@@ -12,7 +12,7 @@
  * The endpoint must reflect the model the NEXT resumed turn will actually use —
  * an explicit in-conversation re-pick when one is stored, otherwise the provider's
  * own per-session active model (which itself degrades to the catalog default) —
- * NOT the caller's global picker. Provider 'gemini' is used because its
+ * NOT the caller's global picker. Provider 'qwen' is used because its
  * `getCurrentActiveModel` returns a STATIC fallback with no network / no transcript
  * read, so the "no override → default" branch is deterministic.
  *
@@ -47,8 +47,8 @@ import providerRouter from '../provider.routes.js';
 
 type TestUser = { id: number; role: string };
 
-const PROVIDER = 'gemini';
-const OVERRIDE_MODEL = 'gemini-2.5-pro-override';
+const PROVIDER = 'qwen';
+const OVERRIDE_MODEL = 'qwen-override';
 
 // uuid v4 ids — the shared session-id validator accepts them.
 const PUBLIC_PINNED_SID = randomUUID(); // has an explicit stored re-pick
@@ -123,6 +123,8 @@ before(async () => {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: TestUser | null }).user = currentUser;
+    (req as unknown as { assertCurrentIdentity: () => boolean }).assertCurrentIdentity =
+      () => true;
     next();
   });
   app.use('/api/providers', providerRouter);

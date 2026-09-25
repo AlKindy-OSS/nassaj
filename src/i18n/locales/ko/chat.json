@@ -649,7 +649,23 @@
     "perModel": "모델별",
     "loading": "계산 중…",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "이전 요약 — 기록된 요청이 전체 대화를 포괄하지 않을 수 있습니다",
+    "measurementIncomplete": "수치가 전체 대화를 포괄하지 않을 수 있습니다",
+    "measurementQuarantined": "측정을 확인 중입니다 — 합계는 확정되지 않았습니다",
+    "modelCalls": "모델 호출: {{count}}",
+    "modelCallUsage": "모델 호출 {{count}}회 · 처리 단위 {{tokens}}",
+    "legacyCodexModelUsage": "이전 요약: 기록된 요청 {{count}}건 · 처리 단위 {{tokens}}",
+    "rolloutChains": "기여한 실행 체인: {{count}}",
+    "subagentSpawnAttempts": "하위 에이전트 생성 시도: {{count}}",
+    "resolvedSubagentRollouts": "집계된 하위 에이전트 실행 체인: {{count}}",
+    "subagentModelCalls": "하위 에이전트 모델 호출: {{count}}",
+    "responseTurnDurationLabel": "응답 시간",
+    "totalWorkDuration": "총 작업 시간(기간은 겹칠 수 있음): {{duration}}"
+  },
+  "activityGap": {
+    "status": "에이전트가 작업 중입니다 — 마지막 활동은 {{time}} 전",
+    "ariaLabel": "에이전트가 계속 작업 중입니다. 마지막 활동은 {{time}} 전입니다"
   },
   "activityGap": {
     "status": "에이전트가 작업 중입니다 — 마지막 활동은 {{time}} 전",

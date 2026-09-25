@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
 
+/* eslint-disable boundaries/dependencies -- deterministic lease fixture verifies the capability probe's cross-module admission contract. */
+import {
+  acquireHarnessLease, releaseHarnessLease,
+} from '../providers/harness-update/lease.js';
+/* eslint-enable boundaries/dependencies */
+
 import {
   CLI_HARNESS_MATRIX, CliTurnSupervisorRuntime, isCliTurnSupervisorArmed, isCliTurnSupervisorEnabled,
 } from './cli-turn-supervisor.service.js';
@@ -46,6 +52,23 @@ describe('CLI Turn Supervisor capability gate', () => {
     assert.equal(isCliTurnSupervisorEnabled('hermes', 'chat', env), false);
     assert.equal(CLI_HARNESS_MATRIX.find(({ provider }) => provider === 'qwen')?.supported, false);
     assert.equal(CLI_HARNESS_MATRIX.find(({ provider }) => provider === 'hermes')?.supported, false);
+  });
+
+  it('refuses capability child creation during update without caching a denial', () => {
+    const env = { ...process.env, QWEN_PATH: '/definitely/not/a/qwen-binary' };
+    const key = `qwen:${env.QWEN_PATH}`;
+    cliCapabilityInternals.clearProbeCache();
+    assert.ok('lease' in acquireHarnessLease('qwen', 'capability-test'));
+    try {
+      assert.throws(() => cliCapabilityInternals.qwenProbe(env), /being updated/u);
+      assert.equal(cliCapabilityInternals.hasCachedProbe(key), false);
+    } finally {
+      releaseHarnessLease('qwen', 'capability-test');
+    }
+    assert.equal(isCliTurnSupervisorEnabled('qwen', 'chat', {
+      ...env, NASSAJ_TURN_SUPERVISOR_QWEN_CHAT: '1',
+    }), false);
+    assert.equal(cliCapabilityInternals.hasCachedProbe(key), true);
   });
 
   it('requires an independent configured reviewer for delegate_review', () => {

@@ -20,6 +20,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+// eslint-disable-next-line boundaries/dependencies -- systemd admission must stay a synchronous leaf and avoid the providers barrel's service graph.
+import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
+
 import { scopeUnitName } from './config.js';
 import type { UnitState } from './result-capture.js';
 
@@ -260,6 +263,9 @@ export async function launchScope(params: {
   /** Env to read PATH / optional unit HOME from (defaults to process.env). */
   baseEnv?: NodeJS.ProcessEnv;
 }): Promise<string> {
+  // T-1749/ADR-159: the unit runs `task-runner` → `claude -p`, i.e. a real claude
+  // harness spawn out-of-process. Refuse to launch it while claude is updating;
+  // the in-unit wrapper cannot consult the in-process lease itself.
   const unit = scopeUnitName(params.wfLaunchId);
   const memMax = params.memoryMax ?? '2G';
   const timeoutS = params.timeoutSeconds ?? 7200;
@@ -332,7 +338,24 @@ export async function launchScope(params: {
   // injection possible regardless of prompt content).
   args.push('--prompt', params.scriptOrPrompt);
 
-  await execFileAsync('systemd-run', args);
+  const releaseLaunch = beginHarnessLaunch('claude');
+  try {
+    await execFileAsync('systemd-run', args);
+  } catch (error) {
+    releaseLaunch();
+    throw error;
+  }
+  // The transient unit outlives systemd-run. Retain admission until its actual
+  // terminal state so an update cannot begin in the manager-start/on-exit gap.
+  const watch = setInterval(() => {
+    void systemctlShowState(unit).then((state) => {
+      if (state === 'inactive' || state === 'failed' || state === 'gone') {
+        clearInterval(watch);
+        releaseLaunch();
+      }
+    });
+  }, 1_000);
+  watch.unref?.();
   return unit;
 }
 

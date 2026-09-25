@@ -1,3 +1,12 @@
+## 2.3.0.6 — 2026-09-25
+
+يعيد محفظة حسابات الجهاز، ويضيف إدارة أعضاء المشروع مع فرض حدود العضوية، ويستعيد نموذج
+المحرّك المسجَّل للجلسة بعد إعادة التشغيل، ويوحّد إعداد الموصلات وتحديث الأدوات، ويضم قياس
+تكاليف متقدماً معطَّلاً. ويُصلح إعادة استخدام مستودع مستنسخ مسبقاً عند استنساخه من جديد.
+Restore the device account wallet, add project member management with enforced membership
+boundaries, recover a session's recorded engine model after restart, unify connector setup
+and harness updates, and ship dormant cost telemetry. Fix reusing an already-cloned repository.
+
 ## 2.3.0.5 — 2026-09-24
 
 توفيق إجمالي تكلفة Codex مع إبقاء تذييل كل ردّ، وإصلاحات فحص الإصدار ونشاط الأدوات،

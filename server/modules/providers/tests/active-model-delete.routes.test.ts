@@ -12,7 +12,7 @@
  * The DELETE unpins a session: it removes the stored explicit re-pick so the next
  * resumed turn follows the ordinary flow again. The response must report whether a
  * pin actually existed (`cleared`) and the model that WILL now drive the session —
- * always the provider-current value once the override is gone. Provider 'gemini'
+ * always the provider-current value once the override is gone. Provider 'qwen'
  * is used because its `getCurrentActiveModel` returns a STATIC fallback (no
  * network / no transcript read), so the post-delete model is deterministic and
  * distinguishable from any stored override.
@@ -49,9 +49,9 @@ import providerRouter from '../provider.routes.js';
 
 type TestUser = { id: number; role: string };
 
-const PROVIDER = 'gemini';
-const OVERRIDE_MODEL = 'gemini-2.5-pro-public-override';
-const PRIVATE_OVERRIDE_MODEL = 'gemini-2.5-pro-PRIVATE-secret';
+const PROVIDER = 'qwen';
+const OVERRIDE_MODEL = 'qwen-public-override';
+const PRIVATE_OVERRIDE_MODEL = 'qwen-PRIVATE-secret';
 
 // uuid v4 ids — the shared session-id validator accepts them.
 const PUBLIC_PINNED_SID = randomUUID(); // pinned inside the "clear existing" test
@@ -147,6 +147,8 @@ before(async () => {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: TestUser | null }).user = currentUser;
+    (req as unknown as { assertCurrentIdentity: () => boolean }).assertCurrentIdentity =
+      () => true;
     next();
   });
   app.use('/api/providers', providerRouter);

@@ -137,12 +137,12 @@ describe('resolveProviderEnv — hosted vendor key injection', () => {
 describe('resolveProviderEnv — opencode XDG isolation (OC-07)', () => {
   const XDG_KEYS = ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'] as const;
 
-  it('shared mode (default): base env is returned byte-for-byte unchanged', () => {
+  it('shared mode applies the binary updater policy without credential isolation', () => {
     _resetProviderSharingCache();
     setProviderSharingConfig({ opencode: 'shared' });
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
     const env = resolveProviderEnv(400, 'opencode', { ...base });
-    assert.deepEqual(env, base);
+    assert.deepEqual(env, { ...base, OPENCODE_DISABLE_AUTOUPDATE: '1' });
     for (const key of XDG_KEYS) {
       assert.equal(env[key], undefined, `${key} must not be set in shared mode`);
     }
@@ -169,12 +169,22 @@ describe('resolveProviderEnv — opencode XDG isolation (OC-07)', () => {
     assertNoAnthropicNamespace(env);
   });
 
-  it('anonymous (null userId) opencode spawn injects nothing even when isolated', () => {
+  it('anonymous (null userId) opencode spawn still disables the binary updater', () => {
     _resetProviderSharingCache();
     setProviderSharingConfig({ opencode: 'isolated' });
     const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
     const env = resolveProviderEnv(null, 'opencode', { ...base });
-    assert.deepEqual(env, base);
+    assert.deepEqual(env, { ...base, OPENCODE_DISABLE_AUTOUPDATE: '1' });
+  });
+});
+
+describe('resolveProviderEnv — updater policy covers every identity mode', () => {
+  it('claude shared, anonymous and isolated modes all disable self-update', () => {
+    for (const [userId, sharing] of [[44, 'shared'], [null, 'isolated'], [45, 'isolated']] as const) {
+      _resetProviderSharingCache();
+      setProviderSharingConfig({ claude: sharing });
+      assert.equal(resolveProviderEnv(userId, 'claude', { PATH: '/usr/bin' }).DISABLE_AUTOUPDATER, '1');
+    }
   });
 });
 

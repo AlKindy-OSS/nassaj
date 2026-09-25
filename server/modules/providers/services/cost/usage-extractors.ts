@@ -188,7 +188,8 @@ const hasHumanText = (content: unknown): boolean => {
  * رُصدت تحمل `started` و`interacted` فقط، ولا توفر نهايةً زوجية موثوقة. المفتاح
  * الثابت للوكيل يمنع احتساب النتيجة نفسها ثانيةً حين تعود في مخرج الأب أو الطفل.
  */
-class WorkDurationAccumulator {
+/** Shared trusted-duration reducer; consumers must feed only decoded transcript entries. */
+export class WorkDurationAccumulator {
   private total = 0;
   private measured = false;
   private readonly seen = new Set<string>();
@@ -624,11 +625,6 @@ export async function extractCodexSessionUsage(
   const captured: RequestUsageRecord[] = [];
   const finalAssistantMessages: Array<{ id: string; timestampMs: number }> = [];
   const userBoundariesMs: number[] = [];
-  /**
-   * العدّاد تراكمي، فحصّة نافذة زمنية = (آخر عدّاد داخلها) − (آخر عدّاد قبلها)
-   * طرحاً لا ترشيحاً. الترشيح وحده كان سينسب كل تاريخ المحادثة إلى الشهر الذي
-   * صادف أن وقع فيه آخر دور.
-   */
   let baseline: { input: number; cached: number; output: number } | null = null;
   const workDuration = durationAccumulator ?? new WorkDurationAccumulator();
 
@@ -694,9 +690,7 @@ export async function extractCodexSessionUsage(
 
       const info = isRecord(payload.info) ? payload.info : null;
       const total = info && isRecord(info.total_token_usage) ? info.total_token_usage : null;
-      if (!total) {
-        continue;
-      }
+      if (!total) continue;
 
       const snapshot = {
         input: readNumber(total.input_tokens),
@@ -706,32 +700,15 @@ export async function extractCodexSessionUsage(
 
       const timestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : Number.NaN;
       const hasWindow = Boolean(window && (window.since !== undefined || window.until !== undefined));
-
-      const insideWindow = !hasWindow || !Number.isFinite(timestamp) || (
-        (window?.since === undefined || timestamp >= window.since)
-        && (window?.until === undefined || timestamp < window.until)
-      );
+      const insideWindow = !hasWindow || !Number.isFinite(timestamp) || ((window?.since === undefined || timestamp >= window.since) && (window?.until === undefined || timestamp < window.until));
       if (hasWindow && Number.isFinite(timestamp)) {
-        if (window?.since !== undefined && timestamp < window.since) {
-          // آخر عدّاد قبل النافذة = خطّ الأساس الذي يُطرح.
-          baseline = snapshot;
-          previousSnapshot = snapshot;
-          continue;
-        }
-        if (window?.until !== undefined && timestamp >= window.until) {
-          previousSnapshot = snapshot;
-          continue;
-        }
+        if (window?.since !== undefined && timestamp < window.since) { baseline = snapshot; previousSnapshot = snapshot; continue; }
+        if (window?.until !== undefined && timestamp >= window.until) { previousSnapshot = snapshot; continue; }
       }
-
       latest = snapshot;
       if (options.captureRequests && insideWindow) {
         const last = info && isRecord(info.last_token_usage) ? info.last_token_usage : null;
-        const source = last ?? {
-          input_tokens: Math.max(0, snapshot.input - (previousSnapshot?.input ?? 0)),
-          cached_input_tokens: Math.max(0, snapshot.cached - (previousSnapshot?.cached ?? 0)),
-          output_tokens: Math.max(0, snapshot.output - (previousSnapshot?.output ?? 0)),
-        };
+        const source = last ?? { input_tokens: Math.max(0, snapshot.input - (previousSnapshot?.input ?? 0)), cached_input_tokens: Math.max(0, snapshot.cached - (previousSnapshot?.cached ?? 0)), output_tokens: Math.max(0, snapshot.output - (previousSnapshot?.output ?? 0)) };
         const capturedInput = readNumber(source.input_tokens);
         const capturedCached = Math.min(capturedInput, readNumber(source.cached_input_tokens));
         const capturedOutput = readNumber(source.output_tokens);
@@ -741,13 +718,7 @@ export async function extractCodexSessionUsage(
             model: model || 'unknown',
             timestampMs: Number.isFinite(timestamp) ? timestamp : 0,
             isSubagent: options.isSubagent === true,
-            totals: {
-              input: Math.max(0, capturedInput - capturedCached),
-              cacheRead: capturedCached,
-              output: capturedOutput,
-              cacheWrite5m: 0,
-              cacheWrite1h: 0,
-            },
+            totals: { input: Math.max(0, capturedInput - capturedCached), cacheRead: capturedCached, output: capturedOutput, cacheWrite5m: 0, cacheWrite1h: 0 },
           });
         }
       }
@@ -766,8 +737,7 @@ export async function extractCodexSessionUsage(
 
   if (!latest) {
     return {
-      provider: 'codex',
-      perModel: [],
+      provider: 'codex', perModel: [],
       subagentRequests: 0,
       workDurationMs: workDuration.result(),
       skipped: { synthetic: 0, duplicates: 0 },
@@ -777,7 +747,6 @@ export async function extractCodexSessionUsage(
   const totals = emptyTotals();
   const windowedInput = Math.max(0, latest.input - (baseline?.input ?? 0));
   const windowedCached = Math.max(0, latest.cached - (baseline?.cached ?? 0));
-  // القراءة من المخبّأ لا تُطرح مرتين: input شامل، فغير المخبّأ = input - cached.
   totals.input = Math.max(0, windowedInput - windowedCached);
   totals.cacheRead = windowedCached;
   totals.output = Math.max(0, latest.output - (baseline?.output ?? 0));
@@ -793,8 +762,6 @@ export async function extractCodexSessionUsage(
   });
   return {
     provider: 'codex',
-    // ملخص الشريط العلوي يبقى دائماً آخر العدّاد التراكمي الموثوق؛ سجلات
-    // `last_token_usage` تخصّ تفصيل الأدوار فقط ولا يجوز أن تغيّر الإجمالي.
     perModel: [{ model: model || 'unknown', totals, requests: 1 }],
     subagentRequests: 0,
     workDurationMs: workDuration.result(),

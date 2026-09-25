@@ -21,7 +21,6 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import path from 'node:path';
 
 import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
-
 import {
   readJsonObjectOrEmpty,
   writeJsonObjectAtomic,
@@ -31,7 +30,10 @@ import { assertNotClaudeSubscriptionToken } from '@/modules/providers/shared/cre
 // eslint-disable-next-line boundaries/dependencies
 import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
 // eslint-disable-next-line boundaries/dependencies
+import { createAuthenticatedLaunchActor, isAuthenticatedLaunchActorCurrent } from '@/modules/execution-permissions/actor.js';
+// eslint-disable-next-line boundaries/dependencies
 import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissions/runtime-user-effect.js';
+import { assertHarnessNotUpdating } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import type {
   IProviderCredentialWriter,
@@ -95,6 +97,7 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
     userId: string | number | null | undefined,
     apiKey: string,
     target?: string,
+    authenticatedPrincipal?: unknown,
   ): Promise<ProviderCredentialStatus> {
     this.rejectTarget(target);
     if (typeof apiKey !== 'string' || apiKey.trim() === '') {
@@ -107,21 +110,26 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
     // `codex login --with-api-key` would persist it into auth.json verbatim.
     assertNotClaudeSubscriptionToken(apiKey, 'codex');
 
-    // The login CLI PERSISTS the key into CODEX_HOME, so this is a write path:
-    // the caller's own tree only, never a grantor's (B-1251).
+    // Bind the credential destination to the current authenticated actor before
+    // resolving an environment (which may provision directories).
+    const actor = createAuthenticatedLaunchActor(authenticatedPrincipal as never);
+    if (String(userId) !== String(actor.userId) || !isAuthenticatedLaunchActorCurrent(actor)) {
+      throw new AppError('Credential authentication is no longer valid.', {
+        code: 'CREDENTIAL_ACTOR_INVALID', statusCode: 403,
+      });
+    }
     const env = this.ownProviderEnv(userId);
-
-    const permissionExecution = this.spawnFn === nodeSpawn
-      ? authorizeRuntimeUserProviderEffect({
-        provider: 'codex',
-        engine: 'codex_cli_login',
-        entrypoint: 'provider.credentials.codex-login',
-        purpose: 'spawn',
-        effectFootprint: 'external',
-        projectId: 'system:provider-credentials',
-        workspacePath: process.cwd(),
-      })
-      : null;
+    // Injecting a child-process implementation must never bypass admission.
+    const permissionExecution = authorizeRuntimeUserProviderEffect({
+      authenticatedPrincipal,
+      provider: 'codex',
+      engine: 'codex_cli_login',
+      entrypoint: 'provider.credentials.codex-login',
+      purpose: 'spawn',
+      effectFootprint: 'external',
+      projectId: 'system:provider-credentials',
+      workspacePath: process.cwd(),
+    });
     await runPermissionExecutionAdapter(permissionExecution, () => new Promise<void>((resolve, reject) => {
       // Generic user-facing failure — carries no key material and no CLI output.
       const loginFailed = (reason: string): AppError =>
@@ -148,6 +156,15 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
         }
         resolve();
       };
+
+      // T-1749/ADR-159: `codex login` is a codex harness spawn too — refuse it
+      // (retryably) while the codex binary is being replaced by an update.
+      try {
+        assertHarnessNotUpdating('codex');
+      } catch (error) {
+        reject(error);
+        return;
+      }
 
       let child: ReturnType<SpawnFn>;
       try {

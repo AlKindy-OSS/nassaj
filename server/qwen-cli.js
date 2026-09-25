@@ -30,6 +30,7 @@ import { materializeQwenSettings, QWEN_HOME_SUBDIR } from './services/isolation/
 import { resolveCagedLaunch } from './services/isolation/provider-cage-wiring.js';
 import { sanitizeVendorAgentEnv } from './services/isolation/sanitize-vendor-agent-env.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
+import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { createNormalizedMessage, stampCoordinatorId } from './shared/utils.js';
@@ -37,6 +38,11 @@ import { resolveCliExecutablePath } from './shared/cli-executable-path.js';
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 const activeQwenProcesses = new Map();
+
+/** Resolves the same qwen executable used by spawn and update probes. */
+export function resolveQwenBinaryPath(env = process.env) {
+  return resolveCliExecutablePath('qwen', { override: env.QWEN_PATH, env });
+}
 
 const DEFAULT_RUN_TIMEOUT_MS = 15 * 60 * 1000;
 const MIN_RUN_TIMEOUT_MS = 10 * 1000;
@@ -181,6 +187,10 @@ export function parseQwenEvent(raw, state, ws, sessionId) {
 }
 
 async function spawnQwen(command, options = {}, ws) {
+  if (refuseSpawnIfHarnessUpdating('qwen', ws, {
+    sessionId: options.sessionId,
+    clientMsgId: options.clientMsgId,
+  })) return;
   const cwdToCheck = options.cwd || options.projectPath;
   if (cwdToCheck) {
     const cwdCheck = await checkCwdExists(cwdToCheck);
@@ -311,7 +321,7 @@ async function spawnQwen(command, options = {}, ws) {
     baseEnv,
   });
 
-  const binary = resolveCliExecutablePath('qwen', { override: process.env.QWEN_PATH });
+  const binary = resolveQwenBinaryPath();
   const launch = resolveCagedLaunch({
     userId: actorUserId,
     provider: 'qwen',
@@ -321,15 +331,20 @@ async function spawnQwen(command, options = {}, ws) {
   });
 
   return new Promise((resolve) => {
-    const child = spawnFunction(launch.cmd, launch.args, {
-      cwd: workingDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-    });
+    const releaseHarnessLaunch = beginHarnessLaunch('qwen');
+    let child;
+    try {
+      child = spawnFunction(launch.cmd, launch.args, {
+        cwd: workingDir, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+      });
+    } catch (error) {
+      releaseHarnessLaunch();
+      throw error;
+    }
     activeQwenProcesses.set(sessionId, child);
     const presence = beginProviderRun({
       provider: 'qwen', writer: ws, sessionId, projectPath: workingDir, pid: child.pid,
+      launchReservation: releaseHarnessLaunch,
     });
     const state = {
       assistantText: '', assistantFallback: '', resultSeen: false,
@@ -356,7 +371,8 @@ async function spawnQwen(command, options = {}, ws) {
       activeQwenProcesses.delete(sessionId);
       presence.end();
       const answer = state.assistantText || state.assistantFallback;
-      const assistantMessageId = answer ? await appendVendorTranscriptTurn(
+      const assistantMessageId = answer && !ws?.isRunOutputRevoked?.()
+        ? await appendVendorTranscriptTurn(
         'qwen', sessionId, workingDir, 'assistant', answer,
         { finalAnswer: code === 0 && !state.error && !state.resultError && !spawnError },
       ) : null;
@@ -386,6 +402,7 @@ async function spawnQwen(command, options = {}, ws) {
     };
 
     child.stdout.on('data', (chunk) => {
+      if (ws?.isRunOutputRevoked?.()) return;
       state.buffer += chunk.toString('utf8');
       const lines = state.buffer.split(/\r?\n/);
       state.buffer = lines.pop() || '';

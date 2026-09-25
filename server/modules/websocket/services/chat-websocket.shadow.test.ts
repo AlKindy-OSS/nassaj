@@ -15,8 +15,11 @@ import {
   UniversalConversationShadowRuntime,
 } from '@/modules/conversations/index.js';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     projectsDb: {
       getProjectPath: () => ({ project_id: 'test-project' }),
       isProjectWritableByUser: () => true,
@@ -303,7 +306,7 @@ describe('chat Phase-0 shadow hook', () => {
       41,
       { id: 41, role: 'user', authenticationKind: 'session', authorizationGeneration: 3 },
     );
-    assert.deepEqual(trace, ['consume', 'adapter', 'started', 'settle:succeeded']);
+    assert.deepEqual(trace, ['consume', 'started', 'adapter', 'settle:succeeded']);
   });
 
   it('keeps legacy redispatch behavior visible to shadow evidence for the same client message', async () => {

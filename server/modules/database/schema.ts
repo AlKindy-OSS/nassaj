@@ -1,3 +1,5 @@
+export { USAGE_STATISTICS_V3_TABLES_SCHEMA_SQL } from './usage-statistics-v3.migration.js';
+
 const USER_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -968,6 +970,7 @@ CREATE TABLE IF NOT EXISTS conversation_usage_snapshots (
     PRIMARY KEY (session_id, attribution_kind, attribution_id, attribution_scope)
 );
 `;
+
 
 export const LAST_SCANNED_AT_SQL = `
 CREATE TABLE IF NOT EXISTS scan_state (

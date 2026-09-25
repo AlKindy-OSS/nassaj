@@ -184,8 +184,8 @@ describe('B — resolveWebSocketUrl uses the latest localStorage token', () => {
     expect(resolveWebSocketUrl()).not.toContain('old-jwt');
   });
 
-  it('B-3: returns null when no token is stored', () => {
-    expect(resolveWebSocketUrl()).toBeNull();
+  it('B-3: falls back to the cookie-authenticated websocket URL without a JWT', () => {
+    expect(resolveWebSocketUrl()).toMatch(/^wss?:\/\/.*\/ws$/);
   });
 
   it('B-4: URL-encodes tokens with reserved characters', () => {

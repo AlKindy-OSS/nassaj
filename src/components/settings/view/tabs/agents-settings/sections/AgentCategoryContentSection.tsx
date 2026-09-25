@@ -14,6 +14,8 @@ import ComingSoonContent from './content/ComingSoonContent';
 import CredentialGrantsSection from './content/CredentialGrantsSection';
 import EnginesContent from './content/EnginesContent';
 import InstructionSourcesContent from './content/InstructionSourcesContent';
+import HarnessVersionSection from './HarnessVersionSection';
+import HarnessAutoUpdateSection from './HarnessAutoUpdateSection';
 import PermissionsContent from './content/PermissionsContent';
 
 export default function AgentCategoryContentSection({
@@ -95,6 +97,10 @@ export default function AgentCategoryContentSection({
           <CredentialGrantsSection agent={selectedAgent} />
 
           <AgentUsageSection agent={selectedAgent} />
+
+          <HarnessVersionSection agent={selectedAgent} />
+
+          <HarnessAutoUpdateSection />
         </div>
       )}
 

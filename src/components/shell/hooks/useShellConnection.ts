@@ -5,6 +5,7 @@ import type { Terminal } from '@xterm/xterm';
 
 import { sanitizeTerminalText } from '../../../../shared/terminalText';
 import type { Project, ProjectSession } from '../../../types/app';
+import { isIdentityRevocationClose, reconcileRevokedIdentity } from '../../auth/accountIdentityBarrier';
 import type { ShellErrorInfo } from '../types/types';
 import { TERMINAL_INIT_DELAY_MS } from '../constants/constants';
 import { getShellWebSocketUrl, parseShellMessage, sendSocketMessage } from '../utils/socket';
@@ -348,6 +349,13 @@ export function useShellConnection({
           setIsConnecting(false);
           connectingRef.current = false;
 
+          if (isIdentityRevocationClose(event.code)) {
+            suppressAutoConnectRef.current = true;
+            clearReconnectTimer();
+            reconcileRevokedIdentity();
+            return;
+          }
+
           // An outright refusal (4401 auth / 4403 role / 4404 project): the
           // server states the reason in an `error` frame and closes at once.
           // The generic classifier would read these non-1000 codes as abnormal
@@ -471,6 +479,22 @@ export function useShellConnection({
     // A deliberate teardown wipes the pane, so the banner goes with it.
     clearShellError();
   }, [clearReconnectTimer, clearShellError, clearTerminalScreen, closeSocket, setAuthUrl]);
+
+  useEffect(() => {
+    const disconnectForIdentityChange = () => disconnectFromShell({ suppressAutoConnect: true });
+    const resumeAfterIdentityChange = (event: Event) => {
+      const phase = (event as CustomEvent<{ phase?: string }>).detail?.phase;
+      if (phase !== 'stable') return;
+      suppressAutoConnectRef.current = false;
+      if (autoConnect) connectToShell();
+    };
+    window.addEventListener('auth:identity-changing', disconnectForIdentityChange);
+    window.addEventListener('auth:identity-barrier', resumeAfterIdentityChange);
+    return () => {
+      window.removeEventListener('auth:identity-changing', disconnectForIdentityChange);
+      window.removeEventListener('auth:identity-barrier', resumeAfterIdentityChange);
+    };
+  }, [autoConnect, connectToShell, disconnectFromShell]);
 
   useEffect(() => {
     if (

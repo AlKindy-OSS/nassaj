@@ -6,15 +6,14 @@ import path from 'path';
 import express from 'express';
 import multer from 'multer';
 
-import { userDb, auditLogDb, invitesDb } from '../modules/database/index.js';
+import { AccountWalletService } from '../modules/account-wallet/index.js';
 import {
-  generateToken,
-  authenticateToken,
-  requireRole,
-  invalidateRefreshCache,
-  verifyTokenAllowingRecentExpiry,
-  REFRESH_GRACE_MS,
-} from '../middleware/auth.js';
+  canonicalMutationPath,
+  mintMutationCsrfToken,
+  mutationIdentityBinding,
+} from '../modules/account-wallet/request-csrf.js';
+import * as databaseModule from '../modules/database/index.js';
+import * as authMiddleware from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
 import { verifyPassword, needsRehash, hashPassword } from '../services/password.service.js';
 import { createInvite, acceptInvite, InviteError } from '../services/invite.service.js';
@@ -24,13 +23,40 @@ import {
   clearConnectorOwnerAuthentication,
   recordConnectorOwnerAuthentication,
 } from '../modules/connectors/connector-owner-auth-session.js';
+import { oidcEnabled } from '../services/oidc-config.js';
 
 import webauthnRouter from './webauthn.js';
 import oidcRouter from './oidc.js';
-import { oidcEnabled } from '../services/oidc-config.js';
 
 const MIN_PASSWORD_LENGTH = 8;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,32}$/;
+const { userDb, auditLogDb, invitesDb } = databaseModule;
+const deviceAccountSessionsDb = databaseModule.deviceAccountSessionsDb;
+const DEVICE_COOKIE = databaseModule.DEVICE_COOKIE ?? '__Host-nassaj_device';
+const WalletConflictError = databaseModule.WalletConflictError;
+const {
+  generateToken,
+  authenticateToken,
+  requireRole,
+  invalidateRefreshCache,
+  verifyTokenAllowingRecentExpiry,
+  REFRESH_GRACE_MS,
+} = authMiddleware;
+const generatePasswordChangeToken = authMiddleware.generatePasswordChangeToken ?? generateToken;
+const authenticatePasswordChange = authMiddleware.authenticatePasswordChange ?? authenticateToken;
+const JWT_SECRET = authMiddleware.JWT_SECRET ?? 'test-only-wallet-csrf-secret';
+const PASSWORD_CHANGE_COOKIE = authMiddleware.PASSWORD_CHANGE_COOKIE
+  ?? '__Host-nassaj_password_change';
+const SESSION_COOKIE_OPTIONS = Object.freeze({
+  secure: true, httpOnly: true, sameSite: 'lax', path: '/',
+});
+
+const readCookie = (req, name) => {
+  const match = String(req.headers.cookie || '')
+    .match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch { return null; }
+};
 
 // Constant-time login decoy (B-142). A fixed, valid argon2id hash of an
 // unreachable random secret, produced once (at authoring time) with the SAME
@@ -117,6 +143,155 @@ const avatarUpload = multer({
 }).single('avatar');
 
 const router = express.Router();
+const multiAccountEnabled = () => process.env.MULTI_ACCOUNT_SWITCHING === 'true';
+const SLOT_ID_PATTERN = /^slot_[A-Za-z0-9_-]{16,64}$/;
+const LOCAL_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const validGeneration = (value) => Number.isSafeInteger(value) && value > 0;
+const csrfFor = (sessionId, generation, action, expiry) => `${expiry}.${crypto.createHmac('sha256', JWT_SECRET).update(`${sessionId}:${generation}:${action}:${expiry}`).digest('base64url')}`;
+const csrfAction = (action, slotId) => {
+  if (action === 'remove') {
+    return typeof slotId === 'string' && SLOT_ID_PATTERN.test(slotId)
+      ? `remove:${slotId}`
+      : null;
+  }
+  return new Set(['switch', 'add', 'logout', 'logout_all']).has(action) ? action : null;
+};
+const trustedOrigin = (req) => {
+  const origin = req.get('origin');
+  const expected = process.env.APP_ORIGIN || `${req.protocol}://${req.get('host')}`;
+  return Boolean(origin && origin === expected);
+};
+const walletCsrf = (action) => (req, res, next) => {
+  const canonicalAction = csrfAction(action, req.params?.slotId);
+  const token = req.get('x-csrf-token');
+  const [expiry, signature] = String(token || '').split('.');
+  const numericExpiry = Number(expiry);
+  const expected = canonicalAction && Number.isSafeInteger(numericExpiry)
+    ? csrfFor(req.devicePrincipal.deviceSessionId, req.devicePrincipal.generation, canonicalAction, numericExpiry).split('.')[1]
+    : '';
+  const supplied = Buffer.from(signature || '');
+  const wanted = Buffer.from(expected);
+  if (!trustedOrigin(req) || numericExpiry < Date.now() || !signature
+      || supplied.length !== wanted.length || !crypto.timingSafeEqual(supplied, wanted)) {
+    return res.status(403).json({ error: 'Request rejected', code: 'csrf_or_origin_rejected' });
+  }
+  next();
+};
+const walletMutationGuard = (req, res, next) => req.devicePrincipal
+  ? walletCsrf('logout')(req, res, next)
+  : next();
+const walletAuth = (req, res, next) => {
+  if (!multiAccountEnabled()) return res.status(404).json({ error: 'Not found' });
+  const secret = readCookie(req, DEVICE_COOKIE);
+  if (!secret || req.get('authorization')) return res.status(req.get('authorization') ? 400 : 401).json({ error: 'Authentication rejected', code: req.get('authorization') ? 'ambiguous_authentication' : 'device_session_invalid' });
+  const resolved = deviceAccountSessionsDb.resolve(secret);
+  if (!resolved) return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
+  req.wallet = resolved.wallet;
+  req.devicePrincipal = resolved.principal;
+  next();
+};
+const walletError = (res, error, principal) => {
+  if (WalletConflictError && error instanceof WalletConflictError) {
+    const status = error.code === 'device_session_invalid' ? 401 : error.code === 'slot_not_found' ? 404 : 409;
+    const wallet = error.code === 'wallet_generation_conflict' && principal
+      ? deviceAccountSessionsDb.snapshot(principal.deviceSessionId)
+      : undefined;
+    return res.status(status).json({
+      error: 'Account operation failed',
+      code: error.code,
+      ...(wallet ? { wallet } : {}),
+    });
+  }
+  return res.status(500).json({ error: 'Internal server error' });
+};
+
+const accountWalletService = new AccountWalletService({
+  findLocalCredential: (identifier) => {
+    const user = userDb.getUserByLoginIdentifier(identifier);
+    return user && Number.isSafeInteger(user.password_changed_at)
+      ? {
+          id: user.id,
+          passwordHash: user.password_hash,
+          passwordStamp: user.password_changed_at,
+        }
+      : null;
+  },
+  verifyPassword,
+  decoyPasswordHash: DECOY_PASSWORD_HASH,
+});
+
+const addCandidateKey = (req) => {
+  const identifier = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  return crypto.createHmac('sha256', JWT_SECRET).update(identifier).digest('hex');
+};
+const addLimit = (max, key) => createRateLimiter({
+  windowMs: 15 * 60_000,
+  max,
+  message: 'Account could not be added',
+  code: 'add_account_failed',
+  ...(key ? { key } : {}),
+});
+const addAccountLimiters = [
+  addLimit(8, (req) => `device:${req.devicePrincipal?.deviceSessionId ?? 'none'}`),
+  // IP is intentionally broader than device/candidate limits: offices and the
+  // local tunnel legitimately multiplex many trusted devices behind one IP.
+  addLimit(100),
+  addLimit(8, (req) => `candidate:${addCandidateKey(req)}`),
+  addLimit(5, (req) => `compound:${req.devicePrincipal?.deviceSessionId ?? 'none'}:${clientIp(req) ?? 'unknown'}:${addCandidateKey(req)}`),
+];
+
+router.get('/accounts', walletAuth, (req, res) => res.set('Cache-Control', 'no-store').json(req.wallet));
+router.get('/accounts/csrf', walletAuth, (req,res) => {
+  const action = csrfAction(String(req.query.action || ''), req.query.slotId);
+  if (!action) return res.status(400).json({ error: 'Invalid request' });
+  const expiry = Date.now() + 900000;
+  res.set('Cache-Control','no-store').json({
+    csrfToken: csrfFor(req.devicePrincipal.deviceSessionId, req.devicePrincipal.generation, action, expiry),
+    expiresAt: expiry,
+  });
+});
+router.get('/mutation-csrf', authenticatePasswordChange, (req, res) => {
+  const method = String(req.query.method || '').toUpperCase();
+  const requestPath = canonicalMutationPath(String(req.query.path || ''));
+  const binding = mutationIdentityBinding(req);
+  const token = mintMutationCsrfToken(JWT_SECRET, binding, method, requestPath);
+  if (!token) return res.status(400).json({ error: 'Invalid request' });
+  return res.set('Cache-Control', 'no-store').json(token);
+});
+router.post('/accounts/switch', walletAuth, walletCsrf('switch'), (req, res) => {
+  const { slotId, expectedGeneration } = req.body ?? {};
+  if (typeof slotId !== 'string' || !SLOT_ID_PATTERN.test(slotId)
+      || !validGeneration(expectedGeneration)) return res.status(400).json({ error: 'Invalid request' });
+  try {
+    const wallet = accountWalletService.switch(req.devicePrincipal, slotId, expectedGeneration);
+    const account = wallet.accounts.find((item) => item.slotId === slotId);
+    res.set('Cache-Control', 'no-store').json({ generation: wallet.generation, activeSlotId: wallet.activeSlotId, account });
+  } catch (error) { walletError(res, error, req.devicePrincipal); }
+});
+router.post('/accounts/add', walletAuth, ...addAccountLimiters, walletCsrf('add'), async (req, res) => {
+  const { email, password, expectedGeneration } = req.body ?? {};
+  if (typeof email !== 'string' || email.length > 320 || !LOCAL_EMAIL_PATTERN.test(email.trim())
+      || typeof password !== 'string' || password.length < 1 || password.length > 1024
+      || !validGeneration(expectedGeneration)) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+  try {
+    const wallet = await accountWalletService.addLocal(
+      req.devicePrincipal, email, password, expectedGeneration,
+    );
+    if (!wallet) return res.status(401).json({ error: 'Account could not be added', code: 'add_account_failed' });
+    return res.status(201).set('Cache-Control', 'no-store').json(wallet);
+  } catch (error) { return walletError(res, error, req.devicePrincipal); }
+});
+router.delete('/accounts/:slotId', walletAuth, walletCsrf('remove'), (req, res) => {
+  const expectedGeneration = req.body?.expectedGeneration;
+  if (!validGeneration(expectedGeneration)) return res.status(400).json({ error:'Invalid request' });
+  try {
+    return res.set('Cache-Control','no-store').json(accountWalletService.remove(
+      req.devicePrincipal, req.params.slotId, expectedGeneration,
+    ));
+  } catch(error) { return walletError(res, error, req.devicePrincipal); }
+});
 
 // Passkey (WebAuthn) registration, credential management, and login (B-PK).
 router.use('/webauthn', webauthnRouter);
@@ -138,13 +313,17 @@ const authLimiter = createRateLimiter({
 // ---------------------------------------------------------------------------
 
 // Check auth status. needsSetup is true only until the bootstrap owner exists.
-// oidcEnabled mirrors the same predicate the OIDC routes gate on, so the SPA can
-// decide whether to offer the SSO button without probing the rate-limited
-// /oidc/exchange. No configuration detail beyond the boolean is exposed.
+// Public capability booleans mirror the exact predicates their routes gate on,
+// so the SPA does not need to probe protected endpoints or infer auth state.
 router.get('/status', async (req, res) => {
   try {
     const hasUsers = await userDb.hasUsers();
-    res.json({ needsSetup: !hasUsers, isAuthenticated: false, oidcEnabled: oidcEnabled() });
+    res.json({
+      needsSetup: !hasUsers,
+      isAuthenticated: false,
+      oidcEnabled: oidcEnabled(),
+      deviceAccountSessionsEnabled: multiAccountEnabled(),
+    });
   } catch (error) {
     console.error('Auth status error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -157,6 +336,11 @@ router.get('/status', async (req, res) => {
 
 router.post('/login', authLimiter, async (req, res) => {
   try {
+    if (multiAccountEnabled() && !trustedOrigin(req)) {
+      return res.status(403).set('Cache-Control', 'no-store').json({
+        error: 'Request rejected', code: 'origin_rejected',
+      });
+    }
     const { username, password } = req.body ?? {};
 
     if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
@@ -192,6 +376,21 @@ router.post('/login', authLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
+    if (user.must_change_password === 1) {
+      const limitedToken = generatePasswordChangeToken(user);
+      userDb.updateLastLogin(user.id);
+      auditLogDb.record('login_success', {
+        userId: user.id, ipAddress: ip, userAgent,
+        metadata: { purpose: 'password_change' },
+      });
+      res.cookie(PASSWORD_CHANGE_COOKIE, limitedToken, SESSION_COOKIE_OPTIONS);
+      return res.set('Cache-Control', 'no-store').json({
+        success: true,
+        passwordChangeRequired: true,
+        user: { id: user.id, username: user.username, role: user.role },
+      });
+    }
+
     // Transparent upgrade of legacy bcrypt hashes to argon2id on login.
     if (needsRehash(user.password_hash)) {
       try {
@@ -203,10 +402,22 @@ router.post('/login', authLimiter, async (req, res) => {
     }
 
     const token = generateToken(user);
+    res.clearCookie(PASSWORD_CHANGE_COOKIE, SESSION_COOKIE_OPTIONS);
     recordConnectorOwnerAuthentication(res, user.id, 'password');
     userDb.updateLastLogin(user.id);
     auditLogDb.record('login_success', { userId: user.id, ipAddress: ip, userAgent });
 
+    if (multiAccountEnabled()) {
+      const device = deviceAccountSessionsDb.create(user.id, 7 * 24 * 60 * 60 * 1000);
+      const expiry = Date.now() + 900000;
+      res.cookie(DEVICE_COOKIE, device.secret, SESSION_COOKIE_OPTIONS);
+      return res.set('Cache-Control', 'no-store').json({
+        success: true,
+        user: { id: user.id, username: user.username, role: user.role },
+        wallet: device.wallet,
+        csrfToken: csrfFor(device.principal.deviceSessionId, device.principal.generation, 'switch', expiry),
+      });
+    }
     res.json({
       success: true,
       user: { id: user.id, username: user.username, role: user.role },
@@ -275,6 +486,10 @@ const graceRefresh = (req, res, next) => {
     if (user.password_changed_at && result.decoded.pwd_iat < user.password_changed_at) {
       return res.status(401).json({ error: 'Token invalidated' });
     }
+    if (!Number.isSafeInteger(result.decoded.auth_gen)
+        || result.decoded.auth_gen !== user.authorization_generation) {
+      return res.status(401).json({ error: 'Token invalidated' });
+    }
     if (user.must_change_password === 1) {
       return res.status(403).json({
         error: 'Password change required',
@@ -294,6 +509,12 @@ const graceRefresh = (req, res, next) => {
 };
 
 router.post('/refresh', graceRefresh, authenticateToken, (req, res) => {
+  if (req.user.authenticationKind === 'device_session') {
+    return res.status(400).json({
+      error: 'Device sessions do not use bearer refresh',
+      code: 'device_session_no_refresh',
+    });
+  }
   const token = generateToken(req.user);
   auditLogDb.record('token_refresh', {
     userId: req.user.id,
@@ -340,7 +561,20 @@ router.get('/me', authenticateToken, (req, res) => {
   res.json({ id, username, role, status, avatarUrl: avatar_url ?? null });
 });
 
-router.post('/logout', authenticateToken, (req, res) => {
+router.post('/logout', authenticateToken, walletMutationGuard, (req, res) => {
+  if (req.devicePrincipal) {
+    const expectedGeneration = req.body?.expectedGeneration;
+    if (!validGeneration(expectedGeneration)) return res.status(400).json({ error: 'Invalid request' });
+    try {
+      const result = accountWalletService.logout(req.devicePrincipal, expectedGeneration);
+      req.allowIdentityTransitionResponse?.();
+      return res.set('Cache-Control','no-store').json({
+        signedOutSlotId: result.signedOutSlotId,
+        activeSlotId: result.wallet.activeSlotId,
+        generation: result.wallet.generation,
+      });
+    } catch(error) { return walletError(res, error, req.devicePrincipal); }
+  }
   // Behind authenticateToken, so req.user is guaranteed. Record the explicit
   // logout for the auth timeline (T-182). Best-effort: never blocks the response.
   auditLogDb.record('logout', {
@@ -350,6 +584,15 @@ router.post('/logout', authenticateToken, (req, res) => {
   });
   clearConnectorOwnerAuthentication(req, res, req.user.id);
   res.json({ success: true, message: 'Logged out successfully' });
+});
+
+router.post('/logout-all', walletAuth, walletCsrf('logout_all'), (req,res) => {
+  const expectedGeneration = req.body?.expectedGeneration;
+  if (!validGeneration(expectedGeneration)) return res.status(400).json({error:'Invalid request'});
+  try {
+    accountWalletService.logoutAll(req.devicePrincipal, expectedGeneration);
+    return res.clearCookie(DEVICE_COOKIE,{secure:true,httpOnly:true,sameSite:'lax',path:'/'}).status(204).end();
+  } catch(error) { return walletError(res, error, req.devicePrincipal); }
 });
 
 // ---------------------------------------------------------------------------
@@ -459,7 +702,9 @@ router.patch('/users/:id/role', authenticateToken, requireRole('owner'), (req, r
     return res.json({ success: true });
   }
 
+  const affectedDeviceSessions = deviceAccountSessionsDb.deviceSessionIdsForUser(id);
   userDb.setRole(id, role);
+  accountWalletService.revokeDevices(affectedDeviceSessions);
   auditLogDb.record('role_changed', {
     userId: req.user.id,
     metadata: { targetUserId: id, from: target.role, to: role },
@@ -495,7 +740,9 @@ router.patch('/users/:id/status', authenticateToken, requireRole('owner'), (req,
     return res.json({ success: true });
   }
 
+  const affectedDeviceSessions = deviceAccountSessionsDb.deviceSessionIdsForUser(id);
   userDb.setStatus(id, status);
+  accountWalletService.revokeDevices(affectedDeviceSessions);
   auditLogDb.record(status === 'disabled' ? 'user_disabled' : 'user_enabled', {
     userId: req.user.id,
     metadata: { targetUserId: id },
@@ -547,10 +794,16 @@ router.delete('/users/:id', authenticateToken, requireRole('owner'), async (req,
       throw error;
     }
 
+    if (req.assertCurrentIdentity?.() === false) {
+      return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+    }
+
+    const affectedDeviceSessions = deviceAccountSessionsDb?.deviceSessionIdsForUser?.(id) ?? [];
     const deleted = userDb.deleteUser(id);
     if (!deleted) {
       return res.status(404).json({ error: 'User not found' });
     }
+    accountWalletService.revokeDevices(affectedDeviceSessions);
 
     // Sidecar cleanup (best-effort, non-fatal): the per-user directory holds
     // the uploaded avatar and the isolated provider credential dirs. `id` is a
@@ -603,7 +856,7 @@ router.delete('/users/:id', authenticateToken, requireRole('owner'), async (req,
 // Change own password. Rate-limited (verifies a credential). On success the
 // current device's token is rotated and returned so it keeps working; all other
 // tokens are invalidated via the advanced password_changed_at.
-router.patch('/me/password', authenticateToken, authLimiter, async (req, res) => {
+router.patch('/me/password', authenticatePasswordChange, authLimiter, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body ?? {};
 
@@ -640,7 +893,31 @@ router.patch('/me/password', authenticateToken, authLimiter, async (req, res) =>
 
     const changedAt = Date.now();
     const newHash = await hashPassword(newPassword);
-    userDb.changePassword(req.user.id, newHash, changedAt);
+    if (req.assertCurrentIdentity?.() === false) {
+      return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+    }
+    let establishedWallet = null;
+    let establishedSecret = null;
+    if (multiAccountEnabled() && req.passwordChangeSession) {
+      const established = accountWalletService.completeForcedPasswordRotation(
+        req.user.id,
+        newHash,
+        changedAt,
+        readCookie(req, DEVICE_COOKIE),
+        7 * 24 * 60 * 60 * 1000,
+      );
+      establishedWallet = established.wallet;
+      establishedSecret = established.secret;
+    } else if (multiAccountEnabled()) {
+      accountWalletService.rotatePassword(
+        req.user.id,
+        newHash,
+        changedAt,
+        req.devicePrincipal?.slotId ?? null,
+      );
+    } else {
+      userDb.changePassword(req.user.id, newHash, changedAt);
+    }
 
     // B-165: authenticateToken may already have attached an `X-Refreshed-Token`
     // (auto-refresh past half-life) minted with the OLD pwd_iat. That token died
@@ -656,14 +933,26 @@ router.patch('/me/password', authenticateToken, authLimiter, async (req, res) =>
 
     // Issue a fresh token carrying the new pwd_iat so this device stays signed in.
     const refreshedUser = userDb.getUserById(req.user.id);
-    const token = generateToken(refreshedUser);
+    const token = req.devicePrincipal || establishedWallet ? null : generateToken(refreshedUser);
+
+    if (req.passwordChangeSession) {
+      res.clearCookie(PASSWORD_CHANGE_COOKIE, SESSION_COOKIE_OPTIONS);
+    }
+    if (establishedSecret) {
+      res.cookie(DEVICE_COOKIE, establishedSecret, SESSION_COOKIE_OPTIONS);
+    }
+    req.allowIdentityTransitionResponse?.();
 
     auditLogDb.record('password_changed', {
       userId: req.user.id,
       ipAddress: clientIp(req),
     });
 
-    res.json({ success: true, token });
+    res.set('Cache-Control', 'no-store').json({
+      success: true,
+      ...(token ? { token } : {}),
+      ...(establishedWallet ? { wallet: establishedWallet } : {}),
+    });
   } catch (error) {
     console.error('Password change error:', error?.message);
     res.status(500).json({ error: 'Internal server error' });
@@ -734,6 +1023,9 @@ router.patch('/me/avatar', authenticateToken, (req, res) => {
 
       // userId comes from the verified JWT (numeric), never from client input.
       const userId = req.user.id;
+      if (req.assertCurrentIdentity?.() === false) {
+        return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+      }
 
       // Remove any avatar in a different extension so a stale file is not left
       // shadowing the new one (and not served by the static handler).
@@ -743,13 +1035,22 @@ router.patch('/me/avatar', authenticateToken, (req, res) => {
         if (otherExt === ext) {
           continue;
         }
+        if (req.assertCurrentIdentity?.() === false) {
+          return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+        }
         await fs.promises.rm(path.join(userDir, `avatar.${otherExt}`), { force: true });
       }
 
       const targetPath = path.join(userDir, `avatar.${ext}`);
+      if (req.assertCurrentIdentity?.() === false) {
+        return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+      }
       await fs.promises.writeFile(targetPath, file.buffer);
 
       const avatarUrl = `/avatars/${userId}.${ext}`;
+      if (req.assertCurrentIdentity?.() === false) {
+        return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+      }
       userDb.setAvatarUrl(userId, avatarUrl);
 
       auditLogDb.record('avatar_updated', {
@@ -896,7 +1197,15 @@ router.post(
       // 12 random bytes → 16-char base64url temporary password (CSPRNG).
       const tempPassword = crypto.randomBytes(12).toString('base64url');
       const tempHash = await hashPassword(tempPassword);
-      userDb.resetPassword(id, tempHash, Date.now());
+      if (req.assertCurrentIdentity?.() === false) {
+        return res.status(409).json({ error: 'Identity changed during request', code: 'identity_changed' });
+      }
+      const changedAt = Date.now();
+      if (multiAccountEnabled()) {
+        accountWalletService.rotatePassword(id, tempHash, changedAt, null, true);
+      } else {
+        userDb.resetPassword(id, tempHash, changedAt);
+      }
 
       // B-165 (same class): purge any coalesced refresh token cached for the
       // TARGET, so a token minted with their pre-reset pwd_iat can never be

@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { api } from '../../../utils/api';
 import type { LLMProvider } from '../../../types/app';
+import {
+  getIdentityBarrierSnapshot,
+  reconcileRevokedIdentity,
+  subscribeIdentityBarrier,
+} from '../../auth/accountIdentityBarrier';
 
 /**
  * Sidebar message search (B-332).
@@ -64,6 +69,11 @@ export function useSidebarMessageSearch(query: string, enabled: boolean): Messag
   const [result, setResult] = useState<MessageSearchResult>(EMPTY);
   const seqRef = useRef(0);
   const sourceRef = useRef<EventSource | null>(null);
+  const identityBarrier = useSyncExternalStore(
+    subscribeIdentityBarrier,
+    getIdentityBarrierSnapshot,
+    getIdentityBarrierSnapshot,
+  );
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -73,7 +83,7 @@ export function useSidebarMessageSearch(query: string, enabled: boolean): Messag
       sourceRef.current = null;
     };
 
-    if (!enabled || trimmed.length < MIN_QUERY) {
+    if (identityBarrier.phase !== 'stable' || !enabled || trimmed.length < MIN_QUERY) {
       closeStream();
       seqRef.current++;
       setResult(EMPTY);
@@ -144,17 +154,32 @@ export function useSidebarMessageSearch(query: string, enabled: boolean): Messag
 
       source.addEventListener('done', finish);
       source.addEventListener('error', finish);
+      source.addEventListener('identity_revoked', () => {
+        closeStream();
+        reconcileRevokedIdentity();
+      });
     }, DEBOUNCE_MS);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [enabled, query]);
+  }, [enabled, identityBarrier.phase, identityBarrier.version, query]);
 
   // Close the stream when the sidebar unmounts so the server stops scanning.
   useEffect(() => () => {
     sourceRef.current?.close();
     sourceRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const closeForIdentityChange = () => {
+      seqRef.current += 1;
+      sourceRef.current?.close();
+      sourceRef.current = null;
+      setResult(EMPTY);
+    };
+    window.addEventListener('auth:identity-changing', closeForIdentityChange);
+    return () => window.removeEventListener('auth:identity-changing', closeForIdentityChange);
   }, []);
 
   return result;

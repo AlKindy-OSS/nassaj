@@ -12,6 +12,10 @@
  */
 
 import { getConnection } from '@/modules/database/connection.js';
+import {
+  retireProjectSubjectAccess,
+  rotateProjectSubjectAccess,
+} from '@/modules/database/repositories/project-access.js';
 
 export type ProjectMemberRole = 'owner' | 'member';
 
@@ -21,6 +25,14 @@ export type ProjectMemberRow = {
   role: ProjectMemberRole;
   added_by: number | null;
   created_at: string;
+};
+
+/** Membership row joined with the member's public display identity. */
+export type ProjectMemberIdentityRow = Omit<ProjectMemberRow, 'created_at'> & {
+  created_at: string | null;
+  username: string | null;
+  avatar_url: string | null;
+  is_creator: number;
 };
 
 export const projectMembersDb = {
@@ -48,16 +60,45 @@ export const projectMembersDb = {
     ).run(projectId, userId, role, addedBy);
   },
 
-  /** Removes a membership row. No-op when the row does not exist. */
-  remove(projectId: string, userId: number): void {
+  /** Adds/changes the access projection, then rotates only this project subject. */
+  addAndRotateProjectAccess(
+    projectId: string,
+    userId: number,
+    role: ProjectMemberRole = 'member',
+    addedBy: number | null = null,
+  ): boolean {
+    const db = getConnection();
+    const changed = db.transaction(() => {
+      const existing = db.prepare(
+        'SELECT role FROM project_members WHERE project_id = ? AND user_id = ?',
+      ).get(projectId, userId) as { role: ProjectMemberRole } | undefined;
+      if (existing?.role === role) return false;
+      this.add(projectId, userId, role, addedBy);
+      return true;
+    })();
+    if (changed) rotateProjectSubjectAccess(projectId, userId);
+    return changed;
+  },
+
+  /** Removes a membership row. Returns whether a row was deleted (false = no-op). */
+  remove(projectId: string, userId: number): boolean {
     if (!projectId || !Number.isInteger(userId)) {
-      return;
+      return false;
     }
     const db = getConnection();
-    db.prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').run(
+    const result = db.prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').run(
       projectId,
       userId,
     );
+    return result.changes > 0;
+  },
+
+  /** Removes membership transactionally, then rotates only this project subject. */
+  removeAndRotateProjectAccess(projectId: string, userId: number): boolean {
+    const db = getConnection();
+    const removed = db.transaction(() => this.remove(projectId, userId))();
+    if (removed) retireProjectSubjectAccess(projectId, userId);
+    return removed;
   },
 
   /** Updates a member's role. No-op when the row does not exist. */
@@ -84,6 +125,34 @@ export const projectMembersDb = {
          ORDER BY datetime(created_at) ASC`,
       )
       .all(projectId) as ProjectMemberRow[];
+  },
+
+  /**
+   * ADR-172 member listing with display identity: every project_members row
+   * plus the creator (as role 'owner') when the creator has no explicit row.
+   * Joins users for username/avatar_url ONLY — never email, system role or
+   * status. Creator first, then members by join date.
+   */
+  listByProjectWithIdentity(projectId: string): ProjectMemberIdentityRow[] {
+    return getConnection()
+      .prepare(
+        `SELECT * FROM (
+         SELECT pm.project_id, pm.user_id, pm.role, pm.added_by, pm.created_at,
+                u.username, u.avatar_url, (pm.user_id = p.created_by) AS is_creator
+         FROM project_members pm
+         JOIN projects p ON p.project_id = pm.project_id
+         LEFT JOIN users u ON u.id = pm.user_id
+         WHERE pm.project_id = ?
+         UNION ALL
+         SELECT p.project_id, p.created_by, 'owner', NULL, NULL, u.username, u.avatar_url, 1
+         FROM projects p
+         LEFT JOIN users u ON u.id = p.created_by
+         WHERE p.project_id = ? AND p.created_by IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM project_members pm
+                           WHERE pm.project_id = p.project_id AND pm.user_id = p.created_by)
+         ) ORDER BY is_creator DESC, datetime(created_at) ASC`,
+      )
+      .all(projectId, projectId) as ProjectMemberIdentityRow[];
   },
 
   /**

@@ -7,6 +7,7 @@ const handle = (trace: string[]) => ({
   decisionId: 'decision', leaseId: 'lease', mode: 'legacy' as const,
   consume: () => { trace.push('consume'); return {} as never; },
   markStarted: () => { trace.push('started'); },
+  attachChildIdentity: () => { trace.push('attached'); },
   settle: (outcome: string) => { trace.push(`settle:${outcome}`); },
   notStarted: () => { trace.push('not-started'); },
 });
@@ -14,10 +15,10 @@ const handle = (trace: string[]) => ({
 test('legacy adapter is enclosed by consume, start, and terminal success', async () => {
   const trace: string[] = [];
   await runPermissionExecutionAdapter(handle(trace), async () => { trace.push('adapter'); });
-  assert.deepEqual(trace, ['consume', 'adapter', 'started', 'settle:succeeded']);
+  assert.deepEqual(trace, ['consume', 'started', 'adapter', 'settle:succeeded']);
 });
 
-test('synchronous adapter throw leaves effect unknown without a not-started contract', async () => {
+test('synchronous adapter throw is a failed durably-started effect', async () => {
   const trace: string[] = [];
   await assert.rejects(
     runPermissionExecutionAdapter(handle(trace), () => {
@@ -26,7 +27,7 @@ test('synchronous adapter throw leaves effect unknown without a not-started cont
     }),
     /refused/,
   );
-  assert.deepEqual(trace, ['consume', 'adapter', 'settle:reconciled_unknown']);
+  assert.deepEqual(trace, ['consume', 'started', 'adapter', 'settle:failed']);
 });
 
 test('asynchronous adapter rejection is terminal failed after start evidence', async () => {
@@ -38,7 +39,7 @@ test('asynchronous adapter rejection is terminal failed after start evidence', a
     }),
     /async failure/,
   );
-  assert.deepEqual(trace, ['consume', 'adapter', 'started', 'settle:failed']);
+  assert.deepEqual(trace, ['consume', 'started', 'adapter', 'settle:failed']);
 });
 
 test('start-evidence failure records unknown rather than a false spawn failure', async () => {
@@ -52,7 +53,7 @@ test('start-evidence failure records unknown rather than a false spawn failure',
     /audit unavailable/,
   );
   assert.deepEqual(trace, [
-    'consume', 'adapter', 'start-failed', 'settle:reconciled_unknown',
+    'consume', 'start-failed', 'settle:reconciled_unknown',
   ]);
 });
 
@@ -76,26 +77,24 @@ test('provider failure with failed settlement preserves cause and attempts settl
   assert.deepEqual(trace, ['consume', 'started', 'settle:failed']);
 });
 
-test('failed markStarted observes later rejection while keeping effect unknown', async () => {
+test('failed markStarted never invokes the effect', async () => {
   const trace: string[] = [];
-  let rejectEffect!: (error: Error) => void;
-  const pending = new Promise<void>((_resolve, reject) => { rejectEffect = reject; });
+  let invoked = false;
   const execution = { ...handle(trace), markStarted: () => { throw new Error('start evidence unavailable'); },
     settle: (outcome: string) => { trace.push(`settle:${outcome}`); throw new Error('receipt unavailable'); } };
-  await assert.rejects(runPermissionExecutionAdapter(execution, () => pending), /start evidence unavailable/);
-  rejectEffect(new Error('late provider failure'));
-  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(runPermissionExecutionAdapter(execution, async () => { invoked = true; }), /start evidence unavailable/);
+  assert.equal(invoked, false);
   assert.deepEqual(trace, ['consume', 'settle:reconciled_unknown']);
 });
 
-test('synchronous throw after an effect does not claim spawn_failed or notStarted', async () => {
+test('synchronous throw after entering the claimed effect settles failed', async () => {
   const trace: string[] = [];
   let effects = 0;
   await assert.rejects(runPermissionExecutionAdapter(handle(trace), () => {
     effects++; throw new Error('thrown after effect');
   }), /thrown after effect/);
   assert.equal(effects, 1);
-  assert.deepEqual(trace, ['consume', 'settle:reconciled_unknown']);
+  assert.deepEqual(trace, ['consume', 'started', 'settle:failed']);
 });
 
 test('consumption refusal never invokes adapter or records terminal effect', async () => {

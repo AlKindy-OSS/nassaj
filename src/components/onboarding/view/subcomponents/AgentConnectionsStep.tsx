@@ -11,7 +11,7 @@ type AgentConnectionsStepProps = {
   onOpenProviderLogin: (provider: LLMProvider) => void;
 };
 
-const providerCards = [
+export const providerCards = [
   {
     provider: 'claude' as const,
     title: 'Claude Code',
@@ -32,13 +32,6 @@ const providerCards = [
     connectedClassName: 'bg-muted border-border',
     iconContainerClassName: 'bg-muted',
     loginButtonClassName: 'bg-gray-800 hover:bg-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600',
-  },
-  {
-    provider: 'gemini' as const,
-    title: 'Gemini',
-    connectedClassName: 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800',
-    iconContainerClassName: 'bg-teal-100 dark:bg-teal-900/30',
-    loginButtonClassName: 'bg-teal-600 hover:bg-teal-700',
   },
   {
     provider: 'antigravity' as const,

@@ -145,6 +145,26 @@ export const apiKeysDb = {
     return row;
   },
 
+  /** Revalidates the exact credential row and its immutable owning principal. */
+  isAuthenticationPrincipalCurrent(
+    apiKeyId: number,
+    userId: number,
+    authorizationGeneration: number,
+  ): boolean {
+    if (!Number.isSafeInteger(apiKeyId) || apiKeyId <= 0
+      || !Number.isSafeInteger(userId) || userId <= 0
+      || !Number.isSafeInteger(authorizationGeneration) || authorizationGeneration <= 0) {
+      return false;
+    }
+    const row = getConnection().prepare(`SELECT 1
+      FROM api_keys ak
+      JOIN users u ON u.id = ak.user_id
+      WHERE ak.id = ? AND ak.user_id = ? AND ak.is_active = 1
+        AND u.is_active = 1 AND u.status = 'active'
+        AND u.authorization_generation = ?`).get(apiKeyId, userId, authorizationGeneration);
+    return row !== undefined;
+  },
+
   /** Permanently removes an API key. Returns true if a row was deleted. */
   deleteApiKey(userId: number, apiKeyId: number): boolean {
     const db = getConnection();

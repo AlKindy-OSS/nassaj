@@ -28,6 +28,7 @@ let childGeneration = -1;
 let timing = 0;
 let onAppend = () => {};
 let completedAt: string | undefined;
+let presenceEnds = 0;
 const written: any[] = [];
 const named = (url: string, exports: Record<string, unknown>) => mock.module(url, { namedExports: exports });
 named('node:child_process', { execFileSync: rejectUnexpectedProcess, execFile: rejectUnexpectedProcess, spawnSync: rejectUnexpectedProcess, spawn: () => { childGeneration = generation; child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true; return child; } });
@@ -42,7 +43,7 @@ named('./modules/providers/shared/vendor/vendor-transcript.js', { appendVendorTr
 named('./services/isolation/resolve-provider-env.js', { resolveProviderEnv: () => ({}) });
 named('./services/isolation/provider-cage-wiring.js', { resolveCagedLaunch: (value: unknown) => value });
 named('./services/isolation/sanitize-vendor-agent-env.js', { sanitizeVendorAgentEnv: (value: unknown) => value });
-named('./services/provider-run-presence.js', { beginProviderRun: () => ({ end() { } }) });
+named('./services/provider-run-presence.js', { beginProviderRun: () => ({ end() { presenceEnds++; } }) });
 named('./services/notification-orchestrator.js', { notifyRunFailed() { }, notifyRunStopped() { } });
 named('./shared/cwd-check.js', { checkCwdExists: async () => ({ ok: true }), buildCwdMissingPayload: () => ({}) });
 named('./shared/utils.js', { createNormalizedMessage: (value: unknown) => value, stampCoordinatorId: (value: unknown) => value });
@@ -97,4 +98,31 @@ test('B-1078: a busy Qwen session echoes only the rejected send\'s clientMsgId',
     assert.equal(sent.some(m => m.code === 'session_busy'), false, 'the running turn is not told it is busy');
     child.emit('close', 0, null);
     await withDeadline(run, 'busy-session first run to settle');
+});
+
+test('identity-revoked Qwen settles without late publish or assistant persistence', async () => {
+    child = null;
+    generation++;
+    presenceEnds = 0;
+    written.length = 0;
+    let revoked = false;
+    const sent: any[] = [];
+    const writer = {
+        userId: 7,
+        isRunOutputRevoked: () => revoked,
+        send: (message: any) => { if (!revoked) sent.push(message); },
+    };
+    const run = spawnQwen('fixture', { sessionId: 'revoked-qwen', cwd: process.cwd() }, writer);
+    const started = process.hrtime.bigint();
+    while ((!child || childGeneration !== generation) && elapsedMs(started) < DEADLINE_MS)
+        await new Promise(resolve => setTimeout(resolve, 1));
+    assert.ok(child && childGeneration === generation, 'provider child started');
+    child.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'late response' }] } }) + '\n');
+    revoked = true;
+    assert.equal(abortQwenSession('revoked-qwen'), true);
+    child.emit('close', 0, null);
+    await withDeadline(run, 'identity-revoked Qwen to settle');
+    assert.equal(written.some(args => args[3] === 'assistant'), false);
+    assert.equal(sent.some(message => message.kind === 'complete'), false);
+    assert.equal(presenceEnds, 1, 'run presence and launch lease settle exactly once');
 });

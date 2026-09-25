@@ -406,7 +406,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
     assert.deepEqual(trace, ['consume', 'started', 'settle:succeeded']);
   });
 
-  it('records an entered SDK seam without start evidence as reconciled_unknown', async () => {
+  it('records durable start before an SDK seam that then fails', async () => {
     const trace: string[] = [];
     runStreamedFailure = new Error('ambiguous SDK start');
     await spawnAndCapture({
@@ -417,7 +417,7 @@ describe('queryCodex live spawn — sandbox ceiling regression (T-884)', () => {
         notStarted: () => { trace.push('not-started'); },
       },
     });
-    assert.deepEqual(trace, ['consume', 'settle:reconciled_unknown']);
+    assert.deepEqual(trace, ['consume', 'started', 'settle:failed']);
   });
 
   it('pins MCP empty and delegation depth zero in parent-controlled config', async () => {
@@ -620,7 +620,7 @@ describe('/api/agent codex dispatch — no pinned bypass (T-884)', () => {
       'utf8',
     );
     const start = src.indexOf("} else if (provider === 'codex')");
-    const end = src.indexOf("} else if (provider === 'gemini')", start);
+    const end = src.indexOf("} else if (provider === 'opencode')", start);
     assert.ok(start !== -1 && end !== -1 && end > start, 'could not locate the codex dispatch block');
     const codexBlock = src.slice(start, end);
     assert.ok(codexBlock.includes('queryCodex('), 'codex block must call queryCodex');

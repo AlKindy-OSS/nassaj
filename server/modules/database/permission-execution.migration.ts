@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS permission_launch_decisions (
   ),
   authorization_generation INTEGER NOT NULL CHECK (authorization_generation > 0),
   authentication_credential_id TEXT,
+  device_session_id TEXT,
+  device_slot_id TEXT,
+  device_generation INTEGER CHECK (device_generation IS NULL OR device_generation > 0),
   launch_id TEXT NOT NULL CHECK (length(launch_id) BETWEEN 1 AND 256),
   session_id TEXT,
   project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 256),
@@ -43,7 +46,11 @@ CREATE TABLE IF NOT EXISTS permission_launch_decisions (
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
-  CHECK ((state = 'terminal') = (terminal_outcome IS NOT NULL))
+  CHECK ((state = 'terminal') = (terminal_outcome IS NOT NULL)),
+  CHECK (
+    (device_session_id IS NULL AND device_slot_id IS NULL AND device_generation IS NULL)
+    OR (device_session_id IS NOT NULL AND device_slot_id IS NOT NULL AND device_generation IS NOT NULL)
+  )
 );
 
 CREATE TABLE IF NOT EXISTS permission_admission_leases (
@@ -219,6 +226,16 @@ export const migratePermissionExecution = (database: Database): void => {
       );
     }
     database.exec(PERMISSION_EXECUTION_SCHEMA_SQL);
+    const decisions = columnNames(database, 'permission_launch_decisions');
+    for (const column of [
+      'device_session_id TEXT',
+      'device_slot_id TEXT',
+      'device_generation INTEGER CHECK (device_generation IS NULL OR device_generation > 0)',
+    ]) {
+      if (!decisions.has(column.split(' ')[0])) {
+        database.exec(`ALTER TABLE permission_launch_decisions ADD COLUMN ${column}`);
+      }
+    }
     // T-1593: effect footprint and exact child identity on the lease. Forward-only,
     // guarded so a re-run is a no-op; pre-existing leases read as 'external' (safe).
     const leases = columnNames(database, 'permission_admission_leases');

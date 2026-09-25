@@ -155,13 +155,33 @@ test('bootstrap executable closure is canonical, complete and excludes transacti
     }
 });
 
-test('bootstrap records cannot fall through to ordinary activation or recovery while integration is incomplete', async () => {
-    const { runOidPairTransaction } = await import('./oid-control-capsule.source.mjs');
-    for (const bootstrap of [null, {}, { ticket: createBootstrapTicket(material(), { clock }) }]) {
-        for (const resume of [undefined, { permissionRef: 'fixture' }]) {
-            await assert.rejects(runOidPairTransaction({ bootstrap, resume }, Buffer.alloc(0)), /oid_bootstrap_integration_unavailable/);
-        }
-    }
+test('bootstrap MODE CAS is journaled after stop, reversible before start, and changes no unrelated dotenv bytes', async t => {
+    const { validateBootstrapModeProposal, applyBootstrapModeCAS, restoreBootstrapModeCAS, buildOidTripleStartEnvironment } = await import('./oid-control-capsule.source.mjs');
+    const root = fs.mkdtempSync(path.resolve('.artifacts/bootstrap-mode-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    assert.equal(spawnSync('git', ['init','-q',root]).status, 0); fs.chmodSync(path.join(root, '.git'), 0o700);
+    const nonce = 'c'.repeat(64), recovery = path.join(root, '.git/nassaj-oid-recovery', nonce);
+    fs.mkdirSync(recovery, { recursive: true, mode: 0o700 });
+    const original = Buffer.from('PORT=3004\nNASSAJ_UPDATE_MODE=release\nKEEP=yes\n');
+    const proposal = Buffer.from('PORT=3004\nNASSAJ_UPDATE_MODE=local-main\nKEEP=yes\n');
+    fs.writeFileSync(path.join(root, '.env'), original, { mode: 0o600 });
+    const expected = material(root); expected.mode.originalEnvSha256 = hash(original); expected.mode.proposalEnvSha256 = hash(proposal);
+    const record = { bootstrap: { ticket: createBootstrapTicket(expected, { clock }), proposalEnvBase64: proposal.toString('base64') } };
+    const file = path.join(root, '.git', `nassaj-oid-control-transaction-1-${nonce}.json`);
+    const transaction = { schema: 'nassaj-oid-control-transaction/v2', state: 'triple_old_stopped', oldStoppedAt: 1,
+        transactionNonce: nonce, bootstrap: { claimSha256: H }, pair: { databaseState: 'PRE_CANDIDATE' } };
+    fs.writeFileSync(file, JSON.stringify(transaction), { mode: 0o600 });
+    assert.deepEqual(validateBootstrapModeProposal(original, proposal), { originalSha256: hash(original), proposalSha256: hash(proposal) });
+    const applied = applyBootstrapModeCAS(root, file, transaction, record);
+    assert.equal(applied.state, 'bootstrap_mode_verified'); assert.deepEqual(fs.readFileSync(path.join(root, '.env')), proposal);
+    const replayed = applyBootstrapModeCAS(root, file, applied, record); assert.equal(replayed.bootstrapMode.state, 'verified');
+    const restored = restoreBootstrapModeCAS(root, file, replayed, record);
+    assert.equal(restored.bootstrapMode.state, 'restored'); assert.deepEqual(fs.readFileSync(path.join(root, '.env')), original);
+    assert.throws(() => validateBootstrapModeProposal(original, Buffer.from('PORT=9\nNASSAJ_UPDATE_MODE=local-main\nKEEP=yes\n')), /scope_invalid/);
+    assert.throws(() => restoreBootstrapModeCAS(root, file, { ...replayed, bootDirection: 'target' }, record), /restore_forbidden/);
+    const start = buildOidTripleStartEnvironment({ KEEP: 'yes' }, { bootstrap: {}, transactionNonce: nonce, bootNonce: H });
+    assert.deepEqual(start, { KEEP: 'yes', NASSAJ_UPDATE_MODE: 'local-main', NASSAJ_PREVIEW_TRANSACTION_NONCE: nonce, NASSAJ_PREVIEW_BOOT_NONCE: H });
+    assert.equal(buildOidTripleStartEnvironment({ KEEP: 'yes', NASSAJ_UPDATE_MODE: 'release' },
+        { bootstrap: {}, transactionNonce: nonce, bootNonce: H }, true).NASSAJ_UPDATE_MODE, 'release');
 });
 
 function completeFixture(root, capsule) {

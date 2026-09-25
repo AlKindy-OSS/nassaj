@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 
 import crossSpawn from 'cross-spawn';
 
+import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
@@ -647,9 +648,19 @@ const parseModelsOutput = (text: string): CursorModelRow[] => {
 };
 
 const runCursorListModels = (): Promise<string> => new Promise((resolve, reject) => {
-  const cursorProcess = spawnFunction(resolveCliExecutablePath('cursor-agent'), ['--list-models'], {
-    env: { ...process.env },
-  });
+  const releaseLaunch = beginHarnessLaunch('cursor');
+  let cursorProcess;
+  try {
+    cursorProcess = spawnFunction(resolveCliExecutablePath('cursor-agent'), ['--list-models'], {
+      env: { ...process.env },
+    });
+  } catch (error) {
+    releaseLaunch();
+    reject(error);
+    return;
+  }
+  cursorProcess.once('error', releaseLaunch);
+  cursorProcess.once('close', releaseLaunch);
 
   let stdout = '';
   let stderr = '';
@@ -824,4 +835,3 @@ export class CursorProviderModels implements IProviderModels {
     return writeProviderSessionActiveModelChange('cursor', input);
   }
 }
-

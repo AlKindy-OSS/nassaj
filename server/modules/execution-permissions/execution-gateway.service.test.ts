@@ -66,6 +66,7 @@ const gateway = (
   generation: number,
   now: { value: number },
   candidateFor: Parameters<typeof createExecutionPermissionGateway>[0]['candidateFor'] = () => null,
+  isDevicePrincipalCurrent: Parameters<typeof createExecutionPermissionGateway>[0]['isDevicePrincipalCurrent'] = () => true,
 ) => {
   let sequence = 0;
   return createExecutionPermissionGateway({
@@ -81,6 +82,7 @@ const gateway = (
     },
     randomId: () => `id-${++sequence}`,
     nowMs: () => now.value,
+    isDevicePrincipalCurrent,
   });
 };
 
@@ -98,6 +100,114 @@ test('legacy admits unchanged effect but permit consumption is durable and singl
       FROM permission_launch_decisions decision JOIN permission_admission_leases lease
       ON lease.decision_id = decision.decision_id`).get();
     assert.deepEqual(row, { state: 'effect_claimed', status: 'active' });
+  } finally {
+    database.close();
+  }
+});
+
+test('device-session actor reaches the real launch gateway with wallet fencing intact', () => {
+  const database = setup();
+  try {
+    const deviceActor = createAuthenticatedLaunchActor({
+      id: 1, role: 'owner', status: 'active', is_active: 1,
+      authenticationKind: 'device_session', authorizationGeneration: 1,
+      deviceSessionId: 'device_server_issued', slotId: 'slot_server_issued',
+      deviceGeneration: 4,
+    }, '2030-01-01T00:00:00.000Z');
+    const result = gateway(database, 1, { value: 100 })
+      .authorize(deviceActor, context, 'full_delegation');
+    assert.equal(result.kind, 'authorized');
+    assert.equal(deviceActor.authenticationKind, 'session');
+    assert.equal(deviceActor.deviceSessionId, 'device_server_issued');
+    assert.equal(deviceActor.slotId, 'slot_server_issued');
+    assert.equal(deviceActor.deviceGeneration, 4);
+    const row = database.prepare(`
+      SELECT authentication_kind AS authenticationKind,
+             device_session_id AS deviceSessionId,
+             device_slot_id AS slotId,
+             device_generation AS deviceGeneration
+      FROM permission_launch_decisions
+    `).get();
+    assert.deepEqual(row, {
+      authenticationKind: 'session',
+      deviceSessionId: 'device_server_issued',
+      slotId: 'slot_server_issued',
+      deviceGeneration: 4,
+    });
+  } finally {
+    database.close();
+  }
+});
+
+test('device-session permit cannot be consumed after its wallet generation changes', () => {
+  const database = setup();
+  try {
+    let current = true;
+    const deviceActor = createAuthenticatedLaunchActor({
+      id: 1, role: 'owner', status: 'active', is_active: 1,
+      authenticationKind: 'device_session', authorizationGeneration: 1,
+      deviceSessionId: 'device_server_issued', slotId: 'slot_server_issued',
+      deviceGeneration: 4,
+    }, '2030-01-01T00:00:00.000Z');
+    const result = gateway(database, 1, { value: 100 }, () => null, () => current)
+      .authorize(deviceActor, context, 'full_delegation');
+    assert.equal(result.kind, 'authorized');
+    if (result.kind !== 'authorized') return;
+    current = false;
+    assert.throws(
+      () => result.execution.consume(),
+      (error: unknown) => error instanceof PermissionStateConflictError
+        && error.code === 'DEVICE_IDENTITY_STALE',
+    );
+    assert.equal((database.prepare(
+      "SELECT COUNT(*) AS count FROM permission_admission_leases WHERE status = 'active'",
+    ).get() as { count: number }).count, 0);
+  } finally {
+    database.close();
+  }
+});
+
+test('JWT permit cannot be consumed after global authorization generation changes', () => {
+  const database = setup();
+  try {
+    const result = gateway(database, 1, { value: 100 }).authorize(actor, context, 'full_delegation');
+    assert.equal(result.kind, 'authorized');
+    if (result.kind !== 'authorized') return;
+    database.prepare('UPDATE users SET role = ? WHERE id = 1').run('admin');
+    assert.throws(() => result.execution.consume(), (error: unknown) =>
+      error instanceof PermissionStateConflictError && error.code === 'IDENTITY_STALE');
+  } finally {
+    database.close();
+  }
+});
+
+test('CK permit binds the exact key across disable, re-enable and fresh admission', () => {
+  const database = setup();
+  try {
+    const permissionGateway = gateway(database, 1, { value: 100 });
+    database.prepare("INSERT INTO api_keys(id,user_id,key_digest,is_active) VALUES(11,1,'digest',1)").run();
+    const oldActor = createAuthenticatedLaunchActor({
+      id: 1, role: 'owner', status: 'active', is_active: 1,
+      authenticationKind: 'ck', authenticationCredentialId: 'api-key:11', authorizationGeneration: 2,
+    }, '2030-01-01T00:00:00.000Z');
+    const admitted = permissionGateway.authorize(oldActor, context, 'full_delegation');
+    assert.equal(admitted.kind, 'authorized');
+    if (admitted.kind !== 'authorized') return;
+    database.prepare('UPDATE api_keys SET is_active = 0 WHERE id = 11').run();
+    database.prepare('UPDATE api_keys SET is_active = 1 WHERE id = 11').run();
+    assert.throws(() => admitted.execution.consume(), (error: unknown) =>
+      error instanceof PermissionStateConflictError && error.code === 'IDENTITY_STALE');
+
+    const generation = (database.prepare('SELECT authorization_generation AS generation FROM users WHERE id=1')
+      .get() as { generation: number }).generation;
+    const freshActor = createAuthenticatedLaunchActor({
+      id: 1, role: 'owner', status: 'active', is_active: 1,
+      authenticationKind: 'ck', authenticationCredentialId: 'api-key:11',
+      authorizationGeneration: generation,
+    }, '2030-01-01T00:00:00.000Z');
+    assert.equal(permissionGateway.authorize(
+      freshActor, { ...context, launchId: 'fresh-ck' }, 'full_delegation',
+    ).kind, 'authorized');
   } finally {
     database.close();
   }
@@ -184,6 +294,26 @@ test('T-1593: a reconciled-unknown terminal fact fences its own session scope, n
   } finally {
     database.close();
   }
+});
+
+test('child identity can attach only after the durable pre-effect start', () => {
+  const database = setup();
+  try {
+    const result = gateway(database, 1, { value: 100 })
+      .authorize(actor, { ...context, effectFootprint: 'local' }, 'full_delegation');
+    assert.equal(result.kind, 'authorized');
+    if (result.kind !== 'authorized') return;
+    result.execution.consume();
+    const child = { pid: 4242, bootId: 'boot-id', startTicks: '777' };
+    assert.throws(() => result.execution.attachChildIdentity(child), /CHILD_IDENTITY_NOT_RECORDABLE/);
+    result.execution.markStarted();
+    result.execution.attachChildIdentity(child);
+    assert.deepEqual(database.prepare(`SELECT effect_child_pid AS pid,
+      effect_child_boot_id AS bootId, effect_child_start_ticks AS startTicks
+      FROM permission_admission_leases WHERE lease_id = ?`)
+      .get(result.execution.leaseId), child);
+    assert.throws(() => result.execution.attachChildIdentity(child), /CHILD_IDENTITY_NOT_RECORDABLE/);
+  } finally { database.close(); }
 });
 
 test('shadow records a missing candidate without changing the legacy launch outcome', () => {

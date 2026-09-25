@@ -26,6 +26,8 @@
 import assert from 'node:assert/strict';
 import { test, describe, mock } from 'node:test';
 
+import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/review-envelope-link-stubs.js';
+
 // --- Fixtures & module mocks (registered before importing the service) -------
 
 const PRIVATE_PATH = '/workspace/private-project';
@@ -47,6 +49,7 @@ const mirrorCalls: string[] = [];
 
 mock.module('@/modules/database/index.js', {
   namedExports: {
+    ...reviewEnvelopeDatabaseLinkStubs(),
     sessionsDb: {
       getSessionById: (sessionId: string) =>
         SESSION_PROJECT[sessionId]

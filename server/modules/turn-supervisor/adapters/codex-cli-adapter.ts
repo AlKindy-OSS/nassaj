@@ -2,6 +2,8 @@ import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 import { ensureCodexGovernance } from '@/modules/providers/index.js';
+// eslint-disable-next-line boundaries/dependencies
+import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 
 import {
@@ -153,6 +155,8 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
       return provider === 'codex';
     },
     async probe({ userId }: TurnAdapterProbeRequest): Promise<boolean> {
+      // T-1749/ADR-159: a harness mid-update is unavailable, not merely busy.
+      if (isSpawnBlockedForRunProvider('codex')) return false;
       return governanceProbe(userId) && executableProbe(binary);
     },
     async invoke(request): Promise<TurnAdapterResult> {
@@ -166,6 +170,9 @@ export function createCodexCliAdapter(options: CodexCliAdapterOptions = {}): Tur
         throw new TurnAdapterError('effects_unsupported', 'Codex supervised roles deny effects');
       }
       if (request.signal?.aborted) throw new TurnAdapterError('aborted', 'Codex role aborted before launch');
+      if (isSpawnBlockedForRunProvider('codex')) {
+        throw new TurnAdapterError('provider_unavailable', 'The codex runtime is being updated right now');
+      }
       const hidden = [INTERNAL_ROLE_CONTRACT, ...(request.hiddenContext ?? []), request.system ?? '']
         .filter(Boolean).join('\n\n');
       const args = [

@@ -2,6 +2,8 @@ import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 import { providerSecretsService } from '@/modules/providers/index.js';
+// eslint-disable-next-line boundaries/dependencies
+import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { sanitizeVendorAgentEnv } from '@/services/isolation/sanitize-vendor-agent-env.js';
 import { resolveOpenCodeBinaryPath } from '@/shared/utils.js';
@@ -202,6 +204,8 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
     id: `${provider}-cli-supervisor-ephemeral`, capabilities: EXTENDED_CLI_CAPABILITIES,
     supports(candidate: string): candidate is ExtendedCliProvider { return candidate === provider; },
     async probe({ userId }): Promise<boolean> {
+      // T-1749/ADR-159: never probe (spawn) a binary that is being replaced.
+      if (isSpawnBlockedForRunProvider(provider)) return false;
       if (!await executableProbe(binary) || await versionProbe(binary) !== EXACT_VERSIONS[provider]) return false;
       const env = resolveEnv(userId);
       if (provider === 'qwen') {
@@ -222,6 +226,9 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
       if (request.persist !== false) throw new TurnAdapterError('invalid_persistence', 'supervised CLI roles are ephemeral');
       if (request.effects?.length) throw new TurnAdapterError('effects_unsupported', 'supervised CLI roles deny effects');
       if (request.signal?.aborted) throw new TurnAdapterError('aborted', `${provider} role aborted before launch`);
+      if (isSpawnBlockedForRunProvider(provider)) {
+        throw new TurnAdapterError('provider_unavailable', `The ${provider} runtime is being updated right now`);
+      }
       const role = await createRole();
       try {
         const common = {

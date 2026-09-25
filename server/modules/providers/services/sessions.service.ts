@@ -3,6 +3,9 @@ import path from 'node:path';
 
 import {
   hashMessageAuthorContent,
+  canAccessProject,
+  findOwningProject,
+  isProjectMembershipEnforced,
   messageAuthorsDb,
   messageCoordinationDb,
   participantsDb,
@@ -136,8 +139,26 @@ export function isSessionAccessibleByUser(
     return false;
   }
 
-  if (participantsDb.isParticipant(sessionId, requesterUserId)) {
-    return true;
+  let participant = false;
+  try {
+    participant = participantsDb.isParticipant(sessionId, requesterUserId);
+  } catch {
+    return false;
+  }
+  if (participant) {
+    // ADR-172 (qa م3): under enforcement a participant who lost access to the
+    // session's (registered) project no longer reads or restamps through it.
+    if (!isProjectMembershipEnforced()) {
+      return true;
+    }
+    const owner = findOwningProject(projectPath ?? '');
+    if (owner === null) {
+      return mode === 'read' || participantsDb.hasSpawnConsent(sessionId, requesterUserId);
+    }
+    if (mode === 'restamp' && !participantsDb.hasSpawnConsent(sessionId, requesterUserId)) {
+      return false;
+    }
+    return canAccessProject(owner.project_id, requesterUserId);
   }
 
   // Participation is the ONLY route to a restamp — no project arm (see the
@@ -145,6 +166,14 @@ export function isSessionAccessibleByUser(
   // to the union cannot fall through into the write branch by omission.
   if (mode === 'restamp') {
     return false;
+  }
+
+  if (isProjectMembershipEnforced() && findOwningProject(projectPath ?? '') === null) {
+    try {
+      return mode === 'read' && messageAuthorsDb.isAuthor(sessionId, requesterUserId);
+    } catch {
+      return false;
+    }
   }
 
   return mode === 'read'
@@ -566,6 +595,7 @@ export const sessionsService = {
   async withHistoryLeaseCallback(sessionId: string, requesterUserId: number | null,
     options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'cursor'> & {
       payloadMode?: HistoryPayloadMode; revision?: string; access?: 'read' | 'restamp';
+      assertCurrent?: (notStarted: boolean) => void;
     }, signal: AbortSignal, consume: (payload: HistoryResponse, lease: HistoryReadLease) => Promise<void> | void): Promise<void> {
     let release: (() => void) | undefined, lease: HistoryReadLease | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -574,6 +604,7 @@ export const sessionsService = {
     try {
       const session = assertHistorySourceAccessible(sessionId, requesterUserId, options.access ?? 'read');
       const authorize = () => {
+        options.assertCurrent?.(true);
         const fresh = assertHistorySourceAccessible(sessionId, requesterUserId, options.access ?? 'read');
         if (fresh.provider !== session.provider || fresh.jsonl_path !== session.jsonl_path) throw new HistoryBudgetError('HISTORY_REVISION_CHANGED');
       };
@@ -584,6 +615,7 @@ export const sessionsService = {
       timer = setTimeout(() => deadline.abort(new HistoryBudgetError('HISTORY_TIMEOUT')), HISTORY_LIMITS.executionMs);
       lease = new HistoryReadLease(AbortSignal.any([signal, deadline.signal]));
       await lease.initialize(session.jsonl_path);
+      authorize();
       payload = await this.fetchHistory(sessionId, requesterUserId, { ...options, historyLease: lease });
       await lease.verify(); authorize(); lease.reserveDto(payload); lease.check();
       await consume(payload, lease);
@@ -611,6 +643,7 @@ export const sessionsService = {
   async withHistoryLease(sessionId: string, requesterUserId: number | null,
     options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'cursor'> & {
       payloadMode?: HistoryPayloadMode; revision?: string;
+      assertCurrent?: (notStarted: boolean) => void;
     }, sink: HistoryHttpSink): Promise<void> {
     if (!HistoryHttpSink.isConcrete(sink)) throw new HistoryBudgetError('HISTORY_SOURCE_INVALID');
     try {
@@ -633,8 +666,10 @@ export const sessionsService = {
       payloadMode?: HistoryPayloadMode;
       revision?: string;
       historyLease?: HistoryReadLease;
+      assertCurrent?: (notStarted: boolean) => void;
     } = {},
   ): Promise<HistoryResponse> {
+    options.assertCurrent?.(true);
     const session = options.historyLease ? sessionsDb.getHistorySource(sessionId) : sessionsDb.getSessionById(sessionId);
     if (!session) {
       throw new AppError(`Session "${sessionId}" was not found.`, {
@@ -680,7 +715,7 @@ export const sessionsService = {
       pageKey: JSON.stringify([limit, offset, options.cursor ?? null]),
       historyLease: options.historyLease,
       load: async () => {
-        const loaded = await providerRegistry.resolveProvider(provider).sessions.fetchHistory(sessionId, {
+        const loaded = await providerRegistry.resolveHistorySessions(provider).fetchHistory(sessionId, {
           limit,
           offset,
           cursor: options.cursor,
@@ -699,6 +734,7 @@ export const sessionsService = {
         return loaded;
       },
     });
+    options.assertCurrent?.(true);
 
     if (options.revision !== undefined && options.revision !== revision) {
       throw new AppError('Session history revision changed.', {
@@ -715,6 +751,7 @@ export const sessionsService = {
     let payload = payloadMode === 'light' ? projectLightHistory(ownedResult) : ownedResult;
     if (provider === 'codex') payload = projectCodexHistoryIdentities(
       copyCodexHistoryIdentities(result, payload), sessionId, requesterUserId, options.historyLease, messageCoordinationDb.readCodexVerdicts);
+    options.assertCurrent?.(true);
     return {
       ...payload,
       historySchema: LIGHT_HISTORY_SCHEMA,
@@ -748,20 +785,26 @@ export const sessionsService = {
     const archivedSessions = sessionsDb.getArchivedSessions();
     const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
     const visibilityByProjectPath = new Map<string, boolean>();
+    const enforced = isProjectMembershipEnforced();
     const isVisibleToRequester = (session: { session_id: string; project_path: string | null }): boolean => {
-      // Participation is session-specific and must be asked per row; project
-      // visibility is path-keyed and memoized.
-      if (participantsDb.isParticipant(session.session_id, requesterUserId)) {
-        return true;
+      try {
+        const owner = enforced ? findOwningProject(session.project_path ?? '') : undefined;
+        if (enforced && owner === null) {
+          return participantsDb.isParticipant(session.session_id, requesterUserId);
+        }
+        if (!enforced && participantsDb.isParticipant(session.session_id, requesterUserId)) {
+          return true;
+        }
+        const key = session.project_path ?? '';
+        if (!visibilityByProjectPath.has(key)) {
+          visibilityByProjectPath.set(
+            key, projectsDb.isProjectPathVisibleToUser(session.project_path, requesterUserId),
+          );
+        }
+        return visibilityByProjectPath.get(key) === true;
+      } catch {
+        return false;
       }
-      const key = typeof session.project_path === 'string' ? session.project_path : '';
-      if (!visibilityByProjectPath.has(key)) {
-        visibilityByProjectPath.set(
-          key,
-          projectsDb.isProjectPathVisibleToUser(session.project_path, requesterUserId),
-        );
-      }
-      return visibilityByProjectPath.get(key) as boolean;
     };
 
     return archivedSessions.filter(isVisibleToRequester).map((session) => {
@@ -811,11 +854,14 @@ export const sessionsService = {
     options: {
       force?: boolean;
       deletedFromDisk?: boolean;
+      assertCurrent?: (notStarted: boolean) => void;
+      markEffectStarted?: () => void;
     } = {},
   ): Promise<{ sessionId: string; action: 'archived' | 'deleted'; deletedFromDisk: boolean }> {
     const session = assertSessionAccessible(sessionId, requesterUserId, 'write');
 
     if (!options.force) {
+      options.assertCurrent?.(true);
       sessionsDb.updateSessionIsArchived(sessionId, true);
       return {
         sessionId,
@@ -826,9 +872,21 @@ export const sessionsService = {
 
     let removedFromDisk = false;
     if (options.deletedFromDisk && session.jsonl_path) {
+      options.assertCurrent?.(true);
       removedFromDisk = await removeFileIfExists(session.jsonl_path);
+      if (removedFromDisk) {
+        try {
+          options.markEffectStarted?.();
+        } catch {
+          // Effect accounting must never interrupt the mandatory row settlement.
+        }
+      }
     }
 
+    // Once the transcript unlink commits, deleting the row is mandatory bounded
+    // settlement of that same operation. A revocation here suppresses the HTTP
+    // result at the route boundary; it must not leave a dangling DB row.
+    if (!removedFromDisk) options.assertCurrent?.(true);
     const deleted = sessionsDb.deleteSessionById(sessionId);
     if (!deleted) {
       throw new AppError(`Session "${sessionId}" was not found.`, {
@@ -836,6 +894,7 @@ export const sessionsService = {
         statusCode: 404,
       });
     }
+    options.assertCurrent?.(false);
 
     return {
       sessionId,

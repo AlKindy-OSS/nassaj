@@ -2,6 +2,10 @@ import type { Server as HttpServer } from 'node:http';
 
 import { WebSocket, WebSocketServer, type VerifyClientCallbackSync } from 'ws';
 
+import {
+  connectionRevocationRegistry,
+  devicePrincipalFromUser,
+} from '@/modules/account-wallet/index.js';
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { verifyWebSocketClient } from '@/modules/websocket/services/websocket-auth.service.js';
 import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
@@ -18,7 +22,17 @@ type WebSocketServerDependencies = {
 };
 
 /** WebSocket with keepalive liveness flag + consecutive missed-pong counter. */
-type AliveWebSocket = WebSocket & { isAlive: boolean; missedPongs?: number };
+type AliveWebSocket = WebSocket & {
+  isAlive: boolean;
+  missedPongs?: number;
+  abortIdentityRevokedRuns?: () => void;
+};
+
+/** Trusted registry callback: fence owned work before starting the close handshake. */
+export function closeWebSocketForIdentityRevocation(ws: AliveWebSocket): void {
+  ws.abortIdentityRevokedRuns?.();
+  ws.close(4401, 'identity_revoked');
+}
 
 /** Ping interval in ms — must stay below Cloudflare Tunnel's 90s idle timeout. */
 const PING_INTERVAL_MS = 30_000;
@@ -116,6 +130,21 @@ export function createWebSocketServer(
     const incomingRequest = request as AuthenticatedWebSocketRequest;
     const url = incomingRequest.url ?? '/';
     const pathname = new URL(url, 'http://localhost').pathname;
+    const devicePrincipal = devicePrincipalFromUser(incomingRequest.user);
+    if (devicePrincipal) {
+      // Register first. A switch between upgrade authentication and this handler
+      // can then find and close the socket; the authoritative recheck below
+      // covers a switch that completed before registration.
+      const unregister = connectionRevocationRegistry.register({
+        close: () => closeWebSocketForIdentityRevocation(aliveWs),
+      }, devicePrincipal);
+      ws.once('close', unregister);
+      if (!connectionRevocationRegistry.isCurrent(devicePrincipal)) {
+        unregister();
+        closeWebSocketForIdentityRevocation(aliveWs);
+        return;
+      }
+    }
 
     if (pathname === '/shell') {
       handleShellConnection(ws, incomingRequest, dependencies.shell);

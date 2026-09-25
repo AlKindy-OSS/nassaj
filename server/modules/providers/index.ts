@@ -76,7 +76,20 @@ export { isSessionAccessibleByUser, assertSessionAccessible } from './services/s
 
 // ADR-099: the composition root injects the live-run probe the re-stamp route
 // consults. Exported here because the root may only reach a module through it.
-export { setEngineSwitchLivenessProbe } from './services/engine-switch-liveness.service.js';
+export {
+  isEngineRestampReserved,
+  releaseEngineRestamp,
+  reserveEngineRestamp,
+  setEngineSwitchLivenessProbe,
+} from './services/engine-switch-liveness.service.js';
+export {
+  ENGINE_RESTAMP_MODEL_STORE_LIMITS,
+  EngineRestampStoreError,
+  withEngineRestampModelStoreBoundary,
+  type EngineRestampModelStoreBoundary,
+  type EngineRestampModelStoreMutation,
+  type EngineRestampStoreOwner,
+} from './services/engine-restamp-model-store.service.js';
 export { readProjectSkills } from './services/skill-observations.service.js';
 
 // B-894: authenticated complete-payload receipt capability, never raw provider metadata.

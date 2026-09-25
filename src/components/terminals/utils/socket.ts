@@ -14,10 +14,7 @@ export function getTerminalWebSocketUrl(): string | null {
   }
 
   const token = localStorage.getItem('auth-token');
-  if (!token) {
-    console.error('No authentication token found for Terminal WebSocket connection');
-    return null;
-  }
+  if (!token) return `${protocol}//${window.location.host}/terminal`;
 
   return `${protocol}//${window.location.host}/terminal?token=${encodeURIComponent(token)}`;
 }

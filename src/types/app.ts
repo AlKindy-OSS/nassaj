@@ -144,6 +144,8 @@ export interface Project extends Partial<SessionBuckets<ProjectSession>> {
   // project member). View-filter inputs only — never an access decision.
   ownerId?: number | null;
   isOwner?: boolean;
+  /** Server-authoritative access decision for this viewer. */
+  canAccess?: boolean;
   sessionMeta?: ProjectSessionMeta;
   [key: string]: unknown;
 }

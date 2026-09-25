@@ -1,4 +1,4 @@
-import type { UserRole } from '@/modules/database/index.js';
+import { apiKeysDb, deviceAccountSessionsDb, userDb, type UserRole } from '@/modules/database/index.js';
 
 export type AuthenticatedLaunchActor = Readonly<{
   userId: number;
@@ -8,6 +8,9 @@ export type AuthenticatedLaunchActor = Readonly<{
   authorizationGeneration: number;
   roles: readonly UserRole[];
   authenticatedAt: string;
+  deviceSessionId?: string;
+  slotId?: string;
+  deviceGeneration?: number;
 }>;
 
 export class LaunchActorError extends Error {
@@ -26,10 +29,13 @@ type PersistedPrincipal = Readonly<{
   authenticationKind?: unknown;
   authenticationCredentialId?: unknown;
   authorizationGeneration?: unknown;
+  deviceSessionId?: unknown;
+  slotId?: unknown;
+  deviceGeneration?: unknown;
 }>;
 
 const ROLES = new Set<UserRole>(['owner', 'admin', 'user']);
-const KINDS = new Set(['session', 'ck', 'verified_proxy', 'internal_service']);
+const KINDS = new Set(['session', 'device_session', 'ck', 'verified_proxy', 'internal_service']);
 
 /**
  * Builds a frozen actor only from a canonical authentication result. Callers must pass the
@@ -70,7 +76,10 @@ export const createAuthenticatedLaunchActor = (
   if (Number.isNaN(Date.parse(authenticatedAt)) || new Date(authenticatedAt).toISOString() !== authenticatedAt) {
     throw new LaunchActorError('ACTOR_AUTHENTICATED_AT_INVALID');
   }
-  const authenticationKind = principal.authenticationKind as AuthenticatedLaunchActor['authenticationKind'];
+  const inputAuthenticationKind = String(principal.authenticationKind);
+  const authenticationKind = (inputAuthenticationKind === 'device_session'
+    ? 'session'
+    : inputAuthenticationKind) as AuthenticatedLaunchActor['authenticationKind'];
   const credential = principal.authenticationCredentialId;
   if (credential !== undefined && (typeof credential !== 'string' || !credential
     || credential.length > 256 || /[\u0000-\u001f\u007f]/u.test(credential))) {
@@ -78,6 +87,20 @@ export const createAuthenticatedLaunchActor = (
   }
   if (authenticationKind === 'ck' && credential === undefined) {
     throw new LaunchActorError('ACTOR_CREDENTIAL_ID_REQUIRED');
+  }
+  let deviceBinding: Pick<AuthenticatedLaunchActor, 'deviceSessionId' | 'slotId' | 'deviceGeneration'> = {};
+  if (inputAuthenticationKind === 'device_session') {
+    if (typeof principal.deviceSessionId !== 'string' || !principal.deviceSessionId
+        || typeof principal.slotId !== 'string' || !principal.slotId
+        || !Number.isSafeInteger(principal.deviceGeneration)
+        || Number(principal.deviceGeneration) <= 0) {
+      throw new LaunchActorError('ACTOR_DEVICE_BINDING_INVALID');
+    }
+    deviceBinding = {
+      deviceSessionId: principal.deviceSessionId,
+      slotId: principal.slotId,
+      deviceGeneration: Number(principal.deviceGeneration),
+    };
   }
   return Object.freeze({
     userId: Number(userId),
@@ -87,5 +110,29 @@ export const createAuthenticatedLaunchActor = (
     authorizationGeneration: Number(principal.authorizationGeneration),
     roles: Object.freeze([principal.role as UserRole]),
     authenticatedAt,
+    ...deviceBinding,
   });
+};
+
+/** Revalidates the exact immutable principal without refreshing any captured field. */
+export const isAuthenticatedLaunchActorCurrent = (actor: AuthenticatedLaunchActor): boolean => {
+  if (!userDb.isAuthorizationPrincipalCurrent(actor.userId, actor.authorizationGeneration)) return false;
+  if (actor.deviceSessionId) {
+    return Boolean(actor.slotId && actor.deviceGeneration
+      && deviceAccountSessionsDb.isPrincipalCurrent({
+        deviceSessionId: actor.deviceSessionId,
+        slotId: actor.slotId,
+        generation: actor.deviceGeneration,
+        userId: actor.userId,
+        authorizationGeneration: actor.authorizationGeneration,
+      }));
+  }
+  if (actor.authenticationKind === 'ck') {
+    const match = /^api-key:(\d+)$/u.exec(actor.authenticationCredentialId ?? '');
+    if (!match) return false;
+    return apiKeysDb.isAuthenticationPrincipalCurrent(
+      Number(match[1]), actor.userId, actor.authorizationGeneration,
+    );
+  }
+  return true;
 };

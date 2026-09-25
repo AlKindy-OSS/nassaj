@@ -17,6 +17,8 @@ import type { PermissionExecutionHandle } from '@/modules/execution-permissions/
 import { readRuntimeProcessIdentity, runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
 // eslint-disable-next-line boundaries/dependencies
 import { authorizeRuntimeUserProviderEffect } from '@/modules/execution-permissions/runtime-user-effect.js';
+// eslint-disable-next-line boundaries/dependencies
+import { assertHarnessNotUpdating, beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { assertSessionAccessible } from '@/modules/providers/index.js';
 
 import { requestManagedClaudeBroker } from './managed-claude-launch-broker.js';
@@ -127,6 +129,10 @@ export async function runManagedClaudeLauncher(
     : [...argv];
   const baseEnv = stripManagedClaudeTerminalEnv(sourceEnv);
   const brokered = Boolean(sourceEnv[MANAGED_CLAUDE_BROKER_SOCKET_ENV] && sourceEnv[MANAGED_CLAUDE_BROKER_SELECTOR_ENV]);
+  // T-1749/ADR-159: the managed terminal spawns the REAL claude binary, so it
+  // consults the same harness-update admission gate as the chat entry points.
+  assertHarnessNotUpdating('claude');
+
   if (brokered && deps.permissionExecution === undefined && !deps.authenticatedPrincipal && !deps.authorizeSession && !deps.resolveProfile) {
     const authorization = await requestManagedClaudeBroker(sourceEnv, 'authorize', { argv: childArgv });
     const launch = authorization.launch;
@@ -138,10 +144,13 @@ export async function runManagedClaudeLauncher(
     const spawnImpl = deps.spawnImpl ?? spawn;
     return new Promise<number>((resolve, reject) => {
       let child: ChildProcess;
+      // T-1749 item 6: a managed terminal is a live claude child that never
+      // registers for presence; the harness-update gate reads this registry too.
+      const releaseLaunch = beginHarnessLaunch('claude');
       try { child = spawnImpl(realBinary, childArgv, { env: profileEnv as NodeJS.ProcessEnv, stdio: 'inherit', shell: false }); }
-      catch (error) { void requestManagedClaudeBroker(sourceEnv, 'settle', { launch, exitCode: 1 }); reject(error); return; }
-      child.once('error', error => { void requestManagedClaudeBroker(sourceEnv, 'settle', { launch, exitCode: 1 }); reject(error); });
-      child.once('exit', (code, signal) => { void requestManagedClaudeBroker(sourceEnv, 'settle', { launch, exitCode: code ?? (signal ? 1 : 1) }); resolve(code ?? (signal ? 128 : 1)); });
+      catch (error) { releaseLaunch(); void requestManagedClaudeBroker(sourceEnv, 'settle', { launch, exitCode: 1 }); reject(error); return; }
+      child.once('error', error => { releaseLaunch(); void requestManagedClaudeBroker(sourceEnv, 'settle', { launch, exitCode: 1 }); reject(error); });
+      child.once('exit', (code, signal) => { releaseLaunch(); void requestManagedClaudeBroker(sourceEnv, 'settle', { launch, exitCode: code ?? (signal ? 1 : 1) }); resolve(code ?? (signal ? 128 : 1)); });
     });
   }
   const authorizeSession = deps.authorizeSession ?? assertSessionAccessible;
@@ -189,6 +198,8 @@ export async function runManagedClaudeLauncher(
   let spawnedChild: ChildProcess | null = null;
   return runPermissionExecutionAdapter(permissionExecution, () => new Promise<number>((resolve, reject) => {
     let child: ChildProcess;
+    // T-1749 item 6: see the brokered branch above — same unregistered claude child.
+    const releaseLaunch = beginHarnessLaunch('claude');
     try {
       child = spawnImpl(realBinary, childArgv, {
         env: profile.env,
@@ -196,6 +207,7 @@ export async function runManagedClaudeLauncher(
         shell: false,
       });
     } catch (error) {
+      releaseLaunch();
       reject(error);
       return;
     }
@@ -214,10 +226,12 @@ export async function runManagedClaudeLauncher(
     };
     child.once('error', (error) => {
       cleanup();
+      releaseLaunch();
       reject(error);
     });
     child.once('exit', (code, signal) => {
       cleanup();
+      releaseLaunch();
       resolve(code ?? (signal ? 128 : 1));
     });
   }), () => (spawnedChild?.pid ? readRuntimeProcessIdentity(spawnedChild.pid) : null));

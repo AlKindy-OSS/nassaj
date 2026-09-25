@@ -7,6 +7,9 @@ export type LaunchPermitBinding = Readonly<{
   leaseId: string;
   userId: number;
   authorizationGeneration: number;
+  deviceSessionId?: string;
+  slotId?: string;
+  deviceGeneration?: number;
   provider: string;
   body: string;
   engine: string;

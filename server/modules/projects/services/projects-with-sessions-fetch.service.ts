@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 
-import { closedSessionsDb, participantsDb, projectMembersDb, projectsDb, sessionOutcomesDb, sessionsDb, starredSessionsDb } from '@/modules/database/index.js';
+import { canAccessProject, closedSessionsDb, listAccessibleProjectPaths, participantsDb, projectMembersDb, projectsDb, sessionOutcomesDb, sessionsDb, starredSessionsDb } from '@/modules/database/index.js';
 import type { ClosedSessionRow } from '@/modules/database/index.js';
 import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
@@ -116,6 +116,12 @@ export type ProjectListItem = {
   // Both are view-filter inputs only — never an access decision.
   ownerId: number | null;
   isOwner: boolean;
+  /**
+   * ADR-172 (qa م8): canAccessProject for the requester — platform owner/admin,
+   * project member or creator. Independent of PROJECT_MEMBERSHIP_ENFORCE; this
+   * is what gates the members dialog (and all access once enforced).
+   */
+  canAccess: boolean;
   /**
    * Whether the project directory currently exists on disk.
    *
@@ -627,6 +633,9 @@ export async function getProjectsWithSessions(
       ? new Set(projectMembersDb.listUserOwnedProjectIds(currentUserId))
       : new Set<string>();
 
+  // One set-based query for the per-project `canAccess` flag (active projects).
+  const accessiblePaths = new Set(listAccessibleProjectPaths(currentUserId));
+
   for (let rowIdx = 0; rowIdx < projectRows.length; rowIdx++) {
     const row = projectRows[rowIdx];
     processedProjects += 1;
@@ -668,6 +677,7 @@ export async function getProjectsWithSessions(
       isMember: memberProjectPaths.has(projectPath),
       ownerId,
       isOwner,
+      canAccess: accessiblePaths.has(projectPath),
       dirExists,
       metadataCheckedAt: row.dir_checked_at ?? null,
       ...sessionsPage.sessionBuckets,
@@ -752,6 +762,7 @@ export async function getArchivedProjectsWithSessions(
       isMember: false,
       ownerId,
       isOwner,
+      canAccess: canAccessProject(row.project_id, currentUserId),
       dirExists: archivedDirExists,
       metadataCheckedAt: row.dir_checked_at ?? null,
       isArchived: true,

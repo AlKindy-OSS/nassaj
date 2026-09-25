@@ -33,6 +33,17 @@ test('writer/backfill flags fail closed and off scheduling is a permanent no-op'
   }
 });
 
+test('scheduler activity invokes lazy v3 maintenance while off mode performs no writes', async () => {
+  let maintenanceCalls = 0;
+  const on = new UsageIngestionScheduler({ writerMode: () => 'on', maintenance: () => { maintenanceCalls += 1; },
+    resolveContext: async () => context(), ingest: async () => done() });
+  await on.schedule({ provider: 'claude', filePath: '/disk/root.jsonl' });
+  assert.equal(maintenanceCalls, 1);
+  const off = new UsageIngestionScheduler({ writerMode: () => 'off', maintenance: () => { maintenanceCalls += 1; } });
+  assert.equal(await off.schedule({ provider: 'claude', filePath: '/disk/root.jsonl' }), null);
+  assert.equal(maintenanceCalls, 1);
+});
+
 test('concurrent changes coalesce into one running pass plus one dirty pass', async () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -87,6 +98,21 @@ test('partial no-progress is bounded and only a later watcher event retries it',
   const completed = await scheduler.schedule({ provider: 'claude', filePath: '/disk/root.jsonl' });
   assert.equal(completed?.caughtUp, true);
   assert.equal(calls, 3);
+});
+
+test('writer transient failures stop after exactly three attempts', async () => {
+  let calls = 0;
+  const scheduler = new UsageIngestionScheduler({
+    writerMode: () => 'on', retryDelayMs: 0,
+    resolveContext: async () => context(),
+    ingest: async () => { calls += 1; throw new Error('transient-writer-failure'); },
+    recordFailure: () => {},
+  });
+  await assert.rejects(
+    scheduler.schedule({ provider: 'claude', filePath: '/disk/retry.jsonl' }),
+    /transient-writer-failure/,
+  );
+  assert.equal(calls, 3, 'the retry budget is three total writer attempts');
 });
 
 test('late child dirties the root and refreshes context before the second pass', async () => {

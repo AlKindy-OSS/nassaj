@@ -15,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 
+import { principal } from '../../tests/codex-credential-principal.fixture.js';
+
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cred-writer-'));
 const ORIGINAL_CODEX_HOME = process.env.CODEX_HOME;
 process.env.CODEX_HOME = sandbox;
@@ -73,7 +75,7 @@ test('setApiKey passes the key on STDIN and NEVER in argv', async () => {
   const { spawnFn, calls } = makeFakeSpawn({ exitCode: 0 });
   const writer = new CodexCredentialsWriter(spawnFn as never);
 
-  const result = await writer.setApiKey(null, KEY);
+  const result = await writer.setApiKey(1, KEY, undefined, principal);
   assert.deepEqual(result, { provider: 'codex', configured: true });
 
   assert.equal(calls.length, 1, 'the login CLI was spawned exactly once');
@@ -93,7 +95,7 @@ test('a non-zero CLI exit rejects with a clean generic error carrying no key', a
   const writer = new CodexCredentialsWriter(spawnFn as never);
 
   await assert.rejects(
-    () => writer.setApiKey(null, KEY),
+    () => writer.setApiKey(1, KEY, undefined, principal),
     (err: unknown) => {
       const e = err as { code?: string; message?: string };
       assert.equal(e.code, 'CODEX_LOGIN_FAILED');
@@ -107,7 +109,7 @@ test('a spawn error rejects cleanly (CLI missing / not executable)', async () =>
   const { spawnFn } = makeFakeSpawn({ emitError: true });
   const writer = new CodexCredentialsWriter(spawnFn as never);
   await assert.rejects(
-    () => writer.setApiKey(null, KEY),
+    () => writer.setApiKey(1, KEY, undefined, principal),
     (err: unknown) => (err as { code?: string }).code === 'CODEX_LOGIN_FAILED',
   );
 });

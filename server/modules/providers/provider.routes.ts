@@ -1,11 +1,11 @@
 import os from 'node:os';
-import localModelsRoutes from './local-models.routes.js';
 import path from 'node:path';
 
 import express, { type Request, type Response } from 'express';
 
 import costRoutes from '@/modules/providers/cost.routes.js';
 import resourceRoutes from '@/modules/providers/resources.routes.js';
+import { DeviceBoundSseStream } from '@/modules/account-wallet/index.js';
 import { antigravityActiveModelService } from '@/modules/providers/services/antigravity-active-model.service.js';
 import {
   providerQuotaService,
@@ -37,7 +37,19 @@ import {
   agentStatusService,
   isValidAgentId,
 } from '@/modules/providers/services/agent-status.service.js';
-import { auditLogDb, closedSessionsDb, projectsDb, sessionAgentsDb, sessionsDb, userDb } from '@/modules/database/index.js';
+import {
+  auditLogDb,
+  canAccessProjectPath,
+  captureWorkspaceTopologyFence,
+  closedSessionsDb,
+  isProjectMembershipEnforced,
+  isWorkspaceTopologyFenceCurrent,
+  projectsDb,
+  sessionAgentsDb,
+  sessionsDb,
+  userDb,
+  type WorkspaceTopologyFence,
+} from '@/modules/database/index.js';
 import { OFFICIAL_ENGINE, PIN_SOURCE } from '@/services/isolation/engine-pin.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
@@ -66,6 +78,7 @@ import {
   type EligibleEngineProviderId,
 } from '../../../shared/engineProviders.js';
 
+import localModelsRoutes from './local-models.routes.js';
 import { HistoryHttpSink } from './services/history-response.service.js';
 
 const router = express.Router();
@@ -102,6 +115,84 @@ const readAuthenticatedUserId = (req: Request): string | number | null =>
 // identity and the gate downstream refuses access fail-closed.
 const readRequesterUserId = (req: Request): number | null =>
   coerceUserId((req as Request & { user?: { id?: string | number } }).user?.id ?? null);
+
+type IdentityFencedRequest = Request & { assertCurrentIdentity?: () => boolean };
+
+const accessFenceError = (
+  code: 'identity_changed' | 'project_access_changed',
+  notStarted: boolean,
+): AppError => new AppError(
+  code === 'identity_changed'
+    ? 'Identity changed during request.'
+    : 'Project access changed during request.',
+  {
+    code,
+    statusCode: 409,
+    details: { notStarted, ...(notStarted ? {} : { effectState: 'outcome_unknown' }) },
+  },
+);
+
+/** Captures one session's immutable project/topology authority after its mandate check. */
+function captureSessionRequestFence(
+  req: Request,
+  sessionId: string,
+  access: 'read' | 'write' | 'restamp',
+): WorkspaceTopologyFence | null {
+  const fenced = req as IdentityFencedRequest;
+  if (fenced.assertCurrentIdentity?.() !== true) throw accessFenceError('identity_changed', true);
+  const userId = readRequesterUserId(req);
+  const session = assertSessionAccessible(sessionId, userId, access);
+  if (!isProjectMembershipEnforced()) return null;
+  const workspaceFence = captureWorkspaceTopologyFence(session.project_path ?? '', userId, {
+    sessionId,
+    consent: access === 'read' ? 'read' : 'control',
+  });
+  if (!workspaceFence) {
+    throw new AppError(`Session "${sessionId}" was not found.`, {
+      code: 'SESSION_NOT_FOUND', statusCode: 404,
+    });
+  }
+  return workspaceFence;
+}
+
+/** Rechecks identity and the exact captured project immediately at a boundary. */
+function assertSessionRequestFence(
+  req: Request,
+  workspaceFence: WorkspaceTopologyFence | null,
+  notStarted: boolean,
+): void {
+  if ((req as IdentityFencedRequest).assertCurrentIdentity?.() !== true) {
+    throw accessFenceError('identity_changed', notStarted);
+  }
+  if (workspaceFence && !isWorkspaceTopologyFenceCurrent(workspaceFence)) {
+    throw accessFenceError('project_access_changed', notStarted);
+  }
+}
+
+function assertRequestIdentity(req: Request, notStarted: boolean): void {
+  if ((req as IdentityFencedRequest).assertCurrentIdentity?.() !== true) {
+    throw accessFenceError('identity_changed', notStarted);
+  }
+}
+
+/** Reuses the exact registered-project token pair so stream checks stay O(projects). */
+export function retainDistinctWorkspaceFence(
+  fences: Set<WorkspaceTopologyFence>,
+  candidate: WorkspaceTopologyFence,
+): WorkspaceTopologyFence {
+  if (candidate.kind === 'project') {
+    for (const existing of fences) {
+      if (existing.kind === 'project'
+          && existing.userId === candidate.userId
+          && existing.subjectAccessToken === candidate.subjectAccessToken
+          && existing.projectStructureToken === candidate.projectStructureToken) {
+        return existing;
+      }
+    }
+  }
+  fences.add(candidate);
+  return candidate;
+}
 
 const BULK_SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,120}$/;
 
@@ -1163,6 +1254,7 @@ const setCompanyKey = asyncHandler(async (req: Request, res: Response) => {
   const result = await companyCredentialsService.setKey(userId, companyId, apiKey, {
     isElevated: isElevatedCaller(req),
     includeSubscription,
+    authenticatedPrincipal: (req as Request & { user?: unknown }).user,
     vendorIds: readVendorIds(body?.vendorIds),
   });
   res.json(createApiSuccessResponse(result));
@@ -1224,7 +1316,10 @@ const setProviderApiKey = asyncHandler(async (req: Request, res: Response) => {
   const qwenOptions = provider === 'qwen'
     ? { plan: body?.plan, region: body?.region }
     : undefined;
-  const result = await providerCredentialsService.setKey(userId, provider, apiKey, target, qwenOptions);
+  const result = await providerCredentialsService.setKey(
+    userId, provider, apiKey, target, qwenOptions,
+    (req as Request & { user?: unknown }).user,
+  );
   if (provider === 'qwen') {
     auditLogDb.record('qwen_credential_set', {
       userId: coerceUserId(userId) ?? undefined,
@@ -1379,12 +1474,14 @@ router.get(
     // `req.user` is set by authenticateToken; null for anonymous/platform mode,
     // which uses the operator's shared environment (unchanged behaviour).
     const userId = (req as Request & { user?: { id?: string | number } }).user?.id ?? null;
+    assertRequestIdentity(req, true);
     const result = await providerModelsService.getProviderModels(
       provider,
       { bypassCache },
       userId,
       (req as Request & { user?: unknown }).user,
     );
+    assertRequestIdentity(req, false);
     // `revalidating` rides on the response body at the same level as `models`
     // and `cache` (JSON path `body.data.revalidating`). It is `true` only when a
     // stale catalog was served while a background refresh runs; every other path
@@ -1410,12 +1507,14 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
     const sessionId = parseSessionId(req.params.sessionId);
-    assertSessionAccessible(sessionId, readRequesterUserId(req), 'write');
+    const accessFence = captureSessionRequestFence(req, sessionId, 'write');
     const payload = parseChangeActiveModelPayload(req.body);
+    assertSessionRequestFence(req, accessFence, true);
     const result = await providerModelsService.changeActiveModel(provider, {
       ...payload,
       sessionId,
     });
+    assertSessionRequestFence(req, accessFence, false);
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -1446,7 +1545,7 @@ router.post(
     const userId = readRequesterUserId(req);
     // Narrower than 'write' by design (qa-critic حرج 3). A 404 on refusal keeps
     // the non-disclosure contract of every other session route.
-    assertSessionAccessible(sessionId, userId, 'restamp');
+    const accessFence = captureSessionRequestFence(req, sessionId, 'restamp');
 
     if (provider !== 'claude') {
       throw new AppError('Engine re-stamping applies to the Claude body only.', {
@@ -1481,14 +1580,18 @@ router.post(
     const catalogProvider: LLMProvider = engine === OFFICIAL_ENGINE ? 'claude' : engine;
     let known: string[] = [];
     try {
+      assertSessionRequestFence(req, accessFence, true);
       const { models } = await providerModelsService.getProviderModels(
         catalogProvider,
         {},
         userId,
         (req as Request & { user?: unknown }).user,
       );
+      assertSessionRequestFence(req, accessFence, false);
       known = (models?.OPTIONS ?? []).map((o) => o?.value).filter(Boolean) as string[];
-    } catch {
+    } catch (error) {
+      if (error instanceof AppError && (error.code === 'identity_changed'
+          || error.code === 'project_access_changed')) throw error;
       known = [];
     }
     if (known.length > 0 && !known.includes(model)) {
@@ -1533,6 +1636,8 @@ router.post(
       });
     }
 
+    const previousModel = await providerModelsService.getChangedActiveModel('claude', sessionId);
+    assertSessionRequestFence(req, accessFence, true);
     const result = sessionsDb.setSessionEnginePin(sessionId, engine, PIN_SOURCE.USER_SWITCH, {
       intent: true,
     });
@@ -1562,20 +1667,34 @@ router.post(
 
     // The model must move with the engine or the next turn sends an id the new
     // endpoint does not know — the coupling this whole feature exists to enforce.
-    await providerModelsService.changeActiveModel('claude', { model, sessionId });
-
-    auditLogDb.record('engine_restamped', {
-      userId: typeof userId === 'number' ? userId : null,
-      metadata: {
-        sessionId,
-        fromEngine,
-        toEngine: engine,
-        model,
-        turnsExported,
-        acknowledgedExport: acknowledgedExport === true,
-        outcome: result.outcome,
-      },
-    });
+    try {
+      await providerModelsService.changeActiveModel('claude', { model, sessionId });
+      auditLogDb.record('engine_restamped', {
+        userId: typeof userId === 'number' ? userId : null,
+        metadata: {
+          sessionId,
+          fromEngine,
+          toEngine: engine,
+          model,
+          turnsExported,
+          acknowledgedExport: acknowledgedExport === true,
+          outcome: result.outcome,
+        },
+      });
+    } catch (error) {
+      sessionsDb.setSessionEnginePin(
+        sessionId, fromEngine ?? OFFICIAL_ENGINE, PIN_SOURCE.USER_SWITCH, { intent: true },
+      );
+      if (previousModel.changed && previousModel.model) {
+        await providerModelsService.changeActiveModel('claude', {
+          sessionId, model: previousModel.model,
+        });
+      } else {
+        await providerModelsService.clearChangedActiveModel('claude', sessionId);
+      }
+      throw error;
+    }
+    assertSessionRequestFence(req, accessFence, false);
 
     res.json(createApiSuccessResponse({
       sessionId, engine, model, outcome: result.outcome, turnsExported,
@@ -1600,14 +1719,16 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
     const sessionId = parseSessionId(req.params.sessionId);
-    assertSessionAccessible(sessionId, readRequesterUserId(req), 'read');
+    const accessFence = captureSessionRequestFence(req, sessionId, 'read');
 
     // The nassaj-owned, provider-agnostic override store: `changed` is true only
     // when an explicit in-conversation re-pick is persisted (and then `model` is a
     // non-empty string). `supported` reflects whether the session-scoped override
     // flow applies for this provider. This read never throws for a missing entry —
     // it returns `{ changed: false, model: null }`.
+    assertSessionRequestFence(req, accessFence, true);
     const change = await providerModelsService.getChangedActiveModel(provider, sessionId);
+    assertSessionRequestFence(req, accessFence, true);
 
     let model: string;
     let source: 'session-override' | 'provider-current';
@@ -1622,6 +1743,7 @@ router.get(
       // 500. Provider-store vs catalog-default are indistinguishable through this
       // contract, so both are reported as 'provider-current'.
       model = (await providerModelsService.getCurrentActiveModel(provider, sessionId)).model;
+      assertSessionRequestFence(req, accessFence, true);
       source = 'provider-current';
     }
 
@@ -1669,17 +1791,20 @@ router.delete(
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
     const sessionId = parseSessionId(req.params.sessionId);
-    assertSessionAccessible(sessionId, readRequesterUserId(req), 'write');
+    const accessFence = captureSessionRequestFence(req, sessionId, 'write');
 
     // `cleared` reflects whether a stored override actually existed and was
     // removed; when none existed nothing is written (idempotent no-op).
+    assertSessionRequestFence(req, accessFence, true);
     const { cleared } = await providerModelsService.clearChangedActiveModel(provider, sessionId);
+    assertSessionRequestFence(req, accessFence, false);
 
     // The model the NEXT resumed turn will now use — by construction the
     // provider-current value, since no override remains. Every adapter degrades to
     // its catalog DEFAULT rather than throwing, so this is always a non-empty
     // string (never a 500), mirroring the GET route's 'provider-current' branch.
     const model = (await providerModelsService.getCurrentActiveModel(provider, sessionId)).model;
+    assertSessionRequestFence(req, accessFence, false);
 
     res.json(createApiSuccessResponse({
       provider,
@@ -1810,6 +1935,12 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
     const workspacePath = readOptionalQueryString(req.query.workspacePath);
+    // ADR-172 (qa #8, found by the route probe): under enforcement a workspace
+    // inside a project the caller cannot access must not list its skills.
+    if (workspacePath && isProjectMembershipEnforced()
+        && !canAccessProjectPath(workspacePath, readRequesterUserId(req))) {
+      throw new AppError('Project not found', { code: 'PROJECT_NOT_FOUND', statusCode: 404 });
+    }
     const skills = await providerSkillsService.listProviderSkills(provider, {
       workspacePath,
       // Token-sourced only; never read from the request body/query (B-153).
@@ -1901,6 +2032,9 @@ router.get(
   '/:provider/mcp/servers',
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
+    // The retired Gemini MCP provider used to refuse listing itself; since its
+    // registry entry was removed (035fe5fb1) the route keeps that 403 contract.
+    assertGenericMcpProviderEnabled(provider);
     const scope = parseMcpScope(req.query.scope);
     const userId = readAuthenticatedUserId(req);
 
@@ -2112,35 +2246,55 @@ router.post(
     const action = parseBulkSessionAction(req.body);
     const requesterUserId = readRequesterUserId(req);
     const results: BulkMutationResult[] = [];
+    let anyEffectStarted = false;
 
     for (const id of ids) {
       try {
+        const accessFence = captureSessionRequestFence(req, id, 'write');
+        const assertCurrent = (notStarted: boolean) => {
+          if (!notStarted) anyEffectStarted = true;
+          assertSessionRequestFence(req, accessFence, notStarted && !anyEffectStarted);
+        };
         const provider = sessionsDb.getSessionById(id)?.provider;
         let result: unknown;
         if (action === 'archive') {
-          result = await sessionsService.deleteOrArchiveSessionById(id, requesterUserId);
+          result = await sessionsService.deleteOrArchiveSessionById(id, requesterUserId, { assertCurrent });
         } else if (action === 'restore') {
+          assertCurrent(true);
           result = sessionsService.restoreSessionById(id, requesterUserId);
         } else if (action === 'delete_permanently') {
           result = await sessionsService.deleteOrArchiveSessionById(id, requesterUserId, {
             force: true,
             deletedFromDisk: true,
+            assertCurrent,
+            markEffectStarted: () => { anyEffectStarted = true; },
           });
         } else {
           // Close state is stored separately from the session row, but shares
           // the exact write entitlement used by the existing close routes.
           assertSessionAccessible(id, requesterUserId, 'write');
+          assertCurrent(true);
           if (action === 'close') {
             closedSessionsDb.closeSession(id, requesterUserId ?? 0);
+            anyEffectStarted = true;
             result = { sessionId: id, closed: true };
           } else {
             closedSessionsDb.reopenSession(id);
+            anyEffectStarted = true;
             result = { sessionId: id, closed: false };
           }
         }
+        assertCurrent(false);
         notifyChangedSession(id, provider);
         results.push({ id, success: true, result });
       } catch (error) {
+        if (error instanceof AppError && (error.code === 'identity_changed'
+            || error.code === 'project_access_changed')) {
+          if (anyEffectStarted) {
+            throw accessFenceError(error.code, false);
+          }
+          throw error;
+        }
         results.push(bulkFailure(id, error));
       }
     }
@@ -2162,10 +2316,15 @@ router.delete(
     const sessionId = parseSessionId(req.params.sessionId);
     const force = parseOptionalBooleanQuery(req.query.force, 'force') ?? false;
     const deletedFromDisk = parseOptionalBooleanQuery(req.query.deletedFromDisk, 'deletedFromDisk') ?? force;
+    const accessFence = captureSessionRequestFence(req, sessionId, 'write');
+    const assertCurrent = (notStarted: boolean) =>
+      assertSessionRequestFence(req, accessFence, notStarted);
     const result = await sessionsService.deleteOrArchiveSessionById(sessionId, readRequesterUserId(req), {
       force,
       deletedFromDisk,
+      assertCurrent,
     });
+    assertCurrent(false);
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -2174,7 +2333,10 @@ router.post(
   '/sessions/:sessionId/restore',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
+    const accessFence = captureSessionRequestFence(req, sessionId, 'write');
+    assertSessionRequestFence(req, accessFence, true);
     const result = sessionsService.restoreSessionById(sessionId, readRequesterUserId(req));
+    assertSessionRequestFence(req, accessFence, false);
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -2184,7 +2346,10 @@ router.put(
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
     const summary = parseSessionRenameSummary(req.body);
+    const accessFence = captureSessionRequestFence(req, sessionId, 'write');
+    assertSessionRequestFence(req, accessFence, true);
     const result = sessionsService.renameSessionById(sessionId, readRequesterUserId(req), summary);
+    assertSessionRequestFence(req, accessFence, false);
     res.json(createApiSuccessResponse(result));
   }),
 );
@@ -2256,6 +2421,9 @@ router.get(
 );
 
 async function serveSessionMessages(req: Request, res: Response, sessionId: string): Promise<void> {
+    const accessFence = captureSessionRequestFence(req, sessionId, 'read');
+    const assertCurrent = (notStarted: boolean) =>
+      assertSessionRequestFence(req, accessFence, notStarted);
     const limitRaw = readOptionalQueryString(req.query.limit);
     const offsetRaw = readOptionalQueryString(req.query.offset);
     const cursor = readOptionalQueryString(req.query.cursor);
@@ -2303,6 +2471,7 @@ async function serveSessionMessages(req: Request, res: Response, sessionId: stri
     if (sessionsService.usesBoundedHistory(sessionId)) {
       await sessionsService.withHistoryLease(sessionId, readRequesterUserId(req), {
         limit, offset, cursor, payloadMode: (payloadRaw ?? 'full') as HistoryPayloadMode, revision,
+        assertCurrent,
       }, new HistoryHttpSink(res));
       return;
     }
@@ -2312,7 +2481,9 @@ async function serveSessionMessages(req: Request, res: Response, sessionId: stri
       cursor,
       payloadMode: (payloadRaw ?? 'full') as HistoryPayloadMode,
       revision,
+      assertCurrent,
     });
+    assertCurrent(true);
     res.json(result);
 }
 
@@ -2327,19 +2498,71 @@ router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) 
   // req.user (set by authenticateToken guarding this router); null here means no
   // usable identity → zero results.
   const requesterUserId = readRequesterUserId(req);
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
+  assertRequestIdentity(req, true);
 
   let closed = false;
+  let staleCode: 'identity_changed' | 'project_access_changed' | null = null;
   const abortController = new AbortController();
+  const stream = new DeviceBoundSseStream(
+    res,
+    (req as Request & { user?: unknown }).user,
+    () => {
+      closed = true;
+      abortController.abort();
+    },
+  );
+  assertRequestIdentity(req, true);
+  const ensureHeaders = () => {
+    if (res.headersSent) return;
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+  };
+  const accessBySession = new Map<string, WorkspaceTopologyFence>();
+  const distinctAccessFences = new Set<WorkspaceTopologyFence>();
+  const streamAccessCurrent = (): boolean => {
+    if ((req as IdentityFencedRequest).assertCurrentIdentity?.() !== true) {
+      staleCode = 'identity_changed';
+      abortController.abort();
+      return false;
+    }
+    for (const fence of distinctAccessFences) {
+      if (!isWorkspaceTopologyFenceCurrent(fence)) {
+        staleCode = 'project_access_changed';
+        abortController.abort();
+        return false;
+      }
+    }
+    return true;
+  };
+  const authorizeSession = (sessionId: string, projectPath: string | null): boolean => {
+    if ((req as IdentityFencedRequest).assertCurrentIdentity?.() !== true) {
+      staleCode = 'identity_changed'; abortController.abort(); return false;
+    }
+    if (!isProjectMembershipEnforced()) return true;
+    let fence = accessBySession.get(sessionId);
+    if (!fence) {
+      const captured = captureWorkspaceTopologyFence(projectPath ?? '', requesterUserId, {
+        sessionId, consent: 'read',
+      }) ?? undefined;
+      if (!captured) {
+        staleCode = 'project_access_changed'; abortController.abort(); return false;
+      }
+      fence = retainDistinctWorkspaceFence(distinctAccessFences, captured);
+      accessBySession.set(sessionId, fence);
+    }
+    if (!isWorkspaceTopologyFenceCurrent(fence)) {
+      staleCode = 'project_access_changed'; abortController.abort(); return false;
+    }
+    return true;
+  };
   req.on('close', () => {
     closed = true;
     abortController.abort();
+    stream.markClientGone();
   });
 
   try {
@@ -2348,32 +2571,54 @@ router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) 
       limit,
       requesterUserId,
       signal: abortController.signal,
+      authorizeSession,
       onProgress: ({ projectResult, totalMatches, scannedProjects, totalProjects }) => {
         if (closed) {
           return;
         }
+        if (staleCode || !streamAccessCurrent()) return;
+        ensureHeaders();
 
         if (projectResult) {
-          res.write(`event: result\ndata: ${JSON.stringify({ projectResult, totalMatches, scannedProjects, totalProjects })}\n\n`);
+          stream.send({ projectResult, totalMatches, scannedProjects, totalProjects }, 'result');
           return;
         }
 
-        res.write(`event: progress\ndata: ${JSON.stringify({ totalMatches, scannedProjects, totalProjects })}\n\n`);
+        stream.send({ totalMatches, scannedProjects, totalProjects }, 'progress');
       },
     });
 
-    if (!closed) {
-      res.write('event: done\ndata: {}\n\n');
+    if (!staleCode) streamAccessCurrent();
+    if (staleCode) {
+      if (res.headersSent) stream.invalidateAccess(staleCode);
+      else res.status(409).set('Cache-Control', 'no-store').json({
+        error: staleCode === 'identity_changed'
+          ? 'Identity changed during request' : 'Project access changed during request',
+        code: staleCode,
+        notStarted: true,
+      });
+      closed = true;
+    } else if (!closed) {
+      ensureHeaders();
+      stream.send({}, 'done');
     }
   } catch (error) {
     console.error('Error searching conversations:', error);
-    if (!closed) {
-      res.write(`event: error\ndata: ${JSON.stringify({ error: 'Search failed' })}\n\n`);
+    if (!closed && staleCode) {
+      if (res.headersSent) stream.invalidateAccess(staleCode);
+      else res.status(409).set('Cache-Control', 'no-store').json({
+        error: staleCode === 'identity_changed'
+          ? 'Identity changed during request' : 'Project access changed during request',
+        code: staleCode,
+        notStarted: true,
+      });
+      closed = true;
+    } else if (!closed) {
+      ensureHeaders();
+      stream.send({ error: 'Search failed' }, 'error');
     }
   } finally {
-    if (!closed) {
-      res.end();
-    }
+    if (!closed) stream.end();
   }
 }));
 

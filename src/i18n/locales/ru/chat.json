@@ -655,7 +655,23 @@
     "perModel": "По моделям",
     "loading": "Подсчёт…",
     "turnTokens": "tokens",
-    "turnCostUnavailable": "Turn cost unavailable"
+    "turnCostUnavailable": "Turn cost unavailable",
+    "measurementV1": "Прежняя сводка — записанные запросы могут не охватывать весь разговор",
+    "measurementIncomplete": "Данные могут не охватывать весь разговор",
+    "measurementQuarantined": "Измерение проверяется — итоги не подтверждены",
+    "modelCalls": "Вызовы модели: {{count}}",
+    "modelCallUsage": "{{count}} вызовов модели · {{tokens}} единиц обработки",
+    "legacyCodexModelUsage": "Прежняя сводка: {{count}} записанных запросов · {{tokens}} единиц обработки",
+    "rolloutChains": "Участвующие цепочки выполнения: {{count}}",
+    "subagentSpawnAttempts": "Попытки создания субагентов: {{count}}",
+    "resolvedSubagentRollouts": "Учтённые цепочки субагентов: {{count}}",
+    "subagentModelCalls": "Вызовы модели субагентов: {{count}}",
+    "responseTurnDurationLabel": "Время ответа",
+    "totalWorkDuration": "Общее рабочее время (длительности могут пересекаться): {{duration}}"
+  },
+  "activityGap": {
+    "status": "Агент работает — последняя активность {{time}} назад",
+    "ariaLabel": "Агент всё ещё работает, последняя активность была {{time}} назад"
   },
   "activityGap": {
     "status": "Агент работает — последняя активность {{time}} назад",

@@ -1,3 +1,4 @@
+/* eslint-disable boundaries/dependencies -- PTY composition uses dependency-light leaf seams directly. */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,10 +6,16 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
+import { assertRealtimePrincipalCurrent } from '@/modules/account-wallet/index.js';
 import {
   isProjectPathVisibleToUser,
   readRequestUserId,
 } from '@/modules/websocket/services/chat-websocket.service.js';
+import {
+  findOwningProject,
+  isProjectMembershipEnforced,
+  resolveWorkspaceProjectAdmission,
+} from '@/modules/database/repositories/project-access.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { installManagedClaudeTerminalEnv } from '@/services/isolation/managed-claude-terminal-env.js';
@@ -21,13 +28,13 @@ import { resolveCagedLaunch } from '@/services/isolation/provider-cage-wiring.js
 import { buildShellErrorFrame, sanitizeTerminalText } from '@/modules/websocket/services/shell-error-frame.js';
 import type { AuthenticatedWebSocketRequest } from '@/shared/types.js';
 import { parseIncomingJsonObject } from '@/shared/utils.js';
+import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 
 /** Providers with a per-user credential knob in resolveProviderEnv. */
 type IsolationProvider =
   | 'claude'
-  | 'gemini'
   | 'codex'
   | 'cursor'
   | 'agy'
@@ -265,12 +272,63 @@ type PtySessionEntry = {
   buffer: string[];
   timeoutId: NodeJS.Timeout | null;
   projectPath: string;
+  /** Owning registered project resolved at open (realpath-aware), ADR-172 qa م2. */
+  projectId?: string | null;
   sessionId: string | null;
   writerLease: { release(): void };
+  releaseHarnessLaunch?: () => void;
   managedClaudeSelector?: string;
 };
 
+/** Owning project id of a PTY cwd, or null (unregistered / lookup failure). */
+function resolveOwningProjectId(projectPath: string): string | null {
+  try {
+    return findOwningProject(projectPath)?.project_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const ptySessionsMap = new Map<string, PtySessionEntry>();
+
+/**
+ * ADR-172 (qa #6): ends every /shell PTY a user holds in the project (`projectId`
+ * resolved at open, or literally inside `projectPath`) — closes the socket (4404), kills the PTY, revokes its managed
+ * Claude terminal and releases its writer lease, the same teardown the forced
+ * restart path uses. Keys are `${userId}_${projectPath}_...`, so the user part
+ * comes from the JWT-derived key, never client input. Returns PTYs ended.
+ */
+export function terminateShellSessionsForUserInProject(
+  userId: string | number,
+  projectPath: string,
+  projectId: string | null = null,
+): number {
+  const prefix = `${String(userId)}_`;
+  const root = projectPath.replace(/\/+$/, '');
+  let ended = 0;
+  for (const [key, entry] of ptySessionsMap) {
+    // Match on the owning project id stored at open (a PTY opened through a
+    // symlink carries the client's literal path); literal prefix as fallback.
+    const inside = (projectId !== null && entry.projectId === projectId)
+      || entry.projectPath === root || entry.projectPath.startsWith(`${root}/`);
+    if (!key.startsWith(prefix) || !inside) {
+      continue;
+    }
+    ptySessionsMap.delete(key);
+    if (entry.timeoutId) clearTimeout(entry.timeoutId);
+    try { entry.ws?.close(4404, 'Project access revoked'); } catch { /* already closed */ }
+    try { entry.pty.kill(); } catch { /* already exited */ }
+    revokeManagedClaudeTerminal(entry.managedClaudeSelector);
+    entry.writerLease.release();
+    ended += 1;
+  }
+  return ended;
+}
+
+/** Test seam: registers a PTY entry under `key` (never used by production code). */
+export function __registerShellSessionForTests(key: string, entry: PtySessionEntry): void {
+  ptySessionsMap.set(key, entry);
+}
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
 /**
@@ -380,29 +438,6 @@ function buildShellCommand(
       return `codex resume --include-non-interactive "${sessionId}"`;
     }
     return 'codex';
-  }
-
-  if (provider === 'gemini') {
-    const command = initialCommand || 'gemini';
-    let resumeId = sessionId;
-    if (hasSession && sessionId) {
-      try {
-        const existingSession = dependencies.getSessionById(sessionId);
-        if (existingSession && existingSession.cliSessionId) {
-          resumeId = existingSession.cliSessionId;
-          if (!safeSessionIdPattern.test(resumeId)) {
-            resumeId = '';
-          }
-        }
-      } catch (error) {
-        console.error('Failed to get Gemini CLI session ID:', error);
-      }
-    }
-
-    if (hasSession && resumeId) {
-      return `${command} --resume "${resumeId}"`;
-    }
-    return command;
   }
 
   if (provider === 'opencode') {
@@ -614,7 +649,6 @@ function readIsolationProvider(provider: string): IsolationProvider {
   if (
     provider === 'claude'
     || provider === 'codex'
-    || provider === 'gemini'
     || provider === 'cursor'
     || provider === 'opencode'
     || provider === 'hermes'
@@ -679,6 +713,10 @@ export function handleShellConnection(
   const announcedAuthUrls = new Set<string>();
 
   ws.on('message', async (rawMessage) => {
+    if (!assertRealtimePrincipalCurrent(request.user)) {
+      ws.close(4401, 'identity_revoked');
+      return;
+    }
     try { await withLocalUpdateWriterLease('shell-websocket-frame', async () => {
     try {
       const data = parseShellMessage(rawMessage);
@@ -687,7 +725,7 @@ export function handleShellConnection(
       }
 
       if (data.type === 'init') {
-        const projectPath = readString(data.projectPath, process.cwd());
+        let projectPath = readString(data.projectPath, process.cwd());
         const sessionId = readString(data.sessionId) || null;
         const hasSession = readBoolean(data.hasSession);
         const provider = readString(data.provider, 'claude');
@@ -697,6 +735,17 @@ export function handleShellConnection(
           readBoolean(data.isPlainShell) ||
           (!!initialCommand && !hasSession) ||
           provider === 'plain-shell';
+
+        // Gemini history remains readable through its history routes, but the
+        // removed provider must never reach command construction or pty.spawn.
+        if (provider === 'gemini') {
+          ws.send(JSON.stringify({
+            type: 'error',
+            code: 'provider_removed',
+            message: 'This provider is no longer available for new terminal sessions.',
+          }));
+          return;
+        }
 
         urlDetectionBuffer = '';
         announcedAuthUrls.clear();
@@ -825,6 +874,16 @@ export function handleShellConnection(
           return;
         }
 
+        if (isProjectMembershipEnforced()) {
+          const admission = resolveWorkspaceProjectAdmission(projectPath, Number(userId));
+          if (!admission.allowed || !admission.resolvedPath) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Project not found' }));
+            ws.close(4404, 'Project not found');
+            return;
+          }
+          projectPath = admission.resolvedPath;
+        }
+
         const userKey = userId;
         ptySessionKey = `${userKey}_${projectPath}_${sessionId ?? 'default'}${commandSuffix}`;
 
@@ -835,6 +894,7 @@ export function handleShellConnection(
               clearTimeout(oldSession.timeoutId);
             }
             oldSession.pty.kill();
+            oldSession.releaseHarnessLaunch?.();
             revokeManagedClaudeTerminal(oldSession.managedClaudeSelector);
             oldSession.writerLease.release();
             ptySessionsMap.delete(ptySessionKey);
@@ -873,6 +933,7 @@ export function handleShellConnection(
         if (existingSession) {
           // A pre-gate PTY cannot be admitted during a future update drain.
           existingSession.pty.kill();
+          existingSession.releaseHarnessLaunch?.();
           revokeManagedClaudeTerminal(existingSession.managedClaudeSelector);
           ptySessionsMap.delete(ptySessionKey);
         }
@@ -1005,7 +1066,20 @@ export function handleShellConnection(
           // left with no terminal at all, not with the one they had.
           return;
         }
+        let releaseHarnessLaunch: (() => void) | undefined;
         try {
+          // Atomic provider admission: reserve before the actual spawn and keep
+          // the reservation until node-pty reports exit. Plain operator shells
+          // do not execute a governed provider harness.
+          if (!isPlainShell) releaseHarnessLaunch = beginHarnessLaunch(isolationProvider);
+          if (isProjectMembershipEnforced()) {
+            const finalAdmission = resolveWorkspaceProjectAdmission(resolvedProjectPath, Number(userId));
+            if (!finalAdmission.allowed || finalAdmission.resolvedPath !== resolvedProjectPath) {
+              const error = new Error('project membership changed before PTY spawn') as NodeJS.ErrnoException;
+              error.code = 'SESSION_WORKSPACE_FORBIDDEN';
+              throw error;
+            }
+          }
           shellProcess = pty.spawn(ptyLaunch.cmd, ptyLaunch.args, {
           name: 'xterm-256color',
           cols: termCols,
@@ -1030,6 +1104,7 @@ export function handleShellConnection(
           });
           if (broker) bindManagedClaudeTerminal(broker.selector, shellProcess.pid);
         } catch (error) {
+          releaseHarnessLaunch?.();
           revokeManagedClaudeTerminal(broker?.selector);
           writerLease.release();
           throw error;
@@ -1041,8 +1116,10 @@ export function handleShellConnection(
           buffer: [],
           timeoutId: null,
           projectPath,
+          projectId: resolveOwningProjectId(projectPath),
           sessionId,
           writerLease,
+          releaseHarnessLaunch,
           managedClaudeSelector: broker?.selector,
         });
 
@@ -1148,6 +1225,7 @@ export function handleShellConnection(
           }
 
           session?.writerLease.release();
+          session?.releaseHarnessLaunch?.();
           revokeManagedClaudeTerminal(session?.managedClaudeSelector);
 
           ptySessionsMap.delete(ptySessionKey);
@@ -1166,9 +1244,7 @@ export function handleShellConnection(
               ? 'Cursor'
               : provider === 'codex'
                 ? 'Codex'
-                : provider === 'gemini'
-                  ? 'Gemini'
-                  : provider === 'opencode'
+                : provider === 'opencode'
                     ? 'OpenCode'
                     : provider === 'kimi'
                       ? 'Kimi'
@@ -1259,6 +1335,7 @@ export function handleShellConnection(
       }
 
       session.pty.kill();
+      session.releaseHarnessLaunch?.();
       session.writerLease.release();
       revokeManagedClaudeTerminal(session.managedClaudeSelector);
       ptySessionsMap.delete(ptySessionKey as string);

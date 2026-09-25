@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 
 import { resolveAgyExecutablePath } from '@/shared/cli-executable-path.js';
+import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import type { ProviderModelOption, ProviderModelsDefinition } from '@/shared/types.js';
 import { ANTIGRAVITY_FALLBACK_MODELS } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 
@@ -54,8 +55,10 @@ type AgyModelsRunner = () => Promise<string | null>;
 
 const defaultRunner: AgyModelsRunner = () =>
   new Promise((resolve) => {
+    let releaseLaunch: (() => void) | undefined;
     let child;
     try {
+      releaseLaunch = beginHarnessLaunch('antigravity');
       child = spawn(getAgyPath(), ['models'], {
         // stdin MUST be 'ignore' (/dev/null), NEVER a pipe. `agy models` blocks
         // reading stdin to EOF before printing anything, so an open stdin pipe
@@ -75,10 +78,13 @@ const defaultRunner: AgyModelsRunner = () =>
         env: process.env,
       });
     } catch {
+      releaseLaunch?.();
       // Binary missing / not executable — no CLI catalog.
       resolve(null);
       return;
     }
+    child.once('error', releaseLaunch);
+    child.once('close', releaseLaunch);
 
     let stdout = '';
     let truncated = false;

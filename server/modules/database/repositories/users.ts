@@ -8,6 +8,7 @@
  */
 
 import { getConnection } from '@/modules/database/connection.js';
+import { retireProjectSubjectAccess } from '@/modules/database/repositories/project-access.js';
 
 export type UserRole = 'owner' | 'admin' | 'user';
 export type UserStatus = 'active' | 'disabled';
@@ -152,6 +153,33 @@ export const userDb = {
         "SELECT * FROM users WHERE username = ? AND is_active = 1 AND status = 'active'"
       )
       .get(username) as UserRow | undefined;
+  },
+
+  /**
+   * Resolves a local login identifier without exposing whether it exists.
+   * Local accounts historically store a username while invite-bound email lives
+   * on the accepted invite; an ambiguous reused email intentionally resolves to
+   * no account instead of selecting one by row order.
+   */
+  getUserByLoginIdentifier(identifier: string): UserRow | undefined {
+    const normalized = identifier.trim().toLowerCase();
+    const db = getConnection();
+    return db.prepare(`
+      SELECT u.*
+      FROM users u
+      WHERE u.is_active = 1 AND u.status = 'active'
+        AND (
+          lower(u.username) = ?
+          OR u.id = (
+            SELECT CASE WHEN COUNT(DISTINCT accepted_by) = 1 THEN MIN(accepted_by) END
+            FROM invites
+            WHERE accepted_by IS NOT NULL AND email IS NOT NULL
+              AND lower(trim(email)) = ?
+          )
+        )
+      ORDER BY CASE WHEN lower(u.username) = ? THEN 0 ELSE 1 END
+      LIMIT 1
+    `).get(normalized, normalized, normalized) as UserRow | undefined;
   },
 
   /** Replaces the stored password hash (e.g. legacy bcrypt → argon2id rehash). */
@@ -325,6 +353,31 @@ export const userDb = {
       .all() as UserPublicRow[];
   },
 
+  /**
+   * ADR-172 member-candidate search: ACTIVE users whose username contains `query`
+   * (LIKE wildcards escaped), excluding current members and the creator of `projectId`. Returns
+   * only id/username/avatar_url — never email, role or status. Capped by `limit`.
+   */
+  searchMemberCandidates(
+    projectId: string,
+    query: string,
+    limit: number,
+  ): Array<{ id: number; username: string; avatar_url: string | null }> {
+    const pattern = `%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    return getConnection()
+      .prepare(
+        `SELECT id, username, avatar_url FROM users
+         WHERE is_active = 1 AND status = 'active'
+           AND username LIKE ? ESCAPE '\\'
+           AND id NOT IN (SELECT user_id FROM project_members WHERE project_id = ?)
+           AND id NOT IN (SELECT created_by FROM projects
+                          WHERE project_id = ? AND created_by IS NOT NULL)
+         ORDER BY username COLLATE NOCASE ASC
+         LIMIT ?`
+      )
+      .all(pattern, projectId, projectId, limit) as Array<{ id: number; username: string; avatar_url: string | null }>;
+  },
+
   /** Stores the user's preferred git name and email. */
   updateGitConfig(userId: number, gitName: string, gitEmail: string): void {
     const db = getConnection();
@@ -387,9 +440,49 @@ export const userDb = {
    */
   deleteUser(userId: number): boolean {
     const db = getConnection();
-    const runDelete = db.transaction((id: number): boolean => {
+    const runDelete = db.transaction((id: number): { deleted: boolean; projectIds: string[] } => {
+      const affectedProjects = db.prepare(`SELECT project_id FROM projects WHERE created_by = ?
+        UNION SELECT project_id FROM project_members WHERE user_id = ?`)
+        .all(id, id) as Array<{ project_id: string }>;
+      // A wallet may retain this user in an inactive slot. Detach those rows
+      // inside the same deletion transaction so the RESTRICT foreign key never
+      // turns account deletion into a partial operation. Surviving devices keep
+      // their other eligible slots and receive a new generation.
+      db.prepare(`
+        UPDATE device_sessions SET active_slot_id = NULL
+        WHERE active_slot_id IN (
+          SELECT id FROM device_account_slots WHERE user_id = ?
+        )
+      `).run(id);
+      db.prepare(`
+        UPDATE device_sessions SET generation = generation + 1
+        WHERE id IN (
+          SELECT DISTINCT device_session_id FROM device_account_slots WHERE user_id = ?
+        )
+      `).run(id);
+      db.prepare(`
+        UPDATE device_account_slots SET revoked_at = ?
+        WHERE user_id = ? AND revoked_at IS NULL
+      `).run(Date.now(), id);
+      db.prepare(`
+        UPDATE device_sessions
+        SET active_slot_id = (
+          SELECT s.id FROM device_account_slots s
+          JOIN users u ON u.id = s.user_id
+          WHERE s.device_session_id = device_sessions.id AND s.revoked_at IS NULL
+            AND u.is_active = 1 AND u.status = 'active' AND u.must_change_password = 0
+            AND s.password_stamp = u.password_changed_at
+          ORDER BY s.last_used_at DESC, s.id ASC LIMIT 1
+        )
+        WHERE active_slot_id IS NULL AND revoked_at IS NULL
+          AND id IN (
+            SELECT DISTINCT device_session_id FROM device_account_slots WHERE user_id = ?
+          )
+      `).run(id);
+      db.prepare('DELETE FROM device_account_slots WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM webauthn_credentials WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM project_members WHERE user_id = ?').run(id);
+      db.prepare('UPDATE projects SET created_by = NULL WHERE created_by = ?').run(id);
       db.prepare('DELETE FROM starred_sessions WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM user_credentials WHERE user_id = ?').run(id);
@@ -402,8 +495,24 @@ export const userDb = {
       db.prepare('UPDATE invites SET accepted_by = NULL WHERE accepted_by = ?').run(id);
       db.prepare('UPDATE audit_log SET user_id = NULL WHERE user_id = ?').run(id);
       const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
-      return result.changes > 0;
+      return { deleted: result.changes > 0, projectIds: affectedProjects.map((row) => row.project_id) };
     });
-    return runDelete(userId);
+    const outcome = runDelete(userId);
+    if (outcome.deleted) {
+      for (const projectId of outcome.projectIds) retireProjectSubjectAccess(projectId, userId);
+    }
+    return outcome.deleted;
+  },
+
+  /** Exact active-user generation check for immutable request principals. */
+  isAuthorizationPrincipalCurrent(userId: number, authorizationGeneration: number): boolean {
+    if (!Number.isSafeInteger(userId) || userId <= 0
+      || !Number.isSafeInteger(authorizationGeneration) || authorizationGeneration <= 0) {
+      return false;
+    }
+    const row = getConnection().prepare(`SELECT 1 FROM users
+      WHERE id = ? AND authorization_generation = ?
+        AND is_active = 1 AND status = 'active'`).get(userId, authorizationGeneration);
+    return row !== undefined;
   },
 };

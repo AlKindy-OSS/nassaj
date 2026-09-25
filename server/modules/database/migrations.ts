@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { migrateLocalModelServers } from './local-model-servers.migration.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -7,6 +6,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import type { Database } from 'better-sqlite3';
 
 import { migratePermissionExecution } from '@/modules/database/permission-execution.migration.js';
+import { createUsageStatisticsV3Fresh } from '@/modules/database/usage-statistics-v3.migration.js';
 import {
   API_KEY_DIGEST_PATTERN,
   API_KEY_PREFIX_LENGTH,
@@ -64,6 +64,8 @@ import {
   USAGE_SOURCE_LINKS_TABLE_SCHEMA_SQL,
   WEBAUTHN_CREDENTIALS_TABLE_SCHEMA_SQL,
 } from '@/modules/database/schema.js';
+
+import { migrateLocalModelServers } from './local-model-servers.migration.js';
 
 /** Additive durable queue for scheduled conversation messages. */
 export const migrateScheduledMessages = (db: Database): void => {
@@ -2135,6 +2137,32 @@ const migrateUsageIngestionV2 = (db: Database): void => {
   db.exec('CREATE INDEX IF NOT EXISTS idx_conversation_usage_state ON conversation_usage_snapshots(snapshot_status, updated_at)');
 };
 
+/** ADR-169 v3 is additive and deliberately has no backfill from v1/v2. */
+const migrateUsageStatisticsV3 = (db: Database): void => {
+  createUsageStatisticsV3Fresh(db);
+  const runColumns = getTableInfo(db, 'usage_statistics_runs').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'usage_statistics_runs', runColumns, 'authority_token', 'INTEGER NOT NULL DEFAULT 0 CHECK (authority_token >= 0)');
+  addColumnToTableIfNotExists(db, 'usage_statistics_runs', runColumns, 'fact_count', 'INTEGER NOT NULL DEFAULT 0 CHECK (fact_count >= 0 AND fact_count <= 500000)');
+  addColumnToTableIfNotExists(db, 'usage_statistics_runs', runColumns, 'source_bytes', 'INTEGER NOT NULL DEFAULT 0 CHECK (source_bytes >= 0 AND source_bytes <= 268435456)');
+  addColumnToTableIfNotExists(db, 'usage_statistics_runs', runColumns, 'source_count', 'INTEGER NOT NULL DEFAULT 0 CHECK (source_count >= 0 AND source_count <= 256)');
+  addColumnToTableIfNotExists(db, 'usage_statistics_runs', runColumns, 'lineage_count', 'INTEGER NOT NULL DEFAULT 0 CHECK (lineage_count >= 0 AND lineage_count <= 4096)');
+  addColumnToTableIfNotExists(db, 'usage_statistics_runs', runColumns, 'work_duration_ms', 'INTEGER CHECK (work_duration_ms IS NULL OR (work_duration_ms >= 0 AND work_duration_ms <= 9007199254740991))');
+  const canonicalRunColumns = getTableInfo(db, 'usage_v3_canonical_runs').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'failure_code', 'TEXT CHECK (failure_code IS NULL OR length(failure_code) BETWEEN 1 AND 128)');
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'metrics_fingerprint', "TEXT NOT NULL DEFAULT '' CHECK (length(metrics_fingerprint) <= 512)");
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'pricing_version', "TEXT NOT NULL DEFAULT '' CHECK (length(pricing_version) <= 256)");
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'envelope_json', "TEXT NOT NULL DEFAULT '{}' CHECK (length(CAST(envelope_json AS BLOB)) <= 4096)");
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'work_duration_ms', 'INTEGER CHECK (work_duration_ms IS NULL OR (work_duration_ms >= 0 AND work_duration_ms <= 9007199254740991))');
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'fact_count', 'INTEGER NOT NULL DEFAULT 0 CHECK (fact_count BETWEEN 0 AND 500000)');
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'fact_bytes', 'INTEGER NOT NULL DEFAULT 0 CHECK (fact_bytes BETWEEN 0 AND 268435456)');
+  addColumnToTableIfNotExists(db, 'usage_v3_canonical_runs', canonicalRunColumns, 'lineage_count', 'INTEGER NOT NULL DEFAULT 0 CHECK (lineage_count BETWEEN 0 AND 512)');
+  const receiptColumns = getTableInfo(db, 'usage_v3_preflight_receipts').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'usage_v3_preflight_receipts', receiptColumns, 'created_at_ms', 'INTEGER NOT NULL DEFAULT 0 CHECK (created_at_ms >= 0)');
+  addColumnToTableIfNotExists(db, 'usage_v3_preflight_receipts', receiptColumns, 'failure_code', 'TEXT CHECK (failure_code IS NULL OR length(failure_code) BETWEEN 1 AND 128)');
+  addColumnToTableIfNotExists(db, 'usage_v3_preflight_receipts', receiptColumns, 'accounted_io_bytes', 'INTEGER NOT NULL DEFAULT 0 CHECK (accounted_io_bytes BETWEEN 0 AND 268435456)');
+  addColumnToTableIfNotExists(db, 'usage_v3_preflight_receipts', receiptColumns, 'io_budget_reserved', 'INTEGER NOT NULL DEFAULT 0 CHECK (io_budget_reserved IN (0, 1))');
+};
+
 /** Durable response timing sidecar (ADR-126).  No historical backfill: a
  * transcript does not prove runner start/completion boundaries. */
 export const migrateResponseTurnMetrics = (db: Database): void => {
@@ -2888,6 +2916,7 @@ export const runMigrations = (db: Database) => {
     // is free; kept next to the other presentation-layer tables.
     migrateProjectCostLedger(db);
     migrateUsageIngestionV2(db);
+    migrateUsageStatisticsV3(db);
     migrateResponseTurnMetrics(db);
     migrateTurnResourceLeases(db);
 

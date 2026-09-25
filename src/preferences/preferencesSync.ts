@@ -38,7 +38,8 @@
  * Sync starts working automatically once the route responds after restart.
  */
 
-import { api } from '../utils/api';
+import { api, authenticatedFetch, hasAuthenticatedSession } from '../utils/api';
+import { identityRequestSignal } from '../components/auth/accountIdentityBarrier';
 
 /* ─────────────────────────── Registry ─────────────────────────── */
 
@@ -134,6 +135,23 @@ let routeUnavailable = false;
 // Suppress the write mirror while hydration is applying server values, so the
 // resulting localStorage writes are not echoed straight back to the server.
 let applyingFromServer = false;
+let authenticatedIdentity = false;
+let identityEpoch = 0;
+let preferenceWritesReady = true;
+
+/** Mark whether AuthContext has verified an account identity in this tab. */
+export function setPreferenceIdentityAuthenticated(authenticated: boolean): void {
+  if (!authenticated) {
+    preferenceWritesReady = false;
+    neutralizePreferenceWork();
+    neutralizeSyncedPreferences();
+  }
+  if (authenticatedIdentity === authenticated) return;
+  authenticatedIdentity = authenticated;
+  identityEpoch += 1;
+}
+
+const hasPreferenceIdentity = (): boolean => authenticatedIdentity || hasAuthenticatedSession();
 
 export function markRouteUnavailable(): void {
   routeUnavailable = true;
@@ -190,6 +208,33 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = 0;
 const RETRY_BASE_MS = 2_000;
 const RETRY_MAX_MS = 60_000;
+
+function neutralizePreferenceWork(): void {
+  pendingWrites.clear();
+  if (flushTimer !== null) clearTimeout(flushTimer);
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  flushTimer = null;
+  retryTimer = null;
+  retryDelay = 0;
+}
+
+/** Remove the previous account's values and tell mounted owners to use defaults. */
+function neutralizeSyncedPreferences(): void {
+  if (!hasStorage) return;
+  applyingFromServer = true;
+  try {
+    for (const storageKey of SYNCED_STORAGE_KEYS) localStorage.removeItem(storageKey);
+  } finally {
+    applyingFromServer = false;
+  }
+  if (!hasWindow) return;
+  for (const storageKey of SYNCED_STORAGE_KEYS) {
+    window.dispatchEvent(new CustomEvent<PreferenceApplyDetail>(PREFERENCE_APPLY_EVENT, {
+      detail: { storageKey, rawValue: null },
+    }));
+    if (storageKey.startsWith('codeEditor')) window.dispatchEvent(new Event('codeEditorSettingsChanged'));
+  }
+}
 
 /** يعيد دفعةً فاشلة إلى الطابور دون أن تطمس كتابةً محلية أحدث منها. */
 const requeue = (batch: Array<[string, unknown]>): void => {
@@ -255,7 +300,7 @@ async function flushPendingWrites(): Promise<void> {
   if (inFlight || pendingWrites.size === 0) {
     return; // طلب جارٍ: الذيل أدناه يعيد الإفراغ عند انتهائه.
   }
-  if (!getAuthToken()) {
+  if (!hasPreferenceIdentity()) {
     // Not signed in (or signed out mid-debounce): drop the batch. Local values
     // remain in localStorage; they will seed/sync on the next authenticated load.
     pendingWrites.clear();
@@ -263,11 +308,13 @@ async function flushPendingWrites(): Promise<void> {
   }
 
   const batch = [...pendingWrites];
+  const batchEpoch = identityEpoch;
   pendingWrites.clear();
   inFlight = batch;
 
   try {
     const response = await api.put('/settings/ui-preferences', Object.fromEntries(batch));
+    if (batchEpoch !== identityEpoch) return;
     if (response.ok) {
       retryDelay = 0;
     } else if (isRouteUnavailable(response.status)) {
@@ -278,7 +325,9 @@ async function flushPendingWrites(): Promise<void> {
       requeue(batch);
       scheduleRetry();
     }
-  } catch {
+  } catch (error) {
+    if (batchEpoch !== identityEpoch) return;
+    if (error instanceof DOMException && error.name === 'AbortError') return;
     // انقطاع شبكة أو إعادة تشغيل الخادم: يُعاد لا يُبتلع.
     requeue(batch);
     scheduleRetry();
@@ -290,17 +339,6 @@ async function flushPendingWrites(): Promise<void> {
     scheduleFlush();
   }
 }
-
-const getAuthToken = (): string | null => {
-  if (!hasStorage) {
-    return null;
-  }
-  try {
-    return localStorage.getItem('auth-token');
-  } catch {
-    return null;
-  }
-};
 
 /**
  * Flush whatever is pending immediately, with a request that survives page
@@ -322,23 +360,24 @@ export function flushPendingWritesNow(): void {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  const token = getAuthToken();
-  if (!token) {
+  if (!hasPreferenceIdentity()) {
     pendingWrites.clear();
     return;
   }
 
   const batch = [...pendingWrites];
+  const batchEpoch = identityEpoch;
   pendingWrites.clear();
 
   try {
-    void fetch('/api/settings/ui-preferences', {
+    void authenticatedFetch('/api/settings/ui-preferences', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(Object.fromEntries(batch)),
       keepalive: true,
+      signal: identityRequestSignal(),
     })
       .then((response) => {
+        if (batchEpoch !== identityEpoch) return;
         // الصفحة قد تبقى حيّة (تبديل تطبيق على الجوال لا إغلاق): فشلٌ هنا يعود
         // إلى الطابور ليُرسَل عند العودة، لا يضيع.
         if (!response.ok) {
@@ -346,11 +385,14 @@ export function flushPendingWritesNow(): void {
           scheduleRetry();
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (batchEpoch !== identityEpoch) return;
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         requeue(batch);
         scheduleRetry();
       });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return;
     /* fetch unavailable (tests / SSR): keep the batch for the next attempt */
     requeue(batch);
   }
@@ -361,7 +403,7 @@ export function flushPendingWritesNow(): void {
  * from removeItem. Safe to call when not signed in (flush drops the batch).
  */
 function queueMirror(storageKey: string, rawValue: string | null): void {
-  if (applyingFromServer || routeUnavailable) {
+  if (applyingFromServer || routeUnavailable || !preferenceWritesReady) {
     return;
   }
   const entry = REGISTRY.get(storageKey);
@@ -543,25 +585,31 @@ export function collectLocalPreferences(): Record<string, unknown> {
 export async function hydratePreferencesFromServer(): Promise<
   { status: 'applied' | 'seeded' | 'unavailable' | 'skipped' }
 > {
-  if (routeUnavailable || !getAuthToken()) {
+  if (routeUnavailable || !hasPreferenceIdentity()) {
     return { status: 'skipped' };
   }
 
   let payload: { preferences?: Record<string, unknown> } | null = null;
+  const hydrationEpoch = identityEpoch;
+  const finishHydration = <T extends { status: string }>(result: T): T => {
+    if (hydrationEpoch === identityEpoch && authenticatedIdentity) preferenceWritesReady = true;
+    return result;
+  };
   try {
     const response = await api.get('/settings/ui-preferences');
     if (!response.ok) {
       if (isRouteUnavailable(response.status)) {
         markRouteUnavailable();
       }
-      return { status: 'unavailable' };
+      return finishHydration({ status: 'unavailable' as const });
     }
     payload = (await response.json()) as { preferences?: Record<string, unknown> };
+    if (hydrationEpoch !== identityEpoch) return { status: 'skipped' };
   } catch {
     // عطل شبكة عابر عند الإقلاع (إعادة تشغيل الخادم، نفق متذبذب) لا يُعطّل
     // مرآة الكتابة لبقية عمر التبويب — وإلا صار كل تغيير بعده محلياً فقط،
     // فيُمحى عند أول ترطيب لاحق. الإسقاط الدائم لـ404/405 وحدها (B-444).
-    return { status: 'unavailable' };
+    return finishHydration({ status: 'unavailable' as const });
   }
 
   const preferences = payload?.preferences;
@@ -569,26 +617,27 @@ export async function hydratePreferencesFromServer(): Promise<
 
   if (isObject && Object.keys(preferences).length > 0) {
     applyServerPreferences(preferences);
-    return { status: 'applied' };
+    return finishHydration({ status: 'applied' as const });
   }
 
   // Empty {} → one-time seed from this device's current values.
   const local = collectLocalPreferences();
   if (Object.keys(local).length === 0) {
-    return { status: 'skipped' }; // Brand-new browser: nothing to seed → defaults.
+    return finishHydration({ status: 'skipped' as const }); // Brand-new browser: nothing to seed → defaults.
   }
 
   try {
     const response = await api.put('/settings/ui-preferences', local);
+    if (hydrationEpoch !== identityEpoch) return { status: 'skipped' };
     if (!response.ok && isRouteUnavailable(response.status)) {
       markRouteUnavailable();
-      return { status: 'unavailable' };
+      return finishHydration({ status: 'unavailable' as const });
     }
   } catch {
     // كما في مسار الـGET: العابر لا يُسقط المرآة (B-444).
-    return { status: 'unavailable' };
+    return finishHydration({ status: 'unavailable' as const });
   }
-  return { status: 'seeded' };
+  return finishHydration({ status: 'seeded' as const });
 }
 
 /* ─────────────────────────── Owner subscription helper ─────────────────────────── */
@@ -619,6 +668,9 @@ export function onApplyServerPreference(
 export function __resetPreferenceSyncForTests(): void {
   routeUnavailable = false;
   applyingFromServer = false;
+  authenticatedIdentity = false;
+  identityEpoch += 1;
+  preferenceWritesReady = true;
   // Each test installs fresh window/localStorage stubs; the patch closes over
   // the previous ones, so the mirror must be re-installable.
   writeMirrorInstalled = false;
@@ -638,4 +690,10 @@ export function __resetPreferenceSyncForTests(): void {
 /** Read-only view of the synced key list (for tests / diagnostics). */
 export function getSyncedStorageKeys(): readonly string[] {
   return SYNCED_STORAGE_KEYS;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:identity-changing', () => {
+    setPreferenceIdentityAuthenticated(false);
+  });
 }

@@ -29,7 +29,7 @@ import { api } from '../../../../utils/api';
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
 import type { ProjectToolbarProps, SessionWithProvider } from '../../types/types';
 import type { BulkSelectionKind } from '../../hooks/useSidebarController';
-import { ProjectParticipantsSummary } from '../../../participants';
+import { ManageProjectMembersButton, ProjectParticipantsSummary } from '../../../participants';
 import { announceContextMenuOpen, useDismissableContextMenu } from '../../hooks/useDismissableContextMenu';
 import { useOptionalAuth } from '../../../../contexts/AuthContext';
 import { getAllSessions } from '../../utils/utils';
@@ -196,6 +196,8 @@ export default function SidebarProjectItem({
      بحساب واحد لا أحد يُنسب إليه شيء، فيبقى العدّ النصّي وتختفي الصور. */
   const auth = useOptionalAuth();
   const showParticipantAvatars = Boolean(auth?.isMultiUser);
+  const currentUserId = typeof auth?.user?.id === 'number' ? auth.user.id : null;
+  const canOpenProjectMembers = project.canAccess === true;
   // Busy dot: ids of the project's loaded sessions, matched against the live
   // process-state store (see ProjectBusyDot).
   const sessionIds = sessions.map((session) => session.id);
@@ -734,19 +736,22 @@ export default function SidebarProjectItem({
           onProjectToolbarPresence={isSelected ? onProjectToolbarPresence : undefined}
           contentDirection={i18n.dir()}
           participantsSummary={isExpanded && showParticipantAvatars ? (
-            <ProjectParticipantsSummary
-              projectId={project.projectId}
-              loadedSessions={getAllSessions(project)}
-              locale={i18n.language}
-              t={t}
-              active={participantsActive}
-              showAvatars={showParticipantAvatars}
-              compact
-              maxAvatars={2}
-              // تبقى الوجوه عند طرف شريط الأدوات المقابل لزر الجلسة في RTL؛
-              // ذلك يمنع طول «جلسة جديدة» من دفعها بين الزرّ والنص.
-              className="mt-0 min-w-0 justify-end"
-            />
+            <span className="flex min-w-0 items-center gap-1">
+              <ProjectParticipantsSummary
+                projectId={project.projectId}
+                loadedSessions={getAllSessions(project)}
+                locale={i18n.language}
+                t={t}
+                active={participantsActive}
+                showAvatars={showParticipantAvatars}
+                compact
+                maxAvatars={2}
+                className="mt-0 min-w-0 justify-end"
+              />
+              {canOpenProjectMembers && (
+                <ManageProjectMembersButton projectId={project.projectId} t={t} currentUserId={currentUserId} />
+              )}
+            </span>
           ) : null}
           project={project}
           isExpanded={isExpanded}

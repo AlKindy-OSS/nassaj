@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import Database from 'better-sqlite3';
 import crossSpawn from 'cross-spawn';
 
+import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { GLM_CARRIER_MODELS } from '@/modules/providers/shared/vendor/vendor-config.js';
 import { hasRunnableLocalServers } from '@/services/isolation/local-model-config.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
@@ -427,11 +428,20 @@ export const parseOpenCodeSessionModelValue = (rawModel: unknown): string | null
 };
 
 const runOpenCodeModelsCommand = (): Promise<string> => new Promise((resolve, reject) => {
+  const releaseLaunch = beginHarnessLaunch('opencode');
   // OC-06: OPENCODE_PATH knob → ~/.opencode/bin/opencode → PATH fallback.
-  const openCodeProcess = spawnFunction(resolveOpenCodeBinaryPath(), ['models'], {
-    cwd: process.cwd(),
-    env: { ...process.env },
-  });
+  let openCodeProcess;
+  try {
+    openCodeProcess = spawnFunction(resolveOpenCodeBinaryPath(), ['models'], {
+      cwd: process.cwd(), env: { ...process.env },
+    });
+  } catch (error) {
+    releaseLaunch();
+    reject(error);
+    return;
+  }
+  openCodeProcess.once('error', releaseLaunch);
+  openCodeProcess.once('close', releaseLaunch);
 
   let stdout = '';
   let stderr = '';

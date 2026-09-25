@@ -8,12 +8,33 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { readPreparedLocalRecoveryCandidate } from './local-source-recovery-candidate.mjs';
 import { hashTree } from './lib/source-update-tree-identity.mjs';
-import { readBootstrapPrivateFile, readBootstrapPinnedFile, verifyBootstrapJournalBinding } from './lib/local-source-bootstrap-ticket.mjs';
+import { readBootstrapPrivateFile, readBootstrapPinnedFile, validateBootstrapApprovalChain, verifyBootstrapJournalBinding,
+    verifyBootstrapTicket } from './lib/local-source-bootstrap-ticket.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error(`local_recovery_operator_${code}`); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const require = createRequire(import.meta.url);
+
+/** Bind separately pinned authority/config bytes to a retained record; this never creates an approval or executes an effect. */
+export function bindBootstrapExecutionAuthority(record, { proposalEnvPath, reviewReference, approvalReference, ownerPrincipal, clock }) {
+    const ticket = record?.bootstrap?.ticket;
+    if (!ticket || !path.isAbsolute(proposalEnvPath || '') || fs.realpathSync(proposalEnvPath) !== proposalEnvPath
+        || !reviewReference || !approvalReference || !record.bootstrap.candidateManifestReference) fail('bootstrap_execution_input');
+    const proposal = readBootstrapPinnedFile(proposalEnvPath, ticket.material.mode.proposalEnvSha256);
+    const reference = (value, label) => {
+        if (Object.keys(value).sort().join(',') !== 'file,sha256' || !path.isAbsolute(value.file)) fail(`bootstrap_${label}_reference`);
+        return JSON.parse(readBootstrapPinnedFile(value.file, value.sha256));
+    };
+    const review = reference(reviewReference, 'review'), receipt = reference(approvalReference, 'approval');
+    reference(record.bootstrap.candidateManifestReference, 'candidate_manifest');
+    if (record.bootstrap.candidateManifestReference.sha256 !== ticket.material.event.manifestSha256) fail('bootstrap_candidate_manifest_binding');
+    if (approvalReference.sha256 !== ticket.material.approval.receiptSha256) fail('bootstrap_approval_binding');
+    verifyBootstrapTicket(ticket, ticket.material, clock);
+    validateBootstrapApprovalChain(ticket, review, receipt, ownerPrincipal, clock);
+    return { ...record, bootstrap: { ...record.bootstrap, proposalEnvBase64: proposal.toString('base64'),
+        reviewReference: { ...reviewReference }, approvalReference: { ...approvalReference }, ownerPrincipal: { ...ownerPrincipal } } };
+}
 
 function bootstrapCompletionFiles(root, packet) {
     const binding = packet.bootstrapCompletion;

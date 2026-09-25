@@ -98,6 +98,7 @@ before(async () => {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: TestUser | null }).user = currentUser;
+    (req as unknown as { assertCurrentIdentity: () => boolean }).assertCurrentIdentity = () => true;
     next();
   });
   app.use('/api/providers', providerRouter);

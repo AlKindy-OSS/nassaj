@@ -36,6 +36,7 @@ import { resolveCliExecutablePath } from './shared/cli-executable-path.js';
 import { checkCwdExists, buildCwdMissingPayload } from './shared/cwd-check.js';
 import { mapSpawnError } from './shared/spawn-error.js';
 import { beginProviderRun } from './services/provider-run-presence.js';
+import { beginHarnessLaunch, refuseSpawnIfHarnessUpdating } from './modules/providers/harness-update/spawn-admission.js';
 import { readHermesRuntimeConfig } from './modules/providers/list/hermes/hermes-runtime.js';
 import {
   appendVendorTranscriptTurn,
@@ -191,6 +192,10 @@ function mapHermesStderrToFriendlyMessage(raw) {
 }
 
 async function spawnHermes(command, options = {}, ws) {
+  // T-1749/ADR-159: refuse a new spawn while hermes is mid-update. hermes is
+  // managed-external (never leased today), so this is a no-op guard kept for
+  // parity/future-proofing across every spawn site.
+  if (refuseSpawnIfHarnessUpdating('hermes', ws, { sessionId: options.sessionId, clientMsgId: options.clientMsgId })) return;
   // Mirror opencode B-31: verify the project directory exists before spawning.
   const cwdToCheck = options.cwd || options.projectPath;
   if (cwdToCheck) {
@@ -251,7 +256,10 @@ async function spawnHermes(command, options = {}, ws) {
     // contract).
     let transcriptChain = Promise.resolve();
     const queueTranscript = (write) => {
-      transcriptChain = transcriptChain.then(write).catch(() => {});
+      transcriptChain = transcriptChain.then(() => {
+        if (ws?.isRunOutputRevoked?.()) return undefined;
+        return write();
+      }).catch(() => {});
     };
     let hermesProcess = null;
     // B-395: assigned once the child is spawned (below); notifyTerminalState can
@@ -374,7 +382,7 @@ async function spawnHermes(command, options = {}, ws) {
     // coordinator id stamp attributes the assistant text to the JWT-sourced spawner
     // so viewers/mirrors render the author correctly (B-MU-UX-FIX-ASSISTANT-AUTHOR).
     const emitLine = (line) => {
-      if (!line || !line.trim()) {
+      if (!line || !line.trim() || ws?.isRunOutputRevoked?.()) {
         return;
       }
       turnTimer.markModelActivity();
@@ -458,15 +466,15 @@ async function spawnHermes(command, options = {}, ws) {
       // hermes spawns tool children that would otherwise outlive the parent and
       // keep a timed-out turn alive. stdout/stderr stay piped; `detached` does
       // not detach stdio.
-      hermesProcess = spawnFunction(hermesLaunch.cmd, hermesLaunch.args, {
-        cwd: workingDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true,
-        // Isolation seam (ADR-014): `hermes` has its own case in
-        // resolve-provider-env's switch and the child receives the member's
-        // isolated home (auth.json, config.yaml, state.db all resolve there).
-        env: hermesEnv,
-      });
+      const releaseHarnessLaunch = beginHarnessLaunch('hermes');
+      try {
+        hermesProcess = spawnFunction(hermesLaunch.cmd, hermesLaunch.args, {
+          cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'], detached: true, env: hermesEnv,
+        });
+      } catch (error) {
+        releaseHarnessLaunch();
+        throw error;
+      }
 
       activeHermesProcesses.set(processKey, hermesProcess);
       hermesProcess.sessionId = processKey;
@@ -480,6 +488,7 @@ async function spawnHermes(command, options = {}, ws) {
         sessionId: capturedSessionId || processKey,
         projectPath: workingDir,
         pid: hermesProcess.pid,
+        launchReservation: releaseHarnessLaunch,
       });
       // Re-key the active map to the real session id so abort/check-status from the
       // client (which carry the UUID) match the live process.
@@ -589,7 +598,7 @@ async function spawnHermes(command, options = {}, ws) {
         // Flush any trailing partial line, then close the stream BEFORE complete so
         // the converter finalises the streaming assistant bubble (stream_end is a
         // control event) ahead of the terminal `complete`.
-        if (stdoutLineBuffer.trim()) {
+        if (stdoutLineBuffer.trim() && !ws?.isRunOutputRevoked?.()) {
           emitLine(stdoutLineBuffer.trim());
           stdoutLineBuffer = '';
         }
@@ -602,7 +611,7 @@ async function spawnHermes(command, options = {}, ws) {
         // as "the assistant never answered".
         const sawAssistantOutput = assistantChunks.length > 0;
         let assistantMessageId = null;
-        if (assistantChunks.length > 0) {
+        if (assistantChunks.length > 0 && !ws?.isRunOutputRevoked?.()) {
           const finalText = assistantChunks.join('\n');
           queueTranscript(async () => {
             assistantMessageId = await appendVendorTranscriptTurn(
@@ -612,6 +621,7 @@ async function spawnHermes(command, options = {}, ws) {
           });
           assistantChunks.length = 0;
         }
+        if (ws?.isRunOutputRevoked?.()) assistantChunks.length = 0;
         await transcriptChain;
 
         ws.send(createNormalizedMessage({

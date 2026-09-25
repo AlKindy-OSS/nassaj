@@ -14,6 +14,7 @@ import {
 import { useTerminalTheme } from '../../shell/hooks/useTerminalTheme';
 import { enableXtermArabic, ensureXtermFocusStyles } from '../../shell/utils/terminalStyles';
 import { copyTextToClipboard } from '../../../utils/clipboard';
+import { isIdentityRevocationClose, reconcileRevokedIdentity } from '../../auth/accountIdentityBarrier';
 import { getTerminalWebSocketUrl, parseTerminalMessage, sendTerminalMessage } from '../utils/socket';
 import {
   MAX_RECONNECT_ATTEMPTS,
@@ -352,6 +353,13 @@ export function useTerminalConnection({
         }
         wsRef.current = null;
         setInputEnabled(false);
+        if (isIdentityRevocationClose(event.code)) {
+          clearReconnectTimer();
+          reconnectAttemptsRef.current = 0;
+          setState('idle');
+          reconcileRevokedIdentity();
+          return;
+        }
 
         // Route by close code. 4409/4404/4403/1001 are final (no auto-loop);
         // any abnormal drop (1006 / keepalive timeout / transient network) is
@@ -422,8 +430,24 @@ export function useTerminalConnection({
 
     openSocket();
 
+    const closeForIdentityChange = () => {
+      clearReconnectTimer();
+      reconnectAttemptsRef.current = 0;
+      closeSocket();
+      setInputEnabled(false);
+      setState('idle');
+    };
+    const resumeAfterIdentityChange = (event: Event) => {
+      const phase = (event as CustomEvent<{ phase?: string }>).detail?.phase;
+      if (phase === 'stable') openSocket();
+    };
+    window.addEventListener('auth:identity-changing', closeForIdentityChange);
+    window.addEventListener('auth:identity-barrier', resumeAfterIdentityChange);
+
     const container = terminalContainerRef.current;
     return () => {
+      window.removeEventListener('auth:identity-changing', closeForIdentityChange);
+      window.removeEventListener('auth:identity-barrier', resumeAfterIdentityChange);
       container?.removeEventListener('copy', handleTerminalCopy);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       resizeObserver.disconnect();

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { getConnection, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { getConnection, projectsDb, rotateProjectStructureForPath, sessionsDb } from '@/modules/database/index.js';
 import { purgeProjectLogoFiles } from '@/modules/projects/services/project-logo.service.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -80,7 +80,7 @@ function deleteProjectRowsAtomically(projectId: string, projectPath: string): vo
     ).map((sessionRow) => sessionRow.session_id);
 
     sessionsDb.deleteSessionsByProjectPath(projectPath);
-    projectsDb.deleteProjectById(projectId);
+    projectsDb.deleteProjectById(projectId, { deferFenceRotation: true });
 
     const reinserted = db
       .prepare('DELETE FROM sessions WHERE project_path = ?')
@@ -104,6 +104,7 @@ function deleteProjectRowsAtomically(projectId: string, projectPath: string): vo
   });
 
   run();
+  rotateProjectStructureForPath(projectId, projectPath, { retireProjectId: true });
 }
 
 /**

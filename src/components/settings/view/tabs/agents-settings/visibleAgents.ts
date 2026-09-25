@@ -42,7 +42,7 @@ import type { AgentProvider } from '../../../types/types';
  * the end.
  */
 export const SETTINGS_AGENT_ORDER: readonly AgentProvider[] = Object.freeze([
-  'antigravity', 'gemini', 'codex', 'cursor', 'claude', 'qwen', 'hermes', 'kimi',
+  'antigravity', 'codex', 'cursor', 'claude', 'qwen', 'hermes', 'kimi',
   'deepseek', 'opencode', 'glm',
 ] as AgentProvider[]);
 

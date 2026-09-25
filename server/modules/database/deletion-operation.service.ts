@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 import { createDeletionOperationRepository } from './deletion-operation.repository.js';
+import { rotateProjectStructureForPath } from './repositories/project-access.js';
 import { requireActiveDeletionActor, assertDeletionAuthority, assertDeletionProjectManager, assertDeletionSessionAuthority } from './deletion-authorization.js';
 import { assertDeletionConnection, withDeletionTransaction } from './deletion-guards.js';
 import { DeletionOperationError, DELETION_MAX_SOURCES, DELETION_MAX_SESSIONS } from './deletion-operation.contract.js';
@@ -50,14 +51,14 @@ export function createDeletionOperationService(db:Database.Database,boundary:Del
     execute(input:DeleteCommand,token?:unknown):DeleteResult {
       const command=validateCommand(input);if(!issuer)throw new DeletionOperationError('DELETION_UNAVAILABLE');assertDeletionConnection(db);
       const requestHash=createHash('sha256').update(JSON.stringify([command.actorId,command.targetKind,command.targetId,command.scope])).digest('hex');
-      let audience:ReadonlyMap<number,readonly string[]>=new Map();let committedNew=false;
+      let audience:ReadonlyMap<number,readonly string[]>=new Map();let committedNew=false;let committedProjectPath:string|null=null;
       let reservation:DeletionCapabilityReservation|undefined;let result:DeleteResult;
       try {result=withDeletionTransaction(db,{operationId:command.operationId,intentType:command.targetKind==='project'?'permanent_project':'permanent_session'},()=>{
         requireActiveDeletionActor(db,command.actorId);
         const replay=repository.readReplay(command,requestHash);if(replay)return replay;
         if(command.targetKind==='session')assertDeletionSessionAuthority(db,[command.targetId],command.actorId);
         if(command.targetKind==='project')assertDeletionProjectManager(db,command.targetId,command.actorId);
-        const target=repository.loadTarget(command);assertDeletionAuthority(db,command,target);
+        const target=repository.loadTarget(command);assertDeletionAuthority(db,command,target);if(command.targetKind==='project')committedProjectPath=target.projectPath;
         reservation=claimDeletionCapability(issuer,token,db,command,target);invokeSynchronous(reservation.recheck,reservation,[]);
         const inventory=structuredClone(reservation.inventory);validateInventory(target,command,inventory);
         assertDeletionSessionAuthority(db,[...new Set(inventory.sources.flatMap(source=>source.members.map(row=>row.sessionId)))],command.actorId);
@@ -66,6 +67,7 @@ export function createDeletionOperationService(db:Database.Database,boundary:Del
         invokeSynchronous(boundary.retireUniversalLinks,boundary,[db,target,command]);repository.recordSources(command,target,inventory);repository.recordAudit(command,target);
         repository.removeRows(command,target);invokeSynchronous(reservation.recheck,reservation,[]);committedNew=true;return repository.result(command.operationId);
       });}catch(error){try{if(reservation)invokeSynchronous(reservation.finish,reservation,['failed_or_unknown']);}catch{/* Preserve the transaction error and keep authority unavailable. */}throw error;}
+      if(committedNew&&command.targetKind==='project'&&committedProjectPath)rotateProjectStructureForPath(command.targetId,committedProjectPath,{retireProjectId:true});
       try{if(reservation)invokeSynchronous(reservation.finish,reservation,['committed']);}catch{try{boundary.log({code:'DELETION_CAPABILITY_FINALIZATION_FAILED',operationId:command.operationId});}catch{/* Commit already succeeded. */}}
       if(committedNew)publishCommitted(boundary,audience,command.operationId);
       return result;

@@ -12,6 +12,8 @@ import {
 import { LOCAL_BUILD_KIND, localBuildIdentitySha256, validateLocalManifestHeader } from './local-reviewed-build-identity.mjs';
 import { validatePermissionReleaseContract } from './permission-release-contract.mjs';
 import { FORWARD_EXECUTABLE_ENTRIES } from './update-runtime-bundle.mjs';
+import { COMPOSITE_DATABASE_MIGRATION_ID, validateCompositeDatabaseReleaseContract }
+    from './release-schema-contract.mjs';
 
 export const FORWARD_EXECUTABLE_MANIFEST_PATH = 'FORWARD_EXECUTABLE_MANIFEST.json';
 
@@ -326,6 +328,21 @@ export function validateCompatibleForwardDatabaseContract(contract, expectedRele
         migrationClosure: Object.freeze({ ...contract.migrationClosure }) });
 }
 
+/** Classify immutable artifact material without granting composite activation authority. */
+export function classifyForwardDatabaseContractArtifact(contract, expectedReleaseIdentity, expectedStartupClosureSha256) {
+    if (contract?.migrationId === COMPOSITE_DATABASE_MIGRATION_ID) {
+        return Object.freeze({ kind: 'composite-release-schema-v2', activation: 'unsupported',
+            contract: validateCompositeDatabaseReleaseContract(contract, expectedReleaseIdentity, expectedStartupClosureSha256) });
+    }
+    return Object.freeze({ kind: 'sealed-permission-receipt-v1', activation: 'supported',
+        contract: validateCompatibleForwardDatabaseContract(contract, expectedReleaseIdentity, expectedStartupClosureSha256) });
+}
+
+/** Validate either the sealed v1 forward contract or the artifact-only composite v2 contract. */
+export function validateForwardDatabaseContractArtifact(contract, expectedReleaseIdentity, expectedStartupClosureSha256) {
+    return classifyForwardDatabaseContractArtifact(contract, expectedReleaseIdentity, expectedStartupClosureSha256).contract;
+}
+
 export function validateReleaseAssetManifest(value, expected, injected = {}) {
     const local = expected?.kind === LOCAL_BUILD_KIND;
     if (local) {
@@ -380,7 +397,7 @@ export function validateReleaseAssetManifest(value, expected, injected = {}) {
     const database = value.databaseContract;
     if (local && database?.schema !== 'nassaj-database-release-contract/v2') throw Error('Local manifest requires forward contract.');
     if (database?.schema === 'nassaj-database-release-contract/v2') {
-        validateCompatibleForwardDatabaseContract(database, databaseIdentity, injected.expectedStartupClosureSha256);
+        validateForwardDatabaseContractArtifact(database, databaseIdentity, injected.expectedStartupClosureSha256);
     } else if (database?.schema !== 'nassaj-database-release-contract/v1'
         || ['activationPolicy', 'failurePolicy', 'databasePolicy', 'migrationId', 'observationPolicy', 'source', 'target', 'startup'].some(key => Object.hasOwn(database, key)) || database.releaseIdentitySha256 !== databaseIdentity
         || !SHA256.test(database.migrationEntrySha256 || '') || !SHA256.test(database.migrationClosureSha256 || '')

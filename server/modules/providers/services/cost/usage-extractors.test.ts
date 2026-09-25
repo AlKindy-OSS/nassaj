@@ -554,6 +554,41 @@ test('كودكس: لا يسقط الأبناء بعد 128 رابطاً صريح�
   }
 });
 
+test('manifest يفشل مغلقاً عند lineage أعمق من ثمانية مستويات', async () => {
+  const dir = await makeSessionDir();
+  const rootId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const ids = Array.from({ length: 9 }, (_, index) =>
+    `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
+  const agentPaths = ids.map((_, index) => `/agent/${Array.from({ length: index + 1 }, (__, part) => part + 1).join('/')}`);
+  const root = path.join(dir, `rollout-root-${rootId}.jsonl`);
+  try {
+    const writeNode = async (file: string, threadId: string, parentThreadId: string | null,
+      ownAgentPath: string | null, nextId?: string, nextAgentPath?: string) => {
+      const lines = [JSON.stringify({ type: 'session_meta', payload: {
+        id: threadId, session_id: rootId, thread_source: parentThreadId ? 'subagent' : 'user',
+        ...(parentThreadId ? { parent_thread_id: parentThreadId, source: { subagent: true }, agent_path: ownAgentPath } : {}),
+      } })];
+      if (nextId) lines.push(JSON.stringify({ type: 'event_msg', payload: {
+        type: 'sub_agent_activity', kind: 'started', agent_thread_id: nextId, agent_path: nextAgentPath,
+      } }));
+      await writeFile(file, `${lines.join('\n')}\n`);
+    };
+    await writeNode(root, rootId, null, null, ids[0], agentPaths[0]);
+    for (const [index, id] of ids.entries()) {
+      await writeNode(path.join(dir, `rollout-child-${id}.jsonl`), id,
+        index === 0 ? rootId : ids[index - 1], agentPaths[index], ids[index + 1], agentPaths[index + 1]);
+    }
+
+    const manifest = await resolveCodexLinkedRollouts(root);
+    assert.equal(manifest.complete, false);
+    assert.match(manifest.limitReason ?? '', /depth exceeded.*8/i);
+    assert.equal(manifest.linked.length, 8, 'only eight descendant levels may be admitted');
+    assert.equal(manifest.files.length, 9, 'root plus eight admitted descendants');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('مدة العمل: طوابع محادثة كلود وحدها ليست قياساً لمدة العمل', async () => {
   const dir = await makeSessionDir();
   const transcript = path.join(dir, 'sess.jsonl');

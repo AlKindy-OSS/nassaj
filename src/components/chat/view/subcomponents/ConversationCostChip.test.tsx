@@ -13,6 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import arChat from '../../../../i18n/locales/ar/chat.json';
 import enChat from '../../../../i18n/locales/en/chat.json';
+import { ConversationCostContext } from '../../context/ConversationCostContext';
+
+import ConversationCostChip from './ConversationCostChip';
+import type { ConversationCost, ConversationMeasurementV2 } from './conversationCostFormat';
 
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -20,7 +24,7 @@ vi.mock('react-i18next', async (importOriginal) => ({
     // نُعيد المفتاح نفسه (مع المتغيّرات) كي يُختبَر المفتاح المستعمَل لا نصّ
     // ترجمة قد يتغيّر.
     t: (key: string, opts?: Record<string, unknown>) => {
-      const extras = ['date', 'count', 'tokens']
+      const extras = ['date', 'count', 'tokens', 'duration']
         .filter((name) => opts && opts[name] !== undefined)
         .map((name) => `${name}=${String(opts?.[name])}`);
       return extras.length > 0 ? `${key}(${extras.join(',')})` : key;
@@ -28,9 +32,6 @@ vi.mock('react-i18next', async (importOriginal) => ({
     i18n: { language: 'ar' },
   }),
 }));
-
-import { ConversationCostContext } from '../../context/ConversationCostContext';
-import ConversationCostChip from './ConversationCostChip';
 
 const COST = {
   sessionId: 'sess-1',
@@ -52,6 +53,32 @@ const COST = {
     },
   ],
 };
+
+const V2_MEASUREMENT = {
+  version: 2 as const,
+  status: 'complete' as const,
+  source: 'v3' as const,
+  window: { since: '2026-09-22T00:00:00.000Z', until: null },
+  attribution: { scopeFingerprint: 'scope-1', attributionFingerprint: 'attribution-1' },
+  counts: {
+    facts: 11,
+    requests: 11,
+    rollouts: 3,
+    subagentSpawns: 4,
+    subagentRollouts: 2,
+    subagentRequests: 4,
+  },
+  durations: { responseTurnsMs: 0, workMs: 114_400 },
+  reconciliation: {
+    totalUsd: 'matched' as const,
+    perModel: 'matched' as const,
+    turns: 'matched' as const,
+    counts: 'matched' as const,
+    durations: 'matched' as const,
+    eventSets: 'matched' as const,
+    tokens: 'matched' as const,
+  },
+} satisfies ConversationMeasurementV2;
 
 const mountWith = (cost: unknown, status = 'success', workDurationMs?: number | null) => {
   const ctxValue = { cost: cost as never, status: status as never, refresh: vi.fn() };
@@ -104,12 +131,12 @@ describe('الرقم المعروض', () => {
     expect(chip().textContent).toContain('1h 3m');
     expect(durationIcon()).toBeTruthy();
     expectChipOrder('1h 3m 0.0s');
-    expect(chip().getAttribute('aria-label')).toContain('conversationCost.workDuration');
+    expect(chip().getAttribute('aria-label')).toContain('conversationCost.responseTurnDurationLabel');
     expect(chip().getAttribute('aria-label')).toContain('25,500 conversationCost.totalTokens');
     expect(chip().getAttribute('title')).toContain('25,500 conversationCost.totalTokens');
   });
 
-  it('يعرض إحصاءات Codex الثلاث في الشريط ونافذة التفصيل', () => {
+  it('يسمّي طلبات Codex v1 طلبات مسجلة ولا يستنتج منها سلاسل تنفيذ', () => {
     const codexCost = {
       ...COST,
       provider: 'codex',
@@ -123,9 +150,32 @@ describe('الرقم المعروض', () => {
 
     fireEvent.click(chip());
     const dialog = screen.getByRole('dialog');
-    expect(dialog.textContent).toContain('conversationCost.workDuration42.3s');
+    expect(dialog.textContent).toContain('conversationCost.responseTurnDurationLabel42.3s');
     expect(dialog.textContent).toContain('gpt-5.6-sol');
-    expect(dialog.textContent).toContain('conversationCost.codexModelUsage');
+    expect(dialog.textContent).toContain('conversationCost.legacyCodexModelUsage');
+    expect(dialog.textContent).not.toContain('conversationCost.rolloutChains');
+  });
+
+  it('يعرض عقد v2 بعداداته ومدده ويحفظ مدة الاستجابة الصفرية', () => {
+    const codexCost: ConversationCost = {
+      ...COST,
+      provider: 'codex',
+      perModel: [{ ...COST.perModel[0], model: 'gpt-6-astra' }],
+      measurement: V2_MEASUREMENT,
+    };
+    mountWith(codexCost, 'success', 42_300);
+
+    expect(chip().textContent).toContain('0ms');
+    fireEvent.click(chip());
+    const text = screen.getByRole('dialog').textContent ?? '';
+    expect(text).toContain('conversationCost.modelCalls(count=11)');
+    expect(text).toContain('conversationCost.rolloutChains(count=3)');
+    expect(text).toContain('conversationCost.subagentSpawnAttempts(count=4)');
+    expect(text).toContain('conversationCost.resolvedSubagentRollouts(count=2)');
+    expect(text).toContain('conversationCost.subagentModelCalls(count=4)');
+    expect(text).toContain('conversationCost.totalWorkDuration(duration=1m 54.4s)');
+    expect(text).toContain('conversationCost.modelCallUsage(count=8,tokens=26K)');
+    expect(text).not.toContain('conversationCost.subagents');
   });
 
   it('لا يستعمل cost.workDurationMs مطلقاً كمصدر لمدة الرد', () => {
@@ -135,7 +185,7 @@ describe('الرقم المعروض', () => {
     expect(chip().textContent).toContain('—');
     expect(durationIcon()).toBeTruthy();
     expectChipOrder('—');
-    expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.workDuration');
+    expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.responseTurnDurationLabel');
   });
 
   it('يعامل null كغياب صريح ولو حملت لقطة الكلفة رقماً', () => {
@@ -145,7 +195,7 @@ describe('الرقم المعروض', () => {
     expect(chip().textContent).toContain('—');
     expect(durationIcon()).toBeTruthy();
     expectChipOrder('—');
-    expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.workDuration');
+    expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.responseTurnDurationLabel');
   });
 
   it('لا يعرض رقماً مخمناً حين يغيب القياس عن المصدرين', () => {
@@ -154,7 +204,7 @@ describe('الرقم المعروض', () => {
     expect(chip().textContent).toContain('—');
     expect(durationIcon()).toBeTruthy();
     expectChipOrder('—');
-    expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.workDuration');
+    expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.responseTurnDurationLabel');
   });
 
   it('يعرض مدة الصفر الموثقة ولا يعاملها كقيمة غائبة', () => {
@@ -162,7 +212,7 @@ describe('الرقم المعروض', () => {
 
     expect(chip().textContent).toContain('0ms');
     expectChipOrder('0ms');
-    expect(chip().getAttribute('aria-label')).toContain('conversationCost.workDuration: 0ms');
+    expect(chip().getAttribute('aria-label')).toContain('conversationCost.responseTurnDurationLabel: 0ms');
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
@@ -172,7 +222,7 @@ describe('الرقم المعروض', () => {
       expect(chip().textContent).toContain('—');
       expect(durationIcon()).toBeTruthy();
       expectChipOrder('—');
-      expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.workDuration');
+      expect(chip().getAttribute('aria-label')).not.toContain('conversationCost.responseTurnDurationLabel');
     },
   );
 
@@ -224,23 +274,56 @@ describe('الصدق المالي في الشرح', () => {
     expect(title).toContain('conversationCost.billed');
     expect(title).not.toContain('conversationCost.apiEquivalent');
   });
+
+  it('metered=null يبقى غير متاح ولا يوصف كاشتراك', () => {
+    mountWith({ ...COST, metered: null, reason: 'auth probe unavailable' });
+    const title = chip().getAttribute('title') ?? '';
+    expect(chip().textContent).toContain('—');
+    expect(title).toContain('auth probe unavailable');
+    expect(title).not.toContain('conversationCost.apiEquivalent');
+  });
 });
 
 describe('نافذة التفصيل', () => {
-  it('تسمّي سلاسل Codex وطلبات بقية الهارنس بوضوح بالعربية والإنجليزية', () => {
-    expect(enChat.conversationCost.codexModelUsage).toBe(
-      '{{count}} threads · {{tokens}} processing units',
+  it('تسمّي نداءات v2 وطلبات v1 بوضوح بالعربية والإنجليزية', () => {
+    expect(enChat.conversationCost.modelCallUsage).toBe(
+      '{{count}} model calls · {{tokens}} processing units',
     );
     expect(enChat.conversationCost.requestModelUsage).toBe(
       '{{count}} requests · {{tokens}} processing units',
     );
-    expect(arChat.conversationCost.codexModelUsage).toBe(
-      '{{count}} سلسلة تنفيذ · {{tokens}} وحدة معالجة',
+    expect(arChat.conversationCost.modelCallUsage).toBe(
+      '{{count}} نداءات نموذج · {{tokens}} وحدة معالجة',
     );
     expect(arChat.conversationCost.requestModelUsage).toBe(
       '{{count}} طلباً · {{tokens}} وحدة معالجة',
     );
   });
+
+  it.each(['incomplete', 'quarantined'] as const)(
+    'يعرض تحذير %s بلا تسريب رموز أسباب الخادم',
+    (status) => {
+      mountWith({
+        ...COST,
+        measurement: {
+          ...V2_MEASUREMENT,
+          status,
+          reconciliation: { ...V2_MEASUREMENT.reconciliation, eventSets: 'unavailable' },
+          comparison: { status: 'unavailable', reason: 'raw_private_reason_code' },
+        },
+      });
+
+      expect(screen.getByTestId('conversation-snapshot-warning')).toBeTruthy();
+      expect(chip().getAttribute('aria-label')).toContain(
+        status === 'quarantined'
+          ? 'conversationCost.measurementQuarantined'
+          : 'conversationCost.measurementIncomplete',
+      );
+      expect(chip().getAttribute('aria-label')).not.toContain('raw_private_reason_code');
+      fireEvent.click(chip());
+      expect(screen.getByRole('dialog').textContent).not.toContain('raw_private_reason_code');
+    },
+  );
 
   it('تفتح بالنقر وتحمل النماذج والوكلاء الفرعيين وتاريخ الأسعار', () => {
     mountWith({ ...COST, subagentRequests: 7 }, 'success', 3_780_000);
@@ -248,7 +331,7 @@ describe('نافذة التفصيل', () => {
     fireEvent.click(chip());
 
     const dialog = screen.getByRole('dialog');
-    expect(dialog.textContent).toContain('conversationCost.workDuration1h 3m');
+    expect(dialog.textContent).toContain('conversationCost.responseTurnDurationLabel1h 3m');
     expect(dialog.textContent).toContain('conversationCost.apiEquivalent');
     expect(dialog.textContent).toContain('conversationCost.subagents(count=7)');
     expect(dialog.textContent).toContain('conversationCost.pricesAsOf(date=2026-07-28)');
@@ -260,7 +343,7 @@ describe('نافذة التفصيل', () => {
 
     fireEvent.click(chip());
 
-    expect(screen.getByRole('dialog').textContent).toContain('conversationCost.workDuration1m 54.4s');
+    expect(screen.getByRole('dialog').textContent).toContain('conversationCost.responseTurnDurationLabel1m 54.4s');
   });
 
   it('تسمّي النماذج بلا سعر رسمي حين تكون التغطية جزئية', () => {
@@ -295,7 +378,7 @@ describe('نافذة التفصيل', () => {
     expect(dialog.textContent).not.toContain('$0.00');
   });
 
-  it('Codex يفصل عدد سلاسل التنفيذ عن إجمالي التوكنز بلا علامة ضرب', () => {
+  it('Codex v1 يفصل الطلبات المسجلة عن إجمالي التوكنز بلا علامة ضرب', () => {
     mountWith({
       ...COST,
       provider: 'codex',
@@ -319,9 +402,9 @@ describe('نافذة التفصيل', () => {
     fireEvent.click(chip());
 
     const dialogText = screen.getByRole('dialog').textContent ?? '';
-    const usage = screen.getByText('conversationCost.codexModelUsage(count=59,tokens=7.11B)');
+    const usage = screen.getByText('conversationCost.legacyCodexModelUsage(count=59,tokens=7.11B)');
     expect(usage.getAttribute('dir')).toBe('rtl');
-    expect(dialogText).toContain('conversationCost.codexModelUsage(count=59,tokens=7.11B)');
+    expect(dialogText).toContain('conversationCost.legacyCodexModelUsage(count=59,tokens=7.11B)');
     expect(dialogText).not.toContain('×');
   });
 
@@ -387,7 +470,7 @@ describe('نافذة التفصيل', () => {
     const usage = screen.getByText('conversationCost.requestModelUsage(count=8,tokens=26K)');
     expect(usage.getAttribute('dir')).toBe('rtl');
     expect(dialogText).not.toContain('×');
-    expect(dialogText).not.toContain('conversationCost.codexModelUsage');
+    expect(dialogText).not.toContain('conversationCost.legacyCodexModelUsage');
   });
 
   it('تُغلق بمفتاح Escape', () => {

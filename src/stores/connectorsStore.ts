@@ -262,6 +262,7 @@ const DEADLINE_MS = 15000;
  * twice within a frame of each other.
  */
 let inFlight: Promise<void> | null = null;
+let identityGeneration = 0;
 
 /**
  * Loads the three lists.
@@ -276,11 +277,13 @@ export function loadConnectors(force = false): Promise<void> {
 
   emit({ ...snapshot, loading: true, error: null });
 
+  const generation = identityGeneration;
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
   const run = (async () => {
     try {
-      const deadline = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('__timeout__')), DEADLINE_MS),
-      );
+      const deadline = new Promise<never>((_, reject) => {
+        deadlineTimer = setTimeout(() => reject(new Error('__timeout__')), DEADLINE_MS);
+      });
       const [listRes, catalogRes, targetRes] = await Promise.race([
         Promise.all([
           authenticatedFetch('/api/connectors'),
@@ -289,19 +292,23 @@ export function loadConnectors(force = false): Promise<void> {
         ]),
         deadline,
       ]);
+      if (generation !== identityGeneration) return;
       if (!listRes.ok) {
         emit({ ...snapshot, loading: false, error: { kind: 'http', status: listRes.status } });
         return;
       }
       const connectors = ((await listRes.json()).connectors ?? []) as Connector[];
+      if (generation !== identityGeneration) return;
       const catalogPayload = catalogRes.ok ? (await catalogRes.json()) as CatalogResponse : null;
       const catalog = catalogPayload ? normalizeConnectorCatalog(catalogPayload) : snapshot.catalog;
       const catalogSchemaVersion = catalogPayload?.schemaVersion === 2 ? 2 : 1;
       const targets = targetRes.ok
         ? (((await targetRes.json()).targets ?? []) as ConnectorTarget[])
         : snapshot.targets;
+      if (generation !== identityGeneration) return;
       emit({ connectors, catalog, targets, catalogSchemaVersion, ready: true, loading: false, error: null });
     } catch (err) {
+      if (generation !== identityGeneration) return;
       const message = err instanceof Error ? err.message : String(err);
       emit({
         ...snapshot,
@@ -309,7 +316,8 @@ export function loadConnectors(force = false): Promise<void> {
         error: message === '__timeout__' ? { kind: 'timeout' } : { kind: 'unknown', message },
       });
     } finally {
-      inFlight = null;
+      if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+      if (generation === identityGeneration) inFlight = null;
     }
   })();
 
@@ -328,6 +336,7 @@ export function __snapshotForTest(): ConnectorsSnapshot {
 
 /** Test seam: drops everything so one test's fetch cannot leak into the next. */
 export function resetConnectorsStore(): void {
+  identityGeneration += 1;
   inFlight = null;
   emit({
     connectors: EMPTY_CONNECTORS,
@@ -338,4 +347,8 @@ export function resetConnectorsStore(): void {
     loading: false,
     error: null,
   });
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:identity-changing', resetConnectorsStore);
 }

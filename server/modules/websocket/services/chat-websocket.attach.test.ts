@@ -7,7 +7,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+
 import { handleChatConnection } from './chat-websocket.service.js';
+
+// 5ec5556c5: realtime session paths fail closed on unknown ids, so every session a
+// test reconnects to is persisted first (unregistered project, membership enforcement off).
+await initializeDatabase();
 
 // Inline replay double mirroring the SessionRegistry attach contract (seq>lastSeq,
 // read-only). The real registry internals are covered by session-registry.test.ts;
@@ -110,6 +116,7 @@ test('B-N-ATTACH: check-session-status replays seq>lastSeq to the reconnecting s
   // A live agy session with 4 buffered payloads.
   const reg = makeReplayDouble();
   const sid = 'agy-live-1';
+  sessionsDb.createSession(sid, 'antigravity', process.cwd());
   reg.open();
   for (let i = 1; i <= 4; i += 1) {
     reg.record({ kind: 'stream_delta', content: `m${i}`, provider: 'antigravity' });
@@ -152,6 +159,7 @@ test('B-N-ATTACH: check-session-status replays seq>lastSeq to the reconnecting s
 });
 
 test('B-N-ATTACH: claude path is unchanged — idle claude still swaps writer', () => {
+  sessionsDb.createSession('c-1', 'claude', process.cwd());
   let swapped = false;
   const ws = makeFakeWs();
   const deps = makeDeps({

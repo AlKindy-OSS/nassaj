@@ -75,6 +75,28 @@ describe('connectorsStore', () => {
     expect(snap.error).toEqual({ kind: 'http', status: 503 });
   });
 
+  it('does not let a late account A response refill account B cache', async () => {
+    const pendingA: Array<(value: ReturnType<typeof ok>) => void> = [];
+    authenticatedFetch.mockImplementation(() => new Promise((resolve) => pendingA.push(resolve)));
+    const staleA = loadConnectors();
+    expect(authenticatedFetch).toHaveBeenCalledTimes(3);
+
+    resetConnectorsStore();
+    authenticatedFetch.mockImplementation((url: string) => {
+      if (url === '/api/connectors') return Promise.resolve(ok({ connectors: [{ id: 'account-b' }] }));
+      if (url === '/api/connectors/catalog') return Promise.resolve(ok({ catalog: [] }));
+      return Promise.resolve(ok({ targets: [] }));
+    });
+    await loadConnectors();
+    expect(getSnapshotForTest().connectors[0]?.id).toBe('account-b');
+
+    pendingA[0]?.(ok({ connectors: [{ id: 'account-a' }] }));
+    pendingA[1]?.(ok({ catalog: [] }));
+    pendingA[2]?.(ok({ targets: [] }));
+    await staleA;
+    expect(getSnapshotForTest().connectors[0]?.id).toBe('account-b');
+  });
+
   it('accepts v2 public fields and fails closed on an unknown schema', () => {
     expect(normalizeConnectorCatalog({ schemaVersion: 9, catalog: [] })).toEqual([]);
     expect(normalizeConnectorCatalog({

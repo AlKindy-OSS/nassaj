@@ -167,7 +167,7 @@ test('day range filters the curve while the vendor and model groupings stay life
       ],
     );
 
-    const windowed = projectCostLedgerDb.getDaily(scope, { since: '2026-03-10', until: '2026-03-10' });
+    const windowed = projectCostLedgerDb.getDaily(scope, { since: '2026-03-10', until: '2026-03-11' });
     assert.deepEqual(
       windowed.map((entry) => entry.totalUsd),
       [2],
@@ -182,6 +182,61 @@ test('day range filters the curve while the vendor and model groupings stay life
 
     const byModel = projectCostLedgerDb.getModelTotals(scope);
     assert.deepEqual(byModel.map((entry) => entry.key), ['claude-sonnet-4-6', 'claude-opus-5']);
+  });
+});
+
+test('windowed ledger totals preserve priced, unpriced, assumed, token, and pricing facts', async () => {
+  await withIsolatedDatabase(() => {
+    projectCostLedgerDb.replaceSource(
+      { sourceKey: '/transcripts/parity-a.jsonl', provider: 'codex', mtimeMs: 1, sizeBytes: 1 },
+      [
+        row({
+          day: '2026-03-10', vendor: 'openai', harness: 'codex', model: 'gpt-priced',
+          costUsd: 1.25, requests: 2,
+          tokens: { input: 10, output: 20, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 30 },
+          pricesAsOf: '2026-09-01',
+        }),
+        row({
+          day: '2026-03-10', vendor: 'openai', harness: 'codex', model: 'gpt-assumed',
+          costUsd: 0.75, assumed: true, requests: 1,
+          tokens: { input: 3, output: 4, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 5 },
+          pricesAsOf: '2026-09-01',
+        }),
+        row({
+          day: '2026-03-11', vendor: 'openai', harness: 'codex', model: 'gpt-unpriced',
+          costUsd: 0, priced: false, requests: 1,
+          tokens: { input: 9, output: 8, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 7 },
+          pricesAsOf: '2026-09-02',
+        }),
+      ],
+    );
+
+    // [since, until): the second day must not leak into the first day's facts.
+    const firstDay = { since: '2026-03-10', until: '2026-03-11' };
+    const totals = projectCostLedgerDb.getTotals(scope, firstDay);
+    const [daily] = projectCostLedgerDb.getDaily(scope, firstDay);
+    const models = projectCostLedgerDb.getModelTotals(scope, firstDay);
+
+    assert.equal(totals.totalUsd, 2);
+    assert.equal(totals.requests, 3);
+    assert.equal(totals.complete, false, 'an assumed price is not a complete measurement');
+    assert.deepEqual(totals.unpricedModels, []);
+    assert.deepEqual(totals.assumedModels, ['gpt-assumed']);
+    assert.equal(totals.pricesAsOf, '2026-09-01');
+    assert.deepEqual(daily.tokens, { input: 13, output: 24, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 35 });
+    assert.equal(daily.costUsd, totals.totalUsd);
+    assert.deepEqual(models.map((entry) => [entry.key, entry.totalUsd, entry.requests]), [
+      ['gpt-priced', 1.25, 2],
+      ['gpt-assumed', 0.75, 1],
+    ]);
+
+    const all = projectCostLedgerDb.getTotals(scope);
+    assert.equal(all.totalUsd, 2, 'unpriced usage contributes facts but never a fabricated dollar amount');
+    assert.equal(all.requests, 4);
+    assert.equal(all.complete, false);
+    assert.deepEqual(all.unpricedModels, ['gpt-unpriced']);
+    assert.deepEqual(all.assumedModels, ['gpt-assumed']);
+    assert.equal(all.pricesAsOf, '2026-09-02');
   });
 });
 

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 
 // Reviewed executed security effects: order, multiplicity, method and phase are contractual.
+// The device-wallet schema (15098dccc) is the one reviewed multi-statement exec: its
+// triggers need `;` inside BEGIN/END, so it is admitted only by exact reviewed text.
 const reviewedEffects = [
   {
     "phase": "security_startup_authorized",
@@ -30,6 +32,24 @@ const reviewedEffects = [
     "phase": "security_startup_authorized",
     "method": "exec",
     "sql": "CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_messages_lease_token\n      ON scheduled_messages(lease_token) WHERE lease_token IS NOT NULL",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "exec",
+    "sql": "CREATE TABLE IF NOT EXISTS device_sessions (\n      id TEXT PRIMARY KEY,\n      secret_hash TEXT NOT NULL UNIQUE,\n      expires_at INTEGER NOT NULL,\n      revoked_at INTEGER,\n      active_slot_id TEXT,\n      generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),\n      created_at INTEGER NOT NULL,\n      FOREIGN KEY (active_slot_id) REFERENCES device_account_slots(id)\n    );\n    CREATE TABLE IF NOT EXISTS device_account_slots (\n      id TEXT PRIMARY KEY,\n      device_session_id TEXT NOT NULL,\n      user_id INTEGER NOT NULL,\n      created_at INTEGER NOT NULL,\n      last_used_at INTEGER NOT NULL,\n      password_stamp INTEGER NOT NULL,\n      revoked_at INTEGER,\n      FOREIGN KEY (device_session_id) REFERENCES device_sessions(id) ON DELETE CASCADE,\n      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,\n      UNIQUE(device_session_id, user_id)\n    );\n    CREATE INDEX IF NOT EXISTS idx_device_slots_session ON device_account_slots(device_session_id, revoked_at);\n    CREATE TRIGGER IF NOT EXISTS device_session_active_slot_valid_insert\n    BEFORE INSERT ON device_sessions WHEN NEW.active_slot_id IS NOT NULL AND NOT EXISTS (\n      SELECT 1 FROM device_account_slots WHERE id=NEW.active_slot_id AND device_session_id=NEW.id AND revoked_at IS NULL\n    ) BEGIN SELECT RAISE(ABORT, 'device_active_slot_invalid'); END;\n    CREATE TRIGGER IF NOT EXISTS device_session_active_slot_valid_update\n    BEFORE UPDATE OF active_slot_id ON device_sessions WHEN NEW.active_slot_id IS NOT NULL AND NOT EXISTS (\n      SELECT 1 FROM device_account_slots WHERE id=NEW.active_slot_id AND device_session_id=NEW.id AND revoked_at IS NULL\n    ) BEGIN SELECT RAISE(ABORT, 'device_active_slot_invalid'); END;\n    CREATE TRIGGER IF NOT EXISTS device_slot_cannot_revoke_active\n    BEFORE UPDATE OF revoked_at ON device_account_slots WHEN NEW.revoked_at IS NOT NULL AND EXISTS (\n      SELECT 1 FROM device_sessions WHERE active_slot_id=OLD.id AND revoked_at IS NULL\n    ) BEGIN SELECT RAISE(ABORT, 'device_active_slot_revocation'); END;",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(device_sessions)",
+    "shadow": null
+  },
+  {
+    "phase": "security_startup_authorized",
+    "method": "all",
+    "sql": "PRAGMA table_info(device_account_slots)",
     "shadow": null
   },
   {
@@ -90,6 +110,10 @@ const reviewedEffects = [
 const normalize = sql => sql.replace(/\s+/g, ' ').trim();
 const expected = reviewedEffects.map(row => ({...row, sql:normalize(row.sql)}));
 const phases = new Set(['claimed','security_startup_authorized','serving']);
+const withoutLiterals = sql => sql.replace(/'(?:''|[^'])*'/g, "''");
+const reviewedMultiStatement = new Set(expected
+  .filter(row => row.method === 'exec' && withoutLiterals(row.sql).includes(';'))
+  .map(row => row.sql));
 
 /** Assert the finite pre-serving SQL contract, including connection-local PRAGMA effects. */
 export function assertStartupSqlTrace(rows) {
@@ -103,8 +127,9 @@ export function assertStartupSqlTrace(rows) {
     assert.equal(serving,false,'SQL phase regressed');
     const sql=normalize(row.sql);
     // Values inside SQL literals are removed before checking for extra statements.
-    const tokens=sql.replace(/'(?:''|[^'])*'/g, "''");
-    assert.equal(tokens.includes(';'),false,'multiple/unreviewed SQL statements');
+    const tokens=withoutLiterals(sql);
+    const reviewedExec=row.method==='exec' && reviewedMultiStatement.has(sql);
+    assert.equal(tokens.includes(';') && !reviewedExec,false,'multiple/unreviewed SQL statements');
     if(/^SELECT\b/i.test(sql)) {
       assert.ok(['get','all','iterate'].includes(row.method),'unreviewed SELECT execution method');
       assert.equal(/\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|ATTACH|DETACH|VACUUM|PRAGMA)\b/i.test(tokens),false,'unreviewed SELECT effects');

@@ -17,6 +17,14 @@ import { isExternalApiEnabled, setExternalApiEnabled } from '../services/externa
 
 const router = express.Router();
 
+const claimCurrentIdentity = (req, res) => {
+  if (req.assertCurrentIdentity?.() !== false) return true;
+  res.status(409).set('Cache-Control', 'no-store').json({
+    error: 'Identity changed during request', code: 'identity_changed',
+  });
+  return false;
+};
+
 // ===============================
 // App-wide Branding (custom logo + title)
 // ===============================
@@ -343,6 +351,7 @@ router.post('/branding/logo', requireRole('owner'), (req, res) => {
       // 'dark' targets the dark-theme variant; anything else the main logo.
       const variantCfg = brandingVariantConfig(req.query.variant);
 
+      if (!claimCurrentIdentity(req, res)) return;
       await fs.promises.mkdir(BRANDING_ROOT, { recursive: true });
 
       // Remove any logo stored under a different extension so a stale file is not
@@ -376,6 +385,7 @@ router.post('/branding/logo', requireRole('owner'), (req, res) => {
 router.delete('/branding/logo', requireRole('owner'), async (req, res) => {
   try {
     const variantCfg = brandingVariantConfig(req.query.variant);
+    if (!claimCurrentIdentity(req, res)) return;
     // Remove every possible logo file regardless of which extension is recorded.
     await fs.promises
       .mkdir(BRANDING_ROOT, { recursive: true })

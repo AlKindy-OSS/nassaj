@@ -466,6 +466,25 @@ function scheduleBroadcast(): void {
 }
 
 /**
+ * Sessions with an in-flight run LAUNCHED by the user (presence records each run
+ * under the user who started it). ADR-172 م1 uses it to stop a removed member's
+ * turns in the project.
+ */
+export function listRunningSessionIdsForUser(rawUserId: string | number): string[] {
+  const userId = toPresenceUserId(rawUserId);
+  const state = userId ? users.get(userId) : undefined;
+  return state ? [...state.runs.keys()] : [];
+}
+
+/**
+ * Re-broadcasts presence now-ish (debounced). Used after an access change
+ * (ADR-172 member removal) so per-recipient project filtering is recomputed.
+ */
+export function presenceRefresh(): void {
+  scheduleBroadcast();
+}
+
+/**
  * Registers an authenticated socket as connected. Multiple sockets for the same
  * user dedupe into one presence row (multi-tab/device). Returns silently for
  * unauthenticated sockets (no userId) so single-user/anonymous runs are ignored.

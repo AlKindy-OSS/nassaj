@@ -176,7 +176,13 @@ describe('GL-4 — opencode chat/legacy is byte-for-byte pre-GL-4 (anthropic tar
     // into chat mode, which is what this case exists to police, so the two names
     // are subtracted from the expectation rather than the assertion being
     // loosened: everything else must still arrive byte-for-byte.
-    const expected: NodeJS.ProcessEnv = { ...dirtyEnv(), ...xdgOverrides(uid) };
+    //
+    // T-1749/ADR-159 D2 amendment (035fe5fb1, 0d7a0bb93): every opencode launch
+    // also carries the built-in updater kill switch. It is a binary-governance
+    // flag, not a GL-4 sanitize, so it is added to the expectation explicitly.
+    const expected: NodeJS.ProcessEnv = {
+      ...dirtyEnv(), ...xdgOverrides(uid), OPENCODE_DISABLE_AUTOUPDATE: '1',
+    };
     delete expected.ANTHROPIC_API_KEY;
     delete expected.ANTHROPIC_AUTH_TOKEN;
 
@@ -213,8 +219,9 @@ describe('GL-4 — seam contracts unchanged for anonymous / shared opencode', ()
   // The unconditional SEC-ENV-1 host-secret strip still applies on every path —
   // it is not part of this seam's contract — so the two inherited Anthropic
   // credentials are subtracted from the baseline in both cases below.
+  // The updater kill switch (0d7a0bb93) applies to every credential mode as well.
   const baselineAfterHostStrip = (): NodeJS.ProcessEnv => {
-    const base = dirtyEnv();
+    const base: NodeJS.ProcessEnv = { ...dirtyEnv(), OPENCODE_DISABLE_AUTOUPDATE: '1' };
     delete base.ANTHROPIC_API_KEY;
     delete base.ANTHROPIC_AUTH_TOKEN;
     return base;

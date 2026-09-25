@@ -500,3 +500,21 @@ export function markSessionOutcome(sessionId: string, outcome: SessionOutcome): 
 export function clearSessionOutcome(sessionId: string): void {
   applyOutcomeDelta(sessionId, null, null, 'absent');
 }
+
+/** Clears every account-derived outcome and invalidates deferred REST reads. */
+export function resetSessionCompletionStore(): void {
+  latestRefreshRequestId += 1;
+  deltaGeneration += 1;
+  outcomeById = new Map();
+  lastDeltaGenerationById.clear();
+  terminalOutcomeStateById.clear();
+  acknowledgementInFlight.clear();
+  manuallyUnread.clear();
+  markUnreadRequestBySession.clear();
+  countsSnapshot = { question: 0, error: 0, done: 0 };
+  emitChange();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:identity-changing', resetSessionCompletionStore);
+}

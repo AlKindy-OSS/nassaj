@@ -84,6 +84,15 @@ import connectorUserGrantRoutes from './connector-user-grant.routes.js';
 
 const router = express.Router();
 
+const claimCurrentIdentity = (req: express.Request, res: express.Response): boolean => {
+  const check = (req as express.Request & { assertCurrentIdentity?: () => boolean }).assertCurrentIdentity;
+  if (check?.() !== false) return true;
+  res.status(409).set('Cache-Control', 'no-store').json({
+    error: 'Identity changed during request', code: 'identity_changed',
+  });
+  return false;
+};
+
 const reconcileRateLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 5,
@@ -557,6 +566,7 @@ router.post('/', async (req, res) => {
       });
     }
 
+    if (!claimCurrentIdentity(req, res)) return;
     const connector = await connectorsService.create({
       service: body.service,
       accountLabel: body.accountLabel,
@@ -659,6 +669,7 @@ router.post('/oauth/start', async (req, res) => {
     const key = `${userId}:${body.service}:${body.accountLabel ?? ''}`;
     let operation = firstOAuthStarts.get(key);
     if (!operation) {
+      if (!claimCurrentIdentity(req, res)) return;
       operation = (async () => {
         // Re-read operator configuration at the mutation boundary. An app that
         // disappeared between catalog display and this POST creates zero rows.
@@ -718,6 +729,7 @@ router.put('/:id/key', async (req, res) => {
   if (refuseLegacyConnectorWriter(res)) return;
   if (refusedOnConnector(req, res, req.params.id)) return;
   try {
+    if (!claimCurrentIdentity(req, res)) return;
     const result = await connectorsService.setKey(req.params.id, req.body?.apiKey);
     // Recorded because rotation is the ONLY effective revocation under ADR-098:
     // when a key changes, who changed it and when is the question that gets
@@ -755,6 +767,7 @@ router.post(
     reconcileRateLimiter(req, res, () => {
       void (async () => {
         try {
+          if (!claimCurrentIdentity(req, res)) return;
           auditLogDb.record('connector_reconcile_requested', {
             userId,
             metadata: { connectorId: req.params.id },
@@ -830,6 +843,7 @@ router.patch('/:id', async (req, res) => {
         });
         return;
       }
+      if (!claimCurrentIdentity(req, res)) return;
       res.json({ connector: await connectorsService.setCredentialMode(req.params.id, mode) });
       return;
     }
@@ -837,6 +851,7 @@ router.patch('/:id', async (req, res) => {
     if (body.extraEnv !== undefined) {
       const connector = connectorsService.get(req.params.id, callerId(req) ?? undefined);
       const extraEnv = readExtraEnv(connector.service, body.extraEnv);
+      if (!claimCurrentIdentity(req, res)) return;
       res.json({ connector: await connectorsService.setExtraEnv(req.params.id, extraEnv) });
       return;
     }
@@ -844,6 +859,7 @@ router.patch('/:id', async (req, res) => {
     if (body.additionalFields !== undefined) {
       const connector = connectorsService.get(req.params.id, callerId(req) ?? undefined);
       const extraEnv = readAdditionalFields(connector.service, body.additionalFields);
+      if (!claimCurrentIdentity(req, res)) return;
       res.json({ connector: await connectorsService.setExtraEnv(req.params.id, extraEnv) });
       return;
     }
@@ -853,6 +869,7 @@ router.patch('/:id', async (req, res) => {
       if (typeof body.enabled !== 'boolean') {
         throw badRequest('enabled must be a boolean.', 'CONNECTOR_BAD_ENABLED');
       }
+      if (!claimCurrentIdentity(req, res)) return;
       res.json({ connector: await connectorsService.setEnabled(req.params.id, body.enabled) });
       return;
     }
@@ -870,6 +887,7 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   if (refusedOnConnector(req, res, req.params.id)) return;
   try {
+    if (!claimCurrentIdentity(req, res)) return;
     const result = await connectorsService.remove(req.params.id);
     if (result.removed) {
       auditLogDb.record('connector_removed', {
@@ -914,6 +932,7 @@ router.post('/:id/oauth/start', async (req, res) => {
     if (!source || source.credentialMode !== 'per_member' || source.ownerUserId !== userId) {
       throw new AppError('Connector not found.', { code: 'CONNECTOR_NOT_FOUND', statusCode: 404 });
     }
+    if (!claimCurrentIdentity(req, res)) return;
     const oddRevision = connectorsDb.beginSourceMutation(source.id, source.sourceRevision);
     if (oddRevision === null) {
       throw new AppError('Could not claim account linking.', {

@@ -12,6 +12,9 @@ import { ensureCodexGovernance } from '../modules/providers/list/codex/codex-gov
 import { runPermissionExecutionAdapter } from '../modules/execution-permissions/adapter.js';
 import { authorizeRuntimeUserProviderEffect } from '../modules/execution-permissions/runtime-user-effect.js';
 import { codexLaunchOptions, readCodexExecutableIdentity } from '../shared/codex-executable.js';
+import {
+  beginHarnessLaunch,
+} from '../modules/providers/harness-update/spawn-admission.js';
 
 import { resolveProviderEnv } from './isolation/resolve-provider-env.js';
 
@@ -23,6 +26,19 @@ const activeCompactions = new Map();
 const MAX_ACTIVE_RPCS = 8;
 const MAX_ACTIVE_RPCS_PER_USER = 3;
 const activeRpcs = new Map();
+
+function spawnReservedCodex(spawnImpl, command, args, options) {
+  const release = beginHarnessLaunch('codex');
+  try {
+    const child = spawnImpl(command, args, options);
+    child.once?.('exit', release);
+    child.once?.('error', release);
+    return child;
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
 
 /** Gate the selected-turn fork against the native build whose schema was reviewed. No model turn runs. */
 export function assertCodexMessageForkRuntimeReady() {
@@ -140,7 +156,7 @@ async function executeCodexAppServerRpc(sessionId, userId, method, params = {}, 
     );
     const spawnImpl = options.spawnImpl || spawn;
     const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
-    const child = spawnImpl(launch.codexPathOverride, ['app-server'], {
+    const child = spawnReservedCodex(spawnImpl, launch.codexPathOverride, ['app-server'], {
       cwd: session.project_path || process.cwd(),
       env: launch.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -307,11 +323,17 @@ export async function spawnCodexSideQuery(params = {}, callbacks = {}, options =
   }
 
   const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
-  const child = spawnImpl(launch.codexPathOverride, ['app-server'], {
+  let child;
+  try {
+    child = spawnReservedCodex(spawnImpl, launch.codexPathOverride, ['app-server'], {
     cwd,
     env: launch.env,
     stdio: ['pipe', 'pipe', 'pipe'],
-  });
+    });
+  } catch (error) {
+    onError('sdk_error', error instanceof Error ? error.message : String(error));
+    return;
+  }
   const lines = createInterface({ input: child.stdout });
   child.stderr?.on?.('data', () => {});
   const pending = new Map();
@@ -507,7 +529,7 @@ export async function startCodexCompaction(sessionId, userId, options = {}) {
   return runPermissionExecutionAdapter(permissionExecution, async () => {
     const spawnImpl = options.spawnImpl || spawn;
     const launch = codexLaunchOptions(envResolver(userId, 'codex', process.env));
-    const child = spawnImpl(launch.codexPathOverride, ['app-server'], {
+    const child = spawnReservedCodex(spawnImpl, launch.codexPathOverride, ['app-server'], {
       cwd: session.project_path || process.cwd(),
       env: launch.env,
       stdio: ['pipe', 'pipe', 'pipe'],
