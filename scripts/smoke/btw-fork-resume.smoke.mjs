@@ -50,7 +50,7 @@ import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { forkClaudeTranscript } from '../../server/modules/providers/list/claude/claude-transcript-fork.js';
-import { resolveClaudeCodeExecutablePath } from '../../server/shared/claude-cli-path.js';
+import { resolveHarnessBinary } from '../../server/shared/harness-binaries.js';
 
 const SEED_TIMEOUT_MS = 90_000;
 const RESUME_TIMEOUT_MS = 120_000;
@@ -154,7 +154,7 @@ async function main() {
   delete process.env.ANTHROPIC_BASE_URL;
   delete process.env.ANTHROPIC_AUTH_TOKEN;
 
-  const executable = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH);
+  const executable = resolveHarnessBinary('claude');
   let exitCode = 1;
 
   try {

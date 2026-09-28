@@ -51,12 +51,14 @@ export default function QuickSettingsPanelView({ sessionProvider }: QuickSetting
     showToolCalls: preferences.showToolCalls,
     autoScrollToBottom: preferences.autoScrollToBottom,
     tabsIconOnly: resolvedTabsMode === 'compact',
+    showHardwareUsage: preferences.showHardwareUsage,
   }), [
     preferences.autoExpandTools,
     preferences.autoScrollToBottom,
     preferences.showToolCalls,
     preferences.showRawParameters,
     preferences.showThinking,
+    preferences.showHardwareUsage,
     resolvedTabsMode,
   ]);
 

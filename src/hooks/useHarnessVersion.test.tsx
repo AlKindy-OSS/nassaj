@@ -117,6 +117,69 @@ describe('useHarnessVersion authorization and fencing', () => {
   });
 
 
+  it('surfaces a 409 CONFIRMATION_REQUIRED as a pending confirmation and resends with the acked tokens', async () => {
+    const required = [{ kind: 'pinBreak', token: 'tok-1', expiresAt: Date.now() + 300_000, textEn: 'en', textAr: 'ar', facts: {} }];
+    let resendBody: unknown;
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const parsed = init.body ? JSON.parse(init.body as string) : {};
+        if (!parsed.acks) return response({ code: 'CONFIRMATION_REQUIRED', required }, 409);
+        resendBody = parsed;
+        return response({ jobId: 'job-confirmed', provider: 'codex', status: 'queued' }, 202);
+      }
+      if (_url.includes('/update-jobs/')) return response({ jobId: 'job-confirmed', provider: 'codex', status: 'running', phase: 'updating', percent: 10, log: [], fromVersion: '1', toVersion: '2', error: null });
+      return response(statusBody);
+    });
+    const { result } = renderHook(() => useHarnessVersion('codex', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startUpdate());
+    await waitFor(() => expect(result.current.confirmation).not.toBeNull());
+    expect(result.current.confirmation?.required).toEqual(required);
+    await act(async () => result.current.confirmPending([{ kind: 'pinBreak', token: 'tok-1' }]));
+    expect(resendBody).toEqual({ acks: [{ kind: 'pinBreak', token: 'tok-1' }] });
+    expect(result.current.confirmation).toBeNull();
+    await waitFor(() => expect(result.current.state.phase).toBe('updating'));
+  });
+
+  it('exposes a 423/507 action refusal as actionError and a visible failed status', async () => {
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => (init?.method === 'POST'
+      ? response({ code: 'STORE_IN_USE', message: 'busy' }, 423)
+      : response(statusBody)));
+    const { result } = renderHook(() => useHarnessVersion('codex', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startUpdate());
+    expect(result.current.actionError).toEqual({ code: 'STORE_IN_USE', message: 'busy' });
+    expect(result.current.state).toMatchObject({ status: 'failed', reason: 'STORE_IN_USE', retryReady: false });
+  });
+
+  it('restore-compatible and rollback post their own routes and bodies', async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST' && url.endsWith('/restore-compatible')) return response({ jobId: 'job-rc', provider: 'opencode', status: 'queued' }, 202);
+      if (init?.method === 'POST' && url.endsWith('/rollback')) return response({ jobId: 'job-rb', provider: 'opencode', status: 'queued' }, 202);
+      if (url.includes('/update-jobs/')) return response({ jobId: 'job-rc', provider: 'opencode', status: 'succeeded', phase: 'done', percent: 100, log: [], fromVersion: '1', toVersion: '1', error: null });
+      return response({ ...statusBody, provider: 'opencode' });
+    });
+    const { result } = renderHook(() => useHarnessVersion('opencode', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startRestoreCompatible());
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers/opencode/restore-compatible', { method: 'POST', body: JSON.stringify({}) });
+    await act(async () => result.current.startRollback('job-prior', 'binary+data'));
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers/opencode/rollback', { method: 'POST', body: JSON.stringify({ jobId: 'job-prior', scope: 'binary+data' }) });
+  });
+
+  it('recovery posts the action and follows the job when one is returned', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/recovery')) return response({ jobId: 'job-recover', provider: 'codex', status: 'queued' }, 202);
+      if (url.includes('/update-jobs/')) return response({ jobId: 'job-recover', provider: 'codex', status: 'running', phase: 'recovering', percent: 50, log: [], fromVersion: '1', toVersion: '1', error: null });
+      return response(statusBody);
+    });
+    const { result } = renderHook(() => useHarnessVersion('codex', true));
+    await waitFor(() => expect(result.current.state.status).toBe('update-available'));
+    await act(async () => result.current.startRecovery('retry'));
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers/codex/recovery', { method: 'POST', body: JSON.stringify({ action: 'retry' }) });
+    await waitFor(() => expect(result.current.state.phase).toBe('recovering'));
+  });
+
   it('owner downgrade aborts delayed job JSON, clears logs, and performs only a public status GET', async () => {
     let resolveJobJson!: (value: unknown) => void;
     let jobReads = 0;

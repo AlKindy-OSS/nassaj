@@ -32,6 +32,7 @@ import type {
 import { AppError } from '@/shared/utils.js';
 
 import { projectVendorHistoryReceipts } from '../shared/vendor/vendor-receipt-identity.js';
+import { resolveStoredClaudeTranscript } from '../list/claude/claude-projects-roots.js';
 import { projectClaudeHistoryReceipts } from '../list/claude/claude-receipt-identity.js';
 import { projectCodexHistoryIdentities, copyCodexHistoryIdentities } from '../list/codex/codex-receipt-identity.js';
 import { withCoordinationDirective } from '../../../../shared/coordinationDirectives.js';
@@ -614,7 +615,9 @@ export const sessionsService = {
       const deadline = new AbortController();
       timer = setTimeout(() => deadline.abort(new HistoryBudgetError('HISTORY_TIMEOUT')), HISTORY_LIMITS.executionMs);
       lease = new HistoryReadLease(AbortSignal.any([signal, deadline.signal]));
-      await lease.initialize(session.jsonl_path);
+      await lease.initialize(session.provider === 'claude'
+        ? resolveStoredClaudeTranscript(session.jsonl_path) ?? session.jsonl_path
+        : session.jsonl_path);
       authorize();
       payload = await this.fetchHistory(sessionId, requesterUserId, { ...options, historyLease: lease });
       await lease.verify(); authorize(); lease.reserveDto(payload); lease.check();

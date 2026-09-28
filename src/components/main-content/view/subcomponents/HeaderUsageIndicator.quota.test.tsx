@@ -119,10 +119,17 @@ type MockQuotaResult = {
   }>;
   plan: string | null;
   isAnthropic: boolean;
-  data?: { extraUsageCredits?: { balance: number; unlimited: boolean } };
+  data?: { extraUsageCredits?: { balance: number | null; unlimited: boolean } };
   refetch: () => void;
 };
 let codexQuotaResult: MockQuotaResult;
+
+/** span[aria-hidden] whose visible text is exactly the "+" mark. */
+function plusMarks(container: Element): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>('span[aria-hidden="true"]')).filter(
+    (el) => el.textContent?.trim() === '+',
+  );
+}
 
 vi.mock('../../../quick-settings-panel/hooks/useProviderQuota', () => ({
   // التوقيع الحقيقي (‏provider, activeModel, enabled): النموذج وسيطٌ ثانٍ لأن
@@ -228,6 +235,7 @@ function renderHeader(sessionProvider?: string | null, tabsMode: 'full' | 'hidde
   return {
     text: container.textContent ?? '',
     badges: container.querySelectorAll('span[aria-label]').length,
+    container,
   };
 }
 
@@ -372,6 +380,43 @@ describe('HeaderUsageIndicator — نوافذ حصّة المزوّد', () => {
     assert.equal(badges, 1);
     assert.equal(text.includes('∞'), true);
     assert.equal(text.includes('42'), false);
+  });
+
+  it('رصيد غير محدود بلا رقم إطلاقاً (balance:null) ⇒ "∞" أيضاً', () => {
+    setSelectedProvider('codex');
+    codexQuotaResult = {
+      ...codexQuotaResult,
+      status: 'success',
+      data: { extraUsageCredits: { balance: null, unlimited: true } },
+      windows: [],
+    };
+
+    const { text, badges } = renderHeader(null);
+    assert.equal(badges, 1);
+    assert.equal(text.includes('∞'), true);
+  });
+
+  it('رصيد نافد فعلاً (‏balance:0) ⇒ "0" بلون مكتوم للعلامة "+" والقيمة معاً', () => {
+    setSelectedProvider('codex');
+    codexQuotaResult = {
+      ...codexQuotaResult,
+      status: 'success',
+      data: { extraUsageCredits: { balance: 0, unlimited: false } },
+      windows: [],
+    };
+
+    const { text, badges, container } = renderHeader(null);
+    assert.equal(badges, 1);
+    assert.equal(text.includes('0'), true);
+
+    const plus = plusMarks(container);
+    assert.equal(plus.length, 1);
+    assert.equal(plus[0].className.includes('text-muted-foreground'), true, 'العلامة "+" مكتومة');
+    assert.equal(plus[0].className.includes('text-primary'), false, 'لا لون تنبيه على صفر مؤكَّد');
+
+    const value = plus[0].nextElementSibling as HTMLElement | null;
+    assert.notEqual(value, null);
+    assert.equal(value!.className.includes('text-muted-foreground'), true, 'القيمة بنفس اللون المكتوم');
   });
 
   it('200 بنوافذ منتهية/غير صالحة يسقط إلى الدورة بعد حسم success', () => {

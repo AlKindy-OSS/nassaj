@@ -1,3 +1,54 @@
+## 2.3.0.9 — 2026-09-28
+
+يضيف تحديث أجساد الوكلاء من الإعدادات ← الوكلاء: تحديث بلقطة احتياطية، ورجوع واستعادة، واستئناف
+التحديث المنقطع عند الإقلاع، مع شارات التوافق والانجراف لكل جسد (T-1871). ويضيف تبويب «النظام» للمالك
+وحده، وتصير نقاط نهاية tmpfs والتخزين للمالك فقط مع تسجيلها في سجل التدقيق (B-1341، T-1869). ويرفع
+claude-agent-sdk إلى 0.3.283 وcodex-sdk إلى 0.157.1، ويُصلح استئناف محادثة agy في مساحة عملها
+الصحيحة، ويُصلح /btw. وفي الواجهة: عنصر تحديث مكثّف في الشريط الجانبي، ومفتاح العتاد ينتقل إلى
+الإعدادات السريعة، وإصلاحات لحوار الأعضاء وسهم التمرير و/compact. وإصلاحات أمان منقولة من upstream:
+الاستنساخ بتذكرة لمرة واحدة بلا توكن GitHub في الرابط، وتجاهل المقبس القديم عند إعادة اتصال الطرفية،
+وسقف 10 آلاف عنصر لشجرة الملفات مع تخطّي /proc و/sys، وحلّ الروابط الرمزية لكل جزء من مسار مساحة العمل.
+Adds harness updates in Settings → Agents: update with a snapshot, rollback and restore, resume of
+an interrupted update at boot, and per-harness compatibility and drift badges (T-1871). Adds an
+owner-only System tab; the tmpfs and storage endpoints are owner-only and audited (B-1341, T-1869).
+Upgrades claude-agent-sdk to 0.3.283 and codex-sdk to 0.157.1, resumes agy chats in their correct
+workspace, and fixes /btw. UI: a condensed sidebar update control, the hardware toggle moves to
+quick settings, and fixes for the members dialog, the scroll arrow and /compact. Security fixes
+ported from upstream: clone through a one-shot ticket with no GitHub token in the URL, the terminal
+ignores a superseded socket on reconnect, the file tree is capped at 10k entries and skips /proc and
+/sys, and workspace paths resolve symlinks segment by segment.
+
+وفي هذا الإصدار أيضاً: كل الأجساد تُشغَّل من سجلّ واحد لمسارات مطلقة بلا بحث في PATH (ADR-189)، وCodex
+يُشغَّل من نسخة الجهاز الرسمية بهوية إطلاق مجمَّدة ويرفض النسخة غير المتوافقة (ADR-188)، وKimi ينتقل إلى
+التثبيت الأصيل مع تعطيل محدّثه الذاتي. وعرض الرصيد لا يُظهر أرصدة غير مؤكدة، ونافذة السياق تُحسب للجلسات
+المستعادة من السجل، وصفوف الجلسات والكلفة تبقى بعد نقل مجلد Claude (T-1880).
+Also: every harness launches from one registry of absolute paths with no PATH lookup (ADR-189); Codex
+runs from the official machine install through one frozen launch identity and refuses an incompatible
+release (ADR-188); Kimi moves to its native install with its self-updater disabled. Credit display
+shows only confirmed balances, restored sessions get a context window, and session and cost rows
+survive a Claude-home relocation (T-1880).
+
+قبل زرّ التحديث على كل عقدة: يجب أن يوجد claude في ‎~/.local/bin/claude‎ وcodex في ‎~/.local/bin/codex‎
+وkimi في ‎~/.kimi-code/bin/kimi‎، أو تُضبط المسارات المطلقة CLAUDE_CLI_PATH وCODEX_PATH وKIMI_PATH في بيئة
+الخادم؛ وإلا تعطّل الجسد الغائب (الخادم نفسه يُقلع). المتابعة من ردّ محدد (fork) في Codex معطّلة عمداً
+حتى يجتاز اختبار fork حقيقي على نسخة الجهاز. بعد تحديث Codex قد تطلب جلسات التفويض الكامل إعادة الاعتماد
+(BINARY_DRIFT). الرجوع إلى 2.3.0.8 يضاعف أرقام كلفة Claude حتى تُحذف صفوف source_key التي تبدأ بـ
+claude-rel: من project_cost_daily وproject_cost_sources ثم يُعاد المسح.
+Before the update button on each node: claude must exist at ~/.local/bin/claude, codex at
+~/.local/bin/codex and kimi at ~/.kimi-code/bin/kimi, or set absolute CLAUDE_CLI_PATH, CODEX_PATH and
+KIMI_PATH in the server environment; otherwise the missing harness is unavailable (the server still
+boots). Codex fork-from-a-reply is closed on purpose until a real fork test passes on the machine
+release. After a Codex update, full-access sessions may need re-approval (BINARY_DRIFT). Rolling back
+to 2.3.0.8 double-counts Claude costs until rows whose source_key starts with claude-rel: are deleted
+from project_cost_daily and project_cost_sources and a rescan runs.
+
+تغيير سلوك: المشروع الذي تتجاوز شجرته 10 آلاف عنصر يعرض الآن تنبيهاً بدل الشجرة.
+قيد معروف: ما زال Qwen يوقف دوره عند انقطاع الشبكة (مُتابَع)، واختيار نموذج لكل وكيل فرعي في Codex
+مؤجَّل بانتظار فحص حيّ لحوكمته.
+Behavior change: a project whose tree exceeds 10k entries now shows a notice instead of the tree.
+Known limitations: Qwen still stops its turn on network loss (tracked); per-subagent Codex models
+remain deferred pending a live governance check.
+
 ## 2.3.0.8 — 2026-09-26
 
 يعرض رصيد Codex الإضافي في مؤشّر الاستهلاك وشريط الحصة المطوي، ويقبل الأرصدة الرقمية مقرّبةً إلى

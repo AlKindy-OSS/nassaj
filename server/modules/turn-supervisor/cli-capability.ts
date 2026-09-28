@@ -1,6 +1,8 @@
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
+import { tryResolveHarnessBinary } from '@/shared/harness-binaries.js';
+
 // eslint-disable-next-line boundaries/dependencies -- capability probes execute provider binaries and share the updater's atomic admission seam.
 import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
 
@@ -42,7 +44,8 @@ function exactVersion(
 function qwenProbe(env: NodeJS.ProcessEnv): boolean {
   const releaseHarnessLaunch = beginHarnessLaunch('qwen');
   try {
-    const binary = env.QWEN_PATH?.trim() || 'qwen';
+    const binary = tryResolveHarnessBinary('qwen');
+    if (!binary) return false;
     const help = output('qwen', binary, ['--help'], env);
     if (!help || !exactVersion('qwen', binary, '0.21.12', env)) return false;
     return [
@@ -57,8 +60,8 @@ function qwenProbe(env: NodeJS.ProcessEnv): boolean {
 function hermesProbe(env: NodeJS.ProcessEnv): boolean {
   const releaseHarnessLaunch = beginHarnessLaunch('hermes');
   try {
-    const binary = env.HERMES_PATH?.trim() || 'hermes';
-    if (!exactVersion('hermes', binary, '0.17.0', env)) return false;
+    const binary = tryResolveHarnessBinary('hermes');
+    if (!binary || !exactVersion('hermes', binary, '0.17.0', env)) return false;
     const directory = mkdtempSync('/var/tmp/nassaj-hermes-capability-probe-');
     const isolated = {
       ...env, HOME: `${directory}/home`, HERMES_HOME: `${directory}/hermes`,
@@ -85,8 +88,10 @@ function hermesProbe(env: NodeJS.ProcessEnv): boolean {
 /** Installed-binary proof. Browser and environment claims cannot replace it. */
 export const installedMechanicalCliProbe: MechanicalCliCapabilityProbe = (provider, env) => {
   if (provider === 'codex' || provider === 'opencode') return true;
-  const binary = provider === 'qwen'
-    ? (env.QWEN_PATH?.trim() || 'qwen') : (env.HERMES_PATH?.trim() || 'hermes');
+  // The binary comes from the harness registry (server env only, T-1873); the
+  // member env handed in here can never redirect it.
+  const binary = tryResolveHarnessBinary(provider);
+  if (!binary) return false;
   const key = `${provider}:${binary}`;
   if (probeCache.has(key)) return probeCache.get(key)!;
   const result = provider === 'qwen' ? qwenProbe(env) : hermesProbe(env);

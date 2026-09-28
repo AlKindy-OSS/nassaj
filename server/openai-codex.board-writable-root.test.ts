@@ -14,7 +14,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { resolveCodexRuntime } from './shared/codex-executable.js';
+import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap — MUST run before importing any project module (mirrors
@@ -48,6 +48,10 @@ fs.writeFileSync(
   '# AGENTS.md — neutral nassaj governance\nplatform-agnostic instructions.\n',
 );
 process.env.HOME = sandboxHome;
+// T-1872: a machine Codex release fixture stands in for ~/.local/bin/codex.
+const codexMachine = createCodexMachineFixture(path.join(sandbox, 'codex-machine'));
+await acceptFixtureRuntimeCompat();
+process.env.CODEX_PATH = codexMachine.launcher;
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 // Start from a known-clean flag state so the ceiling stays workspace-write.
 delete process.env.CODEX_ALLOW_FULL_ACCESS;
@@ -185,10 +189,11 @@ describe('queryCodex — writable root reaches the SDK config (B-405)', () => {
   });
   it('never passes an escaped docs root to the SDK under workspace-write', async () => {
     const config = await spawnAndCaptureConfig(symlinkedCwd);
-    const runtime = resolveCodexRuntime();
+    // T-1872: the SDK runs the machine release by its versioned realpath.
+    const release = fs.realpathSync(codexMachine.release);
     const options = ctorCalls.at(-1)!;
-    assert.equal(options.codexPathOverride, runtime.executablePath);
-    if (runtime.pathDirs.length) assert.ok(String((options.env as Record<string, string>).PATH).startsWith(runtime.pathDirs.join(path.delimiter)));
+    assert.equal(options.codexPathOverride, path.join(release, 'bin', 'codex'));
+    assert.ok(String((options.env as Record<string, string>).PATH).startsWith(path.join(release, 'codex-path')));
     assert.equal(
       WRITABLE_ROOTS_KEY in config,
       false,

@@ -260,10 +260,16 @@ export function useRunProgress(
     // and machine-authored user rows always carry `originKind` — so neither is a
     // boundary, and the scan is not cut off mid-reply. -1 when no human prompt
     // exists ⇒ the loop bound `i > -1` falls back to the whole transcript.
+    // T-1862: `/compact` starts a fresh run with no genuine human `type:'user'`
+    // prompt — only the locally-added "Context compaction started." assistant
+    // row, stamped `isCompactionBoundary`. Without also stopping there, this
+    // scan fell through to the PREVIOUS turn's last user message and folded in
+    // that turn's (possibly still-incomplete) sub-agents as if they belonged
+    // to the compaction run.
     let boundaryIndex = -1;
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       const m = chatMessages[i];
-      if (m.type === 'user' && !m.isToolUse && !m.originKind) {
+      if (m.isCompactionBoundary || (m.type === 'user' && !m.isToolUse && !m.originKind)) {
         boundaryIndex = i;
         break;
       }

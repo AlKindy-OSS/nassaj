@@ -6,12 +6,17 @@ export type ClaudeUsageWindow = {
   resetsAt: string | null; // ISO 8601
 };
 
+// Mirrors server/shared/types.ts ClaudeExtraUsage (duplicated on purpose across
+// the API boundary, not shared). `enabled: true` only means the account has an
+// extra-usage pool at all — every other field is `null` when upstream omits
+// it, and must never be zero-filled: an amount claims a fact the account
+// hasn't confirmed.
 export type ClaudeExtraUsage = {
   enabled: boolean;
-  monthlyLimit: number; // in cents (minor currency units), e.g. 8000 = $80.00
-  usedCredits: number; // in cents, e.g. 5127 = $51.27
-  utilization: number; // 0-100
-  currency: string;
+  monthlyLimit: number | null; // in cents (minor currency units), e.g. 8000 = $80.00
+  usedCredits: number | null; // in cents, e.g. 5127 = $51.27
+  utilization: number | null; // 0-100
+  currency: string | null;
 };
 
 export type ClaudeUsage = {

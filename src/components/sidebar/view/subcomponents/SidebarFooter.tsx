@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import {
-  ArrowUpCircle, ChevronUp, Cpu, LogOut, Palette, RefreshCw, Settings, UserRound,
+  ArrowUpCircle, ChevronUp, LogOut, Palette, RefreshCw, Settings, UserRound,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { IS_PLATFORM } from '../../../../constants/config';
+import { UNKNOWN_VERSION } from '../../../../hooks/useVersionCheck';
 import type { ReleaseInfo } from '../../../../types/sharedTypes';
 import { countPendingServerActions, type PublicAction, type ExecuteOutcome, type DismissOutcome, type HistoryEntry } from '../../../../hooks/useServerActions';
 import { useAuth } from '../../../auth/context/AuthContext';
 import { useRawExecQueue } from '../../../../hooks/useRawExecConfig';
-import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 import { SOURCE_REPO_URL } from '../../../../constants/sourceRepo';
 import { ActionMenu, Button, Dialog, DialogContent, DialogTitle } from '../../../../shared/view/ui';
 import type { SettingsDeepLink } from '../../../settings/types/types';
@@ -68,12 +68,6 @@ export default function SidebarFooter({
   const { deviceAccountSessionsEnabled, logout, user } = useAuth();
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
-  // B-1044 follow-up: SidebarCollapsed (desktop icon rail) already had this
-  // toggle; the expanded sidebar — the only path reachable on mobile via the
-  // drawer — had none, so mobile owners could never re-enable a hidden widget.
-  // Stays visible even when the widget itself is hidden (enabled === false).
-  const { preferences, setPreference } = useUiPreferences();
-  const showHardwareUsage = preferences.showHardwareUsage;
   const userName = user?.username || t('account.fallbackName');
   const initials = Array.from(userName.trim()).slice(0, 2).join('').toLocaleUpperCase();
   const [showPanel, setShowPanel] = useState(false);
@@ -90,35 +84,6 @@ export default function SidebarFooter({
 
   return (
     <div className="mt-auto flex-shrink-0 pt-1" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}>
-      {/* Update banner */}
-      {updateAvailable && (
-        <div className="px-3 py-0.5">
-          {/* بانر التحديث — سطر واحد، نمط مطابق للشريط البرتقالي */}
-          <button
-            type="button"
-            className="flex h-8 w-full items-center gap-1.5 rounded-lg bg-blue-50/80 px-2 text-start text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-blue-900/15 dark:text-blue-400 dark:hover:bg-blue-900/25"
-            onClick={onShowVersionModal}
-            aria-label={`${updatePrepared ? t('version.updatePrepared') : t('version.updateAvailable')}${latestVersion ? ` — v${latestVersion}` : ''}`}
-          >
-            <div className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-              <ArrowUpCircle className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" aria-hidden />
-              <span className="absolute -end-0.5 -top-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-            </div>
-            <span className="min-w-0 flex-1 truncate">
-              {t('version.newUpdate')}
-            </span>
-            {latestVersion && (
-              <span
-                className="ms-auto shrink-0 text-[11px] tabular-nums opacity-60"
-                dir="ltr"
-              >
-                v{latestVersion}
-              </span>
-            )}
-          </button>
-        </div>
-      )}
-
       {/* لوحة الأوامر تبقى على المسار القديم: لا تظهر إلا عند وجود أمر ينتظر. */}
       {showBanner && (
         <>
@@ -160,28 +125,9 @@ export default function SidebarFooter({
         />
       )}
 
-      {/* العتاد بنفس بطاقة الإحصاءات الأصلية. */}
+      {/* العتاد بنفس بطاقة الإحصاءات الأصلية؛ زرّ التشغيل/الإيقاف انتقل إلى
+          لوحة الإعدادات السريعة (B-1044 follow-up) لأنها تخدم الجوّال أيضاً. */}
       <SystemStatsFooter t={t} />
-
-      {/* B-1044 follow-up: زرّ تشغيل/إيقاف العتاد نفسه — يبقى ظاهراً دائماً
-          (حتى حين showHardwareUsage=false وSystemStatsFooter لا يُصيَّر) كي
-          يستطيع المستخدم عبر الجوّال إعادة تفعيله؛ نظير زرّ Cpu في
-          SidebarCollapsed لكن بنمط صفّ التذييل الموسَّع. */}
-      <div className="px-3 pb-0.5">
-        <button
-          type="button"
-          onClick={() => setPreference('showHardwareUsage', !showHardwareUsage)}
-          className={`flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-start text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-            showHardwareUsage ? 'bg-accent/40 text-foreground' : ''
-          }`}
-          aria-pressed={showHardwareUsage}
-          aria-label={t('systemStats.hardwareToggleFooter')}
-          title={t('systemStats.hardwareToggleFooter')}
-        >
-          <Cpu className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate">{t('systemStats.hardwareToggleFooter')}</span>
-        </button>
-      </div>
 
       <div className="px-3 pb-0 pt-0.5">
         {deviceAccountSessionsEnabled ? <AccountSwitcher
@@ -243,17 +189,56 @@ export default function SidebarFooter({
       {/* Owner-only upstream release notice */}
       <UpstreamReleaseNotice />
 
-      {/* سطر إصدار نسّاج (OSS فقط) */}
-      {!IS_PLATFORM && (
-        <div className="px-3 pb-0 pt-0 text-center">
-          <a
-            href={SOURCE_REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] leading-none text-muted-foreground/40 transition-colors hover:text-muted-foreground"
-          >
-            {t('common:brand.openSourceVersion', { version: currentVersion })}
-          </a>
+      {/* T-1862: عنصر تحديث واحد مضغوط يخلف بانر «تحديث جديد» الأزرق وسطر
+          «نسّاج vX — مفتوح المصدر» معاً. الضغط يفتح نافذة الإصدار الموجودة.
+          round 2 (qa LOW):
+            - يظهر فقط عند وجود تحديث حقيقي، أو في نسخة OSS (سطر الترخيص كان
+              ظاهراً دائماً بصرف النظر عن التحديث — استعادة السلوك السابق
+              بدل عنصر يظهر دائماً حتى على منصّة بلا تحديث).
+            - النصّ لا يُصيَّر أصلاً حين يفشل `/health` (currentVersion=UNKNOWN_VERSION)
+              بدل عرض «v—» كأنه إصدار حقيقي.
+            - «تحديث إلى vX» نصّاً صريحاً بدل سهم مجرَّد قد يلتبس اتجاهه في RTL.
+            - تباين وهدف لمس أكبر (min-h-9 على الجوّال، h-6 من sm فصاعداً). */}
+      {(updateAvailable || !IS_PLATFORM) && (
+        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-3 pb-0.5 pt-0.5">
+          {currentVersion !== UNKNOWN_VERSION && (
+            <button
+              type="button"
+              onClick={onShowVersionModal}
+              className="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs leading-none text-muted-foreground transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:min-h-6 sm:px-1.5"
+              aria-label={updateAvailable
+                ? `${updatePrepared ? t('version.updatePrepared') : t('version.updateAvailable')}${latestVersion ? ` — v${latestVersion}` : ''}`
+                : t('version.currentVersionLabel', { version: currentVersion, defaultValue: 'Nassaj v{{version}}' }) as string}
+            >
+              {/* round 3 (qa): dir="ltr" على الغلاف كان يفرض ترتيب قراءة
+                  إنجليزي على كل المحتوى فيلتبس نصّ «تحديث إلى» العربي. الآن
+                  العزل على كل رقم إصدار عبر <bdi dir="ltr"> وحده، والنص
+                  العربي بترتيبه الطبيعي، وفاصلة مرئية (·) بين الرقمين.
+                  T-1868: النبرة (accent) على الإصدار الجديد وحده — الإصدار
+                  الحالي يبقى محايداً (text-muted-foreground الموروثة من
+                  الزرّ) لأنه ليس هو ما يستدعي الانتباه. */}
+              <bdi dir="ltr" className="tabular-nums">v{currentVersion}</bdi>
+              {updateAvailable && latestVersion && (
+                <>
+                  <span aria-hidden="true" className="text-muted-foreground/70">·</span>
+                  <ArrowUpCircle className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
+                  <span className="font-medium text-primary">{t('version.updateToLabel', { defaultValue: 'Update to' })}</span>
+                  <bdi dir="ltr" className="font-medium tabular-nums text-primary">v{latestVersion}</bdi>
+                </>
+              )}
+            </button>
+          )}
+          {!IS_PLATFORM && (
+            <a
+              href={SOURCE_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={t('common:brand.openSourceLicense') as string}
+              className="inline-flex min-h-9 items-center px-1 text-xs leading-none text-muted-foreground transition-colors hover:text-foreground sm:min-h-6"
+            >
+              {t('common:brand.openSourceShort', { defaultValue: 'Open source' })}
+            </a>
+          )}
         </div>
       )}
     </div>

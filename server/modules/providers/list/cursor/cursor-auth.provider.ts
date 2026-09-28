@@ -1,10 +1,11 @@
 import spawn from 'cross-spawn';
 
+import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
-import { isCliInstalled } from '@/shared/utils.js';
+import { isHarnessCliInstalled } from '@/shared/utils.js';
 
 type CursorLoginStatus = {
   authenticated: boolean;
@@ -18,7 +19,7 @@ export class CursorProviderAuth implements IProviderAuth {
    * Checks whether the cursor-agent CLI is available on this host.
    */
   private checkInstalled(): boolean {
-    return isCliInstalled('cursor-agent');
+    return isHarnessCliInstalled('cursor');
   }
 
   /**
@@ -65,6 +66,15 @@ export class CursorProviderAuth implements IProviderAuth {
     return new Promise((resolve) => {
       let processCompleted = false;
       let childProcess: ReturnType<typeof spawn> | undefined;
+      // T-1871: `cursor-agent status` is a cursor harness spawn — it crosses
+      // the single admission path (lease/recovery/reconcile block + ledger).
+      let releaseLaunch: () => void;
+      try {
+        releaseLaunch = beginHarnessLaunch('cursor');
+      } catch {
+        resolve({ authenticated: false, email: null, method: null, error: 'Cursor is being updated' });
+        return;
+      }
 
       const timeout = setTimeout(() => {
         if (!processCompleted) {
@@ -80,12 +90,13 @@ export class CursorProviderAuth implements IProviderAuth {
       }, 5000);
 
       try {
-        childProcess = spawn(resolveCliExecutablePath('cursor-agent'), ['status'], {
+        childProcess = spawn(resolveHarnessBinary('cursor'), ['status'], {
           env: resolveProviderEnv(userId ?? null, 'cursor', process.env),
         });
       } catch {
         clearTimeout(timeout);
         processCompleted = true;
+        releaseLaunch();
         resolve({
           authenticated: false,
           email: null,
@@ -107,6 +118,7 @@ export class CursorProviderAuth implements IProviderAuth {
       });
 
       childProcess.on('close', (code) => {
+        releaseLaunch();
         if (processCompleted) {
           return;
         }
@@ -133,6 +145,7 @@ export class CursorProviderAuth implements IProviderAuth {
       });
 
       childProcess.on('error', () => {
+        releaseLaunch();
         if (processCompleted) {
           return;
         }

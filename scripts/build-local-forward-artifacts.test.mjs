@@ -211,7 +211,7 @@ test('actual Git materializer feeds measured plan and workspace copy; stale sour
     t.after(()=>{spawnSync('/usr/bin/chmod',['-R','u+w',root]);fs.rmSync(root,{recursive:true,force:true});});
     const git=args=>{const r=spawnSync('/usr/bin/git',args,{cwd:root,encoding:'utf8',env:{...CONTROL_ENV,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@invalid'}});assert.equal(r.status,0,r.stderr);return r.stdout.trim();};
     write(path.join(root,'package.json'),'{"version":"1.2.3.4"}');
-    write(path.join(root,'package-lock.json'),JSON.stringify({lockfileVersion:3,packages:{'':{},'node_modules/@openai/codex-sdk':{version:'0.153.2',integrity:'sha512-YQ=='}}}));
+    write(path.join(root,'package-lock.json'),JSON.stringify({lockfileVersion:3,packages:{'':{},'node_modules/@openai/codex-sdk':{version:'0.157.1',integrity:'sha512-YQ=='}}}));
     write(path.join(root,'scripts/lib/release-build-isolation.c'),fs.readFileSync(path.join(ROOT,'scripts/lib/release-build-isolation.c')));
     git(['init','-q']);git(['add','package.json','package-lock.json','scripts/lib/release-build-isolation.c']);git(['update-index','--add','--cacheinfo','160000,4895cd3fd33362471e739b786493aba048487bcc,plugins/starter']);git(['commit','-qm','fixture']);const oid=git(['rev-parse','HEAD']);
     await materializePreviewSnapshot(root,oid);fs.mkdirSync(path.join(root,'.artifacts'));

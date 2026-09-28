@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
+
 // eslint-disable-next-line boundaries/dependencies -- systemd admission must stay a synchronous leaf and avoid the providers barrel's service graph.
 import { beginHarnessLaunch } from '../providers/harness-update/spawn-admission.js';
 
@@ -247,7 +249,6 @@ export async function launchScope(params: {
   wfLaunchId: string;
   userId: number;
   cwd: string;
-  claudeBin: string;
   scriptOrPrompt: string;
   setenv: Record<string, string>;
   /** Task artifact dir (result.json[.partial] + DONE land here — §أ-2/§أ-4). */
@@ -322,7 +323,8 @@ export async function launchScope(params: {
     '--task-dir',
     params.resultDir,
     '--claude-bin',
-    params.claudeBin,
+    // The one claude the terminal runs, from the harness registry (T-1873).
+    resolveHarnessBinary('claude'),
     '--output-format',
     'json',
     '--claude-timeout-sec',

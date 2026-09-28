@@ -3,7 +3,7 @@ import { query, type Options, type SDKMessage, type SDKResultMessage } from '@an
 // eslint-disable-next-line boundaries/dependencies -- admission is a synchronous leaf; importing the providers barrel here creates the provider-auth graph during adapter boot.
 import { isSpawnBlockedForRunProvider } from '../../providers/harness-update/spawn-admission.js';
 import { assertAnthropicBaseUrlAllowed, assertSettingsEnvAllowed } from '../../../services/isolation/anthropic-base-url-guard.js';
-import { resolveClaudeCodeExecutablePath } from '../../../shared/claude-cli-path.js';
+import { resolveHarnessBinary } from '../../../shared/harness-binaries.js';
 
 import {
   TurnAdapterError,
@@ -120,7 +120,7 @@ export function createClaudeSdkTurnAdapter(
           skills: [],
           permissionMode: 'dontAsk',
           includePartialMessages: false,
-          pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(env.CLAUDE_CLI_PATH),
+          pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
           systemPrompt: [request.system, ...(request.hiddenContext ?? [])]
             .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
             .join('\n\n'),

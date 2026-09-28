@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { access, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import {
@@ -15,6 +15,7 @@ import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 import type { AgentReviewIngestor } from '../../services/agent-review-ingestor.js';
 
 import { claudeHomeForSessionFile, resolveClaudeHomes } from './claude-home.js';
+import { locateClaudeTranscript } from './claude-projects-roots.js';
 
 type ParsedSession = {
   sessionId: string;
@@ -125,23 +126,18 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    * ~/.claude/projects, leaving DB rows that can neither be opened nor resumed.
    * Scoped to provider "claude" rows with a stored jsonl_path so rows of other
    * providers (or rows that legitimately have no transcript file) are untouched.
+   * T-1880: a row spelled with a pre-separation root survives while the same
+   * relative file exists under any current projects root; transient/permission
+   * errors never count as absence.
    */
   private async pruneDeletedSessionFiles(): Promise<number> {
     const rows = sessionsDb.getSessionFilePathsByProvider(this.provider);
     let pruned = 0;
 
     for (const row of rows) {
-      try {
-        await access(row.jsonl_path);
-      } catch (error) {
-        const fileError = error as NodeJS.ErrnoException;
-        if (fileError.code !== 'ENOENT') {
-          // Transient/permission errors must not delete rows for files that may still exist.
-          continue;
-        }
-        if (sessionsDb.deleteSessionById(row.session_id)) {
-          pruned += 1;
-        }
+      if (locateClaudeTranscript(row.jsonl_path).state !== 'absent') continue;
+      if (sessionsDb.deleteSessionById(row.session_id)) {
+        pruned += 1;
       }
     }
 

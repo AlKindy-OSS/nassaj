@@ -36,6 +36,12 @@ const CREDENTIAL_UNIT = "'gemini' is agy's credential unit (credential-principal
 /** Relative path → one-line reason it keeps the word. */
 const ALLOWLIST: Readonly<Record<string, string>> = Object.freeze({
   'server/agy-cli.js': AGY_HOME,
+  'scripts/repair-agy-orphan-workspaces.mjs': AGY_HOME,
+  'scripts/repair-agy-orphan-workspaces.test.mjs': AGY_HOME,
+  'server/agy-cli.handover.test.ts': AGY_HOME,
+  'server/modules/providers/harness-update/descriptors.ts': AGY_HOME,
+  'server/modules/providers/list/antigravity/agy-brain-dir.js': AGY_HOME,
+  'server/modules/websocket/services/session-handover.test.ts': AGY_HOME,
   'server/agy-cli.lifecycle.test.ts': AGY_HOME,
   'server/agy-cli.model.test.ts': AGY_MODELS,
   'server/agy-cli.registry-integration.test.ts': AGY_HOME,

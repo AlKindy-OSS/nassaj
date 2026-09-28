@@ -115,6 +115,7 @@
     "showToolCalls": "显示工具调用",
     "autoScrollToBottom": "自动滚动到底部",
     "tabsIconOnly": "紧凑标签（仅图标）",
+    "showHardwareUsage": "显示硬件使用情况",
     "sendByCtrlEnter": "使用 Ctrl+Enter 发送",
     "sendByCtrlEnterDescription": "启用后，按 Ctrl+Enter 发送消息，而不是仅按 Enter。这对于使用输入法的用户可以避免意外发送。",
     "dragHandle": {
@@ -215,7 +216,8 @@
     "notifications": "通知",
     "users": "用户",
     "about": "关于",
-    "commandBoard": "命令面板"
+    "commandBoard": "命令面板",
+    "system": "系统"
   },
   "profile": {
     "title": "个人资料",
@@ -1119,8 +1121,8 @@
   "error": "Error",
   "stop": "Stop",
   "tmpfsCap": {
-    "title": "Shared memory cap (/tmp)",
-    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "title": "Shared memory cap ({{path}})",
+    "description": "{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
     "desiredLabel": "Desired cap",
     "capped": "Capped",
     "uncapped": "No cap",

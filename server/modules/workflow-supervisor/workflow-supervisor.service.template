@@ -32,7 +32,7 @@ Environment=WORKFLOW_SUPERVISOR=1
 # Optional tuning (defaults shown):
 #   Environment=WORKFLOW_SUPERVISOR_MAX_PER_USER=3
 #   Environment=WORKFLOW_SUPERVISOR_POLL_MS=2000
-#   Environment=WORKFLOW_SUPERVISOR_CLAUDE_BIN=claude
+#   Environment=WORKFLOW_SUPERVISOR_CLAUDE_BIN=/absolute/path/to/claude  (default: the harness registry's claude)
 ExecStart=@@NODE@@ @@WORKDIR@@/dist-server/server/modules/workflow-supervisor/supervisor.js
 Restart=on-failure
 RestartSec=5

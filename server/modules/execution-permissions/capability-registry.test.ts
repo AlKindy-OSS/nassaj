@@ -1,9 +1,16 @@
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import '../../shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import test from 'node:test';
+import test, { after } from 'node:test';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Pure shared resolver and its test fixture, outside the module graph.
+import { acquireCodexLaunchIdentity } from '../../shared/codex-executable.js';
+import { createCodexMachineFixture } from '../../shared/tests/codex-release-fixture.js';
 
 import artifact from './fixtures/permission-capabilities.v1.json' with { type: 'json' };
 import { CLAUDE_REFERENCE_VECTOR_V1 } from './fixtures/claude-reference-v1.js';
@@ -19,6 +26,17 @@ import {
 } from './capability-registry.js';
 
 const measuredCodex = artifact.candidates.find(candidate => candidate.body === 'codex')!;
+
+// T-1872: a machine Codex release fixture stands in for ~/.local/bin/codex.
+const machineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-registry-machine-'));
+const machine = createCodexMachineFixture(machineRoot);
+const savedCodexPath = process.env.CODEX_PATH;
+process.env.CODEX_PATH = machine.launcher;
+after(() => {
+  if (savedCodexPath === undefined) delete process.env.CODEX_PATH; else process.env.CODEX_PATH = savedCodexPath;
+  fs.rmSync(machineRoot, { recursive: true, force: true });
+});
+const machineIdentity = () => acquireCodexLaunchIdentity({ readVersion: () => '0.156.0' });
 
 const context = Object.freeze({
   launchId: 'launch-1', principalId: 'user:1', sessionId: null,
@@ -91,10 +109,14 @@ test('unavailable-body records reject malformed reasons, dates, and extra keys',
 
 test('installed Codex source identity remains distinct from compiled measured evidence', () => {
   const claude = resolveInstalledClaudeBuildFingerprint(() => '2.1.258 (Claude Code)' as never);
-  const codex = resolveInstalledCodexBuildFingerprint();
+  const codex = resolveInstalledCodexBuildFingerprint(machineIdentity());
   const agy = resolveInstalledAgyBuildFingerprint(() => '1.1.24' as never);
   assert.equal(claude.cliFingerprint, installed.cliFingerprint);
-  assert.equal(claude.sdkFingerprint, installed.sdkFingerprint);
+  // The SDK identity is measured from the installed package, not copied from the
+  // sealed reference; an SDK upgrade past the measured one is drift, never parity.
+  const installedSdk = JSON.parse(fs.readFileSync(
+    new URL('../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json', import.meta.url), 'utf8'));
+  assert.equal(claude.sdkFingerprint, `anthropic-claude-agent-sdk@${installedSdk.version}`);
   assert.match(claude.buildFingerprint, /^sha256:[a-f0-9]{64}$/u);
   // Source adapters have changed since the sealed reference measurement. A matching
   // version string must not upgrade those changed bytes to measured parity.
@@ -105,8 +127,9 @@ test('installed Codex source identity remains distinct from compiled measured ev
   if (claudeParity.kind === 'deny') assert.ok(claudeParity.reasonCodes.includes('BINARY_DRIFT'));
   const sdk = JSON.parse(fs.readFileSync(new URL('../../../node_modules/@openai/codex-sdk/package.json', import.meta.url), 'utf8'));
   assert.equal(codex.sdkFingerprint, `openai-codex-sdk@${sdk.version}`);
-  const cli = JSON.parse(fs.readFileSync(new URL('../../../node_modules/@openai/codex/package.json', import.meta.url), 'utf8'));
-  assert.equal(codex.cliFingerprint, `codex-cli@${cli.version}`);
+  // T-1872: the CLI is the machine release, not the SDK-bundled npm package.
+  assert.equal(codex.cliFingerprint, 'codex-cli@0.156.0');
+  // Until part 2 re-measures the machine release, full delegation must report drift.
   const drifted = evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, resolveMeasuredPermissionCandidate(
     { ...context, body: 'codex' }, measuredCodex.evidence.measuredAt, codex,
   ));
@@ -123,52 +146,41 @@ test('installed Codex source identity remains distinct from compiled measured ev
 });
 
 
-test('Codex runtime and measurement bind the same native executable identity, ignoring PATH CLI', async () => {
+test('Codex runtime and measurement bind the same machine identity object', async () => {
   const { readInstalledIdentity, identityDigest } = await import('../../../scripts/permission-parity-measure-codex.mjs');
-  let measuredBinary = '';
-  const exec = ((binary: string) => { measuredBinary = binary; return 'codex-cli 0.153.2'; }) as never;
-  const runtime = resolveInstalledCodexBuildFingerprint(exec);
-  assert.ok(measuredBinary.startsWith('/'));
-  assert.notEqual(measuredBinary, 'codex');
-  assert.equal(runtime.buildFingerprint, identityDigest(readInstalledIdentity(exec)));
+  const { codexFingerprintFields } = await import('../../shared/codex-executable.js');
+  const identity = machineIdentity();
+  const runtime = resolveInstalledCodexBuildFingerprint(identity);
+  const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  const sdk = JSON.parse(fs.readFileSync(path.join(project, 'node_modules/@openai/codex-sdk/package.json'), 'utf8'));
+  const measured = readInstalledIdentity({
+    root: project, acquire: () => identity, fingerprintFields: codexFingerprintFields, sdkVersion: sdk.version,
+  });
+  assert.equal(measured.launchIdentity, identity);
+  assert.equal(runtime.buildFingerprint, identityDigest(measured));
+  assert.throws(() => resolveInstalledCodexBuildFingerprint(undefined as never), /CLI_VERSION_INVALID/u);
 });
 
 
-test('Codex build fingerprint changes when native bytes change with the same reported CLI version', async () => {
-  // Pure shared native identity utility outside the module graph.
-  const { readCodexExecutableIdentity } = await import('../../shared/codex-executable.js');
-  const identity = readCodexExecutableIdentity();
-  const sameVersion = (() => 'codex-cli 0.153.2') as never;
-  const before = resolveInstalledCodexBuildFingerprint(sameVersion, () => identity);
+test('Codex build fingerprint changes when release bytes change with the same reported version', () => {
+  const identity = machineIdentity();
+  const before = resolveInstalledCodexBuildFingerprint(identity);
   for (const changed of [
     { nativeDigest: 'sha256:changed-native-bytes' },
-    { sdkSourceDigest: 'sha256:changed-sdk-bytes' },
-    { pathClosure: [['rg', 'sha256:changed-tool-bytes']] },
+    { treeDigest: 'sha256:changed-resource-bytes' },
+    { resolverDigest: 'sha256:changed-resolver-bytes' },
   ]) {
-    const after = resolveInstalledCodexBuildFingerprint(sameVersion, () => ({ ...identity, ...changed }));
+    const after = resolveInstalledCodexBuildFingerprint(Object.freeze({ ...identity, ...changed }));
     assert.equal(after.cliFingerprint, before.cliFingerprint);
     assert.notEqual(after.buildFingerprint, before.buildFingerprint);
   }
 });
 
 
-test('same-version native file mutation changes the registry build fingerprint', async () => {
-  // Pure shared identity utility outside the module graph.
-  const { readCodexExecutableIdentity, codexFileDigest } = await import('../../shared/codex-executable.js');
-  const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const artifacts = path.join(project, '.artifacts');
-  fs.mkdirSync(artifacts, { recursive: true });
-  const root = fs.mkdtempSync(path.join(artifacts, 'codex-registry-bytes-'));
-  try {
-    const binary = path.join(root, 'native');
-    const native = readCodexExecutableIdentity();
-    const readNative = () => ({ ...native, nativeDigest: codexFileDigest(binary) });
-    const fixedVersion = (() => 'codex-cli 0.153.2') as never;
-    fs.writeFileSync(binary, 'first native bytes');
-    const before = resolveInstalledCodexBuildFingerprint(fixedVersion, readNative);
-    fs.writeFileSync(binary, 'other native bytes');
-    const after = resolveInstalledCodexBuildFingerprint(fixedVersion, readNative);
-    assert.equal(after.cliFingerprint, before.cliFingerprint);
-    assert.notEqual(after.buildFingerprint, before.buildFingerprint);
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+test('same-version release file mutation changes the registry build fingerprint', () => {
+  const before = resolveInstalledCodexBuildFingerprint(machineIdentity());
+  fs.appendFileSync(path.join(machine.release, 'codex-resources', 'bwrap'), 'patched');
+  const after = resolveInstalledCodexBuildFingerprint(machineIdentity());
+  assert.equal(after.cliFingerprint, before.cliFingerprint);
+  assert.notEqual(after.buildFingerprint, before.buildFingerprint);
 });

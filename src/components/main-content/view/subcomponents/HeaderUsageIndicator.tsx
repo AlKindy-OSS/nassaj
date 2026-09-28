@@ -6,12 +6,12 @@ import { useClaudeUsageShared as useClaudeUsage } from '../../../quick-settings-
 import { useAuth } from '../../../auth/context/AuthContext';
 import {
   clampUtilization,
+  formatClaudeExtraBadgeText,
+  formatClaudeExtraDetailAmounts,
   formatCreditBalance,
-  formatCredits,
   formatPercent,
-  formatRemainingHarnessCredits,
   formatResetTime,
-  hasDisplayableExtraUsageCredits,
+  resolveClaudeExtraUsageDisplay,
   usageTextColorClass,
 } from '../../../quick-settings-panel/claudeUsageHelpers';
 import type { ClaudeUsage } from '../../../quick-settings-panel/claudeUsageTypes';
@@ -36,6 +36,7 @@ import {
 import { useProviderQuota } from '../../../quick-settings-panel/hooks/useProviderQuota';
 import {
   looksLikeAnthropicModel,
+  resolveCreditDisplay,
   resolveWindowLength,
   shouldSuppressOnProviderWindowsLoading,
 } from '../../../quick-settings-panel/providerQuotaHelpers';
@@ -224,23 +225,23 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
   // idle/loading يبقيان صامتَين بواسطة `shouldSuppressOnProviderWindowsLoading`.
   if (!claudeWindowsAllowed) {
     // ── نوافذ المزوّد (نسبة مستهلكة + أفق التصفير) ──────────────────────────
-    const extraCredits =
-      providerQuota.status === 'success' ? providerQuota.data?.extraUsageCredits : undefined;
-    const hasExtraCredits =
-      extraCredits &&
-      Number.isFinite(extraCredits.balance) &&
-      extraCredits.balance >= 0 &&
-      typeof extraCredits.unlimited === 'boolean';
+    const creditDisplay = resolveCreditDisplay(
+      providerQuota.status === 'success' ? providerQuota.data?.extraUsageCredits : undefined,
+    );
     const extraCreditsLabel =
-      hasExtraCredits && extraCredits
-        ? extraCredits.unlimited
-          ? t('agentUsage.unlimited')
-          : t('agentUsage.creditUnits', {
-              formattedCount: isolateBidi(formatCreditBalance(extraCredits.balance, i18n.language)),
+      creditDisplay.kind === 'unlimited'
+        ? t('agentUsage.unlimited')
+        : creditDisplay.kind === 'amount'
+          ? t('agentUsage.creditUnits', {
+              formattedCount: isolateBidi(formatCreditBalance(creditDisplay.value, i18n.language)),
             })
-        : null;
+          : creditDisplay.kind === 'zero'
+            ? t('agentUsage.creditUnits', {
+                formattedCount: isolateBidi(formatCreditBalance(0, i18n.language)),
+              })
+            : null;
 
-    if (quotaWindows.length > 0 || hasExtraCredits) {
+    if (quotaWindows.length > 0 || creditDisplay.kind !== 'hidden') {
       return (
         <div
           className="flex flex-shrink-0 select-none items-center gap-3"
@@ -300,7 +301,7 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
               </Tooltip>
             );
           })}
-          {hasExtraCredits && extraCredits && (
+          {creditDisplay.kind !== 'hidden' && (
             <Tooltip
               content={
                 <div className="space-y-0.5">
@@ -316,9 +317,18 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
                 className="flex items-baseline gap-0.5 text-xs"
                 aria-label={`${t('agentUsage.codexExtraCredits')}: ${extraCreditsLabel}`}
               >
-                <span className="font-semibold text-primary" aria-hidden="true">+</span>
+                <span
+                  className={`font-semibold ${creditDisplay.kind === 'zero' ? 'text-muted-foreground' : 'text-primary'}`}
+                  aria-hidden="true"
+                >
+                  +
+                </span>
                 <span className="tabular-nums text-muted-foreground">
-                  {extraCredits.unlimited ? '∞' : formatCreditBalance(extraCredits.balance, i18n.language)}
+                  {creditDisplay.kind === 'unlimited'
+                    ? '∞'
+                    : creditDisplay.kind === 'amount'
+                      ? formatCreditBalance(creditDisplay.value, i18n.language)
+                      : formatCreditBalance(0, i18n.language)}
                 </span>
               </span>
             </Tooltip>
@@ -470,9 +480,9 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
   if (usageState.status !== 'success') return null;
 
   const { data } = usageState;
-  const extraUsage = hasDisplayableExtraUsageCredits(data.extraUsage)
-    ? data.extraUsage
-    : null;
+  const claudeExtraDisplay = resolveClaudeExtraUsageDisplay(data.extraUsage);
+  const extraBadgeText = formatClaudeExtraBadgeText(claudeExtraDisplay, i18n.language);
+  const extraDetail = formatClaudeExtraDetailAmounts(claudeExtraDisplay, i18n.language);
 
   // Build the list of windows that actually have data.
   const items = WINDOWS.flatMap(({ letter, key }) => {
@@ -483,7 +493,7 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
   });
 
   // Nothing to show — all windows are null.
-  if (items.length === 0 && !extraUsage) return null;
+  if (items.length === 0 && claudeExtraDisplay.kind === 'hidden') return null;
 
   return (
     <div
@@ -536,17 +546,16 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
           </Tooltip>
         );
       })}
-      {extraUsage && (
+      {extraBadgeText !== null && (
         <Tooltip
           content={
             <div className="space-y-0.5">
               <div className="font-medium">{t('claudeUsage.windows.extraUsage')}</div>
-              <div className="opacity-75">
-                {t('claudeUsage.extraUsageDetail', {
-                  used: formatCredits(extraUsage.usedCredits, extraUsage.currency, i18n.language),
-                  limit: formatCredits(extraUsage.monthlyLimit, extraUsage.currency, i18n.language),
-                })}
-              </div>
+              {extraDetail && (
+                <div className="opacity-75">
+                  {t('claudeUsage.extraUsageDetail', extraDetail)}
+                </div>
+              )}
             </div>
           }
           position="bottom"
@@ -555,12 +564,15 @@ export default function HeaderUsageIndicator({ tabsMode, sessionProvider }: Head
         >
           <span
             className="flex items-baseline gap-0.5 text-xs"
-            aria-label={`${t('claudeUsage.windows.extraUsage')}: ${formatRemainingHarnessCredits(extraUsage, i18n.language)}`}
+            aria-label={`${t('claudeUsage.windows.extraUsage')}: ${extraBadgeText}`}
           >
-            <span className="font-semibold text-primary" aria-hidden="true">+</span>
-            <span className="tabular-nums text-muted-foreground">
-              {formatRemainingHarnessCredits(extraUsage, i18n.language)}
+            <span
+              className={`font-semibold ${claudeExtraDisplay.kind === 'zero' ? 'text-muted-foreground' : 'text-primary'}`}
+              aria-hidden="true"
+            >
+              +
             </span>
+            <span className="tabular-nums text-muted-foreground">{extraBadgeText}</span>
           </span>
         </Tooltip>
       )}

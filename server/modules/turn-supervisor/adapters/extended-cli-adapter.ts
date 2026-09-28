@@ -6,6 +6,7 @@ import { providerSecretsService } from '@/modules/providers/index.js';
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { sanitizeVendorAgentEnv } from '@/services/isolation/sanitize-vendor-agent-env.js';
+import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { resolveOpenCodeBinaryPath } from '@/shared/utils.js';
 
 import {
@@ -189,9 +190,13 @@ function parseOutput(provider: ExtendedCliProvider, stdout: string): string {
   return provider === 'hermes' ? stdout.trim() : parseJsonLines(provider, stdout);
 }
 
+/** Registry-resolved binary; opencode goes through its digest-pinned wrapper. Throws when unresolved. */
+function resolveExtendedCliBinary(provider: ExtendedCliProvider): string {
+  return provider === 'opencode' ? resolveOpenCodeBinaryPath() : resolveHarnessBinary(provider);
+}
+
 /** Strict, capture-only Qwen/OpenCode/Hermes registrations. There is no legacy passthrough path. */
 export function createExtendedCliAdapter(provider: ExtendedCliProvider, options: AdapterOptions = {}): TurnAdapterRegistration {
-  const binary = options.binary ?? (provider === 'opencode' ? resolveOpenCodeBinaryPath() : provider);
   const cwd = options.cwd ?? process.cwd();
   const resolveEnv = options.resolveEnv ?? ((userId: string | number) => defaultResolvedEnv(userId, provider));
   const executableProbe = options.executableProbe ?? executable;
@@ -200,12 +205,20 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
   const cleanupRole = options.cleanupRoleHome ?? cleanupEphemeralRoleHome;
   const run = options.spawnCapture ?? spawnInIsolatedCliCage;
   let pinnedAndSafe = false;
+  // Resolved at probe time through the harness registry (T-1873) and pinned for
+  // invoke; opencode additionally passes its vendor digest pin.
+  let binary = '';
   const registration: TurnAdapterRegistration = {
     id: `${provider}-cli-supervisor-ephemeral`, capabilities: EXTENDED_CLI_CAPABILITIES,
     supports(candidate: string): candidate is ExtendedCliProvider { return candidate === provider; },
     async probe({ userId }): Promise<boolean> {
       // T-1749/ADR-159: never probe (spawn) a binary that is being replaced.
       if (isSpawnBlockedForRunProvider(provider)) return false;
+      try {
+        binary = options.binary ?? resolveExtendedCliBinary(provider);
+      } catch {
+        return false;
+      }
       if (!await executableProbe(binary) || await versionProbe(binary) !== EXACT_VERSIONS[provider]) return false;
       const env = resolveEnv(userId);
       if (provider === 'qwen') {

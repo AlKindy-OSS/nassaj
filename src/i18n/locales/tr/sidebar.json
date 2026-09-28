@@ -114,8 +114,7 @@
   },
   "systemStats": {
     "cpuUsage": "CPU kullanımı",
-    "memoryUsage": "Bellek kullanımı",
-    "hardwareToggleCollapsed": "Donanım kullanımını göster/gizle"
+    "memoryUsage": "Bellek kullanımı"
   },
   "branding": {
     "openSource": "Açık Kaynak"
@@ -164,7 +163,9 @@
     "updateAvailable": "Güncelleme mevcut",
     "newUpdate": "New update",
     "restartRequired": "Sunucu güncellendi — yeniden başlatma gerekli",
-    "restartBannerAriaLabel": "Sunucu yeniden başlatması bekleniyor — ayrıntılar için tıkla"
+    "restartBannerAriaLabel": "Sunucu yeniden başlatması bekleniyor — ayrıntılar için tıkla",
+    "currentVersionLabel": "Nassaj v{{version}}",
+    "updateToLabel": "Update to"
   },
   "restart": {
     "modalTitle": "Sunucu Yeniden Başlatma",

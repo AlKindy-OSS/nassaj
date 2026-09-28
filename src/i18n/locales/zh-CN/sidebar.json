@@ -114,8 +114,7 @@
   },
   "systemStats": {
     "cpuUsage": "CPU 使用率",
-    "memoryUsage": "内存使用率",
-    "hardwareToggleCollapsed": "切换硬件使用情况显示"
+    "memoryUsage": "内存使用率"
   },
   "branding": {
     "openSource": "开源"
@@ -164,7 +163,9 @@
     "updateAvailable": "有可用更新",
     "newUpdate": "New update",
     "restartRequired": "服务器已更新 — 需要重启",
-    "restartBannerAriaLabel": "服务器待重启 — 点击查看详情"
+    "restartBannerAriaLabel": "服务器待重启 — 点击查看详情",
+    "currentVersionLabel": "Nassaj v{{version}}",
+    "updateToLabel": "Update to"
   },
   "restart": {
     "modalTitle": "服务器重启",

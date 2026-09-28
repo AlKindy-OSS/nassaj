@@ -33,6 +33,7 @@ import {
   OUTPUT_ACCESS_RECHECK_MS,
   type RunFenceAbort,
 } from '@/modules/websocket/services/run-fence.js';
+import { transparentWriterWith } from '@/modules/websocket/services/writer-proxy.js';
 import {
   addSessionMirror,
   removeSessionMirrorsForSocket,
@@ -414,4 +415,30 @@ test('test 30: 100 runs return the registry to zero; direct arm/release is idemp
   releaseFencedRun(run);
   releaseFencedRun(run);
   assert.equal(__fencedRunCountForTests(), 0);
+});
+
+test('a declared session handover is forwarded while live and refused once the run is revoked', () => {
+  const primary = socket(member.id);
+  const asked: unknown[] = [];
+  const inner = transparentWriterWith(new WebSocketWriter(primary as never, member.id), {
+    requestSessionHandover: (request: unknown) => { asked.push(request); return { accepted: true, reason: 'accepted' }; },
+  });
+  const runFence = createRunFence({ inner, provider: 'antigravity', knownSessionId: null, echo: {}, abortRun: () => true });
+  const handover = (runFence.writer as unknown as { requestSessionHandover: (r: unknown) => { accepted: boolean; reason: string } })
+    .requestSessionHandover;
+  assert.equal(runFence.arm(projectId, member.id), true);
+  assert.deepEqual(handover({ from: 'agy_1_a', to: 'b' }), { accepted: true, reason: 'accepted' });
+  projectMembersDb.removeAndRotateProjectAccess(projectId, member.id);
+  assert.deepEqual(handover({ from: 'agy_1_a', to: 'b' }), { accepted: false, reason: 'run_fence_revoked' });
+  assert.equal(asked.length, 1, 'the inner layer is never consulted for a revoked run');
+  runFence.finish();
+
+  const bare = createRunFence({
+    inner: new WebSocketWriter(socket(member.id) as never, member.id),
+    provider: 'antigravity', knownSessionId: null, echo: {}, abortRun: () => true,
+  });
+  assert.deepEqual(
+    (bare.writer as unknown as { requestSessionHandover: (r: unknown) => unknown }).requestSessionHandover({}),
+    { accepted: false, reason: 'handover_unavailable' },
+  );
 });

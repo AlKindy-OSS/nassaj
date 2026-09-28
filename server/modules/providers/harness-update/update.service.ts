@@ -24,35 +24,34 @@
  *   - post-update verification (binary present + `--version` proves a version
  *     advance) and recovery on failure (npm-prefix: reinstall
  *     the captured previous version under TMPDIR=/var/tmp; git-shallow (hermes):
- *     `git reset --hard <captured rev>` + `uv pip install -e .`; native
- *     self-updaters are ineligible because they have no exact rollback).
+ *     `git reset --hard <captured rev>` + `uv pip install -e .`).
+ *
+ * T-1871 stage 3: a harness whose descriptor carries a `snapshot` spec (claude,
+ * codex, agy, cursor, opencode) runs the snapshot state machine instead
+ * (snapshot-update.ts): verified snapshot + store backup before the updater,
+ * `noop` / `rolled_back` / `rollback_failed` outcomes, server-built acks.
  *
  * The lease also BLOCKS new spawns of that harness while its update runs
  * (`isHarnessSpawnBlocked`) — spawn sites consult it and refuse with a clear,
  * generic error rather than racing the binary swap.
  */
 
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
-import { auditLogDb } from '@/modules/database/index.js';
-// eslint-disable-next-line boundaries/no-unknown -- process presence is a root service shared by all provider launchers.
-import { hasActiveRunForProviders } from '@/services/session-process-monitor.js';
+ 
 // eslint-disable-next-line boundaries/no-unknown -- the root command service owns the canonical secret-stripping environment.
 import { cleanSpawnEnv } from '@/services/command-board-custom.js';
-import { isVendorBinaryPinEnabled } from '@/services/isolation/vendor-binary-integrity.js';
-import { listAllActiveScopes } from '@/modules/workflow-supervisor/index.js';
+import { HarnessBinaryUnresolvedError } from '@/shared/harness-binaries.js';
 import { AppError } from '@/shared/utils.js';
-import type {
-  HarnessUpdateJob,
-  HarnessUpdateJobPhase,
-  HarnessUpdateJobStatus,
-} from '../../../../shared/harness-update.contract.js';
+
+import type { HarnessUpdateJob } from '../../../../shared/harness-update.contract.js';
 
 import {
   getHarnessDescriptor,
   HARNESS_UPDATE_DESCRIPTORS,
+  isVersionAdvance,
+  npmPrefixInstallArgs,
   parseVersionOutput,
   resolveUvBinary,
   type HarnessDescriptor,
@@ -64,35 +63,53 @@ import {
   isHarnessLeased,
   releaseHarnessLease,
 } from './lease.js';
+import {
+  defaultRunVersion,
+  runHarnessUpdateCommand,
+  UPDATE_TIMEOUT_MS,
+} from './run-command.js';
+import { recordJobVersionChange } from './version-drift.js';
 import { isHarnessPinRefused, invalidateInstalledVersion } from './version-status.service.js';
 import {
   clearHarnessRecoveryBlocked,
-  hasLiveHarnessLaunch,
-  isHarnessRecoveryBlocked,
   markHarnessRecoveryBlocked,
 } from './spawn-admission.js';
+import { pinBreakFacts, verifyActionAcks } from './acks.js';
+import { clearNativeStaging, pendingNativeStage } from './native-staging.js';
+import { snapshotError } from './snapshot/errors.js';
+import type { VersionFacts } from './snapshot/manifest.js';
+import { resolveSnapshotRuntime, type SnapshotRuntime } from './snapshot-runtime.js';
+import {
+  assertNotRecoveryBlocked,
+  hasLiveHarnessSession,
+  recordUpdaterGroup,
+  skippedLiveSessionJob,
+  startSnapshotJob,
+  type SnapshotVerdict,
+} from './snapshot-update.js';
+import {
+  appendLog,
+  appendOutput,
+  failJob,
+  finishNow,
+  makeJob,
+  setJob,
+  storeJob,
+  toPublic,
+  type HarnessAuditFn,
+  type InternalJob,
+  type RunResult,
+  type UpdateTrigger,
+} from './update-jobs.js';
 
-/** Hard cap on a single update child process. */
-export const UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
-/** Max stored log lines (append-only, oldest dropped). */
-const MAX_LOG_LINES = 500;
-/** Max characters kept per log line. */
-const MAX_LOG_LINE_LEN = 2_000;
-const MAX_CAPTURE_BYTES = 64 * 1024;
-/** Job store pruning (item 10): finished jobs expire, and the map is capped. */
-const JOB_RETENTION_MS = 60 * 60 * 1000;
-const MAX_JOBS = 50;
-
-export type UpdateTrigger = 'manual' | 'scheduler';
-
-export interface RunResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  /** False only when a timed-out POSIX process group could not be proven dead. */
-  quiesced?: boolean;
-}
+export { runHarnessUpdateCommand, UPDATE_TIMEOUT_MS } from './run-command.js';
+export {
+  _awaitHarnessJob,
+  _resetHarnessJobs,
+  getHarnessUpdateJob,
+  type RunResult,
+  type UpdateTrigger,
+} from './update-jobs.js';
 
 export interface UpdateServiceDeps {
   /** Runs a command with the given env/cwd, bounded by a hard timeout + kill. */
@@ -109,57 +126,13 @@ export interface UpdateServiceDeps {
   hasUnregisteredLaunch?: (providerIds: string[]) => Promise<boolean>;
   pinEnabled?: () => boolean;
   cleanEnv?: () => NodeJS.ProcessEnv;
-  audit?: (action: 'harness_update_started' | 'harness_update_succeeded' | 'harness_update_failed', metadata: Record<string, unknown>, userId: number | null) => void;
+  audit?: HarnessAuditFn;
   now?: () => number;
   /** Test seams for the durable pre-mutation recovery intent. */
   markRecoveryIntent?: (harnessId: string) => void;
   clearRecoveryIntent?: (harnessId: string) => void;
-}
-
-interface InternalJob extends HarnessUpdateJob {
-  userId: number | null;
-  trigger: UpdateTrigger;
-  finished: boolean;
-  /** Epoch ms the job reached a terminal state (null while running). */
-  finishedAt: number | null;
-  /** git-shallow only: the pre-update `git rev-parse HEAD`, for rollback. */
-  gitRev: string | null;
-  /** Keep the lease held after an unverifiable rollback. */
-  retainLease: boolean;
-  /** Promise that settles when the job leaves a running state (for tests). */
-  done: Promise<void>;
-}
-
-const jobs = new Map<string, InternalJob>();
-
-/** Test hook: clear the job store. */
-export function _resetHarnessJobs(): void {
-  jobs.clear();
-}
-
-/** Test hook: resolves when the given job's async run has settled. */
-export function _awaitHarnessJob(jobId: string): Promise<void> {
-  return jobs.get(jobId)?.done ?? Promise.resolve();
-}
-
-function toPublic(job: InternalJob): HarnessUpdateJob {
-  return {
-    jobId: job.jobId,
-    provider: job.provider,
-    status: job.status,
-    phase: job.phase,
-    percent: job.percent,
-    log: [...job.log],
-    fromVersion: job.fromVersion,
-    toVersion: job.toVersion,
-    error: job.error ? { ...job.error } : null,
-  };
-}
-
-/** Returns the public view of a job, or null when unknown. */
-export function getHarnessUpdateJob(jobId: string): HarnessUpdateJob | null {
-  const job = jobs.get(jobId);
-  return job ? toPublic(job) : null;
+  /** Records a verified job-made version change so it is never reported as drift. */
+  recordVersionChange?: (harnessId: string, version: string) => void;
 }
 
 /** The active running job id for a harness (for the version-status/409 view). */
@@ -181,148 +154,11 @@ export function isHarnessSpawnBlocked(runProviderId: string): boolean {
   return false;
 }
 
-function setJob(job: InternalJob, patch: Partial<InternalJob>): void {
-  Object.assign(job, patch);
-}
-
-function appendLog(job: InternalJob, line: string): void {
-  const trimmed = String(line)
-    .replace(/\b(?:Bearer\s+)?[A-Za-z0-9_-]{24,}\b/giu, '[redacted]')
-    .replace(/([?&](?:token|key|secret)=)[^&\s]+/giu, '$1[redacted]')
-    .replace(/(^|\s)(?:\/[\w.@~+-]+)+(?:\/[\w.@~+:-]+)*/gu, '$1[path]')
-    .replace(/(^|\s)[A-Za-z]:[\\/][^\s]*/gu, '$1[path]')
-    .slice(0, MAX_LOG_LINE_LEN);
-  job.log.push(trimmed);
-  if (job.log.length > MAX_LOG_LINES) job.log.splice(0, job.log.length - MAX_LOG_LINES);
-}
-
-function appendOutput(job: InternalJob, result: RunResult): void {
-  for (const stream of [result.stdout, result.stderr]) {
-    for (const raw of stream.split('\n')) {
-      const line = raw.trimEnd();
-      if (line !== '') appendLog(job, line);
-    }
-  }
-}
-
-/** Default bounded command runner (spawn + hard timeout + SIGKILL). */
-export function runHarnessUpdateCommand(
-  cmd: string,
-  args: string[],
-  opts: { env: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number },
-): Promise<RunResult> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timedOut = false;
-    let stdout = '';
-    let stderr = '';
-    let child: ReturnType<typeof spawn> | null = null;
-    let groupId: number | null = null;
-    const appendBounded = (current: string, chunk: unknown) => {
-      const marker = '\n[output truncated]';
-      const contentLimit = MAX_CAPTURE_BYTES - marker.length;
-      if (current.length >= contentLimit) {
-        return current.endsWith(marker) ? current : `${current.slice(0, contentLimit)}${marker}`;
-      }
-      const next = `${current}${String(chunk)}`;
-      return next.length <= contentLimit
-        ? next
-        : `${next.slice(0, contentLimit)}${marker}`;
-    };
-    const finish = (code: number | null, quiesced = true) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut, quiesced });
-    };
-    const waitForGroupDeath = async () => {
-      if (!timedOut || groupId === null || process.platform === 'win32') return true;
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        try {
-          process.kill(-groupId, 0);
-        } catch {
-          return true;
-        }
-        await new Promise((done) => setTimeout(done, 20));
-      }
-      return false;
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        if (child?.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL');
-        else child?.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-      // Resolve only from close/error below: rollback must not begin while any
-      // member of the update process group can still be mutating the install.
-    }, opts.timeoutMs);
-    try {
-      child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env,
-        detached: process.platform !== 'win32',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      groupId = child.pid ?? null;
-    } catch (err) {
-      stderr = appendBounded(stderr, err instanceof Error ? err.message : String(err));
-      finish(null);
-      return;
-    }
-    child.stdout?.on('data', (b) => {
-      stdout = appendBounded(stdout, b.toString());
-    });
-    child.stderr?.on('data', (b) => {
-      stderr = appendBounded(stderr, b.toString());
-    });
-    child.on('error', (err) => {
-      stderr = appendBounded(stderr, err instanceof Error ? err.message : String(err));
-      finish(null);
-    });
-    child.on('close', (code) => {
-      void waitForGroupDeath().then((quiesced) => finish(code, quiesced));
-    });
-  });
-}
-
-/**
- * The gate's second leg (item 6): launches this process started outside the
- * presence run registry. In-process children are counted by spawn-admission;
- * the workflow leg runs as a DETACHED systemd user unit (`wf-*.service` →
- * task-runner → `claude -p`) that outlives this process, so it is probed with
- * `systemctl --user list-units`. A probe failure throws and the caller fails
- * CLOSED (treats the harness as busy) rather than updating under a live turn.
- */
-async function defaultHasUnregisteredLaunch(providerIds: string[]): Promise<boolean> {
-  if (hasLiveHarnessLaunch(providerIds)) return true;
-  if (!providerIds.includes('claude')) return false;
-  const units = await listAllActiveScopes();
-  return units.length > 0;
-}
-
-function defaultRunVersion(cmd: string, args: string[]): Promise<string | null> {
-  return runHarnessUpdateCommand(cmd, args, { env: cleanSpawnEnv() as NodeJS.ProcessEnv, timeoutMs: 10_000 }).then((r) =>
-    r.stdout.trim() !== '' ? r.stdout : r.stderr.trim() !== '' ? r.stderr : null,
-  );
-}
-
-/**
- * Starts (or short-circuits) an update for `provider`. Resolves with the job's
- * initial public view. Throws AppError for an unknown / non-updatable harness
- * (route → 4xx) and for a lease conflict (route → 409 with activeJobId).
- */
-export async function startHarnessUpdate(
-  idOrAlias: string,
-  options: { userId?: number | null; trigger?: UpdateTrigger; deps?: UpdateServiceDeps } = {},
-): Promise<HarnessUpdateJob> {
+/** The descriptor of an updatable harness, else 404 / 400. */
+function requireUpdatableDescriptor(idOrAlias: string): HarnessDescriptor {
   const descriptor = getHarnessDescriptor(idOrAlias);
   if (!descriptor) {
-    throw new AppError(`Unknown harness "${idOrAlias}".`, {
-      code: 'UNKNOWN_HARNESS',
-      statusCode: 404,
-    });
+    throw new AppError(`Unknown harness "${idOrAlias}".`, { code: 'UNKNOWN_HARNESS', statusCode: 404 });
   }
   if (!descriptor.updatable) {
     throw new AppError(
@@ -330,146 +166,187 @@ export async function startHarnessUpdate(
       { code: 'HARNESS_NOT_UPDATABLE', statusCode: 400 },
     );
   }
-  const deps = options.deps ?? {};
-  const userId = options.userId ?? null;
-  const trigger = options.trigger ?? 'manual';
-  const now = deps.now ?? Date.now;
-  const pinEnabled = deps.pinEnabled ?? (() => isVendorBinaryPinEnabled());
-  const hasLiveSession = deps.hasLiveSession ?? hasActiveRunForProviders;
-  const hasUnregisteredLaunch = deps.hasUnregisteredLaunch ?? defaultHasUnregisteredLaunch;
-  const audit = deps.audit ?? ((action, metadata, uid) => auditLogDb.record(action, { userId: uid, metadata }));
-
-  const jobId = randomUUID();
-
-  // (item 5) armed pin over a pinned harness → refuse before doing anything.
-  if (isHarnessPinRefused(descriptor, pinEnabled)) {
-    const job = makeJob(jobId, descriptor.id, userId, trigger, 'refused_pinned', 'done', 100, now);
-    job.error = {
-      code: 'pinned_refused',
-      message: 'This harness is digest-pinned; a signed re-pin (T-1753) is required before it can update.',
-      messageAr: 'هذه الواجهة مثبّتة ببصمة رقمية؛ يلزم إعادة تثبيت موقَّعة (T-1753) قبل تحديثها.',
-    };
-    finishNow(job, now);
-    return toPublic(job);
-  }
-
-  // Single-flight lease FIRST (TOCTOU): holding it makes spawn-admission refuse
-  // every NEW spawn of this harness, so the live-session check below can no
-  // longer be outrun by a turn that starts between the check and the lease.
-  const acquired = acquireHarnessLease(descriptor.id, jobId, now);
-  if ('conflict' in acquired) {
-    throw new AppError(`An update for "${descriptor.id}" is already running.`, {
-      code: 'HARNESS_UPDATE_IN_PROGRESS',
-      statusCode: 409,
-      // surfaced to the route so it can return { activeJobId }
-      details: { activeJobId: acquired.conflict },
-    });
-  }
-  if (isHarnessRecoveryBlocked(descriptor.id)) {
-    releaseHarnessLease(descriptor.id, jobId);
-    throw new AppError(`Harness "${descriptor.id}" is blocked after a failed recovery.`, {
-      code: 'HARNESS_RECOVERY_FAILED', statusCode: 409,
-    });
-  }
-
-  // Atomic no-live-session gate across ALL users, taken UNDER the lease. Any
-  // already-running turn (registered or not) wins: release and skip.
-  let live = false;
-  try {
-    live = hasLiveSession(descriptor.runProviders)
-      || await hasUnregisteredLaunch(descriptor.runProviders);
-  } catch {
-    // A gate that cannot answer fails CLOSED: never swap bytes under a turn.
-    live = true;
-  }
-  if (live) {
-    releaseHarnessLease(descriptor.id, jobId);
-    const job = makeJob(jobId, descriptor.id, userId, trigger, 'skipped_live_session', 'done', 100, now);
-    appendLog(job, `Skipped: a live ${descriptor.id} session is in progress.`);
-    job.error = {
-      code: 'live_session_active',
-      message: `A live ${descriptor.id} session is in progress; the update was skipped.`,
-      messageAr: `توجد جلسة ${descriptor.id} نشطة الآن، فتُخطّي التحديث.`,
-    };
-    finishNow(job, now);
-    return toPublic(job);
-  }
-
-  const job = makeJob(jobId, descriptor.id, userId, trigger, 'running', 'preflight', 5, now);
-  jobs.set(jobId, job);
-  pruneJobs(now());
-  audit('harness_update_started', { provider: descriptor.id, trigger }, userId);
-
-  job.done = runUpdate(job, descriptor, deps, audit).finally(() => {
-    if (!job.retainLease) releaseHarnessLease(descriptor.id, jobId);
-  });
-
-  return toPublic(job);
+  return descriptor;
 }
 
-function makeJob(
-  jobId: string,
-  provider: string,
-  userId: number | null,
-  trigger: UpdateTrigger,
-  status: HarnessUpdateJobStatus,
-  phase: HarnessUpdateJobPhase,
-  percent: number,
-  now: () => number,
-): InternalJob {
-  return {
-    jobId,
-    provider,
-    status,
-    phase,
-    percent,
-    log: [],
-    fromVersion: null,
-    toVersion: null,
-    error: null,
-    userId,
-    trigger,
-    finished: false,
-    finishedAt: null,
-    gitRev: null,
-    retainLease: false,
-    done: Promise.resolve(),
-  };
-}
-
-/** Stores an already-terminal job (pin refusal / live-session skip). */
-function finishNow(job: InternalJob, now: () => number): void {
-  job.finished = true;
-  job.finishedAt = now();
-  job.done = Promise.resolve();
-  jobs.set(job.jobId, job);
-  pruneJobs(now());
+/** Maps the legacy dependency seams onto the shared snapshot runtime. */
+function runtimeFromDeps(deps: UpdateServiceDeps): SnapshotRuntime {
+  const over: Partial<SnapshotRuntime> = {};
+  if (deps.runCommand) over.runCommand = deps.runCommand;
+  if (deps.runVersion) over.runVersion = deps.runVersion;
+  if (deps.hasLiveSession) over.hasLiveSession = deps.hasLiveSession;
+  if (deps.hasUnregisteredLaunch) over.hasUnregisteredLaunch = deps.hasUnregisteredLaunch;
+  if (deps.pinEnabled) over.pinArmed = deps.pinEnabled;
+  if (deps.cleanEnv) over.cleanEnv = deps.cleanEnv;
+  if (deps.audit) over.audit = deps.audit;
+  if (deps.now) over.now = deps.now;
+  if (deps.recordVersionChange) over.recordVersionChange = deps.recordVersionChange;
+  const rt = resolveSnapshotRuntime(over);
+  if (deps.markRecoveryIntent || deps.clearRecoveryIntent) {
+    rt.fence = {
+      mark: deps.markRecoveryIntent ?? rt.fence.mark,
+      clear: deps.clearRecoveryIntent ?? rt.fence.clear,
+      isSet: rt.fence.isSet,
+    };
+  }
+  return rt;
 }
 
 /**
- * Bounds the in-memory job store (item 10): finished jobs older than
- * JOB_RETENTION_MS are dropped, then the map is capped at MAX_JOBS by dropping
- * the OLDEST finished entries (insertion order = LRU here; a running job is
- * never evicted, so an active poll can always still find its job).
+ * Starts (or short-circuits) an update for `provider`. Resolves with the job's
+ * initial public view. Throws AppError for an unknown / non-updatable harness
+ * (route → 4xx), a lease conflict (409 with activeJobId), a required
+ * acknowledgement (409 CONFIRMATION_REQUIRED) and a snapshot preflight refusal
+ * (409 / 423 / 507). Snapshot-backed harnesses run the T-1871 state machine;
+ * npm / git harnesses keep their exact-version recovery path.
  */
-function pruneJobs(nowMs: number): void {
-  for (const [id, job] of jobs) {
-    if (job.finished && job.finishedAt !== null && nowMs - job.finishedAt > JOB_RETENTION_MS) {
-      jobs.delete(id);
-    }
+export async function startHarnessUpdate(
+  idOrAlias: string,
+  options: { userId?: number | null; trigger?: UpdateTrigger; deps?: UpdateServiceDeps; acks?: unknown } = {},
+): Promise<HarnessUpdateJob> {
+  const descriptor = requireUpdatableDescriptor(idOrAlias);
+  const userId = options.userId ?? null;
+  const trigger = options.trigger ?? 'manual';
+  if (trigger === 'scheduler' && descriptor.manualOnly) {
+    throw new AppError(`Harness "${descriptor.id}" updates only from the owner's button.`, {
+      code: 'HARNESS_MANUAL_ONLY', statusCode: 409,
+    });
   }
-  if (jobs.size <= MAX_JOBS) return;
-  for (const [id, job] of jobs) {
-    if (jobs.size <= MAX_JOBS) break;
-    if (job.finished) jobs.delete(id);
+  const rt = runtimeFromDeps(options.deps ?? {});
+  if (descriptor.snapshot) return startSnapshotUpdate(descriptor, { rt, userId, trigger, acks: options.acks });
+  return startLegacyUpdate(descriptor, rt, options.deps ?? {}, userId, trigger);
+}
+
+/** Verdict of an update run: noop, a proven version advance, else rollback. */
+function judgeUpdate(from: VersionFacts, to: VersionFacts | null, result: RunResult): SnapshotVerdict {
+  if (result.timedOut || result.code !== 0 || !to?.version || !from.version) return 'rollback';
+  const sameBytes = from.binarySha256 === to.binarySha256 && from.treeSha256 === to.treeSha256;
+  if (from.version === to.version && sameBytes) return 'noop';
+  return isVersionAdvance(from.version, to.version) ? 'succeeded' : 'rollback';
+}
+
+/**
+ * Snapshot-backed update: the target's compatibility decides a `pinBreak`
+ * acknowledgement (the pin table is never modified), then the fixed updater
+ * argv runs inside the §8 state machine.
+ */
+async function startSnapshotUpdate(
+  descriptor: HarnessDescriptor,
+  opts: { rt: SnapshotRuntime; userId: number | null; trigger: UpdateTrigger; acks: unknown },
+): Promise<HarnessUpdateJob> {
+  const { rt } = opts;
+  const target = await rt.latestVersion(descriptor).catch(() => null);
+  verifyActionAcks(rt, descriptor, {
+    action: 'update', userId: opts.userId, pinBreak: pinBreakFacts(rt, descriptor, target), dataLoss: null, acks: opts.acks,
+  });
+  const baseEnv = rt.cleanEnv();
+  const argv = descriptor.updateArgv(baseEnv);
+  // A snapshot harness has no argv only when its launcher is not the measured
+  // layout the argv is derived from (codex standalone): refuse as such.
+  if (!argv) throw snapshotError('SNAPSHOT_LAYOUT_MISMATCH');
+  const env: NodeJS.ProcessEnv = { ...baseEnv, ...(argv.env ?? {}) };
+  return startSnapshotJob(descriptor, {
+    rt,
+    userId: opts.userId,
+    trigger: opts.trigger,
+    mutation: {
+      kind: 'update',
+      mutate: async (ctx) => {
+        const run = (cmd: string, args: string[]) => rt.runCommand(cmd, args, {
+          env, cwd: argv.cwd, timeoutMs: UPDATE_TIMEOUT_MS, onSpawn: (pid) => recordUpdaterGroup(ctx, pid),
+        });
+        if (!descriptor.stagesNativeUpdate) return run(argv.cmd, argv.args);
+        // A stage left from outside Nassaj must never ride along with this update.
+        clearNativeStaging(ctx.layout.binaryPath);
+        const result = await run(argv.cmd, argv.args);
+        if (result.code !== 0 || result.timedOut) return result;
+        return applyNativeStageInLease(ctx.layout.binaryPath, descriptor.versionArgs, result, run);
+      },
+      judge: judgeUpdate,
+    },
+  });
+}
+
+/**
+ * kimi-code stages its update and swaps it in on the NEXT run of the binary.
+ * Force that swap here, inside the lease and before verification (which then
+ * hashes the bytes that really run); a stage that is still pending afterwards
+ * fails the update so the snapshot is restored.
+ */
+async function applyNativeStageInLease(
+  binaryPath: string,
+  versionArgs: string[],
+  updateResult: RunResult,
+  run: (cmd: string, args: string[]) => Promise<RunResult>,
+): Promise<RunResult> {
+  if (pendingNativeStage(binaryPath).length === 0) return updateResult;
+  const swap = await run(binaryPath, versionArgs);
+  const combined: RunResult = {
+    ...swap,
+    stdout: `${updateResult.stdout}${swap.stdout}`,
+    stderr: `${updateResult.stderr}${swap.stderr}`,
+  };
+  if (swap.code !== 0 || swap.timedOut) return combined;
+  const pending = pendingNativeStage(binaryPath);
+  if (pending.length === 0) return combined;
+  return { ...combined, code: 1, stderr: `${combined.stderr}\nnative update stage was not applied (${pending.join(', ')})` };
+}
+
+/** npm-prefix / git-shallow update with exact-version recovery (T-1749). */
+async function startLegacyUpdate(
+  descriptor: HarnessDescriptor,
+  rt: SnapshotRuntime,
+  deps: UpdateServiceDeps,
+  userId: number | null,
+  trigger: UpdateTrigger,
+): Promise<HarnessUpdateJob> {
+  const jobId = randomUUID();
+  // (item 5) armed pin over a pinned harness → refuse before doing anything.
+  if (isHarnessPinRefused(descriptor, rt.pinArmed)) return refusedPinnedJob(rt, descriptor.id, jobId, userId, trigger);
+  // Single-flight lease FIRST (TOCTOU): holding it makes spawn-admission refuse
+  // every NEW spawn of this harness, so the live-session check below can no
+  // longer be outrun by a turn that starts between the check and the lease.
+  const acquired = acquireHarnessLease(descriptor.id, jobId, rt.now);
+  if ('conflict' in acquired) {
+    throw new AppError(`An update for "${descriptor.id}" is already running.`, {
+      code: 'HARNESS_UPDATE_IN_PROGRESS', statusCode: 409, details: { activeJobId: acquired.conflict },
+    });
   }
+  try {
+    assertNotRecoveryBlocked(rt, descriptor.id);
+  } catch (error) {
+    releaseHarnessLease(descriptor.id, jobId);
+    throw error;
+  }
+  if (await hasLiveHarnessSession(rt, descriptor)) {
+    releaseHarnessLease(descriptor.id, jobId);
+    return skippedLiveSessionJob(rt, descriptor, jobId, userId, trigger);
+  }
+  const job = makeJob(jobId, descriptor.id, userId, trigger, 'running', 'preflight', 5);
+  storeJob(job, rt.now());
+  rt.audit('harness_update_started', { provider: descriptor.id, trigger }, userId);
+  job.done = runUpdate(job, descriptor, deps, rt.audit).finally(() => {
+    if (!job.retainLease) releaseHarnessLease(descriptor.id, jobId);
+  });
+  return toPublic(job);
+}
+
+function refusedPinnedJob(rt: SnapshotRuntime, provider: string, jobId: string, userId: number | null, trigger: UpdateTrigger): HarnessUpdateJob {
+  const job = makeJob(jobId, provider, userId, trigger, 'refused_pinned', 'done', 100);
+  job.error = {
+    code: 'pinned_refused',
+    message: 'This harness is digest-pinned; a signed re-pin (T-1753) is required before it can update.',
+    messageAr: 'هذه الواجهة مثبّتة ببصمة رقمية؛ يلزم إعادة تثبيت موقَّعة (T-1753) قبل تحديثها.',
+  };
+  finishNow(job, rt.now);
+  return toPublic(job);
 }
 
 async function runUpdate(
   job: InternalJob,
   descriptor: HarnessDescriptor,
   deps: UpdateServiceDeps,
-  audit: NonNullable<UpdateServiceDeps['audit']>,
+  audit: HarnessAuditFn,
 ): Promise<void> {
   const runCommand = deps.runCommand ?? runHarnessUpdateCommand;
   const runVersion = deps.runVersion ?? defaultRunVersion;
@@ -487,7 +364,7 @@ async function runUpdate(
     : undefined;
   const resolvedBinary = gitCheckoutDir
     ? path.join(gitCheckoutDir, 'venv', 'bin', 'hermes')
-    : descriptor.resolveBinary(baseEnv);
+    : descriptorBinaryOrEmpty(descriptor);
 
   try {
     // The child env is built ONCE and the SAME object is handed to
@@ -495,7 +372,7 @@ async function runUpdate(
     // resolved against a different env than the process actually gets.
     const argv: HarnessUpdateArgv | null = descriptor.updateArgv(baseEnv, { gitCheckoutDir });
     if (!argv) {
-      failJob(job, 'no_update_argv', 'No update command is defined for this harness.', audit, descriptor);
+      failJob(job, 'no_update_argv', 'No update command is defined for this harness.', audit);
       return;
     }
     // Descriptor env (TMPDIR=/var/tmp for npm, HERMES_HOME for hermes) wins over
@@ -507,7 +384,7 @@ async function runUpdate(
     const fromRaw = await runVersion(resolvedBinary, descriptor.versionArgs);
     job.fromVersion = parseVersionOutput(fromRaw);
     if (!job.fromVersion || !isRecognizedBinary(descriptor, resolvedBinary)) {
-      failJob(job, 'installation_unrecognized', 'The installed harness could not be verified.', audit, descriptor);
+      failJob(job, 'installation_unrecognized', 'The installed harness could not be verified.', audit);
       return;
     }
 
@@ -523,7 +400,7 @@ async function runUpdate(
       if (/^[0-9a-f]{40}$/i.test(captured ?? '')) {
         job.gitRev = captured!;
       } else {
-        failJob(job, 'installation_unrecognized', 'The git installation has no exact recoverable revision.', audit, descriptor);
+        failJob(job, 'installation_unrecognized', 'The git installation has no exact recoverable revision.', audit);
         return;
       }
       const [status, upstream] = await Promise.all([
@@ -535,11 +412,11 @@ async function runUpdate(
         }),
       ]);
       if (status.code !== 0 || status.stdout.trim() !== '') {
-        failJob(job, 'dirty_installation', 'The git installation has local changes.', audit, descriptor);
+        failJob(job, 'dirty_installation', 'The git installation has local changes.', audit);
         return;
       }
       if (upstream.code !== 0 || !/^[0-9a-f]{40}$/iu.test(upstream.stdout.trim())) {
-        failJob(job, 'installation_unrecognized', 'The git installation has no verified upstream.', audit, descriptor);
+        failJob(job, 'installation_unrecognized', 'The git installation has no verified upstream.', audit);
         return;
       }
     }
@@ -551,7 +428,7 @@ async function runUpdate(
       // from this point leaves launches blocked until exact identity is proved.
       markRecoveryIntent(descriptor.id);
     } catch {
-      failJob(job, 'recovery_intent_failed', 'The update recovery fence could not be persisted.', audit, descriptor);
+      failJob(job, 'recovery_intent_failed', 'The update recovery fence could not be persisted.', audit);
       return;
     }
     mutationStarted = true;
@@ -569,20 +446,13 @@ async function runUpdate(
       }
       const reason = result.timedOut ? 'timed out' : `exit code ${result.code}`;
       const recovered = await recover(
-        job, descriptor, runCommand, runVersion, env, baseEnv, clearRecoveryIntent, gitCheckoutDir,
+        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent, gitCheckoutDir,
       );
       if (!recovered) {
         recoveryFailed(job, descriptor, audit, result.code);
         return;
       }
-      failJob(
-        job,
-        result.timedOut ? 'update_timeout' : 'update_failed',
-        `Update ${reason}.`,
-        audit,
-        descriptor,
-        result.code,
-      );
+      failJob(job, result.timedOut ? 'update_timeout' : 'update_failed', `Update ${reason}.`, audit, result.code);
       return;
     }
 
@@ -595,25 +465,25 @@ async function runUpdate(
     if (toVersion === null) {
       // Binary vanished / unreadable after update → recover, fail.
       const recovered = await recover(
-        job, descriptor, runCommand, runVersion, env, baseEnv, clearRecoveryIntent, gitCheckoutDir,
+        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent, gitCheckoutDir,
       );
       if (!recovered) {
         recoveryFailed(job, descriptor, audit, 0);
         return;
       }
-      failJob(job, 'verify_failed', 'Post-update verification failed: no readable version.', audit, descriptor, 0);
+      failJob(job, 'verify_failed', 'Post-update verification failed: no readable version.', audit, 0);
       return;
     }
 
     if (!isVersionAdvance(job.fromVersion, toVersion)) {
       const recovered = await recover(
-        job, descriptor, runCommand, runVersion, env, baseEnv, clearRecoveryIntent, gitCheckoutDir,
+        job, descriptor, runCommand, runVersion, env, clearRecoveryIntent, gitCheckoutDir,
       );
       if (!recovered) {
         recoveryFailed(job, descriptor, audit, 0);
         return;
       }
-      failJob(job, 'update_unverified', 'The updater exited without a provable version advance.', audit, descriptor, 0);
+      failJob(job, 'update_unverified', 'The updater exited without a provable version advance.', audit, 0);
       return;
     }
 
@@ -621,6 +491,14 @@ async function runUpdate(
     // The installed-version probe cache is dropped so the next status read shows
     // the new version instead of the pre-update one (item 9).
     invalidateInstalledVersion(descriptor.id);
+    // T-1871: record the change BEFORE the fence clears, so no status read can
+    // see the new version without the ledger knowing a job made it. A ledger
+    // failure is not an update failure; the worst case is one false drift row.
+    try {
+      (deps.recordVersionChange ?? recordJobVersionChange)(descriptor.id, toVersion);
+    } catch {
+      /* ledger unavailable — drift may be over-reported once, never hidden */
+    }
     try {
       clearRecoveryIntent(descriptor.id);
     } catch {
@@ -642,7 +520,7 @@ async function runUpdate(
     if (mutationStarted) {
       try {
         const recovered = await recover(
-          job, descriptor, runCommand, runVersion, recoveryEnv, baseEnv,
+          job, descriptor, runCommand, runVersion, recoveryEnv,
           clearRecoveryIntent, gitCheckoutDir,
         );
         if (!recovered) {
@@ -654,7 +532,20 @@ async function runUpdate(
         return;
       }
     }
-    failJob(job, 'update_exception', 'Unexpected update failure.', audit, descriptor);
+    failJob(job, 'update_exception', 'Unexpected update failure.', audit);
+  }
+}
+
+/**
+ * The registry-resolved binary, or '' when the CLI is not installed ('' is never
+ * a recognized binary and reads as "no version").
+ */
+function descriptorBinaryOrEmpty(descriptor: HarnessDescriptor): string {
+  try {
+    return descriptor.resolveBinary();
+  } catch (error) {
+    if (error instanceof HarnessBinaryUnresolvedError) return '';
+    throw error;
   }
 }
 
@@ -664,23 +555,6 @@ function isRecognizedBinary(descriptor: HarnessDescriptor, binary: string): bool
   const prefix = path.resolve(descriptor.npm.prefix);
   const resolved = path.resolve(binary);
   return resolved === prefix || resolved.startsWith(`${prefix}${path.sep}`);
-}
-
-function isVersionAdvance(fromVersion: string, toVersion: string): boolean {
-  const parse = (value: string): number[] | null => {
-    const match = value.match(/\d+(?:\.\d+)+/u);
-    return match ? match[0].split('.').map((part) => Number.parseInt(part, 10)) : null;
-  };
-  const from = parse(fromVersion);
-  const to = parse(toVersion);
-  if (!from || !to) return false;
-  for (let i = 0; i < Math.max(from.length, to.length); i += 1) {
-    const left = from[i] ?? 0;
-    const right = to[i] ?? 0;
-    if (right > left) return true;
-    if (right < left) return false;
-  }
-  return false;
 }
 
 /**
@@ -698,7 +572,6 @@ async function recover(
   runCommand: NonNullable<UpdateServiceDeps['runCommand']>,
   runVersion: NonNullable<UpdateServiceDeps['runVersion']>,
   env: NodeJS.ProcessEnv,
-  baseEnv: NodeJS.ProcessEnv,
   clearRecoveryIntent: (harnessId: string) => void,
   gitCheckoutDir?: string,
 ): Promise<boolean> {
@@ -706,13 +579,13 @@ async function recover(
     setJob(job, { phase: 'recovering' });
     const spec = `${descriptor.npm.pkg}@${job.fromVersion}`;
     appendLog(job, `Recovery: reinstalling ${spec}`);
-    const result = await runCommand('npm', ['install', '--prefix', descriptor.npm.prefix, spec], {
+    const result = await runCommand('npm', npmPrefixInstallArgs(descriptor.npm.prefix, spec), {
       env,
       timeoutMs: UPDATE_TIMEOUT_MS,
     });
     appendOutput(job, result);
     if (result.code !== 0 || result.timedOut) return false;
-    const restored = parseVersionOutput(await runVersion(descriptor.resolveBinary(baseEnv), descriptor.versionArgs));
+    const restored = parseVersionOutput(await runVersion(descriptorBinaryOrEmpty(descriptor), descriptor.versionArgs));
     if (restored !== job.fromVersion) return false;
     try {
       clearRecoveryIntent(descriptor.id);
@@ -759,7 +632,7 @@ async function recover(
 function recoveryFailed(
   job: InternalJob,
   descriptor: HarnessDescriptor,
-  audit: NonNullable<UpdateServiceDeps['audit']>,
+  audit: HarnessAuditFn,
   exitCode: number | null,
 ): void {
   job.retainLease = true;
@@ -769,45 +642,5 @@ function recoveryFailed(
     // The in-memory lease remains held when durable fail-closed persistence is
     // unavailable; never release admission after an unverified rollback.
   }
-  failJob(job, 'recovery_failed', 'The previous harness identity could not be restored.', audit, descriptor, exitCode);
-}
-
-/** Arabic renderings of the machine failure codes (UI is ar-first). */
-const FAILURE_MESSAGES_AR: Readonly<Record<string, string>> = Object.freeze({
-  update_failed: 'فشل تنفيذ أمر التحديث.',
-  update_timeout: 'تجاوز التحديث المهلة المحدّدة فأُوقف.',
-  verify_failed: 'تعذّر التحقّق بعد التحديث: لا إصدار مقروء.',
-  no_update_argv: 'لا أمر تحديث معرَّفاً لهذه الواجهة.',
-  update_exception: 'خطأ غير متوقّع أثناء التحديث.',
-  installation_unrecognized: 'تعذّر التحقق من طريقة تثبيت أداة التشغيل.',
-  dirty_installation: 'يحوي تثبيت Git تعديلات محلية، لذلك رُفض التحديث.',
-  update_unverified: 'انتهى أمر التحديث دون إثبات انتقال إلى إصدار أحدث.',
-  recovery_intent_failed: 'تعذّر تثبيت حاجز الاسترجاع قبل بدء التحديث.',
-  recovery_failed: 'تعذّر استرجاع هوية أداة التشغيل السابقة؛ أُوقفت التشغيلات حتى الإصلاح.',
-});
-
-function failJob(
-  job: InternalJob,
-  code: string,
-  message: string,
-  audit: NonNullable<UpdateServiceDeps['audit']>,
-  descriptor: HarnessDescriptor,
-  exitCode: number | null = null,
-): void {
-  setJob(job, {
-    status: 'failed',
-    phase: 'done',
-    percent: 100,
-    error: { code, message, messageAr: FAILURE_MESSAGES_AR[code] ?? 'فشل تحديث الواجهة.' },
-    finished: true,
-    finishedAt: Date.now(),
-  });
-  audit('harness_update_failed', {
-    provider: descriptor.id,
-    fromVersion: job.fromVersion,
-    toVersion: job.toVersion,
-    exitCode,
-    trigger: job.trigger,
-    code,
-  }, job.userId);
+  failJob(job, 'recovery_failed', 'The previous harness identity could not be restored.', audit, exitCode);
 }

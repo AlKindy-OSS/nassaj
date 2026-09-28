@@ -15,7 +15,6 @@ import CredentialGrantsSection from './content/CredentialGrantsSection';
 import EnginesContent from './content/EnginesContent';
 import InstructionSourcesContent from './content/InstructionSourcesContent';
 import HarnessVersionSection from './HarnessVersionSection';
-import HarnessAutoUpdateSection from './HarnessAutoUpdateSection';
 import PermissionsContent from './content/PermissionsContent';
 
 export default function AgentCategoryContentSection({
@@ -30,6 +29,7 @@ export default function AgentCategoryContentSection({
   onCodexPermissionModeChange,
   onRefreshAuthStatus,
   projects,
+  onOpenSystemTab,
 }: AgentCategoryContentSectionProps) {
   // Coming-soon providers (e.g. deepseek T-1760): no categories, no tabs — show
   // the coming-soon panel in place of the entire category content tree.
@@ -96,9 +96,7 @@ export default function AgentCategoryContentSection({
 
           <AgentUsageSection agent={selectedAgent} />
 
-          <HarnessVersionSection agent={selectedAgent} />
-
-          <HarnessAutoUpdateSection />
+          <HarnessVersionSection agent={selectedAgent} onOpenSystemTab={onOpenSystemTab} />
         </div>
       )}
 

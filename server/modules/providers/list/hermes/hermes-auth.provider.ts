@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
-import { isCliInstalled, readObjectRecord } from '@/shared/utils.js';
+import { isHarnessCliInstalled, readObjectRecord } from '@/shared/utils.js';
 
 import { readHermesRuntimeConfig, selectHermesCredential } from './hermes-runtime.js';
 
@@ -18,7 +18,7 @@ type HermesCredentialsStatus = {
 
 export class HermesProviderAuth implements IProviderAuth {
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {
-    const installed = isCliInstalled('hermes');
+    const installed = isHarnessCliInstalled('hermes');
     if (!installed) {
       return {
         installed: false,

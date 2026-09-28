@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { SETTINGS_MAIN_TABS, COMMAND_BOARD_TAB_ROLES } from './constants';
+import { SETTINGS_MAIN_TABS, COMMAND_BOARD_TAB_ROLES, SYSTEM_TAB_ROLES } from './constants';
 
 describe('B-255 unified tab registry', () => {
   it('includes profile tab', () => {
@@ -41,7 +41,7 @@ describe('B-255 unified tab registry', () => {
     });
   });
 
-  it('contains exactly the expected 13 tab ids', () => {
+  it('contains exactly the expected 14 tab ids', () => {
     const ids = SETTINGS_MAIN_TABS.map((t) => t.id);
     expect(ids).toEqual([
       'profile',
@@ -64,8 +64,18 @@ describe('B-255 unified tab registry', () => {
       'notifications',
       'users',
       'command-board',
+      // T-1866 — «النظام»: بعد لوحة الأوامر وقبل عن التطبيق، لا داخل لوحة
+      // الأوامر (كانت تحمل مجموعاتٍ لا تخصّها: التخزين والصلاحيات والتحديث).
+      'system',
       'about',
     ]);
+  });
+
+  it('T-1866: system tab is restricted to owner role, same as command-board', () => {
+    const entry = SETTINGS_MAIN_TABS.find((t) => t.id === 'system');
+    expect(entry?.roles).toEqual(SYSTEM_TAB_ROLES);
+    expect(entry?.roles).toContain('owner');
+    expect(entry?.roles).not.toContain('admin');
   });
 
   it('profile has no role restriction (reachable by all)', () => {

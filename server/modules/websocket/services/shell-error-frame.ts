@@ -45,12 +45,22 @@ export const SHELL_ERROR_DIAGNOSTICS: readonly ShellErrorDiagnostic[] = [
   {
     code: 'shell_claude_binary_missing',
     match: 'Claude executable not found before installing the managed terminal launcher',
-    // The thrown message appends the probed candidate and HOME; that tail is the
-    // part we refuse to publish. The remedy survives without it.
+    // The thrown message appends the probed path; that tail is the part we
+    // refuse to publish. The remedy survives without it.
     text:
       'Claude executable not found. The managed terminal launcher could not find the '
-      + "claude CLI on this node's PATH. Install it, or set CLAUDE_CLI_PATH to the "
-      + 'absolute path of the claude binary, then reopen this terminal.',
+      + "claude CLI where its official installer puts it on this node. Install it, or set "
+      + 'CLAUDE_CLI_PATH on the server to the absolute path of the claude binary, then '
+      + 'reopen this terminal.',
+  },
+  {
+    code: 'shell_harness_cli_missing',
+    // SHELL_HARNESS_CLI_MISSING_PREFIX in shell-websocket.service.ts; the tail
+    // names the probed path and is never published.
+    match: 'Harness CLI not installed for this terminal',
+    text:
+      "This provider's CLI is not installed on this node. Install it with the vendor's "
+      + 'official method (or set its server path override), then reopen this terminal.',
   },
   {
     code: 'shell_session_binding_missing',

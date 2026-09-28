@@ -1,3 +1,5 @@
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import '../../../../../shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';

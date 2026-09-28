@@ -222,9 +222,7 @@
         "session": "session",
         "other": ""
       }
-    },
-    "hardwareToggleCollapsed": "Toggle hardware usage widget",
-    "hardwareToggleFooter": "Hardware usage"
+    }
   },
   "branding": {
     "openSource": "Open Source"
@@ -277,7 +275,9 @@
     "restartRequired": "Server updated — restart required",
     "restartBannerAriaLabel": "Server restart pending — click for details",
     "updatePrepared": "Prepared — awaiting activation",
-    "updatePreparedTitle": "Prepared release"
+    "updatePreparedTitle": "Prepared release",
+    "currentVersionLabel": "Nassaj v{{version}}",
+    "updateToLabel": "Update to"
   },
   "restart": {
     "modalTitle": "Server Restart",
@@ -366,7 +366,8 @@
       "makeOwner": "Make owner",
       "makeMember": "Make member",
       "role": "Project role",
-      "saving": "Saving membership change"
+      "saving": "Saving membership change",
+      "noAddPermission": "You don't have permission to add members"
     },
     "agentKinds": {
       "model": "Base model",

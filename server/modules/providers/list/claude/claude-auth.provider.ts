@@ -3,10 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
-import { resolveClaudeCodeExecutablePath, wellKnownClaudeInstallCandidates } from '@/shared/claude-cli-path.js';
+import { HarnessBinaryUnresolvedError, resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus, ProviderLinkExpiry } from '@/shared/types.js';
-import { isCliInstalled, readObjectRecord, readOptionalString } from '@/shared/utils.js';
+import { isHarnessCliInstalled, readObjectRecord, readOptionalString } from '@/shared/utils.js';
 
 type ClaudeCredentialsStatus = {
   authenticated: boolean;
@@ -150,21 +150,20 @@ export class ClaudeProviderAuth implements IProviderAuth {
    * Checks whether the Claude Code CLI is available on this host.
    */
   private checkInstalled(): boolean {
-    const cliPath = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH);
-    return isCliInstalled(cliPath);
+    return isHarnessCliInstalled('claude');
   }
 
   /**
-   * Human-readable "where we looked" for the not-installed error, derived from
-   * the SAME candidate list the resolver probes (B-1091) so the message can never
-   * drift from the actual search. `cliPath` is the already-resolved value.
+   * Human-readable reason the CLI is not usable, from the SAME registry resolver
+   * every spawn uses (T-1873), so the message can never drift from the search.
    */
-  private describeMissingCli(cliPath: string): string {
-    if (cliPath.includes(path.sep)) {
-      return `resolved to "${cliPath}" but it is not runnable (missing, not a file, or not executable)`;
+  private describeMissingCli(): string {
+    try {
+      const cliPath = resolveHarnessBinary('claude');
+      return `resolved to "${cliPath}" but it did not run (\`--version\` failed)`;
+    } catch (error) {
+      return error instanceof HarnessBinaryUnresolvedError ? error.message : String(error);
     }
-    const searched = wellKnownClaudeInstallCandidates(os.homedir(), cliPath).join(', ');
-    return `"${cliPath}" was not found on PATH or in the known install dirs (${searched})`;
   }
 
   /**
@@ -193,23 +192,18 @@ export class ClaudeProviderAuth implements IProviderAuth {
    * real spawn environment instead of a fixed operator path.
    */
   async getStatus(userId?: string | number | null): Promise<ProviderAuthStatus> {
-    // Resolve once and reuse for both the install probe and the error detail.
-    const cliPath = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH);
-    const installed = isCliInstalled(cliPath);
+    const installed = this.checkInstalled();
 
     if (!installed) {
-      // B-1091: the resolver already probes PATH and the well-known install dirs,
-      // so surface where it looked. This keeps a "Connected" credential badge from
-      // silently contradicting an opaque "not installed" error — the operator sees
-      // exactly which path failed and can set CLAUDE_CLI_PATH to fix it.
+      // Surface where the registry looked, so a "Connected" credential badge never
+      // silently contradicts an opaque "not installed" error.
       return {
         installed,
         provider: 'claude',
         authenticated: false,
         email: null,
         method: null,
-        error: `Claude Code CLI is not installed: ${this.describeMissingCli(cliPath)}. `
-          + 'Set CLAUDE_CLI_PATH to the absolute path of the claude binary.',
+        error: `Claude Code CLI is not installed: ${this.describeMissingCli()}`,
       };
     }
 

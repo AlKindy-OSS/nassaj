@@ -17,6 +17,10 @@
  *   GET  /api/providers/version-status          → HarnessVersionStatus[]
  *   POST /api/providers/:id/update              → HarnessUpdateAccepted (409 on running, 403 non-owner)
  *   GET  /api/providers/update-jobs/:jobId      → HarnessUpdateJob
+ *   POST /api/providers/:id/restore-compatible  → HarnessUpdateAccepted (opencode only)
+ *   POST /api/providers/:id/rollback            → HarnessUpdateAccepted
+ *   POST /api/providers/:id/recovery            → HarnessUpdateAccepted | HarnessRecoveryAcknowledged
+ *   GET  /api/providers/:id/snapshots           → HarnessSnapshotSummary[]
  *   GET  /api/providers/autoupdate-settings     → HarnessAutoUpdateSettings
  *   PUT  /api/providers/autoupdate-settings     → HarnessAutoUpdateSettings
  *
@@ -65,7 +69,90 @@ export interface HarnessVersionStatus {
   updating: boolean;
   /** The running job id, or null. */
   activeJobId: string | null;
+  /**
+   * Compatibility of the INSTALLED version with Nassaj (T-1871 / ADR-159
+   * Addendum 4). Optional for backward compatibility: absent on rows that have
+   * no readable installed version (no-cli, recovery-blocked, mid-update).
+   */
+  compatibility?: HarnessCompatibility;
+  /** Compatibility of `latestVersion`; present only when a latest probe answered. */
+  targetCompatibility?: HarnessCompatibility;
+  /**
+   * Installed version changed since Nassaj last saw it WITHOUT a Nassaj update
+   * job recording the change (vendor auto-updater, manual shell update, …).
+   * Optional for backward compatibility; absent when the ledger is unavailable.
+   */
+  drift?: HarnessVersionDrift;
+  /** T-1871: only the owner's button updates this harness (scheduler skips it). */
+  manualOnly?: boolean;
+  /** T-1871: facts the update dialog must state (agy today); absent = none. */
+  notices?: HarnessUpdateNotices;
+  /** T-1871: "restore compatible version" is offered (opencode only). */
+  restoreCompatible?: HarnessRestoreCompatibleOffer;
 }
+
+/** Dialog facts for one harness (qa condition 8). */
+export interface HarnessUpdateNotices {
+  /** The harness's own data is NOT backed up before an update. */
+  dataNotBackedUp: boolean;
+  /** The CLI may update itself outside Nassaj (auto-updater not proven off). */
+  selfUpdating: boolean;
+}
+
+/** The compatible version the restore action installs. */
+export interface HarnessRestoreCompatibleOffer {
+  version: string;
+  /**
+   * false until a real restore run on this host succeeded (qa condition 4);
+   * the UI must not present the path as verified before then.
+   */
+  verified: boolean;
+}
+
+/**
+ * Compatibility verdict for one harness version:
+ *   - `compatible`   equals the reviewed pinned version (the bytes are still
+ *                    digest-checked at spawn when the pin is enforced)
+ *   - `baseline`     equals the version installed when the baseline was
+ *                    recorded — render as "baseline as of <asOf>", never "tested"
+ *   - `untested`     no review data covers this version; Nassaj still runs it
+ *   - `incompatible` Nassaj WILL refuse to run it (pin enforced), fully or in
+ *                    the modes listed in `blockedModes`
+ */
+export type HarnessCompatibilityState =
+  | 'compatible'
+  | 'baseline'
+  | 'untested'
+  | 'incompatible';
+
+export interface HarnessCompatibility {
+  state: HarnessCompatibilityState;
+  /**
+   * Machine reason: `pin-match`, `pin-armed-blocked`, `<mode>-blocked` (e.g.
+   * `glm-carrier-blocked`), `pin-mismatch-unreviewed`, `baseline-match`,
+   * `not-baselined`, `no-compat-data`, `version-unknown`.
+   */
+  reason: string;
+  /** The version the verdict was compared against (pin or baseline), or null. */
+  referenceVersion: string | null;
+  /** ISO date (YYYY-MM-DD) of the baseline, for `baseline`; null otherwise. */
+  asOf: string | null;
+  /** Modes Nassaj refuses to run this version in; empty unless `incompatible`. */
+  blockedModes: string[];
+}
+
+/** Out-of-band version change detected by the status read (T-1871 stage 2). */
+export type HarnessVersionDrift =
+  | { detected: false }
+  | {
+      detected: true;
+      /** Version Nassaj saw last. */
+      from: string;
+      /** Version installed now. */
+      to: string;
+      /** ISO timestamp the change was first observed. */
+      at: string;
+    };
 
 /** 202/200 body of POST /:id/update when a job is accepted. */
 export interface HarnessUpdateAccepted {
@@ -76,7 +163,112 @@ export interface HarnessUpdateAccepted {
 
 /** 409 body of POST /:id/update when a job is already running for the harness. */
 export interface HarnessUpdateConflict {
+  /** Always `HARNESS_UPDATE_IN_PROGRESS` (optional only for older servers). */
+  code?: 'HARNESS_UPDATE_IN_PROGRESS';
   activeJobId: string;
+}
+
+/**
+ * Machine codes of a refused harness action. Every 409 carries one; 423/507
+ * and 404 carry one too.
+ */
+export type HarnessActionErrorCode =
+  | 'HARNESS_UPDATE_IN_PROGRESS'
+  | 'HARNESS_RECOVERY_FAILED'
+  | 'LIVE_SESSION_ACTIVE'
+  | 'CONFIRMATION_REQUIRED'
+  | 'SNAPSHOT_TAMPERED'
+  | 'ORIGIN_NAME_CONFLICT'
+  | 'SNAPSHOT_LAYOUT_MISMATCH'
+  | 'STORE_IN_USE'
+  | 'STORE_ACCESS_UNPROVABLE'
+  | 'INSUFFICIENT_STORAGE'
+  | 'SNAPSHOT_COUNT_CAP'
+  | 'NOT_RESTORE_COMPATIBLE'
+  | 'SNAPSHOT_NOT_FOUND'
+  | 'NO_RECOVERY_PENDING'
+  | 'RECOVERY_UNVERIFIED'
+  | 'INVALID_ROLLBACK_SCOPE'
+  | 'INVALID_RECOVERY_ACTION';
+
+/** Generic refusal body (no path, member id or command ever appears). */
+export interface HarnessActionError {
+  code: HarnessActionErrorCode | string;
+  message: string;
+}
+
+/** One acknowledgement the server requires before a risky action. */
+export interface HarnessRequiredAck {
+  kind: 'pinBreak' | 'dataLoss';
+  /** Single-use, 5 minutes, bound to user + harness + action + facts. */
+  token: string;
+  /** Epoch ms. */
+  expiresAt: number;
+  textEn: string;
+  textAr: string;
+  /** Server facts the texts were built from. */
+  facts: Record<string, unknown>;
+}
+
+/** 409 CONFIRMATION_REQUIRED body; resend the action with `acks`. */
+export interface HarnessConfirmationRequired {
+  code: 'CONFIRMATION_REQUIRED';
+  required: HarnessRequiredAck[];
+}
+
+/** `acks` entry of a POST body: echo `kind` + `token` of each required ack. */
+export interface HarnessSuppliedAck {
+  kind: 'pinBreak' | 'dataLoss';
+  token: string;
+}
+
+/** POST /:id/update and /:id/restore-compatible body (all optional). */
+export interface HarnessUpdateRequest {
+  acks?: HarnessSuppliedAck[];
+}
+
+/** POST /:id/rollback body. */
+export interface HarnessRollbackRequest {
+  jobId: string;
+  scope: 'binary' | 'binary+data';
+  acks?: HarnessSuppliedAck[];
+}
+
+/** POST /:id/recovery body (owner exit from `rollback_failed`). */
+export interface HarnessRecoveryRequest {
+  /** `retry` re-runs the restore; `acknowledge` accepts the current install. */
+  action: 'retry' | 'acknowledge';
+}
+
+/** 200 body of an acknowledged recovery. */
+export interface HarnessRecoveryAcknowledged {
+  provider: string;
+  status: 'acknowledged';
+}
+
+/** GET /:id/snapshots entry (no paths, no member ids). */
+export interface HarnessSnapshotSummary {
+  jobId: string;
+  /** Epoch ms. */
+  createdAt: number;
+  expiresAt: number;
+  fromVersion: string | null;
+  toVersion: string | null;
+  state: string;
+  storeCount: number;
+  bytes: number;
+  dataRestore: {
+    /** From spawn facts only (a lower bound; see storesChanged). */
+    requiresAck: boolean;
+    firstSpawnAt: number | null;
+    spawnCount: number;
+    /**
+     * Always null in the listing: the GET never hashes stores. The rollback
+     * request re-checks them and may still answer CONFIRMATION_REQUIRED.
+     */
+    storesChanged: boolean | null;
+    unknown: boolean;
+  };
 }
 
 export type HarnessUpdateJobStatus =
@@ -85,12 +277,19 @@ export type HarnessUpdateJobStatus =
   | 'succeeded'
   | 'failed'
   | 'skipped_live_session'
-  | 'refused_pinned';
+  | 'refused_pinned'
+  /** exit 0 with the same version and bytes; snapshot discarded (T-1871). */
+  | 'noop'
+  /** the update failed and the previous install was restored and verified. */
+  | 'rolled_back'
+  /** the restore could not be verified; ONLY this harness stays blocked. */
+  | 'rollback_failed';
 
 /** Coarse phase within a running/finished job, for the progress UI. */
 export type HarnessUpdateJobPhase =
   | 'queued'
   | 'preflight'
+  | 'snapshotting'
   | 'updating'
   | 'verifying'
   | 'recovering'

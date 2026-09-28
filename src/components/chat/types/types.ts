@@ -115,6 +115,16 @@ export interface ChatMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /**
+   * T-1862: stamped on the locally-added "Context compaction started." row
+   * (runPassthroughCompaction / the `compact` command-output case). Marks a
+   * fresh progress scope for useRunProgress and the ClaudeStatus elapsed
+   * anchor, even though it is an `assistant` row, not a genuine human
+   * `type:'user'` prompt — /compact starts a new run without one, so without
+   * this marker both scans fall through to the PREVIOUS turn's last user
+   * message and show its stale subagent/elapsed instead of the compaction's.
+   */
+  isCompactionBoundary?: boolean;
   isSubagentContainer?: boolean;
   subagentState?: {
     childTools: SubagentChildTool[];

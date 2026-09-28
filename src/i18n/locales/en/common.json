@@ -138,6 +138,9 @@
     "modified": "Modified",
     "permissions": "Permissions",
     "noFilesFound": "No files found",
+    "tooLarge": "This project has too many files to display (over {{limit}} entries)",
+    "tooLargeNoLimit": "This project has too many files to display",
+    "loadFailed": "Failed to load files",
     "checkProjectPath": "Check if the project path is accessible",
     "noMatchesFound": "No matches found",
     "tryDifferentSearch": "Try a different search term or clear the search",
@@ -257,7 +260,12 @@
       "selectType": "Please select whether you have an existing workspace or want to create a new one",
       "providePath": "Please provide a workspace path",
       "failedToCreate": "Failed to create workspace",
-      "failedToCreateFolder": "Failed to create folder"
+      "failedToCreateFolder": "Failed to create folder",
+      "invalidCloneRequest": "The workspace path or GitHub URL is invalid",
+      "invalidGithubUrl": "Please provide a valid GitHub repository URL",
+      "cloneTicketLimitReached": "Too many pending clone requests. Wait for one to finish, then try again",
+      "authenticationRequired": "Please sign in again to continue",
+      "cloneTicketCreateFailed": "Failed to start the clone request"
     }
   },
   "notifications": {
@@ -780,7 +788,7 @@
   "brand": {
     "name": "Nassaj",
     "logoAlt": "Nassaj",
-    "openSourceVersion": "Nassaj v{{version}} — open source",
+    "openSourceShort": "Open source",
     "openSourceLicense": "Nassaj — open source (AGPL-3.0)"
   },
   "commandPalette": {

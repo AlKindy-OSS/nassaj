@@ -20,7 +20,16 @@ import path from 'node:path';
 import { Codex } from '@openai/codex-sdk';
 
 import { getRuntimeInstructions } from './services/runtime-instructions.js';
-import { codexLaunchOptions } from './shared/codex-executable.js';
+import {
+  acquireCodexLaunchIdentity,
+  assertCodexIdentityUnchanged,
+  codexIdentityFromExecution,
+  codexLaunchOptions,
+  CODEX_MACHINE_CLI_MISSING_MESSAGE,
+  CODEX_RUNTIME_CHANGED,
+  isCodexMachineCliMissing,
+} from './shared/codex-executable.js';
+import { assertCodexRuntimeCompatible, CODEX_RUNTIME_INCOMPATIBLE } from './shared/codex-runtime-compat.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { assertHistorySourceAccessible, sessionsService } from './modules/providers/services/sessions.service.js';
 import { HISTORY_LIMITS, HistoryBudgetError, historyTransferLedger } from './modules/providers/services/history-budget.service.js';
@@ -748,6 +757,20 @@ async function queryCodexOwned(invocation) {
     // user (null userId) returns the base env unchanged — no non-isolated regression.
     // ADR-134 vertical slice: consume the server-issued, one-use permit at the
     // final SDK seam. A serialized/client-shaped object has no callable handle.
+    // T-1872: the machine Codex release this admission fingerprinted. Acquired
+    // once per launch (by the gateway, or here for handle-less callers) and
+    // executed by exact realpath — never the SDK-bundled copy, never PATH.
+    let launchIdentity;
+    try {
+      // An admitted launch runs only the identity its decision fingerprinted.
+      launchIdentity = permissionExecution
+        ? codexIdentityFromExecution(permissionExecution) : acquireCodexLaunchIdentity();
+      // T-1872 part 2: a machine release Nassaj cannot speak to refuses here (cached verdict).
+      await assertCodexRuntimeCompatible(launchIdentity);
+    } catch (identityError) {
+      permissionExecution?.notStarted();
+      throw identityError;
+    }
     if (permissionExecution) {
       permissionExecution.consume();
       permissionConsumed = true;
@@ -760,7 +783,7 @@ async function queryCodexOwned(invocation) {
       ...codexLaunchOptions({
         ...resolveProviderEnv(ws?.userId ?? null, 'codex', process.env),
         [PROCESS_TAG_ENV_VAR]: processRunTag,
-      }),
+      }, launchIdentity),
       // ADR-134 v1 supersedes the earlier depth-1 delegation allowance: external
       // delegation is denied, so every launch pins depth to zero.
       //
@@ -866,6 +889,8 @@ async function queryCodexOwned(invocation) {
     // ambiguous (the child/turn may already exist), so it must never be
     // rewritten as the stronger `spawn_failed` fact.
     abortController.signal.throwIfAborted();
+    // A release swapped or edited since admission refuses before the start fence.
+    assertCodexIdentityUnchanged(launchIdentity);
     turnUsageBoundaryAt = new Date().toISOString();
     if (permissionExecution) {
       permissionExecution.markStarted();
@@ -1154,7 +1179,16 @@ async function queryCodexOwned(invocation) {
       const classified = classifyCodexFailure(error, capturedSessionId || sessionId || null, command);
       let errorCode;
       let errorContent;
-      if (!installed) {
+      if (isCodexMachineCliMissing(error)) {
+        errorCode = 'cli_not_installed';
+        errorContent = CODEX_MACHINE_CLI_MISSING_MESSAGE;
+      } else if (error?.code === CODEX_RUNTIME_INCOMPATIBLE) {
+        errorCode = 'codex_runtime_incompatible';
+        errorContent = error.message;
+      } else if (error?.code === CODEX_RUNTIME_CHANGED) {
+        errorCode = 'codex_runtime_changed';
+        errorContent = 'The Codex installation changed while starting. Please try again.';
+      } else if (!installed) {
         errorCode = 'cli_not_installed';
         errorContent = 'Codex CLI is not configured. Please set up authentication first.';
       } else {

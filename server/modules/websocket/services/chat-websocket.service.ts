@@ -30,7 +30,11 @@ import {
   releaseFencedRun,
 } from '@/modules/database/repositories/project-access.js';
 import { createRunFence, type FencedWriter, type RunFence } from '@/modules/websocket/services/run-fence.js';
-import { toNumericUserId, transparentWriterWithSend } from '@/modules/websocket/services/writer-proxy.js';
+import {
+  toNumericUserId,
+  transparentWriterWith,
+  transparentWriterWithSend,
+} from '@/modules/websocket/services/writer-proxy.js';
 import { sendOpenSessionsCount } from '@/modules/websocket/services/open-sessions.service.js';
 import {
   presenceConnect,
@@ -63,6 +67,12 @@ import {
   bindSessionWorkspace,
   resolveSessionWorkspaceForLaunch,
 } from '@/modules/session-workspaces/index.js';
+import * as sessionWorkspacesModule from '@/modules/session-workspaces/index.js';
+import {
+  AGY_BRAIN_ID_PATTERN,
+  AGY_SPAWN_KEY_PATTERN,
+} from '@/modules/providers/list/antigravity/agy-session-ids.js';
+import { createSessionHandoverGate } from '@/modules/websocket/services/session-handover.js';
 
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 // Top-level shared/ (compiled into dist-server/shared/) — the single source of
@@ -1031,6 +1041,163 @@ export function abortProviderRun(
   return requestProviderAbort(dependencies, run, toNumericUserId(writer.userId), rawWs);
 }
 
+/** Providers that may declare a spawn-key -> durable-id handover (allow-list). */
+const SESSION_HANDOVER_RULES = Object.freeze({
+  antigravity: Object.freeze({ spawnKey: AGY_SPAWN_KEY_PATTERN, durableId: AGY_BRAIN_ID_PATTERN }),
+});
+
+type SessionWorkspaceBindingInput = {
+  downstreamWriter: WebSocketWriter;
+  sessionWorkspace: ReturnType<typeof resolveSessionWorkspaceForLaunch>;
+  logicalProjectPath: string;
+  launchKey: string | null;
+  principalId: string | number | null;
+  principalUserId: number | null;
+  targetProvider: LLMProvider;
+  echo: Record<string, string>;
+  /** Present only for providers on the handover allow-list. */
+  brainDirForUser: ((userId: number | null) => string) | null;
+};
+
+/**
+ * Loads the brain-dir resolver only for handover providers: its isolation
+ * imports must not ride along into every launch (or every mocked harness).
+ */
+async function loadHandoverBrainDirResolver(
+  provider: string,
+): Promise<((userId: number | null) => string) | null> {
+  if (!Object.hasOwn(SESSION_HANDOVER_RULES, provider)) return null;
+  try {
+    const { getAgyBrainDir } = await import('@/modules/providers/list/antigravity/agy-brain-dir.js');
+    return getAgyBrainDir;
+  } catch (error) {
+    // Fail closed: without a resolver every handover is refused and the
+    // provider keeps its launch id, which stays resumable.
+    console.error('Session handover brain-dir resolver unavailable', {
+      provider,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * Binds the provider's first announced session id to this launch's workspace
+ * (overlay alias + ledger row, or a shared ledger row) before the client sees
+ * it. A second, different identity is refused unless it arrives as the
+ * announcement of an ACCEPTED declared handover (`requestSessionHandover`).
+ */
+function withSessionWorkspaceBinding(input: SessionWorkspaceBindingInput): WebSocketWriter {
+  const { downstreamWriter, sessionWorkspace, targetProvider } = input;
+  const workspaceModesRepository = databaseModule.sessionWorkspaceModesDb;
+  let workspaceBindFailed = false;
+  let boundProviderSessionId: string | null = null;
+  let boundGeneration: string | null = null;
+  const handover = createSessionHandoverGate({
+    provider: targetProvider,
+    isolation: sessionWorkspace.isolation === 'overlay' ? 'overlay' : 'legacy_shared',
+    logicalProjectPath: sessionWorkspace.logicalProjectPath,
+    launchKey: input.launchKey,
+    principalId: input.principalId,
+    principalUserId: input.principalUserId,
+    launchStartedAtMs: Date.now(),
+    boundSessionId: () => (workspaceBindFailed ? null : boundProviderSessionId),
+    rules: SESSION_HANDOVER_RULES,
+    brainDirForUser: input.brainDirForUser ?? (() => {
+      throw new Error('provider has no handover brain store');
+    }),
+    rekeyLedger: (ledger) => workspaceModesRepository.rekeyForHandover(ledger),
+    rebindWorkspace: typeof sessionWorkspacesModule.rebindSessionWorkspace === 'function'
+      ? (rebind) => sessionWorkspacesModule.rebindSessionWorkspace(rebind)
+      : undefined,
+  });
+
+  const annotate = (frame: Record<string, unknown>, generation: string | null) => (
+    sessionWorkspace.isolation === 'legacy_shared'
+      ? { ...frame, workspaceIsolation: 'legacy_shared' }
+      : { ...frame, workspaceGeneration: generation }
+  );
+
+  const bindFirst = (frame: Record<string, unknown>, sessionId: string): Record<string, unknown> => {
+    if (sessionWorkspace.isolation === 'legacy_shared') {
+      workspaceModesRepository.markShared(sessionId, sessionWorkspace.logicalProjectPath, targetProvider);
+    } else {
+      const boundWorkspace = bindSessionWorkspace({
+        projectPath: input.logicalProjectPath,
+        launchKey: input.launchKey!,
+        sessionId,
+        principalId: input.principalId,
+      });
+      workspaceModesRepository.markOverlay(sessionId, boundWorkspace.logicalProjectPath, targetProvider);
+      boundGeneration = boundWorkspace.generation;
+    }
+    boundProviderSessionId = sessionId;
+    return annotate(frame, boundGeneration);
+  };
+
+  /** null = drop the frame (an already-announced identity). */
+  const sessionCreatedFrame = (
+    frame: Record<string, unknown>,
+    sessionId: string,
+  ): Record<string, unknown> | null => {
+    if (!boundProviderSessionId) return bindFirst(frame, sessionId);
+    const accepted = handover.accepted();
+    if (accepted && accepted.to === sessionId) {
+      // The handover announcement goes out exactly once; replays are dropped.
+      if (accepted.forwarded) return null;
+      accepted.forwarded = true;
+      return annotate({ ...frame, parentSessionId: accepted.from }, accepted.generation ?? boundGeneration);
+    }
+    if (sessionId === boundProviderSessionId || sessionId === accepted?.from) return null;
+    throw new Error('provider emitted conflicting session identities for one launch');
+  };
+
+  return transparentWriterWith(downstreamWriter, {
+    send: (payload: unknown): void => {
+      if (workspaceBindFailed) return;
+      let forwardedPayload = payload;
+      try {
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          const frame = payload as Record<string, unknown>;
+          const emittedSessionId = typeof frame.sessionId === 'string'
+            ? frame.sessionId
+            : (typeof frame.newSessionId === 'string' ? frame.newSessionId : '');
+          if (frame.kind === 'session_created' && emittedSessionId) {
+            const next = sessionCreatedFrame(frame, emittedSessionId);
+            if (!next) return;
+            forwardedPayload = next;
+          }
+        }
+        downstreamWriter.send(forwardedPayload);
+      } catch (error) {
+        workspaceBindFailed = true;
+        console.error('Failed to bind provider session to its isolated workspace', {
+          provider: targetProvider,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        downstreamWriter.send(createNormalizedMessage({
+          kind: 'complete', provider: targetProvider, exitCode: 1, success: false,
+          code: 'session_workspace_bind_failed', notStarted: false,
+          error: 'The provider session could not be bound to its isolated workspace.',
+          ...input.echo,
+        }));
+      }
+    },
+    /**
+     * Synchronous verdict for a provider's declared identity swap. On
+     * acceptance the workspace binding already follows `to`; the provider then
+     * adopts its records and announces `to` (see sessionCreatedFrame).
+     */
+    requestSessionHandover: (request: { from?: unknown; to?: unknown; spawnStartedAtMs?: unknown }) => {
+      if (workspaceBindFailed) return { accepted: false, reason: 'workspace_bind_failed' };
+      const verdict = handover.request(request);
+      const accepted = handover.accepted();
+      if (verdict.accepted && accepted) boundProviderSessionId = accepted.to;
+      return verdict;
+    },
+  });
+}
+
 /**
  * Reads the per-turn coordination request from the same options envelope as
  * composer mode. Absence uses the product default (`delegate`); an explicit
@@ -1942,58 +2109,16 @@ async function dispatchFencedProviderCommand(
 
     if (sessionWorkspace && !resumeSessionId
         && (sessionWorkspace.isolation === 'legacy_shared' || ingressClientMsgId)) {
-      const downstreamWriter = writer;
-      let workspaceBindFailed = false;
-      let boundProviderSessionId: string | null = null;
-      writer = transparentWriterWithSend(downstreamWriter, (payload: unknown): void => {
-        if (workspaceBindFailed) return;
-        let forwardedPayload = payload;
-        try {
-          if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-            const frame = payload as Record<string, unknown>;
-            const kind = typeof frame.kind === 'string' ? frame.kind : '';
-            const emittedSessionId = typeof frame.sessionId === 'string'
-              ? frame.sessionId
-              : (typeof frame.newSessionId === 'string' ? frame.newSessionId : '');
-            if (kind === 'session_created' && emittedSessionId) {
-              if (boundProviderSessionId) {
-                if (emittedSessionId === boundProviderSessionId) return;
-                throw new Error('provider emitted conflicting session identities for one launch');
-              }
-              if (sessionWorkspace?.isolation === 'legacy_shared') {
-                workspaceModesRepository.markShared(
-                  emittedSessionId, sessionWorkspace.logicalProjectPath, targetProvider,
-                );
-                forwardedPayload = { ...frame, workspaceIsolation: 'legacy_shared' };
-              } else {
-                const boundWorkspace = bindSessionWorkspace({
-                  projectPath: logicalProjectPath,
-                  launchKey: ingressClientMsgId!,
-                  sessionId: emittedSessionId,
-                  principalId,
-                });
-                workspaceModesRepository.markOverlay(
-                  emittedSessionId, boundWorkspace.logicalProjectPath, targetProvider,
-                );
-                forwardedPayload = { ...frame, workspaceGeneration: boundWorkspace.generation };
-              }
-              boundProviderSessionId = emittedSessionId;
-            }
-          }
-          downstreamWriter.send(forwardedPayload);
-        } catch (error) {
-          workspaceBindFailed = true;
-          console.error('Failed to bind provider session to its isolated workspace', {
-            provider: targetProvider,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          downstreamWriter.send(createNormalizedMessage({
-            kind: 'complete', provider: targetProvider, exitCode: 1, success: false,
-            code: 'session_workspace_bind_failed', notStarted: false,
-            error: 'The provider session could not be bound to its isolated workspace.',
-            ...clientMsgIdEcho(data),
-          }));
-        }
+      writer = withSessionWorkspaceBinding({
+        downstreamWriter: writer,
+        sessionWorkspace,
+        logicalProjectPath,
+        launchKey: ingressClientMsgId,
+        principalId,
+        principalUserId: ingressUserId,
+        targetProvider,
+        echo: clientMsgIdEcho(data),
+        brainDirForUser: await loadHandoverBrainDirResolver(targetProvider),
       });
     }
   }

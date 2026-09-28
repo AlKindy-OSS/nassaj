@@ -20,7 +20,14 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import path from 'node:path';
 
-import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
+import {
+  acquireCodexLaunchIdentity,
+  assertCodexIdentityUnchanged,
+  codexIdentityFromExecution,
+  codexLaunchOptions,
+  CODEX_MACHINE_CLI_MISSING_MESSAGE,
+  isCodexMachineCliMissing,
+} from '@/shared/codex-executable.js';
 import {
   readJsonObjectOrEmpty,
   writeJsonObjectAtomic,
@@ -51,10 +58,12 @@ const CODEX_API_KEY_FIELD = 'OPENAI_API_KEY';
 const LOGIN_TIMEOUT_MS = 20_000;
 
 type SpawnFn = typeof nodeSpawn;
+type CodexLaunchIdentity = ReturnType<typeof acquireCodexLaunchIdentity>;
 
 export class CodexCredentialsWriter implements IProviderCredentialWriter {
   private readonly spawnFn: SpawnFn;
 
+  /** @param spawnFn child-process seam. */
   constructor(spawnFn: SpawnFn = nodeSpawn) {
     this.spawnFn = spawnFn;
   }
@@ -130,6 +139,19 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
       projectId: 'system:provider-credentials',
       workspacePath: process.cwd(),
     });
+    // T-1872: the login runs exactly the machine release the admission measured;
+    // an admission without one refuses with its recorded cause (never re-acquires).
+    let launchIdentity: CodexLaunchIdentity;
+    try {
+      launchIdentity = codexIdentityFromExecution(permissionExecution) as CodexLaunchIdentity;
+    } catch (error) {
+      permissionExecution.notStarted();
+      throw new AppError(isCodexMachineCliMissing(error)
+        ? CODEX_MACHINE_CLI_MISSING_MESSAGE
+        : 'The Codex installation on this machine is not usable.', {
+        code: 'CODEX_NOT_INSTALLED', statusCode: 503,
+      });
+    }
     await runPermissionExecutionAdapter(permissionExecution, () => new Promise<void>((resolve, reject) => {
       // Generic user-facing failure — carries no key material and no CLI output.
       const loginFailed = (reason: string): AppError =>
@@ -169,8 +191,10 @@ export class CodexCredentialsWriter implements IProviderCredentialWriter {
       let child: ReturnType<SpawnFn>;
       try {
         // No shell, key via stdin ONLY — argv stays constant and secret-free.
-        child = this.spawnFn(resolveCliExecutablePath('codex'), ['login', '--with-api-key'], {
-          env,
+        assertCodexIdentityUnchanged(launchIdentity);
+        const launch = codexLaunchOptions(env, launchIdentity);
+        child = this.spawnFn(launch.codexPathOverride, ['login', '--with-api-key'], {
+          env: launch.env,
           shell: false,
           stdio: ['pipe', 'ignore', 'ignore'],
           timeout: LOGIN_TIMEOUT_MS,

@@ -61,6 +61,8 @@ const PAGE_HEADING_OWNERS = new Set([
   'ProfileSettingsTab.tsx',
   'GitSettingsTab.tsx',
   'CommandBoardSettingsTab.tsx',
+  // T-1866: «النظام» — تبويبٌ جديدٌ برأسٍ خاصٍّ به، انفصل عن «لوحة الأوامر».
+  'SystemSettingsTab.tsx',
   // ‏`ConnectorsSettingsTab.tsx` كان الغائب الوحيد من بين أحد عشر تبويباً تستعمل
   // `level="page"` — فحُكم عليه الحارس بعنوانٍ هو رأسُ تبويبه بحقّ. القائمة نقصت
   // اسماً، والمكوّن سليم.

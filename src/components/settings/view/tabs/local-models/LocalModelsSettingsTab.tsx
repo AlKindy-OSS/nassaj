@@ -40,7 +40,7 @@ function Feedback({ control }: { control: Controller }) {
     {(control.loading || control.busy) && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t(control.busy ? 'localModels.working' : 'localModels.loading')}</p>}
     {control.message && <p className="text-sm text-success">{t(`localModels.${control.message}`)}</p>}
     {control.error && <div className="space-y-2"><p className="text-sm text-danger">{t(`localModels.${control.error}`)}</p>
-      {control.error === 'loadFailed' && <Button variant="outline" className="min-h-11" disabled={control.loading || control.busy} onClick={() => { void control.refresh(); }}>{t('localModels.retry')}</Button>}</div>}
+      {control.error === 'loadFailed' && <Button variant="outline" size="lg" className="px-4" disabled={control.loading || control.busy} onClick={() => { void control.refresh(); }}>{t('localModels.retry')}</Button>}</div>}
   </div>;
 }
 
@@ -67,11 +67,14 @@ export default function LocalModelsSettingsTab({ onOpenSharing }: { onOpenSharin
   const open = (server: LocalServer | 'new') => { opener.current = document.activeElement as HTMLElement; setEditing(server); };
   const enabled = control.overview?.feature.enabled ?? false;
   return <div className="space-y-8">
-    <SettingsSection icon={Server} level="page" title={t('localModels.title')} description={t('localModels.description')}><Feedback control={control} /></SettingsSection>
+    {/* لا `level="page"` هنا: هذا اللوح يُعرض داخل تبويب «الوكلاء» الذي يملك
+        عنوان الصفحة أعلاه (اختيار «النماذج المحلية» بطاقةٌ تحته لا تبويبٌ
+        مستقل)، فمستوى القسم هو الصحيح. */}
+    <SettingsSection icon={Server} title={t('localModels.title')} description={t('localModels.description')}><Feedback control={control} /></SettingsSection>
     <Activation control={control} />
     {control.overview && <SettingsSection title={t('localModels.servers')}>
       <div className="space-y-4">
-        <Button className="min-h-11" disabled={!enabled || control.busy || editing !== null} onClick={() => open('new')}><Plus aria-hidden="true" />{t('localModels.add')}</Button>
+        <Button size="lg" className="px-4" disabled={!enabled || control.busy || editing !== null} onClick={() => open('new')}><Plus aria-hidden="true" />{t('localModels.add')}</Button>
         {editing !== null && enabled && <LocalServerForm key={editing === 'new' ? 'new' : editing.id} server={editing === 'new' ? undefined : editing} busy={control.busy} onClose={close}
           onSave={async input => { const ok = await control.save(input, editing === 'new' ? undefined : editing.id); if (ok) setConnected({}); return ok; }} />}
         {control.overview.servers.length === 0 && !control.loading && <p className="text-sm text-muted-foreground">{t('localModels.empty')}</p>}
@@ -80,7 +83,7 @@ export default function LocalModelsSettingsTab({ onOpenSharing }: { onOpenSharin
           onConnect={() => { setConnected(previous => ({ ...previous, [server.id]: false })); void control.connect(server.id).then(ok => { if (ok) setConnected(previous => ({ ...previous, [server.id]: true })); }); }} />)}
         <Pagination control={control} />
         <p className="text-[13px] text-muted-foreground">{t('localModels.sharingDisclosure')}</p>
-        <Button variant="link" className="min-h-11 px-0" onClick={onOpenSharing}>{t('localModels.sharing')}</Button>
+        <Button variant="link" size="lg" className="px-0" onClick={onOpenSharing}>{t('localModels.sharing')}</Button>
       </div>
     </SettingsSection>}
   </div>;

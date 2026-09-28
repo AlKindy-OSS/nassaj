@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  checkBundledCageBwrap,
   cageEnabled,
   resolveBwrapPath,
   buildCagedLaunch,
@@ -778,4 +779,22 @@ describe('M-3 — real caged child inherits ONLY the passed env (integration)', 
       );
     },
   );
+});
+
+describe('checkBundledCageBwrap (T-1872 qa I6)', () => {
+  it('returns the bundled cage bwrap without reporting when it is installed', () => {
+    const reports: unknown[] = [];
+    const found = checkBundledCageBwrap({ report: (entry: unknown) => { reports.push(entry); } });
+    assert.match(String(found), /@openai\/codex-[a-z0-9]+-[a-z0-9]+\/vendor\/.+\/codex-resources\/bwrap$/u);
+    assert.deepEqual(reports, []);
+  });
+
+  it('reports loudly and returns null when the bundled bwrap is missing', () => {
+    const reports: Array<Record<string, unknown>> = [];
+    const found = checkBundledCageBwrap({ candidates: () => [], report: (entry: Record<string, unknown>) => { reports.push(entry); } });
+    assert.equal(found, null);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.event, 'provider_cage_bwrap_missing');
+    assert.equal(reports[0]!.severity, 'error');
+  });
 });

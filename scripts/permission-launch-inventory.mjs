@@ -578,13 +578,23 @@ if (process.argv.includes('--mutation-test')) {
       gateTerms: ['root-owned', 'signature', 'kernel process identity', 'CAS', 'before application import'],
     },
     {
-      id: 'server/services/codex-app-server.js#child_process.execFileSync#1',
-      classification: 'read_only_process_query', purpose: 'codex_native_fork_version_query',
-      adapter: 'assertCodexMessageForkRuntimeReady',
-      start: 'export function assertCodexMessageForkRuntimeReady() {', end: 'function boundedRpcOutput()',
-      guards: ['readCodexExecutableIdentity()', "identity.executablePath, ['--version']",
-        'shell: false', 'timeout: 5000', "version !== 'codex-cli 0.153.2'"],
-      gateTerms: ['SDK-local', '--version', 'shell false', '5000 ms', 'codex-cli 0.153.2'],
+      // T-1872 part 2: runtime-compat probes run the sealed release with fixed argv only.
+      id: 'server/shared/codex-runtime-compat.js#child_process.spawn#1',
+      classification: 'infrastructure_effect', purpose: 'codex_runtime_compat_probe',
+      adapter: 'runCodexProbe',
+      start: 'export function runCodexProbe(executable, args,', end: 'class ProbeFailure',
+      guards: ['spawn(executable, args, { env, cwd, shell: false', "child.kill('SIGKILL')", 'OUTPUT_LIMIT'],
+      gateTerms: ['machine-release', 'shell false', 'without TMPDIR', '15 s', '/var/tmp'],
+    },
+    {
+      // T-1872: the machine Codex version probe stays a fixed, env-less, shell-less query.
+      id: 'server/shared/codex-executable.js#child_process.execFileSync#1',
+      classification: 'read_only_process_query', purpose: 'codex_machine_version_query',
+      adapter: 'readCodexCliVersion',
+      start: 'export function readCodexCliVersion(executablePath) {', end: 'export const codexResolverDigest',
+      guards: ["execFileSync(executablePath, ['--version']", 'shell: false', 'timeout: 5000', 'env: {}',
+        '/^codex-cli (\\d+\\.\\d+\\.\\d+)$/u'],
+      gateTerms: ['machine-release', '--version', 'shell false', 'empty environment', '5000 ms'],
     },
   ];
   const classifications = readClassifications();

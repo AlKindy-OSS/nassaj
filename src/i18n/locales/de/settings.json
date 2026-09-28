@@ -115,6 +115,7 @@
     "showToolCalls": "Tool-Aufrufe anzeigen",
     "autoScrollToBottom": "Automatisch nach unten scrollen",
     "tabsIconOnly": "Kompakte Tabs (nur Symbole)",
+    "showHardwareUsage": "Hardwarenutzung anzeigen",
     "sendByCtrlEnter": "Mit Strg+Enter senden",
     "sendByCtrlEnterDescription": "Wenn aktiviert, sendet Strg+Enter die Nachricht anstelle von Enter. Dies ist nützlich für IME-Benutzer:innen, um versehentliches Senden zu vermeiden.",
     "dragHandle": {
@@ -215,7 +216,8 @@
     "notifications": "Benachrichtigungen",
     "users": "Benutzer:innen",
     "about": "Info",
-    "commandBoard": "Befehlstafel"
+    "commandBoard": "Befehlstafel",
+    "system": "System"
   },
   "profile": {
     "title": "Profil",
@@ -1119,8 +1121,8 @@
   "error": "Error",
   "stop": "Stop",
   "tmpfsCap": {
-    "title": "Shared memory cap (/tmp)",
-    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "title": "Shared memory cap ({{path}})",
+    "description": "{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
     "desiredLabel": "Desired cap",
     "capped": "Capped",
     "uncapped": "No cap",

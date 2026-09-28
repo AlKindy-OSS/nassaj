@@ -36,7 +36,8 @@
  *     تُكمَّل بصفر.
  *  3. الحمولة المُعادة **لا تحمل أي حقل هوية**: ردّ كودكس يحمل `email` و`user_id`
  *     ولا يعبران هذه الطبقة. رصيد الاستخدام الإضافي يمرّ فقط كـ`balance` رقمي
- *     منتهٍ و`unlimited` منطقي، إن أعلنه Codex كاملاً؛ لا يعبر كائن `credits` الخام.
+ *     منتهٍ و`unlimited` منطقي، وفقط حين يؤكّد Codex وجود مجمّع رصيد فعلي
+ *     (‏`has_credits`)؛ لا يعبر كائن `credits` الخام، ولا يُصنَع صفرٌ لخطة بلا رصيد.
  *  4. المفتاح/التوكن يُقرأ خادمياً من جذر اعتمادات **المستخدم الطالب**
  *     (‏`resolveProviderEnv`/مخزن الأسرار) ولا يصل العميل أبداً (‏ADR-014).
  */
@@ -50,7 +51,11 @@ import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
 import { credentialPrincipalId } from '@/services/isolation/credential-principal.js';
 import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
-import type { ProviderQuotaWindow, ProviderQuotaWindows } from '@/shared/types.js';
+import type {
+  ProviderExtraUsageCredits,
+  ProviderQuotaWindow,
+  ProviderQuotaWindows,
+} from '@/shared/types.js';
 
 /**
  * نفس نافذة كاش حصّة كلود (‏180ث): الرقم لا يتحرّك بما يهمّ أسرع من ذلك،
@@ -127,6 +132,39 @@ function parseCodexCreditBalance(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
+/**
+ * Projects Codex's `credits` object onto the shared credit-display rule.
+ *
+ * Upstream shape (observed in live `wham/usage` and in Codex rollout
+ * `rate_limits` events): `{ has_credits: boolean, unlimited: boolean,
+ * balance: string | null }`, or `credits: null`. Plans without a credit pool
+ * report `has_credits: false` together with `balance: "0"`, so the balance
+ * alone cannot tell "no pool" from "empty pool" — `has_credits` can.
+ *
+ * Returns `undefined` (hide) unless a real pool is confirmed:
+ *  - `has_credits: false` → no pool, hidden whatever `balance`/`unlimited` say.
+ *  - `has_credits: true`  → `{ balance, unlimited }`; a zero balance is a
+ *    confirmed empty pool. `unlimited: true` may carry `balance: null`.
+ *  - `has_credits` absent (older shape) → shown only when the value itself is
+ *    unambiguous: `unlimited: true` or a positive balance. A bare zero stays
+ *    hidden because it may mean "no pool".
+ * `credits` is provider-owned and may gain identity/billing fields, so only
+ * these two display-safe fields ever cross the contract.
+ */
+function projectCodexCredits(value: unknown): ProviderExtraUsageCredits | undefined {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.unlimited !== 'boolean') return undefined;
+  const hasCredits = raw.has_credits;
+  if (hasCredits === false) return undefined;
+  if (hasCredits !== undefined && hasCredits !== true) return undefined;
+
+  const balance = parseCodexCreditBalance(raw.balance);
+  if (raw.unlimited) return { balance, unlimited: true };
+  if (balance === null) return undefined;
+  if (hasCredits !== true && balance === 0) return undefined;
+  return { balance, unlimited: false };
 }
 
 /**
@@ -226,14 +264,7 @@ async function readCodexQuota(
   );
   if (!body) return null;
 
-  // `credits` is provider-owned and may gain identity/billing fields. Deliberately
-  // project only the two display-safe fields used by the settings card.
-  const rawCredits = asRecord(body.credits);
-  const parsedBalance = parseCodexCreditBalance(rawCredits?.balance);
-  const extraUsageCredits =
-    parsedBalance !== null && typeof rawCredits?.unlimited === 'boolean'
-      ? { balance: parsedBalance, unlimited: rawCredits.unlimited }
-      : undefined;
+  const extraUsageCredits = projectCodexCredits(body.credits);
 
   const rateLimit = asRecord(body.rate_limit);
 

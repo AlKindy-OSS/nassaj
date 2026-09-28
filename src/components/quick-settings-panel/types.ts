@@ -7,7 +7,8 @@ export type PreferenceToggleKey =
   | 'showThinking'
   | 'showToolCalls'
   | 'autoScrollToBottom'
-  | 'tabsIconOnly';
+  | 'tabsIconOnly'
+  | 'showHardwareUsage';
 
 export type QuickSettingsPreferences = Record<PreferenceToggleKey, boolean>;
 

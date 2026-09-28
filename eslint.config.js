@@ -99,7 +99,8 @@ export default tseslint.config(
       ],
       "boundaries/elements": [
         { type: "backend-shared-type-contract", pattern: ["server/shared/types.{js,ts}","server/shared/interfaces.{js,ts}"], mode: "file" },
-        { type: "backend-shared-utils", pattern: ["server/shared/utils.{js,ts}","server/shared/frontmatter.ts","server/shared/r3-evidence-lexical.ts","server/shared/claude-cli-path.ts","server/shared/cli-executable-path.ts","server/shared/codex-executable.js","server/shared/writer-target.js","server/shared/user-revocation-epoch.js","server/services/image-signature.js","server/services/svg-sanitizer.js"], mode: "file" },
+        { type: "backend-shared-utils", pattern: ["server/shared/utils.{js,ts}","server/shared/frontmatter.ts","server/shared/r3-evidence-lexical.ts","server/shared/claude-cli-path.ts","server/shared/cli-executable-path.ts","server/shared/harness-binaries.ts","server/shared/__tests__/harness-binary-fixtures.ts","server/shared/__tests__/sandbox-home.ts","server/shared/__tests__/stub-harness-binaries.ts","server/shared/codex-executable.js","server/shared/codex-runtime-compat.js","server/shared/writer-target.js","server/shared/user-revocation-epoch.js","server/services/image-signature.js","server/services/svg-sanitizer.js"], mode: "file" },
+        { type: "backend-test-fixture", pattern: ["server/shared/tests/*"], mode: "file" },
         { type: "backend-isolation-service", pattern: "server/services/isolation/*", mode: "file" },
         { type: "backend-service-shared", pattern: ["server/services/provider-sharing.js","server/services/agent-sse-ticket.service.js","server/services/system-resource-sampler.service.ts","server/services/update-maintenance-gate.js","server/services/update-writer-lease.js"], mode: "file" },
         { type: "backend-legacy-runtime", pattern: ["server/projects.js","server/sessionManager.js","server/utils/runtime-paths.js"], mode: "file" },
@@ -125,6 +126,17 @@ export default tseslint.config(
         ],
       }],
       "boundaries/no-unknown": "error",
+    },
+  },
+  {
+    // T-1872 qa I4: test fixtures (server/shared/tests) are reachable from tests only.
+    files: ["server/**/*.{js,ts}"],
+    ignores: ["server/**/*.test.{js,ts}", "server/**/__tests__/**", "server/**/tests/**", "server/**/*.d.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{
+        group: ["**/shared/tests/*", "@/shared/tests/*"],
+        message: "server/shared/tests holds test-only fixtures; production code must not import them.",
+      }] }],
     },
   }
 );

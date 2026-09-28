@@ -6,11 +6,11 @@ import { useClaudeUsageShared as useClaudeUsage } from '../../../quick-settings-
 import { useAuth } from '../../../auth/context/AuthContext';
 import {
   clampUtilization,
+  formatClaudeExtraBadgeText,
   formatCreditBalance,
   formatPercent,
-  formatRemainingHarnessCredits,
   formatResetTime,
-  hasDisplayableExtraUsageCredits,
+  resolveClaudeExtraUsageDisplay,
   usageTextColorClass,
 } from '../../../quick-settings-panel/claudeUsageHelpers';
 import type { ClaudeUsage } from '../../../quick-settings-panel/claudeUsageTypes';
@@ -30,6 +30,7 @@ import { useCycleCountdown } from '../../../quick-settings-panel/hooks/useCycleC
 import { useProviderQuota } from '../../../quick-settings-panel/hooks/useProviderQuota';
 import {
   looksLikeAnthropicModel,
+  resolveCreditDisplay,
   resolveWindowLength,
   shouldSuppressOnProviderWindowsLoading,
 } from '../../../quick-settings-panel/providerQuotaHelpers';
@@ -159,15 +160,11 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
 
   // غير كلود: دورة التجديد إن كانت مرساتها مُكتشَفة/يدوية، وإلا صمت.
   if (!claudeWindowsAllowed) {
-    const extraCredits =
-      providerQuota.status === 'success' ? providerQuota.data?.extraUsageCredits : undefined;
-    const hasExtraCredits =
-      extraCredits &&
-      Number.isFinite(extraCredits.balance) &&
-      extraCredits.balance >= 0 &&
-      typeof extraCredits.unlimited === 'boolean';
+    const creditDisplay = resolveCreditDisplay(
+      providerQuota.status === 'success' ? providerQuota.data?.extraUsageCredits : undefined,
+    );
 
-    if (quotaWindows.length > 0 || hasExtraCredits) {
+    if (quotaWindows.length > 0 || creditDisplay.kind !== 'hidden') {
       return (
         <>
           <div className="flex flex-col items-center xl:hidden">
@@ -205,28 +202,30 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
                 </div>
               );
             })}
-            {hasExtraCredits && extraCredits && (
-              <div
-                className="flex flex-col items-center gap-1 py-1"
-                title={`${t('agentUsage.codexExtraCredits')}: ${
-                  extraCredits.unlimited
-                    ? t('agentUsage.unlimited')
-                    : formatCreditBalance(extraCredits.balance, i18n.language)
-                }`}
-                aria-label={`${t('agentUsage.codexExtraCredits')}: ${
-                  extraCredits.unlimited
-                    ? t('agentUsage.unlimited')
-                    : formatCreditBalance(extraCredits.balance, i18n.language)
-                }`}
-              >
-                <span className="text-[10px] font-semibold leading-none text-primary" aria-hidden="true">
-                  +
-                </span>
-                <span className="text-[11px] tabular-nums leading-none text-muted-foreground">
-                  {extraCredits.unlimited ? '∞' : formatCreditBalance(extraCredits.balance, i18n.language)}
-                </span>
-              </div>
-            )}
+            {creditDisplay.kind !== 'hidden' && (() => {
+              const creditText =
+                creditDisplay.kind === 'unlimited'
+                  ? t('agentUsage.unlimited')
+                  : formatCreditBalance(creditDisplay.kind === 'amount' ? creditDisplay.value : 0, i18n.language);
+              const creditLabel = `${t('agentUsage.codexExtraCredits')}: ${creditText}`;
+              return (
+                <div
+                  className="flex flex-col items-center gap-1 py-1"
+                  title={creditLabel}
+                  aria-label={creditLabel}
+                >
+                  <span
+                    className={`text-[10px] font-semibold leading-none ${creditDisplay.kind === 'zero' ? 'text-muted-foreground' : 'text-primary'}`}
+                    aria-hidden="true"
+                  >
+                    +
+                  </span>
+                  <span className="text-[11px] tabular-nums leading-none text-muted-foreground">
+                    {creditDisplay.kind === 'unlimited' ? '∞' : creditText}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
         </>
       );
@@ -292,12 +291,11 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
 
   if (usage.status !== 'success') return null;
   const { data } = usage;
-  const extraUsage = hasDisplayableExtraUsageCredits(data.extraUsage)
-    ? data.extraUsage
-    : null;
+  const claudeExtraDisplay = resolveClaudeExtraUsageDisplay(data.extraUsage);
+  const extraBadgeText = formatClaudeExtraBadgeText(claudeExtraDisplay, i18n.language);
 
   const visible = WINDOWS.filter(({ key }) => data[key] !== null);
-  if (visible.length === 0 && !extraUsage) return null;
+  if (visible.length === 0 && extraBadgeText === null) return null;
 
   return (
     // CSS double-guard: JS hides on wide viewports; xl:hidden covers any
@@ -334,18 +332,26 @@ export function ClaudeUsageCollapsed({ sessionProvider }: ClaudeUsageCollapsedPr
           </div>
         );
       })}
-      {extraUsage && (
-        <div
-          className="flex flex-col items-center gap-1 py-1"
-          title={`${t('claudeUsage.windows.extraUsage')}: ${formatRemainingHarnessCredits(extraUsage, i18n.language)}`}
-          aria-label={`${t('claudeUsage.windows.extraUsage')}: ${formatRemainingHarnessCredits(extraUsage, i18n.language)}`}
-        >
-          <span className="text-[10px] font-semibold leading-none text-primary" aria-hidden="true">+</span>
-          <span className="text-[11px] tabular-nums leading-none text-muted-foreground">
-            {formatRemainingHarnessCredits(extraUsage, i18n.language)}
-          </span>
-        </div>
-      )}
+      {extraBadgeText !== null && (() => {
+        const label = `${t('claudeUsage.windows.extraUsage')}: ${extraBadgeText}`;
+        return (
+          <div
+            className="flex flex-col items-center gap-1 py-1"
+            title={label}
+            aria-label={label}
+          >
+            <span
+              className={`text-[10px] font-semibold leading-none ${claudeExtraDisplay.kind === 'zero' ? 'text-muted-foreground' : 'text-primary'}`}
+              aria-hidden="true"
+            >
+              +
+            </span>
+            <span className="text-[11px] tabular-nums leading-none text-muted-foreground">
+              {extraBadgeText}
+            </span>
+          </div>
+        );
+      })()}
     </div>
     </>
   );

@@ -82,15 +82,17 @@ function MemberRow({ member, viewer, currentUserId, busy, t, onRole, onRemove }:
   const canRemove = !member.isCreator && (member.role === 'owner' ? viewer.canManageOwnerRole : viewer.canManageMembers);
   const canChangeRole = !member.isCreator && viewer.canManageOwnerRole;
   const isSelf = currentUserId === member.userId;
-  return <li className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
-    <div className="flex min-w-0 items-center gap-2">
-      <MemberAvatar userId={member.userId} displayName={member.displayName} avatar={member.avatar} />
-      <div className="min-w-0"><p className="truncate text-sm font-medium text-foreground"><bdi>{displayName}</bdi></p><p className="text-xs text-muted-foreground">{t(`participants.roles.${member.role === 'owner' ? 'owner' : 'user'}`, { defaultValue: member.role })}</p></div>
-    </div>
-    <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+  return <li className="flex min-h-11 flex-wrap items-center gap-2 py-1.5 sm:flex-nowrap">
+    <MemberAvatar userId={member.userId} displayName={member.displayName} avatar={member.avatar} />
+    {/* qa MEDIUM (c): truncate على <bdi> block لا <p> — بدونها القصّ العربي
+        RTL يقصّ الاسم اللاتيني من بدايته (يمين السطر) لا نهايته. */}
+    <div className="min-w-0 flex-1"><p className="text-sm font-medium text-foreground"><bdi className="block truncate">{displayName}</bdi></p><p className="text-xs text-muted-foreground">{t(`participants.roles.${member.role === 'owner' ? 'owner' : 'user'}`, { defaultValue: member.role })}</p></div>
+    {/* qa MEDIUM (c): flex-wrap على الصفّ يسمح للأزرار بالنزول سطراً ثانياً
+        دون خنق الاسم على الشاشات الضيّقة، بلا قائمة ⋯ إضافية. */}
+    <div className="flex shrink-0 items-center gap-1.5">
       {member.isCreator ? <span className="rounded-full bg-muted px-2 py-1 text-xs text-foreground">{t('participants.memberDialog.creator', { defaultValue: 'Creator' })}</span> : <>
-        {canChangeRole && <Button type="button" size="lg" variant="outline" disabled={busy} onClick={() => onRole(member.role === 'owner' ? 'member' : 'owner')}>{t(member.role === 'owner' ? 'participants.memberDialog.makeMember' : 'participants.memberDialog.makeOwner', { defaultValue: member.role === 'owner' ? 'Make member' : 'Make owner' })}</Button>}
-        {canRemove && (confirming ? <div className="flex w-full gap-2 sm:w-auto"><Button type="button" size="lg" variant="destructive" className="flex-1" disabled={busy} onClick={onRemove}>{busy ? t('participants.memberDialog.removing', { defaultValue: 'Removing…' }) : t(isSelf ? 'participants.memberDialog.confirmSelfRemove' : 'participants.memberDialog.confirmRemove', { defaultValue: isSelf ? 'Confirm leaving' : 'Confirm' })}</Button><Button type="button" size="lg" variant="outline" className="flex-1" disabled={busy} onClick={() => setConfirming(false)}>{t('participants.memberDialog.cancel', { defaultValue: 'Cancel' })}</Button></div> : <Button type="button" size="lg" variant="ghost" disabled={busy} onClick={() => setConfirming(true)}>{t(isSelf ? 'participants.memberDialog.leave' : 'participants.memberDialog.remove', { defaultValue: isSelf ? 'Leave project' : 'Remove' })}</Button>)}
+        {canChangeRole && !confirming && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onRole(member.role === 'owner' ? 'member' : 'owner')}>{t(member.role === 'owner' ? 'participants.memberDialog.makeMember' : 'participants.memberDialog.makeOwner', { defaultValue: member.role === 'owner' ? 'Make member' : 'Make owner' })}</Button>}
+        {canRemove && (confirming ? <><Button type="button" size="sm" variant="destructive" disabled={busy} onClick={onRemove}>{busy ? t('participants.memberDialog.removing', { defaultValue: 'Removing…' }) : t(isSelf ? 'participants.memberDialog.confirmSelfRemove' : 'participants.memberDialog.confirmRemove', { defaultValue: isSelf ? 'Confirm leaving' : 'Confirm' })}</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setConfirming(false)}>{t('participants.memberDialog.cancel', { defaultValue: 'Cancel' })}</Button></> : <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(true)}>{t(isSelf ? 'participants.memberDialog.leave' : 'participants.memberDialog.remove', { defaultValue: isSelf ? 'Leave project' : 'Remove' })}</Button>)}
       </>}
     </div>
   </li>;
@@ -107,6 +109,19 @@ function AddMemberSearch({ projectId, viewer, existingIds, mutationBusy, generat
   const [roleById, setRoleById] = useState<Record<number, MemberRole>>({});
   const epoch = useRef(0);
   const inputId = useId();
+  const listRef = useRef<HTMLUListElement | null>(null);
+  // qa (T-1868): the overlay used to render whenever there were candidates at
+  // all, fading rows that were never clipped on a short list. Only an
+  // overflowing list — and one not already scrolled to its last row — needs
+  // the taper.
+  const [showFade, setShowFade] = useState(false);
+  const updateFade = useCallback(() => {
+    const el = listRef.current;
+    if (!el) { setShowFade(false); return; }
+    const overflowing = el.scrollHeight > el.clientHeight + 1;
+    const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+    setShowFade(overflowing && !atEnd);
+  }, []);
 
   useEffect(() => {
     const request = ++epoch.current;
@@ -127,12 +142,75 @@ function AddMemberSearch({ projectId, viewer, existingIds, mutationBusy, generat
     return () => controller.abort();
   }, [debounced, existingIds, generation, projectId, viewer.canManageMembers]);
 
-  if (!viewer.canManageMembers) return null;
-  return <div className="space-y-2">
+  useEffect(() => { updateFade(); }, [candidates, updateFade]);
+
+  // qa round (optional #4): a viewport rotation/resize changes `max-h-52`'s
+  // effective pixel height without touching `candidates` or firing a scroll
+  // event, so the fade could go stale (shown on a list that no longer
+  // overflows, or vice versa) until the next scroll. `ResizeObserver` isn't
+  // in jsdom, so this no-ops harmlessly under the unit tests above.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateFade);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [candidates, updateFade]);
+
+  // round 3 (qa): AddMemberSearch used to `return null` here, but the comment
+  // at MembersManager's call site claimed the height was reserved regardless
+  // of permission — false: a viewer without canManageMembers got zero height,
+  // so "Current members" still jumped once that permission resolved. Render
+  // the same-height reserve as the loading skeleton (unanimated: this is a
+  // resolved, final state, not "still loading") instead of nothing.
+  if (!viewer.canManageMembers) return <SearchAreaHeightReserve message={t('participants.memberDialog.noAddPermission', { defaultValue: "You don't have permission to add members" }) as string} />;
+  // qa MEDIUM (b): نتائج البحث كانت <ul> عادية داخل التدفّق — تدفع قائمة
+  // الأعضاء تحتها حتى 160px. الآن قائمة عائمة (absolute) أسفل الحقل مباشرة،
+  // فلا إزاحة لأي عنصر آخر. `relative` على الغلاف يجعلها تتموضع بالنسبة إليه.
+  return <div className="relative space-y-2">
     <label htmlFor={inputId} className="block text-sm font-medium text-foreground">{t('participants.memberDialog.searchLabel', { defaultValue: 'Add a member' })}</label>
     <Input className="h-11" id={inputId} value={query} onChange={event => setQuery(event.target.value)} placeholder={t('participants.memberDialog.searchPlaceholder', { defaultValue: 'Search by username' }) as string} aria-describedby={`${inputId}-hint`} />
     <p id={`${inputId}-hint`} aria-live="polite" className="min-h-5 text-xs text-foreground">{query.length > 0 && query.trim().length < 2 ? t('participants.memberDialog.searchHint', { defaultValue: 'Type at least 2 characters' }) : status === 'loading' ? t('participants.memberDialog.searching', { defaultValue: 'Searching…' }) : status === 'error' ? t('participants.memberDialog.searchError', { defaultValue: 'Search failed' }) : status === 'success' && candidates.length === 0 ? t('participants.memberDialog.noResults', { defaultValue: 'No matching users' }) : ''}</p>
-    {candidates.length > 0 && <ul className="space-y-2">{candidates.map(candidate => { const role = roleById[candidate.id] ?? 'member'; return <li key={candidate.id} className="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center"><span className="min-w-0 flex-1 truncate text-sm text-foreground"><bdi>{candidate.displayName}</bdi></span>{viewer.canManageOwnerRole && <select className="h-11 rounded-md border border-input bg-background px-3 text-sm text-foreground" value={role} disabled={mutationBusy} aria-label={t('participants.memberDialog.role', { defaultValue: 'Project role' }) as string} onChange={event => setRoleById(current => ({ ...current, [candidate.id]: event.target.value as MemberRole }))}><option value="member">{t('participants.roles.user', { defaultValue: 'Member' })}</option><option value="owner">{t('participants.roles.owner', { defaultValue: 'Owner' })}</option></select>}<Button type="button" size="lg" disabled={mutationBusy} onClick={() => onAdd(candidate.id, role)}>{t('participants.memberDialog.add', { defaultValue: 'Add' })}</Button></li>; })}</ul>}
+    {candidates.length > 0 && (
+      // round 3 (qa): `relative` on this wrapper, not the outer <div> above,
+      // so the fade overlay below positions against the dropdown itself —
+      // and a stronger border/shadow (shadow-lg) than the rest of the dialog.
+      <div className="absolute inset-x-0 top-full z-20 mt-1 rounded-md border border-border bg-popover shadow-lg">
+        <ul ref={listRef} onScroll={updateFade} className="max-h-52 overflow-y-auto rounded-md">{candidates.map(candidate => { const role = roleById[candidate.id] ?? 'member'; return <li key={candidate.id} className="flex items-center gap-2 px-2 py-1.5"><span className="min-w-0 flex-1 text-sm text-foreground"><bdi className="block truncate">{candidate.displayName}</bdi></span>{viewer.canManageOwnerRole && <select className="h-8 rounded-md border border-input bg-background px-2 pe-7 text-sm text-foreground" value={role} disabled={mutationBusy} aria-label={t('participants.memberDialog.role', { defaultValue: 'Project role' }) as string} onChange={event => setRoleById(current => ({ ...current, [candidate.id]: event.target.value as MemberRole }))}><option value="member">{t('participants.roles.user', { defaultValue: 'Member' })}</option><option value="owner">{t('participants.roles.owner', { defaultValue: 'Owner' })}</option></select>}<Button type="button" size="sm" disabled={mutationBusy} onClick={() => onAdd(candidate.id, role)}>{t('participants.memberDialog.add', { defaultValue: 'Add' })}</Button></li>; })}</ul>
+        {/* round 3 (qa): mask-image made the clipped rows semi-transparent,
+            letting the members list BEHIND the dropdown show through. This is
+            an opaque overlay of the popover's own surface fading to
+            transparent on TOP of the list — it never reveals what's behind
+            the dropdown itself, only visually tapers the last row.
+            T-1868: shown only while the list actually overflows and isn't
+            scrolled to its last row — a short list no longer gets a taper
+            with nothing beneath it to justify one. */}
+        {showFade && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-5 rounded-b-md bg-gradient-to-t from-popover to-transparent" />}
+      </div>
+    )}
+  </div>;
+}
+
+/**
+ * qa MEDIUM (a): يحتلّ ارتفاع `AddMemberSearch` نفسه (لصيقة + حقل h-11 +
+ * سطر تلميح) — سواء أثناء التحميل (‏`viewer` لم يُحسم) أو بعده لعارضٍ بلا
+ * صلاحية الإضافة — فلا ينزل عنوان «الأعضاء الحاليون» في أي من الحالتين.
+ * ‏`pulse` هو الفارق الوحيد بين الحالتين: تحميلٌ حيّ أو نتيجةٌ نهائية.
+ */
+function SearchAreaHeightReserve({ pulse = false, message }: { pulse?: boolean; message?: string }) {
+  const box = pulse ? 'animate-pulse rounded bg-muted' : '';
+  // qa (T-1868): a resolved non-manager used to see a silent blank box here —
+  // indistinguishable from a rendering glitch. `message` names the reason
+  // (no add permission) without disturbing the reserved height any state uses.
+  // qa round: كان النصّ محصوراً بمنتصف صندوق الحقل (h-11) وحده لا منتصف
+  // المساحة المحجوزة كلها (لصيقة + حقل + تلميح). الهيكل الأصلي يبقى كما هو
+  // (فارتفاعه هو الضمان عبر الحالات الثلاث)، والرسالة تعلوه بتموضعٍ مطلق
+  // يتمركز عبر `inset-0`/`items-center` على المساحة الكاملة.
+  return <div aria-hidden={!message} className="relative space-y-2">
+    <div className={`h-5 w-24 ${box}`} />
+    <div className={`h-11 ${pulse ? 'animate-pulse rounded-md bg-muted' : ''}`} />
+    <div className="h-5" />
+    {message && <p className="absolute inset-0 flex items-center text-sm text-muted-foreground">{message}</p>}
   </div>;
 }
 
@@ -216,19 +294,29 @@ function MembersManager({ projectId, t, currentUserId }: { projectId: string; t:
   }, [begin, load, projectId, t, valid, viewer]);
 
   const existingIds = useMemo(() => new Set(members.map(member => member.userId)), [members]);
-  return <DialogContent aria-labelledby={titleId} className="max-h-[min(90dvh,44rem)] w-[calc(100vw-1rem)] max-w-xl overflow-y-auto p-4 text-start sm:p-6">
+  return <DialogContent aria-labelledby={titleId} className="flex h-[min(90dvh,38rem)] w-[calc(100vw-1rem)] max-w-xl flex-col overflow-hidden p-4 text-start sm:p-6">
     <div className="flex flex-wrap items-center gap-2"><DialogTitle id={titleId} className="not-sr-only text-xl font-semibold text-foreground">{t('participants.memberDialog.title', { defaultValue: 'Manage project members' })}</DialogTitle>{viewer?.adminAccess && <span className="rounded-full bg-warning/15 px-2 py-1 text-xs font-medium text-warning">{t('participants.memberDialog.adminAccess', { defaultValue: 'Admin access' })}</span>}</div>
-    <div className="mt-4 space-y-4">
-      {viewer && <AddMemberSearch projectId={projectId} viewer={viewer} existingIds={existingIds} mutationBusy={busyUserId !== null} generation={generation} t={t} onAdd={(userId, role) => void mutate('add', userId, role)} />}
+    {/* qa MEDIUM (b): overflow-hidden — لا يُمرَّر الغلاف كلّه؛ التمرير الوحيد
+        الآن على قائمة الأعضاء نفسها (min-h-0 flex-1 overflow-y-auto) فتملأ
+        الفراغ المتبقّي فعلاً بلا الفجوة الفارغة ~100px التي تركها ارتفاعٌ ثابت. */}
+    <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+      {/* qa MEDIUM (a): ارتفاع محجوز دائماً — سواء أثناء التحميل (هيكل)، أو
+          بعد التحميل بلا صلاحية إضافة (فراغ بالارتفاع نفسه)، أو بالصلاحية
+          (الحقل الحقيقي) — فلا ينزل عنوان «الأعضاء الحاليون» في أي حالة. */}
+      {viewer
+        ? <AddMemberSearch projectId={projectId} viewer={viewer} existingIds={existingIds} mutationBusy={busyUserId !== null} generation={generation} t={t} onAdd={(userId, role) => void mutate('add', userId, role)} />
+        : <SearchAreaHeightReserve pulse />}
       {actionError && <p role="alert" className="text-sm text-danger">{actionError}</p>}
-      <h3 className="border-t border-border pt-4 text-base font-semibold text-foreground">{t('participants.memberDialog.existing', { defaultValue: 'Current members' })}</h3>
-      {status === 'loading' && <p role="status" className="text-sm text-foreground">{t('participants.memberDialog.loading', { defaultValue: 'Loading…' })}</p>}
-      {status === 'error' && <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('participants.memberDialog.loadError', { defaultValue: 'Could not load members' })}</p><Button type="button" variant="outline" size="lg" onClick={() => void load()}>{t('participants.memberDialog.retry', { defaultValue: 'Retry' })}</Button></div>}
-      {status === 'ready' && members.length === 0 && <p className="text-sm text-foreground">{t('participants.memberDialog.none', { defaultValue: 'No members yet' })}</p>}
-      {status === 'ready' && members.length > 0 && viewer && <ul className="space-y-2">{members.map(member => <MemberRow key={member.userId} member={member} viewer={viewer} currentUserId={currentUserId} busy={busyUserId === member.userId} t={t} onRole={role => void mutate('add', member.userId, role)} onRemove={() => void mutate('remove', member.userId)} />)}</ul>}
+      <h3 className="text-sm font-semibold text-foreground">{t('participants.memberDialog.existing', { defaultValue: 'Current members' })}</h3>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {status === 'loading' && <p role="status" className="py-2 text-sm text-foreground">{t('participants.memberDialog.loading', { defaultValue: 'Loading…' })}</p>}
+        {status === 'error' && <div className="space-y-2 py-2"><p role="alert" className="text-sm text-danger">{t('participants.memberDialog.loadError', { defaultValue: 'Could not load members' })}</p><Button type="button" variant="outline" size="sm" onClick={() => void load()}>{t('participants.memberDialog.retry', { defaultValue: 'Retry' })}</Button></div>}
+        {status === 'ready' && members.length === 0 && <p className="py-2 text-sm text-foreground">{t('participants.memberDialog.none', { defaultValue: 'No members yet' })}</p>}
+        {status === 'ready' && members.length > 0 && viewer && <ul className="divide-y divide-border">{members.map(member => <MemberRow key={member.userId} member={member} viewer={viewer} currentUserId={currentUserId} busy={busyUserId === member.userId} t={t} onRole={role => void mutate('add', member.userId, role)} onRemove={() => void mutate('remove', member.userId)} />)}</ul>}
+      </div>
       <div aria-live="polite" className="sr-only">{busyUserId !== null ? t('participants.memberDialog.saving', { defaultValue: 'Saving membership change' }) : actionError}</div>
-      <Button type="button" variant="outline" size="lg" className="w-full" onClick={() => onOpenChange(false)}>{t('participants.memberDialog.close', { defaultValue: 'Close' })}</Button>
     </div>
+    <Button type="button" variant="outline" size="lg" className="mt-3 w-full shrink-0" onClick={() => onOpenChange(false)}>{t('participants.memberDialog.close', { defaultValue: 'Close' })}</Button>
   </DialogContent>;
 }
 

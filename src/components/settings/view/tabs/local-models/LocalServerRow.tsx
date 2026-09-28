@@ -31,15 +31,15 @@ export default function LocalServerRow({ server, busy, enabled, connected, onEdi
     {!server.owned && <p className="text-[13px] text-muted-foreground">{t('localModels.sharedBy', { owner: server.ownerId })}</p>}
     <ModelList server={server} />
     {server.owned && <div className="flex flex-wrap gap-2">
-      <Button variant="outline" className="min-h-11" disabled={busy || !enabled} onClick={onEdit}><Pencil aria-hidden="true" />{t('localModels.edit')}</Button>
-      <Button variant="outline" className="min-h-11" disabled={busy || !enabled} onClick={onConnect}><Plug aria-hidden="true" />{t('localModels.test')}</Button>
-      <Button variant="ghost" className="min-h-11 text-danger" disabled={busy} onClick={() => setConfirming(true)}><Trash2 aria-hidden="true" />{t('localModels.delete')}</Button>
+      <Button variant="outline" size="lg" className="px-4" disabled={busy || !enabled} onClick={onEdit}><Pencil aria-hidden="true" />{t('localModels.edit')}</Button>
+      <Button variant="outline" size="lg" className="px-4" disabled={busy || !enabled} onClick={onConnect}><Plug aria-hidden="true" />{t('localModels.test')}</Button>
+      <Button variant="ghost" size="lg" className="px-4 text-danger" disabled={busy} onClick={() => setConfirming(true)}><Trash2 aria-hidden="true" />{t('localModels.delete')}</Button>
     </div>}
     {confirming && <div className="space-y-3 rounded-lg border border-danger/30 bg-danger/10 p-4" role="group" aria-label={t('localModels.delete')}>
       <p className="text-sm">{t('localModels.deleteConfirm', { name: server.name })}</p>
       <div className="flex flex-wrap gap-2">
-        <Button variant="destructive" className="min-h-11" disabled={busy} onClick={() => { void onRemove().then(ok => { if (ok) setConfirming(false); }); }}>{t('localModels.delete')}</Button>
-        <Button variant="outline" className="min-h-11" disabled={busy} onClick={() => setConfirming(false)}>{t('localModels.cancel')}</Button>
+        <Button variant="destructive" size="lg" className="px-4" disabled={busy} onClick={() => { void onRemove().then(ok => { if (ok) setConfirming(false); }); }}>{t('localModels.delete')}</Button>
+        <Button variant="outline" size="lg" className="px-4" disabled={busy} onClick={() => setConfirming(false)}>{t('localModels.cancel')}</Button>
       </div>
     </div>}
   </article>;

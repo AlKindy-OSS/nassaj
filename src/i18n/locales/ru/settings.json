@@ -115,6 +115,7 @@
     "showToolCalls": "Показывать вызовы инструментов",
     "autoScrollToBottom": "Автопрокрутка вниз",
     "tabsIconOnly": "Компактные вкладки (только иконки)",
+    "showHardwareUsage": "Показывать использование оборудования",
     "sendByCtrlEnter": "Отправка по Ctrl+Enter",
     "sendByCtrlEnterDescription": "Когда включено, нажатие Ctrl+Enter будет отправлять сообщение вместо просто Enter. Это полезно для пользователей IME, чтобы избежать случайной отправки.",
     "dragHandle": {
@@ -215,7 +216,8 @@
     "notifications": "Уведомления",
     "users": "Пользователи",
     "about": "О программе",
-    "commandBoard": "Панель команд"
+    "commandBoard": "Панель команд",
+    "system": "Система"
   },
   "profile": {
     "title": "Профиль",
@@ -1119,8 +1121,8 @@
   "error": "Error",
   "stop": "Stop",
   "tmpfsCap": {
-    "title": "Shared memory cap (/tmp)",
-    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "title": "Shared memory cap ({{path}})",
+    "description": "{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
     "desiredLabel": "Desired cap",
     "capped": "Capped",
     "uncapped": "No cap",

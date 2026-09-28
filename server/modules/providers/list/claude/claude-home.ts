@@ -2,7 +2,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { userDb } from '@/modules/database/index.js';
+import { resolveCredentialPrincipal } from '@/services/isolation/credential-principal.js';
+import { userConfigDir } from '@/services/isolation/provision-user-dirs.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
+import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { readOptionalString } from '@/shared/utils.js';
 
 /** Operator (shared / legacy) Claude configuration home: ~/.claude. */
@@ -41,6 +44,28 @@ export function resolveClaudeHomes(): string[] {
     console.error('Failed to enumerate per-user Claude homes; using operator home only', { error: message });
   }
 
+  return [...homes];
+}
+
+/**
+ * Side-effect-free twin of `resolveClaudeHomes` (T-1880): the same set of
+ * homes, computed from the sharing policy and `userConfigDir` alone. Unlike
+ * `resolveProviderEnv` it never provisions user dirs, seeds operator policy or
+ * sweeps grant homes, so read paths may call it freely. Best-effort like its twin.
+ */
+export function listClaudeConfigDirsReadOnly(): string[] {
+  const shared = readOptionalString(process.env.CLAUDE_CONFIG_DIR) ?? operatorClaudeHome();
+  const homes = new Set<string>([operatorClaudeHome()]);
+  try {
+    if (!isProviderIsolated('claude')) return [...homes.add(shared)];
+    for (const user of userDb.listUsers()) {
+      homes.add(userConfigDir(user.id, '.claude'));
+      homes.add(userConfigDir(resolveCredentialPrincipal(user.id, 'claude').principalId ?? user.id, '.claude'));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Failed to enumerate Claude homes read-only; using operator home only', { error: message });
+  }
   return [...homes];
 }
 

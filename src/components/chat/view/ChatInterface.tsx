@@ -16,8 +16,10 @@ import {
   resolveScrollResyncRoute,
   shouldClearLoadingAfterRecovery,
   shouldShowManualRefresh,
+  shouldShowResyncArrow,
 } from '../hooks/sessionActivity';
 import { useChatSessionState } from '../hooks/useChatSessionState';
+import { resolveRunStartedAt } from '../hooks/runStartedAt';
 import { useChatRealtimeHandlers, type StreamBuffer } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { hasOutboxDeliveryEvidence, verifyOutboxReceipt } from '../utils/messageOutbox';
@@ -336,6 +338,7 @@ function ChatInterface({
     scrollToBottom,
     scrollToBottomAndReset,
     handleUserScrollIntent,
+    handleScroll,
   } = useChatSessionState({
     selectedProject,
     selectedSession,
@@ -921,21 +924,9 @@ function ChatInterface({
     handlePermissionDecision,
   }), [pendingPermissionRequests, handlePermissionDecision]);
 
-  // Real start of the current run: timestamp of the last user message that
-  // triggered it. Transcript messages keep their original timestamps, so after
-  // a page refresh onto a still-processing session the elapsed counter in
-  // ClaudeStatus resumes from the true value instead of restarting at 0.
-  const runStartedAt = useMemo(() => {
-    for (let i = chatMessages.length - 1; i >= 0; i--) {
-      const message = chatMessages[i];
-      // Skip local-command stdout: user-role transcript artifacts, not the
-      // message that started the run.
-      if (message.type !== 'user' || message.isLocalCommandStdout) continue;
-      const ts = new Date(message.timestamp as string | number | Date).getTime();
-      return Number.isFinite(ts) ? ts : null;
-    }
-    return null;
-  }, [chatMessages]);
+  // Real start of the current run — see resolveRunStartedAt's doc (extracted,
+  // T-1862 round 2 qa M-3, for standalone unit tests).
+  const runStartedAt = useMemo(() => resolveRunStartedAt(chatMessages), [chatMessages]);
 
   // Task/agent progress snapshot for the ClaudeStatus indicators. Scans the
   // FULL transcript (not the windowed visibleMessages) once per change; reads no
@@ -1077,6 +1068,15 @@ function ChatInterface({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, selectedSession, stuckProbeCount, handleWebSocketReconnect, chatMessages.length]);
 
+  // T-1862 round 2 (qa HIGH): إشارة السهم منفصلة عن showResync/showManualRefresh
+  // — تلك تعود true لمجرّد الخمول فيظهر السهم دوماً حتى في آخر المحادثة تماماً.
+  // «عالقة» هنا = مسبار واحد على الأقل أُطلق أثناء تشغيلٍ حيّ ولم يُحسم بعد
+  // (stuckProbeCount من المؤقّت أعلاه)، لا الخمول العادي. انظر shouldShowResyncArrow.
+  const arrowNeedsResync = shouldShowResyncArrow({
+    hasHistoryError: Boolean(historyError),
+    isStuck: isLoading && stuckProbeCount >= 1,
+  });
+
   // T-1822: إخطار مخزن الاستخدام المشترك عند انتهاء الدور (isLoading: true→false).
   // isLoading يصبح false فقط حين ينتهي الرد فعلاً — مؤشّر آمن لانتهاء الدور.
   const prevIsLoadingRef = useRef(isLoading);
@@ -1144,6 +1144,7 @@ function ChatInterface({
           scrollContainerRef={scrollContainerRef}
           onWheel={handleUserScrollIntent}
           onTouchMove={handleUserScrollIntent}
+          onScroll={handleScroll}
           historyError={historyError}
           isLoadingSessionMessages={isLoadingSessionMessages}
           chatMessages={chatMessages}
@@ -1216,7 +1217,7 @@ function ChatInterface({
           onNewSession={onNewSession}
           isUserScrolledUp={isUserScrolledUp}
           hasMessages={chatMessages.length > 0}
-          showResync={showResync}
+          showResync={arrowNeedsResync}
           isResyncing={isRefreshing || (Boolean(historyError) && isLoadingSessionMessages)}
           retryUntil={historyError?.retryAt ?? null}
           onScrollToBottom={handleScrollToBottomWithResync}

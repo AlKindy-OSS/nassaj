@@ -82,7 +82,6 @@ export type ResumeTurnParams = {
   systemFraming: string;
   model: string | null;
   disallowedTools: readonly string[];
-  claudeBin: string;
   env: NodeJS.ProcessEnv;
   maxHoldMs: number;
 };
@@ -403,7 +402,6 @@ export async function injectForConversation(
       systemFraming: SYSTEM_FRAMING,
       model: injectorModel(env),
       disallowedTools: LEAF_ONLY_DISALLOWED_TOOLS,
-      claudeBin: env.WORKFLOW_SUPERVISOR_CLAUDE_BIN || 'claude',
       env: spawnEnv,
       maxHoldMs: injectorMaxHoldMs(env),
     });

@@ -115,6 +115,7 @@
     "showToolCalls": "Araç çağrılarını göster",
     "autoScrollToBottom": "Otomatik en alta kaydır",
     "tabsIconOnly": "Kompakt sekmeler (yalnızca simgeler)",
+    "showHardwareUsage": "Donanım kullanımını göster",
     "sendByCtrlEnter": "Ctrl+Enter ile gönder",
     "sendByCtrlEnterDescription": "Etkinleştirildiğinde, Ctrl+Enter'a basmak yalnız Enter yerine mesajı gönderir. IME (girdi metot düzenleyici) kullananlar için yanlışlıkla göndermeyi önler.",
     "dragHandle": {
@@ -215,7 +216,8 @@
     "notifications": "Bildirimler",
     "users": "Kullanıcılar",
     "about": "Hakkında",
-    "commandBoard": "Komut Panosu"
+    "commandBoard": "Komut Panosu",
+    "system": "Sistem"
   },
   "profile": {
     "title": "Profil",
@@ -1119,8 +1121,8 @@
   "error": "Error",
   "stop": "Stop",
   "tmpfsCap": {
-    "title": "Shared memory cap (/tmp)",
-    "description": "/tmp lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
+    "title": "Shared memory cap ({{path}})",
+    "description": "{{path}} lives in RAM on this host. An uncapped mount lets a build hold gigabytes for hours.",
     "desiredLabel": "Desired cap",
     "capped": "Capped",
     "uncapped": "No cap",

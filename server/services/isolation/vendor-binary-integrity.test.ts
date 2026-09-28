@@ -232,6 +232,8 @@ test('computeFileSha256: matches node crypto over the same bytes', () => {
 test('resolveOpenCodeBinaryPath: OPENCODE_PATH override is verified AFTER resolution (M-4)', () => {
   const dir = tmpDir();
   const { file } = writeFileWith(dir, 'opencode', 'override-bytes-not-pinned');
+  // T-1873: the harness registry only accepts a runnable override.
+  fs.chmodSync(file, 0o755);
 
   // Guard OFF → literal back-compat: the override is returned unchanged even
   // though its bytes do not match the pin (no hashing at all).

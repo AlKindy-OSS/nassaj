@@ -794,6 +794,15 @@ async function reportExplainDivergence() {
 
 // ---------------------------------------------------------------------------
 
+/** T-1880: read-only Claude-home layout warnings (legacy symlink, bad links, drift). */
+async function checkClaudeHome() {
+  const { inspectClaudeHome } = await import('./lib/doctor-claude-home.mjs');
+  for (const finding of inspectClaudeHome({ home: os.homedir() })) {
+    if (finding.level === 'ok') ok(finding.name, finding.detail);
+    else warn(finding.name, finding.detail, ...finding.fix);
+  }
+}
+
 function report() {
   const icon = { ok: `${GREEN}✓${RESET}`, warn: `${YELLOW}!${RESET}`, fail: `${RED}✗${RESET}` };
   console.log('\nnassaj doctor\n');
@@ -830,5 +839,6 @@ if (process.argv.includes('--update-preflight')) {
   checkDatabase();
   checkBuild();
   await checkNodePty();
+  await checkClaudeHome();
   report();
 }

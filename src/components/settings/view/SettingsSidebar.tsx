@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '../../../lib/utils';
@@ -20,6 +21,19 @@ export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebar
   const navItems = SETTINGS_MAIN_TABS.filter(
     (item) => !item.roles || (role ? item.roles.includes(role) : false),
   );
+
+  // T-1867: التبويب النشط قد يتغيّر من مصدر غير النقر على شريط اللصائق نفسه
+  // (رابط عميق `?settings=system`، أو المؤشّر النصّي أسفل HarnessVersionSection
+  // الذي يفتح تبويب النظام) — فتبقى لصيقة النشط خارج الرؤية على شريط التمرير
+  // الأفقي في الجوّال بلا ما يمرّرها. `inline: 'nearest'` بدل 'center' يحرّك
+  // الشريط أقلّ ما يلزم فقط، وهو محايد الاتجاه (RTL/LTR) لأنه هندسة العنصر لا
+  // فرضية يمين/يسار.
+  const mobileNavRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = mobileNavRef.current;
+    const activeEl = container?.querySelector<HTMLElement>(`[data-settings-tab="${activeTab}"]`);
+    activeEl?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+  }, [activeTab]);
 
   // T-1036: no queue badge here. Queued commands are shown, reviewed and run in
   // the sidebar command board; a badge pointing INTO settings would send the
@@ -58,7 +72,7 @@ export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebar
 
       {/* Mobile horizontal nav — pill bar */}
       <div className="flex-shrink-0 border-b border-border px-3 py-2 md:hidden">
-        <PillBar className="scrollbar-hide w-full overflow-x-auto">
+        <PillBar ref={mobileNavRef} className="scrollbar-hide w-full overflow-x-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
 

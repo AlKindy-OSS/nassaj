@@ -51,13 +51,21 @@ test('resume parser rejects implicit continue and malformed/multiple resume targ
 });
 
 test('PATH shim is first and remembers a real binary that is not itself', () => {
-  const installed = terminalEnv.installManagedClaudeTerminalEnv(
-    { PATH: '/bin:/usr/bin', CLAUDE_CLI_PATH: '/bin/true' },
-    { userId: 7, mode: 'general' },
-  );
-  assert.equal(installed.PATH?.split(path.delimiter)[0], terminalEnv.MANAGED_CLAUDE_BIN_DIR);
-  assert.equal(installed.NASSAJ_MANAGED_CLAUDE_REAL_BIN, '/bin/true');
-  assert.notEqual(installed.NASSAJ_MANAGED_CLAUDE_REAL_BIN, terminalEnv.MANAGED_CLAUDE_WRAPPER);
+  // T-1873: the real binary is the registry claude (server CLAUDE_CLI_PATH).
+  const saved = process.env.CLAUDE_CLI_PATH;
+  process.env.CLAUDE_CLI_PATH = '/bin/true';
+  try {
+    const installed = terminalEnv.installManagedClaudeTerminalEnv(
+      { PATH: '/bin:/usr/bin', CLAUDE_CLI_PATH: '/member/claude' },
+      { userId: 7, mode: 'general' },
+    );
+    assert.equal(installed.PATH?.split(path.delimiter)[0], terminalEnv.MANAGED_CLAUDE_BIN_DIR);
+    assert.equal(installed.NASSAJ_MANAGED_CLAUDE_REAL_BIN, '/bin/true');
+    assert.notEqual(installed.NASSAJ_MANAGED_CLAUDE_REAL_BIN, terminalEnv.MANAGED_CLAUDE_WRAPPER);
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CLI_PATH;
+    else process.env.CLAUDE_CLI_PATH = saved;
+  }
 });
 
 test('launcher asset resolves in both source and compiled module layouts', () => {

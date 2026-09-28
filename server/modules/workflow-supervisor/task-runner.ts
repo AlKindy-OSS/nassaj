@@ -22,6 +22,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { seal } from './result-capture-writer.js';
 
@@ -37,7 +38,7 @@ type Args = {
 function parseArgs(argv: string[]): Args {
   const a: Args = {
     taskDir: '',
-    claudeBin: 'claude',
+    claudeBin: '',
     prompt: '',
     model: null,
     outputFormat: 'json',
@@ -46,7 +47,7 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
     if (t === '--task-dir') a.taskDir = argv[++i] ?? '';
-    else if (t === '--claude-bin') a.claudeBin = argv[++i] ?? 'claude';
+    else if (t === '--claude-bin') a.claudeBin = argv[++i] ?? '';
     else if (t === '--prompt') a.prompt = argv[++i] ?? '';
     else if (t === '--model') a.model = argv[++i] ?? null;
     else if (t === '--output-format') a.outputFormat = argv[++i] ?? 'json';
@@ -54,6 +55,9 @@ function parseArgs(argv: string[]): Args {
     else throw new Error(`unknown arg: ${t}`);
   }
   if (!a.taskDir) throw new Error('--task-dir required');
+  // launchScope passes the registry-resolved absolute claude (T-1873); a bare
+  // name would be a PATH lookup inside the unit.
+  if (!path.isAbsolute(a.claudeBin)) throw new Error('--claude-bin must be an absolute path');
   if (!a.prompt) throw new Error('--prompt required');
   if (a.claudeTimeoutSec != null && !Number.isInteger(a.claudeTimeoutSec)) {
     a.claudeTimeoutSec = null;

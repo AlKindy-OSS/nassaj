@@ -1,3 +1,5 @@
+// B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';

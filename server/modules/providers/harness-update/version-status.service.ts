@@ -19,12 +19,19 @@ import {
   isVendorBinaryPinEnabled,
   PINNED_VENDOR_DIGESTS,
 } from '@/services/isolation/vendor-binary-integrity.js';
+import { appConfigDb } from '@/modules/database/index.js';
+import { HarnessBinaryUnresolvedError } from '@/shared/harness-binaries.js';
 
 import type {
+  HarnessCompatibility,
   HarnessUpdateJob,
+  HarnessVersionDrift,
   HarnessVersionStatus,
 } from '../../../../shared/harness-update.contract.js';
 
+
+import { clearStaleNativeStageBeforeLaunch } from './native-staging.js';
+import { computeHarnessCompatibility } from './compatibility.js';
 import {
   getHarnessDescriptor,
   HARNESS_IDS,
@@ -34,6 +41,7 @@ import {
 } from './descriptors.js';
 import { activeHarnessJobId, isHarnessLeased } from './lease.js';
 import { isHarnessRecoveryBlocked } from './spawn-admission.js';
+import { observeInstalledVersion, type DriftAudit, type VersionLedger } from './version-drift.js';
 
 /** Hard cap on a `--version` read; the child is killed past it. */
 export const VERSION_READ_TIMEOUT_MS = 10_000;
@@ -57,6 +65,12 @@ export interface VersionStatusDeps {
   runVersion?: (cmd: string, args: string[]) => Promise<string | null>;
   /** Fetches the npm `latest` dist-tag version for `pkg` (or null on failure). */
   fetchNpmLatest?: (pkg: string) => Promise<string | null>;
+  /** Fetches a GitHub `releases/latest` tag from a FIXED descriptor URL (or null). */
+  fetchGithubLatest?: (url: string) => Promise<string | null>;
+  /** Drift ledger (app_config by default). */
+  versionLedger?: VersionLedger;
+  /** Drift audit sink (`harness_version_drift` row by default). */
+  driftAudit?: DriftAudit;
   now?: () => number;
   isLeased?: (provider: string) => boolean;
   activeJobId?: (provider: string) => string | null;
@@ -65,6 +79,8 @@ export interface VersionStatusDeps {
   /** Reads the durable pre-mutation/recovery fence. */
   recoveryBlocked?: (provider: string) => boolean;
   pinEnabled?: () => boolean;
+  /** Durable "restore-compatible ran successfully here" flag (T-1871). */
+  compatVerified?: (provider: string) => boolean;
 }
 
 interface LatestCacheEntry {
@@ -93,6 +109,17 @@ export function invalidateInstalledVersion(provider?: string): void {
   else installedCache.clear();
 }
 
+let testDeps: VersionStatusDeps | null = null;
+
+/**
+ * Test hook: default dependencies for every status read (null restores the
+ * real probes). Route tests use it so no test ever spawns a real harness
+ * `--version` or reaches the npm / GitHub registries.
+ */
+export function _setVersionStatusTestDeps(next: VersionStatusDeps | null): void {
+  testDeps = next;
+}
+
 /** Test hook: clear the latest-version AND installed-version caches. */
 export function _resetLatestCache(): void {
   latestCache.clear();
@@ -108,7 +135,18 @@ async function readInstalledVersion(
   const t = now();
   const cached = installedCache.get(descriptor.id);
   if (cached && t - cached.readAt < INSTALLED_TTL_MS) return cached.raw;
-  const raw = await runVersion(descriptor.resolveBinary(), descriptor.versionArgs);
+  // An unresolved CLI (HarnessBinaryUnresolvedError) reads as "no version";
+  // anything else is a real fault and propagates.
+  let binary = '';
+  try {
+    binary = descriptor.resolveBinary();
+  } catch (error) {
+    if (!(error instanceof HarnessBinaryUnresolvedError)) throw error;
+  }
+  // A staging harness's `--version` would swap in a stale stage: never outside
+  // an update window (native-staging.ts).
+  if (descriptor.stagesNativeUpdate && binary) clearStaleNativeStageBeforeLaunch(descriptor.id, binary);
+  const raw = await runVersion(binary, descriptor.versionArgs);
   installedCache.set(descriptor.id, { raw, readAt: t });
   return raw;
 }
@@ -175,6 +213,35 @@ async function defaultFetchNpmLatest(pkg: string): Promise<string | null> {
 }
 
 /**
+ * Default GitHub probe: `releases/latest` of a fixed https URL, no auth, bounded
+ * timeout. Strips a leading `v` from `tag_name`; anything not version-shaped is
+ * treated as a failure (null) rather than shown.
+ */
+async function defaultFetchGithubLatest(url: string): Promise<string | null> {
+  if (!url.startsWith('https://api.github.com/')) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LATEST_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'nassaj-harness-version-probe',
+      },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { tag_name?: unknown };
+    if (typeof body.tag_name !== 'string') return null;
+    const version = body.tag_name.replace(/^v/, '');
+    return /^\d+\.\d+/.test(version) ? version : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Returns the latest version for `pkg` honouring cache TTL, rate limit and
  * stale-on-failure. `{ version, stale }` — `version` is null only when there is
  * neither a fresh nor a stale value (→ caller marks state `unknown`).
@@ -207,28 +274,140 @@ async function resolveLatest(
   return { version: cached?.version ?? null, stale: cached?.version != null };
 }
 
-/** True when the pin is armed AND this harness is in the frozen pin table. */
+/** Runs the descriptor's latest probe through the shared cache; null = no probe. */
+async function probeLatest(
+  descriptor: HarnessDescriptor,
+  deps: VersionStatusDeps,
+  now: () => number,
+): Promise<{ version: string | null; stale: boolean } | null> {
+  const probe = descriptor.latestProbe;
+  if (!probe) return null;
+  if (probe.kind === 'npm') {
+    return resolveLatest(probe.pkg, deps.fetchNpmLatest ?? defaultFetchNpmLatest, now);
+  }
+  return resolveLatest(probe.url, deps.fetchGithubLatest ?? defaultFetchGithubLatest, now);
+}
+
+/**
+ * Latest published version of `descriptor` through the shared probe cache
+ * (null when the harness has no probe or the probe has no answer). Used by the
+ * update service to judge the TARGET's compatibility before a pinBreak ack.
+ */
+export async function probeLatestVersion(descriptor: HarnessDescriptor): Promise<string | null> {
+  const latest = await probeLatest(descriptor, testDeps ?? {}, Date.now);
+  return latest?.version ?? null;
+}
+
+/** Compatibility verdict for one version of this harness under the live pin posture. */
+export function compatibilityOf(
+  descriptor: HarnessDescriptor,
+  version: string | null,
+  pinArmed: boolean,
+): HarnessCompatibility {
+  return computeHarnessCompatibility({
+    version,
+    descriptor,
+    pins: PINNED_VENDOR_DIGESTS,
+    pinArmed,
+    carrierAlwaysEnforced: Boolean(descriptor.compat?.alwaysEnforcedMode),
+  });
+}
+
+/** Drift verdict; a failing ledger omits the field instead of failing the read. */
+function driftOf(
+  descriptor: HarnessDescriptor,
+  installedVersion: string,
+  deps: VersionStatusDeps,
+  now: () => number,
+): HarnessVersionDrift | undefined {
+  try {
+    return observeInstalledVersion(descriptor.id, installedVersion, {
+      ledger: deps.versionLedger,
+      audit: deps.driftAudit,
+      nowIso: () => new Date(now()).toISOString(),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/** Compatibility of the latest version, when a probe answered. */
+function targetOf(
+  descriptor: HarnessDescriptor,
+  latestVersion: string | null,
+  pinArmed: boolean,
+): { targetCompatibility?: HarnessCompatibility } {
+  return latestVersion === null
+    ? {}
+    : { targetCompatibility: compatibilityOf(descriptor, latestVersion, pinArmed) };
+}
+
+/**
+ * True when the pin is armed AND this harness is in the frozen pin table AND
+ * the harness has no snapshot rollback. A snapshot-backed harness is never
+ * refused outright: leaving the pin needs a server-built `pinBreak`
+ * acknowledgement instead (T-1871 §9), and the pin itself never changes.
+ */
 export function isHarnessPinRefused(
   descriptor: HarnessDescriptor,
   pinEnabled: () => boolean,
 ): boolean {
   return (
-    descriptor.pinKey !== null
+    descriptor.snapshot === null
+    && descriptor.pinKey !== null
     && descriptor.pinKey in PINNED_VENDOR_DIGESTS
     && pinEnabled()
   );
 }
 
+/** T-1871 descriptor facts every status row carries (all optional on the wire). */
+function updateFacts(
+  descriptor: HarnessDescriptor,
+  compatVerified: (provider: string) => boolean,
+): Pick<HarnessVersionStatus, 'manualOnly' | 'notices' | 'restoreCompatible'> {
+  const restore = descriptor.restoreCompatible;
+  return {
+    ...(descriptor.manualOnly ? { manualOnly: true } : {}),
+    ...(descriptor.notices ? { notices: { ...descriptor.notices } } : {}),
+    ...(restore ? { restoreCompatible: { version: restore.version, verified: safeFlag(compatVerified, descriptor.id) } } : {}),
+  };
+}
+
+function safeFlag(read: (provider: string) => boolean, provider: string): boolean {
+  try {
+    return read(provider);
+  } catch {
+    return false;
+  }
+}
+
+/** Spreads `drift` only when the ledger answered (the field stays optional). */
+function withDrift(drift: HarnessVersionDrift | undefined): { drift?: HarnessVersionDrift } {
+  return drift === undefined ? {} : { drift };
+}
+
+const COMPAT_VERIFIED_PREFIX = 'harness_restore_compatible_verified:';
+
+/** Durable flag: a real restore-compatible run of `provider` succeeded on this host. */
+export function isRestoreCompatibleVerified(provider: string): boolean {
+  return appConfigDb.get(`${COMPAT_VERIFIED_PREFIX}${provider}`) === '1';
+}
+
+/** Sets the flag above; only a verified restore-compatible run calls it. */
+export function markRestoreCompatibleVerified(provider: string): void {
+  appConfigDb.set(`${COMPAT_VERIFIED_PREFIX}${provider}`, '1');
+}
+
 /** Computes the full status for one harness. Never throws. */
 export async function getHarnessVersionStatus(
   idOrAlias: string,
-  deps: VersionStatusDeps = {},
+  callDeps: VersionStatusDeps = {},
 ): Promise<HarnessVersionStatus | null> {
+  const deps: VersionStatusDeps = { ...(testDeps ?? {}), ...callDeps };
   const descriptor = getHarnessDescriptor(idOrAlias);
   if (!descriptor) return null;
 
   const runVersion = deps.runVersion ?? defaultRunVersion;
-  const fetchNpmLatest = deps.fetchNpmLatest ?? defaultFetchNpmLatest;
   const now = deps.now ?? Date.now;
   const leased = (deps.isLeased ?? isHarnessLeased)(descriptor.id);
   const activeJobId = (deps.activeJobId ?? activeHarnessJobId)(descriptor.id);
@@ -256,6 +435,7 @@ export async function getHarnessVersionStatus(
     checkedAt,
     updating: activeIntent,
     activeJobId: activeIntent ? activeJobId : null,
+    ...updateFacts(descriptor, deps.compatVerified ?? isRestoreCompatibleVerified),
   };
 
   // The same durable marker is written before the first installation mutation
@@ -304,12 +484,12 @@ export async function getHarnessVersionStatus(
   const rawVersion = await readInstalledVersion(descriptor, runVersion, now);
   const installedVersion = parseVersionOutput(rawVersion);
 
-  // Managed-external (hermes): installed but nassaj cannot update in place.
-  if (descriptor.state === 'managed-external') {
+  // Managed-external with an unreadable version: unchanged pre-T-1871 shape.
+  if (installedVersion === null && descriptor.state === 'managed-external') {
     return {
       ...base,
       state: 'managed-external',
-      installedVersion,
+      installedVersion: null,
       latestVersion: null,
       upToDate: null,
       updatable: false,
@@ -330,10 +510,34 @@ export async function getHarnessVersionStatus(
     };
   }
 
-  // Digest-pin refusal (item 5): armed pin + pinned harness → not updatable.
-  if (isHarnessPinRefused(descriptor, pinEnabled)) {
+  const pinArmed = pinEnabled();
+  const annotated = {
+    ...base,
+    compatibility: compatibilityOf(descriptor, installedVersion, pinArmed),
+    ...withDrift(driftOf(descriptor, installedVersion, deps, now)),
+  };
+
+  // Managed-external: installed but nassaj cannot update in place. A latest probe
+  // (when the descriptor has one) is informational only; updatable stays false.
+  if (descriptor.state === 'managed-external') {
+    const latest = await probeLatest(descriptor, deps, now);
+    const latestVersion = latest?.version ?? null;
     return {
-      ...base,
+      ...annotated,
+      state: 'managed-external',
+      installedVersion,
+      latestVersion,
+      upToDate: latestVersion === null ? null : installedVersion === latestVersion,
+      updatable: false,
+      reason: descriptor.reason ?? 'managed-external',
+      ...targetOf(descriptor, latestVersion, pinArmed),
+    };
+  }
+
+  // Digest-pin refusal (item 5): armed pin + pinned harness → not updatable.
+  if (isHarnessPinRefused(descriptor, () => pinArmed)) {
+    return {
+      ...annotated,
       state: 'updatable',
       installedVersion,
       latestVersion: null,
@@ -343,17 +547,13 @@ export async function getHarnessVersionStatus(
     };
   }
 
-  // Latest probe (npm only today).
-  if (descriptor.latestProbe && descriptor.latestProbe.kind === 'npm') {
-    const { version: latestVersion, stale } = await resolveLatest(
-      descriptor.latestProbe.pkg,
-      fetchNpmLatest,
-      now,
-    );
+  const latest = await probeLatest(descriptor, deps, now);
+  if (latest) {
+    const { version: latestVersion, stale } = latest;
     if (latestVersion === null) {
       // Probe failed with no cache → unknown (never crash, never guess).
       return {
-        ...base,
+        ...annotated,
         state: 'unknown',
         installedVersion,
         latestVersion: null,
@@ -364,20 +564,21 @@ export async function getHarnessVersionStatus(
     }
     const upToDate = installedVersion === latestVersion;
     return {
-      ...base,
+      ...annotated,
       state: 'updatable',
       installedVersion,
       latestVersion,
       upToDate,
       updatable: descriptor.updatable,
       reason: stale ? 'latest-stale' : upToDate ? null : 'update-available',
+      ...targetOf(descriptor, latestVersion, pinArmed),
     };
   }
 
   // No cheap latest probe (native self-updaters): show installed, no comparison.
   // The updater is idempotent, so the button is still safe to press.
   return {
-    ...base,
+    ...annotated,
     state: 'updatable',
     installedVersion,
     latestVersion: null,

@@ -99,6 +99,12 @@ export function useShellConnection({
   const connectingRef = useRef(false);
   const forceRestartOnInitRef = useRef(false);
   const suppressAutoConnectRef = useRef(false);
+  // Identity-barrier transitions dispatch `auth:identity-changing` on EVERY
+  // non-stable phase (both 'changing' and 'committed' — accountIdentityBarrier.ts
+  // applySnapshot), so ONE revocation cycle fires the event twice. Without this
+  // guard `disconnectForIdentityChange` below runs disconnectFromShell() twice,
+  // double-clearing the terminal pane for a single 4401 close (B-1344).
+  const identityDisconnectedRef = useRef(false);
   // Backoff bookkeeping for auto re-attach after an abnormal drop.
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -481,10 +487,15 @@ export function useShellConnection({
   }, [clearReconnectTimer, clearShellError, clearTerminalScreen, closeSocket, setAuthUrl]);
 
   useEffect(() => {
-    const disconnectForIdentityChange = () => disconnectFromShell({ suppressAutoConnect: true });
+    const disconnectForIdentityChange = () => {
+      if (identityDisconnectedRef.current) return;
+      identityDisconnectedRef.current = true;
+      disconnectFromShell({ suppressAutoConnect: true });
+    };
     const resumeAfterIdentityChange = (event: Event) => {
       const phase = (event as CustomEvent<{ phase?: string }>).detail?.phase;
       if (phase !== 'stable') return;
+      identityDisconnectedRef.current = false;
       suppressAutoConnectRef.current = false;
       if (autoConnect) connectToShell();
     };

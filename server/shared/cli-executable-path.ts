@@ -87,7 +87,3 @@ export function resolveCliExecutablePath(
   }
   return requested;
 }
-
-/** agy: `AGY_PATH` override, then PATH and the well-known dirs (was `~/.local/bin/agy` only). */
-export const resolveAgyExecutablePath = (): string =>
-  resolveCliExecutablePath('agy', { override: process.env.AGY_PATH });

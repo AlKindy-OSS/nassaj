@@ -38,12 +38,31 @@ export type PermissionExecutionHandle = Readonly<{
   leaseId: string;
   mode: 'legacy' | 'shadow' | 'enforce';
   effectivePolicy: EffectivePolicy | null;
+  /**
+   * T-1872: the frozen harness identity this decision was fingerprinted against
+   * (Codex: the machine release). The launch executes exactly this object.
+   */
+  launchIdentity: PermissionLaunchIdentity | null;
+  /**
+   * Why the gateway could not acquire that identity (e.g. CODEX_MACHINE_CLI_MISSING).
+   * A launch site holding this handle rethrows it; it never re-acquires.
+   */
+  launchIdentityError: Error | null;
   consume(): LaunchPermitBinding;
   markStarted(child?: PermissionChildIdentity): void;
   attachChildIdentity(child: PermissionChildIdentity): void;
   settle(outcome: PermissionTerminalOutcome): void;
   notStarted(): void;
 }>;
+
+/** Opaque frozen per-launch harness identity (see server/shared/codex-executable.js). */
+export type PermissionLaunchIdentity = Readonly<Record<string, unknown>>;
+
+/** Reason code for a failed identity acquisition: the error's own code, else a generic one. */
+const launchIdentityReasonCode = (error: Error): string => {
+  const code = (error as Error & { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/u.test(code) ? code : 'LAUNCH_IDENTITY_UNAVAILABLE';
+};
 
 export type PermissionGatewayResult =
   | Readonly<{ kind: 'authorized'; execution: PermissionExecutionHandle }>
@@ -53,7 +72,12 @@ type GatewayDependencies = Readonly<{
   database: Database;
   authority: SealedPermissionPolicy;
   reference: ClaudeReferenceVector;
-  candidateFor(context: CanonicalLaunchContext): PermissionCandidateVector | null;
+  candidateFor(
+    context: CanonicalLaunchContext,
+    launchIdentity: PermissionLaunchIdentity | null,
+  ): PermissionCandidateVector | null;
+  /** Acquire the per-launch harness identity once; null when the body has none. */
+  acquireLaunchIdentity?(context: CanonicalLaunchContext): PermissionLaunchIdentity | null;
   capabilityArtifactDigest: string;
   releaseBuild: string;
   manifestDigest: string | null;
@@ -124,7 +148,17 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
     )) {
       throw new PermissionStateConflictError('ROLLOUT_RELEASE_IDENTITY_MISMATCH');
     }
-    const candidate = dependencies.candidateFor(context);
+    let launchIdentity: PermissionLaunchIdentity | null = null;
+    let launchIdentityError: Error | null = null;
+    try {
+      launchIdentity = dependencies.acquireLaunchIdentity?.(context) ?? null;
+    } catch (error) {
+      // An unresolvable harness yields no candidate (fail closed under enforce).
+      // The cause rides on the handle so the launch refuses with it instead of
+      // acquiring an identity this decision never fingerprinted.
+      launchIdentityError = error instanceof Error ? error : new Error(String(error));
+    }
+    const candidate = dependencies.candidateFor(context, launchIdentity);
     const policy = resolveEffectivePolicy({
       context,
       requestedProfile,
@@ -135,6 +169,7 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
     const reasonCodes: string[] = [
       ...(policy.kind === 'resolved' ? [] : policy.reasonCodes),
       ...(parity.kind === 'parity' ? [] : parity.reasonCodes),
+      ...(launchIdentityError ? [launchIdentityReasonCode(launchIdentityError)] : []),
     ];
     const expectedCapabilitySeal = computePermissionReleaseCapabilityDigest(
       dependencies.releaseBuild,
@@ -350,6 +385,8 @@ export const createExecutionPermissionGateway = (dependencies: GatewayDependenci
         leaseId,
         mode: rollout.profile,
         effectivePolicy: policy.kind === 'resolved' ? policy.policy : null,
+        launchIdentity,
+        launchIdentityError,
         consume,
         markStarted,
         attachChildIdentity,

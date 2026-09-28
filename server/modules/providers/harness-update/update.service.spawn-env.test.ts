@@ -5,7 +5,7 @@
  * `/dev/shm` on this host are tmpfs (RAM), and an `npm install` that stages a
  * tarball there reserves RAM until something deletes it (the 2026-07-29 OOM:
  * 2.7 GB held for 45 hours). ADR-159 Addendum 3 therefore makes `TMPDIR=/var/tmp`
- * binding for the kimi and qwen updates — and, since recovery runs the SAME npm
+ * binding for the npm (qwen) update — and, since recovery runs the SAME npm
  * command, for the recovery path too.
  *
  * A descriptor field asserting `env: { TMPDIR: '/var/tmp' }` proves nothing on
@@ -18,11 +18,20 @@
  * registered before the module under test is imported.
  */
 
+// B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
+// eslint-disable-next-line import-x/order -- must evaluate before every other import
+import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import test, { beforeEach, mock } from 'node:test';
 
 import * as realChildProcess from 'node:child_process';
+
+import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
+
+// T-1873: the registry resolves only installed CLIs (test HOME = case dir).
+for (const id of ['qwen', 'hermes'] as const) installFakeHarnessBinary(SANDBOX_HOME, id);
 
 interface SpawnCall {
   cmd: string;
@@ -85,48 +94,36 @@ const deps = {
   hasUnregisteredLaunch: async () => false,
   pinEnabled: () => false,
   audit: () => {},
-  cleanEnv: () => ({ PATH: '/usr/bin', HERMES_PATH: '/home/user/bin/hermes' }),
+  // QWEN_PATH inside the (case-local) HOME prefix: never PATH-resolve a real install.
+  cleanEnv: () => ({
+    PATH: '/usr/bin', HERMES_PATH: '/home/user/bin/hermes',
+    QWEN_PATH: path.join(SANDBOX_HOME, '.local', 'bin', 'qwen'),
+  }),
 };
 
-test('kimi: the npm process is spawned with TMPDIR=/var/tmp (never tmpfs)', async () => {
-  const binary = HARNESS_UPDATE_DESCRIPTORS.kimi.resolveBinary(deps.cleanEnv());
-  stdoutSequences.set(binary, ['0.42.0\n', '0.43.0\n']);
-  const job = await startHarnessUpdate('kimi', { deps });
-  await _awaitHarnessJob(job.jobId);
-
-  const npmCalls = calls.filter((c) => c.cmd === 'npm');
-  assert.equal(npmCalls.length, 1, 'the update ran exactly one npm command');
-  assert.ok(npmCalls[0].args.includes('@moonshot-ai/kimi-code@latest'));
-  assert.equal(
-    npmCalls[0].opts.env?.TMPDIR,
-    '/var/tmp',
-    'the SPAWNED npm env sets TMPDIR to /var/tmp',
-  );
-  // The sanitized base env is still underneath it (this is a merge, not a replace).
-  assert.ok(typeof npmCalls[0].opts.env?.PATH === 'string');
-});
-
-test('qwen: same TMPDIR on the spawned npm process', async () => {
-  const binary = HARNESS_UPDATE_DESCRIPTORS.qwen.resolveBinary(deps.cleanEnv());
+test('qwen: the npm process is spawned with TMPDIR=/var/tmp (never tmpfs)', async () => {
+  const binary = HARNESS_UPDATE_DESCRIPTORS.qwen.resolveBinary();
   stdoutSequences.set(binary, ['0.42.0\n', '0.43.0\n']);
   const job = await startHarnessUpdate('qwen', { deps });
   await _awaitHarnessJob(job.jobId);
   const npmCall = calls.find((c) => c.cmd === 'npm');
   assert.ok(npmCall, 'npm was spawned');
   assert.ok(npmCall!.args.includes('@qwen-code/qwen-code@latest'));
-  assert.equal(npmCall!.opts.env?.TMPDIR, '/var/tmp');
+  assert.equal(npmCall!.opts.env?.TMPDIR, '/var/tmp', 'the SPAWNED npm env sets TMPDIR to /var/tmp');
+  // The sanitized base env is still underneath it (this is a merge, not a replace).
+  assert.ok(typeof npmCall!.opts.env?.PATH === 'string');
 });
 
 test('the npm RECOVERY reinstall keeps TMPDIR=/var/tmp too', async () => {
-  const binary = HARNESS_UPDATE_DESCRIPTORS.kimi.resolveBinary(deps.cleanEnv());
+  const binary = HARNESS_UPDATE_DESCRIPTORS.qwen.resolveBinary();
   stdoutSequences.set(binary, ['0.42.0\n', '0.42.0\n']);
   exitCodes.set('npm', [1, 0]); // update fails, then exact-version recovery succeeds
-  const job = await startHarnessUpdate('kimi', { deps });
+  const job = await startHarnessUpdate('qwen', { deps });
   await _awaitHarnessJob(job.jobId);
 
   const npmCalls = calls.filter((c) => c.cmd === 'npm');
   assert.equal(npmCalls.length, 2, 'update + recovery');
-  assert.ok(npmCalls[1].args.includes('@moonshot-ai/kimi-code@0.42.0'), 'recovery pins the captured version');
+  assert.ok(npmCalls[1].args.includes('@qwen-code/qwen-code@0.42.0'), 'recovery pins the captured version');
   assert.equal(npmCalls[1].opts.env?.TMPDIR, '/var/tmp', 'recovery spawns under /var/tmp as well');
   assert.equal(getHarnessUpdateJob(job.jobId)!.error?.code, 'update_failed');
 });
@@ -152,7 +149,7 @@ test('hermes: `hermes update` runs in the checkout with HERMES_HOME isolation', 
 
 test('hermes failure rolls the checkout back to the captured revision', async () => {
   {
-    const hermesBin = HARNESS_UPDATE_DESCRIPTORS.hermes.resolveBinary(deps.cleanEnv());
+    const hermesBin = HARNESS_UPDATE_DESCRIPTORS.hermes.resolveBinary();
     exitCodes.set(hermesBin, [1]); // `hermes update` fails
 
     const job = await startHarnessUpdate('hermes', { deps });

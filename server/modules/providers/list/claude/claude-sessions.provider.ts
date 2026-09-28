@@ -15,6 +15,7 @@ import { reconcileAgentMessages } from '@/modules/providers/list/claude/agent-re
 
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
 
+import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
 import { createClaudeRawIdentityCollector } from './claude-receipt-identity.js';
 
 const PROVIDER = 'claude';
@@ -132,6 +133,12 @@ async function parseAgentTools(filePath: string, lease?: HistoryReadLease): Prom
   return tools;
 }
 
+/** Stored transcript path; T-1880: a pre-separation spelling resolves under the current roots. */
+function storedClaudeTranscript(sessionId: string): string | undefined {
+  const storedPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+  return storedPath ? resolveStoredClaudeTranscript(storedPath) ?? storedPath : undefined;
+}
+
 async function getSessionMessages(
   sessionId: string,
   limit: number | null,
@@ -140,7 +147,7 @@ async function getSessionMessages(
   lease?: HistoryReadLease,
 ): Promise<ClaudeHistoryMessagesResult> {
   try {
-    const jsonLPath = lease?.mainFile ?? sessionsDb.getSessionById(sessionId)?.jsonl_path;
+    const jsonLPath = lease?.mainFile ?? storedClaudeTranscript(sessionId);
 
     if (!jsonLPath) {
       return { messages: [], total: 0, hasMore: false };

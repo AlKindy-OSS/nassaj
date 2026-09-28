@@ -3,6 +3,7 @@ import {
   Bell,
   Bot,
   Building2,
+  Cog,
   GitBranch,
   Info,
   KeyRound,
@@ -43,6 +44,9 @@ export type SettingsMainTabMeta = {
  * Defined before SETTINGS_MAIN_TABS so it can be referenced in the roles field.
  */
 export const COMMAND_BOARD_TAB_ROLES: ReadonlyArray<string> = ['owner'];
+
+/** T-1866: the «النظام» tab (Updates/Storage/Permissions) — owner-only, same as Command Board. */
+export const SYSTEM_TAB_ROLES: ReadonlyArray<string> = ['owner'];
 
 /**
  * Single source of truth for all settings tab metadata (B-255).
@@ -158,6 +162,18 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
     keywords: 'command board queue settings admin',
     icon: SlidersHorizontal,
     roles: COMMAND_BOARD_TAB_ROLES,
+  },
+  // T-1866 (owner-approved IA option B): split out of `command-board`, which
+  // used to also carry storage/tmpfs/permission-fence sections plus a
+  // per-agent-page auto-update policy widget — none of those are
+  // command-board concerns. Placed after Command Board, before About.
+  {
+    id: 'system',
+    label: 'System',
+    labelKey: 'mainTabs.system',
+    keywords: 'system updates storage tmpfs permissions fences auto update',
+    icon: Cog,
+    roles: SYSTEM_TAB_ROLES,
   },
   {
     id: 'about',

@@ -10,8 +10,8 @@
  *        → injects the user's KIMI_API_KEY + isolates KIMI_CODE_HOME per user.
  *   2. verifyVendorBinaryDigest('kimi', resolvedPath)       [SL-7/M-4]
  *        → refuses the spawn (throws) when the on-disk binary drifts from the
- *          root-of-trust pin. Verified AFTER the final path (KIMI_PATH override
- *          + PATH fallback) is resolved.
+ *          root-of-trust pin. Verified AFTER the final path is resolved by the
+ *          harness registry (KIMI_PATH server override, else ~/.local/bin/kimi).
  *   3. ensureVendorCliGovernance('kimi', home, source)      [SL-2]
  *        → fail-closed: throws VendorGovernanceMissingError when nassaj
  *          governance (the neutral AGENTS.md COPY) cannot be attested. (Kimi's
@@ -63,6 +63,8 @@ import { createTurnTimer, settleTurnTiming } from './modules/providers/services/
 import { participantsDb } from './modules/database/index.js';
 import { resolveProviderEnv } from './services/isolation/resolve-provider-env.js';
 import { verifyVendorBinaryDigest, VendorBinaryIntegrityError } from './services/isolation/vendor-binary-integrity.js';
+import { resolveHarnessBinary } from './shared/harness-binaries.js';
+import { clearStaleNativeStageBeforeLaunch } from './modules/providers/harness-update/native-staging.js';
 import {
   ensureVendorCliGovernance,
   VendorGovernanceMissingError,
@@ -86,10 +88,6 @@ const spawn = process.platform === 'win32' ? crossSpawn : spawnRaw;
 
 /** The npm package whose `kimi` bin this seam governs (KG-1 §1.1, pinned by SL-7). */
 export const KIMI_CODE_PACKAGE = '@moonshot-ai/kimi-code';
-
-export const KIMI_USER_VENDOR_BIN = path.join(
-  os.homedir(), '.local', 'share', 'kimi-code-vendor', 'bin', 'kimi',
-);
 
 /** The governance filename kimi ingests from its config-home (a 0444 neutral COPY). */
 export const KIMI_AGENTS_FILENAME = 'AGENTS.md';
@@ -119,20 +117,6 @@ export const KIMI_INTEGRITY_MESSAGE =
 
 /** Active kimi-agent child processes keyed by session id (abort/liveness). */
 const activeKimiAgentProcesses = new Map();
-
-/**
- * Resolves the FINAL kimi binary spawn target: the KIMI_PATH override when set,
- * else the `kimi` bin found on $PATH or in the well-known install dirs a
- * pm2/systemd PATH omits (B-1138). The SL-7 digest pin then hashes this exact
- * path, so the pin still covers the binary exec will run (M-4).
- *
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {string}
- */
-export function resolveKimiBinaryPath(env = process.env) {
-  const override = typeof env?.KIMI_PATH === 'string' ? env.KIMI_PATH.trim() : '';
-  return override || KIMI_USER_VENDOR_BIN;
-}
 
 /**
  * Resolves the kimi config-home for governance/session purposes: the isolated
@@ -210,6 +194,7 @@ function wrapForShell(binaryPath, args) {
  *           permissionMode?: string, cwd?: string|null,
  *           baseEnv?: NodeJS.ProcessEnv }} params
  * @param {{ resolveProviderEnv?: Function, verifyVendorBinaryDigest?: Function,
+ *           clearStaleNativeStage?: Function,
  *           ensureVendorCliGovernance?: Function,
  *           mapPermissionModeToVendorFlags?: Function,
  *           resolveCagedLaunch?: Function, sanitizeVendorAgentEnv?: Function,
@@ -237,6 +222,7 @@ export function prepareKimiAgentLaunch(params, deps = {}) {
 
   const resolveEnvFn = deps.resolveProviderEnv ?? resolveProviderEnv;
   const verifyDigestFn = deps.verifyVendorBinaryDigest ?? verifyVendorBinaryDigest;
+  const clearStaleStageFn = deps.clearStaleNativeStage ?? clearStaleNativeStageBeforeLaunch;
   const ensureGovernanceFn = deps.ensureVendorCliGovernance ?? ensureVendorCliGovernance;
   const mapPermsFn = deps.mapPermissionModeToVendorFlags ?? mapPermissionModeToVendorFlags;
   const cagedLaunchFn = deps.resolveCagedLaunch ?? resolveCagedLaunch;
@@ -247,7 +233,13 @@ export function prepareKimiAgentLaunch(params, deps = {}) {
   const resolvedEnv = resolveEnvFn(userId, 'kimi', baseEnv, 'agent');
 
   // (2) Digest pin on the FINAL resolved path (throws on drift/unverifiable when armed).
-  const binaryPath = resolveKimiBinaryPath(resolvedEnv);
+  // The binary comes from the harness registry (server env only): the member
+  // env resolved above can never redirect it (T-1873).
+  const binaryPath = resolveHarnessBinary('kimi');
+  // T-1873 (qa HIGH): kimi swaps a staged update in on its NEXT start. Outside a
+  // Nassaj update window a stage is removed first, so the digest below is taken
+  // on the bytes that will actually run and no swap escapes the snapshot.
+  clearStaleStageFn('kimi', binaryPath);
   verifyDigestFn('kimi', binaryPath, { env: resolvedEnv });
 
   // (3) Fail-closed governance gate (throws VendorGovernanceMissingError when unattested)

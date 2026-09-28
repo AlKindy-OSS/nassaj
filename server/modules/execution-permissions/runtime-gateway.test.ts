@@ -4,7 +4,7 @@ import test from 'node:test';
 import artifact from './fixtures/permission-capabilities.v1.json' with { type: 'json' };
 import { evaluateParity } from './parity.js';
 import { CLAUDE_REFERENCE_VECTOR_V1 } from './fixtures/claude-reference-v1.js';
-import { createRuntimeCandidateResolver, processAlive } from './runtime-gateway.js';
+import { acquireRuntimeLaunchIdentity, createRuntimeCandidateResolver, processAlive } from './runtime-gateway.js';
 
 const context = Object.freeze({
   launchId: 'launch-1', principalId: 'user:1', sessionId: null,
@@ -14,12 +14,14 @@ const context = Object.freeze({
 
 test('runtime resolver re-measures identity on every admission and detects in-process drift', () => {
   let calls = 0;
+  const seen: unknown[] = [];
   const measuredCodex = artifact.candidates.find(candidate => candidate.body === 'codex')!;
   const resolver = createRuntimeCandidateResolver({
     resolveClaude: () => { throw new Error('not used'); },
     resolveAntigravity: () => { throw new Error('not used'); },
-    resolveCodex: () => {
+    resolveCodex: (identity) => {
       calls += 1;
+      seen.push(identity);
       return {
         buildFingerprint: calls === 1
           ? measuredCodex.evidence.measuredBuildFingerprint
@@ -28,11 +30,36 @@ test('runtime resolver re-measures identity on every admission and detects in-pr
     },
     now: () => measuredCodex.evidence.measuredAt,
   });
-  assert.equal(evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, resolver(context)).kind, 'parity');
-  const drifted = evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, resolver(context));
+  const first = Object.freeze({ executablePath: '/release/a/bin/codex' });
+  const second = Object.freeze({ executablePath: '/release/b/bin/codex' });
+  assert.equal(evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, resolver(context, first)).kind, 'parity');
+  const drifted = evaluateParity(CLAUDE_REFERENCE_VECTOR_V1, resolver(context, second));
   assert.equal(drifted.kind, 'deny');
   if (drifted.kind === 'deny') assert.ok(drifted.reasonCodes.includes('BINARY_DRIFT'));
   assert.equal(calls, 2);
+  // T-1872: the launch's own frozen identity object is what gets fingerprinted.
+  assert.equal(seen[0], first);
+  assert.equal(seen[1], second);
+});
+
+test('T-1872: a codex admission without a launch identity has no candidate', () => {
+  const resolver = createRuntimeCandidateResolver({
+    resolveClaude: () => { throw new Error('not used'); },
+    resolveAntigravity: () => { throw new Error('not used'); },
+    resolveCodex: () => assert.fail('must not re-resolve a binary without the launch identity'),
+    now: () => '2026-09-03T00:00:00.000Z',
+  });
+  assert.equal(resolver(context, null), null);
+  assert.equal(resolver(context), null);
+});
+
+test('T-1872: only codex bodies acquire a machine launch identity', () => {
+  const identity = Object.freeze({ executablePath: '/release/bin/codex' });
+  let acquired = 0;
+  const acquire = () => { acquired += 1; return identity; };
+  assert.equal(acquireRuntimeLaunchIdentity(context, acquire), identity);
+  assert.equal(acquireRuntimeLaunchIdentity({ ...context, body: 'claude' }, acquire), null);
+  assert.equal(acquired, 1);
 });
 
 test('T-1593: the boot gate is fatal only for external unknowns or live owners', async () => {

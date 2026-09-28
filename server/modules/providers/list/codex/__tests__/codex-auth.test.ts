@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { mock, before, after } from 'node:test';
 
+import { createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
+
 /**
  * End-to-end wiring test for CodexProviderAuth.getStatus() installed detection
  * (B-56 follow-up). cross-spawn is mocked at the module boundary so the test
@@ -27,6 +29,7 @@ before(async () => {
   // Isolate HOME so the credential read (~/.codex/auth.json) is deterministic.
   HOME_DIR = await mkdtemp(path.join(os.tmpdir(), 'codex-auth-'));
   process.env.HOME = HOME_DIR;
+  delete process.env.CODEX_PATH;
 
   // cross-spawn is CJS exporting a callable with a `.sync` property. cli-detect
   // imports the default and calls `.sync`, so mocking the default alone covers
@@ -49,35 +52,32 @@ const enoent = (): SyncResult => ({
   error: Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT', syscall: 'spawn codex' }),
 });
 
-test('getStatus reports installed=false when neither the SDK binary nor a CLI exists', async () => {
+test('getStatus reports installed=false when the machine release is absent', async () => {
   nextSyncResult = enoent();
   const status = await new CodexProviderAuth(() => false).getStatus();
   assert.equal(status.provider, 'codex');
   assert.equal(status.installed, false);
 });
 
-test('B-1138: the SDK-bundled binary counts as installed even when PATH has no codex', async () => {
+test('T-1872: a PATH codex never counts as installed without the machine release', async () => {
+  nextSyncResult = { status: 0 };
+  delete process.env.CODEX_PATH;
+  const status = await new CodexProviderAuth().getStatus();
+  assert.equal(status.installed, false);
+});
+
+test('T-1872: the machine release counts as installed even when PATH has no codex', async () => {
   nextSyncResult = enoent();
-  const status = await new CodexProviderAuth(() => true).getStatus();
-  assert.equal(status.installed, true);
-});
-
-test('getStatus reports installed=true when codex --version exits 0', async () => {
-  nextSyncResult = { status: 0 };
-  const status = await new CodexProviderAuth().getStatus();
-  assert.equal(status.installed, true);
-});
-
-test('getStatus reports installed=true when codex present but auth.json absent', async () => {
-  // installed must reflect the binary, independent of credential presence.
-  nextSyncResult = { status: 0 };
-  const status = await new CodexProviderAuth().getStatus();
-  assert.equal(status.installed, true);
-  assert.equal(status.authenticated, false);
+  const machine = createCodexMachineFixture(path.join(HOME_DIR, 'machine'));
+  process.env.CODEX_PATH = machine.launcher;
+  try {
+    const status = await new CodexProviderAuth().getStatus();
+    assert.equal(status.installed, true);
+    assert.equal(status.authenticated, false);
+  } finally { delete process.env.CODEX_PATH; }
 });
 
 test('getStatus reports installed=true + authenticated=true when an API key is configured', async () => {
-  nextSyncResult = { status: 0 };
   const codexDir = path.join(HOME_DIR, '.codex');
   await mkdir(codexDir, { recursive: true });
   await writeFile(
@@ -85,7 +85,7 @@ test('getStatus reports installed=true + authenticated=true when an API key is c
     JSON.stringify({ OPENAI_API_KEY: 'sk-test-xxx' }),
     'utf8',
   );
-  const status = await new CodexProviderAuth().getStatus();
+  const status = await new CodexProviderAuth(() => true).getStatus();
   assert.equal(status.installed, true);
   assert.equal(status.authenticated, true);
   assert.equal(status.method, 'api_key');

@@ -7,6 +7,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { after, mock, test } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // Preserve transitive import exports without granting this fixture new process effects.
 let unexpectedProcessCalls = 0;
 const rejectUnexpectedProcess = () => {
@@ -17,6 +19,7 @@ after(() => assert.equal(unexpectedProcessCalls, 0));
 const root = await fs.mkdtemp(path.join(process.env.TMPDIR!, 'runner-history-'));
 after(() => fs.rm(root, { recursive: true, force: true }));
 mock.method(os, 'homedir', () => root);
+installFakeHarnessBinary(root, 'kimi');
 // Pre-create an empty fixture so lazy connection imports cannot copy legacy data.
 process.env.DATABASE_PATH = path.join(root, 'synthetic-auth.db');
 await fs.writeFile(process.env.DATABASE_PATH, '', { flag: 'wx', mode: 0o600 });

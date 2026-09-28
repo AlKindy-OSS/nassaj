@@ -38,7 +38,7 @@
     },
     {
       "path": "@openai/codex-sdk/package.json",
-      "sha256": "77300beec12fa5523905e30ae85ca4747e68d4fab42ceccc6a752f84c18ba02a",
+      "sha256": "16b5cd2e9361fbd20e107dc45334e8ee578e844f417155213129d2814974e286",
       "sourceMode": 420,
       "mode": 292,
       "size": 1955
@@ -59,7 +59,7 @@
     },
     {
       "path": "@openai/codex/package.json",
-      "sha256": "4ecf4eae28684c5fcba8b9a63b946ce22b8cc2e451750f23c04e5088cf4c7a05",
+      "sha256": "42cc6481fe2366708e7963edbc6322508733a448837088d3a0c8a14e2cd7450d",
       "sourceMode": 420,
       "mode": 292,
       "size": 1082
@@ -73,28 +73,28 @@
     },
     {
       "path": "@openai/codex-linux-x64/package.json",
-      "sha256": "162f05ebda40624afb12d6967f89af4d480f4254d1fd5eb15532d4f02dc6964a",
+      "sha256": "746356e50c85689853089e40ab54186de18285398a2dfeba773e7075e3da3d65",
       "sourceMode": 420,
       "mode": 292,
       "size": 511
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
-      "sha256": "f8786262ebc0fa1337448a2977332beadec66c8d0cda0ce973c7849766d7943c",
+      "sha256": "3e2584f3f3829a43a0495011a1cecb2facbe64a2403e2b682351fd9c2983f970",
       "sourceMode": 493,
       "mode": 365,
-      "size": 258597984
+      "size": 285340072
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
-      "sha256": "f9dc99ef253919b4b48b53a346b1ebec76589eb854a1ab1a64afb4ff51cfbb61",
+      "sha256": "67b86142bac5cead11b8420cf32d3a2bf88c8868d71733f351ed7c5d95a953e0",
       "sourceMode": 493,
       "mode": 365,
-      "size": 69427264
+      "size": 73962384
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
-      "sha256": "360d40dd3fab0cfb4342519e7ccb7aafa72ae9d1c3c15f78b0a0a002860fc98c",
+      "sha256": "f2902083d9f7c8973a50bab94aa45dc21e4a291640dae0ddde312e0d94476ddc",
       "sourceMode": 420,
       "mode": 292,
       "size": 205
@@ -108,7 +108,7 @@
     },
     {
       "path": "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
-      "sha256": "01fb705f067bd5365b63d8ad2323a61c8d007733ca5e649437e086f3fb9935d8",
+      "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
       "sourceMode": 493,
       "mode": 365,
       "size": 529776
@@ -123,8 +123,8 @@
   ],
   "patch": {
     "issue": "B-990",
-    "sdkVersion": "0.153.2",
-    "upstreamIntegrity": "sha512-If4CYvo+Zpf6CCKxhuoyhgNbaS93UI9pYfscWr529CxCQK5fhlLQA29efutQVwuj8w9EcMhNM4rjn7zu67S+/w==",
+    "sdkVersion": "0.157.1",
+    "upstreamIntegrity": "sha512-JPfUXFtXnADlOFYNlf3WzwOEbhQ4zpn4d53ikAF9UjVy2Fr3vESuhvGZquoENW8h60Gskx9spwO20EoZAbKI0g==",
     "patchedEntrySha256": "f0741050088c636aef4ee970fd25e582ab1c961c18499702c26ae7962fe025d2"
   }
 }

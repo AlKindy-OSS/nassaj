@@ -15,6 +15,7 @@ import mime from 'mime-types';
 import Database from 'better-sqlite3';
 
 import { AppError, WORKSPACES_ROOT, getOpenCodeDatabasePath, validateWorkspacePath } from '@/shared/utils.js';
+import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
 import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 import { abortSessionTurn, dispatchProviderCommand, isSessionWritableByUser } from '@/modules/websocket/services/chat-websocket.service.js';
@@ -52,6 +53,9 @@ import {
     isPayloadTooLargeError,
 } from './middleware/global-body-limits.js';
 import { findAppRoot, getModuleDir } from './utils/runtime-paths.js';
+import { acquireCodexLaunchIdentity, prewarmCodexLaunchIdentity } from './shared/codex-executable.js';
+import { prewarmCodexRuntimeCompat } from './shared/codex-runtime-compat.js';
+import { checkBundledCageBwrap } from './services/isolation/provider-cage.js';
 import { clientIp } from './utils/client-ip.js';
 import { sanitizeAttachmentName, resolveCollisionFreeDest } from './utils/attachment-helpers.js';
 import { resolveReadPathInProject, isResolvedPathInsideRootReal } from './utils/path-guard.js';
@@ -182,17 +186,20 @@ import {
     terminateStandaloneTerminalsForUser,
 } from './services/standalone-terminals/standalone-terminal-registry.js';
 import providerRoutes from './modules/providers/provider.routes.js';
+import { CLAUDE_HOME_READY } from './modules/providers/list/claude/claude-projects-roots.js';
 import harnessUpdateRoutes from './modules/providers/harness-update/harness-update.routes.js';
 import {
     startHarnessAutoUpdateScheduler,
     stopHarnessAutoUpdateScheduler,
 } from './modules/providers/harness-update/scheduler.js';
+import { reconcileHarnessSnapshots } from './modules/providers/harness-update/boot-reconcile.js';
+import { logUnresolvedHarnessBinaries } from './shared/harness-binaries.js';
 import governancePreferencesRoutes from './modules/providers/governance-preferences.routes.js';
 import participantsRoutes from './modules/providers/participants.routes.js';
 import {
     latestClaudeCacheTtlMinutes,
     latestClaudeTokenUsage,
-    claudeContextSnapshot,
+    claudeTranscriptContextSnapshot,
     readClaudeTranscriptForSession,
 } from './modules/providers/list/claude/claude-token-usage.js';
 import { extractCodexTokenBudget } from './modules/providers/list/codex/codex-token-budget.js';
@@ -1392,6 +1399,8 @@ app.get('/health', sourceVersionHealthMiddleware, async (req, res) => {
         degraded: maintenance.degraded,
         degradedReason: maintenance.degradedReason,
         activeSessions,
+        // T-1880: static booleans proving the Claude-home separation prerequisites are live.
+        claudeHomeReady: CLAUDE_HOME_READY,
         restartRequired,
         clientReloadRequired,
         clientBundleMtimeAtStartup,
@@ -2518,8 +2527,8 @@ app.get('/api/projects/:projectId/files', authenticateToken, async (req, res) =>
             return res.status(404).json({ error: `Project path not found: ${actualPath}` });
         }
 
-        const files = await getFileTree(actualPath, 10, 0, true);
-        res.json(files);
+        const { status, body } = await buildProjectFileTreeResponse(actualPath);
+        res.status(status).json(body);
     } catch (error) {
         console.error('[ERROR] File tree error:', error.message);
         res.status(500).json({ error: error.message });
@@ -3709,9 +3718,9 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
         }
         const { inputTokens, outputTokens, modelName, breakdown, cacheSnapshot } = latestClaudeTokenUsage(fileContent, safeSessionId);
 
-        // A restored transcript exposes request input, not a fresh native context measurement.
-        const contextSnapshot = claudeContextSnapshot(null, { sessionId: safeSessionId, modelId: modelName }, modelName ? inputTokens : null);
-        contextSnapshot.observedAt = null; // Restoring a transcript is not a fresh runtime observation.
+        // A restored transcript exposes request input, not a fresh native context measurement;
+        // B-1356: the window comes from the model id, or stays null when it is not known.
+        const contextSnapshot = claudeTranscriptContextSnapshot(safeSessionId, modelName, inputTokens);
 
         res.json({
             used: null,
@@ -3784,149 +3793,6 @@ app.use((err, req, res, next) => {
     },
   });
 });
-
-// Helper function to convert permissions to rwx format
-function permToRwx(perm) {
-    const r = perm & 4 ? 'r' : '-';
-    const w = perm & 2 ? 'w' : '-';
-    const x = perm & 1 ? 'x' : '-';
-    return r + w + x;
-}
-
-// Directories that are almost never interesting for a project tree but can
-// contain tens of thousands of files. Skipping them before recursion keeps
-// traversal time bounded on large monorepos and high-latency filesystems
-// (NFS / SMB).
-const IGNORED_DIRS = new Set([
-    // JS / TS toolchains
-    'node_modules', 'dist', 'build', '.next', '.nuxt', '.cache', '.parcel-cache',
-    // VCS
-    '.git', '.svn', '.hg',
-    // Python
-    '__pycache__', '.pytest_cache', '.mypy_cache', '.tox', 'venv', '.venv',
-    // Rust / Go / Java / Ruby
-    'target', 'vendor',
-    // Build output / IDE
-    '.gradle', '.idea', 'coverage', '.nyc_output'
-]);
-
-const DEFAULT_FS_CONCURRENCY = 64;
-const parsedFsConcurrency = Number.parseInt(process.env.FS_CONCURRENCY || '', 10);
-const FS_CONCURRENCY = Number.isFinite(parsedFsConcurrency) && parsedFsConcurrency > 0
-    ? parsedFsConcurrency
-    : DEFAULT_FS_CONCURRENCY;
-let activeFsOperations = 0;
-const pendingFsOperations = [];
-
-async function acquire() {
-    if (activeFsOperations < FS_CONCURRENCY) {
-        activeFsOperations += 1;
-        return;
-    }
-
-    await new Promise((resolve) => {
-        pendingFsOperations.push(resolve);
-    });
-}
-
-function release() {
-    const next = pendingFsOperations.shift();
-    if (next) {
-        next();
-        return;
-    }
-
-    activeFsOperations = Math.max(0, activeFsOperations - 1);
-}
-
-async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden = true) {
-    // Using fsPromises from import
-    let entries;
-    try {
-        await acquire();
-        try {
-            entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
-        } finally {
-            release();
-        }
-    } catch (error) {
-        // Only log non-permission errors to avoid spam
-        if (error.code !== 'EACCES' && error.code !== 'EPERM') {
-            console.error('Error reading directory:', error);
-        }
-        return [];
-    }
-
-    const filteredEntries = entries.filter((entry) => !(entry.isDirectory() && IGNORED_DIRS.has(entry.name)));
-
-    // Process every entry in parallel. On high-latency filesystems (NFS/SMB)
-    // serial stat() was the real bottleneck — issuing them concurrently lets
-    // the kernel pipeline the round-trips and the recursive calls overlap too.
-    const items = await Promise.all(filteredEntries.map(async (entry) => {
-        const itemPath = path.join(dirPath, entry.name);
-        const item = {
-            name: entry.name,
-            path: itemPath,
-            type: entry.isDirectory() ? 'directory' : 'file'
-        };
-
-        // Get file stats for additional metadata
-        try {
-            await acquire();
-            try {
-              const stats = await fsPromises.lstat(itemPath);
-              item.size = stats.size;
-              item.modified = stats.mtime.toISOString();
-
-              // Mark symlinks so UI can distinguish them
-              if (stats.isSymbolicLink()) {
-                item.isSymlink = true;
-              }
-
-              // Convert permissions to rwx format
-              const mode = stats.mode;
-              const ownerPerm = (mode >> 6) & 7;
-              const groupPerm = (mode >> 3) & 7;
-              const otherPerm = mode & 7;
-              item.permissions =
-                ((mode >> 6) & 7).toString() +
-                ((mode >> 3) & 7).toString() +
-                (mode & 7).toString();
-              item.permissionsRwx =
-                permToRwx(ownerPerm) +
-                permToRwx(groupPerm) +
-                permToRwx(otherPerm);
-            } finally {
-                release();
-            }
-        } catch (statError) {
-            // If stat fails, provide default values
-            item.size = 0;
-            item.modified = null;
-            item.permissions = '000';
-            item.permissionsRwx = '---------';
-        }
-
-        if (entry.isDirectory() && currentDepth < maxDepth) {
-            // Recurse. Let readdir's own EACCES bubble up through the catch in
-            // the recursive call rather than doing a separate access() probe
-            // (which doubled the round-trip count on SMB without adding info).
-            // The recursive call starts with a bounded readdir; holding a permit
-            // for the whole subtree can deadlock when sibling directories are
-            // waiting on their own children.
-            item.children = await getFileTree(itemPath, maxDepth, currentDepth + 1, showHidden);
-        }
-
-        return item;
-    }));
-
-    return items.sort((a, b) => {
-        if (a.type !== b.type) {
-            return a.type === 'directory' ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-    });
-}
 
 /**
  * B-24 — exit code reserved for "this DRAINED instance is an ORPHAN".
@@ -4182,6 +4048,22 @@ async function startServer() {
         }
         if (!forwardStartup && !OID_PAIR_BOOTSTRAP) runConnectorCredentialRetentionAtStartup();
 
+        // T-1871 §8: harness snapshot jobs interrupted by a crash are abandoned,
+        // rolled back or resumed HERE — after the DB (durable fences) and before
+        // any spawn can be admitted (listener, background supervisors) or the
+        // auto-update scheduler starts. Never throws; a harness it cannot
+        // resolve stays blocked by its own durable fence (others are unaffected).
+        // T-1873 boot check: name every harness CLI the registry cannot resolve
+        // (logged, never fatal — only that harness is unavailable).
+        logUnresolvedHarnessBinaries();
+        const harnessReconcile = await reconcileHarnessSnapshots();
+        if (harnessReconcile.blocked.length > 0 || harnessReconcile.rollbackFailed > 0) {
+            console.error('[harness-update] boot reconcile left harnesses blocked', {
+                blocked: harnessReconcile.blocked,
+                rollbackFailed: harnessReconcile.rollbackFailed,
+            });
+        }
+
         // Crash seam: predecessor durably proved runtime verification and
         // opened the gate, then died before the terminal DB CAS.
         for (const job of sourceUpdateJobsDb.listRuntimeVerifying()) {
@@ -4338,6 +4220,12 @@ async function startServer() {
         await backgroundLifecycle.prepare();
         privateSecurityReady = true;
         startHarnessAutoUpdateScheduler();
+        // T-1872: seal the machine Codex release once before admitting launches.
+        prewarmCodexLaunchIdentity();
+        // T-1872 part 2: judge that release off the event loop; a failure never aborts boot.
+        void prewarmCodexRuntimeCompat(acquireCodexLaunchIdentity);
+        // T-1872 qa I6: the cage tool is the repo-pinned bundled bwrap; say so loudly if absent.
+        checkBundledCageBwrap();
 
         // Bootstrap owns EX/EX and admission remains closed until the exact
         // candidate runtime is verified and its client is promoted. Failure

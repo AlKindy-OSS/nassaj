@@ -23,6 +23,7 @@ import spawn from 'cross-spawn';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import { resolveCliExecutablePath } from '@/shared/cli-executable-path.js';
+import { tryResolveHarnessBinary, resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { parseFrontMatter } from '@/shared/frontmatter.js';
 import { verifyVendorBinaryDigest } from '@/services/isolation/vendor-binary-integrity.js';
 import type {
@@ -211,6 +212,89 @@ export function normalizeProjectPath(inputPath: string): string {
   return normalized.replace(/[\\/]+$/, '');
 }
 
+/** Outcome of {@link realpathThroughMissingSegments}. */
+export type RealpathThroughMissingResult =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; code: 'SYMLINK_TARGET_MISSING' | 'NO_EXISTING_ANCESTOR' | 'RESOLUTION_FAILED'; error: string };
+
+/**
+ * Resolves an absolute path whose trailing segments may not exist yet (B-1358).
+ *
+ * Walks up to the nearest existing ancestor, canonicalizes it with `realpath`
+ * (following every symlink on the way), then re-appends the missing segments.
+ * Fail-closed rules:
+ * - a probe that fails `realpath` with ENOENT but still `lstat`s is a dangling
+ *   symlink: a later `mkdir -p` would follow it, so it is rejected
+ *   (`SYMLINK_TARGET_MISSING`), matching `server/utils/path-guard.js`;
+ * - no existing ancestor up to the filesystem root is rejected;
+ * - any other error (EACCES, ELOOP, ENOTDIR, ...) is rejected.
+ *
+ * @param absolutePath Absolute, lexically normalized path.
+ * @returns The fully resolved path, or a classified rejection.
+ */
+export async function realpathThroughMissingSegments(
+  absolutePath: string,
+): Promise<RealpathThroughMissingResult> {
+  const missingSegments: string[] = [];
+  let probe = absolutePath;
+  for (;;) {
+    try {
+      const realProbe = await realpath(probe);
+      return { ok: true, resolvedPath: path.join(realProbe, ...missingSegments.reverse()) };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        return { ok: false, code: 'RESOLUTION_FAILED', error: `Cannot resolve workspace path (${code ?? 'unknown'})` };
+      }
+    }
+    if (await pathEntryExists(probe)) {
+      return { ok: false, code: 'SYMLINK_TARGET_MISSING', error: 'Workspace path contains a symlink whose target is missing' };
+    }
+    const parent = path.dirname(probe);
+    if (parent === probe) {
+      return { ok: false, code: 'NO_EXISTING_ANCESTOR', error: 'Workspace path has no existing ancestor' };
+    }
+    missingSegments.push(path.basename(probe));
+    probe = parent;
+  }
+}
+
+/** True when `lstat` sees an entry (without following a final symlink). */
+async function pathEntryExists(entryPath: string): Promise<boolean> {
+  try {
+    await lstat(entryPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns the rejection message when `normalizedPath` is, or lies under, a
+ * system-critical directory; `null` when the path is allowed.
+ */
+function findForbiddenWorkspacePathError(normalizedPath: string): string | null {
+  if (FORBIDDEN_WORKSPACE_PATHS.includes(normalizedPath) || normalizedPath === '/') {
+    return 'Cannot use system-critical directories as workspace locations';
+  }
+
+  for (const forbiddenPath of FORBIDDEN_WORKSPACE_PATHS) {
+    const normalizedForbiddenPath = normalizeProjectPath(forbiddenPath);
+    const isUnder = normalizedPath === normalizedForbiddenPath
+      || normalizedPath.startsWith(`${normalizedForbiddenPath}${path.sep}`);
+    if (!isUnder) {
+      continue;
+    }
+    // Allow specific user-writable folders under /var.
+    const isAllowedVarChild = normalizedForbiddenPath === '/var'
+      && (normalizedPath.startsWith('/var/tmp') || normalizedPath.startsWith('/var/folders'));
+    if (!isAllowedVarChild) {
+      return `Cannot create workspace in system directory: ${forbiddenPath}`;
+    }
+  }
+  return null;
+}
+
 /**
  * Validates that a user-supplied workspace path is safe to use.
  *
@@ -231,53 +315,20 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
     const absolutePath = path.resolve(normalizedRequestedPath);
     const normalizedPath = normalizeProjectPath(absolutePath);
 
-    if (FORBIDDEN_WORKSPACE_PATHS.includes(normalizedPath) || normalizedPath === '/') {
-      return {
-        valid: false,
-        error: 'Cannot use system-critical directories as workspace locations',
-      };
+    const literalForbiddenError = findForbiddenWorkspacePathError(normalizedPath);
+    if (literalForbiddenError) {
+      return { valid: false, error: literalForbiddenError };
     }
 
-    for (const forbiddenPath of FORBIDDEN_WORKSPACE_PATHS) {
-      const normalizedForbiddenPath = normalizeProjectPath(forbiddenPath);
-      if (
-        normalizedPath === normalizedForbiddenPath
-        || normalizedPath.startsWith(`${normalizedForbiddenPath}${path.sep}`)
-      ) {
-        // Allow specific user-writable folders under /var.
-        if (
-          normalizedForbiddenPath === '/var'
-          && (normalizedPath.startsWith('/var/tmp') || normalizedPath.startsWith('/var/folders'))
-        ) {
-          continue;
-        }
-
-        return {
-          valid: false,
-          error: `Cannot create workspace in system directory: ${forbiddenPath}`,
-        };
-      }
+    const resolution = await realpathThroughMissingSegments(absolutePath);
+    if (!resolution.ok) {
+      return { valid: false, error: resolution.error };
     }
-
-    let resolvedPath = normalizeProjectPath(absolutePath);
-    try {
-      await access(absolutePath);
-      resolvedPath = normalizeProjectPath(await realpath(absolutePath));
-    } catch (error) {
-      const fileError = error as NodeJS.ErrnoException;
-      if (fileError.code !== 'ENOENT') {
-        throw fileError;
-      }
-
-      const parentPath = path.dirname(absolutePath);
-      try {
-        const parentRealPath = await realpath(parentPath);
-        resolvedPath = normalizeProjectPath(path.join(parentRealPath, path.basename(absolutePath)));
-      } catch (parentError) {
-        const parentFileError = parentError as NodeJS.ErrnoException;
-        if (parentFileError.code !== 'ENOENT') {
-          throw parentFileError;
-        }
+    const resolvedPath = normalizeProjectPath(resolution.resolvedPath);
+    if (resolvedPath !== normalizedPath) {
+      const forbiddenError = findForbiddenWorkspacePathError(resolvedPath);
+      if (forbiddenError) {
+        return { valid: false, error: forbiddenError };
       }
     }
 
@@ -1387,44 +1438,18 @@ export function getOpenCodeDatabasePath(): string {
 }
 
 /**
- * Resolves the OpenCode CLI binary to spawn (OC-06, agy-cli.js:42 pattern).
+ * Resolves the OpenCode CLI binary to spawn through the harness registry
+ * (T-1873: `OPENCODE_PATH` server override, else `~/.opencode/bin/opencode`;
+ * no PATH fallback). Throws HarnessBinaryUnresolvedError when not installed.
  *
- * Order: explicit `OPENCODE_PATH` env override → the standard install location
- * `~/.opencode/bin/opencode` when present → bare `opencode` from PATH. The PM2
- * process does not inherit the `.bashrc` PATH addition, so relying on PATH
- * alone made the provider report "not installed" (OPENCODE-COMPAT plan §1).
- * Evaluated per call (not at module load) so tests and admin env changes take
- * effect without a server restart.
- *
- * SL-7 / M-4 (OCC-15, ADR-062): the FINAL resolved path — after the
- * `OPENCODE_PATH` override, the install location, and the bare-`opencode` PATH
- * fallback — is passed through `verifyVendorBinaryDigest` so the sha256 pin
- * cannot be routed around by an env var. The guard is a strict no-op unless
- * `NASSAJ_VENDOR_BINARY_PIN` is armed (default off → live opencode unchanged);
- * when armed it returns the path on a digest match and THROWS
- * VendorBinaryIntegrityError on a deviation, refusing the spawn.
+ * SL-7 / M-4 (OCC-15, ADR-062): the FINAL resolved path is passed through
+ * `verifyVendorBinaryDigest` so the sha256 pin cannot be routed around by an
+ * env var. The guard is a strict no-op unless `NASSAJ_VENDOR_BINARY_PIN` is
+ * armed (default off → live opencode unchanged); when armed it returns the path
+ * on a digest match and THROWS VendorBinaryIntegrityError on a deviation.
  */
 export function resolveOpenCodeBinaryPath(): string {
-  const resolved = resolveOpenCodeBinaryPathRaw();
-  return verifyVendorBinaryDigest('opencode', resolved);
-}
-
-function resolveOpenCodeBinaryPathRaw(): string {
-  const override = process.env.OPENCODE_PATH?.trim();
-  if (override) {
-    return override;
-  }
-
-  const defaultInstallPath = path.join(os.homedir(), '.opencode', 'bin', 'opencode');
-  try {
-    if (fs.existsSync(defaultInstallPath)) {
-      return defaultInstallPath;
-    }
-  } catch {
-    // Unreadable home tree: fall through to the PATH lookup.
-  }
-
-  return resolveCliExecutablePath('opencode');
+  return verifyVendorBinaryDigest('opencode', resolveHarnessBinary('opencode'));
 }
 
 // ---------------------------
@@ -1726,6 +1751,20 @@ export function isCliInstalled(
 
   // No error: installed only when the version command exited cleanly.
   return result.status === 0;
+}
+
+/**
+ * Whether a harness CLI is installed and runnable: resolved by the harness
+ * registry (the SAME path every launch site spawns, T-1873) and then probed like
+ * isCliInstalled. An unresolved harness is not installed.
+ */
+export function isHarnessCliInstalled(
+  idOrAlias: string,
+  options: CliInstalledCheckOptions = {},
+  deps: CliInstalledCheckDependencies = {},
+): boolean {
+  const binary = tryResolveHarnessBinary(idOrAlias);
+  return binary !== null && isCliInstalled(binary, options, deps);
 }
 
 export type CodexUserProof = { version: 'codex_user_v1'; userMessageId: string; turnId: string; payloadSha256: string };

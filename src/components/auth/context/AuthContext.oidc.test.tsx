@@ -23,9 +23,14 @@ vi.mock('../../../utils/api', () => ({
     },
     user: { onboardingStatus: apiMock.onboardingStatus },
   },
+  // AuthContext calls this on every login/logout/token transition to track
+  // cookie-vs-bearer session kind; this test only exercises Bearer-token OIDC
+  // flows and asserts nothing about it, so a no-op stub is sufficient.
+  setCookieSessionKind: () => undefined,
 }));
 vi.mock('../../../preferences/preferencesSync', () => ({
   hydratePreferencesFromServer: async () => undefined,
+  setPreferenceIdentityAuthenticated: () => undefined,
 }));
 vi.mock('../../chat/utils/messageOutbox', () => ({
   clearOutbox: () => undefined,

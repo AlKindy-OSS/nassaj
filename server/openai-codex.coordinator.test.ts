@@ -30,6 +30,7 @@ import { after, describe, it, mock } from 'node:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { acceptFixtureRuntimeCompat, createCodexMachineFixture } from './shared/tests/codex-release-fixture.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap — before importing any project module (mirrors the ceiling test): the DB
@@ -73,6 +74,10 @@ function seedCards(): void {
 seedCards();
 
 process.env.HOME = sandboxHome;
+// T-1872: a machine Codex release fixture stands in for ~/.local/bin/codex.
+const codexMachine = createCodexMachineFixture(path.join(sandbox, 'codex-machine'));
+await acceptFixtureRuntimeCompat();
+process.env.CODEX_PATH = codexMachine.launcher;
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 // Known-clean escape-hatch state: bypassPermissions must cap to workspace-write.
 delete process.env.CODEX_ALLOW_FULL_ACCESS;

@@ -21,15 +21,20 @@ export type ProviderQuotaWindowRow = {
   windowSeconds?: number;
 };
 
+/**
+ * رصيد Codex/GLM الإضافي بوحدات المزوّد، بلا افتراض عملة. رصيد محدود يحمل
+ * رقماً دائماً (0 رصيدٌ حقيقي)، أمّا «غير محدود» فقد يصل بلا رقم إطلاقاً
+ * (الخادم لا يعرف سقفاً ليقيسه) — ولذا `balance` فيه قد يكون `null`.
+ */
+export type ProviderExtraUsageCredits =
+  | { balance: number; unlimited: false }
+  | { balance: number | null; unlimited: true };
+
 export type ProviderQuotaPayload = {
   provider: string;
   plan: string | null;
   windows: ProviderQuotaWindowRow[];
-  /** رصيد Codex الإضافي بوحدات المزوّد، بلا افتراض عملة. */
-  extraUsageCredits?: {
-    balance: number;
-    unlimited: boolean;
-  };
+  extraUsageCredits?: ProviderExtraUsageCredits;
   observedAt?: string;
   source?: string;
 };
@@ -229,4 +234,44 @@ export function shouldSuppressOnProviderWindowsLoading(
   quotaStatus: string,
 ): boolean {
   return surface === 'provider-windows' && (quotaStatus === 'idle' || quotaStatus === 'loading');
+}
+
+/**
+ * قرار عرض واحد لرصيد Codex/GLM الإضافي — الهيدر والشريط الجانبي وقسم
+ * الإعدادات كانوا يكرِّرون نفس الفحص («‏balance رقمي ≥0 و‏unlimited منطقي»)
+ * ثلاث مرّات؛ هذه الدالة الخالصة الوحيدة تحسم القرار فلا يتفرّع السطوح.
+ *
+ * القاعدة المعتمدة (قرار المالك 2026-09-27): اعرض الرقم حين يُعرَف، و«∞» حين
+ * يؤكّد المزوّد أنه غير محدود، و«0» فقط حين يُؤكَّد نفاد الرصيد صراحةً — وإلا
+ * اختفِ كلياً (لا شيء، لا أيقونة، لا «—»). لا صفرٌ مؤقّت أثناء التحميل: هذه
+ * الدالة لا تُستدعى إلا بعد وصول حمولة `success`.
+ */
+export type CreditDisplay =
+  | { kind: 'hidden' }
+  | { kind: 'zero' }
+  | { kind: 'unlimited' }
+  | { kind: 'amount'; value: number };
+
+export function resolveCreditDisplay(
+  credits: ProviderExtraUsageCredits | null | undefined,
+): CreditDisplay {
+  if (!credits || typeof credits.unlimited !== 'boolean') return { kind: 'hidden' };
+
+  if (credits.unlimited) {
+    // غير محدود قد يصل برقم إرشادي أو بلا رقم إطلاقاً — كلاهما "∞" بصريّاً.
+    if (
+      credits.balance === null ||
+      credits.balance === undefined ||
+      (typeof credits.balance === 'number' && Number.isFinite(credits.balance) && credits.balance >= 0)
+    ) {
+      return { kind: 'unlimited' };
+    }
+    return { kind: 'hidden' };
+  }
+
+  if (typeof credits.balance !== 'number' || !Number.isFinite(credits.balance) || credits.balance < 0) {
+    return { kind: 'hidden' };
+  }
+  if (credits.balance === 0) return { kind: 'zero' };
+  return { kind: 'amount', value: credits.balance };
 }

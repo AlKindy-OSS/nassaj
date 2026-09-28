@@ -4,9 +4,35 @@ import { api } from '../../../utils/api';
 import {
   nextQuotaTickMs,
   resolveQuotaWindows,
+  type ProviderExtraUsageCredits,
   type ProviderQuotaPayload,
   type QuotaWindowView,
 } from '../providerQuotaHelpers';
+
+/**
+ * يُثبت الحمولة الخام على `ProviderExtraUsageCredits` أو `undefined`.
+ * العقد: رصيد محدود يحمل رقماً صحيحاً ≥0 دائماً؛ رصيد غير محدود قد يصل
+ * برقم إرشادي أو بلا رقم (‏`balance: null`) حين لا سقف يقيسه المزوّد. أي شكل
+ * آخر (رقم سالب/غير منتهٍ، `unlimited` غير منطقي) لا يُخترَع له صفر — يُحذَف.
+ */
+function parseExtraUsageCredits(raw: unknown): ProviderExtraUsageCredits | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const { balance, unlimited } = raw as { balance?: unknown; unlimited?: unknown };
+  if (typeof unlimited !== 'boolean') return undefined;
+
+  if (unlimited) {
+    if (balance === null || balance === undefined) return { balance: null, unlimited: true };
+    if (typeof balance === 'number' && Number.isFinite(balance) && balance >= 0) {
+      return { balance, unlimited: true };
+    }
+    return undefined;
+  }
+
+  if (typeof balance === 'number' && Number.isFinite(balance) && balance >= 0) {
+    return { balance, unlimited: false };
+  }
+  return undefined;
+}
 
 export type ProviderQuotaState =
   | { status: 'idle' }
@@ -142,6 +168,7 @@ export function useProviderQuota(
         return;
       }
 
+      const extraUsageCredits = parseExtraUsageCredits(body.extraUsageCredits);
       setSnapshot({
         requestKey,
         state: {
@@ -150,19 +177,7 @@ export function useProviderQuota(
             provider: typeof body.provider === 'string' ? body.provider : provider,
             plan: typeof body.plan === 'string' ? body.plan : null,
             windows: body.windows,
-            ...(body.extraUsageCredits &&
-              typeof body.extraUsageCredits === 'object' &&
-              typeof body.extraUsageCredits.balance === 'number' &&
-              Number.isFinite(body.extraUsageCredits.balance) &&
-              body.extraUsageCredits.balance >= 0 &&
-              typeof body.extraUsageCredits.unlimited === 'boolean'
-              ? {
-                  extraUsageCredits: {
-                    balance: body.extraUsageCredits.balance,
-                    unlimited: body.extraUsageCredits.unlimited,
-                  },
-                }
-              : {}),
+            ...(extraUsageCredits ? { extraUsageCredits } : {}),
             observedAt: typeof body.observedAt === 'string' ? body.observedAt : undefined,
           },
         },

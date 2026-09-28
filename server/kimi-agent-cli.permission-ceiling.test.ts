@@ -34,6 +34,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // ---------------------------------------------------------------------------
 // Bootstrap — precede any project import so DB singleton resolves correctly.
 // ---------------------------------------------------------------------------
@@ -49,6 +51,8 @@ fs.writeFileSync(
 );
 
 process.env.HOME = sandboxHome;
+// T-1873: the registry resolves kimi at ~/.local/bin/kimi under this HOME.
+installFakeHarnessBinary(sandboxHome, 'kimi');
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');

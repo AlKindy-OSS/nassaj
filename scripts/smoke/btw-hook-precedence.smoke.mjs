@@ -50,7 +50,7 @@
 
 import { spawnClaudeSideQuery } from '../../server/claude-sdk.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { resolveClaudeCodeExecutablePath } from '../../server/shared/claude-cli-path.js';
+import { resolveHarnessBinary } from '../../server/shared/harness-binaries.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -167,7 +167,7 @@ async function main() {
         env: seedEnv,
         model: 'haiku',
         maxTurns: 1,
-        pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
+        pathToClaudeCodeExecutable: resolveHarnessBinary('claude'),
         systemPrompt: { type: 'preset', preset: 'claude_code' },
       },
     });

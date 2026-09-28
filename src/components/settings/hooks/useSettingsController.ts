@@ -57,7 +57,7 @@ type ActiveLoginProvider = AgentProvider | '';
 
 const KNOWN_MAIN_TABS: SettingsMainTab[] = [
   'profile', 'agents', 'references', 'vendors', 'connectors', 'appearance', 'git', 'api', 'notifications',
-  'users', 'command-board', 'about',
+  'users', 'command-board', 'system', 'about',
 ];
 
 const normalizeMainTab = (tab: string): SettingsMainTab => {

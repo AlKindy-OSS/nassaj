@@ -24,6 +24,8 @@ import path from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import test, { mock, before, after, beforeEach } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // Preserve transitive import exports without granting this fixture new process effects.
 let unexpectedProcessCalls = 0;
 const rejectUnexpectedProcess = () => {
@@ -68,6 +70,7 @@ let spawnAntigravity: typeof import('./agy-cli.js').spawnAntigravity;
 before(async () => {
   HOME_DIR = mkdtempSync(path.join(os.tmpdir(), 'agy-utf8-'));
   process.env.HOME = HOME_DIR;
+  installFakeHarnessBinary(HOME_DIR, 'antigravity');
   // The instructions prefix is only built when there is something to inject, and
   // the response-language rule is configuration now (NASSAJ_RESPONSE_LANGUAGE) —
   // an unset value injects no <instructions> block at all. Pin it BEFORE importing

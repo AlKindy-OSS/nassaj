@@ -88,8 +88,12 @@ afterEach(() => {
 
 describe('T-1730 visual gate', () => {
   it('STATE 1 — consent panel: shows three guarantee bullets and confirm button', async () => {
-    // Pre-flight returns clear — mocked twice because the modal auto-runs preflight
-    // on mount AND handleUpdateNow re-runs it before showing the consent panel.
+    // Pre-flight returns clear — mocked three times: (1) the active-job discovery
+    // fetch the mount effect fires unconditionally (added in c1415cfdf, "recover
+    // active owner jobs without browser state"; it has no `job` field here, so
+    // the modal ignores it), (2) the auto-run preflight on mount, and (3)
+    // handleUpdateNow's own preflight re-run before showing the consent panel.
+    authenticatedFetch.mockResolvedValueOnce(response(200, {}));
     authenticatedFetch.mockResolvedValueOnce(response(200, { ok: true, blocker: null }));
     authenticatedFetch.mockResolvedValueOnce(response(200, { ok: true, blocker: null }));
 
@@ -141,8 +145,9 @@ describe('T-1730 visual gate', () => {
 
     fireEvent.click(confirmBtn);
 
-    // calls[0]=auto-preflight, calls[1]=button-click preflight, calls[2]=POST job
-    const [, postBody] = authenticatedFetch.mock.calls[2] as [string, { body?: string }];
+    // calls[0]=active-job discovery, calls[1]=auto-preflight,
+    // calls[2]=button-click preflight, calls[3]=POST job
+    const [, postBody] = authenticatedFetch.mock.calls[3] as [string, { body?: string }];
     const parsed = JSON.parse(postBody?.body ?? '{}') as Record<string, unknown>;
     expect(parsed.activateWhenIdle).toBe(true);
     expect(typeof parsed.consent === 'object' && parsed.consent !== null).toBe(true);

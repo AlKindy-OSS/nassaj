@@ -1,11 +1,12 @@
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, promises as fsPromises } from 'node:fs';
+import { promises as fsPromises } from 'node:fs';
 
 import chokidar, { type FSWatcher } from 'chokidar';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { resolveClaudeHomes } from '@/modules/providers/list/claude/claude-home.js';
+import { filePresence, locateClaudeTranscript } from '@/modules/providers/list/claude/claude-projects-roots.js';
 import { resolveCodexHomes } from '@/modules/providers/list/codex/codex-home.js';
 import { resolveOpenCodeDataHomes } from '@/modules/providers/list/opencode/opencode-home.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
@@ -77,6 +78,8 @@ const WATCHER_IGNORED_PATTERNS = [
 
 const PROJECTS_UPDATE_DEBOUNCE_MS = 500;
 const PROJECTS_UPDATE_MAX_WAIT_MS = 2_000;
+/** T-1880: an unlink is re-checked no sooner than this, across a layout relocation. */
+export const UNLINK_RECHECK_DELAY_MS = 3_000;
 
 type WatchTarget = { provider: LLMProvider; rootPath: string };
 type ActiveWatcher = { watcher: FSWatcher; polling: boolean; generation: number };
@@ -355,31 +358,47 @@ async function onAdmittedUpdate(
 /**
  * Handles transcript deletions (e.g. Claude's ~30-day retention sweep) by
  * dropping the ghost DB rows indexed from the removed file.
+ *
+ * T-1880: an `unlink` event does not prove deletion. Relocating a slug out of
+ * the governance checkout (renameat2 exchange, a self-loop instant, then a
+ * compat link) emits `unlink` for every transcript in it while the files still
+ * exist. So in EVERY update mode the decision is deferred and re-checked
+ * against the literal path and the same relative path under every Claude
+ * projects root; rows go only when all candidates are provably absent.
  */
 function onUnlink(filePath: string, provider: LLMProvider): void {
-  if (process.env.NASSAJ_UPDATE_MODE !== 'local-main') return onAdmittedUnlink(filePath, provider);
+  if (!isWatcherTargetFile(provider, filePath)) return;
   const generation = watcherGeneration;
-  const attempt = async (): Promise<void> => {
-    if (watcherClosing || generation !== watcherGeneration) return;
-    try {
-      const result = await runLocalUpdateBackground('session-watcher-unlink', () => {
-        if (!existsSync(filePath)) onAdmittedUnlink(filePath, provider);
-      });
-      if (result === null) {
-        const timer = setTimeout(() => { void attempt(); }, 1_000);
-        timer.unref();
-      }
-    } catch (error) { console.error('Session unlink reconciliation failed', { code: error instanceof Error ? error.name : 'unknown' }); }
+  const timer = setTimeout(() => { void reconcileUnlink(filePath, provider, generation); }, UNLINK_RECHECK_DELAY_MS);
+  timer.unref();
+}
+
+/** True unless the transcript is provably gone from every place it may live. */
+function transcriptMayExist(filePath: string, provider: LLMProvider): boolean {
+  if (provider === 'claude') return locateClaudeTranscript(filePath).state !== 'absent';
+  return filePresence(filePath) !== 'absent';
+}
+
+/** Deletes rows for a vanished transcript, retrying while a local update holds the writer lease. */
+async function reconcileUnlink(filePath: string, provider: LLMProvider, generation: number): Promise<void> {
+  if (watcherClosing || generation !== watcherGeneration) return;
+  const reconcile = (): void => {
+    if (!transcriptMayExist(filePath, provider)) onAdmittedUnlink(filePath, provider);
   };
-  void attempt();
+  try {
+    if (process.env.NASSAJ_UPDATE_MODE !== 'local-main') return reconcile();
+    const result = await runLocalUpdateBackground('session-watcher-unlink', reconcile);
+    if (result === null) {
+      const timer = setTimeout(() => { void reconcileUnlink(filePath, provider, generation); }, 1_000);
+      timer.unref();
+    }
+  } catch (error) {
+    console.error('Session unlink reconciliation failed', { code: error instanceof Error ? error.name : 'unknown' });
+  }
 }
 
 /** Delete transcript index rows only while the enclosing local writer is admitted. */
 function onAdmittedUnlink(filePath: string, provider: LLMProvider): void {
-  if (!isWatcherTargetFile(provider, filePath)) {
-    return;
-  }
-
   try {
     const removedSessionIds = sessionsDb.deleteSessionsByJsonlPath(filePath);
     if (removedSessionIds.length === 0) {

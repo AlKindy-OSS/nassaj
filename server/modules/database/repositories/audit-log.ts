@@ -170,7 +170,19 @@ export type AuditAction =
   | 'scheduled_message_failed'
   | 'harness_update_started'
   | 'harness_update_succeeded'
-  | 'harness_update_failed';
+  | 'harness_update_failed'
+  // T-1871: installed harness version changed without a Nassaj update job
+  // (vendor auto-updater or manual shell update). Metadata { provider, from, to }.
+  | 'harness_version_drift'
+  // T-1871 stage 3 snapshot/rollback. Metadata: provider, jobId, versions,
+  // counts and bytes only — never a path or a member id.
+  | 'harness_update_noop'
+  | 'harness_update_rolled_back'
+  | 'harness_update_rollback_failed'
+  | 'harness_snapshot_pruned'
+  | 'harness_snapshot_aside_pruned'
+  | 'harness_recovery_acknowledged'
+  | 'harness_reconcile_resolved';
 
 /**
  * Hard cap on the stored User-Agent string (T-182). UA headers can be long and

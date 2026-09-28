@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { claudeContextSnapshot, readClaudeContextSnapshot } from './claude-token-usage.js';
+import {
+  claudeContextSnapshot,
+  claudeTranscriptContextSnapshot,
+  claudeTranscriptWindowTokens,
+  readClaudeContextSnapshot,
+} from './claude-token-usage.js';
 const identity = { sessionId: 'session-a', modelId: 'claude-model-a' };
 
 test('native control response preserves zero, actual window, native baseline and owner thresholds', () => {
@@ -65,4 +70,44 @@ test('picker alias identity survives getContextUsage round-trip (B-1295)', async
   assert.equal(snapshot.modelId, 'opus[1m]');
   assert.equal(snapshot.windowTokens, 1_048_576);
   assert.equal(snapshot.usageKind, 'native_reported_context');
+});
+
+test('B-1356: transcript window follows the model id and never guesses an unknown one', () => {
+  const cases: Array<[string | null, number | null]> = [
+    ['claude-opus-5-5', 1_000_000],
+    ['claude-opus-4-8', 1_000_000],
+    ['claude-opus-4-6', 1_000_000],
+    ['claude-opus-4-1-20250805', 200_000],
+    ['claude-opus-4-20250514', 200_000],
+    ['claude-fable-5', 1_000_000],
+    // The transcript records the base id for sonnet[1m] too: ambiguity takes the smaller window.
+    ['claude-sonnet-4-6', 200_000],
+    ['claude-sonnet-4-6[1m]', 1_000_000],
+    ['claude-haiku-4-5-20251001', 200_000],
+    ['claude-3-5-sonnet-20241022', 200_000],
+    ['<synthetic>', null],
+    ['gpt-5', null],
+    ['claude-unknown', null],
+    ['', null],
+    [null, null],
+  ];
+  for (const [modelId, expected] of cases) {
+    assert.equal(claudeTranscriptWindowTokens(modelId), expected, String(modelId));
+  }
+});
+
+test('B-1356: transcript snapshot keeps restoration semantics and carries the window', () => {
+  const snapshot = claudeTranscriptContextSnapshot('session-a', 'claude-opus-5-5', 81392);
+  assert.equal(snapshot.observedAt, null);
+  assert.equal(snapshot.usageKind, 'last_request_input');
+  assert.equal(snapshot.usedTokens, 81392);
+  assert.equal(snapshot.windowTokens, 1_000_000);
+  assert.equal(snapshot.proposedCompactTokens, null);
+  assert.equal(snapshot.newSessionTokens, null);
+
+  const unknown = claudeTranscriptContextSnapshot('session-a', '<synthetic>', 10);
+  assert.equal(unknown.windowTokens, null);
+  const noModel = claudeTranscriptContextSnapshot('session-a', null, 81392);
+  assert.equal(noModel.usageKind, 'unknown');
+  assert.equal(noModel.windowTokens, null);
 });

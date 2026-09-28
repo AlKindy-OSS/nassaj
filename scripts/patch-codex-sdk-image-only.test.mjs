@@ -16,7 +16,7 @@ async function fixture(run) {
   const packageRoot = path.join(root, 'node_modules/@openai/codex-sdk');
   const entry = path.join(packageRoot, 'dist/index.js');
   await fs.mkdir(path.dirname(entry), { recursive: true });
-  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@openai/codex-sdk', version: '0.153.2' }));
+  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@openai/codex-sdk', version: CODEX_IMAGE_ONLY_PATCH.version }));
   await fs.writeFile(entry, original, { mode: 0o640 });
   try { await run({ root, packageRoot, entry }); }
   finally { await fs.rm(root, { recursive: true, force: true }); }

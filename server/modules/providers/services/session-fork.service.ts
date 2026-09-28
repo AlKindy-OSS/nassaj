@@ -559,7 +559,7 @@ async function createCodexFork(params: ForkSessionAtMessageParams, attempt: Code
   const row = await authorizeCodexFork(params);
   // ADR-B913 extends the existing legacy App Server transport; no parallel transport service.
   // eslint-disable-next-line boundaries/no-unknown
-  const { callCodexAppServer, assertCodexMessageForkRuntimeReady } = await import('../../../services/codex-app-server.js');
+  const { callCodexAppServer, assertCodexMessageForkRuntimeReady, assertCodexMessageForkRuntimeUnchanged } = await import('../../../services/codex-app-server.js');
   let runtime: ReturnType<typeof assertCodexMessageForkRuntimeReady>;
   try { runtime = assertCodexMessageForkRuntimeReady(); }
   catch { throw new SessionForkError('runtime_not_ready', 'This runtime cannot fork the selected Codex response.'); }
@@ -581,9 +581,8 @@ async function createCodexFork(params: ForkSessionAtMessageParams, attempt: Code
       accessMode: 'write', authenticatedPrincipal: params.authenticatedPrincipal, experimentalApi: true,
       beforeRequest: async () => {
         await authorizeCodexFork(params); await source.verify();
-        if (JSON.stringify(assertCodexMessageForkRuntimeReady()) !== JSON.stringify(runtime)) {
-          throw new SessionForkError('runtime_not_ready', 'The Codex runtime changed before the fork.');
-        }
+        try { assertCodexMessageForkRuntimeUnchanged(runtime); }
+        catch { throw new SessionForkError('runtime_not_ready', 'The Codex runtime changed before the fork.'); }
       },
       onRequestSent: () => { submitted = true; },
     });

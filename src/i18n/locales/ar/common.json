@@ -138,6 +138,9 @@
     "modified": "آخر تعديل",
     "permissions": "الصلاحيات",
     "noFilesFound": "لا توجد ملفات",
+    "tooLarge": "يحتوي هذا المشروع على عدد كبير جداً من الملفات لعرضها (أكثر من {{limit}} عنصر)",
+    "tooLargeNoLimit": "يحتوي هذا المشروع على عدد كبير جداً من الملفات لعرضها",
+    "loadFailed": "فشل تحميل الملفات",
     "checkProjectPath": "تحقّق من إمكانية الوصول إلى مسار المشروع",
     "noMatchesFound": "لا توجد نتائج مطابقة",
     "tryDifferentSearch": "جرّب كلمة بحث مختلفة أو امسح البحث",
@@ -257,7 +260,12 @@
       "selectType": "يرجى تحديد ما إذا كان لديك مساحة عمل قائمة أم تريد إنشاء جديدة",
       "providePath": "يرجى إدخال مسار مساحة العمل",
       "failedToCreate": "فشل إنشاء مساحة العمل",
-      "failedToCreateFolder": "فشل إنشاء المجلد"
+      "failedToCreateFolder": "فشل إنشاء المجلد",
+      "invalidCloneRequest": "مسار مساحة العمل أو رابط GitHub غير صالح",
+      "invalidGithubUrl": "يرجى إدخال رابط مستودع GitHub صحيح",
+      "cloneTicketLimitReached": "طلبات النسخ المعلّقة كثيرة جداً. انتظر اكتمال أحدها ثم أعد المحاولة",
+      "authenticationRequired": "يرجى تسجيل الدخول مجدداً للمتابعة",
+      "cloneTicketCreateFailed": "فشل بدء طلب النسخ"
     }
   },
   "notifications": {
@@ -780,7 +788,7 @@
   "brand": {
     "name": "نسّاج",
     "logoAlt": "نسّاج",
-    "openSourceVersion": "نسّاج v{{version}} — مفتوح المصدر",
+    "openSourceShort": "مفتوح المصدر",
     "openSourceLicense": "نسّاج — مفتوح المصدر (AGPL-3.0)"
   },
   "commandPalette": {

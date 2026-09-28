@@ -38,6 +38,8 @@
  * تسجيل موك الـSDK يسبق استيراد الوحدة تحت الاختبار، ومن ثمّ الاستيراد الديناميكي.
  */
 
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

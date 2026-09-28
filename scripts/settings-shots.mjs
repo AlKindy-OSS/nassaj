@@ -34,7 +34,7 @@ const DB = process.env.DATABASE_PATH
 // موجود تُنتج لقطةَ التبويب الافتراضي وتُقرأ سليمة.
 const TABS = [
   'profile', 'agents', 'references', 'vendors', 'appearance', 'git',
-  'api', 'notifications', 'users', 'command-board', 'about',
+  'api', 'notifications', 'users', 'command-board', 'system', 'about',
 ];
 
 /** مقاسان: جوال حقيقي، وسطح مكتب. الأول هو ما يكسر أولاً. */

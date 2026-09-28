@@ -32,6 +32,13 @@ interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
   onWheel: () => void;
   onTouchMove: () => void;
+  /**
+   * T-1862: يغطّي كل تمرير حقيقي — سحب الشريط والوحين ولوحة المفاتيح — لا
+   * فقط wheel/touchmove. لا يمسّ pendingInitialScrollRef (خلافاً لـ
+   * handleUserScrollIntent) فلا يكسر منطق التمرير الابتدائي؛ فقط يحدّث
+   * isUserScrolledUp من الموضع الفعلي فوراً بدل بقائه عالقاً.
+   */
+  onScroll?: () => void | Promise<void>;
   historyError?: HistoryError | null;
   // T-1821: retryHistory حُذف من الواجهة — المعالج انتقل إلى ChatComposer (jump-down).
   isLoadingSessionMessages: boolean;
@@ -135,6 +142,7 @@ export default function ChatMessagesPane({
   scrollContainerRef,
   onWheel,
   onTouchMove,
+  onScroll,
   historyError,
   isLoadingSessionMessages,
   chatMessages,
@@ -303,6 +311,7 @@ export default function ChatMessagesPane({
       ref={scrollContainerRef}
       onWheel={onWheel}
       onTouchMove={onTouchMove}
+      onScroll={onScroll}
       className="relative flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-0 py-1 sm:space-y-3 sm:px-4"
     >
       {/* T-1821: حُذف زرّ التحديث من هنا — الزرّ الموحَّد (jump-down) في ChatComposer

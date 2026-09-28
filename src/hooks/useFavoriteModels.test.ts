@@ -22,12 +22,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockGet = vi.fn();
 const mockPut = vi.fn();
 
-vi.mock('../utils/api', () => ({
-  api: {
-    get: (...args: unknown[]) => mockGet(...args),
-    put: (...args: unknown[]) => mockPut(...args),
-  },
-}));
+vi.mock('../utils/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/api')>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      get: (...args: unknown[]) => mockGet(...args),
+      put: (...args: unknown[]) => mockPut(...args),
+    },
+  };
+});
 
 // ─── استيراد الهوك بعد تسجيل الـmock ────────────────────────────────────────
 

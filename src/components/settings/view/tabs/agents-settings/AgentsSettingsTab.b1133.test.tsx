@@ -46,11 +46,18 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('lucide-react', () => ({
-  Bot: () => null,
-  Check: () => null,
-  ChevronRight: () => null,
-}));
+// Any icon this file (or a component it renders) imports from lucide-react
+// resolves to a no-op stub, so a new icon added upstream never breaks this
+// test again (B-1133's original failure: a hand-kept `{ Bot, Check, ... }`
+// mock missing `Sun`). No real icons are needed — the DOM assertions below
+// only look at data-testid/data-agent attributes, never icon markup.
+vi.mock('lucide-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('lucide-react')>();
+  const stub = () => null;
+  const stubbed: Record<string, () => null> = {};
+  for (const key of Object.keys(actual)) stubbed[key] = stub;
+  return stubbed;
+});
 
 // Stub heavy child sections so the test focuses on the routing logic inside
 // AgentsSettingsTab, not the content of each panel.

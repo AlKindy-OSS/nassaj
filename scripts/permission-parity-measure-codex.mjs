@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { Codex } from '@openai/codex-sdk';
-import { readCodexExecutableIdentity, codexLaunchOptions } from '../server/shared/codex-executable.js';
+import { acquireCodexLaunchIdentity, codexFingerprintFields, codexLaunchOptions } from '../server/shared/codex-executable.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SUITE_ID = 'codex-production-sdk-full-delegation-v1';
@@ -32,29 +31,33 @@ const packageVersion = (packageName, packageRoot = ROOT) => {
   return JSON.parse(fs.readFileSync(packagePath, 'utf8')).version;
 };
 
-const commandVersion = (binary, execImpl = execFileSync) => String(execImpl(binary, ['--version'], {
-  cwd: ROOT, encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'],
-})).trim();
-
 const shellQuote = value => `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 
-export const readInstalledIdentity = (execImpl = execFileSync, runtime = { root: ROOT, readNative: readCodexExecutableIdentity, sdkVersion: packageVersion('@openai/codex-sdk') }) => {
-  const { executablePath, pathDirs, ...nativeIdentity } = runtime.readNative();
+const defaultRuntime = () => ({
+  root: ROOT, acquire: acquireCodexLaunchIdentity, fingerprintFields: codexFingerprintFields,
+  sdkVersion: packageVersion('@openai/codex-sdk'),
+});
+
+/** T-1872: measure the machine Codex release with the same formula the registry uses. */
+export const readInstalledIdentity = (runtime = defaultRuntime()) => {
+  const launchIdentity = runtime.acquire();
   return {
-    executablePath, pathDirs,
+    executablePath: launchIdentity.executablePath, pathDirs: launchIdentity.pathDirs, launchIdentity,
     serverSourceDigest: digest(fs.readFileSync(path.join(runtime.root, 'server/openai-codex.js'), 'utf8')),
     sdkVersion: runtime.sdkVersion,
-    cliVersion: commandVersion(executablePath, execImpl),
-    suiteId: SUITE_ID, ...nativeIdentity,
+    cliVersion: `codex-cli ${launchIdentity.version}`,
+    suiteId: SUITE_ID, ...runtime.fingerprintFields(launchIdentity),
   };
 };
-export const identityDigest = ({ executablePath: _path, pathDirs: _dirs, ...identity }) => digest(identity);
+export const identityDigest = ({
+  executablePath: _path, pathDirs: _dirs, launchIdentity: _launch, ...identity
+}) => digest(identity);
 
 /** Load measurement identity and SDK from the exact reviewed compiled runtime root. */
 export async function resolveMeasurementRuntime(runtimeRoot) {
   const root = fs.realpathSync(runtimeRoot);
   const helper = await import(pathToFileURL(path.join(root, 'server/shared/codex-executable.js')).href);
-  const sdkEntry = helper.resolveCodexSdkEntry();
+  const sdkEntry = helper.resolveCodexSdkSourceEntry();
   let directory = path.dirname(sdkEntry);
   while (!fs.existsSync(path.join(directory, 'package.json'))) {
     const parent = path.dirname(directory);
@@ -64,7 +67,10 @@ export async function resolveMeasurementRuntime(runtimeRoot) {
   const sdkPackage = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
   if (sdkPackage.name !== '@openai/codex-sdk') throw new Error('PERMISSION_CODEX_SDK_PACKAGE_INVALID');
   const { Codex: RuntimeCodex } = await import(pathToFileURL(sdkEntry).href);
-  return { root, readNative: helper.readCodexExecutableIdentity, sdkVersion: sdkPackage.version, RuntimeCodex, launchOptions: helper.codexLaunchOptions };
+  return {
+    root, acquire: helper.acquireCodexLaunchIdentity, fingerprintFields: helper.codexFingerprintFields,
+    sdkVersion: sdkPackage.version, RuntimeCodex, launchOptions: helper.codexLaunchOptions,
+  };
 }
 
 const normalizeCliFingerprint = value => {
@@ -118,9 +124,9 @@ export const buildMeasuredCodexCandidate = ({
   return Object.freeze({ ...candidate, evidenceDigest: digest(candidate) });
 };
 
-export const defaultRunTurn = async ({ prompt, cwd, codexHome, executablePath, pathDirs, RuntimeCodex = Codex, launchOptions = codexLaunchOptions }) => {
+export const defaultRunTurn = async ({ prompt, cwd, codexHome, launchIdentity, RuntimeCodex = Codex, launchOptions = codexLaunchOptions }) => {
   const codex = new RuntimeCodex({
-    ...launchOptions({ ...process.env, CODEX_HOME: codexHome }, { executablePath, pathDirs }),
+    ...launchOptions({ ...process.env, CODEX_HOME: codexHome }, launchIdentity),
     config: { project_doc_max_bytes: 0, 'features.multi_agent': false, mcp_servers: {} },
   });
   const thread = codex.startThread({
@@ -141,7 +147,6 @@ export const measureCodexCandidate = async ({
   temporaryParent = process.env.NASSAJ_PERMISSION_PROBE_ROOT || '/var/tmp',
   now = () => new Date(),
   runTurn = defaultRunTurn,
-  execImpl = execFileSync,
   readIdentity,
   runtimeRoot,
   expectedFingerprint,
@@ -152,7 +157,7 @@ export const measureCodexCandidate = async ({
     throw new Error('PERMISSION_CODEX_REVIEWED_FINGERPRINT_REQUIRED');
   }
   const runtime = await resolveMeasurementRuntime(runtimeRoot || ROOT);
-  const measureIdentity = readIdentity || (() => readInstalledIdentity(execImpl, runtime));
+  const measureIdentity = readIdentity || (() => readInstalledIdentity(runtime));
   const identityBefore = measureIdentity();
   const fingerprintBefore = identityDigest(identityBefore);
   if (expectedFingerprint && expectedFingerprint !== fingerprintBefore) throw new Error('PERMISSION_CODEX_REVIEWED_FINGERPRINT_MISMATCH');
@@ -176,7 +181,7 @@ export const measureCodexCandidate = async ({
       + `printf %s ${shellQuote(nonce)} > ${shellQuote(writeMarker)}\n`
       + `printf %s ${shellQuote(nonce)} > ${shellQuote(processMarker)}\n`
       + `curl -fsS --max-time 15 https://example.com/ >/dev/null && printf %s ${shellQuote(nonce)} > ${shellQuote(networkMarker)}`;
-    const result = await runTurn({ prompt, cwd: workspace, codexHome, executablePath: identityBefore.executablePath, pathDirs: identityBefore.pathDirs, RuntimeCodex: runtime.RuntimeCodex, launchOptions: runtime.launchOptions });
+    const result = await runTurn({ prompt, cwd: workspace, codexHome, launchIdentity: identityBefore.launchIdentity, RuntimeCodex: runtime.RuntimeCodex, launchOptions: runtime.launchOptions });
     const observation = Object.freeze({
       readHost: fs.existsSync(readMarker) && fs.readFileSync(readMarker, 'utf8') === sentinel,
       writeHost: fs.existsSync(writeMarker) && fs.readFileSync(writeMarker, 'utf8') === nonce,

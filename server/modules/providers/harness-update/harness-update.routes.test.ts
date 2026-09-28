@@ -13,6 +13,8 @@
  *      (`not-permitted`, `in-progress`) rather than to "update failed".
  */
 
+// B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,6 +31,7 @@ import { AppError } from '@/shared/utils.js';
 import { acquireHarnessLease, _resetHarnessLeases } from './lease.js';
 import { isSchedulerRunning, stopHarnessAutoUpdateScheduler } from './scheduler.js';
 import router from './harness-update.routes.js';
+import { _setVersionStatusTestDeps } from './version-status.service.js';
 
 type TestUser = { id: number; role: string };
 
@@ -49,6 +52,12 @@ async function call(method: string, urlPath: string, user: TestUser | null, body
 }
 
 before(async () => {
+  // Never spawn a real harness `--version` nor reach npm/GitHub from a route test.
+  _setVersionStatusTestDeps({
+    runVersion: async () => null,
+    fetchNpmLatest: async () => null,
+    fetchGithubLatest: async () => null,
+  });
   closeConnection();
   dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-routes-db-'));
   process.env.DATABASE_PATH = path.join(dbDir, 'db.sqlite');
@@ -100,10 +109,18 @@ test('authenticated owner/admin/member may read status without host details', as
   ]) {
     const res = await call('GET', '/api/providers/kimi/version-status', user);
     assert.equal(res.status, 200);
-    assert.deepEqual(Object.keys(res.json).sort(), [
+    const keys = Object.keys(res.json).sort();
+    const required = [
       'activeJobId', 'checkedAt', 'installedVersion', 'latestVersion', 'provider',
       'reason', 'state', 'upToDate', 'updatable', 'updating',
-    ]);
+    ];
+    // T-1871 optional fields carry versions/verdicts only (no paths); their
+    // presence depends on whether this host has a readable kimi binary.
+    const optional = ['compatibility', 'drift', 'targetCompatibility', 'manualOnly', 'notices', 'restoreCompatible'];
+    for (const key of required) assert.ok(keys.includes(key), `missing ${key}`);
+    for (const key of keys) {
+      assert.ok(required.includes(key) || optional.includes(key), `unexpected key ${key}`);
+    }
   }
 });
 
@@ -124,10 +141,15 @@ test('GET reflects a durable recovery fence after in-memory state is absent', as
 
 test('a harness already updating answers 409 with { activeJobId }', async () => {
   _resetHarnessLeases();
-  acquireHarnessLease('kimi', 'job-held-by-another-run');
-  const res = await call('POST', '/api/providers/kimi/update', { id: 1, role: 'owner' });
+  // qwen: a legacy (non-snapshot) harness, so the lease check is the first refusal.
+  acquireHarnessLease('qwen', 'job-held-by-another-run');
+  const res = await call('POST', '/api/providers/qwen/update', { id: 1, role: 'owner' });
   assert.equal(res.status, 409);
-  assert.deepEqual(res.json, { activeJobId: 'job-held-by-another-run' });
+  assert.deepEqual(res.json, {
+    code: 'HARNESS_UPDATE_IN_PROGRESS',
+    message: 'Harness action refused (HARNESS_UPDATE_IN_PROGRESS).',
+    activeJobId: 'job-held-by-another-run',
+  });
   _resetHarnessLeases();
 });
 
@@ -167,6 +189,49 @@ test('corrupt persisted settings disable scheduling and string intervals are rej
     enabled: true, intervalMinutes: '60',
   });
   assert.equal(write.status, 400);
+});
+
+test('T-1871 owner routes: non-owners refused; refusals always carry a code', async () => {
+  const member = { id: 3, role: 'user' };
+  for (const [method, url] of [
+    ['POST', '/api/providers/codex/rollback'], ['POST', '/api/providers/opencode/restore-compatible'],
+    ['POST', '/api/providers/codex/recovery'], ['GET', '/api/providers/codex/snapshots'],
+  ] as const) {
+    assert.equal((await call(method, url, member, method === 'POST' ? {} : undefined)).status, 403, url);
+  }
+  const owner = { id: 1, role: 'owner' };
+  const notCompat = await call('POST', '/api/providers/claude/restore-compatible', owner, {});
+  assert.equal(notCompat.status, 404);
+  assert.equal(notCompat.json.code, 'NOT_RESTORE_COMPATIBLE');
+  const badScope = await call('POST', '/api/providers/codex/rollback', owner, { jobId: 'x', scope: 'everything' });
+  assert.equal(badScope.status, 400);
+  assert.equal(badScope.json.code, 'INVALID_ROLLBACK_SCOPE');
+  const unknownRun = await call('POST', '/api/providers/codex/rollback', owner, { jobId: '../../etc', scope: 'binary' });
+  assert.equal(unknownRun.status, 404);
+  assert.equal(unknownRun.json.code, 'SNAPSHOT_NOT_FOUND');
+  const recovery = await call('POST', '/api/providers/codex/recovery', owner, { action: 'retry' });
+  assert.equal(recovery.status, 409);
+  assert.deepEqual(recovery.json, { code: 'NO_RECOVERY_PENDING', message: 'Harness action refused (NO_RECOVERY_PENDING).' });
+  const list = await call('GET', '/api/providers/codex/snapshots', owner);
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.json, []);
+});
+
+test('the snapshot listing has its own limiter; exhausting it never blocks the POSTs', async () => {
+  const owner = { id: 1, role: 'owner' };
+  let limited: Record<string, unknown> | null = null;
+  for (let i = 0; i < 40 && !limited; i += 1) {
+    const res = await call('GET', '/api/providers/codex/snapshots', owner);
+    if (res.status === 429) limited = res.json;
+  }
+  assert.equal(limited?.code, 'HARNESS_SNAPSHOTS_RATE_LIMITED');
+  const post = await call('POST', '/api/providers/codex/recovery', owner, { action: 'retry' });
+  assert.equal(post.status, 409, 'the mutation budget is separate');
+  let postLimited = false;
+  for (let i = 0; i < 15 && !postLimited; i += 1) {
+    postLimited = (await call('POST', '/api/providers/codex/recovery', owner, { action: 'retry' })).status === 429;
+  }
+  assert.ok(postLimited, 'owner mutations refuse an unbounded rate');
 });
 
 test('the aggregate version-status route is rate limited (429 + Retry-After)', async () => {

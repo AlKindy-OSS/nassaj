@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
@@ -14,9 +14,7 @@ import UsersSettingsTab from '../view/tabs/users-settings/UsersSettingsTab';
 import ReferencesSettingsTab from '../view/tabs/references-settings/ReferencesSettingsTab';
 import VendorsSettingsTab from '../view/tabs/vendors-settings/VendorsSettingsTab';
 import CommandBoardSettingsTab from '../view/tabs/CommandBoardSettingsTab';
-import TmpfsCapSection from '../view/tabs/TmpfsCapSection';
-import StoragePolicySection from '../view/tabs/StoragePolicySection';
-import PermissionFencesSection from '../view/tabs/PermissionFencesSection';
+import SystemSettingsTab from '../view/tabs/SystemSettingsTab';
 import { useSettingsController } from '../hooks/useSettingsController';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useWebPush } from '../../../hooks/useWebPush';
@@ -32,6 +30,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
   const { t } = useTranslation('settings');
   const { user } = useAuth();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const contentScrollRef = useRef<HTMLElement>(null);
   /** العنصر الذي كان له تركيز قبل فتح الإعدادات — يُستعاد عند الإغلاق. */
   const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -106,6 +105,22 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
 
   // مزامنة المرجع مع الحالة حتى تقرأ مستمعات الأحداث القيمة الحالية دائماً.
   useEffect(() => { showLoginModalRef.current = showLoginModal; }, [showLoginModal]);
+
+  // T-1867: تبويبٌ طويل يترك سكرول المحتوى في نصفه؛ الانتقال إلى تبويبٍ آخر
+  // كان يفتحه من حيث توقّف السكرول السابق لا من أعلى محتواه هو.
+  //
+  // qa round (T-1867 MEDIUM 1): كان أثرٌ سلبيّ (`useEffect` عادي) يُنفَّذ
+  // **بعد** أثر `VendorsSettingsTab` الذي يمرِّر حقل مفتاح شركةٍ محدَّدة إلى
+  // مجال الرؤية لرابطٍ عميق (`{tab:'vendors', companyId}`) — فيعيد هذا الأثر
+  // السكرول إلى الأعلى بعده، ويخرج الحقل من الشاشة من جديد. `useLayoutEffect`
+  // يُنفَّذ قبل الآثار السلبية للأبناء فيحسم الترتيب، وتخطّي الإعادة كليّاً
+  // حين تكون وجهة تركيز شركةٍ معلَّقة يمنع حتى قفزة سكرول عابرة بين الأثرين.
+  const vendorFocusCompanyId = focusCompanyId ?? (deepLink?.tab === 'vendors' ? deepLink.companyId : undefined);
+  const pendingVendorFocus = activeTab === 'vendors' && Boolean(vendorFocusCompanyId);
+  useLayoutEffect(() => {
+    if (pendingVendorFocus) return;
+    contentScrollRef.current?.scrollTo?.({ top: 0 });
+  }, [activeTab, pendingVendorFocus]);
 
   // B-559: Escape closes the modal (WCAG 3.2.5 / ARIA dialog pattern).
   // الإصلاح (qa-critic): bubble phase لا capture، لا stopPropagation، حتى لا
@@ -264,7 +279,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
           <SettingsSidebar activeTab={activeTab} onChange={handleMainTabChange} />
 
           {/* Content */}
-          <main className="flex-1 overflow-y-auto">
+          <main ref={contentScrollRef} className="flex-1 overflow-y-auto">
             {/* `space-y-8`: الفصل بين الأقسام مسافةٌ لا خطّ ولا صندوق
                 (`docs/design/SETTINGS-SURFACE-LANGUAGE.md` §1). */}
             <div key={activeTab} className="settings-content-enter space-y-8 p-4 pb-safe-area-inset-bottom md:p-6">
@@ -308,6 +323,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   initialLocalModels={localModelsActiveInAgents}
                   onDestinationChange={handleAgentDestinationChange}
                   onLocalModelsSelect={handleLocalModelsSelect}
+                  onOpenSystemTab={user?.role === 'owner' ? () => handleMainTabChange('system') : undefined}
                 />
               )}
 
@@ -331,7 +347,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   (T-1206) — لا سطحَ كتابةٍ ثانٍ: انظر رأس `VendorsSettingsTab`. */}
               {activeTab === 'vendors' && (
                 <VendorsSettingsTab
-                  focusCompanyId={focusCompanyId ?? (deepLink?.tab === 'vendors' ? deepLink.companyId : undefined)}
+                  focusCompanyId={vendorFocusCompanyId}
                   onQwenConnect={() => openLoginForProvider('qwen')}
                 />
               )}
@@ -344,19 +360,15 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
               {activeTab === 'users' && canManageUsers && <UsersSettingsTab />}
 
               {activeTab === 'command-board' && user?.role === 'owner' && (
-                <>
-                  <CommandBoardSettingsTab />
-                  {/* سقف tmpfs يعيش هنا لأن تطبيقه أمرٌ ينفّذه المالك بنفسه —
-                      نفس طبيعة هذا التبويب، ونفس قيده على الدور. */}
-                  <TmpfsCapSection />
-                  {/* عمر المحادثة وحدود صورها — بجوار سقف tmpfs لأنهما معاً
-                      «كم يشغل هذا التطبيق من القرص»، وبنفس قيد الدور. بخلاف
-                      جاره، هذا القسم يطبّق ما يقوله فعلاً. */}
-                  <StoragePolicySection />
-                  {/* حجوب الصلاحيات (T-1770): رفعها قرار مالك بإقرار صريح، فيعيش
-                      هنا بنفس قيد الدور لا في تبويب يراه المدير. */}
-                  <PermissionFencesSection />
-                </>
+                <CommandBoardSettingsTab />
+              )}
+
+              {/* T-1866: تمّت لوحة الأوامر أعلاه لموضوعها الحقيقي وحده
+                  (الأدوار والتنفيذ الخام والأوامر) — سقف tmpfs وسياسة التخزين
+                  وحجوب الصلاحيات والتحديث التلقائي انتقلت هنا («النظام»)،
+                  بنفس قيد الدور. */}
+              {activeTab === 'system' && user?.role === 'owner' && (
+                <SystemSettingsTab />
               )}
 
               {activeTab === 'about' && <AboutTab />}

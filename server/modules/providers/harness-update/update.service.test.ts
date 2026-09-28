@@ -1,9 +1,15 @@
+// B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
+// eslint-disable-next-line import-x/order -- must evaluate before every other import
+import { SANDBOX_HOME } from '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
+import { installFakeHarnessBinary } from '@/shared/__tests__/harness-binary-fixtures.js';
 import { AppError } from '@/shared/utils.js';
 
 import { HARNESS_UPDATE_DESCRIPTORS } from './descriptors.js';
+import { isHarnessPinRefused } from './version-status.service.js';
 import {
   _resetHarnessLaunches,
   beginHarnessLaunch,
@@ -34,13 +40,26 @@ function reset(): void {
 interface Recorder {
   commands: Array<{ cmd: string; args: string[]; env: NodeJS.ProcessEnv }>;
   audits: Array<{ action: string; metadata: Record<string, unknown>; userId: number | null }>;
+  versionChanges: Array<{ id: string; version: string }>;
 }
 
 function recorder(): Recorder {
-  return { commands: [], audits: [] };
+  return { commands: [], audits: [], versionChanges: [] };
 }
 
+/**
+ * Resolver env pinned inside the test HOME (the isolated runner sets HOME to
+ * the case dir): qwen would otherwise resolve through PATH to a real install.
+ */
+const QWEN_FIXTURE_PATH = path.join(SANDBOX_HOME, '.local', 'bin', 'qwen');
+// T-1873: the registry only resolves an installed CLI; lay the npm / git
+// harness launchers out under the test HOME exactly as measured.
+// kimi is a native snapshot harness (ADR-189); the legacy npm/git flows here
+// are exercised through qwen and hermes.
+for (const id of ['qwen', 'hermes'] as const) installFakeHarnessBinary(SANDBOX_HOME, id);
+
 const depsFor = (rec: Recorder, over: Partial<UpdateServiceDeps> = {}): UpdateServiceDeps => ({
+  cleanEnv: () => ({ PATH: '/usr/bin:/bin', QWEN_PATH: QWEN_FIXTURE_PATH }),
   hasLiveSession: () => false,
   hasUnregisteredLaunch: async () => false,
   pinEnabled: () => false,
@@ -50,6 +69,7 @@ const depsFor = (rec: Recorder, over: Partial<UpdateServiceDeps> = {}): UpdateSe
   },
   runVersion: async () => '1.0.0',
   audit: (action, metadata, userId) => rec.audits.push({ action, metadata, userId }),
+  recordVersionChange: (id, version) => rec.versionChanges.push({ id, version }),
   ...over,
 });
 
@@ -86,7 +106,7 @@ test('success: runs the update, verifies a changed version, audits start+success
   reset();
   const rec = recorder();
   let call = 0;
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     userId: 7,
     deps: depsFor(rec, { runVersion: async () => (call++ === 0 ? '0.42.0' : '0.43.0') }),
   });
@@ -98,21 +118,50 @@ test('success: runs the update, verifies a changed version, audits start+success
   assert.deepEqual(rec.audits.map((a) => a.action), ['harness_update_started', 'harness_update_succeeded']);
   const success = rec.audits[1];
   assert.deepEqual(success.metadata, {
-    provider: 'kimi', fromVersion: '0.42.0', toVersion: '0.43.0', exitCode: 0, trigger: 'manual',
+    provider: 'qwen', fromVersion: '0.42.0', toVersion: '0.43.0', exitCode: 0, trigger: 'manual',
   });
   assert.equal(success.userId, 7);
+  // T-1871: the verified change is recorded so the status read never calls it drift.
+  assert.deepEqual(rec.versionChanges, [{ id: 'qwen', version: '0.43.0' }]);
+});
+
+test('T-1871: a rejected (non-advancing) update records no version change', async () => {
+  reset();
+  const rec = recorder();
+  const job = await startHarnessUpdate('qwen', {
+    userId: 7,
+    deps: depsFor(rec, { runVersion: async () => '0.42.0' }),
+  });
+  await _awaitHarnessJob(job.jobId);
+  assert.notEqual(getHarnessUpdateJob(job.jobId)!.status, 'succeeded');
+  assert.deepEqual(rec.versionChanges, []);
+});
+
+test('T-1871: a failing drift ledger does not fail a verified update', async () => {
+  reset();
+  const rec = recorder();
+  let call = 0;
+  const job = await startHarnessUpdate('qwen', {
+    userId: 7,
+    deps: depsFor(rec, {
+      runVersion: async () => (call++ === 0 ? '0.42.0' : '0.43.0'),
+      recordVersionChange: () => { throw new Error('ledger down'); },
+    }),
+  });
+  await _awaitHarnessJob(job.jobId);
+  assert.equal(getHarnessUpdateJob(job.jobId)!.status, 'succeeded');
 });
 
 test('a downgrade is rejected and the exact previous version is restored', async () => {
   reset();
   const rec = recorder();
   const versions = ['1.2.0', '1.1.9', '1.2.0'];
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, { runVersion: async () => versions.shift() ?? '1.2.0' }),
   });
   await _awaitHarnessJob(job.jobId);
   assert.equal(getHarnessUpdateJob(job.jobId)!.error?.code, 'update_unverified');
-  assert.ok(rec.commands.some((entry) => entry.args.includes('@moonshot-ai/kimi-code@1.2.0')));
+  assert.ok(rec.commands.some((entry) => entry.args.includes('@qwen-code/qwen-code@1.2.0')));
 });
 
 test('spawn env is cleanSpawnEnv output — no host secrets, no CLAUDE_CONFIG_DIR', async () => {
@@ -122,7 +171,7 @@ test('spawn env is cleanSpawnEnv output — no host secrets, no CLAUDE_CONFIG_DI
   process.env.NASSAJ_PROVIDER_SECRETS_KEY = 'master';
   const rec = recorder();
   // Do NOT inject cleanEnv — exercise the real cleanSpawnEnv default.
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: {
       hasLiveSession: () => false,
       pinEnabled: () => false,
@@ -148,7 +197,7 @@ test('spawn env is cleanSpawnEnv output — no host secrets, no CLAUDE_CONFIG_DI
 test('live session across users → skipped_live_session, update never runs', async () => {
   reset();
   const rec = recorder();
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, { hasLiveSession: () => true }),
   });
   assert.equal(job.status, 'skipped_live_session');
@@ -159,7 +208,7 @@ test('live session across users → skipped_live_session, update never runs', as
   assert.equal(rec.commands.length, 0);
   // The lease taken for the check MUST be given back, or the harness would stay
   // spawn-blocked forever after a single skipped run.
-  assert.equal(isHarnessLeased('kimi'), false);
+  assert.equal(isHarnessLeased('qwen'), false);
 });
 
 test('TOCTOU: the lease is held BEFORE the live-session check runs', async () => {
@@ -169,10 +218,10 @@ test('TOCTOU: the lease is held BEFORE the live-session check runs', async () =>
   // check still ran first, this would be false and a turn starting in between
   // would race the binary swap (the qa-critic finding).
   let leasedWhenChecked: boolean | null = null;
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, {
       hasLiveSession: () => {
-        leasedWhenChecked = isHarnessLeased('kimi');
+        leasedWhenChecked = isHarnessLeased('qwen');
         return false;
       },
     }),
@@ -185,8 +234,8 @@ test('an UNREGISTERED launch blocks the update admission atomically', async () =
   reset();
   const rec = recorder();
   // Nothing in the presence run registry, but a real claude child is alive.
-  const release = beginHarnessLaunch('kimi');
-  const job = await startHarnessUpdate('kimi', {
+  const release = beginHarnessLaunch('qwen');
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, { hasLiveSession: () => false, hasUnregisteredLaunch: undefined }),
   });
   assert.equal(job.status, 'skipped_live_session');
@@ -197,7 +246,7 @@ test('an UNREGISTERED launch blocks the update admission atomically', async () =
 
   // Once the child is gone the same call proceeds (the registry is not sticky).
   let versionCall = 0;
-  const after = await startHarnessUpdate('kimi', {
+  const after = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, {
       hasUnregisteredLaunch: async () => false,
       runVersion: async () => (versionCall++ === 0 ? '1.0.0' : '1.1.0'),
@@ -210,7 +259,7 @@ test('an UNREGISTERED launch blocks the update admission atomically', async () =
 test('a gate that cannot answer fails CLOSED (never updates under a live turn)', async () => {
   reset();
   const rec = recorder();
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, {
       hasUnregisteredLaunch: async () => { throw new Error('systemctl unavailable'); },
     }),
@@ -226,11 +275,11 @@ test('single-flight: a second update while one runs throws 409 with activeJobId'
   const pending = new Promise<RunResult>((res) => {
     release = () => res(ok());
   });
-  const first = await startHarnessUpdate('kimi', {
+  const first = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, { runCommand: async () => pending }),
   });
   await assert.rejects(
-    () => startHarnessUpdate('kimi', { deps: depsFor(rec) }),
+    () => startHarnessUpdate('qwen', { deps: depsFor(rec) }),
     (err: unknown) => {
       assert.ok(err instanceof AppError);
       assert.equal(err.statusCode, 409);
@@ -242,24 +291,24 @@ test('single-flight: a second update while one runs throws 409 with activeJobId'
   await _awaitHarnessJob(first.jobId);
 });
 
-test('armed pin over a pinned harness → refused_pinned, update never runs (item 5)', async () => {
-  reset();
-  const rec = recorder();
-  const job = await startHarnessUpdate('kimi', {
-    deps: depsFor(rec, { pinEnabled: () => true }),
-  });
-  assert.equal(job.status, 'refused_pinned');
-  // Addendum 3 names this code `pinned_refused` on the wire; the client keys its
-  // message off it, so the old ad-hoc 'PINNED' would render "update failed".
-  assert.equal(getHarnessUpdateJob(job.jobId)!.error?.code, 'pinned_refused');
-  assert.ok(getHarnessUpdateJob(job.jobId)!.error?.messageAr);
-  assert.equal(rec.commands.length, 0);
+test('armed pin: no live harness is refused outright — pinned ones are snapshot-backed', () => {
+  // ADR-189: kimi (pinned) is now a native snapshot harness like opencode, so an
+  // armed pin asks for a server-built pinBreak ack instead of refused_pinned.
+  for (const d of Object.values(HARNESS_UPDATE_DESCRIPTORS)) {
+    assert.equal(isHarnessPinRefused(d, () => true), false, d.id);
+  }
+});
+
+test('armed pin over a pinned NON-snapshot harness is refused (item 5 rule)', () => {
+  const legacyPinned = { ...HARNESS_UPDATE_DESCRIPTORS.qwen, pinKey: 'kimi' };
+  assert.equal(isHarnessPinRefused(legacyPinned, () => true), true);
+  assert.equal(isHarnessPinRefused(legacyPinned, () => false), false);
 });
 
 test('npm-prefix failure → recovery reinstalls the captured previous version', async () => {
   reset();
   const rec = recorder();
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, {
       runVersion: async () => '0.42.0',
       runCommand: async (cmd, args, opts) => {
@@ -273,10 +322,10 @@ test('npm-prefix failure → recovery reinstalls the captured previous version',
   const final = getHarnessUpdateJob(job.jobId)!;
   assert.equal(final.status, 'failed');
   assert.equal(final.error?.code, 'update_failed');
-  // recovery: npm install --prefix <..> @moonshot-ai/kimi-code@0.42.0
+  // recovery: npm install --prefix <..> @qwen-code/qwen-code@0.42.0
   const recovery = rec.commands[1];
   assert.equal(recovery.cmd, 'npm');
-  assert.ok(recovery.args.includes('@moonshot-ai/kimi-code@0.42.0'));
+  assert.ok(recovery.args.includes('@qwen-code/qwen-code@0.42.0'));
   assert.equal(rec.audits.at(-1)!.action, 'harness_update_failed');
 });
 
@@ -362,18 +411,21 @@ test('a restart between durable intent and outcome keeps launches blocked', asyn
   assert.equal(isHarnessRecoveryBlocked('qwen'), false);
 });
 
-test('native self-updaters without exact rollback are ineligible', async () => {
+test('T-1871: the scheduler can never start a manual-only (snapshot-backed) harness', async () => {
   reset();
   const rec = recorder();
-  await assert.rejects(() => startHarnessUpdate('cursor', { deps: depsFor(rec) }),
-    (error: unknown) => error instanceof AppError && error.code === 'HARNESS_NOT_UPDATABLE');
+  for (const id of ['claude', 'codex', 'antigravity', 'cursor', 'opencode']) {
+    await assert.rejects(() => startHarnessUpdate(id, { trigger: 'scheduler', deps: depsFor(rec) }),
+      (error: unknown) => error instanceof AppError && error.code === 'HARNESS_MANUAL_ONLY');
+  }
   assert.equal(rec.commands.length, 0);
+  assert.equal(isHarnessLeased('cursor'), false);
 });
 
 test('an installation without an exact prior version is refused before update', async () => {
   reset();
   const rec = recorder();
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, { runVersion: async () => null }),
   });
   await _awaitHarnessJob(job.jobId);
@@ -410,14 +462,14 @@ test('a lease blocks new spawns of the same harness', async () => {
   const pending = new Promise<RunResult>((res) => {
     release = () => res(ok());
   });
-  const job = await startHarnessUpdate('kimi', {
+  const job = await startHarnessUpdate('qwen', {
     deps: depsFor(rec, { runCommand: async () => pending }),
   });
-  assert.equal(isHarnessSpawnBlocked('kimi'), true);
-  assert.equal(isHarnessSpawnBlocked('qwen'), false);
+  assert.equal(isHarnessSpawnBlocked('qwen'), true);
+  assert.equal(isHarnessSpawnBlocked('hermes'), false);
   release();
   await _awaitHarnessJob(job.jobId);
-  assert.equal(isHarnessSpawnBlocked('kimi'), false);
+  assert.equal(isHarnessSpawnBlocked('qwen'), false);
 });
 
 test('unknown harness → 404, non-updatable harness → 400', async () => {
@@ -501,7 +553,7 @@ test('finished jobs are pruned: the store never grows past its cap (item 10)', a
   const rec = recorder();
   const ids: string[] = [];
   for (let i = 0; i < 55; i += 1) {
-    const job = await startHarnessUpdate('kimi', { deps: depsFor(rec) });
+    const job = await startHarnessUpdate('qwen', { deps: depsFor(rec) });
     await _awaitHarnessJob(job.jobId);
     ids.push(job.jobId);
   }

@@ -27,6 +27,8 @@
  * dynamic import below.
  */
 
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import './shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
@@ -688,6 +690,40 @@ test('B-270(steering): the side-query directive is APPENDED to the claude_code p
   assert.match(append, /run\s+Bash/i, 'forbids Bash');
   assert.match(append, /from the conversation already in context/i, 'steers to answer from context');
   assert.match(append, /not (continuing the task|acting as the coordinator)/i, 'overrides the task persona');
+});
+
+test('SDK 0.3.267: the /btw fork opts out of system-prompt recording (snapshot:false)', async () => {
+  scriptedMessages = [
+    { type: 'result', session_id: FORK_SID, subtype: 'success', is_error: false, result: 'ok' },
+  ];
+  await sdk.spawnClaudeSideQuery(
+    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
+  );
+  const opts = lastQueryArg!.options ?? {};
+  assert.equal(opts.forkSession, true, 'still a fork, never a bare resume');
+  const sp = opts.systemPrompt as { snapshot?: unknown } | undefined;
+  // A recorded prompt would be replayed on the fork and the directive ignored.
+  assert.equal(sp?.snapshot, false, 'the fork renders the directive fresh');
+});
+
+test('SDK 0.3.162: the /btw fork names Grep and Glob in its base tool set', async () => {
+  scriptedMessages = [
+    { type: 'result', session_id: FORK_SID, subtype: 'success', is_error: false, result: 'ok' },
+  ];
+  await sdk.spawnClaudeSideQuery(
+    { sessionId: LIVE_SID, question: 'hi', userId: null, cwd: process.cwd() },
+    { onChunk: () => {}, onError: () => {}, onComplete: () => {} }
+  );
+  const tools = (lastQueryArg!.options ?? {}).tools as unknown;
+  assert.ok(Array.isArray(tools), 'tools is an explicit list, not the default preset');
+  for (const tool of ['Read', 'Grep', 'Glob']) {
+    assert.ok((tools as string[]).includes(tool), `${tool} is registered for /btw`);
+  }
+  // The base set never widens past the read-only allowlist.
+  for (const tool of tools as string[]) {
+    assert.ok(['Read', 'Grep', 'Glob', 'NotebookRead'].includes(tool), `${tool} is allowlisted`);
+  }
 });
 
 test('B-270(steering): appending does NOT widen the read-only allowlist (Read/Grep/Glob only)', async () => {

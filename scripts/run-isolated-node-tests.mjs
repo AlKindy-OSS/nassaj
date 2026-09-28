@@ -38,8 +38,13 @@ try {
       ...process.env,
       DATABASE_PATH: path.join(caseRoot, 'auth.db'),
       TMPDIR: caseRoot,
+      // T-1871: harness snapshots, spawn ledger and ack key stay inside the case.
+      NASSAJ_HARNESS_DATA_HOME: caseRoot,
     };
     delete env.CODEX_HOME;
+    // T-1871: harness-update tests resolve harness installs from HOME; a case-local
+    // HOME makes any resolver the fixtures forgot to override miss the real ones.
+    if (file.replaceAll('\\', '/').includes('server/modules/providers/harness-update/')) env.HOME = caseRoot;
     if (scope === 'server') env.TSX_TSCONFIG_PATH = path.resolve('server/tsconfig.json');
 
     // This fixture owns a stricter HOME/JWT/disk setup and its existing 45-second child deadline.

@@ -1,3 +1,5 @@
+// B-1349: FIRST import — HOME becomes a /var/tmp sandbox before anything reads it.
+import '@/shared/__tests__/sandbox-home.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -5,8 +7,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  _resetSchedulerPruneClock,
   isSchedulerRunning,
   runAutoUpdateTick,
+  runDailySnapshotPrune,
+  SNAPSHOT_PRUNE_PERIOD_MS,
   startHarnessAutoUpdateScheduler,
   stopHarnessAutoUpdateScheduler,
   type SchedulerDeps,
@@ -80,10 +85,10 @@ test('an enabled tick attempts ONLY harnesses whose built-in updater is verified
   const hermesSkip = skipped.find((s) => s.provider === 'hermes');
   assert.ok(hermesSkip, 'hermes is considered by the sweep');
   assert.equal(hermesSkip!.reason, 'autoupdater-disable-unverified');
-  // Same gate keeps the npm harnesses manual until devops verifies their knob.
-  for (const id of ['kimi', 'qwen']) {
-    assert.ok(skipped.some((s) => s.provider === id && s.reason === 'autoupdater-disable-unverified'), id);
-  }
+  // Same gate keeps qwen manual until devops verifies its knob; kimi's knob is
+  // verified (T-1873) but kimi is button-only.
+  assert.ok(skipped.some((s) => s.provider === 'qwen' && s.reason === 'autoupdater-disable-unverified'));
+  assert.ok(skipped.some((s) => s.provider === 'kimi' && s.reason === 'manual-only'));
 });
 
 test('the scheduler never invokes an ineligible native self-updater', async () => {
@@ -122,4 +127,36 @@ test('scheduler leaves native harness leases untouched because they are ineligib
     releaseHarnessLease('opencode', 'manual-opencode');
     _resetHarnessLeases();
   }
+});
+
+test('T-1871: every snapshot-backed harness is skipped as manual-only', async () => {
+  const skipped: Array<{ provider: string; reason: string }> = [];
+  const attempted: string[] = [];
+  await runAutoUpdateTick({
+    getSettings: () => enabled,
+    markRun: () => {},
+    logSkip: (entry) => skipped.push(entry),
+    runUpdate: async (p) => attempted.push(p),
+  });
+  for (const id of ['claude', 'codex', 'antigravity', 'cursor', 'opencode']) {
+    assert.ok(skipped.some((s) => s.provider === id && s.reason === 'manual-only'), id);
+  }
+  assert.deepEqual(attempted, []);
+});
+
+test('T-1871: snapshot retention runs at most once a day on the scheduler tick', () => {
+  _resetSchedulerPruneClock();
+  let runs = 0;
+  let now = 5_000;
+  const deps: SchedulerDeps = { now: () => now, prune: () => { runs += 1; } };
+  assert.equal(runDailySnapshotPrune(deps), true);
+  now += SNAPSHOT_PRUNE_PERIOD_MS - 1;
+  assert.equal(runDailySnapshotPrune(deps), false);
+  now += 1;
+  assert.equal(runDailySnapshotPrune(deps), true);
+  assert.equal(runs, 2);
+  // A failing prune never breaks the tick.
+  now += SNAPSHOT_PRUNE_PERIOD_MS;
+  assert.equal(runDailySnapshotPrune({ now: () => now, prune: () => { throw new Error('disk'); } }), true);
+  _resetSchedulerPruneClock();
 });

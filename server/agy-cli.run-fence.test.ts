@@ -21,6 +21,7 @@ import {
   type ProbeWriter,
   type SpawnObservation,
 } from './run-fence-sweep.test-helper.js';
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
 
 let unexpectedProcessCalls = 0;
 const rejectUnexpectedProcess = () => {
@@ -31,6 +32,7 @@ after(() => assert.equal(unexpectedProcessCalls, 0));
 const root = await fs.mkdtemp(path.join(process.env.TMPDIR ?? os.tmpdir(), 'agy-run-fence-'));
 after(() => fs.rm(root, { recursive: true, force: true }));
 mock.method(os, 'homedir', () => root);
+installFakeHarnessBinary(root, 'antigravity');
 
 let currentWriter: ProbeWriter = createProbeWriter();
 let child: (EventEmitter & Record<string, unknown>) | null = null;

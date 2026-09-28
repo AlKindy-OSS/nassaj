@@ -69,4 +69,21 @@ describe('settings URL destination', () => {
     expect(canOpenSettingsTab('command-board', 'admin')).toBe(false);
     expect(canOpenSettingsTab('command-board', 'owner')).toBe(true);
   });
+
+  // T-1866: the old ?settings=command-board deep link must keep opening
+  // Command Board itself (role access / raw-exec / safe & custom commands) —
+  // moving storage/tmpfs/permissions/auto-update out of it must not touch
+  // this destination's own validity or role gate.
+  it('T-1866: ?settings=command-board still opens Command Board unchanged', () => {
+    expect(readSettingsDestination('?settings=command-board')).toEqual({ tab: 'command-board' });
+    expect(canOpenSettingsTab('command-board', 'owner')).toBe(true);
+    expect(canOpenSettingsTab('command-board', 'admin')).toBe(false);
+  });
+
+  it('T-1866: ?settings=system is a recognized deep link, owner-only like command-board', () => {
+    expect(readSettingsDestination('?settings=system')).toEqual({ tab: 'system' });
+    expect(canOpenSettingsTab('system', 'owner')).toBe(true);
+    expect(canOpenSettingsTab('system', 'admin')).toBe(false);
+    expect(canOpenSettingsTab('system', 'user')).toBe(false);
+  });
 });

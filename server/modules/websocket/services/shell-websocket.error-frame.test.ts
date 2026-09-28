@@ -13,13 +13,15 @@
  *      bug reports.
  *
  * Test 1 drives the real `handleShellConnection` with a real
- * `resolveRealClaudeBinary` failure (no fabricated message: PATH and
- * CLAUDE_CLI_PATH are pointed at a directory with no claude in it), so what is
+ * `resolveRealClaudeBinary` failure (no fabricated message: the server
+ * CLAUDE_CLI_PATH is pointed at a directory with no claude in it), so what is
  * asserted is the message the server genuinely throws in the field.
  *
  * Runner: Node built-in test runner with --experimental-test-module-mocks.
  */
 
+// T-1873: harness CLIs resolve to sandbox stubs, never the host's installs.
+import '../../../shared/__tests__/stub-harness-binaries.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -137,6 +139,11 @@ test('a missing claude binary tells the pane WHAT is wrong and HOW to fix it', a
   const fakeHome = await mkdtemp(path.join(os.tmpdir(), 'shell-error-frame-home-'));
   isolatedEnv = { PATH: emptyBin, HOME: fakeHome, CLAUDE_CLI_PATH: 'claude' };
   spawnCount = 0;
+  // T-1873: the real binary comes from the harness registry, which reads the
+  // SERVER env only (the isolated env above is ignored). Point its override at
+  // a claude that does not exist.
+  const previousClaudeCliPath = process.env.CLAUDE_CLI_PATH;
+  process.env.CLAUDE_CLI_PATH = path.join(emptyBin, 'claude');
 
   try {
     await withIsolatedDatabase(() => {
@@ -164,6 +171,8 @@ test('a missing claude binary tells the pane WHAT is wrong and HOW to fix it', a
       );
     });
   } finally {
+    if (previousClaudeCliPath === undefined) delete process.env.CLAUDE_CLI_PATH;
+    else process.env.CLAUDE_CLI_PATH = previousClaudeCliPath;
     await rm(emptyBin, { recursive: true, force: true });
     await rm(fakeHome, { recursive: true, force: true });
   }

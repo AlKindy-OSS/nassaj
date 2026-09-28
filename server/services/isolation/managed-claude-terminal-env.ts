@@ -3,10 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
-  isRunnableClaudeExecutable,
-  wellKnownClaudeInstallCandidates as sharedWellKnownClaudeInstallCandidates,
-} from '@/shared/claude-cli-path.js';
+import { HarnessBinaryUnresolvedError, resolveHarnessBinary } from '@/shared/harness-binaries.js';
 
 export const MANAGED_CLAUDE_MODE_ENV = 'NASSAJ_MANAGED_CLAUDE_MODE';
 export const MANAGED_CLAUDE_USER_ENV = 'NASSAJ_MANAGED_CLAUDE_USER_ID';
@@ -35,63 +32,29 @@ export function resolveManagedClaudeWrapperPath(
 export const MANAGED_CLAUDE_WRAPPER = resolveManagedClaudeWrapperPath(import.meta.url);
 export const MANAGED_CLAUDE_BIN_DIR = path.dirname(MANAGED_CLAUDE_WRAPPER);
 
-type ResolveDeps = {
-  existsSync?: typeof fs.existsSync;
-  statSync?: typeof fs.statSync;
-  accessSync?: typeof fs.accessSync;
-};
-
 /**
- * Well-known Claude install locations probed AFTER the PATH lookup fails
- * (B-1058). A server launched under pm2/systemd inherits a minimal PATH
- * (`/usr/local/bin:/usr/bin:/bin`) that omits the per-user dirs a login shell
- * would add from `.profile`, while the managed terminal deliberately runs
- * `bash --noprofile --norc` so PATH is never repaired there either. The
- * native installer (`curl -fsSL claude.ai/install.sh`) puts the launcher in
- * `~/.local/bin/claude`; the older local/npm layouts are listed after it.
- * Order is priority order. HOME comes from the isolated env handed in.
- *
- * B-1091 parity guard: the candidate LIST now lives in shared/claude-cli-path.ts
- * so CLI detection and this login/terminal path resolve the same dirs. This
- * thin wrapper keeps the env-based signature the terminal env builder uses.
+ * Resolve the real Claude executable before the shim directory is prepended:
+ * the harness registry's claude (T-1873 — the `CLAUDE_CLI_PATH` SERVER override,
+ * else the native installer's `~/.local/bin/claude` under the operator home).
+ * The isolated PTY env can never redirect it. Throws when claude is not
+ * installed, or when the registry would hand back this module's own shim.
  */
-export function wellKnownClaudeInstallCandidates(env: NodeJS.ProcessEnv, command: string): string[] {
-  return sharedWellKnownClaudeInstallCandidates((env.HOME ?? '').trim(), command);
-}
-
-/** Resolve the real Claude executable before the shim directory is prepended. */
-export function resolveRealClaudeBinary(
-  env: NodeJS.ProcessEnv,
-  configured = env.CLAUDE_CLI_PATH || 'claude',
-  deps: ResolveDeps = {},
-): string {
-  const probe = {
-    existsSync: deps.existsSync ?? fs.existsSync,
-    statSync: deps.statSync ?? fs.statSync,
-    accessSync: deps.accessSync ?? fs.accessSync,
-  };
-  const candidate = configured.trim();
-  const pathEntries = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
-  const paths = candidate.includes(path.sep)
-    ? [path.resolve(candidate)]
-    : [
-      ...pathEntries.map((dir) => path.join(dir, candidate)),
-      ...wellKnownClaudeInstallCandidates(env, candidate),
-    ];
-  for (const executable of paths) {
-    // The shim must never resolve to itself (infinite launcher recursion); this
-    // is the one criterion the shared predicate cannot own — it is about THIS
-    // module's asset, not about being runnable.
-    if (path.resolve(executable) === path.resolve(MANAGED_CLAUDE_WRAPPER)) continue;
-    if (isRunnableClaudeExecutable(executable, probe)) {
-      return path.resolve(executable);
-    }
+export function resolveRealClaudeBinary(): string {
+  let executable: string;
+  try {
+    executable = resolveHarnessBinary('claude');
+  } catch (error) {
+    if (!(error instanceof HarnessBinaryUnresolvedError)) throw error;
+    // Prefix matched by shell-error-frame.ts (the tail is never published).
+    throw new Error(
+      `Claude executable not found before installing the managed terminal launcher (${error.message})`,
+    );
   }
-  throw new Error(
-    'Claude executable not found before installing the managed terminal launcher '
-    + `(looked up "${candidate}" on PATH and in the well-known install dirs under HOME=${env.HOME ?? ''}; `
-    + 'set CLAUDE_CLI_PATH to the absolute path of the claude binary)',
-  );
+  // The shim must never resolve to itself (infinite launcher recursion).
+  if (path.resolve(executable) === path.resolve(MANAGED_CLAUDE_WRAPPER)) {
+    throw new Error('Claude executable resolves to the managed terminal launcher itself');
+  }
+  return path.resolve(executable);
 }
 
 /** Install the managed launcher as the first PATH entry for this PTY only. */
@@ -103,7 +66,7 @@ export function installManagedClaudeTerminalEnv(
     throw new Error('A session-bound Claude terminal requires a sessionId');
   }
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-  const realBinary = resolveRealClaudeBinary(env);
+  const realBinary = resolveRealClaudeBinary();
   return {
     ...env,
     [pathKey]: [MANAGED_CLAUDE_BIN_DIR, env[pathKey]].filter(Boolean).join(path.delimiter),

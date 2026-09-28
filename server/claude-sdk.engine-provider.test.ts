@@ -28,6 +28,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { mock, beforeEach, afterEach, after } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 type SdkMessage = Record<string, unknown>;
 
 let scriptedMessages: SdkMessage[] = [];
@@ -130,6 +132,8 @@ beforeEach(() => {
   sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-home-'));
   originalHomedir = os.homedir;
   (os as unknown as { homedir: () => string }).homedir = () => sandboxHome;
+  // T-1873: the SDK executable is the registry claude under the operator home.
+  installFakeHarnessBinary(sandboxHome, 'claude');
   process.env.NASSAJ_PROVIDER_SECRETS_KEY = crypto.randomBytes(32).toString('base64');
   secrets._resetProviderSecretsServerKeyCache();
 });

@@ -42,7 +42,9 @@ vi.mock('../../../../../../quick-settings-panel/hooks/useProviderQuota', () => (
   useProviderQuota: () => quota.current,
 }));
 
-import AgentUsageSection, { hasDisplayableCodexCredits } from './AgentUsageSection';
+import { resolveCreditDisplay } from '../../../../../../quick-settings-panel/providerQuotaHelpers';
+
+import AgentUsageSection from './AgentUsageSection';
 
 afterEach(cleanup);
 
@@ -72,8 +74,8 @@ describe('رصيد Codex الإضافي', () => {
   });
 
   it('يقبل الصفر الحقيقي ويرفض الرصيد السالب أو غير الصالح', () => {
-    expect(hasDisplayableCodexCredits({ balance: 0, unlimited: false })).toBe(true);
-    expect(hasDisplayableCodexCredits({ balance: -1, unlimited: false })).toBe(false);
-    expect(hasDisplayableCodexCredits(undefined)).toBe(false);
+    expect(resolveCreditDisplay({ balance: 0, unlimited: false })).toEqual({ kind: 'zero' });
+    expect(resolveCreditDisplay({ balance: -1, unlimited: false })).toEqual({ kind: 'hidden' });
+    expect(resolveCreditDisplay(undefined)).toEqual({ kind: 'hidden' });
   });
 });

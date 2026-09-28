@@ -33,6 +33,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // ---------------------------------------------------------------------------
 // Bootstrap — MUST run before importing any project module (DB singleton reads
 // DATABASE_PATH on first use; provision/home helpers read os.homedir()/$HOME).
@@ -50,6 +52,8 @@ fs.writeFileSync(
   '# AGENTS.md — neutral nassaj governance\nplatform-agnostic instructions.\n',
 );
 process.env.HOME = sandboxHome;
+// T-1873: the registry resolves kimi at ~/.kimi-code/bin/kimi under this HOME.
+installFakeHarnessBinary(sandboxHome, 'kimi');
 process.env.DATABASE_PATH = path.join(sandbox, 'test-db.sqlite');
 
 assert.equal(os.homedir(), sandboxHome, 'os.homedir() must honor the sandboxed $HOME');
@@ -67,7 +71,6 @@ globalThis.setInterval = function patchedSetInterval(this: unknown, ...callArgs:
 const {
   prepareKimiAgentLaunch,
   buildKimiAgentArgs,
-  resolveKimiBinaryPath,
   KIMI_SIBLING_VENDOR_KEYS,
 } = await import('./kimi-agent-cli.js');
 const { sanitizeVendorAgentEnv } = await import('./services/isolation/sanitize-vendor-agent-env.js');
@@ -182,12 +185,13 @@ describe('kimi seam order — sanitizeVendorAgentEnv is the LAST step (M-3)', ()
     assert.ok(!KIMI_SIBLING_VENDOR_KEYS.includes('KIMI_API_KEY'), 'must never deny the target key');
   });
 
-  it('resolveKimiBinaryPath honors KIMI_PATH override, else the resolved or bare bin', () => {
-    assert.equal(resolveKimiBinaryPath({ KIMI_PATH: '/opt/kimi/bin/kimi' } as NodeJS.ProcessEnv), '/opt/kimi/bin/kimi');
-    // B-1138: with no PATH hit the well-known install dirs are probed, so the
-    // result is an absolute `.../kimi` on a host that has one, else the bare bin.
-    const fallback = resolveKimiBinaryPath({} as NodeJS.ProcessEnv);
-    assert.ok(fallback === 'kimi' || (path.isAbsolute(fallback) && path.basename(fallback) === 'kimi'), fallback);
+  it('the launch binary is the registry kimi; a member KIMI_PATH is ignored (T-1873)', () => {
+    const prepared = prepareKimiAgentLaunch(
+      { userId: null, command: 'x', model: 'kimi-k2.6', cwd: sandboxHome,
+        baseEnv: { ...hostileBaseEnv(), KIMI_PATH: '/opt/evil/kimi' } },
+      { resolveCagedLaunch: (spec: { cmd: string; args: string[] }) => ({ cmd: spec.cmd, args: spec.args }) },
+    );
+    assert.equal(prepared.binaryPath, path.join(sandboxHome, '.kimi-code', 'bin', 'kimi'));
   });
 });
 
@@ -241,6 +245,8 @@ describe('kimi digest pin — a drifted binary REFUSES the launch (SL-7/M-4)', (
           cwd: sandboxHome,
           baseEnv: {
             ...hostileBaseEnv(),
+            // A member KIMI_PATH is ignored (T-1873); the registry stub is itself
+            // unapproved bytes, so the armed pin must still refuse.
             KIMI_PATH: fakeBin,
             NASSAJ_VENDOR_BINARY_PIN: 'true', // arm the pin
           },

@@ -1,3 +1,8 @@
+## 2.3.0.9 — 2026-09-28
+
+تحديث أجساد الوكلاء مع الرجوع والاستعادة وشارات التوافق، وتبويب النظام للمالك، وترقية SDK، وإصلاحات أمان من upstream، وسجلّ مسارات موحّد للأجساد وCodex من نسخة الجهاز وKimi أصيل (تحقّق من مسارات الأجساد قبل زر التحديث).
+Harness updates with rollback, restore and compatibility badges, an owner-only System tab, SDK upgrades, upstream security fixes, one harness path registry, machine Codex and native Kimi (check harness paths before the update button).
+
 ## 2.3.0.8 — 2026-09-26
 
 رصيد Codex الإضافي في مؤشّر الاستهلاك، وزر واحد لتحميل كل الرسائل، وأقفال البناء المشتركة في النسخ المعزولة، ومحادثة فريق داخل الجلسة مطفأة افتراضياً.

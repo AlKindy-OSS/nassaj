@@ -22,6 +22,8 @@ import path from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import test, { mock, before, beforeEach, after } from 'node:test';
 
+import { installFakeHarnessBinary } from './shared/__tests__/harness-binary-fixtures.js';
+
 // Preserve transitive import exports without granting this fixture new process effects.
 let unexpectedProcessCalls = 0;
 const rejectUnexpectedProcess = () => {
@@ -67,6 +69,7 @@ let spawnAntigravity: typeof import('./agy-cli.js').spawnAntigravity;
 before(async () => {
   HOME_DIR = mkdtempSync(path.join(os.tmpdir(), 'agy-stderr-'));
   process.env.HOME = HOME_DIR;
+  installFakeHarnessBinary(HOME_DIR, 'antigravity');
   process.env.NASSAJ_RESPONSE_LANGUAGE = 'formal Arabic (العربية الفصحى)';
 
   mock.module('child_process', {

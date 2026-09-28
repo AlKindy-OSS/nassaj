@@ -27,10 +27,11 @@ import test from 'node:test';
 
 import {
   latestClaudeTokenUsage,
-  claudeContextSnapshot,
+  claudeTranscriptContextSnapshot,
   latestClaudeCacheTtlMinutes,
   readClaudeTranscriptForSession,
 } from '@/modules/providers/list/claude/claude-token-usage.js';
+import { contextUsagePresentation } from '../../../../../../src/components/chat/hooks/contextUsagePresentation.js';
 
 const INDEX_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -44,6 +45,60 @@ const PROJECT_ID = '11111111-1111-4111-8111-111111111111';
 const PROJECT_PATH = '/var/tmp/x/repo';
 const OVERLAY_PATH = `${PROJECT_PATH}/.git/nassaj-session-overlays/instances/abc/workspace`;
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
+
+/** Scrubbed copy of a real main-chain assistant record (Claude Code 2.1.283). */
+const REAL_ASSISTANT_RECORD = {
+  parentUuid: '00000000-0000-4000-8000-000000000001',
+  isSidechain: false,
+  apiBlockIndex: 1,
+  requestId: 'req_aaaaaaaa',
+  type: 'assistant',
+  uuid: '00000000-0000-4000-8000-000000000002',
+  timestamp: '2026-09-27T22:31:54.029Z',
+  advisorModel: 'claude-opus-5-5',
+  effort: 'medium',
+  perTurnEffort: 'medium',
+  userType: 'external',
+  entrypoint: 'sdk-ts',
+  cwd: OVERLAY_PATH,
+  sessionId: SESSION_ID,
+  version: '2.1.283',
+  gitBranch: 'HEAD',
+  message: {
+    model: 'claude-opus-5-5',
+    id: 'msg_aaaaaaaa',
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'text', text: '<scrubbed>' }],
+    container: null,
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    stop_details: null,
+    usage: {
+      input_tokens: 2,
+      cache_creation_input_tokens: 352,
+      cache_read_input_tokens: 85930,
+      output_tokens: 1434,
+      output_tokens_details: { thinking_tokens: 22 },
+      server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+      service_tier: 'standard',
+      cache_creation: { ephemeral_1h_input_tokens: 352, ephemeral_5m_input_tokens: 0 },
+      inference_geo: 'not_available',
+      iterations: [{
+        input_tokens: 2,
+        output_tokens: 1434,
+        cache_read_input_tokens: 85930,
+        cache_creation_input_tokens: 352,
+        cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 352 },
+        type: 'message',
+      }],
+      speed: 'standard',
+    },
+    input_transformations: [],
+    diagnostics: null,
+    context_management: null,
+  },
+};
 
 const encode = (value: string) => value.replace(/[^a-zA-Z0-9-]/g, '-');
 
@@ -111,7 +166,7 @@ function buildHandler(collaborators: Collaborators) {
   const factory = new Function(
     'os', 'path', 'fsPromises', 'projectsDb', 'sessionsDb', 'isProjectVisible',
     'coerceUserId', 'readClaudeTranscriptForSession', 'latestClaudeTokenUsage',
-    'resolveContextWindow', 'console', 'claudeContextSnapshot', 'latestClaudeCacheTtlMinutes',
+    'console', 'claudeTranscriptContextSnapshot', 'latestClaudeCacheTtlMinutes',
     `return ${handlerSrc};`,
   );
 
@@ -125,9 +180,8 @@ function buildHandler(collaborators: Collaborators) {
     (id: unknown) => id ?? null,
     readClaudeTranscriptForSession,
     latestClaudeTokenUsage,
-    () => 1_000_000,
     console,
-    claudeContextSnapshot,
+    claudeTranscriptContextSnapshot,
     latestClaudeCacheTtlMinutes,
   );
 }
@@ -150,23 +204,14 @@ async function buildFixture(): Promise<Fixture> {
   await mkdir(home, { recursive: true });
   await symlink(path.join(base, 'core'), path.join(home, '.claude'));
 
-  // A provider-shaped synthetic tail: the last assistant entry is the one that counts.
+  // The last assistant entry is the one that counts. Its shape is copied from a
+  // real Claude Code 2.1.283 transcript record (content and ids scrubbed), so the
+  // route is exercised against what the CLI actually writes (B-1356).
   const overlayTranscript = path.join(overlayDir, `${SESSION_ID}.jsonl`);
   await writeFile(
     overlayTranscript,
     `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`
-      + `${JSON.stringify({
-        type: 'assistant',
-        message: {
-          model: 'claude-opus-5',
-          usage: {
-            input_tokens: 2,
-            cache_creation_input_tokens: 7159,
-            cache_read_input_tokens: 246337,
-            output_tokens: 971,
-          },
-        },
-      })}\n`,
+      + `${JSON.stringify(REAL_ASSISTANT_RECORD)}\n`,
   );
 
   const previousHome = process.env.HOME;
@@ -225,18 +270,59 @@ test('answers 200 with cache-aware usage for an overlay-backed Claude session', 
       payload: {
         used: null,
         total: null,
-        contextSnapshot: { ...claudeContextSnapshot(null, { sessionId: SESSION_ID, modelId: 'claude-opus-5' }, 253498), observedAt: null },
-        cacheTtlMinutes: null,
-        inputTokens: 253498,
-        outputTokens: 971,
+        contextSnapshot: {
+          version: 1,
+          provider: 'claude',
+          sessionId: SESSION_ID,
+          modelId: 'claude-opus-5-5',
+          usedTokens: 86284,
+          // B-1356: the transcript path must name the window, or the ring renders '?'.
+          windowTokens: 1_000_000,
+          usageKind: 'last_request_input',
+          source: 'claude.message.usage',
+          observedAt: null,
+          nativeCompactTokens: null,
+          proposedCompactTokens: null,
+          newSessionTokens: null,
+        },
+        cacheTtlMinutes: 60,
+        inputTokens: 86284,
+        outputTokens: 1434,
         breakdown: {
-          input: 253498,
-          output: 971,
-          cacheRead: 246337,
-          cacheCreation: 7159,
+          input: 86284,
+          output: 1434,
+          cacheRead: 85930,
+          cacheCreation: 352,
         },
       },
     }]);
+  });
+});
+
+test('B-1356: the real route payload gives the composer ring both used and window', async () => {
+  await withFixture(async (fixture) => {
+    const handler = buildHandler({
+      projectPathById: PROJECT_PATH,
+      sessionRow: {
+        session_id: SESSION_ID,
+        provider: 'claude',
+        project_path: PROJECT_PATH,
+        jsonl_path: fixture.overlayTranscript,
+      },
+    });
+    const { res, sent } = makeResponseDouble();
+
+    await handler(request(), res);
+
+    // The client passes the session's model as read back from the same transcript.
+    const shown = contextUsagePresentation(
+      sent[0].payload as Record<string, unknown>, 'claude', SESSION_ID, 'claude-opus-5-5',
+    );
+    assert.equal(shown.used, 86284);
+    assert.equal(shown.window, 1_000_000);
+    // Still an estimate: no live-only thresholds are borrowed from a transcript.
+    assert.equal(shown.source, null);
+    assert.equal(shown.proposed, null);
   });
 });
 
