@@ -295,6 +295,16 @@ export type NormalizedMessage = {
    */
   userId?: number;
   /**
+   * T-1903: a mid-turn injection by a member who did not start the turn. Set
+   * ONLY after an ingress uuid + payload-hash match (history) or by the run
+   * that queued it (live) — never inferred from text. `userId` is the sender.
+   */
+  injected?: boolean;
+  /** T-1903: delivery of an injected message ('delivered' once proven from the transcript). */
+  deliveryStatus?: 'queued' | 'delivered' | 'unconfirmed' | 'rejected';
+  /** T-1903: the sender's clientMsgId of an injected message (pairs the live bubble). */
+  steerClientMsgId?: string;
+  /**
    * Provenance of a kind:'text' role:'user' message that was NOT typed by a
    * human (mirrors SDKMessageOrigin.kind from the Claude Agent SDK):
    * - 'coordinator'       — coordinator → subagent prompt (Task/Agent tool)

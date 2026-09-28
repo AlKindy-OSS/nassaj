@@ -647,13 +647,13 @@ async function queryCodexOwned(invocation) {
   // (/api/agent) and the interactive WS path — so applying it here covers both.
   //
   // FAIL-OPEN (deliberate — the exact opposite of the earlier opt-in's fail-closed):
-  // materialize the delegate agents (architect, qa-critic) into $CODEX_HOME/agents/ bound
-  // to the session-resolved model. If that fails (missing card, no model, unwritable dir,
+  // materialize every nassaj delegate agent (the full roster) into $CODEX_HOME/agents/
+  // without pinning a model, so the coordinator may select model/reasoning per spawn.
+  // If that fails (missing card, unwritable dir,
   // transient fs error), LOG loudly and STILL launch — a permanent layer that refused on a
   // transient glitch would take down ALL Codex. The root contract below is a constant
   // string that cannot fail, so the delegate-first instruction is ALWAYS injected even
-  // when the TOMLs could not be written. The model is passed explicitly (Gate 1B: a
-  // delegate REQUIRES a bare Codex model, no `@`). NOTE: T-883 governance (the AGENTS.md
+  // when the TOMLs could not be written. NOTE: T-883 governance (the AGENTS.md
   // fingerprint) stays fail-closed and is entirely separate — untouched here.
   //
   // OWNER-ONLY NOT ENFORCED (T-903 §3, honest scope): this coordinator layer is a
@@ -665,7 +665,7 @@ async function queryCodexOwned(invocation) {
   // contract), like Claude's zero-rule. That is an ACCEPTED gap until system-level read
   // isolation lands (T-893): on the shared uid a per-user owner-only privilege can't be
   // meaningfully enforced anyway. Revisit owner-scoping once T-893 gives real isolation.
-  const materialized = materializeCoordinatorAgents(governance.codexHome, resolvedModel);
+  const materialized = materializeCoordinatorAgents(governance.codexHome);
   if (!materialized.ok) {
     console.warn('[Codex] coordinator delegate agents unavailable — launching WITHOUT them (fail-open)', {
       userId: ws?.userId ?? null,

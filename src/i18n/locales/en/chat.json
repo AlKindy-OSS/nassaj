@@ -285,7 +285,8 @@
     "deny": "Deny",
     "allowOnce": "Allow once",
     "allowAndRemember": "Allow & remember",
-    "allowSaved": "Allow (saved)"
+    "allowSaved": "Allow (saved)",
+    "steerTaintedNote": "This request follows a colleague’s steer — only allow once or deny."
   },
   "todo": {
     "updated": "Todo list has been updated successfully",
@@ -401,7 +402,8 @@
       "accurateConsentTitle": "Accurate transcription and privacy",
       "accurateConsent": "In accurate mode your voice is recorded, uploaded to the Nassaj server, and passed to the external transcription provider using the operator key. The recording is never written to disk or to logs. Continue?",
       "modeAccurateUnknown": "Could not reach the server — reload the page"
-    }
+    },
+    "sendBusy": "Sending is unavailable while a reply is streaming"
   },
   "scheduled": {
     "open": "Schedule this message",
@@ -465,7 +467,7 @@
     },
     "status": {
       "pending": "Scheduled",
-      "running": "Sending",
+      "running": "Delivering",
       "sent": "Sent",
       "failed": "Failed",
       "cancelled": "Cancelled"
@@ -675,7 +677,14 @@
     "providers": {
       "assistant": "Assistant"
     },
-    "frozen": "Paused (process frozen)"
+    "frozen": "Paused (process frozen)",
+    "viewerTooltip": "Running on {{name}}’s quota",
+    "viewerAriaLabel": "Claude is working for {{name}}",
+    "steerButton": {
+      "label": "Steer",
+      "ariaLabel": "Steer",
+      "tooltip": "Steer this turn"
+    }
   },
   "runProgress": {
     "tasksLabel": "Tasks",
@@ -1130,5 +1139,47 @@
     "notSentNote": "This message is not sent to the model.",
     "send": "Send to team",
     "sendFailed": "Could not send the internal message."
+  },
+  "steer": {
+    "command": {
+      "description": "Send a mid-turn steer to the running turn"
+    },
+    "bubble": {
+      "headingPrefix": "Steer from",
+      "ariaLabel": "Steer from {{name}} sent mid-turn",
+      "unknownSender": "Colleague"
+    },
+    "status": {
+      "queued": "Queued",
+      "delivered": "Delivered",
+      "unconfirmed": "Unconfirmed"
+    },
+    "starterNotice": {
+      "text": "{{name}} steered this run",
+      "stopTurn": "Stop turn"
+    },
+    "composerNote": "Counted against {{starter}}’s quota",
+    "errors": {
+      "invalid_request": "Couldn't send the steer — invalid request.",
+      "not_writable": "You don't have write access to this session.",
+      "steer_unsupported": "This provider doesn't support mid-turn steering.",
+      "turn_not_active": "The turn ended before your steer arrived.",
+      "steer_self": "You can't steer your own turn.",
+      "plan_mode": "Steering isn't available in plan mode.",
+      "steer_unavailable": "Steering is temporarily unavailable.",
+      "steer_disabled": "Mid-turn steering is disabled for this server.",
+      "steer_not_consented": "This session's starter hasn't allowed steering.",
+      "steer_rate_limited": "Too many steers — wait a moment and try again.",
+      "steer_turn_limit": "This turn already received the maximum number of steers.",
+      "steer_queue_full": "The steer queue for this turn is full.",
+      "text_empty": "Type a message before sending a steer.",
+      "text_too_long": "That steer is too long.",
+      "duplicate": "That steer was already sent.",
+      "turn_aborted": "The turn was stopped before your steer arrived.",
+      "internal_error": "Couldn't send the steer.",
+      "disconnected": "Couldn't send the steer — you're disconnected.",
+      "timeout": "Couldn't send the steer — no response from the server.",
+      "sendAsNormalMessage": "Send as normal message"
+    }
   }
 }

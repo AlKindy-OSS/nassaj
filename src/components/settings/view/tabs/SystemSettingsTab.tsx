@@ -8,6 +8,7 @@ import HarnessAutoUpdateSection from './agents-settings/sections/HarnessAutoUpda
 import TmpfsCapSection from './TmpfsCapSection';
 import StoragePolicySection from './StoragePolicySection';
 import PermissionFencesSection from './PermissionFencesSection';
+import SteerPolicySection from './SteerPolicySection';
 
 /**
  * T-1866 (owner-approved IA option B): «النظام» — تبويبٌ جديد يفصل ثلاث
@@ -41,6 +42,7 @@ export default function SystemSettingsTab() {
         <TmpfsCapSection />
         <StoragePolicySection />
         <PermissionFencesSection />
+        <SteerPolicySection />
       </div>
     </SettingsSection>
   );

@@ -222,6 +222,25 @@ export const CONTROL_EVENT_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * T-1903/1904 (ADR-190) — رسائل التوجيه تحمل `type` لا `kind` (انظر
+ * shared/session-steer.contract.ts)، فمطابقة `CONTROL_EVENT_KINDS` وحدها لا
+ * تلتقطها. `steer-turn-state` بالذات حرجة: هي التي تُسلِّح/تُنزع سلاح كامل
+ * ميزة التوجيه لهذا الدور، وتصل **بالضبط** حين يكون الازدحام أعلى ما يكون
+ * (بداية الدور: أول إطار بثّ + session-status في نفس المللي‑ثانية غالباً) —
+ * وهو بالضبط ما تحذّر منه B-208: فتحة `latestMessage` الوحيدة تبتلع رسالة
+ * حين تليها أخرى في نفس دفعة الـrender. تأكّد ميدانياً باختبار مستخدمَين حقيقي
+ * (T-1903/1904 e2e): زرّ التوجيه لا يظهر إطلاقاً للمشاهد رغم أن الخادم أرسل
+ * `steerable:true`. الحلّ نفسه المُتَّبع هنا لـcomplete/error/permission_*:
+ * سجلّ مُلحَق لا يبتلع شيئاً (seq + droppedBeforeSeq)، لا فتحة قيمة واحدة.
+ */
+export const STEER_CONTROL_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'steer-turn-state',
+  'steer-queued',
+  'steer-delivered',
+  'steer-rejected',
+]);
+
+/**
  * سقف حجم خريطة إطارات التحكّم. الخريطة تحمل إدخالاً واحداً لكل جلسة شوهدت،
  * فتنمو مع طول الجلسة؛ التقليم يُسقط الأقدم تسلسلاً (الأبعد عهداً) ويُبقي
  * أحدث الحالات — وهي الوحيدة ذات المعنى.
@@ -482,7 +501,9 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           // إلى `''` في `createNormalizedMessage`، ومسار الخطأ في claude-sdk
           // يبعثه لجلسة جديدة فشلت قبل التقاط معرّفها) — وإسقاطُها يعني ضياع
           // نبأ الفشل كلّه.
-          if (data && typeof data.kind === 'string' && CONTROL_EVENT_KINDS.has(data.kind)) {
+          const isKindControlEvent = typeof data?.kind === 'string' && CONTROL_EVENT_KINDS.has(data.kind);
+          const isSteerControlEvent = typeof data?.type === 'string' && STEER_CONTROL_EVENT_TYPES.has(data.type);
+          if (data && (isKindControlEvent || isSteerControlEvent)) {
             if (data.kind === 'session_created') {
               rememberSessionWorkspaceGeneration(
                 data.newSessionId || data.sessionId,
@@ -491,6 +512,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
             }
             // B-721: delivery authority is consumed synchronously, before the
             // bounded React log can batch, remount, or trim the terminal event.
+            // Steer events carry no outbox-tracked clientMsgId in this map's key
+            // space, so calling it is a harmless no-op for them.
             consumeOutboxIngressVerdict(data);
             controlSeqRef.current += 1;
             const seq = controlSeqRef.current;

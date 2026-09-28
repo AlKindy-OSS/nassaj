@@ -35,6 +35,7 @@ export function claudeTextPayloadHash(content: unknown): string | null {
 export function createClaudeReceiptPrompt(input: {
   capability: unknown; command: string; content: unknown; userId: unknown;
   sessionId: string | null; persistSession?: boolean; release: Promise<unknown>;
+  steer?: { take(): Promise<{ uuid: string; wrapped: string } | null> } | null;
 }, bind = messageCoordinationDb.bindClaudeIdentity) {
   const receipt = readVendorReceiptInvocation(input.capability, input.command, input.userId);
   const payloadSha256 = claudeTextPayloadHash(input.content);
@@ -54,7 +55,16 @@ export function createClaudeReceiptPrompt(input: {
     }
     yield { type: 'user', session_id: '', parent_tool_use_id: null,
       ...(uuid ? { uuid } : {}), message: { role: 'user', content } };
-    await input.release;
+    if (!input.steer) {
+      await input.release;
+      return;
+    }
+    // T-1903: the same single generator carries mid-turn injections. The queue
+    // is owned by the run; closing it (input release or abort) ends the stream.
+    for (let item = await input.steer.take(); item; item = await input.steer.take()) {
+      yield { type: 'user', session_id: '', parent_tool_use_id: null, uuid: item.uuid,
+        message: { role: 'user', content: item.wrapped } };
+    }
   };
   return { make, wasConsumed: () => consumed };
 }
@@ -159,4 +169,55 @@ export function projectClaudeHistoryReceipts(result: FetchHistoryResult, session
     if (isSuccessfulTerminalReceipt(matches[0], lease)) parts[0]!.clientMsgId = matches[0].clientMsgId;
   }
   return clone;
+}
+
+/**
+ * T-1903 — transcript rows that MAY be mid-turn injections, keyed by message
+ * object: the native uuid our generator stamped (a normal user line) or the
+ * `queued_command.source_uuid` the CLI records for a message queued mid-turn.
+ */
+const steerCandidates = new WeakMap<NormalizedMessage, string>();
+
+type SteerRaw = { type?: unknown; uuid?: unknown; attachment?: { type?: unknown; prompt?: unknown; source_uuid?: unknown } };
+
+/** Text of a `queued_command` attachment we injected, or null. */
+export function readQueuedSteerPrompt(raw: SteerRaw, knownUuids: ReadonlySet<string>): { uuid: string; text: string } | null {
+  const attachment = raw?.type === 'attachment' ? raw.attachment : null;
+  if (!attachment || attachment.type !== 'queued_command' || typeof attachment.source_uuid !== 'string'
+    || !knownUuids.has(attachment.source_uuid)) return null;
+  const prompt = attachment.prompt;
+  const text = typeof prompt === 'string' ? prompt
+    : Array.isArray(prompt) ? prompt.map(block => (typeof block?.text === 'string' ? block.text : '')).join('') : '';
+  return text ? { uuid: attachment.source_uuid, text } : null;
+}
+
+/** Marks a normalized history row as carrying a native uuid we may have injected. */
+export function markSteerCandidate(message: NormalizedMessage, uuid: string): void {
+  steerCandidates.set(message, uuid);
+}
+
+type SteerRow = { clientMsgId: string; userId: number; uuid: string; payloadSha256: string; text: string };
+
+/**
+ * Stamps VERIFIED injections: uuid AND payload hash must match one ingress row.
+ * A candidate that fails verification is removed (a queued_command we did not
+ * prove stays invisible, exactly as before T-1903). Text is never parsed for
+ * identity; a user-typed wrapper look-alike stays an ordinary message.
+ */
+export function applyClaudeSteerInjections(messages: NormalizedMessage[], rows: readonly SteerRow[]): NormalizedMessage[] {
+  const byUuid = new Map(rows.map(row => [row.uuid, row]));
+  return messages.filter((message) => {
+    const uuid = steerCandidates.get(message);
+    if (!uuid) return true;
+    const row = byUuid.get(uuid);
+    const verified = row && message.kind === 'text' && message.role === 'user'
+      && claudeTextPayloadHash(message.content ?? '') === row.payloadSha256;
+    if (!verified) return !message.id?.endsWith('_steer');
+    message.injected = true;
+    message.userId = row.userId;
+    message.content = row.text;
+    message.deliveryStatus = 'delivered';
+    message.steerClientMsgId = row.clientMsgId;
+    return true;
+  });
 }

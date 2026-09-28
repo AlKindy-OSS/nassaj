@@ -67,6 +67,12 @@ export type AuditAction =
   | 'command_board_raw_exec'
   | 'passkey_registered'
   | 'passkey_removed'
+  // T-1903 (ADR-190): mid-turn steering. Policy/consent changes carry the new
+  // value only; an injection carries ids, a text hash and the ingress
+  // clientMsgId — the full text lives in its message_coordination_ingress row.
+  | 'session_steer_policy_updated'
+  | 'session_steer_consent_updated'
+  | 'session_steer_injection'
   // ADR-187: internal team-chat room grants. Who can read a team room is the
   // question asked later; metadata carries ids and roles only, never text.
   | 'internal_chat_room_created'
@@ -168,6 +174,9 @@ export type AuditAction =
   | 'scheduled_message_cancelled'
   | 'scheduled_message_dispatched'
   | 'scheduled_message_failed'
+  // B-1390: an accepted scheduled turn ended in failure. Metadata carries the
+  // bounded error code only, never message content.
+  | 'scheduled_message_turn_failed'
   | 'harness_update_started'
   | 'harness_update_succeeded'
   | 'harness_update_failed'

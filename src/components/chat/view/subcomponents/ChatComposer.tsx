@@ -130,6 +130,27 @@ interface ChatComposerProps {
   workflowAgents?: RunAgent[];
   /** Honest verdict for those rows; drives the card's headline (see AgentStatusCard). */
   workflowStatus?: WorkflowUiDescriptor | null;
+  /**
+   * T-1904 — the CURRENT viewer is NOT this run's starter and the starter's
+   * display name is known (from steer-turn-state, or a best-effort fallback
+   * for a non-steerable run). Presence alone swaps the provider label for
+   * this name; it does not by itself show the Steer button (see `steerable`).
+   */
+  viewerStarterName?: string | null;
+  /** T-1904: show the Steer pill (only meaningful alongside `viewerStarterName`). */
+  steerable?: boolean;
+  /** T-1904: puts "/steer " in the composer and focuses it. */
+  onSteerClick?: () => void;
+  /**
+   * T-1904 e2e (BLOCKER) — true only when `steer-turn-state` proves a run is
+   * active for THIS viewer's session even though their own `isLoading` has
+   * not (yet, or ever, for a pre-existing mirror) caught up — the confirmed
+   * two-user race. Lets the running bar render for a viewer instead of
+   * disappearing entirely; never used for the starter's own timer/STOP logic.
+   */
+  runActiveOverride?: boolean;
+  /** T-1904 e2e (BLOCKER) — see ClaudeStatus.tsx. Fail-closed; defaults true (legacy solo). */
+  isConfirmedStarter?: boolean;
   onAbortSession: () => void;
   provider: Provider | string;
   displayProvider: Provider | string;
@@ -1011,6 +1032,11 @@ export default function ChatComposer({
   runProgress = null,
   workflowAgents = [],
   workflowStatus = null,
+  viewerStarterName = null,
+  steerable = false,
+  onSteerClick,
+  runActiveOverride = false,
+  isConfirmedStarter = true,
   onAbortSession,
   displayProvider,
   permissionMode,
@@ -1160,6 +1186,19 @@ export default function ChatComposer({
       normalizeArabicSlashCommand(input, displayProvider, i18n?.language),
       displayProvider,
     );
+
+  // T-1904 e2e (bug 5) — a viewer (not this run's starter) must never see the
+  // send button turn into the disabled square "busy" glyph: it looks exactly
+  // like a stop control they don't have, and had no aria-label at all. Force
+  // the real send-arrow (still correctly disabled while empty/offline/etc —
+  // just never disabled purely by `isLoading`, which mirrors someone ELSE's
+  // turn for a viewer, not their own in-flight send).
+  const isViewerComposer = Boolean(viewerStarterName);
+  const promptSubmitStatus = (isBtwReady || isViewerComposer) ? 'ready' : undefined;
+  const promptSubmitActive = isLoading && !isBtwReady && !isViewerComposer;
+  const promptSubmitAriaLabel = promptSubmitActive
+    ? t('input.sendBusy', { defaultValue: 'Sending is unavailable while a reply is streaming' })
+    : t('input.send', { defaultValue: 'Send' });
 
   // ADR-097 — تفريغ صوتي عبر Web Speech. الإدراج نفسه يعيش في طبقة حالة
   // المُؤلِّف (onVoiceInsert ⇐ insertTextAtCursor): يحترم المؤشّر ويُحيّط النصّ
@@ -1635,6 +1674,11 @@ export default function ChatComposer({
           provider={displayProvider}
           runStartedAt={runStartedAt}
           progress={runProgress}
+          viewerStarterName={viewerStarterName}
+          steerable={steerable}
+          onSteerClick={onSteerClick}
+          runActiveOverride={runActiveOverride}
+          isConfirmedStarter={isConfirmedStarter}
       />
 
       {pendingPermissionRequests.length > 0 && (
@@ -2208,9 +2252,10 @@ export default function ChatComposer({
               onClick={openNewSchedule}
             />
             <PromptInputSubmit
-              status={isBtwReady ? 'ready' : undefined}
-              disabled={(!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady) || !isWsConnected || isImageCropping}
+              status={promptSubmitStatus}
+              disabled={(!input.trim() && attachedImages.length === 0) || Boolean(executingCommand) || (isLoading && !isBtwReady && !isViewerComposer) || !isWsConnected || isImageCropping}
               title={!isWsConnected ? t('ws.sendDisabledTitle', { defaultValue: 'Cannot send — connection lost' }) : undefined}
+              aria-label={promptSubmitAriaLabel}
               className="h-8 w-8 shrink-0 sm:h-8 sm:w-8"
             />
           </div>

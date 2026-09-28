@@ -76,6 +76,23 @@ function mount(sessionStore: any, pendingViewSessionRef: { current: any }) {
   );
 }
 
+/** Like `mount`, but `selectedProject` also varies per render (B-1386 project-switch test). */
+function mountWithProject(sessionStore: any, pendingViewSessionRef: { current: any }) {
+  return renderHook(
+    ({ selectedSession, selectedProject }: { selectedSession: any; selectedProject: any }) =>
+      useChatSessionState({
+        selectedProject,
+        selectedSession,
+        ws: null,
+        sendMessage: () => {},
+        resetStreamingState: () => {},
+        pendingViewSessionRef: pendingViewSessionRef as any,
+        sessionStore,
+      }),
+    { initialProps: { selectedSession: null as any, selectedProject: PROJECT } },
+  );
+}
+
 beforeEach(() => {
   localStorage.setItem('selected-provider', 'claude');
 });
@@ -114,6 +131,52 @@ describe('رسالة المسوّدة لا تنتقل إلى محادثة أخر
     assert.equal(result.current.chatMessages.length, 0);
   });
 
+  it(
+    'B-1386: session_created لجلسة جديدة يُبقي المرجع حياً حتى يلحق الموجّه — ' +
+    'لا يُصفَّر currentSessionId ولا تُفقد المسوّدة',
+    async () => {
+      const appends: Appended[] = [];
+      const pendingViewSessionRef:
+        { current: { sessionId: string | null; startedAt: number; projectId?: string | null } | null } =
+        { current: { sessionId: null, startedAt: Date.now(), projectId: PROJECT.projectId } };
+      const { result, rerender } = mount(makeStore(appends), pendingViewSessionRef);
+
+      act(() => {
+        result.current.addMessage({
+          type: 'user',
+          content: 'أول رسالة',
+          timestamp: new Date(),
+        } as any);
+      });
+      assert.equal(result.current.chatMessages.length, 1);
+
+      // مطابقٌ لما يفعله useChatRealtimeHandlers بعد B-1386: يضبط sessionId على
+      // المرجع (لا يُصفِّره) ثم يضبط currentSessionId، والموجّه لم يلحق بعد.
+      act(() => {
+        pendingViewSessionRef.current!.sessionId = 'session-new';
+        result.current.setCurrentSessionId('session-new');
+      });
+
+      // جولة تصيير أخرى بلا selectedSession (سباق الموجّه): لا يُصفَّر
+      // currentSessionId، ولا تضيع المسوّدة.
+      rerender({ selectedSession: null });
+      assert.equal(result.current.currentSessionId, 'session-new');
+
+      await waitFor(() => {
+        assert.deepEqual(
+          appends.map((a) => a.sessionId),
+          ['session-new'],
+          `الإفراغ لم يقع في مخزن الجلسة الجديدة: ${JSON.stringify(appends)}`,
+        );
+      });
+
+      // الموجّه يلحق أخيراً: المرجع يُصفَّر ذاتياً، والجلسة تبقى صحيحة.
+      rerender({ selectedSession: { id: 'session-new', __provider: 'claude' } as any });
+      assert.equal(pendingViewSessionRef.current, null);
+      assert.equal(result.current.currentSessionId, 'session-new');
+    },
+  );
+
   it('وصول الجلسة التي أنشأها الإرسال نفسه ⇒ الإفراغ يقع في مخزنها', async () => {
     const appends: Appended[] = [];
     const pendingViewSessionRef: { current: { sessionId: string | null; startedAt: number } | null } =
@@ -142,4 +205,33 @@ describe('رسالة المسوّدة لا تنتقل إلى محادثة أخر
       );
     });
   });
+
+  it(
+    'B-1386: switching PROJECT mid-send (no newSessionTrigger bump) resets ' +
+    'currentSessionId instead of pinning it to the abandoned project',
+    async () => {
+      const appends: Appended[] = [];
+      const OTHER_PROJECT = { projectId: 'proj-2', fullPath: '/tmp/p2', path: '/tmp/p2' } as any;
+      // Stamped by useChatComposerState with the ORIGINATING project (proj-1).
+      const pendingViewSessionRef:
+        { current: { sessionId: string | null; startedAt: number; projectId?: string | null } | null } =
+        { current: { sessionId: 'session-new', startedAt: Date.now(), projectId: PROJECT.projectId } };
+      const { result, rerender } = mountWithProject(makeStore(appends), pendingViewSessionRef);
+
+      act(() => {
+        result.current.setCurrentSessionId('session-new');
+      });
+
+      // handleProjectSelect: setSelectedProject(OTHER_PROJECT) + setSelectedSession(null),
+      // no newSessionTrigger bump.
+      rerender({ selectedSession: null, selectedProject: OTHER_PROJECT });
+
+      assert.equal(
+        result.current.currentSessionId,
+        null,
+        'a real project switch must reset currentSessionId, not get pinned by the router-lag guard',
+      );
+      assert.equal(pendingViewSessionRef.current, null);
+    },
+  );
 });

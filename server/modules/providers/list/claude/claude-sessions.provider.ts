@@ -6,7 +6,7 @@ import readline from 'node:readline';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
-import { sessionsDb } from '@/modules/database/index.js';
+import { messageCoordinationDb, sessionsDb } from '@/modules/database/index.js';
 import {
   findLatestStoppedNotificationMs,
   reconcileWorkflowMessages,
@@ -16,7 +16,7 @@ import { reconcileAgentMessages } from '@/modules/providers/list/claude/agent-re
 import type { HistoryReadLease } from '../../services/history-budget.service.js';
 
 import { resolveStoredClaudeTranscript } from './claude-projects-roots.js';
-import { createClaudeRawIdentityCollector } from './claude-receipt-identity.js';
+import { createClaudeRawIdentityCollector, markSteerCandidate, readQueuedSteerPrompt } from './claude-receipt-identity.js';
 
 const PROVIDER = 'claude';
 
@@ -365,6 +365,37 @@ function buildLocalCommandDisplayText(payload: ClaudeLocalCommandPayload): strin
  */
 function stripAnsiFormatting(text: string): string {
   return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, '');
+}
+
+/** T-1903: uuids this session's ingress recorded as injections (empty on any failure). */
+function readSteerUuids(sessionId: string, lease?: HistoryReadLease): ReadonlySet<string> {
+  try {
+    return new Set(messageCoordinationDb.listSteerBySession(sessionId, lease).map(row => row.uuid));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Normalizes one raw row and tags T-1903 steer candidates: a `queued_command`
+ * attachment we injected becomes a user text row, and a user line carrying one
+ * of our uuids is tagged. Verification happens later against the ingress row.
+ */
+function normalizeWithSteer(provider: ClaudeSessionsProvider, raw: AnyRecord, sessionId: string,
+  steerUuids: ReadonlySet<string>, lease?: HistoryReadLease): NormalizedMessage[] {
+  if (steerUuids.size === 0) return provider.normalizeMessage(raw, sessionId, lease);
+  const queued = readQueuedSteerPrompt(raw, steerUuids);
+  if (queued) {
+    const message = createNormalizedMessage({ id: `${queued.uuid}_steer`, sessionId, provider: PROVIDER,
+      timestamp: raw.timestamp || new Date().toISOString(), kind: 'text', role: 'user', content: queued.text });
+    markSteerCandidate(message, queued.uuid);
+    return [message];
+  }
+  const messages = provider.normalizeMessage(raw, sessionId, lease);
+  if (raw.type === 'user' && typeof raw.uuid === 'string' && steerUuids.has(raw.uuid)) {
+    for (const message of messages) markSteerCandidate(message, raw.uuid);
+  }
+  return messages;
 }
 
 export class ClaudeSessionsProvider implements IProviderSessions {
@@ -736,10 +767,11 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       }
     }
 
+    const steerUuids = readSteerUuids(sessionId, options.historyLease);
     const normalized: NormalizedMessage[] = [];
     for (const raw of rawMessages) {
       options.historyLease?.reserveDto(raw);
-      normalized.push(...this.normalizeMessage(raw, sessionId, options.historyLease));
+      normalized.push(...normalizeWithSteer(this, raw, sessionId, steerUuids, options.historyLease));
     }
 
     for (const msg of normalized) {

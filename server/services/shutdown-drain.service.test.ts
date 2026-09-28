@@ -269,3 +269,22 @@ test('omitting the hook preserves the previous behaviour exactly', async () => {
   assert.ok(!calls.some((c) => c.name === 'cancelPendingApprovals'));
   assert.ok(calls.some((c) => c.name === 'server.close'));
 });
+
+// ---- onDrainStart (B-1390) -------------------------------------------------
+
+test('B-1390: onDrainStart runs once, before the first wait, and a throwing hook never blocks the drain', async () => {
+  const { deps, calls, names } = buildHarness({ countsSequence: [{ codex: 1 }, { codex: 0 }] });
+  deps.onDrainStart = () => { calls.push({ name: 'onDrainStart', args: [] }); };
+  const drain = createShutdownDrain(deps);
+
+  await drain('SIGTERM');
+  const order = names();
+  assert.equal(order.filter((name) => name === 'onDrainStart').length, 1);
+  assert.ok(order.indexOf('onDrainStart') < order.indexOf('sleep'), 'hook ran after the drain began waiting');
+  assert.equal(order.at(-1), 'exit');
+
+  const failing = buildHarness({ countsSequence: [{ codex: 1 }, { codex: 0 }] });
+  failing.deps.onDrainStart = () => { throw new Error('pause failed'); };
+  await createShutdownDrain(failing.deps)('SIGTERM');
+  assert.equal(failing.names().at(-1), 'exit');
+});

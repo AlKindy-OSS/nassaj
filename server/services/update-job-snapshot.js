@@ -105,6 +105,9 @@ export function normalizeManifestDrift(details, { publisherInstalled = isPublicP
  * receipt (facts.code / facts.failedPhase). failedPhase is the phase the job
  * was in when it failed: the last rollback/recovery receipt's facts.failedPhase,
  * else that receipt's phase (which the worker sets to the job state at failure).
+ * B-1381: the terminal metrics receipt (facts.downtimeMs) is written with the
+ * terminal state as its phase ('failed', …); it summarises the others and is
+ * skipped, and a bare terminal-state phase never replaces the real one.
  *
  * @param {{ id: string, state: string, error_code?: string, error_message?: string }} job
  * @param {{ listReceipts: (id: string) => Array<Record<string, unknown>> }} jobsDb
@@ -125,7 +128,9 @@ export function deriveUpdateJobFailure(job, jobsDb) {
         if (row.kind !== 'rollback' && row.kind !== 'recovery') continue;
         let facts = {};
         try { facts = JSON.parse(row.facts_json) || {}; } catch { facts = {}; }
-        const phase = (typeof facts.failedPhase === 'string' && facts.failedPhase) ? facts.failedPhase : row.phase;
+        if (Object.hasOwn(facts, 'downtimeMs')) continue;
+        const phase = (typeof facts.failedPhase === 'string' && facts.failedPhase) ? facts.failedPhase
+            : (UPDATE_FAILURE_STATES.has(row.phase) ? null : row.phase);
         if (typeof phase === 'string' && phase) failedPhase = phase;
         if (typeof facts.code === 'string' && facts.code) receiptCode = facts.code;
         if (typeof facts.message === 'string') receiptMessage = facts.message;
@@ -164,4 +169,24 @@ export function deriveUpdateJobDeferral(job, live = {}) {
     const gateReason = typeof live.gateReason === 'string' && live.gateReason.length > 0
         ? live.gateReason : null;
     return { deadlineAt, sessionCount, gateReason, rearmCount };
+}
+
+/**
+ * Build the top-level `scheduledDueSoon` snapshot field (T-1912) from the
+ * activator's last status: present ONLY while the scheduled condition itself
+ * holds this job's restart (`autoActivation.state === 'waiting_scheduled'`).
+ * No reader is called here, so a poll adds no query and exposes nothing about
+ * other users' rows unless they are what is holding the owner's update — and
+ * then only `{ count, earliestAt }`, never content, ids or owners.
+ *
+ * @param {{ state?: string }} job
+ * @param {{ state?: string, scheduledDueSoon?: { count?: number, earliestAt?: string | null } } | null} autoActivation
+ */
+export function deriveUpdateJobScheduledDueSoon(job, autoActivation) {
+    if (job?.state !== 'restart_queued' || autoActivation?.state !== 'waiting_scheduled') return null;
+    const reading = autoActivation.scheduledDueSoon;
+    const count = Number.isSafeInteger(reading?.count) && reading.count > 0 ? reading.count : 0;
+    if (count === 0) return null;
+    const parsed = typeof reading.earliestAt === 'string' ? Date.parse(reading.earliestAt) : Number.NaN;
+    return { count, earliestAt: Number.isFinite(parsed) ? new Date(parsed).toISOString() : null };
 }

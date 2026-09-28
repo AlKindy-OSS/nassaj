@@ -1,3 +1,8 @@
+## 2.3.0.10 — 2026-09-28
+
+إصدار جسر للترقية من 2.3.0.8 (إعادة codex-sdk إلى 0.153.2 وبناء كل إصدار لاحق بأدواته)، وتوجيه الدور الجاري بـ/steer، وتسليم الرسائل المجدولة لكل جلسة مع تأجيل التحديث لها، وإقلاع بلا sharp، وأساس الإصدارات الموثَّقة محلياً (حدّث عقد 2.3.0.8 إلى 2.3.0.10 قبل صدور 2.3.0.11).
+Update bridge from 2.3.0.8 (codex-sdk back to 0.153.2 and each later release built with its own builders), mid-turn /steer, per-session scheduled delivery with an update hold, booting without sharp, and local groundwork for attested releases (move 2.3.0.8 nodes to 2.3.0.10 before 2.3.0.11 ships).
+
 ## 2.3.0.9 — 2026-09-28
 
 تحديث أجساد الوكلاء مع الرجوع والاستعادة وشارات التوافق، وتبويب النظام للمالك، وترقية SDK، وإصلاحات أمان من upstream، وسجلّ مسارات موحّد للأجساد وCodex من نسخة الجهاز وKimi أصيل (تحقّق من مسارات الأجساد قبل زر التحديث).

@@ -1,6 +1,6 @@
 {
   "name": "nassaj",
-  "version": "2.3.0.9",
+  "version": "2.3.0.10",
   "description": "Nassaj — multi-provider AI coding workspace with RTL Arabic support",
   "type": "module",
   "private": true,
@@ -45,6 +45,7 @@
     "test:client:conversation-closed": "npm run test:client -- src/components/chat/hooks/useConversationClosed.test.tsx src/components/main-content/view/subcomponents/MainContentTitle.workflowStatus.test.tsx src/components/participants/SessionParticipantsBar.closedHeader.integration.test.tsx",
     "test:smoke:btw-hook": "d=$(mktemp -d); trap 'rm -rf \"$d\"' EXIT; DATABASE_PATH=\"${DATABASE_PATH:-$d/auth.db}\" tsx --tsconfig server/tsconfig.json scripts/smoke/btw-hook-precedence.smoke.mjs",
     "test:smoke:btw-fork": "d=$(mktemp -d); trap 'rm -rf \"$d\"' EXIT; DATABASE_PATH=\"${DATABASE_PATH:-$d/auth.db}\" tsx --tsconfig server/tsconfig.json scripts/smoke/btw-fork-resume.smoke.mjs",
+    "test:smoke:steer-taint": "TMPDIR=/var/tmp tsx --tsconfig server/tsconfig.json scripts/smoke/steer-taint-precedence.smoke.mjs",
     "doctor": "node scripts/doctor.mjs",
     "connectors:doctor": "tsx --tsconfig server/tsconfig.json scripts/connectors-doctor.mjs",
     "connectors:setup": "node scripts/connectors-setup.mjs",
@@ -73,7 +74,9 @@
     "update:platform": "./update-platform.sh",
     "prebuild:client": "node scripts/ensure-wiki-index.mjs",
     "pretest:client": "node scripts/ensure-wiki-index.mjs",
-    "pretypecheck": "node scripts/ensure-wiki-index.mjs"
+    "pretypecheck": "node scripts/ensure-wiki-index.mjs",
+    "release:license-gate": "node scripts/release-license-gate.mjs",
+    "release:generation": "node scripts/build-release-generation.mjs"
   },
   "keywords": [
     "claude code",
@@ -112,8 +115,12 @@
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@octokit/rest": "^22.0.0",
-    "@openai/codex-sdk": "0.157.1",
+    "@openai/codex-sdk": "0.153.2",
     "@replit/codemirror-minimap": "^0.5.2",
+    "@sigstore/bundle": "5.0.0",
+    "@sigstore/core": "4.0.1",
+    "@sigstore/protobuf-specs": "0.5.2",
+    "@sigstore/verify": "4.1.2",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.1",
     "@tailwindcss/typography": "^0.5.16",

@@ -15,9 +15,6 @@ export { hashTree } from './lib/source-update-tree-identity.mjs';
 import { installAndBuildCandidate, buildInstalledCandidateArtifact, dependencyEnvironment } from './lib/candidate-build-steps.mjs';
 import { readOidSourceInventory, verifyOidSourceInventory, verifyOidLinkedWorktree } from './lib/oid-candidate-source.mjs';
 
-import { buildClientReleaseCandidate } from './client-build-atomic.mjs';
-import { buildServerReleaseCandidate } from './server-build-atomic.mjs';
-
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
 
@@ -153,13 +150,22 @@ export async function buildSourceUpdateCandidate(planFile, injected = {}) {
         if (existsSync(target)) throw new Error(`Candidate output already exists: ${path.basename(target)}`);
     }
     const env = dependencyEnvironment(injected.env || process.env);
+    // B-1381: both paths build with the CANDIDATE's own builders, never the
+    // installed runtime's. The installed build guards pin the installed release's
+    // dependency contract (e.g. the codex-sdk image-only patch version), so an
+    // installed builder judging a newer candidate refuses every dependency bump.
+    // Trust boundary: the candidate source is trusted by remote identity, tag ->
+    // commit resolution, fast-forward ancestry and version match (or the local
+    // inventory); no signature is verified. Its code already runs during
+    // `npm ci` (postinstall); running its builders in a child process under the
+    // same restricted env adds no new trust, and verifySource re-checks afterwards.
     const targetBuilder = domain => options => buildInstalledCandidateArtifact(domain, options, run, env);
     const { client, server, sourceProvenance, npmList, stagedModules } = await installAndBuildCandidate({
         ...plan, sourceOid: plan.releaseCommit,
     }, {
         run, env, verifySource: stage => plan.localSource ? verifyLocalSource(plan, stage, run) : assertGitSourceProvenance(plan, run),
-        buildClient: injected.buildClient || (plan.localSource ? targetBuilder('client') : buildClientReleaseCandidate),
-        buildServer: injected.buildServer || (plan.localSource ? targetBuilder('server') : buildServerReleaseCandidate),
+        buildClient: injected.buildClient || targetBuilder('client'),
+        buildServer: injected.buildServer || targetBuilder('server'),
     });
     realDirectory(stagedModules, 'Staged node_modules');
     renameSync(stagedModules, plan.outputs.nodeModules);

@@ -220,7 +220,7 @@ export function measuredBuildControls(sourceFile) {
 function verifySdkReference(options, dependencies) {
     const reference = options.sdkReference?.path === undefined && options.sdkReference?.sha256 === undefined
         ? { path: path.join(options.repoRoot, 'scripts/lib/codex-sdk-dependencies.json'),
-            sha256: '5be6a78e70415e77576855d1409074684320c9ab59e27c70e6a105728cc42401' }
+            sha256: '0bf1ba7d8b72fec96f4655761cf2f59b82f3aad451fa0ea0af025df20e1764dd' }
         : options.sdkReference;
     if (!reference || Object.keys(reference).sort().join(',') !== 'path,sha256' || !SHA.test(reference.sha256 || '')
         || typeof reference.path!=='string' || !inside(options.repoRoot,reference.path)

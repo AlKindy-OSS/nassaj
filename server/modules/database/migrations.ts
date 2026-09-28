@@ -1917,9 +1917,54 @@ export const migrateMessageCoordination = (db: Database): void => {
       `CREATE INDEX IF NOT EXISTS idx_coordination_claude_owner_session
        ON message_coordination_ingress(user_id, provider, session_id) WHERE claude_user_uuid IS NOT NULL`,
     );
+    migrateSessionSteerIngress(db, columns);
   });
 
   migrate();
+};
+
+/**
+ * T-1903 (ADR-190): one ingress row per mid-turn injection. Additive: every
+ * existing row defaults to `delivery_kind = 'message'`, so no legacy reader
+ * changes meaning. Reversible through {@link reverseSessionSteerIngress}.
+ */
+function migrateSessionSteerIngress(db: Database, columns: string[]): void {
+  if (!columns.includes('delivery_kind')) {
+    console.log('Running migration: Adding delivery_kind to message_coordination_ingress');
+    db.exec(`ALTER TABLE message_coordination_ingress ADD COLUMN delivery_kind TEXT NOT NULL
+      DEFAULT 'message' CHECK (delivery_kind IN ('message', 'steer'))`);
+  }
+  if (!columns.includes('turn_id')) {
+    db.exec('ALTER TABLE message_coordination_ingress ADD COLUMN turn_id TEXT');
+  }
+  if (!columns.includes('delivery_status')) {
+    db.exec(`ALTER TABLE message_coordination_ingress ADD COLUMN delivery_status TEXT
+      CHECK (delivery_status IS NULL OR delivery_status IN ('queued', 'delivered', 'unconfirmed', 'rejected'))`);
+  }
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_coordination_steer_session
+     ON message_coordination_ingress(session_id, turn_id) WHERE delivery_kind = 'steer'`,
+  );
+}
+
+/**
+ * Rollback of the T-1903 steer columns. Refuses while steer rows exist so a
+ * downgrade can never re-present an injection as an ordinary message.
+ */
+export const reverseSessionSteerIngress = (db: Database): void => {
+  if (!tableExists(db, 'message_coordination_ingress')) return;
+  const columns = getTableInfo(db, 'message_coordination_ingress').map((column) => column.name);
+  if (!columns.includes('delivery_kind')) return;
+  const steer = db.prepare(
+    "SELECT COUNT(*) AS c FROM message_coordination_ingress WHERE delivery_kind = 'steer'",
+  ).get() as { c: number };
+  if (steer.c > 0) throw new Error('reverseSessionSteerIngress refuses: steer rows exist');
+  db.transaction(() => {
+    db.exec('DROP INDEX IF EXISTS idx_coordination_steer_session');
+    for (const column of ['delivery_status', 'turn_id', 'delivery_kind']) {
+      if (columns.includes(column)) db.exec(`ALTER TABLE message_coordination_ingress DROP COLUMN ${column}`);
+    }
+  })();
 };
 
 /**

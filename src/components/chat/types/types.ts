@@ -71,6 +71,27 @@ export interface ChatMessage {
    */
   originKind?: 'coordinator' | 'peer' | 'channel' | 'task-notification' | string;
   /**
+   * T-1903 (ADR-190): true only on a VERIFIED mid-turn steer injection — a
+   * `type:'user'` row stamped by the server (history replay or live
+   * steer-queued/steer-delivered), never derived from text. `userId` is the
+   * STEERING member (not the turn starter); the renderer shows a distinct
+   * "Steer from <name>" bubble (SteerBubble) instead of the normal blue one.
+   */
+  injected?: boolean;
+  /** Present alongside `injected`: 'queued' until the starter's run consumes it. */
+  deliveryStatus?: 'queued' | 'delivered' | 'unconfirmed' | 'rejected';
+  /** The steering member's own clientMsgId — correlates with session-steer-result. */
+  steerClientMsgId?: string;
+  /**
+   * T-1904 e2e — the sender's display name carried DIRECTLY on a live
+   * `steer-queued`-sourced row (ChatInterface's synthetic insertion), so the
+   * bubble shows the right name/avatar-initial immediately instead of a "?"
+   * while waiting on the participants roster fetch to resolve `userId`. A
+   * reloaded/history row has no need for this (the roster is loaded by then)
+   * and omits it; renderers must prefer it over the roster lookup when present.
+   */
+  steerSenderDisplayName?: string;
+  /**
    * The model that produced this assistant message, verbatim from the provider
    * (B-352). Present on assistant rows whenever any harness names the model,
    * live and on history alike; absent on user rows and on providers that expose
@@ -173,6 +194,14 @@ export interface PendingPermissionRequest {
   context?: unknown;
   sessionId?: string | null;
   receivedAt?: Date;
+  /**
+   * T-1903 (ADR-190) — true when this request follows a colleague's mid-turn
+   * steer (the taint gate, server-side). Goes to the starter only. The
+   * persist/"allow and remember" option must be hidden for it: a rule
+   * written under taint would silently pre-approve future UNRELATED runs too
+   * — only once/deny are offered.
+   */
+  steerTainted?: boolean;
 }
 
 export interface QuestionOption {

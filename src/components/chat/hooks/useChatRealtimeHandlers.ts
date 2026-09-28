@@ -63,6 +63,8 @@ type PendingViewSession = {
    * يُسرق التنقّل لجلسات جلبات أخرى أو تبويبات أخرى.
    */
   clientMsgId?: string | null;
+  /** B-1386: المشروع الذي بدأ منه الإرسال (انظر useChatComposerState). */
+  projectId?: string | null;
 };
 
 type LatestChatMessage = {
@@ -223,6 +225,17 @@ interface UseChatRealtimeHandlersArgs {
    */
   onRequestExpandedHistory?: (sessionId: string) => void;
   sessionStore: SessionStore;
+  /**
+   * T-1904 e2e (bug 2) — يفحص إطار نصّ حيّ `role:'user'` قبل حفظه، ويُعيد
+   * true حين يطابق توجيهاً (steer) أُدرِج بالفعل محلياً كفقاعة SteerBubble
+   * فور وصول `steer-queued` (ChatInterface). السبب: صفّ التوجيه المحفوظ
+   * خادمياً يصل أيضاً عبر هذا المسار العام (كل مشاركي الجلسة، لا المُوجَّه
+   * وحده، مرايا الجلسة اللحظية) فيُضاف صفّاً أزرق عادياً مكرَّراً بجانب فقاعة
+   * التوجيه الكهرمانية — قبل أن يحمل الإطار الحيّ نفسه `injected:true` أصلاً
+   * (يصل ذلك فقط عند إعادة التحميل من history اليوم). اختياري كي تبقى
+   * الاستدعاءات القديمة/الاختبارات صالحة.
+   */
+  isDuplicateSteerInjection?: (msg: { kind?: string; role?: string; content?: string; sessionId?: string; clientMsgId?: string; steerClientMsgId?: string }) => boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -258,6 +271,7 @@ export function useChatRealtimeHandlers({
   onRejectedSendRestore,
   onRequestExpandedHistory,
   sessionStore,
+  isDuplicateSteerInjection,
 }: UseChatRealtimeHandlersArgs) {
   const paletteOps = usePaletteOps();
   const { t } = useTranslation('chat');
@@ -561,7 +575,22 @@ export function useChatRealtimeHandlers({
           onNavigateToSession?.(newSessionId, { replace: true });
           break;
         }
-        pendingViewSessionRef.current = null;
+        // B-1386: keep the guard alive through the router race. Nulling it
+        // here (before the route/selectedSession catches up with the freshly
+        // minted id) let useChatSessionState's session-loading effect treat
+        // this exact tick as "navigated away", resetting currentSessionId and
+        // losing the just-flushed optimistic user message. useChatSessionState
+        // clears the ref itself once `selectedSession.id === newSessionId`.
+        // `error` always clears it too when this is the active view; `complete`
+        // only clears it when the turn is NOT left with pending Workflows (see
+        // `hasPendingWorkflows` below) — a Workflow-tailed turn leaves the ref
+        // set until that later `complete` with no pending work arrives, which
+        // is correct: the view is still "establishing" until then.
+        if (pendingViewSessionRef.current) {
+          pendingViewSessionRef.current.sessionId = newSessionId;
+        } else {
+          pendingViewSessionRef.current = { sessionId: newSessionId, startedAt: Date.now() };
+        }
         onSessionActive?.(newSessionId);
         onSessionProcessing?.(newSessionId);
         setIsLoading(true);
@@ -571,7 +600,7 @@ export function useChatRealtimeHandlers({
           tokens: 0,
           can_interrupt: true,
         });
-        onNavigateToSession?.(newSessionId);
+        onNavigateToSession?.(newSessionId, { replace: true });
         break;
       }
 
@@ -800,6 +829,7 @@ export function useChatRealtimeHandlers({
             context: msg.context,
             sessionId: sid || null,
             receivedAt: new Date(),
+            steerTainted: msg.steerTainted === true,
           }];
         });
         setIsLoading(true);
@@ -1294,7 +1324,15 @@ export function useChatRealtimeHandlers({
     // رسالة المستخدم يُكتب في أي محادثة تكون مفتوحة أمامه حينها، ولا يزول إلا
     // بتحديث الصفحة. والإسقاط هنا بلا خسارة: في شاشة المسوّدة لا مفتاح أصلاً
     // (`sid` عندها null) فلم يكن يُكتب شيء على أي حال.
-    if (msg.sessionId && shouldPersist) {
+    // T-1904 e2e (bug 2): إطار حيّ يطابق توجيهاً أُدرِج بالفعل محلياً — تجاهله
+    // بدل حفظه فقاعة زرقاء ثانية مكرَّرة بجانب SteerBubble الكهرمانية.
+    const isSteerDuplicate =
+      msg.kind === 'text'
+      && msg.role === 'user'
+      && typeof isDuplicateSteerInjection === 'function'
+      && isDuplicateSteerInjection(msg as { sessionId?: string; content?: string; clientMsgId?: string; steerClientMsgId?: string });
+
+    if (msg.sessionId && shouldPersist && !isSteerDuplicate) {
       // Preserve only the run identity needed to attach a later *persisted*
       // response metric. No client timestamp participates in duration UI.
       const persisted = msg.kind === 'text'
@@ -1368,6 +1406,7 @@ export function useChatRealtimeHandlers({
     accumulatedStreamRef,
     onWebSocketReconnect,
     sessionStore,
+    isDuplicateSteerInjection,
   ]);
 
   // زرّ «استكمِل الآن» على صفّ `stream_recovery_gap` (بلا إخفاء تلقائي

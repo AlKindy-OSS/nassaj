@@ -163,7 +163,11 @@ describe('B-1297 — real handler: new-conversation clientMsgId guard', () => {
     });
 
     expect(h.calls.setCurrentSessionId).toEqual(['sess-new']);
-    expect(h.calls.navigated).toEqual([{ id: 'sess-new', replace: undefined }]);
+    // B-1386: the brand-new-conversation path now navigates with replace:true
+    // and keeps `pendingViewSessionRef` alive (stamped with the new id) so the
+    // router-lag reset in useChatSessionState cannot undo `setCurrentSessionId`.
+    expect(h.calls.navigated).toEqual([{ id: 'sess-new', replace: true }]);
+    expect(pendingViewSessionRef.current).toEqual({ sessionId: 'sess-new', clientMsgId: 'cmid_match' });
   });
 
   it('new conversation, non-matching clientMsgId (other live send) → no navigation', () => {
@@ -186,7 +190,8 @@ describe('B-1297 — real handler: new-conversation clientMsgId guard', () => {
     });
     markOutboxDispatchUnconfirmed('cmid_late');
 
-    const pendingViewSessionRef = { current: null };
+    const pendingViewSessionRef: { current: { sessionId: string | null; clientMsgId?: string | null } | null } =
+      { current: null };
     const h = harness({ currentSessionId: null, pendingViewSessionRef });
 
     h.rerender({
@@ -196,7 +201,8 @@ describe('B-1297 — real handler: new-conversation clientMsgId guard', () => {
     });
 
     expect(h.calls.setCurrentSessionId).toEqual(['sess-late']);
-    expect(h.calls.navigated).toEqual([{ id: 'sess-late', replace: undefined }]);
+    expect(h.calls.navigated).toEqual([{ id: 'sess-late', replace: true }]);
+    expect(pendingViewSessionRef.current?.sessionId).toBe('sess-late');
     expect(getOutboxSnapshot().find((e) => e.id === 'cmid_late')?.status).toBe('delivered');
   });
 

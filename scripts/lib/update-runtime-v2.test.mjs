@@ -166,7 +166,7 @@ test('release asset builder emits one exact manifest whose tree hash includes no
         writeFileSync(path.join(source, 'package.json'), '{}\n');
         writeFileSync(path.join(source, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
             '': {},
-            'node_modules/@openai/codex-sdk': { version: '0.157.1', integrity: 'sha512-YQ==' },
+            'node_modules/@openai/codex-sdk': { version: '0.153.2', integrity: 'sha512-YQ==' },
             'node_modules/@anthropic-ai/claude-agent-sdk': { version: '1.0.0', integrity: 'sha512-YQ==' },
             'node_modules/better-sqlite3': { version: '1.0.0', integrity: 'sha512-Yg==' },
             'node_modules/fixture-tool': { version: '1.0.0', integrity: 'sha512-Yw==' },

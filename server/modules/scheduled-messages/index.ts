@@ -1,3 +1,4 @@
+export { createScheduledTurnDispatcher } from './scheduled-messages.dispatch.js';
 export { createScheduledMessagesRouter } from './scheduled-messages.routes.js';
 export {
   createScheduledMessagesService,
@@ -5,4 +6,6 @@ export {
   ScheduledMessageError,
   toPublicScheduledMessage,
 } from './scheduled-messages.service.js';
-export type { ScheduledMessagesService, ScheduledDispatchResult } from './scheduled-messages.service.js';
+export type {
+  ScheduledDispatchAcceptance, ScheduledDispatchResult, ScheduledMessagesService,
+} from './scheduled-messages.service.js';

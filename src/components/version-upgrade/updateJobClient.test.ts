@@ -270,3 +270,79 @@ describe('normalizeUpdateJob dual-shape normalization', () => {
     expect(snapshot.message).toBeUndefined();
   });
 });
+
+// ─── T-1912: scheduled-message hold on restart_queued ────────────────────────
+
+describe('normalizeUpdateJob scheduled-message hold (T-1912)', () => {
+  it('keeps autoActivation.state = waiting_scheduled and parses scheduledDueSoon', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivate: true,
+      autoActivation: {
+        state: 'waiting_scheduled',
+        code: 'scheduled_messages_due',
+        liveSessions: 0,
+        deadlineAt: 1_700_000_000_000,
+        scheduledDueSoon: { count: 2, earliestAt: '2026-09-28T10:15:00.000Z' },
+      },
+    });
+    expect(snapshot.autoActivation?.state).toBe('waiting_scheduled');
+    expect(snapshot.autoActivation?.scheduledDueSoon).toEqual({
+      count: 2,
+      earliestAt: '2026-09-28T10:15:00.000Z',
+    });
+    expect(snapshot.autoActivation?.scheduledOverride).toBe(false);
+  });
+
+  it('parses scheduledOverride: true once the owner has skipped the wait', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivation: {
+        state: 'waiting_scheduled',
+        scheduledDueSoon: { count: 1, earliestAt: null },
+        scheduledOverride: true,
+      },
+    });
+    expect(snapshot.autoActivation?.scheduledOverride).toBe(true);
+    expect(snapshot.autoActivation?.scheduledDueSoon).toEqual({ count: 1, earliestAt: null });
+  });
+
+  it('drops a malformed scheduledDueSoon (non-positive count) to null', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivation: { state: 'waiting_scheduled', scheduledDueSoon: { count: 0, earliestAt: null } },
+    });
+    expect(snapshot.autoActivation?.scheduledDueSoon).toBeNull();
+  });
+
+  it('drops an unparseable earliestAt string to null but keeps the count', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivation: { state: 'waiting_scheduled', scheduledDueSoon: { count: 3, earliestAt: 'not-a-date' } },
+    });
+    expect(snapshot.autoActivation?.scheduledDueSoon).toEqual({ count: 3, earliestAt: null });
+  });
+
+  it('parses the top-level scheduledDueSoon field independent of autoActivation', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      scheduledDueSoon: { count: 1, earliestAt: '2026-09-28T09:00:00.000Z' },
+    });
+    expect(snapshot.scheduledDueSoon).toEqual({ count: 1, earliestAt: '2026-09-28T09:00:00.000Z' });
+  });
+
+  it('normalizes a null/absent scheduledDueSoon to null', () => {
+    const snapshot = normalizeUpdateJob({ state: 'restart_queued' });
+    expect(snapshot.scheduledDueSoon).toBeNull();
+  });
+
+  it('still accepts pre-T-1912 autoActivation states unchanged', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivation: { state: 'waiting_sessions', liveSessions: 2 },
+    });
+    expect(snapshot.autoActivation?.state).toBe('waiting_sessions');
+    expect(snapshot.autoActivation?.scheduledDueSoon).toBeNull();
+    expect(snapshot.autoActivation?.scheduledOverride).toBe(false);
+  });
+});

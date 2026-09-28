@@ -27,6 +27,7 @@ import ts from 'typescript';
 import { fileURLToPath } from 'node:url';
 import { verifyCodexSdkImageOnlySync } from './patch-codex-sdk-image-only.mjs';
 import { previewControlPaths, recordPreviewLedgerEvent } from './local-preview-ledger.mjs';
+import { releaseBuiltAt } from './lib/release-generation/source-date.mjs';
 import { gitControlPath } from './git-control-root.mjs';
 import { assertNoNonterminalOidTransaction } from './oid-control-journal.mjs';
 import {
@@ -957,7 +958,7 @@ export function buildServerReleaseCandidate(options, injected = {}) {
             artifact: 'server', version: options.version, commit: releaseCommit,
             baseCommit: releaseCommit, commitShort: releaseCommit.slice(0, 8),
             branch: null, describe: options.version, dirty: false, dirtyFiles: 0,
-            builtAt: new Date().toISOString(), buildId,
+            builtAt: releaseBuiltAt(), buildId,
         }, null, 2)}\n`, { mode: 0o644, flag: 'wx' });
         writeServerInputManifest(staging, manifest);
         installOidControlRuntime(paths.source, staging, { oid: releaseCommit, buildId });

@@ -19,6 +19,17 @@ export type MessageCoordinationRow = {
   coordinationLevel: StoredCoordinationLevel;
   createdAt: string;
 };
+export type SteerStatus = 'queued' | 'delivered' | 'unconfirmed' | 'rejected';
+export type SteerIngressInput = {
+  clientMsgId: string; userId: number; provider: string; sessionId: string; turnId: string;
+  text: string; uuid: string; payloadSha256: string;
+};
+export type SteerIngressRow = {
+  clientMsgId: string; userId: number; uuid: string; payloadSha256: string; text: string;
+  turnId: string; deliveryStatus: SteerStatus; createdAt: string;
+};
+const CLIENT_MSG_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export type CoordinationClaimResult =
   | { action: 'dispatch' }
   | { action: 'fingerprint_mismatch' }
@@ -90,7 +101,7 @@ export const messageCoordinationDb = {
       lifecycle_status AS lifecycleStatus, verdict_json AS verdictJson
       FROM message_coordination_ingress INDEXED BY idx_coordination_claude_owner_session
       WHERE user_id = ? AND provider = 'claude'
-        AND session_id = ? AND claude_user_uuid IS NOT NULL ORDER BY id LIMIT 1001`;
+        AND session_id = ? AND claude_user_uuid IS NOT NULL AND delivery_kind = 'message' ORDER BY id LIMIT 1001`;
     const rows = (lease ? lease.queryRows(db, sql, [userId, sessionId]) : db.prepare(sql).all(userId, sessionId)) as Array<{clientMsgId: string; uuid: string; payloadSha256: string;
         acceptedAt: string | null; lifecycleStatus: string; verdictJson: string | null}>;
     return rows.length > 1000 ? [] : rows;
@@ -190,12 +201,61 @@ export const messageCoordinationDb = {
     return result.changes === 1;
   },
 
+  /**
+   * T-1903: records one mid-turn injection BEFORE it is queued to the run. The
+   * row is the durable audit copy of the sender's full text; the uuid is fresh
+   * and bound to the SENDER, never to the turn starter.
+   */
+  insertSteer(input: SteerIngressInput): boolean {
+    if (input.provider !== 'claude' || !Number.isSafeInteger(input.userId) || input.userId <= 0
+      || !CLIENT_MSG_ID.test(input.clientMsgId) || !UUID_V4.test(input.uuid)
+      || !/^[0-9a-f]{64}$/u.test(input.payloadSha256) || !input.sessionId || !input.turnId
+      || !input.text) return false;
+    const createdAt = new Date().toISOString();
+    const requestFingerprint = crypto.createHash('sha256').update(JSON.stringify([
+      'steer', input.userId, input.provider, input.sessionId, input.turnId, input.clientMsgId, input.text,
+    ])).digest('hex');
+    return getConnection().prepare(
+      `INSERT OR IGNORE INTO message_coordination_ingress
+        (session_id, client_msg_id, user_id, provider, canonical_content, content_hash,
+         request_fingerprint, coordination_level, lifecycle_status, claude_user_uuid,
+         claude_payload_sha256, delivery_kind, turn_id, delivery_status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', 'started', ?, ?, 'steer', ?, 'queued', ?)`,
+    ).run(input.sessionId, input.clientMsgId, input.userId, input.provider, input.text,
+      hashMessageAuthorContent(input.text), requestFingerprint, input.uuid, input.payloadSha256,
+      input.turnId, createdAt).changes === 1;
+  },
+
+  /** Moves a steer row forward; a delivered or rejected row is final. */
+  updateSteerStatus(clientMsgId: string, userId: number, status: SteerStatus): boolean {
+    return getConnection().prepare(
+      `UPDATE message_coordination_ingress SET delivery_status = ?,
+         lifecycle_status = CASE WHEN ? IN ('delivered', 'rejected') THEN 'terminal' ELSE lifecycle_status END
+       WHERE client_msg_id = ? AND user_id = ? AND delivery_kind = 'steer'
+         AND delivery_status NOT IN ('delivered', 'rejected')`,
+    ).run(status, status, clientMsgId, userId).changes === 1;
+  },
+
+  /** Every injection of a session (all senders): the history stamp needs sender identity. */
+  listSteerBySession(sessionId: string, lease?: HistoryReadLease): SteerIngressRow[] {
+    if (!sessionId || Buffer.byteLength(sessionId) > 256) return [];
+    const sql = `SELECT client_msg_id AS clientMsgId, user_id AS userId, claude_user_uuid AS uuid,
+        claude_payload_sha256 AS payloadSha256, canonical_content AS text, turn_id AS turnId,
+        delivery_status AS deliveryStatus, created_at AS createdAt
+      FROM message_coordination_ingress INDEXED BY idx_coordination_steer_session
+      WHERE session_id = ? AND delivery_kind = 'steer' ORDER BY id LIMIT 1001`;
+    const db = getConnection();
+    const rows = lease ? lease.queryRows<SteerIngressRow>(db, sql, [sessionId])
+      : db.prepare(sql).all(sessionId) as SteerIngressRow[];
+    return rows.length > 1000 ? [] : rows;
+  },
+
   listBySession(sessionId: string, lease?: HistoryReadLease): MessageCoordinationRow[] {
     if (!sessionId) return [];
     const sql = `SELECT client_msg_id AS clientMsgId, session_id AS sessionId, user_id AS userId,
               provider, canonical_content AS canonicalContent, content_hash AS contentHash,
               coordination_level AS coordinationLevel, created_at AS createdAt
-       FROM message_coordination_ingress WHERE session_id = ? ORDER BY id ASC`;
+       FROM message_coordination_ingress WHERE session_id = ? AND delivery_kind = 'message' ORDER BY id ASC`;
     const db = getConnection();
     return lease ? lease.queryRows<MessageCoordinationRow>(db, sql, [sessionId])
       : db.prepare(sql).all(sessionId) as MessageCoordinationRow[];

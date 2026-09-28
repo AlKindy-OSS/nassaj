@@ -18,7 +18,7 @@ const tMock = (key: string, options?: Record<string, unknown>) => {
   return template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(options?.[name] ?? `{{${name}}}`));
 };
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: tMock }) }));
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: tMock, i18n: { language: 'en' } }) }));
 
 const authenticatedFetch = vi.fn();
 vi.mock('../../../utils/api', () => ({
@@ -504,6 +504,37 @@ describe('VersionUpgradeModal async updater', () => {
     expect(screen.getByText(/The update stopped before a verified activation/)).not.toBeNull();
   });
 
+  it('marks the reported failing phase and never guesses one (B-1381)', async () => {
+    const storeAttempt = () => localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+      idempotencyKey: 'abc',
+      jobId: 'job-b1381',
+      statusUrl: '/api/system/update/jobs/job-b1381',
+      targetVersion: '2.3.0.10',
+      createdAt: Date.now(),
+    }));
+    storeAttempt();
+    const staging = /Fetching the release, checking tree/;
+    const runtime = /Booting the new process and verifying its build identity/;
+    authenticatedFetch.mockResolvedValue(response(200, {
+      state: 'failed', targetVersion: '2.3.0.10', strategy: 'git-checkout-v2',
+      errorCode: 'candidate_build_failed', failedPhase: 'staging',
+    }));
+    renderModal();
+    expect(await screen.findByText(staging)).not.toBeNull();
+    expect(screen.queryByText(runtime)).toBeNull();
+    cleanup();
+
+    storeAttempt();
+    authenticatedFetch.mockResolvedValue(response(200, {
+      state: 'failed', targetVersion: '2.3.0.10', strategy: 'git-checkout-v2',
+      errorCode: 'candidate_build_failed', failedPhase: null,
+    }));
+    renderModal();
+    await screen.findByText('Build failed');
+    expect(screen.queryByText(runtime)).toBeNull();
+    expect(screen.queryByText(staging)).toBeNull();
+  });
+
   it('shows error panel with nested old-shape error code', async () => {
     localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
       idempotencyKey: 'abc',
@@ -545,6 +576,89 @@ describe('VersionUpgradeModal async updater', () => {
     for (const name of expectedPhaseNames) {
       expect(screen.getByText(name)).not.toBeNull();
     }
+  });
+});
+
+// ─── T-1912: scheduled-message wait on restart_queued ────────────────────────
+
+describe('VersionUpgradeModal scheduled-message wait (T-1912)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    authenticatedFetch.mockReset();
+    authenticatedFetch.mockResolvedValue(response(200, { job: null }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, {
+      systemUpdate: { updaterProtocol: 'async-v2', updaterStrategy: 'atomic-release', updateReady: true },
+    })));
+    localStorage.setItem(UPDATE_ATTEMPT_STORAGE_KEY, JSON.stringify({
+      idempotencyKey: '8f844646-ff69-4db1-9fbc-bccb7688cccb',
+      jobId: 'sched-1',
+      statusUrl: '/api/system/update/jobs/sched-1',
+      targetVersion: '1.45.0.0',
+      createdAt: Date.now(),
+    }));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const waitingJob = (extra: Record<string, unknown> = {}) => response(200, {
+    state: 'restart_queued', targetVersion: '1.45.0.0', strategy: 'git-checkout-v2',
+    autoActivate: true,
+    autoActivation: {
+      state: 'waiting_scheduled', code: 'scheduled_messages_due', liveSessions: 0,
+      scheduledDueSoon: { count: 2, earliestAt: '2026-09-28T10:15:00.000Z' },
+      ...extra,
+    },
+  });
+
+  it('shows the scheduled-wait panel with count, time and the cap note', async () => {
+    routeFetch({ status: () => waitingJob() });
+    renderModal();
+    expect(await screen.findByText('Waiting for a scheduled message…')).not.toBeNull();
+    expect(screen.getByText(/2 scheduled messages/)).not.toBeNull();
+    expect(screen.getByText('The wait is capped at one hour.')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Update Now' })).not.toBeNull();
+  });
+
+  it('does not render the phase-stepper autoActivate box for waiting_scheduled', async () => {
+    routeFetch({ status: () => waitingJob() });
+    renderModal();
+    await screen.findByText('Waiting for a scheduled message…');
+    expect(screen.queryByText(/Activating automatically with a safe restart/)).toBeNull();
+  });
+
+  it('calls skip-scheduled-wait and shows the confirmation once overridden', async () => {
+    routeFetch({
+      status: () => waitingJob(),
+      post: () => response(200, { jobId: 'sched-1', state: 'restart_queued', scheduledOverride: true }),
+    });
+    renderModal();
+    fireEvent.click(await screen.findByRole('button', { name: 'Update Now' }));
+    await waitFor(() => expect(postCalls()).toHaveLength(1));
+    expect(postCalls()[0][0]).toBe('/api/system/update/jobs/sched-1/skip-scheduled-wait');
+    expect(await screen.findByText(/Skipped/)).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Update Now' })).toBeNull();
+  });
+
+  it('shows an error and keeps the button when the skip is refused (409)', async () => {
+    routeFetch({
+      status: () => waitingJob(),
+      post: () => response(409, { success: false, code: 'update_not_overridable' }),
+    });
+    renderModal();
+    const button = await screen.findByRole('button', { name: 'Update Now' });
+    fireEvent.click(button);
+    expect(await screen.findByText('The scheduled wait cannot be skipped in this state.')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Update Now' })).not.toBeNull();
+  });
+
+  it('does not show the update-now button once scheduledOverride is already true', async () => {
+    routeFetch({ status: () => waitingJob({ scheduledOverride: true }) });
+    renderModal();
+    expect(await screen.findByText(/Skipped/)).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Update Now' })).toBeNull();
   });
 });
 

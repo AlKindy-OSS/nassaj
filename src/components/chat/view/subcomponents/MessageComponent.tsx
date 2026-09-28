@@ -23,6 +23,8 @@ import { Tooltip } from '../../../../shared/view/ui';
 import { getProviderDisplayName, getProviderCapabilities } from '../../constants/providerCapabilities';
 import { ChatActionsContext } from '../../context/ChatActionsContext';
 import { useServerActionCatalog } from '../../../../hooks/useServerActionCatalog';
+import SteerBubble from '../../../session-steer/SteerBubble';
+import { useTurnCostMap } from '../../context/TurnCostContext';
 
 import { Markdown } from './Markdown';
 import ChatMessageImage from './ChatMessageImage';
@@ -31,7 +33,6 @@ import MessageModelBadge from './MessageModelBadge';
 import CoordinationLevelBadge from './CoordinationLevelBadge';
 import { shouldHideToolCallMessage } from './hideToolCalls';
 import { formatWorkDuration, formatTurnFooter } from './conversationCostFormat';
-import { useTurnCostMap } from '../../context/TurnCostContext';
 
 type DiffLine = {
   type: string;
@@ -220,6 +221,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   // isCoordinatorPrompt / isSystemOriginMessage below.
   const messageOriginKind = typeof message.originKind === 'string' ? message.originKind : undefined;
   const isCoordinatorPrompt = message.type === 'user' && messageOriginKind === 'coordinator';
+  // T-1903 (ADR-190): رسالة توجيه (steer) مُحقنة في دور جارٍ من عضوٍ آخر.
+  // الإشارة الوحيدة `message.injected === true` من الخادم (تاريخٌ محقَّق أو حدث
+  // steer-queued حيّ) — لا تحليل نصّ إطلاقاً. تُقدَّم على isSystemOriginMessage
+  // لأنها إنسانٌ حقيقي (userId قائم)، لا رسالة آلية.
+  const isInjectedSteerMessage = message.type === 'user' && message.injected === true;
   const isSystemOriginMessage =
     message.type === 'user' &&
     messageOriginKind !== undefined &&
@@ -407,7 +413,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
       ref={messageRef}
       data-message-timestamp={message.timestamp || undefined}
       className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${
-        message.type === 'user' && !isCoordinatorPrompt && !isSystemOriginMessage
+        message.type === 'user' && !isCoordinatorPrompt && !isSystemOriginMessage && !isInjectedSteerMessage
           ? 'flex justify-end px-3 sm:px-0'
           : 'px-3 sm:px-0'
       }`}
@@ -454,6 +460,19 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             </div>
           </div>
         </div>
+      ) : isInjectedSteerMessage ? (
+        <SteerBubble
+          senderUserId={messageUserId ?? null}
+          senderName={
+            message.steerSenderDisplayName
+            || authorParticipant?.username
+            || t('steer.bubble.unknownSender', { defaultValue: 'Colleague' })
+          }
+          content={message.content ?? ''}
+          deliveryStatus={(message.deliveryStatus as 'queued' | 'delivered' | 'unconfirmed' | 'rejected' | undefined) ?? 'delivered'}
+          contentDir={contentDir}
+          formattedTime={formattedTime}
+        />
       ) : isSystemOriginMessage ? (
         /* ── System / automated message (peer / channel / task-notification) ─
          * Other machine-originated originKind values. Rendered as a neutral
@@ -930,7 +949,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             ) : message.isThinking ? (
               /* Thinking messages — inline when showThinking is ON (no toggle row) */
               <div className="text-sm text-muted-foreground">
-                <Markdown className="prose prose-sm prose-gray max-w-none dark:prose-invert opacity-75">
+                <Markdown className="prose prose-sm prose-gray max-w-none opacity-75 dark:prose-invert">
                   {message.content}
                 </Markdown>
               </div>
@@ -938,7 +957,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
               <div className="text-sm text-foreground">
                 {/* Inline reasoning — no toggle row when showThinking is ON */}
                 {showThinking && message.reasoning && (
-                  <div className="mb-2 text-sm text-muted-foreground opacity-75 whitespace-pre-wrap">
+                  <div className="mb-2 whitespace-pre-wrap text-sm text-muted-foreground opacity-75">
                     {message.reasoning}
                   </div>
                 )}

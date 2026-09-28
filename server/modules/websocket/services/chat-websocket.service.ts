@@ -73,6 +73,7 @@ import {
   AGY_SPAWN_KEY_PATTERN,
 } from '@/modules/providers/list/antigravity/agy-session-ids.js';
 import { createSessionHandoverGate } from '@/modules/websocket/services/session-handover.js';
+import { describeSteerTurnForViewer, handleSessionSteer } from '@/modules/session-steer/index.js';
 
 import { reportWriterLeaseRefusal, withLocalUpdateWriterLease } from '../../../services/update-writer-lease.js';
 // Top-level shared/ (compiled into dist-server/shared/) — the single source of
@@ -1362,7 +1363,7 @@ const OUTBOX_VERDICT_KINDS: ReadonlySet<string> = new Set([
  * deliberately allow-listed: a user echo and a tool result must never start a
  * response timer.
  */
-function isModelActivityFrame(payload: { kind?: unknown; role?: unknown }): boolean {
+export function isModelActivityFrame(payload: { kind?: unknown; role?: unknown }): boolean {
   const kind = String(payload.kind ?? '');
   if (kind === 'stream_delta' || kind === 'thinking' || kind === 'tool_use') {
     return true;
@@ -2945,6 +2946,25 @@ export function handleChatConnection(
         return;
       }
 
+      // T-1903 (ADR-190): mid-turn steer by a member who did not start the
+      // running turn. Every check (write access, provider capability, starter
+      // consent, turn authority, limits) lives in handleSessionSteer and fails
+      // closed; the verdict goes to THIS socket only, while queue/delivery
+      // events reach the starter and mirrors through the run's own writer.
+      if (messageType === 'session-steer') {
+        const senderUserId = toNumericUserId(presenceUserId);
+        sendRawToThisSocket(handleSessionSteer(data, {
+          senderUserId,
+          isWritable: (sessionId, userId) => Boolean(sessionId) && isSessionWritableByUser(sessionId, userId),
+          getSessionProvider: (sessionId) => {
+            const provider = databaseModule.sessionsDb.getSessionById(sessionId)?.provider;
+            return typeof provider === 'string' ? provider : null;
+          },
+          getDisplayName: (userId) => databaseModule.userDb.getUserById(userId)?.username ?? null,
+        }));
+        return;
+      }
+
       // T-881: /btw side query — a read-only "by the way" question answered
       // against a LIVE session by forking it, WITHOUT touching the live stream.
       // The design gate approved "البديل 2" (SDK fork); every gate is enforced
@@ -3739,6 +3759,20 @@ export function handleChatConnection(
         // read-only semantics, never touches the active writer (no-swap veto).
         if (sessionId) {
           websocketWriterService.addSessionMirror(sessionId, ws as RealtimeClientConnection);
+        }
+
+        // T-1903 (E2E): a viewer joining a LIVE run — even a brand-new session's
+        // first turn — learns who started it and whether it may steer, unicast
+        // and computed for this viewer, so it is never treated as the starter.
+        if (sessionId && isActive) {
+          const launcher = dependencies.getProviderRunWriter?.(sessionId) as { userId?: unknown } | null;
+          const persistedProvider = databaseModule.sessionsDb.getSessionById(sessionId)?.provider;
+          sendRawToThisSocket(describeSteerTurnForViewer({
+            sessionId, provider: typeof persistedProvider === 'string' ? persistedProvider : provider,
+            viewerUserId: toNumericUserId(presenceUserId),
+            runStarterUserId: toNumericUserId(launcher?.userId ?? null),
+            isWritable: (id, userId) => isSessionWritableByUser(id, userId),
+          }));
         }
 
         // ج1 (2026-07-26): `isProcessing` MUST serialize as an explicit boolean.

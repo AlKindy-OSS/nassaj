@@ -263,14 +263,17 @@ describe('queryCodex — always-on coordinator layer across all modes (T-886 red
       );
 
       // Delegates materialized into $CODEX_HOME/agents (real fs), no @, and with NO
-      // sandbox_mode pin so each inherits the session sandbox (E12: a write agent writes).
+      // model/reasoning/sandbox pin so spawn_agent can choose compute per call while
+      // each delegate inherits the session sandbox (E12: a write agent writes).
       for (const name of ['architect', 'qa-critic']) {
         const p = path.join(CODEX_AGENTS, `${name}.toml`);
         assert.equal(fs.existsSync(p), true, `${name}.toml must be materialized`);
         const toml = fs.readFileSync(p, 'utf8');
         assert.match(toml, new RegExp(`^name = "${name}"$`, 'm'));
         assert.equal(/^sandbox_mode/m.test(toml), false, `${name} must inherit the session sandbox`);
-        assert.match(toml, /^model = "gpt-5-codex"$/m);
+        assert.equal(/^model\s*=/m.test(toml), false, `${name} must accept a spawn-time model`);
+        assert.equal(/^reasoning_effort\s*=/m.test(toml), false, `${name} must accept spawn-time reasoning`);
+        assert.equal(/^model_reasoning_effort\s*=/m.test(toml), false, `${name} must accept Codex reasoning`);
         assert.equal(toml.includes(`@${name}`), false, 'no @-prefixed delegate name');
       }
 

@@ -4,7 +4,7 @@ import type {
   ScheduledMessageStatus,
 } from '@/modules/database/index.js';
 
-import { runLocalUpdateBackground } from '../../services/update-writer-lease.js';
+import { runLocalUpdateBackground, withLocalUpdateWriterLease } from '../../services/update-writer-lease.js';
 
 export const MAX_SCHEDULED_CONTENT_BYTES = 32 * 1024;
 export const MAX_OPEN_SCHEDULED_PER_USER = 50;
@@ -12,6 +12,29 @@ export const MIN_SCHEDULE_DELAY_MS = 60_000;
 export const MAX_SCHEDULE_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_LEASE_MS = 10 * 60_000;
 const DEFAULT_POLL_MS = 15_000;
+const MAX_CLAIMS_PER_TICK = 10;
+/** Scheduled deliveries/turns this process runs at once, across all users. */
+export const MAX_CONCURRENT_SCHEDULED = 4;
+/** Scheduled deliveries/turns one user may have running at once. */
+export const MAX_CONCURRENT_SCHEDULED_PER_USER = 2;
+/** How long a delivery may wait for the provider to show it accepted the turn. */
+export const DEFAULT_ACCEPTANCE_TIMEOUT_MS = 5 * 60_000;
+const SETTLE_RETRY_DELAY_MS = 250;
+/** Retry delay for a delivery refused by a transient update-maintenance window. */
+export const MAINTENANCE_RETRY_DELAY_MS = 60_000;
+/**
+ * How long after `scheduled_for` a maintenance refusal still gives its attempt
+ * back. The gate also refuses in long states (e.g. MANUAL, possibly days), so
+ * past this window a refusal counts as a normal attempt and `max_attempts`
+ * eventually ends the retries.
+ */
+export const MAINTENANCE_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** The code a scheduled turn refused by update maintenance reports (parity with interactive turns). */
+export const UPDATE_MAINTENANCE_ACTIVE = 'update_maintenance_active';
+
+type SettleOutcome = {
+  success: boolean; retryable: boolean; errorCode?: string; retryAt?: string; refundAttempt?: boolean;
+};
 
 type Repository = {
   create(input: { userId: number; sessionId: string; content: string; options: ScheduledMessageOptions; scheduledFor: string }): ScheduledMessage;
@@ -22,16 +45,43 @@ type Repository = {
   }): { messages: ScheduledMessage[]; total: number };
   countAccessibleActionable(userId: number): { pending: number; running: number; failed: number };
   countOpenForUser(userId: number): number;
+  nextDueWithin(nowIso: string, untilIso: string): { count: number; earliestAt: string | null };
   failExpiredExhausted(nowIso: string): ScheduledMessage[];
   updateOwned(id: string, userId: number, input: { content: string; options: ScheduledMessageOptions; scheduledFor: string }): ScheduledMessage | null;
   cancelOwned(id: string, userId: number): 'cancelled' | 'not_found' | 'conflict';
-  claimDue(nowIso: string, leaseMs: number): ScheduledMessage | null;
+  claimDue(
+    nowIso: string, leaseMs: number, excludeSessionIds?: readonly string[], excludeUserIds?: readonly number[],
+  ): ScheduledMessage | null;
   renewLease(id: string, leaseToken: string, leaseExpiresAt: string): boolean;
-  settle(id: string, leaseToken: string, outcome: { success: boolean; retryable: boolean; errorCode?: string; retryAt?: string }): boolean;
+  settle(id: string, leaseToken: string, outcome: SettleOutcome): boolean;
 };
 
 type ActiveUser = { id: number; role: string; authorization_generation: number };
-export type ScheduledDispatchResult = { success: boolean; retryable: boolean; errorCode?: string };
+/**
+ * `refundAttempt`: the refusal happened before any provider effect and is
+ * transient (update maintenance), so the claim's attempt is given back.
+ */
+export type ScheduledDispatchResult = {
+  success: boolean; retryable: boolean; errorCode?: string; refundAttempt?: boolean;
+};
+/** How an accepted turn ended. Carries a bounded error code only, never content. */
+export type ScheduledTurnOutcome = { success: boolean; errorCode?: string };
+/**
+ * Delivery verdict returned once the provider ACCEPTED the turn (or refused it
+ * before acceptance). `completion` settles when the accepted turn ends; the
+ * queue keeps that session busy until then so same-session order is preserved.
+ */
+export type ScheduledDispatchAcceptance = ScheduledDispatchResult & {
+  completion?: Promise<ScheduledTurnOutcome | void>;
+};
+type AuditAction = 'scheduled_message_created' | 'scheduled_message_updated' | 'scheduled_message_cancelled'
+  | 'scheduled_message_dispatched' | 'scheduled_message_failed' | 'scheduled_message_turn_failed';
+
+/**
+ * Audit/`last_error_code` marker for a delivery whose acceptance was never
+ * observed. See `awaitAcceptance` for why such a row is settled `sent`, not retried.
+ */
+export const ACCEPTANCE_UNOBSERVED = 'acceptance_unobserved';
 
 export class ScheduledMessageError extends Error {
   constructor(public readonly code: string, public readonly statusCode: number) {
@@ -109,19 +159,35 @@ export function createScheduledMessagesService(deps: {
   getActiveUser(userId: number): ActiveUser | undefined;
   sessionExists(sessionId: string): boolean;
   canWriteSession(sessionId: string, userId: number): boolean;
-  dispatch(message: ScheduledMessage, user: ActiveUser): Promise<ScheduledDispatchResult>;
-  audit(action: 'scheduled_message_created' | 'scheduled_message_updated' | 'scheduled_message_cancelled' | 'scheduled_message_dispatched' | 'scheduled_message_failed', metadata: Record<string, unknown>, userId: number): void;
+  dispatch(message: ScheduledMessage, user: ActiveUser): Promise<ScheduledDispatchAcceptance>;
+  audit(action: AuditAction, metadata: Record<string, unknown>, userId: number): void;
   now?: () => number;
   leaseMs?: number;
   pollMs?: number;
+  acceptanceTimeoutMs?: number;
   logger?: Pick<Console, 'error'>;
 }) {
   const now = deps.now ?? Date.now;
   const leaseMs = deps.leaseMs ?? DEFAULT_LEASE_MS;
   const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+  const acceptanceTimeoutMs = deps.acceptanceTimeoutMs ?? DEFAULT_ACCEPTANCE_TIMEOUT_MS;
   const logger = deps.logger ?? console;
   let timer: NodeJS.Timeout | null = null;
-  let ticking: Promise<void> | null = null;
+  let paused = false;
+  // B-1390: the claim phase is serialized; deliveries are not. A session stays
+  // in `busySessions` (session -> owning user) from claim until its accepted
+  // turn completes, and every pre-acceptance delivery is tracked in `inflight`
+  // so stop() can drain it. Both are in-process state only.
+  let claiming: Promise<Array<Promise<void>> | null> | null = null;
+  const busySessions = new Map<string, number>();
+  const inflight = new Set<Promise<void>>();
+
+  /** Users already running their per-user share of scheduled turns. */
+  const saturatedUsers = (): number[] => {
+    const load = new Map<number, number>();
+    for (const userId of busySessions.values()) load.set(userId, (load.get(userId) ?? 0) + 1);
+    return [...load].filter(([, count]) => count >= MAX_CONCURRENT_SCHEDULED_PER_USER).map(([userId]) => userId);
+  };
 
   const isWritableSession = (sessionId: unknown, userId: number): boolean => {
     if (typeof sessionId !== 'string' || !sessionId.trim() || sessionId.length > 256) return false;
@@ -136,80 +202,258 @@ export function createScheduledMessagesService(deps: {
     return (sessionId as string).trim();
   };
 
-  const tick = async (): Promise<void> => {
-    if (ticking) return ticking;
-    ticking = runLocalUpdateBackground('scheduled-message', async () => {
-      const tickNow = new Date(now()).toISOString();
-      for (const message of deps.repository.failExpiredExhausted(tickNow)) {
-        deps.audit('scheduled_message_failed', {
+  const startLeaseHeartbeat = (message: ScheduledMessage): (() => void) => {
+    const heartbeat = setInterval(() => {
+      try {
+        deps.repository.renewLease(message.id, message.leaseToken!, new Date(now() + leaseMs).toISOString());
+      } catch (error) {
+        logger.error('[scheduled-messages] lease renewal failed', {
+          scheduledMessageId: message.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, Math.max(1_000, Math.floor(leaseMs / 3)));
+    heartbeat.unref();
+    return () => clearInterval(heartbeat);
+  };
+
+  /**
+   * Waits for the provider's acceptance verdict, but never beyond
+   * `acceptanceTimeoutMs`. Supervised hosted/CLI paths may emit their text and
+   * `complete` only when the turn ends, and a turn can hang before any frame;
+   * without a bound, such a delivery would renew its claim and hold the shared
+   * update lease indefinitely.
+   *
+   * On expiry the row is settled `sent` with the ACCEPTANCE_UNOBSERVED marker
+   * and is NOT retried: the turn may already be running, and a second attempt
+   * could duplicate a provider effect. This deliberately differs from the
+   * interactive Claude path (chat-websocket.service.ts, ingress markStarted),
+   * which treats only raw trusted model frames as acceptance and keeps the
+   * browser attached for the whole turn; a scheduled turn has no one attached,
+   * so "not proven started" must end in a bounded, non-duplicating verdict.
+   *
+   * Decision (B-1390 review): the session's concurrency slot stays held until
+   * the late turn actually ends. A turn hung before any frame therefore keeps
+   * its slot until restart, and MAX_CONCURRENT_SCHEDULED such turns stop all
+   * scheduled delivery. We do NOT auto-abort (aborting a turn that may be
+   * running risks a half-applied provider effect); instead the expiry logs one
+   * error naming the ids so the stall is visible to operators.
+   */
+  const awaitAcceptance = async (
+    message: ScheduledMessage,
+    dispatched: Promise<ScheduledDispatchAcceptance>,
+  ): Promise<ScheduledDispatchAcceptance> => {
+    let expiry: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<ScheduledDispatchAcceptance>((resolve) => {
+      expiry = setTimeout(() => {
+        logger.error('[scheduled-messages] acceptance not observed; concurrency slot stays held until the turn ends', {
           scheduledMessageId: message.id,
           sessionId: message.sessionId,
-          attempt: message.attempts,
-          errorCode: 'lease_expired',
+        });
+        resolve({
+          success: true,
           retryable: false,
-        }, message.userId);
+          errorCode: ACCEPTANCE_UNOBSERVED,
+          completion: dispatched.then((late) => late.completion, () => undefined),
+        });
+      }, acceptanceTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        dispatched.catch((): ScheduledDispatchAcceptance => (
+          { success: false, retryable: true, errorCode: 'dispatch_unavailable' }
+        )),
+        timedOut,
+      ]);
+    } finally {
+      clearTimeout(expiry);
+    }
+  };
+
+  /** Re-authorizes at due time, then waits only until the provider accepts the turn. */
+  const acceptOne = async (message: ScheduledMessage): Promise<ScheduledDispatchAcceptance> => {
+    const user = deps.getActiveUser(message.userId);
+    if (!user) return { success: false, retryable: false, errorCode: 'actor_revoked' };
+    if (!deps.canWriteSession(message.sessionId, message.userId)) {
+      return { success: false, retryable: false, errorCode: 'session_write_revoked' };
+    }
+    const stopHeartbeat = startLeaseHeartbeat(message);
+    try {
+      let dispatched: Promise<ScheduledDispatchAcceptance>;
+      try {
+        dispatched = Promise.resolve(deps.dispatch(message, user));
+      } catch {
+        return { success: false, retryable: true, errorCode: 'dispatch_unavailable' };
       }
-      for (let processed = 0; processed < 10; processed += 1) {
-        const message = deps.repository.claimDue(new Date(now()).toISOString(), leaseMs);
-        if (!message?.leaseToken) break;
-        let outcome: ScheduledDispatchResult;
-        const user = deps.getActiveUser(message.userId);
-        if (!user) {
-          outcome = { success: false, retryable: false, errorCode: 'actor_revoked' };
-        } else if (!deps.canWriteSession(message.sessionId, message.userId)) {
-          outcome = { success: false, retryable: false, errorCode: 'session_write_revoked' };
-        } else {
-          const heartbeat = setInterval(() => {
-            try {
-              deps.repository.renewLease(
-                message.id,
-                message.leaseToken!,
-                new Date(now() + leaseMs).toISOString(),
-              );
-            } catch (error) {
-              logger.error('[scheduled-messages] lease renewal failed', {
-                scheduledMessageId: message.id,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }, Math.max(1_000, Math.floor(leaseMs / 3)));
-          heartbeat.unref();
-          try {
-            outcome = await deps.dispatch(message, user);
-          } catch {
-            outcome = { success: false, retryable: true, errorCode: 'dispatch_unavailable' };
-          } finally {
-            clearInterval(heartbeat);
-          }
-        }
-        const settledOutcome = !outcome.success && outcome.retryable
-          ? {
-              ...outcome,
-              retryAt: new Date(now() + Math.min(
-                30_000 * (2 ** Math.max(0, message.attempts - 1)),
-                15 * 60_000,
-              )).toISOString(),
-            }
-          : outcome;
-        const settled = deps.repository.settle(message.id, message.leaseToken, settledOutcome);
-        if (settled) {
-          deps.audit(outcome.success ? 'scheduled_message_dispatched' : 'scheduled_message_failed', {
-            scheduledMessageId: message.id,
-            sessionId: message.sessionId,
-            attempt: message.attempts,
-            ...(outcome.success ? {} : { errorCode: outcome.errorCode ?? 'unknown', retryable: outcome.retryable }),
-          }, message.userId);
-        }
-      }
-    }).catch((error: unknown) => {
-      // A transient queue/database failure must not become an unhandled timer
-      // rejection that takes down the whole server. The next poll retries from
-      // durable state; prompt content is deliberately excluded from this log.
-      logger.error('[scheduled-messages] queue tick failed', {
+      return await awaitAcceptance(message, dispatched);
+    } finally {
+      stopHeartbeat();
+    }
+  };
+
+  /** Persists the verdict, retrying once so a transient DB error does not strand the row. */
+  const persistSettle = async (message: ScheduledMessage, outcome: SettleOutcome) => {
+    try {
+      return deps.repository.settle(message.id, message.leaseToken!, outcome);
+    } catch (error) {
+      logger.error('[scheduled-messages] settle failed; retrying once', {
+        scheduledMessageId: message.id,
         error: error instanceof Error ? error.message : String(error),
       });
-    }).finally(() => { ticking = null; });
-    return ticking;
+      await new Promise((resolve) => { setTimeout(resolve, SETTLE_RETRY_DELAY_MS); });
+      return deps.repository.settle(message.id, message.leaseToken!, outcome);
+    }
+  };
+
+  /** A refund is honoured only within MAINTENANCE_REFUND_WINDOW_MS of the due time. */
+  const boundRefund = (message: ScheduledMessage, outcome: ScheduledDispatchResult): ScheduledDispatchResult => {
+    if (!outcome.refundAttempt) return outcome;
+    const overdueMs = now() - Date.parse(message.scheduledFor);
+    if (!(overdueMs > MAINTENANCE_REFUND_WINDOW_MS)) return outcome;
+    const { refundAttempt: _expired, ...counted } = outcome;
+    return counted;
+  };
+
+  /**
+   * A refunded maintenance refusal repeating an already-recorded one is not
+   * audited again: the gate may refuse every poll for hours, and one audit row
+   * per poll would be a storm. Only the transition into the refusal is audited;
+   * a counted attempt is always audited (bounded by `max_attempts`).
+   */
+  const isRepeatedRefusal = (message: ScheduledMessage, outcome: ScheduledDispatchResult): boolean => (
+    outcome.refundAttempt === true
+    && outcome.errorCode === UPDATE_MAINTENANCE_ACTIVE
+    && message.lastErrorCode === UPDATE_MAINTENANCE_ACTIVE
+  );
+
+  const settleOutcome = async (message: ScheduledMessage, verdict: ScheduledDispatchResult): Promise<boolean> => {
+    const outcome = boundRefund(message, verdict);
+    const retryDelayMs = verdict.refundAttempt
+      ? MAINTENANCE_RETRY_DELAY_MS
+      : Math.min(30_000 * (2 ** Math.max(0, message.attempts - 1)), 15 * 60_000);
+    const settledOutcome = !outcome.success && outcome.retryable
+      ? { ...outcome, retryAt: new Date(now() + retryDelayMs).toISOString() }
+      : outcome;
+    const repeated = isRepeatedRefusal(message, outcome);
+    if (!await persistSettle(message, settledOutcome)) return false;
+    if (repeated) return true;
+    deps.audit(outcome.success ? 'scheduled_message_dispatched' : 'scheduled_message_failed', {
+      scheduledMessageId: message.id,
+      sessionId: message.sessionId,
+      attempt: message.attempts,
+      ...(outcome.success
+        ? (outcome.errorCode ? { marker: outcome.errorCode } : {})
+        : { errorCode: outcome.errorCode ?? 'unknown', retryable: outcome.retryable }),
+    }, message.userId);
+    return true;
+  };
+
+  /** Records a failure of an already-accepted turn: bounded code only, no content. */
+  const auditTurnEnd = (message: ScheduledMessage, result: ScheduledTurnOutcome | void): void => {
+    if (!result || result.success) return;
+    try {
+      deps.audit('scheduled_message_turn_failed', {
+        scheduledMessageId: message.id,
+        sessionId: message.sessionId,
+        attempt: message.attempts,
+        errorCode: (result.errorCode ?? 'unknown').slice(0, 128),
+      }, message.userId);
+    } catch (error) {
+      logger.error('[scheduled-messages] turn failure audit failed', {
+        scheduledMessageId: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /**
+   * Delivers one claimed row. The writer lease is retained only up to settle
+   * (acceptance or its timeout), never for the accepted turn; the session is
+   * released when the turn itself completes.
+   */
+  const deliver = async (message: ScheduledMessage): Promise<void> => {
+    let completion: Promise<ScheduledTurnOutcome | void> | undefined;
+    let accepted = false;
+    try {
+      await withLocalUpdateWriterLease('scheduled-message-delivery', async () => {
+        const { completion: turn, ...outcome } = await acceptOne(message);
+        completion = turn;
+        accepted = await settleOutcome(message, outcome) && outcome.success;
+      });
+    } catch (error) {
+      // An unsettled row keeps its lease until expiry and is then recovered by
+      // claimDue; the ingress clientMsgId prevents a second provider effect.
+      logger.error('[scheduled-messages] delivery settle failed', {
+        scheduledMessageId: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const release = () => { busySessions.delete(message.sessionId); };
+    if (!completion) { release(); return; }
+    void completion
+      .then((result) => { if (accepted) auditTurnEnd(message, result); }, () => undefined)
+      .finally(release);
+  };
+
+  const claimAndLaunch = async (): Promise<Array<Promise<void>>> => {
+    const tickNow = new Date(now()).toISOString();
+    for (const message of deps.repository.failExpiredExhausted(tickNow)) {
+      deps.audit('scheduled_message_failed', {
+        scheduledMessageId: message.id,
+        sessionId: message.sessionId,
+        attempt: message.attempts,
+        errorCode: 'lease_expired',
+        retryable: false,
+      }, message.userId);
+    }
+    const launched: Array<Promise<void>> = [];
+    for (let processed = 0; processed < MAX_CLAIMS_PER_TICK; processed += 1) {
+      // Global cap first: each launched delivery may spawn a CLI agent.
+      if (paused || busySessions.size >= MAX_CONCURRENT_SCHEDULED) break;
+      const message = deps.repository.claimDue(
+        new Date(now()).toISOString(), leaseMs, [...busySessions.keys()], saturatedUsers(),
+      );
+      if (!message?.leaseToken) break;
+      busySessions.set(message.sessionId, message.userId);
+      const task: Promise<void> = deliver(message).finally(() => { inflight.delete(task); });
+      inflight.add(task);
+      launched.push(task);
+    }
+    return launched;
+  };
+
+  /**
+   * One poll: claim due rows (serialized across overlapping calls), launch each
+   * delivery independently, and resolve once this poll's deliveries settle.
+   * It never waits for an accepted provider turn to finish (B-1390).
+   */
+  const tick = async (): Promise<void> => {
+    if (paused) return;
+    if (!claiming) {
+      claiming = runLocalUpdateBackground('scheduled-message', claimAndLaunch)
+        .catch((error: unknown) => {
+          // A transient queue/database failure must not become an unhandled timer
+          // rejection that takes down the whole server. The next poll retries from
+          // durable state; prompt content is deliberately excluded from this log.
+          logger.error('[scheduled-messages] queue tick failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        })
+        .finally(() => { claiming = null; });
+    }
+    const launched = await claiming;
+    if (launched) await Promise.all(launched);
+  };
+
+  /**
+   * Stops claiming new rows (a shutdown drain calls this before it waits).
+   * Deliveries and turns already launched continue untouched.
+   */
+  const pause = (): void => {
+    paused = true;
+    if (timer) clearInterval(timer);
+    timer = null;
   };
 
   return {
@@ -235,6 +479,19 @@ export function createScheduledMessagesService(deps: {
         hasMore: offset + page.messages.length < page.total,
         nextOffset: offset + page.messages.length < page.total ? offset + page.messages.length : null,
       };
+    },
+    /**
+     * T-1912: node-wide metadata of scheduled messages due within `windowMs`
+     * (overdue and in-flight pre-acceptance included), for the update
+     * activator's soft deferral. Count and earliest due time only; never
+     * content or owners, since it spans every user's rows.
+     */
+    upcomingDue(windowMs: number): { count: number; earliestAt: string | null } {
+      if (!Number.isFinite(windowMs) || windowMs <= 0) return { count: 0, earliestAt: null };
+      const nowMs = now();
+      return deps.repository.nextDueWithin(
+        new Date(nowMs).toISOString(), new Date(nowMs + windowMs).toISOString(),
+      );
     },
     summary(userId: number) {
       return { counts: deps.repository.countAccessibleActionable(userId) };
@@ -282,15 +539,18 @@ export function createScheduledMessagesService(deps: {
     },
     tick,
     start() {
+      paused = false;
       if (timer) return;
       void tick();
       timer = setInterval(() => { void tick(); }, pollMs);
       timer.unref();
     },
+    pause,
+    /** Pauses, then waits for the claim phase and every pre-acceptance delivery. */
     async stop() {
-      if (timer) clearInterval(timer);
-      timer = null;
-      await ticking;
+      pause();
+      await claiming;
+      await Promise.allSettled([...inflight]);
     },
   };
 }

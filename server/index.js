@@ -18,9 +18,13 @@ import { AppError, WORKSPACES_ROOT, getOpenCodeDatabasePath, validateWorkspacePa
 import { buildProjectFileTreeResponse, getFileTree } from './utils/file-tree.js';
 import { closeSessionsWatcher, forkSessionAtMessage, forkSessionFromSideQuery, initializeSessionsWatcher, isSessionAccessibleByUser, setEngineSwitchLivenessProbe, setSessionLivenessProbes, startCostLedgerScheduler, stopCostLedgerScheduler } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
-import { abortSessionTurn, dispatchProviderCommand, isSessionWritableByUser } from '@/modules/websocket/services/chat-websocket.service.js';
+import {
+    abortSessionTurn, dispatchProviderCommand, isModelActivityFrame, isSessionWritableByUser,
+} from '@/modules/websocket/services/chat-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
-import { createScheduledMessagesRouter, createScheduledMessagesService } from '@/modules/scheduled-messages/index.js';
+import {
+    createScheduledMessagesRouter, createScheduledMessagesService, createScheduledTurnDispatcher,
+} from '@/modules/scheduled-messages/index.js';
 import {
     closeUniversalConversationShadowRuntime,
     createUniversalConversationShadowCoreResolver,
@@ -175,7 +179,7 @@ import { voiceRoutes } from './modules/voice/index.js';
 import userRoutes from './routes/user.js';
 import githubRoutes from './routes/github.js';
 import systemRoutes, { executeActionRowAs, findSourceUpdateActivation, reconcileStrandedActivationJobs } from './routes/system.js';
-import { createUpdateAutoActivator } from './services/update-auto-activator.js';
+import { createUpdateAutoActivator, resolveScheduledUpdateWindowMs } from './services/update-auto-activator.js';
 import { createUpdateJobLog } from './services/update-job-log.js';
 import terminalsRoutes from './routes/terminals.js';
 import {
@@ -188,6 +192,7 @@ import {
 import providerRoutes from './modules/providers/provider.routes.js';
 import { CLAUDE_HOME_READY } from './modules/providers/list/claude/claude-projects-roots.js';
 import harnessUpdateRoutes from './modules/providers/harness-update/harness-update.routes.js';
+import sessionSteerRoutes from './modules/session-steer/steer.routes.js';
 import {
     startHarnessAutoUpdateScheduler,
     stopHarnessAutoUpdateScheduler,
@@ -222,7 +227,9 @@ import { configureWebPush } from './services/vapid-keys.js';
 import { createSourceUpdater, evaluateUpdateStorage, resolveUpdateHostCapability, sourceUpdateErrorPayload } from './services/source-updater.js';
 import { createSourceUpdateWorker, durableReceiptFile } from './services/source-update-worker.js';
 import { createUpdateDeferralScheduler } from './services/update-deferral-scheduler.js';
-import { deriveUpdateJobFailure, deriveUpdateJobDeferral } from './services/update-job-snapshot.js';
+import {
+    deriveUpdateJobFailure, deriveUpdateJobDeferral, deriveUpdateJobScheduledDueSoon,
+} from './services/update-job-snapshot.js';
 import { mountNodeOverlay } from './services/node-overlay-static.js';
 import { mountPublicContent } from './services/public-content-static.js';
 import { resolvePublicPageContentRoot } from './services/public-page-agent-guidance.js';
@@ -1035,61 +1042,26 @@ const scheduledMessagesService = createScheduledMessagesService({
     sessionExists: (sessionId) => Boolean(sessionsDb.getSessionById(sessionId)),
     canWriteSession: (sessionId, userId) => isSessionWritableByUser(sessionId, userId),
     audit: (action, metadata, userId) => auditLogDb.record(action, { userId, metadata }),
-    dispatch: async (message, user) => {
-        let terminal = null;
+    // B-1390: resolves at provider acceptance, not at the end of the turn, so a
+    // long turn in one session no longer blocks every other due message.
+    dispatch: createScheduledTurnDispatcher({
+        getSession: (sessionId) => sessionsDb.getSessionById(sessionId),
         // A real writer preserves the normal mirror fan-out and durable outcome
         // side effects; its primary sink is intentionally inert because this
         // server-owned turn has no originating browser socket.
-        const writer = new WebSocketWriter({ readyState: 1, send() {} }, message.userId);
-        writer.setSessionId(message.sessionId);
-        const forward = writer.send.bind(writer);
-        writer.send = (payload) => {
-            if (payload && typeof payload === 'object'
-                && (payload.kind === 'complete' || payload.kind === 'error')) {
-                terminal = payload;
-            }
-            forward(payload);
-        };
-        const session = sessionsDb.getSessionById(message.sessionId);
-        if (!session?.project_path || !session.provider) {
-            return { success: false, retryable: false, errorCode: 'session_unavailable' };
-        }
-        const principal = {
-            ...user,
-            authenticationKind: 'internal_service',
-            authenticationCredentialId: `scheduled-message:${message.id}`,
-            authorizationGeneration: user.authorization_generation,
-        };
-        await dispatchProviderCommand(
-            `${session.provider}-command`,
-            {
-                command: message.content,
-                sessionId: message.sessionId,
-                options: {
-                    ...message.options,
-                    sessionId: message.sessionId,
-                    cwd: session.project_path,
-                    clientMsgId: `scheduled:${message.id}`,
-                },
-            },
-            writer,
-            chatDependencies,
-            message.userId,
-            principal,
-        );
-        if (!terminal) {
-            return { success: false, retryable: true, errorCode: 'missing_terminal_verdict' };
-        }
-        if (terminal.success === true
-            || (terminal.success === undefined && terminal.exitCode === 0)) {
-            return { success: true, retryable: false };
-        }
-        return {
-            success: false,
-            retryable: terminal.notStarted === true || terminal.sameClientMsgIdRetryable === true,
-            errorCode: typeof terminal.code === 'string' ? terminal.code : 'provider_failed',
-        };
-    },
+        createWriter: (userId, sessionId) => {
+            const writer = new WebSocketWriter({ readyState: 1, send() {} }, userId);
+            writer.setSessionId(sessionId);
+            return writer;
+        },
+        dispatchProviderCommand: (messageType, data, writer, userId, principal) => dispatchProviderCommand(
+            messageType, data, writer, chatDependencies, userId, principal,
+        ),
+        isAcceptanceFrame: isModelActivityFrame,
+        // Held for the whole turn (parity with interactive `provider-turn`), so
+        // a source update waits for a running scheduled turn instead of racing it.
+        acquireWriterLease: (kind) => acquireApplicationWriterLease(kind, { waitMs: 100 }),
+    }),
 });
 
 // Make WebSocket server available to routes
@@ -1690,6 +1662,8 @@ setEngineSwitchLivenessProbe(isSessionEngineSwitchBlocked);
 // (B-26) is enforced in-handler inside provider.routes.ts, immune to Express's
 // case-insensitive path matching.
 app.use('/api/providers', authenticateToken, harnessUpdateRoutes);
+// T-1903 (ADR-190): mid-turn steering policy (owner/admin) and personal consent.
+app.use('/api/session-steer', authenticateToken, sessionSteerRoutes);
 app.use('/api/providers', authenticateToken, providerRoutes);
 
 // Per-engine governance switch (owner decision 2026-08-08). Reads are open to
@@ -1936,6 +1910,13 @@ const SOURCE_UPDATE_IDEMPOTENCY_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}
 // runs the job's own queued row through the command board's executor once the
 // node is idle; it never kills a session and gives up to the button after 24 h.
 const localActivationMode = resolveHostUpdateMode() === 'local-main';
+// T-1912: a restart is softly held while a scheduled message is due within this
+// window (NASSAJ_UPDATE_SCHEDULED_WINDOW_MINUTES, 0 disables). Metadata only.
+// Not in local-main: its jobs live outside sourceUpdateJobsDb, so the owner
+// would get neither the hold status nor the skip-scheduled-wait override there.
+const scheduledUpdateWindowMs = resolveScheduledUpdateWindowMs();
+const readScheduledDueSoon = !localActivationMode && scheduledUpdateWindowMs > 0
+    ? () => scheduledMessagesService.upcomingDue(scheduledUpdateWindowMs) : null;
 const updateAutoActivator = releaseSourceInvalid && !localActivationMode ? null : createUpdateAutoActivator({
     beforeTick: localActivationMode ? async () => {
         const evidence = requestMaintenanceGate.readRecoveryEvidence();
@@ -1954,6 +1935,7 @@ const updateAutoActivator = releaseSourceInvalid && !localActivationMode ? null 
     getUser: (id) => userDb.getUserById(id),
     audit: (action, metadata) => auditLogDb.record(action, { metadata }),
     jobLog: updateJobLog,
+    scheduledDueSoon: readScheduledDueSoon,
 });
 
 app.post('/api/system/update/jobs', authenticateToken, requireRole('owner'), sourceUpdateCreateLimiter, async (req, res) => {
@@ -2115,6 +2097,7 @@ app.get('/api/system/update/jobs/:jobId', authenticateToken, requireRole('owner'
     const job = Number.isSafeInteger(ownerId) ? sourceUpdateJobsDb.getForOwner(req.params.jobId, ownerId) : null;
     if (!job) return res.status(404).json({ success: false, code: 'update_job_not_found' });
     const failure = deriveUpdateJobFailure(job, sourceUpdateJobsDb);
+    const autoActivation = updateAutoActivator?.statusFor(job.id) ?? null;
     return res.json({
         jobId: job.id, state: job.state, expectedVersion: job.expected_version,
         strategy: job.strategy, progressSeq: job.progress_seq,
@@ -2131,13 +2114,16 @@ app.get('/api/system/update/jobs/:jobId', authenticateToken, requireRole('owner'
         createdAt: job.created_at, updatedAt: job.updated_at, completedAt: job.completed_at,
         activationTargetDigest: job.activation_identity_sha256 ?? null,
         autoActivate: job.auto_activate === 1,
-        autoActivation: updateAutoActivator?.statusFor(job.id) ?? null,
+        autoActivation,
         // ADR-156 §3.3 (M15): only present while the job is parked in
         // awaiting_sessions. sessionCount and gateReason are live at request time.
         deferral: deriveUpdateJobDeferral(job, {
             sessionCount: (() => { try { return countGovernedActiveSessions(); } catch { return null; } })(),
             gateReason: updateDeferralScheduler?.getLastGateReason() ?? null,
         }),
+        // T-1912: only while scheduled messages are what holds the restart
+        // (waiting_scheduled); count and earliest due time, never content or owners.
+        scheduledDueSoon: deriveUpdateJobScheduledDueSoon(job, autoActivation),
     });
 });
 
@@ -2153,6 +2139,23 @@ app.post('/api/system/update/jobs/:jobId/cancel', authenticateToken, requireRole
     if (!cancelled) return res.status(409).json({ success: false, code: 'update_not_cancellable' });
     auditLogDb.record('update_deferral_cancelled', { userId: ownerId, metadata: { jobId: req.params.jobId } });
     return res.json({ jobId: req.params.jobId, state: 'cancelled' });
+});
+
+// T-1912: owner "update now" — skip ONLY the scheduled-message hold on this
+// job's restart. Live sessions and every safe-restart gate still apply. Accepted
+// only for the owner's own auto-activating job parked in restart_queued (the one
+// state the hold applies to); otherwise 409 update_not_overridable.
+const sourceUpdateOverrideLimiter = createRateLimiter({ windowMs: 60_000, max: 10, message: 'Too many override requests, please slow down' });
+app.post('/api/system/update/jobs/:jobId/skip-scheduled-wait', authenticateToken, requireRole('owner'), sourceUpdateOverrideLimiter, (req, res) => {
+    const ownerId = req.user?.id;
+    if (!Number.isSafeInteger(ownerId)) return res.status(403).json({ success: false, code: 'owner_identity_unavailable' });
+    const job = sourceUpdateJobsDb.getForOwner(req.params.jobId, ownerId);
+    if (!job) return res.status(404).json({ success: false, code: 'update_job_not_found' });
+    if (job.state !== 'restart_queued' || job.auto_activate !== 1 || !updateAutoActivator?.overrideScheduled(job.id)) {
+        return res.status(409).json({ success: false, code: 'update_not_overridable' });
+    }
+    auditLogDb.record('update_scheduled_override', { userId: ownerId, metadata: { jobId: job.id } });
+    return res.json({ jobId: job.id, state: job.state, scheduledOverride: true });
 });
 
 // T-1768: the job's live terminal log, read from a byte offset so the modal
@@ -4330,6 +4333,9 @@ async function startServer() {
             // restart mid-turn cannot surface as "the user doesn't want to
             // proceed" for a tool the user never refused.
             cancelPendingApprovals: cancelAllPendingApprovals,
+            // B-1390: no new scheduled turn may start once a drain begins; the
+            // queue resumes from durable state in the successor process.
+            onDrainStart: () => scheduledMessagesService.pause(),
             // Close SQLite as the very last act before the process dies. The
             // drain calls this injected `exit` on EVERY termination path (clean
             // finish, drain timeout, and the second-signal escape hatch), so

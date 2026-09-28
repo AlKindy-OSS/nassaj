@@ -12,14 +12,16 @@ import SettingsSubNav from '../SettingsSubNav';
 import AvatarIdentitySection from './AvatarIdentitySection';
 import FeedbackBanner from './FeedbackBanner';
 import type { Feedback } from './FeedbackBanner';
+import OutboxCleanupSection from './OutboxCleanupSection';
 import PasskeysSection from './PasskeysSection';
+import SteerConsentSection from './SteerConsentSection';
 
 // `border-input` لا `border-border`: حدّ التحكّم مطلوب بـWCAG 1.4.11 وليس طبقةً
 // من طبقات السطح (§2.7)، وخلطُ الرمزين يجعل الحقل يبدو صندوقاً داخل صندوق.
 const inputClass =
   'w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60';
 
-type ProfileInnerTab = 'identity' | 'security';
+type ProfileInnerTab = 'identity' | 'security' | 'collaboration';
 
 /**
  * Profile settings tab (F-1).
@@ -144,6 +146,12 @@ export default function ProfileSettingsTab() {
             label: t('profile.tabs.security'),
             id: 'profile-tab-security',
             panelId: 'profile-panel-security',
+          },
+          {
+            value: 'collaboration' as const,
+            label: t('profile.tabs.collaboration', { defaultValue: 'Collaboration' }),
+            id: 'profile-tab-collaboration',
+            panelId: 'profile-panel-collaboration',
           },
         ]}
         value={activeTab}
@@ -324,6 +332,24 @@ export default function ProfileSettingsTab() {
 
         {/* Passkeys (C-PK-3) */}
         <PasskeysSection />
+      </div>
+
+      {/* Collaboration: mid-turn steering consent (T-1903, ADR-190). */}
+      <div
+        id="profile-panel-collaboration"
+        role="tabpanel"
+        aria-labelledby="profile-tab-collaboration"
+        hidden={activeTab !== 'collaboration'}
+        className="space-y-8 pt-3"
+      >
+        <SteerConsentSection />
+      </div>
+
+      {/* Stuck local outbox cleanup (T-1382/B-1370) — this device/browser's
+          data, not tied to any inner tab above, so it stays reachable
+          whichever one is open. */}
+      <div className="space-y-8 pt-3">
+        <OutboxCleanupSection />
       </div>
     </SettingsSection>
   );

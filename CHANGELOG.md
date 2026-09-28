@@ -1,3 +1,64 @@
+## 2.3.0.10 — 2026-09-28
+
+إصدار جسر لسلسلة الترقية (B-1381): المحدّث المثبَّت على 2.3.0.8 يبني الإصدار الجديد بأدواته هو، وحارسها
+يشترط codex-sdk 0.153.2، فرفْع 2.3.0.9 للـSDK إلى 0.157.1 أوقف الترقية من 2.3.0.8 بخطأ
+CODEX_IMAGE_ONLY_PATCH_VERSION. يعيد هذا الإصدار codex-sdk إلى 0.153.2 (الإصدار والبصمة والحارس مطابقة
+لـ2.3.0.8)، ويجعل المحدّث يبني كل إصدار لاحق بأدوات الإصدار الجديد نفسه، وتعرض نافذة التحديث مرحلة
+الفشل الفعلية بدل «التحقق من وقت التشغيل». Codex يعمل من نسخة الجهاز منذ T-1872، فلا يتأثر تشغيله بهذا.
+
+Bridge release for the upgrade chain (B-1381): the updater installed on 2.3.0.8 builds the new
+release with its own builders, whose guard requires codex-sdk 0.153.2, so the 0.157.1 bump in
+2.3.0.9 stopped upgrades from 2.3.0.8 with CODEX_IMAGE_ONLY_PATCH_VERSION. This release restores
+codex-sdk 0.153.2 (version, hash and guard identical to 2.3.0.8), makes the updater build every
+later release with that release's own builders, and the update dialog now shows the phase that
+actually failed instead of "Verifying runtime". Codex runs from the machine install since T-1872,
+so its runtime is unaffected.
+
+وفي هذا الإصدار أيضاً: اختيار نموذج لكل وكيل فرعي في Codex صار فعّالاً ومحمياً من التلاعب (T-1861).
+توجيه الدور الجاري: يرسل عضو آخر رسالة ‎/steer‎ إلى دور Claude قيد التشغيل بموافقته وسياسة المالك، وتظهر
+بفقاعة مميزة، والموافقة الناتجة عنها لمرة واحدة فقط (T-1903، ADR-190)؛ وشريط التشغيل يعرض اسم من بدأ
+الدور ولا يُظهر زر الإيقاف لغيره (T-1904). الرسائل المجدولة تُسلَّم لكل جلسة باستقلال فلا يحجب دورٌ طويل
+البقية، وتظهر «قيد التسليم» (B-1390). ويؤجّل التحديث إعادة التشغيل تأجيلاً ليّناً ما دامت رسالة مجدولة
+مستحقة خلال 10 دقائق، بسقف ساعة، مع زر «حدّث الآن» للمالك (T-1912). والجلسة الجديدة لم تعد تُخفي أول رسالة
+ولا تُظهر شريط تغيّر المراجعة (B-1386). وفي الإعدادات ← الملف الشخصي زرّ لتنظيف رسائل صندوق الإرسال
+المحلي العالقة (T-1909). والخادم يُقلع بلا مكتبة sharp ويحفظ الصورة الأصلية حينها (إصلاح إقلاع).
+وأساس الإصدارات الموثَّقة (ADR-174، المرحلتان 0 و1 محلياً): مُتحقّق توثيق يعمل دون اتصال، وقواعد البيان
+وتسلسل الإصدارات، وبوابة التراخيص، وبوابة بناء وإقلاع تجريبي محلية، وفحص ثابت لسير العمل؛ ولا تغيير
+في طريقة التحديث الآن، وسير العمل العام ما زال معطّلاً.
+
+Also: per-subagent Codex model selection now takes effect and cannot be tampered with (T-1861).
+Mid-turn steering: another member can send /steer into a running Claude turn, with their consent
+and the owner's policy; it shows as a distinct bubble and any approval it triggers is allow-once
+(T-1903, ADR-190); the running bar shows who started the turn and hides Stop from everyone else
+(T-1904). Scheduled messages are delivered per session, so one long turn no longer blocks the
+rest, and show as "delivering" (B-1390). An update softly holds its restart while a scheduled
+message is due within 10 minutes, capped at one hour, with an owner "Update now" button (T-1912).
+A new session no longer hides its first message or shows the revision banner (B-1386). Settings →
+Profile can clear stuck local outbox messages (T-1909). The server boots without the sharp library
+and then stores the original image (boot fix). Groundwork for attested releases (ADR-174, Phases 0
+and 1, local only): an offline attestation verifier, manifest and release-sequence rules, a license
+gate, a local build-and-boot-smoke gate and workflow static checks; the update path is unchanged
+for now and the public workflow stays disabled.
+
+**مسار الترقية:**
+- من 2.3.0.8 إلى 2.3.0.10: المسار الموصى به.
+- من 2.3.0.9 إلى 2.3.0.10: يفشل (محدّث 2.3.0.9 يطلب 0.157.1)؛ انتظر 2.3.0.11.
+- من 2.3.0.8 إلى 2.3.0.11 مباشرة: يفشل إن رفع 2.3.0.11 إصدار Codex SDK؛ مرّ بـ2.3.0.10 أولاً.
+- بعد نشر 2.3.0.11 لن تعرض واجهة عقدة 2.3.0.8 الإصدار 2.3.0.10 (الاكتشاف يعرض أحدث وسم فقط)؛
+  حدّث إلى 2.3.0.10 قبل ذلك.
+
+**Upgrade path:**
+- 2.3.0.8 → 2.3.0.10: recommended.
+- 2.3.0.9 → 2.3.0.10: fails (the 2.3.0.9 updater requires 0.157.1); wait for 2.3.0.11.
+- 2.3.0.8 → 2.3.0.11 directly: fails if 2.3.0.11 raises the Codex SDK; step through 2.3.0.10
+  first.
+- After 2.3.0.11 is published, a 2.3.0.8 node no longer sees 2.3.0.10 in the UI (discovery shows
+  only the latest tag); update to 2.3.0.10 before then.
+
+قيد معروف: ما زال Qwen يوقف دوره عند انقطاع الشبكة (مُتابَع).
+
+Known limitation: Qwen still stops its turn on network loss (tracked).
+
 ## 2.3.0.9 — 2026-09-28
 
 يضيف تحديث أجساد الوكلاء من الإعدادات ← الوكلاء: تحديث بلقطة احتياطية، ورجوع واستعادة، واستئناف

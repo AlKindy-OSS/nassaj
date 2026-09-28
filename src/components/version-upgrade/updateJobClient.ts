@@ -48,12 +48,26 @@ export interface DeferralStatus {
   rearmCount: number;
 }
 
-/** Where the server's automatic activation stands (T-1751). */
+/**
+ * Scheduled messages due soon that hold a restart (T-1912). Count and earliest
+ * due time only — never message content or owner names.
+ */
+export interface ScheduledDueSoon {
+  count: number;
+  /** ISO timestamp, or null when the reading has a count but no known time. */
+  earliestAt: string | null;
+}
+
+/** Where the server's automatic activation stands (T-1751, T-1912). */
 export interface AutoActivationStatus {
-  state: 'waiting_row' | 'waiting_sessions' | 'restarting' | 'refused' | 'expired';
+  state: 'waiting_row' | 'waiting_sessions' | 'waiting_scheduled' | 'restarting' | 'refused' | 'expired';
   liveSessions: number | null;
   code: string | null;
   deadlineAt: number | null;
+  /** Present only while `state` is `waiting_scheduled` (T-1912). */
+  scheduledDueSoon: ScheduledDueSoon | null;
+  /** True once the owner skipped this job's scheduled-message hold (T-1912). */
+  scheduledOverride: boolean;
 }
 
 export interface UpdateJobSnapshot {
@@ -72,6 +86,12 @@ export interface UpdateJobSnapshot {
   autoActivation?: AutoActivationStatus | null;
   /** Present while the job is in `awaiting_sessions` (T-1730 §3.3). */
   deferral?: DeferralStatus | null;
+  /**
+   * Scheduled messages due soon that hold the restart (T-1912). Present only
+   * while `autoActivation.state` is `waiting_scheduled`; mirrors
+   * `autoActivation.scheduledDueSoon`, which the panel reads.
+   */
+  scheduledDueSoon?: ScheduledDueSoon | null;
   /** Which client-asset files drifted, when the failure was a manifest mismatch (T-1804). */
   manifestDrift?: ManifestDrift | null;
 }
@@ -126,7 +146,20 @@ function normalizeDeferral(value: unknown): DeferralStatus | null {
   };
 }
 
-const AUTO_ACTIVATION_STATES = new Set(['waiting_row', 'waiting_sessions', 'restarting', 'refused', 'expired']);
+const AUTO_ACTIVATION_STATES = new Set([
+  'waiting_row', 'waiting_sessions', 'waiting_scheduled', 'restarting', 'refused', 'expired',
+]);
+
+/** Validate a `{count, earliestAt}` reading; never trust the response body as-is. */
+function normalizeScheduledDueSoon(value: unknown): ScheduledDueSoon | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(raw.count) || (raw.count as number) <= 0) return null;
+  const earliestAt = typeof raw.earliestAt === 'string' && !Number.isNaN(Date.parse(raw.earliestAt))
+    ? raw.earliestAt
+    : null;
+  return { count: raw.count as number, earliestAt };
+}
 
 function normalizeAutoActivation(value: unknown): AutoActivationStatus | null {
   if (!value || typeof value !== 'object') return null;
@@ -137,6 +170,8 @@ function normalizeAutoActivation(value: unknown): AutoActivationStatus | null {
     liveSessions: typeof raw.liveSessions === 'number' ? raw.liveSessions : null,
     code: typeof raw.code === 'string' ? raw.code : null,
     deadlineAt: typeof raw.deadlineAt === 'number' ? raw.deadlineAt : null,
+    scheduledDueSoon: normalizeScheduledDueSoon(raw.scheduledDueSoon),
+    scheduledOverride: raw.scheduledOverride === true,
   };
 }
 
@@ -295,6 +330,7 @@ export function normalizeUpdateJob(payload: unknown, fallbackStatusUrl?: string)
     autoActivate: source.autoActivate === true,
     autoActivation: normalizeAutoActivation(source.autoActivation),
     deferral: normalizeDeferral(source.deferral),
+    scheduledDueSoon: normalizeScheduledDueSoon(source.scheduledDueSoon),
     manifestDrift: normalizeManifestDrift(source.manifestDrift),
   };
 }

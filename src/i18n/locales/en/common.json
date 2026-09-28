@@ -361,7 +361,8 @@
       "capabilityBlocked": "Automatic updating is not ready on this node. No update was started.",
       "failed": "The update failed without additional details.",
       "consentMismatch": "The consent version did not match the target version. Try again.",
-      "cancelNotAllowed": "This update cannot be cancelled in its current state."
+      "cancelNotAllowed": "This update cannot be cancelled in its current state.",
+      "overrideNotAllowed": "The scheduled wait cannot be skipped in this state."
     },
     "phases": {
       "accepted": {
@@ -641,6 +642,25 @@
       "rearmCount": "Worker rearmed {{count}} time(s)",
       "cancelledMessage": "The deferred update was cancelled. No new version was installed.",
       "awaitingConfirmation": "Awaiting your confirmation — press the safe restart button in the command board."
+    },
+    "scheduledWait": {
+      "panelAriaLabel": "Scheduled message wait panel",
+      "title": "Waiting for a scheduled message…",
+      "message": "Update deferred: {{count}} scheduled messages, earliest due in {{minutesLabel}} ({{time}}). It starts automatically once sent.",
+      "message_one": "Update deferred: a scheduled message is due in {{minutesLabel}} ({{time}}). It starts automatically once sent.",
+      "message_other": "Update deferred: {{count}} scheduled messages, earliest due in {{minutesLabel}} ({{time}}). It starts automatically once sent.",
+      "messageNoTime": "Update deferred: {{count}} scheduled message(s) due soon. It starts automatically once sent.",
+      "messageNoTime_one": "Update deferred: a scheduled message is due soon. It starts automatically once sent.",
+      "messageNoTime_other": "Update deferred: {{count}} scheduled messages due soon. It starts automatically once sent.",
+      "messageDueNow": "Update deferred: {{count}} scheduled messages due now ({{time}}). It starts automatically once sent.",
+      "messageDueNow_one": "Update deferred: a scheduled message is due now ({{time}}). It starts automatically once sent.",
+      "messageDueNow_other": "Update deferred: {{count}} scheduled messages due now ({{time}}). It starts automatically once sent.",
+      "minutesUnit": "{{count}} min",
+      "minutesUnit_one": "{{count}} min",
+      "minutesUnit_other": "{{count}} min",
+      "capNote": "The wait is capped at one hour.",
+      "overrideHint": "The scheduled message will be delayed by about a minute.",
+      "overridden": "Skipped — the restart no longer waits for the scheduled message."
     },
     "ariaLabels": {
       "closeModal": "Close version upgrade modal",
