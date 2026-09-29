@@ -163,7 +163,7 @@ export const VENDOR_RUNTIME: Record<'kimi' | 'deepseek' | 'glm', VendorRuntimeCo
  * flows from config, into auth.json — never a base URL.
  *
  * IT NO LONGER EQUALS GLM_BASE (changed 2026-07-27, B-221). The carrier's SDK moved from
- * `@ai-sdk/anthropic` to `@ai-sdk/openai-compatible` because opencode 1.17.18 cannot
+ * `@ai-sdk/anthropic` to `@ai-sdk/openai-compatible` because opencode 1.17.18 (measured then; pin now 1.18.32, B-1370) cannot
  * drive the former (it never issues the request — see OPENCODE_GLM_NPM in
  * opencode-config-material.js for the proof), and the wire path has to follow the SDK:
  *   chat    → GLM_BASE          = https://api.z.ai/api/anthropic       (Anthropic wire)

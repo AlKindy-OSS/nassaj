@@ -38,6 +38,16 @@ const generationFence = (openLeases = 0): PermissionFence => ({
   decision: { provider: 'claude', entrypoint: 'terminal.managed-claude', purpose: 'spawn', decidedAtMs: null },
 });
 
+const sessionFence = (scopeKey: string): PermissionFence => ({
+  generation: 1,
+  scopeKind: 'session',
+  scopeKey,
+  reasonCode: 'RECONCILED_EFFECT_UNKNOWN',
+  createdAtMs: Date.UTC(2026, 8, 10),
+  openLeases: 0,
+  decision: null,
+});
+
 describe('PermissionFencesSection', () => {
   beforeEach(() => {
     calls = [];
@@ -82,5 +92,69 @@ describe('PermissionFencesSection', () => {
     loadStatus = 403;
     render(<PermissionFencesSection />);
     expect(await screen.findByText('permissionFences.forbidden')).toBeTruthy();
+  });
+});
+
+describe('B-1076 fenceFilter (deep link from the outbox card)', () => {
+  beforeEach(() => {
+    calls = [];
+    loadStatus = 200;
+  });
+  afterEach(() => cleanup());
+
+  it('shows only the session fence matching an exact-match filter', async () => {
+    fences = [sessionFence('sess-target'), sessionFence('sess-other'), generationFence()];
+    render(<PermissionFencesSection fenceFilter="sess-target" />);
+    await screen.findByText('permissionFences.filteredWarning');
+    expect(screen.getByText('permissionFences.kindScoped {"scope":"sess-target"}')).toBeTruthy();
+    expect(screen.queryByText('permissionFences.kindScoped {"scope":"sess-other"}')).toBeNull();
+    expect(screen.queryByText(/permissionFences\.kindGeneration/u)).toBeNull();
+  });
+
+  it('"show all" clears the filter and restores every fence', async () => {
+    fences = [sessionFence('sess-target'), generationFence()];
+    render(<PermissionFencesSection fenceFilter="sess-target" />);
+    fireEvent.click(await screen.findByText('permissionFences.showAll'));
+    expect(screen.getByText('permissionFences.kindScoped {"scope":"sess-target"}')).toBeTruthy();
+    expect(screen.getByText(/permissionFences\.kindGeneration/u)).toBeTruthy();
+    expect(screen.queryByText('permissionFences.filteredWarning')).toBeNull();
+  });
+
+  it('B-1076: a new deep-link filter while mounted resets a prior "show all"', async () => {
+    fences = [sessionFence('sess-a'), sessionFence('sess-b')];
+    const { rerender } = render(<PermissionFencesSection fenceFilter="sess-a" />);
+    fireEvent.click(await screen.findByText('permissionFences.showAll'));
+    expect(screen.queryByText('permissionFences.filteredWarning')).toBeNull();
+
+    // A second outbox card's deep link arrives for a DIFFERENT session while
+    // this section is still mounted (no remount) — the stale "show all" must
+    // not silently keep the owner looking at the wrong (unfiltered) list.
+    rerender(<PermissionFencesSection fenceFilter="sess-b" />);
+    await screen.findByText('permissionFences.filteredWarning');
+    expect(screen.getByText('permissionFences.kindScoped {"scope":"sess-b"}')).toBeTruthy();
+    expect(screen.queryByText('permissionFences.kindScoped {"scope":"sess-a"}')).toBeNull();
+  });
+
+  it.each([
+    '<script>alert(1)</script>',
+    'javascript:alert(1)',
+    'x'.repeat(10_000),
+    '../../etc/passwd',
+    'a b',
+  ])('rejects a malicious or oversized filter and shows every fence: %j', async (poison) => {
+    fences = [sessionFence('sess-target'), generationFence()];
+    render(<PermissionFencesSection fenceFilter={poison} />);
+    expect(await screen.findByText(/permissionFences\.kindGeneration/u)).toBeTruthy();
+    expect(screen.queryByText('permissionFences.filteredWarning')).toBeNull();
+    // The rejected value is never rendered raw, and no script tag is injected.
+    expect(document.body.querySelector('script[src]')).toBeNull();
+    expect(document.body.innerHTML).not.toContain('<script>alert');
+  });
+
+  it('an unmatched exact filter yields the empty state, not a silent unfiltered list', async () => {
+    fences = [sessionFence('sess-other')];
+    render(<PermissionFencesSection fenceFilter="sess-target" />);
+    await screen.findByText('permissionFences.filteredWarning');
+    expect(await screen.findByText('permissionFences.none')).toBeTruthy();
   });
 });

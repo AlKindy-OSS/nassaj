@@ -164,6 +164,8 @@ mock.module('@/modules/database/index.js', {
         accessFor(projectId, userId).writable,
       getProjectPathById: (projectId: string) =>
         projectId === PUBLIC_PROJECT || projectId === PRIVATE_PROJECT ? PROJECT_DIR : null,
+      getProjectPath: (candidate: string) =>
+        candidate === PROJECT_DIR ? { project_id: PUBLIC_PROJECT } : null,
     },
     userDb: { getGitConfig: () => null },
     githubTokensDb: { getActiveGithubToken: () => storedGithubToken },
@@ -181,6 +183,11 @@ const { validateFilePath, redactCredentials, spawnAsync } = gitModule;
 
 // ── test server ───────────────────────────────────────────────────────────────
 const app = express();
+/** B-1076: per-test permission authorizer behind app.locals, as server/index.js wires it. */
+let authorizeProviderExecution: (...args: unknown[]) => unknown = () => {
+  throw new Error('authorizer not scripted');
+};
+app.locals.authorizeProviderExecution = (...args: unknown[]) => authorizeProviderExecution(...args);
 app.use(express.json());
 app.use((req, _res, next) => {
   if (currentUserId !== null) {
@@ -492,4 +499,77 @@ test('a wallet switch during async Git preflight prevents the first write effect
   assert.equal(res.status, 409);
   assert.equal(res.json.code, 'identity_changed');
   assert.ok(!spawnCalls.some((call) => call.args[0] === 'fetch'));
+});
+
+// ── B-1076: permission admission refusal mapping ─────────────────────────────
+
+test('B-1076: a fenced scope refuses commit-message generation with 409 and a fence hint', async () => {
+  currentUserId = 9;
+  gitScript = (args) => (args[0] === 'diff' ? { stdout: '@@ -1 +1 @@\n-a\n+b\n' } : undefined);
+  const { PermissionStateConflictError } = await import(
+    '@/modules/database/repositories/permission-execution.js'
+  );
+  authorizeProviderExecution = () => {
+    throw new PermissionStateConflictError('EFFECT_SCOPE_FENCED', {
+      scopeKind: 'user_provider_purpose', reasonCode: 'RECONCILED_EFFECT_UNKNOWN',
+    });
+  };
+  const warn = mock.method(console, 'warn', () => undefined);
+  try {
+    const res = await request('POST', '/api/git/generate-commit-message', {
+      project: PUBLIC_PROJECT, files: ['a.txt'],
+    });
+    assert.equal(res.status, 409);
+    assert.deepEqual(res.json, {
+      error: 'Permission admission failed closed.',
+      code: 'effect_scope_fenced',
+      retryable: false,
+      fence: { scopeKind: 'user_provider_purpose', reasonCode: 'RECONCILED_EFFECT_UNKNOWN' },
+      notStarted: true,
+    });
+    const logged = warn.mock.calls.map((call) => String(call.arguments[0]))
+      .filter((line) => line.includes('permission_admission_failed'));
+    assert.equal(logged.length, 1);
+    assert.equal(JSON.parse(logged[0]).entrypoint, 'rest.git.generate-commit-message');
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test('B-1076: a blocked generation is 409 and an arbitrary storage code stays a retryable 503', async () => {
+  currentUserId = 9;
+  const { PermissionStateConflictError } = await import(
+    '@/modules/database/repositories/permission-execution.js'
+  );
+  const warn = mock.method(console, 'warn', () => undefined);
+  try {
+    authorizeProviderExecution = () => {
+      throw new PermissionStateConflictError('GENERATION_BLOCKED', {
+        scopeKind: 'generation', reasonCode: 'START_EVIDENCE_WRITE_FAILED',
+      });
+    };
+    const blocked = await request('POST', '/api/git/generate-commit-message', {
+      project: PUBLIC_PROJECT, files: ['a.txt'],
+    });
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.json.code, 'generation_blocked');
+    assert.equal(blocked.json.retryable, false);
+    assert.deepEqual(blocked.json.fence, { scopeKind: 'generation', reasonCode: 'START_EVIDENCE_WRITE_FAILED' });
+
+    authorizeProviderExecution = () => {
+      throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
+    };
+    const busy = await request('POST', '/api/git/generate-commit-message', {
+      project: PUBLIC_PROJECT, files: ['a.txt'],
+    });
+    assert.equal(busy.status, 503);
+    assert.deepEqual(busy.json, {
+      error: 'Permission admission failed closed.',
+      code: 'permission_admission_unavailable',
+      retryable: true,
+      notStarted: true,
+    });
+  } finally {
+    warn.mock.restore();
+  }
 });

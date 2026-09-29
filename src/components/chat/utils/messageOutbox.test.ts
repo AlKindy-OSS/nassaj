@@ -142,6 +142,36 @@ describe('الحفظ والاسترجاع', () => {
   });
 });
 
+describe('B-1076 حجب الصلاحيات — markOutboxFailed', () => {
+  it.each(['effect_scope_fenced', 'generation_blocked'] as const)(
+    'يحفظ permanentlyBlocked:true والحجب لـ%s مع retryable:false',
+    (code) => {
+      record('m1');
+      const fence = { scopeKind: 'session' as const, reasonCode: 'unknown_effect' };
+      markOutboxFailed('m1', { code, retryable: false, fence });
+      const [entry] = getOutboxSnapshot();
+      expect(entry.reasonCode).toBe(code);
+      expect(entry.permanentlyBlocked).toBe(true);
+      expect(entry.fence).toEqual(fence);
+    },
+  );
+
+  it('لا يُعلّم permanentlyBlocked حين retryable ليس false صراحةً', () => {
+    record('m1');
+    markOutboxFailed('m1', { code: 'effect_scope_fenced', fence: { scopeKind: 'session' } });
+    expect(getOutboxSnapshot()[0].permanentlyBlocked).toBeFalsy();
+  });
+
+  it.each(['generation_transitioning', 'sqlite_busy', 'unknown'])(
+    'لا يُعلّم permanentlyBlocked لرمزٍ آخر ولو وصل retryable:false',
+    (code) => {
+      record('m1');
+      markOutboxFailed('m1', { code, retryable: false });
+      expect(getOutboxSnapshot()[0].permanentlyBlocked).toBeFalsy();
+    },
+  );
+});
+
 describe('الربط بـclientMsgId', () => {
   it('يُصيب الإدخال الصحيح مع إدخالين معلَّقين', () => {
     record('m1');

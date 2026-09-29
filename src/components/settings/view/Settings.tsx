@@ -368,7 +368,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents', deepL
                   وحجوب الصلاحيات والتحديث التلقائي انتقلت هنا («النظام»)،
                   بنفس قيد الدور. */}
               {activeTab === 'system' && user?.role === 'owner' && (
-                <SystemSettingsTab />
+                <SystemSettingsTab
+                  fenceFilter={deepLink?.tab === 'system' ? deepLink.fenceFilter : undefined}
+                />
               )}
 
               {activeTab === 'about' && <AboutTab />}

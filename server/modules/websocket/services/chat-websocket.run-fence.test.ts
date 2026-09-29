@@ -53,6 +53,9 @@ const {
   __resetProjectFenceStateForTests,
 } = await import('@/modules/database/repositories/project-access.js');
 const { WebSocketWriter } = await import('@/modules/websocket/services/websocket-writer.service.js');
+const { PermissionStateConflictError } = await import(
+  '@/modules/database/repositories/permission-execution.js'
+);
 const { dispatchProviderCommand, handleChatConnection, abortSessionTurn, __resetBtwFloodStateForTests } =
   await import('@/modules/websocket/services/chat-websocket.service.js');
 const { revokeProjectLiveAccess } = await import(
@@ -153,7 +156,6 @@ const BRANCHES: Branch[] = [
   { name: 'codex', messageType: 'codex-command', launcher: launcher('queryCodex') },
   { name: 'cursor', messageType: 'cursor-command', launcher: launcher('spawnCursor') },
   { name: 'antigravity', messageType: 'antigravity-command', launcher: launcher('spawnAntigravity') },
-  { name: 'hermes', messageType: 'hermes-command', launcher: launcher('spawnHermes') },
   { name: 'opencode', messageType: 'opencode-command', launcher: launcher('spawnOpenCode') },
   { name: 'kimi', messageType: 'kimi-command', launcher: launcher('spawnKimi') },
   {
@@ -164,7 +166,6 @@ const BRANCHES: Branch[] = [
     name: 'glm-carrier', messageType: 'glm-command', options: { mode: 'agent' },
     env: { NASSAJ_OPENCODE_CARRIER: '1' }, launcher: launcher('spawnOpenCode'),
   },
-  { name: 'qwen', messageType: 'qwen-command', launcher: launcher('spawnQwen') },
   {
     name: 'hosted', messageType: 'kimi-command', options: { clientMsgId: 'rf-hosted-1' },
     launcher: (launches) => ({
@@ -175,7 +176,7 @@ const BRANCHES: Branch[] = [
     }),
   },
   {
-    name: 'cli', messageType: 'qwen-command', options: { clientMsgId: 'rf-cli-1' },
+    name: 'cli', messageType: 'opencode-command', options: { clientMsgId: 'rf-cli-1' },
     launcher: (launches) => ({
       cliTurnSupervisor: {
         enabledCell: () => true, supports: () => true, cancel: () => true,
@@ -442,4 +443,38 @@ test('qa M3 race: a /btw fork that starts after the revocation is interrupted at
   let interrupted = 0;
   calls[0].callbacks.onStarted({ interrupt: () => { interrupted += 1; } } as never);
   assert.equal(interrupted, 1);
+});
+
+test('B-1076: /btw passes the real classified admission code, retry flag and fence hint', async () => {
+  const sessionId = 'rf-btw-fenced';
+  sessionsDb.createSession(sessionId, 'claude', projectPath, 'btw');
+  let releases = 0;
+  const warn = mock.method(console, 'warn', () => undefined);
+  try {
+    const { ws, sent, calls } = btwHarness(member, {
+      acquireWriterLease: async () => ({ release: () => { releases += 1; } }),
+      authorizeProviderExecution: () => {
+        throw new PermissionStateConflictError('EFFECT_SCOPE_FENCED', {
+          scopeKind: 'session', reasonCode: 'RECONCILED_EFFECT_UNKNOWN',
+        });
+      },
+    });
+    await ws.emit('message', JSON.stringify({ type: 'btw-query', btwId: 'b5', sessionId, question: 'secret q' }));
+    await tick();
+    const error = sent.find((frame) => frame.type === 'btw-error');
+    assert.equal(error?.code, 'effect_scope_fenced');
+    assert.equal(error?.retryable, false);
+    assert.deepEqual(error?.fence, { scopeKind: 'session', reasonCode: 'RECONCILED_EFFECT_UNKNOWN' });
+    assert.equal(sent.some((frame) => frame.type === 'btw-accepted'), false);
+    assert.equal(calls.length, 0, 'no fork');
+    assert.equal(releases, 1, 'the lease is released');
+    assert.equal(__fencedRunCountForTests(), 0);
+    const logged = warn.mock.calls.map((call) => String(call.arguments[0]))
+      .filter((line) => line.includes('permission_admission_failed'));
+    assert.equal(logged.length, 1);
+    assert.equal(JSON.parse(logged[0]).entrypoint, 'ws.btw');
+    assert.doesNotMatch(logged[0], /secret q/);
+  } finally {
+    warn.mock.restore();
+  }
 });

@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { hashTree } from './lib/source-update-tree-identity.mjs';
 export { hashTree } from './lib/source-update-tree-identity.mjs';
 
-import { installAndBuildCandidate, buildInstalledCandidateArtifact, dependencyEnvironment } from './lib/candidate-build-steps.mjs';
+import {
+    installAndBuildCandidate, buildInstalledCandidateArtifact, dependencyEnvironment, sanitizedStderrTail,
+} from './lib/candidate-build-steps.mjs';
 import { readOidSourceInventory, verifyOidSourceInventory, verifyOidLinkedWorktree } from './lib/oid-candidate-source.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,11 +29,16 @@ function canonicalJson(value) {
     return JSON.stringify(value);
 }
 
-function command(executable, args, options = {}) {
+/** Run a child synchronously; on failure the error carries a sanitized stderr tail. */
+export function command(executable, args, options = {}) {
     const result = spawnSync(executable, args, {
         cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...options,
     });
-    if (result.status !== 0) throw new Error(`${path.basename(executable)} failed (${result.status ?? result.signal}).`);
+    if (result.status !== 0) {
+        const tail = sanitizedStderrTail(result.stderr);
+        const reason = `${path.basename(executable)} failed (${result.status ?? result.signal}).`;
+        throw new Error(tail ? `${reason}\n${tail}` : reason);
+    }
     return result;
 }
 

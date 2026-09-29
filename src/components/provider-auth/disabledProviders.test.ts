@@ -2,12 +2,12 @@
  * Tests for the globally-disabled-providers seam (T-864, updated per ADR-062
  * and the 2026-07-26 owner decision on GLM, shared/disabledProviders.ts — the
  * single source of truth):
- * - the disabled set is exactly deepseek/glm (Qwen is enabled only after its
- *   foreground runtime adapters landed in T-1376; kimi stays re-enabled as a
- *   governed agent environment per ADR-062; glm is folded into the OpenCode
- *   carrier and is no longer a standalone agent system);
- * - the enabled set (claude/opencode/antigravity/cursor/codex/hermes) is
- *   intact;
+ * - the disabled set is exactly deepseek/glm/hermes/qwen (kimi stays re-enabled
+ *   as a governed agent environment per ADR-062; glm is folded into the OpenCode
+ *   carrier and is no longer a standalone agent system; hermes and qwen are
+ *   hidden and spawn-blocked per the 2026-09-28 owner decisions, code kept
+ *   dormant — qwen's key is to move to the OpenCode carrier like GLM);
+ * - the enabled set (claude/opencode/antigravity/cursor/codex) is intact;
  * - CLI_PROVIDERS (auth-status probe fan-out) contains no disabled provider;
  * - ENABLED_VENDOR_PROVIDERS is exactly [kimi] (deepseek and glm stay
  *   disabled), and VENDOR_PROVIDERS itself stays complete (historical session
@@ -27,6 +27,7 @@ import {
 } from '../../../shared/disabledProviders';
 import { engineProviderHost, isEngineProviderEligible } from '../../../shared/engineProviders';
 import { DEFAULT_PROVIDER, sanitizeStoredProvider } from '../../constants/providerModelFallbacks';
+import { visibleSettingsAgents } from '../settings/view/tabs/agents-settings/visibleAgents';
 
 import { CLI_PROVIDERS } from './types';
 import {
@@ -37,11 +38,12 @@ import {
 } from './vendorProviders';
 
 describe('shared/disabledProviders — single source of truth', () => {
-  it('disabled set is deepseek/glm', () => {
+  it('disabled set is deepseek/glm/hermes/qwen', () => {
     // deepseek: comes-soon tile in the strip (T-1760), but globally disabled for
     // spawn-blocking — its tile shows a coming-soon panel, not real category content.
     // glm: folded into OpenCode carrier (ADR-062).
-    expect([...DISABLED_PROVIDERS].sort()).toEqual(['deepseek', 'glm']);
+    // hermes, qwen: hidden + spawn-blocked (owner decisions 2026-09-28), code dormant.
+    expect([...DISABLED_PROVIDERS].sort()).toEqual(['deepseek', 'glm', 'hermes', 'qwen']);
   });
 
   it('keeps antigravity enabled — it is the Google OAuth agent', () => {
@@ -56,16 +58,16 @@ describe('shared/disabledProviders — single source of truth', () => {
   });
 
   it('keeps the enabled native bodies untouched', () => {
-    for (const provider of ['claude', 'opencode', 'antigravity', 'cursor', 'codex', 'hermes', 'qwen']) {
+    for (const provider of ['claude', 'opencode', 'antigravity', 'cursor', 'codex']) {
       expect(isProviderGloballyDisabled(provider)).toBe(false);
     }
   });
 
   it('filterDisabledProviders preserves order and does not mutate its input', () => {
-    const input = ['claude', 'glm', 'cursor', 'deepseek', 'hermes'];
+    const input = ['claude', 'glm', 'cursor', 'deepseek', 'hermes', 'codex'];
     const output = filterDisabledProviders(input);
-    expect(output).toEqual(['claude', 'cursor', 'hermes']);
-    expect(input).toHaveLength(5);
+    expect(output).toEqual(['claude', 'cursor', 'codex']);
+    expect(input).toHaveLength(6);
   });
 });
 
@@ -76,7 +78,7 @@ describe('CLI_PROVIDERS — auth-status probe fan-out', () => {
     }
   });
 
-  it('still probes the enabled providers (incl. re-enabled kimi, without glm)', () => {
+  it('still probes the enabled providers (incl. re-enabled kimi, without glm/hermes/qwen)', () => {
     // kimi re-enabled per ADR-062 → probed so the key-entry UI reflects its
     // connection state; deepseek and glm stay filtered. Probing glm is what
     // produced the misleading standalone "Connected" badge fed by a key store
@@ -87,9 +89,7 @@ describe('CLI_PROVIDERS — auth-status probe fan-out', () => {
       'codex',
       'antigravity',
       'opencode',
-      'hermes',
       'kimi',
-      'qwen',
     ]);
   });
 });
@@ -142,6 +142,24 @@ describe('sanitizeStoredProvider — persisted selection of a disabled provider'
 
   it('keeps a persisted enabled provider as-is', () => {
     expect(sanitizeStoredProvider('opencode')).toBe('opencode');
-    expect(sanitizeStoredProvider('hermes')).toBe('hermes');
+    expect(sanitizeStoredProvider('codex')).toBe('codex');
+  });
+});
+
+describe('hermes — disabled, not deleted (owner decision 2026-09-28)', () => {
+  it('is hidden from the settings strip, the auth probe and a persisted selection', () => {
+    expect(isProviderGloballyDisabled('hermes')).toBe(true);
+    expect(visibleSettingsAgents()).not.toContain('hermes');
+    expect(CLI_PROVIDERS).not.toContain('hermes');
+    expect(sanitizeStoredProvider('hermes')).toBe(DEFAULT_PROVIDER);
+  });
+});
+
+describe('qwen — disabled, not deleted (owner decision 2026-09-28)', () => {
+  it('is hidden from the settings strip, the auth probe and a persisted selection', () => {
+    expect(isProviderGloballyDisabled('qwen')).toBe(true);
+    expect(visibleSettingsAgents()).not.toContain('qwen');
+    expect(CLI_PROVIDERS).not.toContain('qwen');
+    expect(sanitizeStoredProvider('qwen')).toBe(DEFAULT_PROVIDER);
   });
 });

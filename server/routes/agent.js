@@ -36,6 +36,7 @@ import {
 } from '../services/agent-sse-ticket.service.js';
 import { normalizeProjectPath, validateWorkspacePath } from '../shared/utils.js';
 import { runPermissionExecutionAdapter } from '../modules/execution-permissions/adapter.js';
+import { sendAdmissionFailureResponse } from '../modules/execution-permissions/admission-failure.js';
 import {
   appendBoundedDiagnostic,
   classifyGitCloneFailure,
@@ -1454,11 +1455,13 @@ router.post('/', agentLimiter, requireExternalApiEnabled, validateExternalApiKey
       }
       permissionExecution = permission.execution;
     } catch (error) {
-      return res.status(503).json({
-        error: 'Permission admission failed closed.',
-        code: error?.code || 'PERMISSION_ADMISSION_UNAVAILABLE',
-        notStarted: true,
-      });
+      return sendAdmissionFailureResponse(res, {
+        entrypoint: 'rest.agent',
+        sessionId: typeof sessionId === 'string' && sessionId ? sessionId : null,
+        userId: req.user?.id,
+        provider,
+        purpose: provider === 'claude' || provider === 'codex' ? 'sdk_turn' : 'spawn',
+      }, error);
     }
 
     // Set up writer based on streaming mode

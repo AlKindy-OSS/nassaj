@@ -147,10 +147,10 @@ try {
 // حارس online يرى status=online ⇒ PROC_ONLINE_CONFIRMED=1 مع SERVER_PID فارغ.
 // لا --exec ⇒ لا restart إطلاقاً (غير مدمّر). المتوقّع: exit 6 وJSON نهائي متّسق.
 console.log('# الجزء B: تكامل — ترتيب إصدار --json (B-198، online+pid-غير-محلول)');
-function runEdgeCase() {
+function runEdgeCase({ wfBaseMissing = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'sr-b198-'));
   const wfBase = join(dir, 'wf');            // موجود لكن فارغ ⇒ scanned=0
-  mkdirSync(wfBase, { recursive: true });
+  if (!wfBaseMissing) mkdirSync(wfBase, { recursive: true });
   const fakePm2 = join(dir, 'pm2');          // pm2 مزيّف على رأس PATH
   writeFileSync(fakePm2,
     '#!/usr/bin/env bash\n' +
@@ -175,6 +175,7 @@ function runEdgeCase() {
     stdout = (e.stdout || '').toString();
     code = e.status;
   }
+  rmSync(dir, { recursive: true, force: true });
   return { stdout, code };
 }
 
@@ -196,6 +197,20 @@ eq('B-198: sessionDetectReason = server_pid_unresolved_while_online',
 eq('B-198: scan ok = true محفوظ', obj && obj.ok, true);
 eq('B-198: sessionCount = 0 محفوظ', obj && obj.sessionCount, 0);
 eq('B-198: sessionServerPid = null (pid غير محلول)', obj && obj.sessionServerPid, null);
+eq('wf_base حاضر ⇒ لا ملاحظة wfBaseMissing', obj && obj.wfBaseMissing, undefined);
+eq('wf_base حاضر ⇒ لا wfScanBlind', obj && obj.wfScanBlind, undefined);
+
+// تفعيل 2026-09-29: WF_BASE غائب ⇒ صفر ورشات مع ملاحظة، والقرار يحسمه كشف الجلسات.
+const edgeMissing = runEdgeCase({ wfBaseMissing: true });
+const missingJson = edgeMissing.stdout.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+let objMissing = null;
+try { objMissing = JSON.parse(missingJson[missingJson.length - 1]); } catch (_) {}
+eq('wf_base غائب ⇒ نفس قرار الحافة (exit 6 لا 2)', edgeMissing.code, 6);
+eq('wf_base غائب ⇒ liveCount = 0', objMissing && objMissing.liveCount, 0);
+eq('wf_base غائب ⇒ scan ok = true', objMissing && objMissing.ok, true);
+eq('wf_base غائب ⇒ wfBaseMissing = true', objMissing && objMissing.wfBaseMissing, true);
+eq('wf_base غائب ⇒ ملاحظة مذكورة', /wf_base_missing/.test((objMissing && objMissing.note) || ''), true);
+eq('wf_base غائب ⇒ wfScanBlind = true', objMissing && objMissing.wfScanBlind, true);
 
 // ── الجزء B2: مسار rollback recovery المقيد داخل safe-restart نفسه ────────────
 console.log('\n# الجزء B2: تكامل rollback recovery (PM2 errored)');
@@ -302,7 +317,7 @@ esac
     PM2_FIXTURE_CALLS: calls, NODE_OPTIONS: '--max-old-space-size=64',
     HEALTH_URL: 'http://127.0.0.1:1/health', WORKFLOW_SUPERVISOR: '',
   };
-  let stdout = '', code = 0, observed = [];
+  let stdout = '', stderr = '', code = 0, observed = [];
   try {
     // Refuse before invoking the real shell if PATH no longer selects our stub.
     const resolvedPm2 = execFileSync('/bin/bash', ['-c', 'command -v pm2'], { env, encoding: 'utf8' }).trim();
@@ -314,7 +329,7 @@ esac
       '--cpu=10', '--as=8589934592', '--', '/bin/bash', SCRIPT, '--json'],
     { env, encoding: 'utf8', maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], timeout: 25000 });
   } catch (error) {
-    stdout = (error.stdout || '').toString(); code = error.status;
+    stdout = (error.stdout || '').toString(); stderr = (error.stderr || '').toString(); code = error.status;
     if (error.error || [124, 137, null].includes(code)) throw error;
   } finally {
     observed = existsSync(calls) ? readFileSync(calls, 'utf8').trim().split('\n') : [];
@@ -327,17 +342,22 @@ esac
   const line = stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('{')).pop();
   let parsed = null;
   try { parsed = JSON.parse(line); } catch { /* asserted by the caller */ }
-  return { code, parsed };
+  return { code, parsed, stderr };
 }
 
-// (1) بلا جذر claude على الإطلاق: يفشل بـwf_base_missing — وهو صحيح — لكن المسار
-//     المذكور يجب أن يكون مشتقاً حقيقياً تحت $HOME/.claude، لا عبارةً بشرية.
+// (1) بلا جذر claude على الإطلاق (عقدة/جذر حيّ جديد بلا ورشات): ليس خطأ إعداد —
+//     يُعامَل كصفر ورشات حيّة ويكمل إلى حدّ PM2 (تفعيل 2026-09-29). المسار المذكور في
+//     السجل يبقى مشتقاً حقيقياً تحت $HOME/.claude، لا عبارةً بشرية.
 const missing = runWithHome(mkdtempSync(join(tmpdir(), 'sr-wfbase-none-')), { withProjects: false });
-eq('B-302: بلا جذر ⇒ الخطأ wf_base_missing', missing.parsed && missing.parsed.error, 'wf_base_missing');
-eq('B-302: الاحتياطي تحت $HOME/.claude/projects',
-   Boolean(missing.parsed && /\/\.claude\/projects\//.test(missing.parsed.wfBase)), true);
+eq('wf_base غائب ⇒ لا خطأ wf_base_missing',
+   Boolean(missing.parsed && missing.parsed.error === 'wf_base_missing'), false);
+eq('wf_base غائب ⇒ لا خروج بـ2 (خطأ إعداد)', missing.code === 2, false);
+const missingLine = missing.stderr.split('\n').find(line => line.includes('treated as zero live workflows')) || '';
+eq('wf_base غائب ⇒ سجلّ يعلن صفر ورشات', missingLine !== '', true);
+eq('wf_base غائب ⇒ السجلّ بمستوى WARN لا INFO', /\[WARN\]/.test(missingLine), true);
+eq('B-302: الاحتياطي تحت $HOME/.claude/projects', /\/\.claude\/projects\//.test(missingLine), true);
 eq('B-302: لا مسافات في المسار المشتقّ (لا عبارة وصفية في سطر تنفيذي)',
-   Boolean(missing.parsed && !/\s/.test(missing.parsed.wfBase)), true);
+   /\S+$/.test(missingLine) && !/\s/.test(missingLine.slice(missingLine.lastIndexOf(': ') + 2)), true);
 
 // (2) جذر claude قياسي موجود بلا CLAUDE_CONFIG_DIR: يجب تجاوز بوابة WF_BASE —
 //     ثم يتوقف عند حد PM2 الاصطناعي بلا إنشاء أي عفريت.

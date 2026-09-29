@@ -1,3 +1,44 @@
+## 2.3.0.11 — 2026-09-29
+
+يُكمل هذا الإصدار سلسلة الترقية (B-1381): يعود codex-sdk إلى 0.157.1 بعد أن نقل الإصدار الجسر 2.3.0.10
+كل العقد إلى محدّثٍ يبني الإصدار الجديد بأدواته هو. أداة الحماية bwrap المرفقة بـ0.157.1 مطابقة بايتياً
+لتلك التي تحملها نسخة Codex على الجهاز. وتفعيل التحديث صار أمتن: عقدة لم تُشغّل ورشة Claude من جذرها الحيّ
+قطّ لم تعد تفشل فحص إعادة التشغيل الآمنة، ويُسجَّل سبب أي فشل في الفحص، ولم تعد نافذة التحديث تَعِد بإعادة
+محاولة لن تحدث: الفشل يظهر نهائياً مع خطوة العلاج (عالج السبب ثم أكّد التفعيل مجدداً).
+
+This release completes the upgrade chain (B-1381): codex-sdk returns to 0.157.1 now that the 2.3.0.10
+bridge moved every node to an updater that builds each new release with that release's own builders.
+The bwrap sandbox tool bundled with 0.157.1 is byte-identical to the one the machine Codex install
+already carries. Update activation is sturdier: a node whose live root never ran a Claude workflow no
+longer fails the safe-restart check, every failed check records its reason, and the update dialog no
+longer promises a retry that will not happen: the failure is shown as final with its recovery step
+(fix the cause, then confirm activation again).
+
+وفي هذا الإصدار أيضاً: إيقاف مزوّدَي Qwen وHermes على مستوى الخادم بقرار المالك؛ تبقى محادثاتهما السابقة
+مقروءة (قرار 2026-09-28). ويُثبَّت OpenCode على 1.18.32 بعد مطابقة بصمته لأصل الإصدار الرسمي، فيعمل ناقل
+GLM مجدداً (B-1370). وحين يُحجَب إرسالٌ بحاجز صلاحيات، تشرح بطاقة صندوق الإرسال السبب بلغة واضحة وتعرض
+المتابعة في محادثة جديدة، وللمالك رابط «مراجعة وفكّ الحجب» في الإعدادات ← النظام؛ والخادم يصنّف رفض
+القبول ويسجّله بدل ابتلاعه (B-1076). وسجلّ مهمة التحديث يعرض سبب فشل بناء المرشّح (B-1383). وأُزيل شريط
+تغيّر المراجعة من المحادثة؛ سهم الانتقال إلى الأسفل وحده يشير إلى التحديث.
+
+Also: the Qwen and Hermes providers are disabled server-wide by owner decision; their earlier
+conversations stay readable (decision 2026-09-28). OpenCode is pinned to 1.18.32 after its digest was
+matched to the official release asset, so the GLM carrier runs again (B-1370). When a send is blocked by
+a permission fence, the outbox card explains why in plain language and offers to continue in a new
+conversation, and the owner gets a "review and unlock" link into Settings → System; the server now
+classifies and logs admission refusals instead of swallowing them (B-1076). The update job log shows
+why a candidate build failed (B-1383). The history-revision banner is gone from chat; the jump-down
+arrow alone signals a refresh.
+
+**مسار الترقية:**
+- من 2.3.0.10 إلى 2.3.0.11: المسار الوحيد المدعوم.
+- من 2.3.0.8 أو 2.3.0.9 مباشرة: يفشل (محدّثهما يشترط إصدار Codex SDK آخر)، ولا يعرض زر التحديث
+  الإصدار 2.3.0.10 بعد نشر هذا الإصدار؛ لا تبقى عقدة كهذه في الأسطول.
+
+**Upgrade path:**
+- 2.3.0.10 → 2.3.0.11: the only supported path.
+- 2.3.0.8 or 2.3.0.9 directly: fails (their updater requires a different Codex SDK), and the
+  update button no longer offers 2.3.0.10 once this release ships; no such node remains in the fleet.
 ## 2.3.0.10 — 2026-09-28
 
 إصدار جسر لسلسلة الترقية (B-1381): المحدّث المثبَّت على 2.3.0.8 يبني الإصدار الجديد بأدواته هو، وحارسها

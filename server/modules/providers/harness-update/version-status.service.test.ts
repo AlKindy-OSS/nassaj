@@ -289,18 +289,18 @@ test('getAll returns one row per harness in the contract shape', async () => {
 // Fixtures are the measured 2026-09-27 values (docs/ops/t1871-measurements.md).
 // ---------------------------------------------------------------------------
 
-test('opencode 1.18.32 (pin 1.17.18, flag off) → incompatible in GLM carrier mode', async () => {
+test('opencode 1.18.33 (pin 1.18.32, flag off) → incompatible in GLM carrier mode', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('opencode', baseDeps({
-    runVersion: async () => '1.18.32',
-    fetchGithubLatest: async () => '1.18.32',
+    runVersion: async () => '1.18.33',
+    fetchGithubLatest: async () => '1.18.33',
   }));
   assert.equal(s!.state, 'updatable');
   assert.equal(s!.updatable, true, 'T-1871 stage 3: snapshot-backed, manual only');
-  assert.deepEqual(s!.restoreCompatible, { version: '1.17.18', verified: false });
+  assert.deepEqual(s!.restoreCompatible, { version: '1.18.32', verified: false });
   assert.equal(s!.compatibility?.state, 'incompatible');
   assert.equal(s!.compatibility?.reason, 'glm-carrier-blocked');
-  assert.equal(s!.latestVersion, '1.18.32');
+  assert.equal(s!.latestVersion, '1.18.33');
   assert.equal(s!.upToDate, true);
   assert.equal(s!.targetCompatibility?.reason, 'glm-carrier-blocked');
 });
@@ -309,7 +309,7 @@ test('opencode latest probe uses the fixed GitHub URL', async () => {
   _resetLatestCache();
   const urls: string[] = [];
   await getHarnessVersionStatus('opencode', baseDeps({
-    runVersion: async () => '1.18.32',
+    runVersion: async () => '1.18.33',
     fetchGithubLatest: async (url) => { urls.push(url); return '1.18.33'; },
   }));
   assert.deepEqual(urls, [OPENCODE_LATEST_RELEASE_URL]);
@@ -331,10 +331,10 @@ test('kimi 2.1.1 (pin 0.28.1, flag off) → untested pin-mismatch-unreviewed; ta
 test('restore-compatible offer turns verified only from the durable flag', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('opencode', baseDeps({
-    runVersion: async () => '1.17.18',
+    runVersion: async () => '1.18.32',
     compatVerified: (id) => id === 'opencode',
   }));
-  assert.deepEqual(s!.restoreCompatible, { version: '1.17.18', verified: true });
+  assert.deepEqual(s!.restoreCompatible, { version: '1.18.32', verified: true });
   const kimi = await getHarnessVersionStatus('kimi', baseDeps({ runVersion: async () => '2.1.1' }));
   assert.equal(kimi!.restoreCompatible, undefined, 'kimi restore dropped (stale pin)');
 });
@@ -342,7 +342,7 @@ test('restore-compatible offer turns verified only from the durable flag', async
 test('armed pin: a snapshot-backed pinned harness stays updatable (pinBreak ack instead)', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('opencode', baseDeps({
-    runVersion: async () => '1.18.32',
+    runVersion: async () => '1.18.33',
     pinEnabled: () => true,
   }));
   assert.equal(s!.updatable, true);

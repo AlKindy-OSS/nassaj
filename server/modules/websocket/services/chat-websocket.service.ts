@@ -17,6 +17,10 @@ import type {
 } from '@/modules/execution-permissions/index.js';
 // Runtime-only leaf import avoids evaluating the database-backed public barrel in partial mocks.
 import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
+import {
+  admissionFailurePayload,
+  reportAdmissionFailure,
+} from '@/modules/execution-permissions/admission-failure.js';
 // Namespace import (not `import { projectsDb, sessionsDb }`): the realtime
 // visibility gate below reads `sessionsDb`, but some unit tests module-mock this
 // barrel with only the subset they exercise. A namespace binding tolerates a
@@ -2222,12 +2226,13 @@ async function dispatchFencedProviderCommand(
         purpose,
       });
     } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error
-        ? String(error.code).toLowerCase()
-        : 'permission_admission_unavailable';
+      const failure = reportAdmissionFailure({
+        entrypoint: 'ws.chat', sessionId: resumeSessionId, userId: ingressUserId, provider, purpose,
+      }, error);
       writer.send(createNormalizedMessage({
         kind: 'complete', provider, exitCode: 1, success: false,
-        code, notStarted: true, error: 'Permission admission failed closed.',
+        ...admissionFailurePayload(failure),
+        notStarted: true, error: 'Permission admission failed closed.',
         ...clientMsgIdEcho(data),
       }));
       return null;
@@ -2998,13 +3003,17 @@ export function handleChatConnection(
         // rejections here + fork errors forwarded from spawnClaudeSideQuery's
         // onError). Code + session + userId type/value + message ONLY — never the
         // question text, conversation content, or any credential/token/secret.
-        const emitBtwError = (code: string, message: string): void => {
+        const emitBtwError = (
+          code: string,
+          message: string,
+          extra: Readonly<Record<string, unknown>> = {},
+        ): void => {
           console.warn(
             `[BTW] ws emit-error session=${btwSessionId || '<none>'} code=${code} `
             + `userIdType=${typeof presenceUserId} userIdValue=${String(presenceUserId)} `
             + `msg=${message}`
           );
-          sendBtwRaw({ type: 'btw-error', btwId, code, message });
+          sendBtwRaw({ type: 'btw-error', btwId, ...extra, code, message });
         };
 
         if (Buffer.byteLength(question, 'utf8') > BTW_MAX_QUESTION_BYTES) {
@@ -3151,10 +3160,15 @@ export function handleChatConnection(
               return;
             }
             btwPermissionExecution = permission.execution;
-          } catch {
+          } catch (error) {
             btwWriterLease?.release();
             releaseFencedRun(btwFencedRun);
-            emitBtwError('permission_admission_unavailable', 'Permission admission failed closed.');
+            const failure = reportAdmissionFailure({
+              entrypoint: 'ws.btw', sessionId: btwSessionId, userId: presenceUserId,
+              provider: sessionProvider, purpose: 'sdk_turn',
+            }, error);
+            const { code: failureCode, ...failureExtra } = admissionFailurePayload(failure);
+            emitBtwError(failureCode, 'Permission admission failed closed.', failureExtra);
             return;
           }
         }

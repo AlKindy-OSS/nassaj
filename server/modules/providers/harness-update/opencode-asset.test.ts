@@ -16,8 +16,8 @@ import { makeFixtureRoot, modeOf, removeFixture, writeFixtureFile } from './snap
 const root = makeFixtureRoot();
 after(() => removeFixture(root));
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
-const BIN = Buffer.from('#!fake opencode 1.17.18\n'.repeat(40));
-const START = 'https://github.com/anomalyco/opencode/releases/download/v1.17.18/opencode-linux-x64.tar.gz';
+const BIN = Buffer.from('#!fake opencode 1.18.32\n'.repeat(40));
+const START = 'https://github.com/anomalyco/opencode/releases/download/v1.18.32/opencode-linux-x64.tar.gz';
 const CDN = 'https://release-assets.githubusercontent.com/signed?x=1';
 
 type Entry = { name: string; data?: Buffer; type?: string; prefix?: string; badSum?: boolean };
@@ -52,7 +52,7 @@ function tarGz(entries: Entry[], trailer = Buffer.alloc(1024)): Buffer {
 function specFor(gz: Buffer, over: Partial<ReleaseAssetSpec> = {}): ReleaseAssetSpec {
   return {
     ...OPENCODE_COMPAT_ASSET, url: START, size: gz.length, capBytes: 1 << 20,
-    tarballSha256: sha(gz), binarySha256: sha(BIN), version: '1.17.18', maxUncompressedBytes: 1 << 16, ...over,
+    tarballSha256: sha(gz), binarySha256: sha(BIN), version: '1.18.32', maxUncompressedBytes: 1 << 16, ...over,
   };
 }
 
@@ -73,13 +73,13 @@ let seq = 0;
 async function run(gz: Buffer, opts: { spec?: Partial<ReleaseAssetSpec>; routes?: Record<string, () => Response>; version?: string } = {}) {
   seq += 1;
   const dest = path.join(root, `dest${seq}/opencode`);
-  writeFixtureFile(dest, 'current-1.18.32', 0o755);
+  writeFixtureFile(dest, 'current-1.18.33', 0o755);
   const versions: string[] = [];
   const jobId = `job-${seq}`;
   const promise = installCompatAsset({
     jobId, destPath: dest, stagingParent: root, spec: specFor(gz, opts.spec),
     fetchImpl: fakeFetch(opts.routes ?? { [START]: redirect(CDN), [CDN]: body(gz) }),
-    readVersion: (p) => { versions.push(p); return opts.version ?? '1.17.18'; },
+    readVersion: (p) => { versions.push(p); return opts.version ?? '1.18.32'; },
   });
   return { promise, dest, versions, staging: path.join(root, `nassaj-harness-${jobId}`) };
 }
@@ -87,16 +87,17 @@ async function run(gz: Buffer, opts: { spec?: Partial<ReleaseAssetSpec>; routes?
 async function refused(expected: SnapshotErrorCode, gz: Buffer, opts: Parameters<typeof run>[1] = {}) {
   const r = await run(gz, opts);
   await assert.rejects(r.promise, (e) => hasErrorCode(e, expected));
-  assert.equal(fs.readFileSync(r.dest, 'utf8'), 'current-1.18.32', 'live binary untouched');
+  assert.equal(fs.readFileSync(r.dest, 'utf8'), 'current-1.18.33', 'live binary untouched');
   assert.deepEqual(fs.readdirSync(path.dirname(r.dest)), ['opencode'], 'no temp left');
   assert.equal(fs.existsSync(r.staging), false, 'staging removed');
 }
 
 test('fixed asset constants: pin digest reused, allowlist and caps from the spec', () => {
   assert.equal(OPENCODE_COMPAT_ASSET.binarySha256, PINNED_VENDOR_DIGESTS.opencode.sha256);
-  assert.equal(OPENCODE_COMPAT_ASSET.version, '1.17.18');
+  assert.equal(OPENCODE_COMPAT_ASSET.version, '1.18.32');
   assert.deepEqual([...OPENCODE_COMPAT_ASSET.allowedHosts], ['github.com', 'release-assets.githubusercontent.com']);
-  assert.equal(OPENCODE_COMPAT_ASSET.size, 69_427_073);
+  assert.equal(OPENCODE_COMPAT_ASSET.size, 60_608_353);
+  assert.equal(OPENCODE_COMPAT_ASSET.tarballSha256, '3046e0404fdc60fb80307e7a47824ba07477364178a4d09baa8548496dd6d43b');
   assert.equal(OPENCODE_COMPAT_ASSET.maxRedirects, 3);
   assert.equal(OPENCODE_COMPAT_ASSET.capBytes, 80 * 1024 * 1024);
   assert.equal(OPENCODE_COMPAT_ASSET.url, START);
@@ -171,7 +172,7 @@ test('archive integrity: bad checksum, not gzip, truncated, trailing garbage, un
 test('extracted sha ≠ pin or wrong --version → nothing renamed', async () => {
   const other = tarGz([{ name: 'opencode', data: Buffer.from('a different build') }]);
   await refused('ASSET_DIGEST_MISMATCH', other);
-  await refused('ASSET_VERSION_MISMATCH', tarGz([{ name: 'opencode', data: BIN }]), { version: '1.18.32' });
+  await refused('ASSET_VERSION_MISMATCH', tarGz([{ name: 'opencode', data: BIN }]), { version: '1.18.33' });
 });
 
 test('a pre-existing staging dir is refused and left alone', async () => {
@@ -180,7 +181,7 @@ test('a pre-existing staging dir is refused and left alone', async () => {
   fs.mkdirSync(planted);
   await assert.rejects(installCompatAsset({
     jobId: 'planted', destPath: path.join(root, 'nowhere'), stagingParent: root, spec: specFor(gz),
-    fetchImpl: fakeFetch({}), readVersion: () => '1.17.18',
+    fetchImpl: fakeFetch({}), readVersion: () => '1.18.32',
   }));
   assert.equal(fs.existsSync(planted), true);
 });

@@ -4,6 +4,13 @@ import ar from '../../../i18n/locales/ar/chat.json';
 import en from '../../../i18n/locales/en/chat.json';
 
 import { readServerErrorCode, readServerErrorDetail, resolveServerErrorMessage } from './useChatRealtimeHandlers';
+import {
+  isPermanentOutboxBlock,
+  readServerErrorFence,
+  readServerErrorRetryable,
+  resolveOutboxFenceAction,
+  resolveOutboxFenceReasonKey,
+} from '../utils/serverErrorMessage';
 
 const translate = (locale: typeof en | typeof ar) => (key: string, opts?: Record<string, unknown>) => {
   const value = key.split('.').reduce<unknown>((node, part) =>
@@ -76,6 +83,83 @@ describe('B-928 safe server error banners', () => {
   });
 });
 
+
+describe('B-1076 permission-fence outbox reasons', () => {
+  it.each(['effect_scope_fenced', 'generation_blocked'] as const)(
+    'isPermanentOutboxBlock is true for %s only with an explicit retryable:false',
+    (code) => {
+      expect(isPermanentOutboxBlock(code, false)).toBe(true);
+      expect(isPermanentOutboxBlock(code, true)).toBe(false);
+      expect(isPermanentOutboxBlock(code, null)).toBe(false);
+      expect(isPermanentOutboxBlock(code, undefined)).toBe(false);
+    },
+  );
+
+  it.each(['generation_transitioning', 'actor_revoked_or_stale', 'sqlite_busy', 'unknown', 'run_failed'])(
+    'never treats %s as permanent even with retryable:false',
+    (code) => {
+      expect(isPermanentOutboxBlock(code, false)).toBe(false);
+    },
+  );
+
+  it('resolves a scope-specific reason key for effect_scope_fenced', () => {
+    expect(resolveOutboxFenceReasonKey('effect_scope_fenced', { scopeKind: 'session' }))
+      .toBe('outbox.reason.effect_scope_fenced_session');
+    expect(resolveOutboxFenceReasonKey('effect_scope_fenced', { scopeKind: 'user_provider_purpose' }))
+      .toBe('outbox.reason.effect_scope_fenced_provider');
+    expect(resolveOutboxFenceReasonKey('effect_scope_fenced', null))
+      .toBe('outbox.reason.effect_scope_fenced_unknown');
+    expect(resolveOutboxFenceReasonKey('generation_blocked', null))
+      .toBe('outbox.reason.generation_blocked');
+    expect(resolveOutboxFenceReasonKey('generation_transitioning', null))
+      .toBe('outbox.reason.generation_transitioning');
+    expect(resolveOutboxFenceReasonKey('run_failed', null)).toBe('');
+  });
+
+  it.each([ar, en])('has both fence reason keys populated in %j', (locale) => {
+    expect(locale.outbox.reason.effect_scope_fenced_session).toBeTruthy();
+    expect(locale.outbox.reason.effect_scope_fenced_provider).toBeTruthy();
+    expect(locale.outbox.reason.effect_scope_fenced_unknown).toBeTruthy();
+    expect(locale.outbox.reason.generation_blocked).toBeTruthy();
+    expect(locale.outbox.reason.generation_transitioning).toBeTruthy();
+    expect(locale.outbox.reason.fenceMemberHint).toBeTruthy();
+    expect(locale.outbox.startNewConversation).toBeTruthy();
+    expect(locale.outbox.reviewAndUnlock).toBeTruthy();
+  });
+
+  it('offers "new conversation" only for a session-scoped effect_scope_fenced', () => {
+    expect(resolveOutboxFenceAction('effect_scope_fenced', { scopeKind: 'session' }, false))
+      .toEqual([{ kind: 'new_conversation' }]);
+    expect(resolveOutboxFenceAction('effect_scope_fenced', { scopeKind: 'user_provider_purpose' }, false))
+      .toEqual([]);
+    expect(resolveOutboxFenceAction('effect_scope_fenced', null, false)).toEqual([]);
+    expect(resolveOutboxFenceAction('generation_blocked', null, false)).toEqual([]);
+    expect(resolveOutboxFenceAction('run_failed', { scopeKind: 'session' }, false)).toEqual([]);
+  });
+
+  it('offers "review and unlock" to the owner for either permanent code, any scope', () => {
+    expect(resolveOutboxFenceAction('generation_blocked', null, true))
+      .toEqual([{ kind: 'review_unlock', scopeKind: null }]);
+    expect(resolveOutboxFenceAction('effect_scope_fenced', { scopeKind: 'user_provider_purpose' }, true))
+      .toEqual([{ kind: 'review_unlock', scopeKind: 'user_provider_purpose' }]);
+    // Session scope: the owner sees BOTH actions.
+    expect(resolveOutboxFenceAction('effect_scope_fenced', { scopeKind: 'session' }, true))
+      .toEqual([{ kind: 'new_conversation' }, { kind: 'review_unlock', scopeKind: 'session' }]);
+  });
+
+  it('reads fence and retryable from both the flat and structured wire shapes', () => {
+    expect(readServerErrorFence({ fence: { scopeKind: 'session', reasonCode: 'x' } }))
+      .toEqual({ scopeKind: 'session', reasonCode: 'x' });
+    expect(readServerErrorFence({ error: { fence: { scopeKind: 'generation' } } }))
+      .toEqual({ scopeKind: 'generation', reasonCode: undefined });
+    expect(readServerErrorFence({ fence: { scopeKind: 'not_a_real_scope' } }))
+      .toEqual({ scopeKind: undefined, reasonCode: undefined });
+    expect(readServerErrorFence({})).toBeNull();
+    expect(readServerErrorRetryable({ retryable: false })).toBe(false);
+    expect(readServerErrorRetryable({ error: { retryable: true } })).toBe(true);
+    expect(readServerErrorRetryable({})).toBeNull();
+  });
+});
 
 describe('B-928 shared row and banner classification', () => {
   it.each([ar, en])('keeps known safe descriptions in the selected locale', (locale) => {

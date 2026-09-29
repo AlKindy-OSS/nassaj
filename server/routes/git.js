@@ -15,6 +15,7 @@ import {
   requireBoundSessionWorkspace,
 } from '@/modules/session-workspaces/index.js';
 import { runPermissionExecutionAdapter } from '@/modules/execution-permissions/adapter.js';
+import { sendAdmissionFailureResponse } from '@/modules/execution-permissions/admission-failure.js';
 
 import { projectsDb } from '../modules/database/index.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
@@ -1812,11 +1813,13 @@ router.post('/generate-commit-message', async (req, res) => {
       }
       permissionExecution = permission.execution;
     } catch (error) {
-      return res.status(503).json({
-        error: 'Permission admission failed closed.',
-        code: error?.code || 'PERMISSION_ADMISSION_UNAVAILABLE',
-        notStarted: true,
-      });
+      return sendAdmissionFailureResponse(res, {
+        entrypoint: 'rest.git.generate-commit-message',
+        sessionId: null,
+        userId,
+        provider,
+        purpose: provider === 'claude' ? 'sdk_turn' : 'spawn',
+      }, error);
     }
 
     // Generate commit message using AI

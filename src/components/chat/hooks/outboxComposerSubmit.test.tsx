@@ -18,7 +18,9 @@
 import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-i18next', () => ({
+// Partial mock: OutboxCard (B-1076) reaches the auth barrel, whose UI imports use `Trans`.
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-i18next')>()),
   useTranslation: () => ({ t: (key: string, opts?: any) => opts?.defaultValue ?? key }),
 }));
 vi.mock('../../auth/context/AuthContext', () => ({

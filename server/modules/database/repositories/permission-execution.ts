@@ -95,8 +95,20 @@ export type CreatePermissionAdmission = Readonly<{
   reasonCodes?: readonly string[];
 }>;
 
+/**
+ * Scope that refused an admission. Carries only the scope kind and the recorded reason code;
+ * scope keys, decision ids and generations stay inside the database.
+ */
+export type PermissionAdmissionFenceHint = Readonly<{
+  scopeKind: 'session' | 'user_provider_purpose' | 'generation';
+  reasonCode: string;
+}>;
+
 export class PermissionStateConflictError extends Error {
-  constructor(public readonly code: string) {
+  constructor(
+    public readonly code: string,
+    public readonly fence?: PermissionAdmissionFenceHint,
+  ) {
     super(code);
     this.name = 'PermissionStateConflictError';
   }
@@ -154,6 +166,48 @@ export const digestPermissionWorkspace = (canonicalWorkspace: string): string =>
 };
 
 /**
+ * Refuses an admission for a stale actor, a closing or blocked generation, or a fenced scope.
+ * Permanent refusals carry the refusing scope kind and reason so callers can explain them.
+ */
+const assertAdmissionScopeOpen = (database: Database, input: CreatePermissionAdmission): void => {
+  const actor = database.prepare(`SELECT authorization_generation AS generation
+    FROM users WHERE id = ? AND is_active = 1 AND status = 'active'`).get(input.userId) as
+    | { generation: number }
+    | undefined;
+  if (!actor || actor.generation !== input.authorizationGeneration) {
+    throw new PermissionStateConflictError('ACTOR_REVOKED_OR_STALE');
+  }
+  const closing = database.prepare(`SELECT 1 FROM permission_rollout_transitions
+    WHERE state IN ('prepared', 'closing', 'failed_closed')
+      AND (from_generation = ? OR to_generation = ?) LIMIT 1`)
+    .get(input.protocolGeneration, input.protocolGeneration);
+  if (closing) throw new PermissionStateConflictError('GENERATION_TRANSITIONING');
+  const blocked = database.prepare(`SELECT reason_code AS reasonCode
+    FROM permission_generation_blocks
+    WHERE protocol_generation = ? LIMIT 1`).get(input.protocolGeneration) as
+    | { reasonCode: string }
+    | undefined;
+  if (blocked) {
+    throw new PermissionStateConflictError('GENERATION_BLOCKED', {
+      scopeKind: 'generation', reasonCode: blocked.reasonCode,
+    });
+  }
+  const fenced = database.prepare(`SELECT scope_kind AS scopeKind, reason_code AS reasonCode
+    FROM permission_effect_fences
+    WHERE (scope_kind = 'session' AND scope_key = ?)
+       OR (scope_kind = 'user_provider_purpose' AND scope_key = ?)
+    ORDER BY CASE scope_kind WHEN 'session' THEN 0 ELSE 1 END LIMIT 1`)
+    .get(input.sessionId ?? '', permissionUserProviderPurposeKey(input.userId, input.provider, input.purpose)) as
+    | { scopeKind: 'session' | 'user_provider_purpose'; reasonCode: string }
+    | undefined;
+  if (fenced) {
+    throw new PermissionStateConflictError('EFFECT_SCOPE_FENCED', {
+      scopeKind: fenced.scopeKind, reasonCode: fenced.reasonCode,
+    });
+  }
+};
+
+/**
  * Creates one authorized decision and one issued lease atomically. Duplicate identities,
  * stale actors, and a closing generation fail without leaving a partial decision.
  */
@@ -163,26 +217,7 @@ export const createPermissionAdmission = (
 ): void => {
   assertAdmissionInput(input);
   database.transaction(() => {
-    const actor = database.prepare(`SELECT authorization_generation AS generation
-      FROM users WHERE id = ? AND is_active = 1 AND status = 'active'`).get(input.userId) as
-      | { generation: number }
-      | undefined;
-    if (!actor || actor.generation !== input.authorizationGeneration) {
-      throw new PermissionStateConflictError('ACTOR_REVOKED_OR_STALE');
-    }
-    const closing = database.prepare(`SELECT 1 FROM permission_rollout_transitions
-      WHERE state IN ('prepared', 'closing', 'failed_closed')
-        AND (from_generation = ? OR to_generation = ?) LIMIT 1`)
-      .get(input.protocolGeneration, input.protocolGeneration);
-    if (closing) throw new PermissionStateConflictError('GENERATION_TRANSITIONING');
-    const blocked = database.prepare(`SELECT 1 FROM permission_generation_blocks
-      WHERE protocol_generation = ? LIMIT 1`).get(input.protocolGeneration);
-    if (blocked) throw new PermissionStateConflictError('GENERATION_BLOCKED');
-    const fenced = database.prepare(`SELECT 1 FROM permission_effect_fences
-      WHERE (scope_kind = 'session' AND scope_key = ?)
-         OR (scope_kind = 'user_provider_purpose' AND scope_key = ?) LIMIT 1`)
-      .get(input.sessionId ?? '', permissionUserProviderPurposeKey(input.userId, input.provider, input.purpose));
-    if (fenced) throw new PermissionStateConflictError('EFFECT_SCOPE_FENCED');
+    assertAdmissionScopeOpen(database, input);
 
     const reasonCodesJson = JSON.stringify(input.reasonCodes ?? []);
     database.prepare(`INSERT INTO permission_launch_decisions (

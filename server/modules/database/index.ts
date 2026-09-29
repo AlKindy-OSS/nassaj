@@ -242,6 +242,7 @@ export {
 } from '@/modules/database/repositories/permission-execution.js';
 export type {
   CreatePermissionAdmission,
+  PermissionAdmissionFenceHint,
   PermissionChildIdentity,
   PermissionEffectFenceScope,
   PermissionEffectFootprint,

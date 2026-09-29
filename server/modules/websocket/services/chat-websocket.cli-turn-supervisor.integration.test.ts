@@ -64,9 +64,10 @@ test('Codex direct/delegate/delegate_review route exclusively through mechanical
   }
 });
 
-test('Qwen, OpenCode and Hermes enabled cells use the same capture-only WS seam', async () => {
+// hermes and qwen are globally disabled (owner decision 2026-09-28): refused before any cell.
+test('the OpenCode enabled cell uses the same capture-only WS seam', async () => {
   for (const [messageType, provider] of [
-    ['qwen-command', 'qwen'], ['opencode-command', 'opencode'], ['hermes-command', 'hermes'],
+    ['opencode-command', 'opencode'],
   ] as const) {
     const ctx = harness(true, true);
     await dispatchProviderCommand(messageType, {
@@ -84,7 +85,6 @@ test('disabled or unsupported CLI cells preserve legacy dispatch', async () => {
   const cases = [
     ['codex-command', 'codex'], ['cursor-command', 'cursor'],
     ['antigravity-command', 'antigravity'], ['opencode-command', 'opencode'],
-    ['hermes-command', 'hermes'], ['qwen-command', 'qwen'],
   ] as const;
   for (const [messageType, provider] of cases) {
     const ctx = harness(false, false);

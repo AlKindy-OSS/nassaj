@@ -32,6 +32,22 @@
  * under provider `opencode`), and the ADR-062 agent-mode bypass in
  * chat-websocket.service keeps historical GLM agent sessions runnable.
  *
+ * `hermes` is disabled (owner decision 2026-09-28): Hermes is hidden from every
+ * surface — no settings card, no chat-picker group, no model fetch, no login
+ * CTA — and new runs are refused at the dispatch seam. It is disabled, not
+ * deleted: `hermes-cli.js`, the provider module under
+ * `server/modules/providers/list/hermes/` and its env/cage wiring stay in place
+ * as dormant code, and historical Hermes sessions stay listable and readable.
+ * Re-enabling is removing the id from this list.
+ *
+ * `qwen` is disabled (owner decision 2026-09-28): the Qwen body is hidden from
+ * every surface — no settings card, no chat-picker group, no model fetch, no
+ * login CTA — and new runs are refused at the dispatch seam. Its Coding Plan key
+ * is to become a plain key field used through the OpenCode carrier, like GLM;
+ * that redesign is a separate designed task. Until then the Qwen launcher,
+ * provider module and auth/login wiring stay in place as dormant code, and
+ * historical Qwen sessions stay listable and readable.
+ *
  * NOTE: the provider registry itself is NOT filtered — `resolveProvider` must
  * keep returning disabled providers so historical sessions stay listable and
  * readable (sessions.service fetchHistory/normalizeMessage, synchronizers).
@@ -40,6 +56,8 @@
 export const DISABLED_PROVIDERS = [
   'deepseek',
   'glm',
+  'hermes',
+  'qwen',
 ] as const;
 
 export type DisabledProviderId = (typeof DISABLED_PROVIDERS)[number];

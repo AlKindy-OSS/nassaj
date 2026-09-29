@@ -144,6 +144,7 @@ import {
     captureDatabaseSnapshot,
 } from '../../scripts/lib/source-update-database-snapshot.mjs';
 import { resolveDatabaseFilePath } from '../modules/database/database-path.js';
+import { appendGateStderr, gateReasonFromStderr } from '../shared/action-gate-reason.js';
 
 const router = express.Router();
 
@@ -865,7 +866,9 @@ const ACTION_GATE_TIMEOUT_MS = 30_000;
 
 /**
  * Runs an action's read-only pre-flight GATE with a FIXED argv (no shell, no
- * caller input) and waits for it. Resolves with { code, stdout }. The gate never
+ * caller input) and waits for it. Resolves with { code, stdout, reason }, where
+ * `reason` is the gate's last stderr line, sanitized and capped (null when none),
+ * so a failure is recorded with its cause instead of a bare exit code. The gate never
  * mutates anything, it only reports whether the action is safe to run. For
  * safe-restart the exit codes are: 0=safe, 3=live work (defer), 6=live
  * interactive sessions (defer), 2=read/config error, 4=not in PM2.
@@ -885,10 +888,11 @@ function runActionGate(action) {
                 detached: true,
             });
         } catch {
-            resolve({ code: 2, stdout: '' });
+            resolve({ code: 2, stdout: '', reason: 'gate_spawn_failed' });
             return;
         }
         let stdout = '';
+        let stderrTail = '';
         let settled = false;
         const finish = (outcome) => {
             if (settled) return;
@@ -899,17 +903,28 @@ function runActionGate(action) {
         child.stdout.on('data', (chunk) => {
             stdout += chunk;
         });
-        // Drain stderr so the pipe buffer can't fill and stall the child.
-        child.stderr.on('data', () => {});
+        // Drain stderr (so the pipe can't stall the child) into a bounded tail; decode as
+        // UTF-8 first so a multi-byte character split across chunks is not corrupted.
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk) => {
+            stderrTail = appendGateStderr(stderrTail, chunk);
+        });
         const timer = setTimeout(() => {
             killProcessTree(child);
             console.error('[system] action gate timed out; treating as gate error');
-            finish({ code: 2, stdout: '' });
+            finish({ code: 2, stdout: '', reason: 'gate_timeout' });
         }, ACTION_GATE_TIMEOUT_MS);
         if (typeof timer.unref === 'function') timer.unref();
-        child.on('error', () => finish({ code: 2, stdout: '' }));
-        child.on('close', (code) => finish({ code: code ?? 2, stdout }));
+        child.on('error', () => finish({ code: 2, stdout: '', reason: 'gate_spawn_failed' }));
+        child.on('close', (code) => finish({
+            code: code ?? 2, stdout, reason: gateReasonFromStderr(stderrTail),
+        }));
     });
+}
+
+/** The recorded error for a failed gate: exit code plus its sanitized stderr reason. */
+function gateFailure(gate) {
+    return gate.reason ? `gate_failed:${gate.code}: ${gate.reason}` : `gate_failed:${gate.code}`;
 }
 
 /**
@@ -3278,13 +3293,14 @@ async function executeActionRow(req, res, { id }) {
                     forced: true, killSessions: true, sessionCount: s.sessionCount,
                 });
             } else if (gate.code !== 0) {
-                pendingServerActionsDb.markFailed(id, `gate_failed:${gate.code}`);
-                recordActionOutcome(req, row, 'gate_failed', { exitCode: gate.code });
+                pendingServerActionsDb.markFailed(id, gateFailure(gate));
+                recordActionOutcome(req, row, 'gate_failed', { exitCode: gate.code, reason: gate.reason });
                 broadcastPendingActionsUpdated(req);
                 return res.status(500).json({
                     status: 'error', code: 'gate_failed',
                     detail: `Pre-action safety check failed (exit ${gate.code})`,
                     exitCode: gate.code,
+                    reason: gate.reason ?? null,
                 });
             }
             // gate.code === 0 → no live work/sessions → no confirmation needed.
@@ -3362,8 +3378,8 @@ async function executeActionRow(req, res, { id }) {
             }
 
             if (gate.code !== 0) {
-                pendingServerActionsDb.markFailed(id, `gate_failed:${gate.code}`);
-                recordActionOutcome(req, row, 'gate_failed', { exitCode: gate.code });
+                pendingServerActionsDb.markFailed(id, gateFailure(gate));
+                recordActionOutcome(req, row, 'gate_failed', { exitCode: gate.code, reason: gate.reason });
                 broadcastPendingActionsUpdated(req);
                 return res.status(500).json({
                     status: 'error',
@@ -3377,6 +3393,7 @@ async function executeActionRow(req, res, { id }) {
                     // integer, not a command or a path: nothing executable leaks.
                     detail: `Pre-action safety check failed (exit ${gate.code})`,
                     exitCode: gate.code,
+                    reason: gate.reason ?? null,
                 });
             }
         }

@@ -307,6 +307,18 @@ describe('normalizeUpdateJob scheduled-message hold (T-1912)', () => {
     expect(snapshot.autoActivation?.scheduledDueSoon).toEqual({ count: 1, earliestAt: null });
   });
 
+  it('parses a terminal gate refusal with its reason (activation defect 2026-09-29)', () => {
+    const snapshot = normalizeUpdateJob({
+      state: 'restart_queued',
+      autoActivation: { state: 'refused', code: 'gate_failed', terminal: true, reason: 'node required' },
+    });
+    expect(snapshot.autoActivation?.terminal).toBe(true);
+    expect(snapshot.autoActivation?.reason).toBe('node required');
+    const plain = normalizeUpdateJob({ state: 'restart_queued', autoActivation: { state: 'refused', code: 'x' } });
+    expect(plain.autoActivation?.terminal).toBe(false);
+    expect(plain.autoActivation?.reason).toBeNull();
+  });
+
   it('drops a malformed scheduledDueSoon (non-positive count) to null', () => {
     const snapshot = normalizeUpdateJob({
       state: 'restart_queued',

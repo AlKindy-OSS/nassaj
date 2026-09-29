@@ -165,3 +165,46 @@ test('policy authority activates without a manual receipt and revocation after p
     activeOwner = true;
     await activator.tick(); assert.equal(executions, 1);
 });
+
+test('a gate failure that settles the row is terminal: no "retrying", reason and recovery hint', async () => {
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls, state } = harness({ rows });
+    state.reply = { status: 500, body: { status: 'error', code: 'gate_failed', exitCode: 2, reason: 'node required' } };
+    const execute = calls.executed;
+    // The executor marks the row failed, exactly as system.js does on gate_failed.
+    const originalPush = execute.push.bind(execute);
+    execute.push = (input) => { rows[0].status = 'failed'; return originalPush(input); };
+    await activator.tick();
+    const status = activator.statusFor('job-1');
+    assert.deepEqual([status.state, status.code, status.terminal, status.reason],
+        ['refused', 'gate_failed', true, 'node required']);
+    assert.equal(calls.lines.length, 2);
+    assert.match(calls.lines[1].message, /gate_failed: node required/);
+    assert.match(calls.lines[1].message, /confirm activation again/);
+    assert.doesNotMatch(calls.lines[1].message, /retrying/);
+    assert.ok(calls.audit.some((entry) => entry.action === 'update_auto_activate_failed'));
+    // Later ticks keep the terminal status instead of silently turning into waiting_row.
+    await activator.tick();
+    await activator.tick();
+    assert.equal(calls.executed.length, 1);
+    assert.equal(activator.statusFor('job-1').state, 'refused');
+    assert.equal(activator.statusFor('job-1').terminal, true);
+    assert.equal(calls.lines.length, 2);
+});
+
+test('a refusal that leaves the row pending is still retried and not terminal', async () => {
+    const { activator } = harness({ reply: { status: 409, body: { status: 'error', code: 'action_in_flight' } } });
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').terminal, undefined);
+});
+
+test('a refusal while the row is still an unresolved executing claim is not terminal (B-1158)', async () => {
+    const rows = [{ id: 7, sourceUpdateJobId: 'job-1', status: 'pending' }];
+    const { activator, calls } = harness({ rows, reply: { status: 503, body: { status: 'error', code: 'proc_not_in_pm2' } } });
+    const originalPush = calls.executed.push.bind(calls.executed);
+    // listActionable excludes an executing claim, so the row disappears from the list.
+    calls.executed.push = (input) => { rows.length = 0; return originalPush(input); };
+    await activator.tick();
+    assert.equal(activator.statusFor('job-1').state, 'refused');
+    assert.equal(activator.statusFor('job-1').terminal, undefined);
+});

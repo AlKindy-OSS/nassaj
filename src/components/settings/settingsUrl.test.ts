@@ -86,4 +86,47 @@ describe('settings URL destination', () => {
     expect(canOpenSettingsTab('system', 'admin')).toBe(false);
     expect(canOpenSettingsTab('system', 'user')).toBe(false);
   });
+
+  describe('B-1076: fenceFilter deep link (permission-fence outbox card)', () => {
+    it('reads a well-formed filter on the system tab', () => {
+      expect(readSettingsDestination('?settings=system&settingsFenceFilter=sess-abc_123')).toEqual({
+        tab: 'system',
+        fenceFilter: 'sess-abc_123',
+      });
+    });
+
+    it.each([
+      '<script>alert(1)</script>',
+      'javascript:alert(1)',
+      'x'.repeat(65),
+      'a b',
+      '../etc/passwd',
+    ])('drops a malicious or oversized filter: %j', (poison) => {
+      expect(readSettingsDestination(`?settings=system&settingsFenceFilter=${encodeURIComponent(poison)}`))
+        .toEqual({ tab: 'system' });
+    });
+
+    it('ignores the filter on any tab other than system', () => {
+      expect(readSettingsDestination('?settings=agents&settingsFenceFilter=sess-abc')).toEqual({ tab: 'agents' });
+    });
+
+    it('writes and clears settingsFenceFilter without leaking it onto other tabs', () => {
+      window.history.replaceState(null, '', '/session/one?projectId=p1');
+
+      writeSettingsDestination({ tab: 'system', fenceFilter: 'sess-abc' });
+      expect(window.location.search).toBe('?projectId=p1&settings=system&settingsFenceFilter=sess-abc');
+
+      writeSettingsDestination({ tab: 'agents' });
+      expect(window.location.search).not.toContain('settingsFenceFilter');
+
+      clearSettingsDestination();
+      expect(window.location.search).toBe('?projectId=p1');
+    });
+
+    it('never writes a malicious filter into the URL', () => {
+      window.history.replaceState(null, '', '/');
+      writeSettingsDestination({ tab: 'system', fenceFilter: '<script>alert(1)</script>' });
+      expect(window.location.search).toBe('?settings=system');
+    });
+  });
 });

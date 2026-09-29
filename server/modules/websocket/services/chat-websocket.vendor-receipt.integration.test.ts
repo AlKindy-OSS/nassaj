@@ -66,7 +66,8 @@ function harness(options: { enabled: boolean; supported: boolean }) {
 
 const { readVendorReceiptInvocation } = await import('@/modules/providers/index.js');
 const manifest = { version: 1, kind: 'text', imageCount: 0, fileCount: 0 };
-for (const provider of ['qwen', 'hermes', 'kimi', 'deepseek', 'glm']) {
+// hermes and qwen are globally disabled (owner decision 2026-09-28): refused before dispatch.
+for (const provider of ['kimi', 'deepseek', 'glm']) {
   test(`${provider}: dispatch mints owner-bound text receipt and rejects raw capabilities/attachments`, async () => {
     for (const valid of [true, false]) {
       const ctx = harness({ enabled: true, supported: true });

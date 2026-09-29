@@ -18,13 +18,13 @@ const hex = character => character.repeat(64);
 
 function lockFixture(overrides = {}) {
     return { packages: {
-        '': { dependencies: { '@anthropic-ai/claude-agent-sdk': '^0.3.283', '@openai/codex-sdk': '0.153.2', zod: '^3' } },
+        '': { dependencies: { '@anthropic-ai/claude-agent-sdk': '^0.3.283', '@openai/codex-sdk': '0.157.1', zod: '^3' } },
         'node_modules/@anthropic-ai/claude-agent-sdk': { version: '0.3.283', integrity: SRI,
             resolved: 'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.283.tgz' },
         'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64': { version: '0.3.283', integrity: SRI, optional: true,
             resolved: 'https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/x-0.3.283.tgz' },
-        'node_modules/@openai/codex-linux-x64': { version: '0.153.2', integrity: SRI,
-            resolved: 'https://registry.npmjs.org/@openai/codex/-/codex-0.153.2-linux-x64.tgz' },
+        'node_modules/@openai/codex-linux-x64': { version: '0.157.1', integrity: SRI,
+            resolved: 'https://registry.npmjs.org/@openai/codex/-/codex-0.157.1-linux-x64.tgz' },
         ...overrides,
     } };
 }
