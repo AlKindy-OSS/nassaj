@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import {
   EXTERNAL_ROLE_MAP,
-  ROLES_CLAIM_ABSENT_REASON,
   extractZitadelRoleNames,
+  extractZitadelRoleNamesFromOrgs,
   hasZitadelRolesClaim,
   isValidRoleProjectId,
   mapExternalRoles,
@@ -23,21 +23,22 @@ test('maps admin/member/viewer and resolves multiple roles to the highest rank',
   assert.equal(mapExternalRoles(['viewer', 'admin', 'member']), 'admin');
 });
 
-test('absent, malformed or unknown attestations fall to the lowest role, never owner', () => {
+test('T-1939: absent, malformed or only-unknown attestations map to NO role, never owner', () => {
   for (const input of [undefined, null, 'admin', {}, [], ['Admin'], ['superuser'], [42], ['owner'], ['__proto__']]) {
-    assert.equal(mapExternalRoles(input), 'user', JSON.stringify(input));
+    assert.equal(mapExternalRoles(input), null, JSON.stringify(input));
   }
+  assert.equal(mapExternalRoles(['superuser', 'member']), 'user', 'unknown names are ignored beside a known one');
   assert.ok(!Object.values(EXTERNAL_ROLE_MAP).includes('owner'));
   assert.ok(Object.isFrozen(EXTERNAL_ROLE_MAP));
 });
 
-test('an owner is never changed; admins and users follow the attestation', () => {
-  assert.deepEqual(reconcileLocalRole('owner', []), { role: 'owner', changed: false });
+test('an owner with a known role is never changed; no known role yields no role for anyone', () => {
   assert.deepEqual(reconcileLocalRole('owner', ['viewer']), { role: 'owner', changed: false });
+  assert.deepEqual(reconcileLocalRole('owner', []), { role: null, changed: false });
   assert.deepEqual(reconcileLocalRole('user', ['admin']), { role: 'admin', changed: true });
   assert.deepEqual(reconcileLocalRole('admin', ['member']), { role: 'user', changed: true });
-  assert.deepEqual(reconcileLocalRole('admin', undefined), { role: 'user', changed: true });
-  assert.deepEqual(reconcileLocalRole('user', ['owner']), { role: 'user', changed: false });
+  assert.deepEqual(reconcileLocalRole('admin', undefined), { role: null, changed: false });
+  assert.deepEqual(reconcileLocalRole('user', ['owner']), { role: null, changed: false });
 });
 
 test('Zitadel adapter reads native object and flat array shapes from the scoped claim, bounded', () => {
@@ -129,45 +130,29 @@ test('sync writes via compare-and-set, audits only real changes, returns the fre
 
   const owner = fakeDeps({ id: 1, role: 'owner' });
   const ownerRow = { id: 1, role: 'owner' };
-  assert.equal(syncExternalRole({ user: ownerRow, externalRoles: [], provider: 'oidc' }, owner.deps), ownerRow);
+  assert.equal(syncExternalRole({ user: ownerRow, externalRoles: ['member'], provider: 'oidc' }, owner.deps), ownerRow);
   assert.equal(owner.writes.length + owner.audits.length, 0, 'an owner row is never written');
 });
 
-test('an absent roles claim tags the demotion audit with a distinct reason; present does not', () => {
-  // Claim absent entirely: demotion carries the diagnosable reason.
-  const absent = fakeDeps({ id: 8, role: 'admin' });
-  syncExternalRole(
-    { user: { id: 8, role: 'admin' }, externalRoles: [], provider: 'oidc', claimPresent: false },
-    absent.deps,
-  );
-  assert.deepEqual(absent.audits, [{
-    action: 'external_role_synced',
-    userId: 8,
-    metadata: { provider: 'oidc', from: 'admin', to: 'user', reason: ROLES_CLAIM_ABSENT_REASON },
-  }]);
-
-  // Claim present but no recognized role: same demotion, no reason tag.
-  const present = fakeDeps({ id: 9, role: 'admin' });
-  syncExternalRole(
-    { user: { id: 9, role: 'admin' }, externalRoles: ['unknown'], provider: 'oidc', claimPresent: true },
-    present.deps,
-  );
-  assert.deepEqual(present.audits, [{
-    action: 'external_role_synced',
-    userId: 9,
-    metadata: { provider: 'oidc', from: 'admin', to: 'user' },
-  }]);
-
-  // claimPresent omitted: back-compat, no reason tag.
-  const legacy = fakeDeps({ id: 10, role: 'admin' });
-  syncExternalRole({ user: { id: 10, role: 'admin' }, externalRoles: [], provider: 'oidc' }, legacy.deps);
-  assert.deepEqual(legacy.audits[0]?.metadata, { provider: 'oidc', from: 'admin', to: 'user' });
+test('T-1939: no recognized role returns null and never writes, audits or downgrades', () => {
+  for (const [role, externalRoles] of [['admin', []], ['user', ['superuser']], ['owner', undefined]] as const) {
+    const stored = { id: 8, role };
+    const { deps, audits, writes } = fakeDeps(stored);
+    const applied: unknown[] = [];
+    const result = syncExternalRole(
+      { user: { id: 8, role }, externalRoles, provider: 'oidc' },
+      { ...deps, onRoleApplied: (change: unknown) => applied.push(change) },
+    );
+    assert.equal(result, null, role);
+    assert.equal(writes.length + audits.length + applied.length, 0, role);
+    assert.equal(stored.role, role, 'the stored role is left as is');
+  }
 });
 
 test('a lost compare-and-set race is not audited and yields the stored role', () => {
   const stored = { id: 7, role: 'owner' };
   const { deps, audits } = fakeDeps(stored, false);
-  const fresh = syncExternalRole({ user: { id: 7, role: 'admin' }, externalRoles: [], provider: 'oidc' }, deps);
+  const fresh = syncExternalRole({ user: { id: 7, role: 'admin' }, externalRoles: ['member'], provider: 'oidc' }, deps);
   assert.equal(fresh?.role, 'owner');
   assert.equal(audits.length, 0);
 });
@@ -176,15 +161,39 @@ test('B-1327: onRoleApplied fires only when the compare-and-set changed the role
   const applied: unknown[] = [];
   const onRoleApplied = (change: unknown) => applied.push(change);
   const demoted = fakeDeps({ id: 11, role: 'admin' });
-  syncExternalRole({ user: { id: 11, role: 'admin' }, externalRoles: [], provider: 'oidc' },
+  syncExternalRole({ user: { id: 11, role: 'admin' }, externalRoles: ['viewer'], provider: 'oidc' },
     { ...demoted.deps, onRoleApplied });
   assert.deepEqual(applied, [{ userId: 11, from: 'admin', to: 'user' }]);
 
   const lost = fakeDeps({ id: 12, role: 'owner' }, false);
-  syncExternalRole({ user: { id: 12, role: 'admin' }, externalRoles: [], provider: 'oidc' },
+  syncExternalRole({ user: { id: 12, role: 'admin' }, externalRoles: ['member'], provider: 'oidc' },
     { ...lost.deps, onRoleApplied });
   const unchanged = fakeDeps({ id: 13, role: 'admin' });
   syncExternalRole({ user: { id: 13, role: 'admin' }, externalRoles: ['admin'], provider: 'oidc' },
     { ...unchanged.deps, onRoleApplied });
   assert.equal(applied.length, 1, 'a lost race or no change never revokes');
+});
+
+test('T-1939 slice 4: only roles granted by an allowed organization are returned', () => {
+  const allowed = new Set(['org-a']);
+  const claims = {
+    [SCOPED]: {
+      admin: { 'org-b': 'b.example' },
+      member: { 'org-a': 'a.example', 'org-b': 'b.example' },
+      viewer: {},
+    },
+    [GENERIC]: { admin: { 'org-a': 'a.example' } },
+  };
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs(claims, PROJECT, allowed), ['member']);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs(claims, PROJECT, new Set(['org-b'])), ['admin', 'member']);
+});
+
+test('T-1939 slice 4: no allowlist, no organization keys or the generic claim grant nothing', () => {
+  const allowed = new Set(['org-a']);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs({ [SCOPED]: { admin: { 'org-a': 'a' } } }, PROJECT, new Set()), []);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs({ [SCOPED]: ['admin'] }, PROJECT, allowed), []);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs({ [SCOPED]: { admin: ['org-a'] } }, PROJECT, allowed), []);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs({ [GENERIC]: { admin: { 'org-a': 'a' } } }, PROJECT, allowed), []);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs({ [SCOPED]: { admin: { 'org-a': 'a' } } }, undefined, allowed), []);
+  assert.deepEqual(extractZitadelRoleNamesFromOrgs({ [SCOPED]: { admin: { 'org-a': 'a' } } }, PROJECT, ['org-a'] as never), []);
 });

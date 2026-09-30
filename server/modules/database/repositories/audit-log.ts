@@ -67,6 +67,9 @@ export type AuditAction =
   | 'command_board_raw_exec'
   | 'passkey_registered'
   | 'passkey_removed'
+  // T-1939 slice 6A (B-1407): passkey enrollment refused for a missing or
+  // failed step-up proof. Metadata { method, code } only — never the evidence.
+  | 'passkey_registration_denied'
   // T-1903 (ADR-190): mid-turn steering. Policy/consent changes carry the new
   // value only; an injection carries ids, a text hash and the ingress
   // clientMsgId — the full text lives in its message_coordination_ingress row.
@@ -164,11 +167,58 @@ export type AuditAction =
   // OIDC Relying Party flow (P-IDP-3, ADR-046).
   | 'oidc_login'
   | 'oidc_backchannel_logout'
+  // Historical only since B-1410 removed the admin link route; kept so old
+  // rows still type-check when read back.
   | 'oidc_identity_linked'
   | 'oidc_identity_unlinked'
+  // B-1410: the owner removing SSO links from their own account (password
+  // re-checked). Metadata carries a reason code only, never the password.
+  | 'oidc_identity_self_unlinked'
+  | 'oidc_identity_self_unlink_failed'
+  // T-1939 slice 5: a member linked their OWN account (password + fresh IdP
+  // sign-in). Metadata { provider, identityId } or { reason } — ids and reason
+  // codes only, never the subject or the password.
+  | 'oidc_identity_self_linked'
+  | 'oidc_identity_self_link_failed'
+  // T-1939 slice 5: the owner self-linked (also a WARN and an owner alert).
+  | 'oidc_owner_account_linked'
+  // T-1939 slice 4: just-in-time SSO-only accounts. Provisioned metadata is
+  // { provider, identityId, role }; refused is { provider, reason }; capped is
+  // { provider }. Ids, roles and reason codes only — never subject or username.
+  | 'oidc_user_provisioned'
+  | 'oidc_provision_refused'
+  | 'oidc_provision_capped'
+  // T-1939 slices 4–5: owners alerted about a member self-link or a JIT
+  // account. Metadata { provider, kind, ownerCount }.
+  | 'oidc_owner_alerted'
+  // T-1939 slice 5: legacy duplicate (user, issuer) links. Detected at boot
+  // with { duplicateUsers } only; an affected SSO login is refused.
+  | 'oidc_duplicate_links_detected'
+  | 'oidc_login_blocked_duplicate_links'
   // Local role changed by an external attestation (ADR-069 mapper). Metadata is
   // { provider, from, to } only — never the subject or the raw claim.
   | 'external_role_synced'
+  // T-1939: an SSO login without a recognized project role is refused (never
+  // downgraded). Metadata is { provider, reason } only.
+  | 'oidc_access_denied_no_role'
+  // T-1939: a local-credential entry point refused because the account (or,
+  // for invites, the install) signs in through SSO. Metadata { entry } only.
+  | 'sso_required_denied'
+  // T-1939 slice 3: every API key of a member was deleted because the IdP
+  // withdrew their grant or signed them out. Metadata { trigger, count } only.
+  | 'api_keys_revoked_sso'
+  // T-1939 slice 3: live connections of a linked member closed because their
+  // SSO attestation aged out. Metadata { closedSockets, endedInteractiveSessions }.
+  | 'sso_attestation_expired'
+  // T-1939 slice 6B: connector recent-auth step-up. Metadata { method } on
+  // success, { method, reason } on failure — never the evidence itself.
+  | 'connector_step_up_success'
+  | 'connector_step_up_failure'
+  // T-1939 slice 6B: IdP step-up of an SSO-linked member. Metadata
+  // { provider, audience } or { provider, reason } only — never the subject.
+  | 'oidc_step_up_started'
+  | 'oidc_step_up_verified'
+  | 'oidc_step_up_failed'
   | 'scheduled_message_created'
   | 'scheduled_message_updated'
   | 'scheduled_message_cancelled'

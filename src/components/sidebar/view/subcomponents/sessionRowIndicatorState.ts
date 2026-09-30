@@ -52,3 +52,39 @@ export function deriveSessionRowIndicatorState(
   if (hasOrphanWorkflow) return 'orphan';
   return null;
 }
+
+/**
+ * ترتيب أولوية مجموعة جلسات (المشروع) — B-1431.
+ *
+ * منفصل عمداً عن الأولوية **داخل** صفٍّ واحد أعلى (question > error > done >
+ * frozen > running > orphan، وهي مصفوفة قرار لا ترتيب أهمية): تلك تفصل بين
+ * حقائق الجلسة نفسها (نتيجة نهائية تعلو على بثٍّ متأخر)، وهذه ترتّب **ما يستحق
+ * لفتَ نظر المالك أولاً عبر جلسات كثيرة**، فالجولة الحيّة أهمّ من نتيجةٍ
+ * راكدة سابقاً — قرارٌ اعتمده المالك (يطابق ترتيب `ProjectBusyDot` القائم:
+ * سؤال ثم جولة حيّة ثم تجميد ثم خطأ ثم انتهاء، وorphan آخراً لأنه أضعف من كل
+ * الحالات المرئية الخمس أصلاً).
+ */
+const PROJECT_INDICATOR_PRIORITY: readonly SessionRowIndicatorState[] = [
+  'question',
+  'running',
+  'frozen',
+  'error',
+  'done',
+  'orphan',
+];
+
+/**
+ * أعلى حالة أولويةً بين حالات صفوف جلسات مشروع واحد، أو `null` حين تكون كلها
+ * هادئة. مصدرٌ وحيدٌ لترتيب `ProjectBusyDot` — لا يعيد المشروع اشتقاق شيء لم
+ * يُشتقَّ أصلاً لكل جلسة عبر `deriveSessionRowIndicatorState`.
+ */
+export function deriveProjectIndicatorState(
+  rowStates: ReadonlyArray<SessionRowIndicatorState | null>,
+): SessionRowIndicatorState | null {
+  for (const candidate of PROJECT_INDICATOR_PRIORITY) {
+    if (rowStates.includes(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}

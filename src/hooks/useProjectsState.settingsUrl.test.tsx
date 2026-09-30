@@ -11,7 +11,10 @@ vi.mock('../utils/api', () => ({
     projects: (...args: unknown[]) => projectsApi(...args),
     sessionContext: (...args: unknown[]) => sessionContextApi(...args),
   },
+  authenticatedFetch: vi.fn(),
 }));
+
+import { CONNECTOR_SETTINGS_PATH } from '../components/settings/view/tabs/connectorStepUpClient';
 
 import { useProjectsState } from './useProjectsState';
 
@@ -61,5 +64,17 @@ describe('settings URL history', () => {
 
     await waitFor(() => expect(result.current.showSettings).toBe(false));
     expect(result.current.settingsDeepLink).toBeUndefined();
+  });
+
+  it('opens the connectors tab at the step-up return destination (T-1939 6C)', async () => {
+    window.history.replaceState(null, '', CONNECTOR_SETTINGS_PATH);
+    const { result } = renderHook(() => useProjectsState({
+      navigate: vi.fn(),
+      latestMessage: null,
+      isMobile: false,
+      activeSessions: new Set(),
+    }));
+    await waitFor(() => expect(result.current.showSettings).toBe(true));
+    expect(result.current.settingsInitialTab).toBe('connectors');
   });
 });

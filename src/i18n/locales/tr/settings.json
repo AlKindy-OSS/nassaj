@@ -412,7 +412,14 @@
       "done": "Bitti",
       "copy": "Kopyala",
       "copied": "Kopyalandı",
-      "successHint": "Bu tek kullanımlık bağlantıyı paylaş. Yalnızca bir kez gösterilir."
+      "successHint": "Bu tek kullanımlık bağlantıyı paylaş. Yalnızca bir kez gösterilir.",
+      "durationLabel": "Geçerlilik süresi",
+      "durations": {
+        "day1": "1 gün",
+        "day3": "3 gün",
+        "day7": "7 gün",
+        "day30": "30 gün"
+      }
     }
   },
   "notifications": {

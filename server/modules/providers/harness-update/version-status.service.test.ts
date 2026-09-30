@@ -115,13 +115,14 @@ test('kimi update-available when latest is newer', async () => {
   assert.equal(s!.reason, 'update-available');
 });
 
-test('FAIL-CLOSED: probe failure with no cache → state unknown, never a crash', async () => {
+test('probe failure with no cache → latest unknown but the update stays offered', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('kimi', baseDeps({
     runVersion: async () => '0.42.0',
     fetchNpmLatest: async () => null,
   }));
-  assert.equal(s!.state, 'unknown');
+  assert.equal(s!.state, 'updatable');
+  assert.equal(s!.updatable, true);
   assert.equal(s!.latestVersion, null);
   assert.equal(s!.upToDate, null);
   assert.equal(s!.reason, 'probe-failed');
@@ -285,24 +286,23 @@ test('getAll returns one row per harness in the contract shape', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// T-1871 stage 2: compatibility, target compatibility, drift, new probes.
+// T-1871 stage 2: drift and probes (compat verdicts removed 2026-09-29).
 // Fixtures are the measured 2026-09-27 values (docs/ops/t1871-measurements.md).
 // ---------------------------------------------------------------------------
 
-test('opencode 1.18.33 (pin 1.18.32, flag off) → incompatible in GLM carrier mode', async () => {
+test('opencode on its pinned 1.18.32 is offered a newer release (flag off, no compat gate)', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('opencode', baseDeps({
-    runVersion: async () => '1.18.33',
-    fetchGithubLatest: async () => '1.18.33',
+    runVersion: async () => '1.18.32',
+    fetchGithubLatest: async () => '1.18.40',
   }));
   assert.equal(s!.state, 'updatable');
   assert.equal(s!.updatable, true, 'T-1871 stage 3: snapshot-backed, manual only');
+  assert.equal(s!.upToDate, false);
+  assert.equal(s!.reason, 'update-available');
   assert.deepEqual(s!.restoreCompatible, { version: '1.18.32', verified: false });
-  assert.equal(s!.compatibility?.state, 'incompatible');
-  assert.equal(s!.compatibility?.reason, 'glm-carrier-blocked');
-  assert.equal(s!.latestVersion, '1.18.33');
-  assert.equal(s!.upToDate, true);
-  assert.equal(s!.targetCompatibility?.reason, 'glm-carrier-blocked');
+  assert.equal('compatibility' in s!, false);
+  assert.equal('targetCompatibility' in s!, false);
 });
 
 test('opencode latest probe uses the fixed GitHub URL', async () => {
@@ -316,16 +316,14 @@ test('opencode latest probe uses the fixed GitHub URL', async () => {
   assert.match(OPENCODE_LATEST_RELEASE_URL, /^https:\/\/api\.github\.com\/repos\/anomalyco\/opencode\/releases\/latest$/);
 });
 
-test('kimi 2.1.1 (pin 0.28.1, flag off) → untested pin-mismatch-unreviewed; target judged too', async () => {
+test('kimi 2.1.1 (pin 0.28.1, flag off) → a newer release is simply update-available', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('kimi', baseDeps({
     runVersion: async () => '2.1.1',
     fetchNpmLatest: async () => '2.1.2',
   }));
-  assert.equal(s!.compatibility?.state, 'untested');
-  assert.equal(s!.compatibility?.reason, 'pin-mismatch-unreviewed');
-  assert.equal(s!.targetCompatibility?.state, 'untested');
   assert.equal(s!.reason, 'update-available');
+  assert.equal(s!.updatable, true);
 });
 
 test('restore-compatible offer turns verified only from the durable flag', async () => {
@@ -347,16 +345,6 @@ test('armed pin: a snapshot-backed pinned harness stays updatable (pinBreak ack 
   }));
   assert.equal(s!.updatable, true);
   assert.notEqual(s!.reason, 'pinned');
-  assert.equal(s!.compatibility?.reason, 'pin-armed-blocked');
-});
-
-test('armed pin: kimi row carries incompatible compatibility', async () => {
-  _resetLatestCache();
-  const s = await getHarnessVersionStatus('kimi', baseDeps({
-    runVersion: async () => '2.1.1',
-    pinEnabled: () => true,
-  }));
-  assert.equal(s!.compatibility?.state, 'incompatible');
 });
 
 test('claude/codex npm probes feed an updatable manual-only row', async () => {
@@ -373,32 +361,30 @@ test('claude/codex npm probes feed an updatable manual-only row', async () => {
   assert.equal(s!.upToDate, false);
   assert.equal(s!.updatable, true);
   assert.equal(s!.reason, 'update-available');
-  assert.equal(s!.compatibility?.state, 'baseline');
-  assert.equal(s!.compatibility?.asOf, '2026-09-27');
-  assert.equal(s!.targetCompatibility?.reason, 'not-baselined');
-  await getHarnessVersionStatus('codex', baseDeps({
+  const codex = await getHarnessVersionStatus('codex', baseDeps({
     runVersion: async () => 'codex-cli 0.156.0',
-    fetchNpmLatest: async (pkg) => { pkgs.push(pkg); return '0.157.1'; },
+    fetchNpmLatest: async (pkg) => { pkgs.push(pkg); return '0.159.0'; },
   }));
+  assert.equal(codex!.updatable, true, 'an untested newer codex is offered like any update');
+  assert.equal(codex!.upToDate, false);
+  assert.equal(codex!.reason, 'update-available');
   assert.deepEqual(pkgs, ['@anthropic-ai/claude-code', '@openai/codex']);
 });
 
-test('a failed latest probe keeps latest null and no target', async () => {
+test('a failed latest probe keeps latest null', async () => {
   _resetLatestCache();
   const s = await getHarnessVersionStatus('claude', baseDeps({ runVersion: async () => '2.1.280' }));
   assert.equal(s!.latestVersion, null);
   assert.equal(s!.upToDate, null);
-  assert.equal(s!.targetCompatibility, undefined);
 });
 
-test('rows without a readable version carry no compatibility/drift', async () => {
+test('rows without a readable version carry no drift', async () => {
   _resetLatestCache();
   const ledger = memoryLedger();
   const none = await getHarnessVersionStatus('qwen', baseDeps({ versionLedger: ledger }));
-  assert.equal(none!.compatibility, undefined);
   assert.equal(none!.drift, undefined);
   const hosted = await getHarnessVersionStatus('deepseek', baseDeps({ versionLedger: ledger }));
-  assert.equal(hosted!.compatibility, undefined);
+  assert.equal(hosted!.drift, undefined);
   assert.deepEqual(ledger.map(), {}, 'nothing observed, nothing stored');
 });
 
@@ -478,5 +464,4 @@ test('drift: a failing ledger omits the field and never fails the read', async (
     versionLedger: { read: () => { throw new Error('db down'); }, write: () => {} },
   }));
   assert.equal(s!.drift, undefined);
-  assert.equal(s!.compatibility?.state, 'baseline');
 });

@@ -53,7 +53,7 @@ export function dispatchAuthorizedProviderCommand(
   principalId: string | number = 1,
 ): Promise<void> {
   const options = {
-    cwd: process.cwd(),
+    cwd: process.env.NASSAJ_TEST_GIT_PROJECT ?? process.cwd(),
     ...(data.options ?? {}),
   };
   return dispatch(

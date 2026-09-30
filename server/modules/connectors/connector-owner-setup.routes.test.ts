@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import express from 'express';
 
+import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import { createConnectorOwnerOperationGate } from './connector-owner-operation-gate.js';
 import { createConnectorOwnerSetupRoutes } from './connector-owner-setup.routes.js';
 import type { ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
@@ -15,7 +16,7 @@ const status = { schemaVersion: 1 as const, readyForAccountLinking: false,
     canonicalOrigin: ORIGIN, callbackUrl: `${ORIGIN}/connectors/oauth/callback`, originRevision: 1 },
   trustBundleRevision: 0, activePack: null, activationRecordRevision: 0 };
 
-const run = async (role: string, request: (base: string) => Promise<Response>) => {
+const run = async (role: string, request: (base: string) => Promise<Response>, authTimeMs = NOW - 1) => {
   const calls: unknown[] = [];
   const service = { status: () => status, setOrigin: (...args: unknown[]) => { calls.push(args); return { ok: true }; },
     importTrust: () => ({ ok: true }), importPack: () => ({ ok: true }), setActivations: () => ({ ok: true }) };
@@ -25,7 +26,7 @@ const run = async (role: string, request: (base: string) => Promise<Response>) =
   app.use('/api/connectors/v2/owner/setup', createConnectorOwnerSetupRoutes({
     service: service as unknown as ConnectorOwnerSetupService, installationId: 'install-1', now: () => NOW,
     resolveIdentity: req => ({ userId: 7, role: (req as express.Request & { fixtureRole: string }).fixtureRole }),
-    readRecentSession: () => ({ installationId: 'install-1', userId: 7, authTimeMs: NOW - 1,
+    readRecentSession: () => ({ installationId: 'install-1', userId: 7, authTimeMs,
       expiresAtMs: NOW + 30_000, csrfTokenHash: createHash('sha256').update(CSRF).digest('hex') }),
   }));
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>((resolve, reject) => {
@@ -59,6 +60,23 @@ test('writes require exact body, If-Match, idempotency, origin, recent auth, and
   assert.equal(accepted.response.status, 200); assert.equal(accepted.calls.length, 1);
 });
 
+test('origin mismatch and stale step-up are distinct refusals; the window is ten minutes', async () => {
+  const put = (origin: string, authTimeMs: number) => run('owner', base => fetch(
+    `${base}/api/connectors/v2/owner/setup/origin`, { method: 'PUT', headers: {
+      'content-type': 'application/json', 'if-match': '"1"', 'idempotency-key': 'request-123', origin,
+      'x-csrf-token': CSRF }, body: JSON.stringify({ canonicalOrigin: ORIGIN, expectedOriginRevision: 1 }) }),
+  authTimeMs);
+  const wrongOrigin = await put('https://attacker.example', NOW - 1);
+  assert.equal(wrongOrigin.response.status, 403);
+  assert.deepEqual(await wrongOrigin.response.json(), { code: 'CONNECTOR_ORIGIN_REJECTED' });
+  const stale = await put(ORIGIN, NOW - RECENT_AUTH_MAX_AGE_MS - 1);
+  assert.equal(stale.response.status, 403);
+  assert.deepEqual(await stale.response.json(), { code: 'CONNECTOR_SETUP_RECENT_AUTH_OR_CSRF_REQUIRED' });
+  assert.equal(stale.calls.length, 0);
+  const edge = await put(ORIGIN, NOW - RECENT_AUTH_MAX_AGE_MS);
+  assert.equal(edge.response.status, 200, 'the old five-minute literal is gone');
+});
+
 test('profile verify accepts exact DCR/BYO shapes and rejects API-key setup before I/O', async () => {
   const calls: unknown[] = [];
   const profileStatus = { ...status, activationCandidates: [] };
@@ -90,7 +108,7 @@ test('profile verify accepts exact DCR/BYO shapes and rejects API-key setup befo
     `${base}/api/connectors/v2/owner/setup/profiles/${providerId}/verify`, { method: 'POST',
       headers: { 'content-type': 'application/json', 'if-match': '"0"', 'idempotency-key': 'profile-123',
         origin: ORIGIN, 'x-csrf-token': CSRF,
-        cookie: `nassaj_connector_recent_auth=${'a'.repeat(64)}` }, body: JSON.stringify(body) });
+        cookie: `__Host-nassaj_connector_recent_auth=${'a'.repeat(64)}` }, body: JSON.stringify(body) });
   try {
     assert.equal((await request('github', { method: 'api_key' })).status, 422);
     assert.equal(calls.length, 0);

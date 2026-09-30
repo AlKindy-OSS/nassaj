@@ -1,10 +1,10 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
-
-import type express from 'express';
-
 export const CONNECTOR_PUBLIC_ORIGIN_ENV = 'NASSAJ_PUBLIC_ORIGIN';
 export const CONNECTOR_OAUTH_CALLBACK_PATH = '/connectors/oauth/callback';
-export const RECENT_AUTH_MAX_AGE_MS = 5 * 60 * 1_000;
+/**
+ * Single source of the connector recent-auth window (T-1939 6B): the session
+ * row, both cookies, and every consumer gate use this one value.
+ */
+export const RECENT_AUTH_MAX_AGE_MS = 10 * 60 * 1_000;
 
 type TrustedEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -73,92 +73,4 @@ export const validateConnectorAuthBootstrapCapability = (
   } catch {
     return null;
   }
-};
-
-export type RecentAuthSession = Readonly<{
-  userId: number;
-  /** Milliseconds since epoch, stamped by the server after password/WebAuthn. */
-  authTime: number;
-  authMethod: 'password' | 'webauthn';
-  csrfTokenHash: string;
-  cookieSameSite: 'strict';
-}>;
-
-export type RecentAuthSessionReader = (
-  req: express.Request,
-) => RecentAuthSession | null | Promise<RecentAuthSession | null>;
-
-type AuthedRequest = express.Request & {
-  user?: { id?: number; userId?: number; role?: string; iat?: number; auth_time?: number };
-};
-
-const sha256 = (value: string): Buffer => createHash('sha256').update(value).digest();
-
-const validCsrf = (rawToken: unknown, expectedHex: string): boolean => {
-  if (typeof rawToken !== 'string'
-    || rawToken.length < 32
-    || rawToken.length > 512
-    || !/^[a-f0-9]{64}$/iu.test(expectedHex)) return false;
-  const actual = sha256(rawToken);
-  const expected = Buffer.from(expectedHex, 'hex');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-};
-
-/**
- * Owner-only step-up gate for future connector-app writes. It trusts only the
- * injected server-side session reader; JWT `iat`/`auth_time` claims are ignored.
- */
-export const createRequireRecentConnectorOwner = (
-  readSession: RecentAuthSessionReader | undefined,
-  options: Readonly<{
-    env?: TrustedEnvironment;
-    now?: () => number;
-  }> = {},
-): express.RequestHandler => {
-  if (typeof readSession !== 'function') {
-    throw new Error('Connector recent-auth server-session adapter is unavailable');
-  }
-  return async (req, res, next) => {
-    const user = (req as AuthedRequest).user;
-    if (user?.role !== 'owner') {
-      res.status(403).json({ error: 'Owner permission required.', code: 'CONNECTOR_OWNER_REQUIRED' });
-      return;
-    }
-
-    let origin: string;
-    try {
-      origin = canonicalConnectorPublicOrigin(options.env);
-    } catch {
-      res.status(503).json({ error: 'Connector authentication is not configured.', code: 'CONNECTOR_AUTH_NOT_CONFIGURED' });
-      return;
-    }
-    if (req.get('origin') !== origin) {
-      res.status(403).json({ error: 'Request origin was rejected.', code: 'CONNECTOR_ORIGIN_REJECTED' });
-      return;
-    }
-
-    let session: RecentAuthSession | null;
-    try {
-      session = await readSession(req);
-    } catch {
-      res.status(503).json({ error: 'Recent authentication is unavailable.', code: 'CONNECTOR_RECENT_AUTH_UNAVAILABLE' });
-      return;
-    }
-    const userId = user.id ?? user.userId;
-    const now = options.now?.() ?? Date.now();
-    const recent = session !== null
-      && Number.isSafeInteger(userId)
-      && session.userId === userId
-      && session.cookieSameSite === 'strict'
-      && (session.authMethod === 'password' || session.authMethod === 'webauthn')
-      && Number.isFinite(session.authTime)
-      && session.authTime <= now
-      && now - session.authTime <= RECENT_AUTH_MAX_AGE_MS
-      && validCsrf(req.get('x-csrf-token'), session.csrfTokenHash);
-    if (!recent) {
-      res.status(403).json({ error: 'Recent authentication required.', code: 'CONNECTOR_RECENT_AUTH_REQUIRED' });
-      return;
-    }
-    next();
-  };
 };

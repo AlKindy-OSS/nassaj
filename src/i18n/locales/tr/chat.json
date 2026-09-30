@@ -667,5 +667,9 @@
     "error": "Resim kırpılamadı. Lütfen tekrar deneyin.",
     "cropArea": "Kırpma alanı",
     "cropHint": "Ok tuşlarını kullanarak kırpma alanını taşıyın veya yeniden boyutlandırın"
+  },
+  "inlineCode": {
+    "openLink": "Bağlantıyı aç — kopyalamak için sağ tıklayın",
+    "copyHint": "Kopyala"
   }
 }

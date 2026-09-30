@@ -48,27 +48,27 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
     {
       value: 'default',
       label: 'Default (recommended)',
-      description: 'Use the default model (currently Opus 4.7 (1M context)) · Most capable for complex work',
+      description: 'Use the default model (currently Opus 5.5 (1M context)) · Most capable for complex work',
     },
     {
       value: 'sonnet',
       label: 'Sonnet',
-      description: 'Sonnet 4.6 · Best for everyday tasks · $3/$15 per Mtok',
+      description: 'Sonnet 5 · Best for everyday tasks',
     },
     {
       value: 'sonnet[1m]',
       label: 'Sonnet (1M context)',
-      description: 'Sonnet 4.6 with 1M context · Requires 1M-context access · draws from usage credits · $3/$15 per Mtok',
+      description: 'Sonnet 5 with 1M context · Requires 1M-context access · draws from usage credits',
     },
     {
       value: 'haiku',
       label: 'Haiku',
-      description: 'Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok',
+      description: 'Haiku 4.5 · Fastest for quick answers',
     },
     {
-      value: 'claude-opus-4-8',
-      label: 'Opus 4.8',
-      description: 'Opus 4.8 · Latest, most capable Opus for complex work',
+      value: 'claude-opus-5-5',
+      label: 'Opus 5.5',
+      description: 'Opus 5.5 · Latest, most capable Opus for complex work',
     },
   ],
   DEFAULT: 'default',
@@ -635,15 +635,21 @@ export const CURSOR_FALLBACK_MODELS: ProviderModelsDefinition = {
   DEFAULT: "composer-2.5-fast",
 };
 
+// Mirror of the server's codex degraded-fallback catalog
+// (server/modules/providers/list/codex/codex-models.provider.ts →
+// CODEX_FALLBACK_MODELS), snapshotted from the locally installed `codex` CLI's
+// own live catalog (~/.codex/models_cache.json, client_version 0.156.0).
 export const CODEX_FALLBACK_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
+    { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
+    { value: 'gpt-6-sol', label: 'gpt-6-sol' },
+    { value: 'gpt-6-luna', label: 'gpt-6-luna' },
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol' },
+    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra' },
+    { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna' },
     { value: 'gpt-5.5', label: 'gpt-5.5' },
-    { value: 'gpt-5.4', label: 'gpt-5.4' },
-    { value: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
-    { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
-    { value: 'gpt-5.2', label: 'gpt-5.2' },
   ],
-  DEFAULT: 'gpt-5.4',
+  DEFAULT: 'gpt-5.6-sol',
 };
 
 export const ANTIGRAVITY_FALLBACK_MODELS: ProviderModelsDefinition = {

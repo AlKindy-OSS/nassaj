@@ -70,7 +70,6 @@ const writer = { send: () => undefined } as unknown as WebSocketWriter;
 const ENGINES: Array<{ provider: string; messageType: string; dep: string }> = [
   { provider: 'claude', messageType: 'claude-command', dep: 'queryClaudeSDK' },
   { provider: 'codex', messageType: 'codex-command', dep: 'queryCodex' },
-  { provider: 'cursor', messageType: 'cursor-command', dep: 'spawnCursor' },
   { provider: 'antigravity', messageType: 'antigravity-command', dep: 'spawnAntigravity' },
   { provider: 'opencode', messageType: 'opencode-command', dep: 'spawnOpenCode' },
   // kimi في وضع الدردشة يسلك `spawnKimi` أي **مسار vendor-runtime بعينه** الذي
@@ -92,6 +91,8 @@ const GLOBALLY_DISABLED: Array<{ provider: string; messageType: string; dep: str
   { provider: 'hermes', messageType: 'hermes-command', dep: 'spawnHermes' },
   // qwen: disabled 2026-09-28 (owner decision); its launcher stays dormant.
   { provider: 'qwen', messageType: 'qwen-command', dep: 'spawnQwen' },
+  // cursor: disabled 2026-09-29 (owner decision); its launcher stays dormant.
+  { provider: 'cursor', messageType: 'cursor-command', dep: 'spawnCursor' },
 ];
 
 const DEP_NAMES = [

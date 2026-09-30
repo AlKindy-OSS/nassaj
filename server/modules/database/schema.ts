@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS projects (
     visibility TEXT NOT NULL DEFAULT 'public',
     created_by INTEGER,
     logo_url TEXT,
+    link_url TEXT,
     dir_exists INTEGER,
     dir_checked_at TEXT
 );
@@ -1253,6 +1254,10 @@ ${APP_CONFIG_TABLE_SCHEMA_SQL}
  * their IdP links. No password is involved — this is an alternative to the
  * password_hash login path, not a replacement for it.
  *
+ * last_attested_at (epoch ms, nullable; T-1939) is stamped on every successful
+ * SSO login that carried a recognized project role; NULL = never attested.
+ * Older databases gain it through migrateUserIdentities (ALTER ADD COLUMN).
+ *
  * NOTE: created via migration (user_identities step in runMigrations), NOT in
  * INIT_SCHEMA_SQL, and must run after `users` exists so the FK resolves.
  */
@@ -1263,9 +1268,27 @@ CREATE TABLE IF NOT EXISTS user_identities (
     issuer TEXT NOT NULL,
     subject TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_attested_at INTEGER,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(issuer, subject)
 );`;
+
+/**
+ * user_identities is read by user_id on every authenticated request of a linked
+ * account (attestation freshness, T-1939 slice 3); UNIQUE(issuer, subject) does
+ * not cover that lookup. Created by migrateUserIdentities.
+ */
+export const USER_IDENTITIES_USER_ID_INDEX_SQL =
+  'CREATE INDEX IF NOT EXISTS idx_user_identities_user_id ON user_identities(user_id);';
+
+/**
+ * One link per (user, issuer) (T-1939 slice 5): a member self-links at most one
+ * IdP subject per issuer. Created by migrateUserIdentities only when no legacy
+ * duplicate exists; otherwise it is skipped with a warning and the affected
+ * users are refused at SSO login until the owner removes the extra links.
+ */
+export const USER_IDENTITIES_USER_ISSUER_UNIQUE_INDEX_SQL =
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_user_identities_user_issuer ON user_identities(user_id, issuer);';
 
 /**
  * governance_exemptions — the per-user, per-engine EXCEPTION list for nassaj

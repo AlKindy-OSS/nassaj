@@ -29,9 +29,9 @@ async function fixture(t, buildPreview, identityMiddleware) {
   migrateDocumentShares(db);
   const store = createDocumentSharesStore(db);
   const users = new Map([
-    [1, { id: 1, role: 'owner', status: 'active', password_changed_at: 0 }],
-    [2, { id: 2, role: 'user', status: 'active', password_changed_at: 0 }],
-    [3, { id: 3, role: 'user', status: 'active', password_changed_at: 0 }],
+    [1, { id: 1, role: 'owner', status: 'active', password_changed_at: 0, authorization_generation: 1 }],
+    [2, { id: 2, role: 'user', status: 'active', password_changed_at: 0, authorization_generation: 1 }],
+    [3, { id: 3, role: 'user', status: 'active', password_changed_at: 0, authorization_generation: 1 }],
   ]);
   const members = new Set([2]);
   const audit = [];
@@ -50,7 +50,7 @@ async function fixture(t, buildPreview, identityMiddleware) {
     db.close();
     await fs.rm(base, { recursive: true, force: true });
   });
-  const authorization = (id) => ({ Authorization: `Bearer ${jwt.sign({ userId: id, pwd_iat: 0 }, secret, { expiresIn: '1h' })}` });
+  const authorization = (id) => ({ Authorization: `Bearer ${jwt.sign({ userId: id, pwd_iat: 0, auth_gen: 1 }, secret, { expiresIn: '1h' })}` });
   const request = (url, options = {}) => fetch(origin + url, options);
   const create = async (audience = 'client', extra = {}) => {
     const response = await request('/api/projects/p1/document-shares', { method: 'POST',
@@ -268,6 +268,11 @@ test('real JWT and current membership are required, including after membership/a
   f.users.get(2).status = 'active';
   f.users.get(2).password_changed_at = Date.now();
   assert.equal((await f.request(url, { headers: f.authorization(2) })).status, 401);
+  f.users.get(2).password_changed_at = 0;
+  f.users.get(2).authorization_generation = 2;
+  assert.equal((await f.request(url, { headers: f.authorization(2) })).status, 401);
+  const noGeneration = jwt.sign({ userId: 1, pwd_iat: 0 }, secret, { expiresIn: '1h' });
+  assert.equal(f.verifyUser(`Bearer ${noGeneration}`), null);
   const noStamp = jwt.sign({ userId: 2 }, secret, { expiresIn: '1h' });
   assert.equal(f.verifyUser(`Bearer ${noStamp}`), null);
   const forged = jwt.sign({ userId: 1 }, 'wrong-key', { expiresIn: '1h' });

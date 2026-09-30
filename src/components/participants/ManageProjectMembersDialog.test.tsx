@@ -258,4 +258,33 @@ describe('ManageProjectMembersButton', () => {
     expect(getProjectMembers).toHaveBeenCalledTimes(2);
   });
 
+  it('B-1430: a parent re-render (equal props) does not reload or blink the already-loaded list', async () => {
+    getProjectMembers.mockReturnValue(response(payload('proj-1', [member(1, 'owner', true), member(2, 'member', false, 'Nadia')], viewer())));
+    const rendered = await open();
+    await screen.findByText('Nadia');
+    expect(getProjectMembers).toHaveBeenCalledTimes(1);
+    // Simulates an ancestor (e.g. the sidebar's 60s clock tick) re-rendering
+    // this button with referentially-equal props: no prop actually changed,
+    // but React still re-runs the component body. Before the fix, the
+    // `onOpenChange` handler passed to `<Dialog>` was recreated inline on
+    // every such render, cascading into a reload that briefly cleared and
+    // re-fetched the member list.
+    rendered.rerender(<ManageProjectMembersButton projectId="proj-1" currentUserId={99} t={t} />);
+    rendered.rerender(<ManageProjectMembersButton projectId="proj-1" currentUserId={99} t={t} />);
+    expect(screen.getByText('Nadia')).toBeTruthy();
+    expect(getProjectMembers).toHaveBeenCalledTimes(1);
+  });
+
+  it('circle variant matches an xs member avatar (diameter, shape, overlap) with its own label', () => {
+    render(<ManageProjectMembersButton projectId="proj-1" currentUserId={99} t={t} variant="circle" />);
+    const trigger = screen.getByRole('button', { name: 'Add member' });
+    // h-5 w-5 is ParticipantAvatar's `xs` size (SIZE_CLASSES.xs) and
+    // ParticipantAvatarStack's overflow-chip size — same diameter as the
+    // avatars it sits beside; rounded-full is the avatar/overflow-chip shape.
+    expect(trigger.className).toContain('h-5');
+    expect(trigger.className).toContain('w-5');
+    expect(trigger.className).toContain('rounded-full');
+    expect(screen.queryByLabelText('Project members')).toBeNull();
+  });
+
 });

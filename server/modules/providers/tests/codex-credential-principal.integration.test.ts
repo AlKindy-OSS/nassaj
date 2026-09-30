@@ -13,8 +13,13 @@ import type { AddressInfo } from 'node:net';
 
 import express from 'express';
 
+import { createCodexMachineFixture } from '@/shared/tests/codex-release-fixture.js';
+
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-login-home-'));
 process.env.CODEX_HOME = home;
+// B-1420 gives each case its own HOME with no operator CLI, so the machine
+// resolver gets a synthetic release; spawn itself is mocked below.
+process.env.CODEX_PATH = createCodexMachineFixture(path.join(home, 'codex-machine')).launcher;
 const calls: Array<{ args: unknown; input: string }> = [];
 // Only the OS spawn is replaced: actor, runtime gateway, adapter, and receipts are real.
 mock.module('node:child_process', { namedExports: { ...childProcess, spawn: (_file: string, args: unknown) => {

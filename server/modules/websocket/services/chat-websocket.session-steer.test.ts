@@ -191,14 +191,15 @@ function connect(userId: number, overrides: Record<string, unknown> = {}) {
 const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r)); };
 let findRunCalls = 0;
 let armedRun = true;
+let run: ReturnType<typeof steer.createSteerRun>;
 const events: Array<Record<string, unknown>> = [];
 
 beforeEach(() => {
   inserts.length = 0; audits.length = 0; events.length = 0; findRunCalls = 0;
   policyValue = null; starterConsents = true; armedRun = true;
-  const run = steer.createSteerRun({
+  run = steer.createSteerRun({
     sessionId: () => SID, turnId: TURN, starterUserId: STARTER, permissionMode: () => 'bypassPermissions',
-    hooksArmed: () => true, broadcast: (e) => { events.push(e as never); }, persistStatus: () => {},
+    injectionArmed: () => true, taintHookArmed: () => true, broadcast: (e) => { events.push(e as never); }, persistStatus: () => {},
     confirmDelivery: async () => true,
   });
   steer.registerMidTurnInjection('claude', {
@@ -223,12 +224,15 @@ test('sender identity is the JWT principal; payload identity fields are ignored'
   assert.equal((events[0] as { sender: { userId: number } }).sender.userId, WRITER);
 });
 
-test('the starter cannot pose as someone else to steer his own turn', async () => {
+test('the starter steers his own turn as himself: payload identity cannot pose as another member', async () => {
+  starterConsents = false;
   const ws = connect(STARTER);
   ws.emit('message', steerMsg({ userId: WRITER, senderUserId: WRITER }));
   await flush();
-  assert.equal(ws.sent.find(m => m.type === 'session-steer-result')?.code, 'steer_self');
-  assert.equal(inserts.length, 0);
+  const result = ws.sent.find(m => m.type === 'session-steer-result');
+  assert.deepEqual([result?.ok, result?.status], [true, 202], JSON.stringify(result));
+  assert.equal(inserts[0].userId, STARTER, 'bound to the JWT principal, never the payload');
+  assert.equal(run.isTainted(), false, 'a self-steer never taints the turn');
 });
 
 test('a non-writer is refused not_writable before any run lookup or disclosure', async () => {
@@ -271,11 +275,16 @@ test('late joiner during the first turn learns the starter; steerable is compute
   const [reader] = await join(READER, SID, 'claude');
   assert.deepEqual([reader.starterUserId, reader.steerable], [STARTER, false], 'no write access → not steerable');
   const [starter] = await join(STARTER, SID, 'claude');
-  assert.deepEqual([starter.starterUserId, starter.steerable], [STARTER, false], 'the starter sees himself as starter');
+  assert.deepEqual([starter.starterUserId, starter.forViewerUserId, starter.steerable, starter.starterSteerable],
+    [STARTER, STARTER, true, true], 'the starter sees himself as starter and may steer his own turn');
   starterConsents = false;
-  assert.equal((await join(WRITER, SID, 'claude'))[0].steerable, false, 'starter consent off');
+  const [noConsent] = await join(WRITER, SID, 'claude');
+  assert.deepEqual([noConsent.steerable, noConsent.starterSteerable], [false, true], 'starter consent off: others only');
+  assert.equal((await join(STARTER, SID, 'claude'))[0].steerable, true, 'consent never gates the starter');
   starterConsents = true; policyValue = '{"mode":"off"}';
   assert.equal((await join(WRITER, SID, 'claude'))[0].steerable, false, 'global policy off');
+  const [starterOff] = await join(STARTER, SID, 'claude');
+  assert.deepEqual([starterOff.steerable, starterOff.starterSteerable], [false, false], 'policy off gates the starter too');
 });
 
 test('every provider run announces its starter; non-steerable runs say so', async () => {

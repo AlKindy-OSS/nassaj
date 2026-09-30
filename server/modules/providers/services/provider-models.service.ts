@@ -4,9 +4,12 @@ import path from 'node:path';
 
 import { authorizedLocalModelServers, hasRunnableLocalServers, isLocalModel } from '@/services/isolation/local-model-config.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { withQwenPlanModels } from '@/modules/providers/list/opencode/opencode-models.provider.js';
+import { providerSecretsService } from '@/modules/providers/services/provider-secrets.service.js';
 // Runtime-only leaf import avoids eagerly composing the database gateway through the barrel.
 // eslint-disable-next-line boundaries/dependencies
 import { runAuthorizedProviderCatalog } from '@/modules/execution-permissions/runtime-catalog.js';
+import { setCodexCatalogInvalidator } from '@/modules/providers/list/codex/codex-models-refresh.js';
 import type { IProvider } from '@/shared/interfaces.js';
 import type {
   LLMProvider,
@@ -81,6 +84,15 @@ export const PROVIDER_MODELS_CACHE_VERSION = 6;
 // network I/O, so it is not a runtime effect and must not mint an execution
 // permit. Live CLI/network catalog adapters continue through runCatalogProbe.
 const STATIC_CATALOG_PROVIDERS = new Set<LLMProvider>(['qwen']);
+
+/** T-1906: an unreadable secrets store means "no qwen-plan models", never a failed catalog. */
+function readQwenProfileSafely(userId: string | number | null | undefined) {
+  try {
+    return providerSecretsService.getQwenProfile(userId);
+  } catch {
+    return null;
+  }
+}
 
 type ProviderModelsServiceDependencies = {
   resolveProvider?: (provider: LLMProvider) => Pick<IProvider, 'models'>;
@@ -597,6 +609,20 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     }
   };
 
+  /**
+   * Drops one (provider, user) catalog entry from memory and disk so the next
+   * picker read reloads it (used after a user's Codex models cache refresh).
+   */
+  const invalidateProviderModels = async (
+    provider: LLMProvider,
+    userId?: string | number | null,
+  ): Promise<void> => {
+    await loadPersistedCache();
+    if (memoryCache.delete(buildCacheKey(provider, userId))) {
+      await persistCache();
+    }
+  };
+
   const clearCache = (): void => {
     memoryCache.clear();
     pendingRequests.clear();
@@ -611,8 +637,12 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
      * the feature is off — gets the upstream result back verbatim, DEFAULT included.
      */
     getProviderModels: async (...args: Parameters<typeof getProviderModels>): Promise<ProviderModelsResult> => {
-      const result = await getProviderModels(...args);
-      if (args[0] !== 'opencode' || !hasRunnableLocalServers(args[2])) return result;
+      const cached = await getProviderModels(...args);
+      if (args[0] !== 'opencode') return cached;
+      // T-1906: the caller's own key decides the qwen-plan overlay, per request.
+      const qwenModels = withQwenPlanModels(cached.models, readQwenProfileSafely(args[2]));
+      const result = qwenModels === cached.models ? cached : { ...cached, models: qwenModels };
+      if (!hasRunnableLocalServers(args[2])) return result;
       const options = result.models.OPTIONS.filter(option => !isLocalModel(option.value));
       const localOptions = authorizedLocalModelServers(args[2]).flatMap(server => server.models.map(model => ({
         value: `${server.providerId}/${model.id}`, label: `${model.name ?? model.id} · ${server.name}`,
@@ -629,8 +659,11 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     changeActiveModel,
     resolveResumeModel,
     seedSessionModel,
+    invalidateProviderModels,
     clearCache,
   };
 };
 
 export const providerModelsService = createProviderModelsService();
+
+setCodexCatalogInvalidator((userId) => providerModelsService.invalidateProviderModels('codex', userId));

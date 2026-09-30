@@ -38,12 +38,11 @@ import {
 } from './vendorProviders';
 
 describe('shared/disabledProviders — single source of truth', () => {
-  it('disabled set is deepseek/glm/hermes/qwen', () => {
-    // deepseek: comes-soon tile in the strip (T-1760), but globally disabled for
-    // spawn-blocking — its tile shows a coming-soon panel, not real category content.
+  it('disabled set is cursor/deepseek/glm/hermes/kimi/qwen', () => {
+    // cursor, deepseek, kimi: hidden + spawn-blocked (owner decision 2026-09-29).
     // glm: folded into OpenCode carrier (ADR-062).
     // hermes, qwen: hidden + spawn-blocked (owner decisions 2026-09-28), code dormant.
-    expect([...DISABLED_PROVIDERS].sort()).toEqual(['deepseek', 'glm', 'hermes', 'qwen']);
+    expect([...DISABLED_PROVIDERS].sort()).toEqual(['cursor', 'deepseek', 'glm', 'hermes', 'kimi', 'qwen']);
   });
 
   it('keeps antigravity enabled — it is the Google OAuth agent', () => {
@@ -58,7 +57,7 @@ describe('shared/disabledProviders — single source of truth', () => {
   });
 
   it('keeps the enabled native bodies untouched', () => {
-    for (const provider of ['claude', 'opencode', 'antigravity', 'cursor', 'codex']) {
+    for (const provider of ['claude', 'opencode', 'antigravity', 'codex']) {
       expect(isProviderGloballyDisabled(provider)).toBe(false);
     }
   });
@@ -66,7 +65,7 @@ describe('shared/disabledProviders — single source of truth', () => {
   it('filterDisabledProviders preserves order and does not mutate its input', () => {
     const input = ['claude', 'glm', 'cursor', 'deepseek', 'hermes', 'codex'];
     const output = filterDisabledProviders(input);
-    expect(output).toEqual(['claude', 'cursor', 'codex']);
+    expect(output).toEqual(['claude', 'codex']);
     expect(input).toHaveLength(6);
   });
 });
@@ -78,25 +77,21 @@ describe('CLI_PROVIDERS — auth-status probe fan-out', () => {
     }
   });
 
-  it('still probes the enabled providers (incl. re-enabled kimi, without glm/hermes/qwen)', () => {
-    // kimi re-enabled per ADR-062 → probed so the key-entry UI reflects its
-    // connection state; deepseek and glm stay filtered. Probing glm is what
-    // produced the misleading standalone "Connected" badge fed by a key store
-    // the OpenCode carrier never reads.
+  it('still probes the enabled providers (without cursor/kimi/glm/hermes/qwen)', () => {
+    // Probing glm is what produced the misleading standalone "Connected" badge
+    // fed by a key store the OpenCode carrier never reads.
     expect(CLI_PROVIDERS).toEqual([
       'claude',
-      'cursor',
       'codex',
       'antigravity',
       'opencode',
-      'kimi',
     ]);
   });
 });
 
 describe('vendor providers — the BODY axis vs the ENGINE axis (ADR-073)', () => {
-  it('ENABLED_VENDOR_PROVIDERS (bodies) is [kimi] (deepseek and glm stay disabled)', () => {
-    expect(ENABLED_VENDOR_PROVIDERS).toEqual(['kimi']);
+  it('ENABLED_VENDOR_PROVIDERS (bodies) is empty (kimi, deepseek and glm disabled)', () => {
+    expect(ENABLED_VENDOR_PROVIDERS).toEqual([]);
   });
 
   it('ENGINE_VENDOR_PROVIDERS (engines) is [kimi, deepseek, glm] — NOT the body list', () => {

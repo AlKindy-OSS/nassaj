@@ -69,7 +69,9 @@ export default function JoinPage() {
       setIsSubmitting(true);
       const result = await acceptInvite(token, username, formState.password);
       if (!result.success) {
-        setErrorMessage(result.error);
+        setErrorMessage(result.code === 'sso_required_for_new_accounts'
+          ? t('join.errors.ssoRequiredForNewAccounts')
+          : result.error);
         setIsSubmitting(false);
         return;
       }

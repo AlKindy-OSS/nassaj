@@ -175,9 +175,11 @@ const hostedTurnSupervisor = {
 };
 
 const PROVIDER_COMMANDS: Record<string, string> = {
-  claude: 'claude-command', codex: 'codex-command', cursor: 'cursor-command', antigravity: 'antigravity-command',
-  opencode: 'opencode-command', kimi: 'kimi-command',
+  claude: 'claude-command', codex: 'codex-command', antigravity: 'antigravity-command',
+  opencode: 'opencode-command',
   // hermes, qwen: globally disabled 2026-09-28 (owner decision) — refused before any run.
+  // cursor, kimi: globally disabled 2026-09-29 (owner decision) — likewise. The kimi
+  // hosted-supervisor run (launchHosted) still bypasses the wall and stays covered.
 };
 
 const chatDependencies = {
@@ -436,7 +438,7 @@ test('re-enabling a disabled account stops nothing', async () => {
 test('downgrade admin -> user: runs aborted with role_changed; session stays resumable', async () => {
   const alice = createUser('admin');
   const socket = connect(alice);
-  const runs = [await launch(socket, 'claude'), await launch(socket, 'cursor')];
+  const runs = [await launch(socket, 'claude'), await launch(socket, 'antigravity')];
   const response = await admin('PATCH', `/users/${alice.id}/role`, { role: 'user' });
   assert.equal(response.status, 200);
   await waitFor(() => aborted.length === 2, 'downgrade aborts');

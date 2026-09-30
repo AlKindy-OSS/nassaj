@@ -1264,19 +1264,14 @@
     'Liberation Mono', 'Courier New', monospace;
 }
 
-/* A quiet shared surface groups project actions without changing row density.
-   --project-action-strip تُعيَّن على :root من theme-presets.ts (للكندي وغيره)؛
-   عدم تعيينها يُفعّل الاشتقاق التلقائي من النسبة 3% حيث لا توجد قيمة مسبقة.
-   لا يمكن تجاوز القيمة المحسوبة بـvar() من الجذر مباشرةً — لذا نتحقّق من الرمز
-   الاحتياطي الذي يُعيّنه المُنسِّق أولاً ثم نحسب إن لم يُعيَّن. */
-.sidebar-project-sessions {
-  --project-action-surface: var(--project-action-strip,
-    color-mix(in srgb,
-      var(--project-foreground, hsl(var(--foreground))) 3%,
-      var(--project-surface, hsl(var(--background)))));
-}
+/* The project action strip (new-session button, tool icons) stays
+   transparent at rest and on hover — only text/icon color darkens on
+   hover (owner decision, B-693). A shared tinted surface was added here
+   in dbd68ac59 and regressed that decision; --project-action-strip stays
+   defined in theme-presets.ts for contrast tokens/tests but is no longer
+   consumed as a background here. */
 .sidebar-project-action-strip {
-  background-color: var(--project-action-surface);
+  background-color: transparent;
   border-radius: 0.5rem;
 }
 

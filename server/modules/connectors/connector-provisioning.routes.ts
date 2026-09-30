@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 
 import express from 'express';
 
+import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import type { ConnectorInstallationOriginResolver } from './connector-installation-origin-resolver.js';
 import { ConnectorProvisioningService } from './connector-provisioning.service.js';
 
@@ -41,9 +42,12 @@ export const createConnectorProvisioningRoutes = (deps: Dependencies): express.R
     if (!key) { res.status(400).json({ code: 'CONNECTOR_PROVISIONING_IDEMPOTENCY_KEY_REQUIRED' }); return; }
     const nowMs = deps.now?.() ?? Date.now(); const session = deps.readRecentSession(req);
     const origin = deps.origins.resolve(deps.installationId);
-    if (!origin || !session || session.installationId !== deps.installationId || session.userId !== identity.userId
-      || session.authTimeMs > nowMs || nowMs - session.authTimeMs > 300_000 || session.expiresAtMs <= nowMs
-      || req.get('origin') !== origin.canonicalOrigin || !secureEqual(req.get('x-csrf-token'), session.csrfTokenHash)) {
+    if (!origin || req.get('origin') !== origin.canonicalOrigin) {
+      res.status(403).json({ code: 'CONNECTOR_ORIGIN_REJECTED' }); return;
+    }
+    if (!session || session.installationId !== deps.installationId || session.userId !== identity.userId
+      || session.authTimeMs > nowMs || nowMs - session.authTimeMs > RECENT_AUTH_MAX_AGE_MS
+      || session.expiresAtMs <= nowMs || !secureEqual(req.get('x-csrf-token'), session.csrfTokenHash)) {
       res.status(403).json({ code: 'CONNECTOR_PROVISIONING_RECENT_AUTH_OR_CSRF_REQUIRED' }); return;
     }
     try {

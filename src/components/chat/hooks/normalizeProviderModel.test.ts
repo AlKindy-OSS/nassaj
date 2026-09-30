@@ -63,7 +63,7 @@ describe('sanitizeStoredModel (synchronous initial read)', () => {
   it('keeps a valid stored value for each provider', () => {
     assert.equal(sanitizeStoredModel('claude', 'sonnet'), 'sonnet');
     assert.equal(sanitizeStoredModel('cursor', 'composer-2.5-fast'), 'composer-2.5-fast');
-    assert.equal(sanitizeStoredModel('codex', 'gpt-5.4'), 'gpt-5.4');
+    assert.equal(sanitizeStoredModel('codex', 'gpt-5.5'), 'gpt-5.5');
     assert.equal(sanitizeStoredModel('antigravity', 'auto'), 'auto');
     assert.equal(
       sanitizeStoredModel('opencode', 'anthropic/claude-sonnet-4-5'),

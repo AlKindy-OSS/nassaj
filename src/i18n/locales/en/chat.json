@@ -723,7 +723,12 @@
     "stale": "No signal",
     "staleTooltip": "Started, never returned a result, and its transcript stopped growing — neither running nor confirmed dead.",
     "collapseAria": "Collapse agent activity",
-    "expandAria": "Expand agent activity"
+    "expandAria": "Expand agent activity",
+    "hideCompleted": "Hide completed",
+    "showCompleted": "Show completed ({{count}})",
+    "hideCompletedAria": "Hide completed agents",
+    "showCompletedAria": "Show completed agents",
+    "allCompletedSummary": "{{count}} completed"
   },
   "projectSelection": {
     "startChatWithProvider": "Select a project to start chatting with {{provider}}"
@@ -1166,12 +1171,13 @@
       "stopTurn": "Stop turn"
     },
     "composerNote": "Counted against {{starter}}’s quota",
+    "composerNoteSelf": "Type /steer followed by your message to deliver it into your running turn.",
     "errors": {
       "invalid_request": "Couldn't send the steer — invalid request.",
       "not_writable": "You don't have write access to this session.",
       "steer_unsupported": "This provider doesn't support mid-turn steering.",
       "turn_not_active": "The turn ended before your steer arrived.",
-      "steer_self": "You can't steer your own turn.",
+      "starter_unknown": "This turn's owner is unknown, so it can't be steered.",
       "plan_mode": "Steering isn't available in plan mode.",
       "steer_unavailable": "Steering is temporarily unavailable.",
       "steer_disabled": "Mid-turn steering is disabled for this server.",
@@ -1188,5 +1194,9 @@
       "timeout": "Couldn't send the steer — no response from the server.",
       "sendAsNormalMessage": "Send as normal message"
     }
+  },
+  "inlineCode": {
+    "openLink": "Open link — right-click to copy",
+    "copyHint": "Copy"
   }
 }

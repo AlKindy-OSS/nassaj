@@ -12,6 +12,10 @@ import { reviewEnvelopeDatabaseLinkStubs } from '../../../../tests/helpers/revie
 
 import { dispatchAuthorizedProviderCommand } from './chat-websocket.permission-test-helper.js';
 
+// B-1420: the case HOME (where fixture repos live) is no longer inside the
+// workspace root, so admit it explicitly; validation reads this per call.
+process.env.WORKSPACES_ROOT = fs.realpathSync(os.homedir());
+
 let failLedgerMark = false;
 let resumedRow: { session_id: string; project_path: string; provider: string } | null = null;
 let legacyEligible = false;

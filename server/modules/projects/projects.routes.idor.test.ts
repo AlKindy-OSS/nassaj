@@ -269,3 +269,53 @@ test('the platform owner retains administrative control over a project they did 
   assert.equal(renamed.status, 200, 'platform owner manages metadata');
   assert.equal(projectsDb.getProjectById(projectId)?.custom_project_name, 'By owner');
 });
+
+// ---------------------------------------------------------------------------
+// T-1950 — PUT /:projectId/link (write mandate, validated, set/clear)
+// ---------------------------------------------------------------------------
+
+test('link: a stranger cannot set the link of a public project (404, unchanged)', async () => {
+  projectsDb.setProjectLinkUrl(projectId, 'https://owner.example/');
+  const { status } = await call('PUT', `/api/projects/${projectId}/link`, strangerUser, {
+    linkUrl: 'https://evil.example',
+  });
+  assert.equal(status, 404, '404, not 403: existence is never disclosed');
+  assert.equal(projectsDb.getProjectById(projectId)?.link_url, 'https://owner.example/');
+});
+
+test('link: unauthenticated and unknown-project requests are refused with 404', async () => {
+  const anonymous = await call('PUT', `/api/projects/${projectId}/link`, null, { linkUrl: 'https://x.example' });
+  assert.equal(anonymous.status, 404);
+  const unknown = await call('PUT', '/api/projects/does-not-exist/link', ownerUser, { linkUrl: 'https://x.example' });
+  assert.equal(unknown.status, 404);
+  assert.equal(projectsDb.getProjectById(projectId)?.link_url ?? null, null);
+});
+
+test('link: invalid input is a 400 and stores nothing', async () => {
+  for (const body of [
+    { linkUrl: 'javascript:alert(1)' },
+    { linkUrl: 'https://u:p@example.com' },
+    { linkUrl: 42 },
+    { other: 'x' },
+  ]) {
+    const { status, json } = await call('PUT', `/api/projects/${projectId}/link`, ownerUser, body);
+    assert.equal(status, 400, `400 for ${JSON.stringify(body)}`);
+    assert.equal((json.error as { code?: string })?.code, 'INVALID_PROJECT_LINK');
+  }
+  assert.equal(projectsDb.getProjectById(projectId)?.link_url ?? null, null);
+});
+
+test('link: the creator sets (normalized) and clears with null', async () => {
+  const set = await call('PUT', `/api/projects/${projectId}/link`, ownerUser, { linkUrl: '  example.com/docs ' });
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.json, {
+    success: true,
+    data: { projectId, linkUrl: 'https://example.com/docs' },
+  });
+  assert.equal(projectsDb.getProjectById(projectId)?.link_url, 'https://example.com/docs');
+
+  const cleared = await call('PUT', `/api/projects/${projectId}/link`, ownerUser, { linkUrl: null });
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(cleared.json, { success: true, data: { projectId, linkUrl: null } });
+  assert.equal(projectsDb.getProjectById(projectId)?.link_url, null);
+});

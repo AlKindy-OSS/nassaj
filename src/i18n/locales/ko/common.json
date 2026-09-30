@@ -307,7 +307,8 @@
     "projectBusyHint": "이 프로젝트의 세션이 처리 중입니다",
     "done": "완료",
     "doneHint": "세션이 완료되었으며 아직 열지 않았습니다",
-    "projectDoneHint": "이 프로젝트의 세션이 완료되었으며 아직 열지 않았습니다"
+    "projectDoneHint": "이 프로젝트의 세션이 완료되었으며 아직 열지 않았습니다",
+    "projectOrphanHint": "이 프로젝트의 백그라운드 워크플로우가 완전한 결과를 생성하기 전에 중지되었습니다"
   },
   "workflowStatus": {
     "running": "워크플로우 실행 중",

@@ -180,12 +180,19 @@ export function useSessionSteer({
   }, []);
 
   const isStarter = turnState != null && currentUserId != null && turnState.starterUserId === currentUserId;
-  /** T-1903: مصدر الأهلية الوحيد — غياب steer-turn-state يعني «غير قابل للتوجيه». */
+  /**
+   * T-1903: مصدر الأهلية الوحيد — غياب steer-turn-state يعني «غير قابل
+   * للتوجيه». ADR-190 (تحديث a19af3a88) — `steerable` في الإطار العام
+   * (forViewerUserId: null) صار يعني «عضوٌ غير البادئ قد يوجّه» فقط؛ البادئ
+   * يقرأ `starterSteerable` حصراً. غيابها (إطارٌ أقدم من قبل df0898ce0) يعني
+   * false صراحةً حسب العقد — لا تراجُع إلى `steerable` القديم، فهذا يعني الآن
+   * شيئاً مختلفاً كلياً (أهلية غيره لا أهليته هو).
+   */
+  const starterEligible = turnState?.starterSteerable ?? false;
   const canSteer = Boolean(
-    turnState?.steerable &&
-    turnState.capability?.midTurnInjection &&
+    (isStarter ? starterEligible : turnState?.steerable) &&
+    turnState?.capability?.midTurnInjection &&
     currentUserId != null &&
-    !isStarter &&
     // T-1904 e2e (bug 3): رفضٌ سابق بسبب تعطيل الميزة يُخفي الزرّ فوراً لبقية
     // هذا الدور بعينه — turnId مختلف (دورٌ جديد) يُعيد الأهلية تلقائياً.
     !(turnState.turnId && turnState.turnId === locallyDisabledForTurnId),

@@ -44,7 +44,7 @@ test('real login session drives readiness and POST, while rotation, logout, and 
   const sessionAdapter = createConnectorOwnerAuthSessionAdapter({
     repository,
     installationId,
-    canonicalOrigin: ORIGIN,
+    resolveOrigin: () => ORIGIN,
     now: () => nowMs,
     randomToken: () => sessionToken,
     randomCsrfToken: () => csrfToken,

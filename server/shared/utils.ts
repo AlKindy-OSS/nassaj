@@ -300,7 +300,8 @@ function findForbiddenWorkspacePathError(normalizedPath: string): string | null 
  *
  * Call this before any filesystem mutation that creates or registers projects.
  * The function resolves symlinks, enforces `WORKSPACES_ROOT` containment, and
- * blocks known system directories.
+ * blocks known system directories. The root is read per call (env first, then
+ * the import-time default), matching the membership admission check.
  */
 export async function validateWorkspacePath(requestedPath: string): Promise<WorkspacePathValidationResult> {
   try {
@@ -332,14 +333,15 @@ export async function validateWorkspacePath(requestedPath: string): Promise<Work
       }
     }
 
-    const resolvedWorkspaceRoot = normalizeProjectPath(await realpath(WORKSPACES_ROOT));
+    const workspaceRoot = process.env.WORKSPACES_ROOT || WORKSPACES_ROOT;
+    const resolvedWorkspaceRoot = normalizeProjectPath(await realpath(workspaceRoot));
     if (
       !resolvedPath.startsWith(`${resolvedWorkspaceRoot}${path.sep}`)
       && resolvedPath !== resolvedWorkspaceRoot
     ) {
       return {
         valid: false,
-        error: `Workspace path must be within the allowed workspace root: ${WORKSPACES_ROOT}`,
+        error: `Workspace path must be within the allowed workspace root: ${workspaceRoot}`,
       };
     }
 

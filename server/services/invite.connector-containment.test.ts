@@ -22,6 +22,8 @@ mock.module(url('../modules/database/index.js'), {
   namedExports: {
     userDb: {
       getUserByUsername: (username: string) => users.get(username) ?? null,
+      isUsernameTaken: (username: string) => [...users.keys()]
+        .some((name) => name.toLowerCase() === username.toLowerCase()),
       createUser: (username: string, _hash: string, role: string, invitedBy: number) => {
         const user = { id: nextUserId++, username, role, invited_by: invitedBy };
         users.set(username, user);
@@ -48,7 +50,7 @@ mock.module(url('./password.service.js'), {
   namedExports: { hashPassword: async () => 'argon2-hash' },
 });
 
-const { acceptInvite, createOidcUser } = await import('./invite.service.js');
+const { acceptInvite } = await import('./invite.service.js');
 
 test('invite acceptance creates the account without connector fan-out or config writes', async () => {
   accepted = false;
@@ -56,15 +58,5 @@ test('invite acceptance creates the account without connector fan-out or config 
   const user = await acceptInvite({ token: 'token', username: 'invite_user', password: 'password12' });
   assert.equal(user.username, 'invite_user');
   assert.equal(accepted, true);
-  assert.equal(connectorFanoutCalls, 0);
-});
-
-test('OIDC account creation also leaves connector placement untouched', async () => {
-  connectorFanoutCalls = 0;
-  const user = await createOidcUser(
-    { id: 1, role: 'owner' },
-    { username: 'oidc_user', role: 'user' },
-  );
-  assert.equal(user.username, 'oidc_user');
   assert.equal(connectorFanoutCalls, 0);
 });

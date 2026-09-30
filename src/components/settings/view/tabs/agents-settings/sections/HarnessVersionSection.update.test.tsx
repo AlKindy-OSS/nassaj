@@ -136,14 +136,14 @@ describe('HarnessVersionSection update/rollback/recovery (T-1871 stage 4)', () =
     mockRoutes({}, { ...baseWire, provider: 'opencode', restoreCompatible: { version: '1.17.18', verified: false } });
     render(<HarnessVersionSection agent="opencode" viewerRole="owner" />);
     await screen.findByText(baseWire.installedVersion ?? '');
-    expect(screen.getByRole('button', { name: 'أرجِع النسخة المتوافقة' })).toBeTruthy();
-    expect(screen.getByText('لم يُثبَت هذا المسار بعملية استرجاع حقيقية على هذا الجهاز بعد.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'استرجاع الإصدار 1.17.18' })).toBeTruthy();
+    expect(screen.getByText('لم يُجرَّب هذا الاسترجاع على هذا الخادم بعد.')).toBeTruthy();
   });
 
   it('does not offer "restore compatible" when the server sends no offer (codex)', async () => {
     mockRoutes();
     await renderSection();
-    expect(screen.queryByRole('button', { name: 'أرجِع النسخة المتوافقة' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^استرجاع الإصدار/ })).toBeNull();
   });
 
   it('never fetches snapshots on mount; only on the explicit "rollback options" click, then defaults to scope binary and switches to binary+data only via the checkbox', async () => {
@@ -160,12 +160,12 @@ describe('HarnessVersionSection update/rollback/recovery (T-1871 stage 4)', () =
 
     fireEvent.click(screen.getByRole('button', { name: 'خيارات الاسترجاع' }));
     expect(snapshotFetches).toBe(1);
-    await screen.findByRole('button', { name: 'رجوع لآخر تحديث' });
-    fireEvent.click(screen.getByRole('button', { name: 'رجوع لآخر تحديث' }));
+    await screen.findByRole('button', { name: 'الرجوع إلى ما قبل آخر تحديث' });
+    fireEvent.click(screen.getByRole('button', { name: 'الرجوع إلى ما قبل آخر تحديث' }));
     await waitFor(() => expect(rollbackBody).toEqual({ jobId: 'job-prior', scope: 'binary' }));
 
     fireEvent.click(screen.getByLabelText('مع البيانات'));
-    fireEvent.click(screen.getByRole('button', { name: 'رجوع لآخر تحديث' }));
+    fireEvent.click(screen.getByRole('button', { name: 'الرجوع إلى ما قبل آخر تحديث' }));
     await waitFor(() => expect(rollbackBody).toEqual({ jobId: 'job-prior', scope: 'binary+data' }));
   });
 
@@ -173,8 +173,8 @@ describe('HarnessVersionSection update/rollback/recovery (T-1871 stage 4)', () =
     mockRoutes({});
     await renderSection();
     fireEvent.click(screen.getByRole('button', { name: 'خيارات الاسترجاع' }));
-    await screen.findByText('لا تتوفر نسخة استرجاع لهذه الأداة.');
-    expect(screen.queryByRole('button', { name: 'رجوع لآخر تحديث' })).toBeNull();
+    await screen.findByText('لا توجد نسخة استرجاع لهذه الأداة.');
+    expect(screen.queryByRole('button', { name: 'الرجوع إلى ما قبل آخر تحديث' })).toBeNull();
   });
 
   it('surfaces the two recovery actions once the followed job settles as rollback_failed', async () => {
@@ -190,6 +190,6 @@ describe('HarnessVersionSection update/rollback/recovery (T-1871 stage 4)', () =
     fireEvent.click(screen.getByRole('button', { name: 'تحديث' }));
     await screen.findByRole('button', { name: 'إعادة محاولة الاسترجاع' });
     expect(screen.getByRole('button', { name: 'تأكيد' })).toBeTruthy();
-    expect(screen.getByText('فشل الاسترجاع الآمن التلقائي. يلزم تدخّل المالك.')).toBeTruthy();
+    expect(screen.getByText('فشل الاسترجاع التلقائي؛ يلزم تدخّل المالك.')).toBeTruthy();
   });
 });

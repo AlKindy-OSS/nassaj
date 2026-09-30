@@ -438,6 +438,10 @@
       "empty": "Waiting for output…",
       "truncatedView": "Showing the last {{count}} lines. Copy the log for all of it."
     },
+    "completionNotice": {
+      "message": "The update to version {{version}} completed successfully.",
+      "dismiss": "Dismiss update completion notice"
+    },
     "errorCodes": {
       "update_source_state_degraded": {
         "title": "Source state not reconciled",
@@ -592,7 +596,22 @@
       "update_job_active": "Another governed update is active; its status will be resumed when available.",
       "verified_update_runtime_absent": "The update runtime is not available on this node. No update was started.",
       "release_source_lock_mismatch": "The release source lock does not match this node's configuration. Contact the operator.",
-      "unsupported_install_mode": "Automatic updates are available only for a Nassaj source installation."
+      "release_source_lock_invalid": "The release source lock on this node is corrupt or unreadable. Contact the operator.",
+      "invalid_release_source": "The release source configuration (NASSAJ_RELEASE_SOURCE) is invalid on this node. Contact the operator.",
+      "unsupported_install_mode": "Automatic updates are available only for a Nassaj source installation.",
+      "invalid_update_source": "The update source configuration on this node is unsafe. Contact the operator.",
+      "detached_head": "The source tree on this node has a detached HEAD. Reconnect it to the release branch on the server, then retry.",
+      "wrong_branch": "The source tree on this node is not on the branch pinned for releases. Switch to it on the server, then retry.",
+      "remote_unavailable": "The remote repository could not be reached from this node. No update was started.",
+      "ambiguous_remote": "The remote repository on this node has more than one URL. Contact the operator.",
+      "unsafe_remote": "The remote repository URL on this node is unsafe (must be a credential-free HTTPS or SSH GitHub URL). Contact the operator.",
+      "platform_update_unsupported": "This deployment is centrally managed and does not support button-driven updates.",
+      "tmpfs_candidate_root": "The update candidate staging directory is on tmpfs (in memory), not disk. Contact the operator.",
+      "tmpfs_build_tmpdir": "The build temporary directory (TMPDIR) is on tmpfs, not disk. Contact the operator.",
+      "tmpfs_database_root": "The database snapshot path is on tmpfs, not disk. Contact the operator.",
+      "insufficient_disk": "There is not enough free disk space to stage the update. Free space on the server, then retry.",
+      "insufficient_disk_detail": "There is not enough free disk space to stage the update: {{shortfall}} short (available {{available}} of {{required}} required). Free space, then retry.",
+      "storage_probe_failed": "The storage pre-flight check could not run before the update. Check the source and TMPDIR paths, then retry."
     },
     "buttons": {
       "close": "Close",
@@ -741,7 +760,8 @@
     "projectQuestionHint": "A conversation in this project is waiting for your answer",
     "error": "Error",
     "errorHint": "Session ended with an error or stopped without replying, and has not been opened yet",
-    "projectErrorHint": "A session in this project ended with an error and has not been opened yet"
+    "projectErrorHint": "A session in this project ended with an error and has not been opened yet",
+    "projectOrphanHint": "A background workflow in this project stopped before producing a complete result"
   },
   "workflowStatus": {
     "running": "Workflow running",

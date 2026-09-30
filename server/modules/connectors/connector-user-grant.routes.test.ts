@@ -38,7 +38,7 @@ const call = async (app: express.Express, body: unknown, service = 'github') => 
       method: 'PUT',
       headers: {
         'content-type': 'application/json', origin: ORIGIN,
-        cookie: `nassaj_connector_recent_auth=${SESSION}`, 'x-csrf-token': CSRF,
+        cookie: `__Host-nassaj_connector_recent_auth=${SESSION}`, 'x-csrf-token': CSRF,
       },
       body: JSON.stringify(body),
     });
@@ -56,7 +56,7 @@ const remove = async (app: express.Express, grantId: string) => {
     return await fetch(`http://127.0.0.1:${address.port}/grants/${grantId}`, {
       method: 'DELETE',
       headers: {
-        origin: ORIGIN, cookie: `nassaj_connector_recent_auth=${SESSION}`,
+        origin: ORIGIN, cookie: `__Host-nassaj_connector_recent_auth=${SESSION}`,
         'x-csrf-token': CSRF,
       },
     });

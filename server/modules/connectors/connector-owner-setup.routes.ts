@@ -5,6 +5,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 
 import { ConnectorOwnerSetupError, type ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
+import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import { authorizedOwnerOperation } from './connector-owner-operation-gate.js';
 
 type Identity = Readonly<{ userId: number; role: string }>;
@@ -73,9 +74,14 @@ export const createConnectorOwnerSetupRoutes = (deps: Dependencies): express.Rou
     const proposed = typeof (req.body as Record<string, unknown>).canonicalOrigin === 'string'
       ? String((req.body as Record<string, unknown>).canonicalOrigin) : null;
     const expectedOrigin = status.origin?.canonicalOrigin ?? proposed;
+    // Origin is checked on its own so a wrong-origin request is never reported
+    // (or retried by the client) as an expired step-up.
+    if (!expectedOrigin || req.get('origin') !== expectedOrigin) {
+      res.status(403).json({ code: 'CONNECTOR_ORIGIN_REJECTED' }); return;
+    }
     if (!session || session.installationId !== deps.installationId || session.userId !== identity.userId
-      || session.authTimeMs > nowMs || nowMs - session.authTimeMs > 300_000 || session.expiresAtMs <= nowMs
-      || req.get('origin') !== expectedOrigin || !safeHashEqual(req.get('x-csrf-token'), session.csrfTokenHash)) {
+      || session.authTimeMs > nowMs || nowMs - session.authTimeMs > RECENT_AUTH_MAX_AGE_MS
+      || session.expiresAtMs <= nowMs || !safeHashEqual(req.get('x-csrf-token'), session.csrfTokenHash)) {
       res.status(403).json({ code: 'CONNECTOR_SETUP_RECENT_AUTH_OR_CSRF_REQUIRED' }); return;
     }
     try {

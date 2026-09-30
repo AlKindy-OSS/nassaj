@@ -270,6 +270,90 @@ function CredentialField({
 }
 
 /**
+ * إفصاحٌ ثنائي اللغة + مربّع موافقة، لشركة Alibaba Cloud وحدها (T-1906، قرار
+ * المالك 2026-09-28).
+ *
+ * لماذا هذه الشركة وحدها تحمل هذا: مفتاح Alibaba Coding Plan هو اشتراكٌ شخصي
+ * يُمرَّر عبر حامل OpenCode لا عبر وكيلٍ أصيلٍ له، وأربعُ حقائق فيه لا تصدق على
+ * بقية الشركات: (1) الاستخدام شخصيٌّ وتفاعليٌّ فقط — لا أتمتة ولا تشغيلٌ خلفي؛
+ * (2) Alibaba تملك تعليق المفتاح أو إبطاله من طرفها؛ (3) النموذج نفسه يرى
+ * المفتاح أثناء الجلسة — فإبطالُه من لوحة Alibaba هو الإجراء عند الشكّ لا حذفُه
+ * من هنا فقط؛ (4) الشفرة تُرسَل إلى منطقة Alibaba الدولية.
+ *
+ * ولا تُقال «مشاركة مع الفريق» ولا «الخلفية» في أيّ صياغة: هذا مفتاحٌ شخصي
+ * لاستخدامٍ تفاعلي شخصي، لا موردٌ مشترك.
+ *
+ * الموافقة **تُرسَل صراحةً** (`consent: true`) في نداء الحفظ، ولا تُفترض من
+ * مجرّد فتح الشاشة — الخادم يرفض بلا 400 حين تغيب (شرطٌ خادميّ منفصل).
+ */
+function AlibabaConsentDisclosure({
+  checked,
+  onToggle,
+  disabled,
+}: {
+  checked: boolean;
+  onToggle: (next: boolean) => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation('settings');
+  const checkboxId = 'alibaba-cloud-key-consent';
+
+  return (
+    <SettingsCard tone="info">
+      <div className="space-y-2">
+        <p className="text-[13px] leading-relaxed text-foreground">
+          {t('vendors.consent.alibaba.intro', {
+            defaultValue:
+              'This links your personal Alibaba Coding Plan subscription for your own interactive '
+              + 'use through OpenCode — not a shared team credential.',
+          })}
+        </p>
+        <ul className="list-disc space-y-1 ps-4 text-[13px] leading-relaxed text-muted-foreground">
+          <li>
+            {t('vendors.consent.alibaba.personalInteractive', {
+              defaultValue:
+                'For your personal, interactive use only — not for automation or background runs.',
+            })}
+          </li>
+          <li>
+            {t('vendors.consent.alibaba.suspend', {
+              defaultValue: 'Alibaba may suspend or revoke this key at any time, on their side.',
+            })}
+          </li>
+          <li>
+            {t('vendors.consent.alibaba.modelSeesKey', {
+              defaultValue:
+                'The AI model can see this key during a session. If you suspect it leaked, revoke it '
+                + 'from the Alibaba console — not only by removing it here.',
+            })}
+          </li>
+          <li>
+            {t('vendors.consent.alibaba.internationalRegion', {
+              defaultValue: 'Your code is sent to Alibaba’s international region.',
+            })}
+          </li>
+        </ul>
+        <label htmlFor={checkboxId} className="flex cursor-pointer items-start gap-2 pt-1">
+          <input
+            id={checkboxId}
+            type="checkbox"
+            checked={checked}
+            disabled={disabled}
+            onChange={(event) => onToggle(event.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border-input accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <span className="text-[13px] leading-relaxed text-foreground">
+            {t('vendors.consent.alibaba.checkbox', {
+              defaultValue: 'I understand and accept these terms for my personal key.',
+            })}
+          </span>
+        </label>
+      </div>
+    </SettingsCard>
+  );
+}
+
+/**
  * صفُّ موضعٍ واحد: **مربّع اختيار** يقرّر أيذهب المفتاح إلى هنا، ومعه ما يصف ما
  * هو مخزَّن في هذا الموضع الآن.
  *
@@ -478,6 +562,18 @@ export default function CompanyCredentialCard({
    */
   const [placesOpen, setPlacesOpen] = useState(false);
 
+  /**
+   * Alibaba Coding Plan consent (T-1906, owner decision 2026-09-28): the Qwen
+   * body's own login window is gone, and its personal key now goes through
+   * this generic card. A subscription key sent through OpenCode carries risks
+   * the other companies here do not (interactive-use-only, revocable by
+   * Alibaba, readable by the model mid-session, routed to Alibaba's
+   * international region) — so saving is blocked until the operator reads
+   * that disclosure and ticks it, and the server is told the tick happened.
+   */
+  const isAlibaba = company.id === 'alibaba-cloud';
+  const [alibabaConsent, setAlibabaConsent] = useState(false);
+
   const inputId = `company-api-key-${company.id}`;
 
   const statusById = useMemo(() => {
@@ -582,6 +678,14 @@ export default function CompanyCredentialCard({
    */
   const storedIn = slots.filter((slot) => slot.configured).map((slot) => slotLabel(slot.vendorId));
 
+  /**
+   * موضعٌ محفوظٌ بمِلَفٍّ لا يقبله المسار المبسَّط الحالي — `token_plan` أو
+   * منطقة `china` مخزَّنة قبل T-1906 بالنموذج القديم ذي الحقلين. `configured`
+   * تبقى صادقة (سرٌّ مخزَّنٌ فعلاً)، لكن البطاقة يجب أن تطلب مفتاحاً جديداً لا
+   * أن تقول «جاهز».
+   */
+  const incompatibleProfile = slots.some((slot) => slot.status === 'incompatible_profile');
+
   const outcomeText = (slot: CompanySlotResult): string => {
     switch (slot.outcome) {
       case 'written':
@@ -629,11 +733,13 @@ export default function CompanyCredentialCard({
        */
       vendorIds: chosenIds,
       includeSubscription: overriddenSubscriptions.length > 0,
+      ...(isAlibaba ? { consent: alibabaConsent } : {}),
     });
     if (result.success) {
       setSavedSubscriptionToken(draftIsSubscriptionToken);
       setDraftKey('');
       setResults(result.slots);
+      setAlibabaConsent(false);
     }
   };
 
@@ -715,8 +821,9 @@ export default function CompanyCredentialCard({
             storedIn={storedIn}
             busy={saving || loading}
             // لا حفظ بلا موضعٍ مسمّى: القائمة تُرسل صريحةً دائماً، ومصفوفةٌ فارغة
-            // ‏400 عند الخادم لا «كل المواضع».
-            canSave={chosenIds.length > 0}
+            // ‏400 عند الخادم لا «كل المواضع». وشركة Alibaba تُضيف شرطاً ثالثاً:
+            // لا حفظ قبل تأشير مربّع الموافقة (T-1906).
+            canSave={chosenIds.length > 0 && (!isAlibaba || alibabaConsent)}
           />
         </div>
 
@@ -772,6 +879,26 @@ export default function CompanyCredentialCard({
           )}
         </div>
       </div>
+
+        {incompatibleProfile && (
+          <SettingsCard tone="warning">
+            <p className="text-[13px] leading-relaxed text-warning">
+              {t('vendors.company.incompatibleProfile', {
+                defaultValue:
+                  'The key saved here is not compatible with the current Coding Plan setup — '
+                  + 're-enter a Coding Plan key to use it.',
+              })}
+            </p>
+          </SettingsCard>
+        )}
+
+        {isAlibaba && (
+          <AlibabaConsentDisclosure
+            checked={alibabaConsent}
+            onToggle={setAlibabaConsent}
+            disabled={saving || loading}
+          />
+        )}
 
         {draftKey.trim().length > 0 && (
           <DeliveryNote

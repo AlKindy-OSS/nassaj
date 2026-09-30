@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 
 import { clearSessionOutcome } from '../stores/sessionCompletionStore';
+import { pruneSurfacedContextsToProjects } from '../stores/surfacedSessionsStore';
 import { api } from '../utils/api';
 import type {
   AppSocketMessage,
@@ -106,6 +107,8 @@ const projectsHaveChanges = (
       nextProject.fullPath !== prevProject.fullPath ||
       nextProject.dirExists !== prevProject.dirExists ||
       nextProject.metadataCheckedAt !== prevProject.metadataCheckedAt ||
+      nextProject.linkUrl !== prevProject.linkUrl ||
+      nextProject.logoUrl !== prevProject.logoUrl ||
       Boolean(nextProject.isStarred) !== Boolean(prevProject.isStarred) ||
       Boolean(nextProject.isMember) !== Boolean(prevProject.isMember) ||
       Boolean(nextProject.isOwner) !== Boolean(prevProject.isOwner) ||
@@ -539,6 +542,13 @@ export function useProjectsState({
       projectsSnapshotStateRef.current = snapshotState;
       const projectData = (await response.json()) as Project[];
 
+      // B-1431/T-1949: a full refetch (e.g. triggered by `project_membership_
+      // revoked`, which carries no project list itself) is the other path a
+      // project can leave the visible set through — prune here too, or a
+      // revoked project's stale negative cache would only clear on the NEXT
+      // `projects_updated` broadcast instead of on this refresh.
+      pruneSurfacedContextsToProjects(new Set(projectData.map((project) => project.projectId)));
+
       setProjects((prevProjects) => {
         const mergedProjects = mergeExpandedSessionPages(prevProjects, projectData);
 
@@ -728,6 +738,11 @@ export function useProjectsState({
     setProjects((previousProjects) =>
       projectsHaveChanges(previousProjects, updatedProjects, true) ? updatedProjects : previousProjects,
     );
+
+    // B-1431/T-1949: a project that left the visible list (archived, access
+    // revoked) must not keep surfacing cached rows or blocking a fresh lookup
+    // under a live one via a stale negative-cache entry.
+    pruneSurfacedContextsToProjects(new Set(updatedProjects.map((project) => project.projectId)));
 
     if (!selectedProject) {
       return;

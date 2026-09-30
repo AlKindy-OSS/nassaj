@@ -105,6 +105,7 @@ import {
   markOutboxPending,
   outboxRetryMode,
   recordOutboxEntry,
+  recordOutboxEntryDurably,
   resolveOutboxVerdict,
   consumeOutboxIngressVerdict,
   setOutboxBlobStore,
@@ -187,7 +188,9 @@ function harness(
     },
     pendingViewSessionRef: { current: null } as any,
     scrollToBottom: () => {},
-    addMessage: (msg: any) => state.added.push(msg),
+    // T-1936 item 2: يُقلّد التنفيذ الحقيقي — يُرجع المفتاح الذي أُضيفت الفقاعة
+    // تحته (الجلسة الحالية، أو null قبل ولادتها) حتى يُختبر السحب المضبوط.
+    addMessage: (msg: any) => { state.added.push(msg); return options.sessionId ?? null; },
     setIsLoading: () => {},
     setCanAbortSession: () => {},
     setClaudeStatus: () => {},
@@ -841,7 +844,8 @@ function renderHookWithModel(claudeModel: string) {
     sendMessage: (message: unknown) => { state.sent.push(message); return { ok: true }; },
     pendingViewSessionRef: { current: null } as any,
     scrollToBottom: () => {},
-    addMessage: (msg: any) => state.added.push(msg),
+    // T-1936 item 2: هذا الـharness دائماً بجلسة SESSION_ID — يُقلّد الإرجاع الحقيقي.
+    addMessage: (msg: any) => { state.added.push(msg); return SESSION_ID; },
     setIsLoading: () => {},
     setCanAbortSession: () => {},
     setClaudeStatus: () => {},
@@ -904,7 +908,11 @@ describe('B-894 durable delivery lifecycle in the composer hook', () => {
     act(() => live.result.current.setInput('new text'));
     await act(async () => { await live.result.current.handleSubmit(fakeEvent); });
     expect(live.state.sent).toHaveLength(0);
-    expect(live.state.added).toHaveLength(0);
+    // T-1936: الفقاعة تظهر قبل الحفظ (item 1)، فتُضاف ثم تُسحب فوراً حين يرفض
+    // الحفظ القبول — لا تبقى، لكنّها لم تعد صفراً كما في الترتيب القديم.
+    expect(live.state.added).toHaveLength(1);
+    expect(live.state.withdrawn).toEqual([SESSION_ID]);
+    expect(live.state.withdrawnIds).toEqual([live.state.added[0].id]);
     expect(live.result.current.input).toBe('new text');
     expect(live.result.current.sendError).toBe('outbox.storageFull');
     live.unmount();
@@ -1194,4 +1202,192 @@ it('B-1007 editing preserves the protected copy when image data is unavailable',
   expect(live.result.current.input).not.toBe('keep text');
   expect(live.result.current.sendError).toBe('outbox.reason.attachment_images_missing');
   live.unmount();
+});
+
+/**
+ * T-1936 — الفقاعة تظهر قبل الحفظ الدائم لا بعده.
+ *
+ * ما يحرسه هذا القسم (السرعة المُدركة بلا كسر الالتزام القديم):
+ *  ١. أثناء حفظٍ معلَّق: الفقاعة ظاهرة فوراً، ولا شيء يُبثّ على السلك حتى
+ *     ينجح الحفظ.
+ *  ٢. فشل الحفظ يسحب الفقاعة من نفس المفتاح الذي أُضيفت تحته — في محادثة
+ *     قائمة وفي محادثة لم تُولد بعد (`pendingUserMessage`) على السواء.
+ *  ٣. نقرة/Enter ثانية أثناء الحفظ المعلّق لا تُطلق حفظاً أو إرسالاً ثانياً
+ *     (قفل `submitSeal` يبقى مضبوطاً طوال الانتظار).
+ *  ٤. تبديل «الجلسة النشطة» أثناء الحفظ المعلّق لا يُغيّر لا مفتاح السحب ولا
+ *     وجهة الإرسال — كلاهما مضبوطان قبل الانتظار.
+ *  ٥. `pendingViewSessionRef` (محادثة جديدة) لا يُضبط إلا بعد نجاح الحفظ.
+ */
+describe('T-1936 — الفقاعة قبل الحفظ الدائم', () => {
+  it('(1) حفظ معلّق: الفقاعة تظهر فوراً ولا إرسال حتى ينجح الحفظ، ثم إرسالٌ واحد فقط', async () => {
+    const { result, state } = harness({ sessionId: SESSION_ID });
+    let release!: (value: any) => void;
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(
+      () => new Promise((resolve) => { release = resolve; }),
+    );
+
+    act(() => { result.current.setInput('رسالة معلّقة'); });
+    let submission!: Promise<void>;
+    act(() => { submission = result.current.handleSubmit(fakeEvent); });
+
+    await waitFor(() => expect(state.added.some((m) => m.type === 'user')).toBe(true));
+    // لا شيء أُرسل بعد — الحفظ لم ينجح.
+    expect(state.sent).toHaveLength(0);
+
+    release({ historyEligibility: 'text_only' });
+    await act(async () => { await submission; });
+
+    expect(state.sent).toHaveLength(1);
+  });
+
+  it('(2a) فشل الحفظ يسحب الفقاعة من مفتاح الجلسة القائمة ويُبقي المُؤلِّف والمرفقات', async () => {
+    const { result, state } = harness({ sessionId: SESSION_ID });
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(async () => null);
+
+    act(() => { result.current.setInput('نص لن يُحفَظ'); });
+    await act(async () => { await result.current.handleSubmit(fakeEvent); });
+
+    expect(state.sent).toHaveLength(0);
+    expect(state.added).toHaveLength(1);
+    expect(state.withdrawn).toEqual([SESSION_ID]);
+    expect(state.withdrawnIds).toEqual([state.added[0].id]);
+    // لم يُمسح — الحفظ فشل قبل أي تفريغ للمُؤلِّف.
+    expect(result.current.input).toBe('نص لن يُحفَظ');
+    expect(result.current.sendError).toBe('outbox.storageFull');
+  });
+
+  it('(2b) محادثة لم تُولد بعد: فشل الحفظ يسحب الفقاعة المعلّقة بمفتاح null', async () => {
+    const { result, state } = harness({ sessionId: null });
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(async () => null);
+
+    act(() => { result.current.setInput('أول رسالة لن تُحفَظ'); });
+    await act(async () => { await result.current.handleSubmit(fakeEvent); });
+
+    expect(state.sent).toHaveLength(0);
+    expect(state.added).toHaveLength(1);
+    expect(state.withdrawn).toEqual([null]);
+    expect(result.current.input).toBe('أول رسالة لن تُحفَظ');
+  });
+
+  it('(3) نقرة ثانية أثناء الحفظ المعلّق لا تُطلق حفظاً أو إرسالاً ثانياً', async () => {
+    const { result, state } = harness({ sessionId: SESSION_ID });
+    let release!: (value: any) => void;
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(
+      () => new Promise((resolve) => { release = resolve; }),
+    );
+    const callsBefore = vi.mocked(recordOutboxEntryDurably).mock.calls.length;
+
+    act(() => { result.current.setInput('رسالة'); });
+    let submission!: Promise<void>;
+    act(() => { submission = result.current.handleSubmit(fakeEvent); });
+    await waitFor(() => expect(result.current.isSubmitSealed).toBe(true));
+
+    // نقرة/Enter ثانية أثناء الحفظ المعلّق — القفل يرفضها فوراً بلا حفظ ثانٍ.
+    await act(async () => { await result.current.handleSubmit(fakeEvent); });
+    expect(vi.mocked(recordOutboxEntryDurably).mock.calls.length - callsBefore).toBe(1);
+    expect(state.sent).toHaveLength(0);
+
+    release({ historyEligibility: 'text_only' });
+    await act(async () => { await submission; });
+    expect(state.sent).toHaveLength(1);
+  });
+
+  it('(4) تبديل الجلسة النشطة أثناء الحفظ المعلّق لا يُغيّر مفتاح السحب ولا وجهة الإرسال', async () => {
+    const state: Harness = { sent: [], withdrawn: [], withdrawnIds: [], added: [] };
+    let activeKey: string | null = SESSION_ID;
+    let release!: (value: any) => void;
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(
+      () => new Promise((resolve) => { release = resolve; }),
+    );
+
+    const props = {
+      selectedProject: PROJECT,
+      selectedSession: { id: SESSION_ID } as any,
+      currentSessionId: SESSION_ID,
+      provider: 'claude' as const,
+      displayProvider: 'claude' as const,
+      engineProvider: null,
+      permissionMode: 'default',
+      cyclePermissionMode: () => {},
+      cursorModel: 'cur', claudeModel: 'sonnet-live', codexModel: 'cx',
+      antigravityModel: 'ag', opencodeModel: 'oc', hermesModel: 'hm', kimiModel: 'km',
+      deepseekModel: 'ds', glmModel: 'glm',
+      isLoading: false,
+      canAbortSession: false,
+      tokenBudget: null,
+      sendMessage: (message: unknown) => { state.sent.push(message); return { ok: true }; },
+      pendingViewSessionRef: { current: null } as any,
+      scrollToBottom: () => {},
+      // يقرأ مفتاحاً متبدّلاً — يحاكي جلسة «نشطة» تتغيّر أثناء الانتظار، بخلاف
+      // القيمة المضبوطة فعلياً وقت الإضافة (item 2/4).
+      addMessage: (msg: any) => { state.added.push(msg); return activeKey; },
+      setIsLoading: () => {},
+      setCanAbortSession: () => {},
+      setClaudeStatus: () => {},
+      setIsUserScrolledUp: () => {},
+      setPendingPermissionRequests: () => {},
+      withdrawOptimisticUserMessage: (sessionId: string | null, clientMsgId?: string) => {
+        state.withdrawn.push(sessionId);
+        state.withdrawnIds.push(clientMsgId);
+      },
+      verifyMessageDelivered: async () => false,
+    };
+
+    const { result } = renderHook(() => useChatComposerState(props as any));
+    act(() => { result.current.setInput('رسالة أثناء تبديل الجلسة'); });
+    let submission!: Promise<void>;
+    act(() => { submission = result.current.handleSubmit(fakeEvent); });
+    await waitFor(() => expect(state.added).toHaveLength(1));
+
+    // «الجلسة النشطة» تبدّلت أثناء الحفظ المعلّق — لو استُدعيت addMessage الآن
+    // لأعادت مفتاحاً آخر، لكنها لا تُستدعى ثانيةً؛ المفتاح مضبوطٌ سلفاً.
+    activeKey = 'sess-2';
+
+    release(null); // الحفظ يفشل
+    await act(async () => { await submission; });
+
+    expect(state.withdrawn).toEqual([SESSION_ID]);
+    expect(state.sent).toHaveLength(0);
+  });
+
+  it('(4b) دفعة الإرسال تحمل الجلسة المضبوطة وقت البدء لا أي تبديل لاحق', async () => {
+    const { result, state } = harness({ sessionId: SESSION_ID });
+    let release!: (value: any) => void;
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(
+      () => new Promise((resolve) => { release = resolve; }),
+    );
+
+    act(() => { result.current.setInput('رسالة لجلسة ثابتة'); });
+    let submission!: Promise<void>;
+    act(() => { submission = result.current.handleSubmit(fakeEvent); });
+    await waitFor(() => expect(state.added).toHaveLength(1));
+
+    release({ historyEligibility: 'text_only' });
+    await act(async () => { await submission; });
+
+    expect(state.sent).toHaveLength(1);
+    expect((state.sent[0] as any).sessionId ?? (state.sent[0] as any).options?.sessionId).toBe(SESSION_ID);
+  });
+
+  it('(5) محادثة جديدة: pendingViewSessionRef لا يُضبط إلا بعد نجاح الحفظ', async () => {
+    const { result, props } = harness({ sessionId: null });
+    let release!: (value: any) => void;
+    vi.mocked(recordOutboxEntryDurably).mockImplementationOnce(
+      () => new Promise((resolve) => { release = resolve; }),
+    );
+
+    act(() => { result.current.setInput('محادثة جديدة معلّقة'); });
+    let submission!: Promise<void>;
+    act(() => { submission = result.current.handleSubmit(fakeEvent); });
+
+    await waitFor(() => expect(result.current.isSubmitSealed).toBe(true));
+    // الحفظ لم ينجح بعد — لا تتبُّع لجولةٍ قيد التشغيل.
+    expect(props.pendingViewSessionRef.current).toBeNull();
+
+    release({ historyEligibility: 'text_only' });
+    await act(async () => { await submission; });
+
+    expect(props.pendingViewSessionRef.current).not.toBeNull();
+    expect(props.pendingViewSessionRef.current?.sessionId).toBeNull();
+  });
 });

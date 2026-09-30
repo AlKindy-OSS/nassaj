@@ -19,7 +19,7 @@ test('fresh import keeps explicit legacy mode, but initialization failure perman
     issueOwnerOperation: () => { writes++; return { sessionId: 'session', authTime: 1, expiresAt: 90000 }; },
     consumeOwnerOperation: () => { writes++; return true; },
   };
-  const req = { user: { id: 7, role: 'owner' }, headers: { cookie: `nassaj_connector_recent_auth=${'a'.repeat(64)}` },
+  const req = { user: { id: 7, role: 'owner' }, headers: { cookie: `__Host-nassaj_connector_recent_auth=${'a'.repeat(64)}` },
     get: (name: string) => name === 'origin' ? 'https://example.test' : csrf } as unknown as express.Request;
   const response = { locals: {}, status() { return this; }, json() { return this; } } as unknown as express.Response;
   const gate = createConnectorOwnerOperationGate({ repository, installationId: 'installation', canonicalOrigin: 'https://example.test', operation: 'upsert_byo', now: () => 10 });

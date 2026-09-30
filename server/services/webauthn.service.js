@@ -1,29 +1,34 @@
 /**
- * WebAuthn (passkey) service (B-PK-3 / B-PK-4).
+ * WebAuthn (passkey) service (B-PK-3 / B-PK-4, hardened by B-1407).
  *
  * Wraps @simplewebauthn/server v13 with this app's persistence and challenge
- * bookkeeping. Two ceremonies:
+ * bookkeeping. Three ceremonies, each bound to its own challenge purpose:
  *
- *   Registration (authenticated): createRegistrationOptions stores a
- *   user-bound challenge; verifyRegistration consumes it, verifies the
- *   attestation and persists the credential.
+ *   Registration (authenticated, after a step-up proof checked by the route):
+ *   createRegistrationOptions stores a user-bound 'registration' challenge and
+ *   requires user verification; verifyRegistration consumes it, verifies the
+ *   attestation WITH user verification and persists the credential as
+ *   step-up eligible.
  *
  *   Authentication (anonymous, discoverable credentials): the options carry an
- *   empty allowCredentials list and an anonymous (userId=null) challenge; the
- *   verify step resolves the credential by the ID in the assertion, enforces
- *   the owning user is active, verifies the signature and advances the counter.
+ *   empty allowCredentials list and an anonymous 'login' challenge; the verify
+ *   step resolves the credential by the ID in the assertion, enforces the
+ *   owning user is active, verifies the signature and advances the counter.
+ *   UV stays 'preferred' here (login must not strand authenticators without
+ *   UV); callers read `userVerified` + `stepUpEligible` from the result.
+ *
+ *   Step-up (authenticated): createStepUpOptions lists only the caller's
+ *   eligible credentials and requires UV; the assertion itself is checked by
+ *   services/step-up.service.js through verifyAssertionCore.
  *
  * The challenge is recovered from the response's clientDataJSON (it is what
  * the authenticator actually signed), then consumed single-use from the store
- * — a replayed assertion therefore fails before any crypto work.
+ * with the exact expected purpose — a replayed or cross-ceremony assertion
+ * therefore fails before any crypto work.
  *
  * Error policy: WebAuthnError.message is generic and safe for clients (never
  * reveals whether a credential exists); the machine-readable `reason` is for
  * audit metadata only.
- *
- * Note: requireUserVerification is false on both verifies because the options
- * request userVerification 'preferred' — per simplewebauthn guidance, requiring
- * UV while only preferring it strands authenticators that skip UV.
  */
 
 import {
@@ -40,21 +45,36 @@ import {
 } from '../constants/webauthn.js';
 import { userDb, webauthnCredentialsDb } from '../modules/database/index.js';
 
-import { webauthnChallengeStore } from './webauthn-challenge.store.js';
+import { ChallengeStoreFullError, webauthnChallengeStore } from './webauthn-challenge.store.js';
 
 /**
  * Errors thrown by the service. `status` drives the HTTP layer, `message` is
  * client-safe and generic, `reason` is internal (audit metadata only).
  */
 export class WebAuthnError extends Error {
-  constructor(status, message, reason) {
+  constructor(status, message, reason, code) {
     super(message);
     this.status = status;
     this.reason = reason;
+    this.code = code;
   }
 }
 
-const GENERIC_LOGIN_ERROR = 'Passkey authentication failed';
+export const GENERIC_LOGIN_ERROR = 'Passkey authentication failed';
+
+/** Stores a challenge; a full store becomes a client-safe 503. */
+function storeChallenge(challenge, binding) {
+  try {
+    webauthnChallengeStore.store(challenge, binding);
+  } catch (error) {
+    if (error instanceof ChallengeStoreFullError) {
+      throw new WebAuthnError(
+        503, 'Passkeys are busy, please try again shortly', 'challenge_store_full', 'challenge_store_full'
+      );
+    }
+    throw error;
+  }
+}
 
 /** Parses the stored JSON transports column back into an array (or undefined). */
 function parseTransports(transportsJson) {
@@ -74,7 +94,7 @@ function parseTransports(transportsJson) {
  * registration/authentication response's clientDataJSON. Returns null on any
  * malformed input (never throws).
  */
-function extractClientChallenge(response) {
+export function extractClientChallenge(response) {
   try {
     const clientDataJSON = response?.response?.clientDataJSON;
     if (typeof clientDataJSON !== 'string') {
@@ -94,15 +114,18 @@ function extractClientChallenge(response) {
 // ---------------------------------------------------------------------------
 
 /**
- * Generates registration options for the authenticated user and stores the
- * challenge bound to their id. Existing credentials are excluded so the same
- * authenticator is not registered twice.
+ * Generates registration options for the authenticated user and stores a
+ * 'registration' challenge bound to their id. The caller (route) must already
+ * have checked a step-up proof. User verification is required. Only
+ * step-up-eligible credentials are excluded: a legacy (pre-B-1407) passkey must
+ * stay re-registrable on the same authenticator so the user can upgrade it and
+ * then delete the legacy entry (the settings UI guides exactly that).
  *
  * @param {{ id:number, username:string }} user
  * @returns {Promise<import('@simplewebauthn/server').PublicKeyCredentialCreationOptionsJSON>}
  */
 export async function createRegistrationOptions(user) {
-  const existing = webauthnCredentialsDb.listByUserId(user.id);
+  const eligible = webauthnCredentialsDb.listStepUpEligibleByUserId(user.id);
 
   const options = await generateRegistrationOptions({
     rpName: WEBAUTHN_RP_NAME,
@@ -110,22 +133,23 @@ export async function createRegistrationOptions(user) {
     userName: user.username,
     userID: new TextEncoder().encode(String(user.id)),
     attestationType: 'none',
-    excludeCredentials: existing.map((credential) => ({
+    excludeCredentials: eligible.map((credential) => ({
       id: credential.id,
       transports: parseTransports(credential.transports),
     })),
     authenticatorSelection: {
       residentKey: 'preferred',
-      userVerification: 'preferred',
+      userVerification: 'required',
     },
   });
 
-  webauthnChallengeStore.store(options.challenge, user.id);
+  storeChallenge(options.challenge, { userId: user.id, purpose: 'registration' });
   return options;
 }
 
 /**
- * Verifies a registration response and persists the new credential.
+ * Verifies a registration response (user verification required) and persists
+ * the new credential as step-up eligible.
  *
  * @param {{ id:number }} user authenticated owner of the ceremony
  * @param {object} response RegistrationResponseJSON from the browser
@@ -139,8 +163,10 @@ export async function verifyRegistration(user, response, name = null) {
     throw new WebAuthnError(400, 'Invalid registration response', 'malformed_response');
   }
 
-  const entry = webauthnChallengeStore.consume(challenge);
-  if (!entry || entry.userId !== user.id) {
+  const entry = webauthnChallengeStore.consume(challenge, {
+    purpose: 'registration', userId: user.id,
+  });
+  if (!entry) {
     throw new WebAuthnError(
       400,
       'Registration challenge is invalid or has expired',
@@ -155,13 +181,17 @@ export async function verifyRegistration(user, response, name = null) {
       expectedChallenge: challenge,
       expectedOrigin: WEBAUTHN_ORIGINS,
       expectedRPID: WEBAUTHN_RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: true,
     });
   } catch {
     throw new WebAuthnError(400, 'Passkey registration could not be verified', 'verification_failed');
   }
 
-  if (!verification.verified || !verification.registrationInfo) {
+  if (
+    !verification.verified ||
+    !verification.registrationInfo ||
+    verification.registrationInfo.userVerified !== true
+  ) {
     throw new WebAuthnError(400, 'Passkey registration could not be verified', 'not_verified');
   }
 
@@ -179,6 +209,7 @@ export async function verifyRegistration(user, response, name = null) {
       backedUp: credentialBackedUp === true,
       aaguid: aaguid ?? null,
       name: name ?? null,
+      stepUpEligible: true,
     });
   } catch (error) {
     // UNIQUE violation → this authenticator is already registered.
@@ -211,18 +242,65 @@ export async function createAuthenticationOptions() {
     userVerification: 'preferred',
   });
 
-  webauthnChallengeStore.store(options.challenge, null);
+  storeChallenge(options.challenge, { userId: null, purpose: 'login' });
   return options;
 }
 
 /**
- * Verifies an authentication assertion and resolves the owning user.
- * Enforces: single-use anonymous challenge, known credential, active user
+ * Verifies one assertion against a stored credential row: signature, origin,
+ * RP ID, challenge and signature-counter regression (a counter that does not
+ * advance is rejected by @simplewebauthn as a cloned-authenticator signal).
+ * On success advances the counter and stamps last_used_at.
+ *
+ * @param {{ row: object, response: object, challenge: string, requireUV: boolean }} input
+ * @returns {Promise<{ userVerified: boolean }>}
+ * @throws {WebAuthnError} 401 generic, `userId` set to the credential owner
+ */
+export async function verifyAssertionCore({ row, response, challenge, requireUV }) {
+  const fail = (reason) => {
+    const error = new WebAuthnError(401, GENERIC_LOGIN_ERROR, reason);
+    error.userId = row.user_id;
+    return error;
+  };
+
+  let verification;
+  try {
+    verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: challenge,
+      expectedOrigin: WEBAUTHN_ORIGINS,
+      expectedRPID: WEBAUTHN_RP_ID,
+      credential: {
+        id: row.id,
+        publicKey: new Uint8Array(row.public_key),
+        counter: row.counter,
+        transports: parseTransports(row.transports),
+      },
+      requireUserVerification: requireUV === true,
+    });
+  } catch {
+    throw fail('verification_failed');
+  }
+
+  if (!verification.verified) {
+    throw fail('not_verified');
+  }
+
+  webauthnCredentialsDb.updateCounterAndLastUsed(
+    row.id,
+    verification.authenticationInfo.newCounter
+  );
+  return { userVerified: verification.authenticationInfo.userVerified === true };
+}
+
+/**
+ * Verifies an anonymous login assertion and resolves the owning user.
+ * Enforces: single-use 'login' challenge, known credential, active user
  * (status='active' AND is_active=1 via userDb.getUserById), valid signature.
- * Advances the signature counter and stamps last_used_at on success.
  *
  * @param {object} response AuthenticationResponseJSON from the browser
- * @returns {Promise<{ user: object, credentialId: string }>}
+ * @returns {Promise<{ user: object, credentialId: string, userVerified: boolean,
+ *   stepUpEligible: boolean }>}
  * @throws {WebAuthnError} always 401 with a generic message on auth failure
  */
 export async function verifyAuthentication(response) {
@@ -231,10 +309,10 @@ export async function verifyAuthentication(response) {
     throw new WebAuthnError(401, GENERIC_LOGIN_ERROR, 'malformed_response');
   }
 
-  // Single-use: a consumed/expired/never-issued challenge fails here, and a
-  // registration challenge (bound to a userId) cannot be replayed into login.
-  const entry = webauthnChallengeStore.consume(challenge);
-  if (!entry || entry.userId !== null) {
+  // Single-use and purpose-bound: a registration or step-up challenge can
+  // never be replayed into login.
+  const entry = webauthnChallengeStore.consume(challenge, { purpose: 'login', userId: null });
+  if (!entry) {
     throw new WebAuthnError(401, GENERIC_LOGIN_ERROR, 'challenge_invalid');
   }
 
@@ -252,37 +330,47 @@ export async function verifyAuthentication(response) {
     throw error;
   }
 
-  let verification;
-  try {
-    verification = await verifyAuthenticationResponse({
-      response,
-      expectedChallenge: challenge,
-      expectedOrigin: WEBAUTHN_ORIGINS,
-      expectedRPID: WEBAUTHN_RP_ID,
-      credential: {
-        id: row.id,
-        publicKey: new Uint8Array(row.public_key),
-        counter: row.counter,
-        transports: parseTransports(row.transports),
-      },
-      requireUserVerification: false,
-    });
-  } catch {
-    const error = new WebAuthnError(401, GENERIC_LOGIN_ERROR, 'verification_failed');
-    error.userId = user.id;
-    throw error;
+  const { userVerified } = await verifyAssertionCore({
+    row, response, challenge, requireUV: false,
+  });
+  return {
+    user,
+    credentialId: row.id,
+    userVerified,
+    stepUpEligible: row.step_up_eligible === 1,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Step-up (authenticated user re-proves presence with an eligible passkey)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates step-up options: allowCredentials lists ONLY the caller's
+ * step-up-eligible passkeys, UV is required, and the challenge is bound to
+ * (user, 'step_up', audience). A new step-up challenge replaces the user's
+ * previous pending one.
+ *
+ * @param {{ id:number }} user
+ * @param {string} audience validated by the caller
+ * @returns {Promise<import('@simplewebauthn/server').PublicKeyCredentialRequestOptionsJSON>}
+ * @throws {WebAuthnError} 409 when the user has no eligible passkey
+ */
+export async function createStepUpOptions(user, audience) {
+  const eligible = webauthnCredentialsDb.listStepUpEligibleByUserId(user.id);
+  if (eligible.length === 0) {
+    throw new WebAuthnError(
+      409, 'No passkey is eligible for this check', 'no_eligible_credential', 'no_eligible_passkey'
+    );
   }
-
-  if (!verification.verified) {
-    const error = new WebAuthnError(401, GENERIC_LOGIN_ERROR, 'not_verified');
-    error.userId = user.id;
-    throw error;
-  }
-
-  webauthnCredentialsDb.updateCounterAndLastUsed(
-    row.id,
-    verification.authenticationInfo.newCounter
-  );
-
-  return { user, credentialId: row.id };
+  const options = await generateAuthenticationOptions({
+    rpID: WEBAUTHN_RP_ID,
+    allowCredentials: eligible.map((credential) => ({
+      id: credential.id,
+      transports: parseTransports(credential.transports),
+    })),
+    userVerification: 'required',
+  });
+  storeChallenge(options.challenge, { userId: user.id, purpose: 'step_up', audience });
+  return options;
 }

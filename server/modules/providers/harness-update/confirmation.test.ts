@@ -29,7 +29,7 @@ const ctx = (over: Partial<AckContext> = {}): AckContext => ({
   harness: 'opencode',
   harnessName: 'OpenCode',
   action: 'update',
-  pinBreak: { variant: 'carrier', target: '1.18.32', pin: '1.17.18' },
+  pinBreak: { variant: 'all', target: '1.18.32', pin: '1.17.18' },
   dataLoss: null,
   ...over,
 });
@@ -70,8 +70,8 @@ test('409 carries server-built texts; a valid token passes once, reuse is refuse
   const svc = new AckTokenService(Buffer.alloc(32, 1));
   const [ack] = required(svc, ctx());
   assert.equal(ack.kind, 'pinBreak');
-  assert.match(ack.textEn, /^Updating OpenCode to 1\.18\.32 leaves the verified version 1\.17\.18\. GLM will stop working/);
-  assert.match(ack.textAr, /^تحديث OpenCode إلى 1\.18\.32 يُخرجه عن النسخة الموثَّقة 1\.17\.18\./);
+  assert.equal(ack.textEn, 'OpenCode will be blocked in every mode until version 1.17.18 is restored.');
+  assert.equal(ack.textAr, 'سيُحجب OpenCode في كل الأوضاع حتى تُستعاد النسخة 1.17.18.');
   svc.verifyAcks(ctx(), [{ kind: 'pinBreak', token: ack.token }]);
   assert.equal(required(svc, ctx(), [{ kind: 'pinBreak', token: ack.token }]).length, 1, 'single use');
   assert.equal(JSON.stringify(PINNED_VENDOR_DIGESTS), PINS_BEFORE, 'pins never modified');
@@ -89,7 +89,7 @@ test('tamper, wrong kind, other user/action, facts change and expiry all → fre
     [ctx(), [{ kind: 'pinBreak', token: 42 }]],
     [ctx({ userId: 2 }), [{ kind: 'pinBreak', token: ack.token }]],
     [ctx({ action: 'restore-compatible' }), [{ kind: 'pinBreak', token: ack.token }]],
-    [ctx({ pinBreak: { variant: 'carrier', target: '1.18.33', pin: '1.17.18' } }), [{ kind: 'pinBreak', token: ack.token }]],
+    [ctx({ pinBreak: { variant: 'all', target: '1.18.33', pin: '1.17.18' } }), [{ kind: 'pinBreak', token: ack.token }]],
   ] as const) {
     const fresh = required(svc, c, [...supplied]);
     assert.equal(fresh.length, 1);

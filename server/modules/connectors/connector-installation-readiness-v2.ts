@@ -6,7 +6,7 @@ import type { Database } from 'better-sqlite3';
 import express from 'express';
 
 import {
-  CONNECTOR_OAUTH_CALLBACK_PATH,
+  CONNECTOR_OAUTH_CALLBACK_PATH, RECENT_AUTH_MAX_AGE_MS,
 } from './connector-auth-security.js';
 import type { SqliteConnectorPolicyV2Store } from './connector-policy-v2-store.js';
 
@@ -419,10 +419,12 @@ const putOrigin = async (req: ConnectorM5Request, res: express.Response,
   let current: ConnectorCanonicalOrigin | null;
   try { current = dependencies.store.read(dependencies.installationId); }
   catch { res.status(503).json({ code: 'CONNECTOR_READINESS_UNAVAILABLE' }); return; }
+  if (requestOrigin !== (current?.canonicalOrigin ?? proposedOrigin)) {
+    res.status(403).json({ code: 'CONNECTOR_ORIGIN_REJECTED' }); return;
+  }
   const trusted = session !== null && session.installationId === dependencies.installationId
     && session.userId === identity.userId && session.authTimeMs <= nowMs
-    && nowMs - session.authTimeMs <= 300_000 && session.expiresAtMs > nowMs
-    && requestOrigin === (current?.canonicalOrigin ?? proposedOrigin)
+    && nowMs - session.authTimeMs <= RECENT_AUTH_MAX_AGE_MS && session.expiresAtMs > nowMs
     && csrfMatches(req.get('x-csrf-token'), session.csrfTokenHash);
   if (!session || !trusted) {
     res.status(403).json({ code: 'CONNECTOR_RECENT_AUTH_OR_CSRF_REQUIRED' }); return;

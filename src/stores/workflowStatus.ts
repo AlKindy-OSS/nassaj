@@ -62,6 +62,12 @@ export type WorkflowAgent = {
 export type ActiveWorkflow = {
   sessionId: string;
   wfId: string;
+  /**
+   * DB project id (B-1431), or null when the caller cannot see this session's
+   * project (session membership is not project membership, ADR-172) or an
+   * older server omitted the field.
+   */
+  projectId: string | null;
   status: ActiveWorkflowStatus;
   /** Unique result keys observed so far (progress numerator). */
   agentsDone: number;
@@ -282,6 +288,7 @@ export function normalizeWorkflowsEnvelope(raw: unknown): ActiveWorkflowsEnvelop
       agentsTruncated: w.agentsTruncated === true,
       sessionId,
       wfId,
+      projectId: typeof w.projectId === 'string' && w.projectId.length > 0 ? w.projectId : null,
       status: (status === 'running' || status === 'orphan' || status === 'frozen'
         ? status
         : 'unknown') as ActiveWorkflowStatus,

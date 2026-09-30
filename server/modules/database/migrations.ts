@@ -54,7 +54,6 @@ import {
   SESSION_WORKSPACE_MODES_TABLE_SCHEMA_SQL,
   SESSIONS_TABLE_SCHEMA_SQL,
   STARRED_SESSIONS_TABLE_SCHEMA_SQL,
-  USER_IDENTITIES_TABLE_SCHEMA_SQL,
   USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL,
   VAPID_KEYS_TABLE_SCHEMA_SQL,
   USAGE_BACKFILL_GENERATIONS_TABLE_SCHEMA_SQL,
@@ -71,6 +70,9 @@ import {
 } from '@/modules/database/internal-session-chat-flag.js';
 
 import { migrateLocalModelServers } from './local-model-servers.migration.js';
+import { migrateUserIdentities } from './user-identities.migration.js';
+import { migrateUsernameLowerUniqueIndex } from './users-username-lower.migration.js';
+import { migrateWebAuthnStepUpEligible } from './webauthn-step-up.migration.js';
 
 /** Additive durable queue for scheduled conversation messages. */
 export const migrateScheduledMessages = (db: Database): void => {
@@ -2208,6 +2210,10 @@ const migrateProjectVisibility = (db: Database): void => {
   // the value can be handed to the client verbatim. NULL = no logo, which every
   // pre-existing row keeps.
   addColumnToTableIfNotExists(db, 'projects', columnNames, 'logo_url', 'TEXT');
+  // T-1950: optional external link for the project (e.g. its live site or
+  // repo). Normalized absolute http(s) URL, or NULL. Display-only: the server
+  // never fetches it.
+  addColumnToTableIfNotExists(db, 'projects', columnNames, 'link_url', 'TEXT');
   addColumnToTableIfNotExists(db, 'projects', columnNames, 'detected_name', 'TEXT');
   // Preserve the pre-v2 visible label. Background reconciliation may improve
   // detected_name later without rewriting an explicit custom name.
@@ -3018,6 +3024,9 @@ export const runMigrations = (db: Database) => {
 
     // Passkeys (WebAuthn) — after users exist so the FK resolves.
     migrateWebAuthnCredentials(db);
+    // Passkey step-up eligibility (T-1939 slice 6A, B-1407) — additive column,
+    // DEFAULT 0 so every existing passkey stays ineligible until re-registered.
+    migrateWebAuthnStepUpEligible(db);
 
     // Per-user session stars — after users exist so the FK resolves.
     migrateStarredSessions(db);
@@ -3044,12 +3053,14 @@ export const runMigrations = (db: Database) => {
     migrateLocalModelServers(db);
 
     // OIDC identity linking (P-IDP-3, ADR-046) — after users exist so the
-    // user_id FK resolves. Idempotent (IF NOT EXISTS); no backfill (links are
-    // created explicitly when a user authenticates through or connects an IdP).
-    if (!tableExists(db, 'user_identities')) {
-      console.log('Running migration: Creating user_identities table');
-      db.exec(USER_IDENTITIES_TABLE_SCHEMA_SQL);
-    }
+    // user_id FK resolves. Idempotent (IF NOT EXISTS + additive
+    // last_attested_at, T-1939); no backfill (NULL = never attested).
+    migrateUserIdentities(db);
+
+    // Case-insensitive username uniqueness (T-1939 slice 4) — after users and
+    // audit_log exist. Skipped with a WARN + audit row, never a rename, while
+    // two accounts differ only by case.
+    migrateUsernameLowerUniqueIndex(db);
 
     // External platform connectors (T-1226, ADR-098) — after users exist so the
     // created_by FK resolves. Idempotent; no backfill (a connector is only ever

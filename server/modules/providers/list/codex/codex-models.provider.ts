@@ -20,16 +20,24 @@ import {
 } from '@/shared/utils.js';
 
 import { operatorCodexHome } from './codex-home.js';
+import { codexModelsRefresher, ownCodexRefreshTarget } from './codex-models-refresh.js';
 
+// Snapshot of the locally installed `codex` CLI's own live catalog
+// (~/.codex/models_cache.json, client_version 0.156.0, 2026-09-27), used only
+// when reading that file fails (Codex not installed, cache not yet fetched).
+// `gpt-reserve` and `codex-auto-review` are omitted: their `visibility` is
+// `hide` in the live cache, same filter `buildCodexModelsDefinition` applies.
 export const CODEX_FALLBACK_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
+    { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
+    { value: 'gpt-6-sol', label: 'gpt-6-sol' },
+    { value: 'gpt-6-luna', label: 'gpt-6-luna' },
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol' },
+    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra' },
+    { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna' },
     { value: 'gpt-5.5', label: 'gpt-5.5' },
-    { value: 'gpt-5.4', label: 'gpt-5.4' },
-    { value: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
-    { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
-    { value: 'gpt-5.2', label: 'gpt-5.2' },
   ],
-  DEFAULT: 'gpt-5.4',
+  DEFAULT: 'gpt-5.6-sol',
   degraded: true,
 };
 
@@ -71,9 +79,17 @@ const mapCodexModel = (model: CodexCachedModel): ProviderModelOption => ({
   description: readOptionalString(model.description),
 });
 
+/**
+ * Whether a cached Codex model belongs in the picker. The live models_cache.json
+ * marks internal models with `visibility: 'hide'` (e.g. gpt-reserve); older
+ * shapes used 'hidden', so both are excluded.
+ */
+export const isListedCodexModel = (model: CodexCachedModel): boolean =>
+  model.visibility !== 'hidden' && model.visibility !== 'hide' && model.supported_in_api !== false;
+
 const buildCodexModelsDefinition = (models: CodexCachedModel[]): ProviderModelsDefinition => {
   const sortedModels = [...models]
-    .filter((model) => model.visibility !== 'hidden' && model.supported_in_api !== false)
+    .filter(isListedCodexModel)
     .sort((left, right) => readCodexPriority(left.priority) - readCodexPriority(right.priority));
 
   const options: ProviderModelOption[] = [];
@@ -108,7 +124,15 @@ export class CodexProviderModels implements IProviderModels {
    */
   async getSupportedModels(userId?: string | number | null): Promise<ProviderModelsDefinition> {
     try {
-      const raw = await readFile(path.join(resolveCodexHome(userId), CODEX_MODELS_CACHE_FILE), 'utf8');
+      const env = resolveProviderEnv(userId ?? null, 'codex', process.env);
+      const codexHome = readOptionalString(env.CODEX_HOME) ?? operatorCodexHome();
+      // Only a real user whose resolved home is their OWN isolated CODEX_HOME
+      // triggers a refresh (same env for spawn); granted/shared/anonymous reads stay read-only.
+      const target = ownCodexRefreshTarget(userId, env);
+      if (target && userId !== null && userId !== undefined) {
+        await codexModelsRefresher.ensureFresh(userId, target);
+      }
+      const raw = await readFile(path.join(codexHome, CODEX_MODELS_CACHE_FILE), 'utf8');
       const parsed = readObjectRecord(JSON.parse(raw));
       const models = Array.isArray(parsed?.models)
         ? parsed.models.filter(isCodexCachedModel)

@@ -69,10 +69,16 @@ export function setSteerConsent(userId: number, body: unknown):
   return { ok: true, allowSteerOnMyRuns: allow };
 }
 
-/** Policy AND consent — the single predicate every injection must pass. */
-export function isSteeringAllowedFor(starterUserId: number | null):
+/**
+ * Policy AND consent — the single predicate every injection must pass.
+ * Consent governs OTHER members steering the starter's runs; when the sender
+ * IS the starter (a self-steer) only the admin policy applies.
+ */
+export function isSteeringAllowedFor(starterUserId: number | null, senderUserId: number | null = null):
   { allowed: true } | { allowed: false; code: 'steer_disabled' | 'steer_not_consented' } {
   if (getSteerPolicy().mode === 'off') return { allowed: false, code: 'steer_disabled' };
-  if (!getSteerConsent(starterUserId)) return { allowed: false, code: 'steer_not_consented' };
+  const selfSteer = Number.isSafeInteger(starterUserId) && (starterUserId as number) > 0
+    && senderUserId === starterUserId;
+  if (!selfSteer && !getSteerConsent(starterUserId)) return { allowed: false, code: 'steer_not_consented' };
   return { allowed: true };
 }

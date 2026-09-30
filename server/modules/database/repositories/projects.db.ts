@@ -86,7 +86,7 @@ export const projectsDb = {
             INSERT INTO projects (project_id, project_path, custom_project_name, detected_name, isArchived, created_by)
                 VALUES (?, ?, ?, ?, 0, ?)
                 ON CONFLICT(project_path) DO NOTHING
-                RETURNING project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
+                RETURNING project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, link_url, dir_exists, dir_checked_at
             `).get(attemptedId, normalizedProjectPath, explicitProjectName, detectedName, normalizedCreatedBy) as ProjectRepositoryRow | undefined;
             if (insertedRow) {
                 rotateProjectStructureForPath(insertedRow.project_id, insertedRow.project_path);
@@ -102,7 +102,7 @@ export const projectsDb = {
             ON CONFLICT(project_path) DO UPDATE SET
             isArchived = 0
             WHERE projects.isArchived = 1
-            RETURNING project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
+            RETURNING project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, link_url, dir_exists, dir_checked_at
         `).get(attemptedId, normalizedProjectPath, explicitProjectName, detectedName, normalizedCreatedBy) as ProjectRepositoryRow | undefined;
 
         if (row) {
@@ -124,7 +124,7 @@ export const projectsDb = {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);
         const row = db.prepare(`
-            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
+            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, link_url, dir_exists, dir_checked_at
             FROM projects
             WHERE project_path = ?
         `).get(normalizedProjectPath) as ProjectRepositoryRow | undefined;
@@ -135,7 +135,7 @@ export const projectsDb = {
     getProjectById(projectId: string): ProjectRepositoryRow | null {
         const db = getConnection();
         const row = db.prepare(`
-            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
+            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, link_url, dir_exists, dir_checked_at
             FROM projects
             WHERE project_id = ?
         `).get(projectId) as ProjectRepositoryRow | undefined;
@@ -165,7 +165,7 @@ export const projectsDb = {
     getProjectPaths(): ProjectRepositoryRow[] {
         const db = getConnection();
         return db.prepare(`
-            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
+            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, link_url, dir_exists, dir_checked_at
             FROM projects
             WHERE isArchived = 0
         `).all() as ProjectRepositoryRow[];
@@ -178,7 +178,7 @@ export const projectsDb = {
     getArchivedProjectPaths(): ProjectRepositoryRow[] {
         const db = getConnection();
         return db.prepare(`
-            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, dir_exists, dir_checked_at
+            SELECT project_id, project_path, custom_project_name, detected_name, isStarred, isArchived, visibility, created_by, logo_url, link_url, dir_exists, dir_checked_at
             FROM projects
             WHERE isArchived = 1
         `).all() as ProjectRepositoryRow[];
@@ -250,6 +250,18 @@ export const projectsDb = {
             SET logo_url = ?
             WHERE project_id = ?
         `).run(logoUrl, projectId);
+    },
+
+    /**
+     * Stores the project's external link (T-1950), or clears it with null.
+     * Callers must pass a value already normalized by normalizeProjectLink.
+     */
+    setProjectLinkUrl(projectId: string, linkUrl: string | null): void {
+        getConnection().prepare(`
+            UPDATE projects
+            SET link_url = ?
+            WHERE project_id = ?
+        `).run(linkUrl, projectId);
     },
 
     updateProjectDetectedName(projectId: string, detectedName: string): void {

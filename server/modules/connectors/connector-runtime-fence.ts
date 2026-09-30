@@ -6,6 +6,12 @@ import type { Database } from 'better-sqlite3';
 
 /* eslint-disable-next-line boundaries/dependencies -- inert M2 inventory must derive from canonical SQL without loading the database barrel. */
 import { CONNECTOR_SCHEMA_TABLE_INVENTORY } from '../database/connector-table-inventory.js';
+/* eslint-disable boundaries/dependencies -- the fence predicate is a dependency-free database leaf shared with migrations. */
+import {
+  CONNECTOR_RUNTIME_FENCE_OPEN_SQL,
+  CONNECTOR_RUNTIME_FENCE_TRIGGER_PREFIX,
+} from '../database/connector-runtime-fence-predicate.js';
+/* eslint-enable boundaries/dependencies */
 
 export const CONNECTOR_RUNTIME_FLOOR = 1 as const;
 export const CONNECTOR_POLICY_SCHEMA_VERSION = 2 as const;
@@ -34,7 +40,7 @@ const AUTHORITY_TABLES = Object.freeze([
 const ACTIONS = Object.freeze(['INSERT', 'UPDATE', 'DELETE'] as const);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAC_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
-const TRIGGER_PREFIX = 'connector_runtime_fence_';
+const TRIGGER_PREFIX = CONNECTOR_RUNTIME_FENCE_TRIGGER_PREFIX;
 
 export const CONNECTOR_RUNTIME_FENCE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS connector_runtime_anchor (
@@ -204,28 +210,7 @@ const triggerSql = (table: string, action: typeof ACTIONS[number]): string => `
 CREATE TRIGGER ${triggerName(table, action)}
 BEFORE ${action} ON ${table}
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM connector_runtime_anchor a
-    JOIN connector_runtime_control c ON c.singleton = a.singleton
-    JOIN connector_runtime_writer_lease l ON l.singleton = c.singleton
-    WHERE c.singleton = 1
-      AND nassaj_connector_authority_valid(
-        a.initialized_marker, a.maximum_fencing_token, a.maximum_writer_epoch,
-        a.clock_high_water_ms, a.authority_mac,
-        c.connector_runtime_floor, c.policy_schema_version, c.writer_epoch,
-        c.last_fencing_token, c.last_clock_ms, c.authority_mac,
-        l.owner_token, l.acquisition_nonce, l.lease_generation, l.fencing_token,
-        l.writer_epoch, l.expires_at_ms, l.authority_mac
-      ) = 1
-      AND nassaj_connector_runtime_version() >= c.connector_runtime_floor
-      AND nassaj_connector_policy_schema_version() >= c.policy_schema_version
-      AND nassaj_connector_writer_epoch() = c.writer_epoch
-      AND l.writer_epoch = c.writer_epoch
-      AND nassaj_connector_owner_token() = l.owner_token
-      AND nassaj_connector_acquisition_nonce() = l.acquisition_nonce
-      AND nassaj_connector_fencing_token() = l.fencing_token
-      AND nassaj_connector_now_ms() >= c.last_clock_ms
-      AND l.expires_at_ms > nassaj_connector_now_ms()
+  SELECT CASE WHEN NOT EXISTS (${CONNECTOR_RUNTIME_FENCE_OPEN_SQL}
   ) THEN RAISE(ABORT, 'connector_runtime_fence_required') END;
 END`;
 

@@ -307,7 +307,8 @@
     "projectBusyHint": "このプロジェクトのセッションが処理中です",
     "done": "完了",
     "doneHint": "セッションが完了しました（未読）",
-    "projectDoneHint": "このプロジェクトのセッションが完了しました（未読）"
+    "projectDoneHint": "このプロジェクトのセッションが完了しました（未読）",
+    "projectOrphanHint": "このプロジェクトのバックグラウンドワークフローが完全な結果を生成する前に停止しました"
   },
   "workflowStatus": {
     "running": "ワークフロー実行中",

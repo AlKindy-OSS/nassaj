@@ -40,7 +40,7 @@ import type {
   RealtimeClientConnection,
 } from '@/shared/types.js';
 
-const { projectsDb, sessionOutcomesDb, sessionsDb, userDb } = databaseModule;
+const { indicatorLookupsDb, projectsDb, sessionOutcomesDb, sessionsDb, userDb } = databaseModule;
 
 /** Normalized presence user id (string for stable map keys + client colour). */
 type PresenceUserId = string;
@@ -132,7 +132,17 @@ type ActiveConversations = {
 type RunningSession = {
   sessionId: string;
   state: PresenceProcessState;
+  /**
+   * B-1431: DB id of the run's project (never a path), so a client can light
+   * the owning project's indicator without having that project's page loaded.
+   * Set only when the project is visible to the recipient; null when the run
+   * has no resolved project path or its project is not a registered, active one.
+   */
+  projectId: string | null;
 };
+
+/** project_path -> project_id for active projects; resolved once per broadcast. */
+type ProjectIdByPath = ReadonlyMap<string, string>;
 
 /** WS message type other clients/agents can rely on. */
 export const PRESENCE_MESSAGE_TYPE = 'presence';
@@ -317,7 +327,10 @@ function buildActiveConversations(visiblePaths: Set<string>): ActiveConversation
  *
  * Sorted by sessionId so the payload is stable between snapshots.
  */
-function buildRunningSessions(visiblePaths: Set<string>): RunningSession[] {
+function buildRunningSessions(
+  visiblePaths: Set<string>,
+  projectIdByPath: ProjectIdByPath,
+): RunningSession[] {
   const entries: RunningSession[] = [];
   for (const state of users.values()) {
     for (const run of state.runs.values()) {
@@ -325,11 +338,36 @@ function buildRunningSessions(visiblePaths: Set<string>): RunningSession[] {
       if (path !== null && !visiblePaths.has(path)) {
         continue;
       }
-      entries.push({ sessionId: run.sessionId, state: run.state });
+      // Reaching here with a non-null path means the path is visible.
+      const projectId = path === null ? null : projectIdByPath.get(path) ?? null;
+      entries.push({ sessionId: run.sessionId, state: run.state, projectId });
     }
   }
   entries.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
   return entries;
+}
+
+/**
+ * B-1431: resolves project_path -> project_id ONCE per broadcast (one query),
+ * not per run or per recipient. Skipped entirely when nothing is running.
+ * Never throws: presence must keep broadcasting; ids then degrade to null.
+ */
+function resolveProjectIdsByPath(): ProjectIdByPath {
+  let hasRuns = false;
+  for (const state of users.values()) {
+    if (state.runs.size > 0) {
+      hasRuns = true;
+      break;
+    }
+  }
+  if (!hasRuns) {
+    return new Map();
+  }
+  try {
+    return indicatorLookupsDb?.getActiveProjectIdsByPath?.() ?? new Map();
+  } catch {
+    return new Map();
+  }
 }
 
 /** Coerces a stamped socket userId into a DB user id, or null. */
@@ -364,12 +402,14 @@ function toRecipientUserId(rawUserId: string | number | null | undefined): numbe
 export function broadcastSessionOutcome(sessionId: string): void {
   if (!sessionId) return;
   let projectPath: string | null = null;
+  let projectId: string | null = null;
   let outcome: string | null = null;
   let outcomeAt: string | null = null;
   let outcomeState: 'visible' | 'seen' | 'absent' = 'absent';
   try {
     const resolved = sessionOutcomesDb.getOutcomeForBroadcast(sessionId);
     projectPath = resolved.projectPath;
+    projectId = resolved.projectId ?? null;
     outcome = resolved.outcome;
     outcomeAt = resolved.outcomeAt;
     outcomeState = resolved.outcomeState;
@@ -382,6 +422,9 @@ export function broadcastSessionOutcome(sessionId: string): void {
   const payload = JSON.stringify({
     type: 'session_outcome',
     sessionId,
+    // B-1431: DB id only. Safe to share: recipients below are filtered to those
+    // who can see `projectPath`, i.e. this very project.
+    projectId,
     outcome,
     outcomeAt,
     outcomeState,
@@ -408,6 +451,7 @@ export function broadcastSessionOutcome(sessionId: string): void {
 function broadcastNow(): void {
   broadcastTimer = null;
   const timestamp = new Date().toISOString();
+  const projectIdByPath = resolveProjectIdsByPath();
 
   const payloadByUserId = new Map<number, string>();
   let publicPayload: string | null = null;
@@ -421,7 +465,7 @@ function broadcastNow(): void {
           type: PRESENCE_MESSAGE_TYPE,
           users: buildSnapshot(publicPaths),
           activeConversations: buildActiveConversations(publicPaths),
-          runningSessions: buildRunningSessions(publicPaths),
+          runningSessions: buildRunningSessions(publicPaths, projectIdByPath),
           timestamp,
         });
       }
@@ -435,7 +479,7 @@ function broadcastNow(): void {
         type: PRESENCE_MESSAGE_TYPE,
         users: buildSnapshot(visiblePaths),
         activeConversations: buildActiveConversations(visiblePaths),
-        runningSessions: buildRunningSessions(visiblePaths),
+        runningSessions: buildRunningSessions(visiblePaths, projectIdByPath),
         timestamp,
       });
       payloadByUserId.set(recipientId, payload);

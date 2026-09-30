@@ -307,7 +307,8 @@
     "projectBusyHint": "此项目中有会话正在处理中",
     "done": "已完成",
     "doneHint": "会话已完成，尚未打开",
-    "projectDoneHint": "此项目中有会话已完成且尚未打开"
+    "projectDoneHint": "此项目中有会话已完成且尚未打开",
+    "projectOrphanHint": "此项目中的后台工作流在产生完整结果之前已停止"
   },
   "workflowStatus": {
     "running": "工作流运行中",

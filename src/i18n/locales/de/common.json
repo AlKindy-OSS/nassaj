@@ -307,7 +307,8 @@
     "projectBusyHint": "Eine Sitzung in diesem Projekt wird gerade verarbeitet",
     "done": "Fertig",
     "doneHint": "Sitzung beendet und noch nicht geöffnet",
-    "projectDoneHint": "Eine Sitzung in diesem Projekt ist beendet und wurde noch nicht geöffnet"
+    "projectDoneHint": "Eine Sitzung in diesem Projekt ist beendet und wurde noch nicht geöffnet",
+    "projectOrphanHint": "Ein Hintergrundworkflow in diesem Projekt wurde beendet, bevor ein vollständiges Ergebnis erzeugt wurde"
   },
   "workflowStatus": {
     "running": "Workflow läuft",

@@ -447,17 +447,20 @@ export function useChatSessionState({
   /*  addMessage / clearMessages / rewindMessages                     */
   /* ---------------------------------------------------------------- */
 
-  const addMessage = useCallback((msg: ChatMessage) => {
+  // T-1936 item 2: يُرجع المفتاح الذي أُضيفت الفقاعة تحته (null = معلّقة قبل
+  // ولادة الجلسة) حتى يُقرن السحب لاحقاً بنفس المفتاح لا بجلسة قد تكون تبدّلت.
+  const addMessage = useCallback((msg: ChatMessage): string | null => {
     if (!activeSessionId) {
       // No session yet — show as pending until the backend creates one
       setPendingUserMessage(msg);
-      return;
+      return null;
     }
     const prov = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
     const normalized = chatMessageToNormalized(msg, activeSessionId, prov);
     if (normalized) {
       sessionStore.appendRealtime(activeSessionId, normalized);
     }
+    return activeSessionId;
   }, [activeSessionId, sessionStore]);
 
   /**

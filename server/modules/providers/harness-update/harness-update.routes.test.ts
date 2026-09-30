@@ -116,7 +116,7 @@ test('authenticated owner/admin/member may read status without host details', as
     ];
     // T-1871 optional fields carry versions/verdicts only (no paths); their
     // presence depends on whether this host has a readable kimi binary.
-    const optional = ['compatibility', 'drift', 'targetCompatibility', 'manualOnly', 'notices', 'restoreCompatible'];
+    const optional = ['drift', 'manualOnly', 'notices', 'restoreCompatible'];
     for (const key of required) assert.ok(keys.includes(key), `missing ${key}`);
     for (const key of keys) {
       assert.ok(required.includes(key) || optional.includes(key), `unexpected key ${key}`);

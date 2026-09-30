@@ -333,11 +333,26 @@ test('claude versioned-file layout: hard-link snapshot, failed update restores t
   assert.ok(!fs.readlinkSync(bin).includes('harness-snapshots'), 'never linked into the snapshot root');
 });
 
-test('pinBreak: leaving the opencode pin needs a server-built ack; the pin table never changes', async () => {
+test('owner decision 2026-09-29: opencode updates past its pinned release with no ack', async () => {
+  const pinsBefore = structuredClone(PINNED_VENDOR_DIGESTS);
+  const file = installSingleFile(w, '.opencode/bin/opencode', 'opencode 1.18.32');
+  writeStore(path.join(w.home, '.local', 'share', 'opencode', 'opencode.db'), 'db');
+  _setSnapshotRuntimeOverrides({ ...w.rt, pinArmed: () => false, latestVersion: async () => '1.18.40' });
+  w.updater = () => {
+    fs.writeFileSync(file, 'opencode 1.18.40');
+    return ok();
+  };
+  const accepted = await startHarnessUpdate('opencode', { userId: 1 });
+  await _awaitHarnessJob(accepted.jobId);
+  assert.equal(getHarnessUpdateJob(accepted.jobId)!.status, 'succeeded');
+  assert.deepEqual(PINNED_VENDOR_DIGESTS, pinsBefore);
+});
+
+test('pinBreak: with the opt-in pin armed, leaving the opencode pin needs a server-built ack', async () => {
   const pinsBefore = structuredClone(PINNED_VENDOR_DIGESTS);
   const file = installSingleFile(w, '.opencode/bin/opencode', 'opencode 1.17.18');
   writeStore(path.join(w.home, '.local', 'share', 'opencode', 'opencode.db'), 'db');
-  _setSnapshotRuntimeOverrides({ ...w.rt, latestVersion: async () => '1.18.40' });
+  _setSnapshotRuntimeOverrides({ ...w.rt, pinArmed: () => true, latestVersion: async () => '1.18.40' });
   let required: { kind: string; token: string; textEn: string; textAr: string }[] = [];
   await assert.rejects(() => startHarnessUpdate('opencode', { userId: 1 }), (e: unknown) => {
     assert.ok(e instanceof AppError && e.code === 'CONFIRMATION_REQUIRED');
@@ -346,8 +361,7 @@ test('pinBreak: leaving the opencode pin needs a server-built ack; the pin table
   });
   assert.equal(required.length, 1);
   assert.equal(required[0].kind, 'pinBreak');
-  assert.match(required[0].textEn, /GLM will stop working until the compatible version is restored/);
-  assert.match(required[0].textAr, /سيتوقف GLM عن العمل/);
+  assert.match(required[0].textEn, /blocked in every mode until version 1\.18\.32 is restored/);
   assert.equal(w.commands.length, 0);
   const tampered = [{ kind: 'pinBreak', token: `${required[0].token}x` }];
   await assert.rejects(() => startHarnessUpdate('opencode', { userId: 1, acks: tampered }), codeOf('CONFIRMATION_REQUIRED'));

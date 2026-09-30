@@ -175,6 +175,15 @@ export const deviceAccountSessionsDb = {
     return row?.id ?? null;
   },
 
+  /** Owning user of a live slot on this device session, or null (T-1939). */
+  userIdForSlot(sessionId: string, slotId: string): number | null {
+    const row = getConnection().prepare(`
+      SELECT user_id AS userId FROM device_account_slots
+      WHERE device_session_id = ? AND id = ? AND revoked_at IS NULL
+    `).get(sessionId, slotId) as { userId: number } | undefined;
+    return row?.userId ?? null;
+  },
+
   deviceSessionIdsForUser(userId: number): string[] {
     const rows = getConnection().prepare(`
       SELECT DISTINCT device_session_id AS deviceSessionId

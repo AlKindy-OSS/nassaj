@@ -9,14 +9,18 @@ import {
   ChevronDown,
   ChevronRight,
   Edit3,
+  ExternalLink,
   GitCommitHorizontal,
   ImageOff,
   ImagePlus,
+  Link2,
   ListChecks,
+  Loader2,
   MoreVertical,
   Pin,
   PinOff,
   Trash2,
+  Unlink,
   X,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
@@ -69,6 +73,19 @@ function calcSafeContextMenuPosition(clientX: number, clientY: number, itemCount
     x: Math.max(PROJECT_CONTEXT_MENU_VIEWPORT_PADDING, safeX),
     y: Math.max(PROJECT_CONTEXT_MENU_VIEWPORT_PADDING, safeY),
   };
+}
+
+/** رابط المشروع مُعتمَد على الخادم (T-1950)، لكن هذه القيمة قد تصل من نسخة
+ *  متفائلة محلية أو من لقطة قديمة — يُعاد فحص المخطّط هنا قبل رسم أي `<a>`
+ *  فعلي بدل الوثوق بما خزَّنه الخادم سابقاً. */
+function parseProjectLink(url: string | null | undefined): URL | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 type SidebarProjectItemProps = ProjectToolbarProps & {
@@ -198,9 +215,11 @@ export default function SidebarProjectItem({
   const showParticipantAvatars = Boolean(auth?.isMultiUser);
   const currentUserId = typeof auth?.user?.id === 'number' ? auth.user.id : null;
   const canOpenProjectMembers = project.canAccess === true;
-  // Busy dot: ids of the project's loaded sessions, matched against the live
-  // process-state store (see ProjectBusyDot).
-  const sessionIds = sessions.map((session) => session.id);
+  // Busy dot: ids of the project's loaded sessions. ProjectBusyDot (B-1431)
+  // unions these with whatever the presence/outcome/workflow stores already
+  // attribute to `project.projectId`, so a session outside this loaded page
+  // still lights the header.
+  const loadedSessionIds = sessions.map((session) => session.id);
   const totalSessionCount = Number(project.sessionMeta?.total ?? sessions.length);
   // كان النصّ إنجليزياً مثبَّتاً في الكود (`N sessions`) فظهر كذلك في واجهة
   // عربية. الآن من ملفّ الترجمة بصيغ الجمع العربية الستّ.
@@ -386,9 +405,90 @@ export default function SidebarProjectItem({
     }
   };
 
-  // إزالة الشعار بندٌ لا يظهر إلا حين يوجد شعار — والارتفاع يُحسب من العدد.
-  // +1 for the archive button that is always present.
-  const contextMenuItemCount = logoUrl ? 7 : 6;
+  /* رابط المشروع (T-1950): نفس نمط الشعار المتفائل — الحقيقة عند الخادم في
+     `project.linkUrl`، ونسخة محلية تُعرض فور نجاح الحفظ حتى تصل قائمة
+     المشاريع المحدَّثة عبر `projects_updated`. */
+  const [linkOverride, setLinkOverride] = useState<string | null | undefined>(undefined);
+  const [isLinkBusy, setIsLinkBusy] = useState(false);
+  const [isEditingLink, setIsEditingLink] = useState(false);
+  const [linkDraft, setLinkDraft] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
+  useEffect(() => {
+    setLinkOverride(undefined);
+  }, [project.linkUrl]);
+  const effectiveLinkUrl = linkOverride !== undefined ? linkOverride : (project.linkUrl ?? null);
+  const parsedLink = isEditingLink ? null : parseProjectLink(effectiveLinkUrl);
+
+  const openLinkEditFromMenu = () => {
+    setLinkDraft(effectiveLinkUrl ?? '');
+    setLinkError(null);
+    setIsEditingLink(true);
+    setContextMenu(null);
+  };
+
+  const commitLink = async (value: string | null) => {
+    setIsLinkBusy(true);
+    setLinkError(null);
+    try {
+      const response = await api.setProjectLink(project.projectId, value);
+      if (!response.ok) {
+        throw new Error(`Link save failed with ${response.status}`);
+      }
+      const payload = (await response.json()) as { data?: { linkUrl?: string | null } };
+      setLinkOverride(payload.data?.linkUrl ?? null);
+      setIsEditingLink(false);
+    } catch (error) {
+      console.error('[Sidebar] Failed to save project link:', error);
+      setLinkError(t('tooltips.projectLinkFailed', { defaultValue: 'Failed to save the project link' }));
+    } finally {
+      setIsLinkBusy(false);
+    }
+  };
+
+  const saveLinkFromEdit = () => {
+    if (isLinkBusy) return;
+    const raw = linkDraft.trim();
+    if (raw === '') {
+      void commitLink(null);
+      return;
+    }
+    // فحصٌ عميل موازٍ لعقد الخادم (http/https فقط، ≤2048 محرفاً، إضافة
+    // https:// حين لا يوجد مخطّط) — لا يُغني عن فحص الخادم، فقط يمنع رحلة
+    // شبكة على خطأ واضح محلياً.
+    const candidate = /^[a-z][a-z0-9+.-]*:(?!\d)/i.test(raw) ? raw : `https://${raw}`;
+    let parsed: URL;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      setLinkError(t('tooltips.projectLinkInvalid', { defaultValue: 'Enter a valid web address' }));
+      return;
+    }
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      candidate.length > 2048 ||
+      parsed.username ||
+      parsed.password
+    ) {
+      setLinkError(t('tooltips.projectLinkInvalid', { defaultValue: 'Enter a valid web address' }));
+      return;
+    }
+    void commitLink(candidate);
+  };
+
+  const removeLinkFromEdit = () => {
+    setLinkDraft('');
+    void commitLink(null);
+  };
+
+  const cancelLinkEdit = () => {
+    setIsEditingLink(false);
+    setLinkError(null);
+  };
+
+  // إزالة الشعار بندٌ لا يظهر إلا حين يوجد شعار، وكذلك بند الرابط مفرد دوماً
+  // (نصّه يتبدّل إضافة/تعديل) — العدد فعليّ لا رقم مثبَّت.
+  const FIXED_CONTEXT_MENU_ITEM_COUNT = 6; // تحديد، إعادة تسمية، تثبيت/إلغاء، شعار، أرشفة، حذف
+  const contextMenuItemCount = FIXED_CONTEXT_MENU_ITEM_COUNT + (logoUrl ? 1 : 0) + 1; // +1 إزالة الشعار، +1 بند الرابط
 
   const startProjectBulkSelectionFromMenu = () => {
     onStartBulkSelectionWithId('projects', project.projectId);
@@ -436,7 +536,7 @@ export default function SidebarProjectItem({
           className={cn(
             // One 44px row; the list owns spacing between folder groups.
             'relative min-h-11 bg-transparent px-2 transition-colors duration-150',
-            isEditing ? 'py-1.5' : 'py-2',
+            (isEditing || isEditingLink) ? 'py-1.5' : 'py-2',
             isExpanded ? 'rounded-t-lg bg-[var(--project-header-open,hsl(var(--primary)/0.08))]' : 'rounded-lg hover:bg-[var(--project-hover,hsl(var(--primary)/0.03))]',
             isBulkProjectSelection && 'cursor-pointer select-none',
             isBulkProjectSelection && isBulkSelected && 'bg-[var(--project-session-selected,hsl(var(--primary)/0.1))]',
@@ -477,7 +577,7 @@ export default function SidebarProjectItem({
           onMouseEnter={() => setParticipantsRequested(true)}
           onFocusCapture={() => setParticipantsRequested(true)}
         >
-          {!isEditing && !bulkSelectionKind && (
+          {!isEditing && !isEditingLink && !bulkSelectionKind && (
             <button
               type="button"
               aria-describedby={`project-path-${project.projectId}`}
@@ -561,6 +661,43 @@ export default function SidebarProjectItem({
                       }
                     }}
                   />
+                ) : isEditingLink ? (
+                  // نفس نمط إعادة التسمية: حقل مكان الاسم، dir="ltr" لأن
+                  // الرابط لاتيني دوماً، والخطأ يظهر تحته لا يزاحم الحقل.
+                  <div className="pointer-events-auto flex min-w-0 flex-col gap-0.5">
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={linkDraft}
+                      onChange={(event) => {
+                        setLinkDraft(event.target.value);
+                        setLinkError(null);
+                      }}
+                      disabled={isLinkBusy}
+                      className="sidebar-rename-input"
+                      aria-label={t('tooltips.projectLinkPlaceholder', { defaultValue: 'https://example.com' })}
+                      placeholder={t('tooltips.projectLinkPlaceholder', { defaultValue: 'https://example.com' })}
+                      autoFocus
+                      autoComplete="off"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        event.stopPropagation();
+                        if (event.nativeEvent.isComposing) return;
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          saveLinkFromEdit();
+                        }
+                        if (event.key === 'Escape') {
+                          cancelLinkEdit();
+                        }
+                      }}
+                    />
+                    {linkError && (
+                      <span role="alert" className="text-[11px] text-red-600 dark:text-red-400">
+                        {linkError}
+                      </span>
+                    )}
+                  </div>
                 ) : (
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
@@ -579,7 +716,28 @@ export default function SidebarProjectItem({
                           {project.displayName}
                         </div>
                       </Tooltip>
-                      <ProjectBusyDot sessionIds={sessionIds} className="ms-1 flex-shrink-0" />
+                      {parsedLink && (
+                        <a
+                          href={parsedLink.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={parsedLink.host}
+                          aria-label={t('tooltips.openProjectLink', {
+                            name: project.displayName,
+                            defaultValue: 'Open project link: {{name}} (opens in a new tab)',
+                          })}
+                          className="pointer-events-auto ms-1 flex h-7 w-7 flex-none items-center justify-center rounded text-[color:var(--project-muted-foreground,hsl(var(--muted-foreground)))] opacity-0 transition-opacity hover:text-[color:var(--project-accent,hsl(var(--primary)))] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--project-accent,hsl(var(--ring)))] group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:h-9 [@media(hover:none)]:w-9 [@media(hover:none)]:opacity-100"
+                          onClick={(event) => event.stopPropagation()}
+                          onPointerDown={(event) => event.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                        </a>
+                      )}
+                      <ProjectBusyDot
+                        projectId={project.projectId}
+                        loadedIds={loadedSessionIds}
+                        className="ms-1 flex-shrink-0"
+                      />
                       {/* الرقم وحده: العبارة الكاملة في `title` وفي نصّ مخفيّ
                           لقارئ الشاشة، فلا يفقد أحدٌ المعنى ولا يدفع السطر ثمن
                           كلمةٍ تتكرّر في كل صفّ. */}
@@ -643,6 +801,52 @@ export default function SidebarProjectItem({
                     onClick={(event) => {
                       event.stopPropagation();
                       onCancelEditingProject();
+                    }}
+                  >
+                    <X aria-hidden="true" className="size-3.5" />
+                  </button>
+                </>
+              ) : isEditingLink ? (
+                <>
+                  {effectiveLinkUrl && (
+                    <button
+                      type="button"
+                      className="sidebar-rename-action"
+                      disabled={isLinkBusy}
+                      title={t('tooltips.removeProjectLink', { defaultValue: 'Remove link' })}
+                      aria-label={t('tooltips.removeProjectLink', { defaultValue: 'Remove link' })}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeLinkFromEdit();
+                      }}
+                    >
+                      <Unlink aria-hidden="true" className="size-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="sidebar-rename-action sidebar-rename-save"
+                    disabled={isLinkBusy}
+                    title={t("tooltips.save")} aria-label={t("tooltips.save")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      saveLinkFromEdit();
+                    }}
+                  >
+                    {isLinkBusy ? (
+                      <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                    ) : (
+                      <Check aria-hidden="true" className="size-3.5" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-rename-action"
+                    disabled={isLinkBusy}
+                    title={t("tooltips.cancel")} aria-label={t("tooltips.cancel")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      cancelLinkEdit();
                     }}
                   >
                     <X aria-hidden="true" className="size-3.5" />
@@ -736,7 +940,11 @@ export default function SidebarProjectItem({
           onProjectToolbarPresence={isSelected ? onProjectToolbarPresence : undefined}
           contentDirection={i18n.dir()}
           participantsSummary={isExpanded && showParticipantAvatars ? (
-            <span className="flex min-w-0 items-center gap-1">
+            // The add-member trigger reads as one more face appended to the
+            // stack — `[&>*+*]:-ms-2` gives it the same overlap the avatars
+            // use on each other (ParticipantAvatarStack), instead of a plain
+            // gap that would set it visually apart from the members it adds to.
+            <span className="flex min-w-0 items-center [&>*+*]:-ms-2">
               <ProjectParticipantsSummary
                 projectId={project.projectId}
                 loadedSessions={getAllSessions(project)}
@@ -749,7 +957,12 @@ export default function SidebarProjectItem({
                 className="mt-0 min-w-0 justify-end"
               />
               {canOpenProjectMembers && (
-                <ManageProjectMembersButton projectId={project.projectId} t={t} currentUserId={currentUserId} />
+                <ManageProjectMembersButton
+                  projectId={project.projectId}
+                  t={t}
+                  currentUserId={currentUserId}
+                  variant="circle"
+                />
               )}
             </span>
           ) : null}
@@ -859,7 +1072,7 @@ export default function SidebarProjectItem({
             role="menuitem"
             type="button"
             disabled={isLogoBusy}
-            className="flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs transition-colors hover:bg-accent focus:bg-accent focus:outline-none [@media(pointer:coarse)]:min-h-9 disabled:opacity-50"
+            className="flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs transition-colors hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-50 [@media(pointer:coarse)]:min-h-9"
             onClick={pickLogoFromMenu}
           >
             <ImagePlus className="h-3.5 w-3.5 flex-shrink-0" />
@@ -872,7 +1085,7 @@ export default function SidebarProjectItem({
               role="menuitem"
               type="button"
               disabled={isLogoBusy}
-              className="flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs transition-colors hover:bg-accent focus:bg-accent focus:outline-none [@media(pointer:coarse)]:min-h-9 disabled:opacity-50"
+              className="flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs transition-colors hover:bg-accent focus:bg-accent focus:outline-none disabled:opacity-50 [@media(pointer:coarse)]:min-h-9"
               onClick={removeLogoFromMenu}
             >
               <ImageOff className="h-3.5 w-3.5 flex-shrink-0" />
@@ -881,6 +1094,21 @@ export default function SidebarProjectItem({
               </span>
             </button>
           )}
+          {/* رابط المشروع (T-1950): بند واحد يتبدّل نصّه إضافة/تعديل — الإزالة
+              فعلٌ داخل وضع التحرير نفسه لا بندٌ إضافي هنا. */}
+          <button
+            role="menuitem"
+            type="button"
+            className="flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs transition-colors hover:bg-accent focus:bg-accent focus:outline-none [@media(pointer:coarse)]:min-h-9"
+            onClick={openLinkEditFromMenu}
+          >
+            <Link2 className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="flex-1 whitespace-nowrap">
+              {effectiveLinkUrl
+                ? t('tooltips.editProjectLink', { defaultValue: 'Edit link…' })
+                : t('tooltips.addProjectLink', { defaultValue: 'Add link…' })}
+            </span>
+          </button>
           {/* الأرشفة: بند مستقل قبل الحذف — لا ينقل التحديد ولا يبحر. */}
           <button
             role="menuitem"

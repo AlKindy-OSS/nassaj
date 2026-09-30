@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { projectsDb } from '@/modules/database/index.js';
+import {
+  canAccessProjectPath,
+  isProjectMembershipEnforced,
+  projectsDb,
+} from '@/modules/database/index.js';
 import type {
   CreateProjectPathResult,
   ProjectRepositoryRow,
@@ -28,6 +32,7 @@ type CreateProjectDependencies = {
     createdBy: number | null,
   ) => CreateProjectPathResult;
   getProjectByPath: (projectPath: string) => ProjectRepositoryRow | null;
+  isPathAdmitted: (projectPath: string, userId: number | null) => boolean;
 };
 
 type ProjectApiView = {
@@ -68,7 +73,25 @@ const defaultDependencies: CreateProjectDependencies = {
   ): CreateProjectPathResult => projectsDb.createProjectPath(projectPath, customName, createdBy),
   getProjectByPath: (projectPath: string): ProjectRepositoryRow | null =>
     projectsDb.getProjectPath(projectPath),
+  // ADR-172 (B-1423): a registered project path — or a path nested inside one —
+  // is admitted only for callers who can access that project. Unregistered
+  // paths stay open (creation flow). Off when membership is not enforced, where
+  // every project is readable by every user and existence is not a secret.
+  isPathAdmitted: (projectPath: string, userId: number | null): boolean =>
+    !isProjectMembershipEnforced() || canAccessProjectPath(projectPath, userId),
 };
+
+/**
+ * One response for every path a caller may not use. It carries no project
+ * state, so a non-member cannot tell a registered path from any other refusal.
+ */
+function inadmissiblePathError(): AppError {
+  return new AppError('Invalid project path', {
+    code: 'INVALID_PROJECT_PATH',
+    statusCode: 400,
+    details: 'Path validation failed',
+  });
+}
 
 function resolveDisplayName(customName: string | null | undefined, projectPath: string): string {
   const trimmedCustomName = typeof customName === 'string' ? customName.trim() : '';
@@ -121,10 +144,15 @@ export async function createProject(
   }
 
   const resolvedProjectPath = normalizeProjectPath(pathValidation.resolvedPath);
+  const createdBy = Number.isInteger(input.createdBy) ? (input.createdBy as number) : null;
+  // Authorize BEFORE any existence lookup or filesystem write (B-1423): the
+  // 409 below is reachable only by callers who may already see the project.
+  if (!dependencies.isPathAdmitted(resolvedProjectPath, createdBy)) {
+    throw inadmissiblePathError();
+  }
   await dependencies.ensureWorkspaceDirectory(resolvedProjectPath);
 
   const normalizedCustomName = resolveDisplayName(input.customName ?? null, resolvedProjectPath);
-  const createdBy = Number.isInteger(input.createdBy) ? (input.createdBy as number) : null;
   const persistedProject = dependencies.persistProjectPath(
     resolvedProjectPath,
     normalizedCustomName,

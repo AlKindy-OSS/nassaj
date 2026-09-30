@@ -25,7 +25,10 @@
  */
 
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
-import { providerSecretsService } from '@/modules/providers/services/provider-secrets.service.js';
+import {
+  providerSecretsService,
+  type QwenCredentialAuditContext,
+} from '@/modules/providers/services/provider-secrets.service.js';
 import { isProviderIsolated } from '@/services/provider-sharing.js';
 import { isVendorSecretProvider } from '@/services/isolation/provider-secrets-store.js';
 import type {
@@ -98,6 +101,7 @@ export const providerCredentialsService = {
     target?: string,
     qwenOptions?: { plan?: unknown; region?: unknown },
     authenticatedPrincipal?: unknown,
+    auditContext?: QwenCredentialAuditContext,
   ): Promise<ProviderCredentialStatus> {
     const writer = resolveWriter(provider);
     if (writer) {
@@ -110,7 +114,7 @@ export const providerCredentialsService = {
       return writer.setApiKey(userId, apiKey.trim(), target, authenticatedPrincipal);
     }
     if (isVendorSecretProvider(provider)) {
-      const result = providerSecretsService.setKey(userId, provider, apiKey, qwenOptions);
+      const result = providerSecretsService.setKey(userId, provider, apiKey, qwenOptions, auditContext);
       return { provider: result.provider as LLMProvider, configured: result.configured };
     }
     throw terminalOnly(provider);
@@ -120,13 +124,14 @@ export const providerCredentialsService = {
     userId: string | number | null | undefined,
     provider: string,
     target?: string,
+    auditContext?: QwenCredentialAuditContext,
   ): Promise<ProviderCredentialStatus> {
     const writer = resolveWriter(provider);
     if (writer) {
       return writer.deleteApiKey(userId, target);
     }
     if (isVendorSecretProvider(provider)) {
-      const result = providerSecretsService.deleteKey(userId, provider);
+      const result = providerSecretsService.deleteKey(userId, provider, auditContext);
       return { provider: result.provider as LLMProvider, configured: result.configured };
     }
     throw terminalOnly(provider);

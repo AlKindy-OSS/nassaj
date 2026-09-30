@@ -45,6 +45,13 @@ const consumedStreamHeads = new WeakMap<object, { seq: number; gap?: number }>()
  */
 const streamGapFetchedHeads = new WeakMap<object, number>();
 
+/**
+ * T-1933 (B-1401): نصّ حالة انتظار ورشة الخلفية بعد `complete` بـ
+ * `pendingWorkflows > 0`. ثابتٌ وحيد يُقرَأ ويُكتَب منه معاً كي لا يفترق نصّ
+ * الحارس عن نصّ العرض بتحديثٍ لأحدهما ينسى الآخر.
+ */
+const WORKFLOW_WAIT_STATUS_TEXT = 'Workflow يعمل في الخلفية…';
+
 export { SERVER_ERROR_CODE_KEYS, readServerErrorCode, readServerErrorDetail, resolveServerErrorMessage } from '../utils/serverErrorMessage';
 
 /** Record applied content without treating a later response as proof of an older gap. */
@@ -289,6 +296,58 @@ export function useChatRealtimeHandlers({
   const recoveredEvictionRef = useRef<{ sessionId: string; seq: number } | null>(null);
 
   /**
+   * T-1933 (B-1401 client half, review round 2): معرّفات ورشات الخلفية
+   * المتبقّية لكل جلسة بعد `complete` بـ`pendingWorkflowIds` غير فارغة.
+   * `complete` يُبقي المؤشّر «Workflow يعمل في الخلفية…» بلا أي حدثٍ لاحق
+   * يُنزله — إطار `workflow_settled` (يحمل `toolUseId` الورشة المنتهية) هو
+   * الإعلانُ الوحيد المتاح اليوم أن ورشةً بعينها انتهت. مراجعة qa-critic
+   * (حرج): `task_notification`/`task_reconcile` بطاقتا Agent لا Workflow —
+   * وصولهما لا يُخصَم منه شيء (انظر مُبدِّل `latestMessage` أدناه).
+   *
+   * القيمة `Set<string>` لجلسةٍ أطلقها خادمٌ يبعث `pendingWorkflowIds`؛
+   * `number` تراجعيٌّ **فقط** لخادم أقدم يبعث `pendingWorkflows` عدداً بلا
+   * معرّفات — لا سبيل لمطابقة `toolUseId` بلا معرّفات فيبقى ذلك المُدخَل
+   * حتى تُمحى الجلسة بجولة جديدة (قصداً؛ ليس مسار إنتاج اليوم).
+   */
+  const pendingWorkflowIdsRef = useRef<Map<string, Set<string> | number>>(new Map());
+
+  /**
+   * حين يُتحقَّق من انتهاء كل ورشة معلّقة لجلسة ما (`toolUseId` يطابق
+   * إدخالاً في مجموعتها ويُفرغها): أنزِل الانتظار على الشاشة المعروضة،
+   * وأعلِن للمستهلكين العامّين (قائمة الجلسات) أنها لم تعد تعمل، لأن
+   * `complete` بـ`hasPendingWorkflows` كان قد أخّر ذلك الإعلان عمداً.
+   * `toolUseId` غير معروف أو مكرَّر (لا يوجد في المجموعة) يُتجاهَل بلا أثر.
+   * مُدخَل تراجعي رقمي (`number`) لا يُسوَّى من هنا مطلقاً — لا معرّف
+   * ليُطابَق به.
+   */
+  const settlePendingWorkflow = useCallback((sid: string, toolUseId: string | undefined, isActiveViewSession: boolean) => {
+    const pending = pendingWorkflowIdsRef.current;
+    const entry = pending.get(sid);
+    if (entry === undefined || !(entry instanceof Set)) return;
+    if (!toolUseId || !entry.delete(toolUseId)) return;
+    if (entry.size > 0) return;
+    pending.delete(sid);
+    onSessionNotProcessing?.(sid);
+    if (!isActiveViewSession) return;
+    setClaudeStatus(null);
+    setIsLoading(false);
+    setCanAbortSession(false);
+    pendingViewSessionRef.current = null;
+  }, [onSessionNotProcessing, setClaudeStatus, setIsLoading, setCanAbortSession, pendingViewSessionRef]);
+
+  /**
+   * T-1933 (B-1401، إصلاح السباق الأخير): يُستدعى من مسار الإرسال المحلي
+   * (composer) لحظة بدء جولة جديدة على جلسة **قائمة مسبقاً** — لا
+   * `session_created` لها ولا نصّ حالةٍ يصل بالضرورة قبل `workflow_settled`
+   * المتأخر (أوّل إطارات الجولة الجديدة قد تكون `token_budget` وحدها، وذلك
+   * الفرع لا يحذف من `pendingWorkflowIdsRef`). حذفٌ محلّي فوري هنا يُغلق
+   * النافذة كاملةً بدل الاعتماد على أوّل حدثٍ سلطويّ من الخادم.
+   */
+  const forgetPendingWorkflows = useCallback((sid: string | null | undefined) => {
+    if (sid) pendingWorkflowIdsRef.current.delete(sid);
+  }, [pendingWorkflowIdsRef]);
+
+  /**
    * مسار الاسترجاع الموسَّع لفجوة بثّ. `queueHistoryWork('light400')` (طابور
    * التاريخ المُجمِّع في `useChatSessionState`) هو المسار الأصلي — single-flight
    * وحارس رؤية وحارس `revision`. حين لا يتوفّر (لم يُمرَّر من المستدعي)، البديل
@@ -426,6 +485,14 @@ export function useChatRealtimeHandlers({
     switch (msg.kind) {
       case 'session_created': {
         const newSessionId = msg.newSessionId;
+        // T-1933 review round 2 (finding 3): a new turn is starting for this
+        // view — delete any stale pending-Workflow entry for BOTH the id the
+        // view is leaving (`currentSessionId`, orphaned once the view moves
+        // off it — a fork/stale-resume mint) and the id it is entering, so a
+        // late `workflow_settled` for the OLD turn can never clear a spinner
+        // that belongs to a NEW one on either id.
+        if (currentSessionId) pendingWorkflowIdsRef.current.delete(currentSessionId);
+        if (newSessionId) pendingWorkflowIdsRef.current.delete(newSessionId);
         // T-1295: مولدُ جلسةٍ بمعرّف فارغ = فشلُ إقلاعٍ صريح ⇒ الإدخال يُرفع
         // بطاقةً. وبمعرّفٍ صحيح = قبولٌ مؤكَّد (الجولة بدأت والرسالة في سجلّها)
         // ⇒ يُحذف الإدخال وكائن صوره معه، فلا تتراكم بطاقاتُ «نجحت».
@@ -637,10 +704,28 @@ export function useChatRealtimeHandlers({
         }
 
         // When Workflow tool calls were issued, the assistant turn ended but
-        // background work is still running. Keep the spinner alive until the
-        // next turn arrives (which will re-enter the loading state naturally).
-        const hasPendingWorkflows =
-          typeof msg.pendingWorkflows === 'number' && msg.pendingWorkflows > 0;
+        // background work is still running. T-1933 (B-1401 client half): the
+        // spinner used to stay stuck until a NEW turn started, because nothing
+        // else ever cleared it — a background-only session never gets one.
+        // `pendingWorkflowIdsRef` records which calls we still owe an end-of-
+        // life signal for this session; `settlePendingWorkflow` (the
+        // `workflow_settled` case below) removes the matching id and clears the
+        // wait state once none remain. `pendingWorkflowIds` is the id list the
+        // server names in this `complete`; `pendingWorkflows` (a bare count) is
+        // the older-server fallback with no ids to match against — see the type
+        // doc on `pendingWorkflowIdsRef` above.
+        const pendingWorkflowIdList = Array.isArray(msg.pendingWorkflowIds)
+          ? msg.pendingWorkflowIds.filter((id: unknown): id is string => typeof id === 'string')
+          : null;
+        const hasPendingWorkflows = pendingWorkflowIdList
+          ? pendingWorkflowIdList.length > 0
+          : typeof msg.pendingWorkflows === 'number' && msg.pendingWorkflows > 0;
+        if (sid && hasPendingWorkflows) {
+          pendingWorkflowIdsRef.current.set(
+            sid,
+            pendingWorkflowIdList ? new Set(pendingWorkflowIdList) : (msg.pendingWorkflows as number),
+          );
+        }
 
         // حدث سُلطوي: يُبطل أي لقطة REST لحالة النشاط أُطلقت قبله، فلا تعيد
         // إجابةُ «نشطة» متأخرةٌ رفعَ المؤشّر بعد انتهاء التشغيل فعلياً.
@@ -658,7 +743,7 @@ export function useChatRealtimeHandlers({
         if (isActiveViewSession) {
           if (hasPendingWorkflows) {
             // Keep isLoading true — background Workflow still running.
-            setClaudeStatus({ text: 'Workflow يعمل في الخلفية…', tokens: 0, can_interrupt: true });
+            setClaudeStatus({ text: WORKFLOW_WAIT_STATUS_TEXT, tokens: 0, can_interrupt: true });
           } else {
             setIsLoading(false);
             setCanAbortSession(false);
@@ -847,6 +932,18 @@ export function useChatRealtimeHandlers({
         break;
       }
 
+      // T-1933 review round 2: the only event that may settle a pending
+      // Workflow (see `pendingWorkflowIdsRef` above) — `task_notification` /
+      // `task_reconcile` are Agent cards and must not (qa-critic finding 2).
+      // Routed via `CONTROL_EVENT_KINDS` (WebSocketContext), not the
+      // `latestMessage` switch below, for the same one-time-event guarantee
+      // `complete`/`error`/`session_created` get (B-208).
+      case 'workflow_settled': {
+        const toolUseId = typeof msg.toolUseId === 'string' ? msg.toolUseId : undefined;
+        if (sid) settlePendingWorkflow(sid, toolUseId, isActiveViewSession);
+        break;
+      }
+
       default:
         break;
     }
@@ -872,6 +969,8 @@ export function useChatRealtimeHandlers({
     setPendingPermissionRequests,
     streamTimerRef,
     t,
+    pendingWorkflowIdsRef,
+    settlePendingWorkflow,
   ]);
 
   /**
@@ -1312,6 +1411,11 @@ export function useChatRealtimeHandlers({
       && msg.kind !== 'status'
       && msg.kind !== 'permission_request'
       && msg.kind !== 'permission_cancelled'
+      // T-1933 review round 2: a control event routed to `applyControlEvent`
+      // (CONTROL_EVENT_KINDS) below, not a `MessageKind` the store or
+      // `useChatMessages` union knows — persisting it here would either throw
+      // at the type boundary or render as an unknown-kind row.
+      && (msg.kind as string) !== 'workflow_settled'
       // B-518: ‏`session_busy` رفضٌ لمحاولةِ إرسالٍ لم تقع، لا حدثٌ في
       // المحادثة. والخادم لا يخزّنه عمداً (لا مخزن لمحاولة مرفوضة)، فحفظُه
       // هنا يُنشئ فقاعةَ خطأ تتراكم مع كل محاولة وتختفي عند أول تحديث —
@@ -1349,11 +1453,12 @@ export function useChatRealtimeHandlers({
     // --- UI side effects for specific kinds ---
     //
     // ملحوظة (T-1293، على نمط `session-status` أعلاه): `session_created`
-    // و`complete` و`error` و`permission_request` و`permission_cancelled` لم تعد
-    // تُعالَج من هنا — تُوجَّه في WebSocketContext إلى سجلّ الأحداث الملحَق
-    // `controlEvents` وتُطبَّق في `applyControlEvent`. الحمولة ما تزال تصل
-    // `latestMessage` عمداً (مستهلكون آخرون يقرؤونها: AppContent،
-    // useBtwSideChannel…)، فالحذف من هنا هو **كل** ما يمنع المعالجة المزدوجة.
+    // و`complete` و`error` و`permission_request` و`permission_cancelled`
+    // و`workflow_settled` (T-1933 review round 2) لم تعد تُعالَج من هنا —
+    // تُوجَّه في WebSocketContext إلى سجلّ الأحداث الملحَق `controlEvents`
+    // وتُطبَّق في `applyControlEvent`. الحمولة ما تزال تصل `latestMessage`
+    // عمداً (مستهلكون آخرون يقرؤونها: AppContent، useBtwSideChannel…)،
+    // فالحذف من هنا هو **كل** ما يمنع المعالجة المزدوجة.
     //
     // ما بقي فوق المُبدِّل يخصّها ويعمل لها كما كان: `recordSeq` (ADR-041) —
     // ونقلُه كان سيكسر `lastSeq` فيعود الـreplay من الصفر — و`appendRealtime`
@@ -1371,6 +1476,21 @@ export function useChatRealtimeHandlers({
         if (msg.text === 'token_budget' && msg.tokenBudget) {
           setTokenBudget(msg.tokenBudget as Record<string, unknown>);
         } else if (msg.text) {
+          // T-1933 (review round 2, finding 3 — corrected): نصّ حالةٍ حيّ غير
+          // نصّ انتظار الورشة يعني جولة جديدة تعمل فعلياً على هذه الجلسة
+          // (إرسالٌ تالٍ بينما ورشةُ الجولة السابقة ما تزال معلّقة) — احذف
+          // مُدخَلها من `pendingWorkflowIdsRef` كي لا تُسوّي بطاقةُ
+          // `workflow_settled` المتأخّرة للجولة **القديمة** مؤشّرَ الجولة
+          // الجديدة خطأً. هذا أوّل حدثٍ **سُلطويّ** من الخادم يثبت جولة
+          // جديدة، لا أوّل حدثٍ مطلقاً: بدء الإرسال المحلي (composer عبر
+          // `forgetPendingWorkflows` أعلاه) و`session_created` (فرع أعلاه)
+          // يحذفان مُدخَلَيهما أبكر من هذا وقبل وصول أيّ `workflow_settled`
+          // متأخّر — حتى لجولة على جلسة **قائمة مسبقاً** لا `session_created`
+          // لها، لأن مسار الإرسال المحلي لا ينتظر ردّ الخادم. هذا الفرع
+          // حارسٌ ثانٍ (نصّ حالةٍ حيّ لاحق) لا الأوّل.
+          if (sid && msg.text !== WORKFLOW_WAIT_STATUS_TEXT) {
+            pendingWorkflowIdsRef.current.delete(sid);
+          }
           setClaudeStatus({
             text: msg.text,
             tokens: msg.tokens || 0,
@@ -1382,7 +1502,19 @@ export function useChatRealtimeHandlers({
         break;
       }
 
-      // text, tool_use, tool_result, thinking, interactive_prompt, task_notification
+      // T-1933 review round 2 (qa-critic finding 2, حرج): `task_notification`
+      // و`task_reconcile` بطاقتا **Agent** لا Workflow — وصولهما (حتى طرفياً)
+      // لا يُثبت أن الورشة المعلّقة (`pendingWorkflowIdsRef`) انتهت، فلا
+      // يُسوَّيان شيئاً هنا بعد اليوم. `workflow_settled` وحده (مُوجَّه إلى
+      // `applyControlEvent` أعلاه عبر `CONTROL_EVENT_KINDS`) يحمل `toolUseId`
+      // الورشة المنتهية فعلياً. البطاقتان ما تزالان تُحفَظان في المحادثة
+      // (بوابة `shouldPersist` أعلاه لا تستثنيهما) — هذا التفريع كان لأثره
+      // الجانبي على المؤشّر وحده.
+      case 'task_notification':
+      case 'task_reconcile':
+        break;
+
+      // text, tool_use, tool_result, thinking, interactive_prompt
       // → already routed to store above, no UI side effects needed
       default:
         break;
@@ -1407,10 +1539,11 @@ export function useChatRealtimeHandlers({
     onWebSocketReconnect,
     sessionStore,
     isDuplicateSteerInjection,
+    pendingWorkflowIdsRef,
   ]);
 
   // زرّ «استكمِل الآن» على صفّ `stream_recovery_gap` (بلا إخفاء تلقائي
   // للتنبيه): استدعاء صريح لنفس مسار الاسترجاع الموسَّع، خارج حارس الجلب
   // التلقائي — إجراء مستخدم متعمَّد لا يخضع لتقييد إعادة المحاولة.
-  return { requestStreamGapRecovery };
+  return { requestStreamGapRecovery, forgetPendingWorkflows };
 }

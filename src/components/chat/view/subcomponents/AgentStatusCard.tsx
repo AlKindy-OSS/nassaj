@@ -62,6 +62,31 @@ const EMA_ALPHA = 0.25;
 const MIN_DONE_FOR_ESTIMATE = 1;
 const MIN_ELAPSED_SECONDS_FOR_ESTIMATE = 15;
 
+// ── تفضيل إخفاء الوكلاء المكتملين (محلي، مستمرّ) ─────────────────────────────
+// افتراضياً مخفيّون: بطاقة تتراكم فيها صفوف ✓ خضراء تفقد فائدتها كمؤشّر حيّ.
+// فقط `status === 'done'` (نجاح مؤكَّد) يُخفى؛ `stale` (بلا إشارة، لم يُؤكَّد
+// نجاحه ولا فشله) و`running` يبقيان ظاهرين دائماً بصرف النظر عن التفضيل.
+const HIDE_COMPLETED_STORAGE_KEY = 'nassaj:agentStatusCard:hideCompleted';
+
+function readHideCompletedPref(): boolean {
+  try {
+    const stored = localStorage.getItem(HIDE_COMPLETED_STORAGE_KEY);
+    if (stored === '0') return false;
+    if (stored === '1') return true;
+  } catch {
+    // localStorage unavailable (SSR / private mode) — fall back to default.
+  }
+  return true;
+}
+
+function writeHideCompletedPref(value: boolean): void {
+  try {
+    localStorage.setItem(HIDE_COMPLETED_STORAGE_KEY, value ? '1' : '0');
+  } catch {
+    // localStorage unavailable — preference stays in-memory for this session.
+  }
+}
+
 // ── AgentRow (صفّ الوكيل الواحد داخل البطاقة — غير مُصدَّر) ─────
 
 function AgentRow({ agent, frozen }: { agent: RunAgent; frozen: boolean }) {
@@ -493,6 +518,26 @@ function MergedCard({
     setIsExpanded((prev) => !prev);
   }, []);
 
+  // ── إخفاء المكتمل (مستمرّ عبر localStorage، افتراضي: مخفي) ────────────────
+  const [hideCompleted, setHideCompleted] = useState<boolean>(readHideCompletedPref);
+
+  const toggleHideCompleted = useCallback(() => {
+    setHideCompleted((prev) => {
+      const next = !prev;
+      writeHideCompletedPref(next);
+      return next;
+    });
+  }, []);
+
+  const completedCount = agents.reduce(
+    (n, a) => (a.status === 'done' ? n + 1 : n),
+    0,
+  );
+  const visibleAgents = hideCompleted
+    ? agents.filter((a) => a.status !== 'done')
+    : agents;
+  const allHiddenAsCompleted = hideCompleted && completedCount > 0 && visibleAgents.length === 0;
+
   // ── القيم المشتقة ──────────────────────────────────────────────────────────
   const isFrozenLoading = isLoading && frozen;
   const actionWords = ACTION_KEYS.map((key, i) =>
@@ -741,6 +786,40 @@ function MergedCard({
             isArabic={Boolean(i18n.language?.startsWith('ar'))}
           />
 
+          {/* تبديل إخفاء/إظهار المكتمل — مستقلّ لا يُطلق toggle البطاقة.
+              يظهر فقط حين توجد صفوف مكتملة فعلاً؛ لا فائدة من زر بلا أثر. */}
+          {completedCount > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toggleHideCompleted(); }}
+              aria-pressed={hideCompleted}
+              aria-label={
+                hideCompleted
+                  ? t('agentActivity.showCompletedAria', {
+                      defaultValue: 'Show completed agents',
+                    })
+                  : t('agentActivity.hideCompletedAria', {
+                      defaultValue: 'Hide completed agents',
+                    })
+              }
+              className={[
+                'hidden shrink-0 items-center rounded-md bg-muted/50 px-2 py-0.5 sm:flex',
+                'text-[10px] font-medium text-muted-foreground',
+                'transition-colors hover:bg-muted/70',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+              ].join(' ')}
+            >
+              {hideCompleted
+                ? t('agentActivity.showCompleted', {
+                    count: completedCount,
+                    defaultValue: 'Show completed ({{count}})',
+                  })
+                : t('agentActivity.hideCompleted', {
+                    defaultValue: 'Hide completed',
+                  })}
+            </button>
+          )}
+
           {/* زر chevron الطيّ — عنصر تفاعلي مستقل.
               stopPropagation يمنع الحدث من الوصول إلى الصف الأب فيُطلق toggle مرتين. */}
           <button
@@ -785,11 +864,20 @@ function MergedCard({
         {/* ── صفوف الوكلاء (قابلة للطيّ) ───────────────────────────────────── */}
         {isExpanded && (
           <div className="border-t border-border/30 px-3 py-1.5">
-            <div className="flex flex-col gap-0.5">
-              {agents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} frozen={frozen} />
-              ))}
-            </div>
+            {allHiddenAsCompleted ? (
+              <p className="px-1.5 py-1 text-[11px] text-muted-foreground/70">
+                {t('agentActivity.allCompletedSummary', {
+                  count: completedCount,
+                  defaultValue: '{{count}} completed',
+                })}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {visibleAgents.map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} frozen={frozen} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

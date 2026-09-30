@@ -36,6 +36,9 @@ type OutcomeDbRow = {
   global_seen_at: string | null;
 };
 
+/** An unseen outcome with the DB id of its (active) project — B-1431. */
+export type UnseenOutcomeRow = SessionOutcomeRow & { projectId: string };
+
 const toRow = (row: OutcomeDbRow): SessionOutcomeRow => ({
   sessionId: row.session_id,
   outcome: row.outcome as SessionOutcome,
@@ -125,14 +128,19 @@ export function getOutcomesForSessions(sessionIds: readonly string[]): Map<strin
 export function getUnseenOutcomes(
   userId: number,
   visibleProjectPaths: readonly string[],
-): SessionOutcomeRow[] {
+): UnseenOutcomeRow[] {
   if (!userId || visibleProjectPaths.length === 0) return [];
   const placeholders = visibleProjectPaths.map(() => '?').join(',');
+  // B-1431: projectId (DB id, never a path) so the client can place the badge
+  // without the project page being loaded. project_path is UNIQUE, and the
+  // inner JOIN on an ACTIVE project drops a row whose project was archived.
   const rows = getConnection()
     .prepare(
-      `SELECT o.session_id, o.outcome, o.outcome_at, o.provider, o.global_seen_at
+      `SELECT o.session_id, o.outcome, o.outcome_at, o.provider, o.global_seen_at,
+              p.project_id AS project_id
          FROM session_run_outcomes o
          JOIN sessions s ON s.session_id = o.session_id
+         JOIN projects p ON p.project_path = s.project_path AND p.isArchived = 0
         WHERE s.project_path IN (${placeholders})
           AND s.isArchived = 0
           AND (
@@ -142,8 +150,8 @@ export function getUnseenOutcomes(
           )
      ORDER BY o.outcome_at DESC`
     )
-    .all(...visibleProjectPaths) as OutcomeDbRow[];
-  return rows.map(toRow);
+    .all(...visibleProjectPaths) as Array<OutcomeDbRow & { project_id: string }>;
+  return rows.map((row) => ({ ...toRow(row), projectId: row.project_id }));
 }
 
 /**
@@ -215,33 +223,45 @@ export function clearStaleQuestionOutcomes(): number {
  * موجود — وتلك حالةٌ تُبَثّ عمداً كي تُطفأ الشارة عند الجميع. أمّا مسارٌ فارغ
  * فلا يُبَثّ شيء: لا سبيل إلى معرفة من يراه.
  */
-export function getOutcomeForBroadcast(
-  sessionId: string,
-): {
+/**
+ * Broadcast view of one session's outcome. `projectId` is the DB id of the
+ * session's ACTIVE project (null when unregistered/archived) — B-1431. The
+ * caller only sends it to recipients who can already see `projectPath`.
+ */
+export type OutcomeBroadcast = {
   projectPath: string | null;
+  projectId: string | null;
   outcome: SessionOutcome | null;
   outcomeAt: string | null;
   outcomeState: 'visible' | 'seen' | 'absent';
-} {
+};
+
+export function getOutcomeForBroadcast(
+  sessionId: string,
+): OutcomeBroadcast {
   if (!sessionId) {
-    return { projectPath: null, outcome: null, outcomeAt: null, outcomeState: 'absent' };
+    return { projectPath: null, projectId: null, outcome: null, outcomeAt: null, outcomeState: 'absent' };
   }
   const row = getConnection()
     .prepare(
-      `SELECT s.project_path AS project_path, o.outcome AS outcome,
+      `SELECT s.project_path AS project_path, p.project_id AS project_id,
+              o.outcome AS outcome,
               o.outcome_at AS outcome_at, o.provider AS provider,
               o.global_seen_at AS global_seen_at
          FROM sessions s
+    LEFT JOIN projects p ON p.project_path = s.project_path AND p.isArchived = 0
     LEFT JOIN session_run_outcomes o ON o.session_id = s.session_id
         WHERE s.session_id = ?`
     )
-    .get(sessionId) as ({ project_path: string | null } & OutcomeDbRow) | undefined;
+    .get(sessionId) as ({ project_path: string | null; project_id: string | null } & OutcomeDbRow) | undefined;
   if (!row) {
-    return { projectPath: null, outcome: null, outcomeAt: null, outcomeState: 'absent' };
+    return { projectPath: null, projectId: null, outcome: null, outcomeAt: null, outcomeState: 'absent' };
   }
+  const projectId = row.project_id ?? null;
   if (!row.outcome || !VALID_OUTCOMES.has(row.outcome)) {
     return {
       projectPath: row.project_path,
+      projectId,
       outcome: null,
       outcomeAt: null,
       outcomeState: 'absent',
@@ -252,6 +272,7 @@ export function getOutcomeForBroadcast(
   );
   return {
     projectPath: row.project_path,
+    projectId,
     outcome: visible ? (row.outcome as SessionOutcome) : null,
     // في حالة seen نرسل نسخة الصف الخام كي يعرف العميل أي حكم أُقر عالمياً.
     outcomeAt: row.outcome_at,

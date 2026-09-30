@@ -114,21 +114,23 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
 const INSTALL_INFO: Partial<Record<AgentProvider, { label: string; command: string; note?: string }>> = {
   cursor: {
     label: 'Cursor Agent is not installed',
-    command: '# Install Cursor IDE from cursor.com',
-    note: 'cursor-agent ships with Cursor IDE — there is no standalone npm package.',
+    command: 'curl https://cursor.com/install -fsS | bash',
+    note: 'Official installer → ~/.local/bin/cursor-agent.',
   },
   codex: {
     label: 'Codex CLI is not installed',
-    command: 'npm install -g @openai/codex',
+    command: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
+    note: 'Official standalone installer → ~/.local/bin/codex. An npm -g copy is not detected.',
   },
   opencode: {
     label: 'OpenCode CLI is not installed',
     command: 'curl -fsSL https://opencode.ai/install | bash',
-    note: 'Or via npm: npm install -g opencode-ai',
+    note: 'Official installer → ~/.opencode/bin/opencode. An npm -g copy is not detected.',
   },
   qwen: {
     label: 'Qwen Code CLI is not installed',
-    command: 'npm install -g @qwen-code/qwen-code',
+    command: 'npm install --global --prefix ~/.local @qwen-code/qwen-code',
+    note: 'Must land in ~/.local/bin/qwen. A plain npm -g copy is not detected.',
   },
   hermes: {
     label: 'Hermes Agent is not installed',
@@ -136,8 +138,8 @@ const INSTALL_INFO: Partial<Record<AgentProvider, { label: string; command: stri
   },
   kimi: {
     label: 'Kimi Code CLI is not installed',
-    command: 'npm install -g @moonshot-ai/kimi-code',
-    note: 'Only the native CLI needs installing — the API-key path is pure HTTP.',
+    command: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
+    note: 'Official native installer → ~/.kimi-code/bin/kimi. The API-key path needs no install.',
   },
 };
 

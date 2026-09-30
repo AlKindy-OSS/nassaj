@@ -67,6 +67,12 @@ class RingBuffer {
         return this.items.filter((it) => it.seq > floor);
     }
 
+    // Forget every retained payload but keep the seq counter, so a client that
+    // resumes with lastSeq > 0 still gets everything assigned after the clear.
+    clear() {
+        this.items = [];
+    }
+
     // Highest seq assigned so far (0 before the first push).
     get lastSeq() {
         return this.seq;
@@ -216,6 +222,18 @@ class SessionRegistry {
         if (!this.enabled || !key) return;
         const entry = this.entries.get(key);
         if (entry) entry.active = active === true;
+    }
+
+    // B-1399: a new run is starting on `key`. When the entry belongs to a run that
+    // already ended (inactive), drop its retained frames so its terminal
+    // error/complete is not replayed into the new run. A live entry is never
+    // touched. Returns true when frames were cleared.
+    clearInactiveBuffer(key) {
+        if (!this.enabled || !key) return false;
+        const entry = this.entries.get(key);
+        if (!entry || entry.active) return false;
+        entry.buffer.clear();
+        return true;
     }
 
     // Current highest seq for a session (0 if unknown). Lets a fresh socket

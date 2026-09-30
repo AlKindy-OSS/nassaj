@@ -74,9 +74,11 @@ export interface RunStatusActionsProps {
 }
 
 /**
- * Renders the run's ONE action control: STOP for the confirmed starter,
- * Steer for a steerable non-starter, nothing otherwise (including while
- * starter identity is still unknown — fail-closed).
+ * Renders the run's ONE action control: STOP for the confirmed starter, the
+ * Steer pill for a steerable non-starter, nothing otherwise (including while
+ * starter identity is still unknown — fail-closed). The starter is not
+ * denied steering here — he already has STOP, and steers his own running
+ * turn through `/steer <text>` in the composer instead of this pill.
  */
 export function RunStatusActions({
   canStop,

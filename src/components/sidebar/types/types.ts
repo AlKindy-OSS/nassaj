@@ -22,6 +22,13 @@ export type ArchivedProjectListItem = Project & { isArchived: true };
 
 export type SessionWithProvider = ProjectSession & {
   __provider: LLMProvider;
+  /**
+   * True for a row the sidebar surfaced from outside its loaded page because
+   * one of its indicators (question/error/running/frozen/done/orphan) is
+   * attributed to this project (B-1431/T-1949). Never written into a
+   * project's loaded buckets — merged in only at render time.
+   */
+  __surfaced?: boolean;
 };
 
 export type ArchivedSessionListItem = {

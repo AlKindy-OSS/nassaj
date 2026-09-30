@@ -219,6 +219,11 @@ export const CONTROL_EVENT_KINDS: ReadonlySet<string> = new Set([
   'error',
   'permission_request',
   'permission_cancelled',
+  // T-1933 (B-1401 review round 2): sent once per Workflow `toolUseId`
+  // through the replay buffer (server/claude-sdk.js) — same one-time-event
+  // guarantee as the five above, so it belongs on this log too, not the
+  // single-slot `latestMessage`/`CONTROL_MESSAGE_TYPES` paths.
+  'workflow_settled',
 ]);
 
 /**
@@ -311,15 +316,21 @@ const EMPTY_CONTROL_EVENTS: ControlEventLog = { events: [], droppedBeforeSeq: 0 
 function parsePresenceProcessStates(raw: unknown): Array<{
   sessionId: string;
   state: SessionProcessState;
+  projectId: string | null;
 }> {
   if (!Array.isArray(raw)) return [];
-  const parsed: Array<{ sessionId: string; state: SessionProcessState }> = [];
+  const parsed: Array<{ sessionId: string; state: SessionProcessState; projectId: string | null }> = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const entry = item as Record<string, unknown>;
     if (typeof entry.sessionId !== 'string' || entry.sessionId.length === 0) continue;
     if (entry.state !== 'running' && entry.state !== 'frozen') continue;
-    parsed.push({ sessionId: entry.sessionId, state: entry.state });
+    // B-1431: an older server that omits `projectId` yields null — the exact
+    // fallback the pre-existing behaviour already had (no project rollup).
+    const projectId = typeof entry.projectId === 'string' && entry.projectId.length > 0
+      ? entry.projectId
+      : null;
+    parsed.push({ sessionId: entry.sessionId, state: entry.state, projectId });
   }
   return parsed;
 }
@@ -561,6 +572,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
               (data.outcome ?? null) as Parameters<typeof applyOutcomeDelta>[1],
               typeof data.outcomeAt === 'string' ? data.outcomeAt : null,
               data.outcomeState as OutcomeState,
+              typeof data.projectId === 'string' && data.projectId.length > 0 ? data.projectId : null,
             );
           }
           setLatestMessage(data);

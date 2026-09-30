@@ -842,6 +842,7 @@ const KNOWN_VISIBLE_UNSUPPORTED_KINDS = new Set([
   'task_notification',
   'task_reconcile',
   'workflow_reconciled',
+  'workflow_settled',
 ]);
 
 /** O(1)-space, synchronous content evidence for one run dispatch generation. */

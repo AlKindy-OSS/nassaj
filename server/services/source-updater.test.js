@@ -6,7 +6,7 @@ import { execFileSync, spawn } from 'child_process';
 import test from 'node:test';
 
 import { createUpdateMaintenanceGate } from './update-maintenance-gate.js';
-import { assertUpdateStorage, evaluateUpdateStorage, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError } from './source-updater.js';
+import { assertUpdateStorage, evaluateUpdateStorage, publicStorageFigures, createSourceUpdater as createSourceUpdaterImpl, defaultGitCheckoutProbe as defaultGitCheckoutProbeExport, releaseGitEnvironment, resolveCandidateScript, resolveGovernedSshCommand, resolveUpdateHostCapability, runFile, SourceUpdateError, sourceUpdateErrorPayload } from './source-updater.js';
 
 // A non-tmpfs device with ample free space keeps the T-1553 storage gate out of
 // the way for tests that exercise other behaviour; the gate itself is covered
@@ -714,12 +714,32 @@ test('storage blockers carry an operator remedy in their message (T-1553 م1)', 
         });
         assert.equal(low.code, 'insufficient_disk');
         assert.match(low.message, /free disk|Free space/i);
+        assert.ok(Number.isSafeInteger(low.availableBytes) && Number.isSafeInteger(low.requiredBytes));
+        assert.ok(low.availableBytes < low.requiredBytes);
+        assert.equal(low.availableBytes, 10 * 4096);
+        assert.ok(low.requiredBytes >= 8 * 1024 ** 3);
+        assert.equal(publicStorageFigures(tmp), null, 'tmpfs blockers carry no storage figures');
+        assert.equal('availableBytes' in tmp, false);
 
         assert.deepEqual(evaluateUpdateStorage({
             appRoot, env: { TMPDIR: '/var/tmp' },
             statfs: () => ({ type: EXT4, bavail: 4_000_000, bsize: 4096 }),
         }), { ok: true });
     } finally { fs.rmSync(appRoot, { recursive: true, force: true }); }
+});
+
+test('publicStorageFigures coarsens insufficient_disk figures to whole MiB and ignores other codes', () => {
+    const MiB = 1024 * 1024;
+    assert.deepEqual(publicStorageFigures({
+        ok: false, code: 'insufficient_disk', availableBytes: 5 * MiB + 123, requiredBytes: 7 * MiB + 1,
+    }), { availableBytes: 5 * MiB, requiredBytes: 8 * MiB });
+    assert.deepEqual(publicStorageFigures({
+        ok: false, code: 'insufficient_disk', availableBytes: 3 * MiB, requiredBytes: 4 * MiB,
+    }), { availableBytes: 3 * MiB, requiredBytes: 4 * MiB });
+    for (const other of [{ ok: true }, { ok: false, code: 'tmpfs_build_tmpdir' }, { ok: false, code: 'storage_probe_failed' },
+        { ok: false, code: 'insufficient_disk' }, null, undefined]) {
+        assert.equal(publicStorageFigures(other), null);
+    }
 });
 
 test('capacity sums candidate and TMPDIR requirements on a shared device', () => {
@@ -748,5 +768,14 @@ test('independent DB or TMPDIR device exhaustion rejects despite ample candidate
                 statfs: target => ({ type: EXT4, bavail: target === exhausted ? 1 : 4000000, bsize: 4096 }),
             }), error => error.code === 'insufficient_disk');
         }
+        // The reported figures belong to the device with the largest shortfall.
+        const result = evaluateUpdateStorage({ appRoot,
+            env: { TMPDIR: temporaryRoot, DATABASE_PATH: path.join(databaseRoot, 'db.sqlite') },
+            stat: target => ({ dev: target === databaseRoot ? 2 : target === temporaryRoot ? 3 : 1 }),
+            statfs: target => ({ type: EXT4, bavail: target === temporaryRoot ? 1 : target === databaseRoot ? 2 : 4000000, bsize: 4096 }),
+        });
+        assert.equal(result.code, 'insufficient_disk');
+        assert.equal(result.availableBytes, 4096, 'TMPDIR device (2 GiB short) outranks the DB device (~16 MiB short)');
+        assert.equal(result.requiredBytes, 2 * 1024 ** 3);
     } finally { fs.rmSync(appRoot, { recursive: true, force: true }); }
 });

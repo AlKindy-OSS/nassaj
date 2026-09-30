@@ -25,10 +25,11 @@ import {
   authorizedOwnerOperation,
   createConnectorOwnerReadGate,
   createConnectorOwnerOperationGate,
+  runtimeOriginSource,
   type ConnectorOwnerOperation,
 } from './connector-owner-operation-gate.js';
-import { configureConnectorOwnerAuthSessionProduction } from './connector-owner-auth-session.js';
-import { executeConnectorPolicyV2LifecycleWrite,
+import {
+  connectorRuntimeLiveOrigin,
   resolveConnectorRuntimeInstallationOrigin,
   assertConnectorProviderEffectEnabled,
   connectorProviderProfileOperationCertified } from './connector-substrate-only.production.js';
@@ -39,6 +40,8 @@ type Service = ReturnType<typeof createConnectorProfileManagementService>;
 type ProfileRuntime = Readonly<{
   installationId: string;
   canonicalOrigin: string;
+  /** Live origin (production); absent in test runtimes, which use canonicalOrigin. */
+  resolveOrigin?: () => string | null;
   repository: Repository;
   service: Service;
 }>;
@@ -78,9 +81,8 @@ const buildProductionRuntime = (): ProfileRuntime => {
     testApiKeyCandidate: async candidate => { await probeConnectorApiKeyCandidate(candidate); },
     providerCertified: connectorProviderProfileOperationCertified,
   });
-  configureConnectorOwnerAuthSessionProduction({ repository, installationId, canonicalOrigin,
-    executeWrite: executeConnectorPolicyV2LifecycleWrite });
-  productionRuntime = Object.freeze({ installationId, canonicalOrigin, repository, service });
+  productionRuntime = Object.freeze({ installationId, canonicalOrigin, resolveOrigin: connectorRuntimeLiveOrigin,
+    repository, service });
   return productionRuntime;
 };
 
@@ -149,7 +151,7 @@ export const createConnectorAuthProfileRoutes = (
     createConnectorOwnerOperationGate({
       repository: runtime.repository,
       installationId: runtime.installationId,
-      canonicalOrigin: runtime.canonicalOrigin,
+      canonicalOrigin: runtimeOriginSource(runtime),
       operation: operationName,
     })(req, res, () => {
       void action(runtime, req, res).catch(error => profileFailure(res, error));
@@ -161,6 +163,7 @@ export const createConnectorAuthProfileRoutes = (
     if (!runtime) return;
     createConnectorOwnerReadGate({
       repository: runtime.repository, installationId: runtime.installationId,
+      canonicalOrigin: runtimeOriginSource(runtime),
     })(req, res, () => {
       void runtime.service.list()
         .then(profiles => res.json({ schemaVersion: 1, profiles }))

@@ -18,9 +18,14 @@ export type GrantProvider =
   | 'hermes'
   | 'kimi'
   | 'deepseek'
-  | 'glm'
-  | 'qwen';
+  | 'glm';
 
+/**
+ * `qwen` is deliberately ABSENT (T-1906, owner decision 2026-09-28): its
+ * Coding Plan key is now a personal, single-key credential consumed through
+ * OpenCode's own model routing, not a delegable per-provider grant — the
+ * server drops it from `GRANTABLE_PROVIDERS` for the same reason.
+ */
 const GRANT_PROVIDERS: GrantProvider[] = filterDisabledProviders([
   'claude',
   'gemini',
@@ -32,7 +37,6 @@ const GRANT_PROVIDERS: GrantProvider[] = filterDisabledProviders([
   'kimi',
   'deepseek',
   'glm',
-  'qwen',
 ]);
 
 /**

@@ -4,7 +4,7 @@
  * reaches it is OpenCode + a `glm/*` model. Such a turn arrives at the launcher
  * with `options.carrier` UNSET (nothing sets it outside the historical
  * provider-`glm` dispatch), which — before this seam — meant the entire ADR-062
- * guard chain (governance gate, baseURL allowlist, binary digest pin, loopback
+ * guard chain (governance gate, baseURL allowlist, loopback
  * confinement, env sanitization) was skipped on what is now the sole GLM path.
  *
  * These tests pin the DECISION function itself (isOpenCodeCarrierRun), not the

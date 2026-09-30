@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedSiteDigest": "sha256:7832fcb093b9a2b0a819c3b97f1bd4022270ac5677a83b784c38f3017083ec4e",
+  "reviewedSiteDigest": "sha256:81fdf54286c1ef6a3d6db448ccc18d56beab19a4d6d2051a074be3b0f9c5cd13",
   "exact": {
     "server/services/document-share-preview.js#child_process.spawn#1": {
       "classification": "bounded_local_compute",
@@ -390,6 +390,15 @@
       "gate": "descriptor-fixed https://api.github.com/ URL only (other prefixes refused), no auth header, abort-controller timeout, tag_name used as a version-shaped string and never executed",
       "adapter": "defaultFetchGithubLatest",
       "test": "version-status.service.test.ts"
+    },
+    "server/modules/websocket/services/chat-websocket.test-git-project.ts#child_process.execFileSync#1": {
+      "classification": "test_only",
+      "owner": "websocket test fixtures",
+      "purpose": "synthetic_git_fixture",
+      "actorSource": "test-only importers; fixed git arguments",
+      "gate": "test helper imported only by websocket tests; runs git in a fresh case TMPDIR repo; no production route",
+      "adapter": "git",
+      "test": "chat websocket codex-receipt, coordination-lifecycle and shadow tests (B-1421)"
     }
   },
   "rules": [

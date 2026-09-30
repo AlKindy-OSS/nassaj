@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOidcAvailability } from '../hooks/useOidcAvailability';
 import { useWebAuthn } from '../hooks/useWebAuthn';
 import { startOidcLogin } from '../oidc';
+import { consumeSsoReauthNotice, hasSsoReauthNotice } from '../ssoReauth';
 
 import AuthErrorAlert from './AuthErrorAlert';
 import AuthInputField from './AuthInputField';
@@ -60,7 +61,14 @@ export default function LoginForm() {
   const appName = brandingTitle ?? t('app.title', { ns: 'sidebar', defaultValue: 'ـنسَّاجـ' });
 
   const [formState, setFormState] = useState<LoginFormState>(initialState);
-  const [errorMessage, setErrorMessage] = useState('');
+  // T-1939: a member sent back here after their SSO attestation aged out sees
+  // why, once. Read in the initializer (pure), cleared after mount.
+  const [errorMessage, setErrorMessage] = useState(
+    () => (hasSsoReauthNotice() ? t('login.errors.ssoReauthRequired') : ''),
+  );
+  useEffect(() => {
+    consumeSsoReauthNotice();
+  }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false);
   const [isSsoRedirecting, setIsSsoRedirecting] = useState(false);
@@ -93,7 +101,8 @@ export default function LoginForm() {
       setIsSubmitting(true);
       const result = await login(formState.username.trim(), formState.password);
       if (!result.success) {
-        setErrorMessage(result.error);
+        // T-1939: a linked team account signs in through the IdP (SSO button below).
+        setErrorMessage(result.code === 'sso_required' ? t('login.errors.ssoRequired') : result.error);
       }
       setIsSubmitting(false);
     },

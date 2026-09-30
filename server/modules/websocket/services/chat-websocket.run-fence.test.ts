@@ -154,10 +154,10 @@ const launcher = (key: string) => (launches: string[]) => ({
 const BRANCHES: Branch[] = [
   { name: 'claude', messageType: 'claude-command', launcher: launcher('queryClaudeSDK') },
   { name: 'codex', messageType: 'codex-command', launcher: launcher('queryCodex') },
-  { name: 'cursor', messageType: 'cursor-command', launcher: launcher('spawnCursor') },
   { name: 'antigravity', messageType: 'antigravity-command', launcher: launcher('spawnAntigravity') },
   { name: 'opencode', messageType: 'opencode-command', launcher: launcher('spawnOpenCode') },
-  { name: 'kimi', messageType: 'kimi-command', launcher: launcher('spawnKimi') },
+  // kimi chat and cursor are disabled (2026-09-29) and refused before admission,
+  // below. The kimi agent and hosted branches still bypass the disable wall.
   {
     name: 'kimi-agent', messageType: 'kimi-command', options: { mode: 'agent' },
     launcher: launcher('spawnKimiAgent'),
@@ -207,13 +207,17 @@ for (const branch of BRANCHES) {
   });
 }
 
-test('test 5 [deepseek]: a disabled provider is refused before admission — no arm, no launch', async () => {
-  const launches: string[] = [];
-  const primary = await dispatch('deepseek-command', {}, launcher('spawnDeepSeek')(launches));
-  assert.deepEqual(launches, []);
-  assert.equal(primary.received.at(-1)?.notStarted, true);
-  assert.equal(__fencedRunCountForTests(), 0);
-});
+for (const [provider, key] of [
+  ['deepseek', 'spawnDeepSeek'], ['cursor', 'spawnCursor'], ['kimi', 'spawnKimi'],
+] as const) {
+  test(`test 5 [${provider}]: a disabled provider is refused before admission — no arm, no launch`, async () => {
+    const launches: string[] = [];
+    const primary = await dispatch(`${provider}-command`, {}, launcher(key)(launches));
+    assert.deepEqual(launches, []);
+    assert.equal(primary.received.at(-1)?.notStarted, true);
+    assert.equal(__fencedRunCountForTests(), 0);
+  });
+}
 
 test('C2: a stranger is refused at arming with project_access_changed', async () => {
   const stranger = userDb.createUser('rfd_stranger', 'hash', 'user') as User;

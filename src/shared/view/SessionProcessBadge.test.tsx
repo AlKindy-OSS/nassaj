@@ -69,7 +69,7 @@ describe('SessionProcessBadge', () => {
   it('يتبنّى الورشة الجارية كما يتبنّاها الصفّ', () => {
     setActiveWorkflows({
       workflows: [{
-        sessionId: SESSION, wfId: 'wf-1', status: 'running', agentsDone: 0, agentsTotal: 2,
+        sessionId: SESSION, wfId: 'wf-1', projectId: null, status: 'running', agentsDone: 0, agentsTotal: 2,
         updatedAt: null, agents: [], agentsTruncated: false, dormant: false,
       }],
       eligible: 1, scanned: 1, capped: false, dormant: 0,

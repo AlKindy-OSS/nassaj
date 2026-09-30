@@ -302,6 +302,7 @@ test('الإقرار والإبطال يغيّران حمولة البث الع�
   sessionOutcomesDb.markOutcomeSeen(SESSION_A, initial.outcomeAt);
   assert.deepEqual(sessionOutcomesDb.getOutcomeForBroadcast(SESSION_A), {
     projectPath: VISIBLE_PATH,
+    projectId: 'proj-visible',
     outcome: null,
     outcomeAt: initial.outcomeAt,
     outcomeState: 'seen',
@@ -321,6 +322,7 @@ test('دلتا null تميز seen عن غياب الصف بعد بدء جولة 
   markRunStarted(SESSION_A);
   assert.deepEqual(sessionOutcomesDb.getOutcomeForBroadcast(SESSION_A), {
     projectPath: VISIBLE_PATH,
+    projectId: 'proj-visible',
     outcome: null,
     outcomeAt: null,
     outcomeState: 'absent',
@@ -394,5 +396,22 @@ test('الترحيل يعبّئ global_seen_at من قراءة legacy للحكم
     ]);
   } finally {
     legacy.close();
+  }
+});
+
+test('B-1431: getUnseenOutcomes يحمل projectId، ويُسقط حكم مشروعٍ مؤرشف', () => {
+  sessionOutcomesDb.recordOutcome(SESSION_A, 'done', 'claude');
+  const [row] = sessionOutcomesDb.getUnseenOutcomes(USER_OTHER, [VISIBLE_PATH]);
+  assert.equal(row?.sessionId, SESSION_A);
+  assert.equal(row?.projectId, 'proj-visible');
+
+  const db = getConnection();
+  db.prepare("UPDATE projects SET isArchived = 1 WHERE project_id = 'proj-visible'").run();
+  try {
+    // حتى لو مُرِّر المسار صراحةً، المشروع المؤرشف لا يُعيد صفّاً.
+    assert.deepEqual(sessionOutcomesDb.getUnseenOutcomes(USER_OTHER, [VISIBLE_PATH]), []);
+    assert.equal(sessionOutcomesDb.getOutcomeForBroadcast(SESSION_A).projectId, null);
+  } finally {
+    db.prepare("UPDATE projects SET isArchived = 0 WHERE project_id = 'proj-visible'").run();
   }
 });

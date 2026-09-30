@@ -426,6 +426,7 @@ test('the gate scans only paths the public export ships', () => {
     'scripts/lib/public-release-provenance.mjs',
     'scripts/lib/release-baseline-comparator.mjs',
     'scripts/release-orchestrator-phases.test.mjs', 'docs/plans/roadmap.md',
+    'scripts/release-preflight.mjs', 'scripts/lib/release-baseline-cache.mjs',
     'automation/ai-news-daily/run.mjs', '.github/workflows/release.yml',
     'server/modules/database/deletion-writer-inventory.test.ts',
   ]) assert.equal(isPublicExportPath(excluded), false, excluded);

@@ -1,3 +1,8 @@
+## 2.3.0.12 — 2026-09-30
+
+توجيه صاحب الدور لدوره الجاري بنفسه، ونافذة تحديث أوضح (إخفاء بطاقة التأكيد أثناء التحديث، والعائق الحقيقي وعجز القرص، وإشعار نجاح بعد إعادة الاتصال)، وظهور فقاعة الرسالة قبل الحفظ الدائم، ورابط اختياري لكل مشروع، ومؤشّر انشغال يعكس جلسات خارج الصفحة، وحوار أعضاء لا يُعاد تحميله، وتحديث مذكّر الالتزامات كل دقيقة، وأوامر تثبيت الأجساد الرسمية، وإصلاح عاصفة طلبات عميلية / حلقة 429، ومدة رابط الدعوة، وإيقاف الدور بـSTOP، وإصلاحات الورشات العالقة، وإغلاق ثغرة ربط SSO، وتعطيل Cursor وKimi وDeepSeek، ودخول SSO التجريبي المطفأ افتراضياً، وتأكيد الهوية قبل إضافة مفتاح مرور وفي الموصلات، وفكّ تثبيت OpenCode (الترقية من 2.3.0.11).
+Turn starters steer their own running turn, a clearer update dialog (confirm card hidden while updating, real blocker and disk shortfall, success notice after reconnect), the message bubble shown before the durable save, optional project links, project busy indicator surfacing off-page sessions, members dialog not reloaded, push-reminder updating every minute, official harness install commands, a 429 request-storm fix, invite link duration, STOP that stops the turn, stuck workflow fixes, an SSO linking security fix, Cursor, Kimi and DeepSeek disabled, experimental organization SSO (off by default), step-up before adding a passkey and in connectors, and OpenCode unpinned (upgrade from 2.3.0.11).
+
 ## 2.3.0.11 — 2026-09-29
 
 اكتمال سلسلة الترقية بعودة codex-sdk إلى 0.157.1، وتفعيل تحديث أمتن يسجّل سبب الفشل ولا يَعِد بإعادة محاولة وهمية، وإيقاف Qwen وHermes، وتثبيت OpenCode 1.18.32، وشرح حجب الصلاحيات في صندوق الإرسال (الترقية من 2.3.0.10 فقط).
@@ -39,13 +44,86 @@ Improve provider status localization, optional hardware usage, images and menus.
 
 ---
 
-## الإصدار 2.3.0.12 — قيد التطوير
+## الإصدار 2.3.0.12 — توجيه صاحب الدور ونافذة تحديث أوضح
 
-الدورة التالية مفتوحة؛ يُكتب ملخّصها هنا عند صدورها.
+ما الذي ستلاحظه:
+
+- من بدأ الدور يستطيع توجيه دوره الجاري بنفسه دون طلب موافقة؛ توجيه عضو آخر ما زال يحتاج موافقة صاحب
+  الدور.
+- تختفي بطاقة تأكيد التحديث ما دام تحديث قيد التشغيل.
+- تُسمّي نافذة التحديث العائق الحقيقي، وتذكر مقدار العجز في مساحة القرص عند نقصها.
+- إن اكتمل تحديث والنافذة مغلقة، يظهر إشعار نجاح بعد إعادة الاتصال، مرة واحدة، وبعد تأكيد أن التحديث
+  فُعِّل فعلاً.
+- تظهر فقاعة رسالتك فور الإرسال دون انتظار الحفظ.
+- Qwen ما زال معطّلاً؛ في هذا الإصدار أساس داخلي مطفأ لمفتاح Qwen Coding Plan عبر OpenCode لا يظهر
+  للمستخدمين.
+- يستطيع المالك والمشرف اختيار مدة صلاحية رابط الدعوة (حتى 30 يوماً).
+- الإجابة على طلب STOP توقف الدور فعلاً.
+- إصلاحات دوّار انتظار الورشات العالق وإنهائها (B-1400/B-1401).
+- إصلاح خلفية صف إجراءات المشروع في الشريط الجانبي.
+- تحديث قوائم النماذج الاحتياطية.
+- وسم محايد لإصدارات الأجساد غير المراجَعة.
+- يُحدَّث كاش نماذج Codex لكل مستخدم في مجلده الخاص، وتبقى النماذج الداخلية مخفية.
+- تشرح الموصلات سبب حجب إعداد المالك في تثبيت جديد (B-1405).
+- كلمة المرور الخاطئة لم تعد تُخرجك من حسابك، ولم تعد الجاهزية تُطلق تنبيهات زائفة.
+- أُعيد ترتيب شريط أدوات المشروع.
+- **أمان:** أُغلق مسار للاستيلاء على الحساب عبر ربط SSO (B-1410)، وأُزيل ربط SSO من قِبل المشرف.
+- Cursor وKimi وDeepSeek معطّلة ومخفية؛ الجلسات السابقة تبقى مقروءة.
+
+- إضافة مفتاح مرور جديد تطلب كلمة مرورك الحالية؛ مفاتيح المرور القديمة تبقى للدخول وتحمل شارة «أعِد
+  التسجيل».
+- في الموصلات تظهر نافذة «تأكيد الهوية» بدل «اخرج ثم ادخل مجدداً»، وكلمة المرور الخاطئة لا تُخرجك.
+- دخول المؤسسة الموحّد (SSO) تجريبي ومطفأ افتراضياً (`OIDC_ENABLED`، و`OIDC_JIT_ENABLED` لإنشاء
+  الحسابات عند أول دخول). حين يفعّله المشغّل: يربط العضو حسابه بنفسه من «الملف الشخصي > الأمان»، ويدخل
+  العضو المرتبط عبر مزوّد الهوية وحده. سيُعاد تصميمه موصلاً قابلاً للتركيب في إصدار قادم.
+- لم يعد تحديث OpenCode مقيّداً بإصدار محدّد.
+- النص البرمجي المضمَّن في المحادثة قابل للنقر: الرابط يُفتح وغيره يُنسخ.
+- زرّ لإخفاء الوكلاء المكتملين في بطاقة حالة الوكلاء.
+- **أمان:** إنشاء مشروع على مسار مشروع قائم لا يكشف وجوده لغير الأعضاء (B-1423).
+
+> **قيد معروف (B-1424):** في التثبيتات المحدَّثة بزر التحديث لا يعمل تأكيد الهوية عبر SSO للموصلات بعد؛
+> كلمة المرور ومفتاح المرور يعملان.
 
 ### English
 
-The next cycle is open; its summary is written here when it ships.
+- The member who started a turn can steer it without approval; another member's steer still needs
+  the starter's consent.
+- The update confirm card is hidden while an update is running.
+- The update dialog names the real blocker and states the disk shortfall when space is low.
+- If an update finished while the dialog was closed, a success notice appears after reconnect, once,
+  and only after the update is confirmed activated.
+- Your message bubble appears immediately on send, without waiting for the save.
+- Qwen stays disabled; this release carries internal groundwork, switched off, for a Qwen Coding Plan
+  key through OpenCode that users do not see.
+- The owner and admins can choose the invite link duration (up to 30 days).
+- Answering a STOP request now stops the turn.
+- Stuck workflow spinner and settle fixes (B-1400/B-1401).
+- Sidebar project action row fill fix.
+- Updated fallback model catalogs.
+- A neutral label for unreviewed harness versions.
+- Each user's Codex models cache is refreshed in their own home, and internal models stay hidden.
+- Connectors explain why owner setup is blocked on a fresh install (B-1405).
+- A wrong password no longer signs you out, and readiness no longer fires false prompts.
+- The project toolbar is reordered.
+- **Security:** closed an account-takeover path via SSO linking (B-1410); admin-initiated SSO linking is removed.
+- Cursor, Kimi and DeepSeek are disabled and hidden; old sessions stay readable.
+
+- Adding a new passkey asks for your current password; older passkeys still sign you in and show a
+  "re-register" badge.
+- Connectors show an inline step-up dialog instead of "sign out and sign in again", and a wrong
+  password does not sign you out.
+- Organization SSO sign-in (OIDC) is experimental and off by default (`OIDC_ENABLED`, plus
+  `OIDC_JIT_ENABLED` to create accounts on first sign-in). When the operator enables it, members link
+  their own account from Profile > Security, and a linked member signs in through the identity provider only. It
+  will be redesigned as a pluggable connector in a coming release.
+- OpenCode updates are no longer tied to one pinned release.
+- Inline code in chat is clickable: a link opens, anything else is copied.
+- A toggle hides completed agents in the agent status card.
+- **Security:** creating a project at an existing project's path no longer reveals it to non-members
+  (B-1423).
+
+> **Known limitation (B-1424):** on installs updated with the update button, SSO step-up for
+> connectors does not work yet; password and passkey step-up work.
 
 ---
 

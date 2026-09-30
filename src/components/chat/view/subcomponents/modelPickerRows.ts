@@ -126,6 +126,12 @@ export function bodyCredentialDestination(body: string): CredentialDestination |
 const OPENCODE_UPSTREAM = {
   glm: { key: 'yourKey', vars: () => ({ host: engineProviderHost('glm') ?? 'z.ai' }) },
   opencode: { key: 'zen', vars: () => ({}) },
+  /**
+   * `qwen-plan/*` — the Alibaba Coding Plan key routed through the OpenCode
+   * carrier (owner decision 2026-09-28, replacing the standalone Qwen body's
+   * own login). Same shape as `glm`: the operator's own key, named by host.
+   */
+  'qwen-plan': { key: 'yourKey', vars: () => ({ host: 'Alibaba Cloud' }) },
 } as const;
 
 /** The engine sentence for a body's own, native engine. */
@@ -192,7 +198,16 @@ export function rowsForBody(
   keyStatuses: Partial<Record<string, boolean>>,
   authModes?: Partial<Record<string, 'api_key' | 'subscription_oauth' | 'both' | null>>,
 ): PickerRow[] {
-  const own: ProviderModelOption[] = catalog[body]?.OPTIONS ?? [];
+  /**
+   * `qwen-plan/*` options are dropped client-side when no Alibaba Coding Plan
+   * key is stored (owner decision 2026-09-28). The server is expected to filter
+   * its own catalog answer the same way; this is defense in depth, not the only
+   * gate — the same pattern as the `glm` needsKey row below for the Claude body.
+   */
+  const ownUnfiltered: ProviderModelOption[] = catalog[body]?.OPTIONS ?? [];
+  const own = body === 'opencode' && !keyStatuses.qwen
+    ? ownUnfiltered.filter((option) => splitOpenCodeId(option.value).upstream !== 'qwen-plan')
+    : ownUnfiltered;
   const bodyAuthMode = authModes?.[body];
   const rows: PickerRow[] = own.map((option) => ({
     key: `${body}:${option.value}`,

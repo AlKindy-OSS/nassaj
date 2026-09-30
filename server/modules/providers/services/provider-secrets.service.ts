@@ -8,7 +8,11 @@ import {
 } from '@/services/isolation/provider-secrets-store.js';
 import { assertNotClaudeSubscriptionToken } from '@/modules/providers/shared/credentials/subscription-token-guard.js';
 import { resolveSlotKey } from '@/services/isolation/provider-slot-key.js';
+// Namespace import on purpose (same reason as credential-principal.js): many
+// test files mock the database barrel with a partial export set.
+import * as database from '@/modules/database/index.js';
 import { AppError } from '@/shared/utils.js';
+import { isQwenPlanEnabled, qwenPlanProfileVerdict } from '@/services/isolation/opencode-qwen-plan.js';
 
 /**
  * provider-secrets.service — the production caller over the encrypted per-user
@@ -136,6 +140,48 @@ function getQwenProfileForUser(
   return resolved?.key ? parseQwenProfile(resolved.key) : null;
 }
 
+/**
+ * T-1906: version of the personal-use terms a member must accept before a Qwen
+ * Coding Plan key is stored. ONE definition: every write path reaches setKey.
+ */
+export const QWEN_CONSENT_VERSION = 'qwen-plan-personal-use/2026-09-28';
+
+/**
+ * Request facts the Qwen credential audit row carries (T-1906). Never the key.
+ * `consentVersion` is set only by a path that collected the member's explicit
+ * `consent: true` (per-provider route or company route); setKey refuses a
+ * Qwen write without it.
+ */
+export type QwenCredentialAuditContext = {
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  consentVersion?: string | null;
+};
+
+function toAuditUserId(userId: string | number | null | undefined): number | undefined {
+  const id = Number(userId);
+  return Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
+/**
+ * The ONE place a Qwen credential write/delete is audited (T-1906): every path
+ * (per-provider route, company fan-out) reaches setKey/deleteKey, so a row per
+ * mutation is guaranteed without the routes repeating it.
+ */
+function auditQwenCredential(
+  action: 'qwen_credential_set' | 'qwen_credential_deleted',
+  userId: string | number | null | undefined,
+  metadata: Record<string, unknown>,
+  context: QwenCredentialAuditContext | undefined,
+): void {
+  database.auditLogDb?.record(action, {
+    userId: toAuditUserId(userId),
+    metadata: { provider: 'qwen', scope: 'personal', ...metadata },
+    ipAddress: context?.ipAddress ?? undefined,
+    userAgent: context?.userAgent ?? undefined,
+  });
+}
+
 export type ProviderSecretStatus = {
   provider: VendorSecretProviderId;
   configured: boolean;
@@ -175,6 +221,7 @@ export const providerSecretsService = {
     provider: string,
     apiKey: unknown,
     qwenOptions?: { plan?: unknown; region?: unknown },
+    auditContext?: QwenCredentialAuditContext,
   ): ProviderSecretStatus {
     const vendor = assertVendorProvider(provider);
 
@@ -205,19 +252,37 @@ export const providerSecretsService = {
       });
     }
     let storedValue = apiKey.trim();
+    let qwenProfile: QwenCredentialProfile | null = null;
     if (vendor === 'qwen') {
-      const profile = createQwenCredentialProfile(
+      qwenProfile = createQwenCredentialProfile(
         apiKey,
         qwenOptions?.plan ?? 'coding_plan',
         qwenOptions?.region ?? 'international',
       );
-      storedValue = JSON.stringify(profile);
+      storedValue = JSON.stringify(qwenProfile);
+      // T-1906: the key is personal and interactive-only (vendor terms); it is
+      // never stored without the member's recorded acknowledgement.
+      if (auditContext?.consentVersion !== QWEN_CONSENT_VERSION) {
+        throw new AppError('This key is personal: confirm the personal-use terms before saving it.', {
+          code: 'CONSENT_REQUIRED',
+          statusCode: 400,
+          details: { consentVersion: QWEN_CONSENT_VERSION },
+        });
+      }
     }
 
     if (userId === null || userId === undefined) {
       setSharedVendorKey(vendor, storedValue);
     } else {
       setProviderKey(userId, vendor, storedValue);
+    }
+    if (qwenProfile) {
+      auditQwenCredential('qwen_credential_set', userId, {
+        configured: true,
+        plan: qwenProfile.plan,
+        region: qwenProfile.region,
+        consentVersion: QWEN_CONSENT_VERSION,
+      }, auditContext);
     }
     return { provider: vendor, configured: true };
   },
@@ -229,6 +294,7 @@ export const providerSecretsService = {
   deleteKey(
     userId: string | number | null | undefined,
     provider: string,
+    auditContext?: QwenCredentialAuditContext,
   ): ProviderSecretStatus {
     const vendor = assertVendorProvider(provider);
     if (vendor === 'qwen' && (userId === null || userId === undefined)) {
@@ -241,6 +307,9 @@ export const providerSecretsService = {
       deleteSharedVendorKey(vendor);
     } else {
       deleteProviderKey(userId, vendor);
+    }
+    if (vendor === 'qwen') {
+      auditQwenCredential('qwen_credential_deleted', userId, { configured: false }, auditContext);
     }
     return { provider: vendor, configured: false };
   },
@@ -263,6 +332,22 @@ export const providerSecretsService = {
       configured: vendor === 'qwen'
         ? getQwenProfileForUser(userId) !== null
         : resolveSlotKey(userId, vendor, { sharedFallback: false }) !== null,
+    };
+  },
+
+  /**
+   * T-1906: whether this member can run `qwen-plan/*` models through OpenCode.
+   * `status` is 'ok' | 'missing_key' | 'incompatible_profile' (the same codes a
+   * refused launch carries); `enabled` mirrors NASSAJ_OPENCODE_QWEN_PLAN.
+   * Never returns the key.
+   */
+  getQwenPlanStatus(userId: string | number | null | undefined): {
+    enabled: boolean;
+    status: 'ok' | 'missing_key' | 'incompatible_profile';
+  } {
+    return {
+      enabled: isQwenPlanEnabled(),
+      status: qwenPlanProfileVerdict(getQwenProfileForUser(userId)),
     };
   },
 

@@ -6,7 +6,6 @@ import { DEFAULT_PROJECT_FOR_EMPTY_SHELL } from '../../../constants/config';
 import type { LLMProvider } from '../../../types/app';
 
 import ProviderLoginTerminal from './ProviderLoginTerminal';
-import QwenConnectTerminal from './QwenConnectTerminal';
 
 type ProviderLoginModalProps = {
   isOpen: boolean;
@@ -98,7 +97,6 @@ const PROVIDER_TITLE_DEFAULTS: Partial<Record<LLMProvider, string>> = {
   kimi: 'Kimi Code CLI Login',
   hermes: 'Hermes Agent',
   antigravity: 'Antigravity (agy) Configuration',
-  qwen: 'Connect Qwen',
 };
 
 /** Latin command/identifier inside a translated sentence — never mirrored. */
@@ -249,12 +247,7 @@ export default function ProviderLoginModal({
         </div>
 
         <div className="flex-1 overflow-hidden">
-          {provider === 'qwen' ? (
-            <QwenConnectTerminal
-              onComplete={handleComplete}
-              onClose={onClose}
-            />
-          ) : deviceAuthNotice ? (
+          {deviceAuthNotice ? (
             <div className="flex h-full flex-col">
               <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/50 dark:bg-amber-900/20">
                 <div className="flex gap-3">

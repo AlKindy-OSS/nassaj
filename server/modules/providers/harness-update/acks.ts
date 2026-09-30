@@ -16,7 +16,6 @@ import type { HarnessSnapshotManifest, StoreBackupRecord } from './snapshot/mani
 import { SNAPSHOT_MAX_AGE_MS } from './snapshot/retention.js';
 import { enumerateStoreCoverage, storesFingerprint, type StoreSpec } from './snapshot/store-backup.js';
 import type { SnapshotRuntime } from './snapshot-runtime.js';
-import { compatibilityOf } from './version-status.service.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -29,23 +28,21 @@ const HARNESS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   opencode: 'OpenCode',
 });
 
-function pinOf(d: HarnessDescriptor): { version: string } | null {
+/** The digest pin of `d`, or null when it has none. */
+export function pinOf(d: HarnessDescriptor): { version: string } | null {
   const pins = PINNED_VENDOR_DIGESTS as Readonly<Record<string, { version: string }>>;
   return d.pinKey !== null && d.pinKey in pins ? pins[d.pinKey] : null;
 }
 
 /**
- * pinBreak facts when moving `d` to `target` leaves its digest pin in a mode
- * that enforces it. An unknown target on a pinned harness is treated as
- * leaving the pin (conservative). Null when nothing would be blocked.
+ * pinBreak facts when moving `d` to `target` leaves its digest pin while the
+ * opt-in NASSAJ_VENDOR_BINARY_PIN is armed. An unknown target on a pinned
+ * harness is treated as leaving the pin (conservative). Null when disarmed.
  */
 export function pinBreakFacts(rt: SnapshotRuntime, d: HarnessDescriptor, target: string | null): PinBreakFacts | null {
   const pin = pinOf(d);
-  if (!pin || target === pin.version) return null;
-  const armed = rt.pinArmed();
-  if (target !== null && compatibilityOf(d, target, armed).state !== 'incompatible') return null;
-  if (!armed && !d.compat?.alwaysEnforcedMode) return null;
-  return { variant: armed ? 'all' : 'carrier', target: target ?? 'latest', pin: pin.version };
+  if (!pin || target === pin.version || !rt.pinArmed()) return null;
+  return { variant: 'all', target: target ?? 'latest', pin: pin.version };
 }
 
 /** Store kinds of `d` as a mutable list for the store helpers. */

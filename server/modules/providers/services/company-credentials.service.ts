@@ -43,6 +43,12 @@
 
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCredentialsService } from '@/modules/providers/services/provider-credentials.service.js';
+import {
+  QWEN_CONSENT_VERSION,
+  providerSecretsService,
+  type QwenCredentialAuditContext,
+} from '@/modules/providers/services/provider-secrets.service.js';
+import { QWEN_PLAN_REFUSAL } from '@/services/isolation/opencode-qwen-plan.js';
 // Relative, like every other shared/ import on the server side (claude-sdk.js,
 // engine-pin.js): the `@/*` alias maps to server/ only.
 import { AppError } from '@/shared/utils.js';
@@ -84,7 +90,29 @@ export type CompanySlotStatus = {
   configured: boolean;
   /** True when this slot is currently held by a subscription login. */
   subscription: boolean;
+  /**
+   * T-1906: present only on a configured qwen slot whose saved profile cannot
+   * drive qwen-plan models (token_plan or china region).
+   */
+  status?: typeof QWEN_PLAN_REFUSAL.INCOMPATIBLE_PROFILE;
 };
+
+/** T-1906: the qwen slot's incompatibility marker, or nothing. Never the key. */
+function qwenSlotStatus(
+  userId: string | number | null | undefined,
+  provider: string,
+  configured: boolean,
+): Pick<CompanySlotStatus, 'status'> {
+  if (provider !== 'qwen' || !configured) return {};
+  try {
+    const profile = providerSecretsService.getQwenProfile(userId);
+    return profile && (profile.plan !== 'coding_plan' || profile.region !== 'international')
+      ? { status: QWEN_PLAN_REFUSAL.INCOMPATIBLE_PROFILE }
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 export type CompanyKeyStatus = {
   companyId: string;
@@ -167,6 +195,21 @@ async function isHeldBySubscription(
   }
 }
 
+/**
+ * T-1906: companies whose key is a PERSONAL subscription the vendor forbids
+ * sharing or automating (Alibaba Coding Plan: personal key, interactive use
+ * only). Saving it requires the member's explicit acknowledgement, and the
+ * acknowledged text version is recorded in the credential audit row.
+ */
+const CONSENT_REQUIRED_COMPANIES: Readonly<Record<string, string>> = Object.freeze({
+  'alibaba-cloud': QWEN_CONSENT_VERSION,
+});
+
+/** The consent text version a company requires, or null when none is needed. */
+export function companyConsentVersion(companyId: string): string | null {
+  return CONSENT_REQUIRED_COMPANIES[companyId] ?? null;
+}
+
 export const companyCredentialsService = {
   /** The companies that own at least one writable slot. */
   companies(): { id: string; name: string }[] {
@@ -199,9 +242,20 @@ export const companyCredentialsService = {
       authenticatedPrincipal?: unknown;
       /** Slots the caller ticked. Absent = every slot (pre-checkbox clients). */
       vendorIds?: readonly string[];
+      /** The member's explicit acknowledgement (required for some companies). */
+      consent?: boolean;
+      auditContext?: QwenCredentialAuditContext;
     } = { isElevated: false },
   ): Promise<CompanyKeyResult> {
     const vendors = selectVendors(companyVendors(companyId), options.vendorIds);
+    const consentVersion = companyConsentVersion(companyId);
+    if (consentVersion !== null && options.consent !== true) {
+      throw new AppError('This key is personal: confirm the personal-use terms before saving it.', {
+        code: 'CONSENT_REQUIRED',
+        statusCode: 400,
+        details: { consentVersion },
+      });
+    }
     if (typeof apiKey !== 'string' || apiKey.trim() === '') {
       throw new AppError('API key is required and must not be empty.', {
         code: 'INVALID_API_KEY',
@@ -234,6 +288,7 @@ export const companyCredentialsService = {
       try {
         await providerCredentialsService.setKey(
           userId, slot.provider, key, slot.target, undefined, options.authenticatedPrincipal,
+          { ...options.auditContext, consentVersion },
         );
         slots.push({ ...base, outcome: 'written' });
       } catch (error) {
@@ -260,7 +315,11 @@ export const companyCredentialsService = {
   async deleteKey(
     userId: string | number | null | undefined,
     companyId: string,
-    options: { isElevated: boolean; vendorIds?: readonly string[] } = { isElevated: false },
+    options: {
+      isElevated: boolean;
+      vendorIds?: readonly string[];
+      auditContext?: QwenCredentialAuditContext;
+    } = { isElevated: false },
   ): Promise<CompanyKeyResult> {
     const vendors = selectVendors(companyVendors(companyId), options.vendorIds);
     const slots: CompanySlotResult[] = [];
@@ -275,7 +334,7 @@ export const companyCredentialsService = {
       }
 
       try {
-        await providerCredentialsService.deleteKey(userId, slot.provider, slot.target);
+        await providerCredentialsService.deleteKey(userId, slot.provider, slot.target, options.auditContext);
         slots.push({ ...base, outcome: 'written' });
       } catch (error) {
         slots.push({
@@ -313,6 +372,7 @@ export const companyCredentialsService = {
         target: slot.target,
         configured,
         subscription: await isHeldBySubscription(slot.provider, userId),
+        ...qwenSlotStatus(userId, slot.provider, configured),
       });
     }
 

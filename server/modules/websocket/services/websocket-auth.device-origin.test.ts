@@ -76,3 +76,25 @@ test('disabled wallet ignores a stale device cookie and preserves bearer websock
   assert.equal(verifyWebSocketClient(request as never, deps), true);
   assert.equal((request.req as { user?: { authenticationKind?: string } }).user?.authenticationKind, 'session');
 });
+
+test('T-1939: a verified bearer refused for a stale SSO attestation is audited as such', async () => {
+  const { default: jwt } = await import('jsonwebtoken');
+  const secret = 'synthetic-ws-classifier-secret';
+  const token = jwt.sign({ userId: 9 }, secret, { expiresIn: '1h' });
+  const request = () => ({ req: { url: `/ws?token=${token}`, headers: { host: 'nassaj.example.test' } } });
+  for (const [fresh, expected] of [[false, 'sso_attestation_stale'], [true, 'user_missing']] as const) {
+    const rejections: string[] = [];
+    const deps: any = dependencies(rejections);
+    deps.deviceSessionsEnabled = () => false;
+    deps.jwtSecret = secret;
+    deps.ssoAttestationFresh = (userId: number) => (userId === 9 ? fresh : true);
+    assert.equal(verifyWebSocketClient(request() as never, deps), false);
+    assert.deepEqual(rejections, [expected]);
+  }
+  const rejections: string[] = [];
+  const deps: any = dependencies(rejections);
+  deps.deviceSessionsEnabled = () => false;
+  deps.jwtSecret = secret;
+  assert.equal(verifyWebSocketClient(request() as never, deps), false);
+  assert.deepEqual(rejections, ['user_missing'], 'no predicate wired: legacy label');
+});

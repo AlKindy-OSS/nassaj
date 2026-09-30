@@ -171,8 +171,9 @@ function extendedCliHarness(provider: ExtendedCliProvider) {
   const calls: string[] = [];
   const adapter = createExtendedCliAdapter(provider, {
     executableProbe: async () => true,
-    versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider],
+    versionProbe: async () => extendedCliAdapterInternals.EXACT_VERSIONS[provider] ?? '1.18.40',
     qwenCapabilityProbe: async () => true,
+    opencodeCapabilityProbe: async () => true,
     hermesToolDefinitionProbe: async () => 0,
     resolveEnv: () => ({}), createRoleHome: async () => fakeRole, cleanupRoleHome: async () => {},
     spawnCapture: async ({ args }) => {

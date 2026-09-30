@@ -6,6 +6,7 @@ import { providerSecretsService } from '@/modules/providers/index.js';
 import { isSpawnBlockedForRunProvider } from '@/modules/providers/harness-update/spawn-admission.js';
 import { resolveProviderEnv } from '@/services/isolation/resolve-provider-env.js';
 import { sanitizeVendorAgentEnv } from '@/services/isolation/sanitize-vendor-agent-env.js';
+import { isQwenPlanModel } from '@/services/isolation/opencode-qwen-plan.js';
 import { resolveHarnessBinary } from '@/shared/harness-binaries.js';
 import { resolveOpenCodeBinaryPath } from '@/shared/utils.js';
 
@@ -45,6 +46,8 @@ type AdapterOptions = Readonly<{
   executableProbe?: (binary: string) => Promise<boolean>;
   versionProbe?: (binary: string) => Promise<string>;
   qwenCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv }) => Promise<boolean>;
+  /** opencode cell: the run flags exist and the zero-tools/deny config resolves (not a version pin). */
+  opencodeCapabilityProbe?: (input: { binary: string; env: NodeJS.ProcessEnv; cwd: string }) => Promise<boolean>;
   /** Hermes enablement requires a pinned-runtime probe that observes zero tool definitions. */
   hermesToolDefinitionProbe?: (input: { binary: string; env: NodeJS.ProcessEnv }) => Promise<number>;
   createRoleHome?: () => Promise<EphemeralRoleHome>;
@@ -52,9 +55,20 @@ type AdapterOptions = Readonly<{
   spawnCapture?: (input: IsolatedCliProcessSpec & { role: EphemeralRoleHome; signal?: AbortSignal }) => Promise<IsolatedCliResult>;
 }>;
 
-const EXACT_VERSIONS: Readonly<Record<ExtendedCliProvider, string>> = Object.freeze({
-  qwen: '0.21.12', opencode: '1.18.32', hermes: '0.17.0',
+/**
+ * Exact release pins for the disabled qwen/hermes cells. opencode is not pinned
+ * (owner decision 2026-09-29): any release that runs and reports a version is
+ * accepted, so the cell survives harness updates.
+ */
+const EXACT_VERSIONS: Readonly<Partial<Record<ExtendedCliProvider, string>>> = Object.freeze({
+  qwen: '0.21.12', hermes: '0.17.0',
 });
+
+/** True when `version` was reported and satisfies this provider's pin, if any. */
+function versionAccepted(provider: ExtendedCliProvider, version: string): boolean {
+  const pin = EXACT_VERSIONS[provider];
+  return version !== '' && (pin === undefined || version === pin);
+}
 
 async function executable(binary: string): Promise<boolean> {
   if (!binary.includes('/')) return true;
@@ -108,6 +122,43 @@ async function defaultQwenCapabilityProbe(input: { binary: string; env: NodeJS.P
   } catch { return false; }
 }
 
+/** Flags the opencode cell passes to `opencode run` (see opencodeSpec). */
+const OPENCODE_RUN_FLAGS = Object.freeze(['--pure', '--format', '--agent', '--model']);
+
+/** True when a resolved `debug agent` document keeps every tool off and denies `*`. */
+function opencodeAgentIsToolless(stdout: string): boolean {
+  const start = stdout.indexOf('{');
+  const end = stdout.lastIndexOf('}');
+  if (start < 0 || end <= start) return false;
+  const agent = JSON.parse(stdout.slice(start, end + 1)) as {
+    tools?: Record<string, unknown>; permission?: { permission?: unknown; action?: unknown }[];
+  };
+  const tools = Object.values(agent.tools ?? {});
+  const deniesAll = (agent.permission ?? []).some((rule) => rule.permission === '*' && rule.action === 'deny');
+  return tools.length > 0 && tools.every((enabled) => enabled === false) && deniesAll;
+}
+
+/**
+ * opencode cell capability probe, run in the same cage as the cell: `run --help`
+ * must list the flags the cell uses, and `debug agent supervisor` under the
+ * cell's OPENCODE_CONFIG_CONTENT must resolve to zero enabled tools. Fails closed
+ * for this cell only; interactive opencode/GLM chat never calls it.
+ */
+async function defaultOpencodeCapabilityProbe(input: { binary: string; env: NodeJS.ProcessEnv; cwd: string }): Promise<boolean> {
+  const role = await createEphemeralRoleHome();
+  try {
+    const env = opencodeCellEnv(input.env, ROLE_SYSTEM);
+    const help = await spawnInIsolatedCliCage({ binary: input.binary, args: ['run', '--help'], cwd: input.cwd, env, role });
+    const helpText = `${help.stdout}\n${help.stderr}`;
+    if (help.code !== 0 || !OPENCODE_RUN_FLAGS.every((flag) => helpText.includes(flag))) return false;
+    const agent = await spawnInIsolatedCliCage({
+      binary: input.binary, args: ['debug', 'agent', 'supervisor'], cwd: input.cwd, env, role,
+    });
+    return agent.code === 0 && opencodeAgentIsToolless(agent.stdout);
+  } catch { return false; }
+  finally { await cleanupEphemeralRoleHome(role); }
+}
+
 function hiddenSystem(request: { hiddenContext?: readonly string[]; system?: string }): string {
   return [ROLE_SYSTEM, ...(request.hiddenContext ?? []), request.system ?? ''].filter(Boolean).join('\n\n');
 }
@@ -142,15 +193,20 @@ function qwenSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessEnv; 
   });
 }
 
-function opencodeSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessEnv; model: string; prompt: string; system: string }): IsolatedCliProcessSpec {
+/** The cell's sanitized env with its zero-tools, deny-all inline config. */
+function opencodeCellEnv(env: NodeJS.ProcessEnv, system: string): NodeJS.ProcessEnv {
   const config = JSON.stringify({
     default_agent: 'supervisor',
-    agent: { supervisor: { mode: 'primary', prompt: input.system, tools: { '*': false, task: false } } },
+    agent: { supervisor: { mode: 'primary', prompt: system, tools: { '*': false, task: false } } },
     tools: { '*': false, task: false }, permission: { '*': 'deny', task: 'deny' },
   });
+  return Object.freeze({ ...sanitizeVendorAgentEnv(env), OPENCODE_CONFIG_CONTENT: config });
+}
+
+function opencodeSpec(input: { binary: string; cwd: string; env: NodeJS.ProcessEnv; model: string; prompt: string; system: string }): IsolatedCliProcessSpec {
   return Object.freeze({
     binary: input.binary, cwd: input.cwd,
-    env: Object.freeze({ ...sanitizeVendorAgentEnv(input.env), OPENCODE_CONFIG_CONTENT: config }),
+    env: opencodeCellEnv(input.env, input.system),
     args: Object.freeze(['run', '--pure', '--format', 'json', '--agent', 'supervisor', '--model', input.model, input.prompt]),
   });
 }
@@ -190,7 +246,7 @@ function parseOutput(provider: ExtendedCliProvider, stdout: string): string {
   return provider === 'hermes' ? stdout.trim() : parseJsonLines(provider, stdout);
 }
 
-/** Registry-resolved binary; opencode goes through its digest-pinned wrapper. Throws when unresolved. */
+/** Registry-resolved binary; opencode goes through its (opt-in) digest-pin wrapper. Throws when unresolved. */
 function resolveExtendedCliBinary(provider: ExtendedCliProvider): string {
   return provider === 'opencode' ? resolveOpenCodeBinaryPath() : resolveHarnessBinary(provider);
 }
@@ -206,7 +262,7 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
   const run = options.spawnCapture ?? spawnInIsolatedCliCage;
   let pinnedAndSafe = false;
   // Resolved at probe time through the harness registry (T-1873) and pinned for
-  // invoke; opencode additionally passes its vendor digest pin.
+  // invoke; opencode's digest pin applies only when NASSAJ_VENDOR_BINARY_PIN is armed.
   let binary = '';
   const registration: TurnAdapterRegistration = {
     id: `${provider}-cli-supervisor-ephemeral`, capabilities: EXTENDED_CLI_CAPABILITIES,
@@ -219,11 +275,15 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
       } catch {
         return false;
       }
-      if (!await executableProbe(binary) || await versionProbe(binary) !== EXACT_VERSIONS[provider]) return false;
+      if (!await executableProbe(binary) || !versionAccepted(provider, await versionProbe(binary))) return false;
       const env = resolveEnv(userId);
       if (provider === 'qwen') {
         const capabilityProbe = options.qwenCapabilityProbe ?? defaultQwenCapabilityProbe;
         if (!await capabilityProbe({ binary, env })) return false;
+      }
+      if (provider === 'opencode') {
+        const capabilityProbe = options.opencodeCapabilityProbe ?? defaultOpencodeCapabilityProbe;
+        if (!await capabilityProbe({ binary, env, cwd })) return false;
       }
       if (provider === 'hermes') {
         const toolProbe = options.hermesToolDefinitionProbe ?? defaultHermesToolDefinitionProbe;
@@ -239,6 +299,12 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
       if (request.persist !== false) throw new TurnAdapterError('invalid_persistence', 'supervised CLI roles are ephemeral');
       if (request.effects?.length) throw new TurnAdapterError('effects_unsupported', 'supervised CLI roles deny effects');
       if (request.signal?.aborted) throw new TurnAdapterError('aborted', `${provider} role aborted before launch`);
+      // T-1906: a Coding Plan turn must run through spawnOpenCode (sender key,
+      // interactive marker, carrier guards). This cell spawns opencode directly
+      // and is not an interactive human turn, so qwen-plan/* is refused here.
+      if (isQwenPlanModel(request.model)) {
+        throw new TurnAdapterError('credential_unavailable', 'Qwen Coding Plan models run only in interactive chat turns');
+      }
       if (isSpawnBlockedForRunProvider(provider)) {
         throw new TurnAdapterError('provider_unavailable', `The ${provider} runtime is being updated right now`);
       }
@@ -272,6 +338,6 @@ export function createExtendedCliAdapter(provider: ExtendedCliProvider, options:
 
 export const extendedCliAdapterInternals = Object.freeze({
   EXACT_VERSIONS, ROLE_SYSTEM, qwenSpec, opencodeSpec, hermesSpec, parseOutput,
-  defaultVersionProbe, defaultHermesToolDefinitionProbe,
+  defaultVersionProbe, defaultHermesToolDefinitionProbe, opencodeAgentIsToolless, OPENCODE_RUN_FLAGS,
   defaultQwenCapabilityProbe,
 });

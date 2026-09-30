@@ -95,3 +95,38 @@ describe('no body other than Claude is handed an engine', () => {
     expect(rowsForBody('cursor', CATALOG, KEYED)).toEqual([]);
   });
 });
+
+/**
+ * T-1906 (owner decision 2026-09-28): the Alibaba Coding Plan key is now
+ * consumed through OpenCode's own catalog as `qwen-plan/*`. The server is
+ * expected to filter its own answer by key status too; this is the client-side
+ * half of that defense in depth, the same shape as the Claude-body engine gate
+ * above.
+ */
+describe('qwen-plan models under OpenCode are gated behind the Alibaba key (T-1906)', () => {
+  const catalogWithQwenPlan: Partial<Record<LLMProvider, ProviderModelsDefinition>> = {
+    ...CATALOG,
+    opencode: def('opencode/big-pickle', 'glm/glm-5.2', 'qwen-plan/qwen3-coder-plus'),
+  };
+
+  it('hides qwen-plan rows when no Alibaba key is stored', () => {
+    const rows = rowsForBody('opencode', catalogWithQwenPlan, { glm: true, qwen: false });
+    expect(rows.some((r) => r.model.startsWith('qwen-plan/'))).toBe(false);
+    // Its siblings are untouched by the gate.
+    expect(rows.some((r) => r.model === 'opencode/big-pickle')).toBe(true);
+    expect(rows.some((r) => r.model === 'glm/glm-5.2')).toBe(true);
+  });
+
+  it('shows qwen-plan rows, named by host, once a key is stored', () => {
+    const rows = rowsForBody('opencode', catalogWithQwenPlan, { glm: true, qwen: true });
+    const qwenPlan = rows.find((r) => r.model === 'qwen-plan/qwen3-coder-plus');
+    expect(qwenPlan).toBeDefined();
+    expect(qwenPlan!.engine).toEqual({ key: 'yourKey', vars: { host: 'Alibaba Cloud' } });
+    expect(qwenPlan!.engineProvider).toBeNull();
+  });
+
+  it('treats a missing qwen status the same as an explicit false (locked out by default)', () => {
+    const rows = rowsForBody('opencode', catalogWithQwenPlan, { glm: true });
+    expect(rows.some((r) => r.model.startsWith('qwen-plan/'))).toBe(false);
+  });
+});

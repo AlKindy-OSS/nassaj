@@ -5,24 +5,23 @@
  * (chat-websocket.service.ts, KM-3). This is the narrow "survived the
  * governance / disable wall and now routed to the right launcher" layer.
  *
- * THE CORE CONTRACT (KM-3 / §4.2, updated per ADR-062 re-enable of kimi):
+ * THE CORE CONTRACT (KM-3 / §4.2; kimi is back in DISABLED_PROVIDERS per the
+ * owner decision of 2026-09-29, c4fe8f58c):
  *   • `mode === 'agent'` + `spawnKimiAgent` injected → spawnKimiAgent is called
- *     (the governed native CLI path).
- *   • `mode === 'agent'` WITHOUT `spawnKimiAgent` → falls back to the vendor
- *     chat launcher spawnKimi. kimi is no longer in DISABLED_PROVIDERS (ADR-062),
- *     so with no native launcher wired the agent request degrades to the chat
- *     path rather than being refused; spawnKimiAgent is NOT invented.
- *   • No mode (chat turn) → spawnKimi (vendor-runtime), never spawnKimiAgent.
- *   • kimi CHAT stays on `spawnKimi` (vendor-runtime), never routed to
- *     `spawnKimiAgent`.
+ *     (the ADR-062 agent-run bypass of the disable wall, unchanged by that
+ *     decision — the dormant native launcher mechanics stay covered here).
+ *   • `mode === 'agent'` WITHOUT `spawnKimiAgent` → refused as disabled; no
+ *     launcher runs and spawnKimiAgent is NOT invented.
+ *   • No mode / mode=chat → refused as disabled; neither spawnKimi nor
+ *     spawnKimiAgent runs.
  *
  * Proves (all pure — module-mocked DB, no binary, no real WS):
  *  (A) agent + wired → spawnKimiAgent called with (command, options, writer).
- *  (B) agent + NOT wired → spawnKimi (chat) handles it, spawnKimiAgent untouched.
- *  (C) chat (no mode) → spawnKimi, never spawnKimiAgent.
+ *  (B) agent + NOT wired → refused, no launcher.
+ *  (C) chat (no mode / mode=chat) → refused, no launcher.
  *  (D) spawnKimi never called when spawnKimiAgent handles the turn.
- *  (E) vendor-runtime stays intact: a kimi chat turn does NOT leak into
- *      spawnKimiAgent even when the launcher is wired.
+ *  (E) a refused kimi chat turn does NOT leak into spawnKimiAgent even when the
+ *      launcher is wired.
  *
  * Runner:
  *   npx tsx --experimental-test-module-mocks --tsconfig server/tsconfig.json \
@@ -143,6 +142,18 @@ function makeDeps(overrides: {
   return { deps, calls, spawnLog };
 }
 
+/** Asserts the single not-started refusal the dispatch seam sends for a disabled provider. */
+function assertRefusedAsDisabled(sent: SentPayload[], calls: string[]) {
+  assert.deepEqual(calls, [], 'no launcher runs for a disabled provider');
+  assert.equal(sent.length, 1, 'exactly one refusal frame');
+  const [refusal] = sent as Array<SentPayload & { notStarted?: boolean }>;
+  assert.equal(refusal.kind, 'complete');
+  assert.equal(refusal.success, false);
+  assert.equal(refusal.provider, 'kimi');
+  assert.equal(refusal.notStarted, true, 'refused before a run starts');
+  assert.match(String(refusal.error), /disabled on this deployment/);
+}
+
 // ---------------------------------------------------------------------------
 // (A) mode==='agent' + spawnKimiAgent wired → spawnKimiAgent called
 // ---------------------------------------------------------------------------
@@ -199,15 +210,14 @@ test('(A) spawnKimiAgent receives the correct command and options', async () => 
 });
 
 // ---------------------------------------------------------------------------
-// (B) mode==='agent' WITHOUT spawnKimiAgent wired → chat-launcher fallback
+// (B) mode==='agent' WITHOUT spawnKimiAgent wired → refused as disabled
 // ---------------------------------------------------------------------------
-test('(B) kimi mode=agent WITHOUT spawnKimiAgent wired → falls back to spawnKimi (chat)', async () => {
+test('(B) kimi mode=agent WITHOUT spawnKimiAgent wired → refused, no launcher', async () => {
   const { writer, sent } = makeWriter();
 
-  // No spawnKimiAgent in deps → kimiAgentRun=false. kimi is no longer globally
-  // disabled (ADR-062), so the agent request degrades to the vendor chat
-  // launcher spawnKimi instead of being refused. spawnKimiAgent must NOT be
-  // invented, and no refusal message is sent.
+  // No spawnKimiAgent in deps → kimiAgentRun=false → no bypass. kimi is globally
+  // disabled (2026-09-29), so the request is refused; it does not degrade to the
+  // chat launcher and spawnKimiAgent is not invented.
   const { deps, calls } = makeDeps({});
 
   await dispatchProviderCommand(
@@ -217,24 +227,17 @@ test('(B) kimi mode=agent WITHOUT spawnKimiAgent wired → falls back to spawnKi
     deps,
   );
 
-  assert.deepEqual(
-    calls,
-    ['kimi-chat'],
-    'the vendor chat launcher handles the agent request when no native launcher is wired',
-  );
-  assert.ok(!calls.includes('kimi-agent'), 'spawnKimiAgent must not be called when it is not wired');
-  assert.deepEqual(sent, [], 'no refusal message — kimi is enabled');
+  assertRefusedAsDisabled(sent, calls);
 });
 
 // ---------------------------------------------------------------------------
-// (C) No mode (chat turn) → vendor chat launcher spawnKimi
+// (C) No mode (chat turn) → refused as disabled
 // ---------------------------------------------------------------------------
-test('(C) kimi chat (no mode) → spawnKimi (chat), never spawnKimiAgent', async () => {
+test('(C) kimi chat (no mode) → refused, never spawnKimi or spawnKimiAgent', async () => {
   const { writer, sent } = makeWriter();
 
   // spawnKimiAgent IS wired, but no mode=agent → kimiAgentRun=false (chat path).
-  // kimi chat is enabled (ADR-062) → routes to spawnKimi, never a refusal and
-  // never spawnKimiAgent.
+  // kimi is disabled → refused; neither launcher runs.
   const { deps, calls } = makeDeps({
     spawnKimiAgent: async () => {
       throw new Error('spawnKimiAgent must not be called for a chat turn');
@@ -248,12 +251,10 @@ test('(C) kimi chat (no mode) → spawnKimi (chat), never spawnKimiAgent', async
     deps,
   );
 
-  assert.deepEqual(calls, ['kimi-chat'], 'chat turn routes to the vendor chat launcher');
-  assert.ok(!calls.includes('kimi-agent'), 'spawnKimiAgent must not be called for chat');
-  assert.deepEqual(sent, [], 'no refusal — kimi chat is enabled');
+  assertRefusedAsDisabled(sent, calls);
 });
 
-test('(C) kimi chat with explicit mode=chat → spawnKimi, no native launcher', async () => {
+test('(C) kimi chat with explicit mode=chat → refused, no launcher', async () => {
   const { writer, sent } = makeWriter();
   const { deps, calls } = makeDeps({
     spawnKimiAgent: async () => {},
@@ -266,10 +267,8 @@ test('(C) kimi chat with explicit mode=chat → spawnKimi, no native launcher', 
     deps,
   );
 
-  // mode=chat is NOT 'agent' → kimiAgentRun=false → vendor chat launcher.
-  assert.deepEqual(calls, ['kimi-chat'], 'mode=chat routes to spawnKimi');
-  assert.ok(!calls.includes('kimi-agent'), 'spawnKimiAgent must not run for mode=chat');
-  assert.deepEqual(sent, [], 'no refusal — kimi chat is enabled');
+  // mode=chat is NOT 'agent' → kimiAgentRun=false → the disable wall refuses it.
+  assertRefusedAsDisabled(sent, calls);
 });
 
 // ---------------------------------------------------------------------------
@@ -296,13 +295,13 @@ test('(D) spawnKimi is NOT called when spawnKimiAgent handles the agent turn', a
 });
 
 // ---------------------------------------------------------------------------
-// (E) Vendor-runtime stays intact: chat turn does not leak into spawnKimiAgent
+// (E) A refused chat turn does not leak into spawnKimiAgent
 // ---------------------------------------------------------------------------
 test('(E) vendor-runtime isolation: chat turn never reaches spawnKimiAgent', async () => {
   // Even when spawnKimiAgent is wired, a chat-mode kimi turn must NOT end up in
-  // spawnKimiAgent — it routes to the vendor chat launcher spawnKimi. This proves
-  // the native-agent bypass is ONLY for agent mode.
-  const { writer } = makeWriter();
+  // spawnKimiAgent — it is refused as disabled. This proves the native-agent
+  // bypass is ONLY for agent mode.
+  const { writer, sent } = makeWriter();
   let kimiAgentHit = false;
 
   const { deps, calls } = makeDeps({
@@ -311,7 +310,7 @@ test('(E) vendor-runtime isolation: chat turn never reaches spawnKimiAgent', asy
     },
   });
 
-  // Chat mode: kimi chat is enabled → routed to spawnKimi, spawnKimiAgent NEVER touched.
+  // Chat mode: kimi is disabled → refused, spawnKimiAgent NEVER touched.
   await dispatchProviderCommand(
     'kimi-command',
     { command: 'tell me something', options: { mode: 'chat', coordinationLevel: 'direct' } },
@@ -324,8 +323,8 @@ test('(E) vendor-runtime isolation: chat turn never reaches spawnKimiAgent', asy
     false,
     'spawnKimiAgent must not be invoked for a chat-mode kimi turn',
   );
-  // Confirm it routed to the vendor chat launcher (not silently dropped).
-  assert.deepEqual(calls, ['kimi-chat'], 'chat-mode kimi routes to the vendor chat launcher');
+  // Confirm it was refused explicitly (not silently dropped).
+  assertRefusedAsDisabled(sent, calls);
 });
 
 // ---------------------------------------------------------------------------

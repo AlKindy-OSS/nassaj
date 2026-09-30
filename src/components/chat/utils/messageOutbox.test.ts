@@ -1036,11 +1036,20 @@ function makeMemoryIDB() {
   };
 }
 
-/** انتظر التزام جميع معاملات IDB المعلَّقة. */
-async function flushIDB() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await new Promise<void>(resolve => setTimeout(resolve, 0));
+/**
+ * انتظر التزام جميع معاملات IDB المعلَّقة.
+ *
+ * T-1936: عدّة معاملات متسلسلة (`hydrateV2` ثلاثٌ، وسلسلة `importLegacyOutbox`
+ * غير المنتظَرة خلفها) قد تحتاج أكثر من دورة واحدة من microtask+macrotask
+ * لتلتزم كلّها؛ جولة واحدة كانت كافية بالصدفة حين كانت قراءة التفعيل معاملةً
+ * منفصلة (خطوة إضافية أزاحت التوقيت). التكرار هنا أعمّ من عدّ الجولات يدوياً.
+ */
+async function flushIDB(rounds = 5) {
+  for (let i = 0; i < rounds; i++) {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
 }
 
 describe('B-1034 — إخلاء تلقائي في مسار v2', () => {
@@ -1236,6 +1245,28 @@ describe('B-1034 — إخلاء تلقائي في مسار v2', () => {
     expect(ids).toContain('imgEntry');     // حامل الصور يبقى رغم أنه الأحدث
     expect(ids).toContain('pressure');
     expect(getOutboxSnapshot()).toHaveLength(MAX_OUTBOX_ENTRIES);
+  });
+
+  it('T-1936 (6): راية التفعيل تُكتب مرّة أولى وتبقى ثابتة عند إرسال ثانٍ', async () => {
+    const metaStore = fakeIDB.getStoreMap('nassaj-outbox-v2', 'meta');
+    // مفتاح الحساب هو مفتاح صندوق v1 نفسه (`userKey`)، لا معرّف المستخدم مجرداً.
+    const account = 'nassaj_outbox_v1_u99';
+    const key = `activation:${account}`;
+
+    expect(metaStore.get(key)).toBeUndefined();
+
+    const first = await recordOutboxEntryDurably({ id: 'act1', projectId: PROJECT, sessionId: SESSION, text: 'أول' });
+    await flushIDB();
+    expect(first).not.toBeNull();
+    const firstMarker = metaStore.get(key) as { activatedAt: number } | undefined;
+    expect(firstMarker?.activatedAt).toBeTypeOf('number');
+
+    // إرسال ثانٍ — الراية تبقى كما كُتبت أول مرّة، لا تُستبدَل (item 4).
+    const second = await recordOutboxEntryDurably({ id: 'act2', projectId: PROJECT, sessionId: SESSION, text: 'ثانٍ' });
+    await flushIDB();
+    expect(second).not.toBeNull();
+    const secondMarker = metaStore.get(key) as { activatedAt: number } | undefined;
+    expect(secondMarker?.activatedAt).toBe(firstMarker?.activatedAt);
   });
 });
 

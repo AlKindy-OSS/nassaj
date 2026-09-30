@@ -25,6 +25,8 @@ export type WebAuthnCredentialRow = {
   name: string | null;
   created_at: string;
   last_used_at: string | null;
+  /** 1 when enrolled under the hardened ceremony (B-1407); only these may step up. */
+  step_up_eligible: number;
 };
 
 /** Listing shape — everything except the public key bytes. */
@@ -43,10 +45,13 @@ export type CreateWebAuthnCredentialInput = {
   backedUp?: boolean;
   aaguid?: string | null;
   name?: string | null;
+  /** True only for passkeys enrolled with a step-up proof and user verification. */
+  stepUpEligible?: boolean;
 };
 
 const SUMMARY_COLUMNS =
-  'id, user_id, counter, transports, device_type, backed_up, aaguid, name, created_at, last_used_at';
+  'id, user_id, counter, transports, device_type, backed_up, aaguid, name, created_at, last_used_at, '
+  + 'step_up_eligible';
 
 export const webauthnCredentialsDb = {
   /** Persists a newly verified registration. */
@@ -54,8 +59,9 @@ export const webauthnCredentialsDb = {
     const db = getConnection();
     db.prepare(
       `INSERT INTO webauthn_credentials
-         (id, user_id, public_key, counter, transports, device_type, backed_up, aaguid, name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, user_id, public_key, counter, transports, device_type, backed_up, aaguid, name,
+          step_up_eligible)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       input.id,
       input.userId,
@@ -65,7 +71,8 @@ export const webauthnCredentialsDb = {
       input.deviceType ?? null,
       input.backedUp ? 1 : 0,
       input.aaguid ?? null,
-      input.name ?? null
+      input.name ?? null,
+      input.stepUpEligible === true ? 1 : 0
     );
   },
 
@@ -84,6 +91,17 @@ export const webauthnCredentialsDb = {
       .prepare(
         `SELECT ${SUMMARY_COLUMNS} FROM webauthn_credentials
          WHERE user_id = ? ORDER BY created_at DESC, id ASC`
+      )
+      .all(userId) as WebAuthnCredentialSummary[];
+  },
+
+  /** The user's step-up-eligible credentials (step-up allowCredentials), no key bytes. */
+  listStepUpEligibleByUserId(userId: number): WebAuthnCredentialSummary[] {
+    const db = getConnection();
+    return db
+      .prepare(
+        `SELECT ${SUMMARY_COLUMNS} FROM webauthn_credentials
+         WHERE user_id = ? AND step_up_eligible = 1 ORDER BY created_at DESC, id ASC`
       )
       .all(userId) as WebAuthnCredentialSummary[];
   },

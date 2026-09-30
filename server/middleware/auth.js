@@ -4,6 +4,7 @@ import * as databaseModule from '../modules/database/index.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { clientIp } from '../utils/client-ip.js';
 import { enforceCookieMutationGuard } from '../modules/account-wallet/request-csrf.js';
+import { refuseStaleAttestation, userSsoAttestationFresh } from '../services/sso-attestation.js';
 
 import { recordAuthRejection } from './auth-rejection-audit.js';
 
@@ -423,6 +424,13 @@ const authenticateToken = async (req, res, next) => {
     if (!resolved || !resolved.wallet.activeSlotId) return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
     const user = userDb.getUserById(resolved.principal.userId);
     if (!user) return res.status(401).json({ error: 'Device session invalid', code: 'device_session_invalid' });
+    if (!userSsoAttestationFresh(user)) {
+      recordAuthRejection({
+        reason: 'sso_attestation_stale', transport: 'rest', userId: user.id,
+        ipAddress: clientIp(req), userAgent: req.headers['user-agent'] ?? null,
+      });
+      return refuseStaleAttestation(res);
+    }
     req.user = user;
     req.user.userId = user.id;
     req.user.authenticationKind = 'device_session';
@@ -501,6 +509,16 @@ const authenticateToken = async (req, res, next) => {
         ipAddress: ip, userAgent: ua,
       });
       return res.status(401).json({ error: 'Token invalidated' });
+    }
+
+    // T-1939 slice 3: a linked member whose SSO attestation aged out is refused
+    // BEFORE the auto-renew below, so a stale member is never re-issued a token.
+    if (!userSsoAttestationFresh(user)) {
+      recordAuthRejection({
+        reason: 'sso_attestation_stale', transport: 'rest', userId: user.id,
+        ipAddress: ip, userAgent: ua,
+      });
+      return refuseStaleAttestation(res);
     }
 
     // Auto-refresh: if token is past halfway through its lifetime, issue a new one.
@@ -612,6 +630,15 @@ const authenticatePasswordChange = async (req, res, next) => {
     if (!user || user.must_change_password !== 1
         || user.password_changed_at !== decoded.pwd_iat) {
       return res.status(401).json({ error: 'Invalid password change session' });
+    }
+    // T-1939 slice 3: /me/password issues a JWT or device session, so the
+    // forced-rotation cookie must not outlive the member's SSO attestation.
+    if (!userSsoAttestationFresh(user)) {
+      recordAuthRejection({
+        reason: 'sso_attestation_stale', transport: 'rest', userId: user.id,
+        ipAddress: clientIp(req), userAgent: req.headers['user-agent'] ?? null,
+      });
+      return refuseStaleAttestation(res);
     }
     req.user = user;
     req.user.userId = user.id;
@@ -758,6 +785,10 @@ const authenticateWebSocket = (token) => {
         || decoded.auth_gen !== user.authorization_generation) {
       return null;
     }
+    // T-1939 slice 3: same SSO attestation window as the REST verifier.
+    if (!userSsoAttestationFresh(user)) {
+      return null;
+    }
     return {
       id: user.id,
       userId: user.id,
@@ -778,7 +809,7 @@ const authenticateDeviceWebSocket = (secret) => {
   const resolved = deviceAccountSessionsDb.resolve(secret);
   if (!resolved) return null;
   const user = userDb.getUserById(resolved.principal.userId);
-  if (!user) return null;
+  if (!user || !userSsoAttestationFresh(user)) return null;
   return {
     id: user.id,
     userId: user.id,

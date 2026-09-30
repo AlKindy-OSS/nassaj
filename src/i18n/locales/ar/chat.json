@@ -737,7 +737,12 @@
     "stale": "بلا إشارة",
     "staleTooltip": "بدأ ولم يُعِد نتيجة، وتوقّف نصّه عن النموّ — لا يعمل ولا يُؤكَّد موته.",
     "collapseAria": "طيّ نشاط الوكيل",
-    "expandAria": "بسط نشاط الوكيل"
+    "expandAria": "بسط نشاط الوكيل",
+    "hideCompleted": "إخفاء المكتمل",
+    "showCompleted": "إظهار المكتمل ({{count}})",
+    "hideCompletedAria": "إخفاء الوكلاء المكتملين",
+    "showCompletedAria": "إظهار الوكلاء المكتملين",
+    "allCompletedSummary": "{{count}} مكتمل"
   },
   "projectSelection": {
     "startChatWithProvider": "اختر مشروعاً لبدء المحادثة مع {{provider}}"
@@ -1209,12 +1214,13 @@
       "stopTurn": "أوقف الدور"
     },
     "composerNote": "يُحتسب على حصة {{starter}}",
+    "composerNoteSelf": "اكتب ‎/steer‎ متبوعًا برسالتك لإيصالها إلى دورك الجاري.",
     "errors": {
       "invalid_request": "تعذّر إرسال التوجيه — طلب غير صالح.",
       "not_writable": "لا تملك صلاحية الكتابة في هذه الجلسة.",
       "steer_unsupported": "هذا المزوّد لا يدعم التوجيه أثناء الدور.",
       "turn_not_active": "انتهى الدور قبل وصول توجيهك.",
-      "steer_self": "لا يمكنك توجيه دورك أنت.",
+      "starter_unknown": "صاحب هذا الدور غير معروف، فلا يمكن توجيهه.",
       "plan_mode": "التوجيه غير متاح في وضع الخطة.",
       "steer_unavailable": "التوجيه غير متاح مؤقتاً.",
       "steer_disabled": "التوجيه أثناء الدور معطَّل لهذا الخادم.",
@@ -1231,5 +1237,9 @@
       "timeout": "تعذّر إرسال التوجيه — لا ردّ من الخادم.",
       "sendAsNormalMessage": "أرسل كرسالة عادية"
     }
+  },
+  "inlineCode": {
+    "openLink": "فتح الرابط — النقر بالزر الأيمن للنسخ",
+    "copyHint": "نسخ"
   }
 }

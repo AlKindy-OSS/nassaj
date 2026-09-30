@@ -151,10 +151,12 @@ export default function InlineModelSwitcher({
   const confirmTimeoutRef = useRef<number | null>(null);
 
   // B-352: محور المحرّك صار معروضاً — لكن فقط ما هو **قابل للتشغيل الآن**.
-  // المفاتيح تُستعلَم على جسد claude وحده (هو الوحيد الذي يقبل محرّكاً،
-  // ADR-073 §4)، فلا طلبات شبكة زائدة على بقية المزوّدات.
+  // المفاتيح تُستعلَم على جسد claude (هو الوحيد الذي يقبل محرّكاً، ADR-073 §4)
+  // وعلى جسد opencode (يبوّب `qwen-plan/*` خلف مفتاح Alibaba Coding Plan، قرار
+  // المالك 2026-09-28) — فلا طلبات شبكة زائدة على بقية المزوّدات.
   const isClaudeBody = provider === 'claude';
-  const { statuses: vendorKeyStatuses } = useVendorKeyStatuses(isClaudeBody);
+  const needsVendorKeyStatuses = isClaudeBody || provider === 'opencode';
+  const { statuses: vendorKeyStatuses } = useVendorKeyStatuses(needsVendorKeyStatuses);
 
   // صفّ locked = محرّك بلا مفتاح مخزَّن: يبقى مخفياً هنا (مساره الإعدادات، لا
   // مبدّل وسط المحادثة). وصفّ بلا model لا يُرسَل أصلاً. وجود تعريف كتالوج لا
@@ -163,7 +165,7 @@ export default function InlineModelSwitcher({
   const baseRows = rowsForBody(
     provider as LLMProvider,
     catalog,
-    isClaudeBody ? vendorKeyStatuses : {},
+    needsVendorKeyStatuses ? vendorKeyStatuses : {},
   ).filter((row) => !row.locked && row.model);
 
   // إن وُفِّرت قائمة مفضّلة، تُرتَّب صفوفها أولاً (تعديل غير بنيوي — B-Fav).

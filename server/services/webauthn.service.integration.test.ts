@@ -152,13 +152,21 @@ test('login verify: malformed response (no clientDataJSON) is rejected', async (
   });
 });
 
-test('registration options: bound to the user and excludes existing credentials', async () => {
+test('registration options: bound to the user; excludes eligible credentials only', async () => {
   await withIsolatedDatabase(async () => {
     const user = userDb.createUser('alice', 'hash', 'user');
     webauthnCredentialsDb.create({
       id: 'existing-cred',
       userId: user.id,
       publicKey: Buffer.from([1]),
+      transports: ['internal'],
+      stepUpEligible: true,
+    });
+    // A legacy (pre-B-1407) passkey must stay re-registrable on its authenticator.
+    webauthnCredentialsDb.create({
+      id: 'legacy-cred',
+      userId: user.id,
+      publicKey: Buffer.from([2]),
       transports: ['internal'],
     });
 
@@ -173,7 +181,7 @@ test('registration options: bound to the user and excludes existing credentials'
       ['existing-cred']
     );
     assert.equal(options.authenticatorSelection?.residentKey, 'preferred');
-    assert.equal(options.authenticatorSelection?.userVerification, 'preferred');
+    assert.equal(options.authenticatorSelection?.userVerification, 'required');
     assert.ok(typeof options.challenge === 'string' && options.challenge.length > 0);
   });
 });

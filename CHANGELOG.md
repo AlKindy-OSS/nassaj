@@ -1,3 +1,173 @@
+## 2.3.0.12 — 2026-09-30
+
+صار بوسع من بدأ الدور أن يوجّه دوره الجاري بنفسه (T-1903): توجيه صاحب الدور يُقبل بسياسة المشرف وحدها،
+ولا يُعلِّم الدور بأنه مُتأثّر بتدخّل خارجي، فلا يتبعه طلب موافقة ولا خفض لصلاحية «السماح مرة». أما توجيه
+عضو آخر فيبقى مشروطاً بموافقة صاحب الدور كما كان، ويُرفض بدونها عند القبول.
+
+The member who started a turn can now steer their own running turn (T-1903). The starter's own steer
+is admitted under the admin policy alone and never taints the turn, so no starter approval or
+allow-once downgrade follows it. Another member's steer still needs the starter's consent as before
+and is refused at admission without it.
+
+نافذة التحديث أوضح: تختفي بطاقة التأكيد ما دام تحديث قيد التشغيل؛ وتُسمّي النافذة العائق الحقيقي بدل
+ملاحظة «غير جاهز» العامة، وتذكر العجز في مساحة القرص عند نقصها؛ ويظهر إشعار نجاح بعد إعادة الاتصال
+حين يكتمل تحديث والنافذة مغلقة، ولا يظهر إلا بعد تأكيد أن المهمة بلغت حالة «مُفعَّل»، ومرة واحدة فقط
+(T-1730).
+
+The update dialog is clearer. The confirm card is hidden while an update is running. The dialog names
+the real blocker instead of a generic "not ready" note and states the disk shortfall when space is
+low. A success notice appears after reconnect when an update finished while the dialog was closed; it
+shows only once the job is confirmed 'activated', and only once (T-1730).
+
+وتظهر فقاعة الرسالة فور الإرسال قبل حفظها الدائم في صندوق الإرسال، ولا يُرسل شيء عبر الشبكة قبل نجاح
+الحفظ (T-1936).
+
+The message bubble now appears immediately on send, before the durable outbox save; nothing goes over
+the wire before that save succeeds (T-1936).
+
+وفيه أساس داخلي لتشغيل مفتاح Qwen Coding Plan عبر ناقل OpenCode (T-1906). يُشحن مطفأً خلف العلم
+`NASSAJ_OPENCODE_QWEN_PLAN`، ويبقى مزوّد Qwen معطّلاً على مستوى الخادم؛ فلا تغيير يراه المستخدم. البند
+B-1367 ما زال مفتوحاً.
+
+It also carries internal groundwork for running a Qwen Coding Plan key through the OpenCode carrier
+(T-1906). It ships off behind the `NASSAJ_OPENCODE_QWEN_PLAN` flag, and the Qwen provider stays
+disabled server-wide, so nothing changes for users. B-1367 is still open.
+
+**وفي هذا الإصدار أيضاً / Also in this release:**
+
+- رابط اختياري لكل مشروع، يُضبط من القائمة السياقية، يظهر برمز ربط خارجي، مرئي لكل المشاهدين؛ الخادم لا يجلب الرابط قط (T-1950).
+- مؤشّر انشغال المشروع يعكس جلسات خارج الصفحة المحمَّلة (T-1949/B-1431).
+- حوار الأعضاء لا يُعاد تحميله عند تحديث العنصر الأب (B-1430).
+- مذكّر دفع الالتزامات يُحدِّث عدد الالتزامات كل دقيقة وعند استعادة التركيز بدل مرة واحدة عند التحميل (مُوقَّف أثناء إخفاء الصف أو تنويم الصفحة).
+- بطاقات تثبيت الأجساد تعرض أمر التثبيت الرسمي لكل جسد على مستوى المستخدم؛ بطاقة Codex تشير إلى المثبِّت الموحّد الرسمي وتضيف تلميح EACCES.
+- إصلاح عاصفة طلبات عميلية / حلقة 429 في الجلسات المظهَرة.
+- يستطيع المالك والمشرف اختيار مدة صلاحية رابط الدعوة (حتى 30 يوماً).
+- الإجابة على طلب STOP توقف الدور فعلاً.
+- إصلاحات دوّار انتظار الورشات العالق وإنهائها (B-1400/B-1401).
+- إصلاح خلفية صف إجراءات المشروع في الشريط الجانبي.
+- تحديث قوائم النماذج الاحتياطية.
+- وسم محايد لإصدارات الأجساد غير المراجَعة.
+- يُحدَّث كاش نماذج Codex لكل مستخدم في مجلده الخاص، وتبقى النماذج الداخلية مخفية.
+- تشرح الموصلات سبب حجب إعداد المالك في تثبيت جديد (B-1405).
+- كلمة المرور الخاطئة لم تعد تُخرجك من حسابك، ولم تعد الجاهزية تُطلق تنبيهات زائفة.
+- أُعيد ترتيب شريط أدوات المشروع.
+- **أمان:** أُغلق مسار للاستيلاء على الحساب عبر ربط SSO (B-1410)، وأُزيل ربط SSO من قِبل المشرف.
+- Cursor وKimi وDeepSeek معطّلة ومخفية؛ الجلسات السابقة تبقى مقروءة.
+- لم يعد تحديث OpenCode مقيّداً ببصمة إصدار محدّد ولا بفحوص التوافق؛ بصمة `NASSAJ_VENDOR_BINARY_PIN`
+  الاختيارية باقية، وخلية المشرف تفحص قدرات الأداة بدل رقم إصدارها.
+- **أمان:** إنشاء مشروع على مسار مشروع قائم لا يكشف وجوده لغير الأعضاء (B-1423).
+- النص البرمجي المضمَّن في المحادثة قابل للنقر: الرابط يُفتح، وأي نص آخر يُنسخ.
+- زرّ في بطاقة حالة الوكلاء لإخفاء الوكلاء المكتملين.
+- عزل اختبارات الخادم عن البيئة الحيّة والمجلد المنزلي (B-1420..B-1422، B-1426، B-1427).
+
+- A project can have an optional link, set from the context menu, shown as an external-link icon, visible to all viewers;
+  the server never fetches the link (T-1950).
+- Project busy indicator now surfaces sessions beyond the loaded page (T-1949/B-1431).
+- Members dialog no longer reloads on a parent re-render (B-1430).
+- Push reminder refreshes its commit count every minute and on focus instead of once per load (paused while the row
+  is off-screen or the tab hidden).
+- Harness install cards show each harness's official user-level install command; the Codex card points to the official
+  standalone installer and has an EACCES hint.
+- Fixed a client request storm / 429 loop in surfaced sessions.
+- The owner and admins can choose the invite link duration (up to 30 days).
+- Answering a STOP request now stops the turn.
+- Stuck workflow spinner and settle fixes (B-1400/B-1401).
+- Sidebar project action row fill fix.
+- Updated fallback model catalogs.
+- A neutral label for unreviewed harness versions.
+- Each user's Codex models cache is refreshed in their own home, and internal models stay hidden.
+- Connectors explain why owner setup is blocked on a fresh install (B-1405).
+- A wrong password no longer signs you out, and readiness no longer fires false prompts.
+- The project toolbar is reordered.
+- **Security:** closed an account-takeover path via SSO linking (B-1410); admin-initiated SSO linking is removed.
+- Cursor, Kimi and DeepSeek are disabled and hidden; old sessions stay readable.
+- OpenCode updates are no longer tied to one pinned release digest or compatibility checks; the
+  opt-in `NASSAJ_VENDOR_BINARY_PIN` stays, and the supervisor cell probes capabilities, not versions.
+- **Security:** creating a project at an existing project's path no longer reveals it to non-members
+  (B-1423).
+- Inline code in chat is clickable: a link opens, any other text is copied.
+- A toggle in the agent status card hides completed agents.
+- Server tests are isolated from the live environment and home directory (B-1420..B-1422, B-1426,
+  B-1427).
+
+**دخول المؤسسة الموحّد (SSO) — تجريبي ومطفأ افتراضياً (T-1939):**
+
+يعمل هذا كله فقط حين يضبط المشغّل `OIDC_ENABLED=true`، وإنشاء الحسابات عند أول دخول يحتاج فوقه
+`OIDC_JIT_ENABLED=true` مع قائمة `OIDC_ALLOWED_ORG_IDS`. التثبيتات التي لا تفعّل SSO لا يتغيّر فيها شيء
+من هذا القسم. الميزة تجريبية، وسيُعاد تصميمها في إصدار قادم لتصبح موصلاً قابلاً للتركيب (T-1947).
+
+- يربط العضو حسابه بمزوّد الهوية بنفسه من «الملف الشخصي > الأمان» بعد إدخال كلمة مروره؛ ولا يُفكّ الربط إلا المالك.
+- دخول SSO يشترط دوراً معروفاً في المشروع؛ ومن لا دور له يُرفض بدل خفضه إلى «مستخدم».
+- العضو المرتبط (غير المالك) لا يدخل بكلمة المرور أو مفتاح المرور، ويبقى وصوله صالحاً ما دام آخر
+  تأكيد من مزوّد الهوية حديثاً (12 ساعة افتراضياً، `OIDC_ATTESTATION_MAX_AGE_HOURS`)؛ بعدها يُعاد توجيهه لمزوّد الهوية.
+- إنشاء حساب SSO تلقائياً عند أول دخول (JIT) لمن يحمل دوراً من مؤسسة مسموحة، بسقف 20 حساباً في الساعة،
+  مع تنبيه المالك عند كل ربط أو حساب جديد.
+- أسماء المستخدمين صارت فريدة دون اعتبار حالة الأحرف، مع قائمة أسماء محجوزة.
+- **تنبيه للمشغّل عند الترقية:** عند أول تشغيل بعد التحديث يُطلب من كل عضو مرتبط (غير المالك) أن
+  يدخل من جديد عبر مزوّد الهوية، لأن الروابط القائمة لا تحمل بعدُ وقت تأكيد.
+- **تنبيه للمشغّل:** إن وصل دخول SSO بلا دور المشروع (ولو بسبب خطأ في إعداد مزوّد الهوية) يُرفض
+  الدخول وتُنهى جلسات ذلك العضو وتُلغى مفاتيح API الخاصة به؛ فراجِع إعداد مزوّد الهوية قبل الترقية.
+- **قيد معروف:** مفاتيح API لا تخضع لنافذة التأكيد؛ العضو الذي أُزيل من مزوّد الهوية يبقى وصوله
+  بمفتاح API حتى يصل إشعار خروج من مزوّد الهوية أو يعطّل المالك حسابه.
+
+**Organization SSO sign-in (OIDC) — experimental and off by default (T-1939):**
+
+All of this applies only when the operator sets `OIDC_ENABLED=true`; creating accounts on first
+sign-in additionally needs `OIDC_JIT_ENABLED=true` and an `OIDC_ALLOWED_ORG_IDS` allowlist. Installs
+that do not enable SSO see no change from this section. The feature is experimental and will be
+redesigned as a pluggable connector in a coming release (T-1947).
+
+- Members link their own account to the identity provider from Profile > Security after entering their password;
+  only the owner can unlink.
+- SSO sign-in requires a recognized project role; a member without one is refused instead of being
+  downgraded to "user".
+- A linked non-owner member cannot sign in with a password or passkey, and stays signed in only while
+  their latest identity-provider confirmation is fresh (12 hours by default, `OIDC_ATTESTATION_MAX_AGE_HOURS`);
+  after that they are sent back to the identity provider.
+- Accounts can be created on a first SSO sign-in (JIT) for holders of a role from an allowed
+  organization, capped at 20 per hour; the owner is alerted on every self-link and every new account.
+- Usernames are now unique case-insensitively, with a list of reserved names.
+- **Operator note on upgrade:** on the first start after the update, every linked non-owner member
+  must sign in again at the identity provider, because existing links carry no confirmation time yet.
+- **Operator note:** if an SSO sign-in arrives without the project role (including through an
+  identity-provider misconfiguration), sign-in is refused, that member's sessions are ended and their
+  API keys are revoked; check the identity-provider configuration before upgrading.
+- **Known limitation:** API keys are not bound to the confirmation window; a member removed at the
+  identity provider keeps API-key access until a logout notice arrives from the identity provider or
+  the owner disables the account.
+
+**تأكيد الهوية قبل العمليات الحسّاسة / Step-up before sensitive actions:**
+
+- إضافة مفتاح مرور جديد تتطلّب الآن كلمة المرور الحالية أو مفتاح مرور مؤهَّل (B-1407). مفاتيح المرور
+  القديمة تبقى صالحة للدخول، لكنها تحمل شارة «أعِد التسجيل» لتصلح لتأكيد الهوية.
+- في الموصلات ومعالج إعداد المالك حلّت نافذة «تأكيد الهوية» محلّ «اخرج ثم ادخل مجدداً»: كلمة المرور أو
+  مفتاح المرور للحسابات المحلية، و«التأكيد عبر مزوّد الهوية» للأعضاء المرتبطين. كلمة المرور الخاطئة لا تُنهي
+  الجلسة.
+
+- Adding a new passkey now needs your current password or an eligible passkey (B-1407). Older passkeys
+  still sign you in, but show a "re-register" badge so they can be used for step-up.
+- Connectors and the owner setup wizard replace "sign out and sign in again" with an inline step-up
+  dialog: password or passkey for local accounts, "confirm with the identity provider" for linked members. A wrong
+  password never ends the session.
+
+> **قيد معروف (B-1424):** في التثبيتات المحدَّثة بزر التحديث لا يتّسع عمود `auth_method` ليقبل
+> `'oidc'`، فتأكيد الهوية عبر SSO للموصلات لا يعمل فيها بعد. كلمة المرور ومفتاح المرور يعملان.
+
+> **Known limitation (B-1424):** on installs updated with the update button, `auth_method` is not
+> widened to `'oidc'`, so SSO step-up for connectors does not work there yet. Password and passkey
+> step-up work.
+
+
+**مسار الترقية:**
+- من 2.3.0.11 إلى 2.3.0.12: المسار المدعوم. لا تغيير في التبعيات عن 2.3.0.11.
+- ترحيلات قاعدة البيانات في هذا الإصدار إضافية ولها رجوع صريح؛ فهرس أسماء المستخدمين الفريد يُتخطّى مع
+  تحذير إن وُجدت أسماء متكرّرة تختلف في حالة الأحرف فقط، ولا يُعاد تسمية أي حساب.
+
+**Upgrade path:**
+- 2.3.0.11 → 2.3.0.12: the supported path. No dependency changes since 2.3.0.11.
+- Database migrations in this release are additive with explicit rollbacks; the unique username
+  index is skipped with a warning if case-only duplicates exist, and no account is renamed.
+
 ## 2.3.0.11 — 2026-09-29
 
 يُكمل هذا الإصدار سلسلة الترقية (B-1381): يعود codex-sdk إلى 0.157.1 بعد أن نقل الإصدار الجسر 2.3.0.10

@@ -8,6 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -56,11 +57,19 @@ function activationInputs(job: ReturnType<typeof queuedJob>, beginUpdate: () => 
         sourceUpdateJobId: job.id, sourceUpdateTransactionId: job.transactionId,
         activationIdentitySha256: job.activationIdentitySha256, releaseCommit: 'b'.repeat(40),
     };
+    // A normal (non-local-recovery) candidate manifest: no operationBinding, so the
+    // process-binding check passes it through and validateCandidate still refuses it.
+    const candidateRoot = path.join(tmpDir, 'candidate');
+    const manifestPath = path.join(candidateRoot, 'candidate-manifest.json');
+    const manifestBytes = JSON.stringify({ txId: job.transactionId });
+    mkdirSync(candidateRoot, { recursive: true });
+    writeFileSync(manifestPath, manifestBytes);
     const resolved = {
         action: {
             transactionId: job.transactionId, originalHead: 'c'.repeat(40), targetCommit: 'b'.repeat(40),
-            version: '1.47.0.16', manifestSha256: 'd'.repeat(64),
-            candidateRoot: path.join(tmpDir, 'candidate'), manifestPath: path.join(tmpDir, 'candidate', 'candidate-manifest.json'),
+            version: '1.47.0.16',
+            manifestSha256: crypto.createHash('sha256').update(manifestBytes).digest('hex'),
+            candidateRoot, manifestPath,
         },
         maintenance: { paths: { root: tmpDir }, beginUpdate },
     };

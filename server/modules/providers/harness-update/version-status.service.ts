@@ -23,7 +23,6 @@ import { appConfigDb } from '@/modules/database/index.js';
 import { HarnessBinaryUnresolvedError } from '@/shared/harness-binaries.js';
 
 import type {
-  HarnessCompatibility,
   HarnessUpdateJob,
   HarnessVersionDrift,
   HarnessVersionStatus,
@@ -31,7 +30,6 @@ import type {
 
 
 import { clearStaleNativeStageBeforeLaunch } from './native-staging.js';
-import { computeHarnessCompatibility } from './compatibility.js';
 import {
   getHarnessDescriptor,
   HARNESS_IDS,
@@ -291,26 +289,11 @@ async function probeLatest(
 /**
  * Latest published version of `descriptor` through the shared probe cache
  * (null when the harness has no probe or the probe has no answer). Used by the
- * update service to judge the TARGET's compatibility before a pinBreak ack.
+ * update service to name the target of a pinBreak ack (armed pin only).
  */
 export async function probeLatestVersion(descriptor: HarnessDescriptor): Promise<string | null> {
   const latest = await probeLatest(descriptor, testDeps ?? {}, Date.now);
   return latest?.version ?? null;
-}
-
-/** Compatibility verdict for one version of this harness under the live pin posture. */
-export function compatibilityOf(
-  descriptor: HarnessDescriptor,
-  version: string | null,
-  pinArmed: boolean,
-): HarnessCompatibility {
-  return computeHarnessCompatibility({
-    version,
-    descriptor,
-    pins: PINNED_VENDOR_DIGESTS,
-    pinArmed,
-    carrierAlwaysEnforced: Boolean(descriptor.compat?.alwaysEnforcedMode),
-  });
 }
 
 /** Drift verdict; a failing ledger omits the field instead of failing the read. */
@@ -329,17 +312,6 @@ function driftOf(
   } catch {
     return undefined;
   }
-}
-
-/** Compatibility of the latest version, when a probe answered. */
-function targetOf(
-  descriptor: HarnessDescriptor,
-  latestVersion: string | null,
-  pinArmed: boolean,
-): { targetCompatibility?: HarnessCompatibility } {
-  return latestVersion === null
-    ? {}
-    : { targetCompatibility: compatibilityOf(descriptor, latestVersion, pinArmed) };
 }
 
 /**
@@ -513,7 +485,6 @@ export async function getHarnessVersionStatus(
   const pinArmed = pinEnabled();
   const annotated = {
     ...base,
-    compatibility: compatibilityOf(descriptor, installedVersion, pinArmed),
     ...withDrift(driftOf(descriptor, installedVersion, deps, now)),
   };
 
@@ -530,7 +501,6 @@ export async function getHarnessVersionStatus(
       upToDate: latestVersion === null ? null : installedVersion === latestVersion,
       updatable: false,
       reason: descriptor.reason ?? 'managed-external',
-      ...targetOf(descriptor, latestVersion, pinArmed),
     };
   }
 
@@ -551,10 +521,11 @@ export async function getHarnessVersionStatus(
   if (latest) {
     const { version: latestVersion, stale } = latest;
     if (latestVersion === null) {
-      // Probe failed with no cache → unknown (never crash, never guess).
+      // Probe failed with no cache: the newest release is unknown, but the
+      // updater is idempotent, so the button stays offered (never guess a version).
       return {
         ...annotated,
-        state: 'unknown',
+        state: 'updatable',
         installedVersion,
         latestVersion: null,
         upToDate: null,
@@ -571,7 +542,6 @@ export async function getHarnessVersionStatus(
       upToDate,
       updatable: descriptor.updatable,
       reason: stale ? 'latest-stale' : upToDate ? null : 'update-available',
-      ...targetOf(descriptor, latestVersion, pinArmed),
     };
   }
 

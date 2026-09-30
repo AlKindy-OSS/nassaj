@@ -110,6 +110,7 @@ describe('OidcReturnPage', () => {
     ['access_denied', enAuth.sso.errors.providerDenied],
     ['invalid_state', enAuth.sso.errors.invalidState],
     ['transaction_expired', enAuth.sso.errors.transactionExpired],
+    ['rate_limited', enAuth.sso.errors.rateLimited],
     ['something_new', enAuth.sso.errors.providerUnavailable],
   ])('shows a callback error (%s) without calling the exchange', async (error, message) => {
     renderAt(`/auth/oidc/return?error=${error}&oidc_code=ignored`);
@@ -122,6 +123,23 @@ describe('OidcReturnPage', () => {
     renderAt('/auth/oidc/return');
     expect((await screen.findByRole('alert')).textContent).toContain(enAuth.sso.errors.missingCode);
     expect(loginWithOidcCode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['oidc_not_linked', enAuth.sso.errors.notLinked],
+    ['oidc_not_authorized', enAuth.sso.errors.notAuthorized],
+    ['oidc_account_exists', enAuth.sso.errors.accountExists],
+  ])('names a server login refusal (%s) without retry or exchange', async (error, message) => {
+    renderAt(`/auth/oidc/return?error=${error}`);
+
+    expect((await screen.findByRole('alert')).textContent).toContain(message);
+    expect(screen.queryByRole('button', { name: new RegExp(enAuth.sso.return.retry) })).toBeNull();
+    expect(screen.getByRole('button', { name: enAuth.sso.return.backToLogin })).toBeTruthy();
+    expect(loginWithOidcCode).not.toHaveBeenCalled();
+  });
+
+  it('tells a clashing account to sign in and link SSO from the profile, in Arabic too', () => {
+    expect(arAuth.sso.errors.accountExists).toContain('سجّل الدخول بحسابك ثم اربط مزوّد الهوية من ملفك');
   });
 
   it('hides SSO retry when only an administrator can fix it, keeping password sign-in', async () => {

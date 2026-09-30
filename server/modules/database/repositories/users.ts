@@ -8,6 +8,7 @@
  */
 
 import { getConnection } from '@/modules/database/connection.js';
+import { userIdentitiesDb } from '@/modules/database/repositories/user-identities.js';
 import {
   retireProjectSubjectAccess,
   revalidateUserProjectAccess,
@@ -67,6 +68,22 @@ type CreateUserResult = {
   password_changed_at: number;
   authorization_generation: number;
 };
+
+type CreateSsoUserInput = {
+  username: string;
+  /** Sentinel from services/sso-only-password.js; never a real hash. */
+  passwordHash: string;
+  role: Exclude<UserRole, 'owner'>;
+  issuer: string;
+  subject: string;
+  attestedAtMs: number;
+  /** Reserved-name policy (services/username-policy.js), checked with the clash. */
+  isReservedUsername: (username: string) => boolean;
+};
+
+type CreateSsoUserResult =
+  | { created: true; user: CreateUserResult; identityId: number }
+  | { created: false; reason: 'username_taken' };
 
 const PUBLIC_COLUMNS =
   'id, username, created_at, last_login, role, status, avatar_url, password_changed_at, must_change_password, authorization_generation';
@@ -143,6 +160,46 @@ export const userDb = {
       password_changed_at: passwordChangedAt,
       authorization_generation: 1,
     };
+  },
+
+  /**
+   * T-1939 slice 4: creates an SSO-only account, links its IdP identity and
+   * stamps the attestation in ONE transaction, so an account never exists
+   * without its link (or a link without a fresh attestation). The username is
+   * refused — nothing written — when any account, active or not, already holds
+   * it case-insensitively, or when it is reserved. The check and the insert
+   * share the transaction, so no concurrent writer can slip between them.
+   * Throws on any other failure (including a UNIQUE(issuer, subject) conflict
+   * from a concurrent sign-in); nothing is written in that case.
+   */
+  createSsoUser(input: CreateSsoUserInput): CreateSsoUserResult {
+    if (input.role !== 'admin' && input.role !== 'user') {
+      throw new Error('invalid_sso_role');
+    }
+    const db = getConnection();
+    return db.transaction((): CreateSsoUserResult => {
+      if (input.isReservedUsername(input.username) || userDb.isUsernameTaken(input.username)) {
+        return { created: false, reason: 'username_taken' };
+      }
+      const user = userDb.createUser(input.username, input.passwordHash, input.role, null);
+      const identityId = userIdentitiesDb.link(user.id, input.issuer, input.subject);
+      if (!userIdentitiesDb.markAttested(identityId, user.id, input.attestedAtMs)) {
+        throw new Error('attestation_stamp_failed');
+      }
+      return { created: true, user, identityId };
+    })();
+  },
+
+  /**
+   * Whether any account — active or not — already holds `username`
+   * case-insensitively (ASCII folding, matching the username pattern), other
+   * than `excludeUserId`. Backed by idx_users_username_lower where it exists.
+   */
+  isUsernameTaken(username: string, excludeUserId: number | null = null): boolean {
+    const db = getConnection();
+    return db
+      .prepare('SELECT 1 FROM users WHERE lower(username) = lower(?) AND (? IS NULL OR id <> ?) LIMIT 1')
+      .get(username, excludeUserId, excludeUserId) !== undefined;
   },
 
   /**
@@ -341,6 +398,14 @@ export const userDb = {
       )
       .get() as { id: number } | undefined;
     return fallback?.id ?? null;
+  },
+
+  /** Ids of every active owner, oldest first (owner alerts, T-1939 slice 4). */
+  listActiveOwnerIds(): number[] {
+    const rows = getConnection()
+      .prepare("SELECT id FROM users WHERE role = 'owner' AND is_active = 1 AND status = 'active' ORDER BY id ASC")
+      .all() as Array<{ id: number }>;
+    return rows.map((row) => row.id);
   },
 
   /** Returns the first active user. Used for single-user / platform mode lookups. */

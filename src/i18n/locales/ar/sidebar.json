@@ -100,6 +100,12 @@
     "messageCount_many": "{{count}} رسالة",
     "messageCount_other": "{{count}} رسالة",
     "allClosedHidden": "المحادثات المغلقة مخفيّة",
+    "surfacedHiddenHint_zero": "لا محادثات أخرى نشِطة",
+    "surfacedHiddenHint_one": "+محادثة واحدة أخرى فيها نشاط",
+    "surfacedHiddenHint_two": "+محادثتان أخريان فيهما نشاط",
+    "surfacedHiddenHint_few": "+{{count}} محادثات أخرى فيها نشاط",
+    "surfacedHiddenHint_many": "+{{count}} محادثة أخرى فيها نشاط",
+    "surfacedHiddenHint_other": "+{{count}} محادثة أخرى فيها نشاط",
     "loadMoreSessions": "تحميل المزيد من المحادثات",
     "loadingSessions": "جارٍ تحميل الجلسات...",
     "unnamed": "بدون اسم",
@@ -175,7 +181,14 @@
     "selectProject": "تحديد المشروع",
     "selectSession": "تحديد المحادثة",
     "projectLogoTooLarge": "الصورة تتجاوز الحدّ الأقصى (2 ميغابايت)",
-    "projectLogoFailed": "تعذّر حفظ شعار المشروع"
+    "projectLogoFailed": "تعذّر حفظ شعار المشروع",
+    "addProjectLink": "إضافة رابط…",
+    "editProjectLink": "تعديل الرابط…",
+    "removeProjectLink": "إزالة الرابط",
+    "openProjectLink": "فتح رابط المشروع: {{name}} (يُفتح في تبويب جديد)",
+    "projectLinkPlaceholder": "https://example.com",
+    "projectLinkInvalid": "أدخل عنوان ويب صالحاً",
+    "projectLinkFailed": "تعذّر حفظ رابط المشروع"
   },
   "navigation": {
     "chat": "محادثة",
@@ -356,6 +369,7 @@
     },
     "memberDialog": {
       "trigger": "أعضاء المشروع",
+      "addTrigger": "إضافة عضو",
       "title": "إدارة أعضاء المشروع",
       "searchLabel": "إضافة عضو",
       "searchPlaceholder": "ابحث باسم المستخدم",

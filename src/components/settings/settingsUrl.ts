@@ -1,3 +1,5 @@
+import { isProviderGloballyDisabled } from '../../../shared/disabledProviders';
+
 import type { AgentCategory, AgentProvider, SettingsDeepLink, SettingsMainTab } from './types/types';
 
 const MAIN_TABS = new Set<SettingsMainTab>([
@@ -5,10 +7,22 @@ const MAIN_TABS = new Set<SettingsMainTab>([
   'connectors', 'notifications', 'users', 'command-board', 'system', 'about',
 ]);
 
+/**
+ * The full agent union, for upstream-sync friendliness — kept complete even
+ * though `isAgentDeepLinkable` below rejects the globally disabled ids
+ * (T-864/T-1906): a deep link naming `qwen` or `hermes` must fall back to the
+ * default agent rather than pin a hidden one that renders no category
+ * content.
+ */
 const AGENTS = new Set<AgentProvider>([
   'claude', 'cursor', 'codex', 'antigravity', 'opencode', 'qwen',
   'kimi', 'deepseek', 'glm', 'hermes', 'sakana',
 ]);
+
+/** A deep-linkable agent: known to the union AND not globally disabled. */
+function isAgentDeepLinkable(agent: string): agent is AgentProvider {
+  return AGENTS.has(agent as AgentProvider) && !isProviderGloballyDisabled(agent);
+}
 
 const CATEGORIES = new Set<AgentCategory>([
   'account', 'permissions', 'engines', 'instructions', 'mcp', 'skills',
@@ -48,8 +62,8 @@ export function readSettingsDestination(search = window.location.search): Settin
   const destination: SettingsDeepLink = { tab: tab as SettingsMainTab };
   const agent = params.get('settingsAgent');
   const category = params.get('settingsCategory');
-  if (destination.tab === 'agents' && agent && AGENTS.has(agent as AgentProvider)) {
-    destination.agent = agent as AgentProvider;
+  if (destination.tab === 'agents' && agent && isAgentDeepLinkable(agent)) {
+    destination.agent = agent;
   }
   if (destination.tab === 'agents' && category && CATEGORIES.has(category as AgentCategory)) {
     destination.category = category as AgentCategory;

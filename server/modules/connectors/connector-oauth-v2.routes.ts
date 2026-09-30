@@ -20,7 +20,7 @@ import {
 } from './connector-auth-vault.crypto.js';
 import { createCertifiedConnectorOidcVerifier } from './connector-certified-oidc.js';
 import { safeFetchProviderJson } from './connector-auth-safe-fetch.js';
-import { assertConnectorProviderEffectEnabled,
+import { assertConnectorProviderEffectEnabled, connectorRuntimeLiveOrigin,
   resolveConnectorRuntimeInstallationOrigin } from './connector-substrate-only.production.js';
 import { ConnectorPolicyOperation } from './connector-policy-v2.js';
 import {
@@ -32,12 +32,15 @@ import {
   authorizedOwnerOperation,
   consumeAuthorizedOwnerOperation,
   createConnectorOwnerOperationGate,
+  runtimeOriginSource,
   type ConnectorOwnerOperation,
 } from './connector-owner-operation-gate.js';
 
 type Runtime = Readonly<{
   installationId: string;
   canonicalOrigin: string;
+  /** Live origin (production); absent in test runtimes, which use canonicalOrigin. */
+  resolveOrigin?: () => string | null;
   repository: ReturnType<typeof createConnectorAuthDb>;
   engine: ReturnType<typeof createConnectorOAuthEngine>;
   fanout: (result: Readonly<{
@@ -113,7 +116,8 @@ const buildRuntime = (): Runtime => {
     const placement = await reconcileConnectorPlacements(matching[0]!.id, result.userId, process.env);
     return placement.state === 'verified';
   };
-  productionRuntime = Object.freeze({ installationId, canonicalOrigin, repository, engine, fanout });
+  productionRuntime = Object.freeze({ installationId, canonicalOrigin, resolveOrigin: connectorRuntimeLiveOrigin,
+    repository, engine, fanout });
   return productionRuntime;
 };
 
@@ -166,7 +170,7 @@ export const createConnectorOAuthV2Routes = (
     limiter(req, res, () => createConnectorOwnerOperationGate({
       repository: eagerRuntime.repository,
       installationId: eagerRuntime.installationId,
-      canonicalOrigin: eagerRuntime.canonicalOrigin,
+      canonicalOrigin: runtimeOriginSource(eagerRuntime),
       operation,
       ownerOnly: false,
     })(req, res, () => {

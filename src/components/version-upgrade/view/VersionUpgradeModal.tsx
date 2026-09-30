@@ -7,12 +7,14 @@ import { ReleaseInfo } from "../../../types/sharedTypes";
 import { copyTextToClipboard } from "../../../utils/clipboard";
 import type { InstallMode } from "../../../hooks/useVersionCheck";
 import {
+    blockedReasonI18nArgs,
     clearStoredUpdateAttempt,
     createIdempotencyKey,
     GIT_CHECKOUT_V2_PHASES,
     inferStrategy,
     isTerminalUpdateState,
     normalizeUpdateJob,
+    parseBlockedStorage,
     phaseListForStrategy,
     pollingDelay,
     readStoredUpdateAttempt,
@@ -20,6 +22,7 @@ import {
     safeStatusPath,
     storeUpdateAttempt,
     updateJobPercent,
+    type BlockedStorageFigures,
     type StoredUpdateAttempt,
     type ManifestDrift,
     type UpdateJobSnapshot,
@@ -90,6 +93,19 @@ interface UpdateCapability {
     ready: boolean;
     strategy?: string;
     reason?: string;
+    /** Present only alongside reason === 'insufficient_disk' (T-1553, م1). */
+    blockedStorage?: BlockedStorageFigures | null;
+}
+
+/** Render a blocked-reason code, interpolating disk figures when available. */
+function blockedReasonText(
+    t: Translate,
+    reason: string | undefined,
+    blockedStorage: BlockedStorageFigures | null | undefined,
+    defaultValue: string,
+): string {
+    const { key, params } = blockedReasonI18nArgs(reason, blockedStorage);
+    return t(key, { ...params, defaultValue });
 }
 
 /** Terminal state translation key — kept for terminal states per spec. */
@@ -434,6 +450,11 @@ export function VersionUpgradeModal({
     const { t } = useTranslation('common');
     const upgradeCommand = installMode === 'npm' ? t('versionUpdate.npmUpgradeCommand') : null;
     const [job, setJob] = useState<UpdateJobSnapshot | null>(null);
+    // Always-current mirror of `job` for async callbacks (preflight, polling)
+    // that must see a job discovered mid-await, not the one from their own
+    // stale render closure (owner-reported race, 2026-09).
+    const jobRef = useRef<UpdateJobSnapshot | null>(null);
+    useEffect(() => { jobRef.current = job; }, [job]);
     const [updateError, setUpdateError] = useState('');
     const [reused, setReused] = useState(false);
     const [capability, setCapability] = useState<UpdateCapability>({ loading: true, ready: false });
@@ -601,14 +622,28 @@ export function VersionUpgradeModal({
                     : data;
                 const protocol = systemUpdate.updaterProtocol;
                 const ready = systemUpdate.updateReady === true && protocol === 'async-v2';
+                const reason = typeof systemUpdate.blockedReasonCode === 'string'
+                    ? systemUpdate.blockedReasonCode
+                    : ready ? undefined : 'protocol_unavailable';
                 setCapability({
                     loading: false,
                     ready,
                     strategy: typeof systemUpdate.updaterStrategy === 'string' ? systemUpdate.updaterStrategy : undefined,
-                    reason: typeof systemUpdate.blockedReasonCode === 'string'
-                        ? systemUpdate.blockedReasonCode
-                        : ready ? undefined : 'protocol_unavailable',
+                    reason,
                 });
+                // /health is unauthenticated and never carries byte counts; fetch
+                // them at owner-only authorization only when they would actually
+                // be shown, fresh on every open (T-1553, م2 — single source).
+                if (reason === 'insufficient_disk') {
+                    void authenticatedFetch('/api/system/update/storage')
+                        .then(async storageResponse => {
+                            if (cancelled || !storageResponse.ok) return;
+                            const storageData = await responseJson(storageResponse);
+                            const blockedStorage = parseBlockedStorage(storageData.blockedStorage);
+                            if (blockedStorage) setCapability(prev => ({ ...prev, blockedStorage }));
+                        })
+                        .catch(() => { /* treat as no figures; plain blocked-reason text stays */ });
+                }
             })
             .catch(() => {
                 if (!cancelled) setCapability({ loading: false, ready: false, reason: 'capability_unavailable' });
@@ -706,22 +741,31 @@ export function VersionUpgradeModal({
             }
 
             if (response.status === 401 || response.status === 403) {
+                clearStoredUpdateAttempt();
                 setUpdateError(t('versionUpdate.errors.authorization'));
             } else if (response.status === 429) {
+                clearStoredUpdateAttempt();
                 setUpdateError(t('versionUpdate.errors.rateLimited'));
             } else if (response.status === 409 && data.code === 'idempotency_payload_mismatch') {
                 clearStoredUpdateAttempt();
                 setUpdateError(t('versionUpdate.errors.idempotencyMismatch'));
             } else if (response.status === 409 && data.code === 'update_consent_mismatch') {
                 // Phase 1 (T-1730): server rejected because consent.version ≠ expectedVersion.
+                clearStoredUpdateAttempt();
                 setUpdateError(t('versionUpdate.errors.consentMismatch'));
             } else {
+                // General blocker (dirty tree, wrong branch, capability lost, etc.) —
+                // this attempt never became a real job; nothing left to complete (T2).
+                clearStoredUpdateAttempt();
                 const reason = typeof data.blockedReasonCode === 'string'
                     ? data.blockedReasonCode
                     : typeof data.code === 'string' ? data.code : 'failed';
-                setUpdateError(t(`versionUpdate.blockedReasons.${reason}`, {
-                    defaultValue: typeof data.error === 'string' ? data.error : t('versionUpdate.errors.failed'),
-                }));
+                setUpdateError(blockedReasonText(
+                    t,
+                    reason,
+                    capability.blockedStorage,
+                    typeof data.error === 'string' ? data.error : t('versionUpdate.errors.failed'),
+                ));
             }
             setJob(null);
         } catch (error) {
@@ -731,19 +775,23 @@ export function VersionUpgradeModal({
                 : t('versionUpdate.errors.connection'));
             setJob(null);
         }
-    }, [pollJob, stopPolling, t]);
+    }, [capability.blockedStorage, pollJob, stopPolling, t]);
 
     // ── Phase 1 (T-1730): "Update Now" → shows consent panel ─────────────────
 
     const handleUpdateNow = useCallback(async () => {
+        // A job may have been discovered (resumed from storage, or found active
+        // on another session) while this click was in flight; never open the
+        // consent card over a job that is already running (owner defect 2026-09).
+        if (jobRef.current && !isTerminalUpdateState(jobRef.current.state)) { setShowConsent(false); return; }
         if (!latestVersion) {
             setUpdateError(t('versionUpdate.errors.releaseUnavailable'));
             return;
         }
         if (!capability.ready) {
-            setUpdateError(t(`versionUpdate.blockedReasons.${capability.reason}`, {
-                defaultValue: t('versionUpdate.errors.capabilityBlocked'),
-            }));
+            setUpdateError(blockedReasonText(
+                t, capability.reason, capability.blockedStorage, t('versionUpdate.errors.capabilityBlocked'),
+            ));
             return;
         }
         // Pre-flight before showing the consent panel: sessions or dirty tree
@@ -751,6 +799,8 @@ export function VersionUpgradeModal({
         setUpdateError('');
         const verdict = await runPreflight();
         if (verdict.status !== 'clear') return;
+        // Re-check: the preflight await may have let a discovered job land.
+        if (jobRef.current && !isTerminalUpdateState(jobRef.current.state)) { setShowConsent(false); return; }
 
         setShowConsent(true);
     }, [capability, latestVersion, runPreflight, t]);
@@ -824,6 +874,20 @@ export function VersionUpgradeModal({
         if (!isOpen) setShowConsent(false);
     }, [isOpen]);
 
+    const jobActive = Boolean(job && !isTerminalUpdateState(job.state));
+    // T-1730: special active state — polling continues, but PhaseStepper is replaced
+    // by DeferralWaitingPanel. 'cancelled' is terminal so jobActive would be false.
+    const awaitingReleaseConfirmation = job?.state === 'restart_queued' && Boolean(job.activationTargetDigest)
+        && (!job.autoActivate || ['expired', 'refused'].includes(job.autoActivation?.state ?? ''));
+
+    // Effect-level safety net (qa-critic round 1, T1): the render guard alone
+    // only hides the card for the render it fires on. Explicitly clear
+    // `showConsent` whenever a job is running and this is not the legitimate
+    // re-confirm case, so a later render never finds it still true.
+    useEffect(() => {
+        if (jobActive && !awaitingReleaseConfirmation) setShowConsent(false);
+    }, [awaitingReleaseConfirmation, jobActive]);
+
     if (!isOpen) return null;
 
     if (hostMode === 'local-main') {
@@ -869,14 +933,8 @@ export function VersionUpgradeModal({
         );
     }
 
-    const jobActive = Boolean(job && !isTerminalUpdateState(job.state));
     const isFailed = Boolean(job && FAILURE_STATES.has(job.state));
     const termKey = job ? terminalStatusKey(job.state) : null;
-
-    // T-1730: special active state — polling continues, but PhaseStepper is replaced
-    // by DeferralWaitingPanel. 'cancelled' is terminal so jobActive would be false.
-    const awaitingReleaseConfirmation = job?.state === 'restart_queued' && Boolean(job.activationTargetDigest)
-        && (!job.autoActivate || ['expired', 'refused'].includes(job.autoActivation?.state ?? ''));
 
     const isDeferralWaiting = job?.state === 'awaiting_sessions';
 
@@ -952,7 +1010,7 @@ export function VersionUpgradeModal({
                     <div className={`rounded-md border px-3 py-2 text-xs ${capability.ready ? 'border-border bg-muted text-muted-foreground' : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'}`}>
                         {capability.ready
                             ? t('versionUpdate.strategy', { strategy: capability.strategy || t('versionUpdate.strategyUnknown') })
-                            : t(`versionUpdate.blockedReasons.${capability.reason}`, { defaultValue: t('versionUpdate.errors.capabilityBlocked') })}
+                            : blockedReasonText(t, capability.reason, capability.blockedStorage, t('versionUpdate.errors.capabilityBlocked'))}
                     </div>
                 )}
 
@@ -962,7 +1020,9 @@ export function VersionUpgradeModal({
                 )}
 
                 {/* ── Phase 1 (T-1730): Consent panel ─────────────────────────────── */}
-                {showConsent && (job?.targetVersion || latestVersion) && (
+                {/* Hidden while a job is running, except the legitimate re-confirm case
+                    (auto-activation expired/refused) where the owner must act (a). */}
+                {showConsent && (job?.targetVersion || latestVersion) && (!jobActive || awaitingReleaseConfirmation) && (
                     <UpdateConsentPanel
                         targetVersion={job?.state === 'restart_queued' ? job.targetVersion! : latestVersion!}
                         releaseInfo={releaseInfo}

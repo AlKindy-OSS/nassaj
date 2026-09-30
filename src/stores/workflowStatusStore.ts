@@ -64,6 +64,9 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+/** Raw subscription for callers outside React's useSyncExternalStore (B-1431 rollup). */
+export { subscribe as subscribeWorkflowStatus };
+
 function workflowSig(w: ActiveWorkflow): string {
   // The agent rows MUST be part of the signature. `updatedAt` is the JOURNAL's
   // mtime, and a journal only moves when an agent starts or finishes — so a live
@@ -73,7 +76,12 @@ function workflowSig(w: ActiveWorkflow): string {
   const agentsSig = w.agents
     .map((a) => `${a.agentId}:${a.status}:${a.callCount}:${a.currentTool ?? ''}`)
     .join(',');
-  return `${w.wfId}|${w.status}|${w.agentsDone}|${w.agentsTotal}|${w.updatedAt ?? ''}|${agentsSig}`;
+  // `projectId` MUST be part of the signature too (T-1949): it can change
+  // without any other field moving (e.g. the run's project attribution is
+  // resolved/corrected after the row was first seen), and the surfaced-
+  // sessions store's project rollup reads `w.projectId` directly — a snapshot
+  // that suppressed a projectId-only change would leave that rollup stale.
+  return `${w.wfId}|${w.status}|${w.agentsDone}|${w.agentsTotal}|${w.updatedAt ?? ''}|${w.projectId ?? ''}|${agentsSig}`;
 }
 
 function listSig(list: readonly ActiveWorkflow[]): string {
@@ -195,6 +203,27 @@ export function useSessionWorkflows(sessionId?: string | null): readonly ActiveW
   return useSyncExternalStore(subscribe, () =>
     sessionId ? (bySession.get(sessionId) ?? EMPTY_LIST) : EMPTY_LIST,
   );
+}
+
+/** Non-reactive: هذه الجلسة، لقارئ يجمع عدة متاجر خارج React. */
+export function getSessionWorkflows(sessionId?: string | null): readonly ActiveWorkflow[] {
+  return sessionId ? (bySession.get(sessionId) ?? EMPTY_LIST) : EMPTY_LIST;
+}
+
+/**
+ * Non-reactive: session ids with a running/orphaned workflow attributed to
+ * `projectId` (B-1431). Used by the project busy-dot rollup to reach sessions
+ * it never loaded a row for.
+ */
+export function getWorkflowSessionIdsForProject(projectId: string | null): string[] {
+  if (!projectId) return [];
+  const ids: string[] = [];
+  for (const [sessionId, list] of bySession) {
+    if (list.some((w) => w.projectId === projectId)) {
+      ids.push(sessionId);
+    }
+  }
+  return ids;
 }
 
 /**

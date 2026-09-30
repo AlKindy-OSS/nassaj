@@ -100,7 +100,13 @@ export const applyRefreshedToken = (token) => {
 // NO code; route-level guards use one of these codes. Any OTHER code on a 401
 // is a domain error that merely borrowed the status (a provider credential, an
 // upstream OAuth refusal, …) and must never sign the member out (B-1043).
+/** T-1939: the linked member's SSO attestation aged out (server/services/sso-attestation.js). */
+export const SSO_REAUTH_REQUIRED_CODE = 'sso_reauth_required';
+/** Window event AuthContext answers by restarting the SSO flow (never a plain logout). */
+export const SSO_REAUTH_EVENT = 'auth:sso-reauth-required';
+
 const SESSION_REJECTION_CODES = new Set([
+  SSO_REAUTH_REQUIRED_CODE,
   'AUTH_REQUIRED',
   'AUTHENTICATION_REQUIRED',
   'UNAUTHENTICATED',
@@ -128,6 +134,33 @@ export const isSessionRejection = async (response) => {
   }
   const code = body && typeof body.code === 'string' ? body.code : null;
   return code === null || SESSION_REJECTION_CODES.has(code);
+};
+
+/**
+ * True when a 401 says the member must re-attest through SSO. Reads a CLONE of
+ * the body so the caller can still consume the response.
+ *
+ * @param {Response} response
+ * @returns {Promise<boolean>}
+ */
+export const isSsoReauthRejection = async (response) => {
+  if (response.status !== 401) return false;
+  try {
+    const body = await response.clone().json();
+    return Boolean(body) && body.code === SSO_REAUTH_REQUIRED_CODE;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Asks AuthContext to restart SSO for the rejected credential (`token` is null
+ * for a cookie-backed device session).
+ *
+ * @param {string | null} token
+ */
+const dispatchSsoReauth = (token) => {
+  window.dispatchEvent(new CustomEvent(SSO_REAUTH_EVENT, { detail: { token } }));
 };
 
 // Single-flight guard: the in-flight refresh promise, shared by every caller
@@ -168,7 +201,11 @@ export const refreshAuthToken = () => {
           Authorization: `Bearer ${token}`,
         },
       });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        // An aged-out SSO attestation cannot be refreshed: restart SSO instead.
+        if (await isSsoReauthRejection(response)) dispatchSsoReauth(token);
+        return null;
+      }
       const data = await response.json().catch(() => null);
       const nextToken = data && data.token;
       if (!nextToken) return null;
@@ -236,6 +273,16 @@ export const authenticatedFetch = async (url, options = {}) => {
   // sent — a 401 with no token is the expected response for an unauthenticated
   // visitor (e.g. the login screen eagerly probing /api/branding),
   // and evicting there would trigger a redirect loop on every mount.
+  // T-1939: an aged-out SSO attestation is neither refreshable nor a plain
+  // logout. Skip the silent refresh (it is refused for the same reason) and
+  // hand AuthContext the SSO restart instead of `auth:unauthorized`.
+  if ((token || cookieSessionKind !== 'none') && await isSsoReauthRejection(response)) {
+    if (!requestSignal?.aborted) {
+      if (!token) failClosedCookieIdentity();
+      dispatchSsoReauth(token);
+    }
+    return response;
+  }
   if (response.status === 401 && !token && cookieSessionKind !== 'none') {
     const rejectedSession = await isSessionRejection(response);
     if (!requestSignal?.aborted && rejectedSession) {
@@ -337,8 +384,20 @@ export const api = {
     // Options endpoints return raw @simplewebauthn option JSON — pass them
     // straight to startRegistration/startAuthentication({ optionsJSON }).
     webauthn: {
-      registerOptions: () =>
-        authenticatedFetch('/api/auth/webauthn/register/options', { method: 'POST' }),
+      // B-1407: enrolling a passkey needs a step-up proof — `stepUp` is
+      // { method: 'password', password } or { method: 'passkey', response }
+      // (the assertion answering stepUpOptions('passkey_registration')).
+      registerOptions: (stepUp) =>
+        authenticatedFetch('/api/auth/webauthn/register/options', {
+          method: 'POST',
+          body: JSON.stringify({ stepUp }),
+        }),
+      // Step-up challenge for the caller's eligible passkeys (UV required).
+      stepUpOptions: (audience) =>
+        authenticatedFetch('/api/auth/webauthn/step-up/options', {
+          method: 'POST',
+          body: JSON.stringify({ audience }),
+        }),
       // `response` is the RegistrationResponseJSON produced by startRegistration.
       registerVerify: (response, name) =>
         authenticatedFetch('/api/auth/webauthn/register/verify', {
@@ -386,16 +445,31 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       }),
-      // Owner/admin: link an existing account to an IdP subject (`sub`).
-      link: (targetUserId, subject) =>
-        authenticatedFetch('/api/auth/oidc/link', {
+      // Any signed-in member, own account only (T-1939 slice 5): { linked, ssoStepUp? }.
+      // 501 when OIDC is off, so the profile hides the self-link section.
+      selfLinkStatus: (options = {}) => authenticatedFetch('/api/auth/oidc/link/self', options),
+      // Any signed-in member: re-checks the password and returns
+      // { authorizationUrl } for linking THEIR OWN account. The response also
+      // sets the `__Host-oidc-txn` cookie; the caller then leaves the SPA with
+      // location.assign. A wrong password is 401 current_password_incorrect,
+      // which is not a session rejection.
+      startSelfLink: (currentPassword) =>
+        authenticatedFetch('/api/auth/oidc/link/self/start', {
           method: 'POST',
-          body: JSON.stringify({ targetUserId, subject }),
+          body: JSON.stringify({ currentPassword }),
         }),
-      // Owner/admin: remove every IdP link of a user and revoke their sessions.
+      // Owner only, strictly lower-ranked target: remove every IdP link of a
+      // user and revoke their sessions. There is no admin link call (B-1410).
       unlink: (userId) =>
         authenticatedFetch(`/api/auth/oidc/link/${encodeURIComponent(userId)}`, {
           method: 'DELETE',
+        }),
+      // Owner only: remove the SSO links on the owner's own account (password
+      // re-checked). Signs the owner out everywhere, this device included.
+      unlinkSelf: (currentPassword) =>
+        authenticatedFetch('/api/auth/oidc/link/self', {
+          method: 'DELETE',
+          body: JSON.stringify({ currentPassword }),
         }),
     },
 
@@ -523,6 +597,15 @@ export const api = {
   },
   sessionContext: (sessionId, options = {}) =>
     authenticatedFetch(`/api/projects/session-context/${encodeURIComponent(sessionId)}`, options),
+  // B-1431/T-1949: batched form for the sidebar's surfaced-session driver — up
+  // to 50 session ids per call, {contexts: [{projectId, provider, session}]}.
+  sessionContexts: (sessionIds, options = {}) =>
+    authenticatedFetch('/api/projects/session-contexts', {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      body: JSON.stringify({ sessionIds }),
+    }),
   // Project Board — live projection of docs/project-state.json + ARCHITECTURE files.
   projectBoard: (projectId) =>
     authenticatedFetch(`/api/project-board/${encodeURIComponent(projectId)}`),
@@ -667,6 +750,14 @@ export const api = {
   deleteProjectLogo: (projectId) =>
     authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/logo`, {
       method: 'DELETE',
+    }),
+  // Project external link (T-1950). `linkUrl: null` clears the link. The
+  // server normalizes (adds https:// when no scheme, http/https only, max
+  // 2048 chars) and returns the stored value, or 400 on invalid input.
+  setProjectLink: (projectId, linkUrl) =>
+    authenticatedFetch(`/api/projects/${encodeURIComponent(projectId)}/link`, {
+      method: 'PUT',
+      body: JSON.stringify({ linkUrl }),
     }),
   // Per-user session star/favorite. Idempotent — `starred` is the desired
   // absolute state, not a toggle. The user is taken from the auth token server-side.

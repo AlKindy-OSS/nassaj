@@ -307,7 +307,8 @@
     "projectBusyHint": "Una sessione in questo progetto è in elaborazione",
     "done": "Completata",
     "doneHint": "Sessione terminata e non ancora aperta",
-    "projectDoneHint": "Una sessione in questo progetto è terminata e non è stata ancora aperta"
+    "projectDoneHint": "Una sessione in questo progetto è terminata e non è stata ancora aperta",
+    "projectOrphanHint": "Un workflow in background in questo progetto si è interrotto prima di produrre un risultato completo"
   },
   "workflowStatus": {
     "running": "Workflow in esecuzione",

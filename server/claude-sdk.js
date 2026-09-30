@@ -34,8 +34,8 @@ import {
   createSteerRun,
   createSteerTaintHook,
   createTranscriptScanner,
-  getSteerConsent,
   getSteerPolicy,
+  isSteeringAllowedFor,
   registerMidTurnInjection,
   STEER_TAINT_MATCHER,
   steerHookTimeoutSeconds,
@@ -114,6 +114,7 @@ import {
   unregisterSessionProcess
 } from './services/session-process-monitor.js';
 import { SessionRegistry } from './session-registry.js';
+import { probeWorkflowLiveness } from './services/workflow-liveness.js';
 // ADR-042 (B-80c) ghost-detach: read-only listener-detection seam. Imported one
 // way only (writer service NEVER imports claude-sdk — verified, no circularity).
 import { countLiveMirrors } from './modules/websocket/services/websocket-writer.service.js';
@@ -214,7 +215,9 @@ const pendingToolApprovals = new Map();
 
 // T-1903: Claude is the first provider with the server-registered
 // `midTurnInjection` capability. A run is steerable only while its entry is
-// active AND it armed a steer controller at start (policy + starter consent).
+// active AND it armed a steer controller at start (admin policy on). Starter
+// consent is enforced at admission, per sender (self-steer skips it); another
+// member additionally needs the run's taint hook (registered only on consent).
 registerMidTurnInjection('claude', {
   findRun(sessionId) {
     const session = activeSessions.get(sessionId);
@@ -411,46 +414,192 @@ const startsMainLoopActivity = (message) => !message?.parent_tool_use_id && (
   MAIN_LOOP_ACTIVITY_TYPES.has(message?.type)
   || (message?.type === 'system' && message.subtype === 'init'));
 
+// B-1400: the CLI's own `<task-notification>` text names the task and its tool call.
+const NOTIFICATION_BLOCK_RE = /<task-notification>([\s\S]*?)(?:<\/task-notification>|$)/g;
+const NOTIFICATION_TASK_ID_RE = /<task-id>([^<\s]+)<\/task-id>/;
+const NOTIFICATION_TOOL_USE_ID_RE = /<tool-use-id>([^<\s]+)<\/tool-use-id>/;
+
+/** Text of a user message, or '' — only used to find `<task-notification>` blocks. */
+function userMessageText(message) {
+  const content = message?.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(b => (typeof b?.text === 'string' ? b.text : '')).join('');
+}
+
+/**
+ * `{ taskId, toolUseId }` per `<task-notification>` block of a user message the CLI
+ * itself delivered as a background-task notification. SDK types: such a message
+ * carries `origin.kind === 'task-notification'` with no `subkind` (a subkind marks
+ * scheduled/peer/relay deliveries, whose text another sender authored), so text a
+ * human or a peer typed can never settle a task.
+ */
+function notifiedTasks(message) {
+  const origin = message?.type === 'user' ? message.origin : null;
+  if (origin?.kind !== 'task-notification' || origin.subkind) return [];
+  const text = userMessageText(message);
+  return Array.from(text.matchAll(NOTIFICATION_BLOCK_RE), ([, block]) => ({
+    taskId: block.match(NOTIFICATION_TASK_ID_RE)?.[1] ?? null,
+    toolUseId: block.match(NOTIFICATION_TOOL_USE_ID_RE)?.[1] ?? null,
+  }));
+}
+
+// B-1401 review: Workflow calls a `complete` announced as still running
+// (`pendingWorkflowIds`), per session, until evidence ends each one. `complete` is
+// sent only after the run's iterator ended, so the end of such a workflow is seen
+// either by a later run of the same session (its notification) or as the exit of
+// the CLI process that ran it (a workflow lives inside that process tree, B-103).
+// Each end is announced once as `workflow_settled` through the replay buffer.
+const workflowExitPollMs = () =>
+  parseInt(process.env.CLAUDE_SDK_WORKFLOW_EXIT_POLL_MS, 10) || 5000;
+const announcedWorkflows = new Map();
+
+/**
+ * Sends `workflow_settled` for each of `toolUseIds` still announced for the session,
+ * through `send` (the observing run's sink) or else the announcing run's.
+ */
+function settleAnnouncedWorkflows(sessionId, toolUseIds, reason, send = null) {
+  const entry = sessionId ? announcedWorkflows.get(sessionId) : null;
+  if (!entry) return;
+  for (const toolUseId of toolUseIds) {
+    if (!entry.ids.delete(toolUseId)) continue;
+    (send ?? entry.send)(createNormalizedMessage({ kind: 'workflow_settled', toolUseId, reason, sessionId,
+      provider: 'claude' }));
+  }
+  if (entry.ids.size > 0) return;
+  clearInterval(entry.timer);
+  announcedWorkflows.delete(sessionId);
+}
+
+/**
+ * Remembers Workflow calls a `complete` reported unresolved and watches the CLI pid
+ * that ran them: once that pid is known and gone, the workflows ended with it. An
+ * unknown pid proves nothing (workflow-liveness M1), so it settles nothing; the
+ * watch stops at the background-hold idle cap either way.
+ */
+function announceUnresolvedWorkflows(sessionId, toolUseIds, send) {
+  if (!sessionId || toolUseIds.length === 0) return;
+  const entry = announcedWorkflows.get(sessionId) ?? { ids: new Set(), send, timer: null };
+  entry.send = send;
+  for (const id of toolUseIds) entry.ids.add(id);
+  announcedWorkflows.set(sessionId, entry);
+  if (entry.timer) return;
+  const watchUntil = Date.now() + sdkBackgroundHoldIdleMaxMs();
+  entry.timer = setInterval(() => {
+    const { known, alive } = probeWorkflowLiveness(sessionId);
+    if (known && !alive) settleAnnouncedWorkflows(sessionId, [...entry.ids], 'process_exited');
+    else if (Date.now() >= watchUntil) { clearInterval(entry.timer); entry.timer = null; }
+  }, workflowExitPollMs());
+  entry.timer.unref?.();
+}
+
 /**
  * B-1120: per-run view of the CLI's tasks, fed with RAW SDK messages. Measured on
  * CLI 2.1.269: every task (foreground or background, agent or bash) emits
  * system/task_started{task_id,is_backgrounded}, then task_updated{patch.status} and
  * task_notification{status} for the same id — so every start counts and either end
  * event clears it. Unknown ids are ignored, so the count can never go negative.
+ * B-1400: those bookends can be missed (the CLI's task-event queue evicts entries,
+ * incl. bookends, at 1000 and drops a whole evicted session key), which left a turn
+ * held for an hour at a time. A task therefore also settles on: the same tool_use_id
+ * in a task_notification (when its task id names no pending task), the
+ * `<task-notification>` text the CLI delivers (origin task-notification), and its
+ * absence from the `background_tasks_changed` level (the SDK's documented guard
+ * against a missed bookend; foreground tasks are not in that list, so only tasks
+ * known to be backgrounded settle that way). Ambient/skip_transcript tasks (watchers,
+ * housekeeping) are not activity and are never counted.
  * `quiet` is true from a `result` until the MAIN loop (not a subagent) speaks again.
  * `continuationExpected`: a known task ended while quiet, so its notification cycle is
  * due; cleared when that cycle (or any main-loop activity) starts, or on a `result`.
  * `backgrounded`: this message started (or moved) a task into the background.
+ * `holdAnchorAt`: last `result` or activity of a pending task — the idle cap counts
+ * from here, so unrelated CLI chatter cannot extend the hold.
+ * `endedToolUseIds`: tool_use ids whose task this message reported as ended.
  * @returns {{ observe: (message: object) => { quiet: boolean, pending: number,
- *   continuationExpected: boolean, backgrounded: boolean } }}
+ *   continuationExpected: boolean, backgrounded: boolean, holdAnchorAt: number,
+ *   endedToolUseIds: string[] } }}
  */
 function createBackgroundTaskTracker() {
   const pendingTasks = new Map();
   let quiet = false;
   let continuationExpected = false;
+  let holdAnchorAt = Date.now();
   const endsTask = (message) => message.subtype === 'task_notification'
     || (message.subtype === 'task_updated' && TERMINAL_TASK_STATUSES.has(message.patch?.status));
+  const settle = (taskId, endedToolUseIds) => {
+    const task = pendingTasks.get(taskId);
+    if (!task) return;
+    pendingTasks.delete(taskId);
+    if (task.toolUseId) endedToolUseIds.push(task.toolUseId);
+    if (quiet) continuationExpected = true;
+    holdAnchorAt = Date.now();
+  };
+  const settleByToolUseId = (toolUseId, endedToolUseIds) => {
+    for (const [taskId, task] of pendingTasks) {
+      if (task.toolUseId === toolUseId) settle(taskId, endedToolUseIds);
+    }
+  };
+  // B-1400 review: the task id is authoritative; the tool_use_id settles a pending
+  // task only when the task id names none (its task_started was lost).
+  const settleEnded = (taskId, toolUseId, endedToolUseIds) => {
+    if (toolUseId) endedToolUseIds.push(toolUseId);
+    if (taskId && pendingTasks.has(taskId)) settle(taskId, endedToolUseIds);
+    else if (toolUseId) settleByToolUseId(toolUseId, endedToolUseIds);
+  };
+  const observeSystem = (message, endedToolUseIds) => {
+    const taskId = typeof message.task_id === 'string' && message.task_id ? message.task_id : null;
+    if (message.subtype === 'background_tasks_changed') {
+      if (!Array.isArray(message.tasks)) return false;
+      const live = new Set(message.tasks.filter(t => t && t.ambient !== true).map(t => t.task_id));
+      for (const [id, task] of pendingTasks) {
+        if (live.has(id)) task.backgrounded = true;
+        else if (task.backgrounded) settle(id, endedToolUseIds);
+      }
+      return false;
+    }
+    if (!taskId) return false;
+    if (message.subtype === 'task_started') {
+      if (message.ambient === true || message.skip_transcript === true) return false;
+      const toolUseId = typeof message.tool_use_id === 'string' ? message.tool_use_id : null;
+      // A workflow always runs in the background; is_backgrounded is only set for
+      // agent and bash tasks.
+      const inBackground = message.is_backgrounded === true || message.task_type === 'local_workflow';
+      pendingTasks.set(taskId, { toolUseId, backgrounded: inBackground });
+      holdAnchorAt = Date.now();
+      return message.is_backgrounded === true;
+    }
+    if (endsTask(message)) {
+      settleEnded(taskId, typeof message.tool_use_id === 'string' ? message.tool_use_id : null,
+        endedToolUseIds);
+      return false;
+    }
+    const task = pendingTasks.get(taskId);
+    if (task) holdAnchorAt = Date.now();
+    if (message.subtype !== 'task_updated' || message.patch?.is_backgrounded !== true) return false;
+    if (task) task.backgrounded = true;
+    return true;
+  };
+  const isPendingTaskActivity = (message) => typeof message?.parent_tool_use_id === 'string'
+    && [...pendingTasks.values()].some(t => t.toolUseId === message.parent_tool_use_id);
   return {
     observe(message) {
       let backgrounded = false;
-      if (message?.type === 'system' && typeof message.task_id === 'string' && message.task_id) {
-        if (message.subtype === 'task_started') {
-          pendingTasks.set(message.task_id, { startedAt: Date.now() });
-          backgrounded = message.is_backgrounded === true;
-        } else if (endsTask(message)) {
-          if (pendingTasks.delete(message.task_id) && quiet) continuationExpected = true;
-        } else if (message.subtype === 'task_updated') {
-          backgrounded = message.patch?.is_backgrounded === true;
-        }
+      const endedToolUseIds = [];
+      if (message?.type === 'system') backgrounded = observeSystem(message, endedToolUseIds);
+      for (const { taskId, toolUseId } of notifiedTasks(message)) {
+        settleEnded(taskId, toolUseId, endedToolUseIds);
       }
+      if (isPendingTaskActivity(message)) holdAnchorAt = Date.now();
       if (message?.type === 'result') {
         quiet = true;
         continuationExpected = false;
+        holdAnchorAt = Date.now();
       } else if (startsMainLoopActivity(message)) {
         quiet = false;
         continuationExpected = false;
       }
-      return { quiet, pending: pendingTasks.size, continuationExpected, backgrounded };
+      return { quiet, pending: pendingTasks.size, continuationExpected, backgrounded, holdAnchorAt,
+        endedToolUseIds: [...new Set(endedToolUseIds)] };
     },
   };
 }
@@ -2733,18 +2882,28 @@ function createSteerStarterApproval({ ws, sessionIdRef, waitForApproval, settleA
 }
 
 /**
- * T-1903 — arms mid-turn steering for one run, or returns null. Armed only when
- * the global policy is on AND the starter consented AT RUN START (the taint hook
- * must be registered before query(); consent is re-read at each injection too),
- * never in plan mode, never without a persisted session. The taint hook is
- * appended to the run's PreToolUse hooks; it is inert until a steer arrives.
+ * T-1903 — arms mid-turn steering for one run, or returns null. The steer
+ * controller (queue + streaming-input delivery) is armed whenever the global
+ * policy is on AT RUN START, so the starter can always steer his own turn.
+ * Never in plan mode, never without a persisted session.
+ *
+ * The `.*` taint hook is registered ONLY when the starter consented AT RUN
+ * START (it must exist before query()). It is an SDK CALLBACK hook, and after
+ * the control stream closes the CLI cancels any tool whose callback hook it
+ * cannot reach, with the phantom "user doesn't want to take this action"
+ * denial (B-503) — so no run carries it without a reason. A self-steer never
+ * taints and needs no hook; another member is admitted only when the hook is
+ * armed (`taintHookArmed`). Returns `{ run, taintHookRegistered }`.
  */
-function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, hooksArmed, onQueued, waitForApproval, settleApproval }) {
+function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, injectionArmed, taintHookArmed, onQueued,
+  waitForApproval, settleApproval }) {
   const starterUserId = ws?.userId;
+  let withTaintHook = false;
   try {
     if (!Number.isInteger(starterUserId) || sdkOptions.permissionMode === 'plan'
-      || sdkOptions.persistSession === false || !sdkOptions.hooks || typeof sdkOptions.hooks !== 'object'
-      || getSteerPolicy().mode === 'off' || !getSteerConsent(starterUserId)) return null;
+      || sdkOptions.persistSession === false || getSteerPolicy().mode === 'off') return null;
+    withTaintHook = Boolean(sdkOptions.hooks && typeof sdkOptions.hooks === 'object')
+      && isSteeringAllowedFor(starterUserId).allowed;
   } catch {
     return null;
   }
@@ -2755,12 +2914,14 @@ function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, hooksArmed, 
   const run = createSteerRun({
     sessionId: sessionIdRef, turnId: crypto.randomUUID(), starterUserId,
     permissionMode: () => sdkOptions.permissionMode || 'default',
-    hooksArmed,
+    injectionArmed,
+    taintHookArmed,
     onQueued: (item) => { void scanner.mark(item.uuid); onQueued?.(); },
     broadcast: (event) => sendAndBuffer(event),
     persistStatus: (item, status) => { messageCoordinationDb.updateSteerStatus(item.clientMsgId, item.senderUserId, status); },
     confirmDelivery: (item) => confirmWithRetry(() => scanner.has(item.uuid)),
   });
+  if (!withTaintHook) return { run, taintHookRegistered: false };
 
   const hook = createSteerTaintHook({
     isTainted: run.isTainted,
@@ -2771,7 +2932,7 @@ function armSteerRun({ ws, sdkOptions, sessionIdRef, sendAndBuffer, hooksArmed, 
   sdkOptions.hooks.PreToolUse = [...preToolUse, {
     matcher: STEER_TAINT_MATCHER, hooks: [hook], timeout: steerHookTimeoutSeconds(steerApprovalTimeoutMs()),
   }];
-  return run;
+  return { run, taintHookRegistered: true };
 }
 
 /**
@@ -2982,11 +3143,13 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   // background tasks never reported back within the idle ceiling), `abort`, or
   // `run-ended` (the finally).
   let inputReleasedAt = null;
-  // T-1903: the run-owned steer controller (null unless policy + the starter's
-  // consent allowed steering when this run started) and whether its taint hook
-  // actually reached the CLI. Declared before releaseInput, which closes it.
+  // T-1903: the run-owned steer controller (null unless the admin policy allowed
+  // steering when this run started), whether it may inject at all, and whether
+  // its taint hook (registered only on starter consent) actually reached the
+  // CLI. Declared before releaseInput, which closes it.
   let steerRun = null;
-  let steerHooksArmed = false;
+  let steerInjectionArmed = false;
+  let steerTaintHookArmed = false;
   const releaseInput = (reason) => {
     steerRun?.close(reason === 'abort' ? 'turn_aborted' : 'input_closed');
     if (inputReleasedAt === null) {
@@ -3035,7 +3198,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     if (steerRun?.hasPendingWork()) {
       armInputClose(sdkBackgroundHoldIdleMaxMs(), 'steer-hold-cap');
     } else if (taskState.pending > 0) {
-      armInputClose(sdkBackgroundHoldIdleMaxMs(), 'background-idle-cap');
+      // B-1400: idle counted from the last result or pending-task activity, not from
+      // this message — unrelated CLI chatter no longer re-arms a full hour.
+      const idleLeftMs = taskState.holdAnchorAt + sdkBackgroundHoldIdleMaxMs() - Date.now();
+      armInputClose(Math.max(0, idleLeftMs), 'background-idle-cap');
     } else if (taskState.continuationExpected) {
       armInputClose(sdkContinuationWaitMs(), 'continuation-wait-expired');
     } else if (continuationPossible) {
@@ -3055,8 +3221,17 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
   let effectiveEngineProvider = null;
   // B-1136: declared out here so the catch below can tell a STOP-driven kill apart.
   let runAbortController = null;
+  // B-1399: out here too — an interrupt() that answered leaves the controller
+  // un-aborted, so the catch reads the abort mark on the query handle instead.
+  let queryInstance = null;
 
   try {
+    // B-1399: a new turn on a session whose previous run already ended must not
+    // hand that run's terminal frames (error/complete) to a client that attaches
+    // with lastSeq=0. Clears the retained frames only; the seq line continues.
+    if (sessionId) {
+      claudeSessionRegistry.clearInactiveBuffer(sessionId);
+    }
     const resolvedModel = await providerModelsService.resolveResumeModel(
       'claude',
       sessionId,
@@ -3558,10 +3733,11 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       } : {}),
     };
 
-    steerRun = armSteerRun({
+    const armedSteer = armSteerRun({
       ws, sdkOptions, sessionIdRef: () => capturedSessionId || sessionId || null,
       sendAndBuffer: (payload) => bufferThenSend(ws, capturedSessionId || sessionId || null, payload),
-      hooksArmed: () => steerHooksArmed && Boolean(sdkOptions.hooks),
+      injectionArmed: () => steerInjectionArmed,
+      taintHookArmed: () => steerTaintHookArmed && Boolean(sdkOptions.hooks),
       // M2: a steer landing while a close is ARMED (the run went quiet) must
       // not be cut off by that timer — swap it for the steer hold.
       onQueued: () => {
@@ -3570,7 +3746,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       waitForApproval: waitForToolApproval,
       settleApproval: settleToolApproval,
     });
-    if (steerRun) steerHooksArmed = true;
+    steerRun = armedSteer?.run ?? null;
+    steerInjectionArmed = Boolean(steerRun);
+    steerTaintHookArmed = Boolean(armedSteer?.taintHookRegistered);
 
     // Caveat: in 'auto' and 'bypassPermissions' modes the SDK resolves approval
     // at the permission-mode step and skips this callback, so interactive tools
@@ -3812,14 +3990,23 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       entry.steerRun = steerRun;
       if (steerTurnAnnounced) return;
       steerTurnAnnounced = true;
+      // `steerable` = others may steer (taint hook armed + policy + consent);
+      // `starterSteerable` = the starter may steer (injection armed + policy;
+      // a plan-mode run is never armed).
+      let othersAllowed = false;
+      let starterAllowed = false;
+      try {
+        othersAllowed = isSteeringAllowedFor(steerRun.starterUserId).allowed;
+        starterAllowed = isSteeringAllowedFor(steerRun.starterUserId, steerRun.starterUserId).allowed;
+      } catch { /* fail-closed: not steerable */ }
       bufferThenSend(ws, sid, {
         type: 'steer-turn-state', sessionId: sid, turnId: steerRun.turnId,
-        starterUserId: steerRun.starterUserId, steerable: steerRun.hooksArmed(),
+        starterUserId: steerRun.starterUserId, steerable: steerRun.taintHookArmed() && othersAllowed,
+        starterSteerable: steerRun.injectionArmed() && steerRun.permissionMode() !== 'plan' && starterAllowed,
         forViewerUserId: null, capability: { midTurnInjection: true },
       });
     };
 
-    let queryInstance;
     // B-117: the streaming-input prompt. Yields this turn's single user message —
     // byte-identical text to the string form, which the SDK itself wrapped the
     // same way — then parks on `inputStreamRelease` so stdin (and with it the
@@ -3857,8 +4044,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
         // Keep notification behavior operational via runtime events even if hook registration fails.
         console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
         delete sdkOptions.hooks;
-        // T-1903: no hooks → no taint gate → no steering on this run (fail-closed).
-        steerHooksArmed = false;
+        // T-1903: no hooks → no taint gate → no steering by OTHER members on this
+        // run (fail-closed). The starter's own steer needs no gate and stays armed.
+        steerTaintHookArmed = false;
         // The logical execution permit covers this broker-managed retry. It is
         // intentionally not consumed a second time.
         queryInstance = query({
@@ -3924,9 +4112,12 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     let continuationPossible = false;
     // B-1120: this run's pending CLI tasks and whether the main loop is quiet.
     const backgroundTasks = createBackgroundTaskTracker();
-    // Count Workflow tool_use calls so the complete event can signal
-    // that background work is still in flight after the assistant turn ends.
-    let pendingWorkflows = 0;
+    // B-1401: tool_use ids of this run's Workflow calls not yet resolved. The tool
+    // returns at once and the workflow runs as a background task, so an id leaves
+    // the set only when its tool_result is an error (never started) or its task is
+    // reported ended (notification, terminal update, level signal). `complete`
+    // carries the size: workflows still running when this run ends.
+    const unresolvedWorkflows = new Set();
     // T-1765: prompt-cache lifetime Anthropic reported for this run's latest
     // main-chain cache write (60 or 5 minutes); null until one is reported.
     let lastCacheTtlMinutes = null;
@@ -4050,8 +4241,17 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // that background work continues after the assistant turn ends.
       if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
         for (const block of message.message.content) {
-          if (block && block.type === 'tool_use' && block.name === 'Workflow') {
-            pendingWorkflows += 1;
+          if (block && block.type === 'tool_use' && block.name === 'Workflow' && block.id) {
+            unresolvedWorkflows.add(block.id);
+          }
+        }
+      }
+      if (message.type === 'user' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) {
+          if (block?.type === 'tool_result' && block.is_error === true) {
+            unresolvedWorkflows.delete(block.tool_use_id);
+            settleAnnouncedWorkflows(capturedSessionId || sessionId, [block.tool_use_id], 'failed',
+              sendAndBuffer);
           }
         }
       }
@@ -4062,6 +4262,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
       // so does a known task ending after the main loop went quiet. A background
       // Bash is not caught by the tool_use scan below, yet re-enters the same way.
       const taskState = backgroundTasks.observe(message);
+      for (const toolUseId of taskState.endedToolUseIds) unresolvedWorkflows.delete(toolUseId);
+      settleAnnouncedWorkflows(capturedSessionId || sessionId, taskState.endedToolUseIds, 'notified',
+        sendAndBuffer);
       if (taskState.backgrounded || taskState.continuationExpected) continuationPossible = true;
       // T-1903: an injected message can start another invocation after a
       // `result`, and a `result` settles every injection yielded before it.
@@ -4328,7 +4531,9 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     }
     // T-1903: a steered run may produce several `result`s; the aggregate rides the terminal frame.
     const steerUsage = steerRun?.everInjected() ? { runUsage: steerRun.usage() } : {};
-    sendAndBuffer(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude', pendingWorkflows, ...clientMsgIdField, ...durableTiming, ...steerUsage }));
+    const pendingWorkflowIds = [...unresolvedWorkflows];
+    sendAndBuffer(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude', pendingWorkflows: pendingWorkflowIds.length, pendingWorkflowIds, ...clientMsgIdField, ...durableTiming, ...steerUsage }));
+    announceUnresolvedWorkflows(capturedSessionId || sessionId, pendingWorkflowIds, sendAndBuffer);
     // ADR-041: terminal state — flip the single source of truth to inactive and
     // schedule a deferred buffer drop (post-close replay window, not an immediate
     // drop). No-op when SESSION_REGISTRY_claude is off.
@@ -4348,8 +4553,18 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     return { ok: true };
 
   } catch (error) {
-    permissionOutcome = permissionStarted ? 'failed' : 'spawn_failed';
-    console.error('SDK query error:', error);
+    // B-1399: a STOP ends the run either by killing the CLI (controller aborted,
+    // B-1136) or by an answered interrupt() after which the CLI may still exit
+    // non-zero. Both are the user's own stop, never a failure.
+    const userAborted = Boolean(runAbortController?.signal.aborted || queryInstance?.__nassajAborted
+      || queryInstance?.__nassajStopRequested);
+    if (userAborted) {
+      permissionOutcome = 'cancelled';
+      console.log(`[Claude] run ended by user stop: ${error?.message || error}`);
+    } else {
+      permissionOutcome = permissionStarted ? 'failed' : 'spawn_failed';
+      console.error('SDK query error:', error);
+    }
 
     // B-40a: cancel dangling tool approvals so approval promises resolve
     // immediately rather than leaking until TOOL_APPROVAL_TIMEOUT_MS.
@@ -4378,10 +4593,10 @@ async function runClaudeSDKQuery(command, options = {}, ws, internalOptions = {}
     // Clean up temporary image files on error
     await cleanupTempFiles(tempImagePaths, tempDir);
 
-    // B-1136: a STOP that had to kill the CLI ends the stream with the SDK's abort
-    // error. The abort handler already sent the aborted frame, so no error frame
-    // or failure notification follows it.
-    if (runAbortController?.signal.aborted) {
+    // B-1136/B-1399: a user STOP ends the stream with the SDK's abort error or a
+    // non-zero CLI exit. The abort handler already sent the aborted frame, so no
+    // error frame or failure notification follows it.
+    if (userAborted) {
       return { ok: false };
     }
 
@@ -4692,6 +4907,9 @@ async function abortClaudeSDKSession(sessionId, rawWs = null) {
     }
     // B-1136: bounded. An unanswered interrupt used to hang this await forever,
     // leaving the run active and every later STOP press a no-op.
+    // B-1399 review: marked before awaiting, so a CLI that exits non-zero while the
+    // interrupt is in flight still reads as this stop, never as spawn_failed.
+    session.instance.__nassajStopRequested = true;
     const interrupted = await interruptWithin(session.instance, interruptTimeoutMs());
     if (!interrupted && typeof session.forceStop !== 'function') {
       const reason = `session ${sessionId} did not answer interrupt() and has no force-stop handle`;
@@ -4985,6 +5203,9 @@ export {
   addSession,
   removeSession,
   getSession,
+  // B-1401 review: test seam for the post-complete workflow settle signal.
+  announceUnresolvedWorkflows,
+  settleAnnouncedWorkflows,
   // Pure helpers — exported for unit testing only (no side effects, no I/O).
   handleFiles
 };

@@ -13,6 +13,7 @@ import { prepareLocalSourceRecoveryCandidate, buildLocalSourceRecoveryCandidate 
 import { hashTree } from '../../../scripts/lib/source-update-tree-identity.mjs';
 import { recoveryDatabaseSchemaSha256, inspectLocalRecoveryRegistration, registerLocalRecoveryPacket } from '../../../scripts/local-source-recovery-operator.mjs';
 import { reconcileLocalRecoveryRollback } from '../../../scripts/local-source-recovery-reconcile.mjs';
+import { installServerScriptsLib } from '../../../tests/helpers/server-artifact-scripts-lib.mjs';
 
 const project = process.cwd(), sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const serverBuild = 'c'.repeat(64), clientBuild = 'b'.repeat(64), oldBuild = 'd'.repeat(64);
@@ -28,10 +29,9 @@ function fixtureRoot(t: test.TestContext) {
   git('add', 'package.json', 'package-lock.json', '.gitignore');
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'fixture');
   for (const name of ['dist', 'dist-server', 'node_modules']) { fs.mkdirSync(path.join(root, name)); write(path.join(root, name, 'fixture'), 'old'); }
-  fs.mkdirSync(path.join(root, 'dist-server/scripts'));
-  fs.cpSync(path.join(project, 'dist-server/scripts/lib'), path.join(root, 'dist-server/scripts/lib'), { recursive: true });
+  installServerScriptsLib(project, root);
   fs.mkdirSync(path.join(root, 'dist-server/server/services'), { recursive: true });
-  write(path.join(root, 'dist-server/server/services/update-maintenance-gate.js'), `export * from ${JSON.stringify(pathToFileURL(path.join(project, 'dist-server/server/services/update-maintenance-gate.js')).href)};`);
+  write(path.join(root, 'dist-server/server/services/update-maintenance-gate.js'), `export * from ${JSON.stringify(pathToFileURL(path.join(project, 'server/services/update-maintenance-gate.js')).href)};`);
   write(path.join(root, 'dist-server/OID_CONTROL_MANIFEST.json'), '{}');
   for (const name of ['dist', 'dist-server']) write(path.join(root, name, 'BUILD_PROVENANCE.json'), JSON.stringify({ commit: 'e'.repeat(40), buildId: oldBuild }));
   return { root, git, oid: git('rev-parse', 'HEAD') };
@@ -137,7 +137,7 @@ test('packet verification and registration reuse one exact candidate with real l
   assert.equal(fs.readFileSync(path.join(root, '.env'), 'utf8'), original);
   assert.equal(value.git('rev-parse', 'HEAD'), oid);
   db.prepare("UPDATE source_update_jobs SET state='runtime_verifying' WHERE id='job-1'").run();
-  const loaded = await import(pathToFileURL(path.join(project, 'dist-server/scripts/lib/source-update-activation.mjs')).href);
+  const loaded = await import(pathToFileURL(path.join(root, 'dist-server/scripts/lib/source-update-activation.mjs')).href);
   const validation = loaded.validateCandidate({ projectRoot: root, candidateRoot: path.dirname(receipt.manifestPath), transactionId: 'tx-1',
     releaseCommit: oid, version: receipt.version, manifestPath: receipt.manifestPath, manifestSha256: receipt.manifestSha256 });
   loaded.exchangeGenerations(validation); loaded.rollbackGenerations(validation);

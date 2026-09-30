@@ -12,6 +12,9 @@ function turnState(overrides: Partial<Record<string, unknown>> = {}) {
     turnId: 't1',
     starterUserId: 1,
     steerable: true,
+    // a19af3a88: always sent by this server; a realistic default frame armed
+    // for the starter too, distinct from `steerable` (non-starter eligibility).
+    starterSteerable: true,
     capability: { midTurnInjection: true },
     ...overrides,
   };
@@ -27,13 +30,15 @@ function logOf(...frames: unknown[]): ControlEventLogLike {
 describe('useSessionSteer', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('canSteer is false for the starter and true for any other member once steerable', () => {
+  it('canSteer is true for both the starter and any other member once steerable', () => {
+    // ADR-190 (تحديث): البادئ نفسه مؤهَّل لتوجيه دوره الجاري — الخادم يقبل
+    // sender === starter مباشرةً بلا موافقة وبلا موجّه أدوات.
     const starter = renderHook(({ controlEvents }) =>
       useSessionSteer({ sessionId: SESSION_ID, currentUserId: 1, latestMessage: null, controlEvents, sendMessage: vi.fn() }),
       { initialProps: { controlEvents: EMPTY_LOG } },
     );
     starter.rerender({ controlEvents: logOf(turnState()) });
-    expect(starter.result.current.canSteer).toBe(false);
+    expect(starter.result.current.canSteer).toBe(true);
     expect(starter.result.current.isStarter).toBe(true);
 
     const viewer = renderHook(({ controlEvents }) =>
@@ -43,6 +48,45 @@ describe('useSessionSteer', () => {
     viewer.rerender({ controlEvents: logOf(turnState()) });
     expect(viewer.result.current.canSteer).toBe(true);
     expect(viewer.result.current.isStarter).toBe(false);
+  });
+
+  it('starter reads starterSteerable, not the broadcast steerable (df0898ce0)', () => {
+    // ADR-190 (تحديث df0898ce0) — الإطار العام (forViewerUserId: null) يجعل
+    // steerable تعني «غيري قد يوجّه» فقط؛ starterSteerable هي مصدر أهلية
+    // البادئ نفسه، حتى حين steerable=false (لا موافقة على عضوٍ آخر).
+    const starter = renderHook(({ controlEvents }) =>
+      useSessionSteer({ sessionId: SESSION_ID, currentUserId: 1, latestMessage: null, controlEvents, sendMessage: vi.fn() }),
+      { initialProps: { controlEvents: EMPTY_LOG } },
+    );
+    starter.rerender({
+      controlEvents: logOf(turnState({ steerable: false, starterSteerable: true, forViewerUserId: null })),
+    });
+    expect(starter.result.current.isStarter).toBe(true);
+    expect(starter.result.current.canSteer).toBe(true);
+
+    const viewer = renderHook(({ controlEvents }) =>
+      useSessionSteer({ sessionId: SESSION_ID, currentUserId: 2, latestMessage: null, controlEvents, sendMessage: vi.fn() }),
+      { initialProps: { controlEvents: EMPTY_LOG } },
+    );
+    viewer.rerender({
+      controlEvents: logOf(turnState({ steerable: false, starterSteerable: true, forViewerUserId: null })),
+    });
+    expect(viewer.result.current.isStarter).toBe(false);
+    expect(viewer.result.current.canSteer).toBe(false);
+  });
+
+  it('canSteer is false for the starter when starterSteerable is absent (no fallback to steerable)', () => {
+    // a19af3a88: an absent `starterSteerable` (older/malformed frame) must
+    // NOT fall back to `steerable` — that field now means something else
+    // entirely for a viewer who is the starter (another member's eligibility).
+    const { starterSteerable: _omit, ...frameWithoutStarterSteerable } = turnState({ steerable: true });
+    const starter = renderHook(({ controlEvents }) =>
+      useSessionSteer({ sessionId: SESSION_ID, currentUserId: 1, latestMessage: null, controlEvents, sendMessage: vi.fn() }),
+      { initialProps: { controlEvents: EMPTY_LOG } },
+    );
+    starter.rerender({ controlEvents: logOf(frameWithoutStarterSteerable) });
+    expect(starter.result.current.isStarter).toBe(true);
+    expect(starter.result.current.canSteer).toBe(false);
   });
 
   it('canSteer is false when steer-turn-state is absent (no capability signal)', () => {

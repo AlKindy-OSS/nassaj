@@ -409,6 +409,7 @@ describe('sidebar workflow indicator', () => {
       workflows: [{
         sessionId: 'session-1',
         wfId: 'wf_10000000-demo',
+        projectId: null,
         status: 'unknown',
         agentsDone: 0,
         agentsTotal: 0,
@@ -438,6 +439,7 @@ describe('sidebar workflow indicator', () => {
         workflows: [{
           sessionId: 'session-1',
           wfId: 'wf_10000000-demo',
+          projectId: null,
           status: 'running',
           agentsDone: 1,
           agentsTotal: 2,
@@ -506,6 +508,7 @@ describe('sidebar workflow indicator', () => {
         workflows: [{
           sessionId: 'session-1',
           wfId: `wf_orphan_${agentsDone}`,
+          projectId: null,
           status: 'orphan',
           agentsDone,
           agentsTotal,

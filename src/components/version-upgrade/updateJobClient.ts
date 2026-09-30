@@ -1,5 +1,75 @@
 export const UPDATE_ATTEMPT_STORAGE_KEY = 'nassaj:update-attempt:v2';
 
+/** Public byte figures for the `insufficient_disk` storage blocker (T-1553, م1). */
+export interface BlockedStorageFigures {
+  availableBytes: number;
+  requiredBytes: number;
+}
+
+/**
+ * Defensively parse the owner-only `GET /api/system/update/storage` payload's
+ * `blockedStorage` field: only trustworthy as finite, non-negative integers —
+ * a malformed or hostile value must never crash the modal, it just falls back
+ * to the plain (figure-free) blocked-reason text.
+ */
+export function parseBlockedStorage(value: unknown): BlockedStorageFigures | null {
+  if (!value || typeof value !== 'object') return null;
+  const availableBytes = (value as Record<string, unknown>).availableBytes;
+  const requiredBytes = (value as Record<string, unknown>).requiredBytes;
+  if (typeof availableBytes !== 'number' || typeof requiredBytes !== 'number') return null;
+  if (!Number.isInteger(availableBytes) || !Number.isInteger(requiredBytes)) return null;
+  if (availableBytes < 0 || requiredBytes < 0) return null;
+  return { availableBytes, requiredBytes };
+}
+
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+
+/**
+ * Format a byte count with binary (1024) units and one decimal place. The
+ * rounding `direction` is caller-chosen so paired figures never mislead: what
+ * is actually *available* rounds down (never overstate headroom), and what is
+ * *required* or *missing* rounds up (never understate the ask) — T-1553, م2.
+ */
+export function formatBytesDirectional(bytes: number, direction: 'down' | 'up'): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const base = 1024;
+  const maxIndex = BYTE_UNITS.length - 1;
+  const index = Math.min(maxIndex, Math.floor(Math.log(bytes) / Math.log(base)));
+  const scaled = bytes / Math.pow(base, index);
+  const precision = 10; // one decimal place
+  const rounded = direction === 'up'
+    ? Math.ceil(scaled * precision) / precision
+    : Math.floor(scaled * precision) / precision;
+  const value = rounded.toFixed(1).replace(/\.0$/, '');
+  return `${value} ${BYTE_UNITS[index]}`;
+}
+
+/**
+ * Resolve the i18n key + interpolation params for a blocked-reason code. Only
+ * `insufficient_disk` gets a figures variant, and only when the byte counts
+ * are actually available; every other code (and a disk blocker without
+ * figures) falls back to the plain key so callers can still supply a
+ * `defaultValue` for codes this build doesn't recognize yet.
+ */
+export function blockedReasonI18nArgs(
+  reason: string | undefined,
+  blockedStorage: BlockedStorageFigures | null | undefined,
+): { key: string; params?: { available: string; required: string; shortfall: string } } {
+  const code = reason || 'failed';
+  if (code === 'insufficient_disk' && blockedStorage) {
+    const shortfallBytes = Math.max(0, blockedStorage.requiredBytes - blockedStorage.availableBytes);
+    return {
+      key: 'versionUpdate.blockedReasons.insufficient_disk_detail',
+      params: {
+        available: formatBytesDirectional(blockedStorage.availableBytes, 'down'),
+        required: formatBytesDirectional(blockedStorage.requiredBytes, 'up'),
+        shortfall: formatBytesDirectional(shortfallBytes, 'up'),
+      },
+    };
+  }
+  return { key: `versionUpdate.blockedReasons.${code}` };
+}
+
 export type UpdateJobState =
   | 'accepted'
   | 'resolving'

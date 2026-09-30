@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import express from 'express';
 
+import { RECENT_AUTH_MAX_AGE_MS } from './connector-auth-security.js';
 import { createConnectorProvisioningRoutes } from './connector-provisioning.routes.js';
 import type { ConnectorProvisioningService } from './connector-provisioning.service.js';
 
@@ -13,7 +14,8 @@ const ORIGIN = 'https://nassaj.example.test';
 const CSRF = 'c'.repeat(64);
 
 const run = async (request: (base: string) => Promise<Response>,
-  start = async (_providerId: string, _idempotencyKey: string) => ({ provisioningId: 'provisioning-1', state: 'manual_recovery' })) => {
+  start = async (_providerId: string, _idempotencyKey: string) => ({ provisioningId: 'provisioning-1', state: 'manual_recovery' }),
+  authTimeMs = NOW - 1) => {
   const starts: Array<[string, string]> = [];
   const service = { start: async (providerId: string, idempotencyKey: string) => {
     starts.push([providerId, idempotencyKey]); return start(providerId, idempotencyKey);
@@ -23,7 +25,7 @@ const run = async (request: (base: string) => Promise<Response>,
     installationId: 'install-1', origins: { resolve: () => ({ canonicalOrigin: ORIGIN, originRevision: 3,
       callbackUrl: `${ORIGIN}/connectors/oauth/callback` }) } as never,
     resolveIdentity: () => ({ userId: 7, role: 'owner' }), now: () => NOW,
-    readRecentSession: () => ({ installationId: 'install-1', userId: 7, authTimeMs: NOW - 1,
+    readRecentSession: () => ({ installationId: 'install-1', userId: 7, authTimeMs,
       expiresAtMs: NOW + 30_000, csrfTokenHash: createHash('sha256').update(CSRF).digest('hex') }),
   }));
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>((resolve, reject) => {
@@ -37,8 +39,20 @@ test('provisioning rejects an origin mismatch before it starts any durable attem
   const { response, starts } = await run(base => fetch(`${base}/provisioning`, { method: 'POST',
     headers: { 'content-type': 'application/json', origin: 'https://attacker.example.test',
       'idempotency-key': 'origin-mismatch-123', 'x-csrf-token': CSRF }, body: JSON.stringify({ providerId: 'notion' }) }));
-  assert.equal(response.status, 403); assert.deepEqual(await response.json(), { code: 'CONNECTOR_PROVISIONING_RECENT_AUTH_OR_CSRF_REQUIRED' });
+  assert.equal(response.status, 403); assert.deepEqual(await response.json(), { code: 'CONNECTOR_ORIGIN_REJECTED' });
   assert.deepEqual(starts, []);
+});
+
+test('provisioning honours the single ten-minute recent-auth window with its own code', async () => {
+  const post = (authTimeMs: number) => run(base => fetch(`${base}/provisioning`, { method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN, 'x-csrf-token': CSRF,
+      'idempotency-key': 'window-key-123' }, body: JSON.stringify({ providerId: 'notion' }) }), undefined, authTimeMs);
+  const inside = await post(NOW - RECENT_AUTH_MAX_AGE_MS);
+  assert.equal(inside.response.status, 202, 'nine minutes and change is still recent (was a 5-minute literal)');
+  const stale = await post(NOW - RECENT_AUTH_MAX_AGE_MS - 1);
+  assert.equal(stale.response.status, 403);
+  assert.deepEqual(await stale.response.json(), { code: 'CONNECTOR_PROVISIONING_RECENT_AUTH_OR_CSRF_REQUIRED' });
+  assert.deepEqual(stale.starts, []);
 });
 
 test('provisioning requires exact request shape and a valid idempotency key before service invocation', async () => {

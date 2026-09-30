@@ -80,6 +80,7 @@ import { connectorPolicyV2OwnerSetupRoutes,
   connectorPolicyV2SubstrateRoutes,
   resolveConnectorRuntimeInstallationOrigin } from './connector-substrate-only.production.js';
 import connectorOAuthV2Routes, { createConnectorOAuthV2Callback } from './connector-oauth-v2.routes.js';
+import connectorOwnerSessionRoutes from './connector-owner-session.production.js';
 import connectorUserGrantRoutes from './connector-user-grant.routes.js';
 
 const router = express.Router();
@@ -535,6 +536,7 @@ router.use('/v2/owner/setup', connectorPolicyV2OwnerSetupRoutes);
 router.use('/v2/owner/provisioning', connectorPolicyV2ProvisioningRoutes);
 router.use('/grants', connectorUserGrantRoutes);
 router.use('/oauth-v2', connectorOAuthV2Routes);
+router.use('/owner-session', connectorOwnerSessionRoutes);
 
 router.post('/', async (req, res) => {
   const userId = callerId(req);

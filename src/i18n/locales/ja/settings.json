@@ -412,7 +412,14 @@
       "done": "完了",
       "copy": "コピー",
       "copied": "コピーしました",
-      "successHint": "この一回限りのリンクを共有してください。一度しか表示されません。"
+      "successHint": "この一回限りのリンクを共有してください。一度しか表示されません。",
+      "durationLabel": "有効期限",
+      "durations": {
+        "day1": "1日",
+        "day3": "3日",
+        "day7": "7日",
+        "day30": "30日"
+      }
     }
   },
   "notifications": {

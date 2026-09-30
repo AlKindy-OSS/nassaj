@@ -95,19 +95,19 @@ const CMID = 'cmid_test_1';
 
 const MESSAGE_TYPES: ReadonlyArray<[string, string]> = [
   ['claude-command', 'claude'],
-  ['cursor-command', 'cursor'],
   ['codex-command', 'codex'],
   ['antigravity-command', 'antigravity'],
-  ['kimi-command', 'kimi'],
   ['opencode-command', 'opencode'],
 ];
 
 /** معطَّلة عالمياً (`shared/disabledProviders.ts`): مسارها الرفضُ قبل الإقلاع.
- *  hermes وqwen أُضيفا بقرار المالك 2026-09-28. */
+ *  hermes وqwen أُضيفا بقرار المالك 2026-09-28، وcursor وkimi بقراره 2026-09-29. */
 const DISABLED_MESSAGE_TYPES: ReadonlyArray<[string, string]> = [
   ['deepseek-command', 'deepseek'],
   ['hermes-command', 'hermes'],
   ['qwen-command', 'qwen'],
+  ['cursor-command', 'cursor'],
+  ['kimi-command', 'kimi'],
 ];
 
 test('كل مسار بثّ يُصدي هوية الجولة على أول stream delta وعلى حكمه النهائي', async () => {
@@ -196,7 +196,7 @@ test('يمرر اسم النموذج فقط عندما يعلنه الـ harness
 test('لا قياس في دور فاشل أو دور بلا رد مساعد، ولا يُدهس توثيق الموفّر', async () => {
   const { writer, sent } = fakeWriter();
   await dispatchProviderCommand(
-    'cursor-command',
+    'antigravity-command',
     { command: 'x', options: { clientMsgId: CMID } } as never,
     writer as never,
     fakeDependencies((w) => {
@@ -238,7 +238,7 @@ test('المزوّد المعطَّل عالمياً: حمولة الرفض تح
 test('كل stream_delta يحمل هوية الجولة لربط زمن الاستجابة، وtool_result وحده لا يُوسم', async () => {
   const { writer, sent } = fakeWriter();
   await dispatchProviderCommand(
-    'cursor-command',
+    'antigravity-command',
     { command: 'x', options: { clientMsgId: CMID } } as never,
     writer as never,
     fakeDependencies((w) => {
@@ -296,7 +296,7 @@ test('وسمُ المزوّد بنفسه لا يُدهس — الموجود أد
 test('بلا هوية من العميل لا يظهر الحقل إطلاقاً — تدهور رشيق', async () => {
   const { writer, sent } = fakeWriter();
   await dispatchProviderCommand(
-    'cursor-command',
+    'antigravity-command',
     { command: 'x', options: {} } as never,
     writer as never,
     fakeDependencies((w) => {
@@ -316,7 +316,7 @@ test('جولتان على مقبس واحد: كل حكم بهويته هو', asy
   const { writer, sent } = fakeWriter();
 
   const first = dispatchProviderCommand(
-    'cursor-command',
+    'antigravity-command',
     { command: 'أولى', options: { clientMsgId: 'cmid_A' } } as never,
     writer as never,
     fakeDependencies((w) => {

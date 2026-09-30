@@ -990,3 +990,193 @@ test('AAD-bound composite foreign keys reject cross-subject swaps and revision m
     database.close();
   }
 });
+
+// T-1939 6B: the pre-'oidc' connector_owner_auth_sessions shape, rebuilt from
+// the current DDL with the narrower auth_method CHECK (the documented downgrade).
+const narrowOwnerSessionsToPreOidc = (database: Database.Database): void => {
+  const { sql } = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connector_owner_auth_sessions'",
+  ).get() as { sql: string };
+  const narrow = sql.replace("('password', 'webauthn', 'oidc')", "('password', 'webauthn')");
+  assert.notEqual(narrow, sql);
+  database.pragma('foreign_keys = OFF');
+  database.exec(`
+    DROP TABLE connector_owner_auth_sessions;
+    ${narrow};
+    CREATE INDEX idx_connector_owner_sessions_expiry
+      ON connector_owner_auth_sessions(installation_id, user_id, revoked_at_ms, expires_at_ms);
+  `);
+  database.pragma('foreign_keys = ON');
+};
+
+const seedPreOidcSessions = (database: Database.Database) => {
+  const repository = createConnectorAuthDb(database);
+  const installationId = repository.getOrCreateInstallation();
+  narrowOwnerSessionsToPreOidc(database);
+  const active = randomUUID();
+  const revoked = randomUUID();
+  const insert = database.prepare(`INSERT INTO connector_owner_auth_sessions (
+    session_id, installation_id, session_token_hash, csrf_token_hash, user_id,
+    auth_method, auth_time_ms, expires_at_ms, revoked_at_ms, created_at
+  ) VALUES (?, ?, ?, ?, 7, ?, ?, ?, ?, ?)`);
+  insert.run(active, installationId, '1'.repeat(64), '2'.repeat(64), 'webauthn', 1_000, 601_000, null,
+    '2026-09-01 10:00:00');
+  insert.run(revoked, installationId, '3'.repeat(64), '4'.repeat(64), 'password', 2_000, 602_000, 3_000,
+    '2026-09-01 10:00:01');
+  assert.throws(() => insert.run(randomUUID(), installationId, '5'.repeat(64), '6'.repeat(64), 'oidc',
+    1, 2, null, '2026-09-01 10:00:02'), /CHECK constraint failed/u, 'fixture really is the old shape');
+  database.prepare(`INSERT INTO connector_owner_operation_nonces (
+    nonce_hash, request_id, session_id, installation_id, user_id, operation, expires_at_ms
+  ) VALUES (?, ?, ?, ?, 7, 'oauth_start', 9000)`).run('7'.repeat(64), randomUUID(), active, installationId);
+  return { installationId, active, revoked };
+};
+
+const snapshot = (database: Database.Database) => ({
+  sessions: database.prepare('SELECT * FROM connector_owner_auth_sessions ORDER BY session_id').all(),
+  nonces: database.prepare('SELECT * FROM connector_owner_operation_nonces ORDER BY nonce_hash').all(),
+});
+
+const assertOidcShape = (database: Database.Database, installationId: string) => {
+  const { sql } = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connector_owner_auth_sessions'",
+  ).get() as { sql: string };
+  assert.match(sql, /'password', 'webauthn', 'oidc'/u);
+  const index = database.prepare(
+    "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'idx_connector_owner_sessions_expiry'",
+  ).get() as { tbl_name: string };
+  assert.equal(index.tbl_name, 'connector_owner_auth_sessions');
+  assert.equal(database.prepare('PRAGMA foreign_key_check').all().length, 0);
+  const fks = database.prepare('PRAGMA foreign_key_list(connector_owner_auth_sessions)').all() as Array<{
+    table: string; on_delete: string;
+  }>;
+  assert.deepEqual(fks.map(fk => [fk.table, fk.on_delete]).sort(),
+    [['connector_installations', 'CASCADE'], ['users', 'CASCADE']]);
+  createConnectorAuthDb(database).recordOwnerAuthSession({
+    sessionId: randomUUID(), installationId, sessionTokenHash: '8'.repeat(64), csrfTokenHash: '9'.repeat(64),
+    userId: 7, authMethod: 'oidc', authTimeMs: 10_000, expiresAtMs: 610_000,
+  });
+  assert.throws(() => database.prepare(`UPDATE connector_owner_auth_sessions SET auth_method = 'saml'
+    WHERE session_token_hash = ?`).run('8'.repeat(64)), /CHECK constraint failed/u);
+};
+
+test('6B migration widens auth_method to oidc, preserving rows, nonces, index and FKs', () => {
+  const database = openDatabase();
+  try {
+    const { installationId, active } = seedPreOidcSessions(database);
+    const before = snapshot(database);
+    migrateConnectorAuthSchema(database);
+    assert.deepEqual(snapshot(database), before, 'every session and nonce column survives the rebuild');
+    assert.equal(Number(database.pragma('foreign_keys', { simple: true })), 1, 'pragma restored');
+    assertOidcShape(database, installationId);
+
+    const afterFirst = snapshot(database);
+    migrateConnectorAuthSchema(database);
+    assert.deepEqual(snapshot(database), afterFirst, 'a second run is a no-op');
+    assert.equal(database.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE name LIKE 'connector_owner_auth_sessions%'",
+    ).get().count, 1, 'no rebuild table is left behind');
+
+    database.prepare('DELETE FROM connector_owner_auth_sessions WHERE session_id = ?').run(active);
+    assert.equal(database.prepare('SELECT count(*) AS count FROM connector_owner_operation_nonces')
+      .get().count, 0, 'the nonce FK still cascades from the rebuilt parent');
+  } finally {
+    database.close();
+  }
+});
+
+test('6B migration inside a caller transaction (foreign_keys on) keeps the child nonces', () => {
+  const database = openDatabase();
+  try {
+    const { installationId } = seedPreOidcSessions(database);
+    const before = snapshot(database);
+    database.transaction(() => { migrateConnectorAuthSchema(database); }).immediate();
+    assert.deepEqual(snapshot(database), before, 'DROP TABLE did not cascade the nonces away');
+    assertOidcShape(database, installationId);
+  } finally {
+    database.close();
+  }
+});
+
+test('6B migration drops only orphan nonces and logs how many (count only)', (t) => {
+  const database = openDatabase();
+  const warnings = t.mock.method(console, 'warn', () => undefined);
+  try {
+    const { installationId } = seedPreOidcSessions(database);
+    // A legacy database written with foreign_keys off can hold an orphan nonce.
+    database.pragma('foreign_keys = OFF');
+    database.prepare(`INSERT INTO connector_owner_operation_nonces (
+      nonce_hash, request_id, session_id, installation_id, user_id, operation, expires_at_ms
+    ) VALUES (?, ?, ?, ?, 7, 'oauth_start', 9000)`).run('f'.repeat(64), randomUUID(), randomUUID(), installationId);
+    migrateConnectorAuthSchema(database);
+    assert.deepEqual(database.prepare('SELECT nonce_hash FROM connector_owner_operation_nonces').all(),
+      [{ nonce_hash: '7'.repeat(64) }], 'the live nonce survives, the orphan does not');
+    assert.deepEqual(warnings.mock.calls.map(call => call.arguments), [
+      ['connector owner session upgrade dropped orphan operation nonces', { orphanNonces: 1 }],
+    ]);
+  } finally {
+    database.close();
+  }
+});
+
+test('6B migration rolls back completely when a copied row violates the new schema', () => {
+  const database = openDatabase();
+  try {
+    const { installationId } = seedPreOidcSessions(database);
+    // Simulates a legacy row written before a CHECK existed.
+    database.pragma('ignore_check_constraints = ON');
+    database.prepare(`INSERT INTO connector_owner_auth_sessions (
+      session_id, installation_id, session_token_hash, csrf_token_hash, user_id, auth_method,
+      auth_time_ms, expires_at_ms
+    ) VALUES ('not-a-uuid', ?, ?, ?, 7, 'password', 1, 2)`).run(installationId, 'a'.repeat(64), 'b'.repeat(64));
+    database.pragma('ignore_check_constraints = OFF');
+    const before = snapshot(database);
+    assert.throws(() => migrateConnectorAuthSchema(database), /CHECK constraint failed/u);
+    assert.deepEqual(snapshot(database), before);
+    assert.doesNotMatch((database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connector_owner_auth_sessions'",
+    ).get() as { sql: string }).sql, /'oidc'/u, 'the old table is still in place');
+    assert.equal(Number(database.pragma('foreign_keys', { simple: true })), 1, 'pragma restored after failure');
+  } finally {
+    database.close();
+  }
+});
+
+test('6B retention purges only sessions expired or revoked before the cutoff, with their nonces', () => {
+  const database = openDatabase();
+  try {
+    const repository = createConnectorAuthDb(database);
+    const installationId = repository.getOrCreateInstallation();
+    const record = (tokenChar: string, authTimeMs: number) => {
+      const sessionId = randomUUID();
+      repository.recordOwnerAuthSession({
+        sessionId, installationId, sessionTokenHash: tokenChar.repeat(64), csrfTokenHash: 'c'.repeat(64),
+        userId: 7, authMethod: 'oidc', authTimeMs, expiresAtMs: authTimeMs + 600_000,
+      });
+      return sessionId;
+    };
+    const old = record('1', 1_000_000);
+    const revokedEarly = record('2', 5_000_000);
+    const live = record('3', 9_000_000);
+    repository.issueOwnerOperation({
+      sessionId: old, requestId: randomUUID(), nonceHash: 'e'.repeat(64), installationId, userId: 7,
+      operation: 'disable', nowMs: 1_000_001, ttlMs: 30_000,
+    });
+    repository.revokeOwnerAuthSession({
+      sessionTokenHash: '2'.repeat(64), installationId, userId: 7, nowMs: 5_000_001,
+    });
+    assert.throws(() => repository.purgeExpiredOwnerAuthSessions(0, 10), /cleanup_invalid/u);
+    assert.throws(() => repository.purgeExpiredOwnerAuthSessions(1, 101), /cleanup_invalid/u);
+    assert.equal(repository.purgeExpiredOwnerAuthSessions(1_600_000, 10), 1, 'expiry at the cutoff is purged');
+    assert.equal(repository.purgeExpiredOwnerAuthSessions(1_600_000, 10), 0);
+    assert.equal(repository.purgeExpiredOwnerAuthSessions(5_000_001, 1), 1, 'revoked before cutoff');
+    const remaining = (database.prepare('SELECT session_id FROM connector_owner_auth_sessions').all() as Array<{
+      session_id: string;
+    }>).map(row => row.session_id);
+    assert.deepEqual(remaining, [live]);
+    assert.ok(!remaining.includes(revokedEarly));
+    assert.equal(database.prepare('SELECT count(*) AS count FROM connector_owner_operation_nonces')
+      .get().count, 0);
+  } finally {
+    database.close();
+  }
+});

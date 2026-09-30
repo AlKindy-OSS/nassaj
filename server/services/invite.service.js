@@ -15,6 +15,7 @@ import { userDb, invitesDb, auditLogDb } from '../modules/database/index.js';
 
 import { provisionUserDirs } from './isolation/provision-user-dirs.js';
 import { hashPassword } from './password.service.js';
+import { isUsernameAvailable } from './username-policy.js';
 
 const DEFAULT_TTL_HOURS = 72;
 const MIN_USERNAME_LENGTH = 3;
@@ -104,10 +105,9 @@ export async function acceptInvite(input, ipAddress = null) {
   if (!username || username.length < MIN_USERNAME_LENGTH) {
     throw new InviteError(400, `Username must be at least ${MIN_USERNAME_LENGTH} characters`);
   }
-  // B-147: enforce the same username shape createOidcUser applies (see below),
-  // so invite-accepted accounts cannot carry characters the length check alone
-  // would let through (spaces, dots, slashes, control/unicode). Same message for
-  // a consistent client contract across both account-creation paths.
+  // B-147: enforce the username shape, so invite-accepted accounts cannot carry
+  // characters the length check alone would let through (spaces, dots,
+  // slashes, control/unicode).
   if (!USERNAME_PATTERN.test(username)) {
     throw new InviteError(400, 'Username may contain only letters, digits, and underscores (3–32)');
   }
@@ -127,7 +127,7 @@ export async function acceptInvite(input, ipAddress = null) {
     throw new InviteError(400, 'Invite is invalid, expired, or already used');
   }
 
-  if (userDb.getUserByUsername(username)) {
+  if (!isUsernameAvailable(username)) {
     throw new InviteError(409, 'Username already taken');
   }
 
@@ -163,60 +163,6 @@ export async function acceptInvite(input, ipAddress = null) {
       ipAddress,
     });
   }
-  return user;
-}
-
-/**
- * Creates an OIDC-only user account (C-1: sentinel argon2 hash, no usable password).
- * Called by admin to pre-provision a user before their first OIDC login.
- * The admin then links their IdP identity via POST /api/auth/oidc/link.
- *
- * @param {{ id:number, role:string }} actor - admin/owner creating the account
- * @param {{ username:string, role?:string, email?:string }} params
- */
-export async function createOidcUser(actor, params = {}) {
-  const { username, role = 'user', email } = params;
-
-  if (!username || username.length < MIN_USERNAME_LENGTH) {
-    throw new InviteError(400, `Username must be at least ${MIN_USERNAME_LENGTH} characters`);
-  }
-  if (!USERNAME_PATTERN.test(username)) {
-    throw new InviteError(400, 'Username may contain only letters, digits, and underscores (3–32)');
-  }
-  if (!ASSIGNABLE_ROLES.has(role)) {
-    throw new InviteError(400, 'Invalid role');
-  }
-  if (role === 'admin' && actor.role !== 'owner') {
-    throw new InviteError(403, 'Only the owner can create admin accounts');
-  }
-  if (userDb.getUserByUsername(username)) {
-    throw new InviteError(409, 'Username already taken');
-  }
-
-  // C-1: sentinel argon2 hash — valid hash of a random unreachable secret.
-  // The user can never authenticate with a local password; OIDC is the only path.
-  const sentinelPlaintext = crypto.randomBytes(32).toString('hex');
-  const sentinelHash = await hashPassword(sentinelPlaintext);
-
-  const user = userDb.createUser(username, sentinelHash, role, actor.id);
-
-  // Provision user dirs eagerly (same as acceptInvite). A provisioning failure
-  // must never roll back the created account — the lazy path on first spawn
-  // remains a fallback; audit the failure for visibility.
-  try {
-    provisionUserDirs(user.id);
-  } catch (err) {
-    auditLogDb.record('user_dirs_provision_failed', {
-      userId: user.id,
-      metadata: { stage: 'create_oidc_user', error: err?.message || String(err) },
-    });
-  }
-
-  auditLogDb.record('oidc_user_created', {
-    userId: actor.id,
-    metadata: { newUserId: user.id, username, role, hasEmail: Boolean(email) },
-  });
-
   return user;
 }
 

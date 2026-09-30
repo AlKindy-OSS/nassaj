@@ -71,7 +71,7 @@ describe('MainContentTitle workflow indicator', () => {
     setSessionProcessState('session-1', 'running');
     setActiveWorkflows({
       workflows: [{
-        sessionId: 'session-1', wfId: 'wf-demo', status: 'unknown', agentsDone: 0, agentsTotal: 0,
+        sessionId: 'session-1', wfId: 'wf-demo', projectId: null, status: 'unknown', agentsDone: 0, agentsTotal: 0,
         updatedAt: null, agents: [], agentsTruncated: false, dormant: false,
       }],
       eligible: 2, scanned: 1, capped: true, dormant: 0,
@@ -84,7 +84,7 @@ describe('MainContentTitle workflow indicator', () => {
     act(() => {
       setActiveWorkflows({
         workflows: [{
-          sessionId: 'session-1', wfId: 'wf-demo', status: 'running', agentsDone: 1, agentsTotal: 2,
+          sessionId: 'session-1', wfId: 'wf-demo', projectId: null, status: 'running', agentsDone: 1, agentsTotal: 2,
           updatedAt: null, agents: [], agentsTruncated: false, dormant: false,
         }],
         eligible: 1, scanned: 1, capped: false, dormant: 0,

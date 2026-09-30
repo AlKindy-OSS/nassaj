@@ -22,9 +22,12 @@ import {
 import { CONNECTOR_PUBLIC_ORIGIN_ENV } from './connector-auth-security.js';
 import { connectorEnvironmentOriginProposal,
   ConnectorInstallationOriginResolver } from './connector-installation-origin-resolver.js';
-import { connectorRecentAuthCookieName,
+import { connectorRecentAuthCookieValue,
   createConnectorOwnerOperationGate } from './connector-owner-operation-gate.js';
-import { configureConnectorOwnerAuthSessionProduction } from './connector-owner-auth-session.js';
+import {
+  configureConnectorOwnerAuthSessionProduction,
+  createRecentAuthOriginSource,
+} from './connector-owner-auth-session.js';
 import { runConnectorAutoSetupOnBoot } from './connector-auto-setup.js';
 import { createConnectorOwnerSetupRoutes } from './connector-owner-setup.routes.js';
 import { ConnectorOwnerSetupService } from './connector-owner-setup.service.js';
@@ -87,6 +90,14 @@ export const executeConnectorPolicyV2SynchronousWrite = <T, Args extends unknown
 /** Database-only runtime origin authority. Environment values never escape as runtime origin. */
 export const resolveConnectorRuntimeInstallationOrigin = () => runtime?.originResolver
   .resolve(runtime.installationId) ?? null;
+
+/**
+ * The persisted installation origin read at call time (T-1939 6B), or null.
+ * Gates use it per request so a PUT /origin change applies without a restart.
+ */
+export const connectorRuntimeLiveOrigin = (): string | null => {
+  try { return resolveConnectorRuntimeInstallationOrigin()?.canonicalOrigin ?? null; } catch { return null; }
+};
 
 /** True after schema-2 installation is observed, including fail-closed runtime states. */
 export const connectorPolicyV2ClaimsLegacyPaths = (): boolean => substrateInstalled;
@@ -222,16 +233,6 @@ const installationId = (database: Database): string => {
   return row.installationId;
 };
 
-const cookie = (req: express.Request, name: string): string | null => {
-  const raw = req.headers.cookie;
-  if (typeof raw !== 'string') return null;
-  for (const part of raw.split(';')) {
-    const [candidate, ...value] = part.trim().split('=');
-    if (candidate === name && /^[a-f0-9]{64}$/u.test(value.join('='))) return value.join('=');
-  }
-  return null;
-};
-
 const facts = (installation: string): readonly ConnectorReadinessFact[] => Object.freeze(
   PROVIDER_AUTH_SPECS.flatMap(spec => spec.services.map(serviceId => Object.freeze({
     installationId: installation, providerId: spec.profileId, serviceId, authMethod: spec.method,
@@ -339,17 +340,22 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
       return Boolean(lease && gate.runFencedMutation(effect, advance));
     };
     lifecycleWrite = effect => executeOriginWrite(false, effect);
-    try {
-      const persistedOrigin = originResolver.resolve(id);
-      const bootstrapProposal = existingStartup || persistedOrigin ? null : connectorEnvironmentOriginProposal(
-        process.env[CONNECTOR_PUBLIC_ORIGIN_ENV], process.env.NODE_ENV !== 'production');
-      configureConnectorOwnerAuthSessionProduction({ repository, installationId: id,
-        canonicalOrigin: persistedOrigin?.canonicalOrigin ?? bootstrapProposal?.canonicalOrigin ?? '',
-        executeWrite: executeConnectorPolicyV2LifecycleWrite });
-    } catch {
-      // Schema 2 remains readable without a public origin; owner mutation stays
-      // unavailable until the installation supplies its exact deployment origin.
-    }
+    // Live, per-request origin (T-1939 6B): the persisted installation origin,
+    // else the NASSAJ_PUBLIC_ORIGIN proposal only while NO origin is persisted
+    // (pre-origin bootstrap). A persisted origin that cannot be read (e.g.
+    // tampered) is null, never the environment value. Read on every call, so
+    // PUT /origin takes effect without a restart.
+    const readPersistedOrigin = (): string | null => originResolver.resolve(id)?.canonicalOrigin ?? null;
+    const persistedOrigin = (): string | null => {
+      try { return readPersistedOrigin(); } catch { return null; }
+    };
+    const recentAuthOrigin = createRecentAuthOriginSource({
+      readPersisted: readPersistedOrigin,
+      readProposal: () => connectorEnvironmentOriginProposal(process.env[CONNECTOR_PUBLIC_ORIGIN_ENV],
+        process.env.NODE_ENV !== 'production')?.canonicalOrigin ?? null,
+    });
+    configureConnectorOwnerAuthSessionProduction({ repository, installationId: id,
+      resolveOrigin: recentAuthOrigin, executeWrite: executeConnectorPolicyV2LifecycleWrite });
     const resolveIdentity = (req: express.Request): { userId: number; role: string } | null => {
       const user = database.prepare(`SELECT id,role FROM users WHERE id = ? AND is_active = 1
         AND status = 'active'`).get(
@@ -359,7 +365,8 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
       return user ? { userId: user.id, role: user.role } : null;
     };
     const readRecentSession = (req: express.Request) => {
-      const identity = resolveIdentity(req); const token = cookie(req, connectorRecentAuthCookieName);
+      const identity = resolveIdentity(req);
+      const token = connectorRecentAuthCookieValue(req, recentAuthOrigin());
       if (!identity || !token) return null;
       const session = repository.readOwnerAuthSession({ sessionTokenHash: createHash('sha256')
         .update(token).digest('hex'), installationId: id, userId: identity.userId, nowMs: now() });
@@ -376,7 +383,7 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
       },
       readRecentOwnerSession: req => {
         const userId = (req as express.Request & { user?: { id?: number } }).user?.id;
-        const token = cookie(req, connectorRecentAuthCookieName);
+        const token = connectorRecentAuthCookieValue(req, recentAuthOrigin());
         if (!Number.isSafeInteger(userId) || Number(userId) < 1 || !token) return null;
         const session = repository.readOwnerAuthSession({ sessionTokenHash: createHash('sha256')
           .update(token).digest('hex'), installationId: id, userId: Number(userId), nowMs: now() });
@@ -404,11 +411,9 @@ export const initializeConnectorPolicyV2SubstrateOnly = (database: Database,
       profileOperationGate: (req, res, next) => {
         const operation = req.body?.method === 'dcr_pkce' ? 'register_dcr'
           : req.body?.method === 'byo_app' ? 'upsert_byo' : null;
-        const origin = originResolver.resolve(id)?.canonicalOrigin;
-        if (!operation || !origin) { res.status(operation ? 503 : 422).json({
-          code: operation ? 'CONNECTOR_PROFILE_SETUP_UNAVAILABLE' : 'CONNECTOR_PROFILE_NOT_REQUIRED' }); return; }
+        if (!operation) { res.status(422).json({ code: 'CONNECTOR_PROFILE_NOT_REQUIRED' }); return; }
         createConnectorOwnerOperationGate({ repository, installationId: id,
-          canonicalOrigin: origin, operation, now })(req, res, next);
+          canonicalOrigin: persistedOrigin, operation, now })(req, res, next);
       } });
     const provisioningRoutes = createConnectorProvisioningRoutes({ service: provisioningService,
       installationId: id, origins: originResolver, resolveIdentity, readRecentSession, now });

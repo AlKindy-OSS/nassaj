@@ -39,14 +39,22 @@ export function escapeDisplayName(name: unknown): string {
   return escapeMarkup(bounded).replace(/"/gu, '&quot;');
 }
 
-/** The exact model-facing payload; `null` when wrapping exceeds the bound. */
-export function buildSteerWrapper(displayName: string, text: string): string | null {
-  const wrapped = `<nassaj-steer from="${escapeDisplayName(displayName)}" role="member">\n`
+/** Who wrote a steer, relative to the running turn: its own starter, or another member. */
+export type SteerAuthorRole = 'owner' | 'member';
+
+/**
+ * The exact model-facing payload; `null` when wrapping exceeds the bound.
+ * `role="owner"` marks a note from the turn's own starter (a self-steer);
+ * `role="member"` one from another session member.
+ */
+export function buildSteerWrapper(displayName: string, text: string, role: SteerAuthorRole = 'member'): string | null {
+  const tagRole = role === 'owner' ? 'owner' : 'member';
+  const wrapped = `<nassaj-steer from="${escapeDisplayName(displayName)}" role="${tagRole}">\n`
     + `${escapeMarkup(text)}\n</nassaj-steer>`;
   return wrapped.length > STEER_MAX_CHARS ? null : wrapped;
 }
 
-const WRAPPER = /^<nassaj-steer from="([^"<>]*)" role="member">\n([^<>]*)\n<\/nassaj-steer>$/u;
+const WRAPPER = /^<nassaj-steer from="([^"<>]*)" role="(?:member|owner)">\n([^<>]*)\n<\/nassaj-steer>$/u;
 
 /**
  * Strips the server wrapper for DISPLAY. Callers must only use it on a row whose

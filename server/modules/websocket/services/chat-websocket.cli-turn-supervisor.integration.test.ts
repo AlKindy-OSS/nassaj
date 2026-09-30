@@ -83,7 +83,7 @@ test('the OpenCode enabled cell uses the same capture-only WS seam', async () =>
 
 test('disabled or unsupported CLI cells preserve legacy dispatch', async () => {
   const cases = [
-    ['codex-command', 'codex'], ['cursor-command', 'cursor'],
+    ['codex-command', 'codex'],
     ['antigravity-command', 'antigravity'], ['opencode-command', 'opencode'],
   ] as const;
   for (const [messageType, provider] of cases) {
@@ -94,6 +94,19 @@ test('disabled or unsupported CLI cells preserve legacy dispatch', async () => {
     assert.equal(ctx.calls.legacy, 1, provider);
     assert.equal(ctx.calls.execute, 0, provider);
   }
+});
+
+// cursor is globally disabled (owner decision 2026-09-29): an OFF cell leaves it on
+// the legacy path, which is now the disable wall — refused, never launched.
+test('an OFF CLI cell leaves disabled cursor refused before any launcher', async () => {
+  const ctx = harness(false, false);
+  await dispatchProviderCommand('cursor-command', {
+    command: 'request', options: { clientMsgId: 'cmid-cursor', coordinationLevel: 'delegate' },
+  } as never, ctx.writer as never, ctx.dependencies as never, 41);
+  assert.equal(ctx.calls.legacy, 0);
+  assert.equal(ctx.calls.execute, 0);
+  assert.equal(ctx.sent[0]?.notStarted, true);
+  assert.match(String(ctx.sent[0]?.error), /disabled on this deployment/);
 });
 
 test('an enabled Codex cell never falls back when its requested level lacks capability', async () => {

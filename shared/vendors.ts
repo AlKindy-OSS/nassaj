@@ -191,19 +191,29 @@ export const VENDORS: readonly Vendor[] = Object.freeze([
     ],
   },
   {
+    /**
+     * T-1906 (owner decision 2026-09-28): the standalone Qwen body's own login
+     * window is gone. This is now a plain personal key — the Alibaba Coding
+     * Plan subscription — consumed through the OpenCode carrier as
+     * `qwen-plan/*` models, the same shape as `zai`/`zai-opencode` above. The
+     * slot stays `{provider:'qwen'}` and the store stays `aes`: the write
+     * surface and the encrypted record it fills did not move, only the reader
+     * (OpenCode's model routing instead of the retired standalone Qwen Code
+     * CLI login) and the label describing it did.
+     */
     id: 'alibaba-qwen-coding-plan',
     companyId: 'alibaba-cloud',
     name: 'Alibaba ModelStudio',
     credential: 'api_key',
     store: 'aes',
     slot: { provider: 'qwen' },
-    keyUrl: 'https://modelstudio.console.alibabacloud.com/',
+    keyUrl: 'https://www.alibabacloud.com/help/en/model-studio/coding-plan',
     consumers: [
       {
         axis: 'body',
         body: 'qwen',
         labelKey: 'vendors.consumer.qwenBody',
-        labelDefault: 'the Qwen Code agent',
+        labelDefault: 'OpenCode · qwen-plan',
       },
     ],
   },

@@ -530,7 +530,7 @@ export function createConnectorAuthDb(database: Database = getConnection()) {
       sessionTokenHash: string;
       csrfTokenHash: string;
       userId: number;
-      authMethod: 'password' | 'webauthn';
+      authMethod: 'password' | 'webauthn' | 'oidc';
       authTimeMs: number;
       expiresAtMs: number;
     }>): void {
@@ -541,7 +541,7 @@ export function createConnectorAuthDb(database: Database = getConnection()) {
       if (!Number.isSafeInteger(input.userId) || input.userId <= 0
         || !Number.isSafeInteger(input.authTimeMs) || input.authTimeMs <= 0
         || !Number.isSafeInteger(input.expiresAtMs) || input.expiresAtMs <= input.authTimeMs
-        || !['password', 'webauthn'].includes(input.authMethod)) {
+        || !['password', 'webauthn', 'oidc'].includes(input.authMethod)) {
         throw new Error('connector_owner_session_invalid');
       }
       database.prepare(
@@ -2065,6 +2065,37 @@ export function createConnectorAuthDb(database: Database = getConnection()) {
         const erase = database.prepare('DELETE FROM connector_vault_secrets WHERE secret_ref = ?');
         for (const ref of refs) erase.run(ref.secret_ref);
         return true;
+      }).immediate();
+    },
+
+    /**
+     * Bounded retention for recent-auth sessions (T-1939 6B): removes at most
+     * `limit` sessions that expired or were revoked at or before `cutoffMs`,
+     * with their operation nonces (deleted explicitly, not only by cascade).
+     */
+    purgeExpiredOwnerAuthSessions(cutoffMs: number, limit: number): number {
+      if (!Number.isSafeInteger(cutoffMs) || cutoffMs <= 0
+        || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new Error('connector_owner_session_cleanup_invalid');
+      }
+      return database.transaction(() => {
+        const ids = (database.prepare(
+          `SELECT session_id FROM connector_owner_auth_sessions
+           WHERE expires_at_ms <= ? OR (revoked_at_ms IS NOT NULL AND revoked_at_ms <= ?)
+           ORDER BY expires_at_ms, session_id LIMIT ?`,
+        ).all(cutoffMs, cutoffMs, limit) as Array<{ session_id: string }>).map(row => row.session_id);
+        const deleteNonces = database.prepare(
+          'DELETE FROM connector_owner_operation_nonces WHERE session_id = ?',
+        );
+        const deleteSession = database.prepare(
+          'DELETE FROM connector_owner_auth_sessions WHERE session_id = ?',
+        );
+        let removed = 0;
+        for (const id of ids) {
+          deleteNonces.run(id);
+          removed += deleteSession.run(id).changes;
+        }
+        return removed;
       }).immediate();
     },
 

@@ -34,7 +34,7 @@ class MockAccountWalletError extends Error {
   get wallet() { return this.walletValue; }
 }
 mock.module('../../../constants/config', { namedExports: { IS_PLATFORM: false } });
-mock.module('../../../utils/api', { namedExports: { authenticatedFetch: async () => Response.json({}), setCookieSessionKind: () => {}, api: {
+mock.module('../../../utils/api', { namedExports: { SSO_REAUTH_EVENT: 'auth:sso-reauth-required', authenticatedFetch: async () => Response.json({}), setCookieSessionKind: () => {}, api: {
   auth: {
     status: async () => Response.json({ needsSetup: false, deviceAccountSessionsEnabled: walletEnabled }),
     user: () => initialUser(),

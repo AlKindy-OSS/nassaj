@@ -111,3 +111,24 @@ export const ACCOUNT_DELETED_REVOCATION: UserRealtimeRevocation = Object.freeze(
   abortReason: 'account_deleted',
   endInteractiveSessions: true,
 });
+
+/**
+ * T-1939: the IdP no longer attests any project role for a linked member. The
+ * account stays enabled with its stored role (re-granting in the IdP restores
+ * access), but everything it had running under the withdrawn grant stops.
+ */
+export const SSO_ROLE_WITHDRAWN_REVOCATION: UserRealtimeRevocation = Object.freeze({
+  abortReason: 'role_changed',
+  endInteractiveSessions: true,
+});
+
+/**
+ * T-1939 slice 3: a linked member's SSO attestation aged out. Like a token
+ * expiry, running turns are left to finish (the member reattaches after
+ * re-authenticating), but open-ended interactive access — shells, terminals and
+ * every realtime socket — ends now; reconnecting requires a fresh SSO login.
+ */
+export const SSO_ATTESTATION_EXPIRED_REVOCATION: UserRealtimeRevocation = Object.freeze({
+  abortReason: null,
+  endInteractiveSessions: true,
+});

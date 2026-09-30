@@ -193,6 +193,6 @@ describe('T-1866: HarnessAutoUpdateSection moved off agent pages into النظا
     await findByText('إصدار أداة المزوّد');
     expect(container.textContent).not.toContain('التحديث التلقائي العام');
     // The pointer that replaced it, instead.
-    expect(container.textContent).toContain('التحديث التلقائي يُضبط من الإعدادات ← النظام');
+    expect(container.textContent).toContain('إعدادات التحديث التلقائي في تبويب «النظام»');
   });
 });

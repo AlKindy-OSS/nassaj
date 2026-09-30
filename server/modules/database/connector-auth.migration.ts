@@ -1,5 +1,10 @@
 import type { Database } from 'better-sqlite3';
 
+import {
+  connectorRuntimeFenceOpen,
+  connectorRuntimeFenceTriggersOn,
+} from './connector-runtime-fence-predicate.js';
+
 const UUID_CHECK = (column: string): string => `
   length(${column}) = 36
   AND substr(${column}, 9, 1) = '-'
@@ -270,7 +275,7 @@ CREATE TABLE IF NOT EXISTS connector_owner_auth_sessions (
     AND csrf_token_hash NOT GLOB '*[^0-9a-f]*'
   ),
   user_id INTEGER NOT NULL CHECK (user_id > 0),
-  auth_method TEXT NOT NULL CHECK (auth_method IN ('password', 'webauthn')),
+  auth_method TEXT NOT NULL CHECK (auth_method IN ('password', 'webauthn', 'oidc')),
   auth_time_ms INTEGER NOT NULL CHECK (auth_time_ms > 0),
   expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms > auth_time_ms),
   revoked_at_ms INTEGER,
@@ -700,6 +705,162 @@ const upgradeOwnerOperationNonces = (database: Database): void => {
   }).immediate();
 };
 
+const OWNER_AUTH_SESSIONS_V2_TABLE = 'connector_owner_auth_sessions_v2';
+const OWNER_AUTH_SESSIONS_V2_SQL = `
+CREATE TABLE ${OWNER_AUTH_SESSIONS_V2_TABLE} (
+  session_id TEXT PRIMARY KEY CHECK (${UUID_CHECK('session_id')}),
+  installation_id TEXT NOT NULL,
+  session_token_hash TEXT NOT NULL UNIQUE CHECK (
+    length(session_token_hash) = 64 AND lower(session_token_hash) = session_token_hash
+    AND session_token_hash NOT GLOB '*[^0-9a-f]*'
+  ),
+  csrf_token_hash TEXT NOT NULL CHECK (
+    length(csrf_token_hash) = 64 AND lower(csrf_token_hash) = csrf_token_hash
+    AND csrf_token_hash NOT GLOB '*[^0-9a-f]*'
+  ),
+  user_id INTEGER NOT NULL CHECK (user_id > 0),
+  auth_method TEXT NOT NULL CHECK (auth_method IN ('password', 'webauthn', 'oidc')),
+  auth_time_ms INTEGER NOT NULL CHECK (auth_time_ms > 0),
+  expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms > auth_time_ms),
+  revoked_at_ms INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (installation_id) REFERENCES connector_installations(installation_id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);`;
+
+const OWNER_AUTH_SESSION_COLUMNS = `session_id, installation_id, session_token_hash, csrf_token_hash,
+  user_id, auth_method, auth_time_ms, expires_at_ms, revoked_at_ms, created_at`;
+const OWNER_OPERATION_NONCE_COLUMNS = `nonce_hash, request_id, session_id, installation_id, user_id,
+  operation, expires_at_ms, consumed_at_ms, created_at`;
+const OWNER_NONCE_BACKUP_TABLE = 'temp.connector_owner_operation_nonces_6b';
+
+const rowCount = (database: Database, table: string): number =>
+  (database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number }).count;
+
+type SchemaObject = Readonly<{ type: string; name: string; sql: string }>;
+
+const normalizedSql = (sql: string): string => sql.replace(/\s+/gu, ' ').trim();
+
+/** Every explicitly created trigger and index on `table` (autoindexes have no SQL). */
+const schemaObjectsOn = (database: Database, table: string): SchemaObject[] =>
+  database.prepare(
+    `SELECT type, name, sql FROM sqlite_master
+     WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name`,
+  ).all(table) as SchemaObject[];
+
+/** Re-creates each captured object that the rebuild dropped, then proves all are back verbatim. */
+const restoreSchemaObjects = (database: Database, table: string, captured: readonly SchemaObject[]): void => {
+  const present = new Map(schemaObjectsOn(database, table).map(row => [row.name, row]));
+  for (const object of captured) if (!present.has(object.name)) database.exec(object.sql);
+  const restored = new Map(schemaObjectsOn(database, table).map(row => [row.name, row]));
+  for (const object of captured) {
+    const row = restored.get(object.name);
+    if (!row || row.type !== object.type || normalizedSql(row.sql) !== normalizedSql(object.sql)) {
+      throw new Error('connector_owner_session_upgrade_schema_object_lost');
+    }
+  }
+};
+
+/**
+ * Whether the auth_method rebuild may run on this connection now. An unfenced
+ * table (fresh or pre-M2 database) always may. A fenced table only while the
+ * runtime fence is open for this connection (the guarded boot); otherwise the
+ * rebuild would write guarded rows outside the fence, so it is skipped with no
+ * DDL and the table keeps its narrower CHECK until the next guarded boot.
+ */
+const ownerAuthSessionRebuildPermitted = (database: Database): boolean => {
+  const fenced = connectorRuntimeFenceTriggersOn(database, 'connector_owner_auth_sessions').length > 0
+    || connectorRuntimeFenceTriggersOn(database, 'connector_owner_operation_nonces').length > 0;
+  if (!fenced || connectorRuntimeFenceOpen(database)) return true;
+  console.warn('connector owner session upgrade deferred to a fenced boot', {
+    reason: 'connector_runtime_fence_closed',
+  });
+  return false;
+};
+
+/**
+ * T-1939 6B: widens connector_owner_auth_sessions.auth_method with 'oidc'.
+ * SQLite cannot ALTER a CHECK, so this is the documented 12-step rebuild:
+ * create the new table, copy every row, drop the old table, rename, restore
+ * every trigger and index the old table carried (including the M2 runtime
+ * fence triggers, verbatim), then foreign_key_check — inside one transaction
+ * (a savepoint when the caller already holds one). Idempotent: a table whose
+ * CHECK already lists 'oidc' is left untouched. On a fenced database it runs
+ * only inside an open runtime fence (see ownerAuthSessionRebuildPermitted).
+ *
+ * Every session row is preserved. The child operation nonces are copied to a
+ * temp table and restored after the rename, so the outcome is the same
+ * whether or not the foreign_keys pragma is on (with it on, DROP TABLE would
+ * otherwise cascade-delete them; inside a caller's transaction the pragma
+ * cannot be switched). A nonce whose session no longer exists is an orphan
+ * foreign_key_check would reject anyway and is not restored; how many were
+ * dropped is logged (count only). Outside a
+ * transaction foreign_keys is switched off around the rebuild and restored.
+ *
+ * Rollback: the new table is a strict superset (the CHECK only gains a
+ * value), so older code keeps working on it; an explicit downgrade is the
+ * same rebuild with the narrower CHECK after deleting any 'oidc' rows.
+ */
+const upgradeOwnerAuthSessions = (database: Database): void => {
+  const row = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'connector_owner_auth_sessions'",
+  ).get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'oidc'") || !ownerAuthSessionRebuildPermitted(database)) return;
+
+  const toggleForeignKeys = !database.inTransaction
+    && Number(database.pragma('foreign_keys', { simple: true })) === 1;
+  if (toggleForeignKeys) database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      const sessionsBefore = rowCount(database, 'connector_owner_auth_sessions');
+      const noncesBefore = rowCount(database, 'connector_owner_operation_nonces');
+      const objects = schemaObjectsOn(database, 'connector_owner_auth_sessions');
+      database.exec(`
+        DROP TABLE IF EXISTS ${OWNER_NONCE_BACKUP_TABLE};
+        CREATE TEMP TABLE connector_owner_operation_nonces_6b AS
+          SELECT ${OWNER_OPERATION_NONCE_COLUMNS} FROM connector_owner_operation_nonces;
+        DELETE FROM connector_owner_operation_nonces;
+        DROP TABLE IF EXISTS ${OWNER_AUTH_SESSIONS_V2_TABLE};
+        ${OWNER_AUTH_SESSIONS_V2_SQL}
+        INSERT INTO ${OWNER_AUTH_SESSIONS_V2_TABLE} (${OWNER_AUTH_SESSION_COLUMNS})
+          SELECT ${OWNER_AUTH_SESSION_COLUMNS} FROM connector_owner_auth_sessions;
+        DROP TABLE connector_owner_auth_sessions;
+        ALTER TABLE ${OWNER_AUTH_SESSIONS_V2_TABLE} RENAME TO connector_owner_auth_sessions;
+      `);
+      restoreSchemaObjects(database, 'connector_owner_auth_sessions', objects);
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_connector_owner_sessions_expiry
+          ON connector_owner_auth_sessions(installation_id, user_id, revoked_at_ms, expires_at_ms);
+        INSERT INTO connector_owner_operation_nonces (${OWNER_OPERATION_NONCE_COLUMNS})
+          SELECT ${OWNER_OPERATION_NONCE_COLUMNS} FROM ${OWNER_NONCE_BACKUP_TABLE}
+          WHERE session_id IN (SELECT session_id FROM connector_owner_auth_sessions);
+        DROP TABLE ${OWNER_NONCE_BACKUP_TABLE};
+      `);
+      if (rowCount(database, 'connector_owner_auth_sessions') !== sessionsBefore) {
+        throw new Error('connector_owner_session_upgrade_copy_failed');
+      }
+      const orphanNonces = noncesBefore - rowCount(database, 'connector_owner_operation_nonces');
+      if (orphanNonces > 0) {
+        // Not a failure: an orphan nonce could never be consumed. Counted only.
+        console.warn('connector owner session upgrade dropped orphan operation nonces', { orphanNonces });
+      }
+      for (const table of ['connector_owner_auth_sessions', 'connector_owner_operation_nonces']) {
+        if (database.prepare(`PRAGMA foreign_key_check(${table})`).all().length > 0) {
+          throw new Error('connector_owner_session_upgrade_fk_failed');
+        }
+      }
+      const index = database.prepare(
+        "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'idx_connector_owner_sessions_expiry'",
+      ).get() as { tbl_name: string } | undefined;
+      if (index?.tbl_name !== 'connector_owner_auth_sessions') {
+        throw new Error('connector_owner_session_upgrade_index_failed');
+      }
+    }).immediate();
+  } finally {
+    if (toggleForeignKeys) database.pragma('foreign_keys = ON');
+  }
+};
+
 const OAUTH_GRANT_SERVICES_V2_SQL = `
 CREATE TABLE connector_oauth_grant_services (
   grant_id TEXT NOT NULL,
@@ -761,6 +922,7 @@ const upgradeOAuthGrantServices = (database: Database): void => {
 export const migrateConnectorAuthSchema = (database: Database): void => {
   database.exec(CONNECTOR_AUTH_SCHEMA_SQL);
   upgradeOwnerOperationNonces(database);
+  upgradeOwnerAuthSessions(database);
   upgradeOAuthGrantServices(database);
   const columns = new Set((database.prepare('PRAGMA table_info(connector_user_grants)').all() as Array<{
     name: string;

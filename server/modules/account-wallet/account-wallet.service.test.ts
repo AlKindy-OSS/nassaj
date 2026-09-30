@@ -16,7 +16,7 @@ import {
 // eslint-disable-next-line boundaries/no-unknown -- test exercises the existing password verifier through the domain injection seam.
 import { hashPassword, verifyPassword } from '@/services/password.service.js';
 
-import { AccountWalletService } from './account-wallet.service.js';
+import { AccountWalletService, SsoReauthRequiredError, SsoRequiredError } from './account-wallet.service.js';
 import { connectionRevocationRegistry } from './connection-revocation-registry.js';
 
 const DECOY = '$argon2id$v=19$m=19456,t=2,p=1$EDCm/UT8BUkf/841sKsVBA$ovQxBwQSaiVR9mJzTVt6kcaWVmZzT1PslPE4FjMPxRk';
@@ -297,5 +297,64 @@ test('forced reset revokes all devices and prevents old principal reuse', async 
     }
     assert.throws(() => deviceAccountSessionsDb.create(first.id, 60_000),
       (error) => error instanceof WalletConflictError && error.code === 'account_ineligible');
+  });
+});
+
+test('T-1939: an SSO-only account is refused only after its password verifies', async () => {
+  await withDatabase(async () => {
+    const { device, second } = await fixture();
+    const verified: string[] = [];
+    const service = new AccountWalletService({
+      findLocalCredential: (identifier) => {
+        const user = userDb.getUserByLoginIdentifier(identifier);
+        return user ? { id: user.id, passwordHash: user.password_hash, passwordStamp: user.password_changed_at as number } : null;
+      },
+      verifyPassword: async (hash, plaintext) => {
+        verified.push(hash);
+        return verifyPassword(hash, plaintext);
+      },
+      decoyPasswordHash: DECOY,
+      requiresSso: (userId) => userId === second.id,
+    });
+    const wrong = await service.addLocal(device.principal, 'second_user', 'wrong', device.wallet.generation);
+    assert.equal(wrong, null, 'a wrong password keeps the generic failure');
+    await assert.rejects(
+      service.addLocal(device.principal, 'second_user', 'correct horse battery staple', device.wallet.generation),
+      (error: unknown) => error instanceof SsoRequiredError && error.userId === second.id && error.code === 'sso_required',
+    );
+    assert.equal(verified.length, 2, 'both attempts ran the full verification');
+    assert.deepEqual(deviceAccountSessionsDb.snapshot(device.principal.deviceSessionId), device.wallet);
+  });
+});
+
+test('T-1939 slice 3: a slot whose SSO attestation aged out cannot become active', async () => {
+  await withDatabase(async () => {
+    const { device, second } = await fixture();
+    let fresh = false;
+    const service = new AccountWalletService({
+      findLocalCredential: (identifier) => {
+        const user = userDb.getUserByLoginIdentifier(identifier);
+        return user ? { id: user.id, passwordHash: user.password_hash, passwordStamp: user.password_changed_at as number } : null;
+      },
+      verifyPassword,
+      decoyPasswordHash: DECOY,
+      attestationFresh: (userId) => userId !== second.id || fresh,
+    });
+    const added = await service.addLocal(
+      device.principal, 'second_user', 'correct horse battery staple', device.wallet.generation,
+    );
+    assert.ok(added);
+    const slotId = deviceAccountSessionsDb.slotIdForUser(device.principal.deviceSessionId, second.id)!;
+    const principal = { ...device.principal, generation: added.generation };
+    assert.throws(
+      () => service.switch(principal, slotId, added.generation),
+      (error: unknown) => error instanceof SsoReauthRequiredError && error.userId === second.id
+        && error.code === 'sso_reauth_required',
+    );
+    assert.equal(deviceAccountSessionsDb.snapshot(device.principal.deviceSessionId)?.activeSlotId,
+      device.principal.slotId, 'the active slot is unchanged');
+
+    fresh = true;
+    assert.equal(service.switch(principal, slotId, added.generation).activeSlotId, slotId);
   });
 });

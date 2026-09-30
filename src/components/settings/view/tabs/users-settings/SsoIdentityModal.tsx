@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Alert, AlertDescription, Button, Input } from '../../../../../shared/view/ui';
-import { SSO_SUBJECT_MAX_LENGTH } from '../../../hooks/useUsersAdmin';
 import type { SsoLinkFailure, SsoLinkResult } from '../../../hooks/useUsersAdmin';
 import SettingsCard from '../../SettingsCard';
 
@@ -13,32 +11,36 @@ import UserDialogShell from './UserDialogShell';
 type SsoIdentityModalProps = {
   // Username of the target account, shown for context.
   username: string;
+  // The owner managing their own account: unlink needs the current password.
+  isSelf: boolean;
   onClose: () => void;
-  onLink: (subject: string) => Promise<SsoLinkResult>;
-  onUnlink: () => Promise<SsoLinkResult>;
+  onUnlink: (currentPassword?: string) => Promise<SsoLinkResult>;
 };
 
 type Outcome = { tone: 'success'; key: string } | { tone: 'error'; key: string } | null;
 
 const FAILURE_KEYS: Readonly<Record<SsoLinkFailure, string>> = {
-  invalid: 'users.sso.errors.invalid',
-  conflict: 'users.sso.errors.conflict',
+  wrong_password: 'users.sso.errors.wrongPassword',
+  rate_limited: 'users.sso.errors.rateLimited',
+  forbidden: 'users.sso.errors.forbidden',
   not_found: 'users.sso.errors.notFound',
-  not_configured: 'users.sso.errors.notConfigured',
   failed: 'users.sso.errors.failed',
   network: 'users.sso.errors.network',
 };
 
 /**
- * SSO identity modal (B-728). Links an existing account to an identity-provider
- * subject (`sub`) so it can sign in with SSO, or removes every link — which the
- * server pairs with revoking all of the account's sessions, hence the
- * two-step confirm. Password sign-in is untouched either way.
+ * SSO identity modal (B-728, B-1410). Linking is never done here: an
+ * administrator attaching an identity they control to someone else's account
+ * is an account takeover, so the link control stays visible but disabled and
+ * says linking is done by the member themself. What remains is removing every
+ * link — paired server-side with revoking all of the account's sessions, hence
+ * the two-step confirm. On the owner's own account the current password is
+ * required as well. Password sign-in is untouched either way.
  */
-export default function SsoIdentityModal({ username, onClose, onLink, onUnlink }: SsoIdentityModalProps) {
+export default function SsoIdentityModal({ username, isSelf, onClose, onUnlink }: SsoIdentityModalProps) {
   const { t } = useTranslation('settings');
-  const [subject, setSubject] = useState('');
-  const [pending, setPending] = useState<'link' | 'unlink' | null>(null);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [isPending, setPending] = useState(false);
   const [isConfirmingUnlink, setConfirmingUnlink] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
 
@@ -52,84 +54,50 @@ export default function SsoIdentityModal({ username, onClose, onLink, onUnlink }
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  const handleLink = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const trimmed = subject.trim();
-      if (!trimmed) {
-        setOutcome({ tone: 'error', key: 'users.sso.errors.required' });
-        return;
-      }
-      setOutcome(null);
-      setPending('link');
-      const result = await onLink(trimmed);
-      setPending(null);
-      if (!result.success) {
-        setOutcome({ tone: 'error', key: FAILURE_KEYS[result.reason] });
-        return;
-      }
-      setSubject('');
-      setOutcome({ tone: 'success', key: 'users.sso.linked' });
-    },
-    [onLink, subject],
-  );
-
   const handleUnlink = useCallback(async () => {
+    if (isSelf && !currentPassword) {
+      setOutcome({ tone: 'error', key: 'users.sso.errors.passwordRequired' });
+      return;
+    }
     if (!isConfirmingUnlink) {
       setConfirmingUnlink(true);
       return;
     }
     setConfirmingUnlink(false);
     setOutcome(null);
-    setPending('unlink');
-    const result = await onUnlink();
-    setPending(null);
+    setPending(true);
+    const result = await onUnlink(isSelf ? currentPassword : undefined);
+    setPending(false);
+    setCurrentPassword('');
+    const successKey = isSelf ? 'users.sso.unlinkedSelf' : 'users.sso.unlinked';
     setOutcome(
       result.success
-        ? { tone: 'success', key: 'users.sso.unlinked' }
+        ? { tone: 'success', key: successKey }
         : { tone: 'error', key: FAILURE_KEYS[result.reason] },
     );
-  }, [isConfirmingUnlink, onUnlink]);
+  }, [currentPassword, isConfirmingUnlink, isSelf, onUnlink]);
 
-  const isBusy = pending !== null;
+  let unlinkPrompt = isSelf ? t('users.sso.unlinkSelfDescription') : t('users.sso.unlinkDescription', { username });
+  if (isConfirmingUnlink) {
+    unlinkPrompt = isSelf ? t('users.sso.unlinkSelfConfirm') : t('users.sso.unlinkConfirm', { username });
+  }
 
   return (
     <UserDialogShell title={t('users.sso.title')} closeLabel={t('users.sso.close')} onClose={onClose}>
       <div className="space-y-4">
-        <form className="space-y-3" onSubmit={handleLink}>
+        <div className="space-y-3">
           <p className="text-[13px] leading-relaxed text-muted-foreground">
             {t('users.sso.description', { username })}
           </p>
-          <div className="space-y-1.5">
-            <label htmlFor="sso-subject" className="block text-sm font-medium text-foreground">
-              {t('users.sso.subjectLabel')}
-            </label>
-            {/* قيمة تقنية لاتينية: جزيرة ltr معزولة، بلا محاذاة فيزيائية. */}
-            <Input
-              id="sso-subject"
-              dir="ltr"
-              value={subject}
-              maxLength={SSO_SUBJECT_MAX_LENGTH}
-              autoComplete="off"
-              spellCheck={false}
-              aria-describedby="sso-subject-hint"
-              disabled={isBusy}
-              onChange={(event) => setSubject(event.target.value)}
-              className="font-mono"
-            />
-            <p id="sso-subject-hint" className="text-[13px] leading-relaxed text-muted-foreground">
-              {t('users.sso.subjectHint')}
-            </p>
-          </div>
+          <p id="sso-link-disabled-hint" className="text-[13px] leading-relaxed text-muted-foreground">
+            {t('users.sso.linkDisabledHint')}
+          </p>
           <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={isBusy}>
-              {pending === 'link' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              <span className={pending === 'link' ? 'ms-1.5' : undefined}>
-                {pending === 'link' ? t('users.sso.linking') : t('users.sso.link')}
-              </span>
+            <Button type="button" size="sm" disabled aria-describedby="sso-link-disabled-hint">
+              {t('users.sso.link')}
             </Button>
           </div>
-        </form>
+        </div>
 
         {outcome && (
           <Alert variant={outcome.tone === 'error' ? 'destructive' : 'default'} role={outcome.tone === 'error' ? 'alert' : 'status'}>
@@ -140,19 +108,33 @@ export default function SsoIdentityModal({ username, onClose, onLink, onUnlink }
 
         <SettingsCard tone="danger">
           <div className="space-y-2">
-            <p className="text-[13px] leading-relaxed text-foreground">
-              {isConfirmingUnlink
-                ? t('users.sso.unlinkConfirm', { username })
-                : t('users.sso.unlinkDescription', { username })}
-            </p>
+            <p className="text-[13px] leading-relaxed text-foreground">{unlinkPrompt}</p>
+            {isSelf && (
+              <div className="space-y-1.5">
+                <label htmlFor="sso-current-password" className="block text-sm font-medium text-foreground">
+                  {t('users.sso.passwordLabel')}
+                </label>
+                <Input
+                  id="sso-current-password"
+                  type="password"
+                  value={currentPassword}
+                  autoComplete="current-password"
+                  disabled={isPending}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                />
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               {isConfirmingUnlink && (
                 <Button variant="ghost" size="sm" onClick={() => setConfirmingUnlink(false)}>
                   {t('users.sso.cancel')}
                 </Button>
               )}
-              <Button variant="destructive" size="sm" disabled={isBusy} onClick={() => void handleUnlink()}>
-                {pending === 'unlink' ? t('users.sso.unlinking') : t('users.sso.unlink')}
+              <Button variant="destructive" size="sm" disabled={isPending} onClick={() => void handleUnlink()}>
+                {isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+                <span className={isPending ? 'ms-1.5' : undefined}>
+                  {isPending ? t('users.sso.unlinking') : t('users.sso.unlink')}
+                </span>
               </Button>
             </div>
           </div>

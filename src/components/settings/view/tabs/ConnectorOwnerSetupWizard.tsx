@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { AlertCircle, Check, FileKey2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 
 import { Button, Input } from '../../../../shared/view/ui';
@@ -8,8 +8,24 @@ import {
   verifyConnectorOwnerProfile,
   type ConnectorOwnerSetupStatus, type OwnerSetupStep,
 } from './connectorOwnerSetupClient';
+import { CONNECTOR_RECENT_AUTH_CODES } from './connectorStepUpClient';
 
-type Props = { owner: boolean; csrfToken: string | null; language: string; onReadyChange?: () => void };
+type Props = {
+  owner: boolean;
+  csrfToken: string | null;
+  // B-1405 follow-up: `csrfToken` is also null during the initial load and on
+  // a structural/config readiness error (ConnectorsSettingsTabM1.tsx), neither
+  // of which is a session problem — only a confirmed recent-auth rejection
+  // offers the step-up (T-1939 6C: an inline check, never a sign-out).
+  recentAuthRequired: boolean;
+  /**
+   * Opens the connector step-up dialog owned by the connectors tab. `code` is
+   * the refusal that triggered it (absent when the member clicked the button).
+   */
+  onRequestStepUp?: (code?: string) => void;
+  language: string;
+  onReadyChange?: () => void;
+};
 const FILE_LIMITS = { trust: 256 * 1024, pack: 2 * 1024 * 1024 } as const;
 const STEPS: OwnerSetupStep[] = ['origin', 'trust', 'provider_pack', 'activation'];
 
@@ -20,6 +36,17 @@ const validOrigin = (raw: string): boolean => {
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
     return parsed.origin === raw && (parsed.protocol === 'https:' || parsed.protocol === 'http:' && loopback);
   } catch { return false; }
+};
+// Strips a single trailing slash left over from copy-pasting a page URL (e.g.
+// "https://host/") so the value can equal `URL(origin).origin` without one.
+// Only collapses exactly one extra slash; anything else is left for the
+// explicit hint below so the owner can see what needs fixing.
+const normalizeOrigin = (raw: string): string => {
+  if (!raw.endsWith('/') || raw.endsWith('://')) return raw;
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.origin}/` === raw ? parsed.origin : raw;
+  } catch { return raw; }
 };
 const readBoundedJson = async (file: File, limit: number): Promise<unknown> => {
   if (file.size < 2 || file.size > limit || !/\.json$/iu.test(file.name)) throw new Error('file_invalid');
@@ -32,7 +59,7 @@ const actionableCandidate = (candidate: ConnectorOwnerSetupStatus['activationCan
     && candidate.blockerCodes.every(code => code === 'CONNECTOR_ACTIVATION_REQUIRED')
     && (!candidate.profileRequired || candidate.profileState === 'ready');
 
-export default function ConnectorOwnerSetupWizard({ owner, csrfToken, language, onReadyChange }: Props) {
+export default function ConnectorOwnerSetupWizard({ owner, csrfToken, recentAuthRequired, onRequestStepUp, language, onReadyChange }: Props) {
   const ar = language.startsWith('ar');
   const say = (en: string, arabic: string) => ar ? arabic : en;
   const [status, setStatus] = useState<ConnectorOwnerSetupStatus | null>(null);
@@ -43,6 +70,12 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, language, 
   const [profileInputs, setProfileInputs] = useState<Record<string, { clientId: string; clientSecret: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A recent-auth refusal is not a setup failure: it opens the step-up instead.
+  const failWith = useCallback((reason: unknown) => {
+    const code = reason instanceof ConnectorOwnerSetupRequestError ? reason.code : 'CONNECTOR_SETUP_UNAVAILABLE';
+    if (CONNECTOR_RECENT_AUTH_CODES.has(code) && onRequestStepUp) { onRequestStepUp(code); return; }
+    setError(code);
+  }, [onRequestStepUp]);
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
 
@@ -93,7 +126,7 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, language, 
       await refresh();
     } catch (reason) {
       if (callGeneration !== generation.current || abort.signal.aborted || !owner) return;
-      setError(reason instanceof ConnectorOwnerSetupRequestError ? reason.code : 'CONNECTOR_SETUP_UNAVAILABLE');
+      failWith(reason);
       setBusy(false);
     }
   };
@@ -118,10 +151,29 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, language, 
       onReadyChange?.(); await refresh();
     } catch (reason) {
       if (callGeneration !== generation.current || abort.signal.aborted || !owner) return;
-      setError(reason instanceof ConnectorOwnerSetupRequestError ? reason.code : 'CONNECTOR_SETUP_UNAVAILABLE');
+      failWith(reason);
       setBusy(false);
     }
   };
+
+  // B-1405 follow-up: normalization only ever runs against a snapshot for
+  // validation/submit, never fed back into the controlled input on every
+  // keystroke — otherwise typing "/" while composing a real path (e.g.
+  // "https://host/x") gets silently eaten mid-type. The visible field always
+  // shows exactly what was typed; only blur/paste/submit commit the
+  // normalized value back into state.
+  const normalizedOrigin = useMemo(() => normalizeOrigin(origin), [origin]);
+  const commitNormalizedOrigin = useCallback((raw: string) => {
+    setOrigin(normalizeOrigin(raw));
+  }, []);
+  const handleOriginPaste = useCallback((event: ClipboardEvent<HTMLInputElement>) => {
+    event.preventDefault();
+    const target = event.currentTarget;
+    const pasted = event.clipboardData.getData('text');
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? target.value.length;
+    commitNormalizedOrigin(target.value.slice(0, start) + pasted + target.value.slice(end));
+  }, [commitNormalizedOrigin]);
 
   const packWarning: 'expired' | 'expiring' | null = useMemo(() => {
     if (!status) return null;
@@ -168,6 +220,13 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, language, 
       <h3 id="connector-owner-setup-title" className="font-semibold">{say('Owner installation setup', 'إعداد التثبيت للمالك')}</h3>
       <p className="mt-1 text-sm text-muted-foreground">{say('Shared installation controls. Members never receive this data or section.', 'إعدادات مشتركة للتثبيت. لا تصل هذه البيانات أو هذا القسم إلى الأعضاء.')}</p>
     </div></div>
+    {recentAuthRequired && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm text-warning">
+      <span>{say(
+        'Installation setup needs a quick identity check (valid for 10 minutes).',
+        'تهيئة التثبيت تحتاج تحققاً سريعاً من هويتك (صالح 10 دقائق).',
+      )}</span>
+      {onRequestStepUp && <Button variant="outline" onClick={() => onRequestStepUp()}><ShieldCheck className="h-4 w-4" aria-hidden="true"/>{say("Confirm it's you", 'تأكيد هويتك')}</Button>}
+    </div>}
     {error && <div role="alert" className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true"/><span className="min-w-0 flex-1">{say('Setup could not continue', 'تعذر متابعة الإعداد')} <code dir="ltr">{error}</code></span><Button variant="outline" onClick={() => void refresh()}>{say('Retry', 'إعادة المحاولة')}</Button></div>}
     {!status && !error ? <div className="flex min-h-24 items-center justify-center"><Loader2 className="animate-spin" aria-label={say('Loading setup', 'جارٍ تحميل الإعداد')} /></div> : status && <>
       {packWarning && <div role="alert" aria-live="polite" className={`flex items-start gap-2 rounded-md border p-3 text-sm${packWarning === 'expired' ? ' border-danger/30 bg-danger/5 text-danger' : ' border-warning/30 bg-warning/5 text-warning'}`}>
@@ -199,9 +258,17 @@ export default function ConnectorOwnerSetupWizard({ owner, csrfToken, language, 
 
       {status.resumableStep === 'origin' && <div className="space-y-3 rounded-lg bg-background p-4">
         <label htmlFor="connector-owner-origin" className="font-medium">{say('Canonical HTTPS origin', 'عنوان HTTPS الأساسي')}</label>
-        <Input id="connector-owner-origin" dir="ltr" inputMode="url" autoComplete="url" value={origin} onChange={event => setOrigin(event.target.value)} disabled={busy}/>
-        <p className="text-[13px] text-muted-foreground">{say('No path or trailing slash. OAuth callback:', 'دون مسار أو شرطة أخيرة. رابط OAuth:')} <code dir="ltr">{validOrigin(origin) ? `${origin}/connectors/oauth/callback` : '—'}</code></p>
-        <Button className="w-full sm:w-auto" disabled={!csrfToken || busy || !validOrigin(origin)} onClick={() => void mutate('origin', 'PUT', status.origin?.originRevision ?? 0, { canonicalOrigin: origin, expectedOriginRevision: status.origin?.originRevision ?? 0 })}>{busy && <Loader2 className="animate-spin"/>}{say('Save and continue', 'حفظ ومتابعة')}</Button>
+        <Input id="connector-owner-origin" dir="ltr" inputMode="url" autoComplete="url" value={origin}
+          onChange={event => setOrigin(event.target.value)}
+          onBlur={event => commitNormalizedOrigin(event.target.value)}
+          onPaste={handleOriginPaste}
+          disabled={busy}/>
+        <p className="text-[13px] text-muted-foreground">{say('No path or trailing slash. OAuth callback:', 'دون مسار أو شرطة أخيرة. رابط OAuth:')} <code dir="ltr">{validOrigin(normalizedOrigin) ? `${normalizedOrigin}/connectors/oauth/callback` : '—'}</code></p>
+        {origin.endsWith('/') && !validOrigin(normalizedOrigin) && <p role="status" className="text-[13px] text-warning">{say('Remove the trailing slash from the address.', 'أزل الشرطة الأخيرة (/) من العنوان.')}</p>}
+        <Button className="w-full sm:w-auto" disabled={!csrfToken || busy || !validOrigin(normalizedOrigin)} onClick={() => {
+          commitNormalizedOrigin(origin);
+          void mutate('origin', 'PUT', status.origin?.originRevision ?? 0, { canonicalOrigin: normalizedOrigin, expectedOriginRevision: status.origin?.originRevision ?? 0 });
+        }}>{busy && <Loader2 className="animate-spin"/>}{say('Save and continue', 'حفظ ومتابعة')}</Button>
       </div>}
 
       {status.resumableStep === 'trust' && <UploadStep id="trust" title={say('Import the installation trust bundle', 'استيراد حزمة ثقة التثبيت')} help={say('Signed JSON supplied with the release or by your trusted distributor. Maximum 256 KB.', 'ملف JSON موقّع يأتي مع الإصدار أو من موزعك الموثوق. الحد 256 كيلوبايت.')} submitLabel={say('Import and verify', 'استيراد وتحقق')} file={trustFile} setFile={setTrustFile} busy={busy} onSubmit={async () => {

@@ -7,6 +7,13 @@ import crossSpawn from 'cross-spawn';
 import { beginHarnessLaunch } from '@/modules/providers/harness-update/spawn-admission.js';
 import { GLM_CARRIER_MODELS } from '@/modules/providers/shared/vendor/vendor-config.js';
 import { hasRunnableLocalServers } from '@/services/isolation/local-model-config.js';
+import {
+  QWEN_PLAN_MODELS,
+  QWEN_PLAN_MODEL_PREFIX,
+  isQwenPlanEnabled,
+  isQwenPlanModel,
+  qwenPlanProfileVerdict,
+} from '@/services/isolation/opencode-qwen-plan.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderChangeActiveModelInput,
@@ -144,6 +151,36 @@ export const withGlmCarrierModels = (
     // is re-established over the COMBINED list, never over either half alone.
     OPTIONS: disambiguateModelLabels([...definition.OPTIONS, ...carrierOptions]),
     DEFAULT: definition.DEFAULT,
+  };
+};
+
+/**
+ * T-1906: the static qwen-plan catalog as opencode `qwen-plan/<id>` options.
+ * Offered ONLY to a caller whose own saved Qwen profile is compatible
+ * (coding_plan + international) while NASSAJ_OPENCODE_QWEN_PLAN is armed; for
+ * everyone else any `qwen-plan/*` entry is removed. Applied after the catalog
+ * cache (provider-models.service) so saving or deleting the key is immediate.
+ */
+export const withQwenPlanModels = (
+  definition: ProviderModelsDefinition,
+  profile: { plan: string; region: string; key: string } | null,
+  env: NodeJS.ProcessEnv = process.env,
+): ProviderModelsDefinition => {
+  const base = definition.OPTIONS.filter((option) => !isQwenPlanModel(option.value));
+  const offered = isQwenPlanEnabled(env) && qwenPlanProfileVerdict(profile) === 'ok';
+  const options = offered
+    ? [...base, ...QWEN_PLAN_MODELS.map((model) => ({
+      value: `${QWEN_PLAN_MODEL_PREFIX}${model.value}`,
+      label: model.label,
+      description: `qwen-plan - ${QWEN_PLAN_MODEL_PREFIX}${model.value}`,
+    }))]
+    : base;
+  if (options.length === definition.OPTIONS.length && !offered) return definition;
+  const unique = disambiguateModelLabels(options);
+  return {
+    ...definition,
+    OPTIONS: unique,
+    DEFAULT: unique.some((option) => option.value === definition.DEFAULT) ? definition.DEFAULT : unique[0]?.value ?? '',
   };
 };
 
